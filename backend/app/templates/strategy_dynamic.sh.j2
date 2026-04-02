@@ -1,0 +1,47 @@
+#!/bin/bash
+# union-dynamic-install: Strategy B - 첫 부팅 시 라이브러리 pip 설치
+# cloud-init runcmd 에서 1회 실행된다.
+set -euo pipefail
+
+LOG=/var/log/union-dynamic-install.log
+exec >> "$LOG" 2>&1
+echo "[$(date)] 동적 라이브러리 설치 시작"
+
+MARKER=/var/lib/union/.install_done
+[ -f "$MARKER" ] && { echo "이미 설치됨, 스킵"; exit 0; }
+
+# overlay 마운트가 준비될 때까지 대기
+for i in $(seq 1 30); do
+    mountpoint -q /usr/local && break
+    echo "overlay 대기 중... ($i/30)"
+    sleep 5
+done
+
+{% if "python311" in libraries %}
+echo "[$(date)] Python 3.11 설치 중..."
+apt-get update -qq
+apt-get install -y python3.11 python3.11-pip python3.11-venv python3-pip
+{% endif %}
+
+{% if "torch" in libraries %}
+echo "[$(date)] PyTorch {{ versions.torch }} 설치 중..."
+pip3 install --no-cache-dir \
+    torch=={{ versions.torch }} \
+    torchvision=={{ versions.torchvision }} \
+    torchaudio=={{ versions.torchaudio }} \
+    {% if gpu_available %}--index-url https://download.pytorch.org/whl/cu121{% endif %}
+{% endif %}
+
+{% if "vllm" in libraries %}
+echo "[$(date)] vLLM {{ versions.vllm }} 설치 중..."
+pip3 install --no-cache-dir vllm=={{ versions.vllm }}
+{% endif %}
+
+{% if "jupyter" in libraries %}
+echo "[$(date)] Jupyter Lab {{ versions.jupyter }} 설치 중..."
+pip3 install --no-cache-dir jupyterlab=={{ versions.jupyter }} ipykernel
+{% endif %}
+
+mkdir -p /var/lib/union
+touch "$MARKER"
+echo "[$(date)] 동적 라이브러리 설치 완료"

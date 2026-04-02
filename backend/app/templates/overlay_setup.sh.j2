@@ -1,0 +1,85 @@
+#!/bin/bash
+# union-overlay: CephFS 마운트 + OverlayFS 구성 스크립트
+# cloud-init 이 생성하며, systemd 유닛이 매 부팅 시 실행한다.
+set -euo pipefail
+
+LOG=/var/log/union-overlay.log
+exec >> "$LOG" 2>&1
+echo "[$(date)] union-overlay 시작"
+
+# ---------------------------------------------------------------------------
+# 1. CephFS 마운트 디렉토리 준비
+# ---------------------------------------------------------------------------
+mkdir -p /mnt/union/{upper,work}
+{% for share in shares %}
+mkdir -p /mnt/union/lib_{{ share.name }}
+{% endfor %}
+
+# ---------------------------------------------------------------------------
+# 2. CephFS 마운트
+#    커널 드라이버 우선, 없으면 ceph-fuse 폴백
+# ---------------------------------------------------------------------------
+mount_cephfs() {
+    local name="$1"
+    local export_path="$2"
+    local cephx_id="$3"
+    local mountpoint="/mnt/union/lib_${name}"
+
+    # 이미 마운트된 경우 스킵
+    mountpoint -q "$mountpoint" && return 0
+
+    if modprobe ceph 2>/dev/null; then
+        mount -t ceph "$export_path" "$mountpoint" \
+            -o "name=${cephx_id},secretfile=/etc/ceph/ceph.client.${cephx_id}.keyring,_netdev"
+    else
+        # ceph-fuse 폴백
+        ceph-fuse "$mountpoint" \
+            --id="$cephx_id" \
+            --keyring="/etc/ceph/ceph.client.${cephx_id}.keyring"
+    fi
+    echo "[$(date)] CephFS 마운트 완료: ${name} -> ${mountpoint}"
+}
+
+{% for share in shares %}
+mount_cephfs "{{ share.name }}" "{{ share.export_path }}" "{{ share.cephx_id }}"
+{% endfor %}
+
+# ---------------------------------------------------------------------------
+# 3. OverlayFS 구성
+#
+#    lowerdir 순서: 최상위 레이어(우선순위 높음):...:기본 OS 경로
+#    upperdir: Cinder 볼륨 (재부팅 후에도 유지)
+#
+#    /usr/local 과 /opt 에만 overlay 적용
+#    (전체 루트 오버레이는 init 시스템 손상 위험)
+# ---------------------------------------------------------------------------
+
+# upperdir 마운트 (Cinder 볼륨 장치 대기)
+UPPER_DEV="{{ upper_device }}"
+if [ -n "$UPPER_DEV" ] && [ -b "$UPPER_DEV" ]; then
+    if ! blkid "$UPPER_DEV" | grep -q ext4; then
+        mkfs.ext4 -F "$UPPER_DEV"
+    fi
+    mount "$UPPER_DEV" /mnt/union/upper
+    mkdir -p /mnt/union/upper/{usr_local,opt,work_usr_local,work_opt}
+fi
+
+# /usr/local OverlayFS
+LOWER_USR_LOCAL="{{ lowerdir_usr_local }}"
+if ! mountpoint -q /usr/local; then
+    mount -t overlay overlay \
+        -o "lowerdir=${LOWER_USR_LOCAL},upperdir=/mnt/union/upper/usr_local,workdir=/mnt/union/upper/work_usr_local" \
+        /usr/local
+    echo "[$(date)] /usr/local OverlayFS 마운트 완료"
+fi
+
+# /opt OverlayFS
+LOWER_OPT="{{ lowerdir_opt }}"
+if ! mountpoint -q /opt; then
+    mount -t overlay overlay \
+        -o "lowerdir=${LOWER_OPT},upperdir=/mnt/union/upper/opt,workdir=/mnt/union/upper/work_opt" \
+        /opt
+    echo "[$(date)] /opt OverlayFS 마운트 완료"
+fi
+
+echo "[$(date)] union-overlay 완료"

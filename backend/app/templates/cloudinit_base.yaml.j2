@@ -1,0 +1,74 @@
+#cloud-config
+# Union: OpenStack VM 자동 OverlayFS 설정
+# 전략: {{ strategy }}   라이브러리: {{ libraries | join(", ") }}
+
+package_update: false
+package_upgrade: false
+
+packages:
+  - ceph-common
+{% if strategy == "dynamic" %}
+  - python3-pip
+{% endif %}
+
+write_files:
+  # CephX 키링 파일 (공유별)
+{% for share in shares %}
+  - path: /etc/ceph/ceph.client.{{ share.cephx_id }}.keyring
+    permissions: "0600"
+    content: |
+      [client.{{ share.cephx_id }}]
+          key = {{ share.cephx_key }}
+{% endfor %}
+
+  # /etc/ceph/ceph.conf (모니터 주소)
+  - path: /etc/ceph/ceph.conf
+    content: |
+      [global]
+      mon host = {{ ceph_monitors }}
+
+  # OverlayFS 설정 스크립트
+  - path: /opt/union/overlay_setup.sh
+    permissions: "0750"
+    content: |
+{{ overlay_script | indent(6, first=True) }}
+
+{% if strategy == "dynamic" %}
+  # 동적 설치 스크립트 (Strategy B)
+  - path: /opt/union/dynamic_install.sh
+    permissions: "0750"
+    content: |
+{{ dynamic_script | indent(6, first=True) }}
+{% endif %}
+
+  # systemd 유닛: 매 부팅 시 OverlayFS 재구성
+  - path: /etc/systemd/system/union-overlay.service
+    content: |
+      [Unit]
+      Description=Union OverlayFS Mount
+      After=network.target remote-fs.target
+      Before=docker.service kubelet.service
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/opt/union/overlay_setup.sh
+      TimeoutStartSec=300
+
+      [Install]
+      WantedBy=multi-user.target
+
+runcmd:
+  - mkdir -p /opt/union /var/lib/union
+  - systemctl daemon-reload
+  - systemctl enable union-overlay
+  - systemctl start union-overlay
+{% if strategy == "dynamic" %}
+  - /opt/union/dynamic_install.sh
+{% endif %}
+
+final_message: |
+  Union VM 초기화 완료.
+  전략: {{ strategy }}
+  라이브러리: {{ libraries | join(", ") }}
+  OverlayFS 상태: $(mount | grep overlay | wc -l)개 마운트
