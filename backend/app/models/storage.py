@@ -135,6 +135,7 @@ class FloatingIpInfo(BaseModel):
     status: str
     port_id: Optional[str] = None
     floating_network_id: str
+    project_id: Optional[str] = None
 
 
 class AssociateFipRequest(BaseModel):

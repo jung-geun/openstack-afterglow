@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { auth } from '$lib/stores/auth';
-	import { api, ApiError } from '$lib/api/client';
+	import { api, ApiError, memoryCache } from '$lib/api/client';
 	import { goto } from '$app/navigation';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 
@@ -100,6 +100,7 @@
 	let showVolumeModal = $state(false);
 	let showShareModal = $state(false);
 	let showNetworkModal = $state(false);
+	let showRouterModal = $state(false);
 
 	let volForm = $state({ name: '', size_gb: 10 });
 	let shareForm = $state({ name: '', size_gb: 50 });
@@ -111,6 +112,7 @@
 		gateway: '',
 		dhcp: true,
 	});
+	let routerForm = $state({ name: '', external_network_id: '' });
 
 	let creating = $state(false);
 	let createError = $state('');
@@ -135,64 +137,102 @@
 		return networks.length;
 	}
 
+	function swrGet<T>(path: string): T | null {
+		const key = `${path}:${$auth.projectId}`;
+		const c = memoryCache.get(key);
+		return c ? (c.data as T) : null;
+	}
+
+	function swrSet(path: string, data: unknown) {
+		memoryCache.set(`${path}:${$auth.projectId}`, { data, timestamp: Date.now() });
+	}
+
 	async function fetchInstances() {
+		const path = '/api/instances';
+		const cached = swrGet<Instance[]>(path);
+		if (cached && instances.length === 0) instances = cached;
 		try {
-			instances = await api.get<Instance[]>('/api/instances', $auth.token ?? undefined, $auth.projectId ?? undefined);
+			instances = await api.get<Instance[]>(path, $auth.token ?? undefined, $auth.projectId ?? undefined);
+			swrSet(path, instances);
 			instancesError = '';
 		} catch (e) {
-			instancesError = e instanceof ApiError ? `조회 실패 (${e.status}): ${(e as ApiError).message}` : '서버 오류';
+			if (!cached) instancesError = e instanceof ApiError ? `조회 실패 (${e.status}): ${(e as ApiError).message}` : '서버 오류';
 		}
 	}
 
 	async function fetchVolumes() {
+		const path = '/api/volumes';
+		const cached = swrGet<Volume[]>(path);
+		if (cached && volumes.length === 0) volumes = cached;
 		try {
-			volumes = await api.get<Volume[]>('/api/volumes', $auth.token ?? undefined, $auth.projectId ?? undefined);
+			volumes = await api.get<Volume[]>(path, $auth.token ?? undefined, $auth.projectId ?? undefined);
+			swrSet(path, volumes);
 			volumesError = '';
 		} catch (e) {
-			volumesError = e instanceof ApiError ? `조회 실패 (${e.status}): ${(e as ApiError).message}` : '서버 오류';
+			if (!cached) volumesError = e instanceof ApiError ? `조회 실패 (${e.status}): ${(e as ApiError).message}` : '서버 오류';
 		}
 	}
 
 	async function fetchShares() {
+		const path = '/api/shares';
+		const cached = swrGet<Share[]>(path);
+		if (cached && shares.length === 0) shares = cached;
 		try {
-			shares = await api.get<Share[]>('/api/shares', $auth.token ?? undefined, $auth.projectId ?? undefined);
+			shares = await api.get<Share[]>(path, $auth.token ?? undefined, $auth.projectId ?? undefined);
+			swrSet(path, shares);
 			sharesError = '';
 		} catch (e) {
-			sharesError = e instanceof ApiError ? `조회 실패 (${e.status}): ${(e as ApiError).message}` : '서버 오류';
+			if (!cached) sharesError = e instanceof ApiError ? `조회 실패 (${e.status}): ${(e as ApiError).message}` : '서버 오류';
 		}
 	}
 
 	async function fetchNetworks() {
+		const path = '/api/networks';
+		const cached = swrGet<Network[]>(path);
+		if (cached && networks.length === 0) networks = cached;
 		try {
-			networks = await api.get<Network[]>('/api/networks', $auth.token ?? undefined, $auth.projectId ?? undefined);
+			networks = await api.get<Network[]>(path, $auth.token ?? undefined, $auth.projectId ?? undefined);
+			swrSet(path, networks);
 			networksError = '';
 		} catch (e) {
-			networksError = e instanceof ApiError ? `조회 실패 (${e.status}): ${(e as ApiError).message}` : '서버 오류';
+			if (!cached) networksError = e instanceof ApiError ? `조회 실패 (${e.status}): ${(e as ApiError).message}` : '서버 오류';
 		}
 	}
 
 	async function fetchRouters() {
+		const path = '/api/routers';
+		const cached = swrGet<Router[]>(path);
+		if (cached && routers.length === 0) routers = cached;
 		try {
-			routers = await api.get<Router[]>('/api/routers', $auth.token ?? undefined, $auth.projectId ?? undefined);
+			routers = await api.get<Router[]>(path, $auth.token ?? undefined, $auth.projectId ?? undefined);
+			swrSet(path, routers);
 			routersError = '';
 		} catch (e) {
-			routersError = e instanceof ApiError ? `조회 실패 (${e.status}): ${(e as ApiError).message}` : '서버 오류';
+			if (!cached) routersError = e instanceof ApiError ? `조회 실패 (${e.status}): ${(e as ApiError).message}` : '서버 오류';
 		}
 	}
 
 	async function fetchLoadBalancers() {
+		const path = '/api/loadbalancers';
+		const cached = swrGet<LoadBalancer[]>(path);
+		if (cached && loadBalancers.length === 0) loadBalancers = cached;
 		try {
-			loadBalancers = await api.get<LoadBalancer[]>('/api/loadbalancers', $auth.token ?? undefined, $auth.projectId ?? undefined);
+			loadBalancers = await api.get<LoadBalancer[]>(path, $auth.token ?? undefined, $auth.projectId ?? undefined);
+			swrSet(path, loadBalancers);
 			lbError = '';
-		} catch (e) {
+		} catch {
 			// Octavia가 없는 환경에서는 조용히 실패
 			lbError = '';
 		}
 	}
 
 	async function fetchSummary() {
+		const path = '/api/dashboard/summary';
+		const cached = swrGet<DashboardSummary>(path);
+		if (cached && !summary) summary = cached;
 		try {
-			summary = await api.get<DashboardSummary>('/api/dashboard/summary', $auth.token ?? undefined, $auth.projectId ?? undefined);
+			summary = await api.get<DashboardSummary>(path, $auth.token ?? undefined, $auth.projectId ?? undefined);
+			swrSet(path, summary);
 		} catch {
 			// summary는 실패해도 나머지 UI에 영향 없음
 		}
@@ -339,17 +379,38 @@
 		}
 	}
 
+	async function createRouter() {
+		if (!routerForm.name.trim()) return;
+		creating = true;
+		createError = '';
+		try {
+			await api.post('/api/routers', {
+				name: routerForm.name,
+				external_network_id: routerForm.external_network_id || null,
+			}, $auth.token ?? undefined, $auth.projectId ?? undefined);
+			showRouterModal = false;
+			routerForm = { name: '', external_network_id: '' };
+			await fetchRouters();
+		} catch (e) {
+			createError = e instanceof ApiError ? e.message : '생성 실패';
+		} finally {
+			creating = false;
+		}
+	}
+
 	function openModal(tab: Tab) {
 		createError = '';
 		if (tab === 'volumes') showVolumeModal = true;
 		else if (tab === 'shares') showShareModal = true;
 		else if (tab === 'networks') showNetworkModal = true;
+		else if (tab === 'routers') showRouterModal = true;
 	}
 
 	function closeModal() {
 		showVolumeModal = false;
 		showShareModal = false;
 		showNetworkModal = false;
+		showRouterModal = false;
 		createError = '';
 	}
 
@@ -387,7 +448,7 @@
 </script>
 
 <!-- 생성 모달 -->
-{#if showVolumeModal || showShareModal || showNetworkModal}
+{#if showVolumeModal || showShareModal || showNetworkModal || showRouterModal}
 	<div
 		class="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
 		onclick={closeModal}
@@ -445,6 +506,32 @@
 							min="1"
 							class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
 						/>
+					</div>
+				</div>
+
+			{:else if showRouterModal}
+				<h2 class="text-lg font-semibold text-white mb-5">라우터 생성</h2>
+				<div class="space-y-4">
+					<div>
+						<label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">이름</label>
+						<input
+							bind:value={routerForm.name}
+							type="text"
+							placeholder="my-router"
+							class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+						/>
+					</div>
+					<div>
+						<label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">외부 네트워크 (선택)</label>
+						<select
+							bind:value={routerForm.external_network_id}
+							class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+						>
+							<option value="">없음</option>
+							{#each networks.filter(n => n.is_external) as extNet}
+								<option value={extNet.id}>{extNet.name}</option>
+							{/each}
+						</select>
 					</div>
 				</div>
 
@@ -517,6 +604,7 @@
 					onclick={() => {
 						if (showVolumeModal) createVolume();
 						else if (showShareModal) createShare();
+						else if (showRouterModal) createRouter();
 						else createNetwork();
 					}}
 					disabled={creating}
@@ -533,12 +621,19 @@
 	<div class="flex items-center justify-between mb-6">
 		<h1 class="text-2xl font-bold text-white">대시보드</h1>
 		<div class="flex items-center gap-2">
-			{#if activeTab !== 'instances'}
+			{#if activeTab !== 'instances' && activeTab !== 'loadbalancers'}
 				<button
 					onclick={() => openModal(activeTab)}
 					class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
 				>
 					+ {tabLabels[activeTab]} 생성
+				</button>
+			{:else if activeTab === 'loadbalancers'}
+				<button
+					onclick={() => goto('/dashboard/loadbalancers/new')}
+					class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+				>
+					+ 로드밸런서 생성
 				</button>
 			{/if}
 			<a
@@ -669,7 +764,7 @@
 						<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
 							<th class="text-left py-3 pr-6">이름</th>
 							<th class="text-left py-3 pr-6">상태</th>
-							<th class="text-left py-3 pr-6">이미지</th>
+							<th class="text-left py-3 pr-6">이미지 / 플레이버</th>
 							<th class="text-left py-3 pr-6">IP</th>
 							<th class="text-left py-3 pr-6">라이브러리</th>
 							<th class="text-left py-3 pr-6">전략</th>
@@ -688,14 +783,32 @@
 										{inst.status}
 									</span>
 								</td>
-								<td class="py-3 pr-6 text-gray-400">{inst.image_name ?? '-'}</td>
+								<td class="py-3 pr-6 text-xs text-gray-400">
+									<div>{inst.image_name ?? '-'}</div>
+									{#if inst.flavor_name}
+										<div class="text-gray-600 mt-0.5">{inst.flavor_name}</div>
+									{/if}
+								</td>
 								<td class="py-3 pr-6 text-xs">
 									{#if inst.ip_addresses.length > 0}
-										<div class="flex flex-wrap gap-1">
-											{#each inst.ip_addresses.slice(0, 2) as ip}
-												<span class="font-mono {ip.type === 'floating' ? 'text-green-400 bg-green-900/20 px-1.5 py-0.5 rounded' : 'text-gray-400'}">
-													{ip.addr}
-												</span>
+										{@const fixedIps = inst.ip_addresses.filter(ip => ip.type === 'fixed')}
+										{@const floatingIps = inst.ip_addresses.filter(ip => ip.type === 'floating')}
+										<div class="flex flex-col gap-0.5">
+											{#each fixedIps as fip}
+												{@const paired = floatingIps.find(fl => fl.network_name === fip.network_name)}
+												<div class="flex items-center gap-1.5 flex-wrap">
+													<span class="font-mono text-gray-400">{fip.addr}</span>
+													{#if paired}
+														<span class="font-mono text-green-400 bg-green-900/20 px-1.5 py-0.5 rounded">{paired.addr}</span>
+													{/if}
+													<span class="text-gray-600">{fip.network_name}</span>
+												</div>
+											{/each}
+											{#each floatingIps.filter(fl => !fixedIps.some(f => f.network_name === fl.network_name)) as fl}
+												<div class="flex items-center gap-1.5">
+													<span class="font-mono text-green-400 bg-green-900/20 px-1.5 py-0.5 rounded">{fl.addr}</span>
+													<span class="text-gray-600">{fl.network_name}</span>
+												</div>
 											{/each}
 										</div>
 									{:else}
@@ -974,6 +1087,9 @@
 			<div class="text-center py-20 text-gray-600">
 				<div class="text-5xl mb-4">🔀</div>
 				<p class="text-lg">라우터가 없습니다</p>
+				<button onclick={() => openModal('routers')} class="text-blue-400 hover:text-blue-300 text-sm mt-2 inline-block">
+					라우터 생성 →
+				</button>
 			</div>
 		{:else}
 			<div class="overflow-x-auto">

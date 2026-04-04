@@ -9,9 +9,9 @@
 		description?: string;
 	}
 
+	let domainName = $state('Default');
 	let username = $state('');
 	let password = $state('');
-	let projectName = $state('');
 	let error = $state('');
 	let loading = $state(false);
 
@@ -29,7 +29,7 @@
 				username: string;
 				project_id: string;
 				project_name: string;
-			}>('/api/auth/login', { username, password, project_name: projectName });
+			}>('/api/auth/login', { username, password, domain_name: domainName });
 
 			// 프로젝트 목록 조회
 			let projects: Project[] = [];
@@ -74,6 +74,16 @@
 			{/if}
 
 			<div>
+				<label for="domain" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">도메인</label>
+				<input
+					id="domain"
+					bind:value={domainName}
+					type="text"
+					class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
+				/>
+			</div>
+
+			<div>
 				<label for="username" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">사용자명</label>
 				<input
 					id="username"
@@ -91,18 +101,8 @@
 					bind:value={password}
 					type="password"
 					required
+					onkeydown={(e) => { if (e.key === 'Enter' && !loading) { e.preventDefault(); login(); } }}
 					class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
-				/>
-			</div>
-
-			<div>
-				<label for="project" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">프로젝트 (선택)</label>
-				<input
-					id="project"
-					bind:value={projectName}
-					type="text"
-					placeholder="기본 프로젝트 사용"
-					class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-blue-500 transition-colors"
 				/>
 			</div>
 

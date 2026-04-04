@@ -10,6 +10,7 @@ from app.models.storage import (
     TopologyData, TopologyInstance,
 )
 from app.services import neutron, nova
+from app.services.cache import cached_call
 
 router = APIRouter()
 
@@ -109,24 +110,31 @@ async def delete_subnet(
 # 글로벌 토폴로지 (고정 경로 - 동적 경로보다 먼저 등록)
 # ---------------------------------------------------------------------------
 
+def _fetch_topology_sync(conn) -> dict:
+    """동기 방식으로 토폴로지 전체 데이터 수집 (cached_call 내부에서 to_thread로 실행됨)."""
+    topo = neutron.get_topology(conn)
+    servers = nova.list_servers(conn)
+    topo.instances = [
+        TopologyInstance(
+            id=s.id,
+            name=s.name,
+            status=s.status,
+            network_names=list(set(ip.network_name for ip in s.ip_addresses)),
+            ip_addresses=[ip.model_dump() for ip in s.ip_addresses],
+        )
+        for s in servers
+    ]
+    return topo.model_dump()
+
+
 @router.get("/topology", response_model=TopologyData)
 async def get_topology(conn: openstack.connection.Connection = Depends(get_os_conn)):
+    pid = conn._union_project_id
     try:
-        topo, servers = await asyncio.gather(
-            asyncio.to_thread(neutron.get_topology, conn),
-            asyncio.to_thread(nova.list_servers, conn),
+        return await cached_call(
+            f"union:neutron:{pid}:topology", 30,
+            lambda: _fetch_topology_sync(conn)
         )
-        topo.instances = [
-            TopologyInstance(
-                id=s.id,
-                name=s.name,
-                status=s.status,
-                network_names=list(set(ip.network_name for ip in s.ip_addresses)),
-                ip_addresses=[ip.model_dump() for ip in s.ip_addresses],
-            )
-            for s in servers
-        ]
-        return topo
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"토폴로지 조회 실패: {e}")
 

@@ -5,6 +5,7 @@ import openstack
 
 from app.api.deps import get_os_conn
 from app.services import octavia
+from app.services.cache import cached_call, invalidate
 
 router = APIRouter()
 
@@ -58,10 +59,14 @@ def _handle(fn, error_msg: str):
 
 @router.get("")
 async def list_load_balancers(conn: openstack.connection.Connection = Depends(get_os_conn)):
-    return _handle(
-        lambda: octavia.list_load_balancers(conn, project_id=conn._union_project_id),
-        "로드밸런서 목록 조회 실패",
-    )
+    pid = conn._union_project_id
+    try:
+        return await cached_call(
+            f"union:octavia:{pid}:lbs", 30,
+            lambda: octavia.list_load_balancers(conn, project_id=pid)
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"로드밸런서 목록 조회 실패: {e}")
 
 
 @router.post("", status_code=201)
@@ -69,10 +74,13 @@ async def create_load_balancer(
     req: CreateLbRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    return _handle(
-        lambda: octavia.create_load_balancer(conn, req.name, req.vip_subnet_id, req.description),
-        "로드밸런서 생성 실패",
-    )
+    pid = conn._union_project_id
+    try:
+        result = octavia.create_load_balancer(conn, req.name, req.vip_subnet_id, req.description)
+        await invalidate(f"union:octavia:{pid}:lbs")
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"로드밸런서 생성 실패: {e}")
 
 
 @router.get("/{lb_id}")
@@ -82,7 +90,9 @@ async def get_load_balancer(lb_id: str, conn: openstack.connection.Connection = 
 
 @router.delete("/{lb_id}", status_code=204)
 async def delete_load_balancer(lb_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+    pid = conn._union_project_id
     _handle(lambda: octavia.delete_load_balancer(conn, lb_id), "로드밸런서 삭제 실패")
+    await invalidate(f"union:octavia:{pid}:lbs")
 
 
 # ---------------------------------------------------------------------------

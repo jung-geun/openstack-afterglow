@@ -7,14 +7,19 @@ from app.models.storage import (
     CreateRouterRequest, RouterInterfaceRequest, RouterGatewayRequest,
 )
 from app.services import neutron
+from app.services.cache import cached_call, invalidate
 
 router = APIRouter()
 
 
 @router.get("", response_model=list[RouterInfo])
 async def list_routers(conn: openstack.connection.Connection = Depends(get_os_conn)):
+    pid = conn._union_project_id
     try:
-        return neutron.list_routers(conn, project_id=conn._union_project_id)
+        return await cached_call(
+            f"union:neutron:{pid}:routers", 30,
+            lambda: [r.model_dump() for r in neutron.list_routers(conn, project_id=pid)]
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"라우터 목록 조회 실패: {e}")
 
@@ -24,8 +29,11 @@ async def create_router(
     req: CreateRouterRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
+    pid = conn._union_project_id
     try:
-        return neutron.create_router(conn, req.name, req.external_network_id)
+        result = neutron.create_router(conn, req.name, req.external_network_id)
+        await invalidate(f"union:neutron:{pid}:routers")
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"라우터 생성 실패: {e}")
 
@@ -40,8 +48,10 @@ async def get_router(router_id: str, conn: openstack.connection.Connection = Dep
 
 @router.delete("/{router_id}", status_code=204)
 async def delete_router(router_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+    pid = conn._union_project_id
     try:
         neutron.delete_router(conn, router_id)
+        await invalidate(f"union:neutron:{pid}:routers")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"라우터 삭제 실패: {e}")
 

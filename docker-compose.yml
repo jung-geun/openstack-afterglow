@@ -9,12 +9,9 @@ services:
     build: ./backend
     ports:
       - "8000:8000"
-    env_file:
-      - .env
-    environment:
-      - REDIS_URL=redis://redis:6379/0
     volumes:
       - ./backend/app:/app/app   # 개발 시 hot-reload
+      - ./union.toml:/app/union.toml:ro   # 통합 설정 파일
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     depends_on:
       - redis
@@ -26,6 +23,9 @@ services:
       - "3000:3000"
     environment:
       - ORIGIN=http://localhost:3000
+      # 브라우저에서 백엔드로 직접 요청하는 주소 (호스트 머신 기준)
+      # 배포 시 실제 도메인으로 변경: PUBLIC_API_BASE=https://api.example.com
+      - PUBLIC_API_BASE=http://localhost:8000
     depends_on:
       - backend
     restart: unless-stopped

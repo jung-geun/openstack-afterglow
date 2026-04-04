@@ -409,6 +409,7 @@ def _fip_to_info(f) -> FloatingIpInfo:
         status=f.status,
         port_id=f.port_id,
         floating_network_id=f.floating_network_id,
+        project_id=getattr(f, 'project_id', None),
     )
 
 

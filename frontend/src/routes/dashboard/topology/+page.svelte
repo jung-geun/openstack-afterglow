@@ -11,12 +11,14 @@
 	interface TopologyNetwork {
 		id: string; name: string; status: string;
 		is_external: boolean; is_shared: boolean;
+		project_id: string | null;
 		subnet_details: SubnetDetail[];
 	}
 	interface TopologyRouter {
 		id: string; name: string; status: string;
 		external_gateway_network_id: string | null;
 		connected_subnet_ids: string[];
+		project_id: string | null;
 	}
 	interface TopologyInstance {
 		id: string; name: string; status: string;
@@ -27,6 +29,7 @@
 		id: string; floating_ip_address: string;
 		fixed_ip_address: string | null; status: string;
 		port_id: string | null; floating_network_id: string;
+		project_id?: string | null;
 	}
 	interface TopologyData {
 		networks: TopologyNetwork[];
@@ -125,12 +128,15 @@
 			</span>
 		</div>
 
-		<!-- 요약 -->
+		<!-- 요약 (현재 프로젝트 기준) -->
+		{@const _visibleNets = data.networks.filter(n => n.is_external || n.is_shared || n.project_id === $auth.projectId)}
+		{@const _projectRouters = data.routers.filter(r => r.project_id === $auth.projectId)}
+		{@const _projectFips = data.floating_ips.filter(f => !f.project_id || f.project_id === $auth.projectId)}
 		<div class="mt-4 flex gap-6 text-xs text-gray-500 px-1">
-			<span>네트워크 {data.networks.length}개</span>
-			<span>라우터 {data.routers.length}개</span>
+			<span>네트워크 {_visibleNets.length}개</span>
+			<span>라우터 {_projectRouters.length}개</span>
 			<span>인스턴스 {data.instances.length}개</span>
-			<span>Floating IP {data.floating_ips.length}개</span>
+			<span>Floating IP {_projectFips.length}개</span>
 		</div>
 	{/if}
 </div>

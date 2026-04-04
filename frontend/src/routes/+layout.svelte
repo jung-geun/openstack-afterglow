@@ -1,7 +1,9 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { auth, isLoggedIn, clearAuth } from '$lib/stores/auth';
+	import { api } from '$lib/api/client';
 	import ProjectSelector from '$lib/components/ProjectSelector.svelte';
 	import './layout.css';
 	import favicon from '$lib/assets/favicon.svg';
@@ -13,6 +15,17 @@
 	$effect(() => {
 		if (!$isLoggedIn && !publicRoutes.includes($page.url.pathname)) {
 			goto('/');
+		}
+	});
+
+	// localStorage에서 복원된 토큰의 유효성을 서버에서 검증
+	onMount(async () => {
+		if ($auth.token) {
+			try {
+				await api.get('/api/auth/me', $auth.token, $auth.projectId ?? undefined);
+			} catch {
+				clearAuth();
+			}
 		}
 	});
 

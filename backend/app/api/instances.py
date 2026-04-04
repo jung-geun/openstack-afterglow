@@ -21,16 +21,38 @@ from app.api.deps import get_os_conn
 from app.config import get_settings
 from app.models.compute import CreateInstanceRequest, InstanceInfo
 from app.models.progress import ProgressMessage, ProgressStep
-from app.services import nova, cinder, manila, cloudinit, libraries as lib_svc, neutron, keystone
+from app.services import nova, cinder, manila, cloudinit, libraries as lib_svc, neutron, keystone, glance
+from app.services.cache import cached_call, invalidate
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _resolve_names(servers: list, conn) -> list[dict]:
+    """서버 목록에 flavor_name / image_name 을 resolve해서 반환."""
+    flavors = {f.id: f.name for f in nova.list_flavors(conn)}
+    images: dict = {}
+    try:
+        images = {img.id: img.name for img in glance.list_images(conn)}
+    except Exception:
+        pass
+    result = []
+    for s in servers:
+        d = s.model_dump()
+        d["flavor_name"] = flavors.get(s.flavor_id) if s.flavor_id else None
+        d["image_name"] = images.get(s.image_id) if s.image_id else None
+        result.append(d)
+    return result
+
+
 @router.get("", response_model=list[InstanceInfo])
 async def list_instances(conn: openstack.connection.Connection = Depends(get_os_conn)):
+    pid = conn._union_project_id
     try:
-        return nova.list_servers(conn)
+        return await cached_call(
+            f"union:nova:{pid}:instances", 15,
+            lambda: _resolve_names(nova.list_servers(conn), conn)
+        )
     except Exception as e:
         logger.error(f"인스턴스 목록 조회 실패: {e}")
         raise HTTPException(status_code=500, detail=f"인스턴스 목록 조회 실패: {e}")
@@ -41,8 +63,12 @@ async def get_instance(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
+    pid = conn._union_project_id
     try:
-        return nova.get_server(conn, instance_id)
+        return await cached_call(
+            f"union:nova:{pid}:instance:{instance_id}", 15,
+            lambda: _resolve_names([nova.get_server(conn, instance_id)], conn)[0]
+        )
     except Exception:
         raise HTTPException(status_code=404, detail="인스턴스를 찾을 수 없습니다")
 
@@ -323,6 +349,7 @@ async def delete_instance(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
+    pid = conn._union_project_id
     try:
         server = nova.get_server(conn, instance_id)
     except Exception:
@@ -334,6 +361,8 @@ async def delete_instance(
 
     # Nova 서버 삭제
     nova.delete_server(conn, instance_id)
+    await invalidate(f"union:nova:{pid}:instances")
+    await invalidate(f"union:nova:{pid}:instance:{instance_id}")
 
     # Strategy B: 전용 share 삭제
     if strategy == "dynamic":
@@ -357,8 +386,11 @@ async def start_instance(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
+    pid = conn._union_project_id
     try:
         nova.start_server(conn, instance_id)
+        await invalidate(f"union:nova:{pid}:instance:{instance_id}")
+        await invalidate(f"union:nova:{pid}:instances")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -368,8 +400,11 @@ async def stop_instance(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
+    pid = conn._union_project_id
     try:
         nova.stop_server(conn, instance_id)
+        await invalidate(f"union:nova:{pid}:instance:{instance_id}")
+        await invalidate(f"union:nova:{pid}:instances")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -379,8 +414,11 @@ async def reboot_instance(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
+    pid = conn._union_project_id
     try:
         nova.reboot_server(conn, instance_id)
+        await invalidate(f"union:nova:{pid}:instance:{instance_id}")
+        await invalidate(f"union:nova:{pid}:instances")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -415,8 +453,12 @@ async def list_interfaces(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
+    pid = conn._union_project_id
     try:
-        return neutron.list_instance_ports(conn, instance_id)
+        return await cached_call(
+            f"union:neutron:{pid}:ports:{instance_id}", 30,
+            lambda: neutron.list_instance_ports(conn, instance_id)
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -426,7 +468,9 @@ async def list_instance_volumes(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    try:
+    pid = conn._union_project_id
+
+    def _fetch():
         attachments = nova.list_volume_attachments(conn, instance_id)
         result = []
         for a in attachments:
@@ -436,6 +480,9 @@ async def list_instance_volumes(
             except Exception:
                 result.append(a)
         return result
+
+    try:
+        return await cached_call(f"union:cinder:{pid}:vol_attach:{instance_id}", 30, _fetch)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -449,8 +496,11 @@ async def attach_volume_to_instance(
     volume_id = body.get("volume_id")
     if not volume_id:
         raise HTTPException(status_code=400, detail="volume_id 필요")
+    pid = conn._union_project_id
     try:
-        return nova.attach_volume(conn, instance_id, volume_id)
+        result = nova.attach_volume(conn, instance_id, volume_id)
+        await invalidate(f"union:cinder:{pid}:vol_attach:{instance_id}")
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -461,8 +511,10 @@ async def detach_volume_from_instance(
     volume_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
+    pid = conn._union_project_id
     try:
         nova.detach_volume(conn, instance_id, volume_id)
+        await invalidate(f"union:cinder:{pid}:vol_attach:{instance_id}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -472,10 +524,15 @@ async def list_instance_security_groups(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    try:
+    pid = conn._union_project_id
+
+    def _fetch():
         ports = neutron.list_instance_ports(conn, instance_id)
-        all_sgs = neutron.list_security_groups(conn, project_id=conn._union_project_id)
+        all_sgs = neutron.list_security_groups(conn, project_id=pid)
         return {"ports": ports, "security_groups": all_sgs}
+
+    try:
+        return await cached_call(f"union:neutron:{pid}:sgs:{instance_id}", 60, _fetch)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -485,20 +542,25 @@ async def get_instance_owner(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    try:
+    pid = conn._union_project_id
+
+    def _fetch():
         server = nova.get_server(conn, instance_id)
+        if not server.user_id:
+            return {"display": "-"}
+        try:
+            user = keystone.get_user(conn, server.user_id)
+            name = user["name"]
+            email = user["email"]
+            display = f"{name}({email})" if email else name
+            return {"display": display, "name": name, "email": email}
+        except Exception:
+            return {"display": server.user_id}
+
+    try:
+        return await cached_call(f"union:keystone:{pid}:owner:{instance_id}", 300, _fetch)
     except Exception:
         raise HTTPException(status_code=404, detail="인스턴스를 찾을 수 없습니다")
-    if not server.user_id:
-        return {"display": "-"}
-    try:
-        user = keystone.get_user(conn, server.user_id)
-        name = user["name"]
-        email = user["email"]
-        display = f"{name}({email})" if email else name
-        return {"display": display, "name": name, "email": email}
-    except Exception:
-        return {"display": server.user_id}
 
 
 @router.post("/{instance_id}/interfaces", status_code=201)
@@ -510,8 +572,11 @@ async def attach_interface(
     net_id = body.get("net_id")
     if not net_id:
         raise HTTPException(status_code=400, detail="net_id 필요")
+    pid = conn._union_project_id
     try:
-        return nova.attach_interface(conn, instance_id, net_id)
+        result = nova.attach_interface(conn, instance_id, net_id)
+        await invalidate(f"union:neutron:{pid}:ports:{instance_id}")
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -522,8 +587,10 @@ async def detach_interface(
     port_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
+    pid = conn._union_project_id
     try:
         nova.detach_interface(conn, instance_id, port_id)
+        await invalidate(f"union:neutron:{pid}:ports:{instance_id}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -536,8 +603,11 @@ async def update_port_security_groups(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     sg_ids = body.get("security_group_ids", [])
+    pid = conn._union_project_id
     try:
-        return neutron.update_port_security_groups(conn, port_id, sg_ids)
+        result = neutron.update_port_security_groups(conn, port_id, sg_ids)
+        await invalidate(f"union:neutron:{pid}:sgs:{instance_id}")
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
