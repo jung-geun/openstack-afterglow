@@ -2,13 +2,23 @@ import openstack
 from typing import Optional
 
 from app.models.storage import (
-    NetworkInfo, NetworkDetail, SubnetDetail, RouterInfo, FloatingIpInfo,
+    NetworkInfo, NetworkDetail, SubnetDetail, RouterInfo, RouterDetail,
+    RouterInterface, FloatingIpInfo,
     TopologyData, TopologyNetwork, TopologyRouter,
 )
 
 
-def list_networks(conn: openstack.connection.Connection) -> list[NetworkInfo]:
-    return [_net_to_info(n) for n in conn.network.networks()]
+def list_networks(conn: openstack.connection.Connection, project_id: str | None = None) -> list[NetworkInfo]:
+    result = []
+    for n in conn.network.networks():
+        if project_id and not (
+            bool(n.is_router_external)
+            or bool(n.is_shared)
+            or getattr(n, 'project_id', None) == project_id
+        ):
+            continue
+        result.append(_net_to_info(n))
+    return result
 
 
 def get_network(conn: openstack.connection.Connection, network_id: str) -> NetworkInfo:
@@ -225,6 +235,122 @@ def get_topology(conn: openstack.connection.Connection) -> TopologyData:
     )
 
 
+# ---------------------------------------------------------------------------
+# 라우터 CRUD
+# ---------------------------------------------------------------------------
+
+def list_routers(conn: openstack.connection.Connection, project_id: str | None = None) -> list[RouterInfo]:
+    kwargs: dict = {}
+    if project_id:
+        kwargs["project_id"] = project_id
+    result = []
+    for r in conn.network.routers(**kwargs):
+        ext_net_id = None
+        if r.external_gateway_info:
+            ext_net_id = r.external_gateway_info.get("network_id")
+        # connected subnets via router_interface ports
+        subnet_ids: list[str] = []
+        try:
+            for port in conn.network.ports(device_id=r.id, device_owner="network:router_interface"):
+                for fip in (port.fixed_ips or []):
+                    sid = fip.get("subnet_id")
+                    if sid and sid not in subnet_ids:
+                        subnet_ids.append(sid)
+        except Exception:
+            pass
+        result.append(RouterInfo(
+            id=r.id,
+            name=r.name or "",
+            status=r.status or "",
+            project_id=getattr(r, 'project_id', None),
+            external_gateway_network_id=ext_net_id,
+            connected_subnet_ids=subnet_ids,
+        ))
+    return result
+
+
+def get_router_detail(conn: openstack.connection.Connection, router_id: str) -> RouterDetail:
+    r = conn.network.get_router(router_id)
+    ext_net_id = None
+    ext_net_name = None
+    if r.external_gateway_info:
+        ext_net_id = r.external_gateway_info.get("network_id")
+        if ext_net_id:
+            try:
+                ext_net = conn.network.get_network(ext_net_id)
+                ext_net_name = ext_net.name or ext_net_id
+            except Exception:
+                pass
+
+    interfaces: list[RouterInterface] = []
+    for port in conn.network.ports(device_id=r.id, device_owner="network:router_interface"):
+        for fip in (port.fixed_ips or []):
+            sid = fip.get("subnet_id", "")
+            ip = fip.get("ip_address", "")
+            subnet_name = ""
+            net_id = port.network_id or ""
+            try:
+                s = conn.network.get_subnet(sid)
+                subnet_name = s.name or sid
+            except Exception:
+                pass
+            interfaces.append(RouterInterface(
+                id=port.id,
+                subnet_id=sid,
+                subnet_name=subnet_name,
+                network_id=net_id,
+                ip_address=ip,
+            ))
+
+    return RouterDetail(
+        id=r.id,
+        name=r.name or "",
+        status=r.status or "",
+        project_id=getattr(r, 'project_id', None),
+        external_gateway_network_id=ext_net_id,
+        external_gateway_network_name=ext_net_name,
+        interfaces=interfaces,
+    )
+
+
+def create_router(conn: openstack.connection.Connection, name: str, external_network_id: str | None = None) -> RouterInfo:
+    kwargs: dict = {"name": name}
+    if external_network_id:
+        kwargs["external_gateway_info"] = {"network_id": external_network_id}
+    r = conn.network.create_router(**kwargs)
+    ext_net_id = None
+    if r.external_gateway_info:
+        ext_net_id = r.external_gateway_info.get("network_id")
+    return RouterInfo(
+        id=r.id,
+        name=r.name or "",
+        status=r.status or "",
+        project_id=getattr(r, 'project_id', None),
+        external_gateway_network_id=ext_net_id,
+    )
+
+
+def delete_router(conn: openstack.connection.Connection, router_id: str) -> None:
+    conn.network.delete_router(router_id, ignore_missing=True)
+
+
+def add_router_interface(conn: openstack.connection.Connection, router_id: str, subnet_id: str) -> dict:
+    result = conn.network.add_interface_to_router(router_id, subnet_id=subnet_id)
+    return {"subnet_id": result.get("subnet_id", subnet_id), "port_id": result.get("port_id", "")}
+
+
+def remove_router_interface(conn: openstack.connection.Connection, router_id: str, subnet_id: str) -> None:
+    conn.network.remove_interface_from_router(router_id, subnet_id=subnet_id)
+
+
+def set_router_gateway(conn: openstack.connection.Connection, router_id: str, external_network_id: str) -> None:
+    conn.network.update_router(router_id, external_gateway_info={"network_id": external_network_id})
+
+
+def remove_router_gateway(conn: openstack.connection.Connection, router_id: str) -> None:
+    conn.network.update_router(router_id, external_gateway_info=None)
+
+
 def list_instance_ports(conn: openstack.connection.Connection, instance_id: str) -> list[dict]:
     """인스턴스에 연결된 포트 목록 반환."""
     ports = list(conn.network.ports(device_id=instance_id))
@@ -241,7 +367,10 @@ def list_instance_ports(conn: openstack.connection.Connection, instance_id: str)
     ]
 
 
-def list_security_groups(conn: openstack.connection.Connection) -> list[dict]:
+def list_security_groups(conn: openstack.connection.Connection, project_id: str | None = None) -> list[dict]:
+    kwargs: dict = {}
+    if project_id:
+        kwargs["project_id"] = project_id
     return [
         {
             "id": sg.id,
@@ -260,7 +389,7 @@ def list_security_groups(conn: openstack.connection.Connection) -> list[dict]:
                 for r in (sg.security_group_rules or [])
             ],
         }
-        for sg in conn.network.security_groups()
+        for sg in conn.network.security_groups(**kwargs)
     ]
 
 

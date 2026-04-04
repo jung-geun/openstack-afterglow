@@ -21,7 +21,7 @@ from app.api.deps import get_os_conn
 from app.config import get_settings
 from app.models.compute import CreateInstanceRequest, InstanceInfo
 from app.models.progress import ProgressMessage, ProgressStep
-from app.services import nova, cinder, manila, cloudinit, libraries as lib_svc, neutron
+from app.services import nova, cinder, manila, cloudinit, libraries as lib_svc, neutron, keystone
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -474,8 +474,56 @@ async def list_instance_security_groups(
 ):
     try:
         ports = neutron.list_instance_ports(conn, instance_id)
-        all_sgs = neutron.list_security_groups(conn)
+        all_sgs = neutron.list_security_groups(conn, project_id=conn._union_project_id)
         return {"ports": ports, "security_groups": all_sgs}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{instance_id}/owner")
+async def get_instance_owner(
+    instance_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    try:
+        server = nova.get_server(conn, instance_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="인스턴스를 찾을 수 없습니다")
+    if not server.user_id:
+        return {"display": "-"}
+    try:
+        user = keystone.get_user(conn, server.user_id)
+        name = user["name"]
+        email = user["email"]
+        display = f"{name}({email})" if email else name
+        return {"display": display, "name": name, "email": email}
+    except Exception:
+        return {"display": server.user_id}
+
+
+@router.post("/{instance_id}/interfaces", status_code=201)
+async def attach_interface(
+    instance_id: str,
+    body: dict,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    net_id = body.get("net_id")
+    if not net_id:
+        raise HTTPException(status_code=400, detail="net_id 필요")
+    try:
+        return nova.attach_interface(conn, instance_id, net_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/{instance_id}/interfaces/{port_id}", status_code=204)
+async def detach_interface(
+    instance_id: str,
+    port_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    try:
+        nova.detach_interface(conn, instance_id, port_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

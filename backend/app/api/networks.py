@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException
 import openstack
 
@@ -16,7 +17,7 @@ router = APIRouter()
 @router.get("", response_model=list[NetworkInfo])
 async def list_networks(conn: openstack.connection.Connection = Depends(get_os_conn)):
     try:
-        return neutron.list_networks(conn)
+        return neutron.list_networks(conn, project_id=conn._union_project_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"네트워크 목록 조회 실패: {e}")
 
@@ -111,8 +112,10 @@ async def delete_subnet(
 @router.get("/topology", response_model=TopologyData)
 async def get_topology(conn: openstack.connection.Connection = Depends(get_os_conn)):
     try:
-        topo = neutron.get_topology(conn)
-        servers = nova.list_servers(conn)
+        topo, servers = await asyncio.gather(
+            asyncio.to_thread(neutron.get_topology, conn),
+            asyncio.to_thread(nova.list_servers, conn),
+        )
         topo.instances = [
             TopologyInstance(
                 id=s.id,

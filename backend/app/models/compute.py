@@ -1,3 +1,4 @@
+import re
 from pydantic import BaseModel
 from typing import Optional
 
@@ -30,8 +31,15 @@ class FlavorInfo(BaseModel):
     extra_specs: dict = {}
 
     @property
-    def has_gpu(self) -> bool:
-        return any("gpu" in k.lower() or "pci" in k.lower() for k in self.extra_specs)
+    def is_gpu(self) -> bool:
+        return self.name.startswith("gpu.")
+
+    @property
+    def gpu_count(self) -> int:
+        m = re.match(r'^gpu\.\w+?(?:x(\d+))?_', self.name)
+        if not m:
+            return 0
+        return int(m.group(1)) if m.group(1) else 1
 
 
 class InstanceInfo(BaseModel):

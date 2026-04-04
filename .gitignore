@@ -215,3 +215,5 @@ package
 .ionide
 
 # End of https://www.toptal.com/developers/gitignore/api/git,svelte,python,visualstudiocode
+
+union.toml

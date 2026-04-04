@@ -1,0 +1,37 @@
+# Union 통합 설정 파일
+# 이 파일을 수정하면 백엔드와 프론트엔드 전체 설정이 변경됩니다.
+# 우선순위: union.toml > .env > 환경변수
+
+[openstack]
+auth_url = "http://keystone.example.com:5000/v3"
+project_name = "admin"
+project_domain_name = "Default"
+user_domain_name = "Default"
+region_name = "RegionOne"
+
+# Manila 설정
+manila_endpoint = ""              # 서비스 카탈로그 대신 직접 지정할 경우
+manila_share_network_id = ""
+manila_share_type = "cephfstype"
+
+# Ceph 모니터 (cloud-init CephFS 마운트용, 콤마 구분)
+ceph_monitors = ""
+
+[app]
+backend_port = 8000
+frontend_port = 3000
+secret_key = "change-me-in-production"
+
+# 프론트엔드 대시보드 자동 새로고침 간격 (밀리초)
+# 권장 범위: 3000 ~ 30000
+refresh_interval_ms = 5000
+
+[cache]
+redis_url = "redis://redis:6379/0"
+default_ttl_seconds = 30
+
+[nova]
+default_network_id = ""
+default_availability_zone = "nova"
+boot_volume_size_gb = 20
+upper_volume_size_gb = 50

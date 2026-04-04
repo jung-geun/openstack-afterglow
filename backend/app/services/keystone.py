@@ -78,6 +78,16 @@ def get_openstack_connection(token: str, project_id: str) -> openstack.connectio
     )
 
 
+def get_user(conn: openstack.connection.Connection, user_id: str) -> dict:
+    """user_id로 사용자 상세 정보 조회 (이름, 이메일 등)."""
+    u = conn.identity.get_user(user_id)
+    return {
+        "id": u.id,
+        "name": u.name or "",
+        "email": getattr(u, 'email', None) or "",
+    }
+
+
 def list_projects(token: str) -> list[dict]:
     """
     사용자가 접근 가능한 프로젝트 목록 반환.

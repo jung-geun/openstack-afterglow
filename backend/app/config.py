@@ -1,5 +1,59 @@
-from pydantic_settings import BaseSettings
+"""Union 설정 모듈.
+
+우선순위: union.toml (프로젝트 루트) > .env > 환경변수
+"""
+
+import tomllib
+import os
 from functools import lru_cache
+from pathlib import Path
+
+from pydantic_settings import BaseSettings
+
+
+def _load_toml() -> dict:
+    """프로젝트 루트의 union.toml을 읽어 평탄화된 dict를 반환."""
+    # 가능한 위치: CWD, CWD 상위, /app (Docker)
+    candidates = [
+        Path.cwd() / "union.toml",
+        Path.cwd().parent / "union.toml",
+        Path("/app/union.toml"),
+    ]
+    for path in candidates:
+        if path.exists():
+            with open(path, "rb") as f:
+                data = tomllib.load(f)
+            # 섹션을 평탄화하여 Settings 필드에 매핑
+            flat: dict = {}
+            ost = data.get("openstack", {})
+            flat["os_auth_url"] = ost.get("auth_url", "")
+            flat["os_project_name"] = ost.get("project_name", "admin")
+            flat["os_project_domain_name"] = ost.get("project_domain_name", "Default")
+            flat["os_user_domain_name"] = ost.get("user_domain_name", "Default")
+            flat["os_region_name"] = ost.get("region_name", "RegionOne")
+            flat["os_manila_endpoint"] = ost.get("manila_endpoint", "")
+            flat["os_manila_share_network_id"] = ost.get("manila_share_network_id", "")
+            flat["os_manila_share_type"] = ost.get("manila_share_type", "cephfstype")
+            flat["ceph_monitors"] = ost.get("ceph_monitors", "")
+
+            app = data.get("app", {})
+            flat["backend_port"] = app.get("backend_port", 8000)
+            flat["frontend_port"] = app.get("frontend_port", 3000)
+            flat["secret_key"] = app.get("secret_key", "change-me-in-production")
+            flat["refresh_interval_ms"] = app.get("refresh_interval_ms", 5000)
+
+            cache = data.get("cache", {})
+            flat["redis_url"] = cache.get("redis_url", "redis://localhost:6379/0")
+            flat["cache_ttl_seconds"] = cache.get("default_ttl_seconds", 30)
+
+            nv = data.get("nova", {})
+            flat["default_network_id"] = nv.get("default_network_id", "")
+            flat["default_availability_zone"] = nv.get("default_availability_zone", "nova")
+            flat["boot_volume_size_gb"] = nv.get("boot_volume_size_gb", 20)
+            flat["upper_volume_size_gb"] = nv.get("upper_volume_size_gb", 50)
+
+            return flat
+    return {}
 
 
 class Settings(BaseSettings):
@@ -11,16 +65,22 @@ class Settings(BaseSettings):
     os_region_name: str = "RegionOne"
 
     # Manila 설정
-    os_manila_endpoint: str = ""          # 수동 오버라이드 (서비스 카탈로그 대신 사용)
+    os_manila_endpoint: str = ""
     os_manila_share_network_id: str = ""
     os_manila_share_type: str = "cephfstype"
 
     # Ceph 모니터 (cloud-init CephFS 마운트용)
-    ceph_monitors: str = ""  # comma-separated
+    ceph_monitors: str = ""
 
     # 앱 설정
     backend_port: int = 8000
+    frontend_port: int = 3000
     secret_key: str = "change-me-in-production"
+    refresh_interval_ms: int = 5000
+
+    # Redis 캐시
+    redis_url: str = "redis://localhost:6379/0"
+    cache_ttl_seconds: int = 30
 
     # Nova 기본값
     default_network_id: str = ""
@@ -39,4 +99,11 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
+    # TOML 값으로 환경변수를 채워 Settings가 이를 읽도록 함
+    # (환경변수 > .env 이므로, TOML 값을 환경변수로 주입하되 이미 설정된 값은 덮어쓰지 않음)
+    toml_data = _load_toml()
+    for key, value in toml_data.items():
+        env_key = key.upper()
+        if env_key not in os.environ:
+            os.environ[env_key] = str(value)
     return Settings()

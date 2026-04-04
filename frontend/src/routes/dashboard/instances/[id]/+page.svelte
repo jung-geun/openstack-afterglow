@@ -72,6 +72,14 @@
 		attachments: any[];
 	}
 
+	interface NetworkInfo {
+		id: string;
+		name: string;
+		status: string;
+		is_external: boolean;
+		is_shared: boolean;
+	}
+
 	let instance = $state<Instance | null>(null);
 	let floatingIps = $state<FloatingIp[]>([]);
 	let allFloatingIps = $state<FloatingIp[]>([]);
@@ -79,16 +87,29 @@
 	let volumes = $state<VolumeAttachment[]>([]);
 	let allSecurityGroups = $state<SecurityGroup[]>([]);
 	let availableVolumes = $state<VolumeInfo[]>([]);
+	let availableNetworks = $state<NetworkInfo[]>([]);
+	let ownerDisplay = $state('');
 	let loading = $state(true);
 	let error = $state('');
 	let deleting = $state(false);
 	let actioning = $state<string | null>(null);
 	let showFipPanel = $state(false);
+	// Console log
 	let showLog = $state(false);
 	let consoleLog = $state('');
 	let logLoading = $state(false);
+	let logFull = $state(false);
+	let logPreEl = $state<HTMLPreElement | null>(null);
+	// Volume panel
 	let showAttachVolume = $state(false);
+	let attachMode = $state<'existing' | 'new'>('existing');
 	let selectedVolumeId = $state('');
+	let newVolName = $state('');
+	let newVolSize = $state(20);
+	// Interface panel
+	let showAddInterface = $state(false);
+	let selectedNetId = $state('');
+	// Security groups
 	let sgEditPortId = $state<string | null>(null);
 	let sgEditSelected = $state<string[]>([]);
 
@@ -111,6 +132,22 @@
 		fetchInstance(id);
 	});
 
+	// Console log auto-refresh when visible
+	$effect(() => {
+		if (!showLog) return;
+		const interval = setInterval(() => {
+			loadConsoleLog(logFull);
+		}, 5000);
+		return () => clearInterval(interval);
+	});
+
+	// Scroll to bottom when log updates
+	$effect(() => {
+		if (consoleLog && logPreEl) {
+			logPreEl.scrollTop = logPreEl.scrollHeight;
+		}
+	});
+
 	async function fetchInstance(id: string) {
 		loading = true;
 		error = '';
@@ -120,12 +157,14 @@
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined
 			);
-			const [fips, ifaces, vols, sgData, allVols] = await Promise.all([
+			const [fips, ifaces, vols, sgData, allVols, nets, ownerData] = await Promise.all([
 				api.get<FloatingIp[]>('/api/networks/floating-ips', $auth.token ?? undefined, $auth.projectId ?? undefined).catch(() => []),
 				api.get<PortInfo[]>(`/api/instances/${id}/interfaces`, $auth.token ?? undefined, $auth.projectId ?? undefined).catch(() => []),
 				api.get<VolumeAttachment[]>(`/api/instances/${id}/volumes`, $auth.token ?? undefined, $auth.projectId ?? undefined).catch(() => []),
 				api.get<{ ports: PortInfo[]; security_groups: SecurityGroup[] }>(`/api/instances/${id}/security-groups`, $auth.token ?? undefined, $auth.projectId ?? undefined).catch(() => ({ ports: [], security_groups: [] })),
 				api.get<VolumeInfo[]>('/api/volumes', $auth.token ?? undefined, $auth.projectId ?? undefined).catch(() => []),
+				api.get<NetworkInfo[]>('/api/networks', $auth.token ?? undefined, $auth.projectId ?? undefined).catch(() => []),
+				api.get<{ display: string }>(`/api/instances/${id}/owner`, $auth.token ?? undefined, $auth.projectId ?? undefined).catch(() => ({ display: '' })),
 			]);
 			allFloatingIps = fips;
 			const instIps = new Set(instance.ip_addresses.filter(ip => ip.type === 'floating').map(ip => ip.addr));
@@ -133,9 +172,10 @@
 			interfaces = ifaces;
 			volumes = vols;
 			allSecurityGroups = sgData.security_groups;
-			// 이미 attach된 볼륨 제외
 			const attachedIds = new Set(vols.map(v => v.volume_id));
 			availableVolumes = allVols.filter(v => v.status === 'available' && !attachedIds.has(v.id));
+			availableNetworks = nets.filter(n => !n.is_external);
+			ownerDisplay = ownerData.display || '';
 		} catch (e) {
 			error = e instanceof ApiError ? `조회 실패 (${e.status}): ${e.message}` : '서버 오류';
 		} finally {
@@ -143,12 +183,13 @@
 		}
 	}
 
-	async function loadConsoleLog() {
+	async function loadConsoleLog(full = false) {
 		if (!instance) return;
 		logLoading = true;
+		const length = full ? 0 : 200;
 		try {
 			const data = await api.get<{ output: string }>(
-				`/api/instances/${instance.id}/log?length=200`,
+				`/api/instances/${instance.id}/log?length=${length}`,
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined
 			);
@@ -162,9 +203,14 @@
 
 	async function toggleLog() {
 		showLog = !showLog;
-		if (showLog && !consoleLog) {
-			await loadConsoleLog();
+		if (showLog) {
+			await loadConsoleLog(logFull);
 		}
+	}
+
+	async function toggleFullLog() {
+		logFull = !logFull;
+		await loadConsoleLog(logFull);
 	}
 
 	async function openConsole() {
@@ -277,6 +323,33 @@
 		}
 	}
 
+	async function createAndAttachVolume() {
+		if (!instance || !newVolName.trim() || newVolSize < 1) return;
+		actioning = 'create-vol';
+		try {
+			const vol = await api.post<VolumeInfo>(
+				'/api/volumes',
+				{ name: newVolName.trim(), size_gb: newVolSize },
+				$auth.token ?? undefined,
+				$auth.projectId ?? undefined
+			);
+			await api.post(
+				`/api/instances/${instance.id}/volumes`,
+				{ volume_id: vol.id },
+				$auth.token ?? undefined,
+				$auth.projectId ?? undefined
+			);
+			showAttachVolume = false;
+			newVolName = '';
+			newVolSize = 20;
+			await fetchInstance(instance.id);
+		} catch (e) {
+			alert('볼륨 생성/연결 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+		} finally {
+			actioning = null;
+		}
+	}
+
 	async function detachVolume(volumeId: string) {
 		if (!instance) return;
 		if (!confirm('볼륨을 분리하시겠습니까?')) return;
@@ -290,6 +363,44 @@
 			await fetchInstance(instance.id);
 		} catch (e) {
 			alert('볼륨 분리 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+		} finally {
+			actioning = null;
+		}
+	}
+
+	async function attachInterface() {
+		if (!instance || !selectedNetId) return;
+		actioning = 'attach-iface';
+		try {
+			await api.post(
+				`/api/instances/${instance.id}/interfaces`,
+				{ net_id: selectedNetId },
+				$auth.token ?? undefined,
+				$auth.projectId ?? undefined
+			);
+			showAddInterface = false;
+			selectedNetId = '';
+			await fetchInstance(instance.id);
+		} catch (e) {
+			alert('인터페이스 추가 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+		} finally {
+			actioning = null;
+		}
+	}
+
+	async function detachInterface(portId: string) {
+		if (!instance) return;
+		if (!confirm('인터페이스를 제거하시겠습니까?')) return;
+		actioning = 'detach-iface-' + portId;
+		try {
+			await api.delete(
+				`/api/instances/${instance.id}/interfaces/${portId}`,
+				$auth.token ?? undefined,
+				$auth.projectId ?? undefined
+			);
+			await fetchInstance(instance.id);
+		} catch (e) {
+			alert('인터페이스 제거 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			actioning = null;
 		}
@@ -334,6 +445,10 @@
 
 	function sgNameById(id: string): string {
 		return allSecurityGroups.find(sg => sg.id === id)?.name ?? id.slice(0, 8) + '...';
+	}
+
+	function networkNameById(id: string): string {
+		return availableNetworks.find(n => n.id === id)?.name ?? id.slice(0, 12) + '...';
 	}
 
 	let availableFips = $derived(allFloatingIps.filter(f => !f.port_id));
@@ -428,10 +543,10 @@
 					<dt class="text-xs text-gray-500 mb-0.5">키페어</dt>
 					<dd class="text-sm text-gray-300 font-mono">{instance.key_name ?? '-'}</dd>
 				</div>
-				{#if instance.user_id}
+				{#if ownerDisplay}
 					<div>
-						<dt class="text-xs text-gray-500 mb-0.5">생성자 ID</dt>
-						<dd class="text-sm text-gray-300 font-mono">{instance.user_id}</dd>
+						<dt class="text-xs text-gray-500 mb-0.5">생성자</dt>
+						<dd class="text-sm text-gray-300 font-mono">{ownerDisplay}</dd>
 					</div>
 				{/if}
 				<div class="col-span-2">
@@ -461,10 +576,17 @@
 		<div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4">
 			<div class="flex items-center justify-between mb-3">
 				<h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide">콘솔 로그</h2>
-				<div class="flex gap-2">
+				<div class="flex gap-2 items-center">
 					{#if showLog}
+						<span class="text-xs text-gray-600">5초마다 자동 갱신</span>
 						<button
-							onclick={loadConsoleLog}
+							onclick={toggleFullLog}
+							class="text-xs {logFull ? 'text-yellow-400 border-yellow-900' : 'text-gray-400 border-gray-700'} hover:text-gray-200 px-2 py-1 border hover:border-gray-500 rounded transition-colors"
+						>
+							{logFull ? '최근 200줄' : '전체 로그'}
+						</button>
+						<button
+							onclick={() => loadConsoleLog(logFull)}
 							disabled={logLoading}
 							class="text-xs text-gray-400 hover:text-gray-200 px-2 py-1 border border-gray-700 hover:border-gray-500 rounded transition-colors disabled:text-gray-600"
 						>
@@ -480,7 +602,10 @@
 				</div>
 			</div>
 			{#if showLog}
-				<pre class="bg-gray-950 border border-gray-800 rounded p-3 text-xs text-gray-300 font-mono overflow-x-auto max-h-96 overflow-y-auto whitespace-pre-wrap">{logLoading ? '로딩 중...' : consoleLog}</pre>
+				<pre
+					bind:this={logPreEl}
+					class="bg-gray-950 border border-gray-800 rounded p-3 text-xs text-gray-300 font-mono overflow-x-auto max-h-96 overflow-y-auto whitespace-pre-wrap"
+				>{logLoading && !consoleLog ? '로딩 중...' : consoleLog}</pre>
 			{/if}
 		</div>
 
@@ -498,7 +623,7 @@
 
 			{#if showFipPanel}
 				<div class="mb-4 bg-gray-800 rounded-lg p-4">
-					<p class="text-xs text-gray-400 mb-3">사용 가능한 Floating IP</p>
+					<p class="text-xs text-gray-400 mb-3">사용 가능한 Floating IP (이 프로젝트)</p>
 					{#if availableFips.length === 0}
 						<p class="text-sm text-gray-500">사용 가능한 Floating IP가 없습니다</p>
 					{:else}
@@ -547,38 +672,80 @@
 
 		<!-- 인터페이스 -->
 		<div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4">
-			<h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-4">인터페이스</h2>
+			<div class="flex items-center justify-between mb-4">
+				<h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide">인터페이스</h2>
+				<button
+					onclick={() => { showAddInterface = !showAddInterface; selectedNetId = ''; }}
+					class="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+				>
+					{showAddInterface ? '닫기' : '+ 인터페이스 추가'}
+				</button>
+			</div>
+
+			{#if showAddInterface}
+				<div class="mb-4 bg-gray-800 rounded-lg p-4">
+					<p class="text-xs text-gray-400 mb-2">연결할 네트워크 선택</p>
+					<div class="flex gap-2">
+						<select
+							bind:value={selectedNetId}
+							class="flex-1 bg-gray-700 border border-gray-600 text-gray-200 text-sm rounded px-2 py-1.5 focus:outline-none focus:border-blue-500"
+						>
+							<option value="">네트워크 선택...</option>
+							{#each availableNetworks as net}
+								<option value={net.id}>{net.name || net.id.slice(0, 12)}</option>
+							{/each}
+						</select>
+						<button
+							onclick={attachInterface}
+							disabled={!selectedNetId || actioning === 'attach-iface'}
+							class="text-xs text-blue-400 hover:text-blue-300 px-3 py-1.5 border border-blue-900 hover:border-blue-700 rounded transition-colors disabled:text-gray-600 disabled:border-gray-700"
+						>
+							{actioning === 'attach-iface' ? '추가 중...' : '추가'}
+						</button>
+					</div>
+				</div>
+			{/if}
+
 			{#if interfaces.length === 0}
 				<p class="text-sm text-gray-500">인터페이스 정보 없음</p>
 			{:else}
 				<div class="space-y-4">
 					{#each interfaces as iface}
 						<div class="bg-gray-800/50 rounded-lg p-4">
-							<div class="grid grid-cols-2 gap-x-6 gap-y-2 mb-3">
-								<div>
-									<dt class="text-xs text-gray-500 mb-0.5">포트 ID</dt>
-									<dd class="text-xs text-gray-300 font-mono">{iface.id}</dd>
+							<div class="flex items-start justify-between mb-3">
+								<div class="grid grid-cols-2 gap-x-6 gap-y-2 flex-1">
+									<div>
+										<dt class="text-xs text-gray-500 mb-0.5">포트 ID</dt>
+										<dd class="text-xs text-gray-300 font-mono">{iface.id}</dd>
+									</div>
+									<div>
+										<dt class="text-xs text-gray-500 mb-0.5">MAC 주소</dt>
+										<dd class="text-xs text-gray-300 font-mono">{iface.mac_address}</dd>
+									</div>
+									<div>
+										<dt class="text-xs text-gray-500 mb-0.5">네트워크</dt>
+										<dd class="text-xs text-gray-300">{networkNameById(iface.network_id)}</dd>
+									</div>
+									<div>
+										<dt class="text-xs text-gray-500 mb-0.5">상태</dt>
+										<dd class="text-xs {iface.status === 'ACTIVE' ? 'text-green-400' : 'text-gray-400'}">{iface.status}</dd>
+									</div>
+									<div class="col-span-2">
+										<dt class="text-xs text-gray-500 mb-1">IP 주소</dt>
+										<dd class="flex flex-wrap gap-1.5">
+											{#each iface.fixed_ips as fip}
+												<span class="text-xs font-mono text-gray-300 bg-gray-700 px-1.5 py-0.5 rounded">{fip.ip_address}</span>
+											{/each}
+										</dd>
+									</div>
 								</div>
-								<div>
-									<dt class="text-xs text-gray-500 mb-0.5">MAC 주소</dt>
-									<dd class="text-xs text-gray-300 font-mono">{iface.mac_address}</dd>
-								</div>
-								<div>
-									<dt class="text-xs text-gray-500 mb-0.5">네트워크 ID</dt>
-									<dd class="text-xs text-gray-300 font-mono">{iface.network_id}</dd>
-								</div>
-								<div>
-									<dt class="text-xs text-gray-500 mb-0.5">상태</dt>
-									<dd class="text-xs {iface.status === 'ACTIVE' ? 'text-green-400' : 'text-gray-400'}">{iface.status}</dd>
-								</div>
-								<div class="col-span-2">
-									<dt class="text-xs text-gray-500 mb-1">IP 주소</dt>
-									<dd class="flex flex-wrap gap-1.5">
-										{#each iface.fixed_ips as fip}
-											<span class="text-xs font-mono text-gray-300 bg-gray-700 px-1.5 py-0.5 rounded">{fip.ip_address}</span>
-										{/each}
-									</dd>
-								</div>
+								<button
+									onclick={() => detachInterface(iface.id)}
+									disabled={!!actioning}
+									class="ml-4 text-xs text-orange-400 hover:text-orange-300 px-2 py-1 border border-orange-900 hover:border-orange-700 rounded transition-colors disabled:text-gray-600 shrink-0"
+								>
+									{actioning === 'detach-iface-' + iface.id ? '제거 중...' : '제거'}
+								</button>
 							</div>
 							<!-- 보안 그룹 -->
 							<div>
@@ -593,6 +760,7 @@
 								</div>
 								{#if sgEditPortId === iface.id}
 									<div class="bg-gray-700 rounded p-3 mt-2">
+										<p class="text-xs text-gray-500 mb-2">이 프로젝트의 보안 그룹</p>
 										<div class="space-y-1.5 mb-3 max-h-40 overflow-y-auto">
 											{#each allSecurityGroups as sg}
 												<label class="flex items-center gap-2 cursor-pointer">
@@ -648,7 +816,7 @@
 			<div class="flex items-center justify-between mb-4">
 				<h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide">볼륨</h2>
 				<button
-					onclick={() => { showAttachVolume = !showAttachVolume; selectedVolumeId = ''; }}
+					onclick={() => { showAttachVolume = !showAttachVolume; selectedVolumeId = ''; newVolName = ''; newVolSize = 20; }}
 					class="text-xs text-blue-400 hover:text-blue-300 transition-colors"
 				>
 					{showAttachVolume ? '닫기' : '+ 볼륨 연결'}
@@ -657,27 +825,69 @@
 
 			{#if showAttachVolume}
 				<div class="mb-4 bg-gray-800 rounded-lg p-4">
-					<p class="text-xs text-gray-400 mb-2">연결 가능한 볼륨</p>
-					{#if availableVolumes.length === 0}
-						<p class="text-sm text-gray-500">연결 가능한 볼륨이 없습니다</p>
+					<!-- 모드 탭 -->
+					<div class="flex gap-1 mb-3">
+						<button
+							onclick={() => { attachMode = 'existing'; }}
+							class="text-xs px-2 py-1 rounded border transition-colors {attachMode === 'existing' ? 'text-blue-300 border-blue-700 bg-blue-900/20' : 'text-gray-400 border-gray-700 hover:text-gray-200'}"
+						>
+							기존 볼륨
+						</button>
+						<button
+							onclick={() => { attachMode = 'new'; }}
+							class="text-xs px-2 py-1 rounded border transition-colors {attachMode === 'new' ? 'text-blue-300 border-blue-700 bg-blue-900/20' : 'text-gray-400 border-gray-700 hover:text-gray-200'}"
+						>
+							새 볼륨 생성
+						</button>
+					</div>
+
+					{#if attachMode === 'existing'}
+						{#if availableVolumes.length === 0}
+							<p class="text-sm text-gray-500">연결 가능한 볼륨이 없습니다. "새 볼륨 생성"을 이용하세요.</p>
+						{:else}
+							<div class="flex gap-2">
+								<select
+									bind:value={selectedVolumeId}
+									class="flex-1 bg-gray-700 border border-gray-600 text-gray-200 text-sm rounded px-2 py-1.5 focus:outline-none focus:border-blue-500"
+								>
+									<option value="">볼륨 선택...</option>
+									{#each availableVolumes as vol}
+										<option value={vol.id}>{vol.name || vol.id.slice(0, 8)} ({vol.size}GB)</option>
+									{/each}
+								</select>
+								<button
+									onclick={attachVolume}
+									disabled={!selectedVolumeId || actioning === 'attach-vol'}
+									class="text-xs text-blue-400 hover:text-blue-300 px-3 py-1.5 border border-blue-900 hover:border-blue-700 rounded transition-colors disabled:text-gray-600 disabled:border-gray-700"
+								>
+									{actioning === 'attach-vol' ? '연결 중...' : '연결'}
+								</button>
+							</div>
+						{/if}
 					{:else}
-						<div class="flex gap-2">
-							<select
-								bind:value={selectedVolumeId}
-								class="flex-1 bg-gray-700 border border-gray-600 text-gray-200 text-sm rounded px-2 py-1.5 focus:outline-none focus:border-blue-500"
-							>
-								<option value="">볼륨 선택...</option>
-								{#each availableVolumes as vol}
-									<option value={vol.id}>{vol.name || vol.id.slice(0, 8)} ({vol.size}GB)</option>
-								{/each}
-							</select>
-							<button
-								onclick={attachVolume}
-								disabled={!selectedVolumeId || actioning === 'attach-vol'}
-								class="text-xs text-blue-400 hover:text-blue-300 px-3 py-1.5 border border-blue-900 hover:border-blue-700 rounded transition-colors disabled:text-gray-600 disabled:border-gray-700"
-							>
-								{actioning === 'attach-vol' ? '연결 중...' : '연결'}
-							</button>
+						<div class="space-y-2">
+							<div class="flex gap-2">
+								<input
+									bind:value={newVolName}
+									type="text"
+									placeholder="볼륨 이름"
+									class="flex-1 bg-gray-700 border border-gray-600 text-gray-200 text-sm rounded px-2 py-1.5 focus:outline-none focus:border-blue-500"
+								/>
+								<input
+									bind:value={newVolSize}
+									type="number"
+									min="1"
+									placeholder="크기(GB)"
+									class="w-24 bg-gray-700 border border-gray-600 text-gray-200 text-sm rounded px-2 py-1.5 focus:outline-none focus:border-blue-500"
+								/>
+								<button
+									onclick={createAndAttachVolume}
+									disabled={!newVolName.trim() || newVolSize < 1 || actioning === 'create-vol'}
+									class="text-xs text-green-400 hover:text-green-300 px-3 py-1.5 border border-green-900 hover:border-green-700 rounded transition-colors disabled:text-gray-600 disabled:border-gray-700 whitespace-nowrap"
+								>
+									{actioning === 'create-vol' ? '생성 중...' : '생성 및 연결'}
+								</button>
+							</div>
 						</div>
 					{/if}
 				</div>

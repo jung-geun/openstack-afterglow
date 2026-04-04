@@ -53,17 +53,46 @@
 		is_shared: boolean;
 	}
 
-	type Tab = 'instances' | 'volumes' | 'shares' | 'networks';
+	interface DashboardSummary {
+		instances: { total: number; active: number; shutoff: number; error: number };
+		compute: { instances_used: number; instances_limit: number; vcpus_used: number; vcpus_limit: number; ram_used_mb: number; ram_limit_mb: number };
+		storage: { volumes_used: number; volumes_limit: number; gigabytes_used: number; gigabytes_limit: number };
+		gpu_used: number;
+	}
+
+	interface Router {
+		id: string;
+		name: string;
+		status: string;
+		external_gateway_network_id: string | null;
+		connected_subnet_ids: string[];
+	}
+
+	type Tab = 'instances' | 'volumes' | 'shares' | 'networks' | 'routers' | 'loadbalancers';
+
+	interface LoadBalancer {
+		id: string;
+		name: string;
+		status: string;
+		operating_status: string;
+		vip_address: string | null;
+		vip_subnet_id: string | null;
+	}
 
 	let instances = $state<Instance[]>([]);
 	let volumes = $state<Volume[]>([]);
 	let shares = $state<Share[]>([]);
 	let networks = $state<Network[]>([]);
+	let routers = $state<Router[]>([]);
+	let loadBalancers = $state<LoadBalancer[]>([]);
+	let summary = $state<DashboardSummary | null>(null);
 	let loading = $state(true);
 	let instancesError = $state('');
 	let volumesError = $state('');
 	let sharesError = $state('');
 	let networksError = $state('');
+	let routersError = $state('');
+	let lbError = $state('');
 	let deleting = $state<string | null>(null);
 	let activeTab = $state<Tab>('instances');
 
@@ -93,12 +122,16 @@
 		volumes: '볼륨',
 		shares: '공유(Share)',
 		networks: '네트워크',
+		routers: '라우터',
+		loadbalancers: '로드밸런서',
 	};
 
 	function tabCount(tab: Tab): number {
 		if (tab === 'instances') return instances.length;
 		if (tab === 'volumes') return volumes.length;
 		if (tab === 'shares') return shares.length;
+		if (tab === 'routers') return routers.length;
+		if (tab === 'loadbalancers') return loadBalancers.length;
 		return networks.length;
 	}
 
@@ -138,12 +171,53 @@
 		}
 	}
 
+	async function fetchRouters() {
+		try {
+			routers = await api.get<Router[]>('/api/routers', $auth.token ?? undefined, $auth.projectId ?? undefined);
+			routersError = '';
+		} catch (e) {
+			routersError = e instanceof ApiError ? `조회 실패 (${e.status}): ${(e as ApiError).message}` : '서버 오류';
+		}
+	}
+
+	async function fetchLoadBalancers() {
+		try {
+			loadBalancers = await api.get<LoadBalancer[]>('/api/loadbalancers', $auth.token ?? undefined, $auth.projectId ?? undefined);
+			lbError = '';
+		} catch (e) {
+			// Octavia가 없는 환경에서는 조용히 실패
+			lbError = '';
+		}
+	}
+
+	async function fetchSummary() {
+		try {
+			summary = await api.get<DashboardSummary>('/api/dashboard/summary', $auth.token ?? undefined, $auth.projectId ?? undefined);
+		} catch {
+			// summary는 실패해도 나머지 UI에 영향 없음
+		}
+	}
+
+	let refreshIntervalMs = $state(5000);
+
+	async function loadConfig() {
+		try {
+			const cfg = await api.get<{ refresh_interval_ms: number }>('/api/dashboard/config', $auth.token ?? undefined, $auth.projectId ?? undefined);
+			refreshIntervalMs = cfg.refresh_interval_ms;
+		} catch {
+			// 기본값 유지
+		}
+	}
+
 	async function fetchAllData() {
 		await Promise.allSettled([
 			fetchInstances(),
 			fetchVolumes(),
 			fetchShares(),
 			fetchNetworks(),
+			fetchRouters(),
+			fetchLoadBalancers(),
+			fetchSummary(),
 		]);
 		loading = false;
 	}
@@ -284,10 +358,11 @@
 		if (!projectId) return;
 
 		loading = true;
-		fetchAllData();
-
-		const interval = setInterval(fetchAllData, 4000);
-		return () => clearInterval(interval);
+		loadConfig().then(() => {
+			fetchAllData();
+			const interval = setInterval(fetchAllData, refreshIntervalMs);
+			return () => clearInterval(interval);
+		});
 	});
 
 	const statusColor: Record<string, string> = {
@@ -475,9 +550,85 @@
 		</div>
 	</div>
 
+	<!-- 리소스 모니터링 카드 -->
+	{#if summary}
+		{@const c = summary.compute}
+		{@const s = summary.storage}
+		<div class="grid grid-cols-2 gap-3 mb-6 lg:grid-cols-6">
+			<!-- 인스턴스 -->
+			<div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+				<div class="text-xs text-gray-500 uppercase tracking-wide mb-2">인스턴스</div>
+				<div class="text-2xl font-bold text-white mb-1">{summary.instances.active}<span class="text-base text-gray-500">/{summary.instances.total}</span></div>
+				<div class="flex gap-2 text-xs">
+					<span class="text-green-400">{summary.instances.active} active</span>
+					{#if summary.instances.shutoff > 0}<span class="text-gray-500">{summary.instances.shutoff} off</span>{/if}
+					{#if summary.instances.error > 0}<span class="text-red-400">{summary.instances.error} err</span>{/if}
+				</div>
+			</div>
+			<!-- vCPU -->
+			<div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+				<div class="text-xs text-gray-500 uppercase tracking-wide mb-2">vCPU</div>
+				<div class="text-2xl font-bold text-white mb-1">{c.vcpus_used}<span class="text-base text-gray-500">{c.vcpus_limit > 0 ? `/${c.vcpus_limit}` : ''}</span></div>
+				{#if c.vcpus_limit > 0}
+					{@const pct = Math.round(c.vcpus_used / c.vcpus_limit * 100)}
+					<div class="w-full bg-gray-800 rounded-full h-1.5">
+						<div class="h-1.5 rounded-full {pct > 80 ? 'bg-red-500' : pct > 60 ? 'bg-yellow-500' : 'bg-blue-500'}" style="width:{pct}%"></div>
+					</div>
+					<div class="text-xs text-gray-500 mt-1">{pct}% 사용</div>
+				{/if}
+			</div>
+			<!-- RAM -->
+			<div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+				<div class="text-xs text-gray-500 uppercase tracking-wide mb-2">RAM</div>
+				<div class="text-2xl font-bold text-white mb-1">{Math.round(c.ram_used_mb / 1024)}GB<span class="text-base text-gray-500">{c.ram_limit_mb > 0 ? `/${Math.round(c.ram_limit_mb / 1024)}GB` : ''}</span></div>
+				{#if c.ram_limit_mb > 0}
+					{@const pct = Math.round(c.ram_used_mb / c.ram_limit_mb * 100)}
+					<div class="w-full bg-gray-800 rounded-full h-1.5">
+						<div class="h-1.5 rounded-full {pct > 80 ? 'bg-red-500' : pct > 60 ? 'bg-yellow-500' : 'bg-green-500'}" style="width:{pct}%"></div>
+					</div>
+					<div class="text-xs text-gray-500 mt-1">{pct}% 사용</div>
+				{/if}
+			</div>
+			<!-- GPU -->
+			<div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+				<div class="text-xs text-gray-500 uppercase tracking-wide mb-2">GPU (활성)</div>
+				<div class="text-2xl font-bold {summary.gpu_used > 0 ? 'text-purple-300' : 'text-white'} mb-1">{summary.gpu_used}</div>
+				<div class="text-xs text-gray-500">GPU 사용 인스턴스</div>
+			</div>
+			<!-- 볼륨 -->
+			<div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+				<div class="text-xs text-gray-500 uppercase tracking-wide mb-2">볼륨</div>
+				<div class="text-2xl font-bold text-white mb-1">{s.volumes_used}<span class="text-base text-gray-500">{s.volumes_limit > 0 ? `/${s.volumes_limit}` : ''}</span></div>
+				{#if s.volumes_limit > 0}
+					{@const pct = Math.round(s.volumes_used / s.volumes_limit * 100)}
+					<div class="w-full bg-gray-800 rounded-full h-1.5">
+						<div class="h-1.5 rounded-full {pct > 80 ? 'bg-red-500' : pct > 60 ? 'bg-yellow-500' : 'bg-cyan-500'}" style="width:{pct}%"></div>
+					</div>
+					<div class="text-xs text-gray-500 mt-1">{pct}% 사용</div>
+				{:else}
+					<div class="text-xs text-gray-500">볼륨 수</div>
+				{/if}
+			</div>
+			<!-- 스토리지 -->
+			<div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+				<div class="text-xs text-gray-500 uppercase tracking-wide mb-2">볼륨 스토리지</div>
+				<div class="text-2xl font-bold text-white mb-1">{s.gigabytes_used}GB<span class="text-base text-gray-500">{s.gigabytes_limit > 0 ? `/${s.gigabytes_limit}GB` : ''}</span></div>
+				{#if s.gigabytes_limit > 0}
+					{@const pct = Math.round(s.gigabytes_used / s.gigabytes_limit * 100)}
+					<div class="w-full bg-gray-800 rounded-full h-1.5">
+						<div class="h-1.5 rounded-full {pct > 80 ? 'bg-red-500' : pct > 60 ? 'bg-yellow-500' : 'bg-orange-500'}" style="width:{pct}%"></div>
+					</div>
+					<div class="text-xs text-gray-500 mt-1">{s.volumes_used} 볼륨 / {pct}%</div>
+				{:else}
+					<div class="text-xs text-gray-500">{s.volumes_used} 볼륨</div>
+				{/if}
+			</div>
+		</div>
+	{/if}
+
 	<!-- 탭 바 -->
 	<div class="flex gap-0 mb-6 border-b border-gray-800">
-		{#each (['instances', 'volumes', 'shares', 'networks'] as Tab[]) as tab}
+		{#each (['instances', 'volumes', 'shares', 'networks', 'routers', 'loadbalancers'] as Tab[]) as tab}
 			<button
 				onclick={() => (activeTab = tab)}
 				class="px-4 py-2.5 text-sm transition-colors border-b-2 -mb-px
@@ -804,6 +955,114 @@
 									>
 										{deleting === net.id ? '삭제 중...' : '삭제'}
 									</button>
+								</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		{/if}
+
+	<!-- 라우터 탭 -->
+	{:else if activeTab === 'routers'}
+		{#if routersError}
+			<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{routersError}</div>
+		{/if}
+		{#if loading}
+			<LoadingSkeleton variant="table" rows={5} />
+		{:else if routers.length === 0}
+			<div class="text-center py-20 text-gray-600">
+				<div class="text-5xl mb-4">🔀</div>
+				<p class="text-lg">라우터가 없습니다</p>
+			</div>
+		{:else}
+			<div class="overflow-x-auto">
+				<table class="w-full text-sm text-gray-300">
+					<thead>
+						<tr class="border-b border-gray-700 text-gray-500 text-xs uppercase tracking-wide">
+							<th class="text-left py-3 pr-6">이름</th>
+							<th class="text-left py-3 pr-6">상태</th>
+							<th class="text-left py-3 pr-6">외부 게이트웨이</th>
+							<th class="text-left py-3 pr-6">연결된 서브넷 수</th>
+							<th class="text-right py-3">상세</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each routers as router (router.id)}
+							<tr
+								onclick={() => goto('/dashboard/routers/' + router.id)}
+								class="border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors cursor-pointer"
+							>
+								<td class="py-3 pr-6 font-medium text-white">{router.name || router.id.slice(0, 8)}</td>
+								<td class="py-3 pr-6">
+									<span class="px-2 py-0.5 rounded text-xs font-medium {router.status === 'ACTIVE' ? 'text-green-400 bg-green-900/30' : 'text-gray-400 bg-gray-800'}">
+										{router.status}
+									</span>
+								</td>
+								<td class="py-3 pr-6 text-gray-400 text-xs font-mono">
+									{router.external_gateway_network_id ? router.external_gateway_network_id.slice(0, 12) + '…' : '-'}
+								</td>
+								<td class="py-3 pr-6 text-gray-400">{router.connected_subnet_ids.length}</td>
+								<td class="py-3 text-right">
+									<button
+										onclick={(e) => { e.stopPropagation(); goto('/dashboard/routers/' + router.id); }}
+										class="text-blue-400 hover:text-blue-300 text-xs px-2 py-1 rounded border border-blue-900 hover:border-blue-700 transition-colors"
+									>상세</button>
+								</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		{/if}
+
+	<!-- 로드밸런서 탭 -->
+	{:else if activeTab === 'loadbalancers'}
+		{#if loading}
+			<LoadingSkeleton variant="table" rows={5} />
+		{:else if loadBalancers.length === 0}
+			<div class="text-center py-20 text-gray-600">
+				<div class="text-5xl mb-4">⚖️</div>
+				<p class="text-lg">로드밸런서가 없습니다</p>
+				<button onclick={() => goto('/dashboard/loadbalancers/new')} class="text-blue-400 hover:text-blue-300 text-sm mt-2 inline-block">
+					로드밸런서 생성 →
+				</button>
+			</div>
+		{:else}
+			<div class="overflow-x-auto">
+				<table class="w-full text-sm text-gray-300">
+					<thead>
+						<tr class="border-b border-gray-700 text-gray-500 text-xs uppercase tracking-wide">
+							<th class="text-left py-3 pr-6">이름</th>
+							<th class="text-left py-3 pr-6">프로비저닝 상태</th>
+							<th class="text-left py-3 pr-6">운영 상태</th>
+							<th class="text-left py-3 pr-6">VIP 주소</th>
+							<th class="text-right py-3">상세</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each loadBalancers as lb (lb.id)}
+							<tr
+								onclick={() => goto('/dashboard/loadbalancers/' + lb.id)}
+								class="border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors cursor-pointer"
+							>
+								<td class="py-3 pr-6 font-medium text-white">{lb.name || lb.id.slice(0, 8)}</td>
+								<td class="py-3 pr-6">
+									<span class="px-2 py-0.5 rounded text-xs font-medium {lb.status === 'ACTIVE' ? 'text-green-400 bg-green-900/30' : 'text-yellow-400 bg-yellow-900/30'}">
+										{lb.status}
+									</span>
+								</td>
+								<td class="py-3 pr-6">
+									<span class="px-2 py-0.5 rounded text-xs {lb.operating_status === 'ONLINE' ? 'text-green-400' : 'text-gray-400'}">
+										{lb.operating_status}
+									</span>
+								</td>
+								<td class="py-3 pr-6 text-gray-400 text-xs font-mono">{lb.vip_address ?? '-'}</td>
+								<td class="py-3 text-right">
+									<button
+										onclick={(e) => { e.stopPropagation(); goto('/dashboard/loadbalancers/' + lb.id); }}
+										class="text-blue-400 hover:text-blue-300 text-xs px-2 py-1 rounded border border-blue-900 hover:border-blue-700 transition-colors"
+									>상세</button>
 								</td>
 							</tr>
 						{/each}

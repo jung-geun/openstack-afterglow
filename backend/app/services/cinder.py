@@ -54,6 +54,18 @@ def list_volumes(conn: openstack.connection.Connection) -> list[VolumeInfo]:
     return [_vol_to_info(v) for v in conn.block_storage.volumes(details=True)]
 
 
+def get_volume_limits(conn: openstack.connection.Connection) -> dict:
+    """프로젝트의 Cinder 리소스 사용량/한도 조회."""
+    limits = conn.block_storage.get_limits()
+    a = limits.absolute
+    return {
+        "volumes_used": getattr(a, 'total_volumes_used', 0),
+        "volumes_limit": getattr(a, 'max_total_volumes', -1),
+        "gigabytes_used": getattr(a, 'total_gigabytes_used', 0),
+        "gigabytes_limit": getattr(a, 'max_total_volume_gigabytes', -1),
+    }
+
+
 def _vol_to_info(vol) -> VolumeInfo:
     return VolumeInfo(
         id=vol.id,

@@ -55,8 +55,41 @@ class SubnetDetail(BaseModel):
 class RouterInfo(BaseModel):
     id: str
     name: str
+    status: str = ""
+    project_id: Optional[str] = None
     external_gateway_network_id: Optional[str] = None
     connected_subnet_ids: list[str] = []
+
+
+class RouterInterface(BaseModel):
+    id: str          # port id
+    subnet_id: str
+    subnet_name: str
+    network_id: str
+    ip_address: str
+
+
+class RouterDetail(BaseModel):
+    id: str
+    name: str
+    status: str
+    project_id: Optional[str] = None
+    external_gateway_network_id: Optional[str] = None
+    external_gateway_network_name: Optional[str] = None
+    interfaces: list[RouterInterface] = []
+
+
+class CreateRouterRequest(BaseModel):
+    name: str
+    external_network_id: Optional[str] = None
+
+
+class RouterInterfaceRequest(BaseModel):
+    subnet_id: str
+
+
+class RouterGatewayRequest(BaseModel):
+    external_network_id: str
 
 
 class NetworkDetail(BaseModel):

@@ -93,6 +93,33 @@ def detach_volume(conn: openstack.connection.Connection, server_id: str, volume_
     conn.compute.delete_volume_attachment(volume_id, server_id)
 
 
+def attach_interface(conn: openstack.connection.Connection, server_id: str, net_id: str) -> dict:
+    iface = conn.compute.create_server_interface(server_id, net_id=net_id)
+    return {
+        "port_id": iface.port_id,
+        "net_id": iface.net_id,
+        "fixed_ips": iface.fixed_ips or [],
+    }
+
+
+def detach_interface(conn: openstack.connection.Connection, server_id: str, port_id: str) -> None:
+    conn.compute.delete_server_interface(port_id, server=server_id)
+
+
+def get_project_limits(conn: openstack.connection.Connection) -> dict:
+    """프로젝트의 Nova 리소스 사용량/한도 조회."""
+    limits = conn.compute.get_limits()
+    a = limits.absolute
+    return {
+        "instances_used": getattr(a, 'total_instances_used', 0),
+        "instances_limit": getattr(a, 'max_total_instances', -1),
+        "vcpus_used": getattr(a, 'total_cores_used', 0),
+        "vcpus_limit": getattr(a, 'max_total_cores', -1),
+        "ram_used_mb": getattr(a, 'total_ram_used', 0),
+        "ram_limit_mb": getattr(a, 'max_total_ram_size', -1),
+    }
+
+
 def list_keypairs(conn: openstack.connection.Connection) -> list[dict]:
     return [
         {"name": kp.name, "fingerprint": kp.fingerprint, "type": getattr(kp, 'type', 'ssh')}
