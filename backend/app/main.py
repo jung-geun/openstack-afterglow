@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import auth, images, flavors, libraries, instances, admin
+from app.api import auth, images, flavors, libraries, instances, admin, volumes, shares, networks, keypairs
 
 app = FastAPI(
     title="Union",
@@ -48,6 +48,10 @@ app.include_router(flavors.router, prefix="/api/flavors", tags=["flavors"])
 app.include_router(libraries.router, prefix="/api/libraries", tags=["libraries"])
 app.include_router(instances.router, prefix="/api/instances", tags=["instances"])
 app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
+app.include_router(volumes.router, prefix="/api/volumes", tags=["volumes"])
+app.include_router(shares.router, prefix="/api/shares", tags=["shares"])
+app.include_router(networks.router, prefix="/api/networks", tags=["networks"])
+app.include_router(keypairs.router, prefix="/api/keypairs", tags=["keypairs"])
 
 
 @app.get("/api/health")

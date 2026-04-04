@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
+	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 
 	interface Share {
 		id: string;
@@ -143,7 +144,7 @@
 		</div>
 
 		{#if loading}
-			<div class="text-gray-500 text-sm">불러오는 중...</div>
+			<LoadingSkeleton variant="list" rows={4} />
 		{:else if shares.length === 0}
 			<div class="text-gray-600 text-sm">Share가 없습니다</div>
 		{:else}

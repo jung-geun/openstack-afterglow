@@ -16,13 +16,12 @@ def create_volume_from_image(
         "name": name,
         "size": size_gb,
         "imageRef": image_id,
-        "bootable": True,
     }
     if availability_zone:
         kwargs["availability_zone"] = availability_zone
 
     vol = conn.block_storage.create_volume(**kwargs)
-    vol = conn.block_storage.wait_for_volume(vol, status="available", wait=300)
+    vol = conn.block_storage.wait_for_status(vol, status="available", wait=300)
     return _vol_to_info(vol)
 
 
@@ -38,7 +37,7 @@ def create_empty_volume(
         kwargs["availability_zone"] = availability_zone
 
     vol = conn.block_storage.create_volume(**kwargs)
-    vol = conn.block_storage.wait_for_volume(vol, status="available", wait=120)
+    vol = conn.block_storage.wait_for_status(vol, status="available", wait=120)
     return _vol_to_info(vol)
 
 
@@ -49,6 +48,10 @@ def delete_volume(conn: openstack.connection.Connection, volume_id: str) -> None
 def get_volume(conn: openstack.connection.Connection, volume_id: str) -> VolumeInfo:
     vol = conn.block_storage.get_volume(volume_id)
     return _vol_to_info(vol)
+
+
+def list_volumes(conn: openstack.connection.Connection) -> list[VolumeInfo]:
+    return [_vol_to_info(v) for v in conn.block_storage.volumes(details=True)]
 
 
 def _vol_to_info(vol) -> VolumeInfo:

@@ -28,6 +28,8 @@ class ManilaClient:
         self.project_id = project_id
 
     def _url(self, path: str) -> str:
+        if self.base.endswith(self.project_id):
+            return f"{self.base}/{path.lstrip('/')}"
         return f"{self.base}/{self.project_id}/{path.lstrip('/')}"
 
     def get(self, path: str) -> dict:
@@ -130,7 +132,13 @@ def delete_share(conn, share_id: str) -> None:
 
 def list_shares(conn, metadata_filter: Optional[dict] = None) -> list[ShareInfo]:
     client = get_client(conn)
-    data = client.get("shares/detail")["shares"]
+    try:
+        data = client.get("shares/detail")["shares"]
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 400:
+            logger.warning(f"Manila shares/detail 400 (shares 없음으로 추정): {e}")
+            return []
+        raise
     shares = [_parse_share(s) for s in data]
     if metadata_filter:
         shares = [
@@ -188,8 +196,9 @@ def revoke_access_rule(conn, share_id: str, access_id: str) -> None:
 
 def list_access_rules(conn, share_id: str) -> list[dict]:
     client = get_client(conn)
-    data = client.get(f"shares/{share_id}/access-list")
-    return data.get("access_list", [])
+    # API v2.45+: use share-access-rules endpoint instead of action
+    data = client.get(f"share-access-rules?share_id={share_id}")
+    return data.get("access_rules", [])
 
 
 def get_export_locations(conn, share_id: str) -> list[str]:
@@ -205,9 +214,11 @@ def get_export_locations(conn, share_id: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 def _get_access_key(client: ManilaClient, share_id: str, access_id: str) -> str:
-    """access rule 에서 CephX secret key 추출 (Manila API v2.21+)."""
+    """access rule 에서 CephX secret key 추출 (Manila API v2.45+)."""
     for _ in range(20):
-        rules = client.get(f"shares/{share_id}/access-list").get("access_list", [])
+        # API v2.45+: use share-access-rules endpoint
+        data = client.get(f"share-access-rules?share_id={share_id}")
+        rules = data.get("access_rules", [])
         for rule in rules:
             if rule["id"] == access_id and rule.get("access_key"):
                 return rule["access_key"]

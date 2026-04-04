@@ -76,3 +76,37 @@ def get_openstack_connection(token: str, project_id: str) -> openstack.connectio
         project_id=project_id or None,
         region_name=settings.os_region_name,
     )
+
+
+def list_projects(token: str) -> list[dict]:
+    """
+    사용자가 접근 가능한 프로젝트 목록 반환.
+    Keystone v3 API를 사용하여 토큰의 사용자가 접근할 수 있는 모든 프로젝트를 조회.
+    """
+    settings = get_settings()
+
+    # 토큰으로 세션 생성
+    auth_plugin = v3.Token(
+        auth_url=settings.os_auth_url,
+        token=token,
+    )
+    sess = ks_session.Session(auth=auth_plugin)
+
+    # Keystone v3 API로 프로젝트 목록 조회
+    from keystoneclient.v3 import client as ks_client
+    ks = ks_client.Client(session=sess)
+
+    # 현재 사용자가 접근 가능한 프로젝트 목록
+    user_id = auth_plugin.get_access(sess).user_id
+    projects = ks.projects.list(user=user_id)
+
+    return [
+        {
+            "id": p.id,
+            "name": p.name,
+            "description": p.description or "",
+            "domain_id": p.domain_id,
+            "enabled": p.enabled,
+        }
+        for p in projects
+    ]

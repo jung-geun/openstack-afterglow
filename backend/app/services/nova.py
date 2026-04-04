@@ -1,7 +1,7 @@
 import openstack
 from typing import Optional
 
-from app.models.compute import FlavorInfo, InstanceInfo
+from app.models.compute import FlavorInfo, InstanceInfo, IpAddress
 
 
 def list_flavors(conn: openstack.connection.Connection) -> list[FlavorInfo]:
@@ -46,7 +46,6 @@ def create_server(
     body = {
         "name": name,
         "flavorRef": flavor_id,
-        "networks": [{"uuid": network_id}],
         "block_device_mapping_v2": [
             {
                 "boot_index": 0,
@@ -58,6 +57,9 @@ def create_server(
         ],
         "user_data": userdata,
     }
+    # network_id가 있으면 지정, 없으면 자동 할당
+    if network_id:
+        body["networks"] = [{"uuid": network_id}]
     if key_name:
         body["key_name"] = key_name
     if availability_zone:
@@ -70,8 +72,48 @@ def create_server(
     return _server_to_info(s)
 
 
+def get_console_output(conn: openstack.connection.Connection, server_id: str, length: int = 100) -> str:
+    output = conn.compute.get_server_console_output(server_id, length=length)
+    return output.get("output", "")
+
+
+def list_volume_attachments(conn: openstack.connection.Connection, server_id: str) -> list[dict]:
+    return [
+        {"id": a.id, "volume_id": a.volume_id, "device": a.device, "server_id": a.server_id}
+        for a in conn.compute.volume_attachments(server_id)
+    ]
+
+
+def attach_volume(conn: openstack.connection.Connection, server_id: str, volume_id: str) -> dict:
+    a = conn.compute.create_volume_attachment(server_id, volume_id=volume_id)
+    return {"id": a.id, "volume_id": a.volume_id, "device": a.device}
+
+
+def detach_volume(conn: openstack.connection.Connection, server_id: str, volume_id: str) -> None:
+    conn.compute.delete_volume_attachment(volume_id, server_id)
+
+
+def list_keypairs(conn: openstack.connection.Connection) -> list[dict]:
+    return [
+        {"name": kp.name, "fingerprint": kp.fingerprint, "type": getattr(kp, 'type', 'ssh')}
+        for kp in conn.compute.keypairs()
+    ]
+
+
 def delete_server(conn: openstack.connection.Connection, server_id: str) -> None:
     conn.compute.delete_server(server_id, force=True)
+
+
+def start_server(conn: openstack.connection.Connection, server_id: str) -> None:
+    conn.compute.start_server(server_id)
+
+
+def stop_server(conn: openstack.connection.Connection, server_id: str) -> None:
+    conn.compute.stop_server(server_id)
+
+
+def reboot_server(conn: openstack.connection.Connection, server_id: str, reboot_type: str = "SOFT") -> None:
+    conn.compute.reboot_server(server_id, reboot_type)
 
 
 def get_console_url(conn: openstack.connection.Connection, server_id: str) -> str:
@@ -82,9 +124,13 @@ def get_console_url(conn: openstack.connection.Connection, server_id: str) -> st
 
 def _server_to_info(s) -> InstanceInfo:
     ips = []
-    for net_addrs in (s.addresses or {}).values():
+    for net_name, net_addrs in (s.addresses or {}).items():
         for addr in net_addrs:
-            ips.append(addr["addr"])
+            ips.append(IpAddress(
+                addr=addr["addr"],
+                type=addr.get("OS-EXT-IPS:type", "fixed"),
+                network_name=net_name,
+            ))
 
     meta = dict(s.metadata) if s.metadata else {}
 
@@ -104,4 +150,6 @@ def _server_to_info(s) -> InstanceInfo:
         union_strategy=meta.get("union_strategy"),
         union_share_ids=meta.get("union_share_ids", "").split(",") if meta.get("union_share_ids") else [],
         union_upper_volume_id=meta.get("union_upper_volume_id"),
+        key_name=getattr(s, 'key_name', None),
+        user_id=getattr(s, 'user_id', None),
     )

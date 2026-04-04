@@ -23,3 +23,11 @@ class UserInfo(BaseModel):
     project_id: str
     project_name: str
     roles: list[str]
+
+
+class ProjectInfo(BaseModel):
+    id: str
+    name: str
+    description: str = ""
+    domain_id: str | None = None
+    enabled: bool = True

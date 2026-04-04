@@ -1,7 +1,13 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { setAuth, isLoggedIn } from '$lib/stores/auth';
+	import { setAuth, setAvailableProjects, isLoggedIn } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
+
+	interface Project {
+		id: string;
+		name: string;
+		description?: string;
+	}
 
 	let username = $state('');
 	let password = $state('');
@@ -25,6 +31,14 @@
 				project_name: string;
 			}>('/api/auth/login', { username, password, project_name: projectName });
 
+			// 프로젝트 목록 조회
+			let projects: Project[] = [];
+			try {
+				projects = await api.get<Project[]>('/api/auth/projects', data.token);
+			} catch {
+				// 프로젝트 목록 조회 실패 시 무시
+			}
+
 			setAuth({
 				token: data.token,
 				userId: data.user_id,
@@ -32,6 +46,7 @@
 				projectId: data.project_id,
 				projectName: data.project_name,
 			});
+			setAvailableProjects(projects);
 			goto('/dashboard');
 		} catch (e) {
 			error = e instanceof ApiError ? `인증 실패 (${e.status})` : '서버 오류가 발생했습니다';

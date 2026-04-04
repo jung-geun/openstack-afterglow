@@ -30,10 +30,11 @@ async def get_os_conn(
         raise HTTPException(status_code=401, detail="X-Auth-Token 헤더가 필요합니다")
     try:
         token_info = keystone.validate_token(x_auth_token, project_id=x_project_id or "")
+        scoped_token = token_info["token"]
         project_id = token_info["project_id"]
-        conn = keystone.get_openstack_connection(x_auth_token, project_id)
-        # openstacksdk가 토큰을 재발급해도 Manila 등에서 원본을 쓸 수 있도록 보존
-        conn._union_token = x_auth_token
+        conn = keystone.get_openstack_connection(scoped_token, project_id)
+        # 프로젝트에 rescope된 토큰을 저장 (Manila 등 외부 클라이언트에서 사용)
+        conn._union_token = scoped_token
         conn._union_project_id = project_id
         return conn
     except Exception as e:

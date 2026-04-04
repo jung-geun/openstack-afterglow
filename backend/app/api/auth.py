@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Header
 from typing import Optional
 
-from app.models.auth import LoginRequest, TokenResponse, UserInfo
+from app.models.auth import LoginRequest, TokenResponse, UserInfo, ProjectInfo
 from app.services import keystone
 
 router = APIRouter()
@@ -45,3 +45,15 @@ async def me(x_auth_token: Optional[str] = Header(None), x_project_id: Optional[
         project_name=data["project_name"],
         roles=data["roles"],
     )
+
+
+@router.get("/projects", response_model=list[ProjectInfo])
+async def list_projects(x_auth_token: Optional[str] = Header(None)):
+    """사용자가 접근 가능한 프로젝트 목록 반환."""
+    if not x_auth_token:
+        raise HTTPException(status_code=401, detail="토큰이 필요합니다")
+    try:
+        projects = keystone.list_projects(x_auth_token)
+        return [ProjectInfo(**p) for p in projects]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"프로젝트 목록 조회 실패: {e}")

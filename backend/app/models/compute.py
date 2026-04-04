@@ -2,6 +2,12 @@ from pydantic import BaseModel
 from typing import Optional
 
 
+class IpAddress(BaseModel):
+    addr: str
+    type: str = "fixed"  # "fixed" | "floating"
+    network_name: str = ""
+
+
 class ImageInfo(BaseModel):
     id: str
     name: str
@@ -36,7 +42,7 @@ class InstanceInfo(BaseModel):
     image_name: Optional[str] = None
     flavor_id: Optional[str] = None
     flavor_name: Optional[str] = None
-    ip_addresses: list[str] = []
+    ip_addresses: list[IpAddress] = []
     created_at: Optional[str] = None
     metadata: dict = {}
     # Union 전용 메타데이터
@@ -44,6 +50,8 @@ class InstanceInfo(BaseModel):
     union_strategy: Optional[str] = None   # "prebuilt" | "dynamic"
     union_share_ids: list[str] = []
     union_upper_volume_id: Optional[str] = None
+    key_name: Optional[str] = None
+    user_id: Optional[str] = None
 
 
 class CreateInstanceRequest(BaseModel):
@@ -55,3 +63,4 @@ class CreateInstanceRequest(BaseModel):
     network_id: Optional[str] = None
     key_name: Optional[str] = None
     availability_zone: Optional[str] = None
+    boot_volume_size_gb: Optional[int] = None
