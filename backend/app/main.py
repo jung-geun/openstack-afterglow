@@ -1,5 +1,7 @@
 import json
 import logging
+import logging.handlers
+import os
 import time
 from datetime import datetime, timezone
 
@@ -33,11 +35,25 @@ class _JSONFormatter(logging.Formatter):
 
 
 def _setup_logging() -> None:
-    handler = logging.StreamHandler()
-    handler.setFormatter(_JSONFormatter())
+    formatter = _JSONFormatter()
     root = logging.getLogger()
     root.handlers.clear()
-    root.addHandler(handler)
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+    root.addHandler(stream_handler)
+
+    log_path = "/app/logs/union-backend.log"
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    try:
+        file_handler = logging.handlers.RotatingFileHandler(
+            log_path, maxBytes=50 * 1024 * 1024, backupCount=5, encoding="utf-8"
+        )
+        file_handler.setFormatter(formatter)
+        root.addHandler(file_handler)
+    except OSError:
+        pass  # 로그 디렉터리 없으면 파일 핸들러 없이 진행
+
     root.setLevel(logging.INFO)
     logging.getLogger("openstack").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)

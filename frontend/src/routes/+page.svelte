@@ -29,6 +29,7 @@
 				username: string;
 				project_id: string;
 				project_name: string;
+				expires_at: string | null;
 			}>('/api/auth/login', { username, password, domain_name: domainName });
 
 			// 프로젝트 목록 조회
@@ -39,12 +40,28 @@
 				// 프로젝트 목록 조회 실패 시 무시
 			}
 
+			// 세션 설정 조회
+			let sessionTimeoutSeconds = 3600;
+			let sessionWarningBeforeSeconds = 300;
+			try {
+				const sessionInfo = await api.get<{ timeout_seconds: number; warning_before_seconds: number }>(
+					'/api/auth/session-info', data.token, data.project_id
+				);
+				sessionTimeoutSeconds = sessionInfo.timeout_seconds;
+				sessionWarningBeforeSeconds = sessionInfo.warning_before_seconds;
+			} catch {
+				// 기본값 유지
+			}
+
 			setAuth({
 				token: data.token,
 				userId: data.user_id,
 				username: data.username,
 				projectId: data.project_id,
 				projectName: data.project_name,
+				expiresAt: data.expires_at ?? null,
+				sessionTimeoutSeconds,
+				sessionWarningBeforeSeconds,
 			});
 			setAvailableProjects(projects);
 			goto('/dashboard');

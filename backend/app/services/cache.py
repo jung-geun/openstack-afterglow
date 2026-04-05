@@ -38,6 +38,11 @@ def _get_client() -> aioredis.Redis:
     return _client
 
 
+async def _get_redis() -> aioredis.Redis:
+    """Redis 클라이언트를 반환. 세션 관리 등 캐시 레이어 외부에서 직접 사용 시."""
+    return _get_client()
+
+
 async def cached_call(
     key: str,
     ttl: int,

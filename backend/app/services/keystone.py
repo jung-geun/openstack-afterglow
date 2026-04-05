@@ -20,7 +20,7 @@ def authenticate(username: str, password: str, project_name: str, domain_name: s
         project_domain_name=settings.os_project_domain_name,
     )
 
-    sess = ks_session.Session(auth=auth_plugin)
+    sess = ks_session.Session(auth=auth_plugin, timeout=30)
     access = auth_plugin.get_access(sess)
 
     return {
@@ -40,12 +40,12 @@ def validate_token(token: str, project_id: str = "") -> dict:
     """
     settings = get_settings()
 
-    kwargs = dict(auth_url=settings.os_auth_url, token=token)
+    kwargs = {"auth_url": settings.os_auth_url, "token": token}
     if project_id:
         kwargs["project_id"] = project_id
 
     auth_plugin = v3.Token(**kwargs)
-    sess = ks_session.Session(auth=auth_plugin)
+    sess = ks_session.Session(auth=auth_plugin, timeout=30)
     access = auth_plugin.get_access(sess)
 
     return {
@@ -75,6 +75,7 @@ def get_openstack_connection(token: str, project_id: str) -> openstack.connectio
         token=token,
         project_id=project_id or None,
         region_name=settings.os_region_name,
+        api_timeout=30,
     )
 
 

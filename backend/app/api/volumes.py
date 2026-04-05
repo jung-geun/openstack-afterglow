@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException
 import openstack
 
@@ -24,7 +25,7 @@ async def list_volumes(conn: openstack.connection.Connection = Depends(get_os_co
 @router.get("/{volume_id}", response_model=VolumeInfo)
 async def get_volume(volume_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
     try:
-        return cinder.get_volume(conn, volume_id)
+        return await asyncio.to_thread(cinder.get_volume, conn, volume_id)
     except Exception:
         raise HTTPException(status_code=404, detail="볼륨을 찾을 수 없습니다")
 
@@ -36,7 +37,7 @@ async def create_volume(
 ):
     pid = conn._union_project_id
     try:
-        result = cinder.create_empty_volume(conn, req.name, req.size_gb, req.availability_zone)
+        result = await asyncio.to_thread(cinder.create_empty_volume, conn, req.name, req.size_gb, req.availability_zone)
         await invalidate(f"union:cinder:{pid}:volumes")
         return result
     except Exception as e:
@@ -50,7 +51,7 @@ async def delete_volume(
 ):
     pid = conn._union_project_id
     try:
-        cinder.delete_volume(conn, volume_id)
+        await asyncio.to_thread(cinder.delete_volume, conn, volume_id)
         await invalidate(f"union:cinder:{pid}:volumes")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"볼륨 삭제 실패: {e}")

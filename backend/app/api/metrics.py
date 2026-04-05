@@ -1,40 +1,28 @@
-"""간단한 인메모리 메트릭 엔드포인트 (재시작 시 초기화)."""
-import time
-from collections import defaultdict
+"""Prometheus exposition format 메트릭 엔드포인트."""
 from fastapi import APIRouter
+from fastapi.responses import Response
+from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 
 router = APIRouter()
 
-_request_counts: dict[str, int] = defaultdict(int)
-_request_error_counts: dict[str, int] = defaultdict(int)
-_request_durations_ms: dict[str, list[float]] = defaultdict(list)
-_start_time = time.time()
+REQUEST_COUNT = Counter(
+    'union_http_requests_total',
+    'Total HTTP requests',
+    ['method', 'path', 'status']
+)
+REQUEST_DURATION = Histogram(
+    'union_http_request_duration_ms',
+    'HTTP request duration in milliseconds',
+    ['method', 'path'],
+    buckets=[5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000]
+)
 
 
 def record_request(method: str, path: str, status: int, duration_ms: float) -> None:
-    key = f"{method} {path}"
-    _request_counts[key] += 1
-    if status >= 500:
-        _request_error_counts[key] += 1
-    # Keep only last 100 durations per key to bound memory
-    durations = _request_durations_ms[key]
-    durations.append(duration_ms)
-    if len(durations) > 100:
-        durations.pop(0)
+    REQUEST_COUNT.labels(method=method, path=path, status=str(status)).inc()
+    REQUEST_DURATION.labels(method=method, path=path).observe(duration_ms)
 
 
 @router.get("")
 async def get_metrics():
-    summary = {}
-    for key, count in _request_counts.items():
-        durations = _request_durations_ms.get(key, [])
-        avg_ms = sum(durations) / len(durations) if durations else 0
-        summary[key] = {
-            "count": count,
-            "errors": _request_error_counts.get(key, 0),
-            "avg_duration_ms": round(avg_ms, 2),
-        }
-    return {
-        "uptime_seconds": round(time.time() - _start_time),
-        "requests": summary,
-    }
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)

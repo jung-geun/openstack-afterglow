@@ -125,23 +125,25 @@ async def create_instance(
         # ------------------------------------------------------------------
         # 2. Cinder: 부트 볼륨 생성
         # ------------------------------------------------------------------
-        boot_vol = cinder.create_volume_from_image(
+        boot_vol = await asyncio.to_thread(
+            cinder.create_volume_from_image,
             conn,
-            name=f"union-boot-{req.name}",
-            image_id=req.image_id,
-            size_gb=req.boot_volume_size_gb or settings.boot_volume_size_gb,
-            availability_zone=req.availability_zone or settings.default_availability_zone,
+            f"union-boot-{req.name}",
+            req.image_id,
+            req.boot_volume_size_gb or settings.boot_volume_size_gb,
+            req.availability_zone or settings.default_availability_zone,
         )
         boot_volume_id = boot_vol.id
 
         # ------------------------------------------------------------------
         # 3. Cinder: upper 볼륨 생성 (OverlayFS upperdir)
         # ------------------------------------------------------------------
-        upper_vol = cinder.create_empty_volume(
+        upper_vol = await asyncio.to_thread(
+            cinder.create_empty_volume,
             conn,
-            name=f"union-upper-{req.name}",
-            size_gb=settings.upper_volume_size_gb,
-            availability_zone=req.availability_zone or settings.default_availability_zone,
+            f"union-upper-{req.name}",
+            settings.upper_volume_size_gb,
+            req.availability_zone or settings.default_availability_zone,
         )
         upper_volume_id = upper_vol.id
 
@@ -149,7 +151,7 @@ async def create_instance(
         # 4. cloud-init userdata 생성
         # ------------------------------------------------------------------
         # GPU 플레이버 여부 확인
-        flavors = nova.list_flavors(conn)
+        flavors = await asyncio.to_thread(nova.list_flavors, conn)
         flavor = next((f for f in flavors if f.id == req.flavor_id), None)
         gpu_available = flavor.is_gpu if flavor else False
 
@@ -176,35 +178,37 @@ async def create_instance(
 
         # upper 볼륨을 두 번째 블록 디바이스로 추가
         # (Nova block_device_mapping_v2 에 추가 볼륨 연결)
-        server = nova.create_server(
+        server = await asyncio.to_thread(
+            nova.create_server,
             conn,
-            name=req.name,
-            flavor_id=req.flavor_id,
-            network_id=req.network_id or settings.default_network_id,
-            boot_volume_id=boot_volume_id,
-            userdata=userdata,
-            key_name=req.key_name,
-            admin_pass=req.admin_pass,
-            availability_zone=req.availability_zone or settings.default_availability_zone,
-            metadata=meta,
+            req.name,
+            req.flavor_id,
+            req.network_id or settings.default_network_id,
+            boot_volume_id,
+            userdata,
+            req.key_name,
+            req.admin_pass,
+            req.availability_zone or settings.default_availability_zone,
+            meta,
         )
         server_id = server.id
 
         # upper 볼륨 attach (서버 생성 후)
-        conn.compute.create_volume_attachment(
-            server_id, volume_id=upper_volume_id
+        await asyncio.to_thread(
+            conn.compute.create_volume_attachment,
+            server_id, volume_id=upper_volume_id,
         )
 
         # Floating IP 자동 생성 (tenant 네트워크 선택 시)
         if req.network_id:
-            all_nets = neutron.list_networks(conn)
+            all_nets = await asyncio.to_thread(neutron.list_networks, conn)
             selected_net = next((n for n in all_nets if n.id == req.network_id), None)
             if selected_net and not selected_net.is_external:
                 ext_net = next((n for n in all_nets if n.is_external), None)
                 if ext_net:
-                    fip = neutron.create_floating_ip(conn, ext_net.id)
+                    fip = await asyncio.to_thread(neutron.create_floating_ip, conn, ext_net.id)
                     floating_ip_id = fip.id
-                    neutron.associate_floating_ip(conn, fip.id, server_id)
+                    await asyncio.to_thread(neutron.associate_floating_ip, conn, fip.id, server_id)
 
         return server
 
@@ -369,7 +373,7 @@ async def delete_instance(
 ):
     pid = conn._union_project_id
     try:
-        server = nova.get_server(conn, instance_id)
+        server = await asyncio.to_thread(nova.get_server, conn, instance_id)
     except Exception:
         raise HTTPException(status_code=404, detail="인스턴스를 찾을 수 없습니다")
 
@@ -378,7 +382,7 @@ async def delete_instance(
     strategy = server.union_strategy
 
     # Nova 서버 삭제
-    nova.delete_server(conn, instance_id)
+    await asyncio.to_thread(nova.delete_server, conn, instance_id)
     await invalidate(f"union:nova:{pid}:instances")
     await invalidate(f"union:nova:{pid}:instance:{instance_id}")
 
@@ -387,14 +391,14 @@ async def delete_instance(
         for share_id in share_ids:
             if share_id:
                 try:
-                    manila.delete_share(conn, share_id)
+                    await asyncio.to_thread(manila.delete_share, conn, share_id)
                 except Exception as ex:
                     logger.warning(f"Share 삭제 실패 {share_id}: {ex}")
 
     # upper 볼륨 삭제
     if upper_volume_id:
         try:
-            cinder.delete_volume(conn, upper_volume_id)
+            await asyncio.to_thread(cinder.delete_volume, conn, upper_volume_id)
         except Exception as ex:
             logger.warning(f"Upper 볼륨 삭제 실패: {ex}")
 
@@ -406,7 +410,7 @@ async def start_instance(
 ):
     pid = conn._union_project_id
     try:
-        nova.start_server(conn, instance_id)
+        await asyncio.to_thread(nova.start_server, conn, instance_id)
         await invalidate(f"union:nova:{pid}:instance:{instance_id}")
         await invalidate(f"union:nova:{pid}:instances")
     except Exception as e:
@@ -420,7 +424,7 @@ async def stop_instance(
 ):
     pid = conn._union_project_id
     try:
-        nova.stop_server(conn, instance_id)
+        await asyncio.to_thread(nova.stop_server, conn, instance_id)
         await invalidate(f"union:nova:{pid}:instance:{instance_id}")
         await invalidate(f"union:nova:{pid}:instances")
     except Exception as e:
@@ -434,7 +438,7 @@ async def reboot_instance(
 ):
     pid = conn._union_project_id
     try:
-        nova.reboot_server(conn, instance_id)
+        await asyncio.to_thread(nova.reboot_server, conn, instance_id)
         await invalidate(f"union:nova:{pid}:instance:{instance_id}")
         await invalidate(f"union:nova:{pid}:instances")
     except Exception as e:
@@ -447,7 +451,7 @@ async def get_console(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     try:
-        url = nova.get_console_url(conn, instance_id)
+        url = await asyncio.to_thread(nova.get_console_url, conn, instance_id)
         return {"url": url}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -460,7 +464,7 @@ async def get_console_log(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     try:
-        output = nova.get_console_output(conn, instance_id, length)
+        output = await asyncio.to_thread(nova.get_console_output, conn, instance_id, length)
         return {"output": output}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -516,7 +520,7 @@ async def attach_volume_to_instance(
         raise HTTPException(status_code=400, detail="volume_id 필요")
     pid = conn._union_project_id
     try:
-        result = nova.attach_volume(conn, instance_id, volume_id)
+        result = await asyncio.to_thread(nova.attach_volume, conn, instance_id, volume_id)
         await invalidate(f"union:cinder:{pid}:vol_attach:{instance_id}")
         return result
     except Exception as e:
@@ -531,7 +535,7 @@ async def detach_volume_from_instance(
 ):
     pid = conn._union_project_id
     try:
-        nova.detach_volume(conn, instance_id, volume_id)
+        await asyncio.to_thread(nova.detach_volume, conn, instance_id, volume_id)
         await invalidate(f"union:cinder:{pid}:vol_attach:{instance_id}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -592,7 +596,7 @@ async def attach_interface(
         raise HTTPException(status_code=400, detail="net_id 필요")
     pid = conn._union_project_id
     try:
-        result = nova.attach_interface(conn, instance_id, net_id)
+        result = await asyncio.to_thread(nova.attach_interface, conn, instance_id, net_id)
         await invalidate(f"union:neutron:{pid}:ports:{instance_id}")
         return result
     except Exception as e:
@@ -607,7 +611,7 @@ async def detach_interface(
 ):
     pid = conn._union_project_id
     try:
-        nova.detach_interface(conn, instance_id, port_id)
+        await asyncio.to_thread(nova.detach_interface, conn, instance_id, port_id)
         await invalidate(f"union:neutron:{pid}:ports:{instance_id}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -623,7 +627,7 @@ async def update_port_security_groups(
     sg_ids = body.get("security_group_ids", [])
     pid = conn._union_project_id
     try:
-        result = neutron.update_port_security_groups(conn, port_id, sg_ids)
+        result = await asyncio.to_thread(neutron.update_port_security_groups, conn, port_id, sg_ids)
         await invalidate(f"union:neutron:{pid}:sgs:{instance_id}")
         return result
     except Exception as e:
@@ -639,21 +643,22 @@ async def _prepare_prebuilt_shares(
     created_access_ids: list
 ) -> list[dict]:
     """Strategy A: 사전 빌드된 read-only share에 access rule 추가."""
-    prebuilt_shares = manila.list_shares(conn, metadata_filter={"union_type": "prebuilt"})
+    prebuilt_shares = await asyncio.to_thread(
+        manila.list_shares, conn, {"union_type": "prebuilt"}
+    )
     prebuilt_map = {s.library_name: s for s in prebuilt_shares}
 
     shares_info = []
     for lib_id in list(reversed(resolved_libs)):
-        lib = lib_svc.get_by_id(lib_id)
         share = prebuilt_map.get(lib_id)
         if not share:
             raise RuntimeError(f"사전 빌드 share 없음: {lib_id}. Strategy B를 사용하거나 관리자에게 문의하세요.")
 
         cephx_id = f"union-ro-{instance_name}-{lib_id}"
-        rule = manila.create_access_rule(conn, share.id, cephx_id, access_level="ro")
+        rule = await asyncio.to_thread(manila.create_access_rule, conn, share.id, cephx_id, "ro")
         created_access_ids.append((share.id, rule["access_id"]))
 
-        export_paths = manila.get_export_locations(conn, share.id)
+        export_paths = await asyncio.to_thread(manila.get_export_locations, conn, share.id)
         shares_info.append({
             "share_id": share.id,
             "name": lib_id,
@@ -669,13 +674,14 @@ async def _prepare_dynamic_share(
     settings, created_share_ids: list, created_access_ids: list
 ) -> dict:
     """Strategy B: VM 전용 read-write share 신규 생성."""
-    share = manila.create_share(
+    share = await asyncio.to_thread(
+        manila.create_share,
         conn,
-        name=f"union-dyn-{instance_name}",
-        size_gb=settings.upper_volume_size_gb,
-        share_network_id=settings.os_manila_share_network_id,
-        share_type=settings.os_manila_share_type,
-        metadata={
+        f"union-dyn-{instance_name}",
+        settings.upper_volume_size_gb,
+        settings.os_manila_share_network_id,
+        settings.os_manila_share_type,
+        {
             "union_type": "dynamic",
             "union_instance": instance_name,
             "union_libraries": ",".join(resolved_libs),
@@ -684,10 +690,10 @@ async def _prepare_dynamic_share(
     created_share_ids.append(share.id)
 
     cephx_id = f"union-rw-{instance_name}"
-    rule = manila.create_access_rule(conn, share.id, cephx_id, access_level="rw")
+    rule = await asyncio.to_thread(manila.create_access_rule, conn, share.id, cephx_id, "rw")
     created_access_ids.append((share.id, rule["access_id"]))
 
-    export_paths = manila.get_export_locations(conn, share.id)
+    export_paths = await asyncio.to_thread(manila.get_export_locations, conn, share.id)
     return {
         "share_id": share.id,
         "name": "dynamic",
@@ -708,31 +714,31 @@ async def _rollback(
 ):
     if floating_ip_id:
         try:
-            neutron.delete_floating_ip(conn, floating_ip_id)
+            await asyncio.to_thread(neutron.delete_floating_ip, conn, floating_ip_id)
         except Exception as e:
             logger.error(f"Rollback - Floating IP 삭제 실패: {e}")
 
     if server_id:
         try:
-            nova.delete_server(conn, server_id)
+            await asyncio.to_thread(nova.delete_server, conn, server_id)
         except Exception as e:
             logger.error(f"Rollback - 서버 삭제 실패: {e}")
 
     for vol_id in [boot_volume_id, upper_volume_id]:
         if vol_id:
             try:
-                cinder.delete_volume(conn, vol_id)
+                await asyncio.to_thread(cinder.delete_volume, conn, vol_id)
             except Exception as e:
                 logger.error(f"Rollback - 볼륨 삭제 실패 {vol_id}: {e}")
 
     for share_id, access_id in access_ids:
         try:
-            manila.revoke_access_rule(conn, share_id, access_id)
+            await asyncio.to_thread(manila.revoke_access_rule, conn, share_id, access_id)
         except Exception as e:
             logger.error(f"Rollback - access rule 삭제 실패: {e}")
 
     for share_id in share_ids:
         try:
-            manila.delete_share(conn, share_id)
+            await asyncio.to_thread(manila.delete_share, conn, share_id)
         except Exception as e:
             logger.error(f"Rollback - share 삭제 실패 {share_id}: {e}")

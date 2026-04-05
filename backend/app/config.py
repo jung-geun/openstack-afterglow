@@ -46,6 +46,10 @@ def _load_toml() -> dict:
             flat["redis_url"] = cache.get("redis_url", "redis://localhost:6379/0")
             flat["cache_ttl_seconds"] = cache.get("default_ttl_seconds", 30)
 
+            sess = data.get("session", {})
+            flat["session_timeout_seconds"] = sess.get("timeout_seconds", 3600)
+            flat["session_warning_before_seconds"] = sess.get("warning_before_seconds", 300)
+
             nv = data.get("nova", {})
             flat["default_network_id"] = nv.get("default_network_id", "")
             flat["default_availability_zone"] = nv.get("default_availability_zone", "nova")
@@ -81,6 +85,10 @@ class Settings(BaseSettings):
     # Redis 캐시
     redis_url: str = "redis://localhost:6379/0"
     cache_ttl_seconds: int = 30
+
+    # 세션 관리
+    session_timeout_seconds: int = 3600
+    session_warning_before_seconds: int = 300
 
     # Nova 기본값
     default_network_id: str = ""

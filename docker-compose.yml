@@ -17,6 +17,7 @@ services:
     volumes:
       - ./backend/app:/app/app   # 개발 시 hot-reload
       - ./union.toml:/app/union.toml:ro   # 통합 설정 파일
+      - ./logs:/app/logs   # 로컬 로그 파일 저장
     command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     depends_on:
       - redis
@@ -47,17 +48,17 @@ services:
 
   # ── 모니터링 프로필 (docker compose --profile monitoring up) ──────────────
 
-  elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+  opensearch:
+    image: opensearchproject/opensearch:2.13.0
     profiles: ["monitoring"]
     environment:
       - discovery.type=single-node
-      - xpack.security.enabled=false
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - DISABLE_SECURITY_PLUGIN=true
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
     ports:
       - "9200:9200"
     volumes:
-      - es-data:/usr/share/elasticsearch/data
+      - opensearch-data:/usr/share/opensearch/data
     restart: unless-stopped
     logging:
       driver: json-file
@@ -65,15 +66,16 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  kibana:
-    image: docker.elastic.co/kibana/kibana:8.12.0
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:2.13.0
     profiles: ["monitoring"]
     environment:
-      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - OPENSEARCH_HOSTS=http://opensearch:9200
+      - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
     ports:
       - "5601:5601"
     depends_on:
-      - elasticsearch
+      - opensearch
     restart: unless-stopped
     logging:
       driver: json-file
@@ -96,6 +98,27 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  grafana:
+    image: grafana/grafana:11.0.0
+    profiles: ["monitoring"]
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
-  es-data:
+  opensearch-data:
   prom-data:
+  grafana-data:

@@ -5,6 +5,7 @@ from typing import Optional
 from app.models.auth import LoginRequest, TokenResponse, UserInfo, ProjectInfo
 from app.services import keystone
 from app.services.cache import cached_call
+from app.config import get_settings
 
 router = APIRouter()
 
@@ -66,6 +67,37 @@ async def me(x_auth_token: Optional[str] = Header(None), x_project_id: Optional[
         project_name=data["project_name"],
         roles=data["roles"],
     )
+
+
+@router.get("/session-info")
+async def session_info(x_auth_token: Optional[str] = Header(None), x_project_id: Optional[str] = Header(None)):
+    """현재 세션의 남은 시간(초)과 설정된 타임아웃을 반환."""
+    if not x_auth_token:
+        raise HTTPException(status_code=401, detail="토큰이 필요합니다")
+    from app.api.deps import get_session_remaining
+    settings = get_settings()
+    remaining = await get_session_remaining(x_auth_token, x_project_id or "")
+    return {
+        "remaining_seconds": remaining,
+        "timeout_seconds": settings.session_timeout_seconds,
+        "warning_before_seconds": settings.session_warning_before_seconds,
+    }
+
+
+@router.post("/extend-session")
+async def extend_session_endpoint(x_auth_token: Optional[str] = Header(None), x_project_id: Optional[str] = Header(None)):
+    """세션을 연장 (시작 시간을 지금으로 재설정)."""
+    if not x_auth_token:
+        raise HTTPException(status_code=401, detail="토큰이 필요합니다")
+    try:
+        # Keystone 토큰 여전히 유효한지 확인
+        keystone.validate_token(x_auth_token, project_id=x_project_id or "")
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"유효하지 않은 토큰: {e}")
+    from app.api.deps import extend_session
+    await extend_session(x_auth_token, x_project_id or "")
+    settings = get_settings()
+    return {"message": "세션이 연장되었습니다", "timeout_seconds": settings.session_timeout_seconds}
 
 
 @router.get("/projects", response_model=list[ProjectInfo])

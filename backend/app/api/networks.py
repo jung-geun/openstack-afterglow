@@ -17,8 +17,9 @@ router = APIRouter()
 
 @router.get("", response_model=list[NetworkInfo])
 async def list_networks(conn: openstack.connection.Connection = Depends(get_os_conn)):
+    pid = conn._union_project_id
     try:
-        return neutron.list_networks(conn, project_id=conn._union_project_id)
+        return await asyncio.to_thread(neutron.list_networks, conn, pid)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"네트워크 목록 조회 실패: {e}")
 
@@ -29,7 +30,7 @@ async def create_network(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     try:
-        return neutron.create_network(conn, req.name)
+        return await asyncio.to_thread(neutron.create_network, conn, req.name)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"네트워크 생성 실패: {e}")
 
@@ -41,7 +42,7 @@ async def create_network(
 @router.get("/floating-ips", response_model=list[FloatingIpInfo])
 async def list_floating_ips(conn: openstack.connection.Connection = Depends(get_os_conn)):
     try:
-        return neutron.list_floating_ips(conn)
+        return await asyncio.to_thread(neutron.list_floating_ips, conn)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Floating IP 목록 조회 실패: {e}")
 
@@ -52,7 +53,7 @@ async def create_floating_ip(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     try:
-        return neutron.create_floating_ip(conn, req.floating_network_id)
+        return await asyncio.to_thread(neutron.create_floating_ip, conn, req.floating_network_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Floating IP 생성 실패: {e}")
 
@@ -64,7 +65,7 @@ async def associate_floating_ip(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     try:
-        return neutron.associate_floating_ip(conn, fip_id, req.instance_id)
+        return await asyncio.to_thread(neutron.associate_floating_ip, conn, fip_id, req.instance_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Floating IP 연결 실패: {e}")
 
@@ -75,7 +76,7 @@ async def disassociate_floating_ip(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     try:
-        return neutron.disassociate_floating_ip(conn, fip_id)
+        return await asyncio.to_thread(neutron.disassociate_floating_ip, conn, fip_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Floating IP 해제 실패: {e}")
 
@@ -86,7 +87,7 @@ async def delete_floating_ip(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     try:
-        neutron.delete_floating_ip(conn, fip_id)
+        await asyncio.to_thread(neutron.delete_floating_ip, conn, fip_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Floating IP 삭제 실패: {e}")
 
@@ -101,7 +102,7 @@ async def delete_subnet(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     try:
-        neutron.delete_subnet(conn, subnet_id)
+        await asyncio.to_thread(neutron.delete_subnet, conn, subnet_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"서브넷 삭제 실패: {e}")
 
@@ -146,7 +147,7 @@ async def get_topology(conn: openstack.connection.Connection = Depends(get_os_co
 @router.get("/{network_id}", response_model=NetworkDetail)
 async def get_network(network_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
     try:
-        return neutron.get_network_detail(conn, network_id)
+        return await asyncio.to_thread(neutron.get_network_detail, conn, network_id)
     except Exception:
         raise HTTPException(status_code=404, detail="네트워크를 찾을 수 없습니다")
 
@@ -157,7 +158,7 @@ async def delete_network(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     try:
-        neutron.delete_network(conn, network_id)
+        await asyncio.to_thread(neutron.delete_network, conn, network_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"네트워크 삭제 실패: {e}")
 
@@ -169,10 +170,10 @@ async def create_subnet(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     try:
-        return neutron.create_subnet(
+        return await asyncio.to_thread(
+            neutron.create_subnet,
             conn, network_id, req.name, req.cidr,
-            gateway_ip=req.gateway_ip,
-            enable_dhcp=req.enable_dhcp,
+            req.gateway_ip, req.enable_dhcp,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"서브넷 생성 실패: {e}")
