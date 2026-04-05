@@ -30,7 +30,7 @@ router = APIRouter()
 
 def _resolve_names(servers: list, conn) -> list[dict]:
     """서버 목록에 flavor_name / image_name 을 resolve해서 반환."""
-    flavors = {f.id: f.name for f in nova.list_flavors(conn)}
+    flavors_by_id = {f.id: f.name for f in nova.list_flavors(conn)}
     images: dict = {}
     try:
         images = {img.id: img.name for img in glance.list_images(conn)}
@@ -39,7 +39,10 @@ def _resolve_names(servers: list, conn) -> list[dict]:
     result = []
     for s in servers:
         d = s.model_dump()
-        d["flavor_name"] = flavors.get(s.flavor_id) if s.flavor_id else None
+        # flavor_name: _server_to_info에서 original_name으로 이미 설정된 경우 유지,
+        # 없으면 flavor_id로 lookup (구형 마이크로버전)
+        if not d.get("flavor_name") and s.flavor_id:
+            d["flavor_name"] = flavors_by_id.get(s.flavor_id)
         d["image_name"] = images.get(s.image_id) if s.image_id else None
         result.append(d)
     return result
@@ -135,7 +138,7 @@ async def create_instance(
         # GPU 플레이버 여부 확인
         flavors = nova.list_flavors(conn)
         flavor = next((f for f in flavors if f.id == req.flavor_id), None)
-        gpu_available = flavor.has_gpu if flavor else False
+        gpu_available = flavor.is_gpu if flavor else False
 
         userdata = cloudinit.generate_userdata(
             libraries=resolved_libs,
@@ -265,7 +268,7 @@ async def create_instance_async(
             yield send_progress(ProgressStep.USERDATA_GENERATING, 60, "cloud-init 생성 중...")
             flavors = await asyncio.to_thread(nova.list_flavors, conn)
             flavor = next((f for f in flavors if f.id == req.flavor_id), None)
-            gpu_available = flavor.has_gpu if flavor else False
+            gpu_available = flavor.is_gpu if flavor else False
 
             userdata = cloudinit.generate_userdata(
                 libraries=resolved_libs,

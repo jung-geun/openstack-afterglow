@@ -14,7 +14,7 @@ router = APIRouter()
 def _list_servers_as_dicts(conn):
     """서버 목록을 dict 리스트로 반환 (캐시 직렬화 호환)."""
     return [
-        {"id": s.id, "status": s.status, "flavor_id": s.flavor_id}
+        {"id": s.id, "status": s.status, "flavor_id": s.flavor_id, "flavor_name": s.flavor_name}
         for s in nova.list_servers(conn)
     ]
 
@@ -85,12 +85,15 @@ async def get_dashboard_summary(
         raise HTTPException(status_code=500, detail=str(e))
 
     flavors_by_id: dict = {f["id"]: f for f in all_flavors}
+    flavors_by_name: dict = {f["name"]: f for f in all_flavors}
 
     gpu_used = 0
     for s in servers:
         if s["status"] != "ACTIVE":
             continue
-        fl = flavors_by_id.get(s.get("flavor_id", ""), {})
+        fl = flavors_by_id.get(s.get("flavor_id") or "", {})
+        if not fl and s.get("flavor_name"):
+            fl = flavors_by_name.get(s["flavor_name"], {})
         gpu_used += _gpu_count_from_flavor(fl.get("name", ""), fl.get("extra_specs", {}))
 
     return {

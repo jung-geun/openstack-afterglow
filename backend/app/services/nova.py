@@ -8,6 +8,13 @@ def list_flavors(conn: openstack.connection.Connection) -> list[FlavorInfo]:
     flavors = []
     for f in conn.compute.flavors(is_public=True):
         extra = dict(f.extra_specs) if f.extra_specs else {}
+        # List API는 extra_specs를 포함하지 않을 수 있으므로 개별 조회 fallback
+        if not extra:
+            try:
+                detail = conn.compute.get_flavor(f.id)
+                extra = dict(detail.extra_specs) if detail.extra_specs else {}
+            except Exception:
+                pass
         flavors.append(FlavorInfo(
             id=f.id,
             name=f.name,
@@ -162,7 +169,12 @@ def _server_to_info(s) -> InstanceInfo:
     meta = dict(s.metadata) if s.metadata else {}
 
     image_id = s.image.get("id") if isinstance(s.image, dict) else None
-    flavor_id = s.flavor.get("id") if isinstance(s.flavor, dict) else None
+    flavor_id = None
+    flavor_name = None
+    if isinstance(s.flavor, dict):
+        flavor_id = s.flavor.get("id")
+        # 마이크로버전 2.47+에서는 "id" 없이 "original_name"만 반환
+        flavor_name = s.flavor.get("original_name")
 
     return InstanceInfo(
         id=s.id,
@@ -170,6 +182,7 @@ def _server_to_info(s) -> InstanceInfo:
         status=s.status,
         image_id=image_id,
         flavor_id=flavor_id,
+        flavor_name=flavor_name,
         ip_addresses=ips,
         created_at=str(s.created_at) if s.created_at else None,
         metadata=meta,
