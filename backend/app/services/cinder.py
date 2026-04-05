@@ -66,6 +66,16 @@ def get_volume_limits(conn: openstack.connection.Connection) -> dict:
     }
 
 
+def get_volume_image_metadata(conn: openstack.connection.Connection, volume_id: str) -> dict | None:
+    """부트 볼륨의 원본 이미지 메타데이터 반환 (volume_image_metadata 필드)."""
+    try:
+        vol = conn.block_storage.get_volume(volume_id)
+        raw = vol.to_dict() if hasattr(vol, 'to_dict') else {}
+        return raw.get('volume_image_metadata') or getattr(vol, 'volume_image_metadata', None)
+    except Exception:
+        return None
+
+
 def _vol_to_info(vol) -> VolumeInfo:
     return VolumeInfo(
         id=vol.id,

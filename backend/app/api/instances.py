@@ -43,7 +43,20 @@ def _resolve_names(servers: list, conn) -> list[dict]:
         # 없으면 flavor_id로 lookup (구형 마이크로버전)
         if not d.get("flavor_name") and s.flavor_id:
             d["flavor_name"] = flavors_by_id.get(s.flavor_id)
-        d["image_name"] = images.get(s.image_id) if s.image_id else None
+        if s.image_id:
+            d["image_name"] = images.get(s.image_id)
+        else:
+            image_name = None
+            try:
+                attachments = nova.list_volume_attachments(conn, s.id)
+                boot_att = next((a for a in attachments if a.get("device") == "/dev/vda"), None)
+                if boot_att:
+                    meta = cinder.get_volume_image_metadata(conn, boot_att["volume_id"])
+                    if meta:
+                        image_name = meta.get("image_name")
+            except Exception:
+                pass
+            d["image_name"] = image_name or "볼륨에서 부팅"
         result.append(d)
     return result
 
@@ -171,6 +184,7 @@ async def create_instance(
             boot_volume_id=boot_volume_id,
             userdata=userdata,
             key_name=req.key_name,
+            admin_pass=req.admin_pass,
             availability_zone=req.availability_zone or settings.default_availability_zone,
             metadata=meta,
         )
@@ -298,6 +312,7 @@ async def create_instance_async(
                 boot_volume_id=boot_volume_id,
                 userdata=userdata,
                 key_name=req.key_name,
+                admin_pass=req.admin_pass,
                 availability_zone=req.availability_zone or settings.default_availability_zone,
                 metadata=meta,
             )

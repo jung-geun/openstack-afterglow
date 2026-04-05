@@ -7,6 +7,18 @@ from app.models.storage import (
     TopologyData, TopologyNetwork, TopologyRouter,
 )
 
+_ROUTER_IFACE_OWNERS = [
+    "network:router_interface",
+    "network:router_interface_distributed",
+    "network:ha_router_replicated_interface",
+]
+
+
+def _iter_router_interface_ports(conn, **kwargs):
+    """DVR/HA를 포함한 모든 라우터 인터페이스 포트를 순회."""
+    for owner in _ROUTER_IFACE_OWNERS:
+        yield from conn.network.ports(device_owner=owner, **kwargs)
+
 
 def list_networks(conn: openstack.connection.Connection, project_id: str | None = None) -> list[NetworkInfo]:
     result = []
@@ -46,10 +58,7 @@ def get_network_detail(conn: openstack.connection.Connection, network_id: str) -
     # 이 네트워크에 연결된 라우터 찾기 (router_interface 포트 기준)
     router_map: dict[str, RouterInfo] = {}
     try:
-        ports = list(conn.network.ports(
-            device_owner="network:router_interface",
-            network_id=network_id,
-        ))
+        ports = list(_iter_router_interface_ports(conn, network_id=network_id))
         for port in ports:
             router_id = port.device_id
             if not router_id:
@@ -178,9 +187,9 @@ def get_topology(conn: openstack.connection.Connection) -> TopologyData:
         )
         subnet_network_map[s.id] = s.network_id
 
-    # 3. 라우터 인터페이스 포트 → router_id→[subnet_ids] 맵
+    # 3. 라우터 인터페이스 포트 → router_id→[subnet_ids] 맵 (DVR/HA 포함)
     router_subnets: dict[str, list[str]] = {}
-    for port in conn.network.ports(device_owner="network:router_interface"):
+    for port in _iter_router_interface_ports(conn):
         rid = port.device_id
         if not rid:
             continue
@@ -251,7 +260,7 @@ def list_routers(conn: openstack.connection.Connection, project_id: str | None =
         # connected subnets via router_interface ports
         subnet_ids: list[str] = []
         try:
-            for port in conn.network.ports(device_id=r.id, device_owner="network:router_interface"):
+            for port in _iter_router_interface_ports(conn, device_id=r.id):
                 for fip in (port.fixed_ips or []):
                     sid = fip.get("subnet_id")
                     if sid and sid not in subnet_ids:
@@ -283,7 +292,7 @@ def get_router_detail(conn: openstack.connection.Connection, router_id: str) -> 
                 pass
 
     interfaces: list[RouterInterface] = []
-    for port in conn.network.ports(device_id=r.id, device_owner="network:router_interface"):
+    for port in _iter_router_interface_ports(conn, device_id=r.id):
         for fip in (port.fixed_ips or []):
             sid = fip.get("subnet_id", "")
             ip = fip.get("ip_address", "")
@@ -367,30 +376,79 @@ def list_instance_ports(conn: openstack.connection.Connection, instance_id: str)
     ]
 
 
+def _sg_to_dict(sg) -> dict:
+    return {
+        "id": sg.id,
+        "name": sg.name,
+        "description": sg.description,
+        "rules": [
+            {
+                "id": r["id"],
+                "direction": r["direction"],
+                "protocol": r.get("protocol"),
+                "port_range_min": r.get("port_range_min"),
+                "port_range_max": r.get("port_range_max"),
+                "remote_ip_prefix": r.get("remote_ip_prefix"),
+                "ethertype": r.get("ethertype"),
+            }
+            for r in (sg.security_group_rules or [])
+        ],
+    }
+
+
 def list_security_groups(conn: openstack.connection.Connection, project_id: str | None = None) -> list[dict]:
     kwargs: dict = {}
     if project_id:
         kwargs["project_id"] = project_id
-    return [
-        {
-            "id": sg.id,
-            "name": sg.name,
-            "description": sg.description,
-            "rules": [
-                {
-                    "id": r["id"],
-                    "direction": r["direction"],
-                    "protocol": r.get("protocol"),
-                    "port_range_min": r.get("port_range_min"),
-                    "port_range_max": r.get("port_range_max"),
-                    "remote_ip_prefix": r.get("remote_ip_prefix"),
-                    "ethertype": r.get("ethertype"),
-                }
-                for r in (sg.security_group_rules or [])
-            ],
-        }
-        for sg in conn.network.security_groups(**kwargs)
-    ]
+    return [_sg_to_dict(sg) for sg in conn.network.security_groups(**kwargs)]
+
+
+def create_security_group(conn: openstack.connection.Connection, name: str, description: str = "") -> dict:
+    sg = conn.network.create_security_group(name=name, description=description)
+    return _sg_to_dict(sg)
+
+
+def delete_security_group(conn: openstack.connection.Connection, sg_id: str) -> None:
+    conn.network.delete_security_group(sg_id, ignore_missing=True)
+
+
+def create_security_group_rule(
+    conn: openstack.connection.Connection,
+    sg_id: str,
+    direction: str,
+    protocol: str | None = None,
+    port_range_min: int | None = None,
+    port_range_max: int | None = None,
+    remote_ip_prefix: str | None = None,
+    ethertype: str = "IPv4",
+) -> dict:
+    kwargs: dict = {
+        "security_group_id": sg_id,
+        "direction": direction,
+        "ethertype": ethertype,
+    }
+    if protocol:
+        kwargs["protocol"] = protocol
+    if port_range_min is not None:
+        kwargs["port_range_min"] = port_range_min
+    if port_range_max is not None:
+        kwargs["port_range_max"] = port_range_max
+    if remote_ip_prefix:
+        kwargs["remote_ip_prefix"] = remote_ip_prefix
+    rule = conn.network.create_security_group_rule(**kwargs)
+    return {
+        "id": rule.id,
+        "direction": rule.direction,
+        "protocol": rule.protocol,
+        "port_range_min": rule.port_range_min,
+        "port_range_max": rule.port_range_max,
+        "remote_ip_prefix": rule.remote_ip_prefix,
+        "ethertype": rule.ethertype,
+    }
+
+
+def delete_security_group_rule(conn: openstack.connection.Connection, rule_id: str) -> None:
+    conn.network.delete_security_group_rule(rule_id, ignore_missing=True)
 
 
 def update_port_security_groups(conn: openstack.connection.Connection, port_id: str, security_group_ids: list[str]) -> dict:

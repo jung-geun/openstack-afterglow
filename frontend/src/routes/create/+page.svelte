@@ -71,6 +71,10 @@
 				api.get<NetworkInfo[]>('/api/networks', token, projectId),
 				api.get<KeypairInfo[]>('/api/keypairs', token, projectId),
 			]);
+			// 키페어가 1개이면 자동선택
+			if (keypairs.length === 1) {
+				wizard.update(w => ({ ...w, keyName: keypairs[0].name }));
+			}
 		} catch (e) {
 			loadError = e instanceof ApiError ? `데이터 로드 실패 (${e.status})` : '서버 오류';
 		}
@@ -134,7 +138,9 @@
 			case 2: return !!$wizard.flavorId;
 			case 3: return true;
 			case 4: return true;
-			case 5: return true;
+			case 5:
+				if ($wizard.authMode === 'keypair') return !!$wizard.keyName;
+				return $wizard.adminPassword.length >= 1;
 			case 6: return !!$wizard.instanceName.trim();
 			default: return false;
 		}
@@ -169,7 +175,8 @@
 					libraries: $wizard.libraries,
 					strategy: $wizard.strategy,
 					network_id: $wizard.networkId,
-					key_name: $wizard.keyName,
+					key_name: $wizard.authMode === 'keypair' ? $wizard.keyName : null,
+					admin_pass: $wizard.authMode === 'password' ? $wizard.adminPassword : null,
 					boot_volume_size_gb: $wizard.bootVolumeSizeGb,
 				})
 			});
@@ -312,23 +319,59 @@
 			{:else if $wizard.step === 5}
 				<h2 class="text-lg font-semibold text-white mb-4">인스턴스 설정</h2>
 
-				<!-- 키페어 선택 -->
+				<!-- 인증 방식 선택 -->
 				<div class="mb-6">
-					<label class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">키페어 (SSH 접속용)</label>
-					<select
-						value={$wizard.keyName}
-						onchange={e => wizard.update(w => ({ ...w, keyName: (e.target as HTMLSelectElement).value || null }))}
-						class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
-					>
-						<option value="">선택 안 함</option>
-						{#each keypairs as kp}
-							<option value={kp.name}>{kp.name} · {kp.type} · {kp.fingerprint.slice(0, 20)}…</option>
-						{/each}
-					</select>
-					{#if keypairs.length === 0}
-						<p class="text-xs text-amber-400 mt-1">등록된 키페어가 없습니다. SSH 접속을 위해 키페어를 먼저 등록하세요.</p>
-					{/if}
+					<label class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">인증 방식</label>
+					<div class="flex gap-3">
+						<button
+							onclick={() => wizard.update(w => ({ ...w, authMode: 'keypair' }))}
+							class="flex-1 px-4 py-2.5 rounded-lg border text-sm font-medium transition-all {$wizard.authMode === 'keypair'
+								? 'border-blue-500 bg-blue-900/20 text-white'
+								: 'border-gray-700 bg-gray-900 text-gray-400 hover:border-gray-500'}"
+						>SSH 키페어</button>
+						<button
+							onclick={() => wizard.update(w => ({ ...w, authMode: 'password' }))}
+							class="flex-1 px-4 py-2.5 rounded-lg border text-sm font-medium transition-all {$wizard.authMode === 'password'
+								? 'border-blue-500 bg-blue-900/20 text-white'
+								: 'border-gray-700 bg-gray-900 text-gray-400 hover:border-gray-500'}"
+						>비밀번호</button>
+					</div>
 				</div>
+
+				{#if $wizard.authMode === 'keypair'}
+					<!-- 키페어 선택 -->
+					<div class="mb-6">
+						<label class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">키페어 (SSH 접속용)</label>
+						<select
+							value={$wizard.keyName}
+							onchange={e => wizard.update(w => ({ ...w, keyName: (e.target as HTMLSelectElement).value || null }))}
+							class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
+						>
+							<option value="">키페어 선택</option>
+							{#each keypairs as kp}
+								<option value={kp.name}>{kp.name} · {kp.type} · {kp.fingerprint.slice(0, 20)}…</option>
+							{/each}
+						</select>
+						{#if keypairs.length === 0}
+							<p class="text-xs text-amber-400 mt-1">등록된 키페어가 없습니다. SSH 접속을 위해 키페어를 먼저 등록하세요.</p>
+						{:else if !$wizard.keyName}
+							<p class="text-xs text-amber-400 mt-1">키페어를 선택해야 다음 단계로 진행할 수 있습니다.</p>
+						{/if}
+					</div>
+				{:else}
+					<!-- 비밀번호 설정 -->
+					<div class="mb-6">
+						<label class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">관리자 비밀번호</label>
+						<input
+							type="password"
+							value={$wizard.adminPassword}
+							oninput={e => wizard.update(w => ({ ...w, adminPassword: (e.target as HTMLInputElement).value }))}
+							placeholder="비밀번호 입력"
+							class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
+						/>
+						<p class="text-xs text-gray-500 mt-1">인스턴스 root/admin 비밀번호를 설정합니다.</p>
+					</div>
+				{/if}
 
 				<!-- 루트 볼륨 크기 -->
 				<div class="mb-6">
@@ -390,8 +433,14 @@
 						</span>
 					</div>
 					<div class="flex justify-between">
-						<span class="text-gray-400">키페어</span>
-						<span class="text-white">{$wizard.keyName ?? '없음'}</span>
+						<span class="text-gray-400">인증</span>
+						<span class="text-white">
+							{#if $wizard.authMode === 'keypair'}
+								키페어: {$wizard.keyName ?? '없음'}
+							{:else}
+								비밀번호 설정됨
+							{/if}
+						</span>
 					</div>
 					<div class="flex justify-between">
 						<span class="text-gray-400">루트 볼륨</span>

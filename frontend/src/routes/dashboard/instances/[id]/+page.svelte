@@ -112,6 +112,26 @@
 	// Security groups
 	let sgEditPortId = $state<string | null>(null);
 	let sgEditSelected = $state<string[]>([]);
+	let expandedSgRules = $state<Set<string>>(new Set());
+
+	function toggleSgRules(sgId: string) {
+		const next = new Set(expandedSgRules);
+		next.has(sgId) ? next.delete(sgId) : next.add(sgId);
+		expandedSgRules = next;
+	}
+
+	function formatRule(r: any): string {
+		const dir = r.direction === 'ingress' ? '인바운드' : '아웃바운드';
+		if (!r.protocol) return `${dir} 전체 허용`;
+		const proto = (r.protocol as string).toUpperCase();
+		let port = '';
+		if (r.port_range_min != null && r.port_range_max != null) {
+			port = r.port_range_min === r.port_range_max
+				? ` ${r.port_range_min}` : ` ${r.port_range_min}-${r.port_range_max}`;
+		}
+		const remote = r.remote_ip_prefix ? ` ← ${r.remote_ip_prefix}` : '';
+		return `${dir} ${proto}${port}${remote}`;
+	}
 
 	const statusColor: Record<string, string> = {
 		ACTIVE: 'text-green-400 bg-green-900/30',
@@ -533,7 +553,7 @@
 				</div>
 				<div>
 					<dt class="text-xs text-gray-500 mb-0.5">이미지</dt>
-					<dd class="text-sm text-gray-300">{instance.image_name ?? instance.image_id ?? '-'}</dd>
+					<dd class="text-sm text-gray-300">{instance.image_name ?? instance.image_id ?? '볼륨에서 부팅'}</dd>
 				</div>
 				<div>
 					<dt class="text-xs text-gray-500 mb-0.5">플레이버</dt>
@@ -761,20 +781,39 @@
 								{#if sgEditPortId === iface.id}
 									<div class="bg-gray-700 rounded p-3 mt-2">
 										<p class="text-xs text-gray-500 mb-2">이 프로젝트의 보안 그룹</p>
-										<div class="space-y-1.5 mb-3 max-h-40 overflow-y-auto">
+										<div class="space-y-1.5 mb-3 max-h-56 overflow-y-auto">
 											{#each allSecurityGroups as sg}
-												<label class="flex items-center gap-2 cursor-pointer">
-													<input
-														type="checkbox"
-														checked={sgEditSelected.includes(sg.id)}
-														onchange={() => toggleSg(sg.id)}
-														class="accent-blue-500"
-													/>
-													<span class="text-xs text-gray-300">{sg.name}</span>
-													{#if sg.description}
-														<span class="text-xs text-gray-500">— {sg.description}</span>
+												<div>
+													<label class="flex items-center gap-2 cursor-pointer">
+														<input
+															type="checkbox"
+															checked={sgEditSelected.includes(sg.id)}
+															onchange={() => toggleSg(sg.id)}
+															class="accent-blue-500"
+														/>
+														<span class="text-xs text-gray-300">{sg.name}</span>
+														{#if sg.description}
+															<span class="text-xs text-gray-500 truncate max-w-[100px]">— {sg.description}</span>
+														{/if}
+														<button
+															type="button"
+															onclick={() => toggleSgRules(sg.id)}
+															class="text-xs text-gray-600 hover:text-gray-400 ml-auto shrink-0 transition-colors"
+														>
+															{expandedSgRules.has(sg.id) ? '▾' : '▸'} {sg.rules.length}개 규칙
+														</button>
+													</label>
+													{#if expandedSgRules.has(sg.id)}
+														<div class="ml-5 mt-1 mb-1 space-y-0.5 pl-2 border-l border-gray-700">
+															{#each sg.rules as rule}
+																<div class="text-xs text-gray-500 font-mono">{formatRule(rule)}</div>
+															{/each}
+															{#if sg.rules.length === 0}
+																<div class="text-xs text-gray-600 italic">규칙 없음</div>
+															{/if}
+														</div>
 													{/if}
-												</label>
+												</div>
 											{/each}
 										</div>
 										<div class="flex gap-2">

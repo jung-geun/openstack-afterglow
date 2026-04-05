@@ -47,6 +47,7 @@ def create_server(
     boot_volume_id: str,
     userdata: str,
     key_name: Optional[str] = None,
+    admin_pass: Optional[str] = None,
     availability_zone: Optional[str] = None,
     metadata: Optional[dict] = None,
 ) -> InstanceInfo:
@@ -69,6 +70,8 @@ def create_server(
         body["networks"] = [{"uuid": network_id}]
     if key_name:
         body["key_name"] = key_name
+    if admin_pass:
+        body["adminPass"] = admin_pass
     if availability_zone:
         body["availability_zone"] = availability_zone
     if metadata:

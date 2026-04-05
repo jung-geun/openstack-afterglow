@@ -18,6 +18,7 @@ class ImageInfo(BaseModel):
     min_ram: int = 0
     disk_format: Optional[str] = None
     os_type: Optional[str] = None
+    os_distro: Optional[str] = None
     created_at: Optional[str] = None
 
 
@@ -70,5 +71,6 @@ class CreateInstanceRequest(BaseModel):
     strategy: str = "prebuilt"   # "prebuilt" | "dynamic"
     network_id: Optional[str] = None
     key_name: Optional[str] = None
+    admin_pass: Optional[str] = None
     availability_zone: Optional[str] = None
     boot_volume_size_gb: Optional[int] = None
