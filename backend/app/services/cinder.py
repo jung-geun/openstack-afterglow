@@ -76,6 +76,54 @@ def get_volume_image_metadata(conn: openstack.connection.Connection, volume_id: 
         return None
 
 
+def list_backups(conn: openstack.connection.Connection) -> list[dict]:
+    return [_backup_to_dict(b) for b in conn.block_storage.backups(details=True)]
+
+
+def get_backup(conn: openstack.connection.Connection, backup_id: str) -> dict:
+    b = conn.block_storage.get_backup(backup_id)
+    return _backup_to_dict(b)
+
+
+def create_backup(
+    conn: openstack.connection.Connection,
+    volume_id: str,
+    name: str,
+    description: Optional[str] = None,
+    incremental: bool = False,
+) -> dict:
+    kwargs: dict = {"volume_id": volume_id, "name": name, "is_incremental": incremental}
+    if description:
+        kwargs["description"] = description
+    b = conn.block_storage.create_backup(**kwargs)
+    return _backup_to_dict(b)
+
+
+def delete_backup(conn: openstack.connection.Connection, backup_id: str) -> None:
+    conn.block_storage.delete_backup(backup_id, ignore_missing=True)
+
+
+def restore_backup(conn: openstack.connection.Connection, backup_id: str, volume_id: Optional[str] = None) -> dict:
+    kwargs: dict = {}
+    if volume_id:
+        kwargs["volume_id"] = volume_id
+    result = conn.block_storage.restore_backup(backup_id, **kwargs)
+    return {"volume_id": getattr(result, 'volume_id', None), "volume_name": getattr(result, 'volume_name', None)}
+
+
+def _backup_to_dict(b) -> dict:
+    return {
+        "id": b.id,
+        "name": b.name or "",
+        "status": b.status,
+        "volume_id": b.volume_id,
+        "size": b.size,
+        "is_incremental": getattr(b, 'is_incremental', False),
+        "description": b.description or "",
+        "created_at": str(b.created_at) if getattr(b, 'created_at', None) else None,
+    }
+
+
 def _vol_to_info(vol) -> VolumeInfo:
     return VolumeInfo(
         id=vol.id,

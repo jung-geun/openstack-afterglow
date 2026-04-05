@@ -1,0 +1,39 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: union-config
+  namespace: union
+data:
+  APP_REDIS_URL: "redis://redis:6379/0"
+  union.toml: |
+    # Union 통합 설정 파일
+    [openstack]
+    auth_url = "https://keystone.example.com/v3"
+    project_name = "admin"
+    project_domain_name = "Default"
+    user_domain_name = "Default"
+    region_name = "RegionOne"
+    manila_endpoint = ""
+    manila_share_network_id = ""
+    manila_share_type = "cephfs"
+    ceph_monitors = "172.30.2.101:6789,172.30.2.102:6789,172.30.2.103:6789"
+
+    [app]
+    backend_port = 8000
+    frontend_port = 3000
+    secret_key = "change-me-in-production"
+    refresh_interval_ms = 5000
+
+    [cache]
+    redis_url = "redis://redis:6379/0"
+    default_ttl_seconds = 30
+
+    [session]
+    timeout_seconds = 3600
+    warning_before_seconds = 300
+
+    [nova]
+    default_network_id = ""
+    default_availability_zone = "nova"
+    boot_volume_size_gb = 20
+    upper_volume_size_gb = 50

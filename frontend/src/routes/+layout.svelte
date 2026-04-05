@@ -102,11 +102,6 @@
 	{/if}
 	<nav class="fixed top-0 left-0 right-0 z-50 bg-gray-900 border-b border-gray-700 h-14 flex items-center px-6 gap-6">
 		<a href="/dashboard" class="text-white font-bold text-lg tracking-tight">Union</a>
-		<a href="/dashboard" class="text-gray-300 hover:text-white text-sm transition-colors">대시보드</a>
-		<a href="/dashboard/topology" class="text-gray-300 hover:text-white text-sm transition-colors">토폴로지</a>
-		<a href="/create" class="text-gray-300 hover:text-white text-sm transition-colors">VM 생성</a>
-		<a href="/dashboard/security-groups" class="text-gray-300 hover:text-white text-sm transition-colors">보안 그룹</a>
-		<a href="/admin" class="text-gray-300 hover:text-white text-sm transition-colors">관리</a>
 		<div class="ml-auto flex items-center gap-4">
 			<ProjectSelector />
 			<span class="text-gray-400 text-sm">{$auth.username}</span>

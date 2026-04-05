@@ -137,6 +137,30 @@ def list_keypairs(conn: openstack.connection.Connection) -> list[dict]:
     ]
 
 
+def create_keypair(
+    conn: openstack.connection.Connection,
+    name: str,
+    public_key: Optional[str] = None,
+    key_type: str = "ssh",
+) -> dict:
+    """키페어 생성. public_key가 없으면 Nova가 자동 생성하고 private_key를 반환."""
+    body: dict = {"name": name, "type": key_type}
+    if public_key:
+        body["public_key"] = public_key
+    kp = conn.compute.create_keypair(**body)
+    return {
+        "name": kp.name,
+        "fingerprint": kp.fingerprint,
+        "type": getattr(kp, 'type', 'ssh'),
+        "public_key": getattr(kp, 'public_key', None),
+        "private_key": getattr(kp, 'private_key', None),
+    }
+
+
+def delete_keypair(conn: openstack.connection.Connection, name: str) -> None:
+    conn.compute.delete_keypair(name, ignore_missing=True)
+
+
 def delete_server(conn: openstack.connection.Connection, server_id: str) -> None:
     conn.compute.delete_server(server_id, force=True)
 
