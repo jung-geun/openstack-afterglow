@@ -75,4 +75,5 @@ def _cluster_to_info(c) -> ClusterInfo:
         create_timeout=getattr(c, 'create_timeout', None),
         created_at=str(c.created_at) if getattr(c, 'created_at', None) else None,
         updated_at=str(c.updated_at) if getattr(c, 'updated_at', None) else None,
+        stack_id=getattr(c, 'stack_id', None),
     )

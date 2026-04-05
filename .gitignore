@@ -217,3 +217,17 @@ package
 # End of https://www.toptal.com/developers/gitignore/api/git,svelte,python,visualstudiocode
 
 union.toml
+
+# 로그 파일
+logs/
+*.log
+
+# OS 파일
+.DS_Store
+Thumbs.db
+
+# JetBrains IDE
+.idea/
+
+# Docker 볼륨 데이터
+monitoring/data/

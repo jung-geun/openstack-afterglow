@@ -25,7 +25,15 @@
     Deleting: 'text-orange-400 bg-orange-900/30',
   };
 
+  interface ContainerListResponse {
+    items: ZunContainer[];
+    service_available: boolean;
+    message: string;
+  }
+
   let containers = $state<ZunContainer[]>([]);
+  let serviceAvailable = $state(true);
+  let serviceMessage = $state('');
   let loading = $state(true);
   let error = $state('');
   let actionTarget = $state<string | null>(null);
@@ -36,7 +44,10 @@
 
   async function fetchContainers() {
     try {
-      containers = await api.get<ZunContainer[]>('/api/containers', $auth.token ?? undefined, $auth.projectId ?? undefined);
+      const resp = await api.get<ContainerListResponse>('/api/containers', $auth.token ?? undefined, $auth.projectId ?? undefined);
+      containers = resp.items;
+      serviceAvailable = resp.service_available;
+      serviceMessage = resp.message;
       error = '';
     } catch (e) {
       error = e instanceof ApiError ? `조회 실패 (${e.status}): ${e.message}` : '서버 오류';
@@ -152,9 +163,19 @@
   </div>
 
   {#if error}<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>{/if}
+  {#if !serviceAvailable}
+    <div class="bg-yellow-900/30 border border-yellow-700 text-yellow-300 rounded-lg px-4 py-3 text-sm mb-4">
+      <span class="font-medium">Zun 서비스 미배포:</span> 이 환경에 Zun 컨테이너 서비스가 설치되어 있지 않습니다.
+    </div>
+  {/if}
 
   {#if loading}
     <LoadingSkeleton variant="table" rows={4} />
+  {:else if !serviceAvailable}
+    <div class="text-center py-20 text-gray-600">
+      <p class="text-lg mb-2">Zun 서비스를 사용할 수 없습니다</p>
+      <p class="text-sm">OpenStack 관리자에게 Zun 배포를 요청하세요</p>
+    </div>
   {:else if containers.length === 0}
     <div class="text-center py-20 text-gray-600">
       <p class="text-lg mb-2">컨테이너가 없습니다</p>

@@ -1,11 +1,14 @@
 import asyncio
 import re
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import date, timedelta
+from fastapi import APIRouter, Depends, HTTPException, Query
 import openstack
 
 from app.api.deps import get_os_conn
 from app.config import get_settings
 from app.services import nova, cinder
+from app.services import neutron as neutron_svc
+from app.services import manila as manila_svc
 from app.services.cache import cached_call
 
 router = APIRouter()
@@ -113,3 +116,49 @@ async def get_dashboard_summary(
 async def get_dashboard_config():
     settings = get_settings()
     return {"refresh_interval_ms": settings.refresh_interval_ms}
+
+
+@router.get("/quotas")
+async def get_project_quotas(
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """현재 프로젝트의 전체 할당량 (compute/storage/network/share) 조회."""
+    project_id = conn._union_project_id
+    try:
+        compute_q, volume_q, network_q, share_q = await asyncio.gather(
+            asyncio.to_thread(nova.get_project_quota, conn, project_id),
+            asyncio.to_thread(cinder.get_volume_quota, conn, project_id),
+            asyncio.to_thread(neutron_svc.get_network_quota, conn, project_id),
+            asyncio.to_thread(manila_svc.get_share_quota, conn),
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return {
+        "compute": compute_q,
+        "storage": volume_q,
+        "network": network_q,
+        "share": share_q,
+    }
+
+
+@router.get("/usage")
+async def get_project_usage(
+    start: str = Query(default=None, description="시작일 YYYY-MM-DD"),
+    end: str = Query(default=None, description="종료일 YYYY-MM-DD"),
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """기간별 프로젝트 리소스 사용량."""
+    project_id = conn._union_project_id
+    today = date.today()
+    end_dt = end or today.isoformat()
+    start_dt = start or (today - timedelta(days=30)).isoformat()
+    try:
+        usage = await asyncio.to_thread(nova.get_project_usage, conn, project_id, start_dt, end_dt)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return {
+        "start": start_dt,
+        "end": end_dt,
+        **usage,
+    }

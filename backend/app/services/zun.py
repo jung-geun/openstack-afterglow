@@ -4,6 +4,10 @@ import openstack
 from app.models.containers import ZunContainerInfo
 
 
+class ZunServiceUnavailable(Exception):
+    """Zun 서비스가 배포되지 않았거나 접근할 수 없을 때 발생."""
+
+
 def _get_zun_endpoint(conn: openstack.connection.Connection) -> str:
     """서비스 카탈로그에서 Zun endpoint 조회."""
     try:
@@ -37,12 +41,24 @@ def _container_to_info(data: dict) -> ZunContainerInfo:
 
 def list_containers(conn: openstack.connection.Connection) -> list[ZunContainerInfo]:
     endpoint = _get_zun_endpoint(conn)
-    resp = conn.session.get(f"{endpoint}/v1/containers")
-    data = resp.json() if hasattr(resp, 'json') else {}
-    containers = data.get('containers', data) if isinstance(data, dict) else data
-    if isinstance(containers, list):
-        return [_container_to_info(c) for c in containers]
-    return []
+    try:
+        resp = conn.session.get(f"{endpoint}/v1/containers")
+        # HTTP 상태 코드 검사 (404는 서비스 미배포를 의미)
+        status_code = getattr(resp, 'status_code', None) or getattr(resp, 'status', None)
+        if status_code == 404:
+            raise ZunServiceUnavailable("Zun 서비스 엔드포인트가 404를 반환했습니다")
+        data = resp.json() if hasattr(resp, 'json') else {}
+        containers = data.get('containers', data) if isinstance(data, dict) else data
+        if isinstance(containers, list):
+            return [_container_to_info(c) for c in containers]
+        return []
+    except ZunServiceUnavailable:
+        raise
+    except Exception as e:
+        err_str = str(e).lower()
+        if '404' in err_str or 'not found' in err_str or 'connection' in err_str:
+            raise ZunServiceUnavailable(f"Zun 서비스에 접근할 수 없습니다: {e}") from e
+        raise
 
 
 def get_container(conn: openstack.connection.Connection, container_id: str) -> ZunContainerInfo:

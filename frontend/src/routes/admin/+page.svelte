@@ -5,24 +5,6 @@
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 
-	// 기존 Manila share 관리용
-	interface Share {
-		id: string;
-		name: string;
-		status: string;
-		size: number;
-		library_name: string | null;
-		library_version: string | null;
-		built_at: string | null;
-		metadata: Record<string, string>;
-	}
-	interface LibraryConfig {
-		id: string;
-		name: string;
-		version: string;
-		available_prebuilt: boolean;
-	}
-
 	// 관리자 전용 타입
 	interface Overview {
 		hypervisor_count: number;
@@ -61,15 +43,9 @@
 		created_at: string | null;
 	}
 
-	type Tab = 'overview' | 'hypervisors' | 'all-instances' | 'all-volumes' | 'shares';
+	type Tab = 'overview' | 'hypervisors' | 'all-instances' | 'all-volumes';
 
 	let activeTab = $state<Tab>('overview');
-
-	// Manila share 관리 state
-	let shares = $state<Share[]>([]);
-	let libraries = $state<LibraryConfig[]>([]);
-	let building = $state<string | null>(null);
-	let sharesLoading = $state(false);
 	let message = $state('');
 
 	// Admin 전용 state
@@ -94,20 +70,6 @@
 		ERROR:     'text-red-400',
 		in_use:    'text-blue-400',
 	};
-
-	async function loadShares() {
-		sharesLoading = true;
-		try {
-			[shares, libraries] = await Promise.all([
-				api.get<Share[]>('/api/admin/shares', token, projectId),
-				api.get<LibraryConfig[]>('/api/libraries', token, projectId),
-			]);
-		} catch (e) {
-			error = e instanceof ApiError ? `로드 실패: ${e.message}` : '서버 오류';
-		} finally {
-			sharesLoading = false;
-		}
-	}
 
 	async function loadOverview() {
 		try {
@@ -142,27 +104,9 @@
 		}
 	}
 
-	async function buildShare(libId: string) {
-		building = libId;
-		message = '';
-		error = '';
-		try {
-			const res = await api.post<{ share_id: string }>(
-				`/api/admin/shares/build?library_id=${libId}`, {}, token, projectId
-			);
-			message = `Share 생성 시작됨 (ID: ${res.share_id})`;
-			await loadShares();
-		} catch (e) {
-			error = e instanceof ApiError ? `빌드 실패: ${e.message}` : '서버 오류';
-		} finally {
-			building = null;
-		}
-	}
-
 	async function switchTab(tab: Tab) {
 		activeTab = tab;
 		error = '';
-		if (tab === 'shares' && shares.length === 0) await loadShares();
 		if (tab === 'overview' && !overview) await loadOverview();
 		if (tab === 'hypervisors' && hypervisors.length === 0) await loadHypervisors();
 		if (tab === 'all-instances' && allInstances.length === 0) await loadAllInstances();
@@ -195,7 +139,7 @@
 
 	<!-- 탭 -->
 	<div class="flex gap-1 border-b border-gray-800 mb-6">
-		{#each [['overview', '개요'], ['hypervisors', '하이퍼바이저'], ['all-instances', '전체 인스턴스'], ['all-volumes', '전체 볼륨'], ['shares', '라이브러리 Share']] as [tab, label]}
+		{#each [['overview', '개요'], ['hypervisors', '하이퍼바이저'], ['all-instances', '전체 인스턴스'], ['all-volumes', '전체 볼륨']] as [tab, label]}
 			<button
 				onclick={() => switchTab(tab as Tab)}
 				class="px-4 py-2 text-sm transition-colors border-b-2 {activeTab === tab ? 'border-blue-500 text-white' : 'border-transparent text-gray-500 hover:text-gray-300'}"
@@ -325,78 +269,5 @@
 			</table>
 		</div>
 
-	{:else if activeTab === 'shares'}
-		<!-- 기존 Manila share 관리 (원래 페이지 내용) -->
-		<div class="mb-2">
-			<h2 class="text-base font-semibold text-white mb-1">사전 빌드 상태</h2>
-			<p class="text-xs text-gray-500 mb-4">Strategy A (사전 빌드)에서 사용할 Manila CephFS share를 관리합니다.</p>
-		</div>
-
-		{#if sharesLoading}
-			<LoadingSkeleton variant="list" rows={4} />
-		{:else}
-			<div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-8">
-				{#each libraries as lib}
-					{@const prebuilt = shares.find(s => s.library_name === lib.id && s.metadata?.union_type === 'prebuilt')}
-					<div class="bg-gray-900 border border-gray-700 rounded-xl p-4">
-						<div class="flex items-start justify-between mb-2">
-							<div>
-								<div class="font-medium text-white text-sm">{lib.name}</div>
-								<div class="text-xs text-gray-500">v{lib.version}</div>
-							</div>
-							{#if prebuilt}
-								<span class="text-xs {statusColor[prebuilt.status] ?? 'text-gray-400'}">{prebuilt.status}</span>
-							{:else}
-								<span class="text-xs text-gray-600">미구축</span>
-							{/if}
-						</div>
-						{#if prebuilt}
-							<div class="text-xs text-gray-600 mb-3">
-								Share ID: <span class="font-mono">{prebuilt.id.slice(0, 8)}...</span>
-								{#if prebuilt.built_at}• {prebuilt.built_at.split('T')[0]}{/if}
-							</div>
-						{/if}
-						<button
-							onclick={() => buildShare(lib.id)}
-							disabled={building === lib.id || !!prebuilt}
-							class="w-full text-xs py-1.5 rounded-lg border transition-colors {prebuilt ? 'border-gray-700 text-gray-600 cursor-not-allowed' : 'border-blue-700 text-blue-400 hover:bg-blue-900/20'}"
-						>
-							{building === lib.id ? '생성 중...' : prebuilt ? '구축됨' : 'Share 생성'}
-						</button>
-					</div>
-				{/each}
-			</div>
-
-			<div class="flex items-center justify-between mb-3">
-				<h2 class="text-base font-semibold text-white">전체 Share 목록</h2>
-				<button onclick={loadShares} class="text-gray-400 hover:text-white text-xs transition-colors">새로고침</button>
-			</div>
-			{#if shares.length === 0}
-				<div class="text-gray-600 text-sm">Share가 없습니다</div>
-			{:else}
-				<table class="w-full text-sm">
-					<thead>
-						<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
-							<th class="text-left py-2 pr-4">이름</th>
-							<th class="text-left py-2 pr-4">상태</th>
-							<th class="text-left py-2 pr-4">크기</th>
-							<th class="text-left py-2 pr-4">타입</th>
-							<th class="text-left py-2">라이브러리</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each shares as share}
-							<tr class="border-b border-gray-800/50 text-xs">
-								<td class="py-2 pr-4 font-mono text-gray-300">{share.name}</td>
-								<td class="py-2 pr-4 {statusColor[share.status] ?? 'text-gray-400'}">{share.status}</td>
-								<td class="py-2 pr-4 text-gray-400">{share.size} GB</td>
-								<td class="py-2 pr-4 text-gray-500">{share.metadata?.union_type ?? '-'}</td>
-								<td class="py-2 text-gray-500">{share.library_name ?? '-'}</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			{/if}
-		{/if}
 	{/if}
 </div>

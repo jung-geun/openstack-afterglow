@@ -26,11 +26,23 @@
 	let deleting = $state(false);
 
 	const statusColor: Record<string, string> = {
-		available: 'text-green-400 bg-green-900/30',
-		in_use: 'text-blue-400 bg-blue-900/30',
-		creating: 'text-yellow-400 bg-yellow-900/30',
-		deleting: 'text-orange-400 bg-orange-900/30',
-		error: 'text-red-400 bg-red-900/30',
+		available:          'text-green-400 bg-green-900/30',
+		in_use:             'text-blue-400 bg-blue-900/30',
+		creating:           'text-amber-400 bg-amber-900/30',
+		deleting:           'text-orange-400 bg-orange-900/30',
+		error:              'text-red-400 bg-red-900/30',
+		reserved:           'text-purple-400 bg-purple-900/30',
+		attaching:          'text-cyan-400 bg-cyan-900/30',
+		detaching:          'text-amber-400 bg-amber-900/30',
+		'backing-up':       'text-indigo-400 bg-indigo-900/30',
+		'restoring-backup': 'text-teal-400 bg-teal-900/30',
+		downloading:        'text-sky-400 bg-sky-900/30',
+		uploading:          'text-sky-400 bg-sky-900/30',
+		extending:          'text-cyan-400 bg-cyan-900/30',
+		error_deleting:     'text-rose-400 bg-rose-900/30',
+		error_backing_up:   'text-rose-400 bg-rose-900/30',
+		error_restoring:    'text-rose-400 bg-rose-900/30',
+		error_extending:    'text-rose-400 bg-rose-900/30',
 	};
 
 	$effect(() => {

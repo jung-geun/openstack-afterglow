@@ -56,6 +56,15 @@ def _load_toml() -> dict:
             flat["boot_volume_size_gb"] = nv.get("boot_volume_size_gb", 20)
             flat["upper_volume_size_gb"] = nv.get("upper_volume_size_gb", 50)
 
+            log = data.get("logging", {})
+            flat["log_file_path"] = log.get("log_file_path", "/app/logs/union-backend.log")
+            flat["log_level"] = log.get("log_level", "INFO")
+            flat["log_max_bytes"] = log.get("max_bytes", 52428800)
+            flat["log_backup_count"] = log.get("backup_count", 5)
+            flat["log_rotation_type"] = log.get("rotation_type", "size")
+            flat["log_rotation_when"] = log.get("rotation_when", "midnight")
+            flat["log_rotation_interval"] = log.get("rotation_interval", 1)
+
             return flat
     return {}
 
@@ -95,6 +104,15 @@ class Settings(BaseSettings):
     default_availability_zone: str = "nova"
     boot_volume_size_gb: int = 20
     upper_volume_size_gb: int = 50
+
+    # 로깅 설정
+    log_file_path: str = "/app/logs/union-backend.log"
+    log_level: str = "INFO"
+    log_max_bytes: int = 52428800    # 50MB
+    log_backup_count: int = 5
+    log_rotation_type: str = "size"  # "size" | "time"
+    log_rotation_when: str = "midnight"
+    log_rotation_interval: int = 1
 
     @property
     def ceph_monitor_list(self) -> list[str]:

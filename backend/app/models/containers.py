@@ -29,6 +29,7 @@ class ClusterInfo(BaseModel):
     create_timeout: int | None = None
     created_at: str | None = None
     updated_at: str | None = None
+    stack_id: str | None = None
 
 
 class CreateClusterRequest(BaseModel):
@@ -61,3 +62,27 @@ class CreateZunContainerRequest(BaseModel):
     memory: str | None = None
     environment: dict | None = None
     auto_remove: bool = False
+
+
+class ContainerListResponse(BaseModel):
+    items: list[ZunContainerInfo]
+    service_available: bool = True
+    message: str = ""
+
+
+class StackResourceInfo(BaseModel):
+    resource_name: str
+    resource_type: str
+    physical_resource_id: str
+    resource_status: str
+    resource_status_reason: str | None = None
+    created_at: str | None = None
+
+
+class StackEventInfo(BaseModel):
+    resource_name: str
+    resource_status: str
+    resource_status_reason: str | None = None
+    event_time: str
+    logical_resource_id: str | None = None
+    physical_resource_id: str | None = None

@@ -1,1 +1,68 @@
 @import 'tailwindcss';
+
+/* ============================================================
+   라이트/다크 테마 오버라이드
+   :root.light 클래스가 <html>에 붙으면 라이트 모드 적용
+   ============================================================ */
+
+:root.light {
+  /* 배경 색상 오버라이드 */
+  --tw-bg-base: #ffffff;
+}
+
+/* 주요 배경 */
+:root.light .bg-gray-950 { background-color: #ffffff !important; }
+:root.light .bg-gray-900 { background-color: #f8fafc !important; }
+:root.light .bg-gray-800 { background-color: #f1f5f9 !important; }
+:root.light .bg-gray-700 { background-color: #e2e8f0 !important; }
+
+/* 반투명 배경 */
+:root.light .bg-gray-800\/50 { background-color: rgba(241,245,249,0.8) !important; }
+:root.light .bg-gray-800\/60 { background-color: rgba(241,245,249,0.9) !important; }
+
+/* 텍스트 색상 */
+:root.light .text-white { color: #0f172a !important; }
+:root.light .text-gray-400 { color: #475569 !important; }
+:root.light .text-gray-500 { color: #64748b !important; }
+:root.light .text-gray-600 { color: #94a3b8 !important; }
+:root.light .text-gray-300 { color: #1e293b !important; }
+
+/* 테두리 */
+:root.light .border-gray-800 { border-color: #e2e8f0 !important; }
+:root.light .border-gray-800\/50 { border-color: rgba(226,232,240,0.8) !important; }
+:root.light .border-gray-700 { border-color: #cbd5e1 !important; }
+:root.light .border-gray-600 { border-color: #94a3b8 !important; }
+
+/* hover 상태 */
+:root.light .hover\:bg-gray-800:hover { background-color: #e2e8f0 !important; }
+:root.light .hover\:bg-gray-800\/50:hover { background-color: rgba(226,232,240,0.6) !important; }
+
+/* 입력 필드 */
+:root.light input:not([type="checkbox"]):not([type="radio"]):not([type="range"]) {
+  background-color: #ffffff;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+:root.light input:not([type="checkbox"]):not([type="radio"]):not([type="range"])::placeholder {
+  color: #94a3b8;
+}
+:root.light textarea {
+  background-color: #ffffff;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+:root.light select {
+  background-color: #ffffff;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+/* 코드/pre 블록 */
+:root.light pre, :root.light .bg-gray-950 pre {
+  background-color: #f8fafc !important;
+  color: #0f172a;
+}
+
+/* 스크롤바 (라이트 모드) */
+:root.light ::-webkit-scrollbar-thumb { background-color: #cbd5e1; }
+:root.light ::-webkit-scrollbar-track { background-color: #f1f5f9; }

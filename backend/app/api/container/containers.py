@@ -3,16 +3,20 @@ from fastapi import APIRouter, Depends, HTTPException
 import openstack
 
 from app.api.deps import get_os_conn
-from app.models.containers import ZunContainerInfo, CreateZunContainerRequest
+from app.models.containers import ZunContainerInfo, CreateZunContainerRequest, ContainerListResponse
 from app.services import zun
+from app.services.zun import ZunServiceUnavailable
 
 router = APIRouter()
 
 
-@router.get("", response_model=list[ZunContainerInfo])
+@router.get("", response_model=ContainerListResponse)
 async def list_containers(conn: openstack.connection.Connection = Depends(get_os_conn)):
     try:
-        return await asyncio.to_thread(zun.list_containers, conn)
+        items = await asyncio.to_thread(zun.list_containers, conn)
+        return ContainerListResponse(items=items)
+    except ZunServiceUnavailable as e:
+        return ContainerListResponse(items=[], service_available=False, message=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"컨테이너 목록 조회 실패: {e}")
 

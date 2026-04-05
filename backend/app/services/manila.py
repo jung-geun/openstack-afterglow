@@ -91,6 +91,31 @@ def get_client(conn) -> ManilaClient:
 # Share 관리
 # ---------------------------------------------------------------------------
 
+def get_share_quota(conn) -> dict:
+    """프로젝트의 Manila 할당량 (limit + in_use) 조회."""
+    try:
+        client = get_client(conn)
+        project_id = getattr(conn, "_union_project_id", None) or conn.current_project_id
+        data = client.get(f"quota-sets/{project_id}?usage=true")
+        quota = data.get("quota_set", {})
+
+        def _q(key):
+            v = quota.get(key, {})
+            if isinstance(v, dict):
+                return {"limit": v.get("limit", -1), "in_use": v.get("in_use", 0)}
+            return {"limit": int(v) if v is not None else -1, "in_use": 0}
+
+        return {
+            "shares": _q("shares"),
+            "gigabytes": _q("gigabytes"),
+            "share_networks": _q("share_networks"),
+            "share_groups": _q("share_groups"),
+            "snapshot_gigabytes": _q("snapshot_gigabytes"),
+        }
+    except Exception:
+        return {k: {"limit": -1, "in_use": 0} for k in ["shares", "gigabytes", "share_networks", "share_groups", "snapshot_gigabytes"]}
+
+
 def create_share(
     conn,
     name: str,

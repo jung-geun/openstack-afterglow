@@ -2,7 +2,8 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { auth, isLoggedIn, clearAuth } from '$lib/stores/auth';
+	import { auth, isLoggedIn, isAdmin, clearAuth } from '$lib/stores/auth';
+	import { theme } from '$lib/stores/theme';
 	import { api } from '$lib/api/client';
 	import ProjectSelector from '$lib/components/ProjectSelector.svelte';
 	import './layout.css';
@@ -79,6 +80,12 @@
 		return m > 0 ? `${m}분 ${s}초` : `${s}초`;
 	}
 
+	// 테마 변경 시 <html> 클래스 업데이트
+	$effect(() => {
+		if (typeof document === 'undefined') return;
+		document.documentElement.classList.toggle('light', $theme === 'light');
+	});
+
 	function logout() {
 		clearAuth();
 		goto('/');
@@ -102,8 +109,28 @@
 	{/if}
 	<nav class="fixed top-0 left-0 right-0 z-50 bg-gray-900 border-b border-gray-700 h-14 flex items-center px-6 gap-6">
 		<a href="/dashboard" class="text-white font-bold text-lg tracking-tight">Union</a>
-		<div class="ml-auto flex items-center gap-4">
+		<div class="ml-auto flex items-center gap-3">
 			<ProjectSelector />
+			{#if $isAdmin}
+				<a href="/admin" class="flex items-center gap-1.5 px-3 py-1 bg-gray-800 border border-gray-700 hover:border-gray-500 text-gray-300 hover:text-white text-xs rounded-md transition-colors">
+					<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
+					관리
+				</a>
+			{/if}
+			<!-- 테마 토글 -->
+			<button
+				onclick={() => theme.toggle()}
+				class="p-1.5 text-gray-400 hover:text-white transition-colors rounded-md hover:bg-gray-800"
+				title="{$theme === 'dark' ? '라이트 모드' : '다크 모드'}"
+			>
+				{#if $theme === 'dark'}
+					<!-- Sun icon -->
+					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707M17.657 17.657l-.707-.707M6.343 6.343l-.707-.707M12 7a5 5 0 110 10A5 5 0 0112 7z"></path></svg>
+				{:else}
+					<!-- Moon icon -->
+					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
+				{/if}
+			</button>
 			<span class="text-gray-400 text-sm">{$auth.username}</span>
 			<button onclick={logout} class="text-gray-400 hover:text-white text-sm transition-colors">
 				로그아웃

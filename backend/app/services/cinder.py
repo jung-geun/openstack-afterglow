@@ -66,6 +66,37 @@ def get_volume_limits(conn: openstack.connection.Connection) -> dict:
     }
 
 
+def get_volume_quota(conn: openstack.connection.Connection, project_id: str) -> dict:
+    """프로젝트의 상세 Cinder 할당량 (usage 포함)."""
+    def _extract(q):
+        if q is None:
+            return {"limit": -1, "in_use": 0}
+        if isinstance(q, dict):
+            return {"limit": q.get("limit", -1), "in_use": q.get("in_use", 0)}
+        return {"limit": getattr(q, "limit", -1), "in_use": getattr(q, "in_use", 0)}
+
+    try:
+        quota = conn.block_storage.get_quota_set(project_id, usage=True)
+        return {
+            "volumes": _extract(getattr(quota, "volumes", None)),
+            "snapshots": _extract(getattr(quota, "snapshots", None)),
+            "gigabytes": _extract(getattr(quota, "gigabytes", None)),
+            "backups": _extract(getattr(quota, "backups", None)),
+            "backup_gigabytes": _extract(getattr(quota, "backup_gigabytes", None)),
+        }
+    except Exception:
+        # fallback: limits API
+        limits = conn.block_storage.get_limits()
+        a = limits.absolute
+        return {
+            "volumes": {"limit": getattr(a, 'max_total_volumes', -1), "in_use": getattr(a, 'total_volumes_used', 0)},
+            "snapshots": {"limit": getattr(a, 'max_total_snapshots', -1), "in_use": getattr(a, 'total_snapshots_used', 0)},
+            "gigabytes": {"limit": getattr(a, 'max_total_volume_gigabytes', -1), "in_use": getattr(a, 'total_gigabytes_used', 0)},
+            "backups": {"limit": getattr(a, 'max_total_backups', -1), "in_use": getattr(a, 'total_backups_used', 0)},
+            "backup_gigabytes": {"limit": getattr(a, 'max_total_backup_gigabytes', -1), "in_use": getattr(a, 'total_backup_gigabytes_used', 0)},
+        }
+
+
 def get_volume_image_metadata(conn: openstack.connection.Connection, volume_id: str) -> dict | None:
     """부트 볼륨의 원본 이미지 메타데이터 반환 (volume_image_metadata 필드)."""
     try:

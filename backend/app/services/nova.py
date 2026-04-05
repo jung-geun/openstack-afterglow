@@ -130,6 +130,70 @@ def get_project_limits(conn: openstack.connection.Connection) -> dict:
     }
 
 
+def get_project_quota(conn: openstack.connection.Connection, project_id: str) -> dict:
+    """프로젝트의 상세 Nova 할당량 (usage 포함)."""
+    def _extract(q):
+        if q is None:
+            return {"limit": -1, "in_use": 0}
+        if isinstance(q, dict):
+            return {"limit": q.get("limit", -1), "in_use": q.get("in_use", 0)}
+        return {"limit": getattr(q, "limit", -1), "in_use": getattr(q, "in_use", 0)}
+
+    try:
+        quota = conn.compute.get_quota_set(project_id, usage=True)
+        return {
+            "instances": _extract(getattr(quota, "instances", None)),
+            "cores": _extract(getattr(quota, "cores", None)),
+            "ram": _extract(getattr(quota, "ram", None)),
+            "key_pairs": _extract(getattr(quota, "key_pairs", None)),
+            "server_groups": _extract(getattr(quota, "server_groups", None)),
+        }
+    except Exception:
+        # fallback: limits API 사용
+        limits = conn.compute.get_limits()
+        a = limits.absolute
+        return {
+            "instances": {"limit": getattr(a, 'max_total_instances', -1), "in_use": getattr(a, 'total_instances_used', 0)},
+            "cores": {"limit": getattr(a, 'max_total_cores', -1), "in_use": getattr(a, 'total_cores_used', 0)},
+            "ram": {"limit": getattr(a, 'max_total_ram_size', -1), "in_use": getattr(a, 'total_ram_used', 0)},
+            "key_pairs": {"limit": getattr(a, 'max_total_keypairs', -1), "in_use": 0},
+            "server_groups": {"limit": getattr(a, 'max_server_groups', -1), "in_use": 0},
+        }
+
+
+def get_project_usage(conn: openstack.connection.Connection, project_id: str, start: str, end: str) -> dict:
+    """Nova simple-tenant-usage API로 기간별 사용량 조회."""
+    try:
+        usage = conn.compute.get_usage(project_id, start=start, end=end)
+        server_usages = getattr(usage, 'server_usages', []) or []
+        return {
+            "total_vcpus_usage": getattr(usage, 'total_vcpus_usage', 0.0),
+            "total_memory_mb_usage": getattr(usage, 'total_memory_mb_usage', 0.0),
+            "total_local_gb_usage": getattr(usage, 'total_local_gb_usage', 0.0),
+            "total_hours": getattr(usage, 'total_hours', 0.0),
+            "server_usages": [
+                {
+                    "name": s.get("name", "") if isinstance(s, dict) else getattr(s, "name", ""),
+                    "instance_id": s.get("instance_id", "") if isinstance(s, dict) else getattr(s, "instance_id", ""),
+                    "vcpus": s.get("vcpus", 0) if isinstance(s, dict) else getattr(s, "vcpus", 0),
+                    "memory_mb": s.get("memory_mb", 0) if isinstance(s, dict) else getattr(s, "memory_mb", 0),
+                    "local_gb": s.get("local_gb", 0) if isinstance(s, dict) else getattr(s, "local_gb", 0),
+                    "hours": s.get("hours", 0.0) if isinstance(s, dict) else getattr(s, "hours", 0.0),
+                    "state": s.get("state", "") if isinstance(s, dict) else getattr(s, "state", ""),
+                }
+                for s in server_usages
+            ],
+        }
+    except Exception:
+        return {
+            "total_vcpus_usage": 0.0,
+            "total_memory_mb_usage": 0.0,
+            "total_local_gb_usage": 0.0,
+            "total_hours": 0.0,
+            "server_usages": [],
+        }
+
+
 def list_keypairs(conn: openstack.connection.Connection) -> list[dict]:
     return [
         {"name": kp.name, "fingerprint": kp.fingerprint, "type": getattr(kp, 'type', 'ssh')}

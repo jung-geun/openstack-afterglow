@@ -9,7 +9,13 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import auth, images, flavors, libraries, instances, admin, volumes, volume_backups, shares, networks, keypairs, dashboard, routers as routers_api, loadbalancers, security_groups, metrics, clusters, containers
+from app.api.compute import instances_router, keypairs_router, images_router, flavors_router
+from app.api.storage import volumes_router, volume_backups_router, shares_router
+from app.api.network import networks_router, routers_router, security_groups_router, loadbalancers_router
+from app.api.identity import auth_router, admin_router
+from app.api.container import clusters_router, containers_router
+from app.api.common import dashboard_router, metrics_router, libraries_router
+from app.api.common.metrics import record_request as _record_request
 
 
 # ---------------------------------------------------------------------------
@@ -35,6 +41,9 @@ class _JSONFormatter(logging.Formatter):
 
 
 def _setup_logging() -> None:
+    from app.config import get_settings
+    cfg = get_settings()
+
     formatter = _JSONFormatter()
     root = logging.getLogger()
     root.handlers.clear()
@@ -43,18 +52,31 @@ def _setup_logging() -> None:
     stream_handler.setFormatter(formatter)
     root.addHandler(stream_handler)
 
-    log_path = "/app/logs/union-backend.log"
-    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    log_path = cfg.log_file_path
     try:
-        file_handler = logging.handlers.RotatingFileHandler(
-            log_path, maxBytes=50 * 1024 * 1024, backupCount=5, encoding="utf-8"
-        )
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        if cfg.log_rotation_type == "time":
+            file_handler = logging.handlers.TimedRotatingFileHandler(
+                log_path,
+                when=cfg.log_rotation_when,
+                interval=cfg.log_rotation_interval,
+                backupCount=cfg.log_backup_count,
+                encoding="utf-8",
+            )
+        else:
+            file_handler = logging.handlers.RotatingFileHandler(
+                log_path,
+                maxBytes=cfg.log_max_bytes,
+                backupCount=cfg.log_backup_count,
+                encoding="utf-8",
+            )
         file_handler.setFormatter(formatter)
         root.addHandler(file_handler)
     except OSError:
         pass  # 로그 디렉터리 없으면 파일 핸들러 없이 진행
 
-    root.setLevel(logging.INFO)
+    level = getattr(logging, cfg.log_level.upper(), logging.INFO)
+    root.setLevel(level)
     logging.getLogger("openstack").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("keystoneauth1").setLevel(logging.WARNING)
@@ -78,7 +100,7 @@ async def request_logging_middleware(request: Request, call_next):
     start = time.perf_counter()
     response = await call_next(request)
     duration_ms = (time.perf_counter() - start) * 1000
-    metrics.record_request(request.method, request.url.path, response.status_code, duration_ms)
+    _record_request(request.method, request.url.path, response.status_code, duration_ms)
     if not request.url.path.startswith("/api/health"):
         _logger.info(
             "request",
@@ -122,24 +144,30 @@ async def options_handler(request: Request, rest_of_path: str):
     )
 
 
-app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
-app.include_router(images.router, prefix="/api/images", tags=["images"])
-app.include_router(flavors.router, prefix="/api/flavors", tags=["flavors"])
-app.include_router(libraries.router, prefix="/api/libraries", tags=["libraries"])
-app.include_router(instances.router, prefix="/api/instances", tags=["instances"])
-app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
-app.include_router(volume_backups.router, prefix="/api/volumes/backups", tags=["volume-backups"])
-app.include_router(volumes.router, prefix="/api/volumes", tags=["volumes"])
-app.include_router(shares.router, prefix="/api/shares", tags=["shares"])
-app.include_router(networks.router, prefix="/api/networks", tags=["networks"])
-app.include_router(keypairs.router, prefix="/api/keypairs", tags=["keypairs"])
-app.include_router(dashboard.router, prefix="/api/dashboard", tags=["dashboard"])
-app.include_router(routers_api.router, prefix="/api/routers", tags=["routers"])
-app.include_router(loadbalancers.router, prefix="/api/loadbalancers", tags=["loadbalancers"])
-app.include_router(security_groups.router, prefix="/api/security-groups", tags=["security-groups"])
-app.include_router(metrics.router, prefix="/api/metrics", tags=["metrics"])
-app.include_router(clusters.router, prefix="/api/clusters", tags=["clusters"])
-app.include_router(containers.router, prefix="/api/containers", tags=["containers"])
+# Identity
+app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
+app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
+# Compute
+app.include_router(images_router, prefix="/api/images", tags=["images"])
+app.include_router(flavors_router, prefix="/api/flavors", tags=["flavors"])
+app.include_router(instances_router, prefix="/api/instances", tags=["instances"])
+app.include_router(keypairs_router, prefix="/api/keypairs", tags=["keypairs"])
+# Storage (backups 먼저 등록 — /api/volumes/{id} catch-all 보다 앞에)
+app.include_router(volume_backups_router, prefix="/api/volumes/backups", tags=["volume-backups"])
+app.include_router(volumes_router, prefix="/api/volumes", tags=["volumes"])
+app.include_router(shares_router, prefix="/api/shares", tags=["shares"])
+# Network
+app.include_router(networks_router, prefix="/api/networks", tags=["networks"])
+app.include_router(routers_router, prefix="/api/routers", tags=["routers"])
+app.include_router(loadbalancers_router, prefix="/api/loadbalancers", tags=["loadbalancers"])
+app.include_router(security_groups_router, prefix="/api/security-groups", tags=["security-groups"])
+# Container
+app.include_router(clusters_router, prefix="/api/clusters", tags=["clusters"])
+app.include_router(containers_router, prefix="/api/containers", tags=["containers"])
+# Common
+app.include_router(dashboard_router, prefix="/api/dashboard", tags=["dashboard"])
+app.include_router(metrics_router, prefix="/api/metrics", tags=["metrics"])
+app.include_router(libraries_router, prefix="/api/libraries", tags=["libraries"])
 
 
 @app.get("/api/health")

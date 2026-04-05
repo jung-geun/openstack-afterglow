@@ -14,7 +14,7 @@ async def _prewarm_dashboard(token: str, project_id: str):
     """로그인 후 백그라운드에서 대시보드 캐시를 미리 워밍."""
     try:
         conn = keystone.get_openstack_connection(token, project_id)
-        from app.api.dashboard import _list_servers_as_dicts, _list_flavors_as_dicts
+        from app.api.common.dashboard import _list_servers_as_dicts, _list_flavors_as_dicts
         from app.services import nova, cinder
         await asyncio.gather(
             cached_call(f"union:nova:{project_id}:servers", 15, lambda: _list_servers_as_dicts(conn)),

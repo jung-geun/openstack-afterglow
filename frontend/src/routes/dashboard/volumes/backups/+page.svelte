@@ -32,10 +32,12 @@
   let form = $state({ volume_id: '', name: '', description: '', incremental: false });
 
   const statusColor: Record<string, string> = {
-    available: 'text-green-400 bg-green-900/30',
-    creating:  'text-yellow-400 bg-yellow-900/30',
-    deleting:  'text-orange-400 bg-orange-900/30',
-    error:     'text-red-400 bg-red-900/30',
+    available:          'text-green-400 bg-green-900/30',
+    creating:           'text-amber-400 bg-amber-900/30',
+    deleting:           'text-orange-400 bg-orange-900/30',
+    error:              'text-red-400 bg-red-900/30',
+    restoring:          'text-teal-400 bg-teal-900/30',
+    error_restoring:    'text-rose-400 bg-rose-900/30',
   };
 
   async function fetchBackups() {

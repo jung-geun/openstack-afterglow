@@ -141,6 +141,37 @@ def delete_subnet(conn: openstack.connection.Connection, subnet_id: str) -> None
 # Floating IP
 # ---------------------------------------------------------------------------
 
+def get_network_quota(conn: openstack.connection.Connection, project_id: str) -> dict:
+    """프로젝트의 Neutron 할당량 (limit + in_use) 조회."""
+    def _q(q, key):
+        if isinstance(q, dict):
+            return q.get(key, {"limit": -1, "in_use": 0})
+        v = getattr(q, key, None)
+        if isinstance(v, dict):
+            return {"limit": v.get("limit", -1), "in_use": v.get("used", v.get("in_use", 0))}
+        return {"limit": int(v) if v is not None else -1, "in_use": 0}
+
+    try:
+        # details=True는 used 필드를 포함한 상세 할당량 반환
+        quota = conn.network.get_quota(project_id, details=True)
+        quota_dict = quota.to_dict() if hasattr(quota, 'to_dict') else {}
+        keys = ["floatingip", "security_group", "security_group_rule", "network", "port", "router", "subnet"]
+        return {k: _q(quota_dict, k) for k in keys}
+    except Exception:
+        try:
+            # fallback: details 없이 limit만 조회
+            quota = conn.network.get_quota(project_id)
+            quota_dict = quota.to_dict() if hasattr(quota, 'to_dict') else {}
+            keys = ["floatingip", "security_group", "security_group_rule", "network", "port", "router", "subnet"]
+            result = {}
+            for k in keys:
+                val = quota_dict.get(k, -1)
+                result[k] = {"limit": int(val) if val is not None else -1, "in_use": 0}
+            return result
+        except Exception:
+            return {k: {"limit": -1, "in_use": 0} for k in ["floatingip", "security_group", "security_group_rule", "network", "port", "router", "subnet"]}
+
+
 def list_floating_ips(conn: openstack.connection.Connection, project_id: str | None = None) -> list[FloatingIpInfo]:
     kwargs: dict = {}
     if project_id:
