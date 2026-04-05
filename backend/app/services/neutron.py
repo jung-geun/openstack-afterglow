@@ -141,8 +141,11 @@ def delete_subnet(conn: openstack.connection.Connection, subnet_id: str) -> None
 # Floating IP
 # ---------------------------------------------------------------------------
 
-def list_floating_ips(conn: openstack.connection.Connection) -> list[FloatingIpInfo]:
-    return [_fip_to_info(f) for f in conn.network.ips()]
+def list_floating_ips(conn: openstack.connection.Connection, project_id: str | None = None) -> list[FloatingIpInfo]:
+    kwargs: dict = {}
+    if project_id:
+        kwargs["project_id"] = project_id
+    return [_fip_to_info(f) for f in conn.network.ips(**kwargs)]
 
 
 def create_floating_ip(conn: openstack.connection.Connection, floating_network_id: str) -> FloatingIpInfo:
@@ -189,16 +192,21 @@ def get_topology(conn: openstack.connection.Connection) -> TopologyData:
 
     # 3. 라우터 인터페이스 포트 → router_id→[subnet_ids] 맵 (DVR/HA 포함)
     router_subnets: dict[str, list[str]] = {}
+    router_subnet_port_count: dict[str, dict[str, int]] = {}  # rid → {sid → port 수}
     for port in _iter_router_interface_ports(conn):
         rid = port.device_id
         if not rid:
             continue
         if rid not in router_subnets:
             router_subnets[rid] = []
+        if rid not in router_subnet_port_count:
+            router_subnet_port_count[rid] = {}
         for fip in (port.fixed_ips or []):
             sid = fip.get("subnet_id")
-            if sid and sid not in router_subnets[rid]:
-                router_subnets[rid].append(sid)
+            if sid:
+                router_subnet_port_count[rid][sid] = router_subnet_port_count[rid].get(sid, 0) + 1
+                if sid not in router_subnets[rid]:
+                    router_subnets[rid].append(sid)
 
     # 4. 전체 라우터
     topo_routers = []
@@ -206,12 +214,14 @@ def get_topology(conn: openstack.connection.Connection) -> TopologyData:
         ext_net_id = None
         if r.external_gateway_info:
             ext_net_id = r.external_gateway_info.get("network_id")
+        dvr_sids = [sid for sid, cnt in router_subnet_port_count.get(r.id, {}).items() if cnt > 1]
         topo_routers.append(TopologyRouter(
             id=r.id,
             name=r.name or "",
             status=r.status or "",
             external_gateway_network_id=ext_net_id,
             connected_subnet_ids=router_subnets.get(r.id, []),
+            dvr_subnet_ids=dvr_sids,
             project_id=getattr(r, 'project_id', None),
         ))
 

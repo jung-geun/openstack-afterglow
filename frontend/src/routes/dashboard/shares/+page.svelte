@@ -1,5 +1,6 @@
 <script lang="ts">
   import { auth } from '$lib/stores/auth';
+  import { untrack } from 'svelte';
   import { api, ApiError, memoryCache } from '$lib/api/client';
   import type { Share } from '$lib/types/resources';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
@@ -77,8 +78,8 @@
     const projectId = $auth.projectId;
     if (!projectId) return;
     loading = true;
-    fetchShares();
-    const interval = setInterval(fetchShares, 10000);
+    untrack(() => { fetchShares(); });
+    const interval = setInterval(() => untrack(() => { fetchShares(); }), 10000);
     return () => clearInterval(interval);
   });
 </script>

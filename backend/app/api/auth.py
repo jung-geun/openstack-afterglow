@@ -48,6 +48,7 @@ async def login(req: LoginRequest, background_tasks: BackgroundTasks):
         user_id=data["user_id"],
         username=data["username"],
         expires_at=data["expires_at"],
+        roles=data.get("roles", []),
     )
 
 

@@ -69,6 +69,19 @@
     }
   }
 
+  function handleFileUpload(event: Event) {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      form.public_key = ((e.target?.result as string) ?? '').trim();
+    };
+    reader.readAsText(file);
+    // 같은 파일 재선택 허용
+    input.value = '';
+  }
+
   onMount(fetchKeypairs);
 </script>
 
@@ -88,7 +101,13 @@
             <input bind:value={form.name} type="text" placeholder="my-keypair" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" />
           </div>
           <div>
-            <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">공개키 (선택 - 비우면 자동 생성)</label>
+            <div class="flex items-center justify-between mb-1.5">
+              <label class="text-xs text-gray-400 uppercase tracking-wide">공개키 (선택 - 비우면 자동 생성)</label>
+              <label class="text-xs text-blue-400 hover:text-blue-300 cursor-pointer transition-colors">
+                파일 선택
+                <input type="file" accept=".pub,.pem,.txt" class="hidden" onchange={handleFileUpload} />
+              </label>
+            </div>
             <textarea bind:value={form.public_key} placeholder="ssh-rsa AAAA..." rows="3" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 font-mono resize-none"></textarea>
           </div>
         </div>

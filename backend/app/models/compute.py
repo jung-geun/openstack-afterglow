@@ -20,6 +20,7 @@ class ImageInfo(BaseModel):
     os_type: Optional[str] = None
     os_distro: Optional[str] = None
     created_at: Optional[str] = None
+    owner: Optional[str] = None
 
 
 class FlavorInfo(BaseModel):

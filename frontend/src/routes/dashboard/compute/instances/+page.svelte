@@ -1,5 +1,6 @@
 <script lang="ts">
   import { auth } from '$lib/stores/auth';
+  import { untrack } from 'svelte';
   import { api, ApiError, memoryCache } from '$lib/api/client';
   import { goto } from '$app/navigation';
   import type { Instance } from '$lib/types/resources';
@@ -82,8 +83,8 @@
     const projectId = $auth.projectId;
     if (!projectId) return;
     loading = true;
-    fetchInstances();
-    const interval = setInterval(fetchInstances, refreshIntervalMs);
+    untrack(() => { fetchInstances(); });
+    const interval = setInterval(() => untrack(() => { fetchInstances(); }), refreshIntervalMs);
     return () => clearInterval(interval);
   });
 </script>

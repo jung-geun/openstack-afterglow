@@ -1,5 +1,6 @@
 <script lang="ts">
   import { auth } from '$lib/stores/auth';
+  import { untrack } from 'svelte';
   import { api, ApiError, memoryCache } from '$lib/api/client';
   import { goto } from '$app/navigation';
   import type { Network } from '$lib/types/resources';
@@ -92,7 +93,7 @@
     const projectId = $auth.projectId;
     if (!projectId) return;
     loading = true;
-    fetchNetworks();
+    untrack(() => { fetchNetworks(); });
   });
 </script>
 

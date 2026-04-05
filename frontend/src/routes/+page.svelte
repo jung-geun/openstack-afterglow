@@ -62,6 +62,7 @@
 				expiresAt: data.expires_at ?? null,
 				sessionTimeoutSeconds,
 				sessionWarningBeforeSeconds,
+				roles: data.roles ?? [],
 			});
 			setAvailableProjects(projects);
 			goto('/dashboard');

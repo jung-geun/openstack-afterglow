@@ -164,6 +164,7 @@ class TopologyRouter(BaseModel):
     status: str
     external_gateway_network_id: Optional[str] = None
     connected_subnet_ids: list[str] = []
+    dvr_subnet_ids: list[str] = []
     project_id: Optional[str] = None
 
 

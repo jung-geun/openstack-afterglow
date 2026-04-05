@@ -15,6 +15,7 @@ class TokenResponse(BaseModel):
     user_id: str
     username: str
     expires_at: str
+    roles: list[str] = []
 
 
 class UserInfo(BaseModel):

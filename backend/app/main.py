@@ -9,7 +9,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import auth, images, flavors, libraries, instances, admin, volumes, volume_backups, shares, networks, keypairs, dashboard, routers as routers_api, loadbalancers, security_groups, metrics
+from app.api import auth, images, flavors, libraries, instances, admin, volumes, volume_backups, shares, networks, keypairs, dashboard, routers as routers_api, loadbalancers, security_groups, metrics, clusters, containers
 
 
 # ---------------------------------------------------------------------------
@@ -128,8 +128,8 @@ app.include_router(flavors.router, prefix="/api/flavors", tags=["flavors"])
 app.include_router(libraries.router, prefix="/api/libraries", tags=["libraries"])
 app.include_router(instances.router, prefix="/api/instances", tags=["instances"])
 app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
-app.include_router(volumes.router, prefix="/api/volumes", tags=["volumes"])
 app.include_router(volume_backups.router, prefix="/api/volumes/backups", tags=["volume-backups"])
+app.include_router(volumes.router, prefix="/api/volumes", tags=["volumes"])
 app.include_router(shares.router, prefix="/api/shares", tags=["shares"])
 app.include_router(networks.router, prefix="/api/networks", tags=["networks"])
 app.include_router(keypairs.router, prefix="/api/keypairs", tags=["keypairs"])
@@ -138,6 +138,8 @@ app.include_router(routers_api.router, prefix="/api/routers", tags=["routers"])
 app.include_router(loadbalancers.router, prefix="/api/loadbalancers", tags=["loadbalancers"])
 app.include_router(security_groups.router, prefix="/api/security-groups", tags=["security-groups"])
 app.include_router(metrics.router, prefix="/api/metrics", tags=["metrics"])
+app.include_router(clusters.router, prefix="/api/clusters", tags=["clusters"])
+app.include_router(containers.router, prefix="/api/containers", tags=["containers"])
 
 
 @app.get("/api/health")

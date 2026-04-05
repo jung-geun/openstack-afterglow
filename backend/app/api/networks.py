@@ -42,7 +42,7 @@ async def create_network(
 @router.get("/floating-ips", response_model=list[FloatingIpInfo])
 async def list_floating_ips(conn: openstack.connection.Connection = Depends(get_os_conn)):
     try:
-        return await asyncio.to_thread(neutron.list_floating_ips, conn)
+        return await asyncio.to_thread(neutron.list_floating_ips, conn, conn._union_project_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Floating IP 목록 조회 실패: {e}")
 
