@@ -15,7 +15,12 @@ def _get_zun_endpoint(conn: openstack.connection.Connection) -> str:
             service_type='container',
             interface='public',
         )
-        return endpoint.rstrip('/')
+        base = endpoint.rstrip('/')
+        # 서비스 카탈로그 endpoint에 이미 /v1 경로가 포함된 경우 제거
+        # (예: https://zun.dmslab.re.kr/v1/ → /v1/containers 이중 경로 방지)
+        if base.endswith('/v1'):
+            base = base[:-3]
+        return base
     except Exception:
         pass
     # fallback: identity endpoint에서 추론

@@ -113,6 +113,8 @@ def get_share_quota(conn) -> dict:
             "snapshot_gigabytes": _q("snapshot_gigabytes"),
         }
     except Exception:
+        import logging as _logging
+        _logging.getLogger(__name__).warning("Manila share quota 조회 실패", exc_info=True)
         return {k: {"limit": -1, "in_use": 0} for k in ["shares", "gigabytes", "share_networks", "share_groups", "snapshot_gigabytes"]}
 
 

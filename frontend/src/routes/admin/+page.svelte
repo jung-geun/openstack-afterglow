@@ -8,6 +8,8 @@
 	// 관리자 전용 타입
 	interface Overview {
 		hypervisor_count: number;
+		running_vms: number;
+		gpu_instances: number;
 		vcpus: { total: number; used: number };
 		ram_gb: { total: number; used: number };
 		disk_gb: { total: number; used: number };
@@ -42,6 +44,11 @@
 		project_id: string | null;
 		created_at: string | null;
 	}
+	interface PagedResponse<T> {
+		items: T[];
+		next_marker: string | null;
+		count: number;
+	}
 
 	type Tab = 'overview' | 'hypervisors' | 'all-instances' | 'all-volumes';
 
@@ -53,6 +60,14 @@
 	let hypervisors = $state<Hypervisor[]>([]);
 	let allInstances = $state<AdminInstance[]>([]);
 	let allVolumes = $state<AdminVolume[]>([]);
+
+	// 페이지네이션 상태
+	let instancePageSize = $state(20);
+	let instanceMarkerStack = $state<string[]>([]);  // 이전 페이지 marker 스택
+	let instanceNextMarker = $state<string | null>(null);
+	let volumePageSize = $state(20);
+	let volumeMarkerStack = $state<string[]>([]);
+	let volumeNextMarker = $state<string | null>(null);
 
 	let loading = $state(true);
 	let error = $state('');
@@ -88,17 +103,25 @@
 		}
 	}
 
-	async function loadAllInstances() {
+	async function loadAllInstances(marker?: string) {
 		try {
-			allInstances = await api.get<AdminInstance[]>('/api/admin/all-instances', token, projectId);
+			let url = `/api/admin/all-instances?limit=${instancePageSize}`;
+			if (marker) url += `&marker=${marker}`;
+			const res = await api.get<PagedResponse<AdminInstance>>(url, token, projectId);
+			allInstances = res.items;
+			instanceNextMarker = res.next_marker;
 		} catch {
 			allInstances = [];
 		}
 	}
 
-	async function loadAllVolumes() {
+	async function loadAllVolumes(marker?: string) {
 		try {
-			allVolumes = await api.get<AdminVolume[]>('/api/admin/all-volumes', token, projectId);
+			let url = `/api/admin/all-volumes?limit=${volumePageSize}`;
+			if (marker) url += `&marker=${marker}`;
+			const res = await api.get<PagedResponse<AdminVolume>>(url, token, projectId);
+			allVolumes = res.items;
+			volumeNextMarker = res.next_marker;
 		} catch {
 			allVolumes = [];
 		}
@@ -109,8 +132,16 @@
 		error = '';
 		if (tab === 'overview' && !overview) await loadOverview();
 		if (tab === 'hypervisors' && hypervisors.length === 0) await loadHypervisors();
-		if (tab === 'all-instances' && allInstances.length === 0) await loadAllInstances();
-		if (tab === 'all-volumes' && allVolumes.length === 0) await loadAllVolumes();
+		if (tab === 'all-instances' && allInstances.length === 0) {
+			instanceMarkerStack = [];
+			instanceNextMarker = null;
+			await loadAllInstances();
+		}
+		if (tab === 'all-volumes' && allVolumes.length === 0) {
+			volumeMarkerStack = [];
+			volumeNextMarker = null;
+			await loadAllVolumes();
+		}
 	}
 
 	onMount(async () => {
@@ -151,10 +182,18 @@
 		<LoadingSkeleton variant="table" rows={5} />
 	{:else if activeTab === 'overview'}
 		{#if overview}
-			<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+			<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
 				<div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
 					<div class="text-xs text-gray-500 mb-1">하이퍼바이저</div>
 					<div class="text-2xl font-bold text-white">{overview.hypervisor_count}</div>
+				</div>
+				<div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+					<div class="text-xs text-gray-500 mb-1">총 VM</div>
+					<div class="text-2xl font-bold text-white">{overview.running_vms}</div>
+				</div>
+				<div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+					<div class="text-xs text-gray-500 mb-1">GPU VM</div>
+					<div class="text-2xl font-bold {overview.gpu_instances > 0 ? 'text-purple-300' : 'text-white'}">{overview.gpu_instances}</div>
 				</div>
 				<div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
 					<div class="text-xs text-gray-500 mb-1">vCPU</div>
@@ -216,7 +255,18 @@
 		{/if}
 
 	{:else if activeTab === 'all-instances'}
-		<button onclick={loadAllInstances} class="text-xs text-gray-400 hover:text-white mb-4 transition-colors">새로고침</button>
+		<div class="flex items-center gap-3 mb-4">
+			<button onclick={() => { instanceMarkerStack = []; instanceNextMarker = null; loadAllInstances(); }} class="text-xs text-gray-400 hover:text-white transition-colors">새로고침</button>
+			<div class="flex items-center gap-1 text-xs text-gray-500">
+				표시:
+				{#each [10, 20, 30] as n}
+					<button
+						onclick={() => { instancePageSize = n; instanceMarkerStack = []; instanceNextMarker = null; loadAllInstances(); }}
+						class="px-2 py-0.5 rounded {instancePageSize === n ? 'bg-blue-600 text-white' : 'bg-gray-800 hover:bg-gray-700 text-gray-400'}"
+					>{n}</button>
+				{/each}
+			</div>
+		</div>
 		<div class="overflow-x-auto">
 			<table class="w-full text-sm">
 				<thead>
@@ -241,9 +291,41 @@
 				</tbody>
 			</table>
 		</div>
+		<div class="flex items-center justify-between mt-3">
+			<button
+				disabled={instanceMarkerStack.length === 0}
+				onclick={() => {
+					const prev = instanceMarkerStack.slice(0, -1);
+					const marker = prev[prev.length - 1];
+					instanceMarkerStack = prev;
+					loadAllInstances(marker);
+				}}
+				class="px-3 py-1.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed"
+			>← 이전</button>
+			<button
+				disabled={!instanceNextMarker}
+				onclick={() => {
+					if (!instanceNextMarker) return;
+					instanceMarkerStack = [...instanceMarkerStack, instanceNextMarker];
+					loadAllInstances(instanceNextMarker);
+				}}
+				class="px-3 py-1.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed"
+			>다음 →</button>
+		</div>
 
 	{:else if activeTab === 'all-volumes'}
-		<button onclick={loadAllVolumes} class="text-xs text-gray-400 hover:text-white mb-4 transition-colors">새로고침</button>
+		<div class="flex items-center gap-3 mb-4">
+			<button onclick={() => { volumeMarkerStack = []; volumeNextMarker = null; loadAllVolumes(); }} class="text-xs text-gray-400 hover:text-white transition-colors">새로고침</button>
+			<div class="flex items-center gap-1 text-xs text-gray-500">
+				표시:
+				{#each [10, 20, 30] as n}
+					<button
+						onclick={() => { volumePageSize = n; volumeMarkerStack = []; volumeNextMarker = null; loadAllVolumes(); }}
+						class="px-2 py-0.5 rounded {volumePageSize === n ? 'bg-blue-600 text-white' : 'bg-gray-800 hover:bg-gray-700 text-gray-400'}"
+					>{n}</button>
+				{/each}
+			</div>
+		</div>
 		<div class="overflow-x-auto">
 			<table class="w-full text-sm">
 				<thead>
@@ -267,6 +349,27 @@
 					{/each}
 				</tbody>
 			</table>
+		</div>
+		<div class="flex items-center justify-between mt-3">
+			<button
+				disabled={volumeMarkerStack.length === 0}
+				onclick={() => {
+					const prev = volumeMarkerStack.slice(0, -1);
+					const marker = prev[prev.length - 1];
+					volumeMarkerStack = prev;
+					loadAllVolumes(marker);
+				}}
+				class="px-3 py-1.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed"
+			>← 이전</button>
+			<button
+				disabled={!volumeNextMarker}
+				onclick={() => {
+					if (!volumeNextMarker) return;
+					volumeMarkerStack = [...volumeMarkerStack, volumeNextMarker];
+					loadAllVolumes(volumeNextMarker);
+				}}
+				class="px-3 py-1.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed"
+			>다음 →</button>
 		</div>
 
 	{/if}

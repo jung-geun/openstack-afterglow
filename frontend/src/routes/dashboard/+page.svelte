@@ -63,13 +63,9 @@
   $effect(() => {
     const pid = $auth.projectId;
     if (!pid) return;
-    loadConfig().then(() => {
-      fetchSummary();
-      fetchQuotas();
-      fetchUsage();
-      const interval = setInterval(fetchSummary, refreshIntervalMs);
-      return () => clearInterval(interval);
-    });
+    loadConfig().then(() => { fetchSummary(); fetchQuotas(); fetchUsage(); });
+    const interval = setInterval(fetchSummary, refreshIntervalMs);
+    return () => clearInterval(interval);
   });
 
   function downloadCSV() {
@@ -181,6 +177,34 @@
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- 퀵 링크 -->
+  <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+    <a href="/dashboard/compute/instances" class="bg-gray-900 border border-gray-800 hover:border-gray-600 rounded-xl p-4 transition-colors text-center">
+      <div class="text-sm font-medium text-white mb-0.5">인스턴스</div>
+      <div class="text-xs text-gray-500">VM 관리</div>
+    </a>
+    <a href="/dashboard/volumes" class="bg-gray-900 border border-gray-800 hover:border-gray-600 rounded-xl p-4 transition-colors text-center">
+      <div class="text-sm font-medium text-white mb-0.5">볼륨</div>
+      <div class="text-xs text-gray-500">블록 스토리지</div>
+    </a>
+    <a href="/dashboard/shares" class="bg-gray-900 border border-gray-800 hover:border-gray-600 rounded-xl p-4 transition-colors text-center">
+      <div class="text-sm font-medium text-white mb-0.5">공유 스토리지</div>
+      <div class="text-xs text-gray-500">Manila CephFS</div>
+    </a>
+    <a href="/dashboard/network/networks" class="bg-gray-900 border border-gray-800 hover:border-gray-600 rounded-xl p-4 transition-colors text-center">
+      <div class="text-sm font-medium text-white mb-0.5">네트워크</div>
+      <div class="text-xs text-gray-500">가상 네트워크</div>
+    </a>
+    <a href="/dashboard/network/topology" class="bg-gray-900 border border-gray-800 hover:border-gray-600 rounded-xl p-4 transition-colors text-center">
+      <div class="text-sm font-medium text-white mb-0.5">토폴로지</div>
+      <div class="text-xs text-gray-500">네트워크 시각화</div>
+    </a>
+    <a href="/create" class="bg-blue-900/40 border border-blue-800 hover:border-blue-600 rounded-xl p-4 transition-colors text-center">
+      <div class="text-sm font-medium text-blue-300 mb-0.5">+ VM 생성</div>
+      <div class="text-xs text-blue-500">새 인스턴스 배포</div>
+    </a>
   </div>
 
   <!-- Quota 개요 -->
@@ -325,31 +349,4 @@
     {/if}
   </div>
 
-  <!-- 퀵 링크 -->
-  <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-    <a href="/dashboard/compute/instances" class="bg-gray-900 border border-gray-800 hover:border-gray-600 rounded-xl p-4 transition-colors text-center">
-      <div class="text-sm font-medium text-white mb-0.5">인스턴스</div>
-      <div class="text-xs text-gray-500">VM 관리</div>
-    </a>
-    <a href="/dashboard/volumes" class="bg-gray-900 border border-gray-800 hover:border-gray-600 rounded-xl p-4 transition-colors text-center">
-      <div class="text-sm font-medium text-white mb-0.5">볼륨</div>
-      <div class="text-xs text-gray-500">블록 스토리지</div>
-    </a>
-    <a href="/dashboard/shares" class="bg-gray-900 border border-gray-800 hover:border-gray-600 rounded-xl p-4 transition-colors text-center">
-      <div class="text-sm font-medium text-white mb-0.5">공유 스토리지</div>
-      <div class="text-xs text-gray-500">Manila CephFS</div>
-    </a>
-    <a href="/dashboard/network/networks" class="bg-gray-900 border border-gray-800 hover:border-gray-600 rounded-xl p-4 transition-colors text-center">
-      <div class="text-sm font-medium text-white mb-0.5">네트워크</div>
-      <div class="text-xs text-gray-500">가상 네트워크</div>
-    </a>
-    <a href="/dashboard/network/topology" class="bg-gray-900 border border-gray-800 hover:border-gray-600 rounded-xl p-4 transition-colors text-center">
-      <div class="text-sm font-medium text-white mb-0.5">토폴로지</div>
-      <div class="text-xs text-gray-500">네트워크 시각화</div>
-    </a>
-    <a href="/create" class="bg-blue-900/40 border border-blue-800 hover:border-blue-600 rounded-xl p-4 transition-colors text-center">
-      <div class="text-sm font-medium text-blue-300 mb-0.5">+ VM 생성</div>
-      <div class="text-xs text-blue-500">새 인스턴스 배포</div>
-    </a>
-  </div>
 </div>

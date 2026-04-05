@@ -1,7 +1,11 @@
+import logging
 import openstack
+from datetime import datetime
 from typing import Optional
 
 from app.models.compute import FlavorInfo, InstanceInfo, IpAddress
+
+_logger = logging.getLogger(__name__)
 
 
 def list_flavors(conn: openstack.connection.Connection) -> list[FlavorInfo]:
@@ -149,6 +153,7 @@ def get_project_quota(conn: openstack.connection.Connection, project_id: str) ->
             "server_groups": _extract(getattr(quota, "server_groups", None)),
         }
     except Exception:
+        _logger.warning("Nova quota_set 조회 실패 — limits API로 fallback", exc_info=True)
         # fallback: limits API 사용
         limits = conn.compute.get_limits()
         a = limits.absolute
@@ -164,7 +169,10 @@ def get_project_quota(conn: openstack.connection.Connection, project_id: str) ->
 def get_project_usage(conn: openstack.connection.Connection, project_id: str, start: str, end: str) -> dict:
     """Nova simple-tenant-usage API로 기간별 사용량 조회."""
     try:
-        usage = conn.compute.get_usage(project_id, start=start, end=end)
+        # openstacksdk get_usage는 datetime 객체를 기대함 (문자열 전달 시 AttributeError)
+        start_dt = datetime.strptime(start, "%Y-%m-%d")
+        end_dt = datetime.strptime(end, "%Y-%m-%d")
+        usage = conn.compute.get_usage(project_id, start=start_dt, end=end_dt)
         server_usages = getattr(usage, 'server_usages', []) or []
         return {
             "total_vcpus_usage": getattr(usage, 'total_vcpus_usage', 0.0),
@@ -185,6 +193,7 @@ def get_project_usage(conn: openstack.connection.Connection, project_id: str, st
             ],
         }
     except Exception:
+        _logger.warning("Nova get_usage 조회 실패", exc_info=True)
         return {
             "total_vcpus_usage": 0.0,
             "total_memory_mb_usage": 0.0,

@@ -85,6 +85,8 @@ def get_volume_quota(conn: openstack.connection.Connection, project_id: str) -> 
             "backup_gigabytes": _extract(getattr(quota, "backup_gigabytes", None)),
         }
     except Exception:
+        import logging as _logging
+        _logging.getLogger(__name__).warning("Cinder quota_set 조회 실패 — limits API로 fallback", exc_info=True)
         # fallback: limits API
         limits = conn.block_storage.get_limits()
         a = limits.absolute

@@ -158,6 +158,8 @@ def get_network_quota(conn: openstack.connection.Connection, project_id: str) ->
         keys = ["floatingip", "security_group", "security_group_rule", "network", "port", "router", "subnet"]
         return {k: _q(quota_dict, k) for k in keys}
     except Exception:
+        import logging as _logging
+        _logging.getLogger(__name__).warning("Neutron quota details 조회 실패 — fallback", exc_info=True)
         try:
             # fallback: details 없이 limit만 조회
             quota = conn.network.get_quota(project_id)

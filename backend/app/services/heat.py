@@ -66,7 +66,7 @@ def list_stack_events(conn: openstack.connection.Connection, stack_id: str) -> l
     try:
         _get_stack(conn, stack_id)  # 스택 존재 확인
         events = []
-        for e in conn.orchestration.events(stack_id):
+        for e in conn.orchestration.stack_events(stack_id):
             events.append({
                 "resource_name": getattr(e, 'resource_name', None) or getattr(e, 'logical_resource_id', ''),
                 "resource_status": getattr(e, 'resource_status', '') or getattr(e, 'status', ''),
