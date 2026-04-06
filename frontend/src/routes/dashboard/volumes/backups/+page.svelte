@@ -3,6 +3,7 @@
   import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+  import { formatStorage } from '$lib/utils/format';
 
   interface VolumeBackup {
     id: string;
@@ -99,7 +100,7 @@
           <select bind:value={form.volume_id} class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
             <option value="">볼륨을 선택하세요</option>
             {#each volumes as vol}
-              <option value={vol.id}>{vol.name || vol.id.slice(0, 8)} ({vol.size} GB)</option>
+              <option value={vol.id}>{vol.name || vol.id.slice(0, 8)} ({formatStorage(vol.size)})</option>
             {/each}
           </select>
         </div>
@@ -158,7 +159,7 @@
             <tr class="border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors">
               <td class="py-3 pr-6 font-medium text-white">{backup.name || backup.id.slice(0, 8)}</td>
               <td class="py-3 pr-6"><span class="px-2 py-0.5 rounded text-xs font-medium {statusColor[backup.status] ?? 'text-gray-400 bg-gray-800'}">{backup.status}</span></td>
-              <td class="py-3 pr-6 text-gray-400">{backup.size} GB</td>
+              <td class="py-3 pr-6 text-gray-400">{formatStorage(backup.size)}</td>
               <td class="py-3 pr-6"><span class="text-xs {backup.is_incremental ? 'text-blue-400' : 'text-gray-500'}">{backup.is_incremental ? '증분' : '전체'}</span></td>
               <td class="py-3 pr-6 text-gray-400 text-xs">{backup.created_at ? new Date(backup.created_at).toLocaleDateString('ko-KR') : '-'}</td>
               <td class="py-3 text-right">

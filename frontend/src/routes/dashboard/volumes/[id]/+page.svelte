@@ -4,6 +4,7 @@
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import { formatStorage } from '$lib/utils/format';
 
 	interface Volume {
 		id: string;
@@ -155,7 +156,7 @@
 				</div>
 				<div>
 					<dt class="text-xs text-gray-500 mb-0.5">크기</dt>
-					<dd class="text-sm text-gray-300">{volume.size} GB</dd>
+					<dd class="text-sm text-gray-300">{formatStorage(volume.size)}</dd>
 				</div>
 				<div>
 					<dt class="text-xs text-gray-500 mb-0.5">볼륨 타입</dt>

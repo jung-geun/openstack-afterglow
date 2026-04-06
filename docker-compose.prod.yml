@@ -1,11 +1,18 @@
-# 개발 환경용 docker-compose
-# 프로덕션은 docker-compose.prod.yml 참고
+# 프로덕션 환경용 docker-compose
+# 사용법: docker compose -f docker-compose.prod.yml up -d
+#
+# 필수 환경 변수 (.env 파일 또는 셸에서 설정):
+#   REGISTRY       - 컨테이너 레지스트리 주소 (예: ghcr.io/myorg)
+#   IMAGE_TAG      - 이미지 태그 (예: latest, v1.2.3)
+#   ORIGIN         - 프론트엔드 접근 URL (예: https://union.example.com)
+#   PUBLIC_API_BASE - 백엔드 API URL (예: https://union.example.com)
+
 services:
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
-    restart: unless-stopped
+    restart: always
     logging:
       driver: json-file
       options:
@@ -13,18 +20,20 @@ services:
         max-file: "3"
 
   backend:
-    build: ./backend
-    image: union-backend:dev
+    image: ${REGISTRY}/union-backend:${IMAGE_TAG:-latest}
+    pull_policy: always
     ports:
       - "8000:8000"
     volumes:
-      - ./backend/app:/app/app   # 개발 시 hot-reload
       - ./union.toml:/app/union.toml:ro
       - ./logs:/app/logs
-    command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+    environment:
+      - OPENSTACK_PASSWORD=${OPENSTACK_PASSWORD}
+      - SECRET_KEY=${SECRET_KEY}
     depends_on:
       - redis
-    restart: unless-stopped
+    restart: always
     logging:
       driver: json-file
       options:
@@ -32,23 +41,23 @@ services:
         max-file: "5"
 
   frontend:
-    build: ./frontend
-    image: union-frontend:dev
+    image: ${REGISTRY}/union-frontend:${IMAGE_TAG:-latest}
+    pull_policy: always
     ports:
       - "3000:3000"
     environment:
-      - ORIGIN=http://localhost:3000
-      - PUBLIC_API_BASE=http://localhost:8000
+      - ORIGIN=${ORIGIN:-http://localhost:3000}
+      - PUBLIC_API_BASE=${PUBLIC_API_BASE:-http://localhost:8000}
     depends_on:
       - backend
-    restart: unless-stopped
+    restart: always
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
 
-  # ── 모니터링 프로필 (docker compose --profile monitoring up) ──────────────
+  # ── 모니터링 프로필 (docker compose --profile monitoring -f docker-compose.prod.yml up -d) ──
 
   opensearch:
     image: opensearchproject/opensearch:2.13.0
@@ -61,7 +70,7 @@ services:
       - "9200:9200"
     volumes:
       - opensearch-data:/usr/share/opensearch/data
-    restart: unless-stopped
+    restart: always
     logging:
       driver: json-file
       options:
@@ -78,7 +87,7 @@ services:
       - "5601:5601"
     depends_on:
       - opensearch
-    restart: unless-stopped
+    restart: always
     logging:
       driver: json-file
       options:
@@ -93,7 +102,7 @@ services:
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prom-data:/prometheus
-    restart: unless-stopped
+    restart: always
     logging:
       driver: json-file
       options:
@@ -106,14 +115,14 @@ services:
     ports:
       - "3001:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
       - GF_USERS_ALLOW_SIGN_UP=false
     volumes:
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - grafana-data:/var/lib/grafana
     depends_on:
       - prometheus
-    restart: unless-stopped
+    restart: always
     logging:
       driver: json-file
       options:

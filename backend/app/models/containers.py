@@ -54,6 +54,12 @@ class ZunContainerInfo(BaseModel):
     addresses: dict | None = None
 
 
+class PortMapping(BaseModel):
+    container_port: int
+    host_port: int | None = None
+    protocol: str = "tcp"
+
+
 class CreateZunContainerRequest(BaseModel):
     name: str
     image: str
@@ -61,6 +67,7 @@ class CreateZunContainerRequest(BaseModel):
     cpu: float | None = None
     memory: str | None = None
     environment: dict | None = None
+    ports: list[PortMapping] | None = None
     auto_remove: bool = False
 
 

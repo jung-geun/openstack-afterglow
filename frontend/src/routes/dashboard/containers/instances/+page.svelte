@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
+  import { untrack } from 'svelte';
   import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
@@ -31,6 +31,9 @@
     message: string;
   }
 
+  interface EnvVar { key: string; value: string; }
+  interface PortMapping { container_port: number; host_port: number; protocol: string; }
+
   let containers = $state<ZunContainer[]>([]);
   let serviceAvailable = $state(true);
   let serviceMessage = $state('');
@@ -41,6 +44,13 @@
   let creating = $state(false);
   let createError = $state('');
   let form = $state({ name: '', image: '', command: '', cpu: 0.5, memory: '512' });
+  let envVars = $state<EnvVar[]>([{ key: '', value: '' }]);
+  let portMappings = $state<PortMapping[]>([{ container_port: 80, host_port: 0, protocol: 'tcp' }]);
+
+  function addEnvVar() { envVars = [...envVars, { key: '', value: '' }]; }
+  function removeEnvVar(i: number) { envVars = envVars.filter((_, idx) => idx !== i); }
+  function addPort() { portMappings = [...portMappings, { container_port: 80, host_port: 0, protocol: 'tcp' }]; }
+  function removePort(i: number) { portMappings = portMappings.filter((_, idx) => idx !== i); }
 
   async function fetchContainers() {
     try {
@@ -68,9 +78,28 @@
         memory: form.memory,
       };
       if (form.command.trim()) body.command = form.command;
+
+      const envEntries = envVars.filter(e => e.key.trim());
+      if (envEntries.length > 0) {
+        const environment: Record<string, string> = {};
+        envEntries.forEach(e => { environment[e.key.trim()] = e.value; });
+        body.environment = environment;
+      }
+
+      const validPorts = portMappings.filter(p => p.container_port > 0);
+      if (validPorts.length > 0) {
+        body.ports = validPorts.map(p => ({
+          container_port: p.container_port,
+          ...(p.host_port > 0 ? { host_port: p.host_port } : {}),
+          protocol: p.protocol,
+        }));
+      }
+
       await api.post('/api/containers', body, $auth.token ?? undefined, $auth.projectId ?? undefined);
       showModal = false;
       form = { name: '', image: '', command: '', cpu: 0.5, memory: '512' };
+      envVars = [{ key: '', value: '' }];
+      portMappings = [{ container_port: 80, host_port: 0, protocol: 'tcp' }];
       await fetchContainers();
     } catch (e) {
       createError = e instanceof ApiError ? e.message : '생성 실패';
@@ -116,14 +145,22 @@
     }
   }
 
-  onMount(fetchContainers);
+  $effect(() => {
+    const projectId = $auth.projectId;
+    if (!projectId) return;
+    loading = true;
+    untrack(() => { fetchContainers(); });
+    const interval = setInterval(() => untrack(() => { fetchContainers(); }), 5000);
+    return () => clearInterval(interval);
+  });
 </script>
 
 {#if showModal}
   <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onclick={() => { showModal = false; createError = ''; }} role="dialog" aria-modal="true" tabindex="-1" onkeydown={(e) => e.key === 'Escape' && (showModal = false)}>
-    <div class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl" onclick={(e) => e.stopPropagation()} role="document" onkeydown={(e) => e.stopPropagation()}>
+    <div class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-2xl mx-4 shadow-2xl max-h-[90vh] overflow-y-auto" onclick={(e) => e.stopPropagation()} role="document" onkeydown={(e) => e.stopPropagation()}>
       <h2 class="text-lg font-semibold text-white mb-5">컨테이너 생성</h2>
       <div class="space-y-4">
+        <!-- 기본 설정 -->
         <div>
           <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">이름</label>
           <input bind:value={form.name} type="text" placeholder="my-container" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" />
@@ -144,6 +181,50 @@
           <div>
             <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">메모리 (MB)</label>
             <input bind:value={form.memory} type="text" placeholder="512" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" />
+          </div>
+        </div>
+
+        <!-- 환경 변수 -->
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <label class="block text-xs text-gray-400 uppercase tracking-wide">환경 변수</label>
+            <button type="button" onclick={addEnvVar} class="text-xs text-blue-400 hover:text-blue-300 transition-colors">+ 추가</button>
+          </div>
+          <div class="space-y-2">
+            {#each envVars as env, i (i)}
+              <div class="flex gap-2 items-center">
+                <input bind:value={env.key} type="text" placeholder="KEY" class="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-3 py-1.5 text-white text-xs focus:outline-none focus:border-blue-500 font-mono" />
+                <span class="text-gray-600 text-xs">=</span>
+                <input bind:value={env.value} type="text" placeholder="value" class="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-3 py-1.5 text-white text-xs focus:outline-none focus:border-blue-500 font-mono" />
+                <button type="button" onclick={() => removeEnvVar(i)} class="text-gray-600 hover:text-red-400 transition-colors text-xs px-1">✕</button>
+              </div>
+            {/each}
+          </div>
+        </div>
+
+        <!-- 포트 매핑 -->
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <label class="block text-xs text-gray-400 uppercase tracking-wide">포트 매핑</label>
+            <button type="button" onclick={addPort} class="text-xs text-blue-400 hover:text-blue-300 transition-colors">+ 추가</button>
+          </div>
+          <div class="space-y-2">
+            {#each portMappings as port, i (i)}
+              <div class="flex gap-2 items-center">
+                <div class="flex-1">
+                  <input bind:value={port.container_port} type="number" min="1" max="65535" placeholder="컨테이너 포트" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-1.5 text-white text-xs focus:outline-none focus:border-blue-500" />
+                </div>
+                <span class="text-gray-600 text-xs">→</span>
+                <div class="flex-1">
+                  <input bind:value={port.host_port} type="number" min="0" max="65535" placeholder="호스트 포트 (선택)" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-1.5 text-white text-xs focus:outline-none focus:border-blue-500" />
+                </div>
+                <select bind:value={port.protocol} class="bg-gray-800 border border-gray-600 rounded-lg px-2 py-1.5 text-white text-xs focus:outline-none focus:border-blue-500">
+                  <option value="tcp">TCP</option>
+                  <option value="udp">UDP</option>
+                </select>
+                <button type="button" onclick={() => removePort(i)} class="text-gray-600 hover:text-red-400 transition-colors text-xs px-1">✕</button>
+              </div>
+            {/each}
           </div>
         </div>
       </div>

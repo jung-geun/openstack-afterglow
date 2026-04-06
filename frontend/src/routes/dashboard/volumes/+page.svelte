@@ -5,6 +5,7 @@
   import { goto } from '$app/navigation';
   import type { Volume } from '$lib/types/resources';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+  import { formatStorage } from '$lib/utils/format';
 
   const statusColor: Record<string, string> = {
     available:          'text-green-400 bg-green-900/30',
@@ -158,7 +159,7 @@
                 {#if vol.name}<span class="text-white">{vol.name}</span>{:else}<span class="text-gray-400 font-mono text-xs">{vol.id}</span>{/if}
               </td>
               <td class="py-3 pr-6"><span class="px-2 py-0.5 rounded text-xs font-medium {statusColor[vol.status] ?? 'text-gray-400 bg-gray-800'}">{vol.status}</span></td>
-              <td class="py-3 pr-6 text-gray-400">{vol.size} GB</td>
+              <td class="py-3 pr-6 text-gray-400">{formatStorage(vol.size)}</td>
               <td class="py-3 pr-6 text-gray-400 text-xs">{vol.volume_type ?? '-'}</td>
               <td class="py-3 pr-6 text-xs">
                 {#if vol.attachments.length > 0}

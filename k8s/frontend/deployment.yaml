@@ -17,18 +17,28 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: union-frontend:latest
-          imagePullPolicy: IfNotPresent
+          # 이미지 태그: latest (릴리즈), dev (main 브랜치), v1.2.3 (버전 태그)
+          # 실제 레지스트리 주소로 변경 필요
+          # 예: ghcr.io/myorg/union-frontend:latest
+          #     registry.gitlab.com/myorg/union/frontend:latest
+          image: ghcr.io/IMAGE_OWNER/union-frontend:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 3000
           env:
             # 실제 서비스 도메인으로 변경 필요
             - name: ORIGIN
-              value: "http://union.example.com"
-            # PUBLIC_API_BASE는 브라우저에서 직접 접근 가능한 URL이어야 합니다.
-            # Ingress를 사용하는 경우 ORIGIN과 동일하게 설정합니다.
+              valueFrom:
+                configMapKeyRef:
+                  name: union-config
+                  key: APP_ORIGIN
+            # PUBLIC_API_BASE는 브라우저에서 직접 접근 가능한 URL
+            # Ingress를 통해 /api 경로를 백엔드로 라우팅하는 경우 ORIGIN과 동일하게 설정
             - name: PUBLIC_API_BASE
-              value: "http://union.example.com"
+              valueFrom:
+                configMapKeyRef:
+                  name: union-config
+                  key: APP_ORIGIN
           livenessProbe:
             httpGet:
               path: /

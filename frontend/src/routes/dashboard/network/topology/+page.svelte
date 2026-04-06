@@ -1,8 +1,21 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import GlobalTopology from '$lib/components/GlobalTopology.svelte';
+	import InstanceDetailPanel from '$lib/components/InstanceDetailPanel.svelte';
+	import RouterDetailPanel from '$lib/components/RouterDetailPanel.svelte';
+
+	let isLight = $state(false);
+	onMount(() => {
+		isLight = document.documentElement.classList.contains('light');
+		const obs = new MutationObserver(() => {
+			isLight = document.documentElement.classList.contains('light');
+		});
+		obs.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+		return () => obs.disconnect();
+	});
 
 	interface SubnetDetail {
 		id: string; name: string; cidr: string;
@@ -41,6 +54,8 @@
 	let data = $state<TopologyData | null>(null);
 	let loading = $state(true);
 	let error = $state('');
+	let selectedInstanceId = $state<string | null>(null);
+	let selectedRouterId = $state<string | null>(null);
 
 	$effect(() => {
 		if (!$auth.token) return;
@@ -84,7 +99,12 @@
 		<LoadingSkeleton variant="card" rows={8} />
 	{:else if data}
 		<div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4">
-			<GlobalTopology {data} projectId={$auth.projectId} />
+			<GlobalTopology
+				{data}
+				projectId={$auth.projectId}
+				onSelectInstance={(id) => { selectedInstanceId = id; }}
+				onSelectRouter={(id) => { selectedRouterId = id; }}
+			/>
 		</div>
 
 		<!-- 범례 -->
@@ -102,23 +122,23 @@
 				내부 네트워크
 			</span>
 			<span class="flex items-center gap-1.5">
-				<span class="inline-block w-3 h-3 rounded-full" style="background:#1c1400;border:1px solid #f59e0b"></span>
+				<span class="inline-block w-3 h-3 rounded-full" style="background:{isLight ? '#fffbeb' : '#1c1400'};border:1px solid #f59e0b"></span>
 				라우터 (외부 게이트웨이)
 			</span>
 			<span class="flex items-center gap-1.5">
-				<span class="inline-block w-3 h-3 rounded-full" style="background:#0f172a;border:1px solid #64748b"></span>
+				<span class="inline-block w-3 h-3 rounded-full" style="background:{isLight ? '#f8fafc' : '#0f172a'};border:1px solid #64748b"></span>
 				라우터 (내부)
 			</span>
 			<span class="flex items-center gap-1.5">
-				<span class="inline-block w-3 h-3 rounded" style="background:#052e16;border:1px solid #22c55e"></span>
+				<span class="inline-block w-3 h-3 rounded" style="background:{isLight ? '#f0fdf4' : '#052e16'};border:1px solid #22c55e"></span>
 				인스턴스 (ACTIVE)
 			</span>
 			<span class="flex items-center gap-1.5">
-				<span class="inline-block w-3 h-3 rounded" style="background:#450a0a;border:1px solid #ef4444"></span>
+				<span class="inline-block w-3 h-3 rounded" style="background:{isLight ? '#fef2f2' : '#450a0a'};border:1px solid #ef4444"></span>
 				인스턴스 (SHUTOFF/ERROR)
 			</span>
 			<span class="flex items-center gap-1.5">
-				<span class="inline-block w-3 h-3 rounded" style="background:#1c1917;border:1px solid #78716c"></span>
+				<span class="inline-block w-3 h-3 rounded" style="background:{isLight ? '#f8fafc' : '#1c1917'};border:1px solid #78716c"></span>
 				인스턴스 (기타)
 			</span>
 		</div>
@@ -135,3 +155,33 @@
 		</div>
 	{/if}
 </div>
+
+{#if selectedInstanceId}
+	<div
+		class="fixed inset-0 z-40"
+		role="dialog"
+		aria-modal="true"
+		onkeydown={(e) => e.key === 'Escape' && (selectedInstanceId = null)}
+		tabindex="-1"
+	>
+		<div class="absolute inset-0 bg-black/50" onclick={() => selectedInstanceId = null}></div>
+		<div class="absolute right-0 top-14 bottom-0 w-[75vw] max-w-5xl bg-gray-950 border-l border-gray-700 overflow-y-auto shadow-2xl">
+			<InstanceDetailPanel instanceId={selectedInstanceId} onClose={() => selectedInstanceId = null} />
+		</div>
+	</div>
+{/if}
+
+{#if selectedRouterId}
+	<div
+		class="fixed inset-0 z-40"
+		role="dialog"
+		aria-modal="true"
+		onkeydown={(e) => e.key === 'Escape' && (selectedRouterId = null)}
+		tabindex="-1"
+	>
+		<div class="absolute inset-0 bg-black/50" onclick={() => selectedRouterId = null}></div>
+		<div class="absolute right-0 top-14 bottom-0 w-[60vw] max-w-3xl bg-gray-950 border-l border-gray-700 overflow-y-auto shadow-2xl">
+			<RouterDetailPanel routerId={selectedRouterId} onClose={() => selectedRouterId = null} />
+		</div>
+	</div>
+{/if}

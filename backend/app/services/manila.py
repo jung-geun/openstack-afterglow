@@ -32,9 +32,9 @@ class ManilaClient:
             return f"{self.base}/{path.lstrip('/')}"
         return f"{self.base}/{self.project_id}/{path.lstrip('/')}"
 
-    def get(self, path: str) -> dict:
+    def get(self, path: str, params: dict | None = None) -> dict:
         with httpx.Client() as c:
-            r = c.get(self._url(path), headers=self.headers, timeout=30)
+            r = c.get(self._url(path), headers=self.headers, params=params, timeout=30)
             r.raise_for_status()
             return r.json()
 
@@ -157,10 +157,13 @@ def delete_share(conn, share_id: str) -> None:
     client.delete(f"shares/{share_id}")
 
 
-def list_shares(conn, metadata_filter: Optional[dict] = None) -> list[ShareInfo]:
+def list_shares(conn, metadata_filter: Optional[dict] = None, all_tenants: bool = False) -> list[ShareInfo]:
     client = get_client(conn)
+    params: dict = {}
+    if all_tenants:
+        params["all_tenants"] = "1"
     try:
-        data = client.get("shares/detail")["shares"]
+        data = client.get("shares/detail", params=params or None)["shares"]
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 400:
             logger.warning(f"Manila shares/detail 400 (shares 없음으로 추정): {e}")

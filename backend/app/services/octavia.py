@@ -99,6 +99,35 @@ def delete_load_balancer(conn: openstack.connection.Connection, lb_id: str, casc
     conn.load_balancer.delete_load_balancer(lb_id, cascade=cascade, ignore_missing=True)
 
 
+def get_lb_status_tree(conn: openstack.connection.Connection, lb_id: str) -> dict:
+    """로드밸런서 상태 트리 조회 (Octavia status tree API).
+    오류 발생 위치를 계층적으로 확인하는 데 사용.
+    """
+    try:
+        # openstacksdk가 status tree를 직접 지원하지 않으므로 raw session 사용
+        lb = conn.load_balancer.get_load_balancer(lb_id)
+        endpoint = conn.load_balancer.get_endpoint()
+        resp = conn.load_balancer._session.get(
+            f"{endpoint.rstrip('/')}/lbaas/loadbalancers/{lb_id}/status"
+        )
+        data = resp.json() if hasattr(resp, 'json') else {}
+        return data.get("statuses", {}).get("loadbalancer", {})
+    except Exception:
+        pass
+    # fallback: 기본 LB 정보만 반환
+    try:
+        lb = conn.load_balancer.get_load_balancer(lb_id)
+        return {
+            "id": lb.id,
+            "name": lb.name,
+            "provisioning_status": getattr(lb, 'provisioning_status', ''),
+            "operating_status": getattr(lb, 'operating_status', ''),
+            "listeners": [],
+        }
+    except Exception:
+        return {}
+
+
 # ---------------------------------------------------------------------------
 # Listeners
 # ---------------------------------------------------------------------------

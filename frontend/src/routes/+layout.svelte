@@ -112,10 +112,17 @@
 		<div class="ml-auto flex items-center gap-3">
 			<ProjectSelector />
 			{#if $isAdmin}
-				<a href="/admin" class="flex items-center gap-1.5 px-3 py-1 bg-gray-800 border border-gray-700 hover:border-gray-500 text-gray-300 hover:text-white text-xs rounded-md transition-colors">
-					<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
-					관리
-				</a>
+				{#if $page.url.pathname.startsWith('/admin')}
+					<a href="/dashboard" class="flex items-center gap-1.5 px-3 py-1 bg-gray-800 border border-blue-700 hover:border-blue-500 text-blue-400 hover:text-blue-300 text-xs rounded-md transition-colors">
+						<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
+						사용자 모드
+					</a>
+				{:else}
+					<a href="/admin" class="flex items-center gap-1.5 px-3 py-1 bg-gray-800 border border-gray-700 hover:border-gray-500 text-gray-300 hover:text-white text-xs rounded-md transition-colors">
+						<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
+						관리
+					</a>
+				{/if}
 			{/if}
 			<!-- 테마 토글 -->
 			<button

@@ -2,7 +2,7 @@
   import { auth } from '$lib/stores/auth';
   import { api } from '$lib/api/client';
   import type { DashboardSummary } from '$lib/types/resources';
-  import QuotaDonut from '$lib/components/QuotaDonut.svelte';
+  import { formatNumber, formatStorage } from '$lib/utils/format';
 
   interface QuotaItem { limit: number; in_use: number; }
   interface Quotas {
@@ -94,16 +94,16 @@
       <div class="flex-1 grid grid-cols-2 gap-3 lg:grid-cols-3">
         <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
           <div class="text-xs text-gray-500 uppercase tracking-wide mb-2">인스턴스</div>
-          <div class="text-2xl font-bold text-white mb-1">{summary.instances.active}<span class="text-base text-gray-500">/{summary.instances.total}</span></div>
+          <div class="text-2xl font-bold text-white mb-1">{formatNumber(summary.instances.active)}<span class="text-base text-gray-500">/{formatNumber(summary.instances.total)}</span></div>
           <div class="flex gap-2 text-xs">
-            <span class="text-green-400">{summary.instances.active} active</span>
-            {#if summary.instances.shutoff > 0}<span class="text-gray-500">{summary.instances.shutoff} off</span>{/if}
-            {#if summary.instances.error > 0}<span class="text-red-400">{summary.instances.error} err</span>{/if}
+            <span class="text-green-400">{formatNumber(summary.instances.active)} active</span>
+            {#if summary.instances.shutoff > 0}<span class="text-gray-500">{formatNumber(summary.instances.shutoff)} off</span>{/if}
+            {#if summary.instances.error > 0}<span class="text-red-400">{formatNumber(summary.instances.error)} err</span>{/if}
           </div>
         </div>
         <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
           <div class="text-xs text-gray-500 uppercase tracking-wide mb-2">vCPU</div>
-          <div class="text-2xl font-bold text-white mb-1">{c.vcpus_used}<span class="text-base text-gray-500">{c.vcpus_limit > 0 ? `/${c.vcpus_limit}` : ''}</span></div>
+          <div class="text-2xl font-bold text-white mb-1">{formatNumber(c.vcpus_used)}<span class="text-base text-gray-500">{c.vcpus_limit > 0 ? `/${formatNumber(c.vcpus_limit)}` : ''}</span></div>
           {#if c.vcpus_limit > 0}
             {@const pct = Math.round(c.vcpus_used / c.vcpus_limit * 100)}
             <div class="w-full bg-gray-800 rounded-full h-1.5">
@@ -113,7 +113,7 @@
         </div>
         <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
           <div class="text-xs text-gray-500 uppercase tracking-wide mb-2">RAM</div>
-          <div class="text-2xl font-bold text-white mb-1">{Math.round(c.ram_used_mb / 1024)}GB<span class="text-base text-gray-500">{c.ram_limit_mb > 0 ? `/${Math.round(c.ram_limit_mb / 1024)}GB` : ''}</span></div>
+          <div class="text-2xl font-bold text-white mb-1">{formatStorage(Math.round(c.ram_used_mb / 1024))}<span class="text-base text-gray-500">{c.ram_limit_mb > 0 ? ` / ${formatStorage(Math.round(c.ram_limit_mb / 1024))}` : ''}</span></div>
           {#if c.ram_limit_mb > 0}
             {@const pct = Math.round(c.ram_used_mb / c.ram_limit_mb * 100)}
             <div class="w-full bg-gray-800 rounded-full h-1.5">
@@ -123,12 +123,12 @@
         </div>
         <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
           <div class="text-xs text-gray-500 uppercase tracking-wide mb-2">GPU (활성)</div>
-          <div class="text-2xl font-bold {summary.gpu_used > 0 ? 'text-purple-300' : 'text-white'} mb-1">{summary.gpu_used}</div>
+          <div class="text-2xl font-bold {summary.gpu_used > 0 ? 'text-purple-300' : 'text-white'} mb-1">{formatNumber(summary.gpu_used)}</div>
           <div class="text-xs text-gray-500">GPU 인스턴스</div>
         </div>
         <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
           <div class="text-xs text-gray-500 uppercase tracking-wide mb-2">볼륨</div>
-          <div class="text-2xl font-bold text-white mb-1">{s.volumes_used}<span class="text-base text-gray-500">{s.volumes_limit > 0 ? `/${s.volumes_limit}` : ''}</span></div>
+          <div class="text-2xl font-bold text-white mb-1">{formatNumber(s.volumes_used)}<span class="text-base text-gray-500">{s.volumes_limit > 0 ? `/${formatNumber(s.volumes_limit)}` : ''}</span></div>
           {#if s.volumes_limit > 0}
             {@const pct = Math.round(s.volumes_used / s.volumes_limit * 100)}
             <div class="w-full bg-gray-800 rounded-full h-1.5">
@@ -138,7 +138,7 @@
         </div>
         <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
           <div class="text-xs text-gray-500 uppercase tracking-wide mb-2">볼륨 스토리지</div>
-          <div class="text-2xl font-bold text-white mb-1">{s.gigabytes_used}GB<span class="text-base text-gray-500">{s.gigabytes_limit > 0 ? `/${s.gigabytes_limit}GB` : ''}</span></div>
+          <div class="text-2xl font-bold text-white mb-1">{formatStorage(s.gigabytes_used)}<span class="text-base text-gray-500">{s.gigabytes_limit > 0 ? ` / ${formatStorage(s.gigabytes_limit)}` : ''}</span></div>
           {#if s.gigabytes_limit > 0}
             {@const pct = Math.round(s.gigabytes_used / s.gigabytes_limit * 100)}
             <div class="w-full bg-gray-800 rounded-full h-1.5">
@@ -146,6 +146,51 @@
             </div>
           {/if}
         </div>
+        <!-- 네트워크 / Share 카드 (quotas 로드 후 표시) -->
+        {#if quotas}
+          {@const nq = quotas.network}
+          {@const sq = quotas.share}
+          <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+            <div class="text-xs text-gray-500 uppercase tracking-wide mb-2">포트</div>
+            <div class="text-2xl font-bold text-white mb-1">{formatNumber(nq.port.in_use)}<span class="text-base text-gray-500">{nq.port.limit > 0 ? `/${formatNumber(nq.port.limit)}` : ''}</span></div>
+            {#if nq.port.limit > 0}
+              {@const pct = Math.round(nq.port.in_use / nq.port.limit * 100)}
+              <div class="w-full bg-gray-800 rounded-full h-1.5">
+                <div class="h-1.5 rounded-full {pct > 80 ? 'bg-red-500' : pct > 60 ? 'bg-yellow-500' : 'bg-indigo-500'}" style="width:{pct}%"></div>
+              </div>
+            {/if}
+          </div>
+          <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+            <div class="text-xs text-gray-500 uppercase tracking-wide mb-2">Floating IP</div>
+            <div class="text-2xl font-bold text-white mb-1">{formatNumber(nq.floatingip.in_use)}<span class="text-base text-gray-500">{nq.floatingip.limit > 0 ? `/${formatNumber(nq.floatingip.limit)}` : ''}</span></div>
+            {#if nq.floatingip.limit > 0}
+              {@const pct = Math.round(nq.floatingip.in_use / nq.floatingip.limit * 100)}
+              <div class="w-full bg-gray-800 rounded-full h-1.5">
+                <div class="h-1.5 rounded-full {pct > 80 ? 'bg-red-500' : pct > 60 ? 'bg-yellow-500' : 'bg-sky-500'}" style="width:{pct}%"></div>
+              </div>
+            {/if}
+          </div>
+          <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+            <div class="text-xs text-gray-500 uppercase tracking-wide mb-2">Share</div>
+            <div class="text-2xl font-bold text-white mb-1">{formatNumber(sq.shares.in_use)}<span class="text-base text-gray-500">{sq.shares.limit > 0 ? `/${formatNumber(sq.shares.limit)}` : ''}</span></div>
+            {#if sq.shares.limit > 0}
+              {@const pct = Math.round(sq.shares.in_use / sq.shares.limit * 100)}
+              <div class="w-full bg-gray-800 rounded-full h-1.5">
+                <div class="h-1.5 rounded-full {pct > 80 ? 'bg-red-500' : pct > 60 ? 'bg-yellow-500' : 'bg-teal-500'}" style="width:{pct}%"></div>
+              </div>
+            {/if}
+          </div>
+          <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+            <div class="text-xs text-gray-500 uppercase tracking-wide mb-2">Share 스토리지</div>
+            <div class="text-2xl font-bold text-white mb-1">{formatStorage(sq.gigabytes.in_use)}<span class="text-base text-gray-500">{sq.gigabytes.limit > 0 ? ` / ${formatStorage(sq.gigabytes.limit)}` : ''}</span></div>
+            {#if sq.gigabytes.limit > 0}
+              {@const pct = Math.round(sq.gigabytes.in_use / sq.gigabytes.limit * 100)}
+              <div class="w-full bg-gray-800 rounded-full h-1.5">
+                <div class="h-1.5 rounded-full {pct > 80 ? 'bg-red-500' : pct > 60 ? 'bg-yellow-500' : 'bg-emerald-500'}" style="width:{pct}%"></div>
+              </div>
+            {/if}
+          </div>
+        {/if}
       </div>
     {:else}
       <div class="flex-1 grid grid-cols-3 gap-3">
@@ -207,70 +252,6 @@
     </a>
   </div>
 
-  <!-- Quota 개요 -->
-  {#if quotas}
-    {@const q = quotas}
-    <div class="bg-gray-900 border border-gray-800 rounded-xl p-6 mb-6">
-      <div class="flex items-center gap-4 mb-5">
-        <h2 class="text-base font-semibold text-white">Quota 개요</h2>
-        <div class="flex items-center gap-3 text-xs text-gray-500">
-          <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-blue-500 inline-block"></span>Normal</span>
-          <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-orange-500 inline-block"></span>Danger (&gt;80%)</span>
-          <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-red-500 inline-block"></span>Full</span>
-        </div>
-      </div>
-
-      <!-- Compute -->
-      <div class="mb-5">
-        <div class="text-xs text-gray-500 uppercase tracking-wider mb-3 font-medium">Compute</div>
-        <div class="flex flex-wrap gap-6">
-          <QuotaDonut label="인스턴스" used={q.compute.instances.in_use} limit={q.compute.instances.limit} />
-          <QuotaDonut label="vCPUs" used={q.compute.cores.in_use} limit={q.compute.cores.limit} />
-          <QuotaDonut label="RAM" used={q.compute.ram.in_use} limit={q.compute.ram.limit} unit="MB" />
-          <QuotaDonut label="키페어" used={q.compute.key_pairs.in_use} limit={q.compute.key_pairs.limit} />
-          <QuotaDonut label="서버그룹" used={q.compute.server_groups.in_use} limit={q.compute.server_groups.limit} />
-        </div>
-      </div>
-
-      <!-- Storage -->
-      <div class="mb-5">
-        <div class="text-xs text-gray-500 uppercase tracking-wider mb-3 font-medium">Storage</div>
-        <div class="flex flex-wrap gap-6">
-          <QuotaDonut label="볼륨" used={q.storage.volumes.in_use} limit={q.storage.volumes.limit} />
-          <QuotaDonut label="스냅샷" used={q.storage.snapshots.in_use} limit={q.storage.snapshots.limit} />
-          <QuotaDonut label="용량" used={q.storage.gigabytes.in_use} limit={q.storage.gigabytes.limit} unit="GB" />
-          <QuotaDonut label="백업" used={q.storage.backups.in_use} limit={q.storage.backups.limit} />
-          <QuotaDonut label="백업용량" used={q.storage.backup_gigabytes.in_use} limit={q.storage.backup_gigabytes.limit} unit="GB" />
-        </div>
-      </div>
-
-      <!-- Network -->
-      <div class="mb-5">
-        <div class="text-xs text-gray-500 uppercase tracking-wider mb-3 font-medium">Network</div>
-        <div class="flex flex-wrap gap-6">
-          <QuotaDonut label="Floating IP" used={q.network.floatingip.in_use} limit={q.network.floatingip.limit} />
-          <QuotaDonut label="보안 그룹" used={q.network.security_group.in_use} limit={q.network.security_group.limit} />
-          <QuotaDonut label="보안 규칙" used={q.network.security_group_rule.in_use} limit={q.network.security_group_rule.limit} />
-          <QuotaDonut label="네트워크" used={q.network.network.in_use} limit={q.network.network.limit} />
-          <QuotaDonut label="포트" used={q.network.port.in_use} limit={q.network.port.limit} />
-          <QuotaDonut label="라우터" used={q.network.router.in_use} limit={q.network.router.limit} />
-          <QuotaDonut label="서브넷" used={q.network.subnet.in_use} limit={q.network.subnet.limit} />
-        </div>
-      </div>
-
-      <!-- Share -->
-      <div>
-        <div class="text-xs text-gray-500 uppercase tracking-wider mb-3 font-medium">Share</div>
-        <div class="flex flex-wrap gap-6">
-          <QuotaDonut label="Share" used={q.share.shares.in_use} limit={q.share.shares.limit} />
-          <QuotaDonut label="용량" used={q.share.gigabytes.in_use} limit={q.share.gigabytes.limit} unit="GB" />
-          <QuotaDonut label="Share Network" used={q.share.share_networks.in_use} limit={q.share.share_networks.limit} />
-          <QuotaDonut label="Share Group" used={q.share.share_groups.in_use} limit={q.share.share_groups.limit} />
-        </div>
-      </div>
-    </div>
-  {/if}
-
   <!-- 사용량 요약 -->
   <div class="bg-gray-900 border border-gray-800 rounded-xl p-6 mb-6">
     <div class="flex items-center gap-4 mb-4 flex-wrap">
@@ -293,15 +274,15 @@
         </div>
         <div class="bg-gray-800/50 rounded-lg p-3">
           <div class="text-xs text-gray-500 mb-1">vCPU 사용 시간</div>
-          <div class="text-xl font-bold text-white">{usage.total_vcpus_usage.toFixed(1)}h</div>
+          <div class="text-xl font-bold text-white">{formatNumber(Math.round(usage.total_vcpus_usage))}h</div>
         </div>
         <div class="bg-gray-800/50 rounded-lg p-3">
           <div class="text-xs text-gray-500 mb-1">RAM 사용 시간 (GiB·h)</div>
-          <div class="text-xl font-bold text-white">{(usage.total_memory_mb_usage / 1024).toFixed(1)}</div>
+          <div class="text-xl font-bold text-white">{formatNumber(Math.round(usage.total_memory_mb_usage / 1024))}</div>
         </div>
         <div class="bg-gray-800/50 rounded-lg p-3">
           <div class="text-xs text-gray-500 mb-1">디스크 사용 시간 (GB·h)</div>
-          <div class="text-xl font-bold text-white">{usage.total_local_gb_usage.toFixed(1)}</div>
+          <div class="text-xl font-bold text-white">{formatNumber(Math.round(usage.total_local_gb_usage))}</div>
         </div>
       </div>
 
@@ -328,9 +309,9 @@
               {#each usage.server_usages as s}
                 <tr class="border-b border-gray-800/50 text-xs">
                   <td class="py-2 pr-4 text-white">{s.name}</td>
-                  <td class="py-2 pr-4 text-gray-400">{s.vcpus}</td>
-                  <td class="py-2 pr-4 text-gray-400">{s.local_gb}GB</td>
-                  <td class="py-2 pr-4 text-gray-400">{Math.round(s.memory_mb / 1024)}GB</td>
+                  <td class="py-2 pr-4 text-gray-400">{formatNumber(s.vcpus)}</td>
+                  <td class="py-2 pr-4 text-gray-400">{formatStorage(s.local_gb)}</td>
+                  <td class="py-2 pr-4 text-gray-400">{formatStorage(Math.round(s.memory_mb / 1024))}</td>
                   <td class="py-2 pr-4 text-gray-400">
                     {s.hours >= 720 ? `${Math.floor(s.hours/720)}개월 ${Math.floor((s.hours%720)/24)}일` :
                      s.hours >= 24 ? `${Math.floor(s.hours/24)}일` : `${Math.round(s.hours)}시간`}

@@ -17,9 +17,13 @@ spec:
     spec:
       containers:
         - name: backend
-          image: union-backend:latest
-          imagePullPolicy: IfNotPresent
-          command: ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+          # 이미지 태그: latest (릴리즈), dev (main 브랜치), v1.2.3 (버전 태그)
+          # 실제 레지스트리 주소로 변경 필요
+          # 예: ghcr.io/myorg/union-backend:latest
+          #     registry.gitlab.com/myorg/union/backend:latest
+          image: ghcr.io/IMAGE_OWNER/union-backend:latest
+          imagePullPolicy: Always
+          command: ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
           ports:
             - containerPort: 8000
           env:

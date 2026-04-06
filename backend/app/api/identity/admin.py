@@ -1,4 +1,5 @@
 import asyncio
+import itertools
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
 import openstack
@@ -90,13 +91,30 @@ async def admin_overview(conn: openstack.connection.Connection = Depends(get_os_
     try:
         def _collect():
             data = _fetch_hypervisors_raw(conn)
-            total_vcpus = sum(h.get("vcpus", 0) or 0 for h in data)
+            host_count = len(data) or 1
             used_vcpus = sum(h.get("vcpus_used", 0) or 0 for h in data)
             total_ram = sum(h.get("memory_mb", 0) or 0 for h in data)
             used_ram = sum(h.get("memory_mb_used", 0) or 0 for h in data)
-            total_disk = sum(h.get("local_gb", 0) or 0 for h in data)
-            used_disk = sum(h.get("local_gb_used", 0) or 0 for h in data)
+            # Ceph: 모든 hypervisor가 동일한 pool 용량을 보고하므로 host 수로 나눔
+            total_disk = sum(h.get("local_gb", 0) or 0 for h in data) // host_count
+            used_disk = sum(h.get("local_gb_used", 0) or 0 for h in data) // host_count
             running_vms = sum(h.get("running_vms", 0) or 0 for h in data)
+
+            # CPU: Placement API에서 물리 코어 수 조회
+            physical_vcpus = 0
+            try:
+                placement_ep = conn.placement.get_endpoint()
+                rps_resp = conn.session.get(f"{placement_ep}/resource_providers")
+                rps = rps_resp.json().get("resource_providers", [])
+                for rp in rps:
+                    inv_resp = conn.session.get(
+                        f"{placement_ep}/resource_providers/{rp['uuid']}/inventories"
+                    )
+                    vcpu_inv = inv_resp.json().get("inventories", {}).get("VCPU", {})
+                    physical_vcpus += vcpu_inv.get("total", 0)
+            except Exception:
+                _logger.warning("Placement API CPU 조회 실패 — hypervisor vcpus로 대체", exc_info=True)
+                physical_vcpus = sum(h.get("vcpus", 0) or 0 for h in data)
 
             # GPU 인스턴스: flavor 이름에 'gpu' 포함 여부로 집계
             gpu_instances = 0
@@ -109,13 +127,30 @@ async def admin_overview(conn: openstack.connection.Connection = Depends(get_os_
             except Exception:
                 pass
 
+            # 컨테이너 수 (Zun)
+            containers_count = 0
+            try:
+                from app.services.zun import list_containers_admin, ZunServiceUnavailable
+                containers_count = len(list_containers_admin(conn))
+            except Exception:
+                pass
+
+            # 공유 스토리지 수 (Manila)
+            shares_count = 0
+            try:
+                shares_count = len(manila.list_shares(conn, all_tenants=True))
+            except Exception:
+                pass
+
             return {
-                "hypervisor_count": len(data),
+                "hypervisor_count": host_count,
                 "running_vms": running_vms,
                 "gpu_instances": gpu_instances,
-                "vcpus": {"total": total_vcpus, "used": used_vcpus},
+                "vcpus": {"total": physical_vcpus, "used": used_vcpus},
                 "ram_gb": {"total": round(total_ram / 1024, 1), "used": round(used_ram / 1024, 1)},
                 "disk_gb": {"total": total_disk, "used": used_disk},
+                "containers_count": containers_count,
+                "shares_count": shares_count,
             }
         return await asyncio.to_thread(_collect)
     except Exception as e:
@@ -174,7 +209,7 @@ async def list_all_instances(
                     "flavor": getattr(s, 'flavor', {}).get('original_name', '') if isinstance(getattr(s, 'flavor', None), dict) else '',
                     "created_at": str(s.created_at) if getattr(s, 'created_at', None) else None,
                 }
-                for s in conn.compute.servers(**kwargs)
+                for s in itertools.islice(conn.compute.servers(**kwargs), limit)
             ]
             next_marker = items[-1]["id"] if len(items) == limit else None
             return {"items": items, "next_marker": next_marker, "count": len(items)}
@@ -204,13 +239,34 @@ async def list_all_volumes(
                     "project_id": getattr(v, 'project_id', None),
                     "created_at": str(v.created_at) if getattr(v, 'created_at', None) else None,
                 }
-                for v in conn.block_storage.volumes(**kwargs)
+                for v in itertools.islice(conn.block_storage.volumes(**kwargs), limit)
             ]
             next_marker = items[-1]["id"] if len(items) == limit else None
             return {"items": items, "next_marker": next_marker, "count": len(items)}
         return await asyncio.to_thread(_list)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"전체 볼륨 조회 실패: {e}")
+
+
+@router.get("/all-containers", dependencies=[Depends(_require_admin)])
+async def list_all_containers(conn: openstack.connection.Connection = Depends(get_os_conn)):
+    """전체 프로젝트의 컨테이너 목록 (Zun)."""
+    from app.services.zun import list_containers_admin, ZunServiceUnavailable
+    try:
+        return await asyncio.to_thread(list_containers_admin, conn)
+    except ZunServiceUnavailable:
+        return []
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"컨테이너 조회 실패: {e}")
+
+
+@router.get("/all-shares", dependencies=[Depends(_require_admin)])
+async def list_all_shares(conn: openstack.connection.Connection = Depends(get_os_conn)):
+    """전체 프로젝트의 공유 스토리지 목록 (Manila)."""
+    try:
+        return await asyncio.to_thread(manila.list_shares, conn, None, True)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"공유 스토리지 조회 실패: {e}")
 
 
 @router.get("/quotas/{project_id}", dependencies=[Depends(_require_admin)])

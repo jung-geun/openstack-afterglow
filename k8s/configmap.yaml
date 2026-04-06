@@ -5,6 +5,8 @@ metadata:
   namespace: union
 data:
   APP_REDIS_URL: "redis://redis:6379/0"
+  # 실제 서비스 도메인으로 변경 필요 (예: https://union.example.com)
+  APP_ORIGIN: "http://union.example.com"
   union.toml: |
     # Union 통합 설정 파일
     [openstack]

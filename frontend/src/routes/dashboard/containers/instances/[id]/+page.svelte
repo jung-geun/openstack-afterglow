@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import { auth } from '$lib/stores/auth';
@@ -33,6 +33,16 @@
   let logsLoading = $state(false);
   let error = $state('');
   let actioning = $state(false);
+
+  // 콘솔 (exec) 상태
+  let showConsole = $state(false);
+  let terminalEl = $state<HTMLDivElement | null>(null);
+  let terminalReady = $state(false);
+  let consoleInput = $state('');
+  let consoleOutput = $state('');
+  let ws = $state<WebSocket | null>(null);
+  let wsConnecting = $state(false);
+  let wsConnected = $state(false);
 
   const containerId = $derived($page.params.id);
 
@@ -82,7 +92,92 @@
     }
   }
 
+  // xterm.js 터미널
+  let terminal: import('@xterm/xterm').Terminal | null = null;
+  let fitAddon: import('@xterm/addon-fit').FitAddon | null = null;
+
+  async function openConsole() {
+    showConsole = true;
+    // DOM이 렌더된 후 터미널 초기화
+    await new Promise(r => setTimeout(r, 100));
+    if (!terminalEl) return;
+    if (terminal) return; // already initialized
+
+    const { Terminal } = await import('@xterm/xterm');
+    const { FitAddon } = await import('@xterm/addon-fit');
+
+    terminal = new Terminal({
+      theme: { background: '#0f172a', foreground: '#e2e8f0', cursor: '#60a5fa' },
+      fontFamily: 'monospace',
+      fontSize: 13,
+      cursorBlink: true,
+    });
+    fitAddon = new FitAddon();
+    terminal.loadAddon(fitAddon);
+    terminal.open(terminalEl);
+    fitAddon.fit();
+    terminalReady = true;
+
+    connectWs();
+  }
+
+  function connectWs() {
+    if (!terminal || wsConnecting) return;
+    wsConnecting = true;
+
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = window.location.hostname;
+    const port = import.meta.env.PUBLIC_API_BASE ? new URL(import.meta.env.PUBLIC_API_BASE).port || '8000' : '8000';
+    const url = `${proto}//${host}:${port}/api/containers/${containerId}/exec?token=${encodeURIComponent($auth.token ?? '')}&project_id=${encodeURIComponent($auth.projectId ?? '')}`;
+
+    const socket = new WebSocket(url);
+    ws = socket;
+
+    socket.onopen = () => {
+      wsConnecting = false;
+      wsConnected = true;
+    };
+
+    socket.onmessage = (event) => {
+      terminal?.write(event.data);
+    };
+
+    socket.onerror = () => {
+      terminal?.write('\r\n\x1b[31m연결 오류가 발생했습니다\x1b[0m\r\n');
+      wsConnected = false;
+      wsConnecting = false;
+    };
+
+    socket.onclose = () => {
+      wsConnected = false;
+      wsConnecting = false;
+      terminal?.write('\r\n\x1b[33m연결이 종료되었습니다\x1b[0m\r\n');
+    };
+
+    terminal!.onData((data) => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(data);
+      }
+    });
+  }
+
+  function closeConsole() {
+    showConsole = false;
+    ws?.close();
+    ws = null;
+    terminal?.dispose();
+    terminal = null;
+    fitAddon = null;
+    terminalReady = false;
+    wsConnected = false;
+  }
+
   onMount(fetchContainer);
+
+  onDestroy(() => {
+    ws?.close();
+    terminal?.dispose();
+  });
 </script>
 
 <div class="p-8 max-w-3xl">
@@ -102,6 +197,7 @@
       </div>
       <div class="flex gap-2">
         {#if container.status === 'Running'}
+          <button onclick={() => openConsole()} disabled={showConsole} class="px-4 py-2 text-sm text-blue-400 border border-blue-800 hover:bg-blue-900/30 rounded-lg transition-colors disabled:opacity-40">터미널</button>
           <button onclick={() => handleAction('stop')} disabled={actioning} class="px-4 py-2 text-sm text-orange-400 border border-orange-800 hover:bg-orange-900/30 rounded-lg transition-colors disabled:opacity-40">중지</button>
         {:else if container.status === 'Stopped' || container.status === 'Created'}
           <button onclick={() => handleAction('start')} disabled={actioning} class="px-4 py-2 text-sm text-green-400 border border-green-800 hover:bg-green-900/30 rounded-lg transition-colors disabled:opacity-40">시작</button>
@@ -136,6 +232,31 @@
       <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-4">
         <div class="text-xs text-gray-500 mb-2">명령</div>
         <pre class="text-green-300 text-xs font-mono">{container.command}</pre>
+      </div>
+    {/if}
+
+    <!-- 인터랙티브 터미널 콘솔 -->
+    {#if showConsole}
+      <div class="bg-gray-900 border border-gray-700 rounded-xl mb-4 overflow-hidden">
+        <div class="flex items-center justify-between px-4 py-2 bg-gray-800 border-b border-gray-700">
+          <div class="flex items-center gap-2">
+            <span class="text-sm text-white font-medium">터미널</span>
+            {#if wsConnecting}
+              <span class="text-xs text-yellow-400">연결 중...</span>
+            {:else if wsConnected}
+              <span class="text-xs text-green-400">● 연결됨</span>
+            {:else}
+              <span class="text-xs text-gray-500">● 연결 끊김</span>
+            {/if}
+          </div>
+          <div class="flex gap-2">
+            {#if !wsConnected && !wsConnecting}
+              <button onclick={connectWs} class="text-xs text-blue-400 hover:text-blue-300 transition-colors">재연결</button>
+            {/if}
+            <button onclick={closeConsole} class="text-xs text-gray-400 hover:text-white transition-colors">✕ 닫기</button>
+          </div>
+        </div>
+        <div bind:this={terminalEl} class="w-full" style="height: 320px; background: #0f172a;"></div>
       </div>
     {/if}
 

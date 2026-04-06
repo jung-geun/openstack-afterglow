@@ -1,0 +1,57 @@
+stages:
+  - build
+
+variables:
+  DOCKER_TLS_CERTDIR: "/certs"
+  BACKEND_IMAGE: $CI_REGISTRY_IMAGE/backend
+  FRONTEND_IMAGE: $CI_REGISTRY_IMAGE/frontend
+
+.docker-build:
+  image: docker:24.0.7
+  services:
+    - docker:24.0.7-dind
+  before_script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+  rules:
+    # main 브랜치 push → dev 태그
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    # MR (PR) → dev 태그
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    # 버전 태그 push → latest + 버전 태그
+    - if: '$CI_COMMIT_TAG =~ /^v/'
+
+build-backend:
+  extends: .docker-build
+  stage: build
+  script:
+    - docker build -t "$BACKEND_IMAGE:build-tmp" ./backend
+    - |
+      if [ -n "$CI_COMMIT_TAG" ]; then
+        # 버전 태그: latest + 버전 태그
+        docker tag "$BACKEND_IMAGE:build-tmp" "$BACKEND_IMAGE:$CI_COMMIT_TAG"
+        docker tag "$BACKEND_IMAGE:build-tmp" "$BACKEND_IMAGE:latest"
+        docker push "$BACKEND_IMAGE:$CI_COMMIT_TAG"
+        docker push "$BACKEND_IMAGE:latest"
+      else
+        # main 또는 MR: dev 태그만
+        docker tag "$BACKEND_IMAGE:build-tmp" "$BACKEND_IMAGE:dev"
+        docker push "$BACKEND_IMAGE:dev"
+      fi
+
+build-frontend:
+  extends: .docker-build
+  stage: build
+  script:
+    - docker build -t "$FRONTEND_IMAGE:build-tmp" ./frontend
+    - |
+      if [ -n "$CI_COMMIT_TAG" ]; then
+        # 버전 태그: latest + 버전 태그
+        docker tag "$FRONTEND_IMAGE:build-tmp" "$FRONTEND_IMAGE:$CI_COMMIT_TAG"
+        docker tag "$FRONTEND_IMAGE:build-tmp" "$FRONTEND_IMAGE:latest"
+        docker push "$FRONTEND_IMAGE:$CI_COMMIT_TAG"
+        docker push "$FRONTEND_IMAGE:latest"
+      else
+        # main 또는 MR: dev 태그만
+        docker tag "$FRONTEND_IMAGE:build-tmp" "$FRONTEND_IMAGE:dev"
+        docker push "$FRONTEND_IMAGE:dev"
+      fi

@@ -88,6 +88,11 @@ async def get_load_balancer(lb_id: str, conn: openstack.connection.Connection = 
     return _handle(lambda: octavia.get_load_balancer(conn, lb_id), "로드밸런서 조회 실패")
 
 
+@router.get("/{lb_id}/status")
+async def get_lb_status_tree(lb_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+    return _handle(lambda: octavia.get_lb_status_tree(conn, lb_id), "상태 트리 조회 실패")
+
+
 @router.delete("/{lb_id}", status_code=204)
 async def delete_load_balancer(lb_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
     pid = conn._union_project_id

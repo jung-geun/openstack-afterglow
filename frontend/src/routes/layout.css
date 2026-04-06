@@ -66,3 +66,132 @@
 /* 스크롤바 (라이트 모드) */
 :root.light ::-webkit-scrollbar-thumb { background-color: #cbd5e1; }
 :root.light ::-webkit-scrollbar-track { background-color: #f1f5f9; }
+
+/* ============================================================
+   라이트 모드 - 상태 배지 색상 (다크 배경 의존 → 라이트 전환)
+   ============================================================ */
+
+/* 초록 계열 (ACTIVE, Running, available) */
+:root.light .text-green-400 { color: #16a34a !important; }
+:root.light .bg-green-900\/30 { background-color: rgba(22,163,74,0.1) !important; }
+:root.light .border-green-800 { border-color: #86efac !important; }
+:root.light .text-green-300 { color: #15803d !important; }
+:root.light .hover\:text-green-300:hover { color: #15803d !important; }
+:root.light .border-green-900 { border-color: #bbf7d0 !important; }
+
+/* 노란 계열 (PENDING, creating, 경고) */
+:root.light .text-yellow-400 { color: #b45309 !important; }
+:root.light .bg-yellow-900\/30 { background-color: rgba(180,83,9,0.08) !important; }
+:root.light .border-yellow-700 { border-color: #fcd34d !important; }
+:root.light .text-yellow-300 { color: #92400e !important; }
+:root.light .text-yellow-200 { color: #78350f !important; }
+:root.light .bg-yellow-900\/90 { background-color: rgba(254,243,199,0.95) !important; }
+:root.light .bg-yellow-700 { background-color: #fbbf24 !important; }
+:root.light .hover\:bg-yellow-600:hover { background-color: #f59e0b !important; }
+
+/* 빨간 계열 (ERROR, 삭제, 에러) */
+:root.light .text-red-400 { color: #dc2626 !important; }
+:root.light .bg-red-900\/30 { background-color: rgba(220,38,38,0.08) !important; }
+:root.light .bg-red-900\/40 { background-color: rgba(220,38,38,0.08) !important; }
+:root.light .bg-red-900\/20 { background-color: rgba(220,38,38,0.06) !important; }
+:root.light .border-red-700 { border-color: #fca5a5 !important; }
+:root.light .border-red-800 { border-color: #fca5a5 !important; }
+:root.light .border-red-900 { border-color: #fecaca !important; }
+:root.light .text-red-300 { color: #dc2626 !important; }
+:root.light .hover\:text-red-300:hover { color: #b91c1c !important; }
+:root.light .hover\:border-red-700:hover { border-color: #f87171 !important; }
+
+/* 주황 계열 (Deleting, 중지) */
+:root.light .text-orange-400 { color: #ea580c !important; }
+:root.light .bg-orange-900\/30 { background-color: rgba(234,88,12,0.08) !important; }
+:root.light .border-orange-800 { border-color: #fdba74 !important; }
+:root.light .hover\:text-orange-300:hover { color: #c2410c !important; }
+
+/* 파란 계열 (Created, active link, blue buttons) */
+:root.light .text-blue-400 { color: #2563eb !important; }
+:root.light .bg-blue-900\/30 { background-color: rgba(37,99,235,0.08) !important; }
+:root.light .bg-blue-900\/40 { background-color: rgba(37,99,235,0.08) !important; }
+:root.light .border-blue-700 { border-color: #93c5fd !important; }
+:root.light .border-blue-800 { border-color: #bfdbfe !important; }
+:root.light .border-blue-900 { border-color: #dbeafe !important; }
+:root.light .border-blue-600 { border-color: #3b82f6 !important; }
+:root.light .text-blue-300 { color: #2563eb !important; }
+:root.light .hover\:text-blue-300:hover { color: #1d4ed8 !important; }
+:root.light .hover\:text-blue-400:hover { color: #2563eb !important; }
+
+/* 보라 계열 (라이브러리 태그) */
+:root.light .bg-purple-900\/40 { background-color: rgba(126,34,206,0.08) !important; }
+:root.light .text-purple-300 { color: #7c3aed !important; }
+
+/* 모달 오버레이 (라이트 모드에서 너무 어둡지 않게) */
+:root.light .bg-black\/60 { background-color: rgba(0,0,0,0.25) !important; }
+:root.light .bg-black\/50 { background-color: rgba(0,0,0,0.2) !important; }
+
+/* 사이드바 active 항목 */
+:root.light .bg-blue-600\/20 { background-color: rgba(37,99,235,0.1) !important; }
+:root.light .bg-blue-500\/20 { background-color: rgba(59,130,246,0.1) !important; }
+
+/* 인디고 계열 */
+:root.light .text-indigo-400 { color: #4f46e5 !important; }
+:root.light .bg-indigo-900\/30 { background-color: rgba(79,70,229,0.08) !important; }
+
+/* gray-600 텍스트 (secondary text) — 라이트에서 가독성 확보 */
+:root.light .text-gray-600 { color: #64748b !important; }
+
+/* hover 상태 추가 */
+:root.light .hover\:text-gray-200:hover { color: #1e293b !important; }
+:root.light .text-blue-500 { color: #2563eb !important; }
+
+/* 앰버 계열 (creating, detaching) */
+:root.light .text-amber-400 { color: #92400e !important; }
+:root.light .bg-amber-900\/30 { background-color: rgba(180,83,9,0.08) !important; }
+:root.light .border-amber-700 { border-color: #fcd34d !important; }
+
+/* 보라 계열 (reserved 상태) */
+:root.light .text-purple-400 { color: #7c3aed !important; }
+:root.light .bg-purple-900\/30 { background-color: rgba(109,40,217,0.08) !important; }
+:root.light .border-purple-700 { border-color: #c4b5fd !important; }
+
+/* 시안 계열 (attaching) */
+:root.light .text-cyan-400 { color: #0e7490 !important; }
+:root.light .bg-cyan-900\/30 { background-color: rgba(14,116,144,0.08) !important; }
+:root.light .border-cyan-700 { border-color: #67e8f9 !important; }
+
+/* 틸 계열 (restoring-backup) */
+:root.light .text-teal-400 { color: #0f766e !important; }
+:root.light .bg-teal-900\/30 { background-color: rgba(15,118,110,0.08) !important; }
+
+/* 스카이 계열 (downloading, uploading) */
+:root.light .text-sky-400 { color: #0369a1 !important; }
+:root.light .bg-sky-900\/30 { background-color: rgba(3,105,161,0.08) !important; }
+
+/* 로즈 계열 (error_* 상태) */
+:root.light .text-rose-400 { color: #e11d48 !important; }
+:root.light .bg-rose-900\/30 { background-color: rgba(225,29,72,0.08) !important; }
+
+/* 바이올렛 계열 (retyping) */
+:root.light .text-violet-400 { color: #6d28d9 !important; }
+:root.light .bg-violet-900\/30 { background-color: rgba(109,40,217,0.08) !important; }
+
+/* ============================================================
+   액션 버튼 (bg-blue-600) — 부드러운 파란색 + 흰색 텍스트 유지
+   ============================================================ */
+:root.light .bg-blue-600 { background-color: #4f7df5 !important; }
+:root.light .hover\:bg-blue-500:hover { background-color: #3b6fef !important; }
+/* text-white가 전역으로 #0f172a로 오버라이드되므로, 파란 버튼 위에서는 흰색 복원 */
+:root.light .bg-blue-600.text-white { color: #ffffff !important; }
+:root.light .bg-blue-600 > .text-white { color: #ffffff !important; }
+
+/* ============================================================
+   네트워크 유형 뱃지 — /40 변형 + *-300 텍스트 오버라이드
+   ============================================================ */
+/* 외부 (orange) */
+:root.light .bg-orange-900\/40 { background-color: rgba(234,88,12,0.1) !important; }
+:root.light .text-orange-300 { color: #c2410c !important; }
+
+/* 공유 (teal) */
+:root.light .bg-teal-900\/40 { background-color: rgba(15,118,110,0.1) !important; }
+:root.light .text-teal-300 { color: #0f766e !important; }
+
+/* 내부 (blue) — bg-blue-900/40 already overridden above */
+:root.light .text-blue-300 { color: #2563eb !important; }

@@ -44,6 +44,28 @@ def _container_to_info(data: dict) -> ZunContainerInfo:
     )
 
 
+def list_containers_admin(conn: openstack.connection.Connection) -> list[ZunContainerInfo]:
+    """관리자 전용: 전체 프로젝트의 컨테이너 목록 조회."""
+    endpoint = _get_zun_endpoint(conn)
+    try:
+        resp = conn.session.get(f"{endpoint}/v1/containers?all_projects=True")
+        status_code = getattr(resp, 'status_code', None) or getattr(resp, 'status', None)
+        if status_code == 404:
+            raise ZunServiceUnavailable("Zun 서비스 엔드포인트가 404를 반환했습니다")
+        data = resp.json() if hasattr(resp, 'json') else {}
+        containers = data.get('containers', data) if isinstance(data, dict) else data
+        if isinstance(containers, list):
+            return [_container_to_info(c) for c in containers]
+        return []
+    except ZunServiceUnavailable:
+        raise
+    except Exception as e:
+        err_str = str(e).lower()
+        if '404' in err_str or 'not found' in err_str or 'connection' in err_str:
+            raise ZunServiceUnavailable(f"Zun 서비스에 접근할 수 없습니다: {e}") from e
+        raise
+
+
 def list_containers(conn: openstack.connection.Connection) -> list[ZunContainerInfo]:
     endpoint = _get_zun_endpoint(conn)
     try:
@@ -81,6 +103,7 @@ def create_container(
     memory: str | None = None,
     environment: dict | None = None,
     auto_remove: bool = False,
+    ports: list[dict] | None = None,
 ) -> ZunContainerInfo:
     endpoint = _get_zun_endpoint(conn)
     body: dict = {"name": name, "image": image}
@@ -94,13 +117,22 @@ def create_container(
         body["environment"] = environment
     if auto_remove:
         body["auto_remove"] = auto_remove
+    if ports:
+        body["ports"] = ports
     resp = conn.session.post(f"{endpoint}/v1/containers", json=body)
     return _container_to_info(resp.json())
 
 
 def delete_container(conn: openstack.connection.Connection, container_id: str) -> None:
     endpoint = _get_zun_endpoint(conn)
-    conn.session.delete(f"{endpoint}/v1/containers/{container_id}?force=true")
+    # Running 상태면 먼저 stop 후 삭제 (force 파라미터는 API v1.7+에서만 지원)
+    try:
+        info = get_container(conn, container_id)
+        if info.status and info.status.upper() == 'RUNNING':
+            stop_container(conn, container_id)
+    except Exception:
+        pass  # 상태 조회 실패해도 삭제 시도
+    conn.session.delete(f"{endpoint}/v1/containers/{container_id}")
 
 
 def start_container(conn: openstack.connection.Connection, container_id: str) -> None:
@@ -117,3 +149,15 @@ def get_container_logs(conn: openstack.connection.Connection, container_id: str)
     endpoint = _get_zun_endpoint(conn)
     resp = conn.session.get(f"{endpoint}/v1/containers/{container_id}/logs?stdout=true&stderr=true")
     return resp.text if hasattr(resp, 'text') else str(resp.content)
+
+
+def get_exec_websocket_url(conn: openstack.connection.Connection, container_id: str) -> tuple[str, str]:
+    """Zun exec attach WebSocket URL과 auth token 반환.
+    Returns (ws_url, token)
+    """
+    raw_endpoint = _get_zun_endpoint(conn)
+    # http(s)://host:port → ws(s)://host:port
+    ws_endpoint = raw_endpoint.replace("https://", "wss://").replace("http://", "ws://")
+    ws_url = f"{ws_endpoint}/v1/containers/{container_id}/execute_resize"
+    token = getattr(conn, "_union_token", None) or conn.auth_token
+    return ws_url, token

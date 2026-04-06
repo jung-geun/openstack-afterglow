@@ -117,6 +117,11 @@ class CreateShareRequest(BaseModel):
     metadata: Optional[dict[str, Any]] = None
 
 
+class CreateAccessRuleRequest(BaseModel):
+    cephx_id: str
+    access_level: str = "ro"  # "ro" | "rw"
+
+
 class CreateNetworkRequest(BaseModel):
     name: str
 

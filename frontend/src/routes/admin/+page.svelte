@@ -13,6 +13,8 @@
 		vcpus: { total: number; used: number };
 		ram_gb: { total: number; used: number };
 		disk_gb: { total: number; used: number };
+		containers_count: number;
+		shares_count: number;
 	}
 	interface Hypervisor {
 		id: string;
@@ -44,13 +46,30 @@
 		project_id: string | null;
 		created_at: string | null;
 	}
+	interface AdminContainer {
+		uuid: string;
+		name: string;
+		status: string;
+		image: string | null;
+		cpu: number | null;
+		memory: string | null;
+		created_at: string | null;
+	}
+	interface AdminShare {
+		id: string;
+		name: string;
+		status: string;
+		size: number;
+		share_proto: string;
+		metadata: Record<string, string>;
+	}
 	interface PagedResponse<T> {
 		items: T[];
 		next_marker: string | null;
 		count: number;
 	}
 
-	type Tab = 'overview' | 'hypervisors' | 'all-instances' | 'all-volumes';
+	type Tab = 'overview' | 'hypervisors' | 'all-instances' | 'all-volumes' | 'all-containers' | 'all-shares';
 
 	let activeTab = $state<Tab>('overview');
 	let message = $state('');
@@ -60,10 +79,12 @@
 	let hypervisors = $state<Hypervisor[]>([]);
 	let allInstances = $state<AdminInstance[]>([]);
 	let allVolumes = $state<AdminVolume[]>([]);
+	let allContainers = $state<AdminContainer[]>([]);
+	let allShares = $state<AdminShare[]>([]);
 
 	// 페이지네이션 상태
 	let instancePageSize = $state(20);
-	let instanceMarkerStack = $state<string[]>([]);  // 이전 페이지 marker 스택
+	let instanceMarkerStack = $state<string[]>([]);
 	let instanceNextMarker = $state<string | null>(null);
 	let volumePageSize = $state(20);
 	let volumeMarkerStack = $state<string[]>([]);
@@ -81,10 +102,14 @@
 		building:  'text-yellow-400',
 		error:     'text-red-400',
 		ACTIVE:    'text-green-400',
+		Running:   'text-green-400',
 		SHUTOFF:   'text-gray-400',
+		Stopped:   'text-gray-400',
 		ERROR:     'text-red-400',
 		in_use:    'text-blue-400',
 	};
+
+	import { formatNumber, formatStorage } from '$lib/utils/format';
 
 	async function loadOverview() {
 		try {
@@ -127,6 +152,22 @@
 		}
 	}
 
+	async function loadAllContainers() {
+		try {
+			allContainers = await api.get<AdminContainer[]>('/api/admin/all-containers', token, projectId);
+		} catch {
+			allContainers = [];
+		}
+	}
+
+	async function loadAllShares() {
+		try {
+			allShares = await api.get<AdminShare[]>('/api/admin/all-shares', token, projectId);
+		} catch {
+			allShares = [];
+		}
+	}
+
 	async function switchTab(tab: Tab) {
 		activeTab = tab;
 		error = '';
@@ -142,6 +183,8 @@
 			volumeNextMarker = null;
 			await loadAllVolumes();
 		}
+		if (tab === 'all-containers' && allContainers.length === 0) await loadAllContainers();
+		if (tab === 'all-shares' && allShares.length === 0) await loadAllShares();
 	}
 
 	onMount(async () => {
@@ -169,8 +212,8 @@
 	{/if}
 
 	<!-- 탭 -->
-	<div class="flex gap-1 border-b border-gray-800 mb-6">
-		{#each [['overview', '개요'], ['hypervisors', '하이퍼바이저'], ['all-instances', '전체 인스턴스'], ['all-volumes', '전체 볼륨']] as [tab, label]}
+	<div class="flex gap-1 border-b border-gray-800 mb-6 flex-wrap">
+		{#each [['overview', '개요'], ['hypervisors', '하이퍼바이저'], ['all-instances', '전체 인스턴스'], ['all-volumes', '전체 볼륨'], ['all-containers', '전체 컨테이너'], ['all-shares', '공유 스토리지']] as [tab, label]}
 			<button
 				onclick={() => switchTab(tab as Tab)}
 				class="px-4 py-2 text-sm transition-colors border-b-2 {activeTab === tab ? 'border-blue-500 text-white' : 'border-transparent text-gray-500 hover:text-gray-300'}"
@@ -182,38 +225,48 @@
 		<LoadingSkeleton variant="table" rows={5} />
 	{:else if activeTab === 'overview'}
 		{#if overview}
-			<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
+			<div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4 mb-8">
 				<div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
 					<div class="text-xs text-gray-500 mb-1">하이퍼바이저</div>
-					<div class="text-2xl font-bold text-white">{overview.hypervisor_count}</div>
+					<div class="text-2xl font-bold text-white">{formatNumber(overview.hypervisor_count)}</div>
 				</div>
 				<div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
 					<div class="text-xs text-gray-500 mb-1">총 VM</div>
-					<div class="text-2xl font-bold text-white">{overview.running_vms}</div>
+					<div class="text-2xl font-bold text-white">{formatNumber(overview.running_vms)}</div>
 				</div>
 				<div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
 					<div class="text-xs text-gray-500 mb-1">GPU VM</div>
-					<div class="text-2xl font-bold {overview.gpu_instances > 0 ? 'text-purple-300' : 'text-white'}">{overview.gpu_instances}</div>
+					<div class="text-2xl font-bold {overview.gpu_instances > 0 ? 'text-purple-300' : 'text-white'}">{formatNumber(overview.gpu_instances)}</div>
 				</div>
 				<div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
-					<div class="text-xs text-gray-500 mb-1">vCPU</div>
-					<div class="text-2xl font-bold text-white">{overview.vcpus.used}<span class="text-gray-600 text-base"> / {overview.vcpus.total}</span></div>
+					<div class="text-xs text-gray-500 mb-1">CPU 코어</div>
+					<div class="text-2xl font-bold text-white">{formatNumber(overview.vcpus.used)}<span class="text-gray-600 text-base"> / {formatNumber(overview.vcpus.total)}</span></div>
 					<div class="mt-2 bg-gray-800 rounded-full h-1.5"><div class="bg-blue-500 h-1.5 rounded-full" style="width:{usageBar(overview.vcpus.used, overview.vcpus.total)}%"></div></div>
 				</div>
 				<div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
 					<div class="text-xs text-gray-500 mb-1">RAM (GB)</div>
-					<div class="text-2xl font-bold text-white">{overview.ram_gb.used}<span class="text-gray-600 text-base"> / {overview.ram_gb.total}</span></div>
+					<div class="text-2xl font-bold text-white">{formatNumber(overview.ram_gb.used)}<span class="text-gray-600 text-base"> / {formatNumber(overview.ram_gb.total)}</span></div>
 					<div class="mt-2 bg-gray-800 rounded-full h-1.5"><div class="bg-purple-500 h-1.5 rounded-full" style="width:{usageBar(overview.ram_gb.used, overview.ram_gb.total)}%"></div></div>
 				</div>
 				<div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
-					<div class="text-xs text-gray-500 mb-1">로컬 디스크 (GB)</div>
-					<div class="text-2xl font-bold text-white">{overview.disk_gb.used}<span class="text-gray-600 text-base"> / {overview.disk_gb.total}</span></div>
+					<div class="text-xs text-gray-500 mb-1">로컬 디스크</div>
+					<div class="text-xl font-bold text-white">{formatStorage(overview.disk_gb.used)}<span class="text-gray-600 text-sm"> / {formatStorage(overview.disk_gb.total)}</span></div>
 					<div class="mt-2 bg-gray-800 rounded-full h-1.5"><div class="bg-orange-500 h-1.5 rounded-full" style="width:{usageBar(overview.disk_gb.used, overview.disk_gb.total)}%"></div></div>
 				</div>
+				<div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+					<div class="text-xs text-gray-500 mb-1">컨테이너</div>
+					<div class="text-2xl font-bold text-white">{formatNumber(overview.containers_count ?? 0)}</div>
+				</div>
+				<div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+					<div class="text-xs text-gray-500 mb-1">공유 스토리지</div>
+					<div class="text-2xl font-bold text-white">{formatNumber(overview.shares_count ?? 0)}</div>
+				</div>
 			</div>
-			<div class="flex gap-3">
+			<div class="flex gap-3 flex-wrap">
 				<button onclick={() => switchTab('hypervisors')} class="text-sm text-blue-400 hover:text-blue-300 transition-colors">하이퍼바이저 상세 →</button>
 				<button onclick={() => switchTab('all-instances')} class="text-sm text-blue-400 hover:text-blue-300 transition-colors">전체 인스턴스 →</button>
+				<button onclick={() => switchTab('all-containers')} class="text-sm text-blue-400 hover:text-blue-300 transition-colors">전체 컨테이너 →</button>
+				<button onclick={() => switchTab('all-shares')} class="text-sm text-blue-400 hover:text-blue-300 transition-colors">공유 스토리지 →</button>
 			</div>
 		{:else}
 			<div class="text-gray-500 text-sm">개요를 불러올 수 없습니다</div>
@@ -243,10 +296,10 @@
 								<td class="py-2 pr-4">
 									<span class="{h.state === 'up' && h.status === 'enabled' ? 'text-green-400' : 'text-red-400'}">{h.state}/{h.status}</span>
 								</td>
-								<td class="py-2 pr-4 text-gray-400">{h.running_vms}</td>
-								<td class="py-2 pr-4 text-gray-400">{h.vcpus_used}/{h.vcpus}</td>
-								<td class="py-2 pr-4 text-gray-400">{Math.round(h.memory_used_mb/1024)}/{Math.round(h.memory_size_mb/1024)}</td>
-								<td class="py-2 text-gray-400">{h.local_disk_used_gb}/{h.local_disk_gb} GB</td>
+								<td class="py-2 pr-4 text-gray-400">{formatNumber(h.running_vms)}</td>
+								<td class="py-2 pr-4 text-gray-400">{formatNumber(h.vcpus_used)}/{formatNumber(h.vcpus)}</td>
+								<td class="py-2 pr-4 text-gray-400">{formatNumber(Math.round(h.memory_used_mb/1024))}/{formatNumber(Math.round(h.memory_size_mb/1024))}</td>
+								<td class="py-2 text-gray-400">{formatStorage(h.local_disk_used_gb)}/{formatStorage(h.local_disk_gb)}</td>
 							</tr>
 						{/each}
 					</tbody>
@@ -342,7 +395,7 @@
 						<tr class="border-b border-gray-800/50 text-xs">
 							<td class="py-2 pr-4 text-white">{v.name || v.id.slice(0, 8)}</td>
 							<td class="py-2 pr-4 {statusColor[v.status] ?? 'text-gray-400'}">{v.status}</td>
-							<td class="py-2 pr-4 text-gray-400">{v.size} GB</td>
+							<td class="py-2 pr-4 text-gray-400">{formatNumber(v.size)} GB</td>
 							<td class="py-2 pr-4 text-gray-500 font-mono">{v.project_id?.slice(0, 8) ?? '-'}</td>
 							<td class="py-2 text-gray-500">{v.created_at?.slice(0, 10) ?? '-'}</td>
 						</tr>
@@ -371,6 +424,70 @@
 				class="px-3 py-1.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed"
 			>다음 →</button>
 		</div>
+
+	{:else if activeTab === 'all-containers'}
+		<button onclick={loadAllContainers} class="text-xs text-gray-400 hover:text-white mb-4 transition-colors">새로고침</button>
+		{#if allContainers.length === 0}
+			<div class="text-gray-600 text-sm">컨테이너가 없습니다</div>
+		{:else}
+			<div class="overflow-x-auto">
+				<table class="w-full text-sm">
+					<thead>
+						<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
+							<th class="text-left py-2 pr-4">이름</th>
+							<th class="text-left py-2 pr-4">상태</th>
+							<th class="text-left py-2 pr-4">이미지</th>
+							<th class="text-left py-2 pr-4">CPU</th>
+							<th class="text-left py-2 pr-4">메모리</th>
+							<th class="text-left py-2">생성일</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each allContainers as c (c.uuid)}
+							<tr class="border-b border-gray-800/50 text-xs">
+								<td class="py-2 pr-4 text-white">{c.name || c.uuid.slice(0, 8)}</td>
+								<td class="py-2 pr-4 {statusColor[c.status] ?? 'text-gray-400'}">{c.status}</td>
+								<td class="py-2 pr-4 text-gray-400 font-mono text-xs">{c.image || '-'}</td>
+								<td class="py-2 pr-4 text-gray-400">{c.cpu ?? '-'}</td>
+								<td class="py-2 pr-4 text-gray-400">{c.memory || '-'}</td>
+								<td class="py-2 text-gray-500">{c.created_at?.slice(0, 10) ?? '-'}</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		{/if}
+
+	{:else if activeTab === 'all-shares'}
+		<button onclick={loadAllShares} class="text-xs text-gray-400 hover:text-white mb-4 transition-colors">새로고침</button>
+		{#if allShares.length === 0}
+			<div class="text-gray-600 text-sm">공유 스토리지가 없습니다</div>
+		{:else}
+			<div class="overflow-x-auto">
+				<table class="w-full text-sm">
+					<thead>
+						<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
+							<th class="text-left py-2 pr-4">이름</th>
+							<th class="text-left py-2 pr-4">상태</th>
+							<th class="text-left py-2 pr-4">크기</th>
+							<th class="text-left py-2 pr-4">프로토콜</th>
+							<th class="text-left py-2">유형</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each allShares as s (s.id)}
+							<tr class="border-b border-gray-800/50 text-xs">
+								<td class="py-2 pr-4 text-white">{s.name || s.id.slice(0, 8)}</td>
+								<td class="py-2 pr-4 {statusColor[s.status] ?? 'text-gray-400'}">{s.status}</td>
+								<td class="py-2 pr-4 text-gray-400">{formatNumber(s.size)} GB</td>
+								<td class="py-2 pr-4 text-gray-400">{s.share_proto}</td>
+								<td class="py-2 text-gray-500">{s.metadata?.union_type || '-'}</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		{/if}
 
 	{/if}
 </div>
