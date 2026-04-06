@@ -197,31 +197,34 @@
 				<div class="mb-4 bg-gray-800 rounded-lg p-4 space-y-3">
 					<div class="grid grid-cols-2 gap-3">
 						<div>
-							<label class="block text-xs text-gray-400 mb-1">이름 (선택)</label>
+							<label class="block text-xs text-gray-400 mb-1">이름 (선택)
 							<input
 								bind:value={subnetForm.name}
 								type="text"
 								placeholder="my-subnet"
-								class="w-full bg-gray-700 border border-gray-600 rounded px-2.5 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500"
+								class="w-full bg-gray-700 border border-gray-600 rounded px-2.5 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500 mt-1"
 							/>
+						</label>
 						</div>
 						<div>
-							<label class="block text-xs text-gray-400 mb-1">CIDR</label>
+							<label class="block text-xs text-gray-400 mb-1">CIDR
 							<input
 								bind:value={subnetForm.cidr}
 								type="text"
 								placeholder="10.0.0.0/24"
-								class="w-full bg-gray-700 border border-gray-600 rounded px-2.5 py-1.5 text-white text-sm font-mono focus:outline-none focus:border-blue-500"
+								class="w-full bg-gray-700 border border-gray-600 rounded px-2.5 py-1.5 text-white text-sm font-mono focus:outline-none focus:border-blue-500 mt-1"
 							/>
+							</label>
 						</div>
 						<div>
-							<label class="block text-xs text-gray-400 mb-1">게이트웨이 (선택)</label>
+							<label class="block text-xs text-gray-400 mb-1">게이트웨이 (선택)
 							<input
 								bind:value={subnetForm.gateway}
 								type="text"
 								placeholder="10.0.0.1"
-								class="w-full bg-gray-700 border border-gray-600 rounded px-2.5 py-1.5 text-white text-sm font-mono focus:outline-none focus:border-blue-500"
+								class="w-full bg-gray-700 border border-gray-600 rounded px-2.5 py-1.5 text-white text-sm font-mono focus:outline-none focus:border-blue-500 mt-1"
 							/>
+							</label>
 						</div>
 						<div class="flex items-end pb-1.5">
 							<label class="flex items-center gap-2 text-sm text-gray-300">

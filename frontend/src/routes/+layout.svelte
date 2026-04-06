@@ -25,15 +25,17 @@
 	});
 
 	// localStorage에서 복원된 토큰의 유효성을 서버에서 검증
-	onMount(async () => {
-		if ($auth.token) {
-			try {
-				await api.get('/api/auth/me', $auth.token, $auth.projectId ?? undefined);
-			} catch {
-				clearAuth();
-				return;
+	onMount(() => {
+		(async () => {
+			if ($auth.token) {
+				try {
+					await api.get('/api/auth/me', $auth.token, $auth.projectId ?? undefined);
+				} catch {
+					clearAuth();
+					return;
+				}
 			}
-		}
+		})();
 
 		// 세션 타이머: 1분마다 남은 시간 체크
 		const interval = setInterval(async () => {

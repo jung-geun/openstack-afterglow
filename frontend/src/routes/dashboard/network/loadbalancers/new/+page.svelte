@@ -89,8 +89,9 @@
 		{/if}
 
 		<div>
-			<label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">이름</label>
+			<label for="lb-name" class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">이름</label>
 			<input
+				id="lb-name"
 				bind:value={form.name}
 				type="text"
 				placeholder="my-lb"
@@ -99,8 +100,9 @@
 		</div>
 
 		<div>
-			<label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">네트워크</label>
+			<label for="lb-network" class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">네트워크</label>
 			<select
+				id="lb-network"
 				bind:value={form.vip_network_id}
 				onchange={onNetworkChange}
 				class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500"
@@ -114,13 +116,14 @@
 
 		{#if form.vip_network_id}
 			<div>
-				<label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">VIP 서브넷</label>
+				<label for="lb-subnet" class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">VIP 서브넷</label>
 				{#if loadingSubnets}
 					<div class="text-gray-500 text-sm">서브넷 로딩 중...</div>
 				{:else if subnets.length === 0}
 					<div class="text-gray-500 text-sm">서브넷이 없습니다</div>
 				{:else}
 					<select
+						id="lb-subnet"
 						bind:value={form.vip_subnet_id}
 						class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500"
 					>
@@ -134,8 +137,9 @@
 		{/if}
 
 		<div>
-			<label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">설명 (선택)</label>
+			<label for="lb-desc" class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">설명 (선택)</label>
 			<input
+				id="lb-desc"
 				bind:value={form.description}
 				type="text"
 				placeholder="설명"

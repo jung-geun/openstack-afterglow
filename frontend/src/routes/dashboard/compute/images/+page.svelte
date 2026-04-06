@@ -127,25 +127,29 @@
        onkeydown={(e) => e.key === 'Escape' && (editTarget = null)}>
     <div class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl"
          onclick={(e) => e.stopPropagation()}
-         role="document" onkeydown={(e) => e.stopPropagation()}>
+         role="none" onkeydown={(e) => e.stopPropagation()}>
       <h2 class="text-lg font-semibold text-white mb-5">이미지 메타데이터 편집</h2>
       <div class="space-y-4">
         <div>
-          <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">이름</label>
-          <input bind:value={editForm.name} type="text" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" />
+          <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">이름
+            <input bind:value={editForm.name} type="text" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5" />
+          </label>
         </div>
         <div>
-          <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">OS Distro</label>
-          <input bind:value={editForm.os_distro} type="text" placeholder="ubuntu, centos, rocky..." class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" />
+          <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">OS Distro
+            <input bind:value={editForm.os_distro} type="text" placeholder="ubuntu, centos, rocky..." class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5" />
+          </label>
         </div>
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">최소 디스크 (GB)</label>
-            <input bind:value={editForm.min_disk} type="number" min="0" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" />
+            <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">최소 디스크 (GB)
+              <input bind:value={editForm.min_disk} type="number" min="0" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5" />
+            </label>
           </div>
           <div>
-            <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">최소 RAM (MB)</label>
-            <input bind:value={editForm.min_ram} type="number" min="0" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" />
+            <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">최소 RAM (MB)
+              <input bind:value={editForm.min_ram} type="number" min="0" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5" />
+            </label>
           </div>
         </div>
       </div>

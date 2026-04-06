@@ -30,6 +30,7 @@
 				project_id: string;
 				project_name: string;
 				expires_at: string | null;
+				roles?: string[];
 			}>('/api/auth/login', { username, password, domain_name: domainName });
 
 			// 프로젝트 목록 조회

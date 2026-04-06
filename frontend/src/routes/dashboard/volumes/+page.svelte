@@ -102,16 +102,18 @@
 
 {#if showModal}
   <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onclick={() => { showModal = false; createError = ''; }} role="dialog" aria-modal="true" tabindex="-1" onkeydown={(e) => e.key === 'Escape' && (showModal = false)}>
-    <div class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl" onclick={(e) => e.stopPropagation()} role="document" onkeydown={(e) => e.stopPropagation()}>
+    <div class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl" onclick={(e) => e.stopPropagation()} role="none" onkeydown={(e) => e.stopPropagation()}>
       <h2 class="text-lg font-semibold text-white mb-5">볼륨 생성</h2>
       <div class="space-y-4">
         <div>
-          <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">이름</label>
-          <input bind:value={form.name} type="text" placeholder="my-volume" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" />
+          <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">이름
+            <input bind:value={form.name} type="text" placeholder="my-volume" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5" />
+          </label>
         </div>
         <div>
-          <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">크기 (GB)</label>
-          <input bind:value={form.size_gb} type="number" min="1" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" />
+          <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">크기 (GB)
+            <input bind:value={form.size_gb} type="number" min="1" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5" />
+          </label>
         </div>
       </div>
       {#if createError}<div class="mt-4 text-red-400 text-xs bg-red-900/20 border border-red-800 rounded px-3 py-2">{createError}</div>{/if}
@@ -154,7 +156,7 @@
         </thead>
         <tbody>
           {#each volumes as vol (vol.id)}
-            <tr onclick={() => goto('/dashboard/volumes/' + vol.id)} class="border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors cursor-pointer">
+            <tr onclick={() => goto('/dashboard/volumes/' + vol.id)} onkeydown={(e) => e.key === 'Enter' && goto('/dashboard/volumes/' + vol.id)} tabindex="0" role="link" class="border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors cursor-pointer">
               <td class="py-3 pr-6 font-medium">
                 {#if vol.name}<span class="text-white">{vol.name}</span>{:else}<span class="text-gray-400 font-mono text-xs">{vol.id}</span>{/if}
               </td>

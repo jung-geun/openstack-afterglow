@@ -164,7 +164,7 @@
 		onkeydown={(e) => e.key === 'Escape' && (selectedInstanceId = null)}
 		tabindex="-1"
 	>
-		<div class="absolute inset-0 bg-black/50" onclick={() => selectedInstanceId = null}></div>
+		<button class="absolute inset-0 bg-black/50 cursor-default" onclick={() => selectedInstanceId = null} aria-label="패널 닫기"></button>
 		<div class="absolute right-0 top-14 bottom-0 w-[75vw] max-w-5xl bg-gray-950 border-l border-gray-700 overflow-y-auto shadow-2xl">
 			<InstanceDetailPanel instanceId={selectedInstanceId} onClose={() => selectedInstanceId = null} />
 		</div>
@@ -179,7 +179,7 @@
 		onkeydown={(e) => e.key === 'Escape' && (selectedRouterId = null)}
 		tabindex="-1"
 	>
-		<div class="absolute inset-0 bg-black/50" onclick={() => selectedRouterId = null}></div>
+		<button class="absolute inset-0 bg-black/50 cursor-default" onclick={() => selectedRouterId = null} aria-label="패널 닫기"></button>
 		<div class="absolute right-0 top-14 bottom-0 w-[60vw] max-w-3xl bg-gray-950 border-l border-gray-700 overflow-y-auto shadow-2xl">
 			<RouterDetailPanel routerId={selectedRouterId} onClose={() => selectedRouterId = null} />
 		</div>

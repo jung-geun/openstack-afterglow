@@ -265,23 +265,25 @@
 				<div class="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-4">
 					<div class="flex gap-3 items-end">
 						<div class="flex-1">
-							<label class="block text-xs text-gray-400 mb-1">CephX ID</label>
+							<label class="block text-xs text-gray-400 mb-1">CephX ID
 							<input
 								bind:value={ruleForm.cephx_id}
 								type="text"
 								placeholder="예: my-instance"
-								class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500 font-mono"
+								class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500 font-mono mt-1"
 							/>
+						</label>
 						</div>
 						<div>
-							<label class="block text-xs text-gray-400 mb-1">권한</label>
+							<label class="block text-xs text-gray-400 mb-1">권한
 							<select
 								bind:value={ruleForm.access_level}
-								class="bg-gray-900 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500"
+								class="bg-gray-900 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500 mt-1"
 							>
 								<option value="ro">읽기 전용 (ro)</option>
 								<option value="rw">읽기/쓰기 (rw)</option>
 							</select>
+							</label>
 						</div>
 						<button
 							onclick={addAccessRule}

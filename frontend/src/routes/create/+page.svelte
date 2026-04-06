@@ -321,7 +321,7 @@
 
 				<!-- 인증 방식 선택 -->
 				<div class="mb-6">
-					<label class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">인증 방식</label>
+					<span class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">인증 방식</span>
 					<div class="flex gap-3">
 						<button
 							onclick={() => wizard.update(w => ({ ...w, authMode: 'keypair' }))}
@@ -341,8 +341,9 @@
 				{#if $wizard.authMode === 'keypair'}
 					<!-- 키페어 선택 -->
 					<div class="mb-6">
-						<label class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">키페어 (SSH 접속용)</label>
+						<label for="create-keypair" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">키페어 (SSH 접속용)</label>
 						<select
+							id="create-keypair"
 							value={$wizard.keyName}
 							onchange={e => wizard.update(w => ({ ...w, keyName: (e.target as HTMLSelectElement).value || null }))}
 							class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
@@ -361,22 +362,24 @@
 				{:else}
 					<!-- 비밀번호 설정 -->
 					<div class="mb-6">
-						<label class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">관리자 비밀번호</label>
+						<label class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">관리자 비밀번호
 						<input
 							type="password"
 							value={$wizard.adminPassword}
 							oninput={e => wizard.update(w => ({ ...w, adminPassword: (e.target as HTMLInputElement).value }))}
 							placeholder="비밀번호 입력"
-							class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
+							class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors mt-1.5"
 						/>
+					</label>
 						<p class="text-xs text-gray-500 mt-1">인스턴스 root/admin 비밀번호를 설정합니다.</p>
 					</div>
 				{/if}
 
 				<!-- 루트 볼륨 크기 -->
 				<div class="mb-6">
-					<label class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">루트 볼륨 크기 (GB)</label>
+					<label for="create-boot-vol" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">루트 볼륨 크기 (GB)</label>
 					<input
+						id="create-boot-vol"
 						type="number"
 						bind:value={$wizard.bootVolumeSizeGb}
 						min="10"
@@ -388,8 +391,9 @@
 
 				<!-- 네트워크 선택 -->
 				<div class="mb-6">
-					<label class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">네트워크</label>
+					<label for="create-network" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">네트워크</label>
 					<select
+						id="create-network"
 						value={$wizard.networkId ?? ''}
 						onchange={e => selectNetwork((e.target as HTMLSelectElement).value || null)}
 						class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"

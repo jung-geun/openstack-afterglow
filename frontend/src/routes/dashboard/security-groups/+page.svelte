@@ -259,18 +259,20 @@
 		onclick={() => { showSgModal = false; }}
 		onkeydown={(e) => e.key === 'Escape' && (showSgModal = false)}
 		role="dialog" aria-modal="true" tabindex="-1">
-		<div class="bg-gray-800 border border-gray-700 rounded-xl p-6 w-full max-w-sm mx-4" onclick={(e) => e.stopPropagation()}>
+		<div class="bg-gray-800 border border-gray-700 rounded-xl p-6 w-full max-w-sm mx-4" onclick={(e) => e.stopPropagation()} role="none" onkeydown={(e) => e.stopPropagation()}>
 			<h3 class="text-lg font-semibold text-white mb-4">보안 그룹 생성</h3>
 			<div class="space-y-3 mb-4">
 				<div>
-					<label class="block text-xs text-gray-400 mb-1">이름 *</label>
-					<input bind:value={sgForm.name} placeholder="보안 그룹 이름"
-						class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:border-blue-500 focus:outline-none" />
+					<label class="block text-xs text-gray-400 mb-1">이름 *
+						<input bind:value={sgForm.name} placeholder="보안 그룹 이름"
+							class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:border-blue-500 focus:outline-none mt-1" />
+					</label>
 				</div>
 				<div>
-					<label class="block text-xs text-gray-400 mb-1">설명</label>
-					<input bind:value={sgForm.description} placeholder="설명 (선택)"
-						class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:border-blue-500 focus:outline-none" />
+					<label class="block text-xs text-gray-400 mb-1">설명
+						<input bind:value={sgForm.description} placeholder="설명 (선택)"
+							class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:border-blue-500 focus:outline-none mt-1" />
+					</label>
 				</div>
 			</div>
 			{#if sgCreateError}

@@ -92,25 +92,28 @@
 
 {#if showModal}
   <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onclick={() => { showModal = false; createError = ''; }} role="dialog" aria-modal="true" tabindex="-1" onkeydown={(e) => e.key === 'Escape' && (showModal = false)}>
-    <div class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl" onclick={(e) => e.stopPropagation()} role="document" onkeydown={(e) => e.stopPropagation()}>
+    <div class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl" onclick={(e) => e.stopPropagation()} role="none" onkeydown={(e) => e.stopPropagation()}>
       <h2 class="text-lg font-semibold text-white mb-5">볼륨 백업 생성</h2>
       <div class="space-y-4">
         <div>
-          <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">볼륨 선택</label>
-          <select bind:value={form.volume_id} class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
-            <option value="">볼륨을 선택하세요</option>
-            {#each volumes as vol}
-              <option value={vol.id}>{vol.name || vol.id.slice(0, 8)} ({formatStorage(vol.size)})</option>
-            {/each}
-          </select>
+          <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">볼륨 선택
+            <select bind:value={form.volume_id} class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5">
+              <option value="">볼륨을 선택하세요</option>
+              {#each volumes as vol}
+                <option value={vol.id}>{vol.name || vol.id.slice(0, 8)} ({formatStorage(vol.size)})</option>
+              {/each}
+            </select>
+          </label>
         </div>
         <div>
-          <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">백업 이름</label>
-          <input bind:value={form.name} type="text" placeholder="my-backup" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" />
+          <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">백업 이름
+            <input bind:value={form.name} type="text" placeholder="my-backup" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5" />
+          </label>
         </div>
         <div>
-          <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">설명 (선택)</label>
-          <input bind:value={form.description} type="text" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" />
+          <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">설명 (선택)
+            <input bind:value={form.description} type="text" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5" />
+          </label>
         </div>
         <div class="flex items-center gap-2">
           <input type="checkbox" id="incremental" bind:checked={form.incremental} class="rounded border-gray-600" />

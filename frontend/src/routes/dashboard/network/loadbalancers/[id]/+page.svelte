@@ -360,6 +360,9 @@
 						<div>
 							<div
 								onclick={() => selectedPoolId = selectedPoolId === pool.id ? null : pool.id}
+								onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && (selectedPoolId = selectedPoolId === pool.id ? null : pool.id)}
+								role="button"
+								tabindex="0"
 								class="flex items-center justify-between bg-gray-800/50 hover:bg-gray-800 rounded-lg px-4 py-3 cursor-pointer transition-colors {selectedPoolId === pool.id ? 'border border-blue-800' : ''}"
 							>
 								<div class="text-sm">
