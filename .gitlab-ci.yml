@@ -2,14 +2,19 @@ stages:
   - build
 
 variables:
-  DOCKER_TLS_CERTDIR: "/certs"
-  BACKEND_IMAGE: $CI_REGISTRY_IMAGE/backend
-  FRONTEND_IMAGE: $CI_REGISTRY_IMAGE/frontend
+  DOCKER_HOST: tcp://docker:2375
+  DOCKER_TLS_CERTDIR: ""
+  HEALTHCHECK_TCP_PORT: "2375"
+  BACKEND_IMAGE: $CI_REGISTRY_IMAGE/union-api
+  FRONTEND_IMAGE: $CI_REGISTRY_IMAGE/union
 
 .docker-build:
   image: docker:24.0.7
   services:
-    - docker:24.0.7-dind
+    - name: docker:24.0.7-dind
+      alias: docker
+  tags:
+    - docker
   before_script:
     - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
   rules:
