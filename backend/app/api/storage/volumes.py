@@ -19,7 +19,7 @@ async def list_volumes(conn: openstack.connection.Connection = Depends(get_os_co
             lambda: [v.model_dump() for v in cinder.list_volumes(conn)]
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"볼륨 목록 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail="볼륨 목록 조회 실패")
 
 
 @router.get("/{volume_id}", response_model=VolumeInfo)
@@ -41,7 +41,7 @@ async def create_volume(
         await invalidate(f"union:cinder:{pid}:volumes")
         return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"볼륨 생성 실패: {e}")
+        raise HTTPException(status_code=500, detail="볼륨 생성 실패")
 
 
 @router.delete("/{volume_id}", status_code=204)
@@ -54,4 +54,4 @@ async def delete_volume(
         await asyncio.to_thread(cinder.delete_volume, conn, volume_id)
         await invalidate(f"union:cinder:{pid}:volumes")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"볼륨 삭제 실패: {e}")
+        raise HTTPException(status_code=500, detail="볼륨 삭제 실패")

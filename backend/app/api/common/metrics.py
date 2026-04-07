@@ -1,9 +1,15 @@
 """Prometheus exposition format 메트릭 엔드포인트."""
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+from app.api.deps import get_token_info
 
 router = APIRouter()
+
+
+def _require_admin(token_info: dict = Depends(get_token_info)):
+    if "admin" not in token_info.get("roles", []):
+        raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다")
 
 REQUEST_COUNT = Counter(
     'union_http_requests_total',
@@ -23,6 +29,6 @@ def record_request(method: str, path: str, status: int, duration_ms: float) -> N
     REQUEST_DURATION.labels(method=method, path=path).observe(duration_ms)
 
 
-@router.get("")
+@router.get("", dependencies=[Depends(_require_admin)])
 async def get_metrics():
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)

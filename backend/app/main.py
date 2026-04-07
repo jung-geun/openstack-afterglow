@@ -5,9 +5,13 @@ import os
 import time
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exception_handlers import http_exception_handler as _default_http_handler
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from app.rate_limit import limiter
 
 from app.api.compute import instances_router, keypairs_router, images_router, flavors_router
 from app.api.storage import volumes_router, volume_backups_router, volume_snapshots_router, shares_router
@@ -86,12 +90,32 @@ def _setup_logging() -> None:
 _setup_logging()
 _logger = logging.getLogger(__name__)
 
-
 app = FastAPI(
     title="Union",
     description="OpenStack VM 배포 + OverlayFS 마운트 웹 플랫폼",
     version="0.1.0",
 )
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+@app.exception_handler(HTTPException)
+async def sanitized_http_exception_handler(request: Request, exc: HTTPException):
+    """5xx 에러의 내부 상세 정보를 클라이언트에 노출하지 않고 로그에만 기록."""
+    if exc.status_code >= 500:
+        _logger.error(
+            "HTTP %d: %s %s — %s",
+            exc.status_code, request.method, request.url.path, exc.detail,
+        )
+        return JSONResponse(status_code=exc.status_code, content={"detail": "내부 서버 오류"})
+    return await _default_http_handler(request, exc)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """처리되지 않은 예외를 로그에 기록하고 500을 반환."""
+    _logger.exception("Unhandled exception: %s %s", request.method, request.url.path)
+    return JSONResponse(status_code=500, content={"detail": "내부 서버 오류"})
 
 # CORS: credentials 사용 시 allow_origins=["*"] 는 브라우저가 거부하므로
 # 요청 Origin을 동적으로 허용 (개발 환경)
@@ -114,15 +138,24 @@ async def request_logging_middleware(request: Request, call_next):
     return response
 
 
+_CORS_ALLOW_HEADERS = "Content-Type, X-Auth-Token, X-Project-Id, Authorization"
+_CORS_ALLOW_METHODS = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+
+
+def _get_allowed_origins() -> set[str]:
+    from app.config import get_settings
+    return set(get_settings().cors_origin_list)
+
+
 @app.middleware("http")
 async def cors_middleware(request: Request, call_next):
     origin = request.headers.get("origin", "")
     response = await call_next(request)
-    if origin:
+    if origin and origin in _get_allowed_origins():
         response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-Auth-Token, X-Project-Id, Authorization"
+        response.headers["Access-Control-Allow-Methods"] = _CORS_ALLOW_METHODS
+        response.headers["Access-Control-Allow-Headers"] = _CORS_ALLOW_HEADERS
         response.headers["Vary"] = "Origin"
     return response
 
@@ -130,14 +163,17 @@ async def cors_middleware(request: Request, call_next):
 @app.options("/{rest_of_path:path}")
 async def options_handler(request: Request, rest_of_path: str):
     """OPTIONS preflight 전용 핸들러."""
-    origin = request.headers.get("origin", "*")
+    origin = request.headers.get("origin", "")
+    allowed = _get_allowed_origins()
+    if origin not in allowed:
+        return JSONResponse(content="Forbidden", status_code=403)
     return JSONResponse(
         content="OK",
         headers={
             "Access-Control-Allow-Origin": origin,
             "Access-Control-Allow-Credentials": "true",
-            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
-            "Access-Control-Allow-Headers": "Content-Type, X-Auth-Token, X-Project-Id, Authorization",
+            "Access-Control-Allow-Methods": _CORS_ALLOW_METHODS,
+            "Access-Control-Allow-Headers": _CORS_ALLOW_HEADERS,
             "Access-Control-Max-Age": "600",
             "Vary": "Origin",
         },

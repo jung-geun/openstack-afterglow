@@ -9,6 +9,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from pydantic_settings import BaseSettings
+from pydantic import model_validator
 
 
 def _load_toml() -> dict:
@@ -70,6 +71,9 @@ def _load_toml() -> dict:
             flat["gitlab_oidc_redirect_uri"] = gl.get("redirect_uri", "")
             flat["gitlab_oidc_scopes"] = gl.get("scopes", "openid email profile read_user")
 
+            cors = data.get("cors", {})
+            flat["cors_origins"] = cors.get("origins", "http://localhost:3000,http://localhost")
+
             log = data.get("logging", {})
             flat["log_file_path"] = log.get("log_file_path", "/app/logs/union-backend.log")
             flat["log_level"] = log.get("log_level", "INFO")
@@ -103,6 +107,9 @@ class Settings(BaseSettings):
     backend_port: int = 8000
     frontend_port: int = 3000
     secret_key: str = "change-me-in-production"
+
+    # CORS 허용 origin (쉼표 구분)
+    cors_origins: str = "http://localhost:3000,http://localhost"
     refresh_interval_ms: int = 5000
     site_name: str = "Union"
     site_description: str = "OpenStack VM + OverlayFS 배포 플랫폼"
@@ -145,6 +152,21 @@ class Settings(BaseSettings):
     @property
     def ceph_monitor_list(self) -> list[str]:
         return [m.strip() for m in self.ceph_monitors.split(",") if m.strip()]
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @model_validator(mode="after")
+    def warn_insecure_defaults(self) -> "Settings":
+        import logging
+        logger = logging.getLogger(__name__)
+        if self.secret_key == "change-me-in-production":
+            logger.warning(
+                "SECRET_KEY is set to the default value. "
+                "Set a strong random value in config.toml [app] secret_key or SECRET_KEY env var."
+            )
+        return self
 
     class Config:
         env_file = ".env"

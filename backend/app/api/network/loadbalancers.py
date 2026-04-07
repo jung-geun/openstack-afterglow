@@ -50,7 +50,7 @@ def _handle(fn, error_msg: str):
     try:
         return fn()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"{error_msg}: {e}")
+        raise HTTPException(status_code=500, detail="{error_msg}")
 
 
 # ---------------------------------------------------------------------------
@@ -66,7 +66,7 @@ async def list_load_balancers(conn: openstack.connection.Connection = Depends(ge
             lambda: octavia.list_load_balancers(conn, project_id=pid)
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"로드밸런서 목록 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail="로드밸런서 목록 조회 실패")
 
 
 @router.post("", status_code=201)
@@ -80,7 +80,7 @@ async def create_load_balancer(
         await invalidate(f"union:octavia:{pid}:lbs")
         return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"로드밸런서 생성 실패: {e}")
+        raise HTTPException(status_code=500, detail="로드밸런서 생성 실패")
 
 
 @router.get("/{lb_id}")

@@ -24,7 +24,7 @@ async def list_snapshots(
     try:
         return await asyncio.to_thread(cinder.list_snapshots, conn, volume_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"스냅샷 목록 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail="스냅샷 목록 조회 실패")
 
 
 @router.post("", status_code=201)
@@ -37,7 +37,7 @@ async def create_snapshot(
             cinder.create_snapshot, conn, req.volume_id, req.name, req.description, req.force
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"스냅샷 생성 실패: {e}")
+        raise HTTPException(status_code=500, detail="스냅샷 생성 실패")
 
 
 @router.get("/{snapshot_id}")
@@ -53,4 +53,4 @@ async def delete_snapshot(snapshot_id: str, conn: openstack.connection.Connectio
     try:
         await asyncio.to_thread(cinder.delete_snapshot, conn, snapshot_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"스냅샷 삭제 실패: {e}")
+        raise HTTPException(status_code=500, detail="스냅샷 삭제 실패")

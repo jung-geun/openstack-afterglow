@@ -156,7 +156,7 @@ async def admin_overview(conn: openstack.connection.Connection = Depends(get_os_
         return await asyncio.to_thread(_collect)
     except Exception as e:
         _logger.warning("admin overview 조회 실패", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"개요 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail="개요 조회 실패")
 
 
 @router.get("/hypervisors", dependencies=[Depends(_require_admin)])
@@ -185,7 +185,7 @@ async def list_hypervisors(conn: openstack.connection.Connection = Depends(get_o
         return await asyncio.to_thread(_list)
     except Exception as e:
         _logger.warning("hypervisors 조회 실패", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"하이퍼바이저 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail="하이퍼바이저 조회 실패")
 
 
 @router.get("/all-instances", dependencies=[Depends(_require_admin)])
@@ -216,7 +216,7 @@ async def list_all_instances(
             return {"items": items, "next_marker": next_marker, "count": len(items)}
         return await asyncio.to_thread(_list)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"전체 인스턴스 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail="전체 인스턴스 조회 실패")
 
 
 @router.get("/all-volumes", dependencies=[Depends(_require_admin)])
@@ -246,7 +246,7 @@ async def list_all_volumes(
             return {"items": items, "next_marker": next_marker, "count": len(items)}
         return await asyncio.to_thread(_list)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"전체 볼륨 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail="전체 볼륨 조회 실패")
 
 
 @router.get("/all-containers", dependencies=[Depends(_require_admin)])
@@ -258,7 +258,7 @@ async def list_all_containers(conn: openstack.connection.Connection = Depends(ge
     except ZunServiceUnavailable:
         return []
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"컨테이너 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail="컨테이너 조회 실패")
 
 
 @router.get("/all-shares", dependencies=[Depends(_require_admin)])
@@ -267,7 +267,7 @@ async def list_all_shares(conn: openstack.connection.Connection = Depends(get_os
     try:
         return await asyncio.to_thread(manila.list_shares, conn, None, True)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"공유 스토리지 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail="공유 스토리지 조회 실패")
 
 
 @router.get("/topology", response_model=TopologyData, dependencies=[Depends(_require_admin)])
@@ -294,7 +294,7 @@ async def admin_topology(conn: openstack.connection.Connection = Depends(get_os_
     try:
         return await cached_call("union:admin:topology", 30, _fetch)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"토폴로지 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail="토폴로지 조회 실패")
 
 
 @router.get("/quotas/{project_id}", dependencies=[Depends(_require_admin)])
@@ -310,4 +310,4 @@ async def get_quotas(project_id: str, conn: openstack.connection.Connection = De
             }
         return await asyncio.to_thread(_get)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"쿼터 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail="쿼터 조회 실패")

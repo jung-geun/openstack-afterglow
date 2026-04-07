@@ -21,7 +21,7 @@ async def list_networks(conn: openstack.connection.Connection = Depends(get_os_c
     try:
         return await asyncio.to_thread(neutron.list_networks, conn, pid)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"네트워크 목록 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail="네트워크 목록 조회 실패")
 
 
 @router.post("", response_model=NetworkInfo, status_code=201)
@@ -32,7 +32,7 @@ async def create_network(
     try:
         return await asyncio.to_thread(neutron.create_network, conn, req.name)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"네트워크 생성 실패: {e}")
+        raise HTTPException(status_code=500, detail="네트워크 생성 실패")
 
 
 # ---------------------------------------------------------------------------
@@ -44,7 +44,7 @@ async def list_floating_ips(conn: openstack.connection.Connection = Depends(get_
     try:
         return await asyncio.to_thread(neutron.list_floating_ips, conn, conn._union_project_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Floating IP 목록 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail="Floating IP 목록 조회 실패")
 
 
 @router.post("/floating-ips", response_model=FloatingIpInfo, status_code=201)
@@ -55,7 +55,7 @@ async def create_floating_ip(
     try:
         return await asyncio.to_thread(neutron.create_floating_ip, conn, req.floating_network_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Floating IP 생성 실패: {e}")
+        raise HTTPException(status_code=500, detail="Floating IP 생성 실패")
 
 
 @router.post("/floating-ips/{fip_id}/associate", response_model=FloatingIpInfo)
@@ -67,7 +67,7 @@ async def associate_floating_ip(
     try:
         return await asyncio.to_thread(neutron.associate_floating_ip, conn, fip_id, req.instance_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Floating IP 연결 실패: {e}")
+        raise HTTPException(status_code=500, detail="Floating IP 연결 실패")
 
 
 @router.post("/floating-ips/{fip_id}/disassociate", response_model=FloatingIpInfo)
@@ -78,7 +78,7 @@ async def disassociate_floating_ip(
     try:
         return await asyncio.to_thread(neutron.disassociate_floating_ip, conn, fip_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Floating IP 해제 실패: {e}")
+        raise HTTPException(status_code=500, detail="Floating IP 해제 실패")
 
 
 @router.delete("/floating-ips/{fip_id}", status_code=204)
@@ -89,7 +89,7 @@ async def delete_floating_ip(
     try:
         await asyncio.to_thread(neutron.delete_floating_ip, conn, fip_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Floating IP 삭제 실패: {e}")
+        raise HTTPException(status_code=500, detail="Floating IP 삭제 실패")
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +104,7 @@ async def delete_subnet(
     try:
         await asyncio.to_thread(neutron.delete_subnet, conn, subnet_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"서브넷 삭제 실패: {e}")
+        raise HTTPException(status_code=500, detail="서브넷 삭제 실패")
 
 
 # ---------------------------------------------------------------------------
@@ -137,7 +137,7 @@ async def get_topology(conn: openstack.connection.Connection = Depends(get_os_co
             lambda: _fetch_topology_sync(conn)
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"토폴로지 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail="토폴로지 조회 실패")
 
 
 # ---------------------------------------------------------------------------
@@ -160,7 +160,7 @@ async def delete_network(
     try:
         await asyncio.to_thread(neutron.delete_network, conn, network_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"네트워크 삭제 실패: {e}")
+        raise HTTPException(status_code=500, detail="네트워크 삭제 실패")
 
 
 @router.post("/{network_id}/subnets", response_model=SubnetDetail, status_code=201)
@@ -176,4 +176,4 @@ async def create_subnet(
             req.gateway_ip, req.enable_dhcp,
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"서브넷 생성 실패: {e}")
+        raise HTTPException(status_code=500, detail="서브넷 생성 실패")

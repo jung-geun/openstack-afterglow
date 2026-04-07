@@ -33,7 +33,7 @@ async def list_security_groups(conn: openstack.connection.Connection = Depends(g
             lambda: neutron.list_security_groups(conn, project_id=pid),
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"보안 그룹 목록 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail="보안 그룹 목록 조회 실패")
 
 
 @router.post("", status_code=201)
@@ -47,7 +47,7 @@ async def create_security_group(
         await invalidate(f"union:neutron:{pid}:security_groups")
         return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"보안 그룹 생성 실패: {e}")
+        raise HTTPException(status_code=500, detail="보안 그룹 생성 실패")
 
 
 @router.delete("/{sg_id}", status_code=204)
@@ -60,7 +60,7 @@ async def delete_security_group(
         neutron.delete_security_group(conn, sg_id)
         await invalidate(f"union:neutron:{pid}:security_groups")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"보안 그룹 삭제 실패: {e}")
+        raise HTTPException(status_code=500, detail="보안 그룹 삭제 실패")
 
 
 @router.post("/{sg_id}/rules", status_code=201)
@@ -84,7 +84,7 @@ async def create_security_group_rule(
         await invalidate(f"union:neutron:{pid}:security_groups")
         return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"보안 그룹 규칙 추가 실패: {e}")
+        raise HTTPException(status_code=500, detail="보안 그룹 규칙 추가 실패")
 
 
 @router.delete("/{sg_id}/rules/{rule_id}", status_code=204)
@@ -98,4 +98,4 @@ async def delete_security_group_rule(
         neutron.delete_security_group_rule(conn, rule_id)
         await invalidate(f"union:neutron:{pid}:security_groups")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"보안 그룹 규칙 삭제 실패: {e}")
+        raise HTTPException(status_code=500, detail="보안 그룹 규칙 삭제 실패")

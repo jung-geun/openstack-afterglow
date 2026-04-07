@@ -71,7 +71,7 @@ async def list_instances(conn: openstack.connection.Connection = Depends(get_os_
         )
     except Exception as e:
         logger.error(f"인스턴스 목록 조회 실패: {e}")
-        raise HTTPException(status_code=500, detail=f"인스턴스 목록 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail="인스턴스 목록 조회 실패")
 
 
 @router.get("/{instance_id}", response_model=InstanceInfo)
@@ -220,7 +220,7 @@ async def create_instance(
         logger.error(f"인스턴스 생성 실패, rollback 시작: {e}")
         await _rollback(conn, server_id, boot_volume_id, upper_volume_id,
                         created_share_ids, created_access_ids, floating_ip_id)
-        raise HTTPException(status_code=500, detail=f"인스턴스 생성 실패: {e}")
+        raise HTTPException(status_code=500, detail="인스턴스 생성 실패")
 
 
 @router.post("/async")
@@ -445,7 +445,7 @@ async def start_instance(
         await invalidate(f"union:nova:{pid}:instance:{instance_id}")
         await invalidate(f"union:nova:{pid}:instances")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="작업 실패")
 
 
 @router.post("/{instance_id}/stop", status_code=204)
@@ -459,7 +459,7 @@ async def stop_instance(
         await invalidate(f"union:nova:{pid}:instance:{instance_id}")
         await invalidate(f"union:nova:{pid}:instances")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="작업 실패")
 
 
 @router.post("/{instance_id}/reboot", status_code=204)
@@ -473,7 +473,7 @@ async def reboot_instance(
         await invalidate(f"union:nova:{pid}:instance:{instance_id}")
         await invalidate(f"union:nova:{pid}:instances")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="작업 실패")
 
 
 @router.get("/{instance_id}/console")
@@ -485,7 +485,7 @@ async def get_console(
         url = await asyncio.to_thread(nova.get_console_url, conn, instance_id)
         return {"url": url}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="작업 실패")
 
 
 @router.get("/{instance_id}/log")
@@ -498,7 +498,7 @@ async def get_console_log(
         output = await asyncio.to_thread(nova.get_console_output, conn, instance_id, length)
         return {"output": output}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="작업 실패")
 
 
 @router.get("/{instance_id}/interfaces")
@@ -513,7 +513,7 @@ async def list_interfaces(
             lambda: neutron.list_instance_ports(conn, instance_id)
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="작업 실패")
 
 
 @router.get("/{instance_id}/volumes")
@@ -537,7 +537,7 @@ async def list_instance_volumes(
     try:
         return await cached_call(f"union:cinder:{pid}:vol_attach:{instance_id}", 30, _fetch)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="작업 실패")
 
 
 @router.post("/{instance_id}/volumes", status_code=201)
@@ -555,7 +555,7 @@ async def attach_volume_to_instance(
         await invalidate(f"union:cinder:{pid}:vol_attach:{instance_id}")
         return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="작업 실패")
 
 
 @router.delete("/{instance_id}/volumes/{volume_id}", status_code=204)
@@ -569,7 +569,7 @@ async def detach_volume_from_instance(
         await asyncio.to_thread(nova.detach_volume, conn, instance_id, volume_id)
         await invalidate(f"union:cinder:{pid}:vol_attach:{instance_id}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="작업 실패")
 
 
 @router.get("/{instance_id}/security-groups")
@@ -587,7 +587,7 @@ async def list_instance_security_groups(
     try:
         return await cached_call(f"union:neutron:{pid}:sgs:{instance_id}", 60, _fetch)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="작업 실패")
 
 
 @router.get("/{instance_id}/owner")
@@ -631,7 +631,7 @@ async def attach_interface(
         await invalidate(f"union:neutron:{pid}:ports:{instance_id}")
         return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="작업 실패")
 
 
 @router.delete("/{instance_id}/interfaces/{port_id}", status_code=204)
@@ -645,7 +645,7 @@ async def detach_interface(
         await asyncio.to_thread(nova.detach_interface, conn, instance_id, port_id)
         await invalidate(f"union:neutron:{pid}:ports:{instance_id}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="작업 실패")
 
 
 @router.post("/{instance_id}/ports/{port_id}/security-groups")
@@ -662,7 +662,7 @@ async def update_port_security_groups(
         await invalidate(f"union:neutron:{pid}:sgs:{instance_id}")
         return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="작업 실패")
 
 
 # ---------------------------------------------------------------------------

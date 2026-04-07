@@ -90,7 +90,7 @@ async def get_token_info(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=401, detail=f"유효하지 않은 토큰: {e}")
+        raise HTTPException(status_code=401, detail="유효하지 않은 토큰")
 
 
 async def get_os_conn(
@@ -117,7 +117,7 @@ async def get_os_conn(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=401, detail=f"유효하지 않은 토큰: {e}")
+        raise HTTPException(status_code=401, detail="유효하지 않은 토큰")
 
     try:
         yield conn

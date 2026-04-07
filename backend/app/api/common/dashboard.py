@@ -85,7 +85,7 @@ async def get_dashboard_summary(
             ),
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="작업 실패")
 
     flavors_by_id: dict = {f["id"]: f for f in all_flavors}
     flavors_by_name: dict = {f["name"]: f for f in all_flavors}
@@ -132,7 +132,7 @@ async def get_project_quotas(
             asyncio.to_thread(manila_svc.get_share_quota, conn),
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="작업 실패")
 
     return {
         "compute": compute_q,
@@ -156,7 +156,7 @@ async def get_project_usage(
     try:
         usage = await asyncio.to_thread(nova.get_project_usage, conn, project_id, start_dt, end_dt)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="작업 실패")
     return {
         "start": start_dt,
         "end": end_dt,

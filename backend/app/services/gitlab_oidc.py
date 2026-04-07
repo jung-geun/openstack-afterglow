@@ -12,6 +12,7 @@ GitLab OIDC 인증 서비스.
 """
 
 import secrets
+import urllib.parse
 import httpx
 
 from app.config import get_settings
@@ -43,23 +44,18 @@ async def get_authorize_url() -> str:
         "scope": settings.gitlab_oidc_scopes,
         "state": state,
     }
-    query = "&".join(f"{k}={v}" for k, v in params.items())
+    query = urllib.parse.urlencode(params)
     return f"{settings.gitlab_oidc_gitlab_url}/oauth/authorize?{query}"
 
 
 async def _validate_state(state: str) -> None:
     """Redis에서 state 검증 후 삭제. 없거나 Redis 오류면 예외 발생."""
-    try:
-        r = await _get_redis()
-        key = f"union:gitlab_state:{state}"
-        val = await r.get(key)
-        if val is None:
-            raise ValueError("유효하지 않거나 만료된 state입니다")
-        await r.delete(key)
-    except ValueError:
-        raise
-    except Exception:
-        pass  # Redis 장애 시 state 검증 건너뜀
+    r = await _get_redis()
+    key = f"union:gitlab_state:{state}"
+    val = await r.get(key)
+    if val is None:
+        raise ValueError("유효하지 않거나 만료된 state입니다")
+    await r.delete(key)
 
 
 async def _exchange_gitlab_code(code: str) -> dict:

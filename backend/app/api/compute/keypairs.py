@@ -20,7 +20,7 @@ async def list_keypairs(conn: openstack.connection.Connection = Depends(get_os_c
     try:
         return await asyncio.to_thread(nova.list_keypairs, conn)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="작업 실패")
 
 
 @router.post("", status_code=201)
@@ -31,7 +31,7 @@ async def create_keypair(
     try:
         return await asyncio.to_thread(nova.create_keypair, conn, req.name, req.public_key, req.key_type)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"키페어 생성 실패: {e}")
+        raise HTTPException(status_code=500, detail="키페어 생성 실패")
 
 
 @router.delete("/{keypair_name}", status_code=204)
@@ -42,4 +42,4 @@ async def delete_keypair(
     try:
         await asyncio.to_thread(nova.delete_keypair, conn, keypair_name)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"키페어 삭제 실패: {e}")
+        raise HTTPException(status_code=500, detail="키페어 삭제 실패")

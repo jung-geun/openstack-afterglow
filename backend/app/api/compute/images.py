@@ -36,7 +36,7 @@ async def delete_image(
     try:
         await asyncio.to_thread(glance.delete_image, conn, image_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"이미지 삭제 실패: {e}")
+        raise HTTPException(status_code=500, detail="이미지 삭제 실패")
 
 
 @router.patch("/{image_id}", response_model=ImageInfo)
@@ -52,4 +52,4 @@ async def update_image(
         )
         return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"이미지 메타데이터 수정 실패: {e}")
+        raise HTTPException(status_code=500, detail="이미지 메타데이터 수정 실패")

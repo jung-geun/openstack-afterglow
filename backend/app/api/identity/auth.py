@@ -1,11 +1,12 @@
 import asyncio
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Header
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Header, Request
 from typing import Optional
 
 from app.models.auth import LoginRequest, TokenResponse, UserInfo, ProjectInfo, GitLabCallbackRequest
 from app.services import keystone
 from app.services.cache import cached_call
 from app.config import get_settings
+from app.rate_limit import limiter
 
 router = APIRouter()
 
@@ -27,7 +28,8 @@ async def _prewarm_dashboard(token: str, project_id: str):
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(req: LoginRequest, background_tasks: BackgroundTasks):
+@limiter.limit("10/minute")
+async def login(request: Request, req: LoginRequest, background_tasks: BackgroundTasks):
     try:
         data = keystone.authenticate(
             username=req.username,
@@ -36,7 +38,7 @@ async def login(req: LoginRequest, background_tasks: BackgroundTasks):
             domain_name=req.domain_name,
         )
     except Exception as e:
-        raise HTTPException(status_code=401, detail=f"인증 실패: {e}")
+        raise HTTPException(status_code=401, detail="인증 실패")
 
     # 대시보드 캐시 프리워밍 (백그라운드)
     background_tasks.add_task(_prewarm_dashboard, data["token"], data["project_id"])
@@ -59,7 +61,7 @@ async def me(x_auth_token: Optional[str] = Header(None), x_project_id: Optional[
     try:
         data = keystone.validate_token(x_auth_token, project_id=x_project_id or "")
     except Exception as e:
-        raise HTTPException(status_code=401, detail=f"유효하지 않은 토큰: {e}")
+        raise HTTPException(status_code=401, detail="유효하지 않은 토큰")
 
     return UserInfo(
         user_id=data["user_id"],
@@ -94,7 +96,7 @@ async def extend_session_endpoint(x_auth_token: Optional[str] = Header(None), x_
         # Keystone 토큰 여전히 유효한지 확인
         keystone.validate_token(x_auth_token, project_id=x_project_id or "")
     except Exception as e:
-        raise HTTPException(status_code=401, detail=f"유효하지 않은 토큰: {e}")
+        raise HTTPException(status_code=401, detail="유효하지 않은 토큰")
     from app.api.deps import extend_session
     await extend_session(x_auth_token, x_project_id or "")
     settings = get_settings()
@@ -110,7 +112,7 @@ async def list_projects(x_auth_token: Optional[str] = Header(None)):
         projects = keystone.list_projects(x_auth_token)
         return [ProjectInfo(**p) for p in projects]
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"프로젝트 목록 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail="프로젝트 목록 조회 실패")
 
 
 @router.get("/gitlab/enabled")
@@ -130,12 +132,13 @@ async def gitlab_authorize():
     try:
         url = await get_authorize_url()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"GitLab 인증 URL 생성 실패: {e}")
+        raise HTTPException(status_code=500, detail="GitLab 인증 URL 생성 실패")
     return {"authorize_url": url}
 
 
 @router.post("/gitlab/callback", response_model=TokenResponse)
-async def gitlab_callback(req: GitLabCallbackRequest, background_tasks: BackgroundTasks):
+@limiter.limit("10/minute")
+async def gitlab_callback(request: Request, req: GitLabCallbackRequest, background_tasks: BackgroundTasks):
     """GitLab OAuth2 콜백: authorization code로 Keystone 토큰 발급."""
     settings = get_settings()
     if not settings.gitlab_oidc_enabled:
@@ -144,7 +147,7 @@ async def gitlab_callback(req: GitLabCallbackRequest, background_tasks: Backgrou
     try:
         data = await exchange_code(req.code, req.state)
     except Exception as e:
-        raise HTTPException(status_code=401, detail=f"GitLab 인증 실패: {e}")
+        raise HTTPException(status_code=401, detail="GitLab 인증 실패")
 
     background_tasks.add_task(_prewarm_dashboard, data["token"], data["project_id"])
 

@@ -9,7 +9,10 @@ FROM node:20-alpine AS runner
 WORKDIR /app
 COPY --from=builder /app/build ./build
 COPY --from=builder /app/package.json ./
-RUN npm install --omit=dev --ignore-scripts
+RUN npm install --omit=dev --ignore-scripts \
+    && adduser -D appuser \
+    && chown -R appuser:appuser /app
+USER appuser
 EXPOSE 3000
 ENV PORT=3000
 CMD ["node", "build"]

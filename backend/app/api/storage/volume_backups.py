@@ -25,7 +25,7 @@ async def list_backups(conn: openstack.connection.Connection = Depends(get_os_co
     try:
         return await asyncio.to_thread(cinder.list_backups, conn)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"백업 목록 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail="백업 목록 조회 실패")
 
 
 @router.post("", status_code=201)
@@ -38,7 +38,7 @@ async def create_backup(
             cinder.create_backup, conn, req.volume_id, req.name, req.description, req.incremental
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"백업 생성 실패: {e}")
+        raise HTTPException(status_code=500, detail="백업 생성 실패")
 
 
 @router.get("/{backup_id}")
@@ -54,7 +54,7 @@ async def delete_backup(backup_id: str, conn: openstack.connection.Connection = 
     try:
         await asyncio.to_thread(cinder.delete_backup, conn, backup_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"백업 삭제 실패: {e}")
+        raise HTTPException(status_code=500, detail="백업 삭제 실패")
 
 
 @router.post("/{backup_id}/restore")
@@ -66,4 +66,4 @@ async def restore_backup(
     try:
         return await asyncio.to_thread(cinder.restore_backup, conn, backup_id, req.volume_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"백업 복원 실패: {e}")
+        raise HTTPException(status_code=500, detail="백업 복원 실패")

@@ -22,7 +22,7 @@ async def list_containers(conn: openstack.connection.Connection = Depends(get_os
     except ZunServiceUnavailable as e:
         return ContainerListResponse(items=[], service_available=False, message=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"컨테이너 목록 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail="컨테이너 목록 조회 실패")
 
 
 @router.get("/{container_id}", response_model=ZunContainerInfo)
@@ -46,7 +46,7 @@ async def create_container(
             req.cpu, req.memory, req.environment, req.auto_remove, ports,
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"컨테이너 생성 실패: {e}")
+        raise HTTPException(status_code=500, detail="컨테이너 생성 실패")
 
 
 @router.delete("/{container_id}", status_code=204)
@@ -54,7 +54,7 @@ async def delete_container(container_id: str, conn: openstack.connection.Connect
     try:
         await asyncio.to_thread(zun.delete_container, conn, container_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"컨테이너 삭제 실패: {e}")
+        raise HTTPException(status_code=500, detail="컨테이너 삭제 실패")
 
 
 @router.post("/{container_id}/start", status_code=204)
@@ -62,7 +62,7 @@ async def start_container(container_id: str, conn: openstack.connection.Connecti
     try:
         await asyncio.to_thread(zun.start_container, conn, container_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"컨테이너 시작 실패: {e}")
+        raise HTTPException(status_code=500, detail="컨테이너 시작 실패")
 
 
 @router.post("/{container_id}/stop", status_code=204)
@@ -70,7 +70,7 @@ async def stop_container(container_id: str, conn: openstack.connection.Connectio
     try:
         await asyncio.to_thread(zun.stop_container, conn, container_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"컨테이너 중지 실패: {e}")
+        raise HTTPException(status_code=500, detail="컨테이너 중지 실패")
 
 
 @router.get("/{container_id}/logs")
@@ -79,7 +79,7 @@ async def get_container_logs(container_id: str, conn: openstack.connection.Conne
         logs = await asyncio.to_thread(zun.get_container_logs, conn, container_id)
         return {"logs": logs}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"로그 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail="로그 조회 실패")
 
 
 class ExecRequest(BaseModel):

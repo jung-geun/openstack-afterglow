@@ -44,12 +44,16 @@ function loadPersistedAuth(): AuthState {
 export const auth = writable<AuthState>(loadPersistedAuth());
 
 // 자동 영속화: token이 있으면 localStorage에 저장, 없으면 제거
+// 동시에 서버 사이드 인증 미들웨어(hooks.server.ts)를 위한 마커 쿠키도 관리
 if (typeof window !== 'undefined') {
 	auth.subscribe(($auth) => {
 		if ($auth.token) {
 			localStorage.setItem('union_auth', JSON.stringify($auth));
+			// 서버 사이드 라우트 보호용 마커 쿠키 (httpOnly 아님 — 토큰 자체는 저장하지 않음)
+			document.cookie = 'union_session=1; path=/; SameSite=Strict';
 		} else {
 			localStorage.removeItem('union_auth');
+			document.cookie = 'union_session=; path=/; SameSite=Strict; max-age=0';
 		}
 	});
 }
