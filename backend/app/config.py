@@ -60,6 +60,16 @@ def _load_toml() -> dict:
             flat["boot_volume_size_gb"] = nv.get("boot_volume_size_gb", 20)
             flat["upper_volume_size_gb"] = nv.get("upper_volume_size_gb", 50)
 
+            gl = data.get("gitlab_oidc", {})
+            flat["gitlab_oidc_enabled"] = gl.get("enabled", False)
+            flat["gitlab_oidc_gitlab_url"] = gl.get("gitlab_url", "")
+            flat["gitlab_oidc_client_id"] = gl.get("client_id", "")
+            flat["gitlab_oidc_client_secret"] = gl.get("client_secret", "")
+            flat["gitlab_oidc_idp_id"] = gl.get("idp_id", "gitlab")
+            flat["gitlab_oidc_protocol_id"] = gl.get("protocol_id", "openid")
+            flat["gitlab_oidc_redirect_uri"] = gl.get("redirect_uri", "")
+            flat["gitlab_oidc_scopes"] = gl.get("scopes", "openid email profile read_user")
+
             log = data.get("logging", {})
             flat["log_file_path"] = log.get("log_file_path", "/app/logs/union-backend.log")
             flat["log_level"] = log.get("log_level", "INFO")
@@ -112,6 +122,16 @@ class Settings(BaseSettings):
     default_availability_zone: str = "nova"
     boot_volume_size_gb: int = 20
     upper_volume_size_gb: int = 50
+
+    # GitLab OIDC
+    gitlab_oidc_enabled: bool = False
+    gitlab_oidc_gitlab_url: str = ""
+    gitlab_oidc_client_id: str = ""
+    gitlab_oidc_client_secret: str = ""
+    gitlab_oidc_idp_id: str = "gitlab"
+    gitlab_oidc_protocol_id: str = "openid"
+    gitlab_oidc_redirect_uri: str = ""
+    gitlab_oidc_scopes: str = "openid email profile read_user"
 
     # 로깅 설정
     log_file_path: str = "/app/logs/union-backend.log"

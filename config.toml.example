@@ -46,3 +46,19 @@ default_network_id = ""
 default_availability_zone = "nova"
 boot_volume_size_gb = 20
 upper_volume_size_gb = 50
+
+[gitlab_oidc]
+# GitLab OIDC 로그인 활성화 여부
+enabled = false
+# GitLab 인스턴스 URL
+gitlab_url = "https://git.dmslab.re.kr"
+# GitLab OAuth2 Application Client ID / Secret
+client_id = ""
+client_secret = ""
+# Keystone OS-FEDERATION에 등록된 Identity Provider ID / Protocol ID
+idp_id = "gitlab"
+protocol_id = "openid"
+# OAuth2 콜백 URL (프론트엔드 주소 + /auth/gitlab/callback)
+redirect_uri = "http://localhost:3000/auth/gitlab/callback"
+# GitLab OAuth2 scope
+scopes = "openid email profile read_user"

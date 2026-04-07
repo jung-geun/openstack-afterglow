@@ -2,7 +2,7 @@ import asyncio
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Header
 from typing import Optional
 
-from app.models.auth import LoginRequest, TokenResponse, UserInfo, ProjectInfo
+from app.models.auth import LoginRequest, TokenResponse, UserInfo, ProjectInfo, GitLabCallbackRequest
 from app.services import keystone
 from app.services.cache import cached_call
 from app.config import get_settings
@@ -111,3 +111,49 @@ async def list_projects(x_auth_token: Optional[str] = Header(None)):
         return [ProjectInfo(**p) for p in projects]
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"프로젝트 목록 조회 실패: {e}")
+
+
+@router.get("/gitlab/enabled")
+async def gitlab_enabled():
+    """GitLab OIDC 활성화 여부 반환 (프론트엔드에서 버튼 표시 여부 결정)."""
+    settings = get_settings()
+    return {"enabled": settings.gitlab_oidc_enabled}
+
+
+@router.get("/gitlab/authorize")
+async def gitlab_authorize():
+    """GitLab OAuth2 인증 URL 반환."""
+    settings = get_settings()
+    if not settings.gitlab_oidc_enabled:
+        raise HTTPException(status_code=404, detail="GitLab OIDC가 비활성화 상태입니다")
+    from app.services.gitlab_oidc import get_authorize_url
+    try:
+        url = await get_authorize_url()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"GitLab 인증 URL 생성 실패: {e}")
+    return {"authorize_url": url}
+
+
+@router.post("/gitlab/callback", response_model=TokenResponse)
+async def gitlab_callback(req: GitLabCallbackRequest, background_tasks: BackgroundTasks):
+    """GitLab OAuth2 콜백: authorization code로 Keystone 토큰 발급."""
+    settings = get_settings()
+    if not settings.gitlab_oidc_enabled:
+        raise HTTPException(status_code=404, detail="GitLab OIDC가 비활성화 상태입니다")
+    from app.services.gitlab_oidc import exchange_code
+    try:
+        data = await exchange_code(req.code, req.state)
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"GitLab 인증 실패: {e}")
+
+    background_tasks.add_task(_prewarm_dashboard, data["token"], data["project_id"])
+
+    return TokenResponse(
+        token=data["token"],
+        project_id=data["project_id"],
+        project_name=data["project_name"],
+        user_id=data["user_id"],
+        username=data["username"],
+        expires_at=data["expires_at"],
+        roles=data.get("roles", []),
+    )

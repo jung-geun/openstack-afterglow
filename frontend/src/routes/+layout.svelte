@@ -12,7 +12,7 @@
 
 	let { children } = $props();
 
-	const publicRoutes = ['/'];
+	const publicRoutes = ['/', '/auth/gitlab/callback'];
 
 	let sessionWarning = $state(false);
 	let sessionExpired = $state(false);
