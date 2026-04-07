@@ -82,16 +82,16 @@
   }
 </script>
 
-<div class="p-8">
+<div class="p-4 md:p-8">
   <h1 class="text-2xl font-bold text-white mb-8">대시보드</h1>
 
   <!-- 상단: 리소스 요약 카드 + 사용자 정보 -->
-  <div class="flex gap-6 mb-8">
+  <div class="flex flex-col lg:flex-row gap-6 mb-8">
     <!-- 리소스 모니터링 카드 -->
     {#if summary}
       {@const c = summary.compute}
       {@const s = summary.storage}
-      <div class="flex-1 grid grid-cols-2 gap-4 lg:grid-cols-3">
+      <div class="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4 lg:grid-cols-3">
 
         <!-- 인스턴스 -->
         <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 flex flex-col min-h-[128px]">
@@ -340,7 +340,7 @@
 
       </div>
     {:else}
-      <div class="flex-1 grid grid-cols-2 gap-4 lg:grid-cols-3">
+      <div class="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4 lg:grid-cols-3">
         {#each Array(9) as _}
           <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 animate-pulse h-[128px]"></div>
         {/each}
@@ -348,7 +348,7 @@
     {/if}
 
     <!-- 사용자 정보 카드 -->
-    <div class="w-64 shrink-0 bg-gray-900 border border-gray-800 rounded-2xl p-6">
+    <div class="w-full lg:w-64 lg:shrink-0 bg-gray-900 border border-gray-800 rounded-2xl p-6">
       <div class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-5">Hello, {$auth.username}</div>
       <div class="space-y-4 text-sm">
         <div class="flex items-start gap-2">

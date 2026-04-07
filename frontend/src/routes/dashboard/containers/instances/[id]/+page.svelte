@@ -180,7 +180,7 @@
   });
 </script>
 
-<div class="p-8 max-w-3xl">
+<div class="p-4 md:p-8 max-w-3xl">
   <div class="flex items-center gap-3 mb-6">
     <button onclick={() => goto('/dashboard/containers/instances')} class="text-gray-400 hover:text-white transition-colors">← 컨테이너 목록</button>
   </div>

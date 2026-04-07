@@ -75,7 +75,7 @@
 	});
 </script>
 
-<div class="p-8 max-w-lg">
+<div class="p-4 md:p-8 max-w-lg">
 	<div class="flex items-center gap-4 mb-8">
 		<button onclick={() => goto('/dashboard')} class="text-gray-500 hover:text-white transition-colors text-sm">
 			← 대시보드

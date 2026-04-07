@@ -275,7 +275,7 @@
 	const stepLabels = ['이미지', '플레이버', '라이브러리', '전략', '설정', '배포'];
 </script>
 
-<div class="p-8 max-w-3xl mx-auto">
+<div class="p-4 md:p-8 max-w-3xl mx-auto">
 	<h1 class="text-2xl font-bold text-white mb-6">VM 생성</h1>
 
 	{#if loadError}

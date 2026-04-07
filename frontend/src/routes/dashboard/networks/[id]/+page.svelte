@@ -114,7 +114,7 @@
 	}
 </script>
 
-<div class="p-8 max-w-5xl mx-auto">
+<div class="p-4 md:p-8 max-w-5xl mx-auto">
 	<div class="mb-6">
 		<a href="/dashboard" class="text-gray-400 hover:text-gray-200 text-sm transition-colors">
 			← 대시보드

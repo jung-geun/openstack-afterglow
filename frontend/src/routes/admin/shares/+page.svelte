@@ -39,7 +39,7 @@
 	onMount(load);
 </script>
 
-<div class="p-8 max-w-6xl">
+<div class="p-4 md:p-8 max-w-6xl">
 	<div class="flex items-center justify-between mb-6">
 		<h1 class="text-2xl font-bold text-white">전체 공유 스토리지</h1>
 		<button onclick={load} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>

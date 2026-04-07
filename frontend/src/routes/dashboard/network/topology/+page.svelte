@@ -79,7 +79,7 @@
 	}
 </script>
 
-<div class="p-8 max-w-screen-2xl mx-auto">
+<div class="p-4 md:p-8 max-w-screen-2xl mx-auto">
 	<div class="mb-6 flex items-center justify-between">
 		<h1 class="text-2xl font-bold text-white">네트워크 토폴로지</h1>
 		<button
@@ -165,7 +165,7 @@
 		tabindex="-1"
 	>
 		<button class="absolute inset-0 bg-black/50 cursor-default" onclick={() => selectedInstanceId = null} aria-label="패널 닫기"></button>
-		<div class="absolute right-0 top-14 bottom-0 w-[75vw] max-w-5xl bg-gray-950 border-l border-gray-700 overflow-y-auto shadow-2xl">
+		<div class="absolute right-0 top-14 bottom-0 w-full md:w-[75vw] max-w-5xl bg-gray-950 border-l border-gray-700 overflow-y-auto shadow-2xl">
 			<InstanceDetailPanel instanceId={selectedInstanceId} onClose={() => selectedInstanceId = null} />
 		</div>
 	</div>
@@ -180,7 +180,7 @@
 		tabindex="-1"
 	>
 		<button class="absolute inset-0 bg-black/50 cursor-default" onclick={() => selectedRouterId = null} aria-label="패널 닫기"></button>
-		<div class="absolute right-0 top-14 bottom-0 w-[60vw] max-w-3xl bg-gray-950 border-l border-gray-700 overflow-y-auto shadow-2xl">
+		<div class="absolute right-0 top-14 bottom-0 w-full md:w-[60vw] max-w-3xl bg-gray-950 border-l border-gray-700 overflow-y-auto shadow-2xl">
 			<RouterDetailPanel routerId={selectedRouterId} onClose={() => selectedRouterId = null} />
 		</div>
 	</div>

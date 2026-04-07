@@ -148,7 +148,7 @@
   });
 </script>
 
-<div class="p-8 max-w-5xl">
+<div class="p-4 md:p-8 max-w-5xl">
   <div class="flex items-center gap-3 mb-6">
     <button onclick={() => goto('/dashboard/containers/clusters')} class="text-gray-400 hover:text-white transition-colors text-sm">← 클러스터 목록</button>
   </div>

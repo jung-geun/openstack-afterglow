@@ -64,7 +64,7 @@
 	}
 </script>
 
-<div class="p-8 max-w-screen-2xl mx-auto">
+<div class="p-4 md:p-8 max-w-screen-2xl mx-auto">
 	<div class="mb-6 flex items-center justify-between">
 		<div>
 			<a href="/dashboard" class="text-gray-400 hover:text-gray-200 text-sm transition-colors">

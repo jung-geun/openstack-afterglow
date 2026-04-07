@@ -195,3 +195,36 @@
 
 /* 내부 (blue) — bg-blue-900/40 already overridden above */
 :root.light .text-blue-300 { color: #2563eb !important; }
+
+/* ============================================================
+   모바일 테이블 개선
+   ============================================================ */
+@media (max-width: 767px) {
+  .overflow-x-auto {
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+  }
+
+  /* 첫 번째 컬럼 고정 (리소스 이름) */
+  .overflow-x-auto table th:first-child,
+  .overflow-x-auto table td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background-color: inherit;
+  }
+
+  /* 셀 패딩 축소 + 줄바꿈 방지 */
+  .overflow-x-auto table th,
+  .overflow-x-auto table td {
+    padding-left: 0.5rem;
+    padding-right: 0.75rem;
+    white-space: nowrap;
+  }
+}
+
+/* 라이트 모드: 고정 컬럼 배경 */
+:root.light .overflow-x-auto table th:first-child,
+:root.light .overflow-x-auto table td:first-child {
+  background-color: #ffffff;
+}

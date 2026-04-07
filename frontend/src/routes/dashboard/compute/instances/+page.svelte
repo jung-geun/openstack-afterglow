@@ -89,7 +89,7 @@
   });
 </script>
 
-<div class="p-8">
+<div class="p-4 md:p-8">
   <div class="flex items-center justify-between mb-6">
     <h1 class="text-2xl font-bold text-white">인스턴스</h1>
     <a href="/create" class="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
@@ -181,7 +181,7 @@
 {#if selectedInstanceId}
   <div class="fixed inset-0 z-40" role="dialog" aria-modal="true" onkeydown={(e) => e.key === 'Escape' && closeInstancePanel()} tabindex="-1">
     <button class="absolute inset-0 bg-black/50 cursor-default" onclick={closeInstancePanel} aria-label="패널 닫기"></button>
-    <div class="absolute right-0 top-14 bottom-0 w-[75vw] max-w-5xl bg-gray-950 border-l border-gray-700 overflow-y-auto shadow-2xl">
+    <div class="absolute right-0 top-14 bottom-0 w-full md:w-[75vw] max-w-5xl bg-gray-950 border-l border-gray-700 overflow-y-auto shadow-2xl">
       <InstanceDetailPanel instanceId={selectedInstanceId} onClose={closeInstancePanel} />
     </div>
   </div>

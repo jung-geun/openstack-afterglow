@@ -197,7 +197,7 @@
   </div>
 {/if}
 
-<div class="p-8">
+<div class="p-4 md:p-8">
   <div class="flex items-center justify-between mb-6">
     <h1 class="text-2xl font-bold text-white">이미지</h1>
     <button

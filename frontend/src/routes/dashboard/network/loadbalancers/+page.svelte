@@ -32,7 +32,7 @@
   onMount(fetchLoadbalancers);
 </script>
 
-<div class="p-8">
+<div class="p-4 md:p-8">
   <div class="flex items-center justify-between mb-6">
     <h1 class="text-2xl font-bold text-white">로드밸런서</h1>
     <a href="/dashboard/network/loadbalancers/new" class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 로드밸런서 생성</a>

@@ -51,7 +51,7 @@
 	onMount(() => load());
 </script>
 
-<div class="p-8 max-w-6xl">
+<div class="p-4 md:p-8 max-w-6xl">
 	<div class="flex items-center justify-between mb-6">
 		<h1 class="text-2xl font-bold text-white">전체 볼륨</h1>
 		<div class="flex items-center gap-3">

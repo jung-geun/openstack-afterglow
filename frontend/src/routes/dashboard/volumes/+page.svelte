@@ -147,7 +147,7 @@
   </div>
 {/if}
 
-<div class="p-8">
+<div class="p-4 md:p-8">
   <div class="flex items-center justify-between mb-6">
     <h1 class="text-2xl font-bold text-white">볼륨</h1>
     <div class="flex items-center gap-2">
@@ -253,7 +253,7 @@
     onkeydown={(e) => e.key === 'Escape' && closeVolumePanel()}
   >
     <button class="absolute inset-0 bg-black/50 cursor-default" onclick={closeVolumePanel} aria-label="닫기"></button>
-    <div class="absolute right-0 top-14 bottom-0 w-[60vw] max-w-2xl bg-gray-950 border-l border-gray-700 overflow-y-auto shadow-2xl">
+    <div class="absolute right-0 top-14 bottom-0 w-full md:w-[60vw] max-w-2xl bg-gray-950 border-l border-gray-700 overflow-y-auto shadow-2xl">
       <VolumeDetailPanel
         volumeId={selectedVolumeId}
         onClose={closeVolumePanel}

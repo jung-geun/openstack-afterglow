@@ -63,7 +63,7 @@
   onMount(fetchFloatingIps);
 </script>
 
-<div class="p-8">
+<div class="p-4 md:p-8">
   <div class="flex items-center justify-between mb-6">
     <h1 class="text-2xl font-bold text-white">Floating IP</h1>
     <button onclick={allocateFloatingIp} disabled={creating} class="bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
