@@ -216,7 +216,7 @@ package
 
 # End of https://www.toptal.com/developers/gitignore/api/git,svelte,python,visualstudiocode
 
-union.toml
+config.toml
 
 # 로그 파일
 logs/

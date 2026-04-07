@@ -1,7 +1,11 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { setAuth, setAvailableProjects, isLoggedIn } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
+	import { siteConfig, loadSiteConfig } from '$lib/config/site';
+
+	onMount(() => { loadSiteConfig(); });
 
 	interface Project {
 		id: string;
@@ -78,8 +82,8 @@
 <div class="min-h-screen bg-gray-950 flex items-center justify-center">
 	<div class="w-full max-w-md px-4">
 		<div class="text-center mb-8">
-			<h1 class="text-4xl font-bold text-white mb-2">Union</h1>
-			<p class="text-gray-400 text-sm">OpenStack VM + OverlayFS 배포 플랫폼</p>
+			<h1 class="text-4xl font-bold text-white mb-2">{$siteConfig.site_name}</h1>
+			<p class="text-gray-400 text-sm">{$siteConfig.site_description}</p>
 		</div>
 
 		<form

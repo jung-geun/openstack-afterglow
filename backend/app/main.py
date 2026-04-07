@@ -14,7 +14,7 @@ from app.api.storage import volumes_router, volume_backups_router, shares_router
 from app.api.network import networks_router, routers_router, security_groups_router, loadbalancers_router
 from app.api.identity import auth_router, admin_router
 from app.api.container import clusters_router, containers_router
-from app.api.common import dashboard_router, metrics_router, libraries_router
+from app.api.common import dashboard_router, metrics_router, libraries_router, site_router
 from app.api.common.metrics import record_request as _record_request
 
 
@@ -168,6 +168,7 @@ app.include_router(containers_router, prefix="/api/containers", tags=["container
 app.include_router(dashboard_router, prefix="/api/dashboard", tags=["dashboard"])
 app.include_router(metrics_router, prefix="/api/metrics", tags=["metrics"])
 app.include_router(libraries_router, prefix="/api/libraries", tags=["libraries"])
+app.include_router(site_router, prefix="/api/site-config", tags=["site"])
 
 
 @app.get("/api/health")

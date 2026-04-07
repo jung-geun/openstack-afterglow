@@ -1,6 +1,6 @@
 # Union 통합 설정 파일
 # 이 파일을 수정하면 백엔드와 프론트엔드 전체 설정이 변경됩니다.
-# 우선순위: union.toml > .env > 환경변수
+# 우선순위: 환경변수 > config.toml > 기본값
 
 [openstack]
 auth_url = "http://keystone.example.com:5000/v3"
@@ -12,7 +12,7 @@ region_name = "RegionOne"
 # Manila 설정
 manila_endpoint = ""              # 서비스 카탈로그 대신 직접 지정할 경우
 manila_share_network_id = ""
-manila_share_type = "cephfstype"
+manila_share_type = "cephfs"
 
 # Ceph 모니터 (cloud-init CephFS 마운트용, 콤마 구분)
 ceph_monitors = ""
@@ -22,6 +22,10 @@ backend_port = 8000
 frontend_port = 3000
 secret_key = "change-me-in-production"
 
+# 사이트 표시 이름 및 설명 (로그인 화면 · 네비게이션 바)
+site_name = "Union"
+site_description = "OpenStack VM + OverlayFS 배포 플랫폼"
+
 # 프론트엔드 대시보드 자동 새로고침 간격 (밀리초)
 # 권장 범위: 3000 ~ 30000
 refresh_interval_ms = 5000
@@ -29,6 +33,13 @@ refresh_interval_ms = 5000
 [cache]
 redis_url = "redis://redis:6379/0"
 default_ttl_seconds = 30
+
+[session]
+# 세션 유지 시간 (초). 이 시간이 지나면 재로그인 필요.
+# Keystone 토큰 만료 시간보다 짧게 설정 권장 (Keystone 기본값: 3600초)
+timeout_seconds = 3600
+# 만료 N초 전에 경고 표시
+warning_before_seconds = 300
 
 [nova]
 default_network_id = ""

@@ -1,6 +1,6 @@
 """Union 설정 모듈.
 
-우선순위: union.toml (프로젝트 루트) > .env > 환경변수
+우선순위: 환경변수 > config.toml (프로젝트 루트) > 기본값
 """
 
 import tomllib
@@ -12,12 +12,12 @@ from pydantic_settings import BaseSettings
 
 
 def _load_toml() -> dict:
-    """프로젝트 루트의 union.toml을 읽어 평탄화된 dict를 반환."""
+    """프로젝트 루트의 config.toml을 읽어 평탄화된 dict를 반환."""
     # 가능한 위치: CWD, CWD 상위, /app (Docker)
     candidates = [
-        Path.cwd() / "union.toml",
-        Path.cwd().parent / "union.toml",
-        Path("/app/union.toml"),
+        Path.cwd() / "config.toml",
+        Path.cwd().parent / "config.toml",
+        Path("/app/config.toml"),
     ]
     for path in candidates:
         if path.exists():
@@ -41,6 +41,8 @@ def _load_toml() -> dict:
             flat["frontend_port"] = app.get("frontend_port", 3000)
             flat["secret_key"] = app.get("secret_key", "change-me-in-production")
             flat["refresh_interval_ms"] = app.get("refresh_interval_ms", 5000)
+            flat["site_name"] = app.get("site_name", "Union")
+            flat["site_description"] = app.get("site_description", "OpenStack VM + OverlayFS 배포 플랫폼")
 
             cache = data.get("cache", {})
             flat["redis_url"] = cache.get("redis_url", "redis://localhost:6379/0")
@@ -90,6 +92,8 @@ class Settings(BaseSettings):
     frontend_port: int = 3000
     secret_key: str = "change-me-in-production"
     refresh_interval_ms: int = 5000
+    site_name: str = "Union"
+    site_description: str = "OpenStack VM + OverlayFS 배포 플랫폼"
 
     # Redis 캐시
     redis_url: str = "redis://localhost:6379/0"

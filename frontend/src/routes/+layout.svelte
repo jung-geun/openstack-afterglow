@@ -6,6 +6,7 @@
 	import { theme } from '$lib/stores/theme';
 	import { api } from '$lib/api/client';
 	import ProjectSelector from '$lib/components/ProjectSelector.svelte';
+	import { siteConfig, loadSiteConfig } from '$lib/config/site';
 	import './layout.css';
 	import favicon from '$lib/assets/favicon.svg';
 
@@ -26,6 +27,7 @@
 
 	// localStorage에서 복원된 토큰의 유효성을 서버에서 검증
 	onMount(() => {
+		loadSiteConfig();
 		(async () => {
 			if ($auth.token) {
 				try {
@@ -110,7 +112,7 @@
 		</div>
 	{/if}
 	<nav class="fixed top-0 left-0 right-0 z-50 bg-gray-900 border-b border-gray-700 h-14 flex items-center px-6 gap-6">
-		<a href="/dashboard" class="text-white font-bold text-lg tracking-tight">Union</a>
+		<a href="/dashboard" class="text-white font-bold text-lg tracking-tight">{$siteConfig.site_name}</a>
 		<div class="ml-auto flex items-center gap-3">
 			<ProjectSelector />
 			{#if $isAdmin}
