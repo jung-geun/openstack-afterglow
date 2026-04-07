@@ -30,12 +30,14 @@
 
   let volumes = $state<Volume[]>([]);
   let loading = $state(true);
+  let refreshing = $state(false);
   let error = $state('');
   let deleting = $state<string | null>(null);
   let showModal = $state(false);
   let creating = $state(false);
   let createError = $state('');
   let form = $state({ name: '', size_gb: 10 });
+  let autoRefresh = $state(false);
 
   function swrGet<T>(path: string): T | null {
     const key = `${path}:${$auth.projectId}`;
@@ -46,10 +48,11 @@
     memoryCache.set(`${path}:${$auth.projectId}`, { data, timestamp: Date.now() });
   }
 
-  async function fetchVolumes() {
+  async function fetchVolumes(manual = false) {
     const path = '/api/volumes';
     const cached = swrGet<Volume[]>(path);
     if (cached && volumes.length === 0) volumes = cached;
+    if (manual) refreshing = true;
     try {
       volumes = await api.get<Volume[]>(path, $auth.token ?? undefined, $auth.projectId ?? undefined);
       swrSet(path, volumes);
@@ -58,6 +61,7 @@
       if (!cached) error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
     } finally {
       loading = false;
+      refreshing = false;
     }
   }
 
@@ -95,6 +99,10 @@
     if (!projectId) return;
     loading = true;
     untrack(() => { fetchVolumes(); });
+  });
+
+  $effect(() => {
+    if (!$auth.projectId || !autoRefresh) return;
     const interval = setInterval(() => untrack(() => { fetchVolumes(); }), 10000);
     return () => clearInterval(interval);
   });
@@ -128,7 +136,28 @@
 <div class="p-8">
   <div class="flex items-center justify-between mb-6">
     <h1 class="text-2xl font-bold text-white">볼륨</h1>
-    <button onclick={() => showModal = true} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 볼륨 생성</button>
+    <div class="flex items-center gap-2">
+      <button
+        onclick={() => autoRefresh = !autoRefresh}
+        class="flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-medium transition-all {autoRefresh
+          ? 'border-blue-500 bg-blue-900/20 text-blue-400'
+          : 'border-gray-700 bg-gray-900 text-gray-400 hover:border-gray-500'}"
+        title="자동 새로고침 (10초)"
+      >
+        <span class="inline-block {autoRefresh ? 'animate-spin' : ''}" style="animation-duration:3s">⟳</span>
+        자동
+      </button>
+      <button
+        onclick={() => fetchVolumes(true)}
+        disabled={refreshing}
+        class="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-gray-400 hover:border-gray-500 text-xs font-medium transition-colors disabled:opacity-50"
+        title="새로고침"
+      >
+        <span class="{refreshing ? 'animate-spin' : ''}">⟳</span>
+        {refreshing ? '...' : '새로고침'}
+      </button>
+      <button onclick={() => showModal = true} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 볼륨 생성</button>
+    </div>
   </div>
 
   {#if error}<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>{/if}

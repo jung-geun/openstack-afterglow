@@ -10,6 +10,7 @@
 	import SelectStrategy from '$lib/components/wizard/SelectStrategy.svelte';
 	import ProgressBar from '$lib/components/ProgressBar.svelte';
 	import LoadingSpinner from '$lib/components/LoadingSpinner.svelte';
+	import type { Volume } from '$lib/types/resources';
 
 	const TOTAL_STEPS = 6;
 
@@ -52,6 +53,7 @@
 	let libraries = $state<any[]>([]);
 	let networks = $state<NetworkInfo[]>([]);
 	let keypairs = $state<KeypairInfo[]>([]);
+	let volumes = $state<Volume[]>([]);
 	let loadError = $state('');
 	let deploying = $state(false);
 	let deployError = $state('');
@@ -64,12 +66,13 @@
 		const token = $auth.token ?? undefined;
 		const projectId = $auth.projectId ?? undefined;
 		try {
-			[images, flavors, libraries, networks, keypairs] = await Promise.all([
+			[images, flavors, libraries, networks, keypairs, volumes] = await Promise.all([
 				api.get<any[]>('/api/images', token, projectId),
 				api.get<any[]>('/api/flavors', token, projectId),
 				api.get<any[]>('/api/libraries', token, projectId),
 				api.get<NetworkInfo[]>('/api/networks', token, projectId),
 				api.get<KeypairInfo[]>('/api/keypairs', token, projectId),
+				api.get<Volume[]>('/api/volumes', token, projectId),
 			]);
 			// 키페어가 1개이면 자동선택
 			if (keypairs.length === 1) {
@@ -141,6 +144,19 @@
 		$wizard.networkId ? networks.find(n => n.id === $wizard.networkId) ?? null : null
 	);
 
+	let availableVolumes = $derived(
+		volumes.filter(v => v.status === 'available')
+	);
+
+	function toggleVolume(id: string) {
+		wizard.update(w => {
+			const ids = new Set(w.additionalVolumeIds);
+			if (ids.has(id)) ids.delete(id);
+			else ids.add(id);
+			return { ...w, additionalVolumeIds: Array.from(ids) };
+		});
+	}
+
 	let hasGpuFlavor = $derived(
 		flavors.find(f => f.id === $wizard.flavorId)
 			? Object.keys(flavors.find(f => f.id === $wizard.flavorId)?.extra_specs ?? {}).some(
@@ -199,6 +215,7 @@
 					key_name: $wizard.authMode === 'keypair' ? $wizard.keyName : null,
 					admin_pass: $wizard.authMode === 'password' ? $wizard.adminPassword : null,
 					boot_volume_size_gb: $wizard.bootVolumeSizeGb,
+					additional_volume_ids: $wizard.additionalVolumeIds,
 				})
 			});
 
@@ -433,6 +450,34 @@
 					{/if}
 				</div>
 
+				<!-- 추가 볼륨 -->
+				<div class="mb-6">
+					<span class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">추가 볼륨 (선택사항)</span>
+					{#if availableVolumes.length === 0}
+						<p class="text-xs text-gray-500">연결 가능한 볼륨이 없습니다.</p>
+					{:else}
+						<div class="space-y-2 max-h-48 overflow-y-auto">
+							{#each availableVolumes as vol (vol.id)}
+								<button
+									type="button"
+									onclick={() => toggleVolume(vol.id)}
+									class="w-full text-left px-3 py-2 rounded-lg border text-sm transition-all {$wizard.additionalVolumeIds.includes(vol.id)
+										? 'border-blue-500 bg-blue-900/20 text-white'
+										: 'border-gray-700 bg-gray-900 text-gray-400 hover:border-gray-500'}"
+								>
+									<div class="flex items-center justify-between">
+										<span class="font-medium">{vol.name || vol.id.slice(0, 8)}</span>
+										<span class="text-xs text-gray-500">{vol.size} GB</span>
+									</div>
+								</button>
+							{/each}
+						</div>
+						{#if $wizard.additionalVolumeIds.length > 0}
+							<p class="text-xs text-gray-500 mt-1">{$wizard.additionalVolumeIds.length}개 볼륨 선택됨</p>
+						{/if}
+					{/if}
+				</div>
+
 			{:else if $wizard.step === 6}
 				<h2 class="text-lg font-semibold text-white mb-4">최종 확인 및 배포</h2>
 
@@ -480,6 +525,17 @@
 							{/if}
 						</span>
 					</div>
+					{#if $wizard.additionalVolumeIds.length > 0}
+						<div class="flex justify-between">
+							<span class="text-gray-400">추가 볼륨</span>
+							<span class="text-white text-right">
+								{$wizard.additionalVolumeIds.map(id => {
+									const v = volumes.find(vol => vol.id === id);
+									return v ? `${v.name || id.slice(0, 8)} (${v.size}GB)` : id.slice(0, 8);
+								}).join(', ')}
+							</span>
+						</div>
+					{/if}
 				</div>
 
 				<div class="mb-4">

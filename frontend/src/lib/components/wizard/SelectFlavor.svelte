@@ -16,6 +16,8 @@
 
 	type FlavorCategory = 'all' | 'cpu' | 'gpu' | 'other';
 	let activeCategory = $state<FlavorCategory>('all');
+	let filterVcpus = $state<number | null>(null);
+	let filterRam = $state<number | null>(null);
 
 	function hasGpu(flavor: FlavorInfo): boolean {
 		return Object.keys(flavor.extra_specs).some(
@@ -35,11 +37,31 @@
 		other: flavors.filter(f => categorize(f) === 'other').length,
 	});
 
-	const filteredFlavors = $derived(
+	const categoryFiltered = $derived(
 		activeCategory === 'all'
 			? flavors
 			: flavors.filter(f => categorize(f) === activeCategory)
 	);
+
+	const vcpuOptions = $derived(
+		[...new Set(categoryFiltered.map(f => f.vcpus))].sort((a, b) => a - b)
+	);
+
+	const ramOptions = $derived(
+		[...new Set(categoryFiltered.map(f => f.ram))].sort((a, b) => a - b)
+	);
+
+	const filteredFlavors = $derived(
+		categoryFiltered
+			.filter(f => filterVcpus === null || f.vcpus === filterVcpus)
+			.filter(f => filterRam === null || f.ram === filterRam)
+	);
+
+	function setCategory(cat: FlavorCategory) {
+		activeCategory = cat;
+		filterVcpus = null;
+		filterRam = null;
+	}
 
 	function ramLabel(mb: number): string {
 		return mb >= 1024 ? `${mb / 1024} GB` : `${mb} MB`;
@@ -47,7 +69,7 @@
 </script>
 
 <!-- 카테고리 필터 탭 -->
-<div class="flex gap-2 mb-4">
+<div class="flex gap-2 mb-3">
 	{#each ([
 		{ key: 'all', label: `전체 (${flavors.length})` },
 		{ key: 'cpu', label: `CPU (${counts.cpu})` },
@@ -55,12 +77,43 @@
 		{ key: 'other', label: `기타 (${counts.other})` },
 	] as const) as tab}
 		<button
-			onclick={() => activeCategory = tab.key}
+			onclick={() => setCategory(tab.key)}
 			class="px-3 py-1 rounded-lg text-xs font-medium transition-colors {activeCategory === tab.key
 				? 'bg-blue-600 text-white'
 				: 'bg-gray-800 text-gray-400 hover:bg-gray-700'}"
 		>{tab.label}</button>
 	{/each}
+</div>
+
+<!-- vCPU / RAM 필터 -->
+<div class="flex items-center gap-3 mb-4">
+	<div class="flex items-center gap-1.5">
+		<label class="text-xs text-gray-500">vCPU</label>
+		<select
+			value={filterVcpus}
+			onchange={(e) => { const v = (e.target as HTMLSelectElement).value; filterVcpus = v === '' ? null : Number(v); }}
+			class="bg-gray-800 border border-gray-600 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500"
+		>
+			<option value="">전체</option>
+			{#each vcpuOptions as v}
+				<option value={v}>{v} vCPU</option>
+			{/each}
+		</select>
+	</div>
+	<div class="flex items-center gap-1.5">
+		<label class="text-xs text-gray-500">RAM</label>
+		<select
+			value={filterRam}
+			onchange={(e) => { const v = (e.target as HTMLSelectElement).value; filterRam = v === '' ? null : Number(v); }}
+			class="bg-gray-800 border border-gray-600 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500"
+		>
+			<option value="">전체</option>
+			{#each ramOptions as r}
+				<option value={r}>{ramLabel(r)}</option>
+			{/each}
+		</select>
+	</div>
+	<span class="text-xs text-gray-500 ml-auto">{filteredFlavors.length}개</span>
 </div>
 
 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">

@@ -14,7 +14,7 @@ services:
 
   backend:
     build: ./backend
-    image: union-backend:dev
+    image: glcr.dmslab.re.kr/jung-geun/cephfs-mount/union-api:dev
     ports:
       - "8000:8000"
     volumes:
@@ -33,7 +33,7 @@ services:
 
   frontend:
     build: ./frontend
-    image: union-frontend:dev
+    image: glcr.dmslab.re.kr/jung-geun/cephfs-mount/union:dev
     ports:
       - "3000:3000"
     environment:

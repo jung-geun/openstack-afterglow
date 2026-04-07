@@ -75,3 +75,4 @@ class CreateInstanceRequest(BaseModel):
     admin_pass: Optional[str] = None
     availability_zone: Optional[str] = None
     boot_volume_size_gb: Optional[int] = None
+    additional_volume_ids: list[str] = []

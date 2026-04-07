@@ -49,7 +49,7 @@ def create_server(
     flavor_id: str,
     network_id: str,
     boot_volume_id: str,
-    userdata: str,
+    userdata: Optional[str] = None,
     key_name: Optional[str] = None,
     admin_pass: Optional[str] = None,
     availability_zone: Optional[str] = None,
@@ -67,8 +67,9 @@ def create_server(
                 "delete_on_termination": True,
             }
         ],
-        "user_data": userdata,
     }
+    if userdata:
+        body["user_data"] = userdata
     # network_id가 있으면 지정, 없으면 자동 할당
     if network_id:
         body["networks"] = [{"uuid": network_id}]

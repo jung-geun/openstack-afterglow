@@ -242,11 +242,12 @@ async def create_instance_async(
             return f"data: {msg.model_dump_json()}\n\n"
 
         try:
-            # Step 1: Manila shares (0-20%)
-            yield send_progress(ProgressStep.MANILA_PREPARING, 0, "Manila shares 준비 중...")
             shares_info = []
+            userdata = None
 
             if resolved_libs:
+                # Step 1: Manila shares (0-20%)
+                yield send_progress(ProgressStep.MANILA_PREPARING, 0, "Manila shares 준비 중...")
                 if req.strategy == "prebuilt":
                     shares_info = await _prepare_prebuilt_shares(
                         conn, resolved_libs, req.name, created_access_ids
@@ -256,7 +257,7 @@ async def create_instance_async(
                         conn, req.name, resolved_libs, settings, created_share_ids, created_access_ids
                     )
                     shares_info = [share_info]
-            yield send_progress(ProgressStep.MANILA_PREPARING, 20, "Manila shares 준비 완료")
+                yield send_progress(ProgressStep.MANILA_PREPARING, 20, "Manila shares 준비 완료")
 
             # Step 2: Boot volume (20-45%)
             yield send_progress(ProgressStep.BOOT_VOLUME_CREATING, 20, "부트 볼륨 생성 중...")
@@ -271,33 +272,34 @@ async def create_instance_async(
             boot_volume_id = boot_vol.id
             yield send_progress(ProgressStep.BOOT_VOLUME_CREATING, 45, "부트 볼륨 생성 완료")
 
-            # Step 3: Upper volume (45-60%)
-            yield send_progress(ProgressStep.UPPER_VOLUME_CREATING, 45, "Upper 볼륨 생성 중...")
-            upper_vol = await asyncio.to_thread(
-                cinder.create_empty_volume,
-                conn,
-                name=f"union-upper-{req.name}",
-                size_gb=settings.upper_volume_size_gb,
-                availability_zone=req.availability_zone or settings.default_availability_zone,
-            )
-            upper_volume_id = upper_vol.id
-            yield send_progress(ProgressStep.UPPER_VOLUME_CREATING, 60, "Upper 볼륨 생성 완료")
+            if resolved_libs:
+                # Step 3: Upper volume (45-60%)
+                yield send_progress(ProgressStep.UPPER_VOLUME_CREATING, 45, "Upper 볼륨 생성 중...")
+                upper_vol = await asyncio.to_thread(
+                    cinder.create_empty_volume,
+                    conn,
+                    name=f"union-upper-{req.name}",
+                    size_gb=settings.upper_volume_size_gb,
+                    availability_zone=req.availability_zone or settings.default_availability_zone,
+                )
+                upper_volume_id = upper_vol.id
+                yield send_progress(ProgressStep.UPPER_VOLUME_CREATING, 60, "Upper 볼륨 생성 완료")
 
-            # Step 4: cloud-init (60-65%)
-            yield send_progress(ProgressStep.USERDATA_GENERATING, 60, "cloud-init 생성 중...")
-            flavors = await asyncio.to_thread(nova.list_flavors, conn)
-            flavor = next((f for f in flavors if f.id == req.flavor_id), None)
-            gpu_available = flavor.is_gpu if flavor else False
+                # Step 4: cloud-init (60-65%)
+                yield send_progress(ProgressStep.USERDATA_GENERATING, 60, "cloud-init 생성 중...")
+                flavors = await asyncio.to_thread(nova.list_flavors, conn)
+                flavor = next((f for f in flavors if f.id == req.flavor_id), None)
+                gpu_available = flavor.is_gpu if flavor else False
 
-            userdata = cloudinit.generate_userdata(
-                libraries=resolved_libs,
-                strategy=req.strategy,
-                shares=shares_info,
-                upper_device="/dev/vdb",
-                ceph_monitors=settings.ceph_monitors,
-                gpu_available=gpu_available,
-            )
-            yield send_progress(ProgressStep.USERDATA_GENERATING, 65, "cloud-init 생성 완료")
+                userdata = cloudinit.generate_userdata(
+                    libraries=resolved_libs,
+                    strategy=req.strategy,
+                    shares=shares_info,
+                    upper_device="/dev/vdb",
+                    ceph_monitors=settings.ceph_monitors,
+                    gpu_available=gpu_available,
+                )
+                yield send_progress(ProgressStep.USERDATA_GENERATING, 65, "cloud-init 생성 완료")
 
             # Step 5: Nova server (65-95%)
             yield send_progress(ProgressStep.SERVER_CREATING, 65, "Nova 서버 생성 중...")
@@ -305,7 +307,7 @@ async def create_instance_async(
                 "union_libraries": ",".join(resolved_libs) if resolved_libs else "none",
                 "union_strategy": req.strategy or "none",
                 "union_share_ids": ",".join([s.get("share_id", "") for s in shares_info]) if shares_info else "none",
-                "union_upper_volume_id": upper_volume_id,
+                "union_upper_volume_id": upper_volume_id or "none",
             }
 
             server = await asyncio.to_thread(
@@ -324,12 +326,19 @@ async def create_instance_async(
             server_id = server.id
             yield send_progress(ProgressStep.SERVER_CREATING, 95, "Nova 서버 생성 완료")
 
-            # Step 6: Attach volume (95-100%)
+            # Step 6: Attach volumes (95-100%)
             yield send_progress(ProgressStep.ATTACHING_VOLUME, 95, "볼륨 연결 중...")
-            await asyncio.to_thread(
-                conn.compute.create_volume_attachment,
-                server_id, volume_id=upper_volume_id
-            )
+            if upper_volume_id:
+                await asyncio.to_thread(
+                    conn.compute.create_volume_attachment,
+                    server_id, volume_id=upper_volume_id
+                )
+            # 추가 볼륨 연결
+            for vol_id in (req.additional_volume_ids or []):
+                await asyncio.to_thread(
+                    conn.compute.create_volume_attachment,
+                    server_id, volume_id=vol_id
+                )
             yield send_progress(ProgressStep.ATTACHING_VOLUME, 100, "볼륨 연결 완료")
 
             # Step 7: Floating IP (tenant 네트워크 선택 시)

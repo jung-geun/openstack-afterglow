@@ -15,6 +15,7 @@ export interface WizardState {
 	keyName: string | null;
 	adminPassword: string;
 	bootVolumeSizeGb: number;
+	additionalVolumeIds: string[];
 }
 
 const initial: WizardState = {
@@ -32,6 +33,7 @@ const initial: WizardState = {
 	keyName: null,
 	adminPassword: '',
 	bootVolumeSizeGb: 20,
+	additionalVolumeIds: [],
 };
 
 export const wizard = writable<WizardState>({ ...initial });
