@@ -231,3 +231,5 @@ Thumbs.db
 
 # Docker 볼륨 데이터
 monitoring/data/
+
+docker-compose.override.yml

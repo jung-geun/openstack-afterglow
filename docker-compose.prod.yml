@@ -57,6 +57,26 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # ── 프록시 프로필 (docker compose --profile proxy -f docker-compose.prod.yml up -d) ────────
+  # HAProxy를 사용하면 80 포트 하나로 프론트(/)와 백엔드(/api/)를 모두 서빙
+  # 환경변수: HAPROXY_BIND_PORT (기본 80), ORIGIN과 PUBLIC_API_BASE를 HAProxy 주소로 설정
+  haproxy:
+    image: haproxy:2.9-alpine
+    profiles: ["proxy"]
+    ports:
+      - "${HAPROXY_BIND_PORT:-80}:80"
+    volumes:
+      - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    depends_on:
+      - frontend
+      - backend
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   # ── 모니터링 프로필 (docker compose --profile monitoring -f docker-compose.prod.yml up -d) ──
 
   opensearch:

@@ -13,12 +13,10 @@ services:
         max-file: "3"
 
   backend:
-    build: ./backend
     image: glcr.dmslab.re.kr/jung-geun/cephfs-mount/union-api:latest
     ports:
       - "8000:8000"
     volumes:
-      - ./backend/app:/app/app   # 개발 시 hot-reload
       - ./config.toml:/app/config.toml:ro
       - ./logs:/app/logs
     command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
@@ -32,7 +30,6 @@ services:
         max-file: "5"
 
   frontend:
-    build: ./frontend
     image: glcr.dmslab.re.kr/jung-geun/cephfs-mount/union:latest
     ports:
       - "3000:3000"
@@ -40,6 +37,26 @@ services:
       - ORIGIN=http://localhost:3000
       - PUBLIC_API_BASE=http://localhost:8000
     depends_on:
+      - backend
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── 프록시 프로필 (docker compose --profile proxy up) ──────────────────────
+  # HAProxy를 사용하면 80 포트 하나로 프론트(/)와 백엔드(/api/)를 모두 서빙
+  # PUBLIC_API_BASE를 HAProxy 주소로 맞춰야 함 (예: http://localhost)
+  haproxy:
+    image: haproxy:2.9-alpine
+    profiles: ["proxy"]
+    ports:
+      - "80:80"
+    volumes:
+      - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    depends_on:
+      - frontend
       - backend
     restart: unless-stopped
     logging:
