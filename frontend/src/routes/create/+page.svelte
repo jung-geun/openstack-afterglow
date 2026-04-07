@@ -75,16 +75,34 @@
 			if (keypairs.length === 1) {
 				wizard.update(w => ({ ...w, keyName: keypairs[0].name }));
 			}
+			// 네트워크 첫 번째 항목 자동선택
+			if (networks.length > 0) {
+				wizard.update(w => ({ ...w, networkId: networks[0].id, networkName: networks[0].name }));
+			}
 		} catch (e) {
 			loadError = e instanceof ApiError ? `데이터 로드 실패 (${e.status})` : '서버 오류';
 		}
 	});
 
 	function nextStep() {
-		if ($wizard.step < TOTAL_STEPS) wizard.update(w => ({ ...w, step: w.step + 1 }));
+		if ($wizard.step < TOTAL_STEPS) {
+			// 라이브러리 미선택 시 전략 스텝(4) 스킵
+			if ($wizard.step === 3 && $wizard.libraries.length === 0) {
+				wizard.update(w => ({ ...w, step: 5, strategy: null }));
+			} else {
+				wizard.update(w => ({ ...w, step: w.step + 1 }));
+			}
+		}
 	}
 	function prevStep() {
-		if ($wizard.step > 1) wizard.update(w => ({ ...w, step: w.step - 1 }));
+		if ($wizard.step > 1) {
+			// 라이브러리 미선택 시 전략 스텝(4) 스킵
+			if ($wizard.step === 5 && $wizard.libraries.length === 0) {
+				wizard.update(w => ({ ...w, step: 3 }));
+			} else {
+				wizard.update(w => ({ ...w, step: w.step - 1 }));
+			}
+		}
 	}
 
 	function selectImage(id: string, name: string) {
@@ -103,11 +121,14 @@
 				libs.add(id);
 				deps.forEach(d => libs.add(d));
 			}
-			return { ...w, libraries: Array.from(libs) };
+			const newLibs = Array.from(libs);
+			// 라이브러리가 모두 해제되면 전략 초기화
+			const newStrategy = newLibs.length === 0 ? null : (w.strategy ?? 'prebuilt');
+			return { ...w, libraries: newLibs, strategy: newStrategy };
 		});
 	}
 
-	function selectStrategy(s: 'prebuilt' | 'dynamic') {
+	function selectStrategy(s: 'prebuilt' | 'dynamic' | null) {
 		wizard.update(w => ({ ...w, strategy: s }));
 	}
 
@@ -433,7 +454,7 @@
 					<div class="flex justify-between">
 						<span class="text-gray-400">전략</span>
 						<span class="text-white">
-							{$wizard.strategy === 'prebuilt' ? 'A: 사전 빌드 공유 Share' : 'B: 동적 생성'}
+							{$wizard.strategy === 'prebuilt' ? 'A: 사전 빌드 공유 Share' : $wizard.strategy === 'dynamic' ? 'B: 동적 생성' : '없음'}
 						</span>
 					</div>
 					<div class="flex justify-between">

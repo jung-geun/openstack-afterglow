@@ -69,7 +69,7 @@ class CreateInstanceRequest(BaseModel):
     image_id: str
     flavor_id: str
     libraries: list[str] = []
-    strategy: str = "prebuilt"   # "prebuilt" | "dynamic"
+    strategy: Optional[str] = None   # "prebuilt" | "dynamic" | None (no libraries)
     network_id: Optional[str] = None
     key_name: Optional[str] = None
     admin_pass: Optional[str] = None

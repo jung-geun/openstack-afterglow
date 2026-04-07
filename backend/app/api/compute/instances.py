@@ -246,15 +246,16 @@ async def create_instance_async(
             yield send_progress(ProgressStep.MANILA_PREPARING, 0, "Manila shares 준비 중...")
             shares_info = []
 
-            if req.strategy == "prebuilt":
-                shares_info = await _prepare_prebuilt_shares(
-                    conn, resolved_libs, req.name, created_access_ids
-                )
-            else:
-                share_info = await _prepare_dynamic_share(
-                    conn, req.name, resolved_libs, settings, created_share_ids, created_access_ids
-                )
-                shares_info = [share_info]
+            if resolved_libs:
+                if req.strategy == "prebuilt":
+                    shares_info = await _prepare_prebuilt_shares(
+                        conn, resolved_libs, req.name, created_access_ids
+                    )
+                else:
+                    share_info = await _prepare_dynamic_share(
+                        conn, req.name, resolved_libs, settings, created_share_ids, created_access_ids
+                    )
+                    shares_info = [share_info]
             yield send_progress(ProgressStep.MANILA_PREPARING, 20, "Manila shares 준비 완료")
 
             # Step 2: Boot volume (20-45%)
@@ -301,9 +302,9 @@ async def create_instance_async(
             # Step 5: Nova server (65-95%)
             yield send_progress(ProgressStep.SERVER_CREATING, 65, "Nova 서버 생성 중...")
             meta = {
-                "union_libraries": ",".join(resolved_libs),
-                "union_strategy": req.strategy,
-                "union_share_ids": ",".join([s.get("share_id", "") for s in shares_info]),
+                "union_libraries": ",".join(resolved_libs) if resolved_libs else "none",
+                "union_strategy": req.strategy or "none",
+                "union_share_ids": ",".join([s.get("share_id", "") for s in shares_info]) if shares_info else "none",
                 "union_upper_volume_id": upper_volume_id,
             }
 
