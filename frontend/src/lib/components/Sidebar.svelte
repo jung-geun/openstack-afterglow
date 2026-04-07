@@ -20,6 +20,7 @@
 			items: [
 				{ label: '볼륨 목록', href: '/dashboard/volumes' },
 				{ label: '볼륨 백업', href: '/dashboard/volumes/backups' },
+				{ label: '볼륨 스냅샷', href: '/dashboard/volumes/snapshots' },
 			],
 		},
 		{

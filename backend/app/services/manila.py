@@ -118,18 +118,33 @@ def get_share_quota(conn) -> dict:
         return {k: {"limit": -1, "in_use": 0} for k in ["shares", "gigabytes", "share_networks", "share_groups", "snapshot_gigabytes"]}
 
 
+def list_share_types(conn) -> list[dict]:
+    """Manila에서 사용 가능한 share type 목록 조회."""
+    client = get_client(conn)
+    data = client.get("types")
+    return [
+        {
+            "id": t["id"],
+            "name": t["name"],
+            "is_default": t.get("share_type_access:is_public", True),
+        }
+        for t in data.get("share_types", [])
+    ]
+
+
 def create_share(
     conn,
     name: str,
     size_gb: int,
     share_network_id: str,
     share_type: str = "cephfstype",
+    share_proto: str = "CEPHFS",
     metadata: Optional[dict] = None,
 ) -> ShareInfo:
     client = get_client(conn)
     share_body: dict = {
         "name": name,
-        "share_proto": "CEPHFS",
+        "share_proto": share_proto.upper(),
         "size": size_gb,
         "share_type": share_type,
         "metadata": metadata or {},
@@ -191,29 +206,34 @@ def get_share(conn, share_id: str) -> ShareInfo:
 def create_access_rule(
     conn,
     share_id: str,
-    cephx_id: str,
+    access_to: str,
     access_level: str = "ro",   # "ro" | "rw"
+    access_type: str = "cephx",  # "cephx" | "ip"
 ) -> dict:
     """
-    CephX access rule 생성.
-    반환: { access_id, access_key, cephx_id }
+    접근 규칙 생성.
+    - CephFS: access_type="cephx", access_to=cephx_id
+    - NFS: access_type="ip", access_to=IP/CIDR
+    반환: { access_id, access_key, access_to, access_level }
     """
     client = get_client(conn)
     body = {
         "allow_access": {
-            "access_type": "cephx",
-            "access_to": cephx_id,
+            "access_type": access_type,
+            "access_to": access_to,
             "access_level": access_level,
         }
     }
     data = client.post(f"shares/{share_id}/action", body)["access"]
 
-    # access_key 조회 (API v2.21+)
-    access_key = _get_access_key(client, share_id, data["id"])
+    # access_key 조회 (CephX만 해당, IP 규칙은 없음)
+    access_key = ""
+    if access_type == "cephx":
+        access_key = _get_access_key(client, share_id, data["id"])
     return {
         "access_id": data["id"],
         "access_key": access_key,
-        "cephx_id": cephx_id,
+        "access_to": access_to,
         "access_level": data["access_level"],
     }
 

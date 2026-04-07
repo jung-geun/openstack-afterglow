@@ -30,6 +30,14 @@ async def list_shares(conn: openstack.connection.Connection = Depends(get_os_con
         raise HTTPException(status_code=500, detail=f"Share 목록 조회 실패: {e}")
 
 
+@router.get("/types")
+async def list_share_types(conn: openstack.connection.Connection = Depends(get_os_conn)):
+    try:
+        return manila.list_share_types(conn)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Share 타입 목록 조회 실패: {e}")
+
+
 @router.get("/{share_id}", response_model=ShareInfo)
 async def get_share(share_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
     try:
@@ -51,7 +59,8 @@ async def create_share(
             name=req.name,
             size_gb=req.size_gb,
             share_network_id=req.share_network_id or settings.os_manila_share_network_id,
-            share_type=req.share_type,
+            share_type=req.share_type or settings.os_manila_share_type,
+            share_proto=req.share_proto,
             metadata=req.metadata,
         )
         await invalidate(f"union:manila:{pid}:shares")
@@ -92,7 +101,7 @@ async def create_access_rule(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     try:
-        return manila.create_access_rule(conn, share_id, req.cephx_id, req.access_level)
+        return manila.create_access_rule(conn, share_id, req.access_to, req.access_level, req.access_type)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"접근 규칙 생성 실패: {e}")
 

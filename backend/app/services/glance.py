@@ -3,9 +3,14 @@ import openstack
 from app.models.compute import ImageInfo
 
 
-def list_images(conn: openstack.connection.Connection) -> list[ImageInfo]:
-    images = []
-    for img in conn.image.images(status="active"):
+def list_images(conn: openstack.connection.Connection, project_id: str | None = None) -> list[ImageInfo]:
+    seen: set[str] = set()
+    images: list[ImageInfo] = []
+
+    def _add(img) -> None:
+        if img.id in seen:
+            return
+        seen.add(img.id)
         props = img.properties or {}
         os_distro = props.get("os_distro") or _guess_distro(img.name)
         images.append(ImageInfo(
@@ -20,8 +25,33 @@ def list_images(conn: openstack.connection.Connection) -> list[ImageInfo]:
             os_distro=os_distro,
             created_at=str(img.created_at) if img.created_at else None,
             owner=getattr(img, 'owner', None) or getattr(img, 'project_id', None),
+            visibility=getattr(img, 'visibility', None),
         ))
+
+    # public, community, shared: 접근 가능한 공개/공유 이미지
+    for vis in ("public", "community", "shared"):
+        try:
+            for img in conn.image.images(status="active", visibility=vis):
+                _add(img)
+        except Exception:
+            pass
+
+    # 현재 프로젝트의 private 이미지만
+    pid = project_id or getattr(conn, '_union_project_id', None)
+    try:
+        kwargs = {"status": "active", "visibility": "private"}
+        if pid:
+            kwargs["owner"] = pid
+        for img in conn.image.images(**kwargs):
+            _add(img)
+    except Exception:
+        pass
+
     return sorted(images, key=lambda x: x.name)
+
+
+def delete_image(conn: openstack.connection.Connection, image_id: str) -> None:
+    conn.image.delete_image(image_id, ignore_missing=False)
 
 
 def update_image_metadata(

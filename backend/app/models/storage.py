@@ -112,14 +112,16 @@ class CreateVolumeRequest(BaseModel):
 class CreateShareRequest(BaseModel):
     name: str
     size_gb: int
-    share_type: str = "cephfstype"
+    share_type: str = ""
     share_network_id: Optional[str] = None
     metadata: Optional[dict[str, Any]] = None
+    share_proto: str = "CEPHFS"  # "CEPHFS" | "NFS"
 
 
 class CreateAccessRuleRequest(BaseModel):
-    cephx_id: str
+    access_to: str        # CephX ID 또는 IP/CIDR
     access_level: str = "ro"  # "ro" | "rw"
+    access_type: str = "cephx"  # "cephx" | "ip"
 
 
 class CreateNetworkRequest(BaseModel):

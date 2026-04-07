@@ -15,13 +15,35 @@
     os_distro: string | null;
     created_at: string | null;
     owner: string | null;
+    visibility: string | null;
   }
 
   const KNOWN_DISTROS = ['ubuntu', 'centos', 'rocky', 'debian', 'fedora', 'rhel', 'windows', 'cirros'];
 
+  const OS_LOGOS: Record<string, string> = {
+    ubuntu: '/logos/Ubuntu.png',
+    centos: '/logos/CentOS.png',
+    fedora: '/logos/Fedora.png',
+    windows: '/logos/Windows.png',
+    coreos: '/logos/coreos.png',
+  };
+
+  const OS_EMOJI: Record<string, string> = {
+    rocky: '🪨',
+    debian: '🌀',
+    rhel: '🔴',
+    cirros: '☁️',
+  };
+
+  function osLabel(distro: string | null): string {
+    if (!distro) return '-';
+    return distro.charAt(0).toUpperCase() + distro.slice(1);
+  }
+
   let images = $state<ImageInfo[]>([]);
   let loading = $state(true);
   let error = $state('');
+  let deleting = $state<string | null>(null);
 
   // 필터/정렬
   let distroFilter = $state('all');
@@ -68,6 +90,19 @@
       error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
     } finally {
       loading = false;
+    }
+  }
+
+  async function deleteImage(id: string, name: string) {
+    if (!confirm(`이미지 "${name}"을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.`)) return;
+    deleting = id;
+    try {
+      await api.delete(`/api/images/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      images = images.filter(img => img.id !== id);
+    } catch (e) {
+      alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+    } finally {
+      deleting = null;
     }
   }
 
@@ -204,6 +239,7 @@
             <tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
               <th class="text-left py-3 pr-6">이름</th>
               <th class="text-left py-3 pr-6">OS</th>
+              <th class="text-left py-3 pr-6">공개 범위</th>
               <th class="text-left py-3 pr-6">상태</th>
               <th class="text-left py-3 pr-6">포맷</th>
               <th class="text-left py-3 pr-6">크기</th>
@@ -216,7 +252,33 @@
             {#each filteredImages as img (img.id)}
               <tr class="border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors">
                 <td class="py-3 pr-6 font-medium text-white">{img.name}</td>
-                <td class="py-3 pr-6 text-gray-400 text-xs">{img.os_distro ?? '-'}</td>
+                <td class="py-3 pr-6 text-xs">
+                  {#if img.os_distro}
+                    <span class="flex items-center gap-1.5">
+                      {#if OS_LOGOS[img.os_distro]}
+                        <img src={OS_LOGOS[img.os_distro]} alt={img.os_distro} class="w-4 h-4 object-contain" />
+                      {:else}
+                        <span class="w-4 h-4 flex items-center justify-center">{OS_EMOJI[img.os_distro] ?? '💿'}</span>
+                      {/if}
+                      <span class="text-gray-300">{osLabel(img.os_distro)}</span>
+                    </span>
+                  {:else}
+                    <span class="text-gray-500">-</span>
+                  {/if}
+                </td>
+                <td class="py-3 pr-6 text-xs">
+                  {#if img.visibility === 'public'}
+                    <span class="px-2 py-0.5 rounded font-medium text-green-400 bg-green-900/30">공개</span>
+                  {:else if img.visibility === 'shared'}
+                    <span class="px-2 py-0.5 rounded font-medium text-blue-400 bg-blue-900/30">공유</span>
+                  {:else if img.visibility === 'community'}
+                    <span class="px-2 py-0.5 rounded font-medium text-cyan-400 bg-cyan-900/30">커뮤니티</span>
+                  {:else if img.visibility === 'private'}
+                    <span class="px-2 py-0.5 rounded font-medium text-gray-400 bg-gray-800">비공개</span>
+                  {:else}
+                    <span class="text-gray-500">{img.visibility ?? '-'}</span>
+                  {/if}
+                </td>
                 <td class="py-3 pr-6">
                   <span class="px-2 py-0.5 rounded text-xs font-medium {img.status === 'active' ? 'text-green-400 bg-green-900/30' : 'text-gray-400 bg-gray-800'}">{img.status}</span>
                 </td>
@@ -226,10 +288,17 @@
                 <td class="py-3 pr-6 text-gray-400 text-xs">{formatDate(img.created_at)}</td>
                 <td class="py-3">
                   {#if img.owner === $auth.projectId}
-                    <button
-                      onclick={() => openEdit(img)}
-                      class="text-xs text-blue-400 hover:text-blue-300 transition-colors px-2 py-1 rounded hover:bg-blue-900/30"
-                    >편집</button>
+                    <div class="flex items-center gap-1">
+                      <button
+                        onclick={() => openEdit(img)}
+                        class="text-xs text-blue-400 hover:text-blue-300 transition-colors px-2 py-1 rounded hover:bg-blue-900/30"
+                      >편집</button>
+                      <button
+                        onclick={() => deleteImage(img.id, img.name)}
+                        disabled={deleting === img.id}
+                        class="text-xs text-red-400 hover:text-red-300 disabled:text-gray-600 transition-colors px-2 py-1 rounded hover:bg-red-900/30"
+                      >{deleting === img.id ? '삭제 중...' : '삭제'}</button>
+                    </div>
                   {/if}
                 </td>
               </tr>

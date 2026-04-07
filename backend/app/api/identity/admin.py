@@ -7,8 +7,9 @@ import openstack
 from app.api.deps import get_os_conn, get_token_info
 
 _logger = logging.getLogger(__name__)
-from app.models.storage import ShareInfo
-from app.services import manila, libraries as lib_svc
+from app.models.storage import ShareInfo, TopologyData, TopologyInstance
+from app.services import manila, libraries as lib_svc, neutron
+from app.services.cache import cached_call
 from app.config import get_settings
 
 
@@ -267,6 +268,33 @@ async def list_all_shares(conn: openstack.connection.Connection = Depends(get_os
         return await asyncio.to_thread(manila.list_shares, conn, None, True)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"공유 스토리지 조회 실패: {e}")
+
+
+@router.get("/topology", response_model=TopologyData, dependencies=[Depends(_require_admin)])
+async def admin_topology(conn: openstack.connection.Connection = Depends(get_os_conn)):
+    """전체 프로젝트의 네트워크/라우터/인스턴스 토폴로지."""
+    def _fetch():
+        topo = neutron.get_topology(conn)
+        instances = []
+        for s in conn.compute.servers(details=True, all_projects=True):
+            addresses = getattr(s, 'addresses', {}) or {}
+            instances.append(TopologyInstance(
+                id=s.id,
+                name=s.name or "",
+                status=s.status or "",
+                network_names=list(set(addresses.keys())),
+                ip_addresses=[
+                    {"addr": addr["addr"], "type": addr.get("OS-EXT-IPS:type", ""), "network_name": net_name}
+                    for net_name, addrs in addresses.items()
+                    for addr in addrs
+                ],
+            ))
+        topo.instances = instances
+        return topo.model_dump()
+    try:
+        return await cached_call("union:admin:topology", 30, _fetch)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"토폴로지 조회 실패: {e}")
 
 
 @router.get("/quotas/{project_id}", dependencies=[Depends(_require_admin)])

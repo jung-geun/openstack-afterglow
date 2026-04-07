@@ -36,7 +36,7 @@
 	let accessRules = $state<AccessRule[]>([]);
 	let accessLoading = $state(false);
 	let showAddRule = $state(false);
-	let ruleForm = $state({ cephx_id: '', access_level: 'ro' });
+	let ruleForm = $state({ access_to: '', access_level: 'ro' });
 	let addingRule = $state(false);
 	let ruleError = $state('');
 	let revokingId = $state<string | null>(null);
@@ -88,17 +88,18 @@
 	}
 
 	async function addAccessRule() {
-		if (!share || !ruleForm.cephx_id.trim()) return;
+		if (!share || !ruleForm.access_to.trim()) return;
 		addingRule = true;
 		ruleError = '';
+		const access_type = share.share_proto === 'NFS' ? 'ip' : 'cephx';
 		try {
 			await api.post(
 				`/api/shares/${share.id}/access-rules`,
-				{ cephx_id: ruleForm.cephx_id.trim(), access_level: ruleForm.access_level },
+				{ access_to: ruleForm.access_to.trim(), access_level: ruleForm.access_level, access_type },
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined
 			);
-			ruleForm = { cephx_id: '', access_level: 'ro' };
+			ruleForm = { access_to: '', access_level: 'ro' };
 			showAddRule = false;
 			await fetchAccessRules(share.id);
 		} catch (e) {
@@ -252,7 +253,7 @@
 		<!-- 접근 규칙 (Access Rules) -->
 		<div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4">
 			<div class="flex items-center justify-between mb-4">
-				<h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide">접근 규칙 (CephX)</h2>
+				<h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide">접근 규칙 {share.share_proto === 'NFS' ? '(IP)' : '(CephX)'}</h2>
 				<button
 					onclick={() => { showAddRule = !showAddRule; ruleError = ''; }}
 					class="text-xs text-blue-400 hover:text-blue-300 transition-colors"
@@ -265,11 +266,11 @@
 				<div class="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-4">
 					<div class="flex gap-3 items-end">
 						<div class="flex-1">
-							<label class="block text-xs text-gray-400 mb-1">CephX ID
+							<label class="block text-xs text-gray-400 mb-1">{share.share_proto === 'NFS' ? 'IP / CIDR' : 'CephX ID'}
 							<input
-								bind:value={ruleForm.cephx_id}
+								bind:value={ruleForm.access_to}
 								type="text"
-								placeholder="예: my-instance"
+								placeholder={share.share_proto === 'NFS' ? '예: 10.0.0.0/24' : '예: my-instance'}
 								class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500 font-mono mt-1"
 							/>
 						</label>
@@ -287,7 +288,7 @@
 						</div>
 						<button
 							onclick={addAccessRule}
-							disabled={addingRule || !ruleForm.cephx_id.trim()}
+							disabled={addingRule || !ruleForm.access_to.trim()}
 							class="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm rounded transition-colors"
 						>
 							{addingRule ? '추가 중...' : '추가'}
@@ -306,7 +307,7 @@
 					<table class="w-full text-sm">
 						<thead>
 							<tr class="border-b border-gray-800 text-gray-500 text-xs uppercase tracking-wide">
-								<th class="text-left py-2 pr-4">CephX ID</th>
+								<th class="text-left py-2 pr-4">접근 대상</th>
 								<th class="text-left py-2 pr-4">권한</th>
 								<th class="text-left py-2 pr-4">상태</th>
 								<th class="text-left py-2 pr-4">Access Key</th>
@@ -316,7 +317,7 @@
 						<tbody>
 							{#each accessRules as rule (rule.id)}
 								<tr class="border-b border-gray-800/50">
-									<td class="py-2 pr-4 font-mono text-xs text-gray-300">{rule.access_to}</td>
+									<td class="py-2 pr-4 font-mono text-xs text-gray-300">{rule.access_to ?? '-'}</td>
 									<td class="py-2 pr-4">
 										<span class="text-xs px-1.5 py-0.5 rounded {rule.access_level === 'rw' ? 'bg-orange-900/30 text-orange-400' : 'bg-gray-800 text-gray-400'}">
 											{rule.access_level}

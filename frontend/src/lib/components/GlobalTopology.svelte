@@ -40,11 +40,13 @@
 	let {
 		data,
 		projectId = null,
+		showAll = false,
 		onSelectInstance = undefined,
 		onSelectRouter = undefined,
 	}: {
 		data: TopologyData;
 		projectId?: string | null;
+		showAll?: boolean;
 		onSelectInstance?: (id: string) => void;
 		onSelectRouter?: (id: string) => void;
 	} = $props();
@@ -80,11 +82,13 @@
 	// ── Derived: network ordering ─────────────────────────────────────────────
 	// Show: external networks + shared networks + networks owned by current project
 	const visibleNetworks = $derived(
-		data.networks.filter(n =>
-			n.is_external ||
-			n.is_shared ||
-			(projectId != null && n.project_id === projectId)
-		)
+		showAll
+			? data.networks
+			: data.networks.filter(n =>
+				n.is_external ||
+				n.is_shared ||
+				(projectId != null && n.project_id === projectId)
+			)
 	);
 
 	const orderedNetworks = $derived([

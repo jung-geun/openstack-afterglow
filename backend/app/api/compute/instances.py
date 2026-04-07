@@ -128,12 +128,16 @@ async def create_instance(
         boot_vol = await asyncio.to_thread(
             cinder.create_volume_from_image,
             conn,
-            f"union-boot-{req.name}",
+            f"{req.name}-boot",
             req.image_id,
             req.boot_volume_size_gb or settings.boot_volume_size_gb,
             req.availability_zone or settings.default_availability_zone,
         )
         boot_volume_id = boot_vol.id
+        await asyncio.to_thread(
+            cinder.rename_volume, conn, boot_volume_id,
+            f"{req.name}-boot-{boot_volume_id[:8]}"
+        )
 
         # ------------------------------------------------------------------
         # 3. Cinder: upper 볼륨 생성 (OverlayFS upperdir)
@@ -264,12 +268,16 @@ async def create_instance_async(
             boot_vol = await asyncio.to_thread(
                 cinder.create_volume_from_image,
                 conn,
-                name=f"union-boot-{req.name}",
+                name=f"{req.name}-boot",
                 image_id=req.image_id,
                 size_gb=req.boot_volume_size_gb or settings.boot_volume_size_gb,
                 availability_zone=req.availability_zone or settings.default_availability_zone,
             )
             boot_volume_id = boot_vol.id
+            await asyncio.to_thread(
+                cinder.rename_volume, conn, boot_volume_id,
+                f"{req.name}-boot-{boot_volume_id[:8]}"
+            )
             yield send_progress(ProgressStep.BOOT_VOLUME_CREATING, 45, "부트 볼륨 생성 완료")
 
             if resolved_libs:
@@ -332,6 +340,19 @@ async def create_instance_async(
                 await asyncio.to_thread(
                     conn.compute.create_volume_attachment,
                     server_id, volume_id=upper_volume_id
+                )
+            # 새 볼륨 생성 후 연결
+            for nv in (req.new_volumes or []):
+                nv_name = (nv.get("name") or "").strip()
+                nv_size = int(nv.get("size_gb", 50))
+                if not nv_name or nv_size < 1:
+                    continue
+                new_vol = await asyncio.to_thread(
+                    cinder.create_empty_volume, conn, nv_name, nv_size
+                )
+                await asyncio.to_thread(
+                    conn.compute.create_volume_attachment,
+                    server_id, volume_id=new_vol.id
                 )
             # 추가 볼륨 연결
             for vol_id in (req.additional_volume_ids or []):

@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.compute import instances_router, keypairs_router, images_router, flavors_router
-from app.api.storage import volumes_router, volume_backups_router, shares_router
+from app.api.storage import volumes_router, volume_backups_router, volume_snapshots_router, shares_router
 from app.api.network import networks_router, routers_router, security_groups_router, loadbalancers_router
 from app.api.identity import auth_router, admin_router
 from app.api.container import clusters_router, containers_router
@@ -154,6 +154,7 @@ app.include_router(instances_router, prefix="/api/instances", tags=["instances"]
 app.include_router(keypairs_router, prefix="/api/keypairs", tags=["keypairs"])
 # Storage (backups 먼저 등록 — /api/volumes/{id} catch-all 보다 앞에)
 app.include_router(volume_backups_router, prefix="/api/volumes/backups", tags=["volume-backups"])
+app.include_router(volume_snapshots_router, prefix="/api/volume-snapshots", tags=["volume-snapshots"])
 app.include_router(volumes_router, prefix="/api/volumes", tags=["volumes"])
 app.include_router(shares_router, prefix="/api/shares", tags=["shares"])
 # Network

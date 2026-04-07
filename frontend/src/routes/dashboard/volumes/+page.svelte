@@ -2,9 +2,9 @@
   import { auth } from '$lib/stores/auth';
   import { untrack } from 'svelte';
   import { api, ApiError, memoryCache } from '$lib/api/client';
-  import { goto } from '$app/navigation';
   import type { Volume } from '$lib/types/resources';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+  import VolumeDetailPanel from '$lib/components/VolumeDetailPanel.svelte';
   import { formatStorage } from '$lib/utils/format';
 
   const statusColor: Record<string, string> = {
@@ -38,6 +38,18 @@
   let createError = $state('');
   let form = $state({ name: '', size_gb: 10 });
   let autoRefresh = $state(false);
+
+  let selectedVolumeId = $state<string | null>(null);
+
+  function openVolumePanel(id: string) {
+    selectedVolumeId = id;
+    history.pushState({ volumeId: id }, '', `/dashboard/volumes/${id}`);
+  }
+
+  function closeVolumePanel() {
+    selectedVolumeId = null;
+    history.pushState({}, '', '/dashboard/volumes');
+  }
 
   function swrGet<T>(path: string): T | null {
     const key = `${path}:${$auth.projectId}`;
@@ -107,6 +119,8 @@
     return () => clearInterval(interval);
   });
 </script>
+
+<svelte:window onkeydown={(e) => e.key === 'Escape' && selectedVolumeId && closeVolumePanel()} />
 
 {#if showModal}
   <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onclick={() => { showModal = false; createError = ''; }} role="dialog" aria-modal="true" tabindex="-1" onkeydown={(e) => e.key === 'Escape' && (showModal = false)}>
@@ -185,7 +199,13 @@
         </thead>
         <tbody>
           {#each volumes as vol (vol.id)}
-            <tr onclick={() => goto('/dashboard/volumes/' + vol.id)} onkeydown={(e) => e.key === 'Enter' && goto('/dashboard/volumes/' + vol.id)} tabindex="0" role="link" class="border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors cursor-pointer">
+            <tr
+              onclick={() => openVolumePanel(vol.id)}
+              onkeydown={(e) => e.key === 'Enter' && openVolumePanel(vol.id)}
+              tabindex="0"
+              role="button"
+              class="border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors cursor-pointer {selectedVolumeId === vol.id ? 'bg-gray-800/30' : ''}"
+            >
               <td class="py-3 pr-6 font-medium">
                 {#if vol.name}<span class="text-white">{vol.name}</span>{:else}<span class="text-gray-400 font-mono text-xs">{vol.id}</span>{/if}
               </td>
@@ -200,9 +220,20 @@
                 {/if}
               </td>
               <td class="py-3 text-right">
-                <button onclick={(e) => { e.stopPropagation(); deleteVolume(vol.id, vol.name); }} disabled={deleting === vol.id || vol.attachments.length > 0} class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-xs px-2 py-1 rounded border border-red-900 hover:border-red-700 disabled:border-gray-700 transition-colors" title={vol.attachments.length > 0 ? '연결된 볼륨은 삭제할 수 없습니다' : ''}>
-                  {deleting === vol.id ? '삭제 중...' : '삭제'}
-                </button>
+                <div class="flex items-center justify-end gap-1">
+                  {#if vol.status === 'available'}
+                    <button
+                      onclick={(e) => { e.stopPropagation(); openVolumePanel(vol.id); }}
+                      class="text-blue-400 hover:text-blue-300 text-xs px-2 py-1 rounded border border-blue-900 hover:border-blue-700 transition-colors"
+                    >연결</button>
+                  {/if}
+                  <button
+                    onclick={(e) => { e.stopPropagation(); deleteVolume(vol.id, vol.name); }}
+                    disabled={deleting === vol.id || vol.attachments.length > 0}
+                    class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-xs px-2 py-1 rounded border border-red-900 hover:border-red-700 disabled:border-gray-700 transition-colors"
+                    title={vol.attachments.length > 0 ? '연결된 볼륨은 삭제할 수 없습니다' : ''}
+                  >{deleting === vol.id ? '삭제 중...' : '삭제'}</button>
+                </div>
               </td>
             </tr>
           {/each}
@@ -211,3 +242,23 @@
     </div>
   {/if}
 </div>
+
+<!-- Volume Detail Panel -->
+{#if selectedVolumeId}
+  <div
+    class="fixed inset-0 z-40"
+    role="dialog"
+    aria-modal="true"
+    tabindex="-1"
+    onkeydown={(e) => e.key === 'Escape' && closeVolumePanel()}
+  >
+    <button class="absolute inset-0 bg-black/50 cursor-default" onclick={closeVolumePanel} aria-label="닫기"></button>
+    <div class="absolute right-0 top-14 bottom-0 w-[60vw] max-w-2xl bg-gray-950 border-l border-gray-700 overflow-y-auto shadow-2xl">
+      <VolumeDetailPanel
+        volumeId={selectedVolumeId}
+        onClose={closeVolumePanel}
+        onDeleted={() => { fetchVolumes(); closeVolumePanel(); }}
+      />
+    </div>
+  </div>
+{/if}

@@ -136,7 +136,7 @@
           </div>
           {#if c.vcpus_limit > 0}
             {@const pct = Math.round(c.vcpus_used / c.vcpus_limit * 100)}
-            <div class="mt-auto pt-3 w-full bg-gray-800 rounded-full h-2">
+            <div class="mt-auto mt-3 w-full bg-gray-800 rounded-full h-2 overflow-hidden">
               <div class="h-2 rounded-full transition-all {pct > 80 ? 'bg-red-500' : pct > 60 ? 'bg-yellow-500' : 'bg-blue-500'}" style="width:{pct}%"></div>
             </div>
           {/if}
@@ -163,7 +163,7 @@
           </div>
           {#if c.ram_limit_mb > 0}
             {@const pct = Math.round(c.ram_used_mb / c.ram_limit_mb * 100)}
-            <div class="mt-auto pt-3 w-full bg-gray-800 rounded-full h-2">
+            <div class="mt-auto mt-3 w-full bg-gray-800 rounded-full h-2 overflow-hidden">
               <div class="h-2 rounded-full transition-all {pct > 80 ? 'bg-red-500' : pct > 60 ? 'bg-yellow-500' : 'bg-green-500'}" style="width:{pct}%"></div>
             </div>
           {/if}
@@ -206,7 +206,7 @@
           </div>
           {#if s.volumes_limit > 0}
             {@const pct = Math.round(s.volumes_used / s.volumes_limit * 100)}
-            <div class="mt-auto pt-3 w-full bg-gray-800 rounded-full h-2">
+            <div class="mt-auto mt-3 w-full bg-gray-800 rounded-full h-2 overflow-hidden">
               <div class="h-2 rounded-full transition-all {pct > 80 ? 'bg-red-500' : pct > 60 ? 'bg-yellow-500' : 'bg-cyan-500'}" style="width:{pct}%"></div>
             </div>
           {/if}
@@ -231,7 +231,7 @@
           </div>
           {#if s.gigabytes_limit > 0}
             {@const pct = Math.round(s.gigabytes_used / s.gigabytes_limit * 100)}
-            <div class="mt-auto pt-3 w-full bg-gray-800 rounded-full h-2">
+            <div class="mt-auto mt-3 w-full bg-gray-800 rounded-full h-2 overflow-hidden">
               <div class="h-2 rounded-full transition-all {pct > 80 ? 'bg-red-500' : pct > 60 ? 'bg-yellow-500' : 'bg-orange-500'}" style="width:{pct}%"></div>
             </div>
           {/if}
@@ -260,7 +260,7 @@
             </div>
             {#if nq.port.limit > 0}
               {@const pct = Math.round(nq.port.in_use / nq.port.limit * 100)}
-              <div class="mt-auto pt-3 w-full bg-gray-800 rounded-full h-2">
+              <div class="mt-auto mt-3 w-full bg-gray-800 rounded-full h-2 overflow-hidden">
                 <div class="h-2 rounded-full transition-all {pct > 80 ? 'bg-red-500' : pct > 60 ? 'bg-yellow-500' : 'bg-indigo-500'}" style="width:{pct}%"></div>
               </div>
             {/if}
@@ -283,7 +283,7 @@
             </div>
             {#if nq.floatingip.limit > 0}
               {@const pct = Math.round(nq.floatingip.in_use / nq.floatingip.limit * 100)}
-              <div class="mt-auto pt-3 w-full bg-gray-800 rounded-full h-2">
+              <div class="mt-auto mt-3 w-full bg-gray-800 rounded-full h-2 overflow-hidden">
                 <div class="h-2 rounded-full transition-all {pct > 80 ? 'bg-red-500' : pct > 60 ? 'bg-yellow-500' : 'bg-sky-500'}" style="width:{pct}%"></div>
               </div>
             {/if}
@@ -308,7 +308,7 @@
             </div>
             {#if sq.shares.limit > 0}
               {@const pct = Math.round(sq.shares.in_use / sq.shares.limit * 100)}
-              <div class="mt-auto pt-3 w-full bg-gray-800 rounded-full h-2">
+              <div class="mt-auto mt-3 w-full bg-gray-800 rounded-full h-2 overflow-hidden">
                 <div class="h-2 rounded-full transition-all {pct > 80 ? 'bg-red-500' : pct > 60 ? 'bg-yellow-500' : 'bg-teal-500'}" style="width:{pct}%"></div>
               </div>
             {/if}
@@ -331,7 +331,7 @@
             </div>
             {#if sq.gigabytes.limit > 0}
               {@const pct = Math.round(sq.gigabytes.in_use / sq.gigabytes.limit * 100)}
-              <div class="mt-auto pt-3 w-full bg-gray-800 rounded-full h-2">
+              <div class="mt-auto mt-3 w-full bg-gray-800 rounded-full h-2 overflow-hidden">
                 <div class="h-2 rounded-full transition-all {pct > 80 ? 'bg-red-500' : pct > 60 ? 'bg-yellow-500' : 'bg-green-500'}" style="width:{pct}%"></div>
               </div>
             {/if}

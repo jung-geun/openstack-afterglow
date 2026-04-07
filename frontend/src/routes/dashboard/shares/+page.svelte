@@ -30,7 +30,8 @@
   let showModal = $state(false);
   let creating = $state(false);
   let createError = $state('');
-  let form = $state({ name: '', size_gb: 10, share_type: 'cephfstype', share_network_id: '' });
+  let form = $state({ name: '', size_gb: 10, share_type: '', share_network_id: '', share_proto: 'CEPHFS' });
+  let shareTypes = $state<{ id: string; name: string; is_default: boolean }[]>([]);
   let metaEntries = $state<MetaEntry[]>([{ key: '', value: '' }]);
   let copiedExport = $state<string | null>(null);
 
@@ -75,6 +76,20 @@
     setTimeout(() => (copiedExport = null), 2000);
   }
 
+  async function openCreateModal() {
+    showModal = true;
+    try {
+      shareTypes = await api.get<{ id: string; name: string; is_default: boolean }[]>(
+        '/api/shares/types', $auth.token ?? undefined, $auth.projectId ?? undefined
+      );
+      if (shareTypes.length > 0 && !form.share_type) {
+        form.share_type = shareTypes.find(t => t.is_default)?.name ?? shareTypes[0].name;
+      }
+    } catch {
+      shareTypes = [];
+    }
+  }
+
   async function createShare() {
     if (!form.name.trim() || form.size_gb < 1) return;
     creating = true;
@@ -83,7 +98,8 @@
       const body: Record<string, unknown> = {
         name: form.name,
         size_gb: form.size_gb,
-        share_type: form.share_type || 'cephfstype',
+        share_type: form.share_type,
+        share_proto: form.share_proto,
       };
       if (form.share_network_id.trim()) body.share_network_id = form.share_network_id.trim();
       const validMeta = metaEntries.filter(m => m.key.trim());
@@ -94,7 +110,7 @@
       }
       await api.post('/api/shares', body, $auth.token ?? undefined, $auth.projectId ?? undefined);
       showModal = false;
-      form = { name: '', size_gb: 10, share_type: 'cephfstype', share_network_id: '' };
+      form = { name: '', size_gb: 10, share_type: shareTypes[0]?.name ?? '', share_network_id: '', share_proto: 'CEPHFS' };
       metaEntries = [{ key: '', value: '' }];
       await fetchShares();
     } catch (e) {
@@ -145,9 +161,25 @@
           </div>
           <div>
             <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">Share Type
-              <input bind:value={form.share_type} type="text" placeholder="cephfstype" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 font-mono mt-1.5" />
+              {#if shareTypes.length > 0}
+                <select bind:value={form.share_type} class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5">
+                  {#each shareTypes as st}
+                    <option value={st.name}>{st.name}{st.is_default ? ' (기본값)' : ''}</option>
+                  {/each}
+                </select>
+              {:else}
+                <input bind:value={form.share_type} type="text" placeholder="share type 이름" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 font-mono mt-1.5" />
+              {/if}
             </label>
           </div>
+        </div>
+        <div>
+          <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">프로토콜
+            <select bind:value={form.share_proto} class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5">
+              <option value="CEPHFS">CephFS</option>
+              <option value="NFS">NFS</option>
+            </select>
+          </label>
         </div>
         <div>
           <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">Share Network ID (선택)
@@ -184,7 +216,7 @@
 <div class="p-8">
   <div class="flex items-center justify-between mb-6">
     <h1 class="text-2xl font-bold text-white">공유 스토리지</h1>
-    <button onclick={() => showModal = true} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 공유 생성</button>
+    <button onclick={openCreateModal} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 공유 생성</button>
   </div>
 
   <!-- 쿼터 표시 -->
@@ -217,7 +249,7 @@
     <div class="text-center py-20 text-gray-600">
       <div class="text-5xl mb-4">🗂️</div>
       <p class="text-lg">공유 스토리지가 없습니다</p>
-      <button onclick={() => showModal = true} class="text-blue-400 hover:text-blue-300 text-sm mt-2 inline-block">첫 공유 스토리지를 생성하세요 →</button>
+      <button onclick={openCreateModal} class="text-blue-400 hover:text-blue-300 text-sm mt-2 inline-block">첫 공유 스토리지를 생성하세요 →</button>
     </div>
   {:else}
     <div class="overflow-x-auto">

@@ -18,6 +18,12 @@
 	let activeCategory = $state<FlavorCategory>('all');
 	let filterVcpus = $state<number | null>(null);
 	let filterRam = $state<number | null>(null);
+	let filterGpu = $state<string | null>(null);
+
+	function extractGpuModel(f: FlavorInfo): string {
+		const match = f.name.match(/^gpu\.([^_]+)/);
+		return match ? match[1].toUpperCase() : 'Unknown';
+	}
 
 	function hasGpu(flavor: FlavorInfo): boolean {
 		return Object.keys(flavor.extra_specs).some(
@@ -51,16 +57,24 @@
 		[...new Set(categoryFiltered.map(f => f.ram))].sort((a, b) => a - b)
 	);
 
+	const gpuModelOptions = $derived(
+		activeCategory === 'gpu'
+			? [...new Set(categoryFiltered.map(f => extractGpuModel(f)))].sort()
+			: []
+	);
+
 	const filteredFlavors = $derived(
 		categoryFiltered
 			.filter(f => filterVcpus === null || f.vcpus === filterVcpus)
 			.filter(f => filterRam === null || f.ram === filterRam)
+			.filter(f => filterGpu === null || extractGpuModel(f) === filterGpu)
 	);
 
 	function setCategory(cat: FlavorCategory) {
 		activeCategory = cat;
 		filterVcpus = null;
 		filterRam = null;
+		filterGpu = null;
 	}
 
 	function ramLabel(mb: number): string {
@@ -113,6 +127,21 @@
 			{/each}
 		</select>
 	</div>
+	{#if activeCategory === 'gpu'}
+		<div class="flex items-center gap-1.5">
+			<label class="text-xs text-gray-500">GPU</label>
+			<select
+				value={filterGpu}
+				onchange={(e) => { const v = (e.target as HTMLSelectElement).value; filterGpu = v === '' ? null : v; }}
+				class="bg-gray-800 border border-gray-600 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500"
+			>
+				<option value="">전체</option>
+				{#each gpuModelOptions as model}
+					<option value={model}>{model}</option>
+				{/each}
+			</select>
+		</div>
+	{/if}
 	<span class="text-xs text-gray-500 ml-auto">{filteredFlavors.length}개</span>
 </div>
 

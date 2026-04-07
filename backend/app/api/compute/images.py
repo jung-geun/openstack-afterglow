@@ -24,8 +24,19 @@ async def list_images(conn: openstack.connection.Connection = Depends(get_os_con
     pid = conn._union_project_id
     return await cached_call(
         f"union:glance:{pid}:images", 300,
-        lambda: [img.model_dump() for img in glance.list_images(conn)]
+        lambda: [img.model_dump() for img in glance.list_images(conn, pid)]
     )
+
+
+@router.delete("/{image_id}", status_code=204)
+async def delete_image(
+    image_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    try:
+        await asyncio.to_thread(glance.delete_image, conn, image_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"이미지 삭제 실패: {e}")
 
 
 @router.patch("/{image_id}", response_model=ImageInfo)

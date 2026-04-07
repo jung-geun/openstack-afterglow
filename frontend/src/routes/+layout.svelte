@@ -8,7 +8,6 @@
 	import ProjectSelector from '$lib/components/ProjectSelector.svelte';
 	import { siteConfig, loadSiteConfig } from '$lib/config/site';
 	import './layout.css';
-	import favicon from '$lib/assets/favicon.svg';
 
 	let { children } = $props();
 
@@ -96,7 +95,7 @@
 	}
 </script>
 
-<svelte:head><link rel="icon" href={favicon} /></svelte:head>
+<svelte:head><link rel="icon" href={$siteConfig.favicon_path} /></svelte:head>
 
 {#if $isLoggedIn}
 	<!-- 세션 만료 경고 배너 -->
@@ -112,7 +111,10 @@
 		</div>
 	{/if}
 	<nav class="fixed top-0 left-0 right-0 z-50 bg-gray-900 border-b border-gray-700 h-14 flex items-center px-6 gap-6">
-		<a href="/dashboard" class="text-white font-bold text-lg tracking-tight">{$siteConfig.site_name}</a>
+		<a href="/dashboard" class="flex items-center gap-2 text-white font-bold text-lg tracking-tight">
+			<img src={$siteConfig.logo_path} alt={$siteConfig.site_name} class="h-7 w-auto" />
+			{$siteConfig.site_name}
+		</a>
 		<div class="ml-auto flex items-center gap-3">
 			<ProjectSelector />
 			{#if $isAdmin}

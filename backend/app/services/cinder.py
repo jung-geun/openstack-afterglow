@@ -41,6 +41,10 @@ def create_empty_volume(
     return _vol_to_info(vol)
 
 
+def rename_volume(conn: openstack.connection.Connection, volume_id: str, new_name: str) -> None:
+    conn.block_storage.update_volume(volume_id, name=new_name)
+
+
 def delete_volume(conn: openstack.connection.Connection, volume_id: str) -> None:
     conn.block_storage.delete_volume(volume_id, ignore_missing=True)
 
@@ -142,6 +146,48 @@ def restore_backup(conn: openstack.connection.Connection, backup_id: str, volume
         kwargs["volume_id"] = volume_id
     result = conn.block_storage.restore_backup(backup_id, **kwargs)
     return {"volume_id": getattr(result, 'volume_id', None), "volume_name": getattr(result, 'volume_name', None)}
+
+
+def list_snapshots(conn: openstack.connection.Connection, volume_id: Optional[str] = None) -> list[dict]:
+    kwargs = {}
+    if volume_id:
+        kwargs["volume_id"] = volume_id
+    return [_snapshot_to_dict(s) for s in conn.block_storage.snapshots(details=True, **kwargs)]
+
+
+def get_snapshot(conn: openstack.connection.Connection, snapshot_id: str) -> dict:
+    s = conn.block_storage.get_snapshot(snapshot_id)
+    return _snapshot_to_dict(s)
+
+
+def create_snapshot(
+    conn: openstack.connection.Connection,
+    volume_id: str,
+    name: str,
+    description: Optional[str] = None,
+    force: bool = False,
+) -> dict:
+    kwargs: dict = {"volume_id": volume_id, "name": name, "is_forced": force}
+    if description:
+        kwargs["description"] = description
+    s = conn.block_storage.create_snapshot(**kwargs)
+    return _snapshot_to_dict(s)
+
+
+def delete_snapshot(conn: openstack.connection.Connection, snapshot_id: str) -> None:
+    conn.block_storage.delete_snapshot(snapshot_id, ignore_missing=True)
+
+
+def _snapshot_to_dict(s) -> dict:
+    return {
+        "id": s.id,
+        "name": s.name or "",
+        "status": s.status,
+        "volume_id": s.volume_id,
+        "size": s.size,
+        "description": getattr(s, 'description', '') or "",
+        "created_at": str(s.created_at) if getattr(s, 'created_at', None) else None,
+    }
 
 
 def _backup_to_dict(b) -> dict:

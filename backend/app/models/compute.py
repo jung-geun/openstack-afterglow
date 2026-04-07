@@ -21,6 +21,7 @@ class ImageInfo(BaseModel):
     os_distro: Optional[str] = None
     created_at: Optional[str] = None
     owner: Optional[str] = None
+    visibility: Optional[str] = None
 
 
 class FlavorInfo(BaseModel):
@@ -76,3 +77,4 @@ class CreateInstanceRequest(BaseModel):
     availability_zone: Optional[str] = None
     boot_volume_size_gb: Optional[int] = None
     additional_volume_ids: list[str] = []
+    new_volumes: list[dict] = []

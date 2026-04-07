@@ -1,5 +1,10 @@
 import { writable } from 'svelte/store';
 
+export interface NewVolumeSpec {
+	name: string;
+	size_gb: number;
+}
+
 export interface WizardState {
 	step: number;
 	imageId: string | null;
@@ -16,6 +21,7 @@ export interface WizardState {
 	adminPassword: string;
 	bootVolumeSizeGb: number;
 	additionalVolumeIds: string[];
+	newVolumes: NewVolumeSpec[];
 }
 
 const initial: WizardState = {
@@ -34,6 +40,7 @@ const initial: WizardState = {
 	adminPassword: '',
 	bootVolumeSizeGb: 20,
 	additionalVolumeIds: [],
+	newVolumes: [],
 };
 
 export const wizard = writable<WizardState>({ ...initial });

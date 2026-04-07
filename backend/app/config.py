@@ -43,6 +43,8 @@ def _load_toml() -> dict:
             flat["refresh_interval_ms"] = app.get("refresh_interval_ms", 5000)
             flat["site_name"] = app.get("site_name", "Union")
             flat["site_description"] = app.get("site_description", "OpenStack VM + OverlayFS 배포 플랫폼")
+            flat["logo_path"] = app.get("logo_path", "/logo.png")
+            flat["favicon_path"] = app.get("favicon_path", "/favicon.ico")
 
             cache = data.get("cache", {})
             flat["redis_url"] = cache.get("redis_url", "redis://localhost:6379/0")
@@ -94,6 +96,8 @@ class Settings(BaseSettings):
     refresh_interval_ms: int = 5000
     site_name: str = "Union"
     site_description: str = "OpenStack VM + OverlayFS 배포 플랫폼"
+    logo_path: str = "/logo.png"
+    favicon_path: str = "/favicon.ico"
 
     # Redis 캐시
     redis_url: str = "redis://localhost:6379/0"

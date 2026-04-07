@@ -216,6 +216,7 @@
 					admin_pass: $wizard.authMode === 'password' ? $wizard.adminPassword : null,
 					boot_volume_size_gb: $wizard.bootVolumeSizeGb,
 					additional_volume_ids: $wizard.additionalVolumeIds,
+					new_volumes: $wizard.newVolumes.filter(v => v.name.trim()),
 				})
 			});
 
@@ -409,7 +410,11 @@
 							class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors mt-1.5"
 						/>
 					</label>
+						{#if $wizard.adminPassword.length === 0}
+						<p class="text-xs text-amber-400 mt-1">비밀번호를 입력해야 다음 단계로 진행할 수 있습니다.</p>
+					{:else}
 						<p class="text-xs text-gray-500 mt-1">인스턴스 root/admin 비밀번호를 설정합니다.</p>
+					{/if}
 					</div>
 				{/if}
 
@@ -476,7 +481,40 @@
 							<p class="text-xs text-gray-500 mt-1">{$wizard.additionalVolumeIds.length}개 볼륨 선택됨</p>
 						{/if}
 					{/if}
-				</div>
+						<!-- 새 볼륨 만들기 -->
+						<div class="mt-3">
+							<button
+								type="button"
+								onclick={() => wizard.update(w => ({ ...w, newVolumes: [...w.newVolumes, { name: '', size_gb: 50 }] }))}
+								class="text-blue-400 hover:text-blue-300 text-xs transition-colors"
+							>+ 새 볼륨 만들기</button>
+							{#each $wizard.newVolumes as nv, i}
+								<div class="flex gap-2 mt-2 items-center">
+									<input
+										type="text"
+										value={nv.name}
+										oninput={(e) => wizard.update(w => { w.newVolumes[i].name = (e.target as HTMLInputElement).value; return { ...w }; })}
+										placeholder="볼륨 이름"
+										class="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+									/>
+									<input
+										type="number"
+										value={nv.size_gb}
+										oninput={(e) => wizard.update(w => { w.newVolumes[i].size_gb = Number((e.target as HTMLInputElement).value); return { ...w }; })}
+										min="1"
+										max="500"
+										class="w-20 bg-gray-800 border border-gray-600 rounded-lg px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+									/>
+									<span class="text-xs text-gray-500">GB</span>
+									<button
+										type="button"
+										onclick={() => wizard.update(w => ({ ...w, newVolumes: w.newVolumes.filter((_, idx) => idx !== i) }))}
+										class="text-red-400 hover:text-red-300 text-xs transition-colors"
+									>삭제</button>
+								</div>
+							{/each}
+						</div>
+					</div>
 
 			{:else if $wizard.step === 6}
 				<h2 class="text-lg font-semibold text-white mb-4">최종 확인 및 배포</h2>
