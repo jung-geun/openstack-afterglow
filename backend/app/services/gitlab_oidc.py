@@ -62,8 +62,8 @@ async def _validate_state(state: str) -> None:
         pass  # Redis 장애 시 state 검증 건너뜀
 
 
-async def _exchange_gitlab_code(code: str) -> str:
-    """GitLab 토큰 엔드포인트에서 authorization code를 access_token으로 교환."""
+async def _exchange_gitlab_code(code: str) -> dict:
+    """GitLab 토큰 엔드포인트에서 authorization code를 토큰으로 교환."""
     settings = get_settings()
     async with httpx.AsyncClient(timeout=30, verify=True) as client:
         resp = await client.post(
@@ -81,12 +81,14 @@ async def _exchange_gitlab_code(code: str) -> str:
         access_token = data.get("access_token")
         if not access_token:
             raise ValueError(f"GitLab 토큰 응답에 access_token 없음: {data}")
-        return access_token
+        # Keystone OS-FEDERATION OpenID Connect는 id_token(JWT)을 기대함
+        id_token = data.get("id_token", access_token)
+        return {"access_token": access_token, "id_token": id_token}
 
 
-async def _federated_auth(access_token: str) -> dict:
+async def _federated_auth(token: str) -> dict:
     """
-    GitLab access_token으로 Keystone OS-FEDERATION 인증.
+    GitLab id_token으로 Keystone OS-FEDERATION 인증.
     unscoped Keystone 토큰과 사용자 정보를 반환.
     """
     settings = get_settings()
@@ -98,7 +100,7 @@ async def _federated_auth(access_token: str) -> dict:
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(
             url,
-            headers={"Authorization": f"Bearer {access_token}"},
+            headers={"Authorization": f"Bearer {token}"},
         )
         resp.raise_for_status()
         unscoped_token = resp.headers.get("X-Subject-Token", "")
@@ -163,8 +165,8 @@ async def exchange_code(code: str, state: str) -> dict:
     """
     await _validate_state(state)
 
-    access_token = await _exchange_gitlab_code(code)
-    fed = await _federated_auth(access_token)
+    tokens = await _exchange_gitlab_code(code)
+    fed = await _federated_auth(tokens["id_token"])
     unscoped_token = fed["token"]
 
     projects = await _list_projects_for_token(unscoped_token)
