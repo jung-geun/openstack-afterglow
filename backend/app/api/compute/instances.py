@@ -13,7 +13,7 @@
 import logging
 import json
 import asyncio
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 import openstack
 
@@ -346,9 +346,9 @@ async def create_instance_async(
                 )
             # 새 볼륨 생성 후 연결
             for nv in (req.new_volumes or []):
-                nv_name = (nv.get("name") or "").strip()
-                nv_size = int(nv.get("size_gb", 50))
-                if not nv_name or nv_size < 1:
+                nv_name = nv.name
+                nv_size = nv.size_gb
+                if not nv_name:
                     continue
                 new_vol = await asyncio.to_thread(
                     cinder.create_empty_volume, conn, nv_name, nv_size
@@ -494,7 +494,7 @@ async def get_console(
 @router.get("/{instance_id}/log")
 async def get_console_log(
     instance_id: str,
-    length: int = 100,
+    length: int = Query(default=100, ge=1, le=10000),
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     try:

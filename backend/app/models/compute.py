@@ -77,7 +77,7 @@ class CreateInstanceRequest(BaseModel):
     availability_zone: Optional[str] = None
     boot_volume_size_gb: Optional[int] = None
     additional_volume_ids: list[str] = []
-    new_volumes: list[dict] = []
+    new_volumes: list["NewVolumeRequest"] = []
 
     @field_validator("name")
     @classmethod
@@ -86,6 +86,26 @@ class CreateInstanceRequest(BaseModel):
             raise ValueError(
                 "name은 영문자/숫자로 시작하고, 영문자·숫자·하이픈·언더스코어만 허용되며 최대 63자입니다"
             )
+        return v
+
+
+class NewVolumeRequest(BaseModel):
+    name: str = ""
+    size_gb: int = 50
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        v = v.strip()
+        if v and not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,254}$', v):
+            raise ValueError("볼륨 이름은 영문자/숫자로 시작해야 합니다")
+        return v
+
+    @field_validator("size_gb")
+    @classmethod
+    def validate_size(cls, v: int) -> int:
+        if v < 1 or v > 16384:
+            raise ValueError("볼륨 크기는 1~16384 GB 범위여야 합니다")
         return v
 
 

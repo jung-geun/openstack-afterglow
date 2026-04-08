@@ -1,4 +1,5 @@
-from pydantic import BaseModel
+import re
+from pydantic import BaseModel, field_validator
 from typing import Optional
 
 
@@ -32,6 +33,15 @@ class ClusterInfo(BaseModel):
     stack_id: str | None = None
 
 
+_NAME_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$')
+
+
+def _validate_resource_name(v: str) -> str:
+    if not _NAME_RE.match(v):
+        raise ValueError("name은 영문자/숫자로 시작하고, 영문자·숫자·하이픈·언더스코어만 허용되며 최대 63자입니다")
+    return v
+
+
 class CreateClusterRequest(BaseModel):
     name: str
     cluster_template_id: str
@@ -39,6 +49,11 @@ class CreateClusterRequest(BaseModel):
     master_count: int = 1
     keypair: str | None = None
     create_timeout: int | None = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        return _validate_resource_name(v)
 
 
 class ZunContainerInfo(BaseModel):
@@ -66,9 +81,14 @@ class CreateZunContainerRequest(BaseModel):
     command: str | None = None
     cpu: float | None = None
     memory: str | None = None
-    environment: dict | None = None
+    environment: dict[str, str] | None = None
     ports: list[PortMapping] | None = None
     auto_remove: bool = False
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        return _validate_resource_name(v)
 
 
 class ContainerListResponse(BaseModel):

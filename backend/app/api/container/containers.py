@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import logging
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, Query
 from pydantic import BaseModel
@@ -19,8 +20,8 @@ async def list_containers(conn: openstack.connection.Connection = Depends(get_os
     try:
         items = await asyncio.to_thread(zun.list_containers, conn)
         return ContainerListResponse(items=items)
-    except ZunServiceUnavailable as e:
-        return ContainerListResponse(items=[], service_available=False, message=str(e))
+    except ZunServiceUnavailable:
+        return ContainerListResponse(items=[], service_available=False, message="컨테이너 서비스에 연결할 수 없습니다")
     except Exception as e:
         raise HTTPException(status_code=500, detail="컨테이너 목록 조회 실패")
 
@@ -99,10 +100,12 @@ async def container_exec_ws(
     await websocket.accept()
     conn = None
     try:
-        from app.api.deps import _cached_validate
+        from app.api.deps import _cached_validate, _check_session_timeout
         from app.services import keystone
 
         token_info = await _cached_validate(token, project_id)
+        token_hash = hashlib.sha256(token.encode()).hexdigest()[:32]
+        await _check_session_timeout(token_hash, project_id)
         scoped_token = token_info["token"]
         pid = token_info["project_id"]
         conn = await asyncio.to_thread(keystone.get_openstack_connection, scoped_token, pid)
@@ -135,13 +138,14 @@ async def container_exec_ws(
                     await websocket.send_text(f"\r\n\x1b[31m[exit {exit_code}]\x1b[0m")
                 await websocket.send_text("\r\n$ ")
             except Exception as e:
-                await websocket.send_text(f"\r\n\x1b[31m오류: {e}\x1b[0m\r\n$ ")
+                logger.warning("Container exec command error: %s", e)
+                await websocket.send_text("\r\n\x1b[31m명령 실행에 실패했습니다\x1b[0m\r\n$ ")
     except WebSocketDisconnect:
         pass
     except Exception as e:
-        logger.warning(f"Container exec WS error: {e}")
+        logger.warning("Container exec WS error: %s", e)
         try:
-            await websocket.send_text(f"\r\n\x1b[31m연결 오류: {e}\x1b[0m\r\n")
+            await websocket.send_text("\r\n\x1b[31m연결 오류가 발생했습니다\x1b[0m\r\n")
             await websocket.close()
         except Exception:
             pass

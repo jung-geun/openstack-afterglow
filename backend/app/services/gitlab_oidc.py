@@ -11,11 +11,14 @@ GitLab OIDC 인증 서비스.
    - TokenResponse 호환 dict 반환
 """
 
+import logging
 import secrets
 import urllib.parse
 import httpx
 
 from app.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 _STATE_TTL = 600  # 10분
@@ -73,7 +76,8 @@ async def _exchange_gitlab_code(code: str) -> dict:
         data = resp.json()
         access_token = data.get("access_token")
         if not access_token:
-            raise ValueError(f"GitLab 토큰 응답에 access_token 없음: {data}")
+            logger.debug("GitLab 토큰 응답에 access_token 없음: %s", data)
+            raise ValueError("GitLab 토큰 응답에 access_token이 없습니다")
         # Keystone OS-FEDERATION OpenID Connect는 id_token(JWT)을 기대함
         id_token = data.get("id_token", access_token)
         return {"access_token": access_token, "id_token": id_token}

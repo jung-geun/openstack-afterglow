@@ -76,7 +76,7 @@ async def extend_session(token: str, project_id: str) -> None:
         r = await _get_redis()
         await r.setex(key, settings.session_timeout_seconds + 60, str(time.time()))
     except Exception:
-        pass
+        _logger.warning("Redis 장애로 세션 연장을 건너뜁니다", exc_info=True)
 
 
 async def get_token_info(
