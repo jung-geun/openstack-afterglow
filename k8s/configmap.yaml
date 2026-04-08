@@ -23,7 +23,6 @@ data:
     [app]
     backend_port = 8000
     frontend_port = 3000
-    secret_key = "change-me-in-production"
     refresh_interval_ms = 5000
 
     [cache]

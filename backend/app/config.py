@@ -160,12 +160,20 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def warn_insecure_defaults(self) -> "Settings":
         import logging
+        import os
         logger = logging.getLogger(__name__)
         if self.secret_key == "change-me-in-production":
-            logger.warning(
-                "SECRET_KEY is set to the default value. "
-                "Set a strong random value in config.toml [app] secret_key or SECRET_KEY env var."
-            )
+            if os.environ.get("UNION_ALLOW_INSECURE", "").strip() == "1":
+                logger.warning(
+                    "SECRET_KEY is set to the default insecure value. "
+                    "UNION_ALLOW_INSECURE=1 is set — this must NOT be used in production."
+                )
+            else:
+                raise ValueError(
+                    "SECRET_KEY is set to the default value 'change-me-in-production'. "
+                    "Set a strong random value in config.toml [app] secret_key or SECRET_KEY env var. "
+                    "To override this check in development, set UNION_ALLOW_INSECURE=1."
+                )
         return self
 
     class Config:

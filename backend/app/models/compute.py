@@ -1,5 +1,5 @@
 import re
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional
 
 
@@ -78,3 +78,24 @@ class CreateInstanceRequest(BaseModel):
     boot_volume_size_gb: Optional[int] = None
     additional_volume_ids: list[str] = []
     new_volumes: list[dict] = []
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$', v):
+            raise ValueError(
+                "name은 영문자/숫자로 시작하고, 영문자·숫자·하이픈·언더스코어만 허용되며 최대 63자입니다"
+            )
+        return v
+
+
+class AttachVolumeRequest(BaseModel):
+    volume_id: str
+
+
+class AttachInterfaceRequest(BaseModel):
+    net_id: str
+
+
+class UpdateSecurityGroupsRequest(BaseModel):
+    security_group_ids: list[str] = []

@@ -1,8 +1,19 @@
 """Prometheus exposition format 메트릭 엔드포인트."""
+import re
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 from app.api.deps import get_token_info
+
+# UUID, 숫자 ID 패턴을 {id}로 치환하여 카디널리티 폭발 방지
+_UUID_RE = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', re.IGNORECASE)
+_INT_SEGMENT_RE = re.compile(r'(?<=/)\d+(?=/|$)')
+
+
+def _normalize_path(path: str) -> str:
+    path = _UUID_RE.sub('{id}', path)
+    path = _INT_SEGMENT_RE.sub('{id}', path)
+    return path
 
 router = APIRouter()
 
@@ -25,8 +36,9 @@ REQUEST_DURATION = Histogram(
 
 
 def record_request(method: str, path: str, status: int, duration_ms: float) -> None:
-    REQUEST_COUNT.labels(method=method, path=path, status=str(status)).inc()
-    REQUEST_DURATION.labels(method=method, path=path).observe(duration_ms)
+    normalized = _normalize_path(path)
+    REQUEST_COUNT.labels(method=method, path=normalized, status=str(status)).inc()
+    REQUEST_DURATION.labels(method=method, path=normalized).observe(duration_ms)
 
 
 @router.get("", dependencies=[Depends(_require_admin)])

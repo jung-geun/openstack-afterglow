@@ -19,7 +19,10 @@ import openstack
 
 from app.api.deps import get_os_conn
 from app.config import get_settings
-from app.models.compute import CreateInstanceRequest, InstanceInfo
+from app.models.compute import (
+    CreateInstanceRequest, InstanceInfo,
+    AttachVolumeRequest, AttachInterfaceRequest, UpdateSecurityGroupsRequest,
+)
 from app.models.progress import ProgressMessage, ProgressStep
 from app.services import nova, cinder, manila, cloudinit, libraries as lib_svc, neutron, keystone, glance
 from app.services.cache import cached_call, invalidate
@@ -383,7 +386,7 @@ async def create_instance_async(
 
         except Exception as e:
             logger.error(f"인스턴스 생성 실패, rollback 시작: {e}")
-            yield send_progress(ProgressStep.FAILED, 0, f"인스턴스 생성 실패: {e}", error=str(e))
+            yield send_progress(ProgressStep.FAILED, 0, "인스턴스 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.", error="인스턴스 생성 실패")
             await _rollback(conn, server_id, boot_volume_id, upper_volume_id,
                             created_share_ids, created_access_ids, floating_ip_id)
 
@@ -543,12 +546,10 @@ async def list_instance_volumes(
 @router.post("/{instance_id}/volumes", status_code=201)
 async def attach_volume_to_instance(
     instance_id: str,
-    body: dict,
+    body: AttachVolumeRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    volume_id = body.get("volume_id")
-    if not volume_id:
-        raise HTTPException(status_code=400, detail="volume_id 필요")
+    volume_id = body.volume_id
     pid = conn._union_project_id
     try:
         result = await asyncio.to_thread(nova.attach_volume, conn, instance_id, volume_id)
@@ -619,12 +620,10 @@ async def get_instance_owner(
 @router.post("/{instance_id}/interfaces", status_code=201)
 async def attach_interface(
     instance_id: str,
-    body: dict,
+    body: AttachInterfaceRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    net_id = body.get("net_id")
-    if not net_id:
-        raise HTTPException(status_code=400, detail="net_id 필요")
+    net_id = body.net_id
     pid = conn._union_project_id
     try:
         result = await asyncio.to_thread(nova.attach_interface, conn, instance_id, net_id)
@@ -652,10 +651,10 @@ async def detach_interface(
 async def update_port_security_groups(
     instance_id: str,
     port_id: str,
-    body: dict,
+    body: UpdateSecurityGroupsRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    sg_ids = body.get("security_group_ids", [])
+    sg_ids = body.security_group_ids
     pid = conn._union_project_id
     try:
         result = await asyncio.to_thread(neutron.update_port_security_groups, conn, port_id, sg_ids)

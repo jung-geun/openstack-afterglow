@@ -50,7 +50,7 @@ def _handle(fn, error_msg: str):
     try:
         return fn()
     except Exception as e:
-        raise HTTPException(status_code=500, detail="{error_msg}")
+        raise HTTPException(status_code=500, detail=error_msg)
 
 
 # ---------------------------------------------------------------------------

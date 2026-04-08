@@ -234,3 +234,4 @@ Thumbs.db
 monitoring/data/
 
 docker-compose.override.yml
+.claude/settings.json

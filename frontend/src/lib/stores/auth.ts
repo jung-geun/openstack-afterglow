@@ -50,10 +50,10 @@ if (typeof window !== 'undefined') {
 		if ($auth.token) {
 			localStorage.setItem('union_auth', JSON.stringify($auth));
 			// 서버 사이드 라우트 보호용 마커 쿠키 (httpOnly 아님 — 토큰 자체는 저장하지 않음)
-			document.cookie = 'union_session=1; path=/; SameSite=Strict';
+			document.cookie = 'union_session=1; path=/; SameSite=Strict; Secure';
 		} else {
 			localStorage.removeItem('union_auth');
-			document.cookie = 'union_session=; path=/; SameSite=Strict; max-age=0';
+			document.cookie = 'union_session=; path=/; SameSite=Strict; Secure; max-age=0';
 		}
 	});
 }

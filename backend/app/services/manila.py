@@ -41,7 +41,7 @@ class ManilaClient:
     def post(self, path: str, body: dict) -> dict:
         with httpx.Client() as c:
             url = self._url(path)
-            logger.warning(f"Manila POST {url} body={body}")
+            logger.debug(f"Manila POST {url}")
             r = c.post(url, headers=self.headers, json=body, timeout=30)
             if not r.is_success:
                 logger.error(f"Manila POST {url} → {r.status_code}: {r.text}")
@@ -63,7 +63,7 @@ def _get_manila_endpoint(conn) -> str:
     settings = get_settings()
     if getattr(settings, "os_manila_endpoint", ""):
         url = settings.os_manila_endpoint.rstrip("/")
-        logger.warning(f"Manila endpoint (override): {url}")
+        logger.debug(f"Manila endpoint (override): {url}")
         return url
 
     for service_type in ("share", "sharev2", "shared-file-system"):
@@ -71,7 +71,7 @@ def _get_manila_endpoint(conn) -> str:
             try:
                 url = conn.endpoint_for(service_type, interface=interface)
                 if url:
-                    logger.warning(f"Manila endpoint [{service_type}/{interface}]: {url}")
+                    logger.debug(f"Manila endpoint [{service_type}/{interface}]: {url}")
                     return url.rstrip("/")
             except Exception:
                 continue
@@ -83,7 +83,7 @@ def get_client(conn) -> ManilaClient:
     token = getattr(conn, "_union_token", None) or conn.auth_token
     project_id = getattr(conn, "_union_project_id", None) or conn.current_project_id
     endpoint = _get_manila_endpoint(conn)
-    logger.warning(f"Manila client: endpoint={endpoint}, project_id={project_id}, token_src={'original' if hasattr(conn, '_union_token') else 'sdk'}")
+    logger.debug(f"Manila client: endpoint={endpoint}, project_id={project_id}, token_src={'original' if hasattr(conn, '_union_token') else 'sdk'}")
     return ManilaClient(endpoint=endpoint, token=token, project_id=project_id)
 
 

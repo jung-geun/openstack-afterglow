@@ -5,6 +5,7 @@ Jinja2 템플릿을 이용해 CephX 크리덴셜과 OverlayFS 구성을 담은
 cloud-init YAML을 생성한다.
 """
 import base64
+import shlex
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
@@ -20,6 +21,8 @@ _jinja = Environment(
     trim_blocks=True,
     lstrip_blocks=True,
 )
+# shell 인자로 안전하게 사용하기 위한 이스케이프 필터
+_jinja.filters["shlex_quote"] = shlex.quote
 
 # 라이브러리별 패키지 버전 기본값
 _VERSIONS = {

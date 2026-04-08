@@ -22,17 +22,16 @@ def _require_admin(token_info: dict = Depends(get_token_info)):
 router = APIRouter()
 
 
-@router.get("/shares", response_model=list[ShareInfo])
+@router.get("/shares", response_model=list[ShareInfo], dependencies=[Depends(_require_admin)])
 async def list_admin_shares(conn: openstack.connection.Connection = Depends(get_os_conn)):
     """모든 Union 관련 share 목록 (prebuilt + dynamic)."""
     return manila.list_shares(conn)
 
 
-@router.post("/shares/build", status_code=202)
+@router.post("/shares/build", status_code=202, dependencies=[Depends(_require_admin)])
 async def trigger_build(
     library_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
-    token_info: dict = Depends(get_token_info),
 ):
     """
     사전 빌드 share 생성 트리거.

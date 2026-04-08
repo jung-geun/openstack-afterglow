@@ -31,11 +31,8 @@ async def get_authorize_url() -> str:
     settings = get_settings()
     state = secrets.token_urlsafe(32)
 
-    try:
-        r = await _get_redis()
-        await r.setex(f"union:gitlab_state:{state}", _STATE_TTL, "1")
-    except Exception:
-        pass  # Redis 장애 시 state 검증 건너뜀 (보안 약화 허용)
+    r = await _get_redis()
+    await r.setex(f"union:gitlab_state:{state}", _STATE_TTL, "1")
 
     params = {
         "client_id": settings.gitlab_oidc_client_id,
@@ -93,7 +90,7 @@ async def _federated_auth(token: str) -> dict:
         f"/identity_providers/{settings.gitlab_oidc_idp_id}"
         f"/protocols/{settings.gitlab_oidc_protocol_id}/auth"
     )
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(timeout=30, verify=True) as client:
         resp = await client.post(
             url,
             headers={"Authorization": f"Bearer {token}"},
@@ -110,7 +107,7 @@ async def _federated_auth(token: str) -> dict:
 async def _list_projects_for_token(unscoped_token: str) -> list[dict]:
     """unscoped 토큰으로 접근 가능한 프로젝트 목록 조회."""
     settings = get_settings()
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(timeout=30, verify=True) as client:
         resp = await client.get(
             f"{settings.os_auth_url}/auth/projects",
             headers={"X-Auth-Token": unscoped_token},
@@ -133,7 +130,7 @@ async def _scope_token(unscoped_token: str, project_id: str) -> dict:
             },
         }
     }
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(timeout=30, verify=True) as client:
         resp = await client.post(
             f"{settings.os_auth_url}/auth/tokens",
             json=body,

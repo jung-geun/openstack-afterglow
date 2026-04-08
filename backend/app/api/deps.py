@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import logging
 import time
 from fastapi import Header, HTTPException
 from typing import AsyncGenerator, Optional
@@ -9,6 +10,8 @@ from app.services import keystone
 from app.services.cache import cached_call
 from app.config import get_settings
 
+_logger = logging.getLogger(__name__)
+
 
 def _session_key(token_hash: str, project_id: str) -> str:
     return f"union:session_start:{token_hash}:{project_id or 'noscope'}"
@@ -16,7 +19,7 @@ def _session_key(token_hash: str, project_id: str) -> str:
 
 async def _cached_validate(token: str, project_id: str) -> dict:
     """토큰 검증 결과를 Redis에 캐시 (TTL 300s). 반복 API 호출 속도 향상."""
-    token_hash = hashlib.sha256(token.encode()).hexdigest()[:16]
+    token_hash = hashlib.sha256(token.encode()).hexdigest()[:32]
     cache_key = f"union:session:{token_hash}:{project_id or 'noscope'}"
     return await cached_call(cache_key, 300, lambda: keystone.validate_token(token, project_id=project_id))
 
@@ -42,14 +45,14 @@ async def _check_session_timeout(token_hash: str, project_id: str) -> None:
     except HTTPException:
         raise
     except Exception:
-        pass  # Redis 장애 시 세션 체크 건너뜀
+        _logger.warning("Redis 장애로 세션 체크를 건너뜁니다 — 세션 타임아웃이 적용되지 않을 수 있습니다", exc_info=True)
 
 
 async def get_session_remaining(token: str, project_id: str) -> int:
     """세션 남은 시간(초) 반환. Redis 오류 시 -1."""
     from app.services.cache import _get_redis
     settings = get_settings()
-    token_hash = hashlib.sha256(token.encode()).hexdigest()[:16]
+    token_hash = hashlib.sha256(token.encode()).hexdigest()[:32]
     key = _session_key(token_hash, project_id or 'noscope')
     try:
         r = await _get_redis()
@@ -67,7 +70,7 @@ async def extend_session(token: str, project_id: str) -> None:
     """세션 시작 시간을 지금으로 재설정 (연장)."""
     from app.services.cache import _get_redis
     settings = get_settings()
-    token_hash = hashlib.sha256(token.encode()).hexdigest()[:16]
+    token_hash = hashlib.sha256(token.encode()).hexdigest()[:32]
     key = _session_key(token_hash, project_id or 'noscope')
     try:
         r = await _get_redis()
@@ -84,7 +87,7 @@ async def get_token_info(
     if not x_auth_token:
         raise HTTPException(status_code=401, detail="X-Auth-Token 헤더가 필요합니다")
     try:
-        token_hash = hashlib.sha256(x_auth_token.encode()).hexdigest()[:16]
+        token_hash = hashlib.sha256(x_auth_token.encode()).hexdigest()[:32]
         await _check_session_timeout(token_hash, x_project_id or "")
         return await _cached_validate(x_auth_token, x_project_id or "")
     except HTTPException:
@@ -105,7 +108,7 @@ async def get_os_conn(
     if not x_auth_token:
         raise HTTPException(status_code=401, detail="X-Auth-Token 헤더가 필요합니다")
     try:
-        token_hash = hashlib.sha256(x_auth_token.encode()).hexdigest()[:16]
+        token_hash = hashlib.sha256(x_auth_token.encode()).hexdigest()[:32]
         await _check_session_timeout(token_hash, x_project_id or "")
         token_info = await _cached_validate(x_auth_token, x_project_id or "")
         scoped_token = token_info["token"]
