@@ -18,6 +18,10 @@ from app.api.compute import instances_router, keypairs_router, images_router, fl
 from app.api.storage import volumes_router, volume_backups_router, volume_snapshots_router, shares_router
 from app.api.network import networks_router, routers_router, security_groups_router, loadbalancers_router
 from app.api.identity import auth_router, admin_router
+from app.api.identity.admin_services import router as admin_services_router
+from app.api.identity.admin_flavors import router as admin_flavors_router
+from app.api.identity.admin_identity import router as admin_identity_router
+from app.api.identity.admin_gpu import router as admin_gpu_router
 from app.api.container import clusters_router, containers_router
 from app.api.common import dashboard_router, metrics_router, libraries_router, site_router
 from app.api.common.metrics import record_request as _record_request
@@ -184,6 +188,10 @@ async def options_handler(request: Request, rest_of_path: str):
 # Identity
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
+app.include_router(admin_services_router, prefix="/api/admin", tags=["admin-services"])
+app.include_router(admin_flavors_router, prefix="/api/admin", tags=["admin-flavors"])
+app.include_router(admin_identity_router, prefix="/api/admin", tags=["admin-identity"])
+app.include_router(admin_gpu_router, prefix="/api/admin", tags=["admin-gpu"])
 # Compute
 app.include_router(images_router, prefix="/api/images", tags=["images"])
 app.include_router(flavors_router, prefix="/api/flavors", tags=["flavors"])

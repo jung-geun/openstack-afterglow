@@ -41,6 +41,7 @@ def _container_to_info(data: dict) -> ZunContainerInfo:
         memory=str(data.get('memory', '')) if data.get('memory') else None,
         created_at=data.get('created_at'),
         addresses=data.get('addresses'),
+        host=data.get('host'),
     )
 
 

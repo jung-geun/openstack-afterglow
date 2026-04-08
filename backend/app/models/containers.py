@@ -67,6 +67,7 @@ class ZunContainerInfo(BaseModel):
     memory: str | None = None
     created_at: str | None = None
     addresses: dict | None = None
+    host: str | None = None
 
 
 class PortMapping(BaseModel):

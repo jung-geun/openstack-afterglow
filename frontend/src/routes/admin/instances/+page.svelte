@@ -14,6 +14,7 @@
 		project_id: string | null;
 		user_id: string | null;
 		flavor: string;
+		host: string | null;
 		created_at: string | null;
 		fault?: string | null;
 	}
@@ -47,6 +48,17 @@
 	let markerStack = $state<string[]>([]);
 	let nextMarker = $state<string | null>(null);
 	let expandedError = $state<string | null>(null);
+
+	// 필터
+	let hostFilter = $state('');
+	let projectFilter = $state('');
+	let uniqueHosts = $derived([...new Set(allInstances.map(i => i.host).filter(Boolean) as string[])].sort());
+	let filteredInstances = $derived(
+		allInstances.filter(i =>
+			(!hostFilter || i.host === hostFilter) &&
+			(!projectFilter || (i.project_id ?? '').toLowerCase().includes(projectFilter.toLowerCase()))
+		)
+	);
 
 	// 시계열 차트
 	let tsData = $state<TsPoint[]>([]);
@@ -106,7 +118,7 @@
 	<div class="flex items-center justify-between mb-6">
 		<h1 class="text-2xl font-bold text-white">전체 인스턴스</h1>
 		<div class="flex items-center gap-3">
-			<button onclick={() => { markerStack = []; nextMarker = null; load(); }} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
+			<button onclick={() => { markerStack = []; nextMarker = null; hostFilter = ''; projectFilter = ''; load(); }} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
 			<div class="flex items-center gap-1 text-xs text-gray-500">
 				표시:
 				{#each [10, 20, 30] as n}
@@ -117,6 +129,22 @@
 				{/each}
 			</div>
 		</div>
+	</div>
+
+	<!-- 필터 -->
+	<div class="flex gap-3 mb-4">
+		<select bind:value={hostFilter} class="bg-gray-800 border border-gray-700 text-sm text-gray-300 rounded-lg px-2 py-1.5 focus:outline-none focus:border-blue-500">
+			<option value="">모든 호스트</option>
+			{#each uniqueHosts as h}
+				<option value={h}>{h}</option>
+			{/each}
+		</select>
+		<input
+			type="text"
+			placeholder="프로젝트 ID 필터"
+			bind:value={projectFilter}
+			class="bg-gray-800 border border-gray-700 text-sm text-gray-300 rounded-lg px-3 py-1.5 w-52 focus:outline-none focus:border-blue-500"
+		/>
 	</div>
 
 	<!-- 시계열 차트 -->
@@ -147,12 +175,13 @@
 						<th class="text-left py-2 pr-4">이름</th>
 						<th class="text-left py-2 pr-4">상태</th>
 						<th class="text-left py-2 pr-4">Flavor</th>
+						<th class="text-left py-2 pr-4">호스트</th>
 						<th class="text-left py-2 pr-4">프로젝트</th>
 						<th class="text-left py-2">생성일</th>
 					</tr>
 				</thead>
 				<tbody>
-					{#each allInstances as s (s.id)}
+					{#each filteredInstances as s (s.id)}
 						<tr
 							onclick={() => openDetail(s)}
 							class="border-b border-gray-800/50 text-xs hover:bg-gray-800/50 transition-colors cursor-pointer"
@@ -176,6 +205,7 @@
 								{/if}
 							</td>
 							<td class="py-2 pr-4 text-gray-400">{s.flavor || '-'}</td>
+							<td class="py-2 pr-4 text-gray-400">{s.host || '-'}</td>
 							<td class="py-2 pr-4 text-gray-500 font-mono">{s.project_id?.slice(0, 8) ?? '-'}</td>
 							<td class="py-2 text-gray-500">{s.created_at?.slice(0, 10) ?? '-'}</td>
 						</tr>

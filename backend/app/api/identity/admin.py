@@ -4,7 +4,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
 import openstack
 
-from app.api.deps import get_os_conn, get_token_info
+from app.api.deps import get_os_conn, get_token_info, require_admin
 
 _logger = logging.getLogger(__name__)
 from app.models.storage import ShareInfo, TopologyData, TopologyInstance
@@ -12,23 +12,16 @@ from app.services import manila, libraries as lib_svc, neutron
 from app.services.cache import cached_call
 from app.config import get_settings
 
-
-def _require_admin(token_info: dict = Depends(get_token_info)):
-    """admin 역할이 없으면 403 반환."""
-    roles = token_info.get("roles", [])
-    if "admin" not in roles:
-        raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다")
-
 router = APIRouter()
 
 
-@router.get("/shares", response_model=list[ShareInfo], dependencies=[Depends(_require_admin)])
+@router.get("/shares", response_model=list[ShareInfo], dependencies=[Depends(require_admin)])
 async def list_admin_shares(conn: openstack.connection.Connection = Depends(get_os_conn)):
     """모든 Union 관련 share 목록 (prebuilt + dynamic)."""
     return manila.list_shares(conn)
 
 
-@router.post("/shares/build", status_code=202, dependencies=[Depends(_require_admin)])
+@router.post("/shares/build", status_code=202, dependencies=[Depends(require_admin)])
 async def trigger_build(
     library_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
@@ -85,7 +78,7 @@ def _fetch_hypervisors_raw(conn: openstack.connection.Connection) -> list[dict]:
     return resp.json().get("hypervisors", [])
 
 
-@router.get("/overview", dependencies=[Depends(_require_admin)])
+@router.get("/overview", dependencies=[Depends(require_admin)])
 async def admin_overview(conn: openstack.connection.Connection = Depends(get_os_conn)):
     """하이퍼바이저 및 전체 리소스 집계."""
     try:
@@ -100,8 +93,9 @@ async def admin_overview(conn: openstack.connection.Connection = Depends(get_os_
             used_disk = sum(h.get("local_gb_used", 0) or 0 for h in data) // host_count
             running_vms = sum(h.get("running_vms", 0) or 0 for h in data)
 
-            # CPU: Placement API에서 물리 코어 수 조회
+            # CPU: Placement API에서 물리 코어 수 및 allocation_ratio 조회
             physical_vcpus = 0
+            allowed_vcpus_total = 0
             try:
                 placement_ep = conn.placement.get_endpoint()
                 rps_resp = conn.session.get(f"{placement_ep}/resource_providers")
@@ -111,10 +105,14 @@ async def admin_overview(conn: openstack.connection.Connection = Depends(get_os_
                         f"{placement_ep}/resource_providers/{rp['uuid']}/inventories"
                     )
                     vcpu_inv = inv_resp.json().get("inventories", {}).get("VCPU", {})
-                    physical_vcpus += vcpu_inv.get("total", 0)
+                    inv_total = vcpu_inv.get("total", 0)
+                    inv_ratio = vcpu_inv.get("allocation_ratio", 1.0)
+                    physical_vcpus += inv_total
+                    allowed_vcpus_total += int(inv_total * inv_ratio)
             except Exception:
                 _logger.warning("Placement API CPU 조회 실패 — hypervisor vcpus로 대체", exc_info=True)
                 physical_vcpus = sum(h.get("vcpus", 0) or 0 for h in data)
+                allowed_vcpus_total = physical_vcpus
 
             # GPU 인스턴스: flavor 이름에 'gpu' 포함 여부로 집계
             gpu_instances = 0
@@ -146,7 +144,7 @@ async def admin_overview(conn: openstack.connection.Connection = Depends(get_os_
                 "hypervisor_count": host_count,
                 "running_vms": running_vms,
                 "gpu_instances": gpu_instances,
-                "vcpus": {"total": physical_vcpus, "used": used_vcpus},
+                "vcpus": {"total": physical_vcpus, "allowed": allowed_vcpus_total, "used": used_vcpus},
                 "ram_gb": {"total": round(total_ram / 1024, 1), "used": round(used_ram / 1024, 1)},
                 "disk_gb": {"total": total_disk, "used": used_disk},
                 "containers_count": containers_count,
@@ -158,7 +156,7 @@ async def admin_overview(conn: openstack.connection.Connection = Depends(get_os_
         raise HTTPException(status_code=500, detail="개요 조회 실패")
 
 
-@router.get("/hypervisors", dependencies=[Depends(_require_admin)])
+@router.get("/hypervisors", dependencies=[Depends(require_admin)])
 async def list_hypervisors(conn: openstack.connection.Connection = Depends(get_os_conn)):
     """컴퓨트 하이퍼바이저 목록."""
     try:
@@ -187,10 +185,11 @@ async def list_hypervisors(conn: openstack.connection.Connection = Depends(get_o
         raise HTTPException(status_code=500, detail="하이퍼바이저 조회 실패")
 
 
-@router.get("/all-instances", dependencies=[Depends(_require_admin)])
+@router.get("/all-instances", dependencies=[Depends(require_admin)])
 async def list_all_instances(
     limit: int = Query(default=20, ge=1, le=100),
     marker: str | None = Query(default=None),
+    project_id: str | None = Query(default=None),
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """전체 프로젝트의 인스턴스 목록 (페이지네이션)."""
@@ -199,6 +198,8 @@ async def list_all_instances(
             kwargs: dict = {"all_projects": True, "limit": limit}
             if marker:
                 kwargs["marker"] = marker
+            if project_id:
+                kwargs["project_id"] = project_id
             items = []
             for s in itertools.islice(conn.compute.servers(**kwargs), limit):
                 fault_info = None
@@ -206,6 +207,11 @@ async def list_all_instances(
                     fault = getattr(s, 'fault', None)
                     if isinstance(fault, dict) and fault.get("message"):
                         fault_info = fault.get("message", "")
+                host = getattr(s, 'host', None)
+                if not host:
+                    raw = getattr(s, '_body', {}) or {}
+                    if isinstance(raw, dict):
+                        host = raw.get('OS-EXT-SRV-ATTR:host')
                 items.append({
                     "id": s.id,
                     "name": s.name or "",
@@ -213,6 +219,7 @@ async def list_all_instances(
                     "project_id": getattr(s, 'project_id', None),
                     "user_id": getattr(s, 'user_id', None),
                     "flavor": getattr(s, 'flavor', {}).get('original_name', '') if isinstance(getattr(s, 'flavor', None), dict) else '',
+                    "host": host,
                     "created_at": str(s.created_at) if getattr(s, 'created_at', None) else None,
                     "fault": fault_info,
                 })
@@ -223,7 +230,7 @@ async def list_all_instances(
         raise HTTPException(status_code=500, detail="전체 인스턴스 조회 실패")
 
 
-@router.get("/all-volumes", dependencies=[Depends(_require_admin)])
+@router.get("/all-volumes", dependencies=[Depends(require_admin)])
 async def list_all_volumes(
     limit: int = Query(default=20, ge=1, le=100),
     marker: str | None = Query(default=None),
@@ -253,7 +260,7 @@ async def list_all_volumes(
         raise HTTPException(status_code=500, detail="전체 볼륨 조회 실패")
 
 
-@router.get("/all-containers", dependencies=[Depends(_require_admin)])
+@router.get("/all-containers", dependencies=[Depends(require_admin)])
 async def list_all_containers(conn: openstack.connection.Connection = Depends(get_os_conn)):
     """전체 프로젝트의 컨테이너 목록 (Zun)."""
     from app.services.zun import list_containers_admin, ZunServiceUnavailable
@@ -265,7 +272,7 @@ async def list_all_containers(conn: openstack.connection.Connection = Depends(ge
         raise HTTPException(status_code=500, detail="컨테이너 조회 실패")
 
 
-@router.get("/all-shares", dependencies=[Depends(_require_admin)])
+@router.get("/all-shares", dependencies=[Depends(require_admin)])
 async def list_all_shares(conn: openstack.connection.Connection = Depends(get_os_conn)):
     """전체 프로젝트의 공유 스토리지 목록 (Manila)."""
     try:
@@ -274,7 +281,7 @@ async def list_all_shares(conn: openstack.connection.Connection = Depends(get_os
         raise HTTPException(status_code=500, detail="공유 스토리지 조회 실패")
 
 
-@router.get("/topology", response_model=TopologyData, dependencies=[Depends(_require_admin)])
+@router.get("/topology", response_model=TopologyData, dependencies=[Depends(require_admin)])
 async def admin_topology(conn: openstack.connection.Connection = Depends(get_os_conn)):
     """전체 프로젝트의 네트워크/라우터/인스턴스 토폴로지."""
     def _fetch():
@@ -301,7 +308,7 @@ async def admin_topology(conn: openstack.connection.Connection = Depends(get_os_
         raise HTTPException(status_code=500, detail="토폴로지 조회 실패")
 
 
-@router.get("/timeseries/{resource_type}", dependencies=[Depends(_require_admin)])
+@router.get("/timeseries/{resource_type}", dependencies=[Depends(require_admin)])
 async def get_timeseries(
     resource_type: str,
     range: str = Query(default="7d", pattern="^(1d|2d|7d|30d)$"),
@@ -314,7 +321,7 @@ async def get_timeseries(
     return await timeseries.get_timeseries(resource_type, range)
 
 
-@router.get("/all-networks", dependencies=[Depends(_require_admin)])
+@router.get("/all-networks", dependencies=[Depends(require_admin)])
 async def list_all_networks(conn: openstack.connection.Connection = Depends(get_os_conn)):
     """전체 프로젝트의 네트워크 목록."""
     try:
@@ -323,7 +330,7 @@ async def list_all_networks(conn: openstack.connection.Connection = Depends(get_
         raise HTTPException(status_code=500, detail="네트워크 목록 조회 실패")
 
 
-@router.get("/all-floating-ips", dependencies=[Depends(_require_admin)])
+@router.get("/all-floating-ips", dependencies=[Depends(require_admin)])
 async def list_all_floating_ips(conn: openstack.connection.Connection = Depends(get_os_conn)):
     """전체 프로젝트의 Floating IP 목록."""
     try:
@@ -332,7 +339,7 @@ async def list_all_floating_ips(conn: openstack.connection.Connection = Depends(
         raise HTTPException(status_code=500, detail="Floating IP 목록 조회 실패")
 
 
-@router.get("/all-routers", dependencies=[Depends(_require_admin)])
+@router.get("/all-routers", dependencies=[Depends(require_admin)])
 async def list_all_routers(conn: openstack.connection.Connection = Depends(get_os_conn)):
     """전체 프로젝트의 라우터 목록."""
     try:
@@ -341,7 +348,7 @@ async def list_all_routers(conn: openstack.connection.Connection = Depends(get_o
         raise HTTPException(status_code=500, detail="라우터 목록 조회 실패")
 
 
-@router.get("/all-ports", dependencies=[Depends(_require_admin)])
+@router.get("/all-ports", dependencies=[Depends(require_admin)])
 async def list_all_ports(conn: openstack.connection.Connection = Depends(get_os_conn)):
     """전체 프로젝트의 포트 목록."""
     try:
@@ -365,7 +372,7 @@ async def list_all_ports(conn: openstack.connection.Connection = Depends(get_os_
         raise HTTPException(status_code=500, detail="포트 목록 조회 실패")
 
 
-@router.get("/quotas/{project_id}", dependencies=[Depends(_require_admin)])
+@router.get("/quotas/{project_id}", dependencies=[Depends(require_admin)])
 async def get_quotas(project_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
     """특정 프로젝트의 컴퓨트 쿼터 조회."""
     try:

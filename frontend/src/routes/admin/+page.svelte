@@ -11,7 +11,7 @@
 		hypervisor_count: number;
 		running_vms: number;
 		gpu_instances: number;
-		vcpus: { total: number; used: number };
+		vcpus: { total: number; allowed: number; used: number };
 		ram_gb: { total: number; used: number };
 		disk_gb: { total: number; used: number };
 		containers_count: number;
@@ -91,11 +91,11 @@
 					<QuotaDonut
 						label="CPU 코어"
 						used={overview.vcpus.used}
-						limit={overview.vcpus.total}
+						limit={overview.vcpus.allowed}
 						size="lg"
 					/>
 					<div class="text-center">
-						<div class="text-xl font-bold text-white">{formatNumber(overview.vcpus.used)} <span class="text-gray-500 text-sm font-normal">/ {formatNumber(overview.vcpus.total)}</span></div>
+						<div class="text-xl font-bold text-white">{formatNumber(overview.vcpus.used)} <span class="text-gray-500 text-sm font-normal">/ {formatNumber(overview.vcpus.allowed)}</span></div>
 						<div class="text-xs text-gray-500">vCPU</div>
 					</div>
 				</div>

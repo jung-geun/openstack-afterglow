@@ -2,7 +2,7 @@ import asyncio
 import hashlib
 import logging
 import time
-from fastapi import Header, HTTPException
+from fastapi import Depends, Header, HTTPException
 from typing import AsyncGenerator, Optional
 import openstack
 
@@ -94,6 +94,13 @@ async def get_token_info(
         raise
     except Exception as e:
         raise HTTPException(status_code=401, detail="유효하지 않은 토큰")
+
+
+def require_admin(token_info: dict = Depends(get_token_info)):
+    """admin 역할이 없으면 403 반환."""
+    roles = token_info.get("roles", [])
+    if "admin" not in roles:
+        raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다")
 
 
 async def get_os_conn(

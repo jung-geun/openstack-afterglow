@@ -11,6 +11,7 @@
 		image: string | null;
 		cpu: number | null;
 		memory: string | null;
+		host: string | null;
 		created_at: string | null;
 	}
 
@@ -58,6 +59,7 @@
 						<th class="text-left py-2 pr-4">이미지</th>
 						<th class="text-left py-2 pr-4">CPU</th>
 						<th class="text-left py-2 pr-4">메모리</th>
+						<th class="text-left py-2 pr-4">호스트</th>
 						<th class="text-left py-2">생성일</th>
 					</tr>
 				</thead>
@@ -69,6 +71,7 @@
 							<td class="py-2 pr-4 text-gray-400 font-mono text-xs">{c.image || '-'}</td>
 							<td class="py-2 pr-4 text-gray-400">{c.cpu ?? '-'}</td>
 							<td class="py-2 pr-4 text-gray-400">{c.memory || '-'}</td>
+							<td class="py-2 pr-4 text-gray-400">{c.host || '-'}</td>
 							<td class="py-2 text-gray-500">{c.created_at?.slice(0, 10) ?? '-'}</td>
 						</tr>
 					{/each}
