@@ -28,6 +28,7 @@ class UpdateUserRequest(BaseModel):
     name: str | None = None
     email: str | None = None
     enabled: bool | None = None
+    password: str | None = None
 
 
 @router.get("/users", dependencies=[Depends(require_admin)])
@@ -107,6 +108,8 @@ async def update_user(
             kwargs["email"] = req.email
         if req.enabled is not None:
             kwargs["enabled"] = req.enabled
+        if req.password is not None:
+            kwargs["password"] = req.password
         try:
             u = conn.identity.update_user(user_id, **kwargs)
             return {
@@ -230,6 +233,52 @@ async def update_project(
         raise
 
 
+@router.delete("/projects/{project_id}", dependencies=[Depends(require_admin)], status_code=204)
+async def delete_project(
+    project_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """프로젝트 삭제."""
+    def _delete():
+        try:
+            conn.identity.delete_project(project_id, ignore_missing=True)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"프로젝트 삭제 실패: {e}")
+    try:
+        await asyncio.to_thread(_delete)
+    except HTTPException:
+        raise
+
+
+@router.get("/projects/{project_id}/members", dependencies=[Depends(require_admin)])
+async def list_project_members(
+    project_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """프로젝트의 사용자-역할 할당 목록 조회."""
+    def _list():
+        try:
+            assignments = []
+            for ra in conn.identity.role_assignments(project_id=project_id, include_names=True):
+                user = getattr(ra, 'user', None)
+                role = getattr(ra, 'role', None)
+                if not user or not role:
+                    continue
+                assignments.append({
+                    "user_id": user.get("id", ""),
+                    "user_name": user.get("name", ""),
+                    "role_id": role.get("id", ""),
+                    "role_name": role.get("name", ""),
+                })
+            return assignments
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"멤버 목록 조회 실패: {e}")
+    try:
+        return await asyncio.to_thread(_list)
+    except HTTPException:
+        raise
+
+
 # ============================================================================
 # Quotas
 # ============================================================================
@@ -338,6 +387,151 @@ async def list_groups(conn: openstack.connection.Connection = Depends(get_os_con
         return await asyncio.to_thread(_list)
     except Exception:
         raise HTTPException(status_code=500, detail="그룹 목록 조회 실패")
+
+
+class CreateGroupRequest(BaseModel):
+    name: str
+    description: str | None = None
+    domain_id: str | None = None
+
+
+class UpdateGroupRequest(BaseModel):
+    name: str | None = None
+    description: str | None = None
+
+
+@router.post("/groups", dependencies=[Depends(require_admin)], status_code=201)
+async def create_group(
+    req: CreateGroupRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """그룹 생성."""
+    def _create():
+        try:
+            kwargs = {"name": req.name}
+            if req.description:
+                kwargs["description"] = req.description
+            if req.domain_id:
+                kwargs["domain_id"] = req.domain_id
+            g = conn.identity.create_group(**kwargs)
+            return {
+                "id": g.id,
+                "name": g.name or "",
+                "description": getattr(g, "description", "") or "",
+                "domain_id": getattr(g, "domain_id", None),
+            }
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"그룹 생성 실패: {e}")
+    try:
+        return await asyncio.to_thread(_create)
+    except HTTPException:
+        raise
+
+
+@router.patch("/groups/{group_id}", dependencies=[Depends(require_admin)])
+async def update_group(
+    group_id: str,
+    req: UpdateGroupRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """그룹 수정."""
+    def _update():
+        kwargs: dict = {}
+        if req.name is not None:
+            kwargs["name"] = req.name
+        if req.description is not None:
+            kwargs["description"] = req.description
+        try:
+            g = conn.identity.update_group(group_id, **kwargs)
+            return {
+                "id": g.id,
+                "name": g.name or "",
+                "description": getattr(g, "description", "") or "",
+            }
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"그룹 수정 실패: {e}")
+    try:
+        return await asyncio.to_thread(_update)
+    except HTTPException:
+        raise
+
+
+@router.delete("/groups/{group_id}", dependencies=[Depends(require_admin)], status_code=204)
+async def delete_group(
+    group_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """그룹 삭제."""
+    def _delete():
+        try:
+            conn.identity.delete_group(group_id, ignore_missing=True)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"그룹 삭제 실패: {e}")
+    try:
+        await asyncio.to_thread(_delete)
+    except HTTPException:
+        raise
+
+
+@router.get("/groups/{group_id}/users", dependencies=[Depends(require_admin)])
+async def list_group_users(
+    group_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """그룹 멤버 목록."""
+    def _list():
+        users = []
+        try:
+            for u in conn.identity.group_users(group_id):
+                users.append({
+                    "id": u.id,
+                    "name": u.name or "",
+                    "email": getattr(u, "email", "") or "",
+                    "enabled": getattr(u, "is_enabled", True),
+                })
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"그룹 멤버 조회 실패: {e}")
+        return users
+    try:
+        return await asyncio.to_thread(_list)
+    except HTTPException:
+        raise
+
+
+@router.put("/groups/{group_id}/users/{user_id}", dependencies=[Depends(require_admin)], status_code=204)
+async def add_user_to_group(
+    group_id: str,
+    user_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """그룹에 사용자 추가."""
+    def _add():
+        try:
+            conn.identity.add_user_to_group(user_id, group_id)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"그룹 멤버 추가 실패: {e}")
+    try:
+        await asyncio.to_thread(_add)
+    except HTTPException:
+        raise
+
+
+@router.delete("/groups/{group_id}/users/{user_id}", dependencies=[Depends(require_admin)], status_code=204)
+async def remove_user_from_group(
+    group_id: str,
+    user_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """그룹에서 사용자 제거."""
+    def _remove():
+        try:
+            conn.identity.remove_user_from_group(user_id, group_id)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"그룹 멤버 제거 실패: {e}")
+    try:
+        await asyncio.to_thread(_remove)
+    except HTTPException:
+        raise
 
 
 # ============================================================================

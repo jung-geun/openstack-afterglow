@@ -36,6 +36,7 @@
 	let editEnabled = $state(true);
 	let editName = $state('');
 	let editEmail = $state('');
+	let editPassword = $state('');
 	let updating = $state(false);
 	let editError = $state('');
 
@@ -69,8 +70,9 @@
 		try {
 			await api.patch(`/api/admin/users/${editUser.id}`, {
 				name: editName, email: editEmail || null, enabled: editEnabled,
+				...(editPassword ? { password: editPassword } : {}),
 			}, token, projectId);
-			editUser = null; await load();
+			editUser = null; editPassword = ''; await load();
 		} catch (e) { editError = e instanceof ApiError ? e.message : '수정 실패'; } finally { updating = false; }
 	}
 
@@ -109,7 +111,7 @@
 				</thead>
 				<tbody>
 					{#each users as u (u.id)}
-						<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/50 transition-colors cursor-pointer" onclick={() => { editUser = u; editName = u.name; editEmail = u.email; editEnabled = u.enabled; editError = ''; }}>
+						<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/50 transition-colors cursor-pointer" onclick={() => { editUser = u; editName = u.name; editEmail = u.email; editEnabled = u.enabled; editPassword = ''; editError = ''; }}>
 							<td class="py-2 pr-4 text-white">{u.name}</td>
 							<td class="py-2 pr-4 text-gray-400">{u.email || '-'}</td>
 							<td class="py-2 pr-4">
@@ -165,6 +167,7 @@
 			<div class="space-y-4">
 				<div><label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">이름</label><input bind:value={editName} type="text" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" /></div>
 				<div><label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">이메일</label><input bind:value={editEmail} type="email" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" /></div>
+				<div><label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">새 패스워드 <span class="text-gray-600">(변경 시에만 입력)</span></label><input bind:value={editPassword} type="password" placeholder="변경하지 않으면 비워두세요" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" /></div>
 				<div class="flex items-center gap-3">
 					<button onclick={() => editEnabled = !editEnabled} class="relative w-11 h-6 rounded-full transition-colors {editEnabled ? 'bg-blue-600' : 'bg-gray-700'}">
 						<span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform {editEnabled ? 'translate-x-5' : ''}"></span>

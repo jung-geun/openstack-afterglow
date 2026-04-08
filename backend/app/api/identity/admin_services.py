@@ -61,7 +61,7 @@ async def list_services(conn: openstack.connection.Connection = Depends(get_os_c
                     "binary": agent.binary or '',
                     "host": agent.host or '',
                     "agent_type": getattr(agent, 'agent_type', ''),
-                    "alive": getattr(agent, 'alive', None) if hasattr(agent, 'alive') else getattr(agent, 'is_active', None),
+                    "alive": agent.is_alive,
                     "admin_state_up": getattr(agent, 'admin_state_up', True),
                     "updated_at": str(agent.updated_at) if getattr(agent, 'updated_at', None) else None,
                 })

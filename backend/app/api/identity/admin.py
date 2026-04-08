@@ -2,6 +2,7 @@ import asyncio
 import itertools
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 import openstack
 
 from app.api.deps import get_os_conn, get_token_info, require_admin
@@ -386,3 +387,383 @@ async def get_quotas(project_id: str, conn: openstack.connection.Connection = De
         return await asyncio.to_thread(_get)
     except Exception as e:
         raise HTTPException(status_code=500, detail="쿼터 조회 실패")
+
+
+# ===========================================================================
+# 볼륨 관리 (관리자)
+# ===========================================================================
+
+class UpdateVolumeRequest(BaseModel):
+    name: str | None = None
+    description: str | None = None
+
+
+class ExtendVolumeRequest(BaseModel):
+    new_size: int  # GB
+
+
+class ResetVolumeStatusRequest(BaseModel):
+    status: str = "available"
+
+
+@router.patch("/volumes/{volume_id}", dependencies=[Depends(require_admin)])
+async def update_volume(
+    volume_id: str,
+    req: UpdateVolumeRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """볼륨 이름/설명 수정."""
+    def _update():
+        kwargs: dict = {}
+        if req.name is not None:
+            kwargs["name"] = req.name
+        if req.description is not None:
+            kwargs["description"] = req.description
+        try:
+            v = conn.block_storage.update_volume(volume_id, **kwargs)
+            return {
+                "id": v.id,
+                "name": v.name or "",
+                "status": v.status or "",
+                "size": v.size,
+            }
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"볼륨 수정 실패: {e}")
+    try:
+        return await asyncio.to_thread(_update)
+    except HTTPException:
+        raise
+
+
+@router.delete("/volumes/{volume_id}", dependencies=[Depends(require_admin)], status_code=204)
+async def delete_volume(
+    volume_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """볼륨 삭제."""
+    def _delete():
+        try:
+            conn.block_storage.delete_volume(volume_id, ignore_missing=True)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"볼륨 삭제 실패: {e}")
+    try:
+        await asyncio.to_thread(_delete)
+    except HTTPException:
+        raise
+
+
+@router.post("/volumes/{volume_id}/extend", dependencies=[Depends(require_admin)])
+async def extend_volume(
+    volume_id: str,
+    req: ExtendVolumeRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """볼륨 용량 확장."""
+    def _extend():
+        try:
+            conn.block_storage.extend_volume(volume_id, req.new_size)
+            return {"status": "extending"}
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"볼륨 확장 실패: {e}")
+    try:
+        return await asyncio.to_thread(_extend)
+    except HTTPException:
+        raise
+
+
+@router.post("/volumes/{volume_id}/reset-status", dependencies=[Depends(require_admin)])
+async def reset_volume_status(
+    volume_id: str,
+    req: ResetVolumeStatusRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """볼륨 상태 초기화."""
+    def _reset():
+        try:
+            conn.block_storage.reset_volume_status(volume_id, req.status)
+            return {"status": req.status}
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"볼륨 상태 초기화 실패: {e}")
+    try:
+        return await asyncio.to_thread(_reset)
+    except HTTPException:
+        raise
+
+
+# ===========================================================================
+# 네트워크 관리 (관리자)
+# ===========================================================================
+
+class CreateNetworkRequest(BaseModel):
+    name: str
+    is_external: bool = False
+    is_shared: bool = False
+    cidr: str | None = None
+    enable_dhcp: bool = True
+
+
+class UpdateNetworkRequest(BaseModel):
+    name: str | None = None
+    is_shared: bool | None = None
+
+
+class CreateRouterRequest(BaseModel):
+    name: str
+    external_network_id: str | None = None
+
+
+class UpdateRouterRequest(BaseModel):
+    name: str | None = None
+    external_network_id: str | None = None
+
+
+class CreateFloatingIpRequest(BaseModel):
+    floating_network_id: str
+
+
+class UpdatePortRequest(BaseModel):
+    name: str | None = None
+
+
+@router.post("/networks", dependencies=[Depends(require_admin)], status_code=201)
+async def create_network(
+    req: CreateNetworkRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """네트워크 생성 (선택적으로 서브넷 포함)."""
+    def _create():
+        try:
+            net_kwargs: dict = {
+                "name": req.name,
+                "is_router_external": req.is_external,
+                "is_shared": req.is_shared,
+            }
+            n = conn.network.create_network(**net_kwargs)
+            if req.cidr:
+                conn.network.create_subnet(
+                    network_id=n.id,
+                    name=f"{req.name}-subnet",
+                    cidr=req.cidr,
+                    ip_version=4,
+                    is_dhcp_enabled=req.enable_dhcp,
+                )
+            return {
+                "id": n.id,
+                "name": n.name or "",
+                "status": n.status or "",
+                "is_external": bool(n.is_router_external),
+                "is_shared": bool(n.is_shared),
+                "subnets": n.subnet_ids or [],
+            }
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"네트워크 생성 실패: {e}")
+    try:
+        return await asyncio.to_thread(_create)
+    except HTTPException:
+        raise
+
+
+@router.put("/networks/{network_id}", dependencies=[Depends(require_admin)])
+async def update_network(
+    network_id: str,
+    req: UpdateNetworkRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """네트워크 수정."""
+    def _update():
+        kwargs: dict = {}
+        if req.name is not None:
+            kwargs["name"] = req.name
+        if req.is_shared is not None:
+            kwargs["is_shared"] = req.is_shared
+        try:
+            n = conn.network.update_network(network_id, **kwargs)
+            return {
+                "id": n.id,
+                "name": n.name or "",
+                "status": n.status or "",
+                "is_external": bool(n.is_router_external),
+                "is_shared": bool(n.is_shared),
+            }
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"네트워크 수정 실패: {e}")
+    try:
+        return await asyncio.to_thread(_update)
+    except HTTPException:
+        raise
+
+
+@router.delete("/networks/{network_id}", dependencies=[Depends(require_admin)], status_code=204)
+async def delete_network(
+    network_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """네트워크 삭제."""
+    def _delete():
+        try:
+            conn.network.delete_network(network_id, ignore_missing=True)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"네트워크 삭제 실패: {e}")
+    try:
+        await asyncio.to_thread(_delete)
+    except HTTPException:
+        raise
+
+
+@router.post("/floating-ips", dependencies=[Depends(require_admin)], status_code=201)
+async def create_floating_ip(
+    req: CreateFloatingIpRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """Floating IP 생성."""
+    def _create():
+        try:
+            fip = conn.network.create_ip(floating_network_id=req.floating_network_id)
+            return {
+                "id": fip.id,
+                "floating_ip_address": fip.floating_ip_address or "",
+                "fixed_ip_address": fip.fixed_ip_address,
+                "status": fip.status or "",
+                "port_id": fip.port_id,
+                "project_id": getattr(fip, "project_id", None),
+            }
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Floating IP 생성 실패: {e}")
+    try:
+        return await asyncio.to_thread(_create)
+    except HTTPException:
+        raise
+
+
+@router.delete("/floating-ips/{fip_id}", dependencies=[Depends(require_admin)], status_code=204)
+async def delete_floating_ip(
+    fip_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """Floating IP 삭제."""
+    def _delete():
+        try:
+            conn.network.delete_ip(fip_id, ignore_missing=True)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Floating IP 삭제 실패: {e}")
+    try:
+        await asyncio.to_thread(_delete)
+    except HTTPException:
+        raise
+
+
+@router.post("/routers", dependencies=[Depends(require_admin)], status_code=201)
+async def create_router(
+    req: CreateRouterRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """라우터 생성."""
+    def _create():
+        try:
+            kwargs: dict = {"name": req.name}
+            if req.external_network_id:
+                kwargs["external_gateway_info"] = {"network_id": req.external_network_id}
+            r = conn.network.create_router(**kwargs)
+            return {
+                "id": r.id,
+                "name": r.name or "",
+                "status": r.status or "",
+                "external_gateway_network_id": (r.external_gateway_info or {}).get("network_id"),
+                "project_id": getattr(r, "project_id", None),
+            }
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"라우터 생성 실패: {e}")
+    try:
+        return await asyncio.to_thread(_create)
+    except HTTPException:
+        raise
+
+
+@router.put("/routers/{router_id}", dependencies=[Depends(require_admin)])
+async def update_router(
+    router_id: str,
+    req: UpdateRouterRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """라우터 수정."""
+    def _update():
+        kwargs: dict = {}
+        if req.name is not None:
+            kwargs["name"] = req.name
+        if req.external_network_id is not None:
+            kwargs["external_gateway_info"] = {"network_id": req.external_network_id} if req.external_network_id else {}
+        try:
+            r = conn.network.update_router(router_id, **kwargs)
+            return {
+                "id": r.id,
+                "name": r.name or "",
+                "status": r.status or "",
+                "external_gateway_network_id": (r.external_gateway_info or {}).get("network_id"),
+            }
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"라우터 수정 실패: {e}")
+    try:
+        return await asyncio.to_thread(_update)
+    except HTTPException:
+        raise
+
+
+@router.delete("/routers/{router_id}", dependencies=[Depends(require_admin)], status_code=204)
+async def delete_router(
+    router_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """라우터 삭제."""
+    def _delete():
+        try:
+            conn.network.delete_router(router_id, ignore_missing=True)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"라우터 삭제 실패: {e}")
+    try:
+        await asyncio.to_thread(_delete)
+    except HTTPException:
+        raise
+
+
+@router.put("/ports/{port_id}", dependencies=[Depends(require_admin)])
+async def update_port(
+    port_id: str,
+    req: UpdatePortRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """포트 수정 (이름)."""
+    def _update():
+        kwargs: dict = {}
+        if req.name is not None:
+            kwargs["name"] = req.name
+        try:
+            p = conn.network.update_port(port_id, **kwargs)
+            return {
+                "id": p.id,
+                "name": p.name or "",
+                "status": p.status or "",
+                "device_owner": p.device_owner or "",
+            }
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"포트 수정 실패: {e}")
+    try:
+        return await asyncio.to_thread(_update)
+    except HTTPException:
+        raise
+
+
+@router.delete("/ports/{port_id}", dependencies=[Depends(require_admin)], status_code=204)
+async def delete_port(
+    port_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """포트 삭제."""
+    def _delete():
+        try:
+            conn.network.delete_port(port_id, ignore_missing=True)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"포트 삭제 실패: {e}")
+    try:
+        await asyncio.to_thread(_delete)
+    except HTTPException:
+        raise

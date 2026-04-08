@@ -27,6 +27,13 @@
 		gpu_used: number;
 	}
 
+	interface GpuType {
+		device_name: string;
+		vendor: string;
+		total: number;
+		used: number;
+	}
+
 	interface GpuResponse {
 		hosts: GpuHost[];
 		summary: {
@@ -35,10 +42,12 @@
 			used_gpus: number;
 			available_gpus: number;
 		};
+		gpu_types: GpuType[];
 	}
 
 	let hosts = $state<GpuHost[]>([]);
 	let summary = $state({ total_hosts: 0, total_gpus: 0, used_gpus: 0, available_gpus: 0 });
+	let gpuTypes = $state<GpuType[]>([]);
 	let loading = $state(true);
 	let error = $state('');
 	let expandedHost = $state<string | null>(null);
@@ -53,6 +62,7 @@
 			const res = await api.get<GpuResponse>('/api/admin/gpu-hosts', token, projectId);
 			hosts = res.hosts;
 			summary = res.summary;
+			gpuTypes = res.gpu_types ?? [];
 		} catch (e) {
 			error = e instanceof ApiError ? e.message : 'GPU 정보를 불러올 수 없습니다';
 			hosts = [];
@@ -99,6 +109,27 @@
 				<div class="text-xs text-gray-500 mt-1">할당 가능</div>
 			</div>
 		</div>
+
+		<!-- GPU 종류별 요약 -->
+		{#if gpuTypes.length > 0}
+			<div class="mb-6">
+				<div class="text-xs text-gray-400 uppercase tracking-wide mb-2">GPU 종류별 현황</div>
+				<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+					{#each gpuTypes as gt}
+						<div class="bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 flex items-center justify-between">
+							<div>
+								<div class="text-sm font-medium text-white">{gt.device_name}</div>
+								<div class="text-xs text-gray-500">{gt.vendor}</div>
+							</div>
+							<div class="text-right">
+								<div class="text-sm font-semibold text-white">{gt.total}</div>
+								<div class="text-xs {gt.used > 0 ? 'text-red-400' : 'text-gray-500'}">{gt.used} 사용 중</div>
+							</div>
+						</div>
+					{/each}
+				</div>
+			</div>
+		{/if}
 
 		<!-- 호스트별 GPU 테이블 -->
 		<div class="overflow-x-auto">
