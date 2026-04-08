@@ -3,6 +3,7 @@
 	import { auth } from '$lib/stores/auth';
 	import { api } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import TimeSeriesChart from '$lib/components/TimeSeriesChart.svelte';
 	import { formatNumber } from '$lib/utils/format';
 
 	interface AdminShare {
@@ -19,11 +20,27 @@
 		deleting: 'text-orange-400', error: 'text-red-400',
 	};
 
+	interface TsPoint { ts: number; total?: number; [key: string]: number | undefined; }
+
 	let shares = $state<AdminShare[]>([]);
 	let loading = $state(true);
+	let tsData = $state<TsPoint[]>([]);
+	let tsRange = $state('7d');
+	let tsLoading = $state(true);
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
+
+	async function loadTimeseries(range: string) {
+		tsLoading = true;
+		try {
+			tsData = await api.get<TsPoint[]>(`/api/admin/timeseries/shares?range=${range}`, token, projectId);
+		} catch {
+			tsData = [];
+		} finally {
+			tsLoading = false;
+		}
+	}
 
 	async function load() {
 		loading = true;
@@ -36,13 +53,29 @@
 		}
 	}
 
-	onMount(load);
+	onMount(() => { load(); loadTimeseries(tsRange); });
 </script>
 
 <div class="p-4 md:p-8 max-w-6xl">
 	<div class="flex items-center justify-between mb-6">
 		<h1 class="text-2xl font-bold text-white">전체 공유 스토리지</h1>
 		<button onclick={load} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
+	</div>
+
+	<div class="mb-6">
+		{#if tsLoading}
+			<div class="bg-gray-900 border border-gray-800 rounded-xl p-5 h-48 flex items-center justify-center">
+				<div class="text-gray-600 text-sm">차트 로딩 중...</div>
+			</div>
+		{:else}
+			<TimeSeriesChart
+				data={tsData}
+				title="공유 스토리지 수 추이"
+				mainKey="total"
+				currentRange={tsRange}
+				onRangeChange={(r) => { tsRange = r; loadTimeseries(r); }}
+			/>
+		{/if}
 	</div>
 
 	{#if loading}

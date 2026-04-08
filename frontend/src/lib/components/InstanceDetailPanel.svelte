@@ -82,11 +82,14 @@
 	interface Props {
 		instanceId: string;
 		onClose?: () => void;
+		adminProjectId?: string | null;  // 관리자가 다른 프로젝트의 인스턴스를 볼 때
 	}
 
-	let { instanceId, onClose }: Props = $props();
+	let { instanceId, onClose, adminProjectId = null }: Props = $props();
 
 	let instance = $state<Instance | null>(null);
+	const fixedIpsList = $derived(instance?.ip_addresses.filter(ip => ip.type === 'fixed') ?? []);
+	const floatingIpsList = $derived(instance?.ip_addresses.filter(ip => ip.type === 'floating') ?? []);
 	let floatingIps = $state<FloatingIp[]>([]);
 	let allFloatingIps = $state<FloatingIp[]>([]);
 	let interfaces = $state<PortInfo[]>([]);
@@ -145,6 +148,8 @@
 		SHUTOFF: 'text-gray-400 bg-gray-800',
 		ERROR: 'text-red-400 bg-red-900/30',
 		DELETING: 'text-orange-400 bg-orange-900/30',
+		SHELVED_OFFLOADED: 'text-purple-400 bg-purple-900/30',
+		SHELVED: 'text-purple-400 bg-purple-900/30',
 	};
 
 	const strategyLabel: Record<string, string> = {
@@ -178,20 +183,22 @@
 	async function fetchInstance(id: string) {
 		loading = true;
 		error = '';
+		// 관리자가 다른 프로젝트 인스턴스를 볼 때 해당 project_id 사용
+		const effectiveProjectId = adminProjectId ?? ($auth.projectId ?? undefined);
 		try {
 			instance = await api.get<Instance>(
 				`/api/instances/${id}`,
 				$auth.token ?? undefined,
-				$auth.projectId ?? undefined
+				effectiveProjectId
 			);
 			const [fips, ifaces, vols, sgData, allVols, nets, ownerData] = await Promise.all([
-				api.get<FloatingIp[]>('/api/networks/floating-ips', $auth.token ?? undefined, $auth.projectId ?? undefined).catch(() => []),
-				api.get<PortInfo[]>(`/api/instances/${id}/interfaces`, $auth.token ?? undefined, $auth.projectId ?? undefined).catch(() => []),
-				api.get<VolumeAttachment[]>(`/api/instances/${id}/volumes`, $auth.token ?? undefined, $auth.projectId ?? undefined).catch(() => []),
-				api.get<{ ports: PortInfo[]; security_groups: SecurityGroup[] }>(`/api/instances/${id}/security-groups`, $auth.token ?? undefined, $auth.projectId ?? undefined).catch(() => ({ ports: [], security_groups: [] })),
-				api.get<VolumeInfo[]>('/api/volumes', $auth.token ?? undefined, $auth.projectId ?? undefined).catch(() => []),
-				api.get<NetworkInfo[]>('/api/networks', $auth.token ?? undefined, $auth.projectId ?? undefined).catch(() => []),
-				api.get<{ display: string }>(`/api/instances/${id}/owner`, $auth.token ?? undefined, $auth.projectId ?? undefined).catch(() => ({ display: '' })),
+				api.get<FloatingIp[]>('/api/networks/floating-ips', $auth.token ?? undefined, effectiveProjectId).catch(() => []),
+				api.get<PortInfo[]>(`/api/instances/${id}/interfaces`, $auth.token ?? undefined, effectiveProjectId).catch(() => []),
+				api.get<VolumeAttachment[]>(`/api/instances/${id}/volumes`, $auth.token ?? undefined, effectiveProjectId).catch(() => []),
+				api.get<{ ports: PortInfo[]; security_groups: SecurityGroup[] }>(`/api/instances/${id}/security-groups`, $auth.token ?? undefined, effectiveProjectId).catch(() => ({ ports: [], security_groups: [] })),
+				api.get<VolumeInfo[]>('/api/volumes', $auth.token ?? undefined, effectiveProjectId).catch(() => []),
+				api.get<NetworkInfo[]>('/api/networks', $auth.token ?? undefined, effectiveProjectId).catch(() => []),
+				api.get<{ display: string }>(`/api/instances/${id}/owner`, $auth.token ?? undefined, effectiveProjectId).catch(() => ({ display: '' })),
 			]);
 			allFloatingIps = fips;
 			const instIps = new Set(instance.ip_addresses.filter(ip => ip.type === 'floating').map(ip => ip.addr));
@@ -254,9 +261,9 @@
 		}
 	}
 
-	async function performAction(action: 'start' | 'stop' | 'reboot') {
+	async function performAction(action: 'start' | 'stop' | 'reboot' | 'shelve' | 'unshelve') {
 		if (!instance) return;
-		const labels: Record<string, string> = { start: '시작', stop: '정지', reboot: '재부팅' };
+		const labels: Record<string, string> = { start: '시작', stop: '정지', reboot: '재부팅', shelve: '보관', unshelve: '보관 해제' };
 		if (!confirm(`인스턴스를 ${labels[action]}하시겠습니까?`)) return;
 		actioning = action;
 		try {
@@ -522,6 +529,15 @@
 						{actioning === 'start' ? '시작 중...' : '시작'}
 					</button>
 				{/if}
+				{#if instance.status === 'SHELVED_OFFLOADED' || instance.status === 'SHELVED'}
+					<button
+						onclick={() => performAction('unshelve')}
+						disabled={!!actioning}
+						class="text-green-400 hover:text-green-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-green-900 hover:border-green-700 disabled:border-gray-700 transition-colors"
+					>
+						{actioning === 'unshelve' ? '보관 해제 중...' : '보관 해제'}
+					</button>
+				{/if}
 				{#if instance.status === 'ACTIVE'}
 					<button
 						onclick={openConsole}
@@ -542,6 +558,15 @@
 						class="text-blue-400 hover:text-blue-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-blue-900 hover:border-blue-700 disabled:border-gray-700 transition-colors"
 					>
 						{actioning === 'reboot' ? '재부팅 중...' : '재부팅'}
+					</button>
+				{/if}
+				{#if instance.status === 'ACTIVE' || instance.status === 'SHUTOFF'}
+					<button
+						onclick={() => performAction('shelve')}
+						disabled={!!actioning}
+						class="text-purple-400 hover:text-purple-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-purple-900 hover:border-purple-700 disabled:border-gray-700 transition-colors"
+					>
+						{actioning === 'shelve' ? '보관 중...' : '보관'}
 					</button>
 				{/if}
 				<button
@@ -579,28 +604,30 @@
 					<dd class="text-sm text-gray-300 font-mono">{instance.key_name ?? '-'}</dd>
 				</div>
 				{#if ownerDisplay}
-					<div>
+					<div class="overflow-hidden">
 						<dt class="text-xs text-gray-500 mb-0.5">생성자</dt>
-						<dd class="text-sm text-gray-300 font-mono">{ownerDisplay}</dd>
+						<dd class="text-sm text-gray-300 font-mono truncate max-w-full" title={ownerDisplay}>{ownerDisplay}</dd>
 					</div>
 				{/if}
 				<div class="col-span-2">
 					<dt class="text-xs text-gray-500 mb-1.5">IP 주소</dt>
-					<dd class="flex flex-wrap gap-2">
-						{#each instance.ip_addresses as ip}
-							<div class="flex items-center gap-1.5">
-								<span class="text-sm font-mono {ip.type === 'floating' ? 'text-green-300' : 'text-gray-300'} bg-gray-800 px-2 py-0.5 rounded">
-									{ip.addr}
-								</span>
-								<span class="text-xs {ip.type === 'floating' ? 'text-green-500 bg-green-900/20' : 'text-gray-600 bg-gray-800'} px-1.5 py-0.5 rounded">
-									{ip.type === 'floating' ? 'floating' : 'fixed'}
-								</span>
-								{#if ip.network_name}
-									<span class="text-xs text-gray-600">{ip.network_name}</span>
+					<dd class="flex flex-col gap-1.5">
+						{#if fixedIpsList.length === 0 && floatingIpsList.length === 0}
+							<span class="text-sm text-gray-500">-</span>
+						{/if}
+						{#each fixedIpsList as fip}
+							{@const paired = floatingIpsList.find(fl => fl.network_name === fip.network_name)}
+							<div class="flex items-center gap-1.5 flex-wrap">
+								<span class="text-sm font-mono text-gray-300 bg-gray-800 px-2 py-0.5 rounded">{fip.addr}</span>
+								<span class="text-xs text-gray-600 bg-gray-800 px-1.5 py-0.5 rounded">fixed</span>
+								{#if paired}
+									<span class="text-sm font-mono text-green-300 bg-gray-800 px-2 py-0.5 rounded">{paired.addr}</span>
+									<span class="text-xs text-green-500 bg-green-900/20 px-1.5 py-0.5 rounded">floating</span>
+								{/if}
+								{#if fip.network_name}
+									<span class="text-xs text-gray-500">{fip.network_name}</span>
 								{/if}
 							</div>
-						{:else}
-							<span class="text-sm text-gray-500">-</span>
 						{/each}
 					</dd>
 				</div>

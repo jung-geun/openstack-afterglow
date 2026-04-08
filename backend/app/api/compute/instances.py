@@ -479,6 +479,34 @@ async def reboot_instance(
         raise HTTPException(status_code=500, detail="작업 실패")
 
 
+@router.post("/{instance_id}/shelve", status_code=204)
+async def shelve_instance(
+    instance_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    pid = conn._union_project_id
+    try:
+        await asyncio.to_thread(nova.shelve_server, conn, instance_id)
+        await invalidate(f"union:nova:{pid}:instance:{instance_id}")
+        await invalidate(f"union:nova:{pid}:instances")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="작업 실패")
+
+
+@router.post("/{instance_id}/unshelve", status_code=204)
+async def unshelve_instance(
+    instance_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    pid = conn._union_project_id
+    try:
+        await asyncio.to_thread(nova.unshelve_server, conn, instance_id)
+        await invalidate(f"union:nova:{pid}:instance:{instance_id}")
+        await invalidate(f"union:nova:{pid}:instances")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="작업 실패")
+
+
 @router.get("/{instance_id}/console")
 async def get_console(
     instance_id: str,

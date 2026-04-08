@@ -8,11 +8,13 @@
   import InstanceDetailPanel from '$lib/components/InstanceDetailPanel.svelte';
 
   const statusColor: Record<string, string> = {
-    ACTIVE:    'text-green-400 bg-green-900/30',
-    BUILD:     'text-yellow-400 bg-yellow-900/30',
-    SHUTOFF:   'text-gray-400 bg-gray-800',
-    ERROR:     'text-red-400 bg-red-900/30',
-    DELETING:  'text-orange-400 bg-orange-900/30',
+    ACTIVE:             'text-green-400 bg-green-900/30',
+    BUILD:              'text-yellow-400 bg-yellow-900/30',
+    SHUTOFF:            'text-gray-400 bg-gray-800',
+    ERROR:              'text-red-400 bg-red-900/30',
+    DELETING:           'text-orange-400 bg-orange-900/30',
+    SHELVED_OFFLOADED:  'text-purple-400 bg-purple-900/30',
+    SHELVED:            'text-purple-400 bg-purple-900/30',
   };
   const strategyLabel: Record<string, string> = { prebuilt: '사전 빌드', dynamic: '동적 생성' };
 
@@ -44,6 +46,26 @@
       if (!cached) error = e instanceof ApiError ? `조회 실패 (${e.status}): ${(e as ApiError).message}` : '서버 오류';
     } finally {
       loading = false;
+    }
+  }
+
+  async function shelveInstance(id: string) {
+    if (!confirm('인스턴스를 보관하시겠습니까? (SHELVED_OFFLOADED 상태로 전환됩니다)')) return;
+    try {
+      await api.post(`/api/instances/${id}/shelve`, {}, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      await fetchInstances();
+    } catch (e) {
+      alert('보관 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+    }
+  }
+
+  async function unshelveInstance(id: string) {
+    if (!confirm('인스턴스 보관을 해제하시겠습니까?')) return;
+    try {
+      await api.post(`/api/instances/${id}/unshelve`, {}, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      await fetchInstances();
+    } catch (e) {
+      alert('보관 해제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
     }
   }
 
@@ -164,6 +186,12 @@
                 <div class="flex items-center justify-end gap-2">
                   {#if inst.status === 'ACTIVE'}
                     <button onclick={(e) => { e.stopPropagation(); openConsole(inst.id); }} class="text-gray-400 hover:text-white text-xs px-2 py-1 rounded border border-gray-700 hover:border-gray-500 transition-colors">콘솔</button>
+                  {/if}
+                  {#if inst.status === 'ACTIVE' || inst.status === 'SHUTOFF'}
+                    <button onclick={(e) => { e.stopPropagation(); shelveInstance(inst.id); }} class="text-purple-400 hover:text-purple-300 text-xs px-2 py-1 rounded border border-purple-900 hover:border-purple-700 transition-colors">보관</button>
+                  {/if}
+                  {#if inst.status === 'SHELVED_OFFLOADED' || inst.status === 'SHELVED'}
+                    <button onclick={(e) => { e.stopPropagation(); unshelveInstance(inst.id); }} class="text-green-400 hover:text-green-300 text-xs px-2 py-1 rounded border border-green-900 hover:border-green-700 transition-colors">보관 해제</button>
                   {/if}
                   <button onclick={(e) => { e.stopPropagation(); deleteInstance(inst.id, inst.name); }} disabled={deleting === inst.id} class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-xs px-2 py-1 rounded border border-red-900 hover:border-red-700 disabled:border-gray-700 transition-colors">
                     {deleting === inst.id ? '삭제 중...' : '삭제'}

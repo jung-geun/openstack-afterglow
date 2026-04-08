@@ -3,6 +3,7 @@
 	import { auth } from '$lib/stores/auth';
 	import { api } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import TimeSeriesChart from '$lib/components/TimeSeriesChart.svelte';
 	import { formatNumber } from '$lib/utils/format';
 
 	interface AdminVolume {
@@ -24,14 +25,30 @@
 		error: 'text-red-400', in_use: 'text-blue-400',
 	};
 
+	interface TsPoint { ts: number; total?: number; in_use?: number; available?: number; [key: string]: number | undefined; }
+
 	let allVolumes = $state<AdminVolume[]>([]);
 	let loading = $state(true);
 	let pageSize = $state(20);
 	let markerStack = $state<string[]>([]);
 	let nextMarker = $state<string | null>(null);
+	let tsData = $state<TsPoint[]>([]);
+	let tsRange = $state('7d');
+	let tsLoading = $state(true);
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
+
+	async function loadTimeseries(range: string) {
+		tsLoading = true;
+		try {
+			tsData = await api.get<TsPoint[]>(`/api/admin/timeseries/volumes?range=${range}`, token, projectId);
+		} catch {
+			tsData = [];
+		} finally {
+			tsLoading = false;
+		}
+	}
 
 	async function load(marker?: string) {
 		loading = true;
@@ -48,7 +65,7 @@
 		}
 	}
 
-	onMount(() => load());
+	onMount(() => { load(); loadTimeseries(tsRange); });
 </script>
 
 <div class="p-4 md:p-8 max-w-6xl">
@@ -66,6 +83,23 @@
 				{/each}
 			</div>
 		</div>
+	</div>
+
+	<div class="mb-6">
+		{#if tsLoading}
+			<div class="bg-gray-900 border border-gray-800 rounded-xl p-5 h-48 flex items-center justify-center">
+				<div class="text-gray-600 text-sm">차트 로딩 중...</div>
+			</div>
+		{:else}
+			<TimeSeriesChart
+				data={tsData}
+				title="볼륨 수 추이"
+				mainKey="total"
+				extraKeys={['in_use', 'available']}
+				currentRange={tsRange}
+				onRangeChange={(r) => { tsRange = r; loadTimeseries(r); }}
+			/>
+		{/if}
 	</div>
 
 	{#if loading}

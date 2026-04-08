@@ -3,6 +3,8 @@
 	import { auth } from '$lib/stores/auth';
 	import { api } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import TimeSeriesChart from '$lib/components/TimeSeriesChart.svelte';
+	import InstanceDetailPanel from '$lib/components/InstanceDetailPanel.svelte';
 	import { formatNumber } from '$lib/utils/format';
 
 	interface AdminInstance {
@@ -13,17 +15,30 @@
 		user_id: string | null;
 		flavor: string;
 		created_at: string | null;
+		fault?: string | null;
 	}
 	interface PagedResponse<T> {
 		items: T[];
 		next_marker: string | null;
 		count: number;
 	}
+	interface TsPoint {
+		ts: number;
+		total?: number;
+		active?: number;
+		shutoff?: number;
+		error?: number;
+		shelved?: number;
+		[key: string]: number | undefined;
+	}
 
 	const statusColor: Record<string, string> = {
-		ACTIVE: 'text-green-400', Running: 'text-green-400',
-		SHUTOFF: 'text-gray-400', Stopped: 'text-gray-400',
-		ERROR: 'text-red-400', building: 'text-yellow-400',
+		ACTIVE:            'text-green-400',
+		SHUTOFF:           'text-gray-400',
+		ERROR:             'text-red-400',
+		BUILD:             'text-yellow-400',
+		SHELVED_OFFLOADED: 'text-purple-400',
+		SHELVED:           'text-purple-400',
 	};
 
 	let allInstances = $state<AdminInstance[]>([]);
@@ -31,6 +46,16 @@
 	let pageSize = $state(20);
 	let markerStack = $state<string[]>([]);
 	let nextMarker = $state<string | null>(null);
+	let expandedError = $state<string | null>(null);
+
+	// 시계열 차트
+	let tsData = $state<TsPoint[]>([]);
+	let tsRange = $state('7d');
+	let tsLoading = $state(true);
+
+	// 인스턴스 상세 패널
+	let selectedInstanceId = $state<string | null>(null);
+	let selectedProjectId = $state<string | null>(null);
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
@@ -50,7 +75,31 @@
 		}
 	}
 
-	onMount(() => load());
+	async function loadTimeseries(range: string) {
+		tsLoading = true;
+		try {
+			tsData = await api.get<TsPoint[]>(`/api/admin/timeseries/instances?range=${range}`, token, projectId);
+		} catch {
+			tsData = [];
+		} finally {
+			tsLoading = false;
+		}
+	}
+
+	function openDetail(inst: AdminInstance) {
+		selectedInstanceId = inst.id;
+		selectedProjectId = inst.project_id;
+	}
+
+	function closeDetail() {
+		selectedInstanceId = null;
+		selectedProjectId = null;
+	}
+
+	onMount(() => {
+		load();
+		loadTimeseries(tsRange);
+	});
 </script>
 
 <div class="p-4 md:p-8 max-w-6xl">
@@ -70,6 +119,24 @@
 		</div>
 	</div>
 
+	<!-- 시계열 차트 -->
+	<div class="mb-6">
+		{#if tsLoading}
+			<div class="bg-gray-900 border border-gray-800 rounded-xl p-5 h-48 flex items-center justify-center">
+				<div class="text-gray-600 text-sm">차트 로딩 중...</div>
+			</div>
+		{:else}
+			<TimeSeriesChart
+				data={tsData}
+				title="인스턴스 수 추이"
+				mainKey="total"
+				extraKeys={['active', 'shutoff', 'error', 'shelved']}
+				currentRange={tsRange}
+				onRangeChange={(r) => { tsRange = r; loadTimeseries(r); }}
+			/>
+		{/if}
+	</div>
+
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={5} />
 	{:else}
@@ -86,9 +153,28 @@
 				</thead>
 				<tbody>
 					{#each allInstances as s (s.id)}
-						<tr class="border-b border-gray-800/50 text-xs">
+						<tr
+							onclick={() => openDetail(s)}
+							class="border-b border-gray-800/50 text-xs hover:bg-gray-800/50 transition-colors cursor-pointer"
+						>
 							<td class="py-2 pr-4 text-white">{s.name || s.id.slice(0, 8)}</td>
-							<td class="py-2 pr-4 {statusColor[s.status] ?? 'text-gray-400'}">{s.status}</td>
+							<td class="py-2 pr-4">
+								<div class="flex items-center gap-1.5">
+									<span class="{statusColor[s.status] ?? 'text-gray-400'}">{s.status}</span>
+									{#if s.status === 'ERROR' && s.fault}
+										<button
+											onclick={(e) => { e.stopPropagation(); expandedError = expandedError === s.id ? null : s.id; }}
+											class="text-red-500 hover:text-red-300 text-xs underline"
+											title={s.fault}
+										>사유</button>
+									{/if}
+								</div>
+								{#if expandedError === s.id && s.fault}
+									<div class="mt-1 text-red-400 bg-red-900/20 border border-red-900/50 rounded px-2 py-1 text-xs max-w-xs break-words">
+										{s.fault}
+									</div>
+								{/if}
+							</td>
 							<td class="py-2 pr-4 text-gray-400">{s.flavor || '-'}</td>
 							<td class="py-2 pr-4 text-gray-500 font-mono">{s.project_id?.slice(0, 8) ?? '-'}</td>
 							<td class="py-2 text-gray-500">{s.created_at?.slice(0, 10) ?? '-'}</td>
@@ -120,3 +206,12 @@
 		</div>
 	{/if}
 </div>
+
+{#if selectedInstanceId}
+	<div class="fixed inset-0 z-40" role="dialog" aria-modal="true" onkeydown={(e) => e.key === 'Escape' && closeDetail()} tabindex="-1">
+		<button class="absolute inset-0 bg-black/50 cursor-default" onclick={closeDetail} aria-label="패널 닫기"></button>
+		<div class="absolute right-0 top-14 bottom-0 w-full md:w-[75vw] max-w-5xl bg-gray-950 border-l border-gray-700 overflow-y-auto shadow-2xl">
+			<InstanceDetailPanel instanceId={selectedInstanceId} adminProjectId={selectedProjectId} onClose={closeDetail} />
+		</div>
+	</div>
+{/if}

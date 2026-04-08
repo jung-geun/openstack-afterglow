@@ -251,6 +251,14 @@ def reboot_server(conn: openstack.connection.Connection, server_id: str, reboot_
     conn.compute.reboot_server(server_id, reboot_type)
 
 
+def shelve_server(conn: openstack.connection.Connection, server_id: str) -> None:
+    conn.compute.shelve_server(server_id)
+
+
+def unshelve_server(conn: openstack.connection.Connection, server_id: str) -> None:
+    conn.compute.unshelve_server(server_id)
+
+
 def get_console_url(conn: openstack.connection.Connection, server_id: str) -> str:
     s = conn.compute.get_server(server_id)
     result = conn.compute.create_console(s, console_type="novnc")

@@ -199,8 +199,14 @@ async def list_all_instances(
             kwargs: dict = {"all_projects": True, "limit": limit}
             if marker:
                 kwargs["marker"] = marker
-            items = [
-                {
+            items = []
+            for s in itertools.islice(conn.compute.servers(**kwargs), limit):
+                fault_info = None
+                if (s.status or "").upper() == "ERROR":
+                    fault = getattr(s, 'fault', None)
+                    if isinstance(fault, dict) and fault.get("message"):
+                        fault_info = fault.get("message", "")
+                items.append({
                     "id": s.id,
                     "name": s.name or "",
                     "status": s.status or "",
@@ -208,9 +214,8 @@ async def list_all_instances(
                     "user_id": getattr(s, 'user_id', None),
                     "flavor": getattr(s, 'flavor', {}).get('original_name', '') if isinstance(getattr(s, 'flavor', None), dict) else '',
                     "created_at": str(s.created_at) if getattr(s, 'created_at', None) else None,
-                }
-                for s in itertools.islice(conn.compute.servers(**kwargs), limit)
-            ]
+                    "fault": fault_info,
+                })
             next_marker = items[-1]["id"] if len(items) == limit else None
             return {"items": items, "next_marker": next_marker, "count": len(items)}
         return await asyncio.to_thread(_list)
@@ -294,6 +299,70 @@ async def admin_topology(conn: openstack.connection.Connection = Depends(get_os_
         return await cached_call("union:admin:topology", 30, _fetch)
     except Exception as e:
         raise HTTPException(status_code=500, detail="토폴로지 조회 실패")
+
+
+@router.get("/timeseries/{resource_type}", dependencies=[Depends(_require_admin)])
+async def get_timeseries(
+    resource_type: str,
+    range: str = Query(default="7d", pattern="^(1d|2d|7d|30d)$"),
+):
+    """리소스 유형별 시계열 스냅샷 반환."""
+    from app.services import timeseries
+    valid = {"instances", "volumes", "shares", "networks"}
+    if resource_type not in valid:
+        raise HTTPException(status_code=400, detail=f"resource_type은 {valid} 중 하나여야 합니다")
+    return await timeseries.get_timeseries(resource_type, range)
+
+
+@router.get("/all-networks", dependencies=[Depends(_require_admin)])
+async def list_all_networks(conn: openstack.connection.Connection = Depends(get_os_conn)):
+    """전체 프로젝트의 네트워크 목록."""
+    try:
+        return await asyncio.to_thread(neutron.list_networks, conn, None)
+    except Exception:
+        raise HTTPException(status_code=500, detail="네트워크 목록 조회 실패")
+
+
+@router.get("/all-floating-ips", dependencies=[Depends(_require_admin)])
+async def list_all_floating_ips(conn: openstack.connection.Connection = Depends(get_os_conn)):
+    """전체 프로젝트의 Floating IP 목록."""
+    try:
+        return await asyncio.to_thread(neutron.list_floating_ips, conn, None)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Floating IP 목록 조회 실패")
+
+
+@router.get("/all-routers", dependencies=[Depends(_require_admin)])
+async def list_all_routers(conn: openstack.connection.Connection = Depends(get_os_conn)):
+    """전체 프로젝트의 라우터 목록."""
+    try:
+        return await asyncio.to_thread(neutron.list_routers, conn, None)
+    except Exception:
+        raise HTTPException(status_code=500, detail="라우터 목록 조회 실패")
+
+
+@router.get("/all-ports", dependencies=[Depends(_require_admin)])
+async def list_all_ports(conn: openstack.connection.Connection = Depends(get_os_conn)):
+    """전체 프로젝트의 포트 목록."""
+    try:
+        def _list():
+            return [
+                {
+                    "id": p.id,
+                    "name": p.name or "",
+                    "status": p.status or "",
+                    "network_id": p.network_id,
+                    "device_owner": p.device_owner or "",
+                    "device_id": p.device_id or "",
+                    "mac_address": p.mac_address or "",
+                    "fixed_ips": p.fixed_ips or [],
+                    "project_id": getattr(p, 'project_id', None),
+                }
+                for p in conn.network.ports()
+            ]
+        return await asyncio.to_thread(_list)
+    except Exception:
+        raise HTTPException(status_code=500, detail="포트 목록 조회 실패")
 
 
 @router.get("/quotas/{project_id}", dependencies=[Depends(_require_admin)])

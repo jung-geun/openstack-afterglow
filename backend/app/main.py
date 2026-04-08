@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import logging.handlers
@@ -211,3 +212,112 @@ app.include_router(site_router, prefix="/api/site-config", tags=["site"])
 @app.get("/api/health")
 async def health():
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# 시계열 스냅샷 백그라운드 워커
+# ---------------------------------------------------------------------------
+
+async def _collect_snapshot() -> None:
+    """관리자 자격으로 리소스 현황을 수집하여 Redis 시계열에 저장."""
+    from app.services import timeseries
+    from app.config import get_settings
+    from app.services import keystone
+
+    settings = get_settings()
+    try:
+        import openstack
+        conn = openstack.connect(
+            auth_url=settings.os_auth_url,
+            username=settings.os_username,
+            password=settings.os_password,
+            project_name=settings.os_project_name,
+            user_domain_name=settings.os_user_domain_name,
+            project_domain_name=settings.os_project_domain_name,
+        )
+    except Exception:
+        _logger.warning("시계열 스냅샷: OpenStack 연결 실패", exc_info=True)
+        return
+
+    try:
+        # 인스턴스 상태별 집계
+        def _count_instances():
+            counts: dict[str, int] = {"total": 0, "active": 0, "shutoff": 0, "error": 0, "shelved": 0, "other": 0}
+            for s in conn.compute.servers(all_projects=True, details=True):
+                counts["total"] += 1
+                st = (s.status or "").upper()
+                if st == "ACTIVE":
+                    counts["active"] += 1
+                elif st == "SHUTOFF":
+                    counts["shutoff"] += 1
+                elif st == "ERROR":
+                    counts["error"] += 1
+                elif st in ("SHELVED", "SHELVED_OFFLOADED"):
+                    counts["shelved"] += 1
+                else:
+                    counts["other"] += 1
+            return counts
+
+        def _count_volumes():
+            counts: dict[str, int] = {"total": 0, "in_use": 0, "available": 0, "other": 0}
+            for v in conn.block_storage.volumes(all_projects=True):
+                counts["total"] += 1
+                st = (v.status or "").lower()
+                if st == "in-use":
+                    counts["in_use"] += 1
+                elif st == "available":
+                    counts["available"] += 1
+                else:
+                    counts["other"] += 1
+            return counts
+
+        def _count_shares():
+            total = 0
+            try:
+                from app.services import manila
+                shares = manila.list_shares(conn, all_tenants=True)
+                total = len(shares)
+            except Exception:
+                pass
+            return {"total": total}
+
+        def _count_networks():
+            nets = sum(1 for _ in conn.network.networks())
+            routers = sum(1 for _ in conn.network.routers())
+            fips_total = sum(1 for _ in conn.network.ips())
+            fips_used = sum(1 for f in conn.network.ips() if f.port_id)
+            return {"total": nets, "routers": routers, "floating_ips_total": fips_total, "floating_ips_used": fips_used}
+
+        inst_data = await asyncio.to_thread(_count_instances)
+        vol_data = await asyncio.to_thread(_count_volumes)
+        share_data = await asyncio.to_thread(_count_shares)
+        net_data = await asyncio.to_thread(_count_networks)
+
+        await timeseries.record_snapshot("instances", inst_data)
+        await timeseries.record_snapshot("volumes", vol_data)
+        await timeseries.record_snapshot("shares", share_data)
+        await timeseries.record_snapshot("networks", net_data)
+
+        _logger.info("시계열 스냅샷 수집 완료: instances=%d volumes=%d shares=%d networks=%d",
+                     inst_data["total"], vol_data["total"], share_data["total"], net_data["total"])
+    except Exception:
+        _logger.warning("시계열 스냅샷 수집 오류", exc_info=True)
+    finally:
+        try:
+            await asyncio.to_thread(conn.close)
+        except Exception:
+            pass
+
+
+async def _snapshot_loop() -> None:
+    """1시간 간격으로 시계열 스냅샷 수집."""
+    # 시작 직후 첫 번째 수집
+    await asyncio.sleep(30)
+    while True:
+        await _collect_snapshot()
+        await asyncio.sleep(3600)
+
+
+@app.on_event("startup")
+async def start_snapshot_worker():
+    asyncio.create_task(_snapshot_loop())

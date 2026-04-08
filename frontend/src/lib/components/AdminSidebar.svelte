@@ -8,6 +8,7 @@
 		{
 			label: 'Compute',
 			prefix: '/admin/instances',
+			icon: 'M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2',
 			open: false,
 			items: [
 				{ label: '전체 인스턴스', href: '/admin/instances' },
@@ -17,6 +18,7 @@
 		{
 			label: '스토리지',
 			prefix: '/admin/volumes',
+			icon: 'M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4',
 			open: false,
 			items: [
 				{ label: '전체 볼륨', href: '/admin/volumes' },
@@ -26,14 +28,20 @@
 		{
 			label: '네트워크',
 			prefix: '/admin/topology',
+			icon: 'M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9',
 			open: false,
 			items: [
 				{ label: '토폴로지', href: '/admin/topology' },
+				{ label: '네트워크', href: '/admin/networks' },
+				{ label: 'Floating IP', href: '/admin/floating-ips' },
+				{ label: '라우터', href: '/admin/routers' },
+				{ label: '포트', href: '/admin/ports' },
 			],
 		},
 		{
 			label: '컨테이너',
 			prefix: '/admin/containers',
+			icon: 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4',
 			open: false,
 			items: [
 				{ label: '전체 컨테이너', href: '/admin/containers' },
@@ -73,6 +81,7 @@
 			href="/admin"
 			class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors {$page.url.pathname === '/admin' ? 'bg-blue-600/20 text-blue-400 font-medium' : 'text-gray-400 hover:text-white hover:bg-gray-800'}"
 		>
+			<svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
 			개요
 		</a>
 
@@ -83,7 +92,12 @@
 					onclick={() => section.open = !section.open}
 					class="flex items-center justify-between w-full px-3 py-2 rounded-lg text-sm transition-colors {$page.url.pathname.startsWith(section.prefix) || section.items.some(item => $page.url.pathname.startsWith(item.href)) ? 'text-white' : 'text-gray-400 hover:text-white hover:bg-gray-800'}"
 				>
-					<span>{section.label}</span>
+					<div class="flex items-center gap-1.5">
+						{#if section.icon}
+							<svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d={section.icon}></path></svg>
+						{/if}
+						<span>{section.label}</span>
+					</div>
 					<span class="text-xs text-gray-600">{section.open ? '▾' : '▸'}</span>
 				</button>
 
