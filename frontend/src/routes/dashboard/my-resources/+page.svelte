@@ -30,6 +30,10 @@
 		instance_count: number;
 		volume_count: number;
 		storage_gb: number;
+		vcpus: number;
+		ram_mb: number;
+		network_count: number;
+		fip_count: number;
 		error?: boolean;
 	}
 
@@ -40,11 +44,15 @@
 			instances: number;
 			volumes: number;
 			storage_gb: number;
+			vcpus: number;
+			ram_mb: number;
+			networks: number;
+			floating_ips: number;
 		};
 	}
 
 	let data = $state<UserDashboardSummary | null>(null);
-	let loading = $state(true);
+	let initialLoading = $state(true);
 	let refreshing = $state(false);
 	let error = $state('');
 	let expandedProject = $state<string | null>(null);
@@ -53,14 +61,14 @@
 	const projectId = $derived($auth.projectId ?? undefined);
 
 	async function load(opts?: { refresh?: boolean }) {
-		loading = true;
 		error = '';
 		try {
-			data = await api.get<UserDashboardSummary>('/api/user-dashboard/summary', token, projectId, opts);
+			const result = await api.get<UserDashboardSummary>('/api/user-dashboard/summary', token, projectId, opts);
+			data = result;
 		} catch (e) {
 			error = e instanceof ApiError ? e.message : '데이터를 불러올 수 없습니다';
 		} finally {
-			loading = false;
+			initialLoading = false;
 		}
 	}
 
@@ -82,10 +90,15 @@
 			case 'ACTIVE': return 'text-green-400';
 			case 'SHUTOFF': return 'text-gray-400';
 			case 'ERROR': return 'text-red-400';
-			case 'available': return 'text-green-400';
-			case 'in-use': return 'text-blue-400';
+			case 'AVAILABLE': return 'text-green-400';
+			case 'IN-USE': return 'text-blue-400';
 			default: return 'text-yellow-400';
 		}
+	}
+
+	function formatRam(mb: number): string {
+		if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`;
+		return `${mb} MB`;
 	}
 
 	$effect(() => {
@@ -107,25 +120,38 @@
 		<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>
 	{/if}
 
-	{#if loading}
+	{#if initialLoading}
 		<LoadingSkeleton variant="table" rows={6} />
 	{:else if data}
 		<!-- 통합 요약 카드 -->
-		<div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+		<div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 mb-8">
 			<div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
-				<div class="text-xs text-gray-400 uppercase tracking-wide mb-1">전체 인스턴스</div>
+				<div class="text-xs text-gray-400 uppercase tracking-wide mb-1">인스턴스</div>
 				<div class="text-2xl font-bold text-white">{data.totals.instances}</div>
-				<div class="text-xs text-gray-500 mt-1">{data.projects.length}개 프로젝트</div>
 			</div>
 			<div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
-				<div class="text-xs text-gray-400 uppercase tracking-wide mb-1">전체 볼륨</div>
+				<div class="text-xs text-gray-400 uppercase tracking-wide mb-1">CPU</div>
+				<div class="text-2xl font-bold text-white">{data.totals.vcpus} <span class="text-base font-normal text-gray-400">cores</span></div>
+			</div>
+			<div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+				<div class="text-xs text-gray-400 uppercase tracking-wide mb-1">RAM</div>
+				<div class="text-2xl font-bold text-white">{formatRam(data.totals.ram_mb)}</div>
+			</div>
+			<div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+				<div class="text-xs text-gray-400 uppercase tracking-wide mb-1">볼륨</div>
 				<div class="text-2xl font-bold text-white">{data.totals.volumes}</div>
-				<div class="text-xs text-gray-500 mt-1">{data.totals.storage_gb} GB</div>
 			</div>
 			<div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
 				<div class="text-xs text-gray-400 uppercase tracking-wide mb-1">스토리지</div>
 				<div class="text-2xl font-bold text-white">{data.totals.storage_gb} <span class="text-base font-normal text-gray-400">GB</span></div>
-				<div class="text-xs text-gray-500 mt-1">전체 볼륨 합계</div>
+			</div>
+			<div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+				<div class="text-xs text-gray-400 uppercase tracking-wide mb-1">네트워크</div>
+				<div class="text-2xl font-bold text-white">{data.totals.networks}</div>
+			</div>
+			<div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+				<div class="text-xs text-gray-400 uppercase tracking-wide mb-1">Floating IP</div>
+				<div class="text-2xl font-bold text-white">{data.totals.floating_ips}</div>
 			</div>
 		</div>
 

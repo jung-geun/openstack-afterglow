@@ -96,7 +96,7 @@ def get_share_quota(conn) -> dict:
     try:
         client = get_client(conn)
         project_id = getattr(conn, "_union_project_id", None) or conn.current_project_id
-        data = client.get(f"quota-sets/{project_id}?usage=true")
+        data = client.get(f"quota-sets/{project_id}", params={"usage": "true"})
         quota = data.get("quota_set", {})
 
         def _q(key):

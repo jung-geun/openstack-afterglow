@@ -44,6 +44,7 @@ async def list_services(conn: openstack.connection.Connection = Depends(get_os_c
             "shared_file_system": [],
             "orchestration": [],
             "container": [],
+            "container_infra": [],
             "endpoints": [],
             "storage_pools": [],
         }
@@ -169,6 +170,27 @@ async def list_services(conn: openstack.connection.Connection = Depends(get_os_c
                         })
             except Exception:
                 _logger.warning("Zun 서비스 조회 실패", exc_info=True)
+
+        # ── Magnum (container-infra) services ───────────────────────────────
+        if settings.service_magnum_enabled:
+            try:
+                magnum_ep = _get_ep(conn, "container-infra")
+                if magnum_ep:
+                    magnum_base = _strip_version(magnum_ep)
+                    resp = conn.session.get(f"{magnum_base}/v1/mservices")
+                    for svc in resp.json().get("mservices", []):
+                        result["container_infra"].append({
+                            "id": svc.get("id", ""),
+                            "binary": svc.get("binary", ""),
+                            "host": svc.get("host", ""),
+                            "status": "disabled" if svc.get("disabled", False) else "enabled",
+                            "state": svc.get("state", ""),
+                            "zone": "",
+                            "updated_at": svc.get("updated_at") or None,
+                            "disabled_reason": svc.get("disabled_reason") or None,
+                        })
+            except Exception:
+                _logger.warning("Magnum 서비스 조회 실패", exc_info=True)
 
         # ── Keystone API Endpoints (service catalog) — openstacksdk 직접 사용 ──
         try:

@@ -6,28 +6,38 @@ import openstack
 
 from app.api.deps import get_os_conn
 from app.services import keystone
-from app.services.cache import cached_call, ttl_normal
+from app.services.cache import cached_call, ttl_normal, ttl_fast
 
 _logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
-def _list_servers_for_project(conn: openstack.connection.Connection) -> list[dict]:
-    return [
-        {
+def _list_servers_for_project(conn: openstack.connection.Connection, user_id: str) -> list[dict]:
+    results = []
+    for s in conn.compute.servers(user_id=user_id):
+        flavor = getattr(s, "flavor", None) or {}
+        if isinstance(flavor, dict):
+            vcpus = flavor.get("vcpus", 0) or 0
+            ram = flavor.get("ram", 0) or 0
+            flavor_name = flavor.get("original_name") or flavor.get("name", "")
+        else:
+            vcpus = 0
+            ram = 0
+            flavor_name = getattr(s, "flavor_name", "") or ""
+        results.append({
             "id": s.id,
             "name": s.name or "",
             "status": s.status or "",
-            "flavor_id": getattr(s, "flavor_id", "") or "",
-            "flavor_name": getattr(s, "flavor_name", "") or "",
+            "flavor_name": flavor_name,
+            "vcpus": vcpus,
+            "ram_mb": ram,
             "created_at": getattr(s, "created_at", None) or "",
-        }
-        for s in conn.compute.servers()
-    ]
+        })
+    return results
 
 
-def _list_volumes_for_project(conn: openstack.connection.Connection) -> list[dict]:
+def _list_volumes_for_project(conn: openstack.connection.Connection, user_id: str) -> list[dict]:
     return [
         {
             "id": v.id,
@@ -38,34 +48,56 @@ def _list_volumes_for_project(conn: openstack.connection.Connection) -> list[dic
             "created_at": getattr(v, "created_at", None) or "",
         }
         for v in conn.block_storage.volumes()
+        if getattr(v, "user_id", None) == user_id
     ]
 
 
-async def _query_project(token: str, project_id: str, project_name: str, refresh: bool = False) -> dict:
-    """단일 프로젝트의 인스턴스/볼륨 정보를 비동기로 조회."""
+def _count_networks(conn: openstack.connection.Connection, project_id: str) -> int:
+    return sum(
+        1 for n in conn.network.networks()
+        if getattr(n, "project_id", None) == project_id
+    )
+
+
+def _count_floating_ips(conn: openstack.connection.Connection, project_id: str) -> int:
+    return sum(1 for _ in conn.network.ips(project_id=project_id))
+
+
+async def _query_project(token: str, user_id: str, project_id: str, project_name: str, refresh: bool = False) -> dict:
+    """단일 프로젝트의 인스턴스/볼륨/네트워크/FIP 정보를 비동기로 조회."""
     try:
         proj_conn = await asyncio.to_thread(
             keystone.get_openstack_connection, token, project_id
         )
         try:
-            servers, volumes = await asyncio.gather(
+            servers, volumes, network_count, fip_count = await asyncio.gather(
                 cached_call(
-                    f"union:user-dashboard:{project_id}:servers", ttl_normal(),
-                    lambda c=proj_conn: _list_servers_for_project(c),
+                    f"union:user-dashboard:{project_id}:{user_id}:servers", ttl_normal(),
+                    lambda c=proj_conn, u=user_id: _list_servers_for_project(c, u),
                     refresh=refresh,
                 ),
                 cached_call(
-                    f"union:user-dashboard:{project_id}:volumes", ttl_normal(),
-                    lambda c=proj_conn: _list_volumes_for_project(c),
+                    f"union:user-dashboard:{project_id}:{user_id}:volumes", ttl_normal(),
+                    lambda c=proj_conn, u=user_id: _list_volumes_for_project(c, u),
+                    refresh=refresh,
+                ),
+                cached_call(
+                    f"union:user-dashboard:{project_id}:networks", ttl_normal(),
+                    lambda c=proj_conn, pid=project_id: _count_networks(c, pid),
+                    refresh=refresh,
+                ),
+                cached_call(
+                    f"union:user-dashboard:{project_id}:fips", ttl_fast(),
+                    lambda c=proj_conn, pid=project_id: _count_floating_ips(c, pid),
                     refresh=refresh,
                 ),
             )
         finally:
             await asyncio.to_thread(proj_conn.close)
 
-        total_vcpus = 0
-        total_ram_mb = 0
-        # 활성 인스턴스의 flavor 정보는 flavor_name만 있으므로 간단 집계 생략
+        total_vcpus = sum(s.get("vcpus", 0) for s in servers)
+        total_ram_mb = sum(s.get("ram_mb", 0) for s in servers)
+
         return {
             "project_id": project_id,
             "project_name": project_name,
@@ -74,6 +106,10 @@ async def _query_project(token: str, project_id: str, project_name: str, refresh
             "instance_count": len(servers),
             "volume_count": len(volumes),
             "storage_gb": sum(v["size"] for v in volumes),
+            "vcpus": total_vcpus,
+            "ram_mb": total_ram_mb,
+            "network_count": network_count,
+            "fip_count": fip_count,
         }
     except Exception:
         _logger.warning("프로젝트 %s 데이터 조회 실패", project_id, exc_info=True)
@@ -85,6 +121,10 @@ async def _query_project(token: str, project_id: str, project_name: str, refresh
             "instance_count": 0,
             "volume_count": 0,
             "storage_gb": 0,
+            "vcpus": 0,
+            "ram_mb": 0,
+            "network_count": 0,
+            "fip_count": 0,
             "error": True,
         }
 
@@ -97,6 +137,7 @@ async def get_user_dashboard_summary(
     """사용자가 소속된 모든 프로젝트의 인스턴스/볼륨 통합 조회."""
     token = conn._union_token
     current_project_id = conn._union_project_id
+    user_id = conn._union_user_id
 
     try:
         projects = await asyncio.to_thread(keystone.list_projects, token)
@@ -105,7 +146,7 @@ async def get_user_dashboard_summary(
 
     # 병렬로 각 프로젝트 데이터 조회
     tasks = [
-        _query_project(token, p["id"], p["name"], refresh=refresh)
+        _query_project(token, user_id, p["id"], p["name"], refresh=refresh)
         for p in projects
     ]
     project_results = await asyncio.gather(*tasks)
@@ -114,6 +155,10 @@ async def get_user_dashboard_summary(
         "instances": sum(p["instance_count"] for p in project_results),
         "volumes": sum(p["volume_count"] for p in project_results),
         "storage_gb": sum(p["storage_gb"] for p in project_results),
+        "vcpus": sum(p["vcpus"] for p in project_results),
+        "ram_mb": sum(p["ram_mb"] for p in project_results),
+        "networks": sum(p["network_count"] for p in project_results),
+        "floating_ips": sum(p["fip_count"] for p in project_results),
     }
 
     return {

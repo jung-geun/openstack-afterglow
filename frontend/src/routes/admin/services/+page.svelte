@@ -42,7 +42,7 @@
 		allocated_capacity_gb: number;
 	}
 
-	type TabKey = 'compute' | 'network' | 'block_storage' | 'shared_file_system' | 'orchestration' | 'container' | 'endpoints' | 'storage_pools';
+	type TabKey = 'compute' | 'network' | 'block_storage' | 'shared_file_system' | 'orchestration' | 'container' | 'container_infra' | 'endpoints' | 'storage_pools';
 
 	let computeServices = $state<Service[]>([]);
 	let blockStorageServices = $state<Service[]>([]);
@@ -50,6 +50,7 @@
 	let sharedFsServices = $state<Service[]>([]);
 	let orchestrationServices = $state<Service[]>([]);
 	let containerServices = $state<Service[]>([]);
+	let magnumServices = $state<Service[]>([]);
 	let endpoints = $state<EndpointGroup[]>([]);
 	let storagePools = $state<StoragePool[]>([]);
 
@@ -69,6 +70,7 @@
 		{ key: 'shared_file_system', label: 'File Storage', count: () => sharedFsServices.length },
 		{ key: 'orchestration', label: 'Orchestrator', count: () => orchestrationServices.length },
 		{ key: 'container', label: 'Container', count: () => containerServices.length },
+		{ key: 'container_infra', label: 'Magnum', count: () => magnumServices.length },
 		{ key: 'endpoints', label: 'API Endpoints', count: () => endpoints.length },
 		{ key: 'storage_pools', label: 'Storage Pools', count: () => storagePools.length },
 	];
@@ -82,6 +84,7 @@
 				shared_file_system: Service[];
 				orchestration: Service[];
 				container: Service[];
+				container_infra: Service[];
 				endpoints: EndpointGroup[];
 				storage_pools: StoragePool[];
 			}>('/api/admin/services', token, projectId);
@@ -91,6 +94,7 @@
 			sharedFsServices = res.shared_file_system || [];
 			orchestrationServices = res.orchestration || [];
 			containerServices = res.container || [];
+			magnumServices = res.container_infra || [];
 			endpoints = res.endpoints || [];
 			storagePools = res.storage_pools || [];
 			lastRefresh = new Date();
@@ -101,6 +105,7 @@
 			sharedFsServices = [];
 			orchestrationServices = [];
 			containerServices = [];
+			magnumServices = [];
 			endpoints = [];
 			storagePools = [];
 		} finally {
@@ -355,6 +360,40 @@
 									<td class="py-2 pr-4 text-gray-400">{s.zone}</td>
 									<td class="py-2 pr-4"><span class="px-1.5 py-0.5 rounded text-xs font-medium {s.status === 'enabled' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{s.status}</span></td>
 									<td class="py-2 pr-4"><span class="px-1.5 py-0.5 rounded text-xs font-medium {s.state === 'up' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{s.state}</span></td>
+									<td class="py-2 text-gray-500">{fmtTime(s.updated_at)}</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			{/if}
+		{/if}
+
+		<!-- Magnum (Container Infra) -->
+		{#if activeTab === 'container_infra'}
+			{#if magnumServices.length === 0}
+				<div class="text-gray-500 text-sm py-8 text-center">Magnum 서비스가 없거나 접근할 수 없습니다</div>
+			{:else}
+				<div class="overflow-x-auto">
+					<table class="w-full text-sm">
+						<thead>
+							<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
+								<th class="text-left py-2 pr-4">Binary</th>
+								<th class="text-left py-2 pr-4">Host</th>
+								<th class="text-left py-2 pr-4">Status</th>
+								<th class="text-left py-2 pr-4">State</th>
+								<th class="text-left py-2 pr-4">Disabled Reason</th>
+								<th class="text-left py-2">Updated</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each magnumServices as s (s.id || s.binary + s.host)}
+								<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/30">
+									<td class="py-2 pr-4 text-white font-mono">{s.binary}</td>
+									<td class="py-2 pr-4 text-gray-300">{s.host}</td>
+									<td class="py-2 pr-4"><span class="px-1.5 py-0.5 rounded text-xs font-medium {s.status === 'enabled' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{s.status}</span></td>
+									<td class="py-2 pr-4"><span class="px-1.5 py-0.5 rounded text-xs font-medium {s.state === 'up' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{s.state}</span></td>
+									<td class="py-2 pr-4 text-gray-500">{s.disabled_reason || '-'}</td>
 									<td class="py-2 text-gray-500">{fmtTime(s.updated_at)}</td>
 								</tr>
 							{/each}
