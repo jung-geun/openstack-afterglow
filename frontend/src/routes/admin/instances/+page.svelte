@@ -6,6 +6,7 @@
 	import TimeSeriesChart from '$lib/components/TimeSeriesChart.svelte';
 	import InstanceDetailPanel from '$lib/components/InstanceDetailPanel.svelte';
 	import { formatNumber } from '$lib/utils/format';
+	import { projectNames } from '$lib/stores/projectNames';
 
 	interface AdminInstance {
 		id: string;
@@ -48,6 +49,14 @@
 	let markerStack = $state<string[]>([]);
 	let nextMarker = $state<string | null>(null);
 	let expandedError = $state<string | null>(null);
+	let copiedProjectId = $state<string | null>(null);
+
+	function copyProjectId(id: string) {
+		navigator.clipboard.writeText(id).then(() => {
+			copiedProjectId = id;
+			setTimeout(() => { copiedProjectId = null; }, 1500);
+		});
+	}
 
 	// 필터
 	let hostFilter = $state('');
@@ -111,6 +120,7 @@
 	onMount(() => {
 		load();
 		loadTimeseries(tsRange);
+		projectNames.load(token, projectId);
 	});
 </script>
 
@@ -206,7 +216,19 @@
 							</td>
 							<td class="py-2 pr-4 text-gray-400">{s.flavor || '-'}</td>
 							<td class="py-2 pr-4 text-gray-400">{s.host || '-'}</td>
-							<td class="py-2 pr-4 text-gray-500 font-mono">{s.project_id?.slice(0, 8) ?? '-'}</td>
+							<td class="py-2 pr-4">
+								<button
+									onclick={(e) => { e.stopPropagation(); if (s.project_id) copyProjectId(s.project_id); }}
+									class="text-gray-400 hover:text-blue-400 transition-colors cursor-pointer text-left"
+									title={s.project_id ?? ''}
+								>
+									{#if copiedProjectId === s.project_id}
+										<span class="text-green-400 text-xs">복사됨</span>
+									{:else}
+										<span class="text-xs">{s.project_id ? ($projectNames.get(s.project_id) ?? s.project_id.slice(0, 8)) : '-'}</span>
+									{/if}
+								</button>
+							</td>
 							<td class="py-2 text-gray-500">{s.created_at?.slice(0, 10) ?? '-'}</td>
 						</tr>
 					{/each}

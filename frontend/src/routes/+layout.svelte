@@ -127,7 +127,9 @@
 			</svg>
 		</button>
 		<div class="ml-auto flex items-center gap-3">
-			<div class="hidden sm:block"><ProjectSelector /></div>
+			{#if !$page.url.pathname.startsWith('/admin')}
+				<div class="hidden sm:block"><ProjectSelector /></div>
+			{/if}
 			{#if $isAdmin}
 				{#if $page.url.pathname.startsWith('/admin')}
 					<a href="/dashboard" class="hidden md:flex items-center gap-1.5 px-3 py-1 bg-gray-800 border border-blue-700 hover:border-blue-500 text-blue-400 hover:text-blue-300 text-xs rounded-md transition-colors">

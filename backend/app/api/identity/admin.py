@@ -89,9 +89,21 @@ async def admin_overview(conn: openstack.connection.Connection = Depends(get_os_
             used_vcpus = sum(h.get("vcpus_used", 0) or 0 for h in data)
             total_ram = sum(h.get("memory_mb", 0) or 0 for h in data)
             used_ram = sum(h.get("memory_mb_used", 0) or 0 for h in data)
-            # Ceph: 모든 hypervisor가 동일한 pool 용량을 보고하므로 host 수로 나눔
-            total_disk = sum(h.get("local_gb", 0) or 0 for h in data) // host_count
-            used_disk = sum(h.get("local_gb_used", 0) or 0 for h in data) // host_count
+            # Cinder 볼륨 기반 디스크 사용량 (Ceph 환경에서 local_gb는 항상 0)
+            used_disk = 0
+            total_disk = 0
+            try:
+                for v in conn.block_storage.volumes(all_projects=True):
+                    used_disk += (v.size or 0)
+            except Exception:
+                pass
+            try:
+                bs_endpoint = conn.block_storage.get_endpoint()
+                limits_resp = conn.session.get(f"{bs_endpoint}/limits")
+                abs_limits = limits_resp.json().get("limits", {}).get("absolute", {})
+                total_disk = abs_limits.get("maxTotalVolumeGigabytes", 0)
+            except Exception:
+                pass
             running_vms = sum(h.get("running_vms", 0) or 0 for h in data)
 
             # CPU: Placement API에서 물리 코어 수 및 allocation_ratio 조회
@@ -115,14 +127,32 @@ async def admin_overview(conn: openstack.connection.Connection = Depends(get_os_
                 physical_vcpus = sum(h.get("vcpus", 0) or 0 for h in data)
                 allowed_vcpus_total = physical_vcpus
 
-            # GPU 인스턴스: flavor 이름에 'gpu' 포함 여부로 집계
+            # GPU 인스턴스 + 상태별 집계 (microversion 2.53 raw API 재사용)
             gpu_instances = 0
+            instance_stats = {"total": 0, "active": 0, "shutoff": 0, "error": 0, "other": 0}
             try:
-                for s in conn.compute.servers(all_projects=True):
-                    flavor = getattr(s, 'flavor', {}) or {}
-                    fname = flavor.get('original_name', '') or ''
-                    if 'gpu' in fname.lower():
+                _ep = conn.compute.get_endpoint()
+                _params = {"all_tenants": "1", "limit": "1000"}
+                _resp = conn.session.get(
+                    f"{_ep}/servers/detail",
+                    params=_params,
+                    headers={"OpenStack-API-Version": "compute 2.53"},
+                )
+                for s in _resp.json().get("servers", []):
+                    flavor = s.get("flavor") or {}
+                    fname = (flavor.get("original_name") or flavor.get("id") or "").lower()
+                    if "gpu" in fname:
                         gpu_instances += 1
+                    instance_stats["total"] += 1
+                    st = (s.get("status") or "").upper()
+                    if st == "ACTIVE":
+                        instance_stats["active"] += 1
+                    elif st == "SHUTOFF":
+                        instance_stats["shutoff"] += 1
+                    elif st == "ERROR":
+                        instance_stats["error"] += 1
+                    else:
+                        instance_stats["other"] += 1
             except Exception:
                 pass
 
@@ -145,6 +175,7 @@ async def admin_overview(conn: openstack.connection.Connection = Depends(get_os_
                 "hypervisor_count": host_count,
                 "running_vms": running_vms,
                 "gpu_instances": gpu_instances,
+                "instance_stats": instance_stats,
                 "vcpus": {"total": physical_vcpus, "allowed": allowed_vcpus_total, "used": used_vcpus},
                 "ram_gb": {"total": round(total_ram / 1024, 1), "used": round(used_ram / 1024, 1)},
                 "disk_gb": {"total": total_disk, "used": used_disk},
@@ -196,32 +227,36 @@ async def list_all_instances(
     """전체 프로젝트의 인스턴스 목록 (페이지네이션)."""
     try:
         def _list():
-            kwargs: dict = {"all_projects": True, "limit": limit}
+            endpoint = conn.compute.get_endpoint()
+            params: dict = {"all_tenants": "1", "limit": str(limit)}
             if marker:
-                kwargs["marker"] = marker
+                params["marker"] = marker
             if project_id:
-                kwargs["project_id"] = project_id
+                params["tenant_id"] = project_id
+            resp = conn.session.get(
+                f"{endpoint}/servers/detail",
+                params=params,
+                headers={"OpenStack-API-Version": "compute 2.53"},
+            )
+            servers = resp.json().get("servers", [])
             items = []
-            for s in itertools.islice(conn.compute.servers(**kwargs), limit):
+            for s in servers[:limit]:
                 fault_info = None
-                if (s.status or "").upper() == "ERROR":
-                    fault = getattr(s, 'fault', None)
+                if (s.get("status") or "").upper() == "ERROR":
+                    fault = s.get("fault") or {}
                     if isinstance(fault, dict) and fault.get("message"):
                         fault_info = fault.get("message", "")
-                host = getattr(s, 'host', None)
-                if not host:
-                    raw = getattr(s, '_body', {}) or {}
-                    if isinstance(raw, dict):
-                        host = raw.get('OS-EXT-SRV-ATTR:host')
+                host = s.get("OS-EXT-SRV-ATTR:host") or s.get("host")
+                flavor = s.get("flavor") or {}
                 items.append({
-                    "id": s.id,
-                    "name": s.name or "",
-                    "status": s.status or "",
-                    "project_id": getattr(s, 'project_id', None),
-                    "user_id": getattr(s, 'user_id', None),
-                    "flavor": getattr(s, 'flavor', {}).get('original_name', '') if isinstance(getattr(s, 'flavor', None), dict) else '',
+                    "id": s.get("id", ""),
+                    "name": s.get("name") or "",
+                    "status": s.get("status") or "",
+                    "project_id": s.get("tenant_id") or s.get("project_id"),
+                    "user_id": s.get("user_id"),
+                    "flavor": flavor.get("original_name") or flavor.get("id") or "",
                     "host": host,
-                    "created_at": str(s.created_at) if getattr(s, 'created_at', None) else None,
+                    "created_at": s.get("created"),
                     "fault": fault_info,
                 })
             next_marker = items[-1]["id"] if len(items) == limit else None
@@ -387,6 +422,72 @@ async def get_quotas(project_id: str, conn: openstack.connection.Connection = De
         return await asyncio.to_thread(_get)
     except Exception as e:
         raise HTTPException(status_code=500, detail="쿼터 조회 실패")
+
+
+@router.get("/overview/projects", dependencies=[Depends(require_admin)])
+async def admin_overview_projects(conn: openstack.connection.Connection = Depends(get_os_conn)):
+    """프로젝트별 리소스 사용량 및 쿼터."""
+    try:
+        def _collect():
+            # 프로젝트별 GPU 인스턴스 수 집계
+            gpu_by_project: dict = {}
+            try:
+                endpoint = conn.compute.get_endpoint()
+                params = {"all_tenants": "1", "limit": "1000"}
+                resp = conn.session.get(
+                    f"{endpoint}/servers/detail",
+                    params=params,
+                    headers={"OpenStack-API-Version": "compute 2.53"},
+                )
+                for s in resp.json().get("servers", []):
+                    pid = s.get("tenant_id") or s.get("project_id") or ""
+                    fname = (s.get("flavor") or {}).get("original_name") or ""
+                    if "gpu" in fname.lower():
+                        gpu_by_project[pid] = gpu_by_project.get(pid, 0) + 1
+            except Exception:
+                pass
+
+            compute_endpoint = conn.compute.get_endpoint()
+            bs_endpoint = conn.block_storage.get_endpoint()
+
+            result = []
+            for p in conn.identity.projects():
+                pid = p.id
+                row: dict = {
+                    "project_id": pid,
+                    "project_name": p.name or "",
+                    "cpu": {"used": 0, "quota": -1},
+                    "ram_mb": {"used": 0, "quota": -1},
+                    "instances": {"used": 0, "quota": -1},
+                    "disk_gb": {"used": 0, "quota": -1},
+                    "gpu_instances": gpu_by_project.get(pid, 0),
+                }
+                try:
+                    cq_resp = conn.session.get(f"{compute_endpoint}/os-quota-sets/{pid}/detail")
+                    qs = cq_resp.json().get("quota_set", {})
+                    cores = qs.get("cores", {})
+                    ram = qs.get("ram", {})
+                    instances = qs.get("instances", {})
+                    row["cpu"] = {"used": cores.get("in_use", 0), "quota": cores.get("limit", -1)}
+                    row["ram_mb"] = {"used": ram.get("in_use", 0), "quota": ram.get("limit", -1)}
+                    row["instances"] = {"used": instances.get("in_use", 0), "quota": instances.get("limit", -1)}
+                except Exception:
+                    pass
+                try:
+                    bq_resp = conn.session.get(f"{bs_endpoint}/os-quota-sets/{pid}", params={"usage": "true"})
+                    bqs = bq_resp.json().get("quota_set", {})
+                    gb = bqs.get("gigabytes", {})
+                    gb_used = gb.get("in_use", 0) if isinstance(gb, dict) else 0
+                    gb_limit = gb.get("limit", -1) if isinstance(gb, dict) else -1
+                    row["disk_gb"] = {"used": gb_used, "quota": gb_limit}
+                except Exception:
+                    pass
+                result.append(row)
+            return result
+        return await asyncio.to_thread(_collect)
+    except Exception:
+        _logger.warning("프로젝트별 리소스 조회 실패", exc_info=True)
+        raise HTTPException(status_code=500, detail="프로젝트별 리소스 조회 실패")
 
 
 # ===========================================================================

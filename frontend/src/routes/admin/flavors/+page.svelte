@@ -3,6 +3,7 @@
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import { projectNames } from '$lib/stores/projectNames';
 
 	interface Flavor {
 		id: string;
@@ -19,6 +20,7 @@
 	interface FlavorAccess {
 		flavor_id: string;
 		project_id: string;
+		project_name: string;
 	}
 	interface PagedResponse<T> {
 		items: T[];
@@ -40,22 +42,54 @@
 	let diskFilter = $state('');
 	let gpuFilter = $state('');
 
+	// 정렬
+	let sortColumn = $state('');
+	let sortAsc = $state(true);
+
+	function toggleSort(col: string) {
+		if (sortColumn === col) {
+			sortAsc = !sortAsc;
+		} else {
+			sortColumn = col;
+			sortAsc = true;
+		}
+	}
+
+	function sortIcon(col: string): string {
+		if (sortColumn !== col) return '↕';
+		return sortAsc ? '↑' : '↓';
+	}
+
 	let filteredFlavors = $derived(
-		flavors.filter(f => {
-			if (nameFilter && !f.name.toLowerCase().includes(nameFilter.toLowerCase())) return false;
-			if (vcpuFilter && f.vcpus !== parseInt(vcpuFilter)) return false;
-			if (ramFilter) {
-				const ramMB = parseInt(ramFilter);
-				if (f.ram < ramMB * 0.9 || f.ram > ramMB * 1.1) return false;
-			}
-			if (diskFilter) {
-				const diskGB = parseInt(diskFilter);
-				if (f.disk < diskGB * 0.9 || f.disk > diskGB * 1.1) return false;
-			}
-			if (gpuFilter === 'yes' && !f.is_gpu) return false;
-			if (gpuFilter === 'no' && f.is_gpu) return false;
-			return true;
-		})
+		flavors
+			.filter(f => {
+				if (nameFilter && !f.name.toLowerCase().includes(nameFilter.toLowerCase())) return false;
+				if (vcpuFilter && f.vcpus !== parseInt(vcpuFilter)) return false;
+				if (ramFilter) {
+					const ramMB = parseInt(ramFilter);
+					if (f.ram < ramMB * 0.9 || f.ram > ramMB * 1.1) return false;
+				}
+				if (diskFilter) {
+					const diskGB = parseInt(diskFilter);
+					if (f.disk < diskGB * 0.9 || f.disk > diskGB * 1.1) return false;
+				}
+				if (gpuFilter === 'yes' && !f.is_gpu) return false;
+				if (gpuFilter === 'no' && f.is_gpu) return false;
+				return true;
+			})
+			.toSorted((a, b) => {
+				if (!sortColumn) return 0;
+				let va: string | number, vb: string | number;
+				if (sortColumn === 'is_public') {
+					va = a.is_public ? 1 : 0;
+					vb = b.is_public ? 1 : 0;
+				} else {
+					va = (a as Record<string, unknown>)[sortColumn] as string | number;
+					vb = (b as Record<string, unknown>)[sortColumn] as string | number;
+				}
+				const cmp = typeof va === 'string' ? va.localeCompare(vb as string) : (va as number) - (vb as number);
+				return sortAsc ? cmp : -cmp;
+			})
 	);
 
 	// 생성 모달
@@ -68,11 +102,36 @@
 	let selectedFlavor = $state<Flavor | null>(null);
 	let accessList = $state<FlavorAccess[]>([]);
 	let accessLoading = $state(false);
-	let addProjectId = $state('');
 	let accessError = $state('');
+	let selectedProjectId = $state('');
+	let projectSearch = $state('');
+
+	// extra_specs 관리
+	let activeTab = $state<'access' | 'properties'>('access');
+	let newSpecKey = $state('');
+	let newSpecValue = $state('');
+	let specSaving = $state(false);
+	let specError = $state('');
+	let editingSpecKey = $state<string | null>(null);
+	let editingSpecValue = $state('');
+
+	// 프로젝트 목록 (접근 관리용)
+	let allProjects = $state<{ id: string; name: string }[]>([]);
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
+
+	// 이미 접근 권한이 있는 프로젝트 ID 집합
+	let accessedProjectIds = $derived(new Set(accessList.map(a => a.project_id)));
+	let availableProjects = $derived(allProjects.filter(p => !accessedProjectIds.has(p.id)));
+	let searchedProjects = $derived(
+		projectSearch.trim().length > 0
+			? availableProjects.filter(p =>
+				p.name.toLowerCase().includes(projectSearch.toLowerCase()) ||
+				p.id.toLowerCase().includes(projectSearch.toLowerCase())
+			).slice(0, 8)
+			: []
+	);
 
 	async function load(marker?: string) {
 		loading = true;
@@ -125,8 +184,20 @@
 	async function openAccessPanel(flavor: Flavor) {
 		selectedFlavor = flavor;
 		accessError = '';
-		addProjectId = '';
+		selectedProjectId = '';
+		projectSearch = '';
+		activeTab = 'access';
+		newSpecKey = '';
+		newSpecValue = '';
+		specError = '';
+		editingSpecKey = null;
+		editingSpecValue = '';
 		await loadAccess();
+		if (allProjects.length === 0) {
+			try {
+				allProjects = await api.get<{ id: string; name: string }[]>('/api/admin/projects/names', token, projectId);
+			} catch { allProjects = []; }
+		}
 	}
 
 	async function loadAccess() {
@@ -141,25 +212,99 @@
 		}
 	}
 
-	async function addAccess() {
-		if (!selectedFlavor || !addProjectId.trim()) return;
+	async function addAccess(pid?: string) {
+		const targetId = pid || selectedProjectId;
+		if (!selectedFlavor || !targetId) return;
 		accessError = '';
 		try {
-			await api.post(`/api/admin/flavors/${selectedFlavor.id}/access`, { project_id: addProjectId.trim() }, token, projectId);
-			addProjectId = '';
+			await api.post(`/api/admin/flavors/${selectedFlavor.id}/access`, { project_id: targetId }, token, projectId);
+			selectedProjectId = '';
+			projectSearch = '';
 			await loadAccess();
 		} catch (e) {
 			accessError = e instanceof ApiError ? e.message : '접근 권한 추가 실패';
 		}
 	}
 
-	async function removeAccess(projectIdToRemove: string) {
+	async function removeAccess(pid: string) {
 		if (!selectedFlavor) return;
 		try {
-			await api.delete(`/api/admin/flavors/${selectedFlavor.id}/access/${projectIdToRemove}`, token, projectId);
+			await api.delete(`/api/admin/flavors/${selectedFlavor.id}/access/${pid}`, token, projectId);
 			await loadAccess();
 		} catch {
 			accessError = '접근 권한 제거 실패';
+		}
+	}
+
+	async function addExtraSpec() {
+		if (!selectedFlavor || !newSpecKey.trim()) return;
+		specSaving = true;
+		specError = '';
+		try {
+			await api.post(`/api/admin/flavors/${selectedFlavor.id}/extra-specs`, {
+				key: newSpecKey.trim(),
+				value: newSpecValue.trim(),
+			}, token, projectId);
+			// 로컬 상태 즉시 업데이트
+			selectedFlavor = {
+				...selectedFlavor,
+				extra_specs: { ...selectedFlavor.extra_specs, [newSpecKey.trim()]: newSpecValue.trim() },
+			};
+			newSpecKey = '';
+			newSpecValue = '';
+			// 전체 목록도 갱신
+			await load();
+		} catch (e) {
+			specError = e instanceof ApiError ? e.message : 'extra_spec 추가 실패';
+		} finally {
+			specSaving = false;
+		}
+	}
+
+	function startEditSpec(key: string, value: string) {
+		editingSpecKey = key;
+		editingSpecValue = value;
+	}
+
+	function cancelEditSpec() {
+		editingSpecKey = null;
+		editingSpecValue = '';
+	}
+
+	async function saveEditSpec() {
+		if (!selectedFlavor || !editingSpecKey) return;
+		specSaving = true;
+		specError = '';
+		try {
+			await api.post(`/api/admin/flavors/${selectedFlavor.id}/extra-specs`, {
+				key: editingSpecKey,
+				value: editingSpecValue.trim(),
+			}, token, projectId);
+			selectedFlavor = {
+				...selectedFlavor,
+				extra_specs: { ...selectedFlavor.extra_specs, [editingSpecKey]: editingSpecValue.trim() },
+			};
+			editingSpecKey = null;
+			editingSpecValue = '';
+			await load();
+		} catch (e) {
+			specError = e instanceof ApiError ? e.message : 'extra_spec 수정 실패';
+		} finally {
+			specSaving = false;
+		}
+	}
+
+	async function deleteExtraSpec(key: string) {
+		if (!selectedFlavor) return;
+		specError = '';
+		try {
+			await api.delete(`/api/admin/flavors/${selectedFlavor.id}/extra-specs/${encodeURIComponent(key)}`, token, projectId);
+			const specs = { ...selectedFlavor.extra_specs };
+			delete specs[key];
+			selectedFlavor = { ...selectedFlavor, extra_specs: specs };
+			await load();
+		} catch (e) {
+			specError = e instanceof ApiError ? e.message : 'extra_spec 삭제 실패';
 		}
 	}
 
@@ -167,7 +312,7 @@
 		selectedFlavor = null;
 		accessList = [];
 		accessError = '';
-		addProjectId = '';
+		selectedProjectId = '';
 	}
 
 	function formatRam(mb: number): string {
@@ -175,7 +320,10 @@
 		return `${mb} MB`;
 	}
 
-	onMount(load);
+	onMount(() => {
+		load();
+		projectNames.load(token, projectId);
+	});
 </script>
 
 <div class="p-4 md:p-8 max-w-6xl">
@@ -243,11 +391,21 @@
 			<table class="w-full text-sm">
 				<thead>
 					<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
-						<th class="text-left py-2 pr-4">이름</th>
-						<th class="text-left py-2 pr-4">VCPU</th>
-						<th class="text-left py-2 pr-4">RAM</th>
-						<th class="text-left py-2 pr-4">Disk</th>
-						<th class="text-left py-2 pr-4">공개</th>
+						<th class="text-left py-2 pr-4 cursor-pointer select-none hover:text-gray-200" onclick={() => toggleSort('name')}>
+							이름 <span class="text-gray-600">{sortIcon('name')}</span>
+						</th>
+						<th class="text-left py-2 pr-4 cursor-pointer select-none hover:text-gray-200" onclick={() => toggleSort('vcpus')}>
+							VCPU <span class="text-gray-600">{sortIcon('vcpus')}</span>
+						</th>
+						<th class="text-left py-2 pr-4 cursor-pointer select-none hover:text-gray-200" onclick={() => toggleSort('ram')}>
+							RAM <span class="text-gray-600">{sortIcon('ram')}</span>
+						</th>
+						<th class="text-left py-2 pr-4 cursor-pointer select-none hover:text-gray-200" onclick={() => toggleSort('disk')}>
+							Disk <span class="text-gray-600">{sortIcon('disk')}</span>
+						</th>
+						<th class="text-left py-2 pr-4 cursor-pointer select-none hover:text-gray-200" onclick={() => toggleSort('is_public')}>
+							공개 <span class="text-gray-600">{sortIcon('is_public')}</span>
+						</th>
 						<th class="text-left py-2 pr-4">GPU</th>
 						<th class="text-right py-2">액션</th>
 					</tr>
@@ -278,9 +436,7 @@
 							</td>
 							<td class="py-2 text-right">
 								<div class="flex items-center justify-end gap-2">
-									{#if !f.is_public}
-										<button onclick={() => openAccessPanel(f)} class="text-blue-400 hover:text-blue-300 text-xs">접근</button>
-									{/if}
+									<button onclick={() => openAccessPanel(f)} class="text-blue-400 hover:text-blue-300 text-xs">관리</button>
 									<button onclick={() => deleteFlavor(f.id)} class="text-red-400 hover:text-red-300 text-xs">삭제</button>
 								</div>
 							</td>
@@ -361,13 +517,13 @@
 	</div>
 {/if}
 
-<!-- 접근 관리 패널 -->
+<!-- 관리 패널 (접근 + 속성) -->
 {#if selectedFlavor}
 	<div class="fixed inset-0 z-40" role="dialog" aria-modal="true" onkeydown={(e) => e.key === 'Escape' && closeAccess()} tabindex="-1">
 		<button class="absolute inset-0 bg-black/50 cursor-default" onclick={closeAccess} aria-label="패널 닫기"></button>
-		<div class="absolute right-0 top-14 bottom-0 w-full md:w-[400px] bg-gray-950 border-l border-gray-700 overflow-y-auto shadow-2xl p-6">
+		<div class="absolute right-0 top-14 bottom-0 w-full md:w-[640px] bg-gray-950 border-l border-gray-700 overflow-y-auto shadow-2xl p-6">
 			<div class="flex items-center justify-between mb-4">
-				<h2 class="text-lg font-semibold text-white">접근 관리</h2>
+				<h2 class="text-lg font-semibold text-white">Flavor 관리</h2>
 				<button onclick={closeAccess} class="text-gray-400 hover:text-white text-xl">&times;</button>
 			</div>
 			<div class="mb-4">
@@ -376,36 +532,143 @@
 				<div class="text-xs text-gray-500">{selectedFlavor.vcpus} VCPU / {formatRam(selectedFlavor.ram)} / {selectedFlavor.disk} GB</div>
 			</div>
 
-			{#if accessError}
-				<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-3 py-2 text-xs mb-3">{accessError}</div>
-			{/if}
-
-			<div class="mb-4">
-				<div class="text-sm text-gray-400 mb-2">프로젝트 접근 추가</div>
-				<div class="flex gap-2">
-					<input
-						bind:value={addProjectId}
-						type="text"
-						placeholder="프로젝트 ID"
-						class="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500"
-					/>
-					<button onclick={addAccess} class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs rounded-lg">추가</button>
-				</div>
+			<!-- 탭 -->
+			<div class="flex border-b border-gray-800 mb-4">
+				<button
+					onclick={() => activeTab = 'access'}
+					class="px-4 py-2 text-sm {activeTab === 'access' ? 'text-blue-400 border-b-2 border-blue-400' : 'text-gray-400 hover:text-gray-200'}"
+				>접근 관리</button>
+				<button
+					onclick={() => activeTab = 'properties'}
+					class="px-4 py-2 text-sm {activeTab === 'properties' ? 'text-blue-400 border-b-2 border-blue-400' : 'text-gray-400 hover:text-gray-200'}"
+				>속성 (extra_specs)</button>
 			</div>
 
-			<div class="text-sm text-gray-400 mb-2">접근 권한이 있는 프로젝트</div>
-			{#if accessLoading}
-				<div class="text-gray-500 text-sm">로딩 중...</div>
-			{:else if accessList.length === 0}
-				<div class="text-gray-600 text-sm">접근 권한이 없습니다</div>
+			{#if activeTab === 'access'}
+				<!-- 접근 관리 탭 -->
+				{#if selectedFlavor.is_public}
+					<div class="bg-gray-800/50 border border-gray-700 text-gray-400 rounded-lg px-4 py-6 text-sm text-center">
+						Public Flavor는 모든 프로젝트에서 사용 가능하므로 접근 권한 설정이 필요하지 않습니다.
+					</div>
+				{:else}
+				{#if accessError}
+					<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-3 py-2 text-xs mb-3">{accessError}</div>
+				{/if}
+
+				<div class="mb-4">
+					<div class="text-sm text-gray-400 mb-2">프로젝트 접근 추가</div>
+					<div class="relative">
+						<input
+							type="text"
+							placeholder="프로젝트 이름 또는 ID 검색..."
+							bind:value={projectSearch}
+							class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500"
+						/>
+						{#if searchedProjects.length > 0}
+							<div class="absolute z-10 left-0 right-0 mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-xl overflow-hidden">
+								{#each searchedProjects as p}
+									<div class="flex items-center justify-between px-3 py-2 hover:bg-gray-700 border-b border-gray-700/50 last:border-0">
+										<div>
+											<span class="text-sm text-white">{p.name}</span>
+											<span class="text-xs text-gray-500 ml-2 font-mono">{p.id.slice(0, 12)}</span>
+										</div>
+										<button
+											onclick={() => addAccess(p.id)}
+											class="text-xs px-2 py-0.5 bg-blue-600 hover:bg-blue-500 text-white rounded ml-2"
+										>추가</button>
+									</div>
+								{/each}
+							</div>
+						{:else if projectSearch.trim().length > 0}
+							<div class="absolute z-10 left-0 right-0 mt-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-xs text-gray-500">
+								일치하는 프로젝트가 없습니다
+							</div>
+						{/if}
+					</div>
+				</div>
+
+				<div class="text-sm text-gray-400 mb-2">접근 권한이 있는 프로젝트</div>
+				{#if accessLoading}
+					<div class="text-gray-500 text-sm">로딩 중...</div>
+				{:else if accessList.length === 0}
+					<div class="text-gray-600 text-sm">접근 권한이 없습니다</div>
+				{:else}
+					<div class="space-y-2">
+						{#each accessList as a (a.project_id)}
+							<div class="flex items-center justify-between bg-gray-900 border border-gray-800 rounded-lg px-3 py-2">
+								<div>
+									<div class="text-xs text-gray-200">{a.project_name || a.project_id}</div>
+									{#if a.project_name}
+										<div class="text-xs text-gray-600 font-mono">{a.project_id.slice(0, 12)}</div>
+									{/if}
+								</div>
+								<button onclick={() => removeAccess(a.project_id)} class="text-red-400 hover:text-red-300 text-xs">제거</button>
+							</div>
+						{/each}
+					</div>
+				{/if}
+				{/if}
 			{:else}
+				<!-- 속성 탭 -->
+				{#if specError}
+					<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-3 py-2 text-xs mb-3">{specError}</div>
+				{/if}
+
+				{#if Object.keys(selectedFlavor.extra_specs).length === 0}
+					<div class="text-gray-600 text-sm mb-4">등록된 속성이 없습니다</div>
+				{:else}
+					<div class="space-y-1 mb-4">
+						{#each Object.entries(selectedFlavor.extra_specs) as [k, v]}
+							<div class="bg-gray-900 border border-gray-800 rounded-lg px-3 py-2">
+								{#if editingSpecKey === k}
+									<div class="flex items-center gap-2">
+										<span class="text-xs text-blue-300 font-mono break-all shrink-0">{k}</span>
+										<span class="text-gray-500">=</span>
+										<input
+											bind:value={editingSpecValue}
+											type="text"
+											class="flex-1 min-w-0 bg-gray-800 border border-blue-500 rounded px-2 py-1 text-xs text-white font-mono focus:outline-none"
+											onkeydown={(e) => { if (e.key === 'Enter') saveEditSpec(); if (e.key === 'Escape') cancelEditSpec(); }}
+										/>
+										<button onclick={saveEditSpec} disabled={specSaving} class="text-green-400 hover:text-green-300 text-xs shrink-0">저장</button>
+										<button onclick={cancelEditSpec} class="text-gray-400 hover:text-gray-300 text-xs shrink-0">취소</button>
+									</div>
+								{:else}
+									<div class="flex items-center justify-between">
+										<button class="flex-1 min-w-0 text-left cursor-pointer hover:bg-gray-800/50 rounded -mx-1 px-1 py-0.5 transition-colors" onclick={() => startEditSpec(k, v)}>
+											<span class="text-xs text-blue-300 font-mono break-all">{k}</span>
+											<span class="text-gray-500 mx-2">=</span>
+											<span class="text-xs text-gray-300 font-mono break-all">{v}</span>
+										</button>
+										<button onclick={() => deleteExtraSpec(k)} class="ml-2 text-red-400 hover:text-red-300 text-xs shrink-0">삭제</button>
+									</div>
+								{/if}
+							</div>
+						{/each}
+					</div>
+				{/if}
+
+				<div class="text-sm text-gray-400 mb-2">속성 추가/수정</div>
 				<div class="space-y-2">
-					{#each accessList as a (a.project_id)}
-						<div class="flex items-center justify-between bg-gray-900 border border-gray-800 rounded-lg px-3 py-2">
-							<span class="text-xs text-gray-300 font-mono">{a.project_id}</span>
-							<button onclick={() => removeAccess(a.project_id)} class="text-red-400 hover:text-red-300 text-xs">제거</button>
-						</div>
-					{/each}
+					<input
+						bind:value={newSpecKey}
+						type="text"
+						placeholder="키 (예: hw:numa_nodes)"
+						class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-1.5 text-white text-sm font-mono focus:outline-none focus:border-blue-500"
+					/>
+					<input
+						bind:value={newSpecValue}
+						type="text"
+						placeholder="값"
+						class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-1.5 text-white text-sm font-mono focus:outline-none focus:border-blue-500"
+					/>
+					<button
+						onclick={addExtraSpec}
+						disabled={specSaving || !newSpecKey.trim()}
+						class="w-full px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-lg disabled:opacity-30"
+					>
+						{specSaving ? '저장 중...' : '추가/수정'}
+					</button>
 				</div>
 			{/if}
 		</div>

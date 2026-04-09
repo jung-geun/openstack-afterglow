@@ -4,7 +4,7 @@
 	import { api } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 
-	interface ComputeService {
+	interface Service {
 		id: string;
 		binary: string;
 		host: string;
@@ -19,54 +19,110 @@
 		binary: string;
 		host: string;
 		agent_type: string;
+		availability_zone: string | null;
 		alive: boolean | null;
 		admin_state_up: boolean;
 		updated_at: string | null;
 	}
+	interface EndpointGroup {
+		service_id: string;
+		name: string;
+		service: string;
+		region: string;
+		endpoints: Record<string, string>;
+	}
+	interface StoragePool {
+		name: string;
+		volume_backend_name: string;
+		driver_version: string;
+		storage_protocol: string;
+		vendor_name: string;
+		total_capacity_gb: number;
+		free_capacity_gb: number;
+		allocated_capacity_gb: number;
+	}
 
-	let computeServices = $state<ComputeService[]>([]);
-	let blockStorageServices = $state<ComputeService[]>([]);
+	type TabKey = 'compute' | 'network' | 'block_storage' | 'shared_file_system' | 'orchestration' | 'container' | 'endpoints' | 'storage_pools';
+
+	let computeServices = $state<Service[]>([]);
+	let blockStorageServices = $state<Service[]>([]);
 	let networkAgents = $state<NetworkAgent[]>([]);
+	let sharedFsServices = $state<Service[]>([]);
+	let orchestrationServices = $state<Service[]>([]);
+	let containerServices = $state<Service[]>([]);
+	let endpoints = $state<EndpointGroup[]>([]);
+	let storagePools = $state<StoragePool[]>([]);
+
 	let loading = $state(true);
 	let autoRefresh = $state(true);
 	let refreshInterval = $state(30);
 	let lastRefresh = $state<Date | null>(null);
+	let activeTab = $state<TabKey>('compute');
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
 
+	const tabs: { key: TabKey; label: string; count: () => number }[] = [
+		{ key: 'compute', label: 'Compute', count: () => computeServices.length },
+		{ key: 'network', label: 'Network', count: () => networkAgents.length },
+		{ key: 'block_storage', label: 'Block Storage', count: () => blockStorageServices.length },
+		{ key: 'shared_file_system', label: 'File Storage', count: () => sharedFsServices.length },
+		{ key: 'orchestration', label: 'Orchestrator', count: () => orchestrationServices.length },
+		{ key: 'container', label: 'Container', count: () => containerServices.length },
+		{ key: 'endpoints', label: 'API Endpoints', count: () => endpoints.length },
+		{ key: 'storage_pools', label: 'Storage Pools', count: () => storagePools.length },
+	];
+
 	async function load() {
 		try {
 			const res = await api.get<{
-				compute: ComputeService[];
-				block_storage: ComputeService[];
+				compute: Service[];
+				block_storage: Service[];
 				network: NetworkAgent[];
+				shared_file_system: Service[];
+				orchestration: Service[];
+				container: Service[];
+				endpoints: EndpointGroup[];
+				storage_pools: StoragePool[];
 			}>('/api/admin/services', token, projectId);
 			computeServices = res.compute || [];
 			blockStorageServices = res.block_storage || [];
 			networkAgents = res.network || [];
+			sharedFsServices = res.shared_file_system || [];
+			orchestrationServices = res.orchestration || [];
+			containerServices = res.container || [];
+			endpoints = res.endpoints || [];
+			storagePools = res.storage_pools || [];
 			lastRefresh = new Date();
 		} catch {
 			computeServices = [];
 			blockStorageServices = [];
 			networkAgents = [];
+			sharedFsServices = [];
+			orchestrationServices = [];
+			containerServices = [];
+			endpoints = [];
+			storagePools = [];
 		} finally {
 			loading = false;
 		}
 	}
 
-	onMount(() => {
-		load();
-	});
+	onMount(() => { load(); });
 
 	$effect(() => {
 		if (!autoRefresh) return;
 		const interval = setInterval(load, refreshInterval * 1000);
 		return () => clearInterval(interval);
 	});
+
+	function fmtTime(s: string | null) {
+		if (!s) return '-';
+		return s.slice(0, 19).replace('T', ' ');
+	}
 </script>
 
-<div class="p-4 md:p-8 max-w-6xl">
+<div class="p-4 md:p-8 max-w-7xl">
 	<div class="flex items-center justify-between mb-6">
 		<h1 class="text-2xl font-bold text-white">서비스 상태</h1>
 		<div class="flex items-center gap-3">
@@ -76,24 +132,34 @@
 			<button
 				onclick={() => { autoRefresh = !autoRefresh; }}
 				class="text-xs px-3 py-1.5 rounded border transition-colors {autoRefresh ? 'border-blue-500 bg-blue-900/20 text-blue-400' : 'border-gray-700 bg-gray-900 text-gray-400 hover:text-white'}"
-			>
-				{autoRefresh ? '자동 새로고침 ON' : '자동 새로고침 OFF'}
-			</button>
+			>{autoRefresh ? '자동 새로고침 ON' : '자동 새로고침 OFF'}</button>
 			<button onclick={load} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
 		</div>
 	</div>
 
+	<!-- 탭 바 -->
+	<div class="flex flex-wrap gap-1 mb-6 border-b border-gray-800 pb-0">
+		{#each tabs as tab}
+			<button
+				onclick={() => activeTab = tab.key}
+				class="px-3 py-2 text-xs font-medium rounded-t-lg transition-colors relative -mb-px border-b-2 {activeTab === tab.key
+					? 'border-blue-500 text-blue-400 bg-blue-900/10'
+					: 'border-transparent text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'}"
+			>
+				{tab.label}
+				<span class="ml-1.5 text-xs px-1.5 py-0.5 rounded-full {activeTab === tab.key ? 'bg-blue-900/50 text-blue-300' : 'bg-gray-800 text-gray-500'}">{tab.count()}</span>
+			</button>
+		{/each}
+	</div>
+
 	{#if loading}
-		<LoadingSkeleton variant="table" rows={5} />
+		<LoadingSkeleton variant="table" rows={8} />
 	{:else}
+
 		<!-- Compute (Nova) -->
-		<div class="mb-8">
-			<div class="flex items-center gap-2 mb-3">
-				<h2 class="text-lg font-semibold text-white">Compute (Nova)</h2>
-				<span class="text-xs px-2 py-0.5 rounded bg-blue-900/30 text-blue-400">{computeServices.length}</span>
-			</div>
+		{#if activeTab === 'compute'}
 			{#if computeServices.length === 0}
-				<div class="text-gray-600 text-sm">서비스 없음</div>
+				<div class="text-gray-500 text-sm py-8 text-center">데이터 없음</div>
 			{:else}
 				<div class="overflow-x-auto">
 					<table class="w-full text-sm">
@@ -110,34 +176,62 @@
 						</thead>
 						<tbody>
 							{#each computeServices as s (s.id || s.binary + s.host)}
-								<tr class="border-b border-gray-800/50 text-xs">
+								<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/30">
 									<td class="py-2 pr-4 text-white font-mono">{s.binary}</td>
 									<td class="py-2 pr-4 text-gray-300">{s.host}</td>
 									<td class="py-2 pr-4 text-gray-400">{s.zone}</td>
-									<td class="py-2 pr-4">
-										<span class="px-1.5 py-0.5 rounded text-xs font-medium {s.status === 'enabled' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{s.status}</span>
-									</td>
-									<td class="py-2 pr-4">
-										<span class="px-1.5 py-0.5 rounded text-xs font-medium {s.state === 'up' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{s.state}</span>
-									</td>
+									<td class="py-2 pr-4"><span class="px-1.5 py-0.5 rounded text-xs font-medium {s.status === 'enabled' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{s.status}</span></td>
+									<td class="py-2 pr-4"><span class="px-1.5 py-0.5 rounded text-xs font-medium {s.state === 'up' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{s.state}</span></td>
 									<td class="py-2 pr-4 text-gray-500">{s.disabled_reason || '-'}</td>
-									<td class="py-2 text-gray-500">{s.updated_at?.slice(0, 19).replace('T', ' ') ?? '-'}</td>
+									<td class="py-2 text-gray-500">{fmtTime(s.updated_at)}</td>
 								</tr>
 							{/each}
 						</tbody>
 					</table>
 				</div>
 			{/if}
-		</div>
+		{/if}
+
+		<!-- Network (Neutron) -->
+		{#if activeTab === 'network'}
+			{#if networkAgents.length === 0}
+				<div class="text-gray-500 text-sm py-8 text-center">데이터 없음</div>
+			{:else}
+				<div class="overflow-x-auto">
+					<table class="w-full text-sm">
+						<thead>
+							<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
+								<th class="text-left py-2 pr-4">Agent Type</th>
+								<th class="text-left py-2 pr-4">Binary</th>
+								<th class="text-left py-2 pr-4">Host</th>
+								<th class="text-left py-2 pr-4">Zone</th>
+								<th class="text-left py-2 pr-4">Alive</th>
+								<th class="text-left py-2 pr-4">Admin State</th>
+								<th class="text-left py-2">Updated</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each networkAgents as a (a.id)}
+								<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/30">
+									<td class="py-2 pr-4 text-white">{a.agent_type}</td>
+									<td class="py-2 pr-4 text-gray-300 font-mono">{a.binary}</td>
+									<td class="py-2 pr-4 text-gray-300">{a.host}</td>
+									<td class="py-2 pr-4 text-gray-400">{a.availability_zone || '-'}</td>
+									<td class="py-2 pr-4"><span class="px-1.5 py-0.5 rounded text-xs font-medium {a.alive ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{a.alive ? 'alive' : 'down'}</span></td>
+									<td class="py-2 pr-4"><span class="px-1.5 py-0.5 rounded text-xs font-medium {a.admin_state_up ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{a.admin_state_up ? 'UP' : 'DOWN'}</span></td>
+									<td class="py-2 text-gray-500">{fmtTime(a.updated_at)}</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			{/if}
+		{/if}
 
 		<!-- Block Storage (Cinder) -->
-		<div class="mb-8">
-			<div class="flex items-center gap-2 mb-3">
-				<h2 class="text-lg font-semibold text-white">Block Storage (Cinder)</h2>
-				<span class="text-xs px-2 py-0.5 rounded bg-blue-900/30 text-blue-400">{blockStorageServices.length}</span>
-			</div>
+		{#if activeTab === 'block_storage'}
 			{#if blockStorageServices.length === 0}
-				<div class="text-gray-600 text-sm">서비스 없음</div>
+				<div class="text-gray-500 text-sm py-8 text-center">데이터 없음</div>
 			{:else}
 				<div class="overflow-x-auto">
 					<table class="w-full text-sm">
@@ -154,66 +248,200 @@
 						</thead>
 						<tbody>
 							{#each blockStorageServices as s (s.id || s.binary + s.host)}
-								<tr class="border-b border-gray-800/50 text-xs">
+								<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/30">
 									<td class="py-2 pr-4 text-white font-mono">{s.binary}</td>
 									<td class="py-2 pr-4 text-gray-300">{s.host}</td>
 									<td class="py-2 pr-4 text-gray-400">{s.zone}</td>
-									<td class="py-2 pr-4">
-										<span class="px-1.5 py-0.5 rounded text-xs font-medium {s.status === 'enabled' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{s.status}</span>
-									</td>
-									<td class="py-2 pr-4">
-										<span class="px-1.5 py-0.5 rounded text-xs font-medium {s.state === 'up' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{s.state}</span>
-									</td>
+									<td class="py-2 pr-4"><span class="px-1.5 py-0.5 rounded text-xs font-medium {s.status === 'enabled' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{s.status}</span></td>
+									<td class="py-2 pr-4"><span class="px-1.5 py-0.5 rounded text-xs font-medium {s.state === 'up' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{s.state}</span></td>
 									<td class="py-2 pr-4 text-gray-500">{s.disabled_reason || '-'}</td>
-									<td class="py-2 text-gray-500">{s.updated_at?.slice(0, 19).replace('T', ' ') ?? '-'}</td>
+									<td class="py-2 text-gray-500">{fmtTime(s.updated_at)}</td>
 								</tr>
 							{/each}
 						</tbody>
 					</table>
 				</div>
 			{/if}
-		</div>
+		{/if}
 
-		<!-- Network (Neutron) -->
-		<div class="mb-8">
-			<div class="flex items-center gap-2 mb-3">
-				<h2 class="text-lg font-semibold text-white">Network (Neutron)</h2>
-				<span class="text-xs px-2 py-0.5 rounded bg-blue-900/30 text-blue-400">{networkAgents.length}</span>
-			</div>
-			{#if networkAgents.length === 0}
-				<div class="text-gray-600 text-sm">에이전트 없음</div>
+		<!-- File Storage (Manila) -->
+		{#if activeTab === 'shared_file_system'}
+			{#if sharedFsServices.length === 0}
+				<div class="text-gray-500 text-sm py-8 text-center">Manila 서비스가 없거나 접근할 수 없습니다</div>
 			{:else}
 				<div class="overflow-x-auto">
 					<table class="w-full text-sm">
 						<thead>
 							<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
-								<th class="text-left py-2 pr-4">Type</th>
 								<th class="text-left py-2 pr-4">Binary</th>
 								<th class="text-left py-2 pr-4">Host</th>
-								<th class="text-left py-2 pr-4">Alive</th>
-								<th class="text-left py-2 pr-4">Admin State</th>
+								<th class="text-left py-2 pr-4">Zone</th>
+								<th class="text-left py-2 pr-4">Status</th>
+								<th class="text-left py-2 pr-4">State</th>
 								<th class="text-left py-2">Updated</th>
 							</tr>
 						</thead>
 						<tbody>
-							{#each networkAgents as a (a.id)}
-								<tr class="border-b border-gray-800/50 text-xs">
-									<td class="py-2 pr-4 text-white">{a.agent_type}</td>
-									<td class="py-2 pr-4 text-gray-300 font-mono">{a.binary}</td>
-									<td class="py-2 pr-4 text-gray-300">{a.host}</td>
-									<td class="py-2 pr-4">
-										<span class="px-1.5 py-0.5 rounded text-xs font-medium {a.alive ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{a.alive ? 'alive' : 'down'}</span>
-									</td>
-									<td class="py-2 pr-4">
-										<span class="px-1.5 py-0.5 rounded text-xs font-medium {a.admin_state_up ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{a.admin_state_up ? 'UP' : 'DOWN'}</span>
-									</td>
-									<td class="py-2 text-gray-500">{a.updated_at?.slice(0, 19).replace('T', ' ') ?? '-'}</td>
+							{#each sharedFsServices as s (s.id || s.binary + s.host)}
+								<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/30">
+									<td class="py-2 pr-4 text-white font-mono">{s.binary}</td>
+									<td class="py-2 pr-4 text-gray-300">{s.host}</td>
+									<td class="py-2 pr-4 text-gray-400">{s.zone}</td>
+									<td class="py-2 pr-4"><span class="px-1.5 py-0.5 rounded text-xs font-medium {s.status === 'enabled' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{s.status}</span></td>
+									<td class="py-2 pr-4"><span class="px-1.5 py-0.5 rounded text-xs font-medium {s.state === 'up' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{s.state}</span></td>
+									<td class="py-2 text-gray-500">{fmtTime(s.updated_at)}</td>
 								</tr>
 							{/each}
 						</tbody>
 					</table>
 				</div>
 			{/if}
-		</div>
+		{/if}
+
+		<!-- Orchestrator (Heat) -->
+		{#if activeTab === 'orchestration'}
+			{#if orchestrationServices.length === 0}
+				<div class="text-gray-500 text-sm py-8 text-center">Heat 서비스가 없거나 접근할 수 없습니다</div>
+			{:else}
+				<div class="overflow-x-auto">
+					<table class="w-full text-sm">
+						<thead>
+							<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
+								<th class="text-left py-2 pr-4">Binary</th>
+								<th class="text-left py-2 pr-4">Host</th>
+								<th class="text-left py-2 pr-4">Status</th>
+								<th class="text-left py-2 pr-4">State</th>
+								<th class="text-left py-2">Updated</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each orchestrationServices as s (s.id || s.binary + s.host)}
+								<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/30">
+									<td class="py-2 pr-4 text-white font-mono">{s.binary}</td>
+									<td class="py-2 pr-4 text-gray-300">{s.host}</td>
+									<td class="py-2 pr-4"><span class="px-1.5 py-0.5 rounded text-xs font-medium {s.status === 'enabled' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{s.status}</span></td>
+									<td class="py-2 pr-4"><span class="px-1.5 py-0.5 rounded text-xs font-medium {s.state === 'up' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{s.state}</span></td>
+									<td class="py-2 text-gray-500">{fmtTime(s.updated_at)}</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			{/if}
+		{/if}
+
+		<!-- Container (Zun) -->
+		{#if activeTab === 'container'}
+			{#if containerServices.length === 0}
+				<div class="text-gray-500 text-sm py-8 text-center">Zun 서비스가 없거나 접근할 수 없습니다</div>
+			{:else}
+				<div class="overflow-x-auto">
+					<table class="w-full text-sm">
+						<thead>
+							<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
+								<th class="text-left py-2 pr-4">Binary</th>
+								<th class="text-left py-2 pr-4">Host</th>
+								<th class="text-left py-2 pr-4">Zone</th>
+								<th class="text-left py-2 pr-4">Status</th>
+								<th class="text-left py-2 pr-4">State</th>
+								<th class="text-left py-2">Updated</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each containerServices as s (s.id || s.binary + s.host)}
+								<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/30">
+									<td class="py-2 pr-4 text-white font-mono">{s.binary}</td>
+									<td class="py-2 pr-4 text-gray-300">{s.host}</td>
+									<td class="py-2 pr-4 text-gray-400">{s.zone}</td>
+									<td class="py-2 pr-4"><span class="px-1.5 py-0.5 rounded text-xs font-medium {s.status === 'enabled' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{s.status}</span></td>
+									<td class="py-2 pr-4"><span class="px-1.5 py-0.5 rounded text-xs font-medium {s.state === 'up' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{s.state}</span></td>
+									<td class="py-2 text-gray-500">{fmtTime(s.updated_at)}</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			{/if}
+		{/if}
+
+		<!-- API Endpoints -->
+		{#if activeTab === 'endpoints'}
+			{#if endpoints.length === 0}
+				<div class="text-gray-500 text-sm py-8 text-center">엔드포인트 정보를 가져올 수 없습니다</div>
+			{:else}
+				<div class="overflow-x-auto">
+					<table class="w-full text-sm">
+						<thead>
+							<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
+								<th class="text-left py-2 pr-6">Name</th>
+								<th class="text-left py-2 pr-6">Service</th>
+								<th class="text-left py-2 pr-6">Region</th>
+								<th class="text-left py-2">Endpoints</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each [...endpoints].sort((a, b) => (a.name || '').localeCompare(b.name || '')) as ep (ep.service_id)}
+								<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/30 align-top">
+									<td class="py-3 pr-6 text-white font-medium">{ep.name}</td>
+									<td class="py-3 pr-6 text-gray-400">{ep.service}</td>
+									<td class="py-3 pr-6 text-gray-400">{ep.region}</td>
+									<td class="py-3">
+										<div class="space-y-1">
+											{#each Object.entries(ep.endpoints).sort() as [iface, url]}
+												<div class="flex items-start gap-2">
+													<span class="text-gray-500 w-14 shrink-0 font-medium">{iface}:</span>
+													<span class="text-gray-300 font-mono break-all">{url}</span>
+												</div>
+											{/each}
+										</div>
+									</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			{/if}
+		{/if}
+
+		<!-- Storage Pools -->
+		{#if activeTab === 'storage_pools'}
+			{#if storagePools.length === 0}
+				<div class="text-gray-500 text-sm py-8 text-center">스토리지 풀 정보를 가져올 수 없습니다</div>
+			{:else}
+				<div class="space-y-4">
+					{#each storagePools as pool (pool.name)}
+						{@const usedGb = pool.total_capacity_gb - pool.free_capacity_gb}
+						{@const pct = pool.total_capacity_gb > 0 ? Math.min(100, (usedGb / pool.total_capacity_gb) * 100) : 0}
+						<div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+							<div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
+								<div>
+									<div class="text-sm font-medium text-white">{pool.name}</div>
+									<div class="text-xs text-gray-500 mt-0.5">
+										{#if pool.storage_protocol}<span class="mr-3">Protocol: {pool.storage_protocol}</span>{/if}
+										{#if pool.volume_backend_name}<span class="mr-3">Backend: {pool.volume_backend_name}</span>{/if}
+										{#if pool.vendor_name}<span>Vendor: {pool.vendor_name}</span>{/if}
+									</div>
+								</div>
+								<div class="text-right">
+									<div class="text-sm text-white">
+										<span class="font-medium">{usedGb.toFixed(1)}</span>
+										<span class="text-gray-400"> / {pool.total_capacity_gb.toFixed(1)} GiB</span>
+									</div>
+									<div class="text-xs text-gray-500">여유: {pool.free_capacity_gb.toFixed(1)} GiB</div>
+								</div>
+							</div>
+							<div class="w-full h-2 bg-gray-800 rounded-full overflow-hidden">
+								<div
+									class="h-full rounded-full transition-all {pct > 85 ? 'bg-red-500' : pct > 65 ? 'bg-yellow-500' : 'bg-blue-500'}"
+									style="width: {pct.toFixed(1)}%"
+								></div>
+							</div>
+							<div class="text-xs text-gray-500 mt-1">{pct.toFixed(1)}% 사용 중</div>
+						</div>
+					{/each}
+				</div>
+			{/if}
+		{/if}
+
 	{/if}
 </div>

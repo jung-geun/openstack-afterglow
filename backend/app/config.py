@@ -28,6 +28,8 @@ def _load_toml() -> dict:
             flat: dict = {}
             ost = data.get("openstack", {})
             flat["os_auth_url"] = ost.get("auth_url", "")
+            flat["os_username"] = ost.get("username", "")
+            flat["os_password"] = ost.get("password", "")
             flat["os_project_name"] = ost.get("project_name", "admin")
             flat["os_project_domain_name"] = ost.get("project_domain_name", "Default")
             flat["os_user_domain_name"] = ost.get("user_domain_name", "Default")
@@ -90,6 +92,8 @@ def _load_toml() -> dict:
 class Settings(BaseSettings):
     # OpenStack 인증
     os_auth_url: str = ""
+    os_username: str = ""
+    os_password: str = ""
     os_project_name: str = "admin"
     os_project_domain_name: str = "Default"
     os_user_domain_name: str = "Default"

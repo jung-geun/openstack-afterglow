@@ -1,7 +1,7 @@
 """관리자 Identity 관리 엔드포인트 (사용자, 프로젝트, 쿼터, 그룹, 역할)."""
 import asyncio
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel
 import openstack
 
@@ -143,6 +143,17 @@ class UpdateProjectRequest(BaseModel):
     enabled: bool | None = None
 
 
+@router.get("/projects/names", dependencies=[Depends(require_admin)])
+async def list_project_names(conn: openstack.connection.Connection = Depends(get_os_conn)):
+    """모든 프로젝트의 id/name 목록 (페이지네이션 없이)."""
+    def _list():
+        return [{"id": p.id, "name": p.name or ""} for p in conn.identity.projects()]
+    try:
+        return await asyncio.to_thread(_list)
+    except Exception:
+        raise HTTPException(status_code=500, detail="프로젝트 이름 목록 조회 실패")
+
+
 @router.get("/projects", dependencies=[Depends(require_admin)])
 async def list_projects(
     limit: int = Query(default=20, ge=1, le=100),
@@ -258,18 +269,38 @@ async def list_project_members(
     """프로젝트의 사용자-역할 할당 목록 조회."""
     def _list():
         try:
+            import re as _re
+            raw_ep = conn.session.get_endpoint(service_type='identity', interface='public').rstrip('/')
+            # /v3 또는 /v3/{project_id}를 제거 후 명시적으로 /v3 추가
+            base_ep = _re.sub(r'/v[0-9.]+(?:/[a-f0-9\-]+)?$', '', raw_ep)
+            endpoint = base_ep + '/v3'
+            resp = conn.session.get(
+                f"{endpoint}/role_assignments",
+                params={"scope.project.id": project_id, "include_names": "true"},
+            )
+            raw = resp.json().get("role_assignments", [])
             assignments = []
-            for ra in conn.identity.role_assignments(project_id=project_id, include_names=True):
-                user = getattr(ra, 'user', None)
-                role = getattr(ra, 'role', None)
-                if not user or not role:
-                    continue
-                assignments.append({
-                    "user_id": user.get("id", ""),
-                    "user_name": user.get("name", ""),
-                    "role_id": role.get("id", ""),
-                    "role_name": role.get("name", ""),
-                })
+            for ra in raw:
+                user = ra.get("user", {})
+                group = ra.get("group", {})
+                role = ra.get("role", {})
+                if user.get("id"):
+                    assignments.append({
+                        "user_id": user["id"],
+                        "user_name": user.get("name", ""),
+                        "role_id": role.get("id", ""),
+                        "role_name": role.get("name", ""),
+                        "type": "user",
+                    })
+                elif group.get("id"):
+                    assignments.append({
+                        "user_id": f"group:{group['id']}",
+                        "user_name": f"[그룹] {group.get('name', '')}",
+                        "role_id": role.get("id", ""),
+                        "role_name": role.get("name", ""),
+                        "type": "group",
+                        "group_id": group["id"],
+                    })
             return assignments
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"멤버 목록 조회 실패: {e}")
@@ -520,9 +551,11 @@ async def add_user_to_group(
 async def remove_user_from_group(
     group_id: str,
     user_id: str,
+    x_auth_token: str | None = Header(None),
+    x_project_id: str | None = Header(None),
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    """그룹에서 사용자 제거."""
+    """그룹에서 사용자 제거. Keystone 토큰 revocation 대비 세션 캐시 클리어."""
     def _remove():
         try:
             conn.identity.remove_user_from_group(user_id, group_id)
@@ -530,6 +563,18 @@ async def remove_user_from_group(
             raise HTTPException(status_code=400, detail=f"그룹 멤버 제거 실패: {e}")
     try:
         await asyncio.to_thread(_remove)
+        # 그룹 멤버십 변경 시 Keystone이 토큰을 revoke할 수 있으므로 세션 캐시 클리어
+        if x_auth_token:
+            import hashlib as _hl
+            from app.services.cache import _get_redis
+            token_hash = _hl.sha256(x_auth_token.encode()).hexdigest()[:32]
+            pid = x_project_id or "noscope"
+            try:
+                r = await _get_redis()
+                await r.delete(f"union:session:{token_hash}:{pid}")
+                await r.delete(f"union:session_start:{token_hash}:{pid}")
+            except Exception:
+                pass
     except HTTPException:
         raise
 
@@ -597,6 +642,50 @@ async def revoke_role(
             return {"status": "revoked"}
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"역할 회수 실패: {e}")
+    try:
+        return await asyncio.to_thread(_revoke)
+    except HTTPException:
+        raise
+
+
+class AssignGroupRoleRequest(BaseModel):
+    group_id: str
+    project_id: str
+    role_id: str
+
+
+@router.post("/roles/assign-group", dependencies=[Depends(require_admin)])
+async def assign_group_role(
+    req: AssignGroupRoleRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """그룹에 프로젝트 역할 할당."""
+    def _assign():
+        try:
+            conn.identity.assign_project_role_to_group(req.project_id, req.group_id, req.role_id)
+            return {"status": "assigned"}
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"그룹 역할 할당 실패: {e}")
+    try:
+        return await asyncio.to_thread(_assign)
+    except HTTPException:
+        raise
+
+
+@router.delete("/roles/assign-group", dependencies=[Depends(require_admin)])
+async def revoke_group_role(
+    group_id: str = Query(...),
+    project_id: str = Query(...),
+    role_id: str = Query(...),
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """그룹에서 프로젝트 역할 회수."""
+    def _revoke():
+        try:
+            conn.identity.unassign_project_role_from_group(project_id, group_id, role_id)
+            return {"status": "revoked"}
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"그룹 역할 회수 실패: {e}")
     try:
         return await asyncio.to_thread(_revoke)
     except HTTPException:

@@ -11,6 +11,7 @@
 		hypervisor_count: number;
 		running_vms: number;
 		gpu_instances: number;
+		instance_stats?: { total: number; active: number; shutoff: number; error: number; other: number };
 		vcpus: { total: number; allowed: number; used: number };
 		ram_gb: { total: number; used: number };
 		disk_gb: { total: number; used: number };
@@ -18,12 +19,44 @@
 		shares_count: number;
 	}
 
+	interface ProjectUsage {
+		project_id: string;
+		project_name: string;
+		cpu: { used: number; quota: number };
+		ram_mb: { used: number; quota: number };
+		instances: { used: number; quota: number };
+		disk_gb: { used: number; quota: number };
+		gpu_instances: number;
+	}
+
 	let overview = $state<Overview | null>(null);
 	let loading = $state(true);
 	let error = $state('');
+	let projectUsage = $state<ProjectUsage[]>([]);
+	let projectUsageLoading = $state(false);
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
+
+	function usageBar(used: number, quota: number): string {
+		if (quota <= 0) return '0';
+		const pct = Math.min(100, Math.round((used / quota) * 100));
+		return `${pct}`;
+	}
+
+	function usageColor(used: number, quota: number): string {
+		if (quota <= 0) return 'bg-gray-600';
+		const pct = (used / quota) * 100;
+		if (pct >= 100) return 'bg-red-500';
+		if (pct >= 80) return 'bg-orange-500';
+		return 'bg-blue-500';
+	}
+
+	function formatQuota(used: number, quota: number, unit = ''): string {
+		const u = unit === 'GB' ? Math.round(used) : used;
+		const q = quota === -1 ? '∞' : (unit === 'GB' ? Math.round(quota) : quota);
+		return `${u}/${q}${unit ? ' ' + unit : ''}`;
+	}
 
 	onMount(async () => {
 		try {
@@ -33,6 +66,15 @@
 			error = e instanceof ApiError ? `조회 실패: ${e.message}` : '서버 오류';
 		} finally {
 			loading = false;
+		}
+
+		projectUsageLoading = true;
+		try {
+			projectUsage = await api.get<ProjectUsage[]>('/api/admin/overview/projects', token, projectId);
+		} catch {
+			// 실패 시 빈 목록 유지
+		} finally {
+			projectUsageLoading = false;
 		}
 	});
 </script>
@@ -68,6 +110,16 @@
 				<div>
 					<div class="text-xs text-gray-500 uppercase tracking-wide mb-0.5">총 VM</div>
 					<div class="text-3xl font-bold text-white">{formatNumber(overview.running_vms)}</div>
+					{#if overview.instance_stats}
+						<div class="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
+							<span class="text-xs text-green-400">● Active {overview.instance_stats.active}</span>
+							<span class="text-xs text-red-400">● Error {overview.instance_stats.error}</span>
+							<span class="text-xs text-gray-400">● Shutoff {overview.instance_stats.shutoff}</span>
+							{#if overview.instance_stats.other > 0}
+								<span class="text-xs text-yellow-400">● Others {overview.instance_stats.other}</span>
+							{/if}
+						</div>
+					{/if}
 					<a href="/admin/instances" class="text-xs text-blue-400 hover:text-blue-300 mt-1 inline-block">전체 보기 →</a>
 				</div>
 			</div>
@@ -114,7 +166,7 @@
 				</div>
 				<div class="flex flex-col items-center gap-3">
 					<QuotaDonut
-						label="로컬 디스크"
+						label="블록 스토리지"
 						used={overview.disk_gb.used}
 						limit={overview.disk_gb.total}
 						unit="GB"
@@ -126,6 +178,75 @@
 					</div>
 				</div>
 			</div>
+		</div>
+
+		<!-- 프로젝트별 리소스 사용량 -->
+		<div class="bg-gray-900 border border-gray-800 rounded-xl p-6 mb-6">
+			<h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-4">프로젝트별 리소스</h2>
+			{#if projectUsageLoading}
+				<div class="text-gray-500 text-sm">불러오는 중...</div>
+			{:else if projectUsage.length > 0}
+				<div class="overflow-x-auto">
+					<table class="w-full text-sm">
+						<thead>
+							<tr class="text-left text-gray-500 border-b border-gray-800">
+								<th class="pb-2 pr-4 font-medium">프로젝트</th>
+								<th class="pb-2 pr-4 font-medium text-right">인스턴스</th>
+								<th class="pb-2 pr-4 font-medium">CPU</th>
+								<th class="pb-2 pr-4 font-medium">RAM</th>
+								<th class="pb-2 pr-4 font-medium">Disk</th>
+								<th class="pb-2 font-medium text-right">GPU</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each projectUsage.filter(p => p.instances.used > 0 || p.cpu.used > 0 || p.disk_gb.used > 0) as p}
+								<tr class="border-b border-gray-800/50 hover:bg-gray-800/30">
+									<td class="py-2 pr-4">
+										<span class="text-white font-medium">{p.project_name}</span>
+										<span class="text-gray-600 text-xs ml-1">{p.project_id.slice(0, 8)}</span>
+									</td>
+									<td class="py-2 pr-4 text-right text-gray-300 font-mono text-xs">
+										{formatQuota(p.instances.used, p.instances.quota)}
+									</td>
+									<td class="py-2 pr-4">
+										<div class="flex items-center gap-2">
+											<div class="w-16 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+												<div class="h-full rounded-full {usageColor(p.cpu.used, p.cpu.quota)}" style="width: {usageBar(p.cpu.used, p.cpu.quota)}%"></div>
+											</div>
+											<span class="text-gray-300 font-mono text-xs whitespace-nowrap">{formatQuota(p.cpu.used, p.cpu.quota)}</span>
+										</div>
+									</td>
+									<td class="py-2 pr-4">
+										<div class="flex items-center gap-2">
+											<div class="w-16 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+												<div class="h-full rounded-full {usageColor(p.ram_mb.used, p.ram_mb.quota)}" style="width: {usageBar(p.ram_mb.used, p.ram_mb.quota)}%"></div>
+											</div>
+											<span class="text-gray-300 font-mono text-xs whitespace-nowrap">{Math.round(p.ram_mb.used/1024)}/{p.ram_mb.quota === -1 ? '∞' : Math.round(p.ram_mb.quota/1024)} GB</span>
+										</div>
+									</td>
+									<td class="py-2 pr-4">
+										<div class="flex items-center gap-2">
+											<div class="w-16 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+												<div class="h-full rounded-full {usageColor(p.disk_gb.used, p.disk_gb.quota)}" style="width: {usageBar(p.disk_gb.used, p.disk_gb.quota)}%"></div>
+											</div>
+											<span class="text-gray-300 font-mono text-xs whitespace-nowrap">{formatQuota(p.disk_gb.used, p.disk_gb.quota, 'GB')}</span>
+										</div>
+									</td>
+									<td class="py-2 text-right">
+										{#if p.gpu_instances > 0}
+											<span class="text-purple-400 font-mono text-xs">{p.gpu_instances}</span>
+										{:else}
+											<span class="text-gray-600 text-xs">-</span>
+										{/if}
+									</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			{:else}
+				<div class="text-gray-500 text-sm">데이터가 없습니다</div>
+			{/if}
 		</div>
 
 		<!-- 하단: 서비스 카운트 + 퀵 링크 -->

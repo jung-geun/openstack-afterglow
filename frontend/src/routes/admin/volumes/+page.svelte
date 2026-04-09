@@ -5,6 +5,7 @@
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import TimeSeriesChart from '$lib/components/TimeSeriesChart.svelte';
 	import { formatNumber } from '$lib/utils/format';
+	import { projectNames } from '$lib/stores/projectNames';
 
 	interface AdminVolume {
 		id: string;
@@ -47,6 +48,13 @@
 	let deleteVolume = $state<AdminVolume | null>(null);
 	let deleting = $state(false);
 	let deleteError = $state('');
+	let copiedProjectId = $state<string | null>(null);
+	function copyProjectId(id: string) {
+		navigator.clipboard.writeText(id).then(() => {
+			copiedProjectId = id;
+			setTimeout(() => { copiedProjectId = null; }, 1500);
+		});
+	}
 
 	// 용량 확장 모달
 	let extendVolume = $state<AdminVolume | null>(null);
@@ -125,7 +133,7 @@
 		} catch (e) { resetError = e instanceof ApiError ? e.message : '상태 초기화 실패'; } finally { resetting = false; }
 	}
 
-	onMount(() => { load(); loadTimeseries(tsRange); });
+	onMount(() => { load(); loadTimeseries(tsRange); projectNames.load(token, projectId); });
 </script>
 
 <div class="p-4 md:p-8 max-w-6xl">
@@ -183,7 +191,19 @@
 							<td class="py-2 pr-4 text-white">{v.name || v.id.slice(0, 8)}</td>
 							<td class="py-2 pr-4 {statusColor[v.status] ?? 'text-gray-400'}">{v.status}</td>
 							<td class="py-2 pr-4 text-gray-400">{formatNumber(v.size)} GB</td>
-							<td class="py-2 pr-4 text-gray-500 font-mono">{v.project_id?.slice(0, 8) ?? '-'}</td>
+							<td class="py-2 pr-4">
+							<button
+								onclick={() => { if (v.project_id) copyProjectId(v.project_id); }}
+								class="text-gray-400 hover:text-blue-400 transition-colors cursor-pointer text-left"
+								title={v.project_id ?? ''}
+							>
+								{#if copiedProjectId === v.project_id}
+									<span class="text-green-400 text-xs">복사됨</span>
+								{:else}
+									<span class="text-xs">{v.project_id ? ($projectNames.get(v.project_id) ?? v.project_id.slice(0, 8)) : '-'}</span>
+								{/if}
+							</button>
+						</td>
 							<td class="py-2 pr-4 text-gray-500">{v.created_at?.slice(0, 10) ?? '-'}</td>
 							<td class="py-2">
 								<div class="flex items-center gap-1">

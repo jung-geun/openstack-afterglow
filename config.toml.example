@@ -8,6 +8,8 @@ project_name = "admin"
 project_domain_name = "Default"
 user_domain_name = "Default"
 region_name = "RegionOne"
+username = "admin"
+password = "change-me-in-production"
 
 # Manila 설정
 manila_endpoint = ""              # 서비스 카탈로그 대신 직접 지정할 경우

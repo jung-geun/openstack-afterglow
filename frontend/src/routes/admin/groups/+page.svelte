@@ -49,6 +49,7 @@
 	let membersLoading = $state<Record<string, boolean>>({});
 	let allUsers = $state<User[]>([]);
 	let addMemberUserId = $state('');
+	let addMemberSearchText = $state('');
 	let addMemberError = $state<Record<string, string>>({});
 	let addMemberSaving = $state<Record<string, boolean>>({});
 
@@ -105,9 +106,9 @@
 			return;
 		}
 		expandedGroup = g.id;
+		addMemberSearchText = '';
 		await loadGroupMembers(g.id);
 		await loadUsers();
-		addMemberUserId = allUsers.length > 0 ? allUsers[0].id : '';
 	}
 
 	async function loadGroupMembers(groupId: string) {
@@ -122,12 +123,13 @@
 		}
 	}
 
-	async function addMember(groupId: string) {
-		if (!addMemberUserId) return;
+	async function addMember(groupId: string, userId: string) {
+		if (!userId) return;
 		addMemberSaving = { ...addMemberSaving, [groupId]: true };
 		addMemberError = { ...addMemberError, [groupId]: '' };
 		try {
-			await api.put(`/api/admin/groups/${groupId}/users/${addMemberUserId}`, {}, token, projectId);
+			await api.put(`/api/admin/groups/${groupId}/users/${userId}`, {}, token, projectId);
+			addMemberSearchText = '';
 			await loadGroupMembers(groupId);
 		} catch (e) {
 			addMemberError = { ...addMemberError, [groupId]: e instanceof ApiError ? e.message : '추가 실패' };
@@ -139,14 +141,19 @@
 	async function removeMember(groupId: string, userId: string) {
 		try {
 			await api.delete(`/api/admin/groups/${groupId}/users/${userId}`, token, projectId);
-			await loadGroupMembers(groupId);
+			try {
+				await loadGroupMembers(groupId);
+			} catch {
+				// 그룹 멤버십 변경으로 Keystone 토큰이 무효화될 수 있음 — 페이지 새로고침
+				window.location.reload();
+			}
 		} catch {}
 	}
 
 	onMount(load);
 </script>
 
-<div class="p-4 md:p-8 max-w-4xl">
+<div class="p-4 md:p-8 max-w-5xl">
 	<div class="flex items-center justify-between mb-6">
 		<h1 class="text-2xl font-bold text-white">그룹 관리</h1>
 		<div class="flex items-center gap-3">
@@ -166,7 +173,7 @@
 	{:else}
 		<div class="space-y-2">
 			{#each groups as g (g.id)}
-				<div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+				<div class="bg-gray-900 border border-gray-800 rounded-xl">
 					<div class="flex items-center justify-between px-4 py-3">
 						<div class="flex items-center gap-4 min-w-0">
 							<div>
@@ -210,14 +217,36 @@
 									{#if addMemberError[g.id]}
 										<div class="text-xs text-red-400 mb-2">{addMemberError[g.id]}</div>
 									{/if}
-									<div class="flex gap-2">
-										<select bind:value={addMemberUserId} class="flex-1 bg-gray-800 border border-gray-700 text-white text-xs rounded px-2 py-1.5 focus:outline-none">
-											{#each allUsers as u}
-												<option value={u.id}>{u.name}</option>
-											{/each}
-										</select>
-										<button onclick={() => addMember(g.id)} disabled={addMemberSaving[g.id] || !addMemberUserId}
-											class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs rounded disabled:opacity-30">추가</button>
+									<div class="text-xs text-gray-400 mb-2">사용자 검색</div>
+									<div class="relative">
+										<input
+											type="text"
+											placeholder="이름으로 검색하여 멤버 추가..."
+											bind:value={addMemberSearchText}
+											class="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500"
+										/>
+										{#if addMemberSearchText.trim().length > 0}
+											{@const existingIds = new Set((groupMembers[g.id] ?? []).map(m => m.id))}
+											{@const filtered = allUsers.filter(u => !existingIds.has(u.id) && u.name.toLowerCase().includes(addMemberSearchText.toLowerCase())).slice(0, 8)}
+											{#if filtered.length > 0}
+												<div class="absolute z-10 left-0 right-0 mt-1 bg-gray-850 border border-gray-600 rounded-lg shadow-2xl overflow-hidden max-h-56 overflow-y-auto" style="background:#1a1f2e;">
+													{#each filtered as u}
+														<div class="flex items-center justify-between px-4 py-2.5 hover:bg-gray-700 border-b border-gray-700/50 last:border-0 transition-colors">
+															<span class="text-sm text-gray-100">{u.name}</span>
+															<button
+																onclick={() => addMember(g.id, u.id)}
+																disabled={addMemberSaving[g.id]}
+																class="text-xs px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-md disabled:opacity-30 ml-4 shrink-0"
+															>추가</button>
+														</div>
+													{/each}
+												</div>
+											{:else}
+												<div class="absolute z-10 left-0 right-0 mt-1 border border-gray-600 rounded-lg px-4 py-3 text-sm text-gray-500" style="background:#1a1f2e;">
+													일치하는 사용자가 없습니다
+												</div>
+											{/if}
+										{/if}
 									</div>
 								</div>
 							{/if}
