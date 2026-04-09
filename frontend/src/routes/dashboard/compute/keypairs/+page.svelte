@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { auth } from '$lib/stores/auth';
+  import { untrack } from 'svelte';
   import { api, ApiError } from '$lib/api/client';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+  import RefreshButton from '$lib/components/RefreshButton.svelte';
 
   interface Keypair {
     name: string;
@@ -14,6 +15,7 @@
 
   let keypairs = $state<Keypair[]>([]);
   let loading = $state(true);
+  let refreshing = $state(false);
   let error = $state('');
   let deleting = $state<string | null>(null);
   let showModal = $state(false);
@@ -22,14 +24,23 @@
   let createdPrivateKey = $state<string | null>(null);
   let form = $state({ name: '', public_key: '' });
 
-  async function fetchKeypairs() {
+  async function fetchKeypairs(opts?: { refresh?: boolean }) {
     try {
-      keypairs = await api.get<Keypair[]>('/api/keypairs', $auth.token ?? undefined, $auth.projectId ?? undefined);
+      keypairs = await api.get<Keypair[]>('/api/keypairs', $auth.token ?? undefined, $auth.projectId ?? undefined, opts);
       error = '';
     } catch (e) {
       error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
     } finally {
       loading = false;
+    }
+  }
+
+  async function forceRefresh() {
+    refreshing = true;
+    try {
+      await fetchKeypairs({ refresh: true });
+    } finally {
+      refreshing = false;
     }
   }
 
@@ -82,7 +93,13 @@
     input.value = '';
   }
 
-  onMount(fetchKeypairs);
+  $effect(() => {
+    const pid = $auth.projectId;
+    if (!pid) return;
+    untrack(() => { fetchKeypairs(); });
+    const interval = setInterval(() => untrack(() => { fetchKeypairs(); }), 60000);
+    return () => clearInterval(interval);
+  });
 </script>
 
 {#if showModal}
@@ -125,7 +142,10 @@
 <div class="p-4 md:p-8">
   <div class="flex items-center justify-between mb-6">
     <h1 class="text-2xl font-bold text-white">키페어</h1>
-    <button onclick={() => showModal = true} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 키페어 생성</button>
+    <div class="flex items-center gap-2">
+      <RefreshButton {refreshing} onclick={forceRefresh} />
+      <button onclick={() => showModal = true} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 키페어 생성</button>
+    </div>
   </div>
 
   {#if error}<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>{/if}

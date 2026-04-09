@@ -1,5 +1,5 @@
 import asyncio
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 import openstack
 
 from app.api.deps import get_os_conn
@@ -8,18 +8,19 @@ from app.models.storage import (
     CreateRouterRequest, RouterInterfaceRequest, RouterGatewayRequest,
 )
 from app.services import neutron
-from app.services.cache import cached_call, invalidate
+from app.services.cache import cached_call, invalidate, ttl_normal
 
 router = APIRouter()
 
 
 @router.get("", response_model=list[RouterInfo])
-async def list_routers(conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def list_routers(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
     pid = conn._union_project_id
     try:
         return await cached_call(
-            f"union:neutron:{pid}:routers", 30,
-            lambda: [r.model_dump() for r in neutron.list_routers(conn, project_id=pid)]
+            f"union:neutron:{pid}:routers", ttl_normal(),
+            lambda: [r.model_dump() for r in neutron.list_routers(conn, project_id=pid)],
+            refresh=refresh,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail="라우터 목록 조회 실패")

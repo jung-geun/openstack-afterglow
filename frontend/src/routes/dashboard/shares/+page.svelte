@@ -5,6 +5,7 @@
   import { api, ApiError, memoryCache } from '$lib/api/client';
   import type { Share } from '$lib/types/resources';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+  import RefreshButton from '$lib/components/RefreshButton.svelte';
 
   const statusColor: Record<string, string> = {
     available: 'text-green-400 bg-green-900/30',
@@ -25,6 +26,7 @@
   let shares = $state<Share[]>([]);
   let quota = $state<Quota | null>(null);
   let loading = $state(true);
+  let refreshing = $state(false);
   let error = $state('');
   let deleting = $state<string | null>(null);
   let showModal = $state(false);
@@ -47,12 +49,12 @@
     memoryCache.set(`${path}:${$auth.projectId}`, { data, timestamp: Date.now() });
   }
 
-  async function fetchShares() {
+  async function fetchShares(opts?: { refresh?: boolean }) {
     const path = '/api/shares';
     const cached = swrGet<Share[]>(path);
     if (cached && shares.length === 0) shares = cached;
     try {
-      shares = await api.get<Share[]>(path, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      shares = await api.get<Share[]>(path, $auth.token ?? undefined, $auth.projectId ?? undefined, opts);
       swrSet(path, shares);
       error = '';
     } catch (e) {
@@ -141,6 +143,15 @@
     const interval = setInterval(() => untrack(() => { fetchShares(); }), 10000);
     return () => clearInterval(interval);
   });
+
+  async function forceRefresh() {
+    refreshing = true;
+    try {
+      await fetchShares({ refresh: true });
+    } finally {
+      refreshing = false;
+    }
+  }
 </script>
 
 {#if showModal}
@@ -216,7 +227,10 @@
 <div class="p-4 md:p-8">
   <div class="flex items-center justify-between mb-6">
     <h1 class="text-2xl font-bold text-white">공유 스토리지</h1>
-    <button onclick={openCreateModal} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 공유 생성</button>
+    <div class="flex items-center gap-2">
+      <RefreshButton {refreshing} onclick={forceRefresh} />
+      <button onclick={openCreateModal} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 공유 생성</button>
+    </div>
   </div>
 
   <!-- 쿼터 표시 -->

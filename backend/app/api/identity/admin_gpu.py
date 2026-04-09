@@ -3,11 +3,12 @@ import asyncio
 import copy
 import logging
 import re
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 import openstack
 
 from app.api.deps import get_os_conn, require_admin
 from app.config import load_raw_toml
+from app.services.cache import cached_call, ttl_normal
 
 _logger = logging.getLogger(__name__)
 
@@ -132,7 +133,7 @@ def _find_root_uuid(uuid: str, rp_map: dict) -> str:
 
 
 @router.get("/gpu-hosts", dependencies=[Depends(require_admin)])
-async def list_gpu_hosts(conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def list_gpu_hosts(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
     """Placement API에서 각 호스트별 GPU 정보 조회."""
     def _collect():
         placement_ep = conn.placement.get_endpoint()
@@ -350,6 +351,6 @@ async def list_gpu_hosts(conn: openstack.connection.Connection = Depends(get_os_
         }
 
     try:
-        return await asyncio.to_thread(_collect)
+        return await cached_call("union:admin:gpu_hosts", ttl_normal(), _collect, refresh=refresh)
     except Exception:
         raise HTTPException(status_code=500, detail="GPU 호스트 조회 실패")

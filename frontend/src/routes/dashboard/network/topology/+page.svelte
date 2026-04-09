@@ -1,14 +1,15 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { auth } from '$lib/stores/auth';
+	import { untrack } from 'svelte';
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import RefreshButton from '$lib/components/RefreshButton.svelte';
 	import GlobalTopology from '$lib/components/GlobalTopology.svelte';
 	import InstanceDetailPanel from '$lib/components/InstanceDetailPanel.svelte';
 	import RouterDetailPanel from '$lib/components/RouterDetailPanel.svelte';
 
 	let isLight = $state(false);
-	onMount(() => {
+	$effect(() => {
 		isLight = document.documentElement.classList.contains('light');
 		const obs = new MutationObserver(() => {
 			isLight = document.documentElement.classList.contains('light');
@@ -53,23 +54,27 @@
 
 	let data = $state<TopologyData | null>(null);
 	let loading = $state(true);
+	let refreshing = $state(false);
 	let error = $state('');
 	let selectedInstanceId = $state<string | null>(null);
 	let selectedRouterId = $state<string | null>(null);
 
 	$effect(() => {
-		if (!$auth.token) return;
-		fetchTopology();
+		if (!$auth.token || !$auth.projectId) return;
+		untrack(() => { fetchTopology(); });
+		const interval = setInterval(() => untrack(() => { fetchTopology(); }), 30000);
+		return () => clearInterval(interval);
 	});
 
-	async function fetchTopology() {
+	async function fetchTopology(opts?: { refresh?: boolean }) {
 		loading = true;
 		error = '';
 		try {
 			data = await api.get<TopologyData>(
 				'/api/networks/topology',
 				$auth.token ?? undefined,
-				$auth.projectId ?? undefined
+				$auth.projectId ?? undefined,
+				opts,
 			);
 		} catch (e) {
 			error = e instanceof ApiError ? `조회 실패 (${e.status}): ${e.message}` : '서버 오류';
@@ -77,18 +82,21 @@
 			loading = false;
 		}
 	}
+
+	async function forceRefresh() {
+		refreshing = true;
+		try {
+			await fetchTopology({ refresh: true });
+		} finally {
+			refreshing = false;
+		}
+	}
 </script>
 
 <div class="p-4 md:p-8 max-w-screen-2xl mx-auto">
 	<div class="mb-6 flex items-center justify-between">
 		<h1 class="text-2xl font-bold text-white">네트워크 토폴로지</h1>
-		<button
-			onclick={fetchTopology}
-			disabled={loading}
-			class="text-sm px-3 py-1.5 rounded border border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500 disabled:text-gray-600 disabled:border-gray-800 transition-colors"
-		>
-			{loading ? '로딩 중…' : '새로고침'}
-		</button>
+		<RefreshButton refreshing={refreshing || loading} onclick={forceRefresh} />
 	</div>
 
 	{#if error}

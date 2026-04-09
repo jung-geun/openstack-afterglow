@@ -1,12 +1,12 @@
 import asyncio
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 import openstack
 
 from app.api.deps import get_os_conn
 from app.models.compute import ImageInfo
 from app.services import glance
-from app.services.cache import cached_call
+from app.services.cache import cached_call, ttl_static
 
 router = APIRouter()
 
@@ -20,11 +20,12 @@ class UpdateImageRequest(BaseModel):
 
 
 @router.get("", response_model=list[ImageInfo])
-async def list_images(conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def list_images(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
     pid = conn._union_project_id
     return await cached_call(
-        f"union:glance:{pid}:images", 300,
-        lambda: [img.model_dump() for img in glance.list_images(conn, pid)]
+        f"union:glance:{pid}:images", ttl_static(),
+        lambda: [img.model_dump() for img in glance.list_images(conn, pid)],
+        refresh=refresh,
     )
 
 

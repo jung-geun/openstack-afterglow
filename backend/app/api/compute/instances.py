@@ -25,7 +25,7 @@ from app.models.compute import (
 )
 from app.models.progress import ProgressMessage, ProgressStep
 from app.services import nova, cinder, manila, cloudinit, libraries as lib_svc, neutron, keystone, glance
-from app.services.cache import cached_call, invalidate
+from app.services.cache import cached_call, ttl_fast, ttl_normal, ttl_slow, ttl_static, invalidate
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -65,12 +65,13 @@ def _resolve_names(servers: list, conn) -> list[dict]:
 
 
 @router.get("", response_model=list[InstanceInfo])
-async def list_instances(conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def list_instances(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
     pid = conn._union_project_id
     try:
         return await cached_call(
-            f"union:nova:{pid}:instances", 15,
-            lambda: _resolve_names(nova.list_servers(conn), conn)
+            f"union:nova:{pid}:instances", ttl_fast(),
+            lambda: _resolve_names(nova.list_servers(conn), conn),
+            refresh=refresh,
         )
     except Exception as e:
         logger.error(f"인스턴스 목록 조회 실패: {e}")
@@ -85,7 +86,7 @@ async def get_instance(
     pid = conn._union_project_id
     try:
         return await cached_call(
-            f"union:nova:{pid}:instance:{instance_id}", 15,
+            f"union:nova:{pid}:instance:{instance_id}", ttl_fast(),
             lambda: _resolve_names([nova.get_server(conn, instance_id)], conn)[0]
         )
     except Exception:
@@ -540,7 +541,7 @@ async def list_interfaces(
     pid = conn._union_project_id
     try:
         return await cached_call(
-            f"union:neutron:{pid}:ports:{instance_id}", 30,
+            f"union:neutron:{pid}:ports:{instance_id}", ttl_normal(),
             lambda: neutron.list_instance_ports(conn, instance_id)
         )
     except Exception as e:
@@ -566,7 +567,7 @@ async def list_instance_volumes(
         return result
 
     try:
-        return await cached_call(f"union:cinder:{pid}:vol_attach:{instance_id}", 30, _fetch)
+        return await cached_call(f"union:cinder:{pid}:vol_attach:{instance_id}", ttl_normal(), _fetch)
     except Exception as e:
         raise HTTPException(status_code=500, detail="작업 실패")
 
@@ -614,7 +615,7 @@ async def list_instance_security_groups(
         return {"ports": ports, "security_groups": all_sgs}
 
     try:
-        return await cached_call(f"union:neutron:{pid}:sgs:{instance_id}", 60, _fetch)
+        return await cached_call(f"union:neutron:{pid}:sgs:{instance_id}", ttl_slow(), _fetch)
     except Exception as e:
         raise HTTPException(status_code=500, detail="작업 실패")
 
@@ -640,7 +641,7 @@ async def get_instance_owner(
             return {"display": server.user_id}
 
     try:
-        return await cached_call(f"union:keystone:{pid}:owner:{instance_id}", 300, _fetch)
+        return await cached_call(f"union:keystone:{pid}:owner:{instance_id}", ttl_static(), _fetch)
     except Exception:
         raise HTTPException(status_code=404, detail="인스턴스를 찾을 수 없습니다")
 

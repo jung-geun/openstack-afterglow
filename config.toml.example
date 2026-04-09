@@ -38,7 +38,11 @@ refresh_interval_ms = 5000
 
 [cache]
 redis_url = "redis://redis:6379/0"
-default_ttl_seconds = 30
+# TTL 티어 (초). 리소스 변경 빈도에 따라 분류.
+ttl_fast = 15       # 인스턴스, 볼륨, 플로팅IP 등 빈번히 변하는 리소스
+ttl_normal = 30     # 네트워크, 라우터, 토폴로지, 대시보드
+ttl_slow = 60       # 키페어, 보안그룹, 관리자 프로젝트/그룹/역할
+ttl_static = 300    # 이미지, 플레이버, 토큰 검증
 
 [session]
 # 세션 유지 시간 (초). 이 시간이 지나면 재로그인 필요.
@@ -293,6 +297,12 @@ vendor_id = "10DE"
 device_id = "2331"
 name = "H100 PCIe"
 is_audio = false
+
+[services]
+# 선택적 OpenStack 서비스 활성화 여부 (false면 라우터 미등록 + 사이드바 숨김)
+magnum = false      # K8s 클러스터 (Heat 포함)
+manila = false      # 공유 파일 시스템
+zun = false         # 컨테이너
 
 [gitlab_oidc]
 # GitLab OIDC 로그인 활성화 여부

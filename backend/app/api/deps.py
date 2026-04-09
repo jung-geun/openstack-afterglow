@@ -7,7 +7,7 @@ from typing import AsyncGenerator, Optional
 import openstack
 
 from app.services import keystone
-from app.services.cache import cached_call
+from app.services.cache import cached_call, ttl_static
 from app.config import get_settings
 
 _logger = logging.getLogger(__name__)
@@ -21,7 +21,7 @@ async def _cached_validate(token: str, project_id: str) -> dict:
     """토큰 검증 결과를 Redis에 캐시 (TTL 300s). 반복 API 호출 속도 향상."""
     token_hash = hashlib.sha256(token.encode()).hexdigest()[:32]
     cache_key = f"union:session:{token_hash}:{project_id or 'noscope'}"
-    return await cached_call(cache_key, 300, lambda: keystone.validate_token(token, project_id=project_id))
+    return await cached_call(cache_key, ttl_static(), lambda: keystone.validate_token(token, project_id=project_id))
 
 
 async def _check_session_timeout(token_hash: str, project_id: str) -> None:

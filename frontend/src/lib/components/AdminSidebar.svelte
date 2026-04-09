@@ -3,6 +3,7 @@
 	import { auth } from '$lib/stores/auth';
 	import { sidebarOpen } from '$lib/stores/sidebar';
 	import ProjectSelector from '$lib/components/ProjectSelector.svelte';
+	import { siteConfig } from '$lib/config/site';
 
 	const sections = $state([
 		{
@@ -11,10 +12,10 @@
 			icon: 'M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2',
 			open: false,
 			items: [
-				{ label: '전체 인스턴스', href: '/admin/instances' },
-				{ label: 'Flavor', href: '/admin/flavors' },
-				{ label: '하이퍼바이저', href: '/admin/hypervisors' },
-					{ label: 'GPU', href: '/admin/gpu' },
+				{ label: '전체 인스턴스', href: '/admin/instances', service: null },
+				{ label: 'Flavor', href: '/admin/flavors', service: null },
+				{ label: '하이퍼바이저', href: '/admin/hypervisors', service: null },
+				{ label: 'GPU', href: '/admin/gpu', service: null },
 			],
 		},
 		{
@@ -23,8 +24,8 @@
 			icon: 'M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4',
 			open: false,
 			items: [
-				{ label: '전체 볼륨', href: '/admin/volumes' },
-				{ label: '공유 스토리지', href: '/admin/shares' },
+				{ label: '전체 볼륨', href: '/admin/volumes', service: null },
+				{ label: '공유 스토리지', href: '/admin/shares', service: 'manila' as const },
 			],
 		},
 		{
@@ -33,11 +34,11 @@
 			icon: 'M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9',
 			open: false,
 			items: [
-				{ label: '토폴로지', href: '/admin/topology' },
-				{ label: '네트워크', href: '/admin/networks' },
-				{ label: 'Floating IP', href: '/admin/floating-ips' },
-				{ label: '라우터', href: '/admin/routers' },
-				{ label: '포트', href: '/admin/ports' },
+				{ label: '토폴로지', href: '/admin/topology', service: null },
+				{ label: '네트워크', href: '/admin/networks', service: null },
+				{ label: 'Floating IP', href: '/admin/floating-ips', service: null },
+				{ label: '라우터', href: '/admin/routers', service: null },
+				{ label: '포트', href: '/admin/ports', service: null },
 			],
 		},
 		{
@@ -45,8 +46,9 @@
 			prefix: '/admin/containers',
 			icon: 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4',
 			open: false,
+			service: 'zun' as const,
 			items: [
-				{ label: '전체 컨테이너', href: '/admin/containers' },
+				{ label: '전체 컨테이너', href: '/admin/containers', service: null },
 			],
 		},
 		{
@@ -55,7 +57,7 @@
 			icon: 'M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z',
 			open: false,
 			items: [
-				{ label: '서비스 상태', href: '/admin/services' },
+				{ label: '서비스 상태', href: '/admin/services', service: null },
 			],
 		},
 		{
@@ -64,11 +66,11 @@
 			icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z',
 			open: false,
 			items: [
-				{ label: '사용자', href: '/admin/users' },
-				{ label: '프로젝트', href: '/admin/projects' },
-				{ label: '쿼터', href: '/admin/quotas' },
-				{ label: '그룹', href: '/admin/groups' },
-				{ label: '역할', href: '/admin/roles' },
+				{ label: '사용자', href: '/admin/users', service: null },
+				{ label: '프로젝트', href: '/admin/projects', service: null },
+				{ label: '쿼터', href: '/admin/quotas', service: null },
+				{ label: '그룹', href: '/admin/groups', service: null },
+				{ label: '역할', href: '/admin/roles', service: null },
 			],
 		},
 	]);
@@ -87,6 +89,20 @@
 		$page.url.pathname;
 		sidebarOpen.close();
 	});
+
+	function isSectionVisible(section: { service?: string }): boolean {
+		const svcs = $siteConfig.services;
+		if (!section.service) return true;
+		if (section.service === 'zun') return svcs?.zun ?? false;
+		return true;
+	}
+
+	function isItemVisible(item: { service?: string | null }): boolean {
+		const svcs = $siteConfig.services;
+		if (!item.service) return true;
+		if (item.service === 'manila') return svcs?.manila ?? false;
+		return true;
+	}
 </script>
 
 <!-- 오버레이 배경 (모바일만) -->
@@ -111,6 +127,7 @@
 
 		<!-- 섹션들 -->
 		{#each sections as section}
+			{#if isSectionVisible(section)}
 			<div>
 				<button
 					onclick={() => section.open = !section.open}
@@ -128,16 +145,19 @@
 				{#if section.open}
 					<div class="ml-3 mt-0.5 space-y-0.5">
 						{#each section.items as item}
+							{#if isItemVisible(item)}
 							<a
 								href={item.href}
 								class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors {$page.url.pathname === item.href ? 'bg-blue-600/20 text-blue-400 font-medium' : 'text-gray-500 hover:text-gray-200 hover:bg-gray-800'}"
 							>
 								{item.label}
 							</a>
+							{/if}
 						{/each}
 					</div>
 				{/if}
 			</div>
+			{/if}
 		{/each}
 	</nav>
 

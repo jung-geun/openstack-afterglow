@@ -4,6 +4,7 @@
   import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+  import RefreshButton from '$lib/components/RefreshButton.svelte';
 
   interface ZunContainer {
     uuid: string;
@@ -38,6 +39,7 @@
   let serviceAvailable = $state(true);
   let serviceMessage = $state('');
   let loading = $state(true);
+  let refreshing = $state(false);
   let error = $state('');
   let actionTarget = $state<string | null>(null);
   let showModal = $state(false);
@@ -52,9 +54,9 @@
   function addPort() { portMappings = [...portMappings, { container_port: 80, host_port: 0, protocol: 'tcp' }]; }
   function removePort(i: number) { portMappings = portMappings.filter((_, idx) => idx !== i); }
 
-  async function fetchContainers() {
+  async function fetchContainers(opts?: { refresh?: boolean }) {
     try {
-      const resp = await api.get<ContainerListResponse>('/api/containers', $auth.token ?? undefined, $auth.projectId ?? undefined);
+      const resp = await api.get<ContainerListResponse>('/api/containers', $auth.token ?? undefined, $auth.projectId ?? undefined, opts);
       containers = resp.items;
       serviceAvailable = resp.service_available;
       serviceMessage = resp.message;
@@ -63,6 +65,15 @@
       error = e instanceof ApiError ? `조회 실패 (${e.status}): ${e.message}` : '서버 오류';
     } finally {
       loading = false;
+    }
+  }
+
+  async function forceRefresh() {
+    refreshing = true;
+    try {
+      await fetchContainers({ refresh: true });
+    } finally {
+      refreshing = false;
     }
   }
 
@@ -245,7 +256,10 @@
 <div class="p-4 md:p-8">
   <div class="flex items-center justify-between mb-6">
     <h1 class="text-2xl font-bold text-white">컨테이너</h1>
-    <button onclick={() => showModal = true} class="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 컨테이너 생성</button>
+    <div class="flex items-center gap-2">
+      <RefreshButton {refreshing} onclick={forceRefresh} />
+      <button onclick={() => showModal = true} class="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 컨테이너 생성</button>
+    </div>
   </div>
 
   {#if error}<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>{/if}

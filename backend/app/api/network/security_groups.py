@@ -1,11 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 import openstack
 from typing import Optional
 
 from app.api.deps import get_os_conn
 from app.services import neutron
-from app.services.cache import cached_call, invalidate
+from app.services.cache import cached_call, invalidate, ttl_slow
 
 router = APIRouter()
 
@@ -25,12 +25,13 @@ class CreateSecurityGroupRuleRequest(BaseModel):
 
 
 @router.get("")
-async def list_security_groups(conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def list_security_groups(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
     pid = conn._union_project_id
     try:
         return await cached_call(
-            f"union:neutron:{pid}:security_groups", 60,
+            f"union:neutron:{pid}:security_groups", ttl_slow(),
             lambda: neutron.list_security_groups(conn, project_id=pid),
+            refresh=refresh,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail="보안 그룹 목록 조회 실패")

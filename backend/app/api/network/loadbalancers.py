@@ -1,11 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 import openstack
 
 from app.api.deps import get_os_conn
 from app.services import octavia
-from app.services.cache import cached_call, invalidate
+from app.services.cache import cached_call, invalidate, ttl_normal
 
 router = APIRouter()
 
@@ -58,12 +58,13 @@ def _handle(fn, error_msg: str):
 # ---------------------------------------------------------------------------
 
 @router.get("")
-async def list_load_balancers(conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def list_load_balancers(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
     pid = conn._union_project_id
     try:
         return await cached_call(
-            f"union:octavia:{pid}:lbs", 30,
-            lambda: octavia.list_load_balancers(conn, project_id=pid)
+            f"union:octavia:{pid}:lbs", ttl_normal(),
+            lambda: octavia.list_load_balancers(conn, project_id=pid),
+            refresh=refresh,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail="로드밸런서 목록 조회 실패")

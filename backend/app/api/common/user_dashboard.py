@@ -1,12 +1,12 @@
 """사용자별 크로스-프로젝트 대시보드 엔드포인트."""
 import asyncio
 import logging
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 import openstack
 
 from app.api.deps import get_os_conn
 from app.services import keystone
-from app.services.cache import cached_call
+from app.services.cache import cached_call, ttl_normal
 
 _logger = logging.getLogger(__name__)
 
@@ -19,8 +19,8 @@ def _list_servers_for_project(conn: openstack.connection.Connection) -> list[dic
             "id": s.id,
             "name": s.name or "",
             "status": s.status or "",
-            "flavor_id": s.flavor_id or "",
-            "flavor_name": s.flavor_name or "",
+            "flavor_id": getattr(s, "flavor_id", "") or "",
+            "flavor_name": getattr(s, "flavor_name", "") or "",
             "created_at": getattr(s, "created_at", None) or "",
         }
         for s in conn.compute.servers()
@@ -41,7 +41,7 @@ def _list_volumes_for_project(conn: openstack.connection.Connection) -> list[dic
     ]
 
 
-async def _query_project(token: str, project_id: str, project_name: str) -> dict:
+async def _query_project(token: str, project_id: str, project_name: str, refresh: bool = False) -> dict:
     """단일 프로젝트의 인스턴스/볼륨 정보를 비동기로 조회."""
     try:
         proj_conn = await asyncio.to_thread(
@@ -50,12 +50,14 @@ async def _query_project(token: str, project_id: str, project_name: str) -> dict
         try:
             servers, volumes = await asyncio.gather(
                 cached_call(
-                    f"union:user-dashboard:{project_id}:servers", 30,
+                    f"union:user-dashboard:{project_id}:servers", ttl_normal(),
                     lambda c=proj_conn: _list_servers_for_project(c),
+                    refresh=refresh,
                 ),
                 cached_call(
-                    f"union:user-dashboard:{project_id}:volumes", 30,
+                    f"union:user-dashboard:{project_id}:volumes", ttl_normal(),
                     lambda c=proj_conn: _list_volumes_for_project(c),
+                    refresh=refresh,
                 ),
             )
         finally:
@@ -90,6 +92,7 @@ async def _query_project(token: str, project_id: str, project_name: str) -> dict
 @router.get("/summary")
 async def get_user_dashboard_summary(
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    refresh: bool = Query(False),
 ):
     """사용자가 소속된 모든 프로젝트의 인스턴스/볼륨 통합 조회."""
     token = conn._union_token
@@ -102,7 +105,7 @@ async def get_user_dashboard_summary(
 
     # 병렬로 각 프로젝트 데이터 조회
     tasks = [
-        _query_project(token, p["id"], p["name"])
+        _query_project(token, p["id"], p["name"], refresh=refresh)
         for p in projects
     ]
     project_results = await asyncio.gather(*tasks)

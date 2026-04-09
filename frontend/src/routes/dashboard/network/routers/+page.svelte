@@ -1,9 +1,11 @@
 <script lang="ts">
   import { auth } from '$lib/stores/auth';
+  import { untrack } from 'svelte';
   import { api, ApiError } from '$lib/api/client';
   import { goto } from '$app/navigation';
   import type { Router, Network } from '$lib/types/resources';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+  import RefreshButton from '$lib/components/RefreshButton.svelte';
 
   const statusColor: Record<string, string> = {
     ACTIVE: 'text-green-400 bg-green-900/30',
@@ -13,20 +15,30 @@
   let routers = $state<Router[]>([]);
   let externalNetworks = $state<Network[]>([]);
   let loading = $state(true);
+  let refreshing = $state(false);
   let error = $state('');
   let showModal = $state(false);
   let creating = $state(false);
   let createError = $state('');
   let form = $state({ name: '', external_network_id: '' });
 
-  async function fetchRouters() {
+  async function fetchRouters(opts?: { refresh?: boolean }) {
     try {
-      routers = await api.get<Router[]>('/api/routers', $auth.token ?? undefined, $auth.projectId ?? undefined);
+      routers = await api.get<Router[]>('/api/routers', $auth.token ?? undefined, $auth.projectId ?? undefined, opts);
       error = '';
     } catch (e) {
       error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
     } finally {
       loading = false;
+    }
+  }
+
+  async function forceRefresh() {
+    refreshing = true;
+    try {
+      await fetchRouters({ refresh: true });
+    } finally {
+      refreshing = false;
     }
   }
 
@@ -59,8 +71,9 @@
     const projectId = $auth.projectId;
     if (!projectId) return;
     loading = true;
-    fetchRouters();
-    fetchNetworks();
+    untrack(() => { fetchRouters(); fetchNetworks(); });
+    const interval = setInterval(() => untrack(() => { fetchRouters(); }), 15000);
+    return () => clearInterval(interval);
   });
 </script>
 
@@ -97,7 +110,10 @@
 <div class="p-4 md:p-8">
   <div class="flex items-center justify-between mb-6">
     <h1 class="text-2xl font-bold text-white">라우터</h1>
-    <button onclick={() => showModal = true} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 라우터 생성</button>
+    <div class="flex items-center gap-2">
+      <RefreshButton {refreshing} onclick={forceRefresh} />
+      <button onclick={() => showModal = true} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 라우터 생성</button>
+    </div>
   </div>
 
   {#if error}<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>{/if}

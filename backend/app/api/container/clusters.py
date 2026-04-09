@@ -1,8 +1,13 @@
 import asyncio
+import logging
 from fastapi import APIRouter, Depends, HTTPException
 import openstack
+from keystoneauth1 import exceptions as ks_exc
+from openstack import exceptions as os_exc
 
 from app.api.deps import get_os_conn
+
+logger = logging.getLogger(__name__)
 from app.models.containers import ClusterInfo, ClusterTemplateInfo, CreateClusterRequest, StackResourceInfo, StackEventInfo
 from app.services import magnum
 from app.services import heat
@@ -10,20 +15,45 @@ from app.services.heat import HeatServiceUnavailable
 
 router = APIRouter()
 
+_MAGNUM_TIMEOUT = 15  # seconds
+
+
+def _is_service_unavailable(e: Exception) -> bool:
+    """Magnum 서비스 연결 불가 여부 판별."""
+    if isinstance(e, (ks_exc.ConnectTimeout, ks_exc.ConnectFailure, ks_exc.ConnectionError)):
+        return True
+    if isinstance(e, os_exc.HttpException) and getattr(e, 'status_code', 0) == 503:
+        return True
+    return False
+
 
 @router.get("", response_model=list[ClusterInfo])
 async def list_clusters(conn: openstack.connection.Connection = Depends(get_os_conn)):
     try:
-        return await asyncio.to_thread(magnum.list_clusters, conn)
-    except Exception as e:
+        return await asyncio.wait_for(
+            asyncio.to_thread(magnum.list_clusters, conn),
+            timeout=_MAGNUM_TIMEOUT,
+        )
+    except (asyncio.TimeoutError, Exception) as e:
+        if isinstance(e, asyncio.TimeoutError) or _is_service_unavailable(e):
+            logger.warning("Magnum 서비스 응답 없음 (clusters): %s", e)
+            raise HTTPException(status_code=503, detail="Magnum 서비스에 연결할 수 없습니다")
+        logger.exception("클러스터 목록 조회 실패: %s", e)
         raise HTTPException(status_code=500, detail="클러스터 목록 조회 실패")
 
 
 @router.get("/templates", response_model=list[ClusterTemplateInfo])
 async def list_templates(conn: openstack.connection.Connection = Depends(get_os_conn)):
     try:
-        return await asyncio.to_thread(magnum.list_cluster_templates, conn)
-    except Exception as e:
+        return await asyncio.wait_for(
+            asyncio.to_thread(magnum.list_cluster_templates, conn),
+            timeout=_MAGNUM_TIMEOUT,
+        )
+    except (asyncio.TimeoutError, Exception) as e:
+        if isinstance(e, asyncio.TimeoutError) or _is_service_unavailable(e):
+            logger.warning("Magnum 서비스 응답 없음 (templates): %s", e)
+            raise HTTPException(status_code=503, detail="Magnum 서비스에 연결할 수 없습니다")
+        logger.exception("클러스터 템플릿 조회 실패: %s", e)
         raise HTTPException(status_code=500, detail="클러스터 템플릿 조회 실패")
 
 

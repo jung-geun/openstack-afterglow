@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { auth } from '$lib/stores/auth';
+	import { untrack } from 'svelte';
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import RefreshButton from '$lib/components/RefreshButton.svelte';
 
 	interface SecurityGroupRule {
 		id: string;
@@ -22,6 +24,7 @@
 
 	let securityGroups = $state<SecurityGroup[]>([]);
 	let loading = $state(true);
+	let refreshing = $state(false);
 	let sgError = $state('');
 
 	let showSgModal = $state(false);
@@ -32,14 +35,23 @@
 	let sgCreating = $state(false);
 	let sgCreateError = $state('');
 
-	async function fetchSecurityGroups() {
+	async function fetchSecurityGroups(opts?: { refresh?: boolean }) {
 		try {
-			securityGroups = await api.get<SecurityGroup[]>('/api/security-groups', $auth.token ?? undefined, $auth.projectId ?? undefined);
+			securityGroups = await api.get<SecurityGroup[]>('/api/security-groups', $auth.token ?? undefined, $auth.projectId ?? undefined, opts);
 			sgError = '';
 		} catch (e) {
 			sgError = e instanceof ApiError ? `조회 실패 (${e.status}): ${(e as ApiError).message}` : '서버 오류';
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function forceRefresh() {
+		refreshing = true;
+		try {
+			await fetchSecurityGroups({ refresh: true });
+		} finally {
+			refreshing = false;
 		}
 	}
 
@@ -102,7 +114,11 @@
 	}
 
 	$effect(() => {
-		if ($auth.projectId) fetchSecurityGroups();
+		const pid = $auth.projectId;
+		if (!pid) return;
+		untrack(() => { fetchSecurityGroups(); });
+		const interval = setInterval(() => untrack(() => { fetchSecurityGroups(); }), 30000);
+		return () => clearInterval(interval);
 	});
 </script>
 
@@ -110,10 +126,13 @@
 	<!-- 헤더 -->
 	<div class="flex items-center justify-between mb-6">
 		<h1 class="text-xl font-semibold text-white">보안 그룹</h1>
-		<button
-			onclick={() => { showSgModal = true; sgCreateError = ''; }}
-			class="bg-blue-600 hover:bg-blue-500 text-white text-sm px-4 py-2 rounded-lg transition-colors"
-		>+ 보안 그룹 생성</button>
+		<div class="flex items-center gap-2">
+			<RefreshButton {refreshing} onclick={forceRefresh} />
+			<button
+				onclick={() => { showSgModal = true; sgCreateError = ''; }}
+				class="bg-blue-600 hover:bg-blue-500 text-white text-sm px-4 py-2 rounded-lg transition-colors"
+			>+ 보안 그룹 생성</button>
+		</div>
 	</div>
 
 	<!-- 에러 -->

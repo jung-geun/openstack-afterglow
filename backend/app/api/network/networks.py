@@ -1,5 +1,5 @@
 import asyncio
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 import openstack
 
 from app.api.deps import get_os_conn
@@ -10,16 +10,20 @@ from app.models.storage import (
     TopologyData, TopologyInstance,
 )
 from app.services import neutron, nova
-from app.services.cache import cached_call
+from app.services.cache import cached_call, ttl_fast, ttl_normal
 
 router = APIRouter()
 
 
 @router.get("", response_model=list[NetworkInfo])
-async def list_networks(conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def list_networks(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
     pid = conn._union_project_id
     try:
-        return await asyncio.to_thread(neutron.list_networks, conn, pid)
+        return await cached_call(
+            f"union:neutron:{pid}:networks", ttl_normal(),
+            lambda: neutron.list_networks(conn, pid),
+            refresh=refresh,
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail="네트워크 목록 조회 실패")
 
@@ -40,9 +44,14 @@ async def create_network(
 # ---------------------------------------------------------------------------
 
 @router.get("/floating-ips", response_model=list[FloatingIpInfo])
-async def list_floating_ips(conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def list_floating_ips(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
+    pid = conn._union_project_id
     try:
-        return await asyncio.to_thread(neutron.list_floating_ips, conn, conn._union_project_id)
+        return await cached_call(
+            f"union:neutron:{pid}:floating_ips", ttl_fast(),
+            lambda: neutron.list_floating_ips(conn, pid),
+            refresh=refresh,
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail="Floating IP 목록 조회 실패")
 
@@ -129,12 +138,13 @@ def _fetch_topology_sync(conn) -> dict:
 
 
 @router.get("/topology", response_model=TopologyData)
-async def get_topology(conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def get_topology(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
     pid = conn._union_project_id
     try:
         return await cached_call(
-            f"union:neutron:{pid}:topology", 30,
-            lambda: _fetch_topology_sync(conn)
+            f"union:neutron:{pid}:topology", ttl_normal(),
+            lambda: _fetch_topology_sync(conn),
+            refresh=refresh,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail="토폴로지 조회 실패")

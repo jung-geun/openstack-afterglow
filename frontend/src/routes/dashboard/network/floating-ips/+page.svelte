@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { auth } from '$lib/stores/auth';
+  import { untrack } from 'svelte';
   import { api, ApiError } from '$lib/api/client';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+  import RefreshButton from '$lib/components/RefreshButton.svelte';
 
   interface FloatingIp {
     id: string;
@@ -14,6 +15,7 @@
 
   let floatingIps = $state<FloatingIp[]>([]);
   let loading = $state(true);
+  let refreshing = $state(false);
   let error = $state('');
   let creating = $state(false);
   let deleting = $state<string | null>(null);
@@ -24,9 +26,9 @@
     ERROR:  'text-red-400 bg-red-900/30',
   };
 
-  async function fetchFloatingIps() {
+  async function fetchFloatingIps(opts?: { refresh?: boolean }) {
     try {
-      floatingIps = await api.get<FloatingIp[]>('/api/networks/floating-ips', $auth.token ?? undefined, $auth.projectId ?? undefined);
+      floatingIps = await api.get<FloatingIp[]>('/api/networks/floating-ips', $auth.token ?? undefined, $auth.projectId ?? undefined, opts);
       error = '';
     } catch (e) {
       error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
@@ -34,6 +36,23 @@
       loading = false;
     }
   }
+
+  async function forceRefresh() {
+    refreshing = true;
+    try {
+      await fetchFloatingIps({ refresh: true });
+    } finally {
+      refreshing = false;
+    }
+  }
+
+  $effect(() => {
+    const pid = $auth.projectId;
+    if (!pid) return;
+    untrack(() => { fetchFloatingIps(); });
+    const interval = setInterval(() => untrack(() => { fetchFloatingIps(); }), 15000);
+    return () => clearInterval(interval);
+  });
 
   async function allocateFloatingIp() {
     creating = true;
@@ -60,15 +79,17 @@
     }
   }
 
-  onMount(fetchFloatingIps);
 </script>
 
 <div class="p-4 md:p-8">
   <div class="flex items-center justify-between mb-6">
     <h1 class="text-2xl font-bold text-white">Floating IP</h1>
-    <button onclick={allocateFloatingIp} disabled={creating} class="bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
-      {creating ? '할당 중...' : '+ Floating IP 할당'}
-    </button>
+    <div class="flex items-center gap-2">
+      <RefreshButton {refreshing} onclick={forceRefresh} />
+      <button onclick={allocateFloatingIp} disabled={creating} class="bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+        {creating ? '할당 중...' : '+ Floating IP 할당'}
+      </button>
+    </div>
   </div>
 
   {#if error}<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>{/if}

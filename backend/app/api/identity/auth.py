@@ -4,7 +4,7 @@ from typing import Optional
 
 from app.models.auth import LoginRequest, TokenResponse, UserInfo, ProjectInfo, GitLabCallbackRequest
 from app.services import keystone
-from app.services.cache import cached_call
+from app.services.cache import cached_call, ttl_fast, ttl_normal, ttl_static
 from app.config import get_settings
 from app.rate_limit import limiter
 
@@ -18,10 +18,10 @@ async def _prewarm_dashboard(token: str, project_id: str):
         from app.api.common.dashboard import _list_servers_as_dicts, _list_flavors_as_dicts
         from app.services import nova, cinder
         await asyncio.gather(
-            cached_call(f"union:nova:{project_id}:servers", 15, lambda: _list_servers_as_dicts(conn)),
-            cached_call(f"union:nova:{project_id}:limits", 30, lambda: nova.get_project_limits(conn)),
-            cached_call(f"union:cinder:{project_id}:limits", 30, lambda: cinder.get_volume_limits(conn)),
-            cached_call(f"union:nova:{project_id}:flavors", 300, lambda: _list_flavors_as_dicts(conn)),
+            cached_call(f"union:nova:{project_id}:servers", ttl_fast(), lambda: _list_servers_as_dicts(conn)),
+            cached_call(f"union:nova:{project_id}:limits", ttl_normal(), lambda: nova.get_project_limits(conn)),
+            cached_call(f"union:cinder:{project_id}:limits", ttl_normal(), lambda: cinder.get_volume_limits(conn)),
+            cached_call(f"union:nova:{project_id}:flavors", ttl_static(), lambda: _list_flavors_as_dicts(conn)),
         )
     except Exception:
         pass  # best-effort: 실패해도 로그인에는 영향 없음

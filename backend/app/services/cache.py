@@ -21,6 +21,37 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
+
+def ttl_fast() -> int:
+    """빈번히 변하는 리소스 TTL (인스턴스, 볼륨, 플로팅IP 등)."""
+    return get_settings().cache_ttl_fast
+
+
+def ttl_normal() -> int:
+    """일반 리소스 TTL (네트워크, 라우터, 토폴로지 등)."""
+    return get_settings().cache_ttl_normal
+
+
+def ttl_slow() -> int:
+    """느리게 변하는 리소스 TTL (키페어, 보안그룹 등)."""
+    return get_settings().cache_ttl_slow
+
+
+def ttl_static() -> int:
+    """거의 변하지 않는 리소스 TTL (이미지, 플레이버 등)."""
+    return get_settings().cache_ttl_static
+
+
+def _make_serializable(obj: Any) -> Any:
+    """Pydantic 모델 등을 JSON 직렬화 가능한 형태로 변환."""
+    if hasattr(obj, 'model_dump'):
+        return obj.model_dump()
+    if isinstance(obj, list):
+        return [_make_serializable(item) for item in obj]
+    if isinstance(obj, dict):
+        return {k: _make_serializable(v) for k, v in obj.items()}
+    return obj
+
 _client: aioredis.Redis | None = None
 
 
@@ -47,13 +78,23 @@ async def cached_call(
     key: str,
     ttl: int,
     fn: Callable[[], Any],
+    *,
+    refresh: bool = False,
 ) -> Any:
     """캐시에서 값을 가져오거나, 없으면 fn을 실행하여 저장 후 반환.
 
     fn이 동기 함수인 경우 asyncio.to_thread로 실행.
     Redis 연결 실패 시 캐시 없이 fn을 직접 실행.
+    refresh=True이면 기존 캐시를 삭제하고 fn을 강제 실행.
     """
     client = _get_client()
+
+    if refresh:
+        try:
+            await client.delete(key)
+        except Exception:
+            pass
+
     try:
         cached = await client.get(key)
         if cached is not None:
@@ -68,7 +109,7 @@ async def cached_call(
         result = await asyncio.to_thread(fn)
 
     try:
-        await client.setex(key, ttl, json.dumps(result, default=str))
+        await client.setex(key, ttl, json.dumps(_make_serializable(result)))
     except Exception as e:
         logger.warning("캐시 쓰기 실패 (%s): %s", key, e)
 

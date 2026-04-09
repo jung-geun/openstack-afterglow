@@ -2,10 +2,12 @@
 import asyncio
 import logging
 import re
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 import openstack
 
 from app.api.deps import get_os_conn, require_admin
+from app.config import get_settings
+from app.services.cache import cached_call, ttl_normal
 
 _logger = logging.getLogger(__name__)
 
@@ -30,10 +32,11 @@ def _strip_version(url: str) -> str:
 
 
 @router.get("/services", dependencies=[Depends(require_admin)])
-async def list_services(conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def list_services(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
     """Nova, Cinder, Neutron, Manila, Heat, Zun 서비스 상태 + API Endpoints + Storage Pools 조회."""
 
     def _collect():
+        settings = get_settings()
         result: dict = {
             "compute": [],
             "block_storage": [],
@@ -102,67 +105,70 @@ async def list_services(conn: openstack.connection.Connection = Depends(get_os_c
 
         # ── Manila (shared-file-system) services ────────────────────────────
         # Manila v2 API 경로: /v2/{project_id}/os-services
-        try:
-            manila_ep = _get_ep(conn, "shared-file-system")
-            if manila_ep:
-                project_id = conn.current_project_id or getattr(conn, '_union_project_id', '')
-                manila_base = _strip_version(manila_ep)
-                resp = conn.session.get(f"{manila_base}/v2/{project_id}/os-services")
-                for svc in resp.json().get("services", []):
-                    result["shared_file_system"].append({
-                        "id": svc.get("id", ""),
-                        "binary": svc.get("binary", ""),
-                        "host": svc.get("host", ""),
-                        "status": svc.get("status", ""),
-                        "state": svc.get("state", ""),
-                        "zone": svc.get("zone", ""),
-                        "updated_at": svc.get("updated_at") or None,
-                        "disabled_reason": svc.get("disabled_reason") or None,
-                    })
-        except Exception:
-            _logger.warning("Manila 서비스 조회 실패", exc_info=True)
+        if settings.service_manila_enabled:
+            try:
+                manila_ep = _get_ep(conn, "shared-file-system")
+                if manila_ep:
+                    project_id = conn.current_project_id or getattr(conn, '_union_project_id', '')
+                    manila_base = _strip_version(manila_ep)
+                    resp = conn.session.get(f"{manila_base}/v2/{project_id}/os-services")
+                    for svc in resp.json().get("services", []):
+                        result["shared_file_system"].append({
+                            "id": svc.get("id", ""),
+                            "binary": svc.get("binary", ""),
+                            "host": svc.get("host", ""),
+                            "status": svc.get("status", ""),
+                            "state": svc.get("state", ""),
+                            "zone": svc.get("zone", ""),
+                            "updated_at": svc.get("updated_at") or None,
+                            "disabled_reason": svc.get("disabled_reason") or None,
+                        })
+            except Exception:
+                _logger.warning("Manila 서비스 조회 실패", exc_info=True)
 
         # ── Heat (orchestration) services ────────────────────────────────────
         # Heat v1 API 경로: /v1/{tenant_id}/services
-        try:
-            heat_ep = _get_ep(conn, "orchestration")
-            if heat_ep:
-                project_id = conn.current_project_id or getattr(conn, '_union_project_id', '')
-                heat_base = _strip_version(heat_ep)
-                resp = conn.session.get(f"{heat_base}/v1/{project_id}/services")
-                for svc in resp.json().get("services", []):
-                    result["orchestration"].append({
-                        "id": svc.get("id", ""),
-                        "binary": svc.get("binary", ""),
-                        "host": svc.get("host", ""),
-                        "status": svc.get("status", ""),
-                        "state": svc.get("engine_status", ""),
-                        "zone": "",
-                        "updated_at": svc.get("updated_at") or None,
-                        "disabled_reason": None,
-                    })
-        except Exception:
-            _logger.warning("Heat 서비스 조회 실패", exc_info=True)
+        if settings.service_magnum_enabled:
+            try:
+                heat_ep = _get_ep(conn, "orchestration")
+                if heat_ep:
+                    project_id = conn.current_project_id or getattr(conn, '_union_project_id', '')
+                    heat_base = _strip_version(heat_ep)
+                    resp = conn.session.get(f"{heat_base}/v1/{project_id}/services")
+                    for svc in resp.json().get("services", []):
+                        result["orchestration"].append({
+                            "id": svc.get("id", ""),
+                            "binary": svc.get("binary", ""),
+                            "host": svc.get("host", ""),
+                            "status": svc.get("status", ""),
+                            "state": svc.get("engine_status", ""),
+                            "zone": "",
+                            "updated_at": svc.get("updated_at") or None,
+                            "disabled_reason": None,
+                        })
+            except Exception:
+                _logger.warning("Heat 서비스 조회 실패", exc_info=True)
 
         # ── Zun (container) services ─────────────────────────────────────────
-        try:
-            zun_ep = _get_ep(conn, "container")
-            if zun_ep:
-                zun_ep = _strip_version(zun_ep)
-                resp = conn.session.get(f"{zun_ep}/v1/services")
-                for svc in resp.json().get("services", []):
-                    result["container"].append({
-                        "id": svc.get("id", ""),
-                        "binary": svc.get("binary", ""),
-                        "host": svc.get("host", ""),
-                        "status": svc.get("status", ""),
-                        "state": svc.get("state", ""),
-                        "zone": svc.get("availability_zone", ""),
-                        "updated_at": svc.get("updated_at") or None,
-                        "disabled_reason": None,
-                    })
-        except Exception:
-            _logger.warning("Zun 서비스 조회 실패", exc_info=True)
+        if settings.service_zun_enabled:
+            try:
+                zun_ep = _get_ep(conn, "container")
+                if zun_ep:
+                    zun_ep = _strip_version(zun_ep)
+                    resp = conn.session.get(f"{zun_ep}/v1/services")
+                    for svc in resp.json().get("services", []):
+                        result["container"].append({
+                            "id": svc.get("id", ""),
+                            "binary": svc.get("binary", ""),
+                            "host": svc.get("host", ""),
+                            "status": svc.get("status", ""),
+                            "state": svc.get("state", ""),
+                            "zone": svc.get("availability_zone", ""),
+                            "updated_at": svc.get("updated_at") or None,
+                            "disabled_reason": None,
+                        })
+            except Exception:
+                _logger.warning("Zun 서비스 조회 실패", exc_info=True)
 
         # ── Keystone API Endpoints (service catalog) — openstacksdk 직접 사용 ──
         try:
@@ -219,6 +225,6 @@ async def list_services(conn: openstack.connection.Connection = Depends(get_os_c
         return result
 
     try:
-        return await asyncio.to_thread(_collect)
+        return await cached_call("union:admin:services", ttl_normal(), _collect, refresh=refresh)
     except Exception:
         raise HTTPException(status_code=500, detail="서비스 상태 조회 실패")

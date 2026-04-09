@@ -36,6 +36,7 @@
   let templates = $state<ClusterTemplate[]>([]);
   let loading = $state(true);
   let error = $state('');
+  let serviceUnavailable = $state(false);
   let deleting = $state<string | null>(null);
   let showModal = $state(false);
   let creating = $state(false);
@@ -52,8 +53,14 @@
     try {
       clusters = await api.get<Cluster[]>('/api/clusters', $auth.token ?? undefined, $auth.projectId ?? undefined);
       error = '';
+      serviceUnavailable = false;
     } catch (e) {
-      error = e instanceof ApiError ? `조회 실패 (${e.status}): ${e.message}` : '서버 오류';
+      if (e instanceof ApiError && e.status === 503) {
+        serviceUnavailable = true;
+        error = '';
+      } else {
+        error = e instanceof ApiError ? `조회 실패 (${e.status}): ${e.message}` : '서버 오류';
+      }
     } finally {
       loading = false;
     }
@@ -161,7 +168,13 @@
 
   {#if error}<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>{/if}
 
-  {#if loading}
+  {#if serviceUnavailable}
+    <div class="text-center py-20 text-gray-600">
+      <div class="text-5xl mb-4">⚠️</div>
+      <p class="text-lg mb-2 text-amber-400">Magnum 서비스에 연결할 수 없습니다</p>
+      <p class="text-sm text-gray-500">K8s 클러스터 관리 서비스가 현재 응답하지 않습니다.<br/>잠시 후 다시 시도해주세요.</p>
+    </div>
+  {:else if loading}
     <LoadingSkeleton variant="table" rows={4} />
   {:else if clusters.length === 0}
     <div class="text-center py-20 text-gray-600">

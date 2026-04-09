@@ -5,6 +5,7 @@
   import { goto } from '$app/navigation';
   import type { Network } from '$lib/types/resources';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+  import RefreshButton from '$lib/components/RefreshButton.svelte';
 
   const statusColor: Record<string, string> = {
     ACTIVE: 'text-green-400 bg-green-900/30',
@@ -14,6 +15,7 @@
 
   let networks = $state<Network[]>([]);
   let loading = $state(true);
+  let refreshing = $state(false);
   let error = $state('');
   let deleting = $state<string | null>(null);
   let showModal = $state(false);
@@ -36,18 +38,27 @@
     memoryCache.set(`${path}:${$auth.projectId}`, { data, timestamp: Date.now() });
   }
 
-  async function fetchNetworks() {
+  async function fetchNetworks(opts?: { refresh?: boolean }) {
     const path = '/api/networks';
     const cached = swrGet<Network[]>(path);
     if (cached && networks.length === 0) networks = cached;
     try {
-      networks = await api.get<Network[]>(path, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      networks = await api.get<Network[]>(path, $auth.token ?? undefined, $auth.projectId ?? undefined, opts);
       swrSet(path, networks);
       error = '';
     } catch (e) {
       if (!cached) error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
     } finally {
       loading = false;
+    }
+  }
+
+  async function forceRefresh() {
+    refreshing = true;
+    try {
+      await fetchNetworks({ refresh: true });
+    } finally {
+      refreshing = false;
     }
   }
 
@@ -94,6 +105,8 @@
     if (!projectId) return;
     loading = true;
     untrack(() => { fetchNetworks(); });
+    const interval = setInterval(() => untrack(() => { fetchNetworks(); }), 30000);
+    return () => clearInterval(interval);
   });
 </script>
 
@@ -140,7 +153,10 @@
 <div class="p-4 md:p-8">
   <div class="flex items-center justify-between mb-6">
     <h1 class="text-2xl font-bold text-white">네트워크</h1>
-    <button onclick={() => showModal = true} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 네트워크 생성</button>
+    <div class="flex items-center gap-2">
+      <RefreshButton {refreshing} onclick={forceRefresh} />
+      <button onclick={() => showModal = true} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 네트워크 생성</button>
+    </div>
   </div>
 
   {#if error}<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>{/if}

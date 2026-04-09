@@ -1,11 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 import openstack
 
 from app.api.deps import get_os_conn
 from app.config import get_settings
 from app.models.storage import ShareInfo, CreateShareRequest, CreateAccessRuleRequest
 from app.services import manila
-from app.services.cache import cached_call, invalidate
+from app.services.cache import cached_call, invalidate, ttl_fast
 
 router = APIRouter()
 
@@ -19,12 +19,13 @@ async def get_share_quota(conn: openstack.connection.Connection = Depends(get_os
 
 
 @router.get("", response_model=list[ShareInfo])
-async def list_shares(conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def list_shares(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
     pid = conn._union_project_id
     try:
         return await cached_call(
-            f"union:manila:{pid}:shares", 15,
-            lambda: [s.model_dump() for s in manila.list_shares(conn)]
+            f"union:manila:{pid}:shares", ttl_fast(),
+            lambda: [s.model_dump() for s in manila.list_shares(conn)],
+            refresh=refresh,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail="Share 목록 조회 실패")

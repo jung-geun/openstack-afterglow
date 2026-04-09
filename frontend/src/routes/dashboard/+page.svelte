@@ -3,6 +3,7 @@
   import { api } from '$lib/api/client';
   import type { DashboardSummary } from '$lib/types/resources';
   import { formatNumber, formatStorage } from '$lib/utils/format';
+  import RefreshButton from '$lib/components/RefreshButton.svelte';
 
   interface QuotaItem { limit: number; in_use: number; }
   interface Quotas {
@@ -23,6 +24,7 @@
   let quotas = $state<Quotas | null>(null);
   let usage = $state<Usage | null>(null);
   let usageLoading = $state(false);
+  let refreshing = $state(false);
   let refreshIntervalMs = $state(5000);
 
   // 사용량 날짜 범위
@@ -34,10 +36,19 @@
   const token = $derived($auth.token ?? undefined);
   const projectId = $derived($auth.projectId ?? undefined);
 
-  async function fetchSummary() {
+  async function fetchSummary(opts?: { refresh?: boolean }) {
     try {
-      summary = await api.get<DashboardSummary>('/api/dashboard/summary', token, projectId);
+      summary = await api.get<DashboardSummary>('/api/dashboard/summary', token, projectId, opts);
     } catch { /* ignore */ }
+  }
+
+  async function forceRefresh() {
+    refreshing = true;
+    try {
+      await fetchSummary({ refresh: true });
+    } finally {
+      refreshing = false;
+    }
   }
 
   async function fetchQuotas() {
@@ -83,7 +94,10 @@
 </script>
 
 <div class="p-4 md:p-8">
-  <h1 class="text-2xl font-bold text-white mb-8">대시보드</h1>
+  <div class="flex items-center justify-between mb-8">
+    <h1 class="text-2xl font-bold text-white">대시보드</h1>
+    <RefreshButton {refreshing} onclick={forceRefresh} />
+  </div>
 
   <!-- 상단: 리소스 요약 카드 + 사용자 정보 -->
   <div class="flex flex-col lg:flex-row gap-6 mb-8">

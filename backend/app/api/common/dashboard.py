@@ -9,7 +9,7 @@ from app.config import get_settings
 from app.services import nova, cinder
 from app.services import neutron as neutron_svc
 from app.services import manila as manila_svc
-from app.services.cache import cached_call
+from app.services.cache import cached_call, ttl_fast, ttl_normal, ttl_static
 
 router = APIRouter()
 
@@ -62,26 +62,31 @@ def _gpu_count_from_flavor(name: str, extra_specs: dict) -> int:
 @router.get("/summary")
 async def get_dashboard_summary(
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    refresh: bool = Query(False),
 ):
     project_id = conn._union_project_id
 
     try:
         servers, compute_limits, volume_limits, all_flavors = await asyncio.gather(
             cached_call(
-                f"union:nova:{project_id}:servers", 15,
+                f"union:nova:{project_id}:servers", ttl_fast(),
                 lambda: _list_servers_as_dicts(conn),
+                refresh=refresh,
             ),
             cached_call(
-                f"union:nova:{project_id}:limits", 30,
+                f"union:nova:{project_id}:limits", ttl_normal(),
                 lambda: nova.get_project_limits(conn),
+                refresh=refresh,
             ),
             cached_call(
-                f"union:cinder:{project_id}:limits", 30,
+                f"union:cinder:{project_id}:limits", ttl_normal(),
                 lambda: cinder.get_volume_limits(conn),
+                refresh=refresh,
             ),
             cached_call(
-                f"union:nova:{project_id}:flavors", 300,
+                f"union:nova:{project_id}:flavors", ttl_static(),
                 lambda: _list_flavors_as_dicts(conn),
+                refresh=refresh,
             ),
         )
     except Exception as e:
@@ -124,13 +129,18 @@ async def get_project_quotas(
 ):
     """현재 프로젝트의 전체 할당량 (compute/storage/network/share) 조회."""
     project_id = conn._union_project_id
+    settings = get_settings()
     try:
-        compute_q, volume_q, network_q, share_q = await asyncio.gather(
+        tasks = [
             asyncio.to_thread(nova.get_project_quota, conn, project_id),
             asyncio.to_thread(cinder.get_volume_quota, conn, project_id),
             asyncio.to_thread(neutron_svc.get_network_quota, conn, project_id),
-            asyncio.to_thread(manila_svc.get_share_quota, conn),
-        )
+        ]
+        if settings.service_manila_enabled:
+            tasks.append(asyncio.to_thread(manila_svc.get_share_quota, conn))
+        results = await asyncio.gather(*tasks)
+        compute_q, volume_q, network_q = results[0], results[1], results[2]
+        share_q = results[3] if settings.service_manila_enabled else {"limit": 0, "in_use": 0, "reserved": 0}
     except Exception as e:
         raise HTTPException(status_code=500, detail="작업 실패")
 

@@ -1,8 +1,9 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { auth } from '$lib/stores/auth';
+	import { untrack } from 'svelte';
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import RefreshButton from '$lib/components/RefreshButton.svelte';
 
 	interface InstanceItem {
 		id: string;
@@ -44,21 +45,31 @@
 
 	let data = $state<UserDashboardSummary | null>(null);
 	let loading = $state(true);
+	let refreshing = $state(false);
 	let error = $state('');
 	let expandedProject = $state<string | null>(null);
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
 
-	async function load() {
+	async function load(opts?: { refresh?: boolean }) {
 		loading = true;
 		error = '';
 		try {
-			data = await api.get<UserDashboardSummary>('/api/user-dashboard/summary', token, projectId);
+			data = await api.get<UserDashboardSummary>('/api/user-dashboard/summary', token, projectId, opts);
 		} catch (e) {
 			error = e instanceof ApiError ? e.message : '데이터를 불러올 수 없습니다';
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function forceRefresh() {
+		refreshing = true;
+		try {
+			await load({ refresh: true });
+		} finally {
+			refreshing = false;
 		}
 	}
 
@@ -77,16 +88,19 @@
 		}
 	}
 
-	onMount(load);
+	$effect(() => {
+		const pid = $auth.projectId;
+		if (!pid) return;
+		untrack(() => { load(); });
+		const interval = setInterval(() => untrack(() => { load(); }), 30000);
+		return () => clearInterval(interval);
+	});
 </script>
 
 <div class="p-4 md:p-8 max-w-6xl">
 	<div class="flex items-center justify-between mb-6">
 		<h1 class="text-2xl font-bold text-white">내 리소스</h1>
-		<button
-			onclick={() => load()}
-			class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600"
-		>새로고침</button>
+		<RefreshButton {refreshing} onclick={forceRefresh} />
 	</div>
 
 	{#if error}

@@ -6,6 +6,11 @@ interface SiteConfig {
 	site_description: string;
 	logo_path: string;
 	favicon_path: string;
+	services: {
+		magnum: boolean;
+		manila: boolean;
+		zun: boolean;
+	};
 }
 
 const DEFAULTS: SiteConfig = {
@@ -13,6 +18,7 @@ const DEFAULTS: SiteConfig = {
 	site_description: 'OpenStack VM + OverlayFS 배포 플랫폼',
 	logo_path: '/logo.png',
 	favicon_path: '/favicon.ico',
+	services: { magnum: false, manila: false, zun: false },
 };
 
 export const siteConfig = writable<SiteConfig>({ ...DEFAULTS });
@@ -29,6 +35,7 @@ export async function loadSiteConfig(): Promise<void> {
 			site_description: descFromEnv || DEFAULTS.site_description,
 			logo_path: logoFromEnv || DEFAULTS.logo_path,
 			favicon_path: faviconFromEnv || DEFAULTS.favicon_path,
+			services: DEFAULTS.services,
 		});
 		return;
 	}
@@ -38,8 +45,8 @@ export async function loadSiteConfig(): Promise<void> {
 			: (env.PUBLIC_API_BASE || 'http://backend:8000');
 		const res = await fetch(`${apiBase}/api/site-config`);
 		if (res.ok) {
-			const data: SiteConfig = await res.json();
-			siteConfig.set(data);
+			const data = await res.json();
+			siteConfig.set({ ...DEFAULTS, ...data });
 		}
 	} catch {
 		// 네트워크 오류 시 기본값 유지

@@ -5,6 +5,7 @@
   import type { Volume } from '$lib/types/resources';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import VolumeDetailPanel from '$lib/components/VolumeDetailPanel.svelte';
+  import RefreshButton from '$lib/components/RefreshButton.svelte';
   import { formatStorage } from '$lib/utils/format';
 
   const statusColor: Record<string, string> = {
@@ -66,7 +67,7 @@
     if (cached && volumes.length === 0) volumes = cached;
     if (manual) refreshing = true;
     try {
-      volumes = await api.get<Volume[]>(path, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      volumes = await api.get<Volume[]>(path, $auth.token ?? undefined, $auth.projectId ?? undefined, manual ? { refresh: true } : undefined);
       swrSet(path, volumes);
       error = '';
     } catch (e) {
@@ -161,15 +162,7 @@
         <span class="inline-block {autoRefresh ? 'animate-spin' : ''}" style="animation-duration:3s">⟳</span>
         자동
       </button>
-      <button
-        onclick={() => fetchVolumes(true)}
-        disabled={refreshing}
-        class="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-gray-400 hover:border-gray-500 text-xs font-medium transition-colors disabled:opacity-50"
-        title="새로고침"
-      >
-        <span class="{refreshing ? 'animate-spin' : ''}">⟳</span>
-        {refreshing ? '...' : '새로고침'}
-      </button>
+      <RefreshButton {refreshing} onclick={() => fetchVolumes(true)} />
       <button onclick={() => showModal = true} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 볼륨 생성</button>
     </div>
   </div>

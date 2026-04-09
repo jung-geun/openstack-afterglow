@@ -203,15 +203,20 @@ app.include_router(keypairs_router, prefix="/api/keypairs", tags=["keypairs"])
 app.include_router(volume_backups_router, prefix="/api/volumes/backups", tags=["volume-backups"])
 app.include_router(volume_snapshots_router, prefix="/api/volume-snapshots", tags=["volume-snapshots"])
 app.include_router(volumes_router, prefix="/api/volumes", tags=["volumes"])
-app.include_router(shares_router, prefix="/api/shares", tags=["shares"])
 # Network
 app.include_router(networks_router, prefix="/api/networks", tags=["networks"])
 app.include_router(routers_router, prefix="/api/routers", tags=["routers"])
 app.include_router(loadbalancers_router, prefix="/api/loadbalancers", tags=["loadbalancers"])
 app.include_router(security_groups_router, prefix="/api/security-groups", tags=["security-groups"])
-# Container
-app.include_router(clusters_router, prefix="/api/clusters", tags=["clusters"])
-app.include_router(containers_router, prefix="/api/containers", tags=["containers"])
+# Optional services — config.toml [services] 섹션에서 활성화
+from app.config import get_settings as _get_cfg
+_svc_cfg = _get_cfg()
+if _svc_cfg.service_manila_enabled:
+    app.include_router(shares_router, prefix="/api/shares", tags=["shares"])
+if _svc_cfg.service_magnum_enabled:
+    app.include_router(clusters_router, prefix="/api/clusters", tags=["clusters"])
+if _svc_cfg.service_zun_enabled:
+    app.include_router(containers_router, prefix="/api/containers", tags=["containers"])
 # Common
 app.include_router(dashboard_router, prefix="/api/dashboard", tags=["dashboard"])
 app.include_router(metrics_router, prefix="/api/metrics", tags=["metrics"])
@@ -301,7 +306,10 @@ async def _collect_snapshot() -> None:
 
         inst_data = await asyncio.to_thread(_count_instances)
         vol_data = await asyncio.to_thread(_count_volumes)
-        share_data = await asyncio.to_thread(_count_shares)
+        if settings.service_manila_enabled:
+            share_data = await asyncio.to_thread(_count_shares)
+        else:
+            share_data = {"total": 0}
         net_data = await asyncio.to_thread(_count_networks)
 
         await timeseries.record_snapshot("instances", inst_data)

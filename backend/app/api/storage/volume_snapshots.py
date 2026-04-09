@@ -1,10 +1,11 @@
 import asyncio
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 import openstack
 
 from app.api.deps import get_os_conn
 from app.services import cinder
+from app.services.cache import cached_call, invalidate, ttl_fast
 
 router = APIRouter()
 
@@ -20,9 +21,16 @@ class CreateSnapshotRequest(BaseModel):
 async def list_snapshots(
     volume_id: str | None = None,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    refresh: bool = Query(False),
 ):
+    pid = conn._union_project_id
+    cache_key = f"union:cinder:{pid}:snapshots" if not volume_id else f"union:cinder:{pid}:snapshots:{volume_id}"
     try:
-        return await asyncio.to_thread(cinder.list_snapshots, conn, volume_id)
+        return await cached_call(
+            cache_key, ttl_fast(),
+            lambda: cinder.list_snapshots(conn, volume_id),
+            refresh=refresh,
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail="스냅샷 목록 조회 실패")
 

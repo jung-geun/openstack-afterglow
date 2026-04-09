@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { auth } from '$lib/stores/auth';
+  import { untrack } from 'svelte';
   import { api, ApiError } from '$lib/api/client';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+  import RefreshButton from '$lib/components/RefreshButton.svelte';
 
   interface ImageInfo {
     id: string;
@@ -42,6 +43,7 @@
 
   let images = $state<ImageInfo[]>([]);
   let loading = $state(true);
+  let refreshing = $state(false);
   let error = $state('');
   let deleting = $state<string | null>(null);
 
@@ -82,9 +84,9 @@
     return counts;
   });
 
-  async function fetchImages() {
+  async function fetchImages(opts?: { refresh?: boolean }) {
     try {
-      images = await api.get<ImageInfo[]>('/api/images', $auth.token ?? undefined, $auth.projectId ?? undefined);
+      images = await api.get<ImageInfo[]>('/api/images', $auth.token ?? undefined, $auth.projectId ?? undefined, opts);
       error = '';
     } catch (e) {
       error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
@@ -151,7 +153,22 @@
     return s.slice(0, 10);
   }
 
-  onMount(fetchImages);
+  async function forceRefresh() {
+    refreshing = true;
+    try {
+      await fetchImages({ refresh: true });
+    } finally {
+      refreshing = false;
+    }
+  }
+
+  $effect(() => {
+    const pid = $auth.projectId;
+    if (!pid) return;
+    untrack(() => { fetchImages(); });
+    const interval = setInterval(() => untrack(() => { fetchImages(); }), 60000);
+    return () => clearInterval(interval);
+  });
 </script>
 
 <!-- 편집 모달 -->
@@ -200,12 +217,15 @@
 <div class="p-4 md:p-8">
   <div class="flex items-center justify-between mb-6">
     <h1 class="text-2xl font-bold text-white">이미지</h1>
-    <button
-      onclick={() => sortOrder = sortOrder === 'desc' ? 'asc' : 'desc'}
-      class="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white px-3 py-1.5 rounded-lg border border-gray-700 hover:border-gray-600 transition-colors"
-    >
-      날짜 {sortOrder === 'desc' ? '↓ 최신순' : '↑ 오래된순'}
-    </button>
+    <div class="flex items-center gap-2">
+      <RefreshButton {refreshing} onclick={forceRefresh} />
+      <button
+        onclick={() => sortOrder = sortOrder === 'desc' ? 'asc' : 'desc'}
+        class="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white px-3 py-1.5 rounded-lg border border-gray-700 hover:border-gray-600 transition-colors"
+      >
+        날짜 {sortOrder === 'desc' ? '↓ 최신순' : '↑ 오래된순'}
+      </button>
+    </div>
   </div>
 
   {#if error}<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>{/if}

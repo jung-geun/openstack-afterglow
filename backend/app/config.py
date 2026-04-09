@@ -52,6 +52,15 @@ def _load_toml() -> dict:
             cache = data.get("cache", {})
             flat["redis_url"] = cache.get("redis_url", "redis://localhost:6379/0")
             flat["cache_ttl_seconds"] = cache.get("default_ttl_seconds", 30)
+            flat["cache_ttl_fast"] = cache.get("ttl_fast", 15)
+            flat["cache_ttl_normal"] = cache.get("ttl_normal", cache.get("default_ttl_seconds", 30))
+            flat["cache_ttl_slow"] = cache.get("ttl_slow", 60)
+            flat["cache_ttl_static"] = cache.get("ttl_static", 300)
+
+            svc = data.get("services", {})
+            flat["service_magnum_enabled"] = svc.get("magnum", False)
+            flat["service_manila_enabled"] = svc.get("manila", False)
+            flat["service_zun_enabled"] = svc.get("zun", False)
 
             sess = data.get("session", {})
             flat["session_timeout_seconds"] = sess.get("timeout_seconds", 3600)
@@ -123,6 +132,15 @@ class Settings(BaseSettings):
     # Redis 캐시
     redis_url: str = "redis://localhost:6379/0"
     cache_ttl_seconds: int = 30
+    cache_ttl_fast: int = 15
+    cache_ttl_normal: int = 30
+    cache_ttl_slow: int = 60
+    cache_ttl_static: int = 300
+
+    # 선택적 서비스
+    service_magnum_enabled: bool = False
+    service_manila_enabled: bool = False
+    service_zun_enabled: bool = False
 
     # 세션 관리
     session_timeout_seconds: int = 3600

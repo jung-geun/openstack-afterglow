@@ -13,4 +13,9 @@ def get_site_config():
         "site_description": s.site_description,
         "logo_path": s.logo_path,
         "favicon_path": s.favicon_path,
+        "services": {
+            "magnum": s.service_magnum_enabled,
+            "manila": s.service_manila_enabled,
+            "zun": s.service_zun_enabled,
+        },
     }

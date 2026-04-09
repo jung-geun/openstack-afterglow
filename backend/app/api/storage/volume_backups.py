@@ -1,10 +1,11 @@
 import asyncio
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 import openstack
 
 from app.api.deps import get_os_conn
 from app.services import cinder
+from app.services.cache import cached_call, invalidate, ttl_fast
 
 router = APIRouter()
 
@@ -21,9 +22,14 @@ class RestoreBackupRequest(BaseModel):
 
 
 @router.get("")
-async def list_backups(conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def list_backups(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
+    pid = conn._union_project_id
     try:
-        return await asyncio.to_thread(cinder.list_backups, conn)
+        return await cached_call(
+            f"union:cinder:{pid}:backups", ttl_fast(),
+            lambda: cinder.list_backups(conn),
+            refresh=refresh,
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail="백업 목록 조회 실패")
 

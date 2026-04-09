@@ -6,6 +6,7 @@
   import type { Instance } from '$lib/types/resources';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import InstanceDetailPanel from '$lib/components/InstanceDetailPanel.svelte';
+  import RefreshButton from '$lib/components/RefreshButton.svelte';
 
   const statusColor: Record<string, string> = {
     ACTIVE:             'text-green-400 bg-green-900/30',
@@ -20,6 +21,7 @@
 
   let instances = $state<Instance[]>([]);
   let loading = $state(true);
+  let refreshing = $state(false);
   let error = $state('');
   let deleting = $state<string | null>(null);
   let selectedInstanceId = $state<string | null>(null);
@@ -34,18 +36,27 @@
     memoryCache.set(`${path}:${$auth.projectId}`, { data, timestamp: Date.now() });
   }
 
-  async function fetchInstances() {
+  async function fetchInstances(opts?: { refresh?: boolean }) {
     const path = '/api/instances';
     const cached = swrGet<Instance[]>(path);
     if (cached && instances.length === 0) instances = cached;
     try {
-      instances = await api.get<Instance[]>(path, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      instances = await api.get<Instance[]>(path, $auth.token ?? undefined, $auth.projectId ?? undefined, opts);
       swrSet(path, instances);
       error = '';
     } catch (e) {
       if (!cached) error = e instanceof ApiError ? `조회 실패 (${e.status}): ${(e as ApiError).message}` : '서버 오류';
     } finally {
       loading = false;
+    }
+  }
+
+  async function forceRefresh() {
+    refreshing = true;
+    try {
+      await fetchInstances({ refresh: true });
+    } finally {
+      refreshing = false;
     }
   }
 
@@ -114,9 +125,12 @@
 <div class="p-4 md:p-8">
   <div class="flex items-center justify-between mb-6">
     <h1 class="text-2xl font-bold text-white">인스턴스</h1>
-    <a href="/create" class="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
-      + VM 생성
-    </a>
+    <div class="flex items-center gap-2">
+      <RefreshButton {refreshing} onclick={forceRefresh} />
+      <a href="/create" class="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+        + VM 생성
+      </a>
+    </div>
   </div>
 
   {#if error}

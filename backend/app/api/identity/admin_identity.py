@@ -6,6 +6,7 @@ from pydantic import BaseModel
 import openstack
 
 from app.api.deps import get_os_conn, get_token_info, require_admin
+from app.services.cache import cached_call, invalidate, ttl_slow
 
 _logger = logging.getLogger(__name__)
 
@@ -144,12 +145,12 @@ class UpdateProjectRequest(BaseModel):
 
 
 @router.get("/projects/names", dependencies=[Depends(require_admin)])
-async def list_project_names(conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def list_project_names(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
     """모든 프로젝트의 id/name 목록 (페이지네이션 없이)."""
     def _list():
         return [{"id": p.id, "name": p.name or ""} for p in conn.identity.projects()]
     try:
-        return await asyncio.to_thread(_list)
+        return await cached_call("union:admin:project_names", ttl_slow(), _list, refresh=refresh)
     except Exception:
         raise HTTPException(status_code=500, detail="프로젝트 이름 목록 조회 실패")
 
@@ -399,7 +400,7 @@ async def update_project_quotas(
 # ============================================================================
 
 @router.get("/groups", dependencies=[Depends(require_admin)])
-async def list_groups(conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def list_groups(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
     """그룹 목록."""
     def _list():
         groups = []
@@ -415,7 +416,7 @@ async def list_groups(conn: openstack.connection.Connection = Depends(get_os_con
             pass
         return groups
     try:
-        return await asyncio.to_thread(_list)
+        return await cached_call("union:admin:groups", ttl_slow(), _list, refresh=refresh)
     except Exception:
         raise HTTPException(status_code=500, detail="그룹 목록 조회 실패")
 
@@ -454,7 +455,9 @@ async def create_group(
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"그룹 생성 실패: {e}")
     try:
-        return await asyncio.to_thread(_create)
+        result = await asyncio.to_thread(_create)
+        await invalidate("union:admin:groups")
+        return result
     except HTTPException:
         raise
 
@@ -500,6 +503,7 @@ async def delete_group(
             raise HTTPException(status_code=400, detail=f"그룹 삭제 실패: {e}")
     try:
         await asyncio.to_thread(_delete)
+        await invalidate("union:admin:groups")
     except HTTPException:
         raise
 
@@ -584,7 +588,7 @@ async def remove_user_from_group(
 # ============================================================================
 
 @router.get("/roles", dependencies=[Depends(require_admin)])
-async def list_roles(conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def list_roles(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
     """역할 목록."""
     def _list():
         roles = []
@@ -599,7 +603,7 @@ async def list_roles(conn: openstack.connection.Connection = Depends(get_os_conn
             pass
         return roles
     try:
-        return await asyncio.to_thread(_list)
+        return await cached_call("union:admin:roles", ttl_slow(), _list, refresh=refresh)
     except Exception:
         raise HTTPException(status_code=500, detail="역할 목록 조회 실패")
 

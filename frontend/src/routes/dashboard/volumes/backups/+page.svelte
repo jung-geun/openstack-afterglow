@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { auth } from '$lib/stores/auth';
+  import { untrack } from 'svelte';
   import { api, ApiError } from '$lib/api/client';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import { formatStorage } from '$lib/utils/format';
+  import RefreshButton from '$lib/components/RefreshButton.svelte';
 
   interface VolumeBackup {
     id: string;
@@ -25,6 +26,7 @@
   let backups = $state<VolumeBackup[]>([]);
   let volumes = $state<Volume[]>([]);
   let loading = $state(true);
+  let refreshing = $state(false);
   let error = $state('');
   let deleting = $state<string | null>(null);
   let showModal = $state(false);
@@ -87,7 +89,22 @@
     }
   }
 
-  onMount(() => { fetchBackups(); fetchVolumes(); });
+  async function forceRefresh() {
+    refreshing = true;
+    try {
+      await fetchBackups();
+    } finally {
+      refreshing = false;
+    }
+  }
+
+  $effect(() => {
+    const pid = $auth.projectId;
+    if (!pid) return;
+    untrack(() => { fetchBackups(); fetchVolumes(); });
+    const interval = setInterval(() => untrack(() => { fetchBackups(); }), 15000);
+    return () => clearInterval(interval);
+  });
 </script>
 
 {#if showModal}
@@ -132,7 +149,10 @@
 <div class="p-4 md:p-8">
   <div class="flex items-center justify-between mb-6">
     <h1 class="text-2xl font-bold text-white">볼륨 백업</h1>
-    <button onclick={() => showModal = true} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 백업 생성</button>
+    <div class="flex items-center gap-2">
+      <RefreshButton {refreshing} onclick={forceRefresh} />
+      <button onclick={() => showModal = true} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 백업 생성</button>
+    </div>
   </div>
 
   {#if error}<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>{/if}
