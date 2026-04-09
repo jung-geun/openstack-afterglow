@@ -38,6 +38,13 @@
 		error = '';
 		try {
 			const res = await api.get<{ authorize_url: string }>('/api/auth/gitlab/authorize');
+			// 안전한 프로토콜인지 확인 (오픈 리다이렉트 방지)
+			const redirectUrl = new URL(res.authorize_url);
+			if (!['https:', 'http:'].includes(redirectUrl.protocol)) {
+				error = 'GitLab 인증 URL이 유효하지 않습니다';
+				gitlabLoading = false;
+				return;
+			}
 			window.location.href = res.authorize_url;
 		} catch (e) {
 			error = e instanceof ApiError ? `GitLab 인증 오류 (${e.status})` : 'GitLab 인증 URL 조회 실패';

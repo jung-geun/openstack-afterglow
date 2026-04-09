@@ -1,5 +1,5 @@
 import re
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 
 
@@ -75,7 +75,8 @@ class CreateInstanceRequest(BaseModel):
     key_name: Optional[str] = None
     admin_pass: Optional[str] = None
     availability_zone: Optional[str] = None
-    boot_volume_size_gb: Optional[int] = None
+    boot_volume_size_gb: Optional[int] = Field(None, ge=1, le=16384)
+    delete_boot_volume_on_termination: bool = False
     additional_volume_ids: list[str] = []
     new_volumes: list["NewVolumeRequest"] = []
 

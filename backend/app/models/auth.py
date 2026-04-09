@@ -1,11 +1,11 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class LoginRequest(BaseModel):
-    username: str
-    password: str
-    project_name: str = ""
-    domain_name: str = "Default"
+    username: str = Field(..., min_length=1, max_length=255)
+    password: str = Field(..., min_length=1, max_length=1024)
+    project_name: str = Field("", max_length=255)
+    domain_name: str = Field("Default", max_length=255)
 
 
 class TokenResponse(BaseModel):
@@ -35,5 +35,5 @@ class ProjectInfo(BaseModel):
 
 
 class GitLabCallbackRequest(BaseModel):
-    code: str
-    state: str
+    code: str = Field(..., min_length=1, max_length=2048)
+    state: str = Field(..., min_length=1, max_length=256)

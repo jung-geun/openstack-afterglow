@@ -3,6 +3,18 @@ import type { Handle } from '@sveltejs/kit';
 // 인증 없이 접근 가능한 경로
 const PUBLIC_PATHS = ['/', '/auth/gitlab/callback'];
 
+// 정적 파일로 판단할 확장자 패턴
+const STATIC_EXT = /\.(js|css|svg|png|jpg|jpeg|ico|woff2?|ttf|eot|map|webp|gif)$/;
+
+// 모든 응답에 추가할 보안 헤더
+const SECURITY_HEADERS: Record<string, string> = {
+	'X-Frame-Options': 'DENY',
+	'X-Content-Type-Options': 'nosniff',
+	'Referrer-Policy': 'strict-origin-when-cross-origin',
+	'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+	'X-XSS-Protection': '0',
+};
+
 export const handle: Handle = async ({ event, resolve }) => {
 	const path = event.url.pathname;
 
@@ -12,9 +24,13 @@ export const handle: Handle = async ({ event, resolve }) => {
 		path.startsWith('/_app/') ||
 		path.startsWith('/favicon') ||
 		path.startsWith('/logo') ||
-		path.includes('.')
+		STATIC_EXT.test(path)
 	) {
-		return resolve(event);
+		const response = await resolve(event);
+		for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
+			response.headers.set(key, value);
+		}
+		return response;
 	}
 
 	// 서버 사이드에서는 localStorage에 접근할 수 없으므로,
@@ -28,5 +44,9 @@ export const handle: Handle = async ({ event, resolve }) => {
 		});
 	}
 
-	return resolve(event);
+	const response = await resolve(event);
+	for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
+		response.headers.set(key, value);
+	}
+	return response;
 };

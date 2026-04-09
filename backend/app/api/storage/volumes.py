@@ -1,9 +1,10 @@
 import asyncio
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 import openstack
 
 from app.api.deps import get_os_conn
 from app.models.storage import VolumeInfo, CreateVolumeRequest
+from app.rate_limit import limiter
 from app.services import cinder
 from app.services.cache import cached_call, invalidate, ttl_fast
 
@@ -32,7 +33,9 @@ async def get_volume(volume_id: str, conn: openstack.connection.Connection = Dep
 
 
 @router.post("", response_model=VolumeInfo, status_code=201)
+@limiter.limit("10/minute")
 async def create_volume(
+    request: Request,
     req: CreateVolumeRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):

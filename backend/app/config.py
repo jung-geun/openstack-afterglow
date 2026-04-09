@@ -65,6 +65,7 @@ def _load_toml() -> dict:
             sess = data.get("session", {})
             flat["session_timeout_seconds"] = sess.get("timeout_seconds", 3600)
             flat["session_warning_before_seconds"] = sess.get("warning_before_seconds", 300)
+            flat["session_absolute_timeout"] = sess.get("absolute_timeout", 14400)
 
             nv = data.get("nova", {})
             flat["default_network_id"] = nv.get("default_network_id", "")
@@ -145,6 +146,7 @@ class Settings(BaseSettings):
     # 세션 관리
     session_timeout_seconds: int = 3600
     session_warning_before_seconds: int = 300
+    session_absolute_timeout: int = 14400  # 절대 만료: 기본 4시간, 초과 시 연장 불가
 
     # Nova 기본값
     default_network_id: str = ""

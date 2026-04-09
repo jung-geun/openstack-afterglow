@@ -45,7 +45,8 @@ async def _check_session_timeout(token_hash: str, project_id: str) -> None:
     except HTTPException:
         raise
     except Exception:
-        _logger.warning("Redis 장애로 세션 체크를 건너뜁니다 — 세션 타임아웃이 적용되지 않을 수 있습니다", exc_info=True)
+        _logger.error("Redis 장애로 세션 타임아웃 검증 불가 — 요청 거부", exc_info=True)
+        raise HTTPException(status_code=503, detail="서비스를 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도해 주세요.")
 
 
 async def get_session_remaining(token: str, project_id: str) -> int:
@@ -67,14 +68,28 @@ async def get_session_remaining(token: str, project_id: str) -> int:
 
 
 async def extend_session(token: str, project_id: str) -> None:
-    """세션 시작 시간을 지금으로 재설정 (연장)."""
+    """세션 시작 시간을 지금으로 재설정 (연장). 절대 만료 시간 초과 시 HTTPException 발생."""
     from app.services.cache import _get_redis
     settings = get_settings()
     token_hash = hashlib.sha256(token.encode()).hexdigest()[:32]
     key = _session_key(token_hash, project_id or 'noscope')
+    abs_key = f"union:session-abs:{token_hash}:{project_id or 'noscope'}"
     try:
         r = await _get_redis()
-        await r.setex(key, settings.session_timeout_seconds + 60, str(time.time()))
+        now = time.time()
+        # 절대 만료 확인
+        abs_start_bytes = await r.get(abs_key)
+        if abs_start_bytes is not None:
+            if now - float(abs_start_bytes) > settings.session_absolute_timeout:
+                await r.delete(key)
+                await r.delete(abs_key)
+                raise HTTPException(status_code=401, detail="세션 최대 시간을 초과했습니다. 다시 로그인해 주세요.")
+        else:
+            # 절대 시작 시각 최초 기록
+            await r.setex(abs_key, settings.session_absolute_timeout + 60, str(now))
+        await r.setex(key, settings.session_timeout_seconds + 60, str(now))
+    except HTTPException:
+        raise
     except Exception:
         _logger.warning("Redis 장애로 세션 연장을 건너뜁니다", exc_info=True)
 

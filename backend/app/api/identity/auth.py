@@ -1,5 +1,6 @@
 import asyncio
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Header, Request
+import hashlib
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from typing import Optional
 
 from app.models.auth import LoginRequest, TokenResponse, UserInfo, ProjectInfo, GitLabCallbackRequest
@@ -7,6 +8,7 @@ from app.services import keystone
 from app.services.cache import cached_call, ttl_fast, ttl_normal, ttl_static
 from app.config import get_settings
 from app.rate_limit import limiter
+from app.api.deps import get_token_info, get_session_remaining, extend_session
 
 router = APIRouter()
 
@@ -55,31 +57,21 @@ async def login(request: Request, req: LoginRequest, background_tasks: Backgroun
 
 
 @router.get("/me", response_model=UserInfo)
-async def me(x_auth_token: Optional[str] = Header(None), x_project_id: Optional[str] = Header(None)):
-    if not x_auth_token:
-        raise HTTPException(status_code=401, detail="토큰이 필요합니다")
-    try:
-        data = keystone.validate_token(x_auth_token, project_id=x_project_id or "")
-    except Exception as e:
-        raise HTTPException(status_code=401, detail="유효하지 않은 토큰")
-
+async def me(token_info: dict = Depends(get_token_info)):
     return UserInfo(
-        user_id=data["user_id"],
-        username=data["username"],
-        project_id=data["project_id"],
-        project_name=data["project_name"],
-        roles=data["roles"],
+        user_id=token_info["user_id"],
+        username=token_info["username"],
+        project_id=token_info["project_id"],
+        project_name=token_info["project_name"],
+        roles=token_info["roles"],
     )
 
 
 @router.get("/session-info")
-async def session_info(x_auth_token: Optional[str] = Header(None), x_project_id: Optional[str] = Header(None)):
+async def session_info(token_info: dict = Depends(get_token_info)):
     """현재 세션의 남은 시간(초)과 설정된 타임아웃을 반환."""
-    if not x_auth_token:
-        raise HTTPException(status_code=401, detail="토큰이 필요합니다")
-    from app.api.deps import get_session_remaining
     settings = get_settings()
-    remaining = await get_session_remaining(x_auth_token, x_project_id or "")
+    remaining = await get_session_remaining(token_info["token"], token_info["project_id"])
     return {
         "remaining_seconds": remaining,
         "timeout_seconds": settings.session_timeout_seconds,
@@ -88,28 +80,37 @@ async def session_info(x_auth_token: Optional[str] = Header(None), x_project_id:
 
 
 @router.post("/extend-session")
-async def extend_session_endpoint(x_auth_token: Optional[str] = Header(None), x_project_id: Optional[str] = Header(None)):
+async def extend_session_endpoint(token_info: dict = Depends(get_token_info)):
     """세션을 연장 (시작 시간을 지금으로 재설정)."""
-    if not x_auth_token:
-        raise HTTPException(status_code=401, detail="토큰이 필요합니다")
-    try:
-        # Keystone 토큰 여전히 유효한지 확인
-        keystone.validate_token(x_auth_token, project_id=x_project_id or "")
-    except Exception as e:
-        raise HTTPException(status_code=401, detail="유효하지 않은 토큰")
-    from app.api.deps import extend_session
-    await extend_session(x_auth_token, x_project_id or "")
+    await extend_session(token_info["token"], token_info["project_id"])
     settings = get_settings()
     return {"message": "세션이 연장되었습니다", "timeout_seconds": settings.session_timeout_seconds}
 
 
-@router.get("/projects", response_model=list[ProjectInfo])
-async def list_projects(x_auth_token: Optional[str] = Header(None)):
-    """사용자가 접근 가능한 프로젝트 목록 반환."""
-    if not x_auth_token:
-        raise HTTPException(status_code=401, detail="토큰이 필요합니다")
+@router.post("/logout")
+async def logout(token_info: dict = Depends(get_token_info)):
+    """로그아웃: Redis 세션 삭제 및 Keystone 토큰 폐기."""
+    from app.services.cache import _get_redis
+    token = token_info["token"]
+    pid = token_info.get("project_id") or "noscope"
+    h = hashlib.sha256(token.encode()).hexdigest()[:32]
     try:
-        projects = keystone.list_projects(x_auth_token)
+        r = await _get_redis()
+        await r.delete(f"union:session:{h}:{pid}", f"union:session-abs:{h}:{pid}")
+    except Exception:
+        pass
+    try:
+        await asyncio.to_thread(keystone.revoke_token, token)
+    except Exception:
+        pass
+    return {"message": "로그아웃 완료"}
+
+
+@router.get("/projects", response_model=list[ProjectInfo])
+async def list_projects(token_info: dict = Depends(get_token_info)):
+    """사용자가 접근 가능한 프로젝트 목록 반환."""
+    try:
+        projects = keystone.list_projects(token_info["token"])
         return [ProjectInfo(**p) for p in projects]
     except Exception as e:
         raise HTTPException(status_code=500, detail="프로젝트 목록 조회 실패")

@@ -1,5 +1,5 @@
-from pydantic import BaseModel
-from typing import Optional, Any
+from pydantic import BaseModel, Field
+from typing import Literal, Optional, Any
 
 
 class ShareInfo(BaseModel):
@@ -104,24 +104,24 @@ class NetworkDetail(BaseModel):
 
 
 class CreateVolumeRequest(BaseModel):
-    name: str
-    size_gb: int
+    name: str = Field(..., min_length=1, max_length=255)
+    size_gb: int = Field(..., ge=1, le=16384)
     availability_zone: Optional[str] = None
 
 
 class CreateShareRequest(BaseModel):
-    name: str
-    size_gb: int
-    share_type: str = ""
+    name: str = Field(..., min_length=1, max_length=255)
+    size_gb: int = Field(..., ge=1, le=16384)
+    share_type: str = Field("", max_length=255)
     share_network_id: Optional[str] = None
     metadata: Optional[dict[str, Any]] = None
-    share_proto: str = "CEPHFS"  # "CEPHFS" | "NFS"
+    share_proto: Literal["CEPHFS", "NFS"] = "CEPHFS"
 
 
 class CreateAccessRuleRequest(BaseModel):
-    access_to: str        # CephX ID 또는 IP/CIDR
-    access_level: str = "ro"  # "ro" | "rw"
-    access_type: str = "cephx"  # "cephx" | "ip"
+    access_to: str = Field(..., min_length=1, max_length=255)  # CephX ID 또는 IP/CIDR
+    access_level: Literal["ro", "rw"] = "ro"
+    access_type: Literal["cephx", "ip"] = "cephx"
 
 
 class CreateNetworkRequest(BaseModel):

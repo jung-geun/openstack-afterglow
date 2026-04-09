@@ -13,11 +13,12 @@
 import logging
 import json
 import asyncio
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 import openstack
 
 from app.api.deps import get_os_conn
+from app.rate_limit import limiter
 from app.config import get_settings
 from app.models.compute import (
     CreateInstanceRequest, InstanceInfo,
@@ -94,7 +95,9 @@ async def get_instance(
 
 
 @router.post("", response_model=InstanceInfo, status_code=201)
+@limiter.limit("5/minute")
 async def create_instance(
+    request: Request,
     req: CreateInstanceRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
@@ -198,6 +201,7 @@ async def create_instance(
             req.admin_pass,
             req.availability_zone or settings.default_availability_zone,
             meta,
+            req.delete_boot_volume_on_termination,
         )
         server_id = server.id
 
@@ -334,6 +338,7 @@ async def create_instance_async(
                 admin_pass=req.admin_pass,
                 availability_zone=req.availability_zone or settings.default_availability_zone,
                 metadata=meta,
+                delete_boot_volume_on_termination=req.delete_boot_volume_on_termination,
             )
             server_id = server.id
             yield send_progress(ProgressStep.SERVER_CREATING, 95, "Nova 서버 생성 완료")

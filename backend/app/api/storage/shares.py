@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 import openstack
 
 from app.api.deps import get_os_conn
 from app.config import get_settings
 from app.models.storage import ShareInfo, CreateShareRequest, CreateAccessRuleRequest
+from app.rate_limit import limiter
 from app.services import manila
 from app.services.cache import cached_call, invalidate, ttl_fast
 
@@ -48,7 +49,9 @@ async def get_share(share_id: str, conn: openstack.connection.Connection = Depen
 
 
 @router.post("", response_model=ShareInfo, status_code=201)
+@limiter.limit("5/minute")
 async def create_share(
+    request: Request,
     req: CreateShareRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):

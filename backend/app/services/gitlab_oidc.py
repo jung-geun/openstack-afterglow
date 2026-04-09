@@ -76,7 +76,7 @@ async def _exchange_gitlab_code(code: str) -> dict:
         data = resp.json()
         access_token = data.get("access_token")
         if not access_token:
-            logger.debug("GitLab 토큰 응답에 access_token 없음: %s", data)
+            logger.debug("GitLab 토큰 응답에 access_token 없음 (keys: %s)", list(data.keys()))
             raise ValueError("GitLab 토큰 응답에 access_token이 없습니다")
         # Keystone OS-FEDERATION OpenID Connect는 id_token(JWT)을 기대함
         id_token = data.get("id_token", access_token)

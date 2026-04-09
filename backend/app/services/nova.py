@@ -54,6 +54,7 @@ def create_server(
     admin_pass: Optional[str] = None,
     availability_zone: Optional[str] = None,
     metadata: Optional[dict] = None,
+    delete_boot_volume_on_termination: bool = False,
 ) -> InstanceInfo:
     body = {
         "name": name,
@@ -64,7 +65,7 @@ def create_server(
                 "uuid": boot_volume_id,
                 "source_type": "volume",
                 "destination_type": "volume",
-                "delete_on_termination": True,
+                "delete_on_termination": delete_boot_volume_on_termination,
             }
         ],
     }

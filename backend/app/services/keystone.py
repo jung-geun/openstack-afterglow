@@ -79,6 +79,19 @@ def get_openstack_connection(token: str, project_id: str) -> openstack.connectio
     )
 
 
+def revoke_token(token: str) -> None:
+    """Keystone에 토큰 폐기 요청 (DELETE /v3/auth/tokens)."""
+    settings = get_settings()
+    auth_plugin = v3.Token(auth_url=settings.os_auth_url, token=token)
+    sess = ks_session.Session(auth=auth_plugin, timeout=10)
+    sess.delete(
+        f"{settings.os_auth_url}/auth/tokens",
+        endpoint_filter=None,
+        headers={"X-Subject-Token": token},
+        authenticated=False,
+    )
+
+
 def get_user(conn: openstack.connection.Connection, user_id: str) -> dict:
     """user_id로 사용자 상세 정보 조회 (이름, 이메일 등)."""
     u = conn.identity.get_user(user_id)

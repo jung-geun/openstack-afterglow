@@ -221,6 +221,7 @@
 					key_name: $wizard.authMode === 'keypair' ? $wizard.keyName : null,
 					admin_pass: $wizard.authMode === 'password' ? $wizard.adminPassword : null,
 					boot_volume_size_gb: $wizard.bootVolumeSizeGb,
+					delete_boot_volume_on_termination: $wizard.deleteBootVolumeOnTermination,
 					additional_volume_ids: $wizard.additionalVolumeIds,
 					new_volumes: $wizard.newVolumes.filter(v => v.name.trim()),
 				})
@@ -254,9 +255,10 @@
 							progressMessage = data.message;
 
 							if (data.step === 'completed') {
+								const instanceId = data.instance_id;
 								setTimeout(() => {
 									resetWizard();
-									goto('/dashboard');
+									goto(instanceId ? `/dashboard/compute/instances/${instanceId}` : '/dashboard');
 								}, 1000);
 								return;
 							}
@@ -438,6 +440,21 @@
 					<p class="text-xs text-gray-500 mt-1">OS 루트 볼륨 크기. 최소 10GB, 기본 20GB.</p>
 				</div>
 
+				<!-- 인스턴스 삭제 시 볼륨 자동 제거 -->
+				<div class="mb-6">
+					<label class="flex items-center gap-3 cursor-pointer">
+						<input
+							type="checkbox"
+							bind:checked={$wizard.deleteBootVolumeOnTermination}
+							class="w-4 h-4 rounded bg-gray-800 border-gray-600 text-blue-500 focus:ring-blue-500 focus:ring-offset-0"
+						/>
+						<div>
+							<span class="text-sm text-white">인스턴스 삭제 시 루트 볼륨 자동 제거</span>
+							<p class="text-xs text-gray-500 mt-0.5">비활성화 시 인스턴스를 삭제해도 루트 볼륨이 보존됩니다.</p>
+						</div>
+					</label>
+				</div>
+
 				<!-- 네트워크 선택 -->
 				<div class="mb-6">
 					<label for="create-network" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">네트워크</label>
@@ -558,7 +575,7 @@
 					</div>
 					<div class="flex justify-between">
 						<span class="text-gray-400">루트 볼륨</span>
-						<span class="text-white">{$wizard.bootVolumeSizeGb} GB</span>
+						<span class="text-white">{$wizard.bootVolumeSizeGb} GB{$wizard.deleteBootVolumeOnTermination ? '' : ' (인스턴스 삭제 시 보존)'}</span>
 					</div>
 					<div class="flex justify-between">
 						<span class="text-gray-400">네트워크</span>

@@ -20,6 +20,7 @@ export interface WizardState {
 	keyName: string | null;
 	adminPassword: string;
 	bootVolumeSizeGb: number;
+	deleteBootVolumeOnTermination: boolean;
 	additionalVolumeIds: string[];
 	newVolumes: NewVolumeSpec[];
 }
@@ -39,6 +40,7 @@ const initial: WizardState = {
 	keyName: null,
 	adminPassword: '',
 	bootVolumeSizeGb: 20,
+	deleteBootVolumeOnTermination: false,
 	additionalVolumeIds: [],
 	newVolumes: [],
 };

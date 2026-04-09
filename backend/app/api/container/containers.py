@@ -1,12 +1,14 @@
 import asyncio
 import hashlib
 import logging
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, Query
+import secrets
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect, Query
 from pydantic import BaseModel
 import openstack
 
 from app.api.deps import get_os_conn
 from app.models.containers import ZunContainerInfo, CreateZunContainerRequest, ContainerListResponse, PortMapping
+from app.rate_limit import limiter
 from app.services import zun
 from app.services.zun import ZunServiceUnavailable
 
@@ -35,7 +37,9 @@ async def get_container(container_id: str, conn: openstack.connection.Connection
 
 
 @router.post("", response_model=ZunContainerInfo, status_code=201)
+@limiter.limit("5/minute")
 async def create_container(
+    request: Request,
     req: CreateZunContainerRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
@@ -87,27 +91,58 @@ class ExecRequest(BaseModel):
     command: str = "/bin/bash"
 
 
+@router.post("/{container_id}/exec-ticket", status_code=201)
+async def create_exec_ticket(
+    container_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """WebSocket exec 연결에 사용할 일회용 티켓 발급 (30초 유효)."""
+    from app.services.cache import _get_redis
+    import json
+    ticket = secrets.token_urlsafe(32)
+    payload = json.dumps({
+        "container_id": container_id,
+        "user_id": conn._union_user_id,
+        "project_id": conn._union_project_id,
+        "token": conn._union_token,
+    })
+    r = await _get_redis()
+    await r.setex(f"union:ws-ticket:{ticket}", 30, payload)
+    return {"ticket": ticket}
+
+
 @router.websocket("/{container_id}/exec")
 async def container_exec_ws(
     container_id: str,
     websocket: WebSocket,
-    token: str = Query(...),
-    project_id: str = Query(default=""),
+    ticket: str = Query(...),
 ):
     """컨테이너 exec 인터랙티브 WebSocket 프록시.
     Zun execute API를 통해 명령을 실행하고 결과를 반환하는 간단한 셸 에뮬레이터.
+    인증은 일회용 티켓으로 처리 (POST /{id}/exec-ticket 으로 발급).
     """
     await websocket.accept()
     conn = None
     try:
-        from app.api.deps import _cached_validate, _check_session_timeout
+        from app.services.cache import _get_redis
         from app.services import keystone
+        import json
 
-        token_info = await _cached_validate(token, project_id)
-        token_hash = hashlib.sha256(token.encode()).hexdigest()[:32]
-        await _check_session_timeout(token_hash, project_id)
-        scoped_token = token_info["token"]
-        pid = token_info["project_id"]
+        r = await _get_redis()
+        ticket_key = f"union:ws-ticket:{ticket}"
+        payload_bytes = await r.get(ticket_key)
+        if not payload_bytes:
+            await websocket.close(code=4001)
+            return
+        await r.delete(ticket_key)  # 일회용: 즉시 삭제
+
+        payload = json.loads(payload_bytes)
+        if payload.get("container_id") != container_id:
+            await websocket.close(code=4001)
+            return
+
+        scoped_token = payload["token"]
+        pid = payload["project_id"]
         conn = await asyncio.to_thread(keystone.get_openstack_connection, scoped_token, pid)
         conn._union_token = scoped_token
         conn._union_project_id = pid

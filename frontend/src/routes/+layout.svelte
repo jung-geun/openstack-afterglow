@@ -90,7 +90,13 @@
 		document.documentElement.classList.toggle('light', $resolvedTheme === 'light');
 	});
 
-	function logout() {
+	async function logout() {
+		// best-effort 서버 토큰 폐기
+		if ($auth.token) {
+			try {
+				await api.post('/api/auth/logout', {}, $auth.token, $auth.projectId ?? undefined);
+			} catch { /* 실패해도 로컬 정리는 진행 */ }
+		}
 		clearAuth();
 		goto('/');
 	}

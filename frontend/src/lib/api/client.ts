@@ -38,7 +38,11 @@ async function request<T>(
 		headers['X-Project-Id'] = projectId;
 	}
 
-	const res = await fetch(`${getBaseUrl()}${path}`, { ...options, headers });
+	const res = await fetch(`${getBaseUrl()}${path}`, {
+		...options,
+		headers,
+		signal: options.signal ?? AbortSignal.timeout(30_000),
+	});
 
 	if (!res.ok) {
 		let detail = res.statusText;
@@ -80,7 +84,6 @@ export const api = {
 	 * @param projectId 프로젝트 ID
 	 * @param onMessage 각 메시지 수신 시 호출되는 콜백
 	 * @param onError 에러 발생 시 호출되는 콜백
-	 * @returns EventSource 인스턴스
 	 */
 	postSse: <T>(
 		path: string,
@@ -89,7 +92,7 @@ export const api = {
 		projectId?: string,
 		onMessage?: (data: T) => void,
 		onError?: (error: Error) => void
-	): EventSource => {
+	): void => {
 		const baseUrl = getBaseUrl();
 		const url = new URL(`${baseUrl}${path}`);
 
@@ -141,8 +144,5 @@ export const api = {
 		}).catch((err) => {
 			onError?.(err);
 		});
-
-		// EventSource 호환을 위해 더미 객체 반환
-		return new EventSource(url.href);
 	}
 };

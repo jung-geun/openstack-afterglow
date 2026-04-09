@@ -84,9 +84,20 @@
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];
     if (!file) return;
+    // 최대 64KB — SSH 공개키는 일반적으로 1KB 미만
+    if (file.size > 65536) {
+      createError = '파일이 너무 큽니다 (최대 64KB)';
+      input.value = '';
+      return;
+    }
     const reader = new FileReader();
     reader.onload = (e) => {
-      form.public_key = ((e.target?.result as string) ?? '').trim();
+      const content = ((e.target?.result as string) ?? '').trim();
+      if (content && !/^(ssh-rsa|ssh-ed25519|ssh-dss|ecdsa-sha2-\S+)\s/.test(content)) {
+        createError = '유효한 SSH 공개키 형식이 아닙니다 (ssh-rsa, ssh-ed25519 등)';
+        return;
+      }
+      form.public_key = content;
     };
     reader.readAsText(file);
     // 같은 파일 재선택 허용

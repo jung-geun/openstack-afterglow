@@ -121,14 +121,29 @@
     connectWs();
   }
 
-  function connectWs() {
+  async function connectWs() {
     if (!terminal || wsConnecting) return;
     wsConnecting = true;
+
+    let ticket: string;
+    try {
+      const res = await api.post<{ ticket: string }>(
+        `/api/containers/${containerId}/exec-ticket`,
+        {},
+        $auth.token ?? undefined,
+        $auth.projectId ?? undefined,
+      );
+      ticket = res.ticket;
+    } catch {
+      wsConnecting = false;
+      terminal?.write('\r\n\x1b[31m콘솔 티켓 발급 실패\x1b[0m\r\n');
+      return;
+    }
 
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.hostname;
     const port = import.meta.env.PUBLIC_API_BASE ? new URL(import.meta.env.PUBLIC_API_BASE).port || '8000' : '8000';
-    const url = `${proto}//${host}:${port}/api/containers/${containerId}/exec?token=${encodeURIComponent($auth.token ?? '')}&project_id=${encodeURIComponent($auth.projectId ?? '')}`;
+    const url = `${proto}//${host}:${port}/api/containers/${containerId}/exec?ticket=${encodeURIComponent(ticket)}`;
 
     const socket = new WebSocket(url);
     ws = socket;
