@@ -53,6 +53,247 @@ default_availability_zone = "nova"
 boot_volume_size_gb = 20
 upper_volume_size_gb = 50
 
+[gpu]
+# GPU 디바이스 맵 커스터마이징
+# vendor_id / device_id: lspci -nn 출력의 PCI ID (대문자 hex)
+# is_audio: HDMI/DP 오디오 장치이면 true (GPU 카운트에서 제외됨)
+# 변경 후 백엔드를 재시작해야 적용됩니다.
+
+# === Maxwell ===
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "17C2"
+name = "GTX TITAN X"
+is_audio = false
+
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "0FB0"
+name = "GM200 Audio"
+is_audio = true
+
+# === Pascal ===
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "1B06"
+name = "GTX 1080 Ti"
+is_audio = false
+
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "1B80"
+name = "GTX 1080"
+is_audio = false
+
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "1B81"
+name = "GTX 1070"
+is_audio = false
+
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "1B00"
+name = "TITAN X"
+is_audio = false
+
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "1B02"
+name = "TITAN Xp"
+is_audio = false
+
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "10EF"
+name = "GP102 Audio"
+is_audio = true
+
+# === Ampere Consumer ===
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "2204"
+name = "RTX 3090"
+is_audio = false
+
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "2203"
+name = "RTX 3090 Ti"
+is_audio = false
+
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "2206"
+name = "RTX 3080 Ti"
+is_audio = false
+
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "220A"
+name = "RTX 3080"
+is_audio = false
+
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "2484"
+name = "RTX 3070 Ti"
+is_audio = false
+
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "2482"
+name = "RTX 3070"
+is_audio = false
+
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "2504"
+name = "RTX 3060"
+is_audio = false
+
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "1AEF"
+name = "GA102 Audio"
+is_audio = true
+
+# === Ada Lovelace Consumer ===
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "2684"
+name = "RTX 4090"
+is_audio = false
+
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "2704"
+name = "RTX 4080"
+is_audio = false
+
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "2782"
+name = "RTX 4070 Ti SUPER"
+is_audio = false
+
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "2783"
+name = "RTX 4070 Ti"
+is_audio = false
+
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "2786"
+name = "RTX 4070 SUPER"
+is_audio = false
+
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "2882"
+name = "RTX 4060 Ti"
+is_audio = false
+
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "22BA"
+name = "AD102 Audio"
+is_audio = true
+
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "22BE"
+name = "AD107 Audio"
+is_audio = true
+
+# === Blackwell Consumer ===
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "2B85"
+name = "RTX 5090"
+is_audio = false
+
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "2B80"
+name = "RTX 5080"
+is_audio = false
+
+# === Professional / Workstation ===
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "28B0"
+name = "RTX 2000 Ada"
+is_audio = false
+
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "2230"
+name = "RTX A6000"
+is_audio = false
+
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "2231"
+name = "RTX A5000"
+is_audio = false
+
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "26B1"
+name = "L40"
+is_audio = false
+
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "26B9"
+name = "L40S"
+is_audio = false
+
+# === Datacenter ===
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "20B0"
+name = "A100 SXM4 40GB"
+is_audio = false
+
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "20B2"
+name = "A100 SXM4 80GB"
+is_audio = false
+
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "20B5"
+name = "A100 PCIe"
+is_audio = false
+
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "20F1"
+name = "A100 PCIe 40GB"
+is_audio = false
+
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "20B8"
+name = "A10"
+is_audio = false
+
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "2330"
+name = "H100 SXM5"
+is_audio = false
+
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "2331"
+name = "H100 PCIe"
+is_audio = false
+
 [gitlab_oidc]
 # GitLab OIDC 로그인 활성화 여부
 enabled = false

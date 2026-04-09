@@ -27,6 +27,21 @@
 		gpu_used: number;
 	}
 
+	interface GpuGroup {
+		device_name: string;
+		vendor_name: string;
+		total: number;
+		used: number;
+	}
+
+	interface AggregatedHost {
+		name: string;
+		gpus: GpuDevice[];
+		gpu_groups: GpuGroup[];
+		gpu_total: number;
+		gpu_used: number;
+	}
+
 	interface GpuType {
 		device_name: string;
 		vendor: string;
@@ -36,6 +51,7 @@
 
 	interface GpuResponse {
 		hosts: GpuHost[];
+		aggregated_hosts: AggregatedHost[];
 		summary: {
 			total_hosts: number;
 			total_gpus: number;
@@ -45,7 +61,7 @@
 		gpu_types: GpuType[];
 	}
 
-	let hosts = $state<GpuHost[]>([]);
+	let aggregatedHosts = $state<AggregatedHost[]>([]);
 	let summary = $state({ total_hosts: 0, total_gpus: 0, used_gpus: 0, available_gpus: 0 });
 	let gpuTypes = $state<GpuType[]>([]);
 	let loading = $state(true);
@@ -60,7 +76,7 @@
 		error = '';
 		try {
 			const res = await api.get<GpuResponse>('/api/admin/gpu-hosts', token, projectId);
-			hosts = res.hosts;
+			aggregatedHosts = res.aggregated_hosts ?? [];
 			summary = res.summary;
 			gpuTypes = res.gpu_types ?? [];
 		} catch (e) {
@@ -71,8 +87,8 @@
 		}
 	}
 
-	function toggleHost(uuid: string) {
-		expandedHost = expandedHost === uuid ? null : uuid;
+	function toggleHost(name: string) {
+		expandedHost = expandedHost === name ? null : name;
 	}
 
 	onMount(load);
@@ -123,7 +139,14 @@
 							</div>
 							<div class="text-right">
 								<div class="text-sm font-semibold text-white">{gt.total}</div>
-								<div class="text-xs {gt.used > 0 ? 'text-red-400' : 'text-gray-500'}">{gt.used} 사용 중</div>
+								{#if gt.used > 0}
+									<div class="text-xs text-red-400">{gt.used} 사용 중</div>
+								{/if}
+								{#if gt.total - gt.used > 0}
+									<div class="text-xs text-green-400">{gt.total - gt.used} 사용 가능</div>
+								{:else if gt.used === 0}
+									<div class="text-xs text-gray-500">0 사용 중</div>
+								{/if}
 							</div>
 						</div>
 					{/each}
@@ -137,16 +160,22 @@
 				<thead>
 					<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
 						<th class="text-left py-2 pr-4">호스트</th>
-						<th class="text-center py-2 pr-4">전체 GPU</th>
+						<th class="text-left py-2 pr-4">GPU 구성</th>
+						<th class="text-center py-2 pr-4">전체</th>
 						<th class="text-center py-2 pr-4">사용 중</th>
 						<th class="text-center py-2 pr-4">사용 가능</th>
 						<th class="text-center py-2">사용률</th>
 					</tr>
 				</thead>
 				<tbody>
-					{#each hosts as h (h.uuid)}
-						<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/50 transition-colors cursor-pointer" onclick={() => toggleHost(h.uuid)}>
+					{#each aggregatedHosts as h (h.name)}
+						<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/50 transition-colors cursor-pointer" onclick={() => toggleHost(h.name)}>
 							<td class="py-2 pr-4 text-white font-medium">{h.name}</td>
+							<td class="py-2 pr-4 text-gray-400">
+								{#each h.gpu_groups as g}
+									<span class="mr-2">{g.device_name} x{g.total}</span>
+								{/each}
+							</td>
 							<td class="py-2 pr-4 text-center text-gray-300">{h.gpu_total}</td>
 							<td class="py-2 pr-4 text-center">
 								<span class="{h.gpu_used > 0 ? 'text-red-400' : 'text-gray-500'}">{h.gpu_used}</span>
@@ -167,9 +196,9 @@
 								{/if}
 							</td>
 						</tr>
-						{#if expandedHost === h.uuid}
+						{#if expandedHost === h.name}
 							<tr>
-								<td colspan="5" class="p-0">
+								<td colspan="6" class="p-0">
 									<div class="bg-gray-900/50 border border-gray-800 rounded-lg m-2 p-4">
 										<div class="text-xs text-gray-400 uppercase tracking-wide mb-3">GPU 장치 상세</div>
 										<div class="space-y-2">
@@ -206,7 +235,7 @@
 			</table>
 		</div>
 
-		{#if hosts.length === 0}
+		{#if aggregatedHosts.length === 0}
 			<div class="text-center text-gray-500 text-sm py-8">GPU가 있는 호스트가 없습니다</div>
 		{/if}
 	{/if}

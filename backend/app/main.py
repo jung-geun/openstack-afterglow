@@ -24,7 +24,7 @@ from app.api.identity.admin_identity import router as admin_identity_router
 from app.api.identity.admin_gpu import router as admin_gpu_router
 from app.api.identity.profile import router as profile_router
 from app.api.container import clusters_router, containers_router
-from app.api.common import dashboard_router, metrics_router, libraries_router, site_router
+from app.api.common import dashboard_router, metrics_router, libraries_router, site_router, user_dashboard_router
 from app.api.common.metrics import record_request as _record_request
 
 
@@ -217,6 +217,7 @@ app.include_router(dashboard_router, prefix="/api/dashboard", tags=["dashboard"]
 app.include_router(metrics_router, prefix="/api/metrics", tags=["metrics"])
 app.include_router(libraries_router, prefix="/api/libraries", tags=["libraries"])
 app.include_router(site_router, prefix="/api/site-config", tags=["site"])
+app.include_router(user_dashboard_router, prefix="/api/user-dashboard", tags=["user-dashboard"])
 
 
 @app.get("/api/health")

@@ -36,17 +36,23 @@
 		type: string;
 	}
 
-	const PROGRESS_STEPS = [
-		{ id: 'manila_preparing', label: 'Manila Shares', description: '공유 스토리지 준비' },
-		{ id: 'boot_volume_creating', label: '부트 볼륨', description: 'OS 이미지 볼륨 생성' },
-		{ id: 'upper_volume_creating', label: 'Upper 볼륨', description: 'OverlayFS upperdir 생성' },
-		{ id: 'userdata_generating', label: 'cloud-init', description: '초기화 스크립트 생성' },
-		{ id: 'server_creating', label: 'VM 생성', description: 'Nova 인스턴스 생성' },
-		{ id: 'attaching_volume', label: '볼륨 연결', description: '추가 볼륨 연결' },
-		{ id: 'floating_ip_creating', label: 'Floating IP', description: 'Floating IP 할당' },
-		{ id: 'completed', label: '완료', description: '배포 완료' },
-		{ id: 'failed', label: '실패', description: '배포 실패' },
+	const ALL_PROGRESS_STEPS = [
+		{ id: 'manila_preparing', label: 'Manila Shares', description: '공유 스토리지 준비', needsLibrary: true },
+		{ id: 'boot_volume_creating', label: '부트 볼륨', description: 'OS 이미지 볼륨 생성', needsLibrary: false },
+		{ id: 'upper_volume_creating', label: 'Upper 볼륨', description: 'OverlayFS upperdir 생성', needsLibrary: true },
+		{ id: 'userdata_generating', label: 'cloud-init', description: '초기화 스크립트 생성', needsLibrary: true },
+		{ id: 'server_creating', label: 'VM 생성', description: 'Nova 인스턴스 생성', needsLibrary: false },
+		{ id: 'attaching_volume', label: '볼륨 연결', description: '추가 볼륨 연결', needsLibrary: false },
+		{ id: 'floating_ip_creating', label: 'Floating IP', description: 'Floating IP 할당', needsLibrary: false },
+		{ id: 'completed', label: '완료', description: '배포 완료', needsLibrary: false },
+		{ id: 'failed', label: '실패', description: '배포 실패', needsLibrary: false },
 	];
+
+	let progressSteps = $derived(
+		$wizard.libraries.length > 0
+			? ALL_PROGRESS_STEPS
+			: ALL_PROGRESS_STEPS.filter(s => !s.needsLibrary)
+	);
 
 	let images = $state<any[]>([]);
 	let flavors = $state<any[]>([]);
@@ -289,7 +295,7 @@
 		<div class="bg-gray-900 rounded-xl border border-gray-700 p-6 mb-6">
 			<h2 class="text-lg font-semibold text-white mb-4">VM 배포 진행 중</h2>
 			<ProgressBar
-				steps={PROGRESS_STEPS}
+				steps={progressSteps}
 				currentStep={currentStep}
 				progress={progress}
 				error={deployError}

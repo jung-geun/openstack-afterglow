@@ -124,6 +124,7 @@ async def get_os_conn(
         # 프로젝트에 rescope된 토큰을 저장 (Manila 등 외부 클라이언트에서 사용)
         conn._union_token = scoped_token
         conn._union_project_id = project_id
+        conn._union_user_id = token_info.get("user_id", "")
     except HTTPException:
         raise
     except Exception as e:

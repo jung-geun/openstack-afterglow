@@ -186,6 +186,21 @@ class Settings(BaseSettings):
 
 
 @lru_cache
+def load_raw_toml() -> dict:
+    """config.toml 원본 dict를 반환 (중첩 구조 보존, 평탄화하지 않음)."""
+    candidates = [
+        Path.cwd() / "config.toml",
+        Path.cwd().parent / "config.toml",
+        Path("/app/config.toml"),
+    ]
+    for path in candidates:
+        if path.exists():
+            with open(path, "rb") as f:
+                return tomllib.load(f)
+    return {}
+
+
+@lru_cache
 def get_settings() -> Settings:
     # TOML 값으로 환경변수를 채워 Settings가 이를 읽도록 함
     # (환경변수 > .env 이므로, TOML 값을 환경변수로 주입하되 이미 설정된 값은 덮어쓰지 않음)
