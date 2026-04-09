@@ -20,6 +20,7 @@ stages:
 - incremental rollout 100%
 - performance
 - cleanup
+- secret-detection
 variables:
   DOCKER_HOST: tcp://docker:2375
   DOCKER_TLS_CERTDIR: ''
@@ -76,3 +77,5 @@ sast:
   stage: test
 include:
 - template: Auto-DevOps.gitlab-ci.yml
+secret_detection:
+  stage: secret-detection
