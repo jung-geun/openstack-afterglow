@@ -4,6 +4,7 @@
   import { api, ApiError } from '$lib/api/client';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import RefreshButton from '$lib/components/RefreshButton.svelte';
+  import ImageDetailPanel from '$lib/components/ImageDetailPanel.svelte';
 
   interface ImageInfo {
     id: string;
@@ -46,6 +47,21 @@
   let refreshing = $state(false);
   let error = $state('');
   let deleting = $state<string | null>(null);
+  let selectedImageId = $state<string | null>(null);
+
+  function openImagePanel(id: string) {
+    selectedImageId = id;
+    history.pushState({ imageId: id }, '', `/dashboard/compute/images/${id}`);
+  }
+
+  function closeImagePanel() {
+    selectedImageId = null;
+    history.pushState({}, '', '/dashboard/compute/images');
+  }
+
+  function handleImageDeleted(id: string) {
+    images = images.filter(img => img.id !== id);
+  }
 
   // 필터/정렬
   let distroFilter = $state('all');
@@ -270,7 +286,10 @@
           </thead>
           <tbody>
             {#each filteredImages as img (img.id)}
-              <tr class="border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors">
+              <tr
+                class="border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors cursor-pointer"
+                onclick={() => openImagePanel(img.id)}
+              >
                 <td class="py-3 pr-6 font-medium text-white">{img.name}</td>
                 <td class="py-3 pr-6 text-xs">
                   {#if img.os_distro}
@@ -308,7 +327,7 @@
                 <td class="py-3 pr-6 text-gray-400 text-xs">{formatDate(img.created_at)}</td>
                 <td class="py-3">
                   {#if img.owner === $auth.projectId}
-                    <div class="flex items-center gap-1">
+                    <div class="flex items-center gap-1" role="none" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
                       <button
                         onclick={() => openEdit(img)}
                         class="text-xs text-blue-400 hover:text-blue-300 transition-colors px-2 py-1 rounded hover:bg-blue-900/30"
@@ -329,3 +348,22 @@
     {/if}
   {/if}
 </div>
+
+{#if selectedImageId}
+  <div
+    class="fixed inset-0 z-40"
+    role="dialog"
+    aria-modal="true"
+    tabindex="-1"
+    onkeydown={(e) => e.key === 'Escape' && closeImagePanel()}
+  >
+    <button class="absolute inset-0 bg-black/50 cursor-default" onclick={closeImagePanel} aria-label="패널 닫기"></button>
+    <div class="absolute right-0 top-14 bottom-0 w-full md:w-[60vw] max-w-2xl bg-gray-950 border-l border-gray-700 overflow-y-auto shadow-2xl">
+      <ImageDetailPanel
+        imageId={selectedImageId}
+        onClose={closeImagePanel}
+        onDelete={handleImageDeleted}
+      />
+    </div>
+  </div>
+{/if}

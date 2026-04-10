@@ -1,39 +1,55 @@
-# You can override the included template(s) by including variable overrides
-# SAST customization: https://docs.gitlab.com/user/application_security/sast/#available-cicd-variables
-# Secret Detection customization: https://docs.gitlab.com/user/application_security/secret_detection/pipeline/configure/
-# Dependency Scanning customization: https://docs.gitlab.com/user/application_security/dependency_scanning/#customizing-analyzer-behavior
-# Container Scanning customization: https://docs.gitlab.com/user/application_security/container_scanning/#customizing-analyzer-behavior
-# Note that environment variables can be set in several places
-# See https://docs.gitlab.com/ci/variables/#cicd-variable-precedence
 stages:
-  - build
   - test
-  - deploy
-  - review
-  - dast
-  - staging
-  - canary
-  - production
-  - incremental rollout 10%
-  - incremental rollout 25%
-  - incremental rollout 50%
-  - incremental rollout 100%
-  - performance
-  - cleanup
+  - build
   - secret-detection
 
 variables:
   DOCKER_HOST: tcp://docker:2375
   DOCKER_TLS_CERTDIR: ""
-  HEALTHCHECK_TCP_PORT: "2375"
+  DOCKER_BUILDKIT: "1"
   BACKEND_IMAGE: "$CI_REGISTRY_IMAGE/union-api"
   FRONTEND_IMAGE: "$CI_REGISTRY_IMAGE/union"
+
+# ---------------------------------------------------------------------------
+# Test
+# ---------------------------------------------------------------------------
+
+test-backend:
+  image: ghcr.io/astral-sh/uv:python3.12-alpine
+  stage: test
+  before_script:
+    - cd backend
+    - uv sync --frozen
+  script:
+    - uv run pytest tests
+  cache:
+    key: backend-${CI_COMMIT_REF_SLUG}
+    paths:
+      - backend/.venv/
+
+test-frontend:
+  image: oven/bun:1
+  stage: test
+  before_script:
+    - cd frontend
+    - bun install --frozen-lockfile
+  script:
+    - bun run test
+  cache:
+    key: frontend-${CI_COMMIT_REF_SLUG}
+    paths:
+      - frontend/node_modules/
+
+# ---------------------------------------------------------------------------
+# Docker Build (--cache-from 레지스트리 캐시)
+# ---------------------------------------------------------------------------
 
 .docker-build:
   image: docker:24.0.7
   services:
     - name: docker:24.0.7-dind
       alias: docker
+  stage: build
   before_script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
   rules:
@@ -43,42 +59,56 @@ variables:
 
 build-backend:
   extends: .docker-build
-  stage: build
   script:
-    - docker build -t "$BACKEND_IMAGE:build-tmp" ./backend
+    - docker pull "$BACKEND_IMAGE:dev" || true
+    - >
+      docker build
+      --cache-from "$BACKEND_IMAGE:dev"
+      --build-arg BUILDKIT_INLINE_CACHE=1
+      -t "$BACKEND_IMAGE:build-tmp"
+      ./backend
     - |
       if [ -n "$CI_COMMIT_TAG" ]; then
-        # 버전 태그: latest + 버전 태그
         docker tag "$BACKEND_IMAGE:build-tmp" "$BACKEND_IMAGE:$CI_COMMIT_TAG"
         docker tag "$BACKEND_IMAGE:build-tmp" "$BACKEND_IMAGE:latest"
         docker push "$BACKEND_IMAGE:$CI_COMMIT_TAG"
         docker push "$BACKEND_IMAGE:latest"
       else
-        # main 또는 MR: dev 태그만
         docker tag "$BACKEND_IMAGE:build-tmp" "$BACKEND_IMAGE:dev"
         docker push "$BACKEND_IMAGE:dev"
       fi
 
 build-frontend:
   extends: .docker-build
-  stage: build
   script:
-    - docker build -t "$FRONTEND_IMAGE:build-tmp" ./frontend
+    - docker pull "$FRONTEND_IMAGE:dev" || true
+    - >
+      docker build
+      --cache-from "$FRONTEND_IMAGE:dev"
+      --build-arg BUILDKIT_INLINE_CACHE=1
+      -t "$FRONTEND_IMAGE:build-tmp"
+      ./frontend
     - |
       if [ -n "$CI_COMMIT_TAG" ]; then
-        # 버전 태그: latest + 버전 태그
         docker tag "$FRONTEND_IMAGE:build-tmp" "$FRONTEND_IMAGE:$CI_COMMIT_TAG"
         docker tag "$FRONTEND_IMAGE:build-tmp" "$FRONTEND_IMAGE:latest"
         docker push "$FRONTEND_IMAGE:$CI_COMMIT_TAG"
         docker push "$FRONTEND_IMAGE:latest"
       else
-        # main 또는 MR: dev 태그만
         docker tag "$FRONTEND_IMAGE:build-tmp" "$FRONTEND_IMAGE:dev"
         docker push "$FRONTEND_IMAGE:dev"
       fi
+
+# ---------------------------------------------------------------------------
+# Security
+# ---------------------------------------------------------------------------
+
 sast:
   stage: test
-include:
-  - template: Auto-DevOps.gitlab-ci.yml
+
 secret_detection:
   stage: secret-detection
+
+include:
+  - template: Jobs/SAST.gitlab-ci.yml
+  - template: Jobs/Secret-Detection.gitlab-ci.yml

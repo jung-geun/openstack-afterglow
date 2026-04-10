@@ -24,6 +24,16 @@ class ImageInfo(BaseModel):
     visibility: Optional[str] = None
 
 
+class ImageDetail(ImageInfo):
+    checksum: Optional[str] = None
+    container_format: Optional[str] = None
+    virtual_size: Optional[int] = None
+    updated_at: Optional[str] = None
+    protected: bool = False
+    tags: list[str] = []
+    properties: dict = {}
+
+
 class FlavorInfo(BaseModel):
     id: str
     name: str

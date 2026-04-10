@@ -1,6 +1,6 @@
 import openstack
 
-from app.models.compute import ImageInfo
+from app.models.compute import ImageInfo, ImageDetail
 
 
 def list_images(conn: openstack.connection.Connection, project_id: str | None = None) -> list[ImageInfo]:
@@ -50,6 +50,36 @@ def list_images(conn: openstack.connection.Connection, project_id: str | None = 
     return sorted(images, key=lambda x: x.name)
 
 
+def get_image(conn: openstack.connection.Connection, image_id: str) -> ImageDetail:
+    img = conn.image.get_image(image_id)
+    props = img.properties or {}
+    os_distro = props.get("os_distro") or _guess_distro(img.name)
+    # properties에서 내부 키 제외하고 반환
+    _exclude = {"os_distro", "os_type"}
+    clean_props = {k: v for k, v in props.items() if k not in _exclude}
+    return ImageDetail(
+        id=img.id,
+        name=img.name,
+        status=img.status,
+        size=img.size,
+        min_disk=img.min_disk or 0,
+        min_ram=img.min_ram or 0,
+        disk_format=img.disk_format,
+        os_type=props.get("os_type"),
+        os_distro=os_distro,
+        created_at=str(img.created_at) if img.created_at else None,
+        owner=getattr(img, 'owner', None) or getattr(img, 'project_id', None),
+        visibility=getattr(img, 'visibility', None),
+        checksum=getattr(img, 'checksum', None),
+        container_format=img.container_format,
+        virtual_size=getattr(img, 'virtual_size', None),
+        updated_at=str(img.updated_at) if getattr(img, 'updated_at', None) else None,
+        protected=getattr(img, 'is_protected', False) or False,
+        tags=list(getattr(img, 'tags', None) or []),
+        properties=clean_props,
+    )
+
+
 def delete_image(conn: openstack.connection.Connection, image_id: str) -> None:
     conn.image.delete_image(image_id, ignore_missing=False)
 
@@ -62,6 +92,7 @@ def update_image_metadata(
     os_type: str | None = None,
     min_disk: int | None = None,
     min_ram: int | None = None,
+    visibility: str | None = None,
 ) -> ImageInfo:
     """이미지 메타데이터 업데이트 (소유한 이미지만 가능)."""
     kwargs: dict = {}
@@ -75,6 +106,8 @@ def update_image_metadata(
         kwargs["min_disk"] = min_disk
     if min_ram is not None:
         kwargs["min_ram"] = min_ram
+    if visibility is not None:
+        kwargs["visibility"] = visibility
     img = conn.image.update_image(image_id, **kwargs)
     props = img.properties or {}
     od = props.get("os_distro") or _guess_distro(img.name)
