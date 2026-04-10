@@ -37,7 +37,7 @@
 	}
 
 	const ALL_PROGRESS_STEPS = [
-		{ id: 'manila_preparing', label: 'Manila Shares', description: '공유 스토리지 준비', needsLibrary: true },
+		{ id: 'manila_preparing', label: 'File Storage', description: '파일 스토리지 준비', needsLibrary: true },
 		{ id: 'boot_volume_creating', label: '부트 볼륨', description: 'OS 이미지 볼륨 생성', needsLibrary: false },
 		{ id: 'upper_volume_creating', label: 'Upper 볼륨', description: 'OverlayFS upperdir 생성', needsLibrary: true },
 		{ id: 'userdata_generating', label: 'cloud-init', description: '초기화 스크립트 생성', needsLibrary: true },

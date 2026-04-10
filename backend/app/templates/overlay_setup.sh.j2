@@ -11,7 +11,7 @@ echo "[$(date)] union-overlay 시작"
 # 1. CephFS 마운트 디렉토리 준비
 # ---------------------------------------------------------------------------
 mkdir -p /mnt/union/{upper,work}
-{% for share in shares %}
+{% for share in file_storages %}
 mkdir -p /mnt/union/lib_{{ share.name | shlex_quote }}
 {% endfor %}
 
@@ -40,7 +40,7 @@ mount_cephfs() {
     echo "[$(date)] CephFS 마운트 완료: ${name} -> ${mountpoint}"
 }
 
-{% for share in shares %}
+{% for share in file_storages %}
 mount_cephfs {{ share.name | shlex_quote }} {{ share.export_path | shlex_quote }} {{ share.cephx_id | shlex_quote }}
 {% endfor %}
 

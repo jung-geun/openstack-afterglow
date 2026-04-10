@@ -25,7 +25,7 @@ export interface Volume {
   attachments: Record<string, unknown>[];
 }
 
-export interface Share {
+export interface FileStorage {
   id: string;
   name: string;
   status: string;

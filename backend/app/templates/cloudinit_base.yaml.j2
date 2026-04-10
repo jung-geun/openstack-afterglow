@@ -13,7 +13,7 @@ packages:
 
 write_files:
   # CephX 키링 파일 (공유별)
-{% for share in shares %}
+{% for share in file_storages %}
   - path: /etc/ceph/ceph.client.{{ share.cephx_id | shlex_quote }}.keyring
     permissions: "0600"
     content: |

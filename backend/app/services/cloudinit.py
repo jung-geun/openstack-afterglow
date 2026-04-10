@@ -37,7 +37,7 @@ _VERSIONS = {
 def generate_userdata(
     libraries: list[str],
     strategy: str,
-    shares: list[dict],
+    file_storages: list[dict],
     upper_device: str,
     ceph_monitors: str,
     gpu_available: bool = False,
@@ -48,9 +48,9 @@ def generate_userdata(
     Args:
         libraries: 선택된 라이브러리 ID 목록 (의존성 포함, 토폴로지 정렬)
         strategy: "prebuilt" | "dynamic"
-        shares: [
+        file_storages: [
             {
-              name: str,           # Manila share 이름 (디렉토리명에 사용)
+              name: str,           # Manila 파일 스토리지 이름 (디렉토리명에 사용)
               export_path: str,    # CephFS export location
               cephx_id: str,       # CephX 사용자 ID
               cephx_key: str,      # CephX secret key
@@ -67,16 +67,16 @@ def generate_userdata(
     reversed_libs = list(reversed(resolved_libs))
 
     lowerdir_usr_local = ":".join(
-        [f"/mnt/union/lib_{s['name']}/usr_local" for s in shares]
+        [f"/mnt/union/lib_{s['name']}/usr_local" for s in file_storages]
         + ["/usr/local"]
     )
     lowerdir_opt = ":".join(
-        [f"/mnt/union/lib_{s['name']}/opt" for s in shares]
+        [f"/mnt/union/lib_{s['name']}/opt" for s in file_storages]
         + ["/opt"]
     )
 
     overlay_script = _jinja.get_template("overlay_setup.sh.j2").render(
-        shares=shares,
+        file_storages=file_storages,
         upper_device=upper_device,
         lowerdir_usr_local=lowerdir_usr_local,
         lowerdir_opt=lowerdir_opt,
@@ -93,7 +93,7 @@ def generate_userdata(
     yaml_str = _jinja.get_template("cloudinit_base.yaml.j2").render(
         strategy=strategy,
         libraries=resolved_libs,
-        shares=shares,
+        file_storages=file_storages,
         ceph_monitors=ceph_monitors,
         overlay_script=overlay_script,
         dynamic_script=dynamic_script,

@@ -19,15 +19,15 @@
 			<span class="font-semibold text-white">Strategy A</span>
 			<span class="px-2 py-0.5 bg-green-900/40 text-green-400 rounded text-xs">빠름</span>
 		</div>
-		<div class="text-sm text-gray-300 font-medium mb-2">사전 빌드 공유 Share</div>
+		<div class="text-sm text-gray-300 font-medium mb-2">사전 빌드 파일 스토리지</div>
 		<ul class="text-xs text-gray-500 space-y-1">
 			<li>✓ 빠른 부팅 (설치 불필요)</li>
-			<li>✓ 여러 VM이 share 공유 (효율적)</li>
+			<li>✓ 여러 VM이 파일 스토리지 공유 (효율적)</li>
 			<li>✓ read-only 격리로 안전</li>
 			<li class="text-gray-600">✗ 버전 고정 (관리자 빌드 필요)</li>
 		</ul>
 		{#if !hasPrebuilt}
-			<div class="mt-3 text-xs text-orange-400">관리자가 사전 빌드 share를 아직 생성하지 않았습니다</div>
+			<div class="mt-3 text-xs text-orange-400">관리자가 사전 빌드 파일 스토리지를 아직 생성하지 않았습니다</div>
 		{/if}
 	</button>
 
@@ -42,7 +42,7 @@
 			<span class="font-semibold text-white">Strategy B</span>
 			<span class="px-2 py-0.5 bg-yellow-900/40 text-yellow-400 rounded text-xs">유연</span>
 		</div>
-		<div class="text-sm text-gray-300 font-medium mb-2">동적 생성 (VM 전용 Share)</div>
+		<div class="text-sm text-gray-300 font-medium mb-2">동적 생성 (VM 전용 파일 스토리지)</div>
 		<ul class="text-xs text-gray-500 space-y-1">
 			<li>✓ 항상 최신 버전</li>
 			<li>✓ 커스텀 설정 가능</li>

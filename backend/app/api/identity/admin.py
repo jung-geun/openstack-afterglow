@@ -8,7 +8,7 @@ import openstack
 from app.api.deps import get_os_conn, get_token_info, require_admin
 
 _logger = logging.getLogger(__name__)
-from app.models.storage import ShareInfo, TopologyData, TopologyInstance
+from app.models.storage import FileStorageInfo, TopologyData, TopologyInstance
 from app.services import manila, libraries as lib_svc, neutron
 from app.services.cache import cached_call, ttl_fast, ttl_normal, ttl_slow
 from app.config import get_settings
@@ -16,21 +16,21 @@ from app.config import get_settings
 router = APIRouter()
 
 
-@router.get("/shares", response_model=list[ShareInfo], dependencies=[Depends(require_admin)])
-async def list_admin_shares(conn: openstack.connection.Connection = Depends(get_os_conn)):
-    """모든 Union 관련 share 목록 (prebuilt + dynamic)."""
-    return manila.list_shares(conn)
+@router.get("/file-storage", response_model=list[FileStorageInfo], dependencies=[Depends(require_admin)])
+async def list_admin_file_storages(conn: openstack.connection.Connection = Depends(get_os_conn)):
+    """모든 Union 관련 파일 스토리지 목록 (prebuilt + dynamic)."""
+    return manila.list_file_storages(conn)
 
 
-@router.post("/shares/build", status_code=202, dependencies=[Depends(require_admin)])
+@router.post("/file-storage/build", status_code=202, dependencies=[Depends(require_admin)])
 async def trigger_build(
     library_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """
-    사전 빌드 share 생성 트리거.
+    사전 빌드 파일 스토리지 생성 트리거.
     실제 빌드는 별도 백그라운드 프로세스(scripts/build_library_shares.py)에서 수행.
-    여기서는 빈 share를 생성하고 메타데이터만 기록한다.
+    여기서는 빈 파일 스토리지를 생성하고 메타데이터만 기록한다.
     """
     settings = get_settings()
     try:
@@ -38,17 +38,17 @@ async def trigger_build(
     except KeyError:
         raise HTTPException(status_code=404, detail=f"알 수 없는 라이브러리: {library_id}")
 
-    existing = manila.list_shares(conn, metadata_filter={
+    existing = manila.list_file_storages(conn, metadata_filter={
         "union_type": "prebuilt",
         "union_library": library_id,
     })
     if existing:
         raise HTTPException(
             status_code=409,
-            detail=f"이미 존재하는 사전 빌드 share: {existing[0].id}"
+            detail=f"이미 존재하는 사전 빌드 파일 스토리지: {existing[0].id}"
         )
 
-    share = manila.create_share(
+    file_storage = manila.create_file_storage(
         conn,
         name=f"union-prebuilt-{library_id}",
         size_gb=20,
@@ -61,7 +61,7 @@ async def trigger_build(
             "union_status": "building",
         },
     )
-    return {"share_id": share.id, "status": "building", "library": library_id}
+    return {"file_storage_id": file_storage.id, "status": "building", "library": library_id}
 
 
 # ---------------------------------------------------------------------------
@@ -165,11 +165,11 @@ async def admin_overview(conn: openstack.connection.Connection = Depends(get_os_
                 except Exception:
                     pass
 
-            # 공유 스토리지 수 (Manila)
-            shares_count = 0
+            # 파일 스토리지 수 (Manila)
+            file_storage_count = 0
             if get_settings().service_manila_enabled:
                 try:
-                    shares_count = len(manila.list_shares(conn, all_tenants=True))
+                    file_storage_count = len(manila.list_file_storages(conn, all_tenants=True))
                 except Exception:
                     pass
 
@@ -182,7 +182,7 @@ async def admin_overview(conn: openstack.connection.Connection = Depends(get_os_
                 "ram_gb": {"total": round(total_ram / 1024, 1), "used": round(used_ram / 1024, 1)},
                 "disk_gb": {"total": total_disk, "used": used_disk},
                 "containers_count": containers_count,
-                "shares_count": shares_count,
+                "file_storage_count": file_storage_count,
             }
         return await cached_call("union:admin:overview", ttl_normal(), _collect, refresh=refresh)
     except Exception as e:
@@ -312,15 +312,15 @@ async def list_all_containers(conn: openstack.connection.Connection = Depends(ge
         raise HTTPException(status_code=500, detail="컨테이너 조회 실패")
 
 
-@router.get("/all-shares", dependencies=[Depends(require_admin)])
-async def list_all_shares(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
-    """전체 프로젝트의 공유 스토리지 목록 (Manila)."""
+@router.get("/all-file-storages", dependencies=[Depends(require_admin)])
+async def list_all_file_storages(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
+    """전체 프로젝트의 파일 스토리지 목록 (Manila)."""
     if not get_settings().service_manila_enabled:
         return []
     try:
-        return await cached_call("union:admin:shares", ttl_normal(), lambda: manila.list_shares(conn, None, True), refresh=refresh)
+        return await cached_call("union:admin:file_storages", ttl_normal(), lambda: manila.list_file_storages(conn, None, True), refresh=refresh)
     except Exception as e:
-        raise HTTPException(status_code=500, detail="공유 스토리지 조회 실패")
+        raise HTTPException(status_code=500, detail="파일 스토리지 조회 실패")
 
 
 @router.get("/topology", response_model=TopologyData, dependencies=[Depends(require_admin)])
@@ -357,7 +357,7 @@ async def get_timeseries(
 ):
     """리소스 유형별 시계열 스냅샷 반환."""
     from app.services import timeseries
-    valid = {"instances", "volumes", "shares", "networks"}
+    valid = {"instances", "volumes", "file_storage", "networks"}
     if resource_type not in valid:
         raise HTTPException(status_code=400, detail=f"resource_type은 {valid} 중 하나여야 합니다")
     return await timeseries.get_timeseries(resource_type, range)

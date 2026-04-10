@@ -29,14 +29,14 @@
 			],
 		},
 		{
-			label: 'Share Storage',
-			prefix: '/dashboard/shares',
+			label: 'File Storage',
+			prefix: '/dashboard/file-storage',
 			icon: 'M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z',
 			open: false,
 			service: 'manila' as const,
 			items: [
-				{ label: '공유 스토리지', href: '/dashboard/shares', service: null },
-				{ label: '라이브러리 관리', href: '/dashboard/shares/manage', service: null },
+				{ label: '파일 스토리지', href: '/dashboard/file-storage', service: null },
+				{ label: '라이브러리 관리', href: '/dashboard/file-storage/manage', service: null },
 			],
 		},
 		{

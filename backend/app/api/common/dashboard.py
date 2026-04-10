@@ -127,7 +127,7 @@ async def get_dashboard_config():
 async def get_project_quotas(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    """현재 프로젝트의 전체 할당량 (compute/storage/network/share) 조회."""
+    """현재 프로젝트의 전체 할당량 (compute/storage/network/file_storage) 조회."""
     project_id = conn._union_project_id
     settings = get_settings()
     try:
@@ -137,10 +137,10 @@ async def get_project_quotas(
             asyncio.to_thread(neutron_svc.get_network_quota, conn, project_id),
         ]
         if settings.service_manila_enabled:
-            tasks.append(asyncio.to_thread(manila_svc.get_share_quota, conn))
+            tasks.append(asyncio.to_thread(manila_svc.get_file_storage_quota, conn))
         results = await asyncio.gather(*tasks)
         compute_q, volume_q, network_q = results[0], results[1], results[2]
-        share_q = results[3] if settings.service_manila_enabled else {"limit": 0, "in_use": 0, "reserved": 0}
+        file_storage_q = results[3] if settings.service_manila_enabled else {"limit": 0, "in_use": 0, "reserved": 0}
     except Exception as e:
         raise HTTPException(status_code=500, detail="작업 실패")
 
@@ -148,7 +148,7 @@ async def get_project_quotas(
         "compute": compute_q,
         "storage": volume_q,
         "network": network_q,
-        "share": share_q,
+        "file_storage": file_storage_q,
     }
 
 

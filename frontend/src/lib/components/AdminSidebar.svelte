@@ -25,7 +25,7 @@
 			open: false,
 			items: [
 				{ label: '전체 볼륨', href: '/admin/volumes', service: null },
-				{ label: '공유 스토리지', href: '/admin/shares', service: 'manila' as const },
+				{ label: '파일 스토리지', href: '/admin/file-storage', service: 'manila' as const },
 			],
 		},
 		{

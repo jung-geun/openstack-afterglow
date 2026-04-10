@@ -3,7 +3,7 @@
   import { untrack } from 'svelte';
   import { goto } from '$app/navigation';
   import { api, ApiError, memoryCache } from '$lib/api/client';
-  import type { Share } from '$lib/types/resources';
+  import type { FileStorage } from '$lib/types/resources';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import RefreshButton from '$lib/components/RefreshButton.svelte';
 
@@ -23,7 +23,7 @@
 
   interface MetaEntry { key: string; value: string; }
 
-  let shares = $state<Share[]>([]);
+  let fileStorages = $state<FileStorage[]>([]);
   let quota = $state<Quota | null>(null);
   let loading = $state(true);
   let refreshing = $state(false);
@@ -49,13 +49,13 @@
     memoryCache.set(`${path}:${$auth.projectId}`, { data, timestamp: Date.now() });
   }
 
-  async function fetchShares(opts?: { refresh?: boolean }) {
-    const path = '/api/shares';
-    const cached = swrGet<Share[]>(path);
-    if (cached && shares.length === 0) shares = cached;
+  async function fetchFileStorages(opts?: { refresh?: boolean }) {
+    const path = '/api/file-storage';
+    const cached = swrGet<FileStorage[]>(path);
+    if (cached && fileStorages.length === 0) fileStorages = cached;
     try {
-      shares = await api.get<Share[]>(path, $auth.token ?? undefined, $auth.projectId ?? undefined, opts);
-      swrSet(path, shares);
+      fileStorages = await api.get<FileStorage[]>(path, $auth.token ?? undefined, $auth.projectId ?? undefined, opts);
+      swrSet(path, fileStorages);
       error = '';
     } catch (e) {
       if (!cached) error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
@@ -66,15 +66,15 @@
 
   async function fetchQuota() {
     try {
-      quota = await api.get<Quota>('/api/shares/quota', $auth.token ?? undefined, $auth.projectId ?? undefined);
+      quota = await api.get<Quota>('/api/file-storage/quota', $auth.token ?? undefined, $auth.projectId ?? undefined);
     } catch {
       quota = null;
     }
   }
 
-  async function copyExportPath(path: string, shareId: string) {
+  async function copyExportPath(path: string, fileStorageId: string) {
     await navigator.clipboard.writeText(path);
-    copiedExport = shareId;
+    copiedExport = fileStorageId;
     setTimeout(() => (copiedExport = null), 2000);
   }
 
@@ -82,7 +82,7 @@
     showModal = true;
     try {
       shareTypes = await api.get<{ id: string; name: string; is_default: boolean }[]>(
-        '/api/shares/types', $auth.token ?? undefined, $auth.projectId ?? undefined
+        '/api/file-storage/types', $auth.token ?? undefined, $auth.projectId ?? undefined
       );
       if (shareTypes.length > 0 && !form.share_type) {
         form.share_type = shareTypes.find(t => t.is_default)?.name ?? shareTypes[0].name;
@@ -92,7 +92,7 @@
     }
   }
 
-  async function createShare() {
+  async function createFileStorage() {
     if (!form.name.trim() || form.size_gb < 1) return;
     creating = true;
     createError = '';
@@ -110,11 +110,11 @@
         validMeta.forEach(m => { metadata[m.key.trim()] = m.value; });
         body.metadata = metadata;
       }
-      await api.post('/api/shares', body, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      await api.post('/api/file-storage', body, $auth.token ?? undefined, $auth.projectId ?? undefined);
       showModal = false;
       form = { name: '', size_gb: 10, share_type: shareTypes[0]?.name ?? '', share_network_id: '', share_proto: 'CEPHFS' };
       metaEntries = [{ key: '', value: '' }];
-      await fetchShares();
+      await fetchFileStorages();
     } catch (e) {
       createError = e instanceof ApiError ? e.message : '생성 실패';
     } finally {
@@ -122,12 +122,12 @@
     }
   }
 
-  async function deleteShare(id: string, name: string) {
-    if (!confirm(`공유 스토리지 "${name || id.slice(0, 8)}"을 삭제하시겠습니까?`)) return;
+  async function deleteFileStorage(id: string, name: string) {
+    if (!confirm(`파일 스토리지 "${name || id.slice(0, 8)}"을 삭제하시겠습니까?`)) return;
     deleting = id;
     try {
-      await api.delete(`/api/shares/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
-      await fetchShares();
+      await api.delete(`/api/file-storage/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      await fetchFileStorages();
     } catch (e) {
       alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
     } finally {
@@ -139,15 +139,15 @@
     const projectId = $auth.projectId;
     if (!projectId) return;
     loading = true;
-    untrack(() => { fetchShares(); fetchQuota(); });
-    const interval = setInterval(() => untrack(() => { fetchShares(); }), 10000);
+    untrack(() => { fetchFileStorages(); fetchQuota(); });
+    const interval = setInterval(() => untrack(() => { fetchFileStorages(); }), 10000);
     return () => clearInterval(interval);
   });
 
   async function forceRefresh() {
     refreshing = true;
     try {
-      await fetchShares({ refresh: true });
+      await fetchFileStorages({ refresh: true });
     } finally {
       refreshing = false;
     }
@@ -157,11 +157,11 @@
 {#if showModal}
   <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onclick={() => { showModal = false; createError = ''; }} role="dialog" aria-modal="true" tabindex="-1" onkeydown={(e) => e.key === 'Escape' && (showModal = false)}>
     <div class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-lg mx-4 shadow-2xl max-h-[90vh] overflow-y-auto" onclick={(e) => e.stopPropagation()} role="none" onkeydown={(e) => e.stopPropagation()}>
-      <h2 class="text-lg font-semibold text-white mb-5">공유 스토리지 생성</h2>
+      <h2 class="text-lg font-semibold text-white mb-5">파일 스토리지 생성</h2>
       <div class="space-y-4">
         <div>
           <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">이름
-            <input bind:value={form.name} type="text" placeholder="my-share" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5" />
+            <input bind:value={form.name} type="text" placeholder="my-file-storage" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5" />
           </label>
         </div>
         <div class="grid grid-cols-2 gap-3">
@@ -218,7 +218,7 @@
       {#if createError}<div class="mt-4 text-red-400 text-xs bg-red-900/20 border border-red-800 rounded px-3 py-2">{createError}</div>{/if}
       <div class="flex justify-end gap-3 mt-6">
         <button onclick={() => { showModal = false; createError = ''; }} class="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors">취소</button>
-        <button onclick={createShare} disabled={creating} class="px-5 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium rounded-lg transition-colors">{creating ? '생성 중...' : '생성'}</button>
+        <button onclick={createFileStorage} disabled={creating} class="px-5 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium rounded-lg transition-colors">{creating ? '생성 중...' : '생성'}</button>
       </div>
     </div>
   </div>
@@ -226,10 +226,10 @@
 
 <div class="p-4 md:p-8">
   <div class="flex items-center justify-between mb-6">
-    <h1 class="text-2xl font-bold text-white">공유 스토리지</h1>
+    <h1 class="text-2xl font-bold text-white">파일 스토리지</h1>
     <div class="flex items-center gap-2">
       <RefreshButton {refreshing} onclick={forceRefresh} />
-      <button onclick={openCreateModal} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 공유 생성</button>
+      <button onclick={openCreateModal} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 파일 스토리지 생성</button>
     </div>
   </div>
 
@@ -238,7 +238,7 @@
     <div class="flex items-center gap-6 mb-6 bg-gray-900 border border-gray-800 rounded-lg px-5 py-3">
       <span class="text-xs text-gray-500 uppercase tracking-wide">쿼터</span>
       {#each [
-        { label: 'Shares', item: quota.shares },
+        { label: 'File Storage', item: quota.shares },
         { label: '용량', item: quota.gigabytes, unit: 'GB' },
         { label: 'Share Networks', item: quota.share_networks },
       ] as q}
@@ -259,11 +259,11 @@
 
   {#if loading}
     <LoadingSkeleton variant="table" rows={5} />
-  {:else if shares.length === 0}
+  {:else if fileStorages.length === 0}
     <div class="text-center py-20 text-gray-600">
       <div class="text-5xl mb-4">🗂️</div>
-      <p class="text-lg">공유 스토리지가 없습니다</p>
-      <button onclick={openCreateModal} class="text-blue-400 hover:text-blue-300 text-sm mt-2 inline-block">첫 공유 스토리지를 생성하세요 →</button>
+      <p class="text-lg">파일 스토리지가 없습니다</p>
+      <button onclick={openCreateModal} class="text-blue-400 hover:text-blue-300 text-sm mt-2 inline-block">첫 파일 스토리지를 생성하세요 →</button>
     </div>
   {:else}
     <div class="overflow-x-auto">
@@ -280,33 +280,33 @@
           </tr>
         </thead>
         <tbody>
-          {#each shares as share (share.id)}
+          {#each fileStorages as fs (fs.id)}
             <tr class="border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors">
               <td class="py-3 pr-6 font-medium">
-                <button onclick={() => goto(`/dashboard/shares/${share.id}`)} class="text-white hover:text-blue-400 transition-colors text-left">
-                  {#if share.name}<span>{share.name}</span>{:else}<span class="text-gray-400 font-mono text-xs">{share.id}</span>{/if}
+                <button onclick={() => goto(`/dashboard/file-storage/${fs.id}`)} class="text-white hover:text-blue-400 transition-colors text-left">
+                  {#if fs.name}<span>{fs.name}</span>{:else}<span class="text-gray-400 font-mono text-xs">{fs.id}</span>{/if}
                 </button>
               </td>
-              <td class="py-3 pr-6"><span class="px-2 py-0.5 rounded text-xs font-medium {statusColor[share.status] ?? 'text-gray-400 bg-gray-800'}">{share.status}</span></td>
-              <td class="py-3 pr-4 text-gray-400 text-xs">{share.size} GB</td>
-              <td class="py-3 pr-4 text-gray-400 text-xs">{share.share_proto}</td>
+              <td class="py-3 pr-6"><span class="px-2 py-0.5 rounded text-xs font-medium {statusColor[fs.status] ?? 'text-gray-400 bg-gray-800'}">{fs.status}</span></td>
+              <td class="py-3 pr-4 text-gray-400 text-xs">{fs.size} GB</td>
+              <td class="py-3 pr-4 text-gray-400 text-xs">{fs.share_proto}</td>
               <td class="py-3 pr-6 text-xs">
-                {#if share.library_name}
-                  <span class="px-1.5 py-0.5 bg-blue-900/40 text-blue-300 rounded text-xs">{share.library_name}{share.library_version ? ` v${share.library_version}` : ''}</span>
+                {#if fs.library_name}
+                  <span class="px-1.5 py-0.5 bg-blue-900/40 text-blue-300 rounded text-xs">{fs.library_name}{fs.library_version ? ` v${fs.library_version}` : ''}</span>
                 {:else}
                   <span class="text-gray-600">-</span>
                 {/if}
               </td>
               <td class="py-3 pr-6 text-xs max-w-[200px]">
-                {#if share.export_locations && share.export_locations.length > 0}
+                {#if fs.export_locations && fs.export_locations.length > 0}
                   <div class="flex items-center gap-1.5">
-                    <span class="text-gray-500 font-mono truncate">{share.export_locations[0].slice(-32)}</span>
+                    <span class="text-gray-500 font-mono truncate">{fs.export_locations[0].slice(-32)}</span>
                     <button
-                      onclick={(e) => { e.stopPropagation(); copyExportPath(share.export_locations[0], share.id); }}
+                      onclick={(e) => { e.stopPropagation(); copyExportPath(fs.export_locations[0], fs.id); }}
                       class="shrink-0 text-gray-600 hover:text-gray-400 transition-colors"
                       title="경로 복사"
                     >
-                      {copiedExport === share.id ? '✓' : '⎘'}
+                      {copiedExport === fs.id ? '✓' : '⎘'}
                     </button>
                   </div>
                 {:else}
@@ -314,8 +314,8 @@
                 {/if}
               </td>
               <td class="py-3 text-right">
-                <button onclick={(e) => { e.stopPropagation(); deleteShare(share.id, share.name); }} disabled={deleting === share.id} class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-xs px-2 py-1 rounded border border-red-900 hover:border-red-700 disabled:border-gray-700 transition-colors">
-                  {deleting === share.id ? '삭제 중...' : '삭제'}
+                <button onclick={(e) => { e.stopPropagation(); deleteFileStorage(fs.id, fs.name); }} disabled={deleting === fs.id} class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-xs px-2 py-1 rounded border border-red-900 hover:border-red-700 disabled:border-gray-700 transition-colors">
+                  {deleting === fs.id ? '삭제 중...' : '삭제'}
                 </button>
               </td>
             </tr>

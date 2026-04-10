@@ -16,7 +16,7 @@
 		ram_gb: { total: number; used: number };
 		disk_gb: { total: number; used: number };
 		containers_count: number;
-		shares_count: number;
+		file_storage_count: number;
 	}
 
 	interface ProjectUsage {
@@ -260,13 +260,13 @@
 					<div class="text-3xl font-bold text-white">{formatNumber(overview.containers_count ?? 0)}</div>
 				</div>
 			</a>
-			<a href="/admin/shares" class="bg-gray-900 border border-gray-800 rounded-xl p-6 flex items-center gap-5 hover:border-gray-600 transition-colors">
+			<a href="/admin/file-storage" class="bg-gray-900 border border-gray-800 rounded-xl p-6 flex items-center gap-5 hover:border-gray-600 transition-colors">
 				<div class="w-12 h-12 rounded-xl bg-yellow-600/20 flex items-center justify-center shrink-0">
 					<svg class="w-6 h-6 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
 				</div>
 				<div>
-					<div class="text-xs text-gray-500 uppercase tracking-wide mb-0.5">공유 스토리지</div>
-					<div class="text-3xl font-bold text-white">{formatNumber(overview.shares_count ?? 0)}</div>
+					<div class="text-xs text-gray-500 uppercase tracking-wide mb-0.5">파일 스토리지</div>
+					<div class="text-3xl font-bold text-white">{formatNumber(overview.file_storage_count ?? 0)}</div>
 				</div>
 			</a>
 		</div>
@@ -276,7 +276,7 @@
 			<a href="/admin/hypervisors" class="text-sm text-blue-400 hover:text-blue-300 transition-colors">하이퍼바이저 →</a>
 			<a href="/admin/instances" class="text-sm text-blue-400 hover:text-blue-300 transition-colors">전체 인스턴스 →</a>
 			<a href="/admin/containers" class="text-sm text-blue-400 hover:text-blue-300 transition-colors">전체 컨테이너 →</a>
-			<a href="/admin/shares" class="text-sm text-blue-400 hover:text-blue-300 transition-colors">공유 스토리지 →</a>
+			<a href="/admin/file-storage" class="text-sm text-blue-400 hover:text-blue-300 transition-colors">파일 스토리지 →</a>
 			<a href="/admin/topology" class="text-sm text-blue-400 hover:text-blue-300 transition-colors">전체 토폴로지 →</a>
 			<a href="/admin/networks" class="text-sm text-blue-400 hover:text-blue-300 transition-colors">네트워크 →</a>
 		</div>

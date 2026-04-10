@@ -5,7 +5,7 @@
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 
-	interface Share {
+	interface FileStorage {
 		id: string;
 		name: string;
 		status: string;
@@ -27,7 +27,7 @@
 		state: string;
 	}
 
-	let share = $state<Share | null>(null);
+	let fileStorage = $state<FileStorage | null>(null);
 	let loading = $state(true);
 	let error = $state('');
 	let copiedIndex = $state<number | null>(null);
@@ -52,16 +52,16 @@
 	$effect(() => {
 		const id = $page.params.id;
 		if (!id || !$auth.token) return;
-		fetchShare(id);
+		fetchFileStorage(id);
 		fetchAccessRules(id);
 	});
 
-	async function fetchShare(id: string) {
+	async function fetchFileStorage(id: string) {
 		loading = true;
 		error = '';
 		try {
-			share = await api.get<Share>(
-				`/api/shares/${id}`,
+			fileStorage = await api.get<FileStorage>(
+				`/api/file-storage/${id}`,
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined
 			);
@@ -76,7 +76,7 @@
 		accessLoading = true;
 		try {
 			accessRules = await api.get<AccessRule[]>(
-				`/api/shares/${id}/access-rules`,
+				`/api/file-storage/${id}/access-rules`,
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined
 			);
@@ -88,20 +88,20 @@
 	}
 
 	async function addAccessRule() {
-		if (!share || !ruleForm.access_to.trim()) return;
+		if (!fileStorage || !ruleForm.access_to.trim()) return;
 		addingRule = true;
 		ruleError = '';
-		const access_type = share.share_proto === 'NFS' ? 'ip' : 'cephx';
+		const access_type = fileStorage.share_proto === 'NFS' ? 'ip' : 'cephx';
 		try {
 			await api.post(
-				`/api/shares/${share.id}/access-rules`,
+				`/api/file-storage/${fileStorage.id}/access-rules`,
 				{ access_to: ruleForm.access_to.trim(), access_level: ruleForm.access_level, access_type },
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined
 			);
 			ruleForm = { access_to: '', access_level: 'ro' };
 			showAddRule = false;
-			await fetchAccessRules(share.id);
+			await fetchAccessRules(fileStorage.id);
 		} catch (e) {
 			ruleError = e instanceof ApiError ? e.message : '생성 실패';
 		} finally {
@@ -110,16 +110,16 @@
 	}
 
 	async function revokeAccessRule(accessId: string) {
-		if (!share) return;
+		if (!fileStorage) return;
 		if (!confirm('이 접근 규칙을 삭제하시겠습니까?')) return;
 		revokingId = accessId;
 		try {
 			await api.delete(
-				`/api/shares/${share.id}/access-rules/${accessId}`,
+				`/api/file-storage/${fileStorage.id}/access-rules/${accessId}`,
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined
 			);
-			await fetchAccessRules(share.id);
+			await fetchAccessRules(fileStorage.id);
 		} catch (e) {
 			alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
@@ -139,12 +139,12 @@
 		setTimeout(() => (copiedKey = null), 2000);
 	}
 
-	async function deleteShare() {
-		if (!share) return;
-		if (!confirm(`Share "${share.name || share.id}"를 삭제하시겠습니까?`)) return;
+	async function deleteFileStorage() {
+		if (!fileStorage) return;
+		if (!confirm(`파일 스토리지 "${fileStorage.name || fileStorage.id}"를 삭제하시겠습니까?`)) return;
 		deleting = true;
 		try {
-			await api.delete(`/api/shares/${share.id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+			await api.delete(`/api/file-storage/${fileStorage.id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			goto('/dashboard');
 		} catch (e) {
 			alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
@@ -167,23 +167,23 @@
 		</div>
 	{:else if loading}
 		<LoadingSkeleton variant="card" rows={5} />
-	{:else if share}
+	{:else if fileStorage}
 		<div class="flex items-start justify-between mb-6">
 			<div>
-				<h1 class="text-2xl font-bold text-white">{share.name || share.id}</h1>
+				<h1 class="text-2xl font-bold text-white">{fileStorage.name || fileStorage.id}</h1>
 				<div class="flex items-center gap-2 mt-2">
 					<span
-						class="px-2 py-0.5 rounded text-xs font-medium {statusColor[share.status] ?? 'text-gray-400 bg-gray-800'}"
+						class="px-2 py-0.5 rounded text-xs font-medium {statusColor[fileStorage.status] ?? 'text-gray-400 bg-gray-800'}"
 					>
-						{share.status}
+						{fileStorage.status}
 					</span>
 					<span class="px-1.5 py-0.5 bg-purple-900/40 text-purple-300 rounded text-xs">
-						{share.share_proto}
+						{fileStorage.share_proto}
 					</span>
 				</div>
 			</div>
 			<button
-				onclick={deleteShare}
+				onclick={deleteFileStorage}
 				disabled={deleting}
 				class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-red-900 hover:border-red-700 disabled:border-gray-700 transition-colors"
 			>
@@ -197,25 +197,25 @@
 			<dl class="grid grid-cols-2 gap-x-8 gap-y-3">
 				<div>
 					<dt class="text-xs text-gray-500 mb-0.5">ID</dt>
-					<dd class="text-sm text-gray-300 font-mono">{share.id}</dd>
+					<dd class="text-sm text-gray-300 font-mono">{fileStorage.id}</dd>
 				</div>
 				<div>
 					<dt class="text-xs text-gray-500 mb-0.5">크기</dt>
-					<dd class="text-sm text-gray-300">{share.size} GB</dd>
+					<dd class="text-sm text-gray-300">{fileStorage.size} GB</dd>
 				</div>
-				{#if share.library_name}
+				{#if fileStorage.library_name}
 					<div>
 						<dt class="text-xs text-gray-500 mb-0.5">라이브러리</dt>
-						<dd class="text-sm text-gray-300">{share.library_name}</dd>
+						<dd class="text-sm text-gray-300">{fileStorage.library_name}</dd>
 					</div>
 					<div>
 						<dt class="text-xs text-gray-500 mb-0.5">버전</dt>
-						<dd class="text-sm text-gray-300">{share.library_version ?? '-'}</dd>
+						<dd class="text-sm text-gray-300">{fileStorage.library_version ?? '-'}</dd>
 					</div>
-					{#if share.built_at}
+					{#if fileStorage.built_at}
 						<div class="col-span-2">
 							<dt class="text-xs text-gray-500 mb-0.5">빌드 일시</dt>
-							<dd class="text-sm text-gray-300">{share.built_at}</dd>
+							<dd class="text-sm text-gray-300">{fileStorage.built_at}</dd>
 						</div>
 					{/if}
 				{/if}
@@ -223,13 +223,13 @@
 		</div>
 
 		<!-- Export Locations -->
-		{#if share.export_locations.length > 0}
+		{#if fileStorage.export_locations.length > 0}
 			<div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4">
 				<h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-4">
 					Export Locations
 				</h2>
 				<div class="space-y-2">
-					{#each share.export_locations as path, i}
+					{#each fileStorage.export_locations as path, i}
 						<div class="flex items-center gap-2">
 							<code
 								class="flex-1 text-xs text-gray-300 bg-gray-800 px-3 py-2 rounded font-mono break-all"
@@ -253,7 +253,7 @@
 		<!-- 접근 규칙 (Access Rules) -->
 		<div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4">
 			<div class="flex items-center justify-between mb-4">
-				<h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide">접근 규칙 {share.share_proto === 'NFS' ? '(IP)' : '(CephX)'}</h2>
+				<h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide">접근 규칙 {fileStorage.share_proto === 'NFS' ? '(IP)' : '(CephX)'}</h2>
 				<button
 					onclick={() => { showAddRule = !showAddRule; ruleError = ''; }}
 					class="text-xs text-blue-400 hover:text-blue-300 transition-colors"
@@ -266,11 +266,11 @@
 				<div class="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-4">
 					<div class="flex gap-3 items-end">
 						<div class="flex-1">
-							<label class="block text-xs text-gray-400 mb-1">{share.share_proto === 'NFS' ? 'IP / CIDR' : 'CephX ID'}
+							<label class="block text-xs text-gray-400 mb-1">{fileStorage.share_proto === 'NFS' ? 'IP / CIDR' : 'CephX ID'}
 							<input
 								bind:value={ruleForm.access_to}
 								type="text"
-								placeholder={share.share_proto === 'NFS' ? '예: 10.0.0.0/24' : '예: my-instance'}
+								placeholder={fileStorage.share_proto === 'NFS' ? '예: 10.0.0.0/24' : '예: my-instance'}
 								class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500 font-mono mt-1"
 							/>
 						</label>
@@ -357,12 +357,12 @@
 		</div>
 
 		<!-- 메타데이터 -->
-		{#if Object.keys(share.metadata).length > 0}
+		{#if Object.keys(fileStorage.metadata).length > 0}
 			<div class="bg-gray-900 border border-gray-800 rounded-lg p-6">
 				<h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-4">메타데이터</h2>
 				<table class="w-full text-sm">
 					<tbody>
-						{#each Object.entries(share.metadata) as [k, v]}
+						{#each Object.entries(fileStorage.metadata) as [k, v]}
 							<tr class="border-b border-gray-800/50">
 								<td class="py-2 pr-4 text-gray-500 text-xs w-1/3">{k}</td>
 								<td class="py-2 text-gray-300 font-mono text-xs break-all">{v}</td>

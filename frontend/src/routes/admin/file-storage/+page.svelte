@@ -6,7 +6,7 @@
 	import TimeSeriesChart from '$lib/components/TimeSeriesChart.svelte';
 	import { formatNumber } from '$lib/utils/format';
 
-	interface AdminShare {
+	interface AdminFileStorage {
 		id: string;
 		name: string;
 		status: string;
@@ -22,7 +22,7 @@
 
 	interface TsPoint { ts: number; total?: number; [key: string]: number | undefined; }
 
-	let shares = $state<AdminShare[]>([]);
+	let fileStorages = $state<AdminFileStorage[]>([]);
 	let loading = $state(true);
 	let tsData = $state<TsPoint[]>([]);
 	let tsRange = $state('7d');
@@ -34,7 +34,7 @@
 	async function loadTimeseries(range: string) {
 		tsLoading = true;
 		try {
-			tsData = await api.get<TsPoint[]>(`/api/admin/timeseries/shares?range=${range}`, token, projectId);
+			tsData = await api.get<TsPoint[]>(`/api/admin/timeseries/file_storage?range=${range}`, token, projectId);
 		} catch {
 			tsData = [];
 		} finally {
@@ -45,9 +45,9 @@
 	async function load() {
 		loading = true;
 		try {
-			shares = await api.get<AdminShare[]>('/api/admin/all-shares', token, projectId);
+			fileStorages = await api.get<AdminFileStorage[]>('/api/admin/all-file-storages', token, projectId);
 		} catch {
-			shares = [];
+			fileStorages = [];
 		} finally {
 			loading = false;
 		}
@@ -58,7 +58,7 @@
 
 <div class="p-4 md:p-8 max-w-6xl">
 	<div class="flex items-center justify-between mb-6">
-		<h1 class="text-2xl font-bold text-white">전체 공유 스토리지</h1>
+		<h1 class="text-2xl font-bold text-white">전체 파일 스토리지</h1>
 		<button onclick={load} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
 	</div>
 
@@ -70,7 +70,7 @@
 		{:else}
 			<TimeSeriesChart
 				data={tsData}
-				title="공유 스토리지 수 추이"
+				title="파일 스토리지 수 추이"
 				mainKey="total"
 				currentRange={tsRange}
 				onRangeChange={(r) => { tsRange = r; loadTimeseries(r); }}
@@ -80,8 +80,8 @@
 
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={5} />
-	{:else if shares.length === 0}
-		<div class="text-gray-600 text-sm">공유 스토리지가 없습니다</div>
+	{:else if fileStorages.length === 0}
+		<div class="text-gray-600 text-sm">파일 스토리지가 없습니다</div>
 	{:else}
 		<div class="overflow-x-auto">
 			<table class="w-full text-sm">
@@ -95,13 +95,13 @@
 					</tr>
 				</thead>
 				<tbody>
-					{#each shares as s (s.id)}
+					{#each fileStorages as fs (fs.id)}
 						<tr class="border-b border-gray-800/50 text-xs">
-							<td class="py-2 pr-4 text-white">{s.name || s.id.slice(0, 8)}</td>
-							<td class="py-2 pr-4 {statusColor[s.status] ?? 'text-gray-400'}">{s.status}</td>
-							<td class="py-2 pr-4 text-gray-400">{formatNumber(s.size)} GB</td>
-							<td class="py-2 pr-4 text-gray-400">{s.share_proto}</td>
-							<td class="py-2 text-gray-500">{s.metadata?.union_type || '-'}</td>
+							<td class="py-2 pr-4 text-white">{fs.name || fs.id.slice(0, 8)}</td>
+							<td class="py-2 pr-4 {statusColor[fs.status] ?? 'text-gray-400'}">{fs.status}</td>
+							<td class="py-2 pr-4 text-gray-400">{formatNumber(fs.size)} GB</td>
+							<td class="py-2 pr-4 text-gray-400">{fs.share_proto}</td>
+							<td class="py-2 text-gray-500">{fs.metadata?.union_type || '-'}</td>
 						</tr>
 					{/each}
 				</tbody>

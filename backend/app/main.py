@@ -15,7 +15,7 @@ from slowapi.errors import RateLimitExceeded
 from app.rate_limit import limiter
 
 from app.api.compute import instances_router, keypairs_router, images_router, flavors_router
-from app.api.storage import volumes_router, volume_backups_router, volume_snapshots_router, shares_router
+from app.api.storage import volumes_router, volume_backups_router, volume_snapshots_router, file_storage_router
 from app.api.network import networks_router, routers_router, security_groups_router, loadbalancers_router
 from app.api.identity import auth_router, admin_router
 from app.api.identity.admin_services import router as admin_services_router
@@ -212,7 +212,7 @@ app.include_router(security_groups_router, prefix="/api/security-groups", tags=[
 from app.config import get_settings as _get_cfg
 _svc_cfg = _get_cfg()
 if _svc_cfg.service_manila_enabled:
-    app.include_router(shares_router, prefix="/api/shares", tags=["shares"])
+    app.include_router(file_storage_router, prefix="/api/file-storage", tags=["file-storage"])
 if _svc_cfg.service_magnum_enabled:
     app.include_router(clusters_router, prefix="/api/clusters", tags=["clusters"])
 if _svc_cfg.service_zun_enabled:
@@ -287,12 +287,12 @@ async def _collect_snapshot() -> None:
                     counts["other"] += 1
             return counts
 
-        def _count_shares():
+        def _count_file_storages():
             total = 0
             try:
                 from app.services import manila
-                shares = manila.list_shares(conn, all_tenants=True)
-                total = len(shares)
+                file_storages = manila.list_file_storages(conn, all_tenants=True)
+                total = len(file_storages)
             except Exception:
                 pass
             return {"total": total}
@@ -307,18 +307,18 @@ async def _collect_snapshot() -> None:
         inst_data = await asyncio.to_thread(_count_instances)
         vol_data = await asyncio.to_thread(_count_volumes)
         if settings.service_manila_enabled:
-            share_data = await asyncio.to_thread(_count_shares)
+            file_storage_data = await asyncio.to_thread(_count_file_storages)
         else:
-            share_data = {"total": 0}
+            file_storage_data = {"total": 0}
         net_data = await asyncio.to_thread(_count_networks)
 
         await timeseries.record_snapshot("instances", inst_data)
         await timeseries.record_snapshot("volumes", vol_data)
-        await timeseries.record_snapshot("shares", share_data)
+        await timeseries.record_snapshot("file_storage", file_storage_data)
         await timeseries.record_snapshot("networks", net_data)
 
-        _logger.info("시계열 스냅샷 수집 완료: instances=%d volumes=%d shares=%d networks=%d",
-                     inst_data["total"], vol_data["total"], share_data["total"], net_data["total"])
+        _logger.info("시계열 스냅샷 수집 완료: instances=%d volumes=%d file_storage=%d networks=%d",
+                     inst_data["total"], vol_data["total"], file_storage_data["total"], net_data["total"])
     except Exception:
         _logger.warning("시계열 스냅샷 수집 오류", exc_info=True)
     finally:

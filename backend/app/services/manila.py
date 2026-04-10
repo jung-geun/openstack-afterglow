@@ -1,5 +1,5 @@
 """
-Manila CephFS share 관리 서비스.
+Manila CephFS 파일 스토리지 관리 서비스.
 
 openstacksdk 는 Manila(Shared File Systems) API 를 manilaclient 로 래핑하지 않으므로
 직접 REST 호출로 처리한다.
@@ -9,7 +9,7 @@ import time
 import httpx
 from typing import Optional
 
-from app.models.storage import ShareInfo
+from app.models.storage import FileStorageInfo
 
 logger = logging.getLogger(__name__)
 
@@ -88,10 +88,10 @@ def get_client(conn) -> ManilaClient:
 
 
 # ---------------------------------------------------------------------------
-# Share 관리
+# 파일 스토리지 관리
 # ---------------------------------------------------------------------------
 
-def get_share_quota(conn) -> dict:
+def get_file_storage_quota(conn) -> dict:
     """프로젝트의 Manila 할당량 (limit + in_use) 조회."""
     try:
         client = get_client(conn)
@@ -114,7 +114,7 @@ def get_share_quota(conn) -> dict:
         }
     except Exception:
         import logging as _logging
-        _logging.getLogger(__name__).warning("Manila share quota 조회 실패", exc_info=True)
+        _logging.getLogger(__name__).warning("Manila 파일 스토리지 quota 조회 실패", exc_info=True)
         return {k: {"limit": -1, "in_use": 0} for k in ["shares", "gigabytes", "share_networks", "share_groups", "snapshot_gigabytes"]}
 
 
@@ -132,7 +132,7 @@ def list_share_types(conn) -> list[dict]:
     ]
 
 
-def create_share(
+def create_file_storage(
     conn,
     name: str,
     size_gb: int,
@@ -140,7 +140,7 @@ def create_share(
     share_type: str = "cephfstype",
     share_proto: str = "CEPHFS",
     metadata: Optional[dict] = None,
-) -> ShareInfo:
+) -> FileStorageInfo:
     client = get_client(conn)
     share_body: dict = {
         "name": name,
@@ -153,26 +153,26 @@ def create_share(
         share_body["share_network_id"] = share_network_id
     body = {"share": share_body}
     data = client.post("shares", body)["share"]
-    share_id = data["id"]
+    file_storage_id = data["id"]
 
     # available 상태까지 폴링
     for _ in range(60):
         time.sleep(5)
-        info = client.get(f"shares/{share_id}")["share"]
+        info = client.get(f"shares/{file_storage_id}")["share"]
         if info["status"] == "available":
             break
         if info["status"] == "error":
-            raise RuntimeError(f"Share 생성 실패 (error 상태): {share_id}")
+            raise RuntimeError(f"파일 스토리지 생성 실패 (error 상태): {file_storage_id}")
 
-    return _parse_share(client.get(f"shares/{share_id}")["share"])
+    return _parse_file_storage(client.get(f"shares/{file_storage_id}")["share"])
 
 
-def delete_share(conn, share_id: str) -> None:
+def delete_file_storage(conn, file_storage_id: str) -> None:
     client = get_client(conn)
-    client.delete(f"shares/{share_id}")
+    client.delete(f"shares/{file_storage_id}")
 
 
-def list_shares(conn, metadata_filter: Optional[dict] = None, all_tenants: bool = False) -> list[ShareInfo]:
+def list_file_storages(conn, metadata_filter: Optional[dict] = None, all_tenants: bool = False) -> list[FileStorageInfo]:
     client = get_client(conn)
     params: dict = {}
     if all_tenants:
@@ -181,22 +181,22 @@ def list_shares(conn, metadata_filter: Optional[dict] = None, all_tenants: bool 
         data = client.get("shares/detail", params=params or None)["shares"]
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 400:
-            logger.warning(f"Manila shares/detail 400 (shares 없음으로 추정): {e}")
+            logger.warning(f"Manila shares/detail 400 (파일 스토리지 없음으로 추정): {e}")
             return []
         raise
-    shares = [_parse_share(s) for s in data]
+    file_storages = [_parse_file_storage(s) for s in data]
     if metadata_filter:
-        shares = [
-            s for s in shares
+        file_storages = [
+            s for s in file_storages
             if all(s.metadata.get(k) == v for k, v in metadata_filter.items())
         ]
-    return shares
+    return file_storages
 
 
-def get_share(conn, share_id: str) -> ShareInfo:
+def get_file_storage(conn, file_storage_id: str) -> FileStorageInfo:
     client = get_client(conn)
-    data = client.get(f"shares/{share_id}")["share"]
-    return _parse_share(data)
+    data = client.get(f"shares/{file_storage_id}")["share"]
+    return _parse_file_storage(data)
 
 
 # ---------------------------------------------------------------------------
@@ -205,7 +205,7 @@ def get_share(conn, share_id: str) -> ShareInfo:
 
 def create_access_rule(
     conn,
-    share_id: str,
+    file_storage_id: str,
     access_to: str,
     access_level: str = "ro",   # "ro" | "rw"
     access_type: str = "cephx",  # "cephx" | "ip"
@@ -224,12 +224,12 @@ def create_access_rule(
             "access_level": access_level,
         }
     }
-    data = client.post(f"shares/{share_id}/action", body)["access"]
+    data = client.post(f"shares/{file_storage_id}/action", body)["access"]
 
     # access_key 조회 (CephX만 해당, IP 규칙은 없음)
     access_key = ""
     if access_type == "cephx":
-        access_key = _get_access_key(client, share_id, data["id"])
+        access_key = _get_access_key(client, file_storage_id, data["id"])
     return {
         "access_id": data["id"],
         "access_key": access_key,
@@ -238,23 +238,23 @@ def create_access_rule(
     }
 
 
-def revoke_access_rule(conn, share_id: str, access_id: str) -> None:
+def revoke_access_rule(conn, file_storage_id: str, access_id: str) -> None:
     client = get_client(conn)
     body = {"deny_access": {"access_id": access_id}}
-    client.post(f"shares/{share_id}/action", body)
+    client.post(f"shares/{file_storage_id}/action", body)
 
 
-def list_access_rules(conn, share_id: str) -> list[dict]:
+def list_access_rules(conn, file_storage_id: str) -> list[dict]:
     client = get_client(conn)
     # API v2.45+: use share-access-rules endpoint instead of action
-    data = client.get(f"share-access-rules?share_id={share_id}")
+    data = client.get(f"share-access-rules?share_id={file_storage_id}")
     return data.get("access_rules", [])
 
 
-def get_export_locations(conn, share_id: str) -> list[str]:
+def get_export_locations(conn, file_storage_id: str) -> list[str]:
     """CephFS export path 목록 반환 (예: '192.168.1.10:6789,... :/')."""
     client = get_client(conn)
-    data = client.get(f"shares/{share_id}/export_locations")
+    data = client.get(f"shares/{file_storage_id}/export_locations")
     locations = data.get("export_locations", [])
     return [loc["path"] for loc in locations if loc.get("is_admin_only") is False]
 
@@ -263,11 +263,11 @@ def get_export_locations(conn, share_id: str) -> list[str]:
 # 내부 유틸
 # ---------------------------------------------------------------------------
 
-def _get_access_key(client: ManilaClient, share_id: str, access_id: str) -> str:
+def _get_access_key(client: ManilaClient, file_storage_id: str, access_id: str) -> str:
     """access rule 에서 CephX secret key 추출 (Manila API v2.45+)."""
     for _ in range(20):
         # API v2.45+: use share-access-rules endpoint
-        data = client.get(f"share-access-rules?share_id={share_id}")
+        data = client.get(f"share-access-rules?share_id={file_storage_id}")
         rules = data.get("access_rules", [])
         for rule in rules:
             if rule["id"] == access_id and rule.get("access_key"):
@@ -276,7 +276,7 @@ def _get_access_key(client: ManilaClient, share_id: str, access_id: str) -> str:
     return ""
 
 
-def _parse_share(data: dict) -> ShareInfo:
+def _parse_file_storage(data: dict) -> FileStorageInfo:
     meta = data.get("metadata", {}) or {}
     locations = []
     for loc in data.get("export_locations", []):
@@ -285,7 +285,7 @@ def _parse_share(data: dict) -> ShareInfo:
         elif isinstance(loc, str):
             locations.append(loc)
 
-    return ShareInfo(
+    return FileStorageInfo(
         id=data["id"],
         name=data.get("name", ""),
         status=data["status"],
@@ -297,3 +297,13 @@ def _parse_share(data: dict) -> ShareInfo:
         library_version=meta.get("union_version"),
         built_at=meta.get("union_built_at"),
     )
+
+
+# ---------------------------------------------------------------------------
+# 하위 호환 alias (기존 코드와 호환 유지)
+# ---------------------------------------------------------------------------
+get_share_quota = get_file_storage_quota
+create_share = create_file_storage
+delete_share = delete_file_storage
+list_shares = list_file_storages
+get_share = get_file_storage

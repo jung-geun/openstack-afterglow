@@ -2,7 +2,7 @@ from pydantic import BaseModel, Field
 from typing import Literal, Optional, Any
 
 
-class ShareInfo(BaseModel):
+class FileStorageInfo(BaseModel):
     id: str
     name: str
     status: str
@@ -22,7 +22,7 @@ class LibraryConfig(BaseModel):
     version: str      # e.g. "3.11"
     packages: list[str]   # pip packages to install
     depends_on: list[str] = []   # library ids this depends on
-    share_id: Optional[str] = None   # prebuilt share id (Strategy A)
+    file_storage_id: Optional[str] = None   # prebuilt file storage id (Strategy A)
     available_prebuilt: bool = False
 
 
@@ -109,7 +109,7 @@ class CreateVolumeRequest(BaseModel):
     availability_zone: Optional[str] = None
 
 
-class CreateShareRequest(BaseModel):
+class CreateFileStorageRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     size_gb: int = Field(..., ge=1, le=16384)
     share_type: str = Field("", max_length=255)

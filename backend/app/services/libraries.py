@@ -1,6 +1,6 @@
 """
 라이브러리 설정 레지스트리.
-실제 share ID 는 Manila에서 조회해 채운다.
+실제 파일 스토리지 ID 는 Manila에서 조회해 채운다.
 """
 from app.models.storage import LibraryConfig
 

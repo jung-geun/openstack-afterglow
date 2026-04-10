@@ -10,7 +10,7 @@
     compute: { instances: QuotaItem; cores: QuotaItem; ram: QuotaItem; key_pairs: QuotaItem; server_groups: QuotaItem; };
     storage: { volumes: QuotaItem; snapshots: QuotaItem; gigabytes: QuotaItem; backups: QuotaItem; backup_gigabytes: QuotaItem; };
     network: { floatingip: QuotaItem; security_group: QuotaItem; security_group_rule: QuotaItem; network: QuotaItem; port: QuotaItem; router: QuotaItem; subnet: QuotaItem; };
-    share: { shares: QuotaItem; gigabytes: QuotaItem; share_networks: QuotaItem; share_groups: QuotaItem; };
+    file_storage: { shares: QuotaItem; gigabytes: QuotaItem; share_networks: QuotaItem; share_groups: QuotaItem; };
   }
 
   interface UsageServer { name: string; instance_id: string; vcpus: number; memory_mb: number; local_gb: number; hours: number; state: string; }
@@ -251,10 +251,10 @@
           {/if}
         </div>
 
-        <!-- 네트워크 / Share 카드 (quotas 로드 후 표시) -->
+        <!-- 네트워크 / File Storage 카드 (quotas 로드 후 표시) -->
         {#if quotas}
           {@const nq = quotas.network}
-          {@const sq = quotas.share}
+          {@const sq = quotas.file_storage}
 
           <!-- 포트 -->
           <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 flex flex-col min-h-[128px]">
@@ -303,10 +303,10 @@
             {/if}
           </div>
 
-          <!-- Share -->
+          <!-- File Storage -->
           <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 flex flex-col min-h-[128px]">
             <div class="flex items-center justify-between mb-3">
-              <span class="text-xs text-gray-500 uppercase tracking-wide font-medium">Share</span>
+              <span class="text-xs text-gray-500 uppercase tracking-wide font-medium">File Storage</span>
               <div class="w-8 h-8 rounded-full bg-teal-900/40 flex items-center justify-center">
                 <svg class="w-4 h-4 text-teal-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
                   <path d="M1.5 13V5.5a1 1 0 0 1 1-1H6l2 2h5.5a1 1 0 0 1 1 1V13a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/>
@@ -328,10 +328,10 @@
             {/if}
           </div>
 
-          <!-- Share 스토리지 -->
+          <!-- 파일 스토리지 용량 -->
           <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 flex flex-col min-h-[128px]">
             <div class="flex items-center justify-between mb-3">
-              <span class="text-xs text-gray-500 uppercase tracking-wide font-medium">Share 스토리지</span>
+              <span class="text-xs text-gray-500 uppercase tracking-wide font-medium">파일 스토리지 용량</span>
               <div class="w-8 h-8 rounded-full bg-green-900/30 flex items-center justify-center">
                 <svg class="w-4 h-4 text-green-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
                   <path d="M1.5 12V5.5a1 1 0 0 1 1-1H5.5l1.5 1.5H13a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H2.5a1 1 0 0 1-1-1z"/>
@@ -410,7 +410,7 @@
       <div class="text-sm font-medium text-white">볼륨</div>
       <div class="text-xs text-gray-500">블록 스토리지</div>
     </a>
-    <a href="/dashboard/shares" class="bg-gray-900 border border-gray-800 hover:border-gray-600 rounded-2xl p-5 transition-colors flex flex-col items-center gap-2 text-center">
+    <a href="/dashboard/file-storage" class="bg-gray-900 border border-gray-800 hover:border-gray-600 rounded-2xl p-5 transition-colors flex flex-col items-center gap-2 text-center">
       <div class="w-10 h-10 rounded-xl bg-gray-800 flex items-center justify-center">
         <svg class="w-5 h-5 text-gray-300" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
           <path d="M2 16V7.5a1.5 1.5 0 0 1 1.5-1.5H7l2.5 2.5H17a1.5 1.5 0 0 1 1.5 1.5V16a1.5 1.5 0 0 1-1.5 1.5H3.5A1.5 1.5 0 0 1 2 16z"/>
@@ -418,7 +418,7 @@
           <line x1="8" y1="12.5" x2="12" y2="12.5"/>
         </svg>
       </div>
-      <div class="text-sm font-medium text-white">공유 스토리지</div>
+      <div class="text-sm font-medium text-white">파일 스토리지</div>
       <div class="text-xs text-gray-500">Manila CephFS</div>
     </a>
     <a href="/dashboard/network/networks" class="bg-gray-900 border border-gray-800 hover:border-gray-600 rounded-2xl p-5 transition-colors flex flex-col items-center gap-2 text-center">

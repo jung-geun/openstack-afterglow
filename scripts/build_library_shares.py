@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-사전 빌드 라이브러리 share 관리 CLI 스크립트.
+사전 빌드 라이브러리 파일 스토리지 관리 CLI 스크립트.
 
 사용법:
   python build_library_shares.py build --library python311
@@ -8,10 +8,10 @@
   python build_library_shares.py delete --share-id <id>
 
 동작:
-  1. Manila share 생성 (상태: building)
-  2. 임시 VM 생성 (부트 볼륨 + 생성된 share 마운트)
+  1. Manila 파일 스토리지 생성 (상태: building)
+  2. 임시 VM 생성 (부트 볼륨 + 생성된 파일 스토리지 마운트)
   3. VM 내부에서 pip install 실행
-  4. VM 삭제, share 상태를 available 로 업데이트
+  4. VM 삭제, 파일 스토리지 상태를 available 로 업데이트
 """
 import argparse
 import os
@@ -117,7 +117,7 @@ def cmd_list(args, conn):
     union_shares = [s for s in shares if s.get("metadata", {}).get("union_type")]
 
     if not union_shares:
-        print("Union share 없음")
+        print("Union 파일 스토리지 없음")
         return
 
     print(f"{'ID':<36}  {'이름':<30}  {'상태':<12}  {'라이브러리'}")
@@ -137,7 +137,7 @@ def cmd_build(args, conn):
     share_network_id = os.environ.get("OS_MANILA_SHARE_NETWORK_ID", "")
     share_type = os.environ.get("OS_MANILA_SHARE_TYPE", "cephfstype")
 
-    print(f"[1/4] Manila share 생성: union-prebuilt-{lib_id}")
+    print(f"[1/4] Manila 파일 스토리지 생성: union-prebuilt-{lib_id}")
     # Manila REST API 직접 호출
     import httpx
     catalog = conn.config.get_service_catalog()
@@ -177,25 +177,25 @@ def cmd_build(args, conn):
     share_id = share["id"]
     print(f"  Share ID: {share_id}")
 
-    print("[2/4] share available 대기 중...")
+    print("[2/4] 파일 스토리지 available 대기 중...")
     for _ in range(60):
         time.sleep(5)
         r = httpx.get(f"{manila_ep}/{project_id}/shares/{share_id}", headers=headers, timeout=30)
         if r.json()["share"]["status"] == "available":
             break
     else:
-        print("Share 가용 상태 대기 시간 초과", file=sys.stderr)
+        print("파일 스토리지 가용 상태 대기 시간 초과", file=sys.stderr)
         sys.exit(1)
 
-    print("[3/4] (수동 단계) 라이브러리를 share에 설치하세요:")
-    print(f"  1. 임시 VM을 생성하고 이 share를 마운트하세요 (share ID: {share_id})")
+    print("[3/4] (수동 단계) 라이브러리를 파일 스토리지에 설치하세요:")
+    print(f"  1. 임시 VM을 생성하고 이 파일 스토리지를 마운트하세요 (ID: {share_id})")
     print(f"  2. 다음 스크립트를 실행하세요:")
     print("-" * 40)
     print(lib["install_script"])
     print("-" * 40)
-    input("설치 완료 후 Enter를 눌러 share 메타데이터를 업데이트하세요...")
+    input("설치 완료 후 Enter를 눌러 파일 스토리지 메타데이터를 업데이트하세요...")
 
-    print("[4/4] Share 메타데이터 업데이트...")
+    print("[4/4] 파일 스토리지 메타데이터 업데이트...")
     meta_body = {
         "set_metadata": {
             "union_status": "ready",
@@ -207,16 +207,16 @@ def cmd_build(args, conn):
         json=meta_body, headers=headers, timeout=30
     )
     r.raise_for_status()
-    print(f"완료! Share {share_id} 사용 준비됨")
+    print(f"완료! 파일 스토리지 {share_id} 사용 준비됨")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Union 라이브러리 Share 관리")
+    parser = argparse.ArgumentParser(description="Union 라이브러리 파일 스토리지 관리")
     sub = parser.add_subparsers(dest="cmd")
 
-    sub.add_parser("list", help="Share 목록 조회")
+    sub.add_parser("list", help="파일 스토리지 목록 조회")
 
-    build_p = sub.add_parser("build", help="사전 빌드 share 생성")
+    build_p = sub.add_parser("build", help="사전 빌드 파일 스토리지 생성")
     build_p.add_argument("--library", required=True, choices=list(LIBRARY_CATALOG.keys()))
 
     args = parser.parse_args()

@@ -283,7 +283,7 @@
 
 	async function deleteInstance() {
 		if (!instance) return;
-		if (!confirm(`"${instance.name}" 인스턴스를 삭제하시겠습니까?\nManila share와 볼륨도 함께 삭제됩니다.`))
+		if (!confirm(`"${instance.name}" 인스턴스를 삭제하시겠습니까?\n파일 스토리지와 볼륨도 함께 삭제됩니다.`))
 			return;
 		deleting = true;
 		try {
@@ -1039,11 +1039,11 @@
 				{/if}
 				{#if instance.union_share_ids.filter(Boolean).length > 0}
 					<div class="col-span-2">
-						<dt class="text-xs text-gray-500 mb-1.5">연결된 Share</dt>
+						<dt class="text-xs text-gray-500 mb-1.5">연결된 파일 스토리지</dt>
 						<dd class="flex flex-col gap-1">
 							{#each instance.union_share_ids.filter(Boolean) as sid}
 								<a
-									href="/dashboard/shares/{sid}"
+									href="/dashboard/file-storage/{sid}"
 									class="text-sm text-blue-400 hover:text-blue-300 font-mono transition-colors"
 								>
 									{sid}

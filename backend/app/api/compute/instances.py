@@ -2,7 +2,7 @@
 인스턴스 오케스트레이션 엔드포인트.
 
 생성 순서:
-  1. Manila access rule(A) 또는 신규 share(B)
+  1. Manila access rule(A) 또는 신규 파일 스토리지(B)
   2. Cinder 부트 볼륨
   3. Cinder upper 볼륨
   4. cloud-init userdata 생성
@@ -106,8 +106,8 @@ async def create_instance(
     resolved_libs = lib_svc.resolve_with_deps(req.libraries)
 
     # 수집된 리소스 (rollback 용)
-    created_share_ids: list[str] = []
-    created_access_ids: list[tuple[str, str]] = []   # (share_id, access_id)
+    created_file_storage_ids: list[str] = []
+    created_access_ids: list[tuple[str, str]] = []   # (file_storage_id, access_id)
     boot_volume_id: str | None = None
     upper_volume_id: str | None = None
     server_id: str | None = None
@@ -115,19 +115,19 @@ async def create_instance(
 
     try:
         # ------------------------------------------------------------------
-        # 1. Manila: share 및 access rule 준비
+        # 1. Manila: 파일 스토리지 및 access rule 준비
         # ------------------------------------------------------------------
-        shares_info = []  # cloud-init 에 전달할 share 정보 목록
+        file_storages_info = []  # cloud-init 에 전달할 파일 스토리지 정보 목록
 
         if req.strategy == "prebuilt":
-            shares_info = await _prepare_prebuilt_shares(
+            file_storages_info = await _prepare_prebuilt_file_storages(
                 conn, resolved_libs, req.name, created_access_ids
             )
         else:
-            share_info = await _prepare_dynamic_share(
-                conn, req.name, resolved_libs, settings, created_share_ids, created_access_ids
+            file_storage_info = await _prepare_dynamic_file_storage(
+                conn, req.name, resolved_libs, settings, created_file_storage_ids, created_access_ids
             )
-            shares_info = [share_info]
+            file_storages_info = [file_storage_info]
 
         # ------------------------------------------------------------------
         # 2. Cinder: 부트 볼륨 생성
@@ -169,7 +169,7 @@ async def create_instance(
         userdata = cloudinit.generate_userdata(
             libraries=resolved_libs,
             strategy=req.strategy,
-            shares=shares_info,
+            file_storages=file_storages_info,
             upper_device="/dev/vdb",    # Nova가 두 번째 블록으로 붙임
             ceph_monitors=settings.ceph_monitors,
             gpu_available=gpu_available,
@@ -182,7 +182,7 @@ async def create_instance(
             "union_libraries": ",".join(resolved_libs),
             "union_strategy": req.strategy,
             "union_share_ids": ",".join(
-                [s.get("share_id", "") for s in shares_info]
+                [s.get("file_storage_id", "") for s in file_storages_info]
             ),
             "union_upper_volume_id": upper_volume_id,
         }
@@ -227,7 +227,7 @@ async def create_instance(
     except Exception as e:
         logger.error(f"인스턴스 생성 실패, rollback 시작: {e}")
         await _rollback(conn, server_id, boot_volume_id, upper_volume_id,
-                        created_share_ids, created_access_ids, floating_ip_id)
+                        created_file_storage_ids, created_access_ids, floating_ip_id)
         raise HTTPException(status_code=500, detail="인스턴스 생성 실패")
 
 
@@ -242,7 +242,7 @@ async def create_instance_async(
 
     async def progress_generator():
         # 수집된 리소스 (rollback 용)
-        created_share_ids: list[str] = []
+        created_file_storage_ids: list[str] = []
         created_access_ids: list[tuple[str, str]] = []
         boot_volume_id: str | None = None
         upper_volume_id: str | None = None
@@ -254,22 +254,22 @@ async def create_instance_async(
             return f"data: {msg.model_dump_json()}\n\n"
 
         try:
-            shares_info = []
+            file_storages_info = []
             userdata = None
 
             if resolved_libs:
-                # Step 1: Manila shares (0-20%)
-                yield send_progress(ProgressStep.MANILA_PREPARING, 0, "Manila shares 준비 중...")
+                # Step 1: Manila 파일 스토리지 (0-20%)
+                yield send_progress(ProgressStep.MANILA_PREPARING, 0, "파일 스토리지 준비 중...")
                 if req.strategy == "prebuilt":
-                    shares_info = await _prepare_prebuilt_shares(
+                    file_storages_info = await _prepare_prebuilt_file_storages(
                         conn, resolved_libs, req.name, created_access_ids
                     )
                 else:
-                    share_info = await _prepare_dynamic_share(
-                        conn, req.name, resolved_libs, settings, created_share_ids, created_access_ids
+                    file_storage_info = await _prepare_dynamic_file_storage(
+                        conn, req.name, resolved_libs, settings, created_file_storage_ids, created_access_ids
                     )
-                    shares_info = [share_info]
-                yield send_progress(ProgressStep.MANILA_PREPARING, 20, "Manila shares 준비 완료")
+                    file_storages_info = [file_storage_info]
+                yield send_progress(ProgressStep.MANILA_PREPARING, 20, "파일 스토리지 준비 완료")
 
             # Step 2: Boot volume (20-45%)
             yield send_progress(ProgressStep.BOOT_VOLUME_CREATING, 20, "부트 볼륨 생성 중...")
@@ -310,7 +310,7 @@ async def create_instance_async(
                 userdata = cloudinit.generate_userdata(
                     libraries=resolved_libs,
                     strategy=req.strategy,
-                    shares=shares_info,
+                    file_storages=file_storages_info,
                     upper_device="/dev/vdb",
                     ceph_monitors=settings.ceph_monitors,
                     gpu_available=gpu_available,
@@ -322,7 +322,7 @@ async def create_instance_async(
             meta = {
                 "union_libraries": ",".join(resolved_libs) if resolved_libs else "none",
                 "union_strategy": req.strategy or "none",
-                "union_share_ids": ",".join([s.get("share_id", "") for s in shares_info]) if shares_info else "none",
+                "union_share_ids": ",".join([s.get("file_storage_id", "") for s in file_storages_info]) if file_storages_info else "none",
                 "union_upper_volume_id": upper_volume_id or "none",
             }
 
@@ -394,7 +394,7 @@ async def create_instance_async(
             logger.error(f"인스턴스 생성 실패, rollback 시작: {e}")
             yield send_progress(ProgressStep.FAILED, 0, "인스턴스 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.", error="인스턴스 생성 실패")
             await _rollback(conn, server_id, boot_volume_id, upper_volume_id,
-                            created_share_ids, created_access_ids, floating_ip_id)
+                            created_file_storage_ids, created_access_ids, floating_ip_id)
 
     return StreamingResponse(
         progress_generator(),
@@ -418,7 +418,7 @@ async def delete_instance(
         raise HTTPException(status_code=404, detail="인스턴스를 찾을 수 없습니다")
 
     upper_volume_id = server.union_upper_volume_id
-    share_ids = server.union_share_ids
+    file_storage_ids = server.union_share_ids
     strategy = server.union_strategy
 
     # Nova 서버 삭제
@@ -426,14 +426,14 @@ async def delete_instance(
     await invalidate(f"union:nova:{pid}:instances")
     await invalidate(f"union:nova:{pid}:instance:{instance_id}")
 
-    # Strategy B: 전용 share 삭제
+    # Strategy B: 전용 파일 스토리지 삭제
     if strategy == "dynamic":
-        for share_id in share_ids:
-            if share_id:
+        for file_storage_id in file_storage_ids:
+            if file_storage_id:
                 try:
-                    await asyncio.to_thread(manila.delete_share, conn, share_id)
+                    await asyncio.to_thread(manila.delete_file_storage, conn, file_storage_id)
                 except Exception as ex:
-                    logger.warning(f"Share 삭제 실패 {share_id}: {ex}")
+                    logger.warning(f"파일 스토리지 삭제 실패 {file_storage_id}: {ex}")
 
     # upper 볼륨 삭제
     if upper_volume_id:
@@ -702,44 +702,44 @@ async def update_port_security_groups(
 # 내부 헬퍼
 # ---------------------------------------------------------------------------
 
-async def _prepare_prebuilt_shares(
+async def _prepare_prebuilt_file_storages(
     conn, resolved_libs: list[str], instance_name: str,
     created_access_ids: list
 ) -> list[dict]:
-    """Strategy A: 사전 빌드된 read-only share에 access rule 추가."""
-    prebuilt_shares = await asyncio.to_thread(
-        manila.list_shares, conn, {"union_type": "prebuilt"}
+    """Strategy A: 사전 빌드된 read-only 파일 스토리지에 access rule 추가."""
+    prebuilt_file_storages = await asyncio.to_thread(
+        manila.list_file_storages, conn, {"union_type": "prebuilt"}
     )
-    prebuilt_map = {s.library_name: s for s in prebuilt_shares}
+    prebuilt_map = {s.library_name: s for s in prebuilt_file_storages}
 
-    shares_info = []
+    file_storages_info = []
     for lib_id in list(reversed(resolved_libs)):
-        share = prebuilt_map.get(lib_id)
-        if not share:
-            raise RuntimeError(f"사전 빌드 share 없음: {lib_id}. Strategy B를 사용하거나 관리자에게 문의하세요.")
+        file_storage = prebuilt_map.get(lib_id)
+        if not file_storage:
+            raise RuntimeError(f"사전 빌드 파일 스토리지 없음: {lib_id}. Strategy B를 사용하거나 관리자에게 문의하세요.")
 
         cephx_id = f"union-ro-{instance_name}-{lib_id}"
-        rule = await asyncio.to_thread(manila.create_access_rule, conn, share.id, cephx_id, "ro")
-        created_access_ids.append((share.id, rule["access_id"]))
+        rule = await asyncio.to_thread(manila.create_access_rule, conn, file_storage.id, cephx_id, "ro")
+        created_access_ids.append((file_storage.id, rule["access_id"]))
 
-        export_paths = await asyncio.to_thread(manila.get_export_locations, conn, share.id)
-        shares_info.append({
-            "share_id": share.id,
+        export_paths = await asyncio.to_thread(manila.get_export_locations, conn, file_storage.id)
+        file_storages_info.append({
+            "file_storage_id": file_storage.id,
             "name": lib_id,
             "export_path": export_paths[0] if export_paths else "",
             "cephx_id": cephx_id,
             "cephx_key": rule["access_key"],
         })
-    return shares_info
+    return file_storages_info
 
 
-async def _prepare_dynamic_share(
+async def _prepare_dynamic_file_storage(
     conn, instance_name: str, resolved_libs: list[str],
-    settings, created_share_ids: list, created_access_ids: list
+    settings, created_file_storage_ids: list, created_access_ids: list
 ) -> dict:
-    """Strategy B: VM 전용 read-write share 신규 생성."""
-    share = await asyncio.to_thread(
-        manila.create_share,
+    """Strategy B: VM 전용 read-write 파일 스토리지 신규 생성."""
+    file_storage = await asyncio.to_thread(
+        manila.create_file_storage,
         conn,
         f"union-dyn-{instance_name}",
         settings.upper_volume_size_gb,
@@ -751,15 +751,15 @@ async def _prepare_dynamic_share(
             "union_libraries": ",".join(resolved_libs),
         },
     )
-    created_share_ids.append(share.id)
+    created_file_storage_ids.append(file_storage.id)
 
     cephx_id = f"union-rw-{instance_name}"
-    rule = await asyncio.to_thread(manila.create_access_rule, conn, share.id, cephx_id, "rw")
-    created_access_ids.append((share.id, rule["access_id"]))
+    rule = await asyncio.to_thread(manila.create_access_rule, conn, file_storage.id, cephx_id, "rw")
+    created_access_ids.append((file_storage.id, rule["access_id"]))
 
-    export_paths = await asyncio.to_thread(manila.get_export_locations, conn, share.id)
+    export_paths = await asyncio.to_thread(manila.get_export_locations, conn, file_storage.id)
     return {
-        "share_id": share.id,
+        "file_storage_id": file_storage.id,
         "name": "dynamic",
         "export_path": export_paths[0] if export_paths else "",
         "cephx_id": cephx_id,
@@ -772,7 +772,7 @@ async def _rollback(
     server_id: str | None,
     boot_volume_id: str | None,
     upper_volume_id: str | None,
-    share_ids: list[str],
+    file_storage_ids: list[str],
     access_ids: list[tuple[str, str]],
     floating_ip_id: str | None = None,
 ):
@@ -795,14 +795,14 @@ async def _rollback(
             except Exception as e:
                 logger.error(f"Rollback - 볼륨 삭제 실패 {vol_id}: {e}")
 
-    for share_id, access_id in access_ids:
+    for file_storage_id, access_id in access_ids:
         try:
-            await asyncio.to_thread(manila.revoke_access_rule, conn, share_id, access_id)
+            await asyncio.to_thread(manila.revoke_access_rule, conn, file_storage_id, access_id)
         except Exception as e:
             logger.error(f"Rollback - access rule 삭제 실패: {e}")
 
-    for share_id in share_ids:
+    for file_storage_id in file_storage_ids:
         try:
-            await asyncio.to_thread(manila.delete_share, conn, share_id)
+            await asyncio.to_thread(manila.delete_file_storage, conn, file_storage_id)
         except Exception as e:
-            logger.error(f"Rollback - share 삭제 실패 {share_id}: {e}")
+            logger.error(f"Rollback - 파일 스토리지 삭제 실패 {file_storage_id}: {e}")
