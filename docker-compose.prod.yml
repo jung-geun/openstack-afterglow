@@ -19,6 +19,10 @@ services:
         max-file: "3"
 
   backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: backend
     image: ${REGISTRY}/union-backend:${IMAGE_TAG:-latest}
     pull_policy: always
     ports:
@@ -40,6 +44,10 @@ services:
         max-file: "5"
 
   frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: frontend
     image: ${REGISTRY}/union-frontend:${IMAGE_TAG:-latest}
     pull_policy: always
     ports:

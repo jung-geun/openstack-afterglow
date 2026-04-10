@@ -13,6 +13,10 @@ services:
         max-file: "3"
 
   backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: backend
     image: glcr.dmslab.re.kr/jung-geun/cephfs-mount/union-api:latest
     ports:
       - "8000:8000"
@@ -30,6 +34,10 @@ services:
         max-file: "5"
 
   frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: frontend
     image: glcr.dmslab.re.kr/jung-geun/cephfs-mount/union:latest
     ports:
       - "3000:3000"

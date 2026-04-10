@@ -1,0 +1,55 @@
+# ===========================================================================
+# Union - 통합 .dockerignore
+# ===========================================================================
+# backend/ 및 frontend/의 Docker 빌드 컨텍스트에서 제외할 파일
+# 루트 디렉토리에서 docker build 시 참조됩니다.
+# ===========================================================================
+
+# ── 공통 ──────────────────────────────────────────────────────────────────────
+.git/
+.gitlab-ci.yml
+.vscode/
+.env*
+.DS_Store
+*.md
+LICENSE
+PLAN.md
+config.toml
+
+# ── 문서 ──────────────────────────────────────────────────────────────────────
+docs/
+
+# ── 인프라/배포 ───────────────────────────────────────────────────────────────
+k8s/
+haproxy/
+monitoring/
+scripts/
+docker-compose*.yml
+Dockerfile
+.dockerignore
+
+# ── Backend 제외 ──────────────────────────────────────────────────────────────
+backend/.venv
+backend/__pycache__/
+backend/**/*.pyc
+backend/**/*.pyo
+backend/.pytest_cache/
+backend/tests/
+backend/.env
+backend/logs/
+backend/dist/
+backend/**/*egg-info*
+
+# ── Frontend 제외 ─────────────────────────────────────────────────────────────
+frontend/node_modules/
+frontend/.svelte-kit/
+frontend/build/
+frontend/tests/
+frontend/src/**/*.test.*
+frontend/src/**/*.spec.*
+frontend/.env*
+frontend/coverage/
+frontend/.dockerignore
+frontend/Dockerfile
+frontend/.npmrc
+
