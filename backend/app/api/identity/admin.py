@@ -1,6 +1,7 @@
 import asyncio
 import itertools
 import logging
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 import openstack
@@ -79,110 +80,155 @@ def _fetch_hypervisors_raw(conn: openstack.connection.Connection) -> list[dict]:
     return resp.json().get("hypervisors", [])
 
 
+def _fetch_overview_hypervisors(conn) -> dict:
+    """하이퍼바이저 집계 데이터 수집."""
+    try:
+        data = _fetch_hypervisors_raw(conn)
+        return {
+            "host_count": len(data) or 1,
+            "used_vcpus": sum(h.get("vcpus_used", 0) or 0 for h in data),
+            "total_ram_mb": sum(h.get("memory_mb", 0) or 0 for h in data),
+            "used_ram_mb": sum(h.get("memory_mb_used", 0) or 0 for h in data),
+            "running_vms": sum(h.get("running_vms", 0) or 0 for h in data),
+            "total_vcpus": sum(h.get("vcpus", 0) or 0 for h in data),
+        }
+    except Exception:
+        _logger.warning("하이퍼바이저 집계 실패", exc_info=True)
+        return {"host_count": 0, "used_vcpus": 0, "total_ram_mb": 0, "used_ram_mb": 0,
+                "running_vms": 0, "total_vcpus": 0}
+
+
+def _fetch_overview_disk(conn) -> dict:
+    """Cinder 디스크 사용량 + 용량 수집."""
+    used_disk = 0
+    total_disk = 0
+    try:
+        for v in conn.block_storage.volumes(all_projects=True):
+            used_disk += (v.size or 0)
+    except Exception:
+        pass
+    try:
+        bs_endpoint = conn.block_storage.get_endpoint()
+        limits_resp = conn.session.get(f"{bs_endpoint}/limits")
+        abs_limits = limits_resp.json().get("limits", {}).get("absolute", {})
+        total_disk = abs_limits.get("maxTotalVolumeGigabytes", 0)
+    except Exception:
+        pass
+    return {"used_disk": used_disk, "total_disk": total_disk}
+
+
+def _fetch_overview_placement(conn) -> dict:
+    """Placement API에서 물리 코어 수 및 allocation_ratio 수집."""
+    physical_vcpus = 0
+    allowed_vcpus_total = 0
+    try:
+        placement_ep = conn.placement.get_endpoint()
+        rps_resp = conn.session.get(f"{placement_ep}/resource_providers")
+        rps = rps_resp.json().get("resource_providers", [])
+        for rp in rps:
+            inv_resp = conn.session.get(
+                f"{placement_ep}/resource_providers/{rp['uuid']}/inventories"
+            )
+            vcpu_inv = inv_resp.json().get("inventories", {}).get("VCPU", {})
+            inv_total = vcpu_inv.get("total", 0)
+            inv_ratio = vcpu_inv.get("allocation_ratio", 1.0)
+            physical_vcpus += inv_total
+            allowed_vcpus_total += int(inv_total * inv_ratio)
+    except Exception:
+        _logger.warning("Placement API CPU 조회 실패", exc_info=True)
+    return {"physical_vcpus": physical_vcpus, "allowed_vcpus": allowed_vcpus_total}
+
+
+def _fetch_overview_servers(conn) -> dict:
+    """Nova 서버 목록에서 GPU 인스턴스 수 + 상태별 집계."""
+    gpu_instances = 0
+    instance_stats = {"total": 0, "active": 0, "shutoff": 0, "error": 0, "other": 0}
+    try:
+        _ep = conn.compute.get_endpoint()
+        _params = {"all_tenants": "1", "limit": "1000"}
+        _resp = conn.session.get(
+            f"{_ep}/servers/detail",
+            params=_params,
+            headers={"OpenStack-API-Version": "compute 2.53"},
+        )
+        for s in _resp.json().get("servers", []):
+            flavor = s.get("flavor") or {}
+            fname = (flavor.get("original_name") or flavor.get("id") or "").lower()
+            if "gpu" in fname:
+                gpu_instances += 1
+            instance_stats["total"] += 1
+            st = (s.get("status") or "").upper()
+            if st == "ACTIVE":
+                instance_stats["active"] += 1
+            elif st == "SHUTOFF":
+                instance_stats["shutoff"] += 1
+            elif st == "ERROR":
+                instance_stats["error"] += 1
+            else:
+                instance_stats["other"] += 1
+    except Exception:
+        _logger.warning("서버 집계 실패", exc_info=True)
+    return {"gpu_instances": gpu_instances, "instance_stats": instance_stats}
+
+
+def _fetch_overview_containers(conn) -> int:
+    """Zun 컨테이너 수 수집."""
+    if not get_settings().service_zun_enabled:
+        return 0
+    try:
+        from app.services.zun import list_containers_admin
+        return len(list_containers_admin(conn))
+    except Exception:
+        return 0
+
+
+def _fetch_overview_file_storage(conn) -> int:
+    """Manila 파일 스토리지 수 수집."""
+    if not get_settings().service_manila_enabled:
+        return 0
+    try:
+        return len(manila.list_file_storages(conn, all_tenants=True))
+    except Exception:
+        return 0
+
+
 @router.get("/overview", dependencies=[Depends(require_admin)])
 async def admin_overview(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
     """하이퍼바이저 및 전체 리소스 집계."""
     try:
         def _collect():
-            data = _fetch_hypervisors_raw(conn)
-            host_count = len(data) or 1
-            used_vcpus = sum(h.get("vcpus_used", 0) or 0 for h in data)
-            total_ram = sum(h.get("memory_mb", 0) or 0 for h in data)
-            used_ram = sum(h.get("memory_mb_used", 0) or 0 for h in data)
-            # Cinder 볼륨 기반 디스크 사용량 (Ceph 환경에서 local_gb는 항상 0)
-            used_disk = 0
-            total_disk = 0
-            try:
-                for v in conn.block_storage.volumes(all_projects=True):
-                    used_disk += (v.size or 0)
-            except Exception:
-                pass
-            try:
-                bs_endpoint = conn.block_storage.get_endpoint()
-                limits_resp = conn.session.get(f"{bs_endpoint}/limits")
-                abs_limits = limits_resp.json().get("limits", {}).get("absolute", {})
-                total_disk = abs_limits.get("maxTotalVolumeGigabytes", 0)
-            except Exception:
-                pass
-            running_vms = sum(h.get("running_vms", 0) or 0 for h in data)
+            with ThreadPoolExecutor(max_workers=6) as executor:
+                f_hyp = executor.submit(_fetch_overview_hypervisors, conn)
+                f_disk = executor.submit(_fetch_overview_disk, conn)
+                f_cpu = executor.submit(_fetch_overview_placement, conn)
+                f_srv = executor.submit(_fetch_overview_servers, conn)
+                f_ctr = executor.submit(_fetch_overview_containers, conn)
+                f_fs = executor.submit(_fetch_overview_file_storage, conn)
 
-            # CPU: Placement API에서 물리 코어 수 및 allocation_ratio 조회
-            physical_vcpus = 0
-            allowed_vcpus_total = 0
-            try:
-                placement_ep = conn.placement.get_endpoint()
-                rps_resp = conn.session.get(f"{placement_ep}/resource_providers")
-                rps = rps_resp.json().get("resource_providers", [])
-                for rp in rps:
-                    inv_resp = conn.session.get(
-                        f"{placement_ep}/resource_providers/{rp['uuid']}/inventories"
-                    )
-                    vcpu_inv = inv_resp.json().get("inventories", {}).get("VCPU", {})
-                    inv_total = vcpu_inv.get("total", 0)
-                    inv_ratio = vcpu_inv.get("allocation_ratio", 1.0)
-                    physical_vcpus += inv_total
-                    allowed_vcpus_total += int(inv_total * inv_ratio)
-            except Exception:
-                _logger.warning("Placement API CPU 조회 실패 — hypervisor vcpus로 대체", exc_info=True)
-                physical_vcpus = sum(h.get("vcpus", 0) or 0 for h in data)
-                allowed_vcpus_total = physical_vcpus
+            hyp = f_hyp.result(timeout=15)
+            disk = f_disk.result(timeout=15)
+            cpu = f_cpu.result(timeout=15)
+            srv = f_srv.result(timeout=15)
+            ctr = f_ctr.result(timeout=15)
+            fs = f_fs.result(timeout=15)
 
-            # GPU 인스턴스 + 상태별 집계 (microversion 2.53 raw API 재사용)
-            gpu_instances = 0
-            instance_stats = {"total": 0, "active": 0, "shutoff": 0, "error": 0, "other": 0}
-            try:
-                _ep = conn.compute.get_endpoint()
-                _params = {"all_tenants": "1", "limit": "1000"}
-                _resp = conn.session.get(
-                    f"{_ep}/servers/detail",
-                    params=_params,
-                    headers={"OpenStack-API-Version": "compute 2.53"},
-                )
-                for s in _resp.json().get("servers", []):
-                    flavor = s.get("flavor") or {}
-                    fname = (flavor.get("original_name") or flavor.get("id") or "").lower()
-                    if "gpu" in fname:
-                        gpu_instances += 1
-                    instance_stats["total"] += 1
-                    st = (s.get("status") or "").upper()
-                    if st == "ACTIVE":
-                        instance_stats["active"] += 1
-                    elif st == "SHUTOFF":
-                        instance_stats["shutoff"] += 1
-                    elif st == "ERROR":
-                        instance_stats["error"] += 1
-                    else:
-                        instance_stats["other"] += 1
-            except Exception:
-                pass
-
-            # 컨테이너 수 (Zun)
-            containers_count = 0
-            if get_settings().service_zun_enabled:
-                try:
-                    from app.services.zun import list_containers_admin, ZunServiceUnavailable
-                    containers_count = len(list_containers_admin(conn))
-                except Exception:
-                    pass
-
-            # 파일 스토리지 수 (Manila)
-            file_storage_count = 0
-            if get_settings().service_manila_enabled:
-                try:
-                    file_storage_count = len(manila.list_file_storages(conn, all_tenants=True))
-                except Exception:
-                    pass
+            # Placement 실패 시 hypervisor 데이터로 fallback
+            physical_vcpus = cpu["physical_vcpus"]
+            allowed_vcpus = cpu["allowed_vcpus"]
+            if physical_vcpus == 0 and hyp["total_vcpus"] > 0:
+                physical_vcpus = hyp["total_vcpus"]
+                allowed_vcpus = hyp["total_vcpus"]
 
             return {
-                "hypervisor_count": host_count,
-                "running_vms": running_vms,
-                "gpu_instances": gpu_instances,
-                "instance_stats": instance_stats,
-                "vcpus": {"total": physical_vcpus, "allowed": allowed_vcpus_total, "used": used_vcpus},
-                "ram_gb": {"total": round(total_ram / 1024, 1), "used": round(used_ram / 1024, 1)},
-                "disk_gb": {"total": total_disk, "used": used_disk},
-                "containers_count": containers_count,
-                "file_storage_count": file_storage_count,
+                "hypervisor_count": hyp["host_count"],
+                "running_vms": hyp["running_vms"],
+                "gpu_instances": srv["gpu_instances"],
+                "instance_stats": srv["instance_stats"],
+                "vcpus": {"total": physical_vcpus, "allowed": allowed_vcpus, "used": hyp["used_vcpus"]},
+                "ram_gb": {"total": round(hyp["total_ram_mb"] / 1024, 1), "used": round(hyp["used_ram_mb"] / 1024, 1)},
+                "disk_gb": {"total": disk["total_disk"], "used": disk["used_disk"]},
+                "containers_count": ctr,
+                "file_storage_count": fs,
             }
         return await cached_call("union:admin:overview", ttl_normal(), _collect, refresh=refresh)
     except Exception as e:
@@ -455,9 +501,9 @@ async def admin_overview_projects(conn: openstack.connection.Connection = Depend
 
             compute_endpoint = conn.compute.get_endpoint()
             bs_endpoint = conn.block_storage.get_endpoint()
+            projects = list(conn.identity.projects())
 
-            result = []
-            for p in conn.identity.projects():
+            def _fetch_project_quota(p) -> dict:
                 pid = p.id
                 row: dict = {
                     "project_id": pid,
@@ -488,7 +534,16 @@ async def admin_overview_projects(conn: openstack.connection.Connection = Depend
                     row["disk_gb"] = {"used": gb_used, "quota": gb_limit}
                 except Exception:
                     pass
-                result.append(row)
+                return row
+
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                futures = [executor.submit(_fetch_project_quota, p) for p in projects]
+            result = []
+            for f in futures:
+                try:
+                    result.append(f.result(timeout=15))
+                except Exception:
+                    pass
             return result
         return await cached_call("union:admin:overview_projects", ttl_slow(), _collect, refresh=refresh)
     except Exception:

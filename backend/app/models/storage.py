@@ -10,6 +10,9 @@ class FileStorageInfo(BaseModel):
     share_proto: str
     export_locations: list[str] = []
     metadata: dict = {}
+    project_id: Optional[str] = None
+    created_at: Optional[str] = None
+    nfs_export_location: Optional[str] = None
     # Union 전용 메타데이터
     library_name: Optional[str] = None
     library_version: Optional[str] = None

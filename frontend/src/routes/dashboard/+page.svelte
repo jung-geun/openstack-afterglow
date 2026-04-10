@@ -21,7 +21,9 @@
   }
 
   let summary = $state<DashboardSummary | null>(null);
+  let summaryLoading = $state(true);
   let quotas = $state<Quotas | null>(null);
+  let quotasLoading = $state(true);
   let usage = $state<Usage | null>(null);
   let usageLoading = $state(false);
   let refreshing = $state(false);
@@ -37,9 +39,10 @@
   const projectId = $derived($auth.projectId ?? undefined);
 
   async function fetchSummary(opts?: { refresh?: boolean }) {
+    summaryLoading = true;
     try {
       summary = await api.get<DashboardSummary>('/api/dashboard/summary', token, projectId, opts);
-    } catch { /* ignore */ }
+    } catch { /* ignore */ } finally { summaryLoading = false; }
   }
 
   async function forceRefresh() {
@@ -52,9 +55,10 @@
   }
 
   async function fetchQuotas() {
+    quotasLoading = true;
     try {
       quotas = await api.get<Quotas>('/api/dashboard/quotas', token, projectId);
-    } catch { /* ignore */ }
+    } catch { /* ignore */ } finally { quotasLoading = false; }
   }
 
   async function fetchUsage() {
@@ -74,8 +78,16 @@
   $effect(() => {
     const pid = $auth.projectId;
     if (!pid) return;
-    loadConfig().then(() => { fetchSummary(); fetchQuotas(); fetchUsage(); });
-    const interval = setInterval(fetchSummary, refreshIntervalMs);
+    fetchSummary();
+    fetchQuotas();
+    fetchUsage();
+    loadConfig();
+  });
+
+  $effect(() => {
+    if (!$auth.projectId) return;
+    const ms = refreshIntervalMs;
+    const interval = setInterval(fetchSummary, ms);
     return () => clearInterval(interval);
   });
 
@@ -102,7 +114,13 @@
   <!-- 상단: 리소스 요약 카드 + 사용자 정보 -->
   <div class="flex flex-col lg:flex-row gap-6 mb-8">
     <!-- 리소스 모니터링 카드 -->
-    {#if summary}
+    {#if summaryLoading}
+      <div class="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4 lg:grid-cols-3">
+        {#each Array(6) as _}
+          <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 animate-pulse h-[128px]"></div>
+        {/each}
+      </div>
+    {:else if summary}
       {@const c = summary.compute}
       {@const s = summary.storage}
       <div class="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4 lg:grid-cols-3">
@@ -252,7 +270,11 @@
         </div>
 
         <!-- 네트워크 / File Storage 카드 (quotas 로드 후 표시) -->
-        {#if quotas}
+        {#if quotasLoading}
+          {#each Array(4) as _}
+            <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 animate-pulse h-[128px]"></div>
+          {/each}
+        {:else if quotas}
           {@const nq = quotas.network}
           {@const sq = quotas.file_storage}
 
@@ -352,12 +374,6 @@
           </div>
         {/if}
 
-      </div>
-    {:else}
-      <div class="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4 lg:grid-cols-3">
-        {#each Array(9) as _}
-          <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 animate-pulse h-[128px]"></div>
-        {/each}
       </div>
     {/if}
 

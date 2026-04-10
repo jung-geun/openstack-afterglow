@@ -19,9 +19,9 @@ test-backend:
   stage: test
   before_script:
     - cd backend
-    - uv sync --frozen
+    - uv sync --frozen --extra dev
   script:
-    - uv run pytest tests
+    - UNION_ALLOW_INSECURE=1 uv run python -m pytest tests/ -v --ignore=tests/integration
   cache:
     key: backend-${CI_COMMIT_REF_SLUG}
     paths:

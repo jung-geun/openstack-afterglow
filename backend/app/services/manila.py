@@ -300,10 +300,12 @@ def _parse_file_storage(data: dict) -> FileStorageInfo:
         share_proto=share_proto,
         export_locations=locations,
         metadata=meta,
+        project_id=data.get("project_id"),
+        created_at=str(data["created_at"]) if data.get("created_at") else None,
+        nfs_export_location=nfs_export_location,
         library_name=meta.get("union_library"),
         library_version=meta.get("union_version"),
         built_at=meta.get("union_built_at"),
-        nfs_export_location=nfs_export_location,
     )
 
 

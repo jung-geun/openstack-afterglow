@@ -30,10 +30,10 @@
 	}
 
 	let overview = $state<Overview | null>(null);
-	let loading = $state(true);
+	let overviewLoading = $state(true);
 	let error = $state('');
 	let projectUsage = $state<ProjectUsage[]>([]);
-	let projectUsageLoading = $state(false);
+	let projectUsageLoading = $state(true);
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
@@ -58,24 +58,19 @@
 		return `${u}/${q}${unit ? ' ' + unit : ''}`;
 	}
 
-	onMount(async () => {
-		try {
-			overview = await api.get<Overview>('/api/admin/overview', token, projectId);
-		} catch (e) {
-			if (e instanceof ApiError && e.status === 403) { goto('/dashboard'); return; }
-			error = e instanceof ApiError ? `조회 실패: ${e.message}` : '서버 오류';
-		} finally {
-			loading = false;
-		}
+	onMount(() => {
+		api.get<Overview>('/api/admin/overview', token, projectId)
+			.then(r => { overview = r; })
+			.catch((e) => {
+				if (e instanceof ApiError && e.status === 403) { goto('/dashboard'); return; }
+				error = e instanceof ApiError ? `조회 실패: ${e.message}` : '서버 오류';
+			})
+			.finally(() => { overviewLoading = false; });
 
-		projectUsageLoading = true;
-		try {
-			projectUsage = await api.get<ProjectUsage[]>('/api/admin/overview/projects', token, projectId);
-		} catch {
-			// 실패 시 빈 목록 유지
-		} finally {
-			projectUsageLoading = false;
-		}
+		api.get<ProjectUsage[]>('/api/admin/overview/projects', token, projectId)
+			.then(r => { projectUsage = r; })
+			.catch(() => {})
+			.finally(() => { projectUsageLoading = false; });
 	});
 </script>
 
@@ -88,7 +83,7 @@
 		<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>
 	{/if}
 
-	{#if loading}
+	{#if overviewLoading}
 		<LoadingSkeleton variant="table" rows={5} />
 	{:else if overview}
 		<!-- 상단: 주요 지표 카드 -->
