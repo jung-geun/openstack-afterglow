@@ -1,5 +1,5 @@
 #!/bin/bash
-# union-overlay: CephFS 마운트 + OverlayFS 구성 스크립트
+# union-overlay: CephFS/NFS 마운트 + OverlayFS 구성 스크립트
 # cloud-init 이 생성하며, systemd 유닛이 매 부팅 시 실행한다.
 set -euo pipefail
 
@@ -8,78 +8,155 @@ exec >> "$LOG" 2>&1
 echo "[$(date)] union-overlay 시작"
 
 # ---------------------------------------------------------------------------
-# 1. CephFS 마운트 디렉토리 준비
+# 1. 디렉토리 구조 생성
 # ---------------------------------------------------------------------------
-mkdir -p /mnt/union/{upper,work}
+mkdir -p /opt/layers/{lower,upper,work,merged}
 {% for share in file_storages %}
-mkdir -p /mnt/union/lib_{{ share.name | shlex_quote }}
+mkdir -p /opt/layers/lower/{{ share.name | shlex_quote }}
 {% endfor %}
 
 # ---------------------------------------------------------------------------
-# 2. CephFS 마운트
-#    커널 드라이버 우선, 없으면 ceph-fuse 폴백
+# 2. 원격 파일시스템 마운트 (NFS / CephFS 자동 감지)
+#    각 레이어를 /opt/layers/lower/<lib_name> 에 마운트
 # ---------------------------------------------------------------------------
-mount_cephfs() {
+MAX_RETRIES=30
+RETRY_INTERVAL=5
+
+mount_nfs() {
     local name="$1"
-    local export_path="$2"
-    local cephx_id="$3"
-    local mountpoint="/mnt/union/lib_${name}"
+    local export_location="$2"
+    local mount_options="${3:-hard,intr,noatime,_netdev,timeo=10,retrans=3}"
+    local mountpoint="/opt/layers/lower_${name}"
 
     # 이미 마운트된 경우 스킵
     mountpoint -q "$mountpoint" && return 0
 
-    if modprobe ceph 2>/dev/null; then
-        mount -t ceph "$export_path" "$mountpoint" \
-            -o "name=${cephx_id},secretfile=/etc/ceph/ceph.client.${cephx_id}.keyring,_netdev"
-    else
-        # ceph-fuse 폴백
-        ceph-fuse "$mountpoint" \
-            --id="$cephx_id" \
-            --keyring="/etc/ceph/ceph.client.${cephx_id}.keyring"
+    echo "[$(date)] NFS 마운트 시도: ${name} -> ${export_location}"
+    for i in $(seq 1 $MAX_RETRIES); do
+        if mount -t nfs -o "$mount_options" "$export_location" "$mountpoint" 2>/dev/null; then
+            echo "[$(date)] NFS 마운트 완료: ${name} -> ${mountpoint}"
+            return 0
+        fi
+        echo "[$(date)] NFS 마운트 재시도 ${i}/${MAX_RETRIES}... (${RETRY_INTERVAL}초 후)"
+        sleep $RETRY_INTERVAL
+    done
+    echo "[$(date)] NFS 마운트 실패: ${name}" >&2
+    return 1
+}
+
+mount_cephfs() {
+    local name="$1"
+    local export_path="$2"
+    local cephx_id="$3"
+    local cephx_key="$4"
+    local mountpoint="/opt/layers/lower_${name}"
+
+    # 이미 마운트된 경우 스킵
+    mountpoint -q "$mountpoint" && return 0
+
+    echo "[$(date)] CephFS 마운트 시도: ${name} -> ${mountpoint}"
+    # 키링 파일 확인
+    local keyring_path="/etc/ceph/ceph.client.${cephx_id}.keyring"
+    if [ ! -f "$keyring_path" ]; then
+        echo "[$(date)] CephX 키링 파일 없음: ${keyring_path}" >&2
+        return 1
     fi
-    echo "[$(date)] CephFS 마운트 완료: ${name} -> ${mountpoint}"
+
+    for i in $(seq 1 $MAX_RETRIES); do
+        if modprobe ceph 2>/dev/null; then
+            if mount -t ceph "$export_path" "$mountpoint" \
+                -o "name=${cephx_id},secretfile=${keyring_path},_netdev" 2>/dev/null; then
+                echo "[$(date)] CephFS 마운트 완료: ${name} -> ${mountpoint}"
+                return 0
+            fi
+        fi
+        # ceph-fuse 폴백
+        if command -v ceph-fuse >/dev/null 2>&1; then
+            if ceph-fuse "$mountpoint" --id="$cephx_id" --keyring="$keyring_path" 2>/dev/null; then
+                echo "[$(date)] ceph-fuse 마운트 완료: ${name} -> ${mountpoint}"
+                return 0
+            fi
+        fi
+        echo "[$(date)] CephFS 마운트 재시도 ${i}/${MAX_RETRIES}... (${RETRY_INTERVAL}초 후)"
+        sleep $RETRY_INTERVAL
+    done
+    echo "[$(date)] CephFS 마운트 실패: ${name}" >&2
+    return 1
 }
 
 {% for share in file_storages %}
-mount_cephfs {{ share.name | shlex_quote }} {{ share.export_path | shlex_quote }} {{ share.cephx_id | shlex_quote }}
+{% if share.share_proto == "NFS" %}
+mount_nfs {{ share.name | shlex_quote }} {{ share.nfs_export_location | shlex_quote }} {{ share.mount_options | shlex_quote if share.mount_options else "hard,intr,noatime,_netdev,timeo=10,retrans=3" }}
+{% elif share.share_proto == "CEPHFS" %}
+mount_cephfs {{ share.name | shlex_quote }} {{ share.export_path | shlex_quote }} {{ share.cephx_id | shlex_quote }} {{ share.cephx_key | shlex_quote }}
+{% endif %}
 {% endfor %}
 
 # ---------------------------------------------------------------------------
-# 3. OverlayFS 구성
-#
-#    lowerdir 순서: 최상위 레이어(우선순위 높음):...:기본 OS 경로
-#    upperdir: Cinder 볼륨 (재부팅 후에도 유지)
-#
-#    /usr/local 과 /opt 에만 overlay 적용
-#    (전체 루트 오버레이는 init 시스템 손상 위험)
+# 3. Upper 볼륨 마운트 (Cinder 볼륨)
 # ---------------------------------------------------------------------------
-
-# upperdir 마운트 (Cinder 볼륨 장치 대기)
 UPPER_DEV={{ upper_device | shlex_quote }}
 if [ -n "$UPPER_DEV" ] && [ -b "$UPPER_DEV" ]; then
     if ! blkid "$UPPER_DEV" | grep -q ext4; then
+        echo "[$(date)] Upper 볼륨 포맷: ${UPPER_DEV}"
         mkfs.ext4 -F "$UPPER_DEV"
     fi
-    mount "$UPPER_DEV" /mnt/union/upper
-    mkdir -p /mnt/union/upper/{usr_local,opt,work_usr_local,work_opt}
+    if ! mountpoint -q /opt/layers/upper; then
+        mount "$UPPER_DEV" /opt/layers/upper
+    fi
+    mkdir -p /opt/layers/upper/{merged_work,lower_work}
+    echo "[$(date)] Upper 볼륨 마운트 완료: ${UPPER_DEV} -> /opt/layers/upper"
 fi
 
-# /usr/local OverlayFS
-LOWER_USR_LOCAL={{ lowerdir_usr_local | shlex_quote }}
-if ! mountpoint -q /usr/local; then
-    mount -t overlay overlay \
-        -o "lowerdir=${LOWER_USR_LOCAL},upperdir=/mnt/union/upper/usr_local,workdir=/mnt/union/upper/work_usr_local" \
-        /usr/local
-    echo "[$(date)] /usr/local OverlayFS 마운트 완료"
+# ---------------------------------------------------------------------------
+# 4. OverlayFS 마운트 — /opt/layers/merged/
+#
+#    lowerdir 순서: 의존성이 높은 레이어가 우선 (왼쪽)
+#    upperdir: Cinder 볼륨 (재부팅 후에도 유지)
+#    workdir: OverlayFS 작업 디렉토리
+#
+#    마운트 실패 시 재시도 (NFS 마운트가 완전히 준비되지 않았을 수 있음)
+# ---------------------------------------------------------------------------
+# lowerdir 체인: 의존성이 높은 라이브러리가 앞에 오도록 구성
+# file_storages는 이미 의존성 순서(역순)로 정렬되어 있음
+LOWER_DIRS="{{ lowerdirs }}"
+UPPER_DIR="/opt/layers/upper"
+WORK_DIR="/opt/layers/upper/merged_work"
+MERGED_DIR="/opt/layers/merged"
+
+mkdir -p "$MERGED_DIR" "$UPPER_DIR" "$WORK_DIR"
+
+if ! mountpoint -q "$MERGED_DIR"; then
+    echo "[$(date)] OverlayFS 마운트 시도: lowerdir=${LOWER_DIRS}"
+    for i in $(seq 1 $MAX_RETRIES); do
+        if mount -t overlay overlay \
+            -o "lowerdir=${LOWER_DIRS},upperdir=${UPPER_DIR},workdir=${WORK_DIR}" \
+            "$MERGED_DIR" 2>/dev/null; then
+            echo "[$(date)] OverlayFS 마운트 완료: ${MERGED_DIR}"
+            break
+        fi
+        echo "[$(date)] OverlayFS 마운트 재시도 ${i}/${MAX_RETRIES}... (${RETRY_INTERVAL}초 후)"
+        sleep $RETRY_INTERVAL
+    done
 fi
 
-# /opt OverlayFS
-LOWER_OPT={{ lowerdir_opt | shlex_quote }}
-if ! mountpoint -q /opt; then
-    mount -t overlay overlay \
-        -o "lowerdir=${LOWER_OPT},upperdir=/mnt/union/upper/opt,workdir=/mnt/union/upper/work_opt" \
-        /opt
-    echo "[$(date)] /opt OverlayFS 마운트 완료"
-fi
+# ---------------------------------------------------------------------------
+# 5. 환경변수 등록 — /etc/profile.d/union-env.sh
+# ---------------------------------------------------------------------------
+cat > /etc/profile.d/union-env.sh << 'ENVEOF'
+export PATH="/opt/layers/merged/usr/local/bin:/opt/layers/merged/bin:/opt/layers/merged/usr/bin:$PATH"
+export LD_LIBRARY_PATH="/opt/layers/merged/usr/local/lib:/opt/layers/merged/usr/local/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export PYTHONPATH="{{ pythonpath }}"
+export PKG_CONFIG_PATH="/opt/layers/merged/usr/local/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+{% if gpu_available %}
+export CUDA_HOME="/usr/local/cuda"
+export LD_LIBRARY_PATH="/opt/layers/merged/usr/local/cuda/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+{% endif %}
+ENVEOF
+chmod 644 /etc/profile.d/union-env.sh
+
+# /etc/environment 업데이트 (systemd 서비스용)
+grep -q 'PATH=.*:/opt/layers/merged' /etc/environment 2>/dev/null || \
+    sed -i '/^PATH=/ s|"$|:/opt/layers/merged/usr/local/bin:/opt/layers/merged/bin"|' /etc/environment 2>/dev/null || true
 
 echo "[$(date)] union-overlay 완료"

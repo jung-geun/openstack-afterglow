@@ -735,36 +735,77 @@ async def _prepare_prebuilt_file_storages(
 
 async def _prepare_dynamic_file_storage(
     conn, instance_name: str, resolved_libs: list[str],
-    settings, created_file_storage_ids: list, created_access_ids: list
+    settings, created_file_storage_ids: list, created_access_ids: list,
+    share_proto: str = "CEPHFS", vm_ip_address: str = "",
 ) -> dict:
-    """Strategy B: VM 전용 read-write 파일 스토리지 신규 생성."""
+    """Strategy B: VM 전용 read-write 파일 스토리지 신규 생성.
+    
+    share_proto에 따라 CephFS 또는 NFS share를 생성한다.
+    """
+    # 프로토콜에 따른 share type 선택
+    if share_proto.upper() == "NFS":
+        share_type = settings.os_manila_nfs_share_type
+    else:
+        share_type = settings.os_manila_share_type
+
     file_storage = await asyncio.to_thread(
         manila.create_file_storage,
         conn,
         f"union-dyn-{instance_name}",
         settings.upper_volume_size_gb,
         settings.os_manila_share_network_id,
-        settings.os_manila_share_type,
+        share_type,
+        share_proto,
         {
             "union_type": "dynamic",
             "union_instance": instance_name,
             "union_libraries": ",".join(resolved_libs),
+            "union_share_proto": share_proto.upper(),
         },
     )
     created_file_storage_ids.append(file_storage.id)
 
-    cephx_id = f"union-rw-{instance_name}"
-    rule = await asyncio.to_thread(manila.create_access_rule, conn, file_storage.id, cephx_id, "rw")
-    created_access_ids.append((file_storage.id, rule["access_id"]))
+    if share_proto.upper() == "NFS":
+        # NFS: IP 기반 access rule
+        access_to = vm_ip_address if vm_ip_address else "0.0.0.0/0"
+        rule = await asyncio.to_thread(
+            manila.ensure_nfs_access_rule,
+            conn, file_storage.id, access_to, "rw",
+        )
+        created_access_ids.append((file_storage.id, rule["access_id"]))
 
-    export_paths = await asyncio.to_thread(manila.get_export_locations, conn, file_storage.id)
-    return {
-        "file_storage_id": file_storage.id,
-        "name": "dynamic",
-        "export_path": export_paths[0] if export_paths else "",
-        "cephx_id": cephx_id,
-        "cephx_key": rule["access_key"],
-    }
+        nfs_export = file_storage.nfs_export_location
+        if not nfs_export:
+            export_paths = await asyncio.to_thread(manila.get_export_locations, conn, file_storage.id)
+            nfs_export = export_paths[0] if export_paths else ""
+
+        return {
+            "file_storage_id": file_storage.id,
+            "name": "dynamic",
+            "share_proto": "NFS",
+            "export_path": "",
+            "cephx_id": "",
+            "cephx_key": "",
+            "nfs_export_location": nfs_export,
+            "mount_options": "hard,intr,noatime,_netdev,timeo=10,retrans=3",
+        }
+    else:
+        # CephFS: CephX access rule (기존 로직)
+        cephx_id = f"union-rw-{instance_name}"
+        rule = await asyncio.to_thread(manila.create_access_rule, conn, file_storage.id, cephx_id, "rw")
+        created_access_ids.append((file_storage.id, rule["access_id"]))
+
+        export_paths = await asyncio.to_thread(manila.get_export_locations, conn, file_storage.id)
+        return {
+            "file_storage_id": file_storage.id,
+            "name": "dynamic",
+            "share_proto": "CEPHFS",
+            "export_path": export_paths[0] if export_paths else "",
+            "cephx_id": cephx_id,
+            "cephx_key": rule["access_key"],
+            "nfs_export_location": "",
+            "mount_options": "",
+        }
 
 
 async def _rollback(

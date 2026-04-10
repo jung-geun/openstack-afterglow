@@ -22,6 +22,7 @@ from app.api.identity.admin_services import router as admin_services_router
 from app.api.identity.admin_flavors import router as admin_flavors_router
 from app.api.identity.admin_identity import router as admin_identity_router
 from app.api.identity.admin_gpu import router as admin_gpu_router
+from app.api.identity.admin_notion import router as admin_notion_router
 from app.api.identity.profile import router as profile_router
 from app.api.container import clusters_router, containers_router
 from app.api.common import dashboard_router, metrics_router, libraries_router, site_router, user_dashboard_router
@@ -193,6 +194,7 @@ app.include_router(admin_services_router, prefix="/api/admin", tags=["admin-serv
 app.include_router(admin_flavors_router, prefix="/api/admin", tags=["admin-flavors"])
 app.include_router(admin_identity_router, prefix="/api/admin", tags=["admin-identity"])
 app.include_router(admin_gpu_router, prefix="/api/admin", tags=["admin-gpu"])
+app.include_router(admin_notion_router, prefix="/api/admin", tags=["admin-notion"])
 app.include_router(profile_router, prefix="/api/profile", tags=["profile"])
 # Compute
 app.include_router(images_router, prefix="/api/images", tags=["images"])
@@ -337,6 +339,56 @@ async def _snapshot_loop() -> None:
         await asyncio.sleep(3600)
 
 
+async def _notion_sync_loop() -> None:
+    """Notion 연동이 활성화되어 있으면 주기적으로 동기화."""
+    from app.services import notion_sync
+    from app.api.identity.admin_notion import collect_instance_data, collect_hypervisor_data
+    from datetime import datetime, timezone
+
+    await asyncio.sleep(60)  # 시작 후 1분 대기
+    while True:
+        try:
+            config = await notion_sync.get_notion_config()
+            if config and config.get("enabled"):
+                api_key = config["api_key"]
+                users_db_id = config.get("users_database_id", "")
+                hypervisors_db_id = config.get("hypervisors_database_id", "")
+
+                # 1. 하이퍼바이저 동기화 먼저 실행 → page_id 맵 구축
+                host_to_page_id: dict[str, str] = {}
+                if hypervisors_db_id:
+                    try:
+                        hypervisors = await collect_hypervisor_data()
+                        await notion_sync.sync_hypervisors_to_notion(api_key, hypervisors_db_id, hypervisors)
+                        config["hypervisors_last_sync"] = datetime.now(timezone.utc).isoformat()
+                        host_to_page_id = await notion_sync.fetch_hypervisor_page_ids_by_name(api_key, hypervisors_db_id)
+                    except Exception:
+                        _logger.warning("Notion 하이퍼바이저 동기화 오류", exc_info=True)
+
+                # 2. People DB에서 이메일 → page_id 맵 구축
+                email_to_page_id: dict[str, str] = {}
+                if users_db_id:
+                    email_to_page_id = await notion_sync.fetch_user_page_ids_by_email(api_key, users_db_id)
+
+                # 3. 인스턴스 수집 및 동기화
+                instances = await collect_instance_data(
+                    email_to_page_id=email_to_page_id,
+                    host_to_page_id=host_to_page_id,
+                )
+                await notion_sync.sync_to_notion(api_key, config["database_id"], instances)
+                config["last_sync"] = datetime.now(timezone.utc).isoformat()
+
+                await notion_sync.save_notion_config(config)
+                interval = config.get("interval_minutes", 5) * 60
+            else:
+                interval = 60  # 비활성 시 1분마다 설정 체크
+        except Exception:
+            _logger.warning("Notion 동기화 오류", exc_info=True)
+            interval = 300  # 오류 시 5분 후 재시도
+        await asyncio.sleep(interval)
+
+
 @app.on_event("startup")
-async def start_snapshot_worker():
+async def start_background_workers():
     asyncio.create_task(_snapshot_loop())
+    asyncio.create_task(_notion_sync_loop())

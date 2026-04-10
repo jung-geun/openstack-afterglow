@@ -6,19 +6,27 @@ package_update: false
 package_upgrade: false
 
 packages:
+{% if has_cephfs %}
   - ceph-common
+{% endif %}
+{% if has_nfs %}
+  - nfs-common
+{% endif %}
 {% if strategy == "dynamic" %}
   - python3-pip
 {% endif %}
 
 write_files:
-  # CephX 키링 파일 (공유별)
+{% if has_cephfs %}
+  # CephX 키링 파일 (CephFS 공유별)
 {% for share in file_storages %}
+{% if share.share_proto == "CEPHFS" %}
   - path: /etc/ceph/ceph.client.{{ share.cephx_id | shlex_quote }}.keyring
     permissions: "0600"
     content: |
       [client.{{ share.cephx_id | shlex_quote }}]
           key = {{ share.cephx_key }}
+{% endif %}
 {% endfor %}
 
   # /etc/ceph/ceph.conf (모니터 주소)
@@ -26,6 +34,7 @@ write_files:
     content: |
       [global]
       mon host = {{ ceph_monitors }}
+{% endif %}
 
   # OverlayFS 설정 스크립트
   - path: /opt/union/overlay_setup.sh
@@ -41,25 +50,39 @@ write_files:
 {{ dynamic_script | indent(6, first=True) }}
 {% endif %}
 
+  # 환경변수 스크립트 (profile.d)
+  - path: /etc/profile.d/union-env.sh
+    permissions: "0644"
+    content: |
+      export PATH="/opt/layers/merged/usr/local/bin:/opt/layers/merged/bin:$PATH"
+      export LD_LIBRARY_PATH="/opt/layers/merged/usr/local/lib:/opt/layers/merged/usr/local/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+      export PYTHONPATH="{{ pythonpath }}${PYTHONPATH:+:$PYTHONPATH}"
+      export PKG_CONFIG_PATH="/opt/layers/merged/usr/local/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+{% if gpu_available %}
+      export CUDA_HOME="/usr/local/cuda"
+      export LD_LIBRARY_PATH="/opt/layers/merged/usr/local/cuda/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+{% endif %}
+
   # systemd 유닛: 매 부팅 시 OverlayFS 재구성
   - path: /etc/systemd/system/union-overlay.service
     content: |
       [Unit]
       Description=Union OverlayFS Mount
-      After=network.target remote-fs.target
-      Before=docker.service kubelet.service
+      After=network-online.target remote-fs.target
+      Requires=network-online.target
 
       [Service]
       Type=oneshot
       RemainAfterExit=yes
       ExecStart=/opt/union/overlay_setup.sh
       TimeoutStartSec=300
+      OnFailure=emergency.target
 
       [Install]
       WantedBy=multi-user.target
 
 runcmd:
-  - mkdir -p /opt/union /var/lib/union
+  - mkdir -p /opt/layers/{lower,upper,work,merged} /opt/union /var/lib/union
   - systemctl daemon-reload
   - systemctl enable union-overlay
   - systemctl start union-overlay

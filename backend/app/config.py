@@ -37,6 +37,7 @@ def _load_toml() -> dict:
             flat["os_manila_endpoint"] = ost.get("manila_endpoint", "")
             flat["os_manila_share_network_id"] = ost.get("manila_share_network_id", "")
             flat["os_manila_share_type"] = ost.get("manila_share_type", "cephfstype")
+            flat["os_manila_nfs_share_type"] = ost.get("manila_nfs_share_type", "nfstype")
             flat["ceph_monitors"] = ost.get("ceph_monitors", "")
 
             app = data.get("app", {})

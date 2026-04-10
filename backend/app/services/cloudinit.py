@@ -3,6 +3,9 @@ cloud-init userdata 생성 엔진.
 
 Jinja2 템플릿을 이용해 CephX 크리덴셜과 OverlayFS 구성을 담은
 cloud-init YAML을 생성한다.
+
+지원 프로토콜: CephFS, NFS
+OverlayFS 구조: /opt/layers/{lower,upper,work,merged}
 """
 import base64
 import shlex
@@ -50,10 +53,13 @@ def generate_userdata(
         strategy: "prebuilt" | "dynamic"
         file_storages: [
             {
-              name: str,           # Manila 파일 스토리지 이름 (디렉토리명에 사용)
-              export_path: str,    # CephFS export location
-              cephx_id: str,       # CephX 사용자 ID
-              cephx_key: str,      # CephX secret key
+              name: str,                # 라이브러리 ID (디렉토리명에 사용)
+              share_proto: str,         # "CEPHFS" | "NFS"
+              export_path: str,         # CephFS export location (CEPHFS인 경우)
+              cephx_id: str,           # CephX 사용자 ID (CEPHFS인 경우)
+              cephx_key: str,           # CephX secret key (CEPHFS인 경우)
+              nfs_export_location: str, # NFS export 경로 (NFS인 경우)
+              mount_options: str,       # NFS 마운트 옵션 (선택)
             }
         ]
         upper_device: Cinder upper 볼륨 장치 경로 (예: /dev/vdb)
@@ -62,24 +68,25 @@ def generate_userdata(
     """
     resolved_libs = lib_svc.resolve_with_deps(libraries)
 
-    # lowerdir 체인 생성 (우선순위 높은 것이 앞)
-    # 순서: 최상위 라이브러리 → 하위 의존성 → 기본 OS 경로
-    reversed_libs = list(reversed(resolved_libs))
+    # lowerdir 체인 생성 (의존성이 높은 라이브러리가 앞에 오도록)
+    # 역순으로 정렬하여 가장 구체적인(의존성이 높은) 라이브러리가 맨 앞에 오도록 함
+    # 예: vllm:torch:python311 → lowerdir=vllm:torch:python311
+    lowerdir_paths = [f"/opt/layers/lower_{s['name']}" for s in file_storages]
 
-    lowerdir_usr_local = ":".join(
-        [f"/mnt/union/lib_{s['name']}/usr_local" for s in file_storages]
-        + ["/usr/local"]
-    )
-    lowerdir_opt = ":".join(
-        [f"/mnt/union/lib_{s['name']}/opt" for s in file_storages]
-        + ["/opt"]
-    )
+    # PYTHONPATH 동적 생성
+    python_version = "3.11"  # 기본 Python 버전
+    for lib in resolved_libs:
+        if lib.id == "python311":
+            python_version = "3.11"
+            break
+    pythonpath = f"/opt/layers/merged/usr/local/lib/python{python_version}/site-packages"
 
     overlay_script = _jinja.get_template("overlay_setup.sh.j2").render(
         file_storages=file_storages,
         upper_device=upper_device,
-        lowerdir_usr_local=lowerdir_usr_local,
-        lowerdir_opt=lowerdir_opt,
+        lowerdirs=":".join(lowerdir_paths),
+        pythonpath=pythonpath,
+        gpu_available=gpu_available,
     )
 
     dynamic_script = ""
@@ -90,6 +97,10 @@ def generate_userdata(
             gpu_available=gpu_available,
         )
 
+    # CephFS 관련 정보가 필요한지 확인
+    has_cephfs = any(fs.get("share_proto", "CEPHFS") == "CEPHFS" for fs in file_storages)
+    has_nfs = any(fs.get("share_proto", "CEPHFS") == "NFS" for fs in file_storages)
+
     yaml_str = _jinja.get_template("cloudinit_base.yaml.j2").render(
         strategy=strategy,
         libraries=resolved_libs,
@@ -98,6 +109,10 @@ def generate_userdata(
         overlay_script=overlay_script,
         dynamic_script=dynamic_script,
         upper_device=upper_device,
+        has_cephfs=has_cephfs,
+        has_nfs=has_nfs,
+        gpu_available=gpu_available,
+        pythonpath=pythonpath,
     )
 
     # Nova는 userdata를 base64로 인코딩해서 전달

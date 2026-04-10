@@ -21,6 +21,8 @@
 
 	let hypervisors = $state<Hypervisor[]>([]);
 	let loading = $state(true);
+	let sortColumn = $state('');
+	let sortAsc = $state(true);
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
@@ -35,6 +37,37 @@
 			loading = false;
 		}
 	}
+
+	function toggleSort(col: string) {
+		if (sortColumn === col) {
+			sortAsc = !sortAsc;
+		} else {
+			sortColumn = col;
+			sortAsc = true;
+		}
+	}
+
+	function sortIcon(col: string): string {
+		if (sortColumn !== col) return '↕';
+		return sortAsc ? '↑' : '↓';
+	}
+
+	let sortedHypervisors = $derived(
+		hypervisors.toSorted((a, b) => {
+			if (!sortColumn) return 0;
+			let va: string | number;
+			let vb: string | number;
+			if (sortColumn === 'name') {
+				va = a.name;
+				vb = b.name;
+			} else {
+				va = (a as Record<string, number>)[sortColumn] ?? 0;
+				vb = (b as Record<string, number>)[sortColumn] ?? 0;
+			}
+			const cmp = typeof va === 'string' ? va.localeCompare(vb as string) : (va as number) - (vb as number);
+			return sortAsc ? cmp : -cmp;
+		})
+	);
 
 	onMount(load);
 </script>
@@ -54,16 +87,32 @@
 			<table class="w-full text-sm">
 				<thead>
 					<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
-						<th class="text-left py-2 pr-4">호스트명</th>
+						<th class="text-left py-2 pr-4">
+							<button onclick={() => toggleSort('name')} class="hover:text-white transition-colors flex items-center gap-1">
+								호스트명 <span class="text-gray-600">{sortIcon('name')}</span>
+							</button>
+						</th>
 						<th class="text-left py-2 pr-4">상태</th>
-						<th class="text-left py-2 pr-4">VM</th>
-						<th class="text-left py-2 pr-4">vCPU</th>
-						<th class="text-left py-2 pr-4">RAM (GB)</th>
+						<th class="text-left py-2 pr-4">
+							<button onclick={() => toggleSort('running_vms')} class="hover:text-white transition-colors flex items-center gap-1">
+								VM <span class="text-gray-600">{sortIcon('running_vms')}</span>
+							</button>
+						</th>
+						<th class="text-left py-2 pr-4">
+							<button onclick={() => toggleSort('vcpus_used')} class="hover:text-white transition-colors flex items-center gap-1">
+								vCPU <span class="text-gray-600">{sortIcon('vcpus_used')}</span>
+							</button>
+						</th>
+						<th class="text-left py-2 pr-4">
+							<button onclick={() => toggleSort('memory_used_mb')} class="hover:text-white transition-colors flex items-center gap-1">
+								RAM (GB) <span class="text-gray-600">{sortIcon('memory_used_mb')}</span>
+							</button>
+						</th>
 						<th class="text-left py-2">로컬 디스크</th>
 					</tr>
 				</thead>
 				<tbody>
-					{#each hypervisors as h (h.id)}
+					{#each sortedHypervisors as h (h.id)}
 						<tr class="border-b border-gray-800/50 text-xs">
 							<td class="py-2 pr-4 text-white font-mono">{h.name}</td>
 							<td class="py-2 pr-4">

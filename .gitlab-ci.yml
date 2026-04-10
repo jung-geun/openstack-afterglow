@@ -15,7 +15,7 @@ variables:
 # ---------------------------------------------------------------------------
 
 test-backend:
-  image: ghcr.io/astral-sh/uv:python3.12
+  image: ghcr.io/astral-sh/uv:python3.12-trixie-slim
   stage: test
   before_script:
     - cd backend

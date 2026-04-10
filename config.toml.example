@@ -15,6 +15,7 @@ password = "change-me-in-production"
 manila_endpoint = ""              # 서비스 카탈로그 대신 직접 지정할 경우
 manila_share_network_id = ""
 manila_share_type = "cephfs"
+manila_nfs_share_type = "nfstype"  # NFS 프로토콜용 share type
 
 # Ceph 모니터 (cloud-init CephFS 마운트용, 콤마 구분)
 ceph_monitors = ""

@@ -67,6 +67,9 @@
 	let loading = $state(true);
 	let error = $state('');
 	let expandedHost = $state<string | null>(null);
+	let sortColumn = $state('');
+	let sortAsc = $state(true);
+	let availableFilter = $state<'all' | 'available' | 'full'>('all');
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
@@ -90,6 +93,49 @@
 	function toggleHost(name: string) {
 		expandedHost = expandedHost === name ? null : name;
 	}
+
+	function toggleSort(col: string) {
+		if (sortColumn === col) {
+			sortAsc = !sortAsc;
+		} else {
+			sortColumn = col;
+			sortAsc = true;
+		}
+	}
+
+	function sortIcon(col: string): string {
+		if (sortColumn !== col) return '↕';
+		return sortAsc ? '↑' : '↓';
+	}
+
+	let filteredHosts = $derived(
+		aggregatedHosts
+			.filter((h) => {
+				if (availableFilter === 'available') return h.gpu_total - h.gpu_used > 0;
+				if (availableFilter === 'full') return h.gpu_total - h.gpu_used === 0;
+				return true;
+			})
+			.toSorted((a, b) => {
+				if (!sortColumn) return 0;
+				if (sortColumn === 'name') {
+					const cmp = a.name.localeCompare(b.name);
+					return sortAsc ? cmp : -cmp;
+				}
+				let va: number;
+				let vb: number;
+				if (sortColumn === 'usage') {
+					va = a.gpu_total > 0 ? a.gpu_used / a.gpu_total : 0;
+					vb = b.gpu_total > 0 ? b.gpu_used / b.gpu_total : 0;
+				} else if (sortColumn === 'available') {
+					va = a.gpu_total - a.gpu_used;
+					vb = b.gpu_total - b.gpu_used;
+				} else {
+					va = (a as Record<string, number>)[sortColumn] ?? 0;
+					vb = (b as Record<string, number>)[sortColumn] ?? 0;
+				}
+				return sortAsc ? va - vb : vb - va;
+			})
+	);
 
 	onMount(load);
 </script>
@@ -155,20 +201,55 @@
 		{/if}
 
 		<!-- 호스트별 GPU 테이블 -->
+		<div class="flex items-center gap-2 mb-3">
+			<span class="text-xs text-gray-500">필터:</span>
+			<button
+				onclick={() => (availableFilter = 'all')}
+				class="text-xs px-2.5 py-1 rounded transition-colors {availableFilter === 'all' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}"
+			>전체</button>
+			<button
+				onclick={() => (availableFilter = 'available')}
+				class="text-xs px-2.5 py-1 rounded transition-colors {availableFilter === 'available' ? 'bg-green-900/50 text-green-400' : 'text-gray-400 hover:text-white'}"
+			>사용 가능</button>
+			<button
+				onclick={() => (availableFilter = 'full')}
+				class="text-xs px-2.5 py-1 rounded transition-colors {availableFilter === 'full' ? 'bg-red-900/50 text-red-400' : 'text-gray-400 hover:text-white'}"
+			>모두 사용 중</button>
+		</div>
 		<div class="overflow-x-auto">
 			<table class="w-full text-sm">
 				<thead>
 					<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
-						<th class="text-left py-2 pr-4">호스트</th>
+						<th class="text-left py-2 pr-4">
+							<button onclick={() => toggleSort('name')} class="hover:text-white transition-colors flex items-center gap-1">
+								호스트 <span class="text-gray-600">{sortIcon('name')}</span>
+							</button>
+						</th>
 						<th class="text-left py-2 pr-4">GPU 구성</th>
-						<th class="text-center py-2 pr-4">전체</th>
-						<th class="text-center py-2 pr-4">사용 중</th>
-						<th class="text-center py-2 pr-4">사용 가능</th>
-						<th class="text-center py-2">사용률</th>
+						<th class="text-center py-2 pr-4">
+							<button onclick={() => toggleSort('gpu_total')} class="hover:text-white transition-colors flex items-center gap-1 mx-auto">
+								전체 <span class="text-gray-600">{sortIcon('gpu_total')}</span>
+							</button>
+						</th>
+						<th class="text-center py-2 pr-4">
+							<button onclick={() => toggleSort('gpu_used')} class="hover:text-white transition-colors flex items-center gap-1 mx-auto">
+								사용 중 <span class="text-gray-600">{sortIcon('gpu_used')}</span>
+							</button>
+						</th>
+						<th class="text-center py-2 pr-4">
+							<button onclick={() => toggleSort('available')} class="hover:text-white transition-colors flex items-center gap-1 mx-auto">
+								사용 가능 <span class="text-gray-600">{sortIcon('available')}</span>
+							</button>
+						</th>
+						<th class="text-center py-2">
+							<button onclick={() => toggleSort('usage')} class="hover:text-white transition-colors flex items-center gap-1 mx-auto">
+								사용률 <span class="text-gray-600">{sortIcon('usage')}</span>
+							</button>
+						</th>
 					</tr>
 				</thead>
 				<tbody>
-					{#each aggregatedHosts as h (h.name)}
+					{#each filteredHosts as h (h.name)}
 						<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/50 transition-colors cursor-pointer" onclick={() => toggleHost(h.name)}>
 							<td class="py-2 pr-4 text-white font-medium">{h.name}</td>
 							<td class="py-2 pr-4 text-gray-400">
@@ -237,6 +318,8 @@
 
 		{#if aggregatedHosts.length === 0}
 			<div class="text-center text-gray-500 text-sm py-8">GPU가 있는 호스트가 없습니다</div>
+		{:else if filteredHosts.length === 0}
+			<div class="text-center text-gray-500 text-sm py-8">조건에 맞는 호스트가 없습니다</div>
 		{/if}
 	{/if}
 </div>

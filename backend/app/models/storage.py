@@ -24,6 +24,8 @@ class LibraryConfig(BaseModel):
     depends_on: list[str] = []   # library ids this depends on
     file_storage_id: Optional[str] = None   # prebuilt file storage id (Strategy A)
     available_prebuilt: bool = False
+    share_proto: str = "CEPHFS"  # CEPHFS | NFS
+    ubuntu_versions: list[str] = ["22.04", "24.04"]  # 지원 Ubuntu 버전
 
 
 class VolumeInfo(BaseModel):

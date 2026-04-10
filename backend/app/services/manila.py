@@ -285,18 +285,130 @@ def _parse_file_storage(data: dict) -> FileStorageInfo:
         elif isinstance(loc, str):
             locations.append(loc)
 
+    share_proto = data.get("share_proto", "CEPHFS")
+
+    # NFS export location: NFS 프로토콜인 경우 첫 번째 export 경로 사용
+    nfs_export_location = None
+    if share_proto == "NFS":
+        nfs_export_location = locations[0] if locations else None
+
     return FileStorageInfo(
         id=data["id"],
         name=data.get("name", ""),
         status=data["status"],
         size=data["size"],
-        share_proto=data.get("share_proto", "CEPHFS"),
+        share_proto=share_proto,
         export_locations=locations,
         metadata=meta,
         library_name=meta.get("union_library"),
         library_version=meta.get("union_version"),
         built_at=meta.get("union_built_at"),
+        nfs_export_location=nfs_export_location,
     )
+
+
+# ---------------------------------------------------------------------------
+# NFS access rule 관리
+# ---------------------------------------------------------------------------
+
+def ensure_nfs_access_rule(
+    conn,
+    file_storage_id: str,
+    access_to: str,
+    access_level: str = "rw",
+) -> dict:
+    """
+    NFS access rule이 없으면 생성하고, 이미 있으면 기존 rule을 반환.
+    access_to: IP 주소 또는 CIDR (예: "192.168.1.100" 또는 "10.0.0.0/24")
+    """
+    client = get_client(conn)
+
+    # 기존 access rule 조회
+    existing_rules = list_access_rules(conn, file_storage_id)
+    for rule in existing_rules:
+        if (rule.get("access_type") == "ip"
+                and rule.get("access_to") == access_to
+                and rule.get("access_level") == access_level
+                and rule.get("state") in ("active", "new")):
+            logger.info(f"NFS access rule 이미 존재: {access_to} ({rule.get('id')})")
+            return {
+                "access_id": rule["id"],
+                "access_key": "",
+                "access_to": access_to,
+                "access_level": access_level,
+            }
+
+    # 새로 생성
+    return create_access_rule(
+        conn,
+        file_storage_id=file_storage_id,
+        access_to=access_to,
+        access_level=access_level,
+        access_type="ip",
+    )
+
+
+def set_share_public(conn, file_storage_id: str, is_public: bool = True) -> dict:
+    """Manila share의 공개 범위 설정 (다른 프로젝트 접근 허용)."""
+    client = get_client(conn)
+    body = {"share": {"is_public": is_public}}
+    return client.put(f"shares/{file_storage_id}", body)
+
+
+def get_nfs_export_location(conn, file_storage_id: str) -> Optional[str]:
+    """NFS share의 export location을 반환. CephFS share이면 None."""
+    info = get_file_storage(conn, file_storage_id)
+    if info.share_proto != "NFS":
+        return None
+    locations = get_export_locations(conn, file_storage_id)
+    return locations[0] if locations else None
+
+
+# ---------------------------------------------------------------------------
+# Manila share 메타데이터 관리
+# ---------------------------------------------------------------------------
+
+def update_share_metadata(conn, file_storage_id: str, metadata: dict) -> dict:
+    """Manila share 메타데이터 업데이트."""
+    client = get_client(conn)
+    body = {"set_metadata": metadata}
+    return client.post(f"shares/{file_storage_id}/metadata", body)
+
+
+# ---------------------------------------------------------------------------
+# Manila share snapshot 관리
+# ---------------------------------------------------------------------------
+
+def create_share_snapshot(
+    conn,
+    file_storage_id: str,
+    name: Optional[str] = None,
+    description: Optional[str] = None,
+) -> dict:
+    """Manila share 스냅샷 생성."""
+    client = get_client(conn)
+    body: dict = {"snapshot": {"share_id": file_storage_id}}
+    if name:
+        body["snapshot"]["name"] = name
+    if description:
+        body["snapshot"]["description"] = description
+    return client.post("snapshots", body)["snapshot"]
+
+
+def list_share_snapshots(conn, file_storage_id: Optional[str] = None) -> list[dict]:
+    """Manila share 스냅샷 목록 조회."""
+    client = get_client(conn)
+    params: dict = {}
+    if file_storage_id:
+        params["share_id"] = file_storage_id
+    data = client.get("snapshots/detail", params=params or None)
+    return data.get("snapshots", [])
+
+
+def delete_share_snapshot(conn, snapshot_id: str) -> None:
+    """Manila share 스냅샷 삭제."""
+    client = get_client(conn)
+    client.delete(f"snapshots/{snapshot_id}")
 
 
 # ---------------------------------------------------------------------------
