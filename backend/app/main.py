@@ -353,6 +353,17 @@ async def _notion_sync_loop() -> None:
                 api_key = config["api_key"]
                 users_db_id = config.get("users_database_id", "")
                 hypervisors_db_id = config.get("hypervisors_database_id", "")
+                gpu_spec_db_id = config.get("gpu_spec_database_id", "")
+
+                # 0. GPU spec 동기화 (정적 데이터)
+                if gpu_spec_db_id:
+                    try:
+                        from app.api.identity.admin_gpu import get_gpu_spec_list
+                        gpu_specs = get_gpu_spec_list()
+                        await notion_sync.sync_gpu_specs_to_notion(api_key, gpu_spec_db_id, gpu_specs)
+                        config["gpu_spec_last_sync"] = datetime.now(timezone.utc).isoformat()
+                    except Exception:
+                        _logger.warning("Notion GPU spec 동기화 오류", exc_info=True)
 
                 # 1. 하이퍼바이저 동기화 먼저 실행 → page_id 맵 구축
                 host_to_page_id: dict[str, str] = {}

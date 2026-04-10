@@ -20,6 +20,7 @@ class NotionConfigRequest(BaseModel):
     interval_minutes: int = 5
     users_database_id: str = ""
     hypervisors_database_id: str = ""
+    gpu_spec_database_id: str = ""
 
 
 @router.get("/notion/config", dependencies=[Depends(require_admin)])
@@ -38,6 +39,8 @@ async def get_notion_config():
         "users_database_id": config.get("users_database_id", ""),
         "hypervisors_database_id": config.get("hypervisors_database_id", ""),
         "hypervisors_last_sync": config.get("hypervisors_last_sync"),
+        "gpu_spec_database_id": config.get("gpu_spec_database_id", ""),
+        "gpu_spec_last_sync": config.get("gpu_spec_last_sync"),
     }
 
 
@@ -73,9 +76,20 @@ async def save_notion_config(req: NotionConfigRequest):
             _logger.warning("Notion 하이퍼바이저 DB 속성 생성 실패: %s", e)
             raise HTTPException(status_code=400, detail=f"하이퍼바이저 DB 속성 생성 실패: {e}")
 
+    if req.gpu_spec_database_id:
+        ok_g, msg_g = await notion_sync.validate_notion_config(req.api_key, req.gpu_spec_database_id)
+        if not ok_g:
+            raise HTTPException(status_code=400, detail=f"GPU spec DB 오류: {msg_g}")
+        try:
+            await notion_sync.ensure_gpu_spec_db_properties(req.api_key, req.gpu_spec_database_id)
+        except Exception as e:
+            _logger.warning("Notion GPU spec DB 속성 생성 실패: %s", e)
+            raise HTTPException(status_code=400, detail=f"GPU spec DB 속성 생성 실패: {e}")
+
     existing = await notion_sync.get_notion_config()
     last_sync = existing.get("last_sync") if existing else None
     hypervisors_last_sync = existing.get("hypervisors_last_sync") if existing else None
+    gpu_spec_last_sync = existing.get("gpu_spec_last_sync") if existing else None
 
     await notion_sync.save_notion_config({
         "api_key": req.api_key,
@@ -86,6 +100,8 @@ async def save_notion_config(req: NotionConfigRequest):
         "users_database_id": req.users_database_id,
         "hypervisors_database_id": req.hypervisors_database_id,
         "hypervisors_last_sync": hypervisors_last_sync,
+        "gpu_spec_database_id": req.gpu_spec_database_id,
+        "gpu_spec_last_sync": gpu_spec_last_sync,
     })
 
     return {
@@ -115,6 +131,18 @@ async def test_notion_sync(conn=Depends(get_os_conn)):
     database_id = config["database_id"]
     users_db_id = config.get("users_database_id", "")
     hypervisors_db_id = config.get("hypervisors_database_id", "")
+    gpu_spec_db_id = config.get("gpu_spec_database_id", "")
+
+    # 0. GPU spec 동기화 (정적 데이터)
+    gpu_spec_stats = None
+    if gpu_spec_db_id:
+        try:
+            from app.api.identity.admin_gpu import get_gpu_spec_list
+            gpu_specs = get_gpu_spec_list()
+            gpu_spec_stats = await notion_sync.sync_gpu_specs_to_notion(api_key, gpu_spec_db_id, gpu_specs)
+            config["gpu_spec_last_sync"] = datetime.now(timezone.utc).isoformat()
+        except Exception:
+            _logger.warning("Notion 테스트: GPU spec 동기화 실패", exc_info=True)
 
     # 1. 하이퍼바이저 동기화 먼저 실행 → page_id 맵 구축
     host_to_page_id: dict[str, str] = {}
@@ -157,12 +185,15 @@ async def test_notion_sync(conn=Depends(get_os_conn)):
     messages = [f"인스턴스: {stats['created']}개 생성, {stats['updated']}개 갱신, {stats['archived']}개 아카이브"]
     if hypervisor_stats:
         messages.append(f"하이퍼바이저: {hypervisor_stats['created']}개 생성, {hypervisor_stats['updated']}개 갱신")
+    if gpu_spec_stats:
+        messages.append(f"GPU spec: {gpu_spec_stats['created']}개 생성, {gpu_spec_stats['updated']}개 갱신")
 
     return {
         "status": "ok",
         "message": " / ".join(messages),
         "stats": stats,
         "hypervisor_stats": hypervisor_stats,
+        "gpu_spec_stats": gpu_spec_stats,
         "instance_count": len(instances),
     }
 

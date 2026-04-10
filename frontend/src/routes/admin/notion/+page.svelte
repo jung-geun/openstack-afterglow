@@ -20,6 +20,8 @@
     users_database_id?: string;
     hypervisors_database_id?: string;
     hypervisors_last_sync?: string | null;
+    gpu_spec_database_id?: string;
+    gpu_spec_last_sync?: string | null;
   }
 
   let config = $state<NotionConfig | null>(null);
@@ -33,6 +35,7 @@
   let intervalMinutes = $state(5);
   let usersDatabaseId = $state('');
   let hypervisorsDatabaseId = $state('');
+  let gpuSpecDatabaseId = $state('');
 
   let saving = $state(false);
   let saveMessage = $state('');
@@ -58,6 +61,7 @@
         intervalMinutes = config.interval_minutes ?? 5;
         usersDatabaseId = config.users_database_id ?? '';
         hypervisorsDatabaseId = config.hypervisors_database_id ?? '';
+        gpuSpecDatabaseId = config.gpu_spec_database_id ?? '';
         apiKey = '';
       }
       error = '';
@@ -97,6 +101,7 @@
           interval_minutes: intervalMinutes,
           users_database_id: usersDatabaseId,
           hypervisors_database_id: hypervisorsDatabaseId,
+          gpu_spec_database_id: gpuSpecDatabaseId,
         },
         $auth.token ?? undefined,
         $auth.projectId ?? undefined
@@ -152,6 +157,7 @@
       intervalMinutes = 5;
       usersDatabaseId = '';
       hypervisorsDatabaseId = '';
+      gpuSpecDatabaseId = '';
     } catch (e) {
       alert('삭제 실패');
     } finally {
@@ -232,6 +238,16 @@
             <div>
               <dt class="text-xs text-gray-500">마지막 동기화 (하이퍼바이저)</dt>
               <dd class="text-gray-300">{formatDate(config.hypervisors_last_sync)}</dd>
+            </div>
+          {/if}
+          {#if config.gpu_spec_database_id}
+            <div>
+              <dt class="text-xs text-gray-500">GPU Spec DB</dt>
+              <dd class="text-gray-300 font-mono text-xs">{config.gpu_spec_database_id}</dd>
+            </div>
+            <div>
+              <dt class="text-xs text-gray-500">마지막 동기화 (GPU spec)</dt>
+              <dd class="text-gray-300">{formatDate(config.gpu_spec_last_sync)}</dd>
             </div>
           {/if}
         </dl>
@@ -322,6 +338,19 @@
             />
           </label>
           <p class="text-xs text-gray-600 mt-1">호스트명, 상태, VM 수, vCPU, RAM 사용량을 주기적으로 동기화</p>
+        </div>
+
+        <div>
+          <label class="block text-xs text-gray-400 mb-1.5">
+            GPU Spec Database ID <span class="text-gray-600">(선택)</span>
+            <input
+              bind:value={gpuSpecDatabaseId}
+              type="text"
+              placeholder="GPU 디바이스 사양 동기화 (config.toml 기본값 포함)"
+              class="w-full mt-1.5 bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 font-mono"
+            />
+          </label>
+          <p class="text-xs text-gray-600 mt-1">GPU 디바이스 이름, 벤더, PCI ID, 오디오 여부를 동기화 — config.toml 미설정 시 기본 내장 목록 사용</p>
         </div>
 
         <div class="grid grid-cols-2 gap-4">

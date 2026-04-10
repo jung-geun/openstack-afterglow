@@ -354,3 +354,18 @@ async def list_gpu_hosts(conn: openstack.connection.Connection = Depends(get_os_
         return await cached_call("union:admin:gpu_hosts", ttl_normal(), _collect, refresh=refresh)
     except Exception:
         raise HTTPException(status_code=500, detail="GPU 호스트 조회 실패")
+
+
+def get_gpu_spec_list() -> list[dict]:
+    """PCI_DEVICE_MAP을 flat list로 변환하여 반환 (Notion GPU spec 동기화용)."""
+    result = []
+    for vendor_id, devices in PCI_DEVICE_MAP.items():
+        for device_id, info in devices.items():
+            result.append({
+                "vendor_id": vendor_id,
+                "device_id": device_id,
+                "name": info["name"],
+                "is_audio": info["is_audio"],
+                "vendor_name": VENDOR_MAP.get(vendor_id, vendor_id),
+            })
+    return result

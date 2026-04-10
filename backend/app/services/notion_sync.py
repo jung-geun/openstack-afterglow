@@ -548,6 +548,138 @@ async def sync_hypervisors_to_notion(api_key: str, database_id: str, hypervisors
 
 
 # ---------------------------------------------------------------------------
+# GPU Spec 동기화
+# ---------------------------------------------------------------------------
+
+GPU_SPEC_FIELD_MAP: dict[str, str] = {
+    "vendor_id": "vendor_id",
+    "device_id": "device_id",
+    "is_audio": "is_audio",
+    "vendor_name": "vendor_name",
+}
+
+GPU_SPEC_DEFAULT_PROPERTY_TYPES: dict[str, str] = {
+    "vendor_id": "rich_text",
+    "device_id": "rich_text",
+    "is_audio": "checkbox",
+    "vendor_name": "rich_text",
+}
+
+
+async def ensure_gpu_spec_db_properties(api_key: str, database_id: str) -> None:
+    """GPU spec DB에 필요한 속성이 없으면 자동 생성한다."""
+    async with httpx.AsyncClient(timeout=15) as client:
+        schema = await _get_db_schema(client, api_key, database_id)
+        existing = set(schema.keys())
+
+        missing: dict = {}
+        for prop_name, prop_type in GPU_SPEC_DEFAULT_PROPERTY_TYPES.items():
+            if prop_name not in existing:
+                if prop_type == "rich_text":
+                    missing[prop_name] = {"rich_text": {}}
+                elif prop_type == "checkbox":
+                    missing[prop_name] = {"checkbox": {}}
+                elif prop_type == "number":
+                    missing[prop_name] = {"number": {}}
+
+        if not missing:
+            return
+
+        patch_resp = await client.patch(
+            f"{NOTION_API_BASE}/databases/{database_id}",
+            headers=_headers(api_key),
+            json={"properties": missing},
+        )
+        patch_resp.raise_for_status()
+        _logger.info("Notion GPU spec DB 속성 %d개 자동 생성: %s", len(missing), list(missing.keys()))
+
+
+async def sync_gpu_specs_to_notion(api_key: str, database_id: str, gpu_specs: list[dict]) -> dict:
+    """GPU spec 목록을 Notion DB에 동기화한다. 결과 통계 반환."""
+    stats = {"created": 0, "updated": 0, "archived": 0, "errors": 0}
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        schema = await _get_db_schema(client, api_key, database_id)
+        title_prop = _find_title_prop(schema)
+
+        existing_pages = await _fetch_all_pages(client, api_key, database_id)
+        page_map: dict[str, str] = {}
+        for page in existing_pages:
+            key = _extract_rich_text(page, title_prop)
+            if key:
+                page_map[key] = page["id"]
+
+        seen_keys: set[str] = set()
+        sem = asyncio.Semaphore(3)
+
+        async def _upsert(spec: dict) -> None:
+            name = spec.get("name", "")
+            if not name:
+                return
+            seen_keys.add(name)
+
+            props: dict = {title_prop: _format_value("title", name)}
+            for prop_name, prop_def in schema.items():
+                if prop_name == title_prop:
+                    continue
+                data_key = GPU_SPEC_FIELD_MAP.get(prop_name)
+                if data_key is None:
+                    continue
+                prop_type = prop_def.get("type", "")
+                formatted = _format_value(prop_type, spec.get(data_key, ""))
+                if formatted is not None:
+                    props[prop_name] = formatted
+
+            async with sem:
+                try:
+                    if name in page_map:
+                        resp = await client.patch(
+                            f"{NOTION_API_BASE}/pages/{page_map[name]}",
+                            headers=_headers(api_key),
+                            json={"properties": props},
+                        )
+                    else:
+                        resp = await client.post(
+                            f"{NOTION_API_BASE}/pages",
+                            headers=_headers(api_key),
+                            json={"parent": {"database_id": database_id}, "properties": props},
+                        )
+                    if resp.status_code >= 400:
+                        _logger.warning("Notion GPU spec 동기화 실패 (%s, %d): %s", name, resp.status_code, resp.text)
+                        stats["errors"] += 1
+                    else:
+                        stats["updated" if name in page_map else "created"] += 1
+                except Exception as e:
+                    _logger.warning("Notion GPU spec 동기화 실패 (%s): %s", name, e)
+                    stats["errors"] += 1
+
+        await asyncio.gather(*[_upsert(spec) for spec in gpu_specs])
+
+        async def _archive(key: str, page_id: str) -> None:
+            async with sem:
+                try:
+                    resp = await client.patch(
+                        f"{NOTION_API_BASE}/pages/{page_id}",
+                        headers=_headers(api_key),
+                        json={"archived": True},
+                    )
+                    stats["archived" if resp.status_code < 400 else "errors"] += 1
+                except Exception as e:
+                    _logger.warning("Notion GPU spec 아카이브 실패 (%s): %s", key, e)
+                    stats["errors"] += 1
+
+        to_archive = [(k, pid) for k, pid in page_map.items() if k not in seen_keys]
+        if to_archive:
+            await asyncio.gather(*[_archive(k, pid) for k, pid in to_archive])
+
+    _logger.info(
+        "Notion GPU spec 동기화 완료: created=%d updated=%d archived=%d errors=%d",
+        stats["created"], stats["updated"], stats["archived"], stats["errors"],
+    )
+    return stats
+
+
+# ---------------------------------------------------------------------------
 # 사용자 DB 조회 (이메일 → page_id 매핑)
 # ---------------------------------------------------------------------------
 
