@@ -15,8 +15,11 @@ def make_image(owner: str = "test-project-123") -> ImageInfo:
 
 @pytest.mark.asyncio
 async def test_list_images(client, mock_conn):
-    with patch("app.api.images.glance.list_images", return_value=[make_image()]):
-        with patch("app.api.images.cached_call", new=lambda key, ttl, fn: fn()):
+    with patch("app.api.compute.images.glance.list_images", return_value=[make_image()]):
+        async def mock_cached_call(key, ttl, fn, **kw):
+            return fn()
+
+        with patch("app.api.compute.images.cached_call", new=mock_cached_call):
             resp = await client.get("/api/images")
     assert resp.status_code == 200
     data = resp.json()
@@ -28,7 +31,7 @@ async def test_list_images(client, mock_conn):
 async def test_update_image_metadata(client, mock_conn):
     updated = make_image()
     updated.name = "ubuntu-22.04-updated"
-    with patch("app.api.images.glance.update_image_metadata", return_value=updated):
+    with patch("app.api.compute.images.glance.update_image_metadata", return_value=updated):
         resp = await client.patch("/api/images/img-1", json={"name": "ubuntu-22.04-updated"})
     assert resp.status_code == 200
     assert resp.json()["name"] == "ubuntu-22.04-updated"

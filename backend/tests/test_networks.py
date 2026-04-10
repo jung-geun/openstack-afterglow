@@ -23,7 +23,7 @@ async def test_list_floating_ips_filters_by_project(client, mock_conn):
         captured_project_id = project_id
         return [make_fip(project_id or "")]
 
-    with patch("app.api.networks.neutron.list_floating_ips", side_effect=mock_list_fips):
+    with patch("app.api.network.networks.neutron.list_floating_ips", side_effect=mock_list_fips):
         resp = await client.get("/api/networks/floating-ips")
 
     assert resp.status_code == 200
