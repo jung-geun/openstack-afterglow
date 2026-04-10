@@ -15,7 +15,7 @@ variables:
 # ---------------------------------------------------------------------------
 
 test-backend:
-  image: ghcr.io/astral-sh/uv:python3.12-alpine
+  image: ghcr.io/astral-sh/uv:python3.12
   stage: test
   before_script:
     - cd backend
