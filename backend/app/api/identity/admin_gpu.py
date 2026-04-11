@@ -20,54 +20,55 @@ VENDOR_MAP = {
     "1002": "AMD",
 }
 
-# PCI vendor:product → {name, is_audio} 기본 매핑
+# PCI vendor:product → {name, is_audio, aliases} 기본 매핑
+# aliases: OpenStack nova.conf의 pci_passthrough:alias 이름 목록 (소문자 포함)
 _DEFAULT_PCI_DEVICE_MAP: dict[str, dict[str, dict]] = {
     "10DE": {
         # === Maxwell ===
-        "17C2": {"name": "GTX TITAN X", "is_audio": False},
-        "0FB0": {"name": "GM200 Audio", "is_audio": True},
+        "17C2": {"name": "GTX TITAN X", "is_audio": False, "aliases": ["GTX_TITAN_X", "GTX TITAN X", "titan"]},
+        "0FB0": {"name": "GM200 Audio", "is_audio": True, "aliases": []},
         # === Pascal ===
-        "1B06": {"name": "GTX 1080 Ti", "is_audio": False},
-        "1B80": {"name": "GTX 1080", "is_audio": False},
-        "1B81": {"name": "GTX 1070", "is_audio": False},
-        "1B00": {"name": "TITAN X", "is_audio": False},
-        "1B02": {"name": "TITAN Xp", "is_audio": False},
-        "10EF": {"name": "GP102 Audio", "is_audio": True},
+        "1B06": {"name": "GTX 1080 Ti", "is_audio": False, "aliases": ["GTX1080Ti", "GTX_1080_Ti", "1080ti"]},
+        "1B80": {"name": "GTX 1080", "is_audio": False, "aliases": ["GTX1080", "GTX_1080", "1080"]},
+        "1B81": {"name": "GTX 1070", "is_audio": False, "aliases": ["GTX1070", "GTX_1070", "1070"]},
+        "1B00": {"name": "TITAN X", "is_audio": False, "aliases": ["TITAN_X"]},
+        "1B02": {"name": "TITAN Xp", "is_audio": False, "aliases": ["TITAN_Xp", "titanxp"]},
+        "10EF": {"name": "GP102 Audio", "is_audio": True, "aliases": []},
         # === Ampere Consumer ===
-        "2204": {"name": "RTX 3090", "is_audio": False},
-        "2203": {"name": "RTX 3090 Ti", "is_audio": False},
-        "2206": {"name": "RTX 3080 Ti", "is_audio": False},
-        "220A": {"name": "RTX 3080", "is_audio": False},
-        "2484": {"name": "RTX 3070 Ti", "is_audio": False},
-        "2482": {"name": "RTX 3070", "is_audio": False},
-        "2504": {"name": "RTX 3060", "is_audio": False},
-        "1AEF": {"name": "GA102 Audio", "is_audio": True},
+        "2204": {"name": "RTX 3090", "is_audio": False, "aliases": ["RTX3090", "rtx3090", "RTX_3090", "3090"]},
+        "2203": {"name": "RTX 3090 Ti", "is_audio": False, "aliases": ["RTX3090Ti", "RTX_3090_Ti", "3090ti", "3090Ti"]},
+        "2206": {"name": "RTX 3080 Ti", "is_audio": False, "aliases": ["RTX3080Ti", "RTX_3080_Ti", "3080ti", "3080Ti"]},
+        "220A": {"name": "RTX 3080", "is_audio": False, "aliases": ["RTX3080", "RTX_3080", "3080"]},
+        "2484": {"name": "RTX 3070 Ti", "is_audio": False, "aliases": ["RTX3070Ti", "RTX_3070_Ti", "3070ti", "3070Ti"]},
+        "2482": {"name": "RTX 3070", "is_audio": False, "aliases": ["RTX3070", "RTX_3070", "3070"]},
+        "2504": {"name": "RTX 3060", "is_audio": False, "aliases": ["RTX3060", "RTX_3060", "3060"]},
+        "1AEF": {"name": "GA102 Audio", "is_audio": True, "aliases": []},
         # === Ada Lovelace Consumer ===
-        "2684": {"name": "RTX 4090", "is_audio": False},
-        "2704": {"name": "RTX 4080", "is_audio": False},
-        "2782": {"name": "RTX 4070 Ti SUPER", "is_audio": False},
-        "2783": {"name": "RTX 4070 Ti", "is_audio": False},
-        "2786": {"name": "RTX 4070 SUPER", "is_audio": False},
-        "2882": {"name": "RTX 4060 Ti", "is_audio": False},
-        "22BA": {"name": "AD102 Audio", "is_audio": True},
-        "22BE": {"name": "AD107 Audio", "is_audio": True},
+        "2684": {"name": "RTX 4090", "is_audio": False, "aliases": ["RTX4090", "rtx4090", "RTX_4090", "4090"]},
+        "2704": {"name": "RTX 4080", "is_audio": False, "aliases": ["RTX4080", "RTX_4080", "4080"]},
+        "2782": {"name": "RTX 4070 Ti SUPER", "is_audio": False, "aliases": ["RTX4070TiSuper", "RTX_4070_Ti_SUPER", "4070tisuper"]},
+        "2783": {"name": "RTX 4070 Ti", "is_audio": False, "aliases": ["RTX4070Ti", "RTX_4070_Ti", "4070ti", "4070Ti"]},
+        "2786": {"name": "RTX 4070 SUPER", "is_audio": False, "aliases": ["RTX4070Super", "RTX_4070_SUPER", "4070super"]},
+        "2882": {"name": "RTX 4060 Ti", "is_audio": False, "aliases": ["RTX4060Ti", "RTX_4060_Ti", "4060ti", "4060Ti"]},
+        "22BA": {"name": "AD102 Audio", "is_audio": True, "aliases": []},
+        "22BE": {"name": "AD107 Audio", "is_audio": True, "aliases": []},
         # === Blackwell Consumer ===
-        "2B85": {"name": "RTX 5090", "is_audio": False},
-        "2B80": {"name": "RTX 5080", "is_audio": False},
+        "2B85": {"name": "RTX 5090", "is_audio": False, "aliases": ["RTX5090", "RTX_5090", "5090"]},
+        "2B80": {"name": "RTX 5080", "is_audio": False, "aliases": ["RTX5080", "RTX_5080", "5080"]},
         # === Professional / Workstation ===
-        "28B0": {"name": "RTX 2000 Ada", "is_audio": False},
-        "2230": {"name": "RTX A6000", "is_audio": False},
-        "2231": {"name": "RTX A5000", "is_audio": False},
-        "26B1": {"name": "L40", "is_audio": False},
-        "26B9": {"name": "L40S", "is_audio": False},
+        "28B0": {"name": "RTX 2000 Ada", "is_audio": False, "aliases": ["RTX2000Ada", "RTX_2000_Ada", "2000Ada", "2000ada"]},
+        "2230": {"name": "RTX A6000", "is_audio": False, "aliases": ["RTXA6000", "RTX_A6000"]},
+        "2231": {"name": "RTX A5000", "is_audio": False, "aliases": ["RTXA5000", "RTX_A5000"]},
+        "26B1": {"name": "L40", "is_audio": False, "aliases": ["L40", "l40"]},
+        "26B9": {"name": "L40S", "is_audio": False, "aliases": ["L40S", "l40s"]},
         # === Datacenter ===
-        "20B0": {"name": "A100 SXM4 40GB", "is_audio": False},
-        "20B2": {"name": "A100 SXM4 80GB", "is_audio": False},
-        "20B5": {"name": "A100 PCIe", "is_audio": False},
-        "20F1": {"name": "A100 PCIe 40GB", "is_audio": False},
-        "20B8": {"name": "A10", "is_audio": False},
-        "2330": {"name": "H100 SXM5", "is_audio": False},
-        "2331": {"name": "H100 PCIe", "is_audio": False},
+        "20B0": {"name": "A100 SXM4 40GB", "is_audio": False, "aliases": ["A100_SXM4_40GB", "A100SXM440GB"]},
+        "20B2": {"name": "A100 SXM4 80GB", "is_audio": False, "aliases": ["A100_SXM4_80GB", "A100SXM480GB", "A100_80GB"]},
+        "20B5": {"name": "A100 PCIe", "is_audio": False, "aliases": ["A100_PCIe", "A100PCIe"]},
+        "20F1": {"name": "A100 PCIe 40GB", "is_audio": False, "aliases": ["A100_PCIe_40GB", "A100PCIe40GB"]},
+        "20B8": {"name": "A10", "is_audio": False, "aliases": ["A10", "a10"]},
+        "2330": {"name": "H100 SXM5", "is_audio": False, "aliases": ["H100_SXM5", "H100SXM5"]},
+        "2331": {"name": "H100 PCIe", "is_audio": False, "aliases": ["H100_PCIe", "H100PCIe"]},
     },
 }
 
@@ -82,8 +83,13 @@ def _load_device_map() -> dict[str, dict[str, dict]]:
             device = str(entry.get("device_id", "")).upper()
             name = str(entry.get("name", ""))
             is_audio = bool(entry.get("is_audio", False))
+            aliases = [str(a) for a in entry.get("aliases", [])]
             if vendor and device:
-                device_map.setdefault(vendor, {})[device] = {"name": name, "is_audio": is_audio}
+                device_map.setdefault(vendor, {})[device] = {
+                    "name": name,
+                    "is_audio": is_audio,
+                    "aliases": aliases,
+                }
     except Exception:
         _logger.warning("config.toml gpu.devices 로드 실패 — 기본 맵 사용", exc_info=True)
     return device_map
@@ -132,223 +138,233 @@ def _find_root_uuid(uuid: str, rp_map: dict) -> str:
     return current
 
 
+def _collect_gpu_hosts(conn) -> dict:
+    """Placement API로 호스트별 GPU 정보를 수집한다 (동기 함수).
+
+    반환값: {hosts, aggregated_hosts, summary, gpu_types}
+    aggregated_hosts 각 항목: {name, gpus, gpu_groups, gpu_total, gpu_used}
+    gpu_groups 각 항목: {device_name, vendor_name, total, used}
+    """
+    placement_ep = conn.placement.get_endpoint()
+
+    # 1) 모든 리소스 프로바이더 조회
+    rps_resp = conn.session.get(f"{placement_ep}/resource_providers")
+    all_rps = rps_resp.json().get("resource_providers", [])
+
+    # RP UUID → RP 전체 데이터 맵
+    rp_map: dict[str, dict] = {rp["uuid"]: rp for rp in all_rps}
+
+    # 루트 RP (parent_provider_uuid가 None) → 호스트 맵
+    host_map: dict[str, dict] = {}
+    for rp in all_rps:
+        if rp.get("parent_provider_uuid") is None:
+            host_map[rp["uuid"]] = {
+                "name": rp["name"],
+                "uuid": rp["uuid"],
+                "gpus": [],
+                "gpu_total": 0,
+                "gpu_used": 0,
+            }
+
+    # 2) 루트가 아닌 모든 RP의 인벤토리에서 CUSTOM_PCI_* 스캔
+    for rp in all_rps:
+        if rp.get("parent_provider_uuid") is None:
+            continue  # 루트는 별도 처리
+
+        # 루트 호스트 UUID 탐색
+        root_uuid = _find_root_uuid(rp["uuid"], rp_map)
+        if root_uuid not in host_map:
+            continue
+
+        try:
+            inv_resp = conn.session.get(
+                f"{placement_ep}/resource_providers/{rp['uuid']}/inventories"
+            )
+            inventories = inv_resp.json().get("inventories", {})
+
+            # usages 별도 조회 (inventory에는 used 필드가 없음)
+            usages: dict[str, int] = {}
+            has_pci = any(rc.startswith("CUSTOM_PCI_") for rc in inventories)
+            if has_pci:
+                try:
+                    usage_resp = conn.session.get(
+                        f"{placement_ep}/resource_providers/{rp['uuid']}/usages"
+                    )
+                    usages = usage_resp.json().get("usages", {})
+                except Exception:
+                    pass
+
+            for rc_name, inv_data in inventories.items():
+                if not rc_name.startswith("CUSTOM_PCI_"):
+                    continue
+
+                parts = rc_name.split("_")  # ["CUSTOM", "PCI", "10DE", "10EF"]
+                vendor_id = parts[2] if len(parts) >= 3 else ""
+                device_id = parts[3] if len(parts) >= 4 else ""
+
+                if _is_audio_device(vendor_id, device_id):
+                    continue
+
+                # PCI 주소: rp 이름에서 루트 호스트 이름 제거
+                root_name = host_map[root_uuid]["name"]
+                rp_name = rp["name"]
+                pci_address = rp_name
+                if rp_name.startswith(root_name + "_"):
+                    pci_address = rp_name[len(root_name) + 1:]
+
+                used = usages.get(rc_name, 0)
+                gpu_info = {
+                    "provider_name": rp_name,
+                    "provider_uuid": rp["uuid"],
+                    "pci_address": pci_address,
+                    "resource_class": rc_name,
+                    "vendor_id": vendor_id,
+                    "vendor_name": VENDOR_MAP.get(vendor_id, vendor_id),
+                    "device_id": device_id,
+                    "device_name": _device_name(vendor_id, device_id),
+                    "total": inv_data.get("total", 0),
+                    "used": used,
+                    "allocation_ratio": inv_data.get("allocation_ratio", 1.0),
+                    "reserved": inv_data.get("reserved", 0),
+                }
+
+                host_map[root_uuid]["gpus"].append(gpu_info)
+                host_map[root_uuid]["gpu_total"] += gpu_info["total"]
+                host_map[root_uuid]["gpu_used"] += gpu_info["used"]
+        except Exception:
+            _logger.warning(
+                "RP %s 인벤토리 조회 실패", rp.get("uuid"), exc_info=True
+            )
+
+    # 3) 자식 RP에서 GPU를 찾지 못한 호스트: 루트 RP 인벤토리도 확인
+    for host_uuid, host_info in host_map.items():
+        if host_info["gpu_total"] > 0:
+            continue
+        try:
+            inv_resp = conn.session.get(
+                f"{placement_ep}/resource_providers/{host_uuid}/inventories"
+            )
+            inventories = inv_resp.json().get("inventories", {})
+
+            usages2: dict[str, int] = {}
+            has_pci = any(rc.startswith("CUSTOM_PCI_") for rc in inventories)
+            if has_pci:
+                try:
+                    usage_resp = conn.session.get(
+                        f"{placement_ep}/resource_providers/{host_uuid}/usages"
+                    )
+                    usages2 = usage_resp.json().get("usages", {})
+                except Exception:
+                    pass
+
+            for rc_name, inv_data in inventories.items():
+                if not rc_name.startswith("CUSTOM_PCI_"):
+                    continue
+                parts = rc_name.split("_")
+                vendor_id = parts[2] if len(parts) >= 3 else ""
+                device_id = parts[3] if len(parts) >= 4 else ""
+                if _is_audio_device(vendor_id, device_id):
+                    continue
+                used = usages2.get(rc_name, 0)
+                gpu_info = {
+                    "provider_name": host_info["name"],
+                    "provider_uuid": host_uuid,
+                    "pci_address": "host-level",
+                    "resource_class": rc_name,
+                    "vendor_id": vendor_id,
+                    "vendor_name": VENDOR_MAP.get(vendor_id, vendor_id),
+                    "device_id": device_id,
+                    "device_name": _device_name(vendor_id, device_id),
+                    "total": inv_data.get("total", 0),
+                    "used": used,
+                    "allocation_ratio": inv_data.get("allocation_ratio", 1.0),
+                    "reserved": inv_data.get("reserved", 0),
+                }
+                host_info["gpus"].append(gpu_info)
+                host_info["gpu_total"] += gpu_info["total"]
+                host_info["gpu_used"] += gpu_info["used"]
+        except Exception:
+            _logger.warning(
+                "루트 RP %s 인벤토리 조회 실패", host_uuid, exc_info=True
+            )
+
+    # GPU가 있는 호스트만 필터링하여 정렬
+    gpu_hosts = sorted(
+        [h for h in host_map.values() if h["gpu_total"] > 0],
+        key=lambda h: h["name"],
+    )
+
+    total_gpus = sum(h["gpu_total"] for h in gpu_hosts)
+    used_gpus = sum(h["gpu_used"] for h in gpu_hosts)
+
+    # GPU 종류별 집계
+    type_map: dict[str, dict] = {}
+    for h in gpu_hosts:
+        for gpu in h["gpus"]:
+            key = f"{gpu['vendor_id']}_{gpu['device_id']}"
+            if key not in type_map:
+                type_map[key] = {
+                    "device_name": gpu["device_name"] or gpu["device_id"],
+                    "vendor": gpu["vendor_name"],
+                    "total": 0,
+                    "used": 0,
+                }
+            type_map[key]["total"] += gpu["total"]
+            type_map[key]["used"] += gpu["used"]
+
+    gpu_types = sorted(type_map.values(), key=lambda x: x["total"], reverse=True)
+
+    # 호스트명 기반 집계 (PCI 주소 접미사 제거 후 그룹핑)
+    agg: dict[str, dict] = {}
+    for h in gpu_hosts:
+        hostname = _extract_hostname(h["name"])
+        if hostname not in agg:
+            agg[hostname] = {
+                "name": hostname,
+                "gpus": [],
+                "gpu_groups": [],
+                "gpu_total": 0,
+                "gpu_used": 0,
+            }
+        agg[hostname]["gpus"].extend(h["gpus"])
+        agg[hostname]["gpu_total"] += h["gpu_total"]
+        agg[hostname]["gpu_used"] += h["gpu_used"]
+
+    for host_data in agg.values():
+        groups: dict[str, dict] = {}
+        for gpu in host_data["gpus"]:
+            key = f"{gpu['vendor_id']}_{gpu['device_id']}"
+            if key not in groups:
+                groups[key] = {
+                    "device_name": gpu["device_name"] or gpu["device_id"],
+                    "vendor_name": gpu["vendor_name"],
+                    "total": 0,
+                    "used": 0,
+                }
+            groups[key]["total"] += gpu["total"]
+            groups[key]["used"] += gpu["used"]
+        host_data["gpu_groups"] = sorted(groups.values(), key=lambda x: x["device_name"])
+
+    aggregated_hosts = sorted(agg.values(), key=lambda h: h["name"])
+
+    return {
+        "hosts": gpu_hosts,
+        "aggregated_hosts": aggregated_hosts,
+        "summary": {
+            "total_hosts": len(aggregated_hosts),
+            "total_gpus": total_gpus,
+            "used_gpus": used_gpus,
+            "available_gpus": total_gpus - used_gpus,
+        },
+        "gpu_types": gpu_types,
+    }
+
+
 @router.get("/gpu-hosts", dependencies=[Depends(require_admin)])
 async def list_gpu_hosts(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
     """Placement API에서 각 호스트별 GPU 정보 조회."""
     def _collect():
-        placement_ep = conn.placement.get_endpoint()
-
-        # 1) 모든 리소스 프로바이더 조회
-        rps_resp = conn.session.get(f"{placement_ep}/resource_providers")
-        all_rps = rps_resp.json().get("resource_providers", [])
-
-        # RP UUID → RP 전체 데이터 맵
-        rp_map: dict[str, dict] = {rp["uuid"]: rp for rp in all_rps}
-
-        # 루트 RP (parent_provider_uuid가 None) → 호스트 맵
-        host_map: dict[str, dict] = {}
-        for rp in all_rps:
-            if rp.get("parent_provider_uuid") is None:
-                host_map[rp["uuid"]] = {
-                    "name": rp["name"],
-                    "uuid": rp["uuid"],
-                    "gpus": [],
-                    "gpu_total": 0,
-                    "gpu_used": 0,
-                }
-
-        # 2) 루트가 아닌 모든 RP의 인벤토리에서 CUSTOM_PCI_* 스캔
-        for rp in all_rps:
-            if rp.get("parent_provider_uuid") is None:
-                continue  # 루트는 별도 처리
-
-            # 루트 호스트 UUID 탐색
-            root_uuid = _find_root_uuid(rp["uuid"], rp_map)
-            if root_uuid not in host_map:
-                continue
-
-            try:
-                inv_resp = conn.session.get(
-                    f"{placement_ep}/resource_providers/{rp['uuid']}/inventories"
-                )
-                inventories = inv_resp.json().get("inventories", {})
-
-                # usages 별도 조회 (inventory에는 used 필드가 없음)
-                usages: dict[str, int] = {}
-                has_pci = any(rc.startswith("CUSTOM_PCI_") for rc in inventories)
-                if has_pci:
-                    try:
-                        usage_resp = conn.session.get(
-                            f"{placement_ep}/resource_providers/{rp['uuid']}/usages"
-                        )
-                        usages = usage_resp.json().get("usages", {})
-                    except Exception:
-                        pass
-
-                for rc_name, inv_data in inventories.items():
-                    if not rc_name.startswith("CUSTOM_PCI_"):
-                        continue
-
-                    parts = rc_name.split("_")  # ["CUSTOM", "PCI", "10DE", "10EF"]
-                    vendor_id = parts[2] if len(parts) >= 3 else ""
-                    device_id = parts[3] if len(parts) >= 4 else ""
-
-                    if _is_audio_device(vendor_id, device_id):
-                        continue
-
-                    # PCI 주소: rp 이름에서 루트 호스트 이름 제거
-                    root_name = host_map[root_uuid]["name"]
-                    rp_name = rp["name"]
-                    pci_address = rp_name
-                    if rp_name.startswith(root_name + "_"):
-                        pci_address = rp_name[len(root_name) + 1:]
-
-                    used = usages.get(rc_name, 0)
-                    gpu_info = {
-                        "provider_name": rp_name,
-                        "provider_uuid": rp["uuid"],
-                        "pci_address": pci_address,
-                        "resource_class": rc_name,
-                        "vendor_id": vendor_id,
-                        "vendor_name": VENDOR_MAP.get(vendor_id, vendor_id),
-                        "device_id": device_id,
-                        "device_name": _device_name(vendor_id, device_id),
-                        "total": inv_data.get("total", 0),
-                        "used": used,
-                        "allocation_ratio": inv_data.get("allocation_ratio", 1.0),
-                        "reserved": inv_data.get("reserved", 0),
-                    }
-
-                    host_map[root_uuid]["gpus"].append(gpu_info)
-                    host_map[root_uuid]["gpu_total"] += gpu_info["total"]
-                    host_map[root_uuid]["gpu_used"] += gpu_info["used"]
-            except Exception:
-                _logger.warning(
-                    "RP %s 인벤토리 조회 실패", rp.get("uuid"), exc_info=True
-                )
-
-        # 3) 자식 RP에서 GPU를 찾지 못한 호스트: 루트 RP 인벤토리도 확인
-        for host_uuid, host_info in host_map.items():
-            if host_info["gpu_total"] > 0:
-                continue
-            try:
-                inv_resp = conn.session.get(
-                    f"{placement_ep}/resource_providers/{host_uuid}/inventories"
-                )
-                inventories = inv_resp.json().get("inventories", {})
-
-                usages: dict[str, int] = {}
-                has_pci = any(rc.startswith("CUSTOM_PCI_") for rc in inventories)
-                if has_pci:
-                    try:
-                        usage_resp = conn.session.get(
-                            f"{placement_ep}/resource_providers/{host_uuid}/usages"
-                        )
-                        usages = usage_resp.json().get("usages", {})
-                    except Exception:
-                        pass
-
-                for rc_name, inv_data in inventories.items():
-                    if not rc_name.startswith("CUSTOM_PCI_"):
-                        continue
-                    parts = rc_name.split("_")
-                    vendor_id = parts[2] if len(parts) >= 3 else ""
-                    device_id = parts[3] if len(parts) >= 4 else ""
-                    if _is_audio_device(vendor_id, device_id):
-                        continue
-                    used = usages.get(rc_name, 0)
-                    gpu_info = {
-                        "provider_name": host_info["name"],
-                        "provider_uuid": host_uuid,
-                        "pci_address": "host-level",
-                        "resource_class": rc_name,
-                        "vendor_id": vendor_id,
-                        "vendor_name": VENDOR_MAP.get(vendor_id, vendor_id),
-                        "device_id": device_id,
-                        "device_name": _device_name(vendor_id, device_id),
-                        "total": inv_data.get("total", 0),
-                        "used": used,
-                        "allocation_ratio": inv_data.get("allocation_ratio", 1.0),
-                        "reserved": inv_data.get("reserved", 0),
-                    }
-                    host_info["gpus"].append(gpu_info)
-                    host_info["gpu_total"] += gpu_info["total"]
-                    host_info["gpu_used"] += gpu_info["used"]
-            except Exception:
-                _logger.warning(
-                    "루트 RP %s 인벤토리 조회 실패", host_uuid, exc_info=True
-                )
-
-        # GPU가 있는 호스트만 필터링하여 정렬
-        gpu_hosts = sorted(
-            [h for h in host_map.values() if h["gpu_total"] > 0],
-            key=lambda h: h["name"],
-        )
-
-        total_gpus = sum(h["gpu_total"] for h in gpu_hosts)
-        used_gpus = sum(h["gpu_used"] for h in gpu_hosts)
-
-        # GPU 종류별 집계
-        type_map: dict[str, dict] = {}
-        for h in gpu_hosts:
-            for gpu in h["gpus"]:
-                key = f"{gpu['vendor_id']}_{gpu['device_id']}"
-                if key not in type_map:
-                    type_map[key] = {
-                        "device_name": gpu["device_name"] or gpu["device_id"],
-                        "vendor": gpu["vendor_name"],
-                        "total": 0,
-                        "used": 0,
-                    }
-                type_map[key]["total"] += gpu["total"]
-                type_map[key]["used"] += gpu["used"]
-
-        gpu_types = sorted(type_map.values(), key=lambda x: x["total"], reverse=True)
-
-        # 호스트명 기반 집계 (PCI 주소 접미사 제거 후 그룹핑)
-        agg: dict[str, dict] = {}
-        for h in gpu_hosts:
-            hostname = _extract_hostname(h["name"])
-            if hostname not in agg:
-                agg[hostname] = {
-                    "name": hostname,
-                    "gpus": [],
-                    "gpu_groups": [],
-                    "gpu_total": 0,
-                    "gpu_used": 0,
-                }
-            agg[hostname]["gpus"].extend(h["gpus"])
-            agg[hostname]["gpu_total"] += h["gpu_total"]
-            agg[hostname]["gpu_used"] += h["gpu_used"]
-
-        for host_data in agg.values():
-            groups: dict[str, dict] = {}
-            for gpu in host_data["gpus"]:
-                key = f"{gpu['vendor_id']}_{gpu['device_id']}"
-                if key not in groups:
-                    groups[key] = {
-                        "device_name": gpu["device_name"] or gpu["device_id"],
-                        "vendor_name": gpu["vendor_name"],
-                        "total": 0,
-                        "used": 0,
-                    }
-                groups[key]["total"] += gpu["total"]
-                groups[key]["used"] += gpu["used"]
-            host_data["gpu_groups"] = sorted(groups.values(), key=lambda x: x["device_name"])
-
-        aggregated_hosts = sorted(agg.values(), key=lambda h: h["name"])
-
-        return {
-            "hosts": gpu_hosts,
-            "aggregated_hosts": aggregated_hosts,
-            "summary": {
-                "total_hosts": len(aggregated_hosts),
-                "total_gpus": total_gpus,
-                "used_gpus": used_gpus,
-                "available_gpus": total_gpus - used_gpus,
-            },
-            "gpu_types": gpu_types,
-        }
+        return _collect_gpu_hosts(conn)
 
     try:
         return await cached_call("union:admin:gpu_hosts", ttl_normal(), _collect, refresh=refresh)
@@ -367,5 +383,24 @@ def get_gpu_spec_list() -> list[dict]:
                 "name": info["name"],
                 "is_audio": info["is_audio"],
                 "vendor_name": VENDOR_MAP.get(vendor_id, vendor_id),
+                "aliases": info.get("aliases", []),
             })
     return result
+
+
+def build_alias_to_device_name_map() -> dict[str, str]:
+    """OpenStack PCI alias → 정식 GPU 이름 매핑 반환.
+
+    예: "RTX3090" → "RTX 3090", "A100_80GB" → "A100 SXM4 80GB"
+    GPU flavor의 pci_passthrough:alias 값을 GPU Spec Notion 페이지 이름으로 변환할 때 사용한다.
+    """
+    alias_map: dict[str, str] = {}
+    for devices in PCI_DEVICE_MAP.values():
+        for info in devices.values():
+            if info.get("is_audio"):
+                continue
+            name = info["name"]
+            for alias in info.get("aliases", []):
+                if alias:
+                    alias_map[alias] = name
+    return alias_map

@@ -19,40 +19,85 @@ NOTION_API_BASE = "https://api.notion.com/v1"
 NOTION_VERSION = "2022-06-28"
 REDIS_CONFIG_KEY = "union:notion:config"
 
-# 속성 이름 → 인스턴스 데이터 키 매핑
+# 속성 이름 → 인스턴스 데이터 키 매핑 (한국어 속성명 기준)
 # DB에 이 이름의 속성이 있으면 해당 데이터를 채운다.
 # relation 타입: 값은 page_id 문자열 (비어있으면 relation 해제)
 FIELD_MAP: dict[str, str] = {
-    "user": "user_page_id",             # relation → People DB
-    "openstack resource": "hypervisor_page_id",  # relation → Hypervisor DB
-    "team": "project_name",
-    "flavor": "flavor_name",
+    "사용자": "user_page_id",              # relation → People DB
+    "오픈스택 리소스": "hypervisor_page_id",  # relation → Hypervisor DB
+    "팀": "project_name",
+    "플레이버": "flavor_name",
     "CPU (c)": "vcpus",
     "MEM (G)": "ram_gb",
     "GPU": "gpu_name",
     "GPU 개수": "gpu_count",
+    "GPU map": "gpu_spec_page_id",          # relation → GPU Spec DB
+    "고정 IP": "fixed_ip",
+    "유동 IP": "floating_ip",
+    "인스턴스 ID": "instance_id",
+    "상태": "status",
+    "생성된 날짜": "created_at",
+}
+
+# 한국어 이전 전 영문 속성명도 지원 (마이그레이션 전 기존 DB 호환)
+_FIELD_MAP_LEGACY: dict[str, str] = {
+    "user": "user_page_id",
+    "openstack resource": "hypervisor_page_id",
+    "team": "project_name",
+    "flavor": "flavor_name",
     "fixed ip": "fixed_ip",
     "floating ip": "floating_ip",
     "instance id": "instance_id",
     "status": "status",
-    "생성된 날짜": "created_at",
+    "GPU spec": "gpu_spec_page_id",   # 이전 칼럼명 호환 (→ "GPU map"으로 변경됨)
+}
+
+# OpenStack 상태값 → 한국어 번역
+STATUS_KO: dict[str, str] = {
+    "ACTIVE": "실행 중",
+    "SHUTOFF": "종료",
+    "PAUSED": "일시정지",
+    "SUSPENDED": "일시중단",
+    "ERROR": "오류",
+    "BUILDING": "생성 중",
+    "DELETED": "삭제됨",
+    "SHELVED": "보류",
+    "SHELVED_OFFLOADED": "보류(오프로드)",
+    "RESIZE": "크기 변경 중",
+    "VERIFY_RESIZE": "크기 변경 확인",
+    "MIGRATING": "마이그레이션 중",
+    "REBOOT": "재시작 중",
 }
 
 # ensure_db_properties에서 누락된 속성을 생성할 때의 기본 타입
 # relation 속성은 자동 생성 불가 (이미 DB에 존재해야 함)
 DEFAULT_PROPERTY_TYPES: dict[str, str] = {
-    "team": "select",
-    "flavor": "rich_text",
+    "팀": "select",
+    "플레이버": "rich_text",
     "CPU (c)": "number",
     "MEM (G)": "number",
     "GPU": "rich_text",
     "GPU 개수": "number",
-    "fixed ip": "rich_text",
-    "floating ip": "rich_text",
-    "instance id": "rich_text",
-    "status": "select",
+    "고정 IP": "rich_text",
+    "유동 IP": "rich_text",
+    "인스턴스 ID": "rich_text",
+    "상태": "select",
     "생성된 날짜": "date",
 }
+
+# Notion DB 속성명 한국어 마이그레이션 매핑 (영문 → 한국어)
+_KO_MIGRATION_MAP: dict[str, str] = {
+    "user": "사용자",
+    "openstack resource": "오픈스택 리소스",
+    "team": "팀",
+    "flavor": "플레이버",
+    "fixed ip": "고정 IP",
+    "floating ip": "유동 IP",
+    "instance id": "인스턴스 ID",
+    "status": "상태",
+}
+
+REDIS_MIGRATION_KEY = "union:notion:migration_v1"
 
 
 def _headers(api_key: str) -> dict[str, str]:
@@ -187,15 +232,18 @@ def _build_instance_properties(schema: dict, title_prop: str, inst: dict) -> dic
     # title 속성
     props[title_prop] = _format_value("title", inst.get("name", ""))
 
-    # 나머지 속성: DB에 존재하고 FIELD_MAP에 매핑이 있는 것만
+    # 나머지 속성: DB에 존재하고 FIELD_MAP(또는 레거시 맵)에 매핑이 있는 것만
     for prop_name, prop_def in schema.items():
         if prop_name == title_prop:
             continue
-        data_key = FIELD_MAP.get(prop_name)
+        data_key = FIELD_MAP.get(prop_name) or _FIELD_MAP_LEGACY.get(prop_name)
         if data_key is None:
             continue  # 매핑 없는 속성은 건너뛴다
         prop_type = prop_def.get("type", "")
         value = inst.get(data_key, "")
+        # 상태값 한국어 번역 (select 타입이고 data_key가 status인 경우)
+        if data_key == "status" and prop_type == "select" and value:
+            value = STATUS_KO.get(str(value).upper(), value)
         formatted = _format_value(prop_type, value)
         if formatted is not None:
             props[prop_name] = formatted
@@ -259,11 +307,13 @@ async def sync_to_notion(api_key: str, database_id: str, instances: list[dict]) 
 
         # 기존 페이지 조회 → {instance_id: page_id} 맵
         existing_pages = await _fetch_all_pages(client, api_key, database_id)
-        has_instance_id_prop = "instance id" in schema
+        # 한국어 속성명과 영문 레거시 속성명 모두 지원
+        instance_id_prop = "인스턴스 ID" if "인스턴스 ID" in schema else ("instance id" if "instance id" in schema else "")
+        has_instance_id_prop = bool(instance_id_prop)
         page_map: dict[str, str] = {}
         for page in existing_pages:
             if has_instance_id_prop:
-                key = _extract_rich_text(page, "instance id")
+                key = _extract_rich_text(page, instance_id_prop)
             else:
                 key = _extract_rich_text(page, title_prop)
             if key:
@@ -315,14 +365,15 @@ async def sync_to_notion(api_key: str, database_id: str, instances: list[dict]) 
         await asyncio.gather(*[_upsert(inst) for inst in instances])
 
         # Notion에만 있고 OpenStack에 없는 페이지 → openstack resource relation 해제 후 아카이브
-        has_resource_prop = "openstack resource" in schema
+        resource_prop_name = "오픈스택 리소스" if "오픈스택 리소스" in schema else ("openstack resource" if "openstack resource" in schema else "")
+        has_resource_prop = bool(resource_prop_name)
 
         async def _archive(key: str, page_id: str) -> None:
             async with sem:
                 try:
                     body: dict = {"archived": True}
                     if has_resource_prop:
-                        body["properties"] = {"openstack resource": {"relation": []}}
+                        body["properties"] = {resource_prop_name: {"relation": []}}
                     resp = await client.patch(
                         f"{NOTION_API_BASE}/pages/{page_id}",
                         headers=_headers(api_key),
@@ -426,6 +477,8 @@ HYPERVISOR_FIELD_MAP: dict[str, str] = {
     "사용중인 core": "vcpus_used",
     "ram": "memory_size_gb",
     "사용중인 ram": "memory_used_gb",
+    "GPU": "gpu_spec_page_ids",   # relation (list) → GPU Spec DB
+    "GPU 갯수": "gpu_total",       # number — 해당 호스트의 전체 GPU 수
 }
 
 HYPERVISOR_DEFAULT_PROPERTY_TYPES: dict[str, str] = {
@@ -556,6 +609,13 @@ GPU_SPEC_FIELD_MAP: dict[str, str] = {
     "device_id": "device_id",
     "is_audio": "is_audio",
     "vendor_name": "vendor_name",
+    "총 사용 CPU": "total_cpu_used",
+    "총 사용 RAM (G)": "total_ram_used",
+    "총 사용 GPU": "total_gpu_used",
+    "인스턴스 수": "instance_count",
+    "사용 가능": "gpu_available",   # number — 하이퍼바이저 전체 GPU 총합
+    "사용중인 GPU": "gpu_used",      # number — 인스턴스가 사용 중인 GPU 수
+    "남은 GPU": "gpu_remaining",    # number — 사용 가능 - 사용중인
 }
 
 GPU_SPEC_DEFAULT_PROPERTY_TYPES: dict[str, str] = {
@@ -563,6 +623,10 @@ GPU_SPEC_DEFAULT_PROPERTY_TYPES: dict[str, str] = {
     "device_id": "rich_text",
     "is_audio": "checkbox",
     "vendor_name": "rich_text",
+    "총 사용 CPU": "number",
+    "총 사용 RAM (G)": "number",
+    "총 사용 GPU": "number",
+    "인스턴스 수": "number",
 }
 
 
@@ -594,9 +658,19 @@ async def ensure_gpu_spec_db_properties(api_key: str, database_id: str) -> None:
         _logger.info("Notion GPU spec DB 속성 %d개 자동 생성: %s", len(missing), list(missing.keys()))
 
 
-async def sync_gpu_specs_to_notion(api_key: str, database_id: str, gpu_specs: list[dict]) -> dict:
-    """GPU spec 목록을 Notion DB에 동기화한다. 결과 통계 반환."""
+async def sync_gpu_specs_to_notion(
+    api_key: str,
+    database_id: str,
+    gpu_specs: list[dict],
+    usage_by_gpu: dict[str, dict] | None = None,
+) -> dict:
+    """GPU spec 목록을 Notion DB에 동기화한다.
+
+    usage_by_gpu: {GPU이름: {total_cpu_used, total_ram_used, total_gpu_used, instance_count}}
+    인스턴스 수집 후 집계된 리소스 사용량을 함께 기록한다.
+    """
     stats = {"created": 0, "updated": 0, "archived": 0, "errors": 0}
+    usage_by_gpu = usage_by_gpu or {}
 
     async with httpx.AsyncClient(timeout=30) as client:
         schema = await _get_db_schema(client, api_key, database_id)
@@ -618,6 +692,20 @@ async def sync_gpu_specs_to_notion(api_key: str, database_id: str, gpu_specs: li
                 return
             seen_keys.add(name)
 
+            # spec에 집계 데이터 병합 (usage_by_gpu에 해당 GPU가 있으면)
+            spec_with_usage = dict(spec)
+            if name in usage_by_gpu:
+                spec_with_usage.update(usage_by_gpu[name])
+            else:
+                # 사용 중인 인스턴스가 없으면 0으로 초기화
+                spec_with_usage.setdefault("total_cpu_used", 0)
+                spec_with_usage.setdefault("total_ram_used", 0)
+                spec_with_usage.setdefault("total_gpu_used", 0)
+                spec_with_usage.setdefault("instance_count", 0)
+                spec_with_usage.setdefault("gpu_available", 0)
+                spec_with_usage.setdefault("gpu_used", 0)
+                spec_with_usage.setdefault("gpu_remaining", 0)
+
             props: dict = {title_prop: _format_value("title", name)}
             for prop_name, prop_def in schema.items():
                 if prop_name == title_prop:
@@ -626,7 +714,7 @@ async def sync_gpu_specs_to_notion(api_key: str, database_id: str, gpu_specs: li
                 if data_key is None:
                     continue
                 prop_type = prop_def.get("type", "")
-                formatted = _format_value(prop_type, spec.get(data_key, ""))
+                formatted = _format_value(prop_type, spec_with_usage.get(data_key, ""))
                 if formatted is not None:
                     props[prop_name] = formatted
 
@@ -728,3 +816,78 @@ async def fetch_hypervisor_page_ids_by_name(api_key: str, hypervisors_database_i
     except Exception:
         _logger.warning("Hypervisor DB 이름 조회 실패", exc_info=True)
     return name_to_page_id
+
+
+async def fetch_gpu_spec_page_ids_by_name(api_key: str, gpu_spec_database_id: str) -> dict[str, str]:
+    """GPU Spec DB에서 GPU 이름(title) → Notion page_id 맵을 반환한다.
+
+    인스턴스 DB의 'GPU spec' relation 속성에 설정할 page_id를 얻기 위해 사용한다.
+    GPU spec 동기화 완료 후 호출해야 한다.
+    """
+    name_to_page_id: dict[str, str] = {}
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            schema = await _get_db_schema(client, api_key, gpu_spec_database_id)
+            title_prop = _find_title_prop(schema)
+            pages = await _fetch_all_pages(client, api_key, gpu_spec_database_id)
+            for page in pages:
+                name = _extract_rich_text(page, title_prop)
+                if name:
+                    name_to_page_id[name] = page["id"]
+    except Exception:
+        _logger.warning("GPU Spec DB 이름 조회 실패", exc_info=True)
+    return name_to_page_id
+
+
+async def migrate_instance_db_to_korean(api_key: str, database_id: str) -> bool:
+    """인스턴스 Notion DB의 속성명을 영문에서 한국어로 일괄 변경한다.
+
+    Redis에 마이그레이션 완료 플래그를 저장하여 1회만 실행된다.
+    반환값: 마이그레이션이 실행되었으면 True, 이미 완료된 상태면 False.
+    """
+    from app.services.cache import _get_redis
+
+    try:
+        r = await _get_redis()
+        if await r.get(REDIS_MIGRATION_KEY):
+            return False  # 이미 완료됨
+    except Exception:
+        _logger.warning("마이그레이션 플래그 확인 실패 — 마이그레이션 생략", exc_info=True)
+        return False
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            schema = await _get_db_schema(client, api_key, database_id)
+            existing_names = set(schema.keys())
+
+            rename_payload: dict = {}
+            for old_name, new_name in _KO_MIGRATION_MAP.items():
+                if old_name in existing_names and new_name not in existing_names:
+                    rename_payload[old_name] = {"name": new_name}
+
+            if rename_payload:
+                resp = await client.patch(
+                    f"{NOTION_API_BASE}/databases/{database_id}",
+                    headers=_headers(api_key),
+                    json={"properties": rename_payload},
+                )
+                resp.raise_for_status()
+                _logger.info(
+                    "인스턴스 DB 속성 한국어 마이그레이션 완료: %s",
+                    {k: v["name"] for k, v in rename_payload.items()},
+                )
+            else:
+                _logger.info("인스턴스 DB 한국어 마이그레이션: 변경할 속성 없음 (이미 완료됨)")
+
+        # 완료 플래그 저장 (7일 TTL)
+        try:
+            r = await _get_redis()
+            await r.set(REDIS_MIGRATION_KEY, "1", ex=60 * 60 * 24 * 7)
+        except Exception:
+            _logger.warning("마이그레이션 완료 플래그 저장 실패", exc_info=True)
+
+        return True
+
+    except Exception:
+        _logger.warning("인스턴스 DB 한국어 마이그레이션 실패", exc_info=True)
+        return False
