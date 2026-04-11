@@ -42,6 +42,15 @@ async def login(request: Request, req: LoginRequest, background_tasks: Backgroun
     except Exception as e:
         raise HTTPException(status_code=401, detail="인증 실패")
 
+    # 사용자의 default_project_id 조회
+    default_project_id = ""
+    try:
+        conn = keystone.get_openstack_connection(data["token"], data["project_id"])
+        u = conn.identity.get_user(data["user_id"])
+        default_project_id = getattr(u, "default_project_id", None) or ""
+    except Exception:
+        pass
+
     # 대시보드 캐시 프리워밍 (백그라운드)
     background_tasks.add_task(_prewarm_dashboard, data["token"], data["project_id"])
 
@@ -53,6 +62,7 @@ async def login(request: Request, req: LoginRequest, background_tasks: Backgroun
         username=data["username"],
         expires_at=data["expires_at"],
         roles=data.get("roles", []),
+        default_project_id=default_project_id,
     )
 
 
@@ -150,6 +160,15 @@ async def gitlab_callback(request: Request, req: GitLabCallbackRequest, backgrou
     except Exception as e:
         raise HTTPException(status_code=401, detail="GitLab 인증 실패")
 
+    # 사용자의 default_project_id 조회
+    gl_default_project_id = ""
+    try:
+        gl_conn = keystone.get_openstack_connection(data["token"], data["project_id"])
+        gl_u = gl_conn.identity.get_user(data["user_id"])
+        gl_default_project_id = getattr(gl_u, "default_project_id", None) or ""
+    except Exception:
+        pass
+
     background_tasks.add_task(_prewarm_dashboard, data["token"], data["project_id"])
 
     return TokenResponse(
@@ -160,4 +179,5 @@ async def gitlab_callback(request: Request, req: GitLabCallbackRequest, backgrou
         username=data["username"],
         expires_at=data["expires_at"],
         roles=data.get("roles", []),
+        default_project_id=gl_default_project_id,
     )

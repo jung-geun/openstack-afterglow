@@ -16,6 +16,7 @@ class TokenResponse(BaseModel):
     username: str
     expires_at: str
     roles: list[str] = []
+    default_project_id: str = ""
 
 
 class UserInfo(BaseModel):

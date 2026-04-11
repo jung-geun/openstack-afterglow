@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { auth } from '$lib/stores/auth';
   import { api } from '$lib/api/client';
   import type { DashboardSummary } from '$lib/types/resources';
@@ -39,7 +40,7 @@
   const projectId = $derived($auth.projectId ?? undefined);
 
   async function fetchSummary(opts?: { refresh?: boolean }) {
-    summaryLoading = true;
+    if (!summary) summaryLoading = true;
     try {
       summary = await api.get<DashboardSummary>('/api/dashboard/summary', token, projectId, opts);
     } catch { /* ignore */ } finally { summaryLoading = false; }
@@ -55,7 +56,7 @@
   }
 
   async function fetchQuotas() {
-    quotasLoading = true;
+    if (!quotas) quotasLoading = true;
     try {
       quotas = await api.get<Quotas>('/api/dashboard/quotas', token, projectId);
     } catch { /* ignore */ } finally { quotasLoading = false; }
@@ -78,10 +79,12 @@
   $effect(() => {
     const pid = $auth.projectId;
     if (!pid) return;
-    fetchSummary();
-    fetchQuotas();
-    fetchUsage();
-    loadConfig();
+    untrack(() => {
+      fetchSummary();
+      fetchQuotas();
+      fetchUsage();
+      loadConfig();
+    });
   });
 
   $effect(() => {

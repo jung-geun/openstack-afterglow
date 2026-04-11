@@ -33,6 +33,7 @@
 				project_name: string;
 				expires_at: string | null;
 				roles?: string[];
+				default_project_id?: string;
 			}>('/api/auth/gitlab/callback', { code, state });
 
 			// 프로젝트 목록 조회
@@ -56,12 +57,23 @@
 				// 기본값 유지
 			}
 
+			// 기본 프로젝트가 설정되어 있고, 프로젝트 목록에 존재하면 해당 프로젝트로 전환
+			let selectedProjectId = data.project_id;
+			let selectedProjectName = data.project_name;
+			if (data.default_project_id && projects.length > 0) {
+				const defaultProject = projects.find(p => p.id === data.default_project_id);
+				if (defaultProject) {
+					selectedProjectId = defaultProject.id;
+					selectedProjectName = defaultProject.name;
+				}
+			}
+
 			setAuth({
 				token: data.token,
 				userId: data.user_id,
 				username: data.username,
-				projectId: data.project_id,
-				projectName: data.project_name,
+				projectId: selectedProjectId,
+				projectName: selectedProjectName,
 				expiresAt: data.expires_at ?? null,
 				sessionTimeoutSeconds,
 				sessionWarningBeforeSeconds,

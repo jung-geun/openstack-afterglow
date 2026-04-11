@@ -17,6 +17,7 @@ class UpdateProfileRequest(BaseModel):
     name: str | None = None
     email: str | None = None
     description: str | None = None
+    default_project_id: str | None = None
 
 
 class ChangePasswordRequest(BaseModel):
@@ -40,6 +41,7 @@ async def get_profile(
                 "name": u.name or "",
                 "email": getattr(u, "email", None) or "",
                 "description": getattr(u, "description", None) or "",
+                "default_project_id": getattr(u, "default_project_id", None) or "",
             }
         except Exception as e:
             raise HTTPException(status_code=500, detail="프로필 조회 실패")
@@ -67,6 +69,8 @@ async def update_profile(
             kwargs["email"] = req.email
         if req.description is not None:
             kwargs["description"] = req.description
+        if req.default_project_id is not None:
+            kwargs["default_project_id"] = req.default_project_id
         if not kwargs:
             raise HTTPException(status_code=400, detail="수정할 항목이 없습니다")
         try:
@@ -76,6 +80,7 @@ async def update_profile(
                 "name": u.name or "",
                 "email": getattr(u, "email", None) or "",
                 "description": getattr(u, "description", None) or "",
+                "default_project_id": getattr(u, "default_project_id", None) or "",
             }
         except HTTPException:
             raise

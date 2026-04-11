@@ -79,7 +79,7 @@
 	];
 
 	async function loadCategory(cat: TabKey, isRefresh = false) {
-		loadingMap[cat] = true;
+		if (!isRefresh) loadingMap[cat] = true;
 		try {
 			const url = isRefresh ? `/api/admin/services?category=${cat}&refresh=true` : `/api/admin/services?category=${cat}`;
 			const res = await api.get<Record<string, unknown>>(url, token, projectId);
@@ -114,7 +114,7 @@
 
 	$effect(() => {
 		if (!autoRefresh) return;
-		const interval = setInterval(() => loadAll(), refreshInterval * 1000);
+		const interval = setInterval(() => loadAll(true), refreshInterval * 1000);
 		return () => clearInterval(interval);
 	});
 
