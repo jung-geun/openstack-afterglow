@@ -167,13 +167,12 @@ def _fetch_container(conn, settings) -> list[dict]:
             zun_ep = _strip_version(zun_ep)
             resp = conn.session.get(f"{zun_ep}/v1/services", timeout=_SERVICE_TIMEOUT)
             for svc in resp.json().get("services", []):
-                _raw = svc.get("status", "")
                 result.append({
                     "id": svc.get("id", ""),
                     "binary": svc.get("binary", ""),
                     "host": svc.get("host", ""),
-                    "status": "enabled" if _raw == "up" else ("disabled" if _raw == "down" else _raw),
-                    "state": _raw,
+                    "status": "disabled" if svc.get("disabled", False) else "enabled",
+                    "state": svc.get("state", ""),
                     "zone": svc.get("availability_zone", ""),
                     "updated_at": svc.get("updated_at") or None,
                     "disabled_reason": None,
