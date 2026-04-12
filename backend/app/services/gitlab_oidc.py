@@ -61,7 +61,7 @@ async def _validate_state(state: str) -> None:
 async def _exchange_gitlab_code(code: str) -> dict:
     """GitLab 토큰 엔드포인트에서 authorization code를 토큰으로 교환."""
     settings = get_settings()
-    async with httpx.AsyncClient(timeout=30, verify=True) as client:
+    async with httpx.AsyncClient(timeout=30, verify=settings.ssl_verify) as client:
         resp = await client.post(
             f"{settings.gitlab_oidc_gitlab_url}/oauth/token",
             json={
@@ -94,7 +94,7 @@ async def _federated_auth(token: str) -> dict:
         f"/identity_providers/{settings.gitlab_oidc_idp_id}"
         f"/protocols/{settings.gitlab_oidc_protocol_id}/auth"
     )
-    async with httpx.AsyncClient(timeout=30, verify=True) as client:
+    async with httpx.AsyncClient(timeout=30, verify=settings.ssl_verify) as client:
         resp = await client.post(
             url,
             headers={"Authorization": f"Bearer {token}"},
@@ -111,7 +111,7 @@ async def _federated_auth(token: str) -> dict:
 async def _list_projects_for_token(unscoped_token: str) -> list[dict]:
     """unscoped 토큰으로 접근 가능한 프로젝트 목록 조회."""
     settings = get_settings()
-    async with httpx.AsyncClient(timeout=30, verify=True) as client:
+    async with httpx.AsyncClient(timeout=30, verify=settings.ssl_verify) as client:
         resp = await client.get(
             f"{settings.os_auth_url}/auth/projects",
             headers={"X-Auth-Token": unscoped_token},
@@ -134,7 +134,7 @@ async def _scope_token(unscoped_token: str, project_id: str) -> dict:
             },
         }
     }
-    async with httpx.AsyncClient(timeout=30, verify=True) as client:
+    async with httpx.AsyncClient(timeout=30, verify=settings.ssl_verify) as client:
         resp = await client.post(
             f"{settings.os_auth_url}/auth/tokens",
             json=body,

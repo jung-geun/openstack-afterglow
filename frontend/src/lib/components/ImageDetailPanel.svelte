@@ -23,6 +23,9 @@
     protected: boolean;
     tags: string[];
     properties: Record<string, string>;
+    os_hash_algo: string | null;
+    os_hash_value: string | null;
+    direct_url: string | null;
   }
 
   const VISIBILITY_OPTIONS = [
@@ -215,6 +218,18 @@
             <dt class="text-xs text-gray-500 mb-0.5">소유자 (Project ID)</dt>
             <dd class="text-xs text-gray-300 font-mono break-all">{image.owner ?? '-'}</dd>
           </div>
+          {#if image.os_hash_algo}
+            <div class="col-span-2">
+              <dt class="text-xs text-gray-500 mb-0.5">해시 ({image.os_hash_algo})</dt>
+              <dd class="text-xs text-gray-300 font-mono break-all">{image.os_hash_value ?? '-'}</dd>
+            </div>
+          {/if}
+          {#if image.direct_url}
+            <div class="col-span-2">
+              <dt class="text-xs text-gray-500 mb-0.5">저장 위치</dt>
+              <dd class="text-xs text-gray-300 font-mono break-all">{image.direct_url}</dd>
+            </div>
+          {/if}
         </dl>
       </div>
 

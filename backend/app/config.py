@@ -34,6 +34,8 @@ def _load_toml() -> dict:
             flat["os_project_domain_name"] = ost.get("project_domain_name", "Default")
             flat["os_user_domain_name"] = ost.get("user_domain_name", "Default")
             flat["os_region_name"] = ost.get("region_name", "RegionOne")
+            flat["os_insecure"] = ost.get("insecure", False)
+            flat["os_cacert"] = ost.get("cacert", "")
             flat["os_manila_endpoint"] = ost.get("manila_endpoint", "")
             flat["os_manila_share_network_id"] = ost.get("manila_share_network_id", "")
             flat["os_manila_share_type"] = ost.get("manila_share_type", "cephfstype")
@@ -109,6 +111,8 @@ class Settings(BaseSettings):
     os_project_domain_name: str = "Default"
     os_user_domain_name: str = "Default"
     os_region_name: str = "RegionOne"
+    os_insecure: bool = False
+    os_cacert: str = ""
 
     # Manila 설정
     os_manila_endpoint: str = ""
@@ -173,6 +177,15 @@ class Settings(BaseSettings):
     log_rotation_type: str = "size"  # "size" | "time"
     log_rotation_when: str = "midnight"
     log_rotation_interval: int = 1
+
+    @property
+    def ssl_verify(self) -> bool | str:
+        """OpenStack API SSL 검증 설정. cacert 경로가 있으면 해당 경로, insecure면 False, 아니면 True."""
+        if self.os_insecure:
+            return False
+        if self.os_cacert:
+            return self.os_cacert
+        return True
 
     @property
     def ceph_monitor_list(self) -> list[str]:

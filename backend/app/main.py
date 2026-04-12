@@ -252,6 +252,7 @@ async def _collect_snapshot() -> None:
             project_name=settings.os_project_name,
             user_domain_name=settings.os_user_domain_name,
             project_domain_name=settings.os_project_domain_name,
+            verify=settings.ssl_verify,
         )
     except Exception:
         _logger.warning("시계열 스냅샷: OpenStack 연결 실패", exc_info=True)

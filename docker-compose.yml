@@ -32,6 +32,12 @@ services:
       options:
         max-size: "50m"
         max-file: "5"
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
 
   frontend:
     build:
@@ -45,27 +51,40 @@ services:
       - ORIGIN=http://localhost:3000
       - PUBLIC_API_BASE=http://localhost:8000
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     restart: unless-stopped
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
+    healthcheck:
+      test: [ "CMD", "node", "-e", "fetch('http://localhost:3000/health').then(r=>{if(!r.ok)throw 1})" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
   # ── 프록시 프로필 (docker compose --profile proxy up) ──────────────────────
-  # HAProxy를 사용하면 80 포트 하나로 프론트(/)와 백엔드(/api/)를 모두 서빙
-  # PUBLIC_API_BASE를 HAProxy 주소로 맞춰야 함 (예: http://localhost)
+  # 80 → HTTPS 리다이렉트, 443 SSL termination
+  # /api/ → backend, 나머지 → frontend
   haproxy:
-    image: haproxy:2.9-alpine
+    build:
+      context: ./haproxy
+      dockerfile: Dockerfile
     profiles: [ "proxy" ]
     ports:
       - "80:80"
+      - "443:443"
     volumes:
       - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+      - haproxy-certs:/etc/haproxy/certs
     depends_on:
-      - frontend
-      - backend
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
     restart: unless-stopped
     logging:
       driver: json-file
@@ -149,3 +168,4 @@ volumes:
   opensearch-data:
   prom-data:
   grafana-data:
+  haproxy-certs:

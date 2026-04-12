@@ -32,6 +32,9 @@ class ImageDetail(ImageInfo):
     protected: bool = False
     tags: list[str] = []
     properties: dict = {}
+    os_hash_algo: Optional[str] = None
+    os_hash_value: Optional[str] = None
+    direct_url: Optional[str] = None
 
 
 class FlavorInfo(BaseModel):

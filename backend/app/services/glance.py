@@ -12,7 +12,7 @@ def list_images(conn: openstack.connection.Connection, project_id: str | None = 
             return
         seen.add(img.id)
         props = img.properties or {}
-        os_distro = props.get("os_distro") or _guess_distro(img.name)
+        os_distro = getattr(img, 'os_distro', None) or props.get("os_distro") or _guess_distro(img.name)
         images.append(ImageInfo(
             id=img.id,
             name=img.name,
@@ -53,9 +53,9 @@ def list_images(conn: openstack.connection.Connection, project_id: str | None = 
 def get_image(conn: openstack.connection.Connection, image_id: str) -> ImageDetail:
     img = conn.image.get_image(image_id)
     props = img.properties or {}
-    os_distro = props.get("os_distro") or _guess_distro(img.name)
-    # properties에서 내부 키 제외하고 반환
-    _exclude = {"os_distro", "os_type"}
+    os_distro = getattr(img, 'os_distro', None) or props.get("os_distro") or _guess_distro(img.name)
+    # properties에서 별도 필드로 반환하는 키 제외
+    _exclude = {"os_distro", "os_type", "os_hash_algo", "os_hash_value"}
     clean_props = {k: v for k, v in props.items() if k not in _exclude}
     return ImageDetail(
         id=img.id,
@@ -77,6 +77,9 @@ def get_image(conn: openstack.connection.Connection, image_id: str) -> ImageDeta
         protected=getattr(img, 'is_protected', False) or False,
         tags=list(getattr(img, 'tags', None) or []),
         properties=clean_props,
+        os_hash_algo=getattr(img, 'os_hash_algo', None),
+        os_hash_value=getattr(img, 'os_hash_value', None),
+        direct_url=getattr(img, 'direct_url', None),
     )
 
 
@@ -110,7 +113,7 @@ def update_image_metadata(
         kwargs["visibility"] = visibility
     img = conn.image.update_image(image_id, **kwargs)
     props = img.properties or {}
-    od = props.get("os_distro") or _guess_distro(img.name)
+    od = getattr(img, 'os_distro', None) or props.get("os_distro") or _guess_distro(img.name)
     return ImageInfo(
         id=img.id,
         name=img.name,
@@ -129,7 +132,7 @@ def update_image_metadata(
 def _guess_distro(name: str) -> str | None:
     """이미지 이름에서 OS 배포판 추정."""
     lower = name.lower()
-    for distro in ("ubuntu", "centos", "rocky", "debian", "fedora", "rhel", "windows", "cirros"):
+    for distro in ("ubuntu", "centos", "rocky", "debian", "fedora-coreos", "fedora", "rhel", "windows", "cirros"):
         if distro in lower:
             return distro
     return None

@@ -20,12 +20,13 @@
     visibility: string | null;
   }
 
-  const KNOWN_DISTROS = ['ubuntu', 'centos', 'rocky', 'debian', 'fedora', 'rhel', 'windows', 'cirros'];
+  const KNOWN_DISTROS = ['ubuntu', 'centos', 'rocky', 'debian', 'fedora-coreos', 'fedora', 'rhel', 'windows', 'cirros'];
 
   const OS_LOGOS: Record<string, string> = {
     ubuntu: '/logos/Ubuntu.png',
     centos: '/logos/CentOS.png',
     fedora: '/logos/Fedora.png',
+    'fedora-coreos': '/logos/coreos.png',
     windows: '/logos/Windows.png',
     coreos: '/logos/coreos.png',
   };
@@ -37,9 +38,15 @@
     cirros: '☁️',
   };
 
+  const OS_LABELS: Record<string, string> = {
+    ubuntu: 'Ubuntu', centos: 'CentOS', rocky: 'Rocky Linux',
+    debian: 'Debian', 'fedora-coreos': 'Fedora CoreOS', fedora: 'Fedora',
+    rhel: 'RHEL', windows: 'Windows', cirros: 'CirrOS',
+  };
+
   function osLabel(distro: string | null): string {
     if (!distro) return '-';
-    return distro.charAt(0).toUpperCase() + distro.slice(1);
+    return OS_LABELS[distro] ?? distro.charAt(0).toUpperCase() + distro.slice(1);
   }
 
   let images = $state<ImageInfo[]>([]);
@@ -251,7 +258,7 @@
   {:else}
     <!-- OS 필터 탭 -->
     <div class="flex flex-wrap gap-2 mb-5">
-      {#each [['all', '전체'], ...KNOWN_DISTROS.map(d => [d, d.charAt(0).toUpperCase() + d.slice(1)]), ['other', '기타']] as [key, label]}
+      {#each [['all', '전체'], ...KNOWN_DISTROS.map(d => [d, osLabel(d)]), ['other', '기타']] as [key, label]}
         {@const count = distroGroups[key] ?? 0}
         {#if count > 0 || key === 'all'}
           <button

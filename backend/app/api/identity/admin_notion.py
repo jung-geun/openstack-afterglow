@@ -289,6 +289,7 @@ async def collect_instance_data(
         project_name=settings.os_project_name,
         user_domain_name=settings.os_user_domain_name,
         project_domain_name=settings.os_project_domain_name,
+        verify=settings.ssl_verify,
     )
 
     try:
@@ -435,6 +436,7 @@ async def collect_hypervisor_data(gpu_name_to_page_id: dict[str, str] | None = N
         project_name=settings.os_project_name,
         user_domain_name=settings.os_user_domain_name,
         project_domain_name=settings.os_project_domain_name,
+        verify=settings.ssl_verify,
     )
 
     try:

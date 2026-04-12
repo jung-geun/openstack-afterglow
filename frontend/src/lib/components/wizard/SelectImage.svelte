@@ -20,7 +20,7 @@
 
 	const distroLabels: Record<string, string> = {
 		ubuntu: 'Ubuntu', centos: 'CentOS', rocky: 'Rocky Linux',
-		debian: 'Debian', fedora: 'Fedora', rhel: 'RHEL',
+		debian: 'Debian', 'fedora-coreos': 'Fedora CoreOS', fedora: 'Fedora', rhel: 'RHEL',
 		windows: 'Windows', cirros: 'CirrOS',
 	};
 
