@@ -464,11 +464,12 @@ def create_security_group_rule(
     port_range_max: int | None = None,
     remote_ip_prefix: str | None = None,
     ethertype: str = "IPv4",
+    remote_group_id: str | None = None,
 ) -> dict:
     kwargs: dict = {
         "security_group_id": sg_id,
         "direction": direction,
-        "ethertype": ethertype,
+        "ether_type": ethertype,
     }
     if protocol:
         kwargs["protocol"] = protocol
@@ -478,6 +479,8 @@ def create_security_group_rule(
         kwargs["port_range_max"] = port_range_max
     if remote_ip_prefix:
         kwargs["remote_ip_prefix"] = remote_ip_prefix
+    if remote_group_id:
+        kwargs["remote_group_id"] = remote_group_id
     rule = conn.network.create_security_group_rule(**kwargs)
     return {
         "id": rule.id,
@@ -486,7 +489,7 @@ def create_security_group_rule(
         "port_range_min": rule.port_range_min,
         "port_range_max": rule.port_range_max,
         "remote_ip_prefix": rule.remote_ip_prefix,
-        "ethertype": rule.ethertype,
+        "ethertype": rule.ether_type,
     }
 
 

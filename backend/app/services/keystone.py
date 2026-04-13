@@ -80,6 +80,28 @@ def get_openstack_connection(token: str, project_id: str) -> openstack.connectio
     )
 
 
+def get_admin_connection_for_project(project_id: str) -> openstack.connection.Connection:
+    """관리자 크리덴셜로 특정 프로젝트에 스코프된 OpenStack 연결 반환.
+
+    콜백 등 사용자 토큰이 없는 상황에서 프로젝트 리소스를 조작할 때 사용.
+    """
+    settings = get_settings()
+    return openstack.connect(
+        load_envvars=False,
+        load_yaml_config=False,
+        auth_url=settings.os_auth_url,
+        auth_type="password",
+        username=settings.os_username,
+        password=settings.os_password,
+        project_id=project_id,
+        user_domain_name=settings.os_user_domain_name,
+        project_domain_name=settings.os_project_domain_name,
+        region_name=settings.os_region_name,
+        api_timeout=30,
+        verify=settings.ssl_verify,
+    )
+
+
 def revoke_token(token: str) -> None:
     """Keystone에 토큰 폐기 요청 (DELETE /v3/auth/tokens)."""
     settings = get_settings()

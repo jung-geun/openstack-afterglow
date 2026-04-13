@@ -17,5 +17,6 @@ def get_site_config():
             "magnum": s.service_magnum_enabled,
             "manila": s.service_manila_enabled,
             "zun": s.service_zun_enabled,
+            "k3s": s.service_k3s_enabled,
         },
     }

@@ -34,6 +34,7 @@
   let createError = $state('');
   let form = $state({ name: '', size_gb: 10, share_type: '', share_network_id: '', share_proto: 'CEPHFS' });
   let shareTypes = $state<{ id: string; name: string; is_default: boolean }[]>([]);
+  let shareNetworks = $state<{ id: string; name: string; neutron_net_id: string | null; status: string }[]>([]);
   let metaEntries = $state<MetaEntry[]>([{ key: '', value: '' }]);
   let copiedExport = $state<string | null>(null);
 
@@ -81,14 +82,22 @@
   async function openCreateModal() {
     showModal = true;
     try {
-      shareTypes = await api.get<{ id: string; name: string; is_default: boolean }[]>(
-        '/api/file-storage/types', $auth.token ?? undefined, $auth.projectId ?? undefined
-      );
+      const [types, networks] = await Promise.all([
+        api.get<{ id: string; name: string; is_default: boolean }[]>(
+          '/api/file-storage/types', $auth.token ?? undefined, $auth.projectId ?? undefined
+        ),
+        api.get<{ id: string; name: string; neutron_net_id: string | null; status: string }[]>(
+          '/api/file-storage/networks', $auth.token ?? undefined, $auth.projectId ?? undefined
+        ),
+      ]);
+      shareTypes = types;
+      shareNetworks = networks;
       if (shareTypes.length > 0 && !form.share_type) {
         form.share_type = shareTypes.find(t => t.is_default)?.name ?? shareTypes[0].name;
       }
     } catch {
       shareTypes = [];
+      shareNetworks = [];
     }
   }
 
@@ -164,25 +173,30 @@
             <input bind:value={form.name} type="text" placeholder="my-file-storage" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5" />
           </label>
         </div>
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">크기 (GB)
-              <input bind:value={form.size_gb} type="number" min="1" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5" />
-            </label>
+        <div>
+          <span class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">크기 (GB)</span>
+          <div class="flex gap-2 mb-2">
+            {#each [10, 20, 50, 100] as preset}
+              <button type="button" onclick={() => form.size_gb = preset}
+                class="flex-1 py-1.5 text-xs rounded-lg border transition-colors {form.size_gb === preset ? 'border-blue-500 bg-blue-900/30 text-blue-400' : 'border-gray-600 text-gray-400 hover:border-gray-500 hover:text-gray-300'}">
+                {preset} GB
+              </button>
+            {/each}
           </div>
-          <div>
-            <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">Share Type
-              {#if shareTypes.length > 0}
-                <select bind:value={form.share_type} class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5">
-                  {#each shareTypes as st}
-                    <option value={st.name}>{st.name}{st.is_default ? ' (기본값)' : ''}</option>
-                  {/each}
-                </select>
-              {:else}
-                <input bind:value={form.share_type} type="text" placeholder="share type 이름" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 font-mono mt-1.5" />
-              {/if}
-            </label>
-          </div>
+          <input bind:value={form.size_gb} type="number" min="1" placeholder="직접 입력" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" />
+        </div>
+        <div>
+          <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">Share Type
+            {#if shareTypes.length > 0}
+              <select bind:value={form.share_type} class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5">
+                {#each shareTypes as st}
+                  <option value={st.name}>{st.name}{st.is_default ? ' (기본값)' : ''}</option>
+                {/each}
+              </select>
+            {:else}
+              <input bind:value={form.share_type} type="text" placeholder="share type 이름" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 font-mono mt-1.5" />
+            {/if}
+          </label>
         </div>
         <div>
           <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">프로토콜
@@ -193,8 +207,17 @@
           </label>
         </div>
         <div>
-          <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">Share Network ID (선택)
-            <input bind:value={form.share_network_id} type="text" placeholder="UUID (비워두면 기본값 사용)" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 font-mono mt-1.5" />
+          <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">Share Network (선택)
+            {#if shareNetworks.length > 0}
+              <select bind:value={form.share_network_id} class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5">
+                <option value="">기본값 사용</option>
+                {#each shareNetworks as net}
+                  <option value={net.id}>{net.name || net.id.slice(0, 8)}{net.status ? ` (${net.status})` : ''}</option>
+                {/each}
+              </select>
+            {:else}
+              <input bind:value={form.share_network_id} type="text" placeholder="UUID (비워두면 기본값 사용)" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 font-mono mt-1.5" />
+            {/if}
           </label>
         </div>
         <!-- 메타데이터 -->

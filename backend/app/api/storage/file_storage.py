@@ -40,6 +40,14 @@ async def list_share_types(conn: openstack.connection.Connection = Depends(get_o
         raise HTTPException(status_code=500, detail="Share 타입 목록 조회 실패")
 
 
+@router.get("/networks")
+async def list_share_networks(conn: openstack.connection.Connection = Depends(get_os_conn)):
+    try:
+        return manila.list_share_networks(conn)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Share 네트워크 목록 조회 실패")
+
+
 @router.get("/{file_storage_id}", response_model=FileStorageInfo)
 async def get_file_storage(file_storage_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
     try:

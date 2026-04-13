@@ -123,6 +123,64 @@ class CreateFileStorageRequest(BaseModel):
     share_proto: Literal["CEPHFS", "NFS"] = "CEPHFS"
 
 
+class ShareNetworkInfo(BaseModel):
+    id: str
+    name: str
+    description: str = ""
+    neutron_net_id: Optional[str] = None
+    neutron_subnet_id: Optional[str] = None
+    network_type: Optional[str] = None
+    status: str = ""
+    created_at: Optional[str] = None
+    security_service_ids: list[str] = []
+
+
+class CreateShareNetworkRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    description: str = ""
+    neutron_net_id: str
+    neutron_subnet_id: str
+
+
+class ShareSnapshotInfo(BaseModel):
+    id: str
+    name: str
+    status: str
+    share_id: str
+    size: int = 0
+    description: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class CreateShareSnapshotRequest(BaseModel):
+    share_id: str
+    name: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = None
+
+
+class SecurityServiceInfo(BaseModel):
+    id: str
+    name: str
+    description: str = ""
+    type: str  # ldap | kerberos | active_directory
+    dns_ip: Optional[str] = None
+    server: Optional[str] = None
+    domain: Optional[str] = None
+    status: str = ""
+    created_at: Optional[str] = None
+
+
+class CreateSecurityServiceRequest(BaseModel):
+    type: Literal["ldap", "kerberos", "active_directory"]
+    name: str = Field(..., min_length=1, max_length=255)
+    description: str = ""
+    dns_ip: str = ""
+    server: str = ""
+    domain: str = ""
+    user: str = ""
+    password: str = ""
+
+
 class CreateAccessRuleRequest(BaseModel):
     access_to: str = Field(..., min_length=1, max_length=255)  # CephX ID 또는 IP/CIDR
     access_level: Literal["ro", "rw"] = "ro"

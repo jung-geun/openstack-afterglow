@@ -15,7 +15,7 @@ from slowapi.errors import RateLimitExceeded
 from app.rate_limit import limiter
 
 from app.api.compute import instances_router, keypairs_router, images_router, flavors_router
-from app.api.storage import volumes_router, volume_backups_router, volume_snapshots_router, file_storage_router
+from app.api.storage import volumes_router, volume_backups_router, volume_snapshots_router, file_storage_router, share_snapshots_router, share_networks_router, security_services_router
 from app.api.network import networks_router, routers_router, security_groups_router, loadbalancers_router
 from app.api.identity import auth_router, admin_router
 from app.api.identity.admin_services import router as admin_services_router
@@ -25,6 +25,7 @@ from app.api.identity.admin_gpu import router as admin_gpu_router
 from app.api.identity.admin_notion import router as admin_notion_router
 from app.api.identity.profile import router as profile_router
 from app.api.container import clusters_router, containers_router
+from app.api.k3s import k3s_clusters_router, k3s_callback_router
 from app.api.common import dashboard_router, metrics_router, libraries_router, site_router, user_dashboard_router
 from app.api.common.metrics import record_request as _record_request
 
@@ -215,10 +216,16 @@ from app.config import get_settings as _get_cfg
 _svc_cfg = _get_cfg()
 if _svc_cfg.service_manila_enabled:
     app.include_router(file_storage_router, prefix="/api/file-storage", tags=["file-storage"])
+    app.include_router(share_snapshots_router, prefix="/api/share-snapshots", tags=["share-snapshots"])
+    app.include_router(share_networks_router, prefix="/api/share-networks", tags=["share-networks"])
+    app.include_router(security_services_router, prefix="/api/security-services", tags=["security-services"])
 if _svc_cfg.service_magnum_enabled:
     app.include_router(clusters_router, prefix="/api/clusters", tags=["clusters"])
 if _svc_cfg.service_zun_enabled:
     app.include_router(containers_router, prefix="/api/containers", tags=["containers"])
+if _svc_cfg.service_k3s_enabled:
+    app.include_router(k3s_clusters_router, prefix="/api/k3s/clusters", tags=["k3s"])
+    app.include_router(k3s_callback_router, prefix="/api/k3s", tags=["k3s-callback"])
 # Common
 app.include_router(dashboard_router, prefix="/api/dashboard", tags=["dashboard"])
 app.include_router(metrics_router, prefix="/api/metrics", tags=["metrics"])
@@ -466,7 +473,21 @@ async def _notion_sync_loop() -> None:
         await asyncio.sleep(interval)
 
 
+async def _k3s_cleanup_loop() -> None:
+    """5분 간격으로 stale CREATING 클러스터를 ERROR로 변경."""
+    await asyncio.sleep(120)
+    while True:
+        try:
+            from app.services import k3s_cluster as _k3s
+            await _k3s.check_stale_clusters(timeout_minutes=30)
+        except Exception:
+            _logger.warning("k3s stale cluster check failed", exc_info=True)
+        await asyncio.sleep(300)
+
+
 @app.on_event("startup")
 async def start_background_workers():
     asyncio.create_task(_snapshot_loop())
     asyncio.create_task(_notion_sync_loop())
+    if _svc_cfg.service_k3s_enabled:
+        asyncio.create_task(_k3s_cleanup_loop())

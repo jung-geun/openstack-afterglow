@@ -36,6 +36,9 @@
 			service: 'manila' as const,
 			items: [
 				{ label: '파일 스토리지', href: '/dashboard/file-storage', service: null },
+				{ label: '스냅샷', href: '/dashboard/file-storage/snapshots', service: null },
+				{ label: 'Share 네트워크', href: '/dashboard/file-storage/networks', service: null },
+				{ label: 'Security Service', href: '/dashboard/file-storage/security-services', service: null },
 				{ label: '라이브러리 관리', href: '/dashboard/file-storage/manage', service: null },
 			],
 		},
@@ -48,6 +51,7 @@
 			items: [
 				{ label: 'K8s 클러스터', href: '/dashboard/containers/clusters', service: 'magnum' as const },
 				{ label: '컨테이너', href: '/dashboard/containers/instances', service: 'zun' as const },
+				{ label: 'k3s 클러스터', href: '/dashboard/containers/k3s', service: 'k3s' as const },
 			],
 		},
 		{
@@ -85,7 +89,7 @@
 		const svcs = $siteConfig.services;
 		if (!section.service) return true;
 		if (section.service === 'manila') return svcs?.manila ?? false;
-		if (section.service === 'containers') return (svcs?.magnum ?? false) || (svcs?.zun ?? false);
+		if (section.service === 'containers') return (svcs?.magnum ?? false) || (svcs?.zun ?? false) || (svcs?.k3s ?? false);
 		return true;
 	}
 
@@ -94,6 +98,7 @@
 		if (!item.service) return true;
 		if (item.service === 'magnum') return svcs?.magnum ?? false;
 		if (item.service === 'zun') return svcs?.zun ?? false;
+		if (item.service === 'k3s') return svcs?.k3s ?? false;
 		return true;
 	}
 </script>

@@ -1,0 +1,87 @@
+#cloud-config
+# k3s 서버(control plane) 노드 — 클러스터: {{ cluster_name }}
+
+package_update: true
+packages:
+  - curl
+  - jq
+
+write_files:
+  - path: /opt/k3s/callback.sh
+    permissions: "0750"
+    content: |
+      #!/bin/bash
+      set -e
+      CALLBACK_URL="{{ callback_url }}"
+      CALLBACK_TOKEN="{{ callback_token }}"
+
+      log() { echo "[k3s-callback] $*" | tee -a /var/log/k3s-callback.log; }
+
+      log "Waiting for k3s kubeconfig (up to 10 min)..."
+      for i in $(seq 1 120); do
+        if [ -f /etc/rancher/k3s/k3s.yaml ]; then
+          break
+        fi
+        sleep 5
+      done
+
+      if [ ! -f /etc/rancher/k3s/k3s.yaml ]; then
+        log "ERROR: kubeconfig not found after 10 minutes"
+        curl -sf -X POST "${CALLBACK_URL}/api/k3s/callback" \
+          -H "Content-Type: application/json" \
+          -d "{\"token\": \"${CALLBACK_TOKEN}\", \"success\": false, \"error\": \"kubeconfig not found after 10min\"}" || true
+        exit 1
+      fi
+
+      log "Waiting for node-token (up to 5 min)..."
+      for i in $(seq 1 60); do
+        if [ -f /var/lib/rancher/k3s/server/node-token ]; then
+          break
+        fi
+        sleep 5
+      done
+
+      SERVER_IP=$(hostname -I | awk '{print $1}')
+      KUBECONFIG_RAW=$(cat /etc/rancher/k3s/k3s.yaml)
+      # 127.0.0.1 → 실제 서버 IP로 치환
+      KUBECONFIG_FIXED=$(echo "${KUBECONFIG_RAW}" | sed "s/127\.0\.0\.1/${SERVER_IP}/g")
+      NODE_TOKEN=$(cat /var/lib/rancher/k3s/server/node-token 2>/dev/null || echo "")
+
+      log "Sending callback to ${CALLBACK_URL}"
+      PAYLOAD=$(jq -n \
+        --arg token   "${CALLBACK_TOKEN}" \
+        --arg kc      "${KUBECONFIG_FIXED}" \
+        --arg nt      "${NODE_TOKEN}" \
+        --arg sip     "${SERVER_IP}" \
+        '{token: $token, success: true, kubeconfig: $kc, node_token: $nt, server_ip: $sip}')
+
+      log "Payload size: $(echo -n "${PAYLOAD}" | wc -c) bytes"
+      HTTP_CODE=$(curl -s -o /tmp/callback_response.txt -w "%{http_code}" \
+        -X POST "${CALLBACK_URL}/api/k3s/callback" \
+        -H "Content-Type: application/json" \
+        -d "${PAYLOAD}" --connect-timeout 10 --max-time 30 2>&1) || true
+      RESPONSE=$(cat /tmp/callback_response.txt 2>/dev/null || echo "")
+      if [ "${HTTP_CODE}" = "200" ]; then
+        log "Callback sent successfully (HTTP ${HTTP_CODE})"
+      else
+        log "ERROR: Callback failed (HTTP ${HTTP_CODE}): ${RESPONSE}"
+        # 재시도 (30초 후)
+        sleep 30
+        log "Retrying callback..."
+        curl -s -o /dev/null -w "Retry HTTP %{http_code}\n" \
+          -X POST "${CALLBACK_URL}/api/k3s/callback" \
+          -H "Content-Type: application/json" \
+          -d "${PAYLOAD}" --connect-timeout 10 --max-time 30 >> /var/log/k3s-callback.log 2>&1 || true
+      fi
+
+runcmd:
+  - |
+    # k3s 서버 설치
+    SERVER_IP=$(hostname -I | awk '{print $1}')
+    curl -sfL https://get.k3s.io | \
+      INSTALL_K3S_VERSION="{{ k3s_version }}" \
+      sh -s - server \
+        --tls-san "${SERVER_IP}" \
+        --write-kubeconfig-mode 644
+  # 콜백 스크립트를 백그라운드 실행 (k3s 준비 대기 후 전송)
+  - nohup /opt/k3s/callback.sh > /var/log/k3s-callback.log 2>&1 &

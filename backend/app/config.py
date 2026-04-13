@@ -64,6 +64,16 @@ def _load_toml() -> dict:
             flat["service_magnum_enabled"] = svc.get("magnum", False)
             flat["service_manila_enabled"] = svc.get("manila", False)
             flat["service_zun_enabled"] = svc.get("zun", False)
+            flat["service_k3s_enabled"] = svc.get("k3s", False)
+
+            k3s = data.get("k3s", {})
+            flat["k3s_version"] = k3s.get("version", "v1.31.4+k3s1")
+            flat["k3s_server_flavor_id"] = k3s.get("server_flavor_id", "")
+            flat["k3s_default_agent_flavor_id"] = k3s.get("default_agent_flavor_id", "")
+            flat["k3s_server_image_id"] = k3s.get("server_image_id", "")
+            flat["k3s_callback_base_url"] = k3s.get("callback_base_url", "")
+            flat["k3s_kubeconfig_encryption_key"] = k3s.get("kubeconfig_encryption_key", "")
+            flat["k3s_boot_volume_size_gb"] = k3s.get("boot_volume_size_gb", 30)
 
             sess = data.get("session", {})
             flat["session_timeout_seconds"] = sess.get("timeout_seconds", 3600)
@@ -75,6 +85,11 @@ def _load_toml() -> dict:
             flat["default_availability_zone"] = nv.get("default_availability_zone", "nova")
             flat["boot_volume_size_gb"] = nv.get("boot_volume_size_gb", 20)
             flat["upper_volume_size_gb"] = nv.get("upper_volume_size_gb", 50)
+
+            builder = data.get("builder", {})
+            flat["builder_image_id"] = builder.get("image_id", "")
+            flat["builder_flavor_id"] = builder.get("flavor_id", "")
+            flat["builder_network_id"] = builder.get("network_id", "")
 
             gl = data.get("gitlab_oidc", {})
             flat["gitlab_oidc_enabled"] = gl.get("enabled", False)
@@ -147,6 +162,16 @@ class Settings(BaseSettings):
     service_magnum_enabled: bool = False
     service_manila_enabled: bool = False
     service_zun_enabled: bool = False
+    service_k3s_enabled: bool = False
+
+    # k3s 설정
+    k3s_version: str = "v1.31.4+k3s1"
+    k3s_server_flavor_id: str = ""
+    k3s_default_agent_flavor_id: str = ""
+    k3s_server_image_id: str = ""
+    k3s_callback_base_url: str = ""
+    k3s_kubeconfig_encryption_key: str = ""
+    k3s_boot_volume_size_gb: int = 30
 
     # 세션 관리
     session_timeout_seconds: int = 3600
@@ -158,6 +183,11 @@ class Settings(BaseSettings):
     default_availability_zone: str = "nova"
     boot_volume_size_gb: int = 20
     upper_volume_size_gb: int = 50
+
+    # 라이브러리 빌더 VM 설정
+    builder_image_id: str = ""       # 빌더 VM 부팅 이미지 ID (Ubuntu 22.04+)
+    builder_flavor_id: str = ""      # 빌더 VM 플레이버 ID
+    builder_network_id: str = ""     # 빌더 VM 네트워크 ID (미지정 시 default_network_id 사용)
 
     # GitLab OIDC
     gitlab_oidc_enabled: bool = False

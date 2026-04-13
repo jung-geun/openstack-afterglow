@@ -10,6 +10,7 @@ interface SiteConfig {
 		magnum: boolean;
 		manila: boolean;
 		zun: boolean;
+		k3s: boolean;
 	};
 }
 
@@ -18,7 +19,7 @@ const DEFAULTS: SiteConfig = {
 	site_description: 'OpenStack VM + OverlayFS 배포 플랫폼',
 	logo_path: '/logo.png',
 	favicon_path: '/favicon.ico',
-	services: { magnum: false, manila: false, zun: false },
+	services: { magnum: false, manila: false, zun: false, k3s: false },
 };
 
 export const siteConfig = writable<SiteConfig>({ ...DEFAULTS });

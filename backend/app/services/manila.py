@@ -48,6 +48,12 @@ class ManilaClient:
             r.raise_for_status()
             return r.json()
 
+    def put(self, path: str, body: dict) -> dict:
+        with httpx.Client() as c:
+            r = c.put(self._url(path), headers=self.headers, json=body, timeout=30)
+            r.raise_for_status()
+            return r.json()
+
     def delete(self, path: str) -> None:
         with httpx.Client() as c:
             r = c.delete(self._url(path), headers=self.headers, timeout=30)
@@ -130,6 +136,144 @@ def list_share_types(conn) -> list[dict]:
         }
         for t in data.get("share_types", [])
     ]
+
+
+def list_share_networks(conn) -> list[dict]:
+    """Manila에서 사용 가능한 share network 목록 조회."""
+    client = get_client(conn)
+    data = client.get("share-networks/detail")
+    return [
+        {
+            "id": net["id"],
+            "name": net.get("name", ""),
+            "neutron_net_id": net.get("neutron_net_id"),
+            "neutron_subnet_id": net.get("neutron_subnet_id"),
+            "network_type": net.get("network_type"),
+            "status": net.get("status", ""),
+            "created_at": net.get("created_at"),
+        }
+        for net in data.get("share_networks", [])
+    ]
+
+
+def get_share_network(conn, share_network_id: str) -> dict:
+    """Share network 상세 조회."""
+    client = get_client(conn)
+    data = client.get(f"share-networks/{share_network_id}")
+    net = data.get("share_network", data)
+    return {
+        "id": net["id"],
+        "name": net.get("name", ""),
+        "description": net.get("description", ""),
+        "neutron_net_id": net.get("neutron_net_id"),
+        "neutron_subnet_id": net.get("neutron_subnet_id"),
+        "network_type": net.get("network_type"),
+        "status": net.get("status", ""),
+        "created_at": net.get("created_at"),
+        "security_service_ids": [
+            ss.get("id", "") for ss in net.get("security_services", [])
+        ] if net.get("security_services") else [],
+    }
+
+
+def create_share_network(
+    conn,
+    name: str,
+    neutron_net_id: str,
+    neutron_subnet_id: str,
+    description: str = "",
+) -> dict:
+    """Share network 생성."""
+    client = get_client(conn)
+    body = {"share_network": {
+        "name": name,
+        "description": description,
+        "neutron_net_id": neutron_net_id,
+        "neutron_subnet_id": neutron_subnet_id,
+    }}
+    return client.post("share-networks", body)["share_network"]
+
+
+def delete_share_network(conn, share_network_id: str) -> None:
+    """Share network 삭제."""
+    client = get_client(conn)
+    client.delete(f"share-networks/{share_network_id}")
+
+
+def add_security_service_to_network(conn, share_network_id: str, security_service_id: str) -> dict:
+    """Share network에 보안 서비스 연결."""
+    client = get_client(conn)
+    body = {"add_security_service": {"security_service_id": security_service_id}}
+    return client.post(f"share-networks/{share_network_id}/action", body)
+
+
+def remove_security_service_from_network(conn, share_network_id: str, security_service_id: str) -> dict:
+    """Share network에서 보안 서비스 제거."""
+    client = get_client(conn)
+    body = {"remove_security_service": {"security_service_id": security_service_id}}
+    return client.post(f"share-networks/{share_network_id}/action", body)
+
+
+# ---------------------------------------------------------------------------
+# Security Services
+# ---------------------------------------------------------------------------
+
+def list_security_services(conn) -> list[dict]:
+    """Manila security service 목록 조회."""
+    client = get_client(conn)
+    data = client.get("security-services/detail")
+    return [
+        {
+            "id": ss["id"],
+            "name": ss.get("name", ""),
+            "description": ss.get("description", ""),
+            "type": ss.get("type", ""),
+            "dns_ip": ss.get("dns_ip"),
+            "server": ss.get("server"),
+            "domain": ss.get("domain"),
+            "status": ss.get("status", ""),
+            "created_at": ss.get("created_at"),
+        }
+        for ss in data.get("security_services", [])
+    ]
+
+
+def create_security_service(
+    conn,
+    type: str,
+    name: str,
+    description: str = "",
+    dns_ip: str = "",
+    server: str = "",
+    domain: str = "",
+    user: str = "",
+    password: str = "",
+) -> dict:
+    """Manila security service 생성."""
+    client = get_client(conn)
+    body: dict = {
+        "type": type,
+        "name": name,
+    }
+    if description:
+        body["description"] = description
+    if dns_ip:
+        body["dns_ip"] = dns_ip
+    if server:
+        body["server"] = server
+    if domain:
+        body["domain"] = domain
+    if user:
+        body["user"] = user
+    if password:
+        body["password"] = password
+    return client.post("security-services", {"security_service": body})["security_service"]
+
+
+def delete_security_service(conn, security_service_id: str) -> None:
+    """Manila security service 삭제."""
+    client = get_client(conn)
+    client.delete(f"security-services/{security_service_id}")
 
 
 def create_file_storage(

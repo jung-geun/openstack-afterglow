@@ -11,6 +11,7 @@ from app.api.deps import get_os_conn, get_token_info, require_admin
 _logger = logging.getLogger(__name__)
 from app.models.storage import FileStorageInfo, TopologyData, TopologyInstance
 from app.services import manila, libraries as lib_svc, neutron
+from app.services import library_builder
 from app.services.cache import cached_call, ttl_fast, ttl_normal, ttl_slow
 from app.config import get_settings
 
@@ -26,12 +27,13 @@ async def list_admin_file_storages(conn: openstack.connection.Connection = Depen
 @router.post("/file-storage/build", status_code=202, dependencies=[Depends(require_admin)])
 async def trigger_build(
     library_id: str,
+    auto_install: bool = Query(False, description="Cloud-init VM으로 자동 패키지 설치"),
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """
     사전 빌드 파일 스토리지 생성 트리거.
-    실제 빌드는 별도 백그라운드 프로세스(scripts/build_library_shares.py)에서 수행.
-    여기서는 빈 파일 스토리지를 생성하고 메타데이터만 기록한다.
+    auto_install=true: Cloud-init VM으로 자동 패키지 설치 (빌더 설정 필요)
+    auto_install=false: 빈 파일 스토리지 생성만 (수동 설치 필요)
     """
     settings = get_settings()
     try:
@@ -49,6 +51,13 @@ async def trigger_build(
             detail=f"이미 존재하는 사전 빌드 파일 스토리지: {existing[0].id}"
         )
 
+    if auto_install:
+        try:
+            result = await library_builder.start_build(conn, library_id)
+            return result
+        except RuntimeError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
     file_storage = manila.create_file_storage(
         conn,
         name=f"union-prebuilt-{library_id}",
@@ -63,6 +72,12 @@ async def trigger_build(
         },
     )
     return {"file_storage_id": file_storage.id, "status": "building", "library": library_id}
+
+
+@router.get("/file-storage/builds", dependencies=[Depends(require_admin)])
+async def list_active_builds():
+    """현재 진행 중인 자동 빌드 목록 조회."""
+    return library_builder.get_active_builds()
 
 
 # ---------------------------------------------------------------------------

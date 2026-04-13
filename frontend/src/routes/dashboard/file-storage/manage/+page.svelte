@@ -36,6 +36,7 @@
   let loading = $state(true);
   let error = $state('');
   let message = $state('');
+  let autoInstall = $state(true);
 
   const token = $derived($auth.token ?? undefined);
   const projectId = $derived($auth.projectId ?? undefined);
@@ -59,10 +60,16 @@
     message = '';
     error = '';
     try {
-      const res = await api.post<{ file_storage_id: string }>(
-        `/api/admin/file-storage/build?library_id=${libId}`, {}, token, projectId
+      const params = new URLSearchParams({ library_id: libId });
+      if (autoInstall) params.set('auto_install', 'true');
+      const res = await api.post<{ file_storage_id: string; server_id?: string }>(
+        `/api/admin/file-storage/build?${params}`, {}, token, projectId
       );
-      message = `파일 스토리지 생성 시작됨 (ID: ${res.file_storage_id})`;
+      if (autoInstall && res.server_id) {
+        message = `자동 빌드 시작됨 (Share: ${res.file_storage_id}, VM: ${res.server_id})`;
+      } else {
+        message = `파일 스토리지 생성 시작됨 (ID: ${res.file_storage_id})`;
+      }
       await loadData();
     } catch (e) {
       error = e instanceof ApiError ? `빌드 실패: ${e.message}` : '서버 오류';
@@ -80,7 +87,13 @@
       <h1 class="text-2xl font-bold text-white">라이브러리 파일 스토리지 관리</h1>
       <p class="text-sm text-gray-500 mt-1">Strategy A (사전 빌드)에서 사용할 Manila CephFS 파일 스토리지를 관리합니다.</p>
     </div>
-    <button onclick={loadData} class="text-xs text-gray-400 hover:text-white transition-colors border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg">새로고침</button>
+    <div class="flex items-center gap-3">
+      <label class="flex items-center gap-2 text-xs text-gray-400 cursor-pointer">
+        <input type="checkbox" bind:checked={autoInstall} class="rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0" />
+        자동 패키지 설치
+      </label>
+      <button onclick={loadData} class="text-xs text-gray-400 hover:text-white transition-colors border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg">새로고침</button>
+    </div>
   </div>
 
   {#if error}

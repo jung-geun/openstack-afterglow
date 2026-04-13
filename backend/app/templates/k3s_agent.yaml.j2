@@ -1,0 +1,22 @@
+#cloud-config
+# k3s 에이전트(worker) 노드 — 클러스터: {{ cluster_name }}
+
+package_update: true
+packages:
+  - curl
+
+runcmd:
+  - |
+    # 서버 API 서버(6443) 준비될 때까지 대기 (최대 15분)
+    for i in $(seq 1 180); do
+      if curl -sk --connect-timeout 3 https://{{ server_ip }}:6443/healthz 2>/dev/null | grep -q ok; then
+        break
+      fi
+      sleep 5
+    done
+    # k3s 에이전트 설치 및 클러스터 조인
+    curl -sfL https://get.k3s.io | \
+      INSTALL_K3S_VERSION="{{ k3s_version }}" \
+      K3S_URL="https://{{ server_ip }}:6443" \
+      K3S_TOKEN="{{ node_token }}" \
+      sh -

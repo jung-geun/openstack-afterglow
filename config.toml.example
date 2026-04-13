@@ -342,6 +342,17 @@ aliases = ["H100_PCIe", "H100PCIe"]
 magnum = false      # K8s 클러스터 (Heat 포함)
 manila = false      # 공유 파일 시스템
 zun = false         # 컨테이너
+k3s = false         # k3s 자체 관리 Kubernetes 클러스터
+
+[k3s]
+# k3s 자체 관리 Kubernetes 클러스터 설정 (services.k3s = true 시 활성화)
+version = "v1.31.4+k3s1"
+server_flavor_id = ""          # 서버(control plane) 노드 플레이버 ID
+default_agent_flavor_id = ""   # 에이전트(worker) 노드 기본 플레이버 ID
+server_image_id = ""           # Ubuntu 22.04+ 이미지 ID
+callback_base_url = ""         # 서버 VM이 콜백할 백엔드 URL (예: http://10.0.0.1:8000)
+kubeconfig_encryption_key = "" # AES-256-GCM 키 — openssl rand -hex 32 로 생성
+boot_volume_size_gb = 30
 
 [cors]
 # CORS 허용 origin (쉼표 구분). 프론트엔드 실제 접근 URL로 설정.
