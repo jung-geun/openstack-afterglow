@@ -84,6 +84,24 @@ async def list_clusters(project_id: str) -> list[dict]:
     return clusters
 
 
+async def list_all_clusters() -> list[dict]:
+    """전체 프로젝트의 k3s 클러스터 목록 반환 (관리자용)."""
+    client = _get_client()
+    all_clusters = []
+    async for key in client.scan_iter(match="union:k3s:*:clusters", count=100):
+        key_str = key.decode() if isinstance(key, bytes) else key
+        parts = key_str.split(":")
+        if len(parts) < 4:
+            continue
+        pid = parts[2]
+        clusters = await list_clusters(pid)
+        for c in clusters:
+            c["project_id"] = pid
+        all_clusters.extend(clusters)
+    all_clusters.sort(key=lambda c: c.get("created_at") or "", reverse=True)
+    return all_clusters
+
+
 async def update_cluster_status(
     project_id: str,
     cluster_id: str,

@@ -14,6 +14,7 @@
 			items: [
 				{ label: '전체 인스턴스', href: '/admin/instances', service: null },
 				{ label: 'Flavor', href: '/admin/flavors', service: null },
+				{ label: '이미지', href: '/admin/images', service: null },
 				{ label: '하이퍼바이저', href: '/admin/hypervisors', service: null },
 				{ label: 'GPU', href: '/admin/gpu', service: null },
 			],
@@ -46,9 +47,10 @@
 			prefix: '/admin/containers',
 			icon: 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4',
 			open: false,
-			service: 'zun' as const,
+			service: null as null,
 			items: [
-				{ label: '전체 컨테이너', href: '/admin/containers', service: null },
+				{ label: '전체 컨테이너', href: '/admin/containers', service: 'zun' as const },
+				{ label: 'k3s 클러스터', href: '/admin/containers/k3s', service: 'k3s' as const },
 			],
 		},
 		{
@@ -91,18 +93,17 @@
 		sidebarOpen.close();
 	});
 
-	function isSectionVisible(section: { service?: string }): boolean {
-		const svcs = $siteConfig.services;
-		if (!section.service) return true;
-		if (section.service === 'zun') return svcs?.zun ?? false;
-		return true;
+	function isItemVisible(item: { service?: string | null }): boolean {
+		const svcs = $siteConfig.services as Record<string, boolean> | undefined;
+		if (!item.service) return true;
+		return svcs?.[item.service] ?? false;
 	}
 
-	function isItemVisible(item: { service?: string | null }): boolean {
-		const svcs = $siteConfig.services;
-		if (!item.service) return true;
-		if (item.service === 'manila') return svcs?.manila ?? false;
-		return true;
+	function isSectionVisible(section: { service?: string | null; items: { service?: string | null }[] }): boolean {
+		const svcs = $siteConfig.services as Record<string, boolean> | undefined;
+		if (section.service) return svcs?.[section.service] ?? false;
+		// service 없는 섹션: 하위 아이템 중 하나라도 visible이면 표시
+		return section.items.some(item => isItemVisible(item));
 	}
 </script>
 

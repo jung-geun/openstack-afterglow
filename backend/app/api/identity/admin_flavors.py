@@ -56,7 +56,7 @@ def _flavor_to_dict(f) -> dict:
 
 @router.get("/flavors", dependencies=[Depends(require_admin)])
 async def list_admin_flavors(
-    limit: int = Query(default=20, ge=1, le=100),
+    limit: int = Query(default=20, ge=1, le=1000),
     marker: str | None = Query(default=None),
     is_public: bool | None = Query(default=None),
     conn: openstack.connection.Connection = Depends(get_os_conn),

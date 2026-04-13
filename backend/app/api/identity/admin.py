@@ -10,8 +10,8 @@ from app.api.deps import get_os_conn, get_token_info, require_admin
 
 _logger = logging.getLogger(__name__)
 from app.models.storage import FileStorageInfo, TopologyData, TopologyInstance
-from app.services import manila, libraries as lib_svc, neutron
-from app.services import library_builder
+from app.services import manila, libraries as lib_svc, neutron, nova
+from app.services import library_builder, k3s_cluster
 from app.services.cache import cached_call, ttl_fast, ttl_normal, ttl_slow
 from app.config import get_settings
 
@@ -280,11 +280,68 @@ async def list_hypervisors(conn: openstack.connection.Connection = Depends(get_o
         raise HTTPException(status_code=500, detail="하이퍼바이저 조회 실패")
 
 
+@router.get("/hypervisors/{hypervisor_id}", dependencies=[Depends(require_admin)])
+async def get_hypervisor_detail(hypervisor_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+    """하이퍼바이저 상세 정보 + 해당 호스트의 VM 목록."""
+    try:
+        def _get():
+            endpoint = conn.compute.get_endpoint()
+            resp = conn.session.get(
+                f"{endpoint}/os-hypervisors/{hypervisor_id}",
+                headers={"OpenStack-API-Version": "compute 2.53"},
+            )
+            h = resp.json().get("hypervisor", {})
+            hostname = h.get("hypervisor_hostname", "")
+            servers = []
+            if hostname:
+                try:
+                    srv_resp = conn.session.get(
+                        f"{endpoint}/servers/detail",
+                        params={"all_tenants": "1", "host": hostname, "limit": "200"},
+                        headers={"OpenStack-API-Version": "compute 2.53"},
+                    )
+                    for s in srv_resp.json().get("servers", []):
+                        servers.append({
+                            "id": s.get("id", ""),
+                            "name": s.get("name", ""),
+                            "status": s.get("status", ""),
+                            "project_id": s.get("tenant_id", "") or s.get("project_id", ""),
+                            "flavor": (s.get("flavor") or {}).get("original_name", ""),
+                        })
+                except Exception:
+                    pass
+            svc = h.get("service") or {}
+            return {
+                "id": h.get("id", ""),
+                "hypervisor_hostname": hostname,
+                "state": h.get("state", ""),
+                "status": h.get("status", ""),
+                "hypervisor_type": h.get("hypervisor_type", ""),
+                "hypervisor_version": h.get("hypervisor_version", 0),
+                "host_ip": h.get("host_ip", ""),
+                "service_host": svc.get("host", ""),
+                "vcpus": h.get("vcpus", 0) or 0,
+                "vcpus_used": h.get("vcpus_used", 0) or 0,
+                "memory_mb": h.get("memory_mb", 0) or 0,
+                "memory_mb_used": h.get("memory_mb_used", 0) or 0,
+                "local_gb": h.get("local_gb", 0) or 0,
+                "local_gb_used": h.get("local_gb_used", 0) or 0,
+                "running_vms": h.get("running_vms", 0) or 0,
+                "cpu_info": h.get("cpu_info"),
+                "servers": servers,
+            }
+        return await asyncio.to_thread(_get)
+    except Exception:
+        _logger.warning("하이퍼바이저 상세 조회 실패", exc_info=True)
+        raise HTTPException(status_code=500, detail="하이퍼바이저 상세 조회 실패")
+
+
 @router.get("/all-instances", dependencies=[Depends(require_admin)])
 async def list_all_instances(
     limit: int = Query(default=20, ge=1, le=100),
     marker: str | None = Query(default=None),
     project_id: str | None = Query(default=None),
+    host: str | None = Query(default=None),
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """전체 프로젝트의 인스턴스 목록 (페이지네이션)."""
@@ -296,6 +353,8 @@ async def list_all_instances(
                 params["marker"] = marker
             if project_id:
                 params["tenant_id"] = project_id
+            if host:
+                params["host"] = host
             resp = conn.session.get(
                 f"{endpoint}/servers/detail",
                 params=params,
@@ -309,7 +368,7 @@ async def list_all_instances(
                     fault = s.get("fault") or {}
                     if isinstance(fault, dict) and fault.get("message"):
                         fault_info = fault.get("message", "")
-                host = s.get("OS-EXT-SRV-ATTR:host") or s.get("host")
+                server_host = s.get("OS-EXT-SRV-ATTR:host") or s.get("host")
                 flavor = s.get("flavor") or {}
                 items.append({
                     "id": s.get("id", ""),
@@ -318,7 +377,7 @@ async def list_all_instances(
                     "project_id": s.get("tenant_id") or s.get("project_id"),
                     "user_id": s.get("user_id"),
                     "flavor": flavor.get("original_name") or flavor.get("id") or "",
-                    "host": host,
+                    "host": server_host,
                     "created_at": s.get("created"),
                     "fault": fault_info,
                 })
@@ -408,6 +467,7 @@ async def admin_topology(conn: openstack.connection.Connection = Depends(get_os_
     try:
         return await cached_call("union:admin:topology", ttl_normal(), _fetch, refresh=refresh)
     except Exception as e:
+        _logger.exception("토폴로지 조회 실패")
         raise HTTPException(status_code=500, detail="토폴로지 조회 실패")
 
 
@@ -452,12 +512,23 @@ async def list_all_routers(conn: openstack.connection.Connection = Depends(get_o
 
 
 @router.get("/all-ports", dependencies=[Depends(require_admin)])
-async def list_all_ports(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
-    """전체 프로젝트의 포트 목록."""
+async def list_all_ports(
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    limit: int = Query(default=20, ge=1, le=100),
+    marker: str | None = Query(default=None),
+    project_id: str | None = Query(default=None),
+):
+    """전체 프로젝트의 포트 목록 (페이지네이션)."""
     try:
         def _list():
-            return [
-                {
+            kwargs: dict = {"limit": limit}
+            if marker:
+                kwargs["marker"] = marker
+            if project_id:
+                kwargs["project_id"] = project_id
+            items = []
+            for p in conn.network.ports(**kwargs):
+                items.append({
                     "id": p.id,
                     "name": p.name or "",
                     "status": p.status or "",
@@ -467,25 +538,83 @@ async def list_all_ports(conn: openstack.connection.Connection = Depends(get_os_
                     "mac_address": p.mac_address or "",
                     "fixed_ips": p.fixed_ips or [],
                     "project_id": getattr(p, 'project_id', None),
-                }
-                for p in conn.network.ports()
-            ]
-        return await cached_call("union:admin:ports", ttl_normal(), _list, refresh=refresh)
+                })
+                if len(items) >= limit:
+                    break
+            next_marker = items[-1]["id"] if len(items) == limit else None
+            return {"items": items, "next_marker": next_marker, "count": len(items)}
+        return await asyncio.to_thread(_list)
     except Exception:
         raise HTTPException(status_code=500, detail="포트 목록 조회 실패")
 
 
+class CreatePortRequest(BaseModel):
+    network_id: str
+    name: str = ""
+    project_id: str | None = None
+    fixed_ip: str | None = None
+
+
+@router.post("/ports", dependencies=[Depends(require_admin)], status_code=201)
+async def create_port(
+    req: CreatePortRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """포트 생성 (관리자)."""
+    try:
+        def _create():
+            kwargs: dict = {"network_id": req.network_id}
+            if req.name:
+                kwargs["name"] = req.name
+            if req.project_id:
+                kwargs["project_id"] = req.project_id
+            if req.fixed_ip:
+                kwargs["fixed_ips"] = [{"ip_address": req.fixed_ip}]
+            p = conn.network.create_port(**kwargs)
+            return {
+                "id": p.id,
+                "name": p.name or "",
+                "status": p.status or "",
+                "network_id": p.network_id,
+                "device_owner": p.device_owner or "",
+                "device_id": p.device_id or "",
+                "mac_address": p.mac_address or "",
+                "fixed_ips": p.fixed_ips or [],
+                "project_id": getattr(p, 'project_id', None),
+            }
+        return await asyncio.to_thread(_create)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"포트 생성 실패: {e}")
+
+
 @router.get("/quotas/{project_id}", dependencies=[Depends(require_admin)])
 async def get_quotas(project_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
-    """특정 프로젝트의 컴퓨트 쿼터 조회."""
+    """특정 프로젝트의 쿼터 조회 (Compute + Volume, 실제 사용량 포함)."""
     try:
         def _get():
-            q = conn.compute.get_quota_set(project_id)
-            return {
-                "instances": {"limit": q.instances, "in_use": getattr(q, 'instances_used', 0)},
-                "cores": {"limit": q.cores, "in_use": getattr(q, 'cores_used', 0)},
-                "ram": {"limit": q.ram, "in_use": getattr(q, 'ram_used', 0)},
-            }
+            result: dict = {"compute": {}, "volume": {}}
+            compute_endpoint = conn.compute.get_endpoint()
+            bs_endpoint = conn.block_storage.get_endpoint()
+            try:
+                cq = conn.session.get(f"{compute_endpoint}/os-quota-sets/{project_id}/detail")
+                qs = cq.json().get("quota_set", {})
+                for key in ("instances", "cores", "ram"):
+                    q = qs.get(key, {})
+                    result["compute"][key] = {"limit": q.get("limit", 0), "in_use": q.get("in_use", 0)}
+            except Exception:
+                result["compute"] = {}
+            try:
+                bq = conn.session.get(f"{bs_endpoint}/os-quota-sets/{project_id}", params={"usage": "true"})
+                bqs = bq.json().get("quota_set", {})
+                for key in ("volumes", "gigabytes"):
+                    q = bqs.get(key, {})
+                    if isinstance(q, dict):
+                        result["volume"][key] = {"limit": q.get("limit", 0), "in_use": q.get("in_use", 0)}
+                    else:
+                        result["volume"][key] = {"limit": q, "in_use": 0}
+            except Exception:
+                result["volume"] = {}
+            return result
         return await asyncio.to_thread(_get)
     except Exception as e:
         raise HTTPException(status_code=500, detail="쿼터 조회 실패")
@@ -569,6 +698,33 @@ async def admin_overview_projects(conn: openstack.connection.Connection = Depend
 # ===========================================================================
 # 볼륨 관리 (관리자)
 # ===========================================================================
+
+
+@router.get("/volumes/{volume_id}", dependencies=[Depends(require_admin)])
+async def get_admin_volume(volume_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+    """볼륨 상세 조회 (관리자)."""
+    try:
+        def _get():
+            v = conn.block_storage.get_volume(volume_id)
+            return {
+                "id": v.id,
+                "name": v.name or "",
+                "status": v.status or "",
+                "size": v.size or 0,
+                "volume_type": v.volume_type or "",
+                "project_id": getattr(v, "project_id", None) or getattr(v, "os-vol-tenant-attr:tenant_id", None),
+                "attachments": [dict(a) for a in (v.attachments or [])],
+                "created_at": str(v.created_at) if v.created_at else None,
+                "description": v.description or "",
+                "bootable": getattr(v, "is_bootable", None),
+                "encrypted": getattr(v, "is_encrypted", None),
+                "multiattach": getattr(v, "is_multiattach", None),
+                "metadata": dict(v.metadata or {}),
+            }
+        return await asyncio.to_thread(_get)
+    except Exception:
+        _logger.warning("볼륨 상세 조회 실패", exc_info=True)
+        raise HTTPException(status_code=500, detail="볼륨 상세 조회 실패")
 
 class UpdateVolumeRequest(BaseModel):
     name: str | None = None
@@ -667,6 +823,103 @@ async def reset_volume_status(
         raise
 
 
+class LiveMigrateRequest(BaseModel):
+    host: str | None = None
+    block_migration: str = "auto"
+
+
+class ColdMigrateRequest(BaseModel):
+    pass
+
+
+@router.get("/compute-hosts", dependencies=[Depends(require_admin)])
+async def list_compute_hosts(conn: openstack.connection.Connection = Depends(get_os_conn)):
+    """마이그레이션 가능한 컴퓨트 호스트 목록."""
+    try:
+        return await asyncio.to_thread(nova.list_compute_hosts, conn)
+    except Exception:
+        raise HTTPException(status_code=500, detail="컴퓨트 호스트 목록 조회 실패")
+
+
+@router.post("/instances/{server_id}/live-migrate", dependencies=[Depends(require_admin)])
+async def live_migrate_instance(
+    server_id: str,
+    req: LiveMigrateRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """인스턴스 라이브 마이그레이션."""
+    try:
+        await asyncio.to_thread(nova.live_migrate_server, conn, server_id, req.host, req.block_migration)
+        return {"status": "migrating"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"라이브 마이그레이션 실패: {e}")
+
+
+@router.post("/instances/{server_id}/cold-migrate", dependencies=[Depends(require_admin)])
+async def cold_migrate_instance(
+    server_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """인스턴스 콜드 마이그레이션."""
+    try:
+        await asyncio.to_thread(nova.cold_migrate_server, conn, server_id)
+        return {"status": "migrating"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"콜드 마이그레이션 실패: {e}")
+
+
+@router.post("/instances/{server_id}/confirm-resize", dependencies=[Depends(require_admin)])
+async def confirm_resize_instance(
+    server_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """콜드 마이그레이션 후 리사이즈 확인."""
+    try:
+        await asyncio.to_thread(nova.confirm_resize_server, conn, server_id)
+        return {"status": "confirmed"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"리사이즈 확인 실패: {e}")
+
+
+class VolumeTransferRequest(BaseModel):
+    target_project_id: str
+
+
+@router.post("/volumes/{volume_id}/transfer", dependencies=[Depends(require_admin)])
+async def transfer_volume(
+    volume_id: str,
+    req: VolumeTransferRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """볼륨을 다른 프로젝트로 이전 (관리자 전용)."""
+    try:
+        def _transfer():
+            bs_endpoint = conn.block_storage.get_endpoint()
+            # 1. 이전 생성
+            create_resp = conn.session.post(
+                f"{bs_endpoint}/os-volume-transfer",
+                json={"transfer": {"name": f"admin-transfer-{volume_id[:8]}", "volume_id": volume_id}},
+            )
+            transfer = create_resp.json().get("transfer", {})
+            transfer_id = transfer.get("id")
+            auth_key = transfer.get("auth_key")
+            if not transfer_id or not auth_key:
+                raise Exception("이전 생성 실패: transfer_id 또는 auth_key를 받지 못했습니다")
+            # 2. 대상 프로젝트 범위로 이전 수락
+            accept_resp = conn.session.post(
+                f"{bs_endpoint}/os-volume-transfer/{transfer_id}/accept",
+                json={"accept": {"auth_key": auth_key}},
+                endpoint_override=None,
+                headers={"X-Project-Id": req.target_project_id},
+            )
+            result = accept_resp.json().get("transfer", {})
+            return {"status": "transferred", "volume_id": result.get("volume_id", volume_id)}
+        return await asyncio.to_thread(_transfer)
+    except Exception as e:
+        _logger.warning("볼륨 이전 실패", exc_info=True)
+        raise HTTPException(status_code=400, detail=f"볼륨 이전 실패: {e}")
+
+
 # ===========================================================================
 # 네트워크 관리 (관리자)
 # ===========================================================================
@@ -700,6 +953,15 @@ class CreateFloatingIpRequest(BaseModel):
 
 class UpdatePortRequest(BaseModel):
     name: str | None = None
+
+
+@router.get("/networks/{network_id}", dependencies=[Depends(require_admin)])
+async def get_admin_network(network_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+    """네트워크 상세 조회 (관리자)."""
+    try:
+        return await asyncio.to_thread(neutron.get_network_detail, conn, network_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="네트워크를 찾을 수 없습니다")
 
 
 @router.post("/networks", dependencies=[Depends(require_admin)], status_code=201)
@@ -944,3 +1206,18 @@ async def delete_port(
         await asyncio.to_thread(_delete)
     except HTTPException:
         raise
+
+
+# ===========================================================================
+# k3s 클러스터 관리 (관리자)
+# ===========================================================================
+
+@router.get("/k3s-clusters", dependencies=[Depends(require_admin)])
+async def list_admin_k3s_clusters():
+    """전체 프로젝트의 k3s 클러스터 목록 (관리자용)."""
+    try:
+        clusters = await k3s_cluster.list_all_clusters()
+        return clusters
+    except Exception:
+        _logger.warning("k3s 클러스터 목록 조회 실패", exc_info=True)
+        raise HTTPException(status_code=500, detail="k3s 클러스터 목록 조회 실패")

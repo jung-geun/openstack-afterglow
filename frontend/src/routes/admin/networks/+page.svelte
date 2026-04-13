@@ -42,6 +42,9 @@
 	let deleting = $state(false);
 	let deleteError = $state('');
 
+	// 상세 패널
+	let selectedNetworkId = $state<string | null>(null);
+
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
 
@@ -145,7 +148,10 @@
 				</thead>
 				<tbody>
 					{#each networks as n (n.id)}
-						<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/30 transition-colors">
+						<tr
+							onclick={() => { selectedNetworkId = n.id; }}
+							class="border-b border-gray-800/50 text-xs hover:bg-gray-800/30 transition-colors cursor-pointer {selectedNetworkId === n.id ? 'bg-gray-800/50' : ''}"
+						>
 							<td class="py-2 pr-4 text-white">{n.name || n.id.slice(0, 8)}</td>
 							<td class="py-2 pr-4 {n.status === 'ACTIVE' ? 'text-green-400' : 'text-gray-400'}">{n.status}</td>
 							<td class="py-2 pr-4">
@@ -154,7 +160,7 @@
 								{#if !n.is_external && !n.is_shared}<span class="text-gray-500">내부</span>{/if}
 							</td>
 							<td class="py-2 pr-4 text-gray-500">{n.subnets.length}개</td>
-							<td class="py-2">
+							<td class="py-2" onclick={(e) => e.stopPropagation()}>
 								<div class="flex items-center gap-1">
 									<button onclick={() => { editNet = n; editName = n.name; editShared = n.is_shared; editError = ''; }}
 										class="px-2 py-0.5 text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 rounded">수정</button>
@@ -228,6 +234,18 @@
 				<button onclick={() => { deleteNet = null; }} class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded-lg">취소</button>
 				<button onclick={confirmDelete} disabled={deleting} class="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-sm font-medium rounded-lg disabled:opacity-30">{deleting ? '삭제 중...' : '삭제'}</button>
 			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- 네트워크 상세 패널 -->
+{#if selectedNetworkId}
+	<div class="fixed inset-0 z-40" role="dialog" aria-modal="true" onkeydown={(e) => e.key === 'Escape' && (selectedNetworkId = null)} tabindex="-1">
+		<button class="absolute inset-0 bg-black/50 cursor-default" onclick={() => { selectedNetworkId = null; }} aria-label="패널 닫기"></button>
+		<div class="absolute right-0 top-14 bottom-0 w-96 bg-gray-950 border-l border-gray-700 overflow-y-auto shadow-2xl">
+			{#await import('$lib/components/NetworkDetailPanel.svelte') then { default: Panel }}
+				<Panel networkId={selectedNetworkId} onClose={() => { selectedNetworkId = null; }} token={token} projectId={projectId} />
+			{/await}
 		</div>
 	</div>
 {/if}

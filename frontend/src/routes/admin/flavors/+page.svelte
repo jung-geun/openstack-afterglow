@@ -31,8 +31,7 @@
 	let flavors = $state<Flavor[]>([]);
 	let loading = $state(true);
 	let pageSize = $state(20);
-	let markerStack = $state<string[]>([]);
-	let nextMarker = $state<string | null>(null);
+	let currentPage = $state(0);
 	let error = $state('');
 
 	// 필터
@@ -92,6 +91,15 @@
 			})
 	);
 
+	// 필터 변경 시 첫 페이지로 이동
+	$effect(() => {
+		nameFilter; vcpuFilter; ramFilter; diskFilter; gpuFilter;
+		currentPage = 0;
+	});
+
+	let pagedFlavors = $derived(filteredFlavors.slice(currentPage * pageSize, (currentPage + 1) * pageSize));
+	let totalPages = $derived(Math.max(1, Math.ceil(filteredFlavors.length / pageSize)));
+
 	// 생성 모달
 	let showCreate = $state(false);
 	let creating = $state(false);
@@ -133,15 +141,13 @@
 			: []
 	);
 
-	async function load(marker?: string) {
+	async function load() {
 		loading = true;
 		error = '';
 		try {
-			let url = `/api/admin/flavors?limit=${pageSize}`;
-			if (marker) url += `&marker=${marker}`;
-			const res = await api.get<PagedResponse<Flavor>>(url, token, projectId);
+			const res = await api.get<PagedResponse<Flavor>>('/api/admin/flavors?limit=999', token, projectId);
 			flavors = res.items;
-			nextMarker = res.next_marker;
+			currentPage = 0;
 		} catch (e) {
 			error = e instanceof ApiError ? e.message : 'Flavor 목록 조회 실패';
 			flavors = [];
@@ -164,7 +170,7 @@
 			showCreate = false;
 			form = { name: '', vcpus: 1, ram: 512, disk: 0, is_public: true };
 			await load();
-		} catch (e) {
+		} catch (e: unknown) {
 			createError = e instanceof ApiError ? e.message : 'Flavor 생성 실패';
 		} finally {
 			creating = false;
@@ -254,7 +260,7 @@
 			newSpecValue = '';
 			// 전체 목록도 갱신
 			await load();
-		} catch (e) {
+		} catch (e: unknown) {
 			specError = e instanceof ApiError ? e.message : 'extra_spec 추가 실패';
 		} finally {
 			specSaving = false;
@@ -336,7 +342,7 @@
 				표시:
 				{#each [10, 20, 30] as n}
 					<button
-						onclick={() => { pageSize = n; markerStack = []; nextMarker = null; load(); }}
+						onclick={() => { pageSize = n; currentPage = 0; }}
 						class="px-2 py-0.5 rounded {pageSize === n ? 'bg-blue-600 text-white' : 'bg-gray-800 hover:bg-gray-700 text-gray-400'}"
 					>{n}</button>
 				{/each}
@@ -411,7 +417,7 @@
 					</tr>
 				</thead>
 				<tbody>
-					{#each filteredFlavors as f (f.id)}
+					{#each pagedFlavors as f (f.id)}
 						<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/50 transition-colors">
 							<td class="py-2 pr-4">
 								<div>
@@ -447,22 +453,19 @@
 		</div>
 		<div class="flex items-center justify-between mt-3">
 			<button
-				disabled={markerStack.length === 0}
-				onclick={() => {
-					const prev = markerStack.slice(0, -1);
-					const marker = prev[prev.length - 1];
-					markerStack = prev;
-					load(marker);
-				}}
+				disabled={currentPage === 0}
+				onclick={() => { currentPage -= 1; }}
 				class="px-3 py-1.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed"
 			>← 이전</button>
+			<span class="text-xs text-gray-500">
+				{filteredFlavors.length}개 중 {currentPage * pageSize + 1}–{Math.min((currentPage + 1) * pageSize, filteredFlavors.length)}
+				{#if filteredFlavors.length < flavors.length}
+					(전체 {flavors.length}개 필터됨)
+				{/if}
+			</span>
 			<button
-				disabled={!nextMarker}
-				onclick={() => {
-					if (!nextMarker) return;
-					markerStack = [...markerStack, nextMarker];
-					load(nextMarker || undefined);
-				}}
+				disabled={currentPage >= totalPages - 1}
+				onclick={() => { currentPage += 1; }}
 				class="px-3 py-1.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed"
 			>다음 →</button>
 		</div>

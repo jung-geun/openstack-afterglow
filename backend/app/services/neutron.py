@@ -510,7 +510,7 @@ def _fip_to_info(f) -> FloatingIpInfo:
         id=f.id,
         floating_ip_address=f.floating_ip_address,
         fixed_ip_address=f.fixed_ip_address,
-        status=f.status,
+        status=f.status or "",
         port_id=f.port_id,
         floating_network_id=f.floating_network_id,
         project_id=getattr(f, 'project_id', None),

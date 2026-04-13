@@ -2,7 +2,7 @@ import { env } from '$env/dynamic/public';
 
 // 브라우저에서 직접 접근하는 Backend 주소
 // PUBLIC_API_BASE 는 docker-compose 또는 .env 에서 런타임으로 주입
-function getBaseUrl(): string {
+export function getBaseUrl(): string {
 	if (typeof window !== 'undefined') {
 		// 브라우저: PUBLIC_API_BASE 없으면 현재 호스트의 8000 포트로 시도
 		return env.PUBLIC_API_BASE || `${window.location.protocol}//${window.location.hostname}:8000`;

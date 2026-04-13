@@ -87,6 +87,14 @@ def delete_image(conn: openstack.connection.Connection, image_id: str) -> None:
     conn.image.delete_image(image_id, ignore_missing=False)
 
 
+def deactivate_image(conn: openstack.connection.Connection, image_id: str) -> None:
+    conn.image.deactivate_image(image_id)
+
+
+def reactivate_image(conn: openstack.connection.Connection, image_id: str) -> None:
+    conn.image.reactivate_image(image_id)
+
+
 def update_image_metadata(
     conn: openstack.connection.Connection,
     image_id: str,

@@ -487,6 +487,79 @@
 	}
 
 	let availableFips = $derived(allFloatingIps.filter(f => !f.port_id));
+
+	// 마이그레이션 (관리자 전용)
+	let showMigrateModal = $state(false);
+	let migrateType = $state<'live' | 'cold'>('live');
+	let migrateHosts = $state<{ name: string; state: string; status: string }[]>([]);
+	let migrateHost = $state('');
+	let migrateLoading = $state(false);
+	let migrateError = $state('');
+
+	async function openMigrateModal(type: 'live' | 'cold') {
+		migrateType = type;
+		migrateHost = '';
+		migrateError = '';
+		migrateHosts = [];
+		showMigrateModal = true;
+		try {
+			migrateHosts = await api.get<{ name: string; state: string; status: string }[]>(
+				'/api/admin/compute-hosts',
+				$auth.token ?? undefined,
+				$auth.projectId ?? undefined
+			);
+		} catch {
+			migrateHosts = [];
+		}
+	}
+
+	async function doMigrate() {
+		if (!instance) return;
+		migrateLoading = true;
+		migrateError = '';
+		try {
+			if (migrateType === 'live') {
+				await api.post(
+					`/api/admin/instances/${instance.id}/live-migrate`,
+					{ host: migrateHost || null, block_migration: 'auto' },
+					$auth.token ?? undefined,
+					$auth.projectId ?? undefined
+				);
+			} else {
+				await api.post(
+					`/api/admin/instances/${instance.id}/cold-migrate`,
+					{},
+					$auth.token ?? undefined,
+					$auth.projectId ?? undefined
+				);
+			}
+			showMigrateModal = false;
+			await fetchInstance(instance.id);
+		} catch (e) {
+			migrateError = e instanceof ApiError ? e.message : '마이그레이션 실패';
+		} finally {
+			migrateLoading = false;
+		}
+	}
+
+	async function confirmResize() {
+		if (!instance) return;
+		if (!confirm('리사이즈를 확인하시겠습니까?')) return;
+		actioning = 'confirm-resize';
+		try {
+			await api.post(
+				`/api/admin/instances/${instance.id}/confirm-resize`,
+				{},
+				$auth.token ?? undefined,
+				$auth.projectId ?? undefined
+			);
+			await fetchInstance(instance.id);
+		} catch (e) {
+			alert('리사이즈 확인 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+		} finally {
+			actioning = null;
+		}
+	}
 </script>
 
 <div class="p-8">
@@ -568,6 +641,35 @@
 					>
 						{actioning === 'shelve' ? '보관 중...' : '보관'}
 					</button>
+				{/if}
+				{#if adminProjectId}
+					{#if instance.status === 'ACTIVE'}
+						<button
+							onclick={() => openMigrateModal('live')}
+							disabled={!!actioning}
+							class="text-cyan-400 hover:text-cyan-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-cyan-900 hover:border-cyan-700 disabled:border-gray-700 transition-colors"
+						>
+							라이브 마이그레이션
+						</button>
+					{/if}
+					{#if instance.status === 'ACTIVE' || instance.status === 'SHUTOFF'}
+						<button
+							onclick={() => openMigrateModal('cold')}
+							disabled={!!actioning}
+							class="text-teal-400 hover:text-teal-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-teal-900 hover:border-teal-700 disabled:border-gray-700 transition-colors"
+						>
+							콜드 마이그레이션
+						</button>
+					{/if}
+					{#if instance.status === 'VERIFY_RESIZE'}
+						<button
+							onclick={confirmResize}
+							disabled={!!actioning}
+							class="text-orange-400 hover:text-orange-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-orange-900 hover:border-orange-700 disabled:border-gray-700 transition-colors"
+						>
+							{actioning === 'confirm-resize' ? '확인 중...' : '리사이즈 확인'}
+						</button>
+					{/if}
 				{/if}
 				<button
 					onclick={deleteInstance}
@@ -1073,3 +1175,33 @@
 		{/if}
 	{/if}
 </div>
+
+<!-- 마이그레이션 모달 -->
+{#if showMigrateModal}
+	<div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" role="dialog" onclick={() => { showMigrateModal = false; }} onkeydown={(e) => e.key === 'Escape' && (showMigrateModal = false)} tabindex="-1">
+		<div class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl" onclick={(e) => e.stopPropagation()}>
+			<h2 class="text-lg font-semibold text-white mb-1">{migrateType === 'live' ? '라이브 마이그레이션' : '콜드 마이그레이션'}</h2>
+			<p class="text-xs text-gray-500 mb-5">{migrateType === 'live' ? '인스턴스 실행 중에 다른 호스트로 이동합니다.' : '인스턴스를 종료하고 다른 호스트로 이동합니다.'}</p>
+			{#if migrateError}
+				<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{migrateError}</div>
+			{/if}
+			<div class="space-y-4">
+				<div>
+					<label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">대상 호스트 <span class="text-gray-600">(선택 안 하면 자동)</span></label>
+					<select bind:value={migrateHost} class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
+						<option value="">자동 선택</option>
+						{#each migrateHosts as h}
+							<option value={h.name}>{h.name}</option>
+						{/each}
+					</select>
+				</div>
+			</div>
+			<div class="flex justify-end gap-3 mt-6">
+				<button onclick={() => { showMigrateModal = false; }} class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded-lg">취소</button>
+				<button onclick={doMigrate} disabled={migrateLoading} class="px-4 py-2 bg-cyan-700 hover:bg-cyan-600 text-white text-sm font-medium rounded-lg disabled:opacity-30">
+					{migrateLoading ? '마이그레이션 중...' : '마이그레이션'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}

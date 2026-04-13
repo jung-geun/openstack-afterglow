@@ -3,6 +3,7 @@
 	import { auth } from '$lib/stores/auth';
 	import { api } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import { siteConfig } from '$lib/config/site';
 
 	interface Service {
 		id: string;
@@ -56,6 +57,29 @@
 
 	// 카테고리별 독립 로딩 상태
 	const allCategories: TabKey[] = ['compute', 'network', 'block_storage', 'shared_file_system', 'orchestration', 'container', 'container_infra', 'endpoints', 'storage_pools'];
+
+	// 선택적 서비스와 탭 키 매핑 (서비스가 비활성이면 탭 숨김)
+	const serviceTabMap: Partial<Record<TabKey, keyof NonNullable<typeof $siteConfig>['services']>> = {
+		container_infra: 'magnum',
+		shared_file_system: 'manila',
+		container: 'zun',
+	};
+
+	let visibleTabs = $derived(
+		tabs.filter(tab => {
+			const serviceKey = serviceTabMap[tab.key];
+			if (!serviceKey) return true;
+			return ($siteConfig?.services as Record<string, boolean>)?.[serviceKey] ?? false;
+		})
+	);
+
+	let activeCategories = $derived(
+		allCategories.filter(cat => {
+			const serviceKey = serviceTabMap[cat];
+			if (!serviceKey) return true;
+			return ($siteConfig?.services as Record<string, boolean>)?.[serviceKey] ?? false;
+		})
+	);
 	let loadingMap = $state<Record<TabKey, boolean>>(Object.fromEntries(allCategories.map(c => [c, true])) as Record<TabKey, boolean>);
 
 	let autoRefresh = $state(true);
@@ -103,12 +127,19 @@
 
 	function loadAll(isRefresh = false) {
 		lastRefresh = new Date();
-		allCategories.forEach(cat => loadCategory(cat, isRefresh));
+		activeCategories.forEach(cat => loadCategory(cat, isRefresh));
 	}
 
 	function refresh() {
 		loadAll(true);
 	}
+
+	// activeTab이 숨겨진 탭이면 첫 번째 visible 탭으로 이동
+	$effect(() => {
+		if (visibleTabs.length > 0 && !visibleTabs.find(t => t.key === activeTab)) {
+			activeTab = visibleTabs[0].key;
+		}
+	});
 
 	onMount(() => { loadAll(); });
 
@@ -141,7 +172,7 @@
 
 	<!-- 탭 바 -->
 	<div class="flex flex-wrap gap-1 mb-6 border-b border-gray-800 pb-0">
-		{#each tabs as tab}
+		{#each visibleTabs as tab}
 			<button
 				onclick={() => activeTab = tab.key}
 				class="px-3 py-2 text-xs font-medium rounded-t-lg transition-colors relative -mb-px border-b-2 {activeTab === tab.key

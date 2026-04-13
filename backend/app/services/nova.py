@@ -266,6 +266,38 @@ def get_console_url(conn: openstack.connection.Connection, server_id: str) -> st
     return result.get("url", "")
 
 
+def live_migrate_server(conn: openstack.connection.Connection, server_id: str, host: Optional[str] = None, block_migration: str = "auto") -> None:
+    """라이브 마이그레이션 (인스턴스 실행 중 이동)."""
+    conn.compute.live_migrate_server(server_id, host=host, block_migration=block_migration)
+
+
+def cold_migrate_server(conn: openstack.connection.Connection, server_id: str) -> None:
+    """콜드 마이그레이션 (인스턴스 종료 후 이동)."""
+    conn.compute.migrate_server(server_id)
+
+
+def confirm_resize_server(conn: openstack.connection.Connection, server_id: str) -> None:
+    """콜드 마이그레이션 후 리사이즈 확인."""
+    conn.compute.confirm_server_resize(server_id)
+
+
+def list_compute_hosts(conn: openstack.connection.Connection) -> list[dict]:
+    """마이그레이션 대상 가능한 컴퓨트 호스트 목록."""
+    endpoint = conn.compute.get_endpoint()
+    try:
+        resp = conn.session.get(
+            f"{endpoint}/os-hypervisors/detail",
+            headers={"OpenStack-API-Version": "compute 2.53"},
+        )
+        return [
+            {"name": h.get("hypervisor_hostname", ""), "state": h.get("state", ""), "status": h.get("status", "")}
+            for h in resp.json().get("hypervisors", [])
+            if h.get("state") == "up" and h.get("status") == "enabled"
+        ]
+    except Exception:
+        return []
+
+
 def _server_to_info(s) -> InstanceInfo:
     ips = []
     for net_name, net_addrs in (s.addresses or {}).items():

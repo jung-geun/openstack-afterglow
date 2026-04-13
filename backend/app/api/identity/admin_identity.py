@@ -45,6 +45,14 @@ async def list_users(
             kwargs["marker"] = marker
         users = []
         for u in conn.identity.users(**kwargs):
+            # Keystone list API가 created_at을 반환하지 않는 경우 개별 GET으로 보완
+            created_at = getattr(u, 'created_at', None)
+            if not created_at:
+                try:
+                    detail = conn.identity.get_user(u.id)
+                    created_at = getattr(detail, 'created_at', None)
+                except Exception:
+                    pass
             users.append({
                 "id": u.id,
                 "name": u.name or "",
@@ -52,7 +60,7 @@ async def list_users(
                 "enabled": u.is_enabled,
                 "domain_id": getattr(u, 'domain_id', None),
                 "default_project_id": getattr(u, 'default_project_id', None),
-                "created_at": str(u.created_at) if hasattr(u, 'created_at') and u.created_at else None,
+                "created_at": str(created_at) if created_at else None,
             })
             if len(users) >= limit:
                 break
@@ -328,26 +336,28 @@ async def get_project_quotas(
     project_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    """프로젝트 쿼터 조회 (Compute + Volume)."""
+    """프로젝트 쿼터 조회 (Compute + Volume, 실제 사용량 포함)."""
     def _get():
         result: dict = {"compute": {}, "volume": {}}
-        # Compute quotas
+        compute_endpoint = conn.compute.get_endpoint()
+        bs_endpoint = conn.block_storage.get_endpoint()
         try:
-            q = conn.compute.get_quota_set(project_id)
-            result["compute"] = {
-                "instances": {"limit": q.instances, "in_use": getattr(q, 'instances_used', 0)},
-                "cores": {"limit": q.cores, "in_use": getattr(q, 'cores_used', 0)},
-                "ram": {"limit": q.ram, "in_use": getattr(q, 'ram_used', 0)},
-            }
+            cq = conn.session.get(f"{compute_endpoint}/os-quota-sets/{project_id}/detail")
+            qs = cq.json().get("quota_set", {})
+            for key in ("instances", "cores", "ram"):
+                q = qs.get(key, {})
+                result["compute"][key] = {"limit": q.get("limit", 0), "in_use": q.get("in_use", 0)}
         except Exception:
             result["compute"] = {}
-        # Volume quotas
         try:
-            vq = conn.block_storage.get_quota_set(project_id)
-            result["volume"] = {
-                "volumes": {"limit": getattr(vq, 'volumes', 0), "in_use": getattr(vq, 'volumes_used', 0)},
-                "gigabytes": {"limit": getattr(vq, 'gigabytes', 0), "in_use": getattr(vq, 'gigabytes_used', 0)},
-            }
+            bq = conn.session.get(f"{bs_endpoint}/os-quota-sets/{project_id}", params={"usage": "true"})
+            bqs = bq.json().get("quota_set", {})
+            for key in ("volumes", "gigabytes"):
+                q = bqs.get(key, {})
+                if isinstance(q, dict):
+                    result["volume"][key] = {"limit": q.get("limit", 0), "in_use": q.get("in_use", 0)}
+                else:
+                    result["volume"][key] = {"limit": q, "in_use": 0}
         except Exception:
             result["volume"] = {}
         return result

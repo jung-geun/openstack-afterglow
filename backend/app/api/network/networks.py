@@ -1,6 +1,9 @@
 import asyncio
+import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
 import openstack
+
+_logger = logging.getLogger(__name__)
 
 from app.api.deps import get_os_conn
 from app.models.storage import (
@@ -147,6 +150,7 @@ async def get_topology(conn: openstack.connection.Connection = Depends(get_os_co
             refresh=refresh,
         )
     except Exception as e:
+        _logger.exception("토폴로지 조회 실패")
         raise HTTPException(status_code=500, detail="토폴로지 조회 실패")
 
 

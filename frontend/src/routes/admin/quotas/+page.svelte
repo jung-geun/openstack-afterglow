@@ -26,6 +26,9 @@
 
 	let projects = $state<Project[]>([]);
 	let selectedProjectId = $state('');
+	let selectedProjectName = $state('');
+	let projectSearch = $state('');
+	let showProjectDropdown = $state(false);
 	let quotas = $state<Quotas | null>(null);
 	let loading = $state(true);
 	let quotaLoading = $state(false);
@@ -43,12 +46,26 @@
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
 
+	let filteredProjects = $derived(
+		projectSearch
+			? projects.filter(p => p.name.toLowerCase().includes(projectSearch.toLowerCase()))
+			: projects
+	);
+
 	async function loadProjects() {
 		loading = true;
 		try {
-			const res = await api.get<{ items: Project[] }>('/api/admin/projects?limit=100', token, projectId);
-			projects = res.items || [];
+			const res = await api.get<{ id: string; name: string }[]>('/api/admin/projects/names', token, projectId);
+			projects = res || [];
 		} catch { projects = []; } finally { loading = false; }
+	}
+
+	function selectProject(p: Project) {
+		selectedProjectId = p.id;
+		selectedProjectName = p.name;
+		projectSearch = p.name;
+		showProjectDropdown = false;
+		loadQuotas();
 	}
 
 	async function loadQuotas() {
@@ -94,14 +111,31 @@
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={3} />
 	{:else}
-		<div class="mb-6">
+		<div class="mb-6 relative max-w-md">
 			<label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">프로젝트 선택</label>
-			<select bind:value={selectedProjectId} onchange={loadQuotas} class="bg-gray-800 border border-gray-700 text-sm text-gray-300 rounded-lg px-3 py-2 w-full max-w-md focus:outline-none focus:border-blue-500">
-				<option value="">프로젝트를 선택하세요</option>
-				{#each projects as p (p.id)}
-					<option value={p.id}>{p.name}</option>
-				{/each}
-			</select>
+			<input
+				type="text"
+				bind:value={projectSearch}
+				onfocus={() => showProjectDropdown = true}
+				oninput={() => { showProjectDropdown = true; if (!projectSearch) { selectedProjectId = ''; selectedProjectName = ''; quotas = null; } }}
+				onblur={() => setTimeout(() => { showProjectDropdown = false; }, 150)}
+				placeholder="프로젝트 이름으로 검색..."
+				class="w-full bg-gray-800 border border-gray-700 text-sm text-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500"
+			/>
+			{#if showProjectDropdown && filteredProjects.length > 0}
+				<div class="absolute z-10 w-full mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-xl max-h-60 overflow-y-auto">
+					{#each filteredProjects as p (p.id)}
+						<button
+							type="button"
+							onmousedown={() => selectProject(p)}
+							class="w-full text-left px-3 py-2 text-sm text-gray-300 hover:bg-gray-700 transition-colors {selectedProjectId === p.id ? 'bg-gray-700 text-white' : ''}"
+						>{p.name}</button>
+					{/each}
+				</div>
+			{/if}
+			{#if selectedProjectName}
+				<div class="mt-1 text-xs text-gray-500">선택됨: <span class="text-blue-400">{selectedProjectName}</span></div>
+			{/if}
 		</div>
 
 		{#if selectedProjectId}

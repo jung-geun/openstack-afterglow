@@ -23,6 +23,7 @@ from app.api.identity.admin_flavors import router as admin_flavors_router
 from app.api.identity.admin_identity import router as admin_identity_router
 from app.api.identity.admin_gpu import router as admin_gpu_router
 from app.api.identity.admin_notion import router as admin_notion_router
+from app.api.identity.admin_images import router as admin_images_router
 from app.api.identity.profile import router as profile_router
 from app.api.container import clusters_router, containers_router
 from app.api.k3s import k3s_clusters_router, k3s_callback_router
@@ -196,6 +197,7 @@ app.include_router(admin_flavors_router, prefix="/api/admin", tags=["admin-flavo
 app.include_router(admin_identity_router, prefix="/api/admin", tags=["admin-identity"])
 app.include_router(admin_gpu_router, prefix="/api/admin", tags=["admin-gpu"])
 app.include_router(admin_notion_router, prefix="/api/admin", tags=["admin-notion"])
+app.include_router(admin_images_router, prefix="/api/admin", tags=["admin-images"])
 app.include_router(profile_router, prefix="/api/profile", tags=["profile"])
 # Compute
 app.include_router(images_router, prefix="/api/images", tags=["images"])

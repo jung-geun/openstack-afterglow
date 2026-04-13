@@ -202,7 +202,7 @@ class FloatingIpInfo(BaseModel):
     id: str
     floating_ip_address: str
     fixed_ip_address: Optional[str] = None
-    status: str
+    status: str = ""
     port_id: Optional[str] = None
     floating_network_id: str
     project_id: Optional[str] = None

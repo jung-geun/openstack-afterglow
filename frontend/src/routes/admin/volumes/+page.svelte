@@ -68,8 +68,27 @@
 	let resetting = $state(false);
 	let resetError = $state('');
 
+	// 볼륨 이전 모달
+	let transferVolume = $state<AdminVolume | null>(null);
+	let transferSearch = $state('');
+	let transferProjectId = $state('');
+	let transferProjectName = $state('');
+	let showTransferDropdown = $state(false);
+	let transferring = $state(false);
+	let transferError = $state('');
+	let allProjects = $state<{ id: string; name: string }[]>([]);
+
+	// 상세 패널
+	let selectedVolumeId = $state<string | null>(null);
+
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
+
+	let filteredTransferProjects = $derived(
+		transferSearch
+			? allProjects.filter(p => p.name.toLowerCase().includes(transferSearch.toLowerCase()))
+			: allProjects
+	);
 
 	async function loadTimeseries(range: string) {
 		tsLoading = true;
@@ -133,7 +152,23 @@
 		} catch (e) { resetError = e instanceof ApiError ? e.message : '상태 초기화 실패'; } finally { resetting = false; }
 	}
 
-	onMount(() => { load(); loadTimeseries(tsRange); projectNames.load(token, projectId); });
+	async function loadProjects() {
+		try {
+			allProjects = await api.get<{ id: string; name: string }[]>('/api/admin/projects/names', token, projectId);
+		} catch { allProjects = []; }
+	}
+
+	async function confirmTransfer() {
+		if (!transferVolume || !transferProjectId) return;
+		transferring = true; transferError = '';
+		try {
+			await api.post(`/api/admin/volumes/${transferVolume.id}/transfer`, { target_project_id: transferProjectId }, token, projectId);
+			transferVolume = null;
+			await load(markerStack[markerStack.length - 1]);
+		} catch (e) { transferError = e instanceof ApiError ? e.message : '이전 실패'; } finally { transferring = false; }
+	}
+
+	onMount(() => { load(); loadTimeseries(tsRange); projectNames.load(token, projectId); loadProjects(); });
 </script>
 
 <div class="p-4 md:p-8 max-w-6xl">
@@ -187,30 +222,37 @@
 				</thead>
 				<tbody>
 					{#each allVolumes as v (v.id)}
-						<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/30 transition-colors">
+						<tr
+							onclick={() => { selectedVolumeId = v.id; }}
+							class="border-b border-gray-800/50 text-xs hover:bg-gray-800/30 transition-colors cursor-pointer {selectedVolumeId === v.id ? 'bg-gray-800/50' : ''}"
+						>
 							<td class="py-2 pr-4 text-white">{v.name || v.id.slice(0, 8)}</td>
 							<td class="py-2 pr-4 {statusColor[v.status] ?? 'text-gray-400'}">{v.status}</td>
 							<td class="py-2 pr-4 text-gray-400">{formatNumber(v.size)} GB</td>
 							<td class="py-2 pr-4">
-							<button
-								onclick={() => { if (v.project_id) copyProjectId(v.project_id); }}
-								class="text-gray-400 hover:text-blue-400 transition-colors cursor-pointer text-left"
-								title={v.project_id ?? ''}
-							>
-								{#if copiedProjectId === v.project_id}
-									<span class="text-green-400 text-xs">복사됨</span>
-								{:else}
-									<span class="text-xs">{v.project_id ? ($projectNames.get(v.project_id) ?? v.project_id.slice(0, 8)) : '-'}</span>
-								{/if}
-							</button>
-						</td>
+								<button
+									onclick={(e) => { e.stopPropagation(); if (v.project_id) copyProjectId(v.project_id); }}
+									class="text-gray-400 hover:text-blue-400 transition-colors cursor-pointer text-left"
+									title={v.project_id ?? ''}
+								>
+									{#if copiedProjectId === v.project_id}
+										<span class="text-green-400 text-xs">복사됨</span>
+									{:else}
+										<span class="text-xs">{v.project_id ? ($projectNames.get(v.project_id) ?? v.project_id.slice(0, 8)) : '-'}</span>
+									{/if}
+								</button>
+							</td>
 							<td class="py-2 pr-4 text-gray-500">{v.created_at?.slice(0, 10) ?? '-'}</td>
-							<td class="py-2">
+							<td class="py-2" onclick={(e) => e.stopPropagation()}>
 								<div class="flex items-center gap-1">
 									<button onclick={() => { editVolume = v; editName = v.name; editDesc = ''; editError = ''; }}
 										class="px-2 py-0.5 text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 rounded">수정</button>
 									<button onclick={() => { extendVolume = v; newSize = v.size + 10; extendError = ''; }}
 										class="px-2 py-0.5 text-xs bg-blue-900/40 hover:bg-blue-800/40 text-blue-400 rounded">확장</button>
+									{#if v.status === 'available'}
+										<button onclick={() => { transferVolume = v; transferSearch = ''; transferProjectId = ''; transferProjectName = ''; transferError = ''; }}
+											class="px-2 py-0.5 text-xs bg-purple-900/40 hover:bg-purple-800/40 text-purple-400 rounded">이전</button>
+									{/if}
 									{#if v.status === 'error'}
 										<button onclick={() => { resetVolume = v; resetStatus = 'available'; resetError = ''; }}
 											class="px-2 py-0.5 text-xs bg-yellow-900/40 hover:bg-yellow-800/40 text-yellow-400 rounded">상태초기화</button>
@@ -319,6 +361,64 @@
 				<button onclick={() => { resetVolume = null; }} class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded-lg">취소</button>
 				<button onclick={confirmReset} disabled={resetting} class="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 text-white text-sm font-medium rounded-lg disabled:opacity-30">{resetting ? '초기화 중...' : '초기화'}</button>
 			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- 볼륨 이전 모달 -->
+{#if transferVolume}
+	<div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onclick={() => { transferVolume = null; }} role="dialog" onkeydown={(e) => e.key === 'Escape' && (transferVolume = null)} tabindex="-1">
+		<div class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl" onclick={(e) => e.stopPropagation()}>
+			<h2 class="text-lg font-semibold text-white mb-3">볼륨 프로젝트 이전</h2>
+			<p class="text-xs text-gray-500 mb-4">볼륨 <span class="text-white">{transferVolume.name || transferVolume.id.slice(0, 8)}</span>을 다른 프로젝트로 이전합니다.</p>
+			{#if transferError}<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{transferError}</div>{/if}
+			<div class="relative">
+				<label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">대상 프로젝트 *</label>
+				<input
+					type="text"
+					bind:value={transferSearch}
+					onfocus={() => showTransferDropdown = true}
+					oninput={() => { showTransferDropdown = true; if (!transferSearch) { transferProjectId = ''; transferProjectName = ''; } }}
+					onblur={() => setTimeout(() => { showTransferDropdown = false; }, 150)}
+					placeholder="프로젝트 검색..."
+					class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+				/>
+				{#if showTransferDropdown && filteredTransferProjects.length > 0}
+					<div class="absolute z-10 w-full mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-xl max-h-40 overflow-y-auto">
+						{#each filteredTransferProjects as p (p.id)}
+							<button
+								type="button"
+								onmousedown={() => { transferProjectId = p.id; transferProjectName = p.name; transferSearch = p.name; showTransferDropdown = false; }}
+								class="w-full text-left px-3 py-2 text-sm text-gray-300 hover:bg-gray-700 transition-colors {transferProjectId === p.id ? 'bg-gray-700 text-white' : ''}"
+							>{p.name}</button>
+						{/each}
+					</div>
+				{/if}
+				{#if transferProjectName}
+					<div class="mt-1 text-xs text-gray-500">선택됨: <span class="text-blue-400">{transferProjectName}</span></div>
+				{/if}
+			</div>
+			<div class="flex justify-end gap-3 mt-6">
+				<button onclick={() => { transferVolume = null; }} class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded-lg">취소</button>
+				<button onclick={confirmTransfer} disabled={transferring || !transferProjectId} class="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white text-sm font-medium rounded-lg disabled:opacity-30">{transferring ? '이전 중...' : '이전'}</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- 볼륨 상세 패널 -->
+{#if selectedVolumeId}
+	<div class="fixed inset-0 z-40" role="dialog" aria-modal="true" onkeydown={(e) => e.key === 'Escape' && (selectedVolumeId = null)} tabindex="-1">
+		<button class="absolute inset-0 bg-black/50 cursor-default" onclick={() => { selectedVolumeId = null; }} aria-label="패널 닫기"></button>
+		<div class="absolute right-0 top-14 bottom-0 w-full md:w-[50vw] max-w-2xl bg-gray-950 border-l border-gray-700 overflow-y-auto shadow-2xl">
+			{#await import('$lib/components/AdminVolumeDetailPanel.svelte') then { default: Panel }}
+				<Panel volumeId={selectedVolumeId} onClose={() => { selectedVolumeId = null; }} onRefresh={() => load(markerStack[markerStack.length - 1])} token={token} projectId={projectId} />
+			{:catch}
+				<!-- Fallback: 기존 상세 페이지로 이동 -->
+				<div class="p-6">
+					<a href="/admin/volumes/{selectedVolumeId}" class="text-blue-400 hover:text-blue-300">상세 페이지에서 보기 →</a>
+				</div>
+			{/await}
 		</div>
 	</div>
 {/if}

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { auth } from '$lib/stores/auth';
   import { untrack } from 'svelte';
-  import { api, ApiError } from '$lib/api/client';
+  import { api, ApiError, getBaseUrl } from '$lib/api/client';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import RefreshButton from '$lib/components/RefreshButton.svelte';
 
@@ -124,9 +124,7 @@
     createdClusterId = null;
 
     try {
-      const baseUrl = typeof window !== 'undefined'
-        ? `${window.location.protocol}//${window.location.hostname}:8000`
-        : 'http://backend:8000';
+      const baseUrl = getBaseUrl();
 
       const res = await fetch(`${baseUrl}/api/k3s/clusters/async`, {
         method: 'POST',
@@ -197,9 +195,7 @@
   }
 
   async function downloadKubeconfig(id: string, name: string) {
-    const baseUrl = typeof window !== 'undefined'
-      ? `${window.location.protocol}//${window.location.hostname}:8000`
-      : 'http://backend:8000';
+    const baseUrl = getBaseUrl();
     const res = await fetch(`${baseUrl}/api/k3s/clusters/${id}/kubeconfig`, {
       headers: {
         ...(token ? { 'X-Auth-Token': token } : {}),

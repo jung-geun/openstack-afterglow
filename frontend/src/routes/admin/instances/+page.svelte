@@ -61,10 +61,9 @@
 	// 필터
 	let hostFilter = $state('');
 	let projectFilter = $state('');
-	let uniqueHosts = $derived([...new Set(allInstances.map(i => i.host).filter(Boolean) as string[])].sort());
+	let availableHosts = $state<string[]>([]);
 	let filteredInstances = $derived(
 		allInstances.filter(i =>
-			(!hostFilter || i.host === hostFilter) &&
 			(!projectFilter || (i.project_id ?? '').toLowerCase().includes(projectFilter.toLowerCase()))
 		)
 	);
@@ -86,6 +85,7 @@
 		try {
 			let url = `/api/admin/all-instances?limit=${pageSize}`;
 			if (marker) url += `&marker=${marker}`;
+			if (hostFilter) url += `&host=${encodeURIComponent(hostFilter)}`;
 			const res = await api.get<PagedResponse<AdminInstance>>(url, token, projectId);
 			allInstances = res.items;
 			nextMarker = res.next_marker;
@@ -93,6 +93,15 @@
 			allInstances = [];
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function loadHosts() {
+		try {
+			const hvs = await api.get<{ id: string; name: string }[]>('/api/admin/hypervisors', token, projectId);
+			availableHosts = hvs.map(h => h.name).sort();
+		} catch {
+			availableHosts = [];
 		}
 	}
 
@@ -120,6 +129,7 @@
 	onMount(() => {
 		load();
 		loadTimeseries(tsRange);
+		loadHosts();
 		projectNames.load(token, projectId);
 	});
 </script>
@@ -128,7 +138,7 @@
 	<div class="flex items-center justify-between mb-6">
 		<h1 class="text-2xl font-bold text-white">전체 인스턴스</h1>
 		<div class="flex items-center gap-3">
-			<button onclick={() => { markerStack = []; nextMarker = null; hostFilter = ''; projectFilter = ''; load(); }} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
+			<button onclick={() => { markerStack = []; nextMarker = null; hostFilter = ''; projectFilter = ''; load(); loadHosts(); }} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
 			<div class="flex items-center gap-1 text-xs text-gray-500">
 				표시:
 				{#each [10, 20, 30] as n}
@@ -143,9 +153,9 @@
 
 	<!-- 필터 -->
 	<div class="flex gap-3 mb-4">
-		<select bind:value={hostFilter} class="bg-gray-800 border border-gray-700 text-sm text-gray-300 rounded-lg px-2 py-1.5 focus:outline-none focus:border-blue-500">
+		<select bind:value={hostFilter} onchange={() => { markerStack = []; nextMarker = null; load(); }} class="bg-gray-800 border border-gray-700 text-sm text-gray-300 rounded-lg px-2 py-1.5 focus:outline-none focus:border-blue-500">
 			<option value="">모든 호스트</option>
-			{#each uniqueHosts as h}
+			{#each availableHosts as h}
 				<option value={h}>{h}</option>
 			{/each}
 		</select>
