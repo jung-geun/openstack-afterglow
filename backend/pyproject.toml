@@ -1,6 +1,6 @@
 [project]
 name = "union-backend"
-version = "0.1.0"
+version = "1.11.0"
 description = "Union - OpenStack VM deployment platform"
 requires-python = ">=3.12"
 dependencies = [

@@ -1221,3 +1221,73 @@ async def list_admin_k3s_clusters():
     except Exception:
         _logger.warning("k3s 클러스터 목록 조회 실패", exc_info=True)
         raise HTTPException(status_code=500, detail="k3s 클러스터 목록 조회 실패")
+
+
+# ===========================================================================
+# 시스템 버전 정보
+# ===========================================================================
+
+_admin_start_time: float = __import__("time").time()
+
+def _read_backend_version() -> str:
+    import tomllib, pathlib
+    for p in [pathlib.Path("pyproject.toml"), pathlib.Path(__file__).resolve().parents[3] / "pyproject.toml"]:
+        if p.exists():
+            with open(p, "rb") as f:
+                return tomllib.load(f).get("project", {}).get("version", "unknown")
+    return "unknown"
+
+_backend_version: str = _read_backend_version()
+
+
+@router.get("/version", dependencies=[Depends(require_admin)])
+async def admin_version():
+    """플랫폼 버전, 런타임, 의존성, Git 정보 반환."""
+    import importlib.metadata
+    import platform
+    import subprocess
+    import time
+
+    s = get_settings()
+
+    # 의존성 버전
+    deps: dict = {}
+    for pkg in ("fastapi", "openstacksdk", "python-keystoneclient", "pydantic", "uvicorn"):
+        try:
+            deps[pkg] = importlib.metadata.version(pkg)
+        except importlib.metadata.PackageNotFoundError:
+            deps[pkg] = None
+
+    # Git 정보 (Docker 환경에서는 없을 수 있음)
+    def _git(args: list[str]) -> str | None:
+        try:
+            result = subprocess.run(
+                ["git"] + args, capture_output=True, text=True, timeout=3,
+                cwd="/app",
+            )
+            return result.stdout.strip() or None
+        except Exception:
+            return None
+
+    git_commit = _git(["rev-parse", "--short", "HEAD"])
+    git_tag = _git(["describe", "--tags", "--abbrev=0"])
+    git_branch = _git(["rev-parse", "--abbrev-ref", "HEAD"])
+
+    return {
+        "platform": {
+            "backend_version": _backend_version,
+        },
+        "runtime": {
+            "python_version": platform.python_version(),
+            "uptime_seconds": int(time.time() - _admin_start_time),
+        },
+        "dependencies": deps,
+        "git": {
+            "commit": git_commit,
+            "tag": git_tag,
+            "branch": git_branch,
+        },
+        "config": {
+            "k3s_version": s.k3s_version,
+        },
+    }

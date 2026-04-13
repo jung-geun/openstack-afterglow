@@ -55,6 +55,7 @@ def create_server(
     availability_zone: Optional[str] = None,
     metadata: Optional[dict] = None,
     delete_boot_volume_on_termination: bool = False,
+    security_groups: Optional[list[str]] = None,
 ) -> InstanceInfo:
     body = {
         "name": name,
@@ -82,6 +83,8 @@ def create_server(
         body["availability_zone"] = availability_zone
     if metadata:
         body["metadata"] = metadata
+    if security_groups:
+        body["security_groups"] = [{"name": sg} for sg in security_groups]
 
     s = conn.compute.create_server(**body)
     s = conn.compute.wait_for_server(s, status="ACTIVE", wait=600)

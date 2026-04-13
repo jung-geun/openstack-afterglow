@@ -82,13 +82,9 @@ FROM oven/bun:1 AS frontend-dev
 WORKDIR /app
 
 COPY frontend/package.json frontend/bun.lock* ./
-RUN bun install \
-    && groupadd -r appuser && useradd -r -g appuser -d /app -s /sbin/nologin appuser
+RUN bun install
 
 COPY frontend/ .
-RUN chown -R appuser:appuser /app
-
-USER appuser
 
 EXPOSE 3000
 ENV PORT=3000

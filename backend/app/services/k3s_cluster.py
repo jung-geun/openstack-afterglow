@@ -204,7 +204,7 @@ async def check_stale_clusters(timeout_minutes: int = 30) -> None:
             for cid_bytes in ids:
                 cid = cid_bytes.decode() if isinstance(cid_bytes, bytes) else cid_bytes
                 cluster = await get_cluster(project_id, cid)
-                if not cluster or cluster.get("status") != "CREATING":
+                if not cluster or cluster.get("status") not in ("CREATING", "PROVISIONING"):
                     continue
                 created_at_str = cluster.get("created_at")
                 if not created_at_str:

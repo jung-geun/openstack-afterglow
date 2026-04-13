@@ -100,10 +100,19 @@ _setup_logging()
 _logger = logging.getLogger(__name__)
 
 _is_production = os.environ.get("UNION_ENV", "development") == "production"
+
+def _read_app_version() -> str:
+    import tomllib, pathlib
+    for p in [pathlib.Path("pyproject.toml"), pathlib.Path(__file__).resolve().parents[2] / "pyproject.toml"]:
+        if p.exists():
+            with open(p, "rb") as f:
+                return tomllib.load(f).get("project", {}).get("version", "0.1.0")
+    return "0.1.0"
+
 app = FastAPI(
     title="Union",
     description="OpenStack VM 배포 + OverlayFS 마운트 웹 플랫폼",
-    version="0.1.0",
+    version=_read_app_version(),
     docs_url=None if _is_production else "/docs",
     redoc_url=None if _is_production else "/redoc",
     openapi_url=None if _is_production else "/openapi.json",
@@ -131,9 +140,15 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     return JSONResponse(status_code=500, content={"detail": "내부 서버 오류"})
 
 # 보안 응답 헤더: API 서버이므로 제한적 CSP 적용
+_DOCS_PATHS = {"/docs", "/redoc", "/openapi.json"}
+
 @app.middleware("http")
 async def security_headers_middleware(request: Request, call_next):
     response = await call_next(request)
+    # dev 모드에서 /docs, /redoc 경로는 Swagger UI 로딩을 위해 보안 헤더 생략
+    path = request.url.path.rstrip("/")
+    if not _is_production and path in _DOCS_PATHS:
+        return response
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"

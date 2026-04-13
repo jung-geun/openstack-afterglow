@@ -95,12 +95,19 @@ async def _provision_agents(
 
     s = get_settings()
     agent_flavor_id = cluster.get("agent_flavor_id") or s.k3s_default_agent_flavor_id
+    if not agent_flavor_id:
+        _logger.error("k3s agent provision: agent_flavor_id not configured")
+        await k3s_cluster.update_cluster_status(
+            project_id, cluster_id, "ERROR", "에이전트 플레이버 미설정"
+        )
+        return
     network_id = cluster.get("network_id") or s.default_network_id
     key_name = cluster.get("key_name") or None
     cluster_name = cluster.get("name") or cluster_id
     k3s_version = cluster.get("k3s_version") or s.k3s_version
     image_id = s.k3s_server_image_id
     boot_volume_size = s.k3s_boot_volume_size_gb
+    sg_id = cluster.get("security_group_id") or None
 
     # 관리자 OpenStack 연결로 VM 생성 (에이전트는 사용자 프로젝트에 생성)
     try:
@@ -138,6 +145,7 @@ async def _provision_agents(
                 key_name=key_name,
                 metadata={"union_role": "k3s_agent", "union_cluster_id": cluster_id},
                 delete_boot_volume_on_termination=True,
+                security_groups=[sg_id] if sg_id else None,
             )
             agent_vm_ids.append(vm.id)
             _logger.info("k3s agent %s created: %s", agent_name, vm.id)

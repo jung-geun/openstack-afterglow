@@ -19,6 +19,16 @@
 		file_storage_count: number;
 	}
 
+	declare const __APP_VERSION__: string;
+
+	interface VersionInfo {
+		platform: { backend_version: string };
+		runtime: { python_version: string; uptime_seconds: number };
+		dependencies: Record<string, string | null>;
+		git: { commit: string | null; tag: string | null; branch: string | null };
+		config: { k3s_version: string };
+	}
+
 	interface ProjectUsage {
 		project_id: string;
 		project_name: string;
@@ -34,6 +44,8 @@
 	let error = $state('');
 	let projectUsage = $state<ProjectUsage[]>([]);
 	let projectUsageLoading = $state(true);
+	let versionInfo = $state<VersionInfo | null>(null);
+	let versionOpen = $state(false);
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
@@ -58,6 +70,17 @@
 		return `${u}/${q}${unit ? ' ' + unit : ''}`;
 	}
 
+	function formatUptime(seconds: number): string {
+		const d = Math.floor(seconds / 86400);
+		const h = Math.floor((seconds % 86400) / 3600);
+		const m = Math.floor((seconds % 3600) / 60);
+		const parts = [];
+		if (d > 0) parts.push(`${d}d`);
+		if (h > 0) parts.push(`${h}h`);
+		parts.push(`${m}m`);
+		return parts.join(' ');
+	}
+
 	onMount(() => {
 		api.get<Overview>('/api/admin/overview', token, projectId)
 			.then(r => { overview = r; })
@@ -71,6 +94,10 @@
 			.then(r => { projectUsage = r; })
 			.catch(() => {})
 			.finally(() => { projectUsageLoading = false; });
+
+		api.get<VersionInfo>('/api/admin/version', token, projectId)
+			.then(r => { versionInfo = r; })
+			.catch(() => {});
 	});
 </script>
 
@@ -275,6 +302,87 @@
 			<a href="/admin/topology" class="text-sm text-blue-400 hover:text-blue-300 transition-colors">전체 토폴로지 →</a>
 			<a href="/admin/networks" class="text-sm text-blue-400 hover:text-blue-300 transition-colors">네트워크 →</a>
 		</div>
+
+		<!-- 시스템 버전 정보 (접이식) -->
+		<button
+			class="mt-6 flex items-center gap-1.5 text-sm text-gray-600 hover:text-gray-400 transition-colors"
+			onclick={() => versionOpen = !versionOpen}
+		>
+			<svg class="w-3.5 h-3.5 transition-transform {versionOpen ? 'rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+			</svg>
+			시스템 버전 정보
+		</button>
+		{#if versionOpen && versionInfo}
+			<div class="bg-gray-900 border border-gray-800 rounded-xl p-6 mt-2">
+				<div class="grid grid-cols-1 sm:grid-cols-2 gap-x-12 gap-y-1">
+					<!-- 플랫폼 -->
+					<div class="col-span-full mb-2">
+						<span class="text-xs font-semibold text-gray-500 uppercase tracking-wide">플랫폼</span>
+					</div>
+					<div class="flex justify-between py-1 border-b border-gray-800/50">
+						<span class="text-xs text-gray-500">백엔드 버전</span>
+						<span class="text-xs text-gray-300 font-mono">{versionInfo.platform.backend_version}</span>
+					</div>
+					<div class="flex justify-between py-1 border-b border-gray-800/50">
+						<span class="text-xs text-gray-500">프론트엔드 버전</span>
+						<span class="text-xs text-gray-300 font-mono">{__APP_VERSION__}</span>
+					</div>
+					<!-- 런타임 -->
+					<div class="col-span-full mt-3 mb-2">
+						<span class="text-xs font-semibold text-gray-500 uppercase tracking-wide">런타임</span>
+					</div>
+					<div class="flex justify-between py-1 border-b border-gray-800/50">
+						<span class="text-xs text-gray-500">Python</span>
+						<span class="text-xs text-gray-300 font-mono">{versionInfo.runtime.python_version}</span>
+					</div>
+					<div class="flex justify-between py-1 border-b border-gray-800/50">
+						<span class="text-xs text-gray-500">업타임</span>
+						<span class="text-xs text-gray-300 font-mono">{formatUptime(versionInfo.runtime.uptime_seconds)}</span>
+					</div>
+					<!-- 의존성 -->
+					<div class="col-span-full mt-3 mb-2">
+						<span class="text-xs font-semibold text-gray-500 uppercase tracking-wide">의존성</span>
+					</div>
+					{#each Object.entries(versionInfo.dependencies) as [pkg, ver]}
+						<div class="flex justify-between py-1 border-b border-gray-800/50">
+							<span class="text-xs text-gray-500">{pkg}</span>
+							<span class="text-xs text-gray-300 font-mono">{ver ?? '-'}</span>
+						</div>
+					{/each}
+					<!-- Git -->
+					{#if versionInfo.git.commit}
+						<div class="col-span-full mt-3 mb-2">
+							<span class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Git</span>
+						</div>
+						<div class="flex justify-between py-1 border-b border-gray-800/50">
+							<span class="text-xs text-gray-500">커밋</span>
+							<span class="text-xs text-gray-300 font-mono">{versionInfo.git.commit}</span>
+						</div>
+						{#if versionInfo.git.tag}
+							<div class="flex justify-between py-1 border-b border-gray-800/50">
+								<span class="text-xs text-gray-500">태그</span>
+								<span class="text-xs text-gray-300 font-mono">{versionInfo.git.tag}</span>
+							</div>
+						{/if}
+						{#if versionInfo.git.branch}
+							<div class="flex justify-between py-1 border-b border-gray-800/50">
+								<span class="text-xs text-gray-500">브랜치</span>
+								<span class="text-xs text-gray-300 font-mono">{versionInfo.git.branch}</span>
+							</div>
+						{/if}
+					{/if}
+					<!-- 설정 -->
+					<div class="col-span-full mt-3 mb-2">
+						<span class="text-xs font-semibold text-gray-500 uppercase tracking-wide">설정</span>
+					</div>
+					<div class="flex justify-between py-1 border-b border-gray-800/50">
+						<span class="text-xs text-gray-500">k3s 버전</span>
+						<span class="text-xs text-gray-300 font-mono">{versionInfo.config.k3s_version}</span>
+					</div>
+				</div>
+			</div>
+		{/if}
 	{:else}
 		<div class="text-gray-500 text-sm">개요를 불러올 수 없습니다</div>
 	{/if}

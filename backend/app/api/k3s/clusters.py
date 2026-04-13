@@ -117,6 +117,11 @@ async def create_k3s_cluster_async(
         )
 
     agent_flavor_id = req.agent_flavor_id or s.k3s_default_agent_flavor_id
+    if req.agent_count > 0 and not agent_flavor_id:
+        raise HTTPException(
+            status_code=503,
+            detail="에이전트 플레이버가 설정되지 않았습니다. 관리자에게 문의하세요."
+        )
     network_id = req.network_id or s.default_network_id
     k3s_version = s.k3s_version
     boot_volume_size = s.k3s_boot_volume_size_gb
@@ -214,6 +219,7 @@ async def create_k3s_cluster_async(
                     "union_cluster_name": req.name,
                 },
                 delete_boot_volume_on_termination=True,
+                security_groups=[sg_id],
             )
             server_vm_id = server_vm.id
             yield event(K3sProgressStep.SERVER_CREATING, 55, f"서버 VM 생성 완료: {server_vm_id}")
