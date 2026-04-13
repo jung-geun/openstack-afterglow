@@ -26,7 +26,7 @@ services:
     image: ${REGISTRY}/union-backend:${IMAGE_TAG:-latest}
     pull_policy: always
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./config.toml:/app/config.toml:ro
       - ./logs:/app/logs
@@ -34,6 +34,7 @@ services:
     environment:
       - OPENSTACK_PASSWORD=${OPENSTACK_PASSWORD}
       - SECRET_KEY=${SECRET_KEY}
+      - UNION_ENV=production
     depends_on:
       - redis
     restart: always
@@ -51,7 +52,7 @@ services:
     image: ${REGISTRY}/union-frontend:${IMAGE_TAG:-latest}
     pull_policy: always
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
       - ORIGIN=${ORIGIN:-http://localhost:3000}
       - PUBLIC_API_BASE=${PUBLIC_API_BASE:-http://localhost:8000}
@@ -91,8 +92,8 @@ services:
     profiles: ["monitoring"]
     environment:
       - discovery.type=single-node
-      - DISABLE_SECURITY_PLUGIN=true
       - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OPENSEARCH_PASSWORD:?OPENSEARCH_PASSWORD must be set}
     ports:
       - "127.0.0.1:9200:9200"
     volumes:

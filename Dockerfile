@@ -75,13 +75,20 @@ ENV PORT=3000
 CMD ["node", "build"]
 
 # ── Frontend 개발 스테이지 (docker-compose.override.yml에서 사용) ────────────
-# 소스코드를 볼륨 마운트하여 실시간 반영, Vite dev 서버로 HMR 지원
+# Frontend 개발 스테이지
+# 볼륨 마운트 시 소스코드 실시간 반영, 아닐 경우 이미지 내 소스 사용
 FROM oven/bun:1 AS frontend-dev
 
 WORKDIR /app
 
 COPY frontend/package.json frontend/bun.lock* ./
-RUN bun install
+RUN bun install \
+    && groupadd -r appuser && useradd -r -g appuser -d /app -s /sbin/nologin appuser
+
+COPY frontend/ .
+RUN chown -R appuser:appuser /app
+
+USER appuser
 
 EXPOSE 3000
 ENV PORT=3000

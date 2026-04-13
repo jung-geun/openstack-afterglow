@@ -3,9 +3,10 @@
 import asyncio
 import logging
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Request
 
 from app.models.k3s import K3sCallbackRequest
+from app.rate_limit import limiter
 from app.services import k3s_cluster
 
 router = APIRouter()
@@ -13,7 +14,8 @@ _logger = logging.getLogger(__name__)
 
 
 @router.post("/callback")
-async def k3s_callback(req: K3sCallbackRequest):
+@limiter.limit("10/minute")
+async def k3s_callback(request: Request, req: K3sCallbackRequest):
     """k3s 서버 VM의 cloud-init에서 kubeconfig + node-token 수신.
 
     일회성 토큰으로 보안 보장. 토큰 소비 후 에이전트 VM 생성은 백그라운드로 처리.
@@ -22,7 +24,7 @@ async def k3s_callback(req: K3sCallbackRequest):
     token_data = await k3s_cluster.consume_callback_token(req.token)
     if not token_data:
         _logger.warning("k3s callback received with invalid/expired token")
-        return {"ok": False, "error": "invalid or expired token"}
+        raise HTTPException(status_code=403, detail="Forbidden")
 
     project_id = token_data["project_id"]
     cluster_id = token_data["cluster_id"]

@@ -117,12 +117,16 @@ async def cached_call(
 
 
 async def invalidate(pattern: str) -> None:
-    """패턴에 매칭되는 캐시 키를 모두 삭제."""
+    """패턴에 매칭되는 캐시 키를 모두 삭제.
+    KEYS 대신 SCAN을 사용해 Redis 블로킹을 방지.
+    """
     client = _get_client()
     try:
-        keys = await client.keys(pattern)
-        if keys:
-            await client.delete(*keys)
+        keys_to_delete: list = []
+        async for key in client.scan_iter(match=pattern, count=100):
+            keys_to_delete.append(key)
+        if keys_to_delete:
+            await client.delete(*keys_to_delete)
     except Exception as e:
         logger.warning("캐시 삭제 실패 (%s): %s", pattern, e)
 

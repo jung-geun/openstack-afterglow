@@ -99,10 +99,14 @@ def _setup_logging() -> None:
 _setup_logging()
 _logger = logging.getLogger(__name__)
 
+_is_production = os.environ.get("UNION_ENV", "development") == "production"
 app = FastAPI(
     title="Union",
     description="OpenStack VM 배포 + OverlayFS 마운트 웹 플랫폼",
     version="0.1.0",
+    docs_url=None if _is_production else "/docs",
+    redoc_url=None if _is_production else "/redoc",
+    openapi_url=None if _is_production else "/openapi.json",
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
@@ -125,6 +129,19 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     """처리되지 않은 예외를 로그에 기록하고 500을 반환."""
     _logger.exception("Unhandled exception: %s %s", request.method, request.url.path)
     return JSONResponse(status_code=500, content={"detail": "내부 서버 오류"})
+
+# 보안 응답 헤더: API 서버이므로 제한적 CSP 적용
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+    return response
+
 
 # CORS: credentials 사용 시 allow_origins=["*"] 는 브라우저가 거부하므로
 # 요청 Origin을 동적으로 허용 (개발 환경)

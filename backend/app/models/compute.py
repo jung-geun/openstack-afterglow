@@ -86,7 +86,7 @@ class CreateInstanceRequest(BaseModel):
     strategy: Optional[str] = None   # "prebuilt" | "dynamic" | None (no libraries)
     network_id: Optional[str] = None
     key_name: Optional[str] = None
-    admin_pass: Optional[str] = None
+    admin_pass: Optional[str] = Field(None, min_length=8, max_length=128)
     availability_zone: Optional[str] = None
     boot_volume_size_gb: Optional[int] = Field(None, ge=1, le=16384)
     delete_boot_volume_on_termination: bool = False

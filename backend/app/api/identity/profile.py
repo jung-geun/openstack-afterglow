@@ -1,10 +1,11 @@
 """사용자 본인 프로필 관리 엔드포인트."""
 import asyncio
 import logging
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from app.api.deps import get_token_info, get_os_conn
+from app.rate_limit import limiter
 from app.services import keystone
 from app.config import get_settings
 
@@ -94,7 +95,9 @@ async def update_profile(
 
 
 @router.post("/password")
+@limiter.limit("5/minute")
 async def change_password(
+    request: Request,
     req: ChangePasswordRequest,
     token_info: dict = Depends(get_token_info),
     conn=Depends(get_os_conn),
