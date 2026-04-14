@@ -193,6 +193,15 @@ async def create_k3s_cluster_async(
 
             # --- Step 3: 콜백 토큰 + cloud-init 생성 ---
             yield event(K3sProgressStep.SERVER_CREATING, 30, "서버 VM cloud-init 생성 중...")
+            # 공개키 미리 조회 (에이전트 VM은 admin conn으로 생성하므로 cloud-init에 직접 주입)
+            ssh_public_key = ""
+            if req.key_name:
+                try:
+                    kp = await asyncio.to_thread(conn.compute.find_keypair, req.key_name)
+                    if kp:
+                        ssh_public_key = kp.public_key or ""
+                except Exception:
+                    pass
             callback_token = await k3s_cluster.create_callback_token(project_id, cluster_id)
             callback_url = s.k3s_callback_base_url.rstrip("/")
             userdata = k3s_cloudinit.generate_server_userdata(
@@ -241,6 +250,7 @@ async def create_k3s_cluster_async(
                 "server_ip": "",
                 "api_address": "",
                 "key_name": req.key_name or "",
+                "ssh_public_key": ssh_public_key,
                 "k3s_version": k3s_version,
                 "created_at": now,
                 "updated_at": now,

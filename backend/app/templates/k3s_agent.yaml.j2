@@ -1,5 +1,9 @@
 #cloud-config
 # k3s 에이전트(worker) 노드 — 클러스터: {{ cluster_name }}
+{% if ssh_public_key %}
+ssh_authorized_keys:
+  - {{ ssh_public_key }}
+{% endif %}
 
 package_update: true
 packages:

@@ -102,7 +102,7 @@ async def _provision_agents(
         )
         return
     network_id = cluster.get("network_id") or s.default_network_id
-    key_name = cluster.get("key_name") or None
+    ssh_public_key = cluster.get("ssh_public_key") or None
     cluster_name = cluster.get("name") or cluster_id
     k3s_version = cluster.get("k3s_version") or s.k3s_version
     image_id = s.k3s_server_image_id
@@ -136,13 +136,13 @@ async def _provision_agents(
                 k3s_version=k3s_version,
                 server_ip=server_ip,
                 node_token=node_token,
+                ssh_public_key=ssh_public_key,
             )
-            # 에이전트 VM 생성
+            # 에이전트 VM 생성 (admin conn이므로 key_name 대신 cloud-init으로 공개키 주입)
             vm = await asyncio.to_thread(
                 nova.create_server,
                 conn, agent_name, agent_flavor_id, network_id, vol.id,
                 userdata=userdata,
-                key_name=key_name,
                 metadata={"union_role": "k3s_agent", "union_cluster_id": cluster_id},
                 delete_boot_volume_on_termination=True,
                 security_groups=[sg_id] if sg_id else None,

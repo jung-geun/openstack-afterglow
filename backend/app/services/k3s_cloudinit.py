@@ -34,6 +34,7 @@ def generate_agent_userdata(
     k3s_version: str,
     server_ip: str,
     node_token: str,
+    ssh_public_key: str | None = None,
 ) -> str:
     """k3s 에이전트 노드 cloud-init YAML을 렌더링하여 base64 인코딩 반환."""
     yaml_str = _jinja.get_template("k3s_agent.yaml.j2").render(
@@ -41,5 +42,6 @@ def generate_agent_userdata(
         k3s_version=k3s_version,
         server_ip=server_ip,
         node_token=node_token,
+        ssh_public_key=ssh_public_key or "",
     )
     return base64.b64encode(yaml_str.encode()).decode()
