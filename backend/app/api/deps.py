@@ -45,8 +45,7 @@ async def _check_session_timeout(token_hash: str, project_id: str) -> None:
     except HTTPException:
         raise
     except Exception:
-        _logger.error("Redis 장애로 세션 타임아웃 검증 불가 — 요청 거부", exc_info=True)
-        raise HTTPException(status_code=503, detail="서비스를 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도해 주세요.")
+        _logger.warning("Redis 장애로 세션 타임아웃 검증 건너뜀 — Keystone 토큰 검증으로 폴백", exc_info=True)
 
 
 async def get_session_remaining(token: str, project_id: str) -> int:

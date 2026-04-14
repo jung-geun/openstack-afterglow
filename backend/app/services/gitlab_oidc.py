@@ -23,6 +23,9 @@ logger = logging.getLogger(__name__)
 
 _STATE_TTL = 600  # 10분
 
+# Redis 장애 시 인메모리 state 폴백 (단일 프로세스용, 재시작 시 소실)
+_fallback_states: dict[str, float] = {}
+
 
 async def _get_redis():
     from app.services.cache import _get_redis as _cache_redis
@@ -34,8 +37,12 @@ async def get_authorize_url() -> str:
     settings = get_settings()
     state = secrets.token_urlsafe(32)
 
-    r = await _get_redis()
-    await r.setex(f"union:gitlab_state:{state}", _STATE_TTL, "1")
+    try:
+        r = await _get_redis()
+        await r.setex(f"union:gitlab_state:{state}", _STATE_TTL, "1")
+    except Exception:
+        logger.warning("Redis 장애로 OIDC state를 인메모리에 임시 저장합니다")
+        _fallback_states[state] = __import__("time").time() + _STATE_TTL
 
     params = {
         "client_id": settings.gitlab_oidc_client_id,
@@ -49,13 +56,25 @@ async def get_authorize_url() -> str:
 
 
 async def _validate_state(state: str) -> None:
-    """Redis에서 state 검증 후 삭제. 없거나 Redis 오류면 예외 발생."""
-    r = await _get_redis()
-    key = f"union:gitlab_state:{state}"
-    val = await r.get(key)
-    if val is None:
-        raise ValueError("유효하지 않거나 만료된 state입니다")
-    await r.delete(key)
+    """Redis에서 state 검증 후 삭제. Redis 장애 시 인메모리 폴백 확인."""
+    import time as _time
+    # Redis 시도
+    try:
+        r = await _get_redis()
+        key = f"union:gitlab_state:{state}"
+        val = await r.get(key)
+        if val is not None:
+            await r.delete(key)
+            return
+    except Exception:
+        logger.warning("Redis 장애로 state 검증을 인메모리 폴백으로 시도합니다")
+
+    # 인메모리 폴백 확인
+    expiry = _fallback_states.pop(state, None)
+    if expiry is not None and _time.time() < expiry:
+        return
+
+    raise ValueError("유효하지 않거나 만료된 state입니다")
 
 
 async def _exchange_gitlab_code(code: str) -> dict:

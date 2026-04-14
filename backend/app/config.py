@@ -12,14 +12,20 @@ from pydantic_settings import BaseSettings
 from pydantic import model_validator
 
 
-def _load_toml() -> dict:
-    """프로젝트 루트의 config.toml을 읽어 평탄화된 dict를 반환."""
-    # 가능한 위치: CWD, CWD 상위, /app (Docker)
-    candidates = [
+def _config_candidates() -> list[Path]:
+    """설정 파일 후보 경로 목록. CWD → 상위 → /app (Docker) → union.toml (K8s ConfigMap)."""
+    return [
         Path.cwd() / "config.toml",
         Path.cwd().parent / "config.toml",
         Path("/app/config.toml"),
+        Path("/app/union.toml"),       # K8s ConfigMap 마운트 경로
+        Path.cwd() / "union.toml",
     ]
+
+
+def _load_toml() -> dict:
+    """프로젝트 루트의 config.toml을 읽어 평탄화된 dict를 반환."""
+    candidates = _config_candidates()
     for path in candidates:
         if path.exists():
             with open(path, "rb") as f:
@@ -252,11 +258,7 @@ class Settings(BaseSettings):
 @lru_cache
 def load_raw_toml() -> dict:
     """config.toml 원본 dict를 반환 (중첩 구조 보존, 평탄화하지 않음)."""
-    candidates = [
-        Path.cwd() / "config.toml",
-        Path.cwd().parent / "config.toml",
-        Path("/app/config.toml"),
-    ]
+    candidates = _config_candidates()
     for path in candidates:
         if path.exists():
             with open(path, "rb") as f:
@@ -266,6 +268,15 @@ def load_raw_toml() -> dict:
 
 @lru_cache
 def get_settings() -> Settings:
+    # K8s 서비스 디스커버리 환경변수 충돌 방지
+    # K8s는 서비스명 기반으로 {SVC}_PORT=tcp://IP:PORT 등을 자동 주입하는데,
+    # 이것이 우리 설정 필드(backend_port, frontend_port 등)와 충돌할 수 있음.
+    _k8s_collision_keys = ("BACKEND_PORT", "FRONTEND_PORT")
+    for key in _k8s_collision_keys:
+        val = os.environ.get(key, "")
+        if val.startswith("tcp://") or val.startswith("udp://"):
+            del os.environ[key]
+
     # TOML 값으로 환경변수를 채워 Settings가 이를 읽도록 함
     # (환경변수 > .env 이므로, TOML 값을 환경변수로 주입하되 이미 설정된 값은 덮어쓰지 않음)
     toml_data = _load_toml()

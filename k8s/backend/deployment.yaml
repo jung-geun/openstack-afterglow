@@ -41,18 +41,24 @@ spec:
             - name: union-config-volume
               mountPath: /app/union.toml
               subPath: union.toml
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            failureThreshold: 30
+            periodSeconds: 2
           livenessProbe:
             httpGet:
               path: /api/health
               port: 8000
-            initialDelaySeconds: 15
             periodSeconds: 20
+            failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /api/health
               port: 8000
-            initialDelaySeconds: 10
             periodSeconds: 5
+            failureThreshold: 3
           resources:
             requests:
               memory: "128Mi"

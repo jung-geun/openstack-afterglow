@@ -270,7 +270,16 @@ app.include_router(user_dashboard_router, prefix="/api/user-dashboard", tags=["u
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok"}
+    """헬스체크 엔드포인트. Redis 장애와 무관하게 항상 200을 반환."""
+    detail = {"status": "ok", "redis": "unknown"}
+    try:
+        from app.services.cache import _get_redis
+        r = await _get_redis()
+        await r.ping()
+        detail["redis"] = "ok"
+    except Exception:
+        detail["redis"] = "unavailable"
+    return detail
 
 
 # ---------------------------------------------------------------------------
