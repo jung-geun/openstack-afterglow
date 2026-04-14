@@ -47,6 +47,8 @@ services:
     image: glcr.dmslab.re.kr/jung-geun/cephfs-mount/union:latest
     ports:
       - "3000:3000"
+    volumes:
+      - ./logs:/app/logs
     environment:
       - ORIGIN=http://localhost:3000
       - PUBLIC_API_BASE=http://localhost:8000

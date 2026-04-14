@@ -21,7 +21,7 @@ spec:
           # 실제 레지스트리 주소로 변경 필요
           # 예: ghcr.io/myorg/union-frontend:latest
           #     registry.gitlab.com/myorg/union/frontend:latest
-          image: ghcr.io/IMAGE_OWNER/union-frontend:latest
+          image: glcr.dmslab.re.kr/jung-geun/cephfs-mount/union:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 3000
