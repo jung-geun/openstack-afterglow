@@ -76,10 +76,8 @@
   async function checkKubeconfig() {
     if (!clusterId || !cluster || cluster.status !== 'ACTIVE') return;
     try {
-      const baseUrl = typeof window !== 'undefined'
-        ? `${window.location.protocol}//${window.location.hostname}:8000`
-        : 'http://backend:8000';
-      const res = await fetch(`${baseUrl}/api/k3s/clusters/${clusterId}/kubeconfig`, {
+      const baseUrl = getBaseUrl();
+      const res = await fetch(`${baseUrl}${apiBase}/${clusterId}/kubeconfig`, {
         method: 'HEAD',
         headers: {
           ...(token ? { 'X-Auth-Token': token } : {}),
@@ -94,10 +92,8 @@
 
   async function downloadKubeconfig() {
     if (!clusterId || !cluster) return;
-    const baseUrl = typeof window !== 'undefined'
-      ? `${window.location.protocol}//${window.location.hostname}:8000`
-      : 'http://backend:8000';
-    const res = await fetch(`${baseUrl}/api/k3s/clusters/${clusterId}/kubeconfig`, {
+    const baseUrl = getBaseUrl();
+    const res = await fetch(`${baseUrl}${apiBase}/${clusterId}/kubeconfig`, {
       headers: {
         ...(token ? { 'X-Auth-Token': token } : {}),
         ...(projectId ? { 'X-Project-Id': projectId } : {}),
@@ -120,7 +116,7 @@
     if (!cluster || !confirm(`k3s 클러스터 "${cluster.name}"을 삭제하시겠습니까?`)) return;
     deleting = true;
     try {
-      await api.delete(`/api/k3s/clusters/${clusterId}`, token, projectId);
+      await api.delete(`${apiBase}/${clusterId}`, token, projectId);
       if (onClose) onClose();
       else goto('/dashboard/containers/k3s');
     } catch (e) {

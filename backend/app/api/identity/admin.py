@@ -1233,6 +1233,78 @@ async def get_admin_k3s_cluster(cluster_id: str):
     return cluster
 
 
+@router.get("/k3s-clusters/{cluster_id}/kubeconfig", dependencies=[Depends(require_admin)])
+async def download_admin_k3s_kubeconfig(cluster_id: str):
+    """관리자용 kubeconfig 다운로드."""
+    from fastapi.responses import Response
+
+    cluster = await k3s_cluster.get_cluster_admin(cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
+
+    kubeconfig = await k3s_cluster.get_kubeconfig_admin(cluster_id)
+    if not kubeconfig:
+        raise HTTPException(status_code=404, detail="kubeconfig가 아직 준비되지 않았습니다.")
+
+    cluster_name = cluster.get("name", cluster_id)
+    return Response(
+        content=kubeconfig,
+        media_type="application/yaml",
+        headers={"Content-Disposition": f'attachment; filename="kubeconfig-{cluster_name}.yaml"'},
+    )
+
+
+@router.delete("/k3s-clusters/{cluster_id}", status_code=204, dependencies=[Depends(require_admin)])
+async def delete_admin_k3s_cluster(
+    cluster_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """관리자용 k3s 클러스터 삭제."""
+    import asyncio
+    from app.services import nova as _nova, neutron as _neutron
+
+    cluster = await k3s_cluster.get_cluster_admin(cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
+
+    project_id = cluster.get("project_id", "")
+    await k3s_cluster.update_cluster_status(project_id, cluster_id, "DELETING")
+
+    # 에이전트 VM 병렬 삭제
+    agent_vm_ids = cluster.get("agent_vm_ids") or []
+    if isinstance(agent_vm_ids, str):
+        import json
+        try:
+            agent_vm_ids = json.loads(agent_vm_ids)
+        except Exception:
+            agent_vm_ids = []
+
+    async def _del_vm(vm_id: str) -> None:
+        try:
+            await asyncio.to_thread(_nova.delete_server, conn, vm_id)
+        except Exception as e:
+            _logger.warning("Delete agent VM %s failed: %s", vm_id, e)
+
+    await asyncio.gather(*[_del_vm(vid) for vid in agent_vm_ids], return_exceptions=True)
+
+    server_vm_id = cluster.get("server_vm_id")
+    if server_vm_id:
+        try:
+            await asyncio.to_thread(_nova.delete_server, conn, server_vm_id)
+        except Exception as e:
+            _logger.warning("Delete server VM %s failed: %s", server_vm_id, e)
+
+    sg_id = cluster.get("security_group_id")
+    if sg_id:
+        try:
+            await asyncio.sleep(3)
+            await asyncio.to_thread(_neutron.delete_security_group, conn, sg_id)
+        except Exception as e:
+            _logger.warning("Delete SG %s failed: %s", sg_id, e)
+
+    await k3s_cluster.delete_cluster_record(project_id, cluster_id)
+
+
 # ===========================================================================
 # 시스템 버전 정보
 # ===========================================================================

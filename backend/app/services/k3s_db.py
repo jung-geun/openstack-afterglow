@@ -367,6 +367,23 @@ async def get_kubeconfig(project_id: str, cluster_id: str) -> Optional[str]:
         return decrypt_kubeconfig(row)
 
 
+async def get_kubeconfig_admin(cluster_id: str) -> Optional[str]:
+    """관리자용 kubeconfig 조회 (project_id 필터 없음)."""
+    if not is_db_available():
+        return None
+
+    factory = get_session_factory()
+    async with factory() as session:
+        stmt = select(K3sCluster.kubeconfig_encrypted).where(
+            K3sCluster.id == cluster_id
+        )
+        result = await session.execute(stmt)
+        row = result.scalar_one_or_none()
+        if not row:
+            return None
+        return decrypt_kubeconfig(row)
+
+
 # ---------------------------------------------------------------------------
 # 콜백 토큰 — Redis 유지 (TTL 일회성, DB 불필요)
 # ---------------------------------------------------------------------------
