@@ -21,7 +21,7 @@ spec:
           # 실제 레지스트리 주소로 변경 필요
           # 예: ghcr.io/myorg/afterglow-api:latest
           #     registry.gitlab.com/myorg/afterglow/backend:latest
-          image: glcr.dmslab.re.kr/jung-geun/openstack-afterglow/afterglow-api:dev
+          image: ghcr.io/jung-geun/afterglow-api:latest
           imagePullPolicy: Always
           command:
             [
