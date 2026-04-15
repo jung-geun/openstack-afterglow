@@ -4,6 +4,7 @@
 	import { api } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { projectNames } from '$lib/stores/projectNames';
+	import K3sClusterDetailPanel from '$lib/components/K3sClusterDetailPanel.svelte';
 
 	interface AdminK3sCluster {
 		id: string;
@@ -30,6 +31,17 @@
 	let clusters = $state<AdminK3sCluster[]>([]);
 	let loading = $state(true);
 
+	// 슬라이드 패널
+	let selectedClusterId = $state<string | null>(null);
+
+	function openClusterPanel(id: string) {
+		selectedClusterId = id;
+	}
+
+	function closeClusterPanel() {
+		selectedClusterId = null;
+	}
+
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
 
@@ -49,6 +61,24 @@
 		projectNames.load(token, projectId);
 	});
 </script>
+
+<!-- 슬라이드 패널 -->
+{#if selectedClusterId}
+	<div
+		class="fixed inset-0 z-40"
+		role="dialog"
+		aria-modal="true"
+		onkeydown={(e) => e.key === 'Escape' && closeClusterPanel()}>
+		<button
+			class="absolute inset-0 bg-black/50 cursor-default"
+			onclick={closeClusterPanel}
+			aria-label="패널 닫기"></button>
+		<div class="absolute right-0 top-14 bottom-0 w-full md:w-[75vw] max-w-5xl
+					bg-gray-950 border-l border-gray-700 overflow-y-auto shadow-2xl">
+			<K3sClusterDetailPanel clusterId={selectedClusterId} onClose={closeClusterPanel} adminMode={true} />
+		</div>
+	</div>
+{/if}
 
 <div class="p-4 md:p-8 max-w-7xl">
 	<div class="flex items-center justify-between mb-6">
@@ -76,11 +106,16 @@
 				</thead>
 				<tbody>
 					{#each clusters as c (c.id)}
-						<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/30 transition-colors">
+						<tr
+							class="border-b border-gray-800/50 text-xs hover:bg-gray-800/30 transition-colors cursor-pointer"
+							onclick={() => openClusterPanel(c.id)}
+							onkeydown={(e) => e.key === 'Enter' && openClusterPanel(c.id)}
+							role="button"
+							tabindex="0">
 							<td class="py-2 pr-4">
-								<a href="/dashboard/containers/k3s/{c.id}" target="_blank" class="text-white hover:text-blue-400 transition-colors">
+								<span class="text-white hover:text-blue-400 transition-colors">
 									{c.name}
-								</a>
+								</span>
 								{#if c.status_reason}
 									<div class="text-gray-500 text-xs mt-0.5 truncate max-w-40">{c.status_reason}</div>
 								{/if}

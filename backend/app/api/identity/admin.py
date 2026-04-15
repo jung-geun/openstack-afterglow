@@ -11,7 +11,8 @@ from app.api.deps import get_os_conn, get_token_info, require_admin
 _logger = logging.getLogger(__name__)
 from app.models.storage import FileStorageInfo, TopologyData, TopologyInstance
 from app.services import manila, libraries as lib_svc, neutron, nova
-from app.services import library_builder, k3s_cluster
+from app.services import library_builder
+from app.services import k3s_db as k3s_cluster
 from app.services.cache import cached_call, ttl_fast, ttl_normal, ttl_slow
 from app.config import get_settings
 
@@ -1221,6 +1222,15 @@ async def list_admin_k3s_clusters():
     except Exception:
         _logger.warning("k3s 클러스터 목록 조회 실패", exc_info=True)
         raise HTTPException(status_code=500, detail="k3s 클러스터 목록 조회 실패")
+
+
+@router.get("/k3s-clusters/{cluster_id}", dependencies=[Depends(require_admin)])
+async def get_admin_k3s_cluster(cluster_id: str):
+    """관리자용 단일 k3s 클러스터 조회 (프로젝트 필터 없음)."""
+    cluster = await k3s_cluster.get_cluster_admin(cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
+    return cluster
 
 
 # ===========================================================================

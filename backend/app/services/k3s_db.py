@@ -106,6 +106,24 @@ async def get_cluster(project_id: str, cluster_id: str) -> Optional[dict]:
         return _cluster_to_dict(cluster)
 
 
+async def get_cluster_admin(cluster_id: str) -> Optional[dict]:
+    """관리자용 단일 클러스터 조회 (project_id 필터 없음)."""
+    if not is_db_available():
+        return None
+
+    factory = get_session_factory()
+    async with factory() as session:
+        stmt = select(K3sCluster).where(K3sCluster.id == cluster_id)
+        result = await session.execute(stmt)
+        cluster = result.scalar_one_or_none()
+        if cluster is None:
+            return None
+        await session.refresh(cluster, ["agent_vms"])
+        d = _cluster_to_dict(cluster)
+        d["project_id"] = cluster.project_id
+        return d
+
+
 async def list_clusters(project_id: str) -> list[dict]:
     """프로젝트의 클러스터 목록 (최신순)."""
     if not is_db_available():

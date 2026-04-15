@@ -25,9 +25,10 @@
   interface Props {
     clusterId: string;
     onClose?: () => void;
+    adminMode?: boolean;
   }
 
-  let { clusterId, onClose }: Props = $props();
+  let { clusterId, onClose, adminMode = false }: Props = $props();
 
   const statusColor: Record<string, string> = {
     ACTIVE:       'text-green-400 bg-green-900/30',
@@ -55,10 +56,12 @@
   let scaling = $state(false);
   let scaleError = $state('');
 
+  const apiBase = $derived(adminMode ? '/api/admin/k3s-clusters' : '/api/k3s/clusters');
+
   async function fetchCluster() {
     if (!clusterId) return;
     try {
-      cluster = await api.get<K3sCluster>(`/api/k3s/clusters/${clusterId}`, token, projectId);
+      cluster = await api.get<K3sCluster>(`${apiBase}/${clusterId}`, token, projectId);
       if (scalingTarget === null && cluster) {
         scalingTarget = cluster.agent_count;
       }
