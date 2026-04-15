@@ -53,3 +53,13 @@ frontend/.dockerignore
 frontend/Dockerfile
 frontend/.npmrc
 
+# ── 추가 제외 ─────────────────────────────────────────────────────────────────
+logs/
+__pycache__/
+kubeconfig
+k8s-test/
+.claude/
+.gstack/
+setup.py
+*.toml.example
+
