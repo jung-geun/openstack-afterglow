@@ -1,4 +1,4 @@
-# Union 통합 설정 파일
+# Afterglow 통합 설정 파일
 # 이 파일을 수정하면 백엔드와 프론트엔드 전체 설정이 변경됩니다.
 # 우선순위: 환경변수 > config.toml > 기본값
 
@@ -28,7 +28,7 @@ frontend_port = 3000
 secret_key = "change-me-in-production"
 
 # 사이트 표시 이름 및 설명 (로그인 화면 · 네비게이션 바)
-site_name = "Union"
+site_name = "Afterglow"
 site_description = "OpenStack VM + OverlayFS 배포 플랫폼"
 
 # 로고 및 파비콘 경로 (frontend/static/ 기준, SvelteKit이 /로 서빙)
@@ -357,7 +357,7 @@ boot_volume_size_gb = 30
 [database]
 # k3s 클러스터 영속화용 MariaDB/MySQL 연결 URL (선택적)
 # 미설정 시 기존 Redis 방식으로 동작
-# url = "mysql+asyncmy://union:password@mariadb.example.com:3306/union_k3s"
+# url = "mysql+asyncmy://afterglow:password@mariadb.example.com:3306/afterglow"
 url = ""
 # 커넥션 풀 설정
 pool_size = 5

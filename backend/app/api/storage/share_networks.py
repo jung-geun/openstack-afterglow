@@ -19,7 +19,7 @@ async def list_share_networks(
     pid = conn._union_project_id
     try:
         return await cached_call(
-            f"union:manila:{pid}:share_networks", ttl_fast(),
+            f"afterglow:manila:{pid}:share_networks", ttl_fast(),
             lambda: manila.list_share_networks(conn),
             refresh=refresh,
         )
@@ -51,7 +51,7 @@ async def create_share_network(
             manila.create_share_network,
             conn, req.name, req.neutron_net_id, req.neutron_subnet_id, req.description,
         )
-        await invalidate(f"union:manila:{pid}:share_networks")
+        await invalidate(f"afterglow:manila:{pid}:share_networks")
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Share 네트워크 생성 실패: {e}")
@@ -65,6 +65,6 @@ async def delete_share_network(
     pid = conn._union_project_id
     try:
         await asyncio.to_thread(manila.delete_share_network, conn, share_network_id)
-        await invalidate(f"union:manila:{pid}:share_networks")
+        await invalidate(f"afterglow:manila:{pid}:share_networks")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Share 네트워크 삭제 실패: {e}")

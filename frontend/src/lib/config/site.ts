@@ -15,7 +15,7 @@ interface SiteConfig {
 }
 
 const DEFAULTS: SiteConfig = {
-	site_name: 'Union',
+	site_name: 'Afterglow',
 	site_description: 'OpenStack VM + OverlayFS 배포 플랫폼',
 	logo_path: '/logo.png',
 	favicon_path: '/favicon.ico',

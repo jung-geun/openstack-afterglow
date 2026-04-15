@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: backend
-  namespace: union
+  namespace: afterglow
   labels:
     app: backend
 spec:
@@ -19,9 +19,9 @@ spec:
         - name: backend
           # 이미지 태그: latest (릴리즈), dev (main 브랜치), v1.2.3 (버전 태그)
           # 실제 레지스트리 주소로 변경 필요
-          # 예: ghcr.io/myorg/union-backend:latest
-          #     registry.gitlab.com/myorg/union/backend:latest
-          image: glcr.dmslab.re.kr/jung-geun/cephfs-mount/union-api:latest
+          # 예: ghcr.io/myorg/afterglow-api:latest
+          #     registry.gitlab.com/myorg/afterglow/backend:latest
+          image: glcr.dmslab.re.kr/jung-geun/cephfs-mount/afterglow-api:latest
           imagePullPolicy: Always
           command:
             [
@@ -42,30 +42,30 @@ spec:
             - name: REDIS_URL
               valueFrom:
                 configMapKeyRef:
-                  name: union-config
+                  name: afterglow-config
                   key: APP_REDIS_URL
             - name: OS_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: union-secrets
+                  name: afterglow-secrets
                   key: OS_PASSWORD
             - name: SECRET_KEY
               valueFrom:
                 secretKeyRef:
-                  name: union-secrets
+                  name: afterglow-secrets
                   key: SECRET_KEY
             - name: GITLAB_OIDC_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: union-secrets
+                  name: afterglow-secrets
                   key: GITLAB_OIDC_CLIENT_SECRET
             - name: K3S_KUBECONFIG_ENCRYPTION_KEY
               valueFrom:
                 secretKeyRef:
-                  name: union-secrets
+                  name: afterglow-secrets
                   key: K3S_KUBECONFIG_ENCRYPTION_KEY
           volumeMounts:
-            - name: union-config-volume
+            - name: afterglow-config-volume
               mountPath: /app/config.toml
               subPath: config.toml
           # startupProbe:
@@ -97,9 +97,9 @@ spec:
               memory: "1024Mi"
               cpu: "1"
       volumes:
-        - name: union-config-volume
+        - name: afterglow-config-volume
           configMap:
-            name: union-config
+            name: afterglow-config
             items:
               - key: config.toml
                 path: config.toml

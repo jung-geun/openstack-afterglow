@@ -99,7 +99,7 @@ def _setup_logging() -> None:
 _setup_logging()
 _logger = logging.getLogger(__name__)
 
-_is_production = os.environ.get("UNION_ENV", "development") == "production"
+_is_production = os.environ.get("AFTERGLOW_ENV", "development") == "production"
 
 def _read_app_version() -> str:
     import tomllib, pathlib
@@ -110,7 +110,7 @@ def _read_app_version() -> str:
     return "0.1.0"
 
 app = FastAPI(
-    title="Union",
+    title="Afterglow",
     description="OpenStack VM 배포 + OverlayFS 마운트 웹 플랫폼",
     version=_read_app_version(),
     docs_url=None if _is_production else "/docs",

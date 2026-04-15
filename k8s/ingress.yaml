@@ -1,8 +1,8 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: union-ingress
-  namespace: union
+  name: afterglow-ingress
+  namespace: afterglow
   annotations:
     kubernetes.io/ingress.class: "traefik"
     traefik.ingress.kubernetes.io/router.entrypoints: web
@@ -13,10 +13,10 @@ spec:
   # TLS 설정 (HTTPS 사용 시 주석 해제 후 설정)
   # tls:
   #   - hosts:
-  #       - union.example.com      # 실제 도메인으로 변경
-  #     secretName: union-tls      # cert-manager 또는 수동으로 생성한 TLS Secret 이름
+  #       - afterglow.example.com      # 실제 도메인으로 변경
+  #     secretName: afterglow-tls      # cert-manager 또는 수동으로 생성한 TLS Secret 이름
   rules:
-    - host: union.example.com      # 실제 도메인으로 변경
+    - host: afterglow.example.com      # 실제 도메인으로 변경
       http:
         paths:
           - path: /api

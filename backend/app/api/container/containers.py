@@ -107,7 +107,7 @@ async def create_exec_ticket(
         "token": conn._union_token,
     })
     r = await _get_redis()
-    await r.setex(f"union:ws-ticket:{ticket}", 30, payload)
+    await r.setex(f"afterglow:ws-ticket:{ticket}", 30, payload)
     return {"ticket": ticket}
 
 
@@ -129,7 +129,7 @@ async def container_exec_ws(
         import json
 
         r = await _get_redis()
-        ticket_key = f"union:ws-ticket:{ticket}"
+        ticket_key = f"afterglow:ws-ticket:{ticket}"
         payload_bytes = await r.get(ticket_key)
         if not payload_bytes:
             await websocket.close(code=4001)

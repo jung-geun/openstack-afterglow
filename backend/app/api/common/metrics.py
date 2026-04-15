@@ -23,12 +23,12 @@ def _require_admin(token_info: dict = Depends(get_token_info)):
         raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다")
 
 REQUEST_COUNT = Counter(
-    'union_http_requests_total',
+    'afterglow_http_requests_total',
     'Total HTTP requests',
     ['method', 'path', 'status']
 )
 REQUEST_DURATION = Histogram(
-    'union_http_request_duration_ms',
+    'afterglow_http_request_duration_ms',
     'HTTP request duration in milliseconds',
     ['method', 'path'],
     buckets=[5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000]

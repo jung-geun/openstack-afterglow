@@ -70,7 +70,7 @@ async def list_instances(conn: openstack.connection.Connection = Depends(get_os_
     pid = conn._union_project_id
     try:
         return await cached_call(
-            f"union:nova:{pid}:instances", ttl_fast(),
+            f"afterglow:nova:{pid}:instances", ttl_fast(),
             lambda: _resolve_names(nova.list_servers(conn), conn),
             refresh=refresh,
         )
@@ -87,7 +87,7 @@ async def get_instance(
     pid = conn._union_project_id
     try:
         return await cached_call(
-            f"union:nova:{pid}:instance:{instance_id}", ttl_fast(),
+            f"afterglow:nova:{pid}:instance:{instance_id}", ttl_fast(),
             lambda: _resolve_names([nova.get_server(conn, instance_id)], conn)[0]
         )
     except Exception:
@@ -423,8 +423,8 @@ async def delete_instance(
 
     # Nova 서버 삭제
     await asyncio.to_thread(nova.delete_server, conn, instance_id)
-    await invalidate(f"union:nova:{pid}:instances")
-    await invalidate(f"union:nova:{pid}:instance:{instance_id}")
+    await invalidate(f"afterglow:nova:{pid}:instances")
+    await invalidate(f"afterglow:nova:{pid}:instance:{instance_id}")
 
     # Strategy B: 전용 파일 스토리지 삭제
     if strategy == "dynamic":
@@ -451,8 +451,8 @@ async def start_instance(
     pid = conn._union_project_id
     try:
         await asyncio.to_thread(nova.start_server, conn, instance_id)
-        await invalidate(f"union:nova:{pid}:instance:{instance_id}")
-        await invalidate(f"union:nova:{pid}:instances")
+        await invalidate(f"afterglow:nova:{pid}:instance:{instance_id}")
+        await invalidate(f"afterglow:nova:{pid}:instances")
     except Exception as e:
         raise HTTPException(status_code=500, detail="작업 실패")
 
@@ -465,8 +465,8 @@ async def stop_instance(
     pid = conn._union_project_id
     try:
         await asyncio.to_thread(nova.stop_server, conn, instance_id)
-        await invalidate(f"union:nova:{pid}:instance:{instance_id}")
-        await invalidate(f"union:nova:{pid}:instances")
+        await invalidate(f"afterglow:nova:{pid}:instance:{instance_id}")
+        await invalidate(f"afterglow:nova:{pid}:instances")
     except Exception as e:
         raise HTTPException(status_code=500, detail="작업 실패")
 
@@ -479,8 +479,8 @@ async def reboot_instance(
     pid = conn._union_project_id
     try:
         await asyncio.to_thread(nova.reboot_server, conn, instance_id)
-        await invalidate(f"union:nova:{pid}:instance:{instance_id}")
-        await invalidate(f"union:nova:{pid}:instances")
+        await invalidate(f"afterglow:nova:{pid}:instance:{instance_id}")
+        await invalidate(f"afterglow:nova:{pid}:instances")
     except Exception as e:
         raise HTTPException(status_code=500, detail="작업 실패")
 
@@ -493,8 +493,8 @@ async def shelve_instance(
     pid = conn._union_project_id
     try:
         await asyncio.to_thread(nova.shelve_server, conn, instance_id)
-        await invalidate(f"union:nova:{pid}:instance:{instance_id}")
-        await invalidate(f"union:nova:{pid}:instances")
+        await invalidate(f"afterglow:nova:{pid}:instance:{instance_id}")
+        await invalidate(f"afterglow:nova:{pid}:instances")
     except Exception as e:
         raise HTTPException(status_code=500, detail="작업 실패")
 
@@ -507,8 +507,8 @@ async def unshelve_instance(
     pid = conn._union_project_id
     try:
         await asyncio.to_thread(nova.unshelve_server, conn, instance_id)
-        await invalidate(f"union:nova:{pid}:instance:{instance_id}")
-        await invalidate(f"union:nova:{pid}:instances")
+        await invalidate(f"afterglow:nova:{pid}:instance:{instance_id}")
+        await invalidate(f"afterglow:nova:{pid}:instances")
     except Exception as e:
         raise HTTPException(status_code=500, detail="작업 실패")
 
@@ -546,7 +546,7 @@ async def list_interfaces(
     pid = conn._union_project_id
     try:
         return await cached_call(
-            f"union:neutron:{pid}:ports:{instance_id}", ttl_normal(),
+            f"afterglow:neutron:{pid}:ports:{instance_id}", ttl_normal(),
             lambda: neutron.list_instance_ports(conn, instance_id)
         )
     except Exception as e:
@@ -572,7 +572,7 @@ async def list_instance_volumes(
         return result
 
     try:
-        return await cached_call(f"union:cinder:{pid}:vol_attach:{instance_id}", ttl_normal(), _fetch)
+        return await cached_call(f"afterglow:cinder:{pid}:vol_attach:{instance_id}", ttl_normal(), _fetch)
     except Exception as e:
         raise HTTPException(status_code=500, detail="작업 실패")
 
@@ -587,7 +587,7 @@ async def attach_volume_to_instance(
     pid = conn._union_project_id
     try:
         result = await asyncio.to_thread(nova.attach_volume, conn, instance_id, volume_id)
-        await invalidate(f"union:cinder:{pid}:vol_attach:{instance_id}")
+        await invalidate(f"afterglow:cinder:{pid}:vol_attach:{instance_id}")
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail="작업 실패")
@@ -602,7 +602,7 @@ async def detach_volume_from_instance(
     pid = conn._union_project_id
     try:
         await asyncio.to_thread(nova.detach_volume, conn, instance_id, volume_id)
-        await invalidate(f"union:cinder:{pid}:vol_attach:{instance_id}")
+        await invalidate(f"afterglow:cinder:{pid}:vol_attach:{instance_id}")
     except Exception as e:
         raise HTTPException(status_code=500, detail="작업 실패")
 
@@ -620,7 +620,7 @@ async def list_instance_security_groups(
         return {"ports": ports, "security_groups": all_sgs}
 
     try:
-        return await cached_call(f"union:neutron:{pid}:sgs:{instance_id}", ttl_slow(), _fetch)
+        return await cached_call(f"afterglow:neutron:{pid}:sgs:{instance_id}", ttl_slow(), _fetch)
     except Exception as e:
         raise HTTPException(status_code=500, detail="작업 실패")
 
@@ -646,7 +646,7 @@ async def get_instance_owner(
             return {"display": server.user_id}
 
     try:
-        return await cached_call(f"union:keystone:{pid}:owner:{instance_id}", ttl_static(), _fetch)
+        return await cached_call(f"afterglow:keystone:{pid}:owner:{instance_id}", ttl_static(), _fetch)
     except Exception:
         raise HTTPException(status_code=404, detail="인스턴스를 찾을 수 없습니다")
 
@@ -661,7 +661,7 @@ async def attach_interface(
     pid = conn._union_project_id
     try:
         result = await asyncio.to_thread(nova.attach_interface, conn, instance_id, net_id)
-        await invalidate(f"union:neutron:{pid}:ports:{instance_id}")
+        await invalidate(f"afterglow:neutron:{pid}:ports:{instance_id}")
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail="작업 실패")
@@ -676,7 +676,7 @@ async def detach_interface(
     pid = conn._union_project_id
     try:
         await asyncio.to_thread(nova.detach_interface, conn, instance_id, port_id)
-        await invalidate(f"union:neutron:{pid}:ports:{instance_id}")
+        await invalidate(f"afterglow:neutron:{pid}:ports:{instance_id}")
     except Exception as e:
         raise HTTPException(status_code=500, detail="작업 실패")
 
@@ -692,7 +692,7 @@ async def update_port_security_groups(
     pid = conn._union_project_id
     try:
         result = await asyncio.to_thread(neutron.update_port_security_groups, conn, port_id, sg_ids)
-        await invalidate(f"union:neutron:{pid}:sgs:{instance_id}")
+        await invalidate(f"afterglow:neutron:{pid}:sgs:{instance_id}")
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail="작업 실패")

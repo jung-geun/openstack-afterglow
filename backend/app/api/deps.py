@@ -14,13 +14,13 @@ _logger = logging.getLogger(__name__)
 
 
 def _session_key(token_hash: str, project_id: str) -> str:
-    return f"union:session_start:{token_hash}:{project_id or 'noscope'}"
+    return f"afterglow:session_start:{token_hash}:{project_id or 'noscope'}"
 
 
 async def _cached_validate(token: str, project_id: str) -> dict:
     """토큰 검증 결과를 Redis에 캐시 (TTL 300s). 반복 API 호출 속도 향상."""
     token_hash = hashlib.sha256(token.encode()).hexdigest()[:32]
-    cache_key = f"union:session:{token_hash}:{project_id or 'noscope'}"
+    cache_key = f"afterglow:session:{token_hash}:{project_id or 'noscope'}"
     return await cached_call(cache_key, ttl_static(), lambda: keystone.validate_token(token, project_id=project_id))
 
 
@@ -72,7 +72,7 @@ async def extend_session(token: str, project_id: str) -> None:
     settings = get_settings()
     token_hash = hashlib.sha256(token.encode()).hexdigest()[:32]
     key = _session_key(token_hash, project_id or 'noscope')
-    abs_key = f"union:session-abs:{token_hash}:{project_id or 'noscope'}"
+    abs_key = f"afterglow:session-abs:{token_hash}:{project_id or 'noscope'}"
     try:
         r = await _get_redis()
         now = time.time()

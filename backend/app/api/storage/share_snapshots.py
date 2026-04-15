@@ -17,7 +17,7 @@ async def list_share_snapshots(
     refresh: bool = Query(False),
 ):
     pid = conn._union_project_id
-    cache_key = f"union:manila:{pid}:share_snapshots" if not share_id else f"union:manila:{pid}:share_snapshots:{share_id}"
+    cache_key = f"afterglow:manila:{pid}:share_snapshots" if not share_id else f"afterglow:manila:{pid}:share_snapshots:{share_id}"
     try:
         return await cached_call(
             cache_key, ttl_fast(),
@@ -38,7 +38,7 @@ async def create_share_snapshot(
         result = await asyncio.to_thread(
             manila.create_share_snapshot, conn, req.share_id, req.name, req.description
         )
-        await invalidate(f"union:manila:{pid}:share_snapshots")
+        await invalidate(f"afterglow:manila:{pid}:share_snapshots")
         return _normalize_snapshot(result)
     except Exception:
         raise HTTPException(status_code=500, detail="스냅샷 생성 실패")
@@ -52,7 +52,7 @@ async def delete_share_snapshot(
     pid = conn._union_project_id
     try:
         await asyncio.to_thread(manila.delete_share_snapshot, conn, snapshot_id)
-        await invalidate(f"union:manila:{pid}:share_snapshots")
+        await invalidate(f"afterglow:manila:{pid}:share_snapshots")
     except Exception:
         raise HTTPException(status_code=500, detail="스냅샷 삭제 실패")
 

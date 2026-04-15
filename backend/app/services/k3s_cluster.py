@@ -19,19 +19,19 @@ _CALLBACK_TTL = 1800  # 30분
 # ---------------------------------------------------------------------------
 
 def _cluster_key(project_id: str, cluster_id: str) -> str:
-    return f"union:k3s:{project_id}:cluster:{cluster_id}"
+    return f"afterglow:k3s:{project_id}:cluster:{cluster_id}"
 
 
 def _clusters_set_key(project_id: str) -> str:
-    return f"union:k3s:{project_id}:clusters"
+    return f"afterglow:k3s:{project_id}:clusters"
 
 
 def _kubeconfig_key(project_id: str, cluster_id: str) -> str:
-    return f"union:k3s:{project_id}:kubeconfig:{cluster_id}"
+    return f"afterglow:k3s:{project_id}:kubeconfig:{cluster_id}"
 
 
 def _callback_key(token: str) -> str:
-    return f"union:k3s:callback:{token}"
+    return f"afterglow:k3s:callback:{token}"
 
 
 # ---------------------------------------------------------------------------
@@ -88,7 +88,7 @@ async def list_all_clusters() -> list[dict]:
     """전체 프로젝트의 k3s 클러스터 목록 반환 (관리자용)."""
     client = _get_client()
     all_clusters = []
-    async for key in client.scan_iter(match="union:k3s:*:clusters", count=100):
+    async for key in client.scan_iter(match="afterglow:k3s:*:clusters", count=100):
         key_str = key.decode() if isinstance(key, bytes) else key
         parts = key_str.split(":")
         if len(parts) < 4:
@@ -193,9 +193,9 @@ async def check_stale_clusters(timeout_minutes: int = 30) -> None:
     # 모든 프로젝트의 k3s 클러스터 SET 키 스캔
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=timeout_minutes)
     try:
-        async for key in client.scan_iter("union:k3s:*:clusters"):
+        async for key in client.scan_iter("afterglow:k3s:*:clusters"):
             key_str = key.decode() if isinstance(key, bytes) else key
-            # union:k3s:{project_id}:clusters 형식에서 project_id 추출
+            # afterglow:k3s:{project_id}:clusters 형식에서 project_id 추출
             parts = key_str.split(":")
             if len(parts) != 4:
                 continue

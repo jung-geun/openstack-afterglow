@@ -40,7 +40,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/union-api
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/afterglow-api
           tags: |
             # main 브랜치 push 또는 PR → dev 태그
             type=raw,value=dev,enable=${{ github.event_name == 'pull_request' || (github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')) }}
@@ -84,7 +84,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/union
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/afterglow
           tags: |
             # main 브랜치 push 또는 PR → dev 태그
             type=raw,value=dev,enable=${{ github.event_name == 'pull_request' || (github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')) }}

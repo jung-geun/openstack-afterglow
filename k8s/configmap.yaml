@@ -1,14 +1,14 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: union-config
-  namespace: union
+  name: afterglow-config
+  namespace: afterglow
 data:
-  APP_REDIS_URL: "redis://redis.union.svc.cluster.local:6379/0"
-  # 실제 서비스 도메인으로 변경 필요 (예: https://union.example.com)
-  APP_ORIGIN: "http://union.example.com"
-  union.toml: |
-    # Union 통합 설정 파일
+  APP_REDIS_URL: "redis://redis.afterglow.svc.cluster.local:6379/0"
+  # 실제 서비스 도메인으로 변경 필요 (예: https://afterglow.example.com)
+  APP_ORIGIN: "http://afterglow.example.com"
+  config.toml: |
+    # Afterglow 통합 설정 파일
     [openstack]
     auth_url = "https://keystone.example.com/v3"
     project_name = "admin"
@@ -45,7 +45,7 @@ data:
     backup_count = 10
 
     [cache]
-    redis_url = "redis://redis.union.svc.cluster.local:6379/0"
+    redis_url = "redis://redis.afterglow.svc.cluster.local:6379/0"
     # TTL 티어 (초)
     ttl_fast = 15      # 인스턴스, 볼륨, 플로팅IP
     ttl_normal = 30    # 네트워크, 라우터, 대시보드

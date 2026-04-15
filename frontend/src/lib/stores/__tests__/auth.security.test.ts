@@ -52,8 +52,8 @@ describe('auth store — 보안 테스트', () => {
       expiresAt: null,
       roles: ['member'],
     });
-    expect(storage['union_auth']).toBeTruthy();
-    const saved = JSON.parse(storage['union_auth']);
+    expect(storage['afterglow_auth']).toBeTruthy();
+    const saved = JSON.parse(storage['afterglow_auth']);
     // 토큰이 localStorage에 저장됨 (현재 동작 — 보안 개선 전)
     expect(saved.token).toBe('secret-token-123');
   });
@@ -69,13 +69,13 @@ describe('auth store — 보안 테스트', () => {
       roles: ['member'],
     });
     // 저장 확인
-    expect(storage['union_auth']).toBeTruthy();
+    expect(storage['afterglow_auth']).toBeTruthy();
 
     // 로그아웃
     clearAuth();
 
     // localStorage에서 제거 확인
-    expect(storage['union_auth']).toBeUndefined();
+    expect(storage['afterglow_auth']).toBeUndefined();
   });
 
   it('clearAuth 후 auth store의 token이 null', () => {
@@ -86,11 +86,11 @@ describe('auth store — 보안 테스트', () => {
 
   it('초기 상태에서 token이 null이면 localStorage에 저장 안 됨', () => {
     clearAuth();
-    expect(storage['union_auth']).toBeUndefined();
+    expect(storage['afterglow_auth']).toBeUndefined();
   });
 
   it('JSON 파싱 실패 시 초기 상태로 폴백', async () => {
-    storage['union_auth'] = 'invalid json {{{';
+    storage['afterglow_auth'] = 'invalid json {{{';
     vi.resetModules();
     const mod = await import('../auth');
     const state = get(mod.auth);

@@ -24,7 +24,7 @@ class UpdateImageRequest(BaseModel):
 async def list_images(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
     pid = conn._union_project_id
     return await cached_call(
-        f"union:glance:{pid}:images", ttl_static(),
+        f"afterglow:glance:{pid}:images", ttl_static(),
         lambda: [img.model_dump() for img in glance.list_images(conn, pid)],
         refresh=refresh,
     )

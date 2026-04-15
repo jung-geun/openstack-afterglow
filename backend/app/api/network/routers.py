@@ -18,7 +18,7 @@ async def list_routers(conn: openstack.connection.Connection = Depends(get_os_co
     pid = conn._union_project_id
     try:
         return await cached_call(
-            f"union:neutron:{pid}:routers", ttl_normal(),
+            f"afterglow:neutron:{pid}:routers", ttl_normal(),
             lambda: [r.model_dump() for r in neutron.list_routers(conn, project_id=pid)],
             refresh=refresh,
         )
@@ -34,7 +34,7 @@ async def create_router(
     pid = conn._union_project_id
     try:
         result = await asyncio.to_thread(neutron.create_router, conn, req.name, req.external_network_id)
-        await invalidate(f"union:neutron:{pid}:routers")
+        await invalidate(f"afterglow:neutron:{pid}:routers")
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail="라우터 생성 실패")
@@ -53,7 +53,7 @@ async def delete_router(router_id: str, conn: openstack.connection.Connection = 
     pid = conn._union_project_id
     try:
         await asyncio.to_thread(neutron.delete_router, conn, router_id)
-        await invalidate(f"union:neutron:{pid}:routers")
+        await invalidate(f"afterglow:neutron:{pid}:routers")
     except Exception as e:
         raise HTTPException(status_code=500, detail="라우터 삭제 실패")
 

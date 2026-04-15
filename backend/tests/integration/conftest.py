@@ -7,11 +7,11 @@ httpx AsyncClient로 FastAPI 앱에 실제 요청을 보낸다.
 사전 조건:
   - Redis 실행 중 (config.toml의 redis_url)
   - OpenStack 접근 가능 (config.toml의 openstack 섹션)
-  - 환경변수 UNION_ALLOW_INSECURE=1 (개발 시크릿 키 허용)
+  - 환경변수 AFTERGLOW_ALLOW_INSECURE=1 (개발 시크릿 키 허용)
 
 실행:
   cd backend
-  UNION_ALLOW_INSECURE=1 uv run pytest tests/integration/ -v
+  AFTERGLOW_ALLOW_INSECURE=1 uv run pytest tests/integration/ -v
 """
 
 import os

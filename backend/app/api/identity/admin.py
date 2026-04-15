@@ -245,7 +245,7 @@ async def admin_overview(conn: openstack.connection.Connection = Depends(get_os_
                 "containers_count": ctr,
                 "file_storage_count": fs,
             }
-        return await cached_call("union:admin:overview", ttl_normal(), _collect, refresh=refresh)
+        return await cached_call("afterglow:admin:overview", ttl_normal(), _collect, refresh=refresh)
     except Exception as e:
         _logger.warning("admin overview 조회 실패", exc_info=True)
         raise HTTPException(status_code=500, detail="개요 조회 실패")
@@ -274,7 +274,7 @@ async def list_hypervisors(conn: openstack.connection.Connection = Depends(get_o
                 }
                 for h in data
             ]
-        return await cached_call("union:admin:hypervisors", ttl_normal(), _list, refresh=refresh)
+        return await cached_call("afterglow:admin:hypervisors", ttl_normal(), _list, refresh=refresh)
     except Exception as e:
         _logger.warning("hypervisors 조회 실패", exc_info=True)
         raise HTTPException(status_code=500, detail="하이퍼바이저 조회 실패")
@@ -425,7 +425,7 @@ async def list_all_containers(conn: openstack.connection.Connection = Depends(ge
         return []
     from app.services.zun import list_containers_admin, ZunServiceUnavailable
     try:
-        return await cached_call("union:admin:containers", ttl_normal(), lambda: list_containers_admin(conn), refresh=refresh)
+        return await cached_call("afterglow:admin:containers", ttl_normal(), lambda: list_containers_admin(conn), refresh=refresh)
     except ZunServiceUnavailable:
         return []
     except Exception as e:
@@ -438,7 +438,7 @@ async def list_all_file_storages(conn: openstack.connection.Connection = Depends
     if not get_settings().service_manila_enabled:
         return []
     try:
-        return await cached_call("union:admin:file_storages", ttl_normal(), lambda: manila.list_file_storages(conn, None, True), refresh=refresh)
+        return await cached_call("afterglow:admin:file_storages", ttl_normal(), lambda: manila.list_file_storages(conn, None, True), refresh=refresh)
     except Exception as e:
         raise HTTPException(status_code=500, detail="파일 스토리지 조회 실패")
 
@@ -465,7 +465,7 @@ async def admin_topology(conn: openstack.connection.Connection = Depends(get_os_
         topo.instances = instances
         return topo.model_dump()
     try:
-        return await cached_call("union:admin:topology", ttl_normal(), _fetch, refresh=refresh)
+        return await cached_call("afterglow:admin:topology", ttl_normal(), _fetch, refresh=refresh)
     except Exception as e:
         _logger.exception("토폴로지 조회 실패")
         raise HTTPException(status_code=500, detail="토폴로지 조회 실패")
@@ -488,7 +488,7 @@ async def get_timeseries(
 async def list_all_networks(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
     """전체 프로젝트의 네트워크 목록."""
     try:
-        return await cached_call("union:admin:networks", ttl_normal(), lambda: neutron.list_networks(conn, None), refresh=refresh)
+        return await cached_call("afterglow:admin:networks", ttl_normal(), lambda: neutron.list_networks(conn, None), refresh=refresh)
     except Exception:
         raise HTTPException(status_code=500, detail="네트워크 목록 조회 실패")
 
@@ -497,7 +497,7 @@ async def list_all_networks(conn: openstack.connection.Connection = Depends(get_
 async def list_all_floating_ips(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
     """전체 프로젝트의 Floating IP 목록."""
     try:
-        return await cached_call("union:admin:floating_ips", ttl_fast(), lambda: neutron.list_floating_ips(conn, None), refresh=refresh)
+        return await cached_call("afterglow:admin:floating_ips", ttl_fast(), lambda: neutron.list_floating_ips(conn, None), refresh=refresh)
     except Exception:
         raise HTTPException(status_code=500, detail="Floating IP 목록 조회 실패")
 
@@ -506,7 +506,7 @@ async def list_all_floating_ips(conn: openstack.connection.Connection = Depends(
 async def list_all_routers(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
     """전체 프로젝트의 라우터 목록."""
     try:
-        return await cached_call("union:admin:routers", ttl_normal(), lambda: neutron.list_routers(conn, None), refresh=refresh)
+        return await cached_call("afterglow:admin:routers", ttl_normal(), lambda: neutron.list_routers(conn, None), refresh=refresh)
     except Exception:
         raise HTTPException(status_code=500, detail="라우터 목록 조회 실패")
 
@@ -689,7 +689,7 @@ async def admin_overview_projects(conn: openstack.connection.Connection = Depend
                 except Exception:
                     pass
             return result
-        return await cached_call("union:admin:overview_projects", ttl_slow(), _collect, refresh=refresh)
+        return await cached_call("afterglow:admin:overview_projects", ttl_slow(), _collect, refresh=refresh)
     except Exception:
         _logger.warning("프로젝트별 리소스 조회 실패", exc_info=True)
         raise HTTPException(status_code=500, detail="프로젝트별 리소스 조회 실패")

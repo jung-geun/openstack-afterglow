@@ -1,4 +1,4 @@
-"""Union 설정 모듈.
+"""Afterglow 설정 모듈.
 
 우선순위: 환경변수 > config.toml (프로젝트 루트) > 기본값
 """
@@ -13,13 +13,13 @@ from pydantic import model_validator
 
 
 def _config_candidates() -> list[Path]:
-    """설정 파일 후보 경로 목록. CWD → 상위 → /app (Docker) → union.toml (K8s ConfigMap)."""
+    """설정 파일 후보 경로 목록. CWD → 상위 → /app (Docker) → afterglow.toml (K8s ConfigMap)."""
     return [
         Path.cwd() / "config.toml",
         Path.cwd().parent / "config.toml",
         Path("/app/config.toml"),
-        Path("/app/union.toml"),       # K8s ConfigMap 마운트 경로
-        Path.cwd() / "union.toml",
+        Path("/app/afterglow.toml"),       # K8s ConfigMap 마운트 경로
+        Path.cwd() / "afterglow.toml",
     ]
 
 
@@ -53,7 +53,7 @@ def _load_toml() -> dict:
             flat["frontend_port"] = app.get("frontend_port", 3000)
             flat["secret_key"] = app.get("secret_key", "change-me-in-production")
             flat["refresh_interval_ms"] = app.get("refresh_interval_ms", 5000)
-            flat["site_name"] = app.get("site_name", "Union")
+            flat["site_name"] = app.get("site_name", "Afterglow")
             flat["site_description"] = app.get("site_description", "OpenStack VM + OverlayFS 배포 플랫폼")
             flat["logo_path"] = app.get("logo_path", "/logo.png")
             flat["favicon_path"] = app.get("favicon_path", "/favicon.ico")
@@ -117,7 +117,7 @@ def _load_toml() -> dict:
             flat["cors_origins"] = cors.get("origins", "http://localhost:3000,http://localhost")
 
             log = data.get("logging", {})
-            flat["log_file_path"] = log.get("log_file_path", "/app/logs/union-backend.log")
+            flat["log_file_path"] = log.get("log_file_path", "/app/logs/afterglow-backend.log")
             flat["log_level"] = log.get("log_level", "INFO")
             flat["log_max_bytes"] = log.get("max_bytes", 52428800)
             flat["log_backup_count"] = log.get("backup_count", 5)
@@ -157,7 +157,7 @@ class Settings(BaseSettings):
     # CORS 허용 origin (쉼표 구분)
     cors_origins: str = "http://localhost:3000,http://localhost"
     refresh_interval_ms: int = 5000
-    site_name: str = "Union"
+    site_name: str = "Afterglow"
     site_description: str = "OpenStack VM + OverlayFS 배포 플랫폼"
     logo_path: str = "/logo.png"
     favicon_path: str = "/favicon.ico"
@@ -218,7 +218,7 @@ class Settings(BaseSettings):
     gitlab_oidc_scopes: str = "openid email profile read_user"
 
     # 로깅 설정
-    log_file_path: str = "/app/logs/union-backend.log"
+    log_file_path: str = "/app/logs/afterglow-backend.log"
     log_level: str = "INFO"
     log_max_bytes: int = 52428800    # 50MB
     log_backup_count: int = 5
@@ -249,16 +249,16 @@ class Settings(BaseSettings):
         import os
         logger = logging.getLogger(__name__)
         if self.secret_key == "change-me-in-production":
-            if os.environ.get("UNION_ALLOW_INSECURE", "").strip() == "1":
+            if os.environ.get("AFTERGLOW_ALLOW_INSECURE", "").strip() == "1":
                 logger.warning(
                     "SECRET_KEY is set to the default insecure value. "
-                    "UNION_ALLOW_INSECURE=1 is set — this must NOT be used in production."
+                    "AFTERGLOW_ALLOW_INSECURE=1 is set — this must NOT be used in production."
                 )
             else:
                 raise ValueError(
                     "SECRET_KEY is set to the default value 'change-me-in-production'. "
                     "Set a strong random value in config.toml [app] secret_key or SECRET_KEY env var. "
-                    "To override this check in development, set UNION_ALLOW_INSECURE=1."
+                    "To override this check in development, set AFTERGLOW_ALLOW_INSECURE=1."
                 )
         return self
 

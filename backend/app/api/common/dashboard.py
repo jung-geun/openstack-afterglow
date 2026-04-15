@@ -69,22 +69,22 @@ async def get_dashboard_summary(
     try:
         servers, compute_limits, volume_limits, all_flavors = await asyncio.gather(
             cached_call(
-                f"union:nova:{project_id}:servers", ttl_fast(),
+                f"afterglow:nova:{project_id}:servers", ttl_fast(),
                 lambda: _list_servers_as_dicts(conn),
                 refresh=refresh,
             ),
             cached_call(
-                f"union:nova:{project_id}:limits", ttl_normal(),
+                f"afterglow:nova:{project_id}:limits", ttl_normal(),
                 lambda: nova.get_project_limits(conn),
                 refresh=refresh,
             ),
             cached_call(
-                f"union:cinder:{project_id}:limits", ttl_normal(),
+                f"afterglow:cinder:{project_id}:limits", ttl_normal(),
                 lambda: cinder.get_volume_limits(conn),
                 refresh=refresh,
             ),
             cached_call(
-                f"union:nova:{project_id}:flavors", ttl_static(),
+                f"afterglow:nova:{project_id}:flavors", ttl_static(),
                 lambda: _list_flavors_as_dicts(conn),
                 refresh=refresh,
             ),

@@ -1,4 +1,4 @@
--- Union k3s 클러스터 영속화 DDL
+-- Afterglow k3s 클러스터 영속화 DDL
 -- 실행 방법: mysql -u <user> -p <database> < 001_k3s_tables.sql
 -- auto_create_tables = true 설정 시 앱 시작 시 자동 생성됨
 

@@ -17,7 +17,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: backend
-    image: glcr.dmslab.re.kr/jung-geun/cephfs-mount/union-api:latest
+    image: glcr.dmslab.re.kr/jung-geun/cephfs-mount/afterglow-api:latest
     ports:
       - "8000:8000"
     volumes:
@@ -44,7 +44,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: frontend
-    image: glcr.dmslab.re.kr/jung-geun/cephfs-mount/union:latest
+    image: glcr.dmslab.re.kr/jung-geun/cephfs-mount/afterglow:latest
     ports:
       - "3000:3000"
     volumes:

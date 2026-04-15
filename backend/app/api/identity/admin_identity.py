@@ -158,7 +158,7 @@ async def list_project_names(conn: openstack.connection.Connection = Depends(get
     def _list():
         return [{"id": p.id, "name": p.name or ""} for p in conn.identity.projects()]
     try:
-        return await cached_call("union:admin:project_names", ttl_slow(), _list, refresh=refresh)
+        return await cached_call("afterglow:admin:project_names", ttl_slow(), _list, refresh=refresh)
     except Exception:
         raise HTTPException(status_code=500, detail="프로젝트 이름 목록 조회 실패")
 
@@ -426,7 +426,7 @@ async def list_groups(conn: openstack.connection.Connection = Depends(get_os_con
             pass
         return groups
     try:
-        return await cached_call("union:admin:groups", ttl_slow(), _list, refresh=refresh)
+        return await cached_call("afterglow:admin:groups", ttl_slow(), _list, refresh=refresh)
     except Exception:
         raise HTTPException(status_code=500, detail="그룹 목록 조회 실패")
 
@@ -466,7 +466,7 @@ async def create_group(
             raise HTTPException(status_code=400, detail=f"그룹 생성 실패: {e}")
     try:
         result = await asyncio.to_thread(_create)
-        await invalidate("union:admin:groups")
+        await invalidate("afterglow:admin:groups")
         return result
     except HTTPException:
         raise
@@ -513,7 +513,7 @@ async def delete_group(
             raise HTTPException(status_code=400, detail=f"그룹 삭제 실패: {e}")
     try:
         await asyncio.to_thread(_delete)
-        await invalidate("union:admin:groups")
+        await invalidate("afterglow:admin:groups")
     except HTTPException:
         raise
 
@@ -585,8 +585,8 @@ async def remove_user_from_group(
             pid = x_project_id or "noscope"
             try:
                 r = await _get_redis()
-                await r.delete(f"union:session:{token_hash}:{pid}")
-                await r.delete(f"union:session_start:{token_hash}:{pid}")
+                await r.delete(f"afterglow:session:{token_hash}:{pid}")
+                await r.delete(f"afterglow:session_start:{token_hash}:{pid}")
             except Exception:
                 pass
     except HTTPException:
@@ -613,7 +613,7 @@ async def list_roles(conn: openstack.connection.Connection = Depends(get_os_conn
             pass
         return roles
     try:
-        return await cached_call("union:admin:roles", ttl_slow(), _list, refresh=refresh)
+        return await cached_call("afterglow:admin:roles", ttl_slow(), _list, refresh=refresh)
     except Exception:
         raise HTTPException(status_code=500, detail="역할 목록 조회 실패")
 

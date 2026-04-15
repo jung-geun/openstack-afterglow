@@ -24,7 +24,7 @@ async def list_snapshots(
     refresh: bool = Query(False),
 ):
     pid = conn._union_project_id
-    cache_key = f"union:cinder:{pid}:snapshots" if not volume_id else f"union:cinder:{pid}:snapshots:{volume_id}"
+    cache_key = f"afterglow:cinder:{pid}:snapshots" if not volume_id else f"afterglow:cinder:{pid}:snapshots:{volume_id}"
     try:
         return await cached_call(
             cache_key, ttl_fast(),

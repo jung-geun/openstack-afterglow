@@ -21,7 +21,7 @@ async def list_keypairs(conn: openstack.connection.Connection = Depends(get_os_c
     pid = conn._union_project_id
     try:
         return await cached_call(
-            f"union:nova:{pid}:keypairs", ttl_slow(),
+            f"afterglow:nova:{pid}:keypairs", ttl_slow(),
             lambda: nova.list_keypairs(conn),
             refresh=refresh,
         )
@@ -37,7 +37,7 @@ async def create_keypair(
     pid = conn._union_project_id
     try:
         result = await asyncio.to_thread(nova.create_keypair, conn, req.name, req.public_key, req.key_type)
-        await invalidate(f"union:nova:{pid}:keypairs")
+        await invalidate(f"afterglow:nova:{pid}:keypairs")
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail="키페어 생성 실패")
@@ -51,6 +51,6 @@ async def delete_keypair(
     pid = conn._union_project_id
     try:
         await asyncio.to_thread(nova.delete_keypair, conn, keypair_name)
-        await invalidate(f"union:nova:{pid}:keypairs")
+        await invalidate(f"afterglow:nova:{pid}:keypairs")
     except Exception as e:
         raise HTTPException(status_code=500, detail="키페어 삭제 실패")

@@ -1,9 +1,9 @@
 # ===========================================================================
-# Union - Multi-stage Dockerfile
+# Afterglow - Multi-stage Dockerfile
 # ===========================================================================
 # 사용법:
-#   docker build --target backend -t union-backend .
-#   docker build --target frontend -t union-frontend .
+#   docker build --target backend -t afterglow-api .
+#   docker build --target frontend -t afterglow .
 #
 # docker-compose에서는 build.target으로 자동 지정됩니다.
 # ===========================================================================

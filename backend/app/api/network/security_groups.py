@@ -29,7 +29,7 @@ async def list_security_groups(conn: openstack.connection.Connection = Depends(g
     pid = conn._union_project_id
     try:
         return await cached_call(
-            f"union:neutron:{pid}:security_groups", ttl_slow(),
+            f"afterglow:neutron:{pid}:security_groups", ttl_slow(),
             lambda: neutron.list_security_groups(conn, project_id=pid),
             refresh=refresh,
         )
@@ -45,7 +45,7 @@ async def create_security_group(
     pid = conn._union_project_id
     try:
         result = neutron.create_security_group(conn, req.name, req.description)
-        await invalidate(f"union:neutron:{pid}:security_groups")
+        await invalidate(f"afterglow:neutron:{pid}:security_groups")
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail="보안 그룹 생성 실패")
@@ -59,7 +59,7 @@ async def delete_security_group(
     pid = conn._union_project_id
     try:
         neutron.delete_security_group(conn, sg_id)
-        await invalidate(f"union:neutron:{pid}:security_groups")
+        await invalidate(f"afterglow:neutron:{pid}:security_groups")
     except Exception as e:
         raise HTTPException(status_code=500, detail="보안 그룹 삭제 실패")
 
@@ -82,7 +82,7 @@ async def create_security_group_rule(
             remote_ip_prefix=req.remote_ip_prefix,
             ethertype=req.ethertype,
         )
-        await invalidate(f"union:neutron:{pid}:security_groups")
+        await invalidate(f"afterglow:neutron:{pid}:security_groups")
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail="보안 그룹 규칙 추가 실패")
@@ -97,6 +97,6 @@ async def delete_security_group_rule(
     pid = conn._union_project_id
     try:
         neutron.delete_security_group_rule(conn, rule_id)
-        await invalidate(f"union:neutron:{pid}:security_groups")
+        await invalidate(f"afterglow:neutron:{pid}:security_groups")
     except Exception as e:
         raise HTTPException(status_code=500, detail="보안 그룹 규칙 삭제 실패")

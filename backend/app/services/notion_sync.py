@@ -17,7 +17,7 @@ _logger = logging.getLogger(__name__)
 
 NOTION_API_BASE = "https://api.notion.com/v1"
 NOTION_VERSION = "2022-06-28"
-REDIS_CONFIG_KEY = "union:notion:config"
+REDIS_CONFIG_KEY = "afterglow:notion:config"
 
 # 속성 이름 → 인스턴스 데이터 키 매핑 (한국어 속성명 기준)
 # DB에 이 이름의 속성이 있으면 해당 데이터를 채운다.
@@ -97,7 +97,7 @@ _KO_MIGRATION_MAP: dict[str, str] = {
     "status": "상태",
 }
 
-REDIS_MIGRATION_KEY = "union:notion:migration_v1"
+REDIS_MIGRATION_KEY = "afterglow:notion:migration_v1"
 
 
 def _headers(api_key: str) -> dict[str, str]:

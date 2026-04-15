@@ -62,7 +62,7 @@ async def list_load_balancers(conn: openstack.connection.Connection = Depends(ge
     pid = conn._union_project_id
     try:
         return await cached_call(
-            f"union:octavia:{pid}:lbs", ttl_normal(),
+            f"afterglow:octavia:{pid}:lbs", ttl_normal(),
             lambda: octavia.list_load_balancers(conn, project_id=pid),
             refresh=refresh,
         )
@@ -78,7 +78,7 @@ async def create_load_balancer(
     pid = conn._union_project_id
     try:
         result = octavia.create_load_balancer(conn, req.name, req.vip_subnet_id, req.description)
-        await invalidate(f"union:octavia:{pid}:lbs")
+        await invalidate(f"afterglow:octavia:{pid}:lbs")
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail="로드밸런서 생성 실패")
@@ -98,7 +98,7 @@ async def get_lb_status_tree(lb_id: str, conn: openstack.connection.Connection =
 async def delete_load_balancer(lb_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
     pid = conn._union_project_id
     _handle(lambda: octavia.delete_load_balancer(conn, lb_id), "로드밸런서 삭제 실패")
-    await invalidate(f"union:octavia:{pid}:lbs")
+    await invalidate(f"afterglow:octavia:{pid}:lbs")
 
 
 # ---------------------------------------------------------------------------

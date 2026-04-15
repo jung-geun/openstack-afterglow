@@ -26,7 +26,7 @@ async def list_backups(conn: openstack.connection.Connection = Depends(get_os_co
     pid = conn._union_project_id
     try:
         return await cached_call(
-            f"union:cinder:{pid}:backups", ttl_fast(),
+            f"afterglow:cinder:{pid}:backups", ttl_fast(),
             lambda: cinder.list_backups(conn),
             refresh=refresh,
         )

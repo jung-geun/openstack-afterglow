@@ -5,7 +5,7 @@ export type ThemePreference = 'dark' | 'light' | 'system';
 
 function createThemeStore() {
 	const initial: ThemePreference = browser
-		? ((localStorage.getItem('union_theme') as ThemePreference) ?? 'system')
+		? ((localStorage.getItem('afterglow_theme') as ThemePreference) ?? 'system')
 		: 'system';
 
 	const { subscribe, set, update } = writable<ThemePreference>(initial);
@@ -13,14 +13,14 @@ function createThemeStore() {
 	return {
 		subscribe,
 		set(value: ThemePreference) {
-			if (browser) localStorage.setItem('union_theme', value);
+			if (browser) localStorage.setItem('afterglow_theme', value);
 			set(value);
 		},
 		toggle() {
 			update(current => {
 				const order: ThemePreference[] = ['system', 'dark', 'light'];
 				const next = order[(order.indexOf(current) + 1) % order.length];
-				if (browser) localStorage.setItem('union_theme', next);
+				if (browser) localStorage.setItem('afterglow_theme', next);
 				return next;
 			});
 		},

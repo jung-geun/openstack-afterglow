@@ -24,7 +24,7 @@ async def list_file_storages(conn: openstack.connection.Connection = Depends(get
     pid = conn._union_project_id
     try:
         return await cached_call(
-            f"union:manila:{pid}:file_storages", ttl_fast(),
+            f"afterglow:manila:{pid}:file_storages", ttl_fast(),
             lambda: [s.model_dump() for s in manila.list_file_storages(conn)],
             refresh=refresh,
         )
@@ -75,7 +75,7 @@ async def create_file_storage(
             share_proto=req.share_proto,
             metadata=req.metadata,
         )
-        await invalidate(f"union:manila:{pid}:file_storages")
+        await invalidate(f"afterglow:manila:{pid}:file_storages")
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail="파일 스토리지 생성 실패")
@@ -89,7 +89,7 @@ async def delete_file_storage(
     pid = conn._union_project_id
     try:
         manila.delete_file_storage(conn, file_storage_id)
-        await invalidate(f"union:manila:{pid}:file_storages")
+        await invalidate(f"afterglow:manila:{pid}:file_storages")
     except Exception as e:
         raise HTTPException(status_code=500, detail="파일 스토리지 삭제 실패")
 

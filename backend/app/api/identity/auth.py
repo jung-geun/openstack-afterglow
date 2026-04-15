@@ -20,10 +20,10 @@ async def _prewarm_dashboard(token: str, project_id: str):
         from app.api.common.dashboard import _list_servers_as_dicts, _list_flavors_as_dicts
         from app.services import nova, cinder
         await asyncio.gather(
-            cached_call(f"union:nova:{project_id}:servers", ttl_fast(), lambda: _list_servers_as_dicts(conn)),
-            cached_call(f"union:nova:{project_id}:limits", ttl_normal(), lambda: nova.get_project_limits(conn)),
-            cached_call(f"union:cinder:{project_id}:limits", ttl_normal(), lambda: cinder.get_volume_limits(conn)),
-            cached_call(f"union:nova:{project_id}:flavors", ttl_static(), lambda: _list_flavors_as_dicts(conn)),
+            cached_call(f"afterglow:nova:{project_id}:servers", ttl_fast(), lambda: _list_servers_as_dicts(conn)),
+            cached_call(f"afterglow:nova:{project_id}:limits", ttl_normal(), lambda: nova.get_project_limits(conn)),
+            cached_call(f"afterglow:cinder:{project_id}:limits", ttl_normal(), lambda: cinder.get_volume_limits(conn)),
+            cached_call(f"afterglow:nova:{project_id}:flavors", ttl_static(), lambda: _list_flavors_as_dicts(conn)),
         )
     except Exception:
         pass  # best-effort: 실패해도 로그인에는 영향 없음
@@ -106,7 +106,7 @@ async def logout(token_info: dict = Depends(get_token_info)):
     h = hashlib.sha256(token.encode()).hexdigest()[:32]
     try:
         r = await _get_redis()
-        await r.delete(f"union:session:{h}:{pid}", f"union:session-abs:{h}:{pid}")
+        await r.delete(f"afterglow:session:{h}:{pid}", f"afterglow:session-abs:{h}:{pid}")
     except Exception:
         pass
     try:

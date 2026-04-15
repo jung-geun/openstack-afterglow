@@ -1,6 +1,6 @@
 """공통 테스트 픽스처."""
 import os
-os.environ.setdefault("UNION_ALLOW_INSECURE", "1")
+os.environ.setdefault("AFTERGLOW_ALLOW_INSECURE", "1")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 os.environ.setdefault("SERVICE_MANILA_ENABLED", "true")
 

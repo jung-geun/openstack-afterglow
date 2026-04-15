@@ -39,7 +39,7 @@ async def get_authorize_url() -> str:
 
     try:
         r = await _get_redis()
-        await r.setex(f"union:gitlab_state:{state}", _STATE_TTL, "1")
+        await r.setex(f"afterglow:gitlab_state:{state}", _STATE_TTL, "1")
     except Exception:
         logger.warning("Redis 장애로 OIDC state를 인메모리에 임시 저장합니다")
         _fallback_states[state] = __import__("time").time() + _STATE_TTL
@@ -61,7 +61,7 @@ async def _validate_state(state: str) -> None:
     # Redis 시도
     try:
         r = await _get_redis()
-        key = f"union:gitlab_state:{state}"
+        key = f"afterglow:gitlab_state:{state}"
         val = await r.get(key)
         if val is not None:
             await r.delete(key)

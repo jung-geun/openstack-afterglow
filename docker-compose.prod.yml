@@ -4,8 +4,8 @@
 # 필수 환경 변수 (.env 파일 또는 셸에서 설정):
 #   REGISTRY       - 컨테이너 레지스트리 주소 (예: ghcr.io/myorg)
 #   IMAGE_TAG      - 이미지 태그 (예: latest, v1.2.3)
-#   ORIGIN         - 프론트엔드 접근 URL (예: https://union.example.com)
-#   PUBLIC_API_BASE - 백엔드 API URL (예: https://union.example.com)
+#   ORIGIN         - 프론트엔드 접근 URL (예: https://afterglow.example.com)
+#   PUBLIC_API_BASE - 백엔드 API URL (예: https://afterglow.example.com)
 
 services:
   redis:
@@ -23,7 +23,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: backend
-    image: ${REGISTRY}/union-backend:${IMAGE_TAG:-latest}
+    image: ${REGISTRY}/afterglow-api:${IMAGE_TAG:-latest}
     pull_policy: always
     ports:
       - "127.0.0.1:8000:8000"
@@ -34,7 +34,7 @@ services:
     environment:
       - OPENSTACK_PASSWORD=${OPENSTACK_PASSWORD}
       - SECRET_KEY=${SECRET_KEY}
-      - UNION_ENV=production
+      - AFTERGLOW_ENV=production
     depends_on:
       - redis
     restart: always
@@ -49,7 +49,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: frontend
-    image: ${REGISTRY}/union-frontend:${IMAGE_TAG:-latest}
+    image: ${REGISTRY}/afterglow:${IMAGE_TAG:-latest}
     pull_policy: always
     ports:
       - "127.0.0.1:3000:3000"

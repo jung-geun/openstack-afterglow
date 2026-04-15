@@ -303,7 +303,7 @@ async def list_services(
     if category:
         if category not in VALID_CATEGORIES:
             raise HTTPException(status_code=400, detail=f"지원하지 않는 카테고리: {category}")
-        cache_key = f"union:admin:services:{category}"
+        cache_key = f"afterglow:admin:services:{category}"
         fetch_map = _make_fetch_map(conn, settings)
         fetch_fn = fetch_map[category]
 
@@ -333,6 +333,6 @@ async def list_services(
         return result
 
     try:
-        return await cached_call("union:admin:services", ttl_normal(), _collect_all, refresh=refresh)
+        return await cached_call("afterglow:admin:services", ttl_normal(), _collect_all, refresh=refresh)
     except Exception:
         raise HTTPException(status_code=500, detail="서비스 상태 조회 실패")

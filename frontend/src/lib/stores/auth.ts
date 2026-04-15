@@ -35,7 +35,7 @@ const initial: AuthState = {
 function loadPersistedAuth(): AuthState {
 	if (typeof window === 'undefined') return initial;
 	try {
-		const raw = localStorage.getItem('union_auth');
+		const raw = localStorage.getItem('afterglow_auth');
 		if (raw) return { ...initial, ...JSON.parse(raw) };
 	} catch { /* ignore */ }
 	return initial;
@@ -48,12 +48,12 @@ export const auth = writable<AuthState>(loadPersistedAuth());
 if (typeof window !== 'undefined') {
 	auth.subscribe(($auth) => {
 		if ($auth.token) {
-			localStorage.setItem('union_auth', JSON.stringify($auth));
+			localStorage.setItem('afterglow_auth', JSON.stringify($auth));
 			// 서버 사이드 라우트 보호용 마커 쿠키 (httpOnly 아님 — 토큰 자체는 저장하지 않음)
-			document.cookie = 'union_session=1; path=/; SameSite=Strict; Secure';
+			document.cookie = 'afterglow_session=1; path=/; SameSite=Strict; Secure';
 		} else {
-			localStorage.removeItem('union_auth');
-			document.cookie = 'union_session=; path=/; SameSite=Strict; Secure; max-age=0';
+			localStorage.removeItem('afterglow_auth');
+			document.cookie = 'afterglow_session=; path=/; SameSite=Strict; Secure; max-age=0';
 		}
 	});
 }

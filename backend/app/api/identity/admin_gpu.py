@@ -367,7 +367,7 @@ async def list_gpu_hosts(conn: openstack.connection.Connection = Depends(get_os_
         return _collect_gpu_hosts(conn)
 
     try:
-        return await cached_call("union:admin:gpu_hosts", ttl_normal(), _collect, refresh=refresh)
+        return await cached_call("afterglow:admin:gpu_hosts", ttl_normal(), _collect, refresh=refresh)
     except Exception:
         raise HTTPException(status_code=500, detail="GPU 호스트 조회 실패")
 

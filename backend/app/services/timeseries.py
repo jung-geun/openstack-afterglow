@@ -1,7 +1,7 @@
 """
 Redis sorted set 기반 경량 시계열 저장소.
 
-key:   union:ts:{resource_type}
+key:   afterglow:ts:{resource_type}
 score: Unix timestamp (float)
 member: JSON 문자열 {"ts": float, ...데이터...}
 
@@ -30,7 +30,7 @@ async def record_snapshot(resource_type: str, data: dict[str, Any]) -> None:
         r = await _get_redis()
         ts = time.time()
         member = json.dumps({"ts": ts, **data})
-        key = f"union:ts:{resource_type}"
+        key = f"afterglow:ts:{resource_type}"
         await r.zadd(key, {member: ts})
         # 90일보다 오래된 항목 자동 삭제
         cutoff = ts - 90 * 86_400
@@ -45,7 +45,7 @@ async def get_timeseries(resource_type: str, range_str: str = "7d") -> list[dict
     seconds = _RANGE_SECONDS.get(range_str, _RANGE_SECONDS["7d"])
     try:
         r = await _get_redis()
-        key = f"union:ts:{resource_type}"
+        key = f"afterglow:ts:{resource_type}"
         now = time.time()
         start = now - seconds
         raw_items = await r.zrangebyscore(key, start, "+inf")

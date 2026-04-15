@@ -1,7 +1,7 @@
 """Redis 기반 캐시 레이어.
 
-키 형식: union:{service}:{project_id}:{resource}
-예시: union:nova:abc123:servers
+키 형식: afterglow:{service}:{project_id}:{resource}
+예시: afterglow:nova:abc123:servers
 
 TTL 정책:
 - servers/volumes: 15s
@@ -133,4 +133,4 @@ async def invalidate(pattern: str) -> None:
 
 async def invalidate_project(project_id: str, service: str = "*") -> None:
     """특정 프로젝트의 특정 서비스(또는 전체) 캐시를 삭제."""
-    await invalidate(f"union:{service}:{project_id}:*")
+    await invalidate(f"afterglow:{service}:{project_id}:*")

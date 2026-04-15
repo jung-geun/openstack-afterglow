@@ -72,22 +72,22 @@ async def _query_project(token: str, user_id: str, project_id: str, project_name
         try:
             servers, volumes, network_count, fip_count = await asyncio.gather(
                 cached_call(
-                    f"union:user-dashboard:{project_id}:{user_id}:servers", ttl_normal(),
+                    f"afterglow:user-dashboard:{project_id}:{user_id}:servers", ttl_normal(),
                     lambda c=proj_conn, u=user_id: _list_servers_for_project(c, u),
                     refresh=refresh,
                 ),
                 cached_call(
-                    f"union:user-dashboard:{project_id}:{user_id}:volumes", ttl_normal(),
+                    f"afterglow:user-dashboard:{project_id}:{user_id}:volumes", ttl_normal(),
                     lambda c=proj_conn, u=user_id: _list_volumes_for_project(c, u),
                     refresh=refresh,
                 ),
                 cached_call(
-                    f"union:user-dashboard:{project_id}:networks", ttl_normal(),
+                    f"afterglow:user-dashboard:{project_id}:networks", ttl_normal(),
                     lambda c=proj_conn, pid=project_id: _count_networks(c, pid),
                     refresh=refresh,
                 ),
                 cached_call(
-                    f"union:user-dashboard:{project_id}:fips", ttl_fast(),
+                    f"afterglow:user-dashboard:{project_id}:fips", ttl_fast(),
                     lambda c=proj_conn, pid=project_id: _count_floating_ips(c, pid),
                     refresh=refresh,
                 ),

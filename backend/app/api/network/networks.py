@@ -23,7 +23,7 @@ async def list_networks(conn: openstack.connection.Connection = Depends(get_os_c
     pid = conn._union_project_id
     try:
         return await cached_call(
-            f"union:neutron:{pid}:networks", ttl_normal(),
+            f"afterglow:neutron:{pid}:networks", ttl_normal(),
             lambda: neutron.list_networks(conn, pid),
             refresh=refresh,
         )
@@ -51,7 +51,7 @@ async def list_floating_ips(conn: openstack.connection.Connection = Depends(get_
     pid = conn._union_project_id
     try:
         return await cached_call(
-            f"union:neutron:{pid}:floating_ips", ttl_fast(),
+            f"afterglow:neutron:{pid}:floating_ips", ttl_fast(),
             lambda: neutron.list_floating_ips(conn, pid),
             refresh=refresh,
         )
@@ -145,7 +145,7 @@ async def get_topology(conn: openstack.connection.Connection = Depends(get_os_co
     pid = conn._union_project_id
     try:
         return await cached_call(
-            f"union:neutron:{pid}:topology", ttl_normal(),
+            f"afterglow:neutron:{pid}:topology", ttl_normal(),
             lambda: _fetch_topology_sync(conn),
             refresh=refresh,
         )

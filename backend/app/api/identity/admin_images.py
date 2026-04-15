@@ -61,7 +61,7 @@ async def list_admin_images(
             return {"items": items, "next_marker": next_marker, "count": len(items)}
         # 마커가 없고 검색도 없을 때만 캐시 사용
         if not marker and not search:
-            return await cached_call(f"union:admin:images:{limit}", ttl_static(), _list, refresh=refresh)
+            return await cached_call(f"afterglow:admin:images:{limit}", ttl_static(), _list, refresh=refresh)
         return await asyncio.to_thread(_list)
     except Exception:
         _logger.warning("관리자 이미지 목록 조회 실패", exc_info=True)
