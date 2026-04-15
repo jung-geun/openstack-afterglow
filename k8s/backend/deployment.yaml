@@ -21,7 +21,7 @@ spec:
           # 실제 레지스트리 주소로 변경 필요
           # 예: ghcr.io/myorg/afterglow-api:latest
           #     registry.gitlab.com/myorg/afterglow/backend:latest
-          image: glcr.dmslab.re.kr/jung-geun/cephfs-mount/afterglow-api:latest
+          image: glcr.dmslab.re.kr/jung-geun/openstack-afterglow/afterglow-api:dev
           imagePullPolicy: Always
           command:
             [
@@ -64,6 +64,11 @@ spec:
                 secretKeyRef:
                   name: afterglow-secrets
                   key: K3S_KUBECONFIG_ENCRYPTION_KEY
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: afterglow-secrets
+                  key: DATABASE_URL
           volumeMounts:
             - name: afterglow-config-volume
               mountPath: /app/config.toml

@@ -1,4 +1,4 @@
-# Union
+# Afterglow
 
 OpenStack VM + OverlayFS 기반 라이브러리 배포 플랫폼 — Manila CephFS 공유를 OverlayFS로 마운트한 VM을 원클릭으로 프로비저닝합니다.
 
@@ -40,10 +40,10 @@ graph LR
 ## 빠른 시작
 
 ```bash
-git clone https://github.com/your-org/union.git
-cd union
-cp union.toml.ecample union.toml
-# union.toml에서 OpenStack 자격증명 설정
+git clone https://github.com/jung-geun/afterglow.git
+cd afterglow
+cp config.toml.example config.toml
+# config.toml에서 OpenStack 자격증명 설정
 docker compose up -d
 # http://localhost:3000 접속
 ```
@@ -54,7 +54,7 @@ docker compose up -d
 
 ## 설정
 
-모든 설정은 프로젝트 루트의 `union.toml` 파일 하나로 관리합니다.
+모든 설정은 프로젝트 루트의 `config.toml` 파일 하나로 관리합니다.
 
 ### `[openstack]`
 
@@ -119,7 +119,7 @@ union/
 ├── k8s/               # Kubernetes 매니페스트
 ├── docs/              # 상세 문서
 ├── docker-compose.yml
-└── union.toml         # 통합 설정
+└── config.toml         # 통합 설정
 ```
 
 ---
@@ -134,10 +134,10 @@ docker compose --profile monitoring up -d
 
 | 서비스 | URL |
 |--------|-----|
-| OpenSearch | http://localhost:9200 |
-| OpenSearch Dashboards | http://localhost:5601 |
-| Prometheus | http://localhost:9090 |
-| Grafana | http://localhost:3001 (admin / admin) |
+| OpenSearch | <http://localhost:9200> |
+| OpenSearch Dashboards | <http://localhost:5601> |
+| Prometheus | <http://localhost:9090> |
+| Grafana | <http://localhost:3001> (admin / admin) |
 
 Prometheus 수집 대상 설정은 `monitoring/prometheus.yml`, Grafana 대시보드 프로비저닝은 `monitoring/grafana/provisioning/` 을 참고하세요.
 

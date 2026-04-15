@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { untrack } from 'svelte';
   import { goto } from '$app/navigation';
   import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
+  import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 
   interface ClusterTemplate {
@@ -38,6 +39,7 @@
   let error = $state('');
   let serviceUnavailable = $state(false);
   let deleting = $state<string | null>(null);
+  let autoRefresh = $state(false);
   let showModal = $state(false);
   let creating = $state(false);
   let createError = $state('');
@@ -111,7 +113,17 @@
     }
   }
 
-  onMount(() => { fetchClusters(); fetchTemplates(); });
+  $effect(() => {
+    if (!$auth.projectId) return;
+    loading = true;
+    untrack(() => { fetchClusters(); fetchTemplates(); });
+  });
+
+  $effect(() => {
+    if (!$auth.projectId || !autoRefresh) return;
+    const interval = setInterval(() => untrack(() => fetchClusters()), 30000);
+    return () => clearInterval(interval);
+  });
 </script>
 
 {#if showModal}
@@ -163,7 +175,10 @@
 <div class="p-4 md:p-8">
   <div class="flex items-center justify-between mb-6">
     <h1 class="text-2xl font-bold text-white">K8s 클러스터</h1>
-    <button onclick={() => showModal = true} class="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 클러스터 생성</button>
+    <div class="flex items-center gap-2">
+      <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={30} />
+      <button onclick={() => showModal = true} class="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 클러스터 생성</button>
+    </div>
   </div>
 
   {#if error}<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>{/if}

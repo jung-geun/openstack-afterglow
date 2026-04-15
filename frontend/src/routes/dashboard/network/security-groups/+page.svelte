@@ -4,6 +4,7 @@
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import RefreshButton from '$lib/components/RefreshButton.svelte';
+	import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
 
 	interface SecurityGroupRule {
 		id: string;
@@ -26,6 +27,7 @@
 	let loading = $state(true);
 	let refreshing = $state(false);
 	let sgError = $state('');
+	let autoRefresh = $state(false);
 
 	let showSgModal = $state(false);
 	let sgForm = $state({ name: '', description: '' });
@@ -117,6 +119,10 @@
 		const pid = $auth.projectId;
 		if (!pid) return;
 		untrack(() => { fetchSecurityGroups(); });
+	});
+
+	$effect(() => {
+		if (!$auth.projectId || !autoRefresh) return;
 		const interval = setInterval(() => untrack(() => { fetchSecurityGroups(); }), 30000);
 		return () => clearInterval(interval);
 	});
@@ -127,6 +133,7 @@
 	<div class="flex items-center justify-between mb-6">
 		<h1 class="text-xl font-semibold text-white">보안 그룹</h1>
 		<div class="flex items-center gap-2">
+			<AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={30} />
 			<RefreshButton {refreshing} onclick={forceRefresh} />
 			<button
 				onclick={() => { showSgModal = true; sgCreateError = ''; }}

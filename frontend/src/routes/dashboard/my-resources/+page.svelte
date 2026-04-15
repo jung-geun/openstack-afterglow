@@ -4,6 +4,7 @@
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import RefreshButton from '$lib/components/RefreshButton.svelte';
+	import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
 
 	interface InstanceItem {
 		id: string;
@@ -55,6 +56,7 @@
 	let initialLoading = $state(true);
 	let refreshing = $state(false);
 	let error = $state('');
+	let autoRefresh = $state(false);
 	let expandedProject = $state<string | null>(null);
 
 	const token = $derived($auth.token ?? undefined);
@@ -105,6 +107,10 @@
 		const pid = $auth.projectId;
 		if (!pid) return;
 		untrack(() => { load(); });
+	});
+
+	$effect(() => {
+		if (!$auth.projectId || !autoRefresh) return;
 		const interval = setInterval(() => untrack(() => { load(); }), 30000);
 		return () => clearInterval(interval);
 	});
@@ -113,7 +119,10 @@
 <div class="p-4 md:p-8 max-w-6xl">
 	<div class="flex items-center justify-between mb-6">
 		<h1 class="text-2xl font-bold text-white">내 리소스</h1>
-		<RefreshButton {refreshing} onclick={forceRefresh} />
+		<div class="flex items-center gap-2">
+			<AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={30} />
+			<RefreshButton {refreshing} onclick={forceRefresh} />
+		</div>
 	</div>
 
 	{#if error}

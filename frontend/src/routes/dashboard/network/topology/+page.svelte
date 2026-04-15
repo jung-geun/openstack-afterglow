@@ -4,6 +4,7 @@
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import RefreshButton from '$lib/components/RefreshButton.svelte';
+	import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
 	import GlobalTopology from '$lib/components/GlobalTopology.svelte';
 	import InstanceDetailPanel from '$lib/components/InstanceDetailPanel.svelte';
 	import RouterDetailPanel from '$lib/components/RouterDetailPanel.svelte';
@@ -58,10 +59,15 @@
 	let error = $state('');
 	let selectedInstanceId = $state<string | null>(null);
 	let selectedRouterId = $state<string | null>(null);
+	let autoRefresh = $state(false);
 
 	$effect(() => {
 		if (!$auth.token || !$auth.projectId) return;
 		untrack(() => { fetchTopology(); });
+	});
+
+	$effect(() => {
+		if (!$auth.projectId || !autoRefresh) return;
 		const interval = setInterval(() => untrack(() => { fetchTopology(); }), 30000);
 		return () => clearInterval(interval);
 	});
@@ -96,7 +102,10 @@
 <div class="p-4 md:p-8 max-w-screen-2xl mx-auto">
 	<div class="mb-6 flex items-center justify-between">
 		<h1 class="text-2xl font-bold text-white">네트워크 토폴로지</h1>
-		<RefreshButton refreshing={refreshing || loading} onclick={forceRefresh} />
+		<div class="flex items-center gap-2">
+			<AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={30} />
+			<RefreshButton refreshing={refreshing || loading} onclick={forceRefresh} />
+		</div>
 	</div>
 
 	{#if error}

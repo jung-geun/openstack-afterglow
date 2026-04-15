@@ -6,6 +6,7 @@
   import type { FileStorage } from '$lib/types/resources';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import RefreshButton from '$lib/components/RefreshButton.svelte';
+  import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
 
   const statusColor: Record<string, string> = {
     available: 'text-green-400 bg-green-900/30',
@@ -29,6 +30,7 @@
   let refreshing = $state(false);
   let error = $state('');
   let deleting = $state<string | null>(null);
+  let autoRefresh = $state(false);
   let showModal = $state(false);
   let creating = $state(false);
   let createError = $state('');
@@ -149,6 +151,10 @@
     if (!projectId) return;
     loading = true;
     untrack(() => { fetchFileStorages(); fetchQuota(); });
+  });
+
+  $effect(() => {
+    if (!$auth.projectId || !autoRefresh) return;
     const interval = setInterval(() => untrack(() => { fetchFileStorages(); }), 10000);
     return () => clearInterval(interval);
   });
@@ -251,6 +257,7 @@
   <div class="flex items-center justify-between mb-6">
     <h1 class="text-2xl font-bold text-white">파일 스토리지</h1>
     <div class="flex items-center gap-2">
+      <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={10} />
       <RefreshButton {refreshing} onclick={forceRefresh} />
       <button onclick={openCreateModal} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 파일 스토리지 생성</button>
     </div>

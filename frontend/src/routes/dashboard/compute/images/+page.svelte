@@ -4,6 +4,7 @@
   import { api, ApiError } from '$lib/api/client';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import RefreshButton from '$lib/components/RefreshButton.svelte';
+  import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
   import ImageDetailPanel from '$lib/components/ImageDetailPanel.svelte';
 
   interface ImageInfo {
@@ -53,6 +54,7 @@
   let loading = $state(true);
   let refreshing = $state(false);
   let error = $state('');
+  let autoRefresh = $state(false);
   let deleting = $state<string | null>(null);
   let selectedImageId = $state<string | null>(null);
 
@@ -189,6 +191,10 @@
     const pid = $auth.projectId;
     if (!pid) return;
     untrack(() => { fetchImages(); });
+  });
+
+  $effect(() => {
+    if (!$auth.projectId || !autoRefresh) return;
     const interval = setInterval(() => untrack(() => { fetchImages(); }), 60000);
     return () => clearInterval(interval);
   });
@@ -241,6 +247,7 @@
   <div class="flex items-center justify-between mb-6">
     <h1 class="text-2xl font-bold text-white">이미지</h1>
     <div class="flex items-center gap-2">
+      <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={60} />
       <RefreshButton {refreshing} onclick={forceRefresh} />
       <button
         onclick={() => sortOrder = sortOrder === 'desc' ? 'asc' : 'desc'}

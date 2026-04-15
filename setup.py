@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Union 설정 마법사
+"""afterglow 설정 마법사
 
 사용법:
     python3 setup.py
@@ -31,7 +31,7 @@ DEPLOY_K8S = 2
 DEPLOY_BOTH = 3
 
 REDIS_DOCKER = "redis://redis:6379/0"
-REDIS_K8S = "redis://redis.union.svc.cluster.local:6379/0"
+REDIS_K8S = "redis://redis.afterglow.svc.cluster.local:6379/0"
 
 # ANSI 색상 (Windows에서는 비활성화)
 _USE_COLOR = os.name != "nt" or os.environ.get("FORCE_COLOR")
@@ -184,7 +184,7 @@ def section_header(title: str):
 def print_banner():
     print()
     print(cyan("╔" + "═" * 50 + "╗"))
-    print(cyan("║") + bold("        Union 설정 마법사 v1.0              ") + cyan("║"))
+    print(cyan("║") + bold("        afterglow 설정 마법사 v1.0              ") + cyan("║"))
     print(cyan("║") + dim("  config.toml · secret.yaml · configmap.yaml") + cyan("  ║"))
     print(cyan("╚" + "═" * 50 + "╝"))
     print()
@@ -290,7 +290,7 @@ def collect_app() -> dict:
             print(f"  {red('16자 이상이어야 합니다.')}")
 
     print()
-    site_name = ask("사이트 이름", "Union")
+    site_name = ask("사이트 이름", "afterglow")
     site_description = ask("사이트 설명", "OpenStack VM + OverlayFS 배포 플랫폼")
     backend_port = ask_int("백엔드 포트", 8000, 1, 65535)
     frontend_port = ask_int("프론트엔드 포트", 3000, 1, 65535)
@@ -524,7 +524,7 @@ def render_config_toml(cfg: dict, for_k8s: bool = False) -> str:
     )
 
     lines = []
-    lines.append("# Union 통합 설정 파일")
+    lines.append("# afterglow 통합 설정 파일")
     lines.append("# 이 파일을 수정하면 백엔드와 프론트엔드 전체 설정이 변경됩니다.")
     lines.append("# 우선순위: 환경변수 > config.toml > 기본값")
     lines.append("")
@@ -661,8 +661,8 @@ def render_k8s_secret(cfg: dict) -> str:
         "apiVersion: v1",
         "kind: Secret",
         "metadata:",
-        "  name: union-secrets",
-        "  namespace: union",
+        "  name: afterglow-secrets",
+        "  namespace: afterglow",
         "type: Opaque",
         "stringData:",
         "  # OpenStack 관리자 계정 비밀번호",
@@ -705,10 +705,10 @@ def render_k8s_configmap(cfg: dict) -> str:
     app = cfg["app"]
     frontend_port = app["frontend_port"]
 
-    # union.toml 내용 생성 (비밀 제외)
-    union_toml = render_config_toml(cfg, for_k8s=True)
+    # afterglow.toml 내용 생성 (비밀 제외)
+    afterglow_toml = render_config_toml(cfg, for_k8s=True)
     # 4칸 들여쓰기
-    indented = "\n".join("    " + line for line in union_toml.splitlines())
+    indented = "\n".join("    " + line for line in afterglow_toml.splitlines())
 
     # APP_ORIGIN 추론: CORS origins의 첫 번째 값 또는 기본값
     origins = cfg["cors"]["origins"].split(",")
@@ -718,13 +718,13 @@ def render_k8s_configmap(cfg: dict) -> str:
         "apiVersion: v1",
         "kind: ConfigMap",
         "metadata:",
-        "  name: union-config",
-        "  namespace: union",
+        "  name: afterglow-config",
+        "  namespace: afterglow",
         "data:",
         f'  APP_REDIS_URL: "{REDIS_K8S}"',
-        f'  # 실제 서비스 도메인으로 변경 필요 (예: https://union.example.com)',
+        f'  # 실제 서비스 도메인으로 변경 필요 (예: https://afterglow.example.com)',
         f'  APP_ORIGIN: "{app_origin}"',
-        "  union.toml: |",
+        "  afterglow.toml: |",
         indented,
         "",
     ]
@@ -804,7 +804,7 @@ def backup_file(path: Path) -> Path | None:
 
 def write_atomic(path: Path, content: str):
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(dir=path.parent, prefix=".union_setup_")
+    fd, tmp_path = tempfile.mkstemp(dir=path.parent, prefix=".afterglow_setup_")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(content)

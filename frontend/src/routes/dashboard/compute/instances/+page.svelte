@@ -7,6 +7,7 @@
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import InstanceDetailPanel from '$lib/components/InstanceDetailPanel.svelte';
   import RefreshButton from '$lib/components/RefreshButton.svelte';
+  import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
 
   const statusColor: Record<string, string> = {
     ACTIVE:             'text-green-400 bg-green-900/30',
@@ -26,6 +27,7 @@
   let deleting = $state<string | null>(null);
   let selectedInstanceId = $state<string | null>(null);
   let refreshIntervalMs = $state(5000);
+  let autoRefresh = $state(false);
 
   function swrGet<T>(path: string): T | null {
     const key = `${path}:${$auth.projectId}`;
@@ -117,6 +119,10 @@
     if (!projectId) return;
     loading = true;
     untrack(() => { fetchInstances(); });
+  });
+
+  $effect(() => {
+    if (!$auth.projectId || !autoRefresh) return;
     const interval = setInterval(() => untrack(() => { fetchInstances(); }), refreshIntervalMs);
     return () => clearInterval(interval);
   });
@@ -126,6 +132,7 @@
   <div class="flex items-center justify-between mb-6">
     <h1 class="text-2xl font-bold text-white">인스턴스</h1>
     <div class="flex items-center gap-2">
+      <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={refreshIntervalMs / 1000} />
       <RefreshButton {refreshing} onclick={forceRefresh} />
       <a href="/create" class="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
         + VM 생성

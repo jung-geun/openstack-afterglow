@@ -4,6 +4,7 @@
   import { api, ApiError } from '$lib/api/client';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import RefreshButton from '$lib/components/RefreshButton.svelte';
+  import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
 
   interface Keypair {
     name: string;
@@ -17,6 +18,7 @@
   let loading = $state(true);
   let refreshing = $state(false);
   let error = $state('');
+  let autoRefresh = $state(false);
   let deleting = $state<string | null>(null);
   let showModal = $state(false);
   let creating = $state(false);
@@ -108,6 +110,10 @@
     const pid = $auth.projectId;
     if (!pid) return;
     untrack(() => { fetchKeypairs(); });
+  });
+
+  $effect(() => {
+    if (!$auth.projectId || !autoRefresh) return;
     const interval = setInterval(() => untrack(() => { fetchKeypairs(); }), 60000);
     return () => clearInterval(interval);
   });
@@ -154,6 +160,7 @@
   <div class="flex items-center justify-between mb-6">
     <h1 class="text-2xl font-bold text-white">키페어</h1>
     <div class="flex items-center gap-2">
+      <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={60} />
       <RefreshButton {refreshing} onclick={forceRefresh} />
       <button onclick={() => showModal = true} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 키페어 생성</button>
     </div>

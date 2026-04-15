@@ -6,6 +6,7 @@
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import VolumeDetailPanel from '$lib/components/VolumeDetailPanel.svelte';
   import RefreshButton from '$lib/components/RefreshButton.svelte';
+  import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
   import { formatStorage } from '$lib/utils/format';
 
   const statusColor: Record<string, string> = {
@@ -152,16 +153,7 @@
   <div class="flex items-center justify-between mb-6">
     <h1 class="text-2xl font-bold text-white">볼륨</h1>
     <div class="flex items-center gap-2">
-      <button
-        onclick={() => autoRefresh = !autoRefresh}
-        class="flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-medium transition-all {autoRefresh
-          ? 'border-blue-500 bg-blue-900/20 text-blue-400'
-          : 'border-gray-700 bg-gray-900 text-gray-400 hover:border-gray-500'}"
-        title="자동 새로고침 (10초)"
-      >
-        <span class="inline-block {autoRefresh ? 'animate-spin' : ''}" style="animation-duration:3s">⟳</span>
-        자동
-      </button>
+      <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={10} />
       <RefreshButton {refreshing} onclick={() => fetchVolumes(true)} />
       <button onclick={() => showModal = true} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 볼륨 생성</button>
     </div>

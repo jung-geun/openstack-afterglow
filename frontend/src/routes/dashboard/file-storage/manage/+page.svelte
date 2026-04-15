@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { untrack } from 'svelte';
   import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
+  import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 
   interface FileStorage {
@@ -37,6 +38,7 @@
   let error = $state('');
   let message = $state('');
   let autoInstall = $state(true);
+  let autoRefresh = $state(false);
 
   const token = $derived($auth.token ?? undefined);
   const projectId = $derived($auth.projectId ?? undefined);
@@ -78,7 +80,17 @@
     }
   }
 
-  onMount(loadData);
+  $effect(() => {
+    if (!$auth.projectId) return;
+    loading = true;
+    untrack(() => loadData());
+  });
+
+  $effect(() => {
+    if (!$auth.projectId || !autoRefresh) return;
+    const interval = setInterval(() => untrack(() => loadData()), 10000);
+    return () => clearInterval(interval);
+  });
 </script>
 
 <div class="p-4 md:p-8 max-w-5xl">
@@ -92,6 +104,7 @@
         <input type="checkbox" bind:checked={autoInstall} class="rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0" />
         자동 패키지 설치
       </label>
+      <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={10} />
       <button onclick={loadData} class="text-xs text-gray-400 hover:text-white transition-colors border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg">새로고침</button>
     </div>
   </div>

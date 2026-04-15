@@ -5,6 +5,7 @@
   import { api, ApiError } from '$lib/api/client';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import RefreshButton from '$lib/components/RefreshButton.svelte';
+  import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
 
   interface ZunContainer {
     uuid: string;
@@ -41,6 +42,7 @@
   let loading = $state(true);
   let refreshing = $state(false);
   let error = $state('');
+  let autoRefresh = $state(false);
   let actionTarget = $state<string | null>(null);
   let showModal = $state(false);
   let creating = $state(false);
@@ -161,6 +163,10 @@
     if (!projectId) return;
     loading = true;
     untrack(() => { fetchContainers(); });
+  });
+
+  $effect(() => {
+    if (!$auth.projectId || !autoRefresh) return;
     const interval = setInterval(() => untrack(() => { fetchContainers(); }), 5000);
     return () => clearInterval(interval);
   });
@@ -257,6 +263,7 @@
   <div class="flex items-center justify-between mb-6">
     <h1 class="text-2xl font-bold text-white">컨테이너</h1>
     <div class="flex items-center gap-2">
+      <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={5} />
       <RefreshButton {refreshing} onclick={forceRefresh} />
       <button onclick={() => showModal = true} class="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 컨테이너 생성</button>
     </div>

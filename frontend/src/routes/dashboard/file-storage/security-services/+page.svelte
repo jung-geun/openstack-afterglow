@@ -4,6 +4,7 @@
   import { api, ApiError } from '$lib/api/client';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import RefreshButton from '$lib/components/RefreshButton.svelte';
+  import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
 
   interface SecurityService {
     id: string;
@@ -39,6 +40,7 @@
   let shareNetworks = $state<ShareNetwork[]>([]);
   let loading = $state(true);
   let refreshing = $state(false);
+  let autoRefresh = $state(false);
   let deleting = $state<string | null>(null);
   let error = $state('');
   let showModal = $state(false);
@@ -161,6 +163,12 @@
     loading = true;
     untrack(() => fetchServices());
   });
+
+  $effect(() => {
+    if (!$auth.projectId || !autoRefresh) return;
+    const interval = setInterval(() => untrack(() => fetchServices()), 30000);
+    return () => clearInterval(interval);
+  });
 </script>
 
 {#if showModal}
@@ -282,6 +290,7 @@
   <div class="flex items-center justify-between mb-6">
     <h1 class="text-2xl font-bold text-white">Security Service</h1>
     <div class="flex items-center gap-2">
+      <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={30} />
       <RefreshButton {refreshing} onclick={forceRefresh} />
       <button onclick={openCreateModal}
         class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">

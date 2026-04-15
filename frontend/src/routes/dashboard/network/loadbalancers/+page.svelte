@@ -6,6 +6,7 @@
   import type { LoadBalancer } from '$lib/types/resources';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import RefreshButton from '$lib/components/RefreshButton.svelte';
+  import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
 
   const statusColor: Record<string, string> = {
     ACTIVE:  'text-green-400 bg-green-900/30',
@@ -19,6 +20,7 @@
   let loading = $state(true);
   let refreshing = $state(false);
   let error = $state('');
+  let autoRefresh = $state(false);
 
   async function fetchLoadbalancers(opts?: { refresh?: boolean }) {
     try {
@@ -44,6 +46,10 @@
     const pid = $auth.projectId;
     if (!pid) return;
     untrack(() => { fetchLoadbalancers(); });
+  });
+
+  $effect(() => {
+    if (!$auth.projectId || !autoRefresh) return;
     const interval = setInterval(() => untrack(() => { fetchLoadbalancers(); }), 30000);
     return () => clearInterval(interval);
   });
@@ -53,6 +59,7 @@
   <div class="flex items-center justify-between mb-6">
     <h1 class="text-2xl font-bold text-white">로드밸런서</h1>
     <div class="flex items-center gap-2">
+      <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={30} />
       <RefreshButton {refreshing} onclick={forceRefresh} />
       <a href="/dashboard/network/loadbalancers/new" class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 로드밸런서 생성</a>
     </div>

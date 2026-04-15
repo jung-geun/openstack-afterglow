@@ -5,6 +5,7 @@
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import { formatStorage } from '$lib/utils/format';
   import RefreshButton from '$lib/components/RefreshButton.svelte';
+  import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
 
   interface VolumeSnapshot {
     id: string;
@@ -35,6 +36,7 @@
   let loading = $state(true);
   let refreshing = $state(false);
   let error = $state('');
+  let autoRefresh = $state(false);
   let deleting = $state<string | null>(null);
   let showModal = $state(false);
   let creating = $state(false);
@@ -100,6 +102,10 @@
     const pid = $auth.projectId;
     if (!pid) return;
     untrack(() => { fetchSnapshots(); fetchVolumes(); });
+  });
+
+  $effect(() => {
+    if (!$auth.projectId || !autoRefresh) return;
     const interval = setInterval(() => untrack(() => { fetchSnapshots(); }), 15000);
     return () => clearInterval(interval);
   });
@@ -148,6 +154,7 @@
   <div class="flex items-center justify-between mb-6">
     <h1 class="text-2xl font-bold text-white">볼륨 스냅샷</h1>
     <div class="flex items-center gap-2">
+      <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={15} />
       <RefreshButton {refreshing} onclick={forceRefresh} />
       <button onclick={() => showModal = true} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 스냅샷 생성</button>
     </div>

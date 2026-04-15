@@ -5,6 +5,7 @@
   import type { FileStorage } from '$lib/types/resources';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import RefreshButton from '$lib/components/RefreshButton.svelte';
+  import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
 
   interface ShareSnapshot {
     id: string;
@@ -29,6 +30,7 @@
   let refreshing = $state(false);
   let deleting = $state<string | null>(null);
   let error = $state('');
+  let autoRefresh = $state(false);
   let showModal = $state(false);
   let creating = $state(false);
   let createError = $state('');
@@ -104,6 +106,10 @@
     if (!$auth.projectId) return;
     loading = true;
     untrack(() => fetchSnapshots());
+  });
+
+  $effect(() => {
+    if (!$auth.projectId || !autoRefresh) return;
     const interval = setInterval(() => untrack(() => fetchSnapshots()), 15000);
     return () => clearInterval(interval);
   });
@@ -161,6 +167,7 @@
   <div class="flex items-center justify-between mb-6">
     <h1 class="text-2xl font-bold text-white">파일 스토리지 스냅샷</h1>
     <div class="flex items-center gap-2">
+      <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={15} />
       <RefreshButton {refreshing} onclick={forceRefresh} />
       <button onclick={openCreateModal}
         class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
