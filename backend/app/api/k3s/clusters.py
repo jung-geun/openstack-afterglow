@@ -20,8 +20,9 @@ from app.models.k3s import (
     K3sClusterInfo,
     K3sProgressMessage,
     K3sProgressStep,
+    ScaleK3sClusterRequest,
 )
-from app.services import cinder, nova, neutron, k3s_cloudinit
+from app.services import cinder, nova, neutron, k3s_cloudinit, keystone
 from app.services import k3s_db as k3s_cluster
 
 router = APIRouter()
@@ -308,6 +309,133 @@ async def _rollback(
             await asyncio.to_thread(neutron.delete_security_group, conn, sg_id)
         except Exception as e:
             _logger.warning("Rollback: delete SG %s failed: %s", sg_id, e)
+
+
+@router.patch("/{cluster_id}/scale")
+async def scale_k3s_cluster(
+    cluster_id: str,
+    req: ScaleK3sClusterRequest,
+    token_info: dict = Depends(get_token_info),
+):
+    """에이전트 수 변경. 현재 ACTIVE 상태에서만 허용."""
+    project_id = token_info["project_id"]
+    cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
+    if cluster["status"] != "ACTIVE":
+        raise HTTPException(status_code=409, detail="ACTIVE 상태의 클러스터만 스케일링할 수 있습니다")
+
+    current_agent_ids: list[str] = cluster.get("agent_vm_ids") or []
+    if isinstance(current_agent_ids, str):
+        import json as _json
+        try:
+            current_agent_ids = _json.loads(current_agent_ids)
+        except Exception:
+            current_agent_ids = []
+
+    desired = req.agent_count
+    current = len(current_agent_ids)
+
+    if desired == current:
+        return {"message": "변경 없음", "agent_count": current}
+
+    await k3s_cluster.update_cluster_status(project_id, cluster_id, "SCALING")
+    asyncio.create_task(_scale_agents(project_id, cluster_id, current_agent_ids, desired))
+    return {"message": f"스케일링 시작: {current} → {desired}", "agent_count": desired}
+
+
+async def _scale_agents(
+    project_id: str,
+    cluster_id: str,
+    current_agent_ids: list[str],
+    desired_count: int,
+) -> None:
+    """에이전트 스케일링 백그라운드 태스크."""
+    from app.config import get_settings
+
+    cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
+    if not cluster:
+        return
+
+    node_token = await k3s_cluster.get_cluster_node_token(project_id, cluster_id)
+    server_ip = cluster.get("server_ip") or ""
+    s = get_settings()
+
+    current_count = len(current_agent_ids)
+
+    if desired_count > current_count:
+        # 스케일 업
+        add_count = desired_count - current_count
+        agent_flavor_id = cluster.get("agent_flavor_id") or s.k3s_default_agent_flavor_id
+        network_id = cluster.get("network_id") or s.default_network_id
+        ssh_public_key = cluster.get("ssh_public_key") or None
+        cluster_name = cluster.get("name") or cluster_id
+        k3s_version = cluster.get("k3s_version") or s.k3s_version
+        image_id = s.k3s_server_image_id
+        boot_volume_size = s.k3s_boot_volume_size_gb
+        sg_id = cluster.get("security_group_id") or None
+
+        try:
+            conn = keystone.get_admin_connection_for_project(project_id)
+        except Exception as e:
+            _logger.error("k3s scale up: cannot get OpenStack connection: %s", e)
+            await k3s_cluster.update_cluster_status(project_id, cluster_id, "ACTIVE", f"스케일 업 실패: {e}")
+            return
+
+        new_entries: list[dict] = []
+        for i in range(add_count):
+            agent_idx = current_count + i + 1
+            agent_name = f"{cluster_name}-agent-{agent_idx}"
+            try:
+                vol = await asyncio.to_thread(
+                    cinder.create_volume_from_image,
+                    conn, f"{agent_name}-boot", image_id, boot_volume_size
+                )
+                userdata = k3s_cloudinit.generate_agent_userdata(
+                    cluster_name=cluster_name,
+                    k3s_version=k3s_version,
+                    server_ip=server_ip,
+                    node_token=node_token or "",
+                    ssh_public_key=ssh_public_key,
+                )
+                vm = await asyncio.to_thread(
+                    nova.create_server,
+                    conn, agent_name, agent_flavor_id, network_id, vol.id,
+                    userdata=userdata,
+                    metadata={"union_role": "k3s_agent", "union_cluster_id": cluster_id},
+                    delete_boot_volume_on_termination=True,
+                    security_groups=[sg_id] if sg_id else None,
+                )
+                new_entries.append({"vm_id": vm.id, "name": agent_name})
+                _logger.info("k3s scale up: agent %s created: %s", agent_name, vm.id)
+            except Exception as e:
+                _logger.error("k3s scale up: agent %s failed: %s", agent_name, e)
+
+        if new_entries:
+            await k3s_cluster.add_agent_vms(cluster_id, new_entries)
+
+    else:
+        # 스케일 다운: 뒤에서부터 제거
+        remove_ids = current_agent_ids[desired_count:]
+        try:
+            conn = keystone.get_admin_connection_for_project(project_id)
+        except Exception as e:
+            _logger.error("k3s scale down: cannot get OpenStack connection: %s", e)
+            await k3s_cluster.update_cluster_status(project_id, cluster_id, "ACTIVE", f"스케일 다운 실패: {e}")
+            return
+
+        for vm_id in remove_ids:
+            try:
+                await asyncio.to_thread(nova.delete_server, conn, vm_id)
+                _logger.info("k3s scale down: agent VM %s deleted", vm_id)
+            except Exception as e:
+                _logger.warning("k3s scale down: delete VM %s failed: %s", vm_id, e)
+
+        await k3s_cluster.remove_agent_vms(cluster_id, remove_ids)
+
+    await k3s_cluster.update_agent_count(project_id, cluster_id, desired_count)
+    await k3s_cluster.update_cluster_status(project_id, cluster_id, "ACTIVE", "")
+    _logger.info("k3s cluster %s scaled to %d agents", cluster_id, desired_count)
 
 
 @router.delete("/{cluster_id}", status_code=204)

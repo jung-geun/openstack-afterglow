@@ -55,6 +55,10 @@ class K3sClusterInfo(BaseModel):
     updated_at: Optional[str] = None
 
 
+class ScaleK3sClusterRequest(BaseModel):
+    agent_count: int = Field(ge=0, le=10)
+
+
 class K3sCallbackRequest(BaseModel):
     token: str
     success: bool

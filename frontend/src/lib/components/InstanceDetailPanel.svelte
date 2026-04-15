@@ -293,7 +293,7 @@
 				$auth.projectId ?? undefined
 			);
 			if (onClose) onClose();
-			else goto('/dashboard');
+			else goto('/dashboard/compute/instances');
 		} catch (e) {
 			alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
@@ -570,8 +570,8 @@
 				✕ 닫기
 			</button>
 		{:else}
-			<a href="/dashboard" class="text-gray-400 hover:text-gray-200 text-sm transition-colors">
-				← 대시보드
+			<a href="/dashboard/compute/instances" class="text-gray-400 hover:text-gray-200 text-sm transition-colors">
+				← 인스턴스
 			</a>
 		{/if}
 	</div>

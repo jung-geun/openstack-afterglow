@@ -176,13 +176,20 @@ async def list_projects(
             kwargs["marker"] = marker
         projects = []
         for p in conn.identity.projects(**kwargs):
+            created_at = getattr(p, 'created_at', None)
+            if not created_at:
+                try:
+                    detail = conn.identity.get_project(p.id)
+                    created_at = getattr(detail, 'created_at', None)
+                except Exception:
+                    pass
             projects.append({
                 "id": p.id,
                 "name": p.name or "",
                 "description": getattr(p, 'description', '') or "",
                 "enabled": p.is_enabled,
                 "domain_id": getattr(p, 'domain_id', None),
-                "created_at": str(p.created_at) if hasattr(p, 'created_at') and p.created_at else None,
+                "created_at": str(created_at) if created_at else None,
             })
             if len(projects) >= limit:
                 break

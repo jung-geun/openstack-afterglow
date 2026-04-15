@@ -433,10 +433,39 @@ def _gpu_info_from_flavor(flavor_name: str, extra_specs: dict) -> tuple[str, int
 
 
 # ---------------------------------------------------------------------------
-# Redis config helpers
+# Config helpers — DB 우선, Redis fallback
 # ---------------------------------------------------------------------------
 
-async def get_notion_config() -> dict | None:
+def _row_to_dict(row) -> dict:
+    """NotionConfig ORM row → API 호환 dict."""
+    from app.services.k3s_crypto import decrypt_notion_config
+    api_key = ""
+    try:
+        api_key = decrypt_notion_config(row.api_key_encrypted)
+    except Exception:
+        _logger.warning("Notion API key 복호화 실패")
+
+    def _iso(dt) -> str | None:
+        if dt is None:
+            return None
+        return dt.isoformat() if hasattr(dt, "isoformat") else str(dt)
+
+    return {
+        "api_key": api_key,
+        "database_id": row.database_id or "",
+        "enabled": bool(row.enabled),
+        "interval_minutes": row.interval_minutes or 5,
+        "last_sync": _iso(row.last_sync),
+        "users_database_id": row.users_database_id or "",
+        "hypervisors_database_id": row.hypervisors_database_id or "",
+        "hypervisors_last_sync": _iso(row.hypervisors_last_sync),
+        "gpu_spec_database_id": row.gpu_spec_database_id or "",
+        "gpu_spec_last_sync": _iso(row.gpu_spec_last_sync),
+    }
+
+
+async def _redis_get() -> dict | None:
+    """Redis에서 직접 읽기 (fallback 전용)."""
     from app.services.cache import _get_redis
     try:
         r = await _get_redis()
@@ -445,20 +474,100 @@ async def get_notion_config() -> dict | None:
             return None
         return json.loads(raw)
     except Exception:
-        _logger.warning("Notion 설정 읽기 실패", exc_info=True)
         return None
 
 
+async def get_notion_config() -> dict | None:
+    from app.database import is_db_available, get_session_factory
+    from app.models.db import NotionConfig
+    from sqlalchemy import select
+
+    if is_db_available():
+        try:
+            factory = get_session_factory()
+            async with factory() as session:
+                result = await session.execute(select(NotionConfig).where(NotionConfig.id == 1))
+                row = result.scalar_one_or_none()
+                if row is not None:
+                    return _row_to_dict(row)
+        except Exception:
+            _logger.warning("Notion 설정 DB 읽기 실패, Redis fallback", exc_info=True)
+
+    return await _redis_get()
+
+
 async def save_notion_config(config: dict) -> None:
+    from app.database import is_db_available, get_session_factory
+    from app.models.db import NotionConfig
+    from app.services.k3s_crypto import encrypt_notion_config
+    from sqlalchemy import select
+    from datetime import datetime, timezone
+
+    def _parse_dt(val) -> "datetime | None":
+        if not val:
+            return None
+        if isinstance(val, datetime):
+            return val
+        try:
+            return datetime.fromisoformat(val).replace(tzinfo=timezone.utc) if val else None
+        except Exception:
+            return None
+
+    if is_db_available():
+        try:
+            encrypted = encrypt_notion_config(config["api_key"])
+            factory = get_session_factory()
+            async with factory() as session:
+                result = await session.execute(select(NotionConfig).where(NotionConfig.id == 1))
+                row = result.scalar_one_or_none()
+                if row is None:
+                    row = NotionConfig(id=1, api_key_encrypted=encrypted)
+                    session.add(row)
+                else:
+                    row.api_key_encrypted = encrypted
+
+                row.database_id = config.get("database_id") or ""
+                row.enabled = bool(config.get("enabled", False))
+                row.interval_minutes = int(config.get("interval_minutes") or 5)
+                row.users_database_id = config.get("users_database_id") or None
+                row.hypervisors_database_id = config.get("hypervisors_database_id") or None
+                row.gpu_spec_database_id = config.get("gpu_spec_database_id") or None
+                row.last_sync = _parse_dt(config.get("last_sync"))
+                row.hypervisors_last_sync = _parse_dt(config.get("hypervisors_last_sync"))
+                row.gpu_spec_last_sync = _parse_dt(config.get("gpu_spec_last_sync"))
+                row.updated_at = datetime.now(timezone.utc)
+                await session.commit()
+            return
+        except Exception:
+            _logger.warning("Notion 설정 DB 저장 실패, Redis fallback", exc_info=True)
+
+    # Redis fallback
     from app.services.cache import _get_redis
     r = await _get_redis()
     await r.set(REDIS_CONFIG_KEY, json.dumps(config))
 
 
 async def delete_notion_config() -> None:
-    from app.services.cache import _get_redis
-    r = await _get_redis()
-    await r.delete(REDIS_CONFIG_KEY)
+    from app.database import is_db_available, get_session_factory
+    from app.models.db import NotionConfig
+    from sqlalchemy import delete as sa_delete
+
+    if is_db_available():
+        try:
+            factory = get_session_factory()
+            async with factory() as session:
+                await session.execute(sa_delete(NotionConfig).where(NotionConfig.id == 1))
+                await session.commit()
+        except Exception:
+            _logger.warning("Notion 설정 DB 삭제 실패", exc_info=True)
+
+    # Redis도 함께 정리
+    try:
+        from app.services.cache import _get_redis
+        r = await _get_redis()
+        await r.delete(REDIS_CONFIG_KEY)
+    except Exception:
+        pass
 
 
 def mask_api_key(key: str) -> str:

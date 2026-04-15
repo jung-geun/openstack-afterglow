@@ -130,22 +130,25 @@ async def list_clusters(project_id: str) -> list[dict]:
 
 async def list_all_clusters() -> list[dict]:
     """전체 프로젝트의 클러스터 목록 (관리자용)."""
-    if not is_db_available():
-        from app.services import k3s_cluster as _redis
-        return await _redis.list_all_clusters()
+    from app.services import k3s_cluster as _redis
 
-    factory = get_session_factory()
-    async with factory() as session:
-        stmt = select(K3sCluster).order_by(K3sCluster.created_at.desc())
-        result = await session.execute(stmt)
-        clusters = result.scalars().all()
-        out = []
-        for c in clusters:
-            await session.refresh(c, ["agent_vms"])
-            d = _cluster_to_dict(c)
-            d["project_id"] = c.project_id
-            out.append(d)
-        return out
+    if is_db_available():
+        factory = get_session_factory()
+        async with factory() as session:
+            stmt = select(K3sCluster).order_by(K3sCluster.created_at.desc())
+            result = await session.execute(stmt)
+            clusters = result.scalars().all()
+            if clusters:
+                out = []
+                for c in clusters:
+                    await session.refresh(c, ["agent_vms"])
+                    d = _cluster_to_dict(c)
+                    d["project_id"] = c.project_id
+                    out.append(d)
+                return out
+
+    # DB 미설정이거나 DB에 데이터 없으면 Redis fallback
+    return await _redis.list_all_clusters()
 
 
 async def update_cluster_status(
@@ -230,6 +233,60 @@ async def add_agent_vms(cluster_id: str, vm_entries: list[dict]) -> None:
             )
             session.add(vm)
         await session.commit()
+
+
+async def remove_agent_vms(cluster_id: str, vm_ids: list[str]) -> None:
+    """지정된 에이전트 VM 레코드 제거."""
+    if not is_db_available():
+        return
+
+    factory = get_session_factory()
+    async with factory() as session:
+        await session.execute(
+            delete(K3sAgentVM).where(
+                K3sAgentVM.cluster_id == cluster_id,
+                K3sAgentVM.vm_id.in_(vm_ids),
+            )
+        )
+        await session.commit()
+
+
+async def update_agent_count(project_id: str, cluster_id: str, agent_count: int) -> None:
+    """클러스터의 agent_count 필드 업데이트."""
+    if not is_db_available():
+        from app.services import k3s_cluster as _redis
+        return await _redis.update_cluster_status(
+            project_id, cluster_id, None, agent_count=agent_count
+        )
+
+    factory = get_session_factory()
+    async with factory() as session:
+        stmt = select(K3sCluster).where(
+            K3sCluster.id == cluster_id, K3sCluster.project_id == project_id
+        )
+        result = await session.execute(stmt)
+        cluster = result.scalar_one_or_none()
+        if cluster:
+            cluster.agent_count = agent_count
+            cluster.updated_at = datetime.now(timezone.utc)
+            await session.commit()
+
+
+async def get_cluster_node_token(project_id: str, cluster_id: str) -> Optional[str]:
+    """내부용: node_token 조회 (API 응답에는 포함하지 않음)."""
+    if not is_db_available():
+        from app.services import k3s_cluster as _redis
+        c = await _redis.get_cluster(project_id, cluster_id)
+        return c.get("node_token") if c else None
+
+    factory = get_session_factory()
+    async with factory() as session:
+        stmt = select(K3sCluster.node_token).where(
+            K3sCluster.id == cluster_id, K3sCluster.project_id == project_id
+        )
+        result = await session.execute(stmt)
+        row = result.scalar_one_or_none()
+        return row
 
 
 async def update_agent_vm_status(cluster_id: str, vm_id: str, status: str) -> None:

@@ -184,6 +184,7 @@ class Settings(BaseSettings):
     k3s_callback_base_url: str = ""
     k3s_kubeconfig_encryption_key: str = ""
     k3s_boot_volume_size_gb: int = 30
+    notion_config_encryption_key: str = ""  # 미설정 시 k3s_kubeconfig_encryption_key 재사용
 
     # 세션 관리
     session_timeout_seconds: int = 3600

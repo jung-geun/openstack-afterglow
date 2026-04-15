@@ -1,9 +1,9 @@
-"""SQLAlchemy ORM 모델 — k3s 클러스터 영속화."""
+"""SQLAlchemy ORM 모델 — k3s 클러스터 및 Notion 설정 영속화."""
 
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    CHAR, INT, TEXT, VARCHAR,
+    BOOLEAN, CHAR, INT, TEXT, VARCHAR,
     DateTime, ForeignKey, Index, String,
     func,
 )
@@ -85,3 +85,37 @@ class K3sAgentVM(Base):
     )
 
     cluster: Mapped["K3sCluster"] = relationship("K3sCluster", back_populates="agent_vms")
+
+
+class NotionConfig(Base):
+    """Notion 연동 설정 (싱글톤, id=1 고정). API key는 AES-256-GCM 암호화 저장."""
+
+    __tablename__ = "notion_config"
+
+    id: Mapped[int] = mapped_column(INT, primary_key=True, autoincrement=True)
+
+    # 민감 정보 — AES-256-GCM 암호화
+    api_key_encrypted: Mapped[str] = mapped_column(TEXT, nullable=False)
+
+    # 데이터베이스 ID
+    database_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, default="")
+    users_database_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    hypervisors_database_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    gpu_spec_database_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+
+    # 동기화 설정
+    enabled: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False)
+    interval_minutes: Mapped[int] = mapped_column(INT, nullable=False, default=5)
+
+    # 마지막 동기화 시각
+    last_sync: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    hypervisors_last_sync: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    gpu_spec_last_sync: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # 타임스탬프
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
+    )

@@ -5,6 +5,7 @@
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import RefreshButton from '$lib/components/RefreshButton.svelte';
   import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
+  import K3sClusterDetailPanel from '$lib/components/K3sClusterDetailPanel.svelte';
 
   interface K3sCluster {
     id: string;
@@ -55,6 +56,31 @@
     { id: 'waiting_callback', label: 'k3s 초기화' },
     { id: 'completed',        label: '완료' },
   ];
+
+  // 슬라이드 패널
+  let selectedClusterId = $state<string | null>(null);
+
+  function openClusterPanel(id: string) {
+    selectedClusterId = id;
+    history.pushState({ clusterId: id }, '', `/dashboard/containers/k3s/${id}`);
+  }
+
+  function closeClusterPanel() {
+    selectedClusterId = null;
+    history.pushState({}, '', '/dashboard/containers/k3s');
+  }
+
+  $effect(() => {
+    function handlePopState(e: PopStateEvent) {
+      if (e.state?.clusterId) {
+        selectedClusterId = e.state.clusterId;
+      } else {
+        selectedClusterId = null;
+      }
+    }
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  });
 
   let clusters = $state<K3sCluster[]>([]);
   let flavors = $state<Flavor[]>([]);
@@ -345,15 +371,34 @@
           <button onclick={() => { showProgress = false; }}
             class="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors">닫기</button>
           {#if createdClusterId && progressStep === 'completed'}
-            <a href="/dashboard/containers/k3s/{createdClusterId}"
+            <button
+              onclick={() => { showProgress = false; openClusterPanel(createdClusterId!); }}
               class="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors">
               클러스터 보기
-            </a>
+            </button>
           {/if}
         </div>
       {:else}
         <p class="text-xs text-gray-600">완료될 때까지 기다려주세요...</p>
       {/if}
+    </div>
+  </div>
+{/if}
+
+<!-- 슬라이드 패널 -->
+{#if selectedClusterId}
+  <div
+    class="fixed inset-0 z-40"
+    role="dialog"
+    aria-modal="true"
+    onkeydown={(e) => e.key === 'Escape' && closeClusterPanel()}>
+    <button
+      class="absolute inset-0 bg-black/50 cursor-default"
+      onclick={closeClusterPanel}
+      aria-label="패널 닫기"></button>
+    <div class="absolute right-0 top-14 bottom-0 w-full md:w-[75vw] max-w-5xl
+                bg-gray-950 border-l border-gray-700 overflow-y-auto shadow-2xl">
+      <K3sClusterDetailPanel clusterId={selectedClusterId} onClose={closeClusterPanel} />
     </div>
   </div>
 {/if}
@@ -403,12 +448,16 @@
         </thead>
         <tbody>
           {#each clusters as cluster (cluster.id)}
-            <tr class="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
+            <tr
+              class="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors cursor-pointer"
+              onclick={() => openClusterPanel(cluster.id)}
+              onkeydown={(e) => e.key === 'Enter' && openClusterPanel(cluster.id)}
+              role="button"
+              tabindex="0">
               <td class="py-3 pr-6">
-                <a href="/dashboard/containers/k3s/{cluster.id}"
-                  class="font-medium text-white hover:text-blue-400 transition-colors">
+                <span class="font-medium text-white hover:text-blue-400 transition-colors">
                   {cluster.name}
-                </a>
+                </span>
                 {#if cluster.status_reason}
                   <div class="text-xs text-gray-500 truncate max-w-xs">{cluster.status_reason}</div>
                 {/if}
@@ -430,7 +479,7 @@
               <td class="py-3 pr-6 text-xs text-gray-500">
                 {cluster.created_at ? cluster.created_at.split('T')[0] : '-'}
               </td>
-              <td class="py-3 text-right">
+              <td class="py-3 text-right" onclick={(e) => e.stopPropagation()} role="none" onkeydown={(e) => e.stopPropagation()}>
                 <div class="flex items-center justify-end gap-2">
                   <button
                     onclick={() => downloadKubeconfig(cluster.id, cluster.name)}

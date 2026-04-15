@@ -9,43 +9,79 @@ package_update: true
 packages:
   - curl
 
-runcmd:
-  - |
-    LOG="/var/log/k3s-agent.log"
-    log() { echo "[k3s-agent] $(date '+%Y-%m-%d %H:%M:%S') $*" | tee -a "$LOG"; }
+write_files:
+  - path: /opt/k3s/agent-join.sh
+    permissions: "0750"
+    content: |
+      #!/bin/bash
+      LOG="/var/log/k3s-agent.log"
+      log() { echo "[k3s-agent] $(date '+%Y-%m-%d %H:%M:%S') $*" | tee -a "$LOG"; }
 
-    log "서버 API({{ server_ip }}:6443) 대기 시작..."
-    SERVER_READY=false
-    for i in $(seq 1 180); do
-      if curl -sk --connect-timeout 3 https://{{ server_ip }}:6443/healthz 2>/dev/null | grep -q ok; then
-        SERVER_READY=true
-        log "서버 API 준비 완료 (${i}회 시도)"
-        break
-      fi
-      sleep 5
-    done
-
-    if [ "$SERVER_READY" != "true" ]; then
-      log "ERROR: 서버 API에 15분 내 연결 실패. 설치 중단."
-      exit 1
-    fi
-
-    log "k3s 에이전트 설치 시작 (버전: {{ k3s_version }})..."
-    curl -sfL https://get.k3s.io | \
-      INSTALL_K3S_VERSION="{{ k3s_version }}" \
-      K3S_URL="https://{{ server_ip }}:6443" \
-      K3S_TOKEN="{{ node_token }}" \
-      sh - 2>&1 | tee -a "$LOG"
-
-    log "k3s-agent 서비스 활성화 대기 중..."
-    for i in $(seq 1 60); do
+      # 이미 k3s-agent가 실행 중이면 종료 (멱등성)
       if systemctl is-active --quiet k3s-agent 2>/dev/null; then
-        log "k3s-agent 서비스 정상 실행 중. 클러스터 join 완료."
+        log "k3s-agent 이미 실행 중. 종료."
         exit 0
       fi
-      sleep 5
-    done
 
-    log "WARNING: k3s-agent 서비스가 5분 내 활성화되지 않음"
-    systemctl status k3s-agent >> "$LOG" 2>&1 || true
-    journalctl -u k3s-agent --no-pager -n 50 >> "$LOG" 2>&1 || true
+      log "서버 API({{ server_ip }}:6443) 대기 시작..."
+      SERVER_READY=false
+      for i in $(seq 1 360); do
+        if curl -sk --connect-timeout 3 https://{{ server_ip }}:6443/healthz 2>/dev/null | grep -q ok; then
+          SERVER_READY=true
+          log "서버 API 준비 완료 (${i}회 시도)"
+          break
+        fi
+        sleep 5
+      done
+
+      if [ "$SERVER_READY" != "true" ]; then
+        log "ERROR: 서버 API에 30분 내 연결 실패. systemd가 2분 후 재시도 예정."
+        exit 1
+      fi
+
+      log "k3s 에이전트 설치 시작 (버전: {{ k3s_version }})..."
+      curl -sfL https://get.k3s.io | \
+        INSTALL_K3S_VERSION="{{ k3s_version }}" \
+        K3S_URL="https://{{ server_ip }}:6443" \
+        K3S_TOKEN="{{ node_token }}" \
+        sh - 2>&1 | tee -a "$LOG"
+
+      log "k3s-agent 서비스 활성화 대기 중..."
+      for i in $(seq 1 60); do
+        if systemctl is-active --quiet k3s-agent 2>/dev/null; then
+          log "k3s-agent 서비스 정상 실행 중. 클러스터 join 완료."
+          exit 0
+        fi
+        sleep 5
+      done
+
+      log "WARNING: k3s-agent 서비스가 5분 내 활성화되지 않음. 재시도 예정."
+      systemctl status k3s-agent >> "$LOG" 2>&1 || true
+      journalctl -u k3s-agent --no-pager -n 50 >> "$LOG" 2>&1 || true
+      exit 1
+
+  - path: /etc/systemd/system/k3s-agent-join.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=K3s Agent Join - {{ cluster_name }}
+      After=network-online.target
+      Wants=network-online.target
+      ConditionPathExists=!/etc/systemd/system/k3s-agent.service
+
+      [Service]
+      Type=oneshot
+      ExecStart=/opt/k3s/agent-join.sh
+      Restart=on-failure
+      RestartSec=120
+      StartLimitIntervalSec=14400
+      StartLimitBurst=20
+      StandardOutput=journal
+      StandardError=journal
+
+      [Install]
+      WantedBy=multi-user.target
+
+runcmd:
+  - systemctl daemon-reload
+  - systemctl enable --now k3s-agent-join.service
