@@ -521,7 +521,7 @@ async def _k3s_cleanup_loop() -> None:
     await asyncio.sleep(120)
     while True:
         try:
-            from app.services import k3s_cluster as _k3s
+            from app.services import k3s_db as _k3s
             await _k3s.check_stale_clusters(timeout_minutes=30)
         except Exception:
             _logger.warning("k3s stale cluster check failed", exc_info=True)
@@ -530,7 +530,28 @@ async def _k3s_cleanup_loop() -> None:
 
 @app.on_event("startup")
 async def start_background_workers():
+    # DB 초기화 (database.url 설정 시)
+    from app.database import init_db, create_tables
+    _db_cfg = _get_cfg()
+    if _db_cfg.database_url:
+        init_db(
+            _db_cfg.database_url,
+            pool_size=_db_cfg.database_pool_size,
+            max_overflow=_db_cfg.database_max_overflow,
+        )
+        if _db_cfg.database_auto_create_tables:
+            try:
+                await create_tables()
+            except Exception:
+                _logger.warning("DB 테이블 자동 생성 실패 (migrations/001_k3s_tables.sql 수동 실행 필요)", exc_info=True)
+
     asyncio.create_task(_snapshot_loop())
     asyncio.create_task(_notion_sync_loop())
     if _svc_cfg.service_k3s_enabled:
         asyncio.create_task(_k3s_cleanup_loop())
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    from app.database import close_db
+    await close_db()

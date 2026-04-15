@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from app.models.k3s import K3sCallbackRequest
 from app.rate_limit import limiter
-from app.services import k3s_cluster
+from app.services import k3s_db as k3s_cluster
 
 router = APIRouter()
 _logger = logging.getLogger(__name__)
@@ -122,6 +122,7 @@ async def _provision_agents(
     agent_vm_ids: list[str] = []
     failed_count = 0
 
+    new_agent_entries: list[dict] = []
     for i in range(agent_count):
         agent_name = f"{cluster_name}-agent-{i + 1}"
         try:
@@ -148,10 +149,15 @@ async def _provision_agents(
                 security_groups=[sg_id] if sg_id else None,
             )
             agent_vm_ids.append(vm.id)
+            new_agent_entries.append({"vm_id": vm.id, "name": agent_name})
             _logger.info("k3s agent %s created: %s", agent_name, vm.id)
         except Exception as e:
             _logger.error("k3s agent %s creation failed: %s", agent_name, e)
             failed_count += 1
+
+    # 에이전트 VM DB 저장
+    if new_agent_entries:
+        await k3s_cluster.add_agent_vms(cluster_id, new_agent_entries)
 
     # 클러스터 상태 업데이트
     reason = f"에이전트 {failed_count}개 생성 실패" if failed_count else ""

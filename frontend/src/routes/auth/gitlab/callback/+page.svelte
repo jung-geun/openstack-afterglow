@@ -13,8 +13,12 @@
 
 	let error = $state('');
 	let loading = $state(true);
+	let processing = false;
 
 	onMount(async () => {
+		if (processing) return;
+		processing = true;
+
 		const code = $page.url.searchParams.get('code');
 		const state = $page.url.searchParams.get('state');
 

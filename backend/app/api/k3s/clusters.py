@@ -21,7 +21,8 @@ from app.models.k3s import (
     K3sProgressMessage,
     K3sProgressStep,
 )
-from app.services import cinder, nova, neutron, k3s_cluster, k3s_cloudinit
+from app.services import cinder, nova, neutron, k3s_cloudinit
+from app.services import k3s_db as k3s_cluster
 
 router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
@@ -236,6 +237,12 @@ async def create_k3s_cluster_async(
             # --- Step 5: Redis에 클러스터 레코드 저장 ---
             yield event(K3sProgressStep.WAITING_CALLBACK, 60, "k3s 초기화 대기 중 (서버 VM에서 k3s 설치 중)...")
             now = datetime.now(timezone.utc).isoformat()
+            # 생성자 정보 추출
+            _creator_user_id = conn._union_user_id if hasattr(conn, "_union_user_id") else None
+            _creator_username = None
+            if token_info_obj and isinstance(token_info_obj, dict):
+                _creator_user_id = _creator_user_id or token_info_obj.get("user_id")
+                _creator_username = token_info_obj.get("username")
             await k3s_cluster.create_cluster_record(project_id, cluster_id, {
                 "name": req.name,
                 "status": "CREATING",
@@ -252,6 +259,8 @@ async def create_k3s_cluster_async(
                 "key_name": req.key_name or "",
                 "ssh_public_key": ssh_public_key,
                 "k3s_version": k3s_version,
+                "created_by_user_id": _creator_user_id or "",
+                "created_by_username": _creator_username or "",
                 "created_at": now,
                 "updated_at": now,
             })

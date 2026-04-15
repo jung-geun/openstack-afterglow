@@ -37,6 +37,8 @@ def generate_agent_userdata(
     ssh_public_key: str | None = None,
 ) -> str:
     """k3s 에이전트 노드 cloud-init YAML을 렌더링하여 base64 인코딩 반환."""
+    if not node_token:
+        raise ValueError("node_token이 비어있습니다. 서버 콜백에서 토큰이 전달되지 않았습니다.")
     yaml_str = _jinja.get_template("k3s_agent.yaml.j2").render(
         cluster_name=cluster_name,
         k3s_version=k3s_version,

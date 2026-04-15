@@ -11,16 +11,41 @@ packages:
 
 runcmd:
   - |
-    # 서버 API 서버(6443) 준비될 때까지 대기 (최대 15분)
+    LOG="/var/log/k3s-agent.log"
+    log() { echo "[k3s-agent] $(date '+%Y-%m-%d %H:%M:%S') $*" | tee -a "$LOG"; }
+
+    log "서버 API({{ server_ip }}:6443) 대기 시작..."
+    SERVER_READY=false
     for i in $(seq 1 180); do
       if curl -sk --connect-timeout 3 https://{{ server_ip }}:6443/healthz 2>/dev/null | grep -q ok; then
+        SERVER_READY=true
+        log "서버 API 준비 완료 (${i}회 시도)"
         break
       fi
       sleep 5
     done
-    # k3s 에이전트 설치 및 클러스터 조인
+
+    if [ "$SERVER_READY" != "true" ]; then
+      log "ERROR: 서버 API에 15분 내 연결 실패. 설치 중단."
+      exit 1
+    fi
+
+    log "k3s 에이전트 설치 시작 (버전: {{ k3s_version }})..."
     curl -sfL https://get.k3s.io | \
       INSTALL_K3S_VERSION="{{ k3s_version }}" \
       K3S_URL="https://{{ server_ip }}:6443" \
       K3S_TOKEN="{{ node_token }}" \
-      sh -
+      sh - 2>&1 | tee -a "$LOG"
+
+    log "k3s-agent 서비스 활성화 대기 중..."
+    for i in $(seq 1 60); do
+      if systemctl is-active --quiet k3s-agent 2>/dev/null; then
+        log "k3s-agent 서비스 정상 실행 중. 클러스터 join 완료."
+        exit 0
+      fi
+      sleep 5
+    done
+
+    log "WARNING: k3s-agent 서비스가 5분 내 활성화되지 않음"
+    systemctl status k3s-agent >> "$LOG" 2>&1 || true
+    journalctl -u k3s-agent --no-pager -n 50 >> "$LOG" 2>&1 || true

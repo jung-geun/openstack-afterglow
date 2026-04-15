@@ -354,6 +354,17 @@ callback_base_url = ""         # 서버 VM이 콜백할 백엔드 URL (예: http
 kubeconfig_encryption_key = "" # AES-256-GCM 키 — openssl rand -hex 32 로 생성
 boot_volume_size_gb = 30
 
+[database]
+# k3s 클러스터 영속화용 MariaDB/MySQL 연결 URL (선택적)
+# 미설정 시 기존 Redis 방식으로 동작
+# url = "mysql+asyncmy://union:password@mariadb.example.com:3306/union_k3s"
+url = ""
+# 커넥션 풀 설정
+pool_size = 5
+max_overflow = 10
+# 앱 시작 시 테이블 자동 생성 (개발/테스트용, 운영에서는 false 후 migrations/ SQL 수동 실행 권장)
+auto_create_tables = true
+
 [cors]
 # CORS 허용 origin (쉼표 구분). 프론트엔드 실제 접근 URL로 설정.
 # 예: origins = "https://cloud.dmslab.re.kr"

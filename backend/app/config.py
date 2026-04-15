@@ -107,6 +107,12 @@ def _load_toml() -> dict:
             flat["gitlab_oidc_redirect_uri"] = gl.get("redirect_uri", "")
             flat["gitlab_oidc_scopes"] = gl.get("scopes", "openid email profile read_user")
 
+            db = data.get("database", {})
+            flat["database_url"] = db.get("url", "")
+            flat["database_pool_size"] = db.get("pool_size", 5)
+            flat["database_max_overflow"] = db.get("max_overflow", 10)
+            flat["database_auto_create_tables"] = db.get("auto_create_tables", True)
+
             cors = data.get("cors", {})
             flat["cors_origins"] = cors.get("origins", "http://localhost:3000,http://localhost")
 
@@ -194,6 +200,12 @@ class Settings(BaseSettings):
     builder_image_id: str = ""       # 빌더 VM 부팅 이미지 ID (Ubuntu 22.04+)
     builder_flavor_id: str = ""      # 빌더 VM 플레이버 ID
     builder_network_id: str = ""     # 빌더 VM 네트워크 ID (미지정 시 default_network_id 사용)
+
+    # 데이터베이스 (MariaDB/MySQL, 선택적)
+    database_url: str = ""
+    database_pool_size: int = 5
+    database_max_overflow: int = 10
+    database_auto_create_tables: bool = True
 
     # GitLab OIDC
     gitlab_oidc_enabled: bool = False
