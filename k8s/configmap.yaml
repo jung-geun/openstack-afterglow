@@ -19,26 +19,31 @@ data:
     manila_share_network_id = ""
     manila_share_type = "cephfs"
     manila_nfs_share_type = "nfstype"
-    
+
     # Ceph 모니터 (cloud-init CephFS 마운트용, 콤마 구분)
     ceph_monitors = "172.30.0.1:6789,172.30.0.2:6789,172.30.0.3:6789"
-    
+
     [app]
     backend_port = 8000
     frontend_port = 3000
     # secret_key는 secret.yaml의 SECRET_KEY 환경변수로 주입됩니다
-    
+
     # 사이트 표시 이름 및 설명
     site_name = "DMS Cloud"
     site_description = "DMSLAB의 OpenStack 기반 클라우드 플랫폼"
-    
+
     # 로고 및 파비콘 경로 (frontend/static/ 기준)
     logo_path = "/logo.png"
     favicon_path = "/favicon.ico"
-    
+
     # 프론트엔드 대시보드 자동 새로고침 간격 (밀리초)
     refresh_interval_ms = 5000
-    
+
+    [logging]
+    rotation_type = "time"
+    rotation_when = "midnight"
+    backup_count = 10
+
     [cache]
     redis_url = "redis://redis.union.svc.cluster.local:6379/0"
     # TTL 티어 (초)
@@ -46,287 +51,287 @@ data:
     ttl_normal = 30    # 네트워크, 라우터, 대시보드
     ttl_slow = 60      # 키페어, 보안그룹
     ttl_static = 300   # 이미지, 플레이버, 토큰 검증
-    
+
     [session]
     timeout_seconds = 3600
     warning_before_seconds = 300
-    
+
     [nova]
     default_network_id = ""
     default_availability_zone = "nova"
     boot_volume_size_gb = 20
     upper_volume_size_gb = 50
-    
+
     [gpu]
     # GPU 디바이스 맵 (vendor_id/device_id: lspci -nn 출력의 PCI ID)
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "17C2"
     name = "GTX TITAN X"
     is_audio = false
     aliases = ["GTX_TITAN_X", "titan"]
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "0FB0"
     name = "GM200 Audio"
     is_audio = true
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "1B06"
     name = "GTX 1080 Ti"
     is_audio = false
     aliases = ["GTX1080Ti", "1080ti"]
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "1B80"
     name = "GTX 1080"
     is_audio = false
     aliases = ["GTX1080", "1080"]
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "1B81"
     name = "GTX 1070"
     is_audio = false
     aliases = ["GTX1070", "1070"]
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "1B00"
     name = "TITAN X"
     is_audio = false
     aliases = ["TITAN_X"]
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "1B02"
     name = "TITAN Xp"
     is_audio = false
     aliases = ["TITAN_Xp", "titanxp"]
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "10EF"
     name = "GP102 Audio"
     is_audio = true
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "2204"
     name = "RTX 3090"
     is_audio = false
     aliases = ["RTX3090", "rtx3090", "3090"]
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "2203"
     name = "RTX 3090 Ti"
     is_audio = false
     aliases = ["RTX3090Ti", "3090ti", "3090Ti"]
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "2206"
     name = "RTX 3080 Ti"
     is_audio = false
     aliases = ["RTX3080Ti", "3080ti"]
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "220A"
     name = "RTX 3080"
     is_audio = false
     aliases = ["RTX3080", "3080"]
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "2484"
     name = "RTX 3070 Ti"
     is_audio = false
     aliases = ["RTX3070Ti", "3070ti"]
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "2482"
     name = "RTX 3070"
     is_audio = false
     aliases = ["RTX3070", "3070"]
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "2504"
     name = "RTX 3060"
     is_audio = false
     aliases = ["RTX3060", "3060"]
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "1AEF"
     name = "GA102 Audio"
     is_audio = true
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "2684"
     name = "RTX 4090"
     is_audio = false
     aliases = ["RTX4090", "rtx4090", "4090"]
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "2704"
     name = "RTX 4080"
     is_audio = false
     aliases = ["RTX4080", "4080"]
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "2782"
     name = "RTX 4070 Ti SUPER"
     is_audio = false
     aliases = ["RTX4070TiSuper", "4070tisuper"]
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "2783"
     name = "RTX 4070 Ti"
     is_audio = false
     aliases = ["RTX4070Ti", "4070ti"]
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "2786"
     name = "RTX 4070 SUPER"
     is_audio = false
     aliases = ["RTX4070Super", "4070super"]
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "2882"
     name = "RTX 4060 Ti"
     is_audio = false
     aliases = ["RTX4060Ti", "4060ti"]
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "22BA"
     name = "AD102 Audio"
     is_audio = true
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "22BE"
     name = "AD107 Audio"
     is_audio = true
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "2B85"
     name = "RTX 5090"
     is_audio = false
     aliases = ["RTX5090", "5090"]
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "2B80"
     name = "RTX 5080"
     is_audio = false
     aliases = ["RTX5080", "5080"]
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "28B0"
     name = "RTX 2000 Ada"
     is_audio = false
     aliases = ["RTX2000Ada", "2000Ada", "2000ada"]
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "2230"
     name = "RTX A6000"
     is_audio = false
     aliases = ["RTXA6000", "A6000"]
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "2231"
     name = "RTX A5000"
     is_audio = false
     aliases = ["RTXA5000", "A5000"]
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "26B1"
     name = "L40"
     is_audio = false
     aliases = ["L40", "l40"]
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "26B9"
     name = "L40S"
     is_audio = false
     aliases = ["L40S", "l40s"]
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "20B0"
     name = "A100 SXM4 40GB"
     is_audio = false
     aliases = ["A100_SXM4_40GB", "A100SXM440GB"]
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "20B2"
     name = "A100 SXM4 80GB"
     is_audio = false
     aliases = ["A100_SXM4_80GB", "A100_80GB"]
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "20B5"
     name = "A100 PCIe"
     is_audio = false
     aliases = ["A100_PCIe", "A100PCIe"]
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "20F1"
     name = "A100 PCIe 40GB"
     is_audio = false
     aliases = ["A100_PCIe_40GB"]
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "20B8"
     name = "A10"
     is_audio = false
     aliases = ["A10", "a10"]
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "2330"
     name = "H100 SXM5"
     is_audio = false
     aliases = ["H100_SXM5", "H100SXM5"]
-    
+
     [[gpu.devices]]
     vendor_id = "10DE"
     device_id = "2331"
     name = "H100 PCIe"
     is_audio = false
     aliases = ["H100_PCIe", "H100PCIe"]
-    
+
     [services]
     magnum = false
     manila = true
     zun = true
     k3s = true
-    
+
     [k3s]
     version = "v1.31.4+k3s1"
     server_flavor_id = ""
@@ -335,12 +340,12 @@ data:
     callback_base_url = "https://example.com/"
     # kubeconfig_encryption_key는 secret.yaml에서 주입됩니다
     boot_volume_size_gb = 30
-    
+
     [cors]
     origins = "http://localhost:3000,http://127.0.0.1:3000"
-    
+
     [gitlab_oidc]
-    enabled = true
+    enabled = false
     gitlab_url = "https://gitlab.com"
     client_id = "CHANGE_ME"
     # client_secret은 secret.yaml의 GITLAB_OIDC_CLIENT_SECRET 환경변수로 주입됩니다

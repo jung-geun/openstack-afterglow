@@ -53,8 +53,8 @@ spec:
             periodSeconds: 5
           resources:
             requests:
-              memory: "64Mi"
-              cpu: "50m"
+              memory: "500Mi"
+              cpu: "100m"
             limits:
-              memory: "256Mi"
-              cpu: "200m"
+              memory: "1024Mi"
+              cpu: "500m"

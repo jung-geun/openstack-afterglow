@@ -23,10 +23,27 @@ spec:
           #     registry.gitlab.com/myorg/union/backend:latest
           image: glcr.dmslab.re.kr/jung-geun/cephfs-mount/union-api:latest
           imagePullPolicy: Always
-          command: ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+          command:
+            [
+              "uv",
+              "run",
+              "uvicorn",
+              "app.main:app",
+              "--host",
+              "0.0.0.0",
+              "--port",
+              "8000",
+              "--workers",
+              "2",
+            ]
           ports:
             - containerPort: 8000
           env:
+            - name: REDIS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: union-config
+                  key: APP_REDIS_URL
             - name: OS_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -37,39 +54,52 @@ spec:
                 secretKeyRef:
                   name: union-secrets
                   key: SECRET_KEY
+            - name: GITLAB_OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: union-secrets
+                  key: GITLAB_OIDC_CLIENT_SECRET
+            - name: K3S_KUBECONFIG_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: union-secrets
+                  key: K3S_KUBECONFIG_ENCRYPTION_KEY
           volumeMounts:
             - name: union-config-volume
-              mountPath: /app/union.toml
-              subPath: union.toml
-          startupProbe:
-            httpGet:
-              path: /api/health
-              port: 8000
-            failureThreshold: 30
-            periodSeconds: 2
+              mountPath: /app/config.toml
+              subPath: config.toml
+          # startupProbe:
+          #   httpGet:
+          #     path: /api/health
+          #     port: 8000
+          #   initialDelaySeconds: 15
+          #   periodSeconds: 3
+          #   failureThreshold: 30
           livenessProbe:
             httpGet:
               path: /api/health
               port: 8000
+            initialDelaySeconds: 30
             periodSeconds: 20
             failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /api/health
               port: 8000
-            periodSeconds: 5
+            initialDelaySeconds: 20
+            periodSeconds: 10
             failureThreshold: 3
           resources:
             requests:
-              memory: "128Mi"
-              cpu: "100m"
-            limits:
-              memory: "512Mi"
+              memory: "256Mi"
               cpu: "500m"
+            limits:
+              memory: "1024Mi"
+              cpu: "1"
       volumes:
         - name: union-config-volume
           configMap:
             name: union-config
             items:
-              - key: union.toml
-                path: union.toml
+              - key: config.toml
+                path: config.toml
