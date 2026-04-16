@@ -379,3 +379,14 @@
 
 - [x] `frontend/src/lib/components/ProjectQuotaPanel.svelte` — 신규 컴포넌트. `GET /api/admin/quotas/{project_id}` 로 현재값+사용량 로드, instances/cores/ram/volumes/gigabytes 편집 폼, `PUT /api/admin/quotas/{project_id}` 로 저장
 - [x] `frontend/src/routes/admin/+page.svelte` — ProjectQuotaPanel import, `selectedProject` 상태 추가, 프로젝트 테이블 행에 `onclick`/`onkeydown` 클릭 핸들러 추가, `loadProjectUsage()` 함수 분리, 페이지 하단에 슬라이드 패널 렌더링
+
+### 8.5 k3s 클러스터 soft-delete (삭제 이력 영구 유지)
+
+**문제**: 클러스터 삭제 시 DB에서 물리 삭제되어 이력 조회 불가.
+
+- [x] `backend/app/models/db.py::K3sCluster` — `deleted_at`, `deleted_by_user_id`, `deleted_reason` 컬럼 추가
+- [x] `backend/app/models/k3s.py::K3sClusterInfo` — `deleted_at/deleted_by_user_id/deleted_reason` 필드 추가
+- [x] `backend/app/database.py::create_tables` — 기존 테이블에 `ALTER TABLE ADD COLUMN IF NOT EXISTS` 마이그레이션 추가
+- [x] `backend/app/services/k3s_db.py` — `delete_cluster_record` soft-delete(UPDATE status='DELETED' + deleted_at)로 전환, `list_clusters`/`list_all_clusters` 에 `include_deleted` 파라미터 추가, `_cluster_to_dict` 신규 필드 직렬화
+- [x] `backend/app/api/k3s/clusters.py` — `list_k3s_clusters` 에 `?include_deleted=true` 쿼리 파라미터, `delete_k3s_cluster` 에 `user_id` 추출 + soft-delete 호출 + 멱등 처리
+- [x] `frontend/src/routes/dashboard/containers/k3s/+page.svelte` — `showDeleted` 토글 버튼 추가, 삭제된 클러스터 회색+취소선+삭제 시각 표시, 삭제된 행에서 액션 버튼 숨김

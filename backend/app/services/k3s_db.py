@@ -46,6 +46,9 @@ def _cluster_to_dict(cluster: K3sCluster) -> dict:
         "created_by_username": cluster.created_by_username,
         "created_at": cluster.created_at.isoformat() if cluster.created_at else None,
         "updated_at": cluster.updated_at.isoformat() if cluster.updated_at else None,
+        "deleted_at": cluster.deleted_at.isoformat() if cluster.deleted_at else None,
+        "deleted_by_user_id": cluster.deleted_by_user_id,
+        "deleted_reason": cluster.deleted_reason,
     }
 
 
@@ -124,8 +127,8 @@ async def get_cluster_admin(cluster_id: str) -> dict | None:
         return d
 
 
-async def list_clusters(project_id: str) -> list[dict]:
-    """프로젝트의 클러스터 목록 (최신순)."""
+async def list_clusters(project_id: str, include_deleted: bool = False) -> list[dict]:
+    """프로젝트의 클러스터 목록 (최신순). include_deleted=False 이면 deleted_at IS NULL 필터."""
     if not is_db_available():
         from app.services import k3s_cluster as _redis
 
@@ -133,7 +136,10 @@ async def list_clusters(project_id: str) -> list[dict]:
 
     factory = get_session_factory()
     async with factory() as session:
-        stmt = select(K3sCluster).where(K3sCluster.project_id == project_id).order_by(K3sCluster.created_at.desc())
+        stmt = select(K3sCluster).where(K3sCluster.project_id == project_id)
+        if not include_deleted:
+            stmt = stmt.where(K3sCluster.deleted_at.is_(None))
+        stmt = stmt.order_by(K3sCluster.created_at.desc())
         result = await session.execute(stmt)
         clusters = result.scalars().all()
         out = []
@@ -143,14 +149,17 @@ async def list_clusters(project_id: str) -> list[dict]:
         return out
 
 
-async def list_all_clusters() -> list[dict]:
+async def list_all_clusters(include_deleted: bool = False) -> list[dict]:
     """전체 프로젝트의 클러스터 목록 (관리자용)."""
     from app.services import k3s_cluster as _redis
 
     if is_db_available():
         factory = get_session_factory()
         async with factory() as session:
-            stmt = select(K3sCluster).order_by(K3sCluster.created_at.desc())
+            stmt = select(K3sCluster)
+            if not include_deleted:
+                stmt = stmt.where(K3sCluster.deleted_at.is_(None))
+            stmt = stmt.order_by(K3sCluster.created_at.desc())
             result = await session.execute(stmt)
             clusters = result.scalars().all()
             if clusters:
@@ -215,8 +224,14 @@ async def update_cluster_status(
         await session.commit()
 
 
-async def delete_cluster_record(project_id: str, cluster_id: str) -> None:
-    """클러스터 삭제 (agent_vms CASCADE 삭제 포함)."""
+async def delete_cluster_record(
+    project_id: str,
+    cluster_id: str,
+    *,
+    user_id: str | None = None,
+    reason: str | None = None,
+) -> None:
+    """클러스터 soft-delete — status='DELETED' + deleted_at 기록. agent_vms 는 보존."""
     if not is_db_available():
         from app.services import k3s_cluster as _redis
 
@@ -224,9 +239,16 @@ async def delete_cluster_record(project_id: str, cluster_id: str) -> None:
 
     factory = get_session_factory()
     async with factory() as session:
-        await session.execute(
-            delete(K3sCluster).where(K3sCluster.id == cluster_id, K3sCluster.project_id == project_id)
-        )
+        stmt = select(K3sCluster).where(K3sCluster.id == cluster_id, K3sCluster.project_id == project_id)
+        result = await session.execute(stmt)
+        cluster = result.scalar_one_or_none()
+        if cluster is None:
+            return
+        cluster.status = "DELETED"
+        cluster.deleted_at = datetime.now(UTC)
+        cluster.deleted_by_user_id = user_id
+        cluster.deleted_reason = reason
+        cluster.updated_at = datetime.now(UTC)
         await session.commit()
 
 

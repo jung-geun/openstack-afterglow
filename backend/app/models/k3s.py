@@ -53,6 +53,17 @@ class K3sClusterInfo(BaseModel):
     k3s_version: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
+    deleted_at: str | None = None
+    deleted_by_user_id: str | None = None
+    deleted_reason: str | None = None
+
+
+class K3sClusterInfoDeleted(K3sClusterInfo):
+    """삭제 이력 포함 클러스터 정보."""
+
+    deleted_at: str | None = None
+    deleted_by_user_id: str | None = None
+    deleted_reason: str | None = None
 
 
 class ScaleK3sClusterRequest(BaseModel):

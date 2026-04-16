@@ -7,7 +7,7 @@ from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 
 import openstack
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response, StreamingResponse
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -54,13 +54,19 @@ def _cluster_to_info(c: dict) -> K3sClusterInfo:
         k3s_version=c.get("k3s_version") or None,
         created_at=c.get("created_at") or None,
         updated_at=c.get("updated_at") or None,
+        deleted_at=c.get("deleted_at") or None,
+        deleted_by_user_id=c.get("deleted_by_user_id") or None,
+        deleted_reason=c.get("deleted_reason") or None,
     )
 
 
 @router.get("", response_model=list[K3sClusterInfo])
-async def list_k3s_clusters(token_info: dict = Depends(get_token_info)):
+async def list_k3s_clusters(
+    token_info: dict = Depends(get_token_info),
+    include_deleted: bool = Query(default=False),
+):
     project_id = token_info["project_id"]
-    clusters = await k3s_cluster.list_clusters(project_id)
+    clusters = await k3s_cluster.list_clusters(project_id, include_deleted=include_deleted)
     return [_cluster_to_info(c) for c in clusters]
 
 
@@ -477,12 +483,17 @@ async def _scale_agents(
 async def delete_k3s_cluster(
     cluster_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
-    """k3s 클러스터 삭제: VM → SG → Redis 순으로 정리."""
+    """k3s 클러스터 삭제: VM → SG 정리 후 soft-delete 처리."""
     project_id = conn._union_project_id
     cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
     if not cluster:
         raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
+
+    # 이미 삭제된 클러스터는 멱등 처리
+    if cluster.get("deleted_at"):
+        return
 
     await k3s_cluster.update_cluster_status(project_id, cluster_id, "DELETING")
 
@@ -521,5 +532,6 @@ async def delete_k3s_cluster(
         except Exception as e:
             _logger.warning("Delete SG %s failed: %s", sg_id, e)
 
-    # Redis 레코드 삭제
-    await k3s_cluster.delete_cluster_record(project_id, cluster_id)
+    # soft-delete: 상태를 DELETED로 기록 (물리 삭제 안 함)
+    user_id = token_info.get("user_id") if isinstance(token_info, dict) else None
+    await k3s_cluster.delete_cluster_record(project_id, cluster_id, user_id=user_id, reason="사용자 삭제 요청")

@@ -22,6 +22,9 @@
     k3s_version: string | null;
     created_at: string | null;
     updated_at: string | null;
+    deleted_at: string | null;
+    deleted_by_user_id: string | null;
+    deleted_reason: string | null;
   }
 
   interface Flavor {
@@ -47,6 +50,7 @@
     PROVISIONING: 'text-blue-400 bg-blue-900/30',
     DELETING:     'text-orange-400 bg-orange-900/30',
     ERROR:        'text-red-400 bg-red-900/30',
+    DELETED:      'text-gray-500 bg-gray-800/50',
   };
 
   const K3S_STEPS = [
@@ -91,6 +95,7 @@
   let error = $state('');
   let autoRefresh = $state(false);
   let deleting = $state<string | null>(null);
+  let showDeleted = $state(false);
 
   // 모달
   let showModal = $state(false);
@@ -111,7 +116,8 @@
 
   async function fetchClusters(opts?: { refresh?: boolean }) {
     try {
-      clusters = await api.get<K3sCluster[]>('/api/k3s/clusters', token, projectId, opts);
+      const qs = showDeleted ? '?include_deleted=true' : '';
+      clusters = await api.get<K3sCluster[]>(`/api/k3s/clusters${qs}`, token, projectId, opts);
       error = '';
     } catch (e) {
       if (e instanceof ApiError && e.status === 503) {
@@ -407,6 +413,12 @@
   <div class="flex items-center justify-between mb-6">
     <h1 class="text-2xl font-bold text-white">k3s 클러스터</h1>
     <div class="flex items-center gap-2">
+      <button
+        onclick={() => { showDeleted = !showDeleted; fetchClusters(); }}
+        class="text-xs px-3 py-1.5 rounded border transition-colors {showDeleted ? 'border-gray-500 text-gray-300 bg-gray-800' : 'border-gray-700 text-gray-500 hover:border-gray-500 hover:text-gray-400'}"
+      >
+        {showDeleted ? '삭제 이력 숨기기' : '삭제 이력 보기'}
+      </button>
       <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={5} />
       <RefreshButton {refreshing} onclick={forceRefresh} />
       <button onclick={openCreateModal}
@@ -449,16 +461,20 @@
         <tbody>
           {#each clusters as cluster (cluster.id)}
             <tr
-              class="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors cursor-pointer"
-              onclick={() => openClusterPanel(cluster.id)}
-              onkeydown={(e) => e.key === 'Enter' && openClusterPanel(cluster.id)}
+              class="border-b border-gray-800/50 transition-colors {cluster.deleted_at ? 'opacity-50' : 'hover:bg-gray-800/30 cursor-pointer'}"
+              onclick={() => !cluster.deleted_at && openClusterPanel(cluster.id)}
+              onkeydown={(e) => e.key === 'Enter' && !cluster.deleted_at && openClusterPanel(cluster.id)}
               role="button"
               tabindex="0">
               <td class="py-3 pr-6">
-                <span class="font-medium text-white hover:text-blue-400 transition-colors">
+                <span class="font-medium {cluster.deleted_at ? 'text-gray-500 line-through' : 'text-white hover:text-blue-400'} transition-colors">
                   {cluster.name}
                 </span>
-                {#if cluster.status_reason}
+                {#if cluster.deleted_at}
+                  <div class="text-xs text-gray-600 mt-0.5">
+                    삭제됨 {cluster.deleted_at.replace('T', ' ').slice(0, 16)}
+                  </div>
+                {:else if cluster.status_reason}
                   <div class="text-xs text-gray-500 truncate max-w-xs">{cluster.status_reason}</div>
                 {/if}
               </td>
@@ -487,12 +503,14 @@
                     class="text-blue-400 hover:text-blue-300 disabled:text-gray-600 text-xs px-2 py-1 rounded border border-blue-900 hover:border-blue-700 disabled:border-gray-700 transition-colors">
                     kubeconfig
                   </button>
+                  {#if !cluster.deleted_at}
                   <button
                     onclick={() => deleteCluster(cluster.id, cluster.name)}
                     disabled={deleting === cluster.id || cluster.status === 'DELETING'}
                     class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-xs px-2 py-1 rounded border border-red-900 hover:border-red-700 disabled:border-gray-700 transition-colors">
                     {deleting === cluster.id ? '삭제 중...' : '삭제'}
                   </button>
+                  {/if}
                 </div>
               </td>
             </tr>

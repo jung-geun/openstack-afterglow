@@ -51,6 +51,19 @@ async def create_tables() -> None:
 
     async with _engine.begin() as conn:
         await conn.run_sync(_ModelBase.metadata.create_all)
+
+    # 기존 테이블에 soft-delete 컬럼 추가 (없는 경우에만)
+    async with _engine.begin() as conn:
+        for col, col_def in [
+            ("deleted_at", "DATETIME(6)"),
+            ("deleted_by_user_id", "VARCHAR(64)"),
+            ("deleted_reason", "VARCHAR(255)"),
+        ]:
+            try:
+                await conn.exec_driver_sql(f"ALTER TABLE k3s_clusters ADD COLUMN {col} {col_def} DEFAULT NULL")
+            except Exception:
+                pass  # 이미 존재하면 무시
+
     _logger.info("데이터베이스 테이블 생성/확인 완료")
 
 

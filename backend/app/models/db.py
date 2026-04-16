@@ -61,6 +61,11 @@ class K3sCluster(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
 
+    # soft-delete
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    deleted_by_user_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    deleted_reason: Mapped[str | None] = mapped_column(VARCHAR(255))
+
     # 관계
     agent_vms: Mapped[list["K3sAgentVM"]] = relationship(
         "K3sAgentVM", back_populates="cluster", cascade="all, delete-orphan"
