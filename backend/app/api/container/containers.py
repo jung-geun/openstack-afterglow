@@ -3,11 +3,23 @@ import logging
 import secrets
 
 import openstack
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from pydantic import BaseModel
 
 from app.api.deps import get_os_conn
-from app.models.containers import ContainerListResponse, CreateZunContainerRequest, ZunContainerInfo
+from app.models.containers import (
+    ContainerListResponse,
+    CreateZunContainerRequest,
+    ZunContainerInfo,
+)
 from app.rate_limit import limiter
 from app.services import zun
 from app.services.zun import ZunServiceUnavailable
@@ -23,13 +35,19 @@ async def list_containers(conn: openstack.connection.Connection = Depends(get_os
         items = await asyncio.to_thread(zun.list_containers, conn)
         return ContainerListResponse(items=items)
     except ZunServiceUnavailable:
-        return ContainerListResponse(items=[], service_available=False, message="컨테이너 서비스에 연결할 수 없습니다")
+        return ContainerListResponse(
+            items=[],
+            service_available=False,
+            message="컨테이너 서비스에 연결할 수 없습니다",
+        )
     except Exception:
         raise HTTPException(status_code=500, detail="컨테이너 목록 조회 실패")
 
 
 @router.get("/{container_id}", response_model=ZunContainerInfo)
-async def get_container(container_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def get_container(
+    container_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)
+):
     try:
         return await asyncio.to_thread(zun.get_container, conn, container_id)
     except Exception:
@@ -44,7 +62,9 @@ async def create_container(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     try:
-        ports = [p.model_dump(exclude_none=True) for p in req.ports] if req.ports else None
+        ports = (
+            [p.model_dump(exclude_none=True) for p in req.ports] if req.ports else None
+        )
         return await asyncio.to_thread(
             zun.create_container,
             conn,
@@ -62,7 +82,9 @@ async def create_container(
 
 
 @router.delete("/{container_id}", status_code=204)
-async def delete_container(container_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def delete_container(
+    container_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)
+):
     try:
         await asyncio.to_thread(zun.delete_container, conn, container_id)
     except Exception:
@@ -70,7 +92,9 @@ async def delete_container(container_id: str, conn: openstack.connection.Connect
 
 
 @router.post("/{container_id}/start", status_code=204)
-async def start_container(container_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def start_container(
+    container_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)
+):
     try:
         await asyncio.to_thread(zun.start_container, conn, container_id)
     except Exception:
@@ -78,7 +102,9 @@ async def start_container(container_id: str, conn: openstack.connection.Connecti
 
 
 @router.post("/{container_id}/stop", status_code=204)
-async def stop_container(container_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def stop_container(
+    container_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)
+):
     try:
         await asyncio.to_thread(zun.stop_container, conn, container_id)
     except Exception:
@@ -86,7 +112,9 @@ async def stop_container(container_id: str, conn: openstack.connection.Connectio
 
 
 @router.get("/{container_id}/logs")
-async def get_container_logs(container_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def get_container_logs(
+    container_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)
+):
     try:
         logs = await asyncio.to_thread(zun.get_container_logs, conn, container_id)
         return {"logs": logs}
@@ -155,7 +183,9 @@ async def container_exec_ws(
 
         scoped_token = payload["token"]
         pid = payload["project_id"]
-        conn = await asyncio.to_thread(keystone.get_openstack_connection, scoped_token, pid)
+        conn = await asyncio.to_thread(
+            keystone.get_openstack_connection, scoped_token, pid
+        )
         conn._union_token = scoped_token
         conn._union_project_id = pid
 
@@ -190,7 +220,9 @@ async def container_exec_ws(
                 await websocket.send_text("\r\n$ ")
             except Exception as e:
                 logger.warning("Container exec command error: %s", e)
-                await websocket.send_text("\r\n\x1b[31m명령 실행에 실패했습니다\x1b[0m\r\n$ ")
+                await websocket.send_text(
+                    "\r\n\x1b[31m명령 실행에 실패했습니다\x1b[0m\r\n$ "
+                )
     except WebSocketDisconnect:
         pass
     except Exception as e:

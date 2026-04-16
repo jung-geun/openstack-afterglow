@@ -1,4 +1,5 @@
 """애플리케이션 버전 읽기 공용 유틸."""
+
 import pathlib
 import tomllib
 
