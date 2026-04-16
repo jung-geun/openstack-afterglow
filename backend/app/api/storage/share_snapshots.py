@@ -1,9 +1,10 @@
 import asyncio
-from fastapi import APIRouter, Depends, HTTPException, Query
+
 import openstack
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.deps import get_os_conn
-from app.models.storage import ShareSnapshotInfo, CreateShareSnapshotRequest
+from app.models.storage import CreateShareSnapshotRequest, ShareSnapshotInfo
 from app.services import manila
 from app.services.cache import cached_call, invalidate, ttl_fast
 
@@ -17,10 +18,15 @@ async def list_share_snapshots(
     refresh: bool = Query(False),
 ):
     pid = conn._union_project_id
-    cache_key = f"afterglow:manila:{pid}:share_snapshots" if not share_id else f"afterglow:manila:{pid}:share_snapshots:{share_id}"
+    cache_key = (
+        f"afterglow:manila:{pid}:share_snapshots"
+        if not share_id
+        else f"afterglow:manila:{pid}:share_snapshots:{share_id}"
+    )
     try:
         return await cached_call(
-            cache_key, ttl_fast(),
+            cache_key,
+            ttl_fast(),
             lambda: [_normalize_snapshot(s) for s in manila.list_share_snapshots(conn, share_id)],
             refresh=refresh,
         )
@@ -35,9 +41,7 @@ async def create_share_snapshot(
 ):
     pid = conn._union_project_id
     try:
-        result = await asyncio.to_thread(
-            manila.create_share_snapshot, conn, req.share_id, req.name, req.description
-        )
+        result = await asyncio.to_thread(manila.create_share_snapshot, conn, req.share_id, req.name, req.description)
         await invalidate(f"afterglow:manila:{pid}:share_snapshots")
         return _normalize_snapshot(result)
     except Exception:

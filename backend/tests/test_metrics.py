@@ -9,20 +9,18 @@
 3. admin role 없는 사용자 → 403
 4. (xfail) is_system_admin=False 이지만 roles=["admin"] 인 경우 → 현재 200 반환 (불일치 기록)
 """
-import pytest
-from unittest.mock import patch, MagicMock
-from httpx import AsyncClient, ASGITransport
 
-from app.main import app
+import pytest
+from httpx import ASGITransport, AsyncClient
+
 from app.api.deps import get_os_conn, get_token_info
+from app.main import app
 
 
 @pytest.mark.asyncio
 async def test_metrics_requires_auth():
     """인증 없이 /api/metrics 접근 → 401."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.get("/api/metrics")
     assert resp.status_code == 401
 

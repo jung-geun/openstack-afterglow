@@ -49,13 +49,13 @@ describe('auth store', () => {
     expect(state.roles).toContain('admin');
   });
 
-  it('isAdmin은 roles에 admin이 있을 때 true', () => {
-    setAuth({ token: 'tok', userId: 'u', username: 'u', projectId: 'p', projectName: 'p', expiresAt: null, roles: ['admin'] });
+  it('isAdmin은 isSystemAdmin이 true일 때 true', () => {
+    setAuth({ token: 'tok', userId: 'u', username: 'u', projectId: 'p', projectName: 'p', expiresAt: null, roles: ['admin'], isSystemAdmin: true });
     expect(get(isAdmin)).toBe(true);
   });
 
-  it('isAdmin은 roles에 admin이 없을 때 false', () => {
-    setAuth({ token: 'tok', userId: 'u', username: 'u', projectId: 'p', projectName: 'p', expiresAt: null, roles: ['member'] });
+  it('isAdmin은 isSystemAdmin이 false일 때 false', () => {
+    setAuth({ token: 'tok', userId: 'u', username: 'u', projectId: 'p', projectName: 'p', expiresAt: null, roles: ['admin'], isSystemAdmin: false });
     expect(get(isAdmin)).toBe(false);
   });
 

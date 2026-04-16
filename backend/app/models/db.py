@@ -1,11 +1,16 @@
 """SQLAlchemy ORM 모델 — k3s 클러스터 및 Notion 설정 영속화."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import (
-    BOOLEAN, CHAR, INT, TEXT, VARCHAR,
-    DateTime, ForeignKey, Index, String,
-    func,
+    BOOLEAN,
+    CHAR,
+    INT,
+    TEXT,
+    VARCHAR,
+    DateTime,
+    ForeignKey,
+    Index,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -13,7 +18,7 @@ from app.database import Base
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class K3sCluster(Base):
@@ -53,21 +58,20 @@ class K3sCluster(Base):
     agent_count: Mapped[int] = mapped_column(INT, nullable=False, default=0)
 
     # 타임스탬프
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_now
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+    # soft-delete
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    deleted_by_user_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    deleted_reason: Mapped[str | None] = mapped_column(VARCHAR(255))
 
     # 관계
     agent_vms: Mapped[list["K3sAgentVM"]] = relationship(
         "K3sAgentVM", back_populates="cluster", cascade="all, delete-orphan"
     )
 
-    __table_args__ = (
-        Index("idx_k3s_cluster_project_created", "project_id", "created_at"),
-    )
+    __table_args__ = (Index("idx_k3s_cluster_project_created", "project_id", "created_at"),)
 
 
 class K3sAgentVM(Base):
@@ -80,11 +84,40 @@ class K3sAgentVM(Base):
     vm_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, index=True)
     name: Mapped[str | None] = mapped_column(VARCHAR(255))
     status: Mapped[str] = mapped_column(VARCHAR(20), nullable=False, default="CREATING")
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_now
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
 
     cluster: Mapped["K3sCluster"] = relationship("K3sCluster", back_populates="agent_vms")
+
+
+class NotionTarget(Base):
+    """Notion 다중 연동 대상. API key는 AES-256-GCM 암호화 저장."""
+
+    __tablename__ = "notion_targets"
+
+    id: Mapped[int] = mapped_column(INT, primary_key=True, autoincrement=True)
+    label: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, default="기본")
+
+    # 민감 정보 — AES-256-GCM 암호화
+    api_key_encrypted: Mapped[str] = mapped_column(TEXT, nullable=False)
+
+    # 데이터베이스 ID (인스턴스 DB 필수, 나머지 선택)
+    database_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, default="")
+    users_database_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    hypervisors_database_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    gpu_spec_database_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+
+    # 동기화 설정
+    enabled: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=True)
+    interval_minutes: Mapped[int] = mapped_column(INT, nullable=False, default=5)
+
+    # 마지막 동기화 시각
+    last_sync: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    hypervisors_last_sync: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    gpu_spec_last_sync: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # 타임스탬프
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
 
 
 class NotionConfig(Base):
@@ -113,9 +146,5 @@ class NotionConfig(Base):
     gpu_spec_last_sync: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # 타임스탬프
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_now
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)

@@ -13,7 +13,8 @@ TTL 정책:
 import asyncio
 import json
 import logging
-from typing import Any, Callable, Awaitable
+from collections.abc import Callable
+from typing import Any
 
 import redis.asyncio as aioredis
 
@@ -44,13 +45,14 @@ def ttl_static() -> int:
 
 def _make_serializable(obj: Any) -> Any:
     """Pydantic 모델 등을 JSON 직렬화 가능한 형태로 변환."""
-    if hasattr(obj, 'model_dump'):
+    if hasattr(obj, "model_dump"):
         return obj.model_dump()
     if isinstance(obj, list):
         return [_make_serializable(item) for item in obj]
     if isinstance(obj, dict):
         return {k: _make_serializable(v) for k, v in obj.items()}
     return obj
+
 
 _client: aioredis.Redis | None = None
 

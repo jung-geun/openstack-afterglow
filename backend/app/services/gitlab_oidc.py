@@ -14,6 +14,7 @@ GitLab OIDC 인증 서비스.
 import logging
 import secrets
 import urllib.parse
+
 import httpx
 
 from app.config import get_settings
@@ -29,6 +30,7 @@ _fallback_states: dict[str, float] = {}
 
 async def _get_redis():
     from app.services.cache import _get_redis as _cache_redis
+
     return await _cache_redis()
 
 
@@ -58,6 +60,7 @@ async def get_authorize_url() -> str:
 async def _validate_state(state: str) -> None:
     """Redis에서 state 검증 후 삭제. Redis 장애 시 인메모리 폴백 확인."""
     import time as _time
+
     # Redis 시도
     try:
         r = await _get_redis()

@@ -1,9 +1,10 @@
 import asyncio
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+
 import openstack
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.api.deps import get_os_conn
-from app.models.storage import ShareNetworkInfo, CreateShareNetworkRequest
+from app.models.storage import CreateShareNetworkRequest, ShareNetworkInfo
 from app.rate_limit import limiter
 from app.services import manila
 from app.services.cache import cached_call, invalidate, ttl_fast
@@ -19,7 +20,8 @@ async def list_share_networks(
     pid = conn._union_project_id
     try:
         return await cached_call(
-            f"afterglow:manila:{pid}:share_networks", ttl_fast(),
+            f"afterglow:manila:{pid}:share_networks",
+            ttl_fast(),
             lambda: manila.list_share_networks(conn),
             refresh=refresh,
         )
@@ -49,7 +51,11 @@ async def create_share_network(
     try:
         result = await asyncio.to_thread(
             manila.create_share_network,
-            conn, req.name, req.neutron_net_id, req.neutron_subnet_id, req.description,
+            conn,
+            req.name,
+            req.neutron_net_id,
+            req.neutron_subnet_id,
+            req.description,
         )
         await invalidate(f"afterglow:manila:{pid}:share_networks")
         return result

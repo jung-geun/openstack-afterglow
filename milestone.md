@@ -288,3 +288,116 @@
 - [x] 모든 작업 내용 milestone.md 기재 의무화
   - 완료 항목 즉시 `[x]` 체크
   - 중간 지시 작업도 milestone.md에 섹션 추가하여 기록
+
+---
+
+## 2026-04-16 — 인프라 정비 (GitHub Actions self-hosted, Manila quota 수정, Ruff, 통합 테스트 러너)
+
+### Manila 쿼타 404 버그 수정
+
+**근본 원인**: `app/services/manila.py::_get_manila_endpoint()` 의 service_type 검색 순서가 `("share", "sharev2", ...)` 로 v1 endpoint 먼저 반환. Manila v1에서는 quota-sets path 가 `os-quota-sets` 였으므로 v2 microversion 헤더를 보내도 URL 자체가 404.
+
+- [x] `backend/app/services/manila.py` — `_normalize_manila_url()` 추가 (v1 → v2 path 정규화), `_get_manila_endpoint()` 검색 순서 변경 (`sharev2` 우선)
+- [x] `backend/tests/test_file_storage.py` — URL 정규화/우선순위 단위 테스트 3개 추가
+- [x] `backend/tests/integration/test_file_storage.py` — quota 응답 구조 검증 강화
+
+### GitHub Actions self-hosted matrix + 멀티플랫폼 manifest
+
+- [x] `.github/workflows/test.yml` — **신규**: GitHub Actions 단위 테스트 워크플로우 (backend + frontend, ubuntu-latest)
+- [x] `.github/workflows/docker-build.yml` — self-hosted matrix (linux/amd64, macos/arm64) + per-arch build + manifest 통합 job으로 재구성. Apple Silicon native pull 지원.
+
+### CI 테스트 분리
+
+- [x] `.github/workflows/test.yml` — 통합 테스트(`tests/integration`) 제외하고 단위 테스트만 CI 실행 (GitLab CI는 이미 `--ignore=tests/integration` 으로 분리되어 있음)
+- [x] `.gitlab-ci.yml::test-backend` — ruff check + format check 단계 추가
+
+### Ruff 자동화 (백엔드)
+
+- [x] `backend/pyproject.toml` — `ruff>=0.7.0` dev 의존성 추가, `[tool.ruff]` / `[tool.ruff.lint]` / `[tool.ruff.format]` 설정 추가
+- [x] `.pre-commit-config.yaml` — **신규**: ruff hook (백엔드 한정)
+- [x] 초기 포맷 자동 적용: `ruff check --fix` + `ruff format` 실행 (476개 자동 수정)
+
+### 통합 테스트 러너 (루트 package.json)
+
+- [x] `package.json` — **신규**: 루트 monorepo 테스트 러너 (`npm test`, `npm run test:backend`, `npm run test:frontend`, `npm run test:all`, `npm run test:parallel`, `npm run lint:backend`)
+- [x] `.gitignore` — `/node_modules/` 추가
+
+## 7. 버전 관리 통합 + GitHub Actions 수정
+
+> **목표**: 루트 `package.json` 을 단일 버전 진실 소스로 만들고, CI 에서 불일치 시 빌드 차단, PR 은 이미지 미푸시
+
+- [x] 7.1 버전 초기 동기화 (1.13.0 → 1.13.2)
+  - [x] `backend/pyproject.toml` — `1.13.0` → `1.13.2`
+  - [x] `frontend/package.json` — `1.13.0` → `1.13.2`
+  - [x] `backend/uv.lock` — `uv lock` 재생성으로 1.13.2 반영
+
+- [x] 7.2 Node 기반 버전 동기화 스크립트
+  - [x] `scripts/sync-version.js` — 루트 package.json → frontend/backend/uv.lock 전파
+  - [x] `scripts/check-version-sync.js` — CI 용 일치 검증 (tag push 시 git ref 비교)
+  - [x] `package.json` — `version`, `version:sync`, `version:check`, `version:bump:patch/minor/major` 스크립트 추가
+  - [x] npm `version` 훅으로 `npm version patch/minor/major` 한 번에 모든 파일 동기화
+
+- [x] 7.3 백엔드 `_read_app_version` 중복 제거
+  - [x] `backend/app/utils/version.py` — `read_app_version()` 공용 유틸 신규 생성
+  - [x] `backend/app/main.py` — 로컬 `_read_app_version()` 제거, util import 로 치환
+  - [x] `backend/app/api/identity/admin.py` — 로컬 `_read_backend_version()` 제거, util import 로 치환
+
+- [x] 7.4 GitHub Actions 문제 수정
+  - [x] `docker-build.yml` — PR 에서 `push: false`, `cache-to` 도 PR skip
+  - [x] `docker-build.yml` — manifest job 에 `if: github.event_name != 'pull_request'` 가드 추가
+  - [x] `docker-build.yml` — checkout 직후 `check-version-sync.js` 검증 스텝 삽입 (tag push 시 git tag ↔ package.json 일치 확인)
+  - [x] `test.yml` — 트리거에 `dev` 브랜치 및 `v*` 태그 추가
+  - [x] `test.yml` — `version-check` job 신설, `test-backend`/`test-frontend` 가 `needs: version-check` 로 직렬화
+
+## 8. 버그 수정 및 기능 개선 (2026-04-16)
+
+### 8.1 GitHub Actions CI/CD 수정
+
+- [x] `backend/app/utils/version.py` — ruff 포맷 수정 (docstring 후 빈 줄 추가)
+- [x] `backend/app/api/container/containers.py` — ruff format 자동 적용 (함수 시그니처 인라인화 등)
+- [x] `.github/workflows/docker-build.yml` — macOS arm64 러너 keychain 오류 해결: `Pre-auth registry into config.json` 스텝 (base64 auth 직접 기록) 추가, `Set up Docker Buildx` arm64 는 `driver: docker` 사용, arm64 는 `docker/login-action` 미사용
+
+### 8.2 관리자 이미지 검색 substring 매칭 수정
+
+**문제**: 관리자 전체 이미지 페이지에서 이름 일부 입력 시 검색이 동작하지 않음 (Glance `name=` 필터가 정확 매칭이어서 부분 일치 불가).
+
+- [x] `backend/app/api/identity/admin_images.py` — `_serialize_image()` 헬퍼 분리, `_list_search()` 함수 추가 (전체 이미지 fetch 후 case-insensitive substring 클라이언트 필터 + marker 기반 수동 페이지네이션)
+- [x] `backend/tests/test_admin_images.py` — substring 검색 테스트 4개 추가:
+  - `test_list_admin_images_search_substring_case_insensitive` — "u" 가 ubuntu/Windows-Update 모두 매칭
+  - `test_list_admin_images_search_no_match` — 빈 결과 확인
+  - `test_list_admin_images_search_pagination_with_marker` — limit=2 marker 기반 페이지네이션
+  - `test_list_admin_images_search_does_not_pass_name_to_glance` — Glance 호출에 `name=` 인자 미전달 검증
+
+### 8.3 시계열 차트 범위 버튼 데이터 이슈 수정
+
+**문제**: 1d/2d/7d/30d 버튼을 눌러도 모두 같은 데이터로 보임. 원인: Redis 컨테이너에 볼륨이 없어 재시작 시 데이터 전부 소실, 그리고 스냅샷 주기가 1시간이어서 1일치 기준 포인트가 24개 불과.
+
+- [x] `docker-compose.yml` — redis 서비스에 `redis-data` 볼륨 마운트 + `--appendonly yes` AOF 활성화
+- [x] `backend/app/main.py::_snapshot_loop` — 스냅샷 주기 3600s(1시간) → 600s(10분)으로 단축
+
+### 8.4 관리자 개요 프로젝트 클릭 → quota 슬라이드 패널
+
+- [x] `frontend/src/lib/components/ProjectQuotaPanel.svelte` — 신규 컴포넌트. `GET /api/admin/quotas/{project_id}` 로 현재값+사용량 로드, instances/cores/ram/volumes/gigabytes 편집 폼, `PUT /api/admin/quotas/{project_id}` 로 저장
+- [x] `frontend/src/routes/admin/+page.svelte` — ProjectQuotaPanel import, `selectedProject` 상태 추가, 프로젝트 테이블 행에 `onclick`/`onkeydown` 클릭 핸들러 추가, `loadProjectUsage()` 함수 분리, 페이지 하단에 슬라이드 패널 렌더링
+
+### 8.5 k3s 클러스터 soft-delete (삭제 이력 영구 유지)
+
+**문제**: 클러스터 삭제 시 DB에서 물리 삭제되어 이력 조회 불가.
+
+- [x] `backend/app/models/db.py::K3sCluster` — `deleted_at`, `deleted_by_user_id`, `deleted_reason` 컬럼 추가
+- [x] `backend/app/models/k3s.py::K3sClusterInfo` — `deleted_at/deleted_by_user_id/deleted_reason` 필드 추가
+- [x] `backend/app/database.py::create_tables` — 기존 테이블에 `ALTER TABLE ADD COLUMN IF NOT EXISTS` 마이그레이션 추가
+- [x] `backend/app/services/k3s_db.py` — `delete_cluster_record` soft-delete(UPDATE status='DELETED' + deleted_at)로 전환, `list_clusters`/`list_all_clusters` 에 `include_deleted` 파라미터 추가, `_cluster_to_dict` 신규 필드 직렬화
+- [x] `backend/app/api/k3s/clusters.py` — `list_k3s_clusters` 에 `?include_deleted=true` 쿼리 파라미터, `delete_k3s_cluster` 에 `user_id` 추출 + soft-delete 호출 + 멱등 처리
+- [x] `frontend/src/routes/dashboard/containers/k3s/+page.svelte` — `showDeleted` 토글 버튼 추가, 삭제된 클러스터 회색+취소선+삭제 시각 표시, 삭제된 행에서 액션 버튼 숨김
+
+### 8.6 Notion 다중 DB 동기화 + 중복 갱신 방지 (dedup)
+
+**문제**: 하나의 Notion DB만 설정 가능하고, 매 주기마다 변경 없이도 PATCH를 전송.
+
+- [x] `backend/app/models/db.py::NotionTarget` — 다중 연동 대상 ORM 모델 추가 (`label`, `api_key_encrypted`, `database_id`, `users/hypervisors/gpu_spec _database_id`, `enabled`, `interval_minutes`, `last_sync` 등)
+- [x] `backend/app/services/notion_sync.py` — `_parse_dt` 모듈 함수 추출, `sync_to_notion._upsert` 에 SHA256 dedup 추가 (hash 캐시 Redis key: `afterglow:notion:hash:{db_id}:{match_key}`, TTL 24h), `_target_to_dict`/`list_notion_targets`/`get_notion_target`/`create_notion_target`/`update_notion_target`/`delete_notion_target` CRUD 함수 추가
+- [x] `backend/app/api/identity/admin_notion.py` — `NotionTargetCreateRequest`/`NotionTargetUpdateRequest` 모델 추가, `GET/POST /notion/targets`, `PATCH/DELETE /notion/targets/{id}`, `POST /notion/targets/{id}/test` 엔드포인트 추가 (기존 `/notion/config` 레거시 유지)
+- [x] `backend/app/main.py` — `_run_notion_target_sync()` 헬퍼 추출, `_notion_sync_loop` — `NotionTarget` 다중 대상 우선 처리 (enabled + interval 체크), 없으면 `NotionConfig` fallback
+- [x] `frontend/src/routes/admin/notion/+page.svelte` — 단수 폼 → 타겟 카드 리스트 UI로 재작성. "연결 추가" 버튼, 카드별 enabled 상태/마지막 동기화/인라인 수정 폼/지금 동기화/삭제 버튼
+- [x] `backend/tests/test_notion.py` — dedup skip/patch/신규 POST 3건 + 다중 타겟 CRUD API 6건 테스트 추가 (총 9건)

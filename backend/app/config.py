@@ -3,13 +3,13 @@
 우선순위: 환경변수 > config.toml (프로젝트 루트) > 기본값
 """
 
-import tomllib
 import os
+import tomllib
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic_settings import BaseSettings
 from pydantic import model_validator
+from pydantic_settings import BaseSettings
 
 
 def _config_candidates() -> list[Path]:
@@ -18,7 +18,7 @@ def _config_candidates() -> list[Path]:
         Path.cwd() / "config.toml",
         Path.cwd().parent / "config.toml",
         Path("/app/config.toml"),
-        Path("/app/afterglow.toml"),       # K8s ConfigMap 마운트 경로
+        Path("/app/afterglow.toml"),  # K8s ConfigMap 마운트 경로
         Path.cwd() / "afterglow.toml",
     ]
 
@@ -198,9 +198,9 @@ class Settings(BaseSettings):
     upper_volume_size_gb: int = 50
 
     # 라이브러리 빌더 VM 설정
-    builder_image_id: str = ""       # 빌더 VM 부팅 이미지 ID (Ubuntu 22.04+)
-    builder_flavor_id: str = ""      # 빌더 VM 플레이버 ID
-    builder_network_id: str = ""     # 빌더 VM 네트워크 ID (미지정 시 default_network_id 사용)
+    builder_image_id: str = ""  # 빌더 VM 부팅 이미지 ID (Ubuntu 22.04+)
+    builder_flavor_id: str = ""  # 빌더 VM 플레이버 ID
+    builder_network_id: str = ""  # 빌더 VM 네트워크 ID (미지정 시 default_network_id 사용)
 
     # 데이터베이스 (MariaDB/MySQL, 선택적)
     database_url: str = ""
@@ -221,7 +221,7 @@ class Settings(BaseSettings):
     # 로깅 설정
     log_file_path: str = "/app/logs/afterglow-backend.log"
     log_level: str = "INFO"
-    log_max_bytes: int = 52428800    # 50MB
+    log_max_bytes: int = 52428800  # 50MB
     log_backup_count: int = 5
     log_rotation_type: str = "size"  # "size" | "time"
     log_rotation_when: str = "midnight"
@@ -248,6 +248,7 @@ class Settings(BaseSettings):
     def warn_insecure_defaults(self) -> "Settings":
         import logging
         import os
+
         logger = logging.getLogger(__name__)
         if self.secret_key == "change-me-in-production":
             if os.environ.get("AFTERGLOW_ALLOW_INSECURE", "").strip() == "1":

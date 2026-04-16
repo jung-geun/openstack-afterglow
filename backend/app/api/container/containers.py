@@ -1,13 +1,25 @@
 import asyncio
-import hashlib
 import logging
 import secrets
-from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect, Query
-from pydantic import BaseModel
+
 import openstack
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
+from pydantic import BaseModel
 
 from app.api.deps import get_os_conn
-from app.models.containers import ZunContainerInfo, CreateZunContainerRequest, ContainerListResponse, PortMapping
+from app.models.containers import (
+    ContainerListResponse,
+    CreateZunContainerRequest,
+    ZunContainerInfo,
+)
 from app.rate_limit import limiter
 from app.services import zun
 from app.services.zun import ZunServiceUnavailable
@@ -23,8 +35,12 @@ async def list_containers(conn: openstack.connection.Connection = Depends(get_os
         items = await asyncio.to_thread(zun.list_containers, conn)
         return ContainerListResponse(items=items)
     except ZunServiceUnavailable:
-        return ContainerListResponse(items=[], service_available=False, message="컨테이너 서비스에 연결할 수 없습니다")
-    except Exception as e:
+        return ContainerListResponse(
+            items=[],
+            service_available=False,
+            message="컨테이너 서비스에 연결할 수 없습니다",
+        )
+    except Exception:
         raise HTTPException(status_code=500, detail="컨테이너 목록 조회 실패")
 
 
@@ -46,11 +62,18 @@ async def create_container(
     try:
         ports = [p.model_dump(exclude_none=True) for p in req.ports] if req.ports else None
         return await asyncio.to_thread(
-            zun.create_container, conn,
-            req.name, req.image, req.command,
-            req.cpu, req.memory, req.environment, req.auto_remove, ports,
+            zun.create_container,
+            conn,
+            req.name,
+            req.image,
+            req.command,
+            req.cpu,
+            req.memory,
+            req.environment,
+            req.auto_remove,
+            ports,
         )
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="컨테이너 생성 실패")
 
 
@@ -58,7 +81,7 @@ async def create_container(
 async def delete_container(container_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
     try:
         await asyncio.to_thread(zun.delete_container, conn, container_id)
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="컨테이너 삭제 실패")
 
 
@@ -66,7 +89,7 @@ async def delete_container(container_id: str, conn: openstack.connection.Connect
 async def start_container(container_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
     try:
         await asyncio.to_thread(zun.start_container, conn, container_id)
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="컨테이너 시작 실패")
 
 
@@ -74,7 +97,7 @@ async def start_container(container_id: str, conn: openstack.connection.Connecti
 async def stop_container(container_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
     try:
         await asyncio.to_thread(zun.stop_container, conn, container_id)
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="컨테이너 중지 실패")
 
 
@@ -83,7 +106,7 @@ async def get_container_logs(container_id: str, conn: openstack.connection.Conne
     try:
         logs = await asyncio.to_thread(zun.get_container_logs, conn, container_id)
         return {"logs": logs}
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="로그 조회 실패")
 
 
@@ -97,15 +120,19 @@ async def create_exec_ticket(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """WebSocket exec 연결에 사용할 일회용 티켓 발급 (30초 유효)."""
-    from app.services.cache import _get_redis
     import json
+
+    from app.services.cache import _get_redis
+
     ticket = secrets.token_urlsafe(32)
-    payload = json.dumps({
-        "container_id": container_id,
-        "user_id": conn._union_user_id,
-        "project_id": conn._union_project_id,
-        "token": conn._union_token,
-    })
+    payload = json.dumps(
+        {
+            "container_id": container_id,
+            "user_id": conn._union_user_id,
+            "project_id": conn._union_project_id,
+            "token": conn._union_token,
+        }
+    )
     r = await _get_redis()
     await r.setex(f"afterglow:ws-ticket:{ticket}", 30, payload)
     return {"ticket": ticket}
@@ -124,9 +151,10 @@ async def container_exec_ws(
     await websocket.accept()
     conn = None
     try:
-        from app.services.cache import _get_redis
-        from app.services import keystone
         import json
+
+        from app.services import keystone
+        from app.services.cache import _get_redis
 
         r = await _get_redis()
         ticket_key = f"afterglow:ws-ticket:{ticket}"
@@ -148,7 +176,9 @@ async def container_exec_ws(
         conn._union_project_id = pid
 
         endpoint = zun._get_zun_endpoint(conn)
-        await websocket.send_text("\r\n\x1b[32mZun 컨테이너 콘솔에 연결됨\x1b[0m\r\n\x1b[33m명령어를 입력하세요 (exit 로 종료)\x1b[0m\r\n$ ")
+        await websocket.send_text(
+            "\r\n\x1b[32mZun 컨테이너 콘솔에 연결됨\x1b[0m\r\n\x1b[33m명령어를 입력하세요 (exit 로 종료)\x1b[0m\r\n$ "
+        )
 
         while True:
             data = await websocket.receive_text()
@@ -162,9 +192,9 @@ async def container_exec_ws(
             try:
                 body = {"command": ["/bin/sh", "-c", cmd]}
                 resp = await asyncio.to_thread(
-                    lambda: conn.session.post(f"{endpoint}/v1/containers/{container_id}/execute", json=body)
+                    lambda _body=body: conn.session.post(f"{endpoint}/v1/containers/{container_id}/execute", json=_body)
                 )
-                result = resp.json() if hasattr(resp, 'json') else {}
+                result = resp.json() if hasattr(resp, "json") else {}
                 output = result.get("output", "")
                 exit_code = result.get("exit_code", 0)
                 if output:

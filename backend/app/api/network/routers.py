@@ -1,11 +1,15 @@
 import asyncio
-from fastapi import APIRouter, Depends, HTTPException, Query
+
 import openstack
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.deps import get_os_conn
 from app.models.storage import (
-    RouterInfo, RouterDetail,
-    CreateRouterRequest, RouterInterfaceRequest, RouterGatewayRequest,
+    CreateRouterRequest,
+    RouterDetail,
+    RouterGatewayRequest,
+    RouterInfo,
+    RouterInterfaceRequest,
 )
 from app.services import neutron
 from app.services.cache import cached_call, invalidate, ttl_normal
@@ -18,11 +22,12 @@ async def list_routers(conn: openstack.connection.Connection = Depends(get_os_co
     pid = conn._union_project_id
     try:
         return await cached_call(
-            f"afterglow:neutron:{pid}:routers", ttl_normal(),
+            f"afterglow:neutron:{pid}:routers",
+            ttl_normal(),
             lambda: [r.model_dump() for r in neutron.list_routers(conn, project_id=pid)],
             refresh=refresh,
         )
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="라우터 목록 조회 실패")
 
 
@@ -36,7 +41,7 @@ async def create_router(
         result = await asyncio.to_thread(neutron.create_router, conn, req.name, req.external_network_id)
         await invalidate(f"afterglow:neutron:{pid}:routers")
         return result
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="라우터 생성 실패")
 
 
@@ -44,7 +49,7 @@ async def create_router(
 async def get_router(router_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
     try:
         return await asyncio.to_thread(neutron.get_router_detail, conn, router_id)
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=404, detail="라우터 조회 실패")
 
 
@@ -54,7 +59,7 @@ async def delete_router(router_id: str, conn: openstack.connection.Connection = 
     try:
         await asyncio.to_thread(neutron.delete_router, conn, router_id)
         await invalidate(f"afterglow:neutron:{pid}:routers")
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="라우터 삭제 실패")
 
 
@@ -66,7 +71,7 @@ async def add_interface(
 ):
     try:
         return await asyncio.to_thread(neutron.add_router_interface, conn, router_id, req.subnet_id)
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="인터페이스 추가 실패")
 
 
@@ -78,7 +83,7 @@ async def remove_interface(
 ):
     try:
         await asyncio.to_thread(neutron.remove_router_interface, conn, router_id, subnet_id)
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="인터페이스 제거 실패")
 
 
@@ -90,7 +95,7 @@ async def set_gateway(
 ):
     try:
         await asyncio.to_thread(neutron.set_router_gateway, conn, router_id, req.external_network_id)
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="게이트웨이 설정 실패")
 
 
@@ -101,5 +106,5 @@ async def remove_gateway(
 ):
     try:
         await asyncio.to_thread(neutron.remove_router_gateway, conn, router_id)
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="게이트웨이 제거 실패")

@@ -1,6 +1,8 @@
 """볼륨 백업 API 테스트."""
-import pytest
+
 from unittest.mock import patch
+
+import pytest
 
 
 def make_backup(bid: str = "backup-1"):
@@ -27,9 +29,7 @@ async def test_list_backups(client, mock_conn):
 @pytest.mark.asyncio
 async def test_create_backup(client, mock_conn):
     with patch("app.api.storage.volume_backups.cinder.create_backup", return_value=make_backup("backup-new")):
-        resp = await client.post("/api/volumes/backups", json={
-            "volume_id": "vol-1", "name": "my-backup"
-        })
+        resp = await client.post("/api/volumes/backups", json={"volume_id": "vol-1", "name": "my-backup"})
     assert resp.status_code == 201
 
 

@@ -1,20 +1,22 @@
 import asyncio
 import itertools
 import logging
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+from concurrent.futures import ThreadPoolExecutor
+
+import openstack
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-import openstack
 
-from app.api.deps import get_os_conn, get_token_info, require_admin
+from app.api.deps import get_os_conn, require_admin
+from app.utils.version import read_app_version
 
 _logger = logging.getLogger(__name__)
-from app.models.storage import FileStorageInfo, TopologyData, TopologyInstance
-from app.services import manila, libraries as lib_svc, neutron, nova
-from app.services import library_builder
-from app.services import k3s_db as k3s_cluster
-from app.services.cache import cached_call, ttl_fast, ttl_normal, ttl_slow
 from app.config import get_settings
+from app.models.storage import FileStorageInfo, TopologyData, TopologyInstance
+from app.services import k3s_db as k3s_cluster
+from app.services import libraries as lib_svc
+from app.services import library_builder, manila, neutron, nova
+from app.services.cache import cached_call, ttl_fast, ttl_normal, ttl_slow
 
 router = APIRouter()
 
@@ -42,15 +44,15 @@ async def trigger_build(
     except KeyError:
         raise HTTPException(status_code=404, detail=f"알 수 없는 라이브러리: {library_id}")
 
-    existing = manila.list_file_storages(conn, metadata_filter={
-        "union_type": "prebuilt",
-        "union_library": library_id,
-    })
+    existing = manila.list_file_storages(
+        conn,
+        metadata_filter={
+            "union_type": "prebuilt",
+            "union_library": library_id,
+        },
+    )
     if existing:
-        raise HTTPException(
-            status_code=409,
-            detail=f"이미 존재하는 사전 빌드 파일 스토리지: {existing[0].id}"
-        )
+        raise HTTPException(status_code=409, detail=f"이미 존재하는 사전 빌드 파일 스토리지: {existing[0].id}")
 
     if auto_install:
         try:
@@ -85,6 +87,7 @@ async def list_active_builds():
 # 관리자 전용 엔드포인트
 # ---------------------------------------------------------------------------
 
+
 def _fetch_hypervisors_raw(conn: openstack.connection.Connection) -> list[dict]:
     """Nova microversion 2.53으로 하이퍼바이저 raw JSON 조회.
     2.88+ 에서 vcpus/memory_mb 등 필드가 deprecated되므로 2.53을 명시적으로 사용."""
@@ -110,8 +113,14 @@ def _fetch_overview_hypervisors(conn) -> dict:
         }
     except Exception:
         _logger.warning("하이퍼바이저 집계 실패", exc_info=True)
-        return {"host_count": 0, "used_vcpus": 0, "total_ram_mb": 0, "used_ram_mb": 0,
-                "running_vms": 0, "total_vcpus": 0}
+        return {
+            "host_count": 0,
+            "used_vcpus": 0,
+            "total_ram_mb": 0,
+            "used_ram_mb": 0,
+            "running_vms": 0,
+            "total_vcpus": 0,
+        }
 
 
 def _fetch_overview_disk(conn) -> dict:
@@ -120,7 +129,7 @@ def _fetch_overview_disk(conn) -> dict:
     total_disk = 0
     try:
         for v in conn.block_storage.volumes(all_projects=True):
-            used_disk += (v.size or 0)
+            used_disk += v.size or 0
     except Exception:
         pass
     try:
@@ -142,9 +151,7 @@ def _fetch_overview_placement(conn) -> dict:
         rps_resp = conn.session.get(f"{placement_ep}/resource_providers")
         rps = rps_resp.json().get("resource_providers", [])
         for rp in rps:
-            inv_resp = conn.session.get(
-                f"{placement_ep}/resource_providers/{rp['uuid']}/inventories"
-            )
+            inv_resp = conn.session.get(f"{placement_ep}/resource_providers/{rp['uuid']}/inventories")
             vcpu_inv = inv_resp.json().get("inventories", {}).get("VCPU", {})
             inv_total = vcpu_inv.get("total", 0)
             inv_ratio = vcpu_inv.get("allocation_ratio", 1.0)
@@ -193,6 +200,7 @@ def _fetch_overview_containers(conn) -> int:
         return 0
     try:
         from app.services.zun import list_containers_admin
+
         return len(list_containers_admin(conn))
     except Exception:
         return 0
@@ -212,6 +220,7 @@ def _fetch_overview_file_storage(conn) -> int:
 async def admin_overview(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
     """하이퍼바이저 및 전체 리소스 집계."""
     try:
+
         def _collect():
             with ThreadPoolExecutor(max_workers=6) as executor:
                 f_hyp = executor.submit(_fetch_overview_hypervisors, conn)
@@ -246,8 +255,9 @@ async def admin_overview(conn: openstack.connection.Connection = Depends(get_os_
                 "containers_count": ctr,
                 "file_storage_count": fs,
             }
+
         return await cached_call("afterglow:admin:overview", ttl_normal(), _collect, refresh=refresh)
-    except Exception as e:
+    except Exception:
         _logger.warning("admin overview 조회 실패", exc_info=True)
         raise HTTPException(status_code=500, detail="개요 조회 실패")
 
@@ -256,6 +266,7 @@ async def admin_overview(conn: openstack.connection.Connection = Depends(get_os_
 async def list_hypervisors(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
     """컴퓨트 하이퍼바이저 목록."""
     try:
+
         def _list():
             data = _fetch_hypervisors_raw(conn)
             return [
@@ -275,8 +286,9 @@ async def list_hypervisors(conn: openstack.connection.Connection = Depends(get_o
                 }
                 for h in data
             ]
+
         return await cached_call("afterglow:admin:hypervisors", ttl_normal(), _list, refresh=refresh)
-    except Exception as e:
+    except Exception:
         _logger.warning("hypervisors 조회 실패", exc_info=True)
         raise HTTPException(status_code=500, detail="하이퍼바이저 조회 실패")
 
@@ -285,6 +297,7 @@ async def list_hypervisors(conn: openstack.connection.Connection = Depends(get_o
 async def get_hypervisor_detail(hypervisor_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
     """하이퍼바이저 상세 정보 + 해당 호스트의 VM 목록."""
     try:
+
         def _get():
             endpoint = conn.compute.get_endpoint()
             resp = conn.session.get(
@@ -302,13 +315,15 @@ async def get_hypervisor_detail(hypervisor_id: str, conn: openstack.connection.C
                         headers={"OpenStack-API-Version": "compute 2.53"},
                     )
                     for s in srv_resp.json().get("servers", []):
-                        servers.append({
-                            "id": s.get("id", ""),
-                            "name": s.get("name", ""),
-                            "status": s.get("status", ""),
-                            "project_id": s.get("tenant_id", "") or s.get("project_id", ""),
-                            "flavor": (s.get("flavor") or {}).get("original_name", ""),
-                        })
+                        servers.append(
+                            {
+                                "id": s.get("id", ""),
+                                "name": s.get("name", ""),
+                                "status": s.get("status", ""),
+                                "project_id": s.get("tenant_id", "") or s.get("project_id", ""),
+                                "flavor": (s.get("flavor") or {}).get("original_name", ""),
+                            }
+                        )
                 except Exception:
                     pass
             svc = h.get("service") or {}
@@ -331,6 +346,7 @@ async def get_hypervisor_detail(hypervisor_id: str, conn: openstack.connection.C
                 "cpu_info": h.get("cpu_info"),
                 "servers": servers,
             }
+
         return await asyncio.to_thread(_get)
     except Exception:
         _logger.warning("하이퍼바이저 상세 조회 실패", exc_info=True)
@@ -347,6 +363,7 @@ async def list_all_instances(
 ):
     """전체 프로젝트의 인스턴스 목록 (페이지네이션)."""
     try:
+
         def _list():
             endpoint = conn.compute.get_endpoint()
             params: dict = {"all_tenants": "1", "limit": str(limit)}
@@ -371,21 +388,24 @@ async def list_all_instances(
                         fault_info = fault.get("message", "")
                 server_host = s.get("OS-EXT-SRV-ATTR:host") or s.get("host")
                 flavor = s.get("flavor") or {}
-                items.append({
-                    "id": s.get("id", ""),
-                    "name": s.get("name") or "",
-                    "status": s.get("status") or "",
-                    "project_id": s.get("tenant_id") or s.get("project_id"),
-                    "user_id": s.get("user_id"),
-                    "flavor": flavor.get("original_name") or flavor.get("id") or "",
-                    "host": server_host,
-                    "created_at": s.get("created"),
-                    "fault": fault_info,
-                })
+                items.append(
+                    {
+                        "id": s.get("id", ""),
+                        "name": s.get("name") or "",
+                        "status": s.get("status") or "",
+                        "project_id": s.get("tenant_id") or s.get("project_id"),
+                        "user_id": s.get("user_id"),
+                        "flavor": flavor.get("original_name") or flavor.get("id") or "",
+                        "host": server_host,
+                        "created_at": s.get("created"),
+                        "fault": fault_info,
+                    }
+                )
             next_marker = items[-1]["id"] if len(items) == limit else None
             return {"items": items, "next_marker": next_marker, "count": len(items)}
+
         return await asyncio.to_thread(_list)
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="전체 인스턴스 조회 실패")
 
 
@@ -397,6 +417,7 @@ async def list_all_volumes(
 ):
     """전체 프로젝트의 볼륨 목록 (페이지네이션)."""
     try:
+
         def _list():
             kwargs: dict = {"details": True, "all_projects": True, "limit": limit}
             if marker:
@@ -407,67 +428,84 @@ async def list_all_volumes(
                     "name": v.name or "",
                     "status": v.status or "",
                     "size": v.size,
-                    "project_id": getattr(v, 'project_id', None),
-                    "created_at": str(v.created_at) if getattr(v, 'created_at', None) else None,
+                    "project_id": getattr(v, "project_id", None),
+                    "created_at": str(v.created_at) if getattr(v, "created_at", None) else None,
                 }
                 for v in itertools.islice(conn.block_storage.volumes(**kwargs), limit)
             ]
             next_marker = items[-1]["id"] if len(items) == limit else None
             return {"items": items, "next_marker": next_marker, "count": len(items)}
+
         return await asyncio.to_thread(_list)
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="전체 볼륨 조회 실패")
 
 
 @router.get("/all-containers", dependencies=[Depends(require_admin)])
-async def list_all_containers(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
+async def list_all_containers(
+    conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)
+):
     """전체 프로젝트의 컨테이너 목록 (Zun)."""
     if not get_settings().service_zun_enabled:
         return []
-    from app.services.zun import list_containers_admin, ZunServiceUnavailable
+    from app.services.zun import ZunServiceUnavailable, list_containers_admin
+
     try:
-        return await cached_call("afterglow:admin:containers", ttl_normal(), lambda: list_containers_admin(conn), refresh=refresh)
+        return await cached_call(
+            "afterglow:admin:containers", ttl_normal(), lambda: list_containers_admin(conn), refresh=refresh
+        )
     except ZunServiceUnavailable:
         return []
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="컨테이너 조회 실패")
 
 
 @router.get("/all-file-storages", dependencies=[Depends(require_admin)])
-async def list_all_file_storages(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
+async def list_all_file_storages(
+    conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)
+):
     """전체 프로젝트의 파일 스토리지 목록 (Manila)."""
     if not get_settings().service_manila_enabled:
         return []
     try:
-        return await cached_call("afterglow:admin:file_storages", ttl_normal(), lambda: manila.list_file_storages(conn, None, True), refresh=refresh)
-    except Exception as e:
+        return await cached_call(
+            "afterglow:admin:file_storages",
+            ttl_normal(),
+            lambda: manila.list_file_storages(conn, None, True),
+            refresh=refresh,
+        )
+    except Exception:
         raise HTTPException(status_code=500, detail="파일 스토리지 조회 실패")
 
 
 @router.get("/topology", response_model=TopologyData, dependencies=[Depends(require_admin)])
 async def admin_topology(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
     """전체 프로젝트의 네트워크/라우터/인스턴스 토폴로지."""
+
     def _fetch():
         topo = neutron.get_topology(conn)
         instances = []
         for s in conn.compute.servers(details=True, all_projects=True):
-            addresses = getattr(s, 'addresses', {}) or {}
-            instances.append(TopologyInstance(
-                id=s.id,
-                name=s.name or "",
-                status=s.status or "",
-                network_names=list(set(addresses.keys())),
-                ip_addresses=[
-                    {"addr": addr["addr"], "type": addr.get("OS-EXT-IPS:type", ""), "network_name": net_name}
-                    for net_name, addrs in addresses.items()
-                    for addr in addrs
-                ],
-            ))
+            addresses = getattr(s, "addresses", {}) or {}
+            instances.append(
+                TopologyInstance(
+                    id=s.id,
+                    name=s.name or "",
+                    status=s.status or "",
+                    network_names=list(set(addresses.keys())),
+                    ip_addresses=[
+                        {"addr": addr["addr"], "type": addr.get("OS-EXT-IPS:type", ""), "network_name": net_name}
+                        for net_name, addrs in addresses.items()
+                        for addr in addrs
+                    ],
+                )
+            )
         topo.instances = instances
         return topo.model_dump()
+
     try:
         return await cached_call("afterglow:admin:topology", ttl_normal(), _fetch, refresh=refresh)
-    except Exception as e:
+    except Exception:
         _logger.exception("토폴로지 조회 실패")
         raise HTTPException(status_code=500, detail="토폴로지 조회 실패")
 
@@ -479,6 +517,7 @@ async def get_timeseries(
 ):
     """리소스 유형별 시계열 스냅샷 반환."""
     from app.services import timeseries
+
     valid = {"instances", "volumes", "file_storage", "networks"}
     if resource_type not in valid:
         raise HTTPException(status_code=400, detail=f"resource_type은 {valid} 중 하나여야 합니다")
@@ -489,16 +528,22 @@ async def get_timeseries(
 async def list_all_networks(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
     """전체 프로젝트의 네트워크 목록."""
     try:
-        return await cached_call("afterglow:admin:networks", ttl_normal(), lambda: neutron.list_networks(conn, None), refresh=refresh)
+        return await cached_call(
+            "afterglow:admin:networks", ttl_normal(), lambda: neutron.list_networks(conn, None), refresh=refresh
+        )
     except Exception:
         raise HTTPException(status_code=500, detail="네트워크 목록 조회 실패")
 
 
 @router.get("/all-floating-ips", dependencies=[Depends(require_admin)])
-async def list_all_floating_ips(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
+async def list_all_floating_ips(
+    conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)
+):
     """전체 프로젝트의 Floating IP 목록."""
     try:
-        return await cached_call("afterglow:admin:floating_ips", ttl_fast(), lambda: neutron.list_floating_ips(conn, None), refresh=refresh)
+        return await cached_call(
+            "afterglow:admin:floating_ips", ttl_fast(), lambda: neutron.list_floating_ips(conn, None), refresh=refresh
+        )
     except Exception:
         raise HTTPException(status_code=500, detail="Floating IP 목록 조회 실패")
 
@@ -507,7 +552,9 @@ async def list_all_floating_ips(conn: openstack.connection.Connection = Depends(
 async def list_all_routers(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
     """전체 프로젝트의 라우터 목록."""
     try:
-        return await cached_call("afterglow:admin:routers", ttl_normal(), lambda: neutron.list_routers(conn, None), refresh=refresh)
+        return await cached_call(
+            "afterglow:admin:routers", ttl_normal(), lambda: neutron.list_routers(conn, None), refresh=refresh
+        )
     except Exception:
         raise HTTPException(status_code=500, detail="라우터 목록 조회 실패")
 
@@ -521,6 +568,7 @@ async def list_all_ports(
 ):
     """전체 프로젝트의 포트 목록 (페이지네이션)."""
     try:
+
         def _list():
             kwargs: dict = {"limit": limit}
             if marker:
@@ -529,21 +577,24 @@ async def list_all_ports(
                 kwargs["project_id"] = project_id
             items = []
             for p in conn.network.ports(**kwargs):
-                items.append({
-                    "id": p.id,
-                    "name": p.name or "",
-                    "status": p.status or "",
-                    "network_id": p.network_id,
-                    "device_owner": p.device_owner or "",
-                    "device_id": p.device_id or "",
-                    "mac_address": p.mac_address or "",
-                    "fixed_ips": p.fixed_ips or [],
-                    "project_id": getattr(p, 'project_id', None),
-                })
+                items.append(
+                    {
+                        "id": p.id,
+                        "name": p.name or "",
+                        "status": p.status or "",
+                        "network_id": p.network_id,
+                        "device_owner": p.device_owner or "",
+                        "device_id": p.device_id or "",
+                        "mac_address": p.mac_address or "",
+                        "fixed_ips": p.fixed_ips or [],
+                        "project_id": getattr(p, "project_id", None),
+                    }
+                )
                 if len(items) >= limit:
                     break
             next_marker = items[-1]["id"] if len(items) == limit else None
             return {"items": items, "next_marker": next_marker, "count": len(items)}
+
         return await asyncio.to_thread(_list)
     except Exception:
         raise HTTPException(status_code=500, detail="포트 목록 조회 실패")
@@ -563,6 +614,7 @@ async def create_port(
 ):
     """포트 생성 (관리자)."""
     try:
+
         def _create():
             kwargs: dict = {"network_id": req.network_id}
             if req.name:
@@ -581,8 +633,9 @@ async def create_port(
                 "device_id": p.device_id or "",
                 "mac_address": p.mac_address or "",
                 "fixed_ips": p.fixed_ips or [],
-                "project_id": getattr(p, 'project_id', None),
+                "project_id": getattr(p, "project_id", None),
             }
+
         return await asyncio.to_thread(_create)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"포트 생성 실패: {e}")
@@ -592,6 +645,7 @@ async def create_port(
 async def get_quotas(project_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
     """특정 프로젝트의 쿼터 조회 (Compute + Volume, 실제 사용량 포함)."""
     try:
+
         def _get():
             result: dict = {"compute": {}, "volume": {}}
             compute_endpoint = conn.compute.get_endpoint()
@@ -616,15 +670,19 @@ async def get_quotas(project_id: str, conn: openstack.connection.Connection = De
             except Exception:
                 result["volume"] = {}
             return result
+
         return await asyncio.to_thread(_get)
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="쿼터 조회 실패")
 
 
 @router.get("/overview/projects", dependencies=[Depends(require_admin)])
-async def admin_overview_projects(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
+async def admin_overview_projects(
+    conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)
+):
     """프로젝트별 리소스 사용량 및 쿼터."""
     try:
+
         def _collect():
             # 프로젝트별 GPU 인스턴스 수 집계
             gpu_by_project: dict = {}
@@ -690,6 +748,7 @@ async def admin_overview_projects(conn: openstack.connection.Connection = Depend
                 except Exception:
                     pass
             return result
+
         return await cached_call("afterglow:admin:overview_projects", ttl_slow(), _collect, refresh=refresh)
     except Exception:
         _logger.warning("프로젝트별 리소스 조회 실패", exc_info=True)
@@ -705,6 +764,7 @@ async def admin_overview_projects(conn: openstack.connection.Connection = Depend
 async def get_admin_volume(volume_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
     """볼륨 상세 조회 (관리자)."""
     try:
+
         def _get():
             v = conn.block_storage.get_volume(volume_id)
             return {
@@ -722,10 +782,12 @@ async def get_admin_volume(volume_id: str, conn: openstack.connection.Connection
                 "multiattach": getattr(v, "is_multiattach", None),
                 "metadata": dict(v.metadata or {}),
             }
+
         return await asyncio.to_thread(_get)
     except Exception:
         _logger.warning("볼륨 상세 조회 실패", exc_info=True)
         raise HTTPException(status_code=500, detail="볼륨 상세 조회 실패")
+
 
 class UpdateVolumeRequest(BaseModel):
     name: str | None = None
@@ -747,6 +809,7 @@ async def update_volume(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """볼륨 이름/설명 수정."""
+
     def _update():
         kwargs: dict = {}
         if req.name is not None:
@@ -763,6 +826,7 @@ async def update_volume(
             }
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"볼륨 수정 실패: {e}")
+
     try:
         return await asyncio.to_thread(_update)
     except HTTPException:
@@ -775,11 +839,13 @@ async def delete_volume(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """볼륨 삭제."""
+
     def _delete():
         try:
             conn.block_storage.delete_volume(volume_id, ignore_missing=True)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"볼륨 삭제 실패: {e}")
+
     try:
         await asyncio.to_thread(_delete)
     except HTTPException:
@@ -793,12 +859,14 @@ async def extend_volume(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """볼륨 용량 확장."""
+
     def _extend():
         try:
             conn.block_storage.extend_volume(volume_id, req.new_size)
             return {"status": "extending"}
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"볼륨 확장 실패: {e}")
+
     try:
         return await asyncio.to_thread(_extend)
     except HTTPException:
@@ -812,12 +880,14 @@ async def reset_volume_status(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """볼륨 상태 초기화."""
+
     def _reset():
         try:
             conn.block_storage.reset_volume_status(volume_id, req.status)
             return {"status": req.status}
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"볼륨 상태 초기화 실패: {e}")
+
     try:
         return await asyncio.to_thread(_reset)
     except HTTPException:
@@ -894,6 +964,7 @@ async def transfer_volume(
 ):
     """볼륨을 다른 프로젝트로 이전 (관리자 전용)."""
     try:
+
         def _transfer():
             bs_endpoint = conn.block_storage.get_endpoint()
             # 1. 이전 생성
@@ -915,6 +986,7 @@ async def transfer_volume(
             )
             result = accept_resp.json().get("transfer", {})
             return {"status": "transferred", "volume_id": result.get("volume_id", volume_id)}
+
         return await asyncio.to_thread(_transfer)
     except Exception as e:
         _logger.warning("볼륨 이전 실패", exc_info=True)
@@ -924,6 +996,7 @@ async def transfer_volume(
 # ===========================================================================
 # 네트워크 관리 (관리자)
 # ===========================================================================
+
 
 class CreateNetworkRequest(BaseModel):
     name: str
@@ -971,6 +1044,7 @@ async def create_network(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """네트워크 생성 (선택적으로 서브넷 포함)."""
+
     def _create():
         try:
             net_kwargs: dict = {
@@ -997,6 +1071,7 @@ async def create_network(
             }
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"네트워크 생성 실패: {e}")
+
     try:
         return await asyncio.to_thread(_create)
     except HTTPException:
@@ -1010,6 +1085,7 @@ async def update_network(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """네트워크 수정."""
+
     def _update():
         kwargs: dict = {}
         if req.name is not None:
@@ -1027,6 +1103,7 @@ async def update_network(
             }
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"네트워크 수정 실패: {e}")
+
     try:
         return await asyncio.to_thread(_update)
     except HTTPException:
@@ -1039,11 +1116,13 @@ async def delete_network(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """네트워크 삭제."""
+
     def _delete():
         try:
             conn.network.delete_network(network_id, ignore_missing=True)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"네트워크 삭제 실패: {e}")
+
     try:
         await asyncio.to_thread(_delete)
     except HTTPException:
@@ -1056,6 +1135,7 @@ async def create_floating_ip(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """Floating IP 생성."""
+
     def _create():
         try:
             fip = conn.network.create_ip(floating_network_id=req.floating_network_id)
@@ -1069,6 +1149,7 @@ async def create_floating_ip(
             }
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Floating IP 생성 실패: {e}")
+
     try:
         return await asyncio.to_thread(_create)
     except HTTPException:
@@ -1081,11 +1162,13 @@ async def delete_floating_ip(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """Floating IP 삭제."""
+
     def _delete():
         try:
             conn.network.delete_ip(fip_id, ignore_missing=True)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Floating IP 삭제 실패: {e}")
+
     try:
         await asyncio.to_thread(_delete)
     except HTTPException:
@@ -1098,6 +1181,7 @@ async def create_router(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """라우터 생성."""
+
     def _create():
         try:
             kwargs: dict = {"name": req.name}
@@ -1113,6 +1197,7 @@ async def create_router(
             }
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"라우터 생성 실패: {e}")
+
     try:
         return await asyncio.to_thread(_create)
     except HTTPException:
@@ -1126,6 +1211,7 @@ async def update_router(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """라우터 수정."""
+
     def _update():
         kwargs: dict = {}
         if req.name is not None:
@@ -1142,6 +1228,7 @@ async def update_router(
             }
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"라우터 수정 실패: {e}")
+
     try:
         return await asyncio.to_thread(_update)
     except HTTPException:
@@ -1154,11 +1241,13 @@ async def delete_router(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """라우터 삭제."""
+
     def _delete():
         try:
             conn.network.delete_router(router_id, ignore_missing=True)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"라우터 삭제 실패: {e}")
+
     try:
         await asyncio.to_thread(_delete)
     except HTTPException:
@@ -1172,6 +1261,7 @@ async def update_port(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """포트 수정 (이름)."""
+
     def _update():
         kwargs: dict = {}
         if req.name is not None:
@@ -1186,6 +1276,7 @@ async def update_port(
             }
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"포트 수정 실패: {e}")
+
     try:
         return await asyncio.to_thread(_update)
     except HTTPException:
@@ -1198,11 +1289,13 @@ async def delete_port(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """포트 삭제."""
+
     def _delete():
         try:
             conn.network.delete_port(port_id, ignore_missing=True)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"포트 삭제 실패: {e}")
+
     try:
         await asyncio.to_thread(_delete)
     except HTTPException:
@@ -1212,6 +1305,7 @@ async def delete_port(
 # ===========================================================================
 # k3s 클러스터 관리 (관리자)
 # ===========================================================================
+
 
 @router.get("/k3s-clusters", dependencies=[Depends(require_admin)])
 async def list_admin_k3s_clusters():
@@ -1261,7 +1355,9 @@ async def delete_admin_k3s_cluster(
 ):
     """관리자용 k3s 클러스터 삭제."""
     import asyncio
-    from app.services import nova as _nova, neutron as _neutron
+
+    from app.services import neutron as _neutron
+    from app.services import nova as _nova
 
     cluster = await k3s_cluster.get_cluster_admin(cluster_id)
     if not cluster:
@@ -1274,6 +1370,7 @@ async def delete_admin_k3s_cluster(
     agent_vm_ids = cluster.get("agent_vm_ids") or []
     if isinstance(agent_vm_ids, str):
         import json
+
         try:
             agent_vm_ids = json.loads(agent_vm_ids)
         except Exception:
@@ -1311,15 +1408,8 @@ async def delete_admin_k3s_cluster(
 
 _admin_start_time: float = __import__("time").time()
 
-def _read_backend_version() -> str:
-    import tomllib, pathlib
-    for p in [pathlib.Path("pyproject.toml"), pathlib.Path(__file__).resolve().parents[3] / "pyproject.toml"]:
-        if p.exists():
-            with open(p, "rb") as f:
-                return tomllib.load(f).get("project", {}).get("version", "unknown")
-    return "unknown"
 
-_backend_version: str = _read_backend_version()
+_backend_version: str = read_app_version()
 
 
 @router.get("/version", dependencies=[Depends(require_admin)])
@@ -1344,7 +1434,10 @@ async def admin_version():
     def _git(args: list[str]) -> str | None:
         try:
             result = subprocess.run(
-                ["git"] + args, capture_output=True, text=True, timeout=3,
+                ["git"] + args,
+                capture_output=True,
+                text=True,
+                timeout=3,
                 cwd="/app",
             )
             return result.stdout.strip() or None

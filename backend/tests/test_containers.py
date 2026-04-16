@@ -1,16 +1,24 @@
 """container/containers.py 엔드포인트 단위 테스트 (8 HTTP 엔드포인트, Zun 서비스 필요)."""
+
+from unittest.mock import AsyncMock, patch
+
 import pytest
-from unittest.mock import patch, AsyncMock, MagicMock
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
 from app.main import app
-from app.models.containers import ContainerListResponse, ZunContainerInfo
+from app.models.containers import ZunContainerInfo
 
 
 def _make_container():
     return ZunContainerInfo(
-        uuid="c-1", name="mycontainer", status="Running", image="nginx",
-        cpu=0.5, memory="128", command=None, created_at=None,
+        uuid="c-1",
+        name="mycontainer",
+        status="Running",
+        image="nginx",
+        cpu=0.5,
+        memory="128",
+        command=None,
+        created_at=None,
     )
 
 

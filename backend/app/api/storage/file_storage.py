@@ -1,9 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
 import openstack
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.api.deps import get_os_conn
 from app.config import get_settings
-from app.models.storage import FileStorageInfo, CreateFileStorageRequest, CreateAccessRuleRequest
+from app.models.storage import CreateAccessRuleRequest, CreateFileStorageRequest, FileStorageInfo
 from app.rate_limit import limiter
 from app.services import manila
 from app.services.cache import cached_call, invalidate, ttl_fast
@@ -15,20 +15,23 @@ router = APIRouter()
 async def get_file_storage_quota(conn: openstack.connection.Connection = Depends(get_os_conn)):
     try:
         return manila.get_file_storage_quota(conn)
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="파일 스토리지 쿼터 조회 실패")
 
 
 @router.get("", response_model=list[FileStorageInfo])
-async def list_file_storages(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
+async def list_file_storages(
+    conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)
+):
     pid = conn._union_project_id
     try:
         return await cached_call(
-            f"afterglow:manila:{pid}:file_storages", ttl_fast(),
+            f"afterglow:manila:{pid}:file_storages",
+            ttl_fast(),
             lambda: [s.model_dump() for s in manila.list_file_storages(conn)],
             refresh=refresh,
         )
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="파일 스토리지 목록 조회 실패")
 
 
@@ -36,7 +39,7 @@ async def list_file_storages(conn: openstack.connection.Connection = Depends(get
 async def list_share_types(conn: openstack.connection.Connection = Depends(get_os_conn)):
     try:
         return manila.list_share_types(conn)
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="Share 타입 목록 조회 실패")
 
 
@@ -77,7 +80,7 @@ async def create_file_storage(
         )
         await invalidate(f"afterglow:manila:{pid}:file_storages")
         return result
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="파일 스토리지 생성 실패")
 
 
@@ -90,7 +93,7 @@ async def delete_file_storage(
     try:
         manila.delete_file_storage(conn, file_storage_id)
         await invalidate(f"afterglow:manila:{pid}:file_storages")
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="파일 스토리지 삭제 실패")
 
 
@@ -98,11 +101,12 @@ async def delete_file_storage(
 # Access Rules
 # ---------------------------------------------------------------------------
 
+
 @router.get("/{file_storage_id}/access-rules")
 async def list_access_rules(file_storage_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
     try:
         return manila.list_access_rules(conn, file_storage_id)
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="접근 규칙 목록 조회 실패")
 
 
@@ -114,7 +118,7 @@ async def create_access_rule(
 ):
     try:
         return manila.create_access_rule(conn, file_storage_id, req.access_to, req.access_level, req.access_type)
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="접근 규칙 생성 실패")
 
 
@@ -126,5 +130,5 @@ async def revoke_access_rule(
 ):
     try:
         manila.revoke_access_rule(conn, file_storage_id, access_id)
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="접근 규칙 삭제 실패")

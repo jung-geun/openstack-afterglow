@@ -1,13 +1,14 @@
 """관리자 Flavor 관리 엔드포인트."""
+
 import asyncio
 import logging
-from typing import Optional
+
+import openstack
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-import openstack
 
-from app.api.deps import get_os_conn, require_admin
 from app.api.common.dashboard import _gpu_count_from_flavor
+from app.api.deps import get_os_conn, require_admin
 
 _logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ class ExtraSpecRequest(BaseModel):
 def _flavor_to_dict(f) -> dict:
     extra_specs = {}
     try:
-        if hasattr(f, 'extra_specs') and f.extra_specs:
+        if hasattr(f, "extra_specs") and f.extra_specs:
             extra_specs = dict(f.extra_specs)
     except Exception:
         pass
@@ -46,8 +47,8 @@ def _flavor_to_dict(f) -> dict:
         "vcpus": f.vcpus,
         "ram": f.ram,
         "disk": f.disk,
-        "is_public": getattr(f, 'is_public', True),
-        "description": getattr(f, 'description', None) or "",
+        "is_public": getattr(f, "is_public", True),
+        "description": getattr(f, "description", None) or "",
         "extra_specs": extra_specs,
         "is_gpu": gpu_count > 0,
         "gpu_count": gpu_count,
@@ -62,6 +63,7 @@ async def list_admin_flavors(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """전체 flavor 목록 (공개+비공개)."""
+
     def _list():
         kwargs: dict = {"details": True}
         if is_public is not None:
@@ -74,9 +76,10 @@ async def list_admin_flavors(
         items = [_flavor_to_dict(f) for f in flavors[:limit]]
         next_marker = items[-1]["id"] if len(items) == limit else None
         return {"items": items, "next_marker": next_marker, "count": len(items)}
+
     try:
         return await asyncio.to_thread(_list)
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="Flavor 목록 조회 실패")
 
 
@@ -86,6 +89,7 @@ async def create_flavor(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """Flavor 생성."""
+
     def _create():
         try:
             flavor = conn.compute.create_flavor(
@@ -99,11 +103,12 @@ async def create_flavor(
             return _flavor_to_dict(flavor)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Flavor 생성 실패: {e}")
+
     try:
         return await asyncio.to_thread(_create)
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="Flavor 생성 실패")
 
 
@@ -113,11 +118,13 @@ async def delete_flavor(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """Flavor 삭제."""
+
     def _delete():
         try:
             conn.compute.delete_flavor(flavor_id, ignore_missing=True)
         except Exception as e:
             raise HTTPException(status_code=404, detail=f"Flavor 삭제 실패: {e}")
+
     try:
         await asyncio.to_thread(_delete)
     except HTTPException:
@@ -130,6 +137,7 @@ async def list_flavor_access(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """Flavor 접근 권한이 있는 프로젝트 목록 (프로젝트 이름 포함)."""
+
     def _list():
         try:
             endpoint = conn.compute.get_endpoint()
@@ -149,15 +157,18 @@ async def list_flavor_access(
                     project_name = proj.name or ""
                 except Exception:
                     pass
-                result.append({
-                    "flavor_id": a.get("flavor_id", flavor_id),
-                    "project_id": pid,
-                    "project_name": project_name,
-                })
+                result.append(
+                    {
+                        "flavor_id": a.get("flavor_id", flavor_id),
+                        "project_id": pid,
+                        "project_name": project_name,
+                    }
+                )
             return result
         except Exception as e:
             _logger.warning("Flavor 접근 목록 조회 실패 (flavor_id=%s): %s", flavor_id, e)
             return []
+
     try:
         return await asyncio.to_thread(_list)
     except HTTPException:
@@ -171,12 +182,14 @@ async def set_flavor_extra_spec(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """Flavor extra_spec 추가/수정."""
+
     def _set():
         try:
             conn.compute.create_flavor_extra_specs(flavor_id, {req.key: req.value})
             return {"key": req.key, "value": req.value}
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"extra_spec 설정 실패: {e}")
+
     try:
         return await asyncio.to_thread(_set)
     except HTTPException:
@@ -190,11 +203,13 @@ async def delete_flavor_extra_spec(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """Flavor extra_spec 삭제."""
+
     def _delete():
         try:
             conn.compute.delete_flavor_extra_specs_property(flavor_id, key)
         except Exception as e:
             raise HTTPException(status_code=404, detail=f"extra_spec 삭제 실패: {e}")
+
     try:
         await asyncio.to_thread(_delete)
     except HTTPException:
@@ -208,6 +223,7 @@ async def add_flavor_access(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """Flavor에 프로젝트 접근 권한 추가 (Nova raw API)."""
+
     def _add():
         try:
             endpoint = conn.compute.get_endpoint()
@@ -220,6 +236,7 @@ async def add_flavor_access(
             return {"flavor_id": flavor_id, "project_id": req.project_id}
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"접근 권한 추가 실패: {e}")
+
     try:
         return await asyncio.to_thread(_add)
     except HTTPException:
@@ -233,6 +250,7 @@ async def remove_flavor_access(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """Flavor에서 프로젝트 접근 권한 제거 (Nova raw API)."""
+
     def _remove():
         try:
             endpoint = conn.compute.get_endpoint()
@@ -244,6 +262,7 @@ async def remove_flavor_access(
                 raise Exception(f"HTTP {resp.status_code}")
         except Exception as e:
             raise HTTPException(status_code=404, detail=f"접근 권한 제거 실패: {e}")
+
     try:
         await asyncio.to_thread(_remove)
     except HTTPException:

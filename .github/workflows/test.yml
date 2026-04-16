@@ -1,0 +1,68 @@
+name: Unit Tests
+
+on:
+  push:
+    branches: [main, dev]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+jobs:
+  version-check:
+    name: Version sync check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check versions aligned
+        run: bash scripts/check-version-sync.sh
+        env:
+          GITHUB_REF: ${{ github.ref }}
+
+  test-backend:
+    name: Backend (unit tests + lint)
+    needs: version-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Sync deps (dev)
+        working-directory: backend
+        run: uv sync --frozen --extra dev
+
+      - name: Lint — ruff check
+        working-directory: backend
+        run: uv run ruff check .
+
+      - name: Lint — ruff format check
+        working-directory: backend
+        run: uv run ruff format --check .
+
+      - name: Unit tests (integration 제외)
+        working-directory: backend
+        env:
+          AFTERGLOW_ALLOW_INSECURE: "1"
+        run: uv run python -m pytest tests/ -v --ignore=tests/integration
+
+  test-frontend:
+    name: Frontend (vitest)
+    needs: version-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1"
+
+      - name: Install
+        working-directory: frontend
+        run: bun install --frozen-lockfile
+
+      - name: Test
+        working-directory: frontend
+        run: bun run test

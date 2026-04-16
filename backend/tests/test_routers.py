@@ -1,7 +1,10 @@
 """라우터 API 단위 테스트."""
-import pytest
+
 from unittest.mock import patch
-from app.models.storage import RouterInfo, RouterDetail
+
+import pytest
+
+from app.models.storage import RouterDetail, RouterInfo
 
 
 def make_router(router_id: str = "router-1", name: str = "test-router") -> RouterInfo:
@@ -32,8 +35,10 @@ async def test_list_routers(client, mock_conn):
     async def mock_cached_call(key, ttl, fn, **kw):
         return fn()
 
-    with patch("app.api.network.routers.neutron.list_routers", return_value=[make_router()]), \
-         patch("app.api.network.routers.cached_call", new=mock_cached_call):
+    with (
+        patch("app.api.network.routers.neutron.list_routers", return_value=[make_router()]),
+        patch("app.api.network.routers.cached_call", new=mock_cached_call),
+    ):
         resp = await client.get("/api/routers")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)

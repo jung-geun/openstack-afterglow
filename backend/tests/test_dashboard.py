@@ -1,7 +1,9 @@
 """common/dashboard.py 엔드포인트 단위 테스트 (4개)."""
+
+from unittest.mock import AsyncMock, patch
+
 import pytest
-from unittest.mock import patch, AsyncMock
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 
@@ -24,10 +26,6 @@ async def test_get_dashboard_summary_unauthenticated():
 
 @pytest.mark.asyncio
 async def test_get_dashboard_summary_success(client):
-    dummy_summary = {
-        "instances": {"total": 0, "active": 0, "shutoff": 0, "error": 0},
-        "compute": {}, "storage": {}, "gpu_used": 0,
-    }
     with patch("app.api.common.dashboard.asyncio") as mock_asyncio:
         mock_asyncio.gather = AsyncMock(return_value=([], {}, {}, []))
         mock_asyncio.to_thread = AsyncMock()

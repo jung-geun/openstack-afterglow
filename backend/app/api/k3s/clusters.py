@@ -3,12 +3,12 @@
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timezone
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
 
 import openstack
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse, Response
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response, StreamingResponse
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from starlette.requests import Request
@@ -22,7 +22,7 @@ from app.models.k3s import (
     K3sProgressStep,
     ScaleK3sClusterRequest,
 )
-from app.services import cinder, nova, neutron, k3s_cloudinit, keystone
+from app.services import cinder, k3s_cloudinit, keystone, neutron, nova
 from app.services import k3s_db as k3s_cluster
 
 router = APIRouter()
@@ -34,6 +34,7 @@ def _cluster_to_info(c: dict) -> K3sClusterInfo:
     agent_vm_ids = c.get("agent_vm_ids") or []
     if isinstance(agent_vm_ids, str):
         import json
+
         try:
             agent_vm_ids = json.loads(agent_vm_ids)
         except Exception:
@@ -53,13 +54,19 @@ def _cluster_to_info(c: dict) -> K3sClusterInfo:
         k3s_version=c.get("k3s_version") or None,
         created_at=c.get("created_at") or None,
         updated_at=c.get("updated_at") or None,
+        deleted_at=c.get("deleted_at") or None,
+        deleted_by_user_id=c.get("deleted_by_user_id") or None,
+        deleted_reason=c.get("deleted_reason") or None,
     )
 
 
 @router.get("", response_model=list[K3sClusterInfo])
-async def list_k3s_clusters(token_info: dict = Depends(get_token_info)):
+async def list_k3s_clusters(
+    token_info: dict = Depends(get_token_info),
+    include_deleted: bool = Query(default=False),
+):
     project_id = token_info["project_id"]
-    clusters = await k3s_cluster.list_clusters(project_id)
+    clusters = await k3s_cluster.list_clusters(project_id, include_deleted=include_deleted)
     return [_cluster_to_info(c) for c in clusters]
 
 
@@ -83,17 +90,14 @@ async def download_kubeconfig(cluster_id: str, token_info: dict = Depends(get_to
     kubeconfig = await k3s_cluster.get_kubeconfig(project_id, cluster_id)
     if not kubeconfig:
         raise HTTPException(
-            status_code=404,
-            detail="kubeconfig가 아직 준비되지 않았습니다. 클러스터가 초기화 중입니다."
+            status_code=404, detail="kubeconfig가 아직 준비되지 않았습니다. 클러스터가 초기화 중입니다."
         )
 
     cluster_name = cluster.get("name", cluster_id)
     return Response(
         content=kubeconfig,
         media_type="application/yaml",
-        headers={
-            "Content-Disposition": f'attachment; filename="kubeconfig-{cluster_name}.yaml"'
-        },
+        headers={"Content-Disposition": f'attachment; filename="kubeconfig-{cluster_name}.yaml"'},
     )
 
 
@@ -114,16 +118,12 @@ async def create_k3s_cluster_async(
     server_flavor_id = s.k3s_server_flavor_id
     if not server_image_id or not server_flavor_id:
         raise HTTPException(
-            status_code=503,
-            detail="k3s 서버 이미지 또는 플레이버가 설정되지 않았습니다. 관리자에게 문의하세요."
+            status_code=503, detail="k3s 서버 이미지 또는 플레이버가 설정되지 않았습니다. 관리자에게 문의하세요."
         )
 
     agent_flavor_id = req.agent_flavor_id or s.k3s_default_agent_flavor_id
     if req.agent_count > 0 and not agent_flavor_id:
-        raise HTTPException(
-            status_code=503,
-            detail="에이전트 플레이버가 설정되지 않았습니다. 관리자에게 문의하세요."
-        )
+        raise HTTPException(status_code=503, detail="에이전트 플레이버가 설정되지 않았습니다. 관리자에게 문의하세요.")
     network_id = req.network_id or s.default_network_id
     k3s_version = s.k3s_version
     boot_volume_size = s.k3s_boot_volume_size_gb
@@ -158,37 +158,69 @@ async def create_k3s_cluster_async(
             yield event(K3sProgressStep.SECURITY_GROUP, 5, "k3s 보안 그룹 생성 중...")
             sg_name = f"k3s-{req.name}-{cluster_id[:8]}"
             sg = await asyncio.to_thread(
-                neutron.create_security_group, conn, sg_name,
-                f"k3s cluster {req.name} security group"
+                neutron.create_security_group, conn, sg_name, f"k3s cluster {req.name} security group"
             )
             sg_id = sg["id"]
 
             # 보안 그룹 규칙 추가
             rules = [
                 # SSH
-                dict(direction="ingress", protocol="tcp", port_range_min=22, port_range_max=22, remote_ip_prefix="0.0.0.0/0"),
+                dict(
+                    direction="ingress",
+                    protocol="tcp",
+                    port_range_min=22,
+                    port_range_max=22,
+                    remote_ip_prefix="0.0.0.0/0",
+                ),
                 # k3s API server
-                dict(direction="ingress", protocol="tcp", port_range_min=6443, port_range_max=6443, remote_ip_prefix="0.0.0.0/0"),
+                dict(
+                    direction="ingress",
+                    protocol="tcp",
+                    port_range_min=6443,
+                    port_range_max=6443,
+                    remote_ip_prefix="0.0.0.0/0",
+                ),
                 # Kubelet (SG 내부)
-                dict(direction="ingress", protocol="tcp", port_range_min=10250, port_range_max=10250, remote_group_id=sg_id),
+                dict(
+                    direction="ingress",
+                    protocol="tcp",
+                    port_range_min=10250,
+                    port_range_max=10250,
+                    remote_group_id=sg_id,
+                ),
                 # VXLAN (SG 내부)
-                dict(direction="ingress", protocol="udp", port_range_min=8472, port_range_max=8472, remote_group_id=sg_id),
+                dict(
+                    direction="ingress", protocol="udp", port_range_min=8472, port_range_max=8472, remote_group_id=sg_id
+                ),
                 # WireGuard (SG 내부)
-                dict(direction="ingress", protocol="udp", port_range_min=51820, port_range_max=51820, remote_group_id=sg_id),
+                dict(
+                    direction="ingress",
+                    protocol="udp",
+                    port_range_min=51820,
+                    port_range_max=51820,
+                    remote_group_id=sg_id,
+                ),
                 # NodePort
-                dict(direction="ingress", protocol="tcp", port_range_min=30000, port_range_max=32767, remote_ip_prefix="0.0.0.0/0"),
+                dict(
+                    direction="ingress",
+                    protocol="tcp",
+                    port_range_min=30000,
+                    port_range_max=32767,
+                    remote_ip_prefix="0.0.0.0/0",
+                ),
             ]
             for rule_kwargs in rules:
-                await asyncio.to_thread(
-                    neutron.create_security_group_rule, conn, sg_id, **rule_kwargs
-                )
+                await asyncio.to_thread(neutron.create_security_group_rule, conn, sg_id, **rule_kwargs)
             yield event(K3sProgressStep.SECURITY_GROUP, 10, "보안 그룹 생성 완료")
 
             # --- Step 2: 서버 부트 볼륨 생성 ---
             yield event(K3sProgressStep.SERVER_VOLUME, 15, "서버 노드 부트 볼륨 생성 중...")
             boot_vol = await asyncio.to_thread(
                 cinder.create_volume_from_image,
-                conn, f"{req.name}-server-boot", server_image_id, boot_volume_size,
+                conn,
+                f"{req.name}-server-boot",
+                server_image_id,
+                boot_volume_size,
             )
             boot_volume_id = boot_vol.id
             yield event(K3sProgressStep.SERVER_VOLUME, 25, "서버 부트 볼륨 생성 완료")
@@ -237,37 +269,42 @@ async def create_k3s_cluster_async(
 
             # --- Step 5: Redis에 클러스터 레코드 저장 ---
             yield event(K3sProgressStep.WAITING_CALLBACK, 60, "k3s 초기화 대기 중 (서버 VM에서 k3s 설치 중)...")
-            now = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(UTC).isoformat()
             # 생성자 정보 추출
             _creator_user_id = conn._union_user_id if hasattr(conn, "_union_user_id") else None
             _creator_username = None
             if token_info_obj and isinstance(token_info_obj, dict):
                 _creator_user_id = _creator_user_id or token_info_obj.get("user_id")
                 _creator_username = token_info_obj.get("username")
-            await k3s_cluster.create_cluster_record(project_id, cluster_id, {
-                "name": req.name,
-                "status": "CREATING",
-                "status_reason": "",
-                "server_vm_id": server_vm_id,
-                "agent_vm_ids": [],
-                "agent_count": req.agent_count,
-                "server_flavor_id": server_flavor_id,
-                "agent_flavor_id": agent_flavor_id,
-                "network_id": network_id,
-                "security_group_id": sg_id,
-                "server_ip": "",
-                "api_address": "",
-                "key_name": req.key_name or "",
-                "ssh_public_key": ssh_public_key,
-                "k3s_version": k3s_version,
-                "created_by_user_id": _creator_user_id or "",
-                "created_by_username": _creator_username or "",
-                "created_at": now,
-                "updated_at": now,
-            })
+            await k3s_cluster.create_cluster_record(
+                project_id,
+                cluster_id,
+                {
+                    "name": req.name,
+                    "status": "CREATING",
+                    "status_reason": "",
+                    "server_vm_id": server_vm_id,
+                    "agent_vm_ids": [],
+                    "agent_count": req.agent_count,
+                    "server_flavor_id": server_flavor_id,
+                    "agent_flavor_id": agent_flavor_id,
+                    "network_id": network_id,
+                    "security_group_id": sg_id,
+                    "server_ip": "",
+                    "api_address": "",
+                    "key_name": req.key_name or "",
+                    "ssh_public_key": ssh_public_key,
+                    "k3s_version": k3s_version,
+                    "created_by_user_id": _creator_user_id or "",
+                    "created_by_username": _creator_username or "",
+                    "created_at": now,
+                    "updated_at": now,
+                },
+            )
 
             yield event(
-                K3sProgressStep.COMPLETED, 100,
+                K3sProgressStep.COMPLETED,
+                100,
                 f"클러스터 생성 요청 완료. 서버 VM이 k3s를 설치한 후 에이전트 {req.agent_count}개가 자동으로 생성됩니다.",
                 cluster_id=cluster_id,
             )
@@ -328,6 +365,7 @@ async def scale_k3s_cluster(
     current_agent_ids: list[str] = cluster.get("agent_vm_ids") or []
     if isinstance(current_agent_ids, str):
         import json as _json
+
         try:
             current_agent_ids = _json.loads(current_agent_ids)
         except Exception:
@@ -388,8 +426,7 @@ async def _scale_agents(
             agent_name = f"{cluster_name}-agent-{agent_idx}"
             try:
                 vol = await asyncio.to_thread(
-                    cinder.create_volume_from_image,
-                    conn, f"{agent_name}-boot", image_id, boot_volume_size
+                    cinder.create_volume_from_image, conn, f"{agent_name}-boot", image_id, boot_volume_size
                 )
                 userdata = k3s_cloudinit.generate_agent_userdata(
                     cluster_name=cluster_name,
@@ -400,7 +437,11 @@ async def _scale_agents(
                 )
                 vm = await asyncio.to_thread(
                     nova.create_server,
-                    conn, agent_name, agent_flavor_id, network_id, vol.id,
+                    conn,
+                    agent_name,
+                    agent_flavor_id,
+                    network_id,
+                    vol.id,
                     userdata=userdata,
                     metadata={"union_role": "k3s_agent", "union_cluster_id": cluster_id},
                     delete_boot_volume_on_termination=True,
@@ -442,12 +483,17 @@ async def _scale_agents(
 async def delete_k3s_cluster(
     cluster_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
-    """k3s 클러스터 삭제: VM → SG → Redis 순으로 정리."""
+    """k3s 클러스터 삭제: VM → SG 정리 후 soft-delete 처리."""
     project_id = conn._union_project_id
     cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
     if not cluster:
         raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
+
+    # 이미 삭제된 클러스터는 멱등 처리
+    if cluster.get("deleted_at"):
+        return
 
     await k3s_cluster.update_cluster_status(project_id, cluster_id, "DELETING")
 
@@ -455,6 +501,7 @@ async def delete_k3s_cluster(
     agent_vm_ids = cluster.get("agent_vm_ids") or []
     if isinstance(agent_vm_ids, str):
         import json
+
         try:
             agent_vm_ids = json.loads(agent_vm_ids)
         except Exception:
@@ -485,5 +532,6 @@ async def delete_k3s_cluster(
         except Exception as e:
             _logger.warning("Delete SG %s failed: %s", sg_id, e)
 
-    # Redis 레코드 삭제
-    await k3s_cluster.delete_cluster_record(project_id, cluster_id)
+    # soft-delete: 상태를 DELETED로 기록 (물리 삭제 안 함)
+    user_id = token_info.get("user_id") if isinstance(token_info, dict) else None
+    await k3s_cluster.delete_cluster_record(project_id, cluster_id, user_id=user_id, reason="사용자 삭제 요청")

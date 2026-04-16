@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - dev
     tags:
       - 'v*'
   pull_request:
@@ -15,9 +16,22 @@ env:
   IMAGE_OWNER: ${{ github.repository_owner }}
 
 jobs:
-  build-backend:
-    name: Build Backend Image
-    runs-on: ubuntu-latest
+  # ─── per-arch 빌드: self-hosted linux(amd64) / macos(arm64) native 빌드 ───
+  build:
+    name: Build ${{ matrix.target }} (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [backend, frontend]
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            runner: [self-hosted, linux]
+            platform: linux/amd64
+          - arch: arm64
+            runner: [self-hosted, macos]
+            platform: linux/arm64
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
@@ -26,6 +40,108 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Verify version sync
+        run: bash scripts/check-version-sync.sh
+        env:
+          GITHUB_REF: ${{ github.ref }}
+
+      - name: Resolve image name
+        id: img
+        run: |
+          if [ "${{ matrix.target }}" = "backend" ]; then
+            echo "name=${REGISTRY}/${IMAGE_OWNER}/afterglow-api" >> $GITHUB_OUTPUT
+          else
+            echo "name=${REGISTRY}/${IMAGE_OWNER}/afterglow" >> $GITHUB_OUTPUT
+          fi
+
+      # macOS arm64: Keychain 완전 우회
+      # docker login-action이 osxkeychain 저장을 시도하므로,
+      # 레지스트리 자격증명을 base64로 직접 config.json에 기록하고 DOCKER_CONFIG 설정
+      - name: Pre-auth registry into config.json (macOS — no keychain)
+        if: matrix.arch == 'arm64'
+        env:
+          REG_USER: ${{ secrets.REGISTRY_USERNAME || github.actor }}
+          REG_PASS: ${{ secrets.REGISTRY_PASSWORD || secrets.GITHUB_TOKEN }}
+        run: |
+          DOCKER_CONF_DIR="${RUNNER_TEMP}/docker-config"
+          mkdir -p "${DOCKER_CONF_DIR}"
+          AUTH=$(printf "%s:%s" "${REG_USER}" "${REG_PASS}" | base64)
+          printf '{"auths":{"%s":{"auth":"%s"}}}\n' "${REGISTRY}" "${AUTH}" \
+            > "${DOCKER_CONF_DIR}/config.json"
+          echo "DOCKER_CONFIG=${DOCKER_CONF_DIR}" >> "$GITHUB_ENV"
+
+      # macOS arm64 러너: docker-container 드라이버는 buildkit 컨테이너 부팅 시
+      # macOS Keychain을 호출하므로 keychain-free 'docker' 드라이버 사용
+      - name: Set up Docker Buildx (macOS — docker driver)
+        if: matrix.arch == 'arm64'
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker
+
+      - name: Set up Docker Buildx (Linux — docker-container driver)
+        if: matrix.arch == 'amd64'
+        uses: docker/setup-buildx-action@v3
+
+      # amd64 Linux만 docker login 실행 (arm64는 위 pre-auth로 대체)
+      - name: Log in to registry
+        if: matrix.arch == 'amd64'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.REGISTRY_USERNAME || github.actor }}
+          password: ${{ secrets.REGISTRY_PASSWORD || secrets.GITHUB_TOKEN }}
+
+      - name: Compute base tag
+        id: tag
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "base=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          elif [[ "${GITHUB_REF}" == refs/heads/main ]]; then
+            echo "base=nightly" >> $GITHUB_OUTPUT
+          else
+            echo "base=dev" >> $GITHUB_OUTPUT
+          fi
+
+      # arm64 (macOS, docker driver): registry cache 미지원 → 캐시 없이 빌드
+      - name: Build & push arm64 (docker driver)
+        if: matrix.arch == 'arm64'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          target: ${{ matrix.target }}
+          platforms: ${{ matrix.platform }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.img.outputs.name }}:${{ steps.tag.outputs.base }}-${{ matrix.arch }}
+
+      # amd64 (Linux, docker-container driver): registry cache 사용
+      - name: Build & push amd64 (docker-container driver)
+        if: matrix.arch == 'amd64'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          target: ${{ matrix.target }}
+          platforms: ${{ matrix.platform }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.img.outputs.name }}:${{ steps.tag.outputs.base }}-${{ matrix.arch }}
+          cache-from: type=registry,ref=${{ steps.img.outputs.name }}:cache-${{ matrix.arch }}
+          cache-to: ${{ github.event_name != 'pull_request' && format('type=registry,ref={0}:cache-{1},mode=max', steps.img.outputs.name, matrix.arch) || '' }}
+
+  # ─── manifest 통합: 두 arch 태그를 합쳐 단일 멀티플랫폼 태그로 push ───
+  manifest:
+    name: Manifest ${{ matrix.target }}
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        target: [backend, frontend]
+
+    steps:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -36,71 +152,44 @@ jobs:
           username: ${{ secrets.REGISTRY_USERNAME || github.actor }}
           password: ${{ secrets.REGISTRY_PASSWORD || secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/afterglow-api
-          tags: |
-            # main 브랜치 push 또는 PR → dev 태그
-            type=raw,value=dev,enable=${{ github.event_name == 'pull_request' || (github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')) }}
-            # 버전 태그 push → v1.2.3 태그 + latest
-            type=ref,event=tag
-            type=raw,value=latest,enable=${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+      - name: Resolve image name
+        id: img
+        run: |
+          if [ "${{ matrix.target }}" = "backend" ]; then
+            echo "name=${REGISTRY}/${IMAGE_OWNER}/afterglow-api" >> $GITHUB_OUTPUT
+          else
+            echo "name=${REGISTRY}/${IMAGE_OWNER}/afterglow" >> $GITHUB_OUTPUT
+          fi
 
-      - name: Build and push
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile
-          target: backend
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Compute final tags
+        id: tags
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VTAG="${GITHUB_REF#refs/tags/}"
+            echo "primary=${{ steps.img.outputs.name }}:${VTAG}" >> $GITHUB_OUTPUT
+            echo "extra=${{ steps.img.outputs.name }}:latest" >> $GITHUB_OUTPUT
+            echo "base=${VTAG}" >> $GITHUB_OUTPUT
+          elif [[ "${GITHUB_REF}" == refs/heads/main ]]; then
+            echo "primary=${{ steps.img.outputs.name }}:nightly" >> $GITHUB_OUTPUT
+            echo "extra=" >> $GITHUB_OUTPUT
+            echo "base=nightly" >> $GITHUB_OUTPUT
+          else
+            echo "primary=${{ steps.img.outputs.name }}:dev" >> $GITHUB_OUTPUT
+            echo "extra=" >> $GITHUB_OUTPUT
+            echo "base=dev" >> $GITHUB_OUTPUT
+          fi
 
-  build-frontend:
-    name: Build Frontend Image
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ secrets.REGISTRY_USERNAME || github.actor }}
-          password: ${{ secrets.REGISTRY_PASSWORD || secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/afterglow
-          tags: |
-            # main 브랜치 push 또는 PR → dev 태그
-            type=raw,value=dev,enable=${{ github.event_name == 'pull_request' || (github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')) }}
-            # 버전 태그 push → v1.2.3 태그 + latest
-            type=ref,event=tag
-            type=raw,value=latest,enable=${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
-
-      - name: Build and push
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile
-          target: frontend
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Create multi-arch manifest
+        run: |
+          BASE="${{ steps.tags.outputs.base }}"
+          IMG="${{ steps.img.outputs.name }}"
+          docker buildx imagetools create \
+            -t "${{ steps.tags.outputs.primary }}" \
+            "${IMG}:${BASE}-amd64" \
+            "${IMG}:${BASE}-arm64"
+          if [ -n "${{ steps.tags.outputs.extra }}" ]; then
+            docker buildx imagetools create \
+              -t "${{ steps.tags.outputs.extra }}" \
+              "${IMG}:${BASE}-amd64" \
+              "${IMG}:${BASE}-arm64"
+          fi

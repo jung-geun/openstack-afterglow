@@ -1,7 +1,9 @@
 """storage/share_snapshots.py 엔드포인트 단위 테스트 (3개, manila 필요)."""
+
+from unittest.mock import AsyncMock, patch
+
 import pytest
-from unittest.mock import patch, AsyncMock
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 
@@ -30,11 +32,18 @@ async def test_create_share_snapshot_unauthenticated():
 @pytest.mark.asyncio
 async def test_create_share_snapshot_success(client):
     snapshot = {
-        "id": "snap-1", "name": "snap1", "status": "available",
-        "share_id": "s-1", "size": 10, "description": None, "created_at": None,
+        "id": "snap-1",
+        "name": "snap1",
+        "status": "available",
+        "share_id": "s-1",
+        "size": 10,
+        "description": None,
+        "created_at": None,
     }
-    with patch("app.api.storage.share_snapshots.asyncio") as mock_asyncio, \
-         patch("app.api.storage.share_snapshots.invalidate", new=AsyncMock()):
+    with (
+        patch("app.api.storage.share_snapshots.asyncio") as mock_asyncio,
+        patch("app.api.storage.share_snapshots.invalidate", new=AsyncMock()),
+    ):
         mock_asyncio.to_thread = AsyncMock(return_value=snapshot)
         resp = await client.post("/api/share-snapshots", json={"share_id": "s-1", "name": "snap1"})
     assert resp.status_code == 201
@@ -49,8 +58,10 @@ async def test_delete_share_snapshot_unauthenticated():
 
 @pytest.mark.asyncio
 async def test_delete_share_snapshot_success(client):
-    with patch("app.api.storage.share_snapshots.asyncio") as mock_asyncio, \
-         patch("app.api.storage.share_snapshots.invalidate", new=AsyncMock()):
+    with (
+        patch("app.api.storage.share_snapshots.asyncio") as mock_asyncio,
+        patch("app.api.storage.share_snapshots.invalidate", new=AsyncMock()),
+    ):
         mock_asyncio.to_thread = AsyncMock(return_value=None)
         resp = await client.delete("/api/share-snapshots/snap-1")
     assert resp.status_code == 204

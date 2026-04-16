@@ -1,5 +1,7 @@
 """공통 테스트 픽스처."""
+
 import os
+
 os.environ.setdefault("AFTERGLOW_ALLOW_INSECURE", "1")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 os.environ.setdefault("SERVICE_MANILA_ENABLED", "true")
@@ -7,12 +9,13 @@ os.environ.setdefault("SERVICE_MAGNUM_ENABLED", "true")
 os.environ.setdefault("SERVICE_ZUN_ENABLED", "true")
 os.environ.setdefault("SERVICE_K3S_ENABLED", "true")
 
-import pytest
-from unittest.mock import MagicMock, AsyncMock
-from httpx import AsyncClient, ASGITransport
+from unittest.mock import MagicMock
 
-from app.main import app
+import pytest
+from httpx import ASGITransport, AsyncClient
+
 from app.api.deps import get_os_conn, get_token_info
+from app.main import app
 
 
 def make_mock_conn(project_id: str = "test-project-123") -> MagicMock:
@@ -51,6 +54,7 @@ def mock_conn():
 @pytest.fixture
 async def client(mock_conn):
     """인증 의존성을 모의 객체로 오버라이드한 AsyncClient (일반 사용자)."""
+
     async def override_get_os_conn():
         try:
             yield mock_conn
@@ -74,6 +78,7 @@ async def client(mock_conn):
 @pytest.fixture
 async def admin_client(mock_conn):
     """admin 역할을 가진 인증 모의 객체로 오버라이드한 AsyncClient."""
+
     async def override_get_os_conn():
         try:
             yield mock_conn
@@ -97,6 +102,7 @@ async def admin_client(mock_conn):
 @pytest.fixture
 async def non_admin_client(mock_conn):
     """admin 역할 없이 member 역할만 가진 AsyncClient (403 테스트용)."""
+
     async def override_get_os_conn():
         try:
             yield mock_conn

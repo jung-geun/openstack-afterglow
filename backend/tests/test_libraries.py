@@ -1,7 +1,9 @@
 """common/libraries.py 엔드포인트 단위 테스트 (2개)."""
+
+from unittest.mock import patch
+
 import pytest
-from unittest.mock import patch, MagicMock
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 
@@ -15,8 +17,7 @@ async def test_list_libraries_unauthenticated():
 
 @pytest.mark.asyncio
 async def test_list_libraries_success(client, mock_conn):
-    with patch("app.api.common.libraries.lib_svc") as mock_lib, \
-         patch("app.api.common.libraries.manila") as mock_manila:
+    with patch("app.api.common.libraries.lib_svc") as mock_lib, patch("app.api.common.libraries.manila") as mock_manila:
         mock_lib.get_all.return_value = []
         mock_manila.list_file_storages.return_value = []
         resp = await client.get("/api/libraries")

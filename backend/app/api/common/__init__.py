@@ -1,6 +1,6 @@
 from .dashboard import router as dashboard_router
-from .metrics import router as metrics_router
 from .libraries import router as libraries_router
+from .metrics import router as metrics_router
 from .site import router as site_router
 from .user_dashboard import router as user_dashboard_router
 

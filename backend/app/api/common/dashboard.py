@@ -1,14 +1,15 @@
 import asyncio
 import re
 from datetime import date, timedelta
-from fastapi import APIRouter, Depends, HTTPException, Query
+
 import openstack
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.deps import get_os_conn
 from app.config import get_settings
-from app.services import nova, cinder
-from app.services import neutron as neutron_svc
+from app.services import cinder, nova
 from app.services import manila as manila_svc
+from app.services import neutron as neutron_svc
 from app.services.cache import cached_call, ttl_fast, ttl_normal, ttl_static
 
 router = APIRouter()
@@ -24,10 +25,7 @@ def _list_servers_as_dicts(conn):
 
 def _list_flavors_as_dicts(conn):
     """플레이버 목록을 dict 리스트로 반환 (캐시 직렬화 호환)."""
-    return [
-        {"id": f.id, "name": f.name, "extra_specs": f.extra_specs}
-        for f in nova.list_flavors(conn)
-    ]
+    return [{"id": f.id, "name": f.name, "extra_specs": f.extra_specs} for f in nova.list_flavors(conn)]
 
 
 def _gpu_count_from_flavor(name: str, extra_specs: dict) -> int:
@@ -53,7 +51,7 @@ def _gpu_count_from_flavor(name: str, extra_specs: dict) -> int:
     if "gpu" in cat.lower():
         return 1
     # 3차: 이름 기반 fallback
-    m = re.match(r'^gpu[._]\w+?(?:x(\d+))?[._]', name)
+    m = re.match(r"^gpu[._]\w+?(?:x(\d+))?[._]", name)
     if m:
         return int(m.group(1)) if m.group(1) else 1
     return 0
@@ -69,27 +67,31 @@ async def get_dashboard_summary(
     try:
         servers, compute_limits, volume_limits, all_flavors = await asyncio.gather(
             cached_call(
-                f"afterglow:nova:{project_id}:servers", ttl_fast(),
+                f"afterglow:nova:{project_id}:servers",
+                ttl_fast(),
                 lambda: _list_servers_as_dicts(conn),
                 refresh=refresh,
             ),
             cached_call(
-                f"afterglow:nova:{project_id}:limits", ttl_normal(),
+                f"afterglow:nova:{project_id}:limits",
+                ttl_normal(),
                 lambda: nova.get_project_limits(conn),
                 refresh=refresh,
             ),
             cached_call(
-                f"afterglow:cinder:{project_id}:limits", ttl_normal(),
+                f"afterglow:cinder:{project_id}:limits",
+                ttl_normal(),
                 lambda: cinder.get_volume_limits(conn),
                 refresh=refresh,
             ),
             cached_call(
-                f"afterglow:nova:{project_id}:flavors", ttl_static(),
+                f"afterglow:nova:{project_id}:flavors",
+                ttl_static(),
                 lambda: _list_flavors_as_dicts(conn),
                 refresh=refresh,
             ),
         )
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="작업 실패")
 
     flavors_by_id: dict = {f["id"]: f for f in all_flavors}
@@ -141,7 +143,7 @@ async def get_project_quotas(
         results = await asyncio.gather(*tasks)
         compute_q, volume_q, network_q = results[0], results[1], results[2]
         file_storage_q = results[3] if settings.service_manila_enabled else {"limit": 0, "in_use": 0, "reserved": 0}
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="작업 실패")
 
     return {
@@ -165,7 +167,7 @@ async def get_project_usage(
     start_dt = start or (today - timedelta(days=30)).isoformat()
     try:
         usage = await asyncio.to_thread(nova.get_project_usage, conn, project_id, start_dt, end_dt)
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="작업 실패")
     return {
         "start": start_dt,

@@ -1,9 +1,10 @@
 import asyncio
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+
 import openstack
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.api.deps import get_os_conn
-from app.models.storage import SecurityServiceInfo, CreateSecurityServiceRequest
+from app.models.storage import CreateSecurityServiceRequest, SecurityServiceInfo
 from app.rate_limit import limiter
 from app.services import manila
 from app.services.cache import cached_call, invalidate, ttl_fast
@@ -19,7 +20,8 @@ async def list_security_services(
     pid = conn._union_project_id
     try:
         return await cached_call(
-            f"afterglow:manila:{pid}:security_services", ttl_fast(),
+            f"afterglow:manila:{pid}:security_services",
+            ttl_fast(),
             lambda: manila.list_security_services(conn),
             refresh=refresh,
         )
@@ -38,8 +40,15 @@ async def create_security_service(
     try:
         result = await asyncio.to_thread(
             manila.create_security_service,
-            conn, req.type, req.name, req.description,
-            req.dns_ip, req.server, req.domain, req.user, req.password,
+            conn,
+            req.type,
+            req.name,
+            req.description,
+            req.dns_ip,
+            req.server,
+            req.domain,
+            req.user,
+            req.password,
         )
         await invalidate(f"afterglow:manila:{pid}:security_services")
         return result
@@ -70,7 +79,10 @@ async def attach_to_share_network(
     pid = conn._union_project_id
     try:
         result = await asyncio.to_thread(
-            manila.add_security_service_to_network, conn, share_network_id, security_service_id,
+            manila.add_security_service_to_network,
+            conn,
+            share_network_id,
+            security_service_id,
         )
         await invalidate(f"afterglow:manila:{pid}:share_networks")
         return result
@@ -88,7 +100,10 @@ async def detach_from_share_network(
     pid = conn._union_project_id
     try:
         await asyncio.to_thread(
-            manila.remove_security_service_from_network, conn, share_network_id, security_service_id,
+            manila.remove_security_service_from_network,
+            conn,
+            share_network_id,
+            security_service_id,
         )
         await invalidate(f"afterglow:manila:{pid}:share_networks")
     except Exception as e:

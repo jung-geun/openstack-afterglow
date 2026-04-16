@@ -7,9 +7,11 @@ DB의 실제 속성 타입을 읽어 그에 맞는 형식으로 데이터를 전
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
+from datetime import UTC
 
 import httpx
 
@@ -23,7 +25,7 @@ REDIS_CONFIG_KEY = "afterglow:notion:config"
 # DB에 이 이름의 속성이 있으면 해당 데이터를 채운다.
 # relation 타입: 값은 page_id 문자열 (비어있으면 relation 해제)
 FIELD_MAP: dict[str, str] = {
-    "사용자": "user_page_id",              # relation → People DB
+    "사용자": "user_page_id",  # relation → People DB
     "오픈스택 리소스": "hypervisor_page_id",  # relation → Hypervisor DB
     "팀": "project_name",
     "플레이버": "flavor_name",
@@ -31,7 +33,7 @@ FIELD_MAP: dict[str, str] = {
     "MEM (G)": "ram_gb",
     "GPU": "gpu_name",
     "GPU 개수": "gpu_count",
-    "GPU map": "gpu_spec_page_id",          # relation → GPU Spec DB
+    "GPU map": "gpu_spec_page_id",  # relation → GPU Spec DB
     "고정 IP": "fixed_ip",
     "유동 IP": "floating_ip",
     "인스턴스 ID": "instance_id",
@@ -49,7 +51,7 @@ _FIELD_MAP_LEGACY: dict[str, str] = {
     "floating ip": "floating_ip",
     "instance id": "instance_id",
     "status": "status",
-    "GPU spec": "gpu_spec_page_id",   # 이전 칼럼명 호환 (→ "GPU map"으로 변경됨)
+    "GPU spec": "gpu_spec_page_id",  # 이전 칼럼명 호환 (→ "GPU map"으로 변경됨)
 }
 
 # OpenStack 상태값 → 한국어 번역
@@ -111,6 +113,7 @@ def _headers(api_key: str) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 # DB 설정/검증
 # ---------------------------------------------------------------------------
+
 
 async def validate_notion_config(api_key: str, database_id: str) -> tuple[bool, str]:
     """Notion DB 접근 가능 여부를 확인한다."""
@@ -182,6 +185,7 @@ async def ensure_db_properties(api_key: str, database_id: str) -> None:
 # ---------------------------------------------------------------------------
 # 인스턴스 데이터 → Notion properties 변환 (DB 속성 타입에 맞게)
 # ---------------------------------------------------------------------------
+
 
 def _format_value(prop_type: str, value) -> dict | None:
     """DB 속성 타입에 맞는 Notion property value를 생성한다."""
@@ -255,6 +259,7 @@ def _build_instance_properties(schema: dict, title_prop: str, inst: dict) -> dic
 # 동기화 로직
 # ---------------------------------------------------------------------------
 
+
 async def _fetch_all_pages(client: httpx.AsyncClient, api_key: str, database_id: str) -> list[dict]:
     """DB의 모든 페이지를 가져온다 (페이지네이션 처리)."""
     pages: list[dict] = []
@@ -298,7 +303,15 @@ def _extract_rich_text(page: dict, prop_name: str) -> str:
 
 async def sync_to_notion(api_key: str, database_id: str, instances: list[dict]) -> dict:
     """인스턴스 목록을 Notion DB에 동기화한다. 결과 통계 반환."""
-    stats = {"created": 0, "updated": 0, "archived": 0, "errors": 0}
+    stats = {"created": 0, "updated": 0, "archived": 0, "errors": 0, "skipped": 0}
+
+    _redis = None
+    try:
+        from app.services.cache import _get_redis
+
+        _redis = await _get_redis()
+    except Exception:
+        pass
 
     async with httpx.AsyncClient(timeout=30) as client:
         # DB 스키마 읽기
@@ -308,7 +321,9 @@ async def sync_to_notion(api_key: str, database_id: str, instances: list[dict]) 
         # 기존 페이지 조회 → {instance_id: page_id} 맵
         existing_pages = await _fetch_all_pages(client, api_key, database_id)
         # 한국어 속성명과 영문 레거시 속성명 모두 지원
-        instance_id_prop = "인스턴스 ID" if "인스턴스 ID" in schema else ("instance id" if "instance id" in schema else "")
+        instance_id_prop = (
+            "인스턴스 ID" if "인스턴스 ID" in schema else ("instance id" if "instance id" in schema else "")
+        )
         has_instance_id_prop = bool(instance_id_prop)
         page_map: dict[str, str] = {}
         for page in existing_pages:
@@ -334,11 +349,26 @@ async def sync_to_notion(api_key: str, database_id: str, instances: list[dict]) 
             async with sem:
                 try:
                     if match_key in page_map:
+                        # dedup: 이전과 동일한 데이터면 PATCH 생략
+                        _prop_hash = hashlib.sha256(json.dumps(properties, sort_keys=True).encode()).hexdigest()
+                        _redis_key = f"afterglow:notion:hash:{database_id}:{match_key}"
+                        if _redis is not None:
+                            try:
+                                if await _redis.get(_redis_key) == _prop_hash:
+                                    stats["skipped"] += 1
+                                    return
+                            except Exception:
+                                pass
                         resp = await client.patch(
                             f"{NOTION_API_BASE}/pages/{page_map[match_key]}",
                             headers=_headers(api_key),
                             json={"properties": properties},
                         )
+                        if resp.status_code < 400 and _redis is not None:
+                            try:
+                                await _redis.set(_redis_key, _prop_hash, ex=86400)
+                            except Exception:
+                                pass
                     else:
                         resp = await client.post(
                             f"{NOTION_API_BASE}/pages",
@@ -352,7 +382,9 @@ async def sync_to_notion(api_key: str, database_id: str, instances: list[dict]) 
                     if resp.status_code >= 400:
                         _logger.warning(
                             "Notion 페이지 동기화 실패 (instance=%s, status=%d): %s",
-                            name, resp.status_code, resp.text,
+                            name,
+                            resp.status_code,
+                            resp.text,
                         )
                         stats["errors"] += 1
                     else:
@@ -365,7 +397,11 @@ async def sync_to_notion(api_key: str, database_id: str, instances: list[dict]) 
         await asyncio.gather(*[_upsert(inst) for inst in instances])
 
         # Notion에만 있고 OpenStack에 없는 페이지 → openstack resource relation 해제 후 아카이브
-        resource_prop_name = "오픈스택 리소스" if "오픈스택 리소스" in schema else ("openstack resource" if "openstack resource" in schema else "")
+        resource_prop_name = (
+            "오픈스택 리소스"
+            if "오픈스택 리소스" in schema
+            else ("openstack resource" if "openstack resource" in schema else "")
+        )
         has_resource_prop = bool(resource_prop_name)
 
         async def _archive(key: str, page_id: str) -> None:
@@ -393,7 +429,10 @@ async def sync_to_notion(api_key: str, database_id: str, instances: list[dict]) 
 
     _logger.info(
         "Notion 동기화 완료: created=%d updated=%d archived=%d errors=%d",
-        stats["created"], stats["updated"], stats["archived"], stats["errors"],
+        stats["created"],
+        stats["updated"],
+        stats["archived"],
+        stats["errors"],
     )
     return stats
 
@@ -401,6 +440,7 @@ async def sync_to_notion(api_key: str, database_id: str, instances: list[dict]) 
 # ---------------------------------------------------------------------------
 # GPU 이름 추출 헬퍼
 # ---------------------------------------------------------------------------
+
 
 def _gpu_info_from_flavor(flavor_name: str, extra_specs: dict) -> tuple[str, int]:
     """플레이버에서 (GPU 이름, GPU 개수) 를 추출한다."""
@@ -425,7 +465,7 @@ def _gpu_info_from_flavor(flavor_name: str, extra_specs: dict) -> tuple[str, int
             return gpu_name, count
 
     # 이름 기반 fallback: gpu.3090_8c_16g → "3090"
-    m = re.match(r'^gpu\.([^_]+)', flavor_name)
+    m = re.match(r"^gpu\.([^_]+)", flavor_name)
     if m:
         return m.group(1), 1
 
@@ -436,9 +476,11 @@ def _gpu_info_from_flavor(flavor_name: str, extra_specs: dict) -> tuple[str, int
 # Config helpers — DB 우선, Redis fallback
 # ---------------------------------------------------------------------------
 
+
 def _row_to_dict(row) -> dict:
     """NotionConfig ORM row → API 호환 dict."""
     from app.services.k3s_crypto import decrypt_notion_config
+
     api_key = ""
     try:
         api_key = decrypt_notion_config(row.api_key_encrypted)
@@ -467,6 +509,7 @@ def _row_to_dict(row) -> dict:
 async def _redis_get() -> dict | None:
     """Redis에서 직접 읽기 (fallback 전용)."""
     from app.services.cache import _get_redis
+
     try:
         r = await _get_redis()
         raw = await r.get(REDIS_CONFIG_KEY)
@@ -477,10 +520,25 @@ async def _redis_get() -> dict | None:
         return None
 
 
+def _parse_dt(val) -> "object | None":
+    """문자열 또는 datetime을 timezone-aware datetime으로 변환."""
+    from datetime import datetime
+
+    if not val:
+        return None
+    if isinstance(val, datetime):
+        return val
+    try:
+        return datetime.fromisoformat(val).replace(tzinfo=UTC)
+    except Exception:
+        return None
+
+
 async def get_notion_config() -> dict | None:
-    from app.database import is_db_available, get_session_factory
-    from app.models.db import NotionConfig
     from sqlalchemy import select
+
+    from app.database import get_session_factory, is_db_available
+    from app.models.db import NotionConfig
 
     if is_db_available():
         try:
@@ -497,21 +555,13 @@ async def get_notion_config() -> dict | None:
 
 
 async def save_notion_config(config: dict) -> None:
-    from app.database import is_db_available, get_session_factory
+    from datetime import datetime
+
+    from sqlalchemy import select
+
+    from app.database import get_session_factory, is_db_available
     from app.models.db import NotionConfig
     from app.services.k3s_crypto import encrypt_notion_config
-    from sqlalchemy import select
-    from datetime import datetime, timezone
-
-    def _parse_dt(val) -> "datetime | None":
-        if not val:
-            return None
-        if isinstance(val, datetime):
-            return val
-        try:
-            return datetime.fromisoformat(val).replace(tzinfo=timezone.utc) if val else None
-        except Exception:
-            return None
 
     if is_db_available():
         try:
@@ -535,7 +585,7 @@ async def save_notion_config(config: dict) -> None:
                 row.last_sync = _parse_dt(config.get("last_sync"))
                 row.hypervisors_last_sync = _parse_dt(config.get("hypervisors_last_sync"))
                 row.gpu_spec_last_sync = _parse_dt(config.get("gpu_spec_last_sync"))
-                row.updated_at = datetime.now(timezone.utc)
+                row.updated_at = datetime.now(UTC)
                 await session.commit()
             return
         except Exception:
@@ -543,14 +593,16 @@ async def save_notion_config(config: dict) -> None:
 
     # Redis fallback
     from app.services.cache import _get_redis
+
     r = await _get_redis()
     await r.set(REDIS_CONFIG_KEY, json.dumps(config))
 
 
 async def delete_notion_config() -> None:
-    from app.database import is_db_available, get_session_factory
-    from app.models.db import NotionConfig
     from sqlalchemy import delete as sa_delete
+
+    from app.database import get_session_factory, is_db_available
+    from app.models.db import NotionConfig
 
     if is_db_available():
         try:
@@ -564,6 +616,7 @@ async def delete_notion_config() -> None:
     # Redis도 함께 정리
     try:
         from app.services.cache import _get_redis
+
         r = await _get_redis()
         await r.delete(REDIS_CONFIG_KEY)
     except Exception:
@@ -586,8 +639,8 @@ HYPERVISOR_FIELD_MAP: dict[str, str] = {
     "사용중인 core": "vcpus_used",
     "ram": "memory_size_gb",
     "사용중인 ram": "memory_used_gb",
-    "GPU": "gpu_spec_page_ids",   # relation (list) → GPU Spec DB
-    "GPU 갯수": "gpu_total",       # number — 해당 호스트의 전체 GPU 수
+    "GPU": "gpu_spec_page_ids",  # relation (list) → GPU Spec DB
+    "GPU 갯수": "gpu_total",  # number — 해당 호스트의 전체 GPU 수
 }
 
 HYPERVISOR_DEFAULT_PROPERTY_TYPES: dict[str, str] = {
@@ -675,7 +728,9 @@ async def sync_hypervisors_to_notion(api_key: str, database_id: str, hypervisors
                             json={"parent": {"database_id": database_id}, "properties": props},
                         )
                     if resp.status_code >= 400:
-                        _logger.warning("Notion 하이퍼바이저 동기화 실패 (%s, %d): %s", name, resp.status_code, resp.text)
+                        _logger.warning(
+                            "Notion 하이퍼바이저 동기화 실패 (%s, %d): %s", name, resp.status_code, resp.text
+                        )
                         stats["errors"] += 1
                     else:
                         stats["updated" if name in page_map else "created"] += 1
@@ -704,7 +759,10 @@ async def sync_hypervisors_to_notion(api_key: str, database_id: str, hypervisors
 
     _logger.info(
         "Notion 하이퍼바이저 동기화 완료: created=%d updated=%d archived=%d errors=%d",
-        stats["created"], stats["updated"], stats["archived"], stats["errors"],
+        stats["created"],
+        stats["updated"],
+        stats["archived"],
+        stats["errors"],
     )
     return stats
 
@@ -722,9 +780,9 @@ GPU_SPEC_FIELD_MAP: dict[str, str] = {
     "총 사용 RAM (G)": "total_ram_used",
     "총 사용 GPU": "total_gpu_used",
     "인스턴스 수": "instance_count",
-    "사용 가능": "gpu_available",   # number — 하이퍼바이저 전체 GPU 총합
-    "사용중인 GPU": "gpu_used",      # number — 인스턴스가 사용 중인 GPU 수
-    "남은 GPU": "gpu_remaining",    # number — 사용 가능 - 사용중인
+    "사용 가능": "gpu_available",  # number — 하이퍼바이저 전체 GPU 총합
+    "사용중인 GPU": "gpu_used",  # number — 인스턴스가 사용 중인 GPU 수
+    "남은 GPU": "gpu_remaining",  # number — 사용 가능 - 사용중인
 }
 
 GPU_SPEC_DEFAULT_PROPERTY_TYPES: dict[str, str] = {
@@ -871,7 +929,10 @@ async def sync_gpu_specs_to_notion(
 
     _logger.info(
         "Notion GPU spec 동기화 완료: created=%d updated=%d archived=%d errors=%d",
-        stats["created"], stats["updated"], stats["archived"], stats["errors"],
+        stats["created"],
+        stats["updated"],
+        stats["archived"],
+        stats["errors"],
     )
     return stats
 
@@ -879,6 +940,7 @@ async def sync_gpu_specs_to_notion(
 # ---------------------------------------------------------------------------
 # 사용자 DB 조회 (이메일 → page_id 매핑)
 # ---------------------------------------------------------------------------
+
 
 async def fetch_user_page_ids_by_email(api_key: str, users_database_id: str) -> dict[str, str]:
     """People DB에서 이메일(lower) → Notion page_id 맵을 반환한다 (조회 전용).
@@ -1000,3 +1062,169 @@ async def migrate_instance_db_to_korean(api_key: str, database_id: str) -> bool:
     except Exception:
         _logger.warning("인스턴스 DB 한국어 마이그레이션 실패", exc_info=True)
         return False
+
+
+# ---------------------------------------------------------------------------
+# NotionTarget CRUD — 다중 연동 대상 관리
+# ---------------------------------------------------------------------------
+
+
+def _target_to_dict(row, include_api_key: bool = False) -> dict:
+    """NotionTarget ORM row → dict."""
+    from app.services.k3s_crypto import decrypt_notion_config
+
+    api_key_raw = ""
+    try:
+        api_key_raw = decrypt_notion_config(row.api_key_encrypted)
+    except Exception:
+        _logger.warning("Notion target API key 복호화 실패 (id=%s)", row.id)
+
+    def _iso(dt) -> str | None:
+        if dt is None:
+            return None
+        return dt.isoformat() if hasattr(dt, "isoformat") else str(dt)
+
+    return {
+        "id": row.id,
+        "label": row.label,
+        "api_key": api_key_raw if include_api_key else mask_api_key(api_key_raw),
+        "database_id": row.database_id or "",
+        "users_database_id": row.users_database_id or "",
+        "hypervisors_database_id": row.hypervisors_database_id or "",
+        "gpu_spec_database_id": row.gpu_spec_database_id or "",
+        "enabled": bool(row.enabled),
+        "interval_minutes": row.interval_minutes or 5,
+        "last_sync": _iso(row.last_sync),
+        "hypervisors_last_sync": _iso(row.hypervisors_last_sync),
+        "gpu_spec_last_sync": _iso(row.gpu_spec_last_sync),
+        "created_at": _iso(row.created_at),
+        "updated_at": _iso(row.updated_at),
+    }
+
+
+async def list_notion_targets(include_api_key: bool = False) -> list[dict]:
+    """모든 NotionTarget 목록 반환."""
+    from sqlalchemy import select
+
+    from app.database import get_session_factory, is_db_available
+    from app.models.db import NotionTarget
+
+    if not is_db_available():
+        return []
+    factory = get_session_factory()
+    async with factory() as session:
+        result = await session.execute(select(NotionTarget).order_by(NotionTarget.id))
+        rows = result.scalars().all()
+        return [_target_to_dict(r, include_api_key=include_api_key) for r in rows]
+
+
+async def get_notion_target(target_id: int, include_api_key: bool = False) -> dict | None:
+    """단일 NotionTarget 반환."""
+    from sqlalchemy import select
+
+    from app.database import get_session_factory, is_db_available
+    from app.models.db import NotionTarget
+
+    if not is_db_available():
+        return None
+    factory = get_session_factory()
+    async with factory() as session:
+        result = await session.execute(select(NotionTarget).where(NotionTarget.id == target_id))
+        row = result.scalar_one_or_none()
+        if row is None:
+            return None
+        return _target_to_dict(row, include_api_key=include_api_key)
+
+
+async def create_notion_target(data: dict) -> dict:
+    """새 NotionTarget 생성."""
+    from app.database import get_session_factory, is_db_available
+    from app.models.db import NotionTarget
+    from app.services.k3s_crypto import encrypt_notion_config
+
+    if not is_db_available():
+        raise RuntimeError("DB를 사용할 수 없습니다")
+
+    encrypted = encrypt_notion_config(data["api_key"])
+    factory = get_session_factory()
+    async with factory() as session:
+        row = NotionTarget(
+            label=data.get("label") or "기본",
+            api_key_encrypted=encrypted,
+            database_id=data.get("database_id") or "",
+            users_database_id=data.get("users_database_id") or None,
+            hypervisors_database_id=data.get("hypervisors_database_id") or None,
+            gpu_spec_database_id=data.get("gpu_spec_database_id") or None,
+            enabled=bool(data.get("enabled", True)),
+            interval_minutes=int(data.get("interval_minutes") or 5),
+        )
+        session.add(row)
+        await session.commit()
+        await session.refresh(row)
+        return _target_to_dict(row)
+
+
+async def update_notion_target(target_id: int, data: dict) -> dict | None:
+    """NotionTarget 업데이트. 성공 시 dict, 없으면 None."""
+    from datetime import datetime
+
+    from sqlalchemy import select
+
+    from app.database import get_session_factory, is_db_available
+    from app.models.db import NotionTarget
+    from app.services.k3s_crypto import encrypt_notion_config
+
+    if not is_db_available():
+        return None
+
+    factory = get_session_factory()
+    async with factory() as session:
+        result = await session.execute(select(NotionTarget).where(NotionTarget.id == target_id))
+        row = result.scalar_one_or_none()
+        if row is None:
+            return None
+
+        if data.get("api_key"):
+            row.api_key_encrypted = encrypt_notion_config(data["api_key"])
+        if "label" in data and data["label"] is not None:
+            row.label = data["label"]
+        if "database_id" in data:
+            row.database_id = data["database_id"] or ""
+        if "users_database_id" in data:
+            row.users_database_id = data["users_database_id"] or None
+        if "hypervisors_database_id" in data:
+            row.hypervisors_database_id = data["hypervisors_database_id"] or None
+        if "gpu_spec_database_id" in data:
+            row.gpu_spec_database_id = data["gpu_spec_database_id"] or None
+        if "enabled" in data and data["enabled"] is not None:
+            row.enabled = bool(data["enabled"])
+        if "interval_minutes" in data and data["interval_minutes"] is not None:
+            row.interval_minutes = int(data["interval_minutes"])
+        if "last_sync" in data:
+            row.last_sync = _parse_dt(data["last_sync"])
+        if "hypervisors_last_sync" in data:
+            row.hypervisors_last_sync = _parse_dt(data["hypervisors_last_sync"])
+        if "gpu_spec_last_sync" in data:
+            row.gpu_spec_last_sync = _parse_dt(data["gpu_spec_last_sync"])
+
+        row.updated_at = datetime.now(UTC)
+        await session.commit()
+        await session.refresh(row)
+        return _target_to_dict(row)
+
+
+async def delete_notion_target(target_id: int) -> bool:
+    """NotionTarget 삭제. 성공 시 True."""
+    from sqlalchemy import delete as sa_delete
+
+    from app.database import get_session_factory, is_db_available
+    from app.models.db import NotionTarget
+
+    if not is_db_available():
+        return False
+
+    factory = get_session_factory()
+    async with factory() as session:
+        result = await session.execute(sa_delete(NotionTarget).where(NotionTarget.id == target_id))
+        await session.commit()
+        return (result.rowcount or 0) > 0

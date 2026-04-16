@@ -1,10 +1,16 @@
 import openstack
-from typing import Optional
 
 from app.models.storage import (
-    NetworkInfo, NetworkDetail, SubnetDetail, RouterInfo, RouterDetail,
-    RouterInterface, FloatingIpInfo,
-    TopologyData, TopologyNetwork, TopologyRouter,
+    FloatingIpInfo,
+    NetworkDetail,
+    NetworkInfo,
+    RouterDetail,
+    RouterInfo,
+    RouterInterface,
+    SubnetDetail,
+    TopologyData,
+    TopologyNetwork,
+    TopologyRouter,
 )
 
 _ROUTER_IFACE_OWNERS = [
@@ -24,9 +30,7 @@ def list_networks(conn: openstack.connection.Connection, project_id: str | None 
     result = []
     for n in conn.network.networks():
         if project_id and not (
-            bool(n.is_router_external)
-            or bool(n.is_shared)
-            or getattr(n, 'project_id', None) == project_id
+            bool(n.is_router_external) or bool(n.is_shared) or getattr(n, "project_id", None) == project_id
         ):
             continue
         result.append(_net_to_info(n))
@@ -42,16 +46,18 @@ def get_network_detail(conn: openstack.connection.Connection, network_id: str) -
     n = conn.network.get_network(network_id)
 
     subnet_details = []
-    for subnet_id in (n.subnet_ids or []):
+    for subnet_id in n.subnet_ids or []:
         try:
             s = conn.network.get_subnet(subnet_id)
-            subnet_details.append(SubnetDetail(
-                id=s.id,
-                name=s.name or "",
-                cidr=s.cidr or "",
-                gateway_ip=s.gateway_ip,
-                dhcp_enabled=bool(s.is_dhcp_enabled),
-            ))
+            subnet_details.append(
+                SubnetDetail(
+                    id=s.id,
+                    name=s.name or "",
+                    cidr=s.cidr or "",
+                    gateway_ip=s.gateway_ip,
+                    dhcp_enabled=bool(s.is_dhcp_enabled),
+                )
+            )
         except Exception:
             continue
 
@@ -78,7 +84,7 @@ def get_network_detail(conn: openstack.connection.Connection, network_id: str) -
                 except Exception:
                     continue
             # 포트의 fixed_ips에서 서브넷 ID 추출
-            for fixed_ip in (port.fixed_ips or []):
+            for fixed_ip in port.fixed_ips or []:
                 sid = fixed_ip.get("subnet_id")
                 if sid and sid not in router_map[router_id].connected_subnet_ids:
                     router_map[router_id].connected_subnet_ids.append(sid)
@@ -111,7 +117,7 @@ def create_subnet(
     network_id: str,
     name: str,
     cidr: str,
-    gateway_ip: Optional[str] = None,
+    gateway_ip: str | None = None,
     enable_dhcp: bool = True,
 ) -> SubnetDetail:
     kwargs = {
@@ -141,8 +147,10 @@ def delete_subnet(conn: openstack.connection.Connection, subnet_id: str) -> None
 # Floating IP
 # ---------------------------------------------------------------------------
 
+
 def get_network_quota(conn: openstack.connection.Connection, project_id: str) -> dict:
     """프로젝트의 Neutron 할당량 (limit + in_use) 조회."""
+
     def _q(q, key):
         if isinstance(q, dict):
             return q.get(key, {"limit": -1, "in_use": 0})
@@ -154,16 +162,17 @@ def get_network_quota(conn: openstack.connection.Connection, project_id: str) ->
     try:
         # details=True는 used 필드를 포함한 상세 할당량 반환
         quota = conn.network.get_quota(project_id, details=True)
-        quota_dict = quota.to_dict() if hasattr(quota, 'to_dict') else {}
+        quota_dict = quota.to_dict() if hasattr(quota, "to_dict") else {}
         keys = ["floatingip", "security_group", "security_group_rule", "network", "port", "router", "subnet"]
         return {k: _q(quota_dict, k) for k in keys}
     except Exception:
         import logging as _logging
+
         _logging.getLogger(__name__).warning("Neutron quota details 조회 실패 — fallback", exc_info=True)
         try:
             # fallback: details 없이 limit만 조회
             quota = conn.network.get_quota(project_id)
-            quota_dict = quota.to_dict() if hasattr(quota, 'to_dict') else {}
+            quota_dict = quota.to_dict() if hasattr(quota, "to_dict") else {}
             keys = ["floatingip", "security_group", "security_group_rule", "network", "port", "router", "subnet"]
             result = {}
             for k in keys:
@@ -171,7 +180,10 @@ def get_network_quota(conn: openstack.connection.Connection, project_id: str) ->
                 result[k] = {"limit": int(val) if val is not None else -1, "in_use": 0}
             return result
         except Exception:
-            return {k: {"limit": -1, "in_use": 0} for k in ["floatingip", "security_group", "security_group_rule", "network", "port", "router", "subnet"]}
+            return {
+                k: {"limit": -1, "in_use": 0}
+                for k in ["floatingip", "security_group", "security_group_rule", "network", "port", "router", "subnet"]
+            }
 
 
 def list_floating_ips(conn: openstack.connection.Connection, project_id: str | None = None) -> list[FloatingIpInfo]:
@@ -186,7 +198,9 @@ def create_floating_ip(conn: openstack.connection.Connection, floating_network_i
     return _fip_to_info(fip)
 
 
-def associate_floating_ip(conn: openstack.connection.Connection, floating_ip_id: str, instance_id: str) -> FloatingIpInfo:
+def associate_floating_ip(
+    conn: openstack.connection.Connection, floating_ip_id: str, instance_id: str
+) -> FloatingIpInfo:
     """인스턴스의 첫 번째 포트에 floating IP 연결."""
     ports = list(conn.network.ports(device_id=instance_id))
     if not ports:
@@ -211,8 +225,8 @@ def get_topology(conn: openstack.connection.Connection) -> TopologyData:
     all_networks = list(conn.network.networks())
 
     # 2. 전체 서브넷 → 맵 구축
-    subnet_map: dict[str, SubnetDetail] = {}      # subnet_id → SubnetDetail
-    subnet_network_map: dict[str, str] = {}        # subnet_id → network_id
+    subnet_map: dict[str, SubnetDetail] = {}  # subnet_id → SubnetDetail
+    subnet_network_map: dict[str, str] = {}  # subnet_id → network_id
     for s in conn.network.subnets():
         subnet_map[s.id] = SubnetDetail(
             id=s.id,
@@ -234,7 +248,7 @@ def get_topology(conn: openstack.connection.Connection) -> TopologyData:
             router_subnets[rid] = []
         if rid not in router_subnet_port_count:
             router_subnet_port_count[rid] = {}
-        for fip in (port.fixed_ips or []):
+        for fip in port.fixed_ips or []:
             sid = fip.get("subnet_id")
             if sid:
                 router_subnet_port_count[rid][sid] = router_subnet_port_count[rid].get(sid, 0) + 1
@@ -248,15 +262,17 @@ def get_topology(conn: openstack.connection.Connection) -> TopologyData:
         if r.external_gateway_info:
             ext_net_id = r.external_gateway_info.get("network_id")
         dvr_sids = [sid for sid, cnt in router_subnet_port_count.get(r.id, {}).items() if cnt > 1]
-        topo_routers.append(TopologyRouter(
-            id=r.id,
-            name=r.name or "",
-            status=r.status or "",
-            external_gateway_network_id=ext_net_id,
-            connected_subnet_ids=router_subnets.get(r.id, []),
-            dvr_subnet_ids=dvr_sids,
-            project_id=getattr(r, 'project_id', None),
-        ))
+        topo_routers.append(
+            TopologyRouter(
+                id=r.id,
+                name=r.name or "",
+                status=r.status or "",
+                external_gateway_network_id=ext_net_id,
+                connected_subnet_ids=router_subnets.get(r.id, []),
+                dvr_subnet_ids=dvr_sids,
+                project_id=getattr(r, "project_id", None),
+            )
+        )
 
     # 5. 네트워크별 서브넷 grouping
     network_subnets: dict[str, list[SubnetDetail]] = {}
@@ -273,7 +289,7 @@ def get_topology(conn: openstack.connection.Connection) -> TopologyData:
             status=n.status or "",
             is_external=bool(n.is_router_external),
             is_shared=bool(n.is_shared),
-            project_id=getattr(n, 'project_id', None),
+            project_id=getattr(n, "project_id", None),
             subnet_details=network_subnets.get(n.id, []),
         )
         for n in all_networks
@@ -291,6 +307,7 @@ def get_topology(conn: openstack.connection.Connection) -> TopologyData:
 # 라우터 CRUD
 # ---------------------------------------------------------------------------
 
+
 def list_routers(conn: openstack.connection.Connection, project_id: str | None = None) -> list[RouterInfo]:
     kwargs: dict = {}
     if project_id:
@@ -304,20 +321,22 @@ def list_routers(conn: openstack.connection.Connection, project_id: str | None =
         subnet_ids: list[str] = []
         try:
             for port in _iter_router_interface_ports(conn, device_id=r.id):
-                for fip in (port.fixed_ips or []):
+                for fip in port.fixed_ips or []:
                     sid = fip.get("subnet_id")
                     if sid and sid not in subnet_ids:
                         subnet_ids.append(sid)
         except Exception:
             pass
-        result.append(RouterInfo(
-            id=r.id,
-            name=r.name or "",
-            status=r.status or "",
-            project_id=getattr(r, 'project_id', None),
-            external_gateway_network_id=ext_net_id,
-            connected_subnet_ids=subnet_ids,
-        ))
+        result.append(
+            RouterInfo(
+                id=r.id,
+                name=r.name or "",
+                status=r.status or "",
+                project_id=getattr(r, "project_id", None),
+                external_gateway_network_id=ext_net_id,
+                connected_subnet_ids=subnet_ids,
+            )
+        )
     return result
 
 
@@ -336,7 +355,7 @@ def get_router_detail(conn: openstack.connection.Connection, router_id: str) -> 
 
     interfaces: list[RouterInterface] = []
     for port in _iter_router_interface_ports(conn, device_id=r.id):
-        for fip in (port.fixed_ips or []):
+        for fip in port.fixed_ips or []:
             sid = fip.get("subnet_id", "")
             ip = fip.get("ip_address", "")
             subnet_name = ""
@@ -346,26 +365,30 @@ def get_router_detail(conn: openstack.connection.Connection, router_id: str) -> 
                 subnet_name = s.name or sid
             except Exception:
                 pass
-            interfaces.append(RouterInterface(
-                id=port.id,
-                subnet_id=sid,
-                subnet_name=subnet_name,
-                network_id=net_id,
-                ip_address=ip,
-            ))
+            interfaces.append(
+                RouterInterface(
+                    id=port.id,
+                    subnet_id=sid,
+                    subnet_name=subnet_name,
+                    network_id=net_id,
+                    ip_address=ip,
+                )
+            )
 
     return RouterDetail(
         id=r.id,
         name=r.name or "",
         status=r.status or "",
-        project_id=getattr(r, 'project_id', None),
+        project_id=getattr(r, "project_id", None),
         external_gateway_network_id=ext_net_id,
         external_gateway_network_name=ext_net_name,
         interfaces=interfaces,
     )
 
 
-def create_router(conn: openstack.connection.Connection, name: str, external_network_id: str | None = None) -> RouterInfo:
+def create_router(
+    conn: openstack.connection.Connection, name: str, external_network_id: str | None = None
+) -> RouterInfo:
     kwargs: dict = {"name": name}
     if external_network_id:
         kwargs["external_gateway_info"] = {"network_id": external_network_id}
@@ -377,7 +400,7 @@ def create_router(conn: openstack.connection.Connection, name: str, external_net
         id=r.id,
         name=r.name or "",
         status=r.status or "",
-        project_id=getattr(r, 'project_id', None),
+        project_id=getattr(r, "project_id", None),
         external_gateway_network_id=ext_net_id,
     )
 
@@ -497,7 +520,9 @@ def delete_security_group_rule(conn: openstack.connection.Connection, rule_id: s
     conn.network.delete_security_group_rule(rule_id, ignore_missing=True)
 
 
-def update_port_security_groups(conn: openstack.connection.Connection, port_id: str, security_group_ids: list[str]) -> dict:
+def update_port_security_groups(
+    conn: openstack.connection.Connection, port_id: str, security_group_ids: list[str]
+) -> dict:
     port = conn.network.update_port(port_id, security_groups=security_group_ids)
     return {
         "id": port.id,
@@ -513,7 +538,7 @@ def _fip_to_info(f) -> FloatingIpInfo:
         status=f.status or "",
         port_id=f.port_id,
         floating_network_id=f.floating_network_id,
-        project_id=getattr(f, 'project_id', None),
+        project_id=getattr(f, "project_id", None),
     )
 
 

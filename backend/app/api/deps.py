@@ -2,13 +2,14 @@ import asyncio
 import hashlib
 import logging
 import time
-from fastapi import Depends, Header, HTTPException
-from typing import AsyncGenerator, Optional
-import openstack
+from collections.abc import AsyncGenerator
 
+import openstack
+from fastapi import Depends, Header, HTTPException
+
+from app.config import get_settings
 from app.services import keystone
 from app.services.cache import cached_call, ttl_static
-from app.config import get_settings
 
 _logger = logging.getLogger(__name__)
 
@@ -27,6 +28,7 @@ async def _cached_validate(token: str, project_id: str) -> dict:
 async def _check_session_timeout(token_hash: str, project_id: str) -> None:
     """세션 시작 시간이 없으면 기록하고, 있으면 타임아웃 여부를 체크."""
     from app.services.cache import _get_redis  # 지연 임포트
+
     settings = get_settings()
     timeout = settings.session_timeout_seconds
     key = _session_key(token_hash, project_id)
@@ -51,9 +53,10 @@ async def _check_session_timeout(token_hash: str, project_id: str) -> None:
 async def get_session_remaining(token: str, project_id: str) -> int:
     """세션 남은 시간(초) 반환. Redis 오류 시 -1."""
     from app.services.cache import _get_redis
+
     settings = get_settings()
     token_hash = hashlib.sha256(token.encode()).hexdigest()[:32]
-    key = _session_key(token_hash, project_id or 'noscope')
+    key = _session_key(token_hash, project_id or "noscope")
     try:
         r = await _get_redis()
         start_bytes = await r.get(key)
@@ -69,9 +72,10 @@ async def get_session_remaining(token: str, project_id: str) -> int:
 async def extend_session(token: str, project_id: str) -> None:
     """세션 시작 시간을 지금으로 재설정 (연장). 절대 만료 시간 초과 시 HTTPException 발생."""
     from app.services.cache import _get_redis
+
     settings = get_settings()
     token_hash = hashlib.sha256(token.encode()).hexdigest()[:32]
-    key = _session_key(token_hash, project_id or 'noscope')
+    key = _session_key(token_hash, project_id or "noscope")
     abs_key = f"afterglow:session-abs:{token_hash}:{project_id or 'noscope'}"
     try:
         r = await _get_redis()
@@ -94,8 +98,8 @@ async def extend_session(token: str, project_id: str) -> None:
 
 
 async def get_token_info(
-    x_auth_token: Optional[str] = Header(None),
-    x_project_id: Optional[str] = Header(None),
+    x_auth_token: str | None = Header(None),
+    x_project_id: str | None = Header(None),
 ) -> dict:
     """모든 인증 필요 엔드포인트에서 사용하는 Depends 함수."""
     if not x_auth_token:
@@ -106,7 +110,7 @@ async def get_token_info(
         return await _cached_validate(x_auth_token, x_project_id or "")
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=401, detail="유효하지 않은 토큰")
 
 
@@ -117,8 +121,8 @@ def require_admin(token_info: dict = Depends(get_token_info)):
 
 
 async def get_os_conn(
-    x_auth_token: Optional[str] = Header(None),
-    x_project_id: Optional[str] = Header(None),
+    x_auth_token: str | None = Header(None),
+    x_project_id: str | None = Header(None),
 ) -> AsyncGenerator[openstack.connection.Connection, None]:
     """openstacksdk Connection 객체를 반환하는 Depends 함수.
     conn._union_token, conn._union_project_id 에 원본 크리덴셜을 저장해
@@ -140,7 +144,7 @@ async def get_os_conn(
         conn._union_user_id = token_info.get("user_id", "")
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=401, detail="유효하지 않은 토큰")
 
     try:

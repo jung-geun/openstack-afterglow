@@ -5,6 +5,7 @@
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import QuotaDonut from '$lib/components/QuotaDonut.svelte';
+	import ProjectQuotaPanel from '$lib/components/ProjectQuotaPanel.svelte';
 	import { formatNumber, formatStorage } from '$lib/utils/format';
 
 	interface Overview {
@@ -46,6 +47,7 @@
 	let projectUsageLoading = $state(true);
 	let versionInfo = $state<VersionInfo | null>(null);
 	let versionOpen = $state(false);
+	let selectedProject = $state<ProjectUsage | null>(null);
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
@@ -81,6 +83,14 @@
 		return parts.join(' ');
 	}
 
+	function loadProjectUsage() {
+		projectUsageLoading = true;
+		api.get<ProjectUsage[]>('/api/admin/overview/projects', token, projectId)
+			.then(r => { projectUsage = r; })
+			.catch(() => {})
+			.finally(() => { projectUsageLoading = false; });
+	}
+
 	onMount(() => {
 		api.get<Overview>('/api/admin/overview', token, projectId)
 			.then(r => { overview = r; })
@@ -90,10 +100,7 @@
 			})
 			.finally(() => { overviewLoading = false; });
 
-		api.get<ProjectUsage[]>('/api/admin/overview/projects', token, projectId)
-			.then(r => { projectUsage = r; })
-			.catch(() => {})
-			.finally(() => { projectUsageLoading = false; });
+		loadProjectUsage();
 
 		api.get<VersionInfo>('/api/admin/version', token, projectId)
 			.then(r => { versionInfo = r; })
@@ -222,7 +229,13 @@
 						</thead>
 						<tbody>
 							{#each projectUsage.filter(p => p.instances.used > 0 || p.cpu.used > 0 || p.disk_gb.used > 0) as p}
-								<tr class="border-b border-gray-800/50 hover:bg-gray-800/30">
+								<tr
+									class="border-b border-gray-800/50 hover:bg-gray-800/30 cursor-pointer"
+									onclick={() => { selectedProject = p; }}
+									role="button"
+									tabindex="0"
+									onkeydown={(e) => { if (e.key === 'Enter') selectedProject = p; }}
+								>
 									<td class="py-2 pr-4">
 										<span class="text-white font-medium">{p.project_name}</span>
 										<span class="text-gray-600 text-xs ml-1">{p.project_id.slice(0, 8)}</span>
@@ -387,3 +400,14 @@
 		<div class="text-gray-500 text-sm">개요를 불러올 수 없습니다</div>
 	{/if}
 </div>
+
+{#if selectedProject}
+	<ProjectQuotaPanel
+		projectId={selectedProject.project_id}
+		projectName={selectedProject.project_name}
+		{token}
+		authProjectId={projectId}
+		onClose={() => { selectedProject = null; }}
+		onUpdated={() => { loadProjectUsage(); }}
+	/>
+{/if}

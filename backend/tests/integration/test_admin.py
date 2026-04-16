@@ -2,12 +2,13 @@
 
 config.toml의 admin 계정으로 로그인하므로 admin 역할이 있어야 한다.
 """
-import pytest
 
+import pytest
 
 # ─────────────────────────────────────────────────────────────────
 # 관리자 개요
 # ─────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_admin_overview(client):
@@ -20,6 +21,7 @@ async def test_admin_overview(client):
 # ─────────────────────────────────────────────────────────────────
 # 관리자 서비스 상태
 # ─────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_admin_services(client):
@@ -34,6 +36,7 @@ async def test_admin_services(client):
 # ─────────────────────────────────────────────────────────────────
 # 관리자 인스턴스/볼륨/네트워크 전체 목록
 # ─────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_admin_all_instances(client):
@@ -90,6 +93,7 @@ async def test_admin_all_ports(client):
 # 관리자 하이퍼바이저
 # ─────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio(loop_scope="session")
 async def test_admin_hypervisors(client):
     resp = await client.get("/api/admin/hypervisors")
@@ -104,6 +108,7 @@ async def test_admin_hypervisors(client):
 # 관리자 GPU
 # ─────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio(loop_scope="session")
 async def test_admin_gpu_hosts(client):
     resp = await client.get("/api/admin/gpu-hosts")
@@ -115,6 +120,7 @@ async def test_admin_gpu_hosts(client):
 # ─────────────────────────────────────────────────────────────────
 # 관리자 플레이버
 # ─────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_admin_list_flavors(client):
@@ -129,6 +135,7 @@ async def test_admin_list_flavors(client):
 # ─────────────────────────────────────────────────────────────────
 # 관리자 Identity (사용자, 프로젝트, 그룹, 역할)
 # ─────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_admin_list_users(client):
@@ -194,6 +201,7 @@ async def test_admin_projects_overview(client):
 # 관리자 토폴로지
 # ─────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio(loop_scope="session")
 async def test_admin_topology(client):
     resp = await client.get("/api/admin/topology")
@@ -203,6 +211,7 @@ async def test_admin_topology(client):
 # ─────────────────────────────────────────────────────────────────
 # 관리자 시계열
 # ─────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_admin_timeseries(client):
@@ -214,6 +223,7 @@ async def test_admin_timeseries(client):
 # ─────────────────────────────────────────────────────────────────
 # 관리자 파일 스토리지
 # ─────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_admin_file_storages(client, settings):
@@ -237,6 +247,7 @@ async def test_admin_all_file_storages(client, settings):
 # 관리자 컨테이너 (Zun)
 # ─────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio(loop_scope="session")
 async def test_admin_all_containers(client, settings):
     if not settings.service_zun_enabled:
@@ -250,6 +261,7 @@ async def test_admin_all_containers(client, settings):
 # 관리자 Notion 설정
 # ─────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio(loop_scope="session")
 async def test_admin_notion_config_get(client):
     resp = await client.get("/api/admin/notion/config")
@@ -261,6 +273,7 @@ async def test_admin_notion_config_get(client):
 # ─────────────────────────────────────────────────────────────────
 # 메트릭 (Prometheus)
 # ─────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_metrics(client):
@@ -352,9 +365,7 @@ if getattr(_s, "service_k3s_enabled", False):
         "/api/admin/k3s-clusters/fake-cluster-id/kubeconfig",
     ]
 
-_ALL_ADMIN_GET_PATHS = (
-    _ADMIN_SIMPLE_PATHS + _ADMIN_PARAMETERIZED_PATHS + _ADMIN_CONDITIONAL_PATHS
-)
+_ALL_ADMIN_GET_PATHS = _ADMIN_SIMPLE_PATHS + _ADMIN_PARAMETERIZED_PATHS + _ADMIN_CONDITIONAL_PATHS
 
 
 @pytest.mark.parametrize("path", _ALL_ADMIN_GET_PATHS)
@@ -362,14 +373,13 @@ _ALL_ADMIN_GET_PATHS = (
 async def test_admin_get_forbidden_for_regular_user(user_client, path):
     """모든 admin GET 엔드포인트는 일반 유저에게 403을 반환해야 한다."""
     resp = await user_client.get(path)
-    assert resp.status_code == 403, (
-        f"[{path}] Expected 403 Forbidden, got {resp.status_code}: {resp.text[:200]}"
-    )
+    assert resp.status_code == 403, f"[{path}] Expected 403 Forbidden, got {resp.status_code}: {resp.text[:200]}"
 
 
 # ─────────────────────────────────────────────────────────────────
 # PR4: admin 계정으로 경로 파라미터 엔드포인트 정상 접근 확인
 # ─────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_admin_quotas_by_project(admin_client, project_id):
@@ -450,6 +460,7 @@ async def test_admin_image_detail(admin_client):
 # admin_user 검증 (default project ≠ admin 이어도 admin 페이지 접근 가능해야 함)
 # credentials.toml [admin_user] 또는 UNION_TEST_ADMIN_USER_* 환경변수 필요
 # ─────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_admin_user_can_access_admin_overview(admin_user_client):

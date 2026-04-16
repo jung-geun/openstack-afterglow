@@ -3,11 +3,10 @@
 import json
 import logging
 import secrets
-from datetime import datetime, timezone, timedelta
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
 from app.services.cache import _get_client
-from app.services.k3s_crypto import encrypt_kubeconfig, decrypt_kubeconfig
+from app.services.k3s_crypto import decrypt_kubeconfig, encrypt_kubeconfig
 
 _logger = logging.getLogger(__name__)
 
@@ -17,6 +16,7 @@ _CALLBACK_TTL = 1800  # 30분
 # ---------------------------------------------------------------------------
 # 키 헬퍼
 # ---------------------------------------------------------------------------
+
 
 def _cluster_key(project_id: str, cluster_id: str) -> str:
     return f"afterglow:k3s:{project_id}:cluster:{cluster_id}"
@@ -38,17 +38,20 @@ def _callback_key(token: str) -> str:
 # Cluster CRUD
 # ---------------------------------------------------------------------------
 
+
 async def create_cluster_record(project_id: str, cluster_id: str, data: dict) -> None:
     """클러스터 HASH 생성 + 프로젝트 SET에 ID 추가."""
     client = _get_client()
     key = _cluster_key(project_id, cluster_id)
     # HASH는 모든 값을 문자열로 저장
-    str_data = {k: json.dumps(v) if isinstance(v, (list, dict)) else str(v) if v is not None else "" for k, v in data.items()}
+    str_data = {
+        k: json.dumps(v) if isinstance(v, (list, dict)) else str(v) if v is not None else "" for k, v in data.items()
+    }
     await client.hset(key, mapping=str_data)
     await client.sadd(_clusters_set_key(project_id), cluster_id)
 
 
-async def get_cluster(project_id: str, cluster_id: str) -> Optional[dict]:
+async def get_cluster(project_id: str, cluster_id: str) -> dict | None:
     """클러스터 HASH → dict 반환. 없으면 None."""
     client = _get_client()
     raw = await client.hgetall(_cluster_key(project_id, cluster_id))
@@ -106,7 +109,7 @@ async def update_cluster_status(
     project_id: str,
     cluster_id: str,
     status: str,
-    status_reason: Optional[str] = None,
+    status_reason: str | None = None,
     **extra_fields,
 ) -> None:
     """클러스터 status + updated_at + 추가 필드 업데이트."""
@@ -114,7 +117,7 @@ async def update_cluster_status(
     key = _cluster_key(project_id, cluster_id)
     updates: dict = {
         "status": status,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(UTC).isoformat(),
     }
     if status_reason is not None:
         updates["status_reason"] = status_reason
@@ -140,6 +143,7 @@ async def delete_cluster_record(project_id: str, cluster_id: str) -> None:
 # 콜백 토큰
 # ---------------------------------------------------------------------------
 
+
 async def create_callback_token(project_id: str, cluster_id: str) -> str:
     """일회성 콜백 토큰 생성 (TTL 30분)."""
     token = secrets.token_urlsafe(48)
@@ -149,7 +153,7 @@ async def create_callback_token(project_id: str, cluster_id: str) -> str:
     return token
 
 
-async def consume_callback_token(token: str) -> Optional[dict]:
+async def consume_callback_token(token: str) -> dict | None:
     """콜백 토큰을 원자적으로 GET+DELETE. 없거나 만료되면 None."""
     client = _get_client()
     key = _callback_key(token)
@@ -166,6 +170,7 @@ async def consume_callback_token(token: str) -> Optional[dict]:
 # Kubeconfig
 # ---------------------------------------------------------------------------
 
+
 async def store_kubeconfig(project_id: str, cluster_id: str, kubeconfig_yaml: str) -> None:
     """kubeconfig를 AES-256-GCM 암호화하여 Redis에 저장."""
     client = _get_client()
@@ -173,7 +178,7 @@ async def store_kubeconfig(project_id: str, cluster_id: str, kubeconfig_yaml: st
     await client.set(_kubeconfig_key(project_id, cluster_id), encrypted)
 
 
-async def get_kubeconfig(project_id: str, cluster_id: str) -> Optional[str]:
+async def get_kubeconfig(project_id: str, cluster_id: str) -> str | None:
     """Redis에서 kubeconfig를 복호화하여 반환. 없으면 None."""
     client = _get_client()
     raw = await client.get(_kubeconfig_key(project_id, cluster_id))
@@ -187,11 +192,12 @@ async def get_kubeconfig(project_id: str, cluster_id: str) -> Optional[str]:
 # 스테일 클러스터 정리
 # ---------------------------------------------------------------------------
 
+
 async def check_stale_clusters(timeout_minutes: int = 30) -> None:
     """CREATING 상태에서 timeout_minutes 초과한 클러스터를 ERROR로 변경."""
     client = _get_client()
     # 모든 프로젝트의 k3s 클러스터 SET 키 스캔
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=timeout_minutes)
+    cutoff = datetime.now(UTC) - timedelta(minutes=timeout_minutes)
     try:
         async for key in client.scan_iter("afterglow:k3s:*:clusters"):
             key_str = key.decode() if isinstance(key, bytes) else key
@@ -213,8 +219,7 @@ async def check_stale_clusters(timeout_minutes: int = 30) -> None:
                     created_at = datetime.fromisoformat(created_at_str)
                     if created_at < cutoff:
                         await update_cluster_status(
-                            project_id, cid, "ERROR",
-                            "콜백 타임아웃: 서버 VM이 k3s 설치 후 응답하지 않았습니다."
+                            project_id, cid, "ERROR", "콜백 타임아웃: 서버 VM이 k3s 설치 후 응답하지 않았습니다."
                         )
                         _logger.warning("k3s cluster %s marked as ERROR (stale)", cid)
                 except Exception:

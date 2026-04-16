@@ -1,6 +1,7 @@
 """common/site.py 엔드포인트 단위 테스트 (1개 public 엔드포인트)."""
+
 import pytest
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 

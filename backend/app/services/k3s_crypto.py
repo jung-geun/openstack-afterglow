@@ -1,6 +1,8 @@
-import os
 import base64
+import os
+
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
 from app.config import get_settings
 
 
@@ -8,8 +10,7 @@ def _get_key() -> bytes:
     hex_key = get_settings().k3s_kubeconfig_encryption_key
     if not hex_key or len(hex_key) != 64:
         raise ValueError(
-            "k3s_kubeconfig_encryption_key must be 64 hex characters (32 bytes). "
-            "Generate with: openssl rand -hex 32"
+            "k3s_kubeconfig_encryption_key must be 64 hex characters (32 bytes). Generate with: openssl rand -hex 32"
         )
     return bytes.fromhex(hex_key)
 

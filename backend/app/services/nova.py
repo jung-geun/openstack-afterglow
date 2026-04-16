@@ -1,7 +1,7 @@
 import logging
-import openstack
 from datetime import datetime
-from typing import Optional
+
+import openstack
 
 from app.models.compute import FlavorInfo, InstanceInfo, IpAddress
 
@@ -19,15 +19,17 @@ def list_flavors(conn: openstack.connection.Connection) -> list[FlavorInfo]:
                 extra = dict(detail.extra_specs) if detail.extra_specs else {}
             except Exception:
                 pass
-        flavors.append(FlavorInfo(
-            id=f.id,
-            name=f.name,
-            vcpus=f.vcpus,
-            ram=f.ram,
-            disk=f.disk,
-            is_public=True,
-            extra_specs=extra,
-        ))
+        flavors.append(
+            FlavorInfo(
+                id=f.id,
+                name=f.name,
+                vcpus=f.vcpus,
+                ram=f.ram,
+                disk=f.disk,
+                is_public=True,
+                extra_specs=extra,
+            )
+        )
     return sorted(flavors, key=lambda x: (x.vcpus, x.ram))
 
 
@@ -49,13 +51,13 @@ def create_server(
     flavor_id: str,
     network_id: str,
     boot_volume_id: str,
-    userdata: Optional[str] = None,
-    key_name: Optional[str] = None,
-    admin_pass: Optional[str] = None,
-    availability_zone: Optional[str] = None,
-    metadata: Optional[dict] = None,
+    userdata: str | None = None,
+    key_name: str | None = None,
+    admin_pass: str | None = None,
+    availability_zone: str | None = None,
+    metadata: dict | None = None,
     delete_boot_volume_on_termination: bool = False,
-    security_groups: Optional[list[str]] = None,
+    security_groups: list[str] | None = None,
 ) -> InstanceInfo:
     body = {
         "name": name,
@@ -130,17 +132,18 @@ def get_project_limits(conn: openstack.connection.Connection) -> dict:
     limits = conn.compute.get_limits()
     a = limits.absolute
     return {
-        "instances_used": getattr(a, 'total_instances_used', 0),
-        "instances_limit": getattr(a, 'max_total_instances', -1),
-        "vcpus_used": getattr(a, 'total_cores_used', 0),
-        "vcpus_limit": getattr(a, 'max_total_cores', -1),
-        "ram_used_mb": getattr(a, 'total_ram_used', 0),
-        "ram_limit_mb": getattr(a, 'max_total_ram_size', -1),
+        "instances_used": getattr(a, "total_instances_used", 0),
+        "instances_limit": getattr(a, "max_total_instances", -1),
+        "vcpus_used": getattr(a, "total_cores_used", 0),
+        "vcpus_limit": getattr(a, "max_total_cores", -1),
+        "ram_used_mb": getattr(a, "total_ram_used", 0),
+        "ram_limit_mb": getattr(a, "max_total_ram_size", -1),
     }
 
 
 def get_project_quota(conn: openstack.connection.Connection, project_id: str) -> dict:
     """프로젝트의 상세 Nova 할당량 (usage 포함)."""
+
     def _extract(q):
         if q is None:
             return {"limit": -1, "in_use": 0}
@@ -163,11 +166,14 @@ def get_project_quota(conn: openstack.connection.Connection, project_id: str) ->
         limits = conn.compute.get_limits()
         a = limits.absolute
         return {
-            "instances": {"limit": getattr(a, 'max_total_instances', -1), "in_use": getattr(a, 'total_instances_used', 0)},
-            "cores": {"limit": getattr(a, 'max_total_cores', -1), "in_use": getattr(a, 'total_cores_used', 0)},
-            "ram": {"limit": getattr(a, 'max_total_ram_size', -1), "in_use": getattr(a, 'total_ram_used', 0)},
-            "key_pairs": {"limit": getattr(a, 'max_total_keypairs', -1), "in_use": 0},
-            "server_groups": {"limit": getattr(a, 'max_server_groups', -1), "in_use": 0},
+            "instances": {
+                "limit": getattr(a, "max_total_instances", -1),
+                "in_use": getattr(a, "total_instances_used", 0),
+            },
+            "cores": {"limit": getattr(a, "max_total_cores", -1), "in_use": getattr(a, "total_cores_used", 0)},
+            "ram": {"limit": getattr(a, "max_total_ram_size", -1), "in_use": getattr(a, "total_ram_used", 0)},
+            "key_pairs": {"limit": getattr(a, "max_total_keypairs", -1), "in_use": 0},
+            "server_groups": {"limit": getattr(a, "max_server_groups", -1), "in_use": 0},
         }
 
 
@@ -178,12 +184,12 @@ def get_project_usage(conn: openstack.connection.Connection, project_id: str, st
         start_dt = datetime.strptime(start, "%Y-%m-%d")
         end_dt = datetime.strptime(end, "%Y-%m-%d")
         usage = conn.compute.get_usage(project_id, start=start_dt, end=end_dt)
-        server_usages = getattr(usage, 'server_usages', []) or []
+        server_usages = getattr(usage, "server_usages", []) or []
         return {
-            "total_vcpus_usage": getattr(usage, 'total_vcpus_usage', 0.0),
-            "total_memory_mb_usage": getattr(usage, 'total_memory_mb_usage', 0.0),
-            "total_local_gb_usage": getattr(usage, 'total_local_gb_usage', 0.0),
-            "total_hours": getattr(usage, 'total_hours', 0.0),
+            "total_vcpus_usage": getattr(usage, "total_vcpus_usage", 0.0),
+            "total_memory_mb_usage": getattr(usage, "total_memory_mb_usage", 0.0),
+            "total_local_gb_usage": getattr(usage, "total_local_gb_usage", 0.0),
+            "total_hours": getattr(usage, "total_hours", 0.0),
             "server_usages": [
                 {
                     "name": s.get("name", "") if isinstance(s, dict) else getattr(s, "name", ""),
@@ -210,7 +216,7 @@ def get_project_usage(conn: openstack.connection.Connection, project_id: str, st
 
 def list_keypairs(conn: openstack.connection.Connection) -> list[dict]:
     return [
-        {"name": kp.name, "fingerprint": kp.fingerprint, "type": getattr(kp, 'type', 'ssh')}
+        {"name": kp.name, "fingerprint": kp.fingerprint, "type": getattr(kp, "type", "ssh")}
         for kp in conn.compute.keypairs()
     ]
 
@@ -218,7 +224,7 @@ def list_keypairs(conn: openstack.connection.Connection) -> list[dict]:
 def create_keypair(
     conn: openstack.connection.Connection,
     name: str,
-    public_key: Optional[str] = None,
+    public_key: str | None = None,
     key_type: str = "ssh",
 ) -> dict:
     """키페어 생성. public_key가 없으면 Nova가 자동 생성하고 private_key를 반환."""
@@ -229,9 +235,9 @@ def create_keypair(
     return {
         "name": kp.name,
         "fingerprint": kp.fingerprint,
-        "type": getattr(kp, 'type', 'ssh'),
-        "public_key": getattr(kp, 'public_key', None),
-        "private_key": getattr(kp, 'private_key', None),
+        "type": getattr(kp, "type", "ssh"),
+        "public_key": getattr(kp, "public_key", None),
+        "private_key": getattr(kp, "private_key", None),
     }
 
 
@@ -269,7 +275,9 @@ def get_console_url(conn: openstack.connection.Connection, server_id: str) -> st
     return result.get("url", "")
 
 
-def live_migrate_server(conn: openstack.connection.Connection, server_id: str, host: Optional[str] = None, block_migration: str = "auto") -> None:
+def live_migrate_server(
+    conn: openstack.connection.Connection, server_id: str, host: str | None = None, block_migration: str = "auto"
+) -> None:
     """라이브 마이그레이션 (인스턴스 실행 중 이동)."""
     conn.compute.live_migrate_server(server_id, host=host, block_migration=block_migration)
 
@@ -305,11 +313,13 @@ def _server_to_info(s) -> InstanceInfo:
     ips = []
     for net_name, net_addrs in (s.addresses or {}).items():
         for addr in net_addrs:
-            ips.append(IpAddress(
-                addr=addr["addr"],
-                type=addr.get("OS-EXT-IPS:type", "fixed"),
-                network_name=net_name,
-            ))
+            ips.append(
+                IpAddress(
+                    addr=addr["addr"],
+                    type=addr.get("OS-EXT-IPS:type", "fixed"),
+                    network_name=net_name,
+                )
+            )
 
     meta = dict(s.metadata) if s.metadata else {}
 
@@ -335,6 +345,6 @@ def _server_to_info(s) -> InstanceInfo:
         union_strategy=meta.get("union_strategy"),
         union_share_ids=meta.get("union_share_ids", "").split(",") if meta.get("union_share_ids") else [],
         union_upper_volume_id=meta.get("union_upper_volume_id"),
-        key_name=getattr(s, 'key_name', None),
-        user_id=getattr(s, 'user_id', None),
+        key_name=getattr(s, "key_name", None),
+        user_id=getattr(s, "user_id", None),
     )

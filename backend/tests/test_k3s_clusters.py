@@ -1,18 +1,26 @@
 """k3s/clusters.py 엔드포인트 단위 테스트 (6개, k3s 서비스 필요)."""
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import patch, AsyncMock, MagicMock
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 
 
 def _make_cluster_record():
     return {
-        "id": "k3s-1", "name": "mycluster", "status": "ACTIVE",
-        "status_reason": None, "server_vm_id": "vm-1",
-        "agent_vm_ids": [], "agent_count": 0,
-        "api_address": None, "server_ip": "10.0.0.1",
-        "network_id": "net-1", "key_name": None,
+        "id": "k3s-1",
+        "name": "mycluster",
+        "status": "ACTIVE",
+        "status_reason": None,
+        "server_vm_id": "vm-1",
+        "agent_vm_ids": [],
+        "agent_count": 0,
+        "api_address": None,
+        "server_ip": "10.0.0.1",
+        "network_id": "net-1",
+        "key_name": None,
         "k3s_version": "v1.31.4+k3s1",
         "created_at": "2024-01-01T00:00:00Z",
         "updated_at": "2024-01-01T00:00:00Z",

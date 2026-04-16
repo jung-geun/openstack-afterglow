@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends
 import openstack
+from fastapi import APIRouter, Depends
 
 from app.api.deps import get_os_conn
-from app.models.storage import LibraryConfig, FileStorageInfo
-from app.services import libraries as lib_svc, manila
+from app.models.storage import FileStorageInfo, LibraryConfig
+from app.services import libraries as lib_svc
+from app.services import manila
 
 router = APIRouter()
 
@@ -23,11 +24,13 @@ async def list_libraries(conn: openstack.connection.Connection = Depends(get_os_
     result = []
     for lib in catalog:
         file_storage_id = prebuilt_map.get(lib.id)
-        result.append(LibraryConfig(
-            **lib.model_dump(exclude={"file_storage_id", "available_prebuilt"}),
-            file_storage_id=file_storage_id,
-            available_prebuilt=file_storage_id is not None,
-        ))
+        result.append(
+            LibraryConfig(
+                **lib.model_dump(exclude={"file_storage_id", "available_prebuilt"}),
+                file_storage_id=file_storage_id,
+                available_prebuilt=file_storage_id is not None,
+            )
+        )
     return result
 
 

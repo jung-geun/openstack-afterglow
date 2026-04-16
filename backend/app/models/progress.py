@@ -1,6 +1,6 @@
-from pydantic import BaseModel
-from typing import Optional
 from enum import Enum
+
+from pydantic import BaseModel
 
 
 class ProgressStep(str, Enum):
@@ -19,5 +19,5 @@ class ProgressMessage(BaseModel):
     step: ProgressStep
     progress: int  # 0-100
     message: str
-    instance_id: Optional[str] = None
-    error: Optional[str] = None
+    instance_id: str | None = None
+    error: str | None = None

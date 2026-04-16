@@ -1,13 +1,14 @@
 """사용자 본인 프로필 관리 엔드포인트."""
+
 import asyncio
 import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from app.api.deps import get_token_info, get_os_conn
+from app.api.deps import get_os_conn, get_token_info
 from app.rate_limit import limiter
 from app.services import keystone
-from app.config import get_settings
 
 _logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ async def get_profile(
                 "description": getattr(u, "description", None) or "",
                 "default_project_id": getattr(u, "default_project_id", None) or "",
             }
-        except Exception as e:
+        except Exception:
             raise HTTPException(status_code=500, detail="프로필 조회 실패")
 
     try:

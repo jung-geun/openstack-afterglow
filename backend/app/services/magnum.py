@@ -1,23 +1,25 @@
 import openstack
 
-from app.models.containers import ClusterTemplateInfo, ClusterInfo
+from app.models.containers import ClusterInfo, ClusterTemplateInfo
 
 
 def list_cluster_templates(conn: openstack.connection.Connection) -> list[ClusterTemplateInfo]:
     result = []
     for t in conn.container_infrastructure_management.cluster_templates():
-        result.append(ClusterTemplateInfo(
-            id=t.id,
-            name=t.name or "",
-            coe=t.coe or "",
-            image_id=getattr(t, 'image_id', None),
-            flavor_id=getattr(t, 'flavor_id', None),
-            master_flavor_id=getattr(t, 'master_flavor_id', None),
-            network_driver=getattr(t, 'network_driver', None),
-            public=bool(getattr(t, 'public', False)),
-            hidden=bool(getattr(t, 'hidden', False)),
-            created_at=str(t.created_at) if getattr(t, 'created_at', None) else None,
-        ))
+        result.append(
+            ClusterTemplateInfo(
+                id=t.id,
+                name=t.name or "",
+                coe=t.coe or "",
+                image_id=getattr(t, "image_id", None),
+                flavor_id=getattr(t, "flavor_id", None),
+                master_flavor_id=getattr(t, "master_flavor_id", None),
+                network_driver=getattr(t, "network_driver", None),
+                public=bool(getattr(t, "public", False)),
+                hidden=bool(getattr(t, "hidden", False)),
+                created_at=str(t.created_at) if getattr(t, "created_at", None) else None,
+            )
+        )
     return result
 
 
@@ -65,15 +67,15 @@ def _cluster_to_info(c) -> ClusterInfo:
         id=c.id,
         name=c.name or "",
         status=c.status or "",
-        status_reason=getattr(c, 'status_reason', None),
-        cluster_template_id=getattr(c, 'cluster_template_id', None),
-        master_count=getattr(c, 'master_count', 1) or 1,
-        node_count=getattr(c, 'node_count', 1) or 1,
-        api_address=getattr(c, 'api_address', None),
-        coe_version=getattr(c, 'coe_version', None),
-        keypair=getattr(c, 'keypair', None),
-        create_timeout=getattr(c, 'create_timeout', None),
-        created_at=str(c.created_at) if getattr(c, 'created_at', None) else None,
-        updated_at=str(c.updated_at) if getattr(c, 'updated_at', None) else None,
-        stack_id=getattr(c, 'stack_id', None),
+        status_reason=getattr(c, "status_reason", None),
+        cluster_template_id=getattr(c, "cluster_template_id", None),
+        master_count=getattr(c, "master_count", 1) or 1,
+        node_count=getattr(c, "node_count", 1) or 1,
+        api_address=getattr(c, "api_address", None),
+        coe_version=getattr(c, "coe_version", None),
+        keypair=getattr(c, "keypair", None),
+        create_timeout=getattr(c, "create_timeout", None),
+        created_at=str(c.created_at) if getattr(c, "created_at", None) else None,
+        updated_at=str(c.updated_at) if getattr(c, "updated_at", None) else None,
+        stack_id=getattr(c, "stack_id", None),
     )

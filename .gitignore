@@ -236,3 +236,6 @@ monitoring/data/
 docker-compose.override.yml
 .claude/settings.json
 .gstack/
+
+# 루트 테스트 러너 package.json 의존성
+/node_modules/

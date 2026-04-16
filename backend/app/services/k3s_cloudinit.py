@@ -2,6 +2,7 @@
 
 import base64
 from pathlib import Path
+
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 TEMPLATE_DIR = Path(__file__).parent.parent / "templates"

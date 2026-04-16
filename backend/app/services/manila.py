@@ -4,10 +4,11 @@ Manila CephFS 파일 스토리지 관리 서비스.
 openstacksdk 는 Manila(Shared File Systems) API 를 manilaclient 로 래핑하지 않으므로
 직접 REST 호출로 처리한다.
 """
+
 import logging
 import time
+
 import httpx
-from typing import Optional
 
 from app.models.storage import FileStorageInfo
 
@@ -61,24 +62,39 @@ class ManilaClient:
                 r.raise_for_status()
 
 
+def _normalize_manila_url(url: str) -> str:
+    """Manila endpoint 가 /v1 으로 끝나면 /v2 로 치환.
+
+    Manila v1 의 quota-sets 엔드포인트는 'os-quota-sets' 였고 v2 부터 'quota-sets' 로 변경됨.
+    클라이언트는 마이크로버전 헤더(2.65)를 보내므로 v2 path 만 사용.
+    """
+    import re
+
+    return re.sub(r"/v1(?=/|$)", "/v2", url)
+
+
 def _get_manila_endpoint(conn) -> str:
     """openstacksdk connection 에서 Manila 엔드포인트 추출.
     OS_MANILA_ENDPOINT 환경변수로 오버라이드 가능.
     """
     from app.config import get_settings
+
     settings = get_settings()
     if getattr(settings, "os_manila_endpoint", ""):
         url = settings.os_manila_endpoint.rstrip("/")
         logger.debug(f"Manila endpoint (override): {url}")
-        return url
+        return _normalize_manila_url(url)
 
-    for service_type in ("share", "sharev2", "shared-file-system"):
+    # v2 우선: sharev2 → shared-file-system → share (v1 fallback)
+    # Manila v1 catalog 에서 quota-sets 경로가 os-quota-sets 였으므로 v2 endpoint 우선 선택.
+    for service_type in ("sharev2", "shared-file-system", "share"):
         for interface in ("public", "internal", "admin"):
             try:
                 url = conn.endpoint_for(service_type, interface=interface)
                 if url:
-                    logger.debug(f"Manila endpoint [{service_type}/{interface}]: {url}")
-                    return url.rstrip("/")
+                    normalized = _normalize_manila_url(url.rstrip("/"))
+                    logger.debug(f"Manila endpoint [{service_type}/{interface}]: {normalized}")
+                    return normalized
             except Exception:
                 continue
     raise RuntimeError("Manila 엔드포인트를 서비스 카탈로그에서 찾을 수 없습니다")
@@ -89,13 +105,16 @@ def get_client(conn) -> ManilaClient:
     token = getattr(conn, "_union_token", None) or conn.auth_token
     project_id = getattr(conn, "_union_project_id", None) or conn.current_project_id
     endpoint = _get_manila_endpoint(conn)
-    logger.debug(f"Manila client: endpoint={endpoint}, project_id={project_id}, token_src={'original' if hasattr(conn, '_union_token') else 'sdk'}")
+    logger.debug(
+        f"Manila client: endpoint={endpoint}, project_id={project_id}, token_src={'original' if hasattr(conn, '_union_token') else 'sdk'}"
+    )
     return ManilaClient(endpoint=endpoint, token=token, project_id=project_id)
 
 
 # ---------------------------------------------------------------------------
 # 파일 스토리지 관리
 # ---------------------------------------------------------------------------
+
 
 def get_file_storage_quota(conn) -> dict:
     """프로젝트의 Manila 할당량 (limit + in_use) 조회."""
@@ -120,8 +139,12 @@ def get_file_storage_quota(conn) -> dict:
         }
     except Exception:
         import logging as _logging
+
         _logging.getLogger(__name__).warning("Manila 파일 스토리지 quota 조회 실패", exc_info=True)
-        return {k: {"limit": -1, "in_use": 0} for k in ["shares", "gigabytes", "share_networks", "share_groups", "snapshot_gigabytes"]}
+        return {
+            k: {"limit": -1, "in_use": 0}
+            for k in ["shares", "gigabytes", "share_networks", "share_groups", "snapshot_gigabytes"]
+        }
 
 
 def list_share_types(conn) -> list[dict]:
@@ -170,9 +193,9 @@ def get_share_network(conn, share_network_id: str) -> dict:
         "network_type": net.get("network_type"),
         "status": net.get("status", ""),
         "created_at": net.get("created_at"),
-        "security_service_ids": [
-            ss.get("id", "") for ss in net.get("security_services", [])
-        ] if net.get("security_services") else [],
+        "security_service_ids": [ss.get("id", "") for ss in net.get("security_services", [])]
+        if net.get("security_services")
+        else [],
     }
 
 
@@ -185,12 +208,14 @@ def create_share_network(
 ) -> dict:
     """Share network 생성."""
     client = get_client(conn)
-    body = {"share_network": {
-        "name": name,
-        "description": description,
-        "neutron_net_id": neutron_net_id,
-        "neutron_subnet_id": neutron_subnet_id,
-    }}
+    body = {
+        "share_network": {
+            "name": name,
+            "description": description,
+            "neutron_net_id": neutron_net_id,
+            "neutron_subnet_id": neutron_subnet_id,
+        }
+    }
     return client.post("share-networks", body)["share_network"]
 
 
@@ -217,6 +242,7 @@ def remove_security_service_from_network(conn, share_network_id: str, security_s
 # ---------------------------------------------------------------------------
 # Security Services
 # ---------------------------------------------------------------------------
+
 
 def list_security_services(conn) -> list[dict]:
     """Manila security service 목록 조회."""
@@ -283,7 +309,7 @@ def create_file_storage(
     share_network_id: str,
     share_type: str = "cephfstype",
     share_proto: str = "CEPHFS",
-    metadata: Optional[dict] = None,
+    metadata: dict | None = None,
 ) -> FileStorageInfo:
     client = get_client(conn)
     share_body: dict = {
@@ -316,7 +342,7 @@ def delete_file_storage(conn, file_storage_id: str) -> None:
     client.delete(f"shares/{file_storage_id}")
 
 
-def list_file_storages(conn, metadata_filter: Optional[dict] = None, all_tenants: bool = False) -> list[FileStorageInfo]:
+def list_file_storages(conn, metadata_filter: dict | None = None, all_tenants: bool = False) -> list[FileStorageInfo]:
     client = get_client(conn)
     params: dict = {}
     if all_tenants:
@@ -330,10 +356,7 @@ def list_file_storages(conn, metadata_filter: Optional[dict] = None, all_tenants
         raise
     file_storages = [_parse_file_storage(s) for s in data]
     if metadata_filter:
-        file_storages = [
-            s for s in file_storages
-            if all(s.metadata.get(k) == v for k, v in metadata_filter.items())
-        ]
+        file_storages = [s for s in file_storages if all(s.metadata.get(k) == v for k, v in metadata_filter.items())]
     return file_storages
 
 
@@ -347,11 +370,12 @@ def get_file_storage(conn, file_storage_id: str) -> FileStorageInfo:
 # Access Rule (CephX)
 # ---------------------------------------------------------------------------
 
+
 def create_access_rule(
     conn,
     file_storage_id: str,
     access_to: str,
-    access_level: str = "ro",   # "ro" | "rw"
+    access_level: str = "ro",  # "ro" | "rw"
     access_type: str = "cephx",  # "cephx" | "ip"
 ) -> dict:
     """
@@ -407,6 +431,7 @@ def get_export_locations(conn, file_storage_id: str) -> list[str]:
 # 내부 유틸
 # ---------------------------------------------------------------------------
 
+
 def _get_access_key(client: ManilaClient, file_storage_id: str, access_id: str) -> str:
     """access rule 에서 CephX secret key 추출 (Manila API v2.45+)."""
     for _ in range(20):
@@ -457,6 +482,7 @@ def _parse_file_storage(data: dict) -> FileStorageInfo:
 # NFS access rule 관리
 # ---------------------------------------------------------------------------
 
+
 def ensure_nfs_access_rule(
     conn,
     file_storage_id: str,
@@ -467,15 +493,15 @@ def ensure_nfs_access_rule(
     NFS access rule이 없으면 생성하고, 이미 있으면 기존 rule을 반환.
     access_to: IP 주소 또는 CIDR (예: "192.168.1.100" 또는 "10.0.0.0/24")
     """
-    client = get_client(conn)
-
     # 기존 access rule 조회
     existing_rules = list_access_rules(conn, file_storage_id)
     for rule in existing_rules:
-        if (rule.get("access_type") == "ip"
-                and rule.get("access_to") == access_to
-                and rule.get("access_level") == access_level
-                and rule.get("state") in ("active", "new")):
+        if (
+            rule.get("access_type") == "ip"
+            and rule.get("access_to") == access_to
+            and rule.get("access_level") == access_level
+            and rule.get("state") in ("active", "new")
+        ):
             logger.info(f"NFS access rule 이미 존재: {access_to} ({rule.get('id')})")
             return {
                 "access_id": rule["id"],
@@ -501,7 +527,7 @@ def set_share_public(conn, file_storage_id: str, is_public: bool = True) -> dict
     return client.put(f"shares/{file_storage_id}", body)
 
 
-def get_nfs_export_location(conn, file_storage_id: str) -> Optional[str]:
+def get_nfs_export_location(conn, file_storage_id: str) -> str | None:
     """NFS share의 export location을 반환. CephFS share이면 None."""
     info = get_file_storage(conn, file_storage_id)
     if info.share_proto != "NFS":
@@ -514,6 +540,7 @@ def get_nfs_export_location(conn, file_storage_id: str) -> Optional[str]:
 # Manila share 메타데이터 관리
 # ---------------------------------------------------------------------------
 
+
 def update_share_metadata(conn, file_storage_id: str, metadata: dict) -> dict:
     """Manila share 메타데이터 업데이트."""
     client = get_client(conn)
@@ -525,11 +552,12 @@ def update_share_metadata(conn, file_storage_id: str, metadata: dict) -> dict:
 # Manila share snapshot 관리
 # ---------------------------------------------------------------------------
 
+
 def create_share_snapshot(
     conn,
     file_storage_id: str,
-    name: Optional[str] = None,
-    description: Optional[str] = None,
+    name: str | None = None,
+    description: str | None = None,
 ) -> dict:
     """Manila share 스냅샷 생성."""
     client = get_client(conn)
@@ -541,7 +569,7 @@ def create_share_snapshot(
     return client.post("snapshots", body)["snapshot"]
 
 
-def list_share_snapshots(conn, file_storage_id: Optional[str] = None) -> list[dict]:
+def list_share_snapshots(conn, file_storage_id: str | None = None) -> list[dict]:
     """Manila share 스냅샷 목록 조회."""
     client = get_client(conn)
     params: dict = {}

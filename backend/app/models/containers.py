@@ -1,12 +1,12 @@
 import re
+
 from pydantic import BaseModel, field_validator
-from typing import Optional
 
 
 class ClusterTemplateInfo(BaseModel):
     id: str
     name: str
-    coe: str              # kubernetes, swarm, mesos
+    coe: str  # kubernetes, swarm, mesos
     image_id: str | None = None
     flavor_id: str | None = None
     master_flavor_id: str | None = None
@@ -33,7 +33,7 @@ class ClusterInfo(BaseModel):
     stack_id: str | None = None
 
 
-_NAME_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$')
+_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$")
 
 
 def _validate_resource_name(v: str) -> str:

@@ -1,12 +1,14 @@
 """사용자별 크로스-프로젝트 대시보드 엔드포인트."""
+
 import asyncio
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Query
+
 import openstack
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.deps import get_os_conn
 from app.services import keystone
-from app.services.cache import cached_call, ttl_normal, ttl_fast
+from app.services.cache import cached_call, ttl_fast, ttl_normal
 
 _logger = logging.getLogger(__name__)
 
@@ -25,15 +27,17 @@ def _list_servers_for_project(conn: openstack.connection.Connection, user_id: st
             vcpus = 0
             ram = 0
             flavor_name = getattr(s, "flavor_name", "") or ""
-        results.append({
-            "id": s.id,
-            "name": s.name or "",
-            "status": s.status or "",
-            "flavor_name": flavor_name,
-            "vcpus": vcpus,
-            "ram_mb": ram,
-            "created_at": getattr(s, "created_at", None) or "",
-        })
+        results.append(
+            {
+                "id": s.id,
+                "name": s.name or "",
+                "status": s.status or "",
+                "flavor_name": flavor_name,
+                "vcpus": vcpus,
+                "ram_mb": ram,
+                "created_at": getattr(s, "created_at", None) or "",
+            }
+        )
     return results
 
 
@@ -53,10 +57,7 @@ def _list_volumes_for_project(conn: openstack.connection.Connection, user_id: st
 
 
 def _count_networks(conn: openstack.connection.Connection, project_id: str) -> int:
-    return sum(
-        1 for n in conn.network.networks()
-        if getattr(n, "project_id", None) == project_id
-    )
+    return sum(1 for n in conn.network.networks() if getattr(n, "project_id", None) == project_id)
 
 
 def _count_floating_ips(conn: openstack.connection.Connection, project_id: str) -> int:
@@ -66,28 +67,30 @@ def _count_floating_ips(conn: openstack.connection.Connection, project_id: str) 
 async def _query_project(token: str, user_id: str, project_id: str, project_name: str, refresh: bool = False) -> dict:
     """단일 프로젝트의 인스턴스/볼륨/네트워크/FIP 정보를 비동기로 조회."""
     try:
-        proj_conn = await asyncio.to_thread(
-            keystone.get_openstack_connection, token, project_id
-        )
+        proj_conn = await asyncio.to_thread(keystone.get_openstack_connection, token, project_id)
         try:
             servers, volumes, network_count, fip_count = await asyncio.gather(
                 cached_call(
-                    f"afterglow:user-dashboard:{project_id}:{user_id}:servers", ttl_normal(),
+                    f"afterglow:user-dashboard:{project_id}:{user_id}:servers",
+                    ttl_normal(),
                     lambda c=proj_conn, u=user_id: _list_servers_for_project(c, u),
                     refresh=refresh,
                 ),
                 cached_call(
-                    f"afterglow:user-dashboard:{project_id}:{user_id}:volumes", ttl_normal(),
+                    f"afterglow:user-dashboard:{project_id}:{user_id}:volumes",
+                    ttl_normal(),
                     lambda c=proj_conn, u=user_id: _list_volumes_for_project(c, u),
                     refresh=refresh,
                 ),
                 cached_call(
-                    f"afterglow:user-dashboard:{project_id}:networks", ttl_normal(),
+                    f"afterglow:user-dashboard:{project_id}:networks",
+                    ttl_normal(),
                     lambda c=proj_conn, pid=project_id: _count_networks(c, pid),
                     refresh=refresh,
                 ),
                 cached_call(
-                    f"afterglow:user-dashboard:{project_id}:fips", ttl_fast(),
+                    f"afterglow:user-dashboard:{project_id}:fips",
+                    ttl_fast(),
                     lambda c=proj_conn, pid=project_id: _count_floating_ips(c, pid),
                     refresh=refresh,
                 ),
@@ -145,10 +148,7 @@ async def get_user_dashboard_summary(
         raise HTTPException(status_code=500, detail="프로젝트 목록 조회 실패")
 
     # 병렬로 각 프로젝트 데이터 조회
-    tasks = [
-        _query_project(token, user_id, p["id"], p["name"], refresh=refresh)
-        for p in projects
-    ]
+    tasks = [_query_project(token, user_id, p["id"], p["name"], refresh=refresh) for p in projects]
     project_results = await asyncio.gather(*tasks)
 
     totals = {

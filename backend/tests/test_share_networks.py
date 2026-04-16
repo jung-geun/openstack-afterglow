@@ -1,7 +1,9 @@
 """storage/share_networks.py 엔드포인트 단위 테스트 (4개, manila 필요)."""
+
+from unittest.mock import AsyncMock, patch
+
 import pytest
-from unittest.mock import patch, AsyncMock
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 
@@ -29,8 +31,15 @@ async def test_get_share_network_unauthenticated():
 
 @pytest.mark.asyncio
 async def test_get_share_network_success(client):
-    sn = {"id": "sn-1", "name": "net1", "status": "active", "neutron_net_id": "n1",
-          "neutron_subnet_id": "sub1", "description": "", "created_at": None}
+    sn = {
+        "id": "sn-1",
+        "name": "net1",
+        "status": "active",
+        "neutron_net_id": "n1",
+        "neutron_subnet_id": "sub1",
+        "description": "",
+        "created_at": None,
+    }
     with patch("app.api.storage.share_networks.asyncio") as mock_asyncio:
         mock_asyncio.to_thread = AsyncMock(return_value=sn)
         resp = await client.get("/api/share-networks/sn-1")
@@ -40,20 +49,31 @@ async def test_get_share_network_success(client):
 @pytest.mark.asyncio
 async def test_create_share_network_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.post("/api/share-networks",
-                             json={"name": "sn1", "neutron_net_id": "n1", "neutron_subnet_id": "sub1"})
+        resp = await ac.post(
+            "/api/share-networks", json={"name": "sn1", "neutron_net_id": "n1", "neutron_subnet_id": "sub1"}
+        )
     assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
 async def test_create_share_network_success(client):
-    sn = {"id": "sn-1", "name": "sn1", "status": "active", "neutron_net_id": "n1",
-          "neutron_subnet_id": "sub1", "description": "", "created_at": None}
-    with patch("app.api.storage.share_networks.asyncio") as mock_asyncio, \
-         patch("app.api.storage.share_networks.invalidate", new=AsyncMock()):
+    sn = {
+        "id": "sn-1",
+        "name": "sn1",
+        "status": "active",
+        "neutron_net_id": "n1",
+        "neutron_subnet_id": "sub1",
+        "description": "",
+        "created_at": None,
+    }
+    with (
+        patch("app.api.storage.share_networks.asyncio") as mock_asyncio,
+        patch("app.api.storage.share_networks.invalidate", new=AsyncMock()),
+    ):
         mock_asyncio.to_thread = AsyncMock(return_value=sn)
-        resp = await client.post("/api/share-networks",
-                                 json={"name": "sn1", "neutron_net_id": "n1", "neutron_subnet_id": "sub1"})
+        resp = await client.post(
+            "/api/share-networks", json={"name": "sn1", "neutron_net_id": "n1", "neutron_subnet_id": "sub1"}
+        )
     assert resp.status_code == 201
 
 
@@ -66,8 +86,10 @@ async def test_delete_share_network_unauthenticated():
 
 @pytest.mark.asyncio
 async def test_delete_share_network_success(client):
-    with patch("app.api.storage.share_networks.asyncio") as mock_asyncio, \
-         patch("app.api.storage.share_networks.invalidate", new=AsyncMock()):
+    with (
+        patch("app.api.storage.share_networks.asyncio") as mock_asyncio,
+        patch("app.api.storage.share_networks.invalidate", new=AsyncMock()),
+    ):
         mock_asyncio.to_thread = AsyncMock(return_value=None)
         resp = await client.delete("/api/share-networks/sn-1")
     assert resp.status_code == 204

@@ -1,6 +1,8 @@
 """키페어 API 단위 테스트."""
-import pytest
+
 from unittest.mock import patch
+
+import pytest
 
 
 def make_keypair(name: str = "my-key") -> dict:
@@ -18,8 +20,10 @@ async def test_list_keypairs(client, mock_conn):
     async def mock_cached_call(key, ttl, fn, **kw):
         return fn()
 
-    with patch("app.api.compute.keypairs.nova.list_keypairs", return_value=[make_keypair()]), \
-         patch("app.api.compute.keypairs.cached_call", new=mock_cached_call):
+    with (
+        patch("app.api.compute.keypairs.nova.list_keypairs", return_value=[make_keypair()]),
+        patch("app.api.compute.keypairs.cached_call", new=mock_cached_call),
+    ):
         resp = await client.get("/api/keypairs")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)

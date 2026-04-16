@@ -32,9 +32,7 @@ async def k3s_callback(request: Request, req: K3sCallbackRequest):
     if not req.success:
         error_msg = req.error or "서버 VM에서 알 수 없는 오류 발생"
         _logger.error("k3s cluster %s server init failed: %s", cluster_id, error_msg)
-        await k3s_cluster.update_cluster_status(
-            project_id, cluster_id, "ERROR", f"서버 초기화 실패: {error_msg}"
-        )
+        await k3s_cluster.update_cluster_status(project_id, cluster_id, "ERROR", f"서버 초기화 실패: {error_msg}")
         return {"ok": True}
 
     if not req.kubeconfig or not req.node_token or not req.server_ip:
@@ -49,15 +47,15 @@ async def k3s_callback(request: Request, req: K3sCallbackRequest):
         await k3s_cluster.store_kubeconfig(project_id, cluster_id, req.kubeconfig)
     except Exception as e:
         _logger.error("k3s cluster %s kubeconfig encryption failed: %s", cluster_id, e)
-        await k3s_cluster.update_cluster_status(
-            project_id, cluster_id, "ERROR", f"kubeconfig 저장 실패: {e}"
-        )
+        await k3s_cluster.update_cluster_status(project_id, cluster_id, "ERROR", f"kubeconfig 저장 실패: {e}")
         return {"ok": True}
 
     # 클러스터 레코드에 server_ip, node_token, api_address 업데이트
     api_address = f"https://{req.server_ip}:6443"
     await k3s_cluster.update_cluster_status(
-        project_id, cluster_id, "PROVISIONING",
+        project_id,
+        cluster_id,
+        "PROVISIONING",
         server_ip=req.server_ip,
         api_address=api_address,
         node_token=req.node_token,
@@ -79,9 +77,9 @@ async def _provision_agents(
 ) -> None:
     """에이전트 VM 생성 백그라운드 태스크."""
     import asyncio
+
     from app.config import get_settings
-    from app.services import k3s_cloudinit
-    from app.services import cinder, nova, keystone
+    from app.services import cinder, k3s_cloudinit, keystone, nova
 
     cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
     if not cluster:
@@ -97,9 +95,7 @@ async def _provision_agents(
     agent_flavor_id = cluster.get("agent_flavor_id") or s.k3s_default_agent_flavor_id
     if not agent_flavor_id:
         _logger.error("k3s agent provision: agent_flavor_id not configured")
-        await k3s_cluster.update_cluster_status(
-            project_id, cluster_id, "ERROR", "에이전트 플레이버 미설정"
-        )
+        await k3s_cluster.update_cluster_status(project_id, cluster_id, "ERROR", "에이전트 플레이버 미설정")
         return
     network_id = cluster.get("network_id") or s.default_network_id
     ssh_public_key = cluster.get("ssh_public_key") or None
@@ -114,9 +110,7 @@ async def _provision_agents(
         conn = keystone.get_admin_connection_for_project(project_id)
     except Exception as e:
         _logger.error("k3s agent provision: cannot get OpenStack connection: %s", e)
-        await k3s_cluster.update_cluster_status(
-            project_id, cluster_id, "ERROR", f"OpenStack 연결 실패: {e}"
-        )
+        await k3s_cluster.update_cluster_status(project_id, cluster_id, "ERROR", f"OpenStack 연결 실패: {e}")
         return
 
     agent_vm_ids: list[str] = []
@@ -128,8 +122,7 @@ async def _provision_agents(
         try:
             # 에이전트 부트 볼륨 생성
             vol = await asyncio.to_thread(
-                cinder.create_volume_from_image,
-                conn, f"{agent_name}-boot", image_id, boot_volume_size
+                cinder.create_volume_from_image, conn, f"{agent_name}-boot", image_id, boot_volume_size
             )
             # 에이전트 cloud-init 생성
             userdata = k3s_cloudinit.generate_agent_userdata(
@@ -142,7 +135,11 @@ async def _provision_agents(
             # 에이전트 VM 생성 (admin conn이므로 key_name 대신 cloud-init으로 공개키 주입)
             vm = await asyncio.to_thread(
                 nova.create_server,
-                conn, agent_name, agent_flavor_id, network_id, vol.id,
+                conn,
+                agent_name,
+                agent_flavor_id,
+                network_id,
+                vol.id,
                 userdata=userdata,
                 metadata={"union_role": "k3s_agent", "union_cluster_id": cluster_id},
                 delete_boot_volume_on_termination=True,
@@ -162,10 +159,15 @@ async def _provision_agents(
     # 클러스터 상태 업데이트
     reason = f"에이전트 {failed_count}개 생성 실패" if failed_count else ""
     await k3s_cluster.update_cluster_status(
-        project_id, cluster_id, "ACTIVE", reason,
+        project_id,
+        cluster_id,
+        "ACTIVE",
+        reason,
         agent_vm_ids=agent_vm_ids,
     )
     _logger.info(
         "k3s cluster %s ACTIVE: %d agents created, %d failed",
-        cluster_id, len(agent_vm_ids), failed_count,
+        cluster_id,
+        len(agent_vm_ids),
+        failed_count,
     )
