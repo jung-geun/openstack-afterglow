@@ -13,7 +13,6 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from app.api.common import dashboard_router, libraries_router, metrics_router, site_router, user_dashboard_router
-from app.utils.version import read_app_version
 from app.api.common.metrics import record_request as _record_request
 from app.api.compute import flavors_router, images_router, instances_router, keypairs_router
 from app.api.container import clusters_router, containers_router
@@ -37,6 +36,7 @@ from app.api.storage import (
     volumes_router,
 )
 from app.rate_limit import limiter
+from app.utils.version import read_app_version
 
 # ---------------------------------------------------------------------------
 # Structured JSON logging

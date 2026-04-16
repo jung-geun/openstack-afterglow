@@ -23,12 +23,13 @@ jobs:
       fail-fast: false
       matrix:
         target: [backend, frontend]
+        arch: [amd64, arm64]
         include:
-          - runner: [self-hosted, linux]
-            arch: amd64
+          - arch: amd64
+            runner: [self-hosted, linux]
             platform: linux/amd64
-          - runner: [self-hosted, macos]
-            arch: arm64
+          - arch: arm64
+            runner: [self-hosted, macos]
             platform: linux/arm64
     runs-on: ${{ matrix.runner }}
     permissions:
@@ -55,6 +56,17 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      - name: Disable docker osxkeychain on macOS runner
+        if: matrix.arch == 'arm64'
+        run: |
+          mkdir -p ~/.docker
+          if [ -f ~/.docker/config.json ]; then
+            jq 'del(.credsStore, .credHelpers)' ~/.docker/config.json > ~/.docker/config.json.tmp \
+              && mv ~/.docker/config.json.tmp ~/.docker/config.json
+          else
+            echo '{}' > ~/.docker/config.json
+          fi
 
       - name: Log in to registry
         uses: docker/login-action@v3
