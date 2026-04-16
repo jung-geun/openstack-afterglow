@@ -57,13 +57,10 @@ jobs:
       - name: Disable docker osxkeychain on macOS runner
         if: matrix.arch == 'arm64'
         run: |
-          mkdir -p ~/.docker
-          if [ -f ~/.docker/config.json ]; then
-            jq 'del(.credsStore, .credHelpers)' ~/.docker/config.json > ~/.docker/config.json.tmp \
-              && mv ~/.docker/config.json.tmp ~/.docker/config.json
-          else
-            echo '{}' > ~/.docker/config.json
-          fi
+          DOCKER_CONF_DIR="${RUNNER_TEMP}/docker-config"
+          mkdir -p "${DOCKER_CONF_DIR}"
+          echo '{"auths": {}}' > "${DOCKER_CONF_DIR}/config.json"
+          echo "DOCKER_CONFIG=${DOCKER_CONF_DIR}" >> "$GITHUB_ENV"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
