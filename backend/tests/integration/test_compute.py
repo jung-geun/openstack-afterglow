@@ -158,3 +158,35 @@ async def test_get_instance_security_groups(client):
     resp = await client.get(f"/api/instances/{instance_id}/security-groups")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
+
+
+# ─────────────────────────────────────────────────────────────────
+# PR4: 일반 유저도 프로젝트 스코프 리소스 조회 가능 확인
+# ─────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_list_images_as_user(user_client):
+    resp = await user_client.get("/api/images")
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_list_flavors_as_user(user_client):
+    resp = await user_client.get("/api/flavors")
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_list_keypairs_as_user(user_client):
+    resp = await user_client.get("/api/keypairs")
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_list_instances_as_user(user_client):
+    resp = await user_client.get("/api/instances")
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)

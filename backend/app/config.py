@@ -27,7 +27,7 @@ def _load_toml() -> dict:
     """프로젝트 루트의 config.toml을 읽어 평탄화된 dict를 반환."""
     candidates = _config_candidates()
     for path in candidates:
-        if path.exists():
+        if path.exists() and path.stat().st_size > 0:
             with open(path, "rb") as f:
                 data = tomllib.load(f)
             # 섹션을 평탄화하여 Settings 필드에 매핑

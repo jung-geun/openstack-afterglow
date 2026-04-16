@@ -101,3 +101,37 @@ async def test_list_share_types(client, settings):
     resp = await client.get("/api/file-storage/types")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
+
+
+# ─────────────────────────────────────────────────────────────────
+# PR4: 일반 유저도 프로젝트 스코프 스토리지 리소스 조회 가능 확인
+# ─────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_list_volumes_as_user(user_client):
+    resp = await user_client.get("/api/volumes")
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_list_volume_backups_as_user(user_client):
+    resp = await user_client.get("/api/volumes/backups")
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_list_volume_snapshots_as_user(user_client):
+    resp = await user_client.get("/api/volume-snapshots")
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_list_file_storages_as_user(user_client, settings):
+    if not settings.service_manila_enabled:
+        pytest.skip("Manila 비활성화")
+    resp = await user_client.get("/api/file-storage")
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)

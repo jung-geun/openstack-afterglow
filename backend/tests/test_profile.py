@@ -1,6 +1,9 @@
 """프로필 API 단위 테스트."""
 import pytest
 from unittest.mock import patch, MagicMock
+from httpx import AsyncClient, ASGITransport
+
+from app.main import app
 
 
 def make_user_obj(user_id: str = "test-user-123", name: str = "testuser") -> MagicMock:
@@ -60,4 +63,26 @@ async def test_change_password_wrong_current(client, mock_conn):
             "current_password": "WrongPass",
             "new_password": "NewPass456!",
         })
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_get_profile_unauthenticated():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        resp = await ac.get("/api/profile")
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_update_profile_unauthenticated():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        resp = await ac.patch("/api/profile", json={"email": "x@x.com"})
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_change_password_unauthenticated():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        resp = await ac.post("/api/profile/password",
+                             json={"current_password": "a", "new_password": "b"})
     assert resp.status_code == 401

@@ -109,6 +109,7 @@
 				sessionTimeoutSeconds,
 				sessionWarningBeforeSeconds,
 				roles: data.roles ?? [],
+				isSystemAdmin: data.is_system_admin ?? false,
 			});
 			setAvailableProjects(projects);
 			goto('/dashboard');

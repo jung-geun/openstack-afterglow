@@ -129,3 +129,42 @@ async def test_list_loadbalancers(client):
     resp = await client.get("/api/loadbalancers")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
+
+
+# ─────────────────────────────────────────────────────────────────
+# PR4: 일반 유저도 프로젝트 스코프 네트워크 리소스 조회 가능 확인
+# ─────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_list_networks_as_user(user_client):
+    resp = await user_client.get("/api/networks")
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_list_floating_ips_as_user(user_client):
+    resp = await user_client.get("/api/networks/floating-ips")
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_list_routers_as_user(user_client):
+    resp = await user_client.get("/api/routers")
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_list_security_groups_as_user(user_client):
+    resp = await user_client.get("/api/security-groups")
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_list_loadbalancers_as_user(user_client):
+    resp = await user_client.get("/api/loadbalancers")
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)

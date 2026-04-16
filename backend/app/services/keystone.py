@@ -1,8 +1,79 @@
+import logging
 import openstack
 from keystoneauth1.identity import v3
 from keystoneauth1 import session as ks_session
 
 from app.config import get_settings
+
+_logger = logging.getLogger(__name__)
+
+# admin 프로젝트 ID / admin role ID 캐시 (서비스 admin 크리덴셜 조회 결과)
+_admin_project_id_cache: str | None = None
+_admin_role_id_cache: str | None = None
+
+
+def _get_admin_ks_client():
+    """서비스 admin 크리덴셜로 Keystone v3 Client 생성.
+
+    사용자 세션은 OpenStack policy 때문에 role_assignments 조회가 제한될 수 있으므로,
+    시스템 admin 판별은 서비스 크리덴셜로 수행한다.
+    """
+    from keystoneclient.v3 import client as ks_client
+    settings = get_settings()
+    admin_auth = v3.Password(
+        auth_url=settings.os_auth_url,
+        username=settings.os_username,
+        password=settings.os_password,
+        project_name=settings.os_project_name,
+        user_domain_name=settings.os_user_domain_name,
+        project_domain_name=settings.os_project_domain_name,
+    )
+    admin_sess = ks_session.Session(auth=admin_auth, timeout=15, verify=settings.ssl_verify)
+    return ks_client.Client(session=admin_sess)
+
+
+def _resolve_admin_ids() -> tuple[str | None, str | None]:
+    """admin 프로젝트 ID와 admin role ID 반환 (프로세스 수명 동안 1회 조회)."""
+    global _admin_project_id_cache, _admin_role_id_cache
+    if _admin_project_id_cache and _admin_role_id_cache:
+        return _admin_project_id_cache, _admin_role_id_cache
+
+    settings = get_settings()
+    try:
+        ks = _get_admin_ks_client()
+        admin_projects = ks.projects.list(name=settings.os_project_name)
+        admin_roles = ks.roles.list(name="admin")
+        if admin_projects and admin_roles:
+            _admin_project_id_cache = admin_projects[0].id
+            _admin_role_id_cache = admin_roles[0].id
+            return _admin_project_id_cache, _admin_role_id_cache
+    except Exception:
+        _logger.warning("admin 프로젝트/role ID 조회 실패", exc_info=True)
+    return None, None
+
+
+def _is_system_admin(user_id: str, *_args, **_kwargs) -> bool:
+    """사용자가 admin 프로젝트에서 admin role을 가지는지 확인.
+
+    서비스 admin 크리덴셜로 role_assignments 를 조회하여 policy 제약을 회피한다.
+    추가 인자(session, settings)는 호환성을 위해 받되 사용하지 않는다.
+    """
+    if not user_id:
+        return False
+    try:
+        admin_project_id, admin_role_id = _resolve_admin_ids()
+        if not admin_project_id or not admin_role_id:
+            return False
+        ks = _get_admin_ks_client()
+        assignments = ks.role_assignments.list(
+            user=user_id,
+            project=admin_project_id,
+            role=admin_role_id,
+        )
+        return len(assignments) > 0
+    except Exception:
+        _logger.warning("is_system_admin 체크 실패", exc_info=True)
+        return False
 
 
 def authenticate(username: str, password: str, project_name: str, domain_name: str = "Default") -> dict:
@@ -67,6 +138,7 @@ def authenticate(username: str, password: str, project_name: str, domain_name: s
         "username": scoped_access.username or username,
         "expires_at": scoped_access.expires.isoformat() if scoped_access.expires else "",
         "roles": list(scoped_access.role_names) if scoped_access.role_names else [],
+        "is_system_admin": _is_system_admin(scoped_access.user_id, scoped_sess, settings),
     }
 
 
@@ -93,6 +165,7 @@ def _authenticate_scoped(
         "username": access.username or username,
         "expires_at": access.expires.isoformat() if access.expires else "",
         "roles": list(access.role_names) if access.role_names else [],
+        "is_system_admin": _is_system_admin(access.user_id, sess, settings),
     }
 
 
@@ -118,6 +191,7 @@ def validate_token(token: str, project_id: str = "") -> dict:
         "username": access.username or "",
         "expires_at": access.expires.isoformat() if access.expires else "",
         "roles": list(access.role_names) if access.role_names else [],
+        "is_system_admin": _is_system_admin(access.user_id, sess, settings),
     }
 
 

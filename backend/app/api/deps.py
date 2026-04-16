@@ -111,9 +111,8 @@ async def get_token_info(
 
 
 def require_admin(token_info: dict = Depends(get_token_info)):
-    """admin 역할이 없으면 403 반환."""
-    roles = token_info.get("roles", [])
-    if "admin" not in roles:
+    """시스템 관리자(admin 프로젝트의 admin role 보유자)가 아니면 403 반환."""
+    if not token_info.get("is_system_admin", False):
         raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다")
 
 

@@ -17,6 +17,7 @@ export interface AuthState {
 	sessionTimeoutSeconds: number;
 	sessionWarningBeforeSeconds: number;
 	roles: string[];
+	isSystemAdmin: boolean;
 }
 
 const initial: AuthState = {
@@ -30,6 +31,7 @@ const initial: AuthState = {
 	sessionTimeoutSeconds: 3600,
 	sessionWarningBeforeSeconds: 300,
 	roles: [],
+	isSystemAdmin: false,
 };
 
 function loadPersistedAuth(): AuthState {
@@ -59,7 +61,7 @@ if (typeof window !== 'undefined') {
 }
 
 export const isLoggedIn = derived(auth, ($auth) => $auth.token !== null);
-export const isAdmin = derived(auth, ($auth) => $auth.roles.includes('admin'));
+export const isAdmin = derived(auth, ($auth) => $auth.isSystemAdmin === true);
 
 export function setAuth(data: Partial<AuthState> & { token: string }) {
 	auth.update((state) => ({

@@ -17,6 +17,7 @@ class TokenResponse(BaseModel):
     expires_at: str
     roles: list[str] = []
     default_project_id: str = ""
+    is_system_admin: bool = False
 
 
 class UserInfo(BaseModel):
@@ -25,6 +26,7 @@ class UserInfo(BaseModel):
     project_id: str
     project_name: str
     roles: list[str]
+    is_system_admin: bool = False
 
 
 class ProjectInfo(BaseModel):

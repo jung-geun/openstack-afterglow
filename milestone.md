@@ -253,3 +253,38 @@
 | 7 | 5.1~5.6 — 운영 기능 | 5일 | 모니터링 + 보안 + 로깅 |
 
 **총 예상 소요: 약 19일**
+
+---
+
+## 개발 규칙 및 작업 지시사항
+
+### 2026-04-16 — pieroot 관리자 접근 불가 버그 수정
+
+**문제**: `pieroot` 계정이 admin 프로젝트에서 admin role 을 보유하고 있음에도 관리자 페이지 접근 불가. `admin` 계정은 정상 동작.
+
+**원인**: 기존 코드가 scoped token 의 role_names(현재 프로젝트 기준)로 관리자 판별. pieroot 의 default project 가 admin 이 아니어서 scoped token 에 "admin" role 이 없었음.
+
+**수정 내용**:
+- [x] `backend/app/services/keystone.py` — `_is_system_admin(user_id)` 신설. 서비스 admin 크리덴셜로 `role_assignments.list` 조회 → scoped project 무관하게 admin 프로젝트의 admin role 보유 여부 판정.
+- [x] `backend/app/api/deps.py::require_admin` — scoped role 체크 제거, `is_system_admin` 사용.
+- [x] `backend/app/api/identity/auth.py::login, gitlab_callback` — `is_system_admin` 필드 포함 응답.
+- [x] `backend/app/models/auth.py` — `TokenResponse`, `UserInfo` 에 `is_system_admin: bool = False` 추가.
+- [x] `backend/app/api/identity/auth.py::me` — `UserInfo` 에 `is_system_admin` 포함 반환 (페이지 새로고침 후 localStorage 동기화).
+- [x] `frontend/src/lib/stores/auth.ts` — `isSystemAdmin: boolean` 상태 + `isAdmin = isSystemAdmin === true`.
+- [x] `frontend/src/routes/+layout.svelte` — onMount 에서 `/api/auth/me` 응답으로 `isSystemAdmin` 재동기화 (구버전 localStorage 대응).
+- [x] `frontend/src/routes/+page.svelte`, `auth/gitlab/callback/+page.svelte` — 로그인 응답에서 `isSystemAdmin` 설정.
+- [x] `backend/tests/integration/credentials.py` — `admin_user_credentials()` 로더 추가 (`[admin_user]` 섹션).
+- [x] `backend/tests/integration/conftest.py` — `admin_user_credentials_fx`, `admin_user_auth_data`, `admin_user_client` 픽스처 추가.
+- [x] `backend/tests/integration/test_auth.py` — `test_admin_user_login_is_system_admin`, `test_admin_user_me_returns_is_system_admin` 테스트 추가.
+- [x] `backend/tests/integration/test_admin.py` — `test_admin_user_can_access_admin_*` 3개 회귀 테스트 추가.
+
+### 2026-04-16 — 개발 규칙 추가 (CLAUDE.md 갱신)
+
+- [x] 백엔드 엔드포인트 구현 시 테스트 코드 작성 의무화
+  - Mock으로만 때우는 테스트 금지 — 실제 로직을 검증하는 테스트 필수
+  - `tests/test_*.py` (단위) 또는 `tests/integration/test_*.py` (통합) 중 하나 이상 필수
+  - 에러 케이스, 권한 없음, 존재하지 않는 리소스 등 엣지 케이스 커버 필수
+  - 테스트 없이 완료 처리 불가
+- [x] 모든 작업 내용 milestone.md 기재 의무화
+  - 완료 항목 즉시 `[x]` 체크
+  - 중간 지시 작업도 milestone.md에 섹션 추가하여 기록

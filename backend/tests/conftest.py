@@ -3,6 +3,9 @@ import os
 os.environ.setdefault("AFTERGLOW_ALLOW_INSECURE", "1")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 os.environ.setdefault("SERVICE_MANILA_ENABLED", "true")
+os.environ.setdefault("SERVICE_MAGNUM_ENABLED", "true")
+os.environ.setdefault("SERVICE_ZUN_ENABLED", "true")
+os.environ.setdefault("SERVICE_K3S_ENABLED", "true")
 
 import pytest
 from unittest.mock import MagicMock, AsyncMock
@@ -22,7 +25,11 @@ def make_mock_conn(project_id: str = "test-project-123") -> MagicMock:
     return conn
 
 
-def make_token_info(roles: list[str] | None = None, project_id: str = "test-project-123") -> dict:
+def make_token_info(
+    roles: list[str] | None = None,
+    project_id: str = "test-project-123",
+    is_system_admin: bool = False,
+) -> dict:
     """모의 token_info 딕셔너리 생성."""
     return {
         "token": "test-token",
@@ -32,6 +39,7 @@ def make_token_info(roles: list[str] | None = None, project_id: str = "test-proj
         "username": "testuser",
         "roles": roles or ["member"],
         "expires_at": "2099-01-01T00:00:00Z",
+        "is_system_admin": is_system_admin,
     }
 
 
@@ -73,7 +81,7 @@ async def admin_client(mock_conn):
             pass
 
     async def override_get_token_info():
-        return make_token_info(roles=["admin", "member"])
+        return make_token_info(roles=["admin", "member"], is_system_admin=True)
 
     app.dependency_overrides[get_os_conn] = override_get_os_conn
     app.dependency_overrides[get_token_info] = override_get_token_info

@@ -34,7 +34,10 @@
 		(async () => {
 			if ($auth.token) {
 				try {
-					await api.get('/api/auth/me', $auth.token, $auth.projectId ?? undefined);
+					const me = await api.get<{ user_id: string; username: string; project_id: string; project_name: string; roles: string[]; is_system_admin: boolean }>(
+						'/api/auth/me', $auth.token, $auth.projectId ?? undefined,
+					);
+					auth.update((s) => ({ ...s, isSystemAdmin: me.is_system_admin === true, roles: me.roles ?? s.roles }));
 				} catch {
 					clearAuth();
 					return;

@@ -217,6 +217,7 @@ package
 # End of https://www.toptal.com/developers/gitignore/api/git,svelte,python,visualstudiocode
 
 config.toml
+backend/tests/integration/credentials.toml
 
 # 로그 파일
 logs/

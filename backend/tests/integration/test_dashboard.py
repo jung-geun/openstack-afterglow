@@ -112,3 +112,46 @@ async def test_get_profile(client):
     assert resp.status_code == 200
     data = resp.json()
     assert "user_id" in data or "id" in data
+
+
+# ─────────────────────────────────────────────────────────────────
+# PR4: 일반 유저도 대시보드/프로필 조회 가능 확인
+# ─────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_dashboard_summary_as_user(user_client):
+    resp = await user_client.get("/api/dashboard/summary")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "instances" in data
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_dashboard_quotas_as_user(user_client):
+    resp = await user_client.get("/api/dashboard/quotas")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "compute" in data
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_user_dashboard_summary_as_user(user_client):
+    resp = await user_client.get("/api/user-dashboard/summary")
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), dict)
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_get_profile_as_user(user_client):
+    resp = await user_client.get("/api/profile")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "user_id" in data or "id" in data
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_dashboard_config_public(anon_client):
+    """dashboard/config는 인증 없이도 접근 가능해야 한다."""
+    resp = await anon_client.get("/api/dashboard/config")
+    assert resp.status_code == 200
+    assert "refresh_interval_ms" in resp.json()

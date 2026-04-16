@@ -63,6 +63,7 @@ async def login(request: Request, req: LoginRequest, background_tasks: Backgroun
         expires_at=data["expires_at"],
         roles=data.get("roles", []),
         default_project_id=default_project_id,
+        is_system_admin=data.get("is_system_admin", False),
     )
 
 
@@ -74,6 +75,7 @@ async def me(token_info: dict = Depends(get_token_info)):
         project_id=token_info["project_id"],
         project_name=token_info["project_name"],
         roles=token_info["roles"],
+        is_system_admin=token_info.get("is_system_admin", False),
     )
 
 
@@ -180,4 +182,5 @@ async def gitlab_callback(request: Request, req: GitLabCallbackRequest, backgrou
         expires_at=data["expires_at"],
         roles=data.get("roles", []),
         default_project_id=gl_default_project_id,
+        is_system_admin=data.get("is_system_admin", False),
     )
