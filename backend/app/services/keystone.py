@@ -8,18 +8,80 @@ from app.config import get_settings
 def authenticate(username: str, password: str, project_name: str, domain_name: str = "Default") -> dict:
     """
     Keystone 인증 후 토큰과 사용자 정보를 반환.
+
+    project_name이 지정되면 해당 프로젝트로 scoped 인증.
+    미지정 시 unscoped 인증 → 사용자의 프로젝트 목록 조회 → 첫 번째 프로젝트로 scoped 토큰 발급.
     """
     settings = get_settings()
 
+    if project_name:
+        # 명시적 프로젝트 지정 시 직접 scoped 인증
+        return _authenticate_scoped(
+            username, password, project_name, domain_name, settings,
+        )
+
+    # 1) unscoped 인증
+    unscoped_auth = v3.Password(
+        auth_url=settings.os_auth_url,
+        username=username,
+        password=password,
+        user_domain_name=domain_name,
+        unscoped=True,
+    )
+    unscoped_sess = ks_session.Session(auth=unscoped_auth, timeout=30, verify=settings.ssl_verify)
+    unscoped_access = unscoped_auth.get_access(unscoped_sess)
+    unscoped_token = unscoped_access.auth_token
+    user_id = unscoped_access.user_id
+
+    # 2) 사용자의 프로젝트 목록 조회
+    from keystoneclient.v3 import client as ks_client
+    ks = ks_client.Client(session=unscoped_sess)
+    projects = ks.projects.list(user=user_id)
+    enabled_projects = [p for p in projects if p.enabled]
+
+    if not enabled_projects:
+        raise Exception("접근 가능한 프로젝트가 없습니다")
+
+    # 3) default_project_id가 있으면 우선, 없으면 첫 번째 프로젝트
+    default_pid = getattr(unscoped_access, 'project_id', None)
+    target_project = None
+    if default_pid:
+        target_project = next((p for p in enabled_projects if p.id == default_pid), None)
+    if not target_project:
+        target_project = enabled_projects[0]
+
+    # 4) 선택된 프로젝트로 scoped 토큰 발급
+    scoped_auth = v3.Token(
+        auth_url=settings.os_auth_url,
+        token=unscoped_token,
+        project_id=target_project.id,
+    )
+    scoped_sess = ks_session.Session(auth=scoped_auth, timeout=30, verify=settings.ssl_verify)
+    scoped_access = scoped_auth.get_access(scoped_sess)
+
+    return {
+        "token": scoped_access.auth_token,
+        "project_id": scoped_access.project_id or "",
+        "project_name": scoped_access.project_name or "",
+        "user_id": scoped_access.user_id or "",
+        "username": scoped_access.username or username,
+        "expires_at": scoped_access.expires.isoformat() if scoped_access.expires else "",
+        "roles": list(scoped_access.role_names) if scoped_access.role_names else [],
+    }
+
+
+def _authenticate_scoped(
+    username: str, password: str, project_name: str, domain_name: str, settings,
+) -> dict:
+    """지정된 프로젝트로 직접 scoped 인증."""
     auth_plugin = v3.Password(
         auth_url=settings.os_auth_url,
         username=username,
         password=password,
-        project_name=project_name or settings.os_project_name,
+        project_name=project_name,
         user_domain_name=domain_name,
         project_domain_name=settings.os_project_domain_name,
     )
-
     sess = ks_session.Session(auth=auth_plugin, timeout=30, verify=settings.ssl_verify)
     access = auth_plugin.get_access(sess)
 
