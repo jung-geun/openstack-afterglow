@@ -390,3 +390,14 @@
 - [x] `backend/app/services/k3s_db.py` — `delete_cluster_record` soft-delete(UPDATE status='DELETED' + deleted_at)로 전환, `list_clusters`/`list_all_clusters` 에 `include_deleted` 파라미터 추가, `_cluster_to_dict` 신규 필드 직렬화
 - [x] `backend/app/api/k3s/clusters.py` — `list_k3s_clusters` 에 `?include_deleted=true` 쿼리 파라미터, `delete_k3s_cluster` 에 `user_id` 추출 + soft-delete 호출 + 멱등 처리
 - [x] `frontend/src/routes/dashboard/containers/k3s/+page.svelte` — `showDeleted` 토글 버튼 추가, 삭제된 클러스터 회색+취소선+삭제 시각 표시, 삭제된 행에서 액션 버튼 숨김
+
+### 8.6 Notion 다중 DB 동기화 + 중복 갱신 방지 (dedup)
+
+**문제**: 하나의 Notion DB만 설정 가능하고, 매 주기마다 변경 없이도 PATCH를 전송.
+
+- [x] `backend/app/models/db.py::NotionTarget` — 다중 연동 대상 ORM 모델 추가 (`label`, `api_key_encrypted`, `database_id`, `users/hypervisors/gpu_spec _database_id`, `enabled`, `interval_minutes`, `last_sync` 등)
+- [x] `backend/app/services/notion_sync.py` — `_parse_dt` 모듈 함수 추출, `sync_to_notion._upsert` 에 SHA256 dedup 추가 (hash 캐시 Redis key: `afterglow:notion:hash:{db_id}:{match_key}`, TTL 24h), `_target_to_dict`/`list_notion_targets`/`get_notion_target`/`create_notion_target`/`update_notion_target`/`delete_notion_target` CRUD 함수 추가
+- [x] `backend/app/api/identity/admin_notion.py` — `NotionTargetCreateRequest`/`NotionTargetUpdateRequest` 모델 추가, `GET/POST /notion/targets`, `PATCH/DELETE /notion/targets/{id}`, `POST /notion/targets/{id}/test` 엔드포인트 추가 (기존 `/notion/config` 레거시 유지)
+- [x] `backend/app/main.py` — `_run_notion_target_sync()` 헬퍼 추출, `_notion_sync_loop` — `NotionTarget` 다중 대상 우선 처리 (enabled + interval 체크), 없으면 `NotionConfig` fallback
+- [x] `frontend/src/routes/admin/notion/+page.svelte` — 단수 폼 → 타겟 카드 리스트 UI로 재작성. "연결 추가" 버튼, 카드별 enabled 상태/마지막 동기화/인라인 수정 폼/지금 동기화/삭제 버튼
+- [x] `backend/tests/test_notion.py` — dedup skip/patch/신규 POST 3건 + 다중 타겟 CRUD API 6건 테스트 추가 (총 9건)
