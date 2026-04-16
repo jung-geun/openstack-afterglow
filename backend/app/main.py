@@ -13,6 +13,7 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from app.api.common import dashboard_router, libraries_router, metrics_router, site_router, user_dashboard_router
+from app.utils.version import read_app_version
 from app.api.common.metrics import record_request as _record_request
 from app.api.compute import flavors_router, images_router, instances_router, keypairs_router
 from app.api.container import clusters_router, containers_router
@@ -109,21 +110,10 @@ _logger = logging.getLogger(__name__)
 _is_production = os.environ.get("AFTERGLOW_ENV", "development") == "production"
 
 
-def _read_app_version() -> str:
-    import pathlib
-    import tomllib
-
-    for p in [pathlib.Path("pyproject.toml"), pathlib.Path(__file__).resolve().parents[2] / "pyproject.toml"]:
-        if p.exists():
-            with open(p, "rb") as f:
-                return tomllib.load(f).get("project", {}).get("version", "0.1.0")
-    return "0.1.0"
-
-
 app = FastAPI(
     title="Afterglow",
     description="OpenStack VM 배포 + OverlayFS 마운트 웹 플랫폼",
-    version=_read_app_version(),
+    version=read_app_version(),
     docs_url=None if _is_production else "/docs",
     redoc_url=None if _is_production else "/redoc",
     openapi_url=None if _is_production else "/openapi.json",

@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from app.api.deps import get_os_conn, require_admin
+from app.utils.version import read_app_version
 
 _logger = logging.getLogger(__name__)
 from app.config import get_settings
@@ -1408,18 +1409,7 @@ async def delete_admin_k3s_cluster(
 _admin_start_time: float = __import__("time").time()
 
 
-def _read_backend_version() -> str:
-    import pathlib
-    import tomllib
-
-    for p in [pathlib.Path("pyproject.toml"), pathlib.Path(__file__).resolve().parents[3] / "pyproject.toml"]:
-        if p.exists():
-            with open(p, "rb") as f:
-                return tomllib.load(f).get("project", {}).get("version", "unknown")
-    return "unknown"
-
-
-_backend_version: str = _read_backend_version()
+_backend_version: str = read_app_version()
 
 
 @router.get("/version", dependencies=[Depends(require_admin)])

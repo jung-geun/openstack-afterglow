@@ -39,6 +39,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Verify version sync
+        run: node scripts/check-version-sync.js
+        env:
+          GITHUB_REF: ${{ github.ref }}
+
       - name: Resolve image name
         id: img
         run: |
@@ -76,15 +81,16 @@ jobs:
           file: ./Dockerfile
           target: ${{ matrix.target }}
           platforms: ${{ matrix.platform }}
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.img.outputs.name }}:${{ steps.tag.outputs.base }}-${{ matrix.arch }}
           cache-from: type=registry,ref=${{ steps.img.outputs.name }}:cache-${{ matrix.arch }}
-          cache-to: type=registry,ref=${{ steps.img.outputs.name }}:cache-${{ matrix.arch }},mode=max
+          cache-to: ${{ github.event_name != 'pull_request' && format('type=registry,ref={0}:cache-{1},mode=max', steps.img.outputs.name, matrix.arch) || '' }}
 
   # ─── manifest 통합: 두 arch 태그를 합쳐 단일 멀티플랫폼 태그로 push ───
   manifest:
     name: Manifest ${{ matrix.target }}
     needs: build
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read

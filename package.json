@@ -1,7 +1,7 @@
 {
   "name": "union-monorepo",
   "private": true,
-  "version": "1.13.0",
+  "version": "1.13.2",
   "scripts": {
     "test": "npm run test:backend && npm run test:frontend",
     "test:backend": "cd backend && AFTERGLOW_ALLOW_INSECURE=1 uv run python -m pytest tests/ -v --ignore=tests/integration",
@@ -10,7 +10,13 @@
     "test:all": "npm run test:backend && npm run test:backend:integration && npm run test:frontend",
     "test:parallel": "npm-run-all --parallel test:backend test:frontend",
     "lint:backend": "cd backend && uv run ruff check . && uv run ruff format --check .",
-    "lint:backend:fix": "cd backend && uv run ruff check --fix . && uv run ruff format ."
+    "lint:backend:fix": "cd backend && uv run ruff check --fix . && uv run ruff format .",
+    "version": "node scripts/sync-version.js && git add backend/pyproject.toml backend/uv.lock frontend/package.json",
+    "version:sync": "node scripts/sync-version.js",
+    "version:check": "node scripts/check-version-sync.js",
+    "version:bump:patch": "npm version patch -m \"chore(release): v%s\"",
+    "version:bump:minor": "npm version minor -m \"chore(release): v%s\"",
+    "version:bump:major": "npm version major -m \"chore(release): v%s\""
   },
   "devDependencies": {
     "npm-run-all": "^4.1.5"

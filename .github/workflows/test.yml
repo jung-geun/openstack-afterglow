@@ -2,13 +2,28 @@ name: Unit Tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
+    tags: ['v*']
   pull_request:
     branches: [main]
 
 jobs:
+  version-check:
+    name: Version sync check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Check versions aligned
+        run: node scripts/check-version-sync.js
+        env:
+          GITHUB_REF: ${{ github.ref }}
+
   test-backend:
     name: Backend (unit tests + lint)
+    needs: version-check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -38,6 +53,7 @@ jobs:
 
   test-frontend:
     name: Frontend (vitest)
+    needs: version-check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
