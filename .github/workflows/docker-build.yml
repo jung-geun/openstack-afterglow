@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - dev
     tags:
       - 'v*'
   pull_request:
@@ -62,6 +63,8 @@ jobs:
         run: |
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             echo "base=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          elif [[ "${GITHUB_REF}" == refs/heads/main ]]; then
+            echo "base=nightly" >> $GITHUB_OUTPUT
           else
             echo "base=dev" >> $GITHUB_OUTPUT
           fi
@@ -118,6 +121,10 @@ jobs:
             echo "primary=${{ steps.img.outputs.name }}:${VTAG}" >> $GITHUB_OUTPUT
             echo "extra=${{ steps.img.outputs.name }}:latest" >> $GITHUB_OUTPUT
             echo "base=${VTAG}" >> $GITHUB_OUTPUT
+          elif [[ "${GITHUB_REF}" == refs/heads/main ]]; then
+            echo "primary=${{ steps.img.outputs.name }}:nightly" >> $GITHUB_OUTPUT
+            echo "extra=" >> $GITHUB_OUTPUT
+            echo "base=nightly" >> $GITHUB_OUTPUT
           else
             echo "primary=${{ steps.img.outputs.name }}:dev" >> $GITHUB_OUTPUT
             echo "extra=" >> $GITHUB_OUTPUT
