@@ -13,11 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
       - name: Check versions aligned
-        run: node scripts/check-version-sync.js
+        run: bash scripts/check-version-sync.sh
         env:
           GITHUB_REF: ${{ github.ref }}
 

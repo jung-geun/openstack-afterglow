@@ -5,9 +5,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from tests.conftest import make_token_info
-
-
 # ---------------------------------------------------------------------------
 # dedup: sync_to_notion._upsert에서 동일 데이터면 PATCH 스킵
 # ---------------------------------------------------------------------------
