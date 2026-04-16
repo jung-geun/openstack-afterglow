@@ -7,13 +7,13 @@ cloud-init YAML을 생성한다.
 지원 프로토콜: CephFS, NFS
 OverlayFS 구조: /opt/layers/{lower,upper,work,merged}
 """
+
 import base64
 import shlex
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
-from app.config import get_settings
 from app.services import libraries as lib_svc
 
 TEMPLATE_DIR = Path(__file__).parent.parent / "templates"

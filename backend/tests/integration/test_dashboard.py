@@ -1,10 +1,11 @@
 """대시보드, 메트릭, 라이브러리, 사이트 설정, 유저 대시보드 통합 테스트."""
-import pytest
 
+import pytest
 
 # ─────────────────────────────────────────────────────────────────
 # 대시보드
 # ─────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_dashboard_summary(client):
@@ -48,6 +49,7 @@ async def test_dashboard_usage(client):
 # 사이트 설정 (인증 불필요)
 # ─────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio(loop_scope="session")
 async def test_site_config(anon_client):
     resp = await anon_client.get("/api/site-config")
@@ -61,6 +63,7 @@ async def test_site_config(anon_client):
 # 헬스체크 (인증 불필요)
 # ─────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio(loop_scope="session")
 async def test_health(anon_client):
     resp = await anon_client.get("/api/health")
@@ -71,6 +74,7 @@ async def test_health(anon_client):
 # ─────────────────────────────────────────────────────────────────
 # 라이브러리
 # ─────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_list_libraries(client):
@@ -94,6 +98,7 @@ async def test_list_prebuilt_file_storages(client):
 # 유저 대시보드
 # ─────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio(loop_scope="session")
 async def test_user_dashboard_summary(client):
     resp = await client.get("/api/user-dashboard/summary")
@@ -106,6 +111,7 @@ async def test_user_dashboard_summary(client):
 # 프로필
 # ─────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio(loop_scope="session")
 async def test_get_profile(client):
     resp = await client.get("/api/profile")
@@ -117,6 +123,7 @@ async def test_get_profile(client):
 # ─────────────────────────────────────────────────────────────────
 # PR4: 일반 유저도 대시보드/프로필 조회 가능 확인
 # ─────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_dashboard_summary_as_user(user_client):

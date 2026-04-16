@@ -1,13 +1,16 @@
 """볼륨 API 테스트."""
+
+from unittest.mock import patch
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 
 
 def make_mock_volume(vol_id: str = "vol-1", name: str = "test-vol", status: str = "available"):
     from app.models.storage import VolumeInfo
+
     return VolumeInfo(id=vol_id, name=name, status=status, size=10, volume_type=None, attachments=[])
 
 
@@ -23,7 +26,9 @@ async def test_list_volumes(client, mock_conn):
 
 @pytest.mark.asyncio
 async def test_create_volume(client, mock_conn):
-    with patch("app.api.storage.volumes.cinder.create_empty_volume", return_value=make_mock_volume("vol-new", "new-vol")):
+    with patch(
+        "app.api.storage.volumes.cinder.create_empty_volume", return_value=make_mock_volume("vol-new", "new-vol")
+    ):
         resp = await client.post("/api/volumes", json={"name": "new-vol", "size_gb": 10})
     assert resp.status_code == 201
 
@@ -57,7 +62,6 @@ async def test_list_transfers_unauthenticated():
     assert resp.status_code == 401
 
 
-
 @pytest.mark.asyncio
 async def test_create_transfer_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
@@ -69,8 +73,11 @@ async def test_create_transfer_unauthenticated():
 async def test_create_transfer_success(client):
     with patch("app.api.storage.volumes.cinder") as mock_cinder:
         mock_cinder.create_volume_transfer.return_value = {
-            "id": "tr-1", "name": "transfer-1", "volume_id": "vol-1",
-            "auth_key": "abc123", "created_at": None,
+            "id": "tr-1",
+            "name": "transfer-1",
+            "volume_id": "vol-1",
+            "auth_key": "abc123",
+            "created_at": None,
         }
         resp = await client.post("/api/volumes/vol-1/transfer", json={})
     assert resp.status_code in (200, 201)

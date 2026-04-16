@@ -19,19 +19,18 @@ admin/user 권한 분리 테스트를 위한 일반 유저 계정 설정:
   또는 환경변수: UNION_TEST_USER_USERNAME, UNION_TEST_USER_PASSWORD, UNION_TEST_USER_PROJECT
 """
 
-import os
 import pytest
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
-# 환경변수는 루트 tests/conftest.py에서 설정됨
-
-from app.main import app
 from app.config import get_settings
 
+# 환경변수는 루트 tests/conftest.py에서 설정됨
+from app.main import app
 
 # ---------------------------------------------------------------------------
 # 공통 헬퍼
 # ---------------------------------------------------------------------------
+
 
 def assert_forbidden(resp) -> None:
     """403 응답 + 관리자 관련 메시지 검증."""
@@ -55,6 +54,7 @@ def require_service(flag: str) -> None:
 # 설정 / 크리덴셜
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(scope="session")
 def settings():
     return get_settings()
@@ -64,6 +64,7 @@ def settings():
 def admin_credentials_fx():
     """admin 크리덴셜 (credentials.toml > config.toml 폴백)."""
     from .credentials import admin_credentials
+
     return admin_credentials()
 
 
@@ -71,6 +72,7 @@ def admin_credentials_fx():
 def admin_user_credentials_fx():
     """admin_user 크리덴셜 (admin 프로젝트 admin role 보유, default_project ≠ admin 가능). 미설정 시 skip."""
     from .credentials import admin_user_credentials
+
     creds = admin_user_credentials()
     if creds is None:
         pytest.skip(
@@ -85,6 +87,7 @@ def admin_user_credentials_fx():
 def user_credentials_fx():
     """일반 유저 크리덴셜. 미설정 시 테스트 skip."""
     from .credentials import user_credentials
+
     creds = user_credentials()
     if creds is None:
         pytest.skip(
@@ -105,6 +108,7 @@ def credentials(admin_credentials_fx):
 # ---------------------------------------------------------------------------
 # 인증 데이터 (로그인)
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="session")
 def anyio_backend():
@@ -175,6 +179,7 @@ def auth_headers(token, project_id):
 # ---------------------------------------------------------------------------
 # HTTP 클라이언트
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="session")
 async def admin_client(admin_auth_data):
@@ -252,6 +257,7 @@ async def anon_client():
 # 세션 teardown — Redis 캐시 정리
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(scope="session", autouse=True)
 async def _flush_cache_after_session():
     """세션 종료 시 afterglow:cache:* 키 일괄 삭제.
@@ -263,6 +269,7 @@ async def _flush_cache_after_session():
     yield
     try:
         import redis.asyncio as aioredis
+
         r = aioredis.from_url(get_settings().redis_url)
         async for key in r.scan_iter("afterglow:cache:*"):
             await r.delete(key)

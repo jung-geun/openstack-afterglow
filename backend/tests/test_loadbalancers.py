@@ -1,7 +1,9 @@
 """network/loadbalancers.py 엔드포인트 단위 테스트 (17개)."""
+
+from unittest.mock import AsyncMock, patch
+
 import pytest
-from unittest.mock import patch, AsyncMock, MagicMock
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 
@@ -29,8 +31,10 @@ async def test_create_lb_unauthenticated():
 
 @pytest.mark.asyncio
 async def test_create_lb_success(client):
-    with patch("app.api.network.loadbalancers.octavia") as mock_oct, \
-         patch("app.api.network.loadbalancers.invalidate", new=AsyncMock()):
+    with (
+        patch("app.api.network.loadbalancers.octavia") as mock_oct,
+        patch("app.api.network.loadbalancers.invalidate", new=AsyncMock()),
+    ):
         mock_oct.create_load_balancer.return_value = {"id": "lb-1", "name": "lb1"}
         resp = await client.post("/api/loadbalancers", json={"name": "lb1", "vip_subnet_id": "sub-1"})
     assert resp.status_code == 201
@@ -75,8 +79,10 @@ async def test_delete_lb_unauthenticated():
 
 @pytest.mark.asyncio
 async def test_delete_lb_success(client):
-    with patch("app.api.network.loadbalancers.octavia") as mock_oct, \
-         patch("app.api.network.loadbalancers.invalidate", new=AsyncMock()):
+    with (
+        patch("app.api.network.loadbalancers.octavia") as mock_oct,
+        patch("app.api.network.loadbalancers.invalidate", new=AsyncMock()),
+    ):
         mock_oct.delete_load_balancer.return_value = None
         resp = await client.delete("/api/loadbalancers/lb-1")
     assert resp.status_code == 204
@@ -190,8 +196,9 @@ async def test_list_members_success(client):
 @pytest.mark.asyncio
 async def test_add_member_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.post("/api/loadbalancers/lb-1/pools/pool-1/members",
-                             json={"address": "10.0.0.1", "protocol_port": 80})
+        resp = await ac.post(
+            "/api/loadbalancers/lb-1/pools/pool-1/members", json={"address": "10.0.0.1", "protocol_port": 80}
+        )
     assert resp.status_code == 401
 
 
@@ -199,8 +206,9 @@ async def test_add_member_unauthenticated():
 async def test_add_member_success(client):
     with patch("app.api.network.loadbalancers.octavia") as mock_oct:
         mock_oct.add_member.return_value = {"id": "mem-1"}
-        resp = await client.post("/api/loadbalancers/lb-1/pools/pool-1/members",
-                                 json={"address": "10.0.0.1", "protocol_port": 80})
+        resp = await client.post(
+            "/api/loadbalancers/lb-1/pools/pool-1/members", json={"address": "10.0.0.1", "protocol_port": 80}
+        )
     assert resp.status_code == 201
 
 

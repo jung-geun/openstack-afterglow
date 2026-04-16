@@ -1,7 +1,6 @@
+import openstack
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-import openstack
-from typing import Optional
 
 from app.api.deps import get_os_conn
 from app.services import neutron
@@ -17,23 +16,26 @@ class CreateSecurityGroupRequest(BaseModel):
 
 class CreateSecurityGroupRuleRequest(BaseModel):
     direction: str  # "ingress" | "egress"
-    protocol: Optional[str] = None  # "tcp", "udp", "icmp", None (any)
-    port_range_min: Optional[int] = None
-    port_range_max: Optional[int] = None
-    remote_ip_prefix: Optional[str] = None
+    protocol: str | None = None  # "tcp", "udp", "icmp", None (any)
+    port_range_min: int | None = None
+    port_range_max: int | None = None
+    remote_ip_prefix: str | None = None
     ethertype: str = "IPv4"
 
 
 @router.get("")
-async def list_security_groups(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
+async def list_security_groups(
+    conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)
+):
     pid = conn._union_project_id
     try:
         return await cached_call(
-            f"afterglow:neutron:{pid}:security_groups", ttl_slow(),
+            f"afterglow:neutron:{pid}:security_groups",
+            ttl_slow(),
             lambda: neutron.list_security_groups(conn, project_id=pid),
             refresh=refresh,
         )
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="보안 그룹 목록 조회 실패")
 
 
@@ -47,7 +49,7 @@ async def create_security_group(
         result = neutron.create_security_group(conn, req.name, req.description)
         await invalidate(f"afterglow:neutron:{pid}:security_groups")
         return result
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="보안 그룹 생성 실패")
 
 
@@ -60,7 +62,7 @@ async def delete_security_group(
     try:
         neutron.delete_security_group(conn, sg_id)
         await invalidate(f"afterglow:neutron:{pid}:security_groups")
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="보안 그룹 삭제 실패")
 
 
@@ -84,7 +86,7 @@ async def create_security_group_rule(
         )
         await invalidate(f"afterglow:neutron:{pid}:security_groups")
         return result
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="보안 그룹 규칙 추가 실패")
 
 
@@ -98,5 +100,5 @@ async def delete_security_group_rule(
     try:
         neutron.delete_security_group_rule(conn, rule_id)
         await invalidate(f"afterglow:neutron:{pid}:security_groups")
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="보안 그룹 규칙 삭제 실패")

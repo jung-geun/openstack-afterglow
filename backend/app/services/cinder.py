@@ -1,5 +1,4 @@
 import openstack
-from typing import Optional
 
 from app.models.storage import VolumeInfo
 
@@ -9,7 +8,7 @@ def create_volume_from_image(
     name: str,
     image_id: str,
     size_gb: int,
-    availability_zone: Optional[str] = None,
+    availability_zone: str | None = None,
 ) -> VolumeInfo:
     """OS 이미지를 소스로 부트 볼륨 생성."""
     kwargs = {
@@ -29,7 +28,7 @@ def create_empty_volume(
     conn: openstack.connection.Connection,
     name: str,
     size_gb: int,
-    availability_zone: Optional[str] = None,
+    availability_zone: str | None = None,
 ) -> VolumeInfo:
     """upperdir 용 빈 볼륨 생성."""
     kwargs = {"name": name, "size": size_gb}
@@ -63,15 +62,16 @@ def get_volume_limits(conn: openstack.connection.Connection) -> dict:
     limits = conn.block_storage.get_limits()
     a = limits.absolute
     return {
-        "volumes_used": getattr(a, 'total_volumes_used', 0),
-        "volumes_limit": getattr(a, 'max_total_volumes', -1),
-        "gigabytes_used": getattr(a, 'total_gigabytes_used', 0),
-        "gigabytes_limit": getattr(a, 'max_total_volume_gigabytes', -1),
+        "volumes_used": getattr(a, "total_volumes_used", 0),
+        "volumes_limit": getattr(a, "max_total_volumes", -1),
+        "gigabytes_used": getattr(a, "total_gigabytes_used", 0),
+        "gigabytes_limit": getattr(a, "max_total_volume_gigabytes", -1),
     }
 
 
 def get_volume_quota(conn: openstack.connection.Connection, project_id: str) -> dict:
     """프로젝트의 상세 Cinder 할당량 (usage 포함)."""
+
     def _extract(q):
         if q is None:
             return {"limit": -1, "in_use": 0}
@@ -90,16 +90,26 @@ def get_volume_quota(conn: openstack.connection.Connection, project_id: str) -> 
         }
     except Exception:
         import logging as _logging
+
         _logging.getLogger(__name__).warning("Cinder quota_set 조회 실패 — limits API로 fallback", exc_info=True)
         # fallback: limits API
         limits = conn.block_storage.get_limits()
         a = limits.absolute
         return {
-            "volumes": {"limit": getattr(a, 'max_total_volumes', -1), "in_use": getattr(a, 'total_volumes_used', 0)},
-            "snapshots": {"limit": getattr(a, 'max_total_snapshots', -1), "in_use": getattr(a, 'total_snapshots_used', 0)},
-            "gigabytes": {"limit": getattr(a, 'max_total_volume_gigabytes', -1), "in_use": getattr(a, 'total_gigabytes_used', 0)},
-            "backups": {"limit": getattr(a, 'max_total_backups', -1), "in_use": getattr(a, 'total_backups_used', 0)},
-            "backup_gigabytes": {"limit": getattr(a, 'max_total_backup_gigabytes', -1), "in_use": getattr(a, 'total_backup_gigabytes_used', 0)},
+            "volumes": {"limit": getattr(a, "max_total_volumes", -1), "in_use": getattr(a, "total_volumes_used", 0)},
+            "snapshots": {
+                "limit": getattr(a, "max_total_snapshots", -1),
+                "in_use": getattr(a, "total_snapshots_used", 0),
+            },
+            "gigabytes": {
+                "limit": getattr(a, "max_total_volume_gigabytes", -1),
+                "in_use": getattr(a, "total_gigabytes_used", 0),
+            },
+            "backups": {"limit": getattr(a, "max_total_backups", -1), "in_use": getattr(a, "total_backups_used", 0)},
+            "backup_gigabytes": {
+                "limit": getattr(a, "max_total_backup_gigabytes", -1),
+                "in_use": getattr(a, "total_backup_gigabytes_used", 0),
+            },
         }
 
 
@@ -107,8 +117,8 @@ def get_volume_image_metadata(conn: openstack.connection.Connection, volume_id: 
     """부트 볼륨의 원본 이미지 메타데이터 반환 (volume_image_metadata 필드)."""
     try:
         vol = conn.block_storage.get_volume(volume_id)
-        raw = vol.to_dict() if hasattr(vol, 'to_dict') else {}
-        return raw.get('volume_image_metadata') or getattr(vol, 'volume_image_metadata', None)
+        raw = vol.to_dict() if hasattr(vol, "to_dict") else {}
+        return raw.get("volume_image_metadata") or getattr(vol, "volume_image_metadata", None)
     except Exception:
         return None
 
@@ -126,7 +136,7 @@ def create_backup(
     conn: openstack.connection.Connection,
     volume_id: str,
     name: str,
-    description: Optional[str] = None,
+    description: str | None = None,
     incremental: bool = False,
 ) -> dict:
     kwargs: dict = {"volume_id": volume_id, "name": name, "is_incremental": incremental}
@@ -140,15 +150,15 @@ def delete_backup(conn: openstack.connection.Connection, backup_id: str) -> None
     conn.block_storage.delete_backup(backup_id, ignore_missing=True)
 
 
-def restore_backup(conn: openstack.connection.Connection, backup_id: str, volume_id: Optional[str] = None) -> dict:
+def restore_backup(conn: openstack.connection.Connection, backup_id: str, volume_id: str | None = None) -> dict:
     kwargs: dict = {}
     if volume_id:
         kwargs["volume_id"] = volume_id
     result = conn.block_storage.restore_backup(backup_id, **kwargs)
-    return {"volume_id": getattr(result, 'volume_id', None), "volume_name": getattr(result, 'volume_name', None)}
+    return {"volume_id": getattr(result, "volume_id", None), "volume_name": getattr(result, "volume_name", None)}
 
 
-def list_snapshots(conn: openstack.connection.Connection, volume_id: Optional[str] = None) -> list[dict]:
+def list_snapshots(conn: openstack.connection.Connection, volume_id: str | None = None) -> list[dict]:
     kwargs = {}
     if volume_id:
         kwargs["volume_id"] = volume_id
@@ -164,7 +174,7 @@ def create_snapshot(
     conn: openstack.connection.Connection,
     volume_id: str,
     name: str,
-    description: Optional[str] = None,
+    description: str | None = None,
     force: bool = False,
 ) -> dict:
     kwargs: dict = {"volume_id": volume_id, "name": name, "is_forced": force}
@@ -185,8 +195,8 @@ def _snapshot_to_dict(s) -> dict:
         "status": s.status,
         "volume_id": s.volume_id,
         "size": s.size,
-        "description": getattr(s, 'description', '') or "",
-        "created_at": str(s.created_at) if getattr(s, 'created_at', None) else None,
+        "description": getattr(s, "description", "") or "",
+        "created_at": str(s.created_at) if getattr(s, "created_at", None) else None,
     }
 
 
@@ -197,9 +207,9 @@ def _backup_to_dict(b) -> dict:
         "status": b.status,
         "volume_id": b.volume_id,
         "size": b.size,
-        "is_incremental": getattr(b, 'is_incremental', False),
+        "is_incremental": getattr(b, "is_incremental", False),
         "description": b.description or "",
-        "created_at": str(b.created_at) if getattr(b, 'created_at', None) else None,
+        "created_at": str(b.created_at) if getattr(b, "created_at", None) else None,
     }
 
 

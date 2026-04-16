@@ -1,4 +1,5 @@
 """인증 및 세션 관련 통합 테스트."""
+
 import pytest
 
 
@@ -73,12 +74,12 @@ async def test_gitlab_enabled(anon_client):
 # PR4: is_system_admin 분리 검증 — sanity check
 # ─────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio(loop_scope="session")
 async def test_admin_login_is_system_admin(admin_auth_data):
     """admin 로그인 응답의 is_system_admin=True 확인. 실패 시 credentials.toml [admin] 확인."""
     assert admin_auth_data.get("is_system_admin") is True, (
-        "admin 계정이 is_system_admin=False — "
-        "credentials.toml [admin] 계정이 실제 system admin role을 보유하는지 확인"
+        "admin 계정이 is_system_admin=False — credentials.toml [admin] 계정이 실제 system admin role을 보유하는지 확인"
     )
 
 
@@ -86,8 +87,7 @@ async def test_admin_login_is_system_admin(admin_auth_data):
 async def test_user_login_is_not_system_admin(user_auth_data):
     """일반 유저 로그인 응답의 is_system_admin=False 확인. 실패 시 credentials.toml [user] 확인."""
     assert user_auth_data.get("is_system_admin") is False, (
-        "일반 유저가 is_system_admin=True — "
-        "credentials.toml [user] 계정이 system admin role을 보유하지 않는지 확인"
+        "일반 유저가 is_system_admin=True — credentials.toml [user] 계정이 system admin role을 보유하지 않는지 확인"
     )
 
 
@@ -103,6 +103,7 @@ async def test_user_session_info(user_client):
 # admin_user 검증 (admin 프로젝트 admin role 보유, default project ≠ admin 가능)
 # credentials.toml [admin_user] 또는 UNION_TEST_ADMIN_USER_* 환경변수 필요
 # ─────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_admin_user_login_is_system_admin(admin_user_auth_data):

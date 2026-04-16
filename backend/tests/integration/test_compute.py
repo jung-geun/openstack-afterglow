@@ -1,10 +1,11 @@
 """컴퓨트 API (인스턴스, 이미지, 키페어, 플레이버) 통합 테스트."""
-import pytest
 
+import pytest
 
 # ─────────────────────────────────────────────────────────────────
 # 이미지
 # ─────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_list_images(client):
@@ -45,6 +46,7 @@ async def test_get_image_not_found(client):
 # 플레이버
 # ─────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio(loop_scope="session")
 async def test_list_flavors(client):
     resp = await client.get("/api/flavors")
@@ -62,6 +64,7 @@ async def test_list_flavors(client):
 # ─────────────────────────────────────────────────────────────────
 # 키페어
 # ─────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_list_keypairs(client):
@@ -99,6 +102,7 @@ async def test_keypair_crud(client):
 # ─────────────────────────────────────────────────────────────────
 # 인스턴스
 # ─────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_list_instances(client):
@@ -163,6 +167,7 @@ async def test_get_instance_security_groups(client):
 # ─────────────────────────────────────────────────────────────────
 # PR4: 일반 유저도 프로젝트 스코프 리소스 조회 가능 확인
 # ─────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_list_images_as_user(user_client):

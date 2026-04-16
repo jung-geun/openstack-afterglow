@@ -4,17 +4,17 @@
 Manila CephFS share 생성 → CephX access rule → 임시 VM(cloud-init) 자동 생성
 → VM 내부에서 패키지 설치 → VM SHUTOFF 감지 → 메타데이터 업데이트 → VM 삭제
 """
+
 import asyncio
 import base64
 import logging
-import time
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 import openstack
 
 from app.config import get_settings
-from app.services import manila, libraries as lib_svc
+from app.services import libraries as lib_svc
+from app.services import manila
 
 _logger = logging.getLogger(__name__)
 
@@ -137,14 +137,20 @@ async def start_build(
     cephx_user = f"union-builder-{library_id}"
     access_rule = await asyncio.to_thread(
         manila.create_access_rule,
-        conn, share_id, cephx_user, "rw", "cephx",
+        conn,
+        share_id,
+        cephx_user,
+        "rw",
+        "cephx",
     )
     cephx_secret = access_rule["access_key"]
     _logger.info("[builder] CephX access rule 생성: user=%s", cephx_user)
 
     # 3. Export location 조회
     export_locations = await asyncio.to_thread(
-        manila.get_export_locations, conn, share_id,
+        manila.get_export_locations,
+        conn,
+        share_id,
     )
     if not export_locations:
         raise RuntimeError(f"Share {share_id}의 export location을 찾을 수 없습니다")
@@ -170,7 +176,13 @@ async def start_build(
     # 5. 임시 VM 생성 (이미지에서 직접 부팅)
     _logger.info("[builder] 빌더 VM 생성 시작")
     server = await asyncio.to_thread(
-        _create_builder_vm, conn, library_id, image_id, flavor_id, network_id, userdata_b64,
+        _create_builder_vm,
+        conn,
+        library_id,
+        image_id,
+        flavor_id,
+        network_id,
+        userdata_b64,
     )
     server_id = server.id
     _logger.info("[builder] 빌더 VM 생성 완료: %s", server_id)
@@ -182,7 +194,7 @@ async def start_build(
         "server_id": server_id,
         "cephx_user": cephx_user,
         "status": "building",
-        "started_at": datetime.now(timezone.utc).isoformat(),
+        "started_at": datetime.now(UTC).isoformat(),
     }
     _active_builds[library_id] = build_info
 
@@ -248,21 +260,28 @@ async def _monitor_build(
                 _logger.info("[builder] 빌더 VM SHUTOFF 감지, 빌드 완료: %s", library_id)
                 # 메타데이터 업데이트
                 await asyncio.to_thread(
-                    manila.update_share_metadata, conn, share_id,
+                    manila.update_share_metadata,
+                    conn,
+                    share_id,
                     {
                         "union_status": "ready",
-                        "union_built_at": datetime.now(timezone.utc).isoformat(),
+                        "union_built_at": datetime.now(UTC).isoformat(),
                     },
                 )
                 # CephX access rule 정리 (빌더용)
                 try:
                     rules = await asyncio.to_thread(
-                        manila.list_access_rules, conn, share_id,
+                        manila.list_access_rules,
+                        conn,
+                        share_id,
                     )
                     for rule in rules:
                         if rule.get("access_to", "").startswith("union-builder-"):
                             await asyncio.to_thread(
-                                manila.revoke_access_rule, conn, share_id, rule["id"],
+                                manila.revoke_access_rule,
+                                conn,
+                                share_id,
+                                rule["id"],
                             )
                 except Exception:
                     _logger.warning("[builder] CephX rule 정리 실패", exc_info=True)
@@ -282,7 +301,9 @@ async def _monitor_build(
             if status == "ERROR":
                 _logger.error("[builder] 빌더 VM ERROR 상태: %s", server_id)
                 await asyncio.to_thread(
-                    manila.update_share_metadata, conn, share_id,
+                    manila.update_share_metadata,
+                    conn,
+                    share_id,
                     {"union_status": "error"},
                 )
                 try:
@@ -297,7 +318,9 @@ async def _monitor_build(
         # 타임아웃
         _logger.error("[builder] 빌드 타임아웃 (30분): %s", library_id)
         await asyncio.to_thread(
-            manila.update_share_metadata, conn, share_id,
+            manila.update_share_metadata,
+            conn,
+            share_id,
             {"union_status": "timeout"},
         )
         try:

@@ -1,6 +1,9 @@
 """인스턴스 API 단위 테스트."""
+
+from unittest.mock import patch
+
 import pytest
-from unittest.mock import patch, AsyncMock, MagicMock
+
 from app.models.compute import InstanceInfo
 
 
@@ -27,13 +30,16 @@ def make_instance(instance_id: str = "inst-1", name: str = "test-vm", status: st
 
 # ────── GET 목록 & 상세 ──────
 
+
 @pytest.mark.asyncio
 async def test_list_instances(client, mock_conn):
-    with patch("app.api.compute.instances.nova.list_servers", return_value=[make_instance()]), \
-         patch("app.api.compute.instances.nova.list_flavors", return_value=[]), \
-         patch("app.api.compute.instances.glance.list_images", return_value=[]), \
-         patch("app.api.compute.instances.nova.list_volume_attachments", return_value=[]), \
-         patch("app.api.compute.instances.cinder.get_volume_image_metadata", return_value={}):
+    with (
+        patch("app.api.compute.instances.nova.list_servers", return_value=[make_instance()]),
+        patch("app.api.compute.instances.nova.list_flavors", return_value=[]),
+        patch("app.api.compute.instances.glance.list_images", return_value=[]),
+        patch("app.api.compute.instances.nova.list_volume_attachments", return_value=[]),
+        patch("app.api.compute.instances.cinder.get_volume_image_metadata", return_value={}),
+    ):
         resp = await client.get("/api/instances")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
@@ -41,9 +47,11 @@ async def test_list_instances(client, mock_conn):
 
 @pytest.mark.asyncio
 async def test_get_instance(client, mock_conn):
-    with patch("app.api.compute.instances.nova.get_server", return_value=make_instance()), \
-         patch("app.api.compute.instances.nova.list_flavors", return_value=[]), \
-         patch("app.api.compute.instances.glance.list_images", return_value=[]):
+    with (
+        patch("app.api.compute.instances.nova.get_server", return_value=make_instance()),
+        patch("app.api.compute.instances.nova.list_flavors", return_value=[]),
+        patch("app.api.compute.instances.glance.list_images", return_value=[]),
+    ):
         resp = await client.get("/api/instances/inst-1")
     assert resp.status_code == 200
     assert resp.json()["id"] == "inst-1"
@@ -51,18 +59,22 @@ async def test_get_instance(client, mock_conn):
 
 # ────── DELETE ──────
 
+
 @pytest.mark.asyncio
 async def test_delete_instance(client, mock_conn):
     inst = make_instance()
     inst.metadata = {}
-    with patch("app.api.compute.instances.nova.get_server", return_value=inst), \
-         patch("app.api.compute.instances.nova.delete_server", return_value=None), \
-         patch("app.api.compute.instances.cinder.delete_volume", return_value=None):
+    with (
+        patch("app.api.compute.instances.nova.get_server", return_value=inst),
+        patch("app.api.compute.instances.nova.delete_server", return_value=None),
+        patch("app.api.compute.instances.cinder.delete_volume", return_value=None),
+    ):
         resp = await client.delete("/api/instances/inst-1")
     assert resp.status_code == 204
 
 
 # ────── 라이프사이클 액션 ──────
+
 
 @pytest.mark.asyncio
 async def test_start_instance(client, mock_conn):
@@ -101,6 +113,7 @@ async def test_unshelve_instance(client, mock_conn):
 
 # ────── 콘솔/로그 ──────
 
+
 @pytest.mark.asyncio
 async def test_get_console(client, mock_conn):
     with patch("app.api.compute.instances.nova.get_console_url", return_value="https://console.example.com"):
@@ -119,6 +132,7 @@ async def test_get_console_log(client, mock_conn):
 
 # ────── 볼륨 Attach/Detach ──────
 
+
 @pytest.mark.asyncio
 async def test_attach_volume(client, mock_conn):
     with patch("app.api.compute.instances.nova.attach_volume", return_value={"id": "attach-1", "volumeId": "vol-1"}):
@@ -135,9 +149,13 @@ async def test_detach_volume(client, mock_conn):
 
 # ────── 인터페이스 Attach/Detach ──────
 
+
 @pytest.mark.asyncio
 async def test_attach_interface(client, mock_conn):
-    with patch("app.api.compute.instances.nova.attach_interface", return_value={"port_id": "port-1", "net_id": "net-1", "ip_address": "10.0.0.2"}):
+    with patch(
+        "app.api.compute.instances.nova.attach_interface",
+        return_value={"port_id": "port-1", "net_id": "net-1", "ip_address": "10.0.0.2"},
+    ):
         resp = await client.post("/api/instances/inst-1/interfaces", json={"net_id": "net-1"})
     assert resp.status_code in (200, 201)
 
@@ -151,13 +169,17 @@ async def test_detach_interface(client, mock_conn):
 
 # ────── 입력 검증 ──────
 
+
 @pytest.mark.asyncio
 async def test_create_instance_invalid_name(client, mock_conn):
     """인스턴스 이름 regex 검증 — 특수문자 포함 시 422."""
-    resp = await client.post("/api/instances", json={
-        "name": "invalid name!",
-        "image_id": "img-1",
-        "flavor_id": "flavor-1",
-        "network_id": "net-1",
-    })
+    resp = await client.post(
+        "/api/instances",
+        json={
+            "name": "invalid name!",
+            "image_id": "img-1",
+            "flavor_id": "flavor-1",
+            "network_id": "net-1",
+        },
+    )
     assert resp.status_code == 422

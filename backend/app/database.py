@@ -5,15 +5,15 @@ url이 비어있으면 DB 연결 없이 Redis 폴백으로 동작.
 """
 
 import logging
-from typing import AsyncGenerator, Optional
+from collections.abc import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
 _logger = logging.getLogger(__name__)
 
-_engine: Optional[AsyncEngine] = None
-_session_factory: Optional[async_sessionmaker] = None
+_engine: AsyncEngine | None = None
+_session_factory: async_sessionmaker | None = None
 
 
 class Base(DeclarativeBase):
@@ -48,6 +48,7 @@ async def create_tables() -> None:
     if _engine is None:
         return
     from app.models.db import Base as _ModelBase  # noqa: F401 — side effect: 모델 등록
+
     async with _engine.begin() as conn:
         await conn.run_sync(_ModelBase.metadata.create_all)
     _logger.info("데이터베이스 테이블 생성/확인 완료")
@@ -61,7 +62,7 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
-def get_session_factory() -> Optional[async_sessionmaker]:
+def get_session_factory() -> async_sessionmaker | None:
     return _session_factory
 
 
@@ -78,6 +79,7 @@ def _mask_url(url: str) -> str:
     """비밀번호 마스킹 (로그용)."""
     try:
         from urllib.parse import urlparse, urlunparse
+
         p = urlparse(url)
         if p.password:
             masked = p._replace(netloc=f"{p.username}:***@{p.hostname}:{p.port}")

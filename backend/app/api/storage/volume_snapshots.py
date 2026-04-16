@@ -1,11 +1,12 @@
 import asyncio
+
+import openstack
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-import openstack
 
 from app.api.deps import get_os_conn
 from app.services import cinder
-from app.services.cache import cached_call, invalidate, ttl_fast
+from app.services.cache import cached_call, ttl_fast
 
 router = APIRouter()
 
@@ -24,14 +25,17 @@ async def list_snapshots(
     refresh: bool = Query(False),
 ):
     pid = conn._union_project_id
-    cache_key = f"afterglow:cinder:{pid}:snapshots" if not volume_id else f"afterglow:cinder:{pid}:snapshots:{volume_id}"
+    cache_key = (
+        f"afterglow:cinder:{pid}:snapshots" if not volume_id else f"afterglow:cinder:{pid}:snapshots:{volume_id}"
+    )
     try:
         return await cached_call(
-            cache_key, ttl_fast(),
+            cache_key,
+            ttl_fast(),
             lambda: cinder.list_snapshots(conn, volume_id),
             refresh=refresh,
         )
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="스냅샷 목록 조회 실패")
 
 
@@ -44,7 +48,7 @@ async def create_snapshot(
         return await asyncio.to_thread(
             cinder.create_snapshot, conn, req.volume_id, req.name, req.description, req.force
         )
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="스냅샷 생성 실패")
 
 
@@ -60,5 +64,5 @@ async def get_snapshot(snapshot_id: str, conn: openstack.connection.Connection =
 async def delete_snapshot(snapshot_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
     try:
         await asyncio.to_thread(cinder.delete_snapshot, conn, snapshot_id)
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="스냅샷 삭제 실패")

@@ -1,4 +1,5 @@
 """Heat 오케스트레이션 서비스 — Magnum K8s 클러스터 스택 추적용."""
+
 import openstack
 
 
@@ -12,9 +13,9 @@ def _get_stack(conn: openstack.connection.Connection, stack_id: str):
         return conn.orchestration.get_stack(stack_id)
     except Exception as e:
         err = str(e).lower()
-        if '404' in err or 'not found' in err or 'no such' in err:
+        if "404" in err or "not found" in err or "no such" in err:
             raise HeatServiceUnavailable(f"스택을 찾을 수 없습니다: {stack_id}") from e
-        if 'endpoint' in err or 'connection' in err or '503' in err:
+        if "endpoint" in err or "connection" in err or "503" in err:
             raise HeatServiceUnavailable(f"Heat 서비스에 접근할 수 없습니다: {e}") from e
         raise
 
@@ -23,16 +24,16 @@ def get_stack_detail(conn: openstack.connection.Connection, stack_id: str) -> di
     """스택 상세 정보 반환."""
     try:
         stack = _get_stack(conn, stack_id)
-        s = stack.to_dict() if hasattr(stack, 'to_dict') else {}
+        s = stack.to_dict() if hasattr(stack, "to_dict") else {}
         return {
             "id": stack.id,
-            "name": getattr(stack, 'name', None) or s.get('stack_name'),
-            "status": getattr(stack, 'status', None) or s.get('stack_status'),
-            "status_reason": getattr(stack, 'status_reason', None) or s.get('stack_status_reason'),
-            "created_at": str(getattr(stack, 'created_at', None) or s.get('creation_time', '')),
-            "updated_at": str(getattr(stack, 'updated_at', None) or s.get('updated_time', '')),
-            "parameters": s.get('parameters', {}),
-            "outputs": s.get('outputs', []),
+            "name": getattr(stack, "name", None) or s.get("stack_name"),
+            "status": getattr(stack, "status", None) or s.get("stack_status"),
+            "status_reason": getattr(stack, "status_reason", None) or s.get("stack_status_reason"),
+            "created_at": str(getattr(stack, "created_at", None) or s.get("creation_time", "")),
+            "updated_at": str(getattr(stack, "updated_at", None) or s.get("updated_time", "")),
+            "parameters": s.get("parameters", {}),
+            "outputs": s.get("outputs", []),
         }
     except HeatServiceUnavailable:
         raise
@@ -46,14 +47,17 @@ def list_stack_resources(conn: openstack.connection.Connection, stack_id: str) -
         _get_stack(conn, stack_id)  # 스택 존재 확인
         resources = []
         for r in conn.orchestration.resources(stack_id):
-            resources.append({
-                "resource_name": getattr(r, 'resource_name', None) or getattr(r, 'name', ''),
-                "resource_type": getattr(r, 'resource_type', '') or '',
-                "physical_resource_id": getattr(r, 'physical_resource_id', None) or '',
-                "resource_status": getattr(r, 'resource_status', '') or getattr(r, 'status', ''),
-                "resource_status_reason": getattr(r, 'resource_status_reason', None) or getattr(r, 'status_reason', ''),
-                "created_at": str(getattr(r, 'creation_time', '') or getattr(r, 'created_at', '') or ''),
-            })
+            resources.append(
+                {
+                    "resource_name": getattr(r, "resource_name", None) or getattr(r, "name", ""),
+                    "resource_type": getattr(r, "resource_type", "") or "",
+                    "physical_resource_id": getattr(r, "physical_resource_id", None) or "",
+                    "resource_status": getattr(r, "resource_status", "") or getattr(r, "status", ""),
+                    "resource_status_reason": getattr(r, "resource_status_reason", None)
+                    or getattr(r, "status_reason", ""),
+                    "created_at": str(getattr(r, "creation_time", "") or getattr(r, "created_at", "") or ""),
+                }
+            )
         return resources
     except HeatServiceUnavailable:
         raise
@@ -67,16 +71,18 @@ def list_stack_events(conn: openstack.connection.Connection, stack_id: str) -> l
         _get_stack(conn, stack_id)  # 스택 존재 확인
         events = []
         for e in conn.orchestration.stack_events(stack_id):
-            events.append({
-                "resource_name": getattr(e, 'resource_name', None) or getattr(e, 'logical_resource_id', ''),
-                "resource_status": getattr(e, 'resource_status', '') or getattr(e, 'status', ''),
-                "resource_status_reason": getattr(e, 'resource_status_reason', None) or '',
-                "event_time": str(getattr(e, 'event_time', '') or getattr(e, 'created_at', '') or ''),
-                "logical_resource_id": getattr(e, 'logical_resource_id', None) or '',
-                "physical_resource_id": getattr(e, 'physical_resource_id', None) or '',
-            })
+            events.append(
+                {
+                    "resource_name": getattr(e, "resource_name", None) or getattr(e, "logical_resource_id", ""),
+                    "resource_status": getattr(e, "resource_status", "") or getattr(e, "status", ""),
+                    "resource_status_reason": getattr(e, "resource_status_reason", None) or "",
+                    "event_time": str(getattr(e, "event_time", "") or getattr(e, "created_at", "") or ""),
+                    "logical_resource_id": getattr(e, "logical_resource_id", None) or "",
+                    "physical_resource_id": getattr(e, "physical_resource_id", None) or "",
+                }
+            )
         # 최신순 정렬
-        events.sort(key=lambda x: x['event_time'], reverse=True)
+        events.sort(key=lambda x: x["event_time"], reverse=True)
         return events
     except HeatServiceUnavailable:
         raise

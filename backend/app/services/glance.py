@@ -1,6 +1,6 @@
 import openstack
 
-from app.models.compute import ImageInfo, ImageDetail
+from app.models.compute import ImageDetail, ImageInfo
 
 
 def list_images(conn: openstack.connection.Connection, project_id: str | None = None) -> list[ImageInfo]:
@@ -12,21 +12,23 @@ def list_images(conn: openstack.connection.Connection, project_id: str | None = 
             return
         seen.add(img.id)
         props = img.properties or {}
-        os_distro = getattr(img, 'os_distro', None) or props.get("os_distro") or _guess_distro(img.name)
-        images.append(ImageInfo(
-            id=img.id,
-            name=img.name,
-            status=img.status,
-            size=img.size,
-            min_disk=img.min_disk or 0,
-            min_ram=img.min_ram or 0,
-            disk_format=img.disk_format,
-            os_type=props.get("os_type"),
-            os_distro=os_distro,
-            created_at=str(img.created_at) if img.created_at else None,
-            owner=getattr(img, 'owner', None) or getattr(img, 'project_id', None),
-            visibility=getattr(img, 'visibility', None),
-        ))
+        os_distro = getattr(img, "os_distro", None) or props.get("os_distro") or _guess_distro(img.name)
+        images.append(
+            ImageInfo(
+                id=img.id,
+                name=img.name,
+                status=img.status,
+                size=img.size,
+                min_disk=img.min_disk or 0,
+                min_ram=img.min_ram or 0,
+                disk_format=img.disk_format,
+                os_type=props.get("os_type"),
+                os_distro=os_distro,
+                created_at=str(img.created_at) if img.created_at else None,
+                owner=getattr(img, "owner", None) or getattr(img, "project_id", None),
+                visibility=getattr(img, "visibility", None),
+            )
+        )
 
     # public, community, shared: 접근 가능한 공개/공유 이미지
     for vis in ("public", "community", "shared"):
@@ -37,7 +39,7 @@ def list_images(conn: openstack.connection.Connection, project_id: str | None = 
             pass
 
     # 현재 프로젝트의 private 이미지만
-    pid = project_id or getattr(conn, '_union_project_id', None)
+    pid = project_id or getattr(conn, "_union_project_id", None)
     try:
         kwargs = {"status": "active", "visibility": "private"}
         if pid:
@@ -53,7 +55,7 @@ def list_images(conn: openstack.connection.Connection, project_id: str | None = 
 def get_image(conn: openstack.connection.Connection, image_id: str) -> ImageDetail:
     img = conn.image.get_image(image_id)
     props = img.properties or {}
-    os_distro = getattr(img, 'os_distro', None) or props.get("os_distro") or _guess_distro(img.name)
+    os_distro = getattr(img, "os_distro", None) or props.get("os_distro") or _guess_distro(img.name)
     # properties에서 별도 필드로 반환하는 키 제외
     _exclude = {"os_distro", "os_type", "os_hash_algo", "os_hash_value"}
     clean_props = {k: v for k, v in props.items() if k not in _exclude}
@@ -68,18 +70,18 @@ def get_image(conn: openstack.connection.Connection, image_id: str) -> ImageDeta
         os_type=props.get("os_type"),
         os_distro=os_distro,
         created_at=str(img.created_at) if img.created_at else None,
-        owner=getattr(img, 'owner', None) or getattr(img, 'project_id', None),
-        visibility=getattr(img, 'visibility', None),
-        checksum=getattr(img, 'checksum', None),
+        owner=getattr(img, "owner", None) or getattr(img, "project_id", None),
+        visibility=getattr(img, "visibility", None),
+        checksum=getattr(img, "checksum", None),
         container_format=img.container_format,
-        virtual_size=getattr(img, 'virtual_size', None),
-        updated_at=str(img.updated_at) if getattr(img, 'updated_at', None) else None,
-        protected=getattr(img, 'is_protected', False) or False,
-        tags=list(getattr(img, 'tags', None) or []),
+        virtual_size=getattr(img, "virtual_size", None),
+        updated_at=str(img.updated_at) if getattr(img, "updated_at", None) else None,
+        protected=getattr(img, "is_protected", False) or False,
+        tags=list(getattr(img, "tags", None) or []),
         properties=clean_props,
-        os_hash_algo=getattr(img, 'os_hash_algo', None),
-        os_hash_value=getattr(img, 'os_hash_value', None),
-        direct_url=getattr(img, 'direct_url', None),
+        os_hash_algo=getattr(img, "os_hash_algo", None),
+        os_hash_value=getattr(img, "os_hash_value", None),
+        direct_url=getattr(img, "direct_url", None),
     )
 
 
@@ -121,7 +123,7 @@ def update_image_metadata(
         kwargs["visibility"] = visibility
     img = conn.image.update_image(image_id, **kwargs)
     props = img.properties or {}
-    od = getattr(img, 'os_distro', None) or props.get("os_distro") or _guess_distro(img.name)
+    od = getattr(img, "os_distro", None) or props.get("os_distro") or _guess_distro(img.name)
     return ImageInfo(
         id=img.id,
         name=img.name,
@@ -133,7 +135,7 @@ def update_image_metadata(
         os_type=props.get("os_type"),
         os_distro=od,
         created_at=str(img.created_at) if img.created_at else None,
-        owner=getattr(img, 'owner', None) or getattr(img, 'project_id', None),
+        owner=getattr(img, "owner", None) or getattr(img, "project_id", None),
     )
 
 

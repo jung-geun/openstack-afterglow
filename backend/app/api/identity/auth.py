@@ -1,14 +1,14 @@
 import asyncio
 import hashlib
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
-from typing import Optional
 
-from app.models.auth import LoginRequest, TokenResponse, UserInfo, ProjectInfo, GitLabCallbackRequest
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+
+from app.api.deps import extend_session, get_session_remaining, get_token_info
+from app.config import get_settings
+from app.models.auth import GitLabCallbackRequest, LoginRequest, ProjectInfo, TokenResponse, UserInfo
+from app.rate_limit import limiter
 from app.services import keystone
 from app.services.cache import cached_call, ttl_fast, ttl_normal, ttl_static
-from app.config import get_settings
-from app.rate_limit import limiter
-from app.api.deps import get_token_info, get_session_remaining, extend_session
 
 router = APIRouter()
 
@@ -17,8 +17,9 @@ async def _prewarm_dashboard(token: str, project_id: str):
     """로그인 후 백그라운드에서 대시보드 캐시를 미리 워밍."""
     try:
         conn = keystone.get_openstack_connection(token, project_id)
-        from app.api.common.dashboard import _list_servers_as_dicts, _list_flavors_as_dicts
-        from app.services import nova, cinder
+        from app.api.common.dashboard import _list_flavors_as_dicts, _list_servers_as_dicts
+        from app.services import cinder, nova
+
         await asyncio.gather(
             cached_call(f"afterglow:nova:{project_id}:servers", ttl_fast(), lambda: _list_servers_as_dicts(conn)),
             cached_call(f"afterglow:nova:{project_id}:limits", ttl_normal(), lambda: nova.get_project_limits(conn)),
@@ -39,7 +40,7 @@ async def login(request: Request, req: LoginRequest, background_tasks: Backgroun
             project_name=req.project_name,
             domain_name=req.domain_name,
         )
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=401, detail="인증 실패")
 
     # 사용자의 default_project_id 조회
@@ -103,6 +104,7 @@ async def extend_session_endpoint(token_info: dict = Depends(get_token_info)):
 async def logout(token_info: dict = Depends(get_token_info)):
     """로그아웃: Redis 세션 삭제 및 Keystone 토큰 폐기."""
     from app.services.cache import _get_redis
+
     token = token_info["token"]
     pid = token_info.get("project_id") or "noscope"
     h = hashlib.sha256(token.encode()).hexdigest()[:32]
@@ -124,7 +126,7 @@ async def list_projects(token_info: dict = Depends(get_token_info)):
     try:
         projects = keystone.list_projects(token_info["token"])
         return [ProjectInfo(**p) for p in projects]
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="프로젝트 목록 조회 실패")
 
 
@@ -142,9 +144,10 @@ async def gitlab_authorize():
     if not settings.gitlab_oidc_enabled:
         raise HTTPException(status_code=404, detail="GitLab OIDC가 비활성화 상태입니다")
     from app.services.gitlab_oidc import get_authorize_url
+
     try:
         url = await get_authorize_url()
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="GitLab 인증 URL 생성 실패")
     return {"authorize_url": url}
 
@@ -157,9 +160,10 @@ async def gitlab_callback(request: Request, req: GitLabCallbackRequest, backgrou
     if not settings.gitlab_oidc_enabled:
         raise HTTPException(status_code=404, detail="GitLab OIDC가 비활성화 상태입니다")
     from app.services.gitlab_oidc import exchange_code
+
     try:
         data = await exchange_code(req.code, req.state)
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=401, detail="GitLab 인증 실패")
 
     # 사용자의 default_project_id 조회

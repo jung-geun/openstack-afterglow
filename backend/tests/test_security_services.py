@@ -1,7 +1,9 @@
 """storage/security_services.py 엔드포인트 단위 테스트 (5개, manila 필요)."""
+
+from unittest.mock import AsyncMock, patch
+
 import pytest
-from unittest.mock import patch, AsyncMock
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 
@@ -29,11 +31,22 @@ async def test_create_security_service_unauthenticated():
 
 @pytest.mark.asyncio
 async def test_create_security_service_success(client):
-    ss = {"id": "ss-1", "name": "ss1", "type": "ldap", "status": "new",
-          "description": "", "dns_ip": None, "server": None, "domain": None,
-          "user": None, "created_at": None}
-    with patch("app.api.storage.security_services.asyncio") as mock_asyncio, \
-         patch("app.api.storage.security_services.invalidate", new=AsyncMock()):
+    ss = {
+        "id": "ss-1",
+        "name": "ss1",
+        "type": "ldap",
+        "status": "new",
+        "description": "",
+        "dns_ip": None,
+        "server": None,
+        "domain": None,
+        "user": None,
+        "created_at": None,
+    }
+    with (
+        patch("app.api.storage.security_services.asyncio") as mock_asyncio,
+        patch("app.api.storage.security_services.invalidate", new=AsyncMock()),
+    ):
         mock_asyncio.to_thread = AsyncMock(return_value=ss)
         resp = await client.post("/api/security-services", json={"type": "ldap", "name": "ss1"})
     assert resp.status_code == 201
@@ -48,8 +61,10 @@ async def test_delete_security_service_unauthenticated():
 
 @pytest.mark.asyncio
 async def test_delete_security_service_success(client):
-    with patch("app.api.storage.security_services.asyncio") as mock_asyncio, \
-         patch("app.api.storage.security_services.invalidate", new=AsyncMock()):
+    with (
+        patch("app.api.storage.security_services.asyncio") as mock_asyncio,
+        patch("app.api.storage.security_services.invalidate", new=AsyncMock()),
+    ):
         mock_asyncio.to_thread = AsyncMock(return_value=None)
         resp = await client.delete("/api/security-services/ss-1")
     assert resp.status_code == 204
@@ -64,8 +79,10 @@ async def test_attach_security_service_unauthenticated():
 
 @pytest.mark.asyncio
 async def test_attach_security_service_success(client):
-    with patch("app.api.storage.security_services.asyncio") as mock_asyncio, \
-         patch("app.api.storage.security_services.invalidate", new=AsyncMock()):
+    with (
+        patch("app.api.storage.security_services.asyncio") as mock_asyncio,
+        patch("app.api.storage.security_services.invalidate", new=AsyncMock()),
+    ):
         mock_asyncio.to_thread = AsyncMock(return_value={"id": "sn-1"})
         resp = await client.post("/api/security-services/ss-1/attach?share_network_id=sn-1")
     assert resp.status_code == 200
@@ -80,8 +97,10 @@ async def test_detach_security_service_unauthenticated():
 
 @pytest.mark.asyncio
 async def test_detach_security_service_success(client):
-    with patch("app.api.storage.security_services.asyncio") as mock_asyncio, \
-         patch("app.api.storage.security_services.invalidate", new=AsyncMock()):
+    with (
+        patch("app.api.storage.security_services.asyncio") as mock_asyncio,
+        patch("app.api.storage.security_services.invalidate", new=AsyncMock()),
+    ):
         mock_asyncio.to_thread = AsyncMock(return_value=None)
         resp = await client.delete("/api/security-services/ss-1/detach?share_network_id=sn-1")
     assert resp.status_code == 204

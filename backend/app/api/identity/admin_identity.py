@@ -1,11 +1,13 @@
 """관리자 Identity 관리 엔드포인트 (사용자, 프로젝트, 쿼터, 그룹, 역할)."""
+
 import asyncio
 import logging
+
+import openstack
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel
-import openstack
 
-from app.api.deps import get_os_conn, get_token_info, require_admin
+from app.api.deps import get_os_conn, require_admin
 from app.services.cache import cached_call, invalidate, ttl_slow
 
 _logger = logging.getLogger(__name__)
@@ -16,6 +18,7 @@ router = APIRouter()
 # ============================================================================
 # Users
 # ============================================================================
+
 
 class CreateUserRequest(BaseModel):
     name: str
@@ -39,6 +42,7 @@ async def list_users(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """사용자 목록 (페이지네이션)."""
+
     def _list():
         kwargs: dict = {"limit": limit}
         if marker:
@@ -46,26 +50,29 @@ async def list_users(
         users = []
         for u in conn.identity.users(**kwargs):
             # Keystone list API가 created_at을 반환하지 않는 경우 개별 GET으로 보완
-            created_at = getattr(u, 'created_at', None)
+            created_at = getattr(u, "created_at", None)
             if not created_at:
                 try:
                     detail = conn.identity.get_user(u.id)
-                    created_at = getattr(detail, 'created_at', None)
+                    created_at = getattr(detail, "created_at", None)
                 except Exception:
                     pass
-            users.append({
-                "id": u.id,
-                "name": u.name or "",
-                "email": getattr(u, 'email', '') or "",
-                "enabled": u.is_enabled,
-                "domain_id": getattr(u, 'domain_id', None),
-                "default_project_id": getattr(u, 'default_project_id', None),
-                "created_at": str(created_at) if created_at else None,
-            })
+            users.append(
+                {
+                    "id": u.id,
+                    "name": u.name or "",
+                    "email": getattr(u, "email", "") or "",
+                    "enabled": u.is_enabled,
+                    "domain_id": getattr(u, "domain_id", None),
+                    "default_project_id": getattr(u, "default_project_id", None),
+                    "created_at": str(created_at) if created_at else None,
+                }
+            )
             if len(users) >= limit:
                 break
         next_marker = users[-1]["id"] if len(users) == limit else None
         return {"items": users, "next_marker": next_marker, "count": len(users)}
+
     try:
         return await asyncio.to_thread(_list)
     except Exception:
@@ -78,6 +85,7 @@ async def create_user(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """사용자 생성."""
+
     def _create():
         try:
             kwargs = {"name": req.name, "enabled": req.enabled}
@@ -91,11 +99,12 @@ async def create_user(
             return {
                 "id": u.id,
                 "name": u.name or "",
-                "email": getattr(u, 'email', '') or "",
+                "email": getattr(u, "email", "") or "",
                 "enabled": u.is_enabled,
             }
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"사용자 생성 실패: {e}")
+
     try:
         return await asyncio.to_thread(_create)
     except HTTPException:
@@ -109,6 +118,7 @@ async def update_user(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """사용자 수정."""
+
     def _update():
         kwargs: dict = {}
         if req.name is not None:
@@ -124,11 +134,12 @@ async def update_user(
             return {
                 "id": u.id,
                 "name": u.name or "",
-                "email": getattr(u, 'email', '') or "",
+                "email": getattr(u, "email", "") or "",
                 "enabled": u.is_enabled,
             }
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"사용자 수정 실패: {e}")
+
     try:
         return await asyncio.to_thread(_update)
     except HTTPException:
@@ -138,6 +149,7 @@ async def update_user(
 # ============================================================================
 # Projects
 # ============================================================================
+
 
 class CreateProjectRequest(BaseModel):
     name: str
@@ -153,10 +165,14 @@ class UpdateProjectRequest(BaseModel):
 
 
 @router.get("/projects/names", dependencies=[Depends(require_admin)])
-async def list_project_names(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
+async def list_project_names(
+    conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)
+):
     """모든 프로젝트의 id/name 목록 (페이지네이션 없이)."""
+
     def _list():
         return [{"id": p.id, "name": p.name or ""} for p in conn.identity.projects()]
+
     try:
         return await cached_call("afterglow:admin:project_names", ttl_slow(), _list, refresh=refresh)
     except Exception:
@@ -170,31 +186,35 @@ async def list_projects(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """프로젝트 목록 (페이지네이션)."""
+
     def _list():
         kwargs: dict = {"limit": limit}
         if marker:
             kwargs["marker"] = marker
         projects = []
         for p in conn.identity.projects(**kwargs):
-            created_at = getattr(p, 'created_at', None)
+            created_at = getattr(p, "created_at", None)
             if not created_at:
                 try:
                     detail = conn.identity.get_project(p.id)
-                    created_at = getattr(detail, 'created_at', None)
+                    created_at = getattr(detail, "created_at", None)
                 except Exception:
                     pass
-            projects.append({
-                "id": p.id,
-                "name": p.name or "",
-                "description": getattr(p, 'description', '') or "",
-                "enabled": p.is_enabled,
-                "domain_id": getattr(p, 'domain_id', None),
-                "created_at": str(created_at) if created_at else None,
-            })
+            projects.append(
+                {
+                    "id": p.id,
+                    "name": p.name or "",
+                    "description": getattr(p, "description", "") or "",
+                    "enabled": p.is_enabled,
+                    "domain_id": getattr(p, "domain_id", None),
+                    "created_at": str(created_at) if created_at else None,
+                }
+            )
             if len(projects) >= limit:
                 break
         next_marker = projects[-1]["id"] if len(projects) == limit else None
         return {"items": projects, "next_marker": next_marker, "count": len(projects)}
+
     try:
         return await asyncio.to_thread(_list)
     except Exception:
@@ -207,6 +227,7 @@ async def create_project(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """프로젝트 생성."""
+
     def _create():
         try:
             kwargs = {"name": req.name, "enabled": req.enabled}
@@ -218,11 +239,12 @@ async def create_project(
             return {
                 "id": p.id,
                 "name": p.name or "",
-                "description": getattr(p, 'description', '') or "",
+                "description": getattr(p, "description", "") or "",
                 "enabled": p.is_enabled,
             }
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"프로젝트 생성 실패: {e}")
+
     try:
         return await asyncio.to_thread(_create)
     except HTTPException:
@@ -236,6 +258,7 @@ async def update_project(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """프로젝트 수정."""
+
     def _update():
         kwargs: dict = {}
         if req.name is not None:
@@ -249,11 +272,12 @@ async def update_project(
             return {
                 "id": p.id,
                 "name": p.name or "",
-                "description": getattr(p, 'description', '') or "",
+                "description": getattr(p, "description", "") or "",
                 "enabled": p.is_enabled,
             }
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"프로젝트 수정 실패: {e}")
+
     try:
         return await asyncio.to_thread(_update)
     except HTTPException:
@@ -266,11 +290,13 @@ async def delete_project(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """프로젝트 삭제."""
+
     def _delete():
         try:
             conn.identity.delete_project(project_id, ignore_missing=True)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"프로젝트 삭제 실패: {e}")
+
     try:
         await asyncio.to_thread(_delete)
     except HTTPException:
@@ -283,13 +309,15 @@ async def list_project_members(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """프로젝트의 사용자-역할 할당 목록 조회."""
+
     def _list():
         try:
             import re as _re
-            raw_ep = conn.session.get_endpoint(service_type='identity', interface='public').rstrip('/')
+
+            raw_ep = conn.session.get_endpoint(service_type="identity", interface="public").rstrip("/")
             # /v3 또는 /v3/{project_id}를 제거 후 명시적으로 /v3 추가
-            base_ep = _re.sub(r'/v[0-9.]+(?:/[a-f0-9\-]+)?$', '', raw_ep)
-            endpoint = base_ep + '/v3'
+            base_ep = _re.sub(r"/v[0-9.]+(?:/[a-f0-9\-]+)?$", "", raw_ep)
+            endpoint = base_ep + "/v3"
             resp = conn.session.get(
                 f"{endpoint}/role_assignments",
                 params={"scope.project.id": project_id, "include_names": "true"},
@@ -301,25 +329,30 @@ async def list_project_members(
                 group = ra.get("group", {})
                 role = ra.get("role", {})
                 if user.get("id"):
-                    assignments.append({
-                        "user_id": user["id"],
-                        "user_name": user.get("name", ""),
-                        "role_id": role.get("id", ""),
-                        "role_name": role.get("name", ""),
-                        "type": "user",
-                    })
+                    assignments.append(
+                        {
+                            "user_id": user["id"],
+                            "user_name": user.get("name", ""),
+                            "role_id": role.get("id", ""),
+                            "role_name": role.get("name", ""),
+                            "type": "user",
+                        }
+                    )
                 elif group.get("id"):
-                    assignments.append({
-                        "user_id": f"group:{group['id']}",
-                        "user_name": f"[그룹] {group.get('name', '')}",
-                        "role_id": role.get("id", ""),
-                        "role_name": role.get("name", ""),
-                        "type": "group",
-                        "group_id": group["id"],
-                    })
+                    assignments.append(
+                        {
+                            "user_id": f"group:{group['id']}",
+                            "user_name": f"[그룹] {group.get('name', '')}",
+                            "role_id": role.get("id", ""),
+                            "role_name": role.get("name", ""),
+                            "type": "group",
+                            "group_id": group["id"],
+                        }
+                    )
             return assignments
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"멤버 목록 조회 실패: {e}")
+
     try:
         return await asyncio.to_thread(_list)
     except HTTPException:
@@ -329,6 +362,7 @@ async def list_project_members(
 # ============================================================================
 # Quotas
 # ============================================================================
+
 
 class QuotaUpdateRequest(BaseModel):
     instances: int | None = None
@@ -344,6 +378,7 @@ async def get_project_quotas(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """프로젝트 쿼터 조회 (Compute + Volume, 실제 사용량 포함)."""
+
     def _get():
         result: dict = {"compute": {}, "volume": {}}
         compute_endpoint = conn.compute.get_endpoint()
@@ -368,6 +403,7 @@ async def get_project_quotas(
         except Exception:
             result["volume"] = {}
         return result
+
     try:
         return await asyncio.to_thread(_get)
     except Exception:
@@ -381,6 +417,7 @@ async def update_project_quotas(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """프로젝트 쿼터 수정."""
+
     def _update():
         try:
             # Compute quotas
@@ -406,6 +443,7 @@ async def update_project_quotas(
             return {"status": "updated"}
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"쿼터 수정 실패: {e}")
+
     try:
         return await asyncio.to_thread(_update)
     except HTTPException:
@@ -416,22 +454,27 @@ async def update_project_quotas(
 # Groups
 # ============================================================================
 
+
 @router.get("/groups", dependencies=[Depends(require_admin)])
 async def list_groups(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
     """그룹 목록."""
+
     def _list():
         groups = []
         try:
             for g in conn.identity.groups():
-                groups.append({
-                    "id": g.id,
-                    "name": g.name or "",
-                    "description": getattr(g, 'description', '') or "",
-                    "domain_id": getattr(g, 'domain_id', None),
-                })
+                groups.append(
+                    {
+                        "id": g.id,
+                        "name": g.name or "",
+                        "description": getattr(g, "description", "") or "",
+                        "domain_id": getattr(g, "domain_id", None),
+                    }
+                )
         except Exception:
             pass
         return groups
+
     try:
         return await cached_call("afterglow:admin:groups", ttl_slow(), _list, refresh=refresh)
     except Exception:
@@ -455,6 +498,7 @@ async def create_group(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """그룹 생성."""
+
     def _create():
         try:
             kwargs = {"name": req.name}
@@ -471,6 +515,7 @@ async def create_group(
             }
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"그룹 생성 실패: {e}")
+
     try:
         result = await asyncio.to_thread(_create)
         await invalidate("afterglow:admin:groups")
@@ -486,6 +531,7 @@ async def update_group(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """그룹 수정."""
+
     def _update():
         kwargs: dict = {}
         if req.name is not None:
@@ -501,6 +547,7 @@ async def update_group(
             }
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"그룹 수정 실패: {e}")
+
     try:
         return await asyncio.to_thread(_update)
     except HTTPException:
@@ -513,11 +560,13 @@ async def delete_group(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """그룹 삭제."""
+
     def _delete():
         try:
             conn.identity.delete_group(group_id, ignore_missing=True)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"그룹 삭제 실패: {e}")
+
     try:
         await asyncio.to_thread(_delete)
         await invalidate("afterglow:admin:groups")
@@ -531,19 +580,23 @@ async def list_group_users(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """그룹 멤버 목록."""
+
     def _list():
         users = []
         try:
             for u in conn.identity.group_users(group_id):
-                users.append({
-                    "id": u.id,
-                    "name": u.name or "",
-                    "email": getattr(u, "email", "") or "",
-                    "enabled": getattr(u, "is_enabled", True),
-                })
+                users.append(
+                    {
+                        "id": u.id,
+                        "name": u.name or "",
+                        "email": getattr(u, "email", "") or "",
+                        "enabled": getattr(u, "is_enabled", True),
+                    }
+                )
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"그룹 멤버 조회 실패: {e}")
         return users
+
     try:
         return await asyncio.to_thread(_list)
     except HTTPException:
@@ -557,11 +610,13 @@ async def add_user_to_group(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """그룹에 사용자 추가."""
+
     def _add():
         try:
             conn.identity.add_user_to_group(user_id, group_id)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"그룹 멤버 추가 실패: {e}")
+
     try:
         await asyncio.to_thread(_add)
     except HTTPException:
@@ -577,17 +632,21 @@ async def remove_user_from_group(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """그룹에서 사용자 제거. Keystone 토큰 revocation 대비 세션 캐시 클리어."""
+
     def _remove():
         try:
             conn.identity.remove_user_from_group(user_id, group_id)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"그룹 멤버 제거 실패: {e}")
+
     try:
         await asyncio.to_thread(_remove)
         # 그룹 멤버십 변경 시 Keystone이 토큰을 revoke할 수 있으므로 세션 캐시 클리어
         if x_auth_token:
             import hashlib as _hl
+
             from app.services.cache import _get_redis
+
             token_hash = _hl.sha256(x_auth_token.encode()).hexdigest()[:32]
             pid = x_project_id or "noscope"
             try:
@@ -604,21 +663,26 @@ async def remove_user_from_group(
 # Roles
 # ============================================================================
 
+
 @router.get("/roles", dependencies=[Depends(require_admin)])
 async def list_roles(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
     """역할 목록."""
+
     def _list():
         roles = []
         try:
             for r in conn.identity.roles():
-                roles.append({
-                    "id": r.id,
-                    "name": r.name or "",
-                    "domain_id": getattr(r, 'domain_id', None),
-                })
+                roles.append(
+                    {
+                        "id": r.id,
+                        "name": r.name or "",
+                        "domain_id": getattr(r, "domain_id", None),
+                    }
+                )
         except Exception:
             pass
         return roles
+
     try:
         return await cached_call("afterglow:admin:roles", ttl_slow(), _list, refresh=refresh)
     except Exception:
@@ -637,12 +701,14 @@ async def assign_role(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """역할 할당."""
+
     def _assign():
         try:
             conn.identity.assign_project_role_to_user(req.project_id, req.user_id, req.role_id)
             return {"status": "assigned"}
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"역할 할당 실패: {e}")
+
     try:
         return await asyncio.to_thread(_assign)
     except HTTPException:
@@ -657,12 +723,14 @@ async def revoke_role(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """역할 회수."""
+
     def _revoke():
         try:
             conn.identity.unassign_project_role_from_user(project_id, user_id, role_id)
             return {"status": "revoked"}
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"역할 회수 실패: {e}")
+
     try:
         return await asyncio.to_thread(_revoke)
     except HTTPException:
@@ -681,12 +749,14 @@ async def assign_group_role(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """그룹에 프로젝트 역할 할당."""
+
     def _assign():
         try:
             conn.identity.assign_project_role_to_group(req.project_id, req.group_id, req.role_id)
             return {"status": "assigned"}
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"그룹 역할 할당 실패: {e}")
+
     try:
         return await asyncio.to_thread(_assign)
     except HTTPException:
@@ -701,12 +771,14 @@ async def revoke_group_role(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """그룹에서 프로젝트 역할 회수."""
+
     def _revoke():
         try:
             conn.identity.unassign_project_role_from_group(project_id, group_id, role_id)
             return {"status": "revoked"}
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"그룹 역할 회수 실패: {e}")
+
     try:
         return await asyncio.to_thread(_revoke)
     except HTTPException:

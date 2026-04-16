@@ -1,10 +1,11 @@
 import asyncio
+
+import openstack
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-import openstack
 
 from app.api.deps import get_os_conn
-from app.models.compute import ImageInfo, ImageDetail
+from app.models.compute import ImageDetail, ImageInfo
 from app.services import glance
 from app.services.cache import cached_call, ttl_static
 
@@ -24,7 +25,8 @@ class UpdateImageRequest(BaseModel):
 async def list_images(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
     pid = conn._union_project_id
     return await cached_call(
-        f"afterglow:glance:{pid}:images", ttl_static(),
+        f"afterglow:glance:{pid}:images",
+        ttl_static(),
         lambda: [img.model_dump() for img in glance.list_images(conn, pid)],
         refresh=refresh,
     )
@@ -48,7 +50,7 @@ async def delete_image(
 ):
     try:
         await asyncio.to_thread(glance.delete_image, conn, image_id)
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="이미지 삭제 실패")
 
 
@@ -60,9 +62,16 @@ async def update_image(
 ):
     try:
         result = await asyncio.to_thread(
-            glance.update_image_metadata, conn, image_id,
-            req.name, req.os_distro, req.os_type, req.min_disk, req.min_ram, req.visibility,
+            glance.update_image_metadata,
+            conn,
+            image_id,
+            req.name,
+            req.os_distro,
+            req.os_type,
+            req.min_disk,
+            req.min_ram,
+            req.visibility,
         )
         return result
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="이미지 메타데이터 수정 실패")

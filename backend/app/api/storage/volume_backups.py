@@ -1,11 +1,12 @@
 import asyncio
+
+import openstack
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-import openstack
 
 from app.api.deps import get_os_conn
 from app.services import cinder
-from app.services.cache import cached_call, invalidate, ttl_fast
+from app.services.cache import cached_call, ttl_fast
 
 router = APIRouter()
 
@@ -26,11 +27,12 @@ async def list_backups(conn: openstack.connection.Connection = Depends(get_os_co
     pid = conn._union_project_id
     try:
         return await cached_call(
-            f"afterglow:cinder:{pid}:backups", ttl_fast(),
+            f"afterglow:cinder:{pid}:backups",
+            ttl_fast(),
             lambda: cinder.list_backups(conn),
             refresh=refresh,
         )
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="백업 목록 조회 실패")
 
 
@@ -43,7 +45,7 @@ async def create_backup(
         return await asyncio.to_thread(
             cinder.create_backup, conn, req.volume_id, req.name, req.description, req.incremental
         )
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="백업 생성 실패")
 
 
@@ -59,7 +61,7 @@ async def get_backup(backup_id: str, conn: openstack.connection.Connection = Dep
 async def delete_backup(backup_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
     try:
         await asyncio.to_thread(cinder.delete_backup, conn, backup_id)
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="백업 삭제 실패")
 
 
@@ -71,5 +73,5 @@ async def restore_backup(
 ):
     try:
         return await asyncio.to_thread(cinder.restore_backup, conn, backup_id, req.volume_id)
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="백업 복원 실패")

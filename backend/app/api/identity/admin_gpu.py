@@ -1,10 +1,11 @@
 """관리자 GPU 호스트 모니터링 엔드포인트."""
-import asyncio
+
 import copy
 import logging
 import re
-from fastapi import APIRouter, Depends, HTTPException, Query
+
 import openstack
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.deps import get_os_conn, require_admin
 from app.config import load_raw_toml
@@ -46,9 +47,17 @@ _DEFAULT_PCI_DEVICE_MAP: dict[str, dict[str, dict]] = {
         # === Ada Lovelace Consumer ===
         "2684": {"name": "RTX 4090", "is_audio": False, "aliases": ["RTX4090", "rtx4090", "RTX_4090", "4090"]},
         "2704": {"name": "RTX 4080", "is_audio": False, "aliases": ["RTX4080", "RTX_4080", "4080"]},
-        "2782": {"name": "RTX 4070 Ti SUPER", "is_audio": False, "aliases": ["RTX4070TiSuper", "RTX_4070_Ti_SUPER", "4070tisuper"]},
+        "2782": {
+            "name": "RTX 4070 Ti SUPER",
+            "is_audio": False,
+            "aliases": ["RTX4070TiSuper", "RTX_4070_Ti_SUPER", "4070tisuper"],
+        },
         "2783": {"name": "RTX 4070 Ti", "is_audio": False, "aliases": ["RTX4070Ti", "RTX_4070_Ti", "4070ti", "4070Ti"]},
-        "2786": {"name": "RTX 4070 SUPER", "is_audio": False, "aliases": ["RTX4070Super", "RTX_4070_SUPER", "4070super"]},
+        "2786": {
+            "name": "RTX 4070 SUPER",
+            "is_audio": False,
+            "aliases": ["RTX4070Super", "RTX_4070_SUPER", "4070super"],
+        },
         "2882": {"name": "RTX 4060 Ti", "is_audio": False, "aliases": ["RTX4060Ti", "RTX_4060_Ti", "4060ti", "4060Ti"]},
         "22BA": {"name": "AD102 Audio", "is_audio": True, "aliases": []},
         "22BE": {"name": "AD107 Audio", "is_audio": True, "aliases": []},
@@ -56,14 +65,22 @@ _DEFAULT_PCI_DEVICE_MAP: dict[str, dict[str, dict]] = {
         "2B85": {"name": "RTX 5090", "is_audio": False, "aliases": ["RTX5090", "RTX_5090", "5090"]},
         "2B80": {"name": "RTX 5080", "is_audio": False, "aliases": ["RTX5080", "RTX_5080", "5080"]},
         # === Professional / Workstation ===
-        "28B0": {"name": "RTX 2000 Ada", "is_audio": False, "aliases": ["RTX2000Ada", "RTX_2000_Ada", "2000Ada", "2000ada"]},
+        "28B0": {
+            "name": "RTX 2000 Ada",
+            "is_audio": False,
+            "aliases": ["RTX2000Ada", "RTX_2000_Ada", "2000Ada", "2000ada"],
+        },
         "2230": {"name": "RTX A6000", "is_audio": False, "aliases": ["RTXA6000", "RTX_A6000"]},
         "2231": {"name": "RTX A5000", "is_audio": False, "aliases": ["RTXA5000", "RTX_A5000"]},
         "26B1": {"name": "L40", "is_audio": False, "aliases": ["L40", "l40"]},
         "26B9": {"name": "L40S", "is_audio": False, "aliases": ["L40S", "l40s"]},
         # === Datacenter ===
         "20B0": {"name": "A100 SXM4 40GB", "is_audio": False, "aliases": ["A100_SXM4_40GB", "A100SXM440GB"]},
-        "20B2": {"name": "A100 SXM4 80GB", "is_audio": False, "aliases": ["A100_SXM4_80GB", "A100SXM480GB", "A100_80GB"]},
+        "20B2": {
+            "name": "A100 SXM4 80GB",
+            "is_audio": False,
+            "aliases": ["A100_SXM4_80GB", "A100SXM480GB", "A100_80GB"],
+        },
         "20B5": {"name": "A100 PCIe", "is_audio": False, "aliases": ["A100_PCIe", "A100PCIe"]},
         "20F1": {"name": "A100 PCIe 40GB", "is_audio": False, "aliases": ["A100_PCIe_40GB", "A100PCIe40GB"]},
         "20B8": {"name": "A10", "is_audio": False, "aliases": ["A10", "a10"]},
@@ -103,7 +120,7 @@ def _extract_hostname(name: str) -> str:
 
     예: "dms-compute10_0000:03:00.0" → "dms-compute10"
     """
-    m = re.match(r'^(.+?)_[0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.\d+$', name)
+    m = re.match(r"^(.+?)_[0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.\d+$", name)
     return m.group(1) if m else name
 
 
@@ -177,9 +194,7 @@ def _collect_gpu_hosts(conn) -> dict:
             continue
 
         try:
-            inv_resp = conn.session.get(
-                f"{placement_ep}/resource_providers/{rp['uuid']}/inventories"
-            )
+            inv_resp = conn.session.get(f"{placement_ep}/resource_providers/{rp['uuid']}/inventories")
             inventories = inv_resp.json().get("inventories", {})
 
             # usages 별도 조회 (inventory에는 used 필드가 없음)
@@ -187,9 +202,7 @@ def _collect_gpu_hosts(conn) -> dict:
             has_pci = any(rc.startswith("CUSTOM_PCI_") for rc in inventories)
             if has_pci:
                 try:
-                    usage_resp = conn.session.get(
-                        f"{placement_ep}/resource_providers/{rp['uuid']}/usages"
-                    )
+                    usage_resp = conn.session.get(f"{placement_ep}/resource_providers/{rp['uuid']}/usages")
                     usages = usage_resp.json().get("usages", {})
                 except Exception:
                     pass
@@ -210,7 +223,7 @@ def _collect_gpu_hosts(conn) -> dict:
                 rp_name = rp["name"]
                 pci_address = rp_name
                 if rp_name.startswith(root_name + "_"):
-                    pci_address = rp_name[len(root_name) + 1:]
+                    pci_address = rp_name[len(root_name) + 1 :]
 
                 used = usages.get(rc_name, 0)
                 gpu_info = {
@@ -232,27 +245,21 @@ def _collect_gpu_hosts(conn) -> dict:
                 host_map[root_uuid]["gpu_total"] += gpu_info["total"]
                 host_map[root_uuid]["gpu_used"] += gpu_info["used"]
         except Exception:
-            _logger.warning(
-                "RP %s 인벤토리 조회 실패", rp.get("uuid"), exc_info=True
-            )
+            _logger.warning("RP %s 인벤토리 조회 실패", rp.get("uuid"), exc_info=True)
 
     # 3) 자식 RP에서 GPU를 찾지 못한 호스트: 루트 RP 인벤토리도 확인
     for host_uuid, host_info in host_map.items():
         if host_info["gpu_total"] > 0:
             continue
         try:
-            inv_resp = conn.session.get(
-                f"{placement_ep}/resource_providers/{host_uuid}/inventories"
-            )
+            inv_resp = conn.session.get(f"{placement_ep}/resource_providers/{host_uuid}/inventories")
             inventories = inv_resp.json().get("inventories", {})
 
             usages2: dict[str, int] = {}
             has_pci = any(rc.startswith("CUSTOM_PCI_") for rc in inventories)
             if has_pci:
                 try:
-                    usage_resp = conn.session.get(
-                        f"{placement_ep}/resource_providers/{host_uuid}/usages"
-                    )
+                    usage_resp = conn.session.get(f"{placement_ep}/resource_providers/{host_uuid}/usages")
                     usages2 = usage_resp.json().get("usages", {})
                 except Exception:
                     pass
@@ -284,9 +291,7 @@ def _collect_gpu_hosts(conn) -> dict:
                 host_info["gpu_total"] += gpu_info["total"]
                 host_info["gpu_used"] += gpu_info["used"]
         except Exception:
-            _logger.warning(
-                "루트 RP %s 인벤토리 조회 실패", host_uuid, exc_info=True
-            )
+            _logger.warning("루트 RP %s 인벤토리 조회 실패", host_uuid, exc_info=True)
 
     # GPU가 있는 호스트만 필터링하여 정렬
     gpu_hosts = sorted(
@@ -363,6 +368,7 @@ def _collect_gpu_hosts(conn) -> dict:
 @router.get("/gpu-hosts", dependencies=[Depends(require_admin)])
 async def list_gpu_hosts(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
     """Placement API에서 각 호스트별 GPU 정보 조회."""
+
     def _collect():
         return _collect_gpu_hosts(conn)
 
@@ -377,14 +383,16 @@ def get_gpu_spec_list() -> list[dict]:
     result = []
     for vendor_id, devices in PCI_DEVICE_MAP.items():
         for device_id, info in devices.items():
-            result.append({
-                "vendor_id": vendor_id,
-                "device_id": device_id,
-                "name": info["name"],
-                "is_audio": info["is_audio"],
-                "vendor_name": VENDOR_MAP.get(vendor_id, vendor_id),
-                "aliases": info.get("aliases", []),
-            })
+            result.append(
+                {
+                    "vendor_id": vendor_id,
+                    "device_id": device_id,
+                    "name": info["name"],
+                    "is_audio": info["is_audio"],
+                    "vendor_name": VENDOR_MAP.get(vendor_id, vendor_id),
+                    "aliases": info.get("aliases", []),
+                }
+            )
     return result
 
 

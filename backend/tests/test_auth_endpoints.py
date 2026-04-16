@@ -1,6 +1,8 @@
 """인증 API 단위 테스트."""
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import patch, AsyncMock, MagicMock
 
 
 def make_auth_data() -> dict:
@@ -25,19 +27,25 @@ def make_user_obj() -> MagicMock:
 
 # ────── 로그인 ──────
 
+
 @pytest.mark.asyncio
 async def test_login_success(client):
     mock_conn = MagicMock()
     mock_conn.identity.get_user.return_value = make_user_obj()
 
-    with patch("app.api.identity.auth.keystone.authenticate", return_value=make_auth_data()), \
-         patch("app.api.identity.auth.keystone.get_openstack_connection", return_value=mock_conn):
-        resp = await client.post("/api/auth/login", json={
-            "username": "testuser",
-            "password": "password123",
-            "project_name": "test-project",
-            "domain_name": "Default",
-        })
+    with (
+        patch("app.api.identity.auth.keystone.authenticate", return_value=make_auth_data()),
+        patch("app.api.identity.auth.keystone.get_openstack_connection", return_value=mock_conn),
+    ):
+        resp = await client.post(
+            "/api/auth/login",
+            json={
+                "username": "testuser",
+                "password": "password123",
+                "project_name": "test-project",
+                "domain_name": "Default",
+            },
+        )
     assert resp.status_code == 200
     data = resp.json()
     assert data["token"] == "test-token"
@@ -47,16 +55,20 @@ async def test_login_success(client):
 @pytest.mark.asyncio
 async def test_login_failure(client):
     with patch("app.api.identity.auth.keystone.authenticate", side_effect=Exception("auth failed")):
-        resp = await client.post("/api/auth/login", json={
-            "username": "testuser",
-            "password": "wrongpassword",
-            "project_name": "test-project",
-            "domain_name": "Default",
-        })
+        resp = await client.post(
+            "/api/auth/login",
+            json={
+                "username": "testuser",
+                "password": "wrongpassword",
+                "project_name": "test-project",
+                "domain_name": "Default",
+            },
+        )
     assert resp.status_code == 401
 
 
 # ────── /me ──────
+
 
 @pytest.mark.asyncio
 async def test_me(client):
@@ -68,6 +80,7 @@ async def test_me(client):
 
 
 # ────── session-info ──────
+
 
 @pytest.mark.asyncio
 async def test_session_info(client):
@@ -81,6 +94,7 @@ async def test_session_info(client):
 
 # ────── extend-session ──────
 
+
 @pytest.mark.asyncio
 async def test_extend_session(client):
     with patch("app.api.identity.auth.extend_session", new_callable=AsyncMock):
@@ -91,10 +105,13 @@ async def test_extend_session(client):
 
 # ────── logout ──────
 
+
 @pytest.mark.asyncio
 async def test_logout(client):
-    with patch("app.api.identity.auth.keystone.revoke_token", return_value=None), \
-         patch("app.services.cache._get_redis") as mock_redis:
+    with (
+        patch("app.api.identity.auth.keystone.revoke_token", return_value=None),
+        patch("app.services.cache._get_redis") as mock_redis,
+    ):
         mock_r = AsyncMock()
         mock_r.delete = AsyncMock()
         mock_redis.return_value = mock_r
@@ -104,6 +121,7 @@ async def test_logout(client):
 
 
 # ────── projects ──────
+
 
 @pytest.mark.asyncio
 async def test_list_projects(client):
@@ -115,6 +133,7 @@ async def test_list_projects(client):
 
 
 # ────── GitLab enabled ──────
+
 
 @pytest.mark.asyncio
 async def test_gitlab_enabled(client):

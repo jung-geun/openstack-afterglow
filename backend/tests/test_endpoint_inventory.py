@@ -9,16 +9,16 @@ FastAPI app.routes를 순회해:
 - 신규 admin 엔드포인트에 require_admin 누락 → 보안 이슈
 - 예상 밖 Public 엔드포인트 추가 → 인증 누락 가능성
 """
-import pytest
+
 from fastapi.routing import APIRoute
 
+from app.api.deps import require_admin
 from app.main import app
-from app.api.deps import require_admin, get_token_info, get_os_conn
-
 
 # ---------------------------------------------------------------------------
 # 헬퍼
 # ---------------------------------------------------------------------------
+
 
 def _iter_api_routes():
     """app.routes 에서 /api/ 경로 APIRoute만 순회."""
@@ -30,7 +30,7 @@ def _iter_api_routes():
 def _get_route_dep_callables(route: APIRoute) -> set:
     """route.dependencies (decorator 레벨) 의 callable 집합 반환."""
     result = set()
-    for dep in (route.dependencies or []):
+    for dep in route.dependencies or []:
         if hasattr(dep, "dependency"):
             result.add(dep.dependency)
     return result
@@ -52,7 +52,9 @@ def _has_any_auth_dep(route: APIRoute) -> bool:
 
     # 2) 핸들러 파라미터 Depends
     import inspect
+
     from fastapi.params import Depends as _DependsClass
+
     if route.endpoint:
         try:
             sig = inspect.signature(route.endpoint)
@@ -71,22 +73,25 @@ def _has_any_auth_dep(route: APIRoute) -> bool:
 # 조건부 서비스(k3s)의 라우트는 app에 없을 수 있으므로 optional 처리.
 # ---------------------------------------------------------------------------
 
-EXPECTED_PUBLIC = frozenset({
-    ("GET",  "/api/health"),
-    ("GET",  "/api/site-config"),
-    ("GET",  "/api/dashboard/config"),   # 새로고침 간격 등 UI 설정만 반환, 인증 불필요
-    ("GET",  "/api/auth/gitlab/enabled"),
-    ("GET",  "/api/auth/gitlab/authorize"),
-    ("POST", "/api/auth/gitlab/callback"),
-    ("POST", "/api/auth/login"),
-    # k3s 활성 시에만 등록되는 라우트
-    ("POST", "/api/k3s/callback"),
-})
+EXPECTED_PUBLIC = frozenset(
+    {
+        ("GET", "/api/health"),
+        ("GET", "/api/site-config"),
+        ("GET", "/api/dashboard/config"),  # 새로고침 간격 등 UI 설정만 반환, 인증 불필요
+        ("GET", "/api/auth/gitlab/enabled"),
+        ("GET", "/api/auth/gitlab/authorize"),
+        ("POST", "/api/auth/gitlab/callback"),
+        ("POST", "/api/auth/login"),
+        # k3s 활성 시에만 등록되는 라우트
+        ("POST", "/api/k3s/callback"),
+    }
+)
 
 
 # ---------------------------------------------------------------------------
 # 테스트
 # ---------------------------------------------------------------------------
+
 
 def test_admin_prefix_routes_have_require_admin():
     """/api/admin/ 경로 라우트 전체가 require_admin 의존성을 가져야 한다."""
@@ -99,10 +104,7 @@ def test_admin_prefix_routes_have_require_admin():
             methods = ",".join(sorted(route.methods or []))
             violations.append(f"  {methods} {route.path} — require_admin 누락")
 
-    assert not violations, (
-        "다음 /api/admin/ 엔드포인트에 require_admin 의존성이 없습니다:\n"
-        + "\n".join(violations)
-    )
+    assert not violations, "다음 /api/admin/ 엔드포인트에 require_admin 의존성이 없습니다:\n" + "\n".join(violations)
 
 
 def test_no_unexpected_public_routes():
@@ -111,7 +113,7 @@ def test_no_unexpected_public_routes():
     for route in _iter_api_routes():
         if _has_any_auth_dep(route):
             continue
-        for method in (route.methods or []):
+        for method in route.methods or []:
             key = (method, route.path)
             if key not in EXPECTED_PUBLIC:
                 unexpected.append(f"  {method} {route.path}")
@@ -129,10 +131,7 @@ def test_minimum_route_count():
     대규모 라우터 삭제/미등록을 감지하기 위한 간단한 경보. 조건부 서비스 일부가 꺼진
     환경에서도 200개 미만이 되면 구조적 문제가 있는 것으로 판단한다.
     """
-    count = sum(
-        len(route.methods or [])
-        for route in _iter_api_routes()
-    )
+    count = sum(len(route.methods or []) for route in _iter_api_routes())
     assert count >= 200, (
         f"전체 API 엔드포인트(HTTP method × path) 수가 {count}개로 기준값(200)에 미치지 못합니다. "
         "라우터 미등록 또는 대규모 삭제 여부를 확인하세요."
@@ -142,16 +141,12 @@ def test_minimum_route_count():
 def test_admin_routes_summary(capsys):
     """현재 등록된 /api/admin/ 라우트를 열거 (정보성)."""
     routes = sorted(
-        (m, r.path)
-        for r in _iter_api_routes()
-        if r.path.startswith("/api/admin/")
-        for m in (r.methods or [])
+        (m, r.path) for r in _iter_api_routes() if r.path.startswith("/api/admin/") for m in (r.methods or [])
     )
     print(f"\n[admin routes total: {len(routes)}]")
     for method, path in routes:
         print(f"  {method:6} {path}")
     # 정보성 테스트 — 항상 통과
     assert len(routes) >= 50, (
-        f"admin 라우트가 {len(routes)}개로 예상보다 적습니다. "
-        "admin 라우터 등록 여부를 확인하세요."
+        f"admin 라우트가 {len(routes)}개로 예상보다 적습니다. admin 라우터 등록 여부를 확인하세요."
     )

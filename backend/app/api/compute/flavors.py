@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Depends
 import openstack
+from fastapi import APIRouter, Depends
 
 from app.api.deps import get_os_conn
 from app.models.compute import FlavorInfo

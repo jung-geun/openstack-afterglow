@@ -1,11 +1,13 @@
 """스토리지 API (볼륨, 백업, 스냅샷, 파일 스토리지) 통합 테스트."""
-import asyncio
-import pytest
 
+import asyncio
+
+import pytest
 
 # ─────────────────────────────────────────────────────────────────
 # 볼륨
 # ─────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_list_volumes(client):
@@ -19,10 +21,13 @@ async def test_list_volumes(client):
 async def test_volume_crud(client):
     """볼륨 생성 → 상세 조회 → 삭제."""
     # 생성
-    resp = await client.post("/api/volumes", json={
-        "name": "union-test-vol-integration",
-        "size_gb": 1,
-    })
+    resp = await client.post(
+        "/api/volumes",
+        json={
+            "name": "union-test-vol-integration",
+            "size_gb": 1,
+        },
+    )
     assert resp.status_code in (200, 201)
     vol = resp.json()
     vol_id = vol["id"]
@@ -51,6 +56,7 @@ async def test_volume_crud(client):
 # 볼륨 백업
 # ─────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio(loop_scope="session")
 async def test_list_volume_backups(client):
     resp = await client.get("/api/volumes/backups")
@@ -62,6 +68,7 @@ async def test_list_volume_backups(client):
 # 볼륨 스냅샷
 # ─────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio(loop_scope="session")
 async def test_list_volume_snapshots(client):
     resp = await client.get("/api/volume-snapshots")
@@ -72,6 +79,7 @@ async def test_list_volume_snapshots(client):
 # ─────────────────────────────────────────────────────────────────
 # 파일 스토리지 (Manila)
 # ─────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_list_file_storages(client, settings):
@@ -106,6 +114,7 @@ async def test_list_share_types(client, settings):
 # ─────────────────────────────────────────────────────────────────
 # PR4: 일반 유저도 프로젝트 스코프 스토리지 리소스 조회 가능 확인
 # ─────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_list_volumes_as_user(user_client):

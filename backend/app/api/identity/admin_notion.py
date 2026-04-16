@@ -2,6 +2,8 @@
 
 import asyncio
 import logging
+from datetime import UTC
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
@@ -91,18 +93,20 @@ async def save_notion_config(req: NotionConfigRequest):
     hypervisors_last_sync = existing.get("hypervisors_last_sync") if existing else None
     gpu_spec_last_sync = existing.get("gpu_spec_last_sync") if existing else None
 
-    await notion_sync.save_notion_config({
-        "api_key": req.api_key,
-        "database_id": req.database_id,
-        "enabled": req.enabled,
-        "interval_minutes": req.interval_minutes,
-        "last_sync": last_sync,
-        "users_database_id": req.users_database_id,
-        "hypervisors_database_id": req.hypervisors_database_id,
-        "hypervisors_last_sync": hypervisors_last_sync,
-        "gpu_spec_database_id": req.gpu_spec_database_id,
-        "gpu_spec_last_sync": gpu_spec_last_sync,
-    })
+    await notion_sync.save_notion_config(
+        {
+            "api_key": req.api_key,
+            "database_id": req.database_id,
+            "enabled": req.enabled,
+            "interval_minutes": req.interval_minutes,
+            "last_sync": last_sync,
+            "users_database_id": req.users_database_id,
+            "hypervisors_database_id": req.hypervisors_database_id,
+            "hypervisors_last_sync": hypervisors_last_sync,
+            "gpu_spec_database_id": req.gpu_spec_database_id,
+            "gpu_spec_last_sync": gpu_spec_last_sync,
+        }
+    )
 
     return {
         "status": "ok",
@@ -121,7 +125,7 @@ async def delete_notion_config():
 @router.post("/notion/test", dependencies=[Depends(require_admin)])
 async def test_notion_sync(conn=Depends(get_os_conn)):
     """수동 Notion 동기화 1회 실행."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     config = await notion_sync.get_notion_config()
     if not config:
@@ -133,7 +137,7 @@ async def test_notion_sync(conn=Depends(get_os_conn)):
     hypervisors_db_id = config.get("hypervisors_database_id", "")
     gpu_spec_db_id = config.get("gpu_spec_database_id", "")
 
-    from app.api.identity.admin_gpu import get_gpu_spec_list, build_alias_to_device_name_map
+    from app.api.identity.admin_gpu import build_alias_to_device_name_map, get_gpu_spec_list
 
     # 0. GPU spec 동기화 (정적 데이터, 페이지 생성/갱신)
     gpu_spec_stats = None
@@ -142,7 +146,7 @@ async def test_notion_sync(conn=Depends(get_os_conn)):
         try:
             gpu_specs = get_gpu_spec_list()
             gpu_spec_stats = await notion_sync.sync_gpu_specs_to_notion(api_key, gpu_spec_db_id, gpu_specs)
-            config["gpu_spec_last_sync"] = datetime.now(timezone.utc).isoformat()
+            config["gpu_spec_last_sync"] = datetime.now(UTC).isoformat()
             # 동기화 후 page_id 맵 구축 (인스턴스 relation 설정에 사용)
             gpu_name_to_page_id = await notion_sync.fetch_gpu_spec_page_ids_by_name(api_key, gpu_spec_db_id)
         except Exception:
@@ -156,7 +160,7 @@ async def test_notion_sync(conn=Depends(get_os_conn)):
         try:
             hypervisors = await collect_hypervisor_data(gpu_name_to_page_id=gpu_name_to_page_id)
             hypervisor_stats = await notion_sync.sync_hypervisors_to_notion(api_key, hypervisors_db_id, hypervisors)
-            config["hypervisors_last_sync"] = datetime.now(timezone.utc).isoformat()
+            config["hypervisors_last_sync"] = datetime.now(UTC).isoformat()
             # 동기화 후 page_id 맵 구축 (인스턴스 relation 설정에 사용)
             host_to_page_id = await notion_sync.fetch_hypervisor_page_ids_by_name(api_key, hypervisors_db_id)
         except Exception:
@@ -191,9 +195,13 @@ async def test_notion_sync(conn=Depends(get_os_conn)):
                 continue
             if device_name not in usage_by_gpu:
                 usage_by_gpu[device_name] = {
-                    "total_cpu_used": 0, "total_ram_used": 0,
-                    "total_gpu_used": 0, "instance_count": 0,
-                    "gpu_available": 0, "gpu_used": 0, "gpu_remaining": 0,
+                    "total_cpu_used": 0,
+                    "total_ram_used": 0,
+                    "total_gpu_used": 0,
+                    "instance_count": 0,
+                    "gpu_available": 0,
+                    "gpu_used": 0,
+                    "gpu_remaining": 0,
                 }
             usage_by_gpu[device_name]["gpu_available"] += total
 
@@ -205,9 +213,13 @@ async def test_notion_sync(conn=Depends(get_os_conn)):
         canonical = alias_to_device_name.get(gpu_display, gpu_display)
         if canonical not in usage_by_gpu:
             usage_by_gpu[canonical] = {
-                "total_cpu_used": 0, "total_ram_used": 0,
-                "total_gpu_used": 0, "instance_count": 0,
-                "gpu_available": 0, "gpu_used": 0, "gpu_remaining": 0,
+                "total_cpu_used": 0,
+                "total_ram_used": 0,
+                "total_gpu_used": 0,
+                "instance_count": 0,
+                "gpu_available": 0,
+                "gpu_used": 0,
+                "gpu_remaining": 0,
             }
         usage_by_gpu[canonical]["total_cpu_used"] += inst.get("vcpus", 0)
         usage_by_gpu[canonical]["total_ram_used"] += inst.get("ram_gb", 0)
@@ -226,7 +238,7 @@ async def test_notion_sync(conn=Depends(get_os_conn)):
             gpu_spec_stats = await notion_sync.sync_gpu_specs_to_notion(
                 api_key, gpu_spec_db_id, gpu_specs, usage_by_gpu=usage_by_gpu
             )
-            config["gpu_spec_last_sync"] = datetime.now(timezone.utc).isoformat()
+            config["gpu_spec_last_sync"] = datetime.now(UTC).isoformat()
         except Exception:
             _logger.warning("Notion 테스트: GPU spec 집계 업데이트 실패", exc_info=True)
 
@@ -237,7 +249,7 @@ async def test_notion_sync(conn=Depends(get_os_conn)):
         _logger.warning("Notion 테스트: 동기화 실패", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Notion 동기화 실패: {e}")
 
-    config["last_sync"] = datetime.now(timezone.utc).isoformat()
+    config["last_sync"] = datetime.now(UTC).isoformat()
     await notion_sync.save_notion_config(config)
 
     # 7. 한국어 마이그레이션 (1회만 실행)
@@ -276,9 +288,10 @@ async def collect_instance_data(
     host_to_page_id: Hypervisor DB의 {호스트명 → page_id} 맵 (openstack resource relation 설정용)
     gpu_name_to_page_id: GPU Spec DB의 {GPU정식이름 → page_id} 맵 (GPU spec relation 설정용)
     """
-    from app.config import get_settings
-    from app.api.identity.admin_gpu import build_alias_to_device_name_map
     import openstack
+
+    from app.api.identity.admin_gpu import build_alias_to_device_name_map
+    from app.config import get_settings
 
     settings = get_settings()
     alias_to_device_name = build_alias_to_device_name_map()
@@ -293,6 +306,7 @@ async def collect_instance_data(
     )
 
     try:
+
         def _collect():
             # 플레이버 맵
             flavors = {}
@@ -349,19 +363,21 @@ async def collect_instance_data(
                         if not gpu_spec_page_id:
                             _logger.debug(
                                 "GPU spec 페이지 미발견 (GPU=%s, alias=%s) — GPU spec DB 동기화 후 재시도 예정",
-                                canonical_name, gpu_alias,
+                                canonical_name,
+                                gpu_alias,
                             )
                     else:
                         _logger.warning(
                             "GPU alias '%s'가 PCI_DEVICE_MAP에 없음 — GPU spec relation 미설정 (flavor=%s)",
-                            gpu_alias, fl_name,
+                            gpu_alias,
+                            fl_name,
                         )
 
                 # IP 주소
                 fixed_ips = []
                 floating_ips = []
                 addresses = s.addresses or {}
-                for net_name, addrs in addresses.items():
+                for _net_name, addrs in addresses.items():
                     for addr in addrs:
                         if addr.get("OS-EXT-IPS:type") == "floating":
                             floating_ips.append(addr["addr"])
@@ -388,24 +404,26 @@ async def collect_instance_data(
                 if compute_host and status not in ("SHELVED_OFFLOADED", "SHELVED"):
                     hypervisor_page_id = (host_to_page_id or {}).get(compute_host, "")
 
-                result.append({
-                    "name": s.name or "",
-                    "instance_id": s.id or "",
-                    "status": status,
-                    "project_name": projects.get(s.project_id, ""),
-                    "flavor_name": fl_name or (fl.name if fl else ""),
-                    "vcpus": vcpus,
-                    "ram_gb": round(ram_mb / 1024) if ram_mb else 0,
-                    "gpu_name": gpu_display_name,
-                    "gpu_count": gpu_count,
-                    "gpu_spec_page_id": gpu_spec_page_id,
-                    "fixed_ip": ", ".join(fixed_ips),
-                    "floating_ip": ", ".join(floating_ips),
-                    "created_at": created_at_iso,
-                    "compute_host": compute_host,
-                    "user_page_id": user_page_id,
-                    "hypervisor_page_id": hypervisor_page_id,
-                })
+                result.append(
+                    {
+                        "name": s.name or "",
+                        "instance_id": s.id or "",
+                        "status": status,
+                        "project_name": projects.get(s.project_id, ""),
+                        "flavor_name": fl_name or (fl.name if fl else ""),
+                        "vcpus": vcpus,
+                        "ram_gb": round(ram_mb / 1024) if ram_mb else 0,
+                        "gpu_name": gpu_display_name,
+                        "gpu_count": gpu_count,
+                        "gpu_spec_page_id": gpu_spec_page_id,
+                        "fixed_ip": ", ".join(fixed_ips),
+                        "floating_ip": ", ".join(floating_ips),
+                        "created_at": created_at_iso,
+                        "compute_host": compute_host,
+                        "user_page_id": user_page_id,
+                        "hypervisor_page_id": hypervisor_page_id,
+                    }
+                )
 
             return result
 
@@ -423,10 +441,11 @@ async def collect_hypervisor_data(gpu_name_to_page_id: dict[str, str] | None = N
     gpu_name_to_page_id: GPU Spec DB의 {GPU정식이름 → page_id} 맵.
                          제공 시 각 하이퍼바이저의 GPU relation page_id 목록을 설정한다.
     """
-    from app.config import get_settings
+    import openstack
+
     from app.api.identity.admin import _fetch_hypervisors_raw
     from app.api.identity.admin_gpu import _collect_gpu_hosts
-    import openstack
+    from app.config import get_settings
 
     settings = get_settings()
     conn = openstack.connect(
@@ -440,6 +459,7 @@ async def collect_hypervisor_data(gpu_name_to_page_id: dict[str, str] | None = N
     )
 
     try:
+
         def _collect():
             raw = _fetch_hypervisors_raw(conn)
 
@@ -469,18 +489,20 @@ async def collect_hypervisor_data(gpu_name_to_page_id: dict[str, str] | None = N
                     if page_id and page_id not in gpu_spec_page_ids:
                         gpu_spec_page_ids.append(page_id)
 
-                result.append({
-                    "name": hostname,
-                    "status": f"{h.get('state', '')}/{h.get('status', '')}",
-                    "running_vms": h.get("running_vms", 0) or 0,
-                    "vcpus_used": h.get("vcpus_used", 0) or 0,
-                    "vcpus": h.get("vcpus", 0) or 0,
-                    "memory_used_gb": round(mem_used_mb / 1024),
-                    "memory_size_gb": round(mem_mb / 1024),
-                    "gpu_spec_page_ids": gpu_spec_page_ids,
-                    "gpu_total": gpu_total,
-                    "gpu_groups": gpu_groups,  # 집계 계산용
-                })
+                result.append(
+                    {
+                        "name": hostname,
+                        "status": f"{h.get('state', '')}/{h.get('status', '')}",
+                        "running_vms": h.get("running_vms", 0) or 0,
+                        "vcpus_used": h.get("vcpus_used", 0) or 0,
+                        "vcpus": h.get("vcpus", 0) or 0,
+                        "memory_used_gb": round(mem_used_mb / 1024),
+                        "memory_size_gb": round(mem_mb / 1024),
+                        "gpu_spec_page_ids": gpu_spec_page_ids,
+                        "gpu_total": gpu_total,
+                        "gpu_groups": gpu_groups,  # 집계 계산용
+                    }
+                )
             return result
 
         return await asyncio.to_thread(_collect)

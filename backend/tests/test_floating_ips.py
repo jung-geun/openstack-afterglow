@@ -1,6 +1,8 @@
 """Floating IP API 단위 테스트."""
-import pytest
+
 from unittest.mock import patch
+
+import pytest
 
 
 def make_fip(fip_id: str = "fip-1", ip: str = "203.0.113.1") -> dict:
@@ -20,8 +22,10 @@ async def test_list_floating_ips(client, mock_conn):
     async def mock_cached_call(key, ttl, fn, **kw):
         return fn()
 
-    with patch("app.api.network.networks.neutron.list_floating_ips", return_value=[make_fip()]), \
-         patch("app.api.network.networks.cached_call", new=mock_cached_call):
+    with (
+        patch("app.api.network.networks.neutron.list_floating_ips", return_value=[make_fip()]),
+        patch("app.api.network.networks.cached_call", new=mock_cached_call),
+    ):
         resp = await client.get("/api/networks/floating-ips")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)

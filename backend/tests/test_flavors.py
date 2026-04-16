@@ -1,7 +1,9 @@
 """compute/flavors.py 엔드포인트 단위 테스트 (1개)."""
-import pytest
+
 from unittest.mock import patch
-from httpx import AsyncClient, ASGITransport
+
+import pytest
+from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 

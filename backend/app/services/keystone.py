@@ -1,7 +1,8 @@
 import logging
+
 import openstack
-from keystoneauth1.identity import v3
 from keystoneauth1 import session as ks_session
+from keystoneauth1.identity import v3
 
 from app.config import get_settings
 
@@ -19,6 +20,7 @@ def _get_admin_ks_client():
     시스템 admin 판별은 서비스 크리덴셜로 수행한다.
     """
     from keystoneclient.v3 import client as ks_client
+
     settings = get_settings()
     admin_auth = v3.Password(
         auth_url=settings.os_auth_url,
@@ -88,7 +90,11 @@ def authenticate(username: str, password: str, project_name: str, domain_name: s
     if project_name:
         # 명시적 프로젝트 지정 시 직접 scoped 인증
         return _authenticate_scoped(
-            username, password, project_name, domain_name, settings,
+            username,
+            password,
+            project_name,
+            domain_name,
+            settings,
         )
 
     # 1) unscoped 인증
@@ -106,6 +112,7 @@ def authenticate(username: str, password: str, project_name: str, domain_name: s
 
     # 2) 사용자의 프로젝트 목록 조회
     from keystoneclient.v3 import client as ks_client
+
     ks = ks_client.Client(session=unscoped_sess)
     projects = ks.projects.list(user=user_id)
     enabled_projects = [p for p in projects if p.enabled]
@@ -114,7 +121,7 @@ def authenticate(username: str, password: str, project_name: str, domain_name: s
         raise Exception("접근 가능한 프로젝트가 없습니다")
 
     # 3) default_project_id가 있으면 우선, 없으면 첫 번째 프로젝트
-    default_pid = getattr(unscoped_access, 'project_id', None)
+    default_pid = getattr(unscoped_access, "project_id", None)
     target_project = None
     if default_pid:
         target_project = next((p for p in enabled_projects if p.id == default_pid), None)
@@ -143,7 +150,11 @@ def authenticate(username: str, password: str, project_name: str, domain_name: s
 
 
 def _authenticate_scoped(
-    username: str, password: str, project_name: str, domain_name: str, settings,
+    username: str,
+    password: str,
+    project_name: str,
+    domain_name: str,
+    settings,
 ) -> dict:
     """지정된 프로젝트로 직접 scoped 인증."""
     auth_plugin = v3.Password(
@@ -257,7 +268,7 @@ def get_user(conn: openstack.connection.Connection, user_id: str) -> dict:
     return {
         "id": u.id,
         "name": u.name or "",
-        "email": getattr(u, 'email', None) or "",
+        "email": getattr(u, "email", None) or "",
     }
 
 
@@ -277,6 +288,7 @@ def list_projects(token: str) -> list[dict]:
 
     # Keystone v3 API로 프로젝트 목록 조회
     from keystoneclient.v3 import client as ks_client
+
     ks = ks_client.Client(session=sess)
 
     # 현재 사용자가 접근 가능한 프로젝트 목록

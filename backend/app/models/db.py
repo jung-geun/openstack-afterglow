@@ -1,11 +1,16 @@
 """SQLAlchemy ORM 모델 — k3s 클러스터 및 Notion 설정 영속화."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import (
-    BOOLEAN, CHAR, INT, TEXT, VARCHAR,
-    DateTime, ForeignKey, Index, String,
-    func,
+    BOOLEAN,
+    CHAR,
+    INT,
+    TEXT,
+    VARCHAR,
+    DateTime,
+    ForeignKey,
+    Index,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -13,7 +18,7 @@ from app.database import Base
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class K3sCluster(Base):
@@ -53,21 +58,15 @@ class K3sCluster(Base):
     agent_count: Mapped[int] = mapped_column(INT, nullable=False, default=0)
 
     # 타임스탬프
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_now
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
 
     # 관계
     agent_vms: Mapped[list["K3sAgentVM"]] = relationship(
         "K3sAgentVM", back_populates="cluster", cascade="all, delete-orphan"
     )
 
-    __table_args__ = (
-        Index("idx_k3s_cluster_project_created", "project_id", "created_at"),
-    )
+    __table_args__ = (Index("idx_k3s_cluster_project_created", "project_id", "created_at"),)
 
 
 class K3sAgentVM(Base):
@@ -80,9 +79,7 @@ class K3sAgentVM(Base):
     vm_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, index=True)
     name: Mapped[str | None] = mapped_column(VARCHAR(255))
     status: Mapped[str] = mapped_column(VARCHAR(20), nullable=False, default="CREATING")
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_now
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
 
     cluster: Mapped["K3sCluster"] = relationship("K3sCluster", back_populates="agent_vms")
 
@@ -113,9 +110,5 @@ class NotionConfig(Base):
     gpu_spec_last_sync: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # 타임스탬프
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_now
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)

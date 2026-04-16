@@ -1,10 +1,11 @@
 import asyncio
+
+import openstack
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
-import openstack
 
 from app.api.deps import get_os_conn
-from app.models.storage import VolumeInfo, CreateVolumeRequest
+from app.models.storage import CreateVolumeRequest, VolumeInfo
 from app.rate_limit import limiter
 from app.services import cinder
 from app.services.cache import cached_call, invalidate, ttl_fast
@@ -17,11 +18,12 @@ async def list_volumes(conn: openstack.connection.Connection = Depends(get_os_co
     pid = conn._union_project_id
     try:
         return await cached_call(
-            f"afterglow:cinder:{pid}:volumes", ttl_fast(),
+            f"afterglow:cinder:{pid}:volumes",
+            ttl_fast(),
             lambda: [v.model_dump() for v in cinder.list_volumes(conn)],
             refresh=refresh,
         )
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="볼륨 목록 조회 실패")
 
 
@@ -45,7 +47,7 @@ async def create_volume(
         result = await asyncio.to_thread(cinder.create_empty_volume, conn, req.name, req.size_gb, req.availability_zone)
         await invalidate(f"afterglow:cinder:{pid}:volumes")
         return result
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="볼륨 생성 실패")
 
 
@@ -58,13 +60,14 @@ async def delete_volume(
     try:
         await asyncio.to_thread(cinder.delete_volume, conn, volume_id)
         await invalidate(f"afterglow:cinder:{pid}:volumes")
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="볼륨 삭제 실패")
 
 
 # ---------------------------------------------------------------------------
 # 볼륨 Transfer (프로젝트 간 마이그레이션)
 # ---------------------------------------------------------------------------
+
 
 class CreateVolumeTransferRequest(BaseModel):
     name: str | None = None

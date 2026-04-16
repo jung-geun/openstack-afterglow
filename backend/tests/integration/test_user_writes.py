@@ -3,7 +3,9 @@
 생성 → 검증 → 삭제 전체 흐름. try/finally로 리소스 정리 보장.
 고위험(VM/LB/k3s/router/volume 생성)은 의도적으로 제외 — 단위 테스트 커버.
 """
+
 import uuid
+
 import pytest
 
 from tests.integration.conftest import require_service
@@ -24,9 +26,7 @@ async def test_keypair_create_and_delete(user_client):
 
         resp = await user_client.get("/api/keypairs")
         assert resp.status_code == 200
-        assert any(kp.get("name") == name for kp in resp.json()), (
-            f"생성된 키페어 '{name}'가 목록에 없음"
-        )
+        assert any(kp.get("name") == name for kp in resp.json()), f"생성된 키페어 '{name}'가 목록에 없음"
     finally:
         if created:
             resp = await user_client.delete(f"/api/keypairs/{name}")
@@ -40,21 +40,27 @@ async def test_security_group_and_rule_lifecycle(user_client):
     sg_id = None
     rule_id = None
     try:
-        resp = await user_client.post("/api/security-groups", json={
-            "name": sg_name,
-            "description": "PR5 integration test — auto cleanup",
-        })
+        resp = await user_client.post(
+            "/api/security-groups",
+            json={
+                "name": sg_name,
+                "description": "PR5 integration test — auto cleanup",
+            },
+        )
         assert resp.status_code == 201, f"SG create failed: {resp.text}"
         sg_id = resp.json()["id"]
 
-        resp = await user_client.post(f"/api/security-groups/{sg_id}/rules", json={
-            "direction": "ingress",
-            "ethertype": "IPv4",
-            "protocol": "tcp",
-            "port_range_min": 22,
-            "port_range_max": 22,
-            "remote_ip_prefix": "0.0.0.0/0",
-        })
+        resp = await user_client.post(
+            f"/api/security-groups/{sg_id}/rules",
+            json={
+                "direction": "ingress",
+                "ethertype": "IPv4",
+                "protocol": "tcp",
+                "port_range_min": 22,
+                "port_range_max": 22,
+                "remote_ip_prefix": "0.0.0.0/0",
+            },
+        )
         assert resp.status_code == 201, f"rule create failed: {resp.text}"
         rule_id = resp.json()["id"]
     finally:
@@ -82,10 +88,13 @@ async def test_share_snapshot_lifecycle(user_client):
         share_id = share["id"]
         snap_name = f"pr5-snap-{uuid.uuid4().hex[:8]}"
         try:
-            resp = await user_client.post("/api/share-snapshots", json={
-                "share_id": share_id,
-                "name": snap_name,
-            })
+            resp = await user_client.post(
+                "/api/share-snapshots",
+                json={
+                    "share_id": share_id,
+                    "name": snap_name,
+                },
+            )
             if resp.status_code in (422, 500):
                 # 이 share는 snapshot 미지원 — 다음 share 시도
                 continue

@@ -1,10 +1,11 @@
 """네트워크 API (네트워크, 라우터, 보안그룹, 로드밸런서, 플로팅IP) 통합 테스트."""
-import pytest
 
+import pytest
 
 # ─────────────────────────────────────────────────────────────────
 # 네트워크
 # ─────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_list_networks(client):
@@ -39,6 +40,7 @@ async def test_get_topology(client):
 # 플로팅 IP
 # ─────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio(loop_scope="session")
 async def test_list_floating_ips(client):
     resp = await client.get("/api/networks/floating-ips")
@@ -49,6 +51,7 @@ async def test_list_floating_ips(client):
 # ─────────────────────────────────────────────────────────────────
 # 라우터
 # ─────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_list_routers(client):
@@ -73,6 +76,7 @@ async def test_get_router_detail(client):
 # 보안그룹
 # ─────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio(loop_scope="session")
 async def test_list_security_groups(client):
     resp = await client.get("/api/security-groups")
@@ -92,22 +96,28 @@ async def test_security_group_crud(client):
             await client.delete(f"/api/security-groups/{sg['id']}")
 
     # 생성
-    resp = await client.post("/api/security-groups", json={
-        "name": "union-test-sg-integration",
-        "description": "integration test",
-    })
+    resp = await client.post(
+        "/api/security-groups",
+        json={
+            "name": "union-test-sg-integration",
+            "description": "integration test",
+        },
+    )
     assert resp.status_code in (200, 201)
     sg = resp.json()
     sg_id = sg["id"]
 
     # 룰 추가 (SSH)
-    resp = await client.post(f"/api/security-groups/{sg_id}/rules", json={
-        "direction": "ingress",
-        "protocol": "tcp",
-        "port_range_min": 22,
-        "port_range_max": 22,
-        "remote_ip_prefix": "0.0.0.0/0",
-    })
+    resp = await client.post(
+        f"/api/security-groups/{sg_id}/rules",
+        json={
+            "direction": "ingress",
+            "protocol": "tcp",
+            "port_range_min": 22,
+            "port_range_max": 22,
+            "remote_ip_prefix": "0.0.0.0/0",
+        },
+    )
     if resp.status_code in (200, 201):
         rule = resp.json()
         rule_id = rule["id"]
@@ -124,6 +134,7 @@ async def test_security_group_crud(client):
 # 로드밸런서
 # ─────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio(loop_scope="session")
 async def test_list_loadbalancers(client):
     resp = await client.get("/api/loadbalancers")
@@ -134,6 +145,7 @@ async def test_list_loadbalancers(client):
 # ─────────────────────────────────────────────────────────────────
 # PR4: 일반 유저도 프로젝트 스코프 네트워크 리소스 조회 가능 확인
 # ─────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_list_networks_as_user(user_client):

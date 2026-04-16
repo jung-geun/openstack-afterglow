@@ -21,6 +21,8 @@ test-backend:
     - cd backend
     - uv sync --frozen --extra dev
   script:
+    - uv run ruff check .
+    - uv run ruff format --check .
     - AFTERGLOW_ALLOW_INSECURE=1 uv run python -m pytest tests/ -v --ignore=tests/integration
   cache:
     key: backend-${CI_COMMIT_REF_SLUG}

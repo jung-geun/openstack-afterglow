@@ -1,9 +1,9 @@
-from pydantic import BaseModel, Field, field_validator
-from typing import Optional
-from enum import Enum
 import re
+from enum import Enum
 
-_NAME_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$')
+from pydantic import BaseModel, Field, field_validator
+
+_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$")
 
 
 class K3sProgressStep(str, Enum):
@@ -19,16 +19,16 @@ class K3sProgressMessage(BaseModel):
     step: K3sProgressStep
     progress: int  # 0-100
     message: str
-    cluster_id: Optional[str] = None
-    error: Optional[str] = None
+    cluster_id: str | None = None
+    error: str | None = None
 
 
 class CreateK3sClusterRequest(BaseModel):
     name: str
     agent_count: int = Field(default=1, ge=0, le=10)
-    agent_flavor_id: Optional[str] = None
-    network_id: Optional[str] = None
-    key_name: Optional[str] = None
+    agent_flavor_id: str | None = None
+    network_id: str | None = None
+    key_name: str | None = None
 
     @field_validator("name")
     @classmethod
@@ -42,17 +42,17 @@ class K3sClusterInfo(BaseModel):
     id: str
     name: str
     status: str
-    status_reason: Optional[str] = None
-    server_vm_id: Optional[str] = None
+    status_reason: str | None = None
+    server_vm_id: str | None = None
     agent_vm_ids: list[str] = []
     agent_count: int = 0
-    api_address: Optional[str] = None
-    server_ip: Optional[str] = None
-    network_id: Optional[str] = None
-    key_name: Optional[str] = None
-    k3s_version: Optional[str] = None
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
+    api_address: str | None = None
+    server_ip: str | None = None
+    network_id: str | None = None
+    key_name: str | None = None
+    k3s_version: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
 
 
 class ScaleK3sClusterRequest(BaseModel):
@@ -62,7 +62,7 @@ class ScaleK3sClusterRequest(BaseModel):
 class K3sCallbackRequest(BaseModel):
     token: str
     success: bool
-    kubeconfig: Optional[str] = None
-    node_token: Optional[str] = None
-    server_ip: Optional[str] = None
-    error: Optional[str] = None
+    kubeconfig: str | None = None
+    node_token: str | None = None
+    server_ip: str | None = None
+    error: str | None = None

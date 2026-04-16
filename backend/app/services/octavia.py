@@ -1,32 +1,31 @@
 """Octavia (OpenStack Load Balancer) 서비스 래퍼."""
 
 import openstack
-from typing import Optional
 
 
 def _lb_to_dict(lb) -> dict:
     return {
         "id": lb.id,
         "name": lb.name or "",
-        "description": getattr(lb, 'description', "") or "",
-        "status": getattr(lb, 'provisioning_status', "") or "",
-        "operating_status": getattr(lb, 'operating_status', "") or "",
-        "vip_address": getattr(lb, 'vip_address', None),
-        "vip_subnet_id": getattr(lb, 'vip_subnet_id', None),
-        "vip_network_id": getattr(lb, 'vip_network_id', None),
-        "project_id": getattr(lb, 'project_id', None),
+        "description": getattr(lb, "description", "") or "",
+        "status": getattr(lb, "provisioning_status", "") or "",
+        "operating_status": getattr(lb, "operating_status", "") or "",
+        "vip_address": getattr(lb, "vip_address", None),
+        "vip_subnet_id": getattr(lb, "vip_subnet_id", None),
+        "vip_network_id": getattr(lb, "vip_network_id", None),
+        "project_id": getattr(lb, "project_id", None),
     }
 
 
-def _listener_to_dict(l) -> dict:
+def _listener_to_dict(listener) -> dict:
     return {
-        "id": l.id,
-        "name": l.name or "",
-        "protocol": getattr(l, 'protocol', "") or "",
-        "protocol_port": getattr(l, 'protocol_port', 0),
-        "status": getattr(l, 'provisioning_status', "") or "",
-        "default_pool_id": getattr(l, 'default_pool_id', None),
-        "load_balancer_id": getattr(l, 'load_balancer_id', None),
+        "id": listener.id,
+        "name": listener.name or "",
+        "protocol": getattr(listener, "protocol", "") or "",
+        "protocol_port": getattr(listener, "protocol_port", 0),
+        "status": getattr(listener, "provisioning_status", "") or "",
+        "default_pool_id": getattr(listener, "default_pool_id", None),
+        "load_balancer_id": getattr(listener, "load_balancer_id", None),
     }
 
 
@@ -34,11 +33,13 @@ def _pool_to_dict(p) -> dict:
     return {
         "id": p.id,
         "name": p.name or "",
-        "protocol": getattr(p, 'protocol', "") or "",
-        "lb_algorithm": getattr(p, 'lb_algorithm', "") or "",
-        "status": getattr(p, 'provisioning_status', "") or "",
-        "health_monitor_id": getattr(p, 'health_monitor_id', None),
-        "load_balancer_id": (getattr(p, 'load_balancers', None) or [{}])[0].get("id") if getattr(p, 'load_balancers', None) else None,
+        "protocol": getattr(p, "protocol", "") or "",
+        "lb_algorithm": getattr(p, "lb_algorithm", "") or "",
+        "status": getattr(p, "provisioning_status", "") or "",
+        "health_monitor_id": getattr(p, "health_monitor_id", None),
+        "load_balancer_id": (getattr(p, "load_balancers", None) or [{}])[0].get("id")
+        if getattr(p, "load_balancers", None)
+        else None,
     }
 
 
@@ -46,11 +47,11 @@ def _member_to_dict(m) -> dict:
     return {
         "id": m.id,
         "name": m.name or "",
-        "address": getattr(m, 'address', "") or "",
-        "protocol_port": getattr(m, 'protocol_port', 0),
-        "weight": getattr(m, 'weight', 1),
-        "status": getattr(m, 'provisioning_status', "") or "",
-        "subnet_id": getattr(m, 'subnet_id', None),
+        "address": getattr(m, "address", "") or "",
+        "protocol_port": getattr(m, "protocol_port", 0),
+        "weight": getattr(m, "weight", 1),
+        "status": getattr(m, "provisioning_status", "") or "",
+        "subnet_id": getattr(m, "subnet_id", None),
     }
 
 
@@ -58,11 +59,11 @@ def _hm_to_dict(hm) -> dict:
     return {
         "id": hm.id,
         "name": hm.name or "",
-        "type": getattr(hm, 'type', "") or "",
-        "delay": getattr(hm, 'delay', 5),
-        "timeout": getattr(hm, 'timeout', 5),
-        "max_retries": getattr(hm, 'max_retries', 3),
-        "status": getattr(hm, 'provisioning_status', "") or "",
+        "type": getattr(hm, "type", "") or "",
+        "delay": getattr(hm, "delay", 5),
+        "timeout": getattr(hm, "timeout", 5),
+        "max_retries": getattr(hm, "max_retries", 3),
+        "status": getattr(hm, "provisioning_status", "") or "",
     }
 
 
@@ -70,7 +71,8 @@ def _hm_to_dict(hm) -> dict:
 # Load Balancers
 # ---------------------------------------------------------------------------
 
-def list_load_balancers(conn: openstack.connection.Connection, project_id: Optional[str] = None) -> list[dict]:
+
+def list_load_balancers(conn: openstack.connection.Connection, project_id: str | None = None) -> list[dict]:
     kwargs = {}
     if project_id:
         kwargs["project_id"] = project_id
@@ -107,10 +109,8 @@ def get_lb_status_tree(conn: openstack.connection.Connection, lb_id: str) -> dic
         # openstacksdk가 status tree를 직접 지원하지 않으므로 raw session 사용
         lb = conn.load_balancer.get_load_balancer(lb_id)
         endpoint = conn.load_balancer.get_endpoint()
-        resp = conn.load_balancer._session.get(
-            f"{endpoint.rstrip('/')}/lbaas/loadbalancers/{lb_id}/status"
-        )
-        data = resp.json() if hasattr(resp, 'json') else {}
+        resp = conn.load_balancer._session.get(f"{endpoint.rstrip('/')}/lbaas/loadbalancers/{lb_id}/status")
+        data = resp.json() if hasattr(resp, "json") else {}
         return data.get("statuses", {}).get("loadbalancer", {})
     except Exception:
         pass
@@ -120,8 +120,8 @@ def get_lb_status_tree(conn: openstack.connection.Connection, lb_id: str) -> dic
         return {
             "id": lb.id,
             "name": lb.name,
-            "provisioning_status": getattr(lb, 'provisioning_status', ''),
-            "operating_status": getattr(lb, 'operating_status', ''),
+            "provisioning_status": getattr(lb, "provisioning_status", ""),
+            "operating_status": getattr(lb, "operating_status", ""),
             "listeners": [],
         }
     except Exception:
@@ -132,11 +132,12 @@ def get_lb_status_tree(conn: openstack.connection.Connection, lb_id: str) -> dic
 # Listeners
 # ---------------------------------------------------------------------------
 
-def list_listeners(conn: openstack.connection.Connection, lb_id: Optional[str] = None) -> list[dict]:
+
+def list_listeners(conn: openstack.connection.Connection, lb_id: str | None = None) -> list[dict]:
     kwargs = {}
     if lb_id:
         kwargs["load_balancer_id"] = lb_id
-    return [_listener_to_dict(l) for l in conn.load_balancer.listeners(**kwargs)]
+    return [_listener_to_dict(listener) for listener in conn.load_balancer.listeners(**kwargs)]
 
 
 def create_listener(
@@ -145,7 +146,7 @@ def create_listener(
     protocol: str,
     protocol_port: int,
     name: str = "",
-    default_pool_id: Optional[str] = None,
+    default_pool_id: str | None = None,
 ) -> dict:
     kwargs: dict = {
         "load_balancer_id": lb_id,
@@ -167,7 +168,8 @@ def delete_listener(conn: openstack.connection.Connection, listener_id: str) -> 
 # Pools
 # ---------------------------------------------------------------------------
 
-def list_pools(conn: openstack.connection.Connection, lb_id: Optional[str] = None) -> list[dict]:
+
+def list_pools(conn: openstack.connection.Connection, lb_id: str | None = None) -> list[dict]:
     kwargs = {}
     if lb_id:
         kwargs["load_balancer_id"] = lb_id
@@ -180,7 +182,7 @@ def create_pool(
     protocol: str,
     lb_algorithm: str = "ROUND_ROBIN",
     name: str = "",
-    listener_id: Optional[str] = None,
+    listener_id: str | None = None,
 ) -> dict:
     kwargs: dict = {
         "load_balancer_id": lb_id,
@@ -202,6 +204,7 @@ def delete_pool(conn: openstack.connection.Connection, pool_id: str) -> None:
 # Members
 # ---------------------------------------------------------------------------
 
+
 def list_members(conn: openstack.connection.Connection, pool_id: str) -> list[dict]:
     return [_member_to_dict(m) for m in conn.load_balancer.members(pool_id)]
 
@@ -211,7 +214,7 @@ def add_member(
     pool_id: str,
     address: str,
     protocol_port: int,
-    subnet_id: Optional[str] = None,
+    subnet_id: str | None = None,
     name: str = "",
     weight: int = 1,
 ) -> dict:
@@ -235,7 +238,8 @@ def remove_member(conn: openstack.connection.Connection, pool_id: str, member_id
 # Health Monitors
 # ---------------------------------------------------------------------------
 
-def list_health_monitors(conn: openstack.connection.Connection, pool_id: Optional[str] = None) -> list[dict]:
+
+def list_health_monitors(conn: openstack.connection.Connection, pool_id: str | None = None) -> list[dict]:
     kwargs = {}
     if pool_id:
         kwargs["pool_id"] = pool_id

@@ -1,6 +1,8 @@
 """볼륨 스냅샷 API 단위 테스트."""
-import pytest
+
 from unittest.mock import patch
+
+import pytest
 
 
 def make_snapshot(snap_id: str = "snap-1", name: str = "test-snap") -> dict:
@@ -27,12 +29,15 @@ async def test_list_snapshots(client, mock_conn):
 @pytest.mark.asyncio
 async def test_create_snapshot(client, mock_conn):
     with patch("app.api.storage.volume_snapshots.cinder.create_snapshot", return_value=make_snapshot("snap-new")):
-        resp = await client.post("/api/volume-snapshots", json={
-            "volume_id": "vol-1",
-            "name": "test-snap",
-            "description": "",
-            "force": False,
-        })
+        resp = await client.post(
+            "/api/volume-snapshots",
+            json={
+                "volume_id": "vol-1",
+                "name": "test-snap",
+                "description": "",
+                "force": False,
+            },
+        )
     assert resp.status_code == 201
 
 

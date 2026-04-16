@@ -1,7 +1,9 @@
 """네트워크 및 Floating IP API 테스트."""
+
+from unittest.mock import AsyncMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 from app.models.storage import FloatingIpInfo
@@ -9,18 +11,25 @@ from app.models.storage import FloatingIpInfo
 
 def make_fip(project_id: str = "test-project-123") -> FloatingIpInfo:
     return FloatingIpInfo(
-        id="fip-1", floating_ip_address="1.2.3.4",
-        fixed_ip_address=None, status="DOWN",
-        port_id=None, floating_network_id="net-ext",
+        id="fip-1",
+        floating_ip_address="1.2.3.4",
+        fixed_ip_address=None,
+        status="DOWN",
+        port_id=None,
+        floating_network_id="net-ext",
         project_id=project_id,
     )
 
 
 def _make_network():
     return {
-        "id": "net-1", "name": "mynet", "status": "ACTIVE",
-        "project_id": "test-project-123", "shared": False,
-        "admin_state_up": True, "subnets": [],
+        "id": "net-1",
+        "name": "mynet",
+        "status": "ACTIVE",
+        "project_id": "test-project-123",
+        "shared": False,
+        "admin_state_up": True,
+        "subnets": [],
     }
 
 
@@ -70,8 +79,9 @@ async def test_delete_network_success(client):
 @pytest.mark.asyncio
 async def test_create_subnet_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.post("/api/networks/net-1/subnets",
-                             json={"name": "sub1", "cidr": "10.0.0.0/24", "ip_version": 4})
+        resp = await ac.post(
+            "/api/networks/net-1/subnets", json={"name": "sub1", "cidr": "10.0.0.0/24", "ip_version": 4}
+        )
     assert resp.status_code == 401
 
 
@@ -124,8 +134,7 @@ async def test_create_floating_ip_unauthenticated():
 @pytest.mark.asyncio
 async def test_associate_floating_ip_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.post("/api/networks/floating-ips/fip-1/associate",
-                             json={"port_id": "port-1"})
+        resp = await ac.post("/api/networks/floating-ips/fip-1/associate", json={"port_id": "port-1"})
     assert resp.status_code == 401
 
 

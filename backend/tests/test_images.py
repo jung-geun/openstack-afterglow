@@ -1,21 +1,31 @@
 """이미지 API 테스트."""
-import pytest
+
 from unittest.mock import patch
+
+import pytest
+
 from app.models.compute import ImageInfo
 
 
 def make_image(owner: str = "test-project-123") -> ImageInfo:
     return ImageInfo(
-        id="img-1", name="ubuntu-22.04", status="active",
-        size=2_000_000_000, min_disk=20, min_ram=0,
-        disk_format="qcow2", os_distro="ubuntu",
-        created_at="2024-01-01T00:00:00", owner=owner,
+        id="img-1",
+        name="ubuntu-22.04",
+        status="active",
+        size=2_000_000_000,
+        min_disk=20,
+        min_ram=0,
+        disk_format="qcow2",
+        os_distro="ubuntu",
+        created_at="2024-01-01T00:00:00",
+        owner=owner,
     )
 
 
 @pytest.mark.asyncio
 async def test_list_images(client, mock_conn):
     with patch("app.api.compute.images.glance.list_images", return_value=[make_image()]):
+
         async def mock_cached_call(key, ttl, fn, **kw):
             return fn()
 

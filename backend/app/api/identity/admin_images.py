@@ -1,9 +1,11 @@
 """관리자 이미지 관리 엔드포인트."""
+
 import asyncio
 import logging
-from pydantic import BaseModel
-from fastapi import APIRouter, Depends, HTTPException, Query
+
 import openstack
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 from app.api.deps import get_os_conn, require_admin
 from app.services import glance
@@ -33,6 +35,7 @@ async def list_admin_images(
 ):
     """전체 이미지 목록 (visibility 무관, 페이지네이션)."""
     try:
+
         def _list():
             kwargs: dict = {"limit": limit}
             if marker:
@@ -41,24 +44,27 @@ async def list_admin_images(
                 kwargs["name"] = search
             items = []
             for img in conn.image.images(**kwargs):
-                items.append({
-                    "id": img.id,
-                    "name": img.name or "",
-                    "status": img.status or "",
-                    "size": img.size or 0,
-                    "min_disk": img.min_disk or 0,
-                    "min_ram": img.min_ram or 0,
-                    "disk_format": img.disk_format or "",
-                    "os_distro": getattr(img, "os_distro", None) or glance._guess_distro(img.name or ""),
-                    "visibility": img.visibility or "private",
-                    "owner": img.owner or "",
-                    "created_at": str(img.created_at) if img.created_at else None,
-                    "protected": getattr(img, "is_protected", False),
-                })
+                items.append(
+                    {
+                        "id": img.id,
+                        "name": img.name or "",
+                        "status": img.status or "",
+                        "size": img.size or 0,
+                        "min_disk": img.min_disk or 0,
+                        "min_ram": img.min_ram or 0,
+                        "disk_format": img.disk_format or "",
+                        "os_distro": getattr(img, "os_distro", None) or glance._guess_distro(img.name or ""),
+                        "visibility": img.visibility or "private",
+                        "owner": img.owner or "",
+                        "created_at": str(img.created_at) if img.created_at else None,
+                        "protected": getattr(img, "is_protected", False),
+                    }
+                )
                 if len(items) >= limit:
                     break
             next_marker = items[-1]["id"] if len(items) == limit else None
             return {"items": items, "next_marker": next_marker, "count": len(items)}
+
         # 마커가 없고 검색도 없을 때만 캐시 사용
         if not marker and not search:
             return await cached_call(f"afterglow:admin:images:{limit}", ttl_static(), _list, refresh=refresh)
@@ -90,7 +96,14 @@ async def update_admin_image(
     try:
         result = await asyncio.to_thread(
             glance.update_image_metadata,
-            conn, image_id, req.name, req.os_distro, req.os_type, req.min_disk, req.min_ram, req.visibility,
+            conn,
+            image_id,
+            req.name,
+            req.os_distro,
+            req.os_type,
+            req.min_disk,
+            req.min_ram,
+            req.visibility,
         )
         return result
     except Exception as e:
