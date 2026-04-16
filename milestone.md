@@ -367,3 +367,10 @@
   - `test_list_admin_images_search_no_match` — 빈 결과 확인
   - `test_list_admin_images_search_pagination_with_marker` — limit=2 marker 기반 페이지네이션
   - `test_list_admin_images_search_does_not_pass_name_to_glance` — Glance 호출에 `name=` 인자 미전달 검증
+
+### 8.3 시계열 차트 범위 버튼 데이터 이슈 수정
+
+**문제**: 1d/2d/7d/30d 버튼을 눌러도 모두 같은 데이터로 보임. 원인: Redis 컨테이너에 볼륨이 없어 재시작 시 데이터 전부 소실, 그리고 스냅샷 주기가 1시간이어서 1일치 기준 포인트가 24개 불과.
+
+- [x] `docker-compose.yml` — redis 서비스에 `redis-data` 볼륨 마운트 + `--appendonly yes` AOF 활성화
+- [x] `backend/app/main.py::_snapshot_loop` — 스냅샷 주기 3600s(1시간) → 600s(10분)으로 단축

@@ -398,12 +398,12 @@ async def _collect_snapshot() -> None:
 
 
 async def _snapshot_loop() -> None:
-    """1시간 간격으로 시계열 스냅샷 수집."""
+    """10분 간격으로 시계열 스냅샷 수집."""
     # 시작 직후 첫 번째 수집
     await asyncio.sleep(30)
     while True:
         await _collect_snapshot()
-        await asyncio.sleep(3600)
+        await asyncio.sleep(600)
 
 
 async def _notion_sync_loop() -> None:
