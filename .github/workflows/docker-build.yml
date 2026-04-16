@@ -54,6 +54,16 @@ jobs:
             echo "name=${REGISTRY}/${IMAGE_OWNER}/afterglow" >> $GITHUB_OUTPUT
           fi
 
+      # macOS arm64: Keychain 우회 — 빈 docker config 디렉터리를 DOCKER_CONFIG로 설정
+      # docker login은 osxkeychain 대신 config.json 파일에 자격증명 저장
+      - name: Set DOCKER_CONFIG (macOS — no keychain)
+        if: matrix.arch == 'arm64'
+        run: |
+          DOCKER_CONF_DIR="${RUNNER_TEMP}/docker-config"
+          mkdir -p "${DOCKER_CONF_DIR}"
+          echo '{"auths": {}}' > "${DOCKER_CONF_DIR}/config.json"
+          echo "DOCKER_CONFIG=${DOCKER_CONF_DIR}" >> "$GITHUB_ENV"
+
       # macOS arm64 러너: docker-container 드라이버는 buildkit 컨테이너 부팅 시
       # macOS Keychain을 호출하므로 keychain-free 'docker' 드라이버 사용
       - name: Set up Docker Buildx (macOS — docker driver)
