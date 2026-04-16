@@ -25,6 +25,23 @@ class AdminUpdateImageRequest(BaseModel):
     visibility: str | None = None
 
 
+def _serialize_image(img) -> dict:
+    return {
+        "id": img.id,
+        "name": img.name or "",
+        "status": img.status or "",
+        "size": img.size or 0,
+        "min_disk": img.min_disk or 0,
+        "min_ram": img.min_ram or 0,
+        "disk_format": img.disk_format or "",
+        "os_distro": getattr(img, "os_distro", None) or glance._guess_distro(img.name or ""),
+        "visibility": img.visibility or "private",
+        "owner": img.owner or "",
+        "created_at": str(img.created_at) if img.created_at else None,
+        "protected": getattr(img, "is_protected", False),
+    }
+
+
 @router.get("/images", dependencies=[Depends(require_admin)])
 async def list_admin_images(
     conn: openstack.connection.Connection = Depends(get_os_conn),
@@ -33,42 +50,51 @@ async def list_admin_images(
     marker: str | None = Query(default=None),
     search: str | None = Query(default=None),
 ):
-    """전체 이미지 목록 (visibility 무관, 페이지네이션)."""
+    """전체 이미지 목록 (visibility 무관, 페이지네이션).
+
+    `search` 가 있으면 Glance `name` 정확 매칭 대신 전체 이미지를 가져와
+    case-insensitive substring 필터링 후 marker 기반 페이지네이션을 수동 처리한다.
+    """
     try:
 
-        def _list():
+        def _list_paged():
             kwargs: dict = {"limit": limit}
             if marker:
                 kwargs["marker"] = marker
-            if search:
-                kwargs["name"] = search
-            items = []
+            items: list[dict] = []
             for img in conn.image.images(**kwargs):
-                items.append(
-                    {
-                        "id": img.id,
-                        "name": img.name or "",
-                        "status": img.status or "",
-                        "size": img.size or 0,
-                        "min_disk": img.min_disk or 0,
-                        "min_ram": img.min_ram or 0,
-                        "disk_format": img.disk_format or "",
-                        "os_distro": getattr(img, "os_distro", None) or glance._guess_distro(img.name or ""),
-                        "visibility": img.visibility or "private",
-                        "owner": img.owner or "",
-                        "created_at": str(img.created_at) if img.created_at else None,
-                        "protected": getattr(img, "is_protected", False),
-                    }
-                )
+                items.append(_serialize_image(img))
                 if len(items) >= limit:
                     break
             next_marker = items[-1]["id"] if len(items) == limit else None
             return {"items": items, "next_marker": next_marker, "count": len(items)}
 
-        # 마커가 없고 검색도 없을 때만 캐시 사용
-        if not marker and not search:
-            return await cached_call(f"afterglow:admin:images:{limit}", ttl_static(), _list, refresh=refresh)
-        return await asyncio.to_thread(_list)
+        def _list_search():
+            needle = (search or "").lower()
+            matched: list[dict] = []
+            for img in conn.image.images():
+                name = (img.name or "").lower()
+                if needle and needle not in name:
+                    continue
+                matched.append(_serialize_image(img))
+            # marker 기반 슬라이싱 (marker = 직전 페이지 마지막 항목 id)
+            start = 0
+            if marker:
+                for i, item in enumerate(matched):
+                    if item["id"] == marker:
+                        start = i + 1
+                        break
+            page = matched[start : start + limit]
+            has_more = (start + limit) < len(matched)
+            next_marker = page[-1]["id"] if page and has_more else None
+            return {"items": page, "next_marker": next_marker, "count": len(page)}
+
+        if search:
+            return await asyncio.to_thread(_list_search)
+        # 마커가 없을 때만 캐시 사용
+        if not marker:
+            return await cached_call(f"afterglow:admin:images:{limit}", ttl_static(), _list_paged, refresh=refresh)
+        return await asyncio.to_thread(_list_paged)
     except Exception:
         _logger.warning("관리자 이미지 목록 조회 실패", exc_info=True)
         raise HTTPException(status_code=500, detail="이미지 목록 조회 실패")

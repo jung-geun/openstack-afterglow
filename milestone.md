@@ -348,3 +348,22 @@
   - [x] `docker-build.yml` — checkout 직후 `check-version-sync.js` 검증 스텝 삽입 (tag push 시 git tag ↔ package.json 일치 확인)
   - [x] `test.yml` — 트리거에 `dev` 브랜치 및 `v*` 태그 추가
   - [x] `test.yml` — `version-check` job 신설, `test-backend`/`test-frontend` 가 `needs: version-check` 로 직렬화
+
+## 8. 버그 수정 및 기능 개선 (2026-04-16)
+
+### 8.1 GitHub Actions CI/CD 수정
+
+- [x] `backend/app/utils/version.py` — ruff 포맷 수정 (docstring 후 빈 줄 추가)
+- [x] `backend/app/api/container/containers.py` — ruff format 자동 적용 (함수 시그니처 인라인화 등)
+- [x] `.github/workflows/docker-build.yml` — macOS arm64 러너 keychain 오류 해결: `Pre-auth registry into config.json` 스텝 (base64 auth 직접 기록) 추가, `Set up Docker Buildx` arm64 는 `driver: docker` 사용, arm64 는 `docker/login-action` 미사용
+
+### 8.2 관리자 이미지 검색 substring 매칭 수정
+
+**문제**: 관리자 전체 이미지 페이지에서 이름 일부 입력 시 검색이 동작하지 않음 (Glance `name=` 필터가 정확 매칭이어서 부분 일치 불가).
+
+- [x] `backend/app/api/identity/admin_images.py` — `_serialize_image()` 헬퍼 분리, `_list_search()` 함수 추가 (전체 이미지 fetch 후 case-insensitive substring 클라이언트 필터 + marker 기반 수동 페이지네이션)
+- [x] `backend/tests/test_admin_images.py` — substring 검색 테스트 4개 추가:
+  - `test_list_admin_images_search_substring_case_insensitive` — "u" 가 ubuntu/Windows-Update 모두 매칭
+  - `test_list_admin_images_search_no_match` — 빈 결과 확인
+  - `test_list_admin_images_search_pagination_with_marker` — limit=2 marker 기반 페이지네이션
+  - `test_list_admin_images_search_does_not_pass_name_to_glance` — Glance 호출에 `name=` 인자 미전달 검증
