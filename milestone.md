@@ -374,3 +374,8 @@
 
 - [x] `docker-compose.yml` — redis 서비스에 `redis-data` 볼륨 마운트 + `--appendonly yes` AOF 활성화
 - [x] `backend/app/main.py::_snapshot_loop` — 스냅샷 주기 3600s(1시간) → 600s(10분)으로 단축
+
+### 8.4 관리자 개요 프로젝트 클릭 → quota 슬라이드 패널
+
+- [x] `frontend/src/lib/components/ProjectQuotaPanel.svelte` — 신규 컴포넌트. `GET /api/admin/quotas/{project_id}` 로 현재값+사용량 로드, instances/cores/ram/volumes/gigabytes 편집 폼, `PUT /api/admin/quotas/{project_id}` 로 저장
+- [x] `frontend/src/routes/admin/+page.svelte` — ProjectQuotaPanel import, `selectedProject` 상태 추가, 프로젝트 테이블 행에 `onclick`/`onkeydown` 클릭 핸들러 추가, `loadProjectUsage()` 함수 분리, 페이지 하단에 슬라이드 패널 렌더링
