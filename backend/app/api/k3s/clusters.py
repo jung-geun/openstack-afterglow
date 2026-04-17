@@ -22,7 +22,7 @@ from app.models.k3s import (
     K3sProgressStep,
     ScaleK3sClusterRequest,
 )
-from app.services import cinder, k3s_cloudinit, keystone, neutron, nova
+from app.services import cinder, k3s_cloudinit, k3s_kube, keystone, neutron, nova, octavia
 from app.services import k3s_db as k3s_cluster
 
 router = APIRouter()
@@ -80,7 +80,7 @@ async def get_k3s_cluster(cluster_id: str, token_info: dict = Depends(get_token_
     return _cluster_to_info(cluster)
 
 
-@router.get("/{cluster_id}/kubeconfig")
+@router.api_route("/{cluster_id}/kubeconfig", methods=["GET", "HEAD"])
 async def download_kubeconfig(cluster_id: str, token_info: dict = Depends(get_token_info)):
     """kubeconfig YAML 파일 다운로드. 아직 준비되지 않으면 404."""
     project_id = token_info["project_id"]
@@ -467,6 +467,7 @@ async def _scale_agents(
                     server_ip=server_ip,
                     node_token=node_token or "",
                     ssh_public_key=ssh_public_key,
+                    occm_enabled=bool(cluster.get("occm_enabled")),
                 )
                 vm = await asyncio.to_thread(
                     nova.create_server,
@@ -489,8 +490,16 @@ async def _scale_agents(
             await k3s_cluster.add_agent_vms(cluster_id, new_entries)
 
     else:
-        # 스케일 다운: 뒤에서부터 제거
+        # 스케일 다운: K8s 노드 제거 후 VM 삭제
         remove_ids = current_agent_ids[desired_count:]
+
+        # K8s 노드 삭제 (VM 삭제 전 먼저 수행, best-effort)
+        vm_name_map = await k3s_cluster.get_agent_vm_names(cluster_id, remove_ids)
+        node_names = [name for name in vm_name_map.values() if name]
+        if node_names:
+            _logger.info("k3s scale down: K8s 노드 삭제 시작: %s", node_names)
+            await k3s_kube.delete_k8s_nodes(cluster_id, node_names)
+
         try:
             conn = keystone.get_admin_connection_for_project(project_id)
         except Exception as e:
@@ -530,6 +539,22 @@ async def delete_k3s_cluster(
 
     await k3s_cluster.update_cluster_status(project_id, cluster_id, "DELETING")
 
+    # OCCM이 생성한 Octavia LB 정리 (VM 삭제 전에 먼저 처리)
+    if cluster.get("occm_enabled"):
+        cluster_name = cluster.get("name") or ""
+        prefix = f"kube_service_{cluster_name}_"
+        try:
+            all_lbs = await asyncio.to_thread(octavia.list_load_balancers, conn)
+            for lb in all_lbs:
+                if lb.get("name", "").startswith(prefix):
+                    try:
+                        await asyncio.to_thread(octavia.delete_load_balancer, conn, lb["id"], cascade=True)
+                        _logger.info("Deleted OCCM LB %s (%s)", lb["id"], lb["name"])
+                    except Exception as e:
+                        _logger.warning("Delete OCCM LB %s failed: %s", lb["id"], e)
+        except Exception as e:
+            _logger.warning("Failed to list/delete OCCM LBs for cluster %s: %s", cluster_id, e)
+
     # 에이전트 VM 병렬 삭제
     agent_vm_ids = cluster.get("agent_vm_ids") or []
     if isinstance(agent_vm_ids, str):
@@ -539,6 +564,21 @@ async def delete_k3s_cluster(
             agent_vm_ids = json.loads(agent_vm_ids)
         except Exception:
             agent_vm_ids = []
+
+    # K8s 노드 삭제 (VM 삭제 전 먼저 수행, best-effort)
+    all_node_names: list[str] = []
+    if agent_vm_ids:
+        vm_name_map = await k3s_cluster.get_agent_vm_names(cluster_id, agent_vm_ids)
+        all_node_names.extend([name for name in vm_name_map.values() if name])
+    cluster_name = cluster.get("name") or ""
+    if cluster_name:
+        all_node_names.append(f"{cluster_name}-server")
+    if all_node_names:
+        _logger.info("k3s delete: K8s 노드 삭제 시작: %s", all_node_names)
+        try:
+            await k3s_kube.delete_k8s_nodes(cluster_id, all_node_names)
+        except Exception as e:
+            _logger.warning("k3s delete: K8s 노드 삭제 중 오류 (무시): %s", e)
 
     async def _del_vm(vm_id: str) -> None:
         try:

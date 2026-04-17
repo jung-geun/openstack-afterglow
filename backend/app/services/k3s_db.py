@@ -295,6 +295,21 @@ async def remove_agent_vms(cluster_id: str, vm_ids: list[str]) -> None:
         await session.commit()
 
 
+async def get_agent_vm_names(cluster_id: str, vm_ids: list[str]) -> dict[str, str | None]:
+    """vm_id → name 매핑 반환. DB 미설정 시 빈 dict 반환."""
+    if not is_db_available():
+        return {}
+
+    factory = get_session_factory()
+    async with factory() as session:
+        stmt = select(K3sAgentVM).where(
+            K3sAgentVM.cluster_id == cluster_id,
+            K3sAgentVM.vm_id.in_(vm_ids),
+        )
+        result = await session.execute(stmt)
+        return {row.vm_id: row.name for row in result.scalars()}
+
+
 async def update_agent_count(project_id: str, cluster_id: str, agent_count: int) -> None:
     """클러스터의 agent_count 필드 업데이트."""
     if not is_db_available():

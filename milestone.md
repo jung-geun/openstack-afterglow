@@ -401,3 +401,43 @@
 - [x] `backend/app/main.py` — `_run_notion_target_sync()` 헬퍼 추출, `_notion_sync_loop` — `NotionTarget` 다중 대상 우선 처리 (enabled + interval 체크), 없으면 `NotionConfig` fallback
 - [x] `frontend/src/routes/admin/notion/+page.svelte` — 단수 폼 → 타겟 카드 리스트 UI로 재작성. "연결 추가" 버튼, 카드별 enabled 상태/마지막 동기화/인라인 수정 폼/지금 동기화/삭제 버튼
 - [x] `backend/tests/test_notion.py` — dedup skip/patch/신규 POST 3건 + 다중 타겟 CRUD API 6건 테스트 추가 (총 9건)
+
+### 8.7 인스턴스 로그 전체 조회 + HEAD kubeconfig + K3s 헬스 대시보드
+
+- [x] `backend/app/api/compute/instances.py` — 콘솔 로그 `length` 파라미터 `ge=1` → `ge=0` 변경 (Nova API에서 `length=0`은 전체 로그)
+- [x] `backend/tests/test_instances.py` — `length=0` 전체 로그 테스트, 음수 `length` 422 테스트 추가
+- [x] `backend/app/api/k3s/clusters.py` — kubeconfig 엔드포인트를 `@router.api_route(methods=["GET","HEAD"])`로 변경 (프론트 HEAD 요청 405 해결)
+- [x] `backend/tests/test_k3s_clusters.py` — HEAD kubeconfig 준비/미준비 테스트 추가
+- [x] `frontend/src/lib/components/K3sClusterDetailPanel.svelte` — 헬스 대시보드 연동 (K3sClusterHealth/K3sNodeHealth 인터페이스, 상태 배지, 노드별 ready 상태 + role + kubelet 버전, 즉시 체크 버튼)
+
+### 8.8 K3s 클러스터 삭제 시 Octavia LB 자동 정리 + OCCM 스케일 업 버그 수정
+
+**문제**: OCCM 활성 클러스터 삭제 시 Kubernetes LoadBalancer 서비스가 생성한 Octavia LB가 orphan됨. 또한 스케일 업 시 추가된 에이전트에 `cloud-provider=external` 플래그 미전달.
+
+- [x] `backend/app/api/k3s/clusters.py` — `delete_k3s_cluster()`: VM 삭제 전 OCCM LB 자동 정리 추가. `octavia.list_load_balancers()` 로 전체 LB 조회 후 `kube_service_{cluster_name}_` prefix 매칭하여 `cascade=True` 삭제. 실패 시 warning 로그 후 삭제 계속 진행 (best-effort)
+- [x] `backend/app/api/k3s/clusters.py` — `_scale_agents()` 스케일 업: `generate_agent_userdata()` 호출 시 `occm_enabled=bool(cluster.get("occm_enabled"))` 누락 파라미터 추가 (기존 에이전트와 동일한 OCCM 설정 적용)
+- [x] `backend/tests/test_k3s_clusters.py` — LB 정리 테스트 3건 추가: OCCM LB prefix 매칭 삭제 확인, LB 정리 실패 시 삭제 계속, OCCM 비활성 시 LB 조회 스킵
+
+### 8.9 K3s 스케일 다운 시 K8s 노드 강제 삭제 + 헬스체크 프론트엔드 버그 수정
+
+**문제 1**: 스케일 다운 시 VM을 삭제해도 K8s 노드는 NotReady 상태로 잔존. OCCM `node_lifecycle_controller`가 삭제된 OpenStack 인스턴스를 조회 시 `failed to find object` 에러를 무한 반복.
+
+**문제 2**: `K3sClusterDetailPanel`의 Svelte `$effect` 리액티비티 버그로 5초 폴링 시마다 health 2회 + kubeconfig HEAD 1회 = 4 요청/5초 발생.
+
+- [x] `backend/app/services/k3s_kube.py` — **신규** K8s API 직접 호출 유틸리티. kubeconfig에서 client cert/key 추출 + mTLS로 `DELETE /api/v1/nodes/{name}` 호출. 200/404 = True, 그 외 = False (best-effort, 예외 전파 안 함)
+- [x] `backend/app/services/k3s_db.py` — `get_agent_vm_names(cluster_id, vm_ids)` 추가: `K3sAgentVM` 테이블에서 vm_id → name 매핑 반환
+- [x] `backend/app/api/k3s/clusters.py` — `_scale_agents()` 스케일 다운: VM 삭제 전 `k3s_kube.delete_k8s_nodes()`로 K8s 노드 먼저 삭제 (best-effort)
+- [x] `backend/app/api/k3s/clusters.py` — `delete_k3s_cluster()`: LB 정리 후, VM 삭제 전에 모든 K8s 노드 (에이전트 + 서버) 삭제 (best-effort)
+- [x] `frontend/src/lib/components/K3sClusterDetailPanel.svelte` — `initialCheckDone` 플래그 추가. Effect 2가 `cluster?.status === 'ACTIVE'` 진입 시 1회만 실행되도록 수정. 요청 4회/5초 → 2회/5초로 감소
+- [x] `backend/tests/test_k3s_kube.py` — **신규** 유닛 테스트 7건: 성공/404/500/연결오류/kubeconfig없음/다중노드/실패시계속진행
+- [x] `backend/tests/test_k3s_clusters.py` — K8s 노드 삭제 테스트 3건 추가: 클러스터 삭제 시 노드 정리, K8s 오류 시 VM 삭제 계속 진행
+
+### 8.10 Cloud Provider OpenStack 추가 플러그인 도입 계획
+
+현재 OCCM(cloud controller manager)만 설치. 추가 도입 우선순위:
+
+- [ ] **Cinder CSI** (최우선): K8s PVC → Cinder 볼륨 자동 프로비저닝. `backend/app/services/k3s_cinder_csi.py` + `templates/cinder_csi/manifests.yaml.j2`
+- [ ] **Manila CSI** (2순위): ReadWriteMany PVC → Manila NFS share. Union OverlayFS 라이브러리와 시너지
+- [ ] **Keystone Webhook** (중간): OpenStack 토큰으로 kubectl 인증 연동
+- [ ] **Octavia Ingress Controller** (낮음): k3s에 Traefik 내장이라 필요 시만
+- [ ] **Barbican KMS** (낮음): K8s Secret 암호화 at-rest

@@ -22,6 +22,26 @@
     updated_at: string | null;
   }
 
+  interface K3sNodeHealth {
+    name: string;
+    role: string;
+    ready: boolean;
+    conditions: string[];
+    kubelet_version: string | null;
+  }
+
+  interface K3sClusterHealth {
+    cluster_id: string;
+    cluster_name: string;
+    status: string;
+    api_server_reachable: boolean;
+    healthz_ok: boolean;
+    nodes: K3sNodeHealth[];
+    checked_at: string;
+    error: string | null;
+    reachability: string;
+  }
+
   interface Props {
     clusterId: string;
     onClose?: () => void;
@@ -39,14 +59,24 @@
     ERROR:        'text-red-400 bg-red-900/30',
   };
 
+  const healthColor: Record<string, string> = {
+    HEALTHY:     'text-green-400 bg-green-900/30 border-green-800',
+    DEGRADED:    'text-yellow-400 bg-yellow-900/30 border-yellow-800',
+    UNHEALTHY:   'text-red-400 bg-red-900/30 border-red-800',
+    UNREACHABLE: 'text-gray-400 bg-gray-800/30 border-gray-700',
+    UNKNOWN:     'text-gray-500 bg-gray-800/30 border-gray-700',
+  };
+
   const token = $derived($auth.token ?? undefined);
   const projectId = $derived($auth.projectId ?? undefined);
 
   let cluster = $state<K3sCluster | null>(null);
+  let health = $state<K3sClusterHealth | null>(null);
   let loading = $state(true);
   let error = $state('');
   let deleting = $state(false);
   let kubeconfigAvailable = $state(false);
+  let checkingHealth = $state(false);
 
   // 인스턴스 상세 보기
   let viewingInstanceId = $state<string | null>(null);
@@ -55,6 +85,7 @@
   let scalingTarget = $state<number | null>(null);
   let scaling = $state(false);
   let scaleError = $state('');
+  let initialCheckDone = $state(false);
 
   const apiBase = $derived(adminMode ? '/api/admin/k3s-clusters' : '/api/k3s/clusters');
 
@@ -70,6 +101,27 @@
       error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
     } finally {
       loading = false;
+    }
+  }
+
+  async function fetchHealth() {
+    if (!clusterId || !cluster || cluster.status !== 'ACTIVE') return;
+    try {
+      health = await api.get<K3sClusterHealth>(`/api/k3s/clusters/${clusterId}/health`, token, projectId);
+    } catch {
+      // 404는 아직 헬스 데이터 없음 — 무시
+    }
+  }
+
+  async function triggerHealthCheck() {
+    if (!clusterId || checkingHealth) return;
+    checkingHealth = true;
+    try {
+      health = await api.post<K3sClusterHealth>(`/api/k3s/clusters/${clusterId}/health/check`, {}, token, projectId);
+    } catch (e) {
+      // rate limit(429) 등 — 무시
+    } finally {
+      checkingHealth = false;
     }
   }
 
@@ -145,14 +197,23 @@
     if (!$auth.projectId || !clusterId) return;
     loading = true;
     scalingTarget = null;
+    initialCheckDone = false;
     untrack(() => fetchCluster());
-    const interval = setInterval(() => untrack(() => fetchCluster()), 5000);
+    const interval = setInterval(() => untrack(() => {
+      fetchCluster();
+      fetchHealth();
+    }), 5000);
     return () => clearInterval(interval);
   });
 
+  // ACTIVE 진입 시 1회만 kubeconfig 가용성 확인 (폴링 시마다 재실행 방지)
   $effect(() => {
-    if (cluster?.status === 'ACTIVE') {
-      untrack(() => checkKubeconfig());
+    if (cluster?.status === 'ACTIVE' && !initialCheckDone) {
+      initialCheckDone = true;
+      untrack(() => {
+        checkKubeconfig();
+        fetchHealth();
+      });
     }
   });
 </script>
@@ -202,6 +263,11 @@
           <span class="px-2 py-0.5 rounded text-xs font-medium {statusColor[cluster.status] ?? 'text-gray-400 bg-gray-800'}">
             {cluster.status}
           </span>
+          {#if health}
+            <span class="px-2 py-0.5 rounded border text-xs font-medium {healthColor[health.status] ?? 'text-gray-500 bg-gray-800 border-gray-700'}">
+              {health.status}
+            </span>
+          {/if}
           {#if cluster.k3s_version}
             <span class="text-xs text-gray-500">{cluster.k3s_version}</span>
           {/if}
@@ -217,6 +283,12 @@
             <span>초기화 중...</span>
           </div>
         {:else if cluster.status === 'ACTIVE'}
+          <button
+            onclick={triggerHealthCheck}
+            disabled={checkingHealth}
+            class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-200 text-xs rounded-lg transition-colors disabled:opacity-50">
+            {checkingHealth ? '확인 중...' : '헬스 체크'}
+          </button>
           <button onclick={downloadKubeconfig}
             class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium rounded-lg transition-colors">
             kubeconfig 다운로드
@@ -250,53 +322,127 @@
             <dt class="text-gray-400 text-xs">키페어</dt>
             <dd class="text-gray-300 text-xs">{cluster.key_name || '-'}</dd>
           </div>
+          {#if health}
+            <div class="flex justify-between">
+              <dt class="text-gray-400 text-xs">API 서버</dt>
+              <dd class="text-xs {health.api_server_reachable ? 'text-green-400' : 'text-red-400'}">
+                {health.api_server_reachable ? '접근 가능' : '접근 불가'}
+              </dd>
+            </div>
+            <div class="flex justify-between">
+              <dt class="text-gray-400 text-xs">healthz</dt>
+              <dd class="text-xs {health.healthz_ok ? 'text-green-400' : 'text-red-400'}">
+                {health.healthz_ok ? 'OK' : 'FAIL'}
+              </dd>
+            </div>
+            <div class="flex justify-between">
+              <dt class="text-gray-400 text-xs">체크 시각</dt>
+              <dd class="text-gray-400 text-xs">{new Date(health.checked_at).toLocaleTimeString('ko-KR')}</dd>
+            </div>
+          {/if}
         </dl>
       </div>
 
       <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
         <h3 class="text-xs text-gray-500 uppercase tracking-wide mb-3">노드 현황</h3>
-        <dl class="space-y-1.5 text-sm">
-          <div class="flex justify-between">
-            <dt class="text-gray-400 text-xs">서버(control plane)</dt>
-            <dd class="text-gray-300 text-xs">1</dd>
+        {#if health && health.nodes.length > 0}
+          <div class="space-y-2">
+            {#each health.nodes as node}
+              <div class="flex items-center justify-between py-1.5 border-b border-gray-800 last:border-0">
+                <div class="flex items-center gap-2">
+                  <span class="w-2 h-2 rounded-full {node.ready ? 'bg-green-400' : 'bg-red-400'}"></span>
+                  <span class="text-xs text-gray-300 font-mono">{node.name}</span>
+                  <span class="text-xs px-1.5 py-0.5 rounded {node.role === 'server' ? 'bg-purple-900/40 text-purple-400 border border-purple-800' : 'bg-blue-900/40 text-blue-400 border border-blue-800'}">
+                    {node.role}
+                  </span>
+                </div>
+                <div class="text-right">
+                  <span class="text-xs {node.ready ? 'text-green-400' : 'text-red-400'}">
+                    {node.ready ? 'Ready' : 'NotReady'}
+                  </span>
+                  {#if node.kubelet_version}
+                    <div class="text-xs text-gray-600 font-mono">{node.kubelet_version}</div>
+                  {/if}
+                </div>
+              </div>
+            {/each}
           </div>
-          <div class="flex justify-between items-center">
-            <dt class="text-gray-400 text-xs">에이전트(worker)</dt>
-            <dd class="flex items-center gap-1.5">
-              {#if cluster.status === 'ACTIVE'}
-                <button
-                  onclick={() => scalingTarget = Math.max(0, (scalingTarget ?? cluster!.agent_count) - 1)}
-                  class="w-5 h-5 flex items-center justify-center bg-gray-700 hover:bg-gray-600 text-white rounded text-xs transition-colors">−</button>
-                <span class="text-gray-300 text-xs min-w-[2rem] text-center">
-                  {cluster.agent_vm_ids.length} / {scalingTarget ?? cluster.agent_count}
-                </span>
-                <button
-                  onclick={() => scalingTarget = Math.min(10, (scalingTarget ?? cluster!.agent_count) + 1)}
-                  class="w-5 h-5 flex items-center justify-center bg-gray-700 hover:bg-gray-600 text-white rounded text-xs transition-colors">+</button>
-                {#if scalingTarget !== null && scalingTarget !== cluster.agent_count}
+        {:else}
+          <dl class="space-y-1.5 text-sm">
+            <div class="flex justify-between">
+              <dt class="text-gray-400 text-xs">서버(control plane)</dt>
+              <dd class="text-gray-300 text-xs">1</dd>
+            </div>
+            <div class="flex justify-between items-center">
+              <dt class="text-gray-400 text-xs">에이전트(worker)</dt>
+              <dd class="flex items-center gap-1.5">
+                {#if cluster.status === 'ACTIVE'}
                   <button
-                    onclick={applyScale}
-                    disabled={scaling}
-                    class="px-2 py-0.5 bg-blue-600 hover:bg-blue-500 text-white text-xs rounded transition-colors disabled:opacity-50 ml-1">
-                    {scaling ? '...' : '적용'}
-                  </button>
+                    onclick={() => scalingTarget = Math.max(0, (scalingTarget ?? cluster!.agent_count) - 1)}
+                    class="w-5 h-5 flex items-center justify-center bg-gray-700 hover:bg-gray-600 text-white rounded text-xs transition-colors">−</button>
+                  <span class="text-gray-300 text-xs min-w-[2rem] text-center">
+                    {cluster.agent_vm_ids.length} / {scalingTarget ?? cluster.agent_count}
+                  </span>
+                  <button
+                    onclick={() => scalingTarget = Math.min(10, (scalingTarget ?? cluster!.agent_count) + 1)}
+                    class="w-5 h-5 flex items-center justify-center bg-gray-700 hover:bg-gray-600 text-white rounded text-xs transition-colors">+</button>
+                  {#if scalingTarget !== null && scalingTarget !== cluster.agent_count}
+                    <button
+                      onclick={applyScale}
+                      disabled={scaling}
+                      class="px-2 py-0.5 bg-blue-600 hover:bg-blue-500 text-white text-xs rounded transition-colors disabled:opacity-50 ml-1">
+                      {scaling ? '...' : '적용'}
+                    </button>
+                  {/if}
+                {:else}
+                  <span class="text-gray-300 text-xs">{cluster.agent_vm_ids.length} / {cluster.agent_count} 생성됨</span>
                 {/if}
-              {:else}
-                <span class="text-gray-300 text-xs">{cluster.agent_vm_ids.length} / {cluster.agent_count} 생성됨</span>
+              </dd>
+            </div>
+            <div class="flex justify-between">
+              <dt class="text-gray-400 text-xs">생성일</dt>
+              <dd class="text-gray-300 text-xs">{cluster.created_at ? cluster.created_at.split('T')[0] : '-'}</dd>
+            </div>
+            <div class="flex justify-between">
+              <dt class="text-gray-400 text-xs">마지막 업데이트</dt>
+              <dd class="text-gray-300 text-xs">{cluster.updated_at ? cluster.updated_at.split('T')[0] : '-'}</dd>
+            </div>
+          </dl>
+          {#if health === null && cluster.status === 'ACTIVE'}
+            <p class="text-xs text-gray-600 mt-2">헬스 데이터 로드 중...</p>
+          {/if}
+          {#if scaleError}
+            <p class="text-red-400 text-xs mt-2">{scaleError}</p>
+          {/if}
+        {/if}
+
+        {#if health && health.nodes.length > 0}
+          <!-- 에이전트 스케일링 컨트롤 (노드 헬스 표시 중에도) -->
+          {#if cluster.status === 'ACTIVE'}
+            <div class="flex items-center gap-1.5 mt-3 pt-3 border-t border-gray-800">
+              <span class="text-gray-400 text-xs">에이전트:</span>
+              <button
+                onclick={() => scalingTarget = Math.max(0, (scalingTarget ?? cluster!.agent_count) - 1)}
+                class="w-5 h-5 flex items-center justify-center bg-gray-700 hover:bg-gray-600 text-white rounded text-xs transition-colors">−</button>
+              <span class="text-gray-300 text-xs min-w-[2rem] text-center">
+                {cluster.agent_vm_ids.length} / {scalingTarget ?? cluster.agent_count}
+              </span>
+              <button
+                onclick={() => scalingTarget = Math.min(10, (scalingTarget ?? cluster!.agent_count) + 1)}
+                class="w-5 h-5 flex items-center justify-center bg-gray-700 hover:bg-gray-600 text-white rounded text-xs transition-colors">+</button>
+              {#if scalingTarget !== null && scalingTarget !== cluster.agent_count}
+                <button
+                  onclick={applyScale}
+                  disabled={scaling}
+                  class="px-2 py-0.5 bg-blue-600 hover:bg-blue-500 text-white text-xs rounded transition-colors disabled:opacity-50 ml-1">
+                  {scaling ? '...' : '적용'}
+                </button>
               {/if}
-            </dd>
-          </div>
-          <div class="flex justify-between">
-            <dt class="text-gray-400 text-xs">생성일</dt>
-            <dd class="text-gray-300 text-xs">{cluster.created_at ? cluster.created_at.split('T')[0] : '-'}</dd>
-          </div>
-          <div class="flex justify-between">
-            <dt class="text-gray-400 text-xs">마지막 업데이트</dt>
-            <dd class="text-gray-300 text-xs">{cluster.updated_at ? cluster.updated_at.split('T')[0] : '-'}</dd>
-          </div>
-        </dl>
-        {#if scaleError}
-          <p class="text-red-400 text-xs mt-2">{scaleError}</p>
+            </div>
+            {#if scaleError}
+              <p class="text-red-400 text-xs mt-1">{scaleError}</p>
+            {/if}
+          {/if}
         {/if}
       </div>
     </div>

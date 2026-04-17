@@ -535,7 +535,7 @@ async def get_console(
 @router.get("/{instance_id}/log")
 async def get_console_log(
     instance_id: str,
-    length: int = Query(default=100, ge=1, le=10000),
+    length: int = Query(default=100, ge=0, le=10000),
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     try:

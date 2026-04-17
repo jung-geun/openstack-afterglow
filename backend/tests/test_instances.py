@@ -130,6 +130,22 @@ async def test_get_console_log(client, mock_conn):
     assert "output" in resp.json()
 
 
+@pytest.mark.asyncio
+async def test_get_console_log_full(client, mock_conn):
+    """length=0은 전체 로그 요청 — 422가 아닌 200 반환되어야 한다."""
+    with patch("app.api.compute.instances.nova.get_console_output", return_value="full log"):
+        resp = await client.get("/api/instances/inst-1/log?length=0")
+    assert resp.status_code == 200
+    assert resp.json()["output"] == "full log"
+
+
+@pytest.mark.asyncio
+async def test_get_console_log_length_negative(client, mock_conn):
+    """음수 length는 거부되어야 한다."""
+    resp = await client.get("/api/instances/inst-1/log?length=-1")
+    assert resp.status_code == 422
+
+
 # ────── 볼륨 Attach/Detach ──────
 
 
