@@ -51,6 +51,29 @@ secret_key = "your-random-secret-key-change-me"  # 반드시 변경
 default_network_id = "your-network-uuid"
 ```
 
+### 1-b. 설정 오버라이드 (선택)
+
+긴 옵션 섹션(GPU 디바이스 맵 등)은 별도 오버라이드 파일로 분리할 수 있습니다.  
+`config.toml`과 같은 디렉토리에 `config.<name>.toml`을 두면 백엔드 기동 시 알파벳순으로 딥 머지됩니다.
+
+**머지 규칙**: `dict`는 재귀 병합, `list`와 스칼라는 오버라이드 파일이 덮어씁니다.
+
+```bash
+# GPU 디바이스 맵 활성화 예시
+cp config.gpu.toml.example config.gpu.toml
+# config.gpu.toml 을 편집하여 실제 환경의 GPU PCI ID 반영
+```
+
+여러 오버라이드 파일을 동시에 사용할 수 있습니다:
+
+```
+config.toml          ← 베이스 설정
+config.gpu.toml      ← GPU 디바이스 맵 오버라이드
+config.openstack.toml  ← OpenStack 자격증명 오버라이드 (선택)
+```
+
+파일명 예시 처럼 알파벳순(`g` < `o`)으로 적용되며 뒤 파일이 앞 파일을 이깁니다.
+
 ### 2. 서비스 시작
 
 ```bash

@@ -3,7 +3,7 @@
 > 태그: `instances`  
 > 기본 경로: `/api/instances`
 
-Nova 인스턴스(가상 머신)의 생성, 조회, 제어, 삭제를 관리합니다. Union의 핵심 기능인 OverlayFS 기반 VM 생성을 지원합니다.
+Nova 인스턴스(가상 머신)의 생성, 조회, 제어, 삭제를 관리합니다. Afterglow의 핵심 기능인 OverlayFS 기반 VM 생성을 지원합니다.
 
 ---
 

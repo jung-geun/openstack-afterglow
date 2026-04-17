@@ -73,8 +73,8 @@ Manila 공유 파일 시스템(CephFS)을 관리합니다. **config.toml에서 M
 | `size` | integer | 크기 (GB) |
 | `share_proto` | string | 프로토콜 (`CEPHFS`, `NFS`) |
 | `export_locations` | array[string] | 마운트 경로 목록 |
-| `metadata` | object | 메타데이터 (Union 전용 필드 포함) |
-| `library_name` | string\|null | Union 라이브러리 ID |
+| `metadata` | object | 메타데이터 (Afterglow 전용 필드 포함) |
+| `library_name` | string\|null | Afterglow 라이브러리 ID |
 | `library_version` | string\|null | 라이브러리 버전 |
 | `built_at` | string\|null | 빌드 일시 |
 

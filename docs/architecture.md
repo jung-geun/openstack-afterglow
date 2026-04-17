@@ -1,4 +1,4 @@
-# Union 아키텍처
+# Afterglow 아키텍처
 
 ## 1. 시스템 아키텍처
 
@@ -8,7 +8,7 @@ graph LR
         Browser["브라우저"]
     end
 
-    subgraph Union 플랫폼
+    subgraph Afterglow 플랫폼
         FE["SvelteKit 프론트엔드\n:3000"]
         API["FastAPI 백엔드\n:8000"]
         Redis["Redis 캐시/세션\n:6379"]
@@ -50,7 +50,7 @@ FastAPI 백엔드는 모든 OpenStack 서비스와 통신하는 단일 게이트
 
 ## 2. VM 생성 플로우
 
-Union은 VM 생성 시 SSE(Server-Sent Events) 스트림으로 실시간 진행률을 전달합니다. `POST /api/instances/async` 엔드포인트가 이를 처리합니다.
+Afterglow는 VM 생성 시 SSE(Server-Sent Events) 스트림으로 실시간 진행률을 전달합니다. `POST /api/instances/async` 엔드포인트가 이를 처리합니다.
 
 ```mermaid
 sequenceDiagram
@@ -113,7 +113,7 @@ sequenceDiagram
 
 ## 3. 인증 및 세션 관리
 
-Union은 Keystone 토큰을 브라우저 localStorage에 저장하고, Redis에 세션 시작 시간을 기록하여 별도의 앱 수준 세션 타임아웃을 구현합니다.
+Afterglow는 Keystone 토큰을 브라우저 localStorage에 저장하고, Redis에 세션 시작 시간을 기록하여 별도의 앱 수준 세션 타임아웃을 구현합니다.
 
 ```mermaid
 sequenceDiagram
@@ -164,7 +164,7 @@ X-Project-Id: <project-uuid>
 
 ## 4. OverlayFS 아키텍처
 
-Union의 핵심 기능은 CephFS 라이브러리 공유를 OverlayFS 읽기 전용 하위 레이어로 사용하는 것입니다.
+Afterglow의 핵심 기능은 CephFS 라이브러리 공유를 OverlayFS 읽기 전용 하위 레이어로 사용하는 것입니다.
 
 ```
 VM 내부 파일시스템 뷰
@@ -196,3 +196,48 @@ VM 내부 파일시스템 뷰
 - **빠른 프로비저닝**: 라이브러리를 VM 내부에 설치하는 과정이 없습니다. cloud-init이 CephFS 마운트와 OverlayFS 설정만 수행합니다.
 - **격리**: 각 VM의 쓰기는 전용 Cinder 볼륨(upperdir)에만 기록되어 다른 VM에 영향을 주지 않습니다.
 - **데이터 보존**: VM을 삭제해도 upper 볼륨을 별도로 보존하면 사용자 작업 내용을 유지할 수 있습니다.
+
+---
+
+## 5. 멀티 서브프로젝트 구조
+
+이 저장소는 세 개의 서브프로젝트가 하나의 모노레포에 모여 있습니다.
+
+```mermaid
+graph TD
+    subgraph Afterglow["Afterglow — OpenStack 대시보드"]
+        FE2["SvelteKit 프론트엔드"]
+        API2["FastAPI 백엔드"]
+    end
+
+    subgraph Union["Union — 마운트 서브시스템"]
+        OFS["OverlayFS 레이어"]
+        CephFS["CephFS(NFS) 공유"]
+        Manila2["Manila share 관리"]
+    end
+
+    subgraph K3sProv["k3s Provisioner (k3s_horse_generator)"]
+        K3sCtrl["마스터/워커 VM 프로비저닝"]
+        CloudInit["cloud-init 자동 설치"]
+        Kube["kubeconfig 배포"]
+    end
+
+    Afterglow -->|"OverlayFS VM 생성 시 호출"| Union
+    Afterglow -->|"k3s 클러스터 생성 시 호출"| K3sProv
+```
+
+| 서브프로젝트 | 이름 | 역할 |
+|---|---|---|
+| 대시보드 | **Afterglow** | OpenStack 리소스 관리 UI 및 API 게이트웨이 |
+| 마운트 서브시스템 | **Union** | OverlayFS + CephFS(NFS) + Manila 기반 공유 라이브러리 VM 환경. 이 이름은 해당 기능의 실제 명칭이며 변경되지 않습니다. |
+| k3s 프로비저너 | **k3s_horse_generator** (가칭) | Magnum 없이 VM에 k3s를 직접 설치하는 경량 Kubernetes 프로비저닝. 정식 이름 미확정. |
+
+### 코드 내 구분
+
+각 서브프로젝트의 식별자는 서로 겹치지 않도록 독립적인 네임스페이스를 사용합니다.
+
+| 서브프로젝트 | 내부 식별자 예시 |
+|---|---|
+| Afterglow | `conn._afterglow_token`, `AFTERGLOW_TEST_*` env vars |
+| Union | `union_type`, `union_library`, `union-upper-*` 리소스 prefix |
+| k3s Provisioner | `k3s_horse_generator_role`, `k3s_horse_generator_cluster_id` Nova 메타데이터 |
