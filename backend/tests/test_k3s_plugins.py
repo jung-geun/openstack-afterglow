@@ -1,8 +1,8 @@
 """k3s_plugins 레지스트리 및 각 플러그인 단위 테스트."""
 
-import yaml
-import pytest
 from unittest.mock import MagicMock
+
+import yaml
 
 
 def _base_settings(**kwargs) -> MagicMock:
@@ -348,7 +348,6 @@ def test_registry_occm_plus_cinder():
 def test_registry_server_args_dedup():
     """동일 인자가 여러 플러그인에서 반환되어도 중복 없어야 함."""
     from app.services import k3s_plugins
-    from app.services.k3s_plugins.base import K3sPlugin
 
     class FakePluginA:
         name = "fake_a"
@@ -397,6 +396,7 @@ def test_registry_get_active_plugin_names():
 def test_cloudinit_server_no_plugins():
     """플러그인 없을 때 cloud-init 렌더링이 정상 동작해야 한다."""
     import base64
+
     from app.services.k3s_cloudinit import generate_server_userdata
     result = generate_server_userdata(
         cluster_name="test",
@@ -413,6 +413,7 @@ def test_cloudinit_server_no_plugins():
 def test_cloudinit_server_with_occm_plugin():
     """OCCM 플러그인 활성 시 cloud-init에 external cloud provider 인자가 포함되어야 한다."""
     import base64
+
     from app.services.k3s_cloudinit import generate_server_userdata
     result = generate_server_userdata(
         cluster_name="test",
@@ -433,6 +434,7 @@ def test_cloudinit_server_with_occm_plugin():
 def test_cloudinit_server_multi_plugins():
     """복수 플러그인 시 각 매니페스트 파일이 write_files에 포함되어야 한다."""
     import base64
+
     from app.services.k3s_cloudinit import generate_server_userdata
     result = generate_server_userdata(
         cluster_name="test",
@@ -453,6 +455,7 @@ def test_cloudinit_server_multi_plugins():
 def test_cloudinit_agent_no_extra_args():
     """에이전트: extra_agent_args 없을 때 INSTALL_K3S_EXEC 없어야 한다."""
     import base64
+
     from app.services.k3s_cloudinit import generate_agent_userdata
     result = generate_agent_userdata(
         cluster_name="test",
@@ -468,6 +471,7 @@ def test_cloudinit_agent_no_extra_args():
 def test_cloudinit_agent_with_cloud_provider():
     """에이전트: extra_agent_args에 cloud-provider=external이 포함되어야 한다."""
     import base64
+
     from app.services.k3s_cloudinit import generate_agent_userdata
     result = generate_agent_userdata(
         cluster_name="test",
@@ -484,6 +488,7 @@ def test_cloudinit_agent_with_cloud_provider():
 def test_cloudinit_agent_backward_compat_occm_enabled():
     """하위호환: occm_enabled=True 시 cloud-provider=external이 포함되어야 한다."""
     import base64
+
     from app.services.k3s_cloudinit import generate_agent_userdata
     result = generate_agent_userdata(
         cluster_name="test",
