@@ -18,6 +18,7 @@ from app.models.storage import (
     SubnetDetail,
     TopologyData,
     TopologyInstance,
+    UpdateSubnetRequest,
 )
 from app.services import neutron, nova
 from app.services.cache import cached_call, ttl_fast, ttl_normal
@@ -117,6 +118,20 @@ async def delete_floating_ip(
 # ---------------------------------------------------------------------------
 # 서브넷 (고정 경로)
 # ---------------------------------------------------------------------------
+
+
+@router.put("/subnets/{subnet_id}", response_model=SubnetDetail)
+async def update_subnet(
+    subnet_id: str,
+    req: UpdateSubnetRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    try:
+        return await asyncio.to_thread(
+            neutron.update_subnet, conn, subnet_id, req.name, req.gateway_ip, req.enable_dhcp
+        )
+    except Exception:
+        raise HTTPException(status_code=500, detail="서브넷 업데이트 실패")
 
 
 @router.delete("/subnets/{subnet_id}", status_code=204)

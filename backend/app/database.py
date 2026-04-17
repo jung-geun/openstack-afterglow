@@ -72,6 +72,14 @@ async def create_tables() -> None:
         except Exception:
             pass  # 이미 존재하면 무시
 
+        # 플러그인 목록 JSON 컬럼 추가 (없는 경우에만)
+        try:
+            await conn.exec_driver_sql(
+                "ALTER TABLE k3s_clusters ADD COLUMN plugins_enabled JSON DEFAULT NULL"
+            )
+        except Exception:
+            pass  # 이미 존재하면 무시
+
     _logger.info("데이터베이스 테이블 생성/확인 완료")
 
 

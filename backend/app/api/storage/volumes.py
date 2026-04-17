@@ -4,7 +4,7 @@ import openstack
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from app.api.deps import get_os_conn
+from app.api.deps import get_os_conn, require_admin
 from app.models.storage import CreateVolumeRequest, VolumeInfo
 from app.rate_limit import limiter
 from app.services import cinder
@@ -62,6 +62,23 @@ async def delete_volume(
         await invalidate(f"afterglow:cinder:{pid}:volumes")
     except Exception:
         raise HTTPException(status_code=500, detail="볼륨 삭제 실패")
+
+
+@router.post("/{volume_id}/force-delete", status_code=204)
+async def force_delete_volume(
+    volume_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    _: None = Depends(require_admin),
+):
+    """error/error_deleting 상태 볼륨을 강제 삭제한다. 관리자 전용."""
+    pid = conn._afterglow_project_id
+    try:
+        # reset_status → error 상태로 전환 후 force delete
+        await asyncio.to_thread(cinder.reset_volume_status, conn, volume_id, "error")
+        await asyncio.to_thread(cinder.force_delete_volume, conn, volume_id)
+        await invalidate(f"afterglow:cinder:{pid}:volumes")
+    except Exception:
+        raise HTTPException(status_code=500, detail="볼륨 강제 삭제 실패")
 
 
 # ---------------------------------------------------------------------------

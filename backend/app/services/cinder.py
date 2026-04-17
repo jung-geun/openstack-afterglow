@@ -48,6 +48,17 @@ def delete_volume(conn: openstack.connection.Connection, volume_id: str) -> None
     conn.block_storage.delete_volume(volume_id, ignore_missing=True)
 
 
+def reset_volume_status(conn: openstack.connection.Connection, volume_id: str, status: str = "error") -> None:
+    """볼륨 상태를 강제로 변경한다 (Cinder os-reset_status action)."""
+    conn.block_storage.reset_volume_status(volume_id, status)
+
+
+def force_delete_volume(conn: openstack.connection.Connection, volume_id: str) -> None:
+    """볼륨을 강제 삭제한다 (Cinder os-force_delete action). 관리자 전용."""
+    vol = conn.block_storage.get_volume(volume_id)
+    vol.force_delete(conn.block_storage)
+
+
 def get_volume(conn: openstack.connection.Connection, volume_id: str) -> VolumeInfo:
     vol = conn.block_storage.get_volume(volume_id)
     return _vol_to_info(vol)

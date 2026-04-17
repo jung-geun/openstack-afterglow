@@ -91,7 +91,6 @@
 	const fixedIpsList = $derived(instance?.ip_addresses.filter(ip => ip.type === 'fixed') ?? []);
 	const floatingIpsList = $derived(instance?.ip_addresses.filter(ip => ip.type === 'floating') ?? []);
 	let floatingIps = $state<FloatingIp[]>([]);
-	let allFloatingIps = $state<FloatingIp[]>([]);
 	let interfaces = $state<PortInfo[]>([]);
 	let volumes = $state<VolumeAttachment[]>([]);
 	let allSecurityGroups = $state<SecurityGroup[]>([]);
@@ -102,7 +101,6 @@
 	let error = $state('');
 	let deleting = $state(false);
 	let actioning = $state<string | null>(null);
-	let showFipPanel = $state(false);
 	// Console log
 	let showLog = $state(false);
 	let consoleLog = $state('');
@@ -200,7 +198,6 @@
 				api.get<NetworkInfo[]>('/api/networks', $auth.token ?? undefined, effectiveProjectId).catch(() => []),
 				api.get<{ display: string }>(`/api/instances/${id}/owner`, $auth.token ?? undefined, effectiveProjectId).catch(() => ({ display: '' })),
 			]);
-			allFloatingIps = fips;
 			const instIps = new Set(instance.ip_addresses.filter(ip => ip.type === 'floating').map(ip => ip.addr));
 			floatingIps = fips.filter(f => instIps.has(f.floating_ip_address));
 			interfaces = ifaces;
@@ -301,32 +298,30 @@
 		}
 	}
 
-	async function associateFip(fipId: string) {
+	async function assignFloatingIp() {
 		if (!instance) return;
-		actioning = 'fip-' + fipId;
+		actioning = 'fip-assign';
 		try {
 			await api.post(
-				`/api/networks/floating-ips/${fipId}/associate`,
-				{ instance_id: instance.id },
+				`/api/instances/${instance.id}/floating-ip`,
+				{},
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined
 			);
 			await fetchInstance(instance.id);
-			showFipPanel = false;
 		} catch (e) {
-			alert('Floating IP 연결 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			alert('Floating IP 할당 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			actioning = null;
 		}
 	}
 
-	async function disassociateFip(fipId: string) {
-		if (!confirm('Floating IP를 해제하시겠습니까?')) return;
-		actioning = 'fip-' + fipId;
+	async function releaseFloatingIp() {
+		if (!confirm('Floating IP를 해제하고 삭제하시겠습니까?')) return;
+		actioning = 'fip-release';
 		try {
-			await api.post(
-				`/api/networks/floating-ips/${fipId}/disassociate`,
-				{},
+			await api.delete(
+				`/api/instances/${instance!.id}/floating-ip`,
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined
 			);
@@ -485,8 +480,6 @@
 	function networkNameById(id: string): string {
 		return availableNetworks.find(n => n.id === id)?.name ?? id.slice(0, 12) + '...';
 	}
-
-	let availableFips = $derived(allFloatingIps.filter(f => !f.port_id));
 
 	// 마이그레이션 (관리자 전용)
 	let showMigrateModal = $state(false);
@@ -777,37 +770,16 @@
 		<div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4">
 			<div class="flex items-center justify-between mb-4">
 				<h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide">Floating IP</h2>
-				<button
-					onclick={() => (showFipPanel = !showFipPanel)}
-					class="text-xs text-blue-400 hover:text-blue-300 transition-colors"
-				>
-					{showFipPanel ? '닫기' : '+ 할당'}
-				</button>
+				{#if floatingIps.length === 0}
+					<button
+						onclick={assignFloatingIp}
+						disabled={actioning === 'fip-assign'}
+						class="text-xs text-blue-400 hover:text-blue-300 px-2 py-1 border border-blue-900 hover:border-blue-700 rounded transition-colors disabled:text-gray-600 disabled:border-gray-700"
+					>
+						{actioning === 'fip-assign' ? '할당 중...' : '+ Floating IP 요청'}
+					</button>
+				{/if}
 			</div>
-
-			{#if showFipPanel}
-				<div class="mb-4 bg-gray-800 rounded-lg p-4">
-					<p class="text-xs text-gray-400 mb-3">사용 가능한 Floating IP (이 프로젝트)</p>
-					{#if availableFips.length === 0}
-						<p class="text-sm text-gray-500">사용 가능한 Floating IP가 없습니다</p>
-					{:else}
-						<div class="space-y-2">
-							{#each availableFips as fip}
-								<div class="flex items-center justify-between">
-									<span class="font-mono text-sm text-gray-300">{fip.floating_ip_address}</span>
-									<button
-										onclick={() => associateFip(fip.id)}
-										disabled={actioning === 'fip-' + fip.id}
-										class="text-xs text-blue-400 hover:text-blue-300 px-2 py-1 border border-blue-900 hover:border-blue-700 rounded transition-colors disabled:text-gray-600 disabled:border-gray-700"
-									>
-										{actioning === 'fip-' + fip.id ? '연결 중...' : '연결'}
-									</button>
-								</div>
-							{/each}
-						</div>
-					{/if}
-				</div>
-			{/if}
 
 			{#if floatingIps.length === 0}
 				<p class="text-sm text-gray-500">연결된 Floating IP 없음</p>
@@ -822,11 +794,11 @@
 								{/if}
 							</div>
 							<button
-								onclick={() => disassociateFip(fip.id)}
-								disabled={actioning === 'fip-' + fip.id}
+								onclick={releaseFloatingIp}
+								disabled={actioning === 'fip-release'}
 								class="text-xs text-orange-400 hover:text-orange-300 px-2 py-1 border border-orange-900 hover:border-orange-700 rounded transition-colors disabled:text-gray-600"
 							>
-								{actioning === 'fip-' + fip.id ? '해제 중...' : '해제'}
+								{actioning === 'fip-release' ? '해제 중...' : '해제 및 삭제'}
 							</button>
 						</div>
 					{/each}

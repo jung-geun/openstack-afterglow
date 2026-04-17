@@ -449,6 +449,12 @@ async def delete_instance(
         except Exception as ex:
             logger.warning(f"Upper 볼륨 삭제 실패: {ex}")
 
+    # Floating IP 정리 (해제 + 삭제)
+    try:
+        await asyncio.to_thread(neutron.cleanup_instance_fips, conn, instance_id)
+    except Exception as ex:
+        logger.warning(f"Floating IP 정리 실패: {ex}")
+
 
 @router.post("/{instance_id}/start", status_code=204)
 async def start_instance(
@@ -865,3 +871,51 @@ async def _rollback(
             await asyncio.to_thread(manila.delete_file_storage, conn, file_storage_id)
         except Exception as e:
             logger.error(f"Rollback - 파일 스토리지 삭제 실패 {file_storage_id}: {e}")
+
+# ---------------------------------------------------------------------------
+# Floating IP 자동 관리 엔드포인트
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{instance_id}/floating-ip", response_model=dict)
+async def assign_floating_ip(
+    instance_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """인스턴스에 새 Floating IP를 자동 생성하고 연결한다."""
+    pid = conn._afterglow_project_id
+    try:
+        all_nets = await asyncio.to_thread(neutron.list_networks, conn)
+        ext_net = next((n for n in all_nets if n.is_external), None)
+        if not ext_net:
+            raise HTTPException(status_code=400, detail="외부 네트워크가 없습니다")
+        fip = await asyncio.to_thread(neutron.create_floating_ip, conn, ext_net.id)
+        try:
+            result = await asyncio.to_thread(neutron.associate_floating_ip, conn, fip.id, instance_id)
+        except Exception as ex:
+            # 연결 실패 시 생성된 FIP 정리
+            try:
+                await asyncio.to_thread(neutron.delete_floating_ip, conn, fip.id)
+            except Exception:
+                pass
+            raise ex
+        await invalidate(f"afterglow:neutron:{pid}:floating_ips")
+        return {"id": result.id, "floating_ip_address": result.floating_ip_address}
+    except HTTPException:
+        raise
+    except Exception as ex:
+        raise HTTPException(status_code=500, detail=f"Floating IP 할당 실패: {ex}")
+
+
+@router.delete("/{instance_id}/floating-ip", status_code=204)
+async def release_floating_ip(
+    instance_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """인스턴스에 연결된 Floating IP를 해제하고 삭제한다."""
+    pid = conn._afterglow_project_id
+    try:
+        await asyncio.to_thread(neutron.cleanup_instance_fips, conn, instance_id)
+        await invalidate(f"afterglow:neutron:{pid}:floating_ips")
+    except Exception as ex:
+        raise HTTPException(status_code=500, detail=f"Floating IP 해제 실패: {ex}")

@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import TimeSeriesChart from '$lib/components/TimeSeriesChart.svelte';
-	import SlidePanel from '$lib/components/SlidePanel.svelte';
 
 	interface NetworkInfo {
 		id: string;
@@ -42,9 +42,6 @@
 	let deleteNet = $state<NetworkInfo | null>(null);
 	let deleting = $state(false);
 	let deleteError = $state('');
-
-	// 상세 패널
-	let selectedNetworkId = $state<string | null>(null);
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
@@ -150,8 +147,8 @@
 				<tbody>
 					{#each networks as n (n.id)}
 						<tr
-							onclick={() => { selectedNetworkId = n.id; }}
-							class="border-b border-gray-800/50 text-xs hover:bg-gray-800/30 transition-colors cursor-pointer {selectedNetworkId === n.id ? 'bg-gray-800/50' : ''}"
+							onclick={() => goto(`/admin/networks/${n.id}`)}
+							class="border-b border-gray-800/50 text-xs hover:bg-gray-800/30 transition-colors cursor-pointer"
 						>
 							<td class="py-2 pr-4 text-white">{n.name || n.id.slice(0, 8)}</td>
 							<td class="py-2 pr-4 {n.status === 'ACTIVE' ? 'text-green-400' : 'text-gray-400'}">{n.status}</td>
@@ -239,11 +236,3 @@
 	</div>
 {/if}
 
-<!-- 네트워크 상세 패널 -->
-{#if selectedNetworkId}
-	<SlidePanel onClose={() => { selectedNetworkId = null; }} width="w-96">
-		{#await import('$lib/components/NetworkDetailPanel.svelte') then { default: Panel }}
-			<Panel networkId={selectedNetworkId} onClose={() => { selectedNetworkId = null; }} token={token} projectId={projectId} />
-		{/await}
-	</SlidePanel>
-{/if}

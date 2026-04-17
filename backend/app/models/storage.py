@@ -188,6 +188,12 @@ class CreateAccessRuleRequest(BaseModel):
     access_type: Literal["cephx", "ip"] = "cephx"
 
 
+class UpdateSubnetRequest(BaseModel):
+    name: str | None = None
+    gateway_ip: str | None = None
+    enable_dhcp: bool | None = None
+
+
 class CreateNetworkRequest(BaseModel):
     name: str
 

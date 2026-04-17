@@ -109,6 +109,19 @@
     }
   }
 
+  async function forceDeleteVolume(id: string, name: string) {
+    if (!confirm(`볼륨 "${name || id.slice(0, 8)}"을 강제 삭제하시겠습니까?\n이 작업은 오류 상태 볼륨을 강제로 제거합니다.`)) return;
+    deleting = id;
+    try {
+      await api.post(`/api/volumes/${id}/force-delete`, {}, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      await fetchVolumes();
+    } catch (e) {
+      alert('강제 삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+    } finally {
+      deleting = null;
+    }
+  }
+
   $effect(() => {
     const projectId = $auth.projectId;
     if (!projectId) return;
@@ -212,6 +225,14 @@
                       onclick={(e) => { e.stopPropagation(); openVolumePanel(vol.id); }}
                       class="text-blue-400 hover:text-blue-300 text-xs px-2 py-1 rounded border border-blue-900 hover:border-blue-700 transition-colors"
                     >연결</button>
+                  {/if}
+                  {#if (vol.status === 'error' || vol.status === 'error_deleting' || vol.status === 'deleting') && $auth.isSystemAdmin}
+                    <button
+                      onclick={(e) => { e.stopPropagation(); forceDeleteVolume(vol.id, vol.name); }}
+                      disabled={deleting === vol.id}
+                      class="text-rose-400 hover:text-rose-300 disabled:text-gray-600 text-xs px-2 py-1 rounded border border-rose-900 hover:border-rose-700 disabled:border-gray-700 transition-colors"
+                      title="오류 상태 볼륨 강제 삭제 (관리자)"
+                    >{deleting === vol.id ? '삭제 중...' : '강제 삭제'}</button>
                   {/if}
                   <button
                     onclick={(e) => { e.stopPropagation(); deleteVolume(vol.id, vol.name); }}

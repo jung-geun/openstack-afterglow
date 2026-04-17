@@ -449,3 +449,11 @@
 - [x] 테스트: `test_k3s_plugins.py` 41개 (435 passed, 1 xfailed)
 
 config.toml 신규 섹션: `[k3s]` 하위 `cinder_csi_*`, `manila_csi_*`, `keystone_auth_*`, `octavia_ingress_*`, `barbican_kms_*`
+
+### 8.11 네트워크 UX 개선 + 볼륨 강제삭제 + K3s DB 수정
+
+- [x] **K3s DB 수정**: `database.py`의 `create_tables()`에 `plugins_enabled JSON` ALTER TABLE 추가 — 컨테이너 재시작만으로 자동 적용
+- [x] **서브넷 편집 기능**: 네트워크 상세 페이지에서 서브넷 이름/게이트웨이/DHCP 인라인 편집 (`PUT /api/networks/subnets/{id}`)
+- [x] **포트 페이지 제거**: 사용자 불필요. 사이드바에서 제거, 페이지 삭제
+- [x] **Floating IP 자동 관리**: 사이드바에서 Floating IP 페이지 제거. 인스턴스 상세 패널에서 원클릭 요청/해제+삭제(`POST/DELETE /api/instances/{id}/floating-ip`). 인스턴스 삭제 시 FIP 자동 정리
+- [x] **볼륨 강제 삭제**: `error`/`error_deleting` 상태 볼륨을 관리자가 강제 삭제 (`POST /api/volumes/{id}/force-delete`, Cinder `os-reset_status` + `os-force_delete`)

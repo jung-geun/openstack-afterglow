@@ -143,6 +143,54 @@ def delete_subnet(conn: openstack.connection.Connection, subnet_id: str) -> None
     conn.network.delete_subnet(subnet_id, ignore_missing=True)
 
 
+def update_subnet(
+    conn: openstack.connection.Connection,
+    subnet_id: str,
+    name: str | None = None,
+    gateway_ip: str | None = None,
+    enable_dhcp: bool | None = None,
+) -> SubnetDetail:
+    kwargs: dict = {}
+    if name is not None:
+        kwargs["name"] = name
+    if gateway_ip is not None:
+        kwargs["gateway_ip"] = gateway_ip
+    if enable_dhcp is not None:
+        kwargs["is_dhcp_enabled"] = enable_dhcp
+    s = conn.network.update_subnet(subnet_id, **kwargs)
+    return SubnetDetail(
+        id=s.id,
+        name=s.name or "",
+        cidr=s.cidr or "",
+        gateway_ip=s.gateway_ip,
+        dhcp_enabled=bool(s.is_dhcp_enabled),
+    )
+
+
+def delete_port(conn: openstack.connection.Connection, port_id: str) -> None:
+    conn.network.delete_port(port_id, ignore_missing=True)
+
+
+def cleanup_instance_fips(conn: openstack.connection.Connection, instance_id: str) -> None:
+    """인스턴스 삭제 시 연결된 Floating IP를 해제하고 삭제한다."""
+    try:
+        fips = list(conn.network.ips(device_id=instance_id))
+    except Exception:
+        # device_id 필터가 지원되지 않으면 전체 조회 후 필터
+        try:
+            ports = list(conn.network.ports(device_id=instance_id))
+            port_ids = {p.id for p in ports}
+            fips = [f for f in conn.network.ips() if f.port_id in port_ids]
+        except Exception:
+            return
+    for fip in fips:
+        try:
+            conn.network.update_ip(fip.id, port_id=None)
+            conn.network.delete_ip(fip.id, ignore_missing=True)
+        except Exception:
+            pass
+
+
 # ---------------------------------------------------------------------------
 # Floating IP
 # ---------------------------------------------------------------------------
