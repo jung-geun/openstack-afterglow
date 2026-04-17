@@ -1,16 +1,14 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: afterglow
+  name: afterglow-prod
   namespace: argocd
   annotations:
     # ArgoCD Image Updater: :latest 태그의 digest 변경을 감지하여 자동 재배포
-    # 새 이미지가 :latest 로 푸시될 때마다 (~2분 내) 자동 감지 후 배포
     argocd-image-updater.argoproj.io/image-list: |
       backend=ghcr.io/jung-geun/afterglow-api:latest,frontend=ghcr.io/jung-geun/afterglow:latest
     argocd-image-updater.argoproj.io/backend.update-strategy: digest
     argocd-image-updater.argoproj.io/frontend.update-strategy: digest
-    # 이미지 변경 시 git에 .argocd-source-afterglow.yaml 파일로 override 기록
     argocd-image-updater.argoproj.io/write-back-method: git
     argocd-image-updater.argoproj.io/git-branch: main
 spec:
@@ -18,7 +16,7 @@ spec:
   source:
     repoURL: "https://github.com/jung-geun/openstack-afterglow.git"
     targetRevision: main
-    path: deploy/k8s
+    path: deploy/k8s/overlays/prod
   destination:
     server: "https://kubernetes.default.svc"
     namespace: afterglow
@@ -36,5 +34,3 @@ spec:
         duration: 5s
         factor: 2
         maxDuration: 3m
-  # configmap.yaml, secret.yaml은 directory.exclude로 sync 대상에서 제외됨
-  # → 수동으로 kubectl apply -f 해야 함
