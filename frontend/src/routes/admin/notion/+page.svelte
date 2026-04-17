@@ -441,7 +441,7 @@
   {/if}
 
   <!-- 안내 -->
-  <div class="mt-6 bg-gray-900/50 border border-gray-800 rounded-lg p-5">
+  <div class="mt-6 bg-gray-900 border border-gray-800 rounded-lg p-5">
     <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">설정 방법</h3>
     <ol class="text-xs text-gray-500 space-y-1.5 list-decimal list-inside">
       <li>
