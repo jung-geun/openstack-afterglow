@@ -1,5 +1,7 @@
 # k3s 클러스터 프로비저닝
 
+**Language:** 한국어 · [English](en/k3s.md)
+
 Afterglow는 OpenStack의 Magnum 서비스 없이 VM에 k3s를 직접 배포하여 Kubernetes 환경을 제공합니다.
 
 ---

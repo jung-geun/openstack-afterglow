@@ -1,10 +1,13 @@
 ---
 layout: home
 title: Afterglow
+lang: ko
 nav_order: 1
 ---
 
 # Afterglow
+
+**Language:** 한국어 · [English](en/)
 
 > 차세대 OpenStack 대시보드 — Horizon의 완성도 + Skyline의 현대적 UX
 

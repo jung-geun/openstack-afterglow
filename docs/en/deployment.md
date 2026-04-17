@@ -1,32 +1,39 @@
-# 배포 가이드
+---
+title: Deployment
+parent: English
+lang: en
+nav_order: 1
+---
 
-**Language:** 한국어 · [English](en/deployment.md)
+# Deployment Guide
 
-Afterglow는 Docker Compose(개발/소규모), Kubernetes(프로덕션), ArgoCD(GitOps) 세 가지 배포 방식을 지원합니다.
+**Language:** [한국어](../deployment.md) · English
+
+Afterglow supports three deployment modes: Docker Compose (development / small scale), Kubernetes (production), and ArgoCD (GitOps).
 
 ---
 
-## 사전 요구사항
+## Prerequisites
 
-### OpenStack 서비스
+### OpenStack Services
 
-| 서비스 | 필수 여부 | 용도 |
+| Service | Required | Purpose |
 |---|---|---|
-| Keystone | 필수 | 인증 |
-| Nova | 필수 | VM 컴퓨트 |
-| Glance | 필수 | 이미지 관리 |
-| Cinder | 필수 | 블록 스토리지 |
-| Neutron | 필수 | 네트워크 |
-| Manila | 선택 | 공유 파일시스템 (OverlayFS 기능) |
-| Octavia | 선택 | 로드밸런서 |
+| Keystone | Required | Authentication |
+| Nova | Required | VM compute |
+| Glance | Required | Image management |
+| Cinder | Required | Block storage |
+| Neutron | Required | Networking |
+| Manila | Optional | Shared filesystem (OverlayFS feature) |
+| Octavia | Optional | Load balancing |
 
 ---
 
-## Docker Compose 배포
+## Docker Compose Deployment
 
-개발 환경 또는 단일 호스트 소규모 배포에 적합합니다.
+Suitable for development or single-host small-scale deployments.
 
-### 1. 저장소 클론 및 설정
+### 1. Clone and Configure
 
 ```bash
 git clone git@github.com:jung-geun/openstack-afterglow.git
@@ -34,7 +41,7 @@ cd openstack-afterglow
 cp config.toml.example config.toml
 ```
 
-`config.toml` 필수 항목 설정:
+Required `config.toml` fields:
 
 ```toml
 [openstack]
@@ -45,62 +52,62 @@ user_domain_name     = "Default"
 region_name          = "RegionOne"
 
 [app]
-secret_key = "your-random-secret-key-change-me"  # 반드시 변경
+secret_key = "your-random-secret-key-change-me"  # must be changed
 
 [nova]
 default_network_id = "your-network-uuid"
 ```
 
-### 2. 서비스 시작
+### 2. Start Services
 
 ```bash
-# 기본 서비스 (backend + frontend + redis)
+# Core services (backend + frontend + redis)
 docker compose up -d
 
-# 모니터링 스택 포함
+# Including the monitoring stack
 docker compose --profile monitoring up -d
 ```
 
-### 3. 접속 확인
+### 3. Verify
 
 ```bash
-# 헬스체크
+# Health check
 curl http://localhost:8000/api/health
 
-# 브라우저
+# Browser
 open http://localhost:3000
 ```
 
-### 서비스 구성
+### Service Layout
 
-| 서비스 | 포트 | 설명 |
+| Service | Port | Description |
 |---|---|---|
-| frontend | 3000 | SvelteKit 웹 UI |
+| frontend | 3000 | SvelteKit web UI |
 | backend | 8000 | FastAPI REST API |
-| redis | 6379 | 캐시 / 세션 (AOF 영속화) |
-| opensearch | 9200 | 로그 검색 (모니터링) |
-| prometheus | 9090 | 메트릭 수집 (모니터링) |
-| grafana | 3001 | 대시보드 (모니터링) |
+| redis | 6379 | Cache / session (AOF persistence) |
+| opensearch | 9200 | Log search (monitoring) |
+| prometheus | 9090 | Metrics collection (monitoring) |
+| grafana | 3001 | Dashboards (monitoring) |
 
 ---
 
-## Kubernetes 배포
+## Kubernetes Deployment
 
-프로덕션 환경 배포. Kustomize 기반 base + overlay 구조로 dev/prod 환경을 분리합니다.
+Production deployment. Kustomize-based `base` + `overlay` layout separates dev and prod environments.
 
-### 사전 요구사항
+### Prerequisites
 
-| 항목 | 최소 버전 |
+| Item | Minimum version |
 |---|---|
 | kubectl | 1.28+ |
-| k3s 또는 Kubernetes | 1.28+ |
-| (선택) ArgoCD | 2.8+ |
+| k3s or Kubernetes | 1.28+ |
+| (Optional) ArgoCD | 2.8+ |
 
-### 디렉토리 구조
+### Directory Layout
 
 ```
 deploy/k8s/
-├── base/              # 공통 리소스
+├── base/              # Shared resources
 │   ├── namespace.yaml
 │   ├── configmap.yaml
 │   ├── ingress.yaml
@@ -111,11 +118,11 @@ deploy/k8s/
 │   ├── worker/
 │   └── monitoring/
 └── overlays/
-    ├── dev/           # 개발 오버레이
-    └── prod/          # 프로덕션 오버레이
+    ├── dev/           # Development overlay
+    └── prod/          # Production overlay
 ```
 
-### 1. 네임스페이스 및 시크릿 생성
+### 1. Create Namespace and Secrets
 
 ```bash
 kubectl create namespace afterglow
@@ -126,30 +133,30 @@ kubectl create secret generic afterglow-secrets \
   --from-literal=SECRET_KEY=$(openssl rand -hex 32)
 ```
 
-### 2. Kustomize 배포
+### 2. Kustomize Apply
 
 ```bash
-# 개발 환경
+# Development
 kubectl apply -k deploy/k8s/overlays/dev
 
-# 프로덕션 환경
+# Production
 kubectl apply -k deploy/k8s/overlays/prod
 ```
 
-### 3. 배포 확인
+### 3. Verify
 
 ```bash
 kubectl get all -n afterglow
 kubectl get ingress -n afterglow
 
-# 로그 확인
+# Logs
 kubectl logs -f deployment/backend -n afterglow
 kubectl logs -f deployment/frontend -n afterglow
 ```
 
-### ConfigMap 주요 설정
+### Key ConfigMap Settings
 
-`deploy/k8s/base/configmap.yaml` 수정:
+Edit `deploy/k8s/base/configmap.yaml`:
 
 ```yaml
 data:
@@ -159,7 +166,7 @@ data:
   REDIS_URL: "redis://redis:6379/0"
 ```
 
-### Ingress 도메인 설정
+### Ingress Domain
 
 `deploy/k8s/base/ingress.yaml`:
 
@@ -185,34 +192,34 @@ spec:
                   number: 3000
 ```
 
-> **주의**: 프론트엔드 `PUBLIC_API_BASE` 환경변수는 브라우저에서 직접 접근 가능한 외부 URL로 설정해야 합니다. 클러스터 내부 주소(`http://backend:8000`)로 설정하면 브라우저에서 접근할 수 없습니다.
+> **Note**: The frontend's `PUBLIC_API_BASE` environment variable must point at an external URL reachable from the browser. Pointing it at a cluster-internal address (`http://backend:8000`) will fail because the browser cannot resolve it.
 
 ```yaml
-# frontend Deployment 환경변수
+# frontend Deployment environment
 - name: PUBLIC_API_BASE
   value: "https://afterglow.example.com"
 - name: ORIGIN
   value: "https://afterglow.example.com"
 ```
 
-### 모니터링 스택
+### Monitoring Stack
 
 ```bash
-# 전체 모니터링 배포
+# Deploy the full monitoring stack
 kubectl apply -f deploy/k8s/base/monitoring/
 
-# 포트 포워딩으로 로컬 접근
+# Port-forward for local access
 kubectl port-forward svc/grafana 3001:3000 -n afterglow
 kubectl port-forward svc/prometheus 9090:9090 -n afterglow
 ```
 
 ---
 
-## ArgoCD GitOps 배포
+## ArgoCD GitOps Deployment
 
-`dev` 브랜치의 변경사항을 자동으로 클러스터에 동기화합니다.
+Automatically syncs `dev` branch changes to the cluster.
 
-### 1. ArgoCD 설치 (없는 경우)
+### 1. Install ArgoCD (if not present)
 
 ```bash
 kubectl create namespace argocd
@@ -220,21 +227,21 @@ kubectl apply -n argocd \
   -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 ```
 
-### 2. Application 등록
+### 2. Register Applications
 
 ```bash
 kubectl apply -f argocd/appproject.yaml
-kubectl apply -f argocd/application.dev.yaml    # 개발
-kubectl apply -f argocd/application.prod.yaml   # 프로덕션
+kubectl apply -f argocd/application.dev.yaml    # development
+kubectl apply -f argocd/application.prod.yaml   # production
 ```
 
-`argocd/application.dev.yaml` 주요 설정:
+Key fields in `argocd/application.dev.yaml`:
 
 ```yaml
 spec:
   source:
     repoURL: https://github.com/jung-geun/openstack-afterglow
-    targetRevision: dev          # 감시할 브랜치
+    targetRevision: dev          # branch to watch
     path: deploy/k8s/overlays/dev
   destination:
     server: https://kubernetes.default.svc
@@ -245,7 +252,7 @@ spec:
       selfHeal: true
 ```
 
-### 3. 동기화 확인
+### 3. Verify Sync
 
 ```bash
 argocd app list
@@ -255,16 +262,16 @@ argocd app get afterglow-dev
 
 ---
 
-## TLS / HTTPS 설정
+## TLS / HTTPS
 
-cert-manager를 사용하여 Let's Encrypt 인증서를 자동으로 발급합니다.
+Use cert-manager to issue Let's Encrypt certificates automatically.
 
 ```bash
-# cert-manager 설치
+# Install cert-manager
 kubectl apply -f deploy/k8s/base/cert-manager.yaml
 ```
 
-ClusterIssuer 생성:
+Create a ClusterIssuer:
 
 ```yaml
 apiVersion: cert-manager.io/v1
@@ -283,7 +290,7 @@ spec:
             class: nginx
 ```
 
-Ingress에 TLS 추가:
+Add TLS to the Ingress:
 
 ```yaml
 metadata:
@@ -298,7 +305,7 @@ spec:
 
 ---
 
-## 업그레이드
+## Upgrading
 
 ### Docker Compose
 
@@ -311,50 +318,50 @@ docker compose up -d
 ### Kubernetes
 
 ```bash
-# 이미지 업데이트 후 롤링 재시작
+# Rolling restart after image update
 kubectl rollout restart deployment/backend -n afterglow
 kubectl rollout restart deployment/frontend -n afterglow
 kubectl rollout status deployment/backend -n afterglow
 ```
 
-ArgoCD를 사용하는 경우 `dev` 브랜치 푸시 시 자동 동기화됩니다.
+When using ArgoCD, pushing to the `dev` branch triggers an automatic sync.
 
 ---
 
-## 문제 해결
+## Troubleshooting
 
-### 백엔드가 OpenStack에 연결되지 않음
+### Backend Cannot Reach OpenStack
 
 ```bash
-# 로그 확인
+# Check logs
 docker compose logs backend
 kubectl logs -f deployment/backend -n afterglow
 
-# Keystone 연결 테스트
+# Test Keystone connectivity
 curl -s https://keystone.example.com:5000/v3 | python3 -m json.tool
 ```
 
-### Redis 연결 오류
+### Redis Connection Errors
 
 ```bash
 docker compose exec backend redis-cli -u redis://redis:6379 ping
-# 또는
+# or
 kubectl exec -n afterglow deployment/backend -- redis-cli -u redis://redis:6379 ping
 ```
 
-### 프론트엔드 API 연결 오류
+### Frontend Cannot Reach the API
 
-1. `PUBLIC_API_BASE`가 브라우저에서 접근 가능한 외부 URL인지 확인
-2. 도메인 변경 후 프론트엔드 재시작:
+1. Confirm `PUBLIC_API_BASE` resolves to a browser-reachable external URL
+2. Restart the frontend after changing the domain:
    ```bash
    kubectl rollout restart deployment/frontend -n afterglow
    ```
 
-### Pod가 Pending 상태
+### Pods Stuck Pending
 
 ```bash
 kubectl describe pod -l app=backend -n afterglow
-# PVC 바인딩 또는 리소스 부족 여부 확인
+# Check PVC binding or resource pressure
 kubectl get pvc -n afterglow
 kubectl describe nodes
 ```

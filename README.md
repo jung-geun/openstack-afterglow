@@ -1,5 +1,7 @@
 # Afterglow
 
+**Language:** 한국어 · [English](README.en.md)
+
 > Horizon의 안정성과 기능 완성도 + Skyline의 현대적 UX를 결합한 차세대 OpenStack 대시보드
 
 [![CI](https://github.com/jung-geun/openstack-afterglow/actions/workflows/test.yml/badge.svg)](https://github.com/jung-geun/openstack-afterglow/actions/workflows/test.yml)

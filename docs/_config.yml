@@ -3,6 +3,7 @@ description: 차세대 OpenStack 대시보드 — Horizon의 완성도 + Skyline
 baseurl: ""
 url: "https://jung-geun.github.io"
 repository: jung-geun/openstack-afterglow
+lang: ko
 
 remote_theme: just-the-docs/just-the-docs
 
@@ -14,10 +15,14 @@ color_scheme: dark
 
 # 헤더 링크
 aux_links:
+  "한국어":
+    - "/openstack-afterglow/"
+  "English":
+    - "/openstack-afterglow/en/"
   "GitHub":
     - "https://github.com/jung-geun/openstack-afterglow"
 
-aux_links_new_tab: true
+aux_links_new_tab: false
 
 # 푸터
 footer_content: "Afterglow — OpenStack Dashboard. MIT License."
