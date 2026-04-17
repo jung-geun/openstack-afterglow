@@ -21,9 +21,9 @@ from app.main import app
 def make_mock_conn(project_id: str = "test-project-123") -> MagicMock:
     """모의 OpenStack Connection 객체 생성."""
     conn = MagicMock()
-    conn._union_token = "test-token"
-    conn._union_project_id = project_id
-    conn._union_user_id = "test-user-123"
+    conn._afterglow_token = "test-token"
+    conn._afterglow_project_id = project_id
+    conn._afterglow_user_id = "test-user-123"
     conn.close = MagicMock()
     return conn
 

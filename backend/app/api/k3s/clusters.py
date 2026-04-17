@@ -115,7 +115,7 @@ async def create_k3s_cluster_async(
 ):
     """k3s 클러스터 생성 — SSE 스트리밍 진행률 반환."""
     token_info_obj = getattr(request.state, "token_info", None)
-    project_id = conn._union_project_id
+    project_id = conn._afterglow_project_id
     s = get_settings()
 
     # 설정 검증
@@ -289,9 +289,9 @@ async def create_k3s_cluster_async(
                 userdata=userdata,
                 key_name=req.key_name,
                 metadata={
-                    "union_role": "k3s_server",
-                    "union_cluster_id": cluster_id,
-                    "union_cluster_name": req.name,
+                    "k3s_horse_generator_role": "k3s_server",
+                    "k3s_horse_generator_cluster_id": cluster_id,
+                    "k3s_horse_generator_cluster_name": req.name,
                 },
                 delete_boot_volume_on_termination=True,
                 security_groups=[sg_id],
@@ -303,7 +303,7 @@ async def create_k3s_cluster_async(
             yield event(K3sProgressStep.WAITING_CALLBACK, 60, "k3s 초기화 대기 중 (서버 VM에서 k3s 설치 중)...")
             now = datetime.now(UTC).isoformat()
             # 생성자 정보 추출
-            _creator_user_id = conn._union_user_id if hasattr(conn, "_union_user_id") else None
+            _creator_user_id = conn._afterglow_user_id if hasattr(conn, "_afterglow_user_id") else None
             _creator_username = None
             if token_info_obj and isinstance(token_info_obj, dict):
                 _creator_user_id = _creator_user_id or token_info_obj.get("user_id")
@@ -476,7 +476,7 @@ async def _scale_agents(
                     network_id,
                     vol.id,
                     userdata=userdata,
-                    metadata={"union_role": "k3s_agent", "union_cluster_id": cluster_id},
+                    metadata={"k3s_horse_generator_role": "k3s_agent", "k3s_horse_generator_cluster_id": cluster_id},
                     delete_boot_volume_on_termination=True,
                     security_groups=[sg_id] if sg_id else None,
                 )
@@ -519,7 +519,7 @@ async def delete_k3s_cluster(
     token_info: dict = Depends(get_token_info),
 ):
     """k3s 클러스터 삭제: VM → SG 정리 후 soft-delete 처리."""
-    project_id = conn._union_project_id
+    project_id = conn._afterglow_project_id
     cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
     if not cluster:
         raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")

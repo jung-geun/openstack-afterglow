@@ -27,7 +27,7 @@ class CreateSecurityGroupRuleRequest(BaseModel):
 async def list_security_groups(
     conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         return await cached_call(
             f"afterglow:neutron:{pid}:security_groups",
@@ -44,7 +44,7 @@ async def create_security_group(
     req: CreateSecurityGroupRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         result = neutron.create_security_group(conn, req.name, req.description)
         await invalidate(f"afterglow:neutron:{pid}:security_groups")
@@ -58,7 +58,7 @@ async def delete_security_group(
     sg_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         neutron.delete_security_group(conn, sg_id)
         await invalidate(f"afterglow:neutron:{pid}:security_groups")
@@ -72,7 +72,7 @@ async def create_security_group_rule(
     req: CreateSecurityGroupRuleRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         result = neutron.create_security_group_rule(
             conn,
@@ -96,7 +96,7 @@ async def delete_security_group_rule(
     rule_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         neutron.delete_security_group_rule(conn, rule_id)
         await invalidate(f"afterglow:neutron:{pid}:security_groups")

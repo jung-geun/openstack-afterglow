@@ -24,7 +24,7 @@ class RestoreBackupRequest(BaseModel):
 
 @router.get("")
 async def list_backups(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         return await cached_call(
             f"afterglow:cinder:{pid}:backups",

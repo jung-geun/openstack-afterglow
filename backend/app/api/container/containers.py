@@ -128,9 +128,9 @@ async def create_exec_ticket(
     payload = json.dumps(
         {
             "container_id": container_id,
-            "user_id": conn._union_user_id,
-            "project_id": conn._union_project_id,
-            "token": conn._union_token,
+            "user_id": conn._afterglow_user_id,
+            "project_id": conn._afterglow_project_id,
+            "token": conn._afterglow_token,
         }
     )
     r = await _get_redis()
@@ -172,8 +172,8 @@ async def container_exec_ws(
         scoped_token = payload["token"]
         pid = payload["project_id"]
         conn = await asyncio.to_thread(keystone.get_openstack_connection, scoped_token, pid)
-        conn._union_token = scoped_token
-        conn._union_project_id = pid
+        conn._afterglow_token = scoped_token
+        conn._afterglow_project_id = pid
 
         endpoint = zun._get_zun_endpoint(conn)
         await websocket.send_text(

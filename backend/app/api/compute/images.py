@@ -23,7 +23,7 @@ class UpdateImageRequest(BaseModel):
 
 @router.get("", response_model=list[ImageInfo])
 async def list_images(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     return await cached_call(
         f"afterglow:glance:{pid}:images",
         ttl_static(),

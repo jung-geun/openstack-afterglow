@@ -130,7 +130,7 @@ def _fetch_shared_file_system(conn, settings) -> list[dict]:
     try:
         manila_ep = _get_ep(conn, "shared-file-system")
         if manila_ep:
-            project_id = conn.current_project_id or getattr(conn, "_union_project_id", "")
+            project_id = conn.current_project_id or getattr(conn, "_afterglow_project_id", "")
             manila_base = _strip_version(manila_ep)
             resp = conn.session.get(f"{manila_base}/v2/{project_id}/os-services", timeout=_SERVICE_TIMEOUT)
             for svc in resp.json().get("services", []):
@@ -158,7 +158,7 @@ def _fetch_orchestration(conn, settings) -> list[dict]:
     try:
         heat_ep = _get_ep(conn, "orchestration")
         if heat_ep:
-            project_id = conn.current_project_id or getattr(conn, "_union_project_id", "")
+            project_id = conn.current_project_id or getattr(conn, "_afterglow_project_id", "")
             heat_base = _strip_version(heat_ep)
             resp = conn.session.get(f"{heat_base}/v1/{project_id}/services", timeout=_SERVICE_TIMEOUT)
             for svc in resp.json().get("services", []):

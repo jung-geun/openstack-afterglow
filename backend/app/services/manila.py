@@ -102,11 +102,11 @@ def _get_manila_endpoint(conn) -> str:
 
 def get_client(conn) -> ManilaClient:
     # openstacksdk가 토큰을 재발급할 수 있으므로 원본 토큰/project_id 우선 사용
-    token = getattr(conn, "_union_token", None) or conn.auth_token
-    project_id = getattr(conn, "_union_project_id", None) or conn.current_project_id
+    token = getattr(conn, "_afterglow_token", None) or conn.auth_token
+    project_id = getattr(conn, "_afterglow_project_id", None) or conn.current_project_id
     endpoint = _get_manila_endpoint(conn)
     logger.debug(
-        f"Manila client: endpoint={endpoint}, project_id={project_id}, token_src={'original' if hasattr(conn, '_union_token') else 'sdk'}"
+        f"Manila client: endpoint={endpoint}, project_id={project_id}, token_src={'original' if hasattr(conn, '_afterglow_token') else 'sdk'}"
     )
     return ManilaClient(endpoint=endpoint, token=token, project_id=project_id)
 
@@ -120,7 +120,7 @@ def get_file_storage_quota(conn) -> dict:
     """프로젝트의 Manila 할당량 (limit + in_use) 조회."""
     try:
         client = get_client(conn)
-        project_id = getattr(conn, "_union_project_id", None) or conn.current_project_id
+        project_id = getattr(conn, "_afterglow_project_id", None) or conn.current_project_id
         data = client.get(f"quota-sets/{project_id}", params={"usage": "true"})
         quota = data.get("quota_set", {})
 

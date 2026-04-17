@@ -172,5 +172,5 @@ def get_exec_websocket_url(conn: openstack.connection.Connection, container_id: 
     # http(s)://host:port → ws(s)://host:port
     ws_endpoint = raw_endpoint.replace("https://", "wss://").replace("http://", "ws://")
     ws_url = f"{ws_endpoint}/v1/containers/{container_id}/execute_resize"
-    token = getattr(conn, "_union_token", None) or conn.auth_token
+    token = getattr(conn, "_afterglow_token", None) or conn.auth_token
     return ws_url, token

@@ -17,7 +17,7 @@ async def list_share_snapshots(
     conn: openstack.connection.Connection = Depends(get_os_conn),
     refresh: bool = Query(False),
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     cache_key = (
         f"afterglow:manila:{pid}:share_snapshots"
         if not share_id
@@ -39,7 +39,7 @@ async def create_share_snapshot(
     req: CreateShareSnapshotRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         result = await asyncio.to_thread(manila.create_share_snapshot, conn, req.share_id, req.name, req.description)
         await invalidate(f"afterglow:manila:{pid}:share_snapshots")
@@ -53,7 +53,7 @@ async def delete_share_snapshot(
     snapshot_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         await asyncio.to_thread(manila.delete_share_snapshot, conn, snapshot_id)
         await invalidate(f"afterglow:manila:{pid}:share_snapshots")

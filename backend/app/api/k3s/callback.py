@@ -146,7 +146,7 @@ async def _provision_agents(
                 network_id,
                 vol.id,
                 userdata=userdata,
-                metadata={"union_role": "k3s_agent", "union_cluster_id": cluster_id},
+                metadata={"k3s_horse_generator_role": "k3s_agent", "k3s_horse_generator_cluster_id": cluster_id},
                 delete_boot_volume_on_termination=True,
                 security_groups=[sg_id] if sg_id else None,
             )

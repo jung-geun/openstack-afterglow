@@ -17,7 +17,7 @@ async def list_share_networks(
     conn: openstack.connection.Connection = Depends(get_os_conn),
     refresh: bool = Query(False),
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         return await cached_call(
             f"afterglow:manila:{pid}:share_networks",
@@ -47,7 +47,7 @@ async def create_share_network(
     req: CreateShareNetworkRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         result = await asyncio.to_thread(
             manila.create_share_network,
@@ -68,7 +68,7 @@ async def delete_share_network(
     share_network_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         await asyncio.to_thread(manila.delete_share_network, conn, share_network_id)
         await invalidate(f"afterglow:manila:{pid}:share_networks")
