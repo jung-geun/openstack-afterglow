@@ -150,7 +150,7 @@
 
 ### GET /api/admin/file-storage
 
-모든 Union 관련 파일 스토리지(Manila share) 목록을 반환합니다. prebuilt + dynamic 모두 포함.
+모든 Afterglow 관련 파일 스토리지(Manila share) 목록을 반환합니다. prebuilt + dynamic 모두 포함.
 
 **응답 (200 OK)** — `FileStorageInfo[]` 배열
 

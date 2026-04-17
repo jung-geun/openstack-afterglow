@@ -1,6 +1,6 @@
 title: Afterglow
 description: 차세대 OpenStack 대시보드 — Horizon의 완성도 + Skyline의 현대적 UX
-baseurl: ""
+baseurl: "/openstack-afterglow"
 url: "https://jung-geun.github.io"
 repository: jung-geun/openstack-afterglow
 lang: ko
