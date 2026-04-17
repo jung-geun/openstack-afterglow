@@ -208,27 +208,21 @@ def test_octavia_ingress_disabled_by_default():
 def test_octavia_ingress_requires_subnet_id():
     from app.services.k3s_plugins.octavia_ingress import OctaviaIngressPlugin
 
-    s = _base_settings(
-        k3s_octavia_ingress_enabled=True, k3s_octavia_ingress_subnet_id=""
-    )
+    s = _base_settings(k3s_octavia_ingress_enabled=True, k3s_octavia_ingress_subnet_id="")
     assert OctaviaIngressPlugin().should_deploy(s) is False
 
 
 def test_octavia_ingress_should_deploy_true():
     from app.services.k3s_plugins.octavia_ingress import OctaviaIngressPlugin
 
-    s = _base_settings(
-        k3s_octavia_ingress_enabled=True, k3s_octavia_ingress_subnet_id="subnet-123"
-    )
+    s = _base_settings(k3s_octavia_ingress_enabled=True, k3s_octavia_ingress_subnet_id="subnet-123")
     assert OctaviaIngressPlugin().should_deploy(s) is True
 
 
 def test_octavia_ingress_manifests_valid_yaml():
     from app.services.k3s_plugins.octavia_ingress import OctaviaIngressPlugin
 
-    s = _base_settings(
-        k3s_octavia_ingress_enabled=True, k3s_octavia_ingress_subnet_id="subnet-123"
-    )
+    s = _base_settings(k3s_octavia_ingress_enabled=True, k3s_octavia_ingress_subnet_id="subnet-123")
     manifests = OctaviaIngressPlugin().generate_manifests("test-cluster", "proj-1", s)
     docs = [d for d in yaml.safe_load_all(manifests) if d]
     kinds = {d["kind"] for d in docs}
@@ -309,18 +303,14 @@ def test_barbican_kms_requires_kek_id():
 def test_barbican_kms_should_deploy_true():
     from app.services.k3s_plugins.barbican_kms import BarbicanKmsPlugin
 
-    s = _base_settings(
-        k3s_barbican_kms_enabled=True, k3s_barbican_kms_kek_id="kek-uuid-123"
-    )
+    s = _base_settings(k3s_barbican_kms_enabled=True, k3s_barbican_kms_kek_id="kek-uuid-123")
     assert BarbicanKmsPlugin().should_deploy(s) is True
 
 
 def test_barbican_kms_server_install_args():
     from app.services.k3s_plugins.barbican_kms import BarbicanKmsPlugin
 
-    s = _base_settings(
-        k3s_barbican_kms_enabled=True, k3s_barbican_kms_kek_id="kek-uuid-123"
-    )
+    s = _base_settings(k3s_barbican_kms_enabled=True, k3s_barbican_kms_kek_id="kek-uuid-123")
     args = BarbicanKmsPlugin().server_install_args(s)
     assert any("encryption-provider-config" in a for a in args)
 
@@ -328,9 +318,7 @@ def test_barbican_kms_server_install_args():
 def test_barbican_kms_extra_write_files():
     from app.services.k3s_plugins.barbican_kms import BarbicanKmsPlugin
 
-    s = _base_settings(
-        k3s_barbican_kms_enabled=True, k3s_barbican_kms_kek_id="kek-uuid-123"
-    )
+    s = _base_settings(k3s_barbican_kms_enabled=True, k3s_barbican_kms_kek_id="kek-uuid-123")
     files = BarbicanKmsPlugin().extra_write_files("proj-1", "test-cluster", s)
     assert len(files) == 1
     assert files[0]["path"] == "/etc/kubernetes/encryption-config.yaml"
@@ -339,9 +327,7 @@ def test_barbican_kms_extra_write_files():
 def test_barbican_kms_manifests_valid_yaml():
     from app.services.k3s_plugins.barbican_kms import BarbicanKmsPlugin
 
-    s = _base_settings(
-        k3s_barbican_kms_enabled=True, k3s_barbican_kms_kek_id="kek-uuid-123"
-    )
+    s = _base_settings(k3s_barbican_kms_enabled=True, k3s_barbican_kms_kek_id="kek-uuid-123")
     manifests = BarbicanKmsPlugin().generate_manifests("test-cluster", "proj-1", s)
     docs = [d for d in yaml.safe_load_all(manifests) if d]
     kinds = {d["kind"] for d in docs}
@@ -499,9 +485,7 @@ def test_cloudinit_server_with_occm_plugin():
         callback_url="http://callback.example.com",
         callback_token="token123",
         cloud_conf="[Global]\nauth-url=https://example.com\n",
-        plugin_manifests=[
-            {"name": "occm", "content": "apiVersion: v1\nkind: List\nitems: []\n"}
-        ],
+        plugin_manifests=[{"name": "occm", "content": "apiVersion: v1\nkind: List\nitems: []\n"}],
         needs_external_cloud_provider=True,
     )
     decoded = base64.b64decode(result).decode()

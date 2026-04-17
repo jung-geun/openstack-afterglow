@@ -66,9 +66,7 @@ def generate_agent_userdata(
 ) -> str:
     """k3s 에이전트 노드 cloud-init YAML을 렌더링하여 base64 인코딩 반환."""
     if not node_token:
-        raise ValueError(
-            "node_token이 비어있습니다. 서버 콜백에서 토큰이 전달되지 않았습니다."
-        )
+        raise ValueError("node_token이 비어있습니다. 서버 콜백에서 토큰이 전달되지 않았습니다.")
 
     # 하위호환: occm_enabled → cloud-provider=external
     agent_args = list(extra_agent_args or [])

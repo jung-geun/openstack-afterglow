@@ -50,9 +50,7 @@ def _generate_self_signed_cert() -> tuple[bytes, bytes]:
         .public_key(key.public_key())
         .serial_number(x509.random_serial_number())
         .not_valid_before(datetime.datetime.now(datetime.UTC))
-        .not_valid_after(
-            datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=3650)
-        )
+        .not_valid_after(datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=3650))
         .add_extension(
             x509.SubjectAlternativeName(
                 [
@@ -100,15 +98,11 @@ class KeystoneAuthPlugin:
             self._cert_cache[cluster_name] = _generate_self_signed_cert()
         return self._cert_cache[cluster_name]
 
-    def generate_manifests(
-        self, cluster_name: str, project_id: str, settings: Settings
-    ) -> str:
+    def generate_manifests(self, cluster_name: str, project_id: str, settings: Settings) -> str:
         cert_pem, key_pem = self._get_or_create_cert(cluster_name)
         cert_b64 = base64.b64encode(cert_pem).decode()
         key_b64 = base64.b64encode(key_pem).decode()
-        return _jinja.get_template(
-            "k3s_plugins/keystone_auth/manifests.yaml.j2"
-        ).render(
+        return _jinja.get_template("k3s_plugins/keystone_auth/manifests.yaml.j2").render(
             keystone_auth_image=settings.k3s_keystone_auth_image,
             os_auth_url=settings.os_auth_url,
             cert_b64=cert_b64,
@@ -116,15 +110,11 @@ class KeystoneAuthPlugin:
             policy=settings.k3s_keystone_auth_policy,
         )
 
-    def extra_write_files(
-        self, project_id: str, cluster_name: str, settings: Settings
-    ) -> list[dict]:
+    def extra_write_files(self, project_id: str, cluster_name: str, settings: Settings) -> list[dict]:
         """webhook config 파일을 /etc/kubernetes/에 작성."""
         cert_pem, _ = self._get_or_create_cert(cluster_name)
         cert_b64 = base64.b64encode(cert_pem).decode()
-        webhook_config = _jinja.get_template(
-            "k3s_plugins/keystone_auth/webhook_config.yaml.j2"
-        ).render(
+        webhook_config = _jinja.get_template("k3s_plugins/keystone_auth/webhook_config.yaml.j2").render(
             cert_b64=cert_b64,
         )
         return [

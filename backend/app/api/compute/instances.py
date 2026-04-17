@@ -65,9 +65,7 @@ def _resolve_names(servers: list, conn) -> list[dict]:
             image_name = None
             try:
                 attachments = nova.list_volume_attachments(conn, s.id)
-                boot_att = next(
-                    (a for a in attachments if a.get("device") == "/dev/vda"), None
-                )
+                boot_att = next((a for a in attachments if a.get("device") == "/dev/vda"), None)
                 if boot_att:
                     meta = cinder.get_volume_image_metadata(conn, boot_att["volume_id"])
                     if meta:
@@ -207,9 +205,7 @@ async def create_instance(
         meta = {
             "union_libraries": ",".join(resolved_libs),
             "union_strategy": req.strategy,
-            "union_share_ids": ",".join(
-                [s.get("file_storage_id", "") for s in file_storages_info]
-            ),
+            "union_share_ids": ",".join([s.get("file_storage_id", "") for s in file_storages_info]),
             "union_upper_volume_id": upper_volume_id,
         }
 
@@ -245,13 +241,9 @@ async def create_instance(
             if selected_net and not selected_net.is_external:
                 ext_net = next((n for n in all_nets if n.is_external), None)
                 if ext_net:
-                    fip = await asyncio.to_thread(
-                        neutron.create_floating_ip, conn, ext_net.id
-                    )
+                    fip = await asyncio.to_thread(neutron.create_floating_ip, conn, ext_net.id)
                     floating_ip_id = fip.id
-                    await asyncio.to_thread(
-                        neutron.associate_floating_ip, conn, fip.id, server_id
-                    )
+                    await asyncio.to_thread(neutron.associate_floating_ip, conn, fip.id, server_id)
 
         return server
 
@@ -288,9 +280,7 @@ async def create_instance_async(
         floating_ip_id: str | None = None
 
         def send_progress(step: ProgressStep, progress: int, message: str, **extra):
-            msg = ProgressMessage(
-                step=step, progress=progress, message=message, **extra
-            )
+            msg = ProgressMessage(step=step, progress=progress, message=message, **extra)
             return f"data: {msg.model_dump_json()}\n\n"
 
         try:
@@ -299,9 +289,7 @@ async def create_instance_async(
 
             if resolved_libs:
                 # Step 1: Manila 파일 스토리지 (0-20%)
-                yield send_progress(
-                    ProgressStep.MANILA_PREPARING, 0, "파일 스토리지 준비 중..."
-                )
+                yield send_progress(ProgressStep.MANILA_PREPARING, 0, "파일 스토리지 준비 중...")
                 if req.strategy == "prebuilt":
                     file_storages_info = await _prepare_prebuilt_file_storages(
                         conn, resolved_libs, req.name, created_access_ids
@@ -316,22 +304,17 @@ async def create_instance_async(
                         created_access_ids,
                     )
                     file_storages_info = [file_storage_info]
-                yield send_progress(
-                    ProgressStep.MANILA_PREPARING, 20, "파일 스토리지 준비 완료"
-                )
+                yield send_progress(ProgressStep.MANILA_PREPARING, 20, "파일 스토리지 준비 완료")
 
             # Step 2: Boot volume (20-45%)
-            yield send_progress(
-                ProgressStep.BOOT_VOLUME_CREATING, 20, "부트 볼륨 생성 중..."
-            )
+            yield send_progress(ProgressStep.BOOT_VOLUME_CREATING, 20, "부트 볼륨 생성 중...")
             boot_vol = await asyncio.to_thread(
                 cinder.create_volume_from_image,
                 conn,
                 name=f"{req.name}-boot",
                 image_id=req.image_id,
                 size_gb=req.boot_volume_size_gb or settings.boot_volume_size_gb,
-                availability_zone=req.availability_zone
-                or settings.default_availability_zone,
+                availability_zone=req.availability_zone or settings.default_availability_zone,
             )
             boot_volume_id = boot_vol.id
             await asyncio.to_thread(
@@ -340,32 +323,23 @@ async def create_instance_async(
                 boot_volume_id,
                 f"{req.name}-boot-{boot_volume_id[:8]}",
             )
-            yield send_progress(
-                ProgressStep.BOOT_VOLUME_CREATING, 45, "부트 볼륨 생성 완료"
-            )
+            yield send_progress(ProgressStep.BOOT_VOLUME_CREATING, 45, "부트 볼륨 생성 완료")
 
             if resolved_libs:
                 # Step 3: Upper volume (45-60%)
-                yield send_progress(
-                    ProgressStep.UPPER_VOLUME_CREATING, 45, "Upper 볼륨 생성 중..."
-                )
+                yield send_progress(ProgressStep.UPPER_VOLUME_CREATING, 45, "Upper 볼륨 생성 중...")
                 upper_vol = await asyncio.to_thread(
                     cinder.create_empty_volume,
                     conn,
                     name=f"union-upper-{req.name}",
                     size_gb=settings.upper_volume_size_gb,
-                    availability_zone=req.availability_zone
-                    or settings.default_availability_zone,
+                    availability_zone=req.availability_zone or settings.default_availability_zone,
                 )
                 upper_volume_id = upper_vol.id
-                yield send_progress(
-                    ProgressStep.UPPER_VOLUME_CREATING, 60, "Upper 볼륨 생성 완료"
-                )
+                yield send_progress(ProgressStep.UPPER_VOLUME_CREATING, 60, "Upper 볼륨 생성 완료")
 
                 # Step 4: cloud-init (60-65%)
-                yield send_progress(
-                    ProgressStep.USERDATA_GENERATING, 60, "cloud-init 생성 중..."
-                )
+                yield send_progress(ProgressStep.USERDATA_GENERATING, 60, "cloud-init 생성 중...")
                 flavors = await asyncio.to_thread(nova.list_flavors, conn)
                 flavor = next((f for f in flavors if f.id == req.flavor_id), None)
                 gpu_available = flavor.is_gpu if flavor else False
@@ -378,14 +352,10 @@ async def create_instance_async(
                     ceph_monitors=settings.ceph_monitors,
                     gpu_available=gpu_available,
                 )
-                yield send_progress(
-                    ProgressStep.USERDATA_GENERATING, 65, "cloud-init 생성 완료"
-                )
+                yield send_progress(ProgressStep.USERDATA_GENERATING, 65, "cloud-init 생성 완료")
 
             # Step 5: Nova server (65-95%)
-            yield send_progress(
-                ProgressStep.SERVER_CREATING, 65, "Nova 서버 생성 중..."
-            )
+            yield send_progress(ProgressStep.SERVER_CREATING, 65, "Nova 서버 생성 중...")
             meta = {
                 "union_libraries": ",".join(resolved_libs) if resolved_libs else "none",
                 "union_strategy": req.strategy or "none",
@@ -407,8 +377,7 @@ async def create_instance_async(
                 userdata=userdata,
                 key_name=req.key_name,
                 admin_pass=req.admin_pass,
-                availability_zone=req.availability_zone
-                or settings.default_availability_zone,
+                availability_zone=req.availability_zone or settings.default_availability_zone,
                 metadata=meta,
                 delete_boot_volume_on_termination=req.delete_boot_volume_on_termination,
             )
@@ -429,9 +398,7 @@ async def create_instance_async(
                 nv_size = nv.size_gb
                 if not nv_name:
                     continue
-                new_vol = await asyncio.to_thread(
-                    cinder.create_empty_volume, conn, nv_name, nv_size
-                )
+                new_vol = await asyncio.to_thread(cinder.create_empty_volume, conn, nv_name, nv_size)
                 await asyncio.to_thread(
                     conn.compute.create_volume_attachment,
                     server_id,
@@ -439,17 +406,13 @@ async def create_instance_async(
                 )
             # 추가 볼륨 연결
             for vol_id in req.additional_volume_ids or []:
-                await asyncio.to_thread(
-                    conn.compute.create_volume_attachment, server_id, volume_id=vol_id
-                )
+                await asyncio.to_thread(conn.compute.create_volume_attachment, server_id, volume_id=vol_id)
             yield send_progress(ProgressStep.ATTACHING_VOLUME, 100, "볼륨 연결 완료")
 
             # Step 7: Floating IP (tenant 네트워크 선택 시)
             if req.network_id:
                 all_nets = await asyncio.to_thread(neutron.list_networks, conn)
-                selected_net = next(
-                    (n for n in all_nets if n.id == req.network_id), None
-                )
+                selected_net = next((n for n in all_nets if n.id == req.network_id), None)
                 if selected_net and not selected_net.is_external:
                     ext_net = next((n for n in all_nets if n.is_external), None)
                     if ext_net:
@@ -458,13 +421,9 @@ async def create_instance_async(
                             100,
                             "Floating IP 할당 중...",
                         )
-                        fip = await asyncio.to_thread(
-                            neutron.create_floating_ip, conn, ext_net.id
-                        )
+                        fip = await asyncio.to_thread(neutron.create_floating_ip, conn, ext_net.id)
                         floating_ip_id = fip.id
-                        await asyncio.to_thread(
-                            neutron.associate_floating_ip, conn, fip.id, server_id
-                        )
+                        await asyncio.to_thread(neutron.associate_floating_ip, conn, fip.id, server_id)
                         yield send_progress(
                             ProgressStep.FLOATING_IP_CREATING,
                             100,
@@ -472,9 +431,7 @@ async def create_instance_async(
                         )
 
             # Completed
-            yield send_progress(
-                ProgressStep.COMPLETED, 100, "인스턴스 생성 완료", instance_id=server_id
-            )
+            yield send_progress(ProgressStep.COMPLETED, 100, "인스턴스 생성 완료", instance_id=server_id)
 
         except Exception as e:
             logger.error(f"인스턴스 생성 실패, rollback 시작: {e}")
@@ -529,9 +486,7 @@ async def delete_instance(
         for file_storage_id in file_storage_ids:
             if file_storage_id:
                 try:
-                    await asyncio.to_thread(
-                        manila.delete_file_storage, conn, file_storage_id
-                    )
+                    await asyncio.to_thread(manila.delete_file_storage, conn, file_storage_id)
                 except Exception as ex:
                     logger.warning(f"파일 스토리지 삭제 실패 {file_storage_id}: {ex}")
 
@@ -638,9 +593,7 @@ async def get_console_log(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     try:
-        output = await asyncio.to_thread(
-            nova.get_console_output, conn, instance_id, length
-        )
+        output = await asyncio.to_thread(nova.get_console_output, conn, instance_id, length)
         return {"output": output}
     except Exception:
         raise HTTPException(status_code=500, detail="작업 실패")
@@ -675,17 +628,13 @@ async def list_instance_volumes(
         for a in attachments:
             try:
                 vol = cinder.get_volume(conn, a["volume_id"])
-                result.append(
-                    {**a, "name": vol.name, "size": vol.size, "status": vol.status}
-                )
+                result.append({**a, "name": vol.name, "size": vol.size, "status": vol.status})
             except Exception:
                 result.append(a)
         return result
 
     try:
-        return await cached_call(
-            f"afterglow:cinder:{pid}:vol_attach:{instance_id}", ttl_normal(), _fetch
-        )
+        return await cached_call(f"afterglow:cinder:{pid}:vol_attach:{instance_id}", ttl_normal(), _fetch)
     except Exception:
         raise HTTPException(status_code=500, detail="작업 실패")
 
@@ -699,9 +648,7 @@ async def attach_volume_to_instance(
     volume_id = body.volume_id
     pid = conn._afterglow_project_id
     try:
-        result = await asyncio.to_thread(
-            nova.attach_volume, conn, instance_id, volume_id
-        )
+        result = await asyncio.to_thread(nova.attach_volume, conn, instance_id, volume_id)
         await invalidate(f"afterglow:cinder:{pid}:vol_attach:{instance_id}")
         return result
     except Exception:
@@ -735,9 +682,7 @@ async def list_instance_security_groups(
         return {"ports": ports, "security_groups": all_sgs}
 
     try:
-        return await cached_call(
-            f"afterglow:neutron:{pid}:sgs:{instance_id}", ttl_slow(), _fetch
-        )
+        return await cached_call(f"afterglow:neutron:{pid}:sgs:{instance_id}", ttl_slow(), _fetch)
     except Exception:
         raise HTTPException(status_code=500, detail="작업 실패")
 
@@ -763,9 +708,7 @@ async def get_instance_owner(
             return {"display": server.user_id}
 
     try:
-        return await cached_call(
-            f"afterglow:keystone:{pid}:owner:{instance_id}", ttl_static(), _fetch
-        )
+        return await cached_call(f"afterglow:keystone:{pid}:owner:{instance_id}", ttl_static(), _fetch)
     except Exception:
         raise HTTPException(status_code=404, detail="인스턴스를 찾을 수 없습니다")
 
@@ -779,9 +722,7 @@ async def attach_interface(
     net_id = body.net_id
     pid = conn._afterglow_project_id
     try:
-        result = await asyncio.to_thread(
-            nova.attach_interface, conn, instance_id, net_id
-        )
+        result = await asyncio.to_thread(nova.attach_interface, conn, instance_id, net_id)
         await invalidate(f"afterglow:neutron:{pid}:ports:{instance_id}")
         return result
     except Exception:
@@ -812,9 +753,7 @@ async def update_port_security_groups(
     sg_ids = body.security_group_ids
     pid = conn._afterglow_project_id
     try:
-        result = await asyncio.to_thread(
-            neutron.update_port_security_groups, conn, port_id, sg_ids
-        )
+        result = await asyncio.to_thread(neutron.update_port_security_groups, conn, port_id, sg_ids)
         await invalidate(f"afterglow:neutron:{pid}:sgs:{instance_id}")
         return result
     except Exception:
@@ -830,9 +769,7 @@ async def _prepare_prebuilt_file_storages(
     conn, resolved_libs: list[str], instance_name: str, created_access_ids: list
 ) -> list[dict]:
     """Strategy A: 사전 빌드된 read-only 파일 스토리지에 access rule 추가."""
-    prebuilt_file_storages = await asyncio.to_thread(
-        manila.list_file_storages, conn, {"union_type": "prebuilt"}
-    )
+    prebuilt_file_storages = await asyncio.to_thread(manila.list_file_storages, conn, {"union_type": "prebuilt"})
     prebuilt_map = {s.library_name: s for s in prebuilt_file_storages}
 
     file_storages_info = []
@@ -844,14 +781,10 @@ async def _prepare_prebuilt_file_storages(
             )
 
         cephx_id = f"union-ro-{instance_name}-{lib_id}"
-        rule = await asyncio.to_thread(
-            manila.create_access_rule, conn, file_storage.id, cephx_id, "ro"
-        )
+        rule = await asyncio.to_thread(manila.create_access_rule, conn, file_storage.id, cephx_id, "ro")
         created_access_ids.append((file_storage.id, rule["access_id"]))
 
-        export_paths = await asyncio.to_thread(
-            manila.get_export_locations, conn, file_storage.id
-        )
+        export_paths = await asyncio.to_thread(manila.get_export_locations, conn, file_storage.id)
         file_storages_info.append(
             {
                 "file_storage_id": file_storage.id,
@@ -915,9 +848,7 @@ async def _prepare_dynamic_file_storage(
 
         nfs_export = file_storage.nfs_export_location
         if not nfs_export:
-            export_paths = await asyncio.to_thread(
-                manila.get_export_locations, conn, file_storage.id
-            )
+            export_paths = await asyncio.to_thread(manila.get_export_locations, conn, file_storage.id)
             nfs_export = export_paths[0] if export_paths else ""
 
         return {
@@ -933,14 +864,10 @@ async def _prepare_dynamic_file_storage(
     else:
         # CephFS: CephX access rule (기존 로직)
         cephx_id = f"union-rw-{instance_name}"
-        rule = await asyncio.to_thread(
-            manila.create_access_rule, conn, file_storage.id, cephx_id, "rw"
-        )
+        rule = await asyncio.to_thread(manila.create_access_rule, conn, file_storage.id, cephx_id, "rw")
         created_access_ids.append((file_storage.id, rule["access_id"]))
 
-        export_paths = await asyncio.to_thread(
-            manila.get_export_locations, conn, file_storage.id
-        )
+        export_paths = await asyncio.to_thread(manila.get_export_locations, conn, file_storage.id)
         return {
             "file_storage_id": file_storage.id,
             "name": "dynamic",
@@ -983,9 +910,7 @@ async def _rollback(
 
     for file_storage_id, access_id in access_ids:
         try:
-            await asyncio.to_thread(
-                manila.revoke_access_rule, conn, file_storage_id, access_id
-            )
+            await asyncio.to_thread(manila.revoke_access_rule, conn, file_storage_id, access_id)
         except Exception as e:
             logger.error(f"Rollback - access rule 삭제 실패: {e}")
 
@@ -1015,9 +940,7 @@ async def assign_floating_ip(
             raise HTTPException(status_code=400, detail="외부 네트워크가 없습니다")
         fip = await asyncio.to_thread(neutron.create_floating_ip, conn, ext_net.id)
         try:
-            result = await asyncio.to_thread(
-                neutron.associate_floating_ip, conn, fip.id, instance_id
-            )
+            result = await asyncio.to_thread(neutron.associate_floating_ip, conn, fip.id, instance_id)
         except Exception as ex:
             # 연결 실패 시 생성된 FIP 정리
             try:
