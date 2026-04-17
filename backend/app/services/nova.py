@@ -249,6 +249,18 @@ def delete_server(conn: openstack.connection.Connection, server_id: str) -> None
     conn.compute.delete_server(server_id, force=True)
 
 
+def wait_server_deleted(conn: openstack.connection.Connection, server_id: str, timeout: int = 120) -> None:
+    """서버가 완전히 사라질 때까지 폴링."""
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        srv = conn.compute.find_server(server_id, ignore_missing=True)
+        if srv is None:
+            return
+        time.sleep(3)
+
+
 def start_server(conn: openstack.connection.Connection, server_id: str) -> None:
     conn.compute.start_server(server_id)
 

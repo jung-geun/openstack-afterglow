@@ -591,30 +591,38 @@ async def delete_k3s_cluster(
         except Exception as e:
             _logger.warning("k3s delete: K8s 노드 삭제 중 오류 (무시): %s", e)
 
-    async def _del_vm(vm_id: str) -> None:
+    async def _del_vm_and_wait(vm_id: str) -> None:
         try:
             await asyncio.to_thread(nova.delete_server, conn, vm_id)
+            await asyncio.to_thread(nova.wait_server_deleted, conn, vm_id)
+            _logger.info("k3s delete: VM %s fully deleted", vm_id)
         except Exception as e:
-            _logger.warning("Delete agent VM %s failed: %s", vm_id, e)
+            _logger.warning("Delete/wait agent VM %s failed: %s", vm_id, e)
 
-    await asyncio.gather(*[_del_vm(vid) for vid in agent_vm_ids], return_exceptions=True)
+    await asyncio.gather(*[_del_vm_and_wait(vid) for vid in agent_vm_ids], return_exceptions=True)
 
-    # 서버 VM 삭제
+    # 서버 VM 삭제 + 완료 대기
     server_vm_id = cluster.get("server_vm_id")
     if server_vm_id:
         try:
             await asyncio.to_thread(nova.delete_server, conn, server_vm_id)
+            await asyncio.to_thread(nova.wait_server_deleted, conn, server_vm_id)
+            _logger.info("k3s delete: server VM %s fully deleted", server_vm_id)
         except Exception as e:
-            _logger.warning("Delete server VM %s failed: %s", server_vm_id, e)
+            _logger.warning("Delete/wait server VM %s failed: %s", server_vm_id, e)
 
-    # 보안 그룹 삭제
+    # 보안 그룹 삭제 (VM 삭제 완료 후, 재시도 포함)
     sg_id = cluster.get("security_group_id")
     if sg_id:
-        try:
-            await asyncio.sleep(3)  # VM 삭제 후 포트 해제 대기
-            await asyncio.to_thread(neutron.delete_security_group, conn, sg_id)
-        except Exception as e:
-            _logger.warning("Delete SG %s failed: %s", sg_id, e)
+        for attempt in range(3):
+            try:
+                if attempt > 0:
+                    await asyncio.sleep(5)
+                await asyncio.to_thread(neutron.delete_security_group, conn, sg_id)
+                _logger.info("k3s delete: SG %s deleted", sg_id)
+                break
+            except Exception as e:
+                _logger.warning("Delete SG %s attempt %d failed: %s", sg_id, attempt + 1, e)
 
     # soft-delete: 상태를 DELETED로 기록 (물리 삭제 안 함)
     user_id = token_info.get("user_id") if isinstance(token_info, dict) else None
