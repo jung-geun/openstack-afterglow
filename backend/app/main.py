@@ -698,9 +698,7 @@ async def _deferred_create_tables() -> None:
     try:
         await create_tables()
     except Exception:
-        _logger.warning(
-            "DB 테이블 자동 생성 실패 (migrations/001_k3s_tables.sql 수동 실행 필요)", exc_info=True
-        )
+        _logger.warning("DB 테이블 자동 생성 실패 (migrations/001_k3s_tables.sql 수동 실행 필요)", exc_info=True)
 
 
 @app.on_event("startup")
