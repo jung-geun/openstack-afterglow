@@ -40,6 +40,9 @@ COPY --from=backend-builder /app/.venv /app/.venv
 COPY backend/pyproject.toml backend/uv.lock ./
 COPY backend/app/ ./app/
 
+# 런타임 디스크 I/O 감소: 느린 디스크 서버에서 import 시 .py 파싱 대신 .pyc 직접 사용
+RUN python -m compileall -q app/
+
 RUN adduser --disabled-password --gecos "" appuser \
     && chown -R appuser:appuser /app
 

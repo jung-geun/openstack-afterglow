@@ -691,10 +691,22 @@ async def _k3s_cleanup_loop() -> None:
         await asyncio.sleep(300)
 
 
+async def _deferred_create_tables() -> None:
+    """DB 테이블 생성을 백그라운드에서 실행. API 기동을 차단하지 않는다."""
+    from app.database import create_tables
+
+    try:
+        await create_tables()
+    except Exception:
+        _logger.warning(
+            "DB 테이블 자동 생성 실패 (migrations/001_k3s_tables.sql 수동 실행 필요)", exc_info=True
+        )
+
+
 @app.on_event("startup")
 async def start_background_workers():
     # DB 초기화 (database.url 설정 시)
-    from app.database import create_tables, init_db
+    from app.database import init_db
 
     _db_cfg = _get_cfg()
     if _db_cfg.database_url:
@@ -704,12 +716,9 @@ async def start_background_workers():
             max_overflow=_db_cfg.database_max_overflow,
         )
         if _db_cfg.database_auto_create_tables:
-            try:
-                await create_tables()
-            except Exception:
-                _logger.warning(
-                    "DB 테이블 자동 생성 실패 (migrations/001_k3s_tables.sql 수동 실행 필요)", exc_info=True
-                )
+            # create_tables()를 await하지 않고 백그라운드 태스크로 실행해
+            # API가 DB DDL 완료를 기다리지 않고 즉시 요청을 받을 수 있게 한다.
+            asyncio.create_task(_deferred_create_tables())
 
     asyncio.create_task(_snapshot_loop())
     asyncio.create_task(_notion_sync_loop())

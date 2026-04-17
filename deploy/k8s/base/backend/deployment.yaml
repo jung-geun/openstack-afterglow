@@ -35,6 +35,7 @@ spec:
               "8000",
               "--workers",
               "2",
+              "--preload",
             ]
           ports:
             - containerPort: 8000
@@ -73,25 +74,27 @@ spec:
             - name: afterglow-config-volume
               mountPath: /app/config.toml
               subPath: config.toml
-          # startupProbe:
-          #   httpGet:
-          #     path: /api/health
-          #     port: 8000
-          #   initialDelaySeconds: 15
-          #   periodSeconds: 3
-          #   failureThreshold: 30
+          # startupProbe: 시작 완료까지 최대 5 + 30*3 = 95초 허용.
+          # 통과 후에만 liveness/readiness 체크 시작하므로 조기 재시작을 방지한다.
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 3
+            failureThreshold: 30
           livenessProbe:
             httpGet:
               path: /api/health
               port: 8000
-            initialDelaySeconds: 30
+            initialDelaySeconds: 0
             periodSeconds: 20
             failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /api/health
               port: 8000
-            initialDelaySeconds: 30
+            initialDelaySeconds: 0
             periodSeconds: 10
             failureThreshold: 3
           resources:
