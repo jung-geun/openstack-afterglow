@@ -57,24 +57,28 @@ def _base_settings(**kwargs) -> MagicMock:
 
 def test_occm_should_deploy_false_when_disabled():
     from app.services.k3s_plugins.occm import OccmPlugin
+
     s = _base_settings(k3s_occm_enabled=False)
     assert OccmPlugin().should_deploy(s) is False
 
 
 def test_occm_should_deploy_false_when_no_auth_url():
     from app.services.k3s_plugins.occm import OccmPlugin
+
     s = _base_settings(k3s_occm_enabled=True, os_auth_url="")
     assert OccmPlugin().should_deploy(s) is False
 
 
 def test_occm_should_deploy_true():
     from app.services.k3s_plugins.occm import OccmPlugin
+
     s = _base_settings(k3s_occm_enabled=True)
     assert OccmPlugin().should_deploy(s) is True
 
 
 def test_occm_cloud_conf_sections_contains_global():
     from app.services.k3s_plugins.occm import OccmPlugin
+
     s = _base_settings(k3s_occm_enabled=True)
     result = OccmPlugin().cloud_conf_sections("proj-1", s)
     assert "[Global]" in result
@@ -84,6 +88,7 @@ def test_occm_cloud_conf_sections_contains_global():
 
 def test_occm_manifests_valid_yaml():
     from app.services.k3s_plugins.occm import OccmPlugin
+
     s = _base_settings(k3s_occm_enabled=True)
     manifests = OccmPlugin().generate_manifests("test-cluster", "proj-1", s)
     docs = list(yaml.safe_load_all(manifests))
@@ -95,6 +100,7 @@ def test_occm_manifests_valid_yaml():
 
 def test_occm_needs_external_cloud_provider():
     from app.services.k3s_plugins.occm import OccmPlugin
+
     s = _base_settings(k3s_occm_enabled=True)
     assert OccmPlugin().needs_external_cloud_provider(s) is True
 
@@ -106,18 +112,21 @@ def test_occm_needs_external_cloud_provider():
 
 def test_cinder_csi_disabled_by_default():
     from app.services.k3s_plugins.cinder_csi import CinderCsiPlugin
+
     s = _base_settings()
     assert CinderCsiPlugin().should_deploy(s) is False
 
 
 def test_cinder_csi_should_deploy_true():
     from app.services.k3s_plugins.cinder_csi import CinderCsiPlugin
+
     s = _base_settings(k3s_cinder_csi_enabled=True)
     assert CinderCsiPlugin().should_deploy(s) is True
 
 
 def test_cinder_csi_manifests_valid_yaml():
     from app.services.k3s_plugins.cinder_csi import CinderCsiPlugin
+
     s = _base_settings(k3s_cinder_csi_enabled=True)
     manifests = CinderCsiPlugin().generate_manifests("test-cluster", "proj-1", s)
     docs = list(yaml.safe_load_all(manifests))
@@ -130,6 +139,7 @@ def test_cinder_csi_manifests_valid_yaml():
 
 def test_cinder_csi_cloud_conf_section():
     from app.services.k3s_plugins.cinder_csi import CinderCsiPlugin
+
     s = _base_settings(k3s_cinder_csi_enabled=True)
     section = CinderCsiPlugin().cloud_conf_sections("proj-1", s)
     assert "[BlockStorage]" in section
@@ -137,6 +147,7 @@ def test_cinder_csi_cloud_conf_section():
 
 def test_cinder_csi_no_external_cloud_provider():
     from app.services.k3s_plugins.cinder_csi import CinderCsiPlugin
+
     s = _base_settings(k3s_cinder_csi_enabled=True)
     assert CinderCsiPlugin().needs_external_cloud_provider(s) is False
 
@@ -148,18 +159,21 @@ def test_cinder_csi_no_external_cloud_provider():
 
 def test_manila_csi_disabled_by_default():
     from app.services.k3s_plugins.manila_csi import ManilaCsiPlugin
+
     s = _base_settings()
     assert ManilaCsiPlugin().should_deploy(s) is False
 
 
 def test_manila_csi_should_deploy_true():
     from app.services.k3s_plugins.manila_csi import ManilaCsiPlugin
+
     s = _base_settings(k3s_manila_csi_enabled=True)
     assert ManilaCsiPlugin().should_deploy(s) is True
 
 
 def test_manila_csi_manifests_valid_yaml():
     from app.services.k3s_plugins.manila_csi import ManilaCsiPlugin
+
     s = _base_settings(k3s_manila_csi_enabled=True)
     manifests = ManilaCsiPlugin().generate_manifests("test-cluster", "proj-1", s)
     docs = [d for d in yaml.safe_load_all(manifests) if d]
@@ -174,6 +188,7 @@ def test_manila_csi_manifests_valid_yaml():
 
 def test_manila_csi_no_cloud_conf_sections():
     from app.services.k3s_plugins.manila_csi import ManilaCsiPlugin
+
     s = _base_settings(k3s_manila_csi_enabled=True)
     assert ManilaCsiPlugin().cloud_conf_sections("proj-1", s) == ""
 
@@ -185,25 +200,35 @@ def test_manila_csi_no_cloud_conf_sections():
 
 def test_octavia_ingress_disabled_by_default():
     from app.services.k3s_plugins.octavia_ingress import OctaviaIngressPlugin
+
     s = _base_settings()
     assert OctaviaIngressPlugin().should_deploy(s) is False
 
 
 def test_octavia_ingress_requires_subnet_id():
     from app.services.k3s_plugins.octavia_ingress import OctaviaIngressPlugin
-    s = _base_settings(k3s_octavia_ingress_enabled=True, k3s_octavia_ingress_subnet_id="")
+
+    s = _base_settings(
+        k3s_octavia_ingress_enabled=True, k3s_octavia_ingress_subnet_id=""
+    )
     assert OctaviaIngressPlugin().should_deploy(s) is False
 
 
 def test_octavia_ingress_should_deploy_true():
     from app.services.k3s_plugins.octavia_ingress import OctaviaIngressPlugin
-    s = _base_settings(k3s_octavia_ingress_enabled=True, k3s_octavia_ingress_subnet_id="subnet-123")
+
+    s = _base_settings(
+        k3s_octavia_ingress_enabled=True, k3s_octavia_ingress_subnet_id="subnet-123"
+    )
     assert OctaviaIngressPlugin().should_deploy(s) is True
 
 
 def test_octavia_ingress_manifests_valid_yaml():
     from app.services.k3s_plugins.octavia_ingress import OctaviaIngressPlugin
-    s = _base_settings(k3s_octavia_ingress_enabled=True, k3s_octavia_ingress_subnet_id="subnet-123")
+
+    s = _base_settings(
+        k3s_octavia_ingress_enabled=True, k3s_octavia_ingress_subnet_id="subnet-123"
+    )
     manifests = OctaviaIngressPlugin().generate_manifests("test-cluster", "proj-1", s)
     docs = [d for d in yaml.safe_load_all(manifests) if d]
     kinds = {d["kind"] for d in docs}
@@ -218,18 +243,21 @@ def test_octavia_ingress_manifests_valid_yaml():
 
 def test_keystone_auth_disabled_by_default():
     from app.services.k3s_plugins.keystone_auth import KeystoneAuthPlugin
+
     s = _base_settings()
     assert KeystoneAuthPlugin().should_deploy(s) is False
 
 
 def test_keystone_auth_should_deploy_true():
     from app.services.k3s_plugins.keystone_auth import KeystoneAuthPlugin
+
     s = _base_settings(k3s_keystone_auth_enabled=True)
     assert KeystoneAuthPlugin().should_deploy(s) is True
 
 
 def test_keystone_auth_server_install_args():
     from app.services.k3s_plugins.keystone_auth import KeystoneAuthPlugin
+
     s = _base_settings(k3s_keystone_auth_enabled=True)
     args = KeystoneAuthPlugin().server_install_args(s)
     assert any("authentication-token-webhook-config-file" in a for a in args)
@@ -237,6 +265,7 @@ def test_keystone_auth_server_install_args():
 
 def test_keystone_auth_extra_write_files():
     from app.services.k3s_plugins.keystone_auth import KeystoneAuthPlugin
+
     s = _base_settings(k3s_keystone_auth_enabled=True)
     plugin = KeystoneAuthPlugin()
     files = plugin.extra_write_files("proj-1", "test-cluster", s)
@@ -247,6 +276,7 @@ def test_keystone_auth_extra_write_files():
 
 def test_keystone_auth_manifests_valid_yaml():
     from app.services.k3s_plugins.keystone_auth import KeystoneAuthPlugin
+
     s = _base_settings(k3s_keystone_auth_enabled=True)
     plugin = KeystoneAuthPlugin()
     manifests = plugin.generate_manifests("test-cluster", "proj-1", s)
@@ -264,32 +294,43 @@ def test_keystone_auth_manifests_valid_yaml():
 
 def test_barbican_kms_disabled_by_default():
     from app.services.k3s_plugins.barbican_kms import BarbicanKmsPlugin
+
     s = _base_settings()
     assert BarbicanKmsPlugin().should_deploy(s) is False
 
 
 def test_barbican_kms_requires_kek_id():
     from app.services.k3s_plugins.barbican_kms import BarbicanKmsPlugin
+
     s = _base_settings(k3s_barbican_kms_enabled=True, k3s_barbican_kms_kek_id="")
     assert BarbicanKmsPlugin().should_deploy(s) is False
 
 
 def test_barbican_kms_should_deploy_true():
     from app.services.k3s_plugins.barbican_kms import BarbicanKmsPlugin
-    s = _base_settings(k3s_barbican_kms_enabled=True, k3s_barbican_kms_kek_id="kek-uuid-123")
+
+    s = _base_settings(
+        k3s_barbican_kms_enabled=True, k3s_barbican_kms_kek_id="kek-uuid-123"
+    )
     assert BarbicanKmsPlugin().should_deploy(s) is True
 
 
 def test_barbican_kms_server_install_args():
     from app.services.k3s_plugins.barbican_kms import BarbicanKmsPlugin
-    s = _base_settings(k3s_barbican_kms_enabled=True, k3s_barbican_kms_kek_id="kek-uuid-123")
+
+    s = _base_settings(
+        k3s_barbican_kms_enabled=True, k3s_barbican_kms_kek_id="kek-uuid-123"
+    )
     args = BarbicanKmsPlugin().server_install_args(s)
     assert any("encryption-provider-config" in a for a in args)
 
 
 def test_barbican_kms_extra_write_files():
     from app.services.k3s_plugins.barbican_kms import BarbicanKmsPlugin
-    s = _base_settings(k3s_barbican_kms_enabled=True, k3s_barbican_kms_kek_id="kek-uuid-123")
+
+    s = _base_settings(
+        k3s_barbican_kms_enabled=True, k3s_barbican_kms_kek_id="kek-uuid-123"
+    )
     files = BarbicanKmsPlugin().extra_write_files("proj-1", "test-cluster", s)
     assert len(files) == 1
     assert files[0]["path"] == "/etc/kubernetes/encryption-config.yaml"
@@ -297,7 +338,10 @@ def test_barbican_kms_extra_write_files():
 
 def test_barbican_kms_manifests_valid_yaml():
     from app.services.k3s_plugins.barbican_kms import BarbicanKmsPlugin
-    s = _base_settings(k3s_barbican_kms_enabled=True, k3s_barbican_kms_kek_id="kek-uuid-123")
+
+    s = _base_settings(
+        k3s_barbican_kms_enabled=True, k3s_barbican_kms_kek_id="kek-uuid-123"
+    )
     manifests = BarbicanKmsPlugin().generate_manifests("test-cluster", "proj-1", s)
     docs = [d for d in yaml.safe_load_all(manifests) if d]
     kinds = {d["kind"] for d in docs}
@@ -311,6 +355,7 @@ def test_barbican_kms_manifests_valid_yaml():
 
 def test_registry_no_plugins_active():
     from app.services import k3s_plugins
+
     s = _base_settings()
     assert k3s_plugins.get_active_plugins(s) == []
     assert k3s_plugins.needs_external_cloud_provider(s) is False
@@ -320,6 +365,7 @@ def test_registry_no_plugins_active():
 
 def test_registry_occm_only():
     from app.services import k3s_plugins
+
     s = _base_settings(k3s_occm_enabled=True)
     active = k3s_plugins.get_active_plugins(s)
     assert len(active) == 1
@@ -332,6 +378,7 @@ def test_registry_occm_only():
 
 def test_registry_occm_plus_cinder():
     from app.services import k3s_plugins
+
     s = _base_settings(k3s_occm_enabled=True, k3s_cinder_csi_enabled=True)
     active = k3s_plugins.get_active_plugins(s)
     assert len(active) == 2
@@ -351,23 +398,51 @@ def test_registry_server_args_dedup():
 
     class FakePluginA:
         name = "fake_a"
-        def should_deploy(self, s): return True
-        def cloud_conf_sections(self, pid, s): return ""
-        def generate_manifests(self, cn, pid, s): return ""
-        def extra_write_files(self, pid, cn, s): return []
-        def server_install_args(self, s): return ["--foo=bar", "--baz=1"]
-        def agent_install_args(self, s): return []
-        def needs_external_cloud_provider(self, s): return False
+
+        def should_deploy(self, s):
+            return True
+
+        def cloud_conf_sections(self, pid, s):
+            return ""
+
+        def generate_manifests(self, cn, pid, s):
+            return ""
+
+        def extra_write_files(self, pid, cn, s):
+            return []
+
+        def server_install_args(self, s):
+            return ["--foo=bar", "--baz=1"]
+
+        def agent_install_args(self, s):
+            return []
+
+        def needs_external_cloud_provider(self, s):
+            return False
 
     class FakePluginB:
         name = "fake_b"
-        def should_deploy(self, s): return True
-        def cloud_conf_sections(self, pid, s): return ""
-        def generate_manifests(self, cn, pid, s): return ""
-        def extra_write_files(self, pid, cn, s): return []
-        def server_install_args(self, s): return ["--foo=bar", "--other=x"]  # --foo=bar 중복
-        def agent_install_args(self, s): return []
-        def needs_external_cloud_provider(self, s): return False
+
+        def should_deploy(self, s):
+            return True
+
+        def cloud_conf_sections(self, pid, s):
+            return ""
+
+        def generate_manifests(self, cn, pid, s):
+            return ""
+
+        def extra_write_files(self, pid, cn, s):
+            return []
+
+        def server_install_args(self, s):
+            return ["--foo=bar", "--other=x"]  # --foo=bar 중복
+
+        def agent_install_args(self, s):
+            return []
+
+        def needs_external_cloud_provider(self, s):
+            return False
 
     original = k3s_plugins.ALL_PLUGINS
     k3s_plugins.ALL_PLUGINS = [FakePluginA(), FakePluginB()]
@@ -383,6 +458,7 @@ def test_registry_server_args_dedup():
 
 def test_registry_get_active_plugin_names():
     from app.services import k3s_plugins
+
     s = _base_settings(k3s_occm_enabled=True, k3s_cinder_csi_enabled=True)
     names = k3s_plugins.get_active_plugin_names(s)
     assert names == {"occm": True, "cinder_csi": True}
@@ -398,6 +474,7 @@ def test_cloudinit_server_no_plugins():
     import base64
 
     from app.services.k3s_cloudinit import generate_server_userdata
+
     result = generate_server_userdata(
         cluster_name="test",
         k3s_version="v1.31.4+k3s1",
@@ -415,13 +492,16 @@ def test_cloudinit_server_with_occm_plugin():
     import base64
 
     from app.services.k3s_cloudinit import generate_server_userdata
+
     result = generate_server_userdata(
         cluster_name="test",
         k3s_version="v1.31.4+k3s1",
         callback_url="http://callback.example.com",
         callback_token="token123",
         cloud_conf="[Global]\nauth-url=https://example.com\n",
-        plugin_manifests=[{"name": "occm", "content": "apiVersion: v1\nkind: List\nitems: []\n"}],
+        plugin_manifests=[
+            {"name": "occm", "content": "apiVersion: v1\nkind: List\nitems: []\n"}
+        ],
         needs_external_cloud_provider=True,
     )
     decoded = base64.b64decode(result).decode()
@@ -436,6 +516,7 @@ def test_cloudinit_server_multi_plugins():
     import base64
 
     from app.services.k3s_cloudinit import generate_server_userdata
+
     result = generate_server_userdata(
         cluster_name="test",
         k3s_version="v1.31.4+k3s1",
@@ -457,6 +538,7 @@ def test_cloudinit_agent_no_extra_args():
     import base64
 
     from app.services.k3s_cloudinit import generate_agent_userdata
+
     result = generate_agent_userdata(
         cluster_name="test",
         k3s_version="v1.31.4+k3s1",
@@ -473,6 +555,7 @@ def test_cloudinit_agent_with_cloud_provider():
     import base64
 
     from app.services.k3s_cloudinit import generate_agent_userdata
+
     result = generate_agent_userdata(
         cluster_name="test",
         k3s_version="v1.31.4+k3s1",
@@ -490,6 +573,7 @@ def test_cloudinit_agent_backward_compat_occm_enabled():
     import base64
 
     from app.services.k3s_cloudinit import generate_agent_userdata
+
     result = generate_agent_userdata(
         cluster_name="test",
         k3s_version="v1.31.4+k3s1",

@@ -7,7 +7,12 @@ url이 비어있으면 DB 연결 없이 Redis 폴백으로 동작.
 import logging
 from collections.abc import AsyncGenerator
 
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 from sqlalchemy.orm import DeclarativeBase
 
 _logger = logging.getLogger(__name__)
@@ -34,7 +39,9 @@ def init_db(database_url: str, pool_size: int = 5, max_overflow: int = 10) -> No
         pool_pre_ping=True,
         echo=False,
     )
-    _session_factory = async_sessionmaker(_engine, expire_on_commit=False, class_=AsyncSession)
+    _session_factory = async_sessionmaker(
+        _engine, expire_on_commit=False, class_=AsyncSession
+    )
     _logger.info("데이터베이스 연결 초기화 완료: %s", _mask_url(database_url))
 
 
@@ -60,7 +67,9 @@ async def create_tables() -> None:
             ("deleted_reason", "VARCHAR(255)"),
         ]:
             try:
-                await conn.exec_driver_sql(f"ALTER TABLE k3s_clusters ADD COLUMN {col} {col_def} DEFAULT NULL")
+                await conn.exec_driver_sql(
+                    f"ALTER TABLE k3s_clusters ADD COLUMN {col} {col_def} DEFAULT NULL"
+                )
             except Exception:
                 pass  # 이미 존재하면 무시
 
