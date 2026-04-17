@@ -62,7 +62,7 @@ async def get_dashboard_summary(
     conn: openstack.connection.Connection = Depends(get_os_conn),
     refresh: bool = Query(False),
 ):
-    project_id = conn._union_project_id
+    project_id = conn._afterglow_project_id
 
     try:
         servers, compute_limits, volume_limits, all_flavors = await asyncio.gather(
@@ -130,7 +130,7 @@ async def get_project_quotas(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """현재 프로젝트의 전체 할당량 (compute/storage/network/file_storage) 조회."""
-    project_id = conn._union_project_id
+    project_id = conn._afterglow_project_id
     settings = get_settings()
     try:
         tasks = [
@@ -161,7 +161,7 @@ async def get_project_usage(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """기간별 프로젝트 리소스 사용량."""
-    project_id = conn._union_project_id
+    project_id = conn._afterglow_project_id
     today = date.today()
     end_dt = end or today.isoformat()
     start_dt = start or (today - timedelta(days=30)).isoformat()

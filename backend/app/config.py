@@ -23,116 +23,145 @@ def _config_candidates() -> list[Path]:
     ]
 
 
+def _deep_merge(base: dict, override: dict) -> dict:
+    """base 위에 override를 재귀적으로 딥 머지한 새 dict를 반환.
+
+    dict 값은 재귀 병합, 그 외(스칼라·리스트)는 override가 덮어쓴다.
+    """
+    result = dict(base)
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
+def _config_override_paths(base_path: Path) -> list[Path]:
+    """base_path와 같은 디렉토리에서 `<stem>.*.toml` 오버라이드 파일을 알파벳순으로 반환.
+
+    예: base_path=/app/config.toml 이면 config.gpu.toml, config.openstack.toml 등을 찾는다.
+    base 자기자신과 크기 0 파일은 제외.
+    """
+    parent = base_path.parent
+    pattern = f"{base_path.stem}.*.toml"
+    overrides: list[Path] = []
+    for p in sorted(parent.glob(pattern)):
+        if p.name == base_path.name:
+            continue
+        if not p.is_file() or p.stat().st_size == 0:
+            continue
+        overrides.append(p)
+    return overrides
+
+
 def _load_toml() -> dict:
-    """프로젝트 루트의 config.toml을 읽어 평탄화된 dict를 반환."""
-    candidates = _config_candidates()
-    for path in candidates:
-        if path.exists() and path.stat().st_size > 0:
-            with open(path, "rb") as f:
-                data = tomllib.load(f)
-            # 섹션을 평탄화하여 Settings 필드에 매핑
-            flat: dict = {}
-            ost = data.get("openstack", {})
-            flat["os_auth_url"] = ost.get("auth_url", "")
-            flat["os_username"] = ost.get("username", "")
-            flat["os_password"] = ost.get("password", "")
-            flat["os_project_name"] = ost.get("project_name", "admin")
-            flat["os_project_domain_name"] = ost.get("project_domain_name", "Default")
-            flat["os_user_domain_name"] = ost.get("user_domain_name", "Default")
-            flat["os_region_name"] = ost.get("region_name", "RegionOne")
-            flat["os_insecure"] = ost.get("insecure", False)
-            flat["os_cacert"] = ost.get("cacert", "")
-            flat["os_manila_endpoint"] = ost.get("manila_endpoint", "")
-            flat["os_manila_share_network_id"] = ost.get("manila_share_network_id", "")
-            flat["os_manila_share_type"] = ost.get("manila_share_type", "cephfstype")
-            flat["os_manila_nfs_share_type"] = ost.get("manila_nfs_share_type", "nfstype")
-            flat["ceph_monitors"] = ost.get("ceph_monitors", "")
+    """프로젝트 루트의 config.toml(+ 오버라이드)을 읽어 평탄화된 dict를 반환."""
+    data = load_raw_toml()
+    if not data:
+        return {}
 
-            app = data.get("app", {})
-            flat["backend_port"] = app.get("backend_port", 8000)
-            flat["frontend_port"] = app.get("frontend_port", 3000)
-            flat["secret_key"] = app.get("secret_key", "change-me-in-production")
-            flat["refresh_interval_ms"] = app.get("refresh_interval_ms", 5000)
-            flat["site_name"] = app.get("site_name", "Afterglow")
-            flat["site_description"] = app.get("site_description", "OpenStack VM + OverlayFS 배포 플랫폼")
-            flat["logo_path"] = app.get("logo_path", "/logo.png")
-            flat["favicon_path"] = app.get("favicon_path", "/favicon.ico")
+    flat: dict = {}
+    ost = data.get("openstack", {})
+    flat["os_auth_url"] = ost.get("auth_url", "")
+    flat["os_username"] = ost.get("username", "")
+    flat["os_password"] = ost.get("password", "")
+    flat["os_project_name"] = ost.get("project_name", "admin")
+    flat["os_project_domain_name"] = ost.get("project_domain_name", "Default")
+    flat["os_user_domain_name"] = ost.get("user_domain_name", "Default")
+    flat["os_region_name"] = ost.get("region_name", "RegionOne")
+    flat["os_insecure"] = ost.get("insecure", False)
+    flat["os_cacert"] = ost.get("cacert", "")
+    flat["os_manila_endpoint"] = ost.get("manila_endpoint", "")
+    flat["os_manila_share_network_id"] = ost.get("manila_share_network_id", "")
+    flat["os_manila_share_type"] = ost.get("manila_share_type", "cephfstype")
+    flat["os_manila_nfs_share_type"] = ost.get("manila_nfs_share_type", "nfstype")
+    flat["ceph_monitors"] = ost.get("ceph_monitors", "")
 
-            cache = data.get("cache", {})
-            flat["redis_url"] = cache.get("redis_url", "redis://localhost:6379/0")
-            flat["cache_ttl_seconds"] = cache.get("default_ttl_seconds", 30)
-            flat["cache_ttl_fast"] = cache.get("ttl_fast", 15)
-            flat["cache_ttl_normal"] = cache.get("ttl_normal", cache.get("default_ttl_seconds", 30))
-            flat["cache_ttl_slow"] = cache.get("ttl_slow", 60)
-            flat["cache_ttl_static"] = cache.get("ttl_static", 300)
+    app = data.get("app", {})
+    flat["backend_port"] = app.get("backend_port", 8000)
+    flat["frontend_port"] = app.get("frontend_port", 3000)
+    flat["secret_key"] = app.get("secret_key", "change-me-in-production")
+    flat["refresh_interval_ms"] = app.get("refresh_interval_ms", 5000)
+    flat["site_name"] = app.get("site_name", "Afterglow")
+    flat["site_description"] = app.get("site_description", "OpenStack VM + OverlayFS 배포 플랫폼")
+    flat["logo_path"] = app.get("logo_path", "/logo.png")
+    flat["favicon_path"] = app.get("favicon_path", "/favicon.ico")
 
-            svc = data.get("services", {})
-            flat["service_magnum_enabled"] = svc.get("magnum", False)
-            flat["service_manila_enabled"] = svc.get("manila", False)
-            flat["service_zun_enabled"] = svc.get("zun", False)
-            flat["service_k3s_enabled"] = svc.get("k3s", False)
+    cache = data.get("cache", {})
+    flat["redis_url"] = cache.get("redis_url", "redis://localhost:6379/0")
+    flat["cache_ttl_seconds"] = cache.get("default_ttl_seconds", 30)
+    flat["cache_ttl_fast"] = cache.get("ttl_fast", 15)
+    flat["cache_ttl_normal"] = cache.get("ttl_normal", cache.get("default_ttl_seconds", 30))
+    flat["cache_ttl_slow"] = cache.get("ttl_slow", 60)
+    flat["cache_ttl_static"] = cache.get("ttl_static", 300)
 
-            k3s = data.get("k3s", {})
-            flat["k3s_version"] = k3s.get("version", "v1.31.4+k3s1")
-            flat["k3s_server_flavor_id"] = k3s.get("server_flavor_id", "")
-            flat["k3s_default_agent_flavor_id"] = k3s.get("default_agent_flavor_id", "")
-            flat["k3s_server_image_id"] = k3s.get("server_image_id", "")
-            flat["k3s_callback_base_url"] = k3s.get("callback_base_url", "")
-            flat["k3s_kubeconfig_encryption_key"] = k3s.get("kubeconfig_encryption_key", "")
-            flat["k3s_boot_volume_size_gb"] = k3s.get("boot_volume_size_gb", 30)
-            flat["k3s_occm_enabled"] = k3s.get("occm_enabled", False)
-            flat["k3s_occm_image"] = k3s.get(
-                "occm_image", "registry.k8s.io/provider-os/openstack-cloud-controller-manager:v1.35.0"
-            )
-            flat["k3s_occm_floating_network_id"] = k3s.get("occm_floating_network_id", "")
-            flat["k3s_occm_public_network_name"] = k3s.get("occm_public_network_name", "")
+    svc = data.get("services", {})
+    flat["service_magnum_enabled"] = svc.get("magnum", False)
+    flat["service_manila_enabled"] = svc.get("manila", False)
+    flat["service_zun_enabled"] = svc.get("zun", False)
+    flat["service_k3s_enabled"] = svc.get("k3s", False)
 
-            sess = data.get("session", {})
-            flat["session_timeout_seconds"] = sess.get("timeout_seconds", 3600)
-            flat["session_warning_before_seconds"] = sess.get("warning_before_seconds", 300)
-            flat["session_absolute_timeout"] = sess.get("absolute_timeout", 14400)
+    k3s = data.get("k3s", {})
+    flat["k3s_version"] = k3s.get("version", "v1.31.4+k3s1")
+    flat["k3s_server_flavor_id"] = k3s.get("server_flavor_id", "")
+    flat["k3s_default_agent_flavor_id"] = k3s.get("default_agent_flavor_id", "")
+    flat["k3s_server_image_id"] = k3s.get("server_image_id", "")
+    flat["k3s_callback_base_url"] = k3s.get("callback_base_url", "")
+    flat["k3s_kubeconfig_encryption_key"] = k3s.get("kubeconfig_encryption_key", "")
+    flat["k3s_boot_volume_size_gb"] = k3s.get("boot_volume_size_gb", 30)
+    flat["k3s_occm_enabled"] = k3s.get("occm_enabled", False)
+    flat["k3s_occm_image"] = k3s.get(
+        "occm_image", "registry.k8s.io/provider-os/openstack-cloud-controller-manager:v1.35.0"
+    )
+    flat["k3s_occm_floating_network_id"] = k3s.get("occm_floating_network_id", "")
+    flat["k3s_occm_public_network_name"] = k3s.get("occm_public_network_name", "")
 
-            nv = data.get("nova", {})
-            flat["default_network_id"] = nv.get("default_network_id", "")
-            flat["default_availability_zone"] = nv.get("default_availability_zone", "nova")
-            flat["boot_volume_size_gb"] = nv.get("boot_volume_size_gb", 20)
-            flat["upper_volume_size_gb"] = nv.get("upper_volume_size_gb", 50)
+    sess = data.get("session", {})
+    flat["session_timeout_seconds"] = sess.get("timeout_seconds", 3600)
+    flat["session_warning_before_seconds"] = sess.get("warning_before_seconds", 300)
+    flat["session_absolute_timeout"] = sess.get("absolute_timeout", 14400)
 
-            builder = data.get("builder", {})
-            flat["builder_image_id"] = builder.get("image_id", "")
-            flat["builder_flavor_id"] = builder.get("flavor_id", "")
-            flat["builder_network_id"] = builder.get("network_id", "")
+    nv = data.get("nova", {})
+    flat["default_network_id"] = nv.get("default_network_id", "")
+    flat["default_availability_zone"] = nv.get("default_availability_zone", "nova")
+    flat["boot_volume_size_gb"] = nv.get("boot_volume_size_gb", 20)
+    flat["upper_volume_size_gb"] = nv.get("upper_volume_size_gb", 50)
 
-            gl = data.get("gitlab_oidc", {})
-            flat["gitlab_oidc_enabled"] = gl.get("enabled", False)
-            flat["gitlab_oidc_gitlab_url"] = gl.get("gitlab_url", "")
-            flat["gitlab_oidc_client_id"] = gl.get("client_id", "")
-            flat["gitlab_oidc_client_secret"] = gl.get("client_secret", "")
-            flat["gitlab_oidc_idp_id"] = gl.get("idp_id", "gitlab")
-            flat["gitlab_oidc_protocol_id"] = gl.get("protocol_id", "openid")
-            flat["gitlab_oidc_redirect_uri"] = gl.get("redirect_uri", "")
-            flat["gitlab_oidc_scopes"] = gl.get("scopes", "openid email profile read_user")
+    builder = data.get("builder", {})
+    flat["builder_image_id"] = builder.get("image_id", "")
+    flat["builder_flavor_id"] = builder.get("flavor_id", "")
+    flat["builder_network_id"] = builder.get("network_id", "")
 
-            db = data.get("database", {})
-            flat["database_url"] = db.get("url", "")
-            flat["database_pool_size"] = db.get("pool_size", 5)
-            flat["database_max_overflow"] = db.get("max_overflow", 10)
-            flat["database_auto_create_tables"] = db.get("auto_create_tables", True)
+    gl = data.get("gitlab_oidc", {})
+    flat["gitlab_oidc_enabled"] = gl.get("enabled", False)
+    flat["gitlab_oidc_gitlab_url"] = gl.get("gitlab_url", "")
+    flat["gitlab_oidc_client_id"] = gl.get("client_id", "")
+    flat["gitlab_oidc_client_secret"] = gl.get("client_secret", "")
+    flat["gitlab_oidc_idp_id"] = gl.get("idp_id", "gitlab")
+    flat["gitlab_oidc_protocol_id"] = gl.get("protocol_id", "openid")
+    flat["gitlab_oidc_redirect_uri"] = gl.get("redirect_uri", "")
+    flat["gitlab_oidc_scopes"] = gl.get("scopes", "openid email profile read_user")
 
-            cors = data.get("cors", {})
-            flat["cors_origins"] = cors.get("origins", "http://localhost:3000,http://localhost")
+    db = data.get("database", {})
+    flat["database_url"] = db.get("url", "")
+    flat["database_pool_size"] = db.get("pool_size", 5)
+    flat["database_max_overflow"] = db.get("max_overflow", 10)
+    flat["database_auto_create_tables"] = db.get("auto_create_tables", True)
 
-            log = data.get("logging", {})
-            flat["log_file_path"] = log.get("log_file_path", "/app/logs/afterglow-backend.log")
-            flat["log_level"] = log.get("log_level", "INFO")
-            flat["log_max_bytes"] = log.get("max_bytes", 52428800)
-            flat["log_backup_count"] = log.get("backup_count", 5)
-            flat["log_rotation_type"] = log.get("rotation_type", "size")
-            flat["log_rotation_when"] = log.get("rotation_when", "midnight")
-            flat["log_rotation_interval"] = log.get("rotation_interval", 1)
+    cors = data.get("cors", {})
+    flat["cors_origins"] = cors.get("origins", "http://localhost:3000,http://localhost")
 
-            return flat
-    return {}
+    log = data.get("logging", {})
+    flat["log_file_path"] = log.get("log_file_path", "/app/logs/afterglow-backend.log")
+    flat["log_level"] = log.get("log_level", "INFO")
+    flat["log_max_bytes"] = log.get("max_bytes", 52428800)
+    flat["log_backup_count"] = log.get("backup_count", 5)
+    flat["log_rotation_type"] = log.get("rotation_type", "size")
+    flat["log_rotation_when"] = log.get("rotation_when", "midnight")
+    flat["log_rotation_interval"] = log.get("rotation_interval", 1)
+
+    return flat
 
 
 class Settings(BaseSettings):
@@ -281,12 +310,19 @@ class Settings(BaseSettings):
 
 @lru_cache
 def load_raw_toml() -> dict:
-    """config.toml 원본 dict를 반환 (중첩 구조 보존, 평탄화하지 않음)."""
-    candidates = _config_candidates()
-    for path in candidates:
-        if path.exists():
+    """config.toml 원본(+ 같은 디렉토리의 `config.*.toml` 오버라이드 딥 머지)을 중첩 구조 그대로 반환.
+
+    머지 규칙: dict는 재귀 병합, 그 외는 오버라이드가 덮어쓴다. 오버라이드 파일은 알파벳순으로
+    적용되어 뒤에 오는 파일이 앞의 값을 이긴다.
+    """
+    for path in _config_candidates():
+        if path.exists() and path.stat().st_size > 0:
             with open(path, "rb") as f:
-                return tomllib.load(f)
+                merged = tomllib.load(f)
+            for override in _config_override_paths(path):
+                with open(override, "rb") as f:
+                    merged = _deep_merge(merged, tomllib.load(f))
+            return merged
     return {}
 
 

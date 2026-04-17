@@ -19,7 +19,7 @@ router = APIRouter()
 
 @router.get("", response_model=list[RouterInfo])
 async def list_routers(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         return await cached_call(
             f"afterglow:neutron:{pid}:routers",
@@ -36,7 +36,7 @@ async def create_router(
     req: CreateRouterRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         result = await asyncio.to_thread(neutron.create_router, conn, req.name, req.external_network_id)
         await invalidate(f"afterglow:neutron:{pid}:routers")
@@ -55,7 +55,7 @@ async def get_router(router_id: str, conn: openstack.connection.Connection = Dep
 
 @router.delete("/{router_id}", status_code=204)
 async def delete_router(router_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         await asyncio.to_thread(neutron.delete_router, conn, router_id)
         await invalidate(f"afterglow:neutron:{pid}:routers")

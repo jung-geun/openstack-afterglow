@@ -17,7 +17,7 @@ async def list_security_services(
     conn: openstack.connection.Connection = Depends(get_os_conn),
     refresh: bool = Query(False),
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         return await cached_call(
             f"afterglow:manila:{pid}:security_services",
@@ -36,7 +36,7 @@ async def create_security_service(
     req: CreateSecurityServiceRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         result = await asyncio.to_thread(
             manila.create_security_service,
@@ -61,7 +61,7 @@ async def delete_security_service(
     security_service_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         await asyncio.to_thread(manila.delete_security_service, conn, security_service_id)
         await invalidate(f"afterglow:manila:{pid}:security_services")
@@ -76,7 +76,7 @@ async def attach_to_share_network(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """Security Service를 Share Network에 연결."""
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         result = await asyncio.to_thread(
             manila.add_security_service_to_network,
@@ -97,7 +97,7 @@ async def detach_from_share_network(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """Security Service를 Share Network에서 해제."""
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         await asyncio.to_thread(
             manila.remove_security_service_from_network,

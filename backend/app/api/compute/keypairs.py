@@ -19,7 +19,7 @@ class CreateKeypairRequest(BaseModel):
 
 @router.get("")
 async def list_keypairs(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         return await cached_call(
             f"afterglow:nova:{pid}:keypairs",
@@ -36,7 +36,7 @@ async def create_keypair(
     req: CreateKeypairRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         result = await asyncio.to_thread(nova.create_keypair, conn, req.name, req.public_key, req.key_type)
         await invalidate(f"afterglow:nova:{pid}:keypairs")
@@ -50,7 +50,7 @@ async def delete_keypair(
     keypair_name: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         await asyncio.to_thread(nova.delete_keypair, conn, keypair_name)
         await invalidate(f"afterglow:nova:{pid}:keypairs")

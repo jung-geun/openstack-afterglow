@@ -16,7 +16,7 @@ Union은 OpenStack 기반 VM 배포 + OverlayFS 마운트 웹 플랫폼입니다
 ## 프로젝트 구조
 
 ```
-union/
+afterglow/
 ├── frontend/                          # SvelteKit 앱
 │   ├── src/
 │   │   ├── routes/
@@ -140,7 +140,7 @@ POST /api/instances 호출 시 순서:
 
 1. 프론트엔드 → `X-Auth-Token` + `X-Project-Id` 헤더로 백엔드 호출
 2. `get_os_conn` — Redis 캐시된 Keystone 토큰 검증 → `openstacksdk Connection` 반환
-3. Connection 객체에 `conn._union_token`, `conn._union_project_id` 저장
+3. Connection 객체에 `conn._afterglow_token`, `conn._afterglow_project_id` 저장
 
 ---
 
