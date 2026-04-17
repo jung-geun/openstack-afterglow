@@ -80,6 +80,12 @@ def _load_toml() -> dict:
             flat["k3s_callback_base_url"] = k3s.get("callback_base_url", "")
             flat["k3s_kubeconfig_encryption_key"] = k3s.get("kubeconfig_encryption_key", "")
             flat["k3s_boot_volume_size_gb"] = k3s.get("boot_volume_size_gb", 30)
+            flat["k3s_occm_enabled"] = k3s.get("occm_enabled", False)
+            flat["k3s_occm_image"] = k3s.get(
+                "occm_image", "registry.k8s.io/provider-os/openstack-cloud-controller-manager:v1.35.0"
+            )
+            flat["k3s_occm_floating_network_id"] = k3s.get("occm_floating_network_id", "")
+            flat["k3s_occm_public_network_name"] = k3s.get("occm_public_network_name", "")
 
             sess = data.get("session", {})
             flat["session_timeout_seconds"] = sess.get("timeout_seconds", 3600)
@@ -184,6 +190,10 @@ class Settings(BaseSettings):
     k3s_callback_base_url: str = ""
     k3s_kubeconfig_encryption_key: str = ""
     k3s_boot_volume_size_gb: int = 30
+    k3s_occm_enabled: bool = False
+    k3s_occm_image: str = "registry.k8s.io/provider-os/openstack-cloud-controller-manager:v1.35.0"
+    k3s_occm_floating_network_id: str = ""
+    k3s_occm_public_network_name: str = ""
     notion_config_encryption_key: str = ""  # 미설정 시 k3s_kubeconfig_encryption_key 재사용
 
     # 세션 관리

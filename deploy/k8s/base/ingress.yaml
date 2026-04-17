@@ -6,6 +6,7 @@ metadata:
   annotations:
     kubernetes.io/ingress.class: "traefik"
     traefik.ingress.kubernetes.io/router.entrypoints: web
+    cert-manager.io/cluster-issuer: "letsencrypt-prod-traefik" # 위에서 만든 ClusterIssuer
     # kubernetes.io/ingress.class: nginx
     # nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
     # nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
@@ -16,7 +17,7 @@ spec:
   #       - afterglow.example.com      # 실제 도메인으로 변경
   #     secretName: afterglow-tls      # cert-manager 또는 수동으로 생성한 TLS Secret 이름
   rules:
-    - host: afterglow.example.com      # 실제 도메인으로 변경
+    - host: afterglow.example.com # 실제 도메인으로 변경
       http:
         paths:
           - path: /api

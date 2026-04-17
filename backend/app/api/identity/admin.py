@@ -285,7 +285,7 @@ async def get_monitoring_summary(conn: openstack.connection.Connection = Depends
             result["compute"]["gpu_instances"] = srv_data.get("gpu_instances", 0)
             # -- Storage (volumes) --
             try:
-                endpoint = conn.compute.get_endpoint().replace("/compute", "")
+                _ = conn.compute.get_endpoint().replace("/compute", "")
                 vol_ep = conn.block_storage.get_endpoint()
                 vol_resp = conn.session.get(
                     f"{vol_ep}/volumes/detail",
@@ -333,12 +333,7 @@ async def get_monitoring_summary(conn: openstack.connection.Connection = Depends
                 "zun_count": _fetch_overview_containers(conn),
                 "k3s_count": 0,
             }
-            try:
-                from app.services import k3s_db
-                import asyncio as _asyncio
-                # k3s는 async이므로 별도 처리 불가 — 0으로 유지
-            except Exception:
-                pass
+            # k3s는 async이므로 별도 처리 불가 — 0으로 유지
             return result
 
         return await cached_call("afterglow:admin:monitoring", ttl_normal(), _collect, refresh=refresh)
@@ -647,6 +642,7 @@ async def start_admin_container(
         await asyncio.to_thread(_zun.start_container, conn, container_id)
         return {"status": "started"}
     except Exception:
+        _logger.warning("컨테이너 시작 실패: %s", container_id, exc_info=True)
         raise HTTPException(status_code=500, detail="컨테이너 시작 실패")
 
 
@@ -663,6 +659,7 @@ async def stop_admin_container(
         await asyncio.to_thread(_zun.stop_container, conn, container_id)
         return {"status": "stopped"}
     except Exception:
+        _logger.warning("컨테이너 중지 실패: %s", container_id, exc_info=True)
         raise HTTPException(status_code=500, detail="컨테이너 중지 실패")
 
 
@@ -678,6 +675,7 @@ async def delete_admin_container(
     try:
         await asyncio.to_thread(_zun.delete_container, conn, container_id)
     except Exception:
+        _logger.warning("컨테이너 삭제 실패: %s", container_id, exc_info=True)
         raise HTTPException(status_code=500, detail="컨테이너 삭제 실패")
 
 

@@ -19,6 +19,7 @@ dependencies = [
     "asyncmy>=0.2.9",
     "prometheus-client>=0.20.0",
     "slowapi>=0.1.9",
+    "pyyaml>=6.0",
 ]
 
 [build-system]

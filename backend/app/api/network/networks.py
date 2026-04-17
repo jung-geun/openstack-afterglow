@@ -168,27 +168,8 @@ async def get_topology(conn: openstack.connection.Connection = Depends(get_os_co
 
 
 # ---------------------------------------------------------------------------
-# 네트워크 상세 (동적 경로 - 마지막에 등록)
+# 포트 목록 (동적 경로보다 먼저 등록)
 # ---------------------------------------------------------------------------
-
-
-@router.get("/{network_id}", response_model=NetworkDetail)
-async def get_network(network_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
-    try:
-        return await asyncio.to_thread(neutron.get_network_detail, conn, network_id)
-    except Exception:
-        raise HTTPException(status_code=404, detail="네트워크를 찾을 수 없습니다")
-
-
-@router.delete("/{network_id}", status_code=204)
-async def delete_network(
-    network_id: str,
-    conn: openstack.connection.Connection = Depends(get_os_conn),
-):
-    try:
-        await asyncio.to_thread(neutron.delete_network, conn, network_id)
-    except Exception:
-        raise HTTPException(status_code=500, detail="네트워크 삭제 실패")
 
 
 @router.get("/ports", response_model=list[dict])
@@ -214,6 +195,30 @@ async def list_ports(conn: openstack.connection.Connection = Depends(get_os_conn
     except Exception:
         _logger.exception("포트 목록 조회 실패")
         raise HTTPException(status_code=500, detail="포트 조회 실패")
+
+
+# ---------------------------------------------------------------------------
+# 네트워크 상세 (동적 경로 - 마지막에 등록)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{network_id}", response_model=NetworkDetail)
+async def get_network(network_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+    try:
+        return await asyncio.to_thread(neutron.get_network_detail, conn, network_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="네트워크를 찾을 수 없습니다")
+
+
+@router.delete("/{network_id}", status_code=204)
+async def delete_network(
+    network_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    try:
+        await asyncio.to_thread(neutron.delete_network, conn, network_id)
+    except Exception:
+        raise HTTPException(status_code=500, detail="네트워크 삭제 실패")
 
 
 @router.post("/{network_id}/subnets", response_model=SubnetDetail, status_code=201)

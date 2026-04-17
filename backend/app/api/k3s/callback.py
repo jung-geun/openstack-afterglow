@@ -61,6 +61,9 @@ async def k3s_callback(request: Request, req: K3sCallbackRequest):
         node_token=req.node_token,
     )
 
+    if req.occm_status:
+        _logger.info("k3s cluster %s OCCM status: %s", cluster_id, req.occm_status)
+
     _logger.info("k3s cluster %s server ready, spawning agent VMs", cluster_id)
 
     # 에이전트 VM 생성은 백그라운드 태스크로 (콜백 응답을 빠르게 반환)
@@ -124,13 +127,15 @@ async def _provision_agents(
             vol = await asyncio.to_thread(
                 cinder.create_volume_from_image, conn, f"{agent_name}-boot", image_id, boot_volume_size
             )
-            # 에이전트 cloud-init 생성
+            # 에이전트 cloud-init 생성 (OCCM 활성 여부 반영)
+            is_occm = bool(cluster.get("occm_enabled"))
             userdata = k3s_cloudinit.generate_agent_userdata(
                 cluster_name=cluster_name,
                 k3s_version=k3s_version,
                 server_ip=server_ip,
                 node_token=node_token,
                 ssh_public_key=ssh_public_key,
+                occm_enabled=is_occm,
             )
             # 에이전트 VM 생성 (admin conn이므로 key_name 대신 cloud-init으로 공개키 주입)
             vm = await asyncio.to_thread(
