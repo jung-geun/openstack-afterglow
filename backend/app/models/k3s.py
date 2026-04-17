@@ -57,7 +57,9 @@ class K3sClusterInfo(BaseModel):
     deleted_by_user_id: str | None = None
     deleted_reason: str | None = None
     occm_enabled: bool = False
-    health_status: str | None = None  # 최신 헬스체크 결과: "HEALTHY" | "DEGRADED" | "UNHEALTHY" | "UNREACHABLE" | "UNKNOWN"
+    health_status: str | None = (
+        None  # 최신 헬스체크 결과: "HEALTHY" | "DEGRADED" | "UNHEALTHY" | "UNREACHABLE" | "UNKNOWN"
+    )
 
 
 class K3sClusterInfoDeleted(K3sClusterInfo):

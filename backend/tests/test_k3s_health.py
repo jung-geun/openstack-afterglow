@@ -212,10 +212,15 @@ async def test_check_all_active_clusters_empty():
     """ACTIVE 클러스터 없을 때 오류 없이 반환."""
     from app.services.k3s_health import check_all_active_clusters
 
-    with patch("app.services.k3s_db.list_all_clusters", AsyncMock(return_value=[
-        _make_cluster_record(status="CREATING"),
-        _make_cluster_record(cluster_id="k3s-2", status="ERROR"),
-    ])):
+    with patch(
+        "app.services.k3s_db.list_all_clusters",
+        AsyncMock(
+            return_value=[
+                _make_cluster_record(status="CREATING"),
+                _make_cluster_record(cluster_id="k3s-2", status="ERROR"),
+            ]
+        ),
+    ):
         # 예외 없이 완료되어야 함
         await check_all_active_clusters()
 

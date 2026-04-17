@@ -256,13 +256,15 @@ def _parse_nodes(api_response: dict) -> list[K3sNodeHealth]:
             if cond_status == "True":
                 cond_names.append(cond_type)
 
-        result.append(K3sNodeHealth(
-            name=name,
-            role=role,
-            ready=ready,
-            conditions=cond_names,
-            kubelet_version=kubelet_version,
-        ))
+        result.append(
+            K3sNodeHealth(
+                name=name,
+                role=role,
+                ready=ready,
+                conditions=cond_names,
+                kubelet_version=kubelet_version,
+            )
+        )
     return result
 
 

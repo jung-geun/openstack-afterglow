@@ -263,9 +263,12 @@ async def admin_overview(conn: openstack.connection.Connection = Depends(get_os_
 
 
 @router.get("/monitoring/summary", dependencies=[Depends(require_admin)])
-async def get_monitoring_summary(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
+async def get_monitoring_summary(
+    conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)
+):
     """분야별 통합 모니터링 요약 (compute/storage/network/container)."""
     try:
+
         def _collect():
             result: dict = {}
             # -- Compute --
@@ -325,8 +328,12 @@ async def get_monitoring_summary(conn: openstack.connection.Connection = Depends
                 }
             except Exception:
                 result["network"] = {
-                    "network_count": 0, "router_count": 0, "router_active": 0,
-                    "floatingip_count": 0, "floatingip_active": 0, "port_count": 0,
+                    "network_count": 0,
+                    "router_count": 0,
+                    "router_active": 0,
+                    "floatingip_count": 0,
+                    "floatingip_active": 0,
+                    "port_count": 0,
                 }
             # -- Containers --
             result["containers"] = {
@@ -357,9 +364,7 @@ async def list_hypervisors(conn: openstack.connection.Connection = Depends(get_o
                 for rp in rps_resp.json().get("resource_providers", []):
                     if rp.get("parent_provider_uuid"):  # child RP(GPU 등) 건너뜀
                         continue
-                    inv_resp = conn.session.get(
-                        f"{placement_ep}/resource_providers/{rp['uuid']}/inventories"
-                    )
+                    inv_resp = conn.session.get(f"{placement_ep}/resource_providers/{rp['uuid']}/inventories")
                     invs = inv_resp.json().get("inventories", {})
                     ratios[rp["uuid"]] = {
                         "vcpu": invs.get("VCPU", {}).get("allocation_ratio", 1.0),
@@ -379,7 +384,9 @@ async def list_hypervisors(conn: openstack.connection.Connection = Depends(get_o
                     "vcpus_allowed": int((h.get("vcpus", 0) or 0) * ratios.get(h.get("id", ""), {}).get("vcpu", 1.0)),
                     "memory_size_mb": h.get("memory_mb", 0) or 0,
                     "memory_used_mb": h.get("memory_mb_used", 0) or 0,
-                    "memory_allowed_mb": int((h.get("memory_mb", 0) or 0) * ratios.get(h.get("id", ""), {}).get("memory", 1.0)),
+                    "memory_allowed_mb": int(
+                        (h.get("memory_mb", 0) or 0) * ratios.get(h.get("id", ""), {}).get("memory", 1.0)
+                    ),
                     "local_disk_gb": h.get("local_gb", 0) or 0,
                     "local_disk_used_gb": h.get("local_gb_used", 0) or 0,
                     "running_vms": h.get("running_vms", 0) or 0,
@@ -445,9 +452,7 @@ async def get_hypervisor_detail(hypervisor_id: str, conn: openstack.connection.C
             mem_ratio = 1.0
             try:
                 placement_ep = conn.placement.get_endpoint()
-                inv_resp = conn.session.get(
-                    f"{placement_ep}/resource_providers/{hypervisor_id}/inventories"
-                )
+                inv_resp = conn.session.get(f"{placement_ep}/resource_providers/{hypervisor_id}/inventories")
                 invs = inv_resp.json().get("inventories", {})
                 vcpu_ratio = invs.get("VCPU", {}).get("allocation_ratio", 1.0)
                 mem_ratio = invs.get("MEMORY_MB", {}).get("allocation_ratio", 1.0)
@@ -638,6 +643,7 @@ async def start_admin_container(
     if not get_settings().service_zun_enabled:
         raise HTTPException(status_code=503, detail="Zun 서비스가 비활성화되어 있습니다")
     from app.services import zun as _zun
+
     try:
         await asyncio.to_thread(_zun.start_container, conn, container_id)
         return {"status": "started"}
@@ -655,6 +661,7 @@ async def stop_admin_container(
     if not get_settings().service_zun_enabled:
         raise HTTPException(status_code=503, detail="Zun 서비스가 비활성화되어 있습니다")
     from app.services import zun as _zun
+
     try:
         await asyncio.to_thread(_zun.stop_container, conn, container_id)
         return {"status": "stopped"}
@@ -672,6 +679,7 @@ async def delete_admin_container(
     if not get_settings().service_zun_enabled:
         raise HTTPException(status_code=503, detail="Zun 서비스가 비활성화되어 있습니다")
     from app.services import zun as _zun
+
     try:
         await asyncio.to_thread(_zun.delete_container, conn, container_id)
     except Exception:
@@ -1592,6 +1600,7 @@ async def scale_admin_k3s_cluster(cluster_id: str, req: dict):
     current_agent_ids: list[str] = cluster.get("agent_vm_ids") or []
     if isinstance(current_agent_ids, str):
         import json as _json
+
         try:
             current_agent_ids = _json.loads(current_agent_ids)
         except Exception:

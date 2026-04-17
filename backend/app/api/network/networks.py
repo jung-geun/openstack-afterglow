@@ -177,6 +177,7 @@ async def list_ports(conn: openstack.connection.Connection = Depends(get_os_conn
     """현재 프로젝트의 포트 목록."""
     project_id = conn._union_project_id
     try:
+
         def _list():
             return [
                 {
@@ -191,6 +192,7 @@ async def list_ports(conn: openstack.connection.Connection = Depends(get_os_conn
                 }
                 for p in conn.network.ports(project_id=project_id)
             ]
+
         return await asyncio.to_thread(_list)
     except Exception:
         _logger.exception("포트 목록 조회 실패")
