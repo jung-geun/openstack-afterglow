@@ -39,7 +39,7 @@ def list_images(conn: openstack.connection.Connection, project_id: str | None = 
             pass
 
     # 현재 프로젝트의 private 이미지만
-    pid = project_id or getattr(conn, "_union_project_id", None)
+    pid = project_id or getattr(conn, "_afterglow_project_id", None)
     try:
         kwargs = {"status": "active", "visibility": "private"}
         if pid:

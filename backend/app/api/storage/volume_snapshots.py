@@ -24,7 +24,7 @@ async def list_snapshots(
     conn: openstack.connection.Connection = Depends(get_os_conn),
     refresh: bool = Query(False),
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     cache_key = (
         f"afterglow:cinder:{pid}:snapshots" if not volume_id else f"afterglow:cinder:{pid}:snapshots:{volume_id}"
     )

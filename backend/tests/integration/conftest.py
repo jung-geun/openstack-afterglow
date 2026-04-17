@@ -16,7 +16,7 @@ config.toml 또는 credentials.toml 의 실제 OpenStack 인증 정보를 사용
 admin/user 권한 분리 테스트를 위한 일반 유저 계정 설정:
   cp tests/integration/credentials.toml.example tests/integration/credentials.toml
   # 파일을 열어 [user] 섹션 비밀번호 기입
-  또는 환경변수: UNION_TEST_USER_USERNAME, UNION_TEST_USER_PASSWORD, UNION_TEST_USER_PROJECT
+  또는 환경변수: AFTERGLOW_TEST_USER_USERNAME, AFTERGLOW_TEST_USER_PASSWORD, AFTERGLOW_TEST_USER_PROJECT
 """
 
 import pytest
@@ -78,7 +78,7 @@ def admin_user_credentials_fx():
         pytest.skip(
             "admin_user 크리덴셜 미설정 — "
             "tests/integration/credentials.toml 의 [admin_user] 섹션 또는 "
-            "UNION_TEST_ADMIN_USER_USERNAME / UNION_TEST_ADMIN_USER_PASSWORD 환경변수를 설정하세요."
+            "AFTERGLOW_TEST_ADMIN_USER_USERNAME / AFTERGLOW_TEST_ADMIN_USER_PASSWORD 환경변수를 설정하세요."
         )
     return creds
 
@@ -93,7 +93,7 @@ def user_credentials_fx():
         pytest.skip(
             "일반 유저 크리덴셜 미설정 — "
             "tests/integration/credentials.toml 의 [user] 섹션 또는 "
-            "UNION_TEST_USER_USERNAME / UNION_TEST_USER_PASSWORD 환경변수를 설정하세요."
+            "AFTERGLOW_TEST_USER_USERNAME / AFTERGLOW_TEST_USER_PASSWORD 환경변수를 설정하세요."
         )
     return creds
 

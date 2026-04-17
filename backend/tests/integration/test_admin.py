@@ -458,7 +458,7 @@ async def test_admin_image_detail(admin_client):
 
 # ─────────────────────────────────────────────────────────────────
 # admin_user 검증 (default project ≠ admin 이어도 admin 페이지 접근 가능해야 함)
-# credentials.toml [admin_user] 또는 UNION_TEST_ADMIN_USER_* 환경변수 필요
+# credentials.toml [admin_user] 또는 AFTERGLOW_TEST_ADMIN_USER_* 환경변수 필요
 # ─────────────────────────────────────────────────────────────────
 
 

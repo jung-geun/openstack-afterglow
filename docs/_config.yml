@@ -1,0 +1,39 @@
+title: Afterglow
+description: 차세대 OpenStack 대시보드 — Horizon의 완성도 + Skyline의 현대적 UX
+baseurl: ""
+url: "https://jung-geun.github.io"
+repository: jung-geun/openstack-afterglow
+lang: ko
+
+remote_theme: just-the-docs/just-the-docs
+
+# 검색 활성화
+search_enabled: true
+
+# 색상 테마
+color_scheme: dark
+
+# 헤더 링크
+aux_links:
+  "한국어":
+    - "/openstack-afterglow/"
+  "English":
+    - "/openstack-afterglow/en/"
+  "GitHub":
+    - "https://github.com/jung-geun/openstack-afterglow"
+
+aux_links_new_tab: false
+
+# 푸터
+footer_content: "Afterglow — OpenStack Dashboard. MIT License."
+
+# 플러그인
+plugins:
+  - jekyll-seo-tag
+
+# 네비게이션 순서
+nav_sort: case_insensitive
+
+# Mermaid 다이어그램 지원
+mermaid:
+  version: "10"

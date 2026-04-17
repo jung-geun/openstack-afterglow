@@ -15,7 +15,7 @@ router = APIRouter()
 
 @router.get("", response_model=list[VolumeInfo])
 async def list_volumes(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         return await cached_call(
             f"afterglow:cinder:{pid}:volumes",
@@ -42,7 +42,7 @@ async def create_volume(
     req: CreateVolumeRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         result = await asyncio.to_thread(cinder.create_empty_volume, conn, req.name, req.size_gb, req.availability_zone)
         await invalidate(f"afterglow:cinder:{pid}:volumes")
@@ -56,7 +56,7 @@ async def delete_volume(
     volume_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         await asyncio.to_thread(cinder.delete_volume, conn, volume_id)
         await invalidate(f"afterglow:cinder:{pid}:volumes")
@@ -110,7 +110,7 @@ async def accept_volume_transfer(
     """볼륨 이전 수락."""
     try:
         result = await asyncio.to_thread(cinder.accept_volume_transfer, conn, transfer_id, req.auth_key)
-        await invalidate(f"afterglow:cinder:{conn._union_project_id}:volumes")
+        await invalidate(f"afterglow:cinder:{conn._afterglow_project_id}:volumes")
         return result
     except Exception:
         raise HTTPException(status_code=500, detail="볼륨 이전 수락 실패")

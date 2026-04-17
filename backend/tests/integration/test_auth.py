@@ -101,7 +101,7 @@ async def test_user_session_info(user_client):
 
 # ─────────────────────────────────────────────────────────────────
 # admin_user 검증 (admin 프로젝트 admin role 보유, default project ≠ admin 가능)
-# credentials.toml [admin_user] 또는 UNION_TEST_ADMIN_USER_* 환경변수 필요
+# credentials.toml [admin_user] 또는 AFTERGLOW_TEST_ADMIN_USER_* 환경변수 필요
 # ─────────────────────────────────────────────────────────────────
 
 

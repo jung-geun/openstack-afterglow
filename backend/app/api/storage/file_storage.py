@@ -23,7 +23,7 @@ async def get_file_storage_quota(conn: openstack.connection.Connection = Depends
 async def list_file_storages(
     conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         return await cached_call(
             f"afterglow:manila:{pid}:file_storages",
@@ -66,7 +66,7 @@ async def create_file_storage(
     req: CreateFileStorageRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         settings = get_settings()
         result = manila.create_file_storage(
@@ -89,7 +89,7 @@ async def delete_file_storage(
     file_storage_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         manila.delete_file_storage(conn, file_storage_id)
         await invalidate(f"afterglow:manila:{pid}:file_storages")

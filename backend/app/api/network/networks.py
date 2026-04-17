@@ -27,7 +27,7 @@ router = APIRouter()
 
 @router.get("", response_model=list[NetworkInfo])
 async def list_networks(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         return await cached_call(
             f"afterglow:neutron:{pid}:networks",
@@ -57,7 +57,7 @@ async def create_network(
 
 @router.get("/floating-ips", response_model=list[FloatingIpInfo])
 async def list_floating_ips(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         return await cached_call(
             f"afterglow:neutron:{pid}:floating_ips",
@@ -154,7 +154,7 @@ def _fetch_topology_sync(conn) -> dict:
 
 @router.get("/topology", response_model=TopologyData)
 async def get_topology(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         return await cached_call(
             f"afterglow:neutron:{pid}:topology",
@@ -175,7 +175,7 @@ async def get_topology(conn: openstack.connection.Connection = Depends(get_os_co
 @router.get("/ports", response_model=list[dict])
 async def list_ports(conn: openstack.connection.Connection = Depends(get_os_conn)):
     """현재 프로젝트의 포트 목록."""
-    project_id = conn._union_project_id
+    project_id = conn._afterglow_project_id
     try:
 
         def _list():

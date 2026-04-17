@@ -1,4 +1,4 @@
-# Union Kubernetes 배포 가이드
+# Afterglow Kubernetes 배포 가이드
 
 ## 디렉토리 구조
 
@@ -35,16 +35,16 @@ k8s/
 ### 1. 이미지 빌드
 
 ```bash
-docker build -t union-backend:latest ./backend
-docker build -t union-frontend:latest ./frontend
+docker build -t afterglow-api:latest ./backend
+docker build -t afterglow:latest ./frontend
 ```
 
 로컬 Kubernetes 클러스터(예: minikube)를 사용하는 경우, 이미지를 클러스터에 로드합니다.
 
 ```bash
 # minikube 사용 시
-minikube image load union-backend:latest
-minikube image load union-frontend:latest
+minikube image load afterglow-api:latest
+minikube image load afterglow:latest
 ```
 
 ### 2. 설정 수정
@@ -68,8 +68,8 @@ kubectl apply -f k8s/configmap.yaml
 # 3. Secret 생성 (파일 수정 후 적용 또는 아래 명령어 직접 사용)
 kubectl apply -f k8s/secret.yaml
 # 또는 kubectl로 직접 생성:
-# kubectl create secret generic union-secrets \
-#   --namespace=union \
+# kubectl create secret generic afterglow-secrets \
+#   --namespace=afterglow \
 #   --from-literal=OPENSTACK_PASSWORD=실제비밀번호 \
 #   --from-literal=SECRET_KEY=랜덤한시크릿키
 
@@ -101,8 +101,8 @@ kubectl apply -f k8s/ingress.yaml
 ### 4. 배포 상태 확인
 
 ```bash
-kubectl get all -n union
-kubectl get ingress -n union
+kubectl get all -n afterglow
+kubectl get ingress -n afterglow
 ```
 
 ## PUBLIC_API_BASE 설정 주의사항
@@ -111,11 +111,11 @@ kubectl get ingress -n union
 
 - Ingress를 사용하는 경우, `ORIGIN`과 동일하게 외부 도메인으로 설정합니다.
   ```
-  PUBLIC_API_BASE=http://union.example.com
+  PUBLIC_API_BASE=http://afterglow.example.com
   ```
 - 클러스터 내부 서비스 주소(예: `http://backend:8000`)로 설정하면 **브라우저에서 접근할 수 없습니다.**
 - HTTPS를 사용하는 경우 `http://` 대신 `https://`를 사용하세요.
-- 도메인 변경 후에는 `kubectl rollout restart deployment/frontend -n union`으로 프론트엔드를 재시작해야 합니다.
+- 도메인 변경 후에는 `kubectl rollout restart deployment/frontend -n afterglow`으로 프론트엔드를 재시작해야 합니다.
 
 ## 모니터링 선택 배포
 
@@ -135,7 +135,7 @@ kubectl apply -f k8s/monitoring/opensearch/
 
 ```bash
 # 포트 포워딩으로 로컬 접근
-kubectl port-forward svc/grafana 3001:3000 -n union
+kubectl port-forward svc/grafana 3001:3000 -n afterglow
 # 브라우저에서 http://localhost:3001 접속
 # 기본 계정: admin / admin
 ```
@@ -143,7 +143,7 @@ kubectl port-forward svc/grafana 3001:3000 -n union
 ### Prometheus 접근
 
 ```bash
-kubectl port-forward svc/prometheus 9090:9090 -n union
+kubectl port-forward svc/prometheus 9090:9090 -n afterglow
 # 브라우저에서 http://localhost:9090 접속
 ```
 
@@ -151,12 +151,12 @@ kubectl port-forward svc/prometheus 9090:9090 -n union
 
 ```bash
 # Pod 로그 확인
-kubectl logs -f deployment/backend -n union
-kubectl logs -f deployment/frontend -n union
+kubectl logs -f deployment/backend -n afterglow
+kubectl logs -f deployment/frontend -n afterglow
 
 # Pod 상태 확인
-kubectl describe pod -l app=backend -n union
+kubectl describe pod -l app=backend -n afterglow
 
 # ConfigMap 내용 확인
-kubectl get configmap union-config -n union -o yaml
+kubectl get configmap afterglow-config -n afterglow -o yaml
 ```

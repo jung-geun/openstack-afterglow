@@ -47,15 +47,15 @@ vim tests/integration/credentials.toml
 ### 방법 B: 환경변수 (CI/CD)
 
 ```bash
-export UNION_TEST_ADMIN_USERNAME=admin
-export UNION_TEST_ADMIN_PASSWORD=secret
-export UNION_TEST_ADMIN_PROJECT=admin
-export UNION_TEST_ADMIN_DOMAIN=Default
+export AFTERGLOW_TEST_ADMIN_USERNAME=admin
+export AFTERGLOW_TEST_ADMIN_PASSWORD=secret
+export AFTERGLOW_TEST_ADMIN_PROJECT=admin
+export AFTERGLOW_TEST_ADMIN_DOMAIN=Default
 
-export UNION_TEST_USER_USERNAME=testuser
-export UNION_TEST_USER_PASSWORD=secret
-export UNION_TEST_USER_PROJECT=test-project
-export UNION_TEST_USER_DOMAIN=Default
+export AFTERGLOW_TEST_USER_USERNAME=testuser
+export AFTERGLOW_TEST_USER_PASSWORD=secret
+export AFTERGLOW_TEST_USER_PROJECT=test-project
+export AFTERGLOW_TEST_USER_DOMAIN=Default
 ```
 
 ### 우선순위
@@ -122,7 +122,7 @@ AFTERGLOW_ALLOW_INSECURE=1 uv run pytest tests/ --ignore=tests/integration -v -k
 GitLab CI `.gitlab-ci.yml` 참고:
 
 - `test-backend` (자동 실행): 단위 테스트 + Redis service container
-- `integration-backend` (manual trigger): 통합 테스트, `UNION_TEST_*` CI/CD variables 필요
+- `integration-backend` (manual trigger): 통합 테스트, `AFTERGLOW_TEST_*` CI/CD variables 필요
 
 ---
 

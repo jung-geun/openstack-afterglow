@@ -72,7 +72,7 @@ def _resolve_names(servers: list, conn) -> list[dict]:
 
 @router.get("", response_model=list[InstanceInfo])
 async def list_instances(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         return await cached_call(
             f"afterglow:nova:{pid}:instances",
@@ -90,7 +90,7 @@ async def get_instance(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         return await cached_call(
             f"afterglow:nova:{pid}:instance:{instance_id}",
@@ -418,7 +418,7 @@ async def delete_instance(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         server = await asyncio.to_thread(nova.get_server, conn, instance_id)
     except Exception:
@@ -455,7 +455,7 @@ async def start_instance(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         await asyncio.to_thread(nova.start_server, conn, instance_id)
         await invalidate(f"afterglow:nova:{pid}:instance:{instance_id}")
@@ -469,7 +469,7 @@ async def stop_instance(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         await asyncio.to_thread(nova.stop_server, conn, instance_id)
         await invalidate(f"afterglow:nova:{pid}:instance:{instance_id}")
@@ -483,7 +483,7 @@ async def reboot_instance(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         await asyncio.to_thread(nova.reboot_server, conn, instance_id)
         await invalidate(f"afterglow:nova:{pid}:instance:{instance_id}")
@@ -497,7 +497,7 @@ async def shelve_instance(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         await asyncio.to_thread(nova.shelve_server, conn, instance_id)
         await invalidate(f"afterglow:nova:{pid}:instance:{instance_id}")
@@ -511,7 +511,7 @@ async def unshelve_instance(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         await asyncio.to_thread(nova.unshelve_server, conn, instance_id)
         await invalidate(f"afterglow:nova:{pid}:instance:{instance_id}")
@@ -550,7 +550,7 @@ async def list_interfaces(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         return await cached_call(
             f"afterglow:neutron:{pid}:ports:{instance_id}",
@@ -566,7 +566,7 @@ async def list_instance_volumes(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
 
     def _fetch():
         attachments = nova.list_volume_attachments(conn, instance_id)
@@ -592,7 +592,7 @@ async def attach_volume_to_instance(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     volume_id = body.volume_id
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         result = await asyncio.to_thread(nova.attach_volume, conn, instance_id, volume_id)
         await invalidate(f"afterglow:cinder:{pid}:vol_attach:{instance_id}")
@@ -607,7 +607,7 @@ async def detach_volume_from_instance(
     volume_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         await asyncio.to_thread(nova.detach_volume, conn, instance_id, volume_id)
         await invalidate(f"afterglow:cinder:{pid}:vol_attach:{instance_id}")
@@ -620,7 +620,7 @@ async def list_instance_security_groups(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
 
     def _fetch():
         ports = neutron.list_instance_ports(conn, instance_id)
@@ -638,7 +638,7 @@ async def get_instance_owner(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
 
     def _fetch():
         server = nova.get_server(conn, instance_id)
@@ -666,7 +666,7 @@ async def attach_interface(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     net_id = body.net_id
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         result = await asyncio.to_thread(nova.attach_interface, conn, instance_id, net_id)
         await invalidate(f"afterglow:neutron:{pid}:ports:{instance_id}")
@@ -681,7 +681,7 @@ async def detach_interface(
     port_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         await asyncio.to_thread(nova.detach_interface, conn, instance_id, port_id)
         await invalidate(f"afterglow:neutron:{pid}:ports:{instance_id}")
@@ -697,7 +697,7 @@ async def update_port_security_groups(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     sg_ids = body.security_group_ids
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         result = await asyncio.to_thread(neutron.update_port_security_groups, conn, port_id, sg_ids)
         await invalidate(f"afterglow:neutron:{pid}:sgs:{instance_id}")

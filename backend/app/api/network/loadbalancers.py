@@ -61,7 +61,7 @@ def _handle(fn, error_msg: str):
 async def list_load_balancers(
     conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         return await cached_call(
             f"afterglow:octavia:{pid}:lbs",
@@ -78,7 +78,7 @@ async def create_load_balancer(
     req: CreateLbRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     try:
         result = octavia.create_load_balancer(conn, req.name, req.vip_subnet_id, req.description)
         await invalidate(f"afterglow:octavia:{pid}:lbs")
@@ -99,7 +99,7 @@ async def get_lb_status_tree(lb_id: str, conn: openstack.connection.Connection =
 
 @router.delete("/{lb_id}", status_code=204)
 async def delete_load_balancer(lb_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
-    pid = conn._union_project_id
+    pid = conn._afterglow_project_id
     _handle(lambda: octavia.delete_load_balancer(conn, lb_id), "로드밸런서 삭제 실패")
     await invalidate(f"afterglow:octavia:{pid}:lbs")
 

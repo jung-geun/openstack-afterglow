@@ -125,7 +125,7 @@ async def get_os_conn(
     x_project_id: str | None = Header(None),
 ) -> AsyncGenerator[openstack.connection.Connection, None]:
     """openstacksdk Connection 객체를 반환하는 Depends 함수.
-    conn._union_token, conn._union_project_id 에 원본 크리덴셜을 저장해
+    conn._afterglow_token, conn._afterglow_project_id 에 원본 크리덴셜을 저장해
     Manila 등 openstacksdk 외부 클라이언트에서 그대로 사용할 수 있도록 한다.
     요청 완료 후 Connection을 닫아 리소스 누수를 방지한다.
     """
@@ -139,9 +139,9 @@ async def get_os_conn(
         project_id = token_info["project_id"]
         conn = keystone.get_openstack_connection(scoped_token, project_id)
         # 프로젝트에 rescope된 토큰을 저장 (Manila 등 외부 클라이언트에서 사용)
-        conn._union_token = scoped_token
-        conn._union_project_id = project_id
-        conn._union_user_id = token_info.get("user_id", "")
+        conn._afterglow_token = scoped_token
+        conn._afterglow_project_id = project_id
+        conn._afterglow_user_id = token_info.get("user_id", "")
     except HTTPException:
         raise
     except Exception:

@@ -138,9 +138,9 @@ async def get_user_dashboard_summary(
     refresh: bool = Query(False),
 ):
     """사용자가 소속된 모든 프로젝트의 인스턴스/볼륨 통합 조회."""
-    token = conn._union_token
-    current_project_id = conn._union_project_id
-    user_id = conn._union_user_id
+    token = conn._afterglow_token
+    current_project_id = conn._afterglow_project_id
+    user_id = conn._afterglow_user_id
 
     try:
         projects = await asyncio.to_thread(keystone.list_projects, token)
