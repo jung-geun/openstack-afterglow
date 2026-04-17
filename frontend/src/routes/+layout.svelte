@@ -28,22 +28,27 @@
 		}
 	});
 
-	// localStorage에서 복원된 토큰의 유효성을 서버에서 검증
-	onMount(() => {
-		loadSiteConfig();
+	// 토큰이 설정되면 (로그인 직후 포함) 서버에서 권한 검증
+	let lastVerifiedToken: string | null = null;
+	$effect(() => {
+		const token = $auth.token;
+		const projectId = $auth.projectId;
+		if (!token || token === lastVerifiedToken) return;
+		lastVerifiedToken = token;
 		(async () => {
-			if ($auth.token) {
-				try {
-					const me = await api.get<{ user_id: string; username: string; project_id: string; project_name: string; roles: string[]; is_system_admin: boolean }>(
-						'/api/auth/me', $auth.token, $auth.projectId ?? undefined,
-					);
-					auth.update((s) => ({ ...s, isSystemAdmin: me.is_system_admin === true, roles: me.roles ?? s.roles }));
-				} catch {
-					clearAuth();
-					return;
-				}
+			try {
+				const me = await api.get<{ user_id: string; username: string; project_id: string; project_name: string; roles: string[]; is_system_admin: boolean }>(
+					'/api/auth/me', token, projectId ?? undefined,
+				);
+				auth.update((s) => ({ ...s, isSystemAdmin: me.is_system_admin === true, roles: me.roles ?? s.roles }));
+			} catch {
+				clearAuth();
 			}
 		})();
+	});
+
+	onMount(() => {
+		loadSiteConfig();
 
 		// 세션 타이머: 1분마다 남은 시간 체크
 		const interval = setInterval(async () => {
@@ -125,7 +130,7 @@
 	{/if}
 	<nav class="fixed top-0 left-0 right-0 z-50 bg-gray-900 border-b border-gray-700 h-14 flex items-center px-3 md:px-6 gap-3 md:gap-6">
 		<a href="/dashboard" class="flex items-center gap-2 text-white font-bold text-base md:text-lg tracking-tight">
-			<img src={$siteConfig.logo_path} alt={$siteConfig.site_name} class="h-7 w-auto" />
+			<img src={$resolvedTheme === 'light' ? $siteConfig.logo_light_path : $siteConfig.logo_dark_path} alt={$siteConfig.site_name} class="h-7 w-auto" />
 			{$siteConfig.site_name}
 		</a>
 		<!-- 햄버거 버튼 (모바일만) -->

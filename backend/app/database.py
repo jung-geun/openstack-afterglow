@@ -64,6 +64,14 @@ async def create_tables() -> None:
             except Exception:
                 pass  # 이미 존재하면 무시
 
+        # OCCM 활성화 플래그 추가 (없는 경우에만)
+        try:
+            await conn.exec_driver_sql(
+                "ALTER TABLE k3s_clusters ADD COLUMN occm_enabled BOOLEAN NOT NULL DEFAULT FALSE"
+            )
+        except Exception:
+            pass  # 이미 존재하면 무시
+
     _logger.info("데이터베이스 테이블 생성/확인 완료")
 
 

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { fly, fade } from 'svelte/transition';
 	import { api, ApiError } from '$lib/api/client';
 
 	interface QuotaItem {
@@ -112,6 +113,7 @@
 <!-- 오버레이 -->
 <div
 	class="fixed inset-0 bg-black/40 z-40"
+	transition:fade={{ duration: 200 }}
 	role="button"
 	tabindex="0"
 	aria-label="패널 닫기"
@@ -120,7 +122,8 @@
 ></div>
 
 <!-- 슬라이드 패널 -->
-<div class="fixed right-0 top-0 h-full w-[440px] bg-gray-950 border-l border-gray-800 z-50 flex flex-col shadow-2xl">
+<div class="fixed right-0 top-0 h-full w-[440px] bg-gray-950 border-l border-gray-800 z-50 flex flex-col shadow-2xl"
+	transition:fly={{ x: 440, duration: 300, opacity: 1 }}>
 	<!-- 헤더 -->
 	<div class="flex items-center justify-between px-5 py-4 border-b border-gray-800 flex-shrink-0">
 		<div>

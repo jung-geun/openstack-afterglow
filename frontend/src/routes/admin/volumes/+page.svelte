@@ -3,6 +3,7 @@
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import SlidePanel from '$lib/components/SlidePanel.svelte';
 	import TimeSeriesChart from '$lib/components/TimeSeriesChart.svelte';
 	import { formatNumber } from '$lib/utils/format';
 	import { projectNames } from '$lib/stores/projectNames';
@@ -408,17 +409,14 @@
 
 <!-- 볼륨 상세 패널 -->
 {#if selectedVolumeId}
-	<div class="fixed inset-0 z-40" role="dialog" aria-modal="true" onkeydown={(e) => e.key === 'Escape' && (selectedVolumeId = null)} tabindex="-1">
-		<button class="absolute inset-0 bg-black/50 cursor-default" onclick={() => { selectedVolumeId = null; }} aria-label="패널 닫기"></button>
-		<div class="absolute right-0 top-14 bottom-0 w-full md:w-[50vw] max-w-2xl bg-gray-950 border-l border-gray-700 overflow-y-auto shadow-2xl">
-			{#await import('$lib/components/AdminVolumeDetailPanel.svelte') then { default: Panel }}
-				<Panel volumeId={selectedVolumeId} onClose={() => { selectedVolumeId = null; }} onRefresh={() => load(markerStack[markerStack.length - 1])} token={token} projectId={projectId} />
-			{:catch}
-				<!-- Fallback: 기존 상세 페이지로 이동 -->
-				<div class="p-6">
-					<a href="/admin/volumes/{selectedVolumeId}" class="text-blue-400 hover:text-blue-300">상세 페이지에서 보기 →</a>
-				</div>
-			{/await}
-		</div>
-	</div>
+	<SlidePanel onClose={() => { selectedVolumeId = null; }} width="w-full md:w-[50vw] max-w-2xl">
+		{#await import('$lib/components/AdminVolumeDetailPanel.svelte') then { default: Panel }}
+			<Panel volumeId={selectedVolumeId} onClose={() => { selectedVolumeId = null; }} onRefresh={() => load(markerStack[markerStack.length - 1])} token={token} projectId={projectId} />
+		{:catch}
+			<!-- Fallback: 기존 상세 페이지로 이동 -->
+			<div class="p-6">
+				<a href="/admin/volumes/{selectedVolumeId}" class="text-blue-400 hover:text-blue-300">상세 페이지에서 보기 →</a>
+			</div>
+		{/await}
+	</SlidePanel>
 {/if}

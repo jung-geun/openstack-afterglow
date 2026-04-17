@@ -66,6 +66,7 @@
 				{ label: '보안 그룹', href: '/dashboard/network/security-groups', service: null },
 				{ label: '로드밸런서', href: '/dashboard/network/loadbalancers', service: null },
 				{ label: 'Floating IP', href: '/dashboard/network/floating-ips', service: null },
+				{ label: '포트', href: '/dashboard/network/ports', service: null },
 			],
 		},
 	]);
@@ -112,7 +113,7 @@
 	></button>
 {/if}
 
-<aside class="fixed top-14 left-0 bottom-0 z-30 w-60 bg-gray-900 border-r border-gray-800 flex flex-col overflow-y-auto transition-transform duration-200 ease-in-out {$sidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:static md:translate-x-0 md:shrink-0 md:transition-none">
+<aside class="fixed top-14 left-0 bottom-0 z-30 w-60 bg-gray-900 border-r border-gray-800 flex flex-col overflow-y-auto transition-transform duration-200 ease-in-out {$sidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:sticky md:top-14 md:h-[calc(100vh-3.5rem)] md:translate-x-0 md:shrink-0 md:transition-none">
 	<!-- VM 생성 버튼 -->
 	<div class="p-4">
 		<a

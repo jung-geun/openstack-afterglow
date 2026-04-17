@@ -57,6 +57,7 @@ def _cluster_to_info(c: dict) -> K3sClusterInfo:
         deleted_at=c.get("deleted_at") or None,
         deleted_by_user_id=c.get("deleted_by_user_id") or None,
         deleted_reason=c.get("deleted_reason") or None,
+        occm_enabled=bool(c.get("occm_enabled", False)),
     )
 
 
@@ -87,7 +88,11 @@ async def download_kubeconfig(cluster_id: str, token_info: dict = Depends(get_to
     if not cluster:
         raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
 
-    kubeconfig = await k3s_cluster.get_kubeconfig(project_id, cluster_id)
+    try:
+        kubeconfig = await k3s_cluster.get_kubeconfig(project_id, cluster_id)
+    except Exception as e:
+        _logger.error("kubeconfig 복호화 실패: %s", e)
+        raise HTTPException(status_code=500, detail="kubeconfig 복호화에 실패했습니다. 관리자에게 문의하세요.")
     if not kubeconfig:
         raise HTTPException(
             status_code=404, detail="kubeconfig가 아직 준비되지 않았습니다. 클러스터가 초기화 중입니다."
@@ -200,6 +205,22 @@ async def create_k3s_cluster_async(
                     port_range_max=51820,
                     remote_group_id=sg_id,
                 ),
+                # HTTP (Traefik)
+                dict(
+                    direction="ingress",
+                    protocol="tcp",
+                    port_range_min=80,
+                    port_range_max=80,
+                    remote_ip_prefix="0.0.0.0/0",
+                ),
+                # HTTPS (Traefik)
+                dict(
+                    direction="ingress",
+                    protocol="tcp",
+                    port_range_min=443,
+                    port_range_max=443,
+                    remote_ip_prefix="0.0.0.0/0",
+                ),
                 # NodePort
                 dict(
                     direction="ingress",
@@ -238,11 +259,22 @@ async def create_k3s_cluster_async(
                     pass
             callback_token = await k3s_cluster.create_callback_token(project_id, cluster_id)
             callback_url = s.k3s_callback_base_url.rstrip("/")
+
+            # OCCM (OpenStack Cloud Controller Manager) 설정
+            from app.services import k3s_occm
+
+            occm_active = k3s_occm.should_deploy_occm(s)
+            cloud_conf = k3s_occm.generate_cloud_conf(project_id, s) if occm_active else None
+            occm_manifests = k3s_occm.generate_occm_manifests(req.name, s) if occm_active else None
+
             userdata = k3s_cloudinit.generate_server_userdata(
                 cluster_name=req.name,
                 k3s_version=k3s_version,
                 callback_url=callback_url,
                 callback_token=callback_token,
+                occm_enabled=occm_active,
+                cloud_conf=cloud_conf,
+                occm_manifests=occm_manifests,
             )
 
             # --- Step 4: 서버 VM 생성 ---
@@ -295,6 +327,7 @@ async def create_k3s_cluster_async(
                     "key_name": req.key_name or "",
                     "ssh_public_key": ssh_public_key,
                     "k3s_version": k3s_version,
+                    "occm_enabled": occm_active,
                     "created_by_user_id": _creator_user_id or "",
                     "created_by_username": _creator_username or "",
                     "created_at": now,

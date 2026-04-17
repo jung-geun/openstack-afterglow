@@ -1,0 +1,36 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: afterglow-prod
+  namespace: argocd
+  annotations:
+    # ArgoCD Image Updater: :latest 태그의 digest 변경을 감지하여 자동 재배포
+    argocd-image-updater.argoproj.io/image-list: |
+      backend=ghcr.io/jung-geun/afterglow-api:latest,frontend=ghcr.io/jung-geun/afterglow:latest
+    argocd-image-updater.argoproj.io/backend.update-strategy: digest
+    argocd-image-updater.argoproj.io/frontend.update-strategy: digest
+    argocd-image-updater.argoproj.io/write-back-method: git
+    argocd-image-updater.argoproj.io/git-branch: main
+spec:
+  project: afterglow
+  source:
+    repoURL: "https://github.com/jung-geun/openstack-afterglow.git"
+    targetRevision: main
+    path: deploy/k8s/overlays/prod
+  destination:
+    server: "https://kubernetes.default.svc"
+    namespace: afterglow
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - PruneLast=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

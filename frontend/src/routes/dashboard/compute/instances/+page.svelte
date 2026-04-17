@@ -6,6 +6,7 @@
   import type { Instance } from '$lib/types/resources';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import InstanceDetailPanel from '$lib/components/InstanceDetailPanel.svelte';
+  import SlidePanel from '$lib/components/SlidePanel.svelte';
   import RefreshButton from '$lib/components/RefreshButton.svelte';
   import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
 
@@ -228,10 +229,7 @@
 </div>
 
 {#if selectedInstanceId}
-  <div class="fixed inset-0 z-40" role="dialog" aria-modal="true" onkeydown={(e) => e.key === 'Escape' && closeInstancePanel()} tabindex="-1">
-    <button class="absolute inset-0 bg-black/50 cursor-default" onclick={closeInstancePanel} aria-label="패널 닫기"></button>
-    <div class="absolute right-0 top-14 bottom-0 w-full md:w-[75vw] max-w-5xl bg-gray-950 border-l border-gray-700 overflow-y-auto shadow-2xl">
-      <InstanceDetailPanel instanceId={selectedInstanceId} onClose={closeInstancePanel} />
-    </div>
-  </div>
+  <SlidePanel onClose={closeInstancePanel}>
+    <InstanceDetailPanel instanceId={selectedInstanceId} onClose={closeInstancePanel} />
+  </SlidePanel>
 {/if}

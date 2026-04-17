@@ -6,6 +6,7 @@
   import RefreshButton from '$lib/components/RefreshButton.svelte';
   import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
   import ImageDetailPanel from '$lib/components/ImageDetailPanel.svelte';
+  import SlidePanel from '$lib/components/SlidePanel.svelte';
 
   interface ImageInfo {
     id: string;
@@ -364,20 +365,11 @@
 </div>
 
 {#if selectedImageId}
-  <div
-    class="fixed inset-0 z-40"
-    role="dialog"
-    aria-modal="true"
-    tabindex="-1"
-    onkeydown={(e) => e.key === 'Escape' && closeImagePanel()}
-  >
-    <button class="absolute inset-0 bg-black/50 cursor-default" onclick={closeImagePanel} aria-label="패널 닫기"></button>
-    <div class="absolute right-0 top-14 bottom-0 w-full md:w-[60vw] max-w-2xl bg-gray-950 border-l border-gray-700 overflow-y-auto shadow-2xl">
-      <ImageDetailPanel
-        imageId={selectedImageId}
-        onClose={closeImagePanel}
-        onDelete={handleImageDeleted}
-      />
-    </div>
-  </div>
+  <SlidePanel onClose={closeImagePanel} width="w-full md:w-[60vw] max-w-2xl">
+    <ImageDetailPanel
+      imageId={selectedImageId}
+      onClose={closeImagePanel}
+      onDelete={handleImageDeleted}
+    />
+  </SlidePanel>
 {/if}

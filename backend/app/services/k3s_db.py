@@ -49,6 +49,7 @@ def _cluster_to_dict(cluster: K3sCluster) -> dict:
         "deleted_at": cluster.deleted_at.isoformat() if cluster.deleted_at else None,
         "deleted_by_user_id": cluster.deleted_by_user_id,
         "deleted_reason": cluster.deleted_reason,
+        "occm_enabled": cluster.occm_enabled,
     }
 
 
@@ -83,6 +84,7 @@ async def create_cluster_record(project_id: str, cluster_id: str, data: dict) ->
             key_name=data.get("key_name") or None,
             ssh_public_key=data.get("ssh_public_key") or None,
             agent_count=int(data.get("agent_count") or 0),
+            occm_enabled=bool(data.get("occm_enabled", False)),
             created_by_user_id=data.get("created_by_user_id") or None,
             created_by_username=data.get("created_by_username") or None,
         )

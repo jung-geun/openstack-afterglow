@@ -5,6 +5,8 @@ interface SiteConfig {
 	site_name: string;
 	site_description: string;
 	logo_path: string;
+	logo_dark_path: string;
+	logo_light_path: string;
 	favicon_path: string;
 	services: {
 		magnum: boolean;
@@ -18,6 +20,8 @@ const DEFAULTS: SiteConfig = {
 	site_name: 'Afterglow',
 	site_description: 'OpenStack VM + OverlayFS 배포 플랫폼',
 	logo_path: '/logo.png',
+	logo_dark_path: '/logo-dark.png',
+	logo_light_path: '/logo-white.png',
 	favicon_path: '/favicon.ico',
 	services: { magnum: false, manila: false, zun: false, k3s: false },
 };

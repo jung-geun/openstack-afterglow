@@ -1,0 +1,28 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: afterglow
+  namespace: argocd
+spec:
+  description: "Afterglow - OpenStack Management Platform"
+  sourceRepos:
+    - "https://github.com/jung-geun/openstack-afterglow.git"
+  destinations:
+    - namespace: afterglow
+      server: "https://kubernetes.default.svc"
+    - namespace: afterglow-dev
+      server: "https://kubernetes.default.svc"
+    - namespace: argocd
+      server: "https://kubernetes.default.svc"
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+  namespaceResourceWhitelist:
+    - group: ""
+      kind: "*"
+    - group: "apps"
+      kind: "*"
+    - group: "networking.k8s.io"
+      kind: "*"
+    - group: "monitoring.coreos.com"
+      kind: "*"

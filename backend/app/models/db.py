@@ -56,6 +56,7 @@ class K3sCluster(Base):
 
     # 설정
     agent_count: Mapped[int] = mapped_column(INT, nullable=False, default=0)
+    occm_enabled: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False)
 
     # 타임스탬프
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)

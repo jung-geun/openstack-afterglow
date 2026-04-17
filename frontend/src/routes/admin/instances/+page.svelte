@@ -5,6 +5,7 @@
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import TimeSeriesChart from '$lib/components/TimeSeriesChart.svelte';
 	import InstanceDetailPanel from '$lib/components/InstanceDetailPanel.svelte';
+	import SlidePanel from '$lib/components/SlidePanel.svelte';
 	import { formatNumber } from '$lib/utils/format';
 	import { projectNames } from '$lib/stores/projectNames';
 
@@ -61,10 +62,23 @@
 	// 필터
 	let hostFilter = $state('');
 	let projectFilter = $state('');
+	let projectSearchText = $state('');
+	let projectDropdownOpen = $state(false);
 	let availableHosts = $state<string[]>([]);
+
+	let projectSuggestions = $derived(
+		Array.from($projectNames.entries())
+			.filter(([id, name]) =>
+				projectSearchText.length === 0 ||
+				name.toLowerCase().includes(projectSearchText.toLowerCase()) ||
+				id.toLowerCase().includes(projectSearchText.toLowerCase())
+			)
+			.slice(0, 10)
+	);
+
 	let filteredInstances = $derived(
 		allInstances.filter(i =>
-			(!projectFilter || (i.project_id ?? '').toLowerCase().includes(projectFilter.toLowerCase()))
+			(!projectFilter || i.project_id === projectFilter)
 		)
 	);
 
@@ -126,11 +140,20 @@
 		selectedProjectId = null;
 	}
 
+	function handleDocumentClick(e: MouseEvent) {
+		const target = e.target as HTMLElement;
+		if (!target.closest('.project-filter-wrapper')) {
+			projectDropdownOpen = false;
+		}
+	}
+
 	onMount(() => {
 		load();
 		loadTimeseries(tsRange);
 		loadHosts();
 		projectNames.load(token, projectId);
+		document.addEventListener('click', handleDocumentClick);
+		return () => document.removeEventListener('click', handleDocumentClick);
 	});
 </script>
 
@@ -159,12 +182,38 @@
 				<option value={h}>{h}</option>
 			{/each}
 		</select>
-		<input
-			type="text"
-			placeholder="프로젝트 ID 필터"
-			bind:value={projectFilter}
-			class="bg-gray-800 border border-gray-700 text-sm text-gray-300 rounded-lg px-3 py-1.5 w-52 focus:outline-none focus:border-blue-500"
-		/>
+		<div class="relative project-filter-wrapper">
+		<div class="flex items-center bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 w-52 focus-within:border-blue-500">
+			<input
+				type="text"
+				placeholder="프로젝트 검색..."
+				bind:value={projectSearchText}
+				onfocus={() => (projectDropdownOpen = true)}
+				oninput={() => { projectDropdownOpen = true; if (!projectSearchText) { projectFilter = ''; } }}
+				class="bg-transparent text-sm text-gray-300 flex-1 outline-none min-w-0"
+			/>
+			{#if projectFilter}
+				<button onclick={() => { projectFilter = ''; projectSearchText = ''; projectDropdownOpen = false; }} class="text-gray-500 hover:text-white ml-1 flex-shrink-0">✕</button>
+			{/if}
+		</div>
+		{#if projectDropdownOpen && projectSuggestions.length > 0}
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<div
+				class="absolute top-full mt-1 left-0 w-64 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-20 overflow-hidden"
+				onmouseleave={() => {}}
+			>
+				{#each projectSuggestions as [id, name]}
+					<button
+						class="w-full text-left px-3 py-2 text-xs hover:bg-gray-800 transition-colors {projectFilter === id ? 'bg-blue-900/30 text-blue-400' : 'text-gray-300'}"
+						onclick={() => { projectFilter = id; projectSearchText = name; projectDropdownOpen = false; }}
+					>
+						<div class="font-medium truncate">{name}</div>
+						<div class="text-gray-500 font-mono">{id.slice(0, 12)}...</div>
+					</button>
+				{/each}
+			</div>
+		{/if}
+	</div>
 	</div>
 
 	<!-- 시계열 차트 -->
@@ -270,10 +319,7 @@
 </div>
 
 {#if selectedInstanceId}
-	<div class="fixed inset-0 z-40" role="dialog" aria-modal="true" onkeydown={(e) => e.key === 'Escape' && closeDetail()} tabindex="-1">
-		<button class="absolute inset-0 bg-black/50 cursor-default" onclick={closeDetail} aria-label="패널 닫기"></button>
-		<div class="absolute right-0 top-14 bottom-0 w-full md:w-[75vw] max-w-5xl bg-gray-950 border-l border-gray-700 overflow-y-auto shadow-2xl">
-			<InstanceDetailPanel instanceId={selectedInstanceId} adminProjectId={selectedProjectId} onClose={closeDetail} />
-		</div>
-	</div>
+	<SlidePanel onClose={closeDetail}>
+		<InstanceDetailPanel instanceId={selectedInstanceId} adminProjectId={selectedProjectId} onClose={closeDetail} />
+	</SlidePanel>
 {/if}

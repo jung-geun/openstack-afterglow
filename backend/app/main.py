@@ -24,7 +24,7 @@ from app.api.identity.admin_images import router as admin_images_router
 from app.api.identity.admin_notion import router as admin_notion_router
 from app.api.identity.admin_services import router as admin_services_router
 from app.api.identity.profile import router as profile_router
-from app.api.k3s import k3s_callback_router, k3s_clusters_router
+from app.api.k3s import k3s_callback_router, k3s_clusters_router, k3s_health_router
 from app.api.network import loadbalancers_router, networks_router, routers_router, security_groups_router
 from app.api.storage import (
     file_storage_router,
@@ -267,6 +267,7 @@ if _svc_cfg.service_zun_enabled:
     app.include_router(containers_router, prefix="/api/containers", tags=["containers"])
 if _svc_cfg.service_k3s_enabled:
     app.include_router(k3s_clusters_router, prefix="/api/k3s/clusters", tags=["k3s"])
+    app.include_router(k3s_health_router, prefix="/api/k3s/clusters", tags=["k3s-health"])
     app.include_router(k3s_callback_router, prefix="/api/k3s", tags=["k3s-callback"])
 # Common
 app.include_router(dashboard_router, prefix="/api/dashboard", tags=["dashboard"])

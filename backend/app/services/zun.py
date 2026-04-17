@@ -126,12 +126,23 @@ def create_container(
 
 
 def delete_container(conn: openstack.connection.Connection, container_id: str) -> None:
+    import time
+
     endpoint = _get_zun_endpoint(conn)
     # Running 상태면 먼저 stop 후 삭제 (force 파라미터는 API v1.7+에서만 지원)
     try:
         info = get_container(conn, container_id)
         if info.status and info.status.upper() == "RUNNING":
             stop_container(conn, container_id)
+            # 컨테이너가 실제로 멈출 때까지 대기 (최대 30초)
+            for _ in range(15):
+                time.sleep(2)
+                try:
+                    info = get_container(conn, container_id)
+                    if info.status and info.status.upper() != "RUNNING":
+                        break
+                except Exception:
+                    break
     except Exception:
         pass  # 상태 조회 실패해도 삭제 시도
     conn.session.delete(f"{endpoint}/v1/containers/{container_id}")

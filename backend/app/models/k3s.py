@@ -56,6 +56,10 @@ class K3sClusterInfo(BaseModel):
     deleted_at: str | None = None
     deleted_by_user_id: str | None = None
     deleted_reason: str | None = None
+    occm_enabled: bool = False
+    health_status: str | None = (
+        None  # 최신 헬스체크 결과: "HEALTHY" | "DEGRADED" | "UNHEALTHY" | "UNREACHABLE" | "UNKNOWN"
+    )
 
 
 class K3sClusterInfoDeleted(K3sClusterInfo):
@@ -77,3 +81,4 @@ class K3sCallbackRequest(BaseModel):
     node_token: str | None = None
     server_ip: str | None = None
     error: str | None = None
+    occm_status: str | None = None  # "deployed" | "failed" | None
