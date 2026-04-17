@@ -7,6 +7,27 @@ packages:
   - jq
 
 write_files:
+{% if cloud_conf %}
+  - path: /etc/kubernetes/cloud.conf
+    permissions: "0600"
+    content: |
+{{ cloud_conf | indent(6, first=True) }}
+
+{% endif %}
+{% for plugin in plugins %}
+  - path: /opt/k3s/{{ plugin.name }}-manifests.yaml
+    permissions: "0644"
+    content: |
+{{ plugin.content | indent(6, first=True) }}
+
+{% endfor %}
+{% for wf in extra_write_files %}
+  - path: {{ wf.path }}
+    permissions: "{{ wf.permissions }}"
+    content: |
+{{ wf.content | indent(6, first=True) }}
+
+{% endfor %}
   - path: /opt/k3s/callback.sh
     permissions: "0750"
     content: |
@@ -41,6 +62,28 @@ write_files:
         sleep 5
       done
 
+{% if cloud_conf %}
+      # cloud-config secret 생성 (플러그인 공통 1회)
+      log "Creating cloud-config secret..."
+      kubectl --kubeconfig=/etc/rancher/k3s/k3s.yaml \
+        create secret -n kube-system generic cloud-config \
+        --from-file=cloud.conf=/etc/kubernetes/cloud.conf 2>&1 | tee -a /var/log/k3s-callback.log || true
+
+{% endif %}
+{% for plugin in plugins %}
+      # 플러그인 배포: {{ plugin.name }}
+      PLUGIN_{{ plugin.name | upper }}_STATUS="not_deployed"
+      log "Deploying plugin: {{ plugin.name }}..."
+      if kubectl --kubeconfig=/etc/rancher/k3s/k3s.yaml \
+        apply -f /opt/k3s/{{ plugin.name }}-manifests.yaml 2>&1 | tee -a /var/log/k3s-callback.log; then
+        PLUGIN_{{ plugin.name | upper }}_STATUS="deployed"
+        log "Plugin {{ plugin.name }} deployed successfully"
+      else
+        PLUGIN_{{ plugin.name | upper }}_STATUS="failed"
+        log "ERROR: Plugin {{ plugin.name }} deployment failed"
+      fi
+
+{% endfor %}
       SERVER_IP=$(hostname -I | awk '{print $1}')
       KUBECONFIG_RAW=$(cat /etc/rancher/k3s/k3s.yaml)
       # 127.0.0.1 → 실제 서버 IP로 치환
@@ -48,12 +91,23 @@ write_files:
       NODE_TOKEN=$(cat /var/lib/rancher/k3s/server/node-token 2>/dev/null || echo "")
 
       log "Sending callback to ${CALLBACK_URL}"
+      PLUGIN_STATUS_JSON=$(jq -n \
+{% for plugin in plugins %}
+        --arg {{ plugin.name }}   "${PLUGIN_{{ plugin.name | upper }}_STATUS}" \
+{% endfor %}
+{% if plugins %}
+        '{ {% for plugin in plugins %}{{ '"' ~ plugin.name ~ '"' }}: ${{ plugin.name }}{% if not loop.last %}, {% endif %}{% endfor %} }')
+{% else %}
+        '{}')
+{% endif %}
+
       PAYLOAD=$(jq -n \
         --arg token   "${CALLBACK_TOKEN}" \
         --arg kc      "${KUBECONFIG_FIXED}" \
         --arg nt      "${NODE_TOKEN}" \
         --arg sip     "${SERVER_IP}" \
-        '{token: $token, success: true, kubeconfig: $kc, node_token: $nt, server_ip: $sip}')
+        --argjson ps  "${PLUGIN_STATUS_JSON}" \
+        '{token: $token, success: true, kubeconfig: $kc, node_token: $nt, server_ip: $sip, plugin_status: $ps}')
 
       log "Payload size: $(echo -n "${PAYLOAD}" | wc -c) bytes"
       HTTP_CODE=$(curl -s -o /tmp/callback_response.txt -w "%{http_code}" \
@@ -82,6 +136,14 @@ runcmd:
       INSTALL_K3S_VERSION="{{ k3s_version }}" \
       sh -s - server \
         --tls-san "${SERVER_IP}" \
-        --write-kubeconfig-mode 644
+        --write-kubeconfig-mode 644 \
+{% if needs_external_cloud_provider %}
+        --disable-cloud-controller \
+        --kubelet-arg="cloud-provider=external" \
+{% endif %}
+{% for arg in extra_server_args %}
+        {{ arg }} \
+{% endfor %}
+        --node-name="{{ cluster_name }}-server"
   # 콜백 스크립트를 백그라운드 실행 (k3s 준비 대기 후 전송)
   - nohup /opt/k3s/callback.sh > /var/log/k3s-callback.log 2>&1 &

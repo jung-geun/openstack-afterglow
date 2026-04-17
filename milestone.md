@@ -432,12 +432,20 @@
 - [x] `backend/tests/test_k3s_kube.py` — **신규** 유닛 테스트 7건: 성공/404/500/연결오류/kubeconfig없음/다중노드/실패시계속진행
 - [x] `backend/tests/test_k3s_clusters.py` — K8s 노드 삭제 테스트 3건 추가: 클러스터 삭제 시 노드 정리, K8s 오류 시 VM 삭제 계속 진행
 
-### 8.10 Cloud Provider OpenStack 추가 플러그인 도입 계획
+### 8.10 Cloud Provider OpenStack 전체 플러그인 통합
 
-현재 OCCM(cloud controller manager)만 설치. 추가 도입 우선순위:
+플러그인 레지스트리 패턴 도입 — OCCM 포함 6개 플러그인 전체 구현.
+`backend/app/services/k3s_plugins/` 패키지로 통합 관리.
 
-- [ ] **Cinder CSI** (최우선): K8s PVC → Cinder 볼륨 자동 프로비저닝. `backend/app/services/k3s_cinder_csi.py` + `templates/cinder_csi/manifests.yaml.j2`
-- [ ] **Manila CSI** (2순위): ReadWriteMany PVC → Manila NFS share. Union OverlayFS 라이브러리와 시너지
-- [ ] **Keystone Webhook** (중간): OpenStack 토큰으로 kubectl 인증 연동
-- [ ] **Octavia Ingress Controller** (낮음): k3s에 Traefik 내장이라 필요 시만
-- [ ] **Barbican KMS** (낮음): K8s Secret 암호화 at-rest
+- [x] **플러그인 프레임워크** (`k3s_plugins/` 패키지): Protocol 정의, 레지스트리 집계 함수, 통합 cloud-init 템플릿 (기존 4개 → 2개로 통합)
+- [x] **OCCM 이전**: `k3s_plugins/occm.py`로 로직 이전, `k3s_occm.py` 위임 래퍼로 유지 (하위호환)
+- [x] **Cinder CSI**: K8s PVC → Cinder 블록 스토리지 자동 프로비저닝. `k3s_plugins/cinder_csi.py` + `templates/k3s_plugins/cinder_csi/manifests.yaml.j2`
+- [x] **Manila CSI**: ReadWriteMany PVC → Manila NFS share. NFS CSI 드라이버 포함 배포. Union OverlayFS 시너지
+- [x] **Octavia Ingress Controller**: K3s Traefik과 공존, `ingressClassName: openstack`으로 분리
+- [x] **Keystone Webhook Auth**: TLS self-signed 인증서 생성 + K3s API 서버 webhook 설정. `cryptography` 라이브러리 사용
+- [x] **Barbican KMS**: K8s Secret at-rest 암호화. `--encryption-provider-config` API 서버 인자 + Unix socket DaemonSet
+- [x] DB 마이그레이션: `plugins_enabled JSON` 컬럼 추가 (`004_k3s_plugins.sql`)
+- [x] 콜백 확장: `plugin_status: dict[str, str]` 필드로 플러그인별 배포 결과 보고
+- [x] 테스트: `test_k3s_plugins.py` 41개 (435 passed, 1 xfailed)
+
+config.toml 신규 섹션: `[k3s]` 하위 `cinder_csi_*`, `manila_csi_*`, `keystone_auth_*`, `octavia_ingress_*`, `barbican_kms_*`

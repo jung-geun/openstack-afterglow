@@ -87,6 +87,59 @@ callback_base_url = ""         # 서버 VM이 콜백할 백엔드 URL (예: http
 kubeconfig_encryption_key = "" # AES-256-GCM 키 — openssl rand -hex 32 로 생성
 boot_volume_size_gb = 30
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Cloud Provider OpenStack 플러그인 (cloud-provider-openstack, Magnum 제외)
+# 각 플러그인은 독립적으로 활성화 가능. OpenStack 인증 정보([openstack] 섹션)를 공유.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# OCCM (OpenStack Cloud Controller Manager)
+# 역할: K8s 노드 초기화, Service LoadBalancer(Octavia), 라우팅
+# 활성화 시: --disable-cloud-controller + --kubelet-arg=cloud-provider=external 자동 설정
+occm_enabled = false
+occm_image = "registry.k8s.io/provider-os/openstack-cloud-controller-manager:v1.35.0"
+occm_floating_network_id = ""  # Octavia LB에 할당할 Floating IP 네트워크 ID
+occm_public_network_name = ""  # 퍼블릭 네트워크 이름 (라우팅용)
+
+# Cinder CSI Plugin
+# 역할: PersistentVolumeClaim → Cinder 블록 스토리지 자동 프로비저닝
+# StorageClass "cinder" (기본값)가 생성됨. OCCM 없이도 독립 동작.
+cinder_csi_enabled = false
+cinder_csi_image = "registry.k8s.io/provider-os/cinder-csi-plugin:v1.31.0"
+cinder_csi_default_az = "nova" # 볼륨 생성 기본 AZ
+
+# Manila CSI Plugin
+# 역할: ReadWriteMany PVC → Manila NFS 공유 파일시스템 자동 프로비저닝
+# NFS CSI 드라이버가 의존성으로 함께 배포됨. StorageClass "manila-nfs" 생성.
+manila_csi_enabled = false
+manila_csi_image = "registry.k8s.io/provider-os/manila-csi-plugin:v1.31.0"
+manila_csi_nfs_image = "registry.k8s.io/sig-storage/nfsplugin:v4.9.0"
+manila_csi_share_protocol = "NFS"  # "NFS" 또는 "CEPHFS"
+
+# Keystone Webhook Auth
+# 역할: kubectl → Keystone 토큰으로 K8s 인증 연동 (별도 kubeconfig 불필요)
+# 활성화 시: self-signed TLS 인증서 자동 생성 + K3s API 서버 webhook 설정
+keystone_auth_enabled = false
+keystone_auth_image = "registry.k8s.io/provider-os/k8s-keystone-auth:v1.31.0"
+# keystone_auth_policy = ""  # JSON 정책 문자열 (빈값 = 인증만 활성화, 인가는 K8s RBAC 사용)
+
+# Octavia Ingress Controller
+# 역할: Ingress → Octavia 로드밸런서 (ingressClassName: openstack). K3s Traefik과 공존.
+# 주의: subnet_id는 LB가 배치될 서브넷 ID (필수)
+octavia_ingress_enabled = false
+octavia_ingress_image = "registry.k8s.io/provider-os/octavia-ingress-controller:v1.31.0"
+octavia_ingress_subnet_id = ""          # LB 배치 서브넷 ID (필수)
+octavia_ingress_floating_network_id = "" # HTTPS Ingress용 Floating IP 네트워크 ID (선택)
+
+# Barbican KMS Plugin
+# 역할: K8s Secret at-rest 암호화 (etcd 데이터를 Barbican KEK으로 봉인)
+# 사전 조건: Barbican에 AES-256 KEK를 먼저 생성하고 ID를 기입해야 함
+#   barbican secret store --name k8s-kek --payload-content-type application/octet-stream \
+#     --payload "$(openssl rand -base64 32)"
+barbican_kms_enabled = false
+barbican_kms_image = "registry.k8s.io/provider-os/barbican-kms-plugin:v1.31.0"
+barbican_kms_kek_id = "" # Barbican secret UUID (예: "12345678-...")
+
+
 [database]
 # k3s 클러스터 영속화용 MariaDB/MySQL 연결 URL (선택적)
 # 미설정 시 기존 Redis 방식으로 동작

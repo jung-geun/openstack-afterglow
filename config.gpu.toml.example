@@ -23,7 +23,7 @@ vendor_id = "10DE"
 device_id = "17C2"
 name = "GTX TITAN X"
 is_audio = false
-aliases = ["GTX_TITAN_X", "titan"]
+aliases = ["GTX_TITAN_X", "gtx_titan", "gtx_titan_x"]
 
 [[gpu.devices]]
 vendor_id = "10DE"
@@ -37,28 +37,28 @@ vendor_id = "10DE"
 device_id = "1B06"
 name = "GTX 1080 Ti"
 is_audio = false
-aliases = ["GTX1080Ti", "1080ti"]
+aliases = ["GTX1080Ti", "1080ti", "gtx_1080_ti"]
 
 [[gpu.devices]]
 vendor_id = "10DE"
 device_id = "1B80"
 name = "GTX 1080"
 is_audio = false
-aliases = ["GTX1080", "1080"]
+aliases = ["GTX1080", "1080", "gtx_1080"]
 
 [[gpu.devices]]
 vendor_id = "10DE"
 device_id = "1B81"
 name = "GTX 1070"
 is_audio = false
-aliases = ["GTX1070", "1070"]
+aliases = ["GTX1070", "1070", "gtx_1070"]
 
 [[gpu.devices]]
 vendor_id = "10DE"
 device_id = "1B00"
 name = "TITAN X"
 is_audio = false
-aliases = ["TITAN_X"]
+aliases = ["TITAN_X", "titan", "titan_x"]
 
 [[gpu.devices]]
 vendor_id = "10DE"

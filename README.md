@@ -41,8 +41,9 @@ Afterglow는 두 프로젝트의 장점을 취하고 단점을 보완합니다.
 ### k3s 클러스터 프로비저닝 (Magnum 대체)
 - OpenStack VM 위에 k3s 클러스터 원클릭 배포
 - 단일 노드 / 멀티 노드(Master + Worker) 구성
-- 클러스터 생명주기 관리 (생성 · 삭제 이력 보존)
+- 클러스터 생명주기 관리 (생성 · 삭제 이력 보존 · 스케일 인/아웃)
 - kubeconfig 다운로드
+- **Cloud Provider OpenStack 통합** — OCCM, Cinder CSI, Manila CSI, Keystone Auth, Octavia Ingress, Barbican KMS 플러그인 지원
 
 ### OverlayFS 라이브러리 레이어 (AI/ML 특화)
 - Manila NFS/CephFS share를 OverlayFS lower layer로 마운트

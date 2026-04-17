@@ -63,6 +63,8 @@ async def k3s_callback(request: Request, req: K3sCallbackRequest):
 
     if req.occm_status:
         _logger.info("k3s cluster %s OCCM status: %s", cluster_id, req.occm_status)
+    if req.plugin_status:
+        _logger.info("k3s cluster %s plugin status: %s", cluster_id, req.plugin_status)
 
     _logger.info("k3s cluster %s server ready, spawning agent VMs", cluster_id)
 
@@ -127,15 +129,20 @@ async def _provision_agents(
             vol = await asyncio.to_thread(
                 cinder.create_volume_from_image, conn, f"{agent_name}-boot", image_id, boot_volume_size
             )
-            # 에이전트 cloud-init 생성 (OCCM 활성 여부 반영)
-            is_occm = bool(cluster.get("occm_enabled"))
+            # 에이전트 cloud-init 생성 (활성 플러그인 인자 반영)
+            from app.services import k3s_plugins
+
+            _agent_args = k3s_plugins.aggregate_agent_args(s)
+            if not _agent_args and cluster.get("occm_enabled"):
+                # 레거시 클러스터 (plugins_enabled 없음): occm_enabled로 폴백
+                _agent_args = ["--kubelet-arg=cloud-provider=external"]
             userdata = k3s_cloudinit.generate_agent_userdata(
                 cluster_name=cluster_name,
                 k3s_version=k3s_version,
                 server_ip=server_ip,
                 node_token=node_token,
                 ssh_public_key=ssh_public_key,
-                occm_enabled=is_occm,
+                extra_agent_args=_agent_args,
             )
             # 에이전트 VM 생성 (admin conn이므로 key_name 대신 cloud-init으로 공개키 주입)
             vm = await asyncio.to_thread(

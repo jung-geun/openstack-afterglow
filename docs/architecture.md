@@ -196,3 +196,59 @@ VM 내부 파일시스템 뷰
 - **빠른 프로비저닝**: 라이브러리를 VM 내부에 설치하는 과정이 없습니다. cloud-init이 CephFS 마운트와 OverlayFS 설정만 수행합니다.
 - **격리**: 각 VM의 쓰기는 전용 Cinder 볼륨(upperdir)에만 기록되어 다른 VM에 영향을 주지 않습니다.
 - **데이터 보존**: VM을 삭제해도 upper 볼륨을 별도로 보존하면 사용자 작업 내용을 유지할 수 있습니다.
+
+---
+
+## 5. K3s 클러스터 프로비저닝
+
+Union은 OpenStack VM 위에 k3s를 배포하여 Kubernetes 클러스터를 제공합니다. Magnum 없이 Nova + cloud-init만으로 동작합니다.
+
+### 클러스터 생성 플로우
+
+```
+클라이언트 → POST /api/k3s/clusters (SSE)
+  → 보안그룹 생성
+  → 부트 볼륨 생성 (Cinder)
+  → 플러그인 레지스트리 집계 (cloud.conf + 매니페스트 + 서버 인자)
+  → 서버 VM 생성 (cloud-init: k3s 설치 + kubectl apply)
+  → 서버 VM이 /api/k3s/callback으로 kubeconfig + node_token 전송
+  → 에이전트 VM 생성 (cloud-init: k3s-agent join)
+  → 클러스터 ACTIVE
+```
+
+### Cloud Provider OpenStack 플러그인
+
+`backend/app/services/k3s_plugins/` 패키지가 플러그인 레지스트리를 관리합니다. 각 플러그인은 `config.toml [k3s]` 섹션에서 독립적으로 활성화됩니다.
+
+| 플러그인 | 설정 키 | 배포 리소스 | 용도 |
+|---------|--------|-----------|------|
+| **OCCM** | `occm_enabled` | DaemonSet + RBAC | 노드 초기화, Service LB (Octavia) |
+| **Cinder CSI** | `cinder_csi_enabled` | StatefulSet + DaemonSet + CSIDriver | PVC → Cinder 블록 스토리지 |
+| **Manila CSI** | `manila_csi_enabled` | StatefulSet + DaemonSet + NFS CSI | PVC → Manila NFS (ReadWriteMany) |
+| **Octavia Ingress** | `octavia_ingress_enabled` | StatefulSet + IngressClass | Ingress → Octavia LB |
+| **Keystone Auth** | `keystone_auth_enabled` | Deployment + Service (8443) | K8s 인증 → Keystone 토큰 |
+| **Barbican KMS** | `barbican_kms_enabled` | DaemonSet (컨트롤 플레인) | K8s Secret at-rest 암호화 |
+
+#### 플러그인 배포 메커니즘
+
+```
+레지스트리.aggregate_cloud_conf()  →  /etc/kubernetes/cloud.conf  (OCCM + Cinder 공유 Secret)
+레지스트리.aggregate_manifests()   →  /opt/k3s/{plugin}-manifests.yaml
+레지스트리.aggregate_server_args() →  K3s 설치 인자 (--kube-apiserver-arg 등)
+
+callback.sh 내 플러그인 배포 루프:
+  kubectl create secret ... cloud-config  # cloud.conf 있을 때 1회
+  for plugin in active_plugins:
+    kubectl apply -f /opt/k3s/{plugin}-manifests.yaml
+  → /api/k3s/callback에 plugin_status: {plugin: "deployed"|"failed"} 보고
+```
+
+#### K3s 노드 이름 규칙
+
+| VM 역할 | K8s 노드 이름 |
+|--------|-------------|
+| 서버 (control plane) | `{cluster_name}-server` |
+| 에이전트 #1 | `{cluster_name}-agent-1` |
+| 에이전트 #2 | `{cluster_name}-agent-2` |
+
+스케일 다운 또는 클러스터 삭제 시 `k3s_kube.delete_k8s_nodes()`로 VM 삭제 전에 K8s 노드 오브젝트를 먼저 제거하여 OCCM의 `failed to find object` 무한 재시도를 방지합니다.

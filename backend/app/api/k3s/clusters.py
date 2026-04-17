@@ -58,6 +58,7 @@ def _cluster_to_info(c: dict) -> K3sClusterInfo:
         deleted_by_user_id=c.get("deleted_by_user_id") or None,
         deleted_reason=c.get("deleted_reason") or None,
         occm_enabled=bool(c.get("occm_enabled", False)),
+        plugins_enabled=c.get("plugins_enabled") or {},
     )
 
 
@@ -260,21 +261,26 @@ async def create_k3s_cluster_async(
             callback_token = await k3s_cluster.create_callback_token(project_id, cluster_id)
             callback_url = s.k3s_callback_base_url.rstrip("/")
 
-            # OCCM (OpenStack Cloud Controller Manager) 설정
-            from app.services import k3s_occm
+            # 플러그인 레지스트리로 활성 플러그인 집계
+            from app.services import k3s_plugins
 
-            occm_active = k3s_occm.should_deploy_occm(s)
-            cloud_conf = k3s_occm.generate_cloud_conf(project_id, s) if occm_active else None
-            occm_manifests = k3s_occm.generate_occm_manifests(req.name, s) if occm_active else None
+            cloud_conf = k3s_plugins.aggregate_cloud_conf(project_id, s)
+            plugin_manifests = k3s_plugins.aggregate_manifests(req.name, project_id, s)
+            extra_server_args = k3s_plugins.aggregate_server_args(s)
+            extra_write_files = k3s_plugins.aggregate_extra_write_files(project_id, req.name, s)
+            active_plugins = k3s_plugins.get_active_plugin_names(s)
+            occm_active = active_plugins.get("occm", False)
 
             userdata = k3s_cloudinit.generate_server_userdata(
                 cluster_name=req.name,
                 k3s_version=k3s_version,
                 callback_url=callback_url,
                 callback_token=callback_token,
-                occm_enabled=occm_active,
                 cloud_conf=cloud_conf,
-                occm_manifests=occm_manifests,
+                plugin_manifests=plugin_manifests,
+                extra_server_args=extra_server_args,
+                extra_write_files=extra_write_files,
+                needs_external_cloud_provider=k3s_plugins.needs_external_cloud_provider(s),
             )
 
             # --- Step 4: 서버 VM 생성 ---
@@ -328,6 +334,7 @@ async def create_k3s_cluster_async(
                     "ssh_public_key": ssh_public_key,
                     "k3s_version": k3s_version,
                     "occm_enabled": occm_active,
+                    "plugins_enabled": active_plugins,
                     "created_by_user_id": _creator_user_id or "",
                     "created_by_username": _creator_username or "",
                     "created_at": now,
@@ -423,6 +430,7 @@ async def _scale_agents(
 ) -> None:
     """에이전트 스케일링 백그라운드 태스크."""
     from app.config import get_settings
+    from app.services import k3s_plugins
 
     cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
     if not cluster:
@@ -461,13 +469,16 @@ async def _scale_agents(
                 vol = await asyncio.to_thread(
                     cinder.create_volume_from_image, conn, f"{agent_name}-boot", image_id, boot_volume_size
                 )
+                _agent_args = k3s_plugins.aggregate_agent_args(s)
+                if not _agent_args and cluster.get("occm_enabled"):
+                    _agent_args = ["--kubelet-arg=cloud-provider=external"]
                 userdata = k3s_cloudinit.generate_agent_userdata(
                     cluster_name=cluster_name,
                     k3s_version=k3s_version,
                     server_ip=server_ip,
                     node_token=node_token or "",
                     ssh_public_key=ssh_public_key,
-                    occm_enabled=bool(cluster.get("occm_enabled")),
+                    extra_agent_args=_agent_args,
                 )
                 vm = await asyncio.to_thread(
                     nova.create_server,

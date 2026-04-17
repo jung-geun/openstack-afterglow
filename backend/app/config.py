@@ -116,6 +116,28 @@ def _load_toml() -> dict:
     )
     flat["k3s_occm_floating_network_id"] = k3s.get("occm_floating_network_id", "")
     flat["k3s_occm_public_network_name"] = k3s.get("occm_public_network_name", "")
+    # Cinder CSI
+    flat["k3s_cinder_csi_enabled"] = k3s.get("cinder_csi_enabled", False)
+    flat["k3s_cinder_csi_image"] = k3s.get("cinder_csi_image", "registry.k8s.io/provider-os/cinder-csi-plugin:v1.31.0")
+    flat["k3s_cinder_csi_default_az"] = k3s.get("cinder_csi_default_az", "nova")
+    # Manila CSI
+    flat["k3s_manila_csi_enabled"] = k3s.get("manila_csi_enabled", False)
+    flat["k3s_manila_csi_image"] = k3s.get("manila_csi_image", "registry.k8s.io/provider-os/manila-csi-plugin:v1.31.0")
+    flat["k3s_manila_csi_nfs_image"] = k3s.get("manila_csi_nfs_image", "registry.k8s.io/sig-storage/nfsplugin:v4.9.0")
+    flat["k3s_manila_csi_share_protocol"] = k3s.get("manila_csi_share_protocol", "NFS")
+    # Keystone Auth
+    flat["k3s_keystone_auth_enabled"] = k3s.get("keystone_auth_enabled", False)
+    flat["k3s_keystone_auth_image"] = k3s.get("keystone_auth_image", "registry.k8s.io/provider-os/k8s-keystone-auth:v1.31.0")
+    flat["k3s_keystone_auth_policy"] = k3s.get("keystone_auth_policy", "")
+    # Octavia Ingress
+    flat["k3s_octavia_ingress_enabled"] = k3s.get("octavia_ingress_enabled", False)
+    flat["k3s_octavia_ingress_image"] = k3s.get("octavia_ingress_image", "registry.k8s.io/provider-os/octavia-ingress-controller:v1.31.0")
+    flat["k3s_octavia_ingress_subnet_id"] = k3s.get("octavia_ingress_subnet_id", "")
+    flat["k3s_octavia_ingress_floating_network_id"] = k3s.get("octavia_ingress_floating_network_id", "")
+    # Barbican KMS
+    flat["k3s_barbican_kms_enabled"] = k3s.get("barbican_kms_enabled", False)
+    flat["k3s_barbican_kms_image"] = k3s.get("barbican_kms_image", "registry.k8s.io/provider-os/barbican-kms-plugin:v1.31.0")
+    flat["k3s_barbican_kms_kek_id"] = k3s.get("barbican_kms_kek_id", "")
 
     sess = data.get("session", {})
     flat["session_timeout_seconds"] = sess.get("timeout_seconds", 3600)
@@ -223,6 +245,28 @@ class Settings(BaseSettings):
     k3s_occm_image: str = "registry.k8s.io/provider-os/openstack-cloud-controller-manager:v1.35.0"
     k3s_occm_floating_network_id: str = ""
     k3s_occm_public_network_name: str = ""
+    # Cinder CSI
+    k3s_cinder_csi_enabled: bool = False
+    k3s_cinder_csi_image: str = "registry.k8s.io/provider-os/cinder-csi-plugin:v1.31.0"
+    k3s_cinder_csi_default_az: str = "nova"
+    # Manila CSI
+    k3s_manila_csi_enabled: bool = False
+    k3s_manila_csi_image: str = "registry.k8s.io/provider-os/manila-csi-plugin:v1.31.0"
+    k3s_manila_csi_nfs_image: str = "registry.k8s.io/sig-storage/nfsplugin:v4.9.0"
+    k3s_manila_csi_share_protocol: str = "NFS"
+    # Keystone Auth
+    k3s_keystone_auth_enabled: bool = False
+    k3s_keystone_auth_image: str = "registry.k8s.io/provider-os/k8s-keystone-auth:v1.31.0"
+    k3s_keystone_auth_policy: str = ""
+    # Octavia Ingress
+    k3s_octavia_ingress_enabled: bool = False
+    k3s_octavia_ingress_image: str = "registry.k8s.io/provider-os/octavia-ingress-controller:v1.31.0"
+    k3s_octavia_ingress_subnet_id: str = ""
+    k3s_octavia_ingress_floating_network_id: str = ""
+    # Barbican KMS
+    k3s_barbican_kms_enabled: bool = False
+    k3s_barbican_kms_image: str = "registry.k8s.io/provider-os/barbican-kms-plugin:v1.31.0"
+    k3s_barbican_kms_kek_id: str = ""
     notion_config_encryption_key: str = ""  # 미설정 시 k3s_kubeconfig_encryption_key 재사용
 
     # 세션 관리
