@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: afterglow
+  labels:
+    app: backend
+spec:
+  type: LoadBalancer
+  selector:
+    app: backend
+  ports:
+    - port: 8000
+      targetPort: 8000
+      protocol: TCP
