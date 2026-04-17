@@ -5,6 +5,7 @@
   import type { Volume } from '$lib/types/resources';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import VolumeDetailPanel from '$lib/components/VolumeDetailPanel.svelte';
+  import SlidePanel from '$lib/components/SlidePanel.svelte';
   import RefreshButton from '$lib/components/RefreshButton.svelte';
   import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
   import { formatStorage } from '$lib/utils/format';
@@ -230,20 +231,11 @@
 
 <!-- Volume Detail Panel -->
 {#if selectedVolumeId}
-  <div
-    class="fixed inset-0 z-40"
-    role="dialog"
-    aria-modal="true"
-    tabindex="-1"
-    onkeydown={(e) => e.key === 'Escape' && closeVolumePanel()}
-  >
-    <button class="absolute inset-0 bg-black/50 cursor-default" onclick={closeVolumePanel} aria-label="닫기"></button>
-    <div class="absolute right-0 top-14 bottom-0 w-full md:w-[60vw] max-w-2xl bg-gray-950 border-l border-gray-700 overflow-y-auto shadow-2xl">
-      <VolumeDetailPanel
-        volumeId={selectedVolumeId}
-        onClose={closeVolumePanel}
-        onDeleted={() => { fetchVolumes(); closeVolumePanel(); }}
-      />
-    </div>
-  </div>
+  <SlidePanel onClose={closeVolumePanel} width="w-full md:w-[60vw] max-w-2xl">
+    <VolumeDetailPanel
+      volumeId={selectedVolumeId}
+      onClose={closeVolumePanel}
+      onDeleted={() => { fetchVolumes(); closeVolumePanel(); }}
+    />
+  </SlidePanel>
 {/if}

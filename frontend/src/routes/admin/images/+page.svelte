@@ -3,6 +3,7 @@
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import SlidePanel from '$lib/components/SlidePanel.svelte';
 	import { projectNames } from '$lib/stores/projectNames';
 
 	interface AdminImage {
@@ -287,14 +288,11 @@
 
 <!-- 우측 상세 패널 -->
 {#if selectedImageId}
-	<div class="fixed inset-0 z-40" role="dialog" aria-modal="true" onkeydown={(e) => e.key === 'Escape' && closeDetail()} tabindex="-1">
-		<button class="absolute inset-0 bg-black/50 cursor-default" onclick={closeDetail} aria-label="패널 닫기"></button>
-		<div class="absolute right-0 top-14 bottom-0 w-full md:w-[50vw] max-w-2xl bg-gray-950 border-l border-gray-700 overflow-y-auto shadow-2xl">
-			{#await import('$lib/components/ImageDetailPanel.svelte') then { default: Panel }}
-				<Panel imageId={selectedImageId} onClose={closeDetail} />
-			{/await}
-		</div>
-	</div>
+	<SlidePanel onClose={closeDetail} width="w-full md:w-[50vw] max-w-2xl">
+		{#await import('$lib/components/ImageDetailPanel.svelte') then { default: Panel }}
+			<Panel imageId={selectedImageId} onClose={closeDetail} />
+		{/await}
+	</SlidePanel>
 {/if}
 
 <!-- 수정 모달 -->

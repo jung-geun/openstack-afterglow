@@ -54,6 +54,15 @@
 			],
 		},
 		{
+			label: '모니터링',
+			prefix: '/admin/monitoring',
+			icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z',
+			open: false,
+			items: [
+				{ label: '통합 모니터링', href: '/admin/monitoring', service: null },
+			],
+		},
+		{
 			label: '시스템',
 			prefix: '/admin/services',
 			icon: 'M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z',
@@ -116,7 +125,7 @@
 	></button>
 {/if}
 
-<aside class="fixed top-14 left-0 bottom-0 z-30 w-56 bg-gray-900 border-r border-gray-800 flex flex-col overflow-y-auto transition-transform duration-200 ease-in-out {$sidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:static md:translate-x-0 md:shrink-0 md:transition-none">
+<aside class="fixed top-14 left-0 bottom-0 z-30 w-56 bg-gray-900 border-r border-gray-800 flex flex-col overflow-y-auto transition-transform duration-200 ease-in-out {$sidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:sticky md:top-14 md:h-[calc(100vh-3.5rem)] md:translate-x-0 md:shrink-0 md:transition-none">
 	<nav class="flex-1 px-3 py-4 space-y-0.5">
 		<!-- 개요 -->
 		<a

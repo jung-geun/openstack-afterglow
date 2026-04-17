@@ -87,7 +87,11 @@ async def download_kubeconfig(cluster_id: str, token_info: dict = Depends(get_to
     if not cluster:
         raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
 
-    kubeconfig = await k3s_cluster.get_kubeconfig(project_id, cluster_id)
+    try:
+        kubeconfig = await k3s_cluster.get_kubeconfig(project_id, cluster_id)
+    except Exception as e:
+        _logger.error("kubeconfig 복호화 실패: %s", e)
+        raise HTTPException(status_code=500, detail="kubeconfig 복호화에 실패했습니다. 관리자에게 문의하세요.")
     if not kubeconfig:
         raise HTTPException(
             status_code=404, detail="kubeconfig가 아직 준비되지 않았습니다. 클러스터가 초기화 중입니다."

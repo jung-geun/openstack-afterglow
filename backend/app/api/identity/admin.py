@@ -262,6 +262,91 @@ async def admin_overview(conn: openstack.connection.Connection = Depends(get_os_
         raise HTTPException(status_code=500, detail="개요 조회 실패")
 
 
+@router.get("/monitoring/summary", dependencies=[Depends(require_admin)])
+async def get_monitoring_summary(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
+    """분야별 통합 모니터링 요약 (compute/storage/network/container)."""
+    try:
+        def _collect():
+            result: dict = {}
+            # -- Compute --
+            hyp_data = _fetch_hypervisors_raw(conn)
+            hyp_up = sum(1 for h in hyp_data if h.get("state") == "up")
+            result["compute"] = {
+                "hypervisors_total": len(hyp_data),
+                "hypervisors_up": hyp_up,
+                "vcpus_used": sum(h.get("vcpus_used", 0) or 0 for h in hyp_data),
+                "vcpus_total": sum(h.get("vcpus", 0) or 0 for h in hyp_data),
+                "memory_used_mb": sum(h.get("memory_mb_used", 0) or 0 for h in hyp_data),
+                "memory_total_mb": sum(h.get("memory_mb", 0) or 0 for h in hyp_data),
+                "running_vms": sum(h.get("running_vms", 0) or 0 for h in hyp_data),
+            }
+            srv_data = _fetch_overview_servers(conn)
+            result["compute"]["instance_stats"] = srv_data.get("instance_stats", {})
+            result["compute"]["gpu_instances"] = srv_data.get("gpu_instances", 0)
+            # -- Storage (volumes) --
+            try:
+                endpoint = conn.compute.get_endpoint().replace("/compute", "")
+                vol_ep = conn.block_storage.get_endpoint()
+                vol_resp = conn.session.get(
+                    f"{vol_ep}/volumes/detail",
+                    params={"all_tenants": "1", "limit": "1000"},
+                )
+                volumes = vol_resp.json().get("volumes", [])
+                vol_by_status: dict = {}
+                total_gb = 0
+                for v in volumes:
+                    s = v.get("status", "unknown")
+                    vol_by_status[s] = vol_by_status.get(s, 0) + 1
+                    total_gb += v.get("size", 0)
+                result["storage"] = {
+                    "volume_count": len(volumes),
+                    "volume_by_status": vol_by_status,
+                    "total_gb": total_gb,
+                }
+            except Exception:
+                result["storage"] = {"volume_count": 0, "volume_by_status": {}, "total_gb": 0}
+            # file storage
+            result["storage"]["file_storage_count"] = _fetch_overview_file_storage(conn)
+            # -- Network --
+            try:
+                nets = list(conn.network.networks())
+                routers = list(conn.network.routers())
+                fips = list(conn.network.ips())
+                ports = list(conn.network.ports())
+                fip_active = sum(1 for f in fips if f.status == "ACTIVE")
+                router_active = sum(1 for r in routers if r.status == "ACTIVE")
+                result["network"] = {
+                    "network_count": len(nets),
+                    "router_count": len(routers),
+                    "router_active": router_active,
+                    "floatingip_count": len(fips),
+                    "floatingip_active": fip_active,
+                    "port_count": len(ports),
+                }
+            except Exception:
+                result["network"] = {
+                    "network_count": 0, "router_count": 0, "router_active": 0,
+                    "floatingip_count": 0, "floatingip_active": 0, "port_count": 0,
+                }
+            # -- Containers --
+            result["containers"] = {
+                "zun_count": _fetch_overview_containers(conn),
+                "k3s_count": 0,
+            }
+            try:
+                from app.services import k3s_db
+                import asyncio as _asyncio
+                # k3s는 async이므로 별도 처리 불가 — 0으로 유지
+            except Exception:
+                pass
+            return result
+
+        return await cached_call("afterglow:admin:monitoring", ttl_normal(), _collect, refresh=refresh)
+    except Exception:
+        _logger.warning("monitoring summary 조회 실패", exc_info=True)
+        raise HTTPException(status_code=500, detail="모니터링 요약 조회 실패")
+
+
 @router.get("/hypervisors", dependencies=[Depends(require_admin)])
 async def list_hypervisors(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
     """컴퓨트 하이퍼바이저 목록."""
@@ -269,6 +354,24 @@ async def list_hypervisors(conn: openstack.connection.Connection = Depends(get_o
 
         def _list():
             data = _fetch_hypervisors_raw(conn)
+            # Placement API에서 allocation_ratio 수집 (root RP만)
+            ratios: dict[str, dict] = {}
+            try:
+                placement_ep = conn.placement.get_endpoint()
+                rps_resp = conn.session.get(f"{placement_ep}/resource_providers")
+                for rp in rps_resp.json().get("resource_providers", []):
+                    if rp.get("parent_provider_uuid"):  # child RP(GPU 등) 건너뜀
+                        continue
+                    inv_resp = conn.session.get(
+                        f"{placement_ep}/resource_providers/{rp['uuid']}/inventories"
+                    )
+                    invs = inv_resp.json().get("inventories", {})
+                    ratios[rp["uuid"]] = {
+                        "vcpu": invs.get("VCPU", {}).get("allocation_ratio", 1.0),
+                        "memory": invs.get("MEMORY_MB", {}).get("allocation_ratio", 1.0),
+                    }
+            except Exception:
+                _logger.warning("Placement allocation_ratio 조회 실패", exc_info=True)
             return [
                 {
                     "id": h.get("id", ""),
@@ -278,8 +381,10 @@ async def list_hypervisors(conn: openstack.connection.Connection = Depends(get_o
                     "hypervisor_type": h.get("hypervisor_type", ""),
                     "vcpus": h.get("vcpus", 0) or 0,
                     "vcpus_used": h.get("vcpus_used", 0) or 0,
+                    "vcpus_allowed": int((h.get("vcpus", 0) or 0) * ratios.get(h.get("id", ""), {}).get("vcpu", 1.0)),
                     "memory_size_mb": h.get("memory_mb", 0) or 0,
                     "memory_used_mb": h.get("memory_mb_used", 0) or 0,
+                    "memory_allowed_mb": int((h.get("memory_mb", 0) or 0) * ratios.get(h.get("id", ""), {}).get("memory", 1.0)),
                     "local_disk_gb": h.get("local_gb", 0) or 0,
                     "local_disk_used_gb": h.get("local_gb_used", 0) or 0,
                     "running_vms": h.get("running_vms", 0) or 0,
@@ -327,6 +432,34 @@ async def get_hypervisor_detail(hypervisor_id: str, conn: openstack.connection.C
                 except Exception:
                     pass
             svc = h.get("service") or {}
+            # uptime 조회
+            uptime_str = ""
+            host_time_str = ""
+            try:
+                ut_resp = conn.session.get(
+                    f"{endpoint}/os-hypervisors/{hypervisor_id}/uptime",
+                    headers={"OpenStack-API-Version": "compute 2.53"},
+                )
+                ut_data = ut_resp.json().get("hypervisor", {})
+                uptime_str = ut_data.get("uptime", "")
+                host_time_str = ut_data.get("host_time", "")
+            except Exception:
+                pass
+            # Placement에서 allocation_ratio 조회
+            vcpu_ratio = 1.0
+            mem_ratio = 1.0
+            try:
+                placement_ep = conn.placement.get_endpoint()
+                inv_resp = conn.session.get(
+                    f"{placement_ep}/resource_providers/{hypervisor_id}/inventories"
+                )
+                invs = inv_resp.json().get("inventories", {})
+                vcpu_ratio = invs.get("VCPU", {}).get("allocation_ratio", 1.0)
+                mem_ratio = invs.get("MEMORY_MB", {}).get("allocation_ratio", 1.0)
+            except Exception:
+                pass
+            vcpus_total = h.get("vcpus", 0) or 0
+            mem_total = h.get("memory_mb", 0) or 0
             return {
                 "id": h.get("id", ""),
                 "hypervisor_hostname": hostname,
@@ -335,11 +468,15 @@ async def get_hypervisor_detail(hypervisor_id: str, conn: openstack.connection.C
                 "hypervisor_type": h.get("hypervisor_type", ""),
                 "hypervisor_version": h.get("hypervisor_version", 0),
                 "host_ip": h.get("host_ip", ""),
+                "host_time": host_time_str,
+                "uptime": uptime_str,
                 "service_host": svc.get("host", ""),
-                "vcpus": h.get("vcpus", 0) or 0,
+                "vcpus": vcpus_total,
                 "vcpus_used": h.get("vcpus_used", 0) or 0,
-                "memory_mb": h.get("memory_mb", 0) or 0,
+                "vcpus_allowed": int(vcpus_total * vcpu_ratio),
+                "memory_mb": mem_total,
                 "memory_mb_used": h.get("memory_mb_used", 0) or 0,
+                "memory_allowed_mb": int(mem_total * mem_ratio),
                 "local_gb": h.get("local_gb", 0) or 0,
                 "local_gb_used": h.get("local_gb_used", 0) or 0,
                 "running_vms": h.get("running_vms", 0) or 0,
@@ -458,6 +595,90 @@ async def list_all_containers(
         return []
     except Exception:
         raise HTTPException(status_code=500, detail="컨테이너 조회 실패")
+
+
+@router.get("/containers/{container_id}", dependencies=[Depends(require_admin)])
+async def get_admin_container(
+    container_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """관리자용 컨테이너 단건 조회."""
+    if not get_settings().service_zun_enabled:
+        raise HTTPException(status_code=503, detail="Zun 서비스가 비활성화되어 있습니다")
+    from app.services.zun import ZunServiceUnavailable, get_container
+
+    try:
+        return await asyncio.to_thread(get_container, conn, container_id)
+    except ZunServiceUnavailable:
+        raise HTTPException(status_code=503, detail="컨테이너 서비스를 사용할 수 없습니다")
+    except Exception:
+        raise HTTPException(status_code=404, detail="컨테이너를 찾을 수 없습니다")
+
+
+@router.get("/containers/{container_id}/logs", dependencies=[Depends(require_admin)])
+async def get_admin_container_logs(
+    container_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """관리자용 컨테이너 로그 조회."""
+    if not get_settings().service_zun_enabled:
+        raise HTTPException(status_code=503, detail="Zun 서비스가 비활성화되어 있습니다")
+    from app.services.zun import ZunServiceUnavailable, get_container_logs
+
+    try:
+        logs = await asyncio.to_thread(get_container_logs, conn, container_id)
+        return {"logs": logs}
+    except ZunServiceUnavailable:
+        raise HTTPException(status_code=503, detail="컨테이너 서비스를 사용할 수 없습니다")
+    except Exception:
+        raise HTTPException(status_code=404, detail="컨테이너를 찾을 수 없습니다")
+
+
+@router.post("/containers/{container_id}/start", dependencies=[Depends(require_admin)])
+async def start_admin_container(
+    container_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """관리자용 컨테이너 시작."""
+    if not get_settings().service_zun_enabled:
+        raise HTTPException(status_code=503, detail="Zun 서비스가 비활성화되어 있습니다")
+    from app.services import zun as _zun
+    try:
+        await asyncio.to_thread(_zun.start_container, conn, container_id)
+        return {"status": "started"}
+    except Exception:
+        raise HTTPException(status_code=500, detail="컨테이너 시작 실패")
+
+
+@router.post("/containers/{container_id}/stop", dependencies=[Depends(require_admin)])
+async def stop_admin_container(
+    container_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """관리자용 컨테이너 중지."""
+    if not get_settings().service_zun_enabled:
+        raise HTTPException(status_code=503, detail="Zun 서비스가 비활성화되어 있습니다")
+    from app.services import zun as _zun
+    try:
+        await asyncio.to_thread(_zun.stop_container, conn, container_id)
+        return {"status": "stopped"}
+    except Exception:
+        raise HTTPException(status_code=500, detail="컨테이너 중지 실패")
+
+
+@router.delete("/containers/{container_id}", status_code=204, dependencies=[Depends(require_admin)])
+async def delete_admin_container(
+    container_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """관리자용 컨테이너 삭제."""
+    if not get_settings().service_zun_enabled:
+        raise HTTPException(status_code=503, detail="Zun 서비스가 비활성화되어 있습니다")
+    from app.services import zun as _zun
+    try:
+        await asyncio.to_thread(_zun.delete_container, conn, container_id)
+    except Exception:
+        raise HTTPException(status_code=500, detail="컨테이너 삭제 실패")
 
 
 @router.get("/all-file-storages", dependencies=[Depends(require_admin)])
@@ -1336,7 +1557,11 @@ async def download_admin_k3s_kubeconfig(cluster_id: str):
     if not cluster:
         raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
 
-    kubeconfig = await k3s_cluster.get_kubeconfig_admin(cluster_id)
+    try:
+        kubeconfig = await k3s_cluster.get_kubeconfig_admin(cluster_id)
+    except Exception as e:
+        _logger.error("admin kubeconfig 복호화 실패: %s", e)
+        raise HTTPException(status_code=500, detail="kubeconfig 복호화에 실패했습니다. 관리자에게 문의하세요.")
     if not kubeconfig:
         raise HTTPException(status_code=404, detail="kubeconfig가 아직 준비되지 않았습니다.")
 
@@ -1346,6 +1571,40 @@ async def download_admin_k3s_kubeconfig(cluster_id: str):
         media_type="application/yaml",
         headers={"Content-Disposition": f'attachment; filename="kubeconfig-{cluster_name}.yaml"'},
     )
+
+
+@router.patch("/k3s-clusters/{cluster_id}/scale", dependencies=[Depends(require_admin)])
+async def scale_admin_k3s_cluster(cluster_id: str, req: dict):
+    """관리자용 k3s 클러스터 에이전트 스케일링."""
+    import asyncio
+
+    from app.api.k3s.clusters import _scale_agents
+
+    cluster = await k3s_cluster.get_cluster_admin(cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
+    if cluster.get("status") != "ACTIVE":
+        raise HTTPException(status_code=409, detail="ACTIVE 상태의 클러스터만 스케일링할 수 있습니다")
+
+    desired = req.get("agent_count")
+    if desired is None or not isinstance(desired, int) or desired < 0:
+        raise HTTPException(status_code=422, detail="agent_count는 0 이상의 정수여야 합니다")
+
+    project_id = cluster.get("project_id", "")
+    current_agent_ids: list[str] = cluster.get("agent_vm_ids") or []
+    if isinstance(current_agent_ids, str):
+        import json as _json
+        try:
+            current_agent_ids = _json.loads(current_agent_ids)
+        except Exception:
+            current_agent_ids = []
+
+    if desired == len(current_agent_ids):
+        return {"message": "변경 없음", "agent_count": desired}
+
+    await k3s_cluster.update_cluster_status(project_id, cluster_id, "SCALING")
+    asyncio.create_task(_scale_agents(project_id, cluster_id, current_agent_ids, desired))
+    return {"message": f"스케일링 시작: {len(current_agent_ids)} → {desired}", "agent_count": desired}
 
 
 @router.delete("/k3s-clusters/{cluster_id}", status_code=204, dependencies=[Depends(require_admin)])

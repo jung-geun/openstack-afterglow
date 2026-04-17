@@ -3,6 +3,7 @@
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import TimeSeriesChart from '$lib/components/TimeSeriesChart.svelte';
+	import SlidePanel from '$lib/components/SlidePanel.svelte';
 
 	interface NetworkInfo {
 		id: string;
@@ -240,12 +241,9 @@
 
 <!-- 네트워크 상세 패널 -->
 {#if selectedNetworkId}
-	<div class="fixed inset-0 z-40" role="dialog" aria-modal="true" onkeydown={(e) => e.key === 'Escape' && (selectedNetworkId = null)} tabindex="-1">
-		<button class="absolute inset-0 bg-black/50 cursor-default" onclick={() => { selectedNetworkId = null; }} aria-label="패널 닫기"></button>
-		<div class="absolute right-0 top-14 bottom-0 w-96 bg-gray-950 border-l border-gray-700 overflow-y-auto shadow-2xl">
-			{#await import('$lib/components/NetworkDetailPanel.svelte') then { default: Panel }}
-				<Panel networkId={selectedNetworkId} onClose={() => { selectedNetworkId = null; }} token={token} projectId={projectId} />
-			{/await}
-		</div>
-	</div>
+	<SlidePanel onClose={() => { selectedNetworkId = null; }} width="w-96">
+		{#await import('$lib/components/NetworkDetailPanel.svelte') then { default: Panel }}
+			<Panel networkId={selectedNetworkId} onClose={() => { selectedNetworkId = null; }} token={token} projectId={projectId} />
+		{/await}
+	</SlidePanel>
 {/if}

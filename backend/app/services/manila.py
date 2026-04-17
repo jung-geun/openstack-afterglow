@@ -130,13 +130,34 @@ def get_file_storage_quota(conn) -> dict:
                 return {"limit": v.get("limit", -1), "in_use": v.get("in_use", 0)}
             return {"limit": int(v) if v is not None else -1, "in_use": 0}
 
-        return {
+        result = {
             "shares": _q("shares"),
             "gigabytes": _q("gigabytes"),
             "share_networks": _q("share_networks"),
             "share_groups": _q("share_groups"),
             "snapshot_gigabytes": _q("snapshot_gigabytes"),
         }
+
+        # Manila quota-sets가 in_use=0을 반환하더라도 실제 share가 있을 수 있음
+        # (CephFS 백엔드나 quota enforcement 미활성 시 발생)
+        if result["shares"]["in_use"] == 0:
+            try:
+                shares_data = client.get("shares/detail")
+                actual_shares = shares_data.get("shares", [])
+                if actual_shares:
+                    result["shares"]["in_use"] = len(actual_shares)
+                    total_gb = sum(int(s.get("size", 0)) for s in actual_shares)
+                    if total_gb > 0 and result["gigabytes"]["in_use"] == 0:
+                        result["gigabytes"]["in_use"] = total_gb
+                    logger.debug(
+                        "Manila quota fallback: %d shares, %d GB",
+                        result["shares"]["in_use"],
+                        result["gigabytes"]["in_use"],
+                    )
+            except Exception:
+                logger.debug("Manila quota fallback 조회 실패", exc_info=True)
+
+        return result
     except Exception:
         import logging as _logging
 

@@ -191,6 +191,31 @@ async def delete_network(
         raise HTTPException(status_code=500, detail="네트워크 삭제 실패")
 
 
+@router.get("/ports", response_model=list[dict])
+async def list_ports(conn: openstack.connection.Connection = Depends(get_os_conn)):
+    """현재 프로젝트의 포트 목록."""
+    project_id = conn._union_project_id
+    try:
+        def _list():
+            return [
+                {
+                    "id": p.id,
+                    "name": p.name or "",
+                    "status": p.status,
+                    "mac_address": p.mac_address,
+                    "fixed_ips": p.fixed_ips or [],
+                    "network_id": p.network_id or "",
+                    "device_owner": p.device_owner or "",
+                    "device_id": p.device_id or "",
+                }
+                for p in conn.network.ports(project_id=project_id)
+            ]
+        return await asyncio.to_thread(_list)
+    except Exception:
+        _logger.exception("포트 목록 조회 실패")
+        raise HTTPException(status_code=500, detail="포트 조회 실패")
+
+
 @router.post("/{network_id}/subnets", response_model=SubnetDetail, status_code=201)
 async def create_subnet(
     network_id: str,

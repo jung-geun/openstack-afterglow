@@ -3,6 +3,7 @@
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import SlidePanel from '$lib/components/SlidePanel.svelte';
 	import { projectNames } from '$lib/stores/projectNames';
 
 	interface Flavor {
@@ -522,9 +523,8 @@
 
 <!-- 관리 패널 (접근 + 속성) -->
 {#if selectedFlavor}
-	<div class="fixed inset-0 z-40" role="dialog" aria-modal="true" onkeydown={(e) => e.key === 'Escape' && closeAccess()} tabindex="-1">
-		<button class="absolute inset-0 bg-black/50 cursor-default" onclick={closeAccess} aria-label="패널 닫기"></button>
-		<div class="absolute right-0 top-14 bottom-0 w-full md:w-[640px] bg-gray-950 border-l border-gray-700 overflow-y-auto shadow-2xl p-6">
+	<SlidePanel onClose={closeAccess} width="w-full md:w-[640px]">
+		<div class="p-6">
 			<div class="flex items-center justify-between mb-4">
 				<h2 class="text-lg font-semibold text-white">Flavor 관리</h2>
 				<button onclick={closeAccess} class="text-gray-400 hover:text-white text-xl">&times;</button>
@@ -675,5 +675,5 @@
 				</div>
 			{/if}
 		</div>
-	</div>
+	</SlidePanel>
 {/if}

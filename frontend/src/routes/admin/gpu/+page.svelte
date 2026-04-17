@@ -70,6 +70,7 @@
 	let sortColumn = $state('');
 	let sortAsc = $state(true);
 	let availableFilter = $state<'all' | 'available' | 'full'>('all');
+	let selectedGpuTypes = $state<Set<string>>(new Set());
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
@@ -94,6 +95,13 @@
 		expandedHost = expandedHost === name ? null : name;
 	}
 
+	function toggleGpuType(deviceName: string) {
+		const next = new Set(selectedGpuTypes);
+		if (next.has(deviceName)) next.delete(deviceName);
+		else next.add(deviceName);
+		selectedGpuTypes = next;
+	}
+
 	function toggleSort(col: string) {
 		if (sortColumn === col) {
 			sortAsc = !sortAsc;
@@ -111,8 +119,9 @@
 	let filteredHosts = $derived(
 		aggregatedHosts
 			.filter((h) => {
-				if (availableFilter === 'available') return h.gpu_total - h.gpu_used > 0;
-				if (availableFilter === 'full') return h.gpu_total - h.gpu_used === 0;
+				if (availableFilter === 'available' && h.gpu_total - h.gpu_used <= 0) return false;
+				if (availableFilter === 'full' && h.gpu_total - h.gpu_used !== 0) return false;
+				if (selectedGpuTypes.size > 0 && !h.gpu_groups.some(g => selectedGpuTypes.has(g.device_name))) return false;
 				return true;
 			})
 			.toSorted((a, b) => {
@@ -178,9 +187,17 @@
 				<div class="text-xs text-gray-400 uppercase tracking-wide mb-2">GPU 종류별 현황</div>
 				<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
 					{#each gpuTypes as gt}
-						<div class="bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 flex items-center justify-between">
+						<button
+							onclick={() => toggleGpuType(gt.device_name)}
+							class="bg-gray-900 border rounded-lg px-4 py-3 flex items-center justify-between text-left transition-colors {selectedGpuTypes.has(gt.device_name) ? 'border-blue-500 bg-blue-900/20' : 'border-gray-800 hover:border-gray-600'}"
+						>
 							<div>
-								<div class="text-sm font-medium text-white">{gt.device_name}</div>
+								<div class="text-sm font-medium text-white flex items-center gap-1.5">
+									{gt.device_name}
+									{#if selectedGpuTypes.has(gt.device_name)}
+										<span class="text-xs bg-blue-600 text-white px-1 rounded">선택됨</span>
+									{/if}
+								</div>
 								<div class="text-xs text-gray-500">{gt.vendor}</div>
 							</div>
 							<div class="text-right">
@@ -194,14 +211,14 @@
 									<div class="text-xs text-gray-500">0 사용 중</div>
 								{/if}
 							</div>
-						</div>
+						</button>
 					{/each}
 				</div>
 			</div>
 		{/if}
 
 		<!-- 호스트별 GPU 테이블 -->
-		<div class="flex items-center gap-2 mb-3">
+		<div class="flex items-center gap-2 mb-3 flex-wrap">
 			<span class="text-xs text-gray-500">필터:</span>
 			<button
 				onclick={() => (availableFilter = 'all')}
@@ -215,6 +232,11 @@
 				onclick={() => (availableFilter = 'full')}
 				class="text-xs px-2.5 py-1 rounded transition-colors {availableFilter === 'full' ? 'bg-red-900/50 text-red-400' : 'text-gray-400 hover:text-white'}"
 			>모두 사용 중</button>
+			{#if selectedGpuTypes.size > 0}
+				<span class="text-gray-600 text-xs">|</span>
+				<span class="text-xs text-blue-400">GPU 필터: {Array.from(selectedGpuTypes).join(', ')}</span>
+				<button onclick={() => (selectedGpuTypes = new Set())} class="text-xs text-gray-500 hover:text-white transition-colors">✕ 초기화</button>
+			{/if}
 		</div>
 		<div class="overflow-x-auto">
 			<table class="w-full text-sm">

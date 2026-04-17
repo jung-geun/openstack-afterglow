@@ -132,7 +132,7 @@
     scaling = true;
     scaleError = '';
     try {
-      await api.patch(`/api/k3s/clusters/${clusterId}/scale`, { agent_count: scalingTarget }, token, projectId);
+      await api.patch(`${apiBase}/${clusterId}/scale`, { agent_count: scalingTarget }, token, projectId);
       await fetchCluster();
     } catch (e) {
       scaleError = e instanceof ApiError ? e.message : String(e);

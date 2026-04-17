@@ -164,7 +164,19 @@ def get_network_quota(conn: openstack.connection.Connection, project_id: str) ->
         quota = conn.network.get_quota(project_id, details=True)
         quota_dict = quota.to_dict() if hasattr(quota, "to_dict") else {}
         keys = ["floatingip", "security_group", "security_group_rule", "network", "port", "router", "subnet"]
-        return {k: _q(quota_dict, k) for k in keys}
+        result = {k: _q(quota_dict, k) for k in keys}
+        # Fallback: quota details가 in_use=0으로 반환할 때 실제 리소스 카운트
+        if result["floatingip"]["in_use"] == 0:
+            try:
+                result["floatingip"]["in_use"] = sum(1 for _ in conn.network.ips(project_id=project_id))
+            except Exception:
+                pass
+        if result["port"]["in_use"] == 0:
+            try:
+                result["port"]["in_use"] = sum(1 for _ in conn.network.ports(project_id=project_id))
+            except Exception:
+                pass
+        return result
     except Exception:
         import logging as _logging
 

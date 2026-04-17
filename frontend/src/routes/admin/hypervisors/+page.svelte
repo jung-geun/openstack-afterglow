@@ -13,8 +13,10 @@
 		status: string;
 		vcpus: number;
 		vcpus_used: number;
+		vcpus_allowed: number;
 		memory_size_mb: number;
 		memory_used_mb: number;
+		memory_allowed_mb: number;
 		local_disk_gb: number;
 		local_disk_used_gb: number;
 		running_vms: number;
@@ -28,11 +30,15 @@
 		hypervisor_type: string;
 		hypervisor_version: number;
 		host_ip: string;
+		host_time: string;
+		uptime: string;
 		service_host: string;
 		vcpus: number;
 		vcpus_used: number;
+		vcpus_allowed: number;
 		memory_mb: number;
 		memory_mb_used: number;
+		memory_allowed_mb: number;
 		local_gb: number;
 		local_gb_used: number;
 		running_vms: number;
@@ -86,6 +92,20 @@
 	function sortIcon(col: string): string {
 		if (sortColumn !== col) return '↕';
 		return sortAsc ? '↑' : '↓';
+	}
+
+	function usageColor(used: number, total: number): string {
+		if (total === 0) return 'bg-gray-600';
+		const pct = used / total;
+		if (pct >= 0.9) return 'bg-red-500';
+		if (pct >= 0.7) return 'bg-orange-500';
+		if (pct >= 0.5) return 'bg-yellow-500';
+		return 'bg-blue-500';
+	}
+
+	function usagePct(used: number, total: number): number {
+		if (total === 0) return 0;
+		return Math.min(100, Math.round((used / total) * 100));
 	}
 
 	let sortedHypervisors = $derived(
@@ -214,9 +234,30 @@
 								<span class="{h.state === 'up' && h.status === 'enabled' ? 'text-green-400' : 'text-red-400'}">{h.state}/{h.status}</span>
 							</td>
 							<td class="py-2 pr-4 text-gray-400">{formatNumber(h.running_vms)}</td>
-							<td class="py-2 pr-4 text-gray-400">{formatNumber(h.vcpus_used)}/{formatNumber(h.vcpus)}</td>
-							<td class="py-2 pr-4 text-gray-400">{formatNumber(Math.round(h.memory_used_mb/1024))}/{formatNumber(Math.round(h.memory_size_mb/1024))}</td>
-							<td class="py-2 text-gray-400">{formatStorage(h.local_disk_used_gb)}/{formatStorage(h.local_disk_gb)}</td>
+							<td class="py-2 pr-4">
+								<div class="flex items-center gap-2">
+									<div class="w-14 bg-gray-800 rounded-full h-1.5 flex-shrink-0">
+										<div class="{usageColor(h.vcpus_used, h.vcpus_allowed || h.vcpus)} h-1.5 rounded-full" style="width: {usagePct(h.vcpus_used, h.vcpus_allowed || h.vcpus)}%"></div>
+									</div>
+									<span class="text-gray-400 text-xs">{formatNumber(h.vcpus_used)}/{formatNumber(h.vcpus_allowed || h.vcpus)}</span>
+								</div>
+							</td>
+							<td class="py-2 pr-4">
+								<div class="flex items-center gap-2">
+									<div class="w-14 bg-gray-800 rounded-full h-1.5 flex-shrink-0">
+										<div class="{usageColor(h.memory_used_mb, h.memory_allowed_mb || h.memory_size_mb)} h-1.5 rounded-full" style="width: {usagePct(h.memory_used_mb, h.memory_allowed_mb || h.memory_size_mb)}%"></div>
+									</div>
+									<span class="text-gray-400 text-xs">{formatNumber(Math.round(h.memory_used_mb/1024))}/{formatNumber(Math.round((h.memory_allowed_mb || h.memory_size_mb)/1024))}</span>
+								</div>
+							</td>
+							<td class="py-2">
+								<div class="flex items-center gap-2">
+									<div class="w-14 bg-gray-800 rounded-full h-1.5 flex-shrink-0">
+										<div class="{usageColor(h.local_disk_used_gb, h.local_disk_gb)} h-1.5 rounded-full" style="width: {usagePct(h.local_disk_used_gb, h.local_disk_gb)}%"></div>
+									</div>
+									<span class="text-gray-400 text-xs">{formatStorage(h.local_disk_used_gb)}/{formatStorage(h.local_disk_gb)}</span>
+								</div>
+							</td>
 						</tr>
 					{/each}
 				</tbody>
@@ -249,6 +290,18 @@
 							<dt class="text-gray-400">호스트 IP</dt>
 							<dd class="text-gray-300 font-mono">{selectedDetail.host_ip || '-'}</dd>
 						</div>
+						{#if selectedDetail.host_time}
+						<div class="flex justify-between">
+							<dt class="text-gray-400">호스트 시간</dt>
+							<dd class="text-gray-300 font-mono">{selectedDetail.host_time}</dd>
+						</div>
+						{/if}
+						{#if selectedDetail.uptime}
+						<div class="flex justify-between gap-4">
+							<dt class="text-gray-400 flex-shrink-0">업타임</dt>
+							<dd class="text-gray-300 text-right text-xs leading-relaxed break-all">{selectedDetail.uptime}</dd>
+						</div>
+						{/if}
 						<div class="flex justify-between">
 							<dt class="text-gray-400">타입</dt>
 							<dd class="text-gray-300">{selectedDetail.hypervisor_type}</dd>
@@ -270,11 +323,11 @@
 					<dl class="space-y-2 text-xs">
 						<div class="flex justify-between">
 							<dt class="text-gray-400">vCPU</dt>
-							<dd class="text-gray-300">{selectedDetail.vcpus_used} / {selectedDetail.vcpus}</dd>
+							<dd class="text-gray-300">{selectedDetail.vcpus_used} / {selectedDetail.vcpus_allowed || selectedDetail.vcpus} <span class="text-gray-600 text-xs">(물리 {selectedDetail.vcpus})</span></dd>
 						</div>
 						<div class="flex justify-between">
 							<dt class="text-gray-400">RAM</dt>
-							<dd class="text-gray-300">{formatNumber(Math.round(selectedDetail.memory_mb_used/1024))} / {formatNumber(Math.round(selectedDetail.memory_mb/1024))} GB</dd>
+							<dd class="text-gray-300">{formatNumber(Math.round(selectedDetail.memory_mb_used/1024))} / {formatNumber(Math.round((selectedDetail.memory_allowed_mb || selectedDetail.memory_mb)/1024))} GB <span class="text-gray-600 text-xs">(물리 {formatNumber(Math.round(selectedDetail.memory_mb/1024))} GB)</span></dd>
 						</div>
 						<div class="flex justify-between">
 							<dt class="text-gray-400">로컬 디스크</dt>

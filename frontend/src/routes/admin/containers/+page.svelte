@@ -3,6 +3,8 @@
 	import { auth } from '$lib/stores/auth';
 	import { api } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import SlidePanel from '$lib/components/SlidePanel.svelte';
+	import ContainerDetailPanel from '$lib/components/ContainerDetailPanel.svelte';
 
 	interface AdminContainer {
 		uuid: string;
@@ -13,6 +15,7 @@
 		memory: string | null;
 		host: string | null;
 		created_at: string | null;
+		project_id: string | null;
 	}
 
 	const statusColor: Record<string, string> = {
@@ -21,6 +24,7 @@
 
 	let containers = $state<AdminContainer[]>([]);
 	let loading = $state(true);
+	let selectedContainerId = $state<string | null>(null);
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
@@ -65,7 +69,13 @@
 				</thead>
 				<tbody>
 					{#each containers as c (c.uuid)}
-						<tr class="border-b border-gray-800/50 text-xs">
+						<tr
+							class="border-b border-gray-800/50 text-xs hover:bg-gray-800/30 transition-colors cursor-pointer {selectedContainerId === c.uuid ? 'bg-gray-800/50' : ''}"
+							onclick={() => (selectedContainerId = c.uuid)}
+							onkeydown={(e) => e.key === 'Enter' && (selectedContainerId = c.uuid)}
+							role="button"
+							tabindex="0"
+						>
 							<td class="py-2 pr-4 text-white">{c.name || c.uuid.slice(0, 8)}</td>
 							<td class="py-2 pr-4 {statusColor[c.status] ?? 'text-gray-400'}">{c.status}</td>
 							<td class="py-2 pr-4 text-gray-400 font-mono text-xs">{c.image || '-'}</td>
@@ -80,3 +90,14 @@
 		</div>
 	{/if}
 </div>
+
+{#if selectedContainerId}
+	<SlidePanel onClose={() => (selectedContainerId = null)} width="w-full md:w-[480px]">
+		<ContainerDetailPanel
+			containerId={selectedContainerId}
+			onClose={() => (selectedContainerId = null)}
+			adminMode={true}
+			onRefresh={load}
+		/>
+	</SlidePanel>
+{/if}
