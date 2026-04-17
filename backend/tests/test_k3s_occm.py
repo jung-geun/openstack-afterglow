@@ -2,8 +2,6 @@
 
 from unittest.mock import MagicMock
 
-import pytest
-
 
 def _make_settings(**overrides):
     """테스트용 Settings mock 생성."""

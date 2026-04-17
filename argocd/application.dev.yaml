@@ -19,7 +19,7 @@ spec:
     path: deploy/k8s/overlays/dev
   destination:
     server: "https://kubernetes.default.svc"
-    namespace: afterglow
+    namespace: afterglow-dev
   syncPolicy:
     automated:
       prune: true

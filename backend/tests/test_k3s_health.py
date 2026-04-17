@@ -2,12 +2,12 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.main import app
+from app.main import app  # noqa: F401
 from app.models.k3s_health import K3sClusterHealth, K3sNodeHealth
-
 
 # ---------------------------------------------------------------------------
 # 픽스처
@@ -157,8 +157,6 @@ async def test_check_cluster_health_no_server_ip():
 @pytest.mark.asyncio
 async def test_check_cluster_health_unreachable():
     """K3s API 연결 실패 시 UNREACHABLE 반환."""
-    import httpx
-
     from app.services.k3s_health import check_cluster_health
 
     cluster = _make_cluster_record()
@@ -183,8 +181,6 @@ async def test_check_cluster_health_unreachable():
 @pytest.mark.asyncio
 async def test_check_cluster_health_healthy_no_nodes():
     """healthz OK + 노드 조회 실패 시 HEALTHY (healthz 기준)."""
-    import httpx
-
     from app.services.k3s_health import check_cluster_health
 
     cluster = _make_cluster_record()
