@@ -19,8 +19,6 @@ spec:
     repoURL: "https://github.com/jung-geun/openstack-afterglow.git"
     targetRevision: main
     path: deploy/k8s
-    directory:
-      recurse: true
   destination:
     server: "https://kubernetes.default.svc"
     namespace: afterglow
@@ -38,9 +36,5 @@ spec:
         duration: 5s
         factor: 2
         maxDuration: 3m
-  ignoreDifferences:
-    # Secret data는 수동 관리 (ArgoCD가 덮어쓰지 않도록)
-    - group: ""
-      kind: Secret
-      jsonPointers:
-        - /data
+  # configmap.yaml, secret.yaml은 directory.exclude로 sync 대상에서 제외됨
+  # → 수동으로 kubectl apply -f 해야 함
