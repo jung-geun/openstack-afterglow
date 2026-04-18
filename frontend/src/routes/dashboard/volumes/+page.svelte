@@ -5,6 +5,7 @@
   import type { Volume } from '$lib/types/resources';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import VolumeDetailPanel from '$lib/components/VolumeDetailPanel.svelte';
+  import VolumeTransferModal from '$lib/components/VolumeTransferModal.svelte';
   import SlidePanel from '$lib/components/SlidePanel.svelte';
   import RefreshButton from '$lib/components/RefreshButton.svelte';
   import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
@@ -37,6 +38,9 @@
   let error = $state('');
   let deleting = $state<string | null>(null);
   let showModal = $state(false);
+  let showTransferModal = $state(false);
+  let transferVolumeId = $state('');
+  let transferVolumeName = $state('');
   let creating = $state(false);
   let createError = $state('');
   let form = $state({ name: '', size_gb: 10 });
@@ -107,6 +111,12 @@
     } finally {
       deleting = null;
     }
+  }
+
+  function openTransferModal(id: string, name: string) {
+    transferVolumeId = id;
+    transferVolumeName = name;
+    showTransferModal = true;
   }
 
   async function forceDeleteVolume(id: string, name: string) {
@@ -225,6 +235,11 @@
                       onclick={(e) => { e.stopPropagation(); openVolumePanel(vol.id); }}
                       class="text-blue-400 hover:text-blue-300 text-xs px-2 py-1 rounded border border-blue-900 hover:border-blue-700 transition-colors"
                     >연결</button>
+                    <button
+                      onclick={(e) => { e.stopPropagation(); openTransferModal(vol.id, vol.name); }}
+                      class="text-violet-400 hover:text-violet-300 text-xs px-2 py-1 rounded border border-violet-900 hover:border-violet-700 transition-colors"
+                      title="다른 프로젝트로 볼륨 이전"
+                    >이전</button>
                   {/if}
                   {#if (vol.status === 'error' || vol.status === 'error_deleting' || vol.status === 'deleting') && $auth.isSystemAdmin}
                     <button
@@ -259,4 +274,14 @@
       onDeleted={() => { fetchVolumes(); closeVolumePanel(); }}
     />
   </SlidePanel>
+{/if}
+
+<!-- Volume Transfer Modal -->
+{#if showTransferModal}
+  <VolumeTransferModal
+    volumeId={transferVolumeId}
+    volumeName={transferVolumeName}
+    onClose={() => showTransferModal = false}
+    onTransferred={() => { fetchVolumes(); showTransferModal = false; }}
+  />
 {/if}

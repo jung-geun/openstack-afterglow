@@ -72,3 +72,57 @@ def resolve_with_deps(selected_ids: list[str]) -> list[str]:
         visit(lib_id)
 
     return resolved
+
+
+def check_python_version_conflict(selected_ids: list[str]) -> str | None:
+    """선택된 라이브러리들 간 Python 버전 충돌 여부 확인.
+
+    각 라이브러리의 version 필드가 Python 버전을 나타내는 경우(id가 python*인 경우)를
+    기준으로 충돌을 감지. 충돌 시 에러 메시지를, 충돌이 없으면 None 반환.
+    """
+    python_libs = [_catalog_by_id[lid] for lid in selected_ids if lid in _catalog_by_id and lid.startswith("python")]
+    if len(python_libs) <= 1:
+        return None
+    versions = {lib.version for lib in python_libs}
+    if len(versions) > 1:
+        names = ", ".join(lib.name for lib in python_libs)
+        return f"Python 버전 충돌: {names} 중 하나만 선택해야 합니다."
+    return None
+
+
+def validate_compatibility(
+    selected_ids: list[str],
+    ubuntu_version: str | None = None,
+) -> list[str]:
+    """선택된 라이브러리 조합의 호환성을 검증.
+
+    Returns:
+        경고/에러 메시지 목록. 빈 리스트이면 호환.
+    """
+    messages: list[str] = []
+
+    # 알 수 없는 라이브러리 ID 확인
+    unknown = [lid for lid in selected_ids if lid not in _catalog_by_id]
+    if unknown:
+        messages.append(f"알 수 없는 라이브러리: {', '.join(unknown)}")
+
+    known_ids = [lid for lid in selected_ids if lid in _catalog_by_id]
+    if not known_ids:
+        return messages
+
+    # Python 버전 충돌 확인
+    conflict = check_python_version_conflict(known_ids)
+    if conflict:
+        messages.append(conflict)
+
+    # Ubuntu 버전 호환성 확인
+    if ubuntu_version:
+        incompatible = []
+        for lid in known_ids:
+            lib = _catalog_by_id[lid]
+            if lib.ubuntu_versions and ubuntu_version not in lib.ubuntu_versions:
+                incompatible.append(f"{lib.name} (지원: {', '.join(lib.ubuntu_versions)})")
+        if incompatible:
+            messages.append(f"Ubuntu {ubuntu_version} 미지원 라이브러리: {'; '.join(incompatible)}")
+
+    return messages

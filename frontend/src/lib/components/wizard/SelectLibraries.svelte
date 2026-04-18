@@ -5,6 +5,7 @@
 		version: string;
 		depends_on: string[];
 		available_prebuilt: boolean;
+		share_proto: string;
 	}
 
 	let { libraries, selected, hasGpuFlavor, onToggle }: {
@@ -49,6 +50,9 @@
 					<span class="text-gray-500 text-xs">v{lib.version}</span>
 					{#if lib.available_prebuilt}
 						<span class="px-1.5 py-0.5 bg-green-900/40 text-green-400 rounded text-xs">사전 빌드 가능</span>
+					{/if}
+					{#if lib.share_proto}
+						<span class="px-1.5 py-0.5 rounded text-xs {lib.share_proto === 'NFS' ? 'bg-blue-900/40 text-blue-400' : 'bg-purple-900/40 text-purple-400'}">{lib.share_proto}</span>
 					{/if}
 				</div>
 				{#if lib.depends_on.length > 0}

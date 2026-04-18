@@ -1,5 +1,6 @@
 import openstack
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 
 from app.api.deps import get_os_conn
 from app.models.storage import FileStorageInfo, LibraryConfig
@@ -38,3 +39,23 @@ async def list_libraries(conn: openstack.connection.Connection = Depends(get_os_
 async def list_prebuilt_file_storages(conn: openstack.connection.Connection = Depends(get_os_conn)):
     """사전 빌드된 라이브러리 파일 스토리지 목록."""
     return manila.list_file_storages(conn, metadata_filter={"union_type": "prebuilt"})
+
+
+class ValidateLibrariesRequest(BaseModel):
+    library_ids: list[str]
+    ubuntu_version: str | None = None
+
+
+class ValidateLibrariesResponse(BaseModel):
+    compatible: bool
+    messages: list[str]
+
+
+@router.post("/validate", response_model=ValidateLibrariesResponse)
+async def validate_libraries(
+    req: ValidateLibrariesRequest,
+    _conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """선택된 라이브러리 조합의 호환성 검증."""
+    messages = lib_svc.validate_compatibility(req.library_ids, req.ubuntu_version)
+    return ValidateLibrariesResponse(compatible=len(messages) == 0, messages=messages)

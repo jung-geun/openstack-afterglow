@@ -497,6 +497,20 @@ async def delete_instance(
         except Exception as ex:
             logger.warning(f"Upper 볼륨 삭제 실패: {ex}")
 
+    # Strategy A(prebuilt): NFS access rule 정리 (best-effort)
+    if strategy != "dynamic":
+        server_ips = {ip.addr for ip in (server.ip_addresses or [])}
+        for file_storage_id in file_storage_ids:
+            if not file_storage_id:
+                continue
+            try:
+                access_rules = await asyncio.to_thread(manila.list_access_rules, conn, file_storage_id)
+                for rule in access_rules:
+                    if rule.get("access_type") == "ip" and rule.get("access_to") in server_ips:
+                        await asyncio.to_thread(manila.revoke_access_rule, conn, file_storage_id, rule["id"])
+            except Exception as ex:
+                logger.warning(f"NFS access rule 정리 실패 (share={file_storage_id}): {ex}")
+
     # Floating IP 정리 (해제 + 삭제)
     try:
         await asyncio.to_thread(neutron.cleanup_instance_fips, conn, instance_id)

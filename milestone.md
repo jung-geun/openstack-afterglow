@@ -341,7 +341,7 @@ Step 5: 요약 & 배포
   - [x] NFS access rule 생성: `access_type="ip"`, `access_to="<VM_IP_OR_CIDR>"`
   - [x] VM Floating IP / Tenant 네트워크 CIDR 기반 자동 access rule 등록
   - [x] VM 생성 시 인스턴스 IP 확보 후 NFS share access rule 자동 추가
-  - [ ] VM 삭제 시 관련 NFS access rule 자동 정리 (기존 access rule 정리 로직에 NFS 케이스 추가 필요)
+  - [x] VM 삭제 시 관련 NFS access rule 자동 정리 — `delete_instance()`에서 VM IP 매칭 후 revoke (best-effort)
 
 - [x] 1.3 NFS 마운트 안정성 확보
   - [x] NFS 마운트 옵션 튜닝: `hard,intr,noatime,_netdev` 기본값
@@ -349,10 +349,10 @@ Step 5: 요약 & 배포
   - [x] systemd 마운트 유닛(`union-overlay.service`) — `After=network-online.target remote-fs.target`
   - [ ] NFS 마운트 상태 헬스체크 스크립트 추가 (5.1로 이동)
 
-- [ ] 1.4 Frontend — NFS 옵션 UI
-  - [ ] 파일 스토리지 생성 시 프로토콜 선택 (CEPHFS / NFS) 드롭다운 추가
-  - [ ] NFS share 목록 및 access rule 관리 UI
-  - [ ] VM 생성 마법사에서 마운트 프로토콜 선택 옵션
+- [x] 1.4 Frontend — NFS 옵션 UI
+  - [x] 파일 스토리지 생성 시 프로토콜 선택 (CEPHFS / NFS) 드롭다운 추가
+  - [x] NFS share 목록 및 access rule 관리 UI
+  - [x] VM 생성 마법사에서 마운트 프로토콜 선택 옵션 — `SelectStrategy.svelte` Strategy B에 NFS/CephFS 토글, `wizard.ts` mountProtocol 상태 추가, 라이브러리별 프로토콜 배지
 
 ---
 
@@ -472,7 +472,7 @@ Step 5: 요약 & 배포
     }
     ```
   - [x] `LibraryConfig` 모델 확장: `share_proto`, `ubuntu_versions` 필드 추가
-  - [ ] 의존성 검증 로직: 선택된 라이브러리 조합이 호환 가능한지 확인
+  - [x] 의존성 검증 로직: `validate_compatibility()`, `check_python_version_conflict()` — Ubuntu 버전 / Python 버전 충돌 감지. `POST /api/libraries/validate` 엔드포인트 추가
 
 - [x] 3.3 크로스 프로젝트 접근 관리
   - [x] Admin 프로젝트에서 NFS share 생성 시 다른 프로젝트 접근 허용:
@@ -521,10 +521,10 @@ Step 5: 요약 & 배포
   - [x] `GET /api/volumes/transfers` — 이전 목록
   - [x] `DELETE /api/volumes/transfer/{transfer_id}` — 이전 취소
 
-- [ ] 4.3 Frontend — 볼륨 마이그레이션 UI
-  - [ ] 볼륨 상세 페이지에 "이전" 버튼 추가
-  - [ ] 대상 프로젝트 선택 및 auth key 입력 폼
-  - [ ] 이전 진행 상태 표시
+- [x] 4.3 Frontend — 볼륨 마이그레이션 UI
+  - [x] 볼륨 목록 `available` 상태 행에 "이전" 버튼 추가
+  - [x] `VolumeTransferModal.svelte` — 이전 생성(auth_key 복사)/수락(transfer_id+auth_key)/목록+취소
+  - [x] `cinder.py` Transfer 서비스 함수 4개 구현 (이전에 누락되어 런타임 500 발생하던 버그 수정)
 
 ---
 

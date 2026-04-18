@@ -13,6 +13,7 @@ export interface WizardState {
 	flavorName: string | null;
 	libraries: string[];
 	strategy: 'prebuilt' | 'dynamic' | null;
+	mountProtocol: 'CEPHFS' | 'NFS';
 	instanceName: string;
 	networkId: string | null;
 	networkName: string | null;
@@ -33,6 +34,7 @@ const initial: WizardState = {
 	flavorName: null,
 	libraries: [],
 	strategy: null,
+	mountProtocol: 'NFS',
 	instanceName: '',
 	networkId: null,
 	networkName: null,
