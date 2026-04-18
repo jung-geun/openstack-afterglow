@@ -1,5 +1,7 @@
 """k3s_plugins 레지스트리 및 각 플러그인 단위 테스트."""
 
+import base64
+import gzip
 from unittest.mock import MagicMock
 
 import yaml
@@ -457,8 +459,6 @@ def test_registry_get_active_plugin_names():
 
 def test_cloudinit_server_no_plugins():
     """플러그인 없을 때 cloud-init 렌더링이 정상 동작해야 한다."""
-    import base64
-
     from app.services.k3s_cloudinit import generate_server_userdata
 
     result = generate_server_userdata(
@@ -467,7 +467,7 @@ def test_cloudinit_server_no_plugins():
         callback_url="http://callback.example.com",
         callback_token="token123",
     )
-    decoded = base64.b64decode(result).decode()
+    decoded = gzip.decompress(base64.b64decode(result)).decode()
     assert "#cloud-config" in decoded
     assert "k3s_version" not in decoded  # Jinja 변수 미치환 없어야 함
     assert "--disable-cloud-controller" not in decoded
@@ -475,8 +475,6 @@ def test_cloudinit_server_no_plugins():
 
 def test_cloudinit_server_with_occm_plugin():
     """OCCM 플러그인 활성 시 cloud-init에 external cloud provider 인자가 포함되어야 한다."""
-    import base64
-
     from app.services.k3s_cloudinit import generate_server_userdata
 
     result = generate_server_userdata(
@@ -488,7 +486,7 @@ def test_cloudinit_server_with_occm_plugin():
         plugin_manifests=[{"name": "occm", "content": "apiVersion: v1\nkind: List\nitems: []\n"}],
         needs_external_cloud_provider=True,
     )
-    decoded = base64.b64decode(result).decode()
+    decoded = gzip.decompress(base64.b64decode(result)).decode()
     assert "--disable-cloud-controller" in decoded
     assert "cloud-provider=external" in decoded
     assert "occm-manifests.yaml" in decoded
@@ -497,8 +495,6 @@ def test_cloudinit_server_with_occm_plugin():
 
 def test_cloudinit_server_multi_plugins():
     """복수 플러그인 시 각 매니페스트 파일이 write_files에 포함되어야 한다."""
-    import base64
-
     from app.services.k3s_cloudinit import generate_server_userdata
 
     result = generate_server_userdata(
@@ -512,15 +508,13 @@ def test_cloudinit_server_multi_plugins():
         ],
         needs_external_cloud_provider=True,
     )
-    decoded = base64.b64decode(result).decode()
+    decoded = gzip.decompress(base64.b64decode(result)).decode()
     assert "occm-manifests.yaml" in decoded
     assert "cinder_csi-manifests.yaml" in decoded
 
 
 def test_cloudinit_agent_no_extra_args():
     """에이전트: extra_agent_args 없을 때 INSTALL_K3S_EXEC 없어야 한다."""
-    import base64
-
     from app.services.k3s_cloudinit import generate_agent_userdata
 
     result = generate_agent_userdata(
@@ -529,15 +523,13 @@ def test_cloudinit_agent_no_extra_args():
         server_ip="10.0.0.1",
         node_token="tok",
     )
-    decoded = base64.b64decode(result).decode()
+    decoded = gzip.decompress(base64.b64decode(result)).decode()
     assert "#cloud-config" in decoded
     assert "INSTALL_K3S_EXEC" not in decoded
 
 
 def test_cloudinit_agent_with_cloud_provider():
     """에이전트: extra_agent_args에 cloud-provider=external이 포함되어야 한다."""
-    import base64
-
     from app.services.k3s_cloudinit import generate_agent_userdata
 
     result = generate_agent_userdata(
@@ -547,15 +539,13 @@ def test_cloudinit_agent_with_cloud_provider():
         node_token="tok",
         extra_agent_args=["--kubelet-arg=cloud-provider=external"],
     )
-    decoded = base64.b64decode(result).decode()
+    decoded = gzip.decompress(base64.b64decode(result)).decode()
     assert "cloud-provider=external" in decoded
     assert "INSTALL_K3S_EXEC" in decoded
 
 
 def test_cloudinit_agent_backward_compat_occm_enabled():
     """하위호환: occm_enabled=True 시 cloud-provider=external이 포함되어야 한다."""
-    import base64
-
     from app.services.k3s_cloudinit import generate_agent_userdata
 
     result = generate_agent_userdata(
@@ -565,5 +555,5 @@ def test_cloudinit_agent_backward_compat_occm_enabled():
         node_token="tok",
         occm_enabled=True,
     )
-    decoded = base64.b64decode(result).decode()
+    decoded = gzip.decompress(base64.b64decode(result)).decode()
     assert "cloud-provider=external" in decoded

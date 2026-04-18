@@ -1,5 +1,7 @@
 """OCCM 설정 생성 및 cloud-init 통합 단위 테스트."""
 
+import base64
+import gzip
 from unittest.mock import MagicMock
 
 
@@ -110,8 +112,6 @@ class TestGenerateOccmManifests:
 class TestCloudInitIntegration:
     def test_server_userdata_without_occm(self):
         """OCCM 비활성 시 기존 템플릿 사용 확인."""
-        import base64
-
         from app.services.k3s_cloudinit import generate_server_userdata
 
         result = generate_server_userdata(
@@ -120,14 +120,12 @@ class TestCloudInitIntegration:
             callback_url="http://api.example.com",
             callback_token="tok-123",
         )
-        decoded = base64.b64decode(result).decode()
+        decoded = gzip.decompress(base64.b64decode(result)).decode()
         assert "--disable-cloud-controller" not in decoded
         assert "cloud.conf" not in decoded
 
     def test_server_userdata_with_occm(self):
         """OCCM 활성 시 OCCM 템플릿 사용 + 필수 내용 포함 확인."""
-        import base64
-
         from app.services.k3s_cloudinit import generate_server_userdata
 
         result = generate_server_userdata(
@@ -139,7 +137,7 @@ class TestCloudInitIntegration:
             cloud_conf="[Global]\nauth-url=http://keystone:5000/v3",
             occm_manifests="apiVersion: v1\nkind: ServiceAccount",
         )
-        decoded = base64.b64decode(result).decode()
+        decoded = gzip.decompress(base64.b64decode(result)).decode()
         assert "--disable-cloud-controller" in decoded
         assert '--kubelet-arg="cloud-provider=external"' in decoded
         assert "/etc/kubernetes/cloud.conf" in decoded
@@ -148,8 +146,6 @@ class TestCloudInitIntegration:
 
     def test_agent_userdata_without_occm(self):
         """OCCM 비활성 시 기존 에이전트 템플릿."""
-        import base64
-
         from app.services.k3s_cloudinit import generate_agent_userdata
 
         result = generate_agent_userdata(
@@ -158,13 +154,11 @@ class TestCloudInitIntegration:
             server_ip="10.0.0.1",
             node_token="token-abc",
         )
-        decoded = base64.b64decode(result).decode()
+        decoded = gzip.decompress(base64.b64decode(result)).decode()
         assert "cloud-provider=external" not in decoded
 
     def test_agent_userdata_with_occm(self):
         """OCCM 활성 시 에이전트에 cloud-provider=external 포함."""
-        import base64
-
         from app.services.k3s_cloudinit import generate_agent_userdata
 
         result = generate_agent_userdata(
@@ -174,7 +168,7 @@ class TestCloudInitIntegration:
             node_token="token-abc",
             occm_enabled=True,
         )
-        decoded = base64.b64decode(result).decode()
+        decoded = gzip.decompress(base64.b64decode(result)).decode()
         assert "cloud-provider=external" in decoded
 
 

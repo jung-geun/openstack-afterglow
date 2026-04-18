@@ -170,7 +170,10 @@ async def _notion_request(
     for attempt in range(max_retries + 1):
         await _rate_limiter.acquire()
         async with _get_concurrency_sem():
-            resp = await call(url, headers=_headers(api_key), json=json)
+            kwargs: dict = {"headers": _headers(api_key)}
+            if json is not None:
+                kwargs["json"] = json
+            resp = await call(url, **kwargs)
         if resp.status_code != 429:
             return resp
         last_resp = resp
