@@ -1,3 +1,3 @@
 kustomize:
   images:
-  - ghcr.io/jung-geun/afterglow:dev@sha256:4c8b4b9903fde07e64f648213f7649492093733f560ca9e9ec2b163e0f0c7204
+  - ghcr.io/jung-geun/afterglow:dev@sha256:de79de24bcf8201820f264b3e9ca9ba82dcc88c7a50da1de45f35acb1292b2e9
