@@ -198,8 +198,14 @@ jobs:
       # ARGOCD_SERVER: ArgoCD 서버 주소 (예: argocd.example.com)
       # ARGOCD_TOKEN: ArgoCD API 토큰 (Project Settings → Secrets에 등록)
       - name: Trigger ArgoCD Image Updater refresh
-        if: secrets.ARGOCD_SERVER != '' && secrets.ARGOCD_TOKEN != ''
+        env:
+          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+          ARGOCD_TOKEN: ${{ secrets.ARGOCD_TOKEN }}
         run: |
+          if [ -z "${ARGOCD_SERVER}" ] || [ -z "${ARGOCD_TOKEN}" ]; then
+            echo "ARGOCD_SERVER/ARGOCD_TOKEN 미설정 — refresh 건너뜀"
+            exit 0
+          fi
           if [[ "${GITHUB_REF}" == refs/heads/dev ]]; then
             APP="afterglow-dev"
           elif [[ "${GITHUB_REF}" == refs/heads/main ]]; then
@@ -210,8 +216,8 @@ jobs:
           fi
           echo "ArgoCD Application '${APP}' refresh 요청 중..."
           HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
-            "https://${{ secrets.ARGOCD_SERVER }}/api/v1/applications/${APP}/actions/refresh" \
-            -H "Authorization: Bearer ${{ secrets.ARGOCD_TOKEN }}" \
+            "https://${ARGOCD_SERVER}/api/v1/applications/${APP}/actions/refresh" \
+            -H "Authorization: Bearer ${ARGOCD_TOKEN}" \
             --insecure \
             --max-time 10 || echo "000")
           if [ "${HTTP_STATUS}" = "200" ] || [ "${HTTP_STATUS}" = "201" ]; then
