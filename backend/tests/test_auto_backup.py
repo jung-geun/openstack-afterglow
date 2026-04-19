@@ -1,6 +1,6 @@
 """볼륨 자동 백업 서비스 단위 테스트."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -11,15 +11,13 @@ from app.services.auto_backup import (
     disable_auto_backup,
     enable_auto_backup,
     get_auto_backup_config,
-    list_auto_backup_configs,
     run_backup_cycle,
 )
-
 
 # ────────── 헬퍼 ──────────
 
 def _make_backup(volume_id: str, tier: str, days_ago: int, bid: str = "bk-1") -> dict:
-    ts = (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat()
+    ts = (datetime.now(datetime.UTC) - timedelta(days=days_ago)).isoformat()
     return {
         "id": bid,
         "name": f"auto_{volume_id[:8]}_{tier}_20240101",
@@ -63,7 +61,6 @@ async def test_enable_and_get_config():
         pass
 
     # enable_auto_backup이 올바른 키에 저장하는지
-    import json
     stored = {}
 
     async def fake_set(key, val):
@@ -140,7 +137,7 @@ async def test_run_backup_cycle_skips_when_recent():
 
     recent_daily = _make_backup(volume_id, "daily", days_ago=0, bid="bk-recent")
     # created_at을 1시간 전으로 설정
-    recent_daily["created_at"] = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    recent_daily["created_at"] = (datetime.now(datetime.UTC) - timedelta(hours=1)).isoformat()
 
     with patch("app.services.auto_backup.cinder") as mock_cinder:
         mock_cinder.list_backups = MagicMock(return_value=[recent_daily])
