@@ -9,8 +9,7 @@ metadata:
       backend=ghcr.io/jung-geun/afterglow-api:dev,frontend=ghcr.io/jung-geun/afterglow:dev
     argocd-image-updater.argoproj.io/backend.update-strategy: digest
     argocd-image-updater.argoproj.io/frontend.update-strategy: digest
-    argocd-image-updater.argoproj.io/write-back-method: git
-    argocd-image-updater.argoproj.io/git-branch: dev
+    argocd-image-updater.argoproj.io/write-back-method: argocd
 spec:
   project: afterglow
   source:
