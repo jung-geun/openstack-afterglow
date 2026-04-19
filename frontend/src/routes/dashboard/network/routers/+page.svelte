@@ -2,16 +2,28 @@
   import { auth } from '$lib/stores/auth';
   import { untrack } from 'svelte';
   import { api, ApiError } from '$lib/api/client';
-  import { goto } from '$app/navigation';
   import type { Router, Network } from '$lib/types/resources';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import RefreshButton from '$lib/components/RefreshButton.svelte';
   import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
+  import SlidePanel from '$lib/components/SlidePanel.svelte';
+  import RouterDetailPanel from '$lib/components/RouterDetailPanel.svelte';
 
   const statusColor: Record<string, string> = {
     ACTIVE: 'text-green-400 bg-green-900/30',
     DOWN:   'text-red-400 bg-red-900/30',
   };
+
+  let selectedRouterId = $state<string | null>(null);
+
+  function openRouterPanel(id: string) {
+    selectedRouterId = id;
+    history.pushState({ routerId: id }, '', `/dashboard/network/routers/${id}`);
+  }
+  function closeRouterPanel() {
+    selectedRouterId = null;
+    history.pushState({}, '', '/dashboard/network/routers');
+  }
 
   let routers = $state<Router[]>([]);
   let externalNetworks = $state<Network[]>([]);
@@ -146,7 +158,7 @@
         </thead>
         <tbody>
           {#each routers as router (router.id)}
-            <tr onclick={() => goto('/dashboard/network/routers/' + router.id)} onkeydown={(e) => e.key === 'Enter' && goto('/dashboard/network/routers/' + router.id)} tabindex="0" role="link" class="border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors cursor-pointer">
+            <tr onclick={() => openRouterPanel(router.id)} onkeydown={(e) => e.key === 'Enter' && openRouterPanel(router.id)} tabindex="0" role="link" class="border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors cursor-pointer">
               <td class="py-3 pr-6 font-medium text-white">{router.name || router.id.slice(0, 12)}</td>
               <td class="py-3 pr-6"><span class="px-2 py-0.5 rounded text-xs font-medium {statusColor[router.status] ?? 'text-gray-400 bg-gray-800'}">{router.status}</span></td>
               <td class="py-3 pr-6 text-xs">
@@ -158,7 +170,7 @@
               </td>
               <td class="py-3 pr-6 text-gray-400 text-xs">{router.connected_subnet_ids.length}개</td>
               <td class="py-3 text-right">
-                <button onclick={(e) => { e.stopPropagation(); goto('/dashboard/network/routers/' + router.id); }} class="text-gray-400 hover:text-white text-xs px-2 py-1 rounded border border-gray-700 hover:border-gray-500 transition-colors">상세</button>
+                <button onclick={(e) => { e.stopPropagation(); openRouterPanel(router.id); }} class="text-gray-400 hover:text-white text-xs px-2 py-1 rounded border border-gray-700 hover:border-gray-500 transition-colors">상세</button>
               </td>
             </tr>
           {/each}
@@ -167,3 +179,13 @@
     </div>
   {/if}
 </div>
+
+{#if selectedRouterId}
+  <SlidePanel onClose={closeRouterPanel} width="w-full md:w-[60vw] max-w-2xl">
+    <RouterDetailPanel
+      routerId={selectedRouterId}
+      onClose={closeRouterPanel}
+      onDeleted={() => { fetchRouters(); closeRouterPanel(); }}
+    />
+  </SlidePanel>
+{/if}

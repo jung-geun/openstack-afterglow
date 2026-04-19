@@ -691,6 +691,32 @@ async def _k3s_cleanup_loop() -> None:
         await asyncio.sleep(300)
 
 
+async def _auto_backup_loop() -> None:
+    """1시간 간격으로 자동 백업 설정이 있는 볼륨에 대해 백업 사이클 실행."""
+    await asyncio.sleep(60)  # 시작 후 1분 대기
+    while True:
+        try:
+            from app.services import auto_backup as _ab
+            from app.services.keystone import get_admin_connection_for_project
+
+            configs = await _ab.list_all_auto_backup_configs()
+            if configs:
+                _logger.info("auto_backup: %d개 볼륨 자동 백업 시작", len(configs))
+                for cfg in configs:
+                    project_id = cfg.get("project_id")
+                    volume_id = cfg.get("volume_id")
+                    if not project_id or not volume_id:
+                        continue
+                    try:
+                        conn = await asyncio.to_thread(get_admin_connection_for_project, project_id)
+                        await _ab.run_backup_cycle(conn, project_id, volume_id, cfg)
+                    except Exception:
+                        _logger.warning("auto_backup: 백업 사이클 실패 (volume=%s)", volume_id, exc_info=True)
+        except Exception:
+            _logger.warning("auto_backup: 루프 오류", exc_info=True)
+        await asyncio.sleep(3600)  # 1시간
+
+
 async def _deferred_create_tables() -> None:
     """DB 테이블 생성을 백그라운드에서 실행. API 기동을 차단하지 않는다."""
     from app.database import create_tables
@@ -720,6 +746,7 @@ async def start_background_workers():
 
     asyncio.create_task(_snapshot_loop())
     asyncio.create_task(_notion_sync_loop())
+    asyncio.create_task(_auto_backup_loop())
     if _svc_cfg.service_k3s_enabled:
         asyncio.create_task(_k3s_cleanup_loop())
 

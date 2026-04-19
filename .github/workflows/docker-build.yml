@@ -193,3 +193,29 @@ jobs:
               "${IMG}:${BASE}-amd64" \
               "${IMG}:${BASE}-arm64"
           fi
+
+      # manifest 완료 후 ArgoCD Image Updater에 즉시 refresh 신호 전송
+      # ARGOCD_SERVER: ArgoCD 서버 주소 (예: argocd.example.com)
+      # ARGOCD_TOKEN: ArgoCD API 토큰 (Project Settings → Secrets에 등록)
+      - name: Trigger ArgoCD Image Updater refresh
+        if: secrets.ARGOCD_SERVER != '' && secrets.ARGOCD_TOKEN != ''
+        run: |
+          if [[ "${GITHUB_REF}" == refs/heads/dev ]]; then
+            APP="afterglow-dev"
+          elif [[ "${GITHUB_REF}" == refs/heads/main ]]; then
+            APP="afterglow-prod"
+          else
+            echo "태그 빌드 — ArgoCD refresh 건너뜀"
+            exit 0
+          fi
+          echo "ArgoCD Application '${APP}' refresh 요청 중..."
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+            "https://${{ secrets.ARGOCD_SERVER }}/api/v1/applications/${APP}/actions/refresh" \
+            -H "Authorization: Bearer ${{ secrets.ARGOCD_TOKEN }}" \
+            --insecure \
+            --max-time 10 || echo "000")
+          if [ "${HTTP_STATUS}" = "200" ] || [ "${HTTP_STATUS}" = "201" ]; then
+            echo "ArgoCD refresh 성공 (HTTP ${HTTP_STATUS})"
+          else
+            echo "ArgoCD refresh 응답: HTTP ${HTTP_STATUS} (무시하고 계속)"
+          fi

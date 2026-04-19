@@ -2,11 +2,12 @@
   import { auth } from '$lib/stores/auth';
   import { untrack } from 'svelte';
   import { api, ApiError, memoryCache } from '$lib/api/client';
-  import { goto } from '$app/navigation';
   import type { Network } from '$lib/types/resources';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import RefreshButton from '$lib/components/RefreshButton.svelte';
   import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
+  import SlidePanel from '$lib/components/SlidePanel.svelte';
+  import NetworkDetailPanel from '$lib/components/NetworkDetailPanel.svelte';
 
   const statusColor: Record<string, string> = {
     ACTIVE: 'text-green-400 bg-green-900/30',
@@ -20,6 +21,17 @@
   let error = $state('');
   let autoRefresh = $state(false);
   let deleting = $state<string | null>(null);
+  let selectedNetworkId = $state<string | null>(null);
+
+  function openNetworkPanel(id: string) {
+    selectedNetworkId = id;
+    history.pushState({ networkId: id }, '', `/dashboard/network/networks/${id}`);
+  }
+  function closeNetworkPanel() {
+    selectedNetworkId = null;
+    history.pushState({}, '', '/dashboard/network/networks');
+  }
+
   let showModal = $state(false);
   let creating = $state(false);
   let createError = $state('');
@@ -189,7 +201,7 @@
         </thead>
         <tbody>
           {#each networks as net (net.id)}
-            <tr onclick={() => goto('/dashboard/network/networks/' + net.id)} class="border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors cursor-pointer">
+            <tr onclick={() => openNetworkPanel(net.id)} class="border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors cursor-pointer">
               <td class="py-3 pr-6 font-medium text-white">{net.name || net.id.slice(0, 12)}</td>
               <td class="py-3 pr-6"><span class="px-2 py-0.5 rounded text-xs font-medium {statusColor[net.status] ?? 'text-gray-400 bg-gray-800'}">{net.status}</span></td>
               <td class="py-3 pr-6 text-gray-400 text-xs">{net.subnets.length}개</td>
@@ -214,3 +226,15 @@
     </div>
   {/if}
 </div>
+
+{#if selectedNetworkId}
+  <SlidePanel onClose={closeNetworkPanel} width="w-full md:w-[60vw] max-w-2xl">
+    <NetworkDetailPanel
+      networkId={selectedNetworkId}
+      apiBase="/api/networks"
+      onClose={closeNetworkPanel}
+      token={$auth.token ?? undefined}
+      projectId={$auth.projectId ?? undefined}
+    />
+  </SlidePanel>
+{/if}

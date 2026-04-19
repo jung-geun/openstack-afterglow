@@ -246,11 +246,19 @@ def delete_keypair(conn: openstack.connection.Connection, name: str) -> None:
 
 
 def delete_server(conn: openstack.connection.Connection, server_id: str) -> None:
-    conn.compute.delete_server(server_id, force=True)
+    try:
+        conn.compute.delete_server(server_id, force=True)
+    except Exception as e:
+        # 이미 삭제됐거나 존재하지 않으면 무시 (404 ResourceNotFound, 409 Conflict)
+        err_str = str(e).lower()
+        if "404" in err_str or "not found" in err_str or "409" in err_str or "conflict" in err_str:
+            _logger.debug("delete_server %s: already gone or conflict, ignoring (%s)", server_id, e)
+            return
+        raise
 
 
 def wait_server_deleted(conn: openstack.connection.Connection, server_id: str, timeout: int = 120) -> None:
-    """서버가 완전히 사라질 때까지 폴링."""
+    """서버가 완전히 사라질 때까지 폴링. 타임아웃 초과 시 TimeoutError 발생."""
     import time
 
     deadline = time.monotonic() + timeout
@@ -259,6 +267,7 @@ def wait_server_deleted(conn: openstack.connection.Connection, server_id: str, t
         if srv is None:
             return
         time.sleep(3)
+    raise TimeoutError(f"서버 {server_id} 삭제 대기 타임아웃 ({timeout}s)")
 
 
 def start_server(conn: openstack.connection.Connection, server_id: str) -> None:

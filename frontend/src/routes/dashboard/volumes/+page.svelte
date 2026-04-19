@@ -47,6 +47,8 @@
   let autoRefresh = $state(false);
 
   let selectedVolumeId = $state<string | null>(null);
+  let autoBackupConfigs = $state<Set<string>>(new Set());
+  let autoBackupToggling = $state<string | null>(null);
 
   function openVolumePanel(id: string) {
     selectedVolumeId = id;
@@ -132,11 +134,38 @@
     }
   }
 
+  async function fetchAutoBackupConfigs() {
+    try {
+      const configs = await api.post<{ volume_id: string }[]>(
+        '/api/volumes/backups/auto-backup/configs', {},
+        $auth.token ?? undefined, $auth.projectId ?? undefined
+      );
+      autoBackupConfigs = new Set(configs.map(c => c.volume_id));
+    } catch { /* 오류 무시 */ }
+  }
+
+  async function toggleAutoBackup(volumeId: string) {
+    autoBackupToggling = volumeId;
+    try {
+      if (autoBackupConfigs.has(volumeId)) {
+        await api.delete(`/api/volumes/backups/auto-backup/${volumeId}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+        autoBackupConfigs = new Set([...autoBackupConfigs].filter(id => id !== volumeId));
+      } else {
+        await api.post(`/api/volumes/backups/auto-backup/${volumeId}`, {}, $auth.token ?? undefined, $auth.projectId ?? undefined);
+        autoBackupConfigs = new Set([...autoBackupConfigs, volumeId]);
+      }
+    } catch (e) {
+      alert('자동 백업 설정 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+    } finally {
+      autoBackupToggling = null;
+    }
+  }
+
   $effect(() => {
     const projectId = $auth.projectId;
     if (!projectId) return;
     loading = true;
-    untrack(() => { fetchVolumes(); });
+    untrack(() => { fetchVolumes(); fetchAutoBackupConfigs(); });
   });
 
   $effect(() => {
@@ -203,6 +232,7 @@
             <th class="text-left py-3 pr-6">크기</th>
             <th class="text-left py-3 pr-6">타입</th>
             <th class="text-left py-3 pr-6">연결된 인스턴스</th>
+            <th class="text-left py-3 pr-6 hidden md:table-cell">자동 백업</th>
             <th class="text-right py-3">액션</th>
           </tr>
         </thead>
@@ -227,6 +257,16 @@
                 {:else}
                   <span class="text-gray-500">미연결</span>
                 {/if}
+              </td>
+              <td class="py-3 pr-6 hidden md:table-cell">
+                <button
+                  onclick={(e) => { e.stopPropagation(); toggleAutoBackup(vol.id); }}
+                  disabled={autoBackupToggling === vol.id}
+                  title={autoBackupConfigs.has(vol.id) ? '자동 백업 비활성화' : '자동 백업 활성화'}
+                  class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out disabled:opacity-50 {autoBackupConfigs.has(vol.id) ? 'bg-blue-600' : 'bg-gray-700'}"
+                >
+                  <span class="translate-x-0 pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out {autoBackupConfigs.has(vol.id) ? 'translate-x-4' : 'translate-x-0'}"></span>
+                </button>
               </td>
               <td class="py-3 text-right">
                 <div class="flex items-center justify-end gap-1">
