@@ -79,6 +79,7 @@ async def restore_backup(
 
 # ────────── 자동 백업 설정 엔드포인트 ──────────
 
+
 class AutoBackupRequest(BaseModel):
     max_daily: int = 2
     max_weekly: int = 2
@@ -120,7 +121,8 @@ async def enable_auto_backup(
     project_id = conn._afterglow_project_id
     try:
         return await auto_backup.enable_auto_backup(
-            project_id, volume_id,
+            project_id,
+            volume_id,
             max_daily=req.max_daily,
             max_weekly=req.max_weekly,
             max_monthly=req.max_monthly,

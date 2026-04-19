@@ -16,6 +16,7 @@ from app.services.auto_backup import (
 
 # ────────── 헬퍼 ──────────
 
+
 def _make_backup(volume_id: str, tier: str, days_ago: int, bid: str = "bk-1") -> dict:
     ts = (datetime.now(datetime.UTC) - timedelta(days=days_ago)).isoformat()
     return {
@@ -28,6 +29,7 @@ def _make_backup(volume_id: str, tier: str, days_ago: int, bid: str = "bk-1") ->
 
 
 # ────────── 이름 / 분류 헬퍼 테스트 ──────────
+
 
 def test_make_backup_name_format():
     name = _make_backup_name("abc123def456", "daily")
@@ -50,6 +52,7 @@ def test_is_auto_backup_negative_manual():
 
 
 # ────────── Redis CRUD 테스트 ──────────
+
 
 @pytest.mark.asyncio
 async def test_enable_and_get_config():
@@ -108,6 +111,7 @@ async def test_disable_removes_from_redis():
 
 
 # ────────── run_backup_cycle 보존 정책 테스트 ──────────
+
 
 @pytest.mark.asyncio
 async def test_run_backup_cycle_creates_when_no_existing():

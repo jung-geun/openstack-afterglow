@@ -31,7 +31,10 @@ _ALL_KEY = f"{_PREFIX}:all_configs"
 # Config CRUD
 # ────────────────────────────────────────────
 
-async def enable_auto_backup(project_id: str, volume_id: str, max_daily: int = 2, max_weekly: int = 2, max_monthly: int = 1) -> dict:
+
+async def enable_auto_backup(
+    project_id: str, volume_id: str, max_daily: int = 2, max_weekly: int = 2, max_monthly: int = 1
+) -> dict:
     """볼륨 자동 백업 활성화. 설정을 Redis에 저장."""
     config = {
         "volume_id": volume_id,
@@ -97,6 +100,7 @@ async def list_all_auto_backup_configs() -> list[dict]:
 # Backup 이름 파싱 / 분류
 # ────────────────────────────────────────────
 
+
 def _make_backup_name(volume_id: str, tier: str) -> str:
     """tier: daily | weekly | monthly"""
     date = datetime.now(UTC).strftime("%Y%m%d")
@@ -124,7 +128,10 @@ def _backup_date(backup: dict) -> datetime | None:
 # Backup Cycle
 # ────────────────────────────────────────────
 
-async def run_backup_cycle(conn: openstack.connection.Connection, project_id: str, volume_id: str, config: dict) -> None:
+
+async def run_backup_cycle(
+    conn: openstack.connection.Connection, project_id: str, volume_id: str, config: dict
+) -> None:
     """한 볼륨에 대한 자동 백업 사이클 실행.
 
     1. 기존 자동 백업 목록 조회
@@ -146,8 +153,8 @@ async def run_backup_cycle(conn: openstack.connection.Connection, project_id: st
     vol_backups = [b for b in all_backups if b.get("volume_id") == volume_id]
 
     tiers = [
-        ("daily",   config.get("max_daily", 2),   24 * 3600),
-        ("weekly",  config.get("max_weekly", 2),  7 * 24 * 3600),
+        ("daily", config.get("max_daily", 2), 24 * 3600),
+        ("weekly", config.get("max_weekly", 2), 7 * 24 * 3600),
         ("monthly", config.get("max_monthly", 1), 30 * 24 * 3600),
     ]
 
@@ -168,10 +175,7 @@ async def run_backup_cycle(conn: openstack.connection.Connection, project_id: st
             try:
                 # daily는 incremental, weekly/monthly는 full
                 incremental = tier == "daily" and bool(tier_backups)
-                await asyncio.to_thread(
-                    cinder.create_backup, conn, volume_id, name,
-                    f"자동 백업 ({tier})", incremental
-                )
+                await asyncio.to_thread(cinder.create_backup, conn, volume_id, name, f"자동 백업 ({tier})", incremental)
                 _logger.info("auto_backup: %s 백업 생성 완료 (volume=%s, name=%s)", tier, volume_id, name)
                 # 방금 생성한 것 포함 재조회 필요 — 목록에 추가 처리
                 tier_backups = [{"name": name, "created_at": now.isoformat(), "volume_id": volume_id}] + tier_backups
