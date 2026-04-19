@@ -5,6 +5,8 @@ on:
     branches:
       - main
       - dev
+    paths-ignore:
+      - 'deploy/k8s/overlays/**/.argocd-source-*.yaml'
     tags:
       - 'v*'
   pull_request:
