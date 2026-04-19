@@ -170,7 +170,10 @@ async def _notion_request(
     for attempt in range(max_retries + 1):
         await _rate_limiter.acquire()
         async with _get_concurrency_sem():
-            resp = await call(url, headers=_headers(api_key), json=json)
+            kwargs: dict = {"headers": _headers(api_key)}
+            if json is not None:
+                kwargs["json"] = json
+            resp = await call(url, **kwargs)
         if resp.status_code != 429:
             return resp
         last_resp = resp
@@ -178,7 +181,7 @@ async def _notion_request(
         try:
             wait = float(retry_after_str)
         except (ValueError, TypeError):
-            wait = min(2 ** attempt, 60)
+            wait = min(2**attempt, 60)
         _logger.warning(
             "Notion rate limited (429), %ds 후 재시도 (attempt %d/%d)",
             int(wait),
@@ -198,9 +201,7 @@ async def validate_notion_config(api_key: str, database_id: str) -> tuple[bool, 
     """Notion DB 접근 가능 여부를 확인한다."""
     try:
         async with httpx.AsyncClient(timeout=15) as client:
-            resp = await _notion_request(
-                client, "GET", f"{NOTION_API_BASE}/databases/{database_id}", api_key
-            )
+            resp = await _notion_request(client, "GET", f"{NOTION_API_BASE}/databases/{database_id}", api_key)
         if resp.status_code == 200:
             return True, "연결 성공"
         body = resp.json()
@@ -208,7 +209,10 @@ async def validate_notion_config(api_key: str, database_id: str) -> tuple[bool, 
         if resp.status_code == 401:
             return False, f"인증 실패: API Key를 확인하세요 — {msg}"
         if resp.status_code == 404:
-            return False, "Database를 찾을 수 없습니다. ID를 확인하고, Integration에 DB 접근 권한이 있는지 확인하세요."
+            return (
+                False,
+                "Database를 찾을 수 없습니다. ID를 확인하고, Integration에 DB 접근 권한이 있는지 확인하세요.",
+            )
         return False, f"Notion API 오류 ({resp.status_code}): {msg}"
     except httpx.TimeoutException:
         return False, "Notion API 응답 시간 초과"
@@ -249,7 +253,10 @@ async def ensure_db_properties(api_key: str, database_id: str) -> None:
             return
 
         patch_resp = await _notion_request(
-            client, "PATCH", f"{NOTION_API_BASE}/databases/{database_id}", api_key,
+            client,
+            "PATCH",
+            f"{NOTION_API_BASE}/databases/{database_id}",
+            api_key,
             json={"properties": missing},
         )
         patch_resp.raise_for_status()
@@ -346,7 +353,11 @@ async def _fetch_all_pages(client: httpx.AsyncClient, api_key: str, database_id:
             body["start_cursor"] = start_cursor
 
         resp = await _notion_request(
-            client, "POST", f"{NOTION_API_BASE}/databases/{database_id}/query", api_key, json=body
+            client,
+            "POST",
+            f"{NOTION_API_BASE}/databases/{database_id}/query",
+            api_key,
+            json=body,
         )
         if resp.status_code != 200:
             _logger.error("Notion DB query 실패 (%d): %s", resp.status_code, resp.text)
@@ -430,7 +441,10 @@ async def sync_to_notion(api_key: str, database_id: str, instances: list[dict]) 
                         except Exception:
                             pass
                     resp = await _notion_request(
-                        client, "PATCH", f"{NOTION_API_BASE}/pages/{page_map[match_key]}", api_key,
+                        client,
+                        "PATCH",
+                        f"{NOTION_API_BASE}/pages/{page_map[match_key]}",
+                        api_key,
                         json={"properties": properties},
                     )
                     if resp.status_code < 400 and _redis is not None:
@@ -440,7 +454,10 @@ async def sync_to_notion(api_key: str, database_id: str, instances: list[dict]) 
                             pass
                 else:
                     resp = await _notion_request(
-                        client, "POST", f"{NOTION_API_BASE}/pages", api_key,
+                        client,
+                        "POST",
+                        f"{NOTION_API_BASE}/pages",
+                        api_key,
                         json={
                             "parent": {"database_id": database_id},
                             "properties": properties,
@@ -478,7 +495,11 @@ async def sync_to_notion(api_key: str, database_id: str, instances: list[dict]) 
                 if has_resource_prop:
                     body["properties"] = {resource_prop_name: {"relation": []}}
                 resp = await _notion_request(
-                    client, "PATCH", f"{NOTION_API_BASE}/pages/{page_id}", api_key, json=body
+                    client,
+                    "PATCH",
+                    f"{NOTION_API_BASE}/pages/{page_id}",
+                    api_key,
+                    json=body,
                 )
                 if resp.status_code < 400:
                     stats["archived"] += 1
@@ -734,11 +755,18 @@ async def ensure_hypervisor_db_properties(api_key: str, database_id: str) -> Non
             return
 
         patch_resp = await _notion_request(
-            client, "PATCH", f"{NOTION_API_BASE}/databases/{database_id}", api_key,
+            client,
+            "PATCH",
+            f"{NOTION_API_BASE}/databases/{database_id}",
+            api_key,
             json={"properties": missing},
         )
         patch_resp.raise_for_status()
-        _logger.info("Notion 하이퍼바이저 DB 속성 %d개 자동 생성: %s", len(missing), list(missing.keys()))
+        _logger.info(
+            "Notion 하이퍼바이저 DB 속성 %d개 자동 생성: %s",
+            len(missing),
+            list(missing.keys()),
+        )
 
 
 async def sync_hypervisors_to_notion(api_key: str, database_id: str, hypervisors: list[dict]) -> dict:
@@ -779,17 +807,29 @@ async def sync_hypervisors_to_notion(api_key: str, database_id: str, hypervisors
             try:
                 if name in page_map:
                     resp = await _notion_request(
-                        client, "PATCH", f"{NOTION_API_BASE}/pages/{page_map[name]}", api_key,
+                        client,
+                        "PATCH",
+                        f"{NOTION_API_BASE}/pages/{page_map[name]}",
+                        api_key,
                         json={"properties": props},
                     )
                 else:
                     resp = await _notion_request(
-                        client, "POST", f"{NOTION_API_BASE}/pages", api_key,
-                        json={"parent": {"database_id": database_id}, "properties": props},
+                        client,
+                        "POST",
+                        f"{NOTION_API_BASE}/pages",
+                        api_key,
+                        json={
+                            "parent": {"database_id": database_id},
+                            "properties": props,
+                        },
                     )
                 if resp.status_code >= 400:
                     _logger.warning(
-                        "Notion 하이퍼바이저 동기화 실패 (%s, %d): %s", name, resp.status_code, resp.text
+                        "Notion 하이퍼바이저 동기화 실패 (%s, %d): %s",
+                        name,
+                        resp.status_code,
+                        resp.text,
                     )
                     stats["errors"] += 1
                 else:
@@ -803,7 +843,10 @@ async def sync_hypervisors_to_notion(api_key: str, database_id: str, hypervisors
         async def _archive(key: str, page_id: str) -> None:
             try:
                 resp = await _notion_request(
-                    client, "PATCH", f"{NOTION_API_BASE}/pages/{page_id}", api_key,
+                    client,
+                    "PATCH",
+                    f"{NOTION_API_BASE}/pages/{page_id}",
+                    api_key,
                     json={"archived": True},
                 )
                 stats["archived" if resp.status_code < 400 else "errors"] += 1
@@ -875,11 +918,18 @@ async def ensure_gpu_spec_db_properties(api_key: str, database_id: str) -> None:
             return
 
         patch_resp = await _notion_request(
-            client, "PATCH", f"{NOTION_API_BASE}/databases/{database_id}", api_key,
+            client,
+            "PATCH",
+            f"{NOTION_API_BASE}/databases/{database_id}",
+            api_key,
             json={"properties": missing},
         )
         patch_resp.raise_for_status()
-        _logger.info("Notion GPU spec DB 속성 %d개 자동 생성: %s", len(missing), list(missing.keys()))
+        _logger.info(
+            "Notion GPU spec DB 속성 %d개 자동 생성: %s",
+            len(missing),
+            list(missing.keys()),
+        )
 
 
 async def sync_gpu_specs_to_notion(
@@ -944,16 +994,30 @@ async def sync_gpu_specs_to_notion(
             try:
                 if name in page_map:
                     resp = await _notion_request(
-                        client, "PATCH", f"{NOTION_API_BASE}/pages/{page_map[name]}", api_key,
+                        client,
+                        "PATCH",
+                        f"{NOTION_API_BASE}/pages/{page_map[name]}",
+                        api_key,
                         json={"properties": props},
                     )
                 else:
                     resp = await _notion_request(
-                        client, "POST", f"{NOTION_API_BASE}/pages", api_key,
-                        json={"parent": {"database_id": database_id}, "properties": props},
+                        client,
+                        "POST",
+                        f"{NOTION_API_BASE}/pages",
+                        api_key,
+                        json={
+                            "parent": {"database_id": database_id},
+                            "properties": props,
+                        },
                     )
                 if resp.status_code >= 400:
-                    _logger.warning("Notion GPU spec 동기화 실패 (%s, %d): %s", name, resp.status_code, resp.text)
+                    _logger.warning(
+                        "Notion GPU spec 동기화 실패 (%s, %d): %s",
+                        name,
+                        resp.status_code,
+                        resp.text,
+                    )
                     stats["errors"] += 1
                 else:
                     stats["updated" if name in page_map else "created"] += 1
@@ -966,7 +1030,10 @@ async def sync_gpu_specs_to_notion(
         async def _archive(key: str, page_id: str) -> None:
             try:
                 resp = await _notion_request(
-                    client, "PATCH", f"{NOTION_API_BASE}/pages/{page_id}", api_key,
+                    client,
+                    "PATCH",
+                    f"{NOTION_API_BASE}/pages/{page_id}",
+                    api_key,
                     json={"archived": True},
                 )
                 stats["archived" if resp.status_code < 400 else "errors"] += 1
@@ -1089,7 +1156,10 @@ async def migrate_instance_db_to_korean(api_key: str, database_id: str) -> bool:
 
             if rename_payload:
                 resp = await _notion_request(
-                    client, "PATCH", f"{NOTION_API_BASE}/databases/{database_id}", api_key,
+                    client,
+                    "PATCH",
+                    f"{NOTION_API_BASE}/databases/{database_id}",
+                    api_key,
                     json={"properties": rename_payload},
                 )
                 resp.raise_for_status()

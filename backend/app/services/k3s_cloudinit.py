@@ -1,6 +1,7 @@
 """k3s cloud-init 템플릿 렌더링."""
 
 import base64
+import gzip
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
@@ -21,7 +22,7 @@ def generate_server_userdata(
     callback_token: str,
     *,
     cloud_conf: str | None = None,
-    plugin_manifests: list[dict] | None = None,   # [{"name": "occm", "content": "..."}]
+    plugin_manifests: list[dict] | None = None,  # [{"name": "occm", "content": "..."}]
     extra_server_args: list[str] | None = None,
     extra_write_files: list[dict] | None = None,
     needs_external_cloud_provider: bool = False,
@@ -50,7 +51,9 @@ def generate_server_userdata(
         extra_write_files=extra_write_files or [],
         needs_external_cloud_provider=needs_external_cloud_provider,
     )
-    return base64.b64encode(yaml_str.encode()).decode()
+    # gzip 압축 후 base64 인코딩 — cloud-init이 gzip user_data를 자동 감지·처리.
+    # 플러그인 매니페스트가 많을 때 Nova의 user_data 65535바이트 제한 초과를 방지한다.
+    return base64.b64encode(gzip.compress(yaml_str.encode())).decode()
 
 
 def generate_agent_userdata(
@@ -81,4 +84,4 @@ def generate_agent_userdata(
         ssh_public_key=ssh_public_key or "",
         extra_agent_args=agent_args,
     )
-    return base64.b64encode(yaml_str.encode()).decode()
+    return base64.b64encode(gzip.compress(yaml_str.encode())).decode()

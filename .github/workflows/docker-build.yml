@@ -5,6 +5,8 @@ on:
     branches:
       - main
       - dev
+    paths-ignore:
+      - 'deploy/k8s/overlays/**/.argocd-source-*.yaml'
     tags:
       - 'v*'
   pull_request:
@@ -38,7 +40,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Verify version sync
         run: bash scripts/check-version-sync.sh
@@ -74,18 +76,18 @@ jobs:
       # macOS Keychain을 호출하므로 keychain-free 'docker' 드라이버 사용
       - name: Set up Docker Buildx (macOS — docker driver)
         if: matrix.arch == 'arm64'
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
         with:
           driver: docker
 
       - name: Set up Docker Buildx (Linux — docker-container driver)
         if: matrix.arch == 'amd64'
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       # amd64 Linux만 docker login 실행 (arm64는 위 pre-auth로 대체)
       - name: Log in to registry
         if: matrix.arch == 'amd64'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ secrets.REGISTRY_USERNAME || github.actor }}
@@ -105,7 +107,7 @@ jobs:
       # arm64 (macOS, docker driver): registry cache 미지원 → 캐시 없이 빌드
       - name: Build & push arm64 (docker driver)
         if: matrix.arch == 'arm64'
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
@@ -117,7 +119,7 @@ jobs:
       # amd64 (Linux, docker-container driver): registry cache 사용
       - name: Build & push amd64 (docker-container driver)
         if: matrix.arch == 'amd64'
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
@@ -143,10 +145,10 @@ jobs:
 
     steps:
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ secrets.REGISTRY_USERNAME || github.actor }}
@@ -192,4 +194,36 @@ jobs:
               -t "${{ steps.tags.outputs.extra }}" \
               "${IMG}:${BASE}-amd64" \
               "${IMG}:${BASE}-arm64"
+          fi
+
+      # manifest 완료 후 ArgoCD Image Updater에 즉시 refresh 신호 전송
+      # ARGOCD_SERVER: ArgoCD 서버 주소 (예: argocd.example.com)
+      # ARGOCD_TOKEN: ArgoCD API 토큰 (Project Settings → Secrets에 등록)
+      - name: Trigger ArgoCD Image Updater refresh
+        env:
+          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+          ARGOCD_TOKEN: ${{ secrets.ARGOCD_TOKEN }}
+        run: |
+          if [ -z "${ARGOCD_SERVER}" ] || [ -z "${ARGOCD_TOKEN}" ]; then
+            echo "ARGOCD_SERVER/ARGOCD_TOKEN 미설정 — refresh 건너뜀"
+            exit 0
+          fi
+          if [[ "${GITHUB_REF}" == refs/heads/dev ]]; then
+            APP="afterglow-dev"
+          elif [[ "${GITHUB_REF}" == refs/heads/main ]]; then
+            APP="afterglow-prod"
+          else
+            echo "태그 빌드 — ArgoCD refresh 건너뜀"
+            exit 0
+          fi
+          echo "ArgoCD Application '${APP}' refresh 요청 중..."
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+            "https://${ARGOCD_SERVER}/api/v1/applications/${APP}/actions/refresh" \
+            -H "Authorization: Bearer ${ARGOCD_TOKEN}" \
+            --insecure \
+            --max-time 10 || echo "000")
+          if [ "${HTTP_STATUS}" = "200" ] || [ "${HTTP_STATUS}" = "201" ]; then
+            echo "ArgoCD refresh 성공 (HTTP ${HTTP_STATUS})"
+          else
+            echo "ArgoCD refresh 응답: HTTP ${HTTP_STATUS} (무시하고 계속)"
           fi

@@ -691,10 +691,46 @@ async def _k3s_cleanup_loop() -> None:
         await asyncio.sleep(300)
 
 
+async def _auto_backup_loop() -> None:
+    """1시간 간격으로 자동 백업 설정이 있는 볼륨에 대해 백업 사이클 실행."""
+    await asyncio.sleep(60)  # 시작 후 1분 대기
+    while True:
+        try:
+            from app.services import auto_backup as _ab
+            from app.services.keystone import get_admin_connection_for_project
+
+            configs = await _ab.list_all_auto_backup_configs()
+            if configs:
+                _logger.info("auto_backup: %d개 볼륨 자동 백업 시작", len(configs))
+                for cfg in configs:
+                    project_id = cfg.get("project_id")
+                    volume_id = cfg.get("volume_id")
+                    if not project_id or not volume_id:
+                        continue
+                    try:
+                        conn = await asyncio.to_thread(get_admin_connection_for_project, project_id)
+                        await _ab.run_backup_cycle(conn, project_id, volume_id, cfg)
+                    except Exception:
+                        _logger.warning("auto_backup: 백업 사이클 실패 (volume=%s)", volume_id, exc_info=True)
+        except Exception:
+            _logger.warning("auto_backup: 루프 오류", exc_info=True)
+        await asyncio.sleep(3600)  # 1시간
+
+
+async def _deferred_create_tables() -> None:
+    """DB 테이블 생성을 백그라운드에서 실행. API 기동을 차단하지 않는다."""
+    from app.database import create_tables
+
+    try:
+        await create_tables()
+    except Exception:
+        _logger.warning("DB 테이블 자동 생성 실패 (migrations/001_k3s_tables.sql 수동 실행 필요)", exc_info=True)
+
+
 @app.on_event("startup")
 async def start_background_workers():
     # DB 초기화 (database.url 설정 시)
-    from app.database import create_tables, init_db
+    from app.database import init_db
 
     _db_cfg = _get_cfg()
     if _db_cfg.database_url:
@@ -704,15 +740,13 @@ async def start_background_workers():
             max_overflow=_db_cfg.database_max_overflow,
         )
         if _db_cfg.database_auto_create_tables:
-            try:
-                await create_tables()
-            except Exception:
-                _logger.warning(
-                    "DB 테이블 자동 생성 실패 (migrations/001_k3s_tables.sql 수동 실행 필요)", exc_info=True
-                )
+            # create_tables()를 await하지 않고 백그라운드 태스크로 실행해
+            # API가 DB DDL 완료를 기다리지 않고 즉시 요청을 받을 수 있게 한다.
+            asyncio.create_task(_deferred_create_tables())
 
     asyncio.create_task(_snapshot_loop())
     asyncio.create_task(_notion_sync_loop())
+    asyncio.create_task(_auto_backup_loop())
     if _svc_cfg.service_k3s_enabled:
         asyncio.create_task(_k3s_cleanup_loop())
 

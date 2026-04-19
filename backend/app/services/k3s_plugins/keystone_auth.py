@@ -37,10 +37,12 @@ def _generate_self_signed_cert() -> tuple[bytes, bytes]:
         raise
 
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    name = x509.Name([
-        x509.NameAttribute(NameOID.COMMON_NAME, "k8s-keystone-auth"),
-        x509.NameAttribute(NameOID.ORGANIZATION_NAME, "union-k3s"),
-    ])
+    name = x509.Name(
+        [
+            x509.NameAttribute(NameOID.COMMON_NAME, "k8s-keystone-auth"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "union-k3s"),
+        ]
+    )
     cert = (
         x509.CertificateBuilder()
         .subject_name(name)
@@ -50,13 +52,15 @@ def _generate_self_signed_cert() -> tuple[bytes, bytes]:
         .not_valid_before(datetime.datetime.now(datetime.UTC))
         .not_valid_after(datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=3650))
         .add_extension(
-            x509.SubjectAlternativeName([
-                x509.DNSName("k8s-keystone-auth"),
-                x509.DNSName("k8s-keystone-auth.kube-system"),
-                x509.DNSName("k8s-keystone-auth.kube-system.svc"),
-                x509.DNSName("k8s-keystone-auth.kube-system.svc.cluster.local"),
-                x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
-            ]),
+            x509.SubjectAlternativeName(
+                [
+                    x509.DNSName("k8s-keystone-auth"),
+                    x509.DNSName("k8s-keystone-auth.kube-system"),
+                    x509.DNSName("k8s-keystone-auth.kube-system.svc"),
+                    x509.DNSName("k8s-keystone-auth.kube-system.svc.cluster.local"),
+                    x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
+                ]
+            ),
             critical=False,
         )
         .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)

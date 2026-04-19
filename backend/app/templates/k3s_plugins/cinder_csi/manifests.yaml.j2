@@ -134,7 +134,6 @@ spec:
           effect: NoSchedule
       nodeSelector:
         node-role.kubernetes.io/control-plane: "true"
-      hostNetwork: true
       containers:
         - name: cinder-csi-plugin
           image: {{ cinder_csi_image }}

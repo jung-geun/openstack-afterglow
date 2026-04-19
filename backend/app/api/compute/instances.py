@@ -31,7 +31,14 @@ from app.models.progress import ProgressMessage, ProgressStep
 from app.rate_limit import limiter
 from app.services import cinder, cloudinit, glance, keystone, manila, neutron, nova
 from app.services import libraries as lib_svc
-from app.services.cache import cached_call, invalidate, ttl_fast, ttl_normal, ttl_slow, ttl_static
+from app.services.cache import (
+    cached_call,
+    invalidate,
+    ttl_fast,
+    ttl_normal,
+    ttl_slow,
+    ttl_static,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -71,7 +78,10 @@ def _resolve_names(servers: list, conn) -> list[dict]:
 
 
 @router.get("", response_model=list[InstanceInfo])
-async def list_instances(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
+async def list_instances(
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    refresh: bool = Query(False),
+):
     pid = conn._afterglow_project_id
     try:
         return await cached_call(
@@ -132,7 +142,12 @@ async def create_instance(
             )
         else:
             file_storage_info = await _prepare_dynamic_file_storage(
-                conn, req.name, resolved_libs, settings, created_file_storage_ids, created_access_ids
+                conn,
+                req.name,
+                resolved_libs,
+                settings,
+                created_file_storage_ids,
+                created_access_ids,
             )
             file_storages_info = [file_storage_info]
 
@@ -148,7 +163,12 @@ async def create_instance(
             req.availability_zone or settings.default_availability_zone,
         )
         boot_volume_id = boot_vol.id
-        await asyncio.to_thread(cinder.rename_volume, conn, boot_volume_id, f"{req.name}-boot-{boot_volume_id[:8]}")
+        await asyncio.to_thread(
+            cinder.rename_volume,
+            conn,
+            boot_volume_id,
+            f"{req.name}-boot-{boot_volume_id[:8]}",
+        )
 
         # ------------------------------------------------------------------
         # 3. Cinder: upper 볼륨 생성 (OverlayFS upperdir)
@@ -276,7 +296,12 @@ async def create_instance_async(
                     )
                 else:
                     file_storage_info = await _prepare_dynamic_file_storage(
-                        conn, req.name, resolved_libs, settings, created_file_storage_ids, created_access_ids
+                        conn,
+                        req.name,
+                        resolved_libs,
+                        settings,
+                        created_file_storage_ids,
+                        created_access_ids,
                     )
                     file_storages_info = [file_storage_info]
                 yield send_progress(ProgressStep.MANILA_PREPARING, 20, "파일 스토리지 준비 완료")
@@ -292,7 +317,12 @@ async def create_instance_async(
                 availability_zone=req.availability_zone or settings.default_availability_zone,
             )
             boot_volume_id = boot_vol.id
-            await asyncio.to_thread(cinder.rename_volume, conn, boot_volume_id, f"{req.name}-boot-{boot_volume_id[:8]}")
+            await asyncio.to_thread(
+                cinder.rename_volume,
+                conn,
+                boot_volume_id,
+                f"{req.name}-boot-{boot_volume_id[:8]}",
+            )
             yield send_progress(ProgressStep.BOOT_VOLUME_CREATING, 45, "부트 볼륨 생성 완료")
 
             if resolved_libs:
@@ -329,9 +359,11 @@ async def create_instance_async(
             meta = {
                 "union_libraries": ",".join(resolved_libs) if resolved_libs else "none",
                 "union_strategy": req.strategy or "none",
-                "union_share_ids": ",".join([s.get("file_storage_id", "") for s in file_storages_info])
-                if file_storages_info
-                else "none",
+                "union_share_ids": (
+                    ",".join([s.get("file_storage_id", "") for s in file_storages_info])
+                    if file_storages_info
+                    else "none"
+                ),
                 "union_upper_volume_id": upper_volume_id or "none",
             }
 
@@ -355,7 +387,11 @@ async def create_instance_async(
             # Step 6: Attach volumes (95-100%)
             yield send_progress(ProgressStep.ATTACHING_VOLUME, 95, "볼륨 연결 중...")
             if upper_volume_id:
-                await asyncio.to_thread(conn.compute.create_volume_attachment, server_id, volume_id=upper_volume_id)
+                await asyncio.to_thread(
+                    conn.compute.create_volume_attachment,
+                    server_id,
+                    volume_id=upper_volume_id,
+                )
             # 새 볼륨 생성 후 연결
             for nv in req.new_volumes or []:
                 nv_name = nv.name
@@ -363,7 +399,11 @@ async def create_instance_async(
                 if not nv_name:
                     continue
                 new_vol = await asyncio.to_thread(cinder.create_empty_volume, conn, nv_name, nv_size)
-                await asyncio.to_thread(conn.compute.create_volume_attachment, server_id, volume_id=new_vol.id)
+                await asyncio.to_thread(
+                    conn.compute.create_volume_attachment,
+                    server_id,
+                    volume_id=new_vol.id,
+                )
             # 추가 볼륨 연결
             for vol_id in req.additional_volume_ids or []:
                 await asyncio.to_thread(conn.compute.create_volume_attachment, server_id, volume_id=vol_id)
@@ -376,11 +416,19 @@ async def create_instance_async(
                 if selected_net and not selected_net.is_external:
                     ext_net = next((n for n in all_nets if n.is_external), None)
                     if ext_net:
-                        yield send_progress(ProgressStep.FLOATING_IP_CREATING, 100, "Floating IP 할당 중...")
+                        yield send_progress(
+                            ProgressStep.FLOATING_IP_CREATING,
+                            100,
+                            "Floating IP 할당 중...",
+                        )
                         fip = await asyncio.to_thread(neutron.create_floating_ip, conn, ext_net.id)
                         floating_ip_id = fip.id
                         await asyncio.to_thread(neutron.associate_floating_ip, conn, fip.id, server_id)
-                        yield send_progress(ProgressStep.FLOATING_IP_CREATING, 100, "Floating IP 할당 완료")
+                        yield send_progress(
+                            ProgressStep.FLOATING_IP_CREATING,
+                            100,
+                            "Floating IP 할당 완료",
+                        )
 
             # Completed
             yield send_progress(ProgressStep.COMPLETED, 100, "인스턴스 생성 완료", instance_id=server_id)
@@ -448,6 +496,20 @@ async def delete_instance(
             await asyncio.to_thread(cinder.delete_volume, conn, upper_volume_id)
         except Exception as ex:
             logger.warning(f"Upper 볼륨 삭제 실패: {ex}")
+
+    # Strategy A(prebuilt): NFS access rule 정리 (best-effort)
+    if strategy != "dynamic":
+        server_ips = {ip.addr for ip in (server.ip_addresses or [])}
+        for file_storage_id in file_storage_ids:
+            if not file_storage_id:
+                continue
+            try:
+                access_rules = await asyncio.to_thread(manila.list_access_rules, conn, file_storage_id)
+                for rule in access_rules:
+                    if rule.get("access_type") == "ip" and rule.get("access_to") in server_ips:
+                        await asyncio.to_thread(manila.revoke_access_rule, conn, file_storage_id, rule["id"])
+            except Exception as ex:
+                logger.warning(f"NFS access rule 정리 실패 (share={file_storage_id}): {ex}")
 
     # Floating IP 정리 (해제 + 삭제)
     try:
@@ -871,6 +933,7 @@ async def _rollback(
             await asyncio.to_thread(manila.delete_file_storage, conn, file_storage_id)
         except Exception as e:
             logger.error(f"Rollback - 파일 스토리지 삭제 실패 {file_storage_id}: {e}")
+
 
 # ---------------------------------------------------------------------------
 # Floating IP 자동 관리 엔드포인트

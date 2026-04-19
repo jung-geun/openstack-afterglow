@@ -1,4 +1,5 @@
 import re
+import uuid
 from enum import Enum
 
 from pydantic import BaseModel, Field, field_validator
@@ -24,7 +25,7 @@ class K3sProgressMessage(BaseModel):
 
 
 class CreateK3sClusterRequest(BaseModel):
-    name: str
+    name: str = ""
     agent_count: int = Field(default=1, ge=0, le=10)
     agent_flavor_id: str | None = None
     network_id: str | None = None
@@ -33,6 +34,8 @@ class CreateK3sClusterRequest(BaseModel):
     @field_validator("name")
     @classmethod
     def validate_name(cls, v: str) -> str:
+        if not v.strip():
+            return f"k3s-{uuid.uuid4().hex[:8]}"
         if not _NAME_RE.match(v):
             raise ValueError("이름은 영문/숫자로 시작하고, 영문·숫자·하이픈·언더스코어만 허용됩니다 (최대 63자)")
         return v

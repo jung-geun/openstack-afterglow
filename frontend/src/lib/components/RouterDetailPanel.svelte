@@ -36,7 +36,7 @@
 		network_id: string;
 	}
 
-	let { routerId, onClose }: { routerId: string; onClose?: () => void } = $props();
+	let { routerId, onClose, onDeleted }: { routerId: string; onClose?: () => void; onDeleted?: () => void } = $props();
 
 	let router = $state<RouterDetail | null>(null);
 	let loading = $state(true);
@@ -148,8 +148,12 @@
 		saving = true;
 		try {
 			await api.delete(`/api/routers/${routerId}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
-			onClose?.();
-			goto('/dashboard/network/routers');
+			if (onDeleted) {
+				onDeleted();
+			} else {
+				onClose?.();
+				goto('/dashboard/network/routers');
+			}
 		} catch (e) {
 			alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 			saving = false;

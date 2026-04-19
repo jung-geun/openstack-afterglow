@@ -2,11 +2,12 @@
   import { auth } from '$lib/stores/auth';
   import { untrack } from 'svelte';
   import { api, ApiError } from '$lib/api/client';
-  import { goto } from '$app/navigation';
   import type { LoadBalancer } from '$lib/types/resources';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import RefreshButton from '$lib/components/RefreshButton.svelte';
   import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
+  import SlidePanel from '$lib/components/SlidePanel.svelte';
+  import LoadBalancerDetailPanel from '$lib/components/LoadBalancerDetailPanel.svelte';
 
   const statusColor: Record<string, string> = {
     ACTIVE:  'text-green-400 bg-green-900/30',
@@ -15,6 +16,17 @@
     PENDING_UPDATE: 'text-yellow-400 bg-yellow-900/30',
     DELETED: 'text-gray-400 bg-gray-800',
   };
+
+  let selectedLbId = $state<string | null>(null);
+
+  function openLbPanel(id: string) {
+    selectedLbId = id;
+    history.pushState({ lbId: id }, '', `/dashboard/network/loadbalancers/${id}`);
+  }
+  function closeLbPanel() {
+    selectedLbId = null;
+    history.pushState({}, '', '/dashboard/network/loadbalancers');
+  }
 
   let loadbalancers = $state<LoadBalancer[]>([]);
   let loading = $state(true);
@@ -89,7 +101,7 @@
         </thead>
         <tbody>
           {#each loadbalancers as lb (lb.id)}
-            <tr onclick={() => goto('/dashboard/network/loadbalancers/' + lb.id)} class="border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors cursor-pointer">
+            <tr onclick={() => openLbPanel(lb.id)} class="border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors cursor-pointer">
               <td class="py-3 pr-6 font-medium text-white">{lb.name || lb.id.slice(0, 12)}</td>
               <td class="py-3 pr-6"><span class="px-2 py-0.5 rounded text-xs font-medium {statusColor[lb.status] ?? 'text-gray-400 bg-gray-800'}">{lb.status}</span></td>
               <td class="py-3 pr-6 text-xs">
@@ -97,7 +109,7 @@
               </td>
               <td class="py-3 pr-6 text-gray-400 text-xs font-mono">{lb.vip_address ?? '-'}</td>
               <td class="py-3 text-right">
-                <button onclick={(e) => { e.stopPropagation(); goto('/dashboard/network/loadbalancers/' + lb.id); }} class="text-gray-400 hover:text-white text-xs px-2 py-1 rounded border border-gray-700 hover:border-gray-500 transition-colors">상세</button>
+                <button onclick={(e) => { e.stopPropagation(); openLbPanel(lb.id); }} class="text-gray-400 hover:text-white text-xs px-2 py-1 rounded border border-gray-700 hover:border-gray-500 transition-colors">상세</button>
               </td>
             </tr>
           {/each}
@@ -106,3 +118,13 @@
     </div>
   {/if}
 </div>
+
+{#if selectedLbId}
+  <SlidePanel onClose={closeLbPanel}>
+    <LoadBalancerDetailPanel
+      lbId={selectedLbId}
+      onClose={closeLbPanel}
+      onDeleted={() => { fetchLoadbalancers(); closeLbPanel(); }}
+    />
+  </SlidePanel>
+{/if}

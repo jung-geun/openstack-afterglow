@@ -241,10 +241,12 @@ async def test_delete_k3s_cluster_deletes_k8s_nodes(client):
         mock_db.get_cluster = AsyncMock(return_value=cluster)
         mock_db.update_cluster_status = AsyncMock()
         mock_db.delete_cluster_record = AsyncMock()
-        mock_db.get_agent_vm_names = AsyncMock(return_value={
-            "vm-agent-1": "mycluster-agent-1",
-            "vm-agent-2": "mycluster-agent-2",
-        })
+        mock_db.get_agent_vm_names = AsyncMock(
+            return_value={
+                "vm-agent-1": "mycluster-agent-1",
+                "vm-agent-2": "mycluster-agent-2",
+            }
+        )
         with patch("app.api.k3s.clusters.nova") as mock_nova:
             mock_nova.delete_server = MagicMock()
             with patch("app.api.k3s.clusters.neutron") as mock_neutron:
@@ -282,3 +284,54 @@ async def test_delete_k3s_cluster_continues_if_k8s_node_delete_fails(client):
 
     assert resp.status_code == 204
     mock_db.delete_cluster_record.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_delete_k3s_cluster_vm_already_deleted(client):
+    """VM이 이미 삭제된 상태(delete_server 404)여도 soft-delete까지 정상 완료해야 한다."""
+    cluster = _make_cluster_record()
+    cluster["occm_enabled"] = False
+
+    with patch("app.api.k3s.clusters.k3s_cluster") as mock_db:
+        mock_db.get_cluster = AsyncMock(return_value=cluster)
+        mock_db.update_cluster_status = AsyncMock()
+        mock_db.delete_cluster_record = AsyncMock()
+        mock_db.get_agent_vm_names = AsyncMock(return_value={})
+        with patch("app.api.k3s.clusters.nova") as mock_nova:
+            # delete_server가 이미 없는 VM → 예외 없이 리턴 (nova.py에서 404 처리)
+            mock_nova.delete_server = MagicMock()
+            mock_nova.wait_server_deleted = MagicMock()
+            with patch("app.api.k3s.clusters.neutron") as mock_neutron:
+                mock_neutron.delete_security_group = MagicMock()
+                with patch("app.api.k3s.clusters.k3s_kube") as mock_kube:
+                    mock_kube.delete_k8s_nodes = AsyncMock()
+                    resp = await client.delete("/api/k3s/clusters/k3s-1")
+
+    assert resp.status_code == 204
+    mock_db.delete_cluster_record.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_delete_k3s_cluster_vm_wait_timeout(client):
+    """VM 삭제 대기 타임아웃이 발생해도 SG 삭제와 soft-delete는 계속 진행해야 한다."""
+    cluster = _make_cluster_record()
+    cluster["occm_enabled"] = False
+    cluster["security_group_id"] = "sg-1"
+
+    with patch("app.api.k3s.clusters.k3s_cluster") as mock_db:
+        mock_db.get_cluster = AsyncMock(return_value=cluster)
+        mock_db.update_cluster_status = AsyncMock()
+        mock_db.delete_cluster_record = AsyncMock()
+        mock_db.get_agent_vm_names = AsyncMock(return_value={})
+        with patch("app.api.k3s.clusters.nova") as mock_nova:
+            mock_nova.delete_server = MagicMock()
+            mock_nova.wait_server_deleted = MagicMock(side_effect=TimeoutError("timeout"))
+            with patch("app.api.k3s.clusters.neutron") as mock_neutron:
+                mock_neutron.delete_security_group = MagicMock()
+                with patch("app.api.k3s.clusters.k3s_kube") as mock_kube:
+                    mock_kube.delete_k8s_nodes = AsyncMock()
+                    resp = await client.delete("/api/k3s/clusters/k3s-1")
+
+    assert resp.status_code == 204
+    mock_db.delete_cluster_record.assert_called_once()
+    mock_neutron.delete_security_group.assert_called()

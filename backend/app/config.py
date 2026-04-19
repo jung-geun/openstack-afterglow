@@ -112,7 +112,8 @@ def _load_toml() -> dict:
     flat["k3s_boot_volume_size_gb"] = k3s.get("boot_volume_size_gb", 30)
     flat["k3s_occm_enabled"] = k3s.get("occm_enabled", False)
     flat["k3s_occm_image"] = k3s.get(
-        "occm_image", "registry.k8s.io/provider-os/openstack-cloud-controller-manager:v1.35.0"
+        "occm_image",
+        "registry.k8s.io/provider-os/openstack-cloud-controller-manager:v1.35.0",
     )
     flat["k3s_occm_floating_network_id"] = k3s.get("occm_floating_network_id", "")
     flat["k3s_occm_public_network_name"] = k3s.get("occm_public_network_name", "")
@@ -127,16 +128,23 @@ def _load_toml() -> dict:
     flat["k3s_manila_csi_share_protocol"] = k3s.get("manila_csi_share_protocol", "NFS")
     # Keystone Auth
     flat["k3s_keystone_auth_enabled"] = k3s.get("keystone_auth_enabled", False)
-    flat["k3s_keystone_auth_image"] = k3s.get("keystone_auth_image", "registry.k8s.io/provider-os/k8s-keystone-auth:v1.31.0")
+    flat["k3s_keystone_auth_image"] = k3s.get(
+        "keystone_auth_image", "registry.k8s.io/provider-os/k8s-keystone-auth:v1.31.0"
+    )
     flat["k3s_keystone_auth_policy"] = k3s.get("keystone_auth_policy", "")
     # Octavia Ingress
     flat["k3s_octavia_ingress_enabled"] = k3s.get("octavia_ingress_enabled", False)
-    flat["k3s_octavia_ingress_image"] = k3s.get("octavia_ingress_image", "registry.k8s.io/provider-os/octavia-ingress-controller:v1.31.0")
+    flat["k3s_octavia_ingress_image"] = k3s.get(
+        "octavia_ingress_image",
+        "registry.k8s.io/provider-os/octavia-ingress-controller:v1.31.0",
+    )
     flat["k3s_octavia_ingress_subnet_id"] = k3s.get("octavia_ingress_subnet_id", "")
     flat["k3s_octavia_ingress_floating_network_id"] = k3s.get("octavia_ingress_floating_network_id", "")
     # Barbican KMS
     flat["k3s_barbican_kms_enabled"] = k3s.get("barbican_kms_enabled", False)
-    flat["k3s_barbican_kms_image"] = k3s.get("barbican_kms_image", "registry.k8s.io/provider-os/barbican-kms-plugin:v1.31.0")
+    flat["k3s_barbican_kms_image"] = k3s.get(
+        "barbican_kms_image", "registry.k8s.io/provider-os/barbican-kms-plugin:v1.31.0"
+    )
     flat["k3s_barbican_kms_kek_id"] = k3s.get("barbican_kms_kek_id", "")
 
     sess = data.get("session", {})

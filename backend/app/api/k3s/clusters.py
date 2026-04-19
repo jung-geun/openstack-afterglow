@@ -594,10 +594,16 @@ async def delete_k3s_cluster(
     async def _del_vm_and_wait(vm_id: str) -> None:
         try:
             await asyncio.to_thread(nova.delete_server, conn, vm_id)
+        except Exception as e:
+            _logger.warning("Delete agent VM %s failed: %s", vm_id, e)
+            return
+        try:
             await asyncio.to_thread(nova.wait_server_deleted, conn, vm_id)
             _logger.info("k3s delete: VM %s fully deleted", vm_id)
+        except TimeoutError as e:
+            _logger.warning("k3s delete: VM %s 삭제 대기 타임아웃 (계속 진행): %s", vm_id, e)
         except Exception as e:
-            _logger.warning("Delete/wait agent VM %s failed: %s", vm_id, e)
+            _logger.warning("k3s delete: VM %s 대기 중 오류 (계속 진행): %s", vm_id, e)
 
     await asyncio.gather(*[_del_vm_and_wait(vid) for vid in agent_vm_ids], return_exceptions=True)
 
@@ -606,10 +612,16 @@ async def delete_k3s_cluster(
     if server_vm_id:
         try:
             await asyncio.to_thread(nova.delete_server, conn, server_vm_id)
-            await asyncio.to_thread(nova.wait_server_deleted, conn, server_vm_id)
-            _logger.info("k3s delete: server VM %s fully deleted", server_vm_id)
         except Exception as e:
-            _logger.warning("Delete/wait server VM %s failed: %s", server_vm_id, e)
+            _logger.warning("Delete server VM %s failed: %s", server_vm_id, e)
+        else:
+            try:
+                await asyncio.to_thread(nova.wait_server_deleted, conn, server_vm_id)
+                _logger.info("k3s delete: server VM %s fully deleted", server_vm_id)
+            except TimeoutError as e:
+                _logger.warning("k3s delete: server VM %s 삭제 대기 타임아웃 (계속 진행): %s", server_vm_id, e)
+            except Exception as e:
+                _logger.warning("k3s delete: server VM %s 대기 중 오류 (계속 진행): %s", server_vm_id, e)
 
     # 보안 그룹 삭제 (VM 삭제 완료 후, 재시도 포함)
     sg_id = cluster.get("security_group_id")

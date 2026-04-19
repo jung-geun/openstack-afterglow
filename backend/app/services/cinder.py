@@ -224,6 +224,67 @@ def _backup_to_dict(b) -> dict:
     }
 
 
+def create_volume_transfer(
+    conn: openstack.connection.Connection,
+    volume_id: str,
+    name: str | None = None,
+) -> dict:
+    """볼륨 이전(transfer) 생성. auth_key를 반환 — 수락 측에 전달 필요."""
+    body: dict = {"volume_id": volume_id}
+    if name:
+        body["name"] = name
+    result = conn.block_storage.post(
+        "/os-volume-transfer",
+        json={"transfer": body},
+    )
+    transfer = result.json().get("transfer", result.json())
+    return {
+        "id": transfer.get("id"),
+        "name": transfer.get("name") or "",
+        "volume_id": transfer.get("volume_id"),
+        "auth_key": transfer.get("auth_key"),
+        "created_at": transfer.get("created_at"),
+    }
+
+
+def accept_volume_transfer(
+    conn: openstack.connection.Connection,
+    transfer_id: str,
+    auth_key: str,
+) -> dict:
+    """볼륨 이전 수락."""
+    result = conn.block_storage.post(
+        f"/os-volume-transfer/{transfer_id}/accept",
+        json={"accept": {"auth_key": auth_key}},
+    )
+    transfer = result.json().get("transfer", result.json())
+    return {
+        "id": transfer.get("id"),
+        "name": transfer.get("name") or "",
+        "volume_id": transfer.get("volume_id"),
+    }
+
+
+def list_volume_transfers(conn: openstack.connection.Connection) -> list[dict]:
+    """볼륨 이전 목록 조회."""
+    result = conn.block_storage.get("/os-volume-transfer/detail")
+    transfers = result.json().get("transfers", [])
+    return [
+        {
+            "id": t.get("id"),
+            "name": t.get("name") or "",
+            "volume_id": t.get("volume_id"),
+            "created_at": t.get("created_at"),
+        }
+        for t in transfers
+    ]
+
+
+def delete_volume_transfer(conn: openstack.connection.Connection, transfer_id: str) -> None:
+    """볼륨 이전 취소."""
+    conn.block_storage.delete(f"/os-volume-transfer/{transfer_id}", ignore_missing=True)
+
+
 def _vol_to_info(vol) -> VolumeInfo:
     return VolumeInfo(
         id=vol.id,

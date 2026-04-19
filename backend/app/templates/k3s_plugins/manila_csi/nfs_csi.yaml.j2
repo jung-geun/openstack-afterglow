@@ -174,7 +174,7 @@ spec:
             - name: ADDRESS
               value: /var/lib/kubelet/plugins/nfs.csi.k8s.io/csi.sock
             - name: DRIVER_REG_SOCK_PATH
-              value: /var/lib/kubelet/plugins_registry/nfs.csi.k8s.io-reg.sock
+              value: /var/lib/kubelet/plugins/nfs.csi.k8s.io/csi.sock
           volumeMounts:
             - name: socket-dir
               mountPath: /var/lib/kubelet/plugins/nfs.csi.k8s.io

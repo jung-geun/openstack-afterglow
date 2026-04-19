@@ -141,6 +141,10 @@
 		wizard.update(w => ({ ...w, strategy: s }));
 	}
 
+	function selectMountProtocol(p: 'CEPHFS' | 'NFS') {
+		wizard.update(w => ({ ...w, mountProtocol: p }));
+	}
+
 	function selectNetwork(id: string | null) {
 		const net = networks.find(n => n.id === id) ?? null;
 		wizard.update(w => ({ ...w, networkId: id, networkName: net?.name ?? null }));
@@ -360,7 +364,9 @@
 				<SelectStrategy
 					selected={$wizard.strategy}
 					{hasPrebuilt}
+					mountProtocol={$wizard.mountProtocol}
 					onSelect={selectStrategy}
+					onProtocolChange={selectMountProtocol}
 				/>
 
 			{:else if $wizard.step === 5}

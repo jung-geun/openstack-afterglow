@@ -1,8 +1,10 @@
 <script lang="ts">
-	let { selected, hasPrebuilt, onSelect }: {
+	let { selected, hasPrebuilt, mountProtocol, onSelect, onProtocolChange }: {
 		selected: 'prebuilt' | 'dynamic' | null;
 		hasPrebuilt: boolean;
+		mountProtocol: 'CEPHFS' | 'NFS';
 		onSelect: (s: 'prebuilt' | 'dynamic') => void;
+		onProtocolChange: (p: 'CEPHFS' | 'NFS') => void;
 	} = $props();
 </script>
 
@@ -51,3 +53,26 @@
 		</ul>
 	</button>
 </div>
+
+{#if selected === 'dynamic'}
+	<div class="mt-4 p-4 rounded-xl border border-gray-700 bg-gray-900">
+		<div class="text-xs text-gray-400 uppercase tracking-wide mb-3">마운트 프로토콜</div>
+		<div class="flex gap-3">
+			<button
+				onclick={() => onProtocolChange('NFS')}
+				class="flex-1 py-2 px-3 rounded-lg border text-sm font-medium transition-all {mountProtocol === 'NFS' ? 'border-blue-500 bg-blue-900/20 text-blue-300' : 'border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-500'}"
+			>NFS</button>
+			<button
+				onclick={() => onProtocolChange('CEPHFS')}
+				class="flex-1 py-2 px-3 rounded-lg border text-sm font-medium transition-all {mountProtocol === 'CEPHFS' ? 'border-purple-500 bg-purple-900/20 text-purple-300' : 'border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-500'}"
+			>CephFS</button>
+		</div>
+		<p class="text-xs text-gray-500 mt-2">
+			{#if mountProtocol === 'NFS'}
+				NFS: 범용 파일 시스템 프로토콜. 대부분 환경에서 사용 가능합니다.
+			{:else}
+				CephFS: Ceph 네이티브 프로토콜. 높은 성능과 안정성을 제공합니다.
+			{/if}
+		</p>
+	</div>
+{/if}

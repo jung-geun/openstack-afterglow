@@ -7,7 +7,12 @@ url이 비어있으면 DB 연결 없이 Redis 폴백으로 동작.
 import logging
 from collections.abc import AsyncGenerator
 
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 from sqlalchemy.orm import DeclarativeBase
 
 _logger = logging.getLogger(__name__)
@@ -74,9 +79,7 @@ async def create_tables() -> None:
 
         # 플러그인 목록 JSON 컬럼 추가 (없는 경우에만)
         try:
-            await conn.exec_driver_sql(
-                "ALTER TABLE k3s_clusters ADD COLUMN plugins_enabled JSON DEFAULT NULL"
-            )
+            await conn.exec_driver_sql("ALTER TABLE k3s_clusters ADD COLUMN plugins_enabled JSON DEFAULT NULL")
         except Exception:
             pass  # 이미 존재하면 무시
 

@@ -1,6 +1,5 @@
 """Manila CSI Plugin — Manila 공유 파일시스템 기반 PV/PVC 프로비저닝."""
 
-import base64
 import logging
 from pathlib import Path
 

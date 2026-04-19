@@ -44,9 +44,7 @@ class BarbicanKmsPlugin:
 
     def extra_write_files(self, project_id: str, cluster_name: str, settings: Settings) -> list[dict]:
         """encryption-config.yaml을 /etc/kubernetes/에 작성."""
-        encryption_config = _jinja.get_template(
-            "k3s_plugins/barbican_kms/encryption_config.yaml.j2"
-        ).render()
+        encryption_config = _jinja.get_template("k3s_plugins/barbican_kms/encryption_config.yaml.j2").render()
         return [
             {
                 "path": "/etc/kubernetes/encryption-config.yaml",

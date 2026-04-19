@@ -159,22 +159,27 @@
         <thead>
           <tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
             <th class="text-left py-3 pr-6">이름</th>
-            <th class="text-left py-3 pr-6">상태</th>
-            <th class="text-left py-3 pr-6">이미지 / 플레이버</th>
+            <th class="text-left py-3 pr-6 hidden sm:table-cell">상태</th>
+            <th class="text-left py-3 pr-6 hidden md:table-cell">이미지 / 플레이버</th>
             <th class="text-left py-3 pr-6">IP</th>
-            <th class="text-left py-3 pr-6">라이브러리</th>
-            <th class="text-left py-3 pr-6">전략</th>
+            <th class="text-left py-3 pr-6 hidden lg:table-cell">라이브러리</th>
+            <th class="text-left py-3 pr-6 hidden lg:table-cell">전략</th>
             <th class="text-right py-3">액션</th>
           </tr>
         </thead>
         <tbody>
           {#each instances as inst (inst.id)}
             <tr onclick={() => openInstancePanel(inst.id)} class="border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors cursor-pointer">
-              <td class="py-3 pr-6 font-medium text-white">{inst.name}</td>
               <td class="py-3 pr-6">
+                <div class="font-medium text-white">{inst.name}</div>
+                <div class="sm:hidden mt-0.5">
+                  <span class="px-2 py-0.5 rounded text-xs font-medium {statusColor[inst.status] ?? 'text-gray-400 bg-gray-800'}">{inst.status}</span>
+                </div>
+              </td>
+              <td class="py-3 pr-6 hidden sm:table-cell">
                 <span class="px-2 py-0.5 rounded text-xs font-medium {statusColor[inst.status] ?? 'text-gray-400 bg-gray-800'}">{inst.status}</span>
               </td>
-              <td class="py-3 pr-6 text-xs text-gray-400">
+              <td class="py-3 pr-6 text-xs text-gray-400 hidden md:table-cell">
                 <div>{inst.image_name ?? '볼륨에서 부팅'}</div>
                 {#if inst.flavor_name}<div class="text-gray-600 mt-0.5">{inst.flavor_name}</div>{/if}
               </td>
@@ -188,7 +193,7 @@
                       <div class="flex items-center gap-1.5 flex-wrap">
                         <span class="font-mono text-gray-400">{fip.addr}</span>
                         {#if paired}<span class="font-mono text-green-400 bg-green-900/20 px-1.5 py-0.5 rounded">{paired.addr}</span>{/if}
-                        <span class="text-gray-600">{fip.network_name}</span>
+                        <span class="text-gray-600 hidden md:inline">{fip.network_name}</span>
                       </div>
                     {/each}
                   </div>
@@ -196,24 +201,24 @@
                   <span class="text-gray-600">-</span>
                 {/if}
               </td>
-              <td class="py-3 pr-6">
+              <td class="py-3 pr-6 hidden lg:table-cell">
                 <div class="flex flex-wrap gap-1">
                   {#each inst.union_libraries.filter(Boolean) as lib}
                     <span class="px-1.5 py-0.5 bg-blue-900/40 text-blue-300 rounded text-xs">{lib}</span>
                   {/each}
                 </div>
               </td>
-              <td class="py-3 pr-6 text-gray-500 text-xs">{inst.union_strategy ? strategyLabel[inst.union_strategy] ?? inst.union_strategy : '-'}</td>
+              <td class="py-3 pr-6 text-gray-500 text-xs hidden lg:table-cell">{inst.union_strategy ? strategyLabel[inst.union_strategy] ?? inst.union_strategy : '-'}</td>
               <td class="py-3 text-right">
                 <div class="flex items-center justify-end gap-2">
                   {#if inst.status === 'ACTIVE'}
-                    <button onclick={(e) => { e.stopPropagation(); openConsole(inst.id); }} class="text-gray-400 hover:text-white text-xs px-2 py-1 rounded border border-gray-700 hover:border-gray-500 transition-colors">콘솔</button>
+                    <button onclick={(e) => { e.stopPropagation(); openConsole(inst.id); }} class="text-gray-400 hover:text-white text-xs px-2 py-1 rounded border border-gray-700 hover:border-gray-500 transition-colors hidden sm:inline-flex">콘솔</button>
                   {/if}
                   {#if inst.status === 'ACTIVE' || inst.status === 'SHUTOFF'}
-                    <button onclick={(e) => { e.stopPropagation(); shelveInstance(inst.id); }} class="text-purple-400 hover:text-purple-300 text-xs px-2 py-1 rounded border border-purple-900 hover:border-purple-700 transition-colors">보관</button>
+                    <button onclick={(e) => { e.stopPropagation(); shelveInstance(inst.id); }} class="text-purple-400 hover:text-purple-300 text-xs px-2 py-1 rounded border border-purple-900 hover:border-purple-700 transition-colors hidden sm:inline-flex">보관</button>
                   {/if}
                   {#if inst.status === 'SHELVED_OFFLOADED' || inst.status === 'SHELVED'}
-                    <button onclick={(e) => { e.stopPropagation(); unshelveInstance(inst.id); }} class="text-green-400 hover:text-green-300 text-xs px-2 py-1 rounded border border-green-900 hover:border-green-700 transition-colors">보관 해제</button>
+                    <button onclick={(e) => { e.stopPropagation(); unshelveInstance(inst.id); }} class="text-green-400 hover:text-green-300 text-xs px-2 py-1 rounded border border-green-900 hover:border-green-700 transition-colors hidden sm:inline-flex">보관 해제</button>
                   {/if}
                   <button onclick={(e) => { e.stopPropagation(); deleteInstance(inst.id, inst.name); }} disabled={deleting === inst.id} class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-xs px-2 py-1 rounded border border-red-900 hover:border-red-700 disabled:border-gray-700 transition-colors">
                     {deleting === inst.id ? '삭제 중...' : '삭제'}

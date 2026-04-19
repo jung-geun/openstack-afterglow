@@ -73,6 +73,76 @@ async def test_delete_instance(client, mock_conn):
     assert resp.status_code == 204
 
 
+@pytest.mark.asyncio
+async def test_delete_instance_cleans_nfs_access_rules(client, mock_conn):
+    """prebuilt strategy VM 삭제 시 NFS access rule이 revoke되어야 한다."""
+    from app.models.compute import IpAddress
+
+    inst = make_instance()
+    inst.union_strategy = "prebuilt"
+    inst.union_share_ids = ["share-1"]
+    inst.ip_addresses = [IpAddress(addr="10.0.0.5", type="fixed")]
+
+    access_rules = [
+        {"id": "rule-1", "access_type": "ip", "access_to": "10.0.0.5"},
+        {"id": "rule-2", "access_type": "ip", "access_to": "192.168.1.1"},  # 다른 VM의 rule
+    ]
+    with (
+        patch("app.api.compute.instances.nova.get_server", return_value=inst),
+        patch("app.api.compute.instances.nova.delete_server", return_value=None),
+        patch("app.api.compute.instances.manila.list_access_rules", return_value=access_rules) as mock_list,
+        patch("app.api.compute.instances.manila.revoke_access_rule") as mock_revoke,
+        patch("app.api.compute.instances.neutron.cleanup_instance_fips", return_value=None),
+    ):
+        resp = await client.delete("/api/instances/inst-1")
+
+    assert resp.status_code == 204
+    mock_list.assert_called_once_with(mock_conn, "share-1")
+    # IP가 일치하는 rule-1만 revoke
+    mock_revoke.assert_called_once_with(mock_conn, "share-1", "rule-1")
+
+
+@pytest.mark.asyncio
+async def test_delete_instance_nfs_cleanup_failure_continues(client, mock_conn):
+    """NFS access rule 정리 실패해도 VM 삭제는 계속된다."""
+    from app.models.compute import IpAddress
+
+    inst = make_instance()
+    inst.union_strategy = "prebuilt"
+    inst.union_share_ids = ["share-1"]
+    inst.ip_addresses = [IpAddress(addr="10.0.0.5", type="fixed")]
+
+    with (
+        patch("app.api.compute.instances.nova.get_server", return_value=inst),
+        patch("app.api.compute.instances.nova.delete_server", return_value=None),
+        patch("app.api.compute.instances.manila.list_access_rules", side_effect=Exception("Manila 오류")),
+        patch("app.api.compute.instances.neutron.cleanup_instance_fips", return_value=None),
+    ):
+        resp = await client.delete("/api/instances/inst-1")
+
+    assert resp.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_delete_instance_dynamic_skips_nfs_rule_cleanup(client, mock_conn):
+    """dynamic strategy 삭제 시 NFS access rule 조회를 건너뛴다."""
+    inst = make_instance()
+    inst.union_strategy = "dynamic"
+    inst.union_share_ids = ["share-1"]
+
+    with (
+        patch("app.api.compute.instances.nova.get_server", return_value=inst),
+        patch("app.api.compute.instances.nova.delete_server", return_value=None),
+        patch("app.api.compute.instances.manila.delete_file_storage", return_value=None),
+        patch("app.api.compute.instances.manila.list_access_rules") as mock_list,
+        patch("app.api.compute.instances.neutron.cleanup_instance_fips", return_value=None),
+    ):
+        resp = await client.delete("/api/instances/inst-1")
+
+    assert resp.status_code == 204
+    mock_list.assert_not_called()
+
+
 # ────── 라이프사이클 액션 ──────
 
 

@@ -257,7 +257,7 @@ spec:
             - name: ADDRESS
               value: /var/lib/kubelet/plugins/manila.csi.openstack.org/csi.sock
             - name: DRIVER_REG_SOCK_PATH
-              value: /var/lib/kubelet/plugins_registry/manila.csi.openstack.org-reg.sock
+              value: /var/lib/kubelet/plugins/manila.csi.openstack.org/csi.sock
           volumeMounts:
             - name: plugin-dir
               mountPath: /var/lib/kubelet/plugins/manila.csi.openstack.org
