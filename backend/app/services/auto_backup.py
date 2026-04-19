@@ -14,7 +14,7 @@ Redis 키:
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import openstack
 
@@ -40,7 +40,7 @@ async def enable_auto_backup(project_id: str, volume_id: str, max_daily: int = 2
         "max_daily": max_daily,
         "max_weekly": max_weekly,
         "max_monthly": max_monthly,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
     }
     r = await _get_redis()
     key = f"{_PREFIX}:config:{project_id}:{volume_id}"
@@ -99,7 +99,7 @@ async def list_all_auto_backup_configs() -> list[dict]:
 
 def _make_backup_name(volume_id: str, tier: str) -> str:
     """tier: daily | weekly | monthly"""
-    date = datetime.now(timezone.utc).strftime("%Y%m%d")
+    date = datetime.now(UTC).strftime("%Y%m%d")
     return f"auto_{volume_id[:8]}_{tier}_{date}"
 
 
@@ -134,7 +134,7 @@ async def run_backup_cycle(conn: openstack.connection.Connection, project_id: st
     """
     import asyncio
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     try:
         all_backups = await asyncio.to_thread(cinder.list_backups, conn)

@@ -4,7 +4,7 @@ import openstack
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from app.api.deps import get_os_conn, get_token_info
+from app.api.deps import get_os_conn
 from app.services import auto_backup, cinder
 from app.services.cache import cached_call, ttl_fast
 
