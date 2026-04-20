@@ -149,9 +149,7 @@ async def _finalize_api_lb(
 
         # api_address를 FIP 주소로 업데이트
         new_api_address = f"https://{api_fip_address}:6443"
-        await _k3s_db.update_cluster_status(
-            project_id, cluster_id, "PROVISIONING", api_address=new_api_address
-        )
+        await _k3s_db.update_cluster_status(project_id, cluster_id, "PROVISIONING", api_address=new_api_address)
 
         # kubeconfig의 server URL을 FIP로 패치
         kubeconfig = await _k3s_db.get_kubeconfig(project_id, cluster_id)
@@ -160,9 +158,7 @@ async def _finalize_api_lb(
             patched = kubeconfig.replace(old_url, new_api_address)
             await _k3s_db.store_kubeconfig(project_id, cluster_id, patched)
 
-        _logger.info(
-            "k3s cluster %s: API LB 설정 완료 → %s", cluster_id, new_api_address
-        )
+        _logger.info("k3s cluster %s: API LB 설정 완료 → %s", cluster_id, new_api_address)
     except Exception:
         _logger.error(
             "k3s cluster %s: API LB 설정 실패 (클러스터는 private IP로 계속 동작)",
