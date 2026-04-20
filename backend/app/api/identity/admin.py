@@ -1540,11 +1540,11 @@ class GpuQuotaRequest(BaseModel):
 
 
 @router.get("/gpu-aliases", dependencies=[Depends(require_admin)])
-async def get_gpu_aliases(conn: openstack.connection.Connection = Depends(get_os_conn)):
-    """클러스터의 모든 GPU PCI alias 목록 반환 (flavor extra_specs 기반)."""
-    from app.services.gpu_quota import get_gpu_aliases_from_flavors
+async def get_gpu_aliases():
+    """클러스터의 모든 GPU PCI alias 목록 반환 (flavor + Placement API 통합, admin connection 사용)."""
+    from app.services.gpu_quota import get_all_gpu_aliases
 
-    aliases = await get_gpu_aliases_from_flavors(conn)
+    aliases = await get_all_gpu_aliases()
     return {"aliases": aliases}
 
 
@@ -1593,8 +1593,8 @@ async def get_gpu_quotas(project_id: str, conn: openstack.connection.Connection 
     """
     from app.database import is_db_available
     from app.services.gpu_quota import (
+        get_all_gpu_aliases,
         get_effective_gpu_quotas,
-        get_gpu_aliases_from_flavors,
         get_project_gpu_usage,
     )
 
@@ -1602,7 +1602,7 @@ async def get_gpu_quotas(project_id: str, conn: openstack.connection.Connection 
         raise HTTPException(status_code=503, detail="DB가 초기화되지 않아 GPU quota를 조회할 수 없습니다")
 
     aliases, effective, usage = await asyncio.gather(
-        get_gpu_aliases_from_flavors(conn),
+        get_all_gpu_aliases(),
         get_effective_gpu_quotas(project_id),
         get_project_gpu_usage(conn, project_id),
     )
