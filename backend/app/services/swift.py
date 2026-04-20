@@ -61,7 +61,8 @@ def get_account_metadata(conn) -> dict:
 
 def create_container(conn, name: str) -> dict:
     """오브젝트 스토리지 컨테이너를 생성하고 메타데이터를 반환."""
-    c = conn.object_store.create_container(name)
+    _logger.debug("Swift 컨테이너 생성 시도: name=%s", name)
+    c = conn.object_store.create_container(name=name)
     return {"name": c.name or name, "count": 0, "bytes": 0}
 
 

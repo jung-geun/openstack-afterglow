@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import urllib.parse
 
 import openstack
@@ -9,6 +10,7 @@ from app.api.deps import get_os_conn
 from app.models.storage import CreateContainerRequest
 
 router = APIRouter()
+_logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -58,6 +60,7 @@ async def create_object_storage_container(
     try:
         return await asyncio.to_thread(swift.create_container, conn, req.name)
     except Exception:
+        _logger.exception("Swift 컨테이너 생성 실패: name=%s", req.name)
         raise HTTPException(status_code=500, detail="컨테이너 생성 실패")
 
 
