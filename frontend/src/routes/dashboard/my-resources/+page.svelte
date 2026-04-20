@@ -64,6 +64,14 @@
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
 
+	// 전체 프로젝트 인스턴스/볼륨 플랫 목록
+	const allInstances = $derived(
+		data ? data.projects.flatMap(p => p.instances.map(inst => ({ ...inst, project: p.project_name }))) : []
+	);
+	const allVolumes = $derived(
+		data ? data.projects.flatMap(p => p.volumes.map(vol => ({ ...vol, project: p.project_name }))) : []
+	);
+
 	async function load(opts?: { refresh?: boolean }) {
 		error = '';
 		try {
@@ -121,116 +129,106 @@
 	{/if}
 
 	{#if initialLoading}
-		<LoadingSkeleton variant="table" rows={6} />
-	{:else if data}
-		<!-- 통합 요약 카드 -->
-		<div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 mb-8">
-			<div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
-				<div class="text-xs text-gray-400 uppercase tracking-wide mb-1">인스턴스</div>
-				<div class="text-2xl font-bold text-white">{data.totals.instances}</div>
-			</div>
-			<div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
-				<div class="text-xs text-gray-400 uppercase tracking-wide mb-1">CPU</div>
-				<div class="text-2xl font-bold text-white">{data.totals.vcpus} <span class="text-base font-normal text-gray-400">cores</span></div>
-			</div>
-			<div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
-				<div class="text-xs text-gray-400 uppercase tracking-wide mb-1">RAM</div>
-				<div class="text-2xl font-bold text-white">{formatRam(data.totals.ram_mb)}</div>
-			</div>
-			<div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
-				<div class="text-xs text-gray-400 uppercase tracking-wide mb-1">볼륨</div>
-				<div class="text-2xl font-bold text-white">{data.totals.volumes}</div>
-			</div>
-			<div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
-				<div class="text-xs text-gray-400 uppercase tracking-wide mb-1">스토리지</div>
-				<div class="text-2xl font-bold text-white">{data.totals.storage_gb} <span class="text-base font-normal text-gray-400">GB</span></div>
-			</div>
-			<div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
-				<div class="text-xs text-gray-400 uppercase tracking-wide mb-1">네트워크</div>
-				<div class="text-2xl font-bold text-white">{data.totals.networks}</div>
-			</div>
-			<div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
-				<div class="text-xs text-gray-400 uppercase tracking-wide mb-1">Floating IP</div>
-				<div class="text-2xl font-bold text-white">{data.totals.floating_ips}</div>
-			</div>
+		<div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+			{#each [1, 2, 3, 4] as _}
+				<div class="animate-pulse bg-gray-900 border border-gray-800 rounded-2xl h-48"></div>
+			{/each}
 		</div>
+	{:else if data}
+		<div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
 
-		<!-- 프로젝트별 섹션 -->
-		<div class="space-y-3">
-			{#each data.projects as proj (proj.project_id)}
-				{@const isActive = proj.project_id === data.current_project_id}
-				<div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-					<!-- 프로젝트 헤더 -->
-					<button
-						class="w-full flex items-center justify-between px-5 py-4 hover:bg-gray-800/50 transition-colors text-left"
-						onclick={() => toggleProject(proj.project_id)}
-					>
-						<div class="flex items-center gap-3">
-							<span class="text-sm font-medium text-white">{proj.project_name}</span>
-							{#if isActive}
-								<span class="px-1.5 py-0.5 rounded text-xs bg-blue-900/40 text-blue-400">현재</span>
-							{/if}
-							{#if proj.error}
-								<span class="px-1.5 py-0.5 rounded text-xs bg-red-900/40 text-red-400">오류</span>
-							{/if}
+			<!-- 인스턴스 카드 -->
+			<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
+				<div class="flex items-center gap-2.5 mb-3.5">
+					<div class="w-10 h-10 rounded-[10px] bg-blue-500/15 border border-blue-500/30 text-blue-400 flex items-center justify-center shrink-0">
+						<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
+						</svg>
+					</div>
+					<div class="text-white font-semibold text-sm">인스턴스</div>
+					<span class="ml-auto text-xs text-gray-500">{allInstances.length}개</span>
+				</div>
+				<div class="flex flex-col">
+					{#each allInstances as inst, i (inst.id)}
+						<div class="flex items-center gap-3 py-2.5 {i < allInstances.length - 1 ? 'border-b border-gray-800' : ''}">
+							<div class="flex-1 min-w-0">
+								<div class="text-white text-[13px] font-medium truncate">{inst.name || inst.id.slice(0, 8)}</div>
+								<div class="text-[11px] text-gray-500 mt-0.5 font-mono truncate">{inst.flavor_name || '—'} · {inst.project}</div>
+							</div>
+							<StatusChip status={inst.status} />
 						</div>
-						<div class="flex items-center gap-6 text-xs text-gray-400">
-							<span>인스턴스 {proj.instance_count}</span>
-							<span>볼륨 {proj.volume_count}</span>
-							<span>{proj.storage_gb} GB</span>
-							<svg class="w-4 h-4 transition-transform {expandedProject === proj.project_id ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-							</svg>
-						</div>
-					</button>
-
-					{#if expandedProject === proj.project_id}
-						<div class="border-t border-gray-800 px-5 py-4 space-y-4">
-							<!-- 인스턴스 목록 -->
-							{#if proj.instances.length > 0}
-								<div>
-									<div class="text-xs text-gray-400 uppercase tracking-wide mb-2">인스턴스</div>
-									<div class="space-y-1">
-										{#each proj.instances as inst (inst.id)}
-											<div class="flex items-center justify-between bg-gray-800/50 rounded-lg px-3 py-2 text-xs">
-												<div class="flex items-center gap-3">
-													<span class="text-gray-300 font-medium">{inst.name || inst.id.slice(0, 8)}</span>
-													{#if inst.flavor_name}
-														<span class="text-gray-500">{inst.flavor_name}</span>
-													{/if}
-												</div>
-												<StatusChip status={inst.status} />
-											</div>
-										{/each}
-									</div>
-								</div>
-							{/if}
-
-							<!-- 볼륨 목록 -->
-							{#if proj.volumes.length > 0}
-								<div>
-									<div class="text-xs text-gray-400 uppercase tracking-wide mb-2">볼륨</div>
-									<div class="space-y-1">
-										{#each proj.volumes as vol (vol.id)}
-											<div class="flex items-center justify-between bg-gray-800/50 rounded-lg px-3 py-2 text-xs">
-												<div class="flex items-center gap-3">
-													<span class="text-gray-300 font-medium">{vol.name || vol.id.slice(0, 8)}</span>
-													<span class="text-gray-500">{vol.size} GB</span>
-												</div>
-												<StatusChip status={vol.status} />
-											</div>
-										{/each}
-									</div>
-								</div>
-							{/if}
-
-							{#if proj.instances.length === 0 && proj.volumes.length === 0}
-								<div class="text-center text-gray-600 text-xs py-4">리소스가 없습니다</div>
-							{/if}
-						</div>
+					{/each}
+					{#if allInstances.length === 0}
+						<div class="text-gray-600 text-xs py-3 text-center">없음</div>
 					{/if}
 				</div>
-			{/each}
+			</div>
+
+			<!-- 블록 볼륨 카드 -->
+			<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
+				<div class="flex items-center gap-2.5 mb-3.5">
+					<div class="w-10 h-10 rounded-[10px] bg-cyan-500/15 border border-cyan-500/30 text-cyan-400 flex items-center justify-center shrink-0">
+						<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
+						</svg>
+					</div>
+					<div class="text-white font-semibold text-sm">블록 볼륨</div>
+					<span class="ml-auto text-xs text-gray-500">{allVolumes.length}개</span>
+				</div>
+				<div class="flex flex-col">
+					{#each allVolumes as vol, i (vol.id)}
+						<div class="flex items-center gap-3 py-2.5 {i < allVolumes.length - 1 ? 'border-b border-gray-800' : ''}">
+							<div class="flex-1 min-w-0">
+								<div class="text-white text-[13px] font-medium truncate">{vol.name || vol.id.slice(0, 8)}</div>
+								<div class="text-[11px] text-gray-500 mt-0.5 font-mono truncate">{vol.size} GB · {vol.volume_type || '—'}</div>
+							</div>
+							<StatusChip status={vol.status} />
+						</div>
+					{/each}
+					{#if allVolumes.length === 0}
+						<div class="text-gray-600 text-xs py-3 text-center">없음</div>
+					{/if}
+				</div>
+			</div>
+
+			<!-- 키페어 카드 -->
+			<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
+				<div class="flex items-center gap-2.5 mb-3.5">
+					<div class="w-10 h-10 rounded-[10px] bg-violet-500/15 border border-violet-500/30 text-violet-400 flex items-center justify-center shrink-0">
+						<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+						</svg>
+					</div>
+					<div class="text-white font-semibold text-sm">키페어</div>
+					<span class="ml-auto text-xs text-gray-500">{data.totals.instances > 0 ? '—' : '0'}개</span>
+				</div>
+				<div class="flex flex-col items-center justify-center py-6">
+					<div class="text-[11px] text-gray-600 text-center leading-relaxed">
+						키페어 목록은<br />
+						<a href="/dashboard/compute/keypairs" class="text-violet-400 hover:text-violet-300 transition-colors">컴퓨트 → 키페어</a>에서 확인하세요
+					</div>
+				</div>
+			</div>
+
+			<!-- Floating IP 카드 -->
+			<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
+				<div class="flex items-center gap-2.5 mb-3.5">
+					<div class="w-10 h-10 rounded-[10px] bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center shrink-0">
+						<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
+						</svg>
+					</div>
+					<div class="text-white font-semibold text-sm">Floating IP</div>
+					<span class="ml-auto text-xs text-gray-500">{data.totals.floating_ips}개</span>
+				</div>
+				<div class="flex flex-col items-center justify-center py-6">
+					<div class="text-[11px] text-gray-600 text-center leading-relaxed">
+						Floating IP 목록은<br />
+						<a href="/dashboard/network/floating-ips" class="text-emerald-400 hover:text-emerald-300 transition-colors">네트워크 → Floating IP</a>에서 확인하세요
+					</div>
+				</div>
+			</div>
+
 		</div>
 
 		{#if data.projects.length === 0}

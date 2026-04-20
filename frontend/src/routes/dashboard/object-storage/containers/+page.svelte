@@ -135,60 +135,57 @@
 		{/snippet}
 	</PageHeader>
 
-	{#if account}
-		<div class="grid grid-cols-3 gap-4 mb-6">
-			<div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
-				<div class="text-xs text-gray-500 uppercase tracking-wide mb-1">컨테이너</div>
-				<div class="text-2xl font-bold text-white">{account.container_count}</div>
-			</div>
-			<div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
-				<div class="text-xs text-gray-500 uppercase tracking-wide mb-1">오브젝트</div>
-				<div class="text-2xl font-bold text-white">{account.object_count}</div>
-			</div>
-			<div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
-				<div class="text-xs text-gray-500 uppercase tracking-wide mb-1">사용 용량</div>
-				<div class="text-2xl font-bold text-white">{formatStorage(Math.round(account.bytes_used / 1073741824))}</div>
-			</div>
-		</div>
-	{/if}
-
 	{#if loading}
-		<LoadingSkeleton variant="table" rows={5} />
+		<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+			{#each Array(6) as _}
+				<div class="animate-pulse h-32 bg-gray-900 border border-gray-800 rounded-2xl"></div>
+			{/each}
+		</div>
 	{:else if containers.length === 0}
-		<div class="text-gray-600 text-sm">컨테이너가 없습니다</div>
+		<div class="text-gray-600 text-sm py-20 text-center">컨테이너가 없습니다</div>
 	{:else}
-		<div class="overflow-x-auto">
-			<table class="w-full text-sm">
-				<thead>
-					<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
-						<th class="text-left py-3 px-4 font-medium">컨테이너 이름</th>
-						<th class="text-left py-3 px-4 font-medium">오브젝트 수</th>
-						<th class="text-left py-3 px-4 font-medium">용량</th>
-						<th class="text-right py-3 px-4 font-medium">액션</th>
-					</tr>
-				</thead>
-				<tbody>
-					{#each containers as c}
-						<tr class="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
-							<td class="py-3 px-4">
-								<a
-									href="/dashboard/object-storage/containers/{encodeURIComponent(c.name)}"
-									class="text-indigo-400 hover:text-indigo-300 font-medium"
-								>{c.name}</a>
-							</td>
-							<td class="py-3 px-4 text-gray-300">{c.count}</td>
-							<td class="py-3 px-4 text-gray-300">{formatStorage(Math.round(c.bytes / 1073741824))}</td>
-							<td class="py-3 px-4 text-right">
-								<button
-									onclick={(e) => { e.stopPropagation(); deleteContainer(c.name); }}
-									disabled={deleting === c.name}
-									class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-xs px-2 py-1 rounded border border-red-900 hover:border-red-700 disabled:border-gray-700 transition-colors"
-								>{deleting === c.name ? '삭제 중...' : '삭제'}</button>
-							</td>
-						</tr>
-					{/each}
-				</tbody>
-			</table>
+		<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+			{#each containers as c}
+				<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
+					<!-- Header -->
+					<div class="flex items-center gap-2.5 mb-3">
+						<div class="w-10 h-10 rounded-[10px] bg-violet-500/15 border border-violet-500/30 text-violet-400 flex items-center justify-center shrink-0">
+							<svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>
+							</svg>
+						</div>
+						<div class="flex-1 min-w-0">
+							<div class="text-white font-semibold text-sm font-mono truncate">{c.name}</div>
+							<div class="text-[11px] text-gray-500 mt-0.5">오브젝트 {c.count}개</div>
+						</div>
+					</div>
+
+					<!-- Stats -->
+					<div class="grid grid-cols-2 gap-2 mb-3">
+						<div>
+							<div class="text-[11px] uppercase tracking-wider font-medium text-gray-500">오브젝트</div>
+							<div class="text-white font-mono text-sm mt-0.5">{c.count}</div>
+						</div>
+						<div>
+							<div class="text-[11px] uppercase tracking-wider font-medium text-gray-500">크기</div>
+							<div class="text-white font-mono text-sm mt-0.5">{formatStorage(Math.round(c.bytes / 1073741824))}</div>
+						</div>
+					</div>
+
+					<!-- Footer -->
+					<div class="pt-3 border-t border-gray-800 flex items-center justify-between">
+						<a
+							href="/dashboard/object-storage/containers/{encodeURIComponent(c.name)}"
+							class="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+						>상세 보기 →</a>
+						<button
+							onclick={() => deleteContainer(c.name)}
+							disabled={deleting === c.name}
+							class="text-xs text-red-400 hover:text-red-300 disabled:text-gray-600 transition-colors"
+						>{deleting === c.name ? '삭제 중...' : '삭제'}</button>
+					</div>
+				</div>
+			{/each}
 		</div>
 	{/if}
 </div>
