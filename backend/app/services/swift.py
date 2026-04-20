@@ -60,10 +60,21 @@ def get_account_metadata(conn) -> dict:
 
 
 def create_container(conn, name: str) -> dict:
-    """오브젝트 스토리지 컨테이너를 생성하고 메타데이터를 반환."""
-    _logger.debug("Swift 컨테이너 생성 시도: name=%s", name)
-    c = conn.object_store.create_container(name=name)
-    return {"name": c.name or name, "count": 0, "bytes": 0}
+    """오브젝트 스토리지 컨테이너를 생성하고 메타데이터를 반환.
+
+    Ceph RGW 환경에서 openstacksdk의 create_container가 404를 반환할 수 있으므로,
+    raw PUT 요청으로 직접 생성을 시도한다.
+    """
+    try:
+        c = conn.object_store.create_container(name=name)
+        return {"name": c.name or name, "count": 0, "bytes": 0}
+    except Exception:
+        _logger.debug("SDK create_container 실패, raw PUT 시도", exc_info=True)
+        # fallback: raw session PUT (Ceph RGW 호환)
+        resp = conn.object_store.put(f"/{name}", headers={"Content-Length": "0"})
+        if resp.status_code not in (201, 202, 204):
+            raise
+        return {"name": name, "count": 0, "bytes": 0}
 
 
 def delete_container(conn, name: str) -> None:
