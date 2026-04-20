@@ -217,6 +217,15 @@
 				class="w-[30px] h-[30px] rounded-full bg-gray-800 border border-gray-700 flex items-center justify-center text-gray-300 text-[11px] font-semibold hover:border-gray-600 transition-colors"
 				title={$auth.username}
 			>{initials}</button>
+
+			<!-- 로그아웃 -->
+			<button
+				onclick={logout}
+				class="p-1.5 text-gray-400 hover:text-red-400 transition-colors rounded-md hover:bg-gray-800"
+				title="로그아웃"
+			>
+				<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+			</button>
 		</div>
 	</nav>
 	<main class="pt-14 min-h-screen bg-gray-950 text-white">
