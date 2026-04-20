@@ -1,6 +1,9 @@
 """GPU 프로젝트별 Quota 관리 서비스.
 
 DB가 초기화되어 있어야 동작 (is_db_available() 확인 후 호출).
+
+기본 정책: quota 미설정 시 0 (GPU VM 생성 불가). 관리자가 명시적으로 quota를 설정해야 함.
+전체 프로젝트 기본 quota는 project_id = "__default__"로 저장.
 """
 
 import logging
@@ -11,6 +14,8 @@ from sqlalchemy import delete, select
 from app.database import get_session_factory
 
 _logger = logging.getLogger(__name__)
+
+DEFAULT_PROJECT_ID = "__default__"
 
 
 def _parse_alias_counts(extra_specs: dict) -> dict[str, int]:
@@ -112,27 +117,64 @@ async def get_project_gpu_usage(conn, project_id: str) -> dict[str, int]:
     return await asyncio.to_thread(_collect)
 
 
+async def get_effective_gpu_quotas(project_id: str) -> dict[str, int]:
+    """프로젝트의 유효 GPU quota 맵 반환 (프로젝트별 > 기본값 > 0).
+
+    반환: {alias: limit}
+    """
+    project_quotas = await get_project_gpu_quotas(project_id)
+    default_quotas = await get_project_gpu_quotas(DEFAULT_PROJECT_ID)
+
+    default_map = {q["gpu_type"]: q["limit"] for q in default_quotas}
+    effective: dict[str, int] = dict(default_map)
+
+    # 프로젝트별 설정이 기본값을 오버라이드
+    for q in project_quotas:
+        effective[q["gpu_type"]] = q["limit"]
+
+    return effective
+
+
 async def check_gpu_quota(conn, project_id: str, flavor_extra_specs: dict) -> tuple[bool, str]:
     """VM 생성 전 GPU quota 초과 여부 확인.
 
+    기본 정책: quota 미설정 시 0 (거부). 관리자가 명시적으로 설정해야 허용.
     반환: (ok: bool, message: str)
     """
     requested = _parse_alias_counts(flavor_extra_specs)
     if not requested:
         return True, ""
 
-    quotas = await get_project_gpu_quotas(project_id)
-    if not quotas:
-        return True, ""  # quota 미설정 = 무제한
-
-    quota_map = {q["gpu_type"]: q["limit"] for q in quotas}
+    effective = await get_effective_gpu_quotas(project_id)
     usage = await get_project_gpu_usage(conn, project_id)
 
     for alias, count in requested.items():
-        limit = quota_map.get(alias, -1)
+        limit = effective.get(alias, 0)  # 미설정 = 0 (거부)
         if limit == -1:
-            continue  # 해당 타입은 무제한
+            continue  # 무제한
         current = usage.get(alias, 0)
         if current + count > limit:
-            return False, (f"GPU quota 초과: {alias} — 현재 {current}개 사용 중, quota {limit}개, 요청 {count}개")
+            if limit == 0:
+                return False, f"GPU quota 미할당: {alias} — 관리자에게 GPU quota 요청이 필요합니다"
+            return False, f"GPU quota 초과: {alias} — 현재 {current}개 사용 중, quota {limit}개, 요청 {count}개"
     return True, ""
+
+
+async def get_gpu_aliases_from_flavors(conn) -> list[str]:
+    """모든 flavor의 extra_specs에서 고유한 PCI alias 목록 추출.
+
+    반환: 정렬된 alias 이름 리스트 (예: ["RTX3090", "RTX4090", "GtxTitanX"])
+    """
+    import asyncio
+
+    from app.services import nova
+
+    def _collect():
+        all_flavors = nova.list_flavors(conn)
+        aliases: set[str] = set()
+        for f in all_flavors:
+            for alias in _parse_alias_counts(f.extra_specs or {}):
+                aliases.add(alias)
+        return sorted(aliases)
+
+    return await asyncio.to_thread(_collect)

@@ -153,18 +153,17 @@ async def get_project_quotas(
     gpu_quota: list[dict] = []
     if is_db_available():
         try:
-            from app.services.gpu_quota import get_project_gpu_quotas, get_project_gpu_usage
+            from app.services.gpu_quota import get_effective_gpu_quotas, get_project_gpu_usage
 
-            quotas, usage = await asyncio.gather(
-                get_project_gpu_quotas(project_id),
+            effective, usage = await asyncio.gather(
+                get_effective_gpu_quotas(project_id),
                 get_project_gpu_usage(conn, project_id),
             )
-            for q in quotas:
-                in_use = usage.get(q["gpu_type"], 0)
-                limit = q["limit"]
+            for gpu_type, limit in effective.items():
+                in_use = usage.get(gpu_type, 0)
                 gpu_quota.append(
                     {
-                        "gpu_type": q["gpu_type"],
+                        "gpu_type": gpu_type,
                         "limit": limit,
                         "in_use": in_use,
                         "available": (limit - in_use) if limit >= 0 else -1,

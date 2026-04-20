@@ -1539,28 +1539,87 @@ class GpuQuotaRequest(BaseModel):
     limit: int  # -1 = 무제한
 
 
-@router.get("/gpu-quotas/{project_id}", dependencies=[Depends(require_admin)])
-async def get_gpu_quotas(project_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
-    """프로젝트의 GPU quota 목록 + 현재 사용량 조회."""
+@router.get("/gpu-aliases", dependencies=[Depends(require_admin)])
+async def get_gpu_aliases(conn: openstack.connection.Connection = Depends(get_os_conn)):
+    """클러스터의 모든 GPU PCI alias 목록 반환 (flavor extra_specs 기반)."""
+    from app.services.gpu_quota import get_gpu_aliases_from_flavors
+
+    aliases = await get_gpu_aliases_from_flavors(conn)
+    return {"aliases": aliases}
+
+
+@router.get("/gpu-quotas/defaults", dependencies=[Depends(require_admin)])
+async def get_default_gpu_quotas():
+    """전체 프로젝트 기본 GPU quota 조회."""
     from app.database import is_db_available
-    from app.services.gpu_quota import get_project_gpu_quotas, get_project_gpu_usage
+    from app.services.gpu_quota import DEFAULT_PROJECT_ID, get_project_gpu_quotas
 
     if not is_db_available():
         raise HTTPException(status_code=503, detail="DB가 초기화되지 않아 GPU quota를 조회할 수 없습니다")
 
-    quotas, usage = await asyncio.gather(
-        get_project_gpu_quotas(project_id),
+    quotas = await get_project_gpu_quotas(DEFAULT_PROJECT_ID)
+    return [{"gpu_type": q["gpu_type"], "limit": q["limit"]} for q in quotas]
+
+
+@router.put("/gpu-quotas/defaults", dependencies=[Depends(require_admin)])
+async def set_default_gpu_quota(req: GpuQuotaRequest):
+    """전체 프로젝트 기본 GPU quota 설정 (upsert)."""
+    from app.database import is_db_available
+    from app.services.gpu_quota import DEFAULT_PROJECT_ID, set_project_gpu_quota
+
+    if not is_db_available():
+        raise HTTPException(status_code=503, detail="DB가 초기화되지 않아 GPU quota를 설정할 수 없습니다")
+
+    return await set_project_gpu_quota(DEFAULT_PROJECT_ID, req.gpu_type, req.limit)
+
+
+@router.delete("/gpu-quotas/defaults/{gpu_type}", dependencies=[Depends(require_admin)], status_code=204)
+async def delete_default_gpu_quota(gpu_type: str):
+    """전체 프로젝트 기본 GPU quota 삭제 (기본값 0으로 복귀)."""
+    from app.database import is_db_available
+    from app.services.gpu_quota import DEFAULT_PROJECT_ID, delete_project_gpu_quota
+
+    if not is_db_available():
+        raise HTTPException(status_code=503, detail="DB가 초기화되지 않아 GPU quota를 삭제할 수 없습니다")
+
+    await delete_project_gpu_quota(DEFAULT_PROJECT_ID, gpu_type)
+
+
+@router.get("/gpu-quotas/{project_id}", dependencies=[Depends(require_admin)])
+async def get_gpu_quotas(project_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+    """프로젝트의 GPU quota 목록 + 현재 사용량 조회.
+
+    클러스터의 모든 GPU alias에 대해 유효 quota (프로젝트별 > 기본값 > 0)를 반환.
+    """
+    from app.database import is_db_available
+    from app.services.gpu_quota import (
+        get_effective_gpu_quotas,
+        get_gpu_aliases_from_flavors,
+        get_project_gpu_usage,
+    )
+
+    if not is_db_available():
+        raise HTTPException(status_code=503, detail="DB가 초기화되지 않아 GPU quota를 조회할 수 없습니다")
+
+    aliases, effective, usage = await asyncio.gather(
+        get_gpu_aliases_from_flavors(conn),
+        get_effective_gpu_quotas(project_id),
         get_project_gpu_usage(conn, project_id),
     )
-    return [
-        {
-            "gpu_type": q["gpu_type"],
-            "limit": q["limit"],
-            "in_use": usage.get(q["gpu_type"], 0),
-            "available": (q["limit"] - usage.get(q["gpu_type"], 0)) if q["limit"] >= 0 else -1,
-        }
-        for q in quotas
-    ]
+
+    result = []
+    for alias in aliases:
+        limit = effective.get(alias, 0)
+        in_use = usage.get(alias, 0)
+        result.append(
+            {
+                "gpu_type": alias,
+                "limit": limit,
+                "in_use": in_use,
+                "available": (limit - in_use) if limit >= 0 else -1,
+            }
+        )
+    return result
 
 
 @router.put("/gpu-quotas/{project_id}", dependencies=[Depends(require_admin)])
@@ -1577,7 +1636,7 @@ async def set_gpu_quota(project_id: str, req: GpuQuotaRequest):
 
 @router.delete("/gpu-quotas/{project_id}/{gpu_type}", dependencies=[Depends(require_admin)], status_code=204)
 async def delete_gpu_quota(project_id: str, gpu_type: str):
-    """프로젝트의 특정 GPU quota 삭제."""
+    """프로젝트의 특정 GPU quota 삭제 (기본값으로 폴백)."""
     from app.database import is_db_available
     from app.services.gpu_quota import delete_project_gpu_quota
 
