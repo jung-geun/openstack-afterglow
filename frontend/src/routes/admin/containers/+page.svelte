@@ -5,6 +5,8 @@
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import SlidePanel from '$lib/components/SlidePanel.svelte';
 	import ContainerDetailPanel from '$lib/components/ContainerDetailPanel.svelte';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import StatusChip from '$lib/components/ui/StatusChip.svelte';
 
 	interface AdminContainer {
 		uuid: string;
@@ -17,10 +19,6 @@
 		created_at: string | null;
 		project_id: string | null;
 	}
-
-	const statusColor: Record<string, string> = {
-		Running: 'text-green-400', Stopped: 'text-gray-400', ERROR: 'text-red-400',
-	};
 
 	let containers = $state<AdminContainer[]>([]);
 	let loading = $state(true);
@@ -44,10 +42,11 @@
 </script>
 
 <div class="p-4 md:p-8 max-w-6xl">
-	<div class="flex items-center justify-between mb-6">
-		<h1 class="text-2xl font-bold text-white">전체 컨테이너</h1>
-		<button onclick={load} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
-	</div>
+	<PageHeader breadcrumb="CONTAINERS" title="전체 컨테이너">
+		{#snippet actions()}
+			<button onclick={load} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
+		{/snippet}
+	</PageHeader>
 
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={5} />
@@ -77,7 +76,7 @@
 							tabindex="0"
 						>
 							<td class="py-2 pr-4 text-white">{c.name || c.uuid.slice(0, 8)}</td>
-							<td class="py-2 pr-4 {statusColor[c.status] ?? 'text-gray-400'}">{c.status}</td>
+							<td class="py-2 pr-4"><StatusChip status={c.status} /></td>
 							<td class="py-2 pr-4 text-gray-400 font-mono text-xs">{c.image || '-'}</td>
 							<td class="py-2 pr-4 text-gray-400">{c.cpu ?? '-'}</td>
 							<td class="py-2 pr-4 text-gray-400">{c.memory || '-'}</td>

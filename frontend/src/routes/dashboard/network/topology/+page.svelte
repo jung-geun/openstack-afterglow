@@ -9,6 +9,7 @@
 	import InstanceDetailPanel from '$lib/components/InstanceDetailPanel.svelte';
 	import RouterDetailPanel from '$lib/components/RouterDetailPanel.svelte';
 	import SlidePanel from '$lib/components/SlidePanel.svelte';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
 	let isLight = $state(false);
 	$effect(() => {
@@ -101,13 +102,12 @@
 </script>
 
 <div class="p-4 md:p-8 max-w-screen-2xl mx-auto">
-	<div class="mb-6 flex items-center justify-between">
-		<h1 class="text-2xl font-bold text-white">네트워크 토폴로지</h1>
-		<div class="flex items-center gap-2">
+	<PageHeader breadcrumb="NETWORK / TOPOLOGY" title="토폴로지">
+		{#snippet actions()}
 			<AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={30} />
 			<RefreshButton refreshing={refreshing || loading} onclick={forceRefresh} />
-		</div>
-	</div>
+		{/snippet}
+	</PageHeader>
 
 	{#if error}
 		<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm">

@@ -5,6 +5,7 @@
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { formatNumber, formatStorage } from '$lib/utils/format';
 	import { projectNames } from '$lib/stores/projectNames';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
 	interface Hypervisor {
 		id: string;
@@ -185,10 +186,11 @@
 
 <div class="flex h-full">
 <div class="flex-1 p-4 md:p-8 max-w-6xl overflow-auto">
-	<div class="flex items-center justify-between mb-6">
-		<h1 class="text-2xl font-bold text-white">하이퍼바이저</h1>
-		<button onclick={load} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
-	</div>
+	<PageHeader breadcrumb="COMPUTE / HYPERVISORS" title="하이퍼바이저">
+		{#snippet actions()}
+			<button onclick={load} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
+		{/snippet}
+	</PageHeader>
 
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={5} />

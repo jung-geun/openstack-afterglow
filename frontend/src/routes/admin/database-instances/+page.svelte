@@ -3,6 +3,8 @@
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import StatusChip from '$lib/components/ui/StatusChip.svelte';
 
 	interface DbInstance {
 		id: string;
@@ -25,13 +27,6 @@
 		name: string;
 		versions: { id: string; name: string }[];
 	}
-
-	const statusColor: Record<string, string> = {
-		ACTIVE: 'text-green-400',
-		BUILD: 'text-yellow-400',
-		ERROR: 'text-red-400',
-		SHUTDOWN: 'text-gray-400',
-	};
 
 	let instances = $state<DbInstance[]>([]);
 	let loading = $state(true);
@@ -210,14 +205,13 @@
 {/if}
 
 <div class="p-4 md:p-8 max-w-6xl">
-	<div class="flex items-center justify-between mb-6">
-		<h1 class="text-2xl font-bold text-white">DB 인스턴스</h1>
-		<div class="flex gap-2">
+	<PageHeader breadcrumb="STORAGE / DATABASE INSTANCES" title="DB 인스턴스">
+		{#snippet actions()}
 			<button onclick={openModal}
 				class="text-xs text-white bg-amber-600 hover:bg-amber-500 transition-colors px-3 py-1.5 rounded border border-amber-500">+ 인스턴스 생성</button>
 			<button onclick={load} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
-		</div>
-	</div>
+		{/snippet}
+	</PageHeader>
 
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={5} />
@@ -243,7 +237,7 @@
 							<td class="py-3 px-4">
 								<a href="/admin/database-instances/{inst.id}" class="text-amber-400 hover:text-amber-300 font-medium">{inst.name}</a>
 							</td>
-							<td class="py-3 px-4 font-medium text-xs {statusColor[inst.status] ?? 'text-gray-300'}">{inst.status}</td>
+							<td class="py-3 px-4"><StatusChip status={inst.status} /></td>
 							<td class="py-3 px-4 text-gray-300">{inst.datastore?.type ?? '-'} {inst.datastore?.version ?? ''}</td>
 							<td class="py-3 px-4 text-gray-300">{inst.size || '-'}</td>
 							<td class="py-3 px-4 text-gray-600 font-mono text-xs">{inst.id.slice(0, 8)}…</td>

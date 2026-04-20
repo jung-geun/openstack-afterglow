@@ -8,17 +8,13 @@
   import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
   import SlidePanel from '$lib/components/SlidePanel.svelte';
   import FileStorageDetailPanel from '$lib/components/FileStorageDetailPanel.svelte';
+  import StatusChip from '$lib/components/ui/StatusChip.svelte';
+  import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
   // ────────── 공통 ──────────
   const token = $derived($auth.token ?? undefined);
   const projectId = $derived($auth.projectId ?? undefined);
 
-  const statusColor: Record<string, string> = {
-    available: 'text-green-400 bg-green-900/30',
-    creating:  'text-yellow-400 bg-yellow-900/30',
-    deleting:  'text-orange-400 bg-orange-900/30',
-    error:     'text-red-400 bg-red-900/30',
-  };
 
   interface QuotaItem { limit: number; in_use: number; }
   interface Quota { shares: QuotaItem; gigabytes: QuotaItem; share_networks: QuotaItem; }
@@ -576,14 +572,13 @@
 
 <!-- ===== 메인 페이지 ===== -->
 <div class="p-4 md:p-8">
-  <div class="flex items-center justify-between mb-6">
-    <h1 class="text-2xl font-bold text-white">파일 스토리지</h1>
-    <div class="flex items-center gap-2">
+  <PageHeader breadcrumb="FILE STORAGE" title="파일 스토리지">
+    {#snippet actions()}
       <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={10} />
       <RefreshButton refreshing={refreshing} onclick={forceRefresh} />
       <button onclick={openWizard} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 파일 스토리지 생성</button>
-    </div>
-  </div>
+    {/snippet}
+  </PageHeader>
 
   {#if quota}
     <div class="flex items-center gap-6 mb-6 bg-gray-900 border border-gray-800 rounded-lg px-5 py-3">
@@ -634,7 +629,7 @@
                   {#if fs.name}<span>{fs.name}</span>{:else}<span class="text-gray-400 font-mono text-xs">{fs.id}</span>{/if}
                 </button>
               </td>
-              <td class="py-3 pr-6"><span class="px-2 py-0.5 rounded text-xs font-medium {statusColor[fs.status] ?? 'text-gray-400 bg-gray-800'}">{fs.status}</span></td>
+              <td class="py-3 pr-6"><StatusChip status={fs.status} /></td>
               <td class="py-3 pr-4 text-gray-400 text-xs">{fs.size} GB</td>
               <td class="py-3 pr-4 text-gray-400 text-xs">{fs.share_proto}</td>
               <td class="py-3 pr-6 text-xs">

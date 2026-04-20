@@ -5,6 +5,7 @@
   import type { DashboardSummary } from '$lib/types/resources';
   import { formatNumber, formatStorage } from '$lib/utils/format';
   import RefreshButton from '$lib/components/RefreshButton.svelte';
+  import StatTile from '$lib/components/ui/StatTile.svelte';
 
   interface QuotaItem { limit: number; in_use: number; }
   interface Quotas {
@@ -131,148 +132,125 @@
       <div class="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4 lg:grid-cols-3">
 
         <!-- 인스턴스 -->
-        <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 flex flex-col min-h-[128px]">
-          <div class="flex items-center justify-between mb-3">
-            <span class="text-xs text-gray-500 uppercase tracking-wide font-medium">인스턴스</span>
-            <div class="w-8 h-8 rounded-full bg-blue-900/40 flex items-center justify-center">
-              <svg class="w-4 h-4 text-blue-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-                <rect x="1" y="2.5" width="14" height="11" rx="1.5"/>
-                <line x1="4" y1="6" x2="12" y2="6"/>
-                <line x1="4" y1="8.5" x2="12" y2="8.5"/>
-                <line x1="4" y1="11" x2="8" y2="11"/>
-              </svg>
+        <StatTile
+          label="인스턴스"
+          value={formatNumber(summary.instances.active)}
+          suffix="/ {formatNumber(summary.instances.total)}"
+          iconBgClass="bg-blue-900/40"
+        >
+          {#snippet icon()}
+            <svg class="w-4 h-4 text-blue-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+              <rect x="1" y="2.5" width="14" height="11" rx="1.5"/>
+              <line x1="4" y1="6" x2="12" y2="6"/>
+              <line x1="4" y1="8.5" x2="12" y2="8.5"/>
+              <line x1="4" y1="11" x2="8" y2="11"/>
+            </svg>
+          {/snippet}
+          {#snippet footer()}
+            <div class="flex gap-2 text-xs">
+              <span class="text-green-400">{formatNumber(summary.instances.active)} active</span>
+              {#if summary.instances.shutoff > 0}<span class="text-gray-500">{formatNumber(summary.instances.shutoff)} off</span>{/if}
+              {#if summary.instances.error > 0}<span class="text-red-400">{formatNumber(summary.instances.error)} err</span>{/if}
             </div>
-          </div>
-          <div class="text-3xl font-bold text-white leading-tight mb-1">
-            {formatNumber(summary.instances.active)}<span class="text-lg text-gray-500 font-normal"> / {formatNumber(summary.instances.total)}</span>
-          </div>
-          <div class="flex gap-2 text-xs mt-auto pt-2">
-            <span class="text-green-400">{formatNumber(summary.instances.active)} active</span>
-            {#if summary.instances.shutoff > 0}<span class="text-gray-500">{formatNumber(summary.instances.shutoff)} off</span>{/if}
-            {#if summary.instances.error > 0}<span class="text-red-400">{formatNumber(summary.instances.error)} err</span>{/if}
-          </div>
-        </div>
+          {/snippet}
+        </StatTile>
 
         <!-- vCPU -->
-        <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 flex flex-col min-h-[128px]">
-          <div class="flex items-center justify-between mb-3">
-            <span class="text-xs text-gray-500 uppercase tracking-wide font-medium">vCPU</span>
-            <div class="w-8 h-8 rounded-full bg-green-900/30 flex items-center justify-center">
-              <svg class="w-4 h-4 text-green-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-                <rect x="3" y="3" width="10" height="10" rx="1"/>
-                <rect x="5.5" y="5.5" width="5" height="5" rx="0.5"/>
-                <line x1="5" y1="1" x2="5" y2="3"/><line x1="8" y1="1" x2="8" y2="3"/><line x1="11" y1="1" x2="11" y2="3"/>
-                <line x1="5" y1="13" x2="5" y2="15"/><line x1="8" y1="13" x2="8" y2="15"/><line x1="11" y1="13" x2="11" y2="15"/>
-                <line x1="1" y1="5" x2="3" y2="5"/><line x1="1" y1="8" x2="3" y2="8"/><line x1="1" y1="11" x2="3" y2="11"/>
-                <line x1="13" y1="5" x2="15" y2="5"/><line x1="13" y1="8" x2="15" y2="8"/><line x1="13" y1="11" x2="15" y2="11"/>
-              </svg>
-            </div>
-          </div>
-          <div class="text-3xl font-bold text-white leading-tight mb-1">
-            {formatNumber(c.vcpus_used)}<span class="text-lg text-gray-500 font-normal">{c.vcpus_limit > 0 ? ` / ${formatNumber(c.vcpus_limit)}` : ''}</span>
-          </div>
-          {#if c.vcpus_limit > 0}
-            {@const pct = Math.round(c.vcpus_used / c.vcpus_limit * 100)}
-            <div class="mt-auto mt-3 w-full bg-gray-800 rounded-full h-2 overflow-hidden">
-              <div class="h-2 rounded-full transition-all {pct > 80 ? 'bg-red-500' : pct > 60 ? 'bg-yellow-500' : 'bg-blue-500'}" style="width:{pct}%"></div>
-            </div>
-          {/if}
-        </div>
+        <StatTile
+          label="vCPU"
+          value={formatNumber(c.vcpus_used)}
+          suffix={c.vcpus_limit > 0 ? `/ ${formatNumber(c.vcpus_limit)}` : undefined}
+          iconBgClass="bg-green-900/30"
+          progress={c.vcpus_limit > 0 ? { value: c.vcpus_used, max: c.vcpus_limit } : undefined}
+        >
+          {#snippet icon()}
+            <svg class="w-4 h-4 text-green-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+              <rect x="3" y="3" width="10" height="10" rx="1"/>
+              <rect x="5.5" y="5.5" width="5" height="5" rx="0.5"/>
+              <line x1="5" y1="1" x2="5" y2="3"/><line x1="8" y1="1" x2="8" y2="3"/><line x1="11" y1="1" x2="11" y2="3"/>
+              <line x1="5" y1="13" x2="5" y2="15"/><line x1="8" y1="13" x2="8" y2="15"/><line x1="11" y1="13" x2="11" y2="15"/>
+              <line x1="1" y1="5" x2="3" y2="5"/><line x1="1" y1="8" x2="3" y2="8"/><line x1="1" y1="11" x2="3" y2="11"/>
+              <line x1="13" y1="5" x2="15" y2="5"/><line x1="13" y1="8" x2="15" y2="8"/><line x1="13" y1="11" x2="15" y2="11"/>
+            </svg>
+          {/snippet}
+        </StatTile>
 
         <!-- RAM -->
-        <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 flex flex-col min-h-[128px]">
-          <div class="flex items-center justify-between mb-3">
-            <span class="text-xs text-gray-500 uppercase tracking-wide font-medium">RAM</span>
-            <div class="w-8 h-8 rounded-full bg-teal-900/30 flex items-center justify-center">
-              <svg class="w-4 h-4 text-teal-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-                <rect x="1" y="4" width="14" height="8" rx="1"/>
-                <line x1="4" y1="4" x2="4" y2="12"/>
-                <line x1="7" y1="4" x2="7" y2="12"/>
-                <line x1="10" y1="4" x2="10" y2="12"/>
-                <line x1="4" y1="12" x2="4" y2="14.5"/>
-                <line x1="7" y1="12" x2="7" y2="14.5"/>
-                <line x1="10" y1="12" x2="10" y2="14.5"/>
-              </svg>
-            </div>
-          </div>
-          <div class="text-3xl font-bold text-white leading-tight mb-1">
-            {formatStorage(Math.round(c.ram_used_mb / 1024))}<span class="text-lg text-gray-500 font-normal">{c.ram_limit_mb > 0 ? ` / ${formatStorage(Math.round(c.ram_limit_mb / 1024))}` : ''}</span>
-          </div>
-          {#if c.ram_limit_mb > 0}
-            {@const pct = Math.round(c.ram_used_mb / c.ram_limit_mb * 100)}
-            <div class="mt-auto mt-3 w-full bg-gray-800 rounded-full h-2 overflow-hidden">
-              <div class="h-2 rounded-full transition-all {pct > 80 ? 'bg-red-500' : pct > 60 ? 'bg-yellow-500' : 'bg-green-500'}" style="width:{pct}%"></div>
-            </div>
-          {/if}
-        </div>
+        <StatTile
+          label="RAM"
+          value={formatStorage(Math.round(c.ram_used_mb / 1024))}
+          suffix={c.ram_limit_mb > 0 ? `/ ${formatStorage(Math.round(c.ram_limit_mb / 1024))}` : undefined}
+          iconBgClass="bg-teal-900/30"
+          progress={c.ram_limit_mb > 0 ? { value: c.ram_used_mb, max: c.ram_limit_mb } : undefined}
+        >
+          {#snippet icon()}
+            <svg class="w-4 h-4 text-teal-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+              <rect x="1" y="4" width="14" height="8" rx="1"/>
+              <line x1="4" y1="4" x2="4" y2="12"/>
+              <line x1="7" y1="4" x2="7" y2="12"/>
+              <line x1="10" y1="4" x2="10" y2="12"/>
+              <line x1="4" y1="12" x2="4" y2="14.5"/>
+              <line x1="7" y1="12" x2="7" y2="14.5"/>
+              <line x1="10" y1="12" x2="10" y2="14.5"/>
+            </svg>
+          {/snippet}
+        </StatTile>
 
         <!-- GPU -->
-        <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 flex flex-col min-h-[128px]">
-          <div class="flex items-center justify-between mb-3">
-            <span class="text-xs text-gray-500 uppercase tracking-wide font-medium">GPU (활성)</span>
-            <div class="w-8 h-8 rounded-full bg-purple-900/40 flex items-center justify-center">
-              <svg class="w-4 h-4 text-purple-300" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-                <rect x="1" y="4" width="14" height="8" rx="1.5"/>
-                <rect x="4" y="6.5" width="3" height="3" rx="0.5"/>
-                <line x1="9" y1="7" x2="13" y2="7"/>
-                <line x1="9" y1="9.5" x2="11" y2="9.5"/>
-                <line x1="4" y1="2" x2="4" y2="4"/><line x1="8" y1="2" x2="8" y2="4"/><line x1="12" y1="2" x2="12" y2="4"/>
-              </svg>
-            </div>
-          </div>
-          <div class="text-3xl font-bold {summary.gpu_used > 0 ? 'text-purple-300' : 'text-white'} leading-tight mb-1">
-            {formatNumber(summary.gpu_used)}
-          </div>
-          <div class="text-xs text-gray-500 mt-auto pt-2">GPU 인스턴스</div>
-        </div>
+        <StatTile
+          label="GPU (활성)"
+          value={formatNumber(summary.gpu_used)}
+          iconBgClass="bg-purple-900/40"
+        >
+          {#snippet icon()}
+            <svg class="w-4 h-4 text-purple-300" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+              <rect x="1" y="4" width="14" height="8" rx="1.5"/>
+              <rect x="4" y="6.5" width="3" height="3" rx="0.5"/>
+              <line x1="9" y1="7" x2="13" y2="7"/>
+              <line x1="9" y1="9.5" x2="11" y2="9.5"/>
+              <line x1="4" y1="2" x2="4" y2="4"/><line x1="8" y1="2" x2="8" y2="4"/><line x1="12" y1="2" x2="12" y2="4"/>
+            </svg>
+          {/snippet}
+          {#snippet footer()}
+            <span class="text-xs text-gray-500">GPU 인스턴스</span>
+          {/snippet}
+        </StatTile>
 
         <!-- 볼륨 -->
-        <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 flex flex-col min-h-[128px]">
-          <div class="flex items-center justify-between mb-3">
-            <span class="text-xs text-gray-500 uppercase tracking-wide font-medium">볼륨</span>
-            <div class="w-8 h-8 rounded-full bg-cyan-900/30 flex items-center justify-center">
-              <svg class="w-4 h-4 text-cyan-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-                <ellipse cx="8" cy="4.5" rx="6" ry="2"/>
-                <path d="M2 4.5v7c0 1.1 2.7 2 6 2s6-.9 6-2v-7"/>
-                <path d="M2 8c0 1.1 2.7 2 6 2s6-.9 6-2"/>
-              </svg>
-            </div>
-          </div>
-          <div class="text-3xl font-bold text-white leading-tight mb-1">
-            {formatNumber(s.volumes_used)}<span class="text-lg text-gray-500 font-normal">{s.volumes_limit > 0 ? ` / ${formatNumber(s.volumes_limit)}` : ''}</span>
-          </div>
-          {#if s.volumes_limit > 0}
-            {@const pct = Math.round(s.volumes_used / s.volumes_limit * 100)}
-            <div class="mt-auto mt-3 w-full bg-gray-800 rounded-full h-2 overflow-hidden">
-              <div class="h-2 rounded-full transition-all {pct > 80 ? 'bg-red-500' : pct > 60 ? 'bg-yellow-500' : 'bg-cyan-500'}" style="width:{pct}%"></div>
-            </div>
-          {/if}
-        </div>
+        <StatTile
+          label="볼륨"
+          value={formatNumber(s.volumes_used)}
+          suffix={s.volumes_limit > 0 ? `/ ${formatNumber(s.volumes_limit)}` : undefined}
+          iconBgClass="bg-cyan-900/30"
+          progress={s.volumes_limit > 0 ? { value: s.volumes_used, max: s.volumes_limit } : undefined}
+        >
+          {#snippet icon()}
+            <svg class="w-4 h-4 text-cyan-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+              <ellipse cx="8" cy="4.5" rx="6" ry="2"/>
+              <path d="M2 4.5v7c0 1.1 2.7 2 6 2s6-.9 6-2v-7"/>
+              <path d="M2 8c0 1.1 2.7 2 6 2s6-.9 6-2"/>
+            </svg>
+          {/snippet}
+        </StatTile>
 
         <!-- 볼륨 스토리지 -->
-        <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 flex flex-col min-h-[128px]">
-          <div class="flex items-center justify-between mb-3">
-            <span class="text-xs text-gray-500 uppercase tracking-wide font-medium">볼륨 스토리지</span>
-            <div class="w-8 h-8 rounded-full bg-orange-900/40 flex items-center justify-center">
-              <svg class="w-4 h-4 text-orange-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-                <rect x="1" y="2" width="14" height="3.5" rx="1"/>
-                <rect x="1" y="6.5" width="14" height="3.5" rx="1"/>
-                <rect x="1" y="11" width="14" height="3" rx="1"/>
-                <circle cx="12.5" cy="3.75" r="0.6" fill="currentColor" stroke="none"/>
-                <circle cx="12.5" cy="8.25" r="0.6" fill="currentColor" stroke="none"/>
-              </svg>
-            </div>
-          </div>
-          <div class="text-3xl font-bold text-white leading-tight mb-1">
-            {formatStorage(s.gigabytes_used)}<span class="text-lg text-gray-500 font-normal">{s.gigabytes_limit > 0 ? ` / ${formatStorage(s.gigabytes_limit)}` : ''}</span>
-          </div>
-          {#if s.gigabytes_limit > 0}
-            {@const pct = Math.round(s.gigabytes_used / s.gigabytes_limit * 100)}
-            <div class="mt-auto mt-3 w-full bg-gray-800 rounded-full h-2 overflow-hidden">
-              <div class="h-2 rounded-full transition-all {pct > 80 ? 'bg-red-500' : pct > 60 ? 'bg-yellow-500' : 'bg-orange-500'}" style="width:{pct}%"></div>
-            </div>
-          {/if}
-        </div>
+        <StatTile
+          label="볼륨 스토리지"
+          value={formatStorage(s.gigabytes_used)}
+          suffix={s.gigabytes_limit > 0 ? `/ ${formatStorage(s.gigabytes_limit)}` : undefined}
+          iconBgClass="bg-orange-900/40"
+          progress={s.gigabytes_limit > 0 ? { value: s.gigabytes_used, max: s.gigabytes_limit } : undefined}
+        >
+          {#snippet icon()}
+            <svg class="w-4 h-4 text-orange-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+              <rect x="1" y="2" width="14" height="3.5" rx="1"/>
+              <rect x="1" y="6.5" width="14" height="3.5" rx="1"/>
+              <rect x="1" y="11" width="14" height="3" rx="1"/>
+              <circle cx="12.5" cy="3.75" r="0.6" fill="currentColor" stroke="none"/>
+              <circle cx="12.5" cy="8.25" r="0.6" fill="currentColor" stroke="none"/>
+            </svg>
+          {/snippet}
+        </StatTile>
 
         <!-- 네트워크 / File Storage 카드 (quotas 로드 후 표시) -->
         {#if quotasLoading}
@@ -284,136 +262,112 @@
           {@const sq = quotas.file_storage}
 
           <!-- 포트 -->
-          <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 flex flex-col min-h-[128px]">
-            <div class="flex items-center justify-between mb-3">
-              <span class="text-xs text-gray-500 uppercase tracking-wide font-medium">포트</span>
-              <div class="w-8 h-8 rounded-full bg-indigo-900/30 flex items-center justify-center">
-                <svg class="w-4 h-4 text-indigo-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-                  <rect x="2" y="5" width="12" height="7" rx="1"/>
-                  <path d="M5 5V3.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1V5"/>
-                  <line x1="5.5" y1="8.5" x2="10.5" y2="8.5"/>
-                  <line x1="5.5" y1="10.5" x2="8.5" y2="10.5"/>
-                </svg>
-              </div>
-            </div>
-            <div class="text-3xl font-bold text-white leading-tight mb-1">
-              {formatNumber(nq.port.in_use)}<span class="text-lg text-gray-500 font-normal">{nq.port.limit > 0 ? ` / ${formatNumber(nq.port.limit)}` : ''}</span>
-            </div>
-            {#if nq.port.limit > 0}
-              {@const pct = Math.round(nq.port.in_use / nq.port.limit * 100)}
-              <div class="mt-auto mt-3 w-full bg-gray-800 rounded-full h-2 overflow-hidden">
-                <div class="h-2 rounded-full transition-all {pct > 80 ? 'bg-red-500' : pct > 60 ? 'bg-yellow-500' : 'bg-indigo-500'}" style="width:{pct}%"></div>
-              </div>
-            {/if}
-          </div>
+          <StatTile
+            label="포트"
+            value={formatNumber(nq.port.in_use)}
+            suffix={nq.port.limit > 0 ? `/ ${formatNumber(nq.port.limit)}` : undefined}
+            iconBgClass="bg-indigo-900/30"
+            progress={nq.port.limit > 0 ? { value: nq.port.in_use, max: nq.port.limit } : undefined}
+          >
+            {#snippet icon()}
+              <svg class="w-4 h-4 text-indigo-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                <rect x="2" y="5" width="12" height="7" rx="1"/>
+                <path d="M5 5V3.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1V5"/>
+                <line x1="5.5" y1="8.5" x2="10.5" y2="8.5"/>
+                <line x1="5.5" y1="10.5" x2="8.5" y2="10.5"/>
+              </svg>
+            {/snippet}
+          </StatTile>
 
           <!-- Floating IP -->
-          <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 flex flex-col min-h-[128px]">
-            <div class="flex items-center justify-between mb-3">
-              <span class="text-xs text-gray-500 uppercase tracking-wide font-medium">Floating IP</span>
-              <div class="w-8 h-8 rounded-full bg-sky-900/30 flex items-center justify-center">
-                <svg class="w-4 h-4 text-sky-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-                  <path d="M3 10.5a4 4 0 1 1 .5-7.9C4.3 1.1 5.8 0.5 8 0.5s3.7.6 4.5 2.1A4 4 0 0 1 13 10.5"/>
-                  <line x1="5.5" y1="13" x2="10.5" y2="13"/>
-                  <line x1="8" y1="10.5" x2="8" y2="15"/>
-                </svg>
-              </div>
-            </div>
-            <div class="text-3xl font-bold text-white leading-tight mb-1">
-              {formatNumber(nq.floatingip.in_use)}<span class="text-lg text-gray-500 font-normal">{nq.floatingip.limit > 0 ? ` / ${formatNumber(nq.floatingip.limit)}` : ''}</span>
-            </div>
-            {#if nq.floatingip.limit > 0}
-              {@const pct = Math.round(nq.floatingip.in_use / nq.floatingip.limit * 100)}
-              <div class="mt-auto mt-3 w-full bg-gray-800 rounded-full h-2 overflow-hidden">
-                <div class="h-2 rounded-full transition-all {pct > 80 ? 'bg-red-500' : pct > 60 ? 'bg-yellow-500' : 'bg-sky-500'}" style="width:{pct}%"></div>
-              </div>
-            {/if}
-          </div>
+          <StatTile
+            label="Floating IP"
+            value={formatNumber(nq.floatingip.in_use)}
+            suffix={nq.floatingip.limit > 0 ? `/ ${formatNumber(nq.floatingip.limit)}` : undefined}
+            iconBgClass="bg-sky-900/30"
+            progress={nq.floatingip.limit > 0 ? { value: nq.floatingip.in_use, max: nq.floatingip.limit } : undefined}
+          >
+            {#snippet icon()}
+              <svg class="w-4 h-4 text-sky-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M3 10.5a4 4 0 1 1 .5-7.9C4.3 1.1 5.8 0.5 8 0.5s3.7.6 4.5 2.1A4 4 0 0 1 13 10.5"/>
+                <line x1="5.5" y1="13" x2="10.5" y2="13"/>
+                <line x1="8" y1="10.5" x2="8" y2="15"/>
+              </svg>
+            {/snippet}
+          </StatTile>
 
           <!-- File Storage -->
-          <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 flex flex-col min-h-[128px]">
-            <div class="flex items-center justify-between mb-3">
-              <span class="text-xs text-gray-500 uppercase tracking-wide font-medium">File Storage</span>
-              <div class="w-8 h-8 rounded-full bg-teal-900/40 flex items-center justify-center">
-                <svg class="w-4 h-4 text-teal-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-                  <path d="M1.5 13V5.5a1 1 0 0 1 1-1H6l2 2h5.5a1 1 0 0 1 1 1V13a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/>
-                  <circle cx="11" cy="9.5" r="1" stroke-width="1.2"/>
-                  <circle cx="7.5" cy="9.5" r="1" stroke-width="1.2"/>
-                  <line x1="8.5" y1="9" x2="10" y2="9"/>
-                  <line x1="8.5" y1="10" x2="10" y2="10"/>
-                </svg>
-              </div>
-            </div>
-            <div class="text-3xl font-bold text-white leading-tight mb-1">
-              {formatNumber(sq.shares.in_use)}<span class="text-lg text-gray-500 font-normal">{sq.shares.limit > 0 ? ` / ${formatNumber(sq.shares.limit)}` : ''}</span>
-            </div>
-            {#if sq.shares.limit > 0}
-              {@const pct = Math.round(sq.shares.in_use / sq.shares.limit * 100)}
-              <div class="mt-auto mt-3 w-full bg-gray-800 rounded-full h-2 overflow-hidden">
-                <div class="h-2 rounded-full transition-all {pct > 80 ? 'bg-red-500' : pct > 60 ? 'bg-yellow-500' : 'bg-teal-500'}" style="width:{pct}%"></div>
-              </div>
-            {/if}
-          </div>
+          <StatTile
+            label="File Storage"
+            value={formatNumber(sq.shares.in_use)}
+            suffix={sq.shares.limit > 0 ? `/ ${formatNumber(sq.shares.limit)}` : undefined}
+            iconBgClass="bg-teal-900/40"
+            progress={sq.shares.limit > 0 ? { value: sq.shares.in_use, max: sq.shares.limit } : undefined}
+          >
+            {#snippet icon()}
+              <svg class="w-4 h-4 text-teal-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M1.5 13V5.5a1 1 0 0 1 1-1H6l2 2h5.5a1 1 0 0 1 1 1V13a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/>
+                <circle cx="11" cy="9.5" r="1" stroke-width="1.2"/>
+                <circle cx="7.5" cy="9.5" r="1" stroke-width="1.2"/>
+                <line x1="8.5" y1="9" x2="10" y2="9"/>
+                <line x1="8.5" y1="10" x2="10" y2="10"/>
+              </svg>
+            {/snippet}
+          </StatTile>
 
           <!-- 파일 스토리지 용량 -->
-          <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 flex flex-col min-h-[128px]">
-            <div class="flex items-center justify-between mb-3">
-              <span class="text-xs text-gray-500 uppercase tracking-wide font-medium">파일 스토리지 용량</span>
-              <div class="w-8 h-8 rounded-full bg-green-900/30 flex items-center justify-center">
-                <svg class="w-4 h-4 text-green-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-                  <path d="M1.5 12V5.5a1 1 0 0 1 1-1H5.5l1.5 1.5H13a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H2.5a1 1 0 0 1-1-1z"/>
-                  <line x1="8" y1="8" x2="8" y2="11"/>
-                  <line x1="6.5" y1="9.5" x2="9.5" y2="9.5"/>
-                </svg>
-              </div>
-            </div>
-            <div class="text-3xl font-bold text-white leading-tight mb-1">
-              {formatStorage(sq.gigabytes.in_use)}<span class="text-lg text-gray-500 font-normal">{sq.gigabytes.limit > 0 ? ` / ${formatStorage(sq.gigabytes.limit)}` : ''}</span>
-            </div>
-            {#if sq.gigabytes.limit > 0}
-              {@const pct = Math.round(sq.gigabytes.in_use / sq.gigabytes.limit * 100)}
-              <div class="mt-auto mt-3 w-full bg-gray-800 rounded-full h-2 overflow-hidden">
-                <div class="h-2 rounded-full transition-all {pct > 80 ? 'bg-red-500' : pct > 60 ? 'bg-yellow-500' : 'bg-green-500'}" style="width:{pct}%"></div>
-              </div>
-            {/if}
-          </div>
+          <StatTile
+            label="파일 스토리지 용량"
+            value={formatStorage(sq.gigabytes.in_use)}
+            suffix={sq.gigabytes.limit > 0 ? `/ ${formatStorage(sq.gigabytes.limit)}` : undefined}
+            iconBgClass="bg-green-900/30"
+            progress={sq.gigabytes.limit > 0 ? { value: sq.gigabytes.in_use, max: sq.gigabytes.limit } : undefined}
+          >
+            {#snippet icon()}
+              <svg class="w-4 h-4 text-green-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M1.5 12V5.5a1 1 0 0 1 1-1H5.5l1.5 1.5H13a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H2.5a1 1 0 0 1-1-1z"/>
+                <line x1="8" y1="8" x2="8" y2="11"/>
+                <line x1="6.5" y1="9.5" x2="9.5" y2="9.5"/>
+              </svg>
+            {/snippet}
+          </StatTile>
 
           <!-- Database (Trove) -->
           {#if quotas.database !== undefined}
-            <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 flex flex-col min-h-[128px]">
-              <div class="flex items-center justify-between mb-3">
-                <span class="text-xs text-gray-500 uppercase tracking-wide font-medium">Database</span>
-                <div class="w-8 h-8 rounded-full bg-amber-900/40 flex items-center justify-center">
-                  <svg class="w-4 h-4 text-amber-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <ellipse cx="8" cy="4.5" rx="5.5" ry="2"/>
-                    <path d="M2.5 4.5v3c0 1.1 2.46 2 5.5 2s5.5-.9 5.5-2v-3"/>
-                    <path d="M2.5 7.5v3c0 1.1 2.46 2 5.5 2s5.5-.9 5.5-2v-3"/>
-                  </svg>
-                </div>
-              </div>
-              <div class="text-3xl font-bold text-white leading-tight mb-1">
-                {formatNumber(quotas.database.instances_count)}
-              </div>
-              <div class="text-xs text-gray-500 mt-auto">DB 인스턴스</div>
-            </div>
+            <StatTile
+              label="Database"
+              value={formatNumber(quotas.database.instances_count)}
+              iconBgClass="bg-amber-900/40"
+            >
+              {#snippet icon()}
+                <svg class="w-4 h-4 text-amber-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <ellipse cx="8" cy="4.5" rx="5.5" ry="2"/>
+                  <path d="M2.5 4.5v3c0 1.1 2.46 2 5.5 2s5.5-.9 5.5-2v-3"/>
+                  <path d="M2.5 7.5v3c0 1.1 2.46 2 5.5 2s5.5-.9 5.5-2v-3"/>
+                </svg>
+              {/snippet}
+              {#snippet footer()}
+                <span class="text-xs text-gray-500">DB 인스턴스</span>
+              {/snippet}
+            </StatTile>
           {/if}
 
           <!-- Object Storage (Swift) -->
           {#if quotas.object_storage !== undefined}
-            <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 flex flex-col min-h-[128px]">
-              <div class="flex items-center justify-between mb-3">
-                <span class="text-xs text-gray-500 uppercase tracking-wide font-medium">Object Storage</span>
-                <div class="w-8 h-8 rounded-full bg-indigo-900/40 flex items-center justify-center">
-                  <svg class="w-4 h-4 text-indigo-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <path d="M13 10.5A5 5 0 1 0 3.07 9H2a2 2 0 0 0 0 4h10.5a2 2 0 0 0 .5-3.93z"/>
-                  </svg>
-                </div>
-              </div>
-              <div class="text-3xl font-bold text-white leading-tight mb-1">
-                {formatNumber(quotas.object_storage.container_count)}
-              </div>
-              <div class="text-xs text-gray-500 mt-auto">{formatStorage(quotas.object_storage.bytes_used)} 사용 중</div>
-            </div>
+            <StatTile
+              label="Object Storage"
+              value={formatNumber(quotas.object_storage.container_count)}
+              iconBgClass="bg-indigo-900/40"
+            >
+              {#snippet icon()}
+                <svg class="w-4 h-4 text-indigo-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <path d="M13 10.5A5 5 0 1 0 3.07 9H2a2 2 0 0 0 0 4h10.5a2 2 0 0 0 .5-3.93z"/>
+                </svg>
+              {/snippet}
+              {#snippet footer()}
+                <span class="text-xs text-gray-500">{formatStorage(quotas.object_storage.bytes_used)} 사용 중</span>
+              {/snippet}
+            </StatTile>
           {/if}
         {/if}
 

@@ -6,6 +6,8 @@
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import RefreshButton from '$lib/components/RefreshButton.svelte';
   import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
+  import StatusChip from '$lib/components/ui/StatusChip.svelte';
+  import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
   interface ZunContainer {
     uuid: string;
@@ -19,13 +21,6 @@
     created_at: string | null;
   }
 
-  const statusColor: Record<string, string> = {
-    Running:  'text-green-400 bg-green-900/30',
-    Stopped:  'text-gray-400 bg-gray-800',
-    Created:  'text-blue-400 bg-blue-900/30',
-    Error:    'text-red-400 bg-red-900/30',
-    Deleting: 'text-orange-400 bg-orange-900/30',
-  };
 
   interface ContainerListResponse {
     items: ZunContainer[];
@@ -260,14 +255,13 @@
 {/if}
 
 <div class="p-4 md:p-8">
-  <div class="flex items-center justify-between mb-6">
-    <h1 class="text-2xl font-bold text-white">컨테이너</h1>
-    <div class="flex items-center gap-2">
+  <PageHeader breadcrumb="CONTAINERS / INSTANCES" title="컨테이너">
+    {#snippet actions()}
       <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={5} />
       <RefreshButton {refreshing} onclick={forceRefresh} />
       <button onclick={() => showModal = true} class="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 컨테이너 생성</button>
-    </div>
-  </div>
+    {/snippet}
+  </PageHeader>
 
   {#if error}<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>{/if}
   {#if !serviceAvailable}
@@ -309,7 +303,7 @@
                 <button onclick={() => goto(`/dashboard/containers/instances/${c.uuid}`)} class="font-medium text-white hover:text-blue-400 transition-colors text-left">{c.name}</button>
               </td>
               <td class="py-3 pr-6">
-                <span class="px-2 py-0.5 rounded text-xs font-medium {statusColor[c.status] ?? 'text-gray-400 bg-gray-800'}">{c.status}</span>
+                <StatusChip status={c.status} />
               </td>
               <td class="py-3 pr-6 text-gray-400 text-xs font-mono">{c.image ?? '-'}</td>
               <td class="py-3 pr-6 text-gray-400 text-xs">{c.cpu ?? '-'}</td>

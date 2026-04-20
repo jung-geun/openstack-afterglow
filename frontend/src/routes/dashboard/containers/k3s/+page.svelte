@@ -7,6 +7,8 @@
   import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
   import K3sClusterDetailPanel from '$lib/components/K3sClusterDetailPanel.svelte';
   import SlidePanel from '$lib/components/SlidePanel.svelte';
+  import StatusChip from '$lib/components/ui/StatusChip.svelte';
+  import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
   interface K3sCluster {
     id: string;
@@ -45,14 +47,6 @@
     name: string;
   }
 
-  const statusColor: Record<string, string> = {
-    ACTIVE:       'text-green-400 bg-green-900/30',
-    CREATING:     'text-yellow-400 bg-yellow-900/30',
-    PROVISIONING: 'text-blue-400 bg-blue-900/30',
-    DELETING:     'text-orange-400 bg-orange-900/30',
-    ERROR:        'text-red-400 bg-red-900/30',
-    DELETED:      'text-gray-500 bg-gray-800/50',
-  };
 
   const K3S_STEPS = [
     { id: 'security_group',   label: '보안 그룹' },
@@ -399,9 +393,8 @@
 {/if}
 
 <div class="p-4 md:p-8">
-  <div class="flex items-center justify-between mb-6">
-    <h1 class="text-2xl font-bold text-white">k3s 클러스터</h1>
-    <div class="flex items-center gap-2">
+  <PageHeader breadcrumb="CONTAINERS / K3S" title="k3s 클러스터">
+    {#snippet actions()}
       <button
         onclick={() => { showDeleted = !showDeleted; fetchClusters(); }}
         class="text-xs px-3 py-1.5 rounded border transition-colors {showDeleted ? 'border-gray-500 text-gray-300 bg-gray-800' : 'border-gray-700 text-gray-500 hover:border-gray-500 hover:text-gray-400'}"
@@ -414,8 +407,8 @@
         class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
         + 클러스터 생성
       </button>
-    </div>
-  </div>
+    {/snippet}
+  </PageHeader>
 
   <p class="text-sm text-gray-500 mb-6">Nova VM + cloud-init으로 k3s Kubernetes 클러스터를 프로비저닝합니다.</p>
 
@@ -468,9 +461,7 @@
                 {/if}
               </td>
               <td class="py-3 pr-6">
-                <span class="px-2 py-0.5 rounded text-xs font-medium {statusColor[cluster.status] ?? 'text-gray-400 bg-gray-800'}">
-                  {cluster.status}
-                </span>
+                <StatusChip status={cluster.status} />
               </td>
               <td class="py-3 pr-6 text-gray-400 text-xs">
                 {cluster.agent_vm_ids.length} / {cluster.agent_count}

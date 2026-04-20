@@ -128,11 +128,22 @@
 {/if}
 
 <aside class="fixed top-14 left-0 bottom-0 z-30 w-56 bg-gray-900 border-r border-gray-800 flex flex-col overflow-y-auto transition-transform duration-200 ease-in-out {$sidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:sticky md:top-14 md:h-[calc(100vh-3.5rem)] md:translate-x-0 md:shrink-0 md:transition-none">
-	<nav class="flex-1 px-3 py-4 space-y-0.5">
+	<!-- 로고 헤더 with Admin badge -->
+	<div class="h-14 flex items-center gap-2.5 px-4 border-b border-gray-800 shrink-0">
+		<div class="rounded-full shrink-0" style="width:26px;height:26px;background:conic-gradient(from 220deg,#F4976C,#6E4F9A,#8893D4,#F4976C)">
+			<div class="rounded-full bg-gray-900 m-[3px]" style="width:20px;height:20px"></div>
+		</div>
+		<a href="/admin" class="text-white font-bold text-base tracking-tight hover:text-gray-200 transition-colors">
+			{$siteConfig.site_name}
+		</a>
+		<span class="ml-auto text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-amber-900/30 border border-amber-800 text-amber-400 uppercase tracking-wider">Admin</span>
+	</div>
+
+	<nav class="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto">
 		<!-- 개요 -->
 		<a
 			href="/admin"
-			class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors {$page.url.pathname === '/admin' ? 'bg-blue-600/20 text-blue-400 font-medium' : 'text-gray-400 hover:text-white hover:bg-gray-800'}"
+			class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors {$page.url.pathname === '/admin' ? 'bg-amber-600/15 text-amber-400 font-medium' : 'text-gray-400 hover:text-white hover:bg-gray-800'}"
 		>
 			<svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
 			개요
@@ -161,7 +172,7 @@
 							{#if isItemVisible(item)}
 							<a
 								href={item.href}
-								class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors {$page.url.pathname === item.href ? 'bg-blue-600/20 text-blue-400 font-medium' : 'text-gray-500 hover:text-gray-200 hover:bg-gray-800'}"
+								class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors {$page.url.pathname === item.href ? 'bg-amber-600/15 text-amber-400 font-medium' : 'text-gray-500 hover:text-gray-200 hover:bg-gray-800'}"
 							>
 								{item.label}
 							</a>
@@ -174,27 +185,27 @@
 		{/each}
 	</nav>
 
-	<!-- 하단: 모바일 전용 항목 -->
-	<div class="border-t border-gray-800">
-		<!-- 프로젝트 선택 (모바일만) -->
-		<div class="p-3 sm:hidden">
-			<div class="text-xs text-gray-500 uppercase tracking-wide px-3 mb-1.5">프로젝트</div>
-			<ProjectSelector />
+	<!-- 하단: 사용자 정보 + 사용자 모드 전환 -->
+	<div class="border-t border-gray-800 shrink-0">
+		<!-- 데스크톱: 관리자 정보 -->
+		<div class="hidden md:block px-4 py-3">
+			<div class="text-[10px] text-gray-500 uppercase tracking-widest font-medium">관리자</div>
+			<div class="text-[13px] text-gray-200 font-medium mt-0.5 truncate">{$auth.username}</div>
 		</div>
 
-		<!-- 사용자 모드 전환 (모바일만) -->
+		<!-- 모바일 전용 -->
+		<div class="p-3 sm:hidden">
+			<div class="text-[10px] text-gray-500 uppercase tracking-wide px-1 mb-1.5">프로젝트</div>
+			<ProjectSelector />
+		</div>
 		<div class="p-3 pt-0 md:hidden">
-			<a
-				href="/dashboard"
-				class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors bg-blue-600/20 text-blue-400 font-medium"
-			>
+			<a href="/dashboard"
+				class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors bg-blue-600/20 text-blue-400 font-medium">
 				<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
 				사용자 모드
 			</a>
 		</div>
-
-		<!-- 모바일 사용자 정보 -->
-		<div class="p-3 pt-0 md:hidden">
+		<div class="p-3 pt-0 md:hidden border-t border-gray-800">
 			<div class="px-3 text-xs text-gray-500">{$auth.username}</div>
 		</div>
 	</div>

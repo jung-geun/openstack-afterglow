@@ -5,6 +5,7 @@
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import RefreshButton from '$lib/components/RefreshButton.svelte';
 	import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
 	interface SecurityGroupRule {
 		id: string;
@@ -129,18 +130,16 @@
 </script>
 
 <div class="max-w-5xl mx-auto px-6 py-8">
-	<!-- 헤더 -->
-	<div class="flex items-center justify-between mb-6">
-		<h1 class="text-xl font-semibold text-white">보안 그룹</h1>
-		<div class="flex items-center gap-2">
+	<PageHeader breadcrumb="NETWORK / SECURITY GROUPS" title="보안 그룹">
+		{#snippet actions()}
 			<AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={30} />
 			<RefreshButton {refreshing} onclick={forceRefresh} />
 			<button
 				onclick={() => { showSgModal = true; sgCreateError = ''; }}
 				class="bg-blue-600 hover:bg-blue-500 text-white text-sm px-4 py-2 rounded-lg transition-colors"
 			>+ 보안 그룹 생성</button>
-		</div>
-	</div>
+		{/snippet}
+	</PageHeader>
 
 	<!-- 에러 -->
 	{#if sgError}

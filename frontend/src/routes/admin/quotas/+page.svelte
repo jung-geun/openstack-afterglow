@@ -3,6 +3,7 @@
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
 	interface Project {
 		id: string;
@@ -204,7 +205,7 @@
 </script>
 
 <div class="p-4 md:p-8 max-w-6xl">
-	<h1 class="text-2xl font-bold text-white mb-6">쿼터 관리</h1>
+	<PageHeader breadcrumb="IDENTITY / QUOTAS" title="쿼터" />
 
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={3} />

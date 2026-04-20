@@ -9,16 +9,9 @@
   import SlidePanel from '$lib/components/SlidePanel.svelte';
   import RefreshButton from '$lib/components/RefreshButton.svelte';
   import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
+  import StatusChip from '$lib/components/ui/StatusChip.svelte';
+  import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
-  const statusColor: Record<string, string> = {
-    ACTIVE:             'text-green-400 bg-green-900/30',
-    BUILD:              'text-yellow-400 bg-yellow-900/30',
-    SHUTOFF:            'text-gray-400 bg-gray-800',
-    ERROR:              'text-red-400 bg-red-900/30',
-    DELETING:           'text-orange-400 bg-orange-900/30',
-    SHELVED_OFFLOADED:  'text-purple-400 bg-purple-900/30',
-    SHELVED:            'text-purple-400 bg-purple-900/30',
-  };
   const strategyLabel: Record<string, string> = { prebuilt: '사전 빌드', dynamic: '동적 생성' };
 
   let instances = $state<Instance[]>([]);
@@ -130,16 +123,15 @@
 </script>
 
 <div class="p-4 md:p-8">
-  <div class="flex items-center justify-between mb-6">
-    <h1 class="text-2xl font-bold text-white">인스턴스</h1>
-    <div class="flex items-center gap-2">
+  <PageHeader breadcrumb="COMPUTE / INSTANCES" title="인스턴스">
+    {#snippet actions()}
       <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={refreshIntervalMs / 1000} />
       <RefreshButton {refreshing} onclick={forceRefresh} />
       <a href="/create" class="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
         + VM 생성
       </a>
-    </div>
-  </div>
+    {/snippet}
+  </PageHeader>
 
   {#if error}
     <div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>
@@ -173,11 +165,11 @@
               <td class="py-3 pr-6">
                 <div class="font-medium text-white">{inst.name}</div>
                 <div class="sm:hidden mt-0.5">
-                  <span class="px-2 py-0.5 rounded text-xs font-medium {statusColor[inst.status] ?? 'text-gray-400 bg-gray-800'}">{inst.status}</span>
+                  <StatusChip status={inst.status} />
                 </div>
               </td>
               <td class="py-3 pr-6 hidden sm:table-cell">
-                <span class="px-2 py-0.5 rounded text-xs font-medium {statusColor[inst.status] ?? 'text-gray-400 bg-gray-800'}">{inst.status}</span>
+                <StatusChip status={inst.status} />
               </td>
               <td class="py-3 pr-6 text-xs text-gray-400 hidden md:table-cell">
                 <div>{inst.image_name ?? '볼륨에서 부팅'}</div>

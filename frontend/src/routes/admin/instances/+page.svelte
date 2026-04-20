@@ -8,6 +8,8 @@
 	import SlidePanel from '$lib/components/SlidePanel.svelte';
 	import { formatNumber } from '$lib/utils/format';
 	import { projectNames } from '$lib/stores/projectNames';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import StatusChip from '$lib/components/ui/StatusChip.svelte';
 
 	interface AdminInstance {
 		id: string;
@@ -34,15 +36,6 @@
 		shelved?: number;
 		[key: string]: number | undefined;
 	}
-
-	const statusColor: Record<string, string> = {
-		ACTIVE:            'text-green-400',
-		SHUTOFF:           'text-gray-400',
-		ERROR:             'text-red-400',
-		BUILD:             'text-yellow-400',
-		SHELVED_OFFLOADED: 'text-purple-400',
-		SHELVED:           'text-purple-400',
-	};
 
 	let allInstances = $state<AdminInstance[]>([]);
 	let loading = $state(true);
@@ -158,9 +151,8 @@
 </script>
 
 <div class="p-4 md:p-8 max-w-6xl">
-	<div class="flex items-center justify-between mb-6">
-		<h1 class="text-2xl font-bold text-white">전체 인스턴스</h1>
-		<div class="flex items-center gap-3">
+	<PageHeader breadcrumb="COMPUTE / INSTANCES" title="전체 인스턴스">
+		{#snippet actions()}
 			<button onclick={() => { markerStack = []; nextMarker = null; hostFilter = ''; projectFilter = ''; load(); loadHosts(); }} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
 			<div class="flex items-center gap-1 text-xs text-gray-500">
 				표시:
@@ -172,7 +164,8 @@
 				{/each}
 			</div>
 		</div>
-	</div>
+		{/snippet}
+	</PageHeader>
 
 	<!-- 필터 -->
 	<div class="flex gap-3 mb-4">
@@ -258,7 +251,7 @@
 							<td class="py-2 pr-4 text-white">{s.name || s.id.slice(0, 8)}</td>
 							<td class="py-2 pr-4">
 								<div class="flex items-center gap-1.5">
-									<span class="{statusColor[s.status] ?? 'text-gray-400'}">{s.status}</span>
+									<StatusChip status={s.status} />
 									{#if s.status === 'ERROR' && s.fault}
 										<button
 											onclick={(e) => { e.stopPropagation(); expandedError = expandedError === s.id ? null : s.id; }}

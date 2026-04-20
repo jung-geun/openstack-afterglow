@@ -7,6 +7,7 @@
 	import QuotaDonut from '$lib/components/QuotaDonut.svelte';
 	import ProjectQuotaPanel from '$lib/components/ProjectQuotaPanel.svelte';
 	import { formatNumber, formatStorage } from '$lib/utils/format';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
 	interface Overview {
 		hypervisor_count: number;
@@ -111,9 +112,7 @@
 </script>
 
 <div class="p-4 md:p-8 max-w-6xl">
-	<div class="flex items-center justify-between mb-8">
-		<h1 class="text-2xl font-bold text-white">관리자 개요</h1>
-	</div>
+	<PageHeader breadcrumb="" title="관리자 개요" />
 
 	{#if error}
 		<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>

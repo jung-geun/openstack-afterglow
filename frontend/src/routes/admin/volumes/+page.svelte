@@ -7,6 +7,8 @@
 	import TimeSeriesChart from '$lib/components/TimeSeriesChart.svelte';
 	import { formatNumber } from '$lib/utils/format';
 	import { projectNames } from '$lib/stores/projectNames';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import StatusChip from '$lib/components/ui/StatusChip.svelte';
 
 	interface AdminVolume {
 		id: string;
@@ -21,11 +23,6 @@
 		next_marker: string | null;
 		count: number;
 	}
-
-	const statusColor: Record<string, string> = {
-		available: 'text-green-400', creating: 'text-yellow-400',
-		error: 'text-red-400', in_use: 'text-blue-400',
-	};
 
 	interface TsPoint { ts: number; total?: number; in_use?: number; available?: number; [key: string]: number | undefined; }
 
@@ -173,9 +170,8 @@
 </script>
 
 <div class="p-4 md:p-8 max-w-6xl">
-	<div class="flex items-center justify-between mb-6">
-		<h1 class="text-2xl font-bold text-white">전체 볼륨</h1>
-		<div class="flex items-center gap-3">
+	<PageHeader breadcrumb="STORAGE / VOLUMES" title="전체 볼륨">
+		{#snippet actions()}
 			<button onclick={() => { markerStack = []; nextMarker = null; load(); }} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
 			<div class="flex items-center gap-1 text-xs text-gray-500">
 				표시:
@@ -186,8 +182,8 @@
 					>{n}</button>
 				{/each}
 			</div>
-		</div>
-	</div>
+		{/snippet}
+	</PageHeader>
 
 	<div class="mb-6">
 		{#if tsLoading}
@@ -228,7 +224,7 @@
 							class="border-b border-gray-800/50 text-xs hover:bg-gray-800/30 transition-colors cursor-pointer {selectedVolumeId === v.id ? 'bg-gray-800/50' : ''}"
 						>
 							<td class="py-2 pr-4 text-white">{v.name || v.id.slice(0, 8)}</td>
-							<td class="py-2 pr-4 {statusColor[v.status] ?? 'text-gray-400'}">{v.status}</td>
+							<td class="py-2 pr-4"><StatusChip status={v.status} /></td>
 							<td class="py-2 pr-4 text-gray-400">{formatNumber(v.size)} GB</td>
 							<td class="py-2 pr-4">
 								<button

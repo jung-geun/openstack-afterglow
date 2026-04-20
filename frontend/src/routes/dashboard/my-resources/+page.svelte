@@ -5,6 +5,8 @@
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import RefreshButton from '$lib/components/RefreshButton.svelte';
 	import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
+	import StatusChip from '$lib/components/ui/StatusChip.svelte';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
 	interface InstanceItem {
 		id: string;
@@ -87,16 +89,6 @@
 		expandedProject = expandedProject === id ? null : id;
 	}
 
-	function statusColor(status: string) {
-		switch (status?.toUpperCase()) {
-			case 'ACTIVE': return 'text-green-400';
-			case 'SHUTOFF': return 'text-gray-400';
-			case 'ERROR': return 'text-red-400';
-			case 'AVAILABLE': return 'text-green-400';
-			case 'IN-USE': return 'text-blue-400';
-			default: return 'text-yellow-400';
-		}
-	}
 
 	function formatRam(mb: number): string {
 		if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`;
@@ -117,13 +109,12 @@
 </script>
 
 <div class="p-4 md:p-8 max-w-6xl">
-	<div class="flex items-center justify-between mb-6">
-		<h1 class="text-2xl font-bold text-white">내 리소스</h1>
-		<div class="flex items-center gap-2">
+	<PageHeader breadcrumb="" title="내 리소스">
+		{#snippet actions()}
 			<AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={30} />
 			<RefreshButton {refreshing} onclick={forceRefresh} />
-		</div>
-	</div>
+		{/snippet}
+	</PageHeader>
 
 	{#if error}
 		<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>
@@ -208,7 +199,7 @@
 														<span class="text-gray-500">{inst.flavor_name}</span>
 													{/if}
 												</div>
-												<span class="{statusColor(inst.status)} font-medium">{inst.status}</span>
+												<StatusChip status={inst.status} />
 											</div>
 										{/each}
 									</div>
@@ -226,7 +217,7 @@
 													<span class="text-gray-300 font-medium">{vol.name || vol.id.slice(0, 8)}</span>
 													<span class="text-gray-500">{vol.size} GB</span>
 												</div>
-												<span class="{statusColor(vol.status)} font-medium">{vol.status}</span>
+												<StatusChip status={vol.status} />
 											</div>
 										{/each}
 									</div>

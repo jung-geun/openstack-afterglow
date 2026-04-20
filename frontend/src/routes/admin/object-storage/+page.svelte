@@ -4,6 +4,7 @@
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { formatStorage } from '$lib/utils/format';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
 	interface SwiftContainer {
 		name: string;
@@ -121,16 +122,15 @@
 {/if}
 
 <div class="p-4 md:p-8 max-w-6xl">
-	<div class="flex items-center justify-between mb-6">
-		<h1 class="text-2xl font-bold text-white">Object Storage</h1>
-		<div class="flex gap-2">
+	<PageHeader breadcrumb="STORAGE / OBJECT STORAGE" title="Object Storage">
+		{#snippet actions()}
 			<button
 				onclick={() => { showModal = true; createError = ''; newName = ''; }}
 				class="text-xs text-white bg-indigo-600 hover:bg-indigo-500 transition-colors px-3 py-1.5 rounded border border-indigo-500"
 			>+ 컨테이너 생성</button>
 			<button onclick={load} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
-		</div>
-	</div>
+		{/snippet}
+	</PageHeader>
 
 	{#if account}
 		<div class="grid grid-cols-3 gap-4 mb-6">

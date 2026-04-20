@@ -132,13 +132,25 @@
 {/if}
 
 <aside class="fixed top-14 left-0 bottom-0 z-30 w-60 bg-gray-900 border-r border-gray-800 flex flex-col overflow-y-auto transition-transform duration-200 ease-in-out {$sidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:sticky md:top-14 md:h-[calc(100vh-3.5rem)] md:translate-x-0 md:shrink-0 md:transition-none">
+	<!-- 로고 헤더 -->
+	<div class="h-14 flex items-center gap-2.5 px-4 border-b border-gray-800 shrink-0">
+		<!-- RingMark logo -->
+		<div class="rounded-full shrink-0" style="width:26px;height:26px;background:conic-gradient(from 220deg,#F4976C,#6E4F9A,#8893D4,#F4976C)">
+			<div class="rounded-full bg-gray-900 m-[3px]" style="width:20px;height:20px"></div>
+		</div>
+		<a href="/dashboard" class="text-white font-bold text-base tracking-tight hover:text-gray-200 transition-colors">
+			{$siteConfig.site_name}
+		</a>
+	</div>
+
 	<!-- VM 생성 버튼 -->
-	<div class="p-4">
+	<div class="p-3">
 		<a
 			href="/create"
-			class="block w-full text-center bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+			class="flex items-center justify-center gap-1.5 w-full bg-blue-600 hover:bg-blue-500 text-white text-[13px] font-medium px-4 py-2 rounded-lg transition-colors"
 		>
-			+ VM 생성
+			<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v14M5 12h14"/></svg>
+			VM 생성
 		</a>
 	</div>
 
@@ -195,46 +207,41 @@
 		{/each}
 	</nav>
 
-	<!-- 하단: 모바일 전용 항목 + 관리 -->
-	<div class="border-t border-gray-800">
+	<!-- 하단: 프로젝트 정보 + 관리 -->
+	<div class="border-t border-gray-800 shrink-0">
 		<!-- 프로젝트 선택 (모바일만) -->
 		<div class="p-3 sm:hidden">
-			<div class="text-xs text-gray-500 uppercase tracking-wide px-3 mb-1.5">프로젝트</div>
+			<div class="text-[10px] text-gray-500 uppercase tracking-wide px-1 mb-1.5">프로젝트</div>
 			<ProjectSelector />
 		</div>
 
+		<!-- 프로젝트 이름 표시 (데스크톱) -->
+		<div class="hidden md:block px-4 py-3">
+			<div class="text-[10px] text-gray-500 uppercase tracking-widest font-medium">프로젝트</div>
+			<div class="text-[13px] text-gray-200 font-medium mt-0.5 truncate">{$auth.projectName ?? '—'}</div>
+		</div>
+
 		{#if $isAdmin}
-			<div class="p-3 pt-0 md:pt-3 md:border-t md:border-gray-800">
+			<div class="px-3 pb-3 md:border-t md:border-gray-800 md:pt-3">
 				<!-- 모바일: 관리/사용자 모드 전환 -->
 				{#if $page.url.pathname.startsWith('/admin')}
-					<a
-						href="/dashboard"
-						class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors bg-blue-600/20 text-blue-400 font-medium md:hidden"
-					>
+					<a href="/dashboard"
+						class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors bg-blue-600/20 text-blue-400 font-medium md:hidden">
 						<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
 						사용자 모드
 					</a>
 				{:else}
-					<a
-						href="/admin"
-						class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors text-gray-400 hover:text-white hover:bg-gray-800 md:hidden"
-					>
-						<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
-						관리 모드
+					<a href="/admin"
+						class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors text-gray-400 hover:text-white hover:bg-gray-800 md:hidden">
+						<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2l8 4v6c0 5-3.5 9-8 10-4.5-1-8-5-8-10V6l8-4z"></path></svg>
+						관리자 모드
 					</a>
 				{/if}
-				<!-- 데스크톱: 기존 관리 링크 -->
-				<a
-					href="/admin"
-					class="hidden md:flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors {$page.url.pathname.startsWith('/admin') ? 'bg-blue-600/20 text-blue-400 font-medium' : 'text-gray-400 hover:text-white hover:bg-gray-800'}"
-				>
-					관리
-				</a>
 			</div>
 		{/if}
 
 		<!-- 모바일 사용자 정보 -->
-		<div class="p-3 pt-0 md:hidden">
+		<div class="p-3 pt-0 md:hidden border-t border-gray-800">
 			<div class="px-3 text-xs text-gray-500">{$auth.username}</div>
 		</div>
 	</div>

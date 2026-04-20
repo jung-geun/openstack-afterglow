@@ -5,6 +5,8 @@
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import RefreshButton from '$lib/components/RefreshButton.svelte';
   import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
+  import StatusChip from '$lib/components/ui/StatusChip.svelte';
+  import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
   interface ShareNetwork {
     id: string;
@@ -29,11 +31,6 @@
     cidr: string;
   }
 
-  const statusColor: Record<string, string> = {
-    active:  'text-green-400 bg-green-900/30',
-    error:   'text-red-400 bg-red-900/30',
-    inactive: 'text-gray-400 bg-gray-800',
-  };
 
   let networks = $state<ShareNetwork[]>([]);
   let neutronNetworks = $state<NeutronNetwork[]>([]);
@@ -212,17 +209,16 @@
 {/if}
 
 <div class="p-4 md:p-8">
-  <div class="flex items-center justify-between mb-6">
-    <h1 class="text-2xl font-bold text-white">Share 네트워크</h1>
-    <div class="flex items-center gap-2">
+  <PageHeader breadcrumb="FILE STORAGE / NETWORKS" title="Share 네트워크">
+    {#snippet actions()}
       <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={30} />
       <RefreshButton {refreshing} onclick={forceRefresh} />
       <button onclick={openCreateModal}
         class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
         + Share 네트워크 생성
       </button>
-    </div>
-  </div>
+    {/snippet}
+  </PageHeader>
 
   <p class="text-sm text-gray-500 mb-6">파일 스토리지(Manila)를 Neutron 네트워크에 연결하는 Share Network를 관리합니다. NFS 프로토콜 사용 시 필수입니다.</p>
 
@@ -263,9 +259,7 @@
                 {/if}
               </td>
               <td class="py-3 pr-6">
-                <span class="px-2 py-0.5 rounded text-xs font-medium {statusColor[net.status] ?? 'text-gray-400 bg-gray-800'}">
-                  {net.status || '-'}
-                </span>
+                <StatusChip status={net.status || null} />
               </td>
               <td class="py-3 pr-6 font-mono text-xs text-gray-400">{net.neutron_net_id?.slice(0, 20) ?? '-'}...</td>
               <td class="py-3 pr-6 font-mono text-xs text-gray-400">{net.neutron_subnet_id?.slice(0, 20) ?? '-'}...</td>

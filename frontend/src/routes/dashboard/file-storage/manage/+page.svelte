@@ -4,6 +4,8 @@
   import { api, ApiError } from '$lib/api/client';
   import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+  import StatusChip from '$lib/components/ui/StatusChip.svelte';
+  import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
   interface FileStorage {
     id: string;
@@ -23,13 +25,6 @@
     available_prebuilt: boolean;
   }
 
-  const statusColor: Record<string, string> = {
-    available: 'text-green-400',
-    creating:  'text-yellow-400',
-    building:  'text-yellow-400',
-    deleting:  'text-orange-400',
-    error:     'text-red-400',
-  };
 
   let fileStorages = $state<FileStorage[]>([]);
   let libraries = $state<LibraryConfig[]>([]);
@@ -94,20 +89,16 @@
 </script>
 
 <div class="p-4 md:p-8 max-w-5xl">
-  <div class="flex items-center justify-between mb-6">
-    <div>
-      <h1 class="text-2xl font-bold text-white">라이브러리 파일 스토리지 관리</h1>
-      <p class="text-sm text-gray-500 mt-1">Strategy A (사전 빌드)에서 사용할 Manila CephFS 파일 스토리지를 관리합니다.</p>
-    </div>
-    <div class="flex items-center gap-3">
+  <PageHeader breadcrumb="FILE STORAGE / MANAGE" title="라이브러리 관리" subtitle="Strategy A (사전 빌드)에서 사용할 Manila CephFS 파일 스토리지를 관리합니다.">
+    {#snippet actions()}
       <label class="flex items-center gap-2 text-xs text-gray-400 cursor-pointer">
         <input type="checkbox" bind:checked={autoInstall} class="rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0" />
         자동 패키지 설치
       </label>
       <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={10} />
       <button onclick={loadData} class="text-xs text-gray-400 hover:text-white transition-colors border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg">새로고침</button>
-    </div>
-  </div>
+    {/snippet}
+  </PageHeader>
 
   {#if error}
     <div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>
@@ -131,7 +122,7 @@
                 <div class="text-xs text-gray-500">v{lib.version}</div>
               </div>
               {#if prebuilt}
-                <span class="text-xs {statusColor[prebuilt.status] ?? 'text-gray-400'}">{prebuilt.status}</span>
+                <StatusChip status={prebuilt.status} />
               {:else}
                 <span class="text-xs text-gray-600">미구축</span>
               {/if}
@@ -178,7 +169,7 @@
             {#each fileStorages as fs}
               <tr class="border-b border-gray-800/50 text-xs">
                 <td class="py-2 pr-4 font-mono text-gray-300">{fs.name}</td>
-                <td class="py-2 pr-4 {statusColor[fs.status] ?? 'text-gray-400'}">{fs.status}</td>
+                <td class="py-2 pr-4"><StatusChip status={fs.status} /></td>
                 <td class="py-2 pr-4 text-gray-400">{fs.size} GB</td>
                 <td class="py-2 pr-4 text-gray-500">{fs.metadata?.union_type ?? '-'}</td>
                 <td class="py-2 text-gray-500">{fs.library_name ?? '-'}</td>

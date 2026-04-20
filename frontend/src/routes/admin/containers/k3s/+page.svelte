@@ -6,6 +6,8 @@
 	import { projectNames } from '$lib/stores/projectNames';
 	import K3sClusterDetailPanel from '$lib/components/K3sClusterDetailPanel.svelte';
 	import SlidePanel from '$lib/components/SlidePanel.svelte';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import StatusChip from '$lib/components/ui/StatusChip.svelte';
 
 	interface AdminK3sCluster {
 		id: string;
@@ -20,14 +22,6 @@
 		created_at: string | null;
 		project_id: string | null;
 	}
-
-	const statusColor: Record<string, string> = {
-		ACTIVE:       'text-green-400',
-		CREATING:     'text-yellow-400',
-		PROVISIONING: 'text-blue-400',
-		DELETING:     'text-orange-400',
-		ERROR:        'text-red-400',
-	};
 
 	let clusters = $state<AdminK3sCluster[]>([]);
 	let loading = $state(true);
@@ -71,10 +65,11 @@
 {/if}
 
 <div class="p-4 md:p-8 max-w-7xl">
-	<div class="flex items-center justify-between mb-6">
-		<h1 class="text-2xl font-bold text-white">k3s 클러스터 (전체)</h1>
-		<button onclick={load} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
-	</div>
+	<PageHeader breadcrumb="CONTAINERS / K3S" title="k3s 클러스터">
+		{#snippet actions()}
+			<button onclick={load} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
+		{/snippet}
+	</PageHeader>
 
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={5} />
@@ -110,11 +105,8 @@
 									<div class="text-gray-500 text-xs mt-0.5 truncate max-w-40">{c.status_reason}</div>
 								{/if}
 							</td>
-							<td class="py-2 pr-4 {statusColor[c.status] ?? 'text-gray-400'}">
-								{#if c.status === 'CREATING' || c.status === 'PROVISIONING'}
-									<span class="animate-pulse">●</span>
-								{/if}
-								{c.status}
+							<td class="py-2 pr-4">
+								<StatusChip status={c.status} />
 							</td>
 							<td class="py-2 pr-4 text-gray-400">
 								{c.project_id ? ($projectNames.get(c.project_id) ?? c.project_id.slice(0, 8)) : '-'}

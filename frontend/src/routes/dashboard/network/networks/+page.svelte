@@ -8,12 +8,9 @@
   import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
   import SlidePanel from '$lib/components/SlidePanel.svelte';
   import NetworkDetailPanel from '$lib/components/NetworkDetailPanel.svelte';
+  import StatusChip from '$lib/components/ui/StatusChip.svelte';
+  import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
-  const statusColor: Record<string, string> = {
-    ACTIVE: 'text-green-400 bg-green-900/30',
-    DOWN:   'text-red-400 bg-red-900/30',
-    BUILD:  'text-yellow-400 bg-yellow-900/30',
-  };
 
   let networks = $state<Network[]>([]);
   let loading = $state(true);
@@ -169,14 +166,13 @@
 {/if}
 
 <div class="p-4 md:p-8">
-  <div class="flex items-center justify-between mb-6">
-    <h1 class="text-2xl font-bold text-white">네트워크</h1>
-    <div class="flex items-center gap-2">
+  <PageHeader breadcrumb="NETWORK / NETWORKS" title="네트워크">
+    {#snippet actions()}
       <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={30} />
       <RefreshButton {refreshing} onclick={forceRefresh} />
       <button onclick={() => showModal = true} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 네트워크 생성</button>
-    </div>
-  </div>
+    {/snippet}
+  </PageHeader>
 
   {#if error}<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>{/if}
 
@@ -203,7 +199,7 @@
           {#each networks as net (net.id)}
             <tr onclick={() => openNetworkPanel(net.id)} class="border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors cursor-pointer">
               <td class="py-3 pr-6 font-medium text-white">{net.name || net.id.slice(0, 12)}</td>
-              <td class="py-3 pr-6"><span class="px-2 py-0.5 rounded text-xs font-medium {statusColor[net.status] ?? 'text-gray-400 bg-gray-800'}">{net.status}</span></td>
+              <td class="py-3 pr-6"><StatusChip status={net.status} /></td>
               <td class="py-3 pr-6 text-gray-400 text-xs">{net.subnets.length}개</td>
               <td class="py-3 pr-6 text-xs">
                 <div class="flex gap-1 flex-wrap">

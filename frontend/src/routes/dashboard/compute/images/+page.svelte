@@ -7,6 +7,8 @@
   import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
   import ImageDetailPanel from '$lib/components/ImageDetailPanel.svelte';
   import SlidePanel from '$lib/components/SlidePanel.svelte';
+  import StatusChip from '$lib/components/ui/StatusChip.svelte';
+  import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
   interface ImageInfo {
     id: string;
@@ -245,9 +247,8 @@
 {/if}
 
 <div class="p-4 md:p-8">
-  <div class="flex items-center justify-between mb-6">
-    <h1 class="text-2xl font-bold text-white">이미지</h1>
-    <div class="flex items-center gap-2">
+  <PageHeader breadcrumb="COMPUTE / IMAGES" title="이미지">
+    {#snippet actions()}
       <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={60} />
       <RefreshButton {refreshing} onclick={forceRefresh} />
       <button
@@ -256,8 +257,8 @@
       >
         날짜 {sortOrder === 'desc' ? '↓ 최신순' : '↑ 오래된순'}
       </button>
-    </div>
-  </div>
+    {/snippet}
+  </PageHeader>
 
   {#if error}<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>{/if}
 
@@ -334,7 +335,7 @@
                   {/if}
                 </td>
                 <td class="py-3 pr-6">
-                  <span class="px-2 py-0.5 rounded text-xs font-medium {img.status === 'active' ? 'text-green-400 bg-green-900/30' : 'text-gray-400 bg-gray-800'}">{img.status}</span>
+                  <StatusChip status={img.status} />
                 </td>
                 <td class="py-3 pr-6 text-gray-400 text-xs">{img.disk_format ?? '-'}</td>
                 <td class="py-3 pr-6 text-gray-400 text-xs">{formatSize(img.size)}</td>

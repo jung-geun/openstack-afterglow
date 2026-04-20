@@ -5,6 +5,8 @@
   import { api, ApiError } from '$lib/api/client';
   import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+  import StatusChip from '$lib/components/ui/StatusChip.svelte';
+  import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
   interface ClusterTemplate {
     id: string;
@@ -24,14 +26,6 @@
     created_at: string | null;
   }
 
-  const statusColor: Record<string, string> = {
-    CREATE_COMPLETE:    'text-green-400 bg-green-900/30',
-    CREATE_IN_PROGRESS: 'text-yellow-400 bg-yellow-900/30',
-    DELETE_IN_PROGRESS: 'text-orange-400 bg-orange-900/30',
-    CREATE_FAILED:      'text-red-400 bg-red-900/30',
-    UPDATE_IN_PROGRESS: 'text-blue-400 bg-blue-900/30',
-    UPDATE_COMPLETE:    'text-green-400 bg-green-900/30',
-  };
 
   let clusters = $state<Cluster[]>([]);
   let templates = $state<ClusterTemplate[]>([]);
@@ -173,13 +167,12 @@
 {/if}
 
 <div class="p-4 md:p-8">
-  <div class="flex items-center justify-between mb-6">
-    <h1 class="text-2xl font-bold text-white">K8s 클러스터</h1>
-    <div class="flex items-center gap-2">
+  <PageHeader breadcrumb="CONTAINERS / K8S CLUSTERS" title="K8s 클러스터">
+    {#snippet actions()}
       <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={30} />
       <button onclick={() => showModal = true} class="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 클러스터 생성</button>
-    </div>
-  </div>
+    {/snippet}
+  </PageHeader>
 
   {#if error}<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>{/if}
 
@@ -217,7 +210,7 @@
                 <button onclick={() => goto(`/dashboard/containers/clusters/${c.id}`)} class="font-medium text-white hover:text-blue-400 transition-colors text-left">{c.name}</button>
               </td>
               <td class="py-3 pr-6">
-                <span class="px-2 py-0.5 rounded text-xs font-medium {statusColor[c.status] ?? 'text-gray-400 bg-gray-800'}">{c.status}</span>
+                <StatusChip status={c.status} />
               </td>
               <td class="py-3 pr-6 text-gray-400 text-xs">{c.master_count}</td>
               <td class="py-3 pr-6 text-gray-400 text-xs">{c.node_count}</td>
