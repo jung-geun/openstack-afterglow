@@ -9,25 +9,38 @@ import logging
 _logger = logging.getLogger(__name__)
 
 
+def _instance_to_dict(i) -> dict:
+    flavor = getattr(i, "flavor", {}) or {}
+    volume = getattr(i, "volume", {}) or {}
+    links = getattr(i, "links", []) or []
+    # hostname / ip 추출: links 또는 addresses 에서 시도
+    hostname = getattr(i, "hostname", None) or ""
+    addresses = getattr(i, "addresses", {}) or {}
+    ip = ""
+    if not hostname and addresses:
+        for net_addrs in addresses.values():
+            if net_addrs:
+                ip = net_addrs[0].get("addr", "") if isinstance(net_addrs[0], dict) else ""
+                break
+    return {
+        "id": i.id,
+        "name": i.name or "",
+        "status": i.status or "",
+        "datastore": getattr(i, "datastore", {}) or {},
+        "flavor_id": flavor.get("id", "") if isinstance(flavor, dict) else "",
+        "flavor_ram": flavor.get("ram", 0) if isinstance(flavor, dict) else 0,
+        "size": volume.get("size", 0) if isinstance(volume, dict) else 0,
+        "created_at": str(getattr(i, "created_at", "") or ""),
+        "hostname": hostname,
+        "ip": ip,
+        "links": [lk.get("href", "") if isinstance(lk, dict) else str(lk) for lk in links],
+    }
+
+
 def list_instances(conn) -> list[dict]:
     """현재 프로젝트의 DB 인스턴스 목록 반환."""
     try:
-        results = []
-        for i in conn.database.instances():
-            flavor = getattr(i, "flavor", {}) or {}
-            volume = getattr(i, "volume", {}) or {}
-            results.append(
-                {
-                    "id": i.id,
-                    "name": i.name or "",
-                    "status": i.status or "",
-                    "datastore": getattr(i, "datastore", {}) or {},
-                    "flavor_id": flavor.get("id", "") if isinstance(flavor, dict) else "",
-                    "size": volume.get("size", 0) if isinstance(volume, dict) else 0,
-                    "created_at": str(getattr(i, "created_at", "") or ""),
-                }
-            )
-        return results
+        return [_instance_to_dict(i) for i in conn.database.instances()]
     except Exception:
         _logger.debug("Trove 인스턴스 목록 조회 실패", exc_info=True)
         return []
@@ -39,3 +52,226 @@ def count_instances(conn) -> int:
         return sum(1 for _ in conn.database.instances())
     except Exception:
         return 0
+
+
+def get_instance(conn, instance_id: str) -> dict:
+    """DB 인스턴스 상세 정보 반환."""
+    i = conn.database.get_instance(instance_id)
+    return _instance_to_dict(i)
+
+
+def create_instance(
+    conn,
+    name: str,
+    flavor_id: str,
+    volume_size: int,
+    datastore_type: str,
+    datastore_version: str,
+    databases: list | None = None,
+    users: list | None = None,
+    restore_backup_id: str | None = None,
+) -> dict:
+    """DB 인스턴스 생성."""
+    body: dict = {
+        "name": name,
+        "flavor": {"id": flavor_id},
+        "volume": {"size": volume_size},
+        "datastore": {"type": datastore_type, "version": datastore_version},
+    }
+    if databases:
+        body["databases"] = [{"name": db} for db in databases]
+    if users:
+        body["users"] = users
+    if restore_backup_id:
+        body["restorePoint"] = {"backupRef": restore_backup_id}
+    i = conn.database.create_instance(**body)
+    return _instance_to_dict(i)
+
+
+def delete_instance(conn, instance_id: str) -> None:
+    """DB 인스턴스 삭제."""
+    conn.database.delete_instance(instance_id, ignore_missing=False)
+
+
+def restart_instance(conn, instance_id: str) -> None:
+    """DB 인스턴스 재시작."""
+    i = conn.database.get_instance(instance_id)
+    i.restart(conn.database)
+
+
+def enable_root(conn, instance_id: str) -> dict:
+    """root 유저 활성화. {name, password} 반환."""
+    i = conn.database.get_instance(instance_id)
+    result = i.enable_root_user(conn.database)
+    if isinstance(result, dict):
+        return result
+    # result 가 Resource 객체일 수 있음
+    return {
+        "name": getattr(result, "name", "root"),
+        "password": getattr(result, "password", ""),
+    }
+
+
+# ---------------------------------------------------------------------------
+# 데이터베이스 (인스턴스 내부) 관리
+# ---------------------------------------------------------------------------
+
+
+def list_databases(conn, instance_id: str) -> list[dict]:
+    """인스턴스 내 데이터베이스 목록."""
+    try:
+        return [
+            {
+                "name": db.name or "",
+                "character_set": getattr(db, "character_set", "utf8") or "utf8",
+                "collate": getattr(db, "collate", "") or "",
+            }
+            for db in conn.database.databases(instance_id)
+        ]
+    except Exception:
+        _logger.debug("Trove DB 목록 조회 실패 instance=%s", instance_id, exc_info=True)
+        return []
+
+
+def create_database(
+    conn, instance_id: str, name: str, character_set: str = "utf8", collate: str = "utf8_general_ci"
+) -> None:
+    """인스턴스 내 데이터베이스 생성."""
+    conn.database.create_database(instance_id, name=name, character_set=character_set, collate=collate)
+
+
+def delete_database(conn, instance_id: str, db_name: str) -> None:
+    """인스턴스 내 데이터베이스 삭제."""
+    conn.database.delete_database(db_name, instance=instance_id, ignore_missing=False)
+
+
+# ---------------------------------------------------------------------------
+# 유저 (인스턴스 내부) 관리
+# ---------------------------------------------------------------------------
+
+
+def list_users(conn, instance_id: str) -> list[dict]:
+    """인스턴스 내 유저 목록."""
+    try:
+        return [
+            {
+                "name": u.name or "",
+                "databases": getattr(u, "databases", []) or [],
+            }
+            for u in conn.database.users(instance_id)
+        ]
+    except Exception:
+        _logger.debug("Trove 유저 목록 조회 실패 instance=%s", instance_id, exc_info=True)
+        return []
+
+
+def create_user(conn, instance_id: str, name: str, password: str, databases: list[str] | None = None) -> None:
+    """인스턴스 내 유저 생성."""
+    user_body: dict = {"name": name, "password": password}
+    if databases:
+        user_body["databases"] = [{"name": db} for db in databases]
+    conn.database.create_user(instance_id, **user_body)
+
+
+def delete_user(conn, instance_id: str, username: str) -> None:
+    """인스턴스 내 유저 삭제."""
+    conn.database.delete_user(username, instance=instance_id, ignore_missing=False)
+
+
+# ---------------------------------------------------------------------------
+# 플레이버 / 데이터스토어
+# ---------------------------------------------------------------------------
+
+
+def list_flavors(conn) -> list[dict]:
+    """DB 플레이버 목록."""
+    try:
+        return [
+            {
+                "id": f.id,
+                "name": f.name or "",
+                "ram": getattr(f, "ram", 0) or 0,
+                "vcpus": getattr(f, "vcpus", 0) or 0,
+                "disk": getattr(f, "disk", 0) or 0,
+            }
+            for f in conn.database.flavors()
+        ]
+    except Exception:
+        _logger.debug("Trove 플레이버 목록 조회 실패", exc_info=True)
+        return []
+
+
+def list_datastores(conn) -> list[dict]:
+    """데이터스토어 목록 (raw REST)."""
+    try:
+        resp = conn.database.get("/datastores")
+        body = resp.json() if hasattr(resp, "json") else {}
+        datastores_raw = body.get("datastores", [])
+        result = []
+        for ds in datastores_raw:
+            versions = []
+            for v in ds.get("versions", []):
+                versions.append({"id": v.get("id", ""), "name": v.get("name", "")})
+            result.append(
+                {
+                    "id": ds.get("id", ""),
+                    "name": ds.get("name", ""),
+                    "versions": versions,
+                }
+            )
+        return result
+    except Exception:
+        _logger.debug("Trove 데이터스토어 목록 조회 실패", exc_info=True)
+        return []
+
+
+# ---------------------------------------------------------------------------
+# 백업 (SDK 미지원 → raw REST)
+# ---------------------------------------------------------------------------
+
+
+def _backup_to_dict(b: dict) -> dict:
+    return {
+        "id": b.get("id", ""),
+        "name": b.get("name", ""),
+        "description": b.get("description", ""),
+        "status": b.get("status", ""),
+        "instance_id": b.get("instance_id", ""),
+        "size": b.get("size", 0),
+        "created_at": b.get("created", "") or b.get("created_at", ""),
+        "updated_at": b.get("updated", "") or b.get("updated_at", ""),
+    }
+
+
+def list_backups(conn, instance_id: str | None = None) -> list[dict]:
+    """백업 목록. instance_id 지정 시 해당 인스턴스 백업만 반환."""
+    try:
+        url = f"/instances/{instance_id}/backups" if instance_id else "/backups"
+        resp = conn.database.get(url)
+        body = resp.json() if hasattr(resp, "json") else {}
+        return [_backup_to_dict(b) for b in body.get("backups", [])]
+    except Exception:
+        _logger.debug("Trove 백업 목록 조회 실패", exc_info=True)
+        return []
+
+
+def create_backup(conn, instance_id: str, name: str, description: str = "") -> dict:
+    """백업 생성."""
+    payload: dict = {"backup": {"instance": instance_id, "name": name}}
+    if description:
+        payload["backup"]["description"] = description
+    resp = conn.database.post("/backups", json=payload)
+    body = resp.json() if hasattr(resp, "json") else {}
+    return _backup_to_dict(body.get("backup", {}))
+
+
+def delete_backup(conn, backup_id: str) -> None:
+    """백업 삭제."""
+    conn.database.delete(f"/backups/{backup_id}")
+
+
+def get_backup(conn, backup_id: str) -> dict:
+    """백업 상세 조회."""
+    resp = conn.database.get(f"/backups/{backup_id}")
+    body = resp.json() if hasattr(resp, "json") else {}
+    return _backup_to_dict(body.get("backup", {}))

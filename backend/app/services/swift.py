@@ -8,6 +8,7 @@ Zun "컨테이너"와 혼동 방지를 위해 변수/응답 키에 object_storag
 """
 
 import logging
+from collections.abc import Iterator
 
 _logger = logging.getLogger(__name__)
 
@@ -51,3 +52,102 @@ def get_account_metadata(conn) -> dict:
     except Exception:
         _logger.debug("Swift 계정 메타데이터 조회 실패", exc_info=True)
         return {"container_count": 0, "object_count": 0, "bytes_used": 0}
+
+
+# ---------------------------------------------------------------------------
+# 컨테이너 CRUD
+# ---------------------------------------------------------------------------
+
+
+def create_container(conn, name: str) -> dict:
+    """오브젝트 스토리지 컨테이너를 생성하고 메타데이터를 반환."""
+    c = conn.object_store.create_container(name)
+    return {"name": c.name or name, "count": 0, "bytes": 0}
+
+
+def delete_container(conn, name: str) -> None:
+    """오브젝트 스토리지 컨테이너를 삭제."""
+    conn.object_store.delete_container(name, ignore_missing=False)
+
+
+def get_container_metadata(conn, name: str) -> dict:
+    """컨테이너 메타데이터(오브젝트 수, 바이트 등) 반환."""
+    meta = conn.object_store.get_container_metadata(name)
+    return {
+        "name": meta.name or name,
+        "count": getattr(meta, "object_count", 0) or 0,
+        "bytes": getattr(meta, "bytes_used", 0) or 0,
+        "read_acl": getattr(meta, "read_ACL", "") or "",
+        "write_acl": getattr(meta, "write_ACL", "") or "",
+    }
+
+
+# ---------------------------------------------------------------------------
+# 오브젝트 CRUD
+# ---------------------------------------------------------------------------
+
+
+def list_objects(conn, container: str, prefix: str = "") -> list[dict]:
+    """컨테이너 내 오브젝트 목록 반환."""
+    try:
+        kwargs = {}
+        if prefix:
+            kwargs["prefix"] = prefix
+        return [
+            {
+                "name": o.name or "",
+                "bytes": getattr(o, "size", None) or getattr(o, "content_length", 0) or 0,
+                "content_type": getattr(o, "content_type", "") or "",
+                "last_modified": str(getattr(o, "last_modified_at", "") or ""),
+                "etag": getattr(o, "etag", "") or "",
+            }
+            for o in conn.object_store.objects(container, **kwargs)
+        ]
+    except Exception:
+        _logger.debug("Swift 오브젝트 목록 조회 실패 container=%s", container, exc_info=True)
+        return []
+
+
+def upload_object(conn, container: str, name: str, data: bytes, content_type: str = "") -> dict:
+    """오브젝트를 업로드하고 메타데이터를 반환."""
+    kwargs: dict = {"data": data}
+    if content_type:
+        kwargs["content_type"] = content_type
+    obj = conn.object_store.create_object(container, name, **kwargs)
+    return {
+        "name": obj.name or name,
+        "container": container,
+        "bytes": len(data),
+        "etag": getattr(obj, "etag", "") or "",
+    }
+
+
+def stream_object(conn, container: str, name: str) -> tuple[Iterator[bytes], str, int]:
+    """오브젝트를 스트리밍으로 반환. (chunk_iterator, content_type, content_length)"""
+    # 메타데이터 먼저 가져오기
+    meta = conn.object_store.get_object_metadata(name, container=container)
+    content_type = getattr(meta, "content_type", None) or "application/octet-stream"
+    content_length = int(getattr(meta, "content_length", 0) or 0)
+    chunks = conn.object_store.stream_object(name, container=container, chunk_size=65536)
+    return chunks, content_type, content_length
+
+
+def delete_object(conn, container: str, name: str) -> None:
+    """오브젝트를 삭제."""
+    conn.object_store.delete_object(name, ignore_missing=False, container=container)
+
+
+def get_object_metadata(conn, container: str, name: str) -> dict:
+    """오브젝트 상세 메타데이터 반환."""
+    meta = conn.object_store.get_object_metadata(name, container=container)
+    return {
+        "name": meta.name or name,
+        "container": container,
+        "bytes": int(getattr(meta, "content_length", 0) or 0),
+        "content_type": getattr(meta, "content_type", "") or "",
+        "last_modified": str(getattr(meta, "last_modified_at", "") or ""),
+        "etag": getattr(meta, "etag", "") or "",
+        "content_encoding": getattr(meta, "content_encoding", "") or "",
+        "content_disposition": getattr(meta, "content_disposition", "") or "",
+        "delete_at": str(getattr(meta, "delete_at", "") or ""),
+    }

@@ -76,6 +76,51 @@ export const api = {
 	delete: <T>(path: string, token?: string, projectId?: string) =>
 		request<T>(path, { method: 'DELETE' }, token, projectId),
 
+	upload: async <T>(path: string, formData: FormData, token?: string, projectId?: string): Promise<T> => {
+		const headers: Record<string, string> = {};
+		if (token) headers['X-Auth-Token'] = token;
+		if (projectId) headers['X-Project-Id'] = projectId;
+		const res = await fetch(`${getBaseUrl()}${path}`, {
+			method: 'POST',
+			headers,
+			body: formData,
+			signal: AbortSignal.timeout(300_000),
+		});
+		if (!res.ok) {
+			let detail = res.statusText;
+			try {
+				const body = await res.json();
+				detail = body?.detail || JSON.stringify(body);
+			} catch {
+				detail = await res.text().catch(() => res.statusText);
+			}
+			throw new ApiError(res.status, detail);
+		}
+		if (res.status === 204) return undefined as T;
+		return res.json();
+	},
+
+	downloadBlob: async (path: string, token?: string, projectId?: string): Promise<{ blob: Blob; filename: string }> => {
+		const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+		if (token) headers['X-Auth-Token'] = token;
+		if (projectId) headers['X-Project-Id'] = projectId;
+		const res = await fetch(`${getBaseUrl()}${path}`, {
+			method: 'GET',
+			headers,
+			signal: AbortSignal.timeout(300_000),
+		});
+		if (!res.ok) {
+			let detail = res.statusText;
+			try { detail = (await res.json())?.detail || detail; } catch { /* empty */ }
+			throw new ApiError(res.status, detail);
+		}
+		const disposition = res.headers.get('Content-Disposition') || '';
+		const match = disposition.match(/filename="?([^"]+)"?/);
+		const filename = match ? decodeURIComponent(match[1]) : 'download';
+		const blob = await res.blob();
+		return { blob, filename };
+	},
+
 	/**
 	 * SSE (Server-Sent Events) 요청
 	 * @param path API 경로

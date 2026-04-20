@@ -261,3 +261,20 @@ class TopologyData(BaseModel):
     routers: list[TopologyRouter] = []
     instances: list[TopologyInstance] = []
     floating_ips: list[FloatingIpInfo] = []
+
+
+# ---------------------------------------------------------------------------
+# Object Storage (Swift)
+# ---------------------------------------------------------------------------
+
+
+class CreateContainerRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+
+
+class ObjectInfo(BaseModel):
+    name: str
+    bytes: int = 0
+    content_type: str = ""
+    last_modified: str = ""
+    etag: str = ""
