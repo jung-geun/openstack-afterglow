@@ -27,6 +27,8 @@
 			items: [
 				{ label: '전체 볼륨', href: '/admin/volumes', service: null },
 				{ label: '파일 스토리지', href: '/admin/file-storage', service: 'manila' as const },
+				{ label: 'DB 인스턴스', href: '/admin/database-instances', service: 'trove' as const },
+				{ label: 'Object Storage', href: '/admin/object-storage', service: 'swift' as const },
 			],
 		},
 		{

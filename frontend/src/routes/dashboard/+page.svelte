@@ -12,6 +12,8 @@
     storage: { volumes: QuotaItem; snapshots: QuotaItem; gigabytes: QuotaItem; backups: QuotaItem; backup_gigabytes: QuotaItem; };
     network: { floatingip: QuotaItem; security_group: QuotaItem; security_group_rule: QuotaItem; network: QuotaItem; port: QuotaItem; router: QuotaItem; subnet: QuotaItem; };
     file_storage: { shares: QuotaItem; gigabytes: QuotaItem; share_networks: QuotaItem; share_groups: QuotaItem; };
+    database?: { instances_count: number };
+    object_storage?: { container_count: number; object_count: number; bytes_used: number };
   }
 
   interface UsageServer { name: string; instance_id: string; vcpus: number; memory_mb: number; local_gb: number; hours: number; state: string; }
@@ -375,6 +377,44 @@
               </div>
             {/if}
           </div>
+
+          <!-- Database (Trove) -->
+          {#if quotas.database !== undefined}
+            <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 flex flex-col min-h-[128px]">
+              <div class="flex items-center justify-between mb-3">
+                <span class="text-xs text-gray-500 uppercase tracking-wide font-medium">Database</span>
+                <div class="w-8 h-8 rounded-full bg-amber-900/40 flex items-center justify-center">
+                  <svg class="w-4 h-4 text-amber-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <ellipse cx="8" cy="4.5" rx="5.5" ry="2"/>
+                    <path d="M2.5 4.5v3c0 1.1 2.46 2 5.5 2s5.5-.9 5.5-2v-3"/>
+                    <path d="M2.5 7.5v3c0 1.1 2.46 2 5.5 2s5.5-.9 5.5-2v-3"/>
+                  </svg>
+                </div>
+              </div>
+              <div class="text-3xl font-bold text-white leading-tight mb-1">
+                {formatNumber(quotas.database.instances_count)}
+              </div>
+              <div class="text-xs text-gray-500 mt-auto">DB 인스턴스</div>
+            </div>
+          {/if}
+
+          <!-- Object Storage (Swift) -->
+          {#if quotas.object_storage !== undefined}
+            <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 flex flex-col min-h-[128px]">
+              <div class="flex items-center justify-between mb-3">
+                <span class="text-xs text-gray-500 uppercase tracking-wide font-medium">Object Storage</span>
+                <div class="w-8 h-8 rounded-full bg-indigo-900/40 flex items-center justify-center">
+                  <svg class="w-4 h-4 text-indigo-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M13 10.5A5 5 0 1 0 3.07 9H2a2 2 0 0 0 0 4h10.5a2 2 0 0 0 .5-3.93z"/>
+                  </svg>
+                </div>
+              </div>
+              <div class="text-3xl font-bold text-white leading-tight mb-1">
+                {formatNumber(quotas.object_storage.container_count)}
+              </div>
+              <div class="text-xs text-gray-500 mt-auto">{formatStorage(quotas.object_storage.bytes_used)} 사용 중</div>
+            </div>
+          {/if}
         {/if}
 
       </div>

@@ -216,19 +216,45 @@ def _fetch_overview_file_storage(conn) -> int:
         return 0
 
 
+def _fetch_overview_database_instances(conn) -> int:
+    """Trove DB 인스턴스 수 수집."""
+    if not get_settings().service_trove_enabled:
+        return 0
+    try:
+        from app.services.trove import count_instances
+
+        return count_instances(conn)
+    except Exception:
+        return 0
+
+
+def _fetch_overview_object_storage(conn) -> int:
+    """Swift 오브젝트 스토리지 컨테이너 수 수집 (현재 프로젝트/계정)."""
+    if not get_settings().service_swift_enabled:
+        return 0
+    try:
+        from app.services.swift import count_containers
+
+        return count_containers(conn)
+    except Exception:
+        return 0
+
+
 @router.get("/overview", dependencies=[Depends(require_admin)])
 async def admin_overview(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
     """하이퍼바이저 및 전체 리소스 집계."""
     try:
 
         def _collect():
-            with ThreadPoolExecutor(max_workers=6) as executor:
+            with ThreadPoolExecutor(max_workers=8) as executor:
                 f_hyp = executor.submit(_fetch_overview_hypervisors, conn)
                 f_disk = executor.submit(_fetch_overview_disk, conn)
                 f_cpu = executor.submit(_fetch_overview_placement, conn)
                 f_srv = executor.submit(_fetch_overview_servers, conn)
                 f_ctr = executor.submit(_fetch_overview_containers, conn)
                 f_fs = executor.submit(_fetch_overview_file_storage, conn)
+                f_db = executor.submit(_fetch_overview_database_instances, conn)
+                f_os = executor.submit(_fetch_overview_object_storage, conn)
 
             hyp = f_hyp.result(timeout=15)
             disk = f_disk.result(timeout=15)
@@ -236,6 +262,8 @@ async def admin_overview(conn: openstack.connection.Connection = Depends(get_os_
             srv = f_srv.result(timeout=15)
             ctr = f_ctr.result(timeout=15)
             fs = f_fs.result(timeout=15)
+            db = f_db.result(timeout=15)
+            os_count = f_os.result(timeout=15)
 
             # Placement 실패 시 hypervisor 데이터로 fallback
             physical_vcpus = cpu["physical_vcpus"]
@@ -254,6 +282,8 @@ async def admin_overview(conn: openstack.connection.Connection = Depends(get_os_
                 "disk_gb": {"total": disk["total_disk"], "used": disk["used_disk"]},
                 "containers_count": ctr,
                 "file_storage_count": fs,
+                "database_instances_count": db,
+                "object_storage_containers_count": os_count,
             }
 
         return await cached_call("afterglow:admin:overview", ttl_normal(), _collect, refresh=refresh)

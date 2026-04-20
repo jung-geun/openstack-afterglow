@@ -55,6 +55,26 @@
 			],
 		},
 		{
+			label: 'Database',
+			prefix: '/dashboard/database',
+			icon: 'M4 7c0-1.657 3.582-3 8-3s8 1.343 8 3M4 7v5c0 1.657 3.582 3 8 3s8-1.343 8-3V7M4 7c0 1.657 3.582 3 8 3s8-1.343 8-3M4 12v5c0 1.657 3.582 3 8 3s8-1.343 8-3v-5',
+			open: false,
+			service: 'trove' as const,
+			items: [
+				{ label: 'DB 인스턴스', href: '/dashboard/database/instances', service: null },
+			],
+		},
+		{
+			label: 'Object Storage',
+			prefix: '/dashboard/object-storage',
+			icon: 'M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z',
+			open: false,
+			service: 'swift' as const,
+			items: [
+				{ label: '컨테이너', href: '/dashboard/object-storage/containers', service: null },
+			],
+		},
+		{
 			label: '네트워크',
 			prefix: '/dashboard/network',
 			icon: 'M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9',
@@ -85,11 +105,11 @@
 	});
 
 	function isSectionVisible(section: { service?: string }): boolean {
-		const svcs = $siteConfig.services;
+		const svcs = $siteConfig.services as Record<string, boolean> | undefined;
 		if (!section.service) return true;
 		if (section.service === 'manila') return svcs?.manila ?? false;
 		if (section.service === 'containers') return (svcs?.magnum ?? false) || (svcs?.zun ?? false) || (svcs?.k3s ?? false);
-		return true;
+		return svcs?.[section.service] ?? false;
 	}
 
 	function isItemVisible(item: { service?: string | null }): boolean {

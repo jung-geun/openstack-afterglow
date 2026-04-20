@@ -101,6 +101,8 @@ def _load_toml() -> dict:
     flat["service_manila_enabled"] = svc.get("manila", False)
     flat["service_zun_enabled"] = svc.get("zun", False)
     flat["service_k3s_enabled"] = svc.get("k3s", False)
+    flat["service_trove_enabled"] = svc.get("trove", False)
+    flat["service_swift_enabled"] = svc.get("swift", False)
 
     k3s = data.get("k3s", {})
     flat["k3s_version"] = k3s.get("version", "v1.31.4+k3s1")
@@ -248,6 +250,8 @@ class Settings(BaseSettings):
     service_manila_enabled: bool = False
     service_zun_enabled: bool = False
     service_k3s_enabled: bool = False
+    service_trove_enabled: bool = False
+    service_swift_enabled: bool = False
 
     # k3s 설정
     k3s_version: str = "v1.31.4+k3s1"

@@ -18,6 +18,8 @@
 		disk_gb: { total: number; used: number };
 		containers_count: number;
 		file_storage_count: number;
+		database_instances_count: number;
+		object_storage_containers_count: number;
 	}
 
 	declare const __APP_VERSION__: string;
@@ -285,7 +287,7 @@
 		</div>
 
 		<!-- 하단: 서비스 카운트 + 퀵 링크 -->
-		<div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+		<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
 			<a href="/admin/containers" class="bg-gray-900 border border-gray-800 rounded-xl p-6 flex items-center gap-5 hover:border-gray-600 transition-colors">
 				<div class="w-12 h-12 rounded-xl bg-orange-600/20 flex items-center justify-center shrink-0">
 					<svg class="w-6 h-6 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"></path></svg>
@@ -304,6 +306,24 @@
 					<div class="text-3xl font-bold text-white">{formatNumber(overview.file_storage_count ?? 0)}</div>
 				</div>
 			</a>
+			<a href="/admin/database-instances" class="bg-gray-900 border border-gray-800 rounded-xl p-6 flex items-center gap-5 hover:border-gray-600 transition-colors">
+				<div class="w-12 h-12 rounded-xl bg-amber-600/20 flex items-center justify-center shrink-0">
+					<svg class="w-6 h-6 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7c0-1.657 3.582-3 8-3s8 1.343 8 3M4 7v5c0 1.657 3.582 3 8 3s8-1.343 8-3V7M4 7c0 1.657 3.582 3 8 3s8-1.343 8-3M4 12v5c0 1.657 3.582 3 8 3s8-1.343 8-3v-5"></path></svg>
+				</div>
+				<div>
+					<div class="text-xs text-gray-500 uppercase tracking-wide mb-0.5">Database</div>
+					<div class="text-3xl font-bold text-white">{formatNumber(overview.database_instances_count ?? 0)}</div>
+				</div>
+			</a>
+			<a href="/admin/object-storage" class="bg-gray-900 border border-gray-800 rounded-xl p-6 flex items-center gap-5 hover:border-gray-600 transition-colors">
+				<div class="w-12 h-12 rounded-xl bg-indigo-600/20 flex items-center justify-center shrink-0">
+					<svg class="w-6 h-6 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"></path></svg>
+				</div>
+				<div>
+					<div class="text-xs text-gray-500 uppercase tracking-wide mb-0.5">Object Storage</div>
+					<div class="text-3xl font-bold text-white">{formatNumber(overview.object_storage_containers_count ?? 0)}</div>
+				</div>
+			</a>
 		</div>
 
 		<!-- 퀵 링크 -->
@@ -312,6 +332,8 @@
 			<a href="/admin/instances" class="text-sm text-blue-400 hover:text-blue-300 transition-colors">전체 인스턴스 →</a>
 			<a href="/admin/containers" class="text-sm text-blue-400 hover:text-blue-300 transition-colors">전체 컨테이너 →</a>
 			<a href="/admin/file-storage" class="text-sm text-blue-400 hover:text-blue-300 transition-colors">파일 스토리지 →</a>
+			<a href="/admin/database-instances" class="text-sm text-blue-400 hover:text-blue-300 transition-colors">Database →</a>
+			<a href="/admin/object-storage" class="text-sm text-blue-400 hover:text-blue-300 transition-colors">Object Storage →</a>
 			<a href="/admin/topology" class="text-sm text-blue-400 hover:text-blue-300 transition-colors">전체 토폴로지 →</a>
 			<a href="/admin/networks" class="text-sm text-blue-400 hover:text-blue-300 transition-colors">네트워크 →</a>
 		</div>

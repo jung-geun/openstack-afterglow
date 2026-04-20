@@ -269,6 +269,14 @@ if _svc_cfg.service_k3s_enabled:
     app.include_router(k3s_clusters_router, prefix="/api/k3s/clusters", tags=["k3s"])
     app.include_router(k3s_health_router, prefix="/api/k3s/clusters", tags=["k3s-health"])
     app.include_router(k3s_callback_router, prefix="/api/k3s", tags=["k3s-callback"])
+if _svc_cfg.service_trove_enabled:
+    from app.api.database.instances import router as trove_router
+
+    app.include_router(trove_router, prefix="/api/database-instances", tags=["database"])
+if _svc_cfg.service_swift_enabled:
+    from app.api.object_storage.containers import router as swift_router
+
+    app.include_router(swift_router, prefix="/api/object-storage", tags=["object-storage"])
 # Common
 app.include_router(dashboard_router, prefix="/api/dashboard", tags=["dashboard"])
 app.include_router(metrics_router, prefix="/api/metrics", tags=["metrics"])

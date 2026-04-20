@@ -12,6 +12,8 @@ from app.database import is_db_available
 from app.services import cinder, nova
 from app.services import manila as manila_svc
 from app.services import neutron as neutron_svc
+from app.services import swift as swift_svc
+from app.services import trove as trove_svc
 from app.services.cache import cached_call, ttl_fast, ttl_normal, ttl_static
 
 router = APIRouter()
@@ -143,9 +145,24 @@ async def get_project_quotas(
         ]
         if settings.service_manila_enabled:
             tasks.append(asyncio.to_thread(manila_svc.get_file_storage_quota, conn))
+        if settings.service_trove_enabled:
+            tasks.append(asyncio.to_thread(trove_svc.count_instances, conn))
+        if settings.service_swift_enabled:
+            tasks.append(asyncio.to_thread(swift_svc.get_account_metadata, conn))
         results = await asyncio.gather(*tasks)
         compute_q, volume_q, network_q = results[0], results[1], results[2]
-        file_storage_q = results[3] if settings.service_manila_enabled else {"limit": 0, "in_use": 0, "reserved": 0}
+        idx = 3
+        file_storage_q = results[idx] if settings.service_manila_enabled else {"limit": 0, "in_use": 0, "reserved": 0}
+        if settings.service_manila_enabled:
+            idx += 1
+        trove_count: int = results[idx] if settings.service_trove_enabled else 0
+        if settings.service_trove_enabled:
+            idx += 1
+        swift_meta: dict = (
+            results[idx]
+            if settings.service_swift_enabled
+            else {"container_count": 0, "object_count": 0, "bytes_used": 0}
+        )
     except Exception:
         raise HTTPException(status_code=500, detail="작업 실패")
 
@@ -178,6 +195,8 @@ async def get_project_quotas(
         "network": network_q,
         "file_storage": file_storage_q,
         "gpu": gpu_quota,
+        "database": {"instances_count": trove_count},
+        "object_storage": swift_meta,
     }
 
 

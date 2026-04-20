@@ -13,6 +13,8 @@ interface SiteConfig {
 		manila: boolean;
 		zun: boolean;
 		k3s: boolean;
+		trove: boolean;
+		swift: boolean;
 	};
 }
 
@@ -23,7 +25,7 @@ const DEFAULTS: SiteConfig = {
 	logo_dark_path: '/logo-dark.png',
 	logo_light_path: '/logo-white.png',
 	favicon_path: '/favicon.ico',
-	services: { magnum: false, manila: false, zun: false, k3s: false },
+	services: { magnum: false, manila: false, zun: false, k3s: false, trove: false, swift: false },
 };
 
 export const siteConfig = writable<SiteConfig>({ ...DEFAULTS });
