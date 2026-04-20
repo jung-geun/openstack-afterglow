@@ -90,7 +90,10 @@
 	}
 
 	async function createInstance() {
-		if (!form.name.trim() || !form.flavor_id || !form.datastore_type || !form.datastore_version) return;
+		if (!form.name.trim() || !form.flavor_id || !form.datastore_type || !form.datastore_version) {
+			createError = '이름, 데이터스토어, 플레이버를 모두 선택해주세요.';
+			return;
+		}
 		creating = true;
 		createError = '';
 		try {
@@ -227,7 +230,7 @@
 			<div class="flex justify-end gap-2 mt-5">
 				<button onclick={() => { showModal = false; }}
 					class="px-4 py-2 text-sm text-gray-400 hover:text-white border border-gray-700 rounded-lg transition-colors">취소</button>
-				<button onclick={createInstance} disabled={creating || !form.name.trim()}
+				<button onclick={createInstance} disabled={creating || !form.name.trim() || !form.flavor_id || !form.datastore_type || !form.datastore_version}
 					class="px-4 py-2 text-sm bg-amber-600 hover:bg-amber-500 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-lg transition-colors">
 					{creating ? '생성 중...' : '생성'}
 				</button>

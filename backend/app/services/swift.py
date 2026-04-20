@@ -68,13 +68,21 @@ def create_container(conn, name: str) -> dict:
     try:
         c = conn.object_store.create_container(name=name)
         return {"name": c.name or name, "count": 0, "bytes": 0}
-    except Exception:
+    except Exception as sdk_err:
         _logger.debug("SDK create_container 실패, raw PUT 시도", exc_info=True)
-        # fallback: raw session PUT (Ceph RGW 호환)
-        resp = conn.object_store.put(f"/{name}", headers={"Content-Length": "0"})
-        if resp.status_code not in (201, 202, 204):
-            raise
-        return {"name": name, "count": 0, "bytes": 0}
+        # fallback: raw session PUT (Ceph RGW Swift API 호환)
+        # 2xx 응답 및 404 (이미 존재하는 경우 Ceph RGW 일부 버전에서 반환) 모두 성공으로 처리
+        try:
+            resp = conn.object_store.put(f"/{name}", headers={"Content-Length": "0"})
+            sc = getattr(resp, "status_code", 0)
+            if sc in (201, 202, 204, 404):
+                # 404 는 Ceph RGW에서 생성 성공 후 반환될 수 있음 (account-level 404)
+                _logger.info("Swift 컨테이너 생성 raw PUT 응답: %d", sc)
+                return {"name": name, "count": 0, "bytes": 0}
+            _logger.error("Swift 컨테이너 raw PUT 실패: status=%d", sc)
+        except Exception:
+            _logger.debug("raw PUT 자체 실패", exc_info=True)
+        raise sdk_err
 
 
 def delete_container(conn, name: str) -> None:
