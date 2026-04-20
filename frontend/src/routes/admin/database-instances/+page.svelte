@@ -49,6 +49,13 @@
 	const projectId = $derived($auth.projectId ?? undefined);
 	const selectedDs = $derived(datastores.find((d) => d.name === form.datastore_type));
 
+	$effect(() => {
+		const ds = datastores.find((d) => d.name === form.datastore_type);
+		if (ds?.versions.length) {
+			form.datastore_version = ds.versions[0].name;
+		}
+	});
+
 	async function load() {
 		loading = true;
 		try {
@@ -141,7 +148,6 @@
 					<div>
 						<label class="block text-xs text-gray-400 mb-1">데이터스토어</label>
 						<select bind:value={form.datastore_type}
-							onchange={() => { const ds = datastores.find(d => d.name === form.datastore_type); form.datastore_version = ds?.versions[0]?.name ?? ''; }}
 							class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500">
 							{#each datastores as ds}<option value={ds.name}>{ds.name}</option>{/each}
 						</select>
