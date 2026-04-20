@@ -83,6 +83,19 @@ async def create_tables() -> None:
         except Exception:
             pass  # 이미 존재하면 무시
 
+        # API LB 관련 컬럼 추가 (없는 경우에만)
+        for col, col_def in [
+            ("api_lb_id", "VARCHAR(64)"),
+            ("api_fip_id", "VARCHAR(64)"),
+            ("api_fip_address", "VARCHAR(45)"),
+        ]:
+            try:
+                await conn.exec_driver_sql(
+                    f"ALTER TABLE k3s_clusters ADD COLUMN {col} {col_def} DEFAULT NULL"
+                )
+            except Exception:
+                pass  # 이미 존재하면 무시
+
     _logger.info("데이터베이스 테이블 생성/확인 완료")
 
 
