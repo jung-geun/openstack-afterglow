@@ -1607,8 +1607,10 @@ async def get_gpu_quotas(project_id: str, conn: openstack.connection.Connection 
         get_project_gpu_usage(conn, project_id),
     )
 
+    # aliases + effective quota + usage 의 모든 키를 합침
+    all_types = sorted(set(aliases) | set(effective.keys()) | set(usage.keys()))
     result = []
-    for alias in aliases:
+    for alias in all_types:
         limit = effective.get(alias, 0)
         in_use = usage.get(alias, 0)
         result.append(
