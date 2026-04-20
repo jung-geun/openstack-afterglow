@@ -59,6 +59,9 @@ def _cluster_to_info(c: dict) -> K3sClusterInfo:
         deleted_reason=c.get("deleted_reason") or None,
         occm_enabled=bool(c.get("occm_enabled", False)),
         plugins_enabled=c.get("plugins_enabled") or {},
+        api_lb_id=c.get("api_lb_id") or None,
+        api_fip_id=c.get("api_fip_id") or None,
+        api_fip_address=c.get("api_fip_address") or None,
     )
 
 
@@ -158,6 +161,9 @@ async def create_k3s_cluster_async(
         sg_id: str | None = None
         boot_volume_id: str | None = None
         server_vm_id: str | None = None
+        api_lb_id: str | None = None
+        api_fip_id: str | None = None
+        api_fip_address: str | None = None
 
         try:
             # --- Step 1: 보안 그룹 생성 ---
@@ -235,6 +241,39 @@ async def create_k3s_cluster_async(
                 await asyncio.to_thread(neutron.create_security_group_rule, conn, sg_id, **rule_kwargs)
             yield event(K3sProgressStep.SECURITY_GROUP, 10, "보안 그룹 생성 완료")
 
+            # --- Step 1.5: API LB + Floating IP (설정 시) ---
+            extra_tls_sans: list[str] = []
+            if s.k3s_api_lb_enabled:
+                fip_net_id = s.k3s_api_lb_floating_network_id or s.k3s_occm_floating_network_id
+                if not fip_net_id:
+                    raise RuntimeError(
+                        "k3s_api_lb_enabled=true 이나 floating network ID가 설정되지 않았습니다 "
+                        "(k3s_api_lb_floating_network_id 또는 k3s_occm_floating_network_id 설정 필요)"
+                    )
+                yield event(K3sProgressStep.SECURITY_GROUP, 12, "API LB용 Floating IP 할당 중...")
+                fip_info = await asyncio.to_thread(neutron.create_floating_ip, conn, fip_net_id)
+                api_fip_id = fip_info.id
+                api_fip_address = fip_info.floating_ip_address
+                extra_tls_sans.append(api_fip_address)
+
+                # VIP 서브넷: 클러스터 네트워크의 첫 번째 서브넷
+                net_obj = await asyncio.to_thread(conn.network.get_network, network_id)
+                vip_subnet_ids = getattr(net_obj, "subnet_ids", None) or []
+                if not vip_subnet_ids:
+                    raise RuntimeError(f"네트워크 {network_id}에 서브넷이 없습니다")
+                vip_subnet_id = vip_subnet_ids[0]
+
+                yield event(K3sProgressStep.SECURITY_GROUP, 14, "API 로드밸런서 생성 중...")
+                lb = await asyncio.to_thread(
+                    octavia.create_load_balancer,
+                    conn,
+                    f"k3s-api-{req.name}-{cluster_id[:8]}",
+                    vip_subnet_id,
+                    f"K3s API LB for cluster {req.name}",
+                )
+                api_lb_id = lb["id"]
+                _logger.info("k3s cluster %s: API LB %s created, FIP %s", cluster_id, api_lb_id, api_fip_address)
+
             # --- Step 2: 서버 부트 볼륨 생성 ---
             yield event(K3sProgressStep.SERVER_VOLUME, 15, "서버 노드 부트 볼륨 생성 중...")
             boot_vol = await asyncio.to_thread(
@@ -280,6 +319,7 @@ async def create_k3s_cluster_async(
                 plugin_manifests=plugin_manifests,
                 extra_server_args=extra_server_args,
                 extra_write_files=extra_write_files,
+                extra_tls_sans=extra_tls_sans,
                 needs_external_cloud_provider=k3s_plugins.needs_external_cloud_provider(s),
             )
 
@@ -339,6 +379,9 @@ async def create_k3s_cluster_async(
                     "created_by_username": _creator_username or "",
                     "created_at": now,
                     "updated_at": now,
+                    "api_lb_id": api_lb_id or "",
+                    "api_fip_id": api_fip_id or "",
+                    "api_fip_address": api_fip_address or "",
                 },
             )
 
@@ -353,7 +396,7 @@ async def create_k3s_cluster_async(
             _logger.error("k3s cluster creation failed: %s", e, exc_info=True)
             yield event(K3sProgressStep.FAILED, 0, f"클러스터 생성 실패: {e}", error=str(e))
             # 롤백
-            await _rollback(conn, server_vm_id, boot_volume_id, sg_id)
+            await _rollback(conn, server_vm_id, boot_volume_id, sg_id, api_lb_id, api_fip_id)
 
     return StreamingResponse(
         progress_generator(),
@@ -367,6 +410,8 @@ async def _rollback(
     server_vm_id: str | None,
     boot_volume_id: str | None,
     sg_id: str | None,
+    api_lb_id: str | None = None,
+    api_fip_id: str | None = None,
 ) -> None:
     """생성 실패 시 리소스 역순 삭제."""
     if server_vm_id:
@@ -386,6 +431,16 @@ async def _rollback(
             await asyncio.to_thread(neutron.delete_security_group, conn, sg_id)
         except Exception as e:
             _logger.warning("Rollback: delete SG %s failed: %s", sg_id, e)
+    if api_lb_id:
+        try:
+            await asyncio.to_thread(octavia.delete_load_balancer, conn, api_lb_id, cascade=True)
+        except Exception as e:
+            _logger.warning("Rollback: delete API LB %s failed: %s", api_lb_id, e)
+    if api_fip_id:
+        try:
+            await asyncio.to_thread(neutron.delete_floating_ip, conn, api_fip_id)
+        except Exception as e:
+            _logger.warning("Rollback: delete API FIP %s failed: %s", api_fip_id, e)
 
 
 @router.patch("/{cluster_id}/scale")
@@ -549,6 +604,22 @@ async def delete_k3s_cluster(
         return
 
     await k3s_cluster.update_cluster_status(project_id, cluster_id, "DELETING")
+
+    # API LB + FIP 정리 (VM 삭제 전에 먼저 처리)
+    _api_lb_id = cluster.get("api_lb_id") or ""
+    _api_fip_id = cluster.get("api_fip_id") or ""
+    if _api_lb_id:
+        try:
+            await asyncio.to_thread(octavia.delete_load_balancer, conn, _api_lb_id, cascade=True)
+            _logger.info("Deleted API LB %s for cluster %s", _api_lb_id, cluster_id)
+        except Exception as e:
+            _logger.warning("Delete API LB %s failed: %s", _api_lb_id, e)
+    if _api_fip_id:
+        try:
+            await asyncio.to_thread(neutron.delete_floating_ip, conn, _api_fip_id)
+            _logger.info("Deleted API FIP %s for cluster %s", _api_fip_id, cluster_id)
+        except Exception as e:
+            _logger.warning("Delete API FIP %s failed: %s", _api_fip_id, e)
 
     # OCCM이 생성한 Octavia LB 정리 (VM 삭제 전에 먼저 처리)
     if cluster.get("occm_enabled"):

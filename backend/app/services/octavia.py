@@ -13,6 +13,7 @@ def _lb_to_dict(lb) -> dict:
         "vip_address": getattr(lb, "vip_address", None),
         "vip_subnet_id": getattr(lb, "vip_subnet_id", None),
         "vip_network_id": getattr(lb, "vip_network_id", None),
+        "vip_port_id": getattr(lb, "vip_port_id", None),
         "project_id": getattr(lb, "project_id", None),
     }
 
@@ -99,6 +100,28 @@ def create_load_balancer(
 
 def delete_load_balancer(conn: openstack.connection.Connection, lb_id: str, cascade: bool = True) -> None:
     conn.load_balancer.delete_load_balancer(lb_id, cascade=cascade, ignore_missing=True)
+
+
+def wait_for_load_balancer(
+    conn: openstack.connection.Connection,
+    lb_id: str,
+    status: str = "ACTIVE",
+    wait: int = 300,
+    interval: int = 5,
+) -> dict:
+    """LB가 target provisioning_status에 도달할 때까지 폴링. 타임아웃 시 TimeoutError."""
+    import time
+
+    deadline = time.time() + wait
+    while time.time() < deadline:
+        lb = conn.load_balancer.get_load_balancer(lb_id)
+        prov_status = getattr(lb, "provisioning_status", "")
+        if prov_status == status:
+            return _lb_to_dict(lb)
+        if prov_status == "ERROR":
+            raise RuntimeError(f"LB {lb_id} entered ERROR state")
+        time.sleep(interval)
+    raise TimeoutError(f"LB {lb_id} did not reach {status} within {wait}s")
 
 
 def get_lb_status_tree(conn: openstack.connection.Connection, lb_id: str) -> dict:

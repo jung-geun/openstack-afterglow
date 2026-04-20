@@ -156,7 +156,7 @@ async def test_check_cluster_health_no_server_ip():
 
 @pytest.mark.asyncio
 async def test_check_cluster_health_unreachable():
-    """K3s API 연결 실패 시 UNREACHABLE 반환."""
+    """K3s API 연결 실패(ConnectError) 시 UNREACHABLE 반환."""
     from app.services.k3s_health import check_cluster_health
 
     cluster = _make_cluster_record()
@@ -169,6 +169,30 @@ async def test_check_cluster_health_unreachable():
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.get = AsyncMock(side_effect=httpx.ConnectError("연결 거부"))
+        mock_client_cls.return_value = mock_client
+
+        result = await check_cluster_health(cluster)
+
+    assert result.status == "UNREACHABLE"
+    assert result.reachability == "unreachable"
+    assert result.api_server_reachable is False
+
+
+@pytest.mark.asyncio
+async def test_check_cluster_health_unreachable_on_timeout():
+    """K3s API 연결 타임아웃(ConnectTimeout) 시 UNREACHABLE 반환."""
+    from app.services.k3s_health import check_cluster_health
+
+    cluster = _make_cluster_record()
+
+    with (
+        patch("app.services.k3s_health._get_probe_ip", AsyncMock(return_value="10.0.0.1")),
+        patch("httpx.AsyncClient") as mock_client_cls,
+    ):
+        mock_client = MagicMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.get = AsyncMock(side_effect=httpx.ConnectTimeout("연결 타임아웃"))
         mock_client_cls.return_value = mock_client
 
         result = await check_cluster_health(cluster)

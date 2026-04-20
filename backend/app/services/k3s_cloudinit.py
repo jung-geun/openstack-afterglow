@@ -25,6 +25,7 @@ def generate_server_userdata(
     plugin_manifests: list[dict] | None = None,  # [{"name": "occm", "content": "..."}]
     extra_server_args: list[str] | None = None,
     extra_write_files: list[dict] | None = None,
+    extra_tls_sans: list[str] | None = None,
     needs_external_cloud_provider: bool = False,
     # 하위호환 파라미터 (deprecated — 레지스트리 우회 시에만 사용)
     occm_enabled: bool = False,
@@ -49,6 +50,7 @@ def generate_server_userdata(
         plugins=plugin_manifests or [],
         extra_server_args=extra_server_args or [],
         extra_write_files=extra_write_files or [],
+        extra_tls_sans=extra_tls_sans or [],
         needs_external_cloud_provider=needs_external_cloud_provider,
     )
     # gzip 압축 후 base64 인코딩 — cloud-init이 gzip user_data를 자동 감지·처리.

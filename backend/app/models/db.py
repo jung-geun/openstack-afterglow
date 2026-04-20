@@ -37,6 +37,10 @@ class K3sCluster(Base):
     agent_flavor_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     network_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     security_group_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    # API LB (K3s API 서버 앞단 Octavia LB + Floating IP)
+    api_lb_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    api_fip_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    api_fip_address: Mapped[str | None] = mapped_column(VARCHAR(45))
 
     # k3s 정보
     server_ip: Mapped[str | None] = mapped_column(VARCHAR(45))

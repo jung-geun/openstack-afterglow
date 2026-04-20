@@ -146,6 +146,9 @@ def _load_toml() -> dict:
         "barbican_kms_image", "registry.k8s.io/provider-os/barbican-kms-plugin:v1.31.0"
     )
     flat["k3s_barbican_kms_kek_id"] = k3s.get("barbican_kms_kek_id", "")
+    # API LB (K3s API 서버 앞단 Octavia LB + Floating IP)
+    flat["k3s_api_lb_enabled"] = k3s.get("api_lb_enabled", False)
+    flat["k3s_api_lb_floating_network_id"] = k3s.get("api_lb_floating_network_id", "")
 
     sess = data.get("session", {})
     flat["session_timeout_seconds"] = sess.get("timeout_seconds", 3600)
@@ -275,6 +278,9 @@ class Settings(BaseSettings):
     k3s_barbican_kms_enabled: bool = False
     k3s_barbican_kms_image: str = "registry.k8s.io/provider-os/barbican-kms-plugin:v1.31.0"
     k3s_barbican_kms_kek_id: str = ""
+    # API LB
+    k3s_api_lb_enabled: bool = False
+    k3s_api_lb_floating_network_id: str = ""  # 미설정 시 k3s_occm_floating_network_id 사용
     notion_config_encryption_key: str = ""  # 미설정 시 k3s_kubeconfig_encryption_key 재사용
 
     # 세션 관리

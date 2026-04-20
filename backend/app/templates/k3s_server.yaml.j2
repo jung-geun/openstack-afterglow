@@ -136,6 +136,9 @@ runcmd:
       INSTALL_K3S_VERSION="{{ k3s_version }}" \
       sh -s - server \
         --tls-san "${SERVER_IP}" \
+{% for san in extra_tls_sans %}
+        --tls-san "{{ san }}" \
+{% endfor %}
         --write-kubeconfig-mode 644 \
 {% if needs_external_cloud_provider %}
         --disable-cloud-controller \

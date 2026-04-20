@@ -74,6 +74,103 @@ async def k3s_callback(request: Request, req: K3sCallbackRequest):
     return {"ok": True}
 
 
+async def _finalize_api_lb(
+    project_id: str,
+    cluster_id: str,
+    cluster: dict,
+    server_ip: str,
+    conn,
+) -> None:
+    """API LB 설정 완료: listener → pool → member → health monitor → FIP 연결."""
+    from app.services import k3s_db as _k3s_db
+    from app.services import octavia
+
+    api_lb_id = cluster.get("api_lb_id") or ""
+    api_fip_id = cluster.get("api_fip_id") or ""
+    api_fip_address = cluster.get("api_fip_address") or ""
+    cluster_name = cluster.get("name") or cluster_id
+
+    if not api_lb_id or not api_fip_address:
+        return
+
+    try:
+        # LB ACTIVE 대기 (최대 5분)
+        lb = await asyncio.to_thread(octavia.wait_for_load_balancer, conn, api_lb_id)
+        vip_subnet_id = lb.get("vip_subnet_id")
+
+        # Listener 생성 (TCP:6443)
+        listener = await asyncio.to_thread(
+            octavia.create_listener, conn, api_lb_id, "TCP", 6443, name=f"k3s-api-{cluster_name}"
+        )
+        await asyncio.to_thread(octavia.wait_for_load_balancer, conn, api_lb_id)
+
+        # Pool 생성
+        pool = await asyncio.to_thread(
+            octavia.create_pool,
+            conn,
+            api_lb_id,
+            "TCP",
+            "ROUND_ROBIN",
+            name=f"k3s-api-{cluster_name}",
+            listener_id=listener["id"],
+        )
+        await asyncio.to_thread(octavia.wait_for_load_balancer, conn, api_lb_id)
+
+        # Member 추가 (server private IP:6443)
+        await asyncio.to_thread(
+            octavia.add_member,
+            conn,
+            pool["id"],
+            server_ip,
+            6443,
+            subnet_id=vip_subnet_id,
+            name=f"{cluster_name}-server",
+        )
+        await asyncio.to_thread(octavia.wait_for_load_balancer, conn, api_lb_id)
+
+        # Health Monitor 생성 (TCP)
+        await asyncio.to_thread(
+            octavia.create_health_monitor,
+            conn,
+            pool["id"],
+            type="TCP",
+            delay=10,
+            timeout=5,
+            max_retries=3,
+            name=f"k3s-api-{cluster_name}",
+        )
+        await asyncio.to_thread(octavia.wait_for_load_balancer, conn, api_lb_id)
+
+        # FIP → LB VIP port 연결
+        lb_refreshed = await asyncio.to_thread(octavia.get_load_balancer, conn, api_lb_id)
+        vip_port_id = lb_refreshed.get("vip_port_id")
+        if vip_port_id and api_fip_id:
+            await asyncio.to_thread(conn.network.update_ip, api_fip_id, port_id=vip_port_id)
+
+        # api_address를 FIP 주소로 업데이트
+        new_api_address = f"https://{api_fip_address}:6443"
+        await _k3s_db.update_cluster_status(
+            project_id, cluster_id, "PROVISIONING", api_address=new_api_address
+        )
+
+        # kubeconfig의 server URL을 FIP로 패치
+        kubeconfig = await _k3s_db.get_kubeconfig(project_id, cluster_id)
+        if kubeconfig:
+            old_url = f"https://{server_ip}:6443"
+            patched = kubeconfig.replace(old_url, new_api_address)
+            await _k3s_db.store_kubeconfig(project_id, cluster_id, patched)
+
+        _logger.info(
+            "k3s cluster %s: API LB 설정 완료 → %s", cluster_id, new_api_address
+        )
+    except Exception:
+        _logger.error(
+            "k3s cluster %s: API LB 설정 실패 (클러스터는 private IP로 계속 동작)",
+            cluster_id,
+            exc_info=True,
+        )
+
+
 async def _provision_agents(
     project_id: str,
     cluster_id: str,
@@ -117,6 +214,9 @@ async def _provision_agents(
         _logger.error("k3s agent provision: cannot get OpenStack connection: %s", e)
         await k3s_cluster.update_cluster_status(project_id, cluster_id, "ERROR", f"OpenStack 연결 실패: {e}")
         return
+
+    # API LB 설정 완료 (listener/pool/member/FIP 연결) — agent 생성 전에 처리
+    await _finalize_api_lb(project_id, cluster_id, cluster, server_ip, conn)
 
     agent_vm_ids: list[str] = []
     failed_count = 0
