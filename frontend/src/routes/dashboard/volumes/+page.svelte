@@ -13,7 +13,18 @@
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
+  interface Snapshot {
+    id: string;
+    name: string;
+    status: string;
+    volume_id: string;
+    size: number;
+    description: string;
+    created_at: string | null;
+  }
+
   let volumes = $state<Volume[]>([]);
+  let snapshots = $state<Snapshot[]>([]);
   let loading = $state(true);
   let refreshing = $state(false);
   let error = $state('');
@@ -26,10 +37,22 @@
   let createError = $state('');
   let form = $state({ name: '', size_gb: 10 });
   let autoRefresh = $state(false);
+  let tab = $state('volumes');
 
   let selectedVolumeId = $state<string | null>(null);
   let autoBackupConfigs = $state<Set<string>>(new Set());
   let autoBackupToggling = $state<string | null>(null);
+
+  // Derived stats
+  let totalGb = $derived(volumes.reduce((s, v) => s + v.size, 0));
+  let attachedCount = $derived(volumes.filter(v => v.attachments.length > 0).length);
+  let attachedGb = $derived(volumes.filter(v => v.attachments.length > 0).reduce((s, v) => s + v.size, 0));
+
+  // Recent 24h snapshots
+  let recentSnapshots = $derived(snapshots.filter(s => {
+    if (!s.created_at) return false;
+    return Date.now() - new Date(s.created_at).getTime() < 86400000;
+  }));
 
   function openVolumePanel(id: string) {
     selectedVolumeId = id;
@@ -65,6 +88,12 @@
       loading = false;
       refreshing = false;
     }
+  }
+
+  async function fetchSnapshots() {
+    try {
+      snapshots = await api.get<Snapshot[]>('/api/volume-snapshots', $auth.token ?? undefined, $auth.projectId ?? undefined);
+    } catch { /* 오류 무시 */ }
   }
 
   async function createVolume() {
@@ -146,12 +175,12 @@
     const projectId = $auth.projectId;
     if (!projectId) return;
     loading = true;
-    untrack(() => { fetchVolumes(); fetchAutoBackupConfigs(); });
+    untrack(() => { fetchVolumes(); fetchAutoBackupConfigs(); fetchSnapshots(); });
   });
 
   $effect(() => {
     if (!$auth.projectId || !autoRefresh) return;
-    const interval = setInterval(() => untrack(() => { fetchVolumes(); }), 10000);
+    const interval = setInterval(() => untrack(() => { fetchVolumes(); fetchSnapshots(); }), 10000);
     return () => clearInterval(interval);
   });
 </script>
@@ -195,6 +224,16 @@
   {#if error}<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>{/if}
 
   {#if loading}
+    <!-- Skeleton summary cards -->
+    <div class="grid grid-cols-3 gap-3.5 mb-5">
+      {#each [1,2,3] as _}
+        <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 animate-pulse">
+          <div class="h-3 w-20 bg-gray-800 rounded mb-3"></div>
+          <div class="h-8 w-16 bg-gray-800 rounded mb-3"></div>
+          <div class="h-1.5 w-full bg-gray-800 rounded-full"></div>
+        </div>
+      {/each}
+    </div>
     <LoadingSkeleton variant="table" rows={5} />
   {:else if volumes.length === 0}
     <div class="text-center py-20 text-gray-600">
@@ -203,85 +242,181 @@
       <button onclick={() => showModal = true} class="text-blue-400 hover:text-blue-300 text-sm mt-2 inline-block">첫 볼륨을 생성하세요 →</button>
     </div>
   {:else}
-    <div class="overflow-x-auto">
-      <table class="w-full text-sm">
-        <thead>
-          <tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
-            <th class="text-left py-3 pr-6">이름</th>
-            <th class="text-left py-3 pr-6">상태</th>
-            <th class="text-left py-3 pr-6">크기</th>
-            <th class="text-left py-3 pr-6">타입</th>
-            <th class="text-left py-3 pr-6">연결된 인스턴스</th>
-            <th class="text-left py-3 pr-6 hidden md:table-cell">자동 백업</th>
-            <th class="text-right py-3">액션</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each volumes as vol (vol.id)}
-            <tr
-              onclick={() => openVolumePanel(vol.id)}
-              onkeydown={(e) => e.key === 'Enter' && openVolumePanel(vol.id)}
-              tabindex="0"
-              role="button"
-              class="border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors cursor-pointer {selectedVolumeId === vol.id ? 'bg-gray-800/30' : ''}"
-            >
-              <td class="py-3 pr-6 font-medium">
-                {#if vol.name}<span class="text-white">{vol.name}</span>{:else}<span class="text-gray-400 font-mono text-xs">{vol.id}</span>{/if}
-              </td>
-              <td class="py-3 pr-6"><StatusChip status={vol.status} /></td>
-              <td class="py-3 pr-6 text-gray-400">{formatStorage(vol.size)}</td>
-              <td class="py-3 pr-6 text-gray-400 text-xs">{vol.volume_type ?? '-'}</td>
-              <td class="py-3 pr-6 text-xs">
-                {#if vol.attachments.length > 0}
-                  <span class="text-blue-400">{vol.attachments.length}개 연결</span>
-                {:else}
-                  <span class="text-gray-500">미연결</span>
-                {/if}
-              </td>
-              <td class="py-3 pr-6 hidden md:table-cell">
-                <button
-                  onclick={(e) => { e.stopPropagation(); toggleAutoBackup(vol.id); }}
-                  disabled={autoBackupToggling === vol.id}
-                  title={autoBackupConfigs.has(vol.id) ? '자동 백업 비활성화' : '자동 백업 활성화'}
-                  class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out disabled:opacity-50 {autoBackupConfigs.has(vol.id) ? 'bg-blue-600' : 'bg-gray-700'}"
-                >
-                  <span class="translate-x-0 pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out {autoBackupConfigs.has(vol.id) ? 'translate-x-4' : 'translate-x-0'}"></span>
-                </button>
-              </td>
-              <td class="py-3 text-right">
-                <div class="flex items-center justify-end gap-1">
-                  {#if vol.status === 'available'}
-                    <button
-                      onclick={(e) => { e.stopPropagation(); openVolumePanel(vol.id); }}
-                      class="text-blue-400 hover:text-blue-300 text-xs px-2 py-1 rounded border border-blue-900 hover:border-blue-700 transition-colors"
-                    >연결</button>
-                    <button
-                      onclick={(e) => { e.stopPropagation(); openTransferModal(vol.id, vol.name); }}
-                      class="text-violet-400 hover:text-violet-300 text-xs px-2 py-1 rounded border border-violet-900 hover:border-violet-700 transition-colors"
-                      title="다른 프로젝트로 볼륨 이전"
-                    >이전</button>
-                  {/if}
-                  {#if (vol.status === 'error' || vol.status === 'error_deleting' || vol.status === 'deleting') && $auth.isSystemAdmin}
-                    <button
-                      onclick={(e) => { e.stopPropagation(); forceDeleteVolume(vol.id, vol.name); }}
-                      disabled={deleting === vol.id}
-                      class="text-rose-400 hover:text-rose-300 disabled:text-gray-600 text-xs px-2 py-1 rounded border border-rose-900 hover:border-rose-700 disabled:border-gray-700 transition-colors"
-                      title="오류 상태 볼륨 강제 삭제 (관리자)"
-                    >{deleting === vol.id ? '삭제 중...' : '강제 삭제'}</button>
-                  {/if}
-                  <button
-                    onclick={(e) => { e.stopPropagation(); deleteVolume(vol.id, vol.name); }}
-                    disabled={deleting === vol.id || vol.attachments.length > 0}
-                    class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-xs px-2 py-1 rounded border border-red-900 hover:border-red-700 disabled:border-gray-700 transition-colors"
-                    title={vol.attachments.length > 0 ? '연결된 볼륨은 삭제할 수 없습니다' : ''}
-                  >{deleting === vol.id ? '삭제 중...' : '삭제'}</button>
-                </div>
-              </td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
+    <!-- Summary cards -->
+    <div class="grid grid-cols-3 gap-3.5 mb-5">
+      <!-- Card 1: 총 할당 -->
+      <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
+        <div class="text-[11px] uppercase tracking-wider text-gray-500 font-medium mb-2">총 할당</div>
+        <div class="text-[26px] font-bold text-white leading-none mb-1">{totalGb} <span class="text-[14px] font-normal text-gray-400">GB</span></div>
+        <div class="text-[11px] text-gray-500 mb-3">{volumes.length}개 볼륨</div>
+        <div class="h-1.5 bg-gray-800 rounded-full overflow-hidden">
+          <div class="h-full bg-blue-500 rounded-full transition-all" style="width: {Math.min(100, totalGb / 10)}%"></div>
+        </div>
+      </div>
+      <!-- Card 2: 연결된 볼륨 -->
+      <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
+        <div class="text-[11px] uppercase tracking-wider text-gray-500 font-medium mb-2">연결된 볼륨</div>
+        <div class="text-[26px] font-bold text-white leading-none mb-1">
+          {attachedCount} <span class="text-[14px] font-normal text-gray-400">/ {volumes.length}</span>
+        </div>
+        <div class="text-[11px] text-gray-500">{attachedGb} GB 사용 중</div>
+      </div>
+      <!-- Card 3: 스냅샷 -->
+      <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
+        <div class="text-[11px] uppercase tracking-wider text-gray-500 font-medium mb-2">스냅샷</div>
+        <div class="text-[26px] font-bold text-white leading-none mb-1">{snapshots.length}</div>
+        <div class="text-[11px] text-gray-500">최근 24시간 {recentSnapshots.length}개</div>
+      </div>
     </div>
+
+    <!-- Tab UI -->
+    <div class="flex gap-1 mb-4 border-b border-gray-800">
+      <button onclick={() => tab = 'volumes'}
+        class="px-4 py-2 text-[13px] font-medium border-b-2 -mb-px transition-colors {tab === 'volumes' ? 'border-blue-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-200'}">
+        볼륨 {volumes.length}
+      </button>
+      <button onclick={() => tab = 'snapshots'}
+        class="px-4 py-2 text-[13px] font-medium border-b-2 -mb-px transition-colors {tab === 'snapshots' ? 'border-blue-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-200'}">
+        스냅샷 {snapshots.length}
+      </button>
+    </div>
+
+    {#if tab === 'volumes'}
+      <!-- Volume custom table -->
+      <div class="bg-[#0B1220] border border-gray-800 rounded-[10px] overflow-hidden">
+        <!-- Header -->
+        <div class="grid grid-cols-[1.6fr_80px_100px_110px_1.2fr_110px_auto] px-4 py-2.5 border-b border-gray-800 text-[11px] uppercase tracking-wider text-gray-500 font-medium">
+          <div>이름</div>
+          <div>크기</div>
+          <div>유형</div>
+          <div>상태</div>
+          <div>연결</div>
+          <div>부트</div>
+          <div></div>
+        </div>
+        <!-- Rows -->
+        {#each volumes as vol (vol.id)}
+          <div
+            onclick={() => openVolumePanel(vol.id)}
+            onkeydown={(e) => e.key === 'Enter' && openVolumePanel(vol.id)}
+            tabindex="0"
+            role="button"
+            class="grid grid-cols-[1.6fr_80px_100px_110px_1.2fr_110px_auto] px-4 py-3 text-[13px] items-center border-b border-gray-800 hover:bg-gray-800/30 transition-colors cursor-pointer last:border-b-0 {selectedVolumeId === vol.id ? 'bg-gray-800/30' : ''}"
+          >
+            <!-- 이름 -->
+            <div class="flex items-center gap-2.5 min-w-0">
+              <div class="shrink-0 w-7 h-7 rounded-md bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center">
+                <svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
+                </svg>
+              </div>
+              <div class="min-w-0">
+                {#if vol.name}
+                  <div class="text-white font-medium truncate">{vol.name}</div>
+                {:else}
+                  <div class="text-gray-400 font-mono text-xs truncate">{vol.id}</div>
+                {/if}
+                <div class="text-[11px] text-gray-500 font-mono truncate">{vol.id.slice(0, 8)}…</div>
+              </div>
+            </div>
+            <!-- 크기 -->
+            <div class="text-gray-300 font-mono text-[12px]">{formatStorage(vol.size)}</div>
+            <!-- 유형 badge -->
+            <div>
+              <span class="text-[11px] px-2 py-0.5 rounded-md bg-gray-800 border border-gray-700 text-gray-300 font-mono">
+                {vol.volume_type ?? '기본'}
+              </span>
+            </div>
+            <!-- 상태 -->
+            <div><StatusChip status={vol.status} /></div>
+            <!-- 연결 -->
+            <div class="text-[12px]">
+              {#if vol.attachments.length > 0}
+                <span class="text-blue-400">{vol.attachments.length}개 연결</span>
+              {:else}
+                <span class="text-gray-500">미연결</span>
+              {/if}
+            </div>
+            <!-- 부트 badge -->
+            <div>
+              {#if vol.attachments.some((a: Record<string, unknown>) => a.device === '/dev/vda' || a.device === '/dev/sda')}
+                <span class="text-[11px] px-2 py-0.5 rounded-md bg-blue-900/30 border border-blue-800 text-blue-400">부트</span>
+              {/if}
+            </div>
+            <!-- 액션 -->
+            <div class="flex items-center justify-end gap-1" onclick={(e) => e.stopPropagation()} role="none">
+              <!-- 자동 백업 토글 -->
+              <button
+                onclick={(e) => { e.stopPropagation(); toggleAutoBackup(vol.id); }}
+                disabled={autoBackupToggling === vol.id}
+                title={autoBackupConfigs.has(vol.id) ? '자동 백업 비활성화' : '자동 백업 활성화'}
+                class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out disabled:opacity-50 {autoBackupConfigs.has(vol.id) ? 'bg-blue-600' : 'bg-gray-700'}"
+              >
+                <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out {autoBackupConfigs.has(vol.id) ? 'translate-x-4' : 'translate-x-0'}"></span>
+              </button>
+              {#if vol.status === 'available'}
+                <button
+                  onclick={(e) => { e.stopPropagation(); openVolumePanel(vol.id); }}
+                  class="text-blue-400 hover:text-blue-300 text-xs px-2 py-1 rounded border border-blue-900 hover:border-blue-700 transition-colors"
+                >연결</button>
+                <button
+                  onclick={(e) => { e.stopPropagation(); openTransferModal(vol.id, vol.name); }}
+                  class="text-violet-400 hover:text-violet-300 text-xs px-2 py-1 rounded border border-violet-900 hover:border-violet-700 transition-colors"
+                  title="다른 프로젝트로 볼륨 이전"
+                >이전</button>
+              {/if}
+              {#if (vol.status === 'error' || vol.status === 'error_deleting' || vol.status === 'deleting') && $auth.isSystemAdmin}
+                <button
+                  onclick={(e) => { e.stopPropagation(); forceDeleteVolume(vol.id, vol.name); }}
+                  disabled={deleting === vol.id}
+                  class="text-rose-400 hover:text-rose-300 disabled:text-gray-600 text-xs px-2 py-1 rounded border border-rose-900 hover:border-rose-700 disabled:border-gray-700 transition-colors"
+                  title="오류 상태 볼륨 강제 삭제 (관리자)"
+                >{deleting === vol.id ? '삭제 중...' : '강제 삭제'}</button>
+              {/if}
+              <button
+                onclick={(e) => { e.stopPropagation(); deleteVolume(vol.id, vol.name); }}
+                disabled={deleting === vol.id || vol.attachments.length > 0}
+                class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-xs px-2 py-1 rounded border border-red-900 hover:border-red-700 disabled:border-gray-700 transition-colors"
+                title={vol.attachments.length > 0 ? '연결된 볼륨은 삭제할 수 없습니다' : ''}
+              >{deleting === vol.id ? '삭제 중...' : '삭제'}</button>
+            </div>
+          </div>
+        {/each}
+      </div>
+    {:else}
+      <!-- Snapshots custom table -->
+      {#if snapshots.length === 0}
+        <div class="text-center py-16 text-gray-600">
+          <p class="text-sm">스냅샷이 없습니다</p>
+        </div>
+      {:else}
+        <div class="bg-[#0B1220] border border-gray-800 rounded-[10px] overflow-hidden">
+          <!-- Header -->
+          <div class="grid grid-cols-[1.6fr_1.2fr_80px_140px_110px] px-4 py-2.5 border-b border-gray-800 text-[11px] uppercase tracking-wider text-gray-500 font-medium">
+            <div>이름</div>
+            <div>원본 볼륨</div>
+            <div>크기</div>
+            <div>생성됨</div>
+            <div>상태</div>
+          </div>
+          <!-- Rows -->
+          {#each snapshots as snap (snap.id)}
+            <div class="grid grid-cols-[1.6fr_1.2fr_80px_140px_110px] px-4 py-3 text-[13px] items-center border-b border-gray-800 hover:bg-gray-800/30 transition-colors last:border-b-0">
+              <div class="min-w-0">
+                <div class="text-white font-medium truncate">{snap.name || snap.id.slice(0, 12)}</div>
+                <div class="text-[11px] text-gray-500 font-mono truncate">{snap.id.slice(0, 8)}…</div>
+              </div>
+              <div class="text-gray-400 font-mono text-[12px] truncate">{snap.volume_id.slice(0, 12)}…</div>
+              <div class="text-gray-300 font-mono text-[12px]">{snap.size} GB</div>
+              <div class="text-gray-400 text-[12px]">
+                {snap.created_at ? new Date(snap.created_at).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'}
+              </div>
+              <div><StatusChip status={snap.status} /></div>
+            </div>
+          {/each}
+        </div>
+      {/if}
+    {/if}
   {/if}
 </div>
 

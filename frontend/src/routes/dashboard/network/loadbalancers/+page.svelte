@@ -74,7 +74,20 @@
   {#if error}<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>{/if}
 
   {#if loading}
-    <LoadingSkeleton variant="table" rows={4} />
+    <div class="flex flex-col gap-3.5">
+      {#each [1, 2, 3] as _}
+        <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 animate-pulse">
+          <div class="flex items-center gap-4">
+            <div class="w-10 h-10 rounded-xl bg-gray-800"></div>
+            <div class="flex-1">
+              <div class="h-4 w-32 bg-gray-800 rounded mb-2"></div>
+              <div class="h-3 w-48 bg-gray-800 rounded"></div>
+            </div>
+            <div class="h-6 w-16 bg-gray-800 rounded-full"></div>
+          </div>
+        </div>
+      {/each}
+    </div>
   {:else if loadbalancers.length === 0}
     <div class="text-center py-20 text-gray-600">
       <div class="text-5xl mb-4">⚖️</div>
@@ -82,33 +95,36 @@
       <a href="/dashboard/network/loadbalancers/new" class="text-blue-400 hover:text-blue-300 text-sm mt-2 inline-block">첫 로드밸런서를 생성하세요 →</a>
     </div>
   {:else}
-    <div class="overflow-x-auto">
-      <table class="w-full text-sm">
-        <thead>
-          <tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
-            <th class="text-left py-3 pr-6">이름</th>
-            <th class="text-left py-3 pr-6">상태</th>
-            <th class="text-left py-3 pr-6">운영 상태</th>
-            <th class="text-left py-3 pr-6">VIP 주소</th>
-            <th class="text-right py-3">액션</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each loadbalancers as lb (lb.id)}
-            <tr onclick={() => openLbPanel(lb.id)} class="border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors cursor-pointer">
-              <td class="py-3 pr-6 font-medium text-white">{lb.name || lb.id.slice(0, 12)}</td>
-              <td class="py-3 pr-6"><StatusChip status={lb.status} /></td>
-              <td class="py-3 pr-6 text-xs">
-                <span class="{lb.operating_status === 'ONLINE' ? 'text-green-400' : 'text-gray-400'}">{lb.operating_status}</span>
-              </td>
-              <td class="py-3 pr-6 text-gray-400 text-xs font-mono">{lb.vip_address ?? '-'}</td>
-              <td class="py-3 text-right">
-                <button onclick={(e) => { e.stopPropagation(); openLbPanel(lb.id); }} class="text-gray-400 hover:text-white text-xs px-2 py-1 rounded border border-gray-700 hover:border-gray-500 transition-colors">상세</button>
-              </td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
+    <div class="flex flex-col gap-3.5">
+      {#each loadbalancers as lb (lb.id)}
+        <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
+          <div class="flex items-center gap-4">
+            <!-- Blue icon chip -->
+            <div class="shrink-0 w-10 h-10 rounded-xl bg-blue-500/15 border border-blue-500/30 flex items-center justify-center">
+              <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="9" stroke-width="2"/>
+                <path stroke-linecap="round" stroke-width="2" d="M8 12h8M12 8v8"/>
+              </svg>
+            </div>
+            <!-- Name + subtitle -->
+            <div class="flex-1 min-w-0">
+              <div class="text-white text-[15px] font-semibold truncate">{lb.name || lb.id.slice(0, 12)}</div>
+              <div class="text-[11px] text-gray-500 mt-0.5 font-mono">
+                VIP {lb.vip_address ?? '—'}
+                {#if lb.operating_status}
+                  <span class="ml-2 {lb.operating_status === 'ONLINE' ? 'text-green-400' : 'text-gray-400'}">{lb.operating_status}</span>
+                {/if}
+              </div>
+            </div>
+            <!-- Status + action -->
+            <StatusChip status={lb.status} />
+            <button
+              onclick={() => openLbPanel(lb.id)}
+              class="px-3 py-1.5 text-[13px] text-gray-300 hover:text-white border border-gray-700 hover:border-gray-500 rounded-lg transition-colors shrink-0"
+            >상세</button>
+          </div>
+        </div>
+      {/each}
     </div>
   {/if}
 </div>
