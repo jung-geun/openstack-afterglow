@@ -98,6 +98,18 @@ async def _finalize_api_lb(
         lb = await asyncio.to_thread(octavia.wait_for_load_balancer, conn, api_lb_id)
         vip_subnet_id = lb.get("vip_subnet_id")
 
+        # Member 서브넷: LB가 다른 네트워크에 있을 경우 클러스터 네트워크의 서브넷 사용
+        cluster_network_id = cluster.get("network_id")
+        member_subnet_id = vip_subnet_id  # 기본값: LB VIP 서브넷
+        if cluster_network_id:
+            try:
+                cluster_net = await asyncio.to_thread(conn.network.get_network, cluster_network_id)
+                cluster_subnet_ids = getattr(cluster_net, "subnet_ids", None) or []
+                if cluster_subnet_ids:
+                    member_subnet_id = cluster_subnet_ids[0]
+            except Exception:
+                _logger.warning("k3s cluster %s: 클러스터 네트워크 서브넷 조회 실패, VIP 서브넷 사용", cluster_id)
+
         # Listener 생성 (TCP:6443)
         listener = await asyncio.to_thread(
             octavia.create_listener, conn, api_lb_id, "TCP", 6443, name=f"k3s-api-{cluster_name}"
@@ -116,14 +128,14 @@ async def _finalize_api_lb(
         )
         await asyncio.to_thread(octavia.wait_for_load_balancer, conn, api_lb_id)
 
-        # Member 추가 (server private IP:6443)
+        # Member 추가 (server private IP:6443, 클러스터 서브넷으로)
         await asyncio.to_thread(
             octavia.add_member,
             conn,
             pool["id"],
             server_ip,
             6443,
-            subnet_id=vip_subnet_id,
+            subnet_id=member_subnet_id,
             name=f"{cluster_name}-server",
         )
         await asyncio.to_thread(octavia.wait_for_load_balancer, conn, api_lb_id)

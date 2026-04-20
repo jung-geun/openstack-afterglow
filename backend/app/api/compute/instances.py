@@ -20,6 +20,7 @@ from fastapi.responses import StreamingResponse
 
 from app.api.deps import get_os_conn
 from app.config import get_settings
+from app.database import is_db_available
 from app.models.compute import (
     AttachInterfaceRequest,
     AttachVolumeRequest,
@@ -185,10 +186,17 @@ async def create_instance(
         # ------------------------------------------------------------------
         # 4. cloud-init userdata 생성
         # ------------------------------------------------------------------
-        # GPU 플레이버 여부 확인
+        # GPU 플레이버 여부 확인 + quota 체크
         flavors = await asyncio.to_thread(nova.list_flavors, conn)
         flavor = next((f for f in flavors if f.id == req.flavor_id), None)
         gpu_available = flavor.is_gpu if flavor else False
+
+        if gpu_available and is_db_available():
+            from app.services.gpu_quota import check_gpu_quota
+
+            ok, msg = await check_gpu_quota(conn, conn._afterglow_project_id, flavor.extra_specs or {})
+            if not ok:
+                raise HTTPException(status_code=409, detail=msg)
 
         userdata = cloudinit.generate_userdata(
             libraries=resolved_libs,
@@ -305,6 +313,18 @@ async def create_instance_async(
                     )
                     file_storages_info = [file_storage_info]
                 yield send_progress(ProgressStep.MANILA_PREPARING, 20, "파일 스토리지 준비 완료")
+
+            # GPU quota 사전 체크
+            if is_db_available():
+                _all_flavors = await asyncio.to_thread(nova.list_flavors, conn)
+                _flavor = next((f for f in _all_flavors if f.id == req.flavor_id), None)
+                if _flavor and _flavor.is_gpu:
+                    from app.services.gpu_quota import check_gpu_quota
+
+                    _ok, _msg = await check_gpu_quota(conn, conn._afterglow_project_id, _flavor.extra_specs or {})
+                    if not _ok:
+                        yield send_progress(ProgressStep.BOOT_VOLUME_CREATING, 0, f"GPU quota 초과: {_msg}")
+                        raise HTTPException(status_code=409, detail=_msg)
 
             # Step 2: Boot volume (20-45%)
             yield send_progress(ProgressStep.BOOT_VOLUME_CREATING, 20, "부트 볼륨 생성 중...")

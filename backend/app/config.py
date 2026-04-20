@@ -149,6 +149,11 @@ def _load_toml() -> dict:
     # API LB (K3s API 서버 앞단 Octavia LB + Floating IP)
     flat["k3s_api_lb_enabled"] = k3s.get("api_lb_enabled", False)
     flat["k3s_api_lb_floating_network_id"] = k3s.get("api_lb_floating_network_id", "")
+    # LB 네트워크 분리: OCCM Service LB + API LB 공통 VIP 서브넷
+    flat["k3s_lb_subnet_id"] = k3s.get("lb_subnet_id", "")
+
+    gpu = data.get("gpu", {})
+    flat["gpu_available_visible"] = gpu.get("available_visible", False)
 
     sess = data.get("session", {})
     flat["session_timeout_seconds"] = sess.get("timeout_seconds", 3600)
@@ -281,7 +286,12 @@ class Settings(BaseSettings):
     # API LB
     k3s_api_lb_enabled: bool = False
     k3s_api_lb_floating_network_id: str = ""  # 미설정 시 k3s_occm_floating_network_id 사용
+    # LB 네트워크 분리: OCCM Service LB + API LB VIP 서브넷 (미설정 시 클러스터 네트워크의 첫 서브넷)
+    k3s_lb_subnet_id: str = ""
     notion_config_encryption_key: str = ""  # 미설정 시 k3s_kubeconfig_encryption_key 재사용
+
+    # GPU
+    gpu_available_visible: bool = False  # true 시 사용자에게 GPU 가용량 API 노출
 
     # 세션 관리
     session_timeout_seconds: int = 3600

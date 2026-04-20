@@ -256,12 +256,15 @@ async def create_k3s_cluster_async(
                 api_fip_address = fip_info.floating_ip_address
                 extra_tls_sans.append(api_fip_address)
 
-                # VIP 서브넷: 클러스터 네트워크의 첫 번째 서브넷
-                net_obj = await asyncio.to_thread(conn.network.get_network, network_id)
-                vip_subnet_ids = getattr(net_obj, "subnet_ids", None) or []
-                if not vip_subnet_ids:
-                    raise RuntimeError(f"네트워크 {network_id}에 서브넷이 없습니다")
-                vip_subnet_id = vip_subnet_ids[0]
+                # VIP 서브넷: k3s_lb_subnet_id 우선, 미설정 시 클러스터 네트워크의 첫 번째 서브넷
+                if s.k3s_lb_subnet_id:
+                    vip_subnet_id = s.k3s_lb_subnet_id
+                else:
+                    net_obj = await asyncio.to_thread(conn.network.get_network, network_id)
+                    vip_subnet_ids = getattr(net_obj, "subnet_ids", None) or []
+                    if not vip_subnet_ids:
+                        raise RuntimeError(f"네트워크 {network_id}에 서브넷이 없습니다")
+                    vip_subnet_id = vip_subnet_ids[0]
 
                 yield event(K3sProgressStep.SECURITY_GROUP, 14, "API 로드밸런서 생성 중...")
                 lb = await asyncio.to_thread(

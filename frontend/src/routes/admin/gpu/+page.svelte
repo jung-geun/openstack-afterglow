@@ -85,7 +85,7 @@
 			gpuTypes = res.gpu_types ?? [];
 		} catch (e) {
 			error = e instanceof ApiError ? e.message : 'GPU 정보를 불러올 수 없습니다';
-			hosts = [];
+			aggregatedHosts = [];
 		} finally {
 			loading = false;
 		}
@@ -139,14 +139,84 @@
 					va = a.gpu_total - a.gpu_used;
 					vb = b.gpu_total - b.gpu_used;
 				} else {
-					va = (a as Record<string, number>)[sortColumn] ?? 0;
-					vb = (b as Record<string, number>)[sortColumn] ?? 0;
+					va = (a as unknown as Record<string, number>)[sortColumn] ?? 0;
+					vb = (b as unknown as Record<string, number>)[sortColumn] ?? 0;
 				}
 				return sortAsc ? va - vb : vb - va;
 			})
 	);
 
-	onMount(load);
+	// ── GPU Quota 관리 ──────────────────────────────────────
+	interface GpuQuota {
+		gpu_type: string;
+		limit: number;
+		in_use: number;
+		available: number;
+	}
+
+	interface Project {
+		id: string;
+		name: string;
+	}
+
+	let quotaProjects = $state<Project[]>([]);
+	let selectedProjectId = $state('');
+	let quotaList = $state<GpuQuota[]>([]);
+	let quotaLoading = $state(false);
+	let quotaError = $state('');
+	let newGpuType = $state('');
+	let newLimit = $state(1);
+
+	async function loadProjects() {
+		try {
+			const res = await api.get<{ projects: Project[] }>('/api/admin/projects', token, projectId);
+			quotaProjects = res.projects ?? [];
+		} catch {
+			quotaProjects = [];
+		}
+	}
+
+	async function loadQuotas() {
+		if (!selectedProjectId) return;
+		quotaLoading = true;
+		quotaError = '';
+		try {
+			quotaList = await api.get<GpuQuota[]>(`/api/admin/gpu-quotas/${selectedProjectId}`, token, projectId);
+		} catch (e) {
+			quotaError = e instanceof ApiError ? e.message : 'quota 조회 실패';
+			quotaList = [];
+		} finally {
+			quotaLoading = false;
+		}
+	}
+
+	async function setQuota() {
+		if (!selectedProjectId || !newGpuType) return;
+		try {
+			await api.put(`/api/admin/gpu-quotas/${selectedProjectId}`, { gpu_type: newGpuType, limit: newLimit }, token, projectId);
+			newGpuType = '';
+			newLimit = 1;
+			await loadQuotas();
+		} catch (e) {
+			quotaError = e instanceof ApiError ? e.message : 'quota 설정 실패';
+		}
+	}
+
+	async function deleteQuota(gpuType: string) {
+		if (!selectedProjectId) return;
+		try {
+			await api.delete(`/api/admin/gpu-quotas/${selectedProjectId}/${encodeURIComponent(gpuType)}`, token, projectId);
+			await loadQuotas();
+		} catch (e) {
+			quotaError = e instanceof ApiError ? e.message : 'quota 삭제 실패';
+		}
+	}
+
+	$effect(() => {
+		if (selectedProjectId) loadQuotas();
+	});
+
+	onMount(() => { load(); loadProjects(); });
 </script>
 
 <div class="p-4 md:p-8 max-w-6xl">
@@ -344,4 +414,87 @@
 			<div class="text-center text-gray-500 text-sm py-8">조건에 맞는 호스트가 없습니다</div>
 		{/if}
 	{/if}
+
+	<!-- GPU Quota 관리 -->
+	<div class="mt-10">
+		<h2 class="text-lg font-semibold text-white mb-4">프로젝트별 GPU Quota</h2>
+		<div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+			<!-- 프로젝트 선택 -->
+			<div class="flex items-center gap-3 mb-4">
+				<label class="text-sm text-gray-400 shrink-0">프로젝트</label>
+				<select
+					bind:value={selectedProjectId}
+					class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 flex-1 max-w-xs"
+				>
+					<option value="">프로젝트 선택</option>
+					{#each quotaProjects as p}
+						<option value={p.id}>{p.name}</option>
+					{/each}
+				</select>
+			</div>
+
+			{#if quotaError}
+				<div class="text-red-400 text-xs mb-3">{quotaError}</div>
+			{/if}
+
+			{#if selectedProjectId}
+				<!-- Quota 추가 폼 -->
+				<div class="flex items-center gap-2 mb-4">
+					<input
+						bind:value={newGpuType}
+						placeholder="GPU alias (예: RTX3090)"
+						class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 flex-1 max-w-xs"
+					/>
+					<input
+						type="number"
+						bind:value={newLimit}
+						min="-1"
+						placeholder="limit (-1=무제한)"
+						class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 w-36"
+					/>
+					<button
+						onclick={setQuota}
+						class="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-lg transition-colors"
+					>설정</button>
+				</div>
+
+				<!-- Quota 목록 -->
+				{#if quotaLoading}
+					<div class="text-gray-500 text-sm py-4">불러오는 중...</div>
+				{:else if quotaList.length === 0}
+					<div class="text-gray-600 text-sm py-4">설정된 GPU quota 없음 (무제한)</div>
+				{:else}
+					<table class="w-full text-sm">
+						<thead>
+							<tr class="text-gray-400 text-xs border-b border-gray-800">
+								<th class="text-left pb-2">GPU 타입</th>
+								<th class="text-right pb-2">Limit</th>
+								<th class="text-right pb-2">사용 중</th>
+								<th class="text-right pb-2">가용</th>
+								<th class="text-right pb-2"></th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each quotaList as q}
+								<tr class="border-b border-gray-800/50 last:border-0">
+									<td class="py-2 text-white font-mono">{q.gpu_type}</td>
+									<td class="py-2 text-right text-gray-300">{q.limit === -1 ? '무제한' : q.limit}</td>
+									<td class="py-2 text-right text-gray-400">{q.in_use}</td>
+									<td class="py-2 text-right {q.available > 0 ? 'text-green-400' : q.limit === -1 ? 'text-gray-500' : 'text-red-400'}">
+										{q.limit === -1 ? '—' : q.available}
+									</td>
+									<td class="py-2 text-right">
+										<button
+											onclick={() => deleteQuota(q.gpu_type)}
+											class="text-xs text-red-400 hover:text-red-300 transition-colors"
+										>삭제</button>
+									</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				{/if}
+			{/if}
+		</div>
+	</div>
 </div>

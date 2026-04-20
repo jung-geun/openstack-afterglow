@@ -1530,6 +1530,64 @@ async def delete_port(
 
 
 # ===========================================================================
+# GPU Quota 관리 (관리자)
+# ===========================================================================
+
+
+class GpuQuotaRequest(BaseModel):
+    gpu_type: str  # PCI alias (예: "RTX3090")
+    limit: int  # -1 = 무제한
+
+
+@router.get("/gpu-quotas/{project_id}", dependencies=[Depends(require_admin)])
+async def get_gpu_quotas(project_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+    """프로젝트의 GPU quota 목록 + 현재 사용량 조회."""
+    from app.database import is_db_available
+    from app.services.gpu_quota import get_project_gpu_quotas, get_project_gpu_usage
+
+    if not is_db_available():
+        raise HTTPException(status_code=503, detail="DB가 초기화되지 않아 GPU quota를 조회할 수 없습니다")
+
+    quotas, usage = await asyncio.gather(
+        get_project_gpu_quotas(project_id),
+        get_project_gpu_usage(conn, project_id),
+    )
+    return [
+        {
+            "gpu_type": q["gpu_type"],
+            "limit": q["limit"],
+            "in_use": usage.get(q["gpu_type"], 0),
+            "available": (q["limit"] - usage.get(q["gpu_type"], 0)) if q["limit"] >= 0 else -1,
+        }
+        for q in quotas
+    ]
+
+
+@router.put("/gpu-quotas/{project_id}", dependencies=[Depends(require_admin)])
+async def set_gpu_quota(project_id: str, req: GpuQuotaRequest):
+    """프로젝트의 GPU quota 설정 (upsert)."""
+    from app.database import is_db_available
+    from app.services.gpu_quota import set_project_gpu_quota
+
+    if not is_db_available():
+        raise HTTPException(status_code=503, detail="DB가 초기화되지 않아 GPU quota를 설정할 수 없습니다")
+
+    return await set_project_gpu_quota(project_id, req.gpu_type, req.limit)
+
+
+@router.delete("/gpu-quotas/{project_id}/{gpu_type}", dependencies=[Depends(require_admin)], status_code=204)
+async def delete_gpu_quota(project_id: str, gpu_type: str):
+    """프로젝트의 특정 GPU quota 삭제."""
+    from app.database import is_db_available
+    from app.services.gpu_quota import delete_project_gpu_quota
+
+    if not is_db_available():
+        raise HTTPException(status_code=503, detail="DB가 초기화되지 않아 GPU quota를 삭제할 수 없습니다")
+
+    await delete_project_gpu_quota(project_id, gpu_type)
+
+
+# ===========================================================================
 # k3s 클러스터 관리 (관리자)
 # ===========================================================================
 
