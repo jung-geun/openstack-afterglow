@@ -90,9 +90,7 @@ async def create_tables() -> None:
             ("api_fip_address", "VARCHAR(45)"),
         ]:
             try:
-                await conn.exec_driver_sql(
-                    f"ALTER TABLE k3s_clusters ADD COLUMN {col} {col_def} DEFAULT NULL"
-                )
+                await conn.exec_driver_sql(f"ALTER TABLE k3s_clusters ADD COLUMN {col} {col_def} DEFAULT NULL")
             except Exception:
                 pass  # 이미 존재하면 무시
 
