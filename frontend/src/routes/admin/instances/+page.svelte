@@ -163,7 +163,6 @@
 					>{n}</button>
 				{/each}
 			</div>
-		</div>
 		{/snippet}
 	</PageHeader>
 
