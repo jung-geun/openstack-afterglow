@@ -37,20 +37,26 @@
 				'/api/dashboard/gpu-available', token, projectId
 			);
 			gpuAvailability = data.gpu_types ?? [];
-		} catch {
+		} catch (e) {
 			// gpu_available_visible=false 또는 비활성화 — 조용히 무시
+			if (e instanceof Error && !e.message.includes('404')) {
+				console.warn('[SelectFlavor] GPU 가용량 조회 실패:', e.message);
+			}
 		}
 	});
 
 	function getGpuAvailable(flavorName: string): number | null {
 		if (!gpuAvailability.length) return null;
+		// flavor명에서 모델 키워드 추출: gpu.3090_8c_16g → "3090", gpu.titan_8c_32g → "TITAN"
 		const model = flavorName.match(/^gpu\.([^_]+)/)?.[1]?.toUpperCase() ?? '';
 		if (!model) return null;
-		const entry = gpuAvailability.find(
+		// 모델 키워드를 포함하는 모든 GPU 타입의 available 합산
+		const matched = gpuAvailability.filter(
 			(g) => g.device_name.replace(/\s+/g, '').toUpperCase().includes(model) ||
 			       model.includes(g.device_name.replace(/\s+/g, '').toUpperCase())
 		);
-		return entry?.available ?? null;
+		if (!matched.length) return null;
+		return matched.reduce((sum, g) => sum + g.available, 0);
 	}
 
 	type FlavorCategory = 'all' | 'cpu' | 'gpu' | 'other';
