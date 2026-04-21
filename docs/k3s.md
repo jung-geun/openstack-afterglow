@@ -233,3 +233,69 @@ sudo journalctl -u k3s-agent -n 50
 kubectl config set-cluster default \
   --server=https://<floating-ip>:6443
 ```
+
+---
+
+## Cloud Provider OpenStack 플러그인
+
+k3s 클러스터는 Cloud Provider OpenStack 플러그인 레지스트리를 통해 다양한 OpenStack 서비스와 통합됩니다. 각 플러그인은 `config.toml [k3s]` 섹션에서 독립적으로 활성화할 수 있습니다。
+
+### 지원 플러그인
+
+| 플러그인 | 설정 키 | 용도 |
+|---------|--------|------|
+| **OCCM** (OpenStack Cloud Controller Manager) | `occm_enabled` | 노드 초기화, Service 타입 LoadBalancer → Octavia LB 자동 생성 |
+| **Cinder CSI** | `cinder_csi_enabled` | PVC → Cinder 블록 스토리지 자동 프로비저닝 |
+| **Manila CSI** | `manila_csi_enabled` | PVC → Manila NFS (ReadWriteMany) 자동 프로비저닝 |
+| **Octavia Ingress** | `octavia_ingress_enabled` | Ingress 리소스 → Octavia LB 자동 생성 |
+| **Keystone Auth** | `keystone_auth_enabled` | Kubernetes 인증 → Keystone 토큰 연동 |
+| **Barbican KMS** | `barbican_kms_enabled` | Kubernetes Secret at-rest 암호화 → Barbican 연동 |
+
+### config.toml 예시
+
+```toml
+[k3s]
+occm_enabled = true
+cinder_csi_enabled = true
+manila_csi_enabled = false
+octavia_ingress_enabled = false
+keystone_auth_enabled = false
+barbican_kms_enabled = false
+```
+
+### 플러그인 배포 과정
+
+클러스터 생성 시 플러그인 레지스트리가 다음을 집계합니다:
+
+1. **cloud.conf** — OCCM과 Cinder CSI가 공유하는 `/etc/kubernetes/cloud.conf` (OpenStack 인증 정보)
+2. **manifests** — 각 플러그인의 Kubernetes 매니페스트 파일
+3. **server args** — K3s 설치 인자 (예: `--kube-apiserver-arg`)
+
+cloud-init의 콜백 스크립트가 플러그인을 순차적으로 배포하며, 각 플러그인의 결과를 `plugin_status` 필드로 보고합니다:
+
+```json
+{
+  "plugin_status": {
+    "occm": "deployed",
+    "cinder_csi": "deployed",
+    "manila_csi": "failed"
+  }
+}
+```
+
+배포에 실패한 플러그인은 `failed` 상태로 표시되지만, 클러스터 자체는 정상 동작합니다。
+
+### 클러스터 삭제 시 자동 정리
+
+OCCM이 활성화된 클러스터 삭제 시, Kubernetes LoadBalancer 서비스가 생성한 Octavia LB가 orphan되지 않도록 자동 정리됩니다:
+
+- `kube_service_{cluster_name}_` 접두사로 매칭되는 모든 Octavia LB를 cascade 삭제
+- 정리 실패 시 warning 로그 후 삭제 계속 진행 (best-effort)
+
+### 스케일 다운 시 노드 정리
+
+워커 노드 스케일 다운 시, VM 삭제 전 Kubernetes 노드 오브젝트를 먼저 삭제합니다. 이렇게 하면 OCCM이 `failed to find object` 오류로 무한 재시도하는 것을 방지할 수 있습니다.
+
+### kubeconfig 존재 확인 (HEAD)
+
+`HEAD /api/k3s/clusters/{id}/kubeconfig` 요청으로 kubeconfig 파일 존재 여부만 확인할 수 있습니다. 이는 파일을 다운로드하지 않고 클러스터 준비 상태를 확인할 때 유용합니다.

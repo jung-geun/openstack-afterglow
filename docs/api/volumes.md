@@ -21,6 +21,9 @@ Cinder 블록 스토리지 볼륨, 백업, 스냅샷을 관리합니다.
 1. [볼륨](#1-볼륨)
 2. [볼륨 백업](#2-볼륨-백업)
 3. [볼륨 스냅샷](#3-볼륨-스냅샷)
+4. [볼륨 강제 삭제](#4-볼륨-강제-삭제)
+5. [볼륨 이전 (Transfer)](#5-볼륨-이전-transfer)
+6. [자동 백업](#6-자동-백업)
 
 ---
 
@@ -37,6 +40,7 @@ Cinder 블록 스토리지 볼륨, 백업, 스냅샷을 관리합니다.
 | `GET` | `/api/volumes/{volume_id}` | 볼륨 상세 정보 |
 | `POST` | `/api/volumes` | 볼륨 생성 |
 | `DELETE` | `/api/volumes/{volume_id}` | 볼륨 삭제 |
+| `POST` | `/api/volumes/{volume_id}/force-delete` | error/error_deleting 상태 볼륨 강제 삭제 |
 
 ### GET /api/volumes
 
@@ -314,5 +318,175 @@ Cinder 블록 스토리지 볼륨, 백업, 스냅샷을 관리합니다.
 | 파라미터 | 위치 | 타입 | 필수 | 설명 |
 |----------|------|------|------|------|
 | `snapshot_id` | path | string | 예 | 스냅샷 UUID |
+
+**응답**: `204 No Content`
+
+---
+
+## 4. 볼륨 강제 삭제
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| `POST` | `/api/volumes/{volume_id}/force-delete` | error/error_deleting 상태 볼륨 강제 삭제 |
+
+### POST /api/volumes/{volume_id}/force-delete
+
+`error` 또는 `error_deleting` 상태의 볼륨을 강제 삭제합니다. Cinder의 `os-reset-status`로 상태를 `available`로 변경한 후 삭제합니다.
+
+| 파라미터 | 위치 | 타입 | 필수 | 설명 |
+|----------|------|------|------|------|
+| `volume_id` | path | string | 예 | 볼륨 UUID |
+
+**응답**: `204 No Content`
+
+---
+
+## 5. 볼륨 이전 (Transfer)
+
+볼륨의 소유권을 다른 프로젝트로 이전할 수 있습니다.
+
+### 엔드포인트 목록
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| `GET` | `/api/volumes/transfers` | 이전 목록 |
+| `POST` | `/api/volumes/{volume_id}/transfer` | 이전 생성 |
+| `POST` | `/api/volumes/transfer/{transfer_id}/accept` | 이전 수락 |
+| `DELETE` | `/api/volumes/transfer/{transfer_id}` | 이전 취소 |
+
+### GET /api/volumes/transfers
+
+현재 프로젝트의 볼륨 이전 목록을 반환합니다.
+
+**응답 (200 OK)** — 배열
+
+### POST /api/volumes/{volume_id}/transfer
+
+볼륨의 소유권을 다른 프로젝트로 이전하기 위한 이전 요청을 생성합니다. 생성 시 `auth_key`가 반환되며, 수락 측에서 이 키가 필요합니다.
+
+| 파라미터 | 위치 | 타입 | 필수 | 설명 |
+|----------|------|------|------|------|
+| `volume_id` | path | string | 예 | 이전할 볼륨 UUID |
+
+**요청 본문**
+
+```json
+{
+  "name": "string (선택) — 이전 이름"
+}
+```
+
+**응답 (201 Created)**
+
+```json
+{
+  "id": "transfer-uuid",
+  "name": "transfer-name",
+  "volume_id": "volume-uuid",
+  "auth_key": "auth-key-string"
+}
+```
+
+> ⚠️ `auth_key`는 생성 시에만 반환됩니다. 안전하게 보관하세요.
+
+### POST /api/volumes/transfer/{transfer_id}/accept
+
+이전 요청을 수락하여 볼륨 소유권을 현재 프로젝트로 이전합니다.
+
+| 파라미터 | 위치 | 타입 | 필수 | 설명 |
+|----------|------|------|------|------|
+| `transfer_id` | path | string | 예 | 이전 UUID |
+
+**요청 본문**
+
+```json
+{
+  "auth_key": "string (필수) — 이전 생성 시 발급된 인증 키"
+}
+```
+
+**응답 (200 OK)**
+
+```json
+{
+  "id": "transfer-uuid",
+  "volume_id": "volume-uuid"
+}
+```
+
+### DELETE /api/volumes/transfer/{transfer_id}
+
+이전 요청을 취소합니다. 이미 수락된 이전은 취소할 수 없습니다.
+
+| 파라미터 | 위치 | 타입 | 필수 | 설명 |
+|----------|------|------|------|------|
+| `transfer_id` | path | string | 예 | 이전 UUID |
+
+**응답**: `204 No Content`
+
+---
+
+## 6. 자동 백업
+
+볼륨의 정기 자동 백업을 설정하고 관리합니다.
+
+### 엔드포인트 목록
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| `POST` | `/api/volumes/backups/auto-backup/configs` | 자동 백업 설정 목록 |
+| `GET` | `/api/volumes/backups/auto-backup/{volume_id}` | 볼륨 자동 백업 설정 조회 |
+| `POST` | `/api/volumes/backups/auto-backup/{volume_id}` | 자동 백업 활성화 |
+| `DELETE` | `/api/volumes/backups/auto-backup/{volume_id}` | 자동 백업 비활성화 |
+
+### POST /api/volumes/backups/auto-backup/configs
+
+모든 자동 백업 설정 목록을 반환합니다.
+
+**응답 (200 OK)** — 배열
+
+### GET /api/volumes/backups/auto-backup/{volume_id}
+
+지정된 볼륨의 자동 백업 설정을 조회합니다.
+
+| 파라미터 | 위치 | 타입 | 필수 | 설명 |
+|----------|------|------|------|------|
+| `volume_id` | path | string | 예 | 볼륨 UUID |
+
+**응답 (200 OK)** — 자동 백업 설정 객체 (없으면 `404`)
+
+### POST /api/volumes/backups/auto-backup/{volume_id}
+
+지정된 볼륨에 자동 백업을 활성화합니다.
+
+| 파라미터 | 위치 | 타입 | 필수 | 설명 |
+|----------|------|------|------|------|
+| `volume_id` | path | string | 예 | 볼륨 UUID |
+
+**요청 본문**
+
+```json
+{
+  "schedule": "0 2 * * *",
+  "retention": 5,
+  "prefix": "string (선택) — 백업 이름 접두어"
+}
+```
+
+| 필드 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| `schedule` | string | 예 | 백업 스케줄 (cron 표현식) |
+| `retention` | integer | 아니오 | 보관할 백업 수 (기본값: 5) |
+| `prefix` | string | 아니오 | 백업 이름 접두어 |
+
+**응답**: `201 Created`
+
+### DELETE /api/volumes/backups/auto-backup/{volume_id}
+
+지정된 볼륨의 자동 백업을 비활성화합니다.
+
+| 파라미터 | 위치 | 타입 | 필수 | 설명 |
+|----------|------|------|------|------|
+| `volume_id` | path | string | 예 | 볼륨 UUID |
 
 **응답**: `204 No Content`

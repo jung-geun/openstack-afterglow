@@ -69,7 +69,7 @@ Afterglow 백엔드는 FastAPI로 구현된 REST API이며, 모든 OpenStack 서
 
 | 문서 | 태그 | 기본 경로 | 설명 |
 |------|------|-----------|------|
-| [k3s 클러스터 (k3s)](api/k3s.md) | `k3s`, `k3s-health` | `/api/k3s/clusters` | Magnum 없이 VM에 k3s를 직접 배포하는 경량 Kubernetes 프로비저닝. SSE 비동기 생성, 스케일, kubeconfig 다운로드 지원. |
+| [k3s 클러스터 (k3s)](api/k3s.md) | `k3s`, `k3s-health` | `/api/k3s/clusters` | Magnum 없이 VM에 k3s를 직접 배포하는 경량 Kubernetes 프로비저닝. SSE 비동기 생성, 스케일 인/아웃, kubeconfig 다운로드, Cloud Provider OpenStack 플러그인(OCCM, Cinder CSI, Manila CSI, Octavia Ingress, Keystone Auth, Barbican KMS) 지원. |
 
 ### 대시보드 및 공통
 
@@ -118,7 +118,17 @@ Afterglow 백엔드는 FastAPI로 구현된 REST API이며, 모든 OpenStack 서
 | `GET` | `/api/admin/topology` | 전체 토폴로지 |
 | `GET` | `/api/admin/timeseries/{type}` | 시계열 데이터 |
 | `GET` | `/api/admin/services` | 서비스 상태 모니터링 |
+| `GET` | `/api/admin/monitoring/summary` | 모니터링 요약 |
 | `GET` | `/api/admin/gpu-hosts` | GPU 호스트 모니터링 |
+| `GET` | `/api/admin/gpu-aliases` | GPU alias 목록 |
+| `GET` | `/api/admin/gpu-quotas/defaults` | 기본 GPU 쿼터 조회 |
+| `PUT` | `/api/admin/gpu-quotas/defaults` | 기본 GPU 쿼터 수정 |
+| `DELETE` | `/api/admin/gpu-quotas/defaults/{gpu_type}` | 기본 GPU 쿼터 유형별 삭제 |
+| `GET` | `/api/admin/gpu-quotas/{project_id}` | 프로젝트 GPU 쿼터 조회 |
+| `PUT` | `/api/admin/gpu-quotas/{project_id}` | 프로젝트 GPU 쿼터 수정 |
+| `DELETE` | `/api/admin/gpu-quotas/{project_id}/{gpu_type}` | 프로젝트 GPU 쿼터 유형별 삭제 |
+| `GET` | `/api/admin/hypervisors/{id}` | 하이퍼바이저 상세 |
+| `GET` | `/api/admin/file-storage/builds` | 활성 빌드 목록 |
 | `GET`/`POST`/`PATCH`/`DELETE` | `/api/admin/flavors/...` | Flavor 관리 |
 | `GET`/`POST`/`PATCH`/`DELETE` | `/api/admin/users/...` | 사용자 관리 |
 | `GET`/`POST`/`PATCH`/`DELETE` | `/api/admin/projects/...` | 프로젝트 관리 |
@@ -162,6 +172,10 @@ Afterglow 백엔드는 FastAPI로 구현된 REST API이며, 모든 OpenStack 서
 | `GET`/`POST`/`DELETE` | `/api/instances/{id}/interfaces/...` | 네트워크 인터페이스 |
 | `GET`/`POST` | `/api/instances/{id}/security-groups` | 보안 그룹 |
 | `POST` | `/api/instances/{id}/ports/{pid}/security-groups` | 포트 보안 그룹 업데이트 |
+| `POST` | `/api/instances/{id}/shelve` | 인스턴스 쉘브 (리소스 해제) |
+| `POST` | `/api/instances/{id}/unshelve` | 쉘브된 인스턴스 복원 |
+| `POST` | `/api/instances/{id}/floating-ip` | Floating IP 자동 생성 + 연결 |
+| `DELETE` | `/api/instances/{id}/floating-ip` | Floating IP 해제 + 삭제 |
 
 ### 키페어 `/api/keypairs`
 
@@ -179,11 +193,20 @@ Afterglow 백엔드는 FastAPI로 구현된 REST API이며, 모든 OpenStack 서
 | `GET` | `/api/volumes/{id}` | 볼륨 상세 |
 | `POST` | `/api/volumes` | 볼륨 생성 |
 | `DELETE` | `/api/volumes/{id}` | 볼륨 삭제 |
+| `POST` | `/api/volumes/{id}/force-delete` | error/error_deleting 상태 볼륨 강제 삭제 |
+| `GET` | `/api/volumes/transfers` | 볼륨 이전 목록 |
+| `POST` | `/api/volumes/{id}/transfer` | 볼륨 이전 생성 |
+| `POST` | `/api/volumes/transfer/{id}/accept` | 볼륨 이전 수락 |
+| `DELETE` | `/api/volumes/transfer/{id}` | 볼륨 이전 취소 |
 | `GET` | `/api/volumes/backups` | 백업 목록 |
 | `GET` | `/api/volumes/backups/{id}` | 백업 상세 |
 | `POST` | `/api/volumes/backups` | 백업 생성 |
 | `POST` | `/api/volumes/backups/{id}/restore` | 백업 복원 |
 | `DELETE` | `/api/volumes/backups/{id}` | 백업 삭제 |
+| `POST` | `/api/volumes/backups/auto-backup/configs` | 자동 백업 설정 목록 |
+| `GET` | `/api/volumes/backups/auto-backup/{volume_id}` | 볼륨 자동 백업 설정 조회 |
+| `POST` | `/api/volumes/backups/auto-backup/{volume_id}` | 자동 백업 활성화 |
+| `DELETE` | `/api/volumes/backups/auto-backup/{volume_id}` | 자동 백업 비활성화 |
 
 ### 볼륨 스냅샷 `/api/volume-snapshots`
 
@@ -218,6 +241,7 @@ Afterglow 백엔드는 FastAPI로 구현된 REST API이며, 모든 OpenStack 서
 | `GET` | `/api/networks/{id}` | 네트워크 상세 |
 | `DELETE` | `/api/networks/{id}` | 삭제 |
 | `POST` | `/api/networks/{id}/subnets` | 서브넷 생성 |
+| `PUT` | `/api/networks/subnets/{id}` | 서브넷 편집 (이름/게이트웨이/DHCP) |
 | `DELETE` | `/api/networks/subnets/{id}` | 서브넷 삭제 |
 | `GET` | `/api/networks/floating-ips` | Floating IP 목록 |
 | `POST` | `/api/networks/floating-ips` | Floating IP 생성 |
@@ -275,6 +299,9 @@ Afterglow 백엔드는 FastAPI로 구현된 REST API이며, 모든 OpenStack 서
 |--------|------|------|
 | `GET` | `/api/dashboard/summary` | 리소스 요약 |
 | `GET` | `/api/dashboard/config` | 프론트엔드 설정 |
+| `GET` | `/api/dashboard/quotas` | 프로젝트 쿼터 조회 |
+| `GET` | `/api/dashboard/gpu-available` | GPU 가용량 조회 |
+| `GET` | `/api/dashboard/usage` | 프로젝트 리소스 사용량 |
 
 ### 라이브러리 `/api/libraries`
 
@@ -282,6 +309,7 @@ Afterglow 백엔드는 FastAPI로 구현된 REST API이며, 모든 OpenStack 서
 |--------|------|------|
 | `GET` | `/api/libraries` | 라이브러리 카탈로그 |
 | `GET` | `/api/libraries/shares` | 사전 빌드 share 목록 |
+| `POST` | `/api/libraries/validate` | 라이브러리 호환성 검증 |
 
 ### 사이트 설정 `/api/site-config`
 
@@ -317,7 +345,7 @@ Afterglow 백엔드는 FastAPI로 구현된 REST API이며, 모든 OpenStack 서
 |--------|------|------|
 | `GET` | `/api/k3s/clusters` | 클러스터 목록 (삭제된 클러스터 포함) |
 | `GET` | `/api/k3s/clusters/{id}` | 클러스터 상세 |
-| `GET` | `/api/k3s/clusters/{id}/kubeconfig` | kubeconfig 파일 다운로드 |
+| `GET`\|`HEAD` | `/api/k3s/clusters/{id}/kubeconfig` | kubeconfig 다운로드 / 존재 확인 |
 | `POST` | `/api/k3s/clusters/async` | SSE 비동기 클러스터 생성 |
 | `PATCH` | `/api/k3s/clusters/{id}/scale` | 워커 노드 수 조정 |
 | `DELETE` | `/api/k3s/clusters/{id}` | 클러스터 삭제 (soft-delete) |

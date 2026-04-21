@@ -157,6 +157,7 @@ Neutron 네트워크, 서브넷, Floating IP를 관리합니다.
 | 메서드 | 경로 | 설명 |
 |--------|------|------|
 | `POST` | `/api/networks/{network_id}/subnets` | 서브넷 생성 |
+| `PUT` | `/api/networks/subnets/{subnet_id}` | 서브넷 편집 (이름/게이트웨이/DHCP) |
 | `DELETE` | `/api/networks/subnets/{subnet_id}` | 서브넷 삭제 |
 
 ### POST /api/networks/{network_id}/subnets
@@ -190,6 +191,32 @@ Neutron 네트워크, 서브넷, Floating IP를 관리합니다.
 | `subnet_id` | path | string | 예 | 서브넷 UUID |
 
 **응답**: `204 No Content`
+
+### PUT /api/networks/subnets/{subnet_id}
+
+서브넷의 이름, 게이트웨이, DHCP 설정을 수정합니다.
+
+| 파라미터 | 위치 | 타입 | 필수 | 설명 |
+|----------|------|------|------|------|
+| `subnet_id` | path | string | 예 | 서브넷 UUID |
+
+**요청 본문**
+
+```json
+{
+  "name": "string (선택)",
+  "gateway_ip": "string (선택)",
+  "enable_dhcp": true
+}
+```
+
+| 필드 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| `name` | string | 아니오 | 서브넷 이름 |
+| `gateway_ip` | string | 아니오 | 게이트웨이 IP 주소 |
+| `enable_dhcp` | boolean | 아니오 | DHCP 활성화 여부 |
+
+**응답 (200 OK)** — `SubnetDetail`
 
 ---
 
