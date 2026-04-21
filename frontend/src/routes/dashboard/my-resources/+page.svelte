@@ -7,6 +7,7 @@
 	import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
 	import StatusChip from '$lib/components/ui/StatusChip.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import StatTile from '$lib/components/ui/StatTile.svelte';
 
 	interface InstanceItem {
 		id: string;
@@ -129,12 +130,114 @@
 	{/if}
 
 	{#if initialLoading}
+		<div class="grid grid-cols-2 sm:grid-cols-4 gap-3.5 mb-4">
+			{#each [1, 2, 3, 4] as _}
+				<div class="animate-pulse bg-gray-900 border border-gray-800 rounded-2xl h-[82px]"></div>
+			{/each}
+		</div>
 		<div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
 			{#each [1, 2, 3, 4] as _}
 				<div class="animate-pulse bg-gray-900 border border-gray-800 rounded-2xl h-48"></div>
 			{/each}
 		</div>
 	{:else if data}
+		<!-- 전체 사용량 요약 -->
+		<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3.5 mb-5">
+			<StatTile label="인스턴스" value={data.totals.instances} unit="개" accent="blue">
+				{#snippet icon()}
+					<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2"/></svg>
+				{/snippet}
+			</StatTile>
+			<StatTile label="볼륨" value={data.totals.volumes} unit="개" accent="cyan">
+				{#snippet icon()}
+					<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/></svg>
+				{/snippet}
+			</StatTile>
+			<StatTile label="스토리지" value={data.totals.storage_gb} unit="GB" accent="violet">
+				{#snippet icon()}
+					<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/></svg>
+				{/snippet}
+			</StatTile>
+			<StatTile label="vCPU" value={data.totals.vcpus} unit="코어" accent="emerald">
+				{#snippet icon()}
+					<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18"/></svg>
+				{/snippet}
+			</StatTile>
+			<StatTile label="RAM" value={data.totals.ram_mb >= 1024 ? +(data.totals.ram_mb / 1024).toFixed(1) : data.totals.ram_mb} unit={data.totals.ram_mb >= 1024 ? 'GB' : 'MB'} accent="amber">
+				{#snippet icon()}
+					<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"/></svg>
+				{/snippet}
+			</StatTile>
+			<StatTile label="Floating IP" value={data.totals.floating_ips} unit="개" accent="rose">
+				{#snippet icon()}
+					<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>
+				{/snippet}
+			</StatTile>
+		</div>
+
+		<!-- 프로젝트별 사용량 비교 -->
+		{#if data.projects.length > 0}
+			<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 mb-5">
+				<div class="text-white text-[15px] font-semibold mb-3.5">프로젝트별 사용량</div>
+				<div class="bg-[#0B1220] border border-gray-800 rounded-[10px] overflow-hidden">
+					<div class="grid grid-cols-[1.5fr_80px_80px_90px_80px_90px] px-4 py-2.5 border-b border-gray-800 text-[11px] uppercase tracking-wider text-gray-500 font-medium">
+						<div>프로젝트</div>
+						<div class="text-right">인스턴스</div>
+						<div class="text-right">볼륨</div>
+						<div class="text-right">스토리지</div>
+						<div class="text-right">vCPU</div>
+						<div class="text-right">RAM</div>
+					</div>
+					{#each data.projects as p, i}
+						<div class="grid grid-cols-[1.5fr_80px_80px_90px_80px_90px] px-4 py-3 text-[13px] items-center border-b border-gray-800 last:border-b-0 hover:bg-gray-800/20 transition-colors">
+							<div class="min-w-0">
+								<div class="text-white font-medium truncate">{p.project_name}</div>
+								{#if p.error}
+									<span class="text-[10px] text-red-400">조회 실패</span>
+								{/if}
+							</div>
+							<div class="text-right">
+								{#if p.instance_count > 0}
+									<span class="text-blue-400 font-mono text-xs font-medium">{p.instance_count}</span>
+								{:else}
+									<span class="text-gray-600 text-xs">—</span>
+								{/if}
+							</div>
+							<div class="text-right">
+								{#if p.volume_count > 0}
+									<span class="text-cyan-400 font-mono text-xs font-medium">{p.volume_count}</span>
+								{:else}
+									<span class="text-gray-600 text-xs">—</span>
+								{/if}
+							</div>
+							<div class="text-right">
+								{#if p.storage_gb > 0}
+									<span class="text-violet-400 font-mono text-xs">{p.storage_gb} GB</span>
+								{:else}
+									<span class="text-gray-600 text-xs">—</span>
+								{/if}
+							</div>
+							<div class="text-right">
+								{#if p.vcpus > 0}
+									<span class="text-emerald-400 font-mono text-xs">{p.vcpus}</span>
+								{:else}
+									<span class="text-gray-600 text-xs">—</span>
+								{/if}
+							</div>
+							<div class="text-right">
+								{#if p.ram_mb > 0}
+									<span class="text-amber-400 font-mono text-xs">{formatRam(p.ram_mb)}</span>
+								{:else}
+									<span class="text-gray-600 text-xs">—</span>
+								{/if}
+							</div>
+						</div>
+					{/each}
+				</div>
+			</div>
+		{/if}
+
+		<!-- 리소스 상세 목록 -->
 		<div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
 
 			<!-- 인스턴스 카드 -->

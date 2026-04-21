@@ -163,20 +163,27 @@
       {:else if recentInstances.length === 0}
         <div class="text-gray-600 text-sm py-6 text-center">인스턴스가 없습니다</div>
       {:else}
-        <!-- 테이블 헤더 -->
-        <div class="grid grid-cols-[1.7fr_110px_130px_120px] px-3.5 py-2 bg-[#0B1220] rounded-t-[10px] border border-gray-800 border-b-0 text-[11px] uppercase tracking-wider text-gray-500 font-medium">
-          <div>NAME</div><div>STATUS</div><div>IP</div><div>FLAVOR</div>
-        </div>
-        <div class="border border-gray-800 rounded-b-[10px] overflow-hidden">
-          {#each recentInstances as inst, i}
-            <a href="/dashboard/compute/instances"
-              class="grid grid-cols-[1.7fr_110px_130px_120px] px-3.5 py-2.5 text-[13px] items-center hover:bg-gray-800/30 transition-colors {i < recentInstances.length - 1 ? 'border-b border-gray-800' : ''}">
-              <div class="text-white font-medium truncate">{inst.name}</div>
-              <div><StatusChip status={inst.status} /></div>
-              <div class="text-gray-300 font-mono text-xs">{getFirstIp(inst)}</div>
-              <div class="text-gray-400 text-xs truncate">{inst.flavor_name ?? '—'}</div>
-            </a>
-          {/each}
+        <!-- 테이블 헤더 (모바일: 2열, sm+: 4열) -->
+        <div class="overflow-x-auto">
+          <div class="min-w-[360px]">
+            <div class="grid grid-cols-[1.7fr_100px_130px_100px] sm:grid-cols-[1.7fr_110px_130px_120px] px-3.5 py-2 bg-[#0B1220] rounded-t-[10px] border border-gray-800 border-b-0 text-[11px] uppercase tracking-wider text-gray-500 font-medium">
+              <div>NAME</div>
+              <div>STATUS</div>
+              <div>IP</div>
+              <div class="hidden sm:block">FLAVOR</div>
+            </div>
+            <div class="border border-gray-800 rounded-b-[10px] overflow-hidden">
+              {#each recentInstances as inst, i}
+                <a href="/dashboard/compute/instances"
+                  class="grid grid-cols-[1.7fr_100px_130px_100px] sm:grid-cols-[1.7fr_110px_130px_120px] px-3.5 py-2.5 text-[13px] items-center hover:bg-gray-800/30 transition-colors {i < recentInstances.length - 1 ? 'border-b border-gray-800' : ''}">
+                  <div class="text-white font-medium truncate">{inst.name}</div>
+                  <div><StatusChip status={inst.status} /></div>
+                  <div class="text-gray-300 font-mono text-xs">{getFirstIp(inst)}</div>
+                  <div class="text-gray-400 text-xs truncate hidden sm:block">{inst.flavor_name ?? '—'}</div>
+                </a>
+              {/each}
+            </div>
+          </div>
         </div>
       {/if}
     </div>

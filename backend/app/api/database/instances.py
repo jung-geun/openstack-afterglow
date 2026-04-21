@@ -114,6 +114,10 @@ async def create_database_instance(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """DB 인스턴스 생성."""
+    import logging
+
+    _logger = logging.getLogger(__name__)
+
     from app.services import trove
 
     try:
@@ -129,8 +133,11 @@ async def create_database_instance(
             None,
             req.restore_backup_id,
         )
-    except Exception:
-        raise HTTPException(status_code=500, detail="DB 인스턴스 생성 실패")
+    except Exception as e:
+        _logger.exception(
+            "DB 인스턴스 생성 실패: name=%s, datastore=%s/%s", req.name, req.datastore_type, req.datastore_version
+        )
+        raise HTTPException(status_code=500, detail=f"DB 인스턴스 생성 실패: {str(e)}")
 
 
 # ---------------------------------------------------------------------------

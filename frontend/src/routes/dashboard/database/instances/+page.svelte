@@ -1,10 +1,12 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { untrack } from 'svelte';
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import StatusChip from '$lib/components/ui/StatusChip.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
+	import RefreshButton from '$lib/components/RefreshButton.svelte';
 
 	interface DbInstance {
 		id: string;
@@ -33,6 +35,8 @@
 
 	let instances = $state<DbInstance[]>([]);
 	let loading = $state(true);
+	let refreshing = $state(false);
+	let autoRefresh = $state(false);
 	let deleting = $state<string | null>(null);
 	let restarting = $state<string | null>(null);
 
@@ -70,6 +74,17 @@
 			instances = [];
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function forceRefresh() {
+		refreshing = true;
+		try {
+			instances = await api.get<DbInstance[]>('/api/database-instances', token, projectId, { refresh: true });
+		} catch {
+			instances = [];
+		} finally {
+			refreshing = false;
 		}
 	}
 
@@ -136,7 +151,18 @@
 		}
 	}
 
-	onMount(load);
+	$effect(() => {
+		const pid = $auth.projectId;
+		if (!pid) return;
+		loading = true;
+		untrack(() => { load(); });
+	});
+
+	$effect(() => {
+		if (!$auth.projectId || !autoRefresh) return;
+		const interval = setInterval(() => untrack(() => { load(); }), 10000);
+		return () => clearInterval(interval);
+	});
 </script>
 
 {#if showModal}
@@ -223,7 +249,7 @@
 				</div>
 
 				{#if createError}
-					<p class="text-red-400 text-xs">{createError}</p>
+					<div class="bg-red-900/20 border border-red-800 rounded-lg px-3 py-2 text-red-400 text-xs">{createError}</div>
 				{/if}
 			</div>
 			<div class="flex justify-end gap-2 mt-5">
@@ -241,11 +267,12 @@
 <div class="p-4 md:p-8 max-w-6xl">
 	<PageHeader breadcrumb="DATABASE / INSTANCES" title="DB 인스턴스">
 		{#snippet actions()}
+			<AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={10} />
+			<RefreshButton {refreshing} onclick={forceRefresh} />
 			<button
 				onclick={openModal}
 				class="text-xs text-white bg-amber-600 hover:bg-amber-500 transition-colors px-3 py-1.5 rounded border border-amber-500"
 			>+ 인스턴스 생성</button>
-			<button onclick={load} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
 		{/snippet}
 	</PageHeader>
 

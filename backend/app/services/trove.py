@@ -71,21 +71,58 @@ def create_instance(
     users: list | None = None,
     restore_backup_id: str | None = None,
 ) -> dict:
-    """DB 인스턴스 생성."""
-    body: dict = {
+    """DB 인스턴스 생성 (raw REST 방식으로 안정성 확보)."""
+    instance_body: dict = {
         "name": name,
-        "flavor": {"id": flavor_id},
+        "flavorRef": flavor_id,
         "volume": {"size": volume_size},
-        "datastore": {"type": datastore_type, "version": datastore_version},
     }
+    if datastore_type:
+        instance_body["datastore"] = {"type": datastore_type, "version": datastore_version}
     if databases:
-        body["databases"] = [{"name": db} for db in databases]
+        instance_body["databases"] = [{"name": db} for db in databases]
     if users:
-        body["users"] = users
+        instance_body["users"] = users
     if restore_backup_id:
-        body["restorePoint"] = {"backupRef": restore_backup_id}
-    i = conn.database.create_instance(**body)
-    return _instance_to_dict(i)
+        instance_body["restorePoint"] = {"backupRef": restore_backup_id}
+
+    payload = {"instance": instance_body}
+    _logger.debug("Trove create_instance payload: %s", payload)
+    try:
+        resp = conn.database.post("/instances", json=payload)
+        body = resp.json() if hasattr(resp, "json") else {}
+        instance_data = body.get("instance", body)
+        # Resource 객체가 아닌 dict를 받으므로 직접 파싱
+        return {
+            "id": instance_data.get("id", ""),
+            "name": instance_data.get("name", ""),
+            "status": instance_data.get("status", ""),
+            "datastore": instance_data.get("datastore", {}),
+            "flavor_id": (instance_data.get("flavor") or {}).get("id", flavor_id),
+            "flavor_ram": (instance_data.get("flavor") or {}).get("ram", 0),
+            "size": (instance_data.get("volume") or {}).get("size", volume_size),
+            "created_at": str(instance_data.get("created", "") or ""),
+            "hostname": instance_data.get("hostname", "") or "",
+            "ip": "",
+            "links": [],
+        }
+    except Exception:
+        _logger.exception("Trove raw REST create_instance 실패, SDK fallback 시도")
+        # fallback: SDK 방식
+        body_sdk: dict = {
+            "name": name,
+            "flavor": {"id": flavor_id},
+            "volume": {"size": volume_size},
+            "datastore": {"type": datastore_type, "version": datastore_version},
+        }
+        if databases:
+            body_sdk["databases"] = [{"name": db} for db in databases]
+        if users:
+            body_sdk["users"] = users
+        if restore_backup_id:
+            body_sdk["restorePoint"] = {"backupRef": restore_backup_id}
+        i = conn.database.create_instance(**body_sdk)
+        return _instance_to_dict(i)
 
 
 def delete_instance(conn, instance_id: str) -> None:

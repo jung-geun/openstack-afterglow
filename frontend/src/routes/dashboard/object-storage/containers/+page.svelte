@@ -1,10 +1,12 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { untrack } from 'svelte';
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { formatStorage } from '$lib/utils/format';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
+	import RefreshButton from '$lib/components/RefreshButton.svelte';
 
 	interface SwiftContainer {
 		name: string;
@@ -21,6 +23,8 @@
 	let containers = $state<SwiftContainer[]>([]);
 	let account = $state<AccountMeta | null>(null);
 	let loading = $state(true);
+	let refreshing = $state(false);
+	let autoRefresh = $state(false);
 	let deleting = $state<string | null>(null);
 
 	// 생성 모달
@@ -43,6 +47,20 @@
 			containers = [];
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function forceRefresh() {
+		refreshing = true;
+		try {
+			[containers, account] = await Promise.all([
+				api.get<SwiftContainer[]>('/api/object-storage', token, projectId, { refresh: true }),
+				api.get<AccountMeta>('/api/object-storage/account', token, projectId, { refresh: true }),
+			]);
+		} catch {
+			containers = [];
+		} finally {
+			refreshing = false;
 		}
 	}
 
@@ -75,7 +93,18 @@
 		}
 	}
 
-	onMount(load);
+	$effect(() => {
+		const pid = $auth.projectId;
+		if (!pid) return;
+		loading = true;
+		untrack(() => { load(); });
+	});
+
+	$effect(() => {
+		if (!$auth.projectId || !autoRefresh) return;
+		const interval = setInterval(() => untrack(() => { load(); }), 10000);
+		return () => clearInterval(interval);
+	});
 </script>
 
 {#if showModal}
@@ -127,11 +156,12 @@
 <div class="p-4 md:p-8 max-w-6xl">
 	<PageHeader breadcrumb="OBJECT STORAGE / CONTAINERS" title="컨테이너">
 		{#snippet actions()}
+			<AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={10} />
+			<RefreshButton {refreshing} onclick={forceRefresh} />
 			<button
 				onclick={() => { showModal = true; createError = ''; newName = ''; }}
 				class="text-xs text-white bg-indigo-600 hover:bg-indigo-500 transition-colors px-3 py-1.5 rounded border border-indigo-500"
 			>+ 컨테이너 생성</button>
-			<button onclick={load} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
 		{/snippet}
 	</PageHeader>
 

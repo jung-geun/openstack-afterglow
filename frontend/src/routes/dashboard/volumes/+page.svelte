@@ -42,6 +42,12 @@
   let selectedVolumeId = $state<string | null>(null);
   let autoBackupConfigs = $state<Set<string>>(new Set());
   let autoBackupToggling = $state<string | null>(null);
+  let openActionMenu = $state<string | null>(null);
+
+  interface QuotaItem { limit: number; in_use: number; }
+  interface VolumeQuotas { storage: { volumes: QuotaItem; gigabytes: QuotaItem; }; }
+
+  let quotas = $state<VolumeQuotas | null>(null);
 
   // Derived stats
   let totalGb = $derived(volumes.reduce((s, v) => s + v.size, 0));
@@ -93,6 +99,12 @@
   async function fetchSnapshots() {
     try {
       snapshots = await api.get<Snapshot[]>('/api/volume-snapshots', $auth.token ?? undefined, $auth.projectId ?? undefined);
+    } catch { /* 오류 무시 */ }
+  }
+
+  async function fetchQuotas() {
+    try {
+      quotas = await api.get<VolumeQuotas>('/api/dashboard/quotas', $auth.token ?? undefined, $auth.projectId ?? undefined);
     } catch { /* 오류 무시 */ }
   }
 
@@ -175,7 +187,7 @@
     const projectId = $auth.projectId;
     if (!projectId) return;
     loading = true;
-    untrack(() => { fetchVolumes(); fetchAutoBackupConfigs(); fetchSnapshots(); });
+    untrack(() => { fetchVolumes(); fetchAutoBackupConfigs(); fetchSnapshots(); fetchQuotas(); });
   });
 
   $effect(() => {
@@ -185,7 +197,10 @@
   });
 </script>
 
-<svelte:window onkeydown={(e) => e.key === 'Escape' && selectedVolumeId && closeVolumePanel()} />
+<svelte:window
+  onkeydown={(e) => { if (e.key === 'Escape') { if (openActionMenu) openActionMenu = null; else if (selectedVolumeId) closeVolumePanel(); } }}
+  onclick={(e) => { if (openActionMenu && !(e.target as Element)?.closest('[data-action-menu]')) openActionMenu = null; }}
+/>
 
 {#if showModal}
   <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onclick={() => { showModal = false; createError = ''; }} role="dialog" aria-modal="true" tabindex="-1" onkeydown={(e) => e.key === 'Escape' && (showModal = false)}>
@@ -247,10 +262,23 @@
       <!-- Card 1: 총 할당 -->
       <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
         <div class="text-[11px] uppercase tracking-wider text-gray-500 font-medium mb-2">총 할당</div>
-        <div class="text-[26px] font-bold text-white leading-none mb-1">{totalGb} <span class="text-[14px] font-normal text-gray-400">GB</span></div>
-        <div class="text-[11px] text-gray-500 mb-3">{volumes.length}개 볼륨</div>
+        <div class="text-[26px] font-bold text-white leading-none mb-1">
+          {totalGb}
+          {#if quotas?.storage.gigabytes.limit && quotas.storage.gigabytes.limit > 0}
+            <span class="text-[14px] font-normal text-gray-400">/ {quotas.storage.gigabytes.limit} GB</span>
+          {:else}
+            <span class="text-[14px] font-normal text-gray-400">GB</span>
+          {/if}
+        </div>
+        <div class="text-[11px] text-gray-500 mb-3">
+          {volumes.length}개 볼륨{#if quotas?.storage.volumes.limit && quotas.storage.volumes.limit > 0} / {quotas.storage.volumes.limit}개 한도{/if}
+        </div>
         <div class="h-1.5 bg-gray-800 rounded-full overflow-hidden">
-          <div class="h-full bg-blue-500 rounded-full transition-all" style="width: {Math.min(100, totalGb / 10)}%"></div>
+          {#if quotas?.storage.gigabytes.limit && quotas.storage.gigabytes.limit > 0}
+            <div class="h-full rounded-full transition-all {totalGb / quotas.storage.gigabytes.limit >= 1 ? 'bg-red-500' : totalGb / quotas.storage.gigabytes.limit >= 0.8 ? 'bg-orange-500' : 'bg-blue-500'}" style="width: {Math.min(100, Math.round(totalGb / quotas.storage.gigabytes.limit * 100))}%"></div>
+          {:else}
+            <div class="h-full bg-blue-500 rounded-full transition-all" style="width: {Math.min(100, totalGb / 10)}%"></div>
+          {/if}
         </div>
       </div>
       <!-- Card 2: 연결된 볼륨 -->
@@ -285,13 +313,14 @@
       <!-- Volume custom table -->
       <div class="bg-[#0B1220] border border-gray-800 rounded-[10px] overflow-hidden">
         <!-- Header -->
-        <div class="grid grid-cols-[1.6fr_80px_100px_110px_1.2fr_110px_auto] px-4 py-2.5 border-b border-gray-800 text-[11px] uppercase tracking-wider text-gray-500 font-medium">
+        <div class="grid grid-cols-[1.6fr_70px_90px_100px_1fr_80px_80px_56px] px-4 py-2.5 border-b border-gray-800 text-[11px] uppercase tracking-wider text-gray-500 font-medium">
           <div>이름</div>
           <div>크기</div>
           <div>유형</div>
           <div>상태</div>
           <div>연결</div>
           <div>부트</div>
+          <div class="text-center">자동 백업</div>
           <div></div>
         </div>
         <!-- Rows -->
@@ -301,7 +330,7 @@
             onkeydown={(e) => e.key === 'Enter' && openVolumePanel(vol.id)}
             tabindex="0"
             role="button"
-            class="grid grid-cols-[1.6fr_80px_100px_110px_1.2fr_110px_auto] px-4 py-3 text-[13px] items-center border-b border-gray-800 hover:bg-gray-800/30 transition-colors cursor-pointer last:border-b-0 {selectedVolumeId === vol.id ? 'bg-gray-800/30' : ''}"
+            class="grid grid-cols-[1.6fr_70px_90px_100px_1fr_80px_80px_56px] px-4 py-3 text-[13px] items-center border-b border-gray-800 hover:bg-gray-800/30 transition-colors cursor-pointer last:border-b-0 {selectedVolumeId === vol.id ? 'bg-gray-800/30' : ''}"
           >
             <!-- 이름 -->
             <div class="flex items-center gap-2.5 min-w-0">
@@ -343,9 +372,8 @@
                 <span class="text-[11px] px-2 py-0.5 rounded-md bg-blue-900/30 border border-blue-800 text-blue-400">부트</span>
               {/if}
             </div>
-            <!-- 액션 -->
-            <div class="flex items-center justify-end gap-1" onclick={(e) => e.stopPropagation()} role="none">
-              <!-- 자동 백업 토글 -->
+            <!-- 자동 백업 토글 -->
+            <div class="flex justify-center" onclick={(e) => e.stopPropagation()} role="none">
               <button
                 onclick={(e) => { e.stopPropagation(); toggleAutoBackup(vol.id); }}
                 disabled={autoBackupToggling === vol.id}
@@ -354,31 +382,61 @@
               >
                 <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out {autoBackupConfigs.has(vol.id) ? 'translate-x-4' : 'translate-x-0'}"></span>
               </button>
-              {#if vol.status === 'available'}
+            </div>
+            <!-- 액션 드롭다운 -->
+            <div class="flex justify-end" onclick={(e) => e.stopPropagation()} role="none" data-action-menu>
+              <div class="relative" data-action-menu>
                 <button
-                  onclick={(e) => { e.stopPropagation(); openVolumePanel(vol.id); }}
-                  class="text-blue-400 hover:text-blue-300 text-xs px-2 py-1 rounded border border-blue-900 hover:border-blue-700 transition-colors"
-                >연결</button>
-                <button
-                  onclick={(e) => { e.stopPropagation(); openTransferModal(vol.id, vol.name); }}
-                  class="text-violet-400 hover:text-violet-300 text-xs px-2 py-1 rounded border border-violet-900 hover:border-violet-700 transition-colors"
-                  title="다른 프로젝트로 볼륨 이전"
-                >이전</button>
-              {/if}
-              {#if (vol.status === 'error' || vol.status === 'error_deleting' || vol.status === 'deleting') && $auth.isSystemAdmin}
-                <button
-                  onclick={(e) => { e.stopPropagation(); forceDeleteVolume(vol.id, vol.name); }}
-                  disabled={deleting === vol.id}
-                  class="text-rose-400 hover:text-rose-300 disabled:text-gray-600 text-xs px-2 py-1 rounded border border-rose-900 hover:border-rose-700 disabled:border-gray-700 transition-colors"
-                  title="오류 상태 볼륨 강제 삭제 (관리자)"
-                >{deleting === vol.id ? '삭제 중...' : '강제 삭제'}</button>
-              {/if}
-              <button
-                onclick={(e) => { e.stopPropagation(); deleteVolume(vol.id, vol.name); }}
-                disabled={deleting === vol.id || vol.attachments.length > 0}
-                class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-xs px-2 py-1 rounded border border-red-900 hover:border-red-700 disabled:border-gray-700 transition-colors"
-                title={vol.attachments.length > 0 ? '연결된 볼륨은 삭제할 수 없습니다' : ''}
-              >{deleting === vol.id ? '삭제 중...' : '삭제'}</button>
+                  onclick={(e) => { e.stopPropagation(); openActionMenu = openActionMenu === vol.id ? null : vol.id; }}
+                  class="flex items-center justify-center w-7 h-7 rounded-md text-gray-400 hover:text-white hover:bg-gray-700 transition-colors"
+                  title="액션"
+                  data-action-menu
+                >
+                  <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
+                  </svg>
+                </button>
+                {#if openActionMenu === vol.id}
+                  <div class="absolute right-0 top-full mt-1 z-30 bg-gray-900 border border-gray-700 rounded-lg shadow-xl py-1 min-w-[140px]" data-action-menu>
+                    <button
+                      onclick={(e) => { e.stopPropagation(); openActionMenu = null; openVolumePanel(vol.id); }}
+                      class="w-full text-left px-3 py-1.5 text-[13px] text-gray-300 hover:text-white hover:bg-gray-800 transition-colors flex items-center gap-2"
+                    >
+                      <svg class="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+                      연결
+                    </button>
+                    {#if vol.status === 'available'}
+                      <button
+                        onclick={(e) => { e.stopPropagation(); openActionMenu = null; openTransferModal(vol.id, vol.name); }}
+                        class="w-full text-left px-3 py-1.5 text-[13px] text-gray-300 hover:text-white hover:bg-gray-800 transition-colors flex items-center gap-2"
+                      >
+                        <svg class="w-3.5 h-3.5 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>
+                        이전
+                      </button>
+                    {/if}
+                    <div class="border-t border-gray-800 my-1"></div>
+                    {#if (vol.status === 'error' || vol.status === 'error_deleting' || vol.status === 'deleting') && $auth.isSystemAdmin}
+                      <button
+                        onclick={(e) => { e.stopPropagation(); openActionMenu = null; forceDeleteVolume(vol.id, vol.name); }}
+                        disabled={deleting === vol.id}
+                        class="w-full text-left px-3 py-1.5 text-[13px] text-rose-400 hover:text-rose-300 hover:bg-gray-800 disabled:opacity-50 transition-colors flex items-center gap-2"
+                      >
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                        {deleting === vol.id ? '삭제 중...' : '강제 삭제'}
+                      </button>
+                    {/if}
+                    <button
+                      onclick={(e) => { e.stopPropagation(); openActionMenu = null; deleteVolume(vol.id, vol.name); }}
+                      disabled={deleting === vol.id || vol.attachments.length > 0}
+                      title={vol.attachments.length > 0 ? '연결된 볼륨은 삭제할 수 없습니다' : ''}
+                      class="w-full text-left px-3 py-1.5 text-[13px] text-red-400 hover:text-red-300 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                    >
+                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      {deleting === vol.id ? '삭제 중...' : '삭제'}
+                    </button>
+                  </div>
+                {/if}
+              </div>
             </div>
           </div>
         {/each}
