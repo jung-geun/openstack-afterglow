@@ -8,6 +8,7 @@ _import_times: list[tuple[str, float]] = []
 
 
 def _mark(label: str) -> None:
+    print(f"imported {label} at {_time.perf_counter() - _t0:.3f}s")
     _import_times.append((label, _time.perf_counter()))
 
 
