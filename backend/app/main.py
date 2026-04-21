@@ -1,3 +1,19 @@
+# ---------------------------------------------------------------------------
+# Import 프로파일링 — 로거 설정 전에 실행되므로 print 대신 리스트에 기록
+# ---------------------------------------------------------------------------
+import time as _time
+
+_t0 = _time.perf_counter()
+_import_times: list[tuple[str, float]] = []
+
+
+def _mark(label: str) -> None:
+    _import_times.append((label, _time.perf_counter()))
+
+
+# ---------------------------------------------------------------------------
+# stdlib
+# ---------------------------------------------------------------------------
 import asyncio
 import json
 import logging
@@ -6,16 +22,44 @@ import os
 import time
 from datetime import UTC, datetime
 
+_mark("stdlib")
+
+# ---------------------------------------------------------------------------
+# 프레임워크 (fastapi, slowapi)
+# ---------------------------------------------------------------------------
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exception_handlers import http_exception_handler as _default_http_handler
 from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
+_mark("fastapi")
+
+# ---------------------------------------------------------------------------
+# app.api.common
+# ---------------------------------------------------------------------------
 from app.api.common import dashboard_router, libraries_router, metrics_router, site_router, user_dashboard_router
 from app.api.common.metrics import record_request as _record_request
+
+_mark("api.common")
+
+# ---------------------------------------------------------------------------
+# app.api.compute
+# ---------------------------------------------------------------------------
 from app.api.compute import flavors_router, images_router, instances_router, keypairs_router
+
+_mark("api.compute")
+
+# ---------------------------------------------------------------------------
+# app.api.container
+# ---------------------------------------------------------------------------
 from app.api.container import clusters_router, containers_router
+
+_mark("api.container")
+
+# ---------------------------------------------------------------------------
+# app.api.identity (admin, auth, sub-routers)
+# ---------------------------------------------------------------------------
 from app.api.identity import admin_router, auth_router
 from app.api.identity.admin_flavors import router as admin_flavors_router
 from app.api.identity.admin_gpu import router as admin_gpu_router
@@ -24,6 +68,12 @@ from app.api.identity.admin_images import router as admin_images_router
 from app.api.identity.admin_notion import router as admin_notion_router
 from app.api.identity.admin_services import router as admin_services_router
 from app.api.identity.profile import router as profile_router
+
+_mark("api.identity")
+
+# ---------------------------------------------------------------------------
+# app.api.k3s + network + storage
+# ---------------------------------------------------------------------------
 from app.api.k3s import k3s_callback_router, k3s_clusters_router, k3s_health_router
 from app.api.network import loadbalancers_router, networks_router, routers_router, security_groups_router
 from app.api.storage import (
@@ -35,8 +85,16 @@ from app.api.storage import (
     volume_snapshots_router,
     volumes_router,
 )
+
+_mark("api.k3s_network_storage")
+
+# ---------------------------------------------------------------------------
+# 기타 앱 유틸리티
+# ---------------------------------------------------------------------------
 from app.rate_limit import limiter
 from app.utils.version import read_app_version
+
+_mark("misc")
 
 # ---------------------------------------------------------------------------
 # Structured JSON logging
@@ -106,6 +164,18 @@ def _setup_logging() -> None:
 
 _setup_logging()
 _logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Import 프로파일링 결과 출력 (로거가 준비된 시점에 1회)
+# ---------------------------------------------------------------------------
+_prev = _t0
+_profile: dict[str, float] = {}
+for _label, _ts in _import_times:
+    _profile[_label] = round((_ts - _prev) * 1000, 1)
+    _prev = _ts
+_profile["total"] = round((_prev - _t0) * 1000, 1)
+_logger.info("import-profile", extra={"import_ms": _profile})
+del _prev, _label, _ts, _profile  # 모듈 네임스페이스 정리
 
 _is_production = os.environ.get("AFTERGLOW_ENV", "development") == "production"
 
