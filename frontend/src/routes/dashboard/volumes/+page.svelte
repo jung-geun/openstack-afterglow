@@ -313,15 +313,15 @@
       <!-- Volume custom table -->
       <div class="bg-[#0B1220] border border-gray-800 rounded-[10px] overflow-hidden">
         <!-- Header -->
-        <div class="grid grid-cols-[1.6fr_70px_90px_100px_1fr_80px_80px_56px] px-4 py-2.5 border-b border-gray-800 text-[11px] uppercase tracking-wider text-gray-500 font-medium">
+        <div class="grid grid-cols-[1fr_60px_0px_32px_0px_0px_0px_0px] sm:grid-cols-[1.6fr_70px_90px_100px_0px_0px_0px_0px] lg:grid-cols-[1.6fr_70px_90px_100px_1fr_80px_80px_56px] px-4 py-2.5 border-b border-gray-800 text-[11px] uppercase tracking-wider text-gray-500 font-medium">
           <div>이름</div>
           <div>크기</div>
-          <div>유형</div>
-          <div>상태</div>
-          <div>연결</div>
-          <div>부트</div>
-          <div class="text-center">자동 백업</div>
-          <div></div>
+          <div class="hidden sm:block">유형</div>
+          <div class="whitespace-nowrap">상태</div>
+          <div class="hidden lg:block">연결</div>
+          <div class="hidden lg:block">부트</div>
+          <div class="hidden lg:block text-center whitespace-nowrap">자동 백업</div>
+          <div class="hidden lg:block"></div>
         </div>
         <!-- Rows -->
         {#each volumes as vol (vol.id)}
@@ -330,11 +330,11 @@
             onkeydown={(e) => e.key === 'Enter' && openVolumePanel(vol.id)}
             tabindex="0"
             role="button"
-            class="grid grid-cols-[1.6fr_70px_90px_100px_1fr_80px_80px_56px] px-4 py-3 text-[13px] items-center border-b border-gray-800 hover:bg-gray-800/30 transition-colors cursor-pointer last:border-b-0 {selectedVolumeId === vol.id ? 'bg-gray-800/30' : ''}"
+            class="grid grid-cols-[1fr_60px_0px_32px_0px_0px_0px_0px] sm:grid-cols-[1.6fr_70px_90px_100px_0px_0px_0px_0px] lg:grid-cols-[1.6fr_70px_90px_100px_1fr_80px_80px_56px] px-4 py-3 text-[13px] items-center border-b border-gray-800 hover:bg-gray-800/30 transition-colors cursor-pointer last:border-b-0 {selectedVolumeId === vol.id ? 'bg-gray-800/30' : ''}"
           >
             <!-- 이름 -->
             <div class="flex items-center gap-2.5 min-w-0">
-              <div class="shrink-0 w-7 h-7 rounded-md bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center">
+              <div class="hidden sm:flex shrink-0 w-7 h-7 rounded-md bg-cyan-500/15 border border-cyan-500/30 items-center justify-center">
                 <svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
                 </svg>
@@ -351,7 +351,7 @@
             <!-- 크기 -->
             <div class="text-gray-300 font-mono text-[12px]">{formatStorage(vol.size)}</div>
             <!-- 유형 badge -->
-            <div>
+            <div class="hidden sm:block">
               <span class="text-[11px] px-2 py-0.5 rounded-md bg-gray-800 border border-gray-700 text-gray-300 font-mono">
                 {vol.volume_type ?? '기본'}
               </span>
@@ -359,7 +359,7 @@
             <!-- 상태 -->
             <div><StatusChip status={vol.status} /></div>
             <!-- 연결 -->
-            <div class="text-[12px]">
+            <div class="hidden lg:block text-[12px]">
               {#if vol.attachments.length > 0}
                 <span class="text-blue-400">{vol.attachments.length}개 연결</span>
               {:else}
@@ -367,13 +367,13 @@
               {/if}
             </div>
             <!-- 부트 badge -->
-            <div>
+            <div class="hidden lg:block">
               {#if vol.attachments.some((a: Record<string, unknown>) => a.device === '/dev/vda' || a.device === '/dev/sda')}
                 <span class="text-[11px] px-2 py-0.5 rounded-md bg-blue-900/30 border border-blue-800 text-blue-400">부트</span>
               {/if}
             </div>
             <!-- 자동 백업 토글 -->
-            <div class="flex justify-center" onclick={(e) => e.stopPropagation()} role="none">
+            <div class="hidden lg:flex justify-center" onclick={(e) => e.stopPropagation()} role="none">
               <button
                 onclick={(e) => { e.stopPropagation(); toggleAutoBackup(vol.id); }}
                 disabled={autoBackupToggling === vol.id}
@@ -384,7 +384,7 @@
               </button>
             </div>
             <!-- 액션 드롭다운 -->
-            <div class="flex justify-end" onclick={(e) => e.stopPropagation()} role="none" data-action-menu>
+            <div class="hidden lg:flex justify-end" onclick={(e) => e.stopPropagation()} role="none" data-action-menu>
               <div class="relative" data-action-menu>
                 <button
                   onclick={(e) => { e.stopPropagation(); openActionMenu = openActionMenu === vol.id ? null : vol.id; }}

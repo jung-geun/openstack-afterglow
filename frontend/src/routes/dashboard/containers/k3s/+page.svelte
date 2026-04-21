@@ -397,12 +397,12 @@
     {#snippet actions()}
       <button
         onclick={() => { showDeleted = !showDeleted; fetchClusters(); }}
-        class="text-xs px-3 py-1.5 rounded border transition-colors {showDeleted ? 'border-gray-500 text-gray-300 bg-gray-800' : 'border-gray-700 text-gray-500 hover:border-gray-500 hover:text-gray-400'}"
+        class="hidden sm:inline-flex text-xs px-3 py-1.5 rounded border transition-colors {showDeleted ? 'border-gray-500 text-gray-300 bg-gray-800' : 'border-gray-700 text-gray-500 hover:border-gray-500 hover:text-gray-400'}"
       >
         {showDeleted ? '삭제 이력 숨기기' : '삭제 이력 보기'}
       </button>
       <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={5} />
-      <RefreshButton {refreshing} onclick={forceRefresh} />
+      <span class="hidden sm:inline-flex"><RefreshButton {refreshing} onclick={forceRefresh} /></span>
       <button onclick={openCreateModal}
         class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
         + 클러스터 생성

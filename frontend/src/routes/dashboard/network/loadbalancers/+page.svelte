@@ -4,7 +4,6 @@
   import { api, ApiError } from '$lib/api/client';
   import type { LoadBalancer } from '$lib/types/resources';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
-  import RefreshButton from '$lib/components/RefreshButton.svelte';
   import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
   import SlidePanel from '$lib/components/SlidePanel.svelte';
   import LoadBalancerDetailPanel from '$lib/components/LoadBalancerDetailPanel.svelte';
@@ -25,7 +24,6 @@
 
   let loadbalancers = $state<LoadBalancer[]>([]);
   let loading = $state(true);
-  let refreshing = $state(false);
   let error = $state('');
   let autoRefresh = $state(false);
 
@@ -37,15 +35,6 @@
       error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
     } finally {
       loading = false;
-    }
-  }
-
-  async function forceRefresh() {
-    refreshing = true;
-    try {
-      await fetchLoadbalancers({ refresh: true });
-    } finally {
-      refreshing = false;
     }
   }
 
@@ -66,7 +55,6 @@
   <PageHeader breadcrumb="NETWORK / LOADBALANCERS" title="로드밸런서">
     {#snippet actions()}
       <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={30} />
-      <RefreshButton {refreshing} onclick={forceRefresh} />
       <a href="/dashboard/network/loadbalancers/new" class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 로드밸런서 생성</a>
     {/snippet}
   </PageHeader>

@@ -162,7 +162,7 @@
 			<div class="text-lg">보안 그룹이 없습니다</div>
 		</div>
 	{:else}
-		<div class="grid grid-cols-[280px_1fr] gap-3.5 items-start">
+		<div class="grid grid-cols-1 sm:grid-cols-[280px_1fr] gap-3.5 items-start">
 			<!-- Left panel: SG list -->
 			<div class="flex flex-col gap-2">
 				{#each securityGroups as sg (sg.id)}
@@ -193,8 +193,12 @@
 
 			<!-- Right panel: selected SG rules -->
 			{#if curSg}
-				<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
+				<!-- 모바일: 전체화면 오버레이 / 데스크톱: 인라인 -->
+				<div class="fixed inset-0 z-50 bg-gray-950 overflow-y-auto p-4 sm:static sm:inset-auto sm:z-auto sm:bg-gray-900 sm:border sm:border-gray-800 sm:rounded-2xl sm:p-5 sm:overflow-visible">
 					<div class="flex items-center mb-3.5">
+						<button onclick={() => selectedSg = null} class="sm:hidden mr-2 text-gray-400 hover:text-white p-1">
+							<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+						</button>
 						<div>
 							<div class="text-white text-[15px] font-semibold font-mono">{curSg.name}</div>
 							{#if curSg.description}

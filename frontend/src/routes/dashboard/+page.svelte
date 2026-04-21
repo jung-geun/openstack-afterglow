@@ -166,7 +166,7 @@
         <!-- 테이블 헤더 (모바일: 2열, sm+: 4열) -->
         <div class="overflow-x-auto">
           <div class="min-w-[360px]">
-            <div class="grid grid-cols-[1.7fr_100px_130px_100px] sm:grid-cols-[1.7fr_110px_130px_120px] px-3.5 py-2 bg-[#0B1220] rounded-t-[10px] border border-gray-800 border-b-0 text-[11px] uppercase tracking-wider text-gray-500 font-medium">
+            <div class="grid grid-cols-[1.7fr_100px_130px_0px] sm:grid-cols-[1.7fr_110px_130px_120px] px-3.5 py-2 bg-[#0B1220] rounded-t-[10px] border border-gray-800 border-b-0 text-[11px] uppercase tracking-wider text-gray-500 font-medium">
               <div>NAME</div>
               <div>STATUS</div>
               <div>IP</div>
@@ -175,7 +175,7 @@
             <div class="border border-gray-800 rounded-b-[10px] overflow-hidden">
               {#each recentInstances as inst, i}
                 <a href="/dashboard/compute/instances"
-                  class="grid grid-cols-[1.7fr_100px_130px_100px] sm:grid-cols-[1.7fr_110px_130px_120px] px-3.5 py-2.5 text-[13px] items-center hover:bg-gray-800/30 transition-colors {i < recentInstances.length - 1 ? 'border-b border-gray-800' : ''}">
+                  class="grid grid-cols-[1.7fr_100px_130px_0px] sm:grid-cols-[1.7fr_110px_130px_120px] px-3.5 py-2.5 text-[13px] items-center hover:bg-gray-800/30 transition-colors {i < recentInstances.length - 1 ? 'border-b border-gray-800' : ''}">
                   <div class="text-white font-medium truncate">{inst.name}</div>
                   <div><StatusChip status={inst.status} /></div>
                   <div class="text-gray-300 font-mono text-xs">{getFirstIp(inst)}</div>

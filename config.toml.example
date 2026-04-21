@@ -160,7 +160,7 @@ available_visible = false
 [database]
 # k3s 클러스터 영속화용 MariaDB/MySQL 연결 URL (선택적)
 # 미설정 시 기존 Redis 방식으로 동작
-# url = "mysql+asyncmy://afterglow:password@mariadb.example.com:3306/afterglow"
+# url = "mysql+aiomysql://afterglow:password@mariadb.example.com:3306/afterglow"
 url = ""
 # 커넥션 풀 설정
 pool_size = 5

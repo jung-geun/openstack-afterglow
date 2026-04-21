@@ -7,6 +7,12 @@ metadata:
     app: afterglow-worker
 spec:
   replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app: afterglow-worker
@@ -15,13 +21,12 @@ spec:
       labels:
         app: afterglow-worker
     spec:
+      terminationGracePeriodSeconds: 30
       containers:
         - name: worker
           image: ghcr.io/jung-geun/afterglow-api:latest
           imagePullPolicy: Always
           command:
-            - "uv"
-            - "run"
             - "python"
             - "-m"
             - "app.worker"
@@ -51,7 +56,6 @@ spec:
                 secretKeyRef:
                   name: afterglow-secrets
                   key: DATABASE_URL
-            # 헬스체크 주기 (초) — 기본 180s(3분)
             - name: K3S_HEALTH_INTERVAL
               value: "180"
           volumeMounts:
@@ -61,10 +65,10 @@ spec:
           resources:
             requests:
               memory: "128Mi"
-              cpu: "100m"
+              cpu: "50m"
             limits:
               memory: "256Mi"
-              cpu: "500m"
+              cpu: "300m"
       volumes:
         - name: afterglow-config-volume
           configMap:

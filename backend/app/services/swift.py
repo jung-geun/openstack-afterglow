@@ -10,13 +10,27 @@ Zun "컨테이너"와 혼동 방지를 위해 변수/응답 키에 object_storag
 import logging
 from collections.abc import Iterator
 
+from openstack.exceptions import ResourceNotFound
+
 _logger = logging.getLogger(__name__)
+
+
+def _is_account_not_found(exc: Exception) -> bool:
+    """Ceph RGW에서 Swift 계정이 초기화되지 않은 경우 404를 반환하는지 확인."""
+    return isinstance(exc, ResourceNotFound) or (hasattr(exc, "status_code") and getattr(exc, "status_code", 0) == 404)
 
 
 def list_containers(conn) -> list[dict]:
     """현재 계정의 오브젝트 스토리지 컨테이너(버킷) 목록 반환."""
     try:
-        return [
+        project_id = getattr(conn, "_afterglow_project_id", "unknown")
+        try:
+            endpoint = conn.object_store.get_endpoint()
+        except Exception:
+            endpoint = "(resolve failed)"
+        _logger.info("Swift list_containers: project_id=%s endpoint=%s", project_id, endpoint)
+
+        result = [
             {
                 "name": c.name or "",
                 "count": getattr(c, "count", 0) or 0,
@@ -24,8 +38,13 @@ def list_containers(conn) -> list[dict]:
             }
             for c in conn.object_store.containers()
         ]
-    except Exception:
-        _logger.warning("Swift 컨테이너 목록 조회 실패", exc_info=True)
+        _logger.info("Swift 컨테이너 목록 조회: %d개", len(result))
+        return result
+    except Exception as exc:
+        if _is_account_not_found(exc):
+            _logger.info("Swift 계정 미초기화 (404) — 빈 목록 반환")
+        else:
+            _logger.warning("Swift 컨테이너 목록 조회 실패", exc_info=True)
         return []
 
 
@@ -33,7 +52,9 @@ def count_containers(conn) -> int:
     """현재 계정의 오브젝트 스토리지 컨테이너 수 반환."""
     try:
         return sum(1 for _ in conn.object_store.containers())
-    except Exception:
+    except Exception as exc:
+        if not _is_account_not_found(exc):
+            _logger.debug("Swift 컨테이너 수 조회 실패", exc_info=True)
         return 0
 
 
@@ -44,13 +65,23 @@ def get_account_metadata(conn) -> dict:
     """
     try:
         meta = conn.object_store.get_account_metadata()
-        return {
+        result = {
             "container_count": int(getattr(meta, "account_container_count", 0) or 0),
             "object_count": int(getattr(meta, "account_object_count", 0) or 0),
             "bytes_used": int(getattr(meta, "account_bytes_used", 0) or 0),
         }
-    except Exception:
-        _logger.warning("Swift 계정 메타데이터 조회 실패", exc_info=True)
+        _logger.info(
+            "Swift 계정 메타데이터: containers=%d objects=%d bytes=%d",
+            result["container_count"],
+            result["object_count"],
+            result["bytes_used"],
+        )
+        return result
+    except Exception as exc:
+        if _is_account_not_found(exc):
+            _logger.info("Swift 계정 미초기화 (404) — 기본값 반환")
+        else:
+            _logger.warning("Swift 계정 메타데이터 조회 실패", exc_info=True)
         return {"container_count": 0, "object_count": 0, "bytes_used": 0}
 
 

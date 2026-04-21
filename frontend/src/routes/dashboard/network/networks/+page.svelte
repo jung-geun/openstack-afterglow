@@ -197,14 +197,14 @@
         <div class="text-white text-[15px] font-semibold mb-3.5">네트워크</div>
         <div class="bg-[#0B1220] border border-gray-800 rounded-[10px] overflow-hidden">
           <!-- Header -->
-          <div class="grid grid-cols-[1.4fr_1fr_110px_90px_90px_110px_auto] px-4 py-2.5 border-b border-gray-800 text-[11px] uppercase tracking-wider text-gray-500 font-medium">
+          <div class="grid grid-cols-[1fr_0px_auto_0px_0px_0px_0px] sm:grid-cols-[1.4fr_1fr_100px_80px_80px_100px_56px] px-4 py-2.5 border-b border-gray-800 text-[11px] uppercase tracking-wider text-gray-500 font-medium">
             <div>이름</div>
-            <div>CIDR</div>
+            <div class="hidden sm:block">CIDR</div>
             <div>유형</div>
-            <div>서브넷</div>
-            <div>MTU</div>
-            <div>상태</div>
-            <div></div>
+            <div class="hidden sm:block">서브넷</div>
+            <div class="hidden sm:block">MTU</div>
+            <div class="hidden sm:block">상태</div>
+            <div class="hidden sm:block"></div>
           </div>
           <!-- Rows -->
           {#each networks as net (net.id)}
@@ -213,7 +213,7 @@
               onkeydown={(e) => e.key === 'Enter' && openNetworkPanel(net.id)}
               tabindex="0"
               role="button"
-              class="grid grid-cols-[1.4fr_1fr_110px_90px_90px_110px_auto] px-4 py-3 text-[13px] items-center border-b border-gray-800 hover:bg-gray-800/30 transition-colors cursor-pointer last:border-b-0"
+              class="grid grid-cols-[1fr_0px_auto_0px_0px_0px_0px] sm:grid-cols-[1.4fr_1fr_100px_80px_80px_100px_56px] px-4 py-3 text-[13px] items-center border-b border-gray-800 hover:bg-gray-800/30 transition-colors cursor-pointer last:border-b-0"
             >
               <!-- 이름 -->
               <div class="flex items-center gap-2.5 min-w-0">
@@ -228,7 +228,7 @@
                 </div>
               </div>
               <!-- CIDR -->
-              <div class="text-gray-400 font-mono text-[12px]">—</div>
+              <div class="hidden sm:block text-gray-400 font-mono text-[12px]">—</div>
               <!-- 유형 badge -->
               <div>
                 {#if net.is_external}
@@ -240,13 +240,13 @@
                 {/if}
               </div>
               <!-- 서브넷 -->
-              <div class="text-gray-400 text-[12px]">{net.subnets.length}개</div>
+              <div class="hidden sm:block text-gray-400 text-[12px]">{net.subnets.length}개</div>
               <!-- MTU -->
-              <div class="text-gray-500 font-mono text-[12px]">—</div>
+              <div class="hidden sm:block text-gray-500 font-mono text-[12px]">—</div>
               <!-- 상태 -->
-              <div><StatusChip status={net.status} /></div>
+              <div class="hidden sm:block"><StatusChip status={net.status} /></div>
               <!-- 액션 -->
-              <div onclick={(e) => e.stopPropagation()} role="none">
+              <div class="hidden sm:block" onclick={(e) => e.stopPropagation()} role="none">
                 {#if !net.is_external && !net.is_shared}
                   <button
                     onclick={(e) => { e.stopPropagation(); deleteNetwork(net.id, net.name, net.is_external, net.is_shared); }}

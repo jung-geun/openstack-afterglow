@@ -222,6 +222,7 @@ def get_openstack_connection(token: str, project_id: str) -> openstack.connectio
         token=token,
         project_id=project_id or None,
         region_name=settings.os_region_name,
+        interface="internal",
         api_timeout=30,
         verify=settings.ssl_verify,
     )

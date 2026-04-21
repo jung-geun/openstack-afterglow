@@ -1,0 +1,492 @@
+#!/usr/bin/env python3
+"""config.toml → K8s configmap.yaml + secret.yaml 변환기.
+
+현재 config.toml (및 config.*.toml 오버라이드)을 읽어
+deploy/k8s/secret.yaml과 deploy/k8s/configmap.yaml을 자동 생성합니다.
+
+사용법:
+    python3 generate_k8s.py
+    python3 generate_k8s.py --config /path/to/config.toml
+    python3 generate_k8s.py --output-dir /path/to/deploy/k8s
+
+Python 3.12+ 표준 라이브러리만 사용합니다.
+"""
+
+import argparse
+import os
+import sys
+import tempfile
+import tomllib
+from pathlib import Path
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 상수
+# ─────────────────────────────────────────────────────────────────────────────
+
+SCRIPT_DIR = Path(__file__).parent.resolve()
+REDIS_K8S = "redis://redis.afterglow.svc.cluster.local:6379/0"
+
+# ANSI 색상 (Windows에서는 비활성화)
+_USE_COLOR = os.name != "nt" or os.environ.get("FORCE_COLOR")
+
+
+def _c(code: str, text: str) -> str:
+    return f"\033[{code}m{text}\033[0m" if _USE_COLOR else text
+
+
+def green(t: str) -> str: return _c("32", t)
+def yellow(t: str) -> str: return _c("33", t)
+def red(t: str) -> str: return _c("31", t)
+def dim(t: str) -> str: return _c("2", t)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 설정 로드
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _deep_merge(base: dict, override: dict) -> None:
+    """dict를 재귀적으로 병합 (list는 덮어쓰기, dict는 재귀 병합)."""
+    for k, v in override.items():
+        if k in base and isinstance(base[k], dict) and isinstance(v, dict):
+            _deep_merge(base[k], v)
+        else:
+            base[k] = v
+
+
+def load_config(config_path: Path) -> dict:
+    """config.toml + config.*.toml 오버라이드 파일을 로드하고 딥 머지."""
+    with open(config_path, "rb") as f:
+        cfg = tomllib.load(f)
+    # 알파벳순으로 오버라이드 파일 적용 (뒤 파일이 앞을 이김)
+    for override_path in sorted(config_path.parent.glob("config.*.toml")):
+        # config.toml.example 등은 건너뜀 (확장자가 .toml인 것만)
+        if not override_path.name.endswith(".toml"):
+            continue
+        # 자기 자신은 건너뜀
+        if override_path.resolve() == config_path.resolve():
+            continue
+        with open(override_path, "rb") as f:
+            _deep_merge(cfg, tomllib.load(f))
+        print(f"  {dim(f'오버라이드 로드: {override_path.name}')}")
+    return cfg
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# YAML 헬퍼
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _yaml_str(v: str) -> str:
+    """YAML 스칼라 값을 안전하게 따옴표로 감싸서 렌더링."""
+    if any(c in v for c in ('"', "'", ":", "#", "\n", "\\", "{", "}")):
+        escaped = v.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
+    return f'"{v}"'
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TOML 헬퍼 (렌더링용)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _toml_str(v: str) -> str:
+    """TOML 문자열 값 이스케이프."""
+    return '"' + v.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _toml_bool(v: bool) -> str:
+    return "true" if v else "false"
+
+
+def _toml_list_str(items: list[str]) -> str:
+    return "[" + ", ".join(_toml_str(i) for i in items) + "]"
+
+
+def _toml_val(v) -> str:
+    """Python 값을 TOML 값 문자열로 변환."""
+    if isinstance(v, bool):
+        return _toml_bool(v)
+    if isinstance(v, str):
+        return _toml_str(v)
+    if isinstance(v, (int, float)):
+        return str(v)
+    if isinstance(v, list):
+        if all(isinstance(i, str) for i in v):
+            return _toml_list_str(v)
+        return str(v)
+    return _toml_str(str(v))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# secret.yaml 렌더링
+# ─────────────────────────────────────────────────────────────────────────────
+
+def render_secret(cfg: dict) -> str:
+    """secret.yaml 생성: 비밀 값만 추출."""
+    os_cfg = cfg.get("openstack", {})
+    app = cfg.get("app", {})
+    oidc = cfg.get("gitlab_oidc", {})
+    k3s = cfg.get("k3s", {})
+    db = cfg.get("database", {})
+
+    lines = [
+        "apiVersion: v1",
+        "kind: Secret",
+        "metadata:",
+        "  name: afterglow-secrets",
+        "  namespace: afterglow",
+        "type: Opaque",
+        "stringData:",
+        "  # OpenStack 관리자 계정 비밀번호",
+        f'  OS_PASSWORD: {_yaml_str(os_cfg.get("password", ""))}',
+        "",
+        "  # FastAPI 세션/JWT 서명용 시크릿 키",
+        "  # 생성: python3 -c \"import secrets; print(secrets.token_hex(32))\"",
+        f'  SECRET_KEY: {_yaml_str(app.get("secret_key", ""))}',
+    ]
+
+    client_secret = oidc.get("client_secret", "")
+    if client_secret:
+        lines.extend([
+            "",
+            "  # GitLab OIDC Client Secret",
+            f'  GITLAB_OIDC_CLIENT_SECRET: {_yaml_str(client_secret)}',
+        ])
+
+    enc_key = k3s.get("kubeconfig_encryption_key", "")
+    if enc_key:
+        lines.extend([
+            "",
+            "  # k3s kubeconfig 암호화 키",
+            "  # 생성: python3 -c \"import secrets; print(secrets.token_hex(32))\"",
+            f'  K3S_KUBECONFIG_ENCRYPTION_KEY: {_yaml_str(enc_key)}',
+        ])
+
+    # db_url = db.get("url", "")
+    # if db_url:
+    #     # aiomysql → asyncmy 드라이버 변환 (k8s 배포 표준)
+    #     db_url_k8s = db_url.replace("mysql+aiomysql://", "mysql+asyncmy://")
+    #     lines.extend([
+    #         "",
+    #         "  # 애플리케이션 데이터베이스 연결 URL",
+    #         f'  DATABASE_URL: {_yaml_str(db_url_k8s)}',
+    #     ])
+
+    lines.append("")
+    return "\n".join(lines)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# config.toml 인라인 렌더링 (비밀 제외)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _render_toml_for_k8s(cfg: dict) -> str:
+    """config.toml 전체를 렌더링하되 비밀 값은 주석으로 대체."""
+    os_cfg = cfg.get("openstack", {})
+    app = cfg.get("app", {})
+    cache = cfg.get("cache", {})
+    sess = cfg.get("session", {})
+    nova = cfg.get("nova", {})
+    gpu = cfg.get("gpu", {})
+    svc = cfg.get("services", {})
+    k3s = cfg.get("k3s", {})
+    db = cfg.get("database", {})
+    cors = cfg.get("cors", {})
+    oidc = cfg.get("gitlab_oidc", {})
+    logging_cfg = cfg.get("logging", {})
+
+    lines = [
+        "# Afterglow 통합 설정 파일",
+        "# 비밀 값은 secret.yaml의 환경변수로 주입됩니다.",
+        "",
+    ]
+
+    # [openstack]
+    lines.append("[openstack]")
+    lines.append(f'auth_url = {_toml_str(os_cfg.get("auth_url", ""))}')
+    lines.append(f'project_name = {_toml_str(os_cfg.get("project_name", "admin"))}')
+    lines.append(f'project_domain_name = {_toml_str(os_cfg.get("project_domain_name", "Default"))}')
+    lines.append(f'user_domain_name = {_toml_str(os_cfg.get("user_domain_name", "Default"))}')
+    lines.append(f'region_name = {_toml_str(os_cfg.get("region_name", "RegionOne"))}')
+    lines.append(f'username = {_toml_str(os_cfg.get("username", "admin"))}')
+    lines.append("# password는 secret.yaml의 OS_PASSWORD 환경변수로 주입됩니다")
+    if os_cfg.get("insecure"):
+        lines.append("insecure = true")
+    if os_cfg.get("cacert"):
+        lines.append(f'cacert = {_toml_str(os_cfg["cacert"])}')
+    lines.append("")
+    lines.append("# Manila 설정")
+    lines.append(f'manila_endpoint = {_toml_str(os_cfg.get("manila_endpoint", ""))}')
+    lines.append(f'manila_share_network_id = {_toml_str(os_cfg.get("manila_share_network_id", ""))}')
+    lines.append(f'manila_share_type = {_toml_str(os_cfg.get("manila_share_type", "cephfs"))}')
+    lines.append(f'manila_nfs_share_type = {_toml_str(os_cfg.get("manila_nfs_share_type", "nfstype"))}')
+    lines.append("")
+    lines.append("# Ceph 모니터 (cloud-init CephFS 마운트용, 콤마 구분)")
+    lines.append(f'ceph_monitors = {_toml_str(os_cfg.get("ceph_monitors", ""))}')
+    lines.append("")
+
+    # [app]
+    lines.append("[app]")
+    lines.append(f'backend_port = {app.get("backend_port", 8000)}')
+    lines.append(f'frontend_port = {app.get("frontend_port", 3000)}')
+    lines.append("# secret_key는 secret.yaml의 SECRET_KEY 환경변수로 주입됩니다")
+    lines.append("")
+    lines.append("# 사이트 표시 이름 및 설명")
+    lines.append(f'site_name = {_toml_str(app.get("site_name", "afterglow"))}')
+    lines.append(f'site_description = {_toml_str(app.get("site_description", ""))}')
+    lines.append("")
+    lines.append("# 로고 및 파비콘 경로 (frontend/static/ 기준)")
+    lines.append(f'logo_path = {_toml_str(app.get("logo_path", "/logo.png"))}')
+    lines.append(f'favicon_path = {_toml_str(app.get("favicon_path", "/favicon.ico"))}')
+    lines.append("")
+    lines.append("# 프론트엔드 대시보드 자동 새로고침 간격 (밀리초)")
+    lines.append(f'refresh_interval_ms = {app.get("refresh_interval_ms", 5000)}')
+    lines.append("")
+
+    # [logging] (선택)
+    if logging_cfg:
+        lines.append("[logging]")
+        for k, v in logging_cfg.items():
+            lines.append(f'{k} = {_toml_val(v)}')
+        lines.append("")
+
+    # [cache]
+    lines.append("[cache]")
+    lines.append(f'redis_url = {_toml_str(REDIS_K8S)}')
+    lines.append("# TTL 티어 (초)")
+    lines.append(f'ttl_fast = {cache.get("ttl_fast", 15)}      # 인스턴스, 볼륨, 플로팅IP')
+    lines.append(f'ttl_normal = {cache.get("ttl_normal", 30)}    # 네트워크, 라우터, 대시보드')
+    lines.append(f'ttl_slow = {cache.get("ttl_slow", 60)}      # 키페어, 보안그룹')
+    lines.append(f'ttl_static = {cache.get("ttl_static", 300)}   # 이미지, 플레이버, 토큰 검증')
+    lines.append("")
+
+    # [session]
+    lines.append("[session]")
+    lines.append(f'timeout_seconds = {sess.get("timeout_seconds", 3600)}')
+    lines.append(f'warning_before_seconds = {sess.get("warning_before_seconds", 300)}')
+    lines.append("")
+
+    # [nova]
+    lines.append("[nova]")
+    lines.append(f'default_network_id = {_toml_str(nova.get("default_network_id", ""))}')
+    lines.append(f'default_availability_zone = {_toml_str(nova.get("default_availability_zone", "nova"))}')
+    lines.append(f'boot_volume_size_gb = {nova.get("boot_volume_size_gb", 20)}')
+    lines.append(f'upper_volume_size_gb = {nova.get("upper_volume_size_gb", 50)}')
+    lines.append("")
+
+    # [gpu] + [[gpu.devices]]
+    lines.append("[gpu]")
+    if "available_visible" in gpu:
+        lines.append(f'available_visible = {_toml_bool(gpu["available_visible"])}')
+    lines.append("# GPU 디바이스 맵 (vendor_id/device_id: lspci -nn 출력의 PCI ID)")
+    lines.append("")
+    for dev in gpu.get("devices", []):
+        lines.append("[[gpu.devices]]")
+        lines.append(f'vendor_id = {_toml_str(dev.get("vendor_id", ""))}')
+        lines.append(f'device_id = {_toml_str(dev.get("device_id", ""))}')
+        lines.append(f'name = {_toml_str(dev.get("name", ""))}')
+        lines.append(f'is_audio = {_toml_bool(dev.get("is_audio", False))}')
+        aliases = dev.get("aliases", [])
+        if aliases:
+            lines.append(f'aliases = {_toml_list_str(aliases)}')
+        lines.append("")
+
+    # [services]
+    lines.append("[services]")
+    for svc_name in ("magnum", "manila", "zun", "k3s", "swift", "trove", "barbican"):
+        if svc_name in svc:
+            lines.append(f'{svc_name} = {_toml_bool(svc[svc_name])}')
+    lines.append("")
+
+    # [k3s]
+    lines.append("[k3s]")
+    k3s_keys_str = (
+        "version", "server_flavor_id", "default_agent_flavor_id", "server_image_id",
+        "callback_base_url", "occm_image", "occm_floating_network_id", "occm_public_network_name",
+        "cinder_csi_image", "cinder_csi_default_az", "manila_csi_image", "manila_csi_nfs_image",
+        "manila_csi_share_protocol", "keystone_auth_image", "octavia_ingress_image",
+        "octavia_ingress_subnet_id", "octavia_ingress_floating_network_id",
+        "barbican_kms_image", "barbican_kms_kek_id",
+        "api_lb_floating_network_id", "lb_subnet_id",
+    )
+    k3s_keys_int = ("boot_volume_size_gb",)
+    k3s_keys_bool = (
+        "occm_enabled", "cinder_csi_enabled", "manila_csi_enabled",
+        "keystone_auth_enabled", "octavia_ingress_enabled", "barbican_kms_enabled",
+        "api_lb_enabled",
+    )
+    for key in k3s_keys_str:
+        if key in k3s:
+            lines.append(f'{key} = {_toml_str(k3s[key])}')
+    for key in k3s_keys_int:
+        if key in k3s:
+            lines.append(f'{key} = {k3s[key]}')
+    for key in k3s_keys_bool:
+        if key in k3s:
+            lines.append(f'{key} = {_toml_bool(k3s[key])}')
+    lines.append("# kubeconfig_encryption_key는 secret.yaml의 K3S_KUBECONFIG_ENCRYPTION_KEY 환경변수로 주입됩니다")
+    lines.append("")
+
+    # [database] (url은 비밀, 나머지는 포함)
+    if db:
+        lines.append("[database]")
+        lines.append("# url은 secret.yaml의 DATABASE_URL 환경변수로 주입됩니다")
+        if "pool_size" in db:
+            lines.append(f'pool_size = {db["pool_size"]}')
+        if "max_overflow" in db:
+            lines.append(f'max_overflow = {db["max_overflow"]}')
+        if "auto_create_tables" in db:
+            lines.append(f'auto_create_tables = {_toml_bool(db["auto_create_tables"])}')
+        lines.append("")
+
+    # [cors]
+    lines.append("[cors]")
+    lines.append(f'origins = {_toml_str(cors.get("origins", "http://localhost:3000"))}')
+    lines.append("")
+
+    # [gitlab_oidc]
+    lines.append("[gitlab_oidc]")
+    lines.append(f'enabled = {_toml_bool(oidc.get("enabled", False))}')
+    lines.append(f'gitlab_url = {_toml_str(oidc.get("gitlab_url", "https://gitlab.com"))}')
+    lines.append(f'client_id = {_toml_str(oidc.get("client_id", ""))}')
+    lines.append("# client_secret은 secret.yaml의 GITLAB_OIDC_CLIENT_SECRET 환경변수로 주입됩니다")
+    lines.append(f'idp_id = {_toml_str(oidc.get("idp_id", "gitlab"))}')
+    lines.append(f'protocol_id = {_toml_str(oidc.get("protocol_id", "openid"))}')
+    lines.append(f'redirect_uri = {_toml_str(oidc.get("redirect_uri", ""))}')
+    lines.append(f'scopes = {_toml_str(oidc.get("scopes", "openid email profile read_user"))}')
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# configmap.yaml 렌더링
+# ─────────────────────────────────────────────────────────────────────────────
+
+def render_configmap(cfg: dict) -> str:
+    """configmap.yaml 생성: Redis URL, Origin, config.toml 인라인."""
+    app = cfg.get("app", {})
+    cors = cfg.get("cors", {})
+    frontend_port = app.get("frontend_port", 3000)
+
+    # APP_ORIGIN: CORS origins의 첫 번째 값 사용
+    origins_raw = cors.get("origins", f"http://localhost:{frontend_port}")
+    app_origin = origins_raw.split(",")[0].strip()
+
+    # config.toml 인라인 (4칸 들여쓰기)
+    toml_content = _render_toml_for_k8s(cfg)
+    indented = "\n".join("    " + line for line in toml_content.splitlines())
+
+    lines = [
+        "apiVersion: v1",
+        "kind: ConfigMap",
+        "metadata:",
+        "  name: afterglow-config",
+        "  namespace: afterglow",
+        "data:",
+        f'  APP_REDIS_URL: "{REDIS_K8S}"',
+        f'  # 실제 서비스 도메인으로 변경 필요 (예: https://afterglow.example.com)',
+        f'  APP_ORIGIN: "{app_origin}"',
+        "  config.toml: |",
+        indented,
+        "",
+    ]
+    return "\n".join(lines)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 파일 쓰기
+# ─────────────────────────────────────────────────────────────────────────────
+
+def write_atomic(path: Path, content: str) -> None:
+    """임시 파일로 쓴 뒤 원자적으로 교체 (부분 쓰기 방지)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".gen_k8s_")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 진입점
+# ─────────────────────────────────────────────────────────────────────────────
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="config.toml → K8s configmap.yaml + secret.yaml 변환기"
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=SCRIPT_DIR / "config.toml",
+        help="config.toml 경로 (기본값: ./config.toml)",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=SCRIPT_DIR / "deploy" / "k8s",
+        help="출력 디렉토리 (기본값: ./deploy/k8s)",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="파일을 쓰지 않고 내용만 출력",
+    )
+    args = parser.parse_args()
+
+    config_path = args.config.resolve()
+    output_dir = args.output_dir.resolve()
+
+    if not config_path.exists():
+        print(f"{red('오류')}: config.toml을 찾을 수 없습니다: {config_path}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"  설정 로드: {dim(str(config_path))}")
+    cfg = load_config(config_path)
+    print(f"  {green('✓')} 설정 로드 완료")
+    print()
+
+    # 렌더링
+    secret_content = render_secret(cfg)
+    configmap_content = render_configmap(cfg)
+
+    if args.dry_run:
+        print("─" * 60)
+        print("# secret.yaml")
+        print("─" * 60)
+        print(secret_content)
+        print("─" * 60)
+        print("# configmap.yaml")
+        print("─" * 60)
+        print(configmap_content)
+        return
+
+    # 파일 쓰기
+    secret_path = output_dir / "secret.yaml"
+    configmap_path = output_dir / "configmap.yaml"
+
+    write_atomic(secret_path, secret_content)
+    print(f"  {green('✓')} {secret_path}")
+
+    write_atomic(configmap_path, configmap_content)
+    print(f"  {green('✓')} {configmap_path}")
+
+    print()
+    print(f"{green('완료!')} K8s 매니페스트가 생성되었습니다.")
+    print()
+    print(f"  {yellow('주의')}: secret.yaml에 비밀번호가 평문으로 저장됩니다.")
+    print(f"        git에 커밋하지 마세요.")
+    print()
+    print("  적용 방법:")
+    print(f"    kubectl apply -f {secret_path}")
+    print(f"    kubectl apply -f {configmap_path}")
+    print(f"    kubectl rollout restart deployment -n afterglow")
+
+
+if __name__ == "__main__":
+    main()

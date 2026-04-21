@@ -175,9 +175,9 @@
 			</StatTile>
 		</div>
 
-		<!-- 프로젝트별 사용량 비교 -->
+		<!-- 프로젝트별 사용량 비교 (모바일에서 숨김) -->
 		{#if data.projects.length > 0}
-			<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 mb-5">
+			<div class="hidden sm:block bg-gray-900 border border-gray-800 rounded-2xl p-5 mb-5">
 				<div class="text-white text-[15px] font-semibold mb-3.5">프로젝트별 사용량</div>
 				<div class="bg-[#0B1220] border border-gray-800 rounded-[10px] overflow-hidden">
 					<div class="grid grid-cols-[1.5fr_80px_80px_90px_80px_90px] px-4 py-2.5 border-b border-gray-800 text-[11px] uppercase tracking-wider text-gray-500 font-medium">

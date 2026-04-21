@@ -12,8 +12,8 @@
 </script>
 
 <span
-  class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium border leading-tight {c.bg} {c.border} {c.text} {className}"
+  class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium border leading-tight max-w-full {c.bg} {c.border} {c.text} {className}"
 >
-  <span class="w-1.5 h-1.5 rounded-full {c.dot}"></span>
-  {status ?? '—'}
+  <span class="w-1.5 h-1.5 rounded-full shrink-0 {c.dot}"></span>
+  <span class="truncate">{status ?? '—'}</span>
 </span>

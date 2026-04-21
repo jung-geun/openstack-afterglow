@@ -7,6 +7,12 @@ metadata:
     app: frontend
 spec:
   replicas: 2
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app: frontend
@@ -15,46 +21,49 @@ spec:
       labels:
         app: frontend
     spec:
+      terminationGracePeriodSeconds: 20
       containers:
         - name: frontend
-          # 이미지 태그: latest (릴리즈), dev (main 브랜치), v1.2.3 (버전 태그)
-          # 실제 레지스트리 주소로 변경 필요
-          # 예: ghcr.io/myorg/afterglow:latest
-          #     registry.gitlab.com/myorg/afterglow/frontend:latest
           image: ghcr.io/jung-geun/afterglow:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 3000
           env:
-            # 실제 서비스 도메인으로 변경 필요
             - name: ORIGIN
               valueFrom:
                 configMapKeyRef:
                   name: afterglow-config
                   key: APP_ORIGIN
-            # PUBLIC_API_BASE는 브라우저에서 직접 접근 가능한 URL
-            # Ingress를 통해 /api 경로를 백엔드로 라우팅하는 경우 ORIGIN과 동일하게 설정
             - name: PUBLIC_API_BASE
               valueFrom:
                 configMapKeyRef:
                   name: afterglow-config
                   key: APP_ORIGIN
+          startupProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 2
+            periodSeconds: 2
+            failureThreshold: 15
           livenessProbe:
             httpGet:
               path: /
               port: 3000
-            initialDelaySeconds: 10
             periodSeconds: 15
+            failureThreshold: 3
+            timeoutSeconds: 3
           readinessProbe:
             httpGet:
               path: /
               port: 3000
-            initialDelaySeconds: 5
             periodSeconds: 5
+            failureThreshold: 2
+            timeoutSeconds: 3
           resources:
             requests:
-              memory: "500Mi"
-              cpu: "100m"
+              memory: "128Mi"
+              cpu: "50m"
             limits:
-              memory: "1024Mi"
-              cpu: "500m"
+              memory: "512Mi"
+              cpu: "300m"
