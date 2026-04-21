@@ -301,5 +301,5 @@
 :root.light .border-amber-600\/50 { border-color: rgba(217,119,6,0.35) !important; }
 :root.light .hover\:bg-amber-500\/25:hover { background-color: rgba(245,158,11,0.12) !important; }
 
-/* 드롭다운 메뉴 배경 (라이트에서 bg-gray-900 오버라이드) */
+/* 드롭다운 메뉴 그림자 (라이트에서 shadow-xl 오버라이드) */
 :root.light .shadow-xl { box-shadow: 0 10px 25px rgba(0,0,0,0.12) !important; }

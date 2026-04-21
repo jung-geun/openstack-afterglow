@@ -144,7 +144,7 @@
 			</div>
 			<div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
 				<div class="text-xs text-gray-500 uppercase tracking-wide mb-1">사용 용량</div>
-				<div class="text-2xl font-bold text-white">{formatStorage(Math.round(account.bytes_used / 1073741824))}</div>
+				<div class="text-2xl font-bold text-white">{formatStorage(account.bytes_used / 1_000_000_000)}</div>
 			</div>
 		</div>
 	{/if}

@@ -198,7 +198,7 @@
 						</div>
 						<div>
 							<div class="text-[11px] uppercase tracking-wider font-medium text-gray-500">크기</div>
-							<div class="text-white font-mono text-sm mt-0.5">{formatStorage(Math.round(c.bytes / 1073741824))}</div>
+							<div class="text-white font-mono text-sm mt-0.5">{formatStorage(c.bytes / 1_000_000_000)}</div>
 						</div>
 					</div>
 

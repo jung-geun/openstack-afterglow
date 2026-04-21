@@ -117,20 +117,30 @@ async def list_objects(
         raise HTTPException(status_code=500, detail="오브젝트 목록 조회 실패")
 
 
+_MAX_UPLOAD_BYTES = 5 * 1024 * 1024 * 1024  # 5 GB
+
+
 @router.post("/{container_name}/objects", status_code=201)
 async def upload_object(
     container_name: str,
     file: UploadFile,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    """오브젝트 업로드 (multipart/form-data)."""
+    """오브젝트 업로드 (multipart/form-data). 최대 5 GB."""
     from app.services import swift
+
+    if file.size is not None and file.size > _MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="업로드 파일 크기는 5 GB를 초과할 수 없습니다")
 
     try:
         data = await file.read()
+        if len(data) > _MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail="업로드 파일 크기는 5 GB를 초과할 수 없습니다")
         object_name = file.filename or "unnamed"
         content_type = file.content_type or ""
         return await asyncio.to_thread(swift.upload_object, conn, container_name, object_name, data, content_type)
+    except HTTPException:
+        raise
     except Exception:
         raise HTTPException(status_code=500, detail="오브젝트 업로드 실패")
 
@@ -162,8 +172,17 @@ async def download_object(
         if content_length:
             headers["Content-Length"] = str(content_length)
 
-        def _iter():
-            yield from chunks
+        sentinel = object()
+
+        def _next_chunk():
+            return next(chunks, sentinel)
+
+        async def _iter():
+            while True:
+                chunk = await asyncio.to_thread(_next_chunk)
+                if chunk is sentinel:
+                    break
+                yield chunk
 
         return StreamingResponse(_iter(), media_type=content_type, headers=headers)
     except Exception:

@@ -222,7 +222,7 @@ def get_openstack_connection(token: str, project_id: str) -> openstack.connectio
         token=token,
         project_id=project_id or None,
         region_name=settings.os_region_name,
-        interface="internal",
+        interface=settings.os_interface,
         api_timeout=30,
         verify=settings.ssl_verify,
     )
@@ -245,6 +245,7 @@ def get_admin_connection_for_project(project_id: str) -> openstack.connection.Co
         user_domain_name=settings.os_user_domain_name,
         project_domain_name=settings.os_project_domain_name,
         region_name=settings.os_region_name,
+        interface=settings.os_interface,
         api_timeout=30,
         verify=settings.ssl_verify,
     )

@@ -80,7 +80,10 @@ export function deriveBreadcrumb(pathname: string): BreadcrumbResult {
   const relevant = parts.slice(1).filter(p => !isUuid(p) && p !== 'new');
 
   if (relevant.length === 0) {
-    return { breadcrumb: '', title: '대시보드' };
+    // /dashboard 또는 /admin 루트인 경우 첫 세그먼트로 타이틀 결정
+    const root = parts[0];
+    const rootTitle = ROUTE_LABELS[root] ?? root;
+    return { breadcrumb: '', title: rootTitle };
   }
 
   const labels = relevant.map(p => {

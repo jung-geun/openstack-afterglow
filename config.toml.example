@@ -12,6 +12,7 @@ project_name = "admin"
 project_domain_name = "Default"
 user_domain_name = "Default"
 region_name = "RegionOne"
+# interface = "internal"          # OpenStack 엔드포인트 타입: "internal" | "public" | "admin" (기본값: internal)
 username = "admin"
 password = "change-me-in-production"
 # insecure = false                # 자체 서명 인증서 사용 시 true로 설정

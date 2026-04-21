@@ -85,9 +85,13 @@
   }
 
   async function copyFingerprint(fingerprint: string) {
-    await navigator.clipboard.writeText(fingerprint);
-    copiedFingerprint = fingerprint;
-    setTimeout(() => (copiedFingerprint = null), 2000);
+    try {
+      await navigator.clipboard.writeText(fingerprint);
+      copiedFingerprint = fingerprint;
+      setTimeout(() => (copiedFingerprint = null), 2000);
+    } catch {
+      // 비보안 컨텍스트(HTTP) 또는 권한 거부 시 조용히 무시
+    }
   }
 
   function handleFileUpload(event: Event) {

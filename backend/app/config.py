@@ -70,6 +70,7 @@ def _load_toml() -> dict:
     flat["os_project_domain_name"] = ost.get("project_domain_name", "Default")
     flat["os_user_domain_name"] = ost.get("user_domain_name", "Default")
     flat["os_region_name"] = ost.get("region_name", "RegionOne")
+    flat["os_interface"] = ost.get("interface", "internal")
     flat["os_insecure"] = ost.get("insecure", False)
     flat["os_cacert"] = ost.get("cacert", "")
     flat["os_manila_endpoint"] = ost.get("manila_endpoint", "")
@@ -213,6 +214,7 @@ class Settings(BaseSettings):
     os_project_domain_name: str = "Default"
     os_user_domain_name: str = "Default"
     os_region_name: str = "RegionOne"
+    os_interface: str = "internal"
     os_insecure: bool = False
     os_cacert: str = ""
 
