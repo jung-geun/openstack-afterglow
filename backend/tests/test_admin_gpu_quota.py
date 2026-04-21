@@ -11,7 +11,6 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 인증 (admin-only) 테스트
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -31,9 +30,7 @@ async def test_get_default_gpu_quotas_requires_admin(non_admin_client):
 
 @pytest.mark.asyncio
 async def test_set_default_gpu_quota_requires_admin(non_admin_client):
-    resp = await non_admin_client.put(
-        "/api/admin/gpu-quotas/defaults", json={"gpu_type": "RTX3090", "limit": 4}
-    )
+    resp = await non_admin_client.put("/api/admin/gpu-quotas/defaults", json={"gpu_type": "RTX3090", "limit": 4})
     assert resp.status_code == 403
 
 
@@ -51,9 +48,7 @@ async def test_get_gpu_quotas_requires_admin(non_admin_client):
 
 @pytest.mark.asyncio
 async def test_set_gpu_quota_requires_admin(non_admin_client):
-    resp = await non_admin_client.put(
-        "/api/admin/gpu-quotas/proj-1", json={"gpu_type": "RTX3090", "limit": 2}
-    )
+    resp = await non_admin_client.put("/api/admin/gpu-quotas/proj-1", json={"gpu_type": "RTX3090", "limit": 2})
     assert resp.status_code == 403
 
 
@@ -78,9 +73,7 @@ async def test_get_default_gpu_quotas_db_not_initialized(admin_client):
 @pytest.mark.asyncio
 async def test_set_default_gpu_quota_db_not_initialized(admin_client):
     with patch("app.database.is_db_available", return_value=False):
-        resp = await admin_client.put(
-            "/api/admin/gpu-quotas/defaults", json={"gpu_type": "RTX3090", "limit": 4}
-        )
+        resp = await admin_client.put("/api/admin/gpu-quotas/defaults", json={"gpu_type": "RTX3090", "limit": 4})
     assert resp.status_code == 503
 
 
@@ -101,9 +94,7 @@ async def test_get_gpu_quotas_db_not_initialized(admin_client):
 @pytest.mark.asyncio
 async def test_set_gpu_quota_db_not_initialized(admin_client):
     with patch("app.database.is_db_available", return_value=False):
-        resp = await admin_client.put(
-            "/api/admin/gpu-quotas/proj-1", json={"gpu_type": "RTX3090", "limit": 2}
-        )
+        resp = await admin_client.put("/api/admin/gpu-quotas/proj-1", json={"gpu_type": "RTX3090", "limit": 2})
     assert resp.status_code == 503
 
 
@@ -176,13 +167,9 @@ async def test_set_default_gpu_quota_success(admin_client):
     with patch("app.database.is_db_available", return_value=True):
         with patch(
             "app.services.gpu_quota.set_project_gpu_quota",
-            new=AsyncMock(
-                return_value={"project_id": "__default__", "gpu_type": "RTX3090", "limit": 4}
-            ),
+            new=AsyncMock(return_value={"project_id": "__default__", "gpu_type": "RTX3090", "limit": 4}),
         ):
-            resp = await admin_client.put(
-                "/api/admin/gpu-quotas/defaults", json={"gpu_type": "RTX3090", "limit": 4}
-            )
+            resp = await admin_client.put("/api/admin/gpu-quotas/defaults", json={"gpu_type": "RTX3090", "limit": 4})
     assert resp.status_code == 200
     data = resp.json()
     assert data["gpu_type"] == "RTX3090"
@@ -210,13 +197,9 @@ async def test_set_gpu_quota_success(admin_client):
     with patch("app.database.is_db_available", return_value=True):
         with patch(
             "app.services.gpu_quota.set_project_gpu_quota",
-            new=AsyncMock(
-                return_value={"project_id": "proj-1", "gpu_type": "RTX3090", "limit": 2}
-            ),
+            new=AsyncMock(return_value={"project_id": "proj-1", "gpu_type": "RTX3090", "limit": 2}),
         ):
-            resp = await admin_client.put(
-                "/api/admin/gpu-quotas/proj-1", json={"gpu_type": "RTX3090", "limit": 2}
-            )
+            resp = await admin_client.put("/api/admin/gpu-quotas/proj-1", json={"gpu_type": "RTX3090", "limit": 2})
     assert resp.status_code == 200
     data = resp.json()
     assert data["project_id"] == "proj-1"
@@ -335,7 +318,7 @@ async def test_get_gpu_quotas_multiple_types(admin_client):
                     resp = await admin_client.get("/api/admin/gpu-quotas/proj-1")
     assert resp.status_code == 200
     data = {item["gpu_type"]: item for item in resp.json()}
-    assert data["RTX3090"]["available"] == 2   # 4 - 2
+    assert data["RTX3090"]["available"] == 2  # 4 - 2
     assert data["RTX4090"]["available"] == -1  # 무제한
 
 
