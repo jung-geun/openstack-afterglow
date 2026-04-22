@@ -241,6 +241,10 @@ class TopologyRouter(BaseModel):
     name: str
     status: str
     external_gateway_network_id: str | None = None
+    external_gateway_ips: list[str] = []  # GW 외부 고정 IP 목록 (SNAT IP 포함)
+    interface_ips: list[dict] = []  # [{ip_address, subnet_id}] 내부 인터페이스 IP
+    is_distributed: bool = False  # DVR 여부
+    is_ha: bool = False  # HA 여부
     connected_subnet_ids: list[str] = []
     dvr_subnet_ids: list[str] = []
     project_id: str | None = None

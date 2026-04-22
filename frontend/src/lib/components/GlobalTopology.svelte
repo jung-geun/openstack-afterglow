@@ -14,7 +14,12 @@
 	interface TopologyRouter {
 		id: string; name: string; status: string;
 		external_gateway_network_id: string | null;
+		external_gateway_ips: string[];
+		interface_ips: { ip_address: string; subnet_id: string }[];
+		is_distributed: boolean;
+		is_ha: boolean;
 		connected_subnet_ids: string[];
+		dvr_subnet_ids: string[];
 		project_id: string | null;
 	}
 	interface TopologyInstance {
@@ -129,6 +134,9 @@
 		data.networks.flatMap(n => n.subnet_details.map(s => [s.id, s]))
 	));
 
+	// router id → TopologyRouter (상세 정보 툴팁용)
+	const routerById = $derived(new Map(data.routers.map(r => [r.id, r])));
+
 	// ── Item rows ─────────────────────────────────────────────────────────────
 	interface ItemRow {
 		type: 'router' | 'instance';
@@ -219,7 +227,7 @@
 	const barH  = $derived(Math.max(rows.length, 1) * ROW_H + 20);
 	// Extra right space: items are placed to the RIGHT of their rightmost bar
 	const svgW  = $derived(Math.max(640,
-		L_PAD + orderedNetworks.length * COL_W + IP_GAP + ITEM_W + 40
+		L_PAD + Math.max(0, orderedNetworks.length - 1) * COL_W + IP_GAP + ITEM_W + 40
 	));
 	const svgH  = $derived(TOP_H + barH + BOT_H);
 
@@ -479,8 +487,9 @@
 					fill={rStroke} font-size="9"
 					font-family="ui-sans-serif, system-ui, sans-serif"
 					style="pointer-events:none"
-				>라우터 · {row.status}</text>
-				<title>{row.name}{'\n'}ID: {row.id}{'\n'}상태: {row.status}</title>
+				>라우터 · {row.status}{routerById.get(row.id)?.is_distributed ? ' · DVR' : ''}{routerById.get(row.id)?.is_ha ? ' · HA' : ''}</text>
+				{@const rDetail = routerById.get(row.id)}
+				<title>{row.name}{'\n'}ID: {row.id}{'\n'}상태: {row.status}{rDetail?.is_distributed ? '\nDVR: 활성' : ''}{rDetail?.is_ha ? '\nHA: 활성' : ''}{rDetail?.external_gateway_ips?.length ? '\nGW IP: ' + rDetail.external_gateway_ips.join(', ') : ''}{rDetail?.interface_ips?.length ? '\n인터페이스: ' + rDetail.interface_ips.map(i => i.ip_address).join(', ') : ''}</title>
 			{:else}
 				<!-- Instance -->
 				<rect

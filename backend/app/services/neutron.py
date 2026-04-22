@@ -306,6 +306,7 @@ def get_topology(conn: openstack.connection.Connection) -> TopologyData:
     # 3. 라우터 인터페이스 포트 → router_id→[subnet_ids] 맵 (DVR/HA 포함)
     router_subnets: dict[str, list[str]] = {}
     router_subnet_port_count: dict[str, dict[str, int]] = {}  # rid → {sid → port 수}
+    router_interface_ips: dict[str, list[dict]] = {}  # rid → [{ip_address, subnet_id}]
     for port in _iter_router_interface_ports(conn):
         rid = port.device_id
         if not rid:
@@ -314,19 +315,34 @@ def get_topology(conn: openstack.connection.Connection) -> TopologyData:
             router_subnets[rid] = []
         if rid not in router_subnet_port_count:
             router_subnet_port_count[rid] = {}
+        if rid not in router_interface_ips:
+            router_interface_ips[rid] = []
         for fip in port.fixed_ips or []:
             sid = fip.get("subnet_id")
+            ip_addr = fip.get("ip_address")
             if sid:
                 router_subnet_port_count[rid][sid] = router_subnet_port_count[rid].get(sid, 0) + 1
                 if sid not in router_subnets[rid]:
                     router_subnets[rid].append(sid)
+            # 중복 IP 제거 (DVR replicated 포트는 같은 IP 여러 번 나올 수 있음)
+            if (
+                ip_addr
+                and sid
+                and not any(e["ip_address"] == ip_addr and e["subnet_id"] == sid for e in router_interface_ips[rid])
+            ):
+                router_interface_ips[rid].append({"ip_address": ip_addr, "subnet_id": sid})
 
     # 4. 전체 라우터
     topo_routers = []
     for r in conn.network.routers():
         ext_net_id = None
+        ext_gw_ips: list[str] = []
         if r.external_gateway_info:
             ext_net_id = r.external_gateway_info.get("network_id")
+            for efip in r.external_gateway_info.get("external_fixed_ips", []):
+                ip = efip.get("ip_address")
+                if ip:
+                    ext_gw_ips.append(ip)
         dvr_sids = [sid for sid, cnt in router_subnet_port_count.get(r.id, {}).items() if cnt > 1]
         topo_routers.append(
             TopologyRouter(
@@ -334,6 +350,10 @@ def get_topology(conn: openstack.connection.Connection) -> TopologyData:
                 name=r.name or "",
                 status=r.status or "",
                 external_gateway_network_id=ext_net_id,
+                external_gateway_ips=ext_gw_ips,
+                interface_ips=router_interface_ips.get(r.id, []),
+                is_distributed=bool(getattr(r, "is_distributed", False)),
+                is_ha=bool(getattr(r, "is_ha", False)),
                 connected_subnet_ids=router_subnets.get(r.id, []),
                 dvr_subnet_ids=dvr_sids,
                 project_id=getattr(r, "project_id", None),

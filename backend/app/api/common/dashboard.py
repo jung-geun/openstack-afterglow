@@ -138,23 +138,32 @@ async def get_dashboard_config():
 @router.get("/quotas")
 async def get_project_quotas(
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    refresh: bool = Query(False),
 ):
     """현재 프로젝트의 전체 할당량 (compute/storage/network/file_storage/gpu) 조회."""
     project_id = conn._afterglow_project_id
     settings = get_settings()
-    try:
-        tasks = [
-            asyncio.to_thread(nova.get_project_quota, conn, project_id),
-            asyncio.to_thread(cinder.get_volume_quota, conn, project_id),
-            asyncio.to_thread(neutron_svc.get_network_quota, conn, project_id),
-        ]
+
+    def _fetch_quotas():
+        tasks_results = []
+        tasks_results.append(nova.get_project_quota(conn, project_id))
+        tasks_results.append(cinder.get_volume_quota(conn, project_id))
+        tasks_results.append(neutron_svc.get_network_quota(conn, project_id))
         if settings.service_manila_enabled:
-            tasks.append(asyncio.to_thread(manila_svc.get_file_storage_quota, conn))
+            tasks_results.append(manila_svc.get_file_storage_quota(conn))
         if settings.service_trove_enabled:
-            tasks.append(asyncio.to_thread(trove_svc.count_instances, conn))
+            tasks_results.append(trove_svc.count_instances(conn))
         if settings.service_swift_enabled:
-            tasks.append(asyncio.to_thread(swift_svc.get_account_metadata, conn))
-        results = await asyncio.gather(*tasks)
+            tasks_results.append(swift_svc.get_account_metadata(conn))
+        return tasks_results
+
+    try:
+        results = await cached_call(
+            f"afterglow:dashboard:{project_id}:quotas",
+            ttl_normal(),
+            lambda: _fetch_quotas(),
+            refresh=refresh,
+        )
         compute_q, volume_q, network_q = results[0], results[1], results[2]
         idx = 3
         file_storage_q = results[idx] if settings.service_manila_enabled else {"limit": 0, "in_use": 0, "reserved": 0}
@@ -249,6 +258,7 @@ async def get_project_usage(
     start: str = Query(default=None, description="시작일 YYYY-MM-DD"),
     end: str = Query(default=None, description="종료일 YYYY-MM-DD"),
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    refresh: bool = Query(False),
 ):
     """기간별 프로젝트 리소스 사용량."""
     project_id = conn._afterglow_project_id
@@ -256,7 +266,12 @@ async def get_project_usage(
     end_dt = end or today.isoformat()
     start_dt = start or (today - timedelta(days=30)).isoformat()
     try:
-        usage = await asyncio.to_thread(nova.get_project_usage, conn, project_id, start_dt, end_dt)
+        usage = await cached_call(
+            f"afterglow:dashboard:{project_id}:usage:{start_dt}:{end_dt}",
+            ttl_fast(),
+            lambda: nova.get_project_usage(conn, project_id, start_dt, end_dt),
+            refresh=refresh,
+        )
     except Exception:
         raise HTTPException(status_code=500, detail="작업 실패")
     return {
