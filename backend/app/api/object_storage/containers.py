@@ -134,19 +134,34 @@ async def upload_object(
     """오브젝트 업로드 (multipart/form-data). 최대 5 GB."""
     from app.services import swift
 
-    if file.size is not None and file.size > _MAX_UPLOAD_BYTES:
+    # 파일 크기 확인 (file.size가 없으면 seek으로 계산)
+    if file.size is not None:
+        file_size = file.size
+    else:
+        await file.seek(0, 2)
+        file_size = await file.tell()
+        await file.seek(0)
+
+    if file_size > _MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="업로드 파일 크기는 5 GB를 초과할 수 없습니다")
 
     try:
-        data = await file.read()
-        if len(data) > _MAX_UPLOAD_BYTES:
-            raise HTTPException(status_code=413, detail="업로드 파일 크기는 5 GB를 초과할 수 없습니다")
         object_name = file.filename or "unnamed"
         content_type = file.content_type or ""
-        return await asyncio.to_thread(swift.upload_object, conn, container_name, object_name, data, content_type)
+        # file.file (SpooledTemporaryFile)을 직접 전달해 스트리밍 업로드
+        return await asyncio.to_thread(
+            swift.upload_object,
+            conn,
+            container_name,
+            object_name,
+            file.file,
+            content_type,
+            file_size,
+        )
     except HTTPException:
         raise
     except Exception:
+        _logger.exception("오브젝트 업로드 실패: container=%s name=%s", container_name, file.filename)
         raise HTTPException(status_code=500, detail="오브젝트 업로드 실패")
 
 

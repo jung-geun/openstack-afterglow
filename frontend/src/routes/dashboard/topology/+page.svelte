@@ -17,7 +17,12 @@
 	interface TopologyRouter {
 		id: string; name: string; status: string;
 		external_gateway_network_id: string | null;
+		external_gateway_ips: string[];
+		interface_ips: { ip_address: string; subnet_id: string }[];
+		is_distributed: boolean;
+		is_ha: boolean;
 		connected_subnet_ids: string[];
+		dvr_subnet_ids: string[];
 		project_id: string | null;
 	}
 	interface TopologyInstance {

@@ -18,6 +18,9 @@ password = "change-me-in-production"
 # insecure = false                # 자체 서명 인증서 사용 시 true로 설정
 # cacert = "/path/to/ca.pem"     # CA 인증서 경로 (insecure=false일 때 사용)
 
+# Swift (Object Storage) 설정
+swift_endpoint = ""               # 서비스 카탈로그 대신 직접 지정할 경우 (예: https://s3.example.com/swift/v1/AUTH_%(project_id)s)
+
 # Manila 설정
 manila_endpoint = ""              # 서비스 카탈로그 대신 직접 지정할 경우
 manila_share_network_id = ""

@@ -4,6 +4,7 @@
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError, getBaseUrl } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import UploadModal from '$lib/components/UploadModal.svelte';
 	import { formatStorage } from '$lib/utils/format';
 
 	interface ObjectItem {
@@ -30,9 +31,6 @@
 
 	// 업로드 모달
 	let showUpload = $state(false);
-	let uploadFile = $state<File | null>(null);
-	let uploading = $state(false);
-	let uploadError = $state('');
 
 	// 오브젝트 상세 (SlidePanel 대신 inline)
 	let selectedMeta = $state<ObjectMeta | null>(null);
@@ -53,24 +51,6 @@
 			objects = [];
 		} finally {
 			loading = false;
-		}
-	}
-
-	async function upload() {
-		if (!uploadFile) return;
-		uploading = true;
-		uploadError = '';
-		try {
-			const formData = new FormData();
-			formData.append('file', uploadFile);
-			await api.upload(`/api/object-storage/${encodeURIComponent(containerName)}/objects`, formData, token, projectId);
-			showUpload = false;
-			uploadFile = null;
-			await load();
-		} catch (e) {
-			uploadError = e instanceof ApiError ? e.message : '업로드 실패';
-		} finally {
-			uploading = false;
 		}
 	}
 
@@ -143,7 +123,7 @@
 		<h1 class="text-2xl font-bold text-white">{containerName}</h1>
 		<div class="flex gap-2">
 			<button
-				onclick={() => { showUpload = true; uploadError = ''; uploadFile = null; }}
+				onclick={() => { showUpload = true; }}
 				class="text-xs text-white bg-indigo-600 hover:bg-indigo-500 transition-colors px-3 py-1.5 rounded border border-indigo-500"
 			>+ 업로드</button>
 			<button onclick={load} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
@@ -152,44 +132,13 @@
 
 	<!-- 업로드 모달 -->
 	{#if showUpload}
-		<div
-			class="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
-			onclick={() => { showUpload = false; }}
-			role="dialog"
-			aria-modal="true"
-			tabindex="-1"
-			onkeydown={(e) => e.key === 'Escape' && (showUpload = false)}
-		>
-			<div
-				class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl"
-				onclick={(e) => e.stopPropagation()}
-				role="none"
-				onkeydown={(e) => e.stopPropagation()}
-			>
-				<h2 class="text-lg font-semibold text-white mb-4">파일 업로드</h2>
-				<div class="space-y-3">
-					<input
-						type="file"
-						onchange={(e) => { uploadFile = (e.target as HTMLInputElement).files?.[0] ?? null; }}
-						class="w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:bg-gray-700 file:text-white hover:file:bg-gray-600"
-					/>
-					{#if uploadError}
-						<p class="text-red-400 text-xs">{uploadError}</p>
-					{/if}
-				</div>
-				<div class="flex justify-end gap-2 mt-5">
-					<button
-						onclick={() => { showUpload = false; }}
-						class="px-4 py-2 text-sm text-gray-400 hover:text-white border border-gray-700 rounded-lg transition-colors"
-					>취소</button>
-					<button
-						onclick={upload}
-						disabled={uploading || !uploadFile}
-						class="px-4 py-2 text-sm bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-lg transition-colors"
-					>{uploading ? '업로드 중...' : '업로드'}</button>
-				</div>
-			</div>
-		</div>
+		<UploadModal
+			{containerName}
+			{token}
+			{projectId}
+			onSuccess={load}
+			onClose={() => { showUpload = false; }}
+		/>
 	{/if}
 
 	<div class="flex gap-6">
