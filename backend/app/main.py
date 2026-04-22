@@ -1,9 +1,9 @@
 # ---------------------------------------------------------------------------
 # Structured JSON logging
 # ---------------------------------------------------------------------------
-import os
 import logging
 import logging.handlers
+import os
 
 _STANDARD_LOG_KEYS = set(logging.LogRecord("", 0, "", 0, "", (), None).__dict__)
 
@@ -408,8 +408,14 @@ app.include_router(
 
 @app.get("/api/health")
 async def health():
-    """헬스체크 엔드포인트. Redis 장애와 무관하게 항상 200을 반환."""
-    detail = {"status": "ok", "redis": "unknown"}
+    """K8s probe용. 항상 즉시 200 반환."""
+    return {"status": "ok"}
+
+
+@app.get("/api/health/detail")
+async def health_detail():
+    """모니터링 대시보드용 상세 헬스체크. Redis 연결 상태 포함."""
+    detail: dict = {"status": "ok", "redis": "unknown"}
     try:
         from app.services.cache import _get_redis
 
@@ -949,6 +955,15 @@ async def _deferred_create_tables() -> None:
 
 @app.on_event("startup")
 async def start_background_workers():
+    # Redis 연결 pre-warm (첫 health check 지연 방지)
+    try:
+        from app.services.cache import _get_redis
+
+        r = await _get_redis()
+        await r.ping()
+    except Exception:
+        pass
+
     # DB 초기화 (database.url 설정 시)
     from app.database import init_db
 

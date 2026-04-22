@@ -1,7 +1,12 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import openstack
 import asyncio
 import logging
 
-import openstack
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 _logger = logging.getLogger(__name__)

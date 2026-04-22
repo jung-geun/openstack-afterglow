@@ -1,11 +1,15 @@
 """관리자 서비스 상태 모니터링 엔드포인트."""
+from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import openstack
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 
-import openstack
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.deps import get_os_conn, require_admin

@@ -1,10 +1,15 @@
-import logging
+from __future__ import annotations
 
-import openstack
+import logging
+from typing import TYPE_CHECKING
+
 from keystoneauth1 import session as ks_session
 from keystoneauth1.identity import v3
 
 from app.config import get_settings
+
+if TYPE_CHECKING:
+    import openstack
 
 _logger = logging.getLogger(__name__)
 
@@ -212,6 +217,8 @@ def get_openstack_connection(token: str, project_id: str) -> openstack.connectio
     load_envvars=False 로 OS_* 환경변수를 무시해 v3.Token에 불필요한 인자가
     전달되는 오류를 방지한다.
     """
+    import openstack
+
     settings = get_settings()
 
     return openstack.connect(
@@ -233,6 +240,8 @@ def get_admin_connection_for_project(project_id: str) -> openstack.connection.Co
 
     콜백 등 사용자 토큰이 없는 상황에서 프로젝트 리소스를 조작할 때 사용.
     """
+    import openstack
+
     settings = get_settings()
     return openstack.connect(
         load_envvars=False,

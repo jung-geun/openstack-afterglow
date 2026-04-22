@@ -7,16 +7,22 @@ openstacksdk의 conn.object_store 프록시를 사용.
 Zun "컨테이너"와 혼동 방지를 위해 변수/응답 키에 object_storage_ 접두어 사용.
 """
 
+from __future__ import annotations
+
 import logging
 from collections.abc import Iterator
+from typing import TYPE_CHECKING
 
-from openstack.exceptions import ResourceNotFound
+if TYPE_CHECKING:
+    pass
 
 _logger = logging.getLogger(__name__)
 
 
 def _is_account_not_found(exc: Exception) -> bool:
     """Ceph RGW에서 Swift 계정이 초기화되지 않은 경우 404를 반환하는지 확인."""
+    from openstack.exceptions import ResourceNotFound
+
     return isinstance(exc, ResourceNotFound) or (hasattr(exc, "status_code") and getattr(exc, "status_code", 0) == 404)
 
 

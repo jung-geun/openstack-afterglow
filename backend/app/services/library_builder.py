@@ -5,12 +5,16 @@ Manila CephFS share 생성 → CephX access rule → 임시 VM(cloud-init) 자�
 → VM 내부에서 패키지 설치 → VM SHUTOFF 감지 → 메타데이터 업데이트 → VM 삭제
 """
 
+from __future__ import annotations
+
 import asyncio
 import base64
 import logging
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
-import openstack
+if TYPE_CHECKING:
+    import openstack
 
 from app.config import get_settings
 from app.services import libraries as lib_svc

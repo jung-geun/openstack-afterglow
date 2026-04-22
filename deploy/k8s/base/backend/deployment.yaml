@@ -38,6 +38,10 @@ spec:
               "2",
               "--timeout-keep-alive",
               "65",
+              "--loop",
+              "uvloop",
+              "--http",
+              "httptools",
             ]
           ports:
             - containerPort: 8000
@@ -84,10 +88,12 @@ spec:
             initialDelaySeconds: 3
             periodSeconds: 2
             failureThreshold: 20
+            timeoutSeconds: 10
           livenessProbe:
             httpGet:
               path: /api/health
               port: 8000
+            initialDelaySeconds: 15
             periodSeconds: 15
             failureThreshold: 3
             timeoutSeconds: 5
@@ -97,11 +103,11 @@ spec:
               port: 8000
             periodSeconds: 5
             failureThreshold: 2
-            timeoutSeconds: 3
+            timeoutSeconds: 5
           resources:
             requests:
               memory: "512Mi"
-              cpu: "2"
+              cpu: "500m"
             limits:
               memory: "1Gi"
               cpu: "4"

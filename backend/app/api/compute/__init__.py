@@ -1,6 +1,20 @@
-from .flavors import router as flavors_router
-from .images import router as images_router
-from .instances import router as instances_router
-from .keypairs import router as keypairs_router
+"""Compute API routers — lazy import to reduce startup time."""
 
-__all__ = ["instances_router", "keypairs_router", "images_router", "flavors_router"]
+_ROUTERS = {
+    "flavors_router": ".flavors",
+    "images_router": ".images",
+    "instances_router": ".instances",
+    "keypairs_router": ".keypairs",
+}
+
+
+def __getattr__(name: str):
+    if name in _ROUTERS:
+        import importlib
+
+        mod = importlib.import_module(_ROUTERS[name], __package__)
+        return mod.router
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+__all__ = list(_ROUTERS)

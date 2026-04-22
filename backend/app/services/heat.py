@@ -1,6 +1,11 @@
 """Heat 오케스트레이션 서비스 — Magnum K8s 클러스터 스택 추적용."""
 
-import openstack
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import openstack
 
 
 class HeatServiceUnavailable(Exception):

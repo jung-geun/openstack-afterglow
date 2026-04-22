@@ -10,11 +10,15 @@
 
 실패 시 역순 rollback.
 """
+from __future__ import annotations
 
 import asyncio
 import logging
+from typing import TYPE_CHECKING
 
-import openstack
+if TYPE_CHECKING:
+    import openstack
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 

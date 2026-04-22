@@ -1,6 +1,20 @@
-from .loadbalancers import router as loadbalancers_router
-from .networks import router as networks_router
-from .routers import router as routers_router
-from .security_groups import router as security_groups_router
+"""Network API routers — lazy import to reduce startup time."""
 
-__all__ = ["networks_router", "routers_router", "security_groups_router", "loadbalancers_router"]
+_ROUTERS = {
+    "loadbalancers_router": ".loadbalancers",
+    "networks_router": ".networks",
+    "routers_router": ".routers",
+    "security_groups_router": ".security_groups",
+}
+
+
+def __getattr__(name: str):
+    if name in _ROUTERS:
+        import importlib
+
+        mod = importlib.import_module(_ROUTERS[name], __package__)
+        return mod.router
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+__all__ = list(_ROUTERS)

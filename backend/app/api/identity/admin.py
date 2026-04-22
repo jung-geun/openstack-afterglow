@@ -1,9 +1,14 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import openstack
 import asyncio
 import itertools
 import logging
 from concurrent.futures import ThreadPoolExecutor
 
-import openstack
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 

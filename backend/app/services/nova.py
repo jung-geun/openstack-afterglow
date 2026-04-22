@@ -1,7 +1,11 @@
+from __future__ import annotations
+
 import logging
 from datetime import datetime
+from typing import TYPE_CHECKING
 
-import openstack
+if TYPE_CHECKING:
+    import openstack
 
 from app.models.compute import FlavorInfo, InstanceInfo, IpAddress
 

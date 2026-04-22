@@ -1,6 +1,11 @@
 """Zun 컨테이너 서비스 — openstacksdk에 Zun 프록시가 없으므로 raw REST 사용."""
 
-import openstack
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import openstack
 
 from app.models.containers import ZunContainerInfo
 

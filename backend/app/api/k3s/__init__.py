@@ -1,5 +1,19 @@
-from .callback import router as k3s_callback_router
-from .clusters import router as k3s_clusters_router
-from .health import router as k3s_health_router
+"""K3s API routers — lazy import to reduce startup time."""
 
-__all__ = ["k3s_clusters_router", "k3s_callback_router", "k3s_health_router"]
+_ROUTERS = {
+    "k3s_callback_router": ".callback",
+    "k3s_clusters_router": ".clusters",
+    "k3s_health_router": ".health",
+}
+
+
+def __getattr__(name: str):
+    if name in _ROUTERS:
+        import importlib
+
+        mod = importlib.import_module(_ROUTERS[name], __package__)
+        return mod.router
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+__all__ = list(_ROUTERS)

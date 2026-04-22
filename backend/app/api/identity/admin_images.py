@@ -1,9 +1,13 @@
 """관리자 이미지 관리 엔드포인트."""
+from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import openstack
 import asyncio
 import logging
 
-import openstack
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 

@@ -1,6 +1,11 @@
 """Octavia (OpenStack Load Balancer) 서비스 래퍼."""
 
-import openstack
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import openstack
 
 
 def _lb_to_dict(lb) -> dict:

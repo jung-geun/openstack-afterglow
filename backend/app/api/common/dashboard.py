@@ -1,9 +1,14 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import openstack
 import asyncio
 import logging
 import re
 from datetime import date, timedelta
 
-import openstack
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.deps import get_os_conn

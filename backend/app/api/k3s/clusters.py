@@ -1,12 +1,16 @@
 """k3s 클러스터 CRUD + SSE 생성 엔드포인트."""
+from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import openstack
 import asyncio
 import logging
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 
-import openstack
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response, StreamingResponse
 from slowapi import Limiter
