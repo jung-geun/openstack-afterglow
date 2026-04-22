@@ -161,7 +161,12 @@ async def test_get_instance_security_groups(client):
     instance_id = instances[0]["id"]
     resp = await client.get(f"/api/instances/{instance_id}/security-groups")
     assert resp.status_code == 200
-    assert isinstance(resp.json(), list)
+    data = resp.json()
+    assert isinstance(data, dict)
+    assert "ports" in data
+    assert "security_groups" in data
+    assert isinstance(data["ports"], list)
+    assert isinstance(data["security_groups"], list)
 
 
 # ─────────────────────────────────────────────────────────────────

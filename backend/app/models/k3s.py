@@ -30,8 +30,8 @@ class CreateK3sClusterRequest(BaseModel):
     agent_flavor_id: str | None = None
     network_id: str | None = None
     key_name: str | None = None
-    api_lb_enabled: bool | None = None     # None = 서버 설정(k3s_api_lb_enabled) 따름
-    api_lb_network_id: str | None = None   # 외부 LB Floating IP 네트워크 ID (미설정 시 서버 설정 따름)
+    api_lb_enabled: bool | None = None  # None = 서버 설정(k3s_api_lb_enabled) 따름
+    api_lb_network_id: str | None = None  # 외부 LB Floating IP 네트워크 ID (미설정 시 서버 설정 따름)
 
     @field_validator("name")
     @classmethod
