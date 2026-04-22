@@ -111,6 +111,25 @@ async def create_tables() -> None:
             except Exception:
                 pass  # 이미 존재하면 무시
 
+        # 프로젝트 기본 네트워크 테이블 생성 (없는 경우에만)
+        try:
+            await conn.exec_driver_sql(
+                "CREATE TABLE IF NOT EXISTS project_default_networks ("
+                "id INT AUTO_INCREMENT PRIMARY KEY,"
+                "project_id VARCHAR(64) NOT NULL,"
+                "network_id VARCHAR(64) NOT NULL,"
+                "subnet_id VARCHAR(64) DEFAULT NULL,"
+                "router_id VARCHAR(64) DEFAULT NULL,"
+                "auto_created BOOLEAN NOT NULL DEFAULT TRUE,"
+                "created_at DATETIME(6) NOT NULL,"
+                "updated_at DATETIME(6) DEFAULT NULL,"
+                "UNIQUE KEY uq_project_default_networks_project_id (project_id),"
+                "KEY ix_project_default_networks_project_id (project_id)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+        except Exception:
+            pass  # 이미 존재하면 무시
+
     _logger.info("데이터베이스 테이블 생성/확인 완료")
 
 

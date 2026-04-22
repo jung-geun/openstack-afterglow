@@ -1,5 +1,7 @@
 <script lang="ts">
 	import Sidebar from '$lib/components/Sidebar.svelte';
+	import VmCreatePanel from '$lib/components/VmCreatePanel.svelte';
+	import { wizardOpen } from '$lib/stores/wizard';
 	let { children } = $props();
 </script>
 
@@ -9,3 +11,7 @@
 		{@render children()}
 	</main>
 </div>
+
+{#if $wizardOpen}
+	<VmCreatePanel />
+{/if}

@@ -138,7 +138,29 @@ async def create_k3s_cluster_async(
     agent_flavor_id = req.agent_flavor_id or s.k3s_default_agent_flavor_id
     if req.agent_count > 0 and not agent_flavor_id:
         raise HTTPException(status_code=503, detail="에이전트 플레이버가 설정되지 않았습니다. 관리자에게 문의하세요.")
-    network_id = req.network_id or s.default_network_id
+
+    # Default 네트워크 결정
+    network_id = req.network_id
+    if not network_id:
+        if s.default_network_enabled:
+            try:
+                from app.services.default_network import ensure_default_network as _ensure_net
+
+                default_net = await _ensure_net(
+                    conn,
+                    project_id,
+                    external_network_id=s.default_network_external_id or None,
+                    cidr=s.default_network_cidr,
+                )
+                network_id = default_net.id
+            except Exception:
+                import logging as _log
+
+                _log.getLogger(__name__).warning("Default 네트워크 조회 실패, 설정값 폴백", exc_info=True)
+                network_id = s.default_network_id
+        else:
+            network_id = s.default_network_id
+
     k3s_version = s.k3s_version
     boot_volume_size = s.k3s_boot_volume_size_gb
     cluster_id = str(uuid.uuid4())
@@ -509,7 +531,7 @@ async def _scale_agents(
         # 스케일 업
         add_count = desired_count - current_count
         agent_flavor_id = cluster.get("agent_flavor_id") or s.k3s_default_agent_flavor_id
-        network_id = cluster.get("network_id") or s.default_network_id
+        network_id = cluster.get("network_id") or ""
         ssh_public_key = cluster.get("ssh_public_key") or None
         cluster_name = cluster.get("name") or cluster_id
         k3s_version = cluster.get("k3s_version") or s.k3s_version
@@ -523,6 +545,25 @@ async def _scale_agents(
             _logger.error("k3s scale up: cannot get OpenStack connection: %s", e)
             await k3s_cluster.update_cluster_status(project_id, cluster_id, "ACTIVE", f"스케일 업 실패: {e}")
             return
+
+        # network_id 폴백: DB → 설정값
+        if not network_id:
+            if s.default_network_enabled:
+                try:
+                    from app.services.default_network import ensure_default_network as _ensure_net
+
+                    _default_net = await _ensure_net(
+                        conn,
+                        project_id,
+                        external_network_id=s.default_network_external_id or None,
+                        cidr=s.default_network_cidr,
+                    )
+                    network_id = _default_net.id
+                except Exception:
+                    _logger.warning("스케일 업: Default 네트워크 조회 실패, 설정값 폴백", exc_info=True)
+                    network_id = s.default_network_id
+            else:
+                network_id = s.default_network_id
 
         new_entries: list[dict] = []
         for i in range(add_count):

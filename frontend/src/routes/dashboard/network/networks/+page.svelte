@@ -20,6 +20,8 @@
   let autoRefresh = $state(false);
   let deleting = $state<string | null>(null);
   let selectedNetworkId = $state<string | null>(null);
+  let defaultNetworkId = $state<string | null>(null);
+  let settingDefault = $state<string | null>(null);
 
   function openNetworkPanel(id: string) {
     selectedNetworkId = id;
@@ -62,6 +64,27 @@
       if (!cached) error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
     } finally {
       loading = false;
+    }
+  }
+
+  async function fetchDefaultNetwork() {
+    try {
+      const record = await api.get<{ network_id: string }>('/api/networks/default', $auth.token ?? undefined, $auth.projectId ?? undefined);
+      defaultNetworkId = record.network_id;
+    } catch {
+      defaultNetworkId = null;
+    }
+  }
+
+  async function setAsDefault(networkId: string) {
+    settingDefault = networkId;
+    try {
+      await api.put('/api/networks/default', { network_id: networkId }, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      defaultNetworkId = networkId;
+    } catch (e) {
+      alert('기본 네트워크 설정 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+    } finally {
+      settingDefault = null;
     }
   }
 
@@ -122,7 +145,7 @@
     const projectId = $auth.projectId;
     if (!projectId) return;
     loading = true;
-    untrack(() => { fetchNetworks(); fetchFloatingIps(); });
+    untrack(() => { fetchNetworks(); fetchFloatingIps(); fetchDefaultNetwork(); });
   });
 
   $effect(() => {
@@ -223,7 +246,12 @@
                   </svg>
                 </div>
                 <div class="min-w-0">
-                  <div class="text-white font-medium truncate">{net.name || net.id.slice(0, 12)}</div>
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-white font-medium truncate">{net.name || net.id.slice(0, 12)}</span>
+                    {#if net.id === defaultNetworkId}
+                      <span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/40 border border-blue-700/60 text-blue-400 shrink-0">기본</span>
+                    {/if}
+                  </div>
                   <div class="text-[11px] text-gray-500 font-mono truncate">{net.id.slice(0, 8)}…</div>
                 </div>
               </div>
@@ -246,8 +274,15 @@
               <!-- 상태 -->
               <div class="hidden sm:block"><StatusChip status={net.status} /></div>
               <!-- 액션 -->
-              <div class="hidden sm:block" onclick={(e) => e.stopPropagation()} role="none">
+              <div class="hidden sm:flex items-center gap-1" onclick={(e) => e.stopPropagation()} role="none">
                 {#if !net.is_external && !net.is_shared}
+                  {#if net.id !== defaultNetworkId}
+                    <button
+                      onclick={(e) => { e.stopPropagation(); setAsDefault(net.id); }}
+                      disabled={settingDefault === net.id}
+                      class="text-blue-400 hover:text-blue-300 disabled:text-gray-600 text-xs px-2 py-1 rounded border border-blue-900 hover:border-blue-700 disabled:border-gray-700 transition-colors"
+                    >{settingDefault === net.id ? '...' : '기본'}</button>
+                  {/if}
                   <button
                     onclick={(e) => { e.stopPropagation(); deleteNetwork(net.id, net.name, net.is_external, net.is_shared); }}
                     disabled={deleting === net.id}

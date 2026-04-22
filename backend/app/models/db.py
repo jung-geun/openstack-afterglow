@@ -142,6 +142,21 @@ class NotionTarget(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
 
 
+class ProjectDefaultNetwork(Base):
+    """프로젝트별 기본 네트워크 설정. 자동 생성 또는 사용자가 직접 지정."""
+
+    __tablename__ = "project_default_networks"
+
+    id: Mapped[int] = mapped_column(INT, primary_key=True, autoincrement=True)
+    project_id: Mapped[str] = mapped_column(VARCHAR(64), unique=True, nullable=False, index=True)
+    network_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    subnet_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    router_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    auto_created: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+
 class NotionConfig(Base):
     """Notion 연동 설정 (싱글톤, id=1 고정). API key는 AES-256-GCM 암호화 저장."""
 

@@ -8,10 +8,12 @@ import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 _logger = logging.getLogger(__name__)
 
 from app.api.deps import get_os_conn
+from app.config import get_settings
 from app.models.storage import (
     AssociateFipRequest,
     CreateFipRequest,
@@ -26,7 +28,7 @@ from app.models.storage import (
     UpdateSubnetRequest,
 )
 from app.services import neutron, nova
-from app.services.cache import cached_call, ttl_fast, ttl_normal
+from app.services.cache import cached_call, invalidate, ttl_fast, ttl_normal
 
 router = APIRouter()
 
@@ -54,6 +56,79 @@ async def create_network(
         return await asyncio.to_thread(neutron.create_network, conn, req.name)
     except Exception:
         raise HTTPException(status_code=500, detail="네트워크 생성 실패")
+
+
+# ---------------------------------------------------------------------------
+# Default 네트워크 (고정 경로 - /{network_id} 보다 먼저 등록)
+# ---------------------------------------------------------------------------
+
+
+class SetDefaultNetworkRequest(BaseModel):
+    network_id: str
+
+
+@router.post("/ensure-default", response_model=NetworkInfo, status_code=200)
+async def ensure_default_network(conn: openstack.connection.Connection = Depends(get_os_conn)):
+    """프로젝트의 Default 네트워크를 조회하거나 생성한다.
+
+    프론트엔드에서 프로젝트 전환 시 호출 — DB에 이미 기록된 경우 빠르게 반환.
+    """
+    settings = get_settings()
+    if not settings.default_network_enabled:
+        raise HTTPException(status_code=404, detail="Default 네트워크 기능이 비활성화 상태입니다")
+    project_id = conn._afterglow_project_id
+    try:
+        from app.services.default_network import ensure_default_network as _ensure
+
+        net_info = await _ensure(
+            conn,
+            project_id,
+            external_network_id=settings.default_network_external_id or None,
+            cidr=settings.default_network_cidr,
+        )
+        # 네트워크 목록 캐시 무효화
+        await invalidate(f"afterglow:neutron:{project_id}:networks")
+        return net_info
+    except Exception:
+        _logger.exception("Default 네트워크 ensure 실패")
+        raise HTTPException(status_code=500, detail="Default 네트워크 처리 실패")
+
+
+@router.get("/default", response_model=dict)
+async def get_default_network(conn: openstack.connection.Connection = Depends(get_os_conn)):
+    """현재 프로젝트의 Default 네트워크 정보를 반환한다 (DB 기록 기준)."""
+    project_id = conn._afterglow_project_id
+    from app.services.default_network import get_default_network_record
+
+    record = await get_default_network_record(project_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Default 네트워크가 설정되지 않았습니다")
+    return record
+
+
+@router.put("/default", response_model=dict)
+async def set_default_network(
+    req: SetDefaultNetworkRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """사용자가 원하는 네트워크를 프로젝트의 Default 네트워크로 지정한다."""
+    project_id = conn._afterglow_project_id
+    # 네트워크 존재 여부 확인
+    try:
+        net = await asyncio.to_thread(neutron.get_network, conn, req.network_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="네트워크를 찾을 수 없습니다")
+
+    from app.services.default_network import get_default_network_record
+    from app.services.default_network import set_default_network as _set
+
+    # 서브넷 ID: 해당 네트워크의 첫 번째 서브넷 사용
+    subnet_id = net.subnets[0] if net.subnets else None
+    await _set(project_id, req.network_id, subnet_id)
+    # 캐시 무효화
+    await invalidate(f"afterglow:neutron:{project_id}:networks")
+    record = await get_default_network_record(project_id)
+    return record or {"project_id": project_id, "network_id": req.network_id}
 
 
 # ---------------------------------------------------------------------------

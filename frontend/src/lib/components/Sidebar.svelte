@@ -4,6 +4,7 @@
 	import { sidebarOpen } from '$lib/stores/sidebar';
 	import ProjectSelector from '$lib/components/ProjectSelector.svelte';
 	import { siteConfig } from '$lib/config/site';
+	import { openWizard } from '$lib/stores/wizard';
 
 	const sections = $state([
 		{
@@ -145,13 +146,13 @@
 
 	<!-- VM 생성 버튼 -->
 	<div class="p-3">
-		<a
-			href="/create"
+		<button
+			onclick={openWizard}
 			class="flex items-center justify-center gap-1.5 w-full bg-blue-600 hover:bg-blue-500 text-white text-[13px] font-medium px-4 py-2 rounded-lg transition-colors"
 		>
 			<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v14M5 12h14"/></svg>
 			VM 생성
-		</a>
+		</button>
 	</div>
 
 	<nav class="flex-1 px-3 pb-4 space-y-0.5">

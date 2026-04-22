@@ -128,6 +128,26 @@ async def create_instance(
     settings = get_settings()
     resolved_libs = lib_svc.resolve_with_deps(req.libraries)
 
+    # Default 네트워크 결정 (asyncio.to_thread 호출 전에 미리 처리)
+    if not req.network_id:
+        if settings.default_network_enabled:
+            try:
+                from app.services.default_network import ensure_default_network as _ensure_net
+
+                default_net = await _ensure_net(
+                    conn,
+                    conn._afterglow_project_id,
+                    external_network_id=settings.default_network_external_id or None,
+                    cidr=settings.default_network_cidr,
+                )
+                req = req.model_copy(update={"network_id": default_net.id})
+            except Exception:
+                logger.warning("Default 네트워크 조회 실패, 설정값 폴백", exc_info=True)
+                if settings.default_network_id:
+                    req = req.model_copy(update={"network_id": settings.default_network_id})
+        elif settings.default_network_id:
+            req = req.model_copy(update={"network_id": settings.default_network_id})
+
     # 수집된 리소스 (rollback 용)
     created_file_storage_ids: list[str] = []
     created_access_ids: list[tuple[str, str]] = []  # (file_storage_id, access_id)
@@ -229,7 +249,7 @@ async def create_instance(
             conn,
             req.name,
             req.flavor_id,
-            req.network_id or settings.default_network_id,
+            req.network_id,
             boot_volume_id,
             userdata,
             req.key_name,
@@ -282,6 +302,26 @@ async def create_instance_async(
     """SSE로 진행 상황을 스트리밍하는 비동기 인스턴스 생성."""
     settings = get_settings()
     resolved_libs = lib_svc.resolve_with_deps(req.libraries)
+
+    # Default 네트워크 결정 (SSE 시작 전에 미리 처리)
+    if not req.network_id:
+        if settings.default_network_enabled:
+            try:
+                from app.services.default_network import ensure_default_network as _ensure_net
+
+                default_net = await _ensure_net(
+                    conn,
+                    conn._afterglow_project_id,
+                    external_network_id=settings.default_network_external_id or None,
+                    cidr=settings.default_network_cidr,
+                )
+                req = req.model_copy(update={"network_id": default_net.id})
+            except Exception:
+                logger.warning("Default 네트워크 조회 실패, 설정값 폴백", exc_info=True)
+                if settings.default_network_id:
+                    req = req.model_copy(update={"network_id": settings.default_network_id})
+        elif settings.default_network_id:
+            req = req.model_copy(update={"network_id": settings.default_network_id})
 
     async def progress_generator():
         # 수집된 리소스 (rollback 용)
@@ -397,7 +437,7 @@ async def create_instance_async(
                 conn,
                 name=req.name,
                 flavor_id=req.flavor_id,
-                network_id=req.network_id or settings.default_network_id,
+                network_id=req.network_id,
                 boot_volume_id=boot_volume_id,
                 userdata=userdata,
                 key_name=req.key_name,

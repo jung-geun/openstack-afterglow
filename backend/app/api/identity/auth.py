@@ -29,6 +29,22 @@ async def _prewarm_dashboard(token: str, project_id: str):
     except Exception:
         pass  # best-effort: 실패해도 로그인에는 영향 없음
 
+    # Default 네트워크 확인/생성 (프로젝트 최초 로드 시 1회)
+    settings = get_settings()
+    if settings.default_network_enabled:
+        try:
+            from app.services.default_network import ensure_default_network
+
+            conn2 = keystone.get_openstack_connection(token, project_id)
+            await ensure_default_network(
+                conn2,
+                project_id,
+                external_network_id=settings.default_network_external_id or None,
+                cidr=settings.default_network_cidr,
+            )
+        except Exception:
+            pass  # best-effort: 실패해도 로그인에는 영향 없음
+
 
 @router.post("/login", response_model=TokenResponse)
 @limiter.limit("10/minute")

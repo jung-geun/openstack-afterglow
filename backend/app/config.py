@@ -165,6 +165,9 @@ def _load_toml() -> dict:
 
     nv = data.get("nova", {})
     flat["default_network_id"] = nv.get("default_network_id", "")
+    flat["default_network_enabled"] = nv.get("default_network_enabled", True)
+    flat["default_network_cidr"] = nv.get("default_network_cidr", "192.168.0.0/24")
+    flat["default_network_external_id"] = nv.get("default_network_external_id", "")
     flat["default_availability_zone"] = nv.get("default_availability_zone", "nova")
     flat["boot_volume_size_gb"] = nv.get("boot_volume_size_gb", 20)
     flat["upper_volume_size_gb"] = nv.get("upper_volume_size_gb", 50)
@@ -305,7 +308,10 @@ class Settings(BaseSettings):
     session_absolute_timeout: int = 14400  # 절대 만료: 기본 4시간, 초과 시 연장 불가
 
     # Nova 기본값
-    default_network_id: str = ""
+    default_network_id: str = ""  # 레거시 폴백 (default_network_enabled=false 시 사용)
+    default_network_enabled: bool = True  # 프로젝트별 Default 네트워크 자동 프로비저닝
+    default_network_cidr: str = "192.168.0.0/24"  # Default 서브넷 CIDR
+    default_network_external_id: str = ""  # 라우터 게이트웨이용 외부 네트워크 ID
     default_availability_zone: str = "nova"
     boot_volume_size_gb: int = 20
     upper_volume_size_gb: int = 50

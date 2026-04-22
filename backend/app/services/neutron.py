@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging as _logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -593,6 +594,147 @@ def update_port_security_groups(
         "id": port.id,
         "security_group_ids": port.security_group_ids or [],
     }
+
+
+# ---------------------------------------------------------------------------
+# 프로젝트 기본 네트워크 (Default Network) — 동기 Neutron 연산
+# ---------------------------------------------------------------------------
+
+_default_net_logger = _logging.getLogger(__name__)
+
+
+def _find_external_network(conn: openstack.connection.Connection) -> str | None:
+    """첫 번째 외부(provider) 네트워크 ID를 반환. 없으면 None."""
+    try:
+        for n in conn.network.networks():
+            if n.is_router_external:
+                return n.id
+    except Exception:
+        pass
+    return None
+
+
+def _find_existing_router_for_subnet(
+    conn: openstack.connection.Connection,
+    subnet_id: str,
+) -> str | None:
+    """서브넷에 이미 연결된 라우터가 있으면 그 ID를 반환."""
+    try:
+        for port in _iter_router_interface_ports(conn, network_id=None):
+            for fip in port.fixed_ips or []:
+                if fip.get("subnet_id") == subnet_id:
+                    return port.device_id
+    except Exception:
+        pass
+    return None
+
+
+def provision_default_network(
+    conn: openstack.connection.Connection,
+    project_id: str,
+    external_network_id: str | None = None,
+    cidr: str = "192.168.0.0/24",
+) -> tuple[str, str | None, str | None, bool]:
+    """Neutron에서 "Default" 네트워크를 찾거나 새로 생성한다 (동기).
+
+    - 외부 네트워크 미지정 시 자동 감지
+    - 기존 네트워크에 라우터가 없으면 자동 생성하여 연결
+
+    Returns:
+        (network_id, subnet_id, router_id, newly_created)
+    """
+    # 외부 네트워크 자동 감지 (미설정 시)
+    if not external_network_id:
+        external_network_id = _find_external_network(conn)
+
+    # ── Neutron 검색 ─────────────────────────────────────────────────────────
+    try:
+        existing = [
+            n for n in conn.network.networks(project_id=project_id) if n.name == "Default" and not n.is_router_external
+        ]
+        if existing:
+            net = existing[0]
+            subnet_id = net.subnet_ids[0] if net.subnet_ids else None
+            router_id: str | None = None
+
+            # 기존 네트워크에 라우터가 연결되어 있는지 확인 → 없으면 자동 생성
+            if subnet_id and external_network_id:
+                router_id = _find_existing_router_for_subnet(conn, subnet_id)
+                if not router_id:
+                    try:
+                        router = conn.network.create_router(
+                            name="Default",
+                            external_gateway_info={"network_id": external_network_id},
+                        )
+                        conn.network.add_interface_to_router(router.id, subnet_id=subnet_id)
+                        router_id = router.id
+                        _default_net_logger.info("기존 Default 네트워크(%s)에 라우터(%s) 자동 연결", net.id, router_id)
+                    except Exception:
+                        _default_net_logger.warning("기존 네트워크에 라우터 자동 연결 실패", exc_info=True)
+
+            return net.id, subnet_id, router_id, False
+    except Exception:
+        _default_net_logger.warning("Neutron 네트워크 검색 실패", exc_info=True)
+
+    # ── 새로 생성 ────────────────────────────────────────────────────────────
+    net = None
+    subnet = None
+    router = None
+    subnet_id = None
+    router_id = None
+    try:
+        net = conn.network.create_network(name="Default")
+        # CIDR의 첫 번째 호스트를 게이트웨이로 사용 (예: 192.168.0.0/24 → 192.168.0.1)
+        try:
+            import ipaddress
+
+            network_addr = ipaddress.IPv4Network(cidr, strict=False)
+            gateway: str | None = str(list(network_addr.hosts())[0])
+        except Exception:
+            gateway = None
+        subnet = conn.network.create_subnet(
+            network_id=net.id,
+            name="Default",
+            cidr=cidr,
+            ip_version=4,
+            is_dhcp_enabled=True,
+            **({} if gateway is None else {"gateway_ip": gateway}),
+        )
+        subnet_id = subnet.id
+
+        # 라우터 생성 및 외부 네트워크 게이트웨이 연결
+        if external_network_id:
+            router = conn.network.create_router(
+                name="Default",
+                external_gateway_info={"network_id": external_network_id},
+            )
+            conn.network.add_interface_to_router(router.id, subnet_id=subnet.id)
+            router_id = router.id
+        else:
+            _default_net_logger.warning("외부 네트워크를 찾을 수 없어 라우터 생성을 건너뜁니다")
+    except Exception as exc:
+        _default_net_logger.error("Default 네트워크 생성 실패, 롤백", exc_info=True)
+        # 생성된 리소스 정리
+        if router:
+            try:
+                if subnet:
+                    conn.network.remove_interface_from_router(router.id, subnet_id=subnet.id)
+                conn.network.delete_router(router.id, ignore_missing=True)
+            except Exception:
+                pass
+        if subnet:
+            try:
+                conn.network.delete_subnet(subnet.id, ignore_missing=True)
+            except Exception:
+                pass
+        if net:
+            try:
+                conn.network.delete_network(net.id, ignore_missing=True)
+            except Exception:
+                pass
+        raise RuntimeError("Default 네트워크 생성 실패") from exc
+
+    return net.id, subnet_id, router_id, True
 
 
 def _fip_to_info(f) -> FloatingIpInfo:

@@ -1,5 +1,15 @@
 import { writable } from 'svelte/store';
 
+export const wizardOpen = writable<boolean>(false);
+
+export function openWizard() {
+	wizardOpen.set(true);
+}
+
+export function closeWizard() {
+	wizardOpen.set(false);
+}
+
 export interface NewVolumeSpec {
 	name: string;
 	size_gb: number;
