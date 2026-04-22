@@ -3,6 +3,7 @@
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
 	interface Project {
 		id: string;
@@ -23,6 +24,16 @@
 			gigabytes?: QuotaLimit;
 		};
 	}
+	interface GpuQuota {
+		gpu_type: string;
+		limit: number;
+		in_use: number;
+		available: number;
+	}
+	interface GpuDefaultQuota {
+		gpu_type: string;
+		limit: number;
+	}
 
 	let projects = $state<Project[]>([]);
 	let selectedProjectId = $state('');
@@ -36,7 +47,17 @@
 	let saveError = $state('');
 	let saveSuccess = $state('');
 
-	// 편집 폼
+	// GPU
+	let gpuAliases = $state<string[]>([]);
+	let gpuQuotas = $state<GpuQuota[]>([]);
+	let gpuDefaults = $state<GpuDefaultQuota[]>([]);
+	let gpuQuotaLoading = $state(false);
+	let gpuQuotaError = $state('');
+	let gpuDefaultLoading = $state(false);
+	let gpuDefaultError = $state('');
+	let gpuDefaultSuccess = $state('');
+
+	// Compute/Volume 편집 폼
 	let editInstances = $state(0);
 	let editCores = $state(0);
 	let editRam = $state(0);
@@ -52,12 +73,57 @@
 			: projects
 	);
 
+	// 선택한 프로젝트의 GPU alias별 quota를 맵으로 관리
+	let gpuQuotaMap = $derived(
+		Object.fromEntries(gpuQuotas.map(q => [q.gpu_type, q]))
+	);
+	let gpuDefaultMap = $derived(
+		Object.fromEntries(gpuDefaults.map(q => [q.gpu_type, q.limit]))
+	);
+
+	// aliases + defaults + quotas에서 모든 GPU 타입 합산
+	let allGpuTypes = $derived(
+		[...new Set([...gpuAliases, ...gpuDefaults.map(d => d.gpu_type), ...gpuQuotas.map(q => q.gpu_type)])].sort()
+	);
+
 	async function loadProjects() {
 		loading = true;
 		try {
 			const res = await api.get<{ id: string; name: string }[]>('/api/admin/projects/names', token, projectId);
 			projects = res || [];
 		} catch { projects = []; } finally { loading = false; }
+	}
+
+	async function loadGpuAliases() {
+		try {
+			const res = await api.get<{ aliases: string[] }>('/api/admin/gpu-aliases', token, projectId);
+			gpuAliases = res.aliases ?? [];
+		} catch (e) {
+			console.warn('[Quotas] GPU alias 로드 실패:', e instanceof ApiError ? e.message : e);
+			gpuAliases = [];
+		}
+	}
+
+	async function loadGpuDefaults() {
+		gpuDefaultLoading = true; gpuDefaultError = '';
+		try {
+			gpuDefaults = await api.get<GpuDefaultQuota[]>('/api/admin/gpu-quotas/defaults', token, projectId);
+		} catch (e) {
+			gpuDefaultError = e instanceof ApiError ? e.message : '기본 GPU quota 조회 실패';
+			gpuDefaults = [];
+		} finally { gpuDefaultLoading = false; }
+	}
+
+	async function setGpuDefault(gpuType: string, limit: number) {
+		gpuDefaultError = ''; gpuDefaultSuccess = '';
+		try {
+			await api.put('/api/admin/gpu-quotas/defaults', { gpu_type: gpuType, limit }, token, projectId);
+			gpuDefaultSuccess = '기본 GPU quota 저장됨';
+			await loadGpuDefaults();
+			if (selectedProjectId) await loadGpuQuotas();
+		} catch (e) {
+			gpuDefaultError = e instanceof ApiError ? e.message : '기본 GPU quota 설정 실패';
+		}
 	}
 
 	function selectProject(p: Project) {
@@ -79,6 +145,39 @@
 			editVolumes = quotas?.volume?.volumes?.limit ?? 0;
 			editGigabytes = quotas?.volume?.gigabytes?.limit ?? 0;
 		} catch { quotas = null; } finally { quotaLoading = false; }
+		await loadGpuQuotas();
+	}
+
+	async function loadGpuQuotas() {
+		if (!selectedProjectId) { gpuQuotas = []; return; }
+		gpuQuotaLoading = true; gpuQuotaError = '';
+		try {
+			gpuQuotas = await api.get<GpuQuota[]>(`/api/admin/gpu-quotas/${selectedProjectId}`, token, projectId);
+		} catch (e) {
+			gpuQuotaError = e instanceof ApiError ? e.message : 'GPU quota 조회 실패';
+			gpuQuotas = [];
+		} finally { gpuQuotaLoading = false; }
+	}
+
+	async function setGpuQuota(gpuType: string, limit: number) {
+		if (!selectedProjectId) return;
+		gpuQuotaError = '';
+		try {
+			await api.put(`/api/admin/gpu-quotas/${selectedProjectId}`, { gpu_type: gpuType, limit }, token, projectId);
+			await loadGpuQuotas();
+		} catch (e) {
+			gpuQuotaError = e instanceof ApiError ? e.message : 'GPU quota 설정 실패';
+		}
+	}
+
+	async function deleteGpuQuota(gpuType: string) {
+		if (!selectedProjectId) return;
+		try {
+			await api.delete(`/api/admin/gpu-quotas/${selectedProjectId}/${encodeURIComponent(gpuType)}`, token, projectId);
+			await loadGpuQuotas();
+		} catch (e) {
+			gpuQuotaError = e instanceof ApiError ? e.message : 'GPU quota 삭제 실패';
+		}
 	}
 
 	async function saveQuotas() {
@@ -102,15 +201,46 @@
 		return `${mb} MB`;
 	}
 
-	onMount(loadProjects);
+	onMount(() => { loadProjects(); loadGpuAliases(); loadGpuDefaults(); });
 </script>
 
 <div class="p-4 md:p-8 max-w-6xl">
-	<h1 class="text-2xl font-bold text-white mb-6">쿼터 관리</h1>
+	<PageHeader breadcrumb="IDENTITY / QUOTAS" title="쿼터" />
 
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={3} />
 	{:else}
+		<!-- 전체 프로젝트 기본 GPU Quota -->
+		<div class="bg-gray-900 border border-gray-800 rounded-xl p-6 mb-6">
+			<h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-1">전체 프로젝트 기본 GPU Quota</h2>
+			<p class="text-xs text-gray-600 mb-4">프로젝트별 개별 설정이 없을 때 적용되는 기본값입니다. 미설정 시 0 (GPU VM 생성 불가).</p>
+			{#if gpuDefaultError}<div class="text-red-400 text-xs mb-3">{gpuDefaultError}</div>{/if}
+			{#if gpuDefaultSuccess}<div class="text-green-400 text-xs mb-3">{gpuDefaultSuccess}</div>{/if}
+			{#if gpuDefaultLoading}
+				<div class="text-gray-500 text-sm">불러오는 중...</div>
+			{:else if allGpuTypes.length === 0}
+				<div class="text-gray-600 text-sm">GPU alias를 찾을 수 없습니다. GPU flavor가 등록되어 있는지 확인하세요.</div>
+			{:else}
+				<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+					{#each allGpuTypes as alias}
+						{@const currentLimit = gpuDefaultMap[alias] ?? 0}
+						<div class="flex items-center gap-2 bg-gray-800/60 rounded-lg px-3 py-2">
+							<span class="text-sm text-white font-mono flex-1">{alias}</span>
+							<input
+								type="number"
+								min="-1"
+								value={currentLimit}
+								onchange={(e) => setGpuDefault(alias, Number((e.target as HTMLInputElement).value))}
+								class="w-20 bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm text-white text-right focus:outline-none focus:border-blue-500"
+							/>
+						</div>
+					{/each}
+				</div>
+				<p class="text-xs text-gray-600 mt-2">-1 = 무제한, 0 = 사용 불가</p>
+			{/if}
+		</div>
+
+		<!-- 프로젝트 선택 -->
 		<div class="mb-6 relative max-w-md">
 			<label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">프로젝트 선택</label>
 			<input
@@ -184,10 +314,79 @@
 					</div>
 				</div>
 
-				<div class="flex justify-end">
+				<div class="flex justify-end mb-6">
 					<button onclick={saveQuotas} disabled={saving} class="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg disabled:opacity-30">
 						{saving ? '저장 중...' : '저장'}
 					</button>
+				</div>
+
+				<!-- GPU Quotas (프로젝트별) -->
+				<div class="bg-gray-900 border border-gray-800 rounded-xl p-6 mb-6">
+					<h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-1">GPU Quota</h2>
+					<p class="text-xs text-gray-600 mb-4">이 프로젝트의 GPU quota입니다. 개별 설정이 없으면 전체 기본값이 적용됩니다.</p>
+					{#if gpuQuotaError}<div class="text-red-400 text-xs mb-3">{gpuQuotaError}</div>{/if}
+					{#if gpuQuotaLoading}
+						<div class="text-gray-500 text-sm">불러오는 중...</div>
+					{:else if gpuQuotas.length === 0 && allGpuTypes.length === 0}
+						<div class="text-gray-600 text-sm">GPU alias를 찾을 수 없습니다.</div>
+					{:else}
+						<table class="w-full text-sm">
+							<thead>
+								<tr class="text-gray-400 text-xs border-b border-gray-800">
+									<th class="text-left pb-2">GPU 타입</th>
+									<th class="text-right pb-2">기본값</th>
+									<th class="text-right pb-2">프로젝트 Limit</th>
+									<th class="text-right pb-2">사용 중</th>
+									<th class="text-right pb-2">가용</th>
+									<th class="text-right pb-2"></th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each gpuQuotas as q}
+									{@const alias = q.gpu_type}
+									{@const defLimit = gpuDefaultMap[alias] ?? 0}
+									{@const effectiveLimit = q.limit}
+									{@const inUse = q.in_use}
+									{@const avail = effectiveLimit === -1 ? -1 : effectiveLimit - inUse}
+										<tr class="border-b border-gray-800/50 last:border-0">
+											<td class="py-2 text-white font-mono">{alias}</td>
+											<td class="py-2 text-right text-gray-500">{defLimit === -1 ? '무제한' : defLimit}</td>
+											<td class="py-2 text-right">
+												<input
+													type="number"
+													min="-1"
+													value={q?.limit ?? ''}
+													placeholder={String(defLimit)}
+													onchange={(e) => {
+														const v = (e.target as HTMLInputElement).value;
+														if (v === '') {
+															deleteGpuQuota(alias);
+														} else {
+															setGpuQuota(alias, Number(v));
+														}
+													}}
+													class="w-20 bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm text-white text-right focus:outline-none focus:border-blue-500"
+												/>
+											</td>
+											<td class="py-2 text-right text-gray-400">{inUse}</td>
+											<td class="py-2 text-right {avail > 0 ? 'text-green-400' : avail === -1 ? 'text-gray-500' : 'text-red-400'}">
+												{effectiveLimit === -1 ? '무제한' : avail}
+											</td>
+											<td class="py-2 text-right">
+												{#if q?.limit != null}
+													<button
+														onclick={() => deleteGpuQuota(alias)}
+														class="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+														title="프로젝트별 설정 삭제 (기본값으로 복귀)"
+													>초기화</button>
+												{/if}
+											</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+							<p class="text-xs text-gray-600 mt-2">빈 칸 = 기본값 사용, -1 = 무제한, 0 = 사용 불가</p>
+					{/if}
 				</div>
 			{:else}
 				<div class="text-gray-600 text-sm">쿼터를 불러올 수 없습니다</div>

@@ -5,6 +5,8 @@
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import RefreshButton from '$lib/components/RefreshButton.svelte';
   import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
+  import StatusChip from '$lib/components/ui/StatusChip.svelte';
+  import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
   interface SecurityService {
     id: string;
@@ -29,12 +31,6 @@
     active_directory: 'Active Directory',
   };
 
-  const statusColor: Record<string, string> = {
-    active:   'text-green-400 bg-green-900/30',
-    error:    'text-red-400 bg-red-900/30',
-    inactive: 'text-gray-400 bg-gray-800',
-    new:      'text-blue-400 bg-blue-900/30',
-  };
 
   let services = $state<SecurityService[]>([]);
   let shareNetworks = $state<ShareNetwork[]>([]);
@@ -287,17 +283,16 @@
 {/if}
 
 <div class="p-4 md:p-8">
-  <div class="flex items-center justify-between mb-6">
-    <h1 class="text-2xl font-bold text-white">Security Service</h1>
-    <div class="flex items-center gap-2">
+  <PageHeader breadcrumb="FILE STORAGE / SECURITY SERVICES" title="Security Service">
+    {#snippet actions()}
       <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={30} />
       <RefreshButton {refreshing} onclick={forceRefresh} />
       <button onclick={openCreateModal}
         class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
         + Security Service 생성
       </button>
-    </div>
-  </div>
+    {/snippet}
+  </PageHeader>
 
   <p class="text-sm text-gray-500 mb-6">LDAP, Kerberos, Active Directory 인증 서비스를 Share Network에 연결하여 파일 스토리지 접근을 제어합니다.</p>
 
@@ -344,9 +339,7 @@
                 </span>
               </td>
               <td class="py-3 pr-4">
-                <span class="px-2 py-0.5 rounded text-xs font-medium {statusColor[svc.status] ?? 'text-gray-400 bg-gray-800'}">
-                  {svc.status || '-'}
-                </span>
+                <StatusChip status={svc.status || null} />
               </td>
               <td class="py-3 pr-4 text-xs text-gray-400 font-mono">{svc.dns_ip || '-'}</td>
               <td class="py-3 pr-4 text-xs text-gray-400">{svc.server || '-'}</td>

@@ -7,6 +7,8 @@
   import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
   import K3sClusterDetailPanel from '$lib/components/K3sClusterDetailPanel.svelte';
   import SlidePanel from '$lib/components/SlidePanel.svelte';
+  import StatusChip from '$lib/components/ui/StatusChip.svelte';
+  import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
   interface K3sCluster {
     id: string;
@@ -45,14 +47,6 @@
     name: string;
   }
 
-  const statusColor: Record<string, string> = {
-    ACTIVE:       'text-green-400 bg-green-900/30',
-    CREATING:     'text-yellow-400 bg-yellow-900/30',
-    PROVISIONING: 'text-blue-400 bg-blue-900/30',
-    DELETING:     'text-orange-400 bg-orange-900/30',
-    ERROR:        'text-red-400 bg-red-900/30',
-    DELETED:      'text-gray-500 bg-gray-800/50',
-  };
 
   const K3S_STEPS = [
     { id: 'security_group',   label: '보안 그룹' },
@@ -399,23 +393,22 @@
 {/if}
 
 <div class="p-4 md:p-8">
-  <div class="flex items-center justify-between mb-6">
-    <h1 class="text-2xl font-bold text-white">k3s 클러스터</h1>
-    <div class="flex items-center gap-2">
+  <PageHeader breadcrumb="CONTAINERS / K3S" title="k3s 클러스터">
+    {#snippet actions()}
       <button
         onclick={() => { showDeleted = !showDeleted; fetchClusters(); }}
-        class="text-xs px-3 py-1.5 rounded border transition-colors {showDeleted ? 'border-gray-500 text-gray-300 bg-gray-800' : 'border-gray-700 text-gray-500 hover:border-gray-500 hover:text-gray-400'}"
+        class="hidden sm:inline-flex text-xs px-3 py-1.5 rounded border transition-colors {showDeleted ? 'border-gray-500 text-gray-300 bg-gray-800' : 'border-gray-700 text-gray-500 hover:border-gray-500 hover:text-gray-400'}"
       >
         {showDeleted ? '삭제 이력 숨기기' : '삭제 이력 보기'}
       </button>
       <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={5} />
-      <RefreshButton {refreshing} onclick={forceRefresh} />
+      <span class="hidden sm:inline-flex"><RefreshButton {refreshing} onclick={forceRefresh} /></span>
       <button onclick={openCreateModal}
         class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
         + 클러스터 생성
       </button>
-    </div>
-  </div>
+    {/snippet}
+  </PageHeader>
 
   <p class="text-sm text-gray-500 mb-6">Nova VM + cloud-init으로 k3s Kubernetes 클러스터를 프로비저닝합니다.</p>
 
@@ -424,7 +417,11 @@
   {/if}
 
   {#if loading}
-    <LoadingSkeleton variant="table" rows={3} />
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+      {#each Array(3) as _}
+        <div class="animate-pulse h-48 bg-gray-900 border border-gray-800 rounded-2xl"></div>
+      {/each}
+    </div>
   {:else if clusters.length === 0}
     <div class="text-center py-20 text-gray-600">
       <div class="text-5xl mb-4">☸</div>
@@ -434,78 +431,77 @@
       </button>
     </div>
   {:else}
-    <div class="overflow-x-auto">
-      <table class="w-full text-sm">
-        <thead>
-          <tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
-            <th class="text-left py-3 pr-6">이름</th>
-            <th class="text-left py-3 pr-6">상태</th>
-            <th class="text-left py-3 pr-6">에이전트</th>
-            <th class="text-left py-3 pr-6">API 주소</th>
-            <th class="text-left py-3 pr-6">k3s 버전</th>
-            <th class="text-left py-3 pr-6">생성일</th>
-            <th class="text-right py-3">액션</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each clusters as cluster (cluster.id)}
-            <tr
-              class="border-b border-gray-800/50 transition-colors {cluster.deleted_at ? 'opacity-50' : 'hover:bg-gray-800/30 cursor-pointer'}"
-              onclick={() => !cluster.deleted_at && openClusterPanel(cluster.id)}
-              onkeydown={(e) => e.key === 'Enter' && !cluster.deleted_at && openClusterPanel(cluster.id)}
-              role="button"
-              tabindex="0">
-              <td class="py-3 pr-6">
-                <span class="font-medium {cluster.deleted_at ? 'text-gray-500 line-through' : 'text-white hover:text-blue-400'} transition-colors">
-                  {cluster.name}
-                </span>
-                {#if cluster.deleted_at}
-                  <div class="text-xs text-gray-600 mt-0.5">
-                    삭제됨 {cluster.deleted_at.replace('T', ' ').slice(0, 16)}
-                  </div>
-                {:else if cluster.status_reason}
-                  <div class="text-xs text-gray-500 truncate max-w-xs">{cluster.status_reason}</div>
-                {/if}
-              </td>
-              <td class="py-3 pr-6">
-                <span class="px-2 py-0.5 rounded text-xs font-medium {statusColor[cluster.status] ?? 'text-gray-400 bg-gray-800'}">
-                  {cluster.status}
-                </span>
-              </td>
-              <td class="py-3 pr-6 text-gray-400 text-xs">
-                {cluster.agent_vm_ids.length} / {cluster.agent_count}
-              </td>
-              <td class="py-3 pr-6 font-mono text-xs text-gray-400">
-                {cluster.api_address || '-'}
-              </td>
-              <td class="py-3 pr-6 text-xs text-gray-500">
-                {cluster.k3s_version || '-'}
-              </td>
-              <td class="py-3 pr-6 text-xs text-gray-500">
-                {cluster.created_at ? cluster.created_at.split('T')[0] : '-'}
-              </td>
-              <td class="py-3 text-right" onclick={(e) => e.stopPropagation()} role="none" onkeydown={(e) => e.stopPropagation()}>
-                <div class="flex items-center justify-end gap-2">
-                  <button
-                    onclick={() => downloadKubeconfig(cluster.id, cluster.name)}
-                    disabled={cluster.status !== 'ACTIVE'}
-                    class="text-blue-400 hover:text-blue-300 disabled:text-gray-600 text-xs px-2 py-1 rounded border border-blue-900 hover:border-blue-700 disabled:border-gray-700 transition-colors">
-                    kubeconfig
-                  </button>
-                  {#if !cluster.deleted_at}
-                  <button
-                    onclick={() => deleteCluster(cluster.id, cluster.name)}
-                    disabled={deleting === cluster.id || cluster.status === 'DELETING'}
-                    class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-xs px-2 py-1 rounded border border-red-900 hover:border-red-700 disabled:border-gray-700 transition-colors">
-                    {deleting === cluster.id ? '삭제 중...' : '삭제'}
-                  </button>
-                  {/if}
-                </div>
-              </td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+      {#each clusters as cluster (cluster.id)}
+        <div
+          class="bg-gray-900 border border-gray-800 rounded-2xl p-5 transition-colors {cluster.deleted_at ? 'opacity-50' : 'cursor-pointer hover:border-gray-600'}"
+          onclick={() => !cluster.deleted_at && openClusterPanel(cluster.id)}
+          role={cluster.deleted_at ? undefined : 'button'}
+          tabindex={cluster.deleted_at ? undefined : 0}
+          onkeydown={(e) => e.key === 'Enter' && !cluster.deleted_at && openClusterPanel(cluster.id)}
+        >
+          <!-- Header -->
+          <div class="flex items-center gap-2.5 mb-3">
+            <div class="w-[34px] h-[34px] rounded-[9px] bg-emerald-500/12 border border-emerald-500/30 text-emerald-400 flex items-center justify-center shrink-0">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              </svg>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="text-white font-semibold text-sm truncate {cluster.deleted_at ? 'line-through text-gray-500' : ''}">
+                {cluster.name}
+              </div>
+              <div class="text-[11px] text-gray-500 font-mono mt-0.5">
+                {cluster.k3s_version || 'k3s'}
+              </div>
+            </div>
+            <StatusChip status={cluster.status} />
+          </div>
+
+          <!-- Info grid -->
+          <div class="grid grid-cols-2 gap-2 text-xs mb-3.5">
+            <div>
+              <div class="text-[11px] uppercase tracking-wider font-medium text-gray-500">노드 (M+A)</div>
+              <div class="text-gray-200 mt-0.5">{cluster.agent_count + 1} (1+{cluster.agent_count})</div>
+            </div>
+            <div>
+              <div class="text-[11px] uppercase tracking-wider font-medium text-gray-500">API</div>
+              <div class="text-gray-200 mt-0.5 font-mono text-xs truncate">{cluster.api_address || '—'}</div>
+            </div>
+            {#if cluster.deleted_at}
+              <div class="col-span-2">
+                <div class="text-[11px] uppercase tracking-wider font-medium text-gray-500">삭제됨</div>
+                <div class="text-gray-500 mt-0.5 text-xs">{cluster.deleted_at.replace('T', ' ').slice(0, 16)}</div>
+              </div>
+            {:else if cluster.status_reason}
+              <div class="col-span-2">
+                <div class="text-[11px] text-gray-500 truncate">{cluster.status_reason}</div>
+              </div>
+            {/if}
+          </div>
+
+          <!-- Actions -->
+          <div class="flex gap-1.5" role="none" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
+            <button
+              onclick={() => downloadKubeconfig(cluster.id, cluster.name)}
+              disabled={cluster.status !== 'ACTIVE'}
+              class="flex-1 text-blue-400 hover:text-blue-300 disabled:text-gray-600 text-xs px-2 py-1.5 rounded border border-blue-900 hover:border-blue-700 disabled:border-gray-700 transition-colors text-center"
+            >kubeconfig</button>
+            <button
+              onclick={() => openClusterPanel(cluster.id)}
+              disabled={!!cluster.deleted_at}
+              class="text-gray-400 hover:text-white disabled:text-gray-600 text-xs px-2 py-1.5 rounded border border-gray-700 hover:border-gray-500 disabled:border-gray-700 transition-colors"
+            >상세</button>
+            {#if !cluster.deleted_at}
+              <button
+                onclick={() => deleteCluster(cluster.id, cluster.name)}
+                disabled={deleting === cluster.id || cluster.status === 'DELETING'}
+                class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-xs px-2 py-1.5 rounded border border-red-900 hover:border-red-700 disabled:border-gray-700 transition-colors"
+              >{deleting === cluster.id ? '삭제 중...' : '삭제'}</button>
+            {/if}
+          </div>
+        </div>
+      {/each}
     </div>
   {/if}
 </div>

@@ -6,6 +6,8 @@
 	import TimeSeriesChart from '$lib/components/TimeSeriesChart.svelte';
 	import { formatNumber } from '$lib/utils/format';
 	import { projectNames } from '$lib/stores/projectNames';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import StatusChip from '$lib/components/ui/StatusChip.svelte';
 
 	interface AdminFileStorage {
 		id: string;
@@ -18,11 +20,6 @@
 		created_at: string | null;
 		export_locations: string[];
 	}
-
-	const statusColor: Record<string, string> = {
-		available: 'text-green-400', creating: 'text-yellow-400',
-		deleting: 'text-orange-400', error: 'text-red-400',
-	};
 
 	interface TsPoint { ts: number; total?: number; [key: string]: number | undefined; }
 
@@ -85,9 +82,8 @@
 </script>
 
 <div class="p-4 md:p-8 max-w-6xl">
-	<div class="flex items-center justify-between mb-6">
-		<h1 class="text-2xl font-bold text-white">전체 파일 스토리지</h1>
-		<div class="flex items-center gap-3">
+	<PageHeader breadcrumb="STORAGE / FILE STORAGE" title="파일 스토리지">
+		{#snippet actions()}
 			<select
 				bind:value={pageSize}
 				onchange={() => { currentPage = 0; }}
@@ -98,8 +94,8 @@
 				{/each}
 			</select>
 			<button onclick={load} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
-		</div>
-	</div>
+		{/snippet}
+	</PageHeader>
 
 	<div class="mb-6">
 		{#if tsLoading}
@@ -140,7 +136,7 @@
 					{#each displayedStorages as fs (fs.id)}
 						<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/20">
 							<td class="py-2 pr-4 text-white font-medium">{fs.name || fs.id.slice(0, 8)}</td>
-							<td class="py-2 pr-4 {statusColor[fs.status] ?? 'text-gray-400'}">{fs.status}</td>
+							<td class="py-2 pr-4"><StatusChip status={fs.status} /></td>
 							<td class="py-2 pr-4 text-gray-400">{formatNumber(fs.size)} GB</td>
 							<td class="py-2 pr-4">
 								<span class="px-1.5 py-0.5 rounded text-xs font-medium {fs.share_proto === 'NFS' ? 'bg-blue-900/40 text-blue-300' : 'bg-purple-900/40 text-purple-300'}">{fs.share_proto}</span>

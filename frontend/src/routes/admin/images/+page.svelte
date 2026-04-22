@@ -5,6 +5,8 @@
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import SlidePanel from '$lib/components/SlidePanel.svelte';
 	import { projectNames } from '$lib/stores/projectNames';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import StatusChip from '$lib/components/ui/StatusChip.svelte';
 
 	interface AdminImage {
 		id: string;
@@ -157,9 +159,8 @@
 </script>
 
 <div class="p-4 md:p-8 max-w-7xl">
-	<div class="flex items-center justify-between mb-6">
-		<h1 class="text-2xl font-bold text-white">이미지 관리</h1>
-		<div class="flex items-center gap-3">
+	<PageHeader breadcrumb="COMPUTE / IMAGES" title="이미지">
+		{#snippet actions()}
 			<button onclick={() => { markerStack = []; nextMarker = null; load(); }} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
 			<div class="flex items-center gap-1 text-xs text-gray-500">
 				표시:
@@ -170,8 +171,8 @@
 					>{n}</button>
 				{/each}
 			</div>
-		</div>
-	</div>
+		{/snippet}
+	</PageHeader>
 
 	<!-- 필터 -->
 	<div class="flex flex-wrap gap-3 mb-4">
@@ -229,7 +230,7 @@
 								</div>
 							</td>
 							<td class="py-2 pr-4">
-								<span class="{img.status === 'active' ? 'text-green-400' : img.status === 'deactivated' ? 'text-orange-400' : img.status === 'queued' ? 'text-yellow-400' : 'text-red-400'}">{img.status}</span>
+								<StatusChip status={img.status} />
 							</td>
 							<td class="py-2 pr-4">
 								<span class="px-1.5 py-0.5 rounded text-xs {visibilityColor[img.visibility] ?? 'text-gray-400 bg-gray-800'}">{img.visibility}</span>

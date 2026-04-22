@@ -3,6 +3,7 @@
 	import { auth } from '$lib/stores/auth';
 	import { api } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import { siteConfig } from '$lib/config/site';
 
 	interface Service {
@@ -65,21 +66,6 @@
 		container: 'zun',
 	};
 
-	let visibleTabs = $derived(
-		tabs.filter(tab => {
-			const serviceKey = serviceTabMap[tab.key];
-			if (!serviceKey) return true;
-			return ($siteConfig?.services as Record<string, boolean>)?.[serviceKey] ?? false;
-		})
-	);
-
-	let activeCategories = $derived(
-		allCategories.filter(cat => {
-			const serviceKey = serviceTabMap[cat];
-			if (!serviceKey) return true;
-			return ($siteConfig?.services as Record<string, boolean>)?.[serviceKey] ?? false;
-		})
-	);
 	let loadingMap = $state<Record<TabKey, boolean>>(Object.fromEntries(allCategories.map(c => [c, true])) as Record<TabKey, boolean>);
 
 	let autoRefresh = $state(true);
@@ -101,6 +87,22 @@
 		{ key: 'endpoints', label: 'API Endpoints', count: () => endpoints.length },
 		{ key: 'storage_pools', label: 'Storage Pools', count: () => storagePools.length },
 	];
+
+	let visibleTabs = $derived(
+		tabs.filter(tab => {
+			const serviceKey = serviceTabMap[tab.key];
+			if (!serviceKey) return true;
+			return ($siteConfig?.services as Record<string, boolean>)?.[serviceKey] ?? false;
+		})
+	);
+
+	let activeCategories = $derived(
+		allCategories.filter(cat => {
+			const serviceKey = serviceTabMap[cat];
+			if (!serviceKey) return true;
+			return ($siteConfig?.services as Record<string, boolean>)?.[serviceKey] ?? false;
+		})
+	);
 
 	async function loadCategory(cat: TabKey, isRefresh = false) {
 		if (!isRefresh) loadingMap[cat] = true;
@@ -156,9 +158,8 @@
 </script>
 
 <div class="p-4 md:p-8 max-w-7xl">
-	<div class="flex items-center justify-between mb-6">
-		<h1 class="text-2xl font-bold text-white">서비스 상태</h1>
-		<div class="flex items-center gap-3">
+	<PageHeader breadcrumb="SYSTEM / SERVICES" title="서비스 상태">
+		{#snippet actions()}
 			{#if lastRefresh}
 				<span class="text-xs text-gray-500">마지막: {lastRefresh.toLocaleTimeString()}</span>
 			{/if}
@@ -167,8 +168,8 @@
 				class="text-xs px-3 py-1.5 rounded border transition-colors {autoRefresh ? 'border-blue-500 bg-blue-900/20 text-blue-400' : 'border-gray-700 bg-gray-900 text-gray-400 hover:text-white'}"
 			>{autoRefresh ? '자동 새로고침 ON' : '자동 새로고침 OFF'}</button>
 			<button onclick={refresh} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
-		</div>
-	</div>
+		{/snippet}
+	</PageHeader>
 
 	<!-- 탭 바 -->
 	<div class="flex flex-wrap gap-1 mb-6 border-b border-gray-800 pb-0">

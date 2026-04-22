@@ -7,6 +7,8 @@
   import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
   import ImageDetailPanel from '$lib/components/ImageDetailPanel.svelte';
   import SlidePanel from '$lib/components/SlidePanel.svelte';
+  import StatusChip from '$lib/components/ui/StatusChip.svelte';
+  import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
   interface ImageInfo {
     id: string;
@@ -245,9 +247,8 @@
 {/if}
 
 <div class="p-4 md:p-8">
-  <div class="flex items-center justify-between mb-6">
-    <h1 class="text-2xl font-bold text-white">이미지</h1>
-    <div class="flex items-center gap-2">
+  <PageHeader breadcrumb="COMPUTE / IMAGES" title="이미지">
+    {#snippet actions()}
       <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={60} />
       <RefreshButton {refreshing} onclick={forceRefresh} />
       <button
@@ -256,13 +257,17 @@
       >
         날짜 {sortOrder === 'desc' ? '↓ 최신순' : '↑ 오래된순'}
       </button>
-    </div>
-  </div>
+    {/snippet}
+  </PageHeader>
 
   {#if error}<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>{/if}
 
   {#if loading}
-    <LoadingSkeleton variant="table" rows={5} />
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3.5">
+      {#each Array(8) as _}
+        <div class="animate-pulse h-32 bg-gray-900 border border-gray-800 rounded-2xl"></div>
+      {/each}
+    </div>
   {:else}
     <!-- OS 필터 탭 -->
     <div class="flex flex-wrap gap-2 mb-5">
@@ -284,81 +289,63 @@
         <p class="text-lg">이미지가 없습니다</p>
       </div>
     {:else}
-      <div class="overflow-x-auto">
-        <table class="w-full text-sm">
-          <thead>
-            <tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
-              <th class="text-left py-3 pr-6">이름</th>
-              <th class="text-left py-3 pr-6">OS</th>
-              <th class="text-left py-3 pr-6">공개 범위</th>
-              <th class="text-left py-3 pr-6">상태</th>
-              <th class="text-left py-3 pr-6">포맷</th>
-              <th class="text-left py-3 pr-6">크기</th>
-              <th class="text-left py-3 pr-6">최소 디스크</th>
-              <th class="text-left py-3 pr-6">등록일</th>
-              <th class="text-left py-3"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each filteredImages as img (img.id)}
-              <tr
-                class="border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors cursor-pointer"
-                onclick={() => openImagePanel(img.id)}
-              >
-                <td class="py-3 pr-6 font-medium text-white">{img.name}</td>
-                <td class="py-3 pr-6 text-xs">
-                  {#if img.os_distro}
-                    <span class="flex items-center gap-1.5">
-                      {#if OS_LOGOS[img.os_distro]}
-                        <img src={OS_LOGOS[img.os_distro]} alt={img.os_distro} class="w-4 h-4 object-contain" />
-                      {:else}
-                        <span class="w-4 h-4 flex items-center justify-center">{OS_EMOJI[img.os_distro] ?? '💿'}</span>
-                      {/if}
-                      <span class="text-gray-300">{osLabel(img.os_distro)}</span>
-                    </span>
-                  {:else}
-                    <span class="text-gray-500">-</span>
-                  {/if}
-                </td>
-                <td class="py-3 pr-6 text-xs">
-                  {#if img.visibility === 'public'}
-                    <span class="px-2 py-0.5 rounded font-medium text-green-400 bg-green-900/30">공개</span>
-                  {:else if img.visibility === 'shared'}
-                    <span class="px-2 py-0.5 rounded font-medium text-blue-400 bg-blue-900/30">공유</span>
-                  {:else if img.visibility === 'community'}
-                    <span class="px-2 py-0.5 rounded font-medium text-cyan-400 bg-cyan-900/30">커뮤니티</span>
-                  {:else if img.visibility === 'private'}
-                    <span class="px-2 py-0.5 rounded font-medium text-gray-400 bg-gray-800">비공개</span>
-                  {:else}
-                    <span class="text-gray-500">{img.visibility ?? '-'}</span>
-                  {/if}
-                </td>
-                <td class="py-3 pr-6">
-                  <span class="px-2 py-0.5 rounded text-xs font-medium {img.status === 'active' ? 'text-green-400 bg-green-900/30' : 'text-gray-400 bg-gray-800'}">{img.status}</span>
-                </td>
-                <td class="py-3 pr-6 text-gray-400 text-xs">{img.disk_format ?? '-'}</td>
-                <td class="py-3 pr-6 text-gray-400 text-xs">{formatSize(img.size)}</td>
-                <td class="py-3 pr-6 text-gray-400 text-xs">{img.min_disk} GB</td>
-                <td class="py-3 pr-6 text-gray-400 text-xs">{formatDate(img.created_at)}</td>
-                <td class="py-3">
-                  {#if img.owner === $auth.projectId}
-                    <div class="flex items-center gap-1" role="none" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
-                      <button
-                        onclick={() => openEdit(img)}
-                        class="text-xs text-blue-400 hover:text-blue-300 transition-colors px-2 py-1 rounded hover:bg-blue-900/30"
-                      >편집</button>
-                      <button
-                        onclick={() => deleteImage(img.id, img.name)}
-                        disabled={deleting === img.id}
-                        class="text-xs text-red-400 hover:text-red-300 disabled:text-gray-600 transition-colors px-2 py-1 rounded hover:bg-red-900/30"
-                      >{deleting === img.id ? '삭제 중...' : '삭제'}</button>
-                    </div>
-                  {/if}
-                </td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3.5">
+        {#each filteredImages as img (img.id)}
+          <div
+            class="bg-gray-900 border border-gray-800 rounded-2xl p-4 flex flex-col gap-3 cursor-pointer hover:border-gray-600 transition-colors"
+            onclick={() => openImagePanel(img.id)}
+            role="button"
+            tabindex="0"
+            onkeydown={(e) => e.key === 'Enter' && openImagePanel(img.id)}
+          >
+            <!-- Header: icon + name -->
+            <div class="flex items-center gap-2.5">
+              <div class="w-10 h-10 rounded-lg bg-gray-800 border border-gray-700 flex items-center justify-center overflow-hidden shrink-0">
+                {#if img.os_distro && OS_LOGOS[img.os_distro]}
+                  <img src={OS_LOGOS[img.os_distro]} alt={img.os_distro} class="w-6 h-6 object-contain" />
+                {:else if img.os_distro && OS_EMOJI[img.os_distro]}
+                  <span class="text-lg">{OS_EMOJI[img.os_distro]}</span>
+                {:else}
+                  <span class="text-lg">💿</span>
+                {/if}
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="text-white text-[13px] font-medium truncate font-mono">{img.name}</div>
+                <div class="text-[11px] text-gray-500 mt-0.5">{img.os_distro ? osLabel(img.os_distro) : 'Unknown'}</div>
+              </div>
+            </div>
+
+            <!-- Footer: status + visibility + size -->
+            <div class="flex items-center gap-2 text-[11px]">
+              <StatusChip status={img.status} />
+              {#if img.visibility === 'public'}
+                <span class="px-1.5 py-0.5 rounded border text-[10px] font-medium bg-blue-900/25 border-blue-800 text-blue-400">공개</span>
+              {:else if img.visibility === 'shared'}
+                <span class="px-1.5 py-0.5 rounded border text-[10px] font-medium bg-teal-900/25 border-teal-800 text-teal-400">공유</span>
+              {:else if img.visibility === 'community'}
+                <span class="px-1.5 py-0.5 rounded border text-[10px] font-medium bg-teal-900/25 border-teal-800 text-teal-400">커뮤니티</span>
+              {:else}
+                <span class="px-1.5 py-0.5 rounded border text-[10px] font-medium bg-gray-800/70 border-gray-700 text-gray-400">{img.visibility ?? '비공개'}</span>
+              {/if}
+              <span class="ml-auto text-gray-500">{formatSize(img.size)}</span>
+            </div>
+
+            <!-- Actions (own images only) -->
+            {#if img.owner === $auth.projectId}
+              <div class="flex items-center gap-1 pt-1 border-t border-gray-800" role="none" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
+                <button
+                  onclick={() => openEdit(img)}
+                  class="text-[11px] text-blue-400 hover:text-blue-300 transition-colors px-2 py-1 rounded hover:bg-blue-900/30"
+                >편집</button>
+                <button
+                  onclick={() => deleteImage(img.id, img.name)}
+                  disabled={deleting === img.id}
+                  class="text-[11px] text-red-400 hover:text-red-300 disabled:text-gray-600 transition-colors px-2 py-1 rounded hover:bg-red-900/30"
+                >{deleting === img.id ? '삭제 중...' : '삭제'}</button>
+              </div>
+            {/if}
+          </div>
+        {/each}
       </div>
     {/if}
   {/if}

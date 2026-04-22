@@ -14,6 +14,9 @@ use-octavia=true
 {% if floating_network_id %}
 floating-network-id={{ floating_network_id }}
 {% endif %}
+{% if lb_subnet_id %}
+subnet-id={{ lb_subnet_id }}
+{% endif %}
 
 [Networking]
 {% if public_network_name %}

@@ -51,6 +51,9 @@ def _cluster_to_dict(cluster: K3sCluster) -> dict:
         "deleted_reason": cluster.deleted_reason,
         "occm_enabled": cluster.occm_enabled,
         "plugins_enabled": cluster.plugins_enabled or {},
+        "api_lb_id": cluster.api_lb_id or "",
+        "api_fip_id": cluster.api_fip_id or "",
+        "api_fip_address": cluster.api_fip_address or "",
     }
 
 
@@ -89,6 +92,9 @@ async def create_cluster_record(project_id: str, cluster_id: str, data: dict) ->
             plugins_enabled=data.get("plugins_enabled") or None,
             created_by_user_id=data.get("created_by_user_id") or None,
             created_by_username=data.get("created_by_username") or None,
+            api_lb_id=data.get("api_lb_id") or None,
+            api_fip_id=data.get("api_fip_id") or None,
+            api_fip_address=data.get("api_fip_address") or None,
         )
         session.add(cluster)
         await session.commit()
@@ -219,6 +225,9 @@ async def update_cluster_status(
             "agent_flavor_id",
             "key_name",
             "ssh_public_key",
+            "api_lb_id",
+            "api_fip_id",
+            "api_fip_address",
         }
         for k, v in extra_fields.items():
             if k in _column_map:

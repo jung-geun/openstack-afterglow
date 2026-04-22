@@ -7,6 +7,12 @@ metadata:
     app: backend
 spec:
   replicas: 2
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app: backend
@@ -15,18 +21,13 @@ spec:
       labels:
         app: backend
     spec:
+      terminationGracePeriodSeconds: 30
       containers:
         - name: backend
-          # 이미지 태그: latest (릴리즈), dev (main 브랜치), v1.2.3 (버전 태그)
-          # 실제 레지스트리 주소로 변경 필요
-          # 예: ghcr.io/myorg/afterglow-api:latest
-          #     registry.gitlab.com/myorg/afterglow/backend:latest
           image: ghcr.io/jung-geun/afterglow-api:latest
           imagePullPolicy: Always
           command:
             [
-              "uv",
-              "run",
               "uvicorn",
               "app.main:app",
               "--host",
@@ -35,6 +36,12 @@ spec:
               "8000",
               "--workers",
               "2",
+              "--timeout-keep-alive",
+              "65",
+              "--loop",
+              "uvloop",
+              "--http",
+              "httptools",
             ]
           ports:
             - containerPort: 8000
@@ -73,36 +80,37 @@ spec:
             - name: afterglow-config-volume
               mountPath: /app/config.toml
               subPath: config.toml
-          # startupProbe: 시작 완료까지 최대 5 + 30*3 = 95초 허용.
-          # 통과 후에만 liveness/readiness 체크 시작하므로 조기 재시작을 방지한다.
+          # startupProbe: 시작 완료까지 최대 3 + 20*2 = 43초 허용
           startupProbe:
             httpGet:
               path: /api/health
               port: 8000
-            initialDelaySeconds: 5
-            periodSeconds: 3
-            failureThreshold: 30
+            initialDelaySeconds: 3
+            periodSeconds: 2
+            failureThreshold: 20
+            timeoutSeconds: 10
           livenessProbe:
             httpGet:
               path: /api/health
               port: 8000
-            initialDelaySeconds: 0
-            periodSeconds: 20
+            initialDelaySeconds: 15
+            periodSeconds: 15
             failureThreshold: 3
+            timeoutSeconds: 5
           readinessProbe:
             httpGet:
               path: /api/health
               port: 8000
-            initialDelaySeconds: 0
-            periodSeconds: 10
-            failureThreshold: 3
+            periodSeconds: 5
+            failureThreshold: 2
+            timeoutSeconds: 5
           resources:
             requests:
-              memory: "256Mi"
+              memory: "512Mi"
               cpu: "500m"
             limits:
-              memory: "1024Mi"
-              cpu: "1"
+              memory: "1Gi"
+              cpu: "4"
       volumes:
         - name: afterglow-config-volume
           configMap:

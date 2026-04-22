@@ -38,6 +38,7 @@
 				expires_at: string | null;
 				roles?: string[];
 				default_project_id?: string;
+				is_system_admin?: boolean;
 			}>('/api/auth/gitlab/callback', { code, state });
 
 			// 프로젝트 목록 조회

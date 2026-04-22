@@ -5,6 +5,7 @@
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import SlidePanel from '$lib/components/SlidePanel.svelte';
 	import { projectNames } from '$lib/stores/projectNames';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
 	interface Flavor {
 		id: string;
@@ -84,8 +85,8 @@
 					va = a.is_public ? 1 : 0;
 					vb = b.is_public ? 1 : 0;
 				} else {
-					va = (a as Record<string, unknown>)[sortColumn] as string | number;
-					vb = (b as Record<string, unknown>)[sortColumn] as string | number;
+					va = (a as unknown as Record<string, unknown>)[sortColumn] as string | number;
+					vb = (b as unknown as Record<string, unknown>)[sortColumn] as string | number;
 				}
 				const cmp = typeof va === 'string' ? va.localeCompare(vb as string) : (va as number) - (vb as number);
 				return sortAsc ? cmp : -cmp;
@@ -334,9 +335,8 @@
 </script>
 
 <div class="p-4 md:p-8 max-w-6xl">
-	<div class="flex items-center justify-between mb-6">
-		<h1 class="text-2xl font-bold text-white">Flavor 관리</h1>
-		<div class="flex items-center gap-3">
+	<PageHeader breadcrumb="COMPUTE / FLAVORS" title="Flavor">
+		{#snippet actions()}
 			<button onclick={() => { showCreate = true; createError = ''; }} class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors">+ 생성</button>
 			<button onclick={() => { nameFilter = ''; vcpuFilter = ''; ramFilter = ''; diskFilter = ''; gpuFilter = ''; load(); }} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
 			<div class="flex items-center gap-1 text-xs text-gray-500">
@@ -348,8 +348,8 @@
 					>{n}</button>
 				{/each}
 			</div>
-		</div>
-	</div>
+		{/snippet}
+	</PageHeader>
 
 	<!-- 필터 -->
 	<div class="flex flex-wrap gap-3 mb-4">

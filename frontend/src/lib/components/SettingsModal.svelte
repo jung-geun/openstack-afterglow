@@ -16,7 +16,7 @@
 		description?: string;
 	}
 
-	let { open = false, onclose }: { open?: boolean; onclose?: () => void } = $props();
+	let { open = $bindable(false), onclose }: { open?: boolean; onclose?: () => void } = $props();
 
 	let profile = $state<Profile>({ id: '', name: '', email: '', description: '', default_project_id: '' });
 	let loading = $state(false);

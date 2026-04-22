@@ -7,6 +7,7 @@
 	import InstanceDetailPanel from '$lib/components/InstanceDetailPanel.svelte';
 	import RouterDetailPanel from '$lib/components/RouterDetailPanel.svelte';
 	import SlidePanel from '$lib/components/SlidePanel.svelte';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
 	let isLight = $state(false);
 	onMount(() => {
@@ -81,16 +82,17 @@
 </script>
 
 <div class="p-4 md:p-8 max-w-screen-2xl mx-auto">
-	<div class="mb-6 flex items-center justify-between">
-		<h1 class="text-2xl font-bold text-white">전체 네트워크 토폴로지</h1>
-		<button
-			onclick={fetchTopology}
-			disabled={loading}
-			class="text-sm px-3 py-1.5 rounded border border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500 disabled:text-gray-600 disabled:border-gray-800 transition-colors"
-		>
-			{loading ? '로딩 중…' : '새로고침'}
-		</button>
-	</div>
+	<PageHeader breadcrumb="NETWORK / TOPOLOGY" title="토폴로지">
+		{#snippet actions()}
+			<button
+				onclick={fetchTopology}
+				disabled={loading}
+				class="text-sm px-3 py-1.5 rounded border border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500 disabled:text-gray-600 disabled:border-gray-800 transition-colors"
+			>
+				{loading ? '로딩 중…' : '새로고침'}
+			</button>
+		{/snippet}
+	</PageHeader>
 
 	{#if error}
 		<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm">

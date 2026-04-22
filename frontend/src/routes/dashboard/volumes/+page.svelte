@@ -10,29 +10,21 @@
   import RefreshButton from '$lib/components/RefreshButton.svelte';
   import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
   import { formatStorage } from '$lib/utils/format';
+  import StatusChip from '$lib/components/ui/StatusChip.svelte';
+  import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
-  const statusColor: Record<string, string> = {
-    available:          'text-green-400 bg-green-900/30',
-    creating:           'text-amber-400 bg-amber-900/30',
-    deleting:           'text-orange-400 bg-orange-900/30',
-    error:              'text-red-400 bg-red-900/30',
-    in_use:             'text-blue-400 bg-blue-900/30',
-    reserved:           'text-purple-400 bg-purple-900/30',
-    attaching:          'text-cyan-400 bg-cyan-900/30',
-    detaching:          'text-amber-400 bg-amber-900/30',
-    'backing-up':       'text-indigo-400 bg-indigo-900/30',
-    'restoring-backup': 'text-teal-400 bg-teal-900/30',
-    downloading:        'text-sky-400 bg-sky-900/30',
-    uploading:          'text-sky-400 bg-sky-900/30',
-    retyping:           'text-violet-400 bg-violet-900/30',
-    extending:          'text-cyan-400 bg-cyan-900/30',
-    error_deleting:     'text-rose-400 bg-rose-900/30',
-    error_backing_up:   'text-rose-400 bg-rose-900/30',
-    error_restoring:    'text-rose-400 bg-rose-900/30',
-    error_extending:    'text-rose-400 bg-rose-900/30',
-  };
+  interface Snapshot {
+    id: string;
+    name: string;
+    status: string;
+    volume_id: string;
+    size: number;
+    description: string;
+    created_at: string | null;
+  }
 
   let volumes = $state<Volume[]>([]);
+  let snapshots = $state<Snapshot[]>([]);
   let loading = $state(true);
   let refreshing = $state(false);
   let error = $state('');
@@ -45,10 +37,28 @@
   let createError = $state('');
   let form = $state({ name: '', size_gb: 10 });
   let autoRefresh = $state(false);
+  let tab = $state('volumes');
 
   let selectedVolumeId = $state<string | null>(null);
   let autoBackupConfigs = $state<Set<string>>(new Set());
   let autoBackupToggling = $state<string | null>(null);
+  let openActionMenu = $state<string | null>(null);
+
+  interface QuotaItem { limit: number; in_use: number; }
+  interface VolumeQuotas { storage: { volumes: QuotaItem; gigabytes: QuotaItem; }; }
+
+  let quotas = $state<VolumeQuotas | null>(null);
+
+  // Derived stats
+  let totalGb = $derived(volumes.reduce((s, v) => s + v.size, 0));
+  let attachedCount = $derived(volumes.filter(v => v.attachments.length > 0).length);
+  let attachedGb = $derived(volumes.filter(v => v.attachments.length > 0).reduce((s, v) => s + v.size, 0));
+
+  // Recent 24h snapshots
+  let recentSnapshots = $derived(snapshots.filter(s => {
+    if (!s.created_at) return false;
+    return Date.now() - new Date(s.created_at).getTime() < 86400000;
+  }));
 
   function openVolumePanel(id: string) {
     selectedVolumeId = id;
@@ -84,6 +94,18 @@
       loading = false;
       refreshing = false;
     }
+  }
+
+  async function fetchSnapshots() {
+    try {
+      snapshots = await api.get<Snapshot[]>('/api/volume-snapshots', $auth.token ?? undefined, $auth.projectId ?? undefined);
+    } catch { /* 오류 무시 */ }
+  }
+
+  async function fetchQuotas() {
+    try {
+      quotas = await api.get<VolumeQuotas>('/api/dashboard/quotas', $auth.token ?? undefined, $auth.projectId ?? undefined);
+    } catch { /* 오류 무시 */ }
   }
 
   async function createVolume() {
@@ -165,17 +187,20 @@
     const projectId = $auth.projectId;
     if (!projectId) return;
     loading = true;
-    untrack(() => { fetchVolumes(); fetchAutoBackupConfigs(); });
+    untrack(() => { fetchVolumes(); fetchAutoBackupConfigs(); fetchSnapshots(); fetchQuotas(); });
   });
 
   $effect(() => {
     if (!$auth.projectId || !autoRefresh) return;
-    const interval = setInterval(() => untrack(() => { fetchVolumes(); }), 10000);
+    const interval = setInterval(() => untrack(() => { fetchVolumes(); fetchSnapshots(); }), 10000);
     return () => clearInterval(interval);
   });
 </script>
 
-<svelte:window onkeydown={(e) => e.key === 'Escape' && selectedVolumeId && closeVolumePanel()} />
+<svelte:window
+  onkeydown={(e) => { if (e.key === 'Escape') { if (openActionMenu) openActionMenu = null; else if (selectedVolumeId) closeVolumePanel(); } }}
+  onclick={(e) => { if (openActionMenu && !(e.target as Element)?.closest('[data-action-menu]')) openActionMenu = null; }}
+/>
 
 {#if showModal}
   <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onclick={() => { showModal = false; createError = ''; }} role="dialog" aria-modal="true" tabindex="-1" onkeydown={(e) => e.key === 'Escape' && (showModal = false)}>
@@ -203,18 +228,27 @@
 {/if}
 
 <div class="p-4 md:p-8">
-  <div class="flex items-center justify-between mb-6">
-    <h1 class="text-2xl font-bold text-white">볼륨</h1>
-    <div class="flex items-center gap-2">
+  <PageHeader breadcrumb="VOLUMES / BLOCK VOLUMES" title="블록 볼륨">
+    {#snippet actions()}
       <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={10} />
       <RefreshButton {refreshing} onclick={() => fetchVolumes(true)} />
       <button onclick={() => showModal = true} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 볼륨 생성</button>
-    </div>
-  </div>
+    {/snippet}
+  </PageHeader>
 
   {#if error}<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>{/if}
 
   {#if loading}
+    <!-- Skeleton summary cards -->
+    <div class="grid grid-cols-3 gap-3.5 mb-5">
+      {#each [1,2,3] as _}
+        <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 animate-pulse">
+          <div class="h-3 w-20 bg-gray-800 rounded mb-3"></div>
+          <div class="h-8 w-16 bg-gray-800 rounded mb-3"></div>
+          <div class="h-1.5 w-full bg-gray-800 rounded-full"></div>
+        </div>
+      {/each}
+    </div>
     <LoadingSkeleton variant="table" rows={5} />
   {:else if volumes.length === 0}
     <div class="text-center py-20 text-gray-600">
@@ -223,85 +257,224 @@
       <button onclick={() => showModal = true} class="text-blue-400 hover:text-blue-300 text-sm mt-2 inline-block">첫 볼륨을 생성하세요 →</button>
     </div>
   {:else}
-    <div class="overflow-x-auto">
-      <table class="w-full text-sm">
-        <thead>
-          <tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
-            <th class="text-left py-3 pr-6">이름</th>
-            <th class="text-left py-3 pr-6">상태</th>
-            <th class="text-left py-3 pr-6">크기</th>
-            <th class="text-left py-3 pr-6">타입</th>
-            <th class="text-left py-3 pr-6">연결된 인스턴스</th>
-            <th class="text-left py-3 pr-6 hidden md:table-cell">자동 백업</th>
-            <th class="text-right py-3">액션</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each volumes as vol (vol.id)}
-            <tr
-              onclick={() => openVolumePanel(vol.id)}
-              onkeydown={(e) => e.key === 'Enter' && openVolumePanel(vol.id)}
-              tabindex="0"
-              role="button"
-              class="border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors cursor-pointer {selectedVolumeId === vol.id ? 'bg-gray-800/30' : ''}"
-            >
-              <td class="py-3 pr-6 font-medium">
-                {#if vol.name}<span class="text-white">{vol.name}</span>{:else}<span class="text-gray-400 font-mono text-xs">{vol.id}</span>{/if}
-              </td>
-              <td class="py-3 pr-6"><span class="px-2 py-0.5 rounded text-xs font-medium {statusColor[vol.status] ?? 'text-gray-400 bg-gray-800'}">{vol.status}</span></td>
-              <td class="py-3 pr-6 text-gray-400">{formatStorage(vol.size)}</td>
-              <td class="py-3 pr-6 text-gray-400 text-xs">{vol.volume_type ?? '-'}</td>
-              <td class="py-3 pr-6 text-xs">
-                {#if vol.attachments.length > 0}
-                  <span class="text-blue-400">{vol.attachments.length}개 연결</span>
-                {:else}
-                  <span class="text-gray-500">미연결</span>
-                {/if}
-              </td>
-              <td class="py-3 pr-6 hidden md:table-cell">
-                <button
-                  onclick={(e) => { e.stopPropagation(); toggleAutoBackup(vol.id); }}
-                  disabled={autoBackupToggling === vol.id}
-                  title={autoBackupConfigs.has(vol.id) ? '자동 백업 비활성화' : '자동 백업 활성화'}
-                  class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out disabled:opacity-50 {autoBackupConfigs.has(vol.id) ? 'bg-blue-600' : 'bg-gray-700'}"
-                >
-                  <span class="translate-x-0 pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out {autoBackupConfigs.has(vol.id) ? 'translate-x-4' : 'translate-x-0'}"></span>
-                </button>
-              </td>
-              <td class="py-3 text-right">
-                <div class="flex items-center justify-end gap-1">
-                  {#if vol.status === 'available'}
-                    <button
-                      onclick={(e) => { e.stopPropagation(); openVolumePanel(vol.id); }}
-                      class="text-blue-400 hover:text-blue-300 text-xs px-2 py-1 rounded border border-blue-900 hover:border-blue-700 transition-colors"
-                    >연결</button>
-                    <button
-                      onclick={(e) => { e.stopPropagation(); openTransferModal(vol.id, vol.name); }}
-                      class="text-violet-400 hover:text-violet-300 text-xs px-2 py-1 rounded border border-violet-900 hover:border-violet-700 transition-colors"
-                      title="다른 프로젝트로 볼륨 이전"
-                    >이전</button>
-                  {/if}
-                  {#if (vol.status === 'error' || vol.status === 'error_deleting' || vol.status === 'deleting') && $auth.isSystemAdmin}
-                    <button
-                      onclick={(e) => { e.stopPropagation(); forceDeleteVolume(vol.id, vol.name); }}
-                      disabled={deleting === vol.id}
-                      class="text-rose-400 hover:text-rose-300 disabled:text-gray-600 text-xs px-2 py-1 rounded border border-rose-900 hover:border-rose-700 disabled:border-gray-700 transition-colors"
-                      title="오류 상태 볼륨 강제 삭제 (관리자)"
-                    >{deleting === vol.id ? '삭제 중...' : '강제 삭제'}</button>
-                  {/if}
-                  <button
-                    onclick={(e) => { e.stopPropagation(); deleteVolume(vol.id, vol.name); }}
-                    disabled={deleting === vol.id || vol.attachments.length > 0}
-                    class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-xs px-2 py-1 rounded border border-red-900 hover:border-red-700 disabled:border-gray-700 transition-colors"
-                    title={vol.attachments.length > 0 ? '연결된 볼륨은 삭제할 수 없습니다' : ''}
-                  >{deleting === vol.id ? '삭제 중...' : '삭제'}</button>
-                </div>
-              </td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
+    <!-- Summary cards -->
+    <div class="grid grid-cols-3 gap-3.5 mb-5">
+      <!-- Card 1: 총 할당 -->
+      <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
+        <div class="text-[11px] uppercase tracking-wider text-gray-500 font-medium mb-2">총 할당</div>
+        <div class="text-[26px] font-bold text-white leading-none mb-1">
+          {totalGb}
+          {#if quotas?.storage.gigabytes.limit && quotas.storage.gigabytes.limit > 0}
+            <span class="text-[14px] font-normal text-gray-400">/ {quotas.storage.gigabytes.limit} GB</span>
+          {:else}
+            <span class="text-[14px] font-normal text-gray-400">GB</span>
+          {/if}
+        </div>
+        <div class="text-[11px] text-gray-500 mb-3">
+          {volumes.length}개 볼륨{#if quotas?.storage.volumes.limit && quotas.storage.volumes.limit > 0} / {quotas.storage.volumes.limit}개 한도{/if}
+        </div>
+        <div class="h-1.5 bg-gray-800 rounded-full overflow-hidden">
+          {#if quotas?.storage.gigabytes.limit && quotas.storage.gigabytes.limit > 0}
+            <div class="h-full rounded-full transition-all {totalGb / quotas.storage.gigabytes.limit >= 1 ? 'bg-red-500' : totalGb / quotas.storage.gigabytes.limit >= 0.8 ? 'bg-orange-500' : 'bg-blue-500'}" style="width: {Math.min(100, Math.round(totalGb / quotas.storage.gigabytes.limit * 100))}%"></div>
+          {:else}
+            <div class="h-full bg-blue-500 rounded-full transition-all" style="width: {Math.min(100, totalGb / 10)}%"></div>
+          {/if}
+        </div>
+      </div>
+      <!-- Card 2: 연결된 볼륨 -->
+      <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
+        <div class="text-[11px] uppercase tracking-wider text-gray-500 font-medium mb-2">연결된 볼륨</div>
+        <div class="text-[26px] font-bold text-white leading-none mb-1">
+          {attachedCount} <span class="text-[14px] font-normal text-gray-400">/ {volumes.length}</span>
+        </div>
+        <div class="text-[11px] text-gray-500">{attachedGb} GB 사용 중</div>
+      </div>
+      <!-- Card 3: 스냅샷 -->
+      <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
+        <div class="text-[11px] uppercase tracking-wider text-gray-500 font-medium mb-2">스냅샷</div>
+        <div class="text-[26px] font-bold text-white leading-none mb-1">{snapshots.length}</div>
+        <div class="text-[11px] text-gray-500">최근 24시간 {recentSnapshots.length}개</div>
+      </div>
     </div>
+
+    <!-- Tab UI -->
+    <div class="flex gap-1 mb-4 border-b border-gray-800">
+      <button onclick={() => tab = 'volumes'}
+        class="px-4 py-2 text-[13px] font-medium border-b-2 -mb-px transition-colors {tab === 'volumes' ? 'border-blue-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-200'}">
+        볼륨 {volumes.length}
+      </button>
+      <button onclick={() => tab = 'snapshots'}
+        class="px-4 py-2 text-[13px] font-medium border-b-2 -mb-px transition-colors {tab === 'snapshots' ? 'border-blue-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-200'}">
+        스냅샷 {snapshots.length}
+      </button>
+    </div>
+
+    {#if tab === 'volumes'}
+      <!-- Volume custom table -->
+      <div class="bg-[#0B1220] border border-gray-800 rounded-[10px] overflow-hidden">
+        <!-- Header -->
+        <div class="grid grid-cols-[1fr_60px_0px_32px_0px_0px_0px_0px] sm:grid-cols-[1.6fr_70px_90px_100px_0px_0px_0px_0px] lg:grid-cols-[1.6fr_70px_90px_100px_1fr_80px_80px_56px] px-4 py-2.5 border-b border-gray-800 text-[11px] uppercase tracking-wider text-gray-500 font-medium">
+          <div>이름</div>
+          <div>크기</div>
+          <div class="hidden sm:block">유형</div>
+          <div class="whitespace-nowrap">상태</div>
+          <div class="hidden lg:block">연결</div>
+          <div class="hidden lg:block">부트</div>
+          <div class="hidden lg:block text-center whitespace-nowrap">자동 백업</div>
+          <div class="hidden lg:block"></div>
+        </div>
+        <!-- Rows -->
+        {#each volumes as vol (vol.id)}
+          <div
+            onclick={() => openVolumePanel(vol.id)}
+            onkeydown={(e) => e.key === 'Enter' && openVolumePanel(vol.id)}
+            tabindex="0"
+            role="button"
+            class="grid grid-cols-[1fr_60px_0px_32px_0px_0px_0px_0px] sm:grid-cols-[1.6fr_70px_90px_100px_0px_0px_0px_0px] lg:grid-cols-[1.6fr_70px_90px_100px_1fr_80px_80px_56px] px-4 py-3 text-[13px] items-center border-b border-gray-800 hover:bg-gray-800/30 transition-colors cursor-pointer last:border-b-0 {selectedVolumeId === vol.id ? 'bg-gray-800/30' : ''}"
+          >
+            <!-- 이름 -->
+            <div class="flex items-center gap-2.5 min-w-0">
+              <div class="hidden sm:flex shrink-0 w-7 h-7 rounded-md bg-cyan-500/15 border border-cyan-500/30 items-center justify-center">
+                <svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
+                </svg>
+              </div>
+              <div class="min-w-0">
+                {#if vol.name}
+                  <div class="text-white font-medium truncate">{vol.name}</div>
+                {:else}
+                  <div class="text-gray-400 font-mono text-xs truncate">{vol.id}</div>
+                {/if}
+                <div class="text-[11px] text-gray-500 font-mono truncate">{vol.id.slice(0, 8)}…</div>
+              </div>
+            </div>
+            <!-- 크기 -->
+            <div class="text-gray-300 font-mono text-[12px]">{formatStorage(vol.size)}</div>
+            <!-- 유형 badge -->
+            <div class="hidden sm:block">
+              <span class="text-[11px] px-2 py-0.5 rounded-md bg-gray-800 border border-gray-700 text-gray-300 font-mono">
+                {vol.volume_type ?? '기본'}
+              </span>
+            </div>
+            <!-- 상태 -->
+            <div><StatusChip status={vol.status} /></div>
+            <!-- 연결 -->
+            <div class="hidden lg:block text-[12px]">
+              {#if vol.attachments.length > 0}
+                <span class="text-blue-400">{vol.attachments.length}개 연결</span>
+              {:else}
+                <span class="text-gray-500">미연결</span>
+              {/if}
+            </div>
+            <!-- 부트 badge -->
+            <div class="hidden lg:block">
+              {#if vol.attachments.some((a: Record<string, unknown>) => a.device === '/dev/vda' || a.device === '/dev/sda')}
+                <span class="text-[11px] px-2 py-0.5 rounded-md bg-blue-900/30 border border-blue-800 text-blue-400">부트</span>
+              {/if}
+            </div>
+            <!-- 자동 백업 토글 -->
+            <div class="hidden lg:flex justify-center" onclick={(e) => e.stopPropagation()} role="none">
+              <button
+                onclick={(e) => { e.stopPropagation(); toggleAutoBackup(vol.id); }}
+                disabled={autoBackupToggling === vol.id}
+                title={autoBackupConfigs.has(vol.id) ? '자동 백업 비활성화' : '자동 백업 활성화'}
+                class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out disabled:opacity-50 {autoBackupConfigs.has(vol.id) ? 'bg-blue-600' : 'bg-gray-700'}"
+              >
+                <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out {autoBackupConfigs.has(vol.id) ? 'translate-x-4' : 'translate-x-0'}"></span>
+              </button>
+            </div>
+            <!-- 액션 드롭다운 -->
+            <div class="hidden lg:flex justify-end" onclick={(e) => e.stopPropagation()} role="none" data-action-menu>
+              <div class="relative" data-action-menu>
+                <button
+                  onclick={(e) => { e.stopPropagation(); openActionMenu = openActionMenu === vol.id ? null : vol.id; }}
+                  class="flex items-center justify-center w-7 h-7 rounded-md text-gray-400 hover:text-white hover:bg-gray-700 transition-colors"
+                  title="액션"
+                  data-action-menu
+                >
+                  <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
+                  </svg>
+                </button>
+                {#if openActionMenu === vol.id}
+                  <div class="absolute right-0 top-full mt-1 z-30 bg-gray-900 border border-gray-700 rounded-lg shadow-xl py-1 min-w-[140px]" data-action-menu>
+                    <button
+                      onclick={(e) => { e.stopPropagation(); openActionMenu = null; openVolumePanel(vol.id); }}
+                      class="w-full text-left px-3 py-1.5 text-[13px] text-gray-300 hover:text-white hover:bg-gray-800 transition-colors flex items-center gap-2"
+                    >
+                      <svg class="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+                      연결
+                    </button>
+                    {#if vol.status === 'available'}
+                      <button
+                        onclick={(e) => { e.stopPropagation(); openActionMenu = null; openTransferModal(vol.id, vol.name); }}
+                        class="w-full text-left px-3 py-1.5 text-[13px] text-gray-300 hover:text-white hover:bg-gray-800 transition-colors flex items-center gap-2"
+                      >
+                        <svg class="w-3.5 h-3.5 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>
+                        이전
+                      </button>
+                    {/if}
+                    <div class="border-t border-gray-800 my-1"></div>
+                    {#if (vol.status === 'error' || vol.status === 'error_deleting' || vol.status === 'deleting') && $auth.isSystemAdmin}
+                      <button
+                        onclick={(e) => { e.stopPropagation(); openActionMenu = null; forceDeleteVolume(vol.id, vol.name); }}
+                        disabled={deleting === vol.id}
+                        class="w-full text-left px-3 py-1.5 text-[13px] text-rose-400 hover:text-rose-300 hover:bg-gray-800 disabled:opacity-50 transition-colors flex items-center gap-2"
+                      >
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                        {deleting === vol.id ? '삭제 중...' : '강제 삭제'}
+                      </button>
+                    {/if}
+                    <button
+                      onclick={(e) => { e.stopPropagation(); openActionMenu = null; deleteVolume(vol.id, vol.name); }}
+                      disabled={deleting === vol.id || vol.attachments.length > 0}
+                      title={vol.attachments.length > 0 ? '연결된 볼륨은 삭제할 수 없습니다' : ''}
+                      class="w-full text-left px-3 py-1.5 text-[13px] text-red-400 hover:text-red-300 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                    >
+                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      {deleting === vol.id ? '삭제 중...' : '삭제'}
+                    </button>
+                  </div>
+                {/if}
+              </div>
+            </div>
+          </div>
+        {/each}
+      </div>
+    {:else}
+      <!-- Snapshots custom table -->
+      {#if snapshots.length === 0}
+        <div class="text-center py-16 text-gray-600">
+          <p class="text-sm">스냅샷이 없습니다</p>
+        </div>
+      {:else}
+        <div class="bg-[#0B1220] border border-gray-800 rounded-[10px] overflow-hidden">
+          <!-- Header -->
+          <div class="grid grid-cols-[1.6fr_1.2fr_80px_140px_110px] px-4 py-2.5 border-b border-gray-800 text-[11px] uppercase tracking-wider text-gray-500 font-medium">
+            <div>이름</div>
+            <div>원본 볼륨</div>
+            <div>크기</div>
+            <div>생성됨</div>
+            <div>상태</div>
+          </div>
+          <!-- Rows -->
+          {#each snapshots as snap (snap.id)}
+            <div class="grid grid-cols-[1.6fr_1.2fr_80px_140px_110px] px-4 py-3 text-[13px] items-center border-b border-gray-800 hover:bg-gray-800/30 transition-colors last:border-b-0">
+              <div class="min-w-0">
+                <div class="text-white font-medium truncate">{snap.name || snap.id.slice(0, 12)}</div>
+                <div class="text-[11px] text-gray-500 font-mono truncate">{snap.id.slice(0, 8)}…</div>
+              </div>
+              <div class="text-gray-400 font-mono text-[12px] truncate">{snap.volume_id.slice(0, 12)}…</div>
+              <div class="text-gray-300 font-mono text-[12px]">{snap.size} GB</div>
+              <div class="text-gray-400 text-[12px]">
+                {snap.created_at ? new Date(snap.created_at).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'}
+              </div>
+              <div><StatusChip status={snap.status} /></div>
+            </div>
+          {/each}
+        </div>
+      {/if}
+    {/if}
   {/if}
 </div>
 

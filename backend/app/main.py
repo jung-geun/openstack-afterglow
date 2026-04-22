@@ -1,46 +1,10 @@
-import asyncio
-import json
-import logging
-import logging.handlers
-import os
-import time
-from datetime import UTC, datetime
-
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.exception_handlers import http_exception_handler as _default_http_handler
-from fastapi.responses import JSONResponse
-from slowapi import _rate_limit_exceeded_handler
-from slowapi.errors import RateLimitExceeded
-
-from app.api.common import dashboard_router, libraries_router, metrics_router, site_router, user_dashboard_router
-from app.api.common.metrics import record_request as _record_request
-from app.api.compute import flavors_router, images_router, instances_router, keypairs_router
-from app.api.container import clusters_router, containers_router
-from app.api.identity import admin_router, auth_router
-from app.api.identity.admin_flavors import router as admin_flavors_router
-from app.api.identity.admin_gpu import router as admin_gpu_router
-from app.api.identity.admin_identity import router as admin_identity_router
-from app.api.identity.admin_images import router as admin_images_router
-from app.api.identity.admin_notion import router as admin_notion_router
-from app.api.identity.admin_services import router as admin_services_router
-from app.api.identity.profile import router as profile_router
-from app.api.k3s import k3s_callback_router, k3s_clusters_router, k3s_health_router
-from app.api.network import loadbalancers_router, networks_router, routers_router, security_groups_router
-from app.api.storage import (
-    file_storage_router,
-    security_services_router,
-    share_networks_router,
-    share_snapshots_router,
-    volume_backups_router,
-    volume_snapshots_router,
-    volumes_router,
-)
-from app.rate_limit import limiter
-from app.utils.version import read_app_version
-
 # ---------------------------------------------------------------------------
 # Structured JSON logging
 # ---------------------------------------------------------------------------
+import logging
+import logging.handlers
+import os
+
 _STANDARD_LOG_KEYS = set(logging.LogRecord("", 0, "", 0, "", (), None).__dict__)
 
 
@@ -106,6 +70,131 @@ def _setup_logging() -> None:
 
 _setup_logging()
 _logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Import 프로파일링 — 로거 설정 전에 실행되므로 print 대신 리스트에 기록
+# ---------------------------------------------------------------------------
+import time as _time
+
+_t0 = _time.perf_counter()
+_import_times: list[tuple[str, float]] = []
+
+
+def _mark(label: str) -> None:
+    _logger.info("imported %s at %.3fs", label, _time.perf_counter() - _t0)
+    _import_times.append((label, _time.perf_counter()))
+
+
+# ---------------------------------------------------------------------------
+# stdlib
+# ---------------------------------------------------------------------------
+import asyncio
+import json
+import time
+from datetime import UTC, datetime
+
+_mark("stdlib")
+
+# ---------------------------------------------------------------------------
+# 프레임워크 (fastapi, slowapi)
+# ---------------------------------------------------------------------------
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exception_handlers import http_exception_handler as _default_http_handler
+from fastapi.responses import JSONResponse
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+
+_mark("fastapi")
+
+# ---------------------------------------------------------------------------
+# app.api.common
+# ---------------------------------------------------------------------------
+from app.api.common import (
+    dashboard_router,
+    libraries_router,
+    metrics_router,
+    site_router,
+    user_dashboard_router,
+)
+from app.api.common.metrics import record_request as _record_request
+
+_mark("api.common")
+
+# ---------------------------------------------------------------------------
+# app.api.compute
+# ---------------------------------------------------------------------------
+from app.api.compute import (
+    flavors_router,
+    images_router,
+    instances_router,
+    keypairs_router,
+)
+
+_mark("api.compute")
+
+# ---------------------------------------------------------------------------
+# app.api.container
+# ---------------------------------------------------------------------------
+from app.api.container import clusters_router, containers_router
+
+_mark("api.container")
+
+# ---------------------------------------------------------------------------
+# app.api.identity (admin, auth, sub-routers)
+# ---------------------------------------------------------------------------
+from app.api.identity import admin_router, auth_router
+from app.api.identity.admin_flavors import router as admin_flavors_router
+from app.api.identity.admin_gpu import router as admin_gpu_router
+from app.api.identity.admin_identity import router as admin_identity_router
+from app.api.identity.admin_images import router as admin_images_router
+from app.api.identity.admin_notion import router as admin_notion_router
+from app.api.identity.admin_services import router as admin_services_router
+from app.api.identity.profile import router as profile_router
+
+_mark("api.identity")
+
+# ---------------------------------------------------------------------------
+# app.api.k3s + network + storage
+# ---------------------------------------------------------------------------
+from app.api.k3s import k3s_callback_router, k3s_clusters_router, k3s_health_router
+from app.api.network import (
+    loadbalancers_router,
+    networks_router,
+    routers_router,
+    security_groups_router,
+)
+from app.api.storage import (
+    file_storage_router,
+    security_services_router,
+    share_networks_router,
+    share_snapshots_router,
+    volume_backups_router,
+    volume_snapshots_router,
+    volumes_router,
+)
+
+_mark("api.k3s_network_storage")
+
+# ---------------------------------------------------------------------------
+# 기타 앱 유틸리티
+# ---------------------------------------------------------------------------
+from app.rate_limit import limiter
+from app.utils.version import read_app_version
+
+_mark("misc")
+
+
+# ---------------------------------------------------------------------------
+# Import 프로파일링 결과 출력 (로거가 준비된 시점에 1회)
+# ---------------------------------------------------------------------------
+_prev = _t0
+_profile: dict[str, float] = {}
+for _label, _ts in _import_times:
+    _profile[_label] = round((_ts - _prev) * 1000, 1)
+    _prev = _ts
+_profile["total"] = round((_prev - _t0) * 1000, 1)
+_logger.info("import-profile", extra={"import_ms": _profile})
+del _prev, _label, _ts, _profile  # 모듈 네임스페이스 정리
 
 _is_production = os.environ.get("AFTERGLOW_ENV", "development") == "production"
 
@@ -260,7 +349,11 @@ if _svc_cfg.service_manila_enabled:
     app.include_router(file_storage_router, prefix="/api/file-storage", tags=["file-storage"])
     app.include_router(share_snapshots_router, prefix="/api/share-snapshots", tags=["share-snapshots"])
     app.include_router(share_networks_router, prefix="/api/share-networks", tags=["share-networks"])
-    app.include_router(security_services_router, prefix="/api/security-services", tags=["security-services"])
+    app.include_router(
+        security_services_router,
+        prefix="/api/security-services",
+        tags=["security-services"],
+    )
 if _svc_cfg.service_magnum_enabled:
     app.include_router(clusters_router, prefix="/api/clusters", tags=["clusters"])
 if _svc_cfg.service_zun_enabled:
@@ -269,6 +362,14 @@ if _svc_cfg.service_k3s_enabled:
     app.include_router(k3s_clusters_router, prefix="/api/k3s/clusters", tags=["k3s"])
     app.include_router(k3s_health_router, prefix="/api/k3s/clusters", tags=["k3s-health"])
     app.include_router(k3s_callback_router, prefix="/api/k3s", tags=["k3s-callback"])
+if _svc_cfg.service_trove_enabled:
+    from app.api.database.instances import router as trove_router
+
+    app.include_router(trove_router, prefix="/api/database-instances", tags=["database"])
+if _svc_cfg.service_swift_enabled:
+    from app.api.object_storage.containers import router as swift_router
+
+    app.include_router(swift_router, prefix="/api/object-storage", tags=["object-storage"])
 # Common
 app.include_router(dashboard_router, prefix="/api/dashboard", tags=["dashboard"])
 app.include_router(metrics_router, prefix="/api/metrics", tags=["metrics"])
@@ -279,8 +380,14 @@ app.include_router(user_dashboard_router, prefix="/api/user-dashboard", tags=["u
 
 @app.get("/api/health")
 async def health():
-    """헬스체크 엔드포인트. Redis 장애와 무관하게 항상 200을 반환."""
-    detail = {"status": "ok", "redis": "unknown"}
+    """K8s probe용. 항상 즉시 200 반환."""
+    return {"status": "ok"}
+
+
+@app.get("/api/health/detail")
+async def health_detail():
+    """모니터링 대시보드용 상세 헬스체크. Redis 연결 상태 포함."""
+    detail: dict = {"status": "ok", "redis": "unknown"}
     try:
         from app.services.cache import _get_redis
 
@@ -322,7 +429,14 @@ async def _collect_snapshot() -> None:
     try:
         # 인스턴스 상태별 집계
         def _count_instances():
-            counts: dict[str, int] = {"total": 0, "active": 0, "shutoff": 0, "error": 0, "shelved": 0, "other": 0}
+            counts: dict[str, int] = {
+                "total": 0,
+                "active": 0,
+                "shutoff": 0,
+                "error": 0,
+                "shelved": 0,
+                "other": 0,
+            }
             for s in conn.compute.servers(all_projects=True, details=True):
                 counts["total"] += 1
                 st = (s.status or "").upper()
@@ -339,7 +453,12 @@ async def _collect_snapshot() -> None:
             return counts
 
         def _count_volumes():
-            counts: dict[str, int] = {"total": 0, "in_use": 0, "available": 0, "other": 0}
+            counts: dict[str, int] = {
+                "total": 0,
+                "in_use": 0,
+                "available": 0,
+                "other": 0,
+            }
             for v in conn.block_storage.volumes(all_projects=True):
                 counts["total"] += 1
                 st = (v.status or "").lower()
@@ -367,7 +486,12 @@ async def _collect_snapshot() -> None:
             routers = sum(1 for _ in conn.network.routers())
             fips_total = sum(1 for _ in conn.network.ips())
             fips_used = sum(1 for f in conn.network.ips() if f.port_id)
-            return {"total": nets, "routers": routers, "floating_ips_total": fips_total, "floating_ips_used": fips_used}
+            return {
+                "total": nets,
+                "routers": routers,
+                "floating_ips_total": fips_total,
+                "floating_ips_used": fips_used,
+            }
 
         inst_data = await asyncio.to_thread(_count_instances)
         vol_data = await asyncio.to_thread(_count_volumes)
@@ -411,8 +535,14 @@ async def _run_notion_target_sync(target: dict) -> None:
     """단일 NotionTarget에 대해 전체 동기화를 실행한다."""
     from datetime import datetime
 
-    from app.api.identity.admin_gpu import build_alias_to_device_name_map, get_gpu_spec_list
-    from app.api.identity.admin_notion import collect_hypervisor_data, collect_instance_data
+    from app.api.identity.admin_gpu import (
+        build_alias_to_device_name_map,
+        get_gpu_spec_list,
+    )
+    from app.api.identity.admin_notion import (
+        collect_hypervisor_data,
+        collect_instance_data,
+    )
     from app.services import notion_sync
 
     target_id = target["id"]
@@ -519,8 +649,14 @@ async def _notion_sync_loop() -> None:
     NotionTarget 다중 대상이 있으면 우선 사용하고, 없으면 NotionConfig fallback."""
     from datetime import datetime
 
-    from app.api.identity.admin_gpu import build_alias_to_device_name_map, get_gpu_spec_list
-    from app.api.identity.admin_notion import collect_hypervisor_data, collect_instance_data
+    from app.api.identity.admin_gpu import (
+        build_alias_to_device_name_map,
+        get_gpu_spec_list,
+    )
+    from app.api.identity.admin_notion import (
+        collect_hypervisor_data,
+        collect_instance_data,
+    )
     from app.services import notion_sync
 
     await asyncio.sleep(60)  # 시작 후 1분 대기
@@ -651,7 +787,10 @@ async def _notion_sync_loop() -> None:
                     try:
                         gpu_specs = get_gpu_spec_list()
                         await notion_sync.sync_gpu_specs_to_notion(
-                            api_key, gpu_spec_db_id, gpu_specs, usage_by_gpu=usage_by_gpu
+                            api_key,
+                            gpu_spec_db_id,
+                            gpu_specs,
+                            usage_by_gpu=usage_by_gpu,
                         )
                         config["gpu_spec_last_sync"] = datetime.now(UTC).isoformat()
                     except Exception:
@@ -711,7 +850,11 @@ async def _auto_backup_loop() -> None:
                         conn = await asyncio.to_thread(get_admin_connection_for_project, project_id)
                         await _ab.run_backup_cycle(conn, project_id, volume_id, cfg)
                     except Exception:
-                        _logger.warning("auto_backup: 백업 사이클 실패 (volume=%s)", volume_id, exc_info=True)
+                        _logger.warning(
+                            "auto_backup: 백업 사이클 실패 (volume=%s)",
+                            volume_id,
+                            exc_info=True,
+                        )
         except Exception:
             _logger.warning("auto_backup: 루프 오류", exc_info=True)
         await asyncio.sleep(3600)  # 1시간
@@ -724,11 +867,23 @@ async def _deferred_create_tables() -> None:
     try:
         await create_tables()
     except Exception:
-        _logger.warning("DB 테이블 자동 생성 실패 (migrations/001_k3s_tables.sql 수동 실행 필요)", exc_info=True)
+        _logger.warning(
+            "DB 테이블 자동 생성 실패 (migrations/001_k3s_tables.sql 수동 실행 필요)",
+            exc_info=True,
+        )
 
 
 @app.on_event("startup")
 async def start_background_workers():
+    # Redis 연결 pre-warm (첫 health check 지연 방지)
+    try:
+        from app.services.cache import _get_redis
+
+        r = await _get_redis()
+        await r.ping()
+    except Exception:
+        pass
+
     # DB 초기화 (database.url 설정 시)
     from app.database import init_db
 

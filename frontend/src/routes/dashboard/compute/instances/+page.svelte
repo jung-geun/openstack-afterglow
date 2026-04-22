@@ -9,16 +9,9 @@
   import SlidePanel from '$lib/components/SlidePanel.svelte';
   import RefreshButton from '$lib/components/RefreshButton.svelte';
   import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
+  import StatusChip from '$lib/components/ui/StatusChip.svelte';
+  import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
-  const statusColor: Record<string, string> = {
-    ACTIVE:             'text-green-400 bg-green-900/30',
-    BUILD:              'text-yellow-400 bg-yellow-900/30',
-    SHUTOFF:            'text-gray-400 bg-gray-800',
-    ERROR:              'text-red-400 bg-red-900/30',
-    DELETING:           'text-orange-400 bg-orange-900/30',
-    SHELVED_OFFLOADED:  'text-purple-400 bg-purple-900/30',
-    SHELVED:            'text-purple-400 bg-purple-900/30',
-  };
   const strategyLabel: Record<string, string> = { prebuilt: '사전 빌드', dynamic: '동적 생성' };
 
   let instances = $state<Instance[]>([]);
@@ -29,6 +22,15 @@
   let selectedInstanceId = $state<string | null>(null);
   let refreshIntervalMs = $state(5000);
   let autoRefresh = $state(false);
+  let openMenuId = $state<string | null>(null);
+
+  function toggleMenu(id: string) {
+    openMenuId = openMenuId === id ? null : id;
+  }
+
+  function closeMenu() {
+    openMenuId = null;
+  }
 
   function swrGet<T>(path: string): T | null {
     const key = `${path}:${$auth.projectId}`;
@@ -116,6 +118,13 @@
   }
 
   $effect(() => {
+    if (!openMenuId) return;
+    function handleClick() { openMenuId = null; }
+    document.addEventListener('click', handleClick);
+    return () => document.removeEventListener('click', handleClick);
+  });
+
+  $effect(() => {
     const projectId = $auth.projectId;
     if (!projectId) return;
     loading = true;
@@ -130,16 +139,15 @@
 </script>
 
 <div class="p-4 md:p-8">
-  <div class="flex items-center justify-between mb-6">
-    <h1 class="text-2xl font-bold text-white">인스턴스</h1>
-    <div class="flex items-center gap-2">
+  <PageHeader breadcrumb="COMPUTE / INSTANCES" title="인스턴스">
+    {#snippet actions()}
       <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={refreshIntervalMs / 1000} />
       <RefreshButton {refreshing} onclick={forceRefresh} />
       <a href="/create" class="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
         + VM 생성
       </a>
-    </div>
-  </div>
+    {/snippet}
+  </PageHeader>
 
   {#if error}
     <div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>
@@ -155,80 +163,101 @@
     </div>
   {:else}
     <div class="overflow-x-auto">
-      <table class="w-full text-sm">
-        <thead>
-          <tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
-            <th class="text-left py-3 pr-6">이름</th>
-            <th class="text-left py-3 pr-6 hidden sm:table-cell">상태</th>
-            <th class="text-left py-3 pr-6 hidden md:table-cell">이미지 / 플레이버</th>
-            <th class="text-left py-3 pr-6">IP</th>
-            <th class="text-left py-3 pr-6 hidden lg:table-cell">라이브러리</th>
-            <th class="text-left py-3 pr-6 hidden lg:table-cell">전략</th>
-            <th class="text-right py-3">액션</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each instances as inst (inst.id)}
-            <tr onclick={() => openInstancePanel(inst.id)} class="border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors cursor-pointer">
-              <td class="py-3 pr-6">
-                <div class="font-medium text-white">{inst.name}</div>
-                <div class="sm:hidden mt-0.5">
-                  <span class="px-2 py-0.5 rounded text-xs font-medium {statusColor[inst.status] ?? 'text-gray-400 bg-gray-800'}">{inst.status}</span>
-                </div>
-              </td>
-              <td class="py-3 pr-6 hidden sm:table-cell">
-                <span class="px-2 py-0.5 rounded text-xs font-medium {statusColor[inst.status] ?? 'text-gray-400 bg-gray-800'}">{inst.status}</span>
-              </td>
-              <td class="py-3 pr-6 text-xs text-gray-400 hidden md:table-cell">
-                <div>{inst.image_name ?? '볼륨에서 부팅'}</div>
-                {#if inst.flavor_name}<div class="text-gray-600 mt-0.5">{inst.flavor_name}</div>{/if}
-              </td>
-              <td class="py-3 pr-6 text-xs">
-                {#if inst.ip_addresses.length > 0}
-                  {@const fixedIps = inst.ip_addresses.filter(ip => ip.type === 'fixed')}
-                  {@const floatingIps = inst.ip_addresses.filter(ip => ip.type === 'floating')}
-                  <div class="flex flex-col gap-0.5">
-                    {#each fixedIps as fip}
-                      {@const paired = floatingIps.find(fl => fl.network_name === fip.network_name)}
-                      <div class="flex items-center gap-1.5 flex-wrap">
-                        <span class="font-mono text-gray-400">{fip.addr}</span>
-                        {#if paired}<span class="font-mono text-green-400 bg-green-900/20 px-1.5 py-0.5 rounded">{paired.addr}</span>{/if}
-                        <span class="text-gray-600 hidden md:inline">{fip.network_name}</span>
-                      </div>
-                    {/each}
-                  </div>
-                {:else}
-                  <span class="text-gray-600">-</span>
-                {/if}
-              </td>
-              <td class="py-3 pr-6 hidden lg:table-cell">
-                <div class="flex flex-wrap gap-1">
-                  {#each inst.union_libraries.filter(Boolean) as lib}
-                    <span class="px-1.5 py-0.5 bg-blue-900/40 text-blue-300 rounded text-xs">{lib}</span>
+      <div class="bg-[#0B1220] border border-gray-800 rounded-[10px] overflow-hidden">
+        <!-- 헤더 -->
+        <div class="grid grid-cols-[1fr_0px_0px_1fr_0px_0px_0px] sm:grid-cols-[1.2fr_130px_0px_1.5fr_0px_0px_32px] md:grid-cols-[1.2fr_130px_1.2fr_1.5fr_0px_0px_32px] lg:grid-cols-[1.2fr_130px_1.2fr_1.5fr_80px_80px_32px] px-4 py-2.5 border-b border-gray-800 text-[11px] uppercase tracking-wider text-gray-500 font-medium">
+          <div>이름</div>
+          <div class="hidden sm:block">상태</div>
+          <div class="hidden md:block">이미지 / 플레이버</div>
+          <div>IP</div>
+          <div class="hidden lg:block">라이브러리</div>
+          <div class="hidden lg:block">전략</div>
+          <div></div>
+        </div>
+        <!-- 행 -->
+        {#each instances as inst (inst.id)}
+          <div
+            onclick={() => openInstancePanel(inst.id)}
+            onkeydown={(e) => e.key === 'Enter' && openInstancePanel(inst.id)}
+            tabindex="0"
+            role="button"
+            class="grid grid-cols-[1fr_0px_0px_1fr_0px_0px_0px] sm:grid-cols-[1.2fr_130px_0px_1.5fr_0px_0px_32px] md:grid-cols-[1.2fr_130px_1.2fr_1.5fr_0px_0px_32px] lg:grid-cols-[1.2fr_130px_1.2fr_1.5fr_80px_80px_32px] px-4 py-3 text-[13px] items-center border-b border-gray-800 hover:bg-gray-800/30 transition-colors cursor-pointer last:border-b-0"
+          >
+            <!-- 이름 -->
+            <div class="flex items-center gap-2.5 min-w-0">
+              <div class="shrink-0 w-7 h-7 rounded-md bg-blue-500/15 border border-blue-500/30 flex items-center justify-center">
+                <svg class="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2"/>
+                </svg>
+              </div>
+              <div class="min-w-0">
+                <div class="text-white font-medium truncate">{inst.name}</div>
+                <div class="sm:hidden mt-0.5"><StatusChip status={inst.status} /></div>
+              </div>
+            </div>
+            <!-- 상태 -->
+            <div class="hidden sm:block overflow-hidden px-1"><StatusChip status={inst.status} class="max-w-full truncate" /></div>
+            <!-- 이미지/플레이버 -->
+            <div class="hidden md:block text-xs min-w-0">
+              <div class="text-gray-300 truncate">{inst.image_name ?? '볼륨에서 부팅'}</div>
+              {#if inst.flavor_name}<div class="text-gray-500 mt-0.5 truncate">{inst.flavor_name}</div>{/if}
+            </div>
+            <!-- IP -->
+            <div class="text-[11px] sm:text-xs">
+              {#if inst.ip_addresses.length > 0}
+                {@const fixedIps = inst.ip_addresses.filter(ip => ip.type === 'fixed')}
+                {@const floatingIps = inst.ip_addresses.filter(ip => ip.type === 'floating')}
+                <div class="flex flex-col gap-0.5">
+                  {#each fixedIps as fip}
+                    {@const paired = floatingIps.find(fl => fl.network_name === fip.network_name)}
+                    <div class="flex items-center gap-1 flex-wrap">
+                      <span class="font-mono text-gray-400 whitespace-nowrap">{fip.addr}</span>
+                      {#if paired}<span class="font-mono text-green-400 bg-green-900/20 px-1.5 py-0.5 rounded whitespace-nowrap">{paired.addr}</span>{/if}
+                    </div>
                   {/each}
                 </div>
-              </td>
-              <td class="py-3 pr-6 text-gray-500 text-xs hidden lg:table-cell">{inst.union_strategy ? strategyLabel[inst.union_strategy] ?? inst.union_strategy : '-'}</td>
-              <td class="py-3 text-right">
-                <div class="flex items-center justify-end gap-2">
+              {:else}
+                <span class="text-gray-600">-</span>
+              {/if}
+            </div>
+            <!-- 라이브러리 -->
+            <div class="hidden lg:flex flex-wrap gap-1">
+              {#each inst.union_libraries.filter(Boolean) as lib}
+                <span class="px-1.5 py-0.5 bg-blue-900/40 text-blue-300 rounded text-xs">{lib}</span>
+              {/each}
+            </div>
+            <!-- 전략 -->
+            <div class="hidden lg:block text-gray-500 text-xs">{inst.union_strategy ? strategyLabel[inst.union_strategy] ?? inst.union_strategy : '—'}</div>
+            <!-- 액션 -->
+            <div class="relative hidden sm:flex items-center justify-end" onclick={(e) => e.stopPropagation()} role="none">
+              <button
+                onclick={(e) => { e.stopPropagation(); toggleMenu(inst.id); }}
+                class="w-7 h-7 flex items-center justify-center rounded-md text-gray-400 hover:text-white hover:bg-gray-700/50 transition-colors"
+              >
+                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z"/>
+                </svg>
+              </button>
+              {#if openMenuId === inst.id}
+                <div class="absolute right-0 top-8 z-50 min-w-[120px] bg-gray-900 border border-gray-700 rounded-lg shadow-xl py-1">
                   {#if inst.status === 'ACTIVE'}
-                    <button onclick={(e) => { e.stopPropagation(); openConsole(inst.id); }} class="text-gray-400 hover:text-white text-xs px-2 py-1 rounded border border-gray-700 hover:border-gray-500 transition-colors hidden sm:inline-flex">콘솔</button>
+                    <button onclick={(e) => { e.stopPropagation(); closeMenu(); openConsole(inst.id); }} class="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800 hover:text-white transition-colors">콘솔</button>
                   {/if}
                   {#if inst.status === 'ACTIVE' || inst.status === 'SHUTOFF'}
-                    <button onclick={(e) => { e.stopPropagation(); shelveInstance(inst.id); }} class="text-purple-400 hover:text-purple-300 text-xs px-2 py-1 rounded border border-purple-900 hover:border-purple-700 transition-colors hidden sm:inline-flex">보관</button>
+                    <button onclick={(e) => { e.stopPropagation(); closeMenu(); shelveInstance(inst.id); }} class="w-full text-left px-3 py-1.5 text-xs text-purple-400 hover:bg-gray-800 hover:text-purple-300 transition-colors">보관</button>
                   {/if}
                   {#if inst.status === 'SHELVED_OFFLOADED' || inst.status === 'SHELVED'}
-                    <button onclick={(e) => { e.stopPropagation(); unshelveInstance(inst.id); }} class="text-green-400 hover:text-green-300 text-xs px-2 py-1 rounded border border-green-900 hover:border-green-700 transition-colors hidden sm:inline-flex">보관 해제</button>
+                    <button onclick={(e) => { e.stopPropagation(); closeMenu(); unshelveInstance(inst.id); }} class="w-full text-left px-3 py-1.5 text-xs text-green-400 hover:bg-gray-800 hover:text-green-300 transition-colors">해제</button>
                   {/if}
-                  <button onclick={(e) => { e.stopPropagation(); deleteInstance(inst.id, inst.name); }} disabled={deleting === inst.id} class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-xs px-2 py-1 rounded border border-red-900 hover:border-red-700 disabled:border-gray-700 transition-colors">
+                  <button onclick={(e) => { e.stopPropagation(); closeMenu(); deleteInstance(inst.id, inst.name); }} disabled={deleting === inst.id} class="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-800 hover:text-red-300 disabled:text-gray-600 transition-colors">
                     {deleting === inst.id ? '삭제 중...' : '삭제'}
                   </button>
                 </div>
-              </td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
+              {/if}
+            </div>
+          </div>
+        {/each}
+      </div>
     </div>
   {/if}
 </div>

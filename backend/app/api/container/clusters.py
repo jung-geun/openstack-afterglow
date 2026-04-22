@@ -1,7 +1,13 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import openstack
+
 import asyncio
 import logging
 
-import openstack
 from fastapi import APIRouter, Depends, HTTPException
 from keystoneauth1 import exceptions as ks_exc
 from openstack import exceptions as os_exc

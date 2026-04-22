@@ -1,15 +1,20 @@
+from __future__ import annotations
+
 import asyncio
 import hashlib
 import logging
 import time
 from collections.abc import AsyncGenerator
+from typing import TYPE_CHECKING
 
-import openstack
 from fastapi import Depends, Header, HTTPException
 
 from app.config import get_settings
 from app.services import keystone
 from app.services.cache import cached_call, ttl_static
+
+if TYPE_CHECKING:
+    import openstack
 
 _logger = logging.getLogger(__name__)
 

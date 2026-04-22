@@ -3,6 +3,7 @@
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
 	interface GpuDevice {
 		provider_name: string;
@@ -85,7 +86,7 @@
 			gpuTypes = res.gpu_types ?? [];
 		} catch (e) {
 			error = e instanceof ApiError ? e.message : 'GPU 정보를 불러올 수 없습니다';
-			hosts = [];
+			aggregatedHosts = [];
 		} finally {
 			loading = false;
 		}
@@ -139,8 +140,8 @@
 					va = a.gpu_total - a.gpu_used;
 					vb = b.gpu_total - b.gpu_used;
 				} else {
-					va = (a as Record<string, number>)[sortColumn] ?? 0;
-					vb = (b as Record<string, number>)[sortColumn] ?? 0;
+					va = (a as unknown as Record<string, number>)[sortColumn] ?? 0;
+					vb = (b as unknown as Record<string, number>)[sortColumn] ?? 0;
 				}
 				return sortAsc ? va - vb : vb - va;
 			})
@@ -150,10 +151,11 @@
 </script>
 
 <div class="p-4 md:p-8 max-w-6xl">
-	<div class="flex items-center justify-between mb-6">
-		<h1 class="text-2xl font-bold text-white">GPU 모니터링</h1>
-		<button onclick={() => load()} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
-	</div>
+	<PageHeader breadcrumb="COMPUTE / GPU" title="GPU">
+		{#snippet actions()}
+			<button onclick={() => load()} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
+		{/snippet}
+	</PageHeader>
 
 	{#if error}
 		<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>
@@ -344,4 +346,5 @@
 			<div class="text-center text-gray-500 text-sm py-8">조건에 맞는 호스트가 없습니다</div>
 		{/if}
 	{/if}
+
 </div>

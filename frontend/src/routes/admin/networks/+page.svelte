@@ -4,6 +4,7 @@
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import TimeSeriesChart from '$lib/components/TimeSeriesChart.svelte';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
 	interface NetworkInfo {
 		id: string;
@@ -105,13 +106,12 @@
 </script>
 
 <div class="p-4 md:p-8 max-w-6xl">
-	<div class="flex items-center justify-between mb-6">
-		<h1 class="text-2xl font-bold text-white">전체 네트워크</h1>
-		<div class="flex items-center gap-3">
+	<PageHeader breadcrumb="NETWORK / NETWORKS" title="네트워크">
+		{#snippet actions()}
 			<button onclick={() => { showCreate = true; createError = ''; }} class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg">+ 생성</button>
 			<button onclick={loadNetworks} class="text-xs text-gray-400 hover:text-white px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
-		</div>
-	</div>
+		{/snippet}
+	</PageHeader>
 
 	<div class="mb-6">
 		{#if tsLoading}

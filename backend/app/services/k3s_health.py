@@ -103,8 +103,12 @@ def _make_ssl_context(cert_pem: bytes, key_pem: bytes) -> ssl.SSLContext:
 # ---------------------------------------------------------------------------
 
 
-async def _get_probe_ip(project_id: str, server_vm_id: str | None, server_ip: str) -> str:
-    """Nova API로 서버 VM의 floating IP를 찾아 반환. 없으면 server_ip(private) 반환."""
+async def _get_probe_ip(
+    project_id: str, server_vm_id: str | None, server_ip: str, api_fip_address: str | None = None
+) -> str:
+    """프로브 IP 결정: API LB FIP > Nova floating IP > private IP 순."""
+    if api_fip_address:
+        return api_fip_address
     if not server_vm_id or not project_id:
         return server_ip
     try:
@@ -134,9 +138,10 @@ async def check_cluster_health(cluster: dict) -> K3sClusterHealth:
     project_id = cluster.get("project_id", "")
     server_vm_id = cluster.get("server_vm_id")
     server_ip = cluster.get("server_ip", "")
+    api_fip_address = cluster.get("api_fip_address") or None
     checked_at = datetime.now(UTC).isoformat()
 
-    if not server_ip:
+    if not server_ip and not api_fip_address:
         return K3sClusterHealth(
             cluster_id=cluster_id,
             cluster_name=cluster_name,
@@ -148,8 +153,8 @@ async def check_cluster_health(cluster: dict) -> K3sClusterHealth:
             reachability="unreachable",
         )
 
-    # 접근 가능한 IP 결정 (floating IP 우선)
-    probe_ip = await _get_probe_ip(project_id, server_vm_id, server_ip)
+    # 접근 가능한 IP 결정 (API LB FIP > Nova floating IP > private IP)
+    probe_ip = await _get_probe_ip(project_id, server_vm_id, server_ip, api_fip_address=api_fip_address)
     base_url = f"https://{probe_ip}:6443"
 
     # 1단계: /healthz 프로빙 (인증 불필요)
@@ -162,7 +167,7 @@ async def check_cluster_health(cluster: dict) -> K3sClusterHealth:
             resp = await client.get(f"{base_url}/healthz")
             api_server_reachable = True
             healthz_ok = resp.status_code == 200 and resp.text.strip() == "ok"
-    except httpx.ConnectError:
+    except (httpx.ConnectError, httpx.TimeoutException):
         error_msg = f"{probe_ip}:6443 에 연결할 수 없습니다 (tenant-only 네트워크일 수 있음)"
         return K3sClusterHealth(
             cluster_id=cluster_id,

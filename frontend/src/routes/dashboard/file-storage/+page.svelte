@@ -8,17 +8,13 @@
   import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
   import SlidePanel from '$lib/components/SlidePanel.svelte';
   import FileStorageDetailPanel from '$lib/components/FileStorageDetailPanel.svelte';
+  import StatusChip from '$lib/components/ui/StatusChip.svelte';
+  import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
   // ────────── 공통 ──────────
   const token = $derived($auth.token ?? undefined);
   const projectId = $derived($auth.projectId ?? undefined);
 
-  const statusColor: Record<string, string> = {
-    available: 'text-green-400 bg-green-900/30',
-    creating:  'text-yellow-400 bg-yellow-900/30',
-    deleting:  'text-orange-400 bg-orange-900/30',
-    error:     'text-red-400 bg-red-900/30',
-  };
 
   interface QuotaItem { limit: number; in_use: number; }
   interface Quota { shares: QuotaItem; gigabytes: QuotaItem; share_networks: QuotaItem; }
@@ -576,36 +572,22 @@
 
 <!-- ===== 메인 페이지 ===== -->
 <div class="p-4 md:p-8">
-  <div class="flex items-center justify-between mb-6">
-    <h1 class="text-2xl font-bold text-white">파일 스토리지</h1>
-    <div class="flex items-center gap-2">
+  <PageHeader breadcrumb="FILE STORAGE" title="파일 스토리지">
+    {#snippet actions()}
       <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={10} />
       <RefreshButton refreshing={refreshing} onclick={forceRefresh} />
       <button onclick={openWizard} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 파일 스토리지 생성</button>
-    </div>
-  </div>
-
-  {#if quota}
-    <div class="flex items-center gap-6 mb-6 bg-gray-900 border border-gray-800 rounded-lg px-5 py-3">
-      <span class="text-xs text-gray-500 uppercase tracking-wide">쿼터</span>
-      {#each [
-        { label: 'File Storage', item: quota.shares },
-        { label: '용량', item: quota.gigabytes, unit: 'GB' },
-        { label: 'Share Networks', item: quota.share_networks },
-      ] as q}
-        <div class="flex items-center gap-1.5">
-          <span class="text-xs text-gray-400">{q.label}:</span>
-          <span class="text-xs font-medium {q.item.limit > 0 && q.item.in_use / q.item.limit > 0.8 ? 'text-orange-400' : 'text-white'}">{q.item.in_use}{q.unit ?? ''}</span>
-          {#if q.item.limit > 0}<span class="text-xs text-gray-600">/ {q.item.limit}{q.unit ?? ''}</span>{/if}
-        </div>
-      {/each}
-    </div>
-  {/if}
+    {/snippet}
+  </PageHeader>
 
   {#if error}<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>{/if}
 
   {#if loading}
-    <LoadingSkeleton variant="table" rows={5} />
+    <div class="grid grid-cols-2 gap-3.5">
+      {#each [1, 2, 3, 4] as _}
+        <div class="animate-pulse bg-gray-900 border border-gray-800 rounded-2xl h-40"></div>
+      {/each}
+    </div>
   {:else if fileStorages.length === 0}
     <div class="text-center py-20 text-gray-600">
       <div class="text-5xl mb-4">🗂️</div>
@@ -613,60 +595,69 @@
       <button onclick={openWizard} class="text-blue-400 hover:text-blue-300 text-sm mt-2 inline-block">첫 파일 스토리지를 생성하세요 →</button>
     </div>
   {:else}
-    <div class="overflow-x-auto">
-      <table class="w-full text-sm">
-        <thead>
-          <tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
-            <th class="text-left py-3 pr-6">이름</th>
-            <th class="text-left py-3 pr-6">상태</th>
-            <th class="text-left py-3 pr-4">크기</th>
-            <th class="text-left py-3 pr-4">프로토콜</th>
-            <th class="text-left py-3 pr-6">라이브러리</th>
-            <th class="text-left py-3 pr-6">Export Location</th>
-            <th class="text-right py-3">액션</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each fileStorages as fs (fs.id)}
-            <tr class="border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors">
-              <td class="py-3 pr-6 font-medium">
-                <button onclick={() => openDetailPanel(fs.id)} class="text-white hover:text-blue-400 transition-colors text-left">
-                  {#if fs.name}<span>{fs.name}</span>{:else}<span class="text-gray-400 font-mono text-xs">{fs.id}</span>{/if}
-                </button>
-              </td>
-              <td class="py-3 pr-6"><span class="px-2 py-0.5 rounded text-xs font-medium {statusColor[fs.status] ?? 'text-gray-400 bg-gray-800'}">{fs.status}</span></td>
-              <td class="py-3 pr-4 text-gray-400 text-xs">{fs.size} GB</td>
-              <td class="py-3 pr-4 text-gray-400 text-xs">{fs.share_proto}</td>
-              <td class="py-3 pr-6 text-xs">
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+      {#each fileStorages as fs (fs.id)}
+        <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
+          <!-- 헤더 -->
+          <div class="flex items-center gap-2.5 mb-3.5">
+            <div class="w-10 h-10 rounded-[10px] bg-teal-500/15 border border-teal-500/30 text-teal-400 flex items-center justify-center shrink-0">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+              </svg>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="text-white text-[14px] font-semibold font-mono truncate">
+                {fs.name || fs.id.slice(0, 8)}
+              </div>
+              <div class="text-[11px] text-gray-500 mt-0.5">
+                {fs.share_proto}
                 {#if fs.library_name}
-                  <span class="px-1.5 py-0.5 bg-blue-900/40 text-blue-300 rounded text-xs">{fs.library_name}{fs.library_version ? ` v${fs.library_version}` : ''}</span>
-                {:else}
-                  <span class="text-gray-600">-</span>
+                  · <span class="text-blue-400">{fs.library_name}{fs.library_version ? ` v${fs.library_version}` : ''}</span>
                 {/if}
-              </td>
-              <td class="py-3 pr-6 text-xs max-w-[200px]">
-                {#if fs.export_locations && fs.export_locations.length > 0}
-                  <div class="flex items-center gap-1.5">
-                    <span class="text-gray-500 font-mono truncate">{fs.export_locations[0].slice(-32)}</span>
-                    <button onclick={(e) => { e.stopPropagation(); copyExportPath(fs.export_locations[0], fs.id); }}
-                      class="shrink-0 text-gray-600 hover:text-gray-400 transition-colors" title="경로 복사">
-                      {copiedExport === fs.id ? '✓' : '⎘'}
-                    </button>
-                  </div>
-                {:else}
-                  <span class="text-gray-600">-</span>
-                {/if}
-              </td>
-              <td class="py-3 text-right">
-                <button onclick={(e) => { e.stopPropagation(); deleteFileStorage(fs.id, fs.name); }} disabled={deleting === fs.id}
-                  class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-xs px-2 py-1 rounded border border-red-900 hover:border-red-700 disabled:border-gray-700 transition-colors">
-                  {deleting === fs.id ? '삭제 중...' : '삭제'}
-                </button>
-              </td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
+              </div>
+            </div>
+            <StatusChip status={fs.status} />
+          </div>
+
+          <!-- 할당 크기 바 -->
+          <div>
+            <div class="flex justify-between text-[11px] text-gray-400 mb-1.5">
+              <span>할당 크기</span>
+              <span class="text-white font-medium">{fs.size} GB</span>
+            </div>
+            <div class="h-1.5 bg-gray-800 rounded-full overflow-hidden">
+              <div class="h-full bg-teal-400" style="width: 60%"></div>
+            </div>
+          </div>
+
+          <!-- Export Location -->
+          {#if fs.export_locations && fs.export_locations.length > 0}
+            <div class="mt-3.5 flex items-center gap-1.5 p-2.5 bg-[#0B1220] border border-gray-800 rounded-md">
+              <span class="text-gray-600 font-mono text-[11px] shrink-0">$</span>
+              <span class="font-mono text-[11px] text-gray-400 truncate flex-1">{fs.export_locations[0]}</span>
+              <button
+                onclick={(e) => { e.stopPropagation(); copyExportPath(fs.export_locations[0], fs.id); }}
+                class="shrink-0 text-gray-600 hover:text-gray-300 transition-colors text-[11px]"
+                title="경로 복사"
+              >{copiedExport === fs.id ? '✓' : '⎘'}</button>
+            </div>
+          {/if}
+
+          <!-- 액션 -->
+          <div class="mt-3.5 flex items-center gap-2 pt-3 border-t border-gray-800">
+            <button
+              onclick={() => openDetailPanel(fs.id)}
+              class="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+            >상세</button>
+            <div class="flex-1"></div>
+            <button
+              onclick={(e) => { e.stopPropagation(); deleteFileStorage(fs.id, fs.name); }}
+              disabled={deleting === fs.id}
+              class="text-xs px-2 py-1 rounded border border-red-900 hover:border-red-700 text-red-400 hover:text-red-300 disabled:text-gray-600 disabled:border-gray-700 transition-colors"
+            >{deleting === fs.id ? '삭제 중...' : '삭제'}</button>
+          </div>
+        </div>
+      {/each}
     </div>
   {/if}
 </div>

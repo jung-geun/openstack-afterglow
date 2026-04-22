@@ -9,14 +9,13 @@ metadata:
       backend=ghcr.io/jung-geun/afterglow-api:latest,frontend=ghcr.io/jung-geun/afterglow:latest
     argocd-image-updater.argoproj.io/backend.update-strategy: digest
     argocd-image-updater.argoproj.io/frontend.update-strategy: digest
-    argocd-image-updater.argoproj.io/write-back-method: git
-    argocd-image-updater.argoproj.io/git-branch: main
+    argocd-image-updater.argoproj.io/write-back-method: argocd
 spec:
   project: afterglow
   source:
     repoURL: "https://github.com/jung-geun/openstack-afterglow.git"
     targetRevision: main
-    path: deploy/k8s/overlays/prod
+    path: deploy/k8s-template/overlays/prod
   destination:
     server: "https://kubernetes.default.svc"
     namespace: afterglow

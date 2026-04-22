@@ -76,6 +76,7 @@ def _has_any_auth_dep(route: APIRoute) -> bool:
 EXPECTED_PUBLIC = frozenset(
     {
         ("GET", "/api/health"),
+        ("GET", "/api/health/detail"),  # 모니터링 대시보드용 Redis 상태 포함 헬스체크
         ("GET", "/api/site-config"),
         ("GET", "/api/dashboard/config"),  # 새로고침 간격 등 UI 설정만 반환, 인증 불필요
         ("GET", "/api/auth/gitlab/enabled"),

@@ -1,4 +1,18 @@
-from .clusters import router as clusters_router
-from .containers import router as containers_router
+"""Container API routers — lazy import to reduce startup time."""
 
-__all__ = ["clusters_router", "containers_router"]
+_ROUTERS = {
+    "clusters_router": ".clusters",
+    "containers_router": ".containers",
+}
+
+
+def __getattr__(name: str):
+    if name in _ROUTERS:
+        import importlib
+
+        mod = importlib.import_module(_ROUTERS[name], __package__)
+        return mod.router
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+__all__ = list(_ROUTERS)

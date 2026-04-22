@@ -1,4 +1,9 @@
-import openstack
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import openstack
 
 from app.models.storage import VolumeInfo
 

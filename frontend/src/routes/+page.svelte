@@ -66,6 +66,7 @@
 				expires_at: string | null;
 				roles?: string[];
 				default_project_id?: string;
+				is_system_admin?: boolean;
 			}>('/api/auth/login', { username, password, domain_name: domainName });
 
 			// 프로젝트 목록 조회

@@ -64,6 +64,9 @@ class K3sClusterInfo(BaseModel):
     health_status: str | None = (
         None  # 최신 헬스체크 결과: "HEALTHY" | "DEGRADED" | "UNHEALTHY" | "UNREACHABLE" | "UNKNOWN"
     )
+    api_lb_id: str | None = None
+    api_fip_id: str | None = None
+    api_fip_address: str | None = None
 
 
 class K3sClusterInfoDeleted(K3sClusterInfo):

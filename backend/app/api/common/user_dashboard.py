@@ -1,9 +1,14 @@
 """사용자별 크로스-프로젝트 대시보드 엔드포인트."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import openstack
 import asyncio
 import logging
 
-import openstack
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.deps import get_os_conn

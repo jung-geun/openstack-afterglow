@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
 	interface FloatingIpInfo {
 		id: string;
@@ -79,13 +80,12 @@
 </script>
 
 <div class="p-4 md:p-8 max-w-6xl">
-	<div class="flex items-center justify-between mb-6">
-		<h1 class="text-2xl font-bold text-white">전체 Floating IP</h1>
-		<div class="flex items-center gap-3">
+	<PageHeader breadcrumb="NETWORK / FLOATING IPs" title="Floating IP">
+		{#snippet actions()}
 			<button onclick={openCreate} class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg">+ 생성</button>
 			<button onclick={load} class="text-xs text-gray-400 hover:text-white px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
-		</div>
-	</div>
+		{/snippet}
+	</PageHeader>
 
 	{#if loading}
 		<div class="text-gray-500 text-sm">로딩 중...</div>

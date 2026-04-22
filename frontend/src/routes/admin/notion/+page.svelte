@@ -2,6 +2,7 @@
   import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
   import { env } from '$env/dynamic/public';
+  import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
   function getBaseUrl(): string {
     if (typeof window !== 'undefined') {
@@ -215,18 +216,16 @@
 </script>
 
 <div class="p-4 md:p-8 max-w-3xl">
-  <div class="flex items-center justify-between mb-6">
-    <div>
-      <h1 class="text-2xl font-bold text-white">Notion 연동</h1>
-      <p class="text-sm text-gray-400 mt-1">OpenStack 리소스를 여러 Notion DB에 동시에 동기화합니다.</p>
-    </div>
-    <button
-      onclick={() => { showAddForm = !showAddForm; addError = ''; }}
-      class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors"
-    >
-      {showAddForm ? '취소' : '+ 연결 추가'}
-    </button>
-  </div>
+  <PageHeader breadcrumb="SYSTEM / NOTION" title="Notion 연동" subtitle="OpenStack 리소스를 여러 Notion DB에 동시에 동기화합니다.">
+    {#snippet actions()}
+      <button
+        onclick={() => { showAddForm = !showAddForm; addError = ''; }}
+        class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors"
+      >
+        {showAddForm ? '취소' : '+ 연결 추가'}
+      </button>
+    {/snippet}
+  </PageHeader>
 
   {#if error}
     <div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>

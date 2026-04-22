@@ -45,6 +45,7 @@ class OccmPlugin:
             ca_file="" if settings.os_insecure else (settings.os_cacert or ""),
             floating_network_id=settings.k3s_occm_floating_network_id,
             public_network_name=settings.k3s_occm_public_network_name,
+            lb_subnet_id=settings.k3s_lb_subnet_id,
         )
 
     def generate_manifests(self, cluster_name: str, project_id: str, settings: Settings) -> str:

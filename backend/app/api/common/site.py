@@ -19,5 +19,7 @@ def get_site_config():
             "manila": s.service_manila_enabled,
             "zun": s.service_zun_enabled,
             "k3s": s.service_k3s_enabled,
+            "trove": s.service_trove_enabled,
+            "swift": s.service_swift_enabled,
         },
     }

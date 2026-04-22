@@ -70,6 +70,7 @@ def _load_toml() -> dict:
     flat["os_project_domain_name"] = ost.get("project_domain_name", "Default")
     flat["os_user_domain_name"] = ost.get("user_domain_name", "Default")
     flat["os_region_name"] = ost.get("region_name", "RegionOne")
+    flat["os_interface"] = ost.get("interface", "internal")
     flat["os_insecure"] = ost.get("insecure", False)
     flat["os_cacert"] = ost.get("cacert", "")
     flat["os_manila_endpoint"] = ost.get("manila_endpoint", "")
@@ -101,6 +102,8 @@ def _load_toml() -> dict:
     flat["service_manila_enabled"] = svc.get("manila", False)
     flat["service_zun_enabled"] = svc.get("zun", False)
     flat["service_k3s_enabled"] = svc.get("k3s", False)
+    flat["service_trove_enabled"] = svc.get("trove", False)
+    flat["service_swift_enabled"] = svc.get("swift", False)
 
     k3s = data.get("k3s", {})
     flat["k3s_version"] = k3s.get("version", "v1.31.4+k3s1")
@@ -146,6 +149,14 @@ def _load_toml() -> dict:
         "barbican_kms_image", "registry.k8s.io/provider-os/barbican-kms-plugin:v1.31.0"
     )
     flat["k3s_barbican_kms_kek_id"] = k3s.get("barbican_kms_kek_id", "")
+    # API LB (K3s API 서버 앞단 Octavia LB + Floating IP)
+    flat["k3s_api_lb_enabled"] = k3s.get("api_lb_enabled", False)
+    flat["k3s_api_lb_floating_network_id"] = k3s.get("api_lb_floating_network_id", "")
+    # LB 네트워크 분리: OCCM Service LB + API LB 공통 VIP 서브넷
+    flat["k3s_lb_subnet_id"] = k3s.get("lb_subnet_id", "")
+
+    gpu = data.get("gpu", {})
+    flat["gpu_available_visible"] = gpu.get("available_visible", False)
 
     sess = data.get("session", {})
     flat["session_timeout_seconds"] = sess.get("timeout_seconds", 3600)
@@ -203,6 +214,7 @@ class Settings(BaseSettings):
     os_project_domain_name: str = "Default"
     os_user_domain_name: str = "Default"
     os_region_name: str = "RegionOne"
+    os_interface: str = "internal"
     os_insecure: bool = False
     os_cacert: str = ""
 
@@ -240,6 +252,8 @@ class Settings(BaseSettings):
     service_manila_enabled: bool = False
     service_zun_enabled: bool = False
     service_k3s_enabled: bool = False
+    service_trove_enabled: bool = False
+    service_swift_enabled: bool = False
 
     # k3s 설정
     k3s_version: str = "v1.31.4+k3s1"
@@ -275,7 +289,15 @@ class Settings(BaseSettings):
     k3s_barbican_kms_enabled: bool = False
     k3s_barbican_kms_image: str = "registry.k8s.io/provider-os/barbican-kms-plugin:v1.31.0"
     k3s_barbican_kms_kek_id: str = ""
+    # API LB
+    k3s_api_lb_enabled: bool = False
+    k3s_api_lb_floating_network_id: str = ""  # 미설정 시 k3s_occm_floating_network_id 사용
+    # LB 네트워크 분리: OCCM Service LB + API LB VIP 서브넷 (미설정 시 클러스터 네트워크의 첫 서브넷)
+    k3s_lb_subnet_id: str = ""
     notion_config_encryption_key: str = ""  # 미설정 시 k3s_kubeconfig_encryption_key 재사용
+
+    # GPU
+    gpu_available_visible: bool = False  # true 시 사용자에게 GPU 가용량 API 노출
 
     # 세션 관리
     session_timeout_seconds: int = 3600

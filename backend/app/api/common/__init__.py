@@ -1,7 +1,21 @@
-from .dashboard import router as dashboard_router
-from .libraries import router as libraries_router
-from .metrics import router as metrics_router
-from .site import router as site_router
-from .user_dashboard import router as user_dashboard_router
+"""Common API routers — lazy import to reduce startup time."""
 
-__all__ = ["dashboard_router", "metrics_router", "libraries_router", "site_router", "user_dashboard_router"]
+_ROUTERS = {
+    "dashboard_router": ".dashboard",
+    "libraries_router": ".libraries",
+    "metrics_router": ".metrics",
+    "site_router": ".site",
+    "user_dashboard_router": ".user_dashboard",
+}
+
+
+def __getattr__(name: str):
+    if name in _ROUTERS:
+        import importlib
+
+        mod = importlib.import_module(_ROUTERS[name], __package__)
+        return mod.router
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+__all__ = list(_ROUTERS)

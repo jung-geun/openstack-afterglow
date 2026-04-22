@@ -12,11 +12,15 @@ Redis 키:
   afterglow:auto_backup:all_configs                      → set of "project_id:volume_id"
 """
 
+from __future__ import annotations
+
 import json
 import logging
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
-import openstack
+if TYPE_CHECKING:
+    import openstack
 
 from app.services import cinder
 from app.services.cache import _get_redis

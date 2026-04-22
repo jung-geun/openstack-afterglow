@@ -4,6 +4,8 @@
   import { api, ApiError } from '$lib/api/client';
   import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+  import StatusChip from '$lib/components/ui/StatusChip.svelte';
+  import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
   interface FileStorage {
     id: string;
@@ -23,13 +25,6 @@
     available_prebuilt: boolean;
   }
 
-  const statusColor: Record<string, string> = {
-    available: 'text-green-400',
-    creating:  'text-yellow-400',
-    building:  'text-yellow-400',
-    deleting:  'text-orange-400',
-    error:     'text-red-400',
-  };
 
   let fileStorages = $state<FileStorage[]>([]);
   let libraries = $state<LibraryConfig[]>([]);
@@ -94,20 +89,16 @@
 </script>
 
 <div class="p-4 md:p-8 max-w-5xl">
-  <div class="flex items-center justify-between mb-6">
-    <div>
-      <h1 class="text-2xl font-bold text-white">라이브러리 파일 스토리지 관리</h1>
-      <p class="text-sm text-gray-500 mt-1">Strategy A (사전 빌드)에서 사용할 Manila CephFS 파일 스토리지를 관리합니다.</p>
-    </div>
-    <div class="flex items-center gap-3">
+  <PageHeader breadcrumb="FILE STORAGE / MANAGE" title="라이브러리 관리" subtitle="Strategy A (사전 빌드)에서 사용할 Manila CephFS 파일 스토리지를 관리합니다.">
+    {#snippet actions()}
       <label class="flex items-center gap-2 text-xs text-gray-400 cursor-pointer">
         <input type="checkbox" bind:checked={autoInstall} class="rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0" />
         자동 패키지 설치
       </label>
       <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={10} />
       <button onclick={loadData} class="text-xs text-gray-400 hover:text-white transition-colors border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg">새로고침</button>
-    </div>
-  </div>
+    {/snippet}
+  </PageHeader>
 
   {#if error}
     <div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>
@@ -131,7 +122,7 @@
                 <div class="text-xs text-gray-500">v{lib.version}</div>
               </div>
               {#if prebuilt}
-                <span class="text-xs {statusColor[prebuilt.status] ?? 'text-gray-400'}">{prebuilt.status}</span>
+                <StatusChip status={prebuilt.status} />
               {:else}
                 <span class="text-xs text-gray-600">미구축</span>
               {/if}
@@ -161,31 +152,49 @@
       <h2 class="text-base font-semibold text-white">전체 파일 스토리지 목록</h2>
     </div>
     {#if fileStorages.length === 0}
-      <div class="text-gray-600 text-sm">파일 스토리지가 없습니다</div>
+      <div class="text-gray-600 text-sm py-8 text-center">파일 스토리지가 없습니다</div>
     {:else}
-      <div class="overflow-x-auto">
-        <table class="w-full text-sm">
-          <thead>
-            <tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
-              <th class="text-left py-2 pr-4">이름</th>
-              <th class="text-left py-2 pr-4">상태</th>
-              <th class="text-left py-2 pr-4">크기</th>
-              <th class="text-left py-2 pr-4">타입</th>
-              <th class="text-left py-2">라이브러리</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each fileStorages as fs}
-              <tr class="border-b border-gray-800/50 text-xs">
-                <td class="py-2 pr-4 font-mono text-gray-300">{fs.name}</td>
-                <td class="py-2 pr-4 {statusColor[fs.status] ?? 'text-gray-400'}">{fs.status}</td>
-                <td class="py-2 pr-4 text-gray-400">{fs.size} GB</td>
-                <td class="py-2 pr-4 text-gray-500">{fs.metadata?.union_type ?? '-'}</td>
-                <td class="py-2 text-gray-500">{fs.library_name ?? '-'}</td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        {#each fileStorages as fs}
+          <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
+            <!-- 헤더 -->
+            <div class="flex items-center gap-2.5 mb-3">
+              <div class="w-10 h-10 rounded-[10px] bg-teal-500/15 border border-teal-500/30 text-teal-400 flex items-center justify-center shrink-0">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+                </svg>
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="text-white font-semibold text-sm font-mono truncate">{fs.name}</div>
+                <div class="flex items-center gap-1.5 mt-0.5">
+                  {#if fs.metadata?.union_type}
+                    <span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/40 text-blue-300 border border-blue-800/50">{fs.metadata.union_type}</span>
+                  {/if}
+                  {#if fs.library_name}
+                    <span class="text-[10px] px-1.5 py-0.5 rounded bg-violet-900/40 text-violet-300 border border-violet-800/50 truncate">{fs.library_name}</span>
+                  {/if}
+                </div>
+              </div>
+            </div>
+            <!-- 정보 -->
+            <div class="grid grid-cols-2 gap-2 mb-3">
+              <div>
+                <div class="text-[11px] uppercase tracking-wider font-medium text-gray-500">크기</div>
+                <div class="text-white font-mono text-sm mt-0.5">{fs.size} GB</div>
+              </div>
+              <div>
+                <div class="text-[11px] uppercase tracking-wider font-medium text-gray-500">상태</div>
+                <div class="mt-0.5"><StatusChip status={fs.status} /></div>
+              </div>
+            </div>
+            <!-- 빌드 날짜 -->
+            {#if fs.built_at}
+              <div class="pt-3 border-t border-gray-800">
+                <div class="text-[11px] text-gray-500">빌드: {fs.built_at.split('T')[0]}</div>
+              </div>
+            {/if}
+          </div>
+        {/each}
       </div>
     {/if}
   {/if}

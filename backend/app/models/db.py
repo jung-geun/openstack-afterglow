@@ -37,6 +37,10 @@ class K3sCluster(Base):
     agent_flavor_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     network_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     security_group_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    # API LB (K3s API 서버 앞단 Octavia LB + Floating IP)
+    api_lb_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    api_fip_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    api_fip_address: Mapped[str | None] = mapped_column(VARCHAR(45))
 
     # k3s 정보
     server_ip: Mapped[str | None] = mapped_column(VARCHAR(45))
@@ -90,6 +94,21 @@ class K3sAgentVM(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
 
     cluster: Mapped["K3sCluster"] = relationship("K3sCluster", back_populates="agent_vms")
+
+
+class GpuQuota(Base):
+    """프로젝트별 GPU 타입 quota. limit=-1 은 무제한."""
+
+    __tablename__ = "gpu_quotas"
+
+    id: Mapped[int] = mapped_column(INT, primary_key=True, autoincrement=True)
+    project_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, index=True)
+    gpu_type: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)  # PCI alias (예: "RTX3090")
+    limit: Mapped[int] = mapped_column(INT, nullable=False, default=-1)  # -1 = 무제한
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+    __table_args__ = (Index("idx_gpu_quota_project_type", "project_id", "gpu_type", unique=True),)
 
 
 class NotionTarget(Base):

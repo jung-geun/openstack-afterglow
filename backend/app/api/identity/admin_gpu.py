@@ -1,10 +1,15 @@
 """관리자 GPU 호스트 모니터링 엔드포인트."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import openstack
 import copy
 import logging
 import re
 
-import openstack
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.deps import get_os_conn, require_admin
@@ -412,3 +417,42 @@ def build_alias_to_device_name_map() -> dict[str, str]:
                 if alias:
                     alias_map[alias] = name
     return alias_map
+
+
+def build_device_name_to_alias_map() -> dict[str, str]:
+    """정식 GPU 이름 → 대표 OpenStack PCI alias 매핑 반환.
+
+    예: "RTX 3090" → "RTX3090", "GTX 1080 Ti" → "GTX1080Ti"
+    aliases 리스트의 첫 번째 항목을 대표 alias로 사용.
+    """
+    name_map: dict[str, str] = {}
+    for devices in PCI_DEVICE_MAP.values():
+        for info in devices.values():
+            if info.get("is_audio"):
+                continue
+            aliases = info.get("aliases", [])
+            if aliases:
+                name_map[info["name"]] = aliases[0]
+    return name_map
+
+
+def build_normalized_alias_map() -> dict[str, str]:
+    """정규화된 alias → 대표(canonical) alias 매핑 반환.
+
+    하이픈, 언더스코어, 공백을 제거하고 소문자로 비교하여
+    같은 GPU의 다른 표기(RTX-3090, RTX3090, RTX_3090)를 대표 alias로 통일.
+    """
+    norm_map: dict[str, str] = {}
+    for devices in PCI_DEVICE_MAP.values():
+        for info in devices.values():
+            if info.get("is_audio"):
+                continue
+            aliases = info.get("aliases", [])
+            if not aliases:
+                continue
+            canonical = aliases[0]
+            # 대표 alias 자체도 등록
+            norm_map[canonical.replace("-", "").replace("_", "").replace(" ", "").lower()] = canonical
+            for alias in aliases:
+                norm_map[alias.replace("-", "").replace("_", "").replace(" ", "").lower()] = canonical
+    return norm_map

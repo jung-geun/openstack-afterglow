@@ -1,18 +1,28 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import openstack
 import asyncio
+import logging
 import re
 from datetime import date, timedelta
 
-import openstack
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.deps import get_os_conn
 from app.config import get_settings
+from app.database import is_db_available
 from app.services import cinder, nova
 from app.services import manila as manila_svc
 from app.services import neutron as neutron_svc
+from app.services import swift as swift_svc
+from app.services import trove as trove_svc
 from app.services.cache import cached_call, ttl_fast, ttl_normal, ttl_static
 
 router = APIRouter()
+_logger = logging.getLogger(__name__)
 
 
 def _list_servers_as_dicts(conn):
@@ -129,7 +139,7 @@ async def get_dashboard_config():
 async def get_project_quotas(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    """현재 프로젝트의 전체 할당량 (compute/storage/network/file_storage) 조회."""
+    """현재 프로젝트의 전체 할당량 (compute/storage/network/file_storage/gpu) 조회."""
     project_id = conn._afterglow_project_id
     settings = get_settings()
     try:
@@ -140,18 +150,98 @@ async def get_project_quotas(
         ]
         if settings.service_manila_enabled:
             tasks.append(asyncio.to_thread(manila_svc.get_file_storage_quota, conn))
+        if settings.service_trove_enabled:
+            tasks.append(asyncio.to_thread(trove_svc.count_instances, conn))
+        if settings.service_swift_enabled:
+            tasks.append(asyncio.to_thread(swift_svc.get_account_metadata, conn))
         results = await asyncio.gather(*tasks)
         compute_q, volume_q, network_q = results[0], results[1], results[2]
-        file_storage_q = results[3] if settings.service_manila_enabled else {"limit": 0, "in_use": 0, "reserved": 0}
+        idx = 3
+        file_storage_q = results[idx] if settings.service_manila_enabled else {"limit": 0, "in_use": 0, "reserved": 0}
+        if settings.service_manila_enabled:
+            idx += 1
+        trove_count: int = results[idx] if settings.service_trove_enabled else 0
+        if settings.service_trove_enabled:
+            idx += 1
+        swift_meta: dict = (
+            results[idx]
+            if settings.service_swift_enabled
+            else {"container_count": 0, "object_count": 0, "bytes_used": 0}
+        )
     except Exception:
         raise HTTPException(status_code=500, detail="작업 실패")
+
+    # GPU quota (DB 있는 경우)
+    gpu_quota: list[dict] = []
+    if is_db_available():
+        try:
+            from app.services.gpu_quota import get_effective_gpu_quotas, get_project_gpu_usage
+
+            effective, usage = await asyncio.gather(
+                get_effective_gpu_quotas(project_id),
+                get_project_gpu_usage(conn, project_id),
+            )
+            for gpu_type, limit in effective.items():
+                in_use = usage.get(gpu_type, 0)
+                gpu_quota.append(
+                    {
+                        "gpu_type": gpu_type,
+                        "limit": limit,
+                        "in_use": in_use,
+                        "available": (limit - in_use) if limit >= 0 else -1,
+                    }
+                )
+        except Exception:
+            _logger.warning("GPU quota 조회 실패", exc_info=True)
 
     return {
         "compute": compute_q,
         "storage": volume_q,
         "network": network_q,
         "file_storage": file_storage_q,
+        "gpu": gpu_quota,
+        "database": {"instances_count": trove_count},
+        "object_storage": swift_meta,
     }
+
+
+@router.get("/gpu-available")
+async def get_gpu_available(
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    refresh: bool = Query(False),
+):
+    """GPU 타입별 가용량 조회 (gpu_available_visible=true 시 활성화).
+
+    Placement API를 admin 연결로 조회하여 호스트 상세 없이 타입별 요약만 반환.
+    """
+    s = get_settings()
+    if not s.gpu_available_visible:
+        raise HTTPException(status_code=404, detail="GPU 가용량 조회가 비활성화되어 있습니다")
+
+    def _collect():
+        from app.api.identity.admin_gpu import _collect_gpu_hosts
+        from app.services.keystone import get_admin_connection_for_project
+
+        admin_conn = get_admin_connection_for_project(s.os_project_name)
+        data = _collect_gpu_hosts(admin_conn)
+        return {
+            "gpu_types": [
+                {
+                    "device_name": t["device_name"],
+                    "vendor": t["vendor"],
+                    "total": t["total"],
+                    "used": t["used"],
+                    "available": t["total"] - t["used"],
+                }
+                for t in data["gpu_types"]
+            ],
+            "summary": data["summary"],
+        }
+
+    try:
+        return await cached_call("afterglow:gpu:availability", ttl_normal(), _collect, refresh=refresh)
+    except Exception:
+        raise HTTPException(status_code=500, detail="GPU 가용량 조회 실패")
 
 
 @router.get("/usage")

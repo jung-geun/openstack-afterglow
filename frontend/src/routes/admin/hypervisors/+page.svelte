@@ -5,6 +5,7 @@
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { formatNumber, formatStorage } from '$lib/utils/format';
 	import { projectNames } from '$lib/stores/projectNames';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
 	interface Hypervisor {
 		id: string;
@@ -117,8 +118,8 @@
 				va = a.name;
 				vb = b.name;
 			} else {
-				va = (a as Record<string, number>)[sortColumn] ?? 0;
-				vb = (b as Record<string, number>)[sortColumn] ?? 0;
+				va = (a as unknown as Record<string, number>)[sortColumn] ?? 0;
+				vb = (b as unknown as Record<string, number>)[sortColumn] ?? 0;
 			}
 			const cmp = typeof va === 'string' ? va.localeCompare(vb as string) : (va as number) - (vb as number);
 			return sortAsc ? cmp : -cmp;
@@ -185,10 +186,11 @@
 
 <div class="flex h-full">
 <div class="flex-1 p-4 md:p-8 max-w-6xl overflow-auto">
-	<div class="flex items-center justify-between mb-6">
-		<h1 class="text-2xl font-bold text-white">하이퍼바이저</h1>
-		<button onclick={load} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
-	</div>
+	<PageHeader breadcrumb="COMPUTE / HYPERVISORS" title="하이퍼바이저">
+		{#snippet actions()}
+			<button onclick={load} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
+		{/snippet}
+	</PageHeader>
 
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={5} />
@@ -349,7 +351,7 @@
 								<div class="flex items-center justify-between py-1.5 border-b border-gray-800/50 last:border-0">
 									<div class="flex-1 min-w-0">
 										<div class="text-xs text-gray-300 truncate">{s.name || s.id.slice(0, 12)}</div>
-										<div class="text-xs text-gray-500">{$projectNames[s.project_id] || s.project_id.slice(0, 8)} · {s.flavor}</div>
+										<div class="text-xs text-gray-500">{$projectNames.get(s.project_id) || s.project_id.slice(0, 8)} · {s.flavor}</div>
 									</div>
 									<div class="flex items-center gap-1 ml-2 flex-shrink-0">
 										<span class="text-xs {s.status === 'ACTIVE' ? 'text-green-400' : s.status === 'ERROR' ? 'text-red-400' : 'text-gray-400'}">{s.status}</span>

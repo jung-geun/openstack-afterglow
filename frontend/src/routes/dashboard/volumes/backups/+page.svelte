@@ -6,6 +6,8 @@
   import { formatStorage } from '$lib/utils/format';
   import RefreshButton from '$lib/components/RefreshButton.svelte';
   import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
+  import StatusChip from '$lib/components/ui/StatusChip.svelte';
+  import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
   interface VolumeBackup {
     id: string;
@@ -36,14 +38,6 @@
   let createError = $state('');
   let form = $state({ volume_id: '', name: '', description: '', incremental: false });
 
-  const statusColor: Record<string, string> = {
-    available:          'text-green-400 bg-green-900/30',
-    creating:           'text-amber-400 bg-amber-900/30',
-    deleting:           'text-orange-400 bg-orange-900/30',
-    error:              'text-red-400 bg-red-900/30',
-    restoring:          'text-teal-400 bg-teal-900/30',
-    error_restoring:    'text-rose-400 bg-rose-900/30',
-  };
 
   async function fetchBackups() {
     try {
@@ -153,14 +147,13 @@
 {/if}
 
 <div class="p-4 md:p-8">
-  <div class="flex items-center justify-between mb-6">
-    <h1 class="text-2xl font-bold text-white">볼륨 백업</h1>
-    <div class="flex items-center gap-2">
+  <PageHeader breadcrumb="VOLUMES / BACKUPS" title="볼륨 백업">
+    {#snippet actions()}
       <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={15} />
       <RefreshButton {refreshing} onclick={forceRefresh} />
       <button onclick={() => showModal = true} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 백업 생성</button>
-    </div>
-  </div>
+    {/snippet}
+  </PageHeader>
 
   {#if error}<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>{/if}
 
@@ -188,7 +181,7 @@
           {#each backups as backup (backup.id)}
             <tr class="border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors">
               <td class="py-3 pr-6 font-medium text-white">{backup.name || backup.id.slice(0, 8)}</td>
-              <td class="py-3 pr-6"><span class="px-2 py-0.5 rounded text-xs font-medium {statusColor[backup.status] ?? 'text-gray-400 bg-gray-800'}">{backup.status}</span></td>
+              <td class="py-3 pr-6"><StatusChip status={backup.status} /></td>
               <td class="py-3 pr-6 text-gray-400">{formatStorage(backup.size)}</td>
               <td class="py-3 pr-6"><span class="text-xs {backup.is_incremental ? 'text-blue-400' : 'text-gray-500'}">{backup.is_incremental ? '증분' : '전체'}</span></td>
               <td class="py-3 pr-6 text-gray-400 text-xs">{backup.created_at ? new Date(backup.created_at).toLocaleDateString('ko-KR') : '-'}</td>
