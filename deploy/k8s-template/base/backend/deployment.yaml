@@ -35,7 +35,7 @@ spec:
               "--port",
               "8000",
               "--workers",
-              "2",
+              "1",
               "--timeout-keep-alive",
               "65",
               "--loop",
@@ -80,37 +80,37 @@ spec:
             - name: afterglow-config-volume
               mountPath: /app/config.toml
               subPath: config.toml
-          # startupProbe: 시작 완료까지 최대 3 + 20*2 = 43초 허용
-          # startupProbe:
-          #   httpGet:
-          #     path: /api/health
-          #     port: 8000
-          #   initialDelaySeconds: 3
-          #   periodSeconds: 2
-          #   failureThreshold: 20
-          #   timeoutSeconds: 10
+          # startupProbe: 시작 완료까지 최대 10 + 30*5 = 160초 허용
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
+            timeoutSeconds: 10
           livenessProbe:
             httpGet:
               path: /api/health
               port: 8000
-            initialDelaySeconds: 180
+            initialDelaySeconds: 15
             periodSeconds: 30
             failureThreshold: 3
             timeoutSeconds: 5
-          # readinessProbe:
-          #   httpGet:
-          #     path: /api/health
-          #     port: 8000
-          #   periodSeconds: 5
-          #   failureThreshold: 2
-          #   timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            periodSeconds: 5
+            failureThreshold: 2
+            timeoutSeconds: 5
           resources:
             requests:
               memory: "512Mi"
               cpu: "500m"
             limits:
               memory: "1Gi"
-              cpu: "4"
+              cpu: "2"
       volumes:
         - name: afterglow-config-volume
           configMap:
