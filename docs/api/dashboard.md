@@ -36,6 +36,9 @@
 |--------|------|------|
 | `GET` | `/api/dashboard/summary` | 인스턴스 수, 컴퓨트/스토리지 한도, GPU 사용량 |
 | `GET` | `/api/dashboard/config` | 프론트엔드 설정 (새로고침 간격 등) |
+| `GET` | `/api/dashboard/quotas` | 프로젝트 쿼터 조회 |
+| `GET` | `/api/dashboard/gpu-available` | GPU 가용량 조회 |
+| `GET` | `/api/dashboard/usage` | 프로젝트 리소스 사용량 |
 
 ### GET /api/dashboard/summary
 
@@ -93,6 +96,24 @@
 | `magnum_enabled` | boolean | Magnum 컨테이너 인프라 서비스 활성화 여부 |
 | `zun_enabled` | boolean | Zun 컨테이너 서비스 활성화 여부 |
 
+### GET /api/dashboard/quotas
+
+프로젝트의 OpenStack 리소스 쿼터를 반환합니다.
+
+**응답 (200 OK)** — 쿼터 객체
+
+### GET /api/dashboard/gpu-available
+
+프로젝트에서 사용 가능한 GPU 리소스를 반환합니다. GPU가 설정되지 않은 경우 빈 응답을 반환합니다.
+
+**응답 (200 OK)** — GPU 가용량 정보
+
+### GET /api/dashboard/usage
+
+프로젝트의 리소스 사용량을 반환합니다.
+
+**응답 (200 OK)** — 사용량 객체
+
 ---
 
 ## 2. 사용자 대시보드
@@ -121,6 +142,7 @@
 |--------|------|------|
 | `GET` | `/api/libraries` | 라이브러리 카탈로그 목록 |
 | `GET` | `/api/libraries/shares` | 사전 빌드된 Manila share 목록 |
+| `POST` | `/api/libraries/validate` | 라이브러리 호환성 검증 |
 
 ### GET /api/libraries
 
@@ -166,6 +188,38 @@ Afterglow 라이브러리 카탈로그를 반환합니다. 각 라이브러리�
 사전 빌드된 Manila share 목록을 반환합니다. 관리자가 빌드한 라이브러리 share를 확인할 수 있습니다.
 
 **응답 (200 OK)** — 배열
+
+### POST /api/libraries/validate
+
+라이브러리 조합의 호환성을 검증합니다. Ubuntu 버전, Python 버전 충돌 등을 감지합니다.
+
+**요청 본문**
+
+```json
+{
+  "library_ids": ["python311", "pytorch"]
+}
+```
+
+| 필드 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| `library_ids` | array[string] | 예 | 검증할 라이브러리 ID 목록 |
+
+**응답 (200 OK)**
+
+```json
+{
+  "valid": true,
+  "conflicts": [],
+  "warnings": []
+}
+```
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `valid` | boolean | 호환성 검증 통과 여부 |
+| `conflicts` | array | 충돌 목록 (빈 배열이면 문제 없음) |
+| `warnings` | array | 경고 목록 (빈 배열이면 문제 없음) |
 
 ---
 

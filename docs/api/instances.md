@@ -155,6 +155,8 @@ Nova 인스턴스(가상 머신)의 생성, 조회, 제어, 삭제를 관리합�
 | `POST` | `/api/instances/{instance_id}/start` | 인스턴스 시작 |
 | `POST` | `/api/instances/{instance_id}/stop` | 인스턴스 중지 |
 | `POST` | `/api/instances/{instance_id}/reboot` | 인스턴스 재시작 |
+| `POST` | `/api/instances/{instance_id}/shelve` | 인스턴스 쉘브 (리소스 해제, 디스크 유지) |
+| `POST` | `/api/instances/{instance_id}/unshelve` | 쉘브된 인스턴스 복원 |
 | `GET` | `/api/instances/{instance_id}/console` | VNC 콘솔 URL 반환 |
 | `GET` | `/api/instances/{instance_id}/log` | 콘솔 로그 반환 |
 
@@ -194,6 +196,18 @@ Nova 인스턴스(가상 머신)의 생성, 조회, 제어, 삭제를 관리합�
 }
 ```
 
+### POST /api/instances/{instance_id}/shelve
+
+인스턴스를 쉘브 상태로 전환합니다. VM 리소스를 해제하면서 디스크는 유지합니다.
+
+**응답**: `204 No Content`
+
+### POST /api/instances/{instance_id}/unshelve
+
+쉘브된 인스턴스를 복원합니다.
+
+**응답**: `204 No Content`
+
 ### GET /api/instances/{instance_id}/console
 
 인스턴스의 VNC 콘솔 접속 URL을 반환합니다.
@@ -213,7 +227,7 @@ Nova 인스턴스(가상 머신)의 생성, 조회, 제어, 삭제를 관리합�
 
 | 파라미터 | 위치 | 타입 | 기본값 | 설명 |
 |----------|------|------|--------|------|
-| `length` | query | integer | 100 | 반환할 로그 라인 수 |
+| `length` | query | integer | 100 | 반환할 로그 라인 수 (`0` = 전체 로그, `ge=0`) |
 
 **응답 (200 OK)**
 
@@ -372,3 +386,44 @@ Nova 인스턴스(가상 머신)의 생성, 조회, 제어, 삭제를 관리합�
   "project_id": "uuid-string",
   "project_name": "project-name"
 }
+```
+
+---
+
+## 7. Floating IP 관리
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| `POST` | `/api/instances/{instance_id}/floating-ip` | Floating IP 자동 생성 + 인스턴스 연결 |
+| `DELETE` | `/api/instances/{instance_id}/floating-ip` | 인스턴스 Floating IP 해제 + 삭제 |
+
+### POST /api/instances/{instance_id}/floating-ip
+
+외부 네트워크에서 새 Floating IP를 자동 생성하여 인스턴스에 연결합니다. 연결 실패 시 생성된 Floating IP는 자동 정리됩니다.
+
+| 파라미터 | 위치 | 타입 | 필수 | 설명 |
+|----------|------|------|------|------|
+| `instance_id` | path | string | 예 | 인스턴스 UUID |
+
+**응답 (200 OK)**
+
+```json
+{
+  "id": "uuid-string",
+  "floating_ip_address": "203.0.113.10"
+}
+```
+
+**오류 응답**
+- `400 Bad Request` — 외부 네트워크가 없음
+- `500 Internal Server Error` — Floating IP 할당 실패
+
+### DELETE /api/instances/{instance_id}/floating-ip
+
+인스턴스에 연결된 모든 Floating IP를 해제하고 삭제합니다. best-effort로 동작합니다.
+
+| 파라미터 | 위치 | 타입 | 필수 | 설명 |
+|----------|------|------|------|------|
+| `instance_id` | path | string | 예 | 인스턴스 UUID |
+
+**응답**: `204 No Content`

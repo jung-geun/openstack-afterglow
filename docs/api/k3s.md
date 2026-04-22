@@ -85,11 +85,12 @@ CREATING → ACTIVE → DELETED (soft-delete)
 
 ---
 
-### `GET /api/k3s/clusters/{cluster_id}/kubeconfig`
+### `GET|HEAD /api/k3s/clusters/{cluster_id}/kubeconfig`
 
-클러스터의 kubeconfig 파일을 다운로드합니다. 파일 내 `server` 주소가 Floating IP로 설정된 경우에만 외부에서 사용 가능합니다.
+클러스터의 kubeconfig 파일을 다운로드합니다 (`GET`) 또는 존재 여부를 확인합니다 (`HEAD`). 파일 내 `server` 주소가 Floating IP로 설정된 경우에만 외부에서 사용 가능합니다.
 
-**응답 `200`** `application/octet-stream` — YAML 형식 kubeconfig
+**응답 `200`** `application/octet-stream` — YAML 형식 kubeconfig (GET)
+**응답 `200`** — kubeconfig 존재 확인 (HEAD)
 
 ```bash
 # 사용 예시
@@ -277,3 +278,61 @@ data: {"step": "failed", "progress": -1, "message": "생성 실패", "error": "�
 | `created_at` | string? | ISO 8601 생성 시각 |
 | `deleted_at` | string? | ISO 8601 삭제 시각 (soft-delete) |
 | `health_status` | string? | 최근 헬스체크 결과 |
+| `plugin_status` | object? | 플러그인 배포 상태 (`{"occm": "deployed", ...}`) |
+
+---
+
+## Cloud Provider OpenStack 플러그인
+
+k3s 클러스터는 Cloud Provider OpenStack 플러그인 레지스트리를 통해 다양한 OpenStack 서비스와 통합됩니다. 각 플러그인은 `config.toml [k3s]` 섹션에서 독립적으로 활성화할 수 있습니다.
+
+### 지원 플러그인
+
+| 플러그인 | 설정 키 | 배포 리소스 | 용도 |
+|---------|--------|-----------|------|
+| **OCCM** | `occm_enabled` | DaemonSet + RBAC | 노드 초기화, Service LB (Octavia) |
+| **Cinder CSI** | `cinder_csi_enabled` | StatefulSet + DaemonSet + CSIDriver | PVC → Cinder 블록 스토리지 |
+| **Manila CSI** | `manila_csi_enabled` | StatefulSet + DaemonSet + NFS CSI | PVC → Manila NFS (ReadWriteMany) |
+| **Octavia Ingress** | `octavia_ingress_enabled` | StatefulSet + IngressClass | Ingress → Octavia LB |
+| **Keystone Auth** | `keystone_auth_enabled` | Deployment + Service (8443) | K8s 인증 → Keystone 토큰 |
+| **Barbican KMS** | `barbican_kms_enabled` | DaemonSet (컨트롤 플레인) | K8s Secret at-rest 암호화 |
+
+### 플러그인 배포 메커니즘
+
+플러그인 레지스트리는 클러스터 생성 시 다음을 집계합니다:
+
+| 함수 | 결과 |
+|------|------|
+| `aggregate_cloud_conf()` | `/etc/kubernetes/cloud.conf` (OCCM + Cinder 공유 Secret) |
+| `aggregate_manifests()` | `/opt/k3s/{plugin}-manifests.yaml` |
+| `aggregate_server_args()` | K3s 설치 인자 (`--kube-apiserver-arg` 등) |
+
+cloud-init의 콜백 스크립트가 플러그인을 순차 배포하며, 결과를 `plugin_status` 필드로 보고합니다:
+
+```json
+{
+  "plugin_status": {
+    "occm": "deployed",
+    "cinder_csi": "deployed",
+    "manila_csi": "failed"
+  }
+}
+```
+
+### 클러스터 삭제 시 정리
+
+OCCM이 활성화된 클러스터 삭제 시, Kubernetes LoadBalancer 서비스가 생성한 Octavia LB가 orphan되지 않도록 자동 정리됩니다. `kube_service_{cluster_name}_` prefix로 매칭하여 cascade 삭제합니다. 실패 시 warning 로그 후 삭제 계속 진행 (best-effort).
+
+스케일 다운 시에도 VM 삭제 전 K8s 노드 오브젝트를 먼저 삭제하여 OCCM의 `failed to find object` 무한 재시도를 방지합니다.
+
+### config.toml 예시
+
+```toml
+[k3s]
+occm_enabled = true
+cinder_csi_enabled = true
+manila_csi_enabled = false
+octavia_ingress_enabled = false
+keystone_auth_enabled = false
+barbican_kms_enabled = false
+```

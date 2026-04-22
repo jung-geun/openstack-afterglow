@@ -240,3 +240,69 @@ sudo journalctl -u k3s-agent -n 50
 kubectl config set-cluster default \
   --server=https://<floating-ip>:6443
 ```
+
+---
+
+## Cloud Provider OpenStack Plugins
+
+k3s clusters integrate with various OpenStack services through the Cloud Provider OpenStack plugin registry. Each plugin can be independently enabled in the `config.toml [k3s]` section.
+
+### Supported Plugins
+
+| Plugin | Config Key | Purpose |
+|--------|-----------|---------|
+| **OCCM** (OpenStack Cloud Controller Manager) | `occm_enabled` | Node initialization, Service type LoadBalancer → automatic Octavia LB |
+| **Cinder CSI** | `cinder_csi_enabled` | PVC → automatic Cinder block storage provisioning |
+| **Manila CSI** | `manila_csi_enabled` | PVC → automatic Manila NFS (ReadWriteMany) provisioning |
+| **Octavia Ingress** | `octavia_ingress_enabled` | Ingress resource → automatic Octavia LB creation |
+| **Keystone Auth** | `keystone_auth_enabled` | Kubernetes authentication → Keystone token integration |
+| **Barbican KMS** | `barbican_kms_enabled` | Kubernetes Secret at-rest encryption → Barbican integration |
+
+### config.toml Example
+
+```toml
+[k3s]
+occm_enabled = true
+cinder_csi_enabled = true
+manila_csi_enabled = false
+octavia_ingress_enabled = false
+keystone_auth_enabled = false
+barbican_kms_enabled = false
+```
+
+### Plugin Deployment Process
+
+When a cluster is created, the plugin registry aggregates:
+
+1. **cloud.conf** — `/etc/kubernetes/cloud.conf` shared by OCCM and Cinder CSI (OpenStack credentials)
+2. **manifests** — Kubernetes manifest files for each plugin
+3. **server args** — K3s install arguments (e.g., `--kube-apiserver-arg`)
+
+The cloud-init callback script deploys plugins sequentially and reports the result in the `plugin_status` field:
+
+```json
+{
+  "plugin_status": {
+    "occm": "deployed",
+    "cinder_csi": "deployed",
+    "manila_csi": "failed"
+  }
+}
+```
+
+A plugin that fails to deploy is marked `failed`, but the cluster itself continues to operate normally.
+
+### Automatic Cleanup on Cluster Deletion
+
+When a cluster with OCCM enabled is deleted, any Octavia load balancers created by Kubernetes LoadBalancer services are automatically cleaned up to prevent orphaned resources:
+
+- All Octavia LBs matching the `kube_service_{cluster_name}_` prefix are cascade-deleted
+- On cleanup failure, a warning is logged and deletion continues (best-effort)
+
+### Node Cleanup on Scale-Down
+
+When scaling down worker nodes, Kubernetes node objects are deleted before the VMs are removed. This prevents OCCM from entering an infinite retry loop with `failed to find object` errors.
+
+### Checking kubeconfig Existence (HEAD)
+
+You can use `HEAD /api/k3s/clusters/{id}/kubeconfig` to check whether a kubeconfig file exists without downloading it. This is useful for verifying cluster readiness without transferring the full file.
