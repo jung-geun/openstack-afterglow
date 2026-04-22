@@ -21,7 +21,7 @@
 		delete_at: string;
 	}
 
-	const containerName = $derived(decodeURIComponent($page.params.name));
+	const containerName = $derived(decodeURIComponent($page.params.name ?? ''));
 	let objects = $state<ObjectItem[]>([]);
 	let loading = $state(true);
 	let prefix = $state('');
@@ -250,7 +250,7 @@
 		<!-- 오브젝트 메타데이터 패널 -->
 		{#if loadingMeta}
 			<div class="w-72 shrink-0 bg-gray-900 border border-gray-800 rounded-xl p-4">
-				<LoadingSkeleton variant="text" rows={6} />
+				<LoadingSkeleton variant="detail" rows={6} />
 			</div>
 		{:else if selectedMeta}
 			<div class="w-72 shrink-0 bg-gray-900 border border-gray-800 rounded-xl p-4 text-sm">

@@ -154,11 +154,11 @@
 	<div class="flex items-center gap-2 mb-2">
 		<a href="/admin/database-instances" class="text-gray-500 hover:text-gray-300 text-sm">DB 인스턴스</a>
 		<span class="text-gray-700">/</span>
-		<span class="text-white text-sm font-medium">{instance?.name ?? instanceId.slice(0, 8)}</span>
+		<span class="text-white text-sm font-medium">{instance?.name ?? instanceId?.slice(0, 8)}</span>
 	</div>
 
 	{#if loading}
-		<LoadingSkeleton variant="text" rows={8} />
+		<LoadingSkeleton variant="detail" rows={8} />
 	{:else if !instance}
 		<div class="text-gray-500 text-sm">인스턴스를 찾을 수 없습니다.</div>
 	{:else}

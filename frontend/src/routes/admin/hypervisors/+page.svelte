@@ -118,8 +118,8 @@
 				va = a.name;
 				vb = b.name;
 			} else {
-				va = (a as Record<string, number>)[sortColumn] ?? 0;
-				vb = (b as Record<string, number>)[sortColumn] ?? 0;
+				va = (a as unknown as Record<string, number>)[sortColumn] ?? 0;
+				vb = (b as unknown as Record<string, number>)[sortColumn] ?? 0;
 			}
 			const cmp = typeof va === 'string' ? va.localeCompare(vb as string) : (va as number) - (vb as number);
 			return sortAsc ? cmp : -cmp;
@@ -351,7 +351,7 @@
 								<div class="flex items-center justify-between py-1.5 border-b border-gray-800/50 last:border-0">
 									<div class="flex-1 min-w-0">
 										<div class="text-xs text-gray-300 truncate">{s.name || s.id.slice(0, 12)}</div>
-										<div class="text-xs text-gray-500">{$projectNames[s.project_id] || s.project_id.slice(0, 8)} · {s.flavor}</div>
+										<div class="text-xs text-gray-500">{$projectNames.get(s.project_id) || s.project_id.slice(0, 8)} · {s.flavor}</div>
 									</div>
 									<div class="flex items-center gap-1 ml-2 flex-shrink-0">
 										<span class="text-xs {s.status === 'ACTIVE' ? 'text-green-400' : s.status === 'ERROR' ? 'text-red-400' : 'text-gray-400'}">{s.status}</span>

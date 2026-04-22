@@ -41,6 +41,8 @@ export async function loadSiteConfig(): Promise<void> {
 			site_name: nameFromEnv || DEFAULTS.site_name,
 			site_description: descFromEnv || DEFAULTS.site_description,
 			logo_path: logoFromEnv || DEFAULTS.logo_path,
+			logo_dark_path: DEFAULTS.logo_dark_path,
+			logo_light_path: DEFAULTS.logo_light_path,
 			favicon_path: faviconFromEnv || DEFAULTS.favicon_path,
 			services: DEFAULTS.services,
 		});

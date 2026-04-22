@@ -21,8 +21,6 @@
 		object_storage_containers_count: number;
 	}
 
-	declare const __APP_VERSION__: string;
-
 	interface VersionInfo {
 		platform: { backend_version: string };
 		runtime: { python_version: string; uptime_seconds: number };

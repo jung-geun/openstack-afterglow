@@ -85,8 +85,8 @@
 					va = a.is_public ? 1 : 0;
 					vb = b.is_public ? 1 : 0;
 				} else {
-					va = (a as Record<string, unknown>)[sortColumn] as string | number;
-					vb = (b as Record<string, unknown>)[sortColumn] as string | number;
+					va = (a as unknown as Record<string, unknown>)[sortColumn] as string | number;
+					vb = (b as unknown as Record<string, unknown>)[sortColumn] as string | number;
 				}
 				const cmp = typeof va === 'string' ? va.localeCompare(vb as string) : (va as number) - (vb as number);
 				return sortAsc ? cmp : -cmp;

@@ -5,4 +5,4 @@
   const clusterId = $derived($page.params.id);
 </script>
 
-<K3sClusterDetailPanel {clusterId} />
+<K3sClusterDetailPanel clusterId={clusterId ?? ''} />

@@ -222,9 +222,7 @@ async def sanitized_http_exception_handler(request: Request, exc: HTTPException)
             request.url.path,
             exc.detail,
         )
-        return JSONResponse(
-            status_code=exc.status_code, content={"detail": "내부 서버 오류"}
-        )
+        return JSONResponse(status_code=exc.status_code, content={"detail": "내부 서버 오류"})
     return await _default_http_handler(request, exc)
 
 
@@ -248,14 +246,10 @@ async def security_headers_middleware(request: Request, call_next):
         return response
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Strict-Transport-Security"] = (
-        "max-age=31536000; includeSubDomains"
-    )
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-    response.headers["Content-Security-Policy"] = (
-        "default-src 'none'; frame-ancestors 'none'"
-    )
+    response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
     return response
 
 
@@ -339,36 +333,22 @@ app.include_router(flavors_router, prefix="/api/flavors", tags=["flavors"])
 app.include_router(instances_router, prefix="/api/instances", tags=["instances"])
 app.include_router(keypairs_router, prefix="/api/keypairs", tags=["keypairs"])
 # Storage (backups 먼저 등록 — /api/volumes/{id} catch-all 보다 앞에)
-app.include_router(
-    volume_backups_router, prefix="/api/volumes/backups", tags=["volume-backups"]
-)
-app.include_router(
-    volume_snapshots_router, prefix="/api/volume-snapshots", tags=["volume-snapshots"]
-)
+app.include_router(volume_backups_router, prefix="/api/volumes/backups", tags=["volume-backups"])
+app.include_router(volume_snapshots_router, prefix="/api/volume-snapshots", tags=["volume-snapshots"])
 app.include_router(volumes_router, prefix="/api/volumes", tags=["volumes"])
 # Network
 app.include_router(networks_router, prefix="/api/networks", tags=["networks"])
 app.include_router(routers_router, prefix="/api/routers", tags=["routers"])
-app.include_router(
-    loadbalancers_router, prefix="/api/loadbalancers", tags=["loadbalancers"]
-)
-app.include_router(
-    security_groups_router, prefix="/api/security-groups", tags=["security-groups"]
-)
+app.include_router(loadbalancers_router, prefix="/api/loadbalancers", tags=["loadbalancers"])
+app.include_router(security_groups_router, prefix="/api/security-groups", tags=["security-groups"])
 # Optional services — config.toml [services] 섹션에서 활성화
 from app.config import get_settings as _get_cfg
 
 _svc_cfg = _get_cfg()
 if _svc_cfg.service_manila_enabled:
-    app.include_router(
-        file_storage_router, prefix="/api/file-storage", tags=["file-storage"]
-    )
-    app.include_router(
-        share_snapshots_router, prefix="/api/share-snapshots", tags=["share-snapshots"]
-    )
-    app.include_router(
-        share_networks_router, prefix="/api/share-networks", tags=["share-networks"]
-    )
+    app.include_router(file_storage_router, prefix="/api/file-storage", tags=["file-storage"])
+    app.include_router(share_snapshots_router, prefix="/api/share-snapshots", tags=["share-snapshots"])
+    app.include_router(share_networks_router, prefix="/api/share-networks", tags=["share-networks"])
     app.include_router(
         security_services_router,
         prefix="/api/security-services",
@@ -380,30 +360,22 @@ if _svc_cfg.service_zun_enabled:
     app.include_router(containers_router, prefix="/api/containers", tags=["containers"])
 if _svc_cfg.service_k3s_enabled:
     app.include_router(k3s_clusters_router, prefix="/api/k3s/clusters", tags=["k3s"])
-    app.include_router(
-        k3s_health_router, prefix="/api/k3s/clusters", tags=["k3s-health"]
-    )
+    app.include_router(k3s_health_router, prefix="/api/k3s/clusters", tags=["k3s-health"])
     app.include_router(k3s_callback_router, prefix="/api/k3s", tags=["k3s-callback"])
 if _svc_cfg.service_trove_enabled:
     from app.api.database.instances import router as trove_router
 
-    app.include_router(
-        trove_router, prefix="/api/database-instances", tags=["database"]
-    )
+    app.include_router(trove_router, prefix="/api/database-instances", tags=["database"])
 if _svc_cfg.service_swift_enabled:
     from app.api.object_storage.containers import router as swift_router
 
-    app.include_router(
-        swift_router, prefix="/api/object-storage", tags=["object-storage"]
-    )
+    app.include_router(swift_router, prefix="/api/object-storage", tags=["object-storage"])
 # Common
 app.include_router(dashboard_router, prefix="/api/dashboard", tags=["dashboard"])
 app.include_router(metrics_router, prefix="/api/metrics", tags=["metrics"])
 app.include_router(libraries_router, prefix="/api/libraries", tags=["libraries"])
 app.include_router(site_router, prefix="/api/site-config", tags=["site"])
-app.include_router(
-    user_dashboard_router, prefix="/api/user-dashboard", tags=["user-dashboard"]
-)
+app.include_router(user_dashboard_router, prefix="/api/user-dashboard", tags=["user-dashboard"])
 
 
 @app.get("/api/health")
@@ -584,40 +556,24 @@ async def _run_notion_target_sync(target: dict) -> None:
     if gpu_spec_db_id:
         try:
             gpu_specs = get_gpu_spec_list()
-            await notion_sync.sync_gpu_specs_to_notion(
-                api_key, gpu_spec_db_id, gpu_specs
-            )
-            gpu_name_to_page_id = await notion_sync.fetch_gpu_spec_page_ids_by_name(
-                api_key, gpu_spec_db_id
-            )
+            await notion_sync.sync_gpu_specs_to_notion(api_key, gpu_spec_db_id, gpu_specs)
+            gpu_name_to_page_id = await notion_sync.fetch_gpu_spec_page_ids_by_name(api_key, gpu_spec_db_id)
         except Exception:
-            _logger.warning(
-                "Notion target %d GPU spec 동기화 오류", target_id, exc_info=True
-            )
+            _logger.warning("Notion target %d GPU spec 동기화 오류", target_id, exc_info=True)
 
     host_to_page_id: dict[str, str] = {}
     hypervisors: list[dict] = []
     if hypervisors_db_id:
         try:
-            hypervisors = await collect_hypervisor_data(
-                gpu_name_to_page_id=gpu_name_to_page_id
-            )
-            await notion_sync.sync_hypervisors_to_notion(
-                api_key, hypervisors_db_id, hypervisors
-            )
-            host_to_page_id = await notion_sync.fetch_hypervisor_page_ids_by_name(
-                api_key, hypervisors_db_id
-            )
+            hypervisors = await collect_hypervisor_data(gpu_name_to_page_id=gpu_name_to_page_id)
+            await notion_sync.sync_hypervisors_to_notion(api_key, hypervisors_db_id, hypervisors)
+            host_to_page_id = await notion_sync.fetch_hypervisor_page_ids_by_name(api_key, hypervisors_db_id)
         except Exception:
-            _logger.warning(
-                "Notion target %d 하이퍼바이저 동기화 오류", target_id, exc_info=True
-            )
+            _logger.warning("Notion target %d 하이퍼바이저 동기화 오류", target_id, exc_info=True)
 
     email_to_page_id: dict[str, str] = {}
     if users_db_id:
-        email_to_page_id = await notion_sync.fetch_user_page_ids_by_email(
-            api_key, users_db_id
-        )
+        email_to_page_id = await notion_sync.fetch_user_page_ids_by_email(api_key, users_db_id)
 
     instances = await collect_instance_data(
         email_to_page_id=email_to_page_id,
@@ -670,13 +626,9 @@ async def _run_notion_target_sync(target: dict) -> None:
     if gpu_spec_db_id and usage_by_gpu:
         try:
             gpu_specs = get_gpu_spec_list()
-            await notion_sync.sync_gpu_specs_to_notion(
-                api_key, gpu_spec_db_id, gpu_specs, usage_by_gpu=usage_by_gpu
-            )
+            await notion_sync.sync_gpu_specs_to_notion(api_key, gpu_spec_db_id, gpu_specs, usage_by_gpu=usage_by_gpu)
         except Exception:
-            _logger.warning(
-                "Notion target %d GPU spec 집계 업데이트 오류", target_id, exc_info=True
-            )
+            _logger.warning("Notion target %d GPU spec 집계 업데이트 오류", target_id, exc_info=True)
 
     await notion_sync.sync_to_notion(api_key, database_id, instances)
 
@@ -689,9 +641,7 @@ async def _run_notion_target_sync(target: dict) -> None:
             "gpu_spec_last_sync": now_iso if gpu_spec_db_id else None,
         },
     )
-    _logger.info(
-        "Notion target %d 동기화 완료 (instances=%d)", target_id, len(instances)
-    )
+    _logger.info("Notion target %d 동기화 완료 (instances=%d)", target_id, len(instances))
 
 
 async def _notion_sync_loop() -> None:
@@ -723,9 +673,7 @@ async def _notion_sync_loop() -> None:
                     interval_min = target.get("interval_minutes", 5)
                     if last_sync_str:
                         try:
-                            last_sync_dt = datetime.fromisoformat(
-                                last_sync_str.replace("Z", "+00:00")
-                            )
+                            last_sync_dt = datetime.fromisoformat(last_sync_str.replace("Z", "+00:00"))
                             elapsed_min = (now - last_sync_dt).total_seconds() / 60
                             if elapsed_min < interval_min:
                                 continue
@@ -734,9 +682,7 @@ async def _notion_sync_loop() -> None:
                     try:
                         await _run_notion_target_sync(target)
                     except Exception:
-                        _logger.warning(
-                            "Notion target %d 동기화 오류", target["id"], exc_info=True
-                        )
+                        _logger.warning("Notion target %d 동기화 오류", target["id"], exc_info=True)
 
                 await asyncio.sleep(60)
                 continue
@@ -754,16 +700,10 @@ async def _notion_sync_loop() -> None:
                 if gpu_spec_db_id:
                     try:
                         gpu_specs = get_gpu_spec_list()
-                        await notion_sync.sync_gpu_specs_to_notion(
-                            api_key, gpu_spec_db_id, gpu_specs
-                        )
+                        await notion_sync.sync_gpu_specs_to_notion(api_key, gpu_spec_db_id, gpu_specs)
                         config["gpu_spec_last_sync"] = datetime.now(UTC).isoformat()
                         # 동기화 후 page_id 맵 구축 (인스턴스 relation 설정에 사용)
-                        gpu_name_to_page_id = (
-                            await notion_sync.fetch_gpu_spec_page_ids_by_name(
-                                api_key, gpu_spec_db_id
-                            )
-                        )
+                        gpu_name_to_page_id = await notion_sync.fetch_gpu_spec_page_ids_by_name(api_key, gpu_spec_db_id)
                     except Exception:
                         _logger.warning("Notion GPU spec 동기화 오류", exc_info=True)
 
@@ -772,29 +712,19 @@ async def _notion_sync_loop() -> None:
                 hypervisors: list[dict] = []
                 if hypervisors_db_id:
                     try:
-                        hypervisors = await collect_hypervisor_data(
-                            gpu_name_to_page_id=gpu_name_to_page_id
-                        )
-                        await notion_sync.sync_hypervisors_to_notion(
-                            api_key, hypervisors_db_id, hypervisors
-                        )
+                        hypervisors = await collect_hypervisor_data(gpu_name_to_page_id=gpu_name_to_page_id)
+                        await notion_sync.sync_hypervisors_to_notion(api_key, hypervisors_db_id, hypervisors)
                         config["hypervisors_last_sync"] = datetime.now(UTC).isoformat()
-                        host_to_page_id = (
-                            await notion_sync.fetch_hypervisor_page_ids_by_name(
-                                api_key, hypervisors_db_id
-                            )
+                        host_to_page_id = await notion_sync.fetch_hypervisor_page_ids_by_name(
+                            api_key, hypervisors_db_id
                         )
                     except Exception:
-                        _logger.warning(
-                            "Notion 하이퍼바이저 동기화 오류", exc_info=True
-                        )
+                        _logger.warning("Notion 하이퍼바이저 동기화 오류", exc_info=True)
 
                 # 2. People DB에서 이메일 → page_id 맵 구축
                 email_to_page_id: dict[str, str] = {}
                 if users_db_id:
-                    email_to_page_id = await notion_sync.fetch_user_page_ids_by_email(
-                        api_key, users_db_id
-                    )
+                    email_to_page_id = await notion_sync.fetch_user_page_ids_by_email(api_key, users_db_id)
 
                 # 3. 인스턴스 수집 (GPU spec relation page_id 포함)
                 instances = await collect_instance_data(
@@ -844,9 +774,7 @@ async def _notion_sync_loop() -> None:
                         }
                     usage_by_gpu[canonical]["total_cpu_used"] += inst.get("vcpus", 0)
                     usage_by_gpu[canonical]["total_ram_used"] += inst.get("ram_gb", 0)
-                    usage_by_gpu[canonical]["total_gpu_used"] += inst.get(
-                        "gpu_count", 0
-                    )
+                    usage_by_gpu[canonical]["total_gpu_used"] += inst.get("gpu_count", 0)
                     usage_by_gpu[canonical]["instance_count"] += 1
                     usage_by_gpu[canonical]["gpu_used"] += inst.get("gpu_count", 0)
 
@@ -866,23 +794,17 @@ async def _notion_sync_loop() -> None:
                         )
                         config["gpu_spec_last_sync"] = datetime.now(UTC).isoformat()
                     except Exception:
-                        _logger.warning(
-                            "Notion GPU spec 집계 업데이트 오류", exc_info=True
-                        )
+                        _logger.warning("Notion GPU spec 집계 업데이트 오류", exc_info=True)
 
                 # 6. 인스턴스 동기화
-                await notion_sync.sync_to_notion(
-                    api_key, config["database_id"], instances
-                )
+                await notion_sync.sync_to_notion(api_key, config["database_id"], instances)
                 config["last_sync"] = datetime.now(UTC).isoformat()
 
                 await notion_sync.save_notion_config(config)
 
                 # 7. 한국어 마이그레이션 (Redis 플래그로 1회만 실행)
                 try:
-                    await notion_sync.migrate_instance_db_to_korean(
-                        api_key, config["database_id"]
-                    )
+                    await notion_sync.migrate_instance_db_to_korean(api_key, config["database_id"])
                 except Exception:
                     _logger.warning("Notion DB 한국어 마이그레이션 오류", exc_info=True)
 
@@ -925,9 +847,7 @@ async def _auto_backup_loop() -> None:
                     if not project_id or not volume_id:
                         continue
                     try:
-                        conn = await asyncio.to_thread(
-                            get_admin_connection_for_project, project_id
-                        )
+                        conn = await asyncio.to_thread(get_admin_connection_for_project, project_id)
                         await _ab.run_backup_cycle(conn, project_id, volume_id, cfg)
                     except Exception:
                         _logger.warning(

@@ -66,21 +66,6 @@
 		container: 'zun',
 	};
 
-	let visibleTabs = $derived(
-		tabs.filter(tab => {
-			const serviceKey = serviceTabMap[tab.key];
-			if (!serviceKey) return true;
-			return ($siteConfig?.services as Record<string, boolean>)?.[serviceKey] ?? false;
-		})
-	);
-
-	let activeCategories = $derived(
-		allCategories.filter(cat => {
-			const serviceKey = serviceTabMap[cat];
-			if (!serviceKey) return true;
-			return ($siteConfig?.services as Record<string, boolean>)?.[serviceKey] ?? false;
-		})
-	);
 	let loadingMap = $state<Record<TabKey, boolean>>(Object.fromEntries(allCategories.map(c => [c, true])) as Record<TabKey, boolean>);
 
 	let autoRefresh = $state(true);
@@ -102,6 +87,22 @@
 		{ key: 'endpoints', label: 'API Endpoints', count: () => endpoints.length },
 		{ key: 'storage_pools', label: 'Storage Pools', count: () => storagePools.length },
 	];
+
+	let visibleTabs = $derived(
+		tabs.filter(tab => {
+			const serviceKey = serviceTabMap[tab.key];
+			if (!serviceKey) return true;
+			return ($siteConfig?.services as Record<string, boolean>)?.[serviceKey] ?? false;
+		})
+	);
+
+	let activeCategories = $derived(
+		allCategories.filter(cat => {
+			const serviceKey = serviceTabMap[cat];
+			if (!serviceKey) return true;
+			return ($siteConfig?.services as Record<string, boolean>)?.[serviceKey] ?? false;
+		})
+	);
 
 	async function loadCategory(cat: TabKey, isRefresh = false) {
 		if (!isRefresh) loadingMap[cat] = true;
