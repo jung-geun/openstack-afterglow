@@ -533,6 +533,11 @@
 				<div class="text-sm text-gray-400">Flavor</div>
 				<div class="text-white font-medium">{selectedFlavor.name}</div>
 				<div class="text-xs text-gray-500">{selectedFlavor.vcpus} VCPU / {formatRam(selectedFlavor.ram)} / {selectedFlavor.disk} GB</div>
+				<button
+					onclick={() => navigator.clipboard.writeText(selectedFlavor!.id)}
+					class="mt-1 text-xs text-gray-500 font-mono hover:text-gray-300 transition-colors cursor-pointer select-all"
+					title="클릭하여 ID 복사"
+				>{selectedFlavor.id}</button>
 			</div>
 
 			<!-- 탭 -->

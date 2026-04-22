@@ -205,7 +205,7 @@
 			allSecurityGroups = sgData.security_groups;
 			const attachedIds = new Set(vols.map(v => v.volume_id));
 			availableVolumes = allVols.filter(v => v.status === 'available' && !attachedIds.has(v.id));
-			availableNetworks = nets.filter(n => !n.is_external);
+			availableNetworks = nets;
 			ownerDisplay = ownerData.display || '';
 		} catch (e) {
 			error = e instanceof ApiError ? `조회 실패 (${e.status}): ${e.message}` : '서버 오류';

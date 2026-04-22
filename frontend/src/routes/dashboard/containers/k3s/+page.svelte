@@ -41,6 +41,7 @@
   interface Network {
     id: string;
     name: string;
+    is_external: boolean;
   }
 
   interface Keypair {
@@ -96,7 +97,7 @@
   let showModal = $state(false);
   let creating = $state(false);
   let createError = $state('');
-  let form = $state({ name: '', agent_count: 1, agent_flavor_id: '', network_id: '', key_name: '' });
+  let form = $state({ name: '', agent_count: 1, agent_flavor_id: '', network_id: '', key_name: '', api_lb_enabled: false, api_lb_network_id: '' });
 
   // SSE 진행률
   let showProgress = $state(false);
@@ -127,7 +128,7 @@
 
   async function openCreateModal() {
     showModal = true;
-    form = { name: '', agent_count: 1, agent_flavor_id: '', network_id: '', key_name: '' };
+    form = { name: '', agent_count: 1, agent_flavor_id: '', network_id: '', key_name: '', api_lb_enabled: false, api_lb_network_id: '' };
     createError = '';
     try {
       [flavors, networks, keypairs] = await Promise.all([
@@ -135,6 +136,9 @@
         api.get<Network[]>('/api/networks', token, projectId),
         api.get<Keypair[]>('/api/keypairs', token, projectId),
       ]);
+      // 기본 tenant 네트워크(Default) 자동 선택
+      const defaultNet = networks.find(n => !n.is_external && (n.name === 'Default' || n.name === 'default'));
+      if (defaultNet) form.network_id = defaultNet.id;
     } catch {
       flavors = []; networks = []; keypairs = [];
     }
@@ -168,6 +172,8 @@
           ...(form.agent_flavor_id ? { agent_flavor_id: form.agent_flavor_id } : {}),
           ...(form.network_id ? { network_id: form.network_id } : {}),
           ...(form.key_name ? { key_name: form.key_name } : {}),
+          api_lb_enabled: form.api_lb_enabled,
+          ...(form.api_lb_network_id ? { api_lb_network_id: form.api_lb_network_id } : {}),
         }),
       });
 
@@ -307,11 +313,34 @@
             <select bind:value={form.network_id}
               class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5">
               <option value="">기본값 사용</option>
-              {#each networks as n}
+              {#each networks.filter(n => !n.is_external) as n}
                 <option value={n.id}>{n.name || n.id.slice(0,12)}</option>
               {/each}
             </select>
           </label>
+        </div>
+        <div class="border border-gray-700 rounded-lg p-3">
+          <label class="flex items-center gap-3 cursor-pointer">
+            <div class="relative">
+              <input type="checkbox" bind:checked={form.api_lb_enabled} class="sr-only" />
+              <div class="w-9 h-5 rounded-full transition-colors {form.api_lb_enabled ? 'bg-blue-600' : 'bg-gray-600'}"></div>
+              <div class="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform {form.api_lb_enabled ? 'translate-x-4' : ''}"></div>
+            </div>
+            <span class="text-sm text-gray-300">외부 로드밸런서 사용</span>
+          </label>
+          <div class="text-xs text-gray-500 mt-1 ml-12">API 서버(6443)에 Octavia LB + Floating IP 연결</div>
+          {#if form.api_lb_enabled}
+            <div class="mt-3">
+              <div class="text-xs text-gray-400 mb-1">LB Floating IP 네트워크</div>
+              <select bind:value={form.api_lb_network_id}
+                class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
+                <option value="">서버 기본값 사용</option>
+                {#each networks.filter(n => n.is_external) as n}
+                  <option value={n.id}>{n.name || n.id.slice(0,12)}</option>
+                {/each}
+              </select>
+            </div>
+          {/if}
         </div>
         <div>
           <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">키페어 (선택)

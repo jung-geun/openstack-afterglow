@@ -270,8 +270,9 @@ async def create_k3s_cluster_async(
 
             # --- Step 1.5: API LB + Floating IP (설정 시) ---
             extra_tls_sans: list[str] = []
-            if s.k3s_api_lb_enabled:
-                fip_net_id = s.k3s_api_lb_floating_network_id or s.k3s_occm_floating_network_id
+            use_api_lb = req.api_lb_enabled if req.api_lb_enabled is not None else s.k3s_api_lb_enabled
+            if use_api_lb:
+                fip_net_id = req.api_lb_network_id or s.k3s_api_lb_floating_network_id or s.k3s_occm_floating_network_id
                 if not fip_net_id:
                     raise RuntimeError(
                         "k3s_api_lb_enabled=true 이나 floating network ID가 설정되지 않았습니다 "
