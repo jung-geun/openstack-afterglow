@@ -15,7 +15,7 @@ spec:
   source:
     repoURL: "https://github.com/jung-geun/openstack-afterglow.git"
     targetRevision: main
-    path: deploy/k8s/overlays/prod
+    path: deploy/k8s-template/overlays/prod
   destination:
     server: "https://kubernetes.default.svc"
     namespace: afterglow

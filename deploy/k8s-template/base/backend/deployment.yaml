@@ -1,0 +1,120 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: afterglow
+  labels:
+    app: backend
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: backend
+          image: ghcr.io/jung-geun/afterglow-api:latest
+          imagePullPolicy: Always
+          command:
+            [
+              "uvicorn",
+              "app.main:app",
+              "--host",
+              "0.0.0.0",
+              "--port",
+              "8000",
+              "--workers",
+              "2",
+              "--timeout-keep-alive",
+              "65",
+              "--loop",
+              "uvloop",
+              "--http",
+              "httptools",
+            ]
+          ports:
+            - containerPort: 8000
+          env:
+            - name: REDIS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: afterglow-config
+                  key: APP_REDIS_URL
+            - name: OS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: afterglow-secrets
+                  key: OS_PASSWORD
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: afterglow-secrets
+                  key: SECRET_KEY
+            - name: GITLAB_OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: afterglow-secrets
+                  key: GITLAB_OIDC_CLIENT_SECRET
+            - name: K3S_KUBECONFIG_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: afterglow-secrets
+                  key: K3S_KUBECONFIG_ENCRYPTION_KEY
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: afterglow-secrets
+                  key: DATABASE_URL
+          volumeMounts:
+            - name: afterglow-config-volume
+              mountPath: /app/config.toml
+              subPath: config.toml
+          # startupProbe: 시작 완료까지 최대 3 + 20*2 = 43초 허용
+          # startupProbe:
+          #   httpGet:
+          #     path: /api/health
+          #     port: 8000
+          #   initialDelaySeconds: 3
+          #   periodSeconds: 2
+          #   failureThreshold: 20
+          #   timeoutSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 180
+            periodSeconds: 30
+            failureThreshold: 3
+            timeoutSeconds: 5
+          # readinessProbe:
+          #   httpGet:
+          #     path: /api/health
+          #     port: 8000
+          #   periodSeconds: 5
+          #   failureThreshold: 2
+          #   timeoutSeconds: 5
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "500m"
+            limits:
+              memory: "1Gi"
+              cpu: "4"
+      volumes:
+        - name: afterglow-config-volume
+          configMap:
+            name: afterglow-config
+            items:
+              - key: config.toml
+                path: config.toml
