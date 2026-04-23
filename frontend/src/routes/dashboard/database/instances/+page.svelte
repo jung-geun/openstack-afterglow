@@ -59,12 +59,6 @@
 
 	const selectedDs = $derived(datastores.find((d) => d.name === form.datastore_type));
 
-	$effect(() => {
-		const ds = datastores.find((d) => d.name === form.datastore_type);
-		if (ds?.versions.length) {
-			form.datastore_version = ds.versions[0].name;
-		}
-	});
 
 	async function load() {
 		loading = true;
@@ -89,22 +83,25 @@
 	}
 
 	async function openModal() {
-		showModal = true;
 		createError = '';
-		form = { name: '', flavor_id: '', volume_size: 5, datastore_type: '', datastore_version: '' };
 		try {
 			[flavors, datastores] = await Promise.all([
 				api.get<DbFlavor[]>('/api/database-instances/flavors', token, projectId),
 				api.get<Datastore[]>('/api/database-instances/datastores', token, projectId),
 			]);
-			if (flavors.length) form.flavor_id = flavors[0].id;
-			if (datastores.length) {
-				form.datastore_type = datastores[0].name;
-				if (datastores[0].versions.length) form.datastore_version = datastores[0].versions[0].name;
-			}
-		} catch {
-			// 목록 로드 실패는 무시 — 직접 입력 가능
+		} catch (e) {
+			createError = '플레이버/데이터스토어 목록을 불러오지 못했습니다. 네트워크 상태를 확인하세요.';
+			console.error('플레이버/데이터스토어 조회 실패:', e);
 		}
+		form = {
+			name: '',
+			flavor_id: flavors.length ? flavors[0].id : '',
+			volume_size: 5,
+			datastore_type: datastores.length ? datastores[0].name : '',
+			datastore_version: (datastores.length && datastores[0].versions.length)
+				? datastores[0].versions[0].name : '',
+		};
+		showModal = true;
 	}
 
 	async function createInstance() {
@@ -192,6 +189,10 @@
 					<div>
 						<label class="block text-xs text-gray-400 mb-1">데이터스토어</label>
 						<select bind:value={form.datastore_type}
+							onchange={() => {
+								const ds = datastores.find(d => d.name === form.datastore_type);
+								form.datastore_version = ds?.versions.length ? ds.versions[0].name : '';
+							}}
 							class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500">
 							{#each datastores as ds}
 								<option value={ds.name}>{ds.name}</option>
@@ -208,6 +209,8 @@
 								{/each}
 							</select>
 						</div>
+					{:else if selectedDs}
+						<p class="text-xs text-amber-400">이 데이터스토어에 사용 가능한 버전이 없습니다.</p>
 					{/if}
 				{:else}
 					<div class="grid grid-cols-2 gap-2">

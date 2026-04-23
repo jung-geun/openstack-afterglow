@@ -74,14 +74,14 @@
 			newName = '';
 			await load();
 		} catch (e) {
-			createError = e instanceof ApiError ? e.message : '컨테이너 생성 실패';
+			createError = e instanceof ApiError ? e.message : '버킷 생성 실패';
 		} finally {
 			creating = false;
 		}
 	}
 
 	async function deleteContainer(name: string) {
-		if (!confirm(`컨테이너 "${name}"를 삭제하시겠습니까? 비어있어야 삭제됩니다.`)) return;
+		if (!confirm(`버킷 "${name}"를 삭제하시겠습니까? 비어있어야 삭제됩니다.`)) return;
 		deleting = name;
 		try {
 			await api.delete(`/api/object-storage/${encodeURIComponent(name)}`, token, projectId);
@@ -122,7 +122,7 @@
 			role="none"
 			onkeydown={(e) => e.stopPropagation()}
 		>
-			<h2 class="text-lg font-semibold text-white mb-4">컨테이너 생성</h2>
+			<h2 class="text-lg font-semibold text-white mb-4">버킷 생성</h2>
 			<div class="space-y-3">
 				<div>
 					<label class="block text-xs text-gray-400 mb-1">이름</label>
@@ -154,14 +154,14 @@
 {/if}
 
 <div class="p-4 md:p-8 max-w-6xl">
-	<PageHeader breadcrumb="OBJECT STORAGE / CONTAINERS" title="컨테이너">
+	<PageHeader breadcrumb="OBJECT STORAGE / BUCKETS" title="버킷">
 		{#snippet actions()}
 			<AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={10} />
 			<RefreshButton {refreshing} onclick={forceRefresh} />
 			<button
 				onclick={() => { showModal = true; createError = ''; newName = ''; }}
 				class="text-xs text-white bg-indigo-600 hover:bg-indigo-500 transition-colors px-3 py-1.5 rounded border border-indigo-500"
-			>+ 컨테이너 생성</button>
+			>+ 버킷 생성</button>
 		{/snippet}
 	</PageHeader>
 
@@ -172,7 +172,7 @@
 			{/each}
 		</div>
 	{:else if containers.length === 0}
-		<div class="text-gray-600 text-sm py-20 text-center">컨테이너가 없습니다</div>
+		<div class="text-gray-600 text-sm py-20 text-center">버킷이 없습니다</div>
 	{:else}
 		<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
 			{#each containers as c}
@@ -205,7 +205,7 @@
 					<!-- Footer -->
 					<div class="pt-3 border-t border-gray-800 flex items-center justify-between">
 						<a
-							href="/dashboard/object-storage/containers/{encodeURIComponent(c.name)}"
+							href="/dashboard/object-storage/buckets/{encodeURIComponent(c.name)}"
 							class="text-xs text-blue-400 hover:text-blue-300 transition-colors"
 						>상세 보기 →</a>
 						<button

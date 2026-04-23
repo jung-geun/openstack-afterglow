@@ -132,9 +132,9 @@
         {/snippet}
       </StatTile>
 
-      <!-- k3s 클러스터 -->
+      <!-- Drover 클러스터 -->
       <StatTile
-        label="k3s 클러스터"
+        label="Drover 클러스터"
         value={k3sCount ?? '—'}
         unit={k3sCount !== null ? '활성' : undefined}
         accent="emerald"

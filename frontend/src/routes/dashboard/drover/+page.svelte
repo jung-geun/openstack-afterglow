@@ -62,12 +62,12 @@
 
   function openClusterPanel(id: string) {
     selectedClusterId = id;
-    history.pushState({ clusterId: id }, '', `/dashboard/containers/k3s/${id}`);
+    history.pushState({ clusterId: id }, '', `/dashboard/drover/${id}`);
   }
 
   function closeClusterPanel() {
     selectedClusterId = null;
-    history.pushState({}, '', '/dashboard/containers/k3s');
+    history.pushState({}, '', '/dashboard/drover');
   }
 
   $effect(() => {
@@ -216,7 +216,7 @@
   }
 
   async function deleteCluster(id: string, name: string) {
-    if (!confirm(`k3s 클러스터 "${name}"을 삭제하시겠습니까?\n모든 VM과 보안 그룹이 삭제됩니다.`)) return;
+    if (!confirm(`Drover 클러스터 "${name}"을 삭제하시겠습니까?\n모든 VM과 보안 그룹이 삭제됩니다.`)) return;
     deleting = id;
     try {
       await api.delete(`/api/k3s/clusters/${id}`, token, projectId);
@@ -283,7 +283,7 @@
     onkeydown={(e) => e.key === 'Escape' && (showModal = false)}>
     <div class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-lg mx-4 shadow-2xl"
       onclick={(e) => e.stopPropagation()} role="none" onkeydown={(e) => e.stopPropagation()}>
-      <h2 class="text-lg font-semibold text-white mb-5">k3s 클러스터 생성</h2>
+      <h2 class="text-lg font-semibold text-white mb-5">Drover 클러스터 생성</h2>
       <div class="space-y-4">
         <div>
           <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">클러스터 이름
@@ -373,7 +373,7 @@
 {#if showProgress}
   <div class="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
     <div class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl">
-      <h2 class="text-lg font-semibold text-white mb-4">k3s 클러스터 생성</h2>
+      <h2 class="text-lg font-semibold text-white mb-4">Drover 클러스터 생성</h2>
       <!-- 스텝 표시 -->
       <div class="space-y-2 mb-4">
         {#each K3S_STEPS as step}
@@ -422,7 +422,7 @@
 {/if}
 
 <div class="p-4 md:p-8">
-  <PageHeader breadcrumb="CONTAINERS / K3S" title="k3s 클러스터">
+  <PageHeader breadcrumb="CONTAINERS / K3S" title="Drover 클러스터">
     {#snippet actions()}
       <button
         onclick={() => { showDeleted = !showDeleted; fetchClusters(); }}
@@ -454,7 +454,7 @@
   {:else if clusters.length === 0}
     <div class="text-center py-20 text-gray-600">
       <div class="text-5xl mb-4">☸</div>
-      <p class="text-lg">k3s 클러스터가 없습니다</p>
+      <p class="text-lg">Drover 클러스터가 없습니다</p>
       <button onclick={openCreateModal} class="text-blue-400 hover:text-blue-300 text-sm mt-2 inline-block">
         첫 클러스터를 생성하세요 →
       </button>

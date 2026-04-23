@@ -12,7 +12,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.api.deps import get_os_conn
-from app.models.storage import CreateContainerRequest
+from app.models.storage import (
+    BulkDeleteRequest,
+    CopyObjectRequest,
+    CreateContainerRequest,
+    CreateDirectoryRequest,
+    MoveObjectRequest,
+    RenameObjectRequest,
+)
 
 router = APIRouter()
 _logger = logging.getLogger(__name__)
@@ -111,13 +118,18 @@ async def delete_object_storage_container(
 async def list_objects(
     container_name: str,
     prefix: str = Query(default=""),
+    delimiter: str = Query(default="/"),
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    """컨테이너 내 오브젝트 목록."""
+    """컨테이너 내 오브젝트 목록.
+
+    delimiter="/"(기본값)를 사용하면 현재 prefix의 직속 파일과 서브디렉토리만 반환한다.
+    delimiter=""로 요청하면 모든 오브젝트를 flat하게 반환한다.
+    """
     from app.services import swift
 
     try:
-        return await asyncio.to_thread(swift.list_objects, conn, container_name, prefix)
+        return await asyncio.to_thread(swift.list_objects, conn, container_name, prefix, delimiter)
     except Exception:
         raise HTTPException(status_code=500, detail="오브젝트 목록 조회 실패")
 
@@ -237,3 +249,153 @@ async def get_object_metadata(
         return await asyncio.to_thread(swift.get_object_metadata, conn, container_name, object_name)
     except Exception:
         raise HTTPException(status_code=404, detail="오브젝트를 찾을 수 없습니다")
+
+
+@router.get("/{container_name}/objects/{object_name:path}/preview")
+async def preview_object(
+    container_name: str,
+    object_name: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """오브젝트 인라인 미리보기 (Content-Disposition: inline)."""
+    from app.services import swift
+
+    try:
+        chunks, content_type, content_length = await asyncio.to_thread(
+            swift.stream_object, conn, container_name, object_name
+        )
+        filename = urllib.parse.quote(object_name.split("/")[-1])
+        headers: dict[str, str] = {
+            "Content-Disposition": f'inline; filename="{filename}"',
+        }
+        if content_length:
+            headers["Content-Length"] = str(content_length)
+
+        sentinel = object()
+
+        def _next_chunk():
+            return next(chunks, sentinel)
+
+        async def _iter():
+            while True:
+                chunk = await asyncio.to_thread(_next_chunk)
+                if chunk is sentinel:
+                    break
+                yield chunk
+
+        return StreamingResponse(_iter(), media_type=content_type, headers=headers)
+    except Exception:
+        raise HTTPException(status_code=404, detail="오브젝트를 찾을 수 없습니다")
+
+
+# ---------------------------------------------------------------------------
+# 일괄 삭제
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{container_name}/objects/bulk-delete", status_code=200)
+async def bulk_delete_objects(
+    container_name: str,
+    body: BulkDeleteRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """오브젝트 일괄 삭제.
+
+    recursive=True이면 디렉토리(`/`로 끝나는) 하위 전체를 삭제한다.
+    반환: {"deleted": [...], "failed": [{"name": ..., "error": ...}]}
+    """
+    from app.services import swift
+
+    try:
+        result = await asyncio.to_thread(
+            swift.bulk_delete_objects, conn, container_name, body.objects, body.recursive
+        )
+        return result
+    except Exception:
+        raise HTTPException(status_code=500, detail="일괄 삭제 실패")
+
+
+# ---------------------------------------------------------------------------
+# 디렉토리 / 복사 / 이동 / 이름 변경
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{container_name}/objects/directory", status_code=201)
+async def create_directory(
+    container_name: str,
+    body: CreateDirectoryRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """가상 디렉토리 생성."""
+    from app.services import swift
+
+    try:
+        return await asyncio.to_thread(swift.create_directory, conn, container_name, body.path)
+    except Exception:
+        _logger.exception("디렉토리 생성 실패: container=%s path=%s", container_name, body.path)
+        raise HTTPException(status_code=500, detail="디렉토리 생성 실패")
+
+
+@router.post("/{container_name}/objects/copy", status_code=200)
+async def copy_object(
+    container_name: str,
+    body: CopyObjectRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """오브젝트 복사."""
+    from app.services import swift
+
+    dest_container = body.dest_container or container_name
+    try:
+        return await asyncio.to_thread(
+            swift.copy_object, conn, container_name, body.source, dest_container, body.destination
+        )
+    except Exception:
+        _logger.exception("오브젝트 복사 실패: %s -> %s", body.source, body.destination)
+        raise HTTPException(status_code=500, detail="오브젝트 복사 실패")
+
+
+@router.post("/{container_name}/objects/move", status_code=200)
+async def move_object(
+    container_name: str,
+    body: MoveObjectRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """오브젝트 이동.
+
+    destination이 "/"로 끝나는 디렉토리 경로인 경우 원본 파일명을 자동으로 추가한다.
+    예: source="a/b.txt", destination="folder/" → dest_name="folder/b.txt"
+    """
+    from app.services import swift
+
+    dest_container = body.dest_container or container_name
+    dest_name = body.destination
+    # 디렉토리 경로로 이동할 경우 원본 파일명 유지
+    if dest_name.endswith("/"):
+        original_filename = body.source.rsplit("/", 1)[-1]
+        dest_name = dest_name + original_filename
+    try:
+        return await asyncio.to_thread(
+            swift.move_object, conn, container_name, body.source, dest_container, dest_name
+        )
+    except Exception:
+        _logger.exception("오브젝트 이동 실패: %s -> %s", body.source, body.destination)
+        raise HTTPException(status_code=500, detail="오브젝트 이동 실패")
+
+
+@router.post("/{container_name}/objects/rename", status_code=200)
+async def rename_object(
+    container_name: str,
+    body: RenameObjectRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """오브젝트 이름 변경."""
+    from app.services import swift
+
+    try:
+        return await asyncio.to_thread(
+            swift.rename_object, conn, container_name, body.source, body.new_name
+        )
+    except Exception:
+        _logger.exception("오브젝트 이름 변경 실패: %s -> %s", body.source, body.new_name)
+        raise HTTPException(status_code=500, detail="오브젝트 이름 변경 실패")

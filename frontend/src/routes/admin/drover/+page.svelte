@@ -65,7 +65,7 @@
 {/if}
 
 <div class="p-4 md:p-8 max-w-7xl">
-	<PageHeader breadcrumb="CONTAINERS / K3S" title="k3s 클러스터">
+	<PageHeader breadcrumb="DROVER" title="Drover 클러스터">
 		{#snippet actions()}
 			<button onclick={load} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
 		{/snippet}
@@ -74,7 +74,7 @@
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={5} />
 	{:else if clusters.length === 0}
-		<div class="text-gray-600 text-sm">k3s 클러스터가 없습니다</div>
+		<div class="text-gray-600 text-sm">Drover 클러스터가 없습니다</div>
 	{:else}
 		<div class="overflow-x-auto">
 			<table class="w-full text-sm">

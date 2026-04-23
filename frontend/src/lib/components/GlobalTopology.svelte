@@ -162,6 +162,9 @@
 
 			if (router.external_gateway_network_id) {
 				netSet.add(router.external_gateway_network_id);
+				if (router.external_gateway_ips?.length) {
+					netIps.set(router.external_gateway_network_id, [...router.external_gateway_ips]);
+				}
 			}
 			for (const sid of router.connected_subnet_ids) {
 				const nid = subnetNetId.get(sid);

@@ -22,8 +22,47 @@ from app.services import manila
 
 _logger = logging.getLogger(__name__)
 
-# 빌드 중인 작업 추적 {library_id: {share_id, server_id, status}}
+# 빌드 중인 작업 추적 {library_id: {share_id, server_id, status}} (인메모리 캐시, DB가 원본)
 _active_builds: dict[str, dict] = {}
+
+
+async def _update_build_db(
+    build_id: int,
+    *,
+    status: str | None = None,
+    progress_step: str | None = None,
+    progress_pct: int | None = None,
+    server_id: str | None = None,
+    error_message: str | None = None,
+    completed: bool = False,
+) -> None:
+    """DB의 library_builds 행을 업데이트한다."""
+    from app.database import get_session_factory
+
+    factory = get_session_factory()
+    if factory is None:
+        return
+    from app.models.db import LibraryBuild
+
+    async with factory() as session:
+        from sqlalchemy import select
+
+        row = (await session.execute(select(LibraryBuild).where(LibraryBuild.id == build_id))).scalar_one_or_none()
+        if row is None:
+            return
+        if status is not None:
+            row.status = status
+        if progress_step is not None:
+            row.progress_step = progress_step
+        if progress_pct is not None:
+            row.progress_pct = progress_pct
+        if server_id is not None:
+            row.server_id = server_id
+        if error_message is not None:
+            row.error_message = error_message
+        if completed:
+            row.completed_at = datetime.now(UTC)
+        await session.commit()
 
 # 설치 스크립트 템플릿 (라이브러리별)
 _INSTALL_SCRIPTS: dict[str, str] = {
@@ -59,8 +98,17 @@ def _generate_cloudinit(
     install_script = _INSTALL_SCRIPTS.get(library_id, "echo 'Unknown library'")
 
     return f"""#!/bin/bash
-set -ex
+set -e
 exec > /var/log/union-builder.log 2>&1
+
+# 오류 발생 시 에러 마커 작성 후 종료
+_on_error() {{
+    echo "[union-builder] BUILD FAILED at line $1"
+    sync 2>/dev/null || true
+    umount /mnt/share 2>/dev/null || true
+    poweroff
+}}
+trap '_on_error $LINENO' ERR
 
 echo "[union-builder] Starting library build: {library_id}"
 
@@ -191,7 +239,31 @@ async def start_build(
     server_id = server.id
     _logger.info("[builder] 빌더 VM 생성 완료: %s", server_id)
 
-    # 빌드 상태 기록
+    # DB에 빌드 레코드 생성
+    build_db_id: int | None = None
+    try:
+        from app.database import get_session_factory
+        from app.models.db import LibraryBuild
+
+        factory = get_session_factory()
+        if factory:
+            async with factory() as session:
+                build_row = LibraryBuild(
+                    library_id=library_id,
+                    file_storage_id=share_id,
+                    server_id=server_id,
+                    status="building",
+                    progress_step="VM 생성 완료, 패키지 설치 중",
+                    progress_pct=40,
+                )
+                session.add(build_row)
+                await session.commit()
+                await session.refresh(build_row)
+                build_db_id = build_row.id
+    except Exception:
+        _logger.warning("[builder] DB 빌드 레코드 생성 실패", exc_info=True)
+
+    # 인메모리 캐시 (호환성 유지)
     build_info = {
         "library_id": library_id,
         "file_storage_id": share_id,
@@ -199,11 +271,12 @@ async def start_build(
         "cephx_user": cephx_user,
         "status": "building",
         "started_at": datetime.now(UTC).isoformat(),
+        "build_db_id": build_db_id,
     }
     _active_builds[library_id] = build_info
 
     # 6. 백그라운드 모니터링 시작
-    asyncio.create_task(_monitor_build(conn, library_id, share_id, server_id))
+    asyncio.create_task(_monitor_build(conn, library_id, share_id, server_id, build_db_id))
 
     return {
         "file_storage_id": share_id,
@@ -246,6 +319,7 @@ async def _monitor_build(
     library_id: str,
     share_id: str,
     server_id: str,
+    build_db_id: int | None = None,
 ):
     """빌더 VM 상태를 모니터링하고 완료 시 정리."""
     _logger.info("[builder] 모니터링 시작: library=%s, server=%s", library_id, server_id)
@@ -261,17 +335,49 @@ async def _monitor_build(
                 continue
 
             if status == "SHUTOFF":
-                _logger.info("[builder] 빌더 VM SHUTOFF 감지, 빌드 완료: %s", library_id)
-                # 메타데이터 업데이트
-                await asyncio.to_thread(
-                    manila.update_share_metadata,
-                    conn,
-                    share_id,
-                    {
-                        "union_status": "ready",
-                        "union_built_at": datetime.now(UTC).isoformat(),
-                    },
-                )
+                _logger.info("[builder] 빌더 VM SHUTOFF 감지: %s", library_id)
+
+                # 빌드 성공 여부 콘솔 로그로 검증
+                build_success = False
+                try:
+                    console_output = await asyncio.to_thread(
+                        conn.compute.get_server_console_output, server_id, length=200
+                    )
+                    log_text = ""
+                    if isinstance(console_output, dict):
+                        log_text = console_output.get("output", "")
+                    elif isinstance(console_output, str):
+                        log_text = console_output
+                    build_success = "[union-builder] Build complete" in log_text
+                    if not build_success:
+                        _logger.warning("[builder] 완료 마커 없음 — 빌드 실패로 처리: %s", library_id)
+                except Exception:
+                    _logger.warning("[builder] 콘솔 로그 조회 실패, 성공으로 간주: %s", library_id, exc_info=True)
+                    build_success = True
+
+                if not build_success:
+                    await asyncio.to_thread(
+                        manila.update_share_metadata,
+                        conn,
+                        share_id,
+                        {"union_status": "error"},
+                    )
+                    if build_db_id:
+                        await _update_build_db(
+                            build_db_id, status="error",
+                            progress_step="빌드 검증 실패",
+                            error_message="콘솔 로그에서 완료 마커를 찾을 수 없음",
+                            completed=True,
+                        )
+                    try:
+                        await asyncio.to_thread(conn.compute.delete_server, server_id, force=True)
+                    except Exception:
+                        pass
+                    if library_id in _active_builds:
+                        _active_builds[library_id]["status"] = "error"
+                        del _active_builds[library_id]
+                    return
+
                 # CephX access rule 정리 (빌더용)
                 try:
                     rules = await asyncio.to_thread(
@@ -289,6 +395,47 @@ async def _monitor_build(
                             )
                 except Exception:
                     _logger.warning("[builder] CephX rule 정리 실패", exc_info=True)
+
+                # 읽기 전용 CephX access rule 생성
+                ro_user = f"union-ro-{library_id}"
+                try:
+                    await asyncio.to_thread(
+                        manila.create_access_rule,
+                        conn,
+                        share_id,
+                        ro_user,
+                        "ro",
+                        "cephx",
+                    )
+                    _logger.info("[builder] 읽기 전용 CephX rule 생성 완료: user=%s", ro_user)
+                except Exception:
+                    _logger.warning("[builder] 읽기 전용 rule 생성 실패", exc_info=True)
+                    ro_user = ""
+
+                # 메타데이터 업데이트
+                metadata: dict[str, str] = {
+                    "union_status": "ready",
+                    "union_built_at": datetime.now(UTC).isoformat(),
+                }
+                if ro_user:
+                    metadata["union_cephx_user"] = ro_user
+                await asyncio.to_thread(
+                    manila.update_share_metadata,
+                    conn,
+                    share_id,
+                    metadata,
+                )
+                _logger.info("[builder] 빌드 완료 처리: %s", library_id)
+
+                # DB 상태 업데이트
+                if build_db_id:
+                    await _update_build_db(
+                        build_db_id,
+                        status="complete",
+                        progress_step="빌드 완료",
+                        progress_pct=100,
+                        completed=True,
+                    )
 
                 # VM 삭제
                 try:
@@ -310,6 +457,13 @@ async def _monitor_build(
                     share_id,
                     {"union_status": "error"},
                 )
+                if build_db_id:
+                    await _update_build_db(
+                        build_db_id, status="error",
+                        progress_step="VM 오류 발생",
+                        error_message="빌더 VM이 ERROR 상태로 전환됨",
+                        completed=True,
+                    )
                 try:
                     await asyncio.to_thread(conn.compute.delete_server, server_id, force=True)
                 except Exception:
@@ -327,6 +481,13 @@ async def _monitor_build(
             share_id,
             {"union_status": "timeout"},
         )
+        if build_db_id:
+            await _update_build_db(
+                build_db_id, status="timeout",
+                progress_step="빌드 타임아웃",
+                error_message="30분 내 빌드가 완료되지 않음",
+                completed=True,
+            )
         try:
             await asyncio.to_thread(conn.compute.delete_server, server_id, force=True)
         except Exception:
@@ -336,5 +497,12 @@ async def _monitor_build(
 
     except Exception:
         _logger.error("[builder] 모니터링 예외: %s", library_id, exc_info=True)
+        if build_db_id:
+            await _update_build_db(
+                build_db_id, status="error",
+                progress_step="모니터링 예외",
+                error_message="모니터링 중 예외 발생",
+                completed=True,
+            )
         if library_id in _active_builds:
             del _active_builds[library_id]

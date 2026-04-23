@@ -33,13 +33,14 @@ export const ROUTE_LABELS: Record<string, string> = {
   // Containers
   containers: '컨테이너',
   clusters: '클러스터',
-  k3s: 'k3s 클러스터',
+  k3s: 'Drover',
 
   // Database
   database: 'DATABASE',
 
   // Object Storage
   'object-storage': 'OBJECT STORAGE',
+  buckets: '버킷',
 
   // Network
   network: '네트워크',

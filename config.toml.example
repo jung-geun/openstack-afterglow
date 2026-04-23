@@ -20,6 +20,7 @@ password = "change-me-in-production"
 
 # Swift (Object Storage) 설정
 swift_endpoint = ""               # 서비스 카탈로그 대신 직접 지정할 경우 (예: https://s3.example.com/swift/v1/AUTH_%(project_id)s)
+swift_upload_timeout = 600  # Swift 업로드 타임아웃 (초)
 
 # Manila 설정
 manila_endpoint = ""              # 서비스 카탈로그 대신 직접 지정할 경우

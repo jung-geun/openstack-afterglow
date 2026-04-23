@@ -17,7 +17,7 @@ from app.models.k3s_health import K3sClusterHealth, K3sNodeHealth
 
 _logger = logging.getLogger(__name__)
 
-_HEALTH_KEY_PREFIX = "afterglow:k3s:health:"
+_HEALTH_KEY_PREFIX = "drover:health:"
 _HEALTH_TTL = 600  # 10분
 
 
@@ -157,13 +157,26 @@ async def check_cluster_health(cluster: dict) -> K3sClusterHealth:
     probe_ip = await _get_probe_ip(project_id, server_vm_id, server_ip, api_fip_address=api_fip_address)
     base_url = f"https://{probe_ip}:6443"
 
-    # 1단계: /healthz 프로빙 (인증 불필요)
+    # kubeconfig 사전 로드 (healthz + nodes 양쪽에서 사용)
+    ssl_ctx = None
+    try:
+        from app.services import k3s_db
+
+        kubeconfig_yaml = await k3s_db.get_kubeconfig_admin(cluster_id)
+        if kubeconfig_yaml:
+            cert_pem, key_pem = _parse_kubeconfig(kubeconfig_yaml)
+            ssl_ctx = _make_ssl_context(cert_pem, key_pem)
+    except Exception:
+        _logger.debug("k3s health: kubeconfig 로드 실패 (cluster=%s)", cluster_id, exc_info=True)
+
+    # 1단계: /healthz 프로빙 (kubeconfig가 있으면 인증 포함)
     healthz_ok = False
     api_server_reachable = False
     error_msg = None
 
     try:
-        async with httpx.AsyncClient(verify=False, timeout=httpx.Timeout(5.0, connect=3.0)) as client:
+        verify = ssl_ctx if ssl_ctx else False
+        async with httpx.AsyncClient(verify=verify, timeout=httpx.Timeout(5.0, connect=3.0)) as client:
             resp = await client.get(f"{base_url}/healthz")
             api_server_reachable = True
             healthz_ok = resp.status_code == 200 and resp.text.strip() == "ok"
@@ -196,15 +209,8 @@ async def check_cluster_health(cluster: dict) -> K3sClusterHealth:
 
     # 2단계: /api/v1/nodes 조회 (kubeconfig 클라이언트 인증서 사용)
     nodes: list[K3sNodeHealth] = []
-    try:
-        from app.services import k3s_db
-
-        # 관리자 접근으로 kubeconfig 조회 (project_id 필터 없음)
-        kubeconfig_yaml = await k3s_db.get_kubeconfig_admin(cluster_id)
-        if kubeconfig_yaml:
-            cert_pem, key_pem = _parse_kubeconfig(kubeconfig_yaml)
-            ssl_ctx = _make_ssl_context(cert_pem, key_pem)
-
+    if ssl_ctx:
+        try:
             async with httpx.AsyncClient(verify=ssl_ctx, timeout=10.0) as client:
                 resp = await client.get(
                     f"{base_url}/api/v1/nodes",
@@ -212,8 +218,8 @@ async def check_cluster_health(cluster: dict) -> K3sClusterHealth:
                 )
                 if resp.status_code == 200:
                     nodes = _parse_nodes(resp.json())
-    except Exception:
-        _logger.debug("k3s health: 노드 목록 조회 실패 (cluster=%s)", cluster_id, exc_info=True)
+        except Exception:
+            _logger.debug("k3s health: 노드 목록 조회 실패 (cluster=%s)", cluster_id, exc_info=True)
 
     # 상태 결정
     if not nodes:

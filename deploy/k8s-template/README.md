@@ -147,6 +147,62 @@ kubectl port-forward svc/prometheus 9090:9090 -n afterglow
 # 브라우저에서 http://localhost:9090 접속
 ```
 
+## 오브젝트 스토리지 업로드 타임아웃 설정
+
+대용량 파일 업로드 시 Traefik 기본 60초 타임아웃으로 인해 업로드가 중단될 수 있습니다.
+아래 절차로 Traefik 타임아웃을 600초(10분)로 설정하세요.
+
+### 1. Middleware CRD 배포
+
+```bash
+kubectl apply -f k8s-template/middleware.yaml
+```
+
+### 2. Ingress 재배포
+
+`ingress.yaml`에 Middleware 어노테이션이 이미 포함되어 있습니다.
+
+```bash
+kubectl apply -f k8s-template/ingress.yaml
+```
+
+### 3. k3s Traefik 엔트리포인트 타임아웃 설정 (필수)
+
+Middleware만으로는 Traefik 엔트리포인트 레벨의 타임아웃을 변경할 수 없습니다.
+k3s 노드에서 Traefik HelmChart 값을 수정해야 합니다.
+
+```bash
+# k3s 노드에서 실행
+cat > /var/lib/rancher/k3s/server/manifests/traefik-config.yaml << 'EOF'
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    additionalArguments:
+      - "--entryPoints.web.transport.respondingTimeouts.readTimeout=600"
+      - "--entryPoints.web.transport.respondingTimeouts.writeTimeout=600"
+      - "--entryPoints.web.transport.respondingTimeouts.idleTimeout=600"
+      - "--entryPoints.websecure.transport.respondingTimeouts.readTimeout=600"
+      - "--entryPoints.websecure.transport.respondingTimeouts.writeTimeout=600"
+      - "--entryPoints.websecure.transport.respondingTimeouts.idleTimeout=600"
+EOF
+```
+
+설정 적용 후 Traefik Pod가 자동으로 재시작됩니다.
+
+### 타임아웃 체인 요약
+
+| 구간 | 설정값 |
+|------|--------|
+| Swift 백엔드 (`swift_upload_timeout`) | 600초 |
+| Ceph RGW HAProxy | 600초 |
+| Traefik Ingress (위 설정 적용 후) | 600초 |
+
+---
+
 ## 문제 해결
 
 ```bash

@@ -76,7 +76,7 @@ def generate_userdata(
     # PYTHONPATH 동적 생성
     python_version = "3.11"  # 기본 Python 버전
     for lib in resolved_libs:
-        if lib.id == "python311":
+        if lib == "python311":
             python_version = "3.11"
             break
     pythonpath = f"/opt/layers/merged/usr/local/lib/python{python_version}/site-packages"

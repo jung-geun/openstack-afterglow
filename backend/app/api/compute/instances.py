@@ -324,6 +324,7 @@ async def create_instance_async(
             req = req.model_copy(update={"network_id": settings.default_network_id})
 
     async def progress_generator():
+        import time
         # 수집된 리소스 (rollback 용)
         created_file_storage_ids: list[str] = []
         created_access_ids: list[tuple[str, str]] = []
@@ -331,9 +332,11 @@ async def create_instance_async(
         upper_volume_id: str | None = None
         server_id: str | None = None
         floating_ip_id: str | None = None
+        _start_time = time.monotonic()
 
         def send_progress(step: ProgressStep, progress: int, message: str, **extra):
-            msg = ProgressMessage(step=step, progress=progress, message=message, **extra)
+            elapsed = round(time.monotonic() - _start_time, 1)
+            msg = ProgressMessage(step=step, progress=progress, message=message, elapsed_seconds=elapsed, **extra)
             return f"data: {msg.model_dump_json()}\n\n"
 
         try:

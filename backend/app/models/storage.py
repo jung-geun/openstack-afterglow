@@ -282,3 +282,29 @@ class ObjectInfo(BaseModel):
     content_type: str = ""
     last_modified: str = ""
     etag: str = ""
+
+
+class CreateDirectoryRequest(BaseModel):
+    path: str = Field(..., min_length=1, max_length=1024)
+
+
+class CopyObjectRequest(BaseModel):
+    source: str = Field(..., min_length=1)
+    destination: str = Field(..., min_length=1)
+    dest_container: str | None = None
+
+
+class MoveObjectRequest(BaseModel):
+    source: str = Field(..., min_length=1)
+    destination: str = Field(..., min_length=1)
+    dest_container: str | None = None
+
+
+class RenameObjectRequest(BaseModel):
+    source: str = Field(..., min_length=1)
+    new_name: str = Field(..., min_length=1)
+
+
+class BulkDeleteRequest(BaseModel):
+    objects: list[str] = Field(..., min_length=1, max_length=1000)
+    recursive: bool = False

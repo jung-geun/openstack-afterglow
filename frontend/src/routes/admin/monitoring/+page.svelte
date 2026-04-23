@@ -225,7 +225,7 @@
 					</div>
 					<div class="bg-gray-800 rounded-lg p-4 text-center">
 						<div class="text-2xl font-bold text-white">{summary.containers.k3s_count}</div>
-						<div class="text-xs text-gray-500 mt-1">k3s 클러스터</div>
+						<div class="text-xs text-gray-500 mt-1">Drover 클러스터</div>
 					</div>
 				</div>
 
@@ -233,8 +233,8 @@
 					<a href="/admin/containers" class="flex items-center justify-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 transition-colors bg-gray-800 rounded-lg py-2">
 						컨테이너 목록 →
 					</a>
-					<a href="/admin/containers/k3s" class="flex items-center justify-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 transition-colors bg-gray-800 rounded-lg py-2">
-						k3s 클러스터 →
+					<a href="/admin/drover" class="flex items-center justify-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 transition-colors bg-gray-800 rounded-lg py-2">
+						Drover 클러스터 →
 					</a>
 				</div>
 			</div>

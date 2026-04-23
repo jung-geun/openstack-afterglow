@@ -52,7 +52,7 @@
 			items: [
 				{ label: 'K8s 클러스터', href: '/dashboard/containers/clusters', service: 'magnum' as const },
 				{ label: '컨테이너', href: '/dashboard/containers/instances', service: 'zun' as const },
-				{ label: 'k3s 클러스터', href: '/dashboard/containers/k3s', service: 'k3s' as const },
+				{ label: 'Drover', href: '/dashboard/drover', service: 'k3s' as const },
 			],
 		},
 		{
@@ -72,7 +72,7 @@
 			open: false,
 			service: 'swift' as const,
 			items: [
-				{ label: '컨테이너', href: '/dashboard/object-storage/containers', service: null },
+				{ label: '버킷', href: '/dashboard/object-storage/buckets', service: null },
 			],
 		},
 		{

@@ -3,13 +3,14 @@
 
 	interface Props {
 		containerName: string;
+		prefix?: string;
 		token?: string;
 		projectId?: string;
 		onSuccess: () => void;
 		onClose: () => void;
 	}
 
-	const { containerName, token, projectId, onSuccess, onClose }: Props = $props();
+	const { containerName, prefix = '', token, projectId, onSuccess, onClose }: Props = $props();
 
 	let file = $state<File | null>(null);
 	let uploading = $state(false);
@@ -72,8 +73,14 @@
 
 		intervalId = setInterval(() => { now = Date.now(); }, 500);
 
+		// prefix가 있으면 오브젝트명 앞에 붙임
+		const objectName = prefix ? prefix + file.name : file.name;
+		const renamedFile = objectName !== file.name
+			? new File([file], objectName, { type: file.type })
+			: file;
+
 		const formData = new FormData();
-		formData.append('file', file);
+		formData.append('file', renamedFile);
 
 		const { promise, abort } = api.uploadWithProgress(
 			`/api/object-storage/${encodeURIComponent(containerName)}/objects`,

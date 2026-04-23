@@ -1,0 +1,22 @@
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: afterglow-upload-timeout
+  namespace: afterglow
+spec:
+  buffering:
+    maxRequestBodyBytes: 5368709120  # 5 GB (백엔드 _MAX_UPLOAD_BYTES 와 동일)
+    memRequestBodyBytes: 2097152     # 2 MB 인메모리 버퍼
+    maxResponseBodyBytes: 0          # 응답 크기 무제한
+    retryExpression: "IsNetworkError() && Attempts() < 2"
+---
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: backend-long-timeout
+  namespace: afterglow
+spec:
+  forwardingTimeouts:
+    dialTimeout: 30s
+    responseHeaderTimeout: 600s
+    idleConnTimeout: 90s

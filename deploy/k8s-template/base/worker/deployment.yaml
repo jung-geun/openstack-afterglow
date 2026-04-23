@@ -1,10 +1,10 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: afterglow-worker
+  name: drover
   namespace: afterglow
   labels:
-    app: afterglow-worker
+    app: drover
 spec:
   replicas: 1
   revisionHistoryLimit: 3
@@ -15,11 +15,11 @@ spec:
       maxUnavailable: 0
   selector:
     matchLabels:
-      app: afterglow-worker
+      app: drover
   template:
     metadata:
       labels:
-        app: afterglow-worker
+        app: drover
     spec:
       terminationGracePeriodSeconds: 30
       containers:

@@ -185,3 +185,25 @@ class NotionConfig(Base):
     # 타임스탬프
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+
+class LibraryBuild(Base):
+    """라이브러리 사전빌드 작업 추적 — Manila share + 빌더 VM 상태를 DB에 기록."""
+
+    __tablename__ = "library_builds"
+
+    id: Mapped[int] = mapped_column(INT, primary_key=True, autoincrement=True)
+    library_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, index=True)
+    file_storage_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    server_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+
+    # 상태: pending, creating_share, creating_access, creating_vm, building, verifying, cleanup, complete, error, timeout
+    status: Mapped[str] = mapped_column(VARCHAR(32), nullable=False, default="pending")
+    progress_step: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, default="")
+    progress_pct: Mapped[int] = mapped_column(INT, nullable=False, default=0)
+    error_message: Mapped[str | None] = mapped_column(TEXT)
+
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)

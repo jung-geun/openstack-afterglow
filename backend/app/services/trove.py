@@ -220,8 +220,11 @@ def delete_user(conn, instance_id: str, username: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+_ALLOWED_DB_FLAVORS = {"cpu.2c_2g", "cpu.4c_8g", "cpu.8c_16g", "cpu.8c_32g"}
+
+
 def list_flavors(conn) -> list[dict]:
-    """DB 플레이버 목록."""
+    """DB 플레이버 목록 (허용된 flavor만 반환)."""
     try:
         return [
             {
@@ -232,6 +235,7 @@ def list_flavors(conn) -> list[dict]:
                 "disk": getattr(f, "disk", 0) or 0,
             }
             for f in conn.database.flavors()
+            if (f.name or "") in _ALLOWED_DB_FLAVORS
         ]
     except Exception:
         _logger.debug("Trove 플레이버 목록 조회 실패", exc_info=True)

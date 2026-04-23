@@ -1,3 +1,11 @@
+/** ISO 날짜 문자열을 짧은 날짜 형식으로 포맷 (예: "2024. 03. 15.") */
+export function formatDate(iso: string): string {
+	if (!iso) return '-';
+	const d = new Date(iso);
+	if (isNaN(d.getTime())) return '-';
+	return d.toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' });
+}
+
 /** 천단위 쉼표 포맷 */
 export function formatNumber(n: number): string {
 	return n.toLocaleString();

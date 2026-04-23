@@ -21,6 +21,7 @@
 		message: string;
 		instance_id?: string;
 		error?: string;
+		elapsed_seconds?: number | null;
 	}
 
 	interface NetworkInfo {
@@ -68,6 +69,7 @@
 	let currentStep = $state('manila_preparing');
 	let progress = $state(0);
 	let progressMessage = $state('');
+	let elapsedSeconds = $state<number | null>(null);
 	let loading = $state(false);
 
 	async function loadData() {
@@ -285,6 +287,9 @@
 							currentStep = data.step;
 							progress = data.progress;
 							progressMessage = data.message;
+							if (data.elapsed_seconds !== undefined && data.elapsed_seconds !== null) {
+								elapsedSeconds = data.elapsed_seconds;
+							}
 
 							if (data.step === 'completed') {
 								const instanceId = data.instance_id;
@@ -362,7 +367,12 @@
 					progress={progress}
 					error={deployError}
 				/>
-				<p class="text-gray-400 text-sm mt-4">{progressMessage}</p>
+				<div class="flex items-center justify-between mt-4">
+					<p class="text-gray-400 text-sm">{progressMessage}</p>
+					{#if elapsedSeconds !== null}
+						<p class="text-gray-600 text-xs font-mono">{elapsedSeconds.toFixed(0)}s 경과</p>
+					{/if}
+				</div>
 			</div>
 
 			<div class="flex justify-end">

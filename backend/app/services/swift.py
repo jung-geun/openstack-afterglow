@@ -206,23 +206,51 @@ def get_container_metadata(conn, name: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def list_objects(conn, container: str, prefix: str = "") -> list[dict]:
-    """컨테이너 내 오브젝트 목록 반환."""
+def list_objects(conn, container: str, prefix: str = "", delimiter: str = "") -> list[dict]:
+    """컨테이너 내 오브젝트 목록 반환.
+
+    delimiter="/"를 사용하면 현재 prefix 바로 아래 파일/폴더만 반환한다.
+    폴더(subdir)는 {"name": "folder/", "is_dir": True}로 반환된다.
+    """
     _apply_endpoint_override(conn)
     try:
         kwargs = {}
         if prefix:
             kwargs["prefix"] = prefix
-        return [
-            {
-                "name": o.name or "",
-                "bytes": getattr(o, "size", None) or getattr(o, "content_length", 0) or 0,
-                "content_type": getattr(o, "content_type", "") or "",
-                "last_modified": str(getattr(o, "last_modified_at", "") or ""),
-                "etag": getattr(o, "etag", "") or "",
-            }
-            for o in conn.object_store.objects(container, **kwargs)
-        ]
+        if delimiter:
+            kwargs["delimiter"] = delimiter
+        results = []
+        seen_subdirs: set[str] = set()
+        for o in conn.object_store.objects(container, **kwargs):
+            # delimiter 사용 시 Swift는 subdir pseudo-directory 엔트리를 반환
+            subdir = getattr(o, "subdir", None)
+            if subdir:
+                seen_subdirs.add(subdir)
+                results.append({
+                    "name": subdir,
+                    "bytes": 0,
+                    "content_type": "application/directory",
+                    "last_modified": "",
+                    "etag": "",
+                    "is_dir": True,
+                })
+            else:
+                name = o.name or ""
+                # subdir 엔트리와 동일한 directory marker 오브젝트는 중복 제외
+                if name in seen_subdirs:
+                    continue
+                # 명시적 directory marker 오브젝트 (trailing slash + application/directory)
+                ct = getattr(o, "content_type", "") or ""
+                is_dir = name.endswith("/") and ct in ("application/directory", "")
+                results.append({
+                    "name": name,
+                    "bytes": getattr(o, "size", None) or getattr(o, "content_length", 0) or 0,
+                    "content_type": ct,
+                    "last_modified": str(getattr(o, "last_modified_at", "") or ""),
+                    "etag": getattr(o, "etag", "") or "",
+                    "is_dir": is_dir,
+                })
+        return results
     except Exception:
         _logger.debug("Swift 오브젝트 목록 조회 실패 container=%s", container, exc_info=True)
         return []
@@ -274,9 +302,18 @@ def stream_object(conn, container: str, name: str) -> tuple[Iterator[bytes], str
 
 
 def delete_object(conn, container: str, name: str) -> None:
-    """오브젝트를 삭제."""
+    """오브젝트를 삭제.
+
+    trailing '/'가 있는 이름(디렉토리 마커)은 openstacksdk urljoin이 '/'를 strip하므로
+    raw DELETE를 사용한다.
+    """
+    import urllib.parse
     _apply_endpoint_override(conn)
-    conn.object_store.delete_object(name, ignore_missing=False, container=container)
+    if name.endswith("/"):
+        encoded = "/" + urllib.parse.quote(container, safe="") + "/" + urllib.parse.quote(name, safe="/")
+        conn.object_store.delete(encoded)
+    else:
+        conn.object_store.delete_object(name, ignore_missing=False, container=container)
 
 
 def get_object_metadata(conn, container: str, name: str) -> dict:
@@ -294,3 +331,144 @@ def get_object_metadata(conn, container: str, name: str) -> dict:
         "content_disposition": getattr(meta, "content_disposition", "") or "",
         "delete_at": str(getattr(meta, "delete_at", "") or ""),
     }
+
+
+# ---------------------------------------------------------------------------
+# 디렉토리 / 복사 / 이동 / 이름 변경
+# ---------------------------------------------------------------------------
+
+
+def bulk_delete_objects(
+    conn, container: str, names: list[str], recursive: bool = False
+) -> dict:
+    """여러 오브젝트를 삭제한다.
+
+    recursive=True이면 디렉토리(`/`로 끝나는) 하위 오브젝트 전체를 삭제한다.
+    반환: {"deleted": [...], "failed": [{"name": ..., "error": ...}, ...]}
+    """
+    _apply_endpoint_override(conn)
+    deleted: list[str] = []
+    failed: list[dict] = []
+
+    for name in names:
+        if name.endswith("/") and recursive:
+            # 디렉토리 하위 전체 나열 후 삭제
+            try:
+                children = list_objects(conn, container, prefix=name, delimiter="")
+            except Exception as e:
+                failed.append({"name": name, "error": str(e)})
+                continue
+            for child in children:
+                child_name = child["name"]
+                if child_name == name:
+                    continue  # directory marker 자체는 나중에 삭제
+                try:
+                    delete_object(conn, container, child_name)
+                    deleted.append(child_name)
+                except Exception as e:
+                    failed.append({"name": child_name, "error": str(e)})
+        # directory marker 또는 일반 파일 삭제
+        try:
+            delete_object(conn, container, name)
+            deleted.append(name)
+        except Exception as e:
+            failed.append({"name": name, "error": str(e)})
+
+    return {"deleted": deleted, "failed": failed}
+
+
+def create_directory(conn, container: str, path: str) -> dict:
+    """가상 디렉토리(빈 오브젝트 + trailing slash)를 생성한다.
+
+    openstacksdk의 create_object는 utils.urljoin에서 trailing /를 strip하므로
+    raw PUT을 사용하여 trailing /를 보존한다.
+    """
+    import urllib.parse
+
+    _apply_endpoint_override(conn)
+    dir_name = path.rstrip("/") + "/"
+    encoded_path = "/" + urllib.parse.quote(container, safe="") + "/" + urllib.parse.quote(dir_name, safe="/")
+    conn.object_store.put(
+        encoded_path,
+        headers={"Content-Type": "application/directory", "Content-Length": "0"},
+    )
+    return {"name": dir_name, "container": container}
+
+
+def copy_object(
+    conn,
+    container: str,
+    source: str,
+    dest_container: str,
+    dest_name: str,
+) -> dict:
+    """오브젝트를 복사한다 (Swift X-Copy-From 헤더 사용)."""
+    import urllib.parse
+    from app.config import get_settings
+
+    _apply_endpoint_override(conn)
+    proxy = conn.object_store
+    # 대용량 파일 복사를 위해 upload_timeout 적용
+    settings = get_settings()
+    upload_timeout = settings.os_swift_upload_timeout
+    original_timeout = getattr(proxy, "timeout", None)
+    proxy.timeout = upload_timeout
+    # 한글 등 non-ASCII 문자를 URL-encode 하여 latin-1 인코딩 문제 방지
+    encoded_src = "/" + urllib.parse.quote(container, safe="") + "/" + urllib.parse.quote(source, safe="/")
+    encoded_dest = "/" + urllib.parse.quote(dest_container, safe="") + "/" + urllib.parse.quote(dest_name, safe="/")
+    try:
+        proxy.put(
+            encoded_dest,
+            headers={"X-Copy-From": encoded_src, "Content-Length": "0"},
+        )
+    finally:
+        proxy.timeout = original_timeout
+    return {
+        "source": source,
+        "destination": dest_name,
+        "source_container": container,
+        "dest_container": dest_container,
+    }
+
+
+def move_object(
+    conn,
+    container: str,
+    source: str,
+    dest_container: str,
+    dest_name: str,
+) -> dict:
+    """오브젝트를 이동한다 (copy + delete).
+
+    source가 디렉토리(trailing '/')이면 하위 파일 전체를 재귀적으로 복사 후 삭제한다.
+    """
+    if source.endswith("/"):
+        # 디렉토리: 하위 파일 전체 나열 후 복사
+        children = list_objects(conn, container, prefix=source, delimiter="")
+        # directory marker 자체도 포함하여 복사
+        copy_object(conn, container, source, dest_container, dest_name)
+        for child in children:
+            child_name = child["name"]
+            if child_name == source:
+                continue
+            new_child_name = dest_name + child_name[len(source):]
+            copy_object(conn, container, child_name, dest_container, new_child_name)
+        # 원본 삭제 (하위 파일 먼저, 마커 나중)
+        for child in children:
+            if child["name"] != source:
+                delete_object(conn, container, child["name"])
+        delete_object(conn, container, source)
+        return {
+            "source": source,
+            "destination": dest_name,
+            "source_container": container,
+            "dest_container": dest_container,
+        }
+    result = copy_object(conn, container, source, dest_container, dest_name)
+    delete_object(conn, container, source)
+    return result
+
+
+def rename_object(conn, container: str, old_name: str, new_name: str) -> dict:
+    """오브젝트 이름을 변경한다 (같은 컨테이너 내 move)."""
+    return move_object(conn, container, old_name, container, new_name)

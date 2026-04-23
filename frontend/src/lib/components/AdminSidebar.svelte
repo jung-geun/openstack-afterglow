@@ -52,7 +52,7 @@
 			service: null as null,
 			items: [
 				{ label: '전체 컨테이너', href: '/admin/containers', service: 'zun' as const },
-				{ label: 'k3s 클러스터', href: '/admin/containers/k3s', service: 'k3s' as const },
+				{ label: 'Drover', href: '/admin/drover', service: 'k3s' as const },
 			],
 		},
 		{

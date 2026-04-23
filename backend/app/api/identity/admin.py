@@ -84,8 +84,40 @@ async def trigger_build(
 
 @router.get("/file-storage/builds", dependencies=[Depends(require_admin)])
 async def list_active_builds():
-    """현재 진행 중인 자동 빌드 목록 조회."""
-    return library_builder.get_active_builds()
+    """빌드 목록 조회 (DB 기반, 인메모리 캐시 병합)."""
+    from app.database import get_session_factory, is_db_available
+
+    result: list[dict] = []
+    if is_db_available():
+        try:
+            from app.models.db import LibraryBuild
+            from sqlalchemy import select
+
+            factory = get_session_factory()
+            if factory:
+                async with factory() as session:
+                    rows = (await session.execute(
+                        select(LibraryBuild).order_by(LibraryBuild.created_at.desc()).limit(20)
+                    )).scalars().all()
+                    for r in rows:
+                        result.append({
+                            "id": r.id,
+                            "library_id": r.library_id,
+                            "file_storage_id": r.file_storage_id,
+                            "server_id": r.server_id,
+                            "status": r.status,
+                            "progress_step": r.progress_step,
+                            "progress_pct": r.progress_pct,
+                            "error_message": r.error_message,
+                            "started_at": r.started_at.isoformat() if r.started_at else None,
+                            "completed_at": r.completed_at.isoformat() if r.completed_at else None,
+                        })
+        except Exception:
+            pass
+    if not result:
+        # DB 사용 불가 시 인메모리 폴백
+        return library_builder.get_active_builds()
+    return result
 
 
 # ---------------------------------------------------------------------------
