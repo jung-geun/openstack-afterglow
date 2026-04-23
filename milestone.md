@@ -802,11 +802,13 @@ config.toml 신규 섹션: `[k3s]` 하위 `cinder_csi_*`, `manila_csi_*`, `keyst
   - `layer-store-rw`: Builder VM RW 마운트 (cephx 또는 Manila access rule)
   - `layer-store-ro`: User VM RO 마운트 (read_only=True access rule)
   - `manifest-store`: DB 대체용 JSON manifest 저장 (향후 PostgreSQL 전환 전)
+- [ ] Manila share 3개 프로비저닝: `layer-store-rw`, `layer-store-ro`, `manifest-store`
 - [ ] Builder VM 설정: Ubuntu 22.04, Manila RW 마운트, `layerbuild` CLI 설치
-- [ ] `layerbuild` CLI (`backend/app/services/union/layerbuild.py`):
-  - `layerbuild init <name> [--parent <hash>]` — layer.json 생성, diff/ 디렉토리 준비
-  - `layerbuild seal` — diff/ sha256 해시 계산, `chmod -R a-w` + `chattr +i` + DB `sealed=true` 3-lock
-  - 레이어 디렉토리 구조: `<layer-store>/<hash>/layer.json`, `<hash>/diff/`
+- [x] `layerbuild` CLI (`scripts/layerbuild.py`):
+  - `layerbuild init <name> --version <ver> [--parent <hash>]` — 작업 디렉토리 + overlay 마운트
+  - `layerbuild exec <recipe.sh>` — systemd-nspawn으로 recipe 실행
+  - `layerbuild seal` — sha256 계산, diff/ 이동, 3-lock (chmod+chattr+API seal), API 등록
+  - `layerbuild abort` — 진행 중인 빌드 취소
 
 **PostgreSQL 스키마**
 
@@ -825,8 +827,8 @@ config.toml 신규 섹션: `[k3s]` 하위 `cinder_csi_*`, `manila_csi_*`, `keyst
 
 **User VM envmgr**
 
-- [ ] `envmgr-init.sh` cloud-init 통합: Manila RO share 마운트
-- [ ] `envmgr-use.sh <template_or_layer_id>`:
+- [x] `envmgr-init.sh` cloud-init 통합: Manila RO share 마운트, envmgr-use 설치, systemd unit 등록
+- [x] `envmgr-use.sh <template_or_layer_id>`:
   1. `/api/union/layers/{id}/ancestors` 호출 → 조상 리스트
   2. `lowerdir=derived:parent:...:base` 조립 (leftmost = 최신)
   3. `upperdir=/var/overlay/<id>/upper`, `workdir=/var/overlay/<id>/work` (로컬 디스크)
