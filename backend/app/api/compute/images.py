@@ -80,3 +80,50 @@ async def update_image(
         return result
     except Exception:
         raise HTTPException(status_code=500, detail="이미지 메타데이터 수정 실패")
+
+
+# ---------------------------------------------------------------------------
+# 이미지 멤버 (공유 프로젝트 관리)
+# ---------------------------------------------------------------------------
+
+
+class AddMemberRequest(BaseModel):
+    member: str  # project_id
+
+
+@router.get("/{image_id}/members")
+async def list_image_members(
+    image_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """이미지 공유 멤버(프로젝트) 목록 조회."""
+    try:
+        return await asyncio.to_thread(glance.list_image_members, conn, image_id)
+    except Exception:
+        raise HTTPException(status_code=500, detail="멤버 목록 조회 실패")
+
+
+@router.post("/{image_id}/members", status_code=201)
+async def add_image_member(
+    image_id: str,
+    req: AddMemberRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """이미지에 공유 프로젝트 추가."""
+    try:
+        return await asyncio.to_thread(glance.add_image_member, conn, image_id, req.member)
+    except Exception:
+        raise HTTPException(status_code=500, detail="멤버 추가 실패")
+
+
+@router.delete("/{image_id}/members/{member_id}", status_code=204)
+async def remove_image_member(
+    image_id: str,
+    member_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """이미지에서 공유 프로젝트 삭제."""
+    try:
+        await asyncio.to_thread(glance.remove_image_member, conn, image_id, member_id)
+    except Exception:
+        raise HTTPException(status_code=500, detail="멤버 삭제 실패")

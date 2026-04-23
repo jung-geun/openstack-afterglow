@@ -189,14 +189,14 @@
   {:else}
     <div class="bg-[#0B1220] border border-gray-800 rounded-[10px] overflow-hidden">
       <!-- 헤더 -->
-      <div class="grid grid-cols-[1.2fr_140px_2fr_120px] px-4 py-2.5 border-b border-gray-800 text-[11px] uppercase tracking-wider text-gray-500 font-medium">
+      <div class="grid grid-cols-[1fr_auto] md:grid-cols-[1.2fr_140px_2fr_120px] px-4 py-2.5 border-b border-gray-800 text-[11px] uppercase tracking-wider text-gray-500 font-medium">
         <div>이름</div>
-        <div>유형</div>
-        <div>지문</div>
+        <div class="hidden md:block">유형</div>
+        <div class="hidden md:block">지문</div>
         <div class="text-right">액션</div>
       </div>
       {#each keypairs as kp, i (kp.name)}
-        <div class="grid grid-cols-[1.2fr_140px_2fr_120px] px-4 py-3 text-[13px] items-center {i < keypairs.length - 1 ? 'border-b border-gray-800' : ''} hover:bg-gray-800/30 transition-colors">
+        <div class="grid grid-cols-[1fr_auto] md:grid-cols-[1.2fr_140px_2fr_120px] px-4 py-3 text-[13px] items-center {i < keypairs.length - 1 ? 'border-b border-gray-800' : ''} hover:bg-gray-800/30 transition-colors">
           <!-- 이름 -->
           <div class="text-white font-medium flex items-center gap-2.5 min-w-0">
             <svg class="w-4 h-4 text-violet-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -205,11 +205,11 @@
             <span class="truncate">{kp.name}</span>
           </div>
           <!-- 유형 -->
-          <div>
+          <div class="hidden md:block">
             <span class="text-[11px] font-mono px-2 py-0.5 rounded-md bg-violet-900/25 border border-violet-800 text-violet-400">{kp.type}</span>
           </div>
           <!-- 지문 -->
-          <div class="text-gray-400 font-mono text-[11px] truncate">{kp.fingerprint}</div>
+          <div class="hidden md:block text-gray-400 font-mono text-[11px] truncate">{kp.fingerprint}</div>
           <!-- 액션 -->
           <div class="flex gap-1.5 justify-end">
             <button

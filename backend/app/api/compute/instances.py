@@ -872,9 +872,12 @@ async def _prepare_prebuilt_file_storages(
             {
                 "file_storage_id": file_storage.id,
                 "name": lib_id,
+                "share_proto": file_storage.share_proto,
                 "export_path": export_paths[0] if export_paths else "",
                 "cephx_id": cephx_id,
                 "cephx_key": rule["access_key"],
+                "nfs_export_location": file_storage.nfs_export_location or "",
+                "mount_options": "",
             }
         )
     return file_storages_info

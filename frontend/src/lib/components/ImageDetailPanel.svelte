@@ -37,11 +37,12 @@
 
   interface Props {
     imageId: string;
+    isAdmin?: boolean;
     onClose?: () => void;
     onDelete?: (id: string) => void;
   }
 
-  let { imageId, onClose, onDelete }: Props = $props();
+  let { imageId, isAdmin = false, onClose, onDelete }: Props = $props();
 
   let image = $state<ImageDetail | null>(null);
   let loading = $state(true);
@@ -51,6 +52,15 @@
   let savingVisibility = $state(false);
   let visibilityError = $state('');
   let visibilitySuccess = $state(false);
+
+  // 공유 멤버 관리
+  interface ImageMember { member_id: string; status: string; created_at: string | null; }
+  let members = $state<ImageMember[]>([]);
+  let loadingMembers = $state(false);
+  let newMemberId = $state('');
+  let addingMember = $state(false);
+  let memberError = $state('');
+  let removingMember = $state<string | null>(null);
 
   const isOwner = $derived(image?.owner === $auth.projectId);
 
@@ -70,6 +80,7 @@
         $auth.projectId ?? undefined
       );
       visibilityValue = image.visibility ?? '';
+      if (image.visibility === 'shared') fetchMembers(image.id);
     } catch (e) {
       error = e instanceof ApiError ? `조회 실패 (${e.status}): ${e.message}` : '서버 오류';
     } finally {
@@ -92,10 +103,52 @@
       image = { ...image, visibility: updated.visibility };
       visibilitySuccess = true;
       setTimeout(() => { visibilitySuccess = false; }, 2000);
+      if (updated.visibility === 'shared') fetchMembers(image.id);
     } catch (e) {
       visibilityError = e instanceof ApiError ? e.message : '저장 실패';
     } finally {
       savingVisibility = false;
+    }
+  }
+
+  async function fetchMembers(id: string) {
+    loadingMembers = true;
+    memberError = '';
+    try {
+      members = await api.get<ImageMember[]>(`/api/images/${id}/members`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+    } catch {
+      members = [];
+    } finally {
+      loadingMembers = false;
+    }
+  }
+
+  async function addMember() {
+    if (!image || !newMemberId.trim()) return;
+    addingMember = true;
+    memberError = '';
+    try {
+      await api.post(`/api/images/${image.id}/members`, { member: newMemberId.trim() }, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      newMemberId = '';
+      await fetchMembers(image.id);
+    } catch (e) {
+      memberError = e instanceof ApiError ? e.message : '멤버 추가 실패';
+    } finally {
+      addingMember = false;
+    }
+  }
+
+  async function removeMember(memberId: string) {
+    if (!image) return;
+    removingMember = memberId;
+    memberError = '';
+    try {
+      await api.delete(`/api/images/${image.id}/members/${memberId}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      await fetchMembers(image.id);
+    } catch (e) {
+      memberError = e instanceof ApiError ? e.message : '멤버 삭제 실패';
+    } finally {
+      removingMember = null;
     }
   }
 
@@ -214,17 +267,19 @@
               <dd class="text-sm text-gray-300">{image.tags.join(', ')}</dd>
             </div>
           {/if}
+          {#if isAdmin}
           <div class="col-span-2">
             <dt class="text-xs text-gray-500 mb-0.5">소유자 (Project ID)</dt>
             <dd class="text-xs text-gray-300 font-mono break-all">{image.owner ?? '-'}</dd>
           </div>
+          {/if}
           {#if image.os_hash_algo}
             <div class="col-span-2">
               <dt class="text-xs text-gray-500 mb-0.5">해시 ({image.os_hash_algo})</dt>
               <dd class="text-xs text-gray-300 font-mono break-all">{image.os_hash_value ?? '-'}</dd>
             </div>
           {/if}
-          {#if image.direct_url}
+          {#if isAdmin && image.direct_url}
             <div class="col-span-2">
               <dt class="text-xs text-gray-500 mb-0.5">저장 위치</dt>
               <dd class="text-xs text-gray-300 font-mono break-all">{image.direct_url}</dd>
@@ -304,6 +359,59 @@
               <span class="text-red-400 text-sm">{visibilityError}</span>
             {/if}
           </div>
+        </div>
+      {/if}
+
+      <!-- 공유 멤버 관리 (shared 이미지 소유자만) -->
+      {#if image.visibility === 'shared' && isOwner}
+        <div class="bg-gray-900 border border-gray-800 rounded-lg p-5">
+          <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">공유 프로젝트 관리</h3>
+
+          <!-- 멤버 추가 -->
+          <div class="flex items-center gap-2 mb-4">
+            <input
+              bind:value={newMemberId}
+              placeholder="프로젝트 ID 입력"
+              class="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 font-mono"
+              onkeydown={(e) => e.key === 'Enter' && addMember()}
+            />
+            <button
+              onclick={addMember}
+              disabled={addingMember || !newMemberId.trim()}
+              class="px-3 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium rounded-lg transition-colors whitespace-nowrap"
+            >
+              {addingMember ? '추가 중...' : '+ 추가'}
+            </button>
+          </div>
+
+          {#if memberError}
+            <p class="text-red-400 text-xs mb-3">{memberError}</p>
+          {/if}
+
+          <!-- 멤버 목록 -->
+          {#if loadingMembers}
+            <p class="text-gray-500 text-xs">불러오는 중...</p>
+          {:else if members.length === 0}
+            <p class="text-gray-500 text-xs">공유된 프로젝트가 없습니다.</p>
+          {:else}
+            <div class="space-y-1">
+              {#each members as m (m.member_id)}
+                <div class="flex items-center justify-between px-3 py-2 bg-gray-800 rounded-lg">
+                  <div>
+                    <span class="text-xs text-gray-300 font-mono">{m.member_id}</span>
+                    <span class="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-gray-700 text-gray-400">{m.status}</span>
+                  </div>
+                  <button
+                    onclick={() => removeMember(m.member_id)}
+                    disabled={removingMember === m.member_id}
+                    class="text-xs px-2 py-1 text-red-400 hover:text-red-300 disabled:text-gray-600 transition-colors"
+                  >
+                    {removingMember === m.member_id ? '삭제 중...' : '삭제'}
+                  </button>
+                </div>
+              {/each}
+            </div>
+          {/if}
         </div>
       {/if}
 

@@ -151,3 +151,32 @@ def _guess_distro(name: str) -> str | None:
         if distro in lower:
             return distro
     return None
+
+
+# ---------------------------------------------------------------------------
+# 이미지 멤버 (공유 프로젝트 관리)
+# ---------------------------------------------------------------------------
+
+
+def list_image_members(conn: openstack.connection.Connection, image_id: str) -> list[dict]:
+    """이미지 멤버(공유 프로젝트) 목록 조회."""
+    members = conn.image.members(image_id)
+    return [
+        {
+            "member_id": m.id,
+            "status": m.status,
+            "created_at": str(m.created_at) if m.created_at else None,
+        }
+        for m in members
+    ]
+
+
+def add_image_member(conn: openstack.connection.Connection, image_id: str, member_id: str) -> dict:
+    """이미지에 프로젝트 멤버 추가."""
+    m = conn.image.add_member(image_id, member_id=member_id)
+    return {"member_id": m.id, "status": m.status}
+
+
+def remove_image_member(conn: openstack.connection.Connection, image_id: str, member_id: str) -> None:
+    """이미지에서 프로젝트 멤버 삭제."""
+    conn.image.remove_member(member_id, image_id)

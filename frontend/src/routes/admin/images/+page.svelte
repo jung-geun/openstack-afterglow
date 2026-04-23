@@ -291,7 +291,7 @@
 {#if selectedImageId}
 	<SlidePanel onClose={closeDetail} width="w-full md:w-[50vw] max-w-2xl">
 		{#await import('$lib/components/ImageDetailPanel.svelte') then { default: Panel }}
-			<Panel imageId={selectedImageId} onClose={closeDetail} />
+			<Panel imageId={selectedImageId} onClose={closeDetail} isAdmin={true} />
 		{/await}
 	</SlidePanel>
 {/if}
