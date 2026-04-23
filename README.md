@@ -45,10 +45,13 @@ Afterglow는 두 프로젝트의 장점을 취하고 단점을 보완합니다.
 - kubeconfig 다운로드
 - **Cloud Provider OpenStack 통합** — OCCM, Cinder CSI, Manila CSI, Keystone Auth, Octavia Ingress, Barbican KMS 플러그인 지원
 
-### OverlayFS 라이브러리 레이어 (AI/ML 특화)
-- Manila NFS/CephFS share를 OverlayFS lower layer로 마운트
-- Python, PyTorch, vLLM, Jupyter 등 사전 빌드 레이어 공유
-- 프로젝트 간 read-only 라이브러리 공유로 스토리지 효율화
+### Union Mount 레이어 시스템 (AI/ML 특화)
+- **Content-addressable 불변 레이어** — 각 레이어를 `sha256(diff/)` 해시로 식별, OCI 스타일
+- **Single-parent 상속 체인** — Python base → PyTorch → vLLM 등 계층적 레이어 조합
+- **CephFS via Manila 3-share 구조**: `layer-store-rw`(빌더 전용) / `layer-store-ro`(사용자 RO) / `manifest-store`
+- **overlayfs 합성**: User VM에서 조상 체인을 `lowerdir=derived:parent:...:base`로 조립, upperdir은 로컬 디스크에 생성
+- **3-lock 불변성**: `chmod -R a-w` + `chattr +i` + DB `sealed=true` — seal 후 변경 불가
+- **Builder VM 격리**: Manila RW 접근 권한을 가진 전용 VM에서 `layerbuild` CLI로 레이어 빌드 및 seal
 
 ### 관리자 기능
 - 프로젝트별 쿼터 관리
@@ -268,9 +271,16 @@ npm run test:parallel # 병렬 실행
 - [x] k3s 클러스터 프로비저닝 (soft-delete 이력 보존)
 - [x] 관리자 쿼터 관리 / 이미지 substring 검색
 - [x] GitHub Actions CI/CD (멀티 플랫폼 Docker 빌드)
-- [ ] Fedora CoreOS 기반 k3s 노드 전환
-- [ ] OverlayFS 상태 모니터링 에이전트
-- [ ] Manila Share Snapshot 관리
-- [ ] Frontend — NFS 옵션 UI / 라이브러리 카탈로그
+- [x] Cloud Provider OpenStack 전체 플러그인 통합 (OCCM, Cinder CSI, Manila CSI, Keystone Auth, Octavia Ingress, Barbican KMS)
 
-전체 로드맵: [milestone.md](milestone.md)
+**Union Mount 레이어 시스템 v2**
+
+- [ ] Phase 1 (MVP): content-addressable 레이어 스토리지, `layerbuild` CLI, REST API, `envmgr-use` User VM 통합
+- [ ] Phase 2 (운영): Frontend 레이어 카탈로그 UI, VM 생성 wizard 통합, Builder VM 격리 관리
+- [ ] Phase 3 (확장): Fork/Rebuild 지원, OverlayFS 상태 모니터링 에이전트, Manila Share Snapshot
+
+**기타**
+
+- [ ] Fedora CoreOS 기반 k3s 노드 전환
+
+전체 로드맵: [milestone.md](milestone.md) · Union Mount 설계: [union.md](union.md)

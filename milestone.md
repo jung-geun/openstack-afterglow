@@ -2,9 +2,11 @@
 
 ---
 
-## 0. 프로젝트 개요 (구 PLAN.md)
+## 0. 프로젝트 개요 (구 PLAN.md) ⚠️ 구 설계, union.md로 대체됨
 
-> 이 섹션은 초기 설계 문서(PLAN.md)를 이전한 내용입니다.
+> **[DEPRECATED]** 이 섹션은 초기 설계 문서(PLAN.md)를 이전한 내용으로, OverlayFS 레이어 시스템의 구 설계를 담고 있습니다.
+> 현재 설계는 **`union.md`** (Content-addressable 불변 레이어, single-parent 상속, Manila 3개 share)를 참조하세요.
+> 아래 내용은 역사적 참조용으로만 보존합니다.
 
 ## Context
 
@@ -783,3 +785,95 @@ config.toml 신규 섹션: `[k3s]` 하위 `cinder_csi_*`, `manila_csi_*`, `keyst
 - [x] **포트 페이지 제거**: 사용자 불필요. 사이드바에서 제거, 페이지 삭제
 - [x] **Floating IP 자동 관리**: 사이드바에서 Floating IP 페이지 제거. 인스턴스 상세 패널에서 원클릭 요청/해제+삭제(`POST/DELETE /api/instances/{id}/floating-ip`). 인스턴스 삭제 시 FIP 자동 정리
 - [x] **볼륨 강제 삭제**: `error`/`error_deleting` 상태 볼륨을 관리자가 강제 삭제 (`POST /api/volumes/{id}/force-delete`, Cinder `os-reset_status` + `os-force_delete`)
+
+---
+
+## 9. Union Mount 레이어 시스템 v2 (content-addressable)
+
+> 설계 원문: **`union.md`** — 구현 전 반드시 먼저 읽는다.
+>
+> **핵심 원칙**: content-addressable 불변 레이어 | single-parent 상속(MVP) | Manila 3개 share(RW/RO/manifest) | overlayfs upperdir = 로컬 디스크
+
+### 9.1 Phase 1 — MVP (목표: ~2주)
+
+**Manila + CephFS 기반 레이어 스토리지 구성**
+
+- [ ] Manila share 3개 프로비저닝: `layer-store-rw`, `layer-store-ro`, `manifest-store`
+  - `layer-store-rw`: Builder VM RW 마운트 (cephx 또는 Manila access rule)
+  - `layer-store-ro`: User VM RO 마운트 (read_only=True access rule)
+  - `manifest-store`: DB 대체용 JSON manifest 저장 (향후 PostgreSQL 전환 전)
+- [ ] Builder VM 설정: Ubuntu 22.04, Manila RW 마운트, `layerbuild` CLI 설치
+- [ ] `layerbuild` CLI (`backend/app/services/union/layerbuild.py`):
+  - `layerbuild init <name> [--parent <hash>]` — layer.json 생성, diff/ 디렉토리 준비
+  - `layerbuild seal` — diff/ sha256 해시 계산, `chmod -R a-w` + `chattr +i` + DB `sealed=true` 3-lock
+  - 레이어 디렉토리 구조: `<layer-store>/<hash>/layer.json`, `<hash>/diff/`
+
+**PostgreSQL 스키마**
+
+- [ ] `backend/app/models/union.py` — Pydantic 모델: `Layer`, `Template`, `UserMount`
+- [ ] DB 마이그레이션: `layers`, `templates`, `user_mounts` 테이블 생성
+  ```sql
+  layers(id, parent_id FK RESTRICT, hash, name, description, created_by, created_at, sealed, size_bytes)
+  templates(id, name, leaf_layer_id FK, description, created_by, created_at)
+  user_mounts(id, user_id, layer_id FK, vm_id, mount_path, created_at, status)
+  ```
+
+**REST API (Backend)**
+
+- [ ] `GET /api/union/layers` — 레이어 목록 (페이지네이션)
+- [ ] `GET /api/union/layers/{id}` — 레이어 상세 + 조상 체인
+- [ ] `POST /api/union/layers` — 새 레이어 등록 (sealed=false)
+- [ ] `POST /api/union/layers/{id}/seal` — 레이어 seal (hash 검증 + 3-lock)
+- [ ] `GET /api/union/templates` — 템플릿 목록
+- [ ] `POST /api/union/templates` — 템플릿 생성
+- [ ] `GET /api/union/layers/{id}/ancestors` — 조상 체인 반환 (lowerdir 조립용)
+
+**User VM envmgr**
+
+- [ ] `envmgr-init.sh` cloud-init 통합: Manila RO share 마운트
+- [ ] `envmgr-use.sh <template_or_layer_id>`:
+  1. `/api/union/layers/{id}/ancestors` 호출 → 조상 리스트
+  2. `lowerdir=derived:parent:...:base` 조립 (leftmost = 최신)
+  3. `upperdir=/var/overlay/<id>/upper`, `workdir=/var/overlay/<id>/work` (로컬 디스크)
+  4. `mount -t overlay overlay -o lowerdir=...,upperdir=...,workdir=... /mnt/env`
+
+**테스트**
+
+- [ ] `backend/tests/test_union_layers.py` — CRUD, seal, 조상 쿼리, hash 검증
+- [ ] `backend/tests/test_union_templates.py` — 템플릿 생성/조회/삭제
+
+### 9.2 Phase 2 — 운영 (목표: Phase 1 완료 후 ~3주)
+
+**Frontend UI**
+
+- [ ] `/library` 라우트: 레이어 카탈로그 페이지 (트리 시각화)
+- [ ] `/library/create` — 새 레이어 생성 wizard (이름, 부모 선택, 설명)
+- [ ] `/library/[id]` — 레이어 상세: 조상 체인, seal 상태, 파생 레이어 목록
+- [ ] 템플릿 관리 UI (관리자 전용)
+- [ ] VM 생성 wizard — "라이브러리 레이어" 선택 단계 통합 (Model A: 템플릿 선택)
+
+**보안 + 격리**
+
+- [ ] Manila access rule 자동 관리: Builder VM RW 추가/제거 API
+- [ ] 레이어 소유자/프로젝트 격리: `created_by` 기반 접근 제어
+- [ ] seal 후 RW 접근 차단 검증
+
+**운영 도구**
+
+- [ ] `GET /api/union/layers/{id}/dependents` — 자식 레이어 목록 (삭제 전 확인용)
+- [ ] 수동 GC 엔드포인트 (관리자): `DELETE /api/union/layers/{id}` — FK RESTRICT로 자식 있으면 차단
+- [ ] 레이어 크기 집계: `size_bytes` 기반 스토리지 사용량 보고
+
+**테스트 확장**
+
+- [ ] Integration test: Builder VM → seal → User VM mount 전체 플로우
+- [ ] FK RESTRICT 삭제 차단 동작 검증
+
+### 9.3 Phase 3 — 확장 (목표: Phase 2 완료 후)
+
+- [ ] **Fork 지원**: `POST /api/union/layers/{id}/fork` — sealed 레이어에서 새 RW 레이어 파생
+- [ ] **Rebuild**: 동일 부모 + 다른 내용 → 새 hash 신규 레이어 (overwrite 금지 정책 유지)
+- [ ] **멀티 상속(실험)**: lowerdir에 여러 부모 지원 — 다이아몬드 충돌 해결 정책 필요
+- [ ] **OverlayFS 상태 모니터링 에이전트**: User VM에서 마운트 상태 주기적 보고
+- [ ] **Manila Share Snapshot 관리**: 레이어 백업/복원
+- [ ] **Fedora CoreOS 노드 지원**: cloud-init → Ignition 전환 (k3s 노드 + Builder VM 동시)
