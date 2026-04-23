@@ -90,28 +90,33 @@ async def list_active_builds():
     result: list[dict] = []
     if is_db_available():
         try:
-            from app.models.db import LibraryBuild
             from sqlalchemy import select
+
+            from app.models.db import LibraryBuild
 
             factory = get_session_factory()
             if factory:
                 async with factory() as session:
-                    rows = (await session.execute(
-                        select(LibraryBuild).order_by(LibraryBuild.created_at.desc()).limit(20)
-                    )).scalars().all()
+                    rows = (
+                        (await session.execute(select(LibraryBuild).order_by(LibraryBuild.created_at.desc()).limit(20)))
+                        .scalars()
+                        .all()
+                    )
                     for r in rows:
-                        result.append({
-                            "id": r.id,
-                            "library_id": r.library_id,
-                            "file_storage_id": r.file_storage_id,
-                            "server_id": r.server_id,
-                            "status": r.status,
-                            "progress_step": r.progress_step,
-                            "progress_pct": r.progress_pct,
-                            "error_message": r.error_message,
-                            "started_at": r.started_at.isoformat() if r.started_at else None,
-                            "completed_at": r.completed_at.isoformat() if r.completed_at else None,
-                        })
+                        result.append(
+                            {
+                                "id": r.id,
+                                "library_id": r.library_id,
+                                "file_storage_id": r.file_storage_id,
+                                "server_id": r.server_id,
+                                "status": r.status,
+                                "progress_step": r.progress_step,
+                                "progress_pct": r.progress_pct,
+                                "error_message": r.error_message,
+                                "started_at": r.started_at.isoformat() if r.started_at else None,
+                                "completed_at": r.completed_at.isoformat() if r.completed_at else None,
+                            }
+                        )
         except Exception:
             pass
     if not result:

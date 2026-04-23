@@ -307,9 +307,7 @@ async def bulk_delete_objects(
     from app.services import swift
 
     try:
-        result = await asyncio.to_thread(
-            swift.bulk_delete_objects, conn, container_name, body.objects, body.recursive
-        )
+        result = await asyncio.to_thread(swift.bulk_delete_objects, conn, container_name, body.objects, body.recursive)
         return result
     except Exception:
         raise HTTPException(status_code=500, detail="일괄 삭제 실패")
@@ -375,9 +373,7 @@ async def move_object(
         original_filename = body.source.rsplit("/", 1)[-1]
         dest_name = dest_name + original_filename
     try:
-        return await asyncio.to_thread(
-            swift.move_object, conn, container_name, body.source, dest_container, dest_name
-        )
+        return await asyncio.to_thread(swift.move_object, conn, container_name, body.source, dest_container, dest_name)
     except Exception:
         _logger.exception("오브젝트 이동 실패: %s -> %s", body.source, body.destination)
         raise HTTPException(status_code=500, detail="오브젝트 이동 실패")
@@ -393,9 +389,7 @@ async def rename_object(
     from app.services import swift
 
     try:
-        return await asyncio.to_thread(
-            swift.rename_object, conn, container_name, body.source, body.new_name
-        )
+        return await asyncio.to_thread(swift.rename_object, conn, container_name, body.source, body.new_name)
     except Exception:
         _logger.exception("오브젝트 이름 변경 실패: %s -> %s", body.source, body.new_name)
         raise HTTPException(status_code=500, detail="오브젝트 이름 변경 실패")

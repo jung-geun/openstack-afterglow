@@ -226,14 +226,16 @@ def list_objects(conn, container: str, prefix: str = "", delimiter: str = "") ->
             subdir = getattr(o, "subdir", None)
             if subdir:
                 seen_subdirs.add(subdir)
-                results.append({
-                    "name": subdir,
-                    "bytes": 0,
-                    "content_type": "application/directory",
-                    "last_modified": "",
-                    "etag": "",
-                    "is_dir": True,
-                })
+                results.append(
+                    {
+                        "name": subdir,
+                        "bytes": 0,
+                        "content_type": "application/directory",
+                        "last_modified": "",
+                        "etag": "",
+                        "is_dir": True,
+                    }
+                )
             else:
                 name = o.name or ""
                 # subdir 엔트리와 동일한 directory marker 오브젝트는 중복 제외
@@ -242,14 +244,16 @@ def list_objects(conn, container: str, prefix: str = "", delimiter: str = "") ->
                 # 명시적 directory marker 오브젝트 (trailing slash + application/directory)
                 ct = getattr(o, "content_type", "") or ""
                 is_dir = name.endswith("/") and ct in ("application/directory", "")
-                results.append({
-                    "name": name,
-                    "bytes": getattr(o, "size", None) or getattr(o, "content_length", 0) or 0,
-                    "content_type": ct,
-                    "last_modified": str(getattr(o, "last_modified_at", "") or ""),
-                    "etag": getattr(o, "etag", "") or "",
-                    "is_dir": is_dir,
-                })
+                results.append(
+                    {
+                        "name": name,
+                        "bytes": getattr(o, "size", None) or getattr(o, "content_length", 0) or 0,
+                        "content_type": ct,
+                        "last_modified": str(getattr(o, "last_modified_at", "") or ""),
+                        "etag": getattr(o, "etag", "") or "",
+                        "is_dir": is_dir,
+                    }
+                )
         return results
     except Exception:
         _logger.debug("Swift 오브젝트 목록 조회 실패 container=%s", container, exc_info=True)
@@ -308,6 +312,7 @@ def delete_object(conn, container: str, name: str) -> None:
     raw DELETE를 사용한다.
     """
     import urllib.parse
+
     _apply_endpoint_override(conn)
     if name.endswith("/"):
         encoded = "/" + urllib.parse.quote(container, safe="") + "/" + urllib.parse.quote(name, safe="/")
@@ -338,9 +343,7 @@ def get_object_metadata(conn, container: str, name: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def bulk_delete_objects(
-    conn, container: str, names: list[str], recursive: bool = False
-) -> dict:
+def bulk_delete_objects(conn, container: str, names: list[str], recursive: bool = False) -> dict:
     """여러 오브젝트를 삭제한다.
 
     recursive=True이면 디렉토리(`/`로 끝나는) 하위 오브젝트 전체를 삭제한다.
@@ -404,6 +407,7 @@ def copy_object(
 ) -> dict:
     """오브젝트를 복사한다 (Swift X-Copy-From 헤더 사용)."""
     import urllib.parse
+
     from app.config import get_settings
 
     _apply_endpoint_override(conn)
@@ -451,7 +455,7 @@ def move_object(
             child_name = child["name"]
             if child_name == source:
                 continue
-            new_child_name = dest_name + child_name[len(source):]
+            new_child_name = dest_name + child_name[len(source) :]
             copy_object(conn, container, child_name, dest_container, new_child_name)
         # 원본 삭제 (하위 파일 먼저, 마커 나중)
         for child in children:

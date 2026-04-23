@@ -64,6 +64,7 @@ async def _update_build_db(
             row.completed_at = datetime.now(UTC)
         await session.commit()
 
+
 # 설치 스크립트 템플릿 (라이브러리별)
 _INSTALL_SCRIPTS: dict[str, str] = {
     "python311": """
@@ -364,7 +365,8 @@ async def _monitor_build(
                     )
                     if build_db_id:
                         await _update_build_db(
-                            build_db_id, status="error",
+                            build_db_id,
+                            status="error",
                             progress_step="빌드 검증 실패",
                             error_message="콘솔 로그에서 완료 마커를 찾을 수 없음",
                             completed=True,
@@ -459,7 +461,8 @@ async def _monitor_build(
                 )
                 if build_db_id:
                     await _update_build_db(
-                        build_db_id, status="error",
+                        build_db_id,
+                        status="error",
                         progress_step="VM 오류 발생",
                         error_message="빌더 VM이 ERROR 상태로 전환됨",
                         completed=True,
@@ -483,7 +486,8 @@ async def _monitor_build(
         )
         if build_db_id:
             await _update_build_db(
-                build_db_id, status="timeout",
+                build_db_id,
+                status="timeout",
                 progress_step="빌드 타임아웃",
                 error_message="30분 내 빌드가 완료되지 않음",
                 completed=True,
@@ -499,7 +503,8 @@ async def _monitor_build(
         _logger.error("[builder] 모니터링 예외: %s", library_id, exc_info=True)
         if build_db_id:
             await _update_build_db(
-                build_db_id, status="error",
+                build_db_id,
+                status="error",
                 progress_step="모니터링 예외",
                 error_message="모니터링 중 예외 발생",
                 completed=True,
