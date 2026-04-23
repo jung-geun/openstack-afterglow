@@ -810,23 +810,18 @@ config.toml 신규 섹션: `[k3s]` 하위 `cinder_csi_*`, `manila_csi_*`, `keyst
 
 **PostgreSQL 스키마**
 
-- [ ] `backend/app/models/union.py` — Pydantic 모델: `Layer`, `Template`, `UserMount`
-- [ ] DB 마이그레이션: `layers`, `templates`, `user_mounts` 테이블 생성
-  ```sql
-  layers(id, parent_id FK RESTRICT, hash, name, description, created_by, created_at, sealed, size_bytes)
-  templates(id, name, leaf_layer_id FK, description, created_by, created_at)
-  user_mounts(id, user_id, layer_id FK, vm_id, mount_path, created_at, status)
-  ```
+- [x] `backend/app/models/union.py` — Pydantic 모델: `LayerInfo`, `TemplateInfo`, `CreateLayerRequest`, `CreateTemplateRequest`, `AncestorChain`
+- [x] DB 마이그레이션: `union_layers`, `union_templates`, `union_user_mounts` 테이블 생성 (MySQL 8.0+, WITH RECURSIVE CTE)
 
 **REST API (Backend)**
 
-- [ ] `GET /api/union/layers` — 레이어 목록 (페이지네이션)
-- [ ] `GET /api/union/layers/{id}` — 레이어 상세 + 조상 체인
-- [ ] `POST /api/union/layers` — 새 레이어 등록 (sealed=false)
-- [ ] `POST /api/union/layers/{id}/seal` — 레이어 seal (hash 검증 + 3-lock)
-- [ ] `GET /api/union/templates` — 템플릿 목록
-- [ ] `POST /api/union/templates` — 템플릿 생성
-- [ ] `GET /api/union/layers/{id}/ancestors` — 조상 체인 반환 (lowerdir 조립용)
+- [x] `GET /api/union/layers` — 레이어 목록 (페이지네이션, ?name= 필터)
+- [x] `GET /api/union/layers/{id}` — 레이어 상세
+- [x] `POST /api/union/layers` — 새 레이어 등록 (sealed=false, 관리자 전용)
+- [x] `POST /api/union/layers/{id}/seal` — 레이어 seal (관리자 전용)
+- [x] `GET /api/union/templates` — 템플릿 목록
+- [x] `POST /api/union/templates` — 템플릿 생성 (관리자 전용)
+- [x] `GET /api/union/layers/{id}/ancestors` — 조상 체인 반환 (lowerdir 조립용)
 
 **User VM envmgr**
 
@@ -839,8 +834,8 @@ config.toml 신규 섹션: `[k3s]` 하위 `cinder_csi_*`, `manila_csi_*`, `keyst
 
 **테스트**
 
-- [ ] `backend/tests/test_union_layers.py` — CRUD, seal, 조상 쿼리, hash 검증
-- [ ] `backend/tests/test_union_templates.py` — 템플릿 생성/조회/삭제
+- [x] `backend/tests/test_union_layers.py` — CRUD, seal, 조상 쿼리, hash 검증, 템플릿 CRUD (30개 테스트)
+- [ ] `backend/tests/test_union_templates.py` — 템플릿 생성/조회/삭제 (별도 파일)
 
 ### 9.2 Phase 2 — 운영 (목표: Phase 1 완료 후 ~3주)
 

@@ -3,6 +3,7 @@
 from datetime import UTC, datetime
 
 from sqlalchemy import (
+    BIGINT,
     BOOLEAN,
     CHAR,
     INT,
@@ -209,3 +210,81 @@ class LibraryBuild(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+
+# ---------------------------------------------------------------------------
+# Union Mount 레이어 시스템
+# ---------------------------------------------------------------------------
+
+
+class UnionLayer(Base):
+    """Content-addressable 불변 레이어. id = 'sha256:<64hex>'."""
+
+    __tablename__ = "union_layers"
+
+    id: Mapped[str] = mapped_column(VARCHAR(71), primary_key=True)  # sha256:<64hex>
+    name: Mapped[str] = mapped_column(VARCHAR(128), nullable=False, index=True)
+    version: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    created_by: Mapped[str] = mapped_column(VARCHAR(128), nullable=False)
+    sealed: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False)
+
+    # 단일 상속: 부모 0개(최상위) 또는 1개
+    parent_id: Mapped[str | None] = mapped_column(
+        VARCHAR(71), ForeignKey("union_layers.id", ondelete="RESTRICT"), index=True
+    )
+    # 최상위 레이어에만 있음: 어느 Ubuntu base 위에서 빌드됐는지
+    ubuntu_base: Mapped[str | None] = mapped_column(VARCHAR(255))
+
+    # 재현/재빌드용 메타데이터
+    build_recipe: Mapped[dict] = mapped_column(JSON, nullable=False)
+    installed_packages: Mapped[dict] = mapped_column(JSON, nullable=False)
+
+    # 검증용
+    content_hash: Mapped[str] = mapped_column(VARCHAR(71), nullable=False)  # sha256:<64hex>
+    size_bytes: Mapped[int | None] = mapped_column(BIGINT)
+    file_count: Mapped[int | None] = mapped_column(INT)
+
+    # 관계
+    parent: Mapped["UnionLayer | None"] = relationship("UnionLayer", remote_side="UnionLayer.id")
+    templates: Mapped[list["UnionTemplate"]] = relationship("UnionTemplate", back_populates="leaf_layer")
+
+    __table_args__ = (
+        Index("idx_union_layers_name_version", "name", "version"),
+        Index("idx_union_layers_parent", "parent_id"),
+    )
+
+
+class UnionTemplate(Base):
+    """이름 붙은 레이어 조합 (leaf layer + ubuntu base 지정)."""
+
+    __tablename__ = "union_templates"
+
+    name: Mapped[str] = mapped_column(VARCHAR(128), primary_key=True)
+    version: Mapped[int] = mapped_column(INT, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    created_by: Mapped[str] = mapped_column(VARCHAR(128), nullable=False)
+    parent_version: Mapped[int | None] = mapped_column(INT)
+    ubuntu_base: Mapped[str] = mapped_column(VARCHAR(255), nullable=False)
+    leaf_layer_id: Mapped[str] = mapped_column(
+        VARCHAR(71), ForeignKey("union_layers.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    note: Mapped[str | None] = mapped_column(TEXT)
+
+    # 관계
+    leaf_layer: Mapped["UnionLayer"] = relationship("UnionLayer", back_populates="templates")
+
+
+class UnionUserMount(Base):
+    """사용자 VM 마운트 추적 (GC 판단 및 운영 가시성)."""
+
+    __tablename__ = "union_user_mounts"
+
+    id: Mapped[int] = mapped_column(INT, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(VARCHAR(128), nullable=False, index=True)
+    vm_hostname: Mapped[str] = mapped_column(VARCHAR(255), nullable=False)
+    leaf_layer_id: Mapped[str] = mapped_column(
+        VARCHAR(71), ForeignKey("union_layers.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    mounted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    unmounted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

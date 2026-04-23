@@ -362,6 +362,11 @@ if _svc_cfg.service_k3s_enabled:
     app.include_router(k3s_clusters_router, prefix="/api/k3s/clusters", tags=["k3s"])
     app.include_router(k3s_health_router, prefix="/api/k3s/clusters", tags=["k3s-health"])
     app.include_router(k3s_callback_router, prefix="/api/k3s", tags=["k3s-callback"])
+
+# Union Mount 레이어 시스템 (DB 연결 시 항상 활성화)
+from app.api.union import router as union_router  # noqa: E402
+
+app.include_router(union_router, prefix="/api/union", tags=["union"])
 if _svc_cfg.service_trove_enabled:
     from app.api.database.instances import router as trove_router
 

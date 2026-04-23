@@ -414,8 +414,8 @@ async def test_finalize_api_lb_adds_member_and_health_monitor():
 
     mock_conn = MagicMock()
 
-    with patch("app.services.k3s_db.update_cluster_status", new_callable=AsyncMock) as mock_update, \
-         patch("app.services.k3s_db.get_kubeconfig", new_callable=AsyncMock, return_value="server: https://10.0.0.1:6443") as mock_get_kube, \
+    with patch("app.services.k3s_db.update_cluster_status", new_callable=AsyncMock), \
+         patch("app.services.k3s_db.get_kubeconfig", new_callable=AsyncMock, return_value="server: https://10.0.0.1:6443"), \
          patch("app.services.k3s_db.store_kubeconfig", new_callable=AsyncMock) as mock_store_kube, \
          patch("app.services.octavia") as mock_octavia:
         mock_lb = {"vip_subnet_id": "subnet-provider", "vip_port_id": "port-1", "vip_address": "10.100.0.50"}
