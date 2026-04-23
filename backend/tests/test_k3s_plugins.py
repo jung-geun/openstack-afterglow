@@ -467,7 +467,8 @@ def test_cloudinit_server_no_plugins():
         callback_url="http://callback.example.com",
         callback_token="token123",
     )
-    decoded = gzip.decompress(base64.b64decode(result)).decode()
+    assert result.config_drive is False
+    decoded = gzip.decompress(base64.b64decode(result.data)).decode()
     assert "#cloud-config" in decoded
     assert "k3s_version" not in decoded  # Jinja 변수 미치환 없어야 함
     assert "--disable-cloud-controller" not in decoded
@@ -486,7 +487,8 @@ def test_cloudinit_server_with_occm_plugin():
         plugin_manifests=[{"name": "occm", "content": "apiVersion: v1\nkind: List\nitems: []\n"}],
         needs_external_cloud_provider=True,
     )
-    decoded = gzip.decompress(base64.b64decode(result)).decode()
+    assert result.config_drive is False
+    decoded = gzip.decompress(base64.b64decode(result.data)).decode()
     assert "--disable-cloud-controller" in decoded
     assert "cloud-provider=external" in decoded
     assert "occm-manifests.yaml" in decoded
@@ -508,7 +510,8 @@ def test_cloudinit_server_multi_plugins():
         ],
         needs_external_cloud_provider=True,
     )
-    decoded = gzip.decompress(base64.b64decode(result)).decode()
+    assert result.config_drive is False
+    decoded = gzip.decompress(base64.b64decode(result.data)).decode()
     assert "occm-manifests.yaml" in decoded
     assert "cinder_csi-manifests.yaml" in decoded
 
@@ -523,7 +526,8 @@ def test_cloudinit_agent_no_extra_args():
         server_ip="10.0.0.1",
         node_token="tok",
     )
-    decoded = gzip.decompress(base64.b64decode(result)).decode()
+    assert result.config_drive is False
+    decoded = gzip.decompress(base64.b64decode(result.data)).decode()
     assert "#cloud-config" in decoded
     assert "INSTALL_K3S_EXEC" not in decoded
 
@@ -539,7 +543,8 @@ def test_cloudinit_agent_with_cloud_provider():
         node_token="tok",
         extra_agent_args=["--kubelet-arg=cloud-provider=external"],
     )
-    decoded = gzip.decompress(base64.b64decode(result)).decode()
+    assert result.config_drive is False
+    decoded = gzip.decompress(base64.b64decode(result.data)).decode()
     assert "cloud-provider=external" in decoded
     assert "INSTALL_K3S_EXEC" in decoded
 
@@ -555,5 +560,6 @@ def test_cloudinit_agent_backward_compat_occm_enabled():
         node_token="tok",
         occm_enabled=True,
     )
-    decoded = gzip.decompress(base64.b64decode(result)).decode()
+    assert result.config_drive is False
+    decoded = gzip.decompress(base64.b64decode(result.data)).decode()
     assert "cloud-provider=external" in decoded

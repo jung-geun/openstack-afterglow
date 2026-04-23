@@ -99,6 +99,7 @@ version = "v1.34.6+k3s1"
 server_flavor_id = ""          # 서버(control plane) 노드 플레이버 ID
 default_agent_flavor_id = ""   # 에이전트(worker) 노드 기본 플레이버 ID
 server_image_id = ""           # Ubuntu 22.04+ 이미지 ID
+fcos_image_id = ""             # Fedora CoreOS 이미지 ID (os_type=fcos 클러스터에 사용)
 callback_base_url = ""         # 서버 VM이 콜백할 백엔드 URL (예: http://10.0.0.1:8000)
 kubeconfig_encryption_key = "" # AES-256-GCM 키 — openssl rand -hex 32 로 생성
 boot_volume_size_gb = 30
@@ -155,10 +156,17 @@ barbican_kms_enabled = false
 barbican_kms_image = "registry.k8s.io/provider-os/barbican-kms-plugin:v1.31.0"
 barbican_kms_kek_id = "" # Barbican secret UUID (예: "12345678-...")
 
-# API LB (K3s API 서버용 Octavia LB + Floating IP)
-# 활성화 시: 클러스터 생성 중 LB + FIP 할당 → kubeconfig의 server URL이 FIP 주소로 패치됨
+# API LB (K3s API 서버용 Octavia LB)
+# LB-first 전략: VM 생성 전에 LB(listener+pool)를 완성하고, 콜백 후 member만 추가.
+# 모드 A — provider 네트워크에 VIP 직접 생성 (FIP 불필요, 권장):
+#   api_lb_enabled = true
+#   api_lb_vip_network_id = "<provider-network-uuid>"
+# 모드 B — tenant 서브넷 VIP + Floating IP (하위호환):
+#   api_lb_enabled = true
+#   api_lb_floating_network_id = "<external-network-uuid>"
 api_lb_enabled = false
-api_lb_floating_network_id = ""  # FIP 할당 외부 네트워크 ID (미설정 시 occm_floating_network_id 사용)
+api_lb_vip_network_id = ""            # [모드 A] provider 네트워크 ID (설정 시 FIP 불필요)
+api_lb_floating_network_id = ""       # [모드 B] FIP 할당 외부 네트워크 ID (미설정 시 occm_floating_network_id 사용)
 
 # LB 네트워크 분리
 # OCCM Service LB(type: LoadBalancer) + API LB(6443) 공통 VIP 서브넷

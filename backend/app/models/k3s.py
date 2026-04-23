@@ -24,6 +24,9 @@ class K3sProgressMessage(BaseModel):
     error: str | None = None
 
 
+_VALID_OS_TYPES = {"ubuntu", "fcos"}
+
+
 class CreateK3sClusterRequest(BaseModel):
     name: str = ""
     agent_count: int = Field(default=1, ge=0, le=10)
@@ -32,6 +35,7 @@ class CreateK3sClusterRequest(BaseModel):
     key_name: str | None = None
     api_lb_enabled: bool | None = None  # None = 서버 설정(k3s_api_lb_enabled) 따름
     api_lb_network_id: str | None = None  # 외부 LB Floating IP 네트워크 ID (미설정 시 서버 설정 따름)
+    os_type: str = "ubuntu"  # "ubuntu" | "fcos"
 
     @field_validator("name")
     @classmethod
@@ -40,6 +44,13 @@ class CreateK3sClusterRequest(BaseModel):
             return f"k3s-{uuid.uuid4().hex[:8]}"
         if not _NAME_RE.match(v):
             raise ValueError("이름은 영문/숫자로 시작하고, 영문·숫자·하이픈·언더스코어만 허용됩니다 (최대 63자)")
+        return v
+
+    @field_validator("os_type")
+    @classmethod
+    def validate_os_type(cls, v: str) -> str:
+        if v not in _VALID_OS_TYPES:
+            raise ValueError(f"os_type은 {sorted(_VALID_OS_TYPES)} 중 하나여야 합니다")
         return v
 
 
@@ -69,6 +80,7 @@ class K3sClusterInfo(BaseModel):
     api_lb_id: str | None = None
     api_fip_id: str | None = None
     api_fip_address: str | None = None
+    os_type: str | None = None
 
 
 class K3sClusterInfoDeleted(K3sClusterInfo):

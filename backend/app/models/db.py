@@ -39,6 +39,7 @@ class K3sCluster(Base):
     security_group_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     # API LB (K3s API 서버 앞단 Octavia LB + Floating IP)
     api_lb_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    api_lb_pool_id: Mapped[str | None] = mapped_column(VARCHAR(64))  # LB-first 방식: 클러스터 생성 시 pool 저장
     api_fip_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     api_fip_address: Mapped[str | None] = mapped_column(VARCHAR(45))
 
@@ -63,6 +64,7 @@ class K3sCluster(Base):
     agent_count: Mapped[int] = mapped_column(INT, nullable=False, default=0)
     occm_enabled: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False)
     plugins_enabled: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # {"occm": true, ...}
+    os_type: Mapped[str] = mapped_column(VARCHAR(10), nullable=False, default="ubuntu")
 
     # 타임스탬프
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)

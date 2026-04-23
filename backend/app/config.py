@@ -154,8 +154,11 @@ def _load_toml() -> dict:
     # API LB (K3s API 서버 앞단 Octavia LB + Floating IP)
     flat["k3s_api_lb_enabled"] = k3s.get("api_lb_enabled", False)
     flat["k3s_api_lb_floating_network_id"] = k3s.get("api_lb_floating_network_id", "")
+    flat["k3s_api_lb_vip_network_id"] = k3s.get("api_lb_vip_network_id", "")
     # LB 네트워크 분리: OCCM Service LB + API LB 공통 VIP 서브넷
     flat["k3s_lb_subnet_id"] = k3s.get("lb_subnet_id", "")
+    # FCOS (Fedora CoreOS) 이미지 ID
+    flat["k3s_fcos_image_id"] = k3s.get("fcos_image_id", "")
 
     gpu = data.get("gpu", {})
     flat["gpu_available_visible"] = gpu.get("available_visible", False)
@@ -300,8 +303,12 @@ class Settings(BaseSettings):
     # API LB
     k3s_api_lb_enabled: bool = False
     k3s_api_lb_floating_network_id: str = ""  # 미설정 시 k3s_occm_floating_network_id 사용
+    # provider 네트워크에 VIP 직접 생성 (설정 시 FIP 불필요, k3s_api_lb_floating_network_id 미사용)
+    k3s_api_lb_vip_network_id: str = ""
     # LB 네트워크 분리: OCCM Service LB + API LB VIP 서브넷 (미설정 시 클러스터 네트워크의 첫 서브넷)
     k3s_lb_subnet_id: str = ""
+    # FCOS (Fedora CoreOS) 이미지 ID (os_type=fcos 클러스터에 사용)
+    k3s_fcos_image_id: str = ""
     notion_config_encryption_key: str = ""  # 미설정 시 k3s_kubeconfig_encryption_key 재사용
 
     # GPU

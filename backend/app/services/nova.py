@@ -62,6 +62,7 @@ def create_server(
     metadata: dict | None = None,
     delete_boot_volume_on_termination: bool = False,
     security_groups: list[str] | None = None,
+    config_drive: bool = False,
 ) -> InstanceInfo:
     body = {
         "name": name,
@@ -76,6 +77,8 @@ def create_server(
             }
         ],
     }
+    if config_drive:
+        body["config_drive"] = True
     if userdata:
         body["user_data"] = userdata
     # network_id가 있으면 지정, 없으면 자동 할당

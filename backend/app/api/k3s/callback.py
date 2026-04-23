@@ -81,16 +81,22 @@ async def _finalize_api_lb(
     server_ip: str,
     conn,
 ) -> None:
-    """API LB 설정 완료: listener → pool → member → health monitor → FIP 연결."""
+    """API LB 설정 완료: member 추가 + health monitor + kubeconfig 패치.
+
+    LB-first 전략: clusters.py에서 이미 LB(listener+pool)를 완전히 생성했으므로,
+    서버 VM의 private IP를 pool에 member로 추가하고 health monitor를 생성한 후
+    kubeconfig의 server URL을 LB 주소(FIP 또는 provider VIP)로 패치한다.
+    """
     from app.services import k3s_db as _k3s_db
     from app.services import octavia
 
     api_lb_id = cluster.get("api_lb_id") or ""
+    api_lb_pool_id = cluster.get("api_lb_pool_id") or ""
     api_fip_id = cluster.get("api_fip_id") or ""
     api_fip_address = cluster.get("api_fip_address") or ""
     cluster_name = cluster.get("name") or cluster_id
 
-    if not api_lb_id or not api_fip_address:
+    if not api_lb_id or not api_lb_pool_id or not api_fip_address:
         return
 
     try:
@@ -98,7 +104,7 @@ async def _finalize_api_lb(
         lb = await asyncio.to_thread(octavia.wait_for_load_balancer, conn, api_lb_id)
         vip_subnet_id = lb.get("vip_subnet_id")
 
-        # Member 서브넷: LB가 다른 네트워크에 있을 경우 클러스터 네트워크의 서브넷 사용
+        # Member 서브넷: 클러스터 네트워크의 서브넷 우선 사용 (LB가 다른 네트워크에 있을 수 있음)
         cluster_network_id = cluster.get("network_id")
         member_subnet_id = vip_subnet_id  # 기본값: LB VIP 서브넷
         if cluster_network_id:
@@ -110,29 +116,11 @@ async def _finalize_api_lb(
             except Exception:
                 _logger.warning("k3s cluster %s: 클러스터 네트워크 서브넷 조회 실패, VIP 서브넷 사용", cluster_id)
 
-        # Listener 생성 (TCP:6443)
-        listener = await asyncio.to_thread(
-            octavia.create_listener, conn, api_lb_id, "TCP", 6443, name=f"k3s-api-{cluster_name}"
-        )
-        await asyncio.to_thread(octavia.wait_for_load_balancer, conn, api_lb_id)
-
-        # Pool 생성
-        pool = await asyncio.to_thread(
-            octavia.create_pool,
-            conn,
-            api_lb_id,
-            "TCP",
-            "ROUND_ROBIN",
-            name=f"k3s-api-{cluster_name}",
-            listener_id=listener["id"],
-        )
-        await asyncio.to_thread(octavia.wait_for_load_balancer, conn, api_lb_id)
-
         # Member 추가 (server private IP:6443, 클러스터 서브넷으로)
         await asyncio.to_thread(
             octavia.add_member,
             conn,
-            pool["id"],
+            api_lb_pool_id,
             server_ip,
             6443,
             subnet_id=member_subnet_id,
@@ -144,7 +132,7 @@ async def _finalize_api_lb(
         await asyncio.to_thread(
             octavia.create_health_monitor,
             conn,
-            pool["id"],
+            api_lb_pool_id,
             type="TCP",
             delay=10,
             timeout=5,
@@ -153,17 +141,18 @@ async def _finalize_api_lb(
         )
         await asyncio.to_thread(octavia.wait_for_load_balancer, conn, api_lb_id)
 
-        # FIP → LB VIP port 연결
-        lb_refreshed = await asyncio.to_thread(octavia.get_load_balancer, conn, api_lb_id)
-        vip_port_id = lb_refreshed.get("vip_port_id")
-        if vip_port_id and api_fip_id:
-            await asyncio.to_thread(conn.network.update_ip, api_fip_id, port_id=vip_port_id)
+        # FIP 모드: FIP → LB VIP port 연결 (provider 직접 VIP 모드에서는 이미 연결됨)
+        if api_fip_id:
+            lb_refreshed = await asyncio.to_thread(octavia.get_load_balancer, conn, api_lb_id)
+            vip_port_id = lb_refreshed.get("vip_port_id")
+            if vip_port_id:
+                await asyncio.to_thread(conn.network.update_ip, api_fip_id, port_id=vip_port_id)
 
-        # api_address를 FIP 주소로 업데이트
+        # api_address를 외부 주소(FIP 또는 provider VIP)로 업데이트
         new_api_address = f"https://{api_fip_address}:6443"
         await _k3s_db.update_cluster_status(project_id, cluster_id, "PROVISIONING", api_address=new_api_address)
 
-        # kubeconfig의 server URL을 FIP로 패치
+        # kubeconfig의 server URL을 외부 주소로 패치
         kubeconfig = await _k3s_db.get_kubeconfig(project_id, cluster_id)
         if kubeconfig:
             old_url = f"https://{server_ip}:6443"
@@ -211,7 +200,8 @@ async def _provision_agents(
     ssh_public_key = cluster.get("ssh_public_key") or None
     cluster_name = cluster.get("name") or cluster_id
     k3s_version = cluster.get("k3s_version") or s.k3s_version
-    image_id = s.k3s_server_image_id
+    os_type = cluster.get("os_type") or "ubuntu"
+    image_id = s.k3s_fcos_image_id if os_type == "fcos" else s.k3s_server_image_id
     boot_volume_size = s.k3s_boot_volume_size_gb
     sg_id = cluster.get("security_group_id") or None
 
@@ -244,13 +234,14 @@ async def _provision_agents(
             if not _agent_args and cluster.get("occm_enabled"):
                 # 레거시 클러스터 (plugins_enabled 없음): occm_enabled로 폴백
                 _agent_args = ["--kubelet-arg=cloud-provider=external"]
-            userdata = k3s_cloudinit.generate_agent_userdata(
+            agent_userdata = k3s_cloudinit.generate_agent_userdata(
                 cluster_name=cluster_name,
                 k3s_version=k3s_version,
                 server_ip=server_ip,
                 node_token=node_token,
                 ssh_public_key=ssh_public_key,
                 extra_agent_args=_agent_args,
+                os_type=os_type,
             )
             # 에이전트 VM 생성 (admin conn이므로 key_name 대신 cloud-init으로 공개키 주입)
             vm = await asyncio.to_thread(
@@ -260,10 +251,11 @@ async def _provision_agents(
                 agent_flavor_id,
                 network_id,
                 vol.id,
-                userdata=userdata,
+                userdata=agent_userdata.data,
                 metadata={"k3s_horse_generator_role": "k3s_agent", "k3s_horse_generator_cluster_id": cluster_id},
                 delete_boot_volume_on_termination=True,
                 security_groups=[sg_id] if sg_id else None,
+                config_drive=agent_userdata.config_drive,
             )
             agent_vm_ids.append(vm.id)
             new_agent_entries.append({"vm_id": vm.id, "name": agent_name})

@@ -92,14 +92,22 @@ def get_load_balancer(conn: openstack.connection.Connection, lb_id: str) -> dict
 def create_load_balancer(
     conn: openstack.connection.Connection,
     name: str,
-    vip_subnet_id: str,
+    vip_subnet_id: str = "",
     description: str = "",
+    *,
+    vip_network_id: str | None = None,
 ) -> dict:
-    lb = conn.load_balancer.create_load_balancer(
-        name=name,
-        vip_subnet_id=vip_subnet_id,
-        description=description,
-    )
+    """Octavia LB 생성.
+
+    vip_network_id가 있으면 provider 네트워크에 직접 VIP를 생성 (FIP 불필요).
+    없으면 vip_subnet_id로 tenant 서브넷에 VIP를 생성.
+    """
+    kwargs: dict = {"name": name, "description": description}
+    if vip_network_id:
+        kwargs["vip_network_id"] = vip_network_id
+    else:
+        kwargs["vip_subnet_id"] = vip_subnet_id
+    lb = conn.load_balancer.create_load_balancer(**kwargs)
     return _lb_to_dict(lb)
 
 

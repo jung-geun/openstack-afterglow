@@ -335,3 +335,132 @@ async def test_delete_k3s_cluster_vm_wait_timeout(client):
     assert resp.status_code == 204
     mock_db.delete_cluster_record.assert_called_once()
     mock_neutron.delete_security_group.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# API LB octavia 서비스 단위 테스트 (LB-first 전략)
+# ---------------------------------------------------------------------------
+
+
+def test_octavia_create_lb_with_subnet():
+    """vip_subnet_id로 LB 생성 시 vip_subnet_id가 API 호출에 전달되어야 한다."""
+    from app.services import octavia
+
+    mock_conn = MagicMock()
+    mock_lb = MagicMock()
+    mock_lb.id = "lb-1"
+    mock_lb.name = "test-lb"
+    mock_lb.description = ""
+    mock_lb.provisioning_status = "ACTIVE"
+    mock_lb.operating_status = "ONLINE"
+    mock_lb.vip_address = "192.168.1.100"
+    mock_lb.vip_subnet_id = "subnet-1"
+    mock_lb.vip_network_id = "net-1"
+    mock_lb.vip_port_id = "port-1"
+    mock_lb.project_id = "proj-1"
+    mock_conn.load_balancer.create_load_balancer.return_value = mock_lb
+
+    result = octavia.create_load_balancer(mock_conn, "test-lb", "subnet-1", "desc")
+
+    mock_conn.load_balancer.create_load_balancer.assert_called_once_with(
+        name="test-lb", description="desc", vip_subnet_id="subnet-1"
+    )
+    assert result["id"] == "lb-1"
+
+
+def test_octavia_create_lb_with_vip_network_id():
+    """vip_network_id 설정 시 vip_subnet_id 대신 vip_network_id가 API 호출에 전달되어야 한다."""
+    from app.services import octavia
+
+    mock_conn = MagicMock()
+    mock_lb = MagicMock()
+    mock_lb.id = "lb-2"
+    mock_lb.name = "provider-lb"
+    mock_lb.description = ""
+    mock_lb.provisioning_status = "ACTIVE"
+    mock_lb.operating_status = "ONLINE"
+    mock_lb.vip_address = "10.100.0.50"
+    mock_lb.vip_subnet_id = None
+    mock_lb.vip_network_id = "provider-net-1"
+    mock_lb.vip_port_id = "port-2"
+    mock_lb.project_id = "proj-1"
+    mock_conn.load_balancer.create_load_balancer.return_value = mock_lb
+
+    result = octavia.create_load_balancer(
+        mock_conn, "provider-lb", description="provider VIP LB", vip_network_id="provider-net-1"
+    )
+
+    call_kwargs = mock_conn.load_balancer.create_load_balancer.call_args[1]
+    assert "vip_network_id" in call_kwargs
+    assert call_kwargs["vip_network_id"] == "provider-net-1"
+    assert "vip_subnet_id" not in call_kwargs
+    assert result["id"] == "lb-2"
+
+
+@pytest.mark.asyncio
+async def test_finalize_api_lb_adds_member_and_health_monitor():
+    """_finalize_api_lb는 member 추가 + health monitor만 수행해야 한다 (listener/pool 생성 없음)."""
+    from app.api.k3s.callback import _finalize_api_lb
+
+    cluster = {
+        "id": "cluster-1",
+        "name": "mycluster",
+        "api_lb_id": "lb-1",
+        "api_lb_pool_id": "pool-1",
+        "api_fip_id": "",           # provider VIP 모드: FIP 없음
+        "api_fip_address": "10.100.0.50",
+        "network_id": "net-1",
+    }
+
+    mock_conn = MagicMock()
+
+    with patch("app.services.k3s_db.update_cluster_status", new_callable=AsyncMock) as mock_update, \
+         patch("app.services.k3s_db.get_kubeconfig", new_callable=AsyncMock, return_value="server: https://10.0.0.1:6443") as mock_get_kube, \
+         patch("app.services.k3s_db.store_kubeconfig", new_callable=AsyncMock) as mock_store_kube, \
+         patch("app.services.octavia") as mock_octavia:
+        mock_lb = {"vip_subnet_id": "subnet-provider", "vip_port_id": "port-1", "vip_address": "10.100.0.50"}
+        mock_octavia.wait_for_load_balancer = MagicMock(return_value=mock_lb)
+        mock_octavia.add_member = MagicMock()
+        mock_octavia.create_health_monitor = MagicMock()
+        mock_octavia.get_load_balancer = MagicMock(return_value=mock_lb)
+
+        mock_net = MagicMock()
+        mock_net.subnet_ids = ["subnet-tenant"]
+        mock_conn.network.get_network = MagicMock(return_value=mock_net)
+
+        await _finalize_api_lb("proj-1", "cluster-1", cluster, "10.0.0.1", mock_conn)
+
+    # member 추가 호출
+    mock_octavia.add_member.assert_called_once()
+    call_args = mock_octavia.add_member.call_args
+    assert call_args[0][1] == "pool-1"    # pool_id
+    assert call_args[0][2] == "10.0.0.1"  # server_ip
+    assert call_args[0][3] == 6443        # port
+    # health monitor 생성 호출
+    mock_octavia.create_health_monitor.assert_called_once()
+    # kubeconfig 패치 확인
+    mock_store_kube.assert_called_once()
+    patched_kubeconfig = mock_store_kube.call_args[0][2]
+    assert "10.100.0.50" in patched_kubeconfig
+
+
+@pytest.mark.asyncio
+async def test_finalize_api_lb_skips_when_no_pool_id():
+    """api_lb_pool_id가 없으면 _finalize_api_lb는 아무 작업도 하지 않아야 한다."""
+    from app.api.k3s.callback import _finalize_api_lb
+
+    cluster = {
+        "id": "cluster-1",
+        "name": "mycluster",
+        "api_lb_id": "lb-1",
+        "api_lb_pool_id": "",  # pool ID 없음
+        "api_fip_id": "",
+        "api_fip_address": "10.100.0.50",
+        "network_id": "net-1",
+    }
+
+    mock_conn = MagicMock()
+    with patch("app.services.octavia") as mock_octavia:
+        await _finalize_api_lb("proj-1", "cluster-1", cluster, "10.0.0.1", mock_conn)
+        mock_octavia.wait_for_load_balancer.assert_not_called()
+        mock_octavia.add_member.assert_not_called()
