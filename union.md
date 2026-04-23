@@ -1,8 +1,13 @@
 # Union Mount 기반 레이어 환경 플랫폼 설계
 
 > OpenStack Afterglow — `dev` 브랜치
-> 작성일: 2026-04-24
+> 작성일: 2026-04-24 | 최종 갱신: 2026-04-24
 > 대상: 관리자 / 개발자 참고용 설계 문서
+
+> **구현 현황 (2026-04-24)**: Phase 1 코드 완료.
+> DB 스키마 · REST API 7개 · `layerbuild` CLI · `envmgr-use` 스크립트 · 테스트 30개 구현.
+> Manila share 실제 프로비저닝 및 Builder/User VM 배포는 미완 (인프라 작업).
+> 세부 상태는 `milestone.md §9`를 참조.
 
 ## 0. 개요
 
@@ -327,6 +332,9 @@ $ envmgr use --layer pytorch@2.4.1
 
 ### 6.2 빌드 절차 (단일 상속 기준)
 
+> **구현 완료**: `scripts/layerbuild.py` (서브커맨드: `init` / `exec` / `seal` / `abort`)
+> 환경변수: `AFTERGLOW_API_URL`, `AFTERGLOW_API_TOKEN`, `LAYER_STORE_RW`
+
 ```bash
 # 1. 관리자가 recipe.sh 준비
 cat > recipe.sh <<'EOF'
@@ -335,30 +343,34 @@ set -e
 apt-get update
 apt-get install -y libopenblas-dev
 pip install torch==2.4.1 torchvision==0.19.1
+# 재현성을 위해 캐시 제거
+rm -rf /var/lib/apt/lists/* ~/.cache/pip
 EOF
 
-# 2. layerbuild 실행
-layerbuild create \
-  --name pytorch \
+# 2. 작업 디렉토리 초기화 (부모 있으면 API로 조상 조회 후 overlay 마운트)
+layerbuild init pytorch \
   --version 2.4.1 \
   --parent sha256:cuda-123-def... \
-  --ubuntu-base ubuntu-24.04-server-20260401.qcow2 \
-  --recipe recipe.sh
+  --ubuntu-base ubuntu-24.04-server-20260401.qcow2
+
+# 3. recipe 격리 실행 (systemd-nspawn)
+layerbuild exec recipe.sh
+
+# 4. 봉인 (해시 계산 → diff 이동 → 3-lock → API 등록+seal)
+layerbuild seal
+# stdout: sha256:<64hex>  (새 레이어 ID)
 ```
 
-`layerbuild`가 내부적으로 수행하는 일:
+`layerbuild seal`이 내부적으로 수행하는 일:
 
-1. `--parent`로 지정된 레이어의 조상 체인을 DB에서 해석.
-2. CephFS RW 마운트의 `/cephfs-rw/build-work/<build-id>/` 생성.
-3. VM 로컬 디스크에 `upper/`, `work/`, `merged/` 준비 (overlayfs 요구사항).
-4. 조상 체인을 lowerdir로 overlay 마운트.
-5. `merged/`에 `/dev`, `/proc`, `/sys` bind mount.
-6. `systemd-nspawn -D merged/ bash recipe.sh`로 격리 실행.
-7. 종료 후 `upper/`의 내용을 결정적 tar로 패킹 → sha256 계산.
-8. `/cephfs-rw/layers/sha256-<hash>/`로 원자적 이동 (`rename(2)`).
-9. `chmod -R a-w` + `chattr +i` 봉인.
-10. DB에 레이어 레코드 insert, `parent_id` 설정.
-11. 필요 시 매니페스트 신규 버전 작성.
+1. overlay 마운트 해제 (`umount merged/`)
+2. `upper/` 내용을 결정적 tar로 패킹 → sha256 계산
+   - `tar --sort=name --mtime='1970-01-01T00:00:00Z' --owner=0 --group=0 --numeric-owner -cf - -C upper/ .`
+3. `$LAYER_STORE_RW/sha256-<hash>/diff/` 로 이동
+4. `layer.json` 기록
+5. `chmod -R a-w diff/` + `chattr -R +i diff/` (CephFS 미지원 시 경고 후 진행)
+6. `POST /api/union/layers` → `POST /api/union/layers/{id}/seal`
+7. 작업 디렉토리 정리
 
 ### 6.3 격리 옵션
 
@@ -445,70 +457,76 @@ systemd-nspawn -D "$ROOT/merged" --bind=/home --bind=/tmp
 
 ## 8. 메타데이터 DB 스키마
 
+> **실제 구현**: MySQL 8.0 (InnoDB, utf8mb4). 아래는 논리 스키마이며, 실제 DDL은
+> `backend/app/database.py::create_tables()` 와 `backend/app/models/db.py` 참조.
+> ORM은 SQLAlchemy 2.0 async 사용. `JSONB` → `JSON`, `TEXT PRIMARY KEY` → `VARCHAR(71) PRIMARY KEY`.
+
 ```sql
--- 레이어 본체
-CREATE TABLE layers (
-    id                  TEXT PRIMARY KEY,          -- sha256:...
-    name                TEXT NOT NULL,
-    version             TEXT NOT NULL,
-    created_at          TIMESTAMPTZ NOT NULL,
-    created_by          TEXT NOT NULL,
+-- 레이어 본체 (테이블명: union_layers)
+CREATE TABLE union_layers (
+    id                  VARCHAR(71) PRIMARY KEY,   -- "sha256:<64hex>"
+    name                VARCHAR(128) NOT NULL,
+    version             VARCHAR(64) NOT NULL,
+    created_at          DATETIME(6) NOT NULL,
+    created_by          VARCHAR(128) NOT NULL,
     sealed              BOOLEAN NOT NULL DEFAULT FALSE,
 
     -- 단일 상속: 부모 0개(최상위 레이어) 또는 1개
-    parent_id           TEXT REFERENCES layers(id) ON DELETE RESTRICT,
+    parent_id           VARCHAR(71) REFERENCES union_layers(id) ON DELETE RESTRICT,
 
     -- 최상위 레이어에만 있음: 어느 Ubuntu base 위에서 빌드됐는지
-    ubuntu_base         TEXT,
+    ubuntu_base         VARCHAR(255),
 
     -- 재현/재빌드용
-    build_recipe        JSONB NOT NULL,
-    installed_packages  JSONB NOT NULL,
+    build_recipe        JSON NOT NULL,
+    installed_packages  JSON NOT NULL,
 
     -- 검증용
-    content_hash        TEXT NOT NULL,
+    content_hash        VARCHAR(71) NOT NULL,       -- 레이어 ID와 동일
     size_bytes          BIGINT,
     file_count          INT,
 
-    UNIQUE (name, version, content_hash)
-);
+    KEY idx_union_layers_name_version (name, version),
+    KEY idx_union_layers_parent (parent_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE INDEX idx_layers_parent ON layers(parent_id);
-CREATE INDEX idx_layers_name_version ON layers(name, version);
-
--- 템플릿 (Model A의 "이름 붙은 조합")
-CREATE TABLE templates (
-    name            TEXT NOT NULL,
+-- 템플릿 (테이블명: union_templates)
+CREATE TABLE union_templates (
+    name            VARCHAR(128) NOT NULL,
     version         INT NOT NULL,
-    created_at      TIMESTAMPTZ NOT NULL,
-    created_by      TEXT NOT NULL,
-    parent_version  INT,                           -- 어느 버전에서 분기했는지
-    ubuntu_base     TEXT NOT NULL,
-    leaf_layer_id   TEXT NOT NULL REFERENCES layers(id) ON DELETE RESTRICT,
+    created_at      DATETIME(6) NOT NULL,
+    created_by      VARCHAR(128) NOT NULL,
+    parent_version  INT,
+    ubuntu_base     VARCHAR(255) NOT NULL,
+    leaf_layer_id   VARCHAR(71) NOT NULL REFERENCES union_layers(id) ON DELETE RESTRICT,
     note            TEXT,
     PRIMARY KEY (name, version)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- 사용자 마운트 추적 (GC 판단 및 운영 가시성)
-CREATE TABLE user_mounts (
-    user_id         TEXT NOT NULL,
-    vm_hostname     TEXT NOT NULL,
-    leaf_layer_id   TEXT NOT NULL REFERENCES layers(id),
-    mounted_at      TIMESTAMPTZ NOT NULL,
-    unmounted_at    TIMESTAMPTZ
-);
+-- 사용자 마운트 추적 (테이블명: union_user_mounts)
+CREATE TABLE union_user_mounts (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    user_id         VARCHAR(128) NOT NULL,
+    vm_hostname     VARCHAR(255) NOT NULL,
+    leaf_layer_id   VARCHAR(71) NOT NULL REFERENCES union_layers(id),
+    mounted_at      DATETIME(6) NOT NULL,
+    unmounted_at    DATETIME(6)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ```
 
 ### 8.1 조상 해석 쿼리 (단일 상속)
 
+MySQL 8.0+ `WITH RECURSIVE` CTE 사용. `backend/app/services/union_layers.py::get_ancestors()` 참조.
+
 ```sql
 WITH RECURSIVE ancestors AS (
-    SELECT id, name, version, parent_id, ubuntu_base, 0 AS depth
-    FROM layers WHERE id = $1   -- leaf layer id
+    SELECT *, 0 AS depth
+    FROM union_layers
+    WHERE id = :leaf_id
   UNION ALL
-    SELECT l.id, l.name, l.version, l.parent_id, l.ubuntu_base, a.depth + 1
+    SELECT l.*, a.depth + 1
     FROM ancestors a
-    JOIN layers l ON l.id = a.parent_id
+    JOIN union_layers l ON l.id = a.parent_id
 )
 SELECT * FROM ancestors ORDER BY depth DESC;  -- base부터 leaf 순
 ```
@@ -600,23 +618,35 @@ layergc delete sha256:xxx...
 
 ## 12. 구현 로드맵
 
-### Phase 1 (MVP, ~2주)
-- [ ] CephFS + Manila share 3개 구성 (ro, rw, manifest)
-- [ ] `layerbuild` 스크립트: 단일 상속, recipe 실행, 해시 계산, 봉인
-- [ ] `envmgr-use` 스크립트: 조상 해석, overlay 마운트, nspawn 진입
-- [ ] Postgres 스키마 + 최소 REST API (`/layers/:id/ancestors`, `/templates/:name/:ver`)
-- [ ] 수동 테스트: base → python → cuda → pytorch 4단 스택 빌드 및 사용
+### Phase 1 (MVP) — 코드 완료, 인프라 미배포
 
-### Phase 2 (운영 기능, ~3주)
-- [ ] 템플릿 시스템 (Model A)
-- [ ] 재빌드 명령 (`layerbuild rebuild --from-template ml-pytorch@v1`)
-- [ ] GC 명령
-- [ ] 무결성 검증 cron
-- [ ] CLI polish (`envmgr list`, `envmgr show <layer>`, `envmgr graph`)
+**코드**
+- [x] MySQL 스키마: `union_layers`, `union_templates`, `union_user_mounts` (InnoDB, WITH RECURSIVE CTE)
+- [x] `backend/app/models/union.py` — Pydantic 모델 (LayerInfo, TemplateInfo, AncestorChain 등)
+- [x] `backend/app/services/union_layers.py` — 서비스 레이어 (CRUD + 조상 쿼리 + 템플릿)
+- [x] REST API 7개 (`/api/union/layers`, `/api/union/templates`)
+- [x] `scripts/layerbuild.py` — `init` / `exec` / `seal` / `abort` 서브커맨드
+- [x] `scripts/envmgr-init.sh` — Manila RO 마운트, systemd unit, envmgr-use 설치
+- [x] `scripts/envmgr-use.sh` — overlay 마운트, 템플릿 지원, unmount/status
+- [x] 테스트 30개 (`backend/tests/test_union_layers.py`)
+
+**인프라 (미완)**
+- [ ] Manila share 3개 실제 프로비저닝 및 CephX keyring 발급
+- [ ] Builder VM 배포 및 `layerbuild` 환경변수 설정
+- [ ] 수동 E2E 테스트: base → python → cuda → pytorch 4단 스택 빌드 및 사용자 VM 마운트 검증
+
+### Phase 2 (운영 기능)
+- [ ] 프론트엔드 UI: `/library` 레이어 카탈로그, 트리 시각화
+- [ ] GC 명령 (`DELETE /api/union/layers/{id}` — FK RESTRICT, 마운트 이력 체크)
+- [ ] `GET /api/union/layers/{id}/dependents` — 자식 레이어 목록
+- [ ] 무결성 검증 cron (sha256 재계산 vs DB 비교)
+- [ ] CLI 확장 (`envmgr list`, `envmgr show <layer>`, `envmgr graph`)
+- [ ] 재빌드 지원 (`layerbuild init --from-layer <id>` — 기존 레이어의 recipe 재실행)
+- [ ] `backend/tests/test_union_templates.py` — 템플릿 전용 추가 테스트
 
 ### Phase 3 (확장)
-- [ ] 다중 상속 (opt-in, 충돌 감지 내장)
-- [ ] Ephemeral 빌드 VM (Nova integration)
+- [ ] 다중 상속 opt-in (충돌 감지, DAG 토폴로지 정렬)
+- [ ] Ephemeral 빌드 VM (Nova로 즉석 생성 후 파괴)
 - [ ] 사용자 upperdir 영구 볼륨 옵션 (Cinder)
 - [ ] K3s Pod 기반 빌드 Job
 

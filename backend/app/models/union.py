@@ -11,7 +11,7 @@ _HEX_LEN = 64
 def _validate_sha256_id(v: str) -> str:
     if not v.startswith(_SHA256_PREFIX):
         raise ValueError(f"id는 'sha256:'으로 시작해야 합니다 (받은 값: {v!r})")
-    hex_part = v[len(_SHA256_PREFIX):]
+    hex_part = v[len(_SHA256_PREFIX) :]
     if len(hex_part) != _HEX_LEN or not all(c in "0123456789abcdef" for c in hex_part):
         raise ValueError(f"sha256 해시는 정확히 {_HEX_LEN}자의 소문자 16진수여야 합니다")
     return v

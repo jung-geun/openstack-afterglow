@@ -786,6 +786,38 @@ config.toml 신규 섹션: `[k3s]` 하위 `cinder_csi_*`, `manila_csi_*`, `keyst
 - [x] **Floating IP 자동 관리**: 사이드바에서 Floating IP 페이지 제거. 인스턴스 상세 패널에서 원클릭 요청/해제+삭제(`POST/DELETE /api/instances/{id}/floating-ip`). 인스턴스 삭제 시 FIP 자동 정리
 - [x] **볼륨 강제 삭제**: `error`/`error_deleting` 상태 볼륨을 관리자가 강제 삭제 (`POST /api/volumes/{id}/force-delete`, Cinder `os-reset_status` + `os-force_delete`)
 
+### 8.12 K3s API LB — LB-first 전략 + Provider 직접 VIP
+
+**문제**: 기존 방식은 VM 생성 후 콜백 시점에 LB를 완전히 구성해야 해서 서버 VM이 LB 없이 떠있는 시간이 존재했고, FIP를 통해 외부 노출해야 했다.
+
+- [x] `backend/app/services/octavia.py` — `create_load_balancer()` 에 `vip_network_id` 파라미터 추가 (provider 네트워크에 VIP 직접 생성)
+- [x] `backend/app/api/k3s/clusters.py` — LB-first 전략: VM 생성 전에 LB(ACTIVE 대기) → listener(TCP:6443) → pool(ROUND_ROBIN) 순서로 완전 구성. LB VIP를 k3s TLS SAN으로 사용. `api_lb_pool_id` DB에 저장
+- [x] `backend/app/api/k3s/callback.py` — `_finalize_api_lb()` 간소화: listener/pool 생성 로직 제거 (clusters.py로 이동), member 추가 + health monitor만 담당
+- [x] `backend/app/models/db.py` — `K3sCluster` 에 `api_lb_pool_id`, `api_fip_id`, `api_fip_address`, `api_lb_id` 컬럼 추가
+- [x] `backend/app/database.py` — 관련 ALTER TABLE 마이그레이션 추가
+- [x] `backend/app/config.py` — `k3s_api_lb_vip_network_id` 설정 추가 (provider 네트워크 ID, 설정 시 FIP 없이 VIP 직접 생성)
+- [x] `backend/app/services/k3s_db.py` — `api_lb_pool_id` 필드 직렬화/역직렬화 추가
+- [x] 하위호환: `k3s_api_lb_vip_network_id` 미설정 시 기존 tenant 서브넷 + FIP 방식 유지
+
+### 8.13 Fedora CoreOS (FCOS) k3s 노드 지원
+
+**목표**: k3s 클러스터 생성 시 `os_type: fcos`를 선택하면 Ubuntu cloud-init 대신 Ignition JSON을 주입하여 FCOS 이미지로 노드를 프로비저닝.
+
+- [x] `backend/app/models/k3s.py` — `CreateK3sClusterRequest` 에 `os_type: str = "ubuntu"` 추가 (validator: `ubuntu` | `fcos`)
+- [x] `backend/app/models/db.py` — `K3sCluster` 에 `os_type` 컬럼 추가 (default `ubuntu`)
+- [x] `backend/app/database.py` — `ALTER TABLE k3s_clusters ADD COLUMN os_type` 마이그레이션 추가
+- [x] `backend/app/services/k3s_cloudinit.py` — 완전 재작성. `UserdataResult(data, config_drive)` NamedTuple 반환. FCOS 경로: Python으로 Ignition JSON 직접 조립 (base64+URL 인코딩), Jinja2는 bash 스크립트 렌더링에만 사용. `INSTALL_K3S_SKIP_SELINUX_RPM=true` 포함
+- [x] `backend/app/templates/k3s_server_fcos_callback.sh.j2` — FCOS 서버 콜백 bash 스크립트 템플릿 (신규)
+- [x] `backend/app/templates/k3s_agent_fcos_join.sh.j2` — FCOS 에이전트 조인 bash 스크립트 템플릿 (신규)
+- [x] `backend/app/api/k3s/clusters.py` — `os_type` 분기: FCOS → `k3s_fcos_image_id`, `config_drive=True`; Ubuntu → 기존 이미지, `config_drive=False`
+- [x] `backend/app/api/k3s/callback.py` — `_provision_agents()` 에서 `os_type` 읽어 이미지·userdata 분기
+- [x] `backend/app/config.py` — `k3s_fcos_image_id: str = ""` 설정 추가
+- [x] `backend/app/services/k3s_db.py` — `os_type` 직렬화 추가
+- [x] `backend/tests/test_k3s_fcos.py` — FCOS 전용 테스트 17건 (Ignition JSON 구조, systemd 유닛, 파일 인코딩, os_type 유효성 검증 등)
+- [x] 하위호환: `os_type` 미설정 시 기존 Ubuntu cloud-init 동작 완전 유지
+
+config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id = ""`
+
 ---
 
 ## 9. Union Mount 레이어 시스템 v2 (content-addressable)
@@ -794,50 +826,48 @@ config.toml 신규 섹션: `[k3s]` 하위 `cinder_csi_*`, `manila_csi_*`, `keyst
 >
 > **핵심 원칙**: content-addressable 불변 레이어 | single-parent 상속(MVP) | Manila 3개 share(RW/RO/manifest) | overlayfs upperdir = 로컬 디스크
 
-### 9.1 Phase 1 — MVP (목표: ~2주)
+### 9.1 Phase 1 — MVP ✅ 코드 완료 (인프라 미설정)
 
 **Manila + CephFS 기반 레이어 스토리지 구성**
 
-- [ ] Manila share 3개 프로비저닝: `layer-store-rw`, `layer-store-ro`, `manifest-store`
-  - `layer-store-rw`: Builder VM RW 마운트 (cephx 또는 Manila access rule)
-  - `layer-store-ro`: User VM RO 마운트 (read_only=True access rule)
-  - `manifest-store`: DB 대체용 JSON manifest 저장 (향후 PostgreSQL 전환 전)
-- [ ] Manila share 3개 프로비저닝: `layer-store-rw`, `layer-store-ro`, `manifest-store`
-- [ ] Builder VM 설정: Ubuntu 22.04, Manila RW 마운트, `layerbuild` CLI 설치
+- [ ] Manila share 3개 실제 프로비저닝: `layer-store-rw` (Builder RW), `layer-store-ro` (User RO), `manifest-store`
+- [ ] Builder VM 설정: LAYER_STORE_RW 마운트, `layerbuild` CLI + 의존성 설치
 - [x] `layerbuild` CLI (`scripts/layerbuild.py`):
-  - `layerbuild init <name> --version <ver> [--parent <hash>]` — 작업 디렉토리 + overlay 마운트
-  - `layerbuild exec <recipe.sh>` — systemd-nspawn으로 recipe 실행
-  - `layerbuild seal` — sha256 계산, diff/ 이동, 3-lock (chmod+chattr+API seal), API 등록
-  - `layerbuild abort` — 진행 중인 빌드 취소
+  - `layerbuild init <name> --version <ver> [--parent <sha256:hash>]` — 작업 디렉토리 생성 + overlay/bind 마운트
+  - `layerbuild exec <recipe.sh>` — `systemd-nspawn -D merged/ bash recipe.sh` 격리 실행
+  - `layerbuild seal` — 결정적 sha256 계산, `sha256-<hash>/diff/` 이동, 3-lock (chmod+chattr+API seal), API 레이어 등록
+  - `layerbuild abort` — 진행 중인 빌드 취소 및 마운트 해제
 
-**PostgreSQL 스키마**
+**MySQL 8.0 스키마 + Pydantic 모델**
 
-- [x] `backend/app/models/union.py` — Pydantic 모델: `LayerInfo`, `TemplateInfo`, `CreateLayerRequest`, `CreateTemplateRequest`, `AncestorChain`
-- [x] DB 마이그레이션: `union_layers`, `union_templates`, `union_user_mounts` 테이블 생성 (MySQL 8.0+, WITH RECURSIVE CTE)
+- [x] `backend/app/models/union.py` — Pydantic 모델: `LayerInfo`, `TemplateInfo`, `CreateLayerRequest`, `CreateTemplateRequest`, `AncestorChain`, `SealLayerResponse`
+- [x] `backend/app/models/db.py` — ORM: `UnionLayer`, `UnionTemplate`, `UnionUserMount` (SQLAlchemy async)
+- [x] `backend/app/database.py` — `CREATE TABLE IF NOT EXISTS union_layers / union_templates / union_user_mounts` DDL (MySQL 8.0+, InnoDB, utf8mb4)
+- [x] `backend/app/services/union_layers.py` — 서비스 레이어: CRUD + MySQL `WITH RECURSIVE` CTE 조상 쿼리 + 템플릿 관리
 
-**REST API (Backend)**
+**REST API (Backend)** — `/api/union` 접두어, `backend/app/api/union/`
 
-- [x] `GET /api/union/layers` — 레이어 목록 (페이지네이션, ?name= 필터)
-- [x] `GET /api/union/layers/{id}` — 레이어 상세
+- [x] `GET /api/union/layers` — 레이어 목록 (페이지네이션, `?name=` 필터)
+- [x] `GET /api/union/layers/{id}` — 레이어 상세 조회
 - [x] `POST /api/union/layers` — 새 레이어 등록 (sealed=false, 관리자 전용)
-- [x] `POST /api/union/layers/{id}/seal` — 레이어 seal (관리자 전용)
+- [x] `POST /api/union/layers/{id}/seal` — 레이어 봉인 (관리자 전용, 봉인 후 수정 불가)
+- [x] `GET /api/union/layers/{id}/ancestors` — 조상 체인 반환 base-first 순 (lowerdir 조립용)
 - [x] `GET /api/union/templates` — 템플릿 목록
-- [x] `POST /api/union/templates` — 템플릿 생성 (관리자 전용)
-- [x] `GET /api/union/layers/{id}/ancestors` — 조상 체인 반환 (lowerdir 조립용)
+- [x] `POST /api/union/templates` — 템플릿 생성 (봉인된 leaf만 허용, 관리자 전용)
 
 **User VM envmgr**
 
-- [x] `envmgr-init.sh` cloud-init 통합: Manila RO share 마운트, envmgr-use 설치, systemd unit 등록
-- [x] `envmgr-use.sh <template_or_layer_id>`:
-  1. `/api/union/layers/{id}/ancestors` 호출 → 조상 리스트
-  2. `lowerdir=derived:parent:...:base` 조립 (leftmost = 최신)
-  3. `upperdir=/var/overlay/<id>/upper`, `workdir=/var/overlay/<id>/work` (로컬 디스크)
-  4. `mount -t overlay overlay -o lowerdir=...,upperdir=...,workdir=... /mnt/env`
+- [x] `scripts/envmgr-init.sh` — cloud-init 통합: CephFS RO share 마운트, envmgr-use 설치, systemd `layer-store-ro.mount` unit 등록
+- [x] `scripts/envmgr-use.sh` — 환경 활성화:
+  - `envmgr-use <sha256:...>` — leaf 레이어 직접 지정
+  - `envmgr-use --template <name>@<ver>` — 템플릿으로 활성화 (API 조회)
+  - `envmgr-use --unmount` / `--status`
+  - 조상 체인 API 조회 → lowerdir 조립 → upperdir=`/var/overlay/<hash>/upper` (로컬 디스크) → `mount -t overlay /mnt/env`
 
 **테스트**
 
-- [x] `backend/tests/test_union_layers.py` — CRUD, seal, 조상 쿼리, hash 검증, 템플릿 CRUD (30개 테스트)
-- [ ] `backend/tests/test_union_templates.py` — 템플릿 생성/조회/삭제 (별도 파일)
+- [x] `backend/tests/test_union_layers.py` — Layer CRUD(5), Seal(3), ListLayers(2), GetAncestors(3), LayerIdValidation(3), Templates(3), API(11) = **30개**
+- [ ] `backend/tests/test_union_templates.py` — 템플릿 전용 추가 테스트 (별도 파일, Phase 2 전 작성)
 
 ### 9.2 Phase 2 — 운영 (목표: Phase 1 완료 후 ~3주)
 
@@ -873,4 +903,3 @@ config.toml 신규 섹션: `[k3s]` 하위 `cinder_csi_*`, `manila_csi_*`, `keyst
 - [ ] **멀티 상속(실험)**: lowerdir에 여러 부모 지원 — 다이아몬드 충돌 해결 정책 필요
 - [ ] **OverlayFS 상태 모니터링 에이전트**: User VM에서 마운트 상태 주기적 보고
 - [ ] **Manila Share Snapshot 관리**: 레이어 백업/복원
-- [ ] **Fedora CoreOS 노드 지원**: cloud-init → Ignition 전환 (k3s 노드 + Builder VM 동시)

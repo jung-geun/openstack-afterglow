@@ -78,6 +78,7 @@ _HEX_CHARS = "0123456789abcdef"
 def _sha(seed: str = "a") -> str:
     """seed 문자열로 유효한 sha256:<64hex> 생성."""
     import hashlib
+
     return "sha256:" + hashlib.sha256(seed.encode()).hexdigest()
 
 
@@ -313,18 +314,70 @@ class TestGetAncestors:
         session.get = AsyncMock(return_value=leaf)
 
         rows = [
-            {"id": _sha("a"), "name": "base", "version": "1", "created_at": _NOW, "created_by": "admin",
-             "sealed": True, "parent_id": None, "ubuntu_base": "ubuntu-24.04", "build_recipe": {},
-             "installed_packages": {}, "content_hash": _sha("a"), "size_bytes": None, "file_count": None, "depth": 3},
-            {"id": _sha("b"), "name": "python", "version": "3.12", "created_at": _NOW, "created_by": "admin",
-             "sealed": True, "parent_id": _sha("a"), "ubuntu_base": None, "build_recipe": {},
-             "installed_packages": {}, "content_hash": _sha("b"), "size_bytes": None, "file_count": None, "depth": 2},
-            {"id": _sha("c"), "name": "cuda", "version": "12.3", "created_at": _NOW, "created_by": "admin",
-             "sealed": True, "parent_id": _sha("b"), "ubuntu_base": None, "build_recipe": {},
-             "installed_packages": {}, "content_hash": _sha("c"), "size_bytes": None, "file_count": None, "depth": 1},
-            {"id": _sha("d"), "name": "pytorch", "version": "2.4", "created_at": _NOW, "created_by": "admin",
-             "sealed": True, "parent_id": _sha("c"), "ubuntu_base": None, "build_recipe": {},
-             "installed_packages": {}, "content_hash": _sha("d"), "size_bytes": None, "file_count": None, "depth": 0},
+            {
+                "id": _sha("a"),
+                "name": "base",
+                "version": "1",
+                "created_at": _NOW,
+                "created_by": "admin",
+                "sealed": True,
+                "parent_id": None,
+                "ubuntu_base": "ubuntu-24.04",
+                "build_recipe": {},
+                "installed_packages": {},
+                "content_hash": _sha("a"),
+                "size_bytes": None,
+                "file_count": None,
+                "depth": 3,
+            },
+            {
+                "id": _sha("b"),
+                "name": "python",
+                "version": "3.12",
+                "created_at": _NOW,
+                "created_by": "admin",
+                "sealed": True,
+                "parent_id": _sha("a"),
+                "ubuntu_base": None,
+                "build_recipe": {},
+                "installed_packages": {},
+                "content_hash": _sha("b"),
+                "size_bytes": None,
+                "file_count": None,
+                "depth": 2,
+            },
+            {
+                "id": _sha("c"),
+                "name": "cuda",
+                "version": "12.3",
+                "created_at": _NOW,
+                "created_by": "admin",
+                "sealed": True,
+                "parent_id": _sha("b"),
+                "ubuntu_base": None,
+                "build_recipe": {},
+                "installed_packages": {},
+                "content_hash": _sha("c"),
+                "size_bytes": None,
+                "file_count": None,
+                "depth": 1,
+            },
+            {
+                "id": _sha("d"),
+                "name": "pytorch",
+                "version": "2.4",
+                "created_at": _NOW,
+                "created_by": "admin",
+                "sealed": True,
+                "parent_id": _sha("c"),
+                "ubuntu_base": None,
+                "build_recipe": {},
+                "installed_packages": {},
+                "content_hash": _sha("d"),
+                "size_bytes": None,
+                "file_count": None,
+                "depth": 0,
+            },
         ]
         mock_result = MagicMock()
         mock_result.mappings.return_value.all.return_value = rows

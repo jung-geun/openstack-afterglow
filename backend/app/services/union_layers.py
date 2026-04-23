@@ -61,7 +61,11 @@ def _template_to_info(tmpl: UnionTemplate, stack: list[LayerInfo] | None = None)
 
 async def create_layer(session: AsyncSession, data: CreateLayerRequest, created_by: str) -> LayerInfo:
     """새 레이어 등록. 부모가 있으면 봉인 여부 검증."""
-    layer_id = f"sha256:{data.content_hash[len('sha256:'):]}" if data.content_hash.startswith("sha256:") else data.content_hash
+    layer_id = (
+        f"sha256:{data.content_hash[len('sha256:') :]}"
+        if data.content_hash.startswith("sha256:")
+        else data.content_hash
+    )
 
     # 동일 id 중복 확인
     existing = await session.get(UnionLayer, layer_id)
@@ -74,7 +78,9 @@ async def create_layer(session: AsyncSession, data: CreateLayerRequest, created_
         if parent is None:
             raise ValueError(f"부모 레이어 {data.parent_id}가 존재하지 않습니다")
         if not parent.sealed:
-            raise ValueError(f"부모 레이어 {data.parent_id}가 아직 봉인되지 않았습니다. 봉인 후 자식 레이어를 생성하세요.")
+            raise ValueError(
+                f"부모 레이어 {data.parent_id}가 아직 봉인되지 않았습니다. 봉인 후 자식 레이어를 생성하세요."
+            )
 
     layer = UnionLayer(
         id=layer_id,

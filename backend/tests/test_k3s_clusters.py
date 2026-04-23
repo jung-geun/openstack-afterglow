@@ -407,17 +407,21 @@ async def test_finalize_api_lb_adds_member_and_health_monitor():
         "name": "mycluster",
         "api_lb_id": "lb-1",
         "api_lb_pool_id": "pool-1",
-        "api_fip_id": "",           # provider VIP 모드: FIP 없음
+        "api_fip_id": "",  # provider VIP 모드: FIP 없음
         "api_fip_address": "10.100.0.50",
         "network_id": "net-1",
     }
 
     mock_conn = MagicMock()
 
-    with patch("app.services.k3s_db.update_cluster_status", new_callable=AsyncMock), \
-         patch("app.services.k3s_db.get_kubeconfig", new_callable=AsyncMock, return_value="server: https://10.0.0.1:6443"), \
-         patch("app.services.k3s_db.store_kubeconfig", new_callable=AsyncMock) as mock_store_kube, \
-         patch("app.services.octavia") as mock_octavia:
+    with (
+        patch("app.services.k3s_db.update_cluster_status", new_callable=AsyncMock),
+        patch(
+            "app.services.k3s_db.get_kubeconfig", new_callable=AsyncMock, return_value="server: https://10.0.0.1:6443"
+        ),
+        patch("app.services.k3s_db.store_kubeconfig", new_callable=AsyncMock) as mock_store_kube,
+        patch("app.services.octavia") as mock_octavia,
+    ):
         mock_lb = {"vip_subnet_id": "subnet-provider", "vip_port_id": "port-1", "vip_address": "10.100.0.50"}
         mock_octavia.wait_for_load_balancer = MagicMock(return_value=mock_lb)
         mock_octavia.add_member = MagicMock()
@@ -433,9 +437,9 @@ async def test_finalize_api_lb_adds_member_and_health_monitor():
     # member 추가 호출
     mock_octavia.add_member.assert_called_once()
     call_args = mock_octavia.add_member.call_args
-    assert call_args[0][1] == "pool-1"    # pool_id
+    assert call_args[0][1] == "pool-1"  # pool_id
     assert call_args[0][2] == "10.0.0.1"  # server_ip
-    assert call_args[0][3] == 6443        # port
+    assert call_args[0][3] == 6443  # port
     # health monitor 생성 호출
     mock_octavia.create_health_monitor.assert_called_once()
     # kubeconfig 패치 확인
