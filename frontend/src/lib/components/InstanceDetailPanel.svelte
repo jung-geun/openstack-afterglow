@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { auth } from '$lib/stores/auth';
+	import { auth, isAdmin } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import { goto } from '$app/navigation';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
@@ -27,6 +27,7 @@
 		union_upper_volume_id: string | null;
 		key_name: string | null;
 		user_id: string | null;
+		fault?: { message?: string; code?: number; created?: string } | null;
 	}
 
 	interface FloatingIp {
@@ -584,6 +585,12 @@
 				>
 					{instance.status}
 				</span>
+				{#if instance.status === 'ERROR' && instance.fault?.message && $isAdmin}
+					<div class="mt-2 p-3 rounded-lg bg-red-900/30 border border-red-800/40 text-red-300 text-sm max-w-xl">
+						<div class="font-medium mb-1 text-xs text-red-400">오류 상세 (관리자)</div>
+						<div class="text-xs opacity-90 break-words">{instance.fault.message}</div>
+					</div>
+				{/if}
 			</div>
 			<div class="flex flex-wrap gap-2 justify-end">
 				{#if instance.status === 'SHUTOFF'}

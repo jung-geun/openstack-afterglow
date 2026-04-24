@@ -45,19 +45,34 @@
 		}
 	});
 
-	function getGpuAvailable(flavorName: string): number | null {
-		if (!gpuAvailability.length) return null;
-		// flavor명에서 모델 키워드 추출: gpu.3090_8c_16g → "3090", gpu.titan_8c_32g → "TITAN"
-		const model = flavorName.match(/^gpu\.([^_]+)/)?.[1]?.toUpperCase() ?? '';
-		if (!model) return null;
-		// 모델 키워드를 포함하는 모든 GPU 타입의 available 합산
-		const matched = gpuAvailability.filter(
-			(g) => g.device_name.replace(/\s+/g, '').toUpperCase().includes(model) ||
-			       model.includes(g.device_name.replace(/\s+/g, '').toUpperCase())
-		);
-		if (!matched.length) return null;
-		return matched.reduce((sum, g) => sum + g.available, 0);
+	function parseGpuRequest(f: FlavorInfo): { model: string; count: number }[] {
+		const alias = f.extra_specs?.['pci_passthrough:alias'] ?? '';
+		if (!alias) return [];
+		return alias.split(',')
+			.map(e => e.trim())
+			.filter(e => e.includes(':') && !e.toLowerCase().includes('audio'))
+			.map(e => {
+				const idx = e.lastIndexOf(':');
+				return { model: e.slice(0, idx).trim(), count: parseInt(e.slice(idx + 1)) || 1 };
+			});
 	}
+
+	const selectedGpuRequest = $derived((() => {
+		const map = new Map<string, number>();
+		if (!selectedId || !gpuAvailability.length) return map;
+		const f = flavors.find(fl => fl.id === selectedId);
+		if (!f) return map;
+		for (const r of parseGpuRequest(f)) {
+			const matched = gpuAvailability.find(g =>
+				g.device_name.replace(/\s+/g, '').toUpperCase().includes(r.model.toUpperCase()) ||
+				r.model.toUpperCase().includes(g.device_name.replace(/\s+/g, '').toUpperCase())
+			);
+			if (matched) {
+				map.set(matched.device_name, (map.get(matched.device_name) ?? 0) + r.count);
+			}
+		}
+		return map;
+	})());
 
 	type FlavorCategory = 'all' | 'cpu' | 'gpu' | 'other';
 	let activeCategory = $state<FlavorCategory>('all');
@@ -193,13 +208,24 @@
 <!-- GPU 탭 활성 시 가용량 요약 배너 -->
 {#if activeCategory === 'gpu' && gpuAvailability.length > 0}
 	<div class="mb-3 p-3 rounded-lg bg-gray-800/60 border border-gray-700">
-		<div class="text-xs text-gray-400 mb-2">GPU 가용량</div>
+		<div class="text-xs text-gray-400 mb-2">GPU 가용량{#if selectedGpuRequest.size > 0} <span class="text-blue-400">(선택 flavor 반영)</span>{/if}</div>
 		<div class="flex flex-wrap gap-2">
 			{#each gpuAvailability as g}
+				{@const requested = selectedGpuRequest.get(g.device_name) ?? 0}
+				{@const effectiveAvail = g.available - requested}
 				<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs
-					{g.available > 0 ? 'bg-green-900/30 text-green-300 border border-green-800/40' : 'bg-red-900/30 text-red-300 border border-red-800/40'}">
+					{effectiveAvail > 0
+						? 'bg-green-900/30 text-green-300 border border-green-800/40'
+						: requested > 0
+							? 'bg-yellow-900/30 text-yellow-300 border border-yellow-800/40'
+							: 'bg-red-900/30 text-red-300 border border-red-800/40'}">
 					<span class="font-medium">{g.device_name}</span>
-					<span class="opacity-70">{g.available}/{g.total}</span>
+					{#if requested > 0}
+						<span class="opacity-70">{effectiveAvail}/{g.total}</span>
+						<span class="opacity-50 text-xs">(-{requested})</span>
+					{:else}
+						<span class="opacity-70">{g.available}/{g.total}</span>
+					{/if}
 				</span>
 			{/each}
 		</div>
@@ -208,7 +234,6 @@
 
 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
 	{#each filteredFlavors as flavor}
-		{@const availCount = hasGpu(flavor) ? getGpuAvailable(flavor.name) : null}
 		<button
 			onclick={() => onSelect(flavor.id, flavor.name)}
 			class="text-left p-4 rounded-xl border transition-all {selectedId === flavor.id
@@ -217,16 +242,9 @@
 		>
 			<div class="flex items-start justify-between mb-2">
 				<div class="font-medium text-white text-sm">{flavor.name}</div>
-				<div class="flex items-center gap-1">
-					{#if hasGpu(flavor)}
-						<span class="px-1.5 py-0.5 bg-purple-900/40 text-purple-300 rounded text-xs">GPU</span>
-					{/if}
-					{#if availCount !== null}
-						<span class="px-1.5 py-0.5 rounded text-xs {availCount > 0 ? 'bg-green-900/40 text-green-300' : 'bg-red-900/40 text-red-300'}">
-							잔여 {availCount}
-						</span>
-					{/if}
-				</div>
+				{#if hasGpu(flavor)}
+					<span class="px-1.5 py-0.5 bg-purple-900/40 text-purple-300 rounded text-xs">GPU</span>
+				{/if}
 			</div>
 			<div class="text-xs text-gray-500 space-y-0.5">
 				<div>vCPU: {flavor.vcpus}</div>

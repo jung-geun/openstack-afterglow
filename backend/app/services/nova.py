@@ -14,7 +14,8 @@ _logger = logging.getLogger(__name__)
 
 def list_flavors(conn: openstack.connection.Connection) -> list[FlavorInfo]:
     flavors = []
-    for f in conn.compute.flavors(is_public=True):
+    # is_public=None → 공개 + 접근 권한이 부여된 비공개 플레이버 모두 반환
+    for f in conn.compute.flavors(is_public=None):
         extra = dict(f.extra_specs) if f.extra_specs else {}
         # List API는 extra_specs를 포함하지 않을 수 있으므로 개별 조회 fallback
         if not extra:
@@ -30,7 +31,7 @@ def list_flavors(conn: openstack.connection.Connection) -> list[FlavorInfo]:
                 vcpus=f.vcpus,
                 ram=f.ram,
                 disk=f.disk,
-                is_public=True,
+                is_public=getattr(f, "is_public", True),
                 extra_specs=extra,
             )
         )
@@ -359,6 +360,12 @@ def _server_to_info(s) -> InstanceInfo:
         # 마이크로버전 2.47+에서는 "id" 없이 "original_name"만 반환
         flavor_name = s.flavor.get("original_name")
 
+    fault = None
+    if s.status == "ERROR":
+        raw_fault = getattr(s, "fault", None)
+        if raw_fault:
+            fault = dict(raw_fault) if not isinstance(raw_fault, dict) else raw_fault
+
     return InstanceInfo(
         id=s.id,
         name=s.name,
@@ -375,4 +382,5 @@ def _server_to_info(s) -> InstanceInfo:
         union_upper_volume_id=meta.get("union_upper_volume_id"),
         key_name=getattr(s, "key_name", None),
         user_id=getattr(s, "user_id", None),
+        fault=fault,
     )

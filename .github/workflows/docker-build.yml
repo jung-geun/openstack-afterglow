@@ -18,13 +18,63 @@ env:
   IMAGE_OWNER: ${{ github.repository_owner }}
 
 jobs:
+  # ─── 변경 감지: dev 브랜치에서만 선택적 빌드, 나머지는 항상 전체 빌드 ───
+  changes:
+    name: Detect changed targets
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      targets: ${{ steps.set-targets.outputs.targets }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Detect file changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+              - 'Dockerfile'
+              - '.dockerignore'
+            frontend:
+              - 'frontend/**'
+              - 'Dockerfile'
+              - '.dockerignore'
+
+      - name: Build target list
+        id: set-targets
+        env:
+          CHANGED_BACKEND: ${{ steps.filter.outputs.backend }}
+          CHANGED_FRONTEND: ${{ steps.filter.outputs.frontend }}
+        run: |
+          # dev 브랜치 이외(main, v* 태그, PR)는 항상 전체 빌드
+          if [[ "${GITHUB_REF}" != "refs/heads/dev" ]]; then
+            echo 'targets=["backend","frontend"]' >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          # dev 브랜치: 변경된 타겟만 빌드
+          TARGETS="[]"
+          if [[ "${CHANGED_BACKEND}" == "true" ]]; then
+            TARGETS=$(echo "$TARGETS" | jq -c '. + ["backend"]')
+          fi
+          if [[ "${CHANGED_FRONTEND}" == "true" ]]; then
+            TARGETS=$(echo "$TARGETS" | jq -c '. + ["frontend"]')
+          fi
+          echo "targets=${TARGETS}" >> $GITHUB_OUTPUT
+
   # ─── per-arch 빌드: self-hosted linux(amd64) / macos(arm64) native 빌드 ───
   build:
     name: Build ${{ matrix.target }} (${{ matrix.arch }})
+    needs: changes
+    if: needs.changes.outputs.targets != '[]'
     strategy:
       fail-fast: false
       matrix:
-        target: [backend, frontend]
+        target: ${{ fromJSON(needs.changes.outputs.targets) }}
         arch: [amd64, arm64]
         include:
           - arch: amd64
@@ -153,15 +203,15 @@ jobs:
   # ─── manifest 통합: 두 arch 태그를 합쳐 단일 멀티플랫폼 태그로 push ───
   manifest:
     name: Manifest ${{ matrix.target }}
-    needs: build
-    if: github.event_name != 'pull_request'
+    needs: [changes, build]
+    if: github.event_name != 'pull_request' && needs.changes.outputs.targets != '[]'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     strategy:
       matrix:
-        target: [backend, frontend]
+        target: ${{ fromJSON(needs.changes.outputs.targets) }}
 
     steps:
       - name: Set up Docker Buildx

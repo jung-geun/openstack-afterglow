@@ -1,0 +1,306 @@
+"""Notion Sync Worker — 별도 파드/프로세스로 실행.
+
+사용법:
+  uv run python -m app.notion_worker
+
+Notion 다중 타겟 + 레거시 NotionConfig 동기화를 1분 간격으로 수행.
+메인 API(app.main)에서 분리되어 독립 프로세스로 실행 가능.
+"""
+
+import asyncio
+import logging
+import os
+from datetime import UTC, datetime
+
+logging.basicConfig(
+    level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+
+_logger = logging.getLogger("notion.worker")
+
+_CHECK_INTERVAL = 60  # 1분마다 타겟 확인
+
+
+async def _run_notion_target_sync(target: dict) -> None:
+    """단일 NotionTarget에 대해 전체 동기화를 실행한다."""
+    from app.api.identity.admin_gpu import (
+        build_alias_to_device_name_map,
+        get_gpu_spec_list,
+    )
+    from app.api.identity.admin_notion import (
+        collect_hypervisor_data,
+        collect_instance_data,
+    )
+    from app.services import notion_sync
+
+    target_id = target["id"]
+    api_key = target["api_key"]
+    database_id = target["database_id"]
+    users_db_id = target.get("users_database_id", "")
+    hypervisors_db_id = target.get("hypervisors_database_id", "")
+    gpu_spec_db_id = target.get("gpu_spec_database_id", "")
+
+    gpu_name_to_page_id: dict[str, str] = {}
+    if gpu_spec_db_id:
+        try:
+            gpu_specs = get_gpu_spec_list()
+            await notion_sync.sync_gpu_specs_to_notion(api_key, gpu_spec_db_id, gpu_specs)
+            gpu_name_to_page_id = await notion_sync.fetch_gpu_spec_page_ids_by_name(api_key, gpu_spec_db_id)
+        except Exception:
+            _logger.warning("Notion target %d GPU spec 동기화 오류", target_id, exc_info=True)
+
+    host_to_page_id: dict[str, str] = {}
+    hypervisors: list[dict] = []
+    if hypervisors_db_id:
+        try:
+            hypervisors = await collect_hypervisor_data(gpu_name_to_page_id=gpu_name_to_page_id)
+            await notion_sync.sync_hypervisors_to_notion(api_key, hypervisors_db_id, hypervisors)
+            host_to_page_id = await notion_sync.fetch_hypervisor_page_ids_by_name(api_key, hypervisors_db_id)
+        except Exception:
+            _logger.warning("Notion target %d 하이퍼바이저 동기화 오류", target_id, exc_info=True)
+
+    email_to_page_id: dict[str, str] = {}
+    if users_db_id:
+        email_to_page_id = await notion_sync.fetch_user_page_ids_by_email(api_key, users_db_id)
+
+    instances = await collect_instance_data(
+        email_to_page_id=email_to_page_id,
+        host_to_page_id=host_to_page_id,
+        gpu_name_to_page_id=gpu_name_to_page_id,
+    )
+
+    # GPU 사용량 집계
+    alias_to_device_name = build_alias_to_device_name_map()
+    usage_by_gpu: dict[str, dict] = {}
+    for h in hypervisors:
+        for g in h.get("gpu_groups", []):
+            device_name = g.get("device_name", "")
+            if not device_name:
+                continue
+            if device_name not in usage_by_gpu:
+                usage_by_gpu[device_name] = {
+                    "total_cpu_used": 0,
+                    "total_ram_used": 0,
+                    "total_gpu_used": 0,
+                    "instance_count": 0,
+                    "gpu_available": 0,
+                    "gpu_used": 0,
+                    "gpu_remaining": 0,
+                }
+            usage_by_gpu[device_name]["gpu_available"] += g.get("total", 0)
+    for inst in instances:
+        gpu_display = inst.get("gpu_name", "")
+        if not gpu_display or not inst.get("gpu_count"):
+            continue
+        canonical = alias_to_device_name.get(gpu_display, gpu_display)
+        if canonical not in usage_by_gpu:
+            usage_by_gpu[canonical] = {
+                "total_cpu_used": 0,
+                "total_ram_used": 0,
+                "total_gpu_used": 0,
+                "instance_count": 0,
+                "gpu_available": 0,
+                "gpu_used": 0,
+                "gpu_remaining": 0,
+            }
+        usage_by_gpu[canonical]["total_cpu_used"] += inst.get("vcpus", 0)
+        usage_by_gpu[canonical]["total_ram_used"] += inst.get("ram_gb", 0)
+        usage_by_gpu[canonical]["total_gpu_used"] += inst.get("gpu_count", 0)
+        usage_by_gpu[canonical]["instance_count"] += 1
+        usage_by_gpu[canonical]["gpu_used"] += inst.get("gpu_count", 0)
+    for u in usage_by_gpu.values():
+        u["gpu_remaining"] = u["gpu_available"] - u["gpu_used"]
+
+    if gpu_spec_db_id and usage_by_gpu:
+        try:
+            gpu_specs = get_gpu_spec_list()
+            await notion_sync.sync_gpu_specs_to_notion(api_key, gpu_spec_db_id, gpu_specs, usage_by_gpu=usage_by_gpu)
+        except Exception:
+            _logger.warning("Notion target %d GPU spec 집계 업데이트 오류", target_id, exc_info=True)
+
+    await notion_sync.sync_to_notion(api_key, database_id, instances)
+
+    now_iso = datetime.now(UTC).isoformat()
+    await notion_sync.update_notion_target(
+        target_id,
+        {
+            "last_sync": now_iso,
+            "hypervisors_last_sync": now_iso if hypervisors_db_id else None,
+            "gpu_spec_last_sync": now_iso if gpu_spec_db_id else None,
+        },
+    )
+    _logger.info("Notion target %d 동기화 완료 (instances=%d)", target_id, len(instances))
+
+
+async def _run_sync_cycle() -> None:
+    """1회 동기화 사이클: 다중 타겟 → fallback NotionConfig."""
+    from app.api.identity.admin_gpu import (
+        build_alias_to_device_name_map,
+        get_gpu_spec_list,
+    )
+    from app.api.identity.admin_notion import (
+        collect_hypervisor_data,
+        collect_instance_data,
+    )
+    from app.services import notion_sync
+
+    targets = await notion_sync.list_notion_targets(include_api_key=True)
+    if targets:
+        now = datetime.now(UTC)
+        for target in targets:
+            if not target.get("enabled"):
+                continue
+            last_sync_str = target.get("last_sync")
+            interval_min = target.get("interval_minutes", 5)
+            if last_sync_str:
+                try:
+                    last_sync_dt = datetime.fromisoformat(last_sync_str.replace("Z", "+00:00"))
+                    elapsed_min = (now - last_sync_dt).total_seconds() / 60
+                    if elapsed_min < interval_min:
+                        continue
+                except Exception:
+                    pass
+            try:
+                await _run_notion_target_sync(target)
+            except Exception:
+                _logger.warning("Notion target %d 동기화 오류", target["id"], exc_info=True)
+        return
+
+    # ── fallback: NotionConfig (싱글톤 레거시 설정) ──
+    config = await notion_sync.get_notion_config()
+    if not config or not config.get("enabled"):
+        return
+
+    api_key = config["api_key"]
+    users_db_id = config.get("users_database_id", "")
+    hypervisors_db_id = config.get("hypervisors_database_id", "")
+    gpu_spec_db_id = config.get("gpu_spec_database_id", "")
+
+    gpu_name_to_page_id: dict[str, str] = {}
+    if gpu_spec_db_id:
+        try:
+            gpu_specs = get_gpu_spec_list()
+            await notion_sync.sync_gpu_specs_to_notion(api_key, gpu_spec_db_id, gpu_specs)
+            config["gpu_spec_last_sync"] = datetime.now(UTC).isoformat()
+            gpu_name_to_page_id = await notion_sync.fetch_gpu_spec_page_ids_by_name(api_key, gpu_spec_db_id)
+        except Exception:
+            _logger.warning("Notion GPU spec 동기화 오류", exc_info=True)
+
+    host_to_page_id: dict[str, str] = {}
+    hypervisors: list[dict] = []
+    if hypervisors_db_id:
+        try:
+            hypervisors = await collect_hypervisor_data(gpu_name_to_page_id=gpu_name_to_page_id)
+            await notion_sync.sync_hypervisors_to_notion(api_key, hypervisors_db_id, hypervisors)
+            config["hypervisors_last_sync"] = datetime.now(UTC).isoformat()
+            host_to_page_id = await notion_sync.fetch_hypervisor_page_ids_by_name(api_key, hypervisors_db_id)
+        except Exception:
+            _logger.warning("Notion 하이퍼바이저 동기화 오류", exc_info=True)
+
+    email_to_page_id: dict[str, str] = {}
+    if users_db_id:
+        email_to_page_id = await notion_sync.fetch_user_page_ids_by_email(api_key, users_db_id)
+
+    instances = await collect_instance_data(
+        email_to_page_id=email_to_page_id,
+        host_to_page_id=host_to_page_id,
+        gpu_name_to_page_id=gpu_name_to_page_id,
+    )
+
+    alias_to_device_name = build_alias_to_device_name_map()
+    usage_by_gpu: dict[str, dict] = {}
+    for h in hypervisors:
+        for g in h.get("gpu_groups", []):
+            device_name = g.get("device_name", "")
+            total = g.get("total", 0)
+            if not device_name:
+                continue
+            if device_name not in usage_by_gpu:
+                usage_by_gpu[device_name] = {
+                    "total_cpu_used": 0,
+                    "total_ram_used": 0,
+                    "total_gpu_used": 0,
+                    "instance_count": 0,
+                    "gpu_available": 0,
+                    "gpu_used": 0,
+                    "gpu_remaining": 0,
+                }
+            usage_by_gpu[device_name]["gpu_available"] += total
+    for inst in instances:
+        gpu_display = inst.get("gpu_name", "")
+        if not gpu_display or not inst.get("gpu_count"):
+            continue
+        canonical = alias_to_device_name.get(gpu_display, gpu_display)
+        if canonical not in usage_by_gpu:
+            usage_by_gpu[canonical] = {
+                "total_cpu_used": 0,
+                "total_ram_used": 0,
+                "total_gpu_used": 0,
+                "instance_count": 0,
+                "gpu_available": 0,
+                "gpu_used": 0,
+                "gpu_remaining": 0,
+            }
+        usage_by_gpu[canonical]["total_cpu_used"] += inst.get("vcpus", 0)
+        usage_by_gpu[canonical]["total_ram_used"] += inst.get("ram_gb", 0)
+        usage_by_gpu[canonical]["total_gpu_used"] += inst.get("gpu_count", 0)
+        usage_by_gpu[canonical]["instance_count"] += 1
+        usage_by_gpu[canonical]["gpu_used"] += inst.get("gpu_count", 0)
+    for u in usage_by_gpu.values():
+        u["gpu_remaining"] = u["gpu_available"] - u["gpu_used"]
+
+    if gpu_spec_db_id:
+        try:
+            gpu_specs = get_gpu_spec_list()
+            await notion_sync.sync_gpu_specs_to_notion(api_key, gpu_spec_db_id, gpu_specs, usage_by_gpu=usage_by_gpu)
+            config["gpu_spec_last_sync"] = datetime.now(UTC).isoformat()
+        except Exception:
+            _logger.warning("Notion GPU spec 집계 업데이트 오류", exc_info=True)
+
+    await notion_sync.sync_to_notion(api_key, config["database_id"], instances)
+    config["last_sync"] = datetime.now(UTC).isoformat()
+    await notion_sync.save_notion_config(config)
+
+    try:
+        await notion_sync.migrate_instance_db_to_korean(api_key, config["database_id"])
+    except Exception:
+        _logger.warning("Notion DB 한국어 마이그레이션 오류", exc_info=True)
+
+
+async def main() -> None:
+    from app.config import get_settings
+    from app.database import init_db, is_db_available
+
+    _logger.info("Notion Sync Worker 시작")
+
+    settings = get_settings()
+    db_cfg = settings.database if hasattr(settings, "database") else None
+    if db_cfg and getattr(db_cfg, "database_url", None):
+        try:
+            await init_db(
+                db_cfg.database_url,
+                pool_size=getattr(db_cfg, "database_pool_size", 5),
+                max_overflow=getattr(db_cfg, "database_max_overflow", 10),
+            )
+            _logger.info("DB 연결 완료")
+        except Exception:
+            _logger.warning("DB 연결 실패 — Notion 동기화 비활성화", exc_info=True)
+            return
+
+    if not is_db_available():
+        _logger.warning("DB 미사용 환경 — Notion 워커 종료")
+        return
+
+    await asyncio.sleep(30)  # 초기 대기
+
+    while True:
+        try:
+            await _run_sync_cycle()
+        except Exception:
+            _logger.exception("Notion 동기화 사이클 오류")
+        await asyncio.sleep(_CHECK_INTERVAL)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
-from app.api.deps import get_os_conn
+from app.api.deps import get_os_conn, get_token_info
 from app.config import get_settings
 from app.database import is_db_available
 from app.models.compute import (
@@ -123,6 +123,7 @@ async def create_instance(
     request: Request,
     req: CreateInstanceRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     """동기식 인스턴스 생성 (기존 방식)."""
     settings = get_settings()
@@ -281,7 +282,30 @@ async def create_instance(
         return server
 
     except Exception as e:
-        logger.error(f"인스턴스 생성 실패, rollback 시작: {e}")
+        error_detail = str(e)
+        logger.error(f"인스턴스 생성 실패, rollback 시작: {error_detail}")
+
+        import re as _re
+
+        if not server_id:
+            _m = _re.search(r"Server:([0-9a-f-]{36})", error_detail)
+            if _m:
+                server_id = _m.group(1)
+
+        if server_id:
+            try:
+                srv = conn.compute.get_server(server_id)
+                raw_fault = getattr(srv, "fault", None)
+                if raw_fault:
+                    fault_msg = (
+                        raw_fault.get("message", "") if isinstance(raw_fault, dict)
+                        else getattr(raw_fault, "message", "")
+                    )
+                    if fault_msg:
+                        error_detail = fault_msg
+            except Exception:
+                pass
+
         await _rollback(
             conn,
             server_id,
@@ -291,13 +315,16 @@ async def create_instance(
             created_access_ids,
             floating_ip_id,
         )
-        raise HTTPException(status_code=500, detail="인스턴스 생성 실패")
+        is_admin = token_info.get("is_system_admin", False)
+        detail = f"인스턴스 생성 실패: {error_detail}" if is_admin else "인스턴스 생성에 실패했습니다. 관리자에게 문의하세요."
+        raise HTTPException(status_code=500, detail=detail)
 
 
 @router.post("/async")
 async def create_instance_async(
     req: CreateInstanceRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     """SSE로 진행 상황을 스트리밍하는 비동기 인스턴스 생성."""
     settings = get_settings()
@@ -503,12 +530,41 @@ async def create_instance_async(
             yield send_progress(ProgressStep.COMPLETED, 100, "인스턴스 생성 완료", instance_id=server_id)
 
         except Exception as e:
-            logger.error(f"인스턴스 생성 실패, rollback 시작: {e}")
+            error_detail = str(e)
+            logger.error(f"인스턴스 생성 실패, rollback 시작: {error_detail}")
+
+            # wait_for_server 실패 시 server_id가 미설정 — 예외 메시지에서 추출
+            import re as _re
+
+            if not server_id:
+                _m = _re.search(r"Server:([0-9a-f-]{36})", error_detail)
+                if _m:
+                    server_id = _m.group(1)
+
+            # ERROR 상태 서버의 fault 메시지를 우선 사용
+            if server_id:
+                try:
+                    srv = conn.compute.get_server(server_id)
+                    raw_fault = getattr(srv, "fault", None)
+                    if raw_fault:
+                        fault_msg = (
+                            raw_fault.get("message", "") if isinstance(raw_fault, dict)
+                            else getattr(raw_fault, "message", "")
+                        )
+                        if fault_msg:
+                            error_detail = fault_msg
+                except Exception:
+                    pass
+
+            # 비관리자에게는 상세 에러 숨김
+            is_admin = token_info.get("is_system_admin", False)
+            user_message = f"인스턴스 생성 실패: {error_detail}" if is_admin else "인스턴스 생성에 실패했습니다. 관리자에게 문의하세요."
+
             yield send_progress(
                 ProgressStep.FAILED,
                 0,
-                "인스턴스 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.",
-                error="인스턴스 생성 실패",
+                user_message,
+                error=error_detail if is_admin else "인스턴스 생성 실패",
             )
             await _rollback(
                 conn,

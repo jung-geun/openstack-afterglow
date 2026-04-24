@@ -265,10 +265,46 @@ async def get_gpu_available(
         }
 
     try:
-        return await cached_call("afterglow:gpu:availability", ttl_normal(), _collect, refresh=refresh)
+        data = await cached_call("afterglow:gpu:availability", ttl_normal(), _collect, refresh=refresh)
     except Exception:
         _logger.warning("GPU 가용량 조회 실패", exc_info=True)
         raise HTTPException(status_code=500, detail="GPU 가용량 조회 실패")
+
+    # 프로젝트 GPU 쿼터 기반 필터링 + 가용량을 쿼터 상한 기준으로 표시
+    if is_db_available():
+        try:
+            from app.api.identity.admin_gpu import build_device_name_to_alias_map
+            from app.services.gpu_quota import get_effective_gpu_quotas, get_project_gpu_usage
+
+            project_id = conn._afterglow_project_id
+            quotas = await get_effective_gpu_quotas(project_id)
+            usage = await get_project_gpu_usage(conn, project_id)
+            name_to_alias = build_device_name_to_alias_map()
+
+            filtered = []
+            for t in data["gpu_types"]:
+                alias = name_to_alias.get(t["device_name"], "")
+                limit = quotas.get(alias, 0)
+                if limit == 0:
+                    continue
+                in_use = usage.get(alias, 0)
+                if limit == -1:
+                    # 무제한: 클러스터 전체 수치 그대로 사용
+                    filtered.append(t)
+                else:
+                    # 상한 있음: total=쿼터 상한, available=min(쿼터 잔여, 클러스터 잔여)
+                    quota_remaining = max(limit - in_use, 0)
+                    filtered.append({
+                        **t,
+                        "total": limit,
+                        "used": in_use,
+                        "available": min(quota_remaining, t["available"]),
+                    })
+            data = {**data, "gpu_types": filtered}
+        except Exception:
+            _logger.warning("GPU 쿼터 필터링 실패 — 전체 목록 반환", exc_info=True)
+
+    return data
 
 
 @router.get("/usage")
