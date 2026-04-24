@@ -36,11 +36,11 @@ jobs:
         working-directory: backend
         run: uv sync --frozen --extra dev
 
-      - name: Lint — ruff check
+      - name: Lint ruff check
         working-directory: backend
         run: uv run ruff check .
 
-      - name: Lint — ruff format check
+      - name: Lint ruff format check
         working-directory: backend
         run: uv run ruff format --check .
 
@@ -49,6 +49,65 @@ jobs:
         env:
           AFTERGLOW_ALLOW_INSECURE: "1"
         run: uv run python -m pytest tests/ -v --ignore=tests/integration
+
+  # ─── 통합 테스트: AFTERGLOW_OS_AUTH_URL 시크릿이 설정된 경우에만 실행 ──────
+  # GitHub Secrets 등록 방법:
+  #   Settings > Secrets and variables > Actions > New repository secret
+  #
+  # 필수 시크릿 (Secrets):
+  #   AFTERGLOW_OS_AUTH_URL       — Keystone v3 endpoint
+  #   AFTERGLOW_OS_USERNAME       — admin 사용자 이름
+  #   AFTERGLOW_OS_PASSWORD       — admin 비밀번호
+  #   AFTERGLOW_OS_PROJECT_NAME   — admin 프로젝트 이름 (기본: admin)
+  #
+  # 선택 시크릿 (다중 계정 통합 테스트):
+  #   AFTERGLOW_TEST_ADMIN_USER_USERNAME / PASSWORD / PROJECT
+  #   AFTERGLOW_TEST_USER_USERNAME / PASSWORD / PROJECT
+  #
+  # 선택 변수 (Variables, 기본값 있음):
+  #   AFTERGLOW_OS_PROJECT_DOMAIN_NAME — 기본: Default
+  #   AFTERGLOW_OS_USER_DOMAIN_NAME    — 기본: Default
+  #   AFTERGLOW_OS_REGION_NAME         — 기본: RegionOne
+  #   AFTERGLOW_OS_INTERFACE           — 기본: internal
+  test-backend-integration:
+    name: Backend (integration tests)
+    needs: [version-check, test-backend]
+    runs-on: ubuntu-latest
+    if: ${{ secrets.AFTERGLOW_OS_AUTH_URL != '' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Sync deps (dev)
+        working-directory: backend
+        run: uv sync --frozen --extra dev
+
+      - name: Integration tests
+        working-directory: backend
+        env:
+          AFTERGLOW_ALLOW_INSECURE: "1"
+          OS_AUTH_URL: ${{ secrets.AFTERGLOW_OS_AUTH_URL }}
+          OS_USERNAME: ${{ secrets.AFTERGLOW_OS_USERNAME }}
+          OS_PASSWORD: ${{ secrets.AFTERGLOW_OS_PASSWORD }}
+          OS_PROJECT_NAME: ${{ secrets.AFTERGLOW_OS_PROJECT_NAME }}
+          OS_PROJECT_DOMAIN_NAME: ${{ vars.AFTERGLOW_OS_PROJECT_DOMAIN_NAME }}
+          OS_USER_DOMAIN_NAME: ${{ vars.AFTERGLOW_OS_USER_DOMAIN_NAME }}
+          OS_REGION_NAME: ${{ vars.AFTERGLOW_OS_REGION_NAME }}
+          OS_INTERFACE: ${{ vars.AFTERGLOW_OS_INTERFACE }}
+          AFTERGLOW_TEST_ADMIN_USERNAME: ${{ secrets.AFTERGLOW_OS_USERNAME }}
+          AFTERGLOW_TEST_ADMIN_PASSWORD: ${{ secrets.AFTERGLOW_OS_PASSWORD }}
+          AFTERGLOW_TEST_ADMIN_PROJECT: ${{ secrets.AFTERGLOW_OS_PROJECT_NAME }}
+          AFTERGLOW_TEST_ADMIN_USER_USERNAME: ${{ secrets.AFTERGLOW_TEST_ADMIN_USER_USERNAME }}
+          AFTERGLOW_TEST_ADMIN_USER_PASSWORD: ${{ secrets.AFTERGLOW_TEST_ADMIN_USER_PASSWORD }}
+          AFTERGLOW_TEST_ADMIN_USER_PROJECT: ${{ secrets.AFTERGLOW_TEST_ADMIN_USER_PROJECT }}
+          AFTERGLOW_TEST_USER_USERNAME: ${{ secrets.AFTERGLOW_TEST_USER_USERNAME }}
+          AFTERGLOW_TEST_USER_PASSWORD: ${{ secrets.AFTERGLOW_TEST_USER_PASSWORD }}
+          AFTERGLOW_TEST_USER_PROJECT: ${{ secrets.AFTERGLOW_TEST_USER_PROJECT }}
+        run: uv run python -m pytest tests/integration -v
 
   test-frontend:
     name: Frontend (vitest)
