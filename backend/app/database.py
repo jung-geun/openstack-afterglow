@@ -159,6 +159,17 @@ async def create_tables() -> None:
         except Exception:
             pass  # 이미 존재하면 무시
 
+        # union_layers 컬럼 마이그레이션 (신규 컬럼 추가)
+        for _col_sql in [
+            "ALTER TABLE union_layers ADD COLUMN project_id VARCHAR(64) DEFAULT NULL",
+            "ALTER TABLE union_layers ADD COLUMN sealed_at DATETIME(6) DEFAULT NULL",
+            "ALTER TABLE union_layers ADD INDEX idx_union_layers_project (project_id)",
+        ]:
+            try:
+                await conn.exec_driver_sql(_col_sql)
+            except Exception:
+                pass  # 이미 존재하면 무시
+
         try:
             await conn.exec_driver_sql(
                 "CREATE TABLE IF NOT EXISTS union_templates ("

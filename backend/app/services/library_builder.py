@@ -511,3 +511,54 @@ async def _monitor_build(
             )
         if library_id in _active_builds:
             del _active_builds[library_id]
+
+
+async def cancel_build(conn: openstack.connection.Connection, build_db_id: int) -> dict:
+    """진행 중인 빌드를 취소하고 리소스를 정리한다.
+
+    Returns:
+        { "cancelled": True, "library_id": str, "server_deleted": bool }
+    """
+    from app.database import get_session_factory
+    from app.models.db import LibraryBuild
+
+    factory = get_session_factory()
+    if factory is None:
+        raise RuntimeError("DB가 초기화되지 않았습니다")
+
+    async with factory() as session:
+        from sqlalchemy import select
+
+        row = (await session.execute(select(LibraryBuild).where(LibraryBuild.id == build_db_id))).scalar_one_or_none()
+        if row is None:
+            raise KeyError(f"빌드 {build_db_id}를 찾을 수 없습니다")
+
+        terminal_states = {"complete", "error", "timeout", "cancelled"}
+        if row.status in terminal_states:
+            raise ValueError(f"이미 종료된 빌드입니다 (상태: {row.status})")
+
+        library_id = row.library_id
+        server_id = row.server_id
+
+        # DB 상태 취소로 변경
+        row.status = "cancelled"
+        row.progress_step = "사용자 취소"
+        row.error_message = "관리자에 의해 취소됨"
+        row.completed_at = datetime.now(UTC)
+        await session.commit()
+
+    # 인메모리 캐시 정리
+    if library_id in _active_builds:
+        del _active_builds[library_id]
+
+    # VM 삭제 (best-effort)
+    server_deleted = False
+    if server_id:
+        try:
+            await asyncio.to_thread(conn.compute.delete_server, server_id, force=True)
+            server_deleted = True
+            _logger.info("[builder] 취소로 인한 빌더 VM 삭제 완료: %s", server_id)
+        except Exception:
+            _logger.warning("[builder] 취소 시 VM 삭제 실패: %s", server_id, exc_info=True)
+
+    return {"cancelled": True, "library_id": library_id, "server_deleted": server_deleted}

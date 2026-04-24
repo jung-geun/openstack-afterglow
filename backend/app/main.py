@@ -147,6 +147,7 @@ from app.api.identity.admin_flavors import router as admin_flavors_router
 from app.api.identity.admin_gpu import router as admin_gpu_router
 from app.api.identity.admin_identity import router as admin_identity_router
 from app.api.identity.admin_images import router as admin_images_router
+from app.api.identity.admin_libraries import router as admin_libraries_router
 from app.api.identity.admin_notion import router as admin_notion_router
 from app.api.identity.admin_services import router as admin_services_router
 from app.api.identity.profile import router as profile_router
@@ -324,6 +325,7 @@ app.include_router(admin_services_router, prefix="/api/admin", tags=["admin-serv
 app.include_router(admin_flavors_router, prefix="/api/admin", tags=["admin-flavors"])
 app.include_router(admin_identity_router, prefix="/api/admin", tags=["admin-identity"])
 app.include_router(admin_gpu_router, prefix="/api/admin", tags=["admin-gpu"])
+app.include_router(admin_libraries_router, prefix="/api/admin/libraries", tags=["admin-libraries"])
 app.include_router(admin_notion_router, prefix="/api/admin", tags=["admin-notion"])
 app.include_router(admin_images_router, prefix="/api/admin", tags=["admin-images"])
 app.include_router(profile_router, prefix="/api/profile", tags=["profile"])

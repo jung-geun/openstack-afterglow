@@ -183,6 +183,11 @@ def _load_toml() -> dict:
     flat["builder_flavor_id"] = builder.get("flavor_id", "")
     flat["builder_network_id"] = builder.get("network_id", "")
 
+    union = data.get("union", {})
+    flat["union_layer_store_rw_share_id"] = union.get("layer_store_rw_share_id", "")
+    flat["union_layer_store_ro_share_id"] = union.get("layer_store_ro_share_id", "")
+    flat["union_manifest_store_share_id"] = union.get("manifest_store_share_id", "")
+
     notion = data.get("notion", {})
     flat["notion_config_encryption_key"] = notion.get("config_encryption_key", "")
 
@@ -315,6 +320,11 @@ class Settings(BaseSettings):
     k3s_lb_subnet_id: str = ""
     # FCOS (Fedora CoreOS) 이미지 ID (os_type=fcos 클러스터에 사용)
     k3s_fcos_image_id: str = ""
+
+    # Union Mount 레이어 시스템 — Manila share ID
+    union_layer_store_rw_share_id: str = ""  # layer-store-rw (Builder 전용 RW)
+    union_layer_store_ro_share_id: str = ""  # layer-store-ro (User VM RO)
+    union_manifest_store_share_id: str = ""  # manifest-store
 
     # Notion 연동
     notion_config_encryption_key: str = ""  # 미설정 시 k3s_kubeconfig_encryption_key 재사용

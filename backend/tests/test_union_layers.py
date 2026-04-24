@@ -22,6 +22,7 @@ def _make_layer(
     version: str = "3.12",
     sealed: bool = False,
     parent_id: str | None = None,
+    project_id: str | None = None,
 ):
     from app.models.db import UnionLayer
 
@@ -34,7 +35,9 @@ def _make_layer(
     layer.created_at = _NOW
     layer.created_by = "testuser"
     layer.sealed = sealed
+    layer.sealed_at = None
     layer.parent_id = parent_id
+    layer.project_id = project_id
     layer.ubuntu_base = None
     layer.build_recipe = {}
     layer.installed_packages = {}
@@ -50,6 +53,7 @@ def _make_layer_info(
     version: str = "3.12",
     sealed: bool = False,
     parent_id: str | None = None,
+    project_id: str | None = None,
 ):
     from app.models.union import LayerInfo
 
@@ -62,7 +66,9 @@ def _make_layer_info(
         created_at=_NOW,
         created_by="testuser",
         sealed=sealed,
+        sealed_at=None,
         parent_id=parent_id,
+        project_id=project_id,
         ubuntu_base=None,
         build_recipe={},
         installed_packages={},
@@ -1007,3 +1013,378 @@ class TestNewUnionLayersAPI:
         finally:
             app.dependency_overrides.pop(get_session, None)
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Phase A: Mount/Unmount 서비스 테스트
+# ---------------------------------------------------------------------------
+
+
+class TestRecordMount:
+    @pytest.mark.asyncio
+    async def test_record_mount_success(self):
+        """마운트 기록 성공."""
+        from app.models.db import UnionUserMount
+        from app.services.union_layers import record_mount
+
+        layer = _make_layer(layer_id=_sha("leaf"), sealed=True)
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=layer)
+
+        mount_obj = MagicMock(spec=UnionUserMount)
+        mount_obj.id = 1
+        mount_obj.user_id = "user1"
+        mount_obj.vm_hostname = "vm-001"
+        mount_obj.leaf_layer_id = _sha("leaf")
+        mount_obj.mounted_at = _NOW
+        mount_obj.unmounted_at = None
+        session.refresh = AsyncMock(side_effect=lambda obj, *a, **kw: None)
+
+        with patch("app.services.union_layers.UnionUserMount", return_value=mount_obj):
+            result = await record_mount(session, "user1", "vm-001", _sha("leaf"))
+
+        session.add.assert_called_once()
+        session.commit.assert_called_once()
+        assert result.user_id == "user1"
+        assert result.vm_hostname == "vm-001"
+        assert result.unmounted_at is None
+
+    @pytest.mark.asyncio
+    async def test_record_mount_nonexistent_layer_raises(self):
+        """없는 레이어 마운트 → ValueError."""
+        from app.services.union_layers import record_mount
+
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=None)
+
+        with pytest.raises(ValueError, match="존재하지 않"):
+            await record_mount(session, "user1", "vm-001", _sha("x"))
+
+    @pytest.mark.asyncio
+    async def test_record_unmount_success(self):
+        """마운트 해제 기록 성공."""
+        from app.models.db import UnionUserMount
+        from app.services.union_layers import record_unmount
+
+        mount_obj = MagicMock(spec=UnionUserMount)
+        mount_obj.id = 1
+        mount_obj.user_id = "user1"
+        mount_obj.vm_hostname = "vm-001"
+        mount_obj.leaf_layer_id = _sha("leaf")
+        mount_obj.mounted_at = _NOW
+        mount_obj.unmounted_at = None
+
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=mount_obj)
+        session.refresh = AsyncMock(side_effect=lambda obj, *a, **kw: None)
+
+        result = await record_unmount(session, 1, "user1")
+        assert result.user_id == "user1"
+        session.commit.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_record_unmount_not_found_raises(self):
+        """없는 마운트 해제 → KeyError."""
+        from app.services.union_layers import record_unmount
+
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=None)
+
+        with pytest.raises(KeyError, match="마운트 999"):
+            await record_unmount(session, 999, "user1")
+
+    @pytest.mark.asyncio
+    async def test_record_unmount_wrong_user_raises(self):
+        """본인 아닌 마운트 해제 → PermissionError."""
+        from app.models.db import UnionUserMount
+        from app.services.union_layers import record_unmount
+
+        mount_obj = MagicMock(spec=UnionUserMount)
+        mount_obj.id = 1
+        mount_obj.user_id = "other_user"
+        mount_obj.unmounted_at = None
+
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=mount_obj)
+
+        with pytest.raises(PermissionError, match="본인"):
+            await record_unmount(session, 1, "user1")
+
+    @pytest.mark.asyncio
+    async def test_record_unmount_already_unmounted_raises(self):
+        """이미 해제된 마운트 → ValueError."""
+        from app.models.db import UnionUserMount
+        from app.services.union_layers import record_unmount
+
+        mount_obj = MagicMock(spec=UnionUserMount)
+        mount_obj.id = 1
+        mount_obj.user_id = "user1"
+        mount_obj.unmounted_at = _NOW  # 이미 해제됨
+
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=mount_obj)
+
+        with pytest.raises(ValueError, match="이미 해제"):
+            await record_unmount(session, 1, "user1")
+
+
+# ---------------------------------------------------------------------------
+# Phase A: Storage Stats 서비스 테스트
+# ---------------------------------------------------------------------------
+
+
+class TestStorageStats:
+    @pytest.mark.asyncio
+    async def test_storage_stats_empty(self):
+        """레이어 없을 때 통계."""
+        from app.services.union_layers import get_storage_stats
+
+        mock_row = MagicMock()
+        mock_row.total_layers = 0
+        mock_row.sealed_layers = 0
+        mock_row.total_size_bytes = 0
+        mock_row.total_file_count = 0
+
+        mock_result = MagicMock()
+        mock_result.one.return_value = mock_row
+
+        session = AsyncMock()
+        session.execute = AsyncMock(return_value=mock_result)
+
+        stats = await get_storage_stats(session)
+        assert stats.total_layers == 0
+        assert stats.sealed_layers == 0
+        assert stats.total_size_bytes == 0
+
+    @pytest.mark.asyncio
+    async def test_storage_stats_with_layers(self):
+        """레이어 있을 때 집계."""
+        from app.services.union_layers import get_storage_stats
+
+        mock_row = MagicMock()
+        mock_row.total_layers = 5
+        mock_row.sealed_layers = 3
+        mock_row.total_size_bytes = 1024 * 1024 * 500  # 500MB
+        mock_row.total_file_count = 9200
+
+        mock_result = MagicMock()
+        mock_result.one.return_value = mock_row
+
+        session = AsyncMock()
+        session.execute = AsyncMock(return_value=mock_result)
+
+        stats = await get_storage_stats(session)
+        assert stats.total_layers == 5
+        assert stats.sealed_layers == 3
+        assert stats.total_size_bytes == 1024 * 1024 * 500
+        assert stats.total_file_count == 9200
+
+
+# ---------------------------------------------------------------------------
+# Phase A: Mount/Unmount API 엔드포인트 테스트
+# ---------------------------------------------------------------------------
+
+
+class TestMountAPI:
+    @pytest.mark.asyncio
+    async def test_post_mount_success(self, client):
+        """마운트 기록 API 성공."""
+        from app.database import get_session
+        from app.models.union import MountInfo
+
+        mock_session = AsyncMock()
+
+        async def override_get_session():
+            yield mock_session
+
+        mount_info = MountInfo(
+            id=1,
+            user_id="user1",
+            vm_hostname="vm-001",
+            leaf_layer_id=_sha("leaf"),
+            mounted_at=_NOW,
+            unmounted_at=None,
+        )
+
+        app.dependency_overrides[get_session] = override_get_session
+        try:
+            with patch("app.api.union.layers.union_layers.record_mount", AsyncMock(return_value=mount_info)):
+                resp = await client.post(
+                    "/api/union/mounts",
+                    json={"vm_hostname": "vm-001", "leaf_layer_id": _sha("leaf")},
+                )
+        finally:
+            app.dependency_overrides.pop(get_session, None)
+
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["vm_hostname"] == "vm-001"
+        assert data["unmounted_at"] is None
+
+    @pytest.mark.asyncio
+    async def test_post_unmount_success(self, client):
+        """마운트 해제 API 성공."""
+        from app.database import get_session
+        from app.models.union import MountInfo
+
+        mock_session = AsyncMock()
+
+        async def override_get_session():
+            yield mock_session
+
+        mount_info = MountInfo(
+            id=1,
+            user_id="user1",
+            vm_hostname="vm-001",
+            leaf_layer_id=_sha("leaf"),
+            mounted_at=_NOW,
+            unmounted_at=_NOW,
+        )
+
+        app.dependency_overrides[get_session] = override_get_session
+        try:
+            with patch("app.api.union.layers.union_layers.record_unmount", AsyncMock(return_value=mount_info)):
+                resp = await client.post("/api/union/mounts/1/unmount")
+        finally:
+            app.dependency_overrides.pop(get_session, None)
+
+        assert resp.status_code == 200
+        assert resp.json()["unmounted_at"] is not None
+
+
+# ---------------------------------------------------------------------------
+# Phase B: Project Isolation 테스트
+# ---------------------------------------------------------------------------
+
+
+class TestProjectIsolation:
+    @pytest.mark.asyncio
+    async def test_list_layers_passes_project_id(self, client):
+        """list_layers API가 token의 project_id를 서비스에 전달하는지 확인."""
+        from app.database import get_session
+
+        mock_session = AsyncMock()
+
+        async def override_get_session():
+            yield mock_session
+
+        captured_args: dict = {}
+
+        async def capture_list_layers(session, name, project_id, is_admin, limit, offset):
+            captured_args.update({"project_id": project_id, "is_admin": is_admin})
+            return []
+
+        app.dependency_overrides[get_session] = override_get_session
+        try:
+            with patch("app.api.union.layers.union_layers.list_layers", capture_list_layers):
+                await client.get("/api/union/layers")
+        finally:
+            app.dependency_overrides.pop(get_session, None)
+
+        # client fixture는 is_admin=False 이므로 is_admin이 False여야 함
+        assert captured_args["is_admin"] is False
+
+    @pytest.mark.asyncio
+    async def test_list_layers_admin_sees_all(self, admin_client):
+        """관리자는 is_admin=True로 서비스 호출."""
+        from app.database import get_session
+
+        mock_session = AsyncMock()
+
+        async def override_get_session():
+            yield mock_session
+
+        captured_args: dict = {}
+
+        async def capture_list_layers(session, name, project_id, is_admin, limit, offset):
+            captured_args.update({"is_admin": is_admin})
+            return []
+
+        app.dependency_overrides[get_session] = override_get_session
+        try:
+            with patch("app.api.union.layers.union_layers.list_layers", capture_list_layers):
+                await admin_client.get("/api/union/layers")
+        finally:
+            app.dependency_overrides.pop(get_session, None)
+
+        assert captured_args["is_admin"] is True
+
+    @pytest.mark.asyncio
+    async def test_create_layer_sets_project_id(self, admin_client):
+        """create_layer API가 token project_id를 서비스에 전달하는지 확인."""
+        from app.database import get_session
+
+        mock_session = AsyncMock()
+
+        async def override_get_session():
+            yield mock_session
+
+        captured_args: dict = {}
+
+        async def capture_create_layer(session, req, created_by, project_id):
+            captured_args["project_id"] = project_id
+            return _make_layer_info(_sha("new"))
+
+        app.dependency_overrides[get_session] = override_get_session
+        try:
+            with patch("app.api.union.layers.union_layers.create_layer", capture_create_layer):
+                await admin_client.post(
+                    "/api/union/layers",
+                    json={
+                        "name": "test",
+                        "version": "1.0",
+                        "content_hash": _sha("new"),
+                        "build_recipe": {},
+                        "installed_packages": {},
+                    },
+                )
+        finally:
+            app.dependency_overrides.pop(get_session, None)
+
+        # admin_client fixture의 token_info에 project_id가 있어야 함
+        assert "project_id" in captured_args
+
+
+# ---------------------------------------------------------------------------
+# Phase C: Seal 타임스탬프 테스트
+# ---------------------------------------------------------------------------
+
+
+class TestSealTimestamp:
+    @pytest.mark.asyncio
+    async def test_seal_sets_sealed_at(self):
+        """봉인 시 sealed_at 타임스탬프가 설정된다."""
+        from app.services.union_layers import seal_layer
+
+        layer = _make_layer(layer_id=_sha("a"), sealed=False)
+        layer.sealed_at = None
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=layer)
+
+        result = await seal_layer(session, _sha("a"))
+        assert result.sealed is True
+        assert result.sealed_at is not None
+
+    @pytest.mark.asyncio
+    async def test_seal_response_includes_sealed_at(self, admin_client):
+        """seal API 응답에 sealed_at 포함."""
+        from app.database import get_session
+        from app.models.union import SealLayerResponse
+
+        mock_session = AsyncMock()
+
+        async def override_get_session():
+            yield mock_session
+
+        seal_resp = SealLayerResponse(id=_sha("a"), sealed=True, sealed_at=_NOW)
+
+        app.dependency_overrides[get_session] = override_get_session
+        try:
+            with patch("app.api.union.layers.union_layers.seal_layer", AsyncMock(return_value=seal_resp)):
+                resp = await admin_client.post(f"/api/union/layers/{_sha('a')}/seal")
+        finally:
+            app.dependency_overrides.pop(get_session, None)
+
+        assert resp.status_code == 200
+        assert resp.json()["sealed"] is True
+        assert resp.json()["sealed_at"] is not None

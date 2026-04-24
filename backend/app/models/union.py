@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 _SHA256_PREFIX = "sha256:"
 _HEX_LEN = 64
@@ -29,6 +29,7 @@ class CreateLayerRequest(BaseModel):
     content_hash: str  # sha256:<64hex>
     size_bytes: int | None = None
     file_count: int | None = None
+    project_id: str | None = None  # 명시적 지정 시 사용, 미지정 시 토큰에서 자동 추출
 
     @field_validator("content_hash")
     @classmethod
@@ -52,7 +53,9 @@ class LayerInfo(BaseModel):
     created_at: datetime
     created_by: str
     sealed: bool
+    sealed_at: datetime | None = None
     parent_id: str | None = None
+    project_id: str | None = None
     ubuntu_base: str | None = None
     build_recipe: dict = {}
     installed_packages: dict = {}
@@ -66,6 +69,7 @@ class SealLayerResponse(BaseModel):
 
     id: str
     sealed: bool
+    sealed_at: datetime | None = None
 
 
 class AncestorChain(BaseModel):
@@ -102,3 +106,72 @@ class TemplateInfo(BaseModel):
     leaf_layer_id: str
     note: str | None = None
     resolved_stack: list[LayerInfo] | None = None  # GET 시 조상 체인 포함
+
+
+# ---------------------------------------------------------------------------
+# 마운트 추적
+# ---------------------------------------------------------------------------
+
+
+class RecordMountRequest(BaseModel):
+    """마운트 기록 요청."""
+
+    vm_hostname: str = Field(min_length=1, max_length=255)
+    leaf_layer_id: str  # sha256:<64hex>
+
+    @field_validator("leaf_layer_id")
+    @classmethod
+    def validate_leaf_layer_id(cls, v: str) -> str:
+        return _validate_sha256_id(v)
+
+
+class MountInfo(BaseModel):
+    """마운트 기록 정보."""
+
+    id: int
+    user_id: str
+    vm_hostname: str
+    leaf_layer_id: str
+    mounted_at: datetime
+    unmounted_at: datetime | None = None
+
+
+# ---------------------------------------------------------------------------
+# 스토리지 통계
+# ---------------------------------------------------------------------------
+
+
+class StorageStats(BaseModel):
+    """레이어 스토리지 사용량 집계."""
+
+    total_layers: int
+    sealed_layers: int
+    total_size_bytes: int
+    total_file_count: int
+
+
+# ---------------------------------------------------------------------------
+# Builder CephX 접근 관리
+# ---------------------------------------------------------------------------
+
+
+class BuilderAccessRequest(BaseModel):
+    """빌더 VM CephX 접근 요청."""
+
+    cephx_user: str = Field(min_length=1, max_length=128)
+    access_level: str = Field(default="rw", pattern="^(rw|ro)$")
+
+    @model_validator(mode="after")
+    def validate_user_not_empty(self) -> "BuilderAccessRequest":
+        if not self.cephx_user.strip():
+            raise ValueError("cephx_user는 비어 있을 수 없습니다")
+        return self
+
+
+class BuilderAccessInfo(BaseModel):
+    """빌더 VM CephX 접근 정보."""
+
+    access_id: str
+    cephx_user: str
+    access_level: str
+    share_id: str

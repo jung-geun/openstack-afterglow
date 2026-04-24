@@ -245,6 +245,11 @@ class UnionLayer(Base):
     size_bytes: Mapped[int | None] = mapped_column(BIGINT)
     file_count: Mapped[int | None] = mapped_column(INT)
 
+    # 프로젝트 격리 (NULL = 공유/시스템 레이어, 값 있음 = 해당 프로젝트 전용)
+    project_id: Mapped[str | None] = mapped_column(VARCHAR(64), index=True)
+    # 봉인 시각 (sealed=True 로 변경된 시점)
+    sealed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     # 관계
     parent: Mapped["UnionLayer | None"] = relationship("UnionLayer", remote_side="UnionLayer.id")
     templates: Mapped[list["UnionTemplate"]] = relationship("UnionTemplate", back_populates="leaf_layer")

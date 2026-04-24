@@ -450,14 +450,17 @@ Step 5: 요약 & 배포
 
 > **목표**: Admin 프로젝트에서 사전 빌드된 라이브러리 패키지(NFS share)를 생성하고, 다른 프로젝트에서도 read-only로 사용 가능하게 구현
 
-- [ ] 3.1 Admin 프로젝트 — 패키지 생성 API
-  - [ ] `POST /api/admin/libraries/build` — 라이브러리 패키지 빌드 트리거
-  - [ ] 기존 `POST /api/admin/file-storage/build` 확장:
+- [x] 3.1 Admin 프로젝트 — 패키지 생성 API
+  - [x] `POST /api/admin/libraries/build` — 라이브러리 패키지 빌드 트리거 (`auto_install` 옵션)
+  - [x] 기존 `POST /api/admin/file-storage/build` 확장:
     - [x] `share_proto` 파라미터 추가 (CEPHFS / NFS 선택)
     - [x] 의존성 메타데이터 `union_depends_on` 필드 추가
-    - [ ] 빌드 상태 관리: `building` → `ready` / `failed` 상태 전이
-  - [ ] `GET /api/admin/libraries` — 전체 프로젝트 가용 라이브러리 목록 (의존성 포함)
-  - [ ] `GET /api/admin/libraries/{id}` — 라이브러리 상세 (의존성 트리 포함)
+    - [x] 빌드 상태 관리: `building` → `ready` / `failed` / `cancelled` 상태 전이, `cancel_build()` 구현
+  - [x] `GET /api/admin/libraries` — 전체 프로젝트 가용 라이브러리 목록 (의존성 포함)
+  - [x] `GET /api/admin/libraries/{id}` — 라이브러리 상세 (의존성 트리 포함)
+  - [x] `GET /api/admin/libraries/builds` — 빌드 이력 목록 (DB + 인메모리 fallback)
+  - [x] `POST /api/admin/libraries/builds/{id}/cancel` — 빌드 취소 (VM 정리 포함)
+  - [x] `backend/app/api/identity/admin_libraries.py` — 전용 라우터 신규 구현 (관리자 인증 필수)
 
 - [x] 3.2 Manila 메타데이터 기반 의존성 추적
   - [x] Manila share metadata 활용:
@@ -482,7 +485,7 @@ Step 5: 요약 & 배포
     - [ ] 특정 프로젝트에 대해 개별적으로 NFS access rule 부여 (VM IP/CIDR 자동 계산 미구현)
     - [ ] VM 생성 시 해당 프로젝트의 네트워크 CIDR로 NFS access rule 자동 생성
   - [x] CephFS의 경우: 기존 CephX access rule 방식 유지
-  - [ ] `backend/app/services/libraries.py` — 크로스 프로젝트 라이브러리 조회 함수 추가
+  - [x] `backend/app/services/libraries.py` — `get_dependency_tree()` 크로스 프로젝트 라이브러리 의존성 트리 조회 함수 추가
 
 - [x] 3.4 패키지 빌드 파이프라인 개선
   - [x] `scripts/build_library_shares.py` 확장:
@@ -883,8 +886,8 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 
 **보안 + 격리**
 
-- [ ] Manila access rule 자동 관리: Builder VM RW 추가/제거 API
-- [ ] 레이어 소유자/프로젝트 격리: `created_by` 기반 접근 제어
+- [x] Manila access rule 자동 관리: Builder VM RW 추가/제거 API (`POST /api/union/builder/access`, `DELETE /api/union/builder/access/{id}`)
+- [x] 레이어 프로젝트 격리: `project_id` 컬럼 + `list_layers()` 필터링 (NULL=공유, 값=프로젝트 전용, admin=전체)
 - [ ] seal 후 RW 접근 차단 검증
 
 **운영 도구**
@@ -892,7 +895,8 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 - [x] `GET /api/union/layers/{id}/dependents` — 자식 레이어 목록 (삭제 전 확인용)
 - [x] `DELETE /api/union/layers/{id}` — 수동 GC 엔드포인트 (관리자, 자식/템플릿/마운트 참조 있으면 409)
 - [x] `GET /api/union/templates/{name}/{version}` — 템플릿 상세 엔드포인트 (resolved_stack 포함)
-- [ ] 레이어 크기 집계: `size_bytes` 기반 스토리지 사용량 보고
+- [x] 레이어 크기 집계: `GET /api/union/stats/storage` — `size_bytes`/`file_count` SQL SUM 집계 (`total_layers`, `sealed_layers`, `total_size_bytes`, `total_file_count`)
+- [x] 마운트 API: `POST /api/union/mounts` (기록), `POST /api/union/mounts/{id}/unmount` (해제), `sealed_at` 봉인 타임스탬프 추가
 
 **테스트 확장**
 
