@@ -56,6 +56,26 @@ jobs:
             echo "name=${REGISTRY}/${IMAGE_OWNER}/afterglow" >> $GITHUB_OUTPUT
           fi
 
+      # macOS arm64: Docker Desktop이 꺼져 있으면 소켓이 없어 빌드 불가.
+      # Docker Desktop 실행 후 daemon 준비 대기 (최대 90초).
+      - name: Ensure Docker daemon is running (macOS)
+        if: matrix.arch == 'arm64'
+        run: |
+          if docker info &>/dev/null; then
+            echo "Docker daemon already running."
+            exit 0
+          fi
+          echo "Docker daemon not running — starting Docker Desktop..."
+          open -a Docker 2>/dev/null || true
+          for i in $(seq 1 45); do
+            if docker info &>/dev/null; then
+              echo "Docker daemon ready after $((i * 2))s."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::warning::Docker daemon did not start in 90s — build may fail."
+
       # macOS arm64: Keychain 완전 우회
       # docker login-action이 osxkeychain 저장을 시도하므로,
       # 레지스트리 자격증명을 base64로 직접 config.json에 기록하고 DOCKER_CONFIG 설정

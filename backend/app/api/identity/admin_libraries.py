@@ -70,9 +70,10 @@ async def list_library_builds(
     library_id: str | None = Query(default=None),
 ) -> list[dict]:
     """라이브러리 빌드 이력 목록. 관리자 전용."""
+    from sqlalchemy import select
+
     from app.database import get_session_factory
     from app.models.db import LibraryBuild
-    from sqlalchemy import select
 
     factory = get_session_factory()
     if factory is None:
