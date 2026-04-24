@@ -54,6 +54,19 @@ async def seal_layer(
         raise HTTPException(status_code=409, detail=str(e))
 
 
+@router.get("/layers/{layer_id}/dependents", response_model=list[LayerInfo])
+async def get_dependents(
+    layer_id: str,
+    _token_info: dict = Depends(get_token_info),
+    session=Depends(get_session),
+):
+    """직접 자식 레이어 목록 조회."""
+    try:
+        return await union_layers.get_dependents(session, layer_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
 @router.get("/layers/{layer_id}/ancestors", response_model=AncestorChain)
 async def get_ancestors(
     layer_id: str,
@@ -80,6 +93,22 @@ async def get_layer(
     return layer
 
 
+@router.delete("/layers/{layer_id}", status_code=204)
+async def delete_layer(
+    layer_id: str,
+    token_info: dict = Depends(get_token_info),
+    session=Depends(get_session),
+):
+    """레이어 삭제 (관리자 전용). 자식/템플릿 참조/활성 마운트가 있으면 409."""
+    _require_admin(token_info)
+    try:
+        await union_layers.delete_layer(session, layer_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
 @router.post("/layers", response_model=LayerInfo, status_code=201)
 async def create_layer(
     req: CreateLayerRequest,
@@ -102,6 +131,20 @@ async def list_templates(
 ):
     """템플릿 목록 조회."""
     return await union_layers.list_templates(session)
+
+
+@router.get("/templates/{name}/{version}", response_model=TemplateInfo)
+async def get_template_detail(
+    name: str,
+    version: int,
+    _token_info: dict = Depends(get_token_info),
+    session=Depends(get_session),
+):
+    """템플릿 상세 조회 (resolved_stack 포함)."""
+    result = await union_layers.get_template(session, name, version)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"템플릿 {name}@{version}을 찾을 수 없습니다")
+    return result
 
 
 @router.post("/templates", response_model=TemplateInfo, status_code=201)

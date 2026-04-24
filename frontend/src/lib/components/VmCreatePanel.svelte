@@ -7,6 +7,7 @@
 	import SelectImage from '$lib/components/wizard/SelectImage.svelte';
 	import SelectFlavor from '$lib/components/wizard/SelectFlavor.svelte';
 	import SelectLibraries from '$lib/components/wizard/SelectLibraries.svelte';
+	import SelectTemplate from '$lib/components/wizard/SelectTemplate.svelte';
 	import SelectStrategy from '$lib/components/wizard/SelectStrategy.svelte';
 	import ProgressBar from '$lib/components/ProgressBar.svelte';
 	import LoadingSpinner from '$lib/components/LoadingSpinner.svelte';
@@ -418,12 +419,31 @@
 
 				{:else if $wizard.step === 3}
 					<h2 class="text-lg font-semibold text-white mb-4">라이브러리 선택</h2>
-					<SelectLibraries
-						{libraries}
-						selected={$wizard.libraries}
-						{hasGpuFlavor}
-						onToggle={toggleLibrary}
-					/>
+					<!-- 선택 모드 탭: 라이브러리 직접 선택 vs 템플릿 선택 -->
+					{#snippet step3Tab()}
+						{@const useTemplate = $wizard.templateName !== null}
+						<div class="flex mb-4 rounded-lg overflow-hidden border border-gray-700">
+							<button
+								class="flex-1 py-2 text-sm transition-colors {!useTemplate ? 'bg-blue-700 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'}"
+								onclick={() => wizard.update(w => ({ ...w, templateName: null, templateVersion: null }))}
+							>라이브러리 선택</button>
+							<button
+								class="flex-1 py-2 text-sm transition-colors {useTemplate ? 'bg-blue-700 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'}"
+								onclick={() => wizard.update(w => ({ ...w, libraries: [] }))}
+							>템플릿 선택</button>
+						</div>
+						{#if useTemplate}
+							<SelectTemplate />
+						{:else}
+							<SelectLibraries
+								{libraries}
+								selected={$wizard.libraries}
+								{hasGpuFlavor}
+								onToggle={toggleLibrary}
+							/>
+						{/if}
+					{/snippet}
+					{@render step3Tab()}
 
 				{:else if $wizard.step === 4}
 					<h2 class="text-lg font-semibold text-white mb-4">마운트 전략 선택</h2>

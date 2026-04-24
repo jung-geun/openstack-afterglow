@@ -51,6 +51,11 @@ export const ROUTE_LABELS: Record<string, string> = {
   'floating-ips': 'Floating IP',
   ports: '포트',
 
+  // Library (Union Mount)
+  library: '라이브러리',
+  libraries: '라이브러리 관리',
+  templates: '템플릿',
+
   // Admin
   monitoring: '통합 모니터링',
   services: '서비스 상태',

@@ -491,12 +491,13 @@ Step 5: 요약 & 배포
     - [ ] 빌드 완료 후 자동 검증 (마운트 테스트)
   - [ ] 백그라운드 빌드 워커 (선택): Celery/async 작업으로 비동기 빌드
 
-- [ ] 3.5 Frontend — Admin 패키지 관리 UI
-  - [ ] `routes/admin/libraries/+page.svelte` — 라이브러리 카탈로그 관리 페이지
-  - [ ] 패키지 빌드 상태 표시 (building / ready / failed)
-  - [ ] 의존성 그래프 시각화
-  - [ ] 패키지 공개/비공개 설정 (다른 프로젝트 접근 권한)
-  - [ ] 기존 `routes/admin/file-storage/+page.svelte`에 프로토콜 컬럼 추가
+- [x] 3.5 Frontend — Admin 패키지 관리 UI
+  - [x] `routes/admin/libraries/+page.svelte` — 라이브러리 카탈로그 관리 페이지 (카드 그리드)
+  - [x] 패키지 빌드 상태 표시 (building / ready / failed / none)
+  - [x] 빌드 트리거 버튼 + AutoRefresh (10초)
+  - [x] 의존성 배지 표시
+  - [ ] 의존성 그래프 시각화 (SVG 연결선)
+  - [ ] 패키지 공개/비공개 설정
 
 - [ ] 3.6 VM 생성 마법사 — 라이브러리 선택 개선
   - [ ] 의존성 자동 해석: vllm 선택 시 torch, python311 자동 체크
@@ -866,18 +867,19 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 
 **테스트**
 
-- [x] `backend/tests/test_union_layers.py` — Layer CRUD(5), Seal(3), ListLayers(2), GetAncestors(3), LayerIdValidation(3), Templates(3), API(11) = **30개**
-- [ ] `backend/tests/test_union_templates.py` — 템플릿 전용 추가 테스트 (별도 파일, Phase 2 전 작성)
+- [x] `backend/tests/test_union_layers.py` — Layer CRUD(5), Seal(3), ListLayers(2), GetAncestors(3), LayerIdValidation(3), Templates(3), API(11), Dependents(3), DeleteLayer(5), NewAPI(7) = **45개**
 
 ### 9.2 Phase 2 — 운영 (목표: Phase 1 완료 후 ~3주)
 
 **Frontend UI**
 
-- [ ] `/library` 라우트: 레이어 카탈로그 페이지 (트리 시각화)
-- [ ] `/library/create` — 새 레이어 생성 wizard (이름, 부모 선택, 설명)
-- [ ] `/library/[id]` — 레이어 상세: 조상 체인, seal 상태, 파생 레이어 목록
-- [ ] 템플릿 관리 UI (관리자 전용)
-- [ ] VM 생성 wizard — "라이브러리 레이어" 선택 단계 통합 (Model A: 템플릿 선택)
+- [x] `/dashboard/library` 라우트: 레이어 카탈로그 페이지 (트리 시각화)
+- [x] `/dashboard/library/create` — 새 레이어 생성 폼 (관리자 전용)
+- [x] `/dashboard/library/[id]` — 레이어 상세: 조상 체인, seal 상태, 파생 레이어 목록, seal/삭제 액션
+- [x] `/dashboard/library/templates` — 템플릿 관리 UI (목록 + 생성 폼 + 슬라이드 패널 상세)
+- [x] VM 생성 wizard — Step 3에 "라이브러리 선택" / "템플릿 선택" 탭 추가 (`SelectTemplate.svelte`)
+- [x] Dashboard 사이드바에 "라이브러리" 섹션 추가
+- [x] Admin 사이드바에 "라이브러리" 섹션 추가
 
 **보안 + 격리**
 
@@ -887,14 +889,15 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 
 **운영 도구**
 
-- [ ] `GET /api/union/layers/{id}/dependents` — 자식 레이어 목록 (삭제 전 확인용)
-- [ ] 수동 GC 엔드포인트 (관리자): `DELETE /api/union/layers/{id}` — FK RESTRICT로 자식 있으면 차단
+- [x] `GET /api/union/layers/{id}/dependents` — 자식 레이어 목록 (삭제 전 확인용)
+- [x] `DELETE /api/union/layers/{id}` — 수동 GC 엔드포인트 (관리자, 자식/템플릿/마운트 참조 있으면 409)
+- [x] `GET /api/union/templates/{name}/{version}` — 템플릿 상세 엔드포인트 (resolved_stack 포함)
 - [ ] 레이어 크기 집계: `size_bytes` 기반 스토리지 사용량 보고
 
 **테스트 확장**
 
 - [ ] Integration test: Builder VM → seal → User VM mount 전체 플로우
-- [ ] FK RESTRICT 삭제 차단 동작 검증
+- [x] 삭제 차단 동작 검증 (자식/템플릿/활성 마운트 — 단위 테스트 포함)
 
 ### 9.3 Phase 3 — 확장 (목표: Phase 2 완료 후)
 

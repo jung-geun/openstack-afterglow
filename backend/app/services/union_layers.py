@@ -242,6 +242,51 @@ async def list_templates(session: AsyncSession) -> list[TemplateInfo]:
     return [_template_to_info(tmpl) for tmpl in result.scalars()]
 
 
+async def get_dependents(session: AsyncSession, layer_id: str) -> list[LayerInfo]:
+    """직접 자식 레이어 목록 (최신순). 부모 레이어 미존재 시 KeyError."""
+    parent = await session.get(UnionLayer, layer_id)
+    if parent is None:
+        raise KeyError(f"레이어 {layer_id}를 찾을 수 없습니다")
+    stmt = select(UnionLayer).where(UnionLayer.parent_id == layer_id).order_by(UnionLayer.created_at.desc())
+    result = await session.execute(stmt)
+    return [_layer_to_info(row) for row in result.scalars()]
+
+
+async def delete_layer(session: AsyncSession, layer_id: str) -> None:
+    """레이어 삭제 (GC). 자식/템플릿 참조/활성 마운트가 있으면 ValueError."""
+    from sqlalchemy import func
+
+    layer = await session.get(UnionLayer, layer_id)
+    if layer is None:
+        raise KeyError(f"레이어 {layer_id}를 찾을 수 없습니다")
+
+    # 자식 레이어 확인
+    child_count_result = await session.execute(
+        select(func.count()).select_from(UnionLayer).where(UnionLayer.parent_id == layer_id)
+    )
+    if child_count_result.scalar_one() > 0:
+        raise ValueError("하위 레이어가 존재하여 삭제할 수 없습니다")
+
+    # 템플릿 참조 확인
+    tmpl_count_result = await session.execute(
+        select(func.count()).select_from(UnionTemplate).where(UnionTemplate.leaf_layer_id == layer_id)
+    )
+    if tmpl_count_result.scalar_one() > 0:
+        raise ValueError("템플릿이 참조하여 삭제할 수 없습니다")
+
+    # 활성 마운트 확인
+    mount_count_result = await session.execute(
+        select(func.count())
+        .select_from(UnionUserMount)
+        .where(UnionUserMount.leaf_layer_id == layer_id, UnionUserMount.unmounted_at.is_(None))
+    )
+    if mount_count_result.scalar_one() > 0:
+        raise ValueError("활성 마운트가 존재하여 삭제할 수 없습니다")
+
+    await session.delete(layer)
+    await session.commit()
+
+
 async def get_template(session: AsyncSession, name: str, version: int) -> TemplateInfo | None:
     """템플릿 상세 + 조상 체인 포함."""
     stmt = select(UnionTemplate).where(UnionTemplate.name == name, UnionTemplate.version == version)

@@ -24,6 +24,8 @@ export interface WizardState {
 	libraries: string[];
 	strategy: 'prebuilt' | 'dynamic' | null;
 	mountProtocol: 'CEPHFS' | 'NFS';
+	templateName: string | null;
+	templateVersion: number | null;
 	instanceName: string;
 	networkId: string | null;
 	networkName: string | null;
@@ -45,6 +47,8 @@ const initial: WizardState = {
 	libraries: [],
 	strategy: null,
 	mountProtocol: 'NFS',
+	templateName: null,
+	templateVersion: null,
 	instanceName: '',
 	networkId: null,
 	networkName: null,

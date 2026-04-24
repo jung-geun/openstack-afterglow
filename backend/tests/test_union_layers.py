@@ -714,3 +714,296 @@ class TestUnionLayersAPI:
         finally:
             app.dependency_overrides.pop(get_session, None)
         assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# get_dependents 서비스 테스트
+# ---------------------------------------------------------------------------
+
+
+class TestGetDependents:
+    @pytest.mark.asyncio
+    async def test_dependents_returns_children(self):
+        """자식 레이어가 있으면 목록 반환."""
+        from app.services.union_layers import get_dependents
+
+        parent = _make_layer(layer_id=_sha("parent"), sealed=True)
+        child1 = _make_layer(layer_id=_sha("child1"), name="cuda", version="12.3", parent_id=_sha("parent"))
+        child2 = _make_layer(layer_id=_sha("child2"), name="torch", version="2.4", parent_id=_sha("parent"))
+
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=parent)
+        mock_result = MagicMock()
+        mock_result.scalars.return_value = [child1, child2]
+        session.execute = AsyncMock(return_value=mock_result)
+
+        result = await get_dependents(session, _sha("parent"))
+        assert len(result) == 2
+
+    @pytest.mark.asyncio
+    async def test_dependents_no_children(self):
+        """자식 없는 레이어 → 빈 목록."""
+        from app.services.union_layers import get_dependents
+
+        parent = _make_layer(layer_id=_sha("parent"), sealed=True)
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=parent)
+        mock_result = MagicMock()
+        mock_result.scalars.return_value = []
+        session.execute = AsyncMock(return_value=mock_result)
+
+        result = await get_dependents(session, _sha("parent"))
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_dependents_nonexistent_parent_raises(self):
+        """없는 부모 레이어 → KeyError."""
+        from app.services.union_layers import get_dependents
+
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=None)
+
+        with pytest.raises(KeyError):
+            await get_dependents(session, _sha("nonexistent"))
+
+
+# ---------------------------------------------------------------------------
+# delete_layer 서비스 테스트
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteLayer:
+    @pytest.mark.asyncio
+    async def test_delete_layer_success(self):
+        """자식/템플릿/마운트 없는 레이어 삭제 성공."""
+        from app.services.union_layers import delete_layer
+
+        layer = _make_layer(layer_id=_sha("a"), sealed=True)
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=layer)
+
+        # 자식 0, 템플릿 0, 마운트 0
+        mock_count = MagicMock()
+        mock_count.scalar_one.return_value = 0
+        session.execute = AsyncMock(return_value=mock_count)
+
+        await delete_layer(session, _sha("a"))
+        session.delete.assert_called_once_with(layer)
+        session.commit.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_delete_nonexistent_layer_raises(self):
+        """없는 레이어 삭제 → KeyError."""
+        from app.services.union_layers import delete_layer
+
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=None)
+
+        with pytest.raises(KeyError):
+            await delete_layer(session, _sha("x"))
+
+    @pytest.mark.asyncio
+    async def test_delete_layer_with_children_raises(self):
+        """자식 레이어 있으면 ValueError."""
+        from app.services.union_layers import delete_layer
+
+        layer = _make_layer(layer_id=_sha("a"), sealed=True)
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=layer)
+
+        # 첫 execute (자식 카운트) → 1
+        mock_count = MagicMock()
+        mock_count.scalar_one.return_value = 1
+        session.execute = AsyncMock(return_value=mock_count)
+
+        with pytest.raises(ValueError, match="하위 레이어"):
+            await delete_layer(session, _sha("a"))
+
+    @pytest.mark.asyncio
+    async def test_delete_layer_with_template_raises(self):
+        """템플릿이 참조하는 레이어 삭제 → ValueError."""
+        from app.services.union_layers import delete_layer
+
+        layer = _make_layer(layer_id=_sha("a"), sealed=True)
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=layer)
+
+        # 자식 0, 템플릿 1
+        counts = [MagicMock(), MagicMock()]
+        counts[0].scalar_one.return_value = 0
+        counts[1].scalar_one.return_value = 1
+        session.execute = AsyncMock(side_effect=counts)
+
+        with pytest.raises(ValueError, match="템플릿"):
+            await delete_layer(session, _sha("a"))
+
+    @pytest.mark.asyncio
+    async def test_delete_layer_with_active_mount_raises(self):
+        """활성 마운트 있는 레이어 삭제 → ValueError."""
+        from app.services.union_layers import delete_layer
+
+        layer = _make_layer(layer_id=_sha("a"), sealed=True)
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=layer)
+
+        # 자식 0, 템플릿 0, 마운트 1
+        counts = [MagicMock(), MagicMock(), MagicMock()]
+        counts[0].scalar_one.return_value = 0
+        counts[1].scalar_one.return_value = 0
+        counts[2].scalar_one.return_value = 1
+        session.execute = AsyncMock(side_effect=counts)
+
+        with pytest.raises(ValueError, match="활성 마운트"):
+            await delete_layer(session, _sha("a"))
+
+
+# ---------------------------------------------------------------------------
+# 새 API 엔드포인트 테스트 (dependents, delete, template detail)
+# ---------------------------------------------------------------------------
+
+
+class TestNewUnionLayersAPI:
+    @pytest.mark.asyncio
+    async def test_get_dependents_authenticated(self, client):
+        """인증된 사용자 dependents 조회."""
+        from app.database import get_session
+
+        mock_session = AsyncMock()
+
+        async def override_get_session():
+            yield mock_session
+
+        app.dependency_overrides[get_session] = override_get_session
+        try:
+            with patch(
+                "app.api.union.layers.union_layers.get_dependents",
+                AsyncMock(return_value=[_make_layer_info(_sha("child"), "cuda", "12.3")]),
+            ):
+                resp = await client.get(f"/api/union/layers/{_sha('a')}/dependents")
+        finally:
+            app.dependency_overrides.pop(get_session, None)
+        assert resp.status_code == 200
+        assert len(resp.json()) == 1
+
+    @pytest.mark.asyncio
+    async def test_get_dependents_not_found(self, client):
+        """없는 레이어의 dependents → 404."""
+        from app.database import get_session
+
+        mock_session = AsyncMock()
+
+        async def override_get_session():
+            yield mock_session
+
+        app.dependency_overrides[get_session] = override_get_session
+        try:
+            with patch(
+                "app.api.union.layers.union_layers.get_dependents",
+                AsyncMock(side_effect=KeyError("not found")),
+            ):
+                resp = await client.get(f"/api/union/layers/{_sha('x')}/dependents")
+        finally:
+            app.dependency_overrides.pop(get_session, None)
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_delete_layer_admin_success(self, admin_client):
+        """관리자 레이어 삭제 성공 → 204."""
+        from app.database import get_session
+
+        mock_session = AsyncMock()
+
+        async def override_get_session():
+            yield mock_session
+
+        app.dependency_overrides[get_session] = override_get_session
+        try:
+            with patch("app.api.union.layers.union_layers.delete_layer", AsyncMock(return_value=None)):
+                resp = await admin_client.delete(f"/api/union/layers/{_sha('a')}")
+        finally:
+            app.dependency_overrides.pop(get_session, None)
+        assert resp.status_code == 204
+
+    @pytest.mark.asyncio
+    async def test_delete_layer_non_admin_forbidden(self, client):
+        """일반 사용자 레이어 삭제 → 403."""
+        from app.database import get_session
+
+        mock_session = AsyncMock()
+
+        async def override_get_session():
+            yield mock_session
+
+        app.dependency_overrides[get_session] = override_get_session
+        try:
+            resp = await client.delete(f"/api/union/layers/{_sha('a')}")
+        finally:
+            app.dependency_overrides.pop(get_session, None)
+        assert resp.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_delete_layer_with_children_returns_409(self, admin_client):
+        """자식 있는 레이어 삭제 → 409."""
+        from app.database import get_session
+
+        mock_session = AsyncMock()
+
+        async def override_get_session():
+            yield mock_session
+
+        app.dependency_overrides[get_session] = override_get_session
+        try:
+            with patch(
+                "app.api.union.layers.union_layers.delete_layer",
+                AsyncMock(side_effect=ValueError("하위 레이어가 존재하여 삭제할 수 없습니다")),
+            ):
+                resp = await admin_client.delete(f"/api/union/layers/{_sha('a')}")
+        finally:
+            app.dependency_overrides.pop(get_session, None)
+        assert resp.status_code == 409
+
+    @pytest.mark.asyncio
+    async def test_get_template_detail_found(self, client):
+        """템플릿 상세 조회 성공."""
+        from app.database import get_session
+        from app.models.union import TemplateInfo
+
+        mock_session = AsyncMock()
+        expected = TemplateInfo(
+            name="ml-pytorch",
+            version=1,
+            created_at=_NOW,
+            created_by="admin",
+            ubuntu_base="ubuntu-24.04",
+            leaf_layer_id=_sha("leaf"),
+        )
+
+        async def override_get_session():
+            yield mock_session
+
+        app.dependency_overrides[get_session] = override_get_session
+        try:
+            with patch("app.api.union.layers.union_layers.get_template", AsyncMock(return_value=expected)):
+                resp = await client.get("/api/union/templates/ml-pytorch/1")
+        finally:
+            app.dependency_overrides.pop(get_session, None)
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "ml-pytorch"
+
+    @pytest.mark.asyncio
+    async def test_get_template_detail_not_found(self, client):
+        """없는 템플릿 조회 → 404."""
+        from app.database import get_session
+
+        mock_session = AsyncMock()
+
+        async def override_get_session():
+            yield mock_session
+
+        app.dependency_overrides[get_session] = override_get_session
+        try:
+            with patch("app.api.union.layers.union_layers.get_template", AsyncMock(return_value=None)):
+                resp = await client.get("/api/union/templates/nonexistent/99")
+        finally:
+            app.dependency_overrides.pop(get_session, None)
+        assert resp.status_code == 404
