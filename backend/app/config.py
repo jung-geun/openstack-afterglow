@@ -77,7 +77,7 @@ def _load_toml() -> dict:
     flat["os_swift_endpoint"] = ost.get("swift_endpoint", "")
     flat["os_swift_upload_timeout"] = ost.get("swift_upload_timeout", 600)
     flat["os_manila_share_network_id"] = ost.get("manila_share_network_id", "")
-    flat["os_manila_share_type"] = ost.get("manila_share_type", "cephfstype")
+    flat["os_manila_share_type"] = ost.get("manila_share_type", "cephfs")
     flat["os_manila_nfs_share_type"] = ost.get("manila_nfs_share_type", "nfstype")
     flat["ceph_monitors"] = ost.get("ceph_monitors", "")
 
@@ -106,9 +106,10 @@ def _load_toml() -> dict:
     flat["service_k3s_enabled"] = svc.get("k3s", False)
     flat["service_trove_enabled"] = svc.get("trove", False)
     flat["service_swift_enabled"] = svc.get("swift", False)
+    flat["service_barbican_enabled"] = svc.get("barbican", False)
 
     k3s = data.get("k3s", {})
-    flat["k3s_version"] = k3s.get("version", "v1.31.4+k3s1")
+    flat["k3s_version"] = k3s.get("version", "v1.34.6+k3s1")
     flat["k3s_server_flavor_id"] = k3s.get("server_flavor_id", "")
     flat["k3s_default_agent_flavor_id"] = k3s.get("default_agent_flavor_id", "")
     flat["k3s_server_image_id"] = k3s.get("server_image_id", "")
@@ -118,30 +119,30 @@ def _load_toml() -> dict:
     flat["k3s_occm_enabled"] = k3s.get("occm_enabled", False)
     flat["k3s_occm_image"] = k3s.get(
         "occm_image",
-        "registry.k8s.io/provider-os/openstack-cloud-controller-manager:v1.35.0",
+        "registry.k8s.io/provider-os/openstack-cloud-controller-manager:v1.34.1",
     )
     flat["k3s_occm_floating_network_id"] = k3s.get("occm_floating_network_id", "")
     flat["k3s_occm_public_network_name"] = k3s.get("occm_public_network_name", "")
     # Cinder CSI
     flat["k3s_cinder_csi_enabled"] = k3s.get("cinder_csi_enabled", False)
-    flat["k3s_cinder_csi_image"] = k3s.get("cinder_csi_image", "registry.k8s.io/provider-os/cinder-csi-plugin:v1.31.0")
+    flat["k3s_cinder_csi_image"] = k3s.get("cinder_csi_image", "registry.k8s.io/provider-os/cinder-csi-plugin:v1.34.1")
     flat["k3s_cinder_csi_default_az"] = k3s.get("cinder_csi_default_az", "nova")
     # Manila CSI
     flat["k3s_manila_csi_enabled"] = k3s.get("manila_csi_enabled", False)
-    flat["k3s_manila_csi_image"] = k3s.get("manila_csi_image", "registry.k8s.io/provider-os/manila-csi-plugin:v1.31.0")
+    flat["k3s_manila_csi_image"] = k3s.get("manila_csi_image", "registry.k8s.io/provider-os/manila-csi-plugin:v1.34.1")
     flat["k3s_manila_csi_nfs_image"] = k3s.get("manila_csi_nfs_image", "registry.k8s.io/sig-storage/nfsplugin:v4.9.0")
     flat["k3s_manila_csi_share_protocol"] = k3s.get("manila_csi_share_protocol", "NFS")
     # Keystone Auth
     flat["k3s_keystone_auth_enabled"] = k3s.get("keystone_auth_enabled", False)
     flat["k3s_keystone_auth_image"] = k3s.get(
-        "keystone_auth_image", "registry.k8s.io/provider-os/k8s-keystone-auth:v1.31.0"
+        "keystone_auth_image", "registry.k8s.io/provider-os/k8s-keystone-auth:v1.34.1"
     )
     flat["k3s_keystone_auth_policy"] = k3s.get("keystone_auth_policy", "")
     # Octavia Ingress
     flat["k3s_octavia_ingress_enabled"] = k3s.get("octavia_ingress_enabled", False)
     flat["k3s_octavia_ingress_image"] = k3s.get(
         "octavia_ingress_image",
-        "registry.k8s.io/provider-os/octavia-ingress-controller:v1.31.0",
+        "registry.k8s.io/provider-os/octavia-ingress-controller:v1.34.1",
     )
     flat["k3s_octavia_ingress_subnet_id"] = k3s.get("octavia_ingress_subnet_id", "")
     flat["k3s_octavia_ingress_floating_network_id"] = k3s.get("octavia_ingress_floating_network_id", "")
@@ -181,6 +182,9 @@ def _load_toml() -> dict:
     flat["builder_image_id"] = builder.get("image_id", "")
     flat["builder_flavor_id"] = builder.get("flavor_id", "")
     flat["builder_network_id"] = builder.get("network_id", "")
+
+    notion = data.get("notion", {})
+    flat["notion_config_encryption_key"] = notion.get("config_encryption_key", "")
 
     gl = data.get("gitlab_oidc", {})
     flat["gitlab_oidc_enabled"] = gl.get("enabled", False)
@@ -232,7 +236,8 @@ class Settings(BaseSettings):
     os_swift_endpoint: str = ""
     os_swift_upload_timeout: int = 600  # 대용량 업로드용 타임아웃 (초)
     os_manila_share_network_id: str = ""
-    os_manila_share_type: str = "cephfstype"
+    os_manila_share_type: str = "cephfs"
+    os_manila_nfs_share_type: str = "nfstype"
 
     # Ceph 모니터 (cloud-init CephFS 마운트용)
     ceph_monitors: str = ""
@@ -265,9 +270,10 @@ class Settings(BaseSettings):
     service_k3s_enabled: bool = False
     service_trove_enabled: bool = False
     service_swift_enabled: bool = False
+    service_barbican_enabled: bool = False
 
     # k3s 설정
-    k3s_version: str = "v1.31.4+k3s1"
+    k3s_version: str = "v1.34.6+k3s1"
     k3s_server_flavor_id: str = ""
     k3s_default_agent_flavor_id: str = ""
     k3s_server_image_id: str = ""
@@ -275,25 +281,25 @@ class Settings(BaseSettings):
     k3s_kubeconfig_encryption_key: str = ""
     k3s_boot_volume_size_gb: int = 30
     k3s_occm_enabled: bool = False
-    k3s_occm_image: str = "registry.k8s.io/provider-os/openstack-cloud-controller-manager:v1.35.0"
+    k3s_occm_image: str = "registry.k8s.io/provider-os/openstack-cloud-controller-manager:v1.34.1"
     k3s_occm_floating_network_id: str = ""
     k3s_occm_public_network_name: str = ""
     # Cinder CSI
     k3s_cinder_csi_enabled: bool = False
-    k3s_cinder_csi_image: str = "registry.k8s.io/provider-os/cinder-csi-plugin:v1.31.0"
+    k3s_cinder_csi_image: str = "registry.k8s.io/provider-os/cinder-csi-plugin:v1.34.1"
     k3s_cinder_csi_default_az: str = "nova"
     # Manila CSI
     k3s_manila_csi_enabled: bool = False
-    k3s_manila_csi_image: str = "registry.k8s.io/provider-os/manila-csi-plugin:v1.31.0"
+    k3s_manila_csi_image: str = "registry.k8s.io/provider-os/manila-csi-plugin:v1.34.1"
     k3s_manila_csi_nfs_image: str = "registry.k8s.io/sig-storage/nfsplugin:v4.9.0"
     k3s_manila_csi_share_protocol: str = "NFS"
     # Keystone Auth
     k3s_keystone_auth_enabled: bool = False
-    k3s_keystone_auth_image: str = "registry.k8s.io/provider-os/k8s-keystone-auth:v1.31.0"
+    k3s_keystone_auth_image: str = "registry.k8s.io/provider-os/k8s-keystone-auth:v1.34.1"
     k3s_keystone_auth_policy: str = ""
     # Octavia Ingress
     k3s_octavia_ingress_enabled: bool = False
-    k3s_octavia_ingress_image: str = "registry.k8s.io/provider-os/octavia-ingress-controller:v1.31.0"
+    k3s_octavia_ingress_image: str = "registry.k8s.io/provider-os/octavia-ingress-controller:v1.34.1"
     k3s_octavia_ingress_subnet_id: str = ""
     k3s_octavia_ingress_floating_network_id: str = ""
     # Barbican KMS
@@ -309,6 +315,8 @@ class Settings(BaseSettings):
     k3s_lb_subnet_id: str = ""
     # FCOS (Fedora CoreOS) 이미지 ID (os_type=fcos 클러스터에 사용)
     k3s_fcos_image_id: str = ""
+
+    # Notion 연동
     notion_config_encryption_key: str = ""  # 미설정 시 k3s_kubeconfig_encryption_key 재사용
 
     # GPU

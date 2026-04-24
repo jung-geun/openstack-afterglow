@@ -183,6 +183,11 @@ flavor_id = ""      # 빌더 VM 플레이버 ID
 network_id = ""     # 빌더 VM 네트워크 ID (미설정 시 nova.default_network_id 사용)
 
 
+[notion]
+# Notion 연동 설정 (선택적)
+# config_encryption_key = ""  # Notion 설정 암호화 키 (미설정 시 k3s.kubeconfig_encryption_key 재사용)
+
+
 [logging]
 # 파일 로그 설정 (미설정 시 stdout 전용 출력)
 # log_file_path = ""            # 로그 파일 경로 (예: "/var/log/afterglow/app.log")
