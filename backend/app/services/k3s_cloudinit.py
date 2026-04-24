@@ -250,7 +250,11 @@ def generate_server_userdata(
         )
         # Ignition JSON 유효성 간단 확인
         json.loads(ign_str)
-        return UserdataResult(data=ign_str, config_drive=True)
+        # Nova API는 user_data를 base64 디코딩 후 config drive에 기록.
+        # raw JSON을 그대로 보내면 base64 디코딩 시 바이너리 garbage가 되므로
+        # 반드시 base64 인코딩하여 전달해야 한다.
+        encoded = base64.b64encode(ign_str.encode()).decode()
+        return UserdataResult(data=encoded, config_drive=True)
 
     # Ubuntu (기본)
     template_vars = dict(
@@ -301,7 +305,8 @@ def generate_agent_userdata(
             extra_agent_args=agent_args,
         )
         json.loads(ign_str)
-        return UserdataResult(data=ign_str, config_drive=True)
+        encoded = base64.b64encode(ign_str.encode()).decode()
+        return UserdataResult(data=encoded, config_drive=True)
 
     # Ubuntu (기본)
     template_vars = dict(
