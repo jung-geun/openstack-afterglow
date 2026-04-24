@@ -23,6 +23,7 @@ class K3sProgressMessage(BaseModel):
     message: str
     cluster_id: str | None = None
     error: str | None = None
+    elapsed_seconds: float | None = None
 
 
 _VALID_OS_TYPES = {"ubuntu", "fcos"}

@@ -76,6 +76,9 @@
 
 	type FlavorCategory = 'all' | 'general' | 'cpu' | 'memory' | 'gpu';
 	let activeCategory = $state<FlavorCategory>('all');
+	let searchTerm = $state('');
+	let currentPage = $state(1);
+	const PAGE_SIZE = 10;
 
 	function hasGpu(flavor: FlavorInfo): boolean {
 		return Object.keys(flavor.extra_specs).some(
@@ -102,6 +105,28 @@
 			? flavors
 			: flavors.filter(f => categorize(f) === activeCategory)
 	);
+
+	const searchedFlavors = $derived(
+		searchTerm.trim()
+			? filteredFlavors.filter(f =>
+				f.name.toLowerCase().includes(searchTerm.trim().toLowerCase()) ||
+				String(f.vcpus).includes(searchTerm.trim()) ||
+				ramLabel(f.ram).toLowerCase().includes(searchTerm.trim().toLowerCase())
+			)
+			: filteredFlavors
+	);
+
+	const totalPages = $derived(Math.max(1, Math.ceil(searchedFlavors.length / PAGE_SIZE)));
+
+	const paginatedFlavors = $derived(
+		searchedFlavors.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
+	);
+
+	$effect(() => {
+		activeCategory;
+		searchTerm;
+		currentPage = 1;
+	});
 
 	function ramLabel(mb: number): string {
 		return mb >= 1024 ? `${Math.round(mb / 1024)} GB` : `${mb} MB`;
@@ -155,6 +180,21 @@
 	{/each}
 </div>
 
+<!-- 통합 검색 -->
+<div class="relative mb-4">
+	<span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none">
+		<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+			<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/>
+		</svg>
+	</span>
+	<input
+		type="search"
+		placeholder="플레이버 이름, vCPU, RAM으로 검색..."
+		bind:value={searchTerm}
+		class="w-full bg-gray-900 border border-gray-800 text-gray-200 rounded-lg pl-9 pr-3 py-2 text-sm outline-none focus:border-gray-600 placeholder-gray-600"
+	/>
+</div>
+
 <!-- GPU 가용량 배너 -->
 {#if gpuAvailability.length > 0 && (activeCategory === 'all' || activeCategory === 'gpu')}
 	<div class="mb-4 p-3 rounded-lg bg-gray-800/60 border border-gray-700">
@@ -194,7 +234,7 @@
 	</div>
 
 	<!-- 테이블 바디 -->
-	{#each filteredFlavors as flavor}
+	{#each paginatedFlavors as flavor}
 		{@const badge = categoryBadge(flavor)}
 		{@const gpu = gpuSummary(flavor)}
 		<button
@@ -230,7 +270,32 @@
 		</button>
 	{/each}
 
-	{#if filteredFlavors.length === 0}
+	{#if searchedFlavors.length === 0}
 		<div class="text-center py-8 text-gray-600 text-sm">조건에 맞는 플레이버가 없습니다</div>
 	{/if}
 </div>
+
+<!-- 페이지네이션 -->
+{#if totalPages > 1}
+<div class="flex items-center justify-between mt-3 text-xs text-gray-500">
+	<span>{searchedFlavors.length}개 중 {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, searchedFlavors.length)}</span>
+	<div class="flex gap-1">
+		<button
+			onclick={() => currentPage = Math.max(1, currentPage - 1)}
+			disabled={currentPage === 1}
+			class="px-2 py-1 rounded bg-gray-800 text-gray-400 hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed"
+		>이전</button>
+		{#each Array.from({ length: totalPages }, (_, i) => i + 1) as p}
+			<button
+				onclick={() => currentPage = p}
+				class="px-2 py-1 rounded {p === currentPage ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}"
+			>{p}</button>
+		{/each}
+		<button
+			onclick={() => currentPage = Math.min(totalPages, currentPage + 1)}
+			disabled={currentPage === totalPages}
+			class="px-2 py-1 rounded bg-gray-800 text-gray-400 hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed"
+		>다음</button>
+	</div>
+</div>
+{/if}

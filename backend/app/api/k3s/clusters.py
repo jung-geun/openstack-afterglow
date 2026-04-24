@@ -8,6 +8,7 @@ if TYPE_CHECKING:
     import openstack
 import asyncio
 import logging
+import time
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
@@ -188,8 +189,11 @@ async def create_k3s_cluster_async(
         agent_flavor_id = _resolve_flavor(conn, agent_flavor_id)
 
     async def progress_generator() -> AsyncGenerator[str, None]:
+        _start_time = time.monotonic()
+
         def event(step: K3sProgressStep, progress: int, message: str, **kw) -> str:
-            msg = K3sProgressMessage(step=step, progress=progress, message=message, **kw)
+            elapsed = round(time.monotonic() - _start_time, 1)
+            msg = K3sProgressMessage(step=step, progress=progress, message=message, elapsed_seconds=elapsed, **kw)
             return f"data: {msg.model_dump_json()}\n\n"
 
         # 롤백 추적

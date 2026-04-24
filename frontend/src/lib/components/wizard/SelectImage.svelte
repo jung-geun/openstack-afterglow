@@ -31,6 +31,19 @@
 		rhel: 'bg-red-700', windows: 'bg-sky-600', cirros: 'bg-teal-600',
 	};
 
+	const distroLogos: Record<string, string> = {
+		ubuntu: '/logos/Ubuntu.png',
+		centos: '/logos/CentOS.png',
+		fedora: '/logos/Fedora.png',
+		'fedora-coreos': '/logos/coreos.png',
+		cirros: '/logos/Cirros.png',
+		windows: '/logos/Windows.png',
+	};
+
+	function logoPath(distro: string | null): string | null {
+		return distroLogos[distro ?? ''] ?? null;
+	}
+
 	const distros = $derived(
 		[...new Set(images.map(i => i.os_distro ?? '기타'))].sort((a, b) => {
 			if (a === '기타') return 1;
@@ -113,9 +126,13 @@
 
 			<!-- 아바타 + 이름 -->
 			<div class="flex items-start gap-3 mb-2">
-				<div class="w-8 h-8 rounded-lg {avatarColor(img.os_distro)} flex items-center justify-center text-white text-sm font-bold flex-shrink-0">
-					{avatarLetter(img.name)}
-				</div>
+				{#if logoPath(img.os_distro)}
+					<img src={logoPath(img.os_distro)} alt={img.os_distro ?? ''} class="w-8 h-8 rounded-lg object-contain bg-gray-800 p-0.5 flex-shrink-0" />
+				{:else}
+					<div class="w-8 h-8 rounded-lg {avatarColor(img.os_distro)} flex items-center justify-center text-white text-sm font-bold flex-shrink-0">
+						{avatarLetter(img.name)}
+					</div>
+				{/if}
 				<div class="min-w-0 flex-1">
 					<div class="font-medium text-white text-sm truncate">{img.name}</div>
 					<div class="text-xs text-gray-500 truncate">{distroDescription(img)}</div>

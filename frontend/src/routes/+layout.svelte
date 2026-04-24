@@ -10,6 +10,7 @@
 	import { siteConfig, loadSiteConfig } from '$lib/config/site';
 	import { sidebarOpen } from '$lib/stores/sidebar';
 	import { deriveBreadcrumb } from '$lib/config/routes';
+	import Toast from '$lib/components/ui/Toast.svelte';
 	import './layout.css';
 
 	let { children } = $props();
@@ -228,6 +229,7 @@
 			</button>
 		</div>
 	</nav>
+	<Toast />
 	<main class="pt-14 min-h-screen bg-gray-950 text-white">
 		{@render children()}
 	</main>

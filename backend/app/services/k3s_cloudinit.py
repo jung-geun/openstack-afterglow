@@ -34,12 +34,15 @@ def _b64(text: str) -> str:
 
 
 def _ignition_file(path: str, content: str, mode: int = 0o644) -> dict:
-    """Ignition storage.files 항목 생성."""
+    """Ignition storage.files 항목 생성 (gzip 압축으로 user_data 크기 절감)."""
+    compressed = gzip.compress(content.encode())
+    b64 = base64.b64encode(compressed).decode()
     return {
         "path": path,
         "mode": mode,
         "contents": {
-            "source": f"data:text/plain;charset=utf-8;base64,{_b64(content)}",
+            "compression": "gzip",
+            "source": f"data:;base64,{b64}",
         },
     }
 

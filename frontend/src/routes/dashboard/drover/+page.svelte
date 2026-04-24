@@ -2,6 +2,7 @@
   import { auth } from '$lib/stores/auth';
   import { untrack } from 'svelte';
   import { api, ApiError, getBaseUrl } from '$lib/api/client';
+  import { toast } from '$lib/stores/toast';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import RefreshButton from '$lib/components/RefreshButton.svelte';
   import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
@@ -119,6 +120,9 @@
   let progressMsg = $state('');
   let progressError = $state('');
   let createdClusterId = $state<string | null>(null);
+  let elapsedSeconds = $state(0);
+  let stepTimings = $state<Record<string, number>>({});
+  let lastStepSeen = $state('');
 
   const token = $derived($auth.token ?? undefined);
   const projectId = $derived($auth.projectId ?? undefined);
@@ -167,6 +171,9 @@
     progressMsg = '클러스터 생성 준비 중...';
     progressError = '';
     createdClusterId = null;
+    elapsedSeconds = 0;
+    stepTimings = {};
+    lastStepSeen = '';
 
     try {
       const baseUrl = getBaseUrl();
@@ -213,9 +220,17 @@
             progressStep = msg.step;
             progressPct = msg.progress;
             progressMsg = msg.message;
+            if (msg.elapsed_seconds != null) elapsedSeconds = msg.elapsed_seconds;
+            if (msg.step !== lastStepSeen) {
+              stepTimings[msg.step] = msg.elapsed_seconds ?? elapsedSeconds;
+              lastStepSeen = msg.step;
+            }
             if (msg.cluster_id) createdClusterId = msg.cluster_id;
-            if (msg.step === 'failed') {
+            if (msg.step === 'completed') {
+              toast.success(`클러스터 "${form.name || '클러스터'}" 생성 완료 (${elapsedSeconds}초)`);
+            } else if (msg.step === 'failed') {
               progressError = msg.error || '알 수 없는 오류';
+              toast.error(`클러스터 생성 실패: ${msg.error || '알 수 없는 오류'}`);
             }
           } catch {}
         }
@@ -421,11 +436,17 @@
         {#each k3sSteps as step}
           {@const isCurrent = progressStep === step.id}
           {@const isDone = k3sSteps.findIndex(s => s.id === progressStep) > k3sSteps.findIndex(s => s.id === step.id)}
+          {@const stepTime = stepTimings[step.id]}
           <div class="flex items-center gap-2 text-sm {isDone ? 'text-green-400' : isCurrent ? 'text-blue-400' : 'text-gray-600'}">
-            <span class="w-4 h-4 flex items-center justify-center">
+            <span class="w-4 h-4 flex items-center justify-center flex-shrink-0">
               {#if isDone}✓{:else if isCurrent}<span class="animate-pulse">●</span>{:else}○{/if}
             </span>
-            {step.label}
+            <span class="flex-1">{step.label}</span>
+            {#if isDone && stepTime != null}
+              <span class="text-xs opacity-60">{stepTime}s~</span>
+            {:else if isCurrent && elapsedSeconds > 0}
+              <span class="text-xs opacity-60">{elapsedSeconds}s</span>
+            {/if}
           </div>
         {/each}
       </div>
@@ -433,7 +454,12 @@
       <div class="bg-gray-800 rounded-full h-2 mb-3">
         <div class="bg-blue-500 h-2 rounded-full transition-all duration-500" style="width: {progressPct}%"></div>
       </div>
-      <p class="text-sm text-gray-400 mb-4">{progressMsg}</p>
+      <div class="flex items-center justify-between mb-4">
+        <p class="text-sm text-gray-400">{progressMsg}</p>
+        {#if elapsedSeconds > 0}
+          <span class="text-xs text-gray-600 flex-shrink-0 ml-2">경과 {elapsedSeconds}초</span>
+        {/if}
+      </div>
       {#if progressError}
         <div class="text-red-400 text-xs bg-red-900/20 border border-red-800 rounded px-3 py-2 mb-4">{progressError}</div>
       {/if}
