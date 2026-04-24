@@ -29,9 +29,10 @@ export interface WizardState {
 	instanceName: string;
 	networkId: string | null;
 	networkName: string | null;
-	authMode: 'keypair' | 'password';
 	keyName: string | null;
-	adminPassword: string;
+	securityGroups: string[];
+	availabilityZone: string | null;
+	cloudInit: string;
 	bootVolumeSizeGb: number;
 	deleteBootVolumeOnTermination: boolean;
 	additionalVolumeIds: string[];
@@ -52,9 +53,10 @@ const initial: WizardState = {
 	instanceName: '',
 	networkId: null,
 	networkName: null,
-	authMode: 'keypair',
 	keyName: null,
-	adminPassword: '',
+	securityGroups: [],
+	availabilityZone: null,
+	cloudInit: '',
 	bootVolumeSizeGb: 20,
 	deleteBootVolumeOnTermination: false,
 	additionalVolumeIds: [],

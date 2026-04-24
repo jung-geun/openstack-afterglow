@@ -248,16 +248,17 @@ async def create_instance(
         server = await asyncio.to_thread(
             nova.create_server,
             conn,
-            req.name,
-            req.flavor_id,
-            req.network_id,
-            boot_volume_id,
-            userdata,
-            req.key_name,
-            req.admin_pass,
-            req.availability_zone or settings.default_availability_zone,
-            meta,
-            req.delete_boot_volume_on_termination,
+            name=req.name,
+            flavor_id=req.flavor_id,
+            network_id=req.network_id,
+            boot_volume_id=boot_volume_id,
+            userdata=userdata,
+            key_name=req.key_name,
+            admin_pass=req.admin_pass,
+            availability_zone=req.availability_zone or settings.default_availability_zone,
+            metadata=meta,
+            delete_boot_volume_on_termination=req.delete_boot_volume_on_termination,
+            security_groups=req.security_groups if req.security_groups else None,
         )
         server_id = server.id
 
@@ -476,6 +477,7 @@ async def create_instance_async(
                 availability_zone=req.availability_zone or settings.default_availability_zone,
                 metadata=meta,
                 delete_boot_volume_on_termination=req.delete_boot_volume_on_termination,
+                security_groups=req.security_groups if req.security_groups else None,
             )
             server_id = server.id
             yield send_progress(ProgressStep.SERVER_CREATING, 95, "Nova 서버 생성 완료")
@@ -1110,3 +1112,15 @@ async def release_floating_ip(
         await invalidate(f"afterglow:neutron:{pid}:floating_ips")
     except Exception as ex:
         raise HTTPException(status_code=500, detail=f"Floating IP 해제 실패: {ex}")
+
+
+@router.get("/availability-zones")
+async def list_availability_zones(
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """사용 가능한 가용 영역 목록."""
+    try:
+        zones = await asyncio.to_thread(nova.list_availability_zones, conn)
+        return zones
+    except Exception:
+        raise HTTPException(status_code=500, detail="가용 영역 조회 실패")

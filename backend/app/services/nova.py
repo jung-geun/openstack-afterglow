@@ -222,6 +222,15 @@ def get_project_usage(conn: openstack.connection.Connection, project_id: str, st
         }
 
 
+def list_availability_zones(conn: openstack.connection.Connection) -> list[dict]:
+    """사용 가능한 가용 영역 목록 조회."""
+    return [
+        {"name": az.name, "state": getattr(az, "state", {}).get("available", True) if isinstance(getattr(az, "state", {}), dict) else True}
+        for az in conn.compute.availability_zones()
+        if getattr(az, "name", "") not in ("internal",)
+    ]
+
+
 def list_keypairs(conn: openstack.connection.Connection) -> list[dict]:
     return [
         {"name": kp.name, "fingerprint": kp.fingerprint, "type": getattr(kp, "type", "ssh")}

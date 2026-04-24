@@ -89,6 +89,8 @@ class CreateInstanceRequest(BaseModel):
     key_name: str | None = None
     admin_pass: str | None = Field(None, min_length=8, max_length=128)
     availability_zone: str | None = None
+    security_groups: list[str] = []
+    userdata: str | None = None
     boot_volume_size_gb: int | None = Field(None, ge=1, le=16384)
     delete_boot_volume_on_termination: bool = False
     additional_volume_ids: list[str] = []

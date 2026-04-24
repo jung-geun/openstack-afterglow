@@ -39,6 +39,17 @@
 		type: string;
 	}
 
+	interface SecurityGroupInfo {
+		id: string;
+		name: string;
+		description: string;
+	}
+
+	interface AvailabilityZoneInfo {
+		name: string;
+		state: boolean;
+	}
+
 	const ALL_PROGRESS_STEPS = [
 		{ id: 'manila_preparing', label: 'File Storage', description: '파일 스토리지 준비', needsLibrary: true },
 		{ id: 'boot_volume_creating', label: '부트 볼륨', description: 'OS 이미지 볼륨 생성', needsLibrary: false },
@@ -63,6 +74,8 @@
 	let networks = $state<NetworkInfo[]>([]);
 	let keypairs = $state<KeypairInfo[]>([]);
 	let volumes = $state<Volume[]>([]);
+	let securityGroups = $state<SecurityGroupInfo[]>([]);
+	let availabilityZones = $state<AvailabilityZoneInfo[]>([]);
 	let defaultNetworkId = $state<string | null>(null);
 	let loadError = $state('');
 	let deploying = $state(false);
@@ -87,11 +100,17 @@
 				api.get<KeypairInfo[]>('/api/keypairs', token, projectId),
 				api.get<Volume[]>('/api/volumes', token, projectId),
 			]);
-			// 키페어가 1개이면 자동선택 (아직 미선택 시)
+			// 보안 그룹, AZ는 비동기 로드 (실패해도 무시)
+			try {
+				securityGroups = await api.get<SecurityGroupInfo[]>('/api/security-groups', token, projectId);
+			} catch { securityGroups = []; }
+			try {
+				availabilityZones = await api.get<AvailabilityZoneInfo[]>('/api/instances/availability-zones', token, projectId);
+			} catch { availabilityZones = []; }
+
 			if (keypairs.length === 1 && !$wizard.keyName) {
 				wizard.update(w => ({ ...w, keyName: keypairs[0].name }));
 			}
-			// 네트워크 자동선택: GET /api/networks/default → "Default" 이름 순으로 선택
 			if (networks.length > 0 && !$wizard.networkId) {
 				let selectedNet = networks[0];
 				try {
@@ -105,11 +124,15 @@
 				}
 				wizard.update(w => ({ ...w, networkId: selectedNet.id, networkName: selectedNet.name }));
 			} else if ($wizard.networkId) {
-				// 기존 선택이 있으면 defaultNetworkId만 갱신
 				try {
 					const defaultRecord = await api.get<{ network_id: string }>('/api/networks/default', token, projectId);
 					defaultNetworkId = defaultRecord.network_id;
 				} catch { /* 무시 */ }
+			}
+			// 보안 그룹 기본 선택 (default)
+			if (securityGroups.length > 0 && $wizard.securityGroups.length === 0) {
+				const defaultSg = securityGroups.find(sg => sg.name === 'default');
+				if (defaultSg) wizard.update(w => ({ ...w, securityGroups: [defaultSg.name] }));
 			}
 		} catch (e) {
 			loadError = e instanceof ApiError ? `데이터 로드 실패 (${e.status})` : '서버 오류';
@@ -153,7 +176,6 @@
 		wizard.update(w => ({ ...w, flavorId: id, flavorName: name }));
 	}
 
-	// 전이적 의존성을 재귀적으로 해결 (DFS)
 	function resolveAllDeps(id: string): string[] {
 		const result: string[] = [];
 		const visited = new Set<string>();
@@ -174,7 +196,6 @@
 			if (libs.has(id)) {
 				libs.delete(id);
 			} else {
-				// 전이적 의존성까지 모두 추가
 				resolveAllDeps(id).forEach(d => libs.add(d));
 			}
 			const newLibs = Array.from(libs);
@@ -183,7 +204,6 @@
 		});
 	}
 
-	// 이미지 이름에서 Ubuntu 버전 추출 ("Ubuntu 22.04 LTS" → "22.04")
 	const ubuntuVersion = $derived.by(() => {
 		const name = $wizard.imageName ?? '';
 		const m = name.match(/(\d{2}\.\d{2})/);
@@ -207,19 +227,6 @@
 		$wizard.networkId ? networks.find(n => n.id === $wizard.networkId) ?? null : null
 	);
 
-	let availableVolumes = $derived(
-		volumes.filter(v => v.status === 'available')
-	);
-
-	function toggleVolume(id: string) {
-		wizard.update(w => {
-			const ids = new Set(w.additionalVolumeIds);
-			if (ids.has(id)) ids.delete(id);
-			else ids.add(id);
-			return { ...w, additionalVolumeIds: Array.from(ids) };
-		});
-	}
-
 	let hasGpuFlavor = $derived(
 		flavors.find(f => f.id === $wizard.flavorId)
 			? Object.keys(flavors.find(f => f.id === $wizard.flavorId)?.extra_specs ?? {}).some(
@@ -232,15 +239,32 @@
 		libraries.some(l => $wizard.libraries.includes(l.id) && l.available_prebuilt)
 	);
 
+	let selectedFlavorDetail = $derived.by(() => {
+		const f = flavors.find((fl: any) => fl.id === $wizard.flavorId);
+		if (!f) return '';
+		const parts = [`${f.vcpus} vCPU`, `${f.ram >= 1024 ? Math.round(f.ram / 1024) + ' GB' : f.ram + ' MB'}`, `${f.disk} GB`];
+		const alias = f.extra_specs?.['pci_passthrough:alias'] ?? '';
+		if (alias) {
+			const gpuParts = alias.split(',').filter((e: string) => e.includes(':') && !e.toLowerCase().includes('audio'));
+			if (gpuParts.length > 0) {
+				gpuParts.forEach((e: string) => {
+					const idx = e.lastIndexOf(':');
+					const model = e.slice(0, idx).trim();
+					const count = parseInt(e.slice(idx + 1)) || 1;
+					parts.push(`${model} ${count > 1 ? '× ' + count : ''}`);
+				});
+			}
+		}
+		return parts.join(' · ');
+	});
+
 	let canNext = $derived((() => {
 		switch ($wizard.step) {
 			case 1: return !!$wizard.imageId;
 			case 2: return !!$wizard.flavorId;
 			case 3: return true;
 			case 4: return true;
-			case 5:
-				if ($wizard.authMode === 'keypair') return !!$wizard.keyName;
-				return $wizard.adminPassword.length >= 1;
+			case 5: return !!$wizard.instanceName.trim() && !!$wizard.keyName;
 			case 6: return !!$wizard.instanceName.trim();
 			default: return false;
 		}
@@ -254,7 +278,6 @@
 		progressMessage = '배포 시작...';
 
 		const baseUrl = getBaseUrl();
-
 		const headers: Record<string, string> = {
 			'Content-Type': 'application/json',
 			'Accept': 'text/event-stream'
@@ -273,12 +296,12 @@
 					libraries: $wizard.libraries,
 					strategy: $wizard.strategy,
 					network_id: $wizard.networkId,
-					key_name: $wizard.authMode === 'keypair' ? $wizard.keyName : null,
-					admin_pass: $wizard.authMode === 'password' ? $wizard.adminPassword : null,
+					key_name: $wizard.keyName,
+					availability_zone: $wizard.availabilityZone,
+					security_groups: $wizard.securityGroups,
+					userdata: $wizard.cloudInit || null,
 					boot_volume_size_gb: $wizard.bootVolumeSizeGb,
 					delete_boot_volume_on_termination: $wizard.deleteBootVolumeOnTermination,
-					additional_volume_ids: $wizard.additionalVolumeIds,
-					new_volumes: $wizard.newVolumes.filter(v => v.name.trim()),
 				})
 			});
 
@@ -342,46 +365,28 @@
 	}
 
 	const stepLabels = ['이미지', '플레이버', '라이브러리', '전략', '설정', '배포'];
+	const stepSubtitles: Record<number, string> = {
+		1: '이미지',
+		2: '플레이버',
+		3: '라이브러리',
+		4: '전략',
+		5: '설정',
+		6: '배포',
+	};
 </script>
 
 <SlidePanel onClose={closeWizard} width="w-full md:w-[75vw] max-w-4xl">
 	<div class="p-4 md:p-8">
-		<!-- 헤더 -->
-		<div class="flex items-center justify-between mb-6">
-			<h1 class="text-2xl font-bold text-white">VM 생성</h1>
-			<div class="flex items-center gap-3">
-				{#if !deploying}
-					<button
-						onclick={handleReset}
-						class="text-xs text-gray-500 hover:text-gray-300 transition-colors px-2 py-1 rounded hover:bg-gray-800"
-					>
-						새로 시작
-					</button>
-				{/if}
-				<button
-					onclick={closeWizard}
-					class="text-gray-500 hover:text-white transition-colors p-1 rounded hover:bg-gray-800"
-					aria-label="닫기"
-				>
-					<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-					</svg>
-				</button>
-			</div>
-		</div>
-
-		{#if loadError}
-			<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-6">
-				{loadError}
-			</div>
-		{/if}
-
 		{#if loading}
 			<div class="flex items-center justify-center py-16">
 				<LoadingSpinner size="lg" color="blue">데이터 로드 중...</LoadingSpinner>
 			</div>
 		{:else if deploying}
-			<!-- 배포 진행 중 Progress Bar -->
+			<!-- 배포 진행 중 -->
+			<div class="mb-6">
+				<h1 class="text-xl font-bold text-white">VM 생성</h1>
+				<p class="text-sm text-gray-500 mt-1">배포 진행 중</p>
+			</div>
 			<div class="bg-gray-900 rounded-xl border border-gray-700 p-6 mb-6">
 				<h2 class="text-lg font-semibold text-white mb-4">VM 배포 진행 중</h2>
 				<ProgressBar
@@ -397,34 +402,63 @@
 					{/if}
 				</div>
 			</div>
-
-			<div class="flex justify-end">
-				<button
-					disabled
-					class="px-6 py-2 bg-gray-700 text-gray-500 text-sm font-medium rounded-lg cursor-not-allowed"
-				>
-					<LoadingSpinner size="sm" color="gray">
-						배포 중...
-					</LoadingSpinner>
-				</button>
-			</div>
 		{:else}
-			<!-- 단계 표시 -->
-			<div class="flex items-center gap-2 mb-8">
+			<!-- 헤더 -->
+			<div class="flex items-start justify-between mb-6">
+				<div>
+					<h1 class="text-xl font-bold text-white">VM 생성</h1>
+					<p class="text-sm text-gray-500 mt-0.5">STEP {$wizard.step} / {TOTAL_STEPS} · {stepSubtitles[$wizard.step]}</p>
+				</div>
+				<div class="flex items-center gap-3">
+					<button
+						onclick={handleReset}
+						class="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+					>새로 시작</button>
+					<button
+						onclick={closeWizard}
+						class="text-gray-500 hover:text-white transition-colors p-1 rounded hover:bg-gray-800"
+						aria-label="닫기"
+					>
+						<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+						</svg>
+					</button>
+				</div>
+			</div>
+
+			{#if loadError}
+				<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-6">
+					{loadError}
+				</div>
+			{/if}
+
+			<!-- 스테퍼 -->
+			<div class="flex items-center gap-1 mb-8">
 				{#each stepLabels as label, i}
 					{@const step = i + 1}
 					<div class="flex items-center gap-2">
-						<div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all {$wizard.step === step
-							? 'bg-blue-600 text-white'
-							: $wizard.step > step
-							? 'bg-green-700 text-white'
-							: 'bg-gray-800 text-gray-500'}">
-							{$wizard.step > step ? '✓' : step}
-						</div>
-						<span class="text-xs {$wizard.step === step ? 'text-white' : 'text-gray-600'}">{label}</span>
+						{#if $wizard.step > step}
+							<!-- 완료 -->
+							<div class="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center">
+								<svg class="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+								</svg>
+							</div>
+						{:else if $wizard.step === step}
+							<!-- 현재 -->
+							<div class="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-sm font-bold text-white ring-2 ring-blue-500/30">
+								{step}
+							</div>
+						{:else}
+							<!-- 미래 -->
+							<div class="w-7 h-7 rounded-full bg-gray-800 flex items-center justify-center text-xs font-medium text-gray-500">
+								{step}
+							</div>
+						{/if}
+						<span class="text-xs hidden sm:inline {$wizard.step >= step ? 'text-white' : 'text-gray-600'}">{label}</span>
 					</div>
 					{#if i < stepLabels.length - 1}
-						<div class="flex-1 h-px bg-gray-800"></div>
+						<div class="flex-1 h-px {$wizard.step > step + 1 ? 'bg-blue-600' : 'bg-gray-800'} mx-1"></div>
 					{/if}
 				{/each}
 			</div>
@@ -432,16 +466,16 @@
 			<!-- 단계별 내용 -->
 			<div class="mb-8">
 				{#if $wizard.step === 1}
-					<h2 class="text-lg font-semibold text-white mb-4">OS 이미지 선택</h2>
+					<h2 class="text-lg font-semibold text-white mb-1">OS 이미지 선택</h2>
+					<p class="text-sm text-gray-400 mb-4">Glance에 등록된 공개 이미지, 직접 업로드한 이미지는 <a href="/dashboard/compute/images" class="text-blue-400 hover:underline">이미지 페이지</a>에서 관리할 수 있습니다.</p>
 					<SelectImage {images} selectedId={$wizard.imageId} onSelect={selectImage} />
 
 				{:else if $wizard.step === 2}
-					<h2 class="text-lg font-semibold text-white mb-4">플레이버 선택</h2>
+					<h2 class="text-lg font-semibold text-white mb-1">플레이버 선택 <span class="text-gray-500 text-sm font-normal">VM의 vCPU / 메모리 / 디스크 스펙</span></h2>
 					<SelectFlavor {flavors} selectedId={$wizard.flavorId} onSelect={selectFlavor} />
 
 				{:else if $wizard.step === 3}
-					<h2 class="text-lg font-semibold text-white mb-4">라이브러리 선택</h2>
-					<!-- 선택 모드 탭: 라이브러리 직접 선택 vs 템플릿 선택 -->
+					<h2 class="text-lg font-semibold text-white mb-1">라이브러리 레이어 <span class="text-gray-500 text-sm font-normal">OverlayFS로 마운트할 사전 빌드 레이어</span></h2>
 					{#snippet step3Tab()}
 						{@const useTemplate = $wizard.templateName !== null}
 						<div class="flex mb-4 rounded-lg overflow-hidden border border-gray-700">
@@ -469,7 +503,7 @@
 					{@render step3Tab()}
 
 				{:else if $wizard.step === 4}
-					<h2 class="text-lg font-semibold text-white mb-4">마운트 전략 선택</h2>
+					<h2 class="text-lg font-semibold text-white mb-1">배포 전략 <span class="text-gray-500 text-sm font-normal">스케줄링 / 내고장성</span></h2>
 					<SelectStrategy
 						selected={$wizard.strategy}
 						{hasPrebuilt}
@@ -479,251 +513,153 @@
 					/>
 
 				{:else if $wizard.step === 5}
-					<h2 class="text-lg font-semibold text-white mb-4">인스턴스 설정</h2>
+					<h2 class="text-lg font-semibold text-white mb-5">인스턴스 설정</h2>
 
-					<!-- 인증 방식 선택 -->
-					<div class="mb-6">
-						<span class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">인증 방식</span>
-						<div class="flex gap-3">
-							<button
-								onclick={() => wizard.update(w => ({ ...w, authMode: 'keypair' }))}
-								class="flex-1 px-4 py-2.5 rounded-lg border text-sm font-medium transition-all {$wizard.authMode === 'keypair'
-									? 'border-blue-500 bg-blue-900/20 text-white'
-									: 'border-gray-700 bg-gray-900 text-gray-400 hover:border-gray-500'}"
-							>SSH 키페어</button>
-							<button
-								onclick={() => wizard.update(w => ({ ...w, authMode: 'password' }))}
-								class="flex-1 px-4 py-2.5 rounded-lg border text-sm font-medium transition-all {$wizard.authMode === 'password'
-									? 'border-blue-500 bg-blue-900/20 text-white'
-									: 'border-gray-700 bg-gray-900 text-gray-400 hover:border-gray-500'}"
-							>비밀번호</button>
-						</div>
-					</div>
-
-					{#if $wizard.authMode === 'keypair'}
-						<!-- 키페어 선택 -->
-						<div class="mb-6">
-							<label for="create-keypair" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">키페어 (SSH 접속용)</label>
-							<select
-								id="create-keypair"
-								value={$wizard.keyName}
-								onchange={e => wizard.update(w => ({ ...w, keyName: (e.target as HTMLSelectElement).value || null }))}
-								class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
-							>
-								<option value="">키페어 선택</option>
-								{#each keypairs as kp}
-									<option value={kp.name}>{kp.name} · {kp.type} · {kp.fingerprint.slice(0, 20)}…</option>
-								{/each}
-							</select>
-							{#if keypairs.length === 0}
-								<p class="text-xs text-amber-400 mt-1">등록된 키페어가 없습니다. SSH 접속을 위해 키페어를 먼저 등록하세요.</p>
-							{:else if !$wizard.keyName}
-								<p class="text-xs text-amber-400 mt-1">키페어를 선택해야 다음 단계로 진행할 수 있습니다.</p>
-							{/if}
-						</div>
-					{:else}
-						<!-- 비밀번호 설정 -->
-						<div class="mb-6">
-							<label class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">관리자 비밀번호
-							<input
-								type="password"
-								value={$wizard.adminPassword}
-								oninput={e => wizard.update(w => ({ ...w, adminPassword: (e.target as HTMLInputElement).value }))}
-								placeholder="비밀번호 입력"
-								class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors mt-1.5"
-							/>
-						</label>
-							{#if $wizard.adminPassword.length === 0}
-							<p class="text-xs text-amber-400 mt-1">비밀번호를 입력해야 다음 단계로 진행할 수 있습니다.</p>
-						{:else}
-							<p class="text-xs text-gray-500 mt-1">인스턴스 root/admin 비밀번호를 설정합니다.</p>
-						{/if}
-						</div>
-					{/if}
-
-					<!-- 루트 볼륨 크기 -->
-					<div class="mb-6">
-						<label for="create-boot-vol" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">루트 볼륨 크기 (GB)</label>
+					<!-- VM 이름 -->
+					<div class="mb-5">
+						<label for="vm-name" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">VM 이름</label>
 						<input
-							id="create-boot-vol"
-							type="number"
-							bind:value={$wizard.bootVolumeSizeGb}
-							min="10"
-							max="500"
-							class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
-						/>
-						<p class="text-xs text-gray-500 mt-1">OS 루트 볼륨 크기. 최소 10GB, 기본 20GB.</p>
-					</div>
-
-					<!-- 인스턴스 삭제 시 볼륨 자동 제거 -->
-					<div class="mb-6">
-						<label class="flex items-center gap-3 cursor-pointer">
-							<input
-								type="checkbox"
-								bind:checked={$wizard.deleteBootVolumeOnTermination}
-								class="w-4 h-4 rounded bg-gray-800 border-gray-600 text-blue-500 focus:ring-blue-500 focus:ring-offset-0"
-							/>
-							<div>
-								<span class="text-sm text-white">인스턴스 삭제 시 루트 볼륨 자동 제거</span>
-								<p class="text-xs text-gray-500 mt-0.5">비활성화 시 인스턴스를 삭제해도 루트 볼륨이 보존됩니다.</p>
-							</div>
-						</label>
-					</div>
-
-					<!-- 네트워크 선택 -->
-					<div class="mb-6">
-						<label for="create-network" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">네트워크</label>
-						<select
-							id="create-network"
-							value={$wizard.networkId ?? ''}
-							onchange={e => selectNetwork((e.target as HTMLSelectElement).value || null)}
-							class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
-						>
-							<option value="">기본 네트워크</option>
-							{#each networks as net}
-								<option value={net.id}>
-									{net.name}{net.id === defaultNetworkId ? ' (기본)' : ''}{net.is_external ? ' (외부)' : ''}{net.is_shared ? ' (공유)' : ''}
-								</option>
-							{/each}
-						</select>
-						{#if selectedNetwork && !selectedNetwork.is_external}
-							<p class="text-xs text-amber-400 mt-1">
-								내부 네트워크 선택 시 외부 접속을 위해 Floating IP가 자동으로 할당됩니다.
-							</p>
-						{/if}
-					</div>
-
-					<!-- 추가 볼륨 -->
-					<div class="mb-6">
-						<span class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">추가 볼륨 (선택사항)</span>
-						{#if availableVolumes.length === 0}
-							<p class="text-xs text-gray-500">연결 가능한 볼륨이 없습니다.</p>
-						{:else}
-							<div class="space-y-2 max-h-48 overflow-y-auto">
-								{#each availableVolumes as vol (vol.id)}
-									<button
-										type="button"
-										onclick={() => toggleVolume(vol.id)}
-										class="w-full text-left px-3 py-2 rounded-lg border text-sm transition-all {$wizard.additionalVolumeIds.includes(vol.id)
-											? 'border-blue-500 bg-blue-900/20 text-white'
-											: 'border-gray-700 bg-gray-900 text-gray-400 hover:border-gray-500'}"
-									>
-										<div class="flex items-center justify-between">
-											<span class="font-medium">{vol.name || vol.id.slice(0, 8)}</span>
-											<span class="text-xs text-gray-500">{vol.size} GB</span>
-										</div>
-									</button>
-								{/each}
-							</div>
-							{#if $wizard.additionalVolumeIds.length > 0}
-								<p class="text-xs text-gray-500 mt-1">{$wizard.additionalVolumeIds.length}개 볼륨 선택됨</p>
-							{/if}
-						{/if}
-						<!-- 새 볼륨 만들기 -->
-						<div class="mt-3">
-							<button
-								type="button"
-								onclick={() => wizard.update(w => ({ ...w, newVolumes: [...w.newVolumes, { name: '', size_gb: 50 }] }))}
-								class="text-blue-400 hover:text-blue-300 text-xs transition-colors"
-							>+ 새 볼륨 만들기</button>
-							{#each $wizard.newVolumes as nv, i}
-								<div class="flex gap-2 mt-2 items-center">
-									<input
-										type="text"
-										value={nv.name}
-										oninput={(e) => wizard.update(w => { w.newVolumes[i].name = (e.target as HTMLInputElement).value; return { ...w }; })}
-										placeholder="볼륨 이름"
-										class="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
-									/>
-									<input
-										type="number"
-										value={nv.size_gb}
-										oninput={(e) => wizard.update(w => { w.newVolumes[i].size_gb = Number((e.target as HTMLInputElement).value); return { ...w }; })}
-										min="1"
-										max="500"
-										class="w-20 bg-gray-800 border border-gray-600 rounded-lg px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
-									/>
-									<span class="text-xs text-gray-500">GB</span>
-									<button
-										type="button"
-										onclick={() => wizard.update(w => ({ ...w, newVolumes: w.newVolumes.filter((_, idx) => idx !== i) }))}
-										class="text-red-400 hover:text-red-300 text-xs transition-colors"
-									>삭제</button>
-								</div>
-							{/each}
-						</div>
-					</div>
-
-				{:else if $wizard.step === 6}
-					<h2 class="text-lg font-semibold text-white mb-4">최종 확인 및 배포</h2>
-
-					<div class="bg-gray-900 rounded-xl border border-gray-700 p-6 space-y-3 mb-6 text-sm">
-						<div class="flex justify-between">
-							<span class="text-gray-400">이미지</span>
-							<span class="text-white">{$wizard.imageName ?? '-'}</span>
-						</div>
-						<div class="flex justify-between">
-							<span class="text-gray-400">플레이버</span>
-							<span class="text-white">{$wizard.flavorName ?? '-'}</span>
-						</div>
-						<div class="flex justify-between">
-							<span class="text-gray-400">라이브러리</span>
-							<span class="text-white">
-								{$wizard.libraries.length > 0 ? $wizard.libraries.join(', ') : '없음'}
-							</span>
-						</div>
-						<div class="flex justify-between">
-							<span class="text-gray-400">전략</span>
-							<span class="text-white">
-								{$wizard.strategy === 'prebuilt' ? 'A: 사전 빌드 공유 Share' : $wizard.strategy === 'dynamic' ? 'B: 동적 생성' : '없음'}
-							</span>
-						</div>
-						<div class="flex justify-between">
-							<span class="text-gray-400">인증</span>
-							<span class="text-white">
-								{#if $wizard.authMode === 'keypair'}
-									키페어: {$wizard.keyName ?? '없음'}
-								{:else}
-									비밀번호 설정됨
-								{/if}
-							</span>
-						</div>
-						<div class="flex justify-between">
-							<span class="text-gray-400">루트 볼륨</span>
-							<span class="text-white">{$wizard.bootVolumeSizeGb} GB{$wizard.deleteBootVolumeOnTermination ? '' : ' (인스턴스 삭제 시 보존)'}</span>
-						</div>
-						<div class="flex justify-between">
-							<span class="text-gray-400">네트워크</span>
-							<span class="text-white">
-								{$wizard.networkName ?? '기본'}
-								{#if selectedNetwork && !selectedNetwork.is_external}
-									<span class="text-amber-400 text-xs ml-1">(Floating IP 자동 할당)</span>
-								{/if}
-							</span>
-						</div>
-						{#if $wizard.additionalVolumeIds.length > 0}
-							<div class="flex justify-between">
-								<span class="text-gray-400">추가 볼륨</span>
-								<span class="text-white text-right">
-									{$wizard.additionalVolumeIds.map(id => {
-										const v = volumes.find(vol => vol.id === id);
-										return v ? `${v.name || id.slice(0, 8)} (${v.size}GB)` : id.slice(0, 8);
-									}).join(', ')}
-								</span>
-							</div>
-						{/if}
-					</div>
-
-					<div class="mb-4">
-						<label for="instance-name" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">인스턴스 이름</label>
-						<input
-							id="instance-name"
+							id="vm-name"
 							bind:value={$wizard.instanceName}
 							type="text"
 							placeholder="my-vm"
 							class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
 						/>
 					</div>
+
+					<!-- 네트워크 + 키페어 -->
+					<div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
+						<div>
+							<label for="create-network" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">네트워크</label>
+							<select
+								id="create-network"
+								value={$wizard.networkId ?? ''}
+								onchange={e => selectNetwork((e.target as HTMLSelectElement).value || null)}
+								class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
+							>
+								<option value="">기본 네트워크</option>
+								{#each networks as net}
+									<option value={net.id}>
+										{net.name}{net.id === defaultNetworkId ? ' (기본)' : ''}{net.is_external ? ' (외부)' : ''}{net.is_shared ? ' (공유)' : ''}
+									</option>
+								{/each}
+							</select>
+						</div>
+						<div>
+							<label for="create-keypair" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">키페어</label>
+							<select
+								id="create-keypair"
+								value={$wizard.keyName ?? ''}
+								onchange={e => wizard.update(w => ({ ...w, keyName: (e.target as HTMLSelectElement).value || null }))}
+								class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
+							>
+								<option value="">키페어 선택</option>
+								{#each keypairs as kp}
+									<option value={kp.name}>{kp.name}</option>
+								{/each}
+							</select>
+							{#if keypairs.length === 0}
+								<p class="text-xs text-amber-400 mt-1">등록된 키페어가 없습니다.</p>
+							{/if}
+						</div>
+					</div>
+
+					<!-- 보안 그룹 + 가용 영역 -->
+					<div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
+						<div>
+							<label for="create-sg" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">보안 그룹</label>
+							<select
+								id="create-sg"
+								value={$wizard.securityGroups[0] ?? ''}
+								onchange={e => {
+									const v = (e.target as HTMLSelectElement).value;
+									wizard.update(w => ({ ...w, securityGroups: v ? [v] : [] }));
+								}}
+								class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
+							>
+								<option value="">기본</option>
+								{#each securityGroups as sg}
+									<option value={sg.name}>{sg.name}</option>
+								{/each}
+							</select>
+						</div>
+						<div>
+							<label for="create-az" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">가용 영역</label>
+							<select
+								id="create-az"
+								value={$wizard.availabilityZone ?? ''}
+								onchange={e => {
+									const v = (e.target as HTMLSelectElement).value;
+									wizard.update(w => ({ ...w, availabilityZone: v || null }));
+								}}
+								class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
+							>
+								<option value="">자동 (nova)</option>
+								{#each availabilityZones as az}
+									<option value={az.name}>{az.name}</option>
+								{/each}
+							</select>
+						</div>
+					</div>
+
+					<!-- cloud-init -->
+					<div class="mb-5">
+						<label for="cloud-init" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">CLOUD-INIT (선택)</label>
+						<textarea
+							id="cloud-init"
+							bind:value={$wizard.cloudInit}
+							rows="6"
+							placeholder="#cloud-config&#10;package_update: true&#10;packages:&#10;  - htop"
+							class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm font-mono focus:outline-none focus:border-blue-500 transition-colors resize-y"
+						></textarea>
+					</div>
+
+				{:else if $wizard.step === 6}
+					<h2 class="text-lg font-semibold text-white mb-5">최종 확인</h2>
+
+					<div class="bg-gray-900 rounded-xl border border-gray-700 p-6 space-y-3 mb-6 text-sm">
+						<div class="flex justify-between">
+							<span class="text-gray-500">이름</span>
+							<span class="text-white font-medium">{$wizard.instanceName || '-'}</span>
+						</div>
+						<div class="flex justify-between">
+							<span class="text-gray-500">이미지</span>
+							<span class="text-white">{$wizard.imageName ?? '-'}</span>
+						</div>
+						<div class="flex justify-between">
+							<span class="text-gray-500">플레이버</span>
+							<span class="text-white">{$wizard.flavorName ?? '-'} <span class="text-gray-500 text-xs">({selectedFlavorDetail})</span></span>
+						</div>
+						{#if $wizard.libraries.length > 0}
+							<div class="flex justify-between">
+								<span class="text-gray-500">라이브러리</span>
+								<span class="text-white">{$wizard.libraries.join(', ')}</span>
+							</div>
+						{/if}
+						<div class="flex justify-between">
+							<span class="text-gray-500">키페어</span>
+							<span class="text-white">{$wizard.keyName ?? '없음'}</span>
+						</div>
+						<div class="flex justify-between">
+							<span class="text-gray-500">전략</span>
+							<span class="text-white">
+								{$wizard.strategy === 'prebuilt' ? '일반 배포' : $wizard.strategy === 'dynamic' ? 'HA 배포' : '없음'}
+							</span>
+						</div>
+						<div class="flex justify-between">
+							<span class="text-gray-500">네트워크</span>
+							<span class="text-white">{$wizard.networkName ?? '기본'}</span>
+						</div>
+					</div>
+
+					{#if $wizard.libraries.length > 0}
+						<div class="p-3 rounded-lg bg-yellow-900/20 border border-yellow-700/40 text-yellow-300 text-xs flex items-start gap-2 mb-4">
+							<svg class="w-4 h-4 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+							</svg>
+							<span>OverlayFS upper 볼륨 50 GB가 함께 생성되며, 과금은 VM 실행 시점부터 시작됩니다.</span>
+						</div>
+					{/if}
 
 					{#if deployError}
 						<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">
@@ -733,33 +669,34 @@
 				{/if}
 			</div>
 
-			<!-- 네비게이션 버튼 -->
-			<div class="flex justify-between">
+			<!-- 하단 네비게이션 -->
+			<div class="flex items-center justify-between pt-4 border-t border-gray-800">
 				<button
-					onclick={prevStep}
-					disabled={$wizard.step === 1}
-					class="px-4 py-2 text-sm text-gray-400 hover:text-white disabled:opacity-30 transition-colors"
-				>
-					← 이전
-				</button>
+					onclick={closeWizard}
+					class="px-4 py-2 text-sm text-gray-400 hover:text-white border border-gray-700 rounded-lg hover:border-gray-500 transition-colors"
+				>취소</button>
 
-				{#if $wizard.step < TOTAL_STEPS}
-					<button
-						onclick={nextStep}
-						disabled={!canNext}
-						class="px-6 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium rounded-lg transition-colors"
-					>
-						다음 →
-					</button>
-				{:else}
-					<button
-						onclick={deploy}
-						disabled={!canNext}
-						class="px-6 py-2 bg-green-600 hover:bg-green-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium rounded-lg transition-colors"
-					>
-						배포 시작
-					</button>
-				{/if}
+				<div class="flex items-center gap-3">
+					{#if $wizard.step > 1}
+						<button
+							onclick={prevStep}
+							class="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors flex items-center gap-1"
+						>← 이전</button>
+					{/if}
+					{#if $wizard.step < TOTAL_STEPS}
+						<button
+							onclick={nextStep}
+							disabled={!canNext}
+							class="px-6 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium rounded-lg transition-colors"
+						>다음 →</button>
+					{:else}
+						<button
+							onclick={deploy}
+							disabled={!canNext}
+							class="px-6 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium rounded-lg transition-colors"
+						>VM 생성</button>
+					{/if}
+				</div>
 			</div>
 		{/if}
 	</div>
