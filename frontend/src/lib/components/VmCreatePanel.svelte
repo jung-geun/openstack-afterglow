@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { auth } from '$lib/stores/auth';
 	import { wizard, resetWizard, closeWizard } from '$lib/stores/wizard';
-	import { api, ApiError } from '$lib/api/client';
+	import { api, ApiError, getBaseUrl } from '$lib/api/client';
 	import SelectImage from '$lib/components/wizard/SelectImage.svelte';
 	import SelectFlavor from '$lib/components/wizard/SelectFlavor.svelte';
 	import SelectLibraries from '$lib/components/wizard/SelectLibraries.svelte';
@@ -253,9 +253,7 @@
 		progress = 0;
 		progressMessage = '배포 시작...';
 
-		const baseUrl = typeof window !== 'undefined'
-			? (import.meta.env.PUBLIC_API_BASE || `${window.location.protocol}//${window.location.hostname}:8000`)
-			: 'http://backend:8000';
+		const baseUrl = getBaseUrl();
 
 		const headers: Record<string, string> = {
 			'Content-Type': 'application/json',
@@ -336,7 +334,9 @@
 				}
 			}
 		} catch (e) {
-			deployError = e instanceof ApiError ? `배포 실패: ${e.message}` : '서버 오류';
+			deployError = e instanceof ApiError
+				? `배포 실패: ${e.message}`
+				: `서버 연결 오류: ${e instanceof Error ? e.message : '알 수 없는 오류'}`;
 			deploying = false;
 		}
 	}

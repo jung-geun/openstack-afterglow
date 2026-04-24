@@ -228,10 +228,27 @@ async def get_gpu_available(
         raise HTTPException(status_code=404, detail="GPU 가용량 조회가 비활성화되어 있습니다")
 
     def _collect():
-        from app.api.identity.admin_gpu import _collect_gpu_hosts
-        from app.services.keystone import get_admin_connection_for_project
+        import openstack
 
-        admin_conn = get_admin_connection_for_project(s.os_project_name)
+        from app.api.identity.admin_gpu import _collect_gpu_hosts
+
+        # get_admin_connection_for_project()는 project_id(UUID)를 기대하므로
+        # admin project는 project_name으로 직접 연결 생성 (gpu_quota.py와 동일 패턴)
+        admin_conn = openstack.connect(
+            load_envvars=False,
+            load_yaml_config=False,
+            auth_url=s.os_auth_url,
+            auth_type="password",
+            username=s.os_username,
+            password=s.os_password,
+            project_name=s.os_project_name,
+            user_domain_name=s.os_user_domain_name,
+            project_domain_name=s.os_project_domain_name,
+            region_name=s.os_region_name,
+            interface=s.os_interface,
+            api_timeout=30,
+            verify=s.ssl_verify,
+        )
         data = _collect_gpu_hosts(admin_conn)
         return {
             "gpu_types": [
@@ -250,6 +267,7 @@ async def get_gpu_available(
     try:
         return await cached_call("afterglow:gpu:availability", ttl_normal(), _collect, refresh=refresh)
     except Exception:
+        _logger.warning("GPU 가용량 조회 실패", exc_info=True)
         raise HTTPException(status_code=500, detail="GPU 가용량 조회 실패")
 
 
