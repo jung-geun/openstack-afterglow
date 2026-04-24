@@ -1,9 +1,25 @@
 """FCOS (Fedora CoreOS) k3s 노드 지원 테스트."""
 
 import base64
+import gzip
 import json
 
 import pytest
+
+
+def _decode_userdata(data: str) -> dict:
+    """base64 인코딩된 userdata를 Ignition JSON dict로 디코딩."""
+    return json.loads(base64.b64decode(data).decode())
+
+
+def _decode_file_content(file_entry: dict) -> str:
+    """Ignition file entry에서 원본 텍스트 추출 (gzip+base64)."""
+    source = file_entry["contents"]["source"]
+    b64_data = source.split(",", 1)[1]
+    raw = base64.b64decode(b64_data)
+    if file_entry["contents"].get("compression") == "gzip":
+        raw = gzip.decompress(raw)
+    return raw.decode()
 
 
 class TestFCOSServerUserdata:
@@ -19,7 +35,7 @@ class TestFCOSServerUserdata:
             os_type="fcos",
         )
         assert result.config_drive is True
-        ign = json.loads(result.data)
+        ign = _decode_userdata(result.data)
         assert ign["ignition"]["version"] == "3.4.0"
 
     def test_fcos_server_ignition_has_required_files(self):
@@ -33,7 +49,7 @@ class TestFCOSServerUserdata:
             callback_token="tok-fcos",
             os_type="fcos",
         )
-        ign = json.loads(result.data)
+        ign = _decode_userdata(result.data)
         paths = {f["path"] for f in ign["storage"]["files"]}
         assert "/opt/k3s/callback.sh" in paths
         assert "/opt/k3s/install.sh" in paths
@@ -50,7 +66,7 @@ class TestFCOSServerUserdata:
             callback_token="tok-fcos",
             os_type="fcos",
         )
-        ign = json.loads(result.data)
+        ign = _decode_userdata(result.data)
         units = {u["name"]: u for u in ign["systemd"]["units"]}
         assert "k3s-install.service" in units
         assert units["k3s-install.service"]["enabled"] is True
@@ -67,7 +83,7 @@ class TestFCOSServerUserdata:
             cloud_conf="[Global]\nauth-url=https://keystone:5000/v3\n",
             os_type="fcos",
         )
-        ign = json.loads(result.data)
+        ign = _decode_userdata(result.data)
         files = {f["path"]: f for f in ign["storage"]["files"]}
         assert "/etc/kubernetes/cloud.conf" in files
         # 권한 0600 = 384
@@ -89,15 +105,14 @@ class TestFCOSServerUserdata:
             needs_external_cloud_provider=True,
             os_type="fcos",
         )
-        ign = json.loads(result.data)
+        ign = _decode_userdata(result.data)
         paths = {f["path"] for f in ign["storage"]["files"]}
         assert "/opt/k3s/occm-manifests.yaml" in paths
         assert "/opt/k3s/cinder_csi-manifests.yaml" in paths
 
         # install.sh에 --disable-cloud-controller가 포함되어야 함
         files = {f["path"]: f for f in ign["storage"]["files"]}
-        install_b64 = files["/opt/k3s/install.sh"]["contents"]["source"].split(",", 1)[1]
-        install_content = base64.b64decode(install_b64).decode()
+        install_content = _decode_file_content(files["/opt/k3s/install.sh"])
         assert "--disable-cloud-controller" in install_content
 
     def test_fcos_server_ignition_tls_san(self):
@@ -112,10 +127,9 @@ class TestFCOSServerUserdata:
             extra_tls_sans=["203.0.113.10"],
             os_type="fcos",
         )
-        ign = json.loads(result.data)
+        ign = _decode_userdata(result.data)
         files = {f["path"]: f for f in ign["storage"]["files"]}
-        install_b64 = files["/opt/k3s/install.sh"]["contents"]["source"].split(",", 1)[1]
-        install_content = base64.b64decode(install_b64).decode()
+        install_content = _decode_file_content(files["/opt/k3s/install.sh"])
         assert "203.0.113.10" in install_content
 
     def test_fcos_server_callback_contains_token(self):
@@ -129,10 +143,9 @@ class TestFCOSServerUserdata:
             callback_token="supersecrettoken",
             os_type="fcos",
         )
-        ign = json.loads(result.data)
+        ign = _decode_userdata(result.data)
         files = {f["path"]: f for f in ign["storage"]["files"]}
-        cb_b64 = files["/opt/k3s/callback.sh"]["contents"]["source"].split(",", 1)[1]
-        cb_content = base64.b64decode(cb_b64).decode()
+        cb_content = _decode_file_content(files["/opt/k3s/callback.sh"])
         assert "supersecrettoken" in cb_content
         assert "http://api.example.com" in cb_content
 
@@ -150,7 +163,7 @@ class TestFCOSAgentUserdata:
             os_type="fcos",
         )
         assert result.config_drive is True
-        ign = json.loads(result.data)
+        ign = _decode_userdata(result.data)
         assert ign["ignition"]["version"] == "3.4.0"
 
     def test_fcos_agent_ignition_has_required_files(self):
@@ -164,7 +177,7 @@ class TestFCOSAgentUserdata:
             node_token="node-token-abc",
             os_type="fcos",
         )
-        ign = json.loads(result.data)
+        ign = _decode_userdata(result.data)
         paths = {f["path"] for f in ign["storage"]["files"]}
         assert "/opt/k3s/agent-join.sh" in paths
         assert "/etc/systemd/system/k3s-agent-join.service" in paths
@@ -180,7 +193,7 @@ class TestFCOSAgentUserdata:
             node_token="node-token-abc",
             os_type="fcos",
         )
-        ign = json.loads(result.data)
+        ign = _decode_userdata(result.data)
         units = {u["name"]: u for u in ign["systemd"]["units"]}
         assert "k3s-agent-join.service" in units
         assert units["k3s-agent-join.service"]["enabled"] is True
@@ -197,7 +210,7 @@ class TestFCOSAgentUserdata:
             ssh_public_key="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 test@host",
             os_type="fcos",
         )
-        ign = json.loads(result.data)
+        ign = _decode_userdata(result.data)
         assert "passwd" in ign
         users = {u["name"]: u for u in ign["passwd"]["users"]}
         assert "core" in users
@@ -214,7 +227,7 @@ class TestFCOSAgentUserdata:
             node_token="tok",
             os_type="fcos",
         )
-        ign = json.loads(result.data)
+        ign = _decode_userdata(result.data)
         assert "passwd" not in ign
 
     def test_fcos_agent_join_script_contains_server_ip(self):
@@ -228,10 +241,9 @@ class TestFCOSAgentUserdata:
             node_token="tok",
             os_type="fcos",
         )
-        ign = json.loads(result.data)
+        ign = _decode_userdata(result.data)
         files = {f["path"]: f for f in ign["storage"]["files"]}
-        join_b64 = files["/opt/k3s/agent-join.sh"]["contents"]["source"].split(",", 1)[1]
-        join_content = base64.b64decode(join_b64).decode()
+        join_content = _decode_file_content(files["/opt/k3s/agent-join.sh"])
         assert "192.168.1.100" in join_content
         assert "INSTALL_K3S_SKIP_SELINUX_RPM=true" in join_content
 
