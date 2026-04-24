@@ -50,30 +50,53 @@ jobs:
           AFTERGLOW_ALLOW_INSECURE: "1"
         run: uv run python -m pytest tests/ -v --ignore=tests/integration
 
-  # ─── 통합 테스트: AFTERGLOW_OS_AUTH_URL 시크릿이 설정된 경우에만 실행 ──────
+  # ─── secret 존재 여부를 job output으로 노출 ─────────────────────────────────
+  # secrets 컨텍스트는 if: 표현식에서 직접 사용 불가 (GitHub Actions 제약).
+  # 별도 job에서 env로 secret을 받아 비어 있는지 검사 후 output으로 전달.
+  detect-integration:
+    name: Detect integration secrets
+    needs: version-check
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.check.outputs.enabled }}
+    steps:
+      - name: Check if OpenStack secret is set
+        id: check
+        env:
+          OS_AUTH_URL: ${{ secrets.AFTERGLOW_OS_AUTH_URL }}
+        run: |
+          if [ -n "$OS_AUTH_URL" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "AFTERGLOW_OS_AUTH_URL secret is set — integration tests will run."
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "AFTERGLOW_OS_AUTH_URL secret is not set — skipping integration tests."
+          fi
+
+  # ─── 통합 테스트: detect-integration.outputs.enabled == 'true' 시만 실행 ───
   # GitHub Secrets 등록 방법:
   #   Settings > Secrets and variables > Actions > New repository secret
   #
-  # 필수 시크릿 (Secrets):
+  # 필수 Secrets:
   #   AFTERGLOW_OS_AUTH_URL       — Keystone v3 endpoint
   #   AFTERGLOW_OS_USERNAME       — admin 사용자 이름
   #   AFTERGLOW_OS_PASSWORD       — admin 비밀번호
   #   AFTERGLOW_OS_PROJECT_NAME   — admin 프로젝트 이름 (기본: admin)
   #
-  # 선택 시크릿 (다중 계정 통합 테스트):
+  # 선택 Secrets (다중 계정 통합 테스트):
   #   AFTERGLOW_TEST_ADMIN_USER_USERNAME / PASSWORD / PROJECT
   #   AFTERGLOW_TEST_USER_USERNAME / PASSWORD / PROJECT
   #
-  # 선택 변수 (Variables, 기본값 있음):
+  # 선택 Variables (Settings > Variables, 기본값 있음):
   #   AFTERGLOW_OS_PROJECT_DOMAIN_NAME — 기본: Default
   #   AFTERGLOW_OS_USER_DOMAIN_NAME    — 기본: Default
   #   AFTERGLOW_OS_REGION_NAME         — 기본: RegionOne
   #   AFTERGLOW_OS_INTERFACE           — 기본: internal
   test-backend-integration:
     name: Backend (integration tests)
-    needs: [version-check, test-backend]
+    needs: [test-backend, detect-integration]
     runs-on: ubuntu-latest
-    if: ${{ secrets.AFTERGLOW_OS_AUTH_URL != '' }}
+    if: ${{ needs.detect-integration.outputs.enabled == 'true' }}
     steps:
       - uses: actions/checkout@v5
 
