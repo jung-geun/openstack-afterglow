@@ -11,6 +11,7 @@
   import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
+  import ActionMenu from '$lib/components/ui/ActionMenu.svelte';
 
   const strategyLabel: Record<string, string> = { prebuilt: '사전 빌드', dynamic: '동적 생성' };
 
@@ -23,14 +24,6 @@
   let refreshIntervalMs = $state(5000);
   let autoRefresh = $state(false);
   let openMenuId = $state<string | null>(null);
-
-  function toggleMenu(id: string) {
-    openMenuId = openMenuId === id ? null : id;
-  }
-
-  function closeMenu() {
-    openMenuId = null;
-  }
 
   function swrGet<T>(path: string): T | null {
     const key = `${path}:${$auth.projectId}`;
@@ -116,13 +109,6 @@
     selectedInstanceId = null;
     history.pushState({}, '', '/dashboard/compute/instances');
   }
-
-  $effect(() => {
-    if (!openMenuId) return;
-    function handleClick() { openMenuId = null; }
-    document.addEventListener('click', handleClick);
-    return () => document.removeEventListener('click', handleClick);
-  });
 
   $effect(() => {
     const projectId = $auth.projectId;
@@ -229,31 +215,25 @@
             <!-- 전략 -->
             <div class="hidden lg:block text-gray-500 text-xs">{inst.union_strategy ? strategyLabel[inst.union_strategy] ?? inst.union_strategy : '—'}</div>
             <!-- 액션 -->
-            <div class="relative hidden sm:flex items-center justify-end" onclick={(e) => e.stopPropagation()} role="none">
-              <button
-                onclick={(e) => { e.stopPropagation(); toggleMenu(inst.id); }}
-                class="w-7 h-7 flex items-center justify-center rounded-md text-gray-400 hover:text-white hover:bg-gray-700/50 transition-colors"
+            <div class="hidden sm:flex items-center justify-end" role="none">
+              <ActionMenu
+                open={openMenuId === inst.id}
+                onopen={() => { openMenuId = inst.id; }}
+                onclose={() => { openMenuId = null; }}
               >
-                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                  <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z"/>
-                </svg>
-              </button>
-              {#if openMenuId === inst.id}
-                <div class="absolute right-0 top-8 z-50 min-w-[120px] bg-gray-900 border border-gray-700 rounded-lg shadow-xl py-1">
-                  {#if inst.status === 'ACTIVE'}
-                    <button onclick={(e) => { e.stopPropagation(); closeMenu(); openConsole(inst.id); }} class="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800 hover:text-white transition-colors">콘솔</button>
-                  {/if}
-                  {#if inst.status === 'ACTIVE' || inst.status === 'SHUTOFF'}
-                    <button onclick={(e) => { e.stopPropagation(); closeMenu(); shelveInstance(inst.id); }} class="w-full text-left px-3 py-1.5 text-xs text-purple-400 hover:bg-gray-800 hover:text-purple-300 transition-colors">보관</button>
-                  {/if}
-                  {#if inst.status === 'SHELVED_OFFLOADED' || inst.status === 'SHELVED'}
-                    <button onclick={(e) => { e.stopPropagation(); closeMenu(); unshelveInstance(inst.id); }} class="w-full text-left px-3 py-1.5 text-xs text-green-400 hover:bg-gray-800 hover:text-green-300 transition-colors">해제</button>
-                  {/if}
-                  <button onclick={(e) => { e.stopPropagation(); closeMenu(); deleteInstance(inst.id, inst.name); }} disabled={deleting === inst.id} class="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-800 hover:text-red-300 disabled:text-gray-600 transition-colors">
-                    {deleting === inst.id ? '삭제 중...' : '삭제'}
-                  </button>
-                </div>
-              {/if}
+                {#if inst.status === 'ACTIVE'}
+                  <button onclick={() => { openMenuId = null; openConsole(inst.id); }} class="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-800 hover:text-white transition-colors">콘솔</button>
+                {/if}
+                {#if inst.status === 'ACTIVE' || inst.status === 'SHUTOFF'}
+                  <button onclick={() => { openMenuId = null; shelveInstance(inst.id); }} class="w-full text-left px-3 py-1.5 text-xs text-purple-400 hover:bg-gray-800 hover:text-purple-300 transition-colors">보관</button>
+                {/if}
+                {#if inst.status === 'SHELVED_OFFLOADED' || inst.status === 'SHELVED'}
+                  <button onclick={() => { openMenuId = null; unshelveInstance(inst.id); }} class="w-full text-left px-3 py-1.5 text-xs text-green-400 hover:bg-gray-800 hover:text-green-300 transition-colors">해제</button>
+                {/if}
+                <button onclick={() => { openMenuId = null; deleteInstance(inst.id, inst.name); }} disabled={deleting === inst.id} class="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-800 hover:text-red-300 disabled:text-gray-600 transition-colors">
+                  {deleting === inst.id ? '삭제 중...' : '삭제'}
+                </button>
+              </ActionMenu>
             </div>
           </div>
         {/each}

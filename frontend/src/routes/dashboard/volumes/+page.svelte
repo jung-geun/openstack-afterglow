@@ -12,6 +12,7 @@
   import { formatStorage } from '$lib/utils/format';
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
+  import ActionMenu from '$lib/components/ui/ActionMenu.svelte';
 
   interface Snapshot {
     id: string;
@@ -198,8 +199,7 @@
 </script>
 
 <svelte:window
-  onkeydown={(e) => { if (e.key === 'Escape') { if (openActionMenu) openActionMenu = null; else if (selectedVolumeId) closeVolumePanel(); } }}
-  onclick={(e) => { if (openActionMenu && !(e.target as Element)?.closest('[data-action-menu]')) openActionMenu = null; }}
+  onkeydown={(e) => { if (e.key === 'Escape' && selectedVolumeId) closeVolumePanel(); }}
 />
 
 {#if showModal}
@@ -384,59 +384,49 @@
               </button>
             </div>
             <!-- 액션 드롭다운 -->
-            <div class="hidden lg:flex justify-end" onclick={(e) => e.stopPropagation()} role="none" data-action-menu>
-              <div class="relative" data-action-menu>
+            <div class="hidden lg:flex justify-end" role="none">
+              <ActionMenu
+                open={openActionMenu === vol.id}
+                onopen={() => { openActionMenu = vol.id; }}
+                onclose={() => { openActionMenu = null; }}
+              >
                 <button
-                  onclick={(e) => { e.stopPropagation(); openActionMenu = openActionMenu === vol.id ? null : vol.id; }}
-                  class="flex items-center justify-center w-7 h-7 rounded-md text-gray-400 hover:text-white hover:bg-gray-700 transition-colors"
-                  title="액션"
-                  data-action-menu
+                  onclick={() => { openActionMenu = null; openVolumePanel(vol.id); }}
+                  class="w-full text-left px-3 py-1.5 text-[13px] text-gray-300 hover:text-white hover:bg-gray-800 transition-colors flex items-center gap-2"
                 >
-                  <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                    <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
-                  </svg>
+                  <svg class="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+                  연결
                 </button>
-                {#if openActionMenu === vol.id}
-                  <div class="absolute right-0 top-full mt-1 z-30 bg-gray-900 border border-gray-700 rounded-lg shadow-xl py-1 min-w-[140px]" data-action-menu>
-                    <button
-                      onclick={(e) => { e.stopPropagation(); openActionMenu = null; openVolumePanel(vol.id); }}
-                      class="w-full text-left px-3 py-1.5 text-[13px] text-gray-300 hover:text-white hover:bg-gray-800 transition-colors flex items-center gap-2"
-                    >
-                      <svg class="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
-                      연결
-                    </button>
-                    {#if vol.status === 'available'}
-                      <button
-                        onclick={(e) => { e.stopPropagation(); openActionMenu = null; openTransferModal(vol.id, vol.name); }}
-                        class="w-full text-left px-3 py-1.5 text-[13px] text-gray-300 hover:text-white hover:bg-gray-800 transition-colors flex items-center gap-2"
-                      >
-                        <svg class="w-3.5 h-3.5 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>
-                        이전
-                      </button>
-                    {/if}
-                    <div class="border-t border-gray-800 my-1"></div>
-                    {#if (vol.status === 'error' || vol.status === 'error_deleting' || vol.status === 'deleting') && $auth.isSystemAdmin}
-                      <button
-                        onclick={(e) => { e.stopPropagation(); openActionMenu = null; forceDeleteVolume(vol.id, vol.name); }}
-                        disabled={deleting === vol.id}
-                        class="w-full text-left px-3 py-1.5 text-[13px] text-rose-400 hover:text-rose-300 hover:bg-gray-800 disabled:opacity-50 transition-colors flex items-center gap-2"
-                      >
-                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-                        {deleting === vol.id ? '삭제 중...' : '강제 삭제'}
-                      </button>
-                    {/if}
-                    <button
-                      onclick={(e) => { e.stopPropagation(); openActionMenu = null; deleteVolume(vol.id, vol.name); }}
-                      disabled={deleting === vol.id || vol.attachments.length > 0}
-                      title={vol.attachments.length > 0 ? '연결된 볼륨은 삭제할 수 없습니다' : ''}
-                      class="w-full text-left px-3 py-1.5 text-[13px] text-red-400 hover:text-red-300 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
-                    >
-                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                      {deleting === vol.id ? '삭제 중...' : '삭제'}
-                    </button>
-                  </div>
+                {#if vol.status === 'available'}
+                  <button
+                    onclick={() => { openActionMenu = null; openTransferModal(vol.id, vol.name); }}
+                    class="w-full text-left px-3 py-1.5 text-[13px] text-gray-300 hover:text-white hover:bg-gray-800 transition-colors flex items-center gap-2"
+                  >
+                    <svg class="w-3.5 h-3.5 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>
+                    이전
+                  </button>
                 {/if}
-              </div>
+                <div class="border-t border-gray-800 my-1"></div>
+                {#if (vol.status === 'error' || vol.status === 'error_deleting' || vol.status === 'deleting') && $auth.isSystemAdmin}
+                  <button
+                    onclick={() => { openActionMenu = null; forceDeleteVolume(vol.id, vol.name); }}
+                    disabled={deleting === vol.id}
+                    class="w-full text-left px-3 py-1.5 text-[13px] text-rose-400 hover:text-rose-300 hover:bg-gray-800 disabled:opacity-50 transition-colors flex items-center gap-2"
+                  >
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                    {deleting === vol.id ? '삭제 중...' : '강제 삭제'}
+                  </button>
+                {/if}
+                <button
+                  onclick={() => { openActionMenu = null; deleteVolume(vol.id, vol.name); }}
+                  disabled={deleting === vol.id || vol.attachments.length > 0}
+                  title={vol.attachments.length > 0 ? '연결된 볼륨은 삭제할 수 없습니다' : ''}
+                  class="w-full text-left px-3 py-1.5 text-[13px] text-red-400 hover:text-red-300 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                >
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                  {deleting === vol.id ? '삭제 중...' : '삭제'}
+                </button>
+              </ActionMenu>
             </div>
           </div>
         {/each}

@@ -10,6 +10,7 @@
   import NetworkDetailPanel from '$lib/components/NetworkDetailPanel.svelte';
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
+  import ActionMenu from '$lib/components/ui/ActionMenu.svelte';
 
 
   let networks = $state<Network[]>([]);
@@ -23,15 +24,6 @@
   let defaultNetworkId = $state<string | null>(null);
   let settingDefault = $state<string | null>(null);
   let openNetMenu = $state<string | null>(null);
-  let netMenuOpenUp = $state(false);
-
-  function toggleNetMenu(e: MouseEvent, id: string) {
-    e.stopPropagation();
-    if (openNetMenu === id) { openNetMenu = null; return; }
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    netMenuOpenUp = window.innerHeight - rect.bottom < 120;
-    openNetMenu = id;
-  }
 
   function openNetworkPanel(id: string) {
     selectedNetworkId = id;
@@ -290,35 +282,27 @@
               <!-- 상태 -->
               <div class="hidden sm:block"><StatusChip status={net.status} /></div>
               <!-- 액션 -->
-              <div class="hidden sm:flex items-center justify-end" onclick={(e) => e.stopPropagation()} role="none">
+              <div class="hidden sm:flex items-center justify-end" role="none">
                 {#if !net.is_external && !net.is_shared}
-                  <div class="relative">
-                    <button
-                      onclick={(e) => toggleNetMenu(e, net.id)}
-                      class="text-gray-400 hover:text-white text-sm px-2 py-1 rounded hover:bg-gray-800 transition-colors"
-                    >{deleting === net.id || settingDefault === net.id ? '...' : '⋯'}</button>
-                    {#if openNetMenu === net.id}
-                      <div
-                        class="absolute right-0 z-30 bg-gray-900 border border-gray-700 rounded-lg shadow-xl py-1 min-w-[140px] {netMenuOpenUp ? 'bottom-8' : 'top-8'}"
-                        onclick={(e) => e.stopPropagation()}
-                        role="none"
-                      >
-                        {#if net.id !== defaultNetworkId}
-                          <button
-                            onclick={() => { openNetMenu = null; setAsDefault(net.id); }}
-                            disabled={settingDefault === net.id}
-                            class="w-full text-left px-3 py-1.5 text-xs text-blue-400 hover:bg-gray-800 hover:text-blue-300 disabled:text-gray-600"
-                          >{settingDefault === net.id ? '설정 중...' : '기본 네트워크로 설정'}</button>
-                        {/if}
-                        <div class="border-t border-gray-800 my-1"></div>
-                        <button
-                          onclick={() => { openNetMenu = null; deleteNetwork(net.id, net.name, net.is_external, net.is_shared); }}
-                          disabled={deleting === net.id}
-                          class="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-800 hover:text-red-300 disabled:text-gray-600"
-                        >{deleting === net.id ? '삭제 중...' : '삭제'}</button>
-                      </div>
+                  <ActionMenu
+                    open={openNetMenu === net.id}
+                    onopen={() => { openNetMenu = net.id; }}
+                    onclose={() => { openNetMenu = null; }}
+                  >
+                    {#if net.id !== defaultNetworkId}
+                      <button
+                        onclick={() => { openNetMenu = null; setAsDefault(net.id); }}
+                        disabled={settingDefault === net.id}
+                        class="w-full text-left px-3 py-1.5 text-xs text-blue-400 hover:bg-gray-800 hover:text-blue-300 disabled:text-gray-600"
+                      >{settingDefault === net.id ? '설정 중...' : '기본 네트워크로 설정'}</button>
                     {/if}
-                  </div>
+                    <div class="border-t border-gray-800 my-1"></div>
+                    <button
+                      onclick={() => { openNetMenu = null; deleteNetwork(net.id, net.name, net.is_external, net.is_shared); }}
+                      disabled={deleting === net.id}
+                      class="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-800 hover:text-red-300 disabled:text-gray-600"
+                    >{deleting === net.id ? '삭제 중...' : '삭제'}</button>
+                  </ActionMenu>
                 {/if}
               </div>
             </div>
