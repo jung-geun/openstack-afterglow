@@ -15,6 +15,7 @@
     depends_on: string[];
     available_prebuilt: boolean;
     share_proto: string;
+    visibility: string;
   }
 
   interface FileStorage {
@@ -122,6 +123,94 @@
     };
     return map[status] ?? status;
   }
+
+  // 의존성 그래프 SVG 계산
+  let showGraph = $state(false);
+
+  interface GraphNode {
+    id: string;
+    name: string;
+    level: number;
+    posX: number;
+    posY: number;
+    status: string;
+  }
+
+  interface GraphEdge {
+    from: string;
+    to: string;
+  }
+
+  const graphData = $derived.by(() => {
+    if (libraries.length === 0) return { nodes: [] as GraphNode[], edges: [] as GraphEdge[], width: 0, height: 0 };
+
+    // 레벨 계산 (BFS)
+    const levels: Record<string, number> = {};
+    function calcLevel(id: string): number {
+      if (levels[id] !== undefined) return levels[id];
+      const lib = libraries.find(l => l.id === id);
+      if (!lib || lib.depends_on.length === 0) {
+        levels[id] = 0;
+        return 0;
+      }
+      levels[id] = Math.max(...lib.depends_on.map(dep => calcLevel(dep) + 1));
+      return levels[id];
+    }
+    libraries.forEach(l => calcLevel(l.id));
+
+    // 레벨별 노드 그룹화
+    const byLevel: Record<number, LibraryConfig[]> = {};
+    libraries.forEach(l => {
+      const lv = levels[l.id] ?? 0;
+      if (!byLevel[lv]) byLevel[lv] = [];
+      byLevel[lv].push(l);
+    });
+
+    const nodeW = 130, nodeH = 36, hGap = 60, vGap = 20, padX = 20, padY = 20;
+    const maxLv = Math.max(...Object.keys(byLevel).map(Number));
+
+    const nodes: GraphNode[] = [];
+    for (let lv = 0; lv <= maxLv; lv++) {
+      const group = byLevel[lv] ?? [];
+      group.forEach((lib, idx) => {
+        nodes.push({
+          id: lib.id,
+          name: lib.name,
+          level: lv,
+          posX: padX + lv * (nodeW + hGap),
+          posY: padY + idx * (nodeH + vGap),
+          status: getBuildStatus(lib),
+        });
+      });
+    }
+
+    const edges: GraphEdge[] = [];
+    libraries.forEach(lib => {
+      lib.depends_on.forEach(dep => {
+        edges.push({ from: dep, to: lib.id });
+      });
+    });
+
+    const totalW = padX * 2 + (maxLv + 1) * (nodeW + hGap) - hGap;
+    const maxNodesPerLevel = Math.max(...Object.values(byLevel).map(g => g.length));
+    const totalH = padY * 2 + maxNodesPerLevel * (nodeH + vGap) - vGap;
+
+    return { nodes, edges, width: totalW, height: totalH, nodeW, nodeH };
+  });
+
+  function nodeColor(status: string): string {
+    const map: Record<string, string> = {
+      ready: '#16a34a',
+      building: '#2563eb',
+      failed: '#dc2626',
+      none: '#4b5563',
+    };
+    return map[status] ?? '#4b5563';
+  }
+
+  function scrollToCard(id: string) {
+    document.getElementById(`lib-card-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
 </script>
 
 <div class="flex flex-col h-full overflow-auto bg-gray-900 text-gray-100 p-6">
@@ -148,10 +237,93 @@
       <p>등록된 라이브러리가 없습니다</p>
     </div>
   {:else}
+    <!-- 의존성 그래프 -->
+    <div class="mb-6 bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
+      <button
+        class="w-full flex items-center justify-between px-4 py-3 text-sm text-gray-300 hover:text-white hover:bg-gray-700/50 transition-colors"
+        onclick={() => showGraph = !showGraph}
+      >
+        <span class="font-medium">의존성 그래프</span>
+        <span class="text-gray-500 text-xs">{showGraph ? '▲ 접기' : '▼ 펼치기'}</span>
+      </button>
+      {#if showGraph}
+        <div class="px-4 pb-4 overflow-x-auto">
+          <svg
+            width={graphData.width}
+            height={graphData.height}
+            class="min-w-full"
+          >
+            <defs>
+              <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" fill="#6b7280" />
+              </marker>
+            </defs>
+            <!-- 엣지 -->
+            {#each graphData.edges as edge}
+              {@const fromNode = graphData.nodes.find(n => n.id === edge.from)}
+              {@const toNode = graphData.nodes.find(n => n.id === edge.to)}
+              {#if fromNode && toNode}
+                <line
+                  x1={fromNode.posX + (graphData.nodeW ?? 130)}
+                  y1={fromNode.posY + (graphData.nodeH ?? 36) / 2}
+                  x2={toNode.posX}
+                  y2={toNode.posY + (graphData.nodeH ?? 36) / 2}
+                  stroke="#4b5563"
+                  stroke-width="1.5"
+                  marker-end="url(#arrowhead)"
+                />
+              {/if}
+            {/each}
+            <!-- 노드 -->
+            {#each graphData.nodes as node}
+              <g
+                class="cursor-pointer"
+                onclick={() => scrollToCard(node.id)}
+                role="button"
+                tabindex="0"
+                onkeydown={(e) => e.key === 'Enter' && scrollToCard(node.id)}
+              >
+                <rect
+                  x={node.posX}
+                  y={node.posY}
+                  width={graphData.nodeW ?? 130}
+                  height={graphData.nodeH ?? 36}
+                  rx="6"
+                  fill="#1f2937"
+                  stroke={nodeColor(node.status)}
+                  stroke-width="1.5"
+                />
+                <circle
+                  cx={node.posX + 12}
+                  cy={node.posY + (graphData.nodeH ?? 36) / 2}
+                  r="4"
+                  fill={nodeColor(node.status)}
+                />
+                <text
+                  x={node.posX + 22}
+                  y={node.posY + (graphData.nodeH ?? 36) / 2 + 4}
+                  fill="#e5e7eb"
+                  font-size="11"
+                  font-family="system-ui, sans-serif"
+                >{node.name}</text>
+              </g>
+            {/each}
+          </svg>
+          <div class="flex items-center gap-4 mt-3 text-xs text-gray-500">
+            {#each [['ready','#16a34a','빌드 완료'], ['building','#2563eb','빌드 중'], ['failed','#dc2626','빌드 실패'], ['none','#4b5563','미빌드']] as [, color, label]}
+              <span class="flex items-center gap-1">
+                <span class="inline-block w-2 h-2 rounded-full" style="background:{color}"></span>{label}
+              </span>
+            {/each}
+          </div>
+        </div>
+      {/if}
+    </div>
+
     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
       {#each libraries as lib}
         {@const buildStatus = getBuildStatus(lib)}
-        <div class="bg-gray-800 rounded-lg border border-gray-700 p-5 flex flex-col gap-4">
+        <div id="lib-card-{lib.id}" class="bg-gray-800 rounded-lg border border-gray-700 p-5 flex flex-col gap-4">
           <div class="flex items-start justify-between">
             <div>
               <h3 class="font-semibold text-gray-100">{lib.name}</h3>
@@ -159,7 +331,12 @@
             </div>
             <div class="flex flex-col items-end gap-1">
               <StatusChip status={statusLabel(buildStatus)} label={statusText(buildStatus)} />
-              <span class="text-xs text-gray-600">{lib.share_proto ?? 'CEPHFS'}</span>
+              <div class="flex items-center gap-1">
+                <span class="text-xs text-gray-600">{lib.share_proto ?? 'CEPHFS'}</span>
+                <span class="px-1.5 py-0.5 text-xs rounded {lib.visibility === 'private' ? 'bg-gray-700 text-gray-400' : 'bg-green-900/30 text-green-500'}">
+                  {lib.visibility === 'private' ? '비공개' : '공개'}
+                </span>
+              </div>
             </div>
           </div>
 

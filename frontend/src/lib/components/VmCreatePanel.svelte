@@ -153,20 +153,42 @@
 		wizard.update(w => ({ ...w, flavorId: id, flavorName: name }));
 	}
 
-	function toggleLibrary(id: string, deps: string[]) {
+	// 전이적 의존성을 재귀적으로 해결 (DFS)
+	function resolveAllDeps(id: string): string[] {
+		const result: string[] = [];
+		const visited = new Set<string>();
+		function visit(lid: string) {
+			if (visited.has(lid)) return;
+			visited.add(lid);
+			const lib = libraries.find((l: any) => l.id === lid);
+			if (lib) (lib.depends_on as string[]).forEach(d => visit(d));
+			result.push(lid);
+		}
+		visit(id);
+		return result;
+	}
+
+	function toggleLibrary(id: string, _deps: string[]) {
 		wizard.update(w => {
 			const libs = new Set(w.libraries);
 			if (libs.has(id)) {
 				libs.delete(id);
 			} else {
-				libs.add(id);
-				deps.forEach(d => libs.add(d));
+				// 전이적 의존성까지 모두 추가
+				resolveAllDeps(id).forEach(d => libs.add(d));
 			}
 			const newLibs = Array.from(libs);
 			const newStrategy = newLibs.length === 0 ? null : (w.strategy ?? 'prebuilt');
 			return { ...w, libraries: newLibs, strategy: newStrategy };
 		});
 	}
+
+	// 이미지 이름에서 Ubuntu 버전 추출 ("Ubuntu 22.04 LTS" → "22.04")
+	const ubuntuVersion = $derived.by(() => {
+		const name = $wizard.imageName ?? '';
+		const m = name.match(/(\d{2}\.\d{2})/);
+		return m ? m[1] : undefined;
+	});
 
 	function selectStrategy(s: 'prebuilt' | 'dynamic' | null) {
 		wizard.update(w => ({ ...w, strategy: s }));
@@ -439,6 +461,7 @@
 								{libraries}
 								selected={$wizard.libraries}
 								{hasGpuFlavor}
+								{ubuntuVersion}
 								onToggle={toggleLibrary}
 							/>
 						{/if}

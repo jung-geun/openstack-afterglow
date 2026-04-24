@@ -1,4 +1,7 @@
 <script lang="ts">
+	import { auth } from '$lib/stores/auth';
+	import { api } from '$lib/api/client';
+
 	interface LibraryConfig {
 		id: string;
 		name: string;
@@ -8,12 +11,16 @@
 		share_proto: string;
 	}
 
-	let { libraries, selected, hasGpuFlavor, onToggle }: {
+	let { libraries, selected, hasGpuFlavor, ubuntuVersion, onToggle }: {
 		libraries: LibraryConfig[];
 		selected: string[];
 		hasGpuFlavor: boolean;
+		ubuntuVersion?: string;
 		onToggle: (id: string, deps: string[]) => void;
 	} = $props();
+
+	let warnings = $state<string[]>([]);
+	let validateTimer: ReturnType<typeof setTimeout> | null = null;
 
 	function isSelected(id: string) {
 		return selected.includes(id);
@@ -25,9 +32,40 @@
 			(lib) => isSelected(lib.id) && lib.depends_on.includes(id) && lib.id !== id
 		);
 	}
+
+	// 선택 변경 시 호환성 검증 (debounce 300ms)
+	$effect(() => {
+		const ids = [...selected]; // 반응형 구독
+		if (validateTimer) clearTimeout(validateTimer);
+		if (ids.length === 0) {
+			warnings = [];
+			return;
+		}
+		validateTimer = setTimeout(async () => {
+			try {
+				const token = $auth.token ?? undefined;
+				const projectId = $auth.projectId ?? undefined;
+				const body: Record<string, unknown> = { library_ids: ids };
+				if (ubuntuVersion) body.ubuntu_version = ubuntuVersion;
+				const res = await api.post<{ compatible: boolean; messages: string[] }>(
+					'/api/libraries/validate', body, token, projectId
+				);
+				warnings = res.messages ?? [];
+			} catch {
+				warnings = [];
+			}
+		}, 300);
+	});
 </script>
 
 <div class="space-y-3">
+	{#if warnings.length > 0}
+		<div class="p-3 rounded-lg border border-yellow-700 bg-yellow-900/20 text-yellow-300 text-xs space-y-1">
+			{#each warnings as w}
+				<div>⚠️ {w}</div>
+			{/each}
+		</div>
+	{/if}
 	{#each libraries as lib}
 		{@const selected_ = isSelected(lib.id)}
 		{@const locked = isRequiredBy(lib.id)}

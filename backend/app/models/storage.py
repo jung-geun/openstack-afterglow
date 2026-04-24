@@ -30,6 +30,7 @@ class LibraryConfig(BaseModel):
     available_prebuilt: bool = False
     share_proto: str = "CEPHFS"  # CEPHFS | NFS
     ubuntu_versions: list[str] = ["22.04", "24.04"]  # 지원 Ubuntu 버전
+    visibility: str = "public"  # "public" | "private"
 
 
 class VolumeInfo(BaseModel):

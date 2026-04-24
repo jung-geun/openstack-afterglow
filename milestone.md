@@ -496,13 +496,13 @@ Step 5: 요약 & 배포
   - [x] 패키지 빌드 상태 표시 (building / ready / failed / none)
   - [x] 빌드 트리거 버튼 + AutoRefresh (10초)
   - [x] 의존성 배지 표시
-  - [ ] 의존성 그래프 시각화 (SVG 연결선)
-  - [ ] 패키지 공개/비공개 설정
+  - [x] 의존성 그래프 시각화 (SVG 연결선) — 레벨 기반 DAG, 빌드 상태 색상, 노드 클릭 스크롤
+  - [x] 패키지 공개/비공개 설정 — `visibility` 필드 추가, non-admin은 public만 반환
 
-- [ ] 3.6 VM 생성 마법사 — 라이브러리 선택 개선
-  - [ ] 의존성 자동 해석: vllm 선택 시 torch, python311 자동 체크
-  - [ ] 호환성 검증: Ubuntu 버전 / Python 버전 충돌 시 경고
-  - [ ] 마운트 프로토콜 표시 (NFS / CephFS)
+- [x] 3.6 VM 생성 마법사 — 라이브러리 선택 개선
+  - [x] 의존성 자동 해석: vllm 선택 시 torch, python311 자동 체크 (전이적 DFS 해결)
+  - [x] 호환성 검증: Ubuntu 버전 / Python 버전 충돌 시 경고 (`POST /api/libraries/validate` 연동, debounce 300ms)
+  - [x] 마운트 프로토콜 표시 (NFS / CephFS) — SelectLibraries.svelte에 이미 구현됨
 
 ---
 
