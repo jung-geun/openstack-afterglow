@@ -143,9 +143,7 @@ async def list_layers(
     if name:
         stmt = stmt.where(UnionLayer.name == name)
     if not is_admin and project_id:
-        stmt = stmt.where(
-            (UnionLayer.project_id.is_(None)) | (UnionLayer.project_id == project_id)
-        )
+        stmt = stmt.where((UnionLayer.project_id.is_(None)) | (UnionLayer.project_id == project_id))
     elif not is_admin:
         # project_id 없는 비관리자 → 공유 레이어만
         stmt = stmt.where(UnionLayer.project_id.is_(None))
