@@ -9,6 +9,7 @@ _NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$")
 
 class K3sProgressStep(str, Enum):
     SECURITY_GROUP = "security_group"
+    LB_CREATING = "lb_creating"
     SERVER_VOLUME = "server_volume"
     SERVER_CREATING = "server_creating"
     WAITING_CALLBACK = "waiting_callback"

@@ -49,13 +49,26 @@
   }
 
 
-  const K3S_STEPS = [
+  const K3S_BASE_STEPS = [
     { id: 'security_group',   label: '보안 그룹' },
     { id: 'server_volume',    label: '서버 볼륨' },
     { id: 'server_creating',  label: '서버 VM' },
     { id: 'waiting_callback', label: 'k3s 초기화' },
     { id: 'completed',        label: '완료' },
   ];
+
+  const K3S_LB_STEP = { id: 'lb_creating', label: '로드밸런서' };
+
+  // api_lb_enabled이면 LB 스텝 포함, 또는 SSE에서 lb_creating 이벤트 수신 시 동적 추가
+  let k3sSteps = $derived.by(() => {
+    const hasLb = form.api_lb_enabled || progressStep === 'lb_creating';
+    if (hasLb) {
+      const steps = [...K3S_BASE_STEPS];
+      steps.splice(1, 0, K3S_LB_STEP); // 보안 그룹 다음에 삽입
+      return steps;
+    }
+    return K3S_BASE_STEPS;
+  });
 
   // 슬라이드 패널
   let selectedClusterId = $state<string | null>(null);
@@ -376,9 +389,9 @@
       <h2 class="text-lg font-semibold text-white mb-4">Drover 클러스터 생성</h2>
       <!-- 스텝 표시 -->
       <div class="space-y-2 mb-4">
-        {#each K3S_STEPS as step}
+        {#each k3sSteps as step}
           {@const isCurrent = progressStep === step.id}
-          {@const isDone = K3S_STEPS.findIndex(s => s.id === progressStep) > K3S_STEPS.findIndex(s => s.id === step.id)}
+          {@const isDone = k3sSteps.findIndex(s => s.id === progressStep) > k3sSteps.findIndex(s => s.id === step.id)}
           <div class="flex items-center gap-2 text-sm {isDone ? 'text-green-400' : isCurrent ? 'text-blue-400' : 'text-gray-600'}">
             <span class="w-4 h-4 flex items-center justify-center">
               {#if isDone}✓{:else if isCurrent}<span class="animate-pulse">●</span>{:else}○{/if}

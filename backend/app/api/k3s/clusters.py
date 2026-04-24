@@ -289,7 +289,7 @@ async def create_k3s_cluster_async(
 
                 if use_provider_vip:
                     # 모드 A: provider 네트워크에 VIP 직접 생성 (FIP 없음)
-                    yield event(K3sProgressStep.SECURITY_GROUP, 11, "API LB 생성 중 (provider 네트워크 VIP)...")
+                    yield event(K3sProgressStep.LB_CREATING, 11, "API LB 생성 중 (provider 네트워크 VIP)...")
                     lb = await asyncio.to_thread(
                         octavia.create_load_balancer,
                         conn,
@@ -309,7 +309,7 @@ async def create_k3s_cluster_async(
                             "k3s_api_lb_enabled=true 이나 floating network ID가 설정되지 않았습니다 "
                             "(k3s_api_lb_vip_network_id 또는 k3s_api_lb_floating_network_id 설정 필요)"
                         )
-                    yield event(K3sProgressStep.SECURITY_GROUP, 11, "API LB용 Floating IP 할당 중...")
+                    yield event(K3sProgressStep.LB_CREATING, 11, "API LB용 Floating IP 할당 중...")
                     fip_info = await asyncio.to_thread(neutron.create_floating_ip, conn, fip_net_id)
                     api_fip_id = fip_info.id
                     api_fip_address = fip_info.floating_ip_address
@@ -324,7 +324,7 @@ async def create_k3s_cluster_async(
                             raise RuntimeError(f"네트워크 {network_id}에 서브넷이 없습니다")
                         vip_subnet_id = vip_subnet_ids[0]
 
-                    yield event(K3sProgressStep.SECURITY_GROUP, 13, "API 로드밸런서 생성 중...")
+                    yield event(K3sProgressStep.LB_CREATING, 13, "API 로드밸런서 생성 중...")
                     lb = await asyncio.to_thread(
                         octavia.create_load_balancer,
                         conn,
@@ -336,11 +336,11 @@ async def create_k3s_cluster_async(
                     _logger.info("k3s cluster %s: API LB %s created, FIP %s", cluster_id, api_lb_id, api_fip_address)
 
                 # LB ACTIVE 대기
-                yield event(K3sProgressStep.SECURITY_GROUP, 14, "API LB ACTIVE 대기 중...")
+                yield event(K3sProgressStep.LB_CREATING, 14, "API LB ACTIVE 대기 중...")
                 lb_active = await asyncio.to_thread(octavia.wait_for_load_balancer, conn, api_lb_id)
 
                 # Listener 생성 (TCP:6443)
-                yield event(K3sProgressStep.SECURITY_GROUP, 16, "API LB listener 생성 중...")
+                yield event(K3sProgressStep.LB_CREATING, 16, "API LB listener 생성 중...")
                 listener = await asyncio.to_thread(
                     octavia.create_listener,
                     conn,
@@ -352,7 +352,7 @@ async def create_k3s_cluster_async(
                 await asyncio.to_thread(octavia.wait_for_load_balancer, conn, api_lb_id)
 
                 # Pool 생성
-                yield event(K3sProgressStep.SECURITY_GROUP, 18, "API LB pool 생성 중...")
+                yield event(K3sProgressStep.LB_CREATING, 18, "API LB pool 생성 중...")
                 pool = await asyncio.to_thread(
                     octavia.create_pool,
                     conn,

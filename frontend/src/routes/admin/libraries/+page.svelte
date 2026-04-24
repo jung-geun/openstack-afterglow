@@ -84,7 +84,19 @@
       message = `${lib.name} 빌드를 시작했습니다.`;
       await loadData();
     } catch (e) {
-      error = e instanceof ApiError ? e.message : '빌드 트리거 실패';
+      if (e instanceof ApiError) {
+        if (e.status === 409) {
+          error = `${lib.name}: 이미 빌드된 파일 스토리지가 존재합니다. 재빌드하려면 기존 스토리지를 삭제 후 다시 시도하세요.`;
+        } else if (e.status === 400) {
+          error = `${lib.name} 빌드 설정 오류: ${e.message}`;
+        } else if (e.status === 404) {
+          error = `${lib.name}: 라이브러리를 찾을 수 없습니다.`;
+        } else {
+          error = `${lib.name} 빌드 실패 (${e.status}): ${e.message}`;
+        }
+      } else {
+        error = `${lib.name} 빌드 트리거 실패: 네트워크 오류가 발생했습니다.`;
+      }
     } finally {
       buildingId = null;
     }
