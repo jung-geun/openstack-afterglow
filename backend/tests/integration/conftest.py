@@ -60,6 +60,27 @@ def settings():
     return get_settings()
 
 
+@pytest.fixture(scope="session", autouse=True)
+async def flush_cache_before_integration():
+    """통합 테스트 세션 시작 전 Redis 캐시를 초기화한다.
+
+    단위 테스트가 먼저 실행될 경우(npm run test:all), mock conn이 빈 결과를
+    Redis에 캐시해 통합 테스트에서 캐시 히트로 잘못된 값을 받는 문제를 방지한다.
+    Redis 미실행 시 조용히 무시.
+    """
+    try:
+        from app.services.cache import _get_client
+
+        client = _get_client()
+        # afterglow:admin:* 키 전체 삭제 (관리자 API 캐시)
+        keys = await client.keys("afterglow:admin:*")
+        if keys:
+            await client.delete(*keys)
+    except Exception:
+        pass
+    yield
+
+
 @pytest.fixture(scope="session")
 def admin_credentials_fx():
     """admin 크리덴셜 (credentials.toml > config.toml 폴백)."""
