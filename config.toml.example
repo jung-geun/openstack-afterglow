@@ -94,15 +94,47 @@ trove = false       # DBaaS (Database as a Service)
 barbican = false    # Key Manager (시크릿/인증서 관리)
 
 [k3s]
+# ─────────────────────────────────────────────────────────────────────────────
 # k3s 자체 관리 Kubernetes 클러스터 설정 (services.k3s = true 시 활성화)
-version = "v1.34.6+k3s1"
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# 클러스터 생성 UI(Drover)에서 OS 타입을 선택할 수 있습니다:
+#   - Ubuntu  (기본): cloud-init 기반. server_image_id에 Ubuntu 22.04+ 이미지 UUID 입력.
+#   - CoreOS  (FCOS): Ignition 기반. fcos_image_id에 Fedora CoreOS 이미지 UUID 입력.
+#
+# 두 OS 타입을 동시에 지원하려면 server_image_id와 fcos_image_id 모두 설정하면 됩니다.
+# 어느 한쪽만 설정해도 해당 타입 클러스터만 정상 동작합니다.
+#
+# [Ubuntu 이미지 준비]
+#   openstack image list --name ubuntu   # 이미지 UUID 확인
+#
+# [Fedora CoreOS 이미지 준비]
+#   1) https://fedoraproject.org/coreos/download/ 에서 OpenStack QCOW2 다운로드
+#   2) openstack image create --file fedora-coreos-*.qcow2 \
+#        --disk-format qcow2 --container-format bare "fedora-coreos-42" \
+#        --property hw_disk_bus=virtio --property hw_vif_model=virtio
+#   3) 출력된 UUID를 fcos_image_id에 입력
+#
+version = "v1.34.6+k3s1"       # k3s 버전 (예: v1.34.6+k3s1)
 server_flavor_id = ""          # 서버(control plane) 노드 플레이버 ID
 default_agent_flavor_id = ""   # 에이전트(worker) 노드 기본 플레이버 ID
-server_image_id = ""           # Ubuntu 22.04+ 이미지 ID
-fcos_image_id = ""             # Fedora CoreOS 이미지 ID (os_type=fcos 클러스터에 사용)
+
+# ── Ubuntu 기반 클러스터 (os_type = ubuntu, 기본값) ──────────────────────────
+# Glance에 등록된 Ubuntu 22.04 LTS 이상 이미지 UUID
+# cloud-init으로 k3s 자동 설치. SSH keypair 사용 가능.
+server_image_id = ""
+
+# ── Fedora CoreOS 기반 클러스터 (os_type = fcos) ─────────────────────────────
+# Glance에 등록된 Fedora CoreOS (FCOS) 이미지 UUID
+# Ignition JSON으로 k3s 설치. SSH 기본 비활성화 (보안 강화).
+# FCOS는 config_drive=true로 부팅해야 Ignition이 주입됨 (자동 처리됨).
+fcos_image_id = ""
+
 callback_base_url = ""         # 서버 VM이 콜백할 백엔드 URL (예: http://10.0.0.1:8000)
-kubeconfig_encryption_key = "" # AES-256-GCM 키 — openssl rand -hex 32 로 생성
-boot_volume_size_gb = 30
+                               # Docker Compose 환경: 호스트 IP를 직접 입력 (localhost 불가)
+kubeconfig_encryption_key = "" # AES-256-GCM 키 (32바이트 hex)
+                               # 생성: openssl rand -hex 32
+boot_volume_size_gb = 30       # 노드 루트 볼륨 크기 (GB). FCOS는 30GB 이상 권장.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Cloud Provider OpenStack 플러그인 (cloud-provider-openstack, Magnum 제외)

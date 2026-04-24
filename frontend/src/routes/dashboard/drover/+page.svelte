@@ -110,7 +110,7 @@
   let showModal = $state(false);
   let creating = $state(false);
   let createError = $state('');
-  let form = $state({ name: '', agent_count: 1, agent_flavor_id: '', network_id: '', key_name: '', api_lb_enabled: false, api_lb_network_id: '' });
+  let form = $state({ name: '', agent_count: 1, agent_flavor_id: '', network_id: '', key_name: '', api_lb_enabled: false, api_lb_network_id: '', os_type: 'ubuntu' });
 
   // SSE 진행률
   let showProgress = $state(false);
@@ -141,7 +141,7 @@
 
   async function openCreateModal() {
     showModal = true;
-    form = { name: '', agent_count: 1, agent_flavor_id: '', network_id: '', key_name: '', api_lb_enabled: false, api_lb_network_id: '' };
+    form = { name: '', agent_count: 1, agent_flavor_id: '', network_id: '', key_name: '', api_lb_enabled: false, api_lb_network_id: '', os_type: 'ubuntu' };
     createError = '';
     try {
       [flavors, networks, keypairs] = await Promise.all([
@@ -182,6 +182,7 @@
         body: JSON.stringify({
           name: form.name,
           agent_count: form.agent_count,
+          os_type: form.os_type,
           ...(form.agent_flavor_id ? { agent_flavor_id: form.agent_flavor_id } : {}),
           ...(form.network_id ? { network_id: form.network_id } : {}),
           ...(form.key_name ? { key_name: form.key_name } : {}),
@@ -303,6 +304,34 @@
             <input bind:value={form.name} type="text" placeholder="미입력 시 자동 생성"
               class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5" />
           </label>
+        </div>
+        <div>
+          <span class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">OS 타입</span>
+          <div class="flex gap-2 mt-1.5">
+            <button type="button"
+              onclick={() => form.os_type = 'ubuntu'}
+              class="flex-1 flex items-center gap-2 px-3 py-2.5 rounded-lg border text-sm transition-colors {form.os_type === 'ubuntu' ? 'border-blue-500 bg-blue-900/30 text-white' : 'border-gray-600 bg-gray-800 text-gray-400 hover:border-gray-500'}">
+              <span class="text-base">🐧</span>
+              <div class="text-left">
+                <div class="font-medium leading-none">Ubuntu</div>
+                <div class="text-xs text-gray-500 mt-0.5">cloud-init</div>
+              </div>
+            </button>
+            <button type="button"
+              onclick={() => form.os_type = 'fcos'}
+              class="flex-1 flex items-center gap-2 px-3 py-2.5 rounded-lg border text-sm transition-colors {form.os_type === 'fcos' ? 'border-orange-500 bg-orange-900/30 text-white' : 'border-gray-600 bg-gray-800 text-gray-400 hover:border-gray-500'}">
+              <span class="text-base">🔴</span>
+              <div class="text-left">
+                <div class="font-medium leading-none">CoreOS</div>
+                <div class="text-xs text-gray-500 mt-0.5">Ignition</div>
+              </div>
+            </button>
+          </div>
+          {#if form.os_type === 'fcos'}
+            <div class="mt-2 text-xs text-orange-400/80 bg-orange-900/10 border border-orange-800/40 rounded px-2.5 py-1.5">
+              서버의 <code class="font-mono">k3s.fcos_image_id</code> 설정이 필요합니다.
+            </div>
+          {/if}
         </div>
         <div>
           <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">에이전트 수 (0-10)
