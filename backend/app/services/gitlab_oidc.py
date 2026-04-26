@@ -23,8 +23,10 @@ logger = logging.getLogger(__name__)
 
 
 _STATE_TTL = 600  # 10분
+_FALLBACK_MAX_SIZE = 500  # 인메모리 폴백 최대 항목 수 (메모리 누수 방지)
 
 # Redis 장애 시 인메모리 state 폴백 (단일 프로세스용, 재시작 시 소실)
+# {state: expiry_timestamp} — 최대 _FALLBACK_MAX_SIZE 항목 유지
 _fallback_states: dict[str, float] = {}
 
 
@@ -44,7 +46,19 @@ async def get_authorize_url() -> str:
         await r.setex(f"afterglow:gitlab_state:{state}", _STATE_TTL, "1")
     except Exception:
         logger.warning("Redis 장애로 OIDC state를 인메모리에 임시 저장합니다")
-        _fallback_states[state] = __import__("time").time() + _STATE_TTL
+        import time as _time
+
+        now = _time.time()
+        # 크기 초과 시 만료된 항목 정리 (메모리 누수 방지)
+        if len(_fallback_states) >= _FALLBACK_MAX_SIZE:
+            expired = [k for k, exp in _fallback_states.items() if exp <= now]
+            for k in expired:
+                del _fallback_states[k]
+            # 여전히 초과하면 가장 오래된 항목 제거
+            if len(_fallback_states) >= _FALLBACK_MAX_SIZE:
+                oldest = min(_fallback_states, key=lambda k: _fallback_states[k])
+                del _fallback_states[oldest]
+        _fallback_states[state] = now + _STATE_TTL
 
     params = {
         "client_id": settings.gitlab_oidc_client_id,

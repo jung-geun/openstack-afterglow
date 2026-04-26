@@ -82,7 +82,9 @@ async def save_notion_config(req: NotionConfigRequest):
         await notion_sync.ensure_db_properties(req.api_key, req.database_id)
     except Exception as e:
         _logger.warning("Notion DB 속성 생성 실패: %s", e)
-        raise HTTPException(status_code=400, detail=f"DB 속성 생성 실패: {e}")
+        _logger.warning("DB 속성 생성 실패: %s", e)
+
+        raise HTTPException(status_code=400, detail="DB 속성 생성 실패")
 
     # 선택 DB 검증
     if req.users_database_id:
@@ -98,7 +100,9 @@ async def save_notion_config(req: NotionConfigRequest):
             await notion_sync.ensure_hypervisor_db_properties(req.api_key, req.hypervisors_database_id)
         except Exception as e:
             _logger.warning("Notion 하이퍼바이저 DB 속성 생성 실패: %s", e)
-            raise HTTPException(status_code=400, detail=f"하이퍼바이저 DB 속성 생성 실패: {e}")
+            _logger.warning("하이퍼바이저 DB 속성 생성 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="하이퍼바이저 DB 속성 생성 실패")
 
     if req.gpu_spec_database_id:
         ok_g, msg_g = await notion_sync.validate_notion_config(req.api_key, req.gpu_spec_database_id)
@@ -108,7 +112,9 @@ async def save_notion_config(req: NotionConfigRequest):
             await notion_sync.ensure_gpu_spec_db_properties(req.api_key, req.gpu_spec_database_id)
         except Exception as e:
             _logger.warning("Notion GPU spec DB 속성 생성 실패: %s", e)
-            raise HTTPException(status_code=400, detail=f"GPU spec DB 속성 생성 실패: {e}")
+            _logger.warning("GPU spec DB 속성 생성 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="GPU spec DB 속성 생성 실패")
 
     existing = await notion_sync.get_notion_config()
     last_sync = existing.get("last_sync") if existing else None
@@ -269,7 +275,9 @@ async def test_notion_sync(conn=Depends(get_os_conn)):
         stats = await notion_sync.sync_to_notion(api_key, database_id, instances)
     except Exception as e:
         _logger.warning("Notion 테스트: 동기화 실패", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Notion 동기화 실패: {e}")
+        _logger.warning("Notion 동기화 실패: %s", e)
+
+        raise HTTPException(status_code=500, detail="Notion 동기화 실패")
 
     config["last_sync"] = datetime.now(UTC).isoformat()
     await notion_sync.save_notion_config(config)
@@ -472,7 +480,9 @@ async def _validate_target_dbs(api_key: str, req_dict: dict) -> None:
         try:
             await notion_sync.ensure_db_properties(api_key, db_id)
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"인스턴스 DB 속성 생성 실패: {e}")
+            _logger.warning("인스턴스 DB 속성 생성 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="인스턴스 DB 속성 생성 실패")
 
     users_db = req_dict.get("users_database_id", "")
     if users_db:
@@ -488,7 +498,9 @@ async def _validate_target_dbs(api_key: str, req_dict: dict) -> None:
         try:
             await notion_sync.ensure_hypervisor_db_properties(api_key, hypervisors_db)
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"하이퍼바이저 DB 속성 생성 실패: {e}")
+            _logger.warning("하이퍼바이저 DB 속성 생성 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="하이퍼바이저 DB 속성 생성 실패")
 
     gpu_spec_db = req_dict.get("gpu_spec_database_id", "")
     if gpu_spec_db:
@@ -498,7 +510,9 @@ async def _validate_target_dbs(api_key: str, req_dict: dict) -> None:
         try:
             await notion_sync.ensure_gpu_spec_db_properties(api_key, gpu_spec_db)
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"GPU spec DB 속성 생성 실패: {e}")
+            _logger.warning("GPU spec DB 속성 생성 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="GPU spec DB 속성 생성 실패")
 
 
 @router.get("/notion/targets", dependencies=[Depends(require_admin)])
@@ -654,7 +668,9 @@ async def test_notion_target_sync(target_id: int, conn=Depends(get_os_conn)):
     try:
         stats = await notion_sync.sync_to_notion(api_key, database_id, instances)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Notion 동기화 실패: {e}")
+        _logger.warning("Notion 동기화 실패: %s", e)
+
+        raise HTTPException(status_code=500, detail="Notion 동기화 실패")
 
     now_iso = datetime.now(UTC).isoformat()
     await notion_sync.update_notion_target(

@@ -25,7 +25,7 @@ write_files:
     permissions: "0600"
     content: |
       [client.{{ share.cephx_id | shlex_quote }}]
-          key = {{ share.cephx_key }}
+          key = {{ share.cephx_key | trim }}
 {% endif %}
 {% endfor %}
 
@@ -81,11 +81,50 @@ write_files:
       [Install]
       WantedBy=multi-user.target
 
+{% if report_url %}
+  # 헬스체크 스크립트
+  - path: /opt/union/scripts/health-check.sh
+    permissions: "0750"
+    content: |
+{{ health_check_script | indent(6, first=True) }}
+
+  # 헬스체크 systemd service
+  - path: /etc/systemd/system/union-health.service
+    content: |
+      [Unit]
+      Description=Union Instance Health Check
+      Wants=union-overlay.service
+      After=union-overlay.service
+
+      [Service]
+      Type=oneshot
+      ExecStart=/opt/union/scripts/health-check.sh
+      StandardOutput=journal
+      StandardError=journal
+
+  # 헬스체크 systemd timer (5분 주기)
+  - path: /etc/systemd/system/union-health.timer
+    content: |
+      [Unit]
+      Description=Union Instance Health Check Timer
+
+      [Timer]
+      OnBootSec=2min
+      OnUnitActiveSec=5min
+      Unit=union-health.service
+
+      [Install]
+      WantedBy=timers.target
+{% endif %}
+
 runcmd:
-  - mkdir -p /opt/layers/{lower,upper,work,merged} /opt/union /var/lib/union
+  - mkdir -p /opt/layers/{lower,upper,work,merged} /opt/union/scripts /var/lib/union
   - systemctl daemon-reload
   - systemctl enable union-overlay
   - systemctl start union-overlay
+{% if report_url %}
+  - systemctl enable --now union-health.timer
+{% endif %}
 {% if strategy == "dynamic" %}
   - /opt/union/dynamic_install.sh
 {% endif %}

@@ -199,7 +199,8 @@ async def trigger_library_build(
                 "message": "빈 share 생성 완료. 수동으로 패키지를 설치하세요.",
             }
         except Exception as e:
-            raise HTTPException(status_code=502, detail=f"Share 생성 실패: {e}")
+            _logger.warning("Share 생성 실패: %s", e)
+            raise HTTPException(status_code=502, detail="Share 생성 실패")
 
 
 # ---------------------------------------------------------------------------

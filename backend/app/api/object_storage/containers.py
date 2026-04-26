@@ -158,7 +158,12 @@ async def upload_object(
         raise HTTPException(status_code=413, detail="업로드 파일 크기는 5 GB를 초과할 수 없습니다")
 
     try:
-        object_name = file.filename or "unnamed"
+        raw_filename = file.filename or "unnamed"
+        # 제어 문자(0x00-0x1f, 0x7f) 및 경로 순회 문자 제거 후 길이 제한
+        object_name = "".join(c for c in raw_filename if ord(c) >= 0x20 and ord(c) != 0x7F)
+        object_name = object_name.strip("/").strip() or "unnamed"
+        if len(object_name) > 1024:
+            object_name = object_name[:1024]
         content_type = file.content_type or ""
         # file.file (SpooledTemporaryFile)을 직접 전달해 스트리밍 업로드
         return await asyncio.to_thread(

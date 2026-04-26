@@ -937,7 +937,9 @@ async def create_port(
 
         return await asyncio.to_thread(_create)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"포트 생성 실패: {e}")
+        _logger.warning("포트 생성 실패: %s", e)
+
+        raise HTTPException(status_code=400, detail="포트 생성 실패")
 
 
 @router.get("/quotas/{project_id}", dependencies=[Depends(require_admin)])
@@ -1124,7 +1126,9 @@ async def update_volume(
                 "size": v.size,
             }
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"볼륨 수정 실패: {e}")
+            _logger.warning("볼륨 수정 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="볼륨 수정 실패")
 
     try:
         return await asyncio.to_thread(_update)
@@ -1143,7 +1147,9 @@ async def delete_volume(
         try:
             conn.block_storage.delete_volume(volume_id, ignore_missing=True)
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"볼륨 삭제 실패: {e}")
+            _logger.warning("볼륨 삭제 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="볼륨 삭제 실패")
 
     try:
         await asyncio.to_thread(_delete)
@@ -1164,7 +1170,9 @@ async def extend_volume(
             conn.block_storage.extend_volume(volume_id, req.new_size)
             return {"status": "extending"}
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"볼륨 확장 실패: {e}")
+            _logger.warning("볼륨 확장 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="볼륨 확장 실패")
 
     try:
         return await asyncio.to_thread(_extend)
@@ -1185,7 +1193,9 @@ async def reset_volume_status(
             conn.block_storage.reset_volume_status(volume_id, req.status)
             return {"status": req.status}
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"볼륨 상태 초기화 실패: {e}")
+            _logger.warning("볼륨 상태 초기화 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="볼륨 상태 초기화 실패")
 
     try:
         return await asyncio.to_thread(_reset)
@@ -1222,7 +1232,9 @@ async def live_migrate_instance(
         await asyncio.to_thread(nova.live_migrate_server, conn, server_id, req.host, req.block_migration)
         return {"status": "migrating"}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"라이브 마이그레이션 실패: {e}")
+        _logger.warning("라이브 마이그레이션 실패: %s", e)
+
+        raise HTTPException(status_code=400, detail="라이브 마이그레이션 실패")
 
 
 @router.post("/instances/{server_id}/cold-migrate", dependencies=[Depends(require_admin)])
@@ -1235,7 +1247,9 @@ async def cold_migrate_instance(
         await asyncio.to_thread(nova.cold_migrate_server, conn, server_id)
         return {"status": "migrating"}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"콜드 마이그레이션 실패: {e}")
+        _logger.warning("콜드 마이그레이션 실패: %s", e)
+
+        raise HTTPException(status_code=400, detail="콜드 마이그레이션 실패")
 
 
 @router.post("/instances/{server_id}/confirm-resize", dependencies=[Depends(require_admin)])
@@ -1248,7 +1262,9 @@ async def confirm_resize_instance(
         await asyncio.to_thread(nova.confirm_resize_server, conn, server_id)
         return {"status": "confirmed"}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"리사이즈 확인 실패: {e}")
+        _logger.warning("리사이즈 확인 실패: %s", e)
+
+        raise HTTPException(status_code=400, detail="리사이즈 확인 실패")
 
 
 class VolumeTransferRequest(BaseModel):
@@ -1289,7 +1305,9 @@ async def transfer_volume(
         return await asyncio.to_thread(_transfer)
     except Exception as e:
         _logger.warning("볼륨 이전 실패", exc_info=True)
-        raise HTTPException(status_code=400, detail=f"볼륨 이전 실패: {e}")
+        _logger.warning("볼륨 이전 실패: %s", e)
+
+        raise HTTPException(status_code=400, detail="볼륨 이전 실패")
 
 
 # ===========================================================================
@@ -1369,7 +1387,9 @@ async def create_network(
                 "subnets": n.subnet_ids or [],
             }
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"네트워크 생성 실패: {e}")
+            _logger.warning("네트워크 생성 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="네트워크 생성 실패")
 
     try:
         return await asyncio.to_thread(_create)
@@ -1401,7 +1421,9 @@ async def update_network(
                 "is_shared": bool(n.is_shared),
             }
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"네트워크 수정 실패: {e}")
+            _logger.warning("네트워크 수정 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="네트워크 수정 실패")
 
     try:
         return await asyncio.to_thread(_update)
@@ -1420,7 +1442,9 @@ async def delete_network(
         try:
             conn.network.delete_network(network_id, ignore_missing=True)
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"네트워크 삭제 실패: {e}")
+            _logger.warning("네트워크 삭제 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="네트워크 삭제 실패")
 
     try:
         await asyncio.to_thread(_delete)
@@ -1447,7 +1471,9 @@ async def create_floating_ip(
                 "project_id": getattr(fip, "project_id", None),
             }
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Floating IP 생성 실패: {e}")
+            _logger.warning("Floating IP 생성 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="Floating IP 생성 실패")
 
     try:
         return await asyncio.to_thread(_create)
@@ -1466,7 +1492,9 @@ async def delete_floating_ip(
         try:
             conn.network.delete_ip(fip_id, ignore_missing=True)
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Floating IP 삭제 실패: {e}")
+            _logger.warning("Floating IP 삭제 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="Floating IP 삭제 실패")
 
     try:
         await asyncio.to_thread(_delete)
@@ -1495,7 +1523,9 @@ async def create_router(
                 "project_id": getattr(r, "project_id", None),
             }
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"라우터 생성 실패: {e}")
+            _logger.warning("라우터 생성 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="라우터 생성 실패")
 
     try:
         return await asyncio.to_thread(_create)
@@ -1526,7 +1556,9 @@ async def update_router(
                 "external_gateway_network_id": (r.external_gateway_info or {}).get("network_id"),
             }
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"라우터 수정 실패: {e}")
+            _logger.warning("라우터 수정 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="라우터 수정 실패")
 
     try:
         return await asyncio.to_thread(_update)
@@ -1545,7 +1577,9 @@ async def delete_router(
         try:
             conn.network.delete_router(router_id, ignore_missing=True)
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"라우터 삭제 실패: {e}")
+            _logger.warning("라우터 삭제 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="라우터 삭제 실패")
 
     try:
         await asyncio.to_thread(_delete)
@@ -1574,7 +1608,9 @@ async def update_port(
                 "device_owner": p.device_owner or "",
             }
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"포트 수정 실패: {e}")
+            _logger.warning("포트 수정 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="포트 수정 실패")
 
     try:
         return await asyncio.to_thread(_update)
@@ -1593,7 +1629,9 @@ async def delete_port(
         try:
             conn.network.delete_port(port_id, ignore_missing=True)
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"포트 삭제 실패: {e}")
+            _logger.warning("포트 삭제 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="포트 삭제 실패")
 
     try:
         await asyncio.to_thread(_delete)

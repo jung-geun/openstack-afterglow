@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -15,6 +16,7 @@ from app.services import manila
 from app.services.cache import cached_call, invalidate, ttl_fast
 
 router = APIRouter()
+_logger = logging.getLogger(__name__)
 
 
 @router.get("", response_model=list[SecurityServiceInfo])
@@ -58,7 +60,9 @@ async def create_security_service(
         await invalidate(f"afterglow:manila:{pid}:security_services")
         return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Security Service 생성 실패: {e}")
+        _logger.warning("Security Service 생성 실패: %s", e)
+
+        raise HTTPException(status_code=500, detail="Security Service 생성 실패")
 
 
 @router.delete("/{security_service_id}", status_code=204)
@@ -71,7 +75,9 @@ async def delete_security_service(
         await asyncio.to_thread(manila.delete_security_service, conn, security_service_id)
         await invalidate(f"afterglow:manila:{pid}:security_services")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Security Service 삭제 실패: {e}")
+        _logger.warning("Security Service 삭제 실패: %s", e)
+
+        raise HTTPException(status_code=500, detail="Security Service 삭제 실패")
 
 
 @router.post("/{security_service_id}/attach", status_code=200)
@@ -92,7 +98,9 @@ async def attach_to_share_network(
         await invalidate(f"afterglow:manila:{pid}:share_networks")
         return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Security Service 연결 실패: {e}")
+        _logger.warning("Security Service 연결 실패: %s", e)
+
+        raise HTTPException(status_code=500, detail="Security Service 연결 실패")
 
 
 @router.delete("/{security_service_id}/detach", status_code=204)
@@ -112,4 +120,6 @@ async def detach_from_share_network(
         )
         await invalidate(f"afterglow:manila:{pid}:share_networks")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Security Service 해제 실패: {e}")
+        _logger.warning("Security Service 해제 실패: %s", e)
+
+        raise HTTPException(status_code=500, detail="Security Service 해제 실패")

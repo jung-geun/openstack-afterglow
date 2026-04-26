@@ -4,6 +4,7 @@ import base64
 import gzip
 import json
 import re
+import shlex
 from pathlib import Path
 from typing import NamedTuple
 
@@ -16,6 +17,7 @@ _jinja = Environment(
     trim_blocks=True,
     lstrip_blocks=True,
 )
+_jinja.filters["shlex_quote"] = shlex.quote
 
 OS_TYPE_UBUNTU = "ubuntu"
 OS_TYPE_FCOS = "fcos"

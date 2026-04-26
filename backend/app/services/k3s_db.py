@@ -366,6 +366,11 @@ async def get_cluster_node_token(project_id: str, cluster_id: str) -> str | None
             return decrypt_node_token(row)
         except Exception:
             # 암호화 전 평문 토큰이 저장된 레거시 레코드 — 그대로 반환
+            # TODO: 마이그레이션 후 이 분기를 제거할 것
+            _logger.warning(
+                "cluster %s: node_token 복호화 실패 — 평문 레거시 레코드로 간주합니다. 재프로비저닝을 권장합니다.",
+                cluster_id,
+            )
             return row
 
 

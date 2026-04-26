@@ -31,6 +31,20 @@ def _require_admin(token_info: dict) -> None:
         raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다")
 
 
+def _can_access_layer(layer: "LayerInfo", token_info: dict) -> bool:
+    """레이어 접근 권한 확인.
+
+    - 관리자: 모든 레이어 접근 가능
+    - 공유 레이어(project_id=None): 누구나 접근 가능
+    - 프로젝트 레이어: 동일 project_id 사용자만 접근 가능
+    """
+    if token_info.get("is_system_admin", False):
+        return True
+    if layer.project_id is None:
+        return True
+    return layer.project_id == token_info.get("project_id")
+
+
 @router.get("/layers", response_model=list[LayerInfo])
 async def list_layers(
     name: str | None = Query(default=None, description="이름 필터"),
@@ -71,23 +85,32 @@ async def seal_layer(
 @router.get("/layers/{layer_id}/dependents", response_model=list[LayerInfo])
 async def get_dependents(
     layer_id: str,
-    _token_info: dict = Depends(get_token_info),
+    token_info: dict = Depends(get_token_info),
     session=Depends(get_session),
 ):
     """직접 자식 레이어 목록 조회."""
     try:
-        return await union_layers.get_dependents(session, layer_id)
+        result = await union_layers.get_dependents(session, layer_id)
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    # 부모 레이어 소유권 검증 (공유 레이어는 누구나 접근 가능)
+    parent = await union_layers.get_layer(session, layer_id)
+    if parent is not None and not _can_access_layer(parent, token_info):
+        raise HTTPException(status_code=404, detail=f"레이어 {layer_id}를 찾을 수 없습니다")
+    return result
 
 
 @router.get("/layers/{layer_id}/ancestors", response_model=AncestorChain)
 async def get_ancestors(
     layer_id: str,
-    _token_info: dict = Depends(get_token_info),
+    token_info: dict = Depends(get_token_info),
     session=Depends(get_session),
 ):
     """조상 체인 조회 (base-first 순서). overlayfs lowerdir 조립에 사용."""
+    # 요청 레이어 소유권 검증
+    leaf = await union_layers.get_layer(session, layer_id)
+    if leaf is None or not _can_access_layer(leaf, token_info):
+        raise HTTPException(status_code=404, detail=f"레이어 {layer_id}를 찾을 수 없습니다")
     try:
         return await union_layers.get_ancestors(session, layer_id)
     except KeyError as e:
@@ -97,12 +120,12 @@ async def get_ancestors(
 @router.get("/layers/{layer_id}", response_model=LayerInfo)
 async def get_layer(
     layer_id: str,
-    _token_info: dict = Depends(get_token_info),
+    token_info: dict = Depends(get_token_info),
     session=Depends(get_session),
 ):
     """레이어 상세 조회."""
     layer = await union_layers.get_layer(session, layer_id)
-    if layer is None:
+    if layer is None or not _can_access_layer(layer, token_info):
         raise HTTPException(status_code=404, detail=f"레이어 {layer_id}를 찾을 수 없습니다")
     return layer
 
@@ -260,7 +283,9 @@ async def grant_builder_access(
             "cephx",
         )
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Manila access rule 생성 실패: {e}")
+        _logger.warning("Manila access rule 생성 실패: %s", e)
+
+        raise HTTPException(status_code=502, detail="Manila access rule 생성 실패")
 
     return BuilderAccessInfo(
         access_id=rule["access_id"],
@@ -290,4 +315,6 @@ async def revoke_builder_access(
     try:
         await __import__("asyncio").to_thread(manila.revoke_access_rule, conn, share_id, access_id)
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Manila access rule 회수 실패: {e}")
+        _logger.warning("Manila access rule 회수 실패: %s", e)
+
+        raise HTTPException(status_code=502, detail="Manila access rule 회수 실패")

@@ -668,9 +668,15 @@ class TestUnionLayersAPI:
 
         app.dependency_overrides[get_session] = override_get_session
         try:
-            with patch(
-                "app.api.union.layers.union_layers.get_ancestors",
-                AsyncMock(side_effect=KeyError("not found")),
+            with (
+                patch(
+                    "app.api.union.layers.union_layers.get_layer",
+                    AsyncMock(return_value=None),
+                ),
+                patch(
+                    "app.api.union.layers.union_layers.get_ancestors",
+                    AsyncMock(side_effect=KeyError("not found")),
+                ),
             ):
                 resp = await client.get(f"/api/union/layers/{_sha('x')}/ancestors")
         finally:
@@ -881,9 +887,16 @@ class TestNewUnionLayersAPI:
 
         app.dependency_overrides[get_session] = override_get_session
         try:
-            with patch(
-                "app.api.union.layers.union_layers.get_dependents",
-                AsyncMock(return_value=[_make_layer_info(_sha("child"), "cuda", "12.3")]),
+            with (
+                patch(
+                    "app.api.union.layers.union_layers.get_dependents",
+                    AsyncMock(return_value=[_make_layer_info(_sha("child"), "cuda", "12.3")]),
+                ),
+                patch(
+                    "app.api.union.layers.union_layers.get_layer",
+                    # project_id=None → 공유 레이어, 누구나 접근 가능
+                    AsyncMock(return_value=_make_layer_info(_sha("a"), project_id=None)),
+                ),
             ):
                 resp = await client.get(f"/api/union/layers/{_sha('a')}/dependents")
         finally:

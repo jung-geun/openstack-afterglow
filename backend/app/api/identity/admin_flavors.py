@@ -107,7 +107,9 @@ async def create_flavor(
             )
             return _flavor_to_dict(flavor)
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Flavor 생성 실패: {e}")
+            _logger.warning("Flavor 생성 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="Flavor 생성 실패")
 
     try:
         return await asyncio.to_thread(_create)
@@ -128,7 +130,9 @@ async def delete_flavor(
         try:
             conn.compute.delete_flavor(flavor_id, ignore_missing=True)
         except Exception as e:
-            raise HTTPException(status_code=404, detail=f"Flavor 삭제 실패: {e}")
+            _logger.warning("Flavor 삭제 실패: %s", e)
+
+            raise HTTPException(status_code=404, detail="Flavor 삭제 실패")
 
     try:
         await asyncio.to_thread(_delete)
@@ -193,7 +197,9 @@ async def set_flavor_extra_spec(
             conn.compute.create_flavor_extra_specs(flavor_id, {req.key: req.value})
             return {"key": req.key, "value": req.value}
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"extra_spec 설정 실패: {e}")
+            _logger.warning("extra_spec 설정 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="extra_spec 설정 실패")
 
     try:
         return await asyncio.to_thread(_set)
@@ -213,7 +219,9 @@ async def delete_flavor_extra_spec(
         try:
             conn.compute.delete_flavor_extra_specs_property(flavor_id, key)
         except Exception as e:
-            raise HTTPException(status_code=404, detail=f"extra_spec 삭제 실패: {e}")
+            _logger.warning("extra_spec 삭제 실패: %s", e)
+
+            raise HTTPException(status_code=404, detail="extra_spec 삭제 실패")
 
     try:
         await asyncio.to_thread(_delete)
@@ -240,7 +248,9 @@ async def add_flavor_access(
                 raise Exception(f"HTTP {resp.status_code}")
             return {"flavor_id": flavor_id, "project_id": req.project_id}
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"접근 권한 추가 실패: {e}")
+            _logger.warning("접근 권한 추가 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="접근 권한 추가 실패")
 
     try:
         return await asyncio.to_thread(_add)
@@ -266,7 +276,9 @@ async def remove_flavor_access(
             if resp.status_code >= 400:
                 raise Exception(f"HTTP {resp.status_code}")
         except Exception as e:
-            raise HTTPException(status_code=404, detail=f"접근 권한 제거 실패: {e}")
+            _logger.warning("접근 권한 제거 실패: %s", e)
+
+            raise HTTPException(status_code=404, detail="접근 권한 제거 실패")
 
     try:
         await asyncio.to_thread(_remove)

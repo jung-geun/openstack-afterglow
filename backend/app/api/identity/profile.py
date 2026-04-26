@@ -87,7 +87,9 @@ async def update_profile(
         except HTTPException:
             raise
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"프로필 수정 실패: {e}")
+            _logger.warning("프로필 수정 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="프로필 수정 실패")
 
     try:
         return await asyncio.to_thread(_update)
@@ -119,7 +121,9 @@ async def change_password(
             conn.identity.update_user(user_id, password=req.new_password)
             return {"status": "changed"}
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"패스워드 변경 실패: {e}")
+            _logger.warning("패스워드 변경 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="패스워드 변경 실패")
 
     try:
         return await asyncio.to_thread(_change)

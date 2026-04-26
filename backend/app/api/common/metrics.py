@@ -2,11 +2,11 @@
 
 import re
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from fastapi.responses import Response
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 
-from app.api.deps import get_token_info
+from app.api.deps import require_admin
 
 # UUID, 숫자 ID 패턴을 {id}로 치환하여 카디널리티 폭발 방지
 _UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE)
@@ -20,11 +20,6 @@ def _normalize_path(path: str) -> str:
 
 
 router = APIRouter()
-
-
-def _require_admin(token_info: dict = Depends(get_token_info)):
-    if "admin" not in token_info.get("roles", []):
-        raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다")
 
 
 REQUEST_COUNT = Counter("afterglow_http_requests_total", "Total HTTP requests", ["method", "path", "status"])
@@ -42,6 +37,6 @@ def record_request(method: str, path: str, status: int, duration_ms: float) -> N
     REQUEST_DURATION.labels(method=method, path=normalized).observe(duration_ms)
 
 
-@router.get("", dependencies=[Depends(_require_admin)])
+@router.get("", dependencies=[Depends(require_admin)])
 async def get_metrics():
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)

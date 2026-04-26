@@ -138,7 +138,9 @@ async def update_admin_image(
         )
         return result
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"이미지 수정 실패: {e}")
+        _logger.warning("이미지 수정 실패: %s", e)
+
+        raise HTTPException(status_code=400, detail="이미지 수정 실패")
 
 
 @router.delete("/images/{image_id}", dependencies=[Depends(require_admin)], status_code=204)
@@ -150,7 +152,9 @@ async def delete_admin_image(
     try:
         await asyncio.to_thread(glance.delete_image, conn, image_id)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"이미지 삭제 실패: {e}")
+        _logger.warning("이미지 삭제 실패: %s", e)
+
+        raise HTTPException(status_code=400, detail="이미지 삭제 실패")
 
 
 @router.post("/images/{image_id}/deactivate", dependencies=[Depends(require_admin)], status_code=200)
@@ -163,7 +167,9 @@ async def deactivate_admin_image(
         await asyncio.to_thread(glance.deactivate_image, conn, image_id)
         return {"status": "deactivated"}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"이미지 비활성화 실패: {e}")
+        _logger.warning("이미지 비활성화 실패: %s", e)
+
+        raise HTTPException(status_code=400, detail="이미지 비활성화 실패")
 
 
 @router.post("/images/{image_id}/reactivate", dependencies=[Depends(require_admin)], status_code=200)
@@ -176,4 +182,6 @@ async def reactivate_admin_image(
         await asyncio.to_thread(glance.reactivate_image, conn, image_id)
         return {"status": "active"}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"이미지 활성화 실패: {e}")
+        _logger.warning("이미지 활성화 실패: %s", e)
+
+        raise HTTPException(status_code=400, detail="이미지 활성화 실패")
