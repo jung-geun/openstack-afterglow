@@ -149,6 +149,39 @@ class TestFCOSServerUserdata:
         assert "supersecrettoken" in cb_content
         assert "http://api.example.com" in cb_content
 
+    def test_fcos_server_install_uses_server_node_name(self):
+        """server_node_name이 install.sh의 --node-name에 반영되어야 한다."""
+        from app.services.k3s_cloudinit import generate_server_userdata
+
+        result = generate_server_userdata(
+            cluster_name="test",
+            k3s_version="v1.31.4+k3s1",
+            callback_url="http://api.example.com",
+            callback_token="tok",
+            os_type="fcos",
+            server_node_name="test-x7k2m",
+        )
+        ign = _decode_userdata(result.data)
+        files = {f["path"]: f for f in ign["storage"]["files"]}
+        install_content = _decode_file_content(files["/opt/k3s/install.sh"])
+        assert '--node-name="test-x7k2m"' in install_content
+
+    def test_fcos_server_install_default_node_name_fallback(self):
+        """server_node_name 미지정 시 {cluster_name}-server가 기본값이어야 한다."""
+        from app.services.k3s_cloudinit import generate_server_userdata
+
+        result = generate_server_userdata(
+            cluster_name="mycluster",
+            k3s_version="v1.31.4+k3s1",
+            callback_url="http://api.example.com",
+            callback_token="tok",
+            os_type="fcos",
+        )
+        ign = _decode_userdata(result.data)
+        files = {f["path"]: f for f in ign["storage"]["files"]}
+        install_content = _decode_file_content(files["/opt/k3s/install.sh"])
+        assert '--node-name="mycluster-server"' in install_content
+
 
 class TestFCOSAgentUserdata:
     def test_fcos_agent_returns_ignition_json(self):

@@ -5,6 +5,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Request
 
+from app.api.k3s.clusters import _rand_suffix
 from app.models.k3s import K3sCallbackRequest
 from app.rate_limit import limiter
 from app.services import k3s_db as k3s_cluster
@@ -220,8 +221,8 @@ async def _provision_agents(
     failed_count = 0
 
     new_agent_entries: list[dict] = []
-    for i in range(agent_count):
-        agent_name = f"{cluster_name}-agent-{i + 1}"
+    for _i in range(agent_count):
+        agent_name = f"{cluster_name}-{_rand_suffix()}"
         try:
             # 에이전트 부트 볼륨 생성
             vol = await asyncio.to_thread(

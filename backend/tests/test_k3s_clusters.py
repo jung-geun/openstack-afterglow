@@ -22,6 +22,7 @@ def _make_cluster_record():
         "network_id": "net-1",
         "key_name": None,
         "k3s_version": "v1.31.4+k3s1",
+        "server_vm_name": "mycluster-server",
         "created_at": "2024-01-01T00:00:00Z",
         "updated_at": "2024-01-01T00:00:00Z",
     }

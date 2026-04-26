@@ -58,6 +58,7 @@ def _build_server_ignition(
     extra_write_files: list[dict],
     extra_tls_sans: list[str],
     needs_external_cloud_provider: bool,
+    server_node_name: str = "",
 ) -> str:
     """FCOS k3s 서버 노드 Ignition JSON 생성."""
     template_vars = dict(
@@ -81,6 +82,7 @@ def _build_server_ignition(
         cloud_controller_args = '--disable-cloud-controller --kubelet-arg="cloud-provider=external"'
     extra_args_str = " ".join(extra_server_args) if extra_server_args else ""
 
+    node_name = server_node_name or f"{cluster_name}-server"
     install_script = f"""#!/bin/bash
 set -e
 SERVER_IP=$(hostname -I | awk '{{print $1}}')
@@ -93,7 +95,7 @@ curl -sfL https://get.k3s.io | \\
     --write-kubeconfig-mode 644 \\
     {cloud_controller_args} \\
     {extra_args_str} \\
-    --node-name="{cluster_name}-server"
+    --node-name="{node_name}"
 nohup /opt/k3s/callback.sh > /var/log/k3s-callback.log 2>&1 &
 """
 
@@ -218,6 +220,7 @@ def generate_server_userdata(
     extra_tls_sans: list[str] | None = None,
     needs_external_cloud_provider: bool = False,
     os_type: str = OS_TYPE_UBUNTU,
+    server_node_name: str | None = None,
     # 하위호환 파라미터 (deprecated — 레지스트리 우회 시에만 사용)
     occm_enabled: bool = False,
     occm_manifests: str | None = None,
@@ -247,6 +250,7 @@ def generate_server_userdata(
             extra_write_files=extra_write_files or [],
             extra_tls_sans=extra_tls_sans or [],
             needs_external_cloud_provider=needs_external_cloud_provider,
+            server_node_name=server_node_name or "",
         )
         # Ignition JSON 유효성 간단 확인
         json.loads(ign_str)
@@ -268,6 +272,7 @@ def generate_server_userdata(
         extra_write_files=extra_write_files or [],
         extra_tls_sans=extra_tls_sans or [],
         needs_external_cloud_provider=needs_external_cloud_provider,
+        server_node_name=server_node_name or f"{cluster_name}-server",
     )
     yaml_str = _jinja.get_template("k3s_server.yaml.j2").render(**template_vars)
     encoded = base64.b64encode(gzip.compress(yaml_str.encode())).decode()

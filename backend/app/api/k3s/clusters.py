@@ -8,6 +8,8 @@ if TYPE_CHECKING:
     import openstack
 import asyncio
 import logging
+import random
+import string
 import time
 import uuid
 from collections.abc import AsyncGenerator
@@ -34,6 +36,11 @@ from app.services import k3s_db as k3s_cluster
 router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
 _logger = logging.getLogger(__name__)
+
+
+def _rand_suffix(length: int = 5) -> str:
+    """K8s 스타일 랜덤 suffix (소문자+숫자). 매 생성마다 고유한 리소스 이름 보장."""
+    return "".join(random.choices(string.ascii_lowercase + string.digits, k=length))
 
 
 def _cluster_to_info(c: dict) -> K3sClusterInfo:
@@ -394,11 +401,14 @@ async def create_k3s_cluster_async(
                     )
 
             # --- Step 2: 서버 부트 볼륨 생성 ---
+            # K8s 스타일: 매 생성마다 고유한 suffix로 이름 충돌 방지
+            server_suffix = _rand_suffix()
+            server_vm_name = f"{req.name}-{server_suffix}"
             yield event(K3sProgressStep.SERVER_VOLUME, 15, "서버 노드 부트 볼륨 생성 중...")
             boot_vol = await asyncio.to_thread(
                 cinder.create_volume_from_image,
                 conn,
-                f"{req.name}-server-boot",
+                f"{server_vm_name}-boot",
                 server_image_id,
                 boot_volume_size,
             )
@@ -441,6 +451,7 @@ async def create_k3s_cluster_async(
                 extra_tls_sans=extra_tls_sans,
                 needs_external_cloud_provider=k3s_plugins.needs_external_cloud_provider(s),
                 os_type=os_type,
+                server_node_name=server_vm_name,
             )
 
             # --- Step 4: 서버 VM 생성 ---
@@ -448,7 +459,7 @@ async def create_k3s_cluster_async(
             server_vm = await asyncio.to_thread(
                 nova.create_server,
                 conn,
-                f"{req.name}-server",
+                server_vm_name,
                 server_flavor_id,
                 network_id,
                 boot_volume_id,
@@ -505,6 +516,7 @@ async def create_k3s_cluster_async(
                     "api_fip_id": api_fip_id or "",
                     "api_fip_address": api_fip_address or "",
                     "os_type": os_type,
+                    "server_vm_name": server_vm_name,
                 },
             )
 
@@ -660,9 +672,8 @@ async def _scale_agents(
                 network_id = s.default_network_id
 
         new_entries: list[dict] = []
-        for i in range(add_count):
-            agent_idx = current_count + i + 1
-            agent_name = f"{cluster_name}-agent-{agent_idx}"
+        for _i in range(add_count):
+            agent_name = f"{cluster_name}-{_rand_suffix()}"
             try:
                 vol = await asyncio.to_thread(
                     cinder.create_volume_from_image, conn, f"{agent_name}-boot", image_id, boot_volume_size
@@ -797,9 +808,9 @@ async def delete_k3s_cluster(
     if agent_vm_ids:
         vm_name_map = await k3s_cluster.get_agent_vm_names(cluster_id, agent_vm_ids)
         all_node_names.extend([name for name in vm_name_map.values() if name])
-    cluster_name = cluster.get("name") or ""
-    if cluster_name:
-        all_node_names.append(f"{cluster_name}-server")
+    server_node_name = cluster.get("server_vm_name") or ""
+    if server_node_name:
+        all_node_names.append(server_node_name)
     if all_node_names:
         _logger.info("k3s delete: K8s 노드 삭제 시작: %s", all_node_names)
         try:
