@@ -294,12 +294,14 @@ async def get_gpu_available(
                 else:
                     # 상한 있음: total=쿼터 상한, available=min(쿼터 잔여, 클러스터 잔여)
                     quota_remaining = max(limit - in_use, 0)
-                    filtered.append({
-                        **t,
-                        "total": limit,
-                        "used": in_use,
-                        "available": min(quota_remaining, t["available"]),
-                    })
+                    filtered.append(
+                        {
+                            **t,
+                            "total": limit,
+                            "used": in_use,
+                            "available": min(quota_remaining, t["available"]),
+                        }
+                    )
             data = {**data, "gpu_types": filtered}
         except Exception:
             _logger.warning("GPU 쿼터 필터링 실패 — 전체 목록 반환", exc_info=True)

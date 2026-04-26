@@ -299,7 +299,8 @@ async def create_instance(
                 raw_fault = getattr(srv, "fault", None)
                 if raw_fault:
                     fault_msg = (
-                        raw_fault.get("message", "") if isinstance(raw_fault, dict)
+                        raw_fault.get("message", "")
+                        if isinstance(raw_fault, dict)
                         else getattr(raw_fault, "message", "")
                     )
                     if fault_msg:
@@ -317,7 +318,11 @@ async def create_instance(
             floating_ip_id,
         )
         is_admin = token_info.get("is_system_admin", False)
-        detail = f"인스턴스 생성 실패: {error_detail}" if is_admin else "인스턴스 생성에 실패했습니다. 관리자에게 문의하세요."
+        detail = (
+            f"인스턴스 생성 실패: {error_detail}"
+            if is_admin
+            else "인스턴스 생성에 실패했습니다. 관리자에게 문의하세요."
+        )
         raise HTTPException(status_code=500, detail=detail)
 
 
@@ -550,7 +555,8 @@ async def create_instance_async(
                     raw_fault = getattr(srv, "fault", None)
                     if raw_fault:
                         fault_msg = (
-                            raw_fault.get("message", "") if isinstance(raw_fault, dict)
+                            raw_fault.get("message", "")
+                            if isinstance(raw_fault, dict)
                             else getattr(raw_fault, "message", "")
                         )
                         if fault_msg:
@@ -560,7 +566,11 @@ async def create_instance_async(
 
             # 비관리자에게는 상세 에러 숨김
             is_admin = token_info.get("is_system_admin", False)
-            user_message = f"인스턴스 생성 실패: {error_detail}" if is_admin else "인스턴스 생성에 실패했습니다. 관리자에게 문의하세요."
+            user_message = (
+                f"인스턴스 생성 실패: {error_detail}"
+                if is_admin
+                else "인스턴스 생성에 실패했습니다. 관리자에게 문의하세요."
+            )
 
             yield send_progress(
                 ProgressStep.FAILED,
