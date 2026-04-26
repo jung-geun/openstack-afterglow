@@ -112,7 +112,7 @@ curl -sfL https://get.k3s.io | \\
     {cloud_controller_args} \\
     {extra_args_str} \\
     --node-name="{node_name}"
-nohup /opt/k3s/callback.sh > /var/log/k3s-callback.log 2>&1 &
+nohup /bin/bash /opt/k3s/callback.sh > /var/log/k3s-callback.log 2>&1 &
 """
 
     install_unit = f"""[Unit]
@@ -124,7 +124,7 @@ ConditionPathExists=!/etc/rancher/k3s/k3s.yaml
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/opt/k3s/install.sh
+ExecStart=/bin/bash /opt/k3s/install.sh
 StandardOutput=journal
 StandardError=journal
 
@@ -187,7 +187,7 @@ ConditionPathExists=!/etc/systemd/system/k3s-agent.service
 
 [Service]
 Type=oneshot
-ExecStart=/opt/k3s/agent-join.sh
+ExecStart=/bin/bash /opt/k3s/agent-join.sh
 Restart=on-failure
 RestartSec=120
 StartLimitIntervalSec=14400
