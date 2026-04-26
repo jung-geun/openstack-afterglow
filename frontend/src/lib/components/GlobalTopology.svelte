@@ -626,7 +626,7 @@
 					fill={iStroke} font-size="9"
 					font-family="ui-sans-serif, system-ui, sans-serif"
 					style="pointer-events:none"
-				>인스턴스 · {row.status}</text>
+				>인스턴스 · {trunc(row.status, 12)}</text>
 				<title>{row.name}{'\n'}ID: {row.id}{'\n'}상태: {row.status}{'\n'}IP: {[...row.netIps.values()].flat().join(', ')}</title>
 			{/if}
 		{/each}
