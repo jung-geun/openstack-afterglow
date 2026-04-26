@@ -251,13 +251,31 @@ def _fetch_topology_sync(conn) -> dict:
     """동기 방식으로 토폴로지 전체 데이터 수집 (cached_call 내부에서 to_thread로 실행됨)."""
     topo = neutron.get_topology(conn)
     servers = nova.list_servers(conn)
+
+    # Neutron 포트에서 (device_id, ip) → network_id 매핑 구축
+    port_net_map: dict[tuple[str, str], str] = {}
+    for p in conn.network.ports():
+        dev_owner = p.device_owner or ""
+        if not p.device_id or not dev_owner.startswith("compute:"):
+            continue
+        for fip in p.fixed_ips or []:
+            ip = fip.get("ip_address")
+            if ip:
+                port_net_map[(p.device_id, ip)] = p.network_id
+
     topo.instances = [
         TopologyInstance(
             id=s.id,
             name=s.name,
             status=s.status,
             network_names=list(set(ip.network_name for ip in s.ip_addresses)),
-            ip_addresses=[ip.model_dump() for ip in s.ip_addresses],
+            ip_addresses=[
+                {
+                    **ip.model_dump(),
+                    "network_id": port_net_map.get((s.id, ip.addr)),
+                }
+                for ip in s.ip_addresses
+            ],
         )
         for s in servers
     ]

@@ -25,7 +25,7 @@
 	interface TopologyInstance {
 		id: string; name: string; status: string;
 		network_names: string[];
-		ip_addresses: { addr: string; type: string; network_name: string }[];
+		ip_addresses: { addr: string; type: string; network_name: string; network_id?: string | null }[];
 	}
 	interface FloatingIpInfo {
 		id: string; floating_ip_address: string;
@@ -146,6 +146,11 @@
 	// router id → TopologyRouter (상세 정보 툴팁용)
 	const routerById = $derived(new Map(data.routers.map(r => [r.id, r])));
 
+	// floating_ip_address → floating_network_id (외부 네트워크 ID)
+	const fipNetMap = $derived(new Map(
+		data.floating_ips.map(f => [f.floating_ip_address, f.floating_network_id])
+	));
+
 	// ── Item rows ─────────────────────────────────────────────────────────────
 	interface ItemRow {
 		type: 'router' | 'instance';
@@ -154,6 +159,7 @@
 		status: string;
 		connectedNetIds: string[];   // sorted by netIdx
 		netIps: Map<string, string[]>;  // netId → IP list
+		floatingNetIps: Map<string, string[]>;  // ext_netId → floating IP list
 		leftIdx: number;
 		rightIdx: number;
 	}
@@ -193,7 +199,7 @@
 			const indices = connectedNetIds.map(id => netIdx.get(id) ?? 0);
 			result.push({
 				type: 'router', id: router.id, name: router.name, status: router.status,
-				connectedNetIds, netIps,
+				connectedNetIds, netIps, floatingNetIps: new Map(),
 				leftIdx: indices.length ? Math.min(...indices) : 0,
 				rightIdx: indices.length ? Math.max(...indices) : 0,
 			});
@@ -203,9 +209,19 @@
 		for (const inst of data.instances) {
 			const netSet = new Set<string>();
 			const netIps = new Map<string, string[]>();
+			const floatingNetIps = new Map<string, string[]>();
 
 			for (const ipInfo of inst.ip_addresses) {
-				const nid = resolveNetId(ipInfo.network_name, ipInfo.addr);
+				if (ipInfo.type === 'floating') {
+					const extNetId = fipNetMap.get(ipInfo.addr);
+					if (extNetId) {
+						const fips = floatingNetIps.get(extNetId) ?? [];
+						if (!fips.includes(ipInfo.addr)) fips.push(ipInfo.addr);
+						floatingNetIps.set(extNetId, fips);
+					}
+					continue;
+				}
+				const nid = ipInfo.network_id || resolveNetId(ipInfo.network_name, ipInfo.addr);
 				if (!nid) continue;
 				netSet.add(nid);
 				const ips = netIps.get(nid) ?? [];
@@ -219,7 +235,7 @@
 			const indices = connectedNetIds.map(id => netIdx.get(id) ?? 0);
 			result.push({
 				type: 'instance', id: inst.id, name: inst.name, status: inst.status,
-				connectedNetIds, netIps,
+				connectedNetIds, netIps, floatingNetIps,
 				leftIdx: indices.length ? Math.min(...indices) : 0,
 				rightIdx: indices.length ? Math.max(...indices) : 0,
 			});
@@ -509,6 +525,36 @@
 					>+{hiddenCount}개</text>
 				{/if}
 			{/each}
+
+			<!-- Floating IP 점선 연결 (외부 네트워크 바 → 인스턴스 박스) -->
+			{#if !isR}
+				{#each [...row.floatingNetIps.entries()] as [fNetId, fIps], fi}
+					{@const fBarX  = netCX.get(fNetId) ?? 0}
+					{@const fCol   = netColors.get(fNetId) ?? '#ea580c'}
+					{@const fIsLeft = fBarX < cx}
+					{@const fTargetX = fIsLeft ? ix : ix + ITEM_W}
+					{@const fLabelX  = fIsLeft ? fBarX + 10 : fBarX - 10}
+					{@const fAnchor  = fIsLeft ? 'start' : 'end'}
+					{@const fLineY   = cy + (row.connectedNetIds.length + fi) * 13 + 13}
+					<!-- 점선 -->
+					<line
+						x1={fBarX} y1={fLineY}
+						x2={fTargetX} y2={fLineY}
+						stroke={fCol} stroke-width="1.5" opacity="0.55"
+						stroke-dasharray="6 3"
+					/>
+					<!-- floating IP 라벨 -->
+					{#each fIps.slice(0, 2) as fip, fi2}
+						<text
+							x={fLabelX} y={fLineY - 5 - fi2 * 11}
+							text-anchor={fAnchor}
+							fill={fCol} font-size="9" opacity="0.7"
+							font-family="ui-monospace, monospace"
+							style="pointer-events:none"
+						>{fip}</text>
+					{/each}
+				{/each}
+			{/if}
 
 			<!-- Item box -->
 			{#if isR}

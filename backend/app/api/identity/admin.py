@@ -783,6 +783,18 @@ async def admin_topology(conn: openstack.connection.Connection = Depends(get_os_
 
     def _fetch():
         topo = neutron.get_topology(conn)
+
+        # Neutron 포트에서 (device_id, ip) → network_id 매핑 구축
+        port_net_map: dict[tuple[str, str], str] = {}
+        for p in conn.network.ports():
+            dev_owner = p.device_owner or ""
+            if not p.device_id or not dev_owner.startswith("compute:"):
+                continue
+            for fip in p.fixed_ips or []:
+                ip = fip.get("ip_address")
+                if ip:
+                    port_net_map[(p.device_id, ip)] = p.network_id
+
         instances = []
         for s in conn.compute.servers(details=True, all_projects=True):
             addresses = getattr(s, "addresses", {}) or {}
@@ -793,7 +805,12 @@ async def admin_topology(conn: openstack.connection.Connection = Depends(get_os_
                     status=s.status or "",
                     network_names=list(set(addresses.keys())),
                     ip_addresses=[
-                        {"addr": addr["addr"], "type": addr.get("OS-EXT-IPS:type", ""), "network_name": net_name}
+                        {
+                            "addr": addr["addr"],
+                            "type": addr.get("OS-EXT-IPS:type", ""),
+                            "network_name": net_name,
+                            "network_id": port_net_map.get((s.id, addr["addr"])),
+                        }
                         for net_name, addrs in addresses.items()
                         for addr in addrs
                     ],
