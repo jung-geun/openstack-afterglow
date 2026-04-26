@@ -182,15 +182,8 @@ async def gitlab_callback(request: Request, req: GitLabCallbackRequest, backgrou
     except Exception:
         raise HTTPException(status_code=401, detail="GitLab 인증 실패")
 
-    # 사용자의 default_project_id 조회
-    gl_default_project_id = ""
-    try:
-        gl_conn = keystone.get_openstack_connection(data["token"], data["project_id"])
-        gl_u = gl_conn.identity.get_user(data["user_id"])
-        gl_default_project_id = getattr(gl_u, "default_project_id", None) or ""
-    except Exception:
-        pass
-
+    # default_project_id는 동기 Keystone 호출로 1초 안팎 지연이 발생하므로
+    # 응답 경로에서 제외한다. exchange_code의 scoped 토큰 project_id를 그대로 사용.
     background_tasks.add_task(_prewarm_dashboard, data["token"], data["project_id"])
 
     return TokenResponse(
@@ -201,6 +194,6 @@ async def gitlab_callback(request: Request, req: GitLabCallbackRequest, backgrou
         username=data["username"],
         expires_at=data["expires_at"],
         roles=data.get("roles", []),
-        default_project_id=gl_default_project_id,
+        default_project_id="",
         is_system_admin=data.get("is_system_admin", False),
     )

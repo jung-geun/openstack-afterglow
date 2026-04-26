@@ -144,24 +144,25 @@ async def get_project_quotas(
     project_id = conn._afterglow_project_id
     settings = get_settings()
 
-    def _fetch_quotas():
-        tasks_results = []
-        tasks_results.append(nova.get_project_quota(conn, project_id))
-        tasks_results.append(cinder.get_volume_quota(conn, project_id))
-        tasks_results.append(neutron_svc.get_network_quota(conn, project_id))
+    async def _fetch_quotas():
+        tasks: list = [
+            asyncio.to_thread(nova.get_project_quota, conn, project_id),
+            asyncio.to_thread(cinder.get_volume_quota, conn, project_id),
+            asyncio.to_thread(neutron_svc.get_network_quota, conn, project_id),
+        ]
         if settings.service_manila_enabled:
-            tasks_results.append(manila_svc.get_file_storage_quota(conn))
+            tasks.append(asyncio.to_thread(manila_svc.get_file_storage_quota, conn))
         if settings.service_trove_enabled:
-            tasks_results.append(trove_svc.count_instances(conn))
+            tasks.append(asyncio.to_thread(trove_svc.count_instances, conn))
         if settings.service_swift_enabled:
-            tasks_results.append(swift_svc.get_account_metadata(conn))
-        return tasks_results
+            tasks.append(asyncio.to_thread(swift_svc.get_account_metadata, conn))
+        return list(await asyncio.gather(*tasks))
 
     try:
         results = await cached_call(
             f"afterglow:dashboard:{project_id}:quotas",
             ttl_normal(),
-            lambda: _fetch_quotas(),
+            _fetch_quotas,
             refresh=refresh,
         )
         compute_q, volume_q, network_q = results[0], results[1], results[2]
