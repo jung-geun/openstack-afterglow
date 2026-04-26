@@ -469,3 +469,33 @@ async def test_finalize_api_lb_skips_when_no_pool_id():
         await _finalize_api_lb("proj-1", "cluster-1", cluster, "10.0.0.1", mock_conn)
         mock_octavia.wait_for_load_balancer.assert_not_called()
         mock_octavia.add_member.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# CreateK3sClusterRequest 모델 — allowed_cidrs 검증
+# ---------------------------------------------------------------------------
+
+
+def test_create_request_allowed_cidrs_default_is_none():
+    """allowed_cidrs 미지정 시 None이어야 한다."""
+    from app.models.k3s import CreateK3sClusterRequest
+
+    req = CreateK3sClusterRequest(name="test-cluster")
+    assert req.allowed_cidrs is None
+
+
+def test_create_request_allowed_cidrs_accepts_list():
+    """allowed_cidrs에 CIDR 목록을 지정하면 그대로 저장되어야 한다."""
+    from app.models.k3s import CreateK3sClusterRequest
+
+    cidrs = ["10.0.0.0/8", "192.168.1.0/24"]
+    req = CreateK3sClusterRequest(name="test-cluster", allowed_cidrs=cidrs)
+    assert req.allowed_cidrs == cidrs
+
+
+def test_create_request_allowed_cidrs_empty_list():
+    """allowed_cidrs에 빈 리스트를 지정하면 빈 리스트가 저장되어야 한다."""
+    from app.models.k3s import CreateK3sClusterRequest
+
+    req = CreateK3sClusterRequest(name="test-cluster", allowed_cidrs=[])
+    assert req.allowed_cidrs == []

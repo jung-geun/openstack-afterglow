@@ -221,23 +221,27 @@ async def create_k3s_cluster_async(
             sg_id = sg["id"]
 
             # 보안 그룹 규칙 추가
-            rules = [
+            # SSH/K3s API는 allowed_cidrs가 있으면 해당 CIDR만, 없으면 0.0.0.0/0 허용
+            mgmt_cidrs = req.allowed_cidrs or ["0.0.0.0/0"]
+            rules = []
+            for cidr in mgmt_cidrs:
                 # SSH
-                dict(
-                    direction="ingress",
-                    protocol="tcp",
-                    port_range_min=22,
-                    port_range_max=22,
-                    remote_ip_prefix="0.0.0.0/0",
-                ),
+                rules.append(
+                    dict(
+                        direction="ingress", protocol="tcp", port_range_min=22, port_range_max=22, remote_ip_prefix=cidr
+                    )
+                )
                 # k3s API server
-                dict(
-                    direction="ingress",
-                    protocol="tcp",
-                    port_range_min=6443,
-                    port_range_max=6443,
-                    remote_ip_prefix="0.0.0.0/0",
-                ),
+                rules.append(
+                    dict(
+                        direction="ingress",
+                        protocol="tcp",
+                        port_range_min=6443,
+                        port_range_max=6443,
+                        remote_ip_prefix=cidr,
+                    )
+                )
+            rules += [
                 # Kubelet (SG 내부)
                 dict(
                     direction="ingress",

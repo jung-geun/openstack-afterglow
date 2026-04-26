@@ -6,7 +6,7 @@ if TYPE_CHECKING:
     import openstack
 import asyncio
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.api.deps import get_os_conn
 from app.models.storage import (
@@ -16,6 +16,7 @@ from app.models.storage import (
     RouterInfo,
     RouterInterfaceRequest,
 )
+from app.rate_limit import limiter
 from app.services import neutron
 from app.services.cache import cached_call, invalidate, ttl_normal
 
@@ -37,7 +38,9 @@ async def list_routers(conn: openstack.connection.Connection = Depends(get_os_co
 
 
 @router.post("", response_model=RouterInfo, status_code=201)
+@limiter.limit("10/minute")
 async def create_router(
+    request: Request,
     req: CreateRouterRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
@@ -59,7 +62,12 @@ async def get_router(router_id: str, conn: openstack.connection.Connection = Dep
 
 
 @router.delete("/{router_id}", status_code=204)
-async def delete_router(router_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+@limiter.limit("10/minute")
+async def delete_router(
+    request: Request,
+    router_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
     pid = conn._afterglow_project_id
     try:
         await asyncio.to_thread(neutron.delete_router, conn, router_id)
@@ -69,7 +77,9 @@ async def delete_router(router_id: str, conn: openstack.connection.Connection = 
 
 
 @router.post("/{router_id}/interfaces", status_code=201)
+@limiter.limit("10/minute")
 async def add_interface(
+    request: Request,
     router_id: str,
     req: RouterInterfaceRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
@@ -81,7 +91,9 @@ async def add_interface(
 
 
 @router.delete("/{router_id}/interfaces/{subnet_id}", status_code=204)
+@limiter.limit("10/minute")
 async def remove_interface(
+    request: Request,
     router_id: str,
     subnet_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
@@ -93,7 +105,9 @@ async def remove_interface(
 
 
 @router.post("/{router_id}/gateway", status_code=204)
+@limiter.limit("10/minute")
 async def set_gateway(
+    request: Request,
     router_id: str,
     req: RouterGatewayRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
@@ -105,7 +119,9 @@ async def set_gateway(
 
 
 @router.delete("/{router_id}/gateway", status_code=204)
+@limiter.limit("10/minute")
 async def remove_gateway(
+    request: Request,
     router_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):

@@ -5,10 +5,11 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import openstack
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from app.api.deps import get_os_conn
+from app.rate_limit import limiter
 from app.services import octavia
 from app.services.cache import cached_call, invalidate, ttl_normal
 
@@ -80,7 +81,9 @@ async def list_load_balancers(
 
 
 @router.post("", status_code=201)
+@limiter.limit("10/minute")
 async def create_load_balancer(
+    request: Request,
     req: CreateLbRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
@@ -104,7 +107,12 @@ async def get_lb_status_tree(lb_id: str, conn: openstack.connection.Connection =
 
 
 @router.delete("/{lb_id}", status_code=204)
-async def delete_load_balancer(lb_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+@limiter.limit("10/minute")
+async def delete_load_balancer(
+    request: Request,
+    lb_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
     pid = conn._afterglow_project_id
     _handle(lambda: octavia.delete_load_balancer(conn, lb_id), "로드밸런서 삭제 실패")
     await invalidate(f"afterglow:octavia:{pid}:lbs")
@@ -121,7 +129,9 @@ async def list_listeners(lb_id: str, conn: openstack.connection.Connection = Dep
 
 
 @router.post("/{lb_id}/listeners", status_code=201)
+@limiter.limit("10/minute")
 async def create_listener(
+    request: Request,
     lb_id: str,
     req: CreateListenerRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
@@ -133,7 +143,13 @@ async def create_listener(
 
 
 @router.delete("/{lb_id}/listeners/{listener_id}", status_code=204)
-async def delete_listener(lb_id: str, listener_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+@limiter.limit("10/minute")
+async def delete_listener(
+    request: Request,
+    lb_id: str,
+    listener_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
     _handle(lambda: octavia.delete_listener(conn, listener_id), "리스너 삭제 실패")
 
 
@@ -148,7 +164,9 @@ async def list_pools(lb_id: str, conn: openstack.connection.Connection = Depends
 
 
 @router.post("/{lb_id}/pools", status_code=201)
+@limiter.limit("10/minute")
 async def create_pool(
+    request: Request,
     lb_id: str,
     req: CreatePoolRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
@@ -160,7 +178,13 @@ async def create_pool(
 
 
 @router.delete("/{lb_id}/pools/{pool_id}", status_code=204)
-async def delete_pool(lb_id: str, pool_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+@limiter.limit("10/minute")
+async def delete_pool(
+    request: Request,
+    lb_id: str,
+    pool_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
     _handle(lambda: octavia.delete_pool(conn, pool_id), "풀 삭제 실패")
 
 
@@ -175,7 +199,9 @@ async def list_members(lb_id: str, pool_id: str, conn: openstack.connection.Conn
 
 
 @router.post("/{lb_id}/pools/{pool_id}/members", status_code=201)
+@limiter.limit("10/minute")
 async def add_member(
+    request: Request,
     lb_id: str,
     pool_id: str,
     req: AddMemberRequest,
@@ -188,7 +214,9 @@ async def add_member(
 
 
 @router.delete("/{lb_id}/pools/{pool_id}/members/{member_id}", status_code=204)
+@limiter.limit("10/minute")
 async def remove_member(
+    request: Request,
     lb_id: str,
     pool_id: str,
     member_id: str,
@@ -208,7 +236,9 @@ async def list_health_monitors(lb_id: str, pool_id: str, conn: openstack.connect
 
 
 @router.post("/{lb_id}/pools/{pool_id}/health-monitor", status_code=201)
+@limiter.limit("10/minute")
 async def create_health_monitor(
+    request: Request,
     lb_id: str,
     pool_id: str,
     req: CreateHealthMonitorRequest,
@@ -223,7 +253,9 @@ async def create_health_monitor(
 
 
 @router.delete("/{lb_id}/pools/{pool_id}/health-monitor/{hm_id}", status_code=204)
+@limiter.limit("10/minute")
 async def delete_health_monitor(
+    request: Request,
     lb_id: str,
     pool_id: str,
     hm_id: str,

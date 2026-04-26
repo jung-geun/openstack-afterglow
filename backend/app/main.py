@@ -98,7 +98,7 @@ _mark("stdlib")
 # ---------------------------------------------------------------------------
 # 프레임워크 (fastapi, slowapi)
 # ---------------------------------------------------------------------------
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exception_handlers import http_exception_handler as _default_http_handler
 from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
@@ -180,6 +180,7 @@ _mark("api.k3s_network_storage")
 # ---------------------------------------------------------------------------
 # 기타 앱 유틸리티
 # ---------------------------------------------------------------------------
+from app.api.deps import get_token_info
 from app.rate_limit import limiter
 from app.utils.version import read_app_version
 
@@ -395,7 +396,7 @@ async def health():
 
 
 @app.get("/api/health/detail")
-async def health_detail():
+async def health_detail(token_info: dict = Depends(get_token_info)):
     """모니터링 대시보드용 상세 헬스체크. Redis 연결 상태 포함."""
     detail: dict = {"status": "ok", "redis": "unknown"}
     try:

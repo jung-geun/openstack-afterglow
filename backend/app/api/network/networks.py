@@ -7,7 +7,7 @@ if TYPE_CHECKING:
 import asyncio
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
 _logger = logging.getLogger(__name__)
@@ -27,6 +27,7 @@ from app.models.storage import (
     TopologyInstance,
     UpdateSubnetRequest,
 )
+from app.rate_limit import limiter
 from app.services import neutron, nova
 from app.services.cache import cached_call, invalidate, ttl_fast, ttl_normal
 
@@ -48,7 +49,9 @@ async def list_networks(conn: openstack.connection.Connection = Depends(get_os_c
 
 
 @router.post("", response_model=NetworkInfo, status_code=201)
+@limiter.limit("10/minute")
 async def create_network(
+    request: Request,
     req: CreateNetworkRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
@@ -68,7 +71,11 @@ class SetDefaultNetworkRequest(BaseModel):
 
 
 @router.post("/ensure-default", response_model=NetworkInfo, status_code=200)
-async def ensure_default_network(conn: openstack.connection.Connection = Depends(get_os_conn)):
+@limiter.limit("10/minute")
+async def ensure_default_network(
+    request: Request,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
     """프로젝트의 Default 네트워크를 조회하거나 생성한다.
 
     프론트엔드에서 프로젝트 전환 시 호출 — DB에 이미 기록된 경우 빠르게 반환.
@@ -151,7 +158,9 @@ async def list_floating_ips(conn: openstack.connection.Connection = Depends(get_
 
 
 @router.post("/floating-ips", response_model=FloatingIpInfo, status_code=201)
+@limiter.limit("10/minute")
 async def create_floating_ip(
+    request: Request,
     req: CreateFipRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
@@ -162,7 +171,9 @@ async def create_floating_ip(
 
 
 @router.post("/floating-ips/{fip_id}/associate", response_model=FloatingIpInfo)
+@limiter.limit("10/minute")
 async def associate_floating_ip(
+    request: Request,
     fip_id: str,
     req: AssociateFipRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
@@ -174,7 +185,9 @@ async def associate_floating_ip(
 
 
 @router.post("/floating-ips/{fip_id}/disassociate", response_model=FloatingIpInfo)
+@limiter.limit("10/minute")
 async def disassociate_floating_ip(
+    request: Request,
     fip_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
@@ -185,7 +198,9 @@ async def disassociate_floating_ip(
 
 
 @router.delete("/floating-ips/{fip_id}", status_code=204)
+@limiter.limit("10/minute")
 async def delete_floating_ip(
+    request: Request,
     fip_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
@@ -215,7 +230,9 @@ async def update_subnet(
 
 
 @router.delete("/subnets/{subnet_id}", status_code=204)
+@limiter.limit("10/minute")
 async def delete_subnet(
+    request: Request,
     subnet_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
@@ -308,7 +325,9 @@ async def get_network(network_id: str, conn: openstack.connection.Connection = D
 
 
 @router.delete("/{network_id}", status_code=204)
+@limiter.limit("10/minute")
 async def delete_network(
+    request: Request,
     network_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
@@ -319,7 +338,9 @@ async def delete_network(
 
 
 @router.post("/{network_id}/subnets", response_model=SubnetDetail, status_code=201)
+@limiter.limit("10/minute")
 async def create_subnet(
+    request: Request,
     network_id: str,
     req: CreateSubnetRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
