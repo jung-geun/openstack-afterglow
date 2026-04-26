@@ -9,7 +9,7 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.deps import get_os_conn
-from app.models.storage import CreateShareSnapshotRequest, ShareSnapshotInfo
+from app.models.storage import CreateShareSnapshotRequest, ShareSnapshotInfo, ShareSnapshotRevertRequest
 from app.services import manila
 from app.services.cache import cached_call, invalidate, ttl_fast
 
@@ -51,6 +51,33 @@ async def create_share_snapshot(
         return _normalize_snapshot(result)
     except Exception:
         raise HTTPException(status_code=500, detail="스냅샷 생성 실패")
+
+
+@router.get("/{snapshot_id}", response_model=ShareSnapshotInfo)
+async def get_share_snapshot(
+    snapshot_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    try:
+        result = await asyncio.to_thread(manila.get_share_snapshot, conn, snapshot_id)
+        return _normalize_snapshot(result)
+    except Exception:
+        raise HTTPException(status_code=404, detail="스냅샷을 찾을 수 없음")
+
+
+@router.post("/{snapshot_id}/revert", status_code=204)
+async def revert_to_snapshot(
+    snapshot_id: str,
+    req: ShareSnapshotRevertRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    pid = conn._afterglow_project_id
+    try:
+        await asyncio.to_thread(manila.revert_to_snapshot, conn, req.share_id, snapshot_id)
+        await invalidate(f"afterglow:manila:{pid}:share_snapshots")
+        await invalidate(f"afterglow:manila:{pid}:share_snapshots:{req.share_id}")
+    except Exception:
+        raise HTTPException(status_code=500, detail="스냅샷 복원 실패")
 
 
 @router.delete("/{snapshot_id}", status_code=204)

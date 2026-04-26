@@ -160,6 +160,10 @@ class CreateShareSnapshotRequest(BaseModel):
     description: str | None = None
 
 
+class ShareSnapshotRevertRequest(BaseModel):
+    share_id: str
+
+
 class SecurityServiceInfo(BaseModel):
     id: str
     name: str

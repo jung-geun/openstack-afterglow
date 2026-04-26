@@ -606,6 +606,18 @@ def delete_share_snapshot(conn, snapshot_id: str) -> None:
     client.delete(f"snapshots/{snapshot_id}")
 
 
+def get_share_snapshot(conn, snapshot_id: str) -> dict:
+    """Manila share 스냅샷 단건 조회."""
+    client = get_client(conn)
+    return client.get(f"snapshots/{snapshot_id}")["snapshot"]
+
+
+def revert_to_snapshot(conn, share_id: str, snapshot_id: str) -> None:
+    """share를 특정 스냅샷 시점으로 복원 (Manila microversion 2.27+)."""
+    client = get_client(conn)
+    client.post(f"shares/{share_id}/action", {"revert": {"snapshot_id": snapshot_id}})
+
+
 # ---------------------------------------------------------------------------
 # 하위 호환 alias (기존 코드와 호환 유지)
 # ---------------------------------------------------------------------------

@@ -545,10 +545,10 @@ Step 5: 요약 & 배포
   - [x] 디스크 사용량: upper 볼륨 사용률 경고 (90%/95% 임계)
   - [x] 결과를 backend API (`POST /api/instances/{id}/health/report`)로 리포트 (Bearer 토큰 인증, 30분 TTL Redis 캐시)
 
-- [ ] 5.2 Manila Share Snapshot 관리
-  - [ ] 사전 빌드 라이브러리의 스냅샷 생성/복원 기능
-  - [ ] 버전 업데이트 시 스냅샷으로 롤백 가능
-  - [ ] `backend/app/services/manila.py` — 스냅샷 API 연동
+- [x] 5.2 Manila Share Snapshot 관리
+  - [x] 사전 빌드 라이브러리의 스냅샷 생성/복원 기능 (`POST /api/share-snapshots`, `POST /api/share-snapshots/{id}/revert`)
+  - [x] 버전 업데이트 시 스냅샷으로 롤백 가능 (`revert_to_snapshot` — Manila action API)
+  - [x] `backend/app/services/manila.py` — 스냅샷 API 연동 (create/list/get/delete/revert 5개 함수)
 
 - [ ] 5.3 볼륨 백업 및 복구
   - [ ] Cinder upper 볼륨의 정기 백업 스케줄링

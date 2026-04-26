@@ -1,4 +1,4 @@
-"""storage/share_snapshots.py 엔드포인트 단위 테스트 (3개, manila 필요)."""
+"""storage/share_snapshots.py 엔드포인트 단위 테스트."""
 
 from unittest.mock import AsyncMock, patch
 
@@ -6,6 +6,16 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
+
+_SNAPSHOT = {
+    "id": "snap-1",
+    "name": "snap1",
+    "status": "available",
+    "share_id": "s-1",
+    "size": 10,
+    "description": None,
+    "created_at": None,
+}
 
 
 @pytest.mark.asyncio
@@ -31,22 +41,67 @@ async def test_create_share_snapshot_unauthenticated():
 
 @pytest.mark.asyncio
 async def test_create_share_snapshot_success(client):
-    snapshot = {
-        "id": "snap-1",
-        "name": "snap1",
-        "status": "available",
-        "share_id": "s-1",
-        "size": 10,
-        "description": None,
-        "created_at": None,
-    }
     with (
         patch("app.api.storage.share_snapshots.asyncio") as mock_asyncio,
         patch("app.api.storage.share_snapshots.invalidate", new=AsyncMock()),
     ):
-        mock_asyncio.to_thread = AsyncMock(return_value=snapshot)
+        mock_asyncio.to_thread = AsyncMock(return_value=_SNAPSHOT)
         resp = await client.post("/api/share-snapshots", json={"share_id": "s-1", "name": "snap1"})
     assert resp.status_code == 201
+    assert resp.json()["id"] == "snap-1"
+
+
+@pytest.mark.asyncio
+async def test_get_share_snapshot_unauthenticated():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        resp = await ac.get("/api/share-snapshots/snap-1")
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_get_share_snapshot_success(client):
+    with patch("app.api.storage.share_snapshots.asyncio") as mock_asyncio:
+        mock_asyncio.to_thread = AsyncMock(return_value=_SNAPSHOT)
+        resp = await client.get("/api/share-snapshots/snap-1")
+    assert resp.status_code == 200
+    assert resp.json()["id"] == "snap-1"
+
+
+@pytest.mark.asyncio
+async def test_get_share_snapshot_not_found(client):
+    with patch("app.api.storage.share_snapshots.asyncio") as mock_asyncio:
+        mock_asyncio.to_thread = AsyncMock(side_effect=Exception("not found"))
+        resp = await client.get("/api/share-snapshots/nonexistent")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_revert_to_snapshot_unauthenticated():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        resp = await ac.post("/api/share-snapshots/snap-1/revert", json={"share_id": "s-1"})
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_revert_to_snapshot_success(client):
+    with (
+        patch("app.api.storage.share_snapshots.asyncio") as mock_asyncio,
+        patch("app.api.storage.share_snapshots.invalidate", new=AsyncMock()),
+    ):
+        mock_asyncio.to_thread = AsyncMock(return_value=None)
+        resp = await client.post("/api/share-snapshots/snap-1/revert", json={"share_id": "s-1"})
+    assert resp.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_revert_to_snapshot_failure(client):
+    with (
+        patch("app.api.storage.share_snapshots.asyncio") as mock_asyncio,
+        patch("app.api.storage.share_snapshots.invalidate", new=AsyncMock()),
+    ):
+        mock_asyncio.to_thread = AsyncMock(side_effect=Exception("share not available"))
+        resp = await client.post("/api/share-snapshots/snap-1/revert", json={"share_id": "s-1"})
+    assert resp.status_code == 500
 
 
 @pytest.mark.asyncio
