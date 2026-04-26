@@ -97,9 +97,9 @@
 	);
 
 	const orderedNetworks = $derived([
-		...visibleNetworks.filter(n => n.is_external),
-		...visibleNetworks.filter(n => n.is_shared && !n.is_external),
-		...visibleNetworks.filter(n => !n.is_external && !n.is_shared),
+		...visibleNetworks.filter(n => n.is_external).sort((a, b) => a.name.localeCompare(b.name)),
+		...visibleNetworks.filter(n => n.is_shared && !n.is_external).sort((a, b) => a.name.localeCompare(b.name)),
+		...visibleNetworks.filter(n => !n.is_external && !n.is_shared).sort((a, b) => a.name.localeCompare(b.name)),
 	]);
 
 	const netColors = $derived.by(() => {
@@ -121,8 +121,17 @@
 	// Index per network (for sorting)
 	const netIdx = $derived(new Map(orderedNetworks.map((n, i) => [n.id, i])));
 
-	// name → network id
-	const nameToNetId = $derived(new Map(data.networks.map(n => [n.name, n.id])));
+	// name → network id (단일 네트워크용, 이름 충돌 없는 경우 fast path)
+	// admin showAll 모드에서는 아래 nameToNetworks + resolveNetId 를 사용
+	const nameToNetworks = $derived.by(() => {
+		const m = new Map<string, TopologyNetwork[]>();
+		for (const n of data.networks) {
+			const arr = m.get(n.name) ?? [];
+			arr.push(n);
+			m.set(n.name, arr);
+		}
+		return m;
+	});
 
 	// subnet_id → network_id
 	const subnetNetId = $derived(new Map(
@@ -196,7 +205,7 @@
 			const netIps = new Map<string, string[]>();
 
 			for (const ipInfo of inst.ip_addresses) {
-				const nid = nameToNetId.get(ipInfo.network_name);
+				const nid = resolveNetId(ipInfo.network_name, ipInfo.addr);
 				if (!nid) continue;
 				netSet.add(nid);
 				const ips = netIps.get(nid) ?? [];
@@ -288,6 +297,46 @@
 
 	function trunc(s: string, n: number): string {
 		return s.length > n ? s.slice(0, n - 1) + '…' : s;
+	}
+
+	// ── IP / CIDR 유틸 ────────────────────────────────────────────────────────
+	function _ipToNum(ip: string): number | null {
+		const parts = ip.split('.');
+		if (parts.length !== 4) return null;
+		const nums = parts.map(Number);
+		if (nums.some(n => isNaN(n) || n < 0 || n > 255)) return null;
+		return ((nums[0] << 24) | (nums[1] << 16) | (nums[2] << 8) | nums[3]) >>> 0;
+	}
+
+	function _ipv4InCidr(ip: string, cidr: string): boolean {
+		const slashIdx = cidr.lastIndexOf('/');
+		if (slashIdx < 0) return false;
+		const net = cidr.slice(0, slashIdx);
+		const mask = parseInt(cidr.slice(slashIdx + 1));
+		if (isNaN(mask) || mask < 0 || mask > 32) return false;
+		const ipNum = _ipToNum(ip);
+		const netNum = _ipToNum(net);
+		if (ipNum === null || netNum === null) return false;
+		const maskBits = mask === 0 ? 0 : ((0xFFFFFFFF << (32 - mask)) >>> 0);
+		return (ipNum & maskBits) === (netNum & maskBits);
+	}
+
+	/**
+	 * 네트워크 이름 + IP 주소로 실제 network_id 해석.
+	 * admin 모드에서 동일 이름 네트워크가 여러 프로젝트에 존재할 때
+	 * 서브넷 CIDR 매칭으로 올바른 네트워크를 찾는다.
+	 * floating IP 등 CIDR 미매칭 시 첫 번째 후보를 반환한다.
+	 */
+	function resolveNetId(networkName: string, ipAddr: string): string | undefined {
+		const nets = nameToNetworks.get(networkName);
+		if (!nets?.length) return undefined;
+		if (nets.length === 1) return nets[0].id;
+		for (const net of nets) {
+			for (const subnet of net.subnet_details) {
+				if (_ipv4InCidr(ipAddr, subnet.cidr)) return net.id;
+			}
+		}
+		return nets[0].id; // fallback
 	}
 
 	/** 같은 방향(좌/우)에 N개 연결선이 있을 때 i번째 선의 Y 오프셋 계산. */
