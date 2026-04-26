@@ -504,6 +504,41 @@ async def _collect_snapshot() -> None:
                 "floating_ips_used": fips_used,
             }
 
+        async def _count_library_usage() -> dict[str, int]:
+            """Nova metadata + union_user_mounts 기반 라이브러리/레이어 사용 카운트."""
+            from sqlalchemy import text
+
+            from app.database import get_session_factory
+
+            counts: dict[str, int] = {}
+            try:
+                for s in conn.compute.servers(all_projects=True, details=True):
+                    libs_str = (s.metadata or {}).get("union_libraries", "")
+                    for lib in libs_str.split(","):
+                        lib = lib.strip()
+                        if lib:
+                            key = f"lib:{lib}"
+                            counts[key] = counts.get(key, 0) + 1
+            except Exception:
+                pass
+            try:
+                factory = get_session_factory()
+                if factory:
+                    async with factory() as db:
+                        result = await db.execute(
+                            text(
+                                "SELECT ul.name, COUNT(*) as cnt FROM union_user_mounts uum "
+                                "JOIN union_layers ul ON ul.id = uum.leaf_layer_id "
+                                "WHERE uum.unmounted_at IS NULL GROUP BY ul.name"
+                            )
+                        )
+                        for row in result:
+                            key = f"layer:{row[0]}"
+                            counts[key] = counts.get(key, 0) + int(row[1])
+            except Exception:
+                pass
+            return counts
+
         inst_data = await asyncio.to_thread(_count_instances)
         vol_data = await asyncio.to_thread(_count_volumes)
         if settings.service_manila_enabled:
@@ -511,18 +546,21 @@ async def _collect_snapshot() -> None:
         else:
             file_storage_data = {"total": 0}
         net_data = await asyncio.to_thread(_count_networks)
+        lib_usage_data = await _count_library_usage()
 
         await timeseries.record_snapshot("instances", inst_data)
         await timeseries.record_snapshot("volumes", vol_data)
         await timeseries.record_snapshot("file_storage", file_storage_data)
         await timeseries.record_snapshot("networks", net_data)
+        await timeseries.record_snapshot("library_usage", lib_usage_data)
 
         _logger.info(
-            "시계열 스냅샷 수집 완료: instances=%d volumes=%d file_storage=%d networks=%d",
+            "시계열 스냅샷 수집 완료: instances=%d volumes=%d file_storage=%d networks=%d library_keys=%d",
             inst_data["total"],
             vol_data["total"],
             file_storage_data["total"],
             net_data["total"],
+            len(lib_usage_data),
         )
     except Exception:
         _logger.warning("시계열 스냅샷 수집 오류", exc_info=True)

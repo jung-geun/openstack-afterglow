@@ -6,6 +6,7 @@
   import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
+  import LibraryUsageChart from '$lib/components/LibraryUsageChart.svelte';
 
   interface LibraryConfig {
     id: string;
@@ -27,6 +28,8 @@
     metadata: Record<string, string>;
   }
 
+  interface TsPoint { ts: number; [key: string]: number | undefined; }
+
   let libraries = $state<LibraryConfig[]>([]);
   let fileStorages = $state<FileStorage[]>([]);
   let loading = $state(true);
@@ -34,6 +37,8 @@
   let message = $state('');
   let buildingId = $state<string | null>(null);
   let autoRefresh = $state(false);
+  let usageData = $state<TsPoint[]>([]);
+  let usageRange = $state('7d');
 
   const token = $derived($auth.token ?? undefined);
   const projectId = $derived($auth.projectId ?? undefined);
@@ -53,8 +58,19 @@
     }
   }
 
+  async function loadUsage(range: string) {
+    try {
+      usageData = await api.get<TsPoint[]>(`/api/admin/timeseries/library_usage?range=${range}`, token, projectId);
+    } catch {
+      usageData = [];
+    }
+  }
+
   $effect(() => {
-    if (token) loadData();
+    if (token) {
+      loadData();
+      loadUsage(usageRange);
+    }
   });
 
   // 라이브러리에 해당하는 FileStorage 찾기
@@ -229,6 +245,16 @@
   {#if message}
     <div class="mb-4 p-3 bg-green-900/40 border border-green-700 rounded-md text-green-300 text-sm">{message}</div>
   {/if}
+
+  <!-- 라이브러리 사용량 차트 -->
+  <div class="mb-6">
+    <LibraryUsageChart
+      data={usageData}
+      title="라이브러리 사용 현황 (활성 VM 기준)"
+      currentRange={usageRange}
+      onRangeChange={(r) => { usageRange = r; loadUsage(r); }}
+    />
+  </div>
 
   {#if loading}
     <LoadingSkeleton rows={6} />

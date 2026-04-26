@@ -1221,7 +1221,10 @@ class TestMountAPI:
 
         app.dependency_overrides[get_session] = override_get_session
         try:
-            with patch("app.api.union.layers.union_layers.record_mount", AsyncMock(return_value=mount_info)):
+            with (
+                patch("app.api.union.layers._resolve_mount_user_id", AsyncMock(return_value="user1")),
+                patch("app.api.union.layers.union_layers.record_mount", AsyncMock(return_value=mount_info)),
+            ):
                 resp = await client.post(
                     "/api/union/mounts",
                     json={"vm_hostname": "vm-001", "leaf_layer_id": _sha("leaf")},
@@ -1256,7 +1259,10 @@ class TestMountAPI:
 
         app.dependency_overrides[get_session] = override_get_session
         try:
-            with patch("app.api.union.layers.union_layers.record_unmount", AsyncMock(return_value=mount_info)):
+            with (
+                patch("app.api.union.layers._resolve_mount_user_id", AsyncMock(return_value="user1")),
+                patch("app.api.union.layers.union_layers.record_unmount", AsyncMock(return_value=mount_info)),
+            ):
                 resp = await client.post("/api/union/mounts/1/unmount")
         finally:
             app.dependency_overrides.pop(get_session, None)
@@ -1401,3 +1407,96 @@ class TestSealTimestamp:
         assert resp.status_code == 200
         assert resp.json()["sealed"] is True
         assert resp.json()["sealed_at"] is not None
+
+
+# ---------------------------------------------------------------------------
+# Bearer 토큰(VM health 토큰) 마운트 인증 테스트
+# ---------------------------------------------------------------------------
+
+
+class TestMountBearerAuth:
+    @pytest.mark.asyncio
+    async def test_mount_with_valid_bearer_token(self):
+        """VM health Bearer 토큰으로 마운트 기록 가능."""
+        from datetime import UTC, datetime
+
+        from app.database import get_session
+        from app.models.union import MountInfo
+
+        mock_session = AsyncMock()
+
+        async def override_get_session():
+            yield mock_session
+
+        mount_info = MountInfo(
+            id=42,
+            user_id="vm:test-instance-id",
+            vm_hostname="vm-001",
+            leaf_layer_id=_sha("leaf"),
+            mounted_at=datetime.now(UTC),
+            unmounted_at=None,
+        )
+
+        app.dependency_overrides[get_session] = override_get_session
+        try:
+            with (
+                patch(
+                    "app.services.instance_health.verify_report_token",
+                    AsyncMock(return_value={"instance_id": "test-instance-id"}),
+                ),
+                patch("app.api.union.layers.union_layers.record_mount", AsyncMock(return_value=mount_info)),
+            ):
+                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                    resp = await ac.post(
+                        "/api/union/mounts",
+                        json={"vm_hostname": "vm-001", "leaf_layer_id": _sha("leaf")},
+                        headers={"Authorization": "Bearer valid-health-token"},
+                    )
+        finally:
+            app.dependency_overrides.pop(get_session, None)
+
+        assert resp.status_code == 201
+        assert resp.json()["user_id"] == "vm:test-instance-id"
+
+    @pytest.mark.asyncio
+    async def test_mount_with_invalid_bearer_token_returns_401(self):
+        """유효하지 않은 Bearer 토큰은 401 반환."""
+        from app.database import get_session
+
+        async def override_get_session():
+            yield AsyncMock()
+
+        app.dependency_overrides[get_session] = override_get_session
+        try:
+            with patch(
+                "app.services.instance_health.verify_report_token",
+                AsyncMock(return_value=None),
+            ):
+                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                    resp = await ac.post(
+                        "/api/union/mounts",
+                        json={"vm_hostname": "vm-001", "leaf_layer_id": _sha("leaf")},
+                        headers={"Authorization": "Bearer bad-token"},
+                    )
+        finally:
+            app.dependency_overrides.pop(get_session, None)
+        assert resp.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_mount_without_any_token_returns_401(self):
+        """인증 토큰 없이 마운트 요청 시 401 반환."""
+        from app.database import get_session
+
+        async def override_get_session():
+            yield AsyncMock()
+
+        app.dependency_overrides[get_session] = override_get_session
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                resp = await ac.post(
+                    "/api/union/mounts",
+                    json={"vm_hostname": "vm-001", "leaf_layer_id": _sha("leaf")},
+                )
+        finally:
+            app.dependency_overrides.pop(get_session, None)
+        assert resp.status_code == 401

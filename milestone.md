@@ -565,10 +565,10 @@ Step 5: 요약 & 배포
   - [ ] VM 간 데이터 격리 검증 (다른 프로젝트의 share 접근 차단)
   - [ ] NFS 방화벽 규칙 자동 관리 (Security Group)
 
-- [ ] 5.6 로깅 및 감사
-  - [ ] 마운트/언마운트 이벤트 로깅
-  - [ ] 라이브러리 사용 통계 (어떤 라이브러리가 어떤 VM에 마운트되었는지)
-  - [ ] 관리자 대시보드에 라이브러리 사용량 차트 추가
+- [x] 5.6 로깅 및 감사
+  - [x] 마운트/언마운트 이벤트 로깅 (envmgr-use.sh → `POST /api/union/mounts` Bearer 토큰 통합, best-effort)
+  - [x] 라이브러리 사용 통계 (Nova metadata `union_libraries` + `union_user_mounts` 활성 마운트 집계, 10분 시계열 스냅샷)
+  - [x] 관리자 대시보드에 라이브러리 사용량 차트 추가 (`LibraryUsageChart.svelte`, 관리자 라이브러리 페이지 상단)
 
 ---
 

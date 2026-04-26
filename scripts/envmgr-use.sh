@@ -131,6 +131,26 @@ for l in data['layers']:
     # 현재 상태 저장
     echo "${leaf_id}" > "${OVERLAY_BASE}/.current_layer"
 
+    # 마운트 기록 (best-effort: 실패해도 마운트 자체는 유지)
+    if [ -n "${AFTERGLOW_API_URL}" ] && [ -n "${AFTERGLOW_API_TOKEN}" ] && command -v jq &>/dev/null; then
+        local vm_hostname
+        vm_hostname=$(hostname -s 2>/dev/null || echo "unknown")
+        local mount_body
+        mount_body=$(jq -n --arg lid "${leaf_id}" --arg h "${vm_hostname}" \
+            '{"leaf_layer_id": $lid, "vm_hostname": $h}')
+        local mount_resp
+        mount_resp=$(curl -s --max-time 5 -X POST \
+            -H "Authorization: Bearer ${AFTERGLOW_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "${mount_body}" \
+            "${AFTERGLOW_API_URL}/api/union/mounts" 2>/dev/null || true)
+        local mount_id
+        mount_id=$(echo "${mount_resp}" | jq -r '.id // empty' 2>/dev/null || true)
+        if [ -n "${mount_id}" ]; then
+            echo "${mount_id}" > "${OVERLAY_BASE}/.current_mount_id"
+        fi
+    fi
+
     echo "==> 환경 활성화 완료"
     echo "    마운트 포인트: ${MOUNT_POINT}"
     echo "    레이어: ${leaf_id}"
@@ -186,6 +206,16 @@ for t in data:
 # ---------------------------------------------------------------------------
 
 _do_unmount() {
+    # 마운트 해제 기록 (best-effort)
+    if [ -n "${AFTERGLOW_API_URL}" ] && [ -n "${AFTERGLOW_API_TOKEN}" ] && [ -f "${OVERLAY_BASE}/.current_mount_id" ]; then
+        local mount_id
+        mount_id=$(cat "${OVERLAY_BASE}/.current_mount_id")
+        curl -s --max-time 5 -X POST \
+            -H "Authorization: Bearer ${AFTERGLOW_API_TOKEN}" \
+            "${AFTERGLOW_API_URL}/api/union/mounts/${mount_id}/unmount" 2>/dev/null || true
+        rm -f "${OVERLAY_BASE}/.current_mount_id"
+    fi
+
     if mountpoint -q "${MOUNT_POINT}"; then
         umount "${MOUNT_POINT}"
         echo "==> 환경 비활성화 완료: ${MOUNT_POINT}"

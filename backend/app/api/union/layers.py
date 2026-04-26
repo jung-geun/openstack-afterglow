@@ -2,7 +2,7 @@
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.api.deps import get_os_conn, get_token_info
 from app.database import get_session
@@ -23,6 +23,25 @@ from app.services import union_layers
 
 router = APIRouter()
 _logger = logging.getLogger(__name__)
+
+
+async def _resolve_mount_user_id(request: Request) -> str:
+    """record_mount/unmount 전용: X-Auth-Token(Keystone) 또는 Bearer(VM health) 토큰 모두 허용."""
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        token = auth[len("Bearer ") :]
+        from app.services import instance_health as _health_svc
+
+        token_data = await _health_svc.verify_report_token(token)
+        if not token_data:
+            raise HTTPException(status_code=401, detail="유효하지 않은 Bearer 토큰")
+        return f"vm:{token_data.get('instance_id', 'unknown')}"
+    x_auth_token = request.headers.get("X-Auth-Token")
+    x_project_id = request.headers.get("X-Project-Id")
+    if not x_auth_token:
+        raise HTTPException(status_code=401, detail="인증 토큰이 필요합니다")
+    token_info = await get_token_info(x_auth_token=x_auth_token, x_project_id=x_project_id)
+    return token_info.get("user_id") or token_info.get("username") or "unknown"
 
 
 def _require_admin(token_info: dict) -> None:
@@ -207,12 +226,12 @@ async def create_template(
 
 @router.post("/mounts", response_model=MountInfo, status_code=201)
 async def record_mount(
+    request: Request,
     req: RecordMountRequest,
-    token_info: dict = Depends(get_token_info),
     session=Depends(get_session),
 ):
-    """마운트 기록 추가. user_id는 토큰에서 자동 추출."""
-    user_id = token_info.get("user_id") or token_info.get("username") or "unknown"
+    """마운트 기록 추가. X-Auth-Token 또는 VM Bearer 토큰 모두 허용."""
+    user_id = await _resolve_mount_user_id(request)
     try:
         return await union_layers.record_mount(session, user_id, req.vm_hostname, req.leaf_layer_id)
     except ValueError as e:
@@ -221,12 +240,12 @@ async def record_mount(
 
 @router.post("/mounts/{mount_id}/unmount", response_model=MountInfo)
 async def record_unmount(
+    request: Request,
     mount_id: int,
-    token_info: dict = Depends(get_token_info),
     session=Depends(get_session),
 ):
     """마운트 해제 기록. 본인 마운트만 해제 가능."""
-    user_id = token_info.get("user_id") or token_info.get("username") or "unknown"
+    user_id = await _resolve_mount_user_id(request)
     try:
         return await union_layers.record_unmount(session, mount_id, user_id)
     except KeyError as e:

@@ -834,7 +834,7 @@ async def get_timeseries(
     """리소스 유형별 시계열 스냅샷 반환."""
     from app.services import timeseries
 
-    valid = {"instances", "volumes", "file_storage", "networks"}
+    valid = {"instances", "volumes", "file_storage", "networks", "library_usage"}
     if resource_type not in valid:
         raise HTTPException(status_code=400, detail=f"resource_type은 {valid} 중 하나여야 합니다")
     return await timeseries.get_timeseries(resource_type, range)
