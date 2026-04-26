@@ -5,6 +5,8 @@
   import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+  import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+  import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
   interface Cluster {
     id: string;
@@ -68,8 +70,6 @@
   let resourcesLoading = $state(false);
   let eventsLoading = $state(false);
   let error = $state('');
-  let autoRefresh = $state(false);
-  let refreshInterval: ReturnType<typeof setInterval> | null = null;
 
   const clusterId = $derived($page.params.id);
   const token = $derived($auth.token ?? undefined);
@@ -117,19 +117,12 @@
     if (tab === 'events' && events.length === 0) await fetchEvents();
   }
 
-  function toggleAutoRefresh() {
-    autoRefresh = !autoRefresh;
-    if (autoRefresh) {
-      refreshInterval = setInterval(async () => {
-        await fetchCluster();
-        if (activeTab === 'resources') await fetchResources();
-        if (activeTab === 'events') await fetchEvents();
-      }, 10_000);
-    } else if (refreshInterval) {
-      clearInterval(refreshInterval);
-      refreshInterval = null;
-    }
-  }
+  const ar = createAutoRefresh(() => { fetchResources(); fetchEvents(); }, {
+    storageKey: 'dashboard-cluster-detail',
+    defaultActive: true,
+    defaultInterval: 10,
+    intervalOptions: [10, 15, 30, 60]
+  });
 
   async function handleDelete() {
     if (!cluster) return;
@@ -144,7 +137,6 @@
 
   onMount(() => {
     fetchCluster();
-    return () => { if (refreshInterval) clearInterval(refreshInterval); };
   });
 </script>
 
@@ -167,14 +159,13 @@
         {/if}
       </div>
       <div class="flex items-center gap-2">
-        {#if cluster.stack_id}
-          <button
-            onclick={toggleAutoRefresh}
-            class="px-3 py-1.5 text-xs border rounded-lg transition-colors {autoRefresh ? 'border-blue-600 text-blue-400 bg-blue-900/20' : 'border-gray-700 text-gray-400 hover:border-gray-500'}"
-          >
-            {autoRefresh ? '⏸ 자동 새로고침' : '▶ 자동 새로고침 (10s)'}
-          </button>
-        {/if}
+        <AutoRefreshControl
+          bind:active={ar.active}
+          bind:intervalSeconds={ar.intervalSeconds}
+          intervalOptions={ar.intervalOptions}
+          refreshing={loading || resourcesLoading || eventsLoading}
+          onManualRefresh={() => { fetchCluster(); fetchResources(); fetchEvents(); }}
+        />
         <button onclick={handleDelete} class="px-4 py-1.5 text-sm text-red-400 border border-red-800 hover:bg-red-900/30 rounded-lg transition-colors">삭제</button>
       </div>
     </div>

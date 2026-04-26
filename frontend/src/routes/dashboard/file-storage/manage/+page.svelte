@@ -2,7 +2,8 @@
   import { untrack } from 'svelte';
   import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
-  import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
+  import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+  import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
@@ -33,7 +34,6 @@
   let error = $state('');
   let message = $state('');
   let autoInstall = $state(true);
-  let autoRefresh = $state(false);
 
   const token = $derived($auth.token ?? undefined);
   const projectId = $derived($auth.projectId ?? undefined);
@@ -81,10 +81,11 @@
     untrack(() => loadData());
   });
 
-  $effect(() => {
-    if (!$auth.projectId || !autoRefresh) return;
-    const interval = setInterval(() => untrack(() => loadData()), 10000);
-    return () => clearInterval(interval);
+  const ar = createAutoRefresh(loadData, {
+    storageKey: 'dashboard-file-storage',
+    defaultActive: true,
+    defaultInterval: 30,
+    intervalOptions: [15, 30, 60]
   });
 </script>
 
@@ -95,8 +96,13 @@
         <input type="checkbox" bind:checked={autoInstall} class="rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0" />
         자동 패키지 설치
       </label>
-      <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={10} />
-      <button onclick={loadData} class="text-xs text-gray-400 hover:text-white transition-colors border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg">새로고침</button>
+      <AutoRefreshControl
+        bind:active={ar.active}
+        bind:intervalSeconds={ar.intervalSeconds}
+        intervalOptions={ar.intervalOptions}
+        refreshing={loading}
+        onManualRefresh={loadData}
+      />
     {/snippet}
   </PageHeader>
 

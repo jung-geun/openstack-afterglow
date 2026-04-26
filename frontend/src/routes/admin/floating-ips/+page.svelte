@@ -3,6 +3,8 @@
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	interface FloatingIpInfo {
 		id: string;
@@ -76,6 +78,13 @@
 		} catch (e) { deleteError = e instanceof ApiError ? e.message : '삭제 실패'; } finally { deleting = false; }
 	}
 
+	const ar = createAutoRefresh(load, {
+		storageKey: 'admin-floating-ips',
+		defaultActive: true,
+		defaultInterval: 30,
+		intervalOptions: [15, 30, 60]
+	});
+
 	onMount(load);
 </script>
 
@@ -83,7 +92,13 @@
 	<PageHeader breadcrumb="NETWORK / FLOATING IPs" title="Floating IP">
 		{#snippet actions()}
 			<button onclick={openCreate} class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg">+ 생성</button>
-			<button onclick={load} class="text-xs text-gray-400 hover:text-white px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
+			<AutoRefreshControl
+				bind:active={ar.active}
+				bind:intervalSeconds={ar.intervalSeconds}
+				intervalOptions={ar.intervalOptions}
+				refreshing={loading}
+				onManualRefresh={load}
+			/>
 		{/snippet}
 	</PageHeader>
 

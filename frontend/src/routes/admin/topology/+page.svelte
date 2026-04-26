@@ -9,6 +9,8 @@
 	import SlidePanel from '$lib/components/SlidePanel.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import { projectNames } from '$lib/stores/projectNames';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	let isLight = $state(false);
 	onMount(() => {
@@ -91,6 +93,13 @@
 		}
 	}
 
+	const ar = createAutoRefresh(fetchTopology, {
+		storageKey: 'admin-topology',
+		defaultActive: true,
+		defaultInterval: 30,
+		intervalOptions: [15, 30, 60]
+	});
+
 	$effect(() => {
 		if (!$auth.token) return;
 		fetchTopology();
@@ -122,13 +131,13 @@
 <div class="p-4 md:p-8 max-w-screen-2xl mx-auto">
 	<PageHeader breadcrumb="NETWORK / TOPOLOGY" title="토폴로지">
 		{#snippet actions()}
-			<button
-				onclick={fetchTopology}
-				disabled={loading}
-				class="text-sm px-3 py-1.5 rounded border border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500 disabled:text-gray-600 disabled:border-gray-800 transition-colors"
-			>
-				{loading ? '로딩 중…' : '새로고침'}
-			</button>
+			<AutoRefreshControl
+				bind:active={ar.active}
+				bind:intervalSeconds={ar.intervalSeconds}
+				intervalOptions={ar.intervalOptions}
+				refreshing={loading}
+				onManualRefresh={fetchTopology}
+			/>
 		{/snippet}
 	</PageHeader>
 

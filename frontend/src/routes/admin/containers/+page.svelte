@@ -7,6 +7,8 @@
 	import ContainerDetailPanel from '$lib/components/ContainerDetailPanel.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import StatusChip from '$lib/components/ui/StatusChip.svelte';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	interface AdminContainer {
 		uuid: string;
@@ -38,13 +40,26 @@
 		}
 	}
 
+	const ar = createAutoRefresh(load, {
+		storageKey: 'admin-containers',
+		defaultActive: true,
+		defaultInterval: 15,
+		intervalOptions: [10, 15, 30, 60]
+	});
+
 	onMount(load);
 </script>
 
 <div class="p-4 md:p-8 max-w-6xl">
 	<PageHeader breadcrumb="CONTAINERS" title="전체 컨테이너">
 		{#snippet actions()}
-			<button onclick={load} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
+			<AutoRefreshControl
+				bind:active={ar.active}
+				bind:intervalSeconds={ar.intervalSeconds}
+				intervalOptions={ar.intervalOptions}
+				refreshing={loading}
+				onManualRefresh={load}
+			/>
 		{/snippet}
 	</PageHeader>
 

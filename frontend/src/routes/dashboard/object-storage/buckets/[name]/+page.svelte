@@ -8,6 +8,8 @@
 	import { formatStorage, formatDate } from '$lib/utils/format';
 	import FileIcon from '$lib/components/ui/FileIcon.svelte';
 	import StatTile from '$lib/components/ui/StatTile.svelte';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	interface ObjectItem {
 		name: string;
@@ -520,6 +522,12 @@
 		return sortAsc ? '↑' : '↓';
 	}
 
+	const ar = createAutoRefresh(load, {
+		storageKey: 'dashboard-bucket-detail',
+		defaultInterval: 15,
+		intervalOptions: [10, 15, 30, 60]
+	});
+
 	onMount(() => {
 		load();
 		loadContainerMeta();
@@ -607,8 +615,13 @@
 			class="text-xs text-gray-300 hover:text-white bg-gray-800 hover:bg-gray-700 transition-colors px-3 py-1.5 rounded border border-gray-700">새 폴더</button>
 		<button onclick={() => { showUpload = true; }}
 			class="text-xs text-white bg-indigo-600 hover:bg-indigo-500 transition-colors px-3 py-1.5 rounded border border-indigo-500">+ 업로드</button>
-		<button onclick={() => { load(); loadContainerMeta(); }}
-			class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
+		<AutoRefreshControl
+			bind:active={ar.active}
+			bind:intervalSeconds={ar.intervalSeconds}
+			intervalOptions={ar.intervalOptions}
+			refreshing={loading}
+			onManualRefresh={() => { load(); loadContainerMeta(); }}
+		/>
 	</div>
 
 	<!-- 일괄 삭제 툴바 -->

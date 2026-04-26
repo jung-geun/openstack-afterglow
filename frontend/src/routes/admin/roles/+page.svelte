@@ -4,6 +4,8 @@
 	import { api } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	interface Role {
 		id: string;
@@ -24,13 +26,26 @@
 		finally { loading = false; }
 	}
 
+	const ar = createAutoRefresh(load, {
+		storageKey: 'admin-roles',
+		defaultActive: true,
+		defaultInterval: 60,
+		intervalOptions: [30, 60]
+	});
+
 	onMount(load);
 </script>
 
 <div class="p-4 md:p-8 max-w-6xl">
 	<PageHeader breadcrumb="IDENTITY / ROLES" title="역할">
 		{#snippet actions()}
-			<button onclick={load} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
+			<AutoRefreshControl
+				bind:active={ar.active}
+				bind:intervalSeconds={ar.intervalSeconds}
+				intervalOptions={ar.intervalOptions}
+				refreshing={loading}
+				onManualRefresh={load}
+			/>
 		{/snippet}
 	</PageHeader>
 

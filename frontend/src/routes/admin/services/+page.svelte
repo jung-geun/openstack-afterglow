@@ -5,6 +5,8 @@
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import { siteConfig } from '$lib/config/site';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	interface Service {
 		id: string;
@@ -68,9 +70,6 @@
 
 	let loadingMap = $state<Record<TabKey, boolean>>(Object.fromEntries(allCategories.map(c => [c, true])) as Record<TabKey, boolean>);
 
-	let autoRefresh = $state(true);
-	let refreshInterval = $state(30);
-	let lastRefresh = $state<Date | null>(null);
 	let activeTab = $state<TabKey>('compute');
 
 	const token = $derived($auth.token ?? undefined);
@@ -128,7 +127,6 @@
 	}
 
 	function loadAll(isRefresh = false) {
-		lastRefresh = new Date();
 		activeCategories.forEach(cat => loadCategory(cat, isRefresh));
 	}
 
@@ -143,13 +141,14 @@
 		}
 	});
 
-	onMount(() => { loadAll(); });
-
-	$effect(() => {
-		if (!autoRefresh) return;
-		const interval = setInterval(() => loadAll(true), refreshInterval * 1000);
-		return () => clearInterval(interval);
+	const ar = createAutoRefresh(() => { loadAll(true); }, {
+		storageKey: 'admin-services',
+		defaultActive: true,
+		defaultInterval: 15,
+		intervalOptions: [10, 15, 30, 60]
 	});
+
+	onMount(() => { loadAll(); });
 
 	function fmtTime(s: string | null) {
 		if (!s) return '-';
@@ -160,14 +159,12 @@
 <div class="p-4 md:p-8 max-w-7xl">
 	<PageHeader breadcrumb="SYSTEM / SERVICES" title="서비스 상태">
 		{#snippet actions()}
-			{#if lastRefresh}
-				<span class="text-xs text-gray-500">마지막: {lastRefresh.toLocaleTimeString()}</span>
-			{/if}
-			<button
-				onclick={() => { autoRefresh = !autoRefresh; }}
-				class="text-xs px-3 py-1.5 rounded border transition-colors {autoRefresh ? 'border-blue-500 bg-blue-900/20 text-blue-400' : 'border-gray-700 bg-gray-900 text-gray-400 hover:text-white'}"
-			>{autoRefresh ? '자동 새로고침 ON' : '자동 새로고침 OFF'}</button>
-			<button onclick={refresh} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
+			<AutoRefreshControl
+				bind:active={ar.active}
+				bind:intervalSeconds={ar.intervalSeconds}
+				intervalOptions={ar.intervalOptions}
+				onManualRefresh={() => { refresh(); }}
+			/>
 		{/snippet}
 	</PageHeader>
 

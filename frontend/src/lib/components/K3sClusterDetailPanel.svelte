@@ -4,6 +4,7 @@
   import { goto } from '$app/navigation';
   import { api, ApiError, getBaseUrl } from '$lib/api/client';
   import InstanceDetailPanel from '$lib/components/InstanceDetailPanel.svelte';
+  import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 
   interface K3sCluster {
     id: string;
@@ -193,17 +194,22 @@
     }
   }
 
+  const eventPollAr = createAutoRefresh(() => untrack(() => {
+    fetchCluster();
+    fetchHealth();
+  }), {
+    storageKey: 'k3s-cluster-events',
+    defaultActive: true,
+    defaultInterval: 15,
+    intervalOptions: [10, 15, 30, 60]
+  });
+
   $effect(() => {
     if (!$auth.projectId || !clusterId) return;
     loading = true;
     scalingTarget = null;
     initialCheckDone = false;
     untrack(() => fetchCluster());
-    const interval = setInterval(() => untrack(() => {
-      fetchCluster();
-      fetchHealth();
-    }), 5000);
-    return () => clearInterval(interval);
   });
 
   // ACTIVE 진입 시 1회만 kubeconfig 가용성 확인 (폴링 시마다 재실행 방지)

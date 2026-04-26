@@ -6,6 +6,8 @@
 	import { formatNumber, formatStorage } from '$lib/utils/format';
 	import { projectNames } from '$lib/stores/projectNames';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	interface Hypervisor {
 		id: string;
@@ -178,6 +180,13 @@
 		}
 	}
 
+	const ar = createAutoRefresh(load, {
+		storageKey: 'admin-hypervisors',
+		defaultActive: true,
+		defaultInterval: 30,
+		intervalOptions: [15, 30, 60]
+	});
+
 	onMount(() => {
 		load();
 		projectNames.load(token, projectId);
@@ -188,7 +197,13 @@
 <div class="flex-1 p-4 md:p-8 max-w-6xl overflow-auto">
 	<PageHeader breadcrumb="COMPUTE / HYPERVISORS" title="하이퍼바이저">
 		{#snippet actions()}
-			<button onclick={load} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
+			<AutoRefreshControl
+				bind:active={ar.active}
+				bind:intervalSeconds={ar.intervalSeconds}
+				intervalOptions={ar.intervalOptions}
+				refreshing={loading}
+				onManualRefresh={load}
+			/>
 		{/snippet}
 	</PageHeader>
 

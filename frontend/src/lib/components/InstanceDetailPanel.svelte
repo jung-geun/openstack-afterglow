@@ -90,14 +90,14 @@
 	let { instanceId, onClose, adminProjectId = null }: Props = $props();
 
 	let instance = $state<Instance | null>(null);
+	let floatingIps = $state<FloatingIp[]>([]);
+	let interfaces = $state<PortInfo[]>([]);
 	const fixedIpsList = $derived(instance?.ip_addresses.filter(ip => ip.type === 'fixed') ?? []);
 	const floatingIpsList = $derived(instance?.ip_addresses.filter(ip => ip.type === 'floating') ?? []);
 	// floating IP가 이미 할당된 포트 ID 집합
 	const assignedPortIds = $derived(new Set(floatingIps.filter(f => f.port_id).map(f => f.port_id!)));
 	// floating IP 할당 가능한 (아직 미할당) 인터페이스
 	const availableInterfaces = $derived(interfaces.filter(i => !assignedPortIds.has(i.id)));
-	let floatingIps = $state<FloatingIp[]>([]);
-	let interfaces = $state<PortInfo[]>([]);
 	let volumes = $state<VolumeAttachment[]>([]);
 	let allSecurityGroups = $state<SecurityGroup[]>([]);
 	let availableVolumes = $state<VolumeInfo[]>([]);

@@ -4,6 +4,8 @@
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	interface Group {
 		id: string;
@@ -151,6 +153,13 @@
 		} catch {}
 	}
 
+	const ar = createAutoRefresh(load, {
+		storageKey: 'admin-groups',
+		defaultActive: true,
+		defaultInterval: 60,
+		intervalOptions: [30, 60]
+	});
+
 	onMount(load);
 </script>
 
@@ -158,7 +167,13 @@
 	<PageHeader breadcrumb="IDENTITY / GROUPS" title="그룹">
 		{#snippet actions()}
 			<button onclick={() => { showCreate = true; createError = ''; }} class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg">+ 생성</button>
-			<button onclick={load} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
+			<AutoRefreshControl
+				bind:active={ar.active}
+				bind:intervalSeconds={ar.intervalSeconds}
+				intervalOptions={ar.intervalOptions}
+				refreshing={loading}
+				onManualRefresh={load}
+			/>
 		{/snippet}
 	</PageHeader>
 

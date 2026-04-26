@@ -9,6 +9,8 @@
 	import { projectNames } from '$lib/stores/projectNames';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import StatusChip from '$lib/components/ui/StatusChip.svelte';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	interface AdminVolume {
 		id: string;
@@ -194,6 +196,11 @@
 		} catch (e) { transferError = e instanceof ApiError ? e.message : '이전 실패'; } finally { transferring = false; }
 	}
 
+	const ar = createAutoRefresh(
+		() => { load(markerStack[markerStack.length - 1]); loadTimeseries(tsRange); },
+		{ storageKey: 'admin-volumes', defaultActive: true, defaultInterval: 30, intervalOptions: [15, 30, 60] }
+	);
+
 	onMount(() => {
 		load();
 		loadTimeseries(tsRange);
@@ -207,7 +214,13 @@
 <div class="p-4 md:p-8 max-w-6xl">
 	<PageHeader breadcrumb="STORAGE / VOLUMES" title="전체 볼륨">
 		{#snippet actions()}
-			<button onclick={() => { markerStack = []; nextMarker = null; projectFilter = ''; projectSearchText = ''; statusFilter = ''; nameSearch = ''; load(); }} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
+			<AutoRefreshControl
+				bind:active={ar.active}
+				bind:intervalSeconds={ar.intervalSeconds}
+				intervalOptions={ar.intervalOptions}
+				refreshing={loading}
+				onManualRefresh={() => { markerStack = []; nextMarker = null; projectFilter = ''; projectSearchText = ''; statusFilter = ''; nameSearch = ''; load(); }}
+			/>
 			<div class="flex items-center gap-1 text-xs text-gray-500">
 				표시:
 				{#each [10, 20, 30] as n}

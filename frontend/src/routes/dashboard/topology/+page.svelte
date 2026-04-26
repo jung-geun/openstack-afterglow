@@ -3,6 +3,8 @@
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import GlobalTopology from '$lib/components/GlobalTopology.svelte';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	interface SubnetDetail {
 		id: string; name: string; cidr: string;
@@ -47,6 +49,12 @@
 	let loading = $state(true);
 	let error = $state('');
 
+	const ar = createAutoRefresh(fetchTopology, {
+		storageKey: 'dashboard-topology',
+		defaultInterval: 30,
+		intervalOptions: [15, 30, 60]
+	});
+
 	$effect(() => {
 		if (!$auth.token) return;
 		fetchTopology();
@@ -77,13 +85,13 @@
 			</a>
 			<h1 class="text-2xl font-bold text-white mt-2">네트워크 토폴로지</h1>
 		</div>
-		<button
-			onclick={fetchTopology}
-			disabled={loading}
-			class="text-sm px-3 py-1.5 rounded border border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500 disabled:text-gray-600 disabled:border-gray-800 transition-colors"
-		>
-			{loading ? '로딩 중…' : '새로고침'}
-		</button>
+		<AutoRefreshControl
+			bind:active={ar.active}
+			bind:intervalSeconds={ar.intervalSeconds}
+			intervalOptions={ar.intervalOptions}
+			refreshing={loading}
+			onManualRefresh={fetchTopology}
+		/>
 	</div>
 
 	{#if error}
