@@ -12,10 +12,11 @@
 
 ---
 
-## 개발 워크플로우 (하네스 운용 규정)
+## 개발 워크플로우
 
-Claude Code는 하네스(비인터랙티브 모드)로 실행되므로 **plan 모드를 사용할 수 없다.**
-따라서 **모든 개발은 반드시 아래 단계를 순서대로 따른다.**
+Claude Code는 **인터랙티브 모드**(plan 모드 포함)와 **하네스(비인터랙티브 모드)** 두 가지로 실행될 수 있다.
+인터랙티브 모드에서는 plan 모드를 사용하여 설계를 먼저 확정한 뒤 구현으로 진행한다.
+하네스 모드(`--print`)로 실행될 때는 아래 단계를 순서대로 따른다.
 
 ### 단계 1 — Discord에서 플래닝 (Katherine 직접 수행)
 
@@ -92,7 +93,11 @@ backend/              FastAPI + openstacksdk (Python 3.12+)
 
 frontend/             SvelteKit + TypeScript + Tailwind CSS 4
   src/routes/         페이지 라우터
-  src/lib/            컴포넌트, API 클라이언트, Svelte stores
+  src/lib/
+    components/       UI 컴포넌트 (AutoRefreshControl 등)
+    utils/            유틸리티 (autoRefresh.svelte.ts 등)
+    stores/           Svelte stores (auth, projectNames 등)
+    api/              API 클라이언트
 
 union.md              Union Mount 레이어 시스템 v2 설계 문서 (참조 필수)
 milestone.md          기능별 구현 현황 추적
