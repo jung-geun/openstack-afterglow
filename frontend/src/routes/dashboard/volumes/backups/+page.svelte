@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
@@ -102,7 +103,7 @@
   $effect(() => {
     const pid = $auth.projectId;
     if (!pid) return;
-    fetchBackups(); fetchVolumes();
+    untrack(() => { fetchBackups(); fetchVolumes(); });
   });
 </script>
 

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { auth } from '$lib/stores/auth';
   import { api, ApiError, getBaseUrl } from '$lib/api/client';
   import { toast } from '$lib/stores/toast';
@@ -299,7 +300,7 @@
   $effect(() => {
     if (!$auth.projectId) return;
     loading = true;
-    fetchClusters();
+    untrack(() => fetchClusters());
   });
 </script>
 

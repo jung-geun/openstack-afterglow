@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { auth } from '$lib/stores/auth';
   import { api, ApiError, memoryCache } from '$lib/api/client';
   import type { Volume } from '$lib/types/resources';
@@ -193,7 +194,7 @@
     const projectId = $auth.projectId;
     if (!projectId) return;
     loading = true;
-    fetchVolumes(); fetchAutoBackupConfigs(); fetchSnapshots(); fetchQuotas();
+    untrack(() => { fetchVolumes(); fetchAutoBackupConfigs(); fetchSnapshots(); fetchQuotas(); });
   });
 </script>
 

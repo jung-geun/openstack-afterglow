@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { auth } from '$lib/stores/auth';
   import { api, ApiError, memoryCache } from '$lib/api/client';
   import type { Network, FloatingIp } from '$lib/types/resources';
@@ -152,7 +153,7 @@
     const projectId = $auth.projectId;
     if (!projectId) return;
     loading = true;
-    fetchNetworks(); fetchFloatingIps(); fetchDefaultNetwork();
+    untrack(() => { fetchNetworks(); fetchFloatingIps(); fetchDefaultNetwork(); });
   });
 
   $effect(() => {

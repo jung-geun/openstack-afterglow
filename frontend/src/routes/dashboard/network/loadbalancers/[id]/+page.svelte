@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { page } from '$app/stores';
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
@@ -107,7 +108,7 @@
 		intervalOptions: [10, 15, 30, 60],
 	});
 
-	$effect(() => { if ($auth.projectId) fetchAll(); });
+	$effect(() => { if ($auth.projectId) untrack(() => fetchAll()); });
 
 	$effect(() => {
 		if (!selectedPoolId) { selectedPoolMembers = []; return; }

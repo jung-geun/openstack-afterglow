@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { goto } from '$app/navigation';
   import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
@@ -116,8 +117,7 @@
   $effect(() => {
     if (!$auth.projectId) return;
     loading = true;
-    fetchClusters();
-    fetchTemplates();
+    untrack(() => { fetchClusters(); fetchTemplates(); });
   });
 </script>
 

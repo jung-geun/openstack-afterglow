@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
   import type { LoadBalancer } from '$lib/types/resources';
@@ -47,7 +48,7 @@
   $effect(() => {
     const pid = $auth.projectId;
     if (!pid) return;
-    fetchLoadbalancers();
+    untrack(() => fetchLoadbalancers());
   });
 </script>
 

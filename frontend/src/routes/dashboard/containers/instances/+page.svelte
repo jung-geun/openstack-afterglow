@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { goto } from '$app/navigation';
   import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
@@ -162,7 +163,7 @@
     const projectId = $auth.projectId;
     if (!projectId) return;
     loading = true;
-    fetchContainers();
+    untrack(() => fetchContainers());
   });
 </script>
 

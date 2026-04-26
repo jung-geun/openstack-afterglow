@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { auth } from '$lib/stores/auth';
   import { api } from '$lib/api/client';
   import type { DashboardSummary } from '$lib/types/resources';
@@ -65,7 +66,7 @@
   $effect(() => {
     const pid = $auth.projectId;
     if (!pid) return;
-    fetchAll();
+    untrack(() => fetchAll());
   });
 
   function getFirstIp(inst: Instance): string {

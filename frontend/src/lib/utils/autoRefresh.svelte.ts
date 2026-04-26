@@ -1,3 +1,5 @@
+import { untrack } from 'svelte';
+
 interface AutoRefreshOptions {
 	storageKey: string;
 	defaultActive?: boolean;
@@ -59,12 +61,14 @@ export function createAutoRefresh(fn: () => void | Promise<void>, options: AutoR
 			if (document.hidden) {
 				stop();
 			} else {
+				stop();
 				fn();
 				start();
 			}
 		}
 
 		if (!document.hidden) {
+			untrack(() => fn());
 			start();
 		}
 

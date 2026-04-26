@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { auth } from '$lib/stores/auth';
@@ -64,8 +65,7 @@
 	$effect(() => {
 		const id = $page.params.id;
 		if (!id || !$auth.token) return;
-		fetchFileStorage(id);
-		fetchAccessRules(id);
+		untrack(() => { fetchFileStorage(id); fetchAccessRules(id); });
 	});
 
 	async function fetchFileStorage(id: string) {

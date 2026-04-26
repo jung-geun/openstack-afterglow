@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { auth } from '$lib/stores/auth';
@@ -63,7 +64,7 @@
 	$effect(() => {
 		const id = $page.params.id;
 		if (!id || !$auth.token) return;
-		fetchNetwork(id);
+		untrack(() => fetchNetwork(id));
 	});
 
 	async function fetchNetwork(id: string) {

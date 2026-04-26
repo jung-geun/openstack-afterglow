@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
   import type { Router, Network } from '$lib/types/resources';
@@ -94,7 +95,7 @@
     const projectId = $auth.projectId;
     if (!projectId) return;
     loading = true;
-    fetchRouters(); fetchNetworks();
+    untrack(() => { fetchRouters(); fetchNetworks(); });
   });
 </script>
 

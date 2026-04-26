@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
   import type { FileStorage } from '$lib/types/resources';
@@ -106,7 +107,7 @@
   $effect(() => {
     if (!$auth.projectId) return;
     loading = true;
-    fetchSnapshots();
+    untrack(() => fetchSnapshots());
   });
 </script>
 
