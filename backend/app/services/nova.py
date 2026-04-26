@@ -396,5 +396,6 @@ def _server_to_info(s) -> InstanceInfo:
         union_upper_volume_id=meta.get("union_upper_volume_id"),
         key_name=getattr(s, "key_name", None),
         user_id=getattr(s, "user_id", None),
+        project_id=getattr(s, "project_id", None) or getattr(s, "tenant_id", None),
         fault=fault,
     )

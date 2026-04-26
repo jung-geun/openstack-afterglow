@@ -273,6 +273,7 @@ def _fetch_topology_sync(conn) -> dict:
             id=s.id,
             name=s.name,
             status=s.status,
+            project_id=s.project_id,
             network_names=list(set(ip.network_name for ip in s.ip_addresses)),
             ip_addresses=[
                 {
