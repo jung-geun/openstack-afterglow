@@ -443,7 +443,10 @@
 			{@const iText   = instText(row.status)}
 
 			<!-- Connection lines + IP labels -->
-			<!-- 같은 방향(좌/우)에 연결된 네트워크 목록을 미리 계산 (Y 분산용) -->
+			<!-- 같은 방향(좌/우)에 연결된 네트워크 목록을 미리 계산 (Y 분산용, floating 포함) -->
+			{@const fipNetIds = [...row.floatingNetIps.keys()]}
+			{@const allLeftNets  = [...row.connectedNetIds, ...fipNetIds].filter(id => (netCX.get(id) ?? 0) < cx)}
+			{@const allRightNets = [...row.connectedNetIds, ...fipNetIds].filter(id => (netCX.get(id) ?? 0) >= cx)}
 			{@const leftNets  = row.connectedNetIds.filter(id => (netCX.get(id) ?? 0) < cx)}
 			{@const rightNets = row.connectedNetIds.filter(id => (netCX.get(id) ?? 0) >= cx)}
 
@@ -464,7 +467,7 @@
 				{@const col  = netColors.get(netId) ?? '#3b82f6'}
 				{@const ips  = row.netIps.get(netId) ?? []}
 				{@const isLeft   = barX < cx}
-				{@const sideList = isLeft ? leftNets : rightNets}
+				{@const sideList = isLeft ? allLeftNets : allRightNets}
 				{@const sideIdx  = sideList.indexOf(netId)}
 				{@const lineY    = connectionY(cy, sideIdx, sideList.length)}
 				<!-- 최대 2개 IP만 라벨로 표시 -->
@@ -528,14 +531,16 @@
 
 			<!-- Floating IP 점선 연결 (외부 네트워크 바 → 인스턴스 박스) -->
 			{#if !isR}
-				{#each [...row.floatingNetIps.entries()] as [fNetId, fIps], fi}
-					{@const fBarX  = netCX.get(fNetId) ?? 0}
-					{@const fCol   = netColors.get(fNetId) ?? '#ea580c'}
-					{@const fIsLeft = fBarX < cx}
+				{#each [...row.floatingNetIps.entries()] as [fNetId, fIps]}
+					{@const fBarX    = netCX.get(fNetId) ?? 0}
+					{@const fCol     = netColors.get(fNetId) ?? '#ea580c'}
+					{@const fIsLeft  = fBarX < cx}
 					{@const fTargetX = fIsLeft ? ix : ix + ITEM_W}
 					{@const fLabelX  = fIsLeft ? fBarX + 10 : fBarX - 10}
 					{@const fAnchor  = fIsLeft ? 'start' : 'end'}
-					{@const fLineY   = cy + (row.connectedNetIds.length + fi) * 13 + 13}
+					{@const fSideAll = fIsLeft ? allLeftNets : allRightNets}
+					{@const fSideIdx = fSideAll.indexOf(fNetId)}
+					{@const fLineY   = connectionY(cy, fSideIdx, fSideAll.length)}
 					<!-- 점선 -->
 					<line
 						x1={fBarX} y1={fLineY}

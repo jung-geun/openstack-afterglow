@@ -265,13 +265,17 @@ def create_floating_ip(conn: openstack.connection.Connection, floating_network_i
 
 
 def associate_floating_ip(
-    conn: openstack.connection.Connection, floating_ip_id: str, instance_id: str
+    conn: openstack.connection.Connection,
+    floating_ip_id: str,
+    instance_id: str,
+    port_id: str | None = None,
 ) -> FloatingIpInfo:
-    """인스턴스의 첫 번째 포트에 floating IP 연결."""
-    ports = list(conn.network.ports(device_id=instance_id))
-    if not ports:
-        raise RuntimeError("인스턴스에 연결된 포트가 없습니다")
-    port_id = ports[0].id
+    """인스턴스 포트에 floating IP 연결. port_id 미지정 시 첫 번째 포트 사용."""
+    if not port_id:
+        ports = list(conn.network.ports(device_id=instance_id))
+        if not ports:
+            raise RuntimeError("인스턴스에 연결된 포트가 없습니다")
+        port_id = ports[0].id
     fip = conn.network.update_ip(floating_ip_id, port_id=port_id)
     return _fip_to_info(fip)
 

@@ -102,6 +102,7 @@
 	let error = $state('');
 	let deleting = $state(false);
 	let actioning = $state<string | null>(null);
+	let showPortSelector = $state(false);
 	// Console log
 	let showLog = $state(false);
 	let consoleLog = $state('');
@@ -299,12 +300,19 @@
 		}
 	}
 
-	async function assignFloatingIp() {
+	async function assignFloatingIp(portId?: string) {
 		if (!instance) return;
+		// 인터페이스가 2개 이상이고 portId 미지정이면 선택 UI 표시
+		if (!portId && interfaces.length > 1) {
+			showPortSelector = true;
+			return;
+		}
+		showPortSelector = false;
 		actioning = 'fip-assign';
 		try {
+			const query = portId ? `?port_id=${portId}` : '';
 			await api.post(
-				`/api/instances/${instance.id}/floating-ip`,
+				`/api/instances/${instance.id}/floating-ip${query}`,
 				{},
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined
@@ -779,7 +787,7 @@
 				<h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide">Floating IP</h2>
 				{#if floatingIps.length === 0}
 					<button
-						onclick={assignFloatingIp}
+						onclick={() => assignFloatingIp()}
 						disabled={actioning === 'fip-assign'}
 						class="text-xs text-blue-400 hover:text-blue-300 px-2 py-1 border border-blue-900 hover:border-blue-700 rounded transition-colors disabled:text-gray-600 disabled:border-gray-700"
 					>
@@ -788,7 +796,30 @@
 				{/if}
 			</div>
 
-			{#if floatingIps.length === 0}
+			{#if showPortSelector}
+				<div class="mb-4 p-3 bg-gray-800 border border-gray-700 rounded-lg">
+					<p class="text-xs text-gray-400 mb-2">Floating IP를 연결할 인터페이스를 선택하세요:</p>
+					<div class="space-y-1.5">
+						{#each interfaces as iface}
+							{@const netName = availableNetworks.find(n => n.id === iface.network_id)?.name ?? iface.network_id.slice(0, 8)}
+							<button
+								onclick={() => assignFloatingIp(iface.id)}
+								disabled={actioning === 'fip-assign'}
+								class="w-full text-left text-xs px-3 py-2 rounded border border-gray-600 hover:border-blue-500 hover:bg-gray-700 transition-colors disabled:opacity-50"
+							>
+								<span class="text-gray-300">{netName}</span>
+								<span class="text-gray-500 ml-2">{iface.fixed_ips.map(f => f.ip_address).join(', ')}</span>
+							</button>
+						{/each}
+					</div>
+					<button
+						onclick={() => showPortSelector = false}
+						class="mt-2 text-xs text-gray-500 hover:text-gray-300"
+					>취소</button>
+				</div>
+			{/if}
+
+			{#if floatingIps.length === 0 && !showPortSelector}
 				<p class="text-sm text-gray-500">연결된 Floating IP 없음</p>
 			{:else}
 				<div class="space-y-2">

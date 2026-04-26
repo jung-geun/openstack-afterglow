@@ -1131,6 +1131,7 @@ async def _rollback(
 @router.post("/{instance_id}/floating-ip", response_model=dict)
 async def assign_floating_ip(
     instance_id: str,
+    port_id: str | None = Query(None, description="연결할 포트 ID (미지정 시 첫 번째 포트)"),
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """인스턴스에 새 Floating IP를 자동 생성하고 연결한다."""
@@ -1142,7 +1143,7 @@ async def assign_floating_ip(
             raise HTTPException(status_code=400, detail="외부 네트워크가 없습니다")
         fip = await asyncio.to_thread(neutron.create_floating_ip, conn, ext_net.id)
         try:
-            result = await asyncio.to_thread(neutron.associate_floating_ip, conn, fip.id, instance_id)
+            result = await asyncio.to_thread(neutron.associate_floating_ip, conn, fip.id, instance_id, port_id)
         except Exception as ex:
             # 연결 실패 시 생성된 FIP 정리
             try:
