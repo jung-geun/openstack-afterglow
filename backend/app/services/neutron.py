@@ -278,12 +278,16 @@ def associate_floating_ip(
     instance_id: str,
     port_id: str | None = None,
 ) -> FloatingIpInfo:
-    """인스턴스 포트에 floating IP 연결. port_id 미지정 시 첫 번째 포트 사용."""
+    """인스턴스 포트에 floating IP 연결. port_id 미지정 시 FIP 미점유 첫 포트를 선택한다."""
     if not port_id:
         ports = list(conn.network.ports(device_id=instance_id))
         if not ports:
             raise RuntimeError("인스턴스에 연결된 포트가 없습니다")
-        port_id = ports[0].id
+        used_port_ids = {f.port_id for f in conn.network.ips() if f.port_id}
+        available = [p for p in ports if p.id not in used_port_ids]
+        if not available:
+            raise RuntimeError("모든 인터페이스에 이미 Floating IP가 할당되어 있습니다")
+        port_id = available[0].id
     fip = conn.network.update_ip(floating_ip_id, port_id=port_id)
     return _fip_to_info(fip)
 

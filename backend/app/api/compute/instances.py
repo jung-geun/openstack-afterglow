@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
+from openstack.exceptions import ConflictException
 
 from app.api.deps import get_os_conn, get_token_info
 from app.config import get_settings
@@ -1137,15 +1138,37 @@ async def assign_floating_ip(
     """인스턴스에 새 Floating IP를 자동 생성하고 연결한다."""
     pid = conn._afterglow_project_id
     try:
+        # 1) 외부 네트워크 확인
         all_nets = await asyncio.to_thread(neutron.list_networks, conn)
         ext_net = next((n for n in all_nets if n.is_external), None)
         if not ext_net:
             raise HTTPException(status_code=400, detail="외부 네트워크가 없습니다")
+
+        # 2) FIP 생성 전 사전 점유 체크
+        ports = await asyncio.to_thread(lambda: list(conn.network.ports(device_id=instance_id)))
+        if not ports:
+            raise HTTPException(status_code=400, detail="인스턴스에 연결된 포트가 없습니다")
+        used_port_ids = await asyncio.to_thread(lambda: {f.port_id for f in conn.network.ips() if f.port_id})
+        if port_id:
+            if port_id in used_port_ids:
+                raise HTTPException(
+                    status_code=409,
+                    detail="해당 인터페이스에 이미 Floating IP가 할당되어 있습니다",
+                )
+        else:
+            available = [p for p in ports if p.id not in used_port_ids]
+            if not available:
+                raise HTTPException(
+                    status_code=400,
+                    detail="모든 인터페이스에 이미 Floating IP가 할당되어 있습니다",
+                )
+            port_id = available[0].id
+
+        # 3) FIP 생성 + 연결 (race 발생 시 rollback)
         fip = await asyncio.to_thread(neutron.create_floating_ip, conn, ext_net.id)
         try:
             result = await asyncio.to_thread(neutron.associate_floating_ip, conn, fip.id, instance_id, port_id)
         except Exception as ex:
-            # 연결 실패 시 생성된 FIP 정리
             try:
                 await asyncio.to_thread(neutron.delete_floating_ip, conn, fip.id)
             except Exception:
@@ -1155,6 +1178,12 @@ async def assign_floating_ip(
         return {"id": result.id, "floating_ip_address": result.floating_ip_address}
     except HTTPException:
         raise
+    except ConflictException as ex:
+        logger.warning("Floating IP 할당 충돌: %s", ex)
+        raise HTTPException(
+            status_code=409,
+            detail="해당 인터페이스에 이미 Floating IP가 할당되어 있습니다",
+        )
     except Exception as ex:
         logger.warning("Floating IP 할당 실패: %s", ex)
         raise HTTPException(status_code=500, detail="Floating IP 할당 실패")

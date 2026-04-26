@@ -361,3 +361,144 @@ async def test_release_floating_ip_per_fip_failure_isolated(client, mock_conn):
 
     update_calls = [call.args[0] for call in mock_conn.network.update_ip.call_args_list]
     assert update_calls == ["fip-fail", "fip-ok"]
+
+
+# ────── Floating IP 할당 (assign) ──────
+
+
+def _make_net(net_id: str, is_external: bool = False):
+    from unittest.mock import MagicMock
+
+    n = MagicMock()
+    n.id = net_id
+    n.is_external = is_external
+    return n
+
+
+def _make_fip_info(fip_id: str, addr: str, port_id: str | None = None):
+    from app.models.storage import FloatingIpInfo
+
+    return FloatingIpInfo(id=fip_id, floating_ip_address=addr, port_id=port_id, floating_network_id="ext-net")
+
+
+@pytest.mark.asyncio
+async def test_assign_floating_ip_single_port_success(client, mock_conn):
+    """단일 포트 인스턴스에 FIP 정상 할당."""
+    mock_conn.network.ports.return_value = [_make_port("p1")]
+    mock_conn.network.ips.return_value = []  # 기존 FIP 없음
+
+    with (
+        patch(
+            "app.api.compute.instances.neutron.list_networks",
+            return_value=[_make_net("ext-net", is_external=True)],
+        ),
+        patch(
+            "app.api.compute.instances.neutron.create_floating_ip",
+            return_value=_make_fip_info("fip-new", "172.30.100.1"),
+        ),
+        patch(
+            "app.api.compute.instances.neutron.associate_floating_ip",
+            return_value=_make_fip_info("fip-new", "172.30.100.1", port_id="p1"),
+        ),
+    ):
+        resp = await client.post("/api/instances/inst-1/floating-ip")
+
+    assert resp.status_code == 200
+    assert resp.json()["floating_ip_address"] == "172.30.100.1"
+
+
+@pytest.mark.asyncio
+async def test_assign_floating_ip_multi_port_selects_available(client, mock_conn):
+    """다중 포트에서 첫 포트가 점유된 경우 두 번째 포트로 자동 선택."""
+    mock_conn.network.ports.return_value = [_make_port("p1"), _make_port("p2")]
+    # p1은 이미 FIP 점유, p2는 자유
+    mock_conn.network.ips.return_value = [_make_fip("fip-existing", "p1")]
+
+    captured_port = {}
+
+    def fake_associate(conn, fip_id, instance_id, port_id=None):
+        captured_port["id"] = port_id
+        return _make_fip_info("fip-new", "172.30.100.2", port_id=port_id)
+
+    with (
+        patch(
+            "app.api.compute.instances.neutron.list_networks",
+            return_value=[_make_net("ext-net", is_external=True)],
+        ),
+        patch(
+            "app.api.compute.instances.neutron.create_floating_ip",
+            return_value=_make_fip_info("fip-new", "172.30.100.2"),
+        ),
+        patch("app.api.compute.instances.neutron.associate_floating_ip", side_effect=fake_associate),
+    ):
+        resp = await client.post("/api/instances/inst-1/floating-ip")
+
+    assert resp.status_code == 200
+    # 사용 가능한 포트(p2)가 선택되어야 한다
+    assert captured_port["id"] == "p2"
+
+
+@pytest.mark.asyncio
+async def test_assign_floating_ip_all_ports_occupied_returns_400(client, mock_conn):
+    """모든 포트가 이미 FIP를 가진 경우 400 반환."""
+    mock_conn.network.ports.return_value = [_make_port("p1")]
+    mock_conn.network.ips.return_value = [_make_fip("fip-existing", "p1")]
+
+    with patch(
+        "app.api.compute.instances.neutron.list_networks",
+        return_value=[_make_net("ext-net", is_external=True)],
+    ):
+        resp = await client.post("/api/instances/inst-1/floating-ip")
+
+    assert resp.status_code == 400
+    assert "이미 Floating IP" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_assign_floating_ip_explicit_port_already_occupied_returns_409(client, mock_conn):
+    """명시적으로 지정한 port_id가 이미 점유된 경우 409 반환."""
+    mock_conn.network.ports.return_value = [_make_port("p1")]
+    mock_conn.network.ips.return_value = [_make_fip("fip-existing", "p1")]
+
+    with patch(
+        "app.api.compute.instances.neutron.list_networks",
+        return_value=[_make_net("ext-net", is_external=True)],
+    ):
+        resp = await client.post("/api/instances/inst-1/floating-ip?port_id=p1")
+
+    assert resp.status_code == 409
+    assert "이미 Floating IP" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_assign_floating_ip_conflict_exception_rolls_back(client, mock_conn):
+    """race로 ConflictException 발생 시 생성된 FIP를 삭제(rollback)한다."""
+    from openstack.exceptions import ConflictException
+
+    mock_conn.network.ports.return_value = [_make_port("p1")]
+    mock_conn.network.ips.return_value = []
+
+    deleted = []
+
+    def fake_delete(conn, fip_id):
+        deleted.append(fip_id)
+
+    with (
+        patch(
+            "app.api.compute.instances.neutron.list_networks",
+            return_value=[_make_net("ext-net", is_external=True)],
+        ),
+        patch(
+            "app.api.compute.instances.neutron.create_floating_ip",
+            return_value=_make_fip_info("fip-race", "172.30.100.3"),
+        ),
+        patch(
+            "app.api.compute.instances.neutron.associate_floating_ip",
+            side_effect=ConflictException("already has fip"),
+        ),
+        patch("app.api.compute.instances.neutron.delete_floating_ip", side_effect=fake_delete),
+    ):
+        resp = await client.post("/api/instances/inst-1/floating-ip")
+
+    assert resp.status_code == 409
+    assert "fip-race" in deleted

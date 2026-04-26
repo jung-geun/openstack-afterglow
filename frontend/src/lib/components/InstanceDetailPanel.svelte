@@ -3,6 +3,7 @@
 	import { api, ApiError } from '$lib/api/client';
 	import { goto } from '$app/navigation';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 
 	interface IpAddress {
 		addr: string;
@@ -169,12 +170,11 @@
 	});
 
 	// Console log auto-refresh when visible
-	$effect(() => {
-		if (!showLog) return;
-		const interval = setInterval(() => {
-			loadConsoleLog(logFull);
-		}, 5000);
-		return () => clearInterval(interval);
+	const consolePollAr = createAutoRefresh(() => loadConsoleLog(logFull), {
+		storageKey: 'instance-detail-console',
+		defaultActive: false,
+		defaultInterval: 15,
+		intervalOptions: [10, 15, 30, 60]
 	});
 
 	// Scroll to bottom when log updates
@@ -240,6 +240,7 @@
 
 	async function toggleLog() {
 		showLog = !showLog;
+		consolePollAr.active = showLog;
 		if (showLog) {
 			await loadConsoleLog(logFull);
 		}
@@ -310,6 +311,10 @@
 		if (!portId && availableInterfaces.length > 1) {
 			showPortSelector = true;
 			return;
+		}
+		// 포트가 1개면 명시적으로 전달 (backend fallback에 의존하지 않음)
+		if (!portId && availableInterfaces.length === 1) {
+			portId = availableInterfaces[0].id;
 		}
 		showPortSelector = false;
 		actioning = 'fip-assign';
@@ -761,7 +766,7 @@
 				<h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide">콘솔 로그</h2>
 				<div class="flex gap-2 items-center">
 					{#if showLog}
-						<span class="text-xs text-gray-600">5초마다 자동 갱신</span>
+						<span class="text-xs text-gray-600">{consolePollAr.intervalSeconds}초마다 자동 갱신</span>
 						<button
 							onclick={toggleFullLog}
 							class="text-xs {logFull ? 'text-yellow-400 border-yellow-900' : 'text-gray-400 border-gray-700'} hover:text-gray-200 px-2 py-1 border hover:border-gray-500 rounded transition-colors"
