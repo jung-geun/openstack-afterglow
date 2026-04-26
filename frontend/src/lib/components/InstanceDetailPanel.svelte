@@ -329,16 +329,23 @@
 		}
 	}
 
-	async function releaseFloatingIp() {
+	async function releaseFloatingIp(fipId: string) {
+		if (!instance) return;
 		if (!confirm('Floating IP를 해제하고 삭제하시겠습니까?')) return;
-		actioning = 'fip-release';
+		actioning = 'fip-release-' + fipId;
 		try {
-			await api.delete(
-				`/api/instances/${instance!.id}/floating-ip`,
+			await api.post(
+				`/api/networks/floating-ips/${fipId}/disassociate`,
+				{},
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined
 			);
-			await fetchInstance(instance!.id);
+			await api.delete(
+				`/api/networks/floating-ips/${fipId}`,
+				$auth.token ?? undefined,
+				$auth.projectId ?? undefined
+			);
+			await fetchInstance(instance.id);
 		} catch (e) {
 			alert('Floating IP 해제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
@@ -836,11 +843,11 @@
 								{/if}
 							</div>
 							<button
-								onclick={releaseFloatingIp}
-								disabled={actioning === 'fip-release'}
+								onclick={() => releaseFloatingIp(fip.id)}
+								disabled={actioning === 'fip-release-' + fip.id}
 								class="text-xs text-orange-400 hover:text-orange-300 px-2 py-1 border border-orange-900 hover:border-orange-700 rounded transition-colors disabled:text-gray-600"
 							>
-								{actioning === 'fip-release' ? '해제 중...' : '해제 및 삭제'}
+								{actioning === 'fip-release-' + fip.id ? '해제 중...' : '해제 및 삭제'}
 							</button>
 						</div>
 					{/each}

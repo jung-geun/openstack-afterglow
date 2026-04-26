@@ -178,23 +178,31 @@ def delete_port(conn: openstack.connection.Connection, port_id: str) -> None:
 
 
 def cleanup_instance_fips(conn: openstack.connection.Connection, instance_id: str) -> None:
-    """인스턴스 삭제 시 연결된 Floating IP를 해제하고 삭제한다."""
+    """인스턴스 포트에 연결된 Floating IP만 해제하고 삭제한다.
+
+    Neutron /v2.0/floatingips 는 device_id 필터를 지원하지 않으므로
+    포트 기반으로 대상 FIP를 식별한다 (Nova가 인스턴스 포트에 device_id를 세팅).
+    """
+    log = _logging.getLogger(__name__)
     try:
-        fips = list(conn.network.ips(device_id=instance_id))
+        ports = list(conn.network.ports(device_id=instance_id))
     except Exception:
-        # device_id 필터가 지원되지 않으면 전체 조회 후 필터
-        try:
-            ports = list(conn.network.ports(device_id=instance_id))
-            port_ids = {p.id for p in ports}
-            fips = [f for f in conn.network.ips() if f.port_id in port_ids]
-        except Exception:
-            return
+        log.warning("cleanup_instance_fips: 포트 조회 실패 (instance=%s)", instance_id, exc_info=True)
+        return
+    port_ids = {p.id for p in ports}
+    if not port_ids:
+        return
+    try:
+        fips = [f for f in conn.network.ips() if f.port_id in port_ids]
+    except Exception:
+        log.warning("cleanup_instance_fips: FIP 조회 실패 (instance=%s)", instance_id, exc_info=True)
+        return
     for fip in fips:
         try:
             conn.network.update_ip(fip.id, port_id=None)
             conn.network.delete_ip(fip.id, ignore_missing=True)
         except Exception:
-            pass
+            log.warning("cleanup_instance_fips: FIP %s 정리 실패", fip.id, exc_info=True)
 
 
 # ---------------------------------------------------------------------------

@@ -191,8 +191,11 @@ async def disassociate_floating_ip(
     fip_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
+    pid = conn._afterglow_project_id
     try:
-        return await asyncio.to_thread(neutron.disassociate_floating_ip, conn, fip_id)
+        result = await asyncio.to_thread(neutron.disassociate_floating_ip, conn, fip_id)
+        await invalidate(f"afterglow:neutron:{pid}:floating_ips")
+        return result
     except Exception:
         raise HTTPException(status_code=500, detail="Floating IP 해제 실패")
 
@@ -204,8 +207,10 @@ async def delete_floating_ip(
     fip_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
+    pid = conn._afterglow_project_id
     try:
         await asyncio.to_thread(neutron.delete_floating_ip, conn, fip_id)
+        await invalidate(f"afterglow:neutron:{pid}:floating_ips")
     except Exception:
         raise HTTPException(status_code=500, detail="Floating IP 삭제 실패")
 

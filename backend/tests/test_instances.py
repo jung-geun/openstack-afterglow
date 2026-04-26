@@ -269,3 +269,95 @@ async def test_create_instance_invalid_name(client, mock_conn):
         },
     )
     assert resp.status_code == 422
+
+
+# ────── Floating IP 해제 — cleanup_instance_fips 범위 검증 ──────
+
+
+def _make_port(pid: str):
+    from unittest.mock import MagicMock
+
+    p = MagicMock()
+    p.id = pid
+    return p
+
+
+def _make_fip(fid: str, port_id: str | None):
+    from unittest.mock import MagicMock
+
+    f = MagicMock()
+    f.id = fid
+    f.port_id = port_id
+    return f
+
+
+@pytest.mark.asyncio
+async def test_release_floating_ip_only_targets_instance_ports(client, mock_conn):
+    """해제 시 해당 인스턴스 포트에 연결된 FIP만 update/delete 한다."""
+    mock_conn.network.ports.return_value = [_make_port("p1"), _make_port("p2")]
+    mock_conn.network.ips.return_value = [
+        _make_fip("fip-1", "p1"),  # 대상 인스턴스 포트
+        _make_fip("fip-2", "other-port"),  # 다른 인스턴스
+        _make_fip("fip-3", None),  # 미연결
+    ]
+
+    resp = await client.delete("/api/instances/inst-1/floating-ip")
+    assert resp.status_code == 204
+
+    called_ids = [call.args[0] for call in mock_conn.network.update_ip.call_args_list]
+    assert called_ids == ["fip-1"], f"expected only fip-1 to be updated, got {called_ids}"
+    called_delete_ids = [call.args[0] for call in mock_conn.network.delete_ip.call_args_list]
+    assert called_delete_ids == ["fip-1"], f"expected only fip-1 to be deleted, got {called_delete_ids}"
+
+
+@pytest.mark.asyncio
+async def test_release_floating_ip_no_ports_does_nothing(client, mock_conn):
+    """포트가 없는 인스턴스 해제 시 어떤 FIP도 건드리지 않는다."""
+    mock_conn.network.ports.return_value = []
+
+    resp = await client.delete("/api/instances/inst-1/floating-ip")
+    assert resp.status_code == 204
+
+    mock_conn.network.update_ip.assert_not_called()
+    mock_conn.network.delete_ip.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_delete_instance_only_cleans_own_fips(client, mock_conn):
+    """인스턴스 삭제 시에도 해당 인스턴스 FIP만 정리된다 (다른 FIP 무사)."""
+    inst = make_instance()
+    inst.metadata = {}
+    mock_conn.network.ports.return_value = [_make_port("p-inst")]
+    mock_conn.network.ips.return_value = [
+        _make_fip("fip-own", "p-inst"),
+        _make_fip("fip-other", "p-other"),
+    ]
+
+    with (
+        patch("app.api.compute.instances.nova.get_server", return_value=inst),
+        patch("app.api.compute.instances.nova.delete_server", return_value=None),
+        patch("app.api.compute.instances.cinder.delete_volume", return_value=None),
+    ):
+        resp = await client.delete("/api/instances/inst-1")
+    assert resp.status_code == 204
+
+    called_delete_ids = [call.args[0] for call in mock_conn.network.delete_ip.call_args_list]
+    assert "fip-own" in called_delete_ids
+    assert "fip-other" not in called_delete_ids
+
+
+@pytest.mark.asyncio
+async def test_release_floating_ip_per_fip_failure_isolated(client, mock_conn):
+    """첫 FIP 정리 실패해도 두 번째 FIP는 정상 처리된다 (best-effort)."""
+    mock_conn.network.ports.return_value = [_make_port("p1")]
+    mock_conn.network.ips.return_value = [
+        _make_fip("fip-fail", "p1"),
+        _make_fip("fip-ok", "p1"),
+    ]
+    mock_conn.network.update_ip.side_effect = [Exception("Neutron 오류"), None]
+
+    resp = await client.delete("/api/instances/inst-1/floating-ip")
+    assert resp.status_code == 204
+
+    update_calls = [call.args[0] for call in mock_conn.network.update_ip.call_args_list]
+    assert update_calls == ["fip-fail", "fip-ok"]
