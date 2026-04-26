@@ -11,7 +11,7 @@ from sqlalchemy import delete, select
 
 from app.database import get_session_factory, is_db_available
 from app.models.db import K3sAgentVM, K3sCluster
-from app.services.k3s_crypto import decrypt_kubeconfig, encrypt_kubeconfig
+from app.services.k3s_crypto import decrypt_kubeconfig, decrypt_node_token, encrypt_kubeconfig, encrypt_node_token
 
 _logger = logging.getLogger(__name__)
 
@@ -236,7 +236,10 @@ async def update_cluster_status(
         }
         for k, v in extra_fields.items():
             if k in _column_map:
-                setattr(cluster, k, v if v else None)
+                if k == "node_token" and v:
+                    setattr(cluster, k, encrypt_node_token(v))
+                else:
+                    setattr(cluster, k, v if v else None)
             # agent_vm_ids는 add_agent_vms()로 별도 처리
 
         await session.commit()
@@ -357,7 +360,13 @@ async def get_cluster_node_token(project_id: str, cluster_id: str) -> str | None
         stmt = select(K3sCluster.node_token).where(K3sCluster.id == cluster_id, K3sCluster.project_id == project_id)
         result = await session.execute(stmt)
         row = result.scalar_one_or_none()
-        return row
+        if not row:
+            return None
+        try:
+            return decrypt_node_token(row)
+        except Exception:
+            # 암호화 전 평문 토큰이 저장된 레거시 레코드 — 그대로 반환
+            return row
 
 
 async def update_agent_vm_status(cluster_id: str, vm_id: str, status: str) -> None:

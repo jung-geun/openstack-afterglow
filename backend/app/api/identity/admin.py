@@ -10,7 +10,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.api.deps import get_os_conn, require_admin
 from app.utils.version import read_app_version
@@ -1770,8 +1770,12 @@ async def download_admin_k3s_kubeconfig(cluster_id: str):
     )
 
 
+class AdminScaleK3sRequest(BaseModel):
+    agent_count: int = Field(ge=0, le=50)
+
+
 @router.patch("/k3s-clusters/{cluster_id}/scale", dependencies=[Depends(require_admin)])
-async def scale_admin_k3s_cluster(cluster_id: str, req: dict):
+async def scale_admin_k3s_cluster(cluster_id: str, req: AdminScaleK3sRequest):
     """관리자용 k3s 클러스터 에이전트 스케일링."""
     import asyncio
 
@@ -1783,9 +1787,7 @@ async def scale_admin_k3s_cluster(cluster_id: str, req: dict):
     if cluster.get("status") != "ACTIVE":
         raise HTTPException(status_code=409, detail="ACTIVE 상태의 클러스터만 스케일링할 수 있습니다")
 
-    desired = req.get("agent_count")
-    if desired is None or not isinstance(desired, int) or desired < 0:
-        raise HTTPException(status_code=422, detail="agent_count는 0 이상의 정수여야 합니다")
+    desired = req.agent_count
 
     project_id = cluster.get("project_id", "")
     current_agent_ids: list[str] = cluster.get("agent_vm_ids") or []

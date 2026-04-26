@@ -52,6 +52,16 @@ def decrypt_kubeconfig(ciphertext_b64: str) -> str:
     return _aes_decrypt(_get_key(), ciphertext_b64)
 
 
+def encrypt_node_token(plaintext: str) -> str:
+    """Encrypt k3s node token with AES-256-GCM."""
+    return _aes_encrypt(_get_key(), plaintext)
+
+
+def decrypt_node_token(ciphertext_b64: str) -> str:
+    """Decrypt k3s node token."""
+    return _aes_decrypt(_get_key(), ciphertext_b64)
+
+
 def encrypt_notion_config(plaintext: str) -> str:
     """Encrypt Notion API key with AES-256-GCM."""
     return _aes_encrypt(_get_notion_key(), plaintext)

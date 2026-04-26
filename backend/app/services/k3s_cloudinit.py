@@ -3,6 +3,7 @@
 import base64
 import gzip
 import json
+import re
 from pathlib import Path
 from typing import NamedTuple
 
@@ -19,6 +20,21 @@ _jinja = Environment(
 OS_TYPE_UBUNTU = "ubuntu"
 OS_TYPE_FCOS = "fcos"
 VALID_OS_TYPES = {OS_TYPE_UBUNTU, OS_TYPE_FCOS}
+
+# SSH 공개키 형식 검증 패턴 (개행 및 YAML injection 방지)
+_SSH_KEY_RE = re.compile(
+    r"^(ssh-rsa|ssh-ed25519|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com)"
+    r"\s+[A-Za-z0-9+/=]+"
+    r"(\s+\S+)?$"
+)
+
+
+def _validate_ssh_public_key(key: str) -> None:
+    """SSH 공개키 형식 검증. 유효하지 않으면 ValueError 발생."""
+    if "\n" in key or "\r" in key:
+        raise ValueError("SSH 공개키에 개행 문자가 포함될 수 없습니다")
+    if not _SSH_KEY_RE.match(key.strip()):
+        raise ValueError(f"유효하지 않은 SSH 공개키 형식입니다: {key[:40]!r}...")
 
 
 class UserdataResult(NamedTuple):
@@ -294,6 +310,10 @@ def generate_agent_userdata(
     """k3s 에이전트 노드 userdata를 렌더링하여 UserdataResult 반환."""
     if not node_token:
         raise ValueError("node_token이 비어있습니다. 서버 콜백에서 토큰이 전달되지 않았습니다.")
+
+    # SSH 공개키 형식 검증 (YAML injection 방지)
+    if ssh_public_key:
+        _validate_ssh_public_key(ssh_public_key)
 
     # 하위호환: occm_enabled → cloud-provider=external
     agent_args = list(extra_agent_args or [])
