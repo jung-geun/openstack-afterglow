@@ -1,0 +1,80 @@
+#!/bin/bash
+# Union VM 헬스체크 스크립트 — systemd timer에 의해 주기적 실행
+set -euo pipefail
+
+REPORT_URL="{{ report_url }}"
+INSTANCE_ID="{{ instance_id }}"
+REPORT_TOKEN="{{ report_token }}"
+
+# OverlayFS 마운트 상태
+if mountpoint -q /opt/layers/merged 2>/dev/null; then
+  OVERLAY_MOUNTED="true"
+else
+  OVERLAY_MOUNTED="false"
+fi
+
+# Upper 볼륨 사용량 (df -PB1)
+UPPER_USED=0
+UPPER_TOTAL=0
+UPPER_PCT=0
+if mountpoint -q /opt/layers/upper 2>/dev/null; then
+  DF_OUT=$(df -PB1 /opt/layers/upper 2>/dev/null | tail -1 || echo "")
+  if [ -n "$DF_OUT" ]; then
+    UPPER_TOTAL=$(echo "$DF_OUT" | awk '{print $2}')
+    UPPER_USED=$(echo  "$DF_OUT" | awk '{print $3}')
+    if [ "$UPPER_TOTAL" -gt 0 ]; then
+      UPPER_PCT=$(awk "BEGIN {printf \"%.1f\", $UPPER_USED/$UPPER_TOTAL*100}")
+    fi
+  fi
+fi
+
+# kernel, uptime
+KERNEL=$(uname -r 2>/dev/null || echo "unknown")
+UPTIME=$(awk '{print $1}' /proc/uptime 2>/dev/null || echo "0")
+
+# 공유 상태 JSON 배열 구축
+SHARES_JSON="["
+FIRST=1
+{% for fs in file_storages %}
+SHARE_NAME="{{ fs.name }}"
+SHARE_PROTO="{{ fs.share_proto }}"
+SHARE_PATH="/opt/layers/lower_{{ fs.name }}"
+SHARE_MOUNTED="false"
+SHARE_STATUS="unreachable"
+
+if timeout 5 stat "$SHARE_PATH" > /dev/null 2>&1; then
+  SHARE_MOUNTED="true"
+  SHARE_STATUS="ok"
+elif [ $? -eq 124 ]; then
+  SHARE_STATUS="timeout"
+fi
+
+SHARE_OBJ="{\"name\":\"$SHARE_NAME\",\"proto\":\"$SHARE_PROTO\",\"mounted\":$SHARE_MOUNTED,\"status\":\"$SHARE_STATUS\"}"
+if [ $FIRST -eq 0 ]; then
+  SHARES_JSON="$SHARES_JSON,"
+fi
+SHARES_JSON="$SHARES_JSON$SHARE_OBJ"
+FIRST=0
+{% endfor %}
+SHARES_JSON="$SHARES_JSON]"
+
+REPORTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+PAYLOAD=$(printf '{"overlay_mounted":%s,"upper_used_bytes":%s,"upper_total_bytes":%s,"upper_usage_pct":%s,"shares":%s,"kernel":"%s","uptime_seconds":%s,"reported_at":"%s"}' \
+  "$OVERLAY_MOUNTED" \
+  "$UPPER_USED" \
+  "$UPPER_TOTAL" \
+  "$UPPER_PCT" \
+  "$SHARES_JSON" \
+  "$KERNEL" \
+  "$UPTIME" \
+  "$REPORTED_AT")
+
+curl -sf -X POST \
+  "${REPORT_URL}/api/instances/${INSTANCE_ID}/health/report" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${REPORT_TOKEN}" \
+  -d "$PAYLOAD" \
+  --connect-timeout 10 \
+  --max-time 30 \
+  -o /dev/null || true

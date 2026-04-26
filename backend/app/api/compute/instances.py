@@ -224,6 +224,21 @@ async def create_instance(
             if not ok:
                 raise HTTPException(status_code=409, detail=msg)
 
+        # 헬스 리포트 토큰 발급 (서버 생성 전에 UUID 선발급)
+        import uuid as _uuid
+
+        project_id = conn._afterglow_project_id
+        from app.services import instance_health as _ih
+
+        _health_id = str(_uuid.uuid4())  # userdata에 포함할 안정적 식별자
+        _report_url = settings.k3s_callback_base_url or ""  # 백엔드 공개 URL 재사용
+        _health_token = ""
+        if _report_url:
+            try:
+                _health_token = await _ih.issue_report_token(_health_id, project_id)
+            except Exception:
+                logger.warning("헬스 토큰 발급 실패, 헬스체크 없이 계속", exc_info=True)
+
         userdata = cloudinit.generate_userdata(
             libraries=resolved_libs,
             strategy=req.strategy,
@@ -231,6 +246,9 @@ async def create_instance(
             upper_device="/dev/vdb",  # Nova가 두 번째 블록으로 붙임
             ceph_monitors=settings.ceph_monitors,
             gpu_available=gpu_available,
+            instance_id=_health_id if _health_token else "",
+            report_url=_report_url if _health_token else "",
+            report_token=_health_token,
         )
 
         # ------------------------------------------------------------------
@@ -242,6 +260,8 @@ async def create_instance(
             "union_share_ids": ",".join([s.get("file_storage_id", "") for s in file_storages_info]),
             "union_upper_volume_id": upper_volume_id,
         }
+        if _health_token:
+            meta["union_health_id"] = _health_id
 
         # upper 볼륨을 두 번째 블록 디바이스로 추가
         # (Nova block_device_mapping_v2 에 추가 볼륨 연결)
@@ -446,6 +466,19 @@ async def create_instance_async(
                 flavor = next((f for f in flavors if f.id == req.flavor_id), None)
                 gpu_available = flavor.is_gpu if flavor else False
 
+                import uuid as _uuid2
+
+                _sse_health_id = str(_uuid2.uuid4())
+                _sse_report_url = settings.k3s_callback_base_url or ""
+                _sse_health_token = ""
+                if _sse_report_url:
+                    try:
+                        from app.services import instance_health as _ih2
+
+                        _sse_health_token = await _ih2.issue_report_token(_sse_health_id, conn._afterglow_project_id)
+                    except Exception:
+                        logger.warning("SSE 헬스 토큰 발급 실패", exc_info=True)
+
                 userdata = cloudinit.generate_userdata(
                     libraries=resolved_libs,
                     strategy=req.strategy,
@@ -453,6 +486,9 @@ async def create_instance_async(
                     upper_device="/dev/vdb",
                     ceph_monitors=settings.ceph_monitors,
                     gpu_available=gpu_available,
+                    instance_id=_sse_health_id if _sse_health_token else "",
+                    report_url=_sse_report_url if _sse_health_token else "",
+                    report_token=_sse_health_token,
                 )
                 yield send_progress(ProgressStep.USERDATA_GENERATING, 65, "cloud-init 생성 완료")
 
@@ -468,6 +504,8 @@ async def create_instance_async(
                 ),
                 "union_upper_volume_id": upper_volume_id or "none",
             }
+            if resolved_libs and _sse_health_token:
+                meta["union_health_id"] = _sse_health_id
 
             server = await asyncio.to_thread(
                 nova.create_server,
@@ -612,6 +650,16 @@ async def delete_instance(
     upper_volume_id = server.union_upper_volume_id
     file_storage_ids = server.union_share_ids
     strategy = server.union_strategy
+    health_id = (server.metadata or {}).get("union_health_id", "")
+
+    # 헬스 토큰 폐기 (best-effort)
+    if health_id:
+        try:
+            from app.services import instance_health as _ih_del
+
+            await _ih_del.revoke_report_token_by_instance(health_id)
+        except Exception:
+            logger.warning("헬스 토큰 폐기 실패 (instance=%s)", instance_id)
 
     # Nova 서버 삭제
     await asyncio.to_thread(nova.delete_server, conn, instance_id)
@@ -1107,7 +1155,8 @@ async def assign_floating_ip(
     except HTTPException:
         raise
     except Exception as ex:
-        raise HTTPException(status_code=500, detail=f"Floating IP 할당 실패: {ex}")
+        logger.warning("Floating IP 할당 실패: %s", ex)
+        raise HTTPException(status_code=500, detail="Floating IP 할당 실패")
 
 
 @router.delete("/{instance_id}/floating-ip", status_code=204)
@@ -1121,7 +1170,8 @@ async def release_floating_ip(
         await asyncio.to_thread(neutron.cleanup_instance_fips, conn, instance_id)
         await invalidate(f"afterglow:neutron:{pid}:floating_ips")
     except Exception as ex:
-        raise HTTPException(status_code=500, detail=f"Floating IP 해제 실패: {ex}")
+        logger.warning("Floating IP 해제 실패: %s", ex)
+        raise HTTPException(status_code=500, detail="Floating IP 해제 실패")
 
 
 @router.get("/availability-zones")

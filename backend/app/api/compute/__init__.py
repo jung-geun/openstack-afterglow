@@ -4,6 +4,7 @@ _ROUTERS = {
     "flavors_router": ".flavors",
     "images_router": ".images",
     "instances_router": ".instances",
+    "instance_health_router": ".instance_health",
     "keypairs_router": ".keypairs",
 }
 

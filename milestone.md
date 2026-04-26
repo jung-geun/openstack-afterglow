@@ -538,12 +538,12 @@ Step 5: 요약 & 배포
 
 > **목표**: 프로덕션 환경 운영에 필요한 기능 추가
 
-- [ ] 5.1 OverlayFS 상태 모니터링 에이전트
-  - [ ] VM 내부 헬스체크 스크립트 (`/opt/union/scripts/health-check.sh`)
-  - [ ] 마운트 상태: `mountpoint -q /opt/layers/merged` 확인
-  - [ ] NFS 연결 상태: `rpcinfo -p <nfs_server>` 또는 `nfsstat` 확인
-  - [ ] 디스크 사용량: upper 볼륨 사용률 경고 (임계치 설정 가능)
-  - [ ] 결과를 Nova metadata 또는 별도 API로 리포트
+- [x] 5.1 OverlayFS 상태 모니터링 에이전트
+  - [x] VM 내부 헬스체크 스크립트 (`/opt/union/scripts/health-check.sh`)
+  - [x] 마운트 상태: `mountpoint -q /opt/layers/merged` 확인
+  - [x] NFS/CephFS 연결 상태: `timeout 5 stat` (hard mount hang 방지)
+  - [x] 디스크 사용량: upper 볼륨 사용률 경고 (90%/95% 임계)
+  - [x] 결과를 backend API (`POST /api/instances/{id}/health/report`)로 리포트 (Bearer 토큰 인증, 30분 TTL Redis 캐시)
 
 - [ ] 5.2 Manila Share Snapshot 관리
   - [ ] 사전 빌드 라이브러리의 스냅샷 생성/복원 기능
@@ -908,5 +908,5 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 - [ ] **Fork 지원**: `POST /api/union/layers/{id}/fork` — sealed 레이어에서 새 RW 레이어 파생
 - [ ] **Rebuild**: 동일 부모 + 다른 내용 → 새 hash 신규 레이어 (overwrite 금지 정책 유지)
 - [ ] **멀티 상속(실험)**: lowerdir에 여러 부모 지원 — 다이아몬드 충돌 해결 정책 필요
-- [ ] **OverlayFS 상태 모니터링 에이전트**: User VM에서 마운트 상태 주기적 보고
+- [x] **OverlayFS 상태 모니터링 에이전트**: User VM에서 마운트 상태 주기적 보고
 - [ ] **Manila Share Snapshot 관리**: 레이어 백업/복원

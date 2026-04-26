@@ -44,6 +44,9 @@ def generate_userdata(
     upper_device: str,
     ceph_monitors: str,
     gpu_available: bool = False,
+    instance_id: str = "",
+    report_url: str = "",
+    report_token: str = "",
 ) -> str:
     """
     cloud-init userdata 문자열(YAML) 생성.
@@ -51,20 +54,14 @@ def generate_userdata(
     Args:
         libraries: 선택된 라이브러리 ID 목록 (의존성 포함, 토폴로지 정렬)
         strategy: "prebuilt" | "dynamic"
-        file_storages: [
-            {
-              name: str,                # 라이브러리 ID (디렉토리명에 사용)
-              share_proto: str,         # "CEPHFS" | "NFS"
-              export_path: str,         # CephFS export location (CEPHFS인 경우)
-              cephx_id: str,           # CephX 사용자 ID (CEPHFS인 경우)
-              cephx_key: str,           # CephX secret key (CEPHFS인 경우)
-              nfs_export_location: str, # NFS export 경로 (NFS인 경우)
-              mount_options: str,       # NFS 마운트 옵션 (선택)
-            }
-        ]
+        file_storages: [{name, share_proto, export_path, cephx_id, cephx_key,
+                         nfs_export_location, mount_options}]
         upper_device: Cinder upper 볼륨 장치 경로 (예: /dev/vdb)
         ceph_monitors: 쉼표 구분 모니터 주소
         gpu_available: GPU 플레이버 여부 (PyTorch CUDA 인덱스 선택)
+        instance_id: Nova 인스턴스 ID (헬스 리포트용)
+        report_url: 백엔드 베이스 URL (헬스 리포트용)
+        report_token: 헬스 리포트 토큰 (헬스 리포트용)
     """
     resolved_libs = lib_svc.resolve_with_deps(libraries)
 
@@ -101,6 +98,15 @@ def generate_userdata(
     has_cephfs = any(fs.get("share_proto", "CEPHFS") == "CEPHFS" for fs in file_storages)
     has_nfs = any(fs.get("share_proto", "CEPHFS") == "NFS" for fs in file_storages)
 
+    health_check_script = ""
+    if report_url and instance_id and report_token:
+        health_check_script = _jinja.get_template("health_check.sh.j2").render(
+            report_url=report_url,
+            instance_id=instance_id,
+            report_token=report_token,
+            file_storages=file_storages,
+        )
+
     yaml_str = _jinja.get_template("cloudinit_base.yaml.j2").render(
         strategy=strategy,
         libraries=resolved_libs,
@@ -113,6 +119,8 @@ def generate_userdata(
         has_nfs=has_nfs,
         gpu_available=gpu_available,
         pythonpath=pythonpath,
+        report_url=report_url,
+        health_check_script=health_check_script,
     )
 
     # Nova는 userdata를 base64로 인코딩해서 전달

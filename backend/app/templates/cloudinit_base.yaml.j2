@@ -81,7 +81,7 @@ write_files:
       [Install]
       WantedBy=multi-user.target
 
-{% if report_url %}
+{% if health_check_script %}
   # 헬스체크 스크립트
   - path: /opt/union/scripts/health-check.sh
     permissions: "0750"
@@ -122,7 +122,7 @@ runcmd:
   - systemctl daemon-reload
   - systemctl enable union-overlay
   - systemctl start union-overlay
-{% if report_url %}
+{% if health_check_script %}
   - systemctl enable --now union-health.timer
 {% endif %}
 {% if strategy == "dynamic" %}

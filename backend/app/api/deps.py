@@ -25,7 +25,7 @@ def _session_key(token_hash: str, project_id: str) -> str:
 
 async def _cached_validate(token: str, project_id: str) -> dict:
     """토큰 검증 결과를 Redis에 캐시 (TTL 300s). 반복 API 호출 속도 향상."""
-    token_hash = hashlib.sha256(token.encode()).hexdigest()[:32]
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
     cache_key = f"afterglow:session:{token_hash}:{project_id or 'noscope'}"
     return await cached_call(cache_key, ttl_static(), lambda: keystone.validate_token(token, project_id=project_id))
 
@@ -63,7 +63,7 @@ async def get_session_remaining(token: str, project_id: str) -> int:
     from app.services.cache import _get_redis
 
     settings = get_settings()
-    token_hash = hashlib.sha256(token.encode()).hexdigest()[:32]
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
     key = _session_key(token_hash, project_id or "noscope")
     try:
         r = await _get_redis()
@@ -82,7 +82,7 @@ async def extend_session(token: str, project_id: str) -> None:
     from app.services.cache import _get_redis
 
     settings = get_settings()
-    token_hash = hashlib.sha256(token.encode()).hexdigest()[:32]
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
     key = _session_key(token_hash, project_id or "noscope")
     abs_key = f"afterglow:session-abs:{token_hash}:{project_id or 'noscope'}"
     try:
@@ -113,7 +113,7 @@ async def get_token_info(
     if not x_auth_token:
         raise HTTPException(status_code=401, detail="X-Auth-Token 헤더가 필요합니다")
     try:
-        token_hash = hashlib.sha256(x_auth_token.encode()).hexdigest()[:32]
+        token_hash = hashlib.sha256(x_auth_token.encode()).hexdigest()
         await _check_session_timeout(token_hash, x_project_id or "")
         return await _cached_validate(x_auth_token, x_project_id or "")
     except HTTPException:
@@ -140,7 +140,7 @@ async def get_os_conn(
     if not x_auth_token:
         raise HTTPException(status_code=401, detail="X-Auth-Token 헤더가 필요합니다")
     try:
-        token_hash = hashlib.sha256(x_auth_token.encode()).hexdigest()[:32]
+        token_hash = hashlib.sha256(x_auth_token.encode()).hexdigest()
         await _check_session_timeout(token_hash, x_project_id or "")
         token_info = await _cached_validate(x_auth_token, x_project_id or "")
         scoped_token = token_info["token"]

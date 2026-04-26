@@ -85,6 +85,8 @@ EXPECTED_PUBLIC = frozenset(
         ("POST", "/api/auth/login"),
         # k3s 활성 시에만 등록되는 라우트
         ("POST", "/api/k3s/callback"),
+        # VM 내부 헬스 리포트 — Bearer report_token으로 자체 인증 (Keystone X-Auth-Token 불가)
+        ("POST", "/api/instances/{instance_id}/health/report"),
     }
 )
 
