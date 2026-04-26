@@ -11,6 +11,7 @@ GitLab OIDC 인증 서비스.
    - TokenResponse 호환 dict 반환
 """
 
+import asyncio
 import logging
 import secrets
 import urllib.parse
@@ -156,6 +157,28 @@ async def _list_projects_for_token(unscoped_token: str) -> list[dict]:
         return resp.json().get("projects", [])
 
 
+async def _get_user_default_project_id(unscoped_token: str, user_id: str) -> str:
+    """unscoped 토큰으로 사용자의 default_project_id를 비동기로 조회.
+
+    Keystone GET /v3/users/{user_id}. 실패 또는 미설정 시 빈 문자열을 반환한다.
+    """
+    if not user_id:
+        return ""
+    settings = get_settings()
+    try:
+        async with httpx.AsyncClient(timeout=10, verify=settings.ssl_verify) as client:
+            resp = await client.get(
+                f"{settings.os_auth_url}/users/{user_id}",
+                headers={"X-Auth-Token": unscoped_token},
+            )
+            resp.raise_for_status()
+            user = resp.json().get("user", {})
+            return user.get("default_project_id") or ""
+    except Exception:
+        logger.warning("default_project_id 조회 실패", exc_info=True)
+        return ""
+
+
 async def _scope_token(unscoped_token: str, project_id: str) -> dict:
     """unscoped 토큰을 특정 프로젝트로 scope → scoped 토큰과 정보 반환."""
     settings = get_settings()
@@ -195,16 +218,24 @@ async def exchange_code(code: str, state: str) -> dict:
     """
     GitLab OAuth2 authorization code를 Keystone 토큰으로 교환.
     TokenResponse 호환 dict 반환.
+
+    사용자의 default_project_id가 접근 가능한 프로젝트 목록에 포함되어 있으면
+    해당 프로젝트로 scope, 그렇지 않으면 첫 번째 프로젝트로 fallback.
+    프로젝트 목록 조회와 default_project_id 조회를 병렬로 수행한다.
     """
     await _validate_state(state)
 
     tokens = await _exchange_gitlab_code(code)
     fed = await _federated_auth(tokens["id_token"])
     unscoped_token = fed["token"]
+    user_id = fed.get("user", {}).get("id", "")
 
-    projects = await _list_projects_for_token(unscoped_token)
+    projects, default_pid = await asyncio.gather(
+        _list_projects_for_token(unscoped_token),
+        _get_user_default_project_id(unscoped_token, user_id),
+    )
     if not projects:
         raise ValueError("접근 가능한 프로젝트가 없습니다")
 
-    first_project_id = projects[0]["id"]
-    return await _scope_token(unscoped_token, first_project_id)
+    target_pid = default_pid if default_pid and any(p["id"] == default_pid for p in projects) else projects[0]["id"]
+    return await _scope_token(unscoped_token, target_pid)
