@@ -1,15 +1,14 @@
 <script lang="ts">
   import { auth } from '$lib/stores/auth';
-  import { untrack } from 'svelte';
   import { api, ApiError, getBaseUrl } from '$lib/api/client';
   import { toast } from '$lib/stores/toast';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
-  import RefreshButton from '$lib/components/RefreshButton.svelte';
-  import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
+  import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
   import K3sClusterDetailPanel from '$lib/components/K3sClusterDetailPanel.svelte';
   import SlidePanel from '$lib/components/SlidePanel.svelte';
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
+  import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 
   interface K3sCluster {
     id: string;
@@ -103,7 +102,6 @@
   let loading = $state(true);
   let refreshing = $state(false);
   let error = $state('');
-  let autoRefresh = $state(false);
   let deleting = $state<string | null>(null);
   let showDeleted = $state(false);
 
@@ -291,16 +289,17 @@
     }
   }
 
-  $effect(() => {
-    if (!$auth.projectId) return;
-    loading = true;
-    untrack(() => fetchClusters());
+  const ar = createAutoRefresh(() => fetchClusters(), {
+    storageKey: 'dashboard-drover',
+    defaultActive: true,
+    defaultInterval: 10,
+    intervalOptions: [10, 15, 30, 60],
   });
 
   $effect(() => {
-    if (!$auth.projectId || !autoRefresh) return;
-    const interval = setInterval(() => untrack(() => fetchClusters()), 5000);
-    return () => clearInterval(interval);
+    if (!$auth.projectId) return;
+    loading = true;
+    fetchClusters();
   });
 </script>
 
@@ -498,8 +497,13 @@
       >
         {showDeleted ? '삭제 이력 숨기기' : '삭제 이력 보기'}
       </button>
-      <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={5} />
-      <span class="hidden sm:inline-flex"><RefreshButton {refreshing} onclick={forceRefresh} /></span>
+      <AutoRefreshControl
+        bind:active={ar.active}
+        bind:intervalSeconds={ar.intervalSeconds}
+        intervalOptions={ar.intervalOptions}
+        refreshing={refreshing || loading}
+        onManualRefresh={forceRefresh}
+      />
       <button onclick={openCreateModal}
         class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
         + 클러스터 생성

@@ -1,11 +1,10 @@
 <script lang="ts">
   import { auth } from '$lib/stores/auth';
-  import { untrack } from 'svelte';
   import { api, ApiError, memoryCache } from '$lib/api/client';
   import type { Network, FloatingIp } from '$lib/types/resources';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
-  import RefreshButton from '$lib/components/RefreshButton.svelte';
-  import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
+  import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+  import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
   import SlidePanel from '$lib/components/SlidePanel.svelte';
   import NetworkDetailPanel from '$lib/components/NetworkDetailPanel.svelte';
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
@@ -18,7 +17,6 @@
   let loading = $state(true);
   let refreshing = $state(false);
   let error = $state('');
-  let autoRefresh = $state(false);
   let deleting = $state<string | null>(null);
   let selectedNetworkId = $state<string | null>(null);
   let defaultNetworkId = $state<string | null>(null);
@@ -143,17 +141,18 @@
     }
   }
 
+  const ar = createAutoRefresh(() => { fetchNetworks(); fetchFloatingIps(); }, {
+    storageKey: 'dashboard-network-networks',
+    defaultActive: true,
+    defaultInterval: 30,
+    intervalOptions: [10, 15, 30, 60],
+  });
+
   $effect(() => {
     const projectId = $auth.projectId;
     if (!projectId) return;
     loading = true;
-    untrack(() => { fetchNetworks(); fetchFloatingIps(); fetchDefaultNetwork(); });
-  });
-
-  $effect(() => {
-    if (!$auth.projectId || !autoRefresh) return;
-    const interval = setInterval(() => untrack(() => { fetchNetworks(); fetchFloatingIps(); }), 30000);
-    return () => clearInterval(interval);
+    fetchNetworks(); fetchFloatingIps(); fetchDefaultNetwork();
   });
 
   $effect(() => {
@@ -206,8 +205,13 @@
 <div class="p-4 md:p-8">
   <PageHeader breadcrumb="NETWORK / NETWORKS" title="네트워크">
     {#snippet actions()}
-      <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={30} />
-      <RefreshButton {refreshing} onclick={forceRefresh} />
+      <AutoRefreshControl
+        bind:active={ar.active}
+        bind:intervalSeconds={ar.intervalSeconds}
+        intervalOptions={ar.intervalOptions}
+        refreshing={refreshing}
+        onManualRefresh={forceRefresh}
+      />
       <button onclick={() => showModal = true} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 네트워크 생성</button>
     {/snippet}
   </PageHeader>

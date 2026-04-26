@@ -1,11 +1,10 @@
 <script lang="ts">
   import { auth } from '$lib/stores/auth';
-  import { untrack } from 'svelte';
   import { api, ApiError } from '$lib/api/client';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import { formatStorage } from '$lib/utils/format';
-  import RefreshButton from '$lib/components/RefreshButton.svelte';
-  import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
+  import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+  import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
@@ -31,7 +30,6 @@
   let loading = $state(true);
   let refreshing = $state(false);
   let error = $state('');
-  let autoRefresh = $state(false);
   let deleting = $state<string | null>(null);
   let showModal = $state(false);
   let creating = $state(false);
@@ -93,16 +91,17 @@
     }
   }
 
-  $effect(() => {
-    const pid = $auth.projectId;
-    if (!pid) return;
-    untrack(() => { fetchSnapshots(); fetchVolumes(); });
+  const ar = createAutoRefresh(() => fetchSnapshots(), {
+    storageKey: 'dashboard-volume-snapshots',
+    defaultActive: true,
+    defaultInterval: 15,
+    intervalOptions: [10, 15, 30, 60],
   });
 
   $effect(() => {
-    if (!$auth.projectId || !autoRefresh) return;
-    const interval = setInterval(() => untrack(() => { fetchSnapshots(); }), 15000);
-    return () => clearInterval(interval);
+    const pid = $auth.projectId;
+    if (!pid) return;
+    fetchSnapshots(); fetchVolumes();
   });
 </script>
 
@@ -148,8 +147,13 @@
 <div class="p-4 md:p-8">
   <PageHeader breadcrumb="VOLUMES / SNAPSHOTS" title="볼륨 스냅샷">
     {#snippet actions()}
-      <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={15} />
-      <RefreshButton {refreshing} onclick={forceRefresh} />
+      <AutoRefreshControl
+        bind:active={ar.active}
+        bind:intervalSeconds={ar.intervalSeconds}
+        intervalOptions={ar.intervalOptions}
+        refreshing={refreshing}
+        onManualRefresh={forceRefresh}
+      />
       <button onclick={() => showModal = true} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 스냅샷 생성</button>
     {/snippet}
   </PageHeader>

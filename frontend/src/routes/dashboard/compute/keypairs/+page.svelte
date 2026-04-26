@@ -1,10 +1,9 @@
 <script lang="ts">
   import { auth } from '$lib/stores/auth';
-  import { untrack } from 'svelte';
   import { api, ApiError } from '$lib/api/client';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
-  import RefreshButton from '$lib/components/RefreshButton.svelte';
-  import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
+  import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+  import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
   interface Keypair {
@@ -19,7 +18,6 @@
   let loading = $state(true);
   let refreshing = $state(false);
   let error = $state('');
-  let autoRefresh = $state(false);
   let deleting = $state<string | null>(null);
   let copiedFingerprint = $state<string | null>(null);
   let showModal = $state(false);
@@ -47,6 +45,13 @@
       refreshing = false;
     }
   }
+
+  const ar = createAutoRefresh(() => fetchKeypairs(), {
+    storageKey: 'dashboard-compute-keypairs',
+    defaultActive: true,
+    defaultInterval: 60,
+    intervalOptions: [10, 15, 30, 60],
+  });
 
   async function createKeypair() {
     if (!form.name.trim()) return;
@@ -121,13 +126,7 @@
   $effect(() => {
     const pid = $auth.projectId;
     if (!pid) return;
-    untrack(() => { fetchKeypairs(); });
-  });
-
-  $effect(() => {
-    if (!$auth.projectId || !autoRefresh) return;
-    const interval = setInterval(() => untrack(() => { fetchKeypairs(); }), 60000);
-    return () => clearInterval(interval);
+    fetchKeypairs();
   });
 </script>
 
@@ -171,8 +170,13 @@
 <div class="p-4 md:p-8">
   <PageHeader breadcrumb="COMPUTE / KEYPAIRS" title="키페어">
     {#snippet actions()}
-      <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={60} />
-      <RefreshButton {refreshing} onclick={forceRefresh} />
+      <AutoRefreshControl
+        bind:active={ar.active}
+        bind:intervalSeconds={ar.intervalSeconds}
+        intervalOptions={ar.intervalOptions}
+        refreshing={refreshing}
+        onManualRefresh={forceRefresh}
+      />
       <button onclick={() => showModal = true} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 키페어 생성</button>
     {/snippet}
   </PageHeader>

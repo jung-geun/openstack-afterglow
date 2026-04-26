@@ -1,12 +1,11 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import StatusChip from '$lib/components/ui/StatusChip.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
-	import RefreshButton from '$lib/components/RefreshButton.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 
 	interface DbInstance {
 		id: string;
@@ -36,7 +35,6 @@
 	let instances = $state<DbInstance[]>([]);
 	let loading = $state(true);
 	let refreshing = $state(false);
-	let autoRefresh = $state(false);
 	let deleting = $state<string | null>(null);
 	let restarting = $state<string | null>(null);
 
@@ -148,17 +146,18 @@
 		}
 	}
 
+	const ar = createAutoRefresh(() => load(), {
+		storageKey: 'dashboard-database-instances',
+		defaultActive: true,
+		defaultInterval: 15,
+		intervalOptions: [10, 15, 30, 60],
+	});
+
 	$effect(() => {
 		const pid = $auth.projectId;
 		if (!pid) return;
 		loading = true;
-		untrack(() => { load(); });
-	});
-
-	$effect(() => {
-		if (!$auth.projectId || !autoRefresh) return;
-		const interval = setInterval(() => untrack(() => { load(); }), 10000);
-		return () => clearInterval(interval);
+		load();
 	});
 </script>
 
@@ -270,8 +269,13 @@
 <div class="p-4 md:p-8 max-w-6xl">
 	<PageHeader breadcrumb="DATABASE / INSTANCES" title="DB 인스턴스">
 		{#snippet actions()}
-			<AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={10} />
-			<RefreshButton {refreshing} onclick={forceRefresh} />
+			<AutoRefreshControl
+				bind:active={ar.active}
+				bind:intervalSeconds={ar.intervalSeconds}
+				intervalOptions={ar.intervalOptions}
+				refreshing={refreshing || loading}
+				onManualRefresh={forceRefresh}
+			/>
 			<button
 				onclick={openModal}
 				class="text-xs text-white bg-amber-600 hover:bg-amber-500 transition-colors px-3 py-1.5 rounded border border-amber-500"

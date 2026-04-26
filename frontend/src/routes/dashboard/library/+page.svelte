@@ -3,7 +3,7 @@
   import { auth, isAdmin } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
-  import RefreshButton from '$lib/components/RefreshButton.svelte';
+
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
@@ -114,7 +114,7 @@
           href="/dashboard/library/templates"
           class="px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 rounded-md transition-colors"
         >템플릿</a>
-        <RefreshButton onclick={loadLayers} />
+        <button onclick={loadLayers} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600 flex items-center gap-1.5">새로고침</button>
       </div>
     {/snippet}
   </PageHeader>

@@ -1,15 +1,14 @@
 <script lang="ts">
 	import { auth } from '$lib/stores/auth';
-	import { untrack } from 'svelte';
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
-	import RefreshButton from '$lib/components/RefreshButton.svelte';
-	import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 	import GlobalTopology from '$lib/components/GlobalTopology.svelte';
 	import InstanceDetailPanel from '$lib/components/InstanceDetailPanel.svelte';
 	import RouterDetailPanel from '$lib/components/RouterDetailPanel.svelte';
 	import SlidePanel from '$lib/components/SlidePanel.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 
 	let isLight = $state(false);
 	$effect(() => {
@@ -66,17 +65,17 @@
 	let error = $state('');
 	let selectedInstanceId = $state<string | null>(null);
 	let selectedRouterId = $state<string | null>(null);
-	let autoRefresh = $state(false);
 
-	$effect(() => {
-		if (!$auth.token || !$auth.projectId) return;
-		untrack(() => { fetchTopology(); });
+	const ar = createAutoRefresh(() => fetchTopology(), {
+		storageKey: 'dashboard-network-topology',
+		defaultActive: true,
+		defaultInterval: 30,
+		intervalOptions: [10, 15, 30, 60],
 	});
 
 	$effect(() => {
-		if (!$auth.projectId || !autoRefresh) return;
-		const interval = setInterval(() => untrack(() => { fetchTopology(); }), 30000);
-		return () => clearInterval(interval);
+		if (!$auth.token || !$auth.projectId) return;
+		fetchTopology();
 	});
 
 	async function fetchTopology(opts?: { refresh?: boolean }) {
@@ -109,8 +108,13 @@
 <div class="p-4 md:p-8 max-w-screen-2xl mx-auto">
 	<PageHeader breadcrumb="NETWORK / TOPOLOGY" title="토폴로지">
 		{#snippet actions()}
-			<AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={30} />
-			<RefreshButton refreshing={refreshing || loading} onclick={forceRefresh} />
+			<AutoRefreshControl
+			bind:active={ar.active}
+			bind:intervalSeconds={ar.intervalSeconds}
+			intervalOptions={ar.intervalOptions}
+			refreshing={refreshing || loading}
+			onManualRefresh={forceRefresh}
+		/>
 		{/snippet}
 	</PageHeader>
 

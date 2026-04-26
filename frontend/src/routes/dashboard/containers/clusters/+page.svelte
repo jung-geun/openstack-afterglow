@@ -1,12 +1,12 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
   import { goto } from '$app/navigation';
   import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
-  import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
+  import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
+  import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 
   interface ClusterTemplate {
     id: string;
@@ -33,7 +33,6 @@
   let error = $state('');
   let serviceUnavailable = $state(false);
   let deleting = $state<string | null>(null);
-  let autoRefresh = $state(false);
   let showModal = $state(false);
   let creating = $state(false);
   let createError = $state('');
@@ -107,16 +106,18 @@
     }
   }
 
-  $effect(() => {
-    if (!$auth.projectId) return;
-    loading = true;
-    untrack(() => { fetchClusters(); fetchTemplates(); });
+  const ar = createAutoRefresh(() => fetchClusters(), {
+    storageKey: 'dashboard-k3s-clusters',
+    defaultActive: true,
+    defaultInterval: 30,
+    intervalOptions: [10, 15, 30, 60],
   });
 
   $effect(() => {
-    if (!$auth.projectId || !autoRefresh) return;
-    const interval = setInterval(() => untrack(() => fetchClusters()), 30000);
-    return () => clearInterval(interval);
+    if (!$auth.projectId) return;
+    loading = true;
+    fetchClusters();
+    fetchTemplates();
   });
 </script>
 
@@ -169,7 +170,13 @@
 <div class="p-4 md:p-8">
   <PageHeader breadcrumb="CONTAINERS / K8S CLUSTERS" title="K8s 클러스터">
     {#snippet actions()}
-      <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={30} />
+      <AutoRefreshControl
+        bind:active={ar.active}
+        bind:intervalSeconds={ar.intervalSeconds}
+        intervalOptions={ar.intervalOptions}
+        refreshing={loading}
+        onManualRefresh={() => fetchClusters()}
+      />
       <button onclick={() => showModal = true} class="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 클러스터 생성</button>
     {/snippet}
   </PageHeader>

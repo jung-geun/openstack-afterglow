@@ -1,14 +1,13 @@
 <script lang="ts">
   import { auth } from '$lib/stores/auth';
-  import { untrack } from 'svelte';
   import { api, ApiError, memoryCache } from '$lib/api/client';
   import { goto } from '$app/navigation';
   import type { Instance } from '$lib/types/resources';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import InstanceDetailPanel from '$lib/components/InstanceDetailPanel.svelte';
   import SlidePanel from '$lib/components/SlidePanel.svelte';
-  import RefreshButton from '$lib/components/RefreshButton.svelte';
-  import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
+  import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+  import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
   import ActionMenu from '$lib/components/ui/ActionMenu.svelte';
@@ -21,8 +20,6 @@
   let error = $state('');
   let deleting = $state<string | null>(null);
   let selectedInstanceId = $state<string | null>(null);
-  let refreshIntervalMs = $state(5000);
-  let autoRefresh = $state(false);
   let openMenuId = $state<string | null>(null);
 
   function swrGet<T>(path: string): T | null {
@@ -57,6 +54,13 @@
       refreshing = false;
     }
   }
+
+  const ar = createAutoRefresh(() => fetchInstances(), {
+    storageKey: 'dashboard-compute-instances',
+    defaultActive: true,
+    defaultInterval: 10,
+    intervalOptions: [10, 15, 30, 60],
+  });
 
   async function shelveInstance(id: string) {
     if (!confirm('인스턴스를 보관하시겠습니까? (SHELVED_OFFLOADED 상태로 전환됩니다)')) return;
@@ -114,21 +118,20 @@
     const projectId = $auth.projectId;
     if (!projectId) return;
     loading = true;
-    untrack(() => { fetchInstances(); });
-  });
-
-  $effect(() => {
-    if (!$auth.projectId || !autoRefresh) return;
-    const interval = setInterval(() => untrack(() => { fetchInstances(); }), refreshIntervalMs);
-    return () => clearInterval(interval);
+    fetchInstances();
   });
 </script>
 
 <div class="p-4 md:p-8">
   <PageHeader breadcrumb="COMPUTE / INSTANCES" title="인스턴스">
     {#snippet actions()}
-      <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={refreshIntervalMs / 1000} />
-      <RefreshButton {refreshing} onclick={forceRefresh} />
+      <AutoRefreshControl
+        bind:active={ar.active}
+        bind:intervalSeconds={ar.intervalSeconds}
+        intervalOptions={ar.intervalOptions}
+        refreshing={refreshing}
+        onManualRefresh={forceRefresh}
+      />
       <a href="/create" class="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
         + VM 생성
       </a>

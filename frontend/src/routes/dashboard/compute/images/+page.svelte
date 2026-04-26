@@ -1,10 +1,9 @@
 <script lang="ts">
   import { auth } from '$lib/stores/auth';
-  import { untrack } from 'svelte';
   import { api, ApiError } from '$lib/api/client';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
-  import RefreshButton from '$lib/components/RefreshButton.svelte';
-  import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
+  import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+  import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
   import ImageDetailPanel from '$lib/components/ImageDetailPanel.svelte';
   import SlidePanel from '$lib/components/SlidePanel.svelte';
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
@@ -57,7 +56,6 @@
   let loading = $state(true);
   let refreshing = $state(false);
   let error = $state('');
-  let autoRefresh = $state(false);
   let deleting = $state<string | null>(null);
   let selectedImageId = $state<string | null>(null);
 
@@ -190,16 +188,17 @@
     }
   }
 
-  $effect(() => {
-    const pid = $auth.projectId;
-    if (!pid) return;
-    untrack(() => { fetchImages(); });
+  const ar = createAutoRefresh(() => fetchImages(), {
+    storageKey: 'dashboard-compute-images',
+    defaultActive: true,
+    defaultInterval: 60,
+    intervalOptions: [10, 15, 30, 60],
   });
 
   $effect(() => {
-    if (!$auth.projectId || !autoRefresh) return;
-    const interval = setInterval(() => untrack(() => { fetchImages(); }), 60000);
-    return () => clearInterval(interval);
+    const pid = $auth.projectId;
+    if (!pid) return;
+    fetchImages();
   });
 </script>
 
@@ -249,8 +248,13 @@
 <div class="p-4 md:p-8">
   <PageHeader breadcrumb="COMPUTE / IMAGES" title="이미지">
     {#snippet actions()}
-      <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={60} />
-      <RefreshButton {refreshing} onclick={forceRefresh} />
+      <AutoRefreshControl
+        bind:active={ar.active}
+        bind:intervalSeconds={ar.intervalSeconds}
+        intervalOptions={ar.intervalOptions}
+        refreshing={refreshing}
+        onManualRefresh={forceRefresh}
+      />
       <button
         onclick={() => sortOrder = sortOrder === 'desc' ? 'asc' : 'desc'}
         class="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white px-3 py-1.5 rounded-lg border border-gray-700 hover:border-gray-600 transition-colors"

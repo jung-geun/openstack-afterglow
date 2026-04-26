@@ -1,12 +1,11 @@
 <script lang="ts">
   import { auth } from '$lib/stores/auth';
-  import { untrack } from 'svelte';
   import { api, ApiError } from '$lib/api/client';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
-  import RefreshButton from '$lib/components/RefreshButton.svelte';
-  import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
+  import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
+  import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 
   interface SecurityService {
     id: string;
@@ -36,7 +35,6 @@
   let shareNetworks = $state<ShareNetwork[]>([]);
   let loading = $state(true);
   let refreshing = $state(false);
-  let autoRefresh = $state(false);
   let deleting = $state<string | null>(null);
   let error = $state('');
   let showModal = $state(false);
@@ -154,16 +152,17 @@
     }
   }
 
-  $effect(() => {
-    if (!$auth.projectId) return;
-    loading = true;
-    untrack(() => fetchServices());
+  const ar = createAutoRefresh(() => fetchServices(), {
+    storageKey: 'dashboard-file-storage-sec',
+    defaultActive: true,
+    defaultInterval: 60,
+    intervalOptions: [10, 15, 30, 60],
   });
 
   $effect(() => {
-    if (!$auth.projectId || !autoRefresh) return;
-    const interval = setInterval(() => untrack(() => fetchServices()), 30000);
-    return () => clearInterval(interval);
+    if (!$auth.projectId) return;
+    loading = true;
+    fetchServices();
   });
 </script>
 
@@ -285,8 +284,13 @@
 <div class="p-4 md:p-8">
   <PageHeader breadcrumb="FILE STORAGE / SECURITY SERVICES" title="Security Service">
     {#snippet actions()}
-      <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={30} />
-      <RefreshButton {refreshing} onclick={forceRefresh} />
+      <AutoRefreshControl
+        bind:active={ar.active}
+        bind:intervalSeconds={ar.intervalSeconds}
+        intervalOptions={ar.intervalOptions}
+        refreshing={refreshing || loading}
+        onManualRefresh={forceRefresh}
+      />
       <button onclick={openCreateModal}
         class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
         + Security Service 생성
