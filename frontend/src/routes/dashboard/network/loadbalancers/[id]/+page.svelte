@@ -3,6 +3,8 @@
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import { goto } from '$app/navigation';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	interface Listener {
 		id: string;
@@ -97,6 +99,13 @@
 			loading = false;
 		}
 	}
+
+	const ar = createAutoRefresh(() => fetchAll(), {
+		storageKey: 'dashboard-network-lb-detail',
+		defaultActive: true,
+		defaultInterval: 15,
+		intervalOptions: [10, 15, 30, 60],
+	});
 
 	$effect(() => { if ($auth.projectId) fetchAll(); });
 
@@ -204,9 +213,18 @@
 </script>
 
 <div class="max-w-4xl mx-auto px-4 py-8 text-gray-100">
-	<button onclick={() => goto('/dashboard/network/loadbalancers')} class="text-sm text-gray-400 hover:text-gray-200 mb-6 inline-flex items-center gap-1">
-		← 로드밸런서 목록
-	</button>
+	<div class="flex items-center justify-between mb-6">
+		<button onclick={() => goto('/dashboard/network/loadbalancers')} class="text-sm text-gray-400 hover:text-gray-200 inline-flex items-center gap-1">
+			← 로드밸런서 목록
+		</button>
+		<AutoRefreshControl
+			bind:active={ar.active}
+			bind:intervalSeconds={ar.intervalSeconds}
+			intervalOptions={ar.intervalOptions}
+			refreshing={loading}
+			onManualRefresh={() => fetchAll()}
+		/>
+	</div>
 
 	{#if loading}
 		<div class="text-gray-500">불러오는 중...</div>

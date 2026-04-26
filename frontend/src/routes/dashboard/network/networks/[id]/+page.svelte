@@ -5,6 +5,8 @@
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import NetworkTopology from '$lib/components/NetworkTopology.svelte';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	interface SubnetDetail {
 		id: string;
@@ -50,6 +52,13 @@
 		DOWN: 'text-red-400 bg-red-900/30',
 		BUILD: 'text-yellow-400 bg-yellow-900/30',
 	};
+
+	const ar = createAutoRefresh(() => fetchNetwork($page.params.id), {
+		storageKey: 'dashboard-network-network-detail',
+		defaultActive: true,
+		defaultInterval: 30,
+		intervalOptions: [10, 15, 30, 60],
+	});
 
 	$effect(() => {
 		const id = $page.params.id;
@@ -197,15 +206,24 @@
 					{/if}
 				</div>
 			</div>
-			{#if !network.is_external && !network.is_shared}
-				<button
-					onclick={deleteNetwork}
-					disabled={deleting}
-					class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-red-900 hover:border-red-700 disabled:border-gray-700 transition-colors"
-				>
-					{deleting ? '삭제 중...' : '삭제'}
-				</button>
-			{/if}
+			<div class="flex items-center gap-2">
+				<AutoRefreshControl
+					bind:active={ar.active}
+					bind:intervalSeconds={ar.intervalSeconds}
+					intervalOptions={ar.intervalOptions}
+					refreshing={loading}
+					onManualRefresh={() => fetchNetwork($page.params.id)}
+				/>
+				{#if !network.is_external && !network.is_shared}
+					<button
+						onclick={deleteNetwork}
+						disabled={deleting}
+						class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-red-900 hover:border-red-700 disabled:border-gray-700 transition-colors"
+					>
+						{deleting ? '삭제 중...' : '삭제'}
+					</button>
+				{/if}
+			</div>
 		</div>
 
 		<!-- 기본 정보 -->

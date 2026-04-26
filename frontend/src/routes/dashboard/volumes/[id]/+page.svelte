@@ -5,6 +5,8 @@
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { formatStorage } from '$lib/utils/format';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	interface Volume {
 		id: string;
@@ -45,6 +47,13 @@
 		error_restoring:    'text-rose-400 bg-rose-900/30',
 		error_extending:    'text-rose-400 bg-rose-900/30',
 	};
+
+	const ar = createAutoRefresh(() => fetchVolume($page.params.id), {
+		storageKey: 'dashboard-volume-detail',
+		defaultActive: true,
+		defaultInterval: 15,
+		intervalOptions: [10, 15, 30, 60],
+	});
 
 	$effect(() => {
 		const id = $page.params.id;
@@ -137,6 +146,14 @@
 					{volume.status}
 				</span>
 			</div>
+			<div class="flex items-center gap-2">
+			<AutoRefreshControl
+				bind:active={ar.active}
+				bind:intervalSeconds={ar.intervalSeconds}
+				intervalOptions={ar.intervalOptions}
+				refreshing={loading}
+				onManualRefresh={() => fetchVolume($page.params.id)}
+			/>
 			<button
 				onclick={deleteVolume}
 				disabled={deleting || volume.attachments.length > 0}
@@ -145,6 +162,7 @@
 			>
 				{deleting ? '삭제 중...' : '삭제'}
 			</button>
+		</div>
 		</div>
 
 		<div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4">

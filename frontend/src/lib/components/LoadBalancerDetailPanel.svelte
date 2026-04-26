@@ -1,6 +1,8 @@
 <script lang="ts">
   import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
+  import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+  import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
   interface Listener {
     id: string; name: string; protocol: string;
@@ -70,6 +72,13 @@
       error = e instanceof ApiError ? e.message : '조회 실패';
     } finally { loading = false; }
   }
+
+  const ar = createAutoRefresh(() => fetchAll(), {
+    storageKey: 'lb-detail-panel',
+    defaultActive: true,
+    defaultInterval: 15,
+    intervalOptions: [10, 15, 30, 60],
+  });
 
   $effect(() => { if (lbId && $auth.projectId) fetchAll(); });
 
@@ -156,7 +165,16 @@
 </script>
 
 <div class="p-6">
-  <button onclick={onClose} class="text-gray-400 hover:text-gray-200 text-sm transition-colors mb-4 inline-block">← 목록으로</button>
+  <div class="flex items-center justify-between mb-4">
+    <button onclick={onClose} class="text-gray-400 hover:text-gray-200 text-sm transition-colors">← 목록으로</button>
+    <AutoRefreshControl
+      bind:active={ar.active}
+      bind:intervalSeconds={ar.intervalSeconds}
+      intervalOptions={ar.intervalOptions}
+      refreshing={loading}
+      onManualRefresh={() => fetchAll()}
+    />
+  </div>
 
   {#if loading}
     <div class="space-y-4">
