@@ -7,6 +7,7 @@ if TYPE_CHECKING:
 import asyncio
 import itertools
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -568,6 +569,8 @@ async def list_all_instances(
     marker: str | None = Query(default=None),
     project_id: str | None = Query(default=None),
     host: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+    name: str | None = Query(default=None),
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """전체 프로젝트의 인스턴스 목록 (페이지네이션)."""
@@ -582,6 +585,10 @@ async def list_all_instances(
                 params["tenant_id"] = project_id
             if host:
                 params["host"] = host
+            if status:
+                params["status"] = status
+            if name:
+                params["name"] = ".*" + re.escape(name) + ".*"
             resp = conn.session.get(
                 f"{endpoint}/servers/detail",
                 params=params,
@@ -622,6 +629,9 @@ async def list_all_instances(
 async def list_all_volumes(
     limit: int = Query(default=20, ge=1, le=100),
     marker: str | None = Query(default=None),
+    project_id: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+    name: str | None = Query(default=None),
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """전체 프로젝트의 볼륨 목록 (페이지네이션)."""
@@ -631,6 +641,12 @@ async def list_all_volumes(
             kwargs: dict = {"details": True, "all_projects": True, "limit": limit}
             if marker:
                 kwargs["marker"] = marker
+            if project_id:
+                kwargs["project_id"] = project_id
+            if status:
+                kwargs["status"] = status
+            if name:
+                kwargs["name~"] = name
             items = [
                 {
                     "id": v.id,
@@ -803,6 +819,7 @@ async def admin_topology(conn: openstack.connection.Connection = Depends(get_os_
                     id=s.id,
                     name=s.name or "",
                     status=s.status or "",
+                    project_id=getattr(s, "project_id", None) or getattr(s, "tenant_id", None),
                     network_names=list(set(addresses.keys())),
                     ip_addresses=[
                         {

@@ -91,6 +91,10 @@
 	let instance = $state<Instance | null>(null);
 	const fixedIpsList = $derived(instance?.ip_addresses.filter(ip => ip.type === 'fixed') ?? []);
 	const floatingIpsList = $derived(instance?.ip_addresses.filter(ip => ip.type === 'floating') ?? []);
+	// floating IP가 이미 할당된 포트 ID 집합
+	const assignedPortIds = $derived(new Set(floatingIps.filter(f => f.port_id).map(f => f.port_id!)));
+	// floating IP 할당 가능한 (아직 미할당) 인터페이스
+	const availableInterfaces = $derived(interfaces.filter(i => !assignedPortIds.has(i.id)));
 	let floatingIps = $state<FloatingIp[]>([]);
 	let interfaces = $state<PortInfo[]>([]);
 	let volumes = $state<VolumeAttachment[]>([]);
@@ -302,8 +306,8 @@
 
 	async function assignFloatingIp(portId?: string) {
 		if (!instance) return;
-		// 인터페이스가 2개 이상이고 portId 미지정이면 선택 UI 표시
-		if (!portId && interfaces.length > 1) {
+		// 할당 가능한 인터페이스가 2개 이상이고 portId 미지정이면 선택 UI 표시
+		if (!portId && availableInterfaces.length > 1) {
 			showPortSelector = true;
 			return;
 		}
@@ -785,7 +789,7 @@
 		<div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4">
 			<div class="flex items-center justify-between mb-4">
 				<h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide">Floating IP</h2>
-				{#if floatingIps.length === 0}
+				{#if availableInterfaces.length > 0}
 					<button
 						onclick={() => assignFloatingIp()}
 						disabled={actioning === 'fip-assign'}
@@ -800,7 +804,7 @@
 				<div class="mb-4 p-3 bg-gray-800 border border-gray-700 rounded-lg">
 					<p class="text-xs text-gray-400 mb-2">Floating IP를 연결할 인터페이스를 선택하세요:</p>
 					<div class="space-y-1.5">
-						{#each interfaces as iface}
+						{#each availableInterfaces as iface}
 							{@const netName = availableNetworks.find(n => n.id === iface.network_id)?.name ?? iface.network_id.slice(0, 8)}
 							<button
 								onclick={() => assignFloatingIp(iface.id)}

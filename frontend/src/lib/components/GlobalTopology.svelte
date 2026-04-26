@@ -24,6 +24,7 @@
 	}
 	interface TopologyInstance {
 		id: string; name: string; status: string;
+		project_id?: string | null;
 		network_names: string[];
 		ip_addresses: { addr: string; type: string; network_name: string; network_id?: string | null }[];
 	}
@@ -206,7 +207,7 @@
 		}
 
 		// Instances
-		for (const inst of data.instances) {
+		for (const inst of data.instances.filter(i => projectId == null || i.project_id === projectId)) {
 			const netSet = new Set<string>();
 			const netIps = new Map<string, string[]>();
 			const floatingNetIps = new Map<string, string[]>();

@@ -57,6 +57,9 @@
 	let projectFilter = $state('');
 	let projectSearchText = $state('');
 	let projectDropdownOpen = $state(false);
+	let statusFilter = $state('');
+	let nameSearch = $state('');
+	let nameDebounceTimer = $state<ReturnType<typeof setTimeout> | null>(null);
 	let availableHosts = $state<string[]>([]);
 
 	let projectSuggestions = $derived(
@@ -67,12 +70,6 @@
 				id.toLowerCase().includes(projectSearchText.toLowerCase())
 			)
 			.slice(0, 10)
-	);
-
-	let filteredInstances = $derived(
-		allInstances.filter(i =>
-			(!projectFilter || i.project_id === projectFilter)
-		)
 	);
 
 	// 시계열 차트
@@ -93,6 +90,9 @@
 			let url = `/api/admin/all-instances?limit=${pageSize}`;
 			if (marker) url += `&marker=${marker}`;
 			if (hostFilter) url += `&host=${encodeURIComponent(hostFilter)}`;
+			if (projectFilter) url += `&project_id=${encodeURIComponent(projectFilter)}`;
+			if (statusFilter) url += `&status=${encodeURIComponent(statusFilter)}`;
+			if (nameSearch) url += `&name=${encodeURIComponent(nameSearch)}`;
 			const res = await api.get<PagedResponse<AdminInstance>>(url, token, projectId);
 			allInstances = res.items;
 			nextMarker = res.next_marker;
@@ -153,7 +153,7 @@
 <div class="p-4 md:p-8 max-w-6xl">
 	<PageHeader breadcrumb="COMPUTE / INSTANCES" title="전체 인스턴스">
 		{#snippet actions()}
-			<button onclick={() => { markerStack = []; nextMarker = null; hostFilter = ''; projectFilter = ''; load(); loadHosts(); }} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
+			<button onclick={() => { markerStack = []; nextMarker = null; hostFilter = ''; projectFilter = ''; projectSearchText = ''; statusFilter = ''; nameSearch = ''; load(); loadHosts(); }} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
 			<div class="flex items-center gap-1 text-xs text-gray-500">
 				표시:
 				{#each [10, 20, 30] as n}
@@ -167,13 +167,29 @@
 	</PageHeader>
 
 	<!-- 필터 -->
-	<div class="flex gap-3 mb-4">
+	<div class="flex flex-wrap gap-3 mb-4">
 		<select bind:value={hostFilter} onchange={() => { markerStack = []; nextMarker = null; load(); }} class="bg-gray-800 border border-gray-700 text-sm text-gray-300 rounded-lg px-2 py-1.5 focus:outline-none focus:border-blue-500">
 			<option value="">모든 호스트</option>
 			{#each availableHosts as h}
 				<option value={h}>{h}</option>
 			{/each}
 		</select>
+		<select bind:value={statusFilter} onchange={() => { markerStack = []; nextMarker = null; load(); }} class="bg-gray-800 border border-gray-700 text-sm text-gray-300 rounded-lg px-2 py-1.5 focus:outline-none focus:border-blue-500">
+			<option value="">모든 상태</option>
+			{#each ['ACTIVE', 'SHUTOFF', 'ERROR', 'SHELVED_OFFLOADED', 'BUILD', 'PAUSED', 'SUSPENDED'] as s}
+				<option value={s}>{s}</option>
+			{/each}
+		</select>
+		<input
+			type="text"
+			placeholder="이름 검색..."
+			bind:value={nameSearch}
+			oninput={() => {
+				if (nameDebounceTimer) clearTimeout(nameDebounceTimer);
+				nameDebounceTimer = setTimeout(() => { markerStack = []; nextMarker = null; load(); }, 300);
+			}}
+			class="bg-gray-800 border border-gray-700 text-sm text-gray-300 rounded-lg px-3 py-1.5 w-40 focus:outline-none focus:border-blue-500"
+		/>
 		<div class="relative project-filter-wrapper">
 		<div class="flex items-center bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 w-52 focus-within:border-blue-500">
 			<input
@@ -185,7 +201,7 @@
 				class="bg-transparent text-sm text-gray-300 flex-1 outline-none min-w-0"
 			/>
 			{#if projectFilter}
-				<button onclick={() => { projectFilter = ''; projectSearchText = ''; projectDropdownOpen = false; }} class="text-gray-500 hover:text-white ml-1 flex-shrink-0">✕</button>
+				<button onclick={() => { projectFilter = ''; projectSearchText = ''; projectDropdownOpen = false; markerStack = []; nextMarker = null; load(); }} class="text-gray-500 hover:text-white ml-1 flex-shrink-0">✕</button>
 			{/if}
 		</div>
 		{#if projectDropdownOpen && projectSuggestions.length > 0}
@@ -197,7 +213,7 @@
 				{#each projectSuggestions as [id, name]}
 					<button
 						class="w-full text-left px-3 py-2 text-xs hover:bg-gray-800 transition-colors {projectFilter === id ? 'bg-blue-900/30 text-blue-400' : 'text-gray-300'}"
-						onclick={() => { projectFilter = id; projectSearchText = name; projectDropdownOpen = false; }}
+						onclick={() => { projectFilter = id; projectSearchText = name; projectDropdownOpen = false; markerStack = []; nextMarker = null; load(); }}
 					>
 						<div class="font-medium truncate">{name}</div>
 						<div class="text-gray-500 font-mono">{id.slice(0, 12)}...</div>
@@ -242,7 +258,7 @@
 					</tr>
 				</thead>
 				<tbody>
-					{#each filteredInstances as s (s.id)}
+					{#each allInstances as s (s.id)}
 						<tr
 							onclick={() => openDetail(s)}
 							class="border-b border-gray-800/50 text-xs hover:bg-gray-800/50 transition-colors cursor-pointer"

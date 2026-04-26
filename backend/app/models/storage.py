@@ -237,6 +237,7 @@ class TopologyInstance(BaseModel):
     id: str
     name: str
     status: str
+    project_id: str | None = None
     network_names: list[str] = []
     ip_addresses: list[dict] = []  # [{addr, type, network_name}]
 

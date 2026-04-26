@@ -8,6 +8,7 @@
 	import RouterDetailPanel from '$lib/components/RouterDetailPanel.svelte';
 	import SlidePanel from '$lib/components/SlidePanel.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import { projectNames } from '$lib/stores/projectNames';
 
 	let isLight = $state(false);
 	onMount(() => {
@@ -42,6 +43,7 @@
 	}
 	interface TopologyInstance {
 		id: string; name: string; status: string;
+		project_id?: string | null;
 		network_names: string[];
 		ip_addresses: { addr: string; type: string; network_name: string }[];
 	}
@@ -64,9 +66,40 @@
 	let selectedInstanceId = $state<string | null>(null);
 	let selectedRouterId = $state<string | null>(null);
 
+	// 프로젝트 필터
+	let projectFilter = $state<string | null>(null);
+	let projectSearchText = $state('');
+	let projectDropdownOpen = $state(false);
+
+	const token = $derived($auth.token ?? undefined);
+	const projectId = $derived($auth.projectId ?? undefined);
+
+	let projectSuggestions = $derived(
+		Array.from($projectNames.entries())
+			.filter(([id, name]) =>
+				projectSearchText.length === 0 ||
+				name.toLowerCase().includes(projectSearchText.toLowerCase()) ||
+				id.toLowerCase().includes(projectSearchText.toLowerCase())
+			)
+			.slice(0, 10)
+	);
+
+	function handleDocumentClick(e: MouseEvent) {
+		const target = e.target as HTMLElement;
+		if (!target.closest('.project-filter-wrapper')) {
+			projectDropdownOpen = false;
+		}
+	}
+
 	$effect(() => {
 		if (!$auth.token) return;
 		fetchTopology();
+	});
+
+	onMount(() => {
+		projectNames.load(token, projectId);
+		document.addEventListener('click', handleDocumentClick);
+		return () => document.removeEventListener('click', handleDocumentClick);
 	});
 
 	async function fetchTopology() {
@@ -99,6 +132,42 @@
 		{/snippet}
 	</PageHeader>
 
+	<!-- 프로젝트 필터 -->
+	<div class="flex gap-3 mb-4">
+		<div class="relative project-filter-wrapper">
+			<div class="flex items-center bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 w-52 focus-within:border-blue-500">
+				<input
+					type="text"
+					placeholder="프로젝트 검색..."
+					bind:value={projectSearchText}
+					onfocus={() => (projectDropdownOpen = true)}
+					oninput={() => { projectDropdownOpen = true; if (!projectSearchText) { projectFilter = null; } }}
+					class="bg-transparent text-sm text-gray-300 flex-1 outline-none min-w-0"
+				/>
+				{#if projectFilter}
+					<button onclick={() => { projectFilter = null; projectSearchText = ''; projectDropdownOpen = false; }} class="text-gray-500 hover:text-white ml-1 flex-shrink-0">✕</button>
+				{/if}
+			</div>
+			{#if projectDropdownOpen && projectSuggestions.length > 0}
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<div
+					class="absolute top-full mt-1 left-0 w-64 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-20 overflow-hidden"
+					onmouseleave={() => {}}
+				>
+					{#each projectSuggestions as [id, name]}
+						<button
+							class="w-full text-left px-3 py-2 text-xs hover:bg-gray-800 transition-colors {projectFilter === id ? 'bg-blue-900/30 text-blue-400' : 'text-gray-300'}"
+							onclick={() => { projectFilter = id; projectSearchText = name; projectDropdownOpen = false; }}
+						>
+							<div class="font-medium truncate">{name}</div>
+							<div class="text-gray-500 font-mono">{id.slice(0, 12)}...</div>
+						</button>
+					{/each}
+				</div>
+			{/if}
+		</div>
+	</div>
+
 	{#if error}
 		<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm">
 			{error}
@@ -109,8 +178,8 @@
 		<div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4">
 			<GlobalTopology
 				{data}
-				projectId={null}
-				showAll={true}
+				projectId={projectFilter}
+				showAll={projectFilter == null}
 				onSelectInstance={(id) => { selectedInstanceId = id; }}
 				onSelectRouter={(id) => { selectedRouterId = id; }}
 			/>
