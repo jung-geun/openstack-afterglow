@@ -67,83 +67,82 @@ async def test_delete_k8s_node_no_kubeconfig():
     assert result is False
 
 
+def _make_mock_http_client(status_code: int):
+    mock_client = AsyncMock()
+    mock_client.delete = AsyncMock(return_value=_make_response(status_code))
+    return mock_client
+
+
 @pytest.mark.asyncio
-async def test_delete_k8s_node_success():
-    """K8s API 200 응답 시 True 반환."""
+async def test_delete_k8s_node_success(monkeypatch):
+    """K8s API 200 응답 시 True 반환 — 실제 DELETE URL/headers를 검증한다."""
+    monkeypatch.setattr("app.services.k3s_kube._make_ssl_context", lambda *a, **k: None)
+    mock_client = _make_mock_http_client(200)
     with patch("app.services.k3s_kube.k3s_db") as mock_db:
         mock_db.get_kubeconfig_admin = AsyncMock(return_value=_FAKE_KUBECONFIG)
-        with patch("app.services.k3s_kube._parse_kubeconfig") as mock_parse:
-            mock_parse.return_value = (b"cert", b"key", "https://10.0.0.1:6443")
-            with patch("app.services.k3s_kube._make_ssl_context") as mock_ssl:
-                mock_ssl.return_value = MagicMock()
-                mock_client = AsyncMock()
-                mock_client.delete = AsyncMock(return_value=_make_response(200))
-                with patch("app.services.k3s_kube.httpx.AsyncClient") as mock_cls:
-                    mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-                    mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-                    from app.services.k3s_kube import delete_k8s_node
+        with patch("app.services.k3s_kube.httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            from app.services.k3s_kube import delete_k8s_node
 
-                    result = await delete_k8s_node("cluster-1", "test-node")
+            result = await delete_k8s_node("cluster-1", "test-node")
     assert result is True
+    mock_client.delete.assert_called_once_with(
+        "https://10.0.0.1:6443/api/v1/nodes/test-node",
+        headers={"Accept": "application/json"},
+    )
 
 
 @pytest.mark.asyncio
-async def test_delete_k8s_node_already_gone():
+async def test_delete_k8s_node_already_gone(monkeypatch):
     """K8s API 404 응답 시에도 True 반환 (이미 삭제된 노드)."""
+    monkeypatch.setattr("app.services.k3s_kube._make_ssl_context", lambda *a, **k: None)
+    mock_client = _make_mock_http_client(404)
     with patch("app.services.k3s_kube.k3s_db") as mock_db:
         mock_db.get_kubeconfig_admin = AsyncMock(return_value=_FAKE_KUBECONFIG)
-        with patch("app.services.k3s_kube._parse_kubeconfig") as mock_parse:
-            mock_parse.return_value = (b"cert", b"key", "https://10.0.0.1:6443")
-            with patch("app.services.k3s_kube._make_ssl_context") as mock_ssl:
-                mock_ssl.return_value = MagicMock()
-                mock_client = AsyncMock()
-                mock_client.delete = AsyncMock(return_value=_make_response(404))
-                with patch("app.services.k3s_kube.httpx.AsyncClient") as mock_cls:
-                    mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-                    mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-                    from app.services.k3s_kube import delete_k8s_node
+        with patch("app.services.k3s_kube.httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            from app.services.k3s_kube import delete_k8s_node
 
-                    result = await delete_k8s_node("cluster-1", "test-node")
+            result = await delete_k8s_node("cluster-1", "test-node")
     assert result is True
+    mock_client.delete.assert_called_once_with(
+        "https://10.0.0.1:6443/api/v1/nodes/test-node",
+        headers={"Accept": "application/json"},
+    )
 
 
 @pytest.mark.asyncio
-async def test_delete_k8s_node_api_error():
+async def test_delete_k8s_node_api_error(monkeypatch):
     """K8s API 500 응답 시 False 반환."""
+    monkeypatch.setattr("app.services.k3s_kube._make_ssl_context", lambda *a, **k: None)
+    mock_client = _make_mock_http_client(500)
     with patch("app.services.k3s_kube.k3s_db") as mock_db:
         mock_db.get_kubeconfig_admin = AsyncMock(return_value=_FAKE_KUBECONFIG)
-        with patch("app.services.k3s_kube._parse_kubeconfig") as mock_parse:
-            mock_parse.return_value = (b"cert", b"key", "https://10.0.0.1:6443")
-            with patch("app.services.k3s_kube._make_ssl_context") as mock_ssl:
-                mock_ssl.return_value = MagicMock()
-                mock_client = AsyncMock()
-                mock_client.delete = AsyncMock(return_value=_make_response(500))
-                with patch("app.services.k3s_kube.httpx.AsyncClient") as mock_cls:
-                    mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-                    mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-                    from app.services.k3s_kube import delete_k8s_node
+        with patch("app.services.k3s_kube.httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            from app.services.k3s_kube import delete_k8s_node
 
-                    result = await delete_k8s_node("cluster-1", "test-node")
+            result = await delete_k8s_node("cluster-1", "test-node")
     assert result is False
 
 
 @pytest.mark.asyncio
-async def test_delete_k8s_node_connection_error():
+async def test_delete_k8s_node_connection_error(monkeypatch):
     """연결 오류 시 False 반환 (예외 전파 안 됨)."""
+    monkeypatch.setattr("app.services.k3s_kube._make_ssl_context", lambda *a, **k: None)
+    mock_client = AsyncMock()
+    mock_client.delete = AsyncMock(side_effect=Exception("Connection refused"))
     with patch("app.services.k3s_kube.k3s_db") as mock_db:
         mock_db.get_kubeconfig_admin = AsyncMock(return_value=_FAKE_KUBECONFIG)
-        with patch("app.services.k3s_kube._parse_kubeconfig") as mock_parse:
-            mock_parse.return_value = (b"cert", b"key", "https://10.0.0.1:6443")
-            with patch("app.services.k3s_kube._make_ssl_context") as mock_ssl:
-                mock_ssl.return_value = MagicMock()
-                mock_client = AsyncMock()
-                mock_client.delete = AsyncMock(side_effect=Exception("Connection refused"))
-                with patch("app.services.k3s_kube.httpx.AsyncClient") as mock_cls:
-                    mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-                    mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-                    from app.services.k3s_kube import delete_k8s_node
+        with patch("app.services.k3s_kube.httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            from app.services.k3s_kube import delete_k8s_node
 
-                    result = await delete_k8s_node("cluster-1", "test-node")
+            result = await delete_k8s_node("cluster-1", "test-node")
     assert result is False
 
 
