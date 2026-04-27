@@ -1170,23 +1170,94 @@ async def update_volume(
         raise
 
 
+_ERROR_STATUSES = {"error", "deleting", "error_deleting", "error_extending", "error_restoring", "error_managing"}
+
+
 @router.delete("/volumes/{volume_id}", dependencies=[Depends(require_admin)], status_code=204)
 async def delete_volume(
     volume_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    """볼륨 삭제."""
+    """볼륨 삭제. error* 상태이면 force-delete로 자동 폴백하여 Cinder DB를 정리한다."""
+    from openstack.exceptions import ResourceNotFound
+
+    from app.services import cinder
 
     def _delete():
+        try:
+            v = conn.block_storage.get_volume(volume_id)
+        except ResourceNotFound:
+            return  # 이미 없음 → 204
+
+        status = (getattr(v, "status", "") or "").lower()
+        attachments = list(getattr(v, "attachments", []) or [])
+
+        if status in _ERROR_STATUSES and not attachments:
+            # 1) 상태를 error로 리셋하여 일반 delete 경로를 열어 둠
+            try:
+                cinder.reset_volume_status(conn, volume_id, "error")
+            except Exception:
+                _logger.warning("reset_volume_status 실패: %s", volume_id, exc_info=True)
+            # 2) 일반 delete 시도 (error 상태면 Ceph NotFound→DB 정리)
+            try:
+                conn.block_storage.delete_volume(volume_id, ignore_missing=True)
+                return
+            except Exception:
+                _logger.info("일반 delete 실패, force_delete 폴백: %s", volume_id, exc_info=True)
+            # 3) 최후 수단: os-force_delete
+            try:
+                cinder.force_delete_volume(conn, volume_id)
+            except Exception as e:
+                _logger.warning("force_delete 실패: %s %s", volume_id, e, exc_info=True)
+                raise HTTPException(status_code=400, detail=f"볼륨 강제 삭제 실패: {e}")
+            return
+
         try:
             conn.block_storage.delete_volume(volume_id, ignore_missing=True)
         except Exception as e:
             _logger.warning("볼륨 삭제 실패: %s", e)
-
-            raise HTTPException(status_code=400, detail="볼륨 삭제 실패")
+            raise HTTPException(status_code=400, detail=f"볼륨 삭제 실패: {e}")
 
     try:
         await asyncio.to_thread(_delete)
+    except HTTPException:
+        raise
+
+
+@router.post("/volumes/{volume_id}/force-delete", dependencies=[Depends(require_admin)], status_code=204)
+async def force_delete_admin_volume(
+    volume_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """볼륨을 강제 삭제한다. status 무관, attachments 있으면 거부."""
+    from openstack.exceptions import ResourceNotFound
+
+    from app.services import cinder
+
+    def _force_delete():
+        try:
+            v = conn.block_storage.get_volume(volume_id)
+        except ResourceNotFound:
+            return
+        if list(getattr(v, "attachments", []) or []):
+            raise HTTPException(status_code=409, detail="attached 볼륨은 강제 삭제할 수 없습니다. 먼저 detach 하세요.")
+        try:
+            cinder.reset_volume_status(conn, volume_id, "error")
+        except Exception:
+            _logger.warning("reset_volume_status 실패: %s", volume_id, exc_info=True)
+        try:
+            conn.block_storage.delete_volume(volume_id, ignore_missing=True)
+            return
+        except Exception:
+            _logger.info("일반 delete 실패, force_delete 폴백: %s", volume_id, exc_info=True)
+        try:
+            cinder.force_delete_volume(conn, volume_id)
+        except Exception as e:
+            _logger.warning("force_delete 실패: %s %s", volume_id, e, exc_info=True)
+            raise HTTPException(status_code=400, detail=f"볼륨 강제 삭제 실패: {e}")
+
+    try:
+        await asyncio.to_thread(_force_delete)
     except HTTPException:
         raise
 
