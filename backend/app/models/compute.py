@@ -96,6 +96,7 @@ class CreateInstanceRequest(BaseModel):
     delete_boot_volume_on_termination: bool = False
     additional_volume_ids: list[str] = []
     new_volumes: list["NewVolumeRequest"] = []
+    existing_upper_volume_id: str | None = None
 
     @field_validator("name")
     @classmethod

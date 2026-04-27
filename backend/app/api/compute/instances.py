@@ -155,6 +155,7 @@ async def create_instance(
     created_access_ids: list[tuple[str, str]] = []  # (file_storage_id, access_id)
     boot_volume_id: str | None = None
     upper_volume_id: str | None = None
+    created_upper: bool = False  # 신규 생성 시에만 rollback에서 삭제
     server_id: str | None = None
     floating_ip_id: str | None = None
 
@@ -199,16 +200,24 @@ async def create_instance(
         )
 
         # ------------------------------------------------------------------
-        # 3. Cinder: upper 볼륨 생성 (OverlayFS upperdir)
+        # 3. Cinder: upper 볼륨 — 신규 생성 또는 기존(복구된) 볼륨 재사용
         # ------------------------------------------------------------------
-        upper_vol = await asyncio.to_thread(
-            cinder.create_empty_volume,
-            conn,
-            f"union-upper-{req.name}",
-            settings.upper_volume_size_gb,
-            req.availability_zone or settings.default_availability_zone,
-        )
-        upper_volume_id = upper_vol.id
+        if req.existing_upper_volume_id:
+            upper_volume_id = req.existing_upper_volume_id
+            upper_vol = await asyncio.to_thread(cinder.get_volume, conn, upper_volume_id)
+            if upper_vol.status != "available":
+                raise HTTPException(400, f"upper 볼륨 상태가 available이 아닙니다: {upper_vol.status}")
+            created_upper = False
+        else:
+            upper_vol = await asyncio.to_thread(
+                cinder.create_empty_volume,
+                conn,
+                f"union-upper-{req.name}",
+                settings.upper_volume_size_gb,
+                req.availability_zone or settings.default_availability_zone,
+            )
+            upper_volume_id = upper_vol.id
+            created_upper = True
 
         # ------------------------------------------------------------------
         # 4. cloud-init userdata 생성
@@ -303,6 +312,8 @@ async def create_instance(
 
         return server
 
+    except HTTPException:
+        raise
     except Exception as e:
         error_detail = str(e)
         logger.error(f"인스턴스 생성 실패, rollback 시작: {error_detail}")
@@ -333,7 +344,7 @@ async def create_instance(
             conn,
             server_id,
             boot_volume_id,
-            upper_volume_id,
+            upper_volume_id if created_upper else None,
             created_file_storage_ids,
             created_access_ids,
             floating_ip_id,
@@ -385,6 +396,7 @@ async def create_instance_async(
         created_access_ids: list[tuple[str, str]] = []
         boot_volume_id: str | None = None
         upper_volume_id: str | None = None
+        created_upper: bool = False  # 신규 생성 시에만 rollback에서 삭제
         server_id: str | None = None
         floating_ip_id: str | None = None
         _start_time = time.monotonic()
@@ -449,17 +461,26 @@ async def create_instance_async(
             yield send_progress(ProgressStep.BOOT_VOLUME_CREATING, 45, "부트 볼륨 생성 완료")
 
             if resolved_libs:
-                # Step 3: Upper volume (45-60%)
-                yield send_progress(ProgressStep.UPPER_VOLUME_CREATING, 45, "Upper 볼륨 생성 중...")
-                upper_vol = await asyncio.to_thread(
-                    cinder.create_empty_volume,
-                    conn,
-                    name=f"union-upper-{req.name}",
-                    size_gb=settings.upper_volume_size_gb,
-                    availability_zone=req.availability_zone or settings.default_availability_zone,
-                )
-                upper_volume_id = upper_vol.id
-                yield send_progress(ProgressStep.UPPER_VOLUME_CREATING, 60, "Upper 볼륨 생성 완료")
+                # Step 3: Upper volume (45-60%) — 신규 생성 또는 기존(복구된) 볼륨 재사용
+                if req.existing_upper_volume_id:
+                    yield send_progress(ProgressStep.UPPER_VOLUME_CREATING, 45, "기존 upper 볼륨 검증 중...")
+                    upper_volume_id = req.existing_upper_volume_id
+                    upper_vol = await asyncio.to_thread(cinder.get_volume, conn, upper_volume_id)
+                    if upper_vol.status != "available":
+                        raise HTTPException(400, f"upper 볼륨 상태가 available이 아닙니다: {upper_vol.status}")
+                    created_upper = False
+                else:
+                    yield send_progress(ProgressStep.UPPER_VOLUME_CREATING, 45, "Upper 볼륨 생성 중...")
+                    upper_vol = await asyncio.to_thread(
+                        cinder.create_empty_volume,
+                        conn,
+                        name=f"union-upper-{req.name}",
+                        size_gb=settings.upper_volume_size_gb,
+                        availability_zone=req.availability_zone or settings.default_availability_zone,
+                    )
+                    upper_volume_id = upper_vol.id
+                    created_upper = True
+                yield send_progress(ProgressStep.UPPER_VOLUME_CREATING, 60, "Upper 볼륨 준비 완료")
 
                 # Step 4: cloud-init (60-65%)
                 yield send_progress(ProgressStep.USERDATA_GENERATING, 60, "cloud-init 생성 중...")
@@ -621,7 +642,7 @@ async def create_instance_async(
                 conn,
                 server_id,
                 boot_volume_id,
-                upper_volume_id,
+                upper_volume_id if created_upper else None,
                 created_file_storage_ids,
                 created_access_ids,
                 floating_ip_id,

@@ -126,6 +126,11 @@ MERGED_DIR="/opt/layers/merged"
 
 mkdir -p "$MERGED_DIR" "$UPPER_DIR" "$WORK_DIR"
 
+# 복구된 볼륨의 stale workdir 정리 (OverlayFS는 빈 workdir 요구)
+if [ -d "$WORK_DIR" ]; then
+    rm -rf "$WORK_DIR"/* "$WORK_DIR"/.[!.]* 2>/dev/null || true
+fi
+
 if ! mountpoint -q "$MERGED_DIR"; then
     echo "[$(date)] OverlayFS 마운트 시도: lowerdir=${LOWER_DIRS}"
     for i in $(seq 1 $MAX_RETRIES); do

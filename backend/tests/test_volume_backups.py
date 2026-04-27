@@ -47,3 +47,28 @@ async def test_backup_not_shadowed_by_volumes_route(client, mock_conn):
         resp = await client.get("/api/volumes/backups")
     # 404가 아닌 200이어야 함
     assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_restore_backup_creates_new_volume(client, mock_conn):
+    """body 미전달 시 새 볼륨으로 복원하고 volume_id를 반환한다."""
+    with patch(
+        "app.api.storage.volume_backups.cinder.restore_backup",
+        return_value={"volume_id": "vol-restored", "volume_name": "restored-vol"},
+    ) as mock_restore:
+        resp = await client.post("/api/volumes/backups/backup-1/restore")
+    assert resp.status_code == 200
+    assert resp.json()["volume_id"] == "vol-restored"
+    mock_restore.assert_called_once_with(mock_conn, "backup-1", None)
+
+
+@pytest.mark.asyncio
+async def test_restore_backup_to_existing_volume(client, mock_conn):
+    """volume_id 지정 시 해당 볼륨에 복원 요청한다."""
+    with patch(
+        "app.api.storage.volume_backups.cinder.restore_backup",
+        return_value={"volume_id": "vol-target", "volume_name": "target-vol"},
+    ) as mock_restore:
+        resp = await client.post("/api/volumes/backups/backup-1/restore", json={"volume_id": "vol-target"})
+    assert resp.status_code == 200
+    mock_restore.assert_called_once_with(mock_conn, "backup-1", "vol-target")

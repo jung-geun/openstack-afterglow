@@ -550,9 +550,9 @@ Step 5: 요약 & 배포
   - [x] 버전 업데이트 시 스냅샷으로 롤백 가능 (`revert_to_snapshot` — Manila action API)
   - [x] `backend/app/services/manila.py` — 스냅샷 API 연동 (create/list/get/delete/revert 5개 함수)
 
-- [ ] 5.3 볼륨 백업 및 복구
-  - [ ] Cinder upper 볼륨의 정기 백업 스케줄링
-  - [ ] 백업에서 복구 시 OverlayFS 재구성 자동화
+- [x] 5.3 볼륨 백업 및 복구
+  - [x] Cinder upper 볼륨의 정기 백업 스케줄링 — `auto_backup.py` + `_auto_backup_loop`
+  - [x] 백업에서 복구 시 OverlayFS 재구성 자동화 — `existing_upper_volume_id` + workdir 정리
 
 - [ ] 5.4 VM 스케일링 지원
   - [ ] 인스턴스 resize (플레이버 변경) 시 OverlayFS 마운트 유지
@@ -950,3 +950,12 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 - [x] `frontend/src/lib/components/K3sClusterDetailPanel.svelte` — 이벤트 ad-hoc `setInterval` → `createAutoRefresh` 마이그레이션 (15s)
 - [x] 기존 ad-hoc 자동새로고침 3곳 통합 제거: `admin/services` (`$effect`+setInterval), `dashboard/containers/clusters/[id]` (자체 setInterval+toggleAutoRefresh), `dashboard/file-storage/manage` (AutoRefreshToggle+setInterval)
 - [x] 자동 새로고침 fn은 **필터/marker 보존** (현재 페이지 유지), 수동 새로고침은 **기존 필터 리셋** 동작 유지 (의도적 분리)
+
+### 10.3 관리자 볼륨 — 상태 변경 + 명시적 강제삭제 (2026-04-27)
+
+> **목표**: `deleting` / `error_*` 등 비정상 상태 볼륨을 admin이 임의 상태로 전환하거나 명시적으로 강제 삭제할 수 있도록 UI/API 확장
+
+- [x] `backend/app/api/identity/admin.py::delete_volume` — `_ERROR_STATUSES` (`error/deleting/error_*`) 자동 폴백: `reset_status` → 일반 `delete` → `os-force_delete` 3단계 시퀀스
+- [x] `backend/app/api/identity/admin.py::force_delete_admin_volume` — **신규** `POST /api/admin/volumes/{id}/force-delete` (status 무관, attached 볼륨은 409)
+- [x] `backend/tests/test_admin_volume_delete.py` — **신규** 11개 (자동 폴백 7 + force-delete 4: normal_status, attached_409, already_gone_204, requires_admin_403)
+- [x] `frontend/src/routes/admin/volumes/+page.svelte` — `상태초기화` (error 한정) → `상태변경` (모든 볼륨 노출), `error*/deleting` 상태에 한해 `강제삭제` 버튼/rose 경고 모달 추가
