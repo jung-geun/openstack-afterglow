@@ -264,6 +264,21 @@ async def create_instance(
         # ------------------------------------------------------------------
         # 5. Nova: 서버 생성
         # ------------------------------------------------------------------
+        if resolved_libs and settings.union_auto_egress_sg_enabled:
+            try:
+                _sg_name = await asyncio.to_thread(
+                    neutron.ensure_union_egress_sg,
+                    conn,
+                    project_id,
+                    settings.union_egress_sg_name,
+                )
+                _sgs = list(req.security_groups or [])
+                if _sg_name not in _sgs:
+                    _sgs.append(_sg_name)
+                req = req.model_copy(update={"security_groups": _sgs})
+            except Exception:
+                logger.warning("Union egress SG 자동 attach 실패, 계속 진행", exc_info=True)
+
         meta = {
             "union_libraries": ",".join(resolved_libs),
             "union_strategy": req.strategy,
@@ -516,6 +531,22 @@ async def create_instance_async(
 
             # Step 5: Nova server (65-95%)
             yield send_progress(ProgressStep.SERVER_CREATING, 65, "Nova 서버 생성 중...")
+            _sse_effective_sgs: list[str] | None = list(req.security_groups) if req.security_groups else None
+            if resolved_libs and settings.union_auto_egress_sg_enabled:
+                try:
+                    _sg_name = await asyncio.to_thread(
+                        neutron.ensure_union_egress_sg,
+                        conn,
+                        conn._afterglow_project_id,
+                        settings.union_egress_sg_name,
+                    )
+                    _sgs = list(req.security_groups or [])
+                    if _sg_name not in _sgs:
+                        _sgs.append(_sg_name)
+                    _sse_effective_sgs = _sgs
+                except Exception:
+                    logger.warning("Union egress SG 자동 attach 실패, 계속 진행", exc_info=True)
+
             meta = {
                 "union_libraries": ",".join(resolved_libs) if resolved_libs else "none",
                 "union_strategy": req.strategy or "none",
@@ -542,7 +573,7 @@ async def create_instance_async(
                 availability_zone=req.availability_zone or settings.default_availability_zone,
                 metadata=meta,
                 delete_boot_volume_on_termination=req.delete_boot_volume_on_termination,
-                security_groups=req.security_groups if req.security_groups else None,
+                security_groups=_sse_effective_sgs,
             )
             server_id = server.id
             yield send_progress(ProgressStep.SERVER_CREATING, 95, "Nova 서버 생성 완료")
@@ -1054,6 +1085,7 @@ async def _prepare_dynamic_file_storage(
             "union_instance": instance_name,
             "union_libraries": ",".join(resolved_libs),
             "union_share_proto": share_proto.upper(),
+            "union_project_id": getattr(conn, "_afterglow_project_id", ""),
         },
     )
     created_file_storage_ids.append(file_storage.id)

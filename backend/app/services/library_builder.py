@@ -427,6 +427,13 @@ async def _monitor_build(
                     share_id,
                     metadata,
                 )
+                # prebuilt share는 모든 프로젝트에서 접근할 수 있도록 공개
+                try:
+                    await asyncio.to_thread(manila.set_share_public, conn, share_id, True)
+                except Exception:
+                    _logger.warning(
+                        "[builder] set_share_public 실패 (격리 필터에서 노출 불가): %s", share_id, exc_info=True
+                    )
                 _logger.info("[builder] 빌드 완료 처리: %s", library_id)
 
                 # DB 상태 업데이트

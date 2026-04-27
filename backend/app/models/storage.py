@@ -14,6 +14,7 @@ class FileStorageInfo(BaseModel):
     project_id: str | None = None
     created_at: str | None = None
     nfs_export_location: str | None = None
+    is_public: bool = False
     # Union 전용 메타데이터
     library_name: str | None = None
     library_version: str | None = None

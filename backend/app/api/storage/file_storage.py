@@ -7,7 +7,7 @@ if TYPE_CHECKING:
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from app.api.deps import get_os_conn
+from app.api.deps import get_os_conn, get_token_info
 from app.config import get_settings
 from app.models.storage import CreateAccessRuleRequest, CreateFileStorageRequest, FileStorageInfo
 from app.rate_limit import limiter
@@ -27,14 +27,18 @@ async def get_file_storage_quota(conn: openstack.connection.Connection = Depends
 
 @router.get("", response_model=list[FileStorageInfo])
 async def list_file_storages(
-    conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+    refresh: bool = Query(False),
 ):
     pid = conn._afterglow_project_id
+    is_admin = token_info.get("is_system_admin", False)
+    caller_project_id = None if is_admin else pid
     try:
         return await cached_call(
             f"afterglow:manila:{pid}:file_storages",
             ttl_fast(),
-            lambda: [s.model_dump() for s in manila.list_file_storages(conn)],
+            lambda: [s.model_dump() for s in manila.list_file_storages(conn, caller_project_id=caller_project_id)],
             refresh=refresh,
         )
     except Exception:
@@ -58,11 +62,22 @@ async def list_share_networks(conn: openstack.connection.Connection = Depends(ge
 
 
 @router.get("/{file_storage_id}", response_model=FileStorageInfo)
-async def get_file_storage(file_storage_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def get_file_storage(
+    file_storage_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    pid = conn._afterglow_project_id
+    is_admin = token_info.get("is_system_admin", False)
     try:
-        return manila.get_file_storage(conn, file_storage_id)
+        share = manila.get_file_storage(conn, file_storage_id)
     except Exception:
         raise HTTPException(status_code=404, detail="파일 스토리지를 찾을 수 없습니다")
+    if not is_admin:
+        owner = share.metadata.get("union_project_id", "")
+        if owner and owner != pid and not share.is_public:
+            raise HTTPException(status_code=404, detail="파일 스토리지를 찾을 수 없습니다")
+    return share
 
 
 @router.post("", response_model=FileStorageInfo, status_code=201)

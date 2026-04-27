@@ -363,7 +363,12 @@ def delete_file_storage(conn, file_storage_id: str) -> None:
     client.delete(f"shares/{file_storage_id}")
 
 
-def list_file_storages(conn, metadata_filter: dict | None = None, all_tenants: bool = False) -> list[FileStorageInfo]:
+def list_file_storages(
+    conn,
+    metadata_filter: dict | None = None,
+    all_tenants: bool = False,
+    caller_project_id: str | None = None,
+) -> list[FileStorageInfo]:
     client = get_client(conn)
     params: dict = {}
     if all_tenants:
@@ -378,6 +383,13 @@ def list_file_storages(conn, metadata_filter: dict | None = None, all_tenants: b
     file_storages = [_parse_file_storage(s) for s in data]
     if metadata_filter:
         file_storages = [s for s in file_storages if all(s.metadata.get(k) == v for k, v in metadata_filter.items())]
+    if caller_project_id is not None:
+        # 다른 프로젝트 소유 share는 is_public=True인 경우만 노출
+        file_storages = [
+            s
+            for s in file_storages
+            if s.is_public or s.metadata.get("union_project_id") in (caller_project_id, None, "")
+        ]
     return file_storages
 
 
@@ -512,6 +524,7 @@ def _parse_file_storage(data: dict) -> FileStorageInfo:
         project_id=data.get("project_id"),
         created_at=str(data["created_at"]) if data.get("created_at") else None,
         nfs_export_location=nfs_export_location,
+        is_public=bool(data.get("is_public", False)),
         library_name=meta.get("union_library"),
         library_version=meta.get("union_version"),
         built_at=meta.get("union_built_at"),
