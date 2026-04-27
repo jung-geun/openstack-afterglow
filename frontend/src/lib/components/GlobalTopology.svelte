@@ -34,11 +34,30 @@
 		port_id: string | null; floating_network_id: string;
 		project_id?: string | null;
 	}
+	interface TopologyLBMember {
+		id: string; address: string; protocol_port: number;
+		status: string; subnet_id: string | null;
+		pool_id: string; server_id: string | null;
+	}
+	interface TopologyLBListener {
+		id: string; name: string; protocol: string;
+		protocol_port: number; default_pool_id: string | null;
+	}
+	interface TopologyLoadBalancer {
+		id: string; name: string;
+		vip_address: string | null; vip_port_id: string | null;
+		vip_subnet_id: string | null; vip_network_id: string | null;
+		provisioning_status: string; operating_status: string;
+		project_id: string | null;
+		listeners: TopologyLBListener[];
+		members: TopologyLBMember[];
+	}
 	interface TopologyData {
 		networks: TopologyNetwork[];
 		routers: TopologyRouter[];
 		instances: TopologyInstance[];
 		floating_ips: FloatingIpInfo[];
+		load_balancers?: TopologyLoadBalancer[];
 	}
 
 	import { onMount } from 'svelte';
@@ -49,12 +68,14 @@
 		showAll = false,
 		onSelectInstance = undefined,
 		onSelectRouter = undefined,
+		onSelectLoadBalancer = undefined,
 	}: {
 		data: TopologyData;
 		projectId?: string | null;
 		showAll?: boolean;
 		onSelectInstance?: (id: string) => void;
 		onSelectRouter?: (id: string) => void;
+		onSelectLoadBalancer?: (lb: TopologyLoadBalancer) => void;
 	} = $props();
 
 	// ── Light mode detection ──────────────────────────────────────────────────
@@ -150,6 +171,11 @@
 	// floating_ip_address → floating_network_id (외부 네트워크 ID)
 	const fipNetMap = $derived(new Map(
 		data.floating_ips.map(f => [f.floating_ip_address, f.floating_network_id])
+	));
+
+	// port_id → FloatingIpInfo (LB VIP의 FIP 매칭용)
+	const fipPortMap = $derived(new Map(
+		data.floating_ips.filter(f => f.port_id).map(f => [f.port_id!, f])
 	));
 
 	// ── Item rows ─────────────────────────────────────────────────────────────
@@ -252,8 +278,35 @@
 		return result;
 	});
 
+	// ── LB items ──────────────────────────────────────────────────────────────
+	interface LBItem {
+		lb: TopologyLoadBalancer;
+		vipNetId: string | null;
+		rowIdx: number;
+	}
+
+	const lbItems = $derived.by((): LBItem[] => {
+		const lbs = (data.load_balancers ?? []).filter(lb =>
+			projectId == null || lb.project_id === projectId
+		);
+		return lbs.map((lb, i) => {
+			const vipNetId =
+				lb.vip_network_id && netCX.has(lb.vip_network_id)
+					? lb.vip_network_id
+					: lb.vip_subnet_id
+					  ? (subnetNetId.get(lb.vip_subnet_id) ?? null)
+					  : null;
+			return { lb, vipNetId, rowIdx: rows.length + i };
+		});
+	});
+
+	// instance id → rows 인덱스 (LB 멤버 엣지 그릴 때 cy 계산용)
+	const instRowIdx = $derived(new Map(
+		rows.flatMap((r, i) => r.type === 'instance' ? [[r.id, i] as [string, number]] : [])
+	));
+
 	// ── SVG dimensions ────────────────────────────────────────────────────────
-	const barH  = $derived(Math.max(rows.length, 1) * ROW_H + 20);
+	const barH  = $derived(Math.max(rows.length + lbItems.length, 1) * ROW_H + 20);
 	// Extra right space: items are placed to the RIGHT of their rightmost bar
 	const svgW  = $derived(Math.max(640,
 		L_PAD + Math.max(0, orderedNetworks.length - 1) * COL_W + IP_GAP + ITEM_W + 40
@@ -629,6 +682,114 @@
 				>인스턴스 · {trunc(row.status, 12)}</text>
 				<title>{row.name}{'\n'}ID: {row.id}{'\n'}상태: {row.status}{'\n'}IP: {[...row.netIps.values()].flat().join(', ')}</title>
 			{/if}
+		{/each}
+
+		<!-- ── Load Balancer nodes + edges ── -->
+		{#each lbItems as { lb, vipNetId, rowIdx }}
+			{@const cy   = rowCY(rowIdx)}
+			{@const iy   = rowY(rowIdx)}
+			{@const barX = vipNetId ? (netCX.get(vipNetId) ?? 0) : 0}
+			{@const col  = vipNetId ? (netColors.get(vipNetId) ?? '#06b6d4') : '#06b6d4'}
+			{@const cx   = vipNetId ? barX + IP_GAP + ITEM_W / 2 : svgW / 2}
+			{@const ix   = cx - ITEM_W / 2}
+			{@const isActive = lb.provisioning_status === 'ACTIVE'}
+			{@const lbStroke = isActive ? '#06b6d4' : '#f59e0b'}
+			{@const lbFill   = isLight ? (isActive ? '#ecfeff' : '#fffbeb') : (isActive ? '#083344' : '#1c1400')}
+			{@const lbText   = isLight ? (isActive ? '#0891b2' : '#92400e') : (isActive ? '#67e8f9' : '#fcd34d')}
+
+			<!-- VIP 네트워크 연결선 -->
+			{#if vipNetId}
+				<line
+					x1={barX} y1={cy}
+					x2={ix} y2={cy}
+					stroke={col} stroke-width="2.5" opacity="0.8"
+				/>
+				<!-- VIP IP 라벨 -->
+				{#if lb.vip_address}
+					<text
+						x={barX + 10} y={cy - 5}
+						fill={col} font-size="9" opacity="0.85"
+						font-family="ui-monospace, monospace"
+						style="pointer-events:none"
+					>{lb.vip_address}</text>
+				{/if}
+			{/if}
+
+			<!-- FIP 점선 (LB 포트에 Floating IP가 연결된 경우) -->
+			{#if lb.vip_port_id}
+				{@const fip = fipPortMap.get(lb.vip_port_id)}
+				{#if fip}
+					{@const fBarX = netCX.get(fip.floating_network_id) ?? 0}
+					{@const fCol  = netColors.get(fip.floating_network_id) ?? '#ea580c'}
+					<line
+						x1={fBarX} y1={cy}
+						x2={ix} y2={cy}
+						stroke={fCol} stroke-width="1.5" opacity="0.55"
+						stroke-dasharray="6 3"
+					/>
+					<text
+						x={fBarX + 10} y={cy - 5}
+						fill={fCol} font-size="9" opacity="0.7"
+						font-family="ui-monospace, monospace"
+						style="pointer-events:none"
+					>{fip.floating_ip_address}</text>
+				{/if}
+			{/if}
+
+			<!-- 멤버 → 인스턴스 연결선 -->
+			{#each lb.members as member}
+				{#if member.server_id}
+					{@const instIdx = instRowIdx.get(member.server_id)}
+					{#if instIdx !== undefined}
+						{@const instRow    = rows[instIdx]}
+						{@const instCx     = itemCX(instRow)}
+						{@const instCy     = rowCY(instIdx)}
+						{@const mActive    = member.status === 'ACTIVE'}
+						{@const mError     = member.status === 'ERROR'}
+						{@const mCol       = mActive ? '#22c55e' : mError ? '#ef4444' : '#64748b'}
+						<!-- 곡선 경로: LB 노드 → 인스턴스 노드 -->
+						<path
+							d="M{ix + ITEM_W} {cy} C{ix + ITEM_W + 40} {cy} {instCx - ITEM_W / 2 - 40} {instCy} {instCx - ITEM_W / 2} {instCy}"
+							fill="none" stroke={mCol} stroke-width="1.5" opacity="0.6"
+							stroke-dasharray={mActive ? 'none' : '4 2'}
+						/>
+					{/if}
+				{/if}
+			{/each}
+
+			<!-- LB 노드 박스 -->
+			<rect
+				x={ix} y={iy} width={ITEM_W} height={ITEM_H} rx="10"
+				fill={lbFill} stroke={lbStroke} stroke-width="1.5"
+				stroke-dasharray={isActive ? 'none' : '5 3'}
+				data-testid="lb-node-{lb.id}"
+				style="cursor:pointer"
+				role="button"
+				tabindex="0"
+				onclick={() => onSelectLoadBalancer?.(lb)}
+				onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && onSelectLoadBalancer?.(lb)}
+			/>
+			<!-- LB 아이콘 (균형 막대) -->
+			<line x1={ix + 22} y1={cy - 8} x2={ix + 22} y2={cy + 8}
+				stroke={lbStroke} stroke-width="1.5"/>
+			<line x1={ix + 14} y1={cy - 4} x2={ix + 30} y2={cy - 4}
+				stroke={lbStroke} stroke-width="2"/>
+			<line x1={ix + 16} y1={cy + 4} x2={ix + 28} y2={cy + 4}
+				stroke={lbStroke} stroke-width="1.5" opacity="0.6"/>
+			<!-- LB 이름 + 라벨 -->
+			<text
+				x={ix + 44} y={cy - 7}
+				fill={lbText} font-size="11" font-weight="600"
+				font-family="ui-sans-serif, system-ui, sans-serif"
+				style="pointer-events:none"
+			>{trunc(lb.name || 'LB', 11)}</text>
+			<text
+				x={ix + 44} y={cy + 9}
+				fill={lbStroke} font-size="9"
+				font-family="ui-sans-serif, system-ui, sans-serif"
+				style="pointer-events:none"
+			>LB · {isActive ? 'ACTIVE' : lb.provisioning_status}</text>
+			<title>{lb.name}{'\n'}ID: {lb.id}{'\n'}VIP: {lb.vip_address ?? '-'}{'\n'}상태: {lb.provisioning_status}{'\n'}멤버: {lb.members.length}개</title>
 		{/each}
 
 		<!-- Empty state -->
