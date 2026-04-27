@@ -30,6 +30,7 @@ from app.models.storage import (
 from app.rate_limit import limiter
 from app.services import neutron, nova
 from app.services.cache import cached_call, invalidate, ttl_fast, ttl_normal
+from app.services.octavia import get_topology_lbs
 
 router = APIRouter()
 
@@ -268,7 +269,7 @@ def _fetch_topology_sync(conn) -> dict:
             if ip:
                 port_net_map[(p.device_id, ip)] = p.network_id
 
-    topo.instances = [
+    instance_list = [
         TopologyInstance(
             id=s.id,
             name=s.name,
@@ -285,6 +286,12 @@ def _fetch_topology_sync(conn) -> dict:
         )
         for s in servers
     ]
+    topo.instances = instance_list
+    topo.load_balancers = get_topology_lbs(
+        conn,
+        project_id=getattr(conn, "_afterglow_project_id", None),
+        instances=[inst.model_dump() for inst in instance_list],
+    )
     return topo.model_dump()
 
 

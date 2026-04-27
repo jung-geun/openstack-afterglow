@@ -269,11 +269,44 @@ class TopologyNetwork(BaseModel):
     subnet_details: list[SubnetDetail] = []
 
 
+class TopologyLBMember(BaseModel):
+    id: str
+    address: str
+    protocol_port: int = 0
+    status: str = ""
+    subnet_id: str | None = None
+    pool_id: str
+    server_id: str | None = None
+
+
+class TopologyLBListener(BaseModel):
+    id: str
+    name: str = ""
+    protocol: str = ""
+    protocol_port: int = 0
+    default_pool_id: str | None = None
+
+
+class TopologyLoadBalancer(BaseModel):
+    id: str
+    name: str = ""
+    vip_address: str | None = None
+    vip_port_id: str | None = None
+    vip_subnet_id: str | None = None
+    vip_network_id: str | None = None
+    provisioning_status: str = ""
+    operating_status: str = ""
+    project_id: str | None = None
+    listeners: list[TopologyLBListener] = []
+    members: list[TopologyLBMember] = []
+
+
 class TopologyData(BaseModel):
     networks: list[TopologyNetwork] = []
     routers: list[TopologyRouter] = []
     instances: list[TopologyInstance] = []
     floating_ips: list[FloatingIpInfo] = []
+    load_balancers: list[TopologyLoadBalancer] = []
 
 
 # ---------------------------------------------------------------------------

@@ -23,6 +23,7 @@ from app.services import k3s_db as k3s_cluster
 from app.services import libraries as lib_svc
 from app.services import library_builder, manila, neutron, nova
 from app.services.cache import cached_call, invalidate, ttl_fast, ttl_normal, ttl_slow
+from app.services.octavia import get_topology_lbs
 
 router = APIRouter()
 
@@ -834,6 +835,11 @@ async def admin_topology(conn: openstack.connection.Connection = Depends(get_os_
                 )
             )
         topo.instances = instances
+        topo.load_balancers = get_topology_lbs(
+            conn,
+            project_id=None,
+            instances=[inst.model_dump() for inst in instances],
+        )
         return topo.model_dump()
 
     try:

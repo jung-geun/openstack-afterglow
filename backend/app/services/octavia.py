@@ -305,3 +305,70 @@ def create_health_monitor(
 
 def delete_health_monitor(conn: openstack.connection.Connection, hm_id: str) -> None:
     conn.load_balancer.delete_health_monitor(hm_id, ignore_missing=True)
+
+
+# ---------------------------------------------------------------------------
+# 토폴로지 수집
+# ---------------------------------------------------------------------------
+
+
+def get_topology_lbs(
+    conn: openstack.connection.Connection,
+    project_id: str | None = None,
+    instances: list[dict] | None = None,
+) -> list[dict]:
+    """프로젝트의 LB 목록을 토폴로지용 dict로 반환.
+
+    각 LB에 대해 status tree를 1콜 호출해 listener/pool/member 트리를 평탄화.
+    member.address ↔ instance fixed_ip 매칭으로 server_id를 미리 채운다.
+    Octavia가 catalog에 없으면 빈 리스트 반환.
+    """
+    try:
+        lbs = list_load_balancers(conn, project_id=project_id)
+    except Exception:
+        return []
+
+    ip_to_server: dict[str, str] = {}
+    for srv in instances or []:
+        for ip_info in srv.get("ip_addresses") or []:
+            addr = ip_info.get("addr")
+            if addr and srv.get("id"):
+                ip_to_server[addr] = srv["id"]
+
+    result = []
+    for lb in lbs:
+        try:
+            tree = get_lb_status_tree(conn, lb["id"])
+        except Exception:
+            tree = {}
+
+        listeners: list[dict] = []
+        members_flat: list[dict] = []
+        for li in tree.get("listeners") or []:
+            pools = li.get("pools") or []
+            listeners.append(
+                {
+                    "id": li.get("id", ""),
+                    "name": li.get("name", ""),
+                    "protocol": li.get("protocol", ""),
+                    "protocol_port": li.get("protocol_port", 0),
+                    "default_pool_id": pools[0].get("id") if pools else None,
+                }
+            )
+            for pool in pools:
+                pid = pool.get("id", "")
+                for m in pool.get("members") or []:
+                    addr = m.get("address", "")
+                    members_flat.append(
+                        {
+                            "id": m.get("id", ""),
+                            "address": addr,
+                            "protocol_port": m.get("protocol_port", 0),
+                            "status": m.get("provisioning_status", ""),
+                            "subnet_id": m.get("subnet_id"),
+                            "pool_id": pid,
+                            "server_id": ip_to_server.get(addr),
+                        }
+                    )
+        result.append({**lb, "listeners": listeners, "members": members_flat})
+    return result
