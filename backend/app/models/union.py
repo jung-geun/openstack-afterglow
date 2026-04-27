@@ -30,6 +30,8 @@ class CreateLayerRequest(BaseModel):
     size_bytes: int | None = None
     file_count: int | None = None
     project_id: str | None = None  # 명시적 지정 시 사용, 미지정 시 토큰에서 자동 추출
+    license_type: str | None = None
+    max_concurrent_mounts: int | None = None
 
     @field_validator("content_hash")
     @classmethod
@@ -62,6 +64,8 @@ class LayerInfo(BaseModel):
     content_hash: str
     size_bytes: int | None = None
     file_count: int | None = None
+    license_type: str | None = None
+    max_concurrent_mounts: int | None = None
 
 
 class SealLayerResponse(BaseModel):

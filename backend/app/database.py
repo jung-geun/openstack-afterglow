@@ -164,6 +164,8 @@ async def create_tables() -> None:
             "ALTER TABLE union_layers ADD COLUMN project_id VARCHAR(64) DEFAULT NULL",
             "ALTER TABLE union_layers ADD COLUMN sealed_at DATETIME(6) DEFAULT NULL",
             "ALTER TABLE union_layers ADD INDEX idx_union_layers_project (project_id)",
+            "ALTER TABLE union_layers ADD COLUMN license_type VARCHAR(64) DEFAULT NULL",
+            "ALTER TABLE union_layers ADD COLUMN max_concurrent_mounts INT DEFAULT NULL",
         ]:
             try:
                 await conn.exec_driver_sql(_col_sql)

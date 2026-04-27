@@ -41,6 +41,8 @@ def _layer_to_info(layer: UnionLayer) -> LayerInfo:
         content_hash=layer.content_hash,
         size_bytes=layer.size_bytes,
         file_count=layer.file_count,
+        license_type=getattr(layer, "license_type", None),
+        max_concurrent_mounts=getattr(layer, "max_concurrent_mounts", None),
     )
 
 
@@ -110,6 +112,8 @@ async def create_layer(
         file_count=data.file_count,
         project_id=effective_project_id,
         sealed_at=None,
+        license_type=data.license_type,
+        max_concurrent_mounts=data.max_concurrent_mounts,
     )
     session.add(layer)
     await session.commit()
@@ -354,10 +358,21 @@ def _mount_to_info(mount: UnionUserMount) -> MountInfo:
 
 
 async def record_mount(session: AsyncSession, user_id: str, vm_hostname: str, leaf_layer_id: str) -> MountInfo:
-    """마운트 기록 추가."""
+    """마운트 기록 추가. max_concurrent_mounts 초과 시 HTTPException(409) 발생."""
+    from fastapi import HTTPException
+
     leaf = await session.get(UnionLayer, leaf_layer_id)
     if leaf is None:
         raise ValueError(f"레이어 {leaf_layer_id}가 존재하지 않습니다")
+
+    if leaf.max_concurrent_mounts is not None:
+        active_count_result = await session.execute(
+            select(func.count())
+            .select_from(UnionUserMount)
+            .where(UnionUserMount.leaf_layer_id == leaf_layer_id, UnionUserMount.unmounted_at.is_(None))
+        )
+        if active_count_result.scalar_one() >= leaf.max_concurrent_mounts:
+            raise HTTPException(status_code=409, detail="concurrent mount limit reached")
 
     mount = UnionUserMount(
         user_id=user_id,

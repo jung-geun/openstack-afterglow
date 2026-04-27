@@ -44,6 +44,8 @@ def _make_layer(
     layer.content_hash = layer_id
     layer.size_bytes = None
     layer.file_count = None
+    layer.license_type = None
+    layer.max_concurrent_mounts = None
     return layer
 
 
@@ -1500,3 +1502,98 @@ class TestMountBearerAuth:
         finally:
             app.dependency_overrides.pop(get_session, None)
         assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# max_concurrent_mounts 가드 테스트
+# ---------------------------------------------------------------------------
+
+
+class TestMountLimitGuard:
+    @pytest.mark.asyncio
+    async def test_record_mount_within_limit(self):
+        """활성 마운트 수가 한도 미만일 때 정상 생성."""
+        from unittest.mock import MagicMock
+
+        from app.services.union_layers import record_mount
+
+        leaf = _make_layer(layer_id=_sha("leaf"))
+        leaf.max_concurrent_mounts = 3
+
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=leaf)
+        count_result = MagicMock()
+        count_result.scalar_one.return_value = 2
+        session.execute = AsyncMock(return_value=count_result)
+
+        mount_obj = MagicMock()
+        mount_obj.id = 1
+        mount_obj.user_id = "user-1"
+        mount_obj.vm_hostname = "vm-001"
+        mount_obj.leaf_layer_id = _sha("leaf")
+        mount_obj.mounted_at = _NOW
+        mount_obj.unmounted_at = None
+        session.refresh = AsyncMock(side_effect=lambda m: None)
+
+        def _side_add(obj):
+            obj.id = 1
+            obj.user_id = "user-1"
+            obj.vm_hostname = "vm-001"
+            obj.leaf_layer_id = _sha("leaf")
+            obj.mounted_at = _NOW
+            obj.unmounted_at = None
+
+        session.add = MagicMock(side_effect=_side_add)
+
+        result = await record_mount(session, "user-1", "vm-001", _sha("leaf"))
+        assert result is not None
+
+    @pytest.mark.asyncio
+    async def test_record_mount_exceeds_limit_raises_409(self):
+        """활성 마운트 수가 한도에 도달하면 HTTPException(409)."""
+        from unittest.mock import MagicMock
+
+        from fastapi import HTTPException
+
+        from app.services.union_layers import record_mount
+
+        leaf = _make_layer(layer_id=_sha("leaf"))
+        leaf.max_concurrent_mounts = 2
+
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=leaf)
+        count_result = MagicMock()
+        count_result.scalar_one.return_value = 2  # 한도 동일 → 초과
+        session.execute = AsyncMock(return_value=count_result)
+
+        with pytest.raises(HTTPException) as exc_info:
+            await record_mount(session, "user-1", "vm-001", _sha("leaf"))
+        assert exc_info.value.status_code == 409
+        assert "concurrent mount limit" in exc_info.value.detail
+
+    @pytest.mark.asyncio
+    async def test_record_mount_no_limit(self):
+        """max_concurrent_mounts=None이면 한도 검사 없이 생성."""
+        from app.services.union_layers import record_mount
+
+        leaf = _make_layer(layer_id=_sha("leaf"))
+        leaf.max_concurrent_mounts = None
+
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=leaf)
+
+        def _side_add(obj):
+            obj.id = 1
+            obj.user_id = "user-1"
+            obj.vm_hostname = "vm-001"
+            obj.leaf_layer_id = _sha("leaf")
+            obj.mounted_at = _NOW
+            obj.unmounted_at = None
+
+        session.add = MagicMock(side_effect=_side_add)
+        session.refresh = AsyncMock()
+
+        result = await record_mount(session, "user-1", "vm-001", _sha("leaf"))
+        # execute(count)가 호출되지 않음
+        session.execute.assert_not_called()
+        assert result is not None

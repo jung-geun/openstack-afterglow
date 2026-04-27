@@ -250,6 +250,10 @@ class UnionLayer(Base):
     # 봉인 시각 (sealed=True 로 변경된 시점)
     sealed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # 라이선스 메타데이터 (None = 제한 없음)
+    license_type: Mapped[str | None] = mapped_column(VARCHAR(64))
+    max_concurrent_mounts: Mapped[int | None] = mapped_column(INT)
+
     # 관계
     parent: Mapped["UnionLayer | None"] = relationship("UnionLayer", remote_side="UnionLayer.id")
     templates: Mapped[list["UnionTemplate"]] = relationship("UnionTemplate", back_populates="leaf_layer")

@@ -14,7 +14,6 @@ from pydantic import BaseModel
 
 from app.api.deps import get_os_conn, require_admin
 from app.services import glance
-from app.services.cache import cached_call, ttl_static
 
 _logger = logging.getLogger(__name__)
 
@@ -50,7 +49,6 @@ def _serialize_image(img) -> dict:
 @router.get("/images", dependencies=[Depends(require_admin)])
 async def list_admin_images(
     conn: openstack.connection.Connection = Depends(get_os_conn),
-    refresh: bool = Query(False),
     limit: int = Query(default=20, ge=1, le=100),
     marker: str | None = Query(default=None),
     search: str | None = Query(default=None),
@@ -58,14 +56,14 @@ async def list_admin_images(
 ):
     """전체 이미지 목록 (페이지네이션).
 
-    `search` 가 있으면 Glance `name` 정확 매칭 대신 전체 이미지를 가져와
-    case-insensitive substring 필터링 후 marker 기반 페이지네이션을 수동 처리한다.
-    `visibility` 가 있으면 서버에서 필터링한다 (public/community/shared/private).
+    `search` 가 있으면 전체 이미지를 가져와 case-insensitive substring 필터링 후
+    marker 기반 페이지네이션을 수동 처리한다.
+    `visibility` 가 있으면 Glance 서버에서 필터링한다.
     """
     try:
 
         def _list_paged():
-            kwargs: dict = {"limit": limit}
+            kwargs: dict = {}
             if marker:
                 kwargs["marker"] = marker
             if visibility:
@@ -103,11 +101,6 @@ async def list_admin_images(
 
         if search:
             return await asyncio.to_thread(_list_search)
-        # 마커가 없을 때만 캐시 사용 (visibility 포함해 캐시 키 구분)
-        vis_key = visibility or "all"
-        if not marker:
-            cache_key = f"afterglow:admin:images:{limit}:{vis_key}"
-            return await cached_call(cache_key, ttl_static(), _list_paged, refresh=refresh)
         return await asyncio.to_thread(_list_paged)
     except Exception:
         _logger.warning("관리자 이미지 목록 조회 실패", exc_info=True)

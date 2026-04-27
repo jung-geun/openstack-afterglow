@@ -38,7 +38,7 @@ mount_nfs() {
             return 0
         fi
         echo "[$(date)] NFS 마운트 재시도 ${i}/${MAX_RETRIES}... (${RETRY_INTERVAL}초 후)"
-        sleep $RETRY_INTERVAL
+        sleep $((RETRY_INTERVAL + RANDOM % 3))
     done
     echo "[$(date)] NFS 마운트 실패: ${name}" >&2
     return 1
@@ -78,7 +78,7 @@ mount_cephfs() {
             fi
         fi
         echo "[$(date)] CephFS 마운트 재시도 ${i}/${MAX_RETRIES}... (${RETRY_INTERVAL}초 후)"
-        sleep $RETRY_INTERVAL
+        sleep $((RETRY_INTERVAL + RANDOM % 3))
     done
     echo "[$(date)] CephFS 마운트 실패: ${name}" >&2
     return 1

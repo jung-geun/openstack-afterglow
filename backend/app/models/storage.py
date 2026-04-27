@@ -31,6 +31,8 @@ class LibraryConfig(BaseModel):
     share_proto: str = "CEPHFS"  # CEPHFS | NFS
     ubuntu_versions: list[str] = ["22.04", "24.04"]  # 지원 Ubuntu 버전
     visibility: str = "public"  # "public" | "private"
+    license_type: str | None = None  # e.g. "MIT", "commercial"
+    max_concurrent_mounts: int | None = None  # None = unlimited
 
 
 class VolumeInfo(BaseModel):
