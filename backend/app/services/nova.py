@@ -335,6 +335,16 @@ def confirm_resize_server(conn: openstack.connection.Connection, server_id: str)
     conn.compute.confirm_server_resize(server_id)
 
 
+def resize_server(conn: openstack.connection.Connection, server_id: str, flavor_id: str) -> None:
+    """인스턴스 플레이버 변경 (cold resize). VERIFY_RESIZE 상태로 전이, confirm 필요."""
+    conn.compute.resize_server(server_id, flavor_id)
+
+
+def revert_resize_server(conn: openstack.connection.Connection, server_id: str) -> None:
+    """리사이즈 취소 — VERIFY_RESIZE 상태에서 이전 플레이버로 복귀."""
+    conn.compute.revert_server_resize(server_id)
+
+
 def list_compute_hosts(conn: openstack.connection.Connection) -> list[dict]:
     """마이그레이션 대상 가능한 컴퓨트 호스트 목록."""
     endpoint = conn.compute.get_endpoint()

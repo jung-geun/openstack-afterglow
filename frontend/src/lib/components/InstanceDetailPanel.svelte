@@ -506,6 +506,71 @@
 		return availableNetworks.find(n => n.id === id)?.name ?? id.slice(0, 12) + '...';
 	}
 
+	// 리사이즈 (관리자 전용)
+	interface Flavor {
+		id: string;
+		name: string;
+		vcpus: number;
+		ram: number;
+		disk: number;
+	}
+	let showResizeModal = $state(false);
+	let resizeFlavors = $state<Flavor[]>([]);
+	let resizeFlavorId = $state('');
+	let resizeLoading = $state(false);
+	let resizeError = $state('');
+
+	async function openResizeModal() {
+		resizeFlavorId = '';
+		resizeError = '';
+		resizeFlavors = [];
+		showResizeModal = true;
+		try {
+			resizeFlavors = await api.get<Flavor[]>('/api/flavors', $auth.token ?? undefined, $auth.projectId ?? undefined);
+		} catch {
+			resizeFlavors = [];
+		}
+	}
+
+	async function doResize() {
+		if (!instance || !resizeFlavorId) return;
+		resizeLoading = true;
+		resizeError = '';
+		try {
+			await api.post(
+				`/api/admin/instances/${instance.id}/resize`,
+				{ flavor_id: resizeFlavorId },
+				$auth.token ?? undefined,
+				$auth.projectId ?? undefined
+			);
+			showResizeModal = false;
+			await fetchInstance(instance.id);
+		} catch (e) {
+			resizeError = e instanceof ApiError ? e.message : '리사이즈 실패';
+		} finally {
+			resizeLoading = false;
+		}
+	}
+
+	async function revertResize() {
+		if (!instance) return;
+		if (!confirm('리사이즈를 취소하고 이전 플레이버로 복귀하시겠습니까?')) return;
+		actioning = 'revert-resize';
+		try {
+			await api.post(
+				`/api/admin/instances/${instance.id}/revert-resize`,
+				{},
+				$auth.token ?? undefined,
+				$auth.projectId ?? undefined
+			);
+			await fetchInstance(instance.id);
+		} catch (e) {
+			alert('리사이즈 취소 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+		} finally {
+			actioning = null;
+		}
+	}
+
 	// 마이그레이션 (관리자 전용)
 	let showMigrateModal = $state(false);
 	let migrateType = $state<'live' | 'cold'>('live');
@@ -684,6 +749,13 @@
 						>
 							콜드 마이그레이션
 						</button>
+						<button
+							onclick={openResizeModal}
+							disabled={!!actioning}
+							class="text-violet-400 hover:text-violet-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-violet-900 hover:border-violet-700 disabled:border-gray-700 transition-colors"
+						>
+							리사이즈
+						</button>
 					{/if}
 					{#if instance.status === 'VERIFY_RESIZE'}
 						<button
@@ -692,6 +764,13 @@
 							class="text-orange-400 hover:text-orange-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-orange-900 hover:border-orange-700 disabled:border-gray-700 transition-colors"
 						>
 							{actioning === 'confirm-resize' ? '확인 중...' : '리사이즈 확인'}
+						</button>
+						<button
+							onclick={revertResize}
+							disabled={!!actioning}
+							class="text-yellow-400 hover:text-yellow-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-yellow-900 hover:border-yellow-700 disabled:border-gray-700 transition-colors"
+						>
+							{actioning === 'revert-resize' ? '취소 중...' : '되돌리기'}
 						</button>
 					{/if}
 				{/if}
@@ -1226,6 +1305,35 @@
 				<button onclick={() => { showMigrateModal = false; }} class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded-lg">취소</button>
 				<button onclick={doMigrate} disabled={migrateLoading} class="px-4 py-2 bg-cyan-700 hover:bg-cyan-600 text-white text-sm font-medium rounded-lg disabled:opacity-30">
 					{migrateLoading ? '마이그레이션 중...' : '마이그레이션'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if showResizeModal}
+	<div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" role="dialog" onclick={() => { showResizeModal = false; }} onkeydown={(e) => e.key === 'Escape' && (showResizeModal = false)} tabindex="-1">
+		<div class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl" onclick={(e) => e.stopPropagation()}>
+			<h2 class="text-lg font-semibold text-white mb-1">인스턴스 리사이즈</h2>
+			<p class="text-xs text-gray-500 mb-5">플레이버를 변경합니다. 완료 후 '리사이즈 확인' 또는 '되돌리기'를 선택하세요.</p>
+			{#if resizeError}
+				<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{resizeError}</div>
+			{/if}
+			<div class="space-y-4">
+				<div>
+					<label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">새 플레이버</label>
+					<select bind:value={resizeFlavorId} class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-violet-500">
+						<option value="">플레이버 선택</option>
+						{#each resizeFlavors as f}
+							<option value={f.id}>{f.name} ({f.vcpus} vCPU / {f.ram >= 1024 ? (f.ram / 1024).toFixed(0) + ' GB' : f.ram + ' MB'} RAM)</option>
+						{/each}
+					</select>
+				</div>
+			</div>
+			<div class="flex justify-end gap-3 mt-6">
+				<button onclick={() => { showResizeModal = false; }} class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded-lg">취소</button>
+				<button onclick={doResize} disabled={resizeLoading || !resizeFlavorId} class="px-4 py-2 bg-violet-700 hover:bg-violet-600 text-white text-sm font-medium rounded-lg disabled:opacity-30">
+					{resizeLoading ? '리사이즈 중...' : '리사이즈'}
 				</button>
 			</div>
 		</div>

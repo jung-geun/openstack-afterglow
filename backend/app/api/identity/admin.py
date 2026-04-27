@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from app.api.deps import get_os_conn, require_admin
+from app.api.deps import get_os_conn, get_token_info, require_admin
 from app.utils.version import read_app_version
 
 _logger = logging.getLogger(__name__)
@@ -22,7 +22,7 @@ from app.models.storage import FileStorageInfo, TopologyData, TopologyInstance
 from app.services import k3s_db as k3s_cluster
 from app.services import libraries as lib_svc
 from app.services import library_builder, manila, neutron, nova
-from app.services.cache import cached_call, ttl_fast, ttl_normal, ttl_slow
+from app.services.cache import cached_call, invalidate, ttl_fast, ttl_normal, ttl_slow
 
 router = APIRouter()
 
@@ -1370,6 +1370,45 @@ async def confirm_resize_instance(
         _logger.warning("리사이즈 확인 실패: %s", e)
 
         raise HTTPException(status_code=400, detail="리사이즈 확인 실패")
+
+
+class ResizeRequest(BaseModel):
+    flavor_id: str
+
+
+@router.post("/instances/{server_id}/resize", dependencies=[Depends(require_admin)])
+async def resize_instance(
+    server_id: str,
+    req: ResizeRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    """인스턴스 플레이버 변경 (cold resize). 완료 후 confirm-resize 또는 revert-resize 필요."""
+    try:
+        await asyncio.to_thread(nova.resize_server, conn, server_id, req.flavor_id)
+        project_id = token_info.get("project_id", "")
+        await invalidate(f"afterglow:nova:{project_id}:instances:*")
+        return {"status": "resizing"}
+    except Exception as e:
+        _logger.warning("리사이즈 실패: %s", e)
+        raise HTTPException(status_code=400, detail="리사이즈 실패")
+
+
+@router.post("/instances/{server_id}/revert-resize", dependencies=[Depends(require_admin)])
+async def revert_resize_instance(
+    server_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    """리사이즈 취소 — VERIFY_RESIZE 상태에서 이전 플레이버로 복귀."""
+    try:
+        await asyncio.to_thread(nova.revert_resize_server, conn, server_id)
+        project_id = token_info.get("project_id", "")
+        await invalidate(f"afterglow:nova:{project_id}:instances:*")
+        return {"status": "reverting"}
+    except Exception as e:
+        _logger.warning("리사이즈 취소 실패: %s", e)
+        raise HTTPException(status_code=400, detail="리사이즈 취소 실패")
 
 
 class VolumeTransferRequest(BaseModel):

@@ -555,7 +555,8 @@ Step 5: 요약 & 배포
   - [x] 백업에서 복구 시 OverlayFS 재구성 자동화 — `existing_upper_volume_id` + workdir 정리
 
 - [ ] 5.4 VM 스케일링 지원
-  - [ ] 인스턴스 resize (플레이버 변경) 시 OverlayFS 마운트 유지
+  - [x] 인스턴스 resize (플레이버 변경) — `POST /api/admin/instances/{id}/resize`, `/revert-resize` 엔드포인트 + `nova.resize_server`/`revert_resize_server` 서비스 함수 추가. `InstanceDetailPanel`에 resize 모달(flavor 선택) + VERIFY_RESIZE 상태에서 '되돌리기' 버튼 추가. 단위 테스트 4건 (`test_admin_resize.py`)
+  - [ ] 인스턴스 resize 시 OverlayFS 마운트 유지 검증 (통합 테스트)
   - [ ] 다중 VM 동시 부팅 시 NFS share 동시 접근 안정성 검증
   - [ ] 라이선스/동시 접속 제한 검토 (상용 소프트웨어)
 
@@ -959,3 +960,45 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 - [x] `backend/app/api/identity/admin.py::force_delete_admin_volume` — **신규** `POST /api/admin/volumes/{id}/force-delete` (status 무관, attached 볼륨은 409)
 - [x] `backend/tests/test_admin_volume_delete.py` — **신규** 11개 (자동 폴백 7 + force-delete 4: normal_status, attached_409, already_gone_204, requires_admin_403)
 - [x] `frontend/src/routes/admin/volumes/+page.svelte` — `상태초기화` (error 한정) → `상태변경` (모든 볼륨 노출), `error*/deleting` 상태에 한해 `강제삭제` 버튼/rose 경고 모달 추가
+
+---
+
+## 11. VM 스케일링 + 보안 강화 (5.4 + 5.5 완성) — Milestone 11
+
+> **목표**: 미완료 상태로 남은 5.4(VM 스케일링) + 5.5(보안 강화) 항목을 4주 로드맵으로 완성
+
+### 11.1 인스턴스 resize 엔드투엔드 (Week 1)
+
+- [x] `backend/app/services/nova.py` — `resize_server()`, `revert_resize_server()` 추가
+- [x] `backend/app/api/identity/admin.py` — `POST /api/admin/instances/{id}/resize`, `/revert-resize` 엔드포인트 추가 (관리자 전용, 캐시 무효화 포함)
+- [x] `frontend/src/lib/components/InstanceDetailPanel.svelte` — ACTIVE/SHUTOFF 상태에서 "리사이즈" 버튼 + flavor select 모달, VERIFY_RESIZE 상태에서 "되돌리기" 버튼 추가
+- [x] `backend/tests/test_admin_resize.py` — 신규 4건 (resize/revert 성공, 403 비관리자, nova 오류 400)
+
+### 11.2 resize OverlayFS 검증 + 다중 VM 동시 부팅 + 라이선스 가드 (Week 2)
+
+- [ ] `backend/app/templates/overlay_setup.sh.j2` — jittered backoff (`RANDOM % 3`) 추가
+- [ ] `backend/tests/integration/test_concurrent_boot.py` — N=5 VM 동시 생성 → OverlayFS 마운트 검증 (slow marker)
+- [ ] `backend/tests/integration/test_resize_overlay.py` — resize → confirm → mountpoint 검증 (slow marker)
+- [ ] `backend/app/models/storage.py` + `db.py` — `LibraryConfig.license_type`, `max_concurrent_mounts` 필드 추가
+- [ ] `backend/app/services/union_layers.py:create_mount` — mount 한도 초과 시 409 가드
+- [ ] `backend/app/api/union/layers.py` — 두 필드 라우터 노출
+- [ ] `frontend/src/routes/admin/libraries/+page.svelte` — 라이선스 배지 + 활성 마운트 수 표시
+
+### 11.3 NFS 옵션 강화 + CephX 회전 + 3-share wiring (Week 3)
+
+- [ ] `backend/app/api/compute/instances.py:1086` + `overlay_setup.sh.j2:28` — `nosuid,nodev,noexec` 추가
+- [ ] `scripts/envmgr-init.sh` — RO mount 옵션 통일
+- [ ] `instances.py:1063` — `0.0.0.0/0` 폴백 제거 → vm_ip 미확보 시 503
+- [ ] `backend/app/services/manila.py` — `rotate_cephx_access_rule()` 헬퍼
+- [ ] `backend/app/api/compute/instance_health.py` 패턴으로 `POST /api/instances/{id}/credentials/rotate-cephx` 추가
+- [ ] `scripts/envmgr-rotate-key.sh` + systemd `union-rotate-key.timer` (신규)
+- [ ] `backend/app/api/union/layers.py` — `grant_user_access()` + 3-share user wiring
+- [ ] `backend/app/services/cloudinit.py` — `union_ro_share_export` 파라미터 + write_files 주입
+
+### 11.4 격리 검증 + SG 자동화 (Week 4)
+
+- [ ] `backend/app/services/manila.py:create_file_storage` — `union_project_id` 메타 추가
+- [ ] `backend/app/api/storage/file_storage.py` — non-admin cross-project 필터링
+- [ ] `backend/tests/integration/test_isolation.py` — 신규 3건 (비노출/허용/403)
+- [ ] `backend/app/services/neutron.py` — `ensure_union_security_group()` 헬퍼
+- [ ] `backend/app/api/compute/instances.py:create_instance` — Union 사용 시 SG 자동 attach
