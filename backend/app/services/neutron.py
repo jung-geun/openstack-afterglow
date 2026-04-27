@@ -622,6 +622,58 @@ def delete_security_group_rule(conn: openstack.connection.Connection, rule_id: s
     conn.network.delete_security_group_rule(rule_id, ignore_missing=True)
 
 
+_UNION_EGRESS_RULES: list[dict] = [
+    {"protocol": "tcp", "port_range_min": 2049, "port_range_max": 2049},  # NFS
+    {"protocol": "udp", "port_range_min": 2049, "port_range_max": 2049},  # NFS UDP
+    {"protocol": "tcp", "port_range_min": 6789, "port_range_max": 6789},  # CephFS mon v1
+    {"protocol": "tcp", "port_range_min": 3300, "port_range_max": 3300},  # Ceph msgr v2
+    {"protocol": "tcp", "port_range_min": 80, "port_range_max": 80},  # envmgr-init HTTP
+    {"protocol": "tcp", "port_range_min": 443, "port_range_max": 443},  # envmgr-init HTTPS
+]
+
+
+def ensure_union_egress_sg(
+    conn: openstack.connection.Connection, project_id: str, sg_name: str = "union-egress-default"
+) -> str:
+    """Union VM용 egress SG를 idempotent하게 확보하고 SG 이름을 반환한다.
+
+    SG가 없으면 생성 후 NFS/CephFS/HTTP(S) egress rule을 추가한다.
+    이미 있으면 누락된 rule만 보충한다.
+    """
+    sgs = list_security_groups(conn, project_id=project_id)
+    existing = next((sg for sg in sgs if sg["name"] == sg_name), None)
+
+    if existing is None:
+        sg = create_security_group(conn, sg_name, "Union VM egress — NFS/CephFS/HTTP(S)")
+        sg_id = sg["id"]
+        existing_rules: list[dict] = []
+    else:
+        sg_id = existing["id"]
+        existing_rules = existing.get("rules", [])
+
+    # (protocol, min, max)로 기존 egress rule 목록 색인
+    existing_keys = {
+        (r.get("protocol"), r.get("port_range_min"), r.get("port_range_max"))
+        for r in existing_rules
+        if r.get("direction") == "egress"
+    }
+
+    for rule in _UNION_EGRESS_RULES:
+        key = (rule["protocol"], rule["port_range_min"], rule["port_range_max"])
+        if key not in existing_keys:
+            create_security_group_rule(
+                conn,
+                sg_id,
+                direction="egress",
+                protocol=rule["protocol"],
+                port_range_min=rule["port_range_min"],
+                port_range_max=rule["port_range_max"],
+                remote_ip_prefix="0.0.0.0/0",
+            )
+
+    return sg_name
+
+
 def update_port_security_groups(
     conn: openstack.connection.Connection, port_id: str, security_group_ids: list[str]
 ) -> dict:
