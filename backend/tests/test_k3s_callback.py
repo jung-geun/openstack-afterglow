@@ -117,7 +117,9 @@ async def test_callback_success_triggers_agent_provisioning():
     assert resp.json() == {"ok": True}
     mock_db.store_kubeconfig.assert_called_once_with("proj-1", "cluster-1", "apiVersion: v1\nkind: Config\n")
     mock_db.update_cluster_status.assert_called_once_with(
-        "proj-1", "cluster-1", "PROVISIONING",
+        "proj-1",
+        "cluster-1",
+        "PROVISIONING",
         server_ip="10.0.0.1",
         api_address="https://10.0.0.1:6443",
         node_token="K10secret::server:abc123",

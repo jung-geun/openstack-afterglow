@@ -319,7 +319,8 @@ def get_topology_lbs(
 ) -> list[dict]:
     """프로젝트의 LB 목록을 토폴로지용 dict로 반환.
 
-    각 LB에 대해 status tree를 1콜 호출해 listener/pool/member 트리를 평탄화.
+    LB별로 list_listeners + list_pools + list_members를 직접 호출해 listener/pool/member를
+    평탄화한다 (status tree보다 정확 — listener에 묶이지 않은 추가 pool도 포함).
     member.address ↔ instance fixed_ip 매칭으로 server_id를 미리 채운다.
     Octavia가 catalog에 없으면 빈 리스트 반환.
     """
@@ -337,38 +338,46 @@ def get_topology_lbs(
 
     result = []
     for lb in lbs:
-        try:
-            tree = get_lb_status_tree(conn, lb["id"])
-        except Exception:
-            tree = {}
+        lb_id = lb["id"]
 
-        listeners: list[dict] = []
+        listeners_dicts: list[dict] = []
+        try:
+            for li in list_listeners(conn, lb_id=lb_id):
+                listeners_dicts.append(
+                    {
+                        "id": li.get("id", ""),
+                        "name": li.get("name", ""),
+                        "protocol": li.get("protocol", ""),
+                        "protocol_port": li.get("protocol_port", 0),
+                        "default_pool_id": li.get("default_pool_id"),
+                    }
+                )
+        except Exception:
+            pass
+
         members_flat: list[dict] = []
-        for li in tree.get("listeners") or []:
-            pools = li.get("pools") or []
-            listeners.append(
-                {
-                    "id": li.get("id", ""),
-                    "name": li.get("name", ""),
-                    "protocol": li.get("protocol", ""),
-                    "protocol_port": li.get("protocol_port", 0),
-                    "default_pool_id": pools[0].get("id") if pools else None,
-                }
-            )
-            for pool in pools:
-                pid = pool.get("id", "")
-                for m in pool.get("members") or []:
-                    addr = m.get("address", "")
-                    members_flat.append(
-                        {
-                            "id": m.get("id", ""),
-                            "address": addr,
-                            "protocol_port": m.get("protocol_port", 0),
-                            "status": m.get("provisioning_status", ""),
-                            "subnet_id": m.get("subnet_id"),
-                            "pool_id": pid,
-                            "server_id": ip_to_server.get(addr),
-                        }
-                    )
-        result.append({**lb, "listeners": listeners, "members": members_flat})
+        try:
+            pools = list_pools(conn, lb_id=lb_id)
+        except Exception:
+            pools = []
+        for pool in pools:
+            pid = pool.get("id", "")
+            try:
+                pool_members = list_members(conn, pool_id=pid)
+            except Exception:
+                continue
+            for m in pool_members:
+                addr = m.get("address", "")
+                members_flat.append(
+                    {
+                        "id": m.get("id", ""),
+                        "address": addr,
+                        "protocol_port": m.get("protocol_port", 0),
+                        "status": m.get("status", ""),
+                        "subnet_id": m.get("subnet_id"),
+                        "pool_id": pid,
+                        "server_id": ip_to_server.get(addr),
+                    }
+                )
+        result.append({**lb, "listeners": listeners_dicts, "members": members_flat})
     return result

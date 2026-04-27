@@ -304,9 +304,7 @@ async def test_list_layers_project_isolation(sess):
     # 공유 레이어 (project_id=None)
     shared = await svc.create_layer(sess, _req(name="shared-layer", version="1"), created_by="admin")
     # 프로젝트 A 레이어
-    proj_a = await svc.create_layer(
-        sess, _req(name="proj-a-layer", version="1", project_id="proj-a"), created_by="ua"
-    )
+    proj_a = await svc.create_layer(sess, _req(name="proj-a-layer", version="1", project_id="proj-a"), created_by="ua")
     # 프로젝트 B 레이어
     await svc.create_layer(sess, _req(name="proj-b-layer", version="1", project_id="proj-b"), created_by="ub")
 
@@ -326,9 +324,7 @@ async def test_list_layers_project_isolation(sess):
 @pytest.mark.asyncio
 async def test_list_layers_admin_sees_all(sess):
     await svc.create_layer(sess, _req(name="sys-layer", version="1"), created_by="admin")
-    await svc.create_layer(
-        sess, _req(name="tenant-layer", version="1", project_id="some-proj"), created_by="user"
-    )
+    await svc.create_layer(sess, _req(name="tenant-layer", version="1", project_id="some-proj"), created_by="user")
 
     all_layers = await svc.list_layers(sess, is_admin=True)
     names = {lyr.name for lyr in all_layers}
