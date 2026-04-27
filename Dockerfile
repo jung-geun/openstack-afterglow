@@ -26,6 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY backend/pyproject.toml backend/uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
+ENV PATH="/app/.venv/bin:$PATH"
 
 # ── Backend 프로덕션 (깨끗한 slim 이미지, gcc 없음) ──────────────────────────
 FROM python:3.12-slim AS backend
