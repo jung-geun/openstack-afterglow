@@ -274,11 +274,12 @@ async def test_create_instance_invalid_name(client, mock_conn):
 # ────── Floating IP 해제 — cleanup_instance_fips 범위 검증 ──────
 
 
-def _make_port(pid: str):
+def _make_port(pid: str, subnet_id: str = "subnet-1"):
     from unittest.mock import MagicMock
 
     p = MagicMock()
     p.id = pid
+    p.fixed_ips = [{"subnet_id": subnet_id, "ip_address": "10.0.0.5"}]
     return p
 
 
@@ -389,8 +390,8 @@ async def test_assign_floating_ip_single_port_success(client, mock_conn):
 
     with (
         patch(
-            "app.api.compute.instances.neutron.list_networks",
-            return_value=[_make_net("ext-net", is_external=True)],
+            "app.api.compute.instances.neutron.find_external_network_for_subnets",
+            return_value="ext-net",
         ),
         patch(
             "app.api.compute.instances.neutron.create_floating_ip",
@@ -422,8 +423,8 @@ async def test_assign_floating_ip_multi_port_selects_available(client, mock_conn
 
     with (
         patch(
-            "app.api.compute.instances.neutron.list_networks",
-            return_value=[_make_net("ext-net", is_external=True)],
+            "app.api.compute.instances.neutron.find_external_network_for_subnets",
+            return_value="ext-net",
         ),
         patch(
             "app.api.compute.instances.neutron.create_floating_ip",
@@ -444,11 +445,7 @@ async def test_assign_floating_ip_all_ports_occupied_returns_400(client, mock_co
     mock_conn.network.ports.return_value = [_make_port("p1")]
     mock_conn.network.ips.return_value = [_make_fip("fip-existing", "p1")]
 
-    with patch(
-        "app.api.compute.instances.neutron.list_networks",
-        return_value=[_make_net("ext-net", is_external=True)],
-    ):
-        resp = await client.post("/api/instances/inst-1/floating-ip")
+    resp = await client.post("/api/instances/inst-1/floating-ip")
 
     assert resp.status_code == 400
     assert "이미 Floating IP" in resp.json()["detail"]
@@ -460,11 +457,7 @@ async def test_assign_floating_ip_explicit_port_already_occupied_returns_409(cli
     mock_conn.network.ports.return_value = [_make_port("p1")]
     mock_conn.network.ips.return_value = [_make_fip("fip-existing", "p1")]
 
-    with patch(
-        "app.api.compute.instances.neutron.list_networks",
-        return_value=[_make_net("ext-net", is_external=True)],
-    ):
-        resp = await client.post("/api/instances/inst-1/floating-ip?port_id=p1")
+    resp = await client.post("/api/instances/inst-1/floating-ip?port_id=p1")
 
     assert resp.status_code == 409
     assert "이미 Floating IP" in resp.json()["detail"]
@@ -485,8 +478,8 @@ async def test_assign_floating_ip_conflict_exception_rolls_back(client, mock_con
 
     with (
         patch(
-            "app.api.compute.instances.neutron.list_networks",
-            return_value=[_make_net("ext-net", is_external=True)],
+            "app.api.compute.instances.neutron.find_external_network_for_subnets",
+            return_value="ext-net",
         ),
         patch(
             "app.api.compute.instances.neutron.create_floating_ip",
@@ -502,6 +495,57 @@ async def test_assign_floating_ip_conflict_exception_rolls_back(client, mock_con
 
     assert resp.status_code == 409
     assert "fip-race" in deleted
+
+
+@pytest.mark.asyncio
+async def test_assign_floating_ip_no_router_returns_422(client, mock_conn):
+    """서브넷이 라우터로 외부망에 연결되어 있지 않으면 422 + 안내 메시지."""
+    mock_conn.network.ports.return_value = [_make_port("p1")]
+    mock_conn.network.ips.return_value = []
+
+    with patch(
+        "app.api.compute.instances.neutron.find_external_network_for_subnets",
+        return_value=None,
+    ):
+        resp = await client.post("/api/instances/inst-1/floating-ip")
+
+    assert resp.status_code == 422
+    assert "라우터" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_assign_floating_ip_unreachable_external_network_returns_422(client, mock_conn):
+    """associate에서 'is not reachable from subnet' 오류 발생 시 422 + 안내."""
+    mock_conn.network.ports.return_value = [_make_port("p1")]
+    mock_conn.network.ips.return_value = []
+
+    deleted = []
+
+    def fake_delete(conn, fip_id):
+        deleted.append(fip_id)
+
+    with (
+        patch(
+            "app.api.compute.instances.neutron.find_external_network_for_subnets",
+            return_value="ext-mismatch",
+        ),
+        patch(
+            "app.api.compute.instances.neutron.create_floating_ip",
+            return_value=_make_fip_info("fip-orphan", "172.30.100.9"),
+        ),
+        patch(
+            "app.api.compute.instances.neutron.associate_floating_ip",
+            side_effect=Exception(
+                "ResourceNotFound: External network ext-mismatch is not reachable from subnet subnet-1."
+            ),
+        ),
+        patch("app.api.compute.instances.neutron.delete_floating_ip", side_effect=fake_delete),
+    ):
+        resp = await client.post("/api/instances/inst-1/floating-ip")
+
+    assert resp.status_code == 422
+    assert "도달 불가능" in resp.json()["detail"]
+    assert "fip-orphan" in deleted
 
 
 # ────── Union SG 자동 attach 테스트 ──────

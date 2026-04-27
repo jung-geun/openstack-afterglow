@@ -272,6 +272,32 @@ def create_floating_ip(conn: openstack.connection.Connection, floating_network_i
     return _fip_to_info(fip)
 
 
+def find_external_network_for_subnets(
+    conn: openstack.connection.Connection,
+    subnet_ids: set[str],
+) -> str | None:
+    """주어진 서브넷에 라우터 인터페이스로 연결된 외부 게이트웨이 네트워크 ID를 반환.
+
+    - 라우터의 external_gateway_info.network_id를 사용해 reachable한 외부망을 결정.
+    - 매칭 라우터가 없거나 라우터에 외부 게이트웨이가 설정되지 않았으면 None.
+    """
+    if not subnet_ids:
+        return None
+    candidate_router_ids: set[str] = set()
+    for iface_port in _iter_router_interface_ports(conn):
+        iface_subnet_ids = {fi.get("subnet_id") for fi in (iface_port.fixed_ips or [])}
+        if iface_subnet_ids & subnet_ids and iface_port.device_id:
+            candidate_router_ids.add(iface_port.device_id)
+    if not candidate_router_ids:
+        return None
+    for router in conn.network.routers():
+        if router.id in candidate_router_ids and router.external_gateway_info:
+            ext_net_id = router.external_gateway_info.get("network_id")
+            if ext_net_id:
+                return ext_net_id
+    return None
+
+
 def associate_floating_ip(
     conn: openstack.connection.Connection,
     floating_ip_id: str,

@@ -1193,18 +1193,15 @@ async def assign_floating_ip(
     """인스턴스에 새 Floating IP를 자동 생성하고 연결한다."""
     pid = conn._afterglow_project_id
     try:
-        # 1) 외부 네트워크 확인
-        all_nets = await asyncio.to_thread(neutron.list_networks, conn)
-        ext_net = next((n for n in all_nets if n.is_external), None)
-        if not ext_net:
-            raise HTTPException(status_code=400, detail="외부 네트워크가 없습니다")
-
-        # 2) FIP 생성 전 사전 점유 체크
+        # 1) 인스턴스 포트 조회 + 점유 체크
         ports = await asyncio.to_thread(lambda: list(conn.network.ports(device_id=instance_id)))
         if not ports:
             raise HTTPException(status_code=400, detail="인스턴스에 연결된 포트가 없습니다")
         used_port_ids = await asyncio.to_thread(lambda: {f.port_id for f in conn.network.ips() if f.port_id})
         if port_id:
+            target_port = next((p for p in ports if p.id == port_id), None)
+            if not target_port:
+                raise HTTPException(status_code=404, detail="해당 인터페이스를 찾을 수 없습니다")
             if port_id in used_port_ids:
                 raise HTTPException(
                     status_code=409,
@@ -1217,10 +1214,23 @@ async def assign_floating_ip(
                     status_code=400,
                     detail="모든 인터페이스에 이미 Floating IP가 할당되어 있습니다",
                 )
-            port_id = available[0].id
+            target_port = available[0]
+            port_id = target_port.id
+
+        # 2) 인스턴스 서브넷 → 라우터 → 연결된 외부 네트워크 결정
+        subnet_ids = {fi.get("subnet_id") for fi in (target_port.fixed_ips or []) if fi.get("subnet_id")}
+        ext_net_id = await asyncio.to_thread(neutron.find_external_network_for_subnets, conn, subnet_ids)
+        if not ext_net_id:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "이 인터페이스의 서브넷이 외부 네트워크와 라우터로 연결되어 있지 않습니다. "
+                    "라우터로 외부 네트워크에 연결한 뒤 다시 시도하세요."
+                ),
+            )
 
         # 3) FIP 생성 + 연결 (race 발생 시 rollback)
-        fip = await asyncio.to_thread(neutron.create_floating_ip, conn, ext_net.id)
+        fip = await asyncio.to_thread(neutron.create_floating_ip, conn, ext_net_id)
         try:
             result = await asyncio.to_thread(neutron.associate_floating_ip, conn, fip.id, instance_id, port_id)
         except Exception as ex:
@@ -1240,6 +1250,16 @@ async def assign_floating_ip(
             detail="해당 인터페이스에 이미 Floating IP가 할당되어 있습니다",
         )
     except Exception as ex:
+        msg = str(ex)
+        if "is not reachable from subnet" in msg or "not reachable from" in msg:
+            logger.warning("Floating IP 할당 실패 (외부망 reachable 아님): %s", ex)
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "선택된 외부 네트워크가 인스턴스 서브넷에서 도달 불가능합니다. "
+                    "라우터의 외부 게이트웨이 설정을 확인하세요."
+                ),
+            )
         logger.warning("Floating IP 할당 실패: %s", ex)
         raise HTTPException(status_code=500, detail="Floating IP 할당 실패")
 
