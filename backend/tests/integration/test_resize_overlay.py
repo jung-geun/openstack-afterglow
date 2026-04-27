@@ -21,17 +21,6 @@ pytestmark = pytest.mark.slow
 async def test_resize_preserves_overlayfs(admin_client, settings):
     """VM 생성 → resize → confirm → OverlayFS /opt/layers/merged 마운트 유지 확인."""
     require_service("service_nova_enabled")
-    pytest.skip("실 인프라 환경에서 실행 — self-hosted runner 전용")
-
-    # --- 실 인프라 환경에서의 동작 개요 ---
-    # 1. 소형 flavor로 prebuilt library VM 생성 → ACTIVE 대기
-    # 2. POST /api/admin/instances/{id}/resize (중형 flavor)
-    # 3. VERIFY_RESIZE 상태 대기 (최대 5분)
-    # 4. POST /api/admin/instances/{id}/confirm-resize
-    # 5. ACTIVE 상태 재진입 대기 (최대 5분)
-    # 6. GET /api/instances/{id}/health → mount_ok=True 확인
-    #    (union-overlay.service WantedBy=multi-user.target으로 cold resize 후 자동 재실행)
-    # 7. VM 삭제 (cleanup)
 
     instance_id: str | None = None
     try:

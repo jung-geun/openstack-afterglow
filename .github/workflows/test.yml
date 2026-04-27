@@ -250,7 +250,10 @@ jobs:
           AFTERGLOW_TEST_USER_USERNAME: ${{ secrets.AFTERGLOW_TEST_USER_USERNAME }}
           AFTERGLOW_TEST_USER_PASSWORD: ${{ secrets.AFTERGLOW_TEST_USER_PASSWORD }}
           AFTERGLOW_TEST_USER_PROJECT: ${{ secrets.AFTERGLOW_TEST_USER_PROJECT }}
-        run: uv run python -m pytest tests/integration -v
+          AFTERGLOW_TEST_PROJECT_B_USERNAME: ${{ secrets.AFTERGLOW_TEST_PROJECT_B_USERNAME }}
+          AFTERGLOW_TEST_PROJECT_B_PASSWORD: ${{ secrets.AFTERGLOW_TEST_PROJECT_B_PASSWORD }}
+          AFTERGLOW_TEST_PROJECT_B_NAME: ${{ secrets.AFTERGLOW_TEST_PROJECT_B_NAME }}
+        run: uv run python -m pytest tests/integration -v -m slow
 
   test-frontend:
     name: Frontend (vitest)

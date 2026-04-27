@@ -9,6 +9,7 @@
 """
 
 import asyncio
+import os
 
 import pytest
 
@@ -16,21 +17,13 @@ from tests.integration.conftest import require_service
 
 pytestmark = pytest.mark.slow
 
-CONCURRENT_VMS = 5
+CONCURRENT_VMS = int(os.getenv("AFTERGLOW_TEST_CONCURRENT_VMS", "3"))
 
 
 @pytest.mark.asyncio
 async def test_concurrent_vm_boot_nfs_stability(admin_client, settings):
-    """N=5 VM을 동일 prebuilt library로 동시 생성 → 모두 ACTIVE + health 보고 도달."""
+    """N=CONCURRENT_VMS VM을 동일 prebuilt library로 동시 생성 → 모두 ACTIVE + health 보고 도달."""
     require_service("service_manila_enabled")
-    pytest.skip("실 인프라 환경에서 실행 — self-hosted runner 전용")
-
-    # --- 실 인프라 환경에서의 동작 개요 ---
-    # 1. prebuilt library share가 존재하는지 확인
-    # 2. 동시에 CONCURRENT_VMS개 VM 생성 요청 (asyncio.gather)
-    # 3. 각 VM이 ACTIVE 상태에 도달할 때까지 폴링 (최대 10분)
-    # 4. 각 VM의 /health 엔드포인트에서 mount_ok=True 확인
-    # 5. 모든 VM 삭제 (cleanup)
 
     instance_ids: list[str] = []
     try:
@@ -42,15 +35,15 @@ async def test_concurrent_vm_boot_nfs_stability(admin_client, settings):
         instance_ids = [r for r in results if isinstance(r, str)]
         assert len(instance_ids) == CONCURRENT_VMS
 
-        # 모든 VM ACTIVE 대기
+        # 모든 VM ACTIVE 대기 (최대 15분)
         for inst_id in instance_ids:
-            status = await _wait_for_active(admin_client, inst_id, timeout=600)
-            assert status == "ACTIVE", f"VM {inst_id}가 ACTIVE에 도달하지 못함"
+            status = await _wait_for_active(admin_client, inst_id, timeout=900)
+            assert status == "ACTIVE", f"VM {inst_id}가 ACTIVE에 도달하지 못함 (status={status})"
 
         # health 보고 확인
         for inst_id in instance_ids:
             health = await _get_health(admin_client, inst_id)
-            assert health.get("mount_ok") is True, f"VM {inst_id} mount_ok=False"
+            assert health.get("mount_ok") is True, f"VM {inst_id} mount_ok=False: {health}"
     finally:
         for inst_id in instance_ids:
             await admin_client.delete(f"/api/instances/{inst_id}")

@@ -65,3 +65,18 @@ def user_credentials() -> dict | None:
         "project_name": os.environ.get("AFTERGLOW_TEST_USER_PROJECT") or t.get("project_name") or "",
         "domain_name": os.environ.get("AFTERGLOW_TEST_USER_DOMAIN") or t.get("domain_name") or "Default",
     }
+
+
+def project_b_credentials() -> dict | None:
+    """두 번째 프로젝트 크리덴셜 (격리 테스트용). 미설정 시 None → 테스트 skip."""
+    t = _toml().get("project_b", {})
+    username = os.environ.get("AFTERGLOW_TEST_PROJECT_B_USERNAME") or t.get("username")
+    password = os.environ.get("AFTERGLOW_TEST_PROJECT_B_PASSWORD") or t.get("password")
+    if not username or not password:
+        return None
+    return {
+        "username": username,
+        "password": password,
+        "project_name": os.environ.get("AFTERGLOW_TEST_PROJECT_B_NAME") or t.get("project_name") or "",
+        "domain_name": os.environ.get("AFTERGLOW_TEST_USER_DOMAIN") or t.get("domain_name") or "Default",
+    }
