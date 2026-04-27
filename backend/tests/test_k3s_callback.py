@@ -44,9 +44,9 @@ async def test_callback_failure_updates_status():
             )
     assert resp.status_code == 200
     assert resp.json() == {"ok": True}
-    mock_db.update_cluster_status.assert_called_once()
-    call_args = mock_db.update_cluster_status.call_args
-    assert call_args.args[2] == "ERROR" or call_args.args[2] == "ERROR"
+    mock_db.update_cluster_status.assert_called_once_with(
+        "proj-1", "cluster-1", "ERROR", "서버 초기화 실패: k3s 설치 실패"
+    )
 
 
 @pytest.mark.asyncio
@@ -115,7 +115,13 @@ async def test_callback_success_triggers_agent_provisioning():
                 )
     assert resp.status_code == 200
     assert resp.json() == {"ok": True}
-    mock_db.store_kubeconfig.assert_called_once()
+    mock_db.store_kubeconfig.assert_called_once_with("proj-1", "cluster-1", "apiVersion: v1\nkind: Config\n")
+    mock_db.update_cluster_status.assert_called_once_with(
+        "proj-1", "cluster-1", "PROVISIONING",
+        server_ip="10.0.0.1",
+        api_address="https://10.0.0.1:6443",
+        node_token="K10secret::server:abc123",
+    )
     mock_asyncio.create_task.assert_called_once()
 
 

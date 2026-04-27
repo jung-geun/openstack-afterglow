@@ -242,28 +242,7 @@ class TestSealLayer:
 
 
 class TestListLayers:
-    @pytest.mark.asyncio
-    async def test_list_layers_returns_list(self):
-        """레이어 목록 반환."""
-        from app.services import union_layers as svc
-
-        layers = [
-            _make_layer_info(_sha("a"), "python", "3.12"),
-            _make_layer_info(_sha("b"), "cuda", "12.3"),
-        ]
-        with patch.object(svc, "list_layers", AsyncMock(return_value=layers)):
-            result = await svc.list_layers(AsyncMock(), name=None, limit=50, offset=0)
-        assert len(result) == 2
-
-    @pytest.mark.asyncio
-    async def test_list_layers_name_filter(self):
-        """이름 필터 적용."""
-        from app.services import union_layers as svc
-
-        filtered = [_make_layer_info(_sha("a"), "python", "3.12")]
-        with patch.object(svc, "list_layers", AsyncMock(return_value=filtered)):
-            result = await svc.list_layers(AsyncMock(), name="python", limit=50, offset=0)
-        assert all(layer.name == "python" for layer in result)
+    pass  # 실 SQL 검증은 test_union_layers_db.py (Phase C MariaDB 통합)으로 이전
 
 
 class TestGetAncestors:
