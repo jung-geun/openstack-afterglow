@@ -71,7 +71,7 @@ jobs:
           OS_USERNAME: ${{ secrets.AFTERGLOW_OS_USERNAME }}
           OS_PASSWORD: ${{ secrets.AFTERGLOW_OS_PASSWORD }}
           OS_PROJECT_NAME: ${{ secrets.AFTERGLOW_OS_PROJECT_NAME }}
-          OS_INTERFACE: ${{ vars.AFTERGLOW_OS_INTERFACE || 'internal' }}
+          OS_INTERFACE: ${{ vars.AFTERGLOW_OS_INTERFACE || 'public' }}
         run: |
           if [ -z "$OS_AUTH_URL" ]; then
             echo "enabled=false" >> "$GITHUB_OUTPUT"
