@@ -50,26 +50,13 @@
   }
 
 
-  const K3S_BASE_STEPS = [
+  const k3sSteps = [
     { id: 'security_group',   label: '보안 그룹' },
     { id: 'server_volume',    label: '서버 볼륨' },
     { id: 'server_creating',  label: '서버 VM' },
     { id: 'waiting_callback', label: 'k3s 초기화' },
     { id: 'completed',        label: '완료' },
   ];
-
-  const K3S_LB_STEP = { id: 'lb_creating', label: '로드밸런서' };
-
-  // api_lb_enabled이면 LB 스텝 포함, 또는 SSE에서 lb_creating 이벤트 수신 시 동적 추가
-  let k3sSteps = $derived.by(() => {
-    const hasLb = form.api_lb_enabled || progressStep === 'lb_creating';
-    if (hasLb) {
-      const steps = [...K3S_BASE_STEPS];
-      steps.splice(1, 0, K3S_LB_STEP); // 보안 그룹 다음에 삽입
-      return steps;
-    }
-    return K3S_BASE_STEPS;
-  });
 
   // 슬라이드 패널
   let selectedClusterId = $state<string | null>(null);
@@ -110,7 +97,8 @@
   let showModal = $state(false);
   let creating = $state(false);
   let createError = $state('');
-  let form = $state({ name: '', agent_count: 1, agent_flavor_id: '', network_id: '', key_name: '', api_lb_enabled: false, api_lb_network_id: '', os_type: 'ubuntu' });
+  let form = $state({ name: '', agent_count: 1, agent_flavor_id: '', network_id: '', key_name: '', os_type: 'ubuntu' });
+  let network_category = $state<'tenant' | 'provider'>('tenant');
 
   // SSE 진행률
   let showProgress = $state(false);
@@ -144,7 +132,8 @@
 
   async function openCreateModal() {
     showModal = true;
-    form = { name: '', agent_count: 1, agent_flavor_id: '', network_id: '', key_name: '', api_lb_enabled: false, api_lb_network_id: '', os_type: 'ubuntu' };
+    form = { name: '', agent_count: 1, agent_flavor_id: '', network_id: '', key_name: '', os_type: 'ubuntu' };
+    network_category = 'tenant';
     createError = '';
     try {
       [flavors, networks, keypairs] = await Promise.all([
@@ -200,8 +189,6 @@
           ...(form.agent_flavor_id ? { agent_flavor_id: form.agent_flavor_id } : {}),
           ...(form.network_id ? { network_id: form.network_id } : {}),
           ...(form.key_name ? { key_name: form.key_name } : {}),
-          api_lb_enabled: form.api_lb_enabled,
-          ...(form.api_lb_network_id ? { api_lb_network_id: form.api_lb_network_id } : {}),
         }),
       });
 
@@ -381,38 +368,28 @@
           </label>
         </div>
         <div>
-          <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">네트워크 (선택)
-            <select bind:value={form.network_id}
-              class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5">
-              <option value="">기본값 사용</option>
-              {#each networks.filter(n => !n.is_external) as n}
-                <option value={n.id}>{n.name || n.id.slice(0,12)}</option>
-              {/each}
-            </select>
-          </label>
-        </div>
-        <div class="border border-gray-700 rounded-lg p-3">
-          <label class="flex items-center gap-3 cursor-pointer">
-            <div class="relative">
-              <input type="checkbox" bind:checked={form.api_lb_enabled} class="sr-only" />
-              <div class="w-9 h-5 rounded-full transition-colors {form.api_lb_enabled ? 'bg-blue-600' : 'bg-gray-600'}"></div>
-              <div class="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform {form.api_lb_enabled ? 'translate-x-4' : ''}"></div>
-            </div>
-            <span class="text-sm text-gray-300">외부 로드밸런서 사용</span>
-          </label>
-          <div class="text-xs text-gray-500 mt-1 ml-12">API 서버(6443)에 Octavia LB + Floating IP 연결</div>
-          {#if form.api_lb_enabled}
-            <div class="mt-3">
-              <div class="text-xs text-gray-400 mb-1">LB Floating IP 네트워크</div>
-              <select bind:value={form.api_lb_network_id}
-                class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
-                <option value="">서버 기본값 사용</option>
-                {#each networks.filter(n => n.is_external) as n}
-                  <option value={n.id}>{n.name || n.id.slice(0,12)}</option>
-                {/each}
-              </select>
-            </div>
-          {/if}
+          <div class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">네트워크</div>
+          <!-- 카테고리 선택 -->
+          <div class="flex gap-2 mb-2">
+            <button type="button"
+              onclick={() => { network_category = 'tenant'; form.network_id = ''; }}
+              class="flex-1 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors {network_category === 'tenant' ? 'border-blue-500 bg-blue-900/30 text-blue-300' : 'border-gray-600 bg-gray-800 text-gray-400 hover:border-gray-500'}">
+              Tenant
+            </button>
+            <button type="button"
+              onclick={() => { network_category = 'provider'; form.network_id = ''; }}
+              class="flex-1 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors {network_category === 'provider' ? 'border-orange-500 bg-orange-900/30 text-orange-300' : 'border-gray-600 bg-gray-800 text-gray-400 hover:border-gray-500'}">
+              Provider
+            </button>
+          </div>
+          <!-- 네트워크 드롭다운 -->
+          <select bind:value={form.network_id}
+            class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
+            <option value="">{network_category === 'tenant' ? '기본값 사용' : '선택 안 함'}</option>
+            {#each networks.filter(n => network_category === 'provider' ? n.is_external : !n.is_external) as n}
+              <option value={n.id}>{n.name || n.id.slice(0,12)}</option>
+            {/each}
+          </select>
         </div>
         <div>
           <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">키페어 (선택)

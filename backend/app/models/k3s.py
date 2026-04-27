@@ -9,7 +9,6 @@ _NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$")
 
 class K3sProgressStep(str, Enum):
     SECURITY_GROUP = "security_group"
-    LB_CREATING = "lb_creating"
     SERVER_VOLUME = "server_volume"
     SERVER_CREATING = "server_creating"
     WAITING_CALLBACK = "waiting_callback"
@@ -35,8 +34,6 @@ class CreateK3sClusterRequest(BaseModel):
     agent_flavor_id: str | None = None
     network_id: str | None = None
     key_name: str | None = None
-    api_lb_enabled: bool | None = None  # None = 서버 설정(k3s_api_lb_enabled) 따름
-    api_lb_network_id: str | None = None  # 외부 LB Floating IP 네트워크 ID (미설정 시 서버 설정 따름)
     os_type: str = "ubuntu"  # "ubuntu" | "fcos"
     allowed_cidrs: list[str] | None = None  # SSH/K3s API 접근 허용 CIDR (미지정 시 0.0.0.0/0)
 

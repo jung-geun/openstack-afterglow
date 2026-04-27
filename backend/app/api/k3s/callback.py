@@ -75,100 +75,6 @@ async def k3s_callback(request: Request, req: K3sCallbackRequest):
     return {"ok": True}
 
 
-async def _finalize_api_lb(
-    project_id: str,
-    cluster_id: str,
-    cluster: dict,
-    server_ip: str,
-    conn,
-) -> None:
-    """API LB 설정 완료: member 추가 + health monitor + kubeconfig 패치.
-
-    LB-first 전략: clusters.py에서 이미 LB(listener+pool)를 완전히 생성했으므로,
-    서버 VM의 private IP를 pool에 member로 추가하고 health monitor를 생성한 후
-    kubeconfig의 server URL을 LB 주소(FIP 또는 provider VIP)로 패치한다.
-    """
-    from app.services import k3s_db as _k3s_db
-    from app.services import octavia
-
-    api_lb_id = cluster.get("api_lb_id") or ""
-    api_lb_pool_id = cluster.get("api_lb_pool_id") or ""
-    api_fip_id = cluster.get("api_fip_id") or ""
-    api_fip_address = cluster.get("api_fip_address") or ""
-    cluster_name = cluster.get("name") or cluster_id
-
-    if not api_lb_id or not api_lb_pool_id or not api_fip_address:
-        return
-
-    try:
-        # LB ACTIVE 대기 (최대 5분)
-        lb = await asyncio.to_thread(octavia.wait_for_load_balancer, conn, api_lb_id)
-        vip_subnet_id = lb.get("vip_subnet_id")
-
-        # Member 서브넷: 클러스터 네트워크의 서브넷 우선 사용 (LB가 다른 네트워크에 있을 수 있음)
-        cluster_network_id = cluster.get("network_id")
-        member_subnet_id = vip_subnet_id  # 기본값: LB VIP 서브넷
-        if cluster_network_id:
-            try:
-                cluster_net = await asyncio.to_thread(conn.network.get_network, cluster_network_id)
-                cluster_subnet_ids = getattr(cluster_net, "subnet_ids", None) or []
-                if cluster_subnet_ids:
-                    member_subnet_id = cluster_subnet_ids[0]
-            except Exception:
-                _logger.warning("k3s cluster %s: 클러스터 네트워크 서브넷 조회 실패, VIP 서브넷 사용", cluster_id)
-
-        # Member 추가 (server private IP:6443, 클러스터 서브넷으로)
-        await asyncio.to_thread(
-            octavia.add_member,
-            conn,
-            api_lb_pool_id,
-            server_ip,
-            6443,
-            subnet_id=member_subnet_id,
-            name=f"{cluster_name}-server",
-        )
-        await asyncio.to_thread(octavia.wait_for_load_balancer, conn, api_lb_id)
-
-        # Health Monitor 생성 (TCP)
-        await asyncio.to_thread(
-            octavia.create_health_monitor,
-            conn,
-            api_lb_pool_id,
-            type="TCP",
-            delay=10,
-            timeout=5,
-            max_retries=3,
-            name=f"k3s-api-{cluster_name}",
-        )
-        await asyncio.to_thread(octavia.wait_for_load_balancer, conn, api_lb_id)
-
-        # FIP 모드: FIP → LB VIP port 연결 (provider 직접 VIP 모드에서는 이미 연결됨)
-        if api_fip_id:
-            lb_refreshed = await asyncio.to_thread(octavia.get_load_balancer, conn, api_lb_id)
-            vip_port_id = lb_refreshed.get("vip_port_id")
-            if vip_port_id:
-                await asyncio.to_thread(conn.network.update_ip, api_fip_id, port_id=vip_port_id)
-
-        # api_address를 외부 주소(FIP 또는 provider VIP)로 업데이트
-        new_api_address = f"https://{api_fip_address}:6443"
-        await _k3s_db.update_cluster_status(project_id, cluster_id, "PROVISIONING", api_address=new_api_address)
-
-        # kubeconfig의 server URL을 외부 주소로 패치
-        kubeconfig = await _k3s_db.get_kubeconfig(project_id, cluster_id)
-        if kubeconfig:
-            old_url = f"https://{server_ip}:6443"
-            patched = kubeconfig.replace(old_url, new_api_address)
-            await _k3s_db.store_kubeconfig(project_id, cluster_id, patched)
-
-        _logger.info("k3s cluster %s: API LB 설정 완료 → %s", cluster_id, new_api_address)
-    except Exception:
-        _logger.error(
-            "k3s cluster %s: API LB 설정 실패 (클러스터는 private IP로 계속 동작)",
-            cluster_id,
-            exc_info=True,
-        )
-
-
 async def _provision_agents(
     project_id: str,
     cluster_id: str,
@@ -213,9 +119,6 @@ async def _provision_agents(
         _logger.error("k3s agent provision: cannot get OpenStack connection: %s", e)
         await k3s_cluster.update_cluster_status(project_id, cluster_id, "ERROR", f"OpenStack 연결 실패: {e}")
         return
-
-    # API LB 설정 완료 (listener/pool/member/FIP 연결) — agent 생성 전에 처리
-    await _finalize_api_lb(project_id, cluster_id, cluster, server_ip, conn)
 
     agent_vm_ids: list[str] = []
     failed_count = 0

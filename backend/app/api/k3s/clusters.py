@@ -206,28 +206,10 @@ async def create_k3s_cluster_async(
         # 프록시/CDN 버퍼 우회: 첫 chunk를 즉시 flush하기 위한 SSE 주석 패딩
         yield ": " + " " * 2048 + "\n\n"
 
-        async def _lb_wait_heartbeat(lb_id: str, wait_progress: int, wait_msg: str, wait: int = 300):
-            """LB ACTIVE 대기하며 1초마다 heartbeat SSE 이벤트를 yield하는 inner generator."""
-            _deadline = time.monotonic() + wait
-            while True:
-                yield event(K3sProgressStep.LB_CREATING, wait_progress, wait_msg)
-                _lb_obj = await asyncio.to_thread(conn.load_balancer.get_load_balancer, lb_id)
-                _prov = getattr(_lb_obj, "provisioning_status", "")
-                if _prov == "ACTIVE":
-                    return
-                if _prov == "ERROR":
-                    raise RuntimeError(f"LB {lb_id} entered ERROR state")
-                if time.monotonic() > _deadline:
-                    raise TimeoutError(f"LB {lb_id} did not reach ACTIVE within {wait}s")
-                await asyncio.sleep(1)
-
         # 롤백 추적
         sg_id: str | None = None
         boot_volume_id: str | None = None
         server_vm_id: str | None = None
-        api_lb_id: str | None = None
-        api_fip_id: str | None = None
-        api_fip_address: str | None = None
 
         try:
             # --- Step 1: 보안 그룹 생성 ---
@@ -309,121 +291,7 @@ async def create_k3s_cluster_async(
                 await asyncio.to_thread(neutron.create_security_group_rule, conn, sg_id, **rule_kwargs)
             yield event(K3sProgressStep.SECURITY_GROUP, 10, "보안 그룹 생성 완료")
 
-            # --- Step 1.5: API LB 완전 사전 생성 (설정 시) ---
-            # LB-first 전략: VM 생성 전에 LB(listener+pool)를 완성하여 TLS SAN을 확정한다.
-            # 모드 A (k3s_api_lb_vip_network_id 설정): provider 네트워크에 VIP 직접 생성, FIP 불필요.
-            # 모드 B (기존): tenant 서브넷에 VIP 생성 + provider FIP 할당.
             extra_tls_sans: list[str] = []
-            api_lb_pool_id: str | None = None
-            use_api_lb = req.api_lb_enabled if req.api_lb_enabled is not None else s.k3s_api_lb_enabled
-            if use_api_lb:
-                vip_net_id = s.k3s_api_lb_vip_network_id  # provider 직접 VIP 모드
-                use_provider_vip = bool(vip_net_id)
-
-                if use_provider_vip:
-                    # 모드 A: provider 네트워크에 VIP 직접 생성 (FIP 없음)
-                    yield event(K3sProgressStep.LB_CREATING, 12, "API LB 생성 중 (provider 네트워크 VIP)...")
-                    lb = await asyncio.to_thread(
-                        octavia.create_load_balancer,
-                        conn,
-                        f"k3s-api-{req.name}-{cluster_id[:8]}",
-                        description=f"K3s API LB for cluster {req.name}",
-                        vip_network_id=vip_net_id,
-                    )
-                    api_lb_id = lb["id"]
-                    _logger.info("k3s cluster %s: API LB %s created (provider VIP)", cluster_id, api_lb_id)
-                else:
-                    # 모드 B: tenant 서브넷 VIP + FIP (하위호환)
-                    fip_net_id = (
-                        req.api_lb_network_id or s.k3s_api_lb_floating_network_id or s.k3s_occm_floating_network_id
-                    )
-                    if not fip_net_id:
-                        raise RuntimeError(
-                            "k3s_api_lb_enabled=true 이나 floating network ID가 설정되지 않았습니다 "
-                            "(k3s_api_lb_vip_network_id 또는 k3s_api_lb_floating_network_id 설정 필요)"
-                        )
-                    yield event(K3sProgressStep.LB_CREATING, 13, "API LB용 Floating IP 할당 중...")
-                    fip_info = await asyncio.to_thread(neutron.create_floating_ip, conn, fip_net_id)
-                    api_fip_id = fip_info.id
-                    api_fip_address = fip_info.floating_ip_address
-
-                    # VIP 서브넷: k3s_lb_subnet_id 우선, 미설정 시 클러스터 네트워크의 첫 번째 서브넷
-                    if s.k3s_lb_subnet_id:
-                        vip_subnet_id = s.k3s_lb_subnet_id
-                    else:
-                        net_obj = await asyncio.to_thread(conn.network.get_network, network_id)
-                        vip_subnet_ids = getattr(net_obj, "subnet_ids", None) or []
-                        if not vip_subnet_ids:
-                            raise RuntimeError(f"네트워크 {network_id}에 서브넷이 없습니다")
-                        vip_subnet_id = vip_subnet_ids[0]
-
-                    yield event(K3sProgressStep.LB_CREATING, 14, "API 로드밸런서 생성 중...")
-                    lb = await asyncio.to_thread(
-                        octavia.create_load_balancer,
-                        conn,
-                        f"k3s-api-{req.name}-{cluster_id[:8]}",
-                        vip_subnet_id,
-                        f"K3s API LB for cluster {req.name}",
-                    )
-                    api_lb_id = lb["id"]
-                    _logger.info("k3s cluster %s: API LB %s created, FIP %s", cluster_id, api_lb_id, api_fip_address)
-
-                # LB ACTIVE 대기 (1초 heartbeat)
-                async for _hb in _lb_wait_heartbeat(api_lb_id, 16, "API LB ACTIVE 대기 중..."):
-                    yield _hb
-                lb_active = await asyncio.to_thread(octavia.get_load_balancer, conn, api_lb_id)
-
-                # Listener 생성 (TCP:6443)
-                yield event(K3sProgressStep.LB_CREATING, 18, "API LB listener 생성 중...")
-                listener = await asyncio.to_thread(
-                    octavia.create_listener,
-                    conn,
-                    api_lb_id,
-                    "TCP",
-                    6443,
-                    name=f"k3s-api-{req.name}",
-                )
-                async for _hb in _lb_wait_heartbeat(api_lb_id, 19, "API LB listener 생성 완료, ACTIVE 대기 중..."):
-                    yield _hb
-
-                # Pool 생성
-                yield event(K3sProgressStep.LB_CREATING, 20, "API LB pool 생성 중...")
-                pool = await asyncio.to_thread(
-                    octavia.create_pool,
-                    conn,
-                    api_lb_id,
-                    "TCP",
-                    "ROUND_ROBIN",
-                    name=f"k3s-api-{req.name}",
-                    listener_id=listener["id"],
-                )
-                api_lb_pool_id = pool["id"]
-                async for _hb in _lb_wait_heartbeat(api_lb_id, 21, "API LB pool 생성 완료, ACTIVE 대기 중..."):
-                    yield _hb
-
-                # TLS SAN: LB VIP 주소 (provider 모드: vip_address, FIP 모드: fip_address)
-                if use_provider_vip:
-                    lb_refreshed = await asyncio.to_thread(octavia.get_load_balancer, conn, api_lb_id)
-                    lb_vip_address = lb_refreshed.get("vip_address") or lb_active.get("vip_address") or ""
-                    if lb_vip_address:
-                        extra_tls_sans.append(lb_vip_address)
-                        api_fip_address = lb_vip_address  # FIP 대신 VIP 주소를 외부 주소로 사용
-                    _logger.info(
-                        "k3s cluster %s: API LB %s ready (provider VIP=%s, pool=%s)",
-                        cluster_id,
-                        api_lb_id,
-                        lb_vip_address,
-                        api_lb_pool_id,
-                    )
-                else:
-                    extra_tls_sans.append(api_fip_address)
-                    _logger.info(
-                        "k3s cluster %s: API LB %s ready (FIP=%s, pool=%s)",
-                        cluster_id,
-                        api_lb_id,
-                        api_fip_address,
-                        api_lb_pool_id,
-                    )
 
             # --- Step 2: 서버 부트 볼륨 생성 ---
             # K8s 스타일: 매 생성마다 고유한 suffix로 이름 충돌 방지
@@ -536,10 +404,10 @@ async def create_k3s_cluster_async(
                     "created_by_username": _creator_username or "",
                     "created_at": now,
                     "updated_at": now,
-                    "api_lb_id": api_lb_id or "",
-                    "api_lb_pool_id": api_lb_pool_id or "",
-                    "api_fip_id": api_fip_id or "",
-                    "api_fip_address": api_fip_address or "",
+                    "api_lb_id": "",
+                    "api_lb_pool_id": "",
+                    "api_fip_id": "",
+                    "api_fip_address": "",
                     "os_type": os_type,
                     "server_vm_name": server_vm_name,
                 },
@@ -556,7 +424,7 @@ async def create_k3s_cluster_async(
             _logger.error("k3s cluster creation failed: %s", e, exc_info=True)
             yield event(K3sProgressStep.FAILED, 0, f"클러스터 생성 실패: {e}", error=str(e))
             # 롤백
-            await _rollback(conn, server_vm_id, boot_volume_id, sg_id, api_lb_id, api_fip_id)
+            await _rollback(conn, server_vm_id, boot_volume_id, sg_id)
 
     return StreamingResponse(
         progress_generator(),
@@ -575,8 +443,6 @@ async def _rollback(
     server_vm_id: str | None,
     boot_volume_id: str | None,
     sg_id: str | None,
-    api_lb_id: str | None = None,
-    api_fip_id: str | None = None,
 ) -> None:
     """생성 실패 시 리소스 역순 삭제."""
     if server_vm_id:
@@ -586,7 +452,6 @@ async def _rollback(
             _logger.warning("Rollback: delete server %s failed: %s", server_vm_id, e)
     if boot_volume_id:
         try:
-            # 볼륨이 인스턴스에서 분리될 때까지 잠시 대기
             await asyncio.sleep(3)
             await asyncio.to_thread(cinder.delete_volume, conn, boot_volume_id)
         except Exception as e:
@@ -596,16 +461,6 @@ async def _rollback(
             await asyncio.to_thread(neutron.delete_security_group, conn, sg_id)
         except Exception as e:
             _logger.warning("Rollback: delete SG %s failed: %s", sg_id, e)
-    if api_lb_id:
-        try:
-            await asyncio.to_thread(octavia.delete_load_balancer, conn, api_lb_id, cascade=True)
-        except Exception as e:
-            _logger.warning("Rollback: delete API LB %s failed: %s", api_lb_id, e)
-    if api_fip_id:
-        try:
-            await asyncio.to_thread(neutron.delete_floating_ip, conn, api_fip_id)
-        except Exception as e:
-            _logger.warning("Rollback: delete API FIP %s failed: %s", api_fip_id, e)
 
 
 @router.patch("/{cluster_id}/scale")
