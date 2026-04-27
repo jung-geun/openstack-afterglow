@@ -1,0 +1,66 @@
+#!/bin/bash
+# envmgr-rotate-key.sh — CephX 키 주기적 회전 스크립트
+# systemd union-rotate-key.timer (24h 기본)가 실행한다.
+#
+# 환경변수 (cloud-init write_files로 주입):
+#   AFTERGLOW_API_URL      — Afterglow API 베이스 URL
+#   AFTERGLOW_REPORT_TOKEN — VM 헬스/키 회전 Bearer 토큰
+#   INSTANCE_ID            — Nova 인스턴스 ID
+#   CEPH_SHARE_ID          — Manila share ID (cephx_share_id)
+#   CEPH_ACCESS_ID         — 현재 access rule ID (cephx_access_id)
+#   CEPH_MOUNT_POINT       — 재마운트 대상 경로 (예: /opt/layers/lower_<name>)
+
+set -euo pipefail
+
+LOG=/var/log/union-rotate-key.log
+exec >> "$LOG" 2>&1
+echo "[$(date)] CephX 키 회전 시작"
+
+: "${AFTERGLOW_API_URL:?AFTERGLOW_API_URL 미설정}"
+: "${AFTERGLOW_REPORT_TOKEN:?AFTERGLOW_REPORT_TOKEN 미설정}"
+: "${INSTANCE_ID:?INSTANCE_ID 미설정}"
+
+ROTATE_URL="${AFTERGLOW_API_URL}/api/instances/${INSTANCE_ID}/credentials/rotate-cephx"
+
+# API 호출로 새 CephX 키 요청
+RESPONSE=$(curl -sf \
+    -X POST \
+    -H "Authorization: Bearer ${AFTERGLOW_REPORT_TOKEN}" \
+    -H "Content-Type: application/json" \
+    "${ROTATE_URL}") || {
+    echo "[$(date)] 오류: rotate-cephx API 호출 실패" >&2
+    exit 1
+}
+
+NEW_KEY=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['cephx_key'])")
+CEPHX_USER=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['cephx_user'])")
+NEW_ACCESS_ID=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['new_access_id'])")
+
+if [ -z "$NEW_KEY" ]; then
+    echo "[$(date)] 오류: 새 CephX 키가 비어있음" >&2
+    exit 1
+fi
+
+# 키링 파일 갱신
+KEYRING_PATH="/etc/ceph/ceph.client.${CEPHX_USER}.keyring"
+cat > "$KEYRING_PATH" << EOF
+[client.${CEPHX_USER}]
+    key = ${NEW_KEY}
+EOF
+chmod 600 "$KEYRING_PATH"
+echo "[$(date)] 키링 갱신 완료: $KEYRING_PATH"
+
+# 마운트 포인트 재마운트 (설정된 경우)
+if [ -n "${CEPH_MOUNT_POINT:-}" ] && mountpoint -q "${CEPH_MOUNT_POINT}"; then
+    mount -o remount,secret="${NEW_KEY}" "${CEPH_MOUNT_POINT}" || {
+        echo "[$(date)] 경고: 재마운트 실패 (비중단 — 다음 부팅에 반영됨)" >&2
+    }
+    echo "[$(date)] 재마운트 완료: $CEPH_MOUNT_POINT"
+fi
+
+# 새 access_id를 환경변수 파일에 저장 (다음 회전 시 사용)
+if [ -n "${NEW_ACCESS_ID:-}" ]; then
+    sed -i "s/^CEPH_ACCESS_ID=.*/CEPH_ACCESS_ID=${NEW_ACCESS_ID}/" /etc/envmgr.conf || true
+fi
+
+echo "[$(date)] CephX 키 회전 완료"

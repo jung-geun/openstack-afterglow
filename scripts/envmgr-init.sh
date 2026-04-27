@@ -26,7 +26,7 @@ if [ -z "${LAYER_STORE_RO_EXPORT:-}" ]; then
 else
     echo "==> layer-store-ro 마운트: ${LAYER_STORE_RO_EXPORT} → ${LAYER_STORE_RO_MOUNT}"
 
-    MOUNT_OPTS="ro,_netdev,noatime"
+    MOUNT_OPTS="ro,nosuid,nodev,noexec,_netdev,noatime"
     if [ -f "${CEPH_KEYRING_PATH}" ]; then
         # CephX 인증 사용
         CEPH_SECRET=$(grep -oP '(?<=key = ).*' "${CEPH_KEYRING_PATH}" | tr -d ' ')
@@ -36,7 +36,7 @@ else
     mount -t ceph "${LAYER_STORE_RO_EXPORT}" "${LAYER_STORE_RO_MOUNT}" \
         -o "${MOUNT_OPTS}" || {
         echo "오류: CephFS 마운트 실패. NFS 폴백 시도..."
-        mount -t nfs -o ro,_netdev "${LAYER_STORE_RO_EXPORT}" "${LAYER_STORE_RO_MOUNT}"
+        mount -t nfs -o ro,nosuid,nodev,noexec,_netdev "${LAYER_STORE_RO_EXPORT}" "${LAYER_STORE_RO_MOUNT}"
     }
 
     echo "==> layer-store-ro 마운트 완료"
@@ -87,7 +87,7 @@ DefaultDependencies=no
 What=${LAYER_STORE_RO_EXPORT}
 Where=${LAYER_STORE_RO_MOUNT}
 Type=ceph
-Options=ro,_netdev,noatime
+Options=ro,nosuid,nodev,noexec,_netdev,noatime
 
 [Install]
 WantedBy=remote-fs.target

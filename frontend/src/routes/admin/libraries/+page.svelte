@@ -16,6 +16,8 @@
     available_prebuilt: boolean;
     share_proto: string;
     visibility: string;
+    license_type?: string | null;
+    max_concurrent_mounts?: number | null;
   }
 
   interface FileStorage {
@@ -356,11 +358,16 @@
             </div>
             <div class="flex flex-col items-end gap-1">
               <StatusChip status={statusLabel(buildStatus)} label={statusText(buildStatus)} />
-              <div class="flex items-center gap-1">
+              <div class="flex items-center gap-1 flex-wrap justify-end">
                 <span class="text-xs text-gray-600">{lib.share_proto ?? 'CEPHFS'}</span>
                 <span class="px-1.5 py-0.5 text-xs rounded {lib.visibility === 'private' ? 'bg-gray-700 text-gray-400' : 'bg-green-900/30 text-green-500'}">
                   {lib.visibility === 'private' ? '비공개' : '공개'}
                 </span>
+                {#if lib.license_type}
+                  <span class="px-1.5 py-0.5 text-xs rounded {lib.license_type === 'commercial' ? 'bg-amber-900/40 text-amber-400' : 'bg-blue-900/40 text-blue-400'}">
+                    {lib.license_type}
+                  </span>
+                {/if}
               </div>
             </div>
           </div>
@@ -387,6 +394,22 @@
                   <span class="px-2 py-0.5 text-xs text-gray-600">+{lib.packages.length - 5}개</span>
                 {/if}
               </div>
+            </div>
+          {/if}
+
+          {#if lib.max_concurrent_mounts !== undefined && lib.max_concurrent_mounts !== null || (usageData.length > 0 && usageData[usageData.length - 1]?.[lib.name] !== undefined)}
+            <div class="flex items-center gap-3 text-xs text-gray-500">
+              {#if lib.max_concurrent_mounts !== undefined && lib.max_concurrent_mounts !== null}
+                <span>최대 마운트: <span class="text-gray-300">{lib.max_concurrent_mounts}개</span></span>
+              {:else}
+                <span>최대 마운트: <span class="text-gray-300">무제한</span></span>
+              {/if}
+              {#if usageData.length > 0}
+                {@const latestMount = usageData[usageData.length - 1]?.[lib.name]}
+                {#if latestMount !== undefined}
+                  <span>현재 활성: <span class="text-green-400">{latestMount}개</span></span>
+                {/if}
+              {/if}
             </div>
           {/if}
 

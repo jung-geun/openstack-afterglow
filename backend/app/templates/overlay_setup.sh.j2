@@ -25,7 +25,7 @@ RETRY_INTERVAL=5
 mount_nfs() {
     local name="$1"
     local export_location="$2"
-    local mount_options="${3:-hard,intr,noatime,_netdev,timeo=10,retrans=3}"
+    local mount_options="${3:-hard,intr,noatime,nosuid,nodev,noexec,_netdev,timeo=10,retrans=3}"
     local mountpoint="/opt/layers/lower_${name}"
 
     # 이미 마운트된 경우 스킵

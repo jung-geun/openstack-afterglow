@@ -81,6 +81,47 @@ write_files:
       [Install]
       WantedBy=multi-user.target
 
+{% if union_ro_share_export %}
+  # envmgr 설정 (layer-store-ro export 경로 포함)
+  - path: /etc/envmgr-union.conf
+    permissions: "0600"
+    content: |
+      LAYER_STORE_RO_EXPORT="{{ union_ro_share_export }}"
+{% if union_manifest_share_export %}
+      MANIFEST_STORE_EXPORT="{{ union_manifest_share_export }}"
+{% endif %}
+{% endif %}
+
+{% if union_cephx_rotate_hours > 0 %}
+  # CephX 키 회전 systemd service
+  - path: /etc/systemd/system/union-rotate-key.service
+    content: |
+      [Unit]
+      Description=Union CephX Key Rotation
+      Wants=network-online.target
+      After=network-online.target
+
+      [Service]
+      Type=oneshot
+      EnvironmentFile=-/etc/envmgr.conf
+      ExecStart=/usr/local/bin/envmgr-rotate-key.sh
+
+  # CephX 키 회전 timer
+  - path: /etc/systemd/system/union-rotate-key.timer
+    content: |
+      [Unit]
+      Description=Union CephX Key Rotation Timer
+
+      [Timer]
+      OnBootSec=30min
+      OnUnitActiveSec={{ union_cephx_rotate_hours }}h
+      RandomizedDelaySec=5min
+      Unit=union-rotate-key.service
+
+      [Install]
+      WantedBy=timers.target
+{% endif %}
+
 {% if health_check_script %}
   # 헬스체크 스크립트
   - path: /opt/union/scripts/health-check.sh

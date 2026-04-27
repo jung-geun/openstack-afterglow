@@ -325,6 +325,7 @@ class Settings(BaseSettings):
     union_layer_store_rw_share_id: str = ""  # layer-store-rw (Builder 전용 RW)
     union_layer_store_ro_share_id: str = ""  # layer-store-ro (User VM RO)
     union_manifest_store_share_id: str = ""  # manifest-store
+    union_cephx_rotate_hours: int = 24  # CephX 키 자동 회전 주기 (0이면 비활성)
 
     # Notion 연동
     notion_config_encryption_key: str = ""  # 미설정 시 k3s_kubeconfig_encryption_key 재사용

@@ -36,6 +36,9 @@ dev = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+markers = [
+    "slow: 실 인프라 필요 테스트 (self-hosted runner에서 실행, CI 기본 skip)",
+]
 
 [tool.ruff]
 line-length = 120

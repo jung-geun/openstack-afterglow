@@ -1060,7 +1060,9 @@ async def _prepare_dynamic_file_storage(
 
     if share_proto.upper() == "NFS":
         # NFS: IP 기반 access rule
-        access_to = vm_ip_address if vm_ip_address else "0.0.0.0/0"
+        if not vm_ip_address:
+            raise HTTPException(status_code=503, detail="VM IP not yet allocated, retry shortly")
+        access_to = vm_ip_address
         rule = await asyncio.to_thread(
             manila.ensure_nfs_access_rule,
             conn,
@@ -1083,7 +1085,7 @@ async def _prepare_dynamic_file_storage(
             "cephx_id": "",
             "cephx_key": "",
             "nfs_export_location": nfs_export,
-            "mount_options": "hard,intr,noatime,_netdev,timeo=10,retrans=3",
+            "mount_options": "hard,intr,noatime,nosuid,nodev,noexec,_netdev,timeo=10,retrans=3",
         }
     else:
         # CephFS: CephX access rule (기존 로직)

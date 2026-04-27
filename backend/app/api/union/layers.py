@@ -314,6 +314,73 @@ async def grant_builder_access(
     )
 
 
+@router.post("/user/access", response_model=BuilderAccessInfo, status_code=201)
+async def grant_user_access(
+    req: BuilderAccessRequest,
+    token_info: dict = Depends(get_token_info),
+    conn=Depends(get_os_conn),
+):
+    """User VM에 layer-store-ro CephX 접근 권한 부여 (관리자 전용).
+
+    union_layer_store_ro_share_id 미설정 시 503 반환.
+    """
+    _require_admin(token_info)
+
+    from app.config import get_settings
+    from app.services import manila
+
+    settings = get_settings()
+    share_id = settings.union_layer_store_ro_share_id
+    if not share_id:
+        raise HTTPException(status_code=503, detail="union_layer_store_ro_share_id가 설정되지 않았습니다")
+
+    try:
+        rule = await __import__("asyncio").to_thread(
+            manila.create_access_rule,
+            conn,
+            share_id,
+            req.cephx_user,
+            "ro",
+            "cephx",
+        )
+    except Exception as e:
+        _logger.warning("User Manila access rule 생성 실패: %s", e)
+
+        raise HTTPException(status_code=502, detail="Manila access rule 생성 실패")
+
+    return BuilderAccessInfo(
+        access_id=rule["access_id"],
+        cephx_user=req.cephx_user,
+        access_level="ro",
+        share_id=share_id,
+    )
+
+
+@router.delete("/user/access/{access_id}", status_code=204)
+async def revoke_user_access(
+    access_id: str,
+    token_info: dict = Depends(get_token_info),
+    conn=Depends(get_os_conn),
+):
+    """User VM CephX 접근 권한 회수 (관리자 전용)."""
+    _require_admin(token_info)
+
+    from app.config import get_settings
+    from app.services import manila
+
+    settings = get_settings()
+    share_id = settings.union_layer_store_ro_share_id
+    if not share_id:
+        raise HTTPException(status_code=503, detail="union_layer_store_ro_share_id가 설정되지 않았습니다")
+
+    try:
+        await __import__("asyncio").to_thread(manila.revoke_access_rule, conn, share_id, access_id)
+    except Exception as e:
+        _logger.warning("User Manila access rule 회수 실패: %s", e)
+
+        raise HTTPException(status_code=502, detail="Manila access rule 회수 실패")
+
+
 @router.delete("/builder/access/{access_id}", status_code=204)
 async def revoke_builder_access(
     access_id: str,

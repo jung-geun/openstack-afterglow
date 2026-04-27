@@ -47,6 +47,9 @@ def generate_userdata(
     instance_id: str = "",
     report_url: str = "",
     report_token: str = "",
+    union_ro_share_export: str | None = None,
+    union_manifest_share_export: str | None = None,
+    union_cephx_rotate_hours: int = 0,
 ) -> str:
     """
     cloud-init userdata 문자열(YAML) 생성.
@@ -121,6 +124,9 @@ def generate_userdata(
         pythonpath=pythonpath,
         report_url=report_url,
         health_check_script=health_check_script,
+        union_ro_share_export=union_ro_share_export or "",
+        union_manifest_share_export=union_manifest_share_export or "",
+        union_cephx_rotate_hours=union_cephx_rotate_hours,
     )
 
     # Nova는 userdata를 base64로 인코딩해서 전달

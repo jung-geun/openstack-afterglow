@@ -433,6 +433,25 @@ def revoke_access_rule(conn, file_storage_id: str, access_id: str) -> None:
     client.post(f"shares/{file_storage_id}/action", body)
 
 
+def rotate_cephx_access_rule(conn, file_storage_id: str, access_id: str) -> dict:
+    """CephX access rule 교체 (revoke 후 동일 access_to/level로 재생성).
+
+    Manila update-access API는 backend별 비호환이므로 revoke+create 방식을 사용한다.
+    반환: { access_id, access_key, access_to, access_level }
+    """
+    # 기존 rule 조회
+    rules = list_access_rules(conn, file_storage_id)
+    target = next((r for r in rules if r.get("id") == access_id), None)
+    if target is None:
+        raise KeyError(f"access_id {access_id}를 찾을 수 없습니다")
+    access_to = target["access_to"]
+    access_level = target["access_level"]
+
+    # revoke 후 재생성
+    revoke_access_rule(conn, file_storage_id, access_id)
+    return create_access_rule(conn, file_storage_id, access_to, access_level, "cephx")
+
+
 def list_access_rules(conn, file_storage_id: str) -> list[dict]:
     client = get_client(conn)
     # API v2.45+: use share-access-rules endpoint instead of action
