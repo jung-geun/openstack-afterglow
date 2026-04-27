@@ -174,6 +174,14 @@
     stepTimings = {};
     lastStepSeen = '';
 
+    // 자체 1초 타이머 — SSE 이벤트 사이에도 경과시간이 흐르도록
+    const _timerStart = performance.now();
+    const _timer = setInterval(() => {
+      elapsedSeconds = Math.round((performance.now() - _timerStart) / 100) / 10;
+    }, 500);
+
+    const _clusterName = form.name;
+
     try {
       const baseUrl = getBaseUrl();
 
@@ -219,14 +227,20 @@
             progressStep = msg.step;
             progressPct = msg.progress;
             progressMsg = msg.message;
+            // 서버 elapsed_seconds가 오면 타이머보다 권위 있으므로 재동기화
             if (msg.elapsed_seconds != null) elapsedSeconds = msg.elapsed_seconds;
             if (msg.step !== lastStepSeen) {
               stepTimings[msg.step] = msg.elapsed_seconds ?? elapsedSeconds;
               lastStepSeen = msg.step;
+              // 모달이 닫혀있으면 단계 전환을 toast로 알림 (completed/failed는 아래에서 별도 처리)
+              if (!showProgress && msg.step !== 'completed' && msg.step !== 'failed') {
+                const stepLabel = k3sSteps.find(s => s.id === msg.step)?.label ?? msg.step;
+                toast.info(`${_clusterName}: ${stepLabel} 진행 중...`);
+              }
             }
             if (msg.cluster_id) createdClusterId = msg.cluster_id;
             if (msg.step === 'completed') {
-              toast.success(`클러스터 "${form.name || '클러스터'}" 생성 완료 (${elapsedSeconds}초)`);
+              toast.success(`클러스터 "${_clusterName || '클러스터'}" 생성 완료 (${elapsedSeconds}초)`);
             } else if (msg.step === 'failed') {
               progressError = msg.error || '알 수 없는 오류';
               toast.error(`클러스터 생성 실패: ${msg.error || '알 수 없는 오류'}`);
@@ -238,6 +252,7 @@
       progressError = String(e);
       progressStep = 'failed';
     } finally {
+      clearInterval(_timer);
       creating = false;
       await fetchClusters();
     }
@@ -476,7 +491,13 @@
           {/if}
         </div>
       {:else}
-        <p class="text-xs text-gray-600">완료될 때까지 기다려주세요...</p>
+        <div class="flex items-center justify-between">
+          <p class="text-xs text-gray-500">백그라운드에서 계속 진행됩니다.</p>
+          <button onclick={() => { showProgress = false; }}
+            class="px-3 py-1.5 text-xs text-gray-500 hover:text-white transition-colors border border-gray-700 rounded-lg hover:bg-gray-800">
+            닫기
+          </button>
+        </div>
       {/if}
     </div>
   </div>

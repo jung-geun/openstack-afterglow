@@ -203,6 +203,24 @@ async def create_k3s_cluster_async(
             msg = K3sProgressMessage(step=step, progress=progress, message=message, elapsed_seconds=elapsed, **kw)
             return f"data: {msg.model_dump_json()}\n\n"
 
+        # 프록시/CDN 버퍼 우회: 첫 chunk를 즉시 flush하기 위한 SSE 주석 패딩
+        yield ": " + " " * 2048 + "\n\n"
+
+        async def _lb_wait_heartbeat(lb_id: str, wait_progress: int, wait_msg: str, wait: int = 300):
+            """LB ACTIVE 대기하며 1초마다 heartbeat SSE 이벤트를 yield하는 inner generator."""
+            _deadline = time.monotonic() + wait
+            while True:
+                yield event(K3sProgressStep.LB_CREATING, wait_progress, wait_msg)
+                _lb_obj = await asyncio.to_thread(conn.load_balancer.get_load_balancer, lb_id)
+                _prov = getattr(_lb_obj, "provisioning_status", "")
+                if _prov == "ACTIVE":
+                    return
+                if _prov == "ERROR":
+                    raise RuntimeError(f"LB {lb_id} entered ERROR state")
+                if time.monotonic() > _deadline:
+                    raise TimeoutError(f"LB {lb_id} did not reach ACTIVE within {wait}s")
+                await asyncio.sleep(1)
+
         # 롤백 추적
         sg_id: str | None = None
         boot_volume_id: str | None = None
@@ -304,7 +322,7 @@ async def create_k3s_cluster_async(
 
                 if use_provider_vip:
                     # 모드 A: provider 네트워크에 VIP 직접 생성 (FIP 없음)
-                    yield event(K3sProgressStep.LB_CREATING, 11, "API LB 생성 중 (provider 네트워크 VIP)...")
+                    yield event(K3sProgressStep.LB_CREATING, 12, "API LB 생성 중 (provider 네트워크 VIP)...")
                     lb = await asyncio.to_thread(
                         octavia.create_load_balancer,
                         conn,
@@ -324,7 +342,7 @@ async def create_k3s_cluster_async(
                             "k3s_api_lb_enabled=true 이나 floating network ID가 설정되지 않았습니다 "
                             "(k3s_api_lb_vip_network_id 또는 k3s_api_lb_floating_network_id 설정 필요)"
                         )
-                    yield event(K3sProgressStep.LB_CREATING, 11, "API LB용 Floating IP 할당 중...")
+                    yield event(K3sProgressStep.LB_CREATING, 13, "API LB용 Floating IP 할당 중...")
                     fip_info = await asyncio.to_thread(neutron.create_floating_ip, conn, fip_net_id)
                     api_fip_id = fip_info.id
                     api_fip_address = fip_info.floating_ip_address
@@ -339,7 +357,7 @@ async def create_k3s_cluster_async(
                             raise RuntimeError(f"네트워크 {network_id}에 서브넷이 없습니다")
                         vip_subnet_id = vip_subnet_ids[0]
 
-                    yield event(K3sProgressStep.LB_CREATING, 13, "API 로드밸런서 생성 중...")
+                    yield event(K3sProgressStep.LB_CREATING, 14, "API 로드밸런서 생성 중...")
                     lb = await asyncio.to_thread(
                         octavia.create_load_balancer,
                         conn,
@@ -350,12 +368,13 @@ async def create_k3s_cluster_async(
                     api_lb_id = lb["id"]
                     _logger.info("k3s cluster %s: API LB %s created, FIP %s", cluster_id, api_lb_id, api_fip_address)
 
-                # LB ACTIVE 대기
-                yield event(K3sProgressStep.LB_CREATING, 14, "API LB ACTIVE 대기 중...")
-                lb_active = await asyncio.to_thread(octavia.wait_for_load_balancer, conn, api_lb_id)
+                # LB ACTIVE 대기 (1초 heartbeat)
+                async for _hb in _lb_wait_heartbeat(api_lb_id, 16, "API LB ACTIVE 대기 중..."):
+                    yield _hb
+                lb_active = await asyncio.to_thread(octavia.get_load_balancer, conn, api_lb_id)
 
                 # Listener 생성 (TCP:6443)
-                yield event(K3sProgressStep.LB_CREATING, 16, "API LB listener 생성 중...")
+                yield event(K3sProgressStep.LB_CREATING, 18, "API LB listener 생성 중...")
                 listener = await asyncio.to_thread(
                     octavia.create_listener,
                     conn,
@@ -364,10 +383,11 @@ async def create_k3s_cluster_async(
                     6443,
                     name=f"k3s-api-{req.name}",
                 )
-                await asyncio.to_thread(octavia.wait_for_load_balancer, conn, api_lb_id)
+                async for _hb in _lb_wait_heartbeat(api_lb_id, 19, "API LB listener 생성 완료, ACTIVE 대기 중..."):
+                    yield _hb
 
                 # Pool 생성
-                yield event(K3sProgressStep.LB_CREATING, 18, "API LB pool 생성 중...")
+                yield event(K3sProgressStep.LB_CREATING, 20, "API LB pool 생성 중...")
                 pool = await asyncio.to_thread(
                     octavia.create_pool,
                     conn,
@@ -378,7 +398,8 @@ async def create_k3s_cluster_async(
                     listener_id=listener["id"],
                 )
                 api_lb_pool_id = pool["id"]
-                await asyncio.to_thread(octavia.wait_for_load_balancer, conn, api_lb_id)
+                async for _hb in _lb_wait_heartbeat(api_lb_id, 21, "API LB pool 생성 완료, ACTIVE 대기 중..."):
+                    yield _hb
 
                 # TLS SAN: LB VIP 주소 (provider 모드: vip_address, FIP 모드: fip_address)
                 if use_provider_vip:
@@ -408,7 +429,7 @@ async def create_k3s_cluster_async(
             # K8s 스타일: 매 생성마다 고유한 suffix로 이름 충돌 방지
             server_suffix = _rand_suffix()
             server_vm_name = f"{req.name}-{server_suffix}"
-            yield event(K3sProgressStep.SERVER_VOLUME, 15, "서버 노드 부트 볼륨 생성 중...")
+            yield event(K3sProgressStep.SERVER_VOLUME, 28, "서버 노드 부트 볼륨 생성 중...")
             boot_vol = await asyncio.to_thread(
                 cinder.create_volume_from_image,
                 conn,
@@ -417,10 +438,10 @@ async def create_k3s_cluster_async(
                 boot_volume_size,
             )
             boot_volume_id = boot_vol.id
-            yield event(K3sProgressStep.SERVER_VOLUME, 25, "서버 부트 볼륨 생성 완료")
+            yield event(K3sProgressStep.SERVER_VOLUME, 35, "서버 부트 볼륨 생성 완료")
 
             # --- Step 3: 콜백 토큰 + cloud-init 생성 ---
-            yield event(K3sProgressStep.SERVER_CREATING, 30, "서버 VM cloud-init 생성 중...")
+            yield event(K3sProgressStep.SERVER_CREATING, 40, "서버 VM cloud-init 생성 중...")
             # 공개키 미리 조회 (에이전트 VM은 admin conn으로 생성하므로 cloud-init에 직접 주입)
             ssh_public_key = ""
             if req.key_name:
@@ -459,7 +480,7 @@ async def create_k3s_cluster_async(
             )
 
             # --- Step 4: 서버 VM 생성 ---
-            yield event(K3sProgressStep.SERVER_CREATING, 35, "서버 VM 생성 중 (완료까지 수 분 소요)...")
+            yield event(K3sProgressStep.SERVER_CREATING, 48, "서버 VM 생성 중 (완료까지 수 분 소요)...")
             server_vm = await asyncio.to_thread(
                 nova.create_server,
                 conn,
@@ -479,10 +500,10 @@ async def create_k3s_cluster_async(
                 config_drive=userdata_result.config_drive,
             )
             server_vm_id = server_vm.id
-            yield event(K3sProgressStep.SERVER_CREATING, 55, f"서버 VM 생성 완료: {server_vm_id}")
+            yield event(K3sProgressStep.SERVER_CREATING, 60, f"서버 VM 생성 완료: {server_vm_id}")
 
             # --- Step 5: Redis에 클러스터 레코드 저장 ---
-            yield event(K3sProgressStep.WAITING_CALLBACK, 60, "k3s 초기화 대기 중 (서버 VM에서 k3s 설치 중)...")
+            yield event(K3sProgressStep.WAITING_CALLBACK, 65, "k3s 초기화 대기 중 (서버 VM에서 k3s 설치 중)...")
             now = datetime.now(UTC).isoformat()
             # 생성자 정보 추출
             _creator_user_id = conn._afterglow_user_id if hasattr(conn, "_afterglow_user_id") else None
@@ -540,7 +561,12 @@ async def create_k3s_cluster_async(
     return StreamingResponse(
         progress_generator(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+            "Content-Encoding": "identity",
+        },
     )
 
 
