@@ -8,7 +8,7 @@ import tomllib
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import model_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 
@@ -378,6 +378,20 @@ class Settings(BaseSettings):
     log_rotation_type: str = "size"  # "size" | "time"
     log_rotation_when: str = "midnight"
     log_rotation_interval: int = 1
+
+    @field_validator("os_auth_url", mode="after")
+    @classmethod
+    def _norm_auth_url(cls, v: str) -> str:
+        from app.services._endpoint import normalize_keystone_url
+
+        return normalize_keystone_url(v)
+
+    @field_validator("os_manila_endpoint", "os_swift_endpoint", mode="after")
+    @classmethod
+    def _norm_service_endpoint(cls, v: str) -> str:
+        from app.services._endpoint import normalize_endpoint
+
+        return normalize_endpoint(v)
 
     @property
     def ssl_verify(self) -> bool | str:
