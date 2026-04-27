@@ -976,24 +976,29 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 
 ### 11.2 resize OverlayFS 검증 + 다중 VM 동시 부팅 + 라이선스 가드 (Week 2)
 
-- [ ] `backend/app/templates/overlay_setup.sh.j2` — jittered backoff (`RANDOM % 3`) 추가
-- [ ] `backend/tests/integration/test_concurrent_boot.py` — N=5 VM 동시 생성 → OverlayFS 마운트 검증 (slow marker)
-- [ ] `backend/tests/integration/test_resize_overlay.py` — resize → confirm → mountpoint 검증 (slow marker)
-- [ ] `backend/app/models/storage.py` + `db.py` — `LibraryConfig.license_type`, `max_concurrent_mounts` 필드 추가
-- [ ] `backend/app/services/union_layers.py:create_mount` — mount 한도 초과 시 409 가드
-- [ ] `backend/app/api/union/layers.py` — 두 필드 라우터 노출
-- [ ] `frontend/src/routes/admin/libraries/+page.svelte` — 라이선스 배지 + 활성 마운트 수 표시
+- [x] `backend/app/templates/overlay_setup.sh.j2` — jittered backoff (`RANDOM % 3`) 추가
+- [x] `backend/tests/integration/test_concurrent_boot.py` — N=5 VM 동시 생성 → OverlayFS 마운트 검증 (slow marker, 실 인프라 skip)
+- [x] `backend/tests/integration/test_resize_overlay.py` — resize → confirm → mountpoint 검증 (slow marker, 실 인프라 skip)
+- [x] `backend/app/models/storage.py` + `db.py` — `LibraryConfig.license_type`, `max_concurrent_mounts` 필드 추가
+- [x] `backend/app/services/union_layers.py:create_mount` — mount 한도 초과 시 409 가드
+- [x] `backend/app/api/union/layers.py` — 두 필드 라우터 노출
+- [x] `frontend/src/routes/admin/libraries/+page.svelte` — 라이선스 배지 + 활성 마운트 수 표시
+- [x] `backend/tests/test_libraries.py` — license/max_concurrent_mounts 직렬화 단위 테스트 3건
 
 ### 11.3 NFS 옵션 강화 + CephX 회전 + 3-share wiring (Week 3)
 
-- [ ] `backend/app/api/compute/instances.py:1086` + `overlay_setup.sh.j2:28` — `nosuid,nodev,noexec` 추가
-- [ ] `scripts/envmgr-init.sh` — RO mount 옵션 통일
-- [ ] `instances.py:1063` — `0.0.0.0/0` 폴백 제거 → vm_ip 미확보 시 503
-- [ ] `backend/app/services/manila.py` — `rotate_cephx_access_rule()` 헬퍼
-- [ ] `backend/app/api/compute/instance_health.py` 패턴으로 `POST /api/instances/{id}/credentials/rotate-cephx` 추가
-- [ ] `scripts/envmgr-rotate-key.sh` + systemd `union-rotate-key.timer` (신규)
-- [ ] `backend/app/api/union/layers.py` — `grant_user_access()` + 3-share user wiring
-- [ ] `backend/app/services/cloudinit.py` — `union_ro_share_export` 파라미터 + write_files 주입
+- [x] `backend/app/api/compute/instances.py:1086` + `overlay_setup.sh.j2:28` — `nosuid,nodev,noexec` 추가
+- [x] `scripts/envmgr-init.sh` — RO mount 옵션 통일 (`ro,nosuid,nodev,noexec,_netdev,noatime`)
+- [x] `instances.py:1063` — `0.0.0.0/0` 폴백 제거 → vm_ip 미확보 시 503
+- [x] `backend/app/services/manila.py` — `rotate_cephx_access_rule()` 헬퍼
+- [x] `backend/app/api/compute/instance_health.py` — `POST /api/instances/{id}/credentials/rotate-cephx` 추가 (Bearer 토큰 인증)
+- [x] `scripts/envmgr-rotate-key.sh` + systemd `union-rotate-key.timer` (신규, cloudinit_base.yaml.j2 통해 주입)
+- [x] `backend/app/api/union/layers.py` — `POST /api/union/user/access`, `DELETE /api/union/user/access/{access_id}` (3-share user wiring)
+- [x] `backend/app/services/cloudinit.py` — `union_ro_share_export` 파라미터 + write_files 주입 (`LAYER_STORE_RO_EXPORT`)
+- [x] `backend/app/config.py` — `union_cephx_rotate_hours: int = 24` 추가
+- [x] `backend/tests/test_manila_rotate.py` — `rotate_cephx_access_rule` 단위 테스트 3건
+- [x] `backend/tests/test_cloudinit.py` — `nosuid,nodev,noexec` + `LAYER_STORE_RO_EXPORT` 단위 테스트 2건
+- [x] `backend/tests/test_endpoint_inventory.py` — rotate-cephx 엔드포인트 whitelist 추가
 
 ### 11.4 격리 검증 + SG 자동화 (Week 4)
 
