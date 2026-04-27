@@ -54,11 +54,13 @@ async def list_admin_images(
     limit: int = Query(default=20, ge=1, le=100),
     marker: str | None = Query(default=None),
     search: str | None = Query(default=None),
+    visibility: str | None = Query(default=None),
 ):
-    """전체 이미지 목록 (visibility 무관, 페이지네이션).
+    """전체 이미지 목록 (페이지네이션).
 
     `search` 가 있으면 Glance `name` 정확 매칭 대신 전체 이미지를 가져와
     case-insensitive substring 필터링 후 marker 기반 페이지네이션을 수동 처리한다.
+    `visibility` 가 있으면 서버에서 필터링한다 (public/community/shared/private).
     """
     try:
 
@@ -66,6 +68,8 @@ async def list_admin_images(
             kwargs: dict = {"limit": limit}
             if marker:
                 kwargs["marker"] = marker
+            if visibility:
+                kwargs["visibility"] = visibility
             items: list[dict] = []
             for img in conn.image.images(**kwargs):
                 items.append(_serialize_image(img))
@@ -77,7 +81,10 @@ async def list_admin_images(
         def _list_search():
             needle = (search or "").lower()
             matched: list[dict] = []
-            for img in conn.image.images():
+            glance_kwargs: dict = {}
+            if visibility:
+                glance_kwargs["visibility"] = visibility
+            for img in conn.image.images(**glance_kwargs):
                 name = (img.name or "").lower()
                 if needle and needle not in name:
                     continue
@@ -96,9 +103,11 @@ async def list_admin_images(
 
         if search:
             return await asyncio.to_thread(_list_search)
-        # 마커가 없을 때만 캐시 사용
+        # 마커가 없을 때만 캐시 사용 (visibility 포함해 캐시 키 구분)
+        vis_key = visibility or "all"
         if not marker:
-            return await cached_call(f"afterglow:admin:images:{limit}", ttl_static(), _list_paged, refresh=refresh)
+            cache_key = f"afterglow:admin:images:{limit}:{vis_key}"
+            return await cached_call(cache_key, ttl_static(), _list_paged, refresh=refresh)
         return await asyncio.to_thread(_list_paged)
     except Exception:
         _logger.warning("관리자 이미지 목록 조회 실패", exc_info=True)

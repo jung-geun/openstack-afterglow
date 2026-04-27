@@ -39,6 +39,7 @@
 
 	let images = $state<AdminImage[]>([]);
 	let loading = $state(true);
+	let refreshing = $state(false);
 	let error = $state('');
 	let searchInput = $state('');
 	let searchFilter = $state('');
@@ -80,21 +81,25 @@
 		return `${bytes} B`;
 	}
 
-	async function load(marker?: string) {
-		loading = true;
+	async function load(marker?: string, forceRefresh = false) {
+		if (images.length === 0) loading = true;
+		else refreshing = true;
 		error = '';
 		try {
 			let url = `/api/admin/images?limit=${pageSize}`;
 			if (marker) url += `&marker=${marker}`;
 			if (searchFilter) url += `&search=${encodeURIComponent(searchFilter)}`;
+			if (visibilityFilter) url += `&visibility=${encodeURIComponent(visibilityFilter)}`;
+			if (forceRefresh) url += `&refresh=true`;
 			const res = await api.get<PagedResponse<AdminImage>>(url, token, projectId);
-			images = (res.items || []).filter(img => !visibilityFilter || img.visibility === visibilityFilter);
+			images = res.items || [];
 			nextMarker = res.next_marker;
 		} catch (e) {
 			error = e instanceof ApiError ? e.message : '이미지 목록 조회 실패';
 			images = [];
 		} finally {
 			loading = false;
+			refreshing = false;
 		}
 	}
 
@@ -159,6 +164,12 @@
 		{ storageKey: 'admin-images', defaultInterval: 30, intervalOptions: [15, 30, 60] }
 	);
 
+	async function forceRefresh() {
+		markerStack = [];
+		nextMarker = null;
+		await load(undefined, true);
+	}
+
 	onMount(() => {
 		load();
 		projectNames.load(token, projectId);
@@ -172,8 +183,8 @@
 				bind:active={ar.active}
 				bind:intervalSeconds={ar.intervalSeconds}
 				intervalOptions={ar.intervalOptions}
-				refreshing={loading}
-				onManualRefresh={() => { markerStack = []; nextMarker = null; load(); }}
+				refreshing={refreshing}
+				onManualRefresh={forceRefresh}
 			/>
 			<div class="flex items-center gap-1 text-xs text-gray-500">
 				표시:
