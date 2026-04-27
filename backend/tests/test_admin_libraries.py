@@ -149,15 +149,17 @@ class TestAdminLibraryDetail:
 class TestBuildCancel:
     @pytest.mark.asyncio
     async def test_cancel_build_success(self, admin_client):
-        """빌드 취소 성공 → 200."""
+        """빌드 취소 성공 → 200 + build_id=1이 정확히 전달됐는지 검증."""
+        mock_cancel = AsyncMock(return_value={"cancelled": True, "library_id": "python311", "server_deleted": True})
         with patch(
             "app.api.identity.admin_libraries.library_builder.cancel_build",
-            AsyncMock(return_value={"cancelled": True, "library_id": "python311", "server_deleted": True}),
+            mock_cancel,
         ):
             resp = await admin_client.post("/api/admin/libraries/builds/1/cancel")
         assert resp.status_code == 200
         data = resp.json()
         assert data["cancelled"] is True
+        assert mock_cancel.call_args[0][1] == 1  # build_id=1이 전달됐는지 검증
 
     @pytest.mark.asyncio
     async def test_cancel_nonexistent_build_returns_404(self, admin_client):

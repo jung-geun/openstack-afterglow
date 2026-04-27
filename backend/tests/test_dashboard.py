@@ -26,12 +26,24 @@ async def test_get_dashboard_summary_unauthenticated():
 
 @pytest.mark.asyncio
 async def test_get_dashboard_summary_success(client):
-    with patch("app.api.common.dashboard.asyncio") as mock_asyncio:
-        mock_asyncio.gather = AsyncMock(return_value=([], {}, {}, []))
-        mock_asyncio.to_thread = AsyncMock()
-        with patch("app.api.common.dashboard.cached_call", new=AsyncMock(return_value=[])):
-            resp = await client.get("/api/dashboard/summary")
-    assert resp.status_code in (200, 500)
+    empty_list: list = []
+    empty_dict: dict = {"limit": 0, "in_use": 0, "reserved": 0}
+    with patch(
+        "app.api.common.dashboard.cached_call",
+        new=AsyncMock(
+            side_effect=[
+                empty_list,  # servers
+                empty_dict,  # compute_limits
+                empty_dict,  # volume_limits
+                empty_list,  # all_flavors
+            ]
+        ),
+    ):
+        resp = await client.get("/api/dashboard/summary")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "instances" in data
+    assert "compute" in data
 
 
 @pytest.mark.asyncio
@@ -44,11 +56,22 @@ async def test_get_dashboard_quotas_unauthenticated():
 @pytest.mark.asyncio
 async def test_get_dashboard_quotas_success(client):
     quota = {"limit": 10, "in_use": 2, "reserved": 0}
-    with patch("app.api.common.dashboard.asyncio") as mock_asyncio:
-        mock_asyncio.gather = AsyncMock(return_value=(quota, quota, quota))
-        mock_asyncio.to_thread = AsyncMock(return_value=quota)
+    # cached_call은 결과를 캐시 key별로 1회씩 호출한다 — _fetch_quotas 내부의
+    # asyncio.gather를 진짜로 실행하되, 각 service 함수는 cached_call로 묶여 있음.
+    # 가장 단순한 방법: cached_call 전체를 patch해서 results 리스트를 한 번에 반환.
+    # 활성화된 서비스(config.toml): manila/trove/swift → compute/volume/network/manila/trove/swift = 최대 6건
+    # 실제 활성 수를 맞추기 위해 넉넉히 6개 제공
+    quota_int = 0  # trove count
+    swift_meta = {"container_count": 0, "object_count": 0, "bytes_used": 0}
+    with patch(
+        "app.api.common.dashboard.cached_call",
+        new=AsyncMock(return_value=[quota, quota, quota, quota, quota_int, swift_meta]),
+    ):
         resp = await client.get("/api/dashboard/quotas")
-    assert resp.status_code in (200, 500)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "compute" in data
+    assert "storage" in data
 
 
 @pytest.mark.asyncio
@@ -60,10 +83,13 @@ async def test_get_dashboard_usage_unauthenticated():
 
 @pytest.mark.asyncio
 async def test_get_dashboard_usage_success(client):
-    with patch("app.api.common.dashboard.asyncio") as mock_asyncio:
-        mock_asyncio.to_thread = AsyncMock(return_value={"server_usages": [], "total_hours": 0})
+    usage_data = {"server_usages": [], "total_hours": 0}
+    with patch("app.api.common.dashboard.cached_call", new=AsyncMock(return_value=usage_data)):
         resp = await client.get("/api/dashboard/usage")
-    assert resp.status_code in (200, 500)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "server_usages" in data
+    assert "total_hours" in data
 
 
 # ---------------------------------------------------------------------------
