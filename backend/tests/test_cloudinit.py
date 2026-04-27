@@ -84,3 +84,41 @@ def test_userdata_partial_health_params_excluded():
     )
     yaml_str = _decode_userdata(encoded)
     assert "union-health.timer" not in yaml_str
+
+
+def test_nfs_mount_options_include_security_flags():
+    """NFS 마운트 옵션에 nosuid,nodev,noexec 포함되어야 한다."""
+    fs = [
+        {
+            "name": "python311",
+            "share_proto": "NFS",
+            "nfs_export_location": "10.0.0.1:/vol",
+            "mount_options": "hard,intr,noatime,nosuid,nodev,noexec,_netdev,timeo=10,retrans=3",
+            "export_path": "",
+            "cephx_id": "",
+            "cephx_key": "",
+        }
+    ]
+    encoded = generate_userdata(
+        libraries=[],
+        strategy="prebuilt",
+        file_storages=fs,
+        upper_device="/dev/vdb",
+        ceph_monitors="",
+        gpu_available=False,
+    )
+    yaml_str = _decode_userdata(encoded)
+    assert "nosuid" in yaml_str
+    assert "nodev" in yaml_str
+    assert "noexec" in yaml_str
+
+
+def test_union_ro_share_export_injected_to_write_files():
+    """union_ro_share_export가 지정되면 write_files에 LAYER_STORE_RO_EXPORT 포함."""
+    encoded = generate_userdata(
+        **_COMMON_ARGS,
+        union_ro_share_export="10.0.0.1:6789:/volumes/_nogroup/abc123",
+    )
+    yaml_str = _decode_userdata(encoded)
+    assert "LAYER_STORE_RO_EXPORT" in yaml_str
+    assert "10.0.0.1:6789:/volumes/_nogroup/abc123" in yaml_str

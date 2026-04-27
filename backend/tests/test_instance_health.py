@@ -295,3 +295,39 @@ async def test_get_health_endpoint_not_found(client):
     with patch("app.services.nova.get_server", side_effect=Exception("not found")):
         resp = await client.get("/api/instances/nonexistent/health")
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# rotate-cephx 엔드포인트 테스트
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_rotate_cephx_no_bearer_token(client):
+    """Authorization 헤더 없으면 401."""
+    resp = await client.post("/api/instances/inst-1/credentials/rotate-cephx")
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_rotate_cephx_invalid_token(fake_redis, client):
+    """유효하지 않은 토큰이면 401."""
+    resp = await client.post(
+        "/api/instances/inst-1/credentials/rotate-cephx",
+        headers={"Authorization": "Bearer invalid-token-xyz"},
+    )
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_rotate_cephx_disabled(fake_redis, client):
+    """union_cephx_rotate_hours=0이면 503."""
+    token = await svc.issue_report_token("inst-disabled", "proj-1")
+    with patch("app.api.compute.instance_health.get_settings") as mock_settings:
+        mock_cfg = mock_settings.return_value
+        mock_cfg.union_cephx_rotate_hours = 0
+        resp = await client.post(
+            "/api/instances/inst-disabled/credentials/rotate-cephx",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    assert resp.status_code == 503

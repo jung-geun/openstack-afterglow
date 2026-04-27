@@ -139,3 +139,56 @@ async def test_validate_endpoint_unknown_library(client, mock_conn):
     data = resp.json()
     assert data["compatible"] is False
     assert any("알 수 없는" in m for m in data["messages"])
+
+
+# ────── license_type / max_concurrent_mounts 필드 ──────
+
+
+def test_library_config_license_fields_default_none():
+    """LibraryConfig의 license_type과 max_concurrent_mounts 기본값은 None."""
+    from app.models.storage import LibraryConfig
+
+    lib = LibraryConfig(id="x", name="X", version="1.0", packages=[])
+    assert lib.license_type is None
+    assert lib.max_concurrent_mounts is None
+
+
+def test_library_config_license_fields_serialized():
+    """LibraryConfig 직렬화 시 license_type과 max_concurrent_mounts 포함."""
+    from app.models.storage import LibraryConfig
+
+    lib = LibraryConfig(
+        id="x",
+        name="X",
+        version="1.0",
+        packages=[],
+        license_type="MIT",
+        max_concurrent_mounts=10,
+    )
+    d = lib.model_dump()
+    assert d["license_type"] == "MIT"
+    assert d["max_concurrent_mounts"] == 10
+
+
+@pytest.mark.asyncio
+async def test_list_libraries_response_includes_license_fields(client, mock_conn):
+    """GET /api/libraries 응답에 license_type과 max_concurrent_mounts 포함."""
+    from app.models.storage import LibraryConfig
+
+    test_lib = LibraryConfig(
+        id="testlib",
+        name="Test",
+        version="1.0",
+        packages=[],
+        license_type="commercial",
+        max_concurrent_mounts=5,
+    )
+    with patch("app.api.common.libraries.lib_svc") as mock_lib, patch("app.api.common.libraries.manila") as mock_manila:
+        mock_lib.get_all.return_value = [test_lib]
+        mock_manila.list_file_storages.return_value = []
+        resp = await client.get("/api/libraries")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["license_type"] == "commercial"
+    assert data[0]["max_concurrent_mounts"] == 5
