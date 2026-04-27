@@ -96,6 +96,29 @@ services:
         max-size: "20m"
         max-file: "3"
 
+  # ── 테스트 프로필 (docker compose --profile test up) ────────────────────────
+  mariadb:
+    image: mariadb:11.4
+    profiles: ["test"]
+    ports:
+      - "127.0.0.1:3306:3306"
+    environment:
+      MARIADB_ROOT_PASSWORD: dev
+      MARIADB_DATABASE: afterglow_test
+      MARIADB_USER: afterglow
+      MARIADB_PASSWORD: dev
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   # ── 프록시 프로필 (docker compose --profile proxy up) ──────────────────────
   # 80 → HTTPS 리다이렉트, 443 SSL termination
   # /api/ → backend, 나머지 → frontend

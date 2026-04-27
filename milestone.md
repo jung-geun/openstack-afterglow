@@ -1028,3 +1028,15 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 - [x] `backend/tests/test_loadbalancers.py` — 모든 success 케이스에 `assert_called_once_with(...)` 인자 검증 추가
 - [x] `backend/tests/test_admin_libraries.py` — `cancel_build` mock `assert_called_once_with(conn, build_id)` 강화
 - [x] `backend/tests/test_admin_endpoints.py` — 432줄 트로이 목마 전수 삭제 (`test_endpoint_inventory.py`의 메타 검증과 100% 중복 확인)
+
+## 11.5 테스트 인프라 강화 — Phase B (동어반복 정리)
+
+- [x] `backend/tests/test_union_layers.py` — `patch.object(svc, fn)` 후 fn 재호출 동어반복 2건 삭제 (DB 통합으로 이전)
+- [x] `backend/tests/test_k3s_callback.py` — `assert_called_once_with(exact, args)` 강화 (failure/success 시나리오 인자 고정)
+
+## 11.5 테스트 인프라 강화 — Phase C (MariaDB 실 SQL 통합)
+
+- [x] `docker-compose.yml` — `profiles: ["test"]` MariaDB 11.4 서비스 추가
+- [x] `backend/tests/fixtures/__init__.py` — 신규 (fixtures 패키지)
+- [x] `backend/tests/test_union_layers_db.py` — 20케이스: INSERT/CTE/FK/격리/mount 실 SQL 검증 (`@pytest.mark.db`)
+- [x] `.github/workflows/test.yml` — `test-backend-db` 잡 신규 (dev 브랜치 push 전용, MariaDB 11.4 서비스)

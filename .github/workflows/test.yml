@@ -50,6 +50,56 @@ jobs:
           AFTERGLOW_ALLOW_INSECURE: "1"
         run: uv run python -m pytest tests/ -v --ignore=tests/integration
 
+  # ─── MariaDB 통합 테스트 — dev 브랜치 push 시에만 실행 ──────────────────────
+  test-backend-db:
+    name: Backend (MariaDB integration)
+    needs: test-backend
+    if: github.ref == 'refs/heads/dev' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: dev
+          MARIADB_DATABASE: afterglow_test
+          MARIADB_USER: afterglow
+          MARIADB_PASSWORD: dev
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Sync deps (dev)
+        working-directory: backend
+        run: uv sync --frozen --extra dev
+
+      - name: MariaDB integration tests
+        working-directory: backend
+        env:
+          AFTERGLOW_ALLOW_INSECURE: "1"
+          AFTERGLOW_REDIS_URL: redis://localhost:6379/0
+          AFTERGLOW_TEST_DATABASE_URL: mysql+aiomysql://afterglow:dev@127.0.0.1:3306/afterglow_test
+        run: uv run python -m pytest tests/test_union_layers_db.py -v -m db
+
   # ─── secret 존재 여부 + Keystone 인증 probe를 job output으로 노출 ──────────
   # secrets 컨텍스트는 if: 표현식에서 직접 사용 불가 (GitHub Actions 제약).
   # 별도 job에서 env로 secret을 받아 비어 있는지 검사하고,
