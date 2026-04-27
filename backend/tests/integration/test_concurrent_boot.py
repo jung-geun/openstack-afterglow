@@ -20,9 +20,10 @@ pytestmark = pytest.mark.slow
 CONCURRENT_VMS = int(os.getenv("AFTERGLOW_TEST_CONCURRENT_VMS", "3"))
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio(loop_scope="session")
 async def test_concurrent_vm_boot_nfs_stability(admin_client, settings):
     """N=CONCURRENT_VMS VM을 동일 prebuilt library로 동시 생성 → 모두 ACTIVE + health 보고 도달."""
+    require_service("service_nova_enabled")
     require_service("service_manila_enabled")
 
     instance_ids: list[str] = []
