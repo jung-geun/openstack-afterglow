@@ -24,10 +24,11 @@ OS_TYPE_FCOS = "fcos"
 VALID_OS_TYPES = {OS_TYPE_UBUNTU, OS_TYPE_FCOS}
 
 # SSH 공개키 형식 검증 패턴 (개행 및 YAML injection 방지)
+# 코멘트 필드는 공백 포함 자유 문자열 허용 (newline/carriage return은 별도 차단)
 _SSH_KEY_RE = re.compile(
     r"^(ssh-rsa|ssh-ed25519|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com)"
     r"\s+[A-Za-z0-9+/=]+"
-    r"(\s+\S+)?$"
+    r"(\s+.+)?$"
 )
 
 

