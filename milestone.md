@@ -560,11 +560,11 @@ Step 5: 요약 & 배포
   - [ ] 다중 VM 동시 부팅 시 NFS share 동시 접근 안정성 검증
   - [ ] 라이선스/동시 접속 제한 검토 (상용 소프트웨어)
 
-- [ ] 5.5 보안 강화
+- [x] 5.5 보안 강화
   - [ ] NFS export 옵션 보안: `root_squash`, `sec=sys` vs `sec=krb5`
-  - [ ] CephX 키 로테이션 지원
-  - [ ] VM 간 데이터 격리 검증 (다른 프로젝트의 share 접근 차단)
-  - [ ] NFS 방화벽 규칙 자동 관리 (Security Group)
+  - [x] CephX 키 로테이션 지원 — `rotate_cephx_access_rule` + `POST /api/instances/{id}/credentials/rotate-cephx` + systemd 타이머
+  - [x] VM 간 데이터 격리 검증 (다른 프로젝트의 share 접근 차단) — `union_project_id` 메타 + list/get 필터
+  - [x] NFS 방화벽 규칙 자동 관리 (Security Group) — `ensure_union_egress_sg` + instances.py auto-attach
 
 - [x] 5.6 로깅 및 감사
   - [x] 마운트/언마운트 이벤트 로깅 (envmgr-use.sh → `POST /api/union/mounts` Bearer 토큰 통합, best-effort)
@@ -963,7 +963,9 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 
 ---
 
-## 11. VM 스케일링 + 보안 강화 (5.4 + 5.5 완성) — Milestone 11
+## 11. VM 스케일링 + 보안 강화 (5.4 + 5.5 완성) — Milestone 11 ✅
+
+> **완료**: resize 엔드투엔드(11.1), OverlayFS 검증 + 라이선스 가드(11.2), NFS 강화 + CephX 회전 + 3-share wiring(11.3), 프로젝트 격리 + Union SG 자동화(11.4) 전 항목 완료.
 
 > **목표**: 미완료 상태로 남은 5.4(VM 스케일링) + 5.5(보안 강화) 항목을 4주 로드맵으로 완성
 
@@ -1000,10 +1002,18 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 - [x] `backend/tests/test_cloudinit.py` — `nosuid,nodev,noexec` + `LAYER_STORE_RO_EXPORT` 단위 테스트 2건
 - [x] `backend/tests/test_endpoint_inventory.py` — rotate-cephx 엔드포인트 whitelist 추가
 
-### 11.4 격리 검증 + SG 자동화 (Week 4)
+### 11.4 격리 검증 + SG 자동화 (Week 4) ✅
 
-- [ ] `backend/app/services/manila.py:create_file_storage` — `union_project_id` 메타 추가
-- [ ] `backend/app/api/storage/file_storage.py` — non-admin cross-project 필터링
-- [ ] `backend/tests/integration/test_isolation.py` — 신규 3건 (비노출/허용/403)
-- [ ] `backend/app/services/neutron.py` — `ensure_union_security_group()` 헬퍼
-- [ ] `backend/app/api/compute/instances.py:create_instance` — Union 사용 시 SG 자동 attach
+- [x] `backend/app/services/manila.py` — `_parse_file_storage` `is_public` 추출, `list_file_storages` `caller_project_id` 필터 추가
+- [x] `backend/app/models/storage.py` — `FileStorageInfo.is_public` 필드 추가
+- [x] `backend/app/api/compute/instances.py:_prepare_dynamic_file_storage` — `union_project_id` 메타 자동 주입
+- [x] `backend/app/services/library_builder.py` — prebuilt 빌드 완료 후 `set_share_public(True)` 자동 호출
+- [x] `backend/app/api/storage/file_storage.py` — non-admin list `caller_project_id` 전달, GET cross-project private → 404
+- [x] `backend/tests/integration/test_isolation.py` — 신규 3건 (`@pytest.mark.slow`, 실 인프라 skip 스켈레톤)
+- [x] `backend/app/services/neutron.py` — `ensure_union_egress_sg()` idempotent 헬퍼 (NFS/CephFS/HTTP(S) 6 rule)
+- [x] `backend/app/config.py` — `union_auto_egress_sg_enabled`, `union_egress_sg_name` 설정값 추가
+- [x] `backend/app/api/compute/instances.py:create_instance` + `create_instance_async` — Union 사용 시 SG 자동 attach
+- [x] `backend/tests/test_file_storage.py` — 격리 테스트 4건 (list 필터, public 노출, cross-project 404, admin 허용)
+- [x] `backend/tests/test_manila_isolation.py` — `list_file_storages` caller_project_id 필터 단위 2건
+- [x] `backend/tests/test_neutron.py` — `ensure_union_egress_sg` 3건 (미존재 생성+6룰, idempotent, 누락 룰만 추가)
+- [x] `backend/tests/test_instances.py` — Union SG 자동 attach 2건 (auto-attach, disabled 시 미호출)
