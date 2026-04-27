@@ -22,15 +22,15 @@ class BarbicanKmsPlugin:
     name = "barbican_kms"
 
     def should_deploy(self, settings: Settings) -> bool:
-        if not settings.k3s_barbican_kms_enabled:
-            return False
-        if not settings.os_auth_url or not settings.os_username or not settings.os_password:
-            _logger.warning("BarbicanKMS 활성화됨이지만 OpenStack 인증 정보 미설정")
-            return False
-        if not settings.k3s_barbican_kms_kek_id:
-            _logger.warning("BarbicanKMS 활성화됨이지만 barbican_kms_kek_id 미설정")
-            return False
-        return True
+        # KMS 데몬 소켓(unix:///var/lib/kms/kms.sock)이 부팅 시점엔 존재하지 않아
+        # kube-apiserver가 encryption-provider-config 초기화에서 데드락에 빠짐.
+        # host static pod 방식으로 재설계할 때까지 강제 비활성화.
+        if settings.k3s_barbican_kms_enabled:
+            _logger.warning(
+                "Barbican KMS는 현재 부팅 데드락으로 인해 비활성화되어 있습니다. "
+                "host static pod 재설계 후 재활성화 예정."
+            )
+        return False
 
     def cloud_conf_sections(self, project_id: str, settings: Settings) -> str:
         """[KeyManager] 섹션 추가."""

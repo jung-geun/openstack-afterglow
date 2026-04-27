@@ -244,11 +244,12 @@ def test_keystone_auth_disabled_by_default():
     assert KeystoneAuthPlugin().should_deploy(s) is False
 
 
-def test_keystone_auth_should_deploy_true():
+def test_keystone_auth_should_deploy_gated():
+    """Keystone Auth는 설정 활성화 여부와 무관하게 should_deploy()가 False를 반환한다 (부팅 데드락 방지)."""
     from app.services.k3s_plugins.keystone_auth import KeystoneAuthPlugin
 
     s = _base_settings(k3s_keystone_auth_enabled=True)
-    assert KeystoneAuthPlugin().should_deploy(s) is True
+    assert KeystoneAuthPlugin().should_deploy(s) is False
 
 
 def test_keystone_auth_server_install_args():
@@ -302,11 +303,12 @@ def test_barbican_kms_requires_kek_id():
     assert BarbicanKmsPlugin().should_deploy(s) is False
 
 
-def test_barbican_kms_should_deploy_true():
+def test_barbican_kms_should_deploy_gated():
+    """Barbican KMS는 설정 활성화 여부와 무관하게 should_deploy()가 False를 반환한다 (부팅 데드락 방지)."""
     from app.services.k3s_plugins.barbican_kms import BarbicanKmsPlugin
 
     s = _base_settings(k3s_barbican_kms_enabled=True, k3s_barbican_kms_kek_id="kek-uuid-123")
-    assert BarbicanKmsPlugin().should_deploy(s) is True
+    assert BarbicanKmsPlugin().should_deploy(s) is False
 
 
 def test_barbican_kms_server_install_args():

@@ -33,6 +33,7 @@ write_files:
     content: |
       #!/bin/bash
       set -e
+      set -o pipefail
       CALLBACK_URL="{{ callback_url }}"
       CALLBACK_TOKEN="{{ callback_token }}"
 
@@ -54,6 +55,26 @@ write_files:
         exit 1
       fi
 
+      log "Waiting for kube-apiserver /livez (up to 10 min)..."
+      SERVER_IP_LOCAL=$(hostname -I | awk '{print $1}')
+      APISERVER_READY=0
+      for i in $(seq 1 120); do
+        HTTP_LIVEZ=$(curl -sk --max-time 3 -o /dev/null -w "%{http_code}" "https://${SERVER_IP_LOCAL}:6443/livez" 2>/dev/null || echo "000")
+        if [ "${HTTP_LIVEZ}" = "200" ]; then
+          APISERVER_READY=1
+          break
+        fi
+        sleep 5
+      done
+      if [ "${APISERVER_READY}" -ne 1 ]; then
+        log "ERROR: kube-apiserver /livez did not return 200 after 10 min"
+        curl -sf -X POST "${CALLBACK_URL}/api/k3s/callback" \
+          -H "Content-Type: application/json" \
+          -d "{\"token\": \"${CALLBACK_TOKEN}\", \"success\": false, \"error\": \"kube-apiserver not ready after 10min\"}" || true
+        exit 1
+      fi
+      log "kube-apiserver is ready (HTTP ${HTTP_LIVEZ})"
+
       log "Waiting for node-token (up to 5 min)..."
       for i in $(seq 1 60); do
         if [ -f /var/lib/rancher/k3s/server/node-token ]; then
@@ -67,7 +88,7 @@ write_files:
       log "Creating cloud-config secret..."
       kubectl --kubeconfig=/etc/rancher/k3s/k3s.yaml \
         create secret -n kube-system generic cloud-config \
-        --from-file=cloud.conf=/etc/kubernetes/cloud.conf 2>&1 | tee -a /var/log/k3s-callback.log || true
+        --from-file=cloud.conf=/etc/kubernetes/cloud.conf >> /var/log/k3s-callback.log 2>&1 || true
 
 {% endif %}
 {% for plugin in plugins %}
@@ -75,7 +96,7 @@ write_files:
       PLUGIN_{{ plugin.name | upper }}_STATUS="not_deployed"
       log "Deploying plugin: {{ plugin.name }}..."
       if kubectl --kubeconfig=/etc/rancher/k3s/k3s.yaml \
-        apply -f /opt/k3s/{{ plugin.name }}-manifests.yaml 2>&1 | tee -a /var/log/k3s-callback.log; then
+        apply --validate=false -f /opt/k3s/{{ plugin.name }}-manifests.yaml >> /var/log/k3s-callback.log 2>&1; then
         PLUGIN_{{ plugin.name | upper }}_STATUS="deployed"
         log "Plugin {{ plugin.name }} deployed successfully"
       else

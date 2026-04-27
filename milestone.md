@@ -823,6 +823,20 @@ config.toml 신규 섹션: `[k3s]` 하위 `cinder_csi_*`, `manila_csi_*`, `keyst
 
 config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id = ""`
 
+### 8.14 k3s 부팅 데드락 수정 + callback.sh 진단 개선
+
+**문제**: barbican_kms / keystone_auth 플러그인이 부팅 시점 불가능한 의존성을 apiserver에 주입해 control plane이 영구 데드락에 빠짐. kubectl get nodes 시 노드가 보이지 않음.
+
+- [x] `backend/app/services/k3s_plugins/barbican_kms.py` — `should_deploy()` 강제 False (KMS 소켓 chicken-and-egg 데드락 방지, host static pod 재설계 전까지)
+- [x] `backend/app/services/k3s_plugins/keystone_auth.py` — `should_deploy()` 강제 False (부팅 직후 webhook service URL resolve 실패 방지)
+- [x] `backend/app/templates/k3s_server.yaml.j2` — `set -o pipefail` 추가, apiserver `/livez` readiness 폴링(최대 10분), kubectl `--validate=false`, tee 파이프 제거(>> redirect로 교체)
+- [x] `backend/tests/test_k3s_clusters.py` — 플러그인 게이팅 신규 테스트 4건
+
+**향후 작업**:
+- [ ] Barbican KMS host static pod 재설계 (부팅 전 소켓 준비, apiserver 재시작 트리거)
+- [ ] Keystone Auth hostNetwork static pod 재설계 (webhook URL을 127.0.0.1:port로 변경)
+- [ ] callback.sh에서 k3s 재시작 루프 감지 시 success=false 보고
+
 ---
 
 ## 9. Union Mount 레이어 시스템 v2 (content-addressable)

@@ -426,3 +426,63 @@ def test_create_request_allowed_cidrs_empty_list():
 
     req = CreateK3sClusterRequest(name="test-cluster", allowed_cidrs=[])
     assert req.allowed_cidrs == []
+
+
+# ---------------------------------------------------------------------------
+# Plugin 부팅 데드락 게이팅 — Barbican KMS / Keystone Auth
+# ---------------------------------------------------------------------------
+
+
+def _make_plugin_settings(**kwargs):
+    """플러그인 테스트용 Settings MagicMock."""
+    from unittest.mock import MagicMock
+
+    defaults = {
+        "k3s_barbican_kms_enabled": False,
+        "k3s_barbican_kms_kek_id": "",
+        "k3s_keystone_auth_enabled": False,
+        "os_auth_url": "http://keystone:5000/v3",
+        "os_username": "admin",
+        "os_password": "secret",
+    }
+    defaults.update(kwargs)
+    mock = MagicMock()
+    for k, v in defaults.items():
+        setattr(mock, k, v)
+    return mock
+
+
+def test_barbican_kms_plugin_disabled_even_when_settings_enabled():
+    """Barbican KMS는 설정이 활성화되어도 should_deploy()가 False를 반환해야 한다 (부팅 데드락 방지)."""
+    from app.services.k3s_plugins.barbican_kms import BarbicanKmsPlugin
+
+    plugin = BarbicanKmsPlugin()
+    settings = _make_plugin_settings(k3s_barbican_kms_enabled=True, k3s_barbican_kms_kek_id="kek-uuid")
+    assert plugin.should_deploy(settings) is False
+
+
+def test_keystone_auth_plugin_disabled_even_when_settings_enabled():
+    """Keystone Auth는 설정이 활성화되어도 should_deploy()가 False를 반환해야 한다 (부팅 webhook 실패 방지)."""
+    from app.services.k3s_plugins.keystone_auth import KeystoneAuthPlugin
+
+    plugin = KeystoneAuthPlugin()
+    settings = _make_plugin_settings(k3s_keystone_auth_enabled=True)
+    assert plugin.should_deploy(settings) is False
+
+
+def test_barbican_kms_plugin_disabled_when_settings_disabled():
+    """Barbican KMS는 설정이 비활성화되면 should_deploy()가 False를 반환해야 한다."""
+    from app.services.k3s_plugins.barbican_kms import BarbicanKmsPlugin
+
+    plugin = BarbicanKmsPlugin()
+    settings = _make_plugin_settings(k3s_barbican_kms_enabled=False)
+    assert plugin.should_deploy(settings) is False
+
+
+def test_keystone_auth_plugin_disabled_when_settings_disabled():
+    """Keystone Auth는 설정이 비활성화되면 should_deploy()가 False를 반환해야 한다."""
+    from app.services.k3s_plugins.keystone_auth import KeystoneAuthPlugin
+
+    plugin = KeystoneAuthPlugin()
+    settings = _make_plugin_settings(k3s_keystone_auth_enabled=False)
+    assert plugin.should_deploy(settings) is False
