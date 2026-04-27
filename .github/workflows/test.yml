@@ -87,10 +87,18 @@ jobs:
             '{"auth":{"identity":{"methods":["password"],"password":{"user":{"name":$u,"password":$p,"domain":{"name":"Default"}}}},"scope":{"project":{"name":$proj,"domain":{"name":"Default"}}}}}' \
             > /tmp/ks_body.json
 
+          # OS_AUTH_URL 정규화: trailing slash 제거 + version path 미존재 시 /v3 자동 부착
+          _RAW_URL="${OS_AUTH_URL%/}"
+          if echo "$_RAW_URL" | grep -qE '/v[0-9]+(\.[0-9]+)?$'; then
+            _AUTH_URL="$_RAW_URL"
+          else
+            _AUTH_URL="$_RAW_URL/v3"
+          fi
+
           # Keystone v3 token probe (timeout 5s) — 응답 body 저장
           STATUS=$(curl -sk -o /tmp/ks_resp.json -w "%{http_code}" \
             --max-time 5 \
-            -X POST "${OS_AUTH_URL}/auth/tokens" \
+            -X POST "${_AUTH_URL}/auth/tokens" \
             -H "Content-Type: application/json" \
             --data "@/tmp/ks_body.json")
 
