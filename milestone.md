@@ -1087,5 +1087,89 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 - [x] `backend/app/templates/cloudinit_base.yaml.j2` — `gpu_available=true` 시 설치 스크립트 + systemd unit 자동 생성 (네이티브 바이너리, `0.0.0.0:9400`)
 - [x] `backend/app/services/cloudinit.py` — `_DCGM_EXPORTER_VERSION` 핀 상수 추가, 템플릿 렌더에 버전 전달
 - [x] `backend/tests/test_cloudinit.py` — GPU/non-GPU 분기 3케이스 추가
-- [ ] 보안 그룹 9400/tcp 자동 허용 — 별도 운영 트랙
-- [ ] Prometheus 스크래핑 대상 자동 등록 — 별도 운영 트랙
+- [→] 보안 그룹 9400/tcp 자동 허용 — 12.2에서 통합 처리
+- [→] Prometheus 스크래핑 대상 자동 등록 — 12.3/12.4에서 통합 처리
+
+
+## 12. 인스턴스 관측성 — Node Exporter + 메트릭 가시성
+
+> **목표**: 운영 중인 모든 사용자 VM의 시스템(`node_exporter:9100`) + GPU(`dcgm-exporter:9400`) 메트릭을 외부에서 안정적으로 수집하고, 프로젝트별 Grafana 대시보드로 사용자가 자신의 인스턴스 상태를 직접 확인할 수 있도록 한다. 11.4 `ensure_union_egress_sg` 패턴을 그대로 ingress 변형으로 재사용한다.
+
+> **배경**: GPU DCGM Exporter(섹션 11 끝)는 cloud-init 단으로 자동 설치 완료. Node Exporter는 base 이미지 빌드 트랙에서 사전 설치 예정 (별도 인프라 작업, 본 코드 변경 외). 현재 Prometheus(`monitoring/prometheus.yml`, `deploy/k8s-template/monitoring/prometheus/configmap.yaml`)는 `backend:8000/api/metrics`만 스크래핑하며 VM은 미수집. 사용자 VM에는 fixed IP만 있고 보안 그룹 ingress는 기본 차단 상태.
+
+### 12.1 Node Exporter 사전 설치 (이미지 빌드 트랙 — 본 저장소 외)
+
+- [ ] base qcow2 이미지에 `node_exporter` 바이너리 + systemd unit 사전 설치 (Packer/Diskimage-Builder 빌드 스크립트)
+- [ ] `node_exporter --web.listen-address=0.0.0.0:9100` 기본 구성, `--collector.systemd` 활성화
+- [ ] 본 저장소 변경: `backend/tests/integration/test_image_metadata.py` 신규 — 이미지 메타데이터에 `monitoring_ready=true` 태그가 있는지 사전 검증 (선택)
+- [ ] `backend/app/api/compute/instances.py` 인스턴스 생성 시 이미지 메타에서 `monitoring_ready` 추출하여 SG 자동 적용 분기에 활용 (12.2와 연동)
+
+### 12.2 Monitoring 보안 그룹 자동화 (ingress 9100/9400)
+
+11.4의 `ensure_union_egress_sg` (egress 6 rule)를 직접 모방. 새 헬퍼는 ingress 방향 + 노출 범위가 핵심 차이.
+
+- [ ] `backend/app/services/neutron.py` — `ensure_monitoring_ingress_sg(conn, project_id, sg_name, scrape_cidr)` idempotent 헬퍼 추가
+  - rule: `ingress tcp 9100/9100 remote_ip_prefix=<scrape_cidr>` + `ingress tcp 9400/9400 remote_ip_prefix=<scrape_cidr>`
+  - `scrape_cidr`은 Prometheus 스크래퍼 IP/서브넷에 한정 (전체 0.0.0.0/0 금지)
+  - 11.4 `_UNION_EGRESS_RULES` 상수 옆에 `_MONITORING_INGRESS_RULES` 추가
+- [ ] `backend/app/config.py` — 신규 설정값:
+  - `monitoring_auto_sg_enabled: bool = True`
+  - `monitoring_sg_name: str = "monitoring"`
+  - `monitoring_scrape_cidr: str` (필수, env로 주입)
+- [ ] `backend/app/api/identity/admin_identity.py:create_project` — 프로젝트 생성 후 `ensure_monitoring_ingress_sg` 호출하여 신규 프로젝트마다 monitoring SG 자동 생성
+- [ ] `backend/app/api/compute/instances.py:create_instance` + `create_instance_async` — 11.4 egress SG 자동 attach 패턴 옆에 monitoring SG attach 추가 (`req.security_groups`에 `monitoring_sg_name` append, 중복 방지)
+- [ ] `backend/app/api/admin/projects.py` (또는 신규 utility 라우터) — `POST /api/admin/projects/{id}/sync-monitoring-sg` 엔드포인트: 기존 프로젝트에 일괄 적용 (관리자 전용)
+- [ ] `frontend/src/lib/components/VmCreatePanel.svelte` — SG 단일 select 옆에 "monitoring SG 자동 포함됨" 안내 배지 (auto-attach 동작 가시화)
+- [ ] `backend/tests/test_neutron.py` — `ensure_monitoring_ingress_sg` 3건 (미존재 생성, idempotent, scrape_cidr 미설정 시 ValueError)
+- [ ] `backend/tests/test_admin_identity.py` — 프로젝트 생성 시 `ensure_monitoring_ingress_sg` 호출 검증 1건
+- [ ] `backend/tests/test_instances.py` — monitoring SG auto-attach 2건 (활성/비활성)
+
+### 12.3 Prometheus 스크래핑 — 메인 클러스터 통합 vs 프로젝트별 분리 (결정 필요)
+
+> **결정 미확정 (사용자 검토 필요)**: 옵션 A를 권장하나, 멀티테넌시 격리 요구 강도에 따라 B가 정답일 수 있음.
+
+#### Option A: 메인 Prometheus + Grafana 단일 인스턴스 + tenant 라벨 분리 (권장)
+
+- 장점: 운영 단일 스택, Grafana org/folder + label-based row-level security로 프로젝트 격리, 비용/리소스 효율
+- 단점: 사용자 정의 대시보드 자유도 낮음 (관리자가 템플릿 제공), Prometheus single-tenant 한계
+- [ ] `monitoring/prometheus.yml` + `deploy/k8s-template/monitoring/prometheus/configmap.yaml` — `nova_sd` 또는 `http_sd_config` 추가하여 OpenStack VM 자동 발견
+- [ ] `backend/app/api/common/sd_targets.py` (신규) — `GET /api/sd/prometheus/targets` Prometheus `http_sd` 호환 JSON 응답 (인스턴스 목록 + `instance`, `project_id`, `flavor`, `gpu` 라벨)
+  - 인증: 별도 token (스크래퍼 전용), `monitoring_sd_token` 설정값
+  - VM의 floating IP가 없어도 fixed IP를 그대로 노출 (스크래퍼가 internal network에 접근 가능하다는 가정)
+- [ ] `backend/tests/test_sd_targets.py` — 라벨 형식, token 검증, 권한 4건
+- [ ] `deploy/k8s-template/monitoring/prometheus/configmap.yaml` — DCGM/Node 스크래핑 잡 추가 (`__meta_*` 라벨 → `project_id`/`instance` 재라벨)
+- [ ] `deploy/k8s-template/monitoring/grafana/` — provisioning datasource (Prometheus) + 기본 대시보드(JSON) 추가, `node_exporter`/`dcgm` 공식 대시보드 import
+- [ ] `frontend/src/routes/dashboard/observability/+page.svelte` (신규) — Grafana iframe 임베드 + 프로젝트별 URL 자동 생성 (`var-project_id={current}`)
+
+#### Option B: 프로젝트별 컨테이너 모니터링 스택 (대안)
+
+- 장점: 완전한 격리, 사용자가 자신의 대시보드/알람 자유 구성, BYO Grafana
+- 단점: 프로젝트당 Prometheus+Grafana 컨테이너 관리(리소스 비용 N배), 사용자가 docker-compose 운영 필요, 인증/네트워크 설계 복잡
+- [ ] `backend/app/templates/monitoring_stack/docker-compose.yml.j2` (신규) — Prometheus + Grafana 한 쌍, 사용자 다운로드 가능
+- [ ] `backend/app/api/compute/instances.py` — `GET /api/instances/{id}/monitoring-bundle` 엔드포인트: 사용자 프로젝트 SD targets + 자격증명을 담은 zip 생성
+- [ ] 사용자가 임의 VM에 `docker compose up`으로 띄움 — 인스턴스 자체 리소스를 사용
+- [ ] 프론트는 사용자가 입력한 Grafana URL만 보관 (관리/설치는 사용자 책임)
+
+#### 비교 의사결정 포인트
+
+- 멀티테넌시 격리 강도 (옵션 A의 라벨 분리로 충분한지 vs 완전 분리 필요한지)
+- 운영 인력/비용 (단일 vs N개 스택)
+- 사용자 자유도 요구 (대시보드 커스터마이즈 빈도)
+
+### 12.4 Grafana 대시보드 + 프로젝트별 가시화
+
+Option A 채택 시 본 절 진행. Option B 채택 시 사용자가 자체 구성하므로 본 절은 템플릿 제공으로 한정.
+
+- [ ] `deploy/k8s-template/monitoring/grafana/provisioning/dashboards/` — node-exporter-full + nvidia-dcgm 공식 대시보드 JSON 동봉
+- [ ] Grafana org/folder 자동 생성 — 프로젝트별 folder, datasource label filter `project_id="<keystone_project_id>"`
+- [ ] `frontend/src/routes/dashboard/observability/+page.svelte` — Grafana iframe + auth proxy (Grafana `auth.proxy` 또는 `auth.jwt` 모드 + 백엔드가 토큰 발급)
+- [ ] `backend/app/api/common/grafana_auth.py` (신규) — Grafana 임베드용 JWT 발급 엔드포인트
+- [ ] `backend/tests/test_grafana_auth.py` — 토큰 발급/만료/권한 3건
+
+### 12.5 Open Questions (사용자 확인 필요)
+
+1. **Kolla Ansible 환경의 Prometheus/Grafana**: 운영 OpenStack(Kolla)에 이미 `prometheus`/`grafana` 컨테이너가 떠 있는가? 있다면 그 인스턴스를 재사용할지(scrape job만 추가), 본 저장소의 `deploy/k8s-template/monitoring/`을 분리 운영할지?
+2. **`monitoring_scrape_cidr` 결정**: 스크래퍼가 실제로 어느 네트워크에서 도달하는가? (control plane management network / provider network / floating IP 경유?)
+3. **VM에서 Prometheus 도달성**: 사용자 VM은 보통 floating IP 없이 fixed IP만 가짐. Prometheus 스크래퍼가 VM의 fixed IP에 직접 접근 가능한 위치에 떠 있는가, 아니면 floating IP가 필수인가?
+4. **인증 모델**: Grafana org를 keystone project별로 1:1 매핑할지, 단일 org + folder + label filter로 격리할지?
+5. **옵션 A vs B 결정**: 본 결정이 12.3/12.4 작업량을 크게 좌우. 사용자 격리 정책 + 운영 인력 기준 판단 필요.
