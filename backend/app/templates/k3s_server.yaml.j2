@@ -85,22 +85,30 @@ write_files:
 {% if cloud_conf %}
       # cloud-config secret 생성 (플러그인 공통 1회)
       log "Creating cloud-config secret..."
-      kubectl --kubeconfig=/etc/rancher/k3s/k3s.yaml \
-        create secret -n kube-system generic cloud-config \
-        --from-file=cloud.conf=/etc/kubernetes/cloud.conf >> /var/log/k3s-callback.log 2>&1 || true
+      SECRET_CLOUD_CONFIG_STATUS="ok"
+      if ! kubectl --kubeconfig=/etc/rancher/k3s/k3s.yaml \
+          create secret -n kube-system generic cloud-config \
+          --from-file=cloud.conf=/etc/kubernetes/cloud.conf >> /var/log/k3s-callback.log 2>&1; then
+        SECRET_CLOUD_CONFIG_STATUS="failed"
+        log "WARNING: cloud-config secret 생성 실패 — OCCM이 시작되지 않을 수 있습니다"
+      fi
 
 {% endif %}
 {% for plugin in plugins %}
       # 플러그인 배포: {{ plugin.name }}
       PLUGIN_{{ plugin.name | upper }}_STATUS="not_deployed"
+      PLUGIN_{{ plugin.name | upper }}_ERROR=""
       log "Deploying plugin: {{ plugin.name }}..."
+      _ERR_FILE="/var/log/k3s-callback-{{ plugin.name }}.stderr"
       if kubectl --kubeconfig=/etc/rancher/k3s/k3s.yaml \
-        apply --validate=false -f /opt/k3s/{{ plugin.name }}-manifests.yaml >> /var/log/k3s-callback.log 2>&1; then
+          apply --validate=false -f /opt/k3s/{{ plugin.name }}-manifests.yaml \
+          >> /var/log/k3s-callback.log 2>"${_ERR_FILE}"; then
         PLUGIN_{{ plugin.name | upper }}_STATUS="deployed"
         log "Plugin {{ plugin.name }} deployed successfully"
       else
         PLUGIN_{{ plugin.name | upper }}_STATUS="failed"
-        log "ERROR: Plugin {{ plugin.name }} deployment failed"
+        PLUGIN_{{ plugin.name | upper }}_ERROR="$(tail -c 1024 "${_ERR_FILE}" | tr '\n' ' ' | sed 's/"/\\"/g')"
+        log "ERROR: Plugin {{ plugin.name }} deployment failed — see ${_ERR_FILE}"
       fi
 
 {% endfor %}
@@ -113,10 +121,11 @@ write_files:
       log "Sending callback to ${CALLBACK_URL}"
       PLUGIN_STATUS_JSON=$(jq -n \
 {% for plugin in plugins %}
-        --arg {{ plugin.name }}   "${PLUGIN_{{ plugin.name | upper }}_STATUS}" \
+        --arg {{ plugin.name }}_st "${PLUGIN_{{ plugin.name | upper }}_STATUS}" \
+        --arg {{ plugin.name }}_er "${PLUGIN_{{ plugin.name | upper }}_ERROR}" \
 {% endfor %}
 {% if plugins %}
-        '{ {% for plugin in plugins %}{{ '"' ~ plugin.name ~ '"' }}: ${{ plugin.name }}{% if not loop.last %}, {% endif %}{% endfor %} }')
+        '{ {% for plugin in plugins %}{{ '"' ~ plugin.name ~ '"' }}: {status: ${{ plugin.name }}_st, error: ${{ plugin.name }}_er}{% if not loop.last %}, {% endif %}{% endfor %} }')
 {% else %}
         '{}')
 {% endif %}
@@ -127,7 +136,8 @@ write_files:
         --arg nt      "${NODE_TOKEN}" \
         --arg sip     "${SERVER_IP}" \
         --argjson ps  "${PLUGIN_STATUS_JSON}" \
-        '{token: $token, success: true, kubeconfig: $kc, node_token: $nt, server_ip: $sip, plugin_status: $ps}')
+        --arg scs     "${SECRET_CLOUD_CONFIG_STATUS:-}" \
+        '{token: $token, success: true, kubeconfig: $kc, node_token: $nt, server_ip: $sip, plugin_status: $ps, secret_cloud_config_status: ($scs | if . == "" then null else . end)}')
 
       log "Payload size: $(echo -n "${PAYLOAD}" | wc -c) bytes"
       HTTP_CODE=$(curl -s -o /tmp/callback_response.txt -w "%{http_code}" \

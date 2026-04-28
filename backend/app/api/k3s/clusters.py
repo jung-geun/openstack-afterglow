@@ -326,7 +326,12 @@ async def create_k3s_cluster_async(
             from app.services import k3s_plugins
 
             cloud_conf = k3s_plugins.aggregate_cloud_conf(project_id, s)
-            plugin_manifests = k3s_plugins.aggregate_manifests(req.name, project_id, s)
+            plugin_manifests, manifest_failures = k3s_plugins.aggregate_manifests(req.name, project_id, s)
+            if manifest_failures:
+                err_msg = f"플러그인 매니페스트 생성 실패: {', '.join(manifest_failures)}"
+                _logger.error("k3s cluster %s: %s", cluster_id, err_msg)
+                yield event(K3sProgressStep.FAILED, 0, err_msg, cluster_id=cluster_id)
+                return
             extra_server_args = k3s_plugins.aggregate_server_args(s)
             extra_write_files = k3s_plugins.aggregate_extra_write_files(project_id, req.name, s)
             active_plugins = k3s_plugins.get_active_plugin_names(s)

@@ -123,6 +123,8 @@ async def test_callback_success_triggers_agent_provisioning():
         server_ip="10.0.0.1",
         api_address="https://10.0.0.1:6443",
         node_token="K10secret::server:abc123",
+        plugin_status=None,
+        secret_cloud_config_status=None,
     )
     mock_asyncio.create_task.assert_called_once()
 
@@ -159,6 +161,58 @@ async def test_callback_token_consumed_only_once():
                 json={"token": "one-time-token", "success": False},
             )
     assert resp2.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_callback_stores_plugin_status_dict():
+    """plugin_status 객체 형식이 update_cluster_status에 전달되어야 한다."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        with patch("app.api.k3s.callback.k3s_cluster") as mock_db:
+            mock_db.consume_callback_token = AsyncMock(return_value={"project_id": "proj-1", "cluster_id": "cluster-1"})
+            mock_db.update_cluster_status = AsyncMock()
+            mock_db.store_kubeconfig = AsyncMock()
+            with patch("app.api.k3s.callback.asyncio"):
+                resp = await ac.post(
+                    "/api/k3s/callback",
+                    json={
+                        "token": "valid-token",
+                        "success": True,
+                        "kubeconfig": "apiVersion: v1\n",
+                        "node_token": "K10secret::server:abc",
+                        "server_ip": "10.0.0.1",
+                        "plugin_status": {"occm": {"status": "deployed", "error": ""}},
+                        "secret_cloud_config_status": "ok",
+                    },
+                )
+    assert resp.status_code == 200
+    call_kwargs = mock_db.update_cluster_status.call_args.kwargs
+    assert call_kwargs.get("plugin_status") == {"occm": {"status": "deployed", "error": ""}}
+    assert call_kwargs.get("secret_cloud_config_status") == "ok"
+
+
+@pytest.mark.asyncio
+async def test_callback_accepts_legacy_string_plugin_status():
+    """기존 string 형식 plugin_status도 수용해야 한다 (backward compat)."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        with patch("app.api.k3s.callback.k3s_cluster") as mock_db:
+            mock_db.consume_callback_token = AsyncMock(return_value={"project_id": "proj-1", "cluster_id": "cluster-1"})
+            mock_db.update_cluster_status = AsyncMock()
+            mock_db.store_kubeconfig = AsyncMock()
+            with patch("app.api.k3s.callback.asyncio"):
+                resp = await ac.post(
+                    "/api/k3s/callback",
+                    json={
+                        "token": "valid-token",
+                        "success": True,
+                        "kubeconfig": "apiVersion: v1\n",
+                        "node_token": "K10secret::server:abc",
+                        "server_ip": "10.0.0.1",
+                        "plugin_status": {"occm": "deployed"},
+                    },
+                )
+    assert resp.status_code == 200
+    call_kwargs = mock_db.update_cluster_status.call_args.kwargs
+    assert call_kwargs.get("plugin_status") == {"occm": "deployed"}
 
 
 @pytest.mark.asyncio

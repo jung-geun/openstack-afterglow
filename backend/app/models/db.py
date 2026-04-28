@@ -65,6 +65,10 @@ class K3sCluster(Base):
     agent_count: Mapped[int] = mapped_column(INT, nullable=False, default=0)
     occm_enabled: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False)
     plugins_enabled: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # {"occm": true, ...}
+    plugin_status: Mapped[dict | None] = mapped_column(
+        JSON, nullable=True
+    )  # {"occm": {"status": "deployed", "error": ""}}
+    secret_cloud_config_status: Mapped[str | None] = mapped_column(VARCHAR(20), nullable=True)
     os_type: Mapped[str] = mapped_column(VARCHAR(10), nullable=False, default="ubuntu")
 
     # 타임스탬프

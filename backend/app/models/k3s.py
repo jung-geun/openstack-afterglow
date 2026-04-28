@@ -103,4 +103,5 @@ class K3sCallbackRequest(BaseModel):
     server_ip: str | None = None
     error: str | None = None
     occm_status: str | None = None  # 하위호환 유지 (deprecated)
-    plugin_status: dict[str, str] | None = None  # {"occm": "deployed", "cinder_csi": "failed"}
+    plugin_status: dict[str, str | dict] | None = None  # {"occm": {"status": "deployed", "error": ""}}
+    secret_cloud_config_status: str | None = None  # "ok" | "failed"

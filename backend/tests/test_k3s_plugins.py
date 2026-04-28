@@ -350,7 +350,8 @@ def test_registry_no_plugins_active():
     assert k3s_plugins.get_active_plugins(s) == []
     assert k3s_plugins.needs_external_cloud_provider(s) is False
     assert k3s_plugins.aggregate_cloud_conf("proj-1", s) is None
-    assert k3s_plugins.aggregate_manifests("test-cluster", "proj-1", s) == []
+    manifests, failures = k3s_plugins.aggregate_manifests("test-cluster", "proj-1", s)
+    assert manifests == [] and failures == []
 
 
 def test_registry_occm_only():
@@ -375,7 +376,8 @@ def test_registry_occm_plus_cinder():
     cloud_conf = k3s_plugins.aggregate_cloud_conf("proj-1", s)
     assert "[Global]" in cloud_conf
     assert "[BlockStorage]" in cloud_conf
-    manifests = k3s_plugins.aggregate_manifests("test-cluster", "proj-1", s)
+    manifests, failures = k3s_plugins.aggregate_manifests("test-cluster", "proj-1", s)
+    assert not failures
     assert len(manifests) == 2
     names = [m["name"] for m in manifests]
     assert "occm" in names
@@ -442,6 +444,70 @@ def test_registry_server_args_dedup():
         assert args.count("--foo=bar") == 1
         assert "--baz=1" in args
         assert "--other=x" in args
+    finally:
+        k3s_plugins.ALL_PLUGINS = original
+
+
+def test_aggregate_manifests_partial_failure():
+    """generate_manifests 예외 발생 시 나머지는 처리되고 failures에 이름 기록."""
+    from app.services import k3s_plugins
+
+    class GoodPlugin:
+        name = "good"
+
+        def should_deploy(self, s):
+            return True
+
+        def cloud_conf_sections(self, pid, s):
+            return ""
+
+        def generate_manifests(self, cn, pid, s):
+            return "---\nkind: List"
+
+        def extra_write_files(self, pid, cn, s):
+            return []
+
+        def server_install_args(self, s):
+            return []
+
+        def agent_install_args(self, s):
+            return []
+
+        def needs_external_cloud_provider(self, s):
+            return False
+
+    class BadPlugin:
+        name = "bad"
+
+        def should_deploy(self, s):
+            return True
+
+        def cloud_conf_sections(self, pid, s):
+            return ""
+
+        def generate_manifests(self, cn, pid, s):
+            raise RuntimeError("template error")
+
+        def extra_write_files(self, pid, cn, s):
+            return []
+
+        def server_install_args(self, s):
+            return []
+
+        def agent_install_args(self, s):
+            return []
+
+        def needs_external_cloud_provider(self, s):
+            return False
+
+    original = k3s_plugins.ALL_PLUGINS
+    k3s_plugins.ALL_PLUGINS = [GoodPlugin(), BadPlugin()]
+    try:
+        s = _base_settings()
+        manifests, failures = k3s_plugins.aggregate_manifests("cluster", "proj", s)
+        assert len(manifests) == 1
+        assert manifests[0]["name"] == "good"
+        assert failures == ["bad"]
     finally:
         k3s_plugins.ALL_PLUGINS = original
 

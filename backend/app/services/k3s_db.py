@@ -51,6 +51,8 @@ def _cluster_to_dict(cluster: K3sCluster) -> dict:
         "deleted_reason": cluster.deleted_reason,
         "occm_enabled": cluster.occm_enabled,
         "plugins_enabled": cluster.plugins_enabled or {},
+        "plugin_status": cluster.plugin_status or {},
+        "secret_cloud_config_status": cluster.secret_cloud_config_status,
         "api_lb_id": cluster.api_lb_id or "",
         "api_lb_pool_id": cluster.api_lb_pool_id or "",
         "api_fip_id": cluster.api_fip_id or "",
@@ -233,11 +235,17 @@ async def update_cluster_status(
             "api_lb_pool_id",
             "api_fip_id",
             "api_fip_address",
+            "plugin_status",
+            "secret_cloud_config_status",
         }
         for k, v in extra_fields.items():
             if k in _column_map:
                 if k == "node_token" and v:
                     setattr(cluster, k, encrypt_node_token(v))
+                elif k in ("plugin_status", "secret_cloud_config_status"):
+                    # None이면 기존 값 보존
+                    if v is not None:
+                        setattr(cluster, k, v)
                 else:
                     setattr(cluster, k, v if v else None)
             # agent_vm_ids는 add_agent_vms()로 별도 처리

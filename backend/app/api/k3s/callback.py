@@ -51,7 +51,7 @@ async def k3s_callback(request: Request, req: K3sCallbackRequest):
         await k3s_cluster.update_cluster_status(project_id, cluster_id, "ERROR", f"kubeconfig 저장 실패: {e}")
         return {"ok": True}
 
-    # 클러스터 레코드에 server_ip, node_token, api_address 업데이트
+    # 클러스터 레코드에 server_ip, node_token, api_address, plugin_status 업데이트
     api_address = f"https://{req.server_ip}:6443"
     await k3s_cluster.update_cluster_status(
         project_id,
@@ -60,12 +60,22 @@ async def k3s_callback(request: Request, req: K3sCallbackRequest):
         server_ip=req.server_ip,
         api_address=api_address,
         node_token=req.node_token,
+        plugin_status=req.plugin_status,
+        secret_cloud_config_status=req.secret_cloud_config_status,
     )
 
     if req.occm_status:
-        _logger.info("k3s cluster %s OCCM status: %s", cluster_id, req.occm_status)
+        _logger.info("k3s cluster %s OCCM status (deprecated): %s", cluster_id, req.occm_status)
+    if req.secret_cloud_config_status and req.secret_cloud_config_status != "ok":
+        _logger.warning("k3s cluster %s cloud-config secret 생성 실패: %s", cluster_id, req.secret_cloud_config_status)
     if req.plugin_status:
-        _logger.info("k3s cluster %s plugin status: %s", cluster_id, req.plugin_status)
+        for name, info in req.plugin_status.items():
+            status = info.get("status", info) if isinstance(info, dict) else info
+            error = info.get("error", "") if isinstance(info, dict) else ""
+            if status == "deployed":
+                _logger.info("k3s cluster %s plugin %s: deployed", cluster_id, name)
+            else:
+                _logger.error("k3s cluster %s plugin %s: %s — %s", cluster_id, name, status, error)
 
     _logger.info("k3s cluster %s server ready, spawning agent VMs", cluster_id)
 

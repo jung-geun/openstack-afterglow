@@ -56,20 +56,25 @@ def aggregate_cloud_conf(project_id: str, settings: Settings) -> str | None:
     return "\n\n".join(sections) + "\n"
 
 
-def aggregate_manifests(cluster_name: str, project_id: str, settings: Settings) -> list[dict[str, str]]:
+def aggregate_manifests(
+    cluster_name: str, project_id: str, settings: Settings
+) -> tuple[list[dict[str, str]], list[str]]:
     """활성 플러그인의 매니페스트 목록 반환.
 
     Returns:
-        [{"name": "occm", "content": "..."}, ...]
+        (manifests, failures) — manifests: [{"name": "occm", "content": "..."}, ...],
+        failures: generate_manifests 예외가 발생한 플러그인 이름 목록.
     """
-    result = []
+    result: list[dict[str, str]] = []
+    failures: list[str] = []
     for plugin in get_active_plugins(settings):
         try:
             content = plugin.generate_manifests(cluster_name, project_id, settings)
             result.append({"name": plugin.name, "content": content})
-        except Exception as e:
-            _logger.warning("플러그인 %s 매니페스트 생성 실패 (스킵): %s", plugin.name, e)
-    return result
+        except Exception:
+            _logger.exception("플러그인 %s 매니페스트 생성 실패", plugin.name)
+            failures.append(plugin.name)
+    return result, failures
 
 
 def aggregate_extra_write_files(project_id: str, cluster_name: str, settings: Settings) -> list[dict]:
