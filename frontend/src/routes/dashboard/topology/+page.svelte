@@ -105,6 +105,9 @@
 	{:else if loading}
 		<LoadingSkeleton variant="card" rows={8} />
 	{:else if data}
+		{@const _visibleNets = data.networks.filter(n => n.is_external || n.is_shared || n.project_id === $auth.projectId)}
+		{@const _projectRouters = data.routers.filter(r => r.project_id === $auth.projectId)}
+		{@const _projectFips = data.floating_ips.filter(f => !f.project_id || f.project_id === $auth.projectId)}
 		<div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 		<div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4">
 			<GlobalTopology {data} projectId={$auth.projectId} />
@@ -147,9 +150,6 @@
 		</div>
 
 		<!-- 요약 (현재 프로젝트 기준) -->
-		{@const _visibleNets = data.networks.filter(n => n.is_external || n.is_shared || n.project_id === $auth.projectId)}
-		{@const _projectRouters = data.routers.filter(r => r.project_id === $auth.projectId)}
-		{@const _projectFips = data.floating_ips.filter(f => !f.project_id || f.project_id === $auth.projectId)}
 		<div class="mt-4 flex gap-6 text-xs text-gray-500 px-1">
 			<span>네트워크 {_visibleNets.length}개</span>
 			<span>라우터 {_projectRouters.length}개</span>
