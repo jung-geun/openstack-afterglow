@@ -47,12 +47,15 @@
   const token = $derived($auth.token ?? undefined);
   const projectId = $derived($auth.projectId ?? undefined);
 
+  let initialLoaded = false;
+
   async function loadTemplates() {
-    if (templates.length === 0) loading = true;
+    if (!initialLoaded) loading = true;
     else refreshing = true;
     error = '';
     try {
       templates = await api.get<TemplateInfo[]>('/api/union/templates', token, projectId);
+      initialLoaded = true;
     } catch (e) {
       error = e instanceof ApiError ? e.message : '템플릿 로드 실패';
       templates = [];
@@ -63,7 +66,7 @@
   }
 
   $effect(() => {
-    if (token) { templates = []; loadTemplates(); }
+    if (token) loadTemplates();
   });
 
   async function loadSealedLayers() {

@@ -31,14 +31,17 @@
   const token = $derived($auth.token ?? undefined);
   const projectId = $derived($auth.projectId ?? undefined);
 
+  let initialLoaded = false;
+
   async function loadLayers() {
-    if (layers.length === 0) loading = true;
+    if (!initialLoaded) loading = true;
     else refreshing = true;
     error = '';
     try {
       const params = new URLSearchParams({ limit: String(pageSize), offset: String(currentPage * pageSize) });
       if (nameFilter) params.set('name', nameFilter);
       layers = await api.get<LayerInfo[]>(`/api/union/layers?${params}`, token, projectId);
+      initialLoaded = true;
     } catch (e) {
       error = e instanceof ApiError ? e.message : '레이어 로드 실패';
       layers = [];
@@ -49,7 +52,7 @@
   }
 
   $effect(() => {
-    if (token) { layers = []; loadLayers(); }
+    if (token) loadLayers();
   });
 
   function formatSize(bytes: number | null): string {
