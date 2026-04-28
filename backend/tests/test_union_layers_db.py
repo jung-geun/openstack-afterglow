@@ -215,10 +215,11 @@ async def test_get_ancestors_five_chain(sess):
     layers = []
     prev_id = None
     for i in range(5):
-        req = _req(name=f"chain-layer-{i}", version="1.0", parent_id=prev_id)
-        info = await svc.create_layer(sess, req, created_by="user-a")
+        # 자식 생성 전에 부모를 먼저 봉인
         if prev_id is not None:
             await svc.seal_layer(sess, prev_id)
+        req = _req(name=f"chain-layer-{i}", version="1.0", parent_id=prev_id)
+        info = await svc.create_layer(sess, req, created_by="user-a")
         layers.append(info)
         prev_id = info.id
 

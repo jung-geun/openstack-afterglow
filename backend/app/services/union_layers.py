@@ -3,6 +3,7 @@
 MySQL 8.0+ WITH RECURSIVE CTE로 조상 체인을 해석한다.
 """
 
+import json
 import logging
 from datetime import UTC, datetime
 
@@ -225,8 +226,12 @@ async def get_ancestors(session: AsyncSession, layer_id: str) -> AncestorChain:
             project_id=row.get("project_id"),
             parent_id=row["parent_id"],
             ubuntu_base=row["ubuntu_base"],
-            build_recipe=row["build_recipe"] or {},
-            installed_packages=row["installed_packages"] or {},
+            build_recipe=json.loads(row["build_recipe"])
+            if isinstance(row["build_recipe"], str)
+            else (row["build_recipe"] or {}),
+            installed_packages=json.loads(row["installed_packages"])
+            if isinstance(row["installed_packages"], str)
+            else (row["installed_packages"] or {}),
             content_hash=row["content_hash"],
             size_bytes=row["size_bytes"],
             file_count=row["file_count"],
