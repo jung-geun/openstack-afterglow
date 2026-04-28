@@ -122,3 +122,30 @@ def test_union_ro_share_export_injected_to_write_files():
     yaml_str = _decode_userdata(encoded)
     assert "LAYER_STORE_RO_EXPORT" in yaml_str
     assert "10.0.0.1:6789:/volumes/_nogroup/abc123" in yaml_str
+
+
+def test_userdata_without_gpu_skips_dcgm():
+    """gpu_available=False 인스턴스에는 DCGM Exporter 관련 내용이 없어야 한다."""
+    encoded = generate_userdata(**{**_COMMON_ARGS, "gpu_available": False})
+    yaml_str = _decode_userdata(encoded)
+    assert "dcgm-exporter" not in yaml_str
+    assert "install_dcgm_exporter.sh" not in yaml_str
+
+
+def test_userdata_with_gpu_installs_dcgm():
+    """gpu_available=True 인스턴스에는 DCGM Exporter 설치 스크립트와 systemd unit이 포함돼야 한다."""
+    encoded = generate_userdata(**{**_COMMON_ARGS, "gpu_available": True})
+    yaml_str = _decode_userdata(encoded)
+    assert "/usr/local/bin/dcgm-exporter" in yaml_str
+    assert "0.0.0.0:9400" in yaml_str
+    assert "systemctl enable --now dcgm-exporter.service" in yaml_str
+    assert "github.com/NVIDIA/dcgm-exporter/releases" in yaml_str
+
+
+def test_userdata_with_gpu_uses_pinned_version():
+    """생성된 cloud-init에 모듈 상수 버전이 포함돼야 한다."""
+    from app.services import cloudinit as ci
+
+    encoded = generate_userdata(**{**_COMMON_ARGS, "gpu_available": True})
+    yaml_str = _decode_userdata(encoded)
+    assert ci._DCGM_EXPORTER_VERSION in yaml_str

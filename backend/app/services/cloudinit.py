@@ -36,6 +36,8 @@ _VERSIONS = {
     "jupyter": "4.2.0",
 }
 
+_DCGM_EXPORTER_VERSION = "4.2.0-4.1.0"
+
 
 def generate_userdata(
     libraries: list[str],
@@ -127,6 +129,7 @@ def generate_userdata(
         union_ro_share_export=union_ro_share_export or "",
         union_manifest_share_export=union_manifest_share_export or "",
         union_cephx_rotate_hours=union_cephx_rotate_hours,
+        dcgm_exporter_version=_DCGM_EXPORTER_VERSION,
     )
 
     # Nova는 userdata를 base64로 인코딩해서 전달

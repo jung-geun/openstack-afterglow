@@ -1081,3 +1081,11 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 
 - [x] 표준 OpenStack은 실행 중 SSH 키 주입을 미지원 — 정책상 런타임 주입 기능 미구현
 - [x] `InstanceDetailPanel.svelte` 패스워드 모달 내에 SSH 키 안내 문구 + 키페어 관리 링크 + rebuild 안내 추가
+
+### GPU 인스턴스 DCGM Exporter 자동 설치 (cloud-init)
+
+- [x] `backend/app/templates/cloudinit_base.yaml.j2` — `gpu_available=true` 시 설치 스크립트 + systemd unit 자동 생성 (네이티브 바이너리, `0.0.0.0:9400`)
+- [x] `backend/app/services/cloudinit.py` — `_DCGM_EXPORTER_VERSION` 핀 상수 추가, 템플릿 렌더에 버전 전달
+- [x] `backend/tests/test_cloudinit.py` — GPU/non-GPU 분기 3케이스 추가
+- [ ] 보안 그룹 9400/tcp 자동 허용 — 별도 운영 트랙
+- [ ] Prometheus 스크래핑 대상 자동 등록 — 별도 운영 트랙

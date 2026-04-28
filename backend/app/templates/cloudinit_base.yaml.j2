@@ -92,6 +92,52 @@ write_files:
 {% endif %}
 {% endif %}
 
+{% if gpu_available %}
+  # DCGM Exporter 설치 스크립트
+  - path: /opt/union/install_dcgm_exporter.sh
+    permissions: "0750"
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      VER="{{ dcgm_exporter_version }}"
+      ARCH="$(uname -m)"
+      case "$ARCH" in
+        x86_64) ARCH=amd64 ;;
+        aarch64) ARCH=arm64 ;;
+        *) echo "unsupported arch: $ARCH" >&2; exit 1 ;;
+      esac
+      TARBALL="dcgm-exporter-${VER}-linux-${ARCH}.tar.gz"
+      URL="https://github.com/NVIDIA/dcgm-exporter/releases/download/${VER}/${TARBALL}"
+      TMP=$(mktemp -d)
+      cd "$TMP"
+      curl -fsSL "$URL" -o "$TARBALL"
+      tar -xzf "$TARBALL"
+      install -m 0755 dcgm-exporter /usr/local/bin/dcgm-exporter
+      install -d -m 0755 /etc/dcgm-exporter
+      install -m 0644 etc/default-counters.csv /etc/dcgm-exporter/default-counters.csv
+      rm -rf "$TMP"
+
+  # DCGM Exporter systemd unit
+  - path: /etc/systemd/system/dcgm-exporter.service
+    content: |
+      [Unit]
+      Description=NVIDIA DCGM Exporter (Prometheus)
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=simple
+      ExecStart=/usr/local/bin/dcgm-exporter \
+        --address=0.0.0.0:9400 \
+        --collectors=/etc/dcgm-exporter/default-counters.csv
+      Restart=on-failure
+      RestartSec=10s
+      AmbientCapabilities=CAP_SYS_ADMIN
+
+      [Install]
+      WantedBy=multi-user.target
+{% endif %}
+
 {% if union_cephx_rotate_hours > 0 %}
   # CephX 키 회전 systemd service
   - path: /etc/systemd/system/union-rotate-key.service
@@ -168,6 +214,11 @@ runcmd:
 {% endif %}
 {% if strategy == "dynamic" %}
   - /opt/union/dynamic_install.sh
+{% endif %}
+{% if gpu_available %}
+  - /opt/union/install_dcgm_exporter.sh
+  - systemctl daemon-reload
+  - systemctl enable --now dcgm-exporter.service
 {% endif %}
 
 final_message: |
