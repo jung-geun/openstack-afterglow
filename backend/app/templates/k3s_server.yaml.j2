@@ -55,24 +55,25 @@ write_files:
         exit 1
       fi
 
+      # /livez 는 k8s 1.34부터 익명 요청에 401을 반환 — admin kubeconfig로 인증된 체크 사용
       log "Waiting for kube-apiserver /livez (up to 10 min)..."
       APISERVER_READY=0
       for i in $(seq 1 120); do
-        HTTP_LIVEZ=$(curl -sk --max-time 3 -o /dev/null -w "%{http_code}" "https://127.0.0.1:6443/livez" 2>/dev/null || echo "000")
-        if [ "${HTTP_LIVEZ}" = "200" ]; then
+        if kubectl --kubeconfig=/etc/rancher/k3s/k3s.yaml --request-timeout=3s \
+            get --raw='/livez' >/dev/null 2>&1; then
           APISERVER_READY=1
           break
         fi
         sleep 5
       done
       if [ "${APISERVER_READY}" -ne 1 ]; then
-        log "ERROR: kube-apiserver /livez did not return 200 after 10 min"
+        log "ERROR: kube-apiserver /livez did not return OK after 10 min"
         curl -sf -X POST "${CALLBACK_URL}/api/k3s/callback" \
           -H "Content-Type: application/json" \
           -d "{\"token\": \"${CALLBACK_TOKEN}\", \"success\": false, \"error\": \"kube-apiserver not ready after 10min\"}" || true
         exit 1
       fi
-      log "kube-apiserver is ready (HTTP ${HTTP_LIVEZ})"
+      log "kube-apiserver is ready"
 
       log "Waiting for node-token (up to 5 min)..."
       for i in $(seq 1 60); do
