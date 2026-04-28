@@ -17,7 +17,7 @@ import app.models.db  # noqa: F401 — side-effect: Base에 ORM 모델 등록
 from app.models.union import CreateLayerRequest
 from app.services import union_layers as svc
 
-pytestmark = pytest.mark.db
+pytestmark = [pytest.mark.db, pytest.mark.asyncio(loop_scope="module")]
 
 _DB_URL_ENV = "AFTERGLOW_TEST_DATABASE_URL"
 
@@ -59,7 +59,7 @@ def db_url():
     return url
 
 
-@pytest_asyncio.fixture(scope="module")
+@pytest_asyncio.fixture(scope="module", loop_scope="module")
 async def db_engine(db_url):
     from app.database import Base
 
@@ -73,7 +73,7 @@ async def db_engine(db_url):
     await engine.dispose()
 
 
-@pytest_asyncio.fixture
+@pytest_asyncio.fixture(loop_scope="module")
 async def sess(db_engine):
     factory = async_sessionmaker(db_engine, expire_on_commit=False, class_=AsyncSession)
     async with factory() as session:
