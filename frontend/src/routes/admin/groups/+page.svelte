@@ -26,6 +26,7 @@
 
 	let groups = $state<Group[]>([]);
 	let loading = $state(true);
+	let refreshing = $state(false);
 	let error = $state('');
 
 	// 생성 모달
@@ -60,13 +61,15 @@
 	const projectId = $derived($auth.projectId ?? undefined);
 
 	async function load() {
-		loading = true; error = '';
+		if (groups.length === 0) loading = true;
+		else refreshing = true;
+		error = '';
 		try {
 			const res = await api.get<Group[]>('/api/admin/groups', token, projectId);
 			groups = res;
 		} catch (e) {
 			error = e instanceof ApiError ? e.message : '그룹 목록 조회 실패';
-		} finally { loading = false; }
+		} finally { loading = false; refreshing = false; }
 	}
 
 	async function loadUsers() {
@@ -171,7 +174,7 @@
 				bind:active={ar.active}
 				bind:intervalSeconds={ar.intervalSeconds}
 				intervalOptions={ar.intervalOptions}
-				refreshing={loading}
+				refreshing={loading || refreshing}
 				onManualRefresh={load}
 			/>
 		{/snippet}
@@ -186,6 +189,7 @@
 	{:else if groups.length === 0}
 		<div class="text-center text-gray-500 text-sm py-8">그룹이 없습니다</div>
 	{:else}
+		<div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 		<div class="space-y-2">
 			{#each groups as g (g.id)}
 				<div class="bg-gray-900 border border-gray-800 rounded-xl">
@@ -269,6 +273,7 @@
 					{/if}
 				</div>
 			{/each}
+		</div>
 		</div>
 	{/if}
 </div>

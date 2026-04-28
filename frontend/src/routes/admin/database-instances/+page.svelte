@@ -32,6 +32,7 @@
 
 	let instances = $state<DbInstance[]>([]);
 	let loading = $state(true);
+	let refreshing = $state(false);
 	let deleting = $state<string | null>(null);
 	let restarting = $state<string | null>(null);
 
@@ -48,13 +49,15 @@
 
 
 	async function load() {
-		loading = true;
+		if (instances.length === 0) loading = true;
+		else refreshing = true;
 		try {
 			instances = await api.get<DbInstance[]>('/api/database-instances', token, projectId);
 		} catch {
 			instances = [];
 		} finally {
 			loading = false;
+			refreshing = false;
 		}
 	}
 
@@ -227,7 +230,7 @@
 				bind:active={ar.active}
 				bind:intervalSeconds={ar.intervalSeconds}
 				intervalOptions={ar.intervalOptions}
-				refreshing={loading}
+				refreshing={loading || refreshing}
 				onManualRefresh={load}
 			/>
 		{/snippet}
@@ -238,6 +241,7 @@
 	{:else if instances.length === 0}
 		<div class="text-gray-600 text-sm">DB 인스턴스가 없습니다</div>
 	{:else}
+		<div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 		<div class="overflow-x-auto">
 			<table class="w-full text-sm">
 				<thead>
@@ -278,6 +282,7 @@
 					{/each}
 				</tbody>
 			</table>
+		</div>
 		</div>
 	{/if}
 </div>

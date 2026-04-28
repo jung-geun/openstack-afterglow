@@ -34,6 +34,7 @@
 
 	let flavors = $state<Flavor[]>([]);
 	let loading = $state(true);
+	let refreshing = $state(false);
 	let pageSize = $state(20);
 	let currentPage = $state(0);
 	let error = $state('');
@@ -146,7 +147,8 @@
 	);
 
 	async function load() {
-		loading = true;
+		if (flavors.length === 0) loading = true;
+		else refreshing = true;
 		error = '';
 		try {
 			const res = await api.get<PagedResponse<Flavor>>('/api/admin/flavors?limit=999', token, projectId);
@@ -157,6 +159,7 @@
 			flavors = [];
 		} finally {
 			loading = false;
+			refreshing = false;
 		}
 	}
 
@@ -349,7 +352,7 @@
 				bind:active={ar.active}
 				bind:intervalSeconds={ar.intervalSeconds}
 				intervalOptions={ar.intervalOptions}
-				refreshing={loading}
+				refreshing={loading || refreshing}
 				onManualRefresh={() => { nameFilter = ''; vcpuFilter = ''; ramFilter = ''; diskFilter = ''; gpuFilter = ''; load(); }}
 			/>
 			<div class="flex items-center gap-1 text-xs text-gray-500">
@@ -407,6 +410,7 @@
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={5} />
 	{:else}
+		<div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 		<div class="overflow-x-auto">
 			<table class="w-full text-sm">
 				<thead>
@@ -482,6 +486,7 @@
 				onclick={() => { currentPage += 1; }}
 				class="px-3 py-1.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed"
 			>다음 →</button>
+		</div>
 		</div>
 	{/if}
 </div>

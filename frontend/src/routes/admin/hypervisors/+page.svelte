@@ -51,6 +51,7 @@
 
 	let hypervisors = $state<Hypervisor[]>([]);
 	let loading = $state(true);
+	let refreshing = $state(false);
 	let sortColumn = $state('');
 	let sortAsc = $state(true);
 
@@ -61,13 +62,15 @@
 	const projectId = $derived($auth.projectId ?? undefined);
 
 	async function load() {
-		loading = true;
+		if (hypervisors.length === 0) loading = true;
+		else refreshing = true;
 		try {
 			hypervisors = await api.get<Hypervisor[]>('/api/admin/hypervisors', token, projectId);
 		} catch {
 			hypervisors = [];
 		} finally {
 			loading = false;
+			refreshing = false;
 		}
 	}
 
@@ -201,7 +204,7 @@
 				bind:active={ar.active}
 				bind:intervalSeconds={ar.intervalSeconds}
 				intervalOptions={ar.intervalOptions}
-				refreshing={loading}
+				refreshing={loading || refreshing}
 				onManualRefresh={load}
 			/>
 		{/snippet}
@@ -212,6 +215,7 @@
 	{:else if hypervisors.length === 0}
 		<div class="text-gray-600 text-sm">하이퍼바이저가 없습니다</div>
 	{:else}
+		<div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 		<div class="overflow-x-auto">
 			<table class="w-full text-sm">
 				<thead>
@@ -279,6 +283,7 @@
 					{/each}
 				</tbody>
 			</table>
+		</div>
 		</div>
 	{/if}
 </div>

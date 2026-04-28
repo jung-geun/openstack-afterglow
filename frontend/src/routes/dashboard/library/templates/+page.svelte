@@ -28,6 +28,7 @@
 
   let templates = $state<TemplateInfo[]>([]);
   let loading = $state(true);
+  let refreshing = $state(false);
   let error = $state('');
   let selectedTemplate = $state<TemplateInfo | null>(null);
   let panelOpen = $state(false);
@@ -47,19 +48,22 @@
   const projectId = $derived($auth.projectId ?? undefined);
 
   async function loadTemplates() {
-    loading = true;
+    if (templates.length === 0) loading = true;
+    else refreshing = true;
     error = '';
     try {
       templates = await api.get<TemplateInfo[]>('/api/union/templates', token, projectId);
     } catch (e) {
       error = e instanceof ApiError ? e.message : '템플릿 로드 실패';
+      templates = [];
     } finally {
       loading = false;
+      refreshing = false;
     }
   }
 
   $effect(() => {
-    if (token) loadTemplates();
+    if (token) { templates = []; loadTemplates(); }
   });
 
   async function loadSealedLayers() {
@@ -183,6 +187,7 @@
       <p>등록된 템플릿이 없습니다</p>
     </div>
   {:else}
+    <div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
     <div class="rounded-lg border border-gray-700 overflow-hidden">
       <table class="w-full text-sm">
         <thead class="bg-gray-800 text-gray-400 text-xs uppercase">
@@ -209,6 +214,7 @@
           {/each}
         </tbody>
       </table>
+    </div>
     </div>
   {/if}
 </div>

@@ -24,19 +24,22 @@
 
 	let containers = $state<AdminContainer[]>([]);
 	let loading = $state(true);
+	let refreshing = $state(false);
 	let selectedContainerId = $state<string | null>(null);
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
 
 	async function load() {
-		loading = true;
+		if (containers.length === 0) loading = true;
+		else refreshing = true;
 		try {
 			containers = await api.get<AdminContainer[]>('/api/admin/all-containers', token, projectId);
 		} catch {
 			containers = [];
 		} finally {
 			loading = false;
+			refreshing = false;
 		}
 	}
 
@@ -57,7 +60,7 @@
 				bind:active={ar.active}
 				bind:intervalSeconds={ar.intervalSeconds}
 				intervalOptions={ar.intervalOptions}
-				refreshing={loading}
+				refreshing={loading || refreshing}
 				onManualRefresh={load}
 			/>
 		{/snippet}
@@ -68,7 +71,7 @@
 	{:else if containers.length === 0}
 		<div class="text-gray-600 text-sm">컨테이너가 없습니다</div>
 	{:else}
-		<div class="overflow-x-auto">
+		<div class="overflow-x-auto" class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 			<table class="w-full text-sm">
 				<thead>
 					<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">

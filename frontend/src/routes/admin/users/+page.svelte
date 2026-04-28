@@ -24,6 +24,7 @@
 
 	let users = $state<User[]>([]);
 	let loading = $state(true);
+	let refreshing = $state(false);
 	let pageSize = $state(20);
 	let markerStack = $state<string[]>([]);
 	let nextMarker = $state<string | null>(null);
@@ -47,14 +48,15 @@
 	const projectId = $derived($auth.projectId ?? undefined);
 
 	async function load(marker?: string) {
-		loading = true;
+		if (users.length === 0) loading = true;
+		else refreshing = true;
 		try {
 			let url = `/api/admin/users?limit=${pageSize}`;
 			if (marker) url += `&marker=${marker}`;
 			const res = await api.get<PagedResponse<User>>(url, token, projectId);
 			users = res.items;
 			nextMarker = res.next_marker;
-		} catch { users = []; } finally { loading = false; }
+		} catch { users = []; } finally { loading = false; refreshing = false; }
 	}
 
 	async function createUser() {
@@ -99,7 +101,7 @@
 				bind:active={ar.active}
 				bind:intervalSeconds={ar.intervalSeconds}
 				intervalOptions={ar.intervalOptions}
-				refreshing={loading}
+				refreshing={loading || refreshing}
 				onManualRefresh={() => load()}
 			/>
 			<div class="flex items-center gap-1 text-xs text-gray-500">
@@ -115,6 +117,7 @@
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={5} />
 	{:else}
+		<div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 		<div class="overflow-x-auto">
 			<table class="w-full text-sm">
 				<thead>
@@ -146,6 +149,7 @@
 				class="px-3 py-1.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-30">← 이전</button>
 			<button disabled={!nextMarker} onclick={() => { if (nextMarker) { markerStack = [...markerStack, nextMarker]; load(nextMarker); } }}
 				class="px-3 py-1.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-30">다음 →</button>
+		</div>
 		</div>
 	{/if}
 </div>

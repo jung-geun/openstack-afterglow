@@ -31,6 +31,7 @@
   let libraries = $state<LibraryConfig[]>([]);
   let building = $state<string | null>(null);
   let loading = $state(true);
+  let refreshing = $state(false);
   let error = $state('');
   let message = $state('');
   let autoInstall = $state(true);
@@ -39,7 +40,8 @@
   const projectId = $derived($auth.projectId ?? undefined);
 
   async function loadData() {
-    loading = true;
+    if (fileStorages.length === 0) loading = true;
+    else refreshing = true;
     try {
       [fileStorages, libraries] = await Promise.all([
         api.get<FileStorage[]>('/api/admin/file-storage', token, projectId),
@@ -47,8 +49,10 @@
       ]);
     } catch (e) {
       error = e instanceof ApiError ? `로드 실패: ${e.message}` : '서버 오류';
+      fileStorages = [];
     } finally {
       loading = false;
+      refreshing = false;
     }
   }
 
@@ -77,7 +81,7 @@
 
   $effect(() => {
     if (!$auth.projectId) return;
-    loading = true;
+    fileStorages = [];
     untrack(() => loadData());
   });
 
@@ -100,7 +104,7 @@
         bind:active={ar.active}
         bind:intervalSeconds={ar.intervalSeconds}
         intervalOptions={ar.intervalOptions}
-        refreshing={loading}
+        refreshing={loading || refreshing}
         onManualRefresh={loadData}
       />
     {/snippet}
@@ -116,6 +120,7 @@
   {#if loading}
     <LoadingSkeleton variant="list" rows={4} />
   {:else}
+    <div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
     <div class="mb-8">
       <h2 class="text-base font-semibold text-white mb-3">사전 빌드 상태</h2>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -203,5 +208,6 @@
         {/each}
       </div>
     {/if}
+    </div>
   {/if}
 </div>

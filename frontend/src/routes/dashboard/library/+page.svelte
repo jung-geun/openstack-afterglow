@@ -22,6 +22,7 @@
 
   let layers = $state<LayerInfo[]>([]);
   let loading = $state(true);
+  let refreshing = $state(false);
   let error = $state('');
   let nameFilter = $state('');
   let currentPage = $state(0);
@@ -31,7 +32,8 @@
   const projectId = $derived($auth.projectId ?? undefined);
 
   async function loadLayers() {
-    loading = true;
+    if (layers.length === 0) loading = true;
+    else refreshing = true;
     error = '';
     try {
       const params = new URLSearchParams({ limit: String(pageSize), offset: String(currentPage * pageSize) });
@@ -39,13 +41,15 @@
       layers = await api.get<LayerInfo[]>(`/api/union/layers?${params}`, token, projectId);
     } catch (e) {
       error = e instanceof ApiError ? e.message : '레이어 로드 실패';
+      layers = [];
     } finally {
       loading = false;
+      refreshing = false;
     }
   }
 
   $effect(() => {
-    if (token) loadLayers();
+    if (token) { layers = []; loadLayers(); }
   });
 
   function formatSize(bytes: number | null): string {
@@ -154,6 +158,7 @@
       <p>레이어가 없습니다</p>
     </div>
   {:else}
+    <div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
     <div class="rounded-lg border border-gray-700 overflow-hidden">
       <table class="w-full text-sm">
         <thead class="bg-gray-800 text-gray-400 text-xs uppercase">
@@ -209,6 +214,7 @@
         disabled={layers.length < pageSize}
         class="px-3 py-1 bg-gray-800 rounded disabled:opacity-40 hover:bg-gray-700 disabled:cursor-not-allowed"
       >다음</button>
+    </div>
     </div>
   {/if}
 </div>

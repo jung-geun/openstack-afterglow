@@ -15,15 +15,17 @@
 
 	let roles = $state<Role[]>([]);
 	let loading = $state(true);
+	let refreshing = $state(false);
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
 
 	async function load() {
-		loading = true;
+		if (roles.length === 0) loading = true;
+		else refreshing = true;
 		try { roles = await api.get<Role[]>('/api/admin/roles', token, projectId); }
 		catch { roles = []; }
-		finally { loading = false; }
+		finally { loading = false; refreshing = false; }
 	}
 
 	const ar = createAutoRefresh(load, {
@@ -43,7 +45,7 @@
 				bind:active={ar.active}
 				bind:intervalSeconds={ar.intervalSeconds}
 				intervalOptions={ar.intervalOptions}
-				refreshing={loading}
+				refreshing={loading || refreshing}
 				onManualRefresh={load}
 			/>
 		{/snippet}
@@ -54,7 +56,7 @@
 	{:else if roles.length === 0}
 		<div class="text-gray-600 text-sm">역할이 없습니다</div>
 	{:else}
-		<div class="overflow-x-auto">
+		<div class="overflow-x-auto" class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 			<table class="w-full text-sm">
 				<thead>
 					<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">

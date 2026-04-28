@@ -60,13 +60,15 @@
 
 
 	async function load() {
-		loading = true;
+		if (instances.length === 0) loading = true;
+		else refreshing = true;
 		try {
 			instances = await api.get<DbInstance[]>('/api/database-instances', token, projectId);
 		} catch {
 			instances = [];
 		} finally {
 			loading = false;
+			refreshing = false;
 		}
 	}
 
@@ -157,7 +159,7 @@
 	$effect(() => {
 		const pid = $auth.projectId;
 		if (!pid) return;
-		loading = true;
+		instances = [];
 		untrack(() => load());
 	});
 </script>
@@ -289,7 +291,7 @@
 	{:else if instances.length === 0}
 		<div class="text-gray-600 text-sm">DB 인스턴스가 없습니다</div>
 	{:else}
-		<div class="overflow-x-auto">
+		<div class="overflow-x-auto" class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 			<table class="w-full text-sm">
 				<thead>
 					<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">

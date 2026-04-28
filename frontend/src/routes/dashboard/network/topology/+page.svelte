@@ -97,7 +97,8 @@
 	});
 
 	async function fetchTopology(opts?: { refresh?: boolean }) {
-		loading = true;
+		if (!data) loading = true;
+		else refreshing = true;
 		error = '';
 		try {
 			data = await api.get<TopologyData>(
@@ -110,6 +111,7 @@
 			error = e instanceof ApiError ? `조회 실패 (${e.status}): ${e.message}` : '서버 오류';
 		} finally {
 			loading = false;
+			refreshing = false;
 		}
 	}
 
@@ -143,6 +145,7 @@
 	{:else if loading}
 		<LoadingSkeleton variant="card" rows={8} />
 	{:else if data}
+		<div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 		<div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4">
 			<GlobalTopology
 				{data}
@@ -203,6 +206,7 @@
 			<span>인스턴스 {data.instances.length}개</span>
 			<span>Floating IP {_projectFips.length}개</span>
 			<span>로드밸런서 {(data.load_balancers ?? []).filter(lb => !lb.project_id || lb.project_id === $auth.projectId).length}개</span>
+		</div>
 		</div>
 	{/if}
 </div>

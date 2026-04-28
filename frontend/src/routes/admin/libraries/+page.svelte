@@ -34,6 +34,7 @@
   let libraries = $state<LibraryConfig[]>([]);
   let fileStorages = $state<FileStorage[]>([]);
   let loading = $state(true);
+  let refreshing = $state(false);
   let error = $state('');
   let message = $state('');
   let buildingId = $state<string | null>(null);
@@ -45,7 +46,8 @@
   const projectId = $derived($auth.projectId ?? undefined);
 
   async function loadData() {
-    loading = true;
+    if (libraries.length === 0) loading = true;
+    else refreshing = true;
     error = '';
     try {
       [libraries, fileStorages] = await Promise.all([
@@ -56,6 +58,7 @@
       error = e instanceof ApiError ? e.message : '데이터 로드 실패';
     } finally {
       loading = false;
+      refreshing = false;
     }
   }
 
@@ -264,6 +267,7 @@
       <p>등록된 라이브러리가 없습니다</p>
     </div>
   {:else}
+    <div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
     <!-- 의존성 그래프 -->
     <div class="mb-6 bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
       <button
@@ -455,5 +459,6 @@
         </div>
       </div>
     {/if}
+    </div>
   {/if}
 </div>

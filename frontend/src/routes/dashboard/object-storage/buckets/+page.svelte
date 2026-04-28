@@ -36,7 +36,8 @@
 	const projectId = $derived($auth.projectId ?? undefined);
 
 	async function load() {
-		loading = true;
+		if (containers.length === 0) loading = true;
+		else refreshing = true;
 		try {
 			[containers, account] = await Promise.all([
 				api.get<SwiftContainer[]>('/api/object-storage', token, projectId),
@@ -46,6 +47,7 @@
 			containers = [];
 		} finally {
 			loading = false;
+			refreshing = false;
 		}
 	}
 
@@ -102,7 +104,7 @@
 	$effect(() => {
 		const pid = $auth.projectId;
 		if (!pid) return;
-		loading = true;
+		containers = [];
 		untrack(() => load());
 	});
 </script>
@@ -179,7 +181,7 @@
 	{:else if containers.length === 0}
 		<div class="text-gray-600 text-sm py-20 text-center">버킷이 없습니다</div>
 	{:else}
-		<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+		<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5" class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 			{#each containers as c}
 				<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
 					<!-- Header -->

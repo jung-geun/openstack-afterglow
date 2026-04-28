@@ -30,6 +30,7 @@
 
 	let allVolumes = $state<AdminVolume[]>([]);
 	let loading = $state(true);
+	let refreshing = $state(false);
 	let pageSize = $state(20);
 	let markerStack = $state<string[]>([]);
 	let nextMarker = $state<string | null>(null);
@@ -132,7 +133,8 @@
 	}
 
 	async function load(marker?: string) {
-		loading = true;
+		if (allVolumes.length === 0) loading = true;
+		else refreshing = true;
 		try {
 			let url = `/api/admin/all-volumes?limit=${pageSize}`;
 			if (marker) url += `&marker=${marker}`;
@@ -146,6 +148,7 @@
 			allVolumes = [];
 		} finally {
 			loading = false;
+			refreshing = false;
 		}
 	}
 
@@ -234,7 +237,7 @@
 				bind:active={ar.active}
 				bind:intervalSeconds={ar.intervalSeconds}
 				intervalOptions={ar.intervalOptions}
-				refreshing={loading}
+				refreshing={loading || refreshing}
 				onManualRefresh={() => { markerStack = []; nextMarker = null; projectFilter = ''; projectSearchText = ''; statusFilter = ''; nameSearch = ''; load(); }}
 			/>
 			<div class="flex items-center gap-1 text-xs text-gray-500">
@@ -321,7 +324,7 @@
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={5} />
 	{:else}
-		<div class="overflow-x-auto">
+		<div class="overflow-x-auto" class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 			<table class="w-full text-sm">
 				<thead>
 					<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">

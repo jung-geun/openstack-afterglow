@@ -80,6 +80,7 @@
 
 	let data = $state<TopologyData | null>(null);
 	let loading = $state(true);
+	let refreshing = $state(false);
 	let error = $state('');
 	let selectedInstanceId = $state<string | null>(null);
 	let selectedRouterId = $state<string | null>(null);
@@ -129,7 +130,8 @@
 	});
 
 	async function fetchTopology() {
-		loading = true;
+		if (!data) loading = true;
+		else refreshing = true;
 		error = '';
 		try {
 			data = await api.get<TopologyData>(
@@ -141,6 +143,7 @@
 			error = e instanceof ApiError ? `조회 실패 (${e.status}): ${e.message}` : '서버 오류';
 		} finally {
 			loading = false;
+			refreshing = false;
 		}
 	}
 </script>
@@ -152,7 +155,7 @@
 				bind:active={ar.active}
 				bind:intervalSeconds={ar.intervalSeconds}
 				intervalOptions={ar.intervalOptions}
-				refreshing={loading}
+				refreshing={loading || refreshing}
 				onManualRefresh={fetchTopology}
 			/>
 		{/snippet}
@@ -201,6 +204,7 @@
 	{:else if loading}
 		<LoadingSkeleton variant="card" rows={8} />
 	{:else if data}
+		<div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 		<div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4">
 			<GlobalTopology
 				{data}
@@ -259,6 +263,7 @@
 			<span>인스턴스 {data.instances.length}개</span>
 			<span>Floating IP {data.floating_ips.length}개</span>
 			<span>로드밸런서 {(data.load_balancers ?? []).length}개</span>
+		</div>
 		</div>
 	{/if}
 </div>
