@@ -33,7 +33,7 @@ jobs:
 
       - name: Detect file changes
         id: filter
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@v4
         with:
           filters: |
             backend:
@@ -177,7 +177,7 @@ jobs:
       # arm64 (macOS, docker driver): registry cache 미지원 → 캐시 없이 빌드
       - name: Build & push arm64 (docker driver)
         if: matrix.arch == 'arm64'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
@@ -189,7 +189,7 @@ jobs:
       # amd64 (Linux, docker-container driver): registry cache 사용
       - name: Build & push amd64 (docker-container driver)
         if: matrix.arch == 'amd64'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
