@@ -136,3 +136,14 @@ class AttachInterfaceRequest(BaseModel):
 
 class UpdateSecurityGroupsRequest(BaseModel):
     security_group_ids: list[str] = []
+
+
+class AdminPasswordRequest(BaseModel):
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class AdminPasswordPrecheck(BaseModel):
+    supported: bool
+    reason: str | None = None
+    os_admin_user: str | None = None
+    server_status: str

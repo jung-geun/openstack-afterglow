@@ -345,6 +345,60 @@ def revert_resize_server(conn: openstack.connection.Connection, server_id: str) 
     conn.compute.revert_server_resize(server_id)
 
 
+def change_server_password(
+    conn: openstack.connection.Connection,
+    server_id: str,
+    new_password: str,
+) -> None:
+    """QEMU Guest Agent를 통해 게스트 OS의 관리자 패스워드 변경.
+    이미지에 hw_qemu_guest_agent=yes + 게스트 내 QGA 데몬 실행 중이어야 동작.
+    """
+    conn.compute.change_server_password(server_id, new_password=new_password)
+
+
+def get_server_image_meta(conn: openstack.connection.Connection, server_id: str) -> dict:
+    """서버의 부트 이미지 메타데이터 조회.
+    Returns: {"qga_enabled": bool, "os_admin_user": str|None, "image_id": str|None, "image_name": str|None}
+    볼륨 부팅 인스턴스는 cinder volume_image_metadata에서 fallback.
+    """
+    from app.services import cinder  # 순환 임포트 방지
+
+    s = conn.compute.get_server(server_id)
+    image_id = s.image.get("id") if isinstance(s.image, dict) else None
+
+    if not image_id:
+        # 볼륨 부팅: /dev/vda 볼륨의 image_metadata에서 조회
+        try:
+            for att in conn.compute.volume_attachments(server_id):
+                if getattr(att, "device", "") == "/dev/vda":
+                    meta = cinder.get_volume_image_metadata(conn, att.volume_id)
+                    if meta:
+                        return {
+                            "qga_enabled": str(meta.get("hw_qemu_guest_agent", "")).lower() in ("yes", "true", "1"),
+                            "os_admin_user": meta.get("os_admin_user"),
+                            "image_id": meta.get("image_id"),
+                            "image_name": meta.get("image_name"),
+                        }
+        except Exception:
+            pass
+        return {"qga_enabled": False, "os_admin_user": None, "image_id": None, "image_name": None}
+
+    try:
+        img = conn.image.get_image(image_id)
+        props = dict(img.properties or {})
+        qga = props.get("hw_qemu_guest_agent") or getattr(img, "hw_qemu_guest_agent", None)
+        admin_user = props.get("os_admin_user") or getattr(img, "os_admin_user", None)
+        return {
+            "qga_enabled": str(qga or "").lower() in ("yes", "true", "1"),
+            "os_admin_user": admin_user,
+            "image_id": image_id,
+            "image_name": getattr(img, "name", None),
+        }
+    except Exception:
+        _logger.warning("이미지 메타 조회 실패 server=%s image=%s", server_id, image_id, exc_info=True)
+        return {"qga_enabled": False, "os_admin_user": None, "image_id": image_id, "image_name": None}
+
+
 def list_compute_hosts(conn: openstack.connection.Connection) -> list[dict]:
     """마이그레이션 대상 가능한 컴퓨트 호스트 목록."""
     endpoint = conn.compute.get_endpoint()

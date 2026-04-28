@@ -213,6 +213,9 @@
 			availableVolumes = allVols.filter(v => v.status === 'available' && !attachedIds.has(v.id));
 			availableNetworks = nets;
 			ownerDisplay = ownerData.display || '';
+			if (adminProjectId) {
+				fetchPasswordPrecheck(id);
+			}
 		} catch (e) {
 			error = e instanceof ApiError ? `조회 실패 (${e.status}): ${e.message}` : '서버 오류';
 		} finally {
@@ -571,6 +574,73 @@
 		}
 	}
 
+	// 관리자 패스워드 재설정 (관리자 전용, QGA 필요)
+	interface PasswordPrecheck {
+		supported: boolean;
+		reason: string | null;
+		os_admin_user: string | null;
+		server_status: string;
+	}
+	let showPasswordModal = $state(false);
+	let passwordPrecheck = $state<PasswordPrecheck | null>(null);
+	let passwordPrecheckLoading = $state(false);
+	let newPassword = $state('');
+	let confirmPassword = $state('');
+	let passwordLoading = $state(false);
+	let passwordError = $state('');
+
+	async function fetchPasswordPrecheck(serverId: string) {
+		if (!adminProjectId) return;
+		passwordPrecheckLoading = true;
+		try {
+			passwordPrecheck = await api.get<PasswordPrecheck>(
+				`/api/instances/${serverId}/admin-password/precheck`,
+				$auth.token ?? undefined,
+				$auth.projectId ?? undefined
+			);
+		} catch {
+			passwordPrecheck = null;
+		} finally {
+			passwordPrecheckLoading = false;
+		}
+	}
+
+	async function openPasswordModal() {
+		newPassword = '';
+		confirmPassword = '';
+		passwordError = '';
+		showPasswordModal = true;
+	}
+
+	async function doSetPassword() {
+		if (!instance) return;
+		if (newPassword !== confirmPassword) {
+			passwordError = '패스워드가 일치하지 않습니다';
+			return;
+		}
+		if (newPassword.length < 8) {
+			passwordError = '패스워드는 8자 이상이어야 합니다';
+			return;
+		}
+		passwordLoading = true;
+		passwordError = '';
+		try {
+			await api.post(
+				`/api/instances/${instance.id}/admin-password`,
+				{ new_password: newPassword },
+				$auth.token ?? undefined,
+				$auth.projectId ?? undefined
+			);
+			showPasswordModal = false;
+			newPassword = '';
+			confirmPassword = '';
+		} catch (e) {
+			passwordError = e instanceof ApiError ? e.message : '패스워드 변경 실패';
+		} finally {
+			passwordLoading = false;
+		}
+	}
+
 	// 마이그레이션 (관리자 전용)
 	let showMigrateModal = $state(false);
 	let migrateType = $state<'live' | 'cold'>('live');
@@ -773,6 +843,14 @@
 							{actioning === 'revert-resize' ? '취소 중...' : '되돌리기'}
 						</button>
 					{/if}
+					<button
+						onclick={openPasswordModal}
+						disabled={passwordPrecheckLoading || !passwordPrecheck?.supported}
+						title={passwordPrecheck?.reason ?? (passwordPrecheckLoading ? '점검 중...' : '')}
+						class="text-amber-400 hover:text-amber-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-amber-900 hover:border-amber-700 disabled:border-gray-700 transition-colors"
+					>
+						{passwordPrecheckLoading ? '점검 중...' : '비밀번호 재설정'}
+					</button>
 				{/if}
 				<button
 					onclick={deleteInstance}
@@ -1305,6 +1383,59 @@
 				<button onclick={() => { showMigrateModal = false; }} class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded-lg">취소</button>
 				<button onclick={doMigrate} disabled={migrateLoading} class="px-4 py-2 bg-cyan-700 hover:bg-cyan-600 text-white text-sm font-medium rounded-lg disabled:opacity-30">
 					{migrateLoading ? '마이그레이션 중...' : '마이그레이션'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if showPasswordModal}
+	<div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" role="dialog" onclick={() => { showPasswordModal = false; }} onkeydown={(e) => e.key === 'Escape' && (showPasswordModal = false)} tabindex="-1">
+		<div class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl" onclick={(e) => e.stopPropagation()} role="document">
+			<h3 class="text-white font-semibold text-lg mb-1">관리자 비밀번호 재설정</h3>
+			<p class="text-gray-400 text-sm mb-4">인스턴스: <span class="text-white">{instance?.name}</span></p>
+			{#if passwordPrecheck?.os_admin_user}
+				<p class="text-xs text-gray-500 mb-4">대상 계정: <span class="text-amber-400">{passwordPrecheck.os_admin_user}</span> (이미지 메타 기준)</p>
+			{:else}
+				<p class="text-xs text-gray-500 mb-4">대상 계정: 이미지 메타데이터의 <code class="text-amber-400">os_admin_user</code>로 자동 결정</p>
+			{/if}
+			<div class="bg-yellow-900/20 border border-yellow-800/40 rounded-lg p-3 mb-4 text-xs text-yellow-300">
+				QGA가 게스트에 실제로 동작 중이어야 변경이 적용됩니다. 변경 직후 콘솔/SSH로 동작을 확인하세요.
+			</div>
+			<div class="space-y-3 mb-4">
+				<div>
+					<label class="block text-sm text-gray-400 mb-1" for="new-password">새 비밀번호</label>
+					<input
+						id="new-password"
+						type="password"
+						bind:value={newPassword}
+						placeholder="8자 이상"
+						class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500"
+					/>
+				</div>
+				<div>
+					<label class="block text-sm text-gray-400 mb-1" for="confirm-password">비밀번호 확인</label>
+					<input
+						id="confirm-password"
+						type="password"
+						bind:value={confirmPassword}
+						placeholder="동일한 비밀번호 재입력"
+						class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500"
+					/>
+				</div>
+			</div>
+			{#if passwordError}
+				<p class="text-red-400 text-sm mb-3">{passwordError}</p>
+			{/if}
+			<div class="bg-gray-800/60 border border-gray-700/40 rounded-lg p-3 mb-4 text-xs text-gray-400">
+				<span class="text-gray-300 font-medium">SSH 키 런타임 주입 안내:</span>
+				표준 OpenStack은 실행 중 SSH 키 주입을 지원하지 않습니다.
+				키페어 사전 등록은 <a href="/dashboard/compute/keypairs" class="text-cyan-400 hover:underline">키페어 관리</a>에서, 비상 복구는 rebuild를 사용하세요.
+			</div>
+			<div class="flex justify-end gap-3">
+				<button onclick={() => { showPasswordModal = false; }} class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded-lg">취소</button>
+				<button onclick={doSetPassword} disabled={passwordLoading || !newPassword || !confirmPassword} class="px-4 py-2 bg-amber-700 hover:bg-amber-600 text-white text-sm font-medium rounded-lg disabled:opacity-30">
+					{passwordLoading ? '변경 중...' : '변경'}
 				</button>
 			</div>
 		</div>

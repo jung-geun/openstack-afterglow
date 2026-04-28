@@ -24,10 +24,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from openstack.exceptions import ConflictException
 
-from app.api.deps import get_os_conn, get_token_info
+from app.api.deps import get_os_conn, get_token_info, require_admin
 from app.config import get_settings
 from app.database import is_db_available
 from app.models.compute import (
+    AdminPasswordPrecheck,
+    AdminPasswordRequest,
     AttachInterfaceRequest,
     AttachVolumeRequest,
     CreateInstanceRequest,
@@ -1289,3 +1291,97 @@ async def list_availability_zones(
         return zones
     except Exception:
         raise HTTPException(status_code=500, detail="가용 영역 조회 실패")
+
+
+@router.get("/{server_id}/admin-password/precheck", response_model=AdminPasswordPrecheck)
+async def precheck_admin_password(
+    server_id: str,
+    _: None = Depends(require_admin),
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """관리자 패스워드 재설정 가능 여부를 사전 점검한다.
+    QGA 지원 여부, 인스턴스 상태, os_admin_user를 반환.
+    """
+    try:
+        s = await asyncio.to_thread(nova.get_server, conn, server_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="인스턴스를 찾을 수 없습니다")
+
+    if s.status != "ACTIVE":
+        return AdminPasswordPrecheck(
+            supported=False,
+            reason=f"인스턴스가 ACTIVE 상태가 아닙니다 (현재: {s.status})",
+            server_status=s.status,
+        )
+
+    try:
+        img_meta = await asyncio.to_thread(nova.get_server_image_meta, conn, server_id)
+    except Exception:
+        img_meta = {"qga_enabled": False, "os_admin_user": None, "image_id": None, "image_name": None}
+
+    if not img_meta["qga_enabled"]:
+        return AdminPasswordPrecheck(
+            supported=False,
+            reason="이미지에 QEMU Guest Agent(QGA)가 활성화되지 않았습니다. 이미지 메타데이터에 hw_qemu_guest_agent=yes 설정이 필요합니다.",
+            os_admin_user=img_meta.get("os_admin_user"),
+            server_status=s.status,
+        )
+
+    return AdminPasswordPrecheck(
+        supported=True,
+        os_admin_user=img_meta.get("os_admin_user"),
+        server_status=s.status,
+    )
+
+
+@router.post("/{server_id}/admin-password", status_code=204)
+async def set_admin_password(
+    server_id: str,
+    body: AdminPasswordRequest,
+    token_info: dict = Depends(get_token_info),
+    _: None = Depends(require_admin),
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """QEMU Guest Agent를 통해 인스턴스 관리자 계정의 패스워드를 재설정한다.
+    이미지에 hw_qemu_guest_agent=yes + 게스트 내 QGA 데몬 실행 중이어야 동작.
+    """
+    try:
+        s = await asyncio.to_thread(nova.get_server, conn, server_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="인스턴스를 찾을 수 없습니다")
+
+    if s.status != "ACTIVE":
+        raise HTTPException(
+            status_code=409,
+            detail=f"패스워드 변경은 ACTIVE 상태에서만 가능합니다 (현재: {s.status})",
+        )
+
+    img_meta = {"qga_enabled": False, "os_admin_user": None}
+    try:
+        img_meta = await asyncio.to_thread(nova.get_server_image_meta, conn, server_id)
+    except Exception:
+        pass
+
+    if not img_meta["qga_enabled"]:
+        raise HTTPException(
+            status_code=409,
+            detail="이미지에 QGA가 활성화되지 않아 패스워드 변경이 동작하지 않습니다. 이미지 메타데이터에 hw_qemu_guest_agent=yes 설정이 필요합니다.",
+        )
+
+    actor_id = token_info.get("user_id", "unknown")
+    project_id = token_info.get("project_id", "unknown")
+    logger.warning(
+        "admin_password_reset server=%s actor=%s project=%s os_admin_user=%s",
+        server_id,
+        actor_id,
+        project_id,
+        img_meta.get("os_admin_user"),
+    )
+
+    try:
+        await asyncio.to_thread(nova.change_server_password, conn, server_id, body.new_password)
+    except ConflictException as e:
+        raise HTTPException(status_code=409, detail=f"Nova 패스워드 변경 충돌: {e}")
+    except Exception as e:
+        logger.warning("admin_password_reset 실패 server=%s: %s", server_id, e)
+        raise HTTPException(status_code=500, detail="패스워드 변경 요청 실패")

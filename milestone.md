@@ -1063,3 +1063,21 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 - [x] `backend/tests/integration/test_concurrent_boot.py` — pytest.skip 제거, env var `AFTERGLOW_TEST_CONCURRENT_VMS` 지원, timeout 15분
 - [x] `backend/tests/integration/test_resize_overlay.py` — pytest.skip 제거
 - [x] `.github/workflows/test.yml` — `test-backend-integration` 잡에 project_b secrets 추가, `-m slow` 마커 적용
+
+
+## 관리자 인스턴스 자격 증명 관리
+
+### 런타임 패스워드 재설정 (QEMU Guest Agent 기반)
+
+- [x] `backend/app/services/nova.py` — `change_server_password(conn, server_id, password)`: Nova `changePassword` action 호출 (libvirt+QGA 게스트 비밀번호 변경)
+- [x] `backend/app/services/nova.py` — `get_server_image_meta(conn, server_id)`: 이미지 QGA 지원 여부(`hw_qemu_guest_agent`) + `os_admin_user` 메타 조회. 볼륨 부팅 인스턴스는 cinder `volume_image_metadata` fallback
+- [x] `backend/app/models/compute.py` — `AdminPasswordRequest`, `AdminPasswordPrecheck` Pydantic 모델 추가
+- [x] `backend/app/api/compute/instances.py` — `GET /{server_id}/admin-password/precheck` (관리자 전용, QGA/상태 사전 점검)
+- [x] `backend/app/api/compute/instances.py` — `POST /{server_id}/admin-password` (관리자 전용, ACTIVE + QGA 검증 후 변경, audit 로그 출력)
+- [x] `backend/tests/test_instance_password.py` — 9케이스 단위 테스트 (403/404/409/422/204 검증)
+- [x] `frontend/src/lib/components/InstanceDetailPanel.svelte` — admin-only "비밀번호 재설정" 버튼 + precheck 자동 호출 + 인라인 모달 (QGA 경고, os_admin_user 표시)
+
+### 런타임 SSH 키 주입 정책
+
+- [x] 표준 OpenStack은 실행 중 SSH 키 주입을 미지원 — 정책상 런타임 주입 기능 미구현
+- [x] `InstanceDetailPanel.svelte` 패스워드 모달 내에 SSH 키 안내 문구 + 키페어 관리 링크 + rebuild 안내 추가
