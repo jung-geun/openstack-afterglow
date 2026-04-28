@@ -58,6 +58,7 @@
   let refreshing = $state(false);
   let error = $state('');
   let deleting = $state<string | null>(null);
+  let togglingId = $state<string | null>(null);
   let selectedImageId = $state<string | null>(null);
 
   function openImagePanel(id: string) {
@@ -132,6 +133,19 @@
       alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
     } finally {
       deleting = null;
+    }
+  }
+
+  async function toggleActivation(img: ImageInfo) {
+    togglingId = img.id;
+    try {
+      const action = img.status === 'active' ? 'deactivate' : 'reactivate';
+      await api.post(`/api/images/${img.id}/${action}`, {}, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      await fetchImages({ refresh: true });
+    } catch (e) {
+      alert('상태 변경 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+    } finally {
+      togglingId = null;
     }
   }
 
@@ -338,6 +352,13 @@
             <!-- Actions (own images only) -->
             {#if img.owner === $auth.projectId}
               <div class="flex items-center gap-1 pt-1 border-t border-gray-800" role="none" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
+                {#if img.status === 'active' || img.status === 'deactivated'}
+                  <button
+                    onclick={() => toggleActivation(img)}
+                    disabled={togglingId === img.id}
+                    class="text-[11px] {img.status === 'active' ? 'text-orange-400 hover:text-orange-300' : 'text-green-400 hover:text-green-300'} disabled:text-gray-600 transition-colors px-2 py-1 rounded hover:bg-gray-800"
+                  >{togglingId === img.id ? '...' : img.status === 'active' ? '비활성화' : '활성화'}</button>
+                {/if}
                 <button
                   onclick={() => openEdit(img)}
                   class="text-[11px] text-blue-400 hover:text-blue-300 transition-colors px-2 py-1 rounded hover:bg-blue-900/30"

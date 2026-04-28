@@ -43,10 +43,10 @@ def list_images(conn: openstack.connection.Connection, project_id: str | None = 
         except Exception:
             pass
 
-    # 현재 프로젝트의 private 이미지만
+    # 현재 프로젝트의 private 이미지만 (deactivated 포함 — 소유자는 모든 상태를 봐야 함)
     pid = project_id or getattr(conn, "_afterglow_project_id", None)
     try:
-        kwargs = {"status": "active", "visibility": "private"}
+        kwargs: dict = {"visibility": "private"}
         if pid:
             kwargs["owner"] = pid
         for img in conn.image.images(**kwargs):

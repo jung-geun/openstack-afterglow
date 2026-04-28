@@ -91,6 +91,49 @@ class AddMemberRequest(BaseModel):
     member: str  # project_id
 
 
+@router.post("/{image_id}/deactivate", status_code=200)
+async def deactivate_own_image(
+    image_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """본인 프로젝트가 소유한 이미지를 비활성화."""
+    try:
+        img = await asyncio.to_thread(conn.image.get_image, image_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="이미지를 찾을 수 없습니다")
+    if img.owner != conn._afterglow_project_id:
+        raise HTTPException(status_code=403, detail="본인 소유 이미지만 변경할 수 있습니다")
+    try:
+        await asyncio.to_thread(glance.deactivate_image, conn, image_id)
+        return {"status": "deactivated"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"비활성화 실패: {e}")
+
+
+@router.post("/{image_id}/reactivate", status_code=200)
+async def reactivate_own_image(
+    image_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """본인 프로젝트가 소유한 이미지를 활성화."""
+    try:
+        img = await asyncio.to_thread(conn.image.get_image, image_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="이미지를 찾을 수 없습니다")
+    if img.owner != conn._afterglow_project_id:
+        raise HTTPException(status_code=403, detail="본인 소유 이미지만 변경할 수 있습니다")
+    try:
+        await asyncio.to_thread(glance.reactivate_image, conn, image_id)
+        return {"status": "active"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"활성화 실패: {e}")
+
+
+# ---------------------------------------------------------------------------
+# 이미지 멤버 (공유 프로젝트 관리)
+# ---------------------------------------------------------------------------
+
+
 @router.get("/{image_id}/members")
 async def list_image_members(
     image_id: str,
