@@ -4,6 +4,7 @@
      pytest tests/test_union_layers_db.py -v -m db
 """
 
+import asyncio
 import os
 import secrets
 
@@ -17,7 +18,7 @@ import app.models.db  # noqa: F401 — side-effect: Base에 ORM 모델 등록
 from app.models.union import CreateLayerRequest
 from app.services import union_layers as svc
 
-pytestmark = [pytest.mark.db, pytest.mark.asyncio(loop_scope="module")]
+pytestmark = [pytest.mark.db, pytest.mark.asyncio]
 
 _DB_URL_ENV = "AFTERGLOW_TEST_DATABASE_URL"
 
@@ -59,23 +60,34 @@ def db_url():
     return url
 
 
-@pytest_asyncio.fixture(scope="module", loop_scope="module")
-async def db_engine(db_url):
+@pytest.fixture(scope="module")
+def db_tables(db_url):
+    """테이블 생성/삭제를 asyncio.run()으로 처리 — 각 테스트의 event loop와 독립."""
     from app.database import Base
 
+    async def _setup():
+        engine = create_async_engine(db_url, echo=False, pool_pre_ping=True)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+            await conn.run_sync(Base.metadata.create_all)
+        await engine.dispose()
+
+    async def _teardown():
+        engine = create_async_engine(db_url, echo=False)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        await engine.dispose()
+
+    asyncio.run(_setup())
+    yield
+    asyncio.run(_teardown())
+
+
+@pytest_asyncio.fixture
+async def sess(db_tables, db_url):
+    """테스트마다 독립적인 AsyncSession — 각 테스트의 event loop에서 직접 생성."""
     engine = create_async_engine(db_url, echo=False, pool_pre_ping=True)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-        await conn.run_sync(Base.metadata.create_all)
-    yield engine
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-    await engine.dispose()
-
-
-@pytest_asyncio.fixture(loop_scope="module")
-async def sess(db_engine):
-    factory = async_sessionmaker(db_engine, expire_on_commit=False, class_=AsyncSession)
+    factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     async with factory() as session:
         yield session
         # SUT이 내부에서 session.commit()을 호출하므로 ROLLBACK 격리 불가.
@@ -86,6 +98,7 @@ async def sess(db_engine):
         await session.execute(text("DELETE FROM union_layers"))
         await session.execute(text("SET FOREIGN_KEY_CHECKS = 1"))
         await session.commit()
+    await engine.dispose()
 
 
 # ---------------------------------------------------------------------------
@@ -93,7 +106,6 @@ async def sess(db_engine):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_create_layer_row_exists(sess):
     req = _req(name="base-layer", version="1.0")
     info = await svc.create_layer(sess, req, created_by="user-a")
@@ -111,7 +123,6 @@ async def test_create_layer_row_exists(sess):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_create_layer_duplicate_hash_raises(sess):
     req = _req(name="dup-layer", version="1.0")
     await svc.create_layer(sess, req, created_by="user-a")
@@ -125,7 +136,6 @@ async def test_create_layer_duplicate_hash_raises(sess):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_seal_layer_sealed_at_set(sess):
     req = _req(name="sealable", version="1.0")
     info = await svc.create_layer(sess, req, created_by="user-a")
@@ -146,7 +156,6 @@ async def test_seal_layer_sealed_at_set(sess):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_seal_already_sealed_raises(sess):
     req = _req(name="double-seal", version="1.0")
     info = await svc.create_layer(sess, req, created_by="user-a")
@@ -161,7 +170,6 @@ async def test_seal_already_sealed_raises(sess):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_create_child_requires_sealed_parent(sess):
     parent_req = _req(name="unsealed-parent", version="1.0")
     parent = await svc.create_layer(sess, parent_req, created_by="user-a")
@@ -177,7 +185,6 @@ async def test_create_child_requires_sealed_parent(sess):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_create_child_with_sealed_parent(sess):
     parent_req = _req(name="sealed-parent", version="1.0")
     parent = await svc.create_layer(sess, parent_req, created_by="user-a")
@@ -193,7 +200,6 @@ async def test_create_child_with_sealed_parent(sess):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_create_layer_nonexistent_parent_raises(sess):
     req = _req(name="orphan", version="1.0", parent_id=_hash())
     with pytest.raises(ValueError, match="존재하지 않습니다"):
@@ -205,7 +211,6 @@ async def test_create_layer_nonexistent_parent_raises(sess):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_get_ancestors_five_chain(sess):
     layers = []
     prev_id = None
@@ -234,7 +239,6 @@ async def test_get_ancestors_five_chain(sess):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_get_ancestors_root_node(sess):
     req = _req(name="root-only", version="1.0")
     info = await svc.create_layer(sess, req, created_by="user-a")
@@ -249,7 +253,6 @@ async def test_get_ancestors_root_node(sess):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_get_layer_not_found(sess):
     result = await svc.get_layer(sess, _hash())
     assert result is None
@@ -260,7 +263,6 @@ async def test_get_layer_not_found(sess):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_list_layers_name_filter(sess):
     for i in range(3):
         await svc.create_layer(sess, _req(name="alpha", version=f"{i}"), created_by="u")
@@ -278,7 +280,6 @@ async def test_list_layers_name_filter(sess):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_list_layers_limit_offset(sess):
     for i in range(5):
         await svc.create_layer(sess, _req(name=f"paged-{i}", version="1"), created_by="u")
@@ -299,7 +300,6 @@ async def test_list_layers_limit_offset(sess):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_list_layers_project_isolation(sess):
     # 공유 레이어 (project_id=None)
     shared = await svc.create_layer(sess, _req(name="shared-layer", version="1"), created_by="admin")
@@ -321,7 +321,6 @@ async def test_list_layers_project_isolation(sess):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_list_layers_admin_sees_all(sess):
     await svc.create_layer(sess, _req(name="sys-layer", version="1"), created_by="admin")
     await svc.create_layer(sess, _req(name="tenant-layer", version="1", project_id="some-proj"), created_by="user")
@@ -337,7 +336,6 @@ async def test_list_layers_admin_sees_all(sess):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_delete_layer_with_child_raises(sess):
     parent = await svc.create_layer(sess, _req(name="del-parent", version="1"), created_by="u")
     await svc.seal_layer(sess, parent.id)
@@ -355,7 +353,6 @@ async def test_delete_layer_with_child_raises(sess):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_delete_layer_leaf_succeeds(sess):
     layer = await svc.create_layer(sess, _req(name="deletable-leaf", version="1"), created_by="u")
     await svc.delete_layer(sess, layer.id)
@@ -367,7 +364,6 @@ async def test_delete_layer_leaf_succeeds(sess):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_record_mount_sets_mounted_at(sess):
     layer = await svc.create_layer(sess, _req(name="mountable", version="1"), created_by="u")
     mount = await svc.record_mount(sess, user_id="user-1", vm_hostname="vm-001", leaf_layer_id=layer.id)
@@ -383,7 +379,6 @@ async def test_record_mount_sets_mounted_at(sess):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_record_unmount_sets_unmounted_at(sess):
     layer = await svc.create_layer(sess, _req(name="unmountable", version="1"), created_by="u")
     mount = await svc.record_mount(sess, user_id="user-2", vm_hostname="vm-002", leaf_layer_id=layer.id)
@@ -397,7 +392,6 @@ async def test_record_unmount_sets_unmounted_at(sess):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_record_unmount_twice_raises(sess):
     layer = await svc.create_layer(sess, _req(name="double-unmount", version="1"), created_by="u")
     mount = await svc.record_mount(sess, user_id="user-3", vm_hostname="vm-003", leaf_layer_id=layer.id)
@@ -412,7 +406,6 @@ async def test_record_unmount_twice_raises(sess):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_max_concurrent_mounts_enforced(sess):
     layer = await svc.create_layer(
         sess,
