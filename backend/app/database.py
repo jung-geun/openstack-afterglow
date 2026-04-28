@@ -107,6 +107,8 @@ async def create_tables() -> None:
             ("api_fip_id", "VARCHAR(64) DEFAULT NULL"),
             ("api_fip_address", "VARCHAR(45) DEFAULT NULL"),
             ("os_type", "VARCHAR(10) NOT NULL DEFAULT 'ubuntu'"),
+            ("plugin_status", "JSON DEFAULT NULL"),
+            ("secret_cloud_config_status", "VARCHAR(20) DEFAULT NULL"),
         ]:
             try:
                 await conn.exec_driver_sql(f"ALTER TABLE k3s_clusters ADD COLUMN {col} {col_def}")
