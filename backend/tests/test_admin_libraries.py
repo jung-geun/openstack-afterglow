@@ -227,6 +227,27 @@ class TestCrossProjectLibrary:
 # ---------------------------------------------------------------------------
 
 
+class TestCreateBuilderVm:
+    def test_does_not_wait_for_active(self):
+        """_create_builder_vm이 wait_for_server를 호출하지 않아야 한다.
+
+        회귀 방지: wait_for_server(wait=600)이 요청 핸들러를 최대 10분간
+        블로킹해 트리거가 타임아웃됐던 버그(네트워크 오류)가 재발하지 않도록 한다.
+        """
+        from app.services.library_builder import _create_builder_vm
+
+        fake_server = MagicMock()
+        fake_server.id = "fake-server-id"
+        fake_conn = MagicMock()
+        fake_conn.compute.create_server.return_value = fake_server
+
+        result = _create_builder_vm(fake_conn, "python311", "img", "flv", "net", "ud-b64")
+
+        fake_conn.compute.create_server.assert_called_once()
+        fake_conn.compute.wait_for_server.assert_not_called()
+        assert result is fake_server
+
+
 class TestBuildList:
     @pytest.mark.asyncio
     async def test_list_builds_returns_list_when_db_unavailable(self, admin_client):

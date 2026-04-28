@@ -301,7 +301,11 @@ def _create_builder_vm(
     network_id: str,
     userdata_b64: str,
 ) -> object:
-    """이미지에서 직접 부팅하는 임시 VM 생성."""
+    """이미지에서 직접 부팅하는 임시 VM 생성 (BUILD 상태로 즉시 반환).
+
+    ACTIVE 대기는 _monitor_build가 폴링으로 처리하므로 여기서 기다리지 않는다.
+    요청 핸들러가 VM 부팅(수 분)을 기다리지 않게 해 트리거 타임아웃을 방지한다.
+    """
     server = conn.compute.create_server(
         name=f"union-builder-{library_id}",
         image_id=image_id,
@@ -310,8 +314,6 @@ def _create_builder_vm(
         user_data=userdata_b64,
         metadata={"union_type": "builder", "union_library": library_id},
     )
-    # ACTIVE 상태까지 대기 (최대 10분)
-    server = conn.compute.wait_for_server(server, status="ACTIVE", wait=600)
     return server
 
 
