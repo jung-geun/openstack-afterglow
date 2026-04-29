@@ -19,6 +19,7 @@
 /* 반투명 배경 */
 :root.light .bg-gray-800\/50 { background-color: rgba(241,245,249,0.8) !important; }
 :root.light .bg-gray-800\/60 { background-color: rgba(241,245,249,0.9) !important; }
+:root.light .bg-gray-800\/70 { background-color: rgba(241,245,249,0.85) !important; }
 
 /* 텍스트 색상 */
 :root.light .text-white { color: #0f172a !important; }

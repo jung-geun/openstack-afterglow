@@ -602,6 +602,32 @@
 						</div>
 					</div>
 
+					<!-- 루트 디스크 -->
+					<div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
+						<div>
+							<label for="boot-volume-size" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">루트 디스크 (GB)</label>
+							<input
+								id="boot-volume-size"
+								bind:value={$wizard.bootVolumeSizeGb}
+								type="number"
+								min="1"
+								max="16384"
+								class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
+							/>
+							<p class="text-xs text-gray-500 mt-1">VM 부트 볼륨 크기 (1–16384 GB)</p>
+						</div>
+						<div class="flex items-start sm:items-end">
+							<label class="flex items-center gap-2 text-sm text-gray-300 sm:pb-2 cursor-pointer">
+								<input
+									type="checkbox"
+									bind:checked={$wizard.deleteBootVolumeOnTermination}
+									class="w-4 h-4 rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500"
+								/>
+								VM 삭제 시 루트 디스크 함께 삭제
+							</label>
+						</div>
+					</div>
+
 					<!-- cloud-init -->
 					<div class="mb-5">
 						<label for="cloud-init" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">CLOUD-INIT (선택)</label>
@@ -649,6 +675,13 @@
 						<div class="flex justify-between">
 							<span class="text-gray-500">네트워크</span>
 							<span class="text-white">{$wizard.networkName ?? '기본'}</span>
+						</div>
+						<div class="flex justify-between">
+							<span class="text-gray-500">루트 디스크</span>
+							<span class="text-white">
+								{$wizard.bootVolumeSizeGb} GB
+								<span class="text-gray-500 text-xs">({$wizard.deleteBootVolumeOnTermination ? 'VM 삭제 시 함께 삭제' : 'VM 삭제 후 보존'})</span>
+							</span>
 						</div>
 					</div>
 

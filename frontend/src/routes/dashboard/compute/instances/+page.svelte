@@ -12,6 +12,7 @@
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
   import ActionMenu from '$lib/components/ui/ActionMenu.svelte';
+  import { openWizard } from '$lib/stores/wizard';
 
   const strategyLabel: Record<string, string> = { prebuilt: '사전 빌드', dynamic: '동적 생성' };
 
@@ -133,9 +134,9 @@
         refreshing={refreshing}
         onManualRefresh={forceRefresh}
       />
-      <a href="/create" class="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+      <button type="button" onclick={openWizard} class="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
         + VM 생성
-      </a>
+      </button>
     {/snippet}
   </PageHeader>
 
@@ -149,7 +150,7 @@
     <div class="text-center py-20 text-gray-600">
       <div class="text-5xl mb-4">☁️</div>
       <p class="text-lg">인스턴스가 없습니다</p>
-      <a href="/create" class="text-blue-400 hover:text-blue-300 text-sm mt-2 inline-block">첫 VM을 생성하세요 →</a>
+      <button type="button" onclick={openWizard} class="text-blue-400 hover:text-blue-300 text-sm mt-2 inline-block bg-transparent">첫 VM을 생성하세요 →</button>
     </div>
   {:else}
     <div class="overflow-x-auto">

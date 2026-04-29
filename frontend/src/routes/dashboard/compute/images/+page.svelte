@@ -344,7 +344,7 @@
               {:else if img.visibility === 'community'}
                 <span class="px-1.5 py-0.5 rounded border text-[10px] font-medium bg-teal-900/25 border-teal-800 text-teal-400">커뮤니티</span>
               {:else}
-                <span class="px-1.5 py-0.5 rounded border text-[10px] font-medium bg-gray-800/70 border-gray-700 text-gray-400">{img.visibility ?? '비공개'}</span>
+                <span class="px-1.5 py-0.5 rounded border text-[10px] font-medium bg-gray-800/70 border-gray-700 text-gray-400">비공개</span>
               {/if}
               <span class="ml-auto text-gray-500">{formatSize(img.size)}</span>
             </div>
