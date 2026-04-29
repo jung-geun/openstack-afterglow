@@ -1,8 +1,10 @@
 <script lang="ts">
-	import { auth } from '$lib/stores/auth';
+	import { auth, isAdmin } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import { goto } from '$app/navigation';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	interface IpAddress {
 		addr: string;
@@ -27,6 +29,7 @@
 		union_upper_volume_id: string | null;
 		key_name: string | null;
 		user_id: string | null;
+		fault?: { message?: string; code?: number; created?: string } | null;
 	}
 
 	interface FloatingIp {
@@ -54,6 +57,7 @@
 		name?: string;
 		size?: number;
 		status?: string;
+		delete_on_termination?: boolean;
 	}
 
 	interface SecurityGroup {
@@ -88,16 +92,21 @@
 	let { instanceId, onClose, adminProjectId = null }: Props = $props();
 
 	let instance = $state<Instance | null>(null);
-	const fixedIpsList = $derived(instance?.ip_addresses.filter(ip => ip.type === 'fixed') ?? []);
-	const floatingIpsList = $derived(instance?.ip_addresses.filter(ip => ip.type === 'floating') ?? []);
 	let floatingIps = $state<FloatingIp[]>([]);
 	let interfaces = $state<PortInfo[]>([]);
+	const fixedIpsList = $derived(instance?.ip_addresses.filter(ip => ip.type === 'fixed') ?? []);
+	const floatingIpsList = $derived(instance?.ip_addresses.filter(ip => ip.type === 'floating') ?? []);
+	// floating IP가 이미 할당된 포트 ID 집합
+	const assignedPortIds = $derived(new Set(floatingIps.filter(f => f.port_id).map(f => f.port_id!)));
+	// floating IP 할당 가능한 (아직 미할당) 인터페이스
+	const availableInterfaces = $derived(interfaces.filter(i => !assignedPortIds.has(i.id)));
 	let volumes = $state<VolumeAttachment[]>([]);
 	let allSecurityGroups = $state<SecurityGroup[]>([]);
 	let availableVolumes = $state<VolumeInfo[]>([]);
 	let availableNetworks = $state<NetworkInfo[]>([]);
 	let ownerDisplay = $state('');
 	let loading = $state(true);
+	let refreshing = $state(false);
 	let error = $state('');
 	let deleting = $state(false);
 	let actioning = $state<string | null>(null);
@@ -162,13 +171,28 @@
 		fetchInstance(instanceId);
 	});
 
+	// Instance detail auto-refresh
+	const detailPollAr = createAutoRefresh(() => {
+		if (!instanceId || !$auth.token) return;
+		return fetchInstance(instanceId, { silent: true });
+	}, {
+		storageKey: 'instance-detail',
+		defaultActive: true,
+		defaultInterval: 30,
+		intervalOptions: [15, 30, 60, 120]
+	});
+
+	function manualRefresh() {
+		if (!instanceId) return;
+		fetchInstance(instanceId, { silent: true });
+	}
+
 	// Console log auto-refresh when visible
-	$effect(() => {
-		if (!showLog) return;
-		const interval = setInterval(() => {
-			loadConsoleLog(logFull);
-		}, 5000);
-		return () => clearInterval(interval);
+	const consolePollAr = createAutoRefresh(() => loadConsoleLog(logFull), {
+		storageKey: 'instance-detail-console',
+		defaultActive: false,
+		defaultInterval: 15,
+		intervalOptions: [10, 15, 30, 60]
 	});
 
 	// Scroll to bottom when log updates
@@ -178,9 +202,13 @@
 		}
 	});
 
-	async function fetchInstance(id: string) {
-		loading = true;
-		error = '';
+	async function fetchInstance(id: string, opts?: { silent?: boolean }) {
+		if (opts?.silent) {
+			refreshing = true;
+		} else {
+			loading = true;
+			error = '';
+		}
 		// 관리자가 다른 프로젝트 인스턴스를 볼 때 해당 project_id 사용
 		const effectiveProjectId = adminProjectId ?? ($auth.projectId ?? undefined);
 		try {
@@ -205,12 +233,16 @@
 			allSecurityGroups = sgData.security_groups;
 			const attachedIds = new Set(vols.map(v => v.volume_id));
 			availableVolumes = allVols.filter(v => v.status === 'available' && !attachedIds.has(v.id));
-			availableNetworks = nets.filter(n => !n.is_external);
+			availableNetworks = nets;
 			ownerDisplay = ownerData.display || '';
+			if (adminProjectId) {
+				fetchPasswordPrecheck(id);
+			}
 		} catch (e) {
 			error = e instanceof ApiError ? `조회 실패 (${e.status}): ${e.message}` : '서버 오류';
 		} finally {
-			loading = false;
+			if (opts?.silent) refreshing = false;
+			else loading = false;
 		}
 	}
 
@@ -234,6 +266,7 @@
 
 	async function toggleLog() {
 		showLog = !showLog;
+		consolePollAr.active = showLog;
 		if (showLog) {
 			await loadConsoleLog(logFull);
 		}
@@ -270,7 +303,7 @@
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined
 			);
-			await fetchInstance(instance.id);
+			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
 			alert(`${labels[action]} 실패: ` + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
@@ -280,8 +313,13 @@
 
 	async function deleteInstance() {
 		if (!instance) return;
-		if (!confirm(`"${instance.name}" 인스턴스를 삭제하시겠습니까?\n파일 스토리지와 볼륨도 함께 삭제됩니다.`))
-			return;
+		const autoDeleteVols = volumes.filter(v => v.delete_on_termination);
+		const keepVols = volumes.filter(v => !v.delete_on_termination);
+		const lines = [`"${instance.name}" 인스턴스를 삭제하시겠습니까?`];
+		if (autoDeleteVols.length) lines.push(`자동 삭제 볼륨: ${autoDeleteVols.map(v => v.name || v.device).join(', ')}`);
+		if (keepVols.length) lines.push(`유지(분리만): ${keepVols.map(v => v.name || v.device).join(', ')}`);
+		if (instance.union_upper_volume_id) lines.push('Upper 볼륨과 파일 스토리지(dynamic)도 삭제됩니다.');
+		if (!confirm(lines.join('\n'))) return;
 		deleting = true;
 		try {
 			await api.delete(
@@ -298,17 +336,18 @@
 		}
 	}
 
-	async function assignFloatingIp() {
+	async function assignFloatingIp(portId: string) {
 		if (!instance) return;
-		actioning = 'fip-assign';
+		actioning = 'fip-assign-' + portId;
 		try {
+			const query = `?port_id=${portId}`;
 			await api.post(
-				`/api/instances/${instance.id}/floating-ip`,
+				`/api/instances/${instance.id}/floating-ip${query}`,
 				{},
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined
 			);
-			await fetchInstance(instance.id);
+			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
 			alert('Floating IP 할당 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
@@ -316,16 +355,23 @@
 		}
 	}
 
-	async function releaseFloatingIp() {
+	async function releaseFloatingIp(fipId: string) {
+		if (!instance) return;
 		if (!confirm('Floating IP를 해제하고 삭제하시겠습니까?')) return;
-		actioning = 'fip-release';
+		actioning = 'fip-release-' + fipId;
 		try {
-			await api.delete(
-				`/api/instances/${instance!.id}/floating-ip`,
+			await api.post(
+				`/api/networks/floating-ips/${fipId}/disassociate`,
+				{},
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined
 			);
-			await fetchInstance(instance!.id);
+			await api.delete(
+				`/api/networks/floating-ips/${fipId}`,
+				$auth.token ?? undefined,
+				$auth.projectId ?? undefined
+			);
+			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
 			alert('Floating IP 해제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
@@ -345,7 +391,7 @@
 			);
 			showAttachVolume = false;
 			selectedVolumeId = '';
-			await fetchInstance(instance.id);
+			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
 			alert('볼륨 연결 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
@@ -372,7 +418,7 @@
 			showAttachVolume = false;
 			newVolName = '';
 			newVolSize = 20;
-			await fetchInstance(instance.id);
+			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
 			alert('볼륨 생성/연결 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
@@ -390,7 +436,7 @@
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined
 			);
-			await fetchInstance(instance.id);
+			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
 			alert('볼륨 분리 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
@@ -410,7 +456,7 @@
 			);
 			showAddInterface = false;
 			selectedNetId = '';
-			await fetchInstance(instance.id);
+			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
 			alert('인터페이스 추가 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
@@ -428,7 +474,7 @@
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined
 			);
-			await fetchInstance(instance.id);
+			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
 			alert('인터페이스 제거 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
@@ -460,7 +506,7 @@
 				$auth.projectId ?? undefined
 			);
 			sgEditPortId = null;
-			await fetchInstance(instance.id);
+			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
 			alert('보안 그룹 업데이트 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
@@ -479,6 +525,138 @@
 
 	function networkNameById(id: string): string {
 		return availableNetworks.find(n => n.id === id)?.name ?? id.slice(0, 12) + '...';
+	}
+
+	// 리사이즈 (관리자 전용)
+	interface Flavor {
+		id: string;
+		name: string;
+		vcpus: number;
+		ram: number;
+		disk: number;
+	}
+	let showResizeModal = $state(false);
+	let resizeFlavors = $state<Flavor[]>([]);
+	let resizeFlavorId = $state('');
+	let resizeLoading = $state(false);
+	let resizeError = $state('');
+
+	async function openResizeModal() {
+		resizeFlavorId = '';
+		resizeError = '';
+		resizeFlavors = [];
+		showResizeModal = true;
+		try {
+			resizeFlavors = await api.get<Flavor[]>('/api/flavors', $auth.token ?? undefined, $auth.projectId ?? undefined);
+		} catch {
+			resizeFlavors = [];
+		}
+	}
+
+	async function doResize() {
+		if (!instance || !resizeFlavorId) return;
+		resizeLoading = true;
+		resizeError = '';
+		try {
+			await api.post(
+				`/api/admin/instances/${instance.id}/resize`,
+				{ flavor_id: resizeFlavorId },
+				$auth.token ?? undefined,
+				$auth.projectId ?? undefined
+			);
+			showResizeModal = false;
+			await fetchInstance(instance.id, { silent: true });
+		} catch (e) {
+			resizeError = e instanceof ApiError ? e.message : '리사이즈 실패';
+		} finally {
+			resizeLoading = false;
+		}
+	}
+
+	async function revertResize() {
+		if (!instance) return;
+		if (!confirm('리사이즈를 취소하고 이전 플레이버로 복귀하시겠습니까?')) return;
+		actioning = 'revert-resize';
+		try {
+			await api.post(
+				`/api/admin/instances/${instance.id}/revert-resize`,
+				{},
+				$auth.token ?? undefined,
+				$auth.projectId ?? undefined
+			);
+			await fetchInstance(instance.id, { silent: true });
+		} catch (e) {
+			alert('리사이즈 취소 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+		} finally {
+			actioning = null;
+		}
+	}
+
+	// 관리자 패스워드 재설정 (관리자 전용, QGA 필요)
+	interface PasswordPrecheck {
+		supported: boolean;
+		reason: string | null;
+		os_admin_user: string | null;
+		server_status: string;
+	}
+	let showPasswordModal = $state(false);
+	let passwordPrecheck = $state<PasswordPrecheck | null>(null);
+	let passwordPrecheckLoading = $state(false);
+	let newPassword = $state('');
+	let confirmPassword = $state('');
+	let passwordLoading = $state(false);
+	let passwordError = $state('');
+
+	async function fetchPasswordPrecheck(serverId: string) {
+		if (!adminProjectId) return;
+		passwordPrecheckLoading = true;
+		try {
+			passwordPrecheck = await api.get<PasswordPrecheck>(
+				`/api/instances/${serverId}/admin-password/precheck`,
+				$auth.token ?? undefined,
+				$auth.projectId ?? undefined
+			);
+		} catch {
+			passwordPrecheck = null;
+		} finally {
+			passwordPrecheckLoading = false;
+		}
+	}
+
+	async function openPasswordModal() {
+		newPassword = '';
+		confirmPassword = '';
+		passwordError = '';
+		showPasswordModal = true;
+	}
+
+	async function doSetPassword() {
+		if (!instance) return;
+		if (newPassword !== confirmPassword) {
+			passwordError = '패스워드가 일치하지 않습니다';
+			return;
+		}
+		if (newPassword.length < 8) {
+			passwordError = '패스워드는 8자 이상이어야 합니다';
+			return;
+		}
+		passwordLoading = true;
+		passwordError = '';
+		try {
+			await api.post(
+				`/api/instances/${instance.id}/admin-password`,
+				{ new_password: newPassword },
+				$auth.token ?? undefined,
+				$auth.projectId ?? undefined
+			);
+			showPasswordModal = false;
+			newPassword = '';
+			confirmPassword = '';
+		} catch (e) {
+			passwordError = e instanceof ApiError ? e.message : '패스워드 변경 실패';
+		} finally {
+			passwordLoading = false;
+		}
 	}
 
 	// 마이그레이션 (관리자 전용)
@@ -527,7 +705,7 @@
 				);
 			}
 			showMigrateModal = false;
-			await fetchInstance(instance.id);
+			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
 			migrateError = e instanceof ApiError ? e.message : '마이그레이션 실패';
 		} finally {
@@ -546,7 +724,7 @@
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined
 			);
-			await fetchInstance(instance.id);
+			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
 			alert('리사이즈 확인 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
@@ -567,6 +745,13 @@
 				← 인스턴스
 			</a>
 		{/if}
+		<AutoRefreshControl
+			bind:active={detailPollAr.active}
+			bind:intervalSeconds={detailPollAr.intervalSeconds}
+			intervalOptions={detailPollAr.intervalOptions}
+			refreshing={refreshing}
+			onManualRefresh={manualRefresh}
+		/>
 	</div>
 
 	{#if error}
@@ -584,6 +769,12 @@
 				>
 					{instance.status}
 				</span>
+				{#if instance.status === 'ERROR' && instance.fault?.message && adminProjectId}
+					<div class="mt-2 p-3 rounded-lg bg-red-900/30 border border-red-800/40 text-red-300 text-sm max-w-xl">
+						<div class="font-medium mb-1 text-xs text-red-400">오류 상세 (관리자)</div>
+						<div class="text-xs opacity-90 break-words">{instance.fault.message}</div>
+					</div>
+				{/if}
 			</div>
 			<div class="flex flex-wrap gap-2 justify-end">
 				{#if instance.status === 'SHUTOFF'}
@@ -653,6 +844,13 @@
 						>
 							콜드 마이그레이션
 						</button>
+						<button
+							onclick={openResizeModal}
+							disabled={!!actioning}
+							class="text-violet-400 hover:text-violet-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-violet-900 hover:border-violet-700 disabled:border-gray-700 transition-colors"
+						>
+							리사이즈
+						</button>
 					{/if}
 					{#if instance.status === 'VERIFY_RESIZE'}
 						<button
@@ -662,7 +860,22 @@
 						>
 							{actioning === 'confirm-resize' ? '확인 중...' : '리사이즈 확인'}
 						</button>
+						<button
+							onclick={revertResize}
+							disabled={!!actioning}
+							class="text-yellow-400 hover:text-yellow-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-yellow-900 hover:border-yellow-700 disabled:border-gray-700 transition-colors"
+						>
+							{actioning === 'revert-resize' ? '취소 중...' : '되돌리기'}
+						</button>
 					{/if}
+					<button
+						onclick={openPasswordModal}
+						disabled={passwordPrecheckLoading || !passwordPrecheck?.supported}
+						title={passwordPrecheck?.reason ?? (passwordPrecheckLoading ? '점검 중...' : '')}
+						class="text-amber-400 hover:text-amber-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-amber-900 hover:border-amber-700 disabled:border-gray-700 transition-colors"
+					>
+						{passwordPrecheckLoading ? '점검 중...' : '비밀번호 재설정'}
+					</button>
 				{/if}
 				<button
 					onclick={deleteInstance}
@@ -735,7 +948,7 @@
 				<h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide">콘솔 로그</h2>
 				<div class="flex gap-2 items-center">
 					{#if showLog}
-						<span class="text-xs text-gray-600">5초마다 자동 갱신</span>
+						<span class="text-xs text-gray-600">{consolePollAr.intervalSeconds}초마다 자동 갱신</span>
 						<button
 							onclick={toggleFullLog}
 							class="text-xs {logFull ? 'text-yellow-400 border-yellow-900' : 'text-gray-400 border-gray-700'} hover:text-gray-200 px-2 py-1 border hover:border-gray-500 rounded transition-colors"
@@ -763,46 +976,6 @@
 					bind:this={logPreEl}
 					class="bg-gray-950 border border-gray-800 rounded p-3 text-xs text-gray-300 font-mono overflow-x-auto max-h-96 overflow-y-auto whitespace-pre-wrap"
 				>{logLoading && !consoleLog ? '로딩 중...' : consoleLog}</pre>
-			{/if}
-		</div>
-
-		<!-- Floating IP 관리 -->
-		<div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4">
-			<div class="flex items-center justify-between mb-4">
-				<h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide">Floating IP</h2>
-				{#if floatingIps.length === 0}
-					<button
-						onclick={assignFloatingIp}
-						disabled={actioning === 'fip-assign'}
-						class="text-xs text-blue-400 hover:text-blue-300 px-2 py-1 border border-blue-900 hover:border-blue-700 rounded transition-colors disabled:text-gray-600 disabled:border-gray-700"
-					>
-						{actioning === 'fip-assign' ? '할당 중...' : '+ Floating IP 요청'}
-					</button>
-				{/if}
-			</div>
-
-			{#if floatingIps.length === 0}
-				<p class="text-sm text-gray-500">연결된 Floating IP 없음</p>
-			{:else}
-				<div class="space-y-2">
-					{#each floatingIps as fip}
-						<div class="flex items-center justify-between">
-							<div class="flex items-center gap-2">
-								<span class="font-mono text-sm text-green-300">{fip.floating_ip_address}</span>
-								{#if fip.fixed_ip_address}
-									<span class="text-xs text-gray-500">→ {fip.fixed_ip_address}</span>
-								{/if}
-							</div>
-							<button
-								onclick={releaseFloatingIp}
-								disabled={actioning === 'fip-release'}
-								class="text-xs text-orange-400 hover:text-orange-300 px-2 py-1 border border-orange-900 hover:border-orange-700 rounded transition-colors disabled:text-gray-600"
-							>
-								{actioning === 'fip-release' ? '해제 중...' : '해제 및 삭제'}
-							</button>
-						</div>
-					{/each}
-				</div>
 			{/if}
 		</div>
 
@@ -847,6 +1020,7 @@
 			{:else}
 				<div class="space-y-4">
 					{#each interfaces as iface}
+						{@const ifaceFip = floatingIps.find(f => f.port_id === iface.id)}
 						<div class="bg-gray-800/50 rounded-lg p-4">
 							<div class="flex items-start justify-between mb-3">
 								<div class="grid grid-cols-2 gap-x-6 gap-y-2 flex-1">
@@ -868,20 +1042,42 @@
 									</div>
 									<div class="col-span-2">
 										<dt class="text-xs text-gray-500 mb-1">IP 주소</dt>
-										<dd class="flex flex-wrap gap-1.5">
+										<dd class="flex flex-wrap gap-1.5 items-center">
 											{#each iface.fixed_ips as fip}
 												<span class="text-xs font-mono text-gray-300 bg-gray-700 px-1.5 py-0.5 rounded">{fip.ip_address}</span>
 											{/each}
+											{#if ifaceFip}
+												<span class="text-xs font-mono text-green-300 bg-green-900/20 px-1.5 py-0.5 rounded">{ifaceFip.floating_ip_address}</span>
+											{/if}
 										</dd>
 									</div>
 								</div>
-								<button
-									onclick={() => detachInterface(iface.id)}
-									disabled={!!actioning}
-									class="ml-4 text-xs text-orange-400 hover:text-orange-300 px-2 py-1 border border-orange-900 hover:border-orange-700 rounded transition-colors disabled:text-gray-600 shrink-0"
-								>
-									{actioning === 'detach-iface-' + iface.id ? '제거 중...' : '제거'}
-								</button>
+								<div class="ml-4 flex flex-col gap-1.5 shrink-0">
+									{#if ifaceFip}
+										<button
+											onclick={() => releaseFloatingIp(ifaceFip.id)}
+											disabled={!!actioning}
+											class="text-xs text-orange-400 hover:text-orange-300 px-2 py-1 border border-orange-900 hover:border-orange-700 rounded transition-colors disabled:text-gray-600"
+										>
+											{actioning === 'fip-release-' + ifaceFip.id ? '해제 중...' : 'FIP 해제'}
+										</button>
+									{:else}
+										<button
+											onclick={() => assignFloatingIp(iface.id)}
+											disabled={!!actioning}
+											class="text-xs text-blue-400 hover:text-blue-300 px-2 py-1 border border-blue-900 hover:border-blue-700 rounded transition-colors disabled:text-gray-600"
+										>
+											{actioning === 'fip-assign-' + iface.id ? '할당 중...' : '+ FIP'}
+										</button>
+									{/if}
+									<button
+										onclick={() => detachInterface(iface.id)}
+										disabled={!!actioning}
+										class="text-xs text-orange-400 hover:text-orange-300 px-2 py-1 border border-orange-900 hover:border-orange-700 rounded transition-colors disabled:text-gray-600"
+									>
+										{actioning === 'detach-iface-' + iface.id ? '제거 중...' : '제거'}
+									</button>
+								</div>
 							</div>
 							<!-- 보안 그룹 -->
 							<div>
@@ -1064,6 +1260,11 @@
 								{#if vol.status}
 									<span class="text-xs {vol.status === 'in-use' ? 'text-green-400' : 'text-gray-400'}">{vol.status}</span>
 								{/if}
+								{#if vol.delete_on_termination}
+									<span class="text-[10px] text-red-300 bg-red-900/30 px-1.5 py-0.5 rounded">인스턴스 삭제 시 자동 삭제</span>
+								{:else}
+									<span class="text-[10px] text-gray-400 bg-gray-800 px-1.5 py-0.5 rounded">유지</span>
+								{/if}
 							</div>
 							<button
 								onclick={() => detachVolume(vol.volume_id)}
@@ -1172,6 +1373,88 @@
 				<button onclick={() => { showMigrateModal = false; }} class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded-lg">취소</button>
 				<button onclick={doMigrate} disabled={migrateLoading} class="px-4 py-2 bg-cyan-700 hover:bg-cyan-600 text-white text-sm font-medium rounded-lg disabled:opacity-30">
 					{migrateLoading ? '마이그레이션 중...' : '마이그레이션'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if showPasswordModal}
+	<div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" role="dialog" onclick={() => { showPasswordModal = false; }} onkeydown={(e) => e.key === 'Escape' && (showPasswordModal = false)} tabindex="-1">
+		<div class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl" onclick={(e) => e.stopPropagation()} role="document">
+			<h3 class="text-white font-semibold text-lg mb-1">관리자 비밀번호 재설정</h3>
+			<p class="text-gray-400 text-sm mb-4">인스턴스: <span class="text-white">{instance?.name}</span></p>
+			{#if passwordPrecheck?.os_admin_user}
+				<p class="text-xs text-gray-500 mb-4">대상 계정: <span class="text-amber-400">{passwordPrecheck.os_admin_user}</span> (이미지 메타 기준)</p>
+			{:else}
+				<p class="text-xs text-gray-500 mb-4">대상 계정: 이미지 메타데이터의 <code class="text-amber-400">os_admin_user</code>로 자동 결정</p>
+			{/if}
+			<div class="bg-yellow-900/20 border border-yellow-800/40 rounded-lg p-3 mb-4 text-xs text-yellow-300">
+				QGA가 게스트에 실제로 동작 중이어야 변경이 적용됩니다. 변경 직후 콘솔/SSH로 동작을 확인하세요.
+			</div>
+			<div class="space-y-3 mb-4">
+				<div>
+					<label class="block text-sm text-gray-400 mb-1" for="new-password">새 비밀번호</label>
+					<input
+						id="new-password"
+						type="password"
+						bind:value={newPassword}
+						placeholder="8자 이상"
+						class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500"
+					/>
+				</div>
+				<div>
+					<label class="block text-sm text-gray-400 mb-1" for="confirm-password">비밀번호 확인</label>
+					<input
+						id="confirm-password"
+						type="password"
+						bind:value={confirmPassword}
+						placeholder="동일한 비밀번호 재입력"
+						class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500"
+					/>
+				</div>
+			</div>
+			{#if passwordError}
+				<p class="text-red-400 text-sm mb-3">{passwordError}</p>
+			{/if}
+			<div class="bg-gray-800/60 border border-gray-700/40 rounded-lg p-3 mb-4 text-xs text-gray-400">
+				<span class="text-gray-300 font-medium">SSH 키 런타임 주입 안내:</span>
+				표준 OpenStack은 실행 중 SSH 키 주입을 지원하지 않습니다.
+				키페어 사전 등록은 <a href="/dashboard/compute/keypairs" class="text-cyan-400 hover:underline">키페어 관리</a>에서, 비상 복구는 rebuild를 사용하세요.
+			</div>
+			<div class="flex justify-end gap-3">
+				<button onclick={() => { showPasswordModal = false; }} class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded-lg">취소</button>
+				<button onclick={doSetPassword} disabled={passwordLoading || !newPassword || !confirmPassword} class="px-4 py-2 bg-amber-700 hover:bg-amber-600 text-white text-sm font-medium rounded-lg disabled:opacity-30">
+					{passwordLoading ? '변경 중...' : '변경'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if showResizeModal}
+	<div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" role="dialog" onclick={() => { showResizeModal = false; }} onkeydown={(e) => e.key === 'Escape' && (showResizeModal = false)} tabindex="-1">
+		<div class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl" onclick={(e) => e.stopPropagation()}>
+			<h2 class="text-lg font-semibold text-white mb-1">인스턴스 리사이즈</h2>
+			<p class="text-xs text-gray-500 mb-5">플레이버를 변경합니다. 완료 후 '리사이즈 확인' 또는 '되돌리기'를 선택하세요.</p>
+			{#if resizeError}
+				<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{resizeError}</div>
+			{/if}
+			<div class="space-y-4">
+				<div>
+					<label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">새 플레이버</label>
+					<select bind:value={resizeFlavorId} class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-violet-500">
+						<option value="">플레이버 선택</option>
+						{#each resizeFlavors as f}
+							<option value={f.id}>{f.name} ({f.vcpus} vCPU / {f.ram >= 1024 ? (f.ram / 1024).toFixed(0) + ' GB' : f.ram + ' MB'} RAM)</option>
+						{/each}
+					</select>
+				</div>
+			</div>
+			<div class="flex justify-end gap-3 mt-6">
+				<button onclick={() => { showResizeModal = false; }} class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded-lg">취소</button>
+				<button onclick={doResize} disabled={resizeLoading || !resizeFlavorId} class="px-4 py-2 bg-violet-700 hover:bg-violet-600 text-white text-sm font-medium rounded-lg disabled:opacity-30">
+					{resizeLoading ? '리사이즈 중...' : '리사이즈'}
 				</button>
 			</div>
 		</div>

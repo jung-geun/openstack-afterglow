@@ -6,7 +6,8 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
-from app.models.storage import FloatingIpInfo
+from app.models.compute import InstanceInfo
+from app.models.storage import FloatingIpInfo, TopologyData
 
 
 def make_fip(project_id: str = "test-project-123") -> FloatingIpInfo:
@@ -97,6 +98,34 @@ async def test_get_topology_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.get("/api/networks/topology")
     assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_get_topology_includes_instance_project_id(client, mock_conn):
+    """토폴로지 응답에 인스턴스 project_id가 포함되어야 함 (필터링 정상 작동 확인)."""
+
+    def fake_get_topology(conn):
+        return TopologyData()
+
+    def fake_list_servers(conn):
+        return [InstanceInfo(id="inst-1", name="srv", status="ACTIVE", project_id="test-project-123")]
+
+    mock_conn.network.ports.return_value = []
+
+    async def fake_cached_call(key, ttl, fn, refresh=False):
+        return fn()
+
+    with (
+        patch("app.api.network.networks.neutron.get_topology", side_effect=fake_get_topology),
+        patch("app.api.network.networks.nova.list_servers", side_effect=fake_list_servers),
+        patch("app.api.network.networks.cached_call", side_effect=fake_cached_call),
+    ):
+        resp = await client.get("/api/networks/topology")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["instances"]) == 1
+    assert data["instances"][0]["project_id"] == "test-project-123"
 
 
 @pytest.mark.asyncio

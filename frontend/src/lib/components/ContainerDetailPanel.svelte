@@ -1,6 +1,8 @@
 <script lang="ts">
   import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
+  import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+  import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
   interface ZunContainer {
     uuid: string;
@@ -105,6 +107,13 @@
     if (logsOpen && !logs) fetchLogs();
   }
 
+  const ar = createAutoRefresh(() => fetchContainer(), {
+    storageKey: 'container-detail-panel',
+    defaultActive: true,
+    defaultInterval: 10,
+    intervalOptions: [10, 15, 30, 60],
+  });
+
   $effect(() => {
     if (containerId) fetchContainer();
   });
@@ -117,7 +126,16 @@
       <h2 class="text-sm font-semibold text-white truncate">{container?.name ?? containerId.slice(0, 12)}</h2>
       <p class="text-xs text-gray-500 mt-0.5 font-mono">{containerId}</p>
     </div>
-    <button onclick={onClose} class="text-gray-400 hover:text-white text-xl leading-none ml-3 flex-shrink-0" aria-label="닫기">×</button>
+    <div class="flex items-center gap-2 ml-3 flex-shrink-0">
+      <AutoRefreshControl
+        bind:active={ar.active}
+        bind:intervalSeconds={ar.intervalSeconds}
+        intervalOptions={ar.intervalOptions}
+        refreshing={loading}
+        onManualRefresh={() => fetchContainer()}
+      />
+      <button onclick={onClose} class="text-gray-400 hover:text-white text-xl leading-none" aria-label="닫기">×</button>
+    </div>
   </div>
 
   <div class="flex-1 overflow-y-auto p-5 space-y-4">

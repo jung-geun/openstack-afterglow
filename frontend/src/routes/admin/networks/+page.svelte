@@ -5,6 +5,8 @@
 	import { api, ApiError } from '$lib/api/client';
 	import TimeSeriesChart from '$lib/components/TimeSeriesChart.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	interface NetworkInfo {
 		id: string;
@@ -102,6 +104,11 @@
 		} catch (e) { deleteError = e instanceof ApiError ? e.message : '삭제 실패'; } finally { deleting = false; }
 	}
 
+	const ar = createAutoRefresh(
+		() => { loadNetworks(); loadTimeseries(tsRange); },
+		{ storageKey: 'admin-networks', defaultInterval: 30, intervalOptions: [15, 30, 60] }
+	);
+
 	onMount(() => { loadNetworks(); loadTimeseries(tsRange); });
 </script>
 
@@ -109,7 +116,13 @@
 	<PageHeader breadcrumb="NETWORK / NETWORKS" title="네트워크">
 		{#snippet actions()}
 			<button onclick={() => { showCreate = true; createError = ''; }} class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg">+ 생성</button>
-			<button onclick={loadNetworks} class="text-xs text-gray-400 hover:text-white px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
+			<AutoRefreshControl
+				bind:active={ar.active}
+				bind:intervalSeconds={ar.intervalSeconds}
+				intervalOptions={ar.intervalOptions}
+				refreshing={loading}
+				onManualRefresh={loadNetworks}
+			/>
 		{/snippet}
 	</PageHeader>
 

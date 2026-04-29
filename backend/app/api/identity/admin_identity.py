@@ -108,7 +108,9 @@ async def create_user(
                 "enabled": u.is_enabled,
             }
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"사용자 생성 실패: {e}")
+            _logger.warning("사용자 생성 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="사용자 생성 실패")
 
     try:
         return await asyncio.to_thread(_create)
@@ -143,7 +145,9 @@ async def update_user(
                 "enabled": u.is_enabled,
             }
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"사용자 수정 실패: {e}")
+            _logger.warning("사용자 수정 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="사용자 수정 실패")
 
     try:
         return await asyncio.to_thread(_update)
@@ -248,7 +252,9 @@ async def create_project(
                 "enabled": p.is_enabled,
             }
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"프로젝트 생성 실패: {e}")
+            _logger.warning("프로젝트 생성 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="프로젝트 생성 실패")
 
     try:
         return await asyncio.to_thread(_create)
@@ -281,7 +287,9 @@ async def update_project(
                 "enabled": p.is_enabled,
             }
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"프로젝트 수정 실패: {e}")
+            _logger.warning("프로젝트 수정 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="프로젝트 수정 실패")
 
     try:
         return await asyncio.to_thread(_update)
@@ -300,7 +308,9 @@ async def delete_project(
         try:
             conn.identity.delete_project(project_id, ignore_missing=True)
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"프로젝트 삭제 실패: {e}")
+            _logger.warning("프로젝트 삭제 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="프로젝트 삭제 실패")
 
     try:
         await asyncio.to_thread(_delete)
@@ -356,7 +366,9 @@ async def list_project_members(
                     )
             return assignments
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"멤버 목록 조회 실패: {e}")
+            _logger.warning("멤버 목록 조회 실패: %s", e)
+
+            raise HTTPException(status_code=500, detail="멤버 목록 조회 실패")
 
     try:
         return await asyncio.to_thread(_list)
@@ -447,7 +459,9 @@ async def update_project_quotas(
 
             return {"status": "updated"}
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"쿼터 수정 실패: {e}")
+            _logger.warning("쿼터 수정 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="쿼터 수정 실패")
 
     try:
         return await asyncio.to_thread(_update)
@@ -519,7 +533,9 @@ async def create_group(
                 "domain_id": getattr(g, "domain_id", None),
             }
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"그룹 생성 실패: {e}")
+            _logger.warning("그룹 생성 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="그룹 생성 실패")
 
     try:
         result = await asyncio.to_thread(_create)
@@ -551,7 +567,9 @@ async def update_group(
                 "description": getattr(g, "description", "") or "",
             }
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"그룹 수정 실패: {e}")
+            _logger.warning("그룹 수정 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="그룹 수정 실패")
 
     try:
         return await asyncio.to_thread(_update)
@@ -570,7 +588,9 @@ async def delete_group(
         try:
             conn.identity.delete_group(group_id, ignore_missing=True)
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"그룹 삭제 실패: {e}")
+            _logger.warning("그룹 삭제 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="그룹 삭제 실패")
 
     try:
         await asyncio.to_thread(_delete)
@@ -599,7 +619,9 @@ async def list_group_users(
                     }
                 )
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"그룹 멤버 조회 실패: {e}")
+            _logger.warning("그룹 멤버 조회 실패: %s", e)
+
+            raise HTTPException(status_code=500, detail="그룹 멤버 조회 실패")
         return users
 
     try:
@@ -620,7 +642,9 @@ async def add_user_to_group(
         try:
             conn.identity.add_user_to_group(user_id, group_id)
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"그룹 멤버 추가 실패: {e}")
+            _logger.warning("그룹 멤버 추가 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="그룹 멤버 추가 실패")
 
     try:
         await asyncio.to_thread(_add)
@@ -642,7 +666,9 @@ async def remove_user_from_group(
         try:
             conn.identity.remove_user_from_group(user_id, group_id)
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"그룹 멤버 제거 실패: {e}")
+            _logger.warning("그룹 멤버 제거 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="그룹 멤버 제거 실패")
 
     try:
         await asyncio.to_thread(_remove)
@@ -712,7 +738,9 @@ async def assign_role(
             conn.identity.assign_project_role_to_user(req.project_id, req.user_id, req.role_id)
             return {"status": "assigned"}
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"역할 할당 실패: {e}")
+            _logger.warning("역할 할당 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="역할 할당 실패")
 
     try:
         return await asyncio.to_thread(_assign)
@@ -734,7 +762,9 @@ async def revoke_role(
             conn.identity.unassign_project_role_from_user(project_id, user_id, role_id)
             return {"status": "revoked"}
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"역할 회수 실패: {e}")
+            _logger.warning("역할 회수 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="역할 회수 실패")
 
     try:
         return await asyncio.to_thread(_revoke)
@@ -760,7 +790,9 @@ async def assign_group_role(
             conn.identity.assign_project_role_to_group(req.project_id, req.group_id, req.role_id)
             return {"status": "assigned"}
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"그룹 역할 할당 실패: {e}")
+            _logger.warning("그룹 역할 할당 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="그룹 역할 할당 실패")
 
     try:
         return await asyncio.to_thread(_assign)
@@ -782,7 +814,9 @@ async def revoke_group_role(
             conn.identity.unassign_project_role_from_group(project_id, group_id, role_id)
             return {"status": "revoked"}
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"그룹 역할 회수 실패: {e}")
+            _logger.warning("그룹 역할 회수 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="그룹 역할 회수 실패")
 
     try:
         return await asyncio.to_thread(_revoke)

@@ -8,6 +8,9 @@ if TYPE_CHECKING:
     import openstack
 import asyncio
 import logging
+import random
+import string
+import time
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
@@ -33,6 +36,11 @@ from app.services import k3s_db as k3s_cluster
 router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
 _logger = logging.getLogger(__name__)
+
+
+def _rand_suffix(length: int = 5) -> str:
+    """K8s 스타일 랜덤 suffix (소문자+숫자). 매 생성마다 고유한 리소스 이름 보장."""
+    return "".join(random.choices(string.ascii_lowercase + string.digits, k=length))
 
 
 def _cluster_to_info(c: dict) -> K3sClusterInfo:
@@ -128,7 +136,15 @@ async def create_k3s_cluster_async(
     s = get_settings()
 
     # 설정 검증
-    server_image_id = s.k3s_server_image_id
+    os_type = req.os_type  # "ubuntu" | "fcos"
+    if os_type == "fcos":
+        server_image_id = s.k3s_fcos_image_id
+        if not server_image_id:
+            raise HTTPException(
+                status_code=503, detail="FCOS 이미지가 설정되지 않았습니다 (k3s_fcos_image_id). 관리자에게 문의하세요."
+            )
+    else:
+        server_image_id = s.k3s_server_image_id
     server_flavor_id = s.k3s_server_flavor_id
     if not server_image_id or not server_flavor_id:
         raise HTTPException(
@@ -138,7 +154,29 @@ async def create_k3s_cluster_async(
     agent_flavor_id = req.agent_flavor_id or s.k3s_default_agent_flavor_id
     if req.agent_count > 0 and not agent_flavor_id:
         raise HTTPException(status_code=503, detail="에이전트 플레이버가 설정되지 않았습니다. 관리자에게 문의하세요.")
-    network_id = req.network_id or s.default_network_id
+
+    # Default 네트워크 결정
+    network_id = req.network_id
+    if not network_id:
+        if s.default_network_enabled:
+            try:
+                from app.services.default_network import ensure_default_network as _ensure_net
+
+                default_net = await _ensure_net(
+                    conn,
+                    project_id,
+                    external_network_id=s.default_network_external_id or None,
+                    cidr=s.default_network_cidr,
+                )
+                network_id = default_net.id
+            except Exception:
+                import logging as _log
+
+                _log.getLogger(__name__).warning("Default 네트워크 조회 실패, 설정값 폴백", exc_info=True)
+                network_id = s.default_network_id
+        else:
+            network_id = s.default_network_id
+
     k3s_version = s.k3s_version
     boot_volume_size = s.k3s_boot_volume_size_gb
     cluster_id = str(uuid.uuid4())
@@ -158,17 +196,20 @@ async def create_k3s_cluster_async(
         agent_flavor_id = _resolve_flavor(conn, agent_flavor_id)
 
     async def progress_generator() -> AsyncGenerator[str, None]:
+        _start_time = time.monotonic()
+
         def event(step: K3sProgressStep, progress: int, message: str, **kw) -> str:
-            msg = K3sProgressMessage(step=step, progress=progress, message=message, **kw)
+            elapsed = round(time.monotonic() - _start_time, 1)
+            msg = K3sProgressMessage(step=step, progress=progress, message=message, elapsed_seconds=elapsed, **kw)
             return f"data: {msg.model_dump_json()}\n\n"
+
+        # 프록시/CDN 버퍼 우회: 첫 chunk를 즉시 flush하기 위한 SSE 주석 패딩
+        yield ": " + " " * 2048 + "\n\n"
 
         # 롤백 추적
         sg_id: str | None = None
         boot_volume_id: str | None = None
         server_vm_id: str | None = None
-        api_lb_id: str | None = None
-        api_fip_id: str | None = None
-        api_fip_address: str | None = None
 
         try:
             # --- Step 1: 보안 그룹 생성 ---
@@ -180,23 +221,27 @@ async def create_k3s_cluster_async(
             sg_id = sg["id"]
 
             # 보안 그룹 규칙 추가
-            rules = [
+            # SSH/K3s API는 allowed_cidrs가 있으면 해당 CIDR만, 없으면 0.0.0.0/0 허용
+            mgmt_cidrs = req.allowed_cidrs or ["0.0.0.0/0"]
+            rules = []
+            for cidr in mgmt_cidrs:
                 # SSH
-                dict(
-                    direction="ingress",
-                    protocol="tcp",
-                    port_range_min=22,
-                    port_range_max=22,
-                    remote_ip_prefix="0.0.0.0/0",
-                ),
+                rules.append(
+                    dict(
+                        direction="ingress", protocol="tcp", port_range_min=22, port_range_max=22, remote_ip_prefix=cidr
+                    )
+                )
                 # k3s API server
-                dict(
-                    direction="ingress",
-                    protocol="tcp",
-                    port_range_min=6443,
-                    port_range_max=6443,
-                    remote_ip_prefix="0.0.0.0/0",
-                ),
+                rules.append(
+                    dict(
+                        direction="ingress",
+                        protocol="tcp",
+                        port_range_min=6443,
+                        port_range_max=6443,
+                        remote_ip_prefix=cidr,
+                    )
+                )
+            rules += [
                 # Kubelet (SG 내부)
                 dict(
                     direction="ingress",
@@ -246,56 +291,25 @@ async def create_k3s_cluster_async(
                 await asyncio.to_thread(neutron.create_security_group_rule, conn, sg_id, **rule_kwargs)
             yield event(K3sProgressStep.SECURITY_GROUP, 10, "보안 그룹 생성 완료")
 
-            # --- Step 1.5: API LB + Floating IP (설정 시) ---
             extra_tls_sans: list[str] = []
-            if s.k3s_api_lb_enabled:
-                fip_net_id = s.k3s_api_lb_floating_network_id or s.k3s_occm_floating_network_id
-                if not fip_net_id:
-                    raise RuntimeError(
-                        "k3s_api_lb_enabled=true 이나 floating network ID가 설정되지 않았습니다 "
-                        "(k3s_api_lb_floating_network_id 또는 k3s_occm_floating_network_id 설정 필요)"
-                    )
-                yield event(K3sProgressStep.SECURITY_GROUP, 12, "API LB용 Floating IP 할당 중...")
-                fip_info = await asyncio.to_thread(neutron.create_floating_ip, conn, fip_net_id)
-                api_fip_id = fip_info.id
-                api_fip_address = fip_info.floating_ip_address
-                extra_tls_sans.append(api_fip_address)
-
-                # VIP 서브넷: k3s_lb_subnet_id 우선, 미설정 시 클러스터 네트워크의 첫 번째 서브넷
-                if s.k3s_lb_subnet_id:
-                    vip_subnet_id = s.k3s_lb_subnet_id
-                else:
-                    net_obj = await asyncio.to_thread(conn.network.get_network, network_id)
-                    vip_subnet_ids = getattr(net_obj, "subnet_ids", None) or []
-                    if not vip_subnet_ids:
-                        raise RuntimeError(f"네트워크 {network_id}에 서브넷이 없습니다")
-                    vip_subnet_id = vip_subnet_ids[0]
-
-                yield event(K3sProgressStep.SECURITY_GROUP, 14, "API 로드밸런서 생성 중...")
-                lb = await asyncio.to_thread(
-                    octavia.create_load_balancer,
-                    conn,
-                    f"k3s-api-{req.name}-{cluster_id[:8]}",
-                    vip_subnet_id,
-                    f"K3s API LB for cluster {req.name}",
-                )
-                api_lb_id = lb["id"]
-                _logger.info("k3s cluster %s: API LB %s created, FIP %s", cluster_id, api_lb_id, api_fip_address)
 
             # --- Step 2: 서버 부트 볼륨 생성 ---
-            yield event(K3sProgressStep.SERVER_VOLUME, 15, "서버 노드 부트 볼륨 생성 중...")
+            # K8s 스타일: 매 생성마다 고유한 suffix로 이름 충돌 방지
+            server_suffix = _rand_suffix()
+            server_vm_name = f"{req.name}-{server_suffix}"
+            yield event(K3sProgressStep.SERVER_VOLUME, 28, "서버 노드 부트 볼륨 생성 중...")
             boot_vol = await asyncio.to_thread(
                 cinder.create_volume_from_image,
                 conn,
-                f"{req.name}-server-boot",
+                f"{server_vm_name}-boot",
                 server_image_id,
                 boot_volume_size,
             )
             boot_volume_id = boot_vol.id
-            yield event(K3sProgressStep.SERVER_VOLUME, 25, "서버 부트 볼륨 생성 완료")
+            yield event(K3sProgressStep.SERVER_VOLUME, 35, "서버 부트 볼륨 생성 완료")
 
             # --- Step 3: 콜백 토큰 + cloud-init 생성 ---
-            yield event(K3sProgressStep.SERVER_CREATING, 30, "서버 VM cloud-init 생성 중...")
+            yield event(K3sProgressStep.SERVER_CREATING, 40, "서버 VM cloud-init 생성 중...")
             # 공개키 미리 조회 (에이전트 VM은 admin conn으로 생성하므로 cloud-init에 직접 주입)
             ssh_public_key = ""
             if req.key_name:
@@ -312,13 +326,18 @@ async def create_k3s_cluster_async(
             from app.services import k3s_plugins
 
             cloud_conf = k3s_plugins.aggregate_cloud_conf(project_id, s)
-            plugin_manifests = k3s_plugins.aggregate_manifests(req.name, project_id, s)
+            plugin_manifests, manifest_failures = k3s_plugins.aggregate_manifests(req.name, project_id, s)
+            if manifest_failures:
+                err_msg = f"플러그인 매니페스트 생성 실패: {', '.join(manifest_failures)}"
+                _logger.error("k3s cluster %s: %s", cluster_id, err_msg)
+                yield event(K3sProgressStep.FAILED, 0, err_msg, cluster_id=cluster_id)
+                return
             extra_server_args = k3s_plugins.aggregate_server_args(s)
             extra_write_files = k3s_plugins.aggregate_extra_write_files(project_id, req.name, s)
             active_plugins = k3s_plugins.get_active_plugin_names(s)
             occm_active = active_plugins.get("occm", False)
 
-            userdata = k3s_cloudinit.generate_server_userdata(
+            userdata_result = k3s_cloudinit.generate_server_userdata(
                 cluster_name=req.name,
                 k3s_version=k3s_version,
                 callback_url=callback_url,
@@ -329,18 +348,20 @@ async def create_k3s_cluster_async(
                 extra_write_files=extra_write_files,
                 extra_tls_sans=extra_tls_sans,
                 needs_external_cloud_provider=k3s_plugins.needs_external_cloud_provider(s),
+                os_type=os_type,
+                server_node_name=server_vm_name,
             )
 
             # --- Step 4: 서버 VM 생성 ---
-            yield event(K3sProgressStep.SERVER_CREATING, 35, "서버 VM 생성 중 (완료까지 수 분 소요)...")
+            yield event(K3sProgressStep.SERVER_CREATING, 48, "서버 VM 생성 중 (완료까지 수 분 소요)...")
             server_vm = await asyncio.to_thread(
                 nova.create_server,
                 conn,
-                f"{req.name}-server",
+                server_vm_name,
                 server_flavor_id,
                 network_id,
                 boot_volume_id,
-                userdata=userdata,
+                userdata=userdata_result.data,
                 key_name=req.key_name,
                 metadata={
                     "k3s_horse_generator_role": "k3s_server",
@@ -349,12 +370,13 @@ async def create_k3s_cluster_async(
                 },
                 delete_boot_volume_on_termination=True,
                 security_groups=[sg_id],
+                config_drive=userdata_result.config_drive,
             )
             server_vm_id = server_vm.id
-            yield event(K3sProgressStep.SERVER_CREATING, 55, f"서버 VM 생성 완료: {server_vm_id}")
+            yield event(K3sProgressStep.SERVER_CREATING, 60, f"서버 VM 생성 완료: {server_vm_id}")
 
             # --- Step 5: Redis에 클러스터 레코드 저장 ---
-            yield event(K3sProgressStep.WAITING_CALLBACK, 60, "k3s 초기화 대기 중 (서버 VM에서 k3s 설치 중)...")
+            yield event(K3sProgressStep.WAITING_CALLBACK, 65, "k3s 초기화 대기 중 (서버 VM에서 k3s 설치 중)...")
             now = datetime.now(UTC).isoformat()
             # 생성자 정보 추출
             _creator_user_id = conn._afterglow_user_id if hasattr(conn, "_afterglow_user_id") else None
@@ -387,9 +409,12 @@ async def create_k3s_cluster_async(
                     "created_by_username": _creator_username or "",
                     "created_at": now,
                     "updated_at": now,
-                    "api_lb_id": api_lb_id or "",
-                    "api_fip_id": api_fip_id or "",
-                    "api_fip_address": api_fip_address or "",
+                    "api_lb_id": "",
+                    "api_lb_pool_id": "",
+                    "api_fip_id": "",
+                    "api_fip_address": "",
+                    "os_type": os_type,
+                    "server_vm_name": server_vm_name,
                 },
             )
 
@@ -404,12 +429,17 @@ async def create_k3s_cluster_async(
             _logger.error("k3s cluster creation failed: %s", e, exc_info=True)
             yield event(K3sProgressStep.FAILED, 0, f"클러스터 생성 실패: {e}", error=str(e))
             # 롤백
-            await _rollback(conn, server_vm_id, boot_volume_id, sg_id, api_lb_id, api_fip_id)
+            await _rollback(conn, server_vm_id, boot_volume_id, sg_id)
 
     return StreamingResponse(
         progress_generator(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+            "Content-Encoding": "identity",
+        },
     )
 
 
@@ -418,8 +448,6 @@ async def _rollback(
     server_vm_id: str | None,
     boot_volume_id: str | None,
     sg_id: str | None,
-    api_lb_id: str | None = None,
-    api_fip_id: str | None = None,
 ) -> None:
     """생성 실패 시 리소스 역순 삭제."""
     if server_vm_id:
@@ -429,7 +457,6 @@ async def _rollback(
             _logger.warning("Rollback: delete server %s failed: %s", server_vm_id, e)
     if boot_volume_id:
         try:
-            # 볼륨이 인스턴스에서 분리될 때까지 잠시 대기
             await asyncio.sleep(3)
             await asyncio.to_thread(cinder.delete_volume, conn, boot_volume_id)
         except Exception as e:
@@ -439,16 +466,6 @@ async def _rollback(
             await asyncio.to_thread(neutron.delete_security_group, conn, sg_id)
         except Exception as e:
             _logger.warning("Rollback: delete SG %s failed: %s", sg_id, e)
-    if api_lb_id:
-        try:
-            await asyncio.to_thread(octavia.delete_load_balancer, conn, api_lb_id, cascade=True)
-        except Exception as e:
-            _logger.warning("Rollback: delete API LB %s failed: %s", api_lb_id, e)
-    if api_fip_id:
-        try:
-            await asyncio.to_thread(neutron.delete_floating_ip, conn, api_fip_id)
-        except Exception as e:
-            _logger.warning("Rollback: delete API FIP %s failed: %s", api_fip_id, e)
 
 
 @router.patch("/{cluster_id}/scale")
@@ -509,11 +526,12 @@ async def _scale_agents(
         # 스케일 업
         add_count = desired_count - current_count
         agent_flavor_id = cluster.get("agent_flavor_id") or s.k3s_default_agent_flavor_id
-        network_id = cluster.get("network_id") or s.default_network_id
+        network_id = cluster.get("network_id") or ""
         ssh_public_key = cluster.get("ssh_public_key") or None
         cluster_name = cluster.get("name") or cluster_id
         k3s_version = cluster.get("k3s_version") or s.k3s_version
-        image_id = s.k3s_server_image_id
+        scale_os_type = cluster.get("os_type") or "ubuntu"
+        image_id = s.k3s_fcos_image_id if scale_os_type == "fcos" else s.k3s_server_image_id
         boot_volume_size = s.k3s_boot_volume_size_gb
         sg_id = cluster.get("security_group_id") or None
 
@@ -524,10 +542,28 @@ async def _scale_agents(
             await k3s_cluster.update_cluster_status(project_id, cluster_id, "ACTIVE", f"스케일 업 실패: {e}")
             return
 
+        # network_id 폴백: DB → 설정값
+        if not network_id:
+            if s.default_network_enabled:
+                try:
+                    from app.services.default_network import ensure_default_network as _ensure_net
+
+                    _default_net = await _ensure_net(
+                        conn,
+                        project_id,
+                        external_network_id=s.default_network_external_id or None,
+                        cidr=s.default_network_cidr,
+                    )
+                    network_id = _default_net.id
+                except Exception:
+                    _logger.warning("스케일 업: Default 네트워크 조회 실패, 설정값 폴백", exc_info=True)
+                    network_id = s.default_network_id
+            else:
+                network_id = s.default_network_id
+
         new_entries: list[dict] = []
-        for i in range(add_count):
-            agent_idx = current_count + i + 1
-            agent_name = f"{cluster_name}-agent-{agent_idx}"
+        for _i in range(add_count):
+            agent_name = f"{cluster_name}-{_rand_suffix()}"
             try:
                 vol = await asyncio.to_thread(
                     cinder.create_volume_from_image, conn, f"{agent_name}-boot", image_id, boot_volume_size
@@ -535,13 +571,14 @@ async def _scale_agents(
                 _agent_args = k3s_plugins.aggregate_agent_args(s)
                 if not _agent_args and cluster.get("occm_enabled"):
                     _agent_args = ["--kubelet-arg=cloud-provider=external"]
-                userdata = k3s_cloudinit.generate_agent_userdata(
+                scale_userdata = k3s_cloudinit.generate_agent_userdata(
                     cluster_name=cluster_name,
                     k3s_version=k3s_version,
                     server_ip=server_ip,
                     node_token=node_token or "",
                     ssh_public_key=ssh_public_key,
                     extra_agent_args=_agent_args,
+                    os_type=scale_os_type,
                 )
                 vm = await asyncio.to_thread(
                     nova.create_server,
@@ -550,10 +587,11 @@ async def _scale_agents(
                     agent_flavor_id,
                     network_id,
                     vol.id,
-                    userdata=userdata,
+                    userdata=scale_userdata.data,
                     metadata={"k3s_horse_generator_role": "k3s_agent", "k3s_horse_generator_cluster_id": cluster_id},
                     delete_boot_volume_on_termination=True,
                     security_groups=[sg_id] if sg_id else None,
+                    config_drive=scale_userdata.config_drive,
                 )
                 new_entries.append({"vm_id": vm.id, "name": agent_name})
                 _logger.info("k3s scale up: agent %s created: %s", agent_name, vm.id)
@@ -660,9 +698,9 @@ async def delete_k3s_cluster(
     if agent_vm_ids:
         vm_name_map = await k3s_cluster.get_agent_vm_names(cluster_id, agent_vm_ids)
         all_node_names.extend([name for name in vm_name_map.values() if name])
-    cluster_name = cluster.get("name") or ""
-    if cluster_name:
-        all_node_names.append(f"{cluster_name}-server")
+    server_node_name = cluster.get("server_vm_name") or ""
+    if server_node_name:
+        all_node_names.append(server_node_name)
     if all_node_names:
         _logger.info("k3s delete: K8s 노드 삭제 시작: %s", all_node_names)
         try:

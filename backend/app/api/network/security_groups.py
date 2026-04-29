@@ -5,10 +5,11 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import openstack
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from app.api.deps import get_os_conn
+from app.rate_limit import limiter
 from app.services import neutron
 from app.services.cache import cached_call, invalidate, ttl_slow
 
@@ -46,7 +47,9 @@ async def list_security_groups(
 
 
 @router.post("", status_code=201)
+@limiter.limit("10/minute")
 async def create_security_group(
+    request: Request,
     req: CreateSecurityGroupRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
@@ -60,7 +63,9 @@ async def create_security_group(
 
 
 @router.delete("/{sg_id}", status_code=204)
+@limiter.limit("10/minute")
 async def delete_security_group(
+    request: Request,
     sg_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
@@ -73,7 +78,9 @@ async def delete_security_group(
 
 
 @router.post("/{sg_id}/rules", status_code=201)
+@limiter.limit("10/minute")
 async def create_security_group_rule(
+    request: Request,
     sg_id: str,
     req: CreateSecurityGroupRuleRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
@@ -97,7 +104,9 @@ async def create_security_group_rule(
 
 
 @router.delete("/{sg_id}/rules/{rule_id}", status_code=204)
+@limiter.limit("10/minute")
 async def delete_security_group_rule(
+    request: Request,
     sg_id: str,
     rule_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),

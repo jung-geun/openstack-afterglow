@@ -34,6 +34,10 @@
 12. [그룹 관리](#12-그룹-관리)
 13. [역할 관리](#13-역할-관리)
 14. [GPU 호스트 모니터링](#14-gpu-호스트-모니터링)
+15. [GPU Quota 관리](#15-gpu-quota-관리)
+16. [하이퍼바이저 상세](#16-하이퍼바이저-상세)
+17. [파일 스토리지 빌드](#17-파일-스토리지-빌드)
+18. [모니터링 요약](#18-모니터링-요약)
 
 ---
 
@@ -1324,3 +1328,115 @@ Placement API에서 각 호스트별 GPU 정보를 조회합니다. PCI 디바�
 | `aggregated_hosts` | 호스트명 기준으로 병합된 GPU 정보 (PCI 주소 접미사 제거) |
 | `summary` | 전체 GPU 총/사용/가용 수 |
 | `gpu_types` | GPU 모델별 집계 |
+---
+
+## 15. GPU Quota 관리
+
+> 태그: `admin-gpu`
+
+GPU 리소스의 alias 정의와 프로젝트별 쿼터를 관리합니다.
+
+### 엔드포인트 목록
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| `GET` | `/api/admin/gpu-aliases` | GPU alias 목록 조회 |
+| `GET` | `/api/admin/gpu-quotas/defaults` | 기본 GPU 쿼터 조회 |
+| `PUT` | `/api/admin/gpu-quotas/defaults` | 기본 GPU 쿼터 수정 |
+| `DELETE` | `/api/admin/gpu-quotas/defaults/{gpu_type}` | 기본 GPU 쿼터 유형별 삭제 |
+| `GET` | `/api/admin/gpu-quotas/{project_id}` | 프로젝트 GPU 쿼터 조회 |
+| `PUT` | `/api/admin/gpu-quotas/{project_id}` | 프로젝트 GPU 쿼터 수정 |
+| `DELETE` | `/api/admin/gpu-quotas/{project_id}/{gpu_type}` | 프로젝트 GPU 쿼터 유형별 삭제 |
+
+### GET /api/admin/gpu-aliases
+
+클러스터에 구성된 GPU alias 목록을 반환합니다. 각 alias는 GPU 모델(예: A100)을 사용자 친화적인 이름으로 매핑합니다。
+
+**응답 (200 OK)** — GPU alias 배열
+
+### GET /api/admin/gpu-quotas/defaults
+
+모든 프로젝트에 적용되는 기본 GPU 쿼터를 반환합니다。
+
+**응답 (200 OK)** — 기본 GPU 쿼터 객체
+
+### PUT /api/admin/gpu-quotas/defaults
+
+기본 GPU 쿼터를 수정합니다. 새 프로젝트 생성 시 이 값이 적용됩니다。
+
+**요청 본문** — GPU 타입별 쿼터 매핑
+
+### DELETE /api/admin/gpu-quotas/defaults/{gpu_type}
+
+지정된 GPU 타입의 기본 쿼터를 삭제합니다.
+
+| 파라미터 | 위치 | 타입 | 필수 | 설명 |
+|----------|------|------|------|------|
+| `gpu_type` | path | string | 예 | GPU 타입 식별자 |
+
+**응답**: `204 No Content`
+
+### GET /api/admin/gpu-quotas/{project_id}
+
+지정 프로젝트의 GPU 쿼터를 반환합니다. 프로젝트별 쿼터가 없으면 기본 쿼터를 반환합니다。
+
+| 파라미터 | 위치 | 타입 | 필수 | 설명 |
+|----------|------|------|------|------|
+| `project_id` | path | string | 예 | 프로젝트 UUID |
+
+**응답 (200 OK)** — 프로젝트 GPU 쿼터 객체
+
+### PUT /api/admin/gpu-quotas/{project_id}
+
+지정 프로젝트의 GPU 쿼터를 수정합니다.
+
+| 파라미터 | 위치 | 타입 | 필수 | 설명 |
+|----------|------|------|------|------|
+| `project_id` | path | string | 예 | 프로젝트 UUID |
+
+**요청 본문** — GPU 타입별 쿼터 매핑
+
+### DELETE /api/admin/gpu-quotas/{project_id}/{gpu_type}
+
+지정 프로젝트의 특정 GPU 타입 쿼터를 삭제합니다. 삭제 후 해당 타입은 기본 쿼터로 돌아갑니다。
+
+| 파라미터 | 위치 | 타입 | 필수 | 설명 |
+|----------|------|------|------|------|
+| `project_id` | path | string | 예 | 프로젝트 UUID |
+| `gpu_type` | path | string | 예 | GPU 타입 식별자 |
+
+**응답**: `204 No Content`
+
+---
+
+## 16. 하이퍼바이저 상세
+
+### GET /api/admin/hypervisors/{hypervisor_id}
+
+특정 하이퍼바이저의 상세 정보를 반환합니다.
+
+| 파라미터 | 위치 | 타입 | 필수 | 설명 |
+|----------|------|------|------|------|
+| `hypervisor_id` | path | string | 예 | 하이퍼바이저 ID |
+
+**응답 (200 OK)** — 하이퍼바이저 상세 객체
+
+---
+
+## 17. 파일 스토리지 빌드
+
+### GET /api/admin/file-storage/builds
+
+현재 진행 중이거나 대기 중인 파일 스토리지 빌드 목록을 반환합니다。
+
+**응답 (200 OK)** — 활성 빌드 배열
+
+---
+
+## 18. 모니터링 요약
+
+### GET /api/admin/monitoring/summary
+
+클러스터 전체 모니터링 요약을 반환합니다. 서비스 상태, 리소스 사용량, 알림 등을 종합합니다。
+
+**응답 (200 OK)** — 모니터링 요약 객체

@@ -14,13 +14,19 @@
 	interface TopologyRouter {
 		id: string; name: string; status: string;
 		external_gateway_network_id: string | null;
+		external_gateway_ips: string[];
+		interface_ips: { ip_address: string; subnet_id: string }[];
+		is_distributed: boolean;
+		is_ha: boolean;
 		connected_subnet_ids: string[];
+		dvr_subnet_ids: string[];
 		project_id: string | null;
 	}
 	interface TopologyInstance {
 		id: string; name: string; status: string;
+		project_id?: string | null;
 		network_names: string[];
-		ip_addresses: { addr: string; type: string; network_name: string }[];
+		ip_addresses: { addr: string; type: string; network_name: string; network_id?: string | null }[];
 	}
 	interface FloatingIpInfo {
 		id: string; floating_ip_address: string;
@@ -28,11 +34,30 @@
 		port_id: string | null; floating_network_id: string;
 		project_id?: string | null;
 	}
+	interface TopologyLBMember {
+		id: string; address: string; protocol_port: number;
+		status: string; subnet_id: string | null;
+		pool_id: string; server_id: string | null;
+	}
+	interface TopologyLBListener {
+		id: string; name: string; protocol: string;
+		protocol_port: number; default_pool_id: string | null;
+	}
+	interface TopologyLoadBalancer {
+		id: string; name: string;
+		vip_address: string | null; vip_port_id: string | null;
+		vip_subnet_id: string | null; vip_network_id: string | null;
+		provisioning_status: string; operating_status: string;
+		project_id: string | null;
+		listeners: TopologyLBListener[];
+		members: TopologyLBMember[];
+	}
 	interface TopologyData {
 		networks: TopologyNetwork[];
 		routers: TopologyRouter[];
 		instances: TopologyInstance[];
 		floating_ips: FloatingIpInfo[];
+		load_balancers?: TopologyLoadBalancer[];
 	}
 
 	import { onMount } from 'svelte';
@@ -43,12 +68,14 @@
 		showAll = false,
 		onSelectInstance = undefined,
 		onSelectRouter = undefined,
+		onSelectLoadBalancer = undefined,
 	}: {
 		data: TopologyData;
 		projectId?: string | null;
 		showAll?: boolean;
 		onSelectInstance?: (id: string) => void;
 		onSelectRouter?: (id: string) => void;
+		onSelectLoadBalancer?: (lb: TopologyLoadBalancer) => void;
 	} = $props();
 
 	// ── Light mode detection ──────────────────────────────────────────────────
@@ -92,9 +119,9 @@
 	);
 
 	const orderedNetworks = $derived([
-		...visibleNetworks.filter(n => n.is_external),
-		...visibleNetworks.filter(n => n.is_shared && !n.is_external),
-		...visibleNetworks.filter(n => !n.is_external && !n.is_shared),
+		...visibleNetworks.filter(n => n.is_external).sort((a, b) => a.name.localeCompare(b.name)),
+		...visibleNetworks.filter(n => n.is_shared && !n.is_external).sort((a, b) => a.name.localeCompare(b.name)),
+		...visibleNetworks.filter(n => !n.is_external && !n.is_shared).sort((a, b) => a.name.localeCompare(b.name)),
 	]);
 
 	const netColors = $derived.by(() => {
@@ -116,8 +143,17 @@
 	// Index per network (for sorting)
 	const netIdx = $derived(new Map(orderedNetworks.map((n, i) => [n.id, i])));
 
-	// name → network id
-	const nameToNetId = $derived(new Map(data.networks.map(n => [n.name, n.id])));
+	// name → network id (단일 네트워크용, 이름 충돌 없는 경우 fast path)
+	// admin showAll 모드에서는 아래 nameToNetworks + resolveNetId 를 사용
+	const nameToNetworks = $derived.by(() => {
+		const m = new Map<string, TopologyNetwork[]>();
+		for (const n of data.networks) {
+			const arr = m.get(n.name) ?? [];
+			arr.push(n);
+			m.set(n.name, arr);
+		}
+		return m;
+	});
 
 	// subnet_id → network_id
 	const subnetNetId = $derived(new Map(
@@ -129,6 +165,19 @@
 		data.networks.flatMap(n => n.subnet_details.map(s => [s.id, s]))
 	));
 
+	// router id → TopologyRouter (상세 정보 툴팁용)
+	const routerById = $derived(new Map(data.routers.map(r => [r.id, r])));
+
+	// floating_ip_address → floating_network_id (외부 네트워크 ID)
+	const fipNetMap = $derived(new Map(
+		data.floating_ips.map(f => [f.floating_ip_address, f.floating_network_id])
+	));
+
+	// port_id → FloatingIpInfo (LB VIP의 FIP 매칭용)
+	const fipPortMap = $derived(new Map(
+		data.floating_ips.filter(f => f.port_id).map(f => [f.port_id!, f])
+	));
+
 	// ── Item rows ─────────────────────────────────────────────────────────────
 	interface ItemRow {
 		type: 'router' | 'instance';
@@ -137,6 +186,7 @@
 		status: string;
 		connectedNetIds: string[];   // sorted by netIdx
 		netIps: Map<string, string[]>;  // netId → IP list
+		floatingNetIps: Map<string, string[]>;  // ext_netId → floating IP list
 		leftIdx: number;
 		rightIdx: number;
 	}
@@ -154,6 +204,9 @@
 
 			if (router.external_gateway_network_id) {
 				netSet.add(router.external_gateway_network_id);
+				if (router.external_gateway_ips?.length) {
+					netIps.set(router.external_gateway_network_id, [...router.external_gateway_ips]);
+				}
 			}
 			for (const sid of router.connected_subnet_ids) {
 				const nid = subnetNetId.get(sid);
@@ -173,19 +226,29 @@
 			const indices = connectedNetIds.map(id => netIdx.get(id) ?? 0);
 			result.push({
 				type: 'router', id: router.id, name: router.name, status: router.status,
-				connectedNetIds, netIps,
+				connectedNetIds, netIps, floatingNetIps: new Map(),
 				leftIdx: indices.length ? Math.min(...indices) : 0,
 				rightIdx: indices.length ? Math.max(...indices) : 0,
 			});
 		}
 
 		// Instances
-		for (const inst of data.instances) {
+		for (const inst of data.instances.filter(i => projectId == null || i.project_id === projectId)) {
 			const netSet = new Set<string>();
 			const netIps = new Map<string, string[]>();
+			const floatingNetIps = new Map<string, string[]>();
 
 			for (const ipInfo of inst.ip_addresses) {
-				const nid = nameToNetId.get(ipInfo.network_name);
+				if (ipInfo.type === 'floating') {
+					const extNetId = fipNetMap.get(ipInfo.addr);
+					if (extNetId) {
+						const fips = floatingNetIps.get(extNetId) ?? [];
+						if (!fips.includes(ipInfo.addr)) fips.push(ipInfo.addr);
+						floatingNetIps.set(extNetId, fips);
+					}
+					continue;
+				}
+				const nid = ipInfo.network_id || resolveNetId(ipInfo.network_name, ipInfo.addr);
 				if (!nid) continue;
 				netSet.add(nid);
 				const ips = netIps.get(nid) ?? [];
@@ -199,7 +262,7 @@
 			const indices = connectedNetIds.map(id => netIdx.get(id) ?? 0);
 			result.push({
 				type: 'instance', id: inst.id, name: inst.name, status: inst.status,
-				connectedNetIds, netIps,
+				connectedNetIds, netIps, floatingNetIps,
 				leftIdx: indices.length ? Math.min(...indices) : 0,
 				rightIdx: indices.length ? Math.max(...indices) : 0,
 			});
@@ -215,11 +278,38 @@
 		return result;
 	});
 
+	// ── LB items ──────────────────────────────────────────────────────────────
+	interface LBItem {
+		lb: TopologyLoadBalancer;
+		vipNetId: string | null;
+		rowIdx: number;
+	}
+
+	const lbItems = $derived.by((): LBItem[] => {
+		const lbs = (data.load_balancers ?? []).filter(lb =>
+			projectId == null || lb.project_id === projectId
+		);
+		return lbs.map((lb, i) => {
+			const vipNetId =
+				lb.vip_network_id && netCX.has(lb.vip_network_id)
+					? lb.vip_network_id
+					: lb.vip_subnet_id
+					  ? (subnetNetId.get(lb.vip_subnet_id) ?? null)
+					  : null;
+			return { lb, vipNetId, rowIdx: rows.length + i };
+		});
+	});
+
+	// instance id → rows 인덱스 (LB 멤버 엣지 그릴 때 cy 계산용)
+	const instRowIdx = $derived(new Map(
+		rows.flatMap((r, i) => r.type === 'instance' ? [[r.id, i] as [string, number]] : [])
+	));
+
 	// ── SVG dimensions ────────────────────────────────────────────────────────
-	const barH  = $derived(Math.max(rows.length, 1) * ROW_H + 20);
+	const barH  = $derived(Math.max(rows.length + lbItems.length, 1) * ROW_H + 20);
 	// Extra right space: items are placed to the RIGHT of their rightmost bar
 	const svgW  = $derived(Math.max(640,
-		L_PAD + orderedNetworks.length * COL_W + IP_GAP + ITEM_W + 40
+		L_PAD + Math.max(0, orderedNetworks.length - 1) * COL_W + IP_GAP + ITEM_W + 40
 	));
 	const svgH  = $derived(TOP_H + barH + BOT_H);
 
@@ -277,6 +367,46 @@
 
 	function trunc(s: string, n: number): string {
 		return s.length > n ? s.slice(0, n - 1) + '…' : s;
+	}
+
+	// ── IP / CIDR 유틸 ────────────────────────────────────────────────────────
+	function _ipToNum(ip: string): number | null {
+		const parts = ip.split('.');
+		if (parts.length !== 4) return null;
+		const nums = parts.map(Number);
+		if (nums.some(n => isNaN(n) || n < 0 || n > 255)) return null;
+		return ((nums[0] << 24) | (nums[1] << 16) | (nums[2] << 8) | nums[3]) >>> 0;
+	}
+
+	function _ipv4InCidr(ip: string, cidr: string): boolean {
+		const slashIdx = cidr.lastIndexOf('/');
+		if (slashIdx < 0) return false;
+		const net = cidr.slice(0, slashIdx);
+		const mask = parseInt(cidr.slice(slashIdx + 1));
+		if (isNaN(mask) || mask < 0 || mask > 32) return false;
+		const ipNum = _ipToNum(ip);
+		const netNum = _ipToNum(net);
+		if (ipNum === null || netNum === null) return false;
+		const maskBits = mask === 0 ? 0 : ((0xFFFFFFFF << (32 - mask)) >>> 0);
+		return (ipNum & maskBits) === (netNum & maskBits);
+	}
+
+	/**
+	 * 네트워크 이름 + IP 주소로 실제 network_id 해석.
+	 * admin 모드에서 동일 이름 네트워크가 여러 프로젝트에 존재할 때
+	 * 서브넷 CIDR 매칭으로 올바른 네트워크를 찾는다.
+	 * floating IP 등 CIDR 미매칭 시 첫 번째 후보를 반환한다.
+	 */
+	function resolveNetId(networkName: string, ipAddr: string): string | undefined {
+		const nets = nameToNetworks.get(networkName);
+		if (!nets?.length) return undefined;
+		if (nets.length === 1) return nets[0].id;
+		for (const net of nets) {
+			for (const subnet of net.subnet_details) {
+				if (_ipv4InCidr(ipAddr, subnet.cidr)) return net.id;
+			}
+		}
+		return nets[0].id; // fallback
 	}
 
 	/** 같은 방향(좌/우)에 N개 연결선이 있을 때 i번째 선의 Y 오프셋 계산. */
@@ -367,7 +497,10 @@
 			{@const iText   = instText(row.status)}
 
 			<!-- Connection lines + IP labels -->
-			<!-- 같은 방향(좌/우)에 연결된 네트워크 목록을 미리 계산 (Y 분산용) -->
+			<!-- 같은 방향(좌/우)에 연결된 네트워크 목록을 미리 계산 (Y 분산용, floating 포함) -->
+			{@const fipNetIds = [...row.floatingNetIps.keys()]}
+			{@const allLeftNets  = [...row.connectedNetIds, ...fipNetIds].filter(id => (netCX.get(id) ?? 0) < cx)}
+			{@const allRightNets = [...row.connectedNetIds, ...fipNetIds].filter(id => (netCX.get(id) ?? 0) >= cx)}
 			{@const leftNets  = row.connectedNetIds.filter(id => (netCX.get(id) ?? 0) < cx)}
 			{@const rightNets = row.connectedNetIds.filter(id => (netCX.get(id) ?? 0) >= cx)}
 
@@ -388,7 +521,7 @@
 				{@const col  = netColors.get(netId) ?? '#3b82f6'}
 				{@const ips  = row.netIps.get(netId) ?? []}
 				{@const isLeft   = barX < cx}
-				{@const sideList = isLeft ? leftNets : rightNets}
+				{@const sideList = isLeft ? allLeftNets : allRightNets}
 				{@const sideIdx  = sideList.indexOf(netId)}
 				{@const lineY    = connectionY(cy, sideIdx, sideList.length)}
 				<!-- 최대 2개 IP만 라벨로 표시 -->
@@ -450,6 +583,38 @@
 				{/if}
 			{/each}
 
+			<!-- Floating IP 점선 연결 (외부 네트워크 바 → 인스턴스 박스) -->
+			{#if !isR}
+				{#each [...row.floatingNetIps.entries()] as [fNetId, fIps]}
+					{@const fBarX    = netCX.get(fNetId) ?? 0}
+					{@const fCol     = netColors.get(fNetId) ?? '#ea580c'}
+					{@const fIsLeft  = fBarX < cx}
+					{@const fTargetX = fIsLeft ? ix : ix + ITEM_W}
+					{@const fLabelX  = fIsLeft ? fBarX + 10 : fBarX - 10}
+					{@const fAnchor  = fIsLeft ? 'start' : 'end'}
+					{@const fSideAll = fIsLeft ? allLeftNets : allRightNets}
+					{@const fSideIdx = fSideAll.indexOf(fNetId)}
+					{@const fLineY   = connectionY(cy, fSideIdx, fSideAll.length)}
+					<!-- 점선 -->
+					<line
+						x1={fBarX} y1={fLineY}
+						x2={fTargetX} y2={fLineY}
+						stroke={fCol} stroke-width="1.5" opacity="0.55"
+						stroke-dasharray="6 3"
+					/>
+					<!-- floating IP 라벨 -->
+					{#each fIps.slice(0, 2) as fip, fi2}
+						<text
+							x={fLabelX} y={fLineY - 5 - fi2 * 11}
+							text-anchor={fAnchor}
+							fill={fCol} font-size="9" opacity="0.7"
+							font-family="ui-monospace, monospace"
+							style="pointer-events:none"
+						>{fip}</text>
+					{/each}
+				{/each}
+			{/if}
+
 			<!-- Item box -->
 			{#if isR}
 				<!-- Router -->
@@ -479,8 +644,9 @@
 					fill={rStroke} font-size="9"
 					font-family="ui-sans-serif, system-ui, sans-serif"
 					style="pointer-events:none"
-				>라우터 · {row.status}</text>
-				<title>{row.name}{'\n'}ID: {row.id}{'\n'}상태: {row.status}</title>
+				>라우터 · {row.status}{routerById.get(row.id)?.is_distributed ? ' · DVR' : ''}{routerById.get(row.id)?.is_ha ? ' · HA' : ''}</text>
+				{@const rDetail = routerById.get(row.id)}
+				<title>{row.name}{'\n'}ID: {row.id}{'\n'}상태: {row.status}{rDetail?.is_distributed ? '\nDVR: 활성' : ''}{rDetail?.is_ha ? '\nHA: 활성' : ''}{rDetail?.external_gateway_ips?.length ? '\nGW IP: ' + rDetail.external_gateway_ips.join(', ') : ''}{rDetail?.interface_ips?.length ? '\n인터페이스: ' + rDetail.interface_ips.map(i => i.ip_address).join(', ') : ''}</title>
 			{:else}
 				<!-- Instance -->
 				<rect
@@ -513,9 +679,117 @@
 					fill={iStroke} font-size="9"
 					font-family="ui-sans-serif, system-ui, sans-serif"
 					style="pointer-events:none"
-				>인스턴스 · {row.status}</text>
+				>인스턴스 · {trunc(row.status, 12)}</text>
 				<title>{row.name}{'\n'}ID: {row.id}{'\n'}상태: {row.status}{'\n'}IP: {[...row.netIps.values()].flat().join(', ')}</title>
 			{/if}
+		{/each}
+
+		<!-- ── Load Balancer nodes + edges ── -->
+		{#each lbItems as { lb, vipNetId, rowIdx }}
+			{@const cy   = rowCY(rowIdx)}
+			{@const iy   = rowY(rowIdx)}
+			{@const barX = vipNetId ? (netCX.get(vipNetId) ?? 0) : 0}
+			{@const col  = vipNetId ? (netColors.get(vipNetId) ?? '#06b6d4') : '#06b6d4'}
+			{@const cx   = vipNetId ? barX + IP_GAP + ITEM_W / 2 : svgW / 2}
+			{@const ix   = cx - ITEM_W / 2}
+			{@const isActive = lb.provisioning_status === 'ACTIVE'}
+			{@const lbStroke = isActive ? '#06b6d4' : '#f59e0b'}
+			{@const lbFill   = isLight ? (isActive ? '#ecfeff' : '#fffbeb') : (isActive ? '#083344' : '#1c1400')}
+			{@const lbText   = isLight ? (isActive ? '#0891b2' : '#92400e') : (isActive ? '#67e8f9' : '#fcd34d')}
+
+			<!-- VIP 네트워크 연결선 -->
+			{#if vipNetId}
+				<line
+					x1={barX} y1={cy}
+					x2={ix} y2={cy}
+					stroke={col} stroke-width="2.5" opacity="0.8"
+				/>
+				<!-- VIP IP 라벨 -->
+				{#if lb.vip_address}
+					<text
+						x={barX + 10} y={cy - 5}
+						fill={col} font-size="9" opacity="0.85"
+						font-family="ui-monospace, monospace"
+						style="pointer-events:none"
+					>{lb.vip_address}</text>
+				{/if}
+			{/if}
+
+			<!-- FIP 점선 (LB 포트에 Floating IP가 연결된 경우) -->
+			{#if lb.vip_port_id}
+				{@const fip = fipPortMap.get(lb.vip_port_id)}
+				{#if fip}
+					{@const fBarX = netCX.get(fip.floating_network_id) ?? 0}
+					{@const fCol  = netColors.get(fip.floating_network_id) ?? '#ea580c'}
+					<line
+						x1={fBarX} y1={cy}
+						x2={ix} y2={cy}
+						stroke={fCol} stroke-width="1.5" opacity="0.55"
+						stroke-dasharray="6 3"
+					/>
+					<text
+						x={fBarX + 10} y={cy - 5}
+						fill={fCol} font-size="9" opacity="0.7"
+						font-family="ui-monospace, monospace"
+						style="pointer-events:none"
+					>{fip.floating_ip_address}</text>
+				{/if}
+			{/if}
+
+			<!-- 멤버 → 인스턴스 연결선 -->
+			{#each lb.members as member}
+				{#if member.server_id}
+					{@const instIdx = instRowIdx.get(member.server_id)}
+					{#if instIdx !== undefined}
+						{@const instRow    = rows[instIdx]}
+						{@const instCx     = itemCX(instRow)}
+						{@const instCy     = rowCY(instIdx)}
+						{@const mActive    = member.status === 'ACTIVE'}
+						{@const mError     = member.status === 'ERROR'}
+						{@const mCol       = mActive ? '#22c55e' : mError ? '#ef4444' : '#64748b'}
+						<!-- 곡선 경로: LB 노드 → 인스턴스 노드 -->
+						<path
+							d="M{ix + ITEM_W} {cy} C{ix + ITEM_W + 40} {cy} {instCx - ITEM_W / 2 - 40} {instCy} {instCx - ITEM_W / 2} {instCy}"
+							fill="none" stroke={mCol} stroke-width="1.5" opacity="0.6"
+							stroke-dasharray={mActive ? 'none' : '4 2'}
+						/>
+					{/if}
+				{/if}
+			{/each}
+
+			<!-- LB 노드 박스 -->
+			<rect
+				x={ix} y={iy} width={ITEM_W} height={ITEM_H} rx="10"
+				fill={lbFill} stroke={lbStroke} stroke-width="1.5"
+				stroke-dasharray={isActive ? 'none' : '5 3'}
+				data-testid="lb-node-{lb.id}"
+				style="cursor:pointer"
+				role="button"
+				tabindex="0"
+				onclick={() => onSelectLoadBalancer?.(lb)}
+				onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && onSelectLoadBalancer?.(lb)}
+			/>
+			<!-- LB 아이콘 (균형 막대) -->
+			<line x1={ix + 22} y1={cy - 8} x2={ix + 22} y2={cy + 8}
+				stroke={lbStroke} stroke-width="1.5"/>
+			<line x1={ix + 14} y1={cy - 4} x2={ix + 30} y2={cy - 4}
+				stroke={lbStroke} stroke-width="2"/>
+			<line x1={ix + 16} y1={cy + 4} x2={ix + 28} y2={cy + 4}
+				stroke={lbStroke} stroke-width="1.5" opacity="0.6"/>
+			<!-- LB 이름 + 라벨 -->
+			<text
+				x={ix + 44} y={cy - 7}
+				fill={lbText} font-size="11" font-weight="600"
+				font-family="ui-sans-serif, system-ui, sans-serif"
+				style="pointer-events:none"
+			>{trunc(lb.name || 'LB', 11)}</text>
+			<text
+				x={ix + 44} y={cy + 9}
+				fill={lbStroke} font-size="9"
+				font-family="ui-sans-serif, system-ui, sans-serif"
+				style="pointer-events:none"
+			>LB · {isActive ? 'ACTIVE' : lb.provisioning_status}</text>
+			<title>{lb.name}{'\n'}ID: {lb.id}{'\n'}VIP: {lb.vip_address ?? '-'}{'\n'}상태: {lb.provisioning_status}{'\n'}멤버: {lb.members.length}개</title>
 		{/each}
 
 		<!-- Empty state -->

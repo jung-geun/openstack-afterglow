@@ -5,6 +5,8 @@
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import StatusChip from '$lib/components/ui/StatusChip.svelte';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	interface DbInstance {
 		id: string;
@@ -30,6 +32,7 @@
 
 	let instances = $state<DbInstance[]>([]);
 	let loading = $state(true);
+	let refreshing = $state(false);
 	let deleting = $state<string | null>(null);
 	let restarting = $state<string | null>(null);
 
@@ -44,39 +47,40 @@
 	const projectId = $derived($auth.projectId ?? undefined);
 	const selectedDs = $derived(datastores.find((d) => d.name === form.datastore_type));
 
-	$effect(() => {
-		const ds = datastores.find((d) => d.name === form.datastore_type);
-		if (ds?.versions.length) {
-			form.datastore_version = ds.versions[0].name;
-		}
-	});
 
 	async function load() {
-		loading = true;
+		if (instances.length === 0) loading = true;
+		else refreshing = true;
 		try {
 			instances = await api.get<DbInstance[]>('/api/database-instances', token, projectId);
 		} catch {
 			instances = [];
 		} finally {
 			loading = false;
+			refreshing = false;
 		}
 	}
 
 	async function openModal() {
-		showModal = true;
 		createError = '';
-		form = { name: '', flavor_id: '', volume_size: 5, datastore_type: '', datastore_version: '' };
 		try {
 			[flavors, datastores] = await Promise.all([
 				api.get<DbFlavor[]>('/api/database-instances/flavors', token, projectId),
 				api.get<Datastore[]>('/api/database-instances/datastores', token, projectId),
 			]);
-			if (flavors.length) form.flavor_id = flavors[0].id;
-			if (datastores.length) {
-				form.datastore_type = datastores[0].name;
-				if (datastores[0].versions.length) form.datastore_version = datastores[0].versions[0].name;
-			}
-		} catch { /* ignore */ }
+		} catch (e) {
+			createError = '플레이버/데이터스토어 목록을 불러오지 못했습니다. 네트워크 상태를 확인하세요.';
+			console.error('플레이버/데이터스토어 조회 실패:', e);
+		}
+		form = {
+			name: '',
+			flavor_id: flavors.length ? flavors[0].id : '',
+			volume_size: 5,
+			datastore_type: datastores.length ? datastores[0].name : '',
+			datastore_version: (datastores.length && datastores[0].versions.length)
+				? datastores[0].versions[0].name : '',
+		};
+		showModal = true;
 	}
 
 	async function createInstance() {
@@ -122,6 +126,13 @@
 		}
 	}
 
+	const ar = createAutoRefresh(load, {
+		storageKey: 'admin-database-instances',
+		defaultActive: true,
+		defaultInterval: 15,
+		intervalOptions: [10, 15, 30, 60]
+	});
+
 	onMount(load);
 </script>
 
@@ -143,6 +154,10 @@
 					<div>
 						<label class="block text-xs text-gray-400 mb-1">데이터스토어</label>
 						<select bind:value={form.datastore_type}
+							onchange={() => {
+								const ds = datastores.find(d => d.name === form.datastore_type);
+								form.datastore_version = ds?.versions.length ? ds.versions[0].name : '';
+							}}
 							class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500">
 							{#each datastores as ds}<option value={ds.name}>{ds.name}</option>{/each}
 						</select>
@@ -155,6 +170,8 @@
 								{#each selectedDs.versions as v}<option value={v.name}>{v.name}</option>{/each}
 							</select>
 						</div>
+					{:else if selectedDs}
+						<p class="text-xs text-amber-400">이 데이터스토어에 사용 가능한 버전이 없습니다.</p>
 					{/if}
 				{:else}
 					<div class="grid grid-cols-2 gap-2">
@@ -209,7 +226,13 @@
 		{#snippet actions()}
 			<button onclick={openModal}
 				class="text-xs text-white bg-amber-600 hover:bg-amber-500 transition-colors px-3 py-1.5 rounded border border-amber-500">+ 인스턴스 생성</button>
-			<button onclick={load} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
+			<AutoRefreshControl
+				bind:active={ar.active}
+				bind:intervalSeconds={ar.intervalSeconds}
+				intervalOptions={ar.intervalOptions}
+				refreshing={loading || refreshing}
+				onManualRefresh={load}
+			/>
 		{/snippet}
 	</PageHeader>
 
@@ -218,6 +241,7 @@
 	{:else if instances.length === 0}
 		<div class="text-gray-600 text-sm">DB 인스턴스가 없습니다</div>
 	{:else}
+		<div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 		<div class="overflow-x-auto">
 			<table class="w-full text-sm">
 				<thead>
@@ -258,6 +282,7 @@
 					{/each}
 				</tbody>
 			</table>
+		</div>
 		</div>
 	{/if}
 </div>

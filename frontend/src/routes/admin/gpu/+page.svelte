@@ -4,6 +4,8 @@
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	interface GpuDevice {
 		provider_name: string;
@@ -66,6 +68,7 @@
 	let summary = $state({ total_hosts: 0, total_gpus: 0, used_gpus: 0, available_gpus: 0 });
 	let gpuTypes = $state<GpuType[]>([]);
 	let loading = $state(true);
+	let refreshing = $state(false);
 	let error = $state('');
 	let expandedHost = $state<string | null>(null);
 	let sortColumn = $state('');
@@ -77,7 +80,8 @@
 	const projectId = $derived($auth.projectId ?? undefined);
 
 	async function load() {
-		loading = true;
+		if (aggregatedHosts.length === 0) loading = true;
+		else refreshing = true;
 		error = '';
 		try {
 			const res = await api.get<GpuResponse>('/api/admin/gpu-hosts', token, projectId);
@@ -89,6 +93,7 @@
 			aggregatedHosts = [];
 		} finally {
 			loading = false;
+			refreshing = false;
 		}
 	}
 
@@ -147,13 +152,26 @@
 			})
 	);
 
+	const ar = createAutoRefresh(load, {
+		storageKey: 'admin-gpu',
+		defaultActive: true,
+		defaultInterval: 30,
+		intervalOptions: [15, 30, 60]
+	});
+
 	onMount(load);
 </script>
 
 <div class="p-4 md:p-8 max-w-6xl">
 	<PageHeader breadcrumb="COMPUTE / GPU" title="GPU">
 		{#snippet actions()}
-			<button onclick={() => load()} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
+			<AutoRefreshControl
+				bind:active={ar.active}
+				bind:intervalSeconds={ar.intervalSeconds}
+				intervalOptions={ar.intervalOptions}
+				refreshing={loading || refreshing}
+				onManualRefresh={load}
+			/>
 		{/snippet}
 	</PageHeader>
 
@@ -164,6 +182,7 @@
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={5} />
 	{:else}
+		<div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 		<!-- 요약 카드 -->
 		<div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
 			<div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
@@ -345,6 +364,7 @@
 		{:else if filteredHosts.length === 0}
 			<div class="text-center text-gray-500 text-sm py-8">조건에 맞는 호스트가 없습니다</div>
 		{/if}
+		</div>
 	{/if}
 
 </div>

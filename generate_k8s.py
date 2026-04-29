@@ -160,15 +160,13 @@ def render_secret(cfg: dict) -> str:
             f'  K3S_KUBECONFIG_ENCRYPTION_KEY: {_yaml_str(enc_key)}',
         ])
 
-    # db_url = db.get("url", "")
-    # if db_url:
-    #     # aiomysql → asyncmy 드라이버 변환 (k8s 배포 표준)
-    #     db_url_k8s = db_url.replace("mysql+aiomysql://", "mysql+asyncmy://")
-    #     lines.extend([
-    #         "",
-    #         "  # 애플리케이션 데이터베이스 연결 URL",
-    #         f'  DATABASE_URL: {_yaml_str(db_url_k8s)}',
-    #     ])
+    db_url = db.get("url", "")
+    if db_url:
+        lines.extend([
+            "",
+            "  # 애플리케이션 데이터베이스 연결 URL",
+            f'  DATABASE_URL: {_yaml_str(db_url)}',
+        ])
 
     lines.append("")
     return "\n".join(lines)
@@ -188,6 +186,7 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     gpu = cfg.get("gpu", {})
     svc = cfg.get("services", {})
     k3s = cfg.get("k3s", {})
+    builder = cfg.get("builder", {})
     db = cfg.get("database", {})
     cors = cfg.get("cors", {})
     oidc = cfg.get("gitlab_oidc", {})
@@ -256,12 +255,14 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     lines.append(f'ttl_normal = {cache.get("ttl_normal", 30)}    # 네트워크, 라우터, 대시보드')
     lines.append(f'ttl_slow = {cache.get("ttl_slow", 60)}      # 키페어, 보안그룹')
     lines.append(f'ttl_static = {cache.get("ttl_static", 300)}   # 이미지, 플레이버, 토큰 검증')
+    lines.append(f'default_ttl_seconds = {cache.get("default_ttl_seconds", 30)}')
     lines.append("")
 
     # [session]
     lines.append("[session]")
     lines.append(f'timeout_seconds = {sess.get("timeout_seconds", 3600)}')
     lines.append(f'warning_before_seconds = {sess.get("warning_before_seconds", 300)}')
+    lines.append(f'absolute_timeout = {sess.get("absolute_timeout", 14400)}')
     lines.append("")
 
     # [nova]
@@ -270,24 +271,28 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     lines.append(f'default_availability_zone = {_toml_str(nova.get("default_availability_zone", "nova"))}')
     lines.append(f'boot_volume_size_gb = {nova.get("boot_volume_size_gb", 20)}')
     lines.append(f'upper_volume_size_gb = {nova.get("upper_volume_size_gb", 50)}')
+    lines.append(f'default_network_enabled = {_toml_bool(nova.get("default_network_enabled", True))}')
+    lines.append(f'default_network_cidr = {_toml_str(nova.get("default_network_cidr", "192.168.0.0/24"))}')
+    lines.append(f'default_network_external_id = {_toml_str(nova.get("default_network_external_id", ""))}')
     lines.append("")
 
-    # [gpu] + [[gpu.devices]]
+    # [builder] (선택)
+    if builder:
+        lines.append("[builder]")
+        if "image_id" in builder:
+            lines.append(f'image_id = {_toml_str(builder["image_id"])}')
+        if "flavor_id" in builder:
+            lines.append(f'flavor_id = {_toml_str(builder["flavor_id"])}')
+        if "network_id" in builder:
+            lines.append(f'network_id = {_toml_str(builder["network_id"])}')
+        lines.append("")
+
+    # [gpu] (디바이스 맵은 config.gpu.toml로 분리)
     lines.append("[gpu]")
     if "available_visible" in gpu:
         lines.append(f'available_visible = {_toml_bool(gpu["available_visible"])}')
-    lines.append("# GPU 디바이스 맵 (vendor_id/device_id: lspci -nn 출력의 PCI ID)")
+    lines.append("# GPU 디바이스 맵은 config.gpu.toml에서 관리됩니다")
     lines.append("")
-    for dev in gpu.get("devices", []):
-        lines.append("[[gpu.devices]]")
-        lines.append(f'vendor_id = {_toml_str(dev.get("vendor_id", ""))}')
-        lines.append(f'device_id = {_toml_str(dev.get("device_id", ""))}')
-        lines.append(f'name = {_toml_str(dev.get("name", ""))}')
-        lines.append(f'is_audio = {_toml_bool(dev.get("is_audio", False))}')
-        aliases = dev.get("aliases", [])
-        if aliases:
-            lines.append(f'aliases = {_toml_list_str(aliases)}')
-        lines.append("")
 
     # [services]
     lines.append("[services]")
@@ -358,11 +363,41 @@ def _render_toml_for_k8s(cfg: dict) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# config.gpu.toml 렌더링
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _render_gpu_toml(cfg: dict) -> str:
+    """config.gpu.toml 렌더링: GPU 디바이스 맵."""
+    gpu = cfg.get("gpu", {})
+    devices = gpu.get("devices", [])
+    if not devices:
+        return ""
+
+    lines = [
+        "# Afterglow GPU 디바이스 맵",
+        "# config.toml과 함께 로드되어 딥 머지됩니다.",
+        "",
+    ]
+    for dev in devices:
+        lines.append("[[gpu.devices]]")
+        lines.append(f'vendor_id = {_toml_str(dev.get("vendor_id", ""))}')
+        lines.append(f'device_id = {_toml_str(dev.get("device_id", ""))}')
+        lines.append(f'name = {_toml_str(dev.get("name", ""))}')
+        lines.append(f'is_audio = {_toml_bool(dev.get("is_audio", False))}')
+        aliases = dev.get("aliases", [])
+        if aliases:
+            lines.append(f'aliases = {_toml_list_str(aliases)}')
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # configmap.yaml 렌더링
 # ─────────────────────────────────────────────────────────────────────────────
 
 def render_configmap(cfg: dict) -> str:
-    """configmap.yaml 생성: Redis URL, Origin, config.toml 인라인."""
+    """configmap.yaml 생성: Redis URL, Origin, config.toml + config.gpu.toml 인라인."""
     app = cfg.get("app", {})
     cors = cfg.get("cors", {})
     frontend_port = app.get("frontend_port", 3000)
@@ -373,7 +408,7 @@ def render_configmap(cfg: dict) -> str:
 
     # config.toml 인라인 (4칸 들여쓰기)
     toml_content = _render_toml_for_k8s(cfg)
-    indented = "\n".join("    " + line for line in toml_content.splitlines())
+    indented_toml = "\n".join("    " + line for line in toml_content.splitlines())
 
     lines = [
         "apiVersion: v1",
@@ -386,9 +421,19 @@ def render_configmap(cfg: dict) -> str:
         f'  # 실제 서비스 도메인으로 변경 필요 (예: https://afterglow.example.com)',
         f'  APP_ORIGIN: "{app_origin}"',
         "  config.toml: |",
-        indented,
-        "",
+        indented_toml,
     ]
+
+    # config.gpu.toml (GPU 디바이스 맵이 있는 경우에만)
+    gpu_content = _render_gpu_toml(cfg)
+    if gpu_content:
+        indented_gpu = "\n".join("    " + line for line in gpu_content.splitlines())
+        lines.extend([
+            "  config.gpu.toml: |",
+            indented_gpu,
+        ])
+
+    lines.append("")
     return "\n".join(lines)
 
 

@@ -1,4 +1,7 @@
 <script lang="ts">
+	import { auth } from '$lib/stores/auth';
+	import { api } from '$lib/api/client';
+
 	interface LibraryConfig {
 		id: string;
 		name: string;
@@ -6,67 +9,116 @@
 		depends_on: string[];
 		available_prebuilt: boolean;
 		share_proto: string;
+		size_bytes?: number;
 	}
 
-	let { libraries, selected, hasGpuFlavor, onToggle }: {
+	let { libraries, selected, hasGpuFlavor, ubuntuVersion, onToggle }: {
 		libraries: LibraryConfig[];
 		selected: string[];
 		hasGpuFlavor: boolean;
+		ubuntuVersion?: string;
 		onToggle: (id: string, deps: string[]) => void;
 	} = $props();
+
+	let warnings = $state<string[]>([]);
+	let validateTimer: ReturnType<typeof setTimeout> | null = null;
 
 	function isSelected(id: string) {
 		return selected.includes(id);
 	}
 
 	function isRequiredBy(id: string): boolean {
-		// 다른 선택된 라이브러리가 이것에 의존하는 경우 해제 불가
 		return libraries.some(
 			(lib) => isSelected(lib.id) && lib.depends_on.includes(id) && lib.id !== id
 		);
 	}
+
+	function formatSize(bytes?: number): string {
+		if (!bytes) return '';
+		const gb = bytes / (1024 * 1024 * 1024);
+		return gb >= 1 ? `${Math.round(gb)} GB` : `${Math.round(gb * 1024)} MB`;
+	}
+
+	$effect(() => {
+		const ids = [...selected];
+		if (validateTimer) clearTimeout(validateTimer);
+		if (ids.length === 0) {
+			warnings = [];
+			return;
+		}
+		validateTimer = setTimeout(async () => {
+			try {
+				const token = $auth.token ?? undefined;
+				const projectId = $auth.projectId ?? undefined;
+				const body: Record<string, unknown> = { library_ids: ids };
+				if (ubuntuVersion) body.ubuntu_version = ubuntuVersion;
+				const res = await api.post<{ compatible: boolean; messages: string[] }>(
+					'/api/libraries/validate', body, token, projectId
+				);
+				warnings = res.messages ?? [];
+			} catch {
+				warnings = [];
+			}
+		}, 300);
+	});
 </script>
 
-<div class="space-y-3">
+<p class="text-sm text-gray-400 mb-4">
+	선택한 레이어는 첫 부팅 시 cloud-init으로 자동 마운트됩니다.
+</p>
+
+{#if warnings.length > 0}
+	<div class="p-3 rounded-lg border border-yellow-700 bg-yellow-900/20 text-yellow-300 text-xs space-y-1 mb-4">
+		{#each warnings as w}
+			<div>⚠ {w}</div>
+		{/each}
+	</div>
+{/if}
+
+<div class="space-y-2">
 	{#each libraries as lib}
 		{@const selected_ = isSelected(lib.id)}
 		{@const locked = isRequiredBy(lib.id)}
 		{@const gpuWarn = lib.id === 'vllm' && !hasGpuFlavor}
 
-		<div class="flex items-start gap-3 p-4 rounded-xl border transition-all {selected_
+		<button
+			type="button"
+			onclick={() => { if (!locked) onToggle(lib.id, lib.depends_on); }}
+			disabled={locked}
+			class="w-full text-left flex items-center gap-3 p-4 rounded-xl border transition-all {selected_
 				? 'border-blue-500 bg-blue-900/10'
-				: 'border-gray-700 bg-gray-900'}">
-			<input
-				type="checkbox"
-				id={lib.id}
-				checked={selected_}
-				disabled={locked}
-				onchange={() => onToggle(lib.id, lib.depends_on)}
-				class="mt-0.5 accent-blue-500"
-			/>
-			<label for={lib.id} class="flex-1 cursor-pointer {locked ? 'opacity-60' : ''}">
-				<div class="flex items-center gap-2 mb-0.5">
+				: 'border-gray-700 bg-gray-900 hover:border-gray-500'} {locked ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}"
+		>
+			<!-- 체크박스 -->
+			<div class="w-5 h-5 rounded flex-shrink-0 flex items-center justify-center border transition-colors
+				{selected_ ? 'bg-blue-500 border-blue-500' : 'border-gray-600 bg-gray-800'}">
+				{#if selected_}
+					<svg class="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+					</svg>
+				{/if}
+			</div>
+
+			<!-- 이름 + 의존성 -->
+			<div class="flex-1 min-w-0">
+				<div class="flex items-center gap-2">
 					<span class="font-medium text-white text-sm">{lib.name}</span>
-					<span class="text-gray-500 text-xs">v{lib.version}</span>
-					{#if lib.available_prebuilt}
-						<span class="px-1.5 py-0.5 bg-green-900/40 text-green-400 rounded text-xs">사전 빌드 가능</span>
-					{/if}
-					{#if lib.share_proto}
-						<span class="px-1.5 py-0.5 rounded text-xs {lib.share_proto === 'NFS' ? 'bg-blue-900/40 text-blue-400' : 'bg-purple-900/40 text-purple-400'}">{lib.share_proto}</span>
-					{/if}
 				</div>
 				{#if lib.depends_on.length > 0}
-					<div class="text-xs text-gray-500">
-						필요: {lib.depends_on.join(', ')}
-						{#if locked}<span class="text-orange-400 ml-1">(다른 라이브러리가 의존 중)</span>{/if}
+					<div class="text-xs text-gray-500 mt-0.5">
+						↳ requires {lib.depends_on.join(', ')}
+						{#if locked}<span class="text-orange-400 ml-1">(의존 중)</span>{/if}
 					</div>
 				{/if}
 				{#if gpuWarn}
-					<div class="text-xs text-yellow-400 mt-1">
-						⚠️ GPU 플레이버를 선택해야 vLLM이 정상 동작합니다
-					</div>
+					<div class="text-xs text-yellow-400 mt-1">GPU 플레이버 필요</div>
 				{/if}
-			</label>
-		</div>
+			</div>
+
+			<!-- 크기 -->
+			{#if lib.size_bytes}
+				<span class="text-xs text-gray-500 flex-shrink-0">{formatSize(lib.size_bytes)}</span>
+			{/if}
+		</button>
 	{/each}
 </div>

@@ -6,6 +6,8 @@
 	import SlidePanel from '$lib/components/SlidePanel.svelte';
 	import { projectNames } from '$lib/stores/projectNames';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	interface Flavor {
 		id: string;
@@ -32,6 +34,7 @@
 
 	let flavors = $state<Flavor[]>([]);
 	let loading = $state(true);
+	let refreshing = $state(false);
 	let pageSize = $state(20);
 	let currentPage = $state(0);
 	let error = $state('');
@@ -144,7 +147,8 @@
 	);
 
 	async function load() {
-		loading = true;
+		if (flavors.length === 0) loading = true;
+		else refreshing = true;
 		error = '';
 		try {
 			const res = await api.get<PagedResponse<Flavor>>('/api/admin/flavors?limit=999', token, projectId);
@@ -155,6 +159,7 @@
 			flavors = [];
 		} finally {
 			loading = false;
+			refreshing = false;
 		}
 	}
 
@@ -328,6 +333,11 @@
 		return `${mb} MB`;
 	}
 
+	const ar = createAutoRefresh(
+		load,
+		{ storageKey: 'admin-flavors', defaultInterval: 60, intervalOptions: [30, 60] }
+	);
+
 	onMount(() => {
 		load();
 		projectNames.load(token, projectId);
@@ -338,7 +348,13 @@
 	<PageHeader breadcrumb="COMPUTE / FLAVORS" title="Flavor">
 		{#snippet actions()}
 			<button onclick={() => { showCreate = true; createError = ''; }} class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors">+ 생성</button>
-			<button onclick={() => { nameFilter = ''; vcpuFilter = ''; ramFilter = ''; diskFilter = ''; gpuFilter = ''; load(); }} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
+			<AutoRefreshControl
+				bind:active={ar.active}
+				bind:intervalSeconds={ar.intervalSeconds}
+				intervalOptions={ar.intervalOptions}
+				refreshing={loading || refreshing}
+				onManualRefresh={() => { nameFilter = ''; vcpuFilter = ''; ramFilter = ''; diskFilter = ''; gpuFilter = ''; load(); }}
+			/>
 			<div class="flex items-center gap-1 text-xs text-gray-500">
 				표시:
 				{#each [10, 20, 30] as n}
@@ -394,6 +410,7 @@
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={5} />
 	{:else}
+		<div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 		<div class="overflow-x-auto">
 			<table class="w-full text-sm">
 				<thead>
@@ -470,6 +487,7 @@
 				class="px-3 py-1.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed"
 			>다음 →</button>
 		</div>
+		</div>
 	{/if}
 </div>
 
@@ -533,6 +551,11 @@
 				<div class="text-sm text-gray-400">Flavor</div>
 				<div class="text-white font-medium">{selectedFlavor.name}</div>
 				<div class="text-xs text-gray-500">{selectedFlavor.vcpus} VCPU / {formatRam(selectedFlavor.ram)} / {selectedFlavor.disk} GB</div>
+				<button
+					onclick={() => navigator.clipboard.writeText(selectedFlavor!.id)}
+					class="mt-1 text-xs text-gray-500 font-mono hover:text-gray-300 transition-colors cursor-pointer select-all"
+					title="클릭하여 ID 복사"
+				>{selectedFlavor.id}</button>
 			</div>
 
 			<!-- 탭 -->

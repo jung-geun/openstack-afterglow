@@ -3,10 +3,10 @@ from pydantic import BaseModel, Field
 
 class CreateDbInstanceRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
-    flavor_id: str
+    flavor_id: str = Field(..., min_length=1)
     volume_size: int = Field(..., ge=1, le=1024)
-    datastore_type: str
-    datastore_version: str
+    datastore_type: str = Field(..., min_length=1)
+    datastore_version: str = Field(..., min_length=1)
     databases: list[str] = []
     restore_backup_id: str | None = None
 

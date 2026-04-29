@@ -2,9 +2,11 @@
 
 ---
 
-## 0. 프로젝트 개요 (구 PLAN.md)
+## 0. 프로젝트 개요 (구 PLAN.md) ⚠️ 구 설계, union.md로 대체됨
 
-> 이 섹션은 초기 설계 문서(PLAN.md)를 이전한 내용입니다.
+> **[DEPRECATED]** 이 섹션은 초기 설계 문서(PLAN.md)를 이전한 내용으로, OverlayFS 레이어 시스템의 구 설계를 담고 있습니다.
+> 현재 설계는 **`union.md`** (Content-addressable 불변 레이어, single-parent 상속, Manila 3개 share)를 참조하세요.
+> 아래 내용은 역사적 참조용으로만 보존합니다.
 
 ## Context
 
@@ -448,14 +450,17 @@ Step 5: 요약 & 배포
 
 > **목표**: Admin 프로젝트에서 사전 빌드된 라이브러리 패키지(NFS share)를 생성하고, 다른 프로젝트에서도 read-only로 사용 가능하게 구현
 
-- [ ] 3.1 Admin 프로젝트 — 패키지 생성 API
-  - [ ] `POST /api/admin/libraries/build` — 라이브러리 패키지 빌드 트리거
-  - [ ] 기존 `POST /api/admin/file-storage/build` 확장:
+- [x] 3.1 Admin 프로젝트 — 패키지 생성 API
+  - [x] `POST /api/admin/libraries/build` — 라이브러리 패키지 빌드 트리거 (`auto_install` 옵션)
+  - [x] 기존 `POST /api/admin/file-storage/build` 확장:
     - [x] `share_proto` 파라미터 추가 (CEPHFS / NFS 선택)
     - [x] 의존성 메타데이터 `union_depends_on` 필드 추가
-    - [ ] 빌드 상태 관리: `building` → `ready` / `failed` 상태 전이
-  - [ ] `GET /api/admin/libraries` — 전체 프로젝트 가용 라이브러리 목록 (의존성 포함)
-  - [ ] `GET /api/admin/libraries/{id}` — 라이브러리 상세 (의존성 트리 포함)
+    - [x] 빌드 상태 관리: `building` → `ready` / `failed` / `cancelled` 상태 전이, `cancel_build()` 구현
+  - [x] `GET /api/admin/libraries` — 전체 프로젝트 가용 라이브러리 목록 (의존성 포함)
+  - [x] `GET /api/admin/libraries/{id}` — 라이브러리 상세 (의존성 트리 포함)
+  - [x] `GET /api/admin/libraries/builds` — 빌드 이력 목록 (DB + 인메모리 fallback)
+  - [x] `POST /api/admin/libraries/builds/{id}/cancel` — 빌드 취소 (VM 정리 포함)
+  - [x] `backend/app/api/identity/admin_libraries.py` — 전용 라우터 신규 구현 (관리자 인증 필수)
 
 - [x] 3.2 Manila 메타데이터 기반 의존성 추적
   - [x] Manila share metadata 활용:
@@ -480,7 +485,7 @@ Step 5: 요약 & 배포
     - [ ] 특정 프로젝트에 대해 개별적으로 NFS access rule 부여 (VM IP/CIDR 자동 계산 미구현)
     - [ ] VM 생성 시 해당 프로젝트의 네트워크 CIDR로 NFS access rule 자동 생성
   - [x] CephFS의 경우: 기존 CephX access rule 방식 유지
-  - [ ] `backend/app/services/libraries.py` — 크로스 프로젝트 라이브러리 조회 함수 추가
+  - [x] `backend/app/services/libraries.py` — `get_dependency_tree()` 크로스 프로젝트 라이브러리 의존성 트리 조회 함수 추가
 
 - [x] 3.4 패키지 빌드 파이프라인 개선
   - [x] `scripts/build_library_shares.py` 확장:
@@ -489,17 +494,18 @@ Step 5: 요약 & 배포
     - [ ] 빌드 완료 후 자동 검증 (마운트 테스트)
   - [ ] 백그라운드 빌드 워커 (선택): Celery/async 작업으로 비동기 빌드
 
-- [ ] 3.5 Frontend — Admin 패키지 관리 UI
-  - [ ] `routes/admin/libraries/+page.svelte` — 라이브러리 카탈로그 관리 페이지
-  - [ ] 패키지 빌드 상태 표시 (building / ready / failed)
-  - [ ] 의존성 그래프 시각화
-  - [ ] 패키지 공개/비공개 설정 (다른 프로젝트 접근 권한)
-  - [ ] 기존 `routes/admin/file-storage/+page.svelte`에 프로토콜 컬럼 추가
+- [x] 3.5 Frontend — Admin 패키지 관리 UI
+  - [x] `routes/admin/libraries/+page.svelte` — 라이브러리 카탈로그 관리 페이지 (카드 그리드)
+  - [x] 패키지 빌드 상태 표시 (building / ready / failed / none)
+  - [x] 빌드 트리거 버튼 + AutoRefresh (10초)
+  - [x] 의존성 배지 표시
+  - [x] 의존성 그래프 시각화 (SVG 연결선) — 레벨 기반 DAG, 빌드 상태 색상, 노드 클릭 스크롤
+  - [x] 패키지 공개/비공개 설정 — `visibility` 필드 추가, non-admin은 public만 반환
 
-- [ ] 3.6 VM 생성 마법사 — 라이브러리 선택 개선
-  - [ ] 의존성 자동 해석: vllm 선택 시 torch, python311 자동 체크
-  - [ ] 호환성 검증: Ubuntu 버전 / Python 버전 충돌 시 경고
-  - [ ] 마운트 프로토콜 표시 (NFS / CephFS)
+- [x] 3.6 VM 생성 마법사 — 라이브러리 선택 개선
+  - [x] 의존성 자동 해석: vllm 선택 시 torch, python311 자동 체크 (전이적 DFS 해결)
+  - [x] 호환성 검증: Ubuntu 버전 / Python 버전 충돌 시 경고 (`POST /api/libraries/validate` 연동, debounce 300ms)
+  - [x] 마운트 프로토콜 표시 (NFS / CephFS) — SelectLibraries.svelte에 이미 구현됨
 
 ---
 
@@ -532,37 +538,38 @@ Step 5: 요약 & 배포
 
 > **목표**: 프로덕션 환경 운영에 필요한 기능 추가
 
-- [ ] 5.1 OverlayFS 상태 모니터링 에이전트
-  - [ ] VM 내부 헬스체크 스크립트 (`/opt/union/scripts/health-check.sh`)
-  - [ ] 마운트 상태: `mountpoint -q /opt/layers/merged` 확인
-  - [ ] NFS 연결 상태: `rpcinfo -p <nfs_server>` 또는 `nfsstat` 확인
-  - [ ] 디스크 사용량: upper 볼륨 사용률 경고 (임계치 설정 가능)
-  - [ ] 결과를 Nova metadata 또는 별도 API로 리포트
+- [x] 5.1 OverlayFS 상태 모니터링 에이전트
+  - [x] VM 내부 헬스체크 스크립트 (`/opt/union/scripts/health-check.sh`)
+  - [x] 마운트 상태: `mountpoint -q /opt/layers/merged` 확인
+  - [x] NFS/CephFS 연결 상태: `timeout 5 stat` (hard mount hang 방지)
+  - [x] 디스크 사용량: upper 볼륨 사용률 경고 (90%/95% 임계)
+  - [x] 결과를 backend API (`POST /api/instances/{id}/health/report`)로 리포트 (Bearer 토큰 인증, 30분 TTL Redis 캐시)
 
-- [ ] 5.2 Manila Share Snapshot 관리
-  - [ ] 사전 빌드 라이브러리의 스냅샷 생성/복원 기능
-  - [ ] 버전 업데이트 시 스냅샷으로 롤백 가능
-  - [ ] `backend/app/services/manila.py` — 스냅샷 API 연동
+- [x] 5.2 Manila Share Snapshot 관리
+  - [x] 사전 빌드 라이브러리의 스냅샷 생성/복원 기능 (`POST /api/share-snapshots`, `POST /api/share-snapshots/{id}/revert`)
+  - [x] 버전 업데이트 시 스냅샷으로 롤백 가능 (`revert_to_snapshot` — Manila action API)
+  - [x] `backend/app/services/manila.py` — 스냅샷 API 연동 (create/list/get/delete/revert 5개 함수)
 
-- [ ] 5.3 볼륨 백업 및 복구
-  - [ ] Cinder upper 볼륨의 정기 백업 스케줄링
-  - [ ] 백업에서 복구 시 OverlayFS 재구성 자동화
+- [x] 5.3 볼륨 백업 및 복구
+  - [x] Cinder upper 볼륨의 정기 백업 스케줄링 — `auto_backup.py` + `_auto_backup_loop`
+  - [x] 백업에서 복구 시 OverlayFS 재구성 자동화 — `existing_upper_volume_id` + workdir 정리
 
 - [ ] 5.4 VM 스케일링 지원
-  - [ ] 인스턴스 resize (플레이버 변경) 시 OverlayFS 마운트 유지
+  - [x] 인스턴스 resize (플레이버 변경) — `POST /api/admin/instances/{id}/resize`, `/revert-resize` 엔드포인트 + `nova.resize_server`/`revert_resize_server` 서비스 함수 추가. `InstanceDetailPanel`에 resize 모달(flavor 선택) + VERIFY_RESIZE 상태에서 '되돌리기' 버튼 추가. 단위 테스트 4건 (`test_admin_resize.py`)
+  - [ ] 인스턴스 resize 시 OverlayFS 마운트 유지 검증 (통합 테스트)
   - [ ] 다중 VM 동시 부팅 시 NFS share 동시 접근 안정성 검증
   - [ ] 라이선스/동시 접속 제한 검토 (상용 소프트웨어)
 
-- [ ] 5.5 보안 강화
+- [x] 5.5 보안 강화
   - [ ] NFS export 옵션 보안: `root_squash`, `sec=sys` vs `sec=krb5`
-  - [ ] CephX 키 로테이션 지원
-  - [ ] VM 간 데이터 격리 검증 (다른 프로젝트의 share 접근 차단)
-  - [ ] NFS 방화벽 규칙 자동 관리 (Security Group)
+  - [x] CephX 키 로테이션 지원 — `rotate_cephx_access_rule` + `POST /api/instances/{id}/credentials/rotate-cephx` + systemd 타이머
+  - [x] VM 간 데이터 격리 검증 (다른 프로젝트의 share 접근 차단) — `union_project_id` 메타 + list/get 필터
+  - [x] NFS 방화벽 규칙 자동 관리 (Security Group) — `ensure_union_egress_sg` + instances.py auto-attach
 
-- [ ] 5.6 로깅 및 감사
-  - [ ] 마운트/언마운트 이벤트 로깅
-  - [ ] 라이브러리 사용 통계 (어떤 라이브러리가 어떤 VM에 마운트되었는지)
-  - [ ] 관리자 대시보드에 라이브러리 사용량 차트 추가
+- [x] 5.6 로깅 및 감사
+  - [x] 마운트/언마운트 이벤트 로깅 (envmgr-use.sh → `POST /api/union/mounts` Bearer 토큰 통합, best-effort)
+  - [x] 라이브러리 사용 통계 (Nova metadata `union_libraries` + `union_user_mounts` 활성 마운트 집계, 10분 시계열 스냅샷)
+  - [x] 관리자 대시보드에 라이브러리 사용량 차트 추가 (`LibraryUsageChart.svelte`, 관리자 라이브러리 페이지 상단)
 
 ---
 
@@ -783,3 +790,386 @@ config.toml 신규 섹션: `[k3s]` 하위 `cinder_csi_*`, `manila_csi_*`, `keyst
 - [x] **포트 페이지 제거**: 사용자 불필요. 사이드바에서 제거, 페이지 삭제
 - [x] **Floating IP 자동 관리**: 사이드바에서 Floating IP 페이지 제거. 인스턴스 상세 패널에서 원클릭 요청/해제+삭제(`POST/DELETE /api/instances/{id}/floating-ip`). 인스턴스 삭제 시 FIP 자동 정리
 - [x] **볼륨 강제 삭제**: `error`/`error_deleting` 상태 볼륨을 관리자가 강제 삭제 (`POST /api/volumes/{id}/force-delete`, Cinder `os-reset_status` + `os-force_delete`)
+
+### 8.12 K3s API LB — LB-first 전략 + Provider 직접 VIP
+
+**문제**: 기존 방식은 VM 생성 후 콜백 시점에 LB를 완전히 구성해야 해서 서버 VM이 LB 없이 떠있는 시간이 존재했고, FIP를 통해 외부 노출해야 했다.
+
+- [x] `backend/app/services/octavia.py` — `create_load_balancer()` 에 `vip_network_id` 파라미터 추가 (provider 네트워크에 VIP 직접 생성)
+- [x] `backend/app/api/k3s/clusters.py` — LB-first 전략: VM 생성 전에 LB(ACTIVE 대기) → listener(TCP:6443) → pool(ROUND_ROBIN) 순서로 완전 구성. LB VIP를 k3s TLS SAN으로 사용. `api_lb_pool_id` DB에 저장
+- [x] `backend/app/api/k3s/callback.py` — `_finalize_api_lb()` 간소화: listener/pool 생성 로직 제거 (clusters.py로 이동), member 추가 + health monitor만 담당
+- [x] `backend/app/models/db.py` — `K3sCluster` 에 `api_lb_pool_id`, `api_fip_id`, `api_fip_address`, `api_lb_id` 컬럼 추가
+- [x] `backend/app/database.py` — 관련 ALTER TABLE 마이그레이션 추가
+- [x] `backend/app/config.py` — `k3s_api_lb_vip_network_id` 설정 추가 (provider 네트워크 ID, 설정 시 FIP 없이 VIP 직접 생성)
+- [x] `backend/app/services/k3s_db.py` — `api_lb_pool_id` 필드 직렬화/역직렬화 추가
+- [x] 하위호환: `k3s_api_lb_vip_network_id` 미설정 시 기존 tenant 서브넷 + FIP 방식 유지
+
+### 8.13 Fedora CoreOS (FCOS) k3s 노드 지원
+
+**목표**: k3s 클러스터 생성 시 `os_type: fcos`를 선택하면 Ubuntu cloud-init 대신 Ignition JSON을 주입하여 FCOS 이미지로 노드를 프로비저닝.
+
+- [x] `backend/app/models/k3s.py` — `CreateK3sClusterRequest` 에 `os_type: str = "ubuntu"` 추가 (validator: `ubuntu` | `fcos`)
+- [x] `backend/app/models/db.py` — `K3sCluster` 에 `os_type` 컬럼 추가 (default `ubuntu`)
+- [x] `backend/app/database.py` — `ALTER TABLE k3s_clusters ADD COLUMN os_type` 마이그레이션 추가
+- [x] `backend/app/services/k3s_cloudinit.py` — 완전 재작성. `UserdataResult(data, config_drive)` NamedTuple 반환. FCOS 경로: Python으로 Ignition JSON 직접 조립 (base64+URL 인코딩), Jinja2는 bash 스크립트 렌더링에만 사용. `INSTALL_K3S_SKIP_SELINUX_RPM=true` 포함
+- [x] `backend/app/templates/k3s_server_fcos_callback.sh.j2` — FCOS 서버 콜백 bash 스크립트 템플릿 (신규)
+- [x] `backend/app/templates/k3s_agent_fcos_join.sh.j2` — FCOS 에이전트 조인 bash 스크립트 템플릿 (신규)
+- [x] `backend/app/api/k3s/clusters.py` — `os_type` 분기: FCOS → `k3s_fcos_image_id`, `config_drive=True`; Ubuntu → 기존 이미지, `config_drive=False`
+- [x] `backend/app/api/k3s/callback.py` — `_provision_agents()` 에서 `os_type` 읽어 이미지·userdata 분기
+- [x] `backend/app/config.py` — `k3s_fcos_image_id: str = ""` 설정 추가
+- [x] `backend/app/services/k3s_db.py` — `os_type` 직렬화 추가
+- [x] `backend/tests/test_k3s_fcos.py` — FCOS 전용 테스트 17건 (Ignition JSON 구조, systemd 유닛, 파일 인코딩, os_type 유효성 검증 등)
+- [x] 하위호환: `os_type` 미설정 시 기존 Ubuntu cloud-init 동작 완전 유지
+
+config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id = ""`
+
+### 8.14 k3s 부팅 데드락 수정 + callback.sh 진단 개선
+
+**문제**: barbican_kms / keystone_auth 플러그인이 부팅 시점 불가능한 의존성을 apiserver에 주입해 control plane이 영구 데드락에 빠짐. kubectl get nodes 시 노드가 보이지 않음.
+
+- [x] `backend/app/services/k3s_plugins/barbican_kms.py` — `should_deploy()` 강제 False (KMS 소켓 chicken-and-egg 데드락 방지, host static pod 재설계 전까지)
+- [x] `backend/app/services/k3s_plugins/keystone_auth.py` — `should_deploy()` 강제 False (부팅 직후 webhook service URL resolve 실패 방지)
+- [x] `backend/app/templates/k3s_server.yaml.j2` — `set -o pipefail` 추가, apiserver `/livez` readiness 폴링(최대 10분), kubectl `--validate=false`, tee 파이프 제거(>> redirect로 교체)
+- [x] `backend/tests/test_k3s_clusters.py` — 플러그인 게이팅 신규 테스트 4건
+
+**향후 작업**:
+- [ ] Barbican KMS host static pod 재설계 (부팅 전 소켓 준비, apiserver 재시작 트리거)
+- [ ] Keystone Auth hostNetwork static pod 재설계 (webhook URL을 127.0.0.1:port로 변경)
+- [ ] callback.sh에서 k3s 재시작 루프 감지 시 success=false 보고
+
+---
+
+## 9. Union Mount 레이어 시스템 v2 (content-addressable)
+
+> 설계 원문: **`union.md`** — 구현 전 반드시 먼저 읽는다.
+>
+> **핵심 원칙**: content-addressable 불변 레이어 | single-parent 상속(MVP) | Manila 3개 share(RW/RO/manifest) | overlayfs upperdir = 로컬 디스크
+
+### 9.1 Phase 1 — MVP ✅ 코드 완료 (인프라 미설정)
+
+**Manila + CephFS 기반 레이어 스토리지 구성**
+
+- [ ] Manila share 3개 실제 프로비저닝: `layer-store-rw` (Builder RW), `layer-store-ro` (User RO), `manifest-store`
+- [ ] Builder VM 설정: LAYER_STORE_RW 마운트, `layerbuild` CLI + 의존성 설치
+- [x] `layerbuild` CLI (`scripts/layerbuild.py`):
+  - `layerbuild init <name> --version <ver> [--parent <sha256:hash>]` — 작업 디렉토리 생성 + overlay/bind 마운트
+  - `layerbuild exec <recipe.sh>` — `systemd-nspawn -D merged/ bash recipe.sh` 격리 실행
+  - `layerbuild seal` — 결정적 sha256 계산, `sha256-<hash>/diff/` 이동, 3-lock (chmod+chattr+API seal), API 레이어 등록
+  - `layerbuild abort` — 진행 중인 빌드 취소 및 마운트 해제
+
+**MySQL 8.0 스키마 + Pydantic 모델**
+
+- [x] `backend/app/models/union.py` — Pydantic 모델: `LayerInfo`, `TemplateInfo`, `CreateLayerRequest`, `CreateTemplateRequest`, `AncestorChain`, `SealLayerResponse`
+- [x] `backend/app/models/db.py` — ORM: `UnionLayer`, `UnionTemplate`, `UnionUserMount` (SQLAlchemy async)
+- [x] `backend/app/database.py` — `CREATE TABLE IF NOT EXISTS union_layers / union_templates / union_user_mounts` DDL (MySQL 8.0+, InnoDB, utf8mb4)
+- [x] `backend/app/services/union_layers.py` — 서비스 레이어: CRUD + MySQL `WITH RECURSIVE` CTE 조상 쿼리 + 템플릿 관리
+
+**REST API (Backend)** — `/api/union` 접두어, `backend/app/api/union/`
+
+- [x] `GET /api/union/layers` — 레이어 목록 (페이지네이션, `?name=` 필터)
+- [x] `GET /api/union/layers/{id}` — 레이어 상세 조회
+- [x] `POST /api/union/layers` — 새 레이어 등록 (sealed=false, 관리자 전용)
+- [x] `POST /api/union/layers/{id}/seal` — 레이어 봉인 (관리자 전용, 봉인 후 수정 불가)
+- [x] `GET /api/union/layers/{id}/ancestors` — 조상 체인 반환 base-first 순 (lowerdir 조립용)
+- [x] `GET /api/union/templates` — 템플릿 목록
+- [x] `POST /api/union/templates` — 템플릿 생성 (봉인된 leaf만 허용, 관리자 전용)
+
+**User VM envmgr**
+
+- [x] `scripts/envmgr-init.sh` — cloud-init 통합: CephFS RO share 마운트, envmgr-use 설치, systemd `layer-store-ro.mount` unit 등록
+- [x] `scripts/envmgr-use.sh` — 환경 활성화:
+  - `envmgr-use <sha256:...>` — leaf 레이어 직접 지정
+  - `envmgr-use --template <name>@<ver>` — 템플릿으로 활성화 (API 조회)
+  - `envmgr-use --unmount` / `--status`
+  - 조상 체인 API 조회 → lowerdir 조립 → upperdir=`/var/overlay/<hash>/upper` (로컬 디스크) → `mount -t overlay /mnt/env`
+
+**테스트**
+
+- [x] `backend/tests/test_union_layers.py` — Layer CRUD(5), Seal(3), ListLayers(2), GetAncestors(3), LayerIdValidation(3), Templates(3), API(11), Dependents(3), DeleteLayer(5), NewAPI(7) = **45개**
+
+### 9.2 Phase 2 — 운영 (목표: Phase 1 완료 후 ~3주)
+
+**Frontend UI**
+
+- [x] `/dashboard/library` 라우트: 레이어 카탈로그 페이지 (트리 시각화)
+- [x] `/dashboard/library/create` — 새 레이어 생성 폼 (관리자 전용)
+- [x] `/dashboard/library/[id]` — 레이어 상세: 조상 체인, seal 상태, 파생 레이어 목록, seal/삭제 액션
+- [x] `/dashboard/library/templates` — 템플릿 관리 UI (목록 + 생성 폼 + 슬라이드 패널 상세)
+- [x] VM 생성 wizard — Step 3에 "라이브러리 선택" / "템플릿 선택" 탭 추가 (`SelectTemplate.svelte`)
+- [x] Dashboard 사이드바에 "라이브러리" 섹션 추가
+- [x] Admin 사이드바에 "라이브러리" 섹션 추가
+
+**보안 + 격리**
+
+- [x] Manila access rule 자동 관리: Builder VM RW 추가/제거 API (`POST /api/union/builder/access`, `DELETE /api/union/builder/access/{id}`)
+- [x] 레이어 프로젝트 격리: `project_id` 컬럼 + `list_layers()` 필터링 (NULL=공유, 값=프로젝트 전용, admin=전체)
+- [ ] seal 후 RW 접근 차단 검증
+
+**운영 도구**
+
+- [x] `GET /api/union/layers/{id}/dependents` — 자식 레이어 목록 (삭제 전 확인용)
+- [x] `DELETE /api/union/layers/{id}` — 수동 GC 엔드포인트 (관리자, 자식/템플릿/마운트 참조 있으면 409)
+- [x] `GET /api/union/templates/{name}/{version}` — 템플릿 상세 엔드포인트 (resolved_stack 포함)
+- [x] 레이어 크기 집계: `GET /api/union/stats/storage` — `size_bytes`/`file_count` SQL SUM 집계 (`total_layers`, `sealed_layers`, `total_size_bytes`, `total_file_count`)
+- [x] 마운트 API: `POST /api/union/mounts` (기록), `POST /api/union/mounts/{id}/unmount` (해제), `sealed_at` 봉인 타임스탬프 추가
+
+**테스트 확장**
+
+- [ ] Integration test: Builder VM → seal → User VM mount 전체 플로우
+- [x] 삭제 차단 동작 검증 (자식/템플릿/활성 마운트 — 단위 테스트 포함)
+
+### 9.3 Phase 3 — 확장 (목표: Phase 2 완료 후)
+
+- [ ] **Fork 지원**: `POST /api/union/layers/{id}/fork` — sealed 레이어에서 새 RW 레이어 파생
+- [ ] **Rebuild**: 동일 부모 + 다른 내용 → 새 hash 신규 레이어 (overwrite 금지 정책 유지)
+- [ ] **멀티 상속(실험)**: lowerdir에 여러 부모 지원 — 다이아몬드 충돌 해결 정책 필요
+- [x] **OverlayFS 상태 모니터링 에이전트**: User VM에서 마운트 상태 주기적 보고
+- [ ] **Manila Share Snapshot 관리**: 레이어 백업/복원
+
+---
+
+## 10. 관리자 UX 개선 (2026-04-27)
+
+### 10.1 관리자 페이지 필터/검색 추가 (volumes, instances, topology)
+
+> **목표**: 관리자 페이지에서 리소스가 많을 때 특정 항목을 빠르게 찾을 수 있는 서버사이드 필터 추가
+
+- [x] `backend/app/api/identity/admin.py` — `list_all_volumes`: `project_id`, `status`, `name` 쿼리 파라미터 추가 (Cinder `name~` substring 매칭)
+- [x] `backend/app/api/identity/admin.py` — `list_all_instances`: `status`, `name` 쿼리 파라미터 추가 (Nova `name=.*{re.escape(input)}.*` regex 변환)
+- [x] `backend/app/api/identity/admin.py` — `admin_topology`: `TopologyInstance` 빌드 시 `project_id` 포함
+- [x] `backend/app/models/storage.py` — `TopologyInstance.project_id: str | None = None` 추가
+- [x] `backend/tests/test_admin_filters.py` — **신규** 7개 테스트: volumes(status/project_id/name~), instances(status/name regex/metachar escape), topology(project_id 포함 검증)
+- [x] `frontend/src/lib/components/GlobalTopology.svelte` — `TopologyInstance.project_id` 인터페이스 추가 + `projectId` prop 기반 인스턴스 필터링
+- [x] `frontend/src/routes/admin/volumes/+page.svelte` — 프로젝트 autocomplete / 상태 select / 이름 검색 필터 UI (서버사이드, 페이지네이션 연동)
+- [x] `frontend/src/routes/admin/instances/+page.svelte` — 상태/이름 필터 추가, 기존 클라이언트사이드 프로젝트 필터 → 서버사이드 전환 (`filteredInstances` derived 제거)
+- [x] `frontend/src/routes/admin/topology/+page.svelte` — 프로젝트 검색 드롭다운 추가, `GlobalTopology`에 `projectId`/`showAll` props 연결
+
+### 10.2 전체 페이지 자동 새로고침 추가 (기본 ON)
+
+> **목표**: 새로고침 버튼이 있는 모든 페이지/패널에 자동 새로고침 추가. 기본 ON, localStorage 영속, 탭 비활성 시 일시정지, 페이지 성격별 차등 주기
+
+- [x] `frontend/src/lib/utils/autoRefresh.svelte.ts` — **신규**. Svelte 5 rune 기반 hook. `createAutoRefresh(fn, options)`:
+  - localStorage에 `autoRefresh.<key>.active` / `autoRefresh.<key>.interval` 영속
+  - Page Visibility API: `document.hidden` 시 timer 정지, 탭 복귀 시 즉시 1회 fetch + 재시작
+  - `$effect` cleanup으로 timer/listener 자동 해제 (SSR 안전)
+- [x] `frontend/src/lib/components/AutoRefreshControl.svelte` — **신규**. 토글 버튼 + 주기 select + 수동 새로고침 버튼 통합 컴포넌트. `PageHeader` actions snippet에 삽입.
+- [x] **admin 23개 페이지 적용**:
+  - 15s: `instances`, `monitoring`, `services`, `database-instances`, `drover`, `containers`, `object-storage/[name]`
+  - 30s: `topology`, `floating-ips`, `routers`, `gpu`, `hypervisors`, `ports`, `networks`, `file-storage`, `volumes`, `images`, `object-storage`
+  - 60s: `flavors`, `groups`, `users`, `roles`, `projects`
+- [x] **dashboard 5개 페이지 적용**:
+  - 10s: `containers/clusters/[id]`
+  - 15s: `containers/instances/[id]` (로그 패널)
+  - 30s: `topology`, `file-storage/manage`, `object-storage/buckets/[name]`
+- [x] `frontend/src/lib/components/InstanceDetailPanel.svelte` — 콘솔 로그 ad-hoc `setInterval` → `createAutoRefresh` 마이그레이션 (15s)
+- [x] `frontend/src/lib/components/K3sClusterDetailPanel.svelte` — 이벤트 ad-hoc `setInterval` → `createAutoRefresh` 마이그레이션 (15s)
+- [x] 기존 ad-hoc 자동새로고침 3곳 통합 제거: `admin/services` (`$effect`+setInterval), `dashboard/containers/clusters/[id]` (자체 setInterval+toggleAutoRefresh), `dashboard/file-storage/manage` (AutoRefreshToggle+setInterval)
+- [x] 자동 새로고침 fn은 **필터/marker 보존** (현재 페이지 유지), 수동 새로고침은 **기존 필터 리셋** 동작 유지 (의도적 분리)
+
+### 10.3 관리자 볼륨 — 상태 변경 + 명시적 강제삭제 (2026-04-27)
+
+> **목표**: `deleting` / `error_*` 등 비정상 상태 볼륨을 admin이 임의 상태로 전환하거나 명시적으로 강제 삭제할 수 있도록 UI/API 확장
+
+- [x] `backend/app/api/identity/admin.py::delete_volume` — `_ERROR_STATUSES` (`error/deleting/error_*`) 자동 폴백: `reset_status` → 일반 `delete` → `os-force_delete` 3단계 시퀀스
+- [x] `backend/app/api/identity/admin.py::force_delete_admin_volume` — **신규** `POST /api/admin/volumes/{id}/force-delete` (status 무관, attached 볼륨은 409)
+- [x] `backend/tests/test_admin_volume_delete.py` — **신규** 11개 (자동 폴백 7 + force-delete 4: normal_status, attached_409, already_gone_204, requires_admin_403)
+- [x] `frontend/src/routes/admin/volumes/+page.svelte` — `상태초기화` (error 한정) → `상태변경` (모든 볼륨 노출), `error*/deleting` 상태에 한해 `강제삭제` 버튼/rose 경고 모달 추가
+
+---
+
+## 11. VM 스케일링 + 보안 강화 (5.4 + 5.5 완성) — Milestone 11 ✅
+
+> **완료**: resize 엔드투엔드(11.1), OverlayFS 검증 + 라이선스 가드(11.2), NFS 강화 + CephX 회전 + 3-share wiring(11.3), 프로젝트 격리 + Union SG 자동화(11.4) 전 항목 완료.
+
+> **목표**: 미완료 상태로 남은 5.4(VM 스케일링) + 5.5(보안 강화) 항목을 4주 로드맵으로 완성
+
+### 11.1 인스턴스 resize 엔드투엔드 (Week 1)
+
+- [x] `backend/app/services/nova.py` — `resize_server()`, `revert_resize_server()` 추가
+- [x] `backend/app/api/identity/admin.py` — `POST /api/admin/instances/{id}/resize`, `/revert-resize` 엔드포인트 추가 (관리자 전용, 캐시 무효화 포함)
+- [x] `frontend/src/lib/components/InstanceDetailPanel.svelte` — ACTIVE/SHUTOFF 상태에서 "리사이즈" 버튼 + flavor select 모달, VERIFY_RESIZE 상태에서 "되돌리기" 버튼 추가
+- [x] `backend/tests/test_admin_resize.py` — 신규 4건 (resize/revert 성공, 403 비관리자, nova 오류 400)
+
+### 11.2 resize OverlayFS 검증 + 다중 VM 동시 부팅 + 라이선스 가드 (Week 2)
+
+- [x] `backend/app/templates/overlay_setup.sh.j2` — jittered backoff (`RANDOM % 3`) 추가
+- [x] `backend/tests/integration/test_concurrent_boot.py` — N=5 VM 동시 생성 → OverlayFS 마운트 검증 (slow marker, 실 인프라 skip)
+- [x] `backend/tests/integration/test_resize_overlay.py` — resize → confirm → mountpoint 검증 (slow marker, 실 인프라 skip)
+- [x] `backend/app/models/storage.py` + `db.py` — `LibraryConfig.license_type`, `max_concurrent_mounts` 필드 추가
+- [x] `backend/app/services/union_layers.py:create_mount` — mount 한도 초과 시 409 가드
+- [x] `backend/app/api/union/layers.py` — 두 필드 라우터 노출
+- [x] `frontend/src/routes/admin/libraries/+page.svelte` — 라이선스 배지 + 활성 마운트 수 표시
+- [x] `backend/tests/test_libraries.py` — license/max_concurrent_mounts 직렬화 단위 테스트 3건
+
+### 11.3 NFS 옵션 강화 + CephX 회전 + 3-share wiring (Week 3)
+
+- [x] `backend/app/api/compute/instances.py:1086` + `overlay_setup.sh.j2:28` — `nosuid,nodev,noexec` 추가
+- [x] `scripts/envmgr-init.sh` — RO mount 옵션 통일 (`ro,nosuid,nodev,noexec,_netdev,noatime`)
+- [x] `instances.py:1063` — `0.0.0.0/0` 폴백 제거 → vm_ip 미확보 시 503
+- [x] `backend/app/services/manila.py` — `rotate_cephx_access_rule()` 헬퍼
+- [x] `backend/app/api/compute/instance_health.py` — `POST /api/instances/{id}/credentials/rotate-cephx` 추가 (Bearer 토큰 인증)
+- [x] `scripts/envmgr-rotate-key.sh` + systemd `union-rotate-key.timer` (신규, cloudinit_base.yaml.j2 통해 주입)
+- [x] `backend/app/api/union/layers.py` — `POST /api/union/user/access`, `DELETE /api/union/user/access/{access_id}` (3-share user wiring)
+- [x] `backend/app/services/cloudinit.py` — `union_ro_share_export` 파라미터 + write_files 주입 (`LAYER_STORE_RO_EXPORT`)
+- [x] `backend/app/config.py` — `union_cephx_rotate_hours: int = 24` 추가
+- [x] `backend/tests/test_manila_rotate.py` — `rotate_cephx_access_rule` 단위 테스트 3건
+- [x] `backend/tests/test_cloudinit.py` — `nosuid,nodev,noexec` + `LAYER_STORE_RO_EXPORT` 단위 테스트 2건
+- [x] `backend/tests/test_endpoint_inventory.py` — rotate-cephx 엔드포인트 whitelist 추가
+
+### 11.4 격리 검증 + SG 자동화 (Week 4) ✅
+
+- [x] `backend/app/services/manila.py` — `_parse_file_storage` `is_public` 추출, `list_file_storages` `caller_project_id` 필터 추가
+- [x] `backend/app/models/storage.py` — `FileStorageInfo.is_public` 필드 추가
+- [x] `backend/app/api/compute/instances.py:_prepare_dynamic_file_storage` — `union_project_id` 메타 자동 주입
+- [x] `backend/app/services/library_builder.py` — prebuilt 빌드 완료 후 `set_share_public(True)` 자동 호출
+- [x] `backend/app/api/storage/file_storage.py` — non-admin list `caller_project_id` 전달, GET cross-project private → 404
+- [x] `backend/tests/integration/test_isolation.py` — 신규 3건 (`@pytest.mark.slow`, 실 인프라 skip 스켈레톤)
+- [x] `backend/app/services/neutron.py` — `ensure_union_egress_sg()` idempotent 헬퍼 (NFS/CephFS/HTTP(S) 6 rule)
+- [x] `backend/app/config.py` — `union_auto_egress_sg_enabled`, `union_egress_sg_name` 설정값 추가
+- [x] `backend/app/api/compute/instances.py:create_instance` + `create_instance_async` — Union 사용 시 SG 자동 attach
+- [x] `backend/tests/test_file_storage.py` — 격리 테스트 4건 (list 필터, public 노출, cross-project 404, admin 허용)
+- [x] `backend/tests/test_manila_isolation.py` — `list_file_storages` caller_project_id 필터 단위 2건
+- [x] `backend/tests/test_neutron.py` — `ensure_union_egress_sg` 3건 (미존재 생성+6룰, idempotent, 누락 룰만 추가)
+- [x] `backend/tests/test_instances.py` — Union SG 자동 attach 2건 (auto-attach, disabled 시 미호출)
+
+
+## 11.5 테스트 인프라 강화 — Phase A (mock 트로이 목마 → 실 검증 전환)
+
+- [x] `backend/pyproject.toml` — pytest markers 4개(slow/db/redis/crypto) + `fakeredis[lua]>=2.21` dev 의존성 추가
+- [x] `backend/tests/test_k3s_crypto.py` — AES-256-GCM 18케이스 신규 (0% → ≥95% 라인 커버)
+- [x] `backend/tests/test_k3s_kube.py` — 4단 nested patch 제거 → `assert_called_once_with(url, headers=...)` URL 검증
+- [x] `backend/tests/test_dashboard.py` — `patch("...asyncio")` 제거, `cached_call` side_effect 리스트로 대체, `status_code == 200` 단정
+- [x] `backend/tests/test_loadbalancers.py` — 모든 success 케이스에 `assert_called_once_with(...)` 인자 검증 추가
+- [x] `backend/tests/test_admin_libraries.py` — `cancel_build` mock `assert_called_once_with(conn, build_id)` 강화
+- [x] `backend/tests/test_admin_endpoints.py` — 432줄 트로이 목마 전수 삭제 (`test_endpoint_inventory.py`의 메타 검증과 100% 중복 확인)
+
+## 11.5 테스트 인프라 강화 — Phase B (동어반복 정리)
+
+- [x] `backend/tests/test_union_layers.py` — `patch.object(svc, fn)` 후 fn 재호출 동어반복 2건 삭제 (DB 통합으로 이전)
+- [x] `backend/tests/test_k3s_callback.py` — `assert_called_once_with(exact, args)` 강화 (failure/success 시나리오 인자 고정)
+
+## 11.5 테스트 인프라 강화 — Phase C (MariaDB 실 SQL 통합)
+
+- [x] `docker-compose.yml` — `profiles: ["test"]` MariaDB 11.4 서비스 추가
+- [x] `backend/tests/fixtures/__init__.py` — 신규 (fixtures 패키지)
+- [x] `backend/tests/test_union_layers_db.py` — 20케이스: INSERT/CTE/FK/격리/mount 실 SQL 검증 (`@pytest.mark.db`)
+- [x] `.github/workflows/test.yml` — `test-backend-db` 잡 신규 (dev 브랜치 push 전용, MariaDB 11.4 서비스)
+
+## 11.5 테스트 인프라 강화 — Phase D (실 OpenStack 통합 테스트 활성화)
+
+- [x] `backend/tests/integration/credentials.py` — `project_b_credentials()` 함수 추가
+- [x] `backend/tests/integration/conftest.py` — `project_b_credentials_fx`, `project_b_auth_data`, `project_b_client` 픽스처 추가
+- [x] `backend/tests/integration/test_isolation.py` — pytest.skip 제거, 3건 본문 구현 (dynamic 격리, public 노출, 직접 GET 404)
+- [x] `backend/tests/integration/test_concurrent_boot.py` — pytest.skip 제거, env var `AFTERGLOW_TEST_CONCURRENT_VMS` 지원, timeout 15분
+- [x] `backend/tests/integration/test_resize_overlay.py` — pytest.skip 제거
+- [x] `.github/workflows/test.yml` — `test-backend-integration` 잡에 project_b secrets 추가, `-m slow` 마커 적용
+
+
+## 관리자 인스턴스 자격 증명 관리
+
+### 런타임 패스워드 재설정 (QEMU Guest Agent 기반)
+
+- [x] `backend/app/services/nova.py` — `change_server_password(conn, server_id, password)`: Nova `changePassword` action 호출 (libvirt+QGA 게스트 비밀번호 변경)
+- [x] `backend/app/services/nova.py` — `get_server_image_meta(conn, server_id)`: 이미지 QGA 지원 여부(`hw_qemu_guest_agent`) + `os_admin_user` 메타 조회. 볼륨 부팅 인스턴스는 cinder `volume_image_metadata` fallback
+- [x] `backend/app/models/compute.py` — `AdminPasswordRequest`, `AdminPasswordPrecheck` Pydantic 모델 추가
+- [x] `backend/app/api/compute/instances.py` — `GET /{server_id}/admin-password/precheck` (관리자 전용, QGA/상태 사전 점검)
+- [x] `backend/app/api/compute/instances.py` — `POST /{server_id}/admin-password` (관리자 전용, ACTIVE + QGA 검증 후 변경, audit 로그 출력)
+- [x] `backend/tests/test_instance_password.py` — 9케이스 단위 테스트 (403/404/409/422/204 검증)
+- [x] `frontend/src/lib/components/InstanceDetailPanel.svelte` — admin-only "비밀번호 재설정" 버튼 + precheck 자동 호출 + 인라인 모달 (QGA 경고, os_admin_user 표시)
+
+### 런타임 SSH 키 주입 정책
+
+- [x] 표준 OpenStack은 실행 중 SSH 키 주입을 미지원 — 정책상 런타임 주입 기능 미구현
+- [x] `InstanceDetailPanel.svelte` 패스워드 모달 내에 SSH 키 안내 문구 + 키페어 관리 링크 + rebuild 안내 추가
+
+### GPU 인스턴스 DCGM Exporter 자동 설치 (cloud-init)
+
+- [x] `backend/app/templates/cloudinit_base.yaml.j2` — `gpu_available=true` 시 설치 스크립트 + systemd unit 자동 생성 (네이티브 바이너리, `0.0.0.0:9400`)
+- [x] `backend/app/services/cloudinit.py` — `_DCGM_EXPORTER_VERSION` 핀 상수 추가, 템플릿 렌더에 버전 전달
+- [x] `backend/tests/test_cloudinit.py` — GPU/non-GPU 분기 3케이스 추가
+- [→] 보안 그룹 9400/tcp 자동 허용 — 12.2에서 통합 처리
+- [→] Prometheus 스크래핑 대상 자동 등록 — 12.3/12.4에서 통합 처리
+
+
+## 12. 인스턴스 관측성 — Node Exporter + 메트릭 가시성
+
+> **목표**: 운영 중인 모든 사용자 VM의 시스템(`node_exporter:9100`) + GPU(`dcgm-exporter:9400`) 메트릭을 외부에서 안정적으로 수집하고, 프로젝트별 Grafana 대시보드로 사용자가 자신의 인스턴스 상태를 직접 확인할 수 있도록 한다. 11.4 `ensure_union_egress_sg` 패턴을 그대로 ingress 변형으로 재사용한다.
+
+> **배경**: GPU DCGM Exporter(섹션 11 끝)는 cloud-init 단으로 자동 설치 완료. Node Exporter는 base 이미지 빌드 트랙에서 사전 설치 예정 (별도 인프라 작업, 본 코드 변경 외). 현재 Prometheus(`monitoring/prometheus.yml`, `deploy/k8s-template/monitoring/prometheus/configmap.yaml`)는 `backend:8000/api/metrics`만 스크래핑하며 VM은 미수집. 사용자 VM에는 fixed IP만 있고 보안 그룹 ingress는 기본 차단 상태.
+
+### 12.1 Node Exporter 사전 설치 (이미지 빌드 트랙 — 본 저장소 외)
+
+- [ ] base qcow2 이미지에 `node_exporter` 바이너리 + systemd unit 사전 설치 (Packer/Diskimage-Builder 빌드 스크립트)
+- [ ] `node_exporter --web.listen-address=0.0.0.0:9100` 기본 구성, `--collector.systemd` 활성화
+- [ ] 본 저장소 변경: `backend/tests/integration/test_image_metadata.py` 신규 — 이미지 메타데이터에 `monitoring_ready=true` 태그가 있는지 사전 검증 (선택)
+- [ ] `backend/app/api/compute/instances.py` 인스턴스 생성 시 이미지 메타에서 `monitoring_ready` 추출하여 SG 자동 적용 분기에 활용 (12.2와 연동)
+
+### 12.2 Monitoring 보안 그룹 자동화 (ingress 9100/9400)
+
+11.4의 `ensure_union_egress_sg` (egress 6 rule)를 직접 모방. 새 헬퍼는 ingress 방향 + 노출 범위가 핵심 차이.
+
+- [ ] `backend/app/services/neutron.py` — `ensure_monitoring_ingress_sg(conn, project_id, sg_name, scrape_cidr)` idempotent 헬퍼 추가
+  - rule: `ingress tcp 9100/9100 remote_ip_prefix=<scrape_cidr>` + `ingress tcp 9400/9400 remote_ip_prefix=<scrape_cidr>`
+  - `scrape_cidr`은 Prometheus 스크래퍼 IP/서브넷에 한정 (전체 0.0.0.0/0 금지)
+  - 11.4 `_UNION_EGRESS_RULES` 상수 옆에 `_MONITORING_INGRESS_RULES` 추가
+- [ ] `backend/app/config.py` — 신규 설정값:
+  - `monitoring_auto_sg_enabled: bool = True`
+  - `monitoring_sg_name: str = "monitoring"`
+  - `monitoring_scrape_cidr: str` (필수, env로 주입)
+- [ ] `backend/app/api/identity/admin_identity.py:create_project` — 프로젝트 생성 후 `ensure_monitoring_ingress_sg` 호출하여 신규 프로젝트마다 monitoring SG 자동 생성
+- [ ] `backend/app/api/compute/instances.py:create_instance` + `create_instance_async` — 11.4 egress SG 자동 attach 패턴 옆에 monitoring SG attach 추가 (`req.security_groups`에 `monitoring_sg_name` append, 중복 방지)
+- [ ] `backend/app/api/admin/projects.py` (또는 신규 utility 라우터) — `POST /api/admin/projects/{id}/sync-monitoring-sg` 엔드포인트: 기존 프로젝트에 일괄 적용 (관리자 전용)
+- [ ] `frontend/src/lib/components/VmCreatePanel.svelte` — SG 단일 select 옆에 "monitoring SG 자동 포함됨" 안내 배지 (auto-attach 동작 가시화)
+- [ ] `backend/tests/test_neutron.py` — `ensure_monitoring_ingress_sg` 3건 (미존재 생성, idempotent, scrape_cidr 미설정 시 ValueError)
+- [ ] `backend/tests/test_admin_identity.py` — 프로젝트 생성 시 `ensure_monitoring_ingress_sg` 호출 검증 1건
+- [ ] `backend/tests/test_instances.py` — monitoring SG auto-attach 2건 (활성/비활성)
+
+### 12.3 Prometheus 스크래핑 — 메인 클러스터 통합 vs 프로젝트별 분리 (결정 필요)
+
+> **결정 미확정 (사용자 검토 필요)**: 옵션 A를 권장하나, 멀티테넌시 격리 요구 강도에 따라 B가 정답일 수 있음.
+
+#### Option A: 메인 Prometheus + Grafana 단일 인스턴스 + tenant 라벨 분리 (권장)
+
+- 장점: 운영 단일 스택, Grafana org/folder + label-based row-level security로 프로젝트 격리, 비용/리소스 효율
+- 단점: 사용자 정의 대시보드 자유도 낮음 (관리자가 템플릿 제공), Prometheus single-tenant 한계
+- [ ] `monitoring/prometheus.yml` + `deploy/k8s-template/monitoring/prometheus/configmap.yaml` — `nova_sd` 또는 `http_sd_config` 추가하여 OpenStack VM 자동 발견
+- [ ] `backend/app/api/common/sd_targets.py` (신규) — `GET /api/sd/prometheus/targets` Prometheus `http_sd` 호환 JSON 응답 (인스턴스 목록 + `instance`, `project_id`, `flavor`, `gpu` 라벨)
+  - 인증: 별도 token (스크래퍼 전용), `monitoring_sd_token` 설정값
+  - VM의 floating IP가 없어도 fixed IP를 그대로 노출 (스크래퍼가 internal network에 접근 가능하다는 가정)
+- [ ] `backend/tests/test_sd_targets.py` — 라벨 형식, token 검증, 권한 4건
+- [ ] `deploy/k8s-template/monitoring/prometheus/configmap.yaml` — DCGM/Node 스크래핑 잡 추가 (`__meta_*` 라벨 → `project_id`/`instance` 재라벨)
+- [ ] `deploy/k8s-template/monitoring/grafana/` — provisioning datasource (Prometheus) + 기본 대시보드(JSON) 추가, `node_exporter`/`dcgm` 공식 대시보드 import
+- [ ] `frontend/src/routes/dashboard/observability/+page.svelte` (신규) — Grafana iframe 임베드 + 프로젝트별 URL 자동 생성 (`var-project_id={current}`)
+
+#### Option B: 프로젝트별 컨테이너 모니터링 스택 (대안)
+
+- 장점: 완전한 격리, 사용자가 자신의 대시보드/알람 자유 구성, BYO Grafana
+- 단점: 프로젝트당 Prometheus+Grafana 컨테이너 관리(리소스 비용 N배), 사용자가 docker-compose 운영 필요, 인증/네트워크 설계 복잡
+- [ ] `backend/app/templates/monitoring_stack/docker-compose.yml.j2` (신규) — Prometheus + Grafana 한 쌍, 사용자 다운로드 가능
+- [ ] `backend/app/api/compute/instances.py` — `GET /api/instances/{id}/monitoring-bundle` 엔드포인트: 사용자 프로젝트 SD targets + 자격증명을 담은 zip 생성
+- [ ] 사용자가 임의 VM에 `docker compose up`으로 띄움 — 인스턴스 자체 리소스를 사용
+- [ ] 프론트는 사용자가 입력한 Grafana URL만 보관 (관리/설치는 사용자 책임)
+
+#### 비교 의사결정 포인트
+
+- 멀티테넌시 격리 강도 (옵션 A의 라벨 분리로 충분한지 vs 완전 분리 필요한지)
+- 운영 인력/비용 (단일 vs N개 스택)
+- 사용자 자유도 요구 (대시보드 커스터마이즈 빈도)
+
+### 12.4 Grafana 대시보드 + 프로젝트별 가시화
+
+Option A 채택 시 본 절 진행. Option B 채택 시 사용자가 자체 구성하므로 본 절은 템플릿 제공으로 한정.
+
+- [ ] `deploy/k8s-template/monitoring/grafana/provisioning/dashboards/` — node-exporter-full + nvidia-dcgm 공식 대시보드 JSON 동봉
+- [ ] Grafana org/folder 자동 생성 — 프로젝트별 folder, datasource label filter `project_id="<keystone_project_id>"`
+- [ ] `frontend/src/routes/dashboard/observability/+page.svelte` — Grafana iframe + auth proxy (Grafana `auth.proxy` 또는 `auth.jwt` 모드 + 백엔드가 토큰 발급)
+- [ ] `backend/app/api/common/grafana_auth.py` (신규) — Grafana 임베드용 JWT 발급 엔드포인트
+- [ ] `backend/tests/test_grafana_auth.py` — 토큰 발급/만료/권한 3건
+
+### 12.5 Open Questions (사용자 확인 필요)
+
+1. **Kolla Ansible 환경의 Prometheus/Grafana**: 운영 OpenStack(Kolla)에 이미 `prometheus`/`grafana` 컨테이너가 떠 있는가? 있다면 그 인스턴스를 재사용할지(scrape job만 추가), 본 저장소의 `deploy/k8s-template/monitoring/`을 분리 운영할지?
+2. **`monitoring_scrape_cidr` 결정**: 스크래퍼가 실제로 어느 네트워크에서 도달하는가? (control plane management network / provider network / floating IP 경유?)
+3. **VM에서 Prometheus 도달성**: 사용자 VM은 보통 floating IP 없이 fixed IP만 가짐. Prometheus 스크래퍼가 VM의 fixed IP에 직접 접근 가능한 위치에 떠 있는가, 아니면 floating IP가 필수인가?
+4. **인증 모델**: Grafana org를 keystone project별로 1:1 매핑할지, 단일 org + folder + label filter로 격리할지?
+5. **옵션 A vs B 결정**: 본 결정이 12.3/12.4 작업량을 크게 좌우. 사용자 격리 정책 + 운영 인력 기준 판단 필요.

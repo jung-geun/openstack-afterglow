@@ -14,6 +14,7 @@ class FileStorageInfo(BaseModel):
     project_id: str | None = None
     created_at: str | None = None
     nfs_export_location: str | None = None
+    is_public: bool = False
     # Union 전용 메타데이터
     library_name: str | None = None
     library_version: str | None = None
@@ -30,6 +31,9 @@ class LibraryConfig(BaseModel):
     available_prebuilt: bool = False
     share_proto: str = "CEPHFS"  # CEPHFS | NFS
     ubuntu_versions: list[str] = ["22.04", "24.04"]  # 지원 Ubuntu 버전
+    visibility: str = "public"  # "public" | "private"
+    license_type: str | None = None  # e.g. "MIT", "commercial"
+    max_concurrent_mounts: int | None = None  # None = unlimited
 
 
 class VolumeInfo(BaseModel):
@@ -159,6 +163,10 @@ class CreateShareSnapshotRequest(BaseModel):
     description: str | None = None
 
 
+class ShareSnapshotRevertRequest(BaseModel):
+    share_id: str
+
+
 class SecurityServiceInfo(BaseModel):
     id: str
     name: str
@@ -232,6 +240,7 @@ class TopologyInstance(BaseModel):
     id: str
     name: str
     status: str
+    project_id: str | None = None
     network_names: list[str] = []
     ip_addresses: list[dict] = []  # [{addr, type, network_name}]
 
@@ -241,6 +250,10 @@ class TopologyRouter(BaseModel):
     name: str
     status: str
     external_gateway_network_id: str | None = None
+    external_gateway_ips: list[str] = []  # GW 외부 고정 IP 목록 (SNAT IP 포함)
+    interface_ips: list[dict] = []  # [{ip_address, subnet_id}] 내부 인터페이스 IP
+    is_distributed: bool = False  # DVR 여부
+    is_ha: bool = False  # HA 여부
     connected_subnet_ids: list[str] = []
     dvr_subnet_ids: list[str] = []
     project_id: str | None = None
@@ -256,11 +269,44 @@ class TopologyNetwork(BaseModel):
     subnet_details: list[SubnetDetail] = []
 
 
+class TopologyLBMember(BaseModel):
+    id: str
+    address: str
+    protocol_port: int = 0
+    status: str = ""
+    subnet_id: str | None = None
+    pool_id: str
+    server_id: str | None = None
+
+
+class TopologyLBListener(BaseModel):
+    id: str
+    name: str = ""
+    protocol: str = ""
+    protocol_port: int = 0
+    default_pool_id: str | None = None
+
+
+class TopologyLoadBalancer(BaseModel):
+    id: str
+    name: str = ""
+    vip_address: str | None = None
+    vip_port_id: str | None = None
+    vip_subnet_id: str | None = None
+    vip_network_id: str | None = None
+    provisioning_status: str = ""
+    operating_status: str = ""
+    project_id: str | None = None
+    listeners: list[TopologyLBListener] = []
+    members: list[TopologyLBMember] = []
+
+
 class TopologyData(BaseModel):
     networks: list[TopologyNetwork] = []
     routers: list[TopologyRouter] = []
     instances: list[TopologyInstance] = []
     floating_ips: list[FloatingIpInfo] = []
+    load_balancers: list[TopologyLoadBalancer] = []
 
 
 # ---------------------------------------------------------------------------
@@ -278,3 +324,29 @@ class ObjectInfo(BaseModel):
     content_type: str = ""
     last_modified: str = ""
     etag: str = ""
+
+
+class CreateDirectoryRequest(BaseModel):
+    path: str = Field(..., min_length=1, max_length=1024)
+
+
+class CopyObjectRequest(BaseModel):
+    source: str = Field(..., min_length=1)
+    destination: str = Field(..., min_length=1)
+    dest_container: str | None = None
+
+
+class MoveObjectRequest(BaseModel):
+    source: str = Field(..., min_length=1)
+    destination: str = Field(..., min_length=1)
+    dest_container: str | None = None
+
+
+class RenameObjectRequest(BaseModel):
+    source: str = Field(..., min_length=1)
+    new_name: str = Field(..., min_length=1)
+
+
+class BulkDeleteRequest(BaseModel):
+    objects: list[str] = Field(..., min_length=1, max_length=1000)
+    recursive: bool = False

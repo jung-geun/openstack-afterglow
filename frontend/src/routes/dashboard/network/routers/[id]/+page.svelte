@@ -3,6 +3,8 @@
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import { goto } from '$app/navigation';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	interface RouterInterface {
 		id: string;
@@ -76,6 +78,13 @@
 			// 무시
 		}
 	}
+
+	const ar = createAutoRefresh(() => fetchRouter(), {
+		storageKey: 'dashboard-network-router-detail',
+		defaultActive: true,
+		defaultInterval: 30,
+		intervalOptions: [10, 15, 30, 60],
+	});
 
 	$effect(() => {
 		if ($auth.projectId) {
@@ -183,11 +192,20 @@
 					<span class="text-xs text-gray-500 font-mono">{router.id}</span>
 				</div>
 			</div>
-			<button
-				onclick={deleteRouter}
-				disabled={saving}
-				class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-red-900 hover:border-red-700 disabled:border-gray-700 transition-colors"
-			>삭제</button>
+			<div class="flex items-center gap-2">
+				<AutoRefreshControl
+					bind:active={ar.active}
+					bind:intervalSeconds={ar.intervalSeconds}
+					intervalOptions={ar.intervalOptions}
+					refreshing={loading}
+					onManualRefresh={() => fetchRouter()}
+				/>
+				<button
+					onclick={deleteRouter}
+					disabled={saving}
+					class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-red-900 hover:border-red-700 disabled:border-gray-700 transition-colors"
+				>삭제</button>
+			</div>
 		</div>
 
 		<!-- 외부 게이트웨이 -->

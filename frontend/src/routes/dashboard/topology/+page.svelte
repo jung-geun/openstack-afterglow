@@ -3,6 +3,8 @@
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import GlobalTopology from '$lib/components/GlobalTopology.svelte';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	interface SubnetDetail {
 		id: string; name: string; cidr: string;
@@ -17,7 +19,12 @@
 	interface TopologyRouter {
 		id: string; name: string; status: string;
 		external_gateway_network_id: string | null;
+		external_gateway_ips: string[];
+		interface_ips: { ip_address: string; subnet_id: string }[];
+		is_distributed: boolean;
+		is_ha: boolean;
 		connected_subnet_ids: string[];
+		dvr_subnet_ids: string[];
 		project_id: string | null;
 	}
 	interface TopologyInstance {
@@ -40,15 +47,24 @@
 
 	let data = $state<TopologyData | null>(null);
 	let loading = $state(true);
+	let refreshing = $state(false);
 	let error = $state('');
+
+	const ar = createAutoRefresh(fetchTopology, {
+		storageKey: 'dashboard-topology',
+		defaultInterval: 30,
+		intervalOptions: [15, 30, 60]
+	});
 
 	$effect(() => {
 		if (!$auth.token) return;
+		data = null;
 		fetchTopology();
 	});
 
 	async function fetchTopology() {
-		loading = true;
+		if (!data) loading = true;
+		else refreshing = true;
 		error = '';
 		try {
 			data = await api.get<TopologyData>(
@@ -60,6 +76,7 @@
 			error = e instanceof ApiError ? `조회 실패 (${e.status}): ${e.message}` : '서버 오류';
 		} finally {
 			loading = false;
+			refreshing = false;
 		}
 	}
 </script>
@@ -72,13 +89,13 @@
 			</a>
 			<h1 class="text-2xl font-bold text-white mt-2">네트워크 토폴로지</h1>
 		</div>
-		<button
-			onclick={fetchTopology}
-			disabled={loading}
-			class="text-sm px-3 py-1.5 rounded border border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500 disabled:text-gray-600 disabled:border-gray-800 transition-colors"
-		>
-			{loading ? '로딩 중…' : '새로고침'}
-		</button>
+		<AutoRefreshControl
+			bind:active={ar.active}
+			bind:intervalSeconds={ar.intervalSeconds}
+			intervalOptions={ar.intervalOptions}
+			refreshing={loading || refreshing}
+			onManualRefresh={fetchTopology}
+		/>
 	</div>
 
 	{#if error}
@@ -88,6 +105,10 @@
 	{:else if loading}
 		<LoadingSkeleton variant="card" rows={8} />
 	{:else if data}
+		{@const _visibleNets = data.networks.filter(n => n.is_external || n.is_shared || n.project_id === $auth.projectId)}
+		{@const _projectRouters = data.routers.filter(r => r.project_id === $auth.projectId)}
+		{@const _projectFips = data.floating_ips.filter(f => !f.project_id || f.project_id === $auth.projectId)}
+		<div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 		<div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4">
 			<GlobalTopology {data} projectId={$auth.projectId} />
 		</div>
@@ -129,14 +150,12 @@
 		</div>
 
 		<!-- 요약 (현재 프로젝트 기준) -->
-		{@const _visibleNets = data.networks.filter(n => n.is_external || n.is_shared || n.project_id === $auth.projectId)}
-		{@const _projectRouters = data.routers.filter(r => r.project_id === $auth.projectId)}
-		{@const _projectFips = data.floating_ips.filter(f => !f.project_id || f.project_id === $auth.projectId)}
 		<div class="mt-4 flex gap-6 text-xs text-gray-500 px-1">
 			<span>네트워크 {_visibleNets.length}개</span>
 			<span>라우터 {_projectRouters.length}개</span>
 			<span>인스턴스 {data.instances.length}개</span>
 			<span>Floating IP {_projectFips.length}개</span>
+		</div>
 		</div>
 	{/if}
 </div>

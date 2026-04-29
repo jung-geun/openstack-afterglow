@@ -11,6 +11,7 @@ GitLab OIDC 인증 서비스.
    - TokenResponse 호환 dict 반환
 """
 
+import asyncio
 import logging
 import secrets
 import urllib.parse
@@ -23,8 +24,10 @@ logger = logging.getLogger(__name__)
 
 
 _STATE_TTL = 600  # 10분
+_FALLBACK_MAX_SIZE = 500  # 인메모리 폴백 최대 항목 수 (메모리 누수 방지)
 
 # Redis 장애 시 인메모리 state 폴백 (단일 프로세스용, 재시작 시 소실)
+# {state: expiry_timestamp} — 최대 _FALLBACK_MAX_SIZE 항목 유지
 _fallback_states: dict[str, float] = {}
 
 
@@ -44,7 +47,19 @@ async def get_authorize_url() -> str:
         await r.setex(f"afterglow:gitlab_state:{state}", _STATE_TTL, "1")
     except Exception:
         logger.warning("Redis 장애로 OIDC state를 인메모리에 임시 저장합니다")
-        _fallback_states[state] = __import__("time").time() + _STATE_TTL
+        import time as _time
+
+        now = _time.time()
+        # 크기 초과 시 만료된 항목 정리 (메모리 누수 방지)
+        if len(_fallback_states) >= _FALLBACK_MAX_SIZE:
+            expired = [k for k, exp in _fallback_states.items() if exp <= now]
+            for k in expired:
+                del _fallback_states[k]
+            # 여전히 초과하면 가장 오래된 항목 제거
+            if len(_fallback_states) >= _FALLBACK_MAX_SIZE:
+                oldest = min(_fallback_states, key=lambda k: _fallback_states[k])
+                del _fallback_states[oldest]
+        _fallback_states[state] = now + _STATE_TTL
 
     params = {
         "client_id": settings.gitlab_oidc_client_id,
@@ -142,6 +157,28 @@ async def _list_projects_for_token(unscoped_token: str) -> list[dict]:
         return resp.json().get("projects", [])
 
 
+async def _get_user_default_project_id(unscoped_token: str, user_id: str) -> str:
+    """unscoped 토큰으로 사용자의 default_project_id를 비동기로 조회.
+
+    Keystone GET /v3/users/{user_id}. 실패 또는 미설정 시 빈 문자열을 반환한다.
+    """
+    if not user_id:
+        return ""
+    settings = get_settings()
+    try:
+        async with httpx.AsyncClient(timeout=10, verify=settings.ssl_verify) as client:
+            resp = await client.get(
+                f"{settings.os_auth_url}/users/{user_id}",
+                headers={"X-Auth-Token": unscoped_token},
+            )
+            resp.raise_for_status()
+            user = resp.json().get("user", {})
+            return user.get("default_project_id") or ""
+    except Exception:
+        logger.warning("default_project_id 조회 실패", exc_info=True)
+        return ""
+
+
 async def _scope_token(unscoped_token: str, project_id: str) -> dict:
     """unscoped 토큰을 특정 프로젝트로 scope → scoped 토큰과 정보 반환."""
     settings = get_settings()
@@ -181,16 +218,24 @@ async def exchange_code(code: str, state: str) -> dict:
     """
     GitLab OAuth2 authorization code를 Keystone 토큰으로 교환.
     TokenResponse 호환 dict 반환.
+
+    사용자의 default_project_id가 접근 가능한 프로젝트 목록에 포함되어 있으면
+    해당 프로젝트로 scope, 그렇지 않으면 첫 번째 프로젝트로 fallback.
+    프로젝트 목록 조회와 default_project_id 조회를 병렬로 수행한다.
     """
     await _validate_state(state)
 
     tokens = await _exchange_gitlab_code(code)
     fed = await _federated_auth(tokens["id_token"])
     unscoped_token = fed["token"]
+    user_id = fed.get("user", {}).get("id", "")
 
-    projects = await _list_projects_for_token(unscoped_token)
+    projects, default_pid = await asyncio.gather(
+        _list_projects_for_token(unscoped_token),
+        _get_user_default_project_id(unscoped_token, user_id),
+    )
     if not projects:
         raise ValueError("접근 가능한 프로젝트가 없습니다")
 
-    first_project_id = projects[0]["id"]
-    return await _scope_token(unscoped_token, first_project_id)
+    target_pid = default_pid if default_pid and any(p["id"] == default_pid for p in projects) else projects[0]["id"]
+    return await _scope_token(unscoped_token, target_pid)

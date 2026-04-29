@@ -138,12 +138,14 @@ async def get_dashboard_config():
 @router.get("/quotas")
 async def get_project_quotas(
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    refresh: bool = Query(False),
 ):
     """현재 프로젝트의 전체 할당량 (compute/storage/network/file_storage/gpu) 조회."""
     project_id = conn._afterglow_project_id
     settings = get_settings()
-    try:
-        tasks = [
+
+    async def _fetch_quotas():
+        tasks: list = [
             asyncio.to_thread(nova.get_project_quota, conn, project_id),
             asyncio.to_thread(cinder.get_volume_quota, conn, project_id),
             asyncio.to_thread(neutron_svc.get_network_quota, conn, project_id),
@@ -154,7 +156,15 @@ async def get_project_quotas(
             tasks.append(asyncio.to_thread(trove_svc.count_instances, conn))
         if settings.service_swift_enabled:
             tasks.append(asyncio.to_thread(swift_svc.get_account_metadata, conn))
-        results = await asyncio.gather(*tasks)
+        return list(await asyncio.gather(*tasks))
+
+    try:
+        results = await cached_call(
+            f"afterglow:dashboard:{project_id}:quotas",
+            ttl_normal(),
+            _fetch_quotas,
+            refresh=refresh,
+        )
         compute_q, volume_q, network_q = results[0], results[1], results[2]
         idx = 3
         file_storage_q = results[idx] if settings.service_manila_enabled else {"limit": 0, "in_use": 0, "reserved": 0}
@@ -219,10 +229,27 @@ async def get_gpu_available(
         raise HTTPException(status_code=404, detail="GPU 가용량 조회가 비활성화되어 있습니다")
 
     def _collect():
-        from app.api.identity.admin_gpu import _collect_gpu_hosts
-        from app.services.keystone import get_admin_connection_for_project
+        import openstack
 
-        admin_conn = get_admin_connection_for_project(s.os_project_name)
+        from app.api.identity.admin_gpu import _collect_gpu_hosts
+
+        # get_admin_connection_for_project()는 project_id(UUID)를 기대하므로
+        # admin project는 project_name으로 직접 연결 생성 (gpu_quota.py와 동일 패턴)
+        admin_conn = openstack.connect(
+            load_envvars=False,
+            load_yaml_config=False,
+            auth_url=s.os_auth_url,
+            auth_type="password",
+            username=s.os_username,
+            password=s.os_password,
+            project_name=s.os_project_name,
+            user_domain_name=s.os_user_domain_name,
+            project_domain_name=s.os_project_domain_name,
+            region_name=s.os_region_name,
+            interface=s.os_interface,
+            api_timeout=30,
+            verify=s.ssl_verify,
+        )
         data = _collect_gpu_hosts(admin_conn)
         return {
             "gpu_types": [
@@ -239,9 +266,48 @@ async def get_gpu_available(
         }
 
     try:
-        return await cached_call("afterglow:gpu:availability", ttl_normal(), _collect, refresh=refresh)
+        data = await cached_call("afterglow:gpu:availability", ttl_normal(), _collect, refresh=refresh)
     except Exception:
+        _logger.warning("GPU 가용량 조회 실패", exc_info=True)
         raise HTTPException(status_code=500, detail="GPU 가용량 조회 실패")
+
+    # 프로젝트 GPU 쿼터 기반 필터링 + 가용량을 쿼터 상한 기준으로 표시
+    if is_db_available():
+        try:
+            from app.api.identity.admin_gpu import build_device_name_to_alias_map
+            from app.services.gpu_quota import get_effective_gpu_quotas, get_project_gpu_usage
+
+            project_id = conn._afterglow_project_id
+            quotas = await get_effective_gpu_quotas(project_id)
+            usage = await get_project_gpu_usage(conn, project_id)
+            name_to_alias = build_device_name_to_alias_map()
+
+            filtered = []
+            for t in data["gpu_types"]:
+                alias = name_to_alias.get(t["device_name"], "")
+                limit = quotas.get(alias, 0)
+                if limit == 0:
+                    continue
+                in_use = usage.get(alias, 0)
+                if limit == -1:
+                    # 무제한: 클러스터 전체 수치 그대로 사용
+                    filtered.append(t)
+                else:
+                    # 상한 있음: total=쿼터 상한, available=min(쿼터 잔여, 클러스터 잔여)
+                    quota_remaining = max(limit - in_use, 0)
+                    filtered.append(
+                        {
+                            **t,
+                            "total": limit,
+                            "used": in_use,
+                            "available": min(quota_remaining, t["available"]),
+                        }
+                    )
+            data = {**data, "gpu_types": filtered}
+        except Exception:
+            _logger.warning("GPU 쿼터 필터링 실패 — 전체 목록 반환", exc_info=True)
+
+    return data
 
 
 @router.get("/usage")
@@ -249,6 +315,7 @@ async def get_project_usage(
     start: str = Query(default=None, description="시작일 YYYY-MM-DD"),
     end: str = Query(default=None, description="종료일 YYYY-MM-DD"),
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    refresh: bool = Query(False),
 ):
     """기간별 프로젝트 리소스 사용량."""
     project_id = conn._afterglow_project_id
@@ -256,7 +323,12 @@ async def get_project_usage(
     end_dt = end or today.isoformat()
     start_dt = start or (today - timedelta(days=30)).isoformat()
     try:
-        usage = await asyncio.to_thread(nova.get_project_usage, conn, project_id, start_dt, end_dt)
+        usage = await cached_call(
+            f"afterglow:dashboard:{project_id}:usage:{start_dt}:{end_dt}",
+            ttl_fast(),
+            lambda: nova.get_project_usage(conn, project_id, start_dt, end_dt),
+            refresh=refresh,
+        )
     except Exception:
         raise HTTPException(status_code=500, detail="작업 실패")
     return {

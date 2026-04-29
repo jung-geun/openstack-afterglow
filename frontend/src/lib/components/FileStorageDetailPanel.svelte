@@ -1,6 +1,8 @@
 <script lang="ts">
   import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
+  import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+  import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
   interface FileStorage {
     id: string;
@@ -56,6 +58,16 @@
 
   const token = $derived($auth.token ?? undefined);
   const projectId = $derived($auth.projectId ?? undefined);
+
+  const ar = createAutoRefresh(
+    () => Promise.all([fetchFileStorage(fileStorageId), fetchAccessRules(fileStorageId)]),
+    {
+      storageKey: 'file-storage-detail-panel',
+      defaultActive: true,
+      defaultInterval: 15,
+      intervalOptions: [10, 15, 30, 60],
+    }
+  );
 
   $effect(() => {
     if (!fileStorageId || !$auth.token) return;
@@ -139,6 +151,13 @@
   <!-- 닫기 버튼 -->
   <div class="flex items-center justify-between mb-4">
     <button onclick={onClose} class="text-gray-400 hover:text-gray-200 text-sm transition-colors">← 목록으로</button>
+    <AutoRefreshControl
+      bind:active={ar.active}
+      bind:intervalSeconds={ar.intervalSeconds}
+      intervalOptions={ar.intervalOptions}
+      refreshing={loading}
+      onManualRefresh={() => Promise.all([fetchFileStorage(fileStorageId), fetchAccessRules(fileStorageId)])}
+    />
   </div>
 
   {#if error}

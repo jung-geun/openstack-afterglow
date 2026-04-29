@@ -5,6 +5,8 @@
   import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+  import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+  import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
   interface ZunContainer {
     uuid: string;
@@ -187,6 +189,12 @@
     wsConnected = false;
   }
 
+  const ar = createAutoRefresh(fetchLogs, {
+    storageKey: 'dashboard-container-logs',
+    defaultInterval: 15,
+    intervalOptions: [10, 15, 30, 60]
+  });
+
   onMount(fetchContainer);
 
   onDestroy(() => {
@@ -279,7 +287,13 @@
     <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
       <div class="flex items-center justify-between mb-3">
         <div class="text-xs text-gray-500">로그</div>
-        <button onclick={fetchLogs} disabled={logsLoading} class="text-xs text-blue-400 hover:text-blue-300 disabled:opacity-40 transition-colors">{logsLoading ? '조회 중...' : '새로고침'}</button>
+        <AutoRefreshControl
+          bind:active={ar.active}
+          bind:intervalSeconds={ar.intervalSeconds}
+          intervalOptions={ar.intervalOptions}
+          refreshing={logsLoading}
+          onManualRefresh={fetchLogs}
+        />
       </div>
       {#if logs}
         <pre class="bg-gray-950 rounded p-3 text-xs text-gray-300 overflow-auto max-h-64 font-mono whitespace-pre-wrap">{logs}</pre>

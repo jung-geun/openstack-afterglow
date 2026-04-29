@@ -13,12 +13,8 @@
 
 	let error = $state('');
 	let loading = $state(true);
-	let processing = false;
 
 	onMount(async () => {
-		if (processing) return;
-		processing = true;
-
 		const code = $page.url.searchParams.get('code');
 		const state = $page.url.searchParams.get('state');
 
@@ -26,6 +22,19 @@
 			error = '잘못된 콜백 요청입니다. 다시 로그인해 주세요.';
 			loading = false;
 			return;
+		}
+
+		// 동일 code 재사용 방지 (HMR/remount/reload 시 onMount 재실행 대응)
+		const guardKey = `gitlab-callback-consumed:${code}`;
+		if (sessionStorage.getItem(guardKey)) {
+			return;
+		}
+		sessionStorage.setItem(guardKey, '1');
+		// URL에서 code/state를 즉시 제거하여 reload 시 재호출되지 않게 함
+		try {
+			history.replaceState(null, '', '/auth/gitlab/callback');
+		} catch {
+			/* noop */
 		}
 
 		try {
@@ -41,26 +50,19 @@
 				is_system_admin?: boolean;
 			}>('/api/auth/gitlab/callback', { code, state });
 
-			// 프로젝트 목록 조회
-			let projects: Project[] = [];
-			try {
-				projects = await api.get<Project[]>('/api/auth/projects', data.token);
-			} catch {
-				// 실패 시 무시
-			}
-
-			// 세션 설정 조회
-			let sessionTimeoutSeconds = 3600;
-			let sessionWarningBeforeSeconds = 300;
-			try {
-				const sessionInfo = await api.get<{ timeout_seconds: number; warning_before_seconds: number }>(
+			// 프로젝트 목록 + 세션 설정 병렬 조회
+			const [projectsResult, sessionInfoResult] = await Promise.allSettled([
+				api.get<Project[]>('/api/auth/projects', data.token),
+				api.get<{ timeout_seconds: number; warning_before_seconds: number }>(
 					'/api/auth/session-info', data.token, data.project_id
-				);
-				sessionTimeoutSeconds = sessionInfo.timeout_seconds;
-				sessionWarningBeforeSeconds = sessionInfo.warning_before_seconds;
-			} catch {
-				// 기본값 유지
-			}
+				),
+			]);
+			const projects: Project[] =
+				projectsResult.status === 'fulfilled' ? projectsResult.value : [];
+			const sessionTimeoutSeconds =
+				sessionInfoResult.status === 'fulfilled' ? sessionInfoResult.value.timeout_seconds : 3600;
+			const sessionWarningBeforeSeconds =
+				sessionInfoResult.status === 'fulfilled' ? sessionInfoResult.value.warning_before_seconds : 300;
 
 			// 기본 프로젝트가 설정되어 있고, 프로젝트 목록에 존재하면 해당 프로젝트로 전환
 			let selectedProjectId = data.project_id;

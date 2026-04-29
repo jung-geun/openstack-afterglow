@@ -7,6 +7,8 @@
 	import ContainerDetailPanel from '$lib/components/ContainerDetailPanel.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import StatusChip from '$lib/components/ui/StatusChip.svelte';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	interface AdminContainer {
 		uuid: string;
@@ -22,21 +24,31 @@
 
 	let containers = $state<AdminContainer[]>([]);
 	let loading = $state(true);
+	let refreshing = $state(false);
 	let selectedContainerId = $state<string | null>(null);
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
 
 	async function load() {
-		loading = true;
+		if (containers.length === 0) loading = true;
+		else refreshing = true;
 		try {
 			containers = await api.get<AdminContainer[]>('/api/admin/all-containers', token, projectId);
 		} catch {
 			containers = [];
 		} finally {
 			loading = false;
+			refreshing = false;
 		}
 	}
+
+	const ar = createAutoRefresh(load, {
+		storageKey: 'admin-containers',
+		defaultActive: true,
+		defaultInterval: 15,
+		intervalOptions: [10, 15, 30, 60]
+	});
 
 	onMount(load);
 </script>
@@ -44,7 +56,13 @@
 <div class="p-4 md:p-8 max-w-6xl">
 	<PageHeader breadcrumb="CONTAINERS" title="전체 컨테이너">
 		{#snippet actions()}
-			<button onclick={load} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
+			<AutoRefreshControl
+				bind:active={ar.active}
+				bind:intervalSeconds={ar.intervalSeconds}
+				intervalOptions={ar.intervalOptions}
+				refreshing={loading || refreshing}
+				onManualRefresh={load}
+			/>
 		{/snippet}
 	</PageHeader>
 
@@ -53,7 +71,7 @@
 	{:else if containers.length === 0}
 		<div class="text-gray-600 text-sm">컨테이너가 없습니다</div>
 	{:else}
-		<div class="overflow-x-auto">
+		<div class="overflow-x-auto" class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 			<table class="w-full text-sm">
 				<thead>
 					<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">

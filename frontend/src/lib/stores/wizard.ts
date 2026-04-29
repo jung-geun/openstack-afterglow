@@ -1,5 +1,15 @@
 import { writable } from 'svelte/store';
 
+export const wizardOpen = writable<boolean>(false);
+
+export function openWizard() {
+	wizardOpen.set(true);
+}
+
+export function closeWizard() {
+	wizardOpen.set(false);
+}
+
 export interface NewVolumeSpec {
 	name: string;
 	size_gb: number;
@@ -14,12 +24,15 @@ export interface WizardState {
 	libraries: string[];
 	strategy: 'prebuilt' | 'dynamic' | null;
 	mountProtocol: 'CEPHFS' | 'NFS';
+	templateName: string | null;
+	templateVersion: number | null;
 	instanceName: string;
 	networkId: string | null;
 	networkName: string | null;
-	authMode: 'keypair' | 'password';
 	keyName: string | null;
-	adminPassword: string;
+	securityGroups: string[];
+	availabilityZone: string | null;
+	cloudInit: string;
 	bootVolumeSizeGb: number;
 	deleteBootVolumeOnTermination: boolean;
 	additionalVolumeIds: string[];
@@ -35,12 +48,15 @@ const initial: WizardState = {
 	libraries: [],
 	strategy: null,
 	mountProtocol: 'NFS',
+	templateName: null,
+	templateVersion: null,
 	instanceName: '',
 	networkId: null,
 	networkName: null,
-	authMode: 'keypair',
 	keyName: null,
-	adminPassword: '',
+	securityGroups: [],
+	availabilityZone: null,
+	cloudInit: '',
 	bootVolumeSizeGb: 20,
 	deleteBootVolumeOnTermination: false,
 	additionalVolumeIds: [],

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import { goto } from '$app/navigation';
@@ -71,7 +72,7 @@
 	}
 
 	$effect(() => {
-		if ($auth.token) loadNetworks();
+		if ($auth.token) untrack(() => loadNetworks());
 	});
 </script>
 

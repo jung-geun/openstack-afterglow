@@ -5,7 +5,8 @@
   import type { DashboardSummary } from '$lib/types/resources';
   import type { Instance } from '$lib/types/resources';
   import { formatStorage } from '$lib/utils/format';
-  import RefreshButton from '$lib/components/RefreshButton.svelte';
+  import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+  import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
   import StatTile from '$lib/components/ui/StatTile.svelte';
   import QuotaBar from '$lib/components/ui/QuotaBar.svelte';
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
@@ -24,7 +25,6 @@
   let recentInstances = $state<Instance[]>([]);
   let k3sCount = $state<number | null>(null);
   let refreshing = $state(false);
-  let refreshIntervalMs = $state(30000);
 
   const token = $derived($auth.token ?? undefined);
   const projectId = $derived($auth.projectId ?? undefined);
@@ -56,17 +56,17 @@
     finally { refreshing = false; }
   }
 
-  $effect(() => {
-    const pid = $auth.projectId;
-    if (!pid) return;
-    untrack(() => { fetchAll(); });
+  const ar = createAutoRefresh(() => fetchAll(), {
+    storageKey: 'dashboard-home',
+    defaultActive: true,
+    defaultInterval: 30,
+    intervalOptions: [10, 15, 30, 60],
   });
 
   $effect(() => {
-    if (!$auth.projectId) return;
-    const ms = refreshIntervalMs;
-    const interval = setInterval(() => fetchAll(), ms);
-    return () => clearInterval(interval);
+    const pid = $auth.projectId;
+    if (!pid) return;
+    untrack(() => fetchAll());
   });
 
   function getFirstIp(inst: Instance): string {
@@ -84,7 +84,13 @@
         {$auth.projectName ?? '—'} · 최근 동기화 방금 전
       </div>
     </div>
-    <RefreshButton {refreshing} onclick={forceRefresh} />
+    <AutoRefreshControl
+      bind:active={ar.active}
+      bind:intervalSeconds={ar.intervalSeconds}
+      intervalOptions={ar.intervalOptions}
+      refreshing={refreshing}
+      onManualRefresh={forceRefresh}
+    />
   </div>
 
   <!-- StatTiles (4개) -->
@@ -132,9 +138,9 @@
         {/snippet}
       </StatTile>
 
-      <!-- k3s 클러스터 -->
+      <!-- Drover 클러스터 -->
       <StatTile
-        label="k3s 클러스터"
+        label="Drover 클러스터"
         value={k3sCount ?? '—'}
         unit={k3sCount !== null ? '활성' : undefined}
         accent="emerald"

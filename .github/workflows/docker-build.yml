@@ -18,13 +18,63 @@ env:
   IMAGE_OWNER: ${{ github.repository_owner }}
 
 jobs:
+  # ─── 변경 감지: dev 브랜치에서만 선택적 빌드, 나머지는 항상 전체 빌드 ───
+  changes:
+    name: Detect changed targets
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      targets: ${{ steps.set-targets.outputs.targets }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Detect file changes
+        id: filter
+        uses: dorny/paths-filter@v4
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+              - 'Dockerfile'
+              - '.dockerignore'
+            frontend:
+              - 'frontend/**'
+              - 'Dockerfile'
+              - '.dockerignore'
+
+      - name: Build target list
+        id: set-targets
+        env:
+          CHANGED_BACKEND: ${{ steps.filter.outputs.backend }}
+          CHANGED_FRONTEND: ${{ steps.filter.outputs.frontend }}
+        run: |
+          # dev 브랜치 이외(main, v* 태그, PR)는 항상 전체 빌드
+          if [[ "${GITHUB_REF}" != "refs/heads/dev" ]]; then
+            echo 'targets=["backend","frontend"]' >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          # dev 브랜치: 변경된 타겟만 빌드
+          TARGETS="[]"
+          if [[ "${CHANGED_BACKEND}" == "true" ]]; then
+            TARGETS=$(echo "$TARGETS" | jq -c '. + ["backend"]')
+          fi
+          if [[ "${CHANGED_FRONTEND}" == "true" ]]; then
+            TARGETS=$(echo "$TARGETS" | jq -c '. + ["frontend"]')
+          fi
+          echo "targets=${TARGETS}" >> $GITHUB_OUTPUT
+
   # ─── per-arch 빌드: self-hosted linux(amd64) / macos(arm64) native 빌드 ───
   build:
     name: Build ${{ matrix.target }} (${{ matrix.arch }})
+    needs: changes
+    if: needs.changes.outputs.targets != '[]'
     strategy:
       fail-fast: false
       matrix:
-        target: [backend, frontend]
+        target: ${{ fromJSON(needs.changes.outputs.targets) }}
         arch: [amd64, arm64]
         include:
           - arch: amd64
@@ -55,6 +105,26 @@ jobs:
           else
             echo "name=${REGISTRY}/${IMAGE_OWNER}/afterglow" >> $GITHUB_OUTPUT
           fi
+
+      # macOS arm64: Docker Desktop이 꺼져 있으면 소켓이 없어 빌드 불가.
+      # Docker Desktop 실행 후 daemon 준비 대기 (최대 90초).
+      - name: Ensure Docker daemon is running (macOS)
+        if: matrix.arch == 'arm64'
+        run: |
+          if docker info &>/dev/null; then
+            echo "Docker daemon already running."
+            exit 0
+          fi
+          echo "Docker daemon not running — starting Docker Desktop..."
+          open -a Docker 2>/dev/null || true
+          for i in $(seq 1 45); do
+            if docker info &>/dev/null; then
+              echo "Docker daemon ready after $((i * 2))s."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::warning::Docker daemon did not start in 90s — build may fail."
 
       # macOS arm64: Keychain 완전 우회
       # docker login-action이 osxkeychain 저장을 시도하므로,
@@ -107,7 +177,7 @@ jobs:
       # arm64 (macOS, docker driver): registry cache 미지원 → 캐시 없이 빌드
       - name: Build & push arm64 (docker driver)
         if: matrix.arch == 'arm64'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
@@ -119,7 +189,7 @@ jobs:
       # amd64 (Linux, docker-container driver): registry cache 사용
       - name: Build & push amd64 (docker-container driver)
         if: matrix.arch == 'amd64'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
@@ -133,15 +203,15 @@ jobs:
   # ─── manifest 통합: 두 arch 태그를 합쳐 단일 멀티플랫폼 태그로 push ───
   manifest:
     name: Manifest ${{ matrix.target }}
-    needs: build
-    if: github.event_name != 'pull_request'
+    needs: [changes, build]
+    if: github.event_name != 'pull_request' && needs.changes.outputs.targets != '[]'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     strategy:
       matrix:
-        target: [backend, frontend]
+        target: ${{ fromJSON(needs.changes.outputs.targets) }}
 
     steps:
       - name: Set up Docker Buildx

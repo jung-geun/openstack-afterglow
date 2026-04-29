@@ -260,6 +260,21 @@ def get_admin_connection_for_project(project_id: str) -> openstack.connection.Co
     )
 
 
+def get_service_project_connection() -> openstack.connection.Connection:
+    """Union Mount 전용 service 프로젝트로 스코프된 admin 자격 conn.
+
+    os_service_project_id가 미설정이면 RuntimeError로 fail-fast.
+    admin 프로젝트로 조용히 fallback하지 않는다.
+    """
+    settings = get_settings()
+    if not settings.os_service_project_id:
+        raise RuntimeError(
+            "os_service_project_id 설정이 없습니다. "
+            "config.toml [openstack] service_project_id 또는 OS_SERVICE_PROJECT_ID 환경변수를 설정하세요."
+        )
+    return get_admin_connection_for_project(settings.os_service_project_id)
+
+
 def revoke_token(token: str) -> None:
     """Keystone에 토큰 폐기 요청 (DELETE /v3/auth/tokens)."""
     settings = get_settings()

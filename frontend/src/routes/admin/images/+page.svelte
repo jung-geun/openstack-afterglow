@@ -7,6 +7,8 @@
 	import { projectNames } from '$lib/stores/projectNames';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import StatusChip from '$lib/components/ui/StatusChip.svelte';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	interface AdminImage {
 		id: string;
@@ -37,6 +39,7 @@
 
 	let images = $state<AdminImage[]>([]);
 	let loading = $state(true);
+	let refreshing = $state(false);
 	let error = $state('');
 	let searchInput = $state('');
 	let searchFilter = $state('');
@@ -78,21 +81,25 @@
 		return `${bytes} B`;
 	}
 
-	async function load(marker?: string) {
-		loading = true;
+	async function load(marker?: string, forceRefresh = false) {
+		if (images.length === 0) loading = true;
+		else refreshing = true;
 		error = '';
 		try {
 			let url = `/api/admin/images?limit=${pageSize}`;
 			if (marker) url += `&marker=${marker}`;
 			if (searchFilter) url += `&search=${encodeURIComponent(searchFilter)}`;
+			if (visibilityFilter) url += `&visibility=${encodeURIComponent(visibilityFilter)}`;
+			if (forceRefresh) url += `&refresh=true`;
 			const res = await api.get<PagedResponse<AdminImage>>(url, token, projectId);
-			images = (res.items || []).filter(img => !visibilityFilter || img.visibility === visibilityFilter);
+			images = res.items || [];
 			nextMarker = res.next_marker;
 		} catch (e) {
 			error = e instanceof ApiError ? e.message : '이미지 목록 조회 실패';
 			images = [];
 		} finally {
 			loading = false;
+			refreshing = false;
 		}
 	}
 
@@ -152,6 +159,17 @@
 		selectedImageId = null;
 	}
 
+	const ar = createAutoRefresh(
+		() => { load(markerStack[markerStack.length - 1]); },
+		{ storageKey: 'admin-images', defaultInterval: 30, intervalOptions: [15, 30, 60] }
+	);
+
+	async function forceRefresh() {
+		markerStack = [];
+		nextMarker = null;
+		await load(undefined, true);
+	}
+
 	onMount(() => {
 		load();
 		projectNames.load(token, projectId);
@@ -161,7 +179,13 @@
 <div class="p-4 md:p-8 max-w-7xl">
 	<PageHeader breadcrumb="COMPUTE / IMAGES" title="이미지">
 		{#snippet actions()}
-			<button onclick={() => { markerStack = []; nextMarker = null; load(); }} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
+			<AutoRefreshControl
+				bind:active={ar.active}
+				bind:intervalSeconds={ar.intervalSeconds}
+				intervalOptions={ar.intervalOptions}
+				refreshing={refreshing}
+				onManualRefresh={forceRefresh}
+			/>
 			<div class="flex items-center gap-1 text-xs text-gray-500">
 				표시:
 				{#each [10, 20, 30] as n}
@@ -291,7 +315,7 @@
 {#if selectedImageId}
 	<SlidePanel onClose={closeDetail} width="w-full md:w-[50vw] max-w-2xl">
 		{#await import('$lib/components/ImageDetailPanel.svelte') then { default: Panel }}
-			<Panel imageId={selectedImageId} onClose={closeDetail} />
+			<Panel imageId={selectedImageId} onClose={closeDetail} isAdmin={true} />
 		{/await}
 	</SlidePanel>
 {/if}

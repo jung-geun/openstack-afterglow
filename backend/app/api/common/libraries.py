@@ -8,7 +8,7 @@ if TYPE_CHECKING:
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from app.api.deps import get_os_conn
+from app.api.deps import get_os_conn, get_token_info
 from app.models.storage import FileStorageInfo, LibraryConfig
 from app.services import libraries as lib_svc
 from app.services import manila
@@ -17,8 +17,14 @@ router = APIRouter()
 
 
 @router.get("", response_model=list[LibraryConfig])
-async def list_libraries(conn: openstack.connection.Connection = Depends(get_os_conn)):
-    """사용 가능한 라이브러리 목록 (사전 빌드 파일 스토리지 가용 여부 포함)."""
+async def list_libraries(
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    """사용 가능한 라이브러리 목록 (사전 빌드 파일 스토리지 가용 여부 포함).
+    non-admin은 visibility=public 라이브러리만 반환.
+    """
+    is_admin = token_info.get("is_admin", False)
     catalog = lib_svc.get_all()
 
     # 사전 빌드된 파일 스토리지 목록에서 library_name 매핑
@@ -30,6 +36,9 @@ async def list_libraries(conn: openstack.connection.Connection = Depends(get_os_
 
     result = []
     for lib in catalog:
+        # non-admin은 private 라이브러리 제외
+        if not is_admin and lib.visibility == "private":
+            continue
         file_storage_id = prebuilt_map.get(lib.id)
         result.append(
             LibraryConfig(

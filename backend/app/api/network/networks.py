@@ -7,11 +7,13 @@ if TYPE_CHECKING:
 import asyncio
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel
 
 _logger = logging.getLogger(__name__)
 
 from app.api.deps import get_os_conn
+from app.config import get_settings
 from app.models.storage import (
     AssociateFipRequest,
     CreateFipRequest,
@@ -25,8 +27,10 @@ from app.models.storage import (
     TopologyInstance,
     UpdateSubnetRequest,
 )
+from app.rate_limit import limiter
 from app.services import neutron, nova
-from app.services.cache import cached_call, ttl_fast, ttl_normal
+from app.services.cache import cached_call, invalidate, ttl_fast, ttl_normal
+from app.services.octavia import get_topology_lbs
 
 router = APIRouter()
 
@@ -46,7 +50,9 @@ async def list_networks(conn: openstack.connection.Connection = Depends(get_os_c
 
 
 @router.post("", response_model=NetworkInfo, status_code=201)
+@limiter.limit("10/minute")
 async def create_network(
+    request: Request,
     req: CreateNetworkRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
@@ -54,6 +60,83 @@ async def create_network(
         return await asyncio.to_thread(neutron.create_network, conn, req.name)
     except Exception:
         raise HTTPException(status_code=500, detail="네트워크 생성 실패")
+
+
+# ---------------------------------------------------------------------------
+# Default 네트워크 (고정 경로 - /{network_id} 보다 먼저 등록)
+# ---------------------------------------------------------------------------
+
+
+class SetDefaultNetworkRequest(BaseModel):
+    network_id: str
+
+
+@router.post("/ensure-default", response_model=NetworkInfo, status_code=200)
+@limiter.limit("10/minute")
+async def ensure_default_network(
+    request: Request,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """프로젝트의 Default 네트워크를 조회하거나 생성한다.
+
+    프론트엔드에서 프로젝트 전환 시 호출 — DB에 이미 기록된 경우 빠르게 반환.
+    """
+    settings = get_settings()
+    if not settings.default_network_enabled:
+        raise HTTPException(status_code=404, detail="Default 네트워크 기능이 비활성화 상태입니다")
+    project_id = conn._afterglow_project_id
+    try:
+        from app.services.default_network import ensure_default_network as _ensure
+
+        net_info = await _ensure(
+            conn,
+            project_id,
+            external_network_id=settings.default_network_external_id or None,
+            cidr=settings.default_network_cidr,
+        )
+        # 네트워크 목록 캐시 무효화
+        await invalidate(f"afterglow:neutron:{project_id}:networks")
+        return net_info
+    except Exception:
+        _logger.exception("Default 네트워크 ensure 실패")
+        raise HTTPException(status_code=500, detail="Default 네트워크 처리 실패")
+
+
+@router.get("/default", response_model=dict)
+async def get_default_network(conn: openstack.connection.Connection = Depends(get_os_conn)):
+    """현재 프로젝트의 Default 네트워크 정보를 반환한다 (DB 기록 기준)."""
+    project_id = conn._afterglow_project_id
+    from app.services.default_network import get_default_network_record
+
+    record = await get_default_network_record(project_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Default 네트워크가 설정되지 않았습니다")
+    return record
+
+
+@router.put("/default", response_model=dict)
+async def set_default_network(
+    req: SetDefaultNetworkRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """사용자가 원하는 네트워크를 프로젝트의 Default 네트워크로 지정한다."""
+    project_id = conn._afterglow_project_id
+    # 네트워크 존재 여부 확인
+    try:
+        net = await asyncio.to_thread(neutron.get_network, conn, req.network_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="네트워크를 찾을 수 없습니다")
+
+    from app.services.default_network import get_default_network_record
+    from app.services.default_network import set_default_network as _set
+
+    # 서브넷 ID: 해당 네트워크의 첫 번째 서브넷 사용
+    subnet_id = net.subnets[0] if net.subnets else None
+    await _set(project_id, req.network_id, subnet_id)
+    # 캐시 무효화
+    await invalidate(f"afterglow:neutron:{project_id}:networks")
+    record = await get_default_network_record(project_id)
+    return record or {"project_id": project_id, "network_id": req.network_id}
 
 
 # ---------------------------------------------------------------------------
@@ -76,7 +159,9 @@ async def list_floating_ips(conn: openstack.connection.Connection = Depends(get_
 
 
 @router.post("/floating-ips", response_model=FloatingIpInfo, status_code=201)
+@limiter.limit("10/minute")
 async def create_floating_ip(
+    request: Request,
     req: CreateFipRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
@@ -87,7 +172,9 @@ async def create_floating_ip(
 
 
 @router.post("/floating-ips/{fip_id}/associate", response_model=FloatingIpInfo)
+@limiter.limit("10/minute")
 async def associate_floating_ip(
+    request: Request,
     fip_id: str,
     req: AssociateFipRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
@@ -99,23 +186,32 @@ async def associate_floating_ip(
 
 
 @router.post("/floating-ips/{fip_id}/disassociate", response_model=FloatingIpInfo)
+@limiter.limit("10/minute")
 async def disassociate_floating_ip(
+    request: Request,
     fip_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
+    pid = conn._afterglow_project_id
     try:
-        return await asyncio.to_thread(neutron.disassociate_floating_ip, conn, fip_id)
+        result = await asyncio.to_thread(neutron.disassociate_floating_ip, conn, fip_id)
+        await invalidate(f"afterglow:neutron:{pid}:floating_ips")
+        return result
     except Exception:
         raise HTTPException(status_code=500, detail="Floating IP 해제 실패")
 
 
 @router.delete("/floating-ips/{fip_id}", status_code=204)
+@limiter.limit("10/minute")
 async def delete_floating_ip(
+    request: Request,
     fip_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
+    pid = conn._afterglow_project_id
     try:
         await asyncio.to_thread(neutron.delete_floating_ip, conn, fip_id)
+        await invalidate(f"afterglow:neutron:{pid}:floating_ips")
     except Exception:
         raise HTTPException(status_code=500, detail="Floating IP 삭제 실패")
 
@@ -140,7 +236,9 @@ async def update_subnet(
 
 
 @router.delete("/subnets/{subnet_id}", status_code=204)
+@limiter.limit("10/minute")
 async def delete_subnet(
+    request: Request,
     subnet_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
@@ -159,16 +257,41 @@ def _fetch_topology_sync(conn) -> dict:
     """동기 방식으로 토폴로지 전체 데이터 수집 (cached_call 내부에서 to_thread로 실행됨)."""
     topo = neutron.get_topology(conn)
     servers = nova.list_servers(conn)
-    topo.instances = [
+
+    # Neutron 포트에서 (device_id, ip) → network_id 매핑 구축
+    port_net_map: dict[tuple[str, str], str] = {}
+    for p in conn.network.ports():
+        dev_owner = p.device_owner or ""
+        if not p.device_id or not dev_owner.startswith("compute:"):
+            continue
+        for fip in p.fixed_ips or []:
+            ip = fip.get("ip_address")
+            if ip:
+                port_net_map[(p.device_id, ip)] = p.network_id
+
+    instance_list = [
         TopologyInstance(
             id=s.id,
             name=s.name,
             status=s.status,
+            project_id=s.project_id,
             network_names=list(set(ip.network_name for ip in s.ip_addresses)),
-            ip_addresses=[ip.model_dump() for ip in s.ip_addresses],
+            ip_addresses=[
+                {
+                    **ip.model_dump(),
+                    "network_id": port_net_map.get((s.id, ip.addr)),
+                }
+                for ip in s.ip_addresses
+            ],
         )
         for s in servers
     ]
+    topo.instances = instance_list
+    topo.load_balancers = get_topology_lbs(
+        conn,
+        project_id=getattr(conn, "_afterglow_project_id", None),
+        instances=[inst.model_dump() for inst in instance_list],
+    )
     return topo.model_dump()
 
 
@@ -233,7 +356,9 @@ async def get_network(network_id: str, conn: openstack.connection.Connection = D
 
 
 @router.delete("/{network_id}", status_code=204)
+@limiter.limit("10/minute")
 async def delete_network(
+    request: Request,
     network_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
@@ -244,7 +369,9 @@ async def delete_network(
 
 
 @router.post("/{network_id}/subnets", response_model=SubnetDetail, status_code=201)
+@limiter.limit("10/minute")
 async def create_subnet(
+    request: Request,
     network_id: str,
     req: CreateSubnetRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),

@@ -153,3 +153,96 @@ def test_get_manila_endpoint_normalizes_v1_fallback():
 
     conn.endpoint_for.side_effect = endpoint_for
     assert _get_manila_endpoint(conn) == "https://manila.example.com/v2/proj-1"
+
+
+# ─────────────────────────────────────────────────────────────────
+# 프로젝트 격리 테스트
+# ─────────────────────────────────────────────────────────────────
+
+
+def _make_share_other_project(is_public: bool = False) -> FileStorageInfo:
+    """다른 프로젝트(project-B)가 소유한 동적 share."""
+    return FileStorageInfo(
+        id="share-other",
+        name="other-share",
+        status="available",
+        size=10,
+        share_proto="CEPHFS",
+        metadata={"union_type": "dynamic", "union_project_id": "project-B"},
+        is_public=is_public,
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_file_storages_filters_other_project(client, mock_conn):
+    """non-admin이 list 요청 시 다른 프로젝트의 private dynamic share는 미수신."""
+    own = make_file_storage("share-mine")
+    own.metadata["union_project_id"] = "test-project-123"
+    other = _make_share_other_project(is_public=False)
+    all_shares = [own, other]
+
+    async def mock_cached_call(key, ttl, fn, **kw):
+        return fn()
+
+    def mock_list(conn, metadata_filter=None, all_tenants=False, caller_project_id=None):
+        if caller_project_id:
+            return [
+                s
+                for s in all_shares
+                if s.is_public or s.metadata.get("union_project_id") in (caller_project_id, None, "")
+            ]
+        return all_shares
+
+    with (
+        patch("app.api.storage.file_storage.manila.list_file_storages", side_effect=mock_list),
+        patch("app.api.storage.file_storage.cached_call", new=mock_cached_call),
+    ):
+        resp = await client.get("/api/file-storage")
+    assert resp.status_code == 200
+    ids = [s["id"] for s in resp.json()]
+    assert "share-mine" in ids
+    assert "share-other" not in ids
+
+
+@pytest.mark.asyncio
+async def test_list_file_storages_exposes_public_share(client, mock_conn):
+    """is_public=True인 prebuilt share는 다른 프로젝트도 list에서 수신."""
+    public_share = _make_share_other_project(is_public=True)
+
+    async def mock_cached_call(key, ttl, fn, **kw):
+        return fn()
+
+    def mock_list(conn, metadata_filter=None, all_tenants=False, caller_project_id=None):
+        if caller_project_id:
+            return [
+                s
+                for s in [public_share]
+                if s.is_public or s.metadata.get("union_project_id") in (caller_project_id, None, "")
+            ]
+        return [public_share]
+
+    with (
+        patch("app.api.storage.file_storage.manila.list_file_storages", side_effect=mock_list),
+        patch("app.api.storage.file_storage.cached_call", new=mock_cached_call),
+    ):
+        resp = await client.get("/api/file-storage")
+    assert resp.status_code == 200
+    assert any(s["id"] == "share-other" for s in resp.json())
+
+
+@pytest.mark.asyncio
+async def test_get_file_storage_cross_project_returns_404(client, mock_conn):
+    """non-admin이 다른 프로젝트 share를 직접 ID로 GET 시 404."""
+    other = _make_share_other_project(is_public=False)
+    with patch("app.api.storage.file_storage.manila.get_file_storage", return_value=other):
+        resp = await client.get("/api/file-storage/share-other")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_admin_can_get_cross_project_share(admin_client, mock_conn):
+    """admin은 다른 프로젝트 share도 GET 가능."""
+    other = _make_share_other_project(is_public=False)
+    with patch("app.api.storage.file_storage.manila.get_file_storage", return_value=other):
+        resp = await admin_client.get("/api/file-storage/share-other")
+    assert resp.status_code == 200

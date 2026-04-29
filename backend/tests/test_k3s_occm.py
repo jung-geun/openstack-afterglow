@@ -120,7 +120,8 @@ class TestCloudInitIntegration:
             callback_url="http://api.example.com",
             callback_token="tok-123",
         )
-        decoded = gzip.decompress(base64.b64decode(result)).decode()
+        assert result.config_drive is False
+        decoded = gzip.decompress(base64.b64decode(result.data)).decode()
         assert "--disable-cloud-controller" not in decoded
         assert "cloud.conf" not in decoded
 
@@ -137,7 +138,8 @@ class TestCloudInitIntegration:
             cloud_conf="[Global]\nauth-url=http://keystone:5000/v3",
             occm_manifests="apiVersion: v1\nkind: ServiceAccount",
         )
-        decoded = gzip.decompress(base64.b64decode(result)).decode()
+        assert result.config_drive is False
+        decoded = gzip.decompress(base64.b64decode(result.data)).decode()
         assert "--disable-cloud-controller" in decoded
         assert '--kubelet-arg="cloud-provider=external"' in decoded
         assert "/etc/kubernetes/cloud.conf" in decoded
@@ -154,7 +156,8 @@ class TestCloudInitIntegration:
             server_ip="10.0.0.1",
             node_token="token-abc",
         )
-        decoded = gzip.decompress(base64.b64decode(result)).decode()
+        assert result.config_drive is False
+        decoded = gzip.decompress(base64.b64decode(result.data)).decode()
         assert "cloud-provider=external" not in decoded
 
     def test_agent_userdata_with_occm(self):
@@ -168,7 +171,8 @@ class TestCloudInitIntegration:
             node_token="token-abc",
             occm_enabled=True,
         )
-        decoded = gzip.decompress(base64.b64decode(result)).decode()
+        assert result.config_drive is False
+        decoded = gzip.decompress(base64.b64decode(result.data)).decode()
         assert "cloud-provider=external" in decoded
 
 

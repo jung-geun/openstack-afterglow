@@ -35,7 +35,7 @@ spec:
               "--port",
               "8000",
               "--workers",
-              "1",
+              "4",
               "--timeout-keep-alive",
               "65",
               "--loop",
@@ -87,7 +87,7 @@ spec:
               port: 8000
             initialDelaySeconds: 10
             periodSeconds: 5
-            failureThreshold: 30
+            failureThreshold: 60
             timeoutSeconds: 10
           livenessProbe:
             httpGet:
@@ -107,10 +107,10 @@ spec:
           resources:
             requests:
               memory: "512Mi"
-              cpu: "500m"
+              cpu: "1"
             limits:
-              memory: "1Gi"
-              cpu: "2"
+              memory: "2Gi"
+              cpu: "4"
       volumes:
         - name: afterglow-config-volume
           configMap:

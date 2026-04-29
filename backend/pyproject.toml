@@ -1,6 +1,6 @@
 [project]
 name = "afterglow-api"
-version = "1.13.6"
+version = "1.13.8"
 description = "Afterglow - OpenStack VM deployment platform"
 requires-python = ">=3.12"
 dependencies = [
@@ -32,10 +32,17 @@ dev = [
     "pytest-asyncio>=0.24",
     "httpx>=0.27",
     "ruff>=0.7.0",
+    "fakeredis[lua]>=2.21",
 ]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+markers = [
+    "slow: 실 인프라(Nova/Manila/Keystone) 필요 — self-hosted runner",
+    "db: MariaDB 컨테이너 필요 — CI test-backend-db 잡에서 실행",
+    "redis: 실 Redis 또는 fakeredis 필요",
+    "crypto: AES-GCM 등 암호화 단위 테스트 — 외부 인프라 불요",
+]
 
 [tool.ruff]
 line-length = 120

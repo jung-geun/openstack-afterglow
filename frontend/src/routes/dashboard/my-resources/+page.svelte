@@ -1,10 +1,10 @@
 <script lang="ts">
-	import { auth } from '$lib/stores/auth';
 	import { untrack } from 'svelte';
+	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
-	import RefreshButton from '$lib/components/RefreshButton.svelte';
-	import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 	import StatusChip from '$lib/components/ui/StatusChip.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import StatTile from '$lib/components/ui/StatTile.svelte';
@@ -59,7 +59,6 @@
 	let initialLoading = $state(true);
 	let refreshing = $state(false);
 	let error = $state('');
-	let autoRefresh = $state(false);
 	let expandedProject = $state<string | null>(null);
 
 	const token = $derived($auth.token ?? undefined);
@@ -94,6 +93,13 @@
 		}
 	}
 
+	const ar = createAutoRefresh(() => load(), {
+		storageKey: 'dashboard-my-resources',
+		defaultActive: true,
+		defaultInterval: 30,
+		intervalOptions: [10, 15, 30, 60],
+	});
+
 	function toggleProject(id: string) {
 		expandedProject = expandedProject === id ? null : id;
 	}
@@ -107,21 +113,20 @@
 	$effect(() => {
 		const pid = $auth.projectId;
 		if (!pid) return;
-		untrack(() => { load(); });
-	});
-
-	$effect(() => {
-		if (!$auth.projectId || !autoRefresh) return;
-		const interval = setInterval(() => untrack(() => { load(); }), 30000);
-		return () => clearInterval(interval);
+		untrack(() => load());
 	});
 </script>
 
 <div class="p-4 md:p-8 max-w-6xl">
 	<PageHeader breadcrumb="" title="내 리소스">
 		{#snippet actions()}
-			<AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={30} />
-			<RefreshButton {refreshing} onclick={forceRefresh} />
+			<AutoRefreshControl
+			bind:active={ar.active}
+			bind:intervalSeconds={ar.intervalSeconds}
+			intervalOptions={ar.intervalOptions}
+			refreshing={refreshing}
+			onManualRefresh={forceRefresh}
+		/>
 		{/snippet}
 	</PageHeader>
 

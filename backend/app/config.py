@@ -8,7 +8,7 @@ import tomllib
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import model_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 
@@ -74,10 +74,13 @@ def _load_toml() -> dict:
     flat["os_insecure"] = ost.get("insecure", False)
     flat["os_cacert"] = ost.get("cacert", "")
     flat["os_manila_endpoint"] = ost.get("manila_endpoint", "")
+    flat["os_swift_endpoint"] = ost.get("swift_endpoint", "")
+    flat["os_swift_upload_timeout"] = ost.get("swift_upload_timeout", 600)
     flat["os_manila_share_network_id"] = ost.get("manila_share_network_id", "")
-    flat["os_manila_share_type"] = ost.get("manila_share_type", "cephfstype")
+    flat["os_manila_share_type"] = ost.get("manila_share_type", "cephfs")
     flat["os_manila_nfs_share_type"] = ost.get("manila_nfs_share_type", "nfstype")
     flat["ceph_monitors"] = ost.get("ceph_monitors", "")
+    flat["os_service_project_id"] = ost.get("service_project_id", "")
 
     app = data.get("app", {})
     flat["backend_port"] = app.get("backend_port", 8000)
@@ -104,9 +107,10 @@ def _load_toml() -> dict:
     flat["service_k3s_enabled"] = svc.get("k3s", False)
     flat["service_trove_enabled"] = svc.get("trove", False)
     flat["service_swift_enabled"] = svc.get("swift", False)
+    flat["service_barbican_enabled"] = svc.get("barbican", False)
 
     k3s = data.get("k3s", {})
-    flat["k3s_version"] = k3s.get("version", "v1.31.4+k3s1")
+    flat["k3s_version"] = k3s.get("version", "v1.34.6+k3s1")
     flat["k3s_server_flavor_id"] = k3s.get("server_flavor_id", "")
     flat["k3s_default_agent_flavor_id"] = k3s.get("default_agent_flavor_id", "")
     flat["k3s_server_image_id"] = k3s.get("server_image_id", "")
@@ -116,30 +120,30 @@ def _load_toml() -> dict:
     flat["k3s_occm_enabled"] = k3s.get("occm_enabled", False)
     flat["k3s_occm_image"] = k3s.get(
         "occm_image",
-        "registry.k8s.io/provider-os/openstack-cloud-controller-manager:v1.35.0",
+        "registry.k8s.io/provider-os/openstack-cloud-controller-manager:v1.34.1",
     )
     flat["k3s_occm_floating_network_id"] = k3s.get("occm_floating_network_id", "")
     flat["k3s_occm_public_network_name"] = k3s.get("occm_public_network_name", "")
     # Cinder CSI
     flat["k3s_cinder_csi_enabled"] = k3s.get("cinder_csi_enabled", False)
-    flat["k3s_cinder_csi_image"] = k3s.get("cinder_csi_image", "registry.k8s.io/provider-os/cinder-csi-plugin:v1.31.0")
+    flat["k3s_cinder_csi_image"] = k3s.get("cinder_csi_image", "registry.k8s.io/provider-os/cinder-csi-plugin:v1.34.1")
     flat["k3s_cinder_csi_default_az"] = k3s.get("cinder_csi_default_az", "nova")
     # Manila CSI
     flat["k3s_manila_csi_enabled"] = k3s.get("manila_csi_enabled", False)
-    flat["k3s_manila_csi_image"] = k3s.get("manila_csi_image", "registry.k8s.io/provider-os/manila-csi-plugin:v1.31.0")
+    flat["k3s_manila_csi_image"] = k3s.get("manila_csi_image", "registry.k8s.io/provider-os/manila-csi-plugin:v1.34.1")
     flat["k3s_manila_csi_nfs_image"] = k3s.get("manila_csi_nfs_image", "registry.k8s.io/sig-storage/nfsplugin:v4.9.0")
     flat["k3s_manila_csi_share_protocol"] = k3s.get("manila_csi_share_protocol", "NFS")
     # Keystone Auth
     flat["k3s_keystone_auth_enabled"] = k3s.get("keystone_auth_enabled", False)
     flat["k3s_keystone_auth_image"] = k3s.get(
-        "keystone_auth_image", "registry.k8s.io/provider-os/k8s-keystone-auth:v1.31.0"
+        "keystone_auth_image", "registry.k8s.io/provider-os/k8s-keystone-auth:v1.34.1"
     )
     flat["k3s_keystone_auth_policy"] = k3s.get("keystone_auth_policy", "")
     # Octavia Ingress
     flat["k3s_octavia_ingress_enabled"] = k3s.get("octavia_ingress_enabled", False)
     flat["k3s_octavia_ingress_image"] = k3s.get(
         "octavia_ingress_image",
-        "registry.k8s.io/provider-os/octavia-ingress-controller:v1.31.0",
+        "registry.k8s.io/provider-os/octavia-ingress-controller:v1.34.1",
     )
     flat["k3s_octavia_ingress_subnet_id"] = k3s.get("octavia_ingress_subnet_id", "")
     flat["k3s_octavia_ingress_floating_network_id"] = k3s.get("octavia_ingress_floating_network_id", "")
@@ -149,11 +153,10 @@ def _load_toml() -> dict:
         "barbican_kms_image", "registry.k8s.io/provider-os/barbican-kms-plugin:v1.31.0"
     )
     flat["k3s_barbican_kms_kek_id"] = k3s.get("barbican_kms_kek_id", "")
-    # API LB (K3s API 서버 앞단 Octavia LB + Floating IP)
-    flat["k3s_api_lb_enabled"] = k3s.get("api_lb_enabled", False)
-    flat["k3s_api_lb_floating_network_id"] = k3s.get("api_lb_floating_network_id", "")
-    # LB 네트워크 분리: OCCM Service LB + API LB 공통 VIP 서브넷
+    # LB 네트워크 분리: OCCM Service LB 공통 VIP 서브넷
     flat["k3s_lb_subnet_id"] = k3s.get("lb_subnet_id", "")
+    # FCOS (Fedora CoreOS) 이미지 ID
+    flat["k3s_fcos_image_id"] = k3s.get("fcos_image_id", "")
 
     gpu = data.get("gpu", {})
     flat["gpu_available_visible"] = gpu.get("available_visible", False)
@@ -165,6 +168,9 @@ def _load_toml() -> dict:
 
     nv = data.get("nova", {})
     flat["default_network_id"] = nv.get("default_network_id", "")
+    flat["default_network_enabled"] = nv.get("default_network_enabled", True)
+    flat["default_network_cidr"] = nv.get("default_network_cidr", "192.168.0.0/24")
+    flat["default_network_external_id"] = nv.get("default_network_external_id", "")
     flat["default_availability_zone"] = nv.get("default_availability_zone", "nova")
     flat["boot_volume_size_gb"] = nv.get("boot_volume_size_gb", 20)
     flat["upper_volume_size_gb"] = nv.get("upper_volume_size_gb", 50)
@@ -173,6 +179,14 @@ def _load_toml() -> dict:
     flat["builder_image_id"] = builder.get("image_id", "")
     flat["builder_flavor_id"] = builder.get("flavor_id", "")
     flat["builder_network_id"] = builder.get("network_id", "")
+
+    union = data.get("union", {})
+    flat["union_layer_store_rw_share_id"] = union.get("layer_store_rw_share_id", "")
+    flat["union_layer_store_ro_share_id"] = union.get("layer_store_ro_share_id", "")
+    flat["union_manifest_store_share_id"] = union.get("manifest_store_share_id", "")
+
+    notion = data.get("notion", {})
+    flat["notion_config_encryption_key"] = notion.get("config_encryption_key", "")
 
     gl = data.get("gitlab_oidc", {})
     flat["gitlab_oidc_enabled"] = gl.get("enabled", False)
@@ -219,9 +233,16 @@ class Settings(BaseSettings):
     os_cacert: str = ""
 
     # Manila 설정
+    os_service_project_id: str = (
+        ""  # Union Mount 빌더/share 전용 service 프로젝트 UUID. 미설정 시 prebuilt 경로 fail-fast.
+    )
     os_manila_endpoint: str = ""
+    # Swift 설정
+    os_swift_endpoint: str = ""
+    os_swift_upload_timeout: int = 600  # 대용량 업로드용 타임아웃 (초)
     os_manila_share_network_id: str = ""
-    os_manila_share_type: str = "cephfstype"
+    os_manila_share_type: str = "cephfs"
+    os_manila_nfs_share_type: str = "nfstype"
 
     # Ceph 모니터 (cloud-init CephFS 마운트용)
     ceph_monitors: str = ""
@@ -254,9 +275,10 @@ class Settings(BaseSettings):
     service_k3s_enabled: bool = False
     service_trove_enabled: bool = False
     service_swift_enabled: bool = False
+    service_barbican_enabled: bool = False
 
     # k3s 설정
-    k3s_version: str = "v1.31.4+k3s1"
+    k3s_version: str = "v1.34.6+k3s1"
     k3s_server_flavor_id: str = ""
     k3s_default_agent_flavor_id: str = ""
     k3s_server_image_id: str = ""
@@ -264,36 +286,45 @@ class Settings(BaseSettings):
     k3s_kubeconfig_encryption_key: str = ""
     k3s_boot_volume_size_gb: int = 30
     k3s_occm_enabled: bool = False
-    k3s_occm_image: str = "registry.k8s.io/provider-os/openstack-cloud-controller-manager:v1.35.0"
+    k3s_occm_image: str = "registry.k8s.io/provider-os/openstack-cloud-controller-manager:v1.34.1"
     k3s_occm_floating_network_id: str = ""
     k3s_occm_public_network_name: str = ""
     # Cinder CSI
     k3s_cinder_csi_enabled: bool = False
-    k3s_cinder_csi_image: str = "registry.k8s.io/provider-os/cinder-csi-plugin:v1.31.0"
+    k3s_cinder_csi_image: str = "registry.k8s.io/provider-os/cinder-csi-plugin:v1.34.1"
     k3s_cinder_csi_default_az: str = "nova"
     # Manila CSI
     k3s_manila_csi_enabled: bool = False
-    k3s_manila_csi_image: str = "registry.k8s.io/provider-os/manila-csi-plugin:v1.31.0"
+    k3s_manila_csi_image: str = "registry.k8s.io/provider-os/manila-csi-plugin:v1.34.1"
     k3s_manila_csi_nfs_image: str = "registry.k8s.io/sig-storage/nfsplugin:v4.9.0"
     k3s_manila_csi_share_protocol: str = "NFS"
     # Keystone Auth
     k3s_keystone_auth_enabled: bool = False
-    k3s_keystone_auth_image: str = "registry.k8s.io/provider-os/k8s-keystone-auth:v1.31.0"
+    k3s_keystone_auth_image: str = "registry.k8s.io/provider-os/k8s-keystone-auth:v1.34.1"
     k3s_keystone_auth_policy: str = ""
     # Octavia Ingress
     k3s_octavia_ingress_enabled: bool = False
-    k3s_octavia_ingress_image: str = "registry.k8s.io/provider-os/octavia-ingress-controller:v1.31.0"
+    k3s_octavia_ingress_image: str = "registry.k8s.io/provider-os/octavia-ingress-controller:v1.34.1"
     k3s_octavia_ingress_subnet_id: str = ""
     k3s_octavia_ingress_floating_network_id: str = ""
     # Barbican KMS
     k3s_barbican_kms_enabled: bool = False
     k3s_barbican_kms_image: str = "registry.k8s.io/provider-os/barbican-kms-plugin:v1.31.0"
     k3s_barbican_kms_kek_id: str = ""
-    # API LB
-    k3s_api_lb_enabled: bool = False
-    k3s_api_lb_floating_network_id: str = ""  # 미설정 시 k3s_occm_floating_network_id 사용
-    # LB 네트워크 분리: OCCM Service LB + API LB VIP 서브넷 (미설정 시 클러스터 네트워크의 첫 서브넷)
+    # LB 네트워크 분리: OCCM Service LB VIP 서브넷 (미설정 시 클러스터 네트워크의 첫 서브넷)
     k3s_lb_subnet_id: str = ""
+    # FCOS (Fedora CoreOS) 이미지 ID (os_type=fcos 클러스터에 사용)
+    k3s_fcos_image_id: str = ""
+
+    # Union Mount 레이어 시스템 — Manila share ID
+    union_layer_store_rw_share_id: str = ""  # layer-store-rw (Builder 전용 RW)
+    union_layer_store_ro_share_id: str = ""  # layer-store-ro (User VM RO)
+    union_manifest_store_share_id: str = ""  # manifest-store
+    union_cephx_rotate_hours: int = 24  # CephX 키 자동 회전 주기 (0이면 비활성)
+    union_auto_egress_sg_enabled: bool = True  # Union VM에 egress SG 자동 attach
+    union_egress_sg_name: str = "union-egress-default"  # 자동 생성/재사용할 SG 이름
+
+    # Notion 연동
     notion_config_encryption_key: str = ""  # 미설정 시 k3s_kubeconfig_encryption_key 재사용
 
     # GPU
@@ -305,7 +336,10 @@ class Settings(BaseSettings):
     session_absolute_timeout: int = 14400  # 절대 만료: 기본 4시간, 초과 시 연장 불가
 
     # Nova 기본값
-    default_network_id: str = ""
+    default_network_id: str = ""  # 레거시 폴백 (default_network_enabled=false 시 사용)
+    default_network_enabled: bool = True  # 프로젝트별 Default 네트워크 자동 프로비저닝
+    default_network_cidr: str = "192.168.0.0/24"  # Default 서브넷 CIDR
+    default_network_external_id: str = ""  # 라우터 게이트웨이용 외부 네트워크 ID
     default_availability_zone: str = "nova"
     boot_volume_size_gb: int = 20
     upper_volume_size_gb: int = 50
@@ -339,6 +373,20 @@ class Settings(BaseSettings):
     log_rotation_type: str = "size"  # "size" | "time"
     log_rotation_when: str = "midnight"
     log_rotation_interval: int = 1
+
+    @field_validator("os_auth_url", mode="after")
+    @classmethod
+    def _norm_auth_url(cls, v: str) -> str:
+        from app.services._endpoint import normalize_keystone_url
+
+        return normalize_keystone_url(v)
+
+    @field_validator("os_manila_endpoint", "os_swift_endpoint", mode="after")
+    @classmethod
+    def _norm_service_endpoint(cls, v: str) -> str:
+        from app.services._endpoint import normalize_endpoint
+
+        return normalize_endpoint(v)
 
     @property
     def ssl_verify(self) -> bool | str:

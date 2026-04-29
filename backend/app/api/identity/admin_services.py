@@ -158,8 +158,6 @@ def _fetch_shared_file_system(conn, settings) -> list[dict]:
 
 def _fetch_orchestration(conn, settings) -> list[dict]:
     result = []
-    if not settings.service_magnum_enabled:
-        return result
     try:
         heat_ep = _get_ep(conn, "orchestration")
         if heat_ep:

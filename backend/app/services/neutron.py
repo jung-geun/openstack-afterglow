@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging as _logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -177,23 +178,31 @@ def delete_port(conn: openstack.connection.Connection, port_id: str) -> None:
 
 
 def cleanup_instance_fips(conn: openstack.connection.Connection, instance_id: str) -> None:
-    """인스턴스 삭제 시 연결된 Floating IP를 해제하고 삭제한다."""
+    """인스턴스 포트에 연결된 Floating IP만 해제하고 삭제한다.
+
+    Neutron /v2.0/floatingips 는 device_id 필터를 지원하지 않으므로
+    포트 기반으로 대상 FIP를 식별한다 (Nova가 인스턴스 포트에 device_id를 세팅).
+    """
+    log = _logging.getLogger(__name__)
     try:
-        fips = list(conn.network.ips(device_id=instance_id))
+        ports = list(conn.network.ports(device_id=instance_id))
     except Exception:
-        # device_id 필터가 지원되지 않으면 전체 조회 후 필터
-        try:
-            ports = list(conn.network.ports(device_id=instance_id))
-            port_ids = {p.id for p in ports}
-            fips = [f for f in conn.network.ips() if f.port_id in port_ids]
-        except Exception:
-            return
+        log.warning("cleanup_instance_fips: 포트 조회 실패 (instance=%s)", instance_id, exc_info=True)
+        return
+    port_ids = {p.id for p in ports}
+    if not port_ids:
+        return
+    try:
+        fips = [f for f in conn.network.ips() if f.port_id in port_ids]
+    except Exception:
+        log.warning("cleanup_instance_fips: FIP 조회 실패 (instance=%s)", instance_id, exc_info=True)
+        return
     for fip in fips:
         try:
             conn.network.update_ip(fip.id, port_id=None)
             conn.network.delete_ip(fip.id, ignore_missing=True)
         except Exception:
-            pass
+            log.warning("cleanup_instance_fips: FIP %s 정리 실패", fip.id, exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -263,14 +272,48 @@ def create_floating_ip(conn: openstack.connection.Connection, floating_network_i
     return _fip_to_info(fip)
 
 
+def find_external_network_for_subnets(
+    conn: openstack.connection.Connection,
+    subnet_ids: set[str],
+) -> str | None:
+    """주어진 서브넷에 라우터 인터페이스로 연결된 외부 게이트웨이 네트워크 ID를 반환.
+
+    - 라우터의 external_gateway_info.network_id를 사용해 reachable한 외부망을 결정.
+    - 매칭 라우터가 없거나 라우터에 외부 게이트웨이가 설정되지 않았으면 None.
+    """
+    if not subnet_ids:
+        return None
+    candidate_router_ids: set[str] = set()
+    for iface_port in _iter_router_interface_ports(conn):
+        iface_subnet_ids = {fi.get("subnet_id") for fi in (iface_port.fixed_ips or [])}
+        if iface_subnet_ids & subnet_ids and iface_port.device_id:
+            candidate_router_ids.add(iface_port.device_id)
+    if not candidate_router_ids:
+        return None
+    for router in conn.network.routers():
+        if router.id in candidate_router_ids and router.external_gateway_info:
+            ext_net_id = router.external_gateway_info.get("network_id")
+            if ext_net_id:
+                return ext_net_id
+    return None
+
+
 def associate_floating_ip(
-    conn: openstack.connection.Connection, floating_ip_id: str, instance_id: str
+    conn: openstack.connection.Connection,
+    floating_ip_id: str,
+    instance_id: str,
+    port_id: str | None = None,
 ) -> FloatingIpInfo:
-    """인스턴스의 첫 번째 포트에 floating IP 연결."""
-    ports = list(conn.network.ports(device_id=instance_id))
-    if not ports:
-        raise RuntimeError("인스턴스에 연결된 포트가 없습니다")
-    port_id = ports[0].id
+    """인스턴스 포트에 floating IP 연결. port_id 미지정 시 FIP 미점유 첫 포트를 선택한다."""
+    if not port_id:
+        ports = list(conn.network.ports(device_id=instance_id))
+        if not ports:
+            raise RuntimeError("인스턴스에 연결된 포트가 없습니다")
+        used_port_ids = {f.port_id for f in conn.network.ips() if f.port_id}
+        available = [p for p in ports if p.id not in used_port_ids]
+        if not available:
+            raise RuntimeError("모든 인터페이스에 이미 Floating IP가 할당되어 있습니다")
+        port_id = available[0].id
     fip = conn.network.update_ip(floating_ip_id, port_id=port_id)
     return _fip_to_info(fip)
 
@@ -305,6 +348,7 @@ def get_topology(conn: openstack.connection.Connection) -> TopologyData:
     # 3. 라우터 인터페이스 포트 → router_id→[subnet_ids] 맵 (DVR/HA 포함)
     router_subnets: dict[str, list[str]] = {}
     router_subnet_port_count: dict[str, dict[str, int]] = {}  # rid → {sid → port 수}
+    router_interface_ips: dict[str, list[dict]] = {}  # rid → [{ip_address, subnet_id}]
     for port in _iter_router_interface_ports(conn):
         rid = port.device_id
         if not rid:
@@ -313,19 +357,34 @@ def get_topology(conn: openstack.connection.Connection) -> TopologyData:
             router_subnets[rid] = []
         if rid not in router_subnet_port_count:
             router_subnet_port_count[rid] = {}
+        if rid not in router_interface_ips:
+            router_interface_ips[rid] = []
         for fip in port.fixed_ips or []:
             sid = fip.get("subnet_id")
+            ip_addr = fip.get("ip_address")
             if sid:
                 router_subnet_port_count[rid][sid] = router_subnet_port_count[rid].get(sid, 0) + 1
                 if sid not in router_subnets[rid]:
                     router_subnets[rid].append(sid)
+            # 중복 IP 제거 (DVR replicated 포트는 같은 IP 여러 번 나올 수 있음)
+            if (
+                ip_addr
+                and sid
+                and not any(e["ip_address"] == ip_addr and e["subnet_id"] == sid for e in router_interface_ips[rid])
+            ):
+                router_interface_ips[rid].append({"ip_address": ip_addr, "subnet_id": sid})
 
     # 4. 전체 라우터
     topo_routers = []
     for r in conn.network.routers():
         ext_net_id = None
+        ext_gw_ips: list[str] = []
         if r.external_gateway_info:
             ext_net_id = r.external_gateway_info.get("network_id")
+            for efip in r.external_gateway_info.get("external_fixed_ips", []):
+                ip = efip.get("ip_address")
+                if ip:
+                    ext_gw_ips.append(ip)
         dvr_sids = [sid for sid, cnt in router_subnet_port_count.get(r.id, {}).items() if cnt > 1]
         topo_routers.append(
             TopologyRouter(
@@ -333,6 +392,10 @@ def get_topology(conn: openstack.connection.Connection) -> TopologyData:
                 name=r.name or "",
                 status=r.status or "",
                 external_gateway_network_id=ext_net_id,
+                external_gateway_ips=ext_gw_ips,
+                interface_ips=router_interface_ips.get(r.id, []),
+                is_distributed=bool(getattr(r, "is_distributed", False)),
+                is_ha=bool(getattr(r, "is_ha", False)),
                 connected_subnet_ids=router_subnets.get(r.id, []),
                 dvr_subnet_ids=dvr_sids,
                 project_id=getattr(r, "project_id", None),
@@ -585,6 +648,58 @@ def delete_security_group_rule(conn: openstack.connection.Connection, rule_id: s
     conn.network.delete_security_group_rule(rule_id, ignore_missing=True)
 
 
+_UNION_EGRESS_RULES: list[dict] = [
+    {"protocol": "tcp", "port_range_min": 2049, "port_range_max": 2049},  # NFS
+    {"protocol": "udp", "port_range_min": 2049, "port_range_max": 2049},  # NFS UDP
+    {"protocol": "tcp", "port_range_min": 6789, "port_range_max": 6789},  # CephFS mon v1
+    {"protocol": "tcp", "port_range_min": 3300, "port_range_max": 3300},  # Ceph msgr v2
+    {"protocol": "tcp", "port_range_min": 80, "port_range_max": 80},  # envmgr-init HTTP
+    {"protocol": "tcp", "port_range_min": 443, "port_range_max": 443},  # envmgr-init HTTPS
+]
+
+
+def ensure_union_egress_sg(
+    conn: openstack.connection.Connection, project_id: str, sg_name: str = "union-egress-default"
+) -> str:
+    """Union VM용 egress SG를 idempotent하게 확보하고 SG 이름을 반환한다.
+
+    SG가 없으면 생성 후 NFS/CephFS/HTTP(S) egress rule을 추가한다.
+    이미 있으면 누락된 rule만 보충한다.
+    """
+    sgs = list_security_groups(conn, project_id=project_id)
+    existing = next((sg for sg in sgs if sg["name"] == sg_name), None)
+
+    if existing is None:
+        sg = create_security_group(conn, sg_name, "Union VM egress — NFS/CephFS/HTTP(S)")
+        sg_id = sg["id"]
+        existing_rules: list[dict] = []
+    else:
+        sg_id = existing["id"]
+        existing_rules = existing.get("rules", [])
+
+    # (protocol, min, max)로 기존 egress rule 목록 색인
+    existing_keys = {
+        (r.get("protocol"), r.get("port_range_min"), r.get("port_range_max"))
+        for r in existing_rules
+        if r.get("direction") == "egress"
+    }
+
+    for rule in _UNION_EGRESS_RULES:
+        key = (rule["protocol"], rule["port_range_min"], rule["port_range_max"])
+        if key not in existing_keys:
+            create_security_group_rule(
+                conn,
+                sg_id,
+                direction="egress",
+                protocol=rule["protocol"],
+                port_range_min=rule["port_range_min"],
+                port_range_max=rule["port_range_max"],
+                remote_ip_prefix="0.0.0.0/0",
+            )
+
+    return sg_name
+
+
 def update_port_security_groups(
     conn: openstack.connection.Connection, port_id: str, security_group_ids: list[str]
 ) -> dict:
@@ -593,6 +708,147 @@ def update_port_security_groups(
         "id": port.id,
         "security_group_ids": port.security_group_ids or [],
     }
+
+
+# ---------------------------------------------------------------------------
+# 프로젝트 기본 네트워크 (Default Network) — 동기 Neutron 연산
+# ---------------------------------------------------------------------------
+
+_default_net_logger = _logging.getLogger(__name__)
+
+
+def _find_external_network(conn: openstack.connection.Connection) -> str | None:
+    """첫 번째 외부(provider) 네트워크 ID를 반환. 없으면 None."""
+    try:
+        for n in conn.network.networks():
+            if n.is_router_external:
+                return n.id
+    except Exception:
+        pass
+    return None
+
+
+def _find_existing_router_for_subnet(
+    conn: openstack.connection.Connection,
+    subnet_id: str,
+) -> str | None:
+    """서브넷에 이미 연결된 라우터가 있으면 그 ID를 반환."""
+    try:
+        for port in _iter_router_interface_ports(conn, network_id=None):
+            for fip in port.fixed_ips or []:
+                if fip.get("subnet_id") == subnet_id:
+                    return port.device_id
+    except Exception:
+        pass
+    return None
+
+
+def provision_default_network(
+    conn: openstack.connection.Connection,
+    project_id: str,
+    external_network_id: str | None = None,
+    cidr: str = "192.168.0.0/24",
+) -> tuple[str, str | None, str | None, bool]:
+    """Neutron에서 "Default" 네트워크를 찾거나 새로 생성한다 (동기).
+
+    - 외부 네트워크 미지정 시 자동 감지
+    - 기존 네트워크에 라우터가 없으면 자동 생성하여 연결
+
+    Returns:
+        (network_id, subnet_id, router_id, newly_created)
+    """
+    # 외부 네트워크 자동 감지 (미설정 시)
+    if not external_network_id:
+        external_network_id = _find_external_network(conn)
+
+    # ── Neutron 검색 ─────────────────────────────────────────────────────────
+    try:
+        existing = [
+            n for n in conn.network.networks(project_id=project_id) if n.name == "Default" and not n.is_router_external
+        ]
+        if existing:
+            net = existing[0]
+            subnet_id = net.subnet_ids[0] if net.subnet_ids else None
+            router_id: str | None = None
+
+            # 기존 네트워크에 라우터가 연결되어 있는지 확인 → 없으면 자동 생성
+            if subnet_id and external_network_id:
+                router_id = _find_existing_router_for_subnet(conn, subnet_id)
+                if not router_id:
+                    try:
+                        router = conn.network.create_router(
+                            name="Default",
+                            external_gateway_info={"network_id": external_network_id},
+                        )
+                        conn.network.add_interface_to_router(router.id, subnet_id=subnet_id)
+                        router_id = router.id
+                        _default_net_logger.info("기존 Default 네트워크(%s)에 라우터(%s) 자동 연결", net.id, router_id)
+                    except Exception:
+                        _default_net_logger.warning("기존 네트워크에 라우터 자동 연결 실패", exc_info=True)
+
+            return net.id, subnet_id, router_id, False
+    except Exception:
+        _default_net_logger.warning("Neutron 네트워크 검색 실패", exc_info=True)
+
+    # ── 새로 생성 ────────────────────────────────────────────────────────────
+    net = None
+    subnet = None
+    router = None
+    subnet_id = None
+    router_id = None
+    try:
+        net = conn.network.create_network(name="Default")
+        # CIDR의 첫 번째 호스트를 게이트웨이로 사용 (예: 192.168.0.0/24 → 192.168.0.1)
+        try:
+            import ipaddress
+
+            network_addr = ipaddress.IPv4Network(cidr, strict=False)
+            gateway: str | None = str(list(network_addr.hosts())[0])
+        except Exception:
+            gateway = None
+        subnet = conn.network.create_subnet(
+            network_id=net.id,
+            name="Default",
+            cidr=cidr,
+            ip_version=4,
+            is_dhcp_enabled=True,
+            **({} if gateway is None else {"gateway_ip": gateway}),
+        )
+        subnet_id = subnet.id
+
+        # 라우터 생성 및 외부 네트워크 게이트웨이 연결
+        if external_network_id:
+            router = conn.network.create_router(
+                name="Default",
+                external_gateway_info={"network_id": external_network_id},
+            )
+            conn.network.add_interface_to_router(router.id, subnet_id=subnet.id)
+            router_id = router.id
+        else:
+            _default_net_logger.warning("외부 네트워크를 찾을 수 없어 라우터 생성을 건너뜁니다")
+    except Exception as exc:
+        _default_net_logger.error("Default 네트워크 생성 실패, 롤백", exc_info=True)
+        # 생성된 리소스 정리
+        if router:
+            try:
+                if subnet:
+                    conn.network.remove_interface_from_router(router.id, subnet_id=subnet.id)
+                conn.network.delete_router(router.id, ignore_missing=True)
+            except Exception:
+                pass
+        if subnet:
+            try:
+                conn.network.delete_subnet(subnet.id, ignore_missing=True)
+            except Exception:
+                pass
+        if net:
+            try:
+                conn.network.delete_network(net.id, ignore_missing=True)
+            except Exception:
+                pass
+        raise RuntimeError("Default 네트워크 생성 실패") from exc
+
+    return net.id, subnet_id, router_id, True
 
 
 def _fip_to_info(f) -> FloatingIpInfo:

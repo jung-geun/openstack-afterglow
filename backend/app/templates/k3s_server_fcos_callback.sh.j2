@@ -1,0 +1,95 @@
+#!/bin/bash
+set -e
+CALLBACK_URL="{{ callback_url }}"
+CALLBACK_TOKEN="{{ callback_token }}"
+
+log() { echo "[k3s-callback] $*" | tee -a /var/log/k3s-callback.log; }
+
+log "Waiting for k3s kubeconfig (up to 10 min)..."
+for i in $(seq 1 120); do
+  if [ -f /etc/rancher/k3s/k3s.yaml ]; then
+    break
+  fi
+  sleep 5
+done
+
+if [ ! -f /etc/rancher/k3s/k3s.yaml ]; then
+  log "ERROR: kubeconfig not found after 10 minutes"
+  curl -sf -X POST "${CALLBACK_URL}/api/k3s/callback" \
+    -H "Content-Type: application/json" \
+    -d "{\"token\": \"${CALLBACK_TOKEN}\", \"success\": false, \"error\": \"kubeconfig not found after 10min\"}" || true
+  exit 1
+fi
+
+log "Waiting for node-token (up to 5 min)..."
+for i in $(seq 1 60); do
+  if [ -f /var/lib/rancher/k3s/server/node-token ]; then
+    break
+  fi
+  sleep 5
+done
+
+{% if cloud_conf %}
+# cloud-config secret 생성 (플러그인 공통 1회)
+log "Creating cloud-config secret..."
+kubectl --kubeconfig=/etc/rancher/k3s/k3s.yaml \
+  create secret -n kube-system generic cloud-config \
+  --from-file=cloud.conf=/etc/kubernetes/cloud.conf 2>&1 | tee -a /var/log/k3s-callback.log || true
+
+{% endif %}
+{% for plugin in plugins %}
+# 플러그인 배포: {{ plugin.name }}
+PLUGIN_{{ plugin.name | upper }}_STATUS="not_deployed"
+log "Deploying plugin: {{ plugin.name }}..."
+if kubectl --kubeconfig=/etc/rancher/k3s/k3s.yaml \
+  apply -f /opt/k3s/{{ plugin.name }}-manifests.yaml 2>&1 | tee -a /var/log/k3s-callback.log; then
+  PLUGIN_{{ plugin.name | upper }}_STATUS="deployed"
+  log "Plugin {{ plugin.name }} deployed successfully"
+else
+  PLUGIN_{{ plugin.name | upper }}_STATUS="failed"
+  log "ERROR: Plugin {{ plugin.name }} deployment failed"
+fi
+
+{% endfor %}
+SERVER_IP=$(hostname -I | awk '{print $1}')
+KUBECONFIG_RAW=$(cat /etc/rancher/k3s/k3s.yaml)
+# 127.0.0.1 → 실제 서버 IP로 치환
+KUBECONFIG_FIXED=$(echo "${KUBECONFIG_RAW}" | sed "s/127\.0\.0\.1/${SERVER_IP}/g")
+NODE_TOKEN=$(cat /var/lib/rancher/k3s/server/node-token 2>/dev/null || echo "")
+
+log "Sending callback to ${CALLBACK_URL}"
+PLUGIN_STATUS_JSON=$(jq -n \
+{% for plugin in plugins %}
+  --arg {{ plugin.name }}   "${PLUGIN_{{ plugin.name | upper }}_STATUS}" \
+{% endfor %}
+{% if plugins %}
+  '{ {% for plugin in plugins %}{{ '"' ~ plugin.name ~ '"' }}: ${{ plugin.name }}{% if not loop.last %}, {% endif %}{% endfor %} }')
+{% else %}
+  '{}')
+{% endif %}
+
+PAYLOAD=$(jq -n \
+  --arg token   "${CALLBACK_TOKEN}" \
+  --arg kc      "${KUBECONFIG_FIXED}" \
+  --arg nt      "${NODE_TOKEN}" \
+  --arg sip     "${SERVER_IP}" \
+  --argjson ps  "${PLUGIN_STATUS_JSON}" \
+  '{token: $token, success: true, kubeconfig: $kc, node_token: $nt, server_ip: $sip, plugin_status: $ps}')
+
+log "Payload size: $(echo -n "${PAYLOAD}" | wc -c) bytes"
+HTTP_CODE=$(curl -s -o /tmp/callback_response.txt -w "%{http_code}" \
+  -X POST "${CALLBACK_URL}/api/k3s/callback" \
+  -H "Content-Type: application/json" \
+  -d "${PAYLOAD}" --connect-timeout 10 --max-time 30 2>&1) || true
+RESPONSE=$(cat /tmp/callback_response.txt 2>/dev/null || echo "")
+if [ "${HTTP_CODE}" = "200" ]; then
+  log "Callback sent successfully (HTTP ${HTTP_CODE})"
+else
+  log "ERROR: Callback failed (HTTP ${HTTP_CODE}): ${RESPONSE}"
+  sleep 30
+  log "Retrying callback..."
+  curl -s -o /dev/null -w "Retry HTTP %{http_code}\n" \
+    -X POST "${CALLBACK_URL}/api/k3s/callback" \
+    -H "Content-Type: application/json" \
+    -d "${PAYLOAD}" --connect-timeout 10 --max-time 30 >> /var/log/k3s-callback.log 2>&1 || true
+fi

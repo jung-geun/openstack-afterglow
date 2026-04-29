@@ -5,6 +5,8 @@
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { formatStorage } from '$lib/utils/format';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	interface SwiftContainer {
 		name: string;
@@ -21,6 +23,7 @@
 	let containers = $state<SwiftContainer[]>([]);
 	let account = $state<AccountMeta | null>(null);
 	let loading = $state(true);
+	let refreshing = $state(false);
 	let deleting = $state<string | null>(null);
 
 	// 생성 모달
@@ -33,7 +36,8 @@
 	const projectId = $derived($auth.projectId ?? undefined);
 
 	async function load() {
-		loading = true;
+		if (containers.length === 0) loading = true;
+		else refreshing = true;
 		try {
 			[containers, account] = await Promise.all([
 				api.get<SwiftContainer[]>('/api/object-storage', token, projectId),
@@ -43,6 +47,7 @@
 			containers = [];
 		} finally {
 			loading = false;
+			refreshing = false;
 		}
 	}
 
@@ -56,14 +61,14 @@
 			newName = '';
 			await load();
 		} catch (e) {
-			createError = e instanceof ApiError ? e.message : '컨테이너 생성 실패';
+			createError = e instanceof ApiError ? e.message : '버킷 생성 실패';
 		} finally {
 			creating = false;
 		}
 	}
 
 	async function deleteContainer(name: string) {
-		if (!confirm(`컨테이너 "${name}"를 삭제하시겠습니까?`)) return;
+		if (!confirm(`버킷 "${name}"를 삭제하시겠습니까?`)) return;
 		deleting = name;
 		try {
 			await api.delete(`/api/object-storage/${encodeURIComponent(name)}`, token, projectId);
@@ -74,6 +79,13 @@
 			deleting = null;
 		}
 	}
+
+	const ar = createAutoRefresh(load, {
+		storageKey: 'admin-object-storage',
+		defaultActive: true,
+		defaultInterval: 30,
+		intervalOptions: [15, 30, 60]
+	});
 
 	onMount(load);
 </script>
@@ -93,7 +105,7 @@
 			role="none"
 			onkeydown={(e) => e.stopPropagation()}
 		>
-			<h2 class="text-lg font-semibold text-white mb-4">컨테이너 생성</h2>
+			<h2 class="text-lg font-semibold text-white mb-4">버킷 생성</h2>
 			<div class="space-y-3">
 				<div>
 					<label class="block text-xs text-gray-400 mb-1">이름</label>
@@ -122,20 +134,26 @@
 {/if}
 
 <div class="p-4 md:p-8 max-w-6xl">
-	<PageHeader breadcrumb="STORAGE / OBJECT STORAGE" title="Object Storage">
+	<PageHeader breadcrumb="STORAGE / OBJECT STORAGE" title="오브젝트 스토리지">
 		{#snippet actions()}
 			<button
 				onclick={() => { showModal = true; createError = ''; newName = ''; }}
 				class="text-xs text-white bg-indigo-600 hover:bg-indigo-500 transition-colors px-3 py-1.5 rounded border border-indigo-500"
-			>+ 컨테이너 생성</button>
-			<button onclick={load} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
+			>+ 버킷 생성</button>
+			<AutoRefreshControl
+				bind:active={ar.active}
+				bind:intervalSeconds={ar.intervalSeconds}
+				intervalOptions={ar.intervalOptions}
+				refreshing={loading || refreshing}
+				onManualRefresh={load}
+			/>
 		{/snippet}
 	</PageHeader>
 
 	{#if account}
 		<div class="grid grid-cols-3 gap-4 mb-6">
 			<div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
-				<div class="text-xs text-gray-500 uppercase tracking-wide mb-1">컨테이너</div>
+				<div class="text-xs text-gray-500 uppercase tracking-wide mb-1">버킷</div>
 				<div class="text-2xl font-bold text-white">{account.container_count}</div>
 			</div>
 			<div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
@@ -152,13 +170,13 @@
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={5} />
 	{:else if containers.length === 0}
-		<div class="text-gray-600 text-sm">컨테이너가 없습니다</div>
+		<div class="text-gray-600 text-sm">버킷가 없습니다</div>
 	{:else}
-		<div class="overflow-x-auto">
+		<div class="overflow-x-auto" class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 			<table class="w-full text-sm">
 				<thead>
 					<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
-						<th class="text-left py-3 px-4 font-medium">컨테이너 이름</th>
+						<th class="text-left py-3 px-4 font-medium">버킷 이름</th>
 						<th class="text-left py-3 px-4 font-medium">오브젝트 수</th>
 						<th class="text-left py-3 px-4 font-medium">용량</th>
 						<th class="text-right py-3 px-4 font-medium">액션</th>

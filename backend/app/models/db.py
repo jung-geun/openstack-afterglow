@@ -3,6 +3,7 @@
 from datetime import UTC, datetime
 
 from sqlalchemy import (
+    BIGINT,
     BOOLEAN,
     CHAR,
     INT,
@@ -39,6 +40,7 @@ class K3sCluster(Base):
     security_group_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     # API LB (K3s API 서버 앞단 Octavia LB + Floating IP)
     api_lb_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    api_lb_pool_id: Mapped[str | None] = mapped_column(VARCHAR(64))  # LB-first 방식: 클러스터 생성 시 pool 저장
     api_fip_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     api_fip_address: Mapped[str | None] = mapped_column(VARCHAR(45))
 
@@ -63,6 +65,11 @@ class K3sCluster(Base):
     agent_count: Mapped[int] = mapped_column(INT, nullable=False, default=0)
     occm_enabled: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False)
     plugins_enabled: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # {"occm": true, ...}
+    plugin_status: Mapped[dict | None] = mapped_column(
+        JSON, nullable=True
+    )  # {"occm": {"status": "deployed", "error": ""}}
+    secret_cloud_config_status: Mapped[str | None] = mapped_column(VARCHAR(20), nullable=True)
+    os_type: Mapped[str] = mapped_column(VARCHAR(10), nullable=False, default="ubuntu")
 
     # 타임스탬프
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
@@ -142,6 +149,21 @@ class NotionTarget(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
 
 
+class ProjectDefaultNetwork(Base):
+    """프로젝트별 기본 네트워크 설정. 자동 생성 또는 사용자가 직접 지정."""
+
+    __tablename__ = "project_default_networks"
+
+    id: Mapped[int] = mapped_column(INT, primary_key=True, autoincrement=True)
+    project_id: Mapped[str] = mapped_column(VARCHAR(64), unique=True, nullable=False, index=True)
+    network_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    subnet_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    router_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    auto_created: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+
 class NotionConfig(Base):
     """Notion 연동 설정 (싱글톤, id=1 고정). API key는 AES-256-GCM 암호화 저장."""
 
@@ -170,3 +192,112 @@ class NotionConfig(Base):
     # 타임스탬프
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+
+class LibraryBuild(Base):
+    """라이브러리 사전빌드 작업 추적 — Manila share + 빌더 VM 상태를 DB에 기록."""
+
+    __tablename__ = "library_builds"
+
+    id: Mapped[int] = mapped_column(INT, primary_key=True, autoincrement=True)
+    library_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, index=True)
+    file_storage_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    server_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+
+    # 상태: pending, creating_share, creating_access, creating_vm, building, verifying, cleanup, complete, error, timeout
+    status: Mapped[str] = mapped_column(VARCHAR(32), nullable=False, default="pending")
+    progress_step: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, default="")
+    progress_pct: Mapped[int] = mapped_column(INT, nullable=False, default=0)
+    error_message: Mapped[str | None] = mapped_column(TEXT)
+
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+
+# ---------------------------------------------------------------------------
+# Union Mount 레이어 시스템
+# ---------------------------------------------------------------------------
+
+
+class UnionLayer(Base):
+    """Content-addressable 불변 레이어. id = 'sha256:<64hex>'."""
+
+    __tablename__ = "union_layers"
+
+    id: Mapped[str] = mapped_column(VARCHAR(71), primary_key=True)  # sha256:<64hex>
+    name: Mapped[str] = mapped_column(VARCHAR(128), nullable=False, index=True)
+    version: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    created_by: Mapped[str] = mapped_column(VARCHAR(128), nullable=False)
+    sealed: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False)
+
+    # 단일 상속: 부모 0개(최상위) 또는 1개
+    parent_id: Mapped[str | None] = mapped_column(
+        VARCHAR(71), ForeignKey("union_layers.id", ondelete="RESTRICT"), index=True
+    )
+    # 최상위 레이어에만 있음: 어느 Ubuntu base 위에서 빌드됐는지
+    ubuntu_base: Mapped[str | None] = mapped_column(VARCHAR(255))
+
+    # 재현/재빌드용 메타데이터
+    build_recipe: Mapped[dict] = mapped_column(JSON, nullable=False)
+    installed_packages: Mapped[dict] = mapped_column(JSON, nullable=False)
+
+    # 검증용
+    content_hash: Mapped[str] = mapped_column(VARCHAR(71), nullable=False)  # sha256:<64hex>
+    size_bytes: Mapped[int | None] = mapped_column(BIGINT)
+    file_count: Mapped[int | None] = mapped_column(INT)
+
+    # 프로젝트 격리 (NULL = 공유/시스템 레이어, 값 있음 = 해당 프로젝트 전용)
+    project_id: Mapped[str | None] = mapped_column(VARCHAR(64), index=True)
+    # 봉인 시각 (sealed=True 로 변경된 시점)
+    sealed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # 라이선스 메타데이터 (None = 제한 없음)
+    license_type: Mapped[str | None] = mapped_column(VARCHAR(64))
+    max_concurrent_mounts: Mapped[int | None] = mapped_column(INT)
+
+    # 관계
+    parent: Mapped["UnionLayer | None"] = relationship("UnionLayer", remote_side="UnionLayer.id")
+    templates: Mapped[list["UnionTemplate"]] = relationship("UnionTemplate", back_populates="leaf_layer")
+
+    __table_args__ = (
+        Index("idx_union_layers_name_version", "name", "version"),
+        Index("idx_union_layers_parent", "parent_id"),
+    )
+
+
+class UnionTemplate(Base):
+    """이름 붙은 레이어 조합 (leaf layer + ubuntu base 지정)."""
+
+    __tablename__ = "union_templates"
+
+    name: Mapped[str] = mapped_column(VARCHAR(128), primary_key=True)
+    version: Mapped[int] = mapped_column(INT, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    created_by: Mapped[str] = mapped_column(VARCHAR(128), nullable=False)
+    parent_version: Mapped[int | None] = mapped_column(INT)
+    ubuntu_base: Mapped[str] = mapped_column(VARCHAR(255), nullable=False)
+    leaf_layer_id: Mapped[str] = mapped_column(
+        VARCHAR(71), ForeignKey("union_layers.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    note: Mapped[str | None] = mapped_column(TEXT)
+
+    # 관계
+    leaf_layer: Mapped["UnionLayer"] = relationship("UnionLayer", back_populates="templates")
+
+
+class UnionUserMount(Base):
+    """사용자 VM 마운트 추적 (GC 판단 및 운영 가시성)."""
+
+    __tablename__ = "union_user_mounts"
+
+    id: Mapped[int] = mapped_column(INT, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(VARCHAR(128), nullable=False, index=True)
+    vm_hostname: Mapped[str] = mapped_column(VARCHAR(255), nullable=False)
+    leaf_layer_id: Mapped[str] = mapped_column(
+        VARCHAR(71), ForeignKey("union_layers.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    mounted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    unmounted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -83,12 +83,15 @@ class KeystoneAuthPlugin:
     _cert_cache: dict[str, tuple[bytes, bytes]] = {}
 
     def should_deploy(self, settings: Settings) -> bool:
-        if not settings.k3s_keystone_auth_enabled:
-            return False
-        if not settings.os_auth_url:
-            _logger.warning("KeystoneAuth 활성화됨이지만 os_auth_url 미설정")
-            return False
-        return True
+        # webhook config가 cluster service URL(k8s-keystone-auth.kube-system.svc.cluster.local)을
+        # 가리켜 부팅 직후 apiserver 인증 실패가 발생함.
+        # hostNetwork static pod 방식으로 재설계할 때까지 강제 비활성화.
+        if settings.k3s_keystone_auth_enabled:
+            _logger.warning(
+                "Keystone Auth는 현재 부팅 시점 webhook resolve 실패로 비활성화되어 있습니다. "
+                "host static pod 재설계 후 재활성화 예정."
+            )
+        return False
 
     def cloud_conf_sections(self, project_id: str, settings: Settings) -> str:
         return ""

@@ -5,6 +5,8 @@ namespace: afterglow-dev
 
 resources:
   - ../../base
+  - middleware.yaml
+  - ingress.yaml
 
 images:
   - name: ghcr.io/jung-geun/afterglow-api

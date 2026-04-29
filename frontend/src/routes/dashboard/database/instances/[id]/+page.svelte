@@ -5,6 +5,8 @@
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	interface DbInstance {
 		id: string;
@@ -209,6 +211,13 @@
 		finally { restoringBackup = null; }
 	}
 
+	const ar = createAutoRefresh(() => loadAll(), {
+		storageKey: 'dashboard-database-instance-detail',
+		defaultActive: true,
+		defaultInterval: 15,
+		intervalOptions: [10, 15, 30, 60],
+	});
+
 	onMount(loadAll);
 </script>
 
@@ -230,10 +239,19 @@
 				<h1 class="text-2xl font-bold text-white">{instance.name}</h1>
 				<span class="text-xs font-medium {statusColor[instance.status] ?? 'text-gray-400'}">{instance.status}</span>
 			</div>
-			<button onclick={deleteInstance} disabled={deleting}
-				class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-red-900 hover:border-red-700 transition-colors">
-				{deleting ? '삭제 중...' : '인스턴스 삭제'}
-			</button>
+			<div class="flex items-center gap-2">
+				<AutoRefreshControl
+					bind:active={ar.active}
+					bind:intervalSeconds={ar.intervalSeconds}
+					intervalOptions={ar.intervalOptions}
+					refreshing={loading}
+					onManualRefresh={() => loadAll()}
+				/>
+				<button onclick={deleteInstance} disabled={deleting}
+					class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-red-900 hover:border-red-700 transition-colors">
+					{deleting ? '삭제 중...' : '인스턴스 삭제'}
+				</button>
+			</div>
 		</div>
 
 		<!-- 인스턴스 정보 -->

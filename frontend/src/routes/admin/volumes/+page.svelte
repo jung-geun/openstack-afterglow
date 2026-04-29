@@ -9,6 +9,8 @@
 	import { projectNames } from '$lib/stores/projectNames';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import StatusChip from '$lib/components/ui/StatusChip.svelte';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	interface AdminVolume {
 		id: string;
@@ -28,6 +30,7 @@
 
 	let allVolumes = $state<AdminVolume[]>([]);
 	let loading = $state(true);
+	let refreshing = $state(false);
 	let pageSize = $state(20);
 	let markerStack = $state<string[]>([]);
 	let nextMarker = $state<string | null>(null);
@@ -66,6 +69,11 @@
 	let resetting = $state(false);
 	let resetError = $state('');
 
+	// 강제 삭제 모달
+	let forceDeleteVolume = $state<AdminVolume | null>(null);
+	let forceDeleting = $state(false);
+	let forceDeleteError = $state('');
+
 	// 볼륨 이전 모달
 	let transferVolume = $state<AdminVolume | null>(null);
 	let transferSearch = $state('');
@@ -79,8 +87,33 @@
 	// 상세 패널
 	let selectedVolumeId = $state<string | null>(null);
 
+	// 필터
+	let projectFilter = $state('');
+	let projectSearchText = $state('');
+	let projectDropdownOpen = $state(false);
+	let statusFilter = $state('');
+	let nameSearch = $state('');
+	let nameDebounceTimer = $state<ReturnType<typeof setTimeout> | null>(null);
+
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
+
+	let projectSuggestions = $derived(
+		Array.from($projectNames.entries())
+			.filter(([id, name]) =>
+				projectSearchText.length === 0 ||
+				name.toLowerCase().includes(projectSearchText.toLowerCase()) ||
+				id.toLowerCase().includes(projectSearchText.toLowerCase())
+			)
+			.slice(0, 10)
+	);
+
+	function handleDocumentClick(e: MouseEvent) {
+		const target = e.target as HTMLElement;
+		if (!target.closest('.project-filter-wrapper')) {
+			projectDropdownOpen = false;
+		}
+	}
 
 	let filteredTransferProjects = $derived(
 		transferSearch
@@ -100,10 +133,14 @@
 	}
 
 	async function load(marker?: string) {
-		loading = true;
+		if (allVolumes.length === 0) loading = true;
+		else refreshing = true;
 		try {
 			let url = `/api/admin/all-volumes?limit=${pageSize}`;
 			if (marker) url += `&marker=${marker}`;
+			if (projectFilter) url += `&project_id=${encodeURIComponent(projectFilter)}`;
+			if (statusFilter) url += `&status=${encodeURIComponent(statusFilter)}`;
+			if (nameSearch) url += `&name=${encodeURIComponent(nameSearch)}`;
 			const res = await api.get<PagedResponse<AdminVolume>>(url, token, projectId);
 			allVolumes = res.items;
 			nextMarker = res.next_marker;
@@ -111,6 +148,7 @@
 			allVolumes = [];
 		} finally {
 			loading = false;
+			refreshing = false;
 		}
 	}
 
@@ -146,8 +184,19 @@
 		resetting = true; resetError = '';
 		try {
 			await api.post(`/api/admin/volumes/${resetVolume.id}/reset-status`, { status: resetStatus }, token, projectId);
-			resetVolume = null; await load();
+			resetVolume = null; await load(markerStack[markerStack.length - 1]);
 		} catch (e) { resetError = e instanceof ApiError ? e.message : '상태 초기화 실패'; } finally { resetting = false; }
+	}
+
+	async function confirmForceDelete() {
+		if (!forceDeleteVolume) return;
+		forceDeleting = true; forceDeleteError = '';
+		try {
+			await api.post(`/api/admin/volumes/${forceDeleteVolume.id}/force-delete`, {}, token, projectId);
+			forceDeleteVolume = null; await load(markerStack[markerStack.length - 1]);
+		} catch (e) {
+			forceDeleteError = e instanceof ApiError ? e.message : '강제 삭제 실패';
+		} finally { forceDeleting = false; }
 	}
 
 	async function loadProjects() {
@@ -166,13 +215,31 @@
 		} catch (e) { transferError = e instanceof ApiError ? e.message : '이전 실패'; } finally { transferring = false; }
 	}
 
-	onMount(() => { load(); loadTimeseries(tsRange); projectNames.load(token, projectId); loadProjects(); });
+	const ar = createAutoRefresh(
+		() => { load(markerStack[markerStack.length - 1]); loadTimeseries(tsRange); },
+		{ storageKey: 'admin-volumes', defaultActive: true, defaultInterval: 30, intervalOptions: [15, 30, 60] }
+	);
+
+	onMount(() => {
+		load();
+		loadTimeseries(tsRange);
+		projectNames.load(token, projectId);
+		loadProjects();
+		document.addEventListener('click', handleDocumentClick);
+		return () => document.removeEventListener('click', handleDocumentClick);
+	});
 </script>
 
 <div class="p-4 md:p-8 max-w-6xl">
 	<PageHeader breadcrumb="STORAGE / VOLUMES" title="전체 볼륨">
 		{#snippet actions()}
-			<button onclick={() => { markerStack = []; nextMarker = null; load(); }} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
+			<AutoRefreshControl
+				bind:active={ar.active}
+				bind:intervalSeconds={ar.intervalSeconds}
+				intervalOptions={ar.intervalOptions}
+				refreshing={loading || refreshing}
+				onManualRefresh={() => { markerStack = []; nextMarker = null; projectFilter = ''; projectSearchText = ''; statusFilter = ''; nameSearch = ''; load(); }}
+			/>
 			<div class="flex items-center gap-1 text-xs text-gray-500">
 				표시:
 				{#each [10, 20, 30] as n}
@@ -202,10 +269,62 @@
 		{/if}
 	</div>
 
+	<!-- 필터 -->
+	<div class="flex flex-wrap gap-3 mb-4">
+		<select bind:value={statusFilter} onchange={() => { markerStack = []; nextMarker = null; load(); }} class="bg-gray-800 border border-gray-700 text-sm text-gray-300 rounded-lg px-2 py-1.5 focus:outline-none focus:border-blue-500">
+			<option value="">모든 상태</option>
+			{#each ['available', 'in-use', 'error', 'error_deleting', 'creating', 'deleting', 'attaching', 'detaching', 'reserved'] as s}
+				<option value={s}>{s}</option>
+			{/each}
+		</select>
+		<input
+			type="text"
+			placeholder="이름 검색..."
+			bind:value={nameSearch}
+			oninput={() => {
+				if (nameDebounceTimer) clearTimeout(nameDebounceTimer);
+				nameDebounceTimer = setTimeout(() => { markerStack = []; nextMarker = null; load(); }, 300);
+			}}
+			class="bg-gray-800 border border-gray-700 text-sm text-gray-300 rounded-lg px-3 py-1.5 w-40 focus:outline-none focus:border-blue-500"
+		/>
+		<div class="relative project-filter-wrapper">
+			<div class="flex items-center bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 w-52 focus-within:border-blue-500">
+				<input
+					type="text"
+					placeholder="프로젝트 검색..."
+					bind:value={projectSearchText}
+					onfocus={() => (projectDropdownOpen = true)}
+					oninput={() => { projectDropdownOpen = true; if (!projectSearchText) { projectFilter = ''; } }}
+					class="bg-transparent text-sm text-gray-300 flex-1 outline-none min-w-0"
+				/>
+				{#if projectFilter}
+					<button onclick={() => { projectFilter = ''; projectSearchText = ''; projectDropdownOpen = false; markerStack = []; nextMarker = null; load(); }} class="text-gray-500 hover:text-white ml-1 flex-shrink-0">✕</button>
+				{/if}
+			</div>
+			{#if projectDropdownOpen && projectSuggestions.length > 0}
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<div
+					class="absolute top-full mt-1 left-0 w-64 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-20 overflow-hidden"
+					onmouseleave={() => {}}
+				>
+					{#each projectSuggestions as [id, name]}
+						<button
+							class="w-full text-left px-3 py-2 text-xs hover:bg-gray-800 transition-colors {projectFilter === id ? 'bg-blue-900/30 text-blue-400' : 'text-gray-300'}"
+							onclick={() => { projectFilter = id; projectSearchText = name; projectDropdownOpen = false; markerStack = []; nextMarker = null; load(); }}
+						>
+							<div class="font-medium truncate">{name}</div>
+							<div class="text-gray-500 font-mono">{id.slice(0, 12)}...</div>
+						</button>
+					{/each}
+				</div>
+			{/if}
+		</div>
+	</div>
+
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={5} />
 	{:else}
-		<div class="overflow-x-auto">
+		<div class="overflow-x-auto" class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 			<table class="w-full text-sm">
 				<thead>
 					<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
@@ -250,9 +369,11 @@
 										<button onclick={() => { transferVolume = v; transferSearch = ''; transferProjectId = ''; transferProjectName = ''; transferError = ''; }}
 											class="px-2 py-0.5 text-xs bg-purple-900/40 hover:bg-purple-800/40 text-purple-400 rounded">이전</button>
 									{/if}
-									{#if v.status === 'error'}
-										<button onclick={() => { resetVolume = v; resetStatus = 'available'; resetError = ''; }}
-											class="px-2 py-0.5 text-xs bg-yellow-900/40 hover:bg-yellow-800/40 text-yellow-400 rounded">상태초기화</button>
+									<button onclick={() => { resetVolume = v; resetStatus = 'available'; resetError = ''; }}
+										class="px-2 py-0.5 text-xs bg-yellow-900/40 hover:bg-yellow-800/40 text-yellow-400 rounded">상태변경</button>
+									{#if /^(error|deleting)/i.test(v.status ?? '')}
+										<button onclick={() => { forceDeleteVolume = v; forceDeleteError = ''; }}
+											class="px-2 py-0.5 text-xs bg-rose-900/40 hover:bg-rose-800/40 text-rose-400 rounded border border-rose-700">강제삭제</button>
 									{/if}
 									<button onclick={() => { deleteVolume = v; deleteError = ''; }}
 										class="px-2 py-0.5 text-xs bg-red-900/30 hover:bg-red-900/50 text-red-400 rounded">삭제</button>
@@ -340,14 +461,14 @@
 	</div>
 {/if}
 
-<!-- 상태 초기화 모달 -->
+<!-- 상태 변경 모달 -->
 {#if resetVolume}
 	<div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onclick={() => { resetVolume = null; }} role="dialog" onkeydown={(e) => e.key === 'Escape' && (resetVolume = null)} tabindex="-1">
 		<div class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-sm mx-4 shadow-2xl" onclick={(e) => e.stopPropagation()}>
-			<h2 class="text-lg font-semibold text-white mb-3">상태 초기화</h2>
+			<h2 class="text-lg font-semibold text-white mb-3">상태 변경</h2>
 			{#if resetError}<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{resetError}</div>{/if}
 			<div>
-				<label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">초기화 상태</label>
+				<label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">변경할 상태</label>
 				<select bind:value={resetStatus} class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none">
 					<option value="available">available</option>
 					<option value="error">error</option>
@@ -356,7 +477,34 @@
 			</div>
 			<div class="flex justify-end gap-3 mt-5">
 				<button onclick={() => { resetVolume = null; }} class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded-lg">취소</button>
-				<button onclick={confirmReset} disabled={resetting} class="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 text-white text-sm font-medium rounded-lg disabled:opacity-30">{resetting ? '초기화 중...' : '초기화'}</button>
+				<button onclick={confirmReset} disabled={resetting} class="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 text-white text-sm font-medium rounded-lg disabled:opacity-30">{resetting ? '변경 중...' : '변경'}</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- 강제 삭제 모달 -->
+{#if forceDeleteVolume}
+	<div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
+		onclick={() => { forceDeleteVolume = null; }} role="dialog"
+		onkeydown={(e) => e.key === 'Escape' && (forceDeleteVolume = null)} tabindex="-1">
+		<div class="bg-gray-900 border border-rose-800 rounded-xl p-6 w-full max-w-sm mx-4 shadow-2xl"
+			onclick={(e) => e.stopPropagation()} role="none">
+			<h2 class="text-lg font-semibold text-rose-400 mb-3">볼륨 강제 삭제</h2>
+			<p class="text-sm text-gray-300 mb-2">
+				<span class="text-white font-mono">{forceDeleteVolume.name || forceDeleteVolume.id.slice(0,8)}</span>
+				({forceDeleteVolume.status})
+			</p>
+			<p class="text-xs text-rose-400 mb-1">상태 무관 강제 삭제. Cinder DB row 정리 목적이며 Ceph backend가 NotFound인 경우에만 사용하세요.</p>
+			<p class="text-xs text-gray-500 mb-4">attached 볼륨은 거부됩니다.</p>
+			{#if forceDeleteError}<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{forceDeleteError}</div>{/if}
+			<div class="flex justify-end gap-3">
+				<button onclick={() => { forceDeleteVolume = null; }}
+					class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded-lg">취소</button>
+				<button onclick={confirmForceDelete} disabled={forceDeleting}
+					class="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-sm font-medium rounded-lg disabled:opacity-30">
+					{forceDeleting ? '삭제 중...' : '강제 삭제'}
+				</button>
 			</div>
 		</div>
 	</div>

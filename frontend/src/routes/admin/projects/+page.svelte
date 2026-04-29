@@ -4,6 +4,8 @@
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	interface Project {
 		id: string;
@@ -42,6 +44,7 @@
 
 	let projects = $state<Project[]>([]);
 	let loading = $state(true);
+	let refreshing = $state(false);
 	let pageSize = $state(20);
 	let markerStack = $state<string[]>([]);
 	let nextMarker = $state<string | null>(null);
@@ -62,6 +65,14 @@
 	let deleteProject = $state<Project | null>(null);
 	let deleting = $state(false);
 	let deleteError = $state('');
+
+	let copiedId = $state<string | null>(null);
+	function copyId(id: string) {
+		navigator.clipboard.writeText(id).then(() => {
+			copiedId = id;
+			setTimeout(() => { copiedId = null; }, 1500);
+		});
+	}
 
 	// 접근 권한 패널
 	let accessProject = $state<Project | null>(null);
@@ -99,13 +110,14 @@
 	const projectId = $derived($auth.projectId ?? undefined);
 
 	async function load(marker?: string) {
-		loading = true;
+		if (projects.length === 0) loading = true;
+		else refreshing = true;
 		try {
 			let url = `/api/admin/projects?limit=${pageSize}`;
 			if (marker) url += `&marker=${marker}`;
 			const res = await api.get<PagedResponse<Project>>(url, token, projectId);
 			projects = res.items; nextMarker = res.next_marker;
-		} catch { projects = []; } finally { loading = false; }
+		} catch { projects = []; } finally { loading = false; refreshing = false; }
 	}
 
 	async function createProject() {
@@ -216,6 +228,15 @@
 		} catch (e) { addError = e instanceof ApiError ? e.message : '그룹 할당 실패'; } finally { addSaving = false; }
 	}
 
+	function autoRefreshLoad() { load(markerStack[markerStack.length - 1]); }
+
+	const ar = createAutoRefresh(autoRefreshLoad, {
+		storageKey: 'admin-projects',
+		defaultActive: true,
+		defaultInterval: 60,
+		intervalOptions: [30, 60]
+	});
+
 	onMount(load);
 </script>
 
@@ -223,7 +244,13 @@
 	<PageHeader breadcrumb="IDENTITY / PROJECTS" title="프로젝트">
 		{#snippet actions()}
 			<button onclick={() => { showCreate = true; createError = ''; }} class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg">+ 생성</button>
-			<button onclick={() => load()} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
+			<AutoRefreshControl
+				bind:active={ar.active}
+				bind:intervalSeconds={ar.intervalSeconds}
+				intervalOptions={ar.intervalOptions}
+				refreshing={loading || refreshing}
+				onManualRefresh={() => load()}
+			/>
 			<div class="flex items-center gap-1 text-xs text-gray-500">
 				표시:
 				{#each [10, 20, 30] as n}
@@ -237,6 +264,7 @@
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={5} />
 	{:else}
+		<div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 		<div class="overflow-x-auto">
 			<table class="w-full text-sm">
 				<thead>
@@ -255,7 +283,11 @@
 							<td class="py-2 pr-4 text-white">{p.name}</td>
 							<td class="py-2 pr-4 text-gray-400">{p.description || '-'}</td>
 							<td class="py-2 pr-4"><span class="px-1.5 py-0.5 rounded text-xs font-medium {p.enabled ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{p.enabled ? '활성' : '비활성'}</span></td>
-							<td class="py-2 pr-4 text-gray-500 font-mono text-xs">{p.id.slice(0, 8)}</td>
+							<td class="py-2 pr-4">
+								<button onclick={() => copyId(p.id)} class="text-gray-500 font-mono text-xs hover:text-gray-300 transition-colors" title={p.id}>
+									{copiedId === p.id ? '복사됨!' : p.id.slice(0, 8)}
+								</button>
+							</td>
 							<td class="py-2 pr-4 text-gray-500">{p.created_at?.slice(0, 10) ?? '-'}</td>
 							<td class="py-2">
 								<div class="flex items-center gap-1">
@@ -277,6 +309,7 @@
 				class="px-3 py-1.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-30">← 이전</button>
 			<button disabled={!nextMarker} onclick={() => { if (nextMarker) { markerStack = [...markerStack, nextMarker]; load(nextMarker); } }}
 				class="px-3 py-1.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-30">다음 →</button>
+		</div>
 		</div>
 	{/if}
 </div>

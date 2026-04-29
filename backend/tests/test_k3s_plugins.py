@@ -244,11 +244,12 @@ def test_keystone_auth_disabled_by_default():
     assert KeystoneAuthPlugin().should_deploy(s) is False
 
 
-def test_keystone_auth_should_deploy_true():
+def test_keystone_auth_should_deploy_gated():
+    """Keystone Auth는 설정 활성화 여부와 무관하게 should_deploy()가 False를 반환한다 (부팅 데드락 방지)."""
     from app.services.k3s_plugins.keystone_auth import KeystoneAuthPlugin
 
     s = _base_settings(k3s_keystone_auth_enabled=True)
-    assert KeystoneAuthPlugin().should_deploy(s) is True
+    assert KeystoneAuthPlugin().should_deploy(s) is False
 
 
 def test_keystone_auth_server_install_args():
@@ -302,11 +303,12 @@ def test_barbican_kms_requires_kek_id():
     assert BarbicanKmsPlugin().should_deploy(s) is False
 
 
-def test_barbican_kms_should_deploy_true():
+def test_barbican_kms_should_deploy_gated():
+    """Barbican KMS는 설정 활성화 여부와 무관하게 should_deploy()가 False를 반환한다 (부팅 데드락 방지)."""
     from app.services.k3s_plugins.barbican_kms import BarbicanKmsPlugin
 
     s = _base_settings(k3s_barbican_kms_enabled=True, k3s_barbican_kms_kek_id="kek-uuid-123")
-    assert BarbicanKmsPlugin().should_deploy(s) is True
+    assert BarbicanKmsPlugin().should_deploy(s) is False
 
 
 def test_barbican_kms_server_install_args():
@@ -348,7 +350,8 @@ def test_registry_no_plugins_active():
     assert k3s_plugins.get_active_plugins(s) == []
     assert k3s_plugins.needs_external_cloud_provider(s) is False
     assert k3s_plugins.aggregate_cloud_conf("proj-1", s) is None
-    assert k3s_plugins.aggregate_manifests("test-cluster", "proj-1", s) == []
+    manifests, failures = k3s_plugins.aggregate_manifests("test-cluster", "proj-1", s)
+    assert manifests == [] and failures == []
 
 
 def test_registry_occm_only():
@@ -373,7 +376,8 @@ def test_registry_occm_plus_cinder():
     cloud_conf = k3s_plugins.aggregate_cloud_conf("proj-1", s)
     assert "[Global]" in cloud_conf
     assert "[BlockStorage]" in cloud_conf
-    manifests = k3s_plugins.aggregate_manifests("test-cluster", "proj-1", s)
+    manifests, failures = k3s_plugins.aggregate_manifests("test-cluster", "proj-1", s)
+    assert not failures
     assert len(manifests) == 2
     names = [m["name"] for m in manifests]
     assert "occm" in names
@@ -444,6 +448,70 @@ def test_registry_server_args_dedup():
         k3s_plugins.ALL_PLUGINS = original
 
 
+def test_aggregate_manifests_partial_failure():
+    """generate_manifests 예외 발생 시 나머지는 처리되고 failures에 이름 기록."""
+    from app.services import k3s_plugins
+
+    class GoodPlugin:
+        name = "good"
+
+        def should_deploy(self, s):
+            return True
+
+        def cloud_conf_sections(self, pid, s):
+            return ""
+
+        def generate_manifests(self, cn, pid, s):
+            return "---\nkind: List"
+
+        def extra_write_files(self, pid, cn, s):
+            return []
+
+        def server_install_args(self, s):
+            return []
+
+        def agent_install_args(self, s):
+            return []
+
+        def needs_external_cloud_provider(self, s):
+            return False
+
+    class BadPlugin:
+        name = "bad"
+
+        def should_deploy(self, s):
+            return True
+
+        def cloud_conf_sections(self, pid, s):
+            return ""
+
+        def generate_manifests(self, cn, pid, s):
+            raise RuntimeError("template error")
+
+        def extra_write_files(self, pid, cn, s):
+            return []
+
+        def server_install_args(self, s):
+            return []
+
+        def agent_install_args(self, s):
+            return []
+
+        def needs_external_cloud_provider(self, s):
+            return False
+
+    original = k3s_plugins.ALL_PLUGINS
+    k3s_plugins.ALL_PLUGINS = [GoodPlugin(), BadPlugin()]
+    try:
+        s = _base_settings()
+        manifests, failures = k3s_plugins.aggregate_manifests("cluster", "proj", s)
+        assert len(manifests) == 1
+        assert manifests[0]["name"] == "good"
+        assert failures == ["bad"]
+    finally:
+        k3s_plugins.ALL_PLUGINS = original
+
+
 def test_registry_get_active_plugin_names():
     from app.services import k3s_plugins
 
@@ -467,7 +535,8 @@ def test_cloudinit_server_no_plugins():
         callback_url="http://callback.example.com",
         callback_token="token123",
     )
-    decoded = gzip.decompress(base64.b64decode(result)).decode()
+    assert result.config_drive is False
+    decoded = gzip.decompress(base64.b64decode(result.data)).decode()
     assert "#cloud-config" in decoded
     assert "k3s_version" not in decoded  # Jinja 변수 미치환 없어야 함
     assert "--disable-cloud-controller" not in decoded
@@ -486,7 +555,8 @@ def test_cloudinit_server_with_occm_plugin():
         plugin_manifests=[{"name": "occm", "content": "apiVersion: v1\nkind: List\nitems: []\n"}],
         needs_external_cloud_provider=True,
     )
-    decoded = gzip.decompress(base64.b64decode(result)).decode()
+    assert result.config_drive is False
+    decoded = gzip.decompress(base64.b64decode(result.data)).decode()
     assert "--disable-cloud-controller" in decoded
     assert "cloud-provider=external" in decoded
     assert "occm-manifests.yaml" in decoded
@@ -508,7 +578,8 @@ def test_cloudinit_server_multi_plugins():
         ],
         needs_external_cloud_provider=True,
     )
-    decoded = gzip.decompress(base64.b64decode(result)).decode()
+    assert result.config_drive is False
+    decoded = gzip.decompress(base64.b64decode(result.data)).decode()
     assert "occm-manifests.yaml" in decoded
     assert "cinder_csi-manifests.yaml" in decoded
 
@@ -523,7 +594,8 @@ def test_cloudinit_agent_no_extra_args():
         server_ip="10.0.0.1",
         node_token="tok",
     )
-    decoded = gzip.decompress(base64.b64decode(result)).decode()
+    assert result.config_drive is False
+    decoded = gzip.decompress(base64.b64decode(result.data)).decode()
     assert "#cloud-config" in decoded
     assert "INSTALL_K3S_EXEC" not in decoded
 
@@ -539,7 +611,8 @@ def test_cloudinit_agent_with_cloud_provider():
         node_token="tok",
         extra_agent_args=["--kubelet-arg=cloud-provider=external"],
     )
-    decoded = gzip.decompress(base64.b64decode(result)).decode()
+    assert result.config_drive is False
+    decoded = gzip.decompress(base64.b64decode(result.data)).decode()
     assert "cloud-provider=external" in decoded
     assert "INSTALL_K3S_EXEC" in decoded
 
@@ -555,5 +628,6 @@ def test_cloudinit_agent_backward_compat_occm_enabled():
         node_token="tok",
         occm_enabled=True,
     )
-    decoded = gzip.decompress(base64.b64decode(result)).decode()
+    assert result.config_drive is False
+    decoded = gzip.decompress(base64.b64decode(result.data)).decode()
     assert "cloud-provider=external" in decoded

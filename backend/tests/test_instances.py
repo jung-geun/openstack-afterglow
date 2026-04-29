@@ -220,6 +220,32 @@ async def test_get_console_log_length_negative(client, mock_conn):
 
 
 @pytest.mark.asyncio
+async def test_list_instance_volumes_includes_delete_on_termination(client, mock_conn):
+    vol_attachment = {
+        "id": "attach-1",
+        "volume_id": "vol-1",
+        "device": "/dev/vdb",
+        "server_id": "inst-1",
+        "delete_on_termination": True,
+    }
+
+    class FakeVol:
+        name = "test-vol"
+        size = 10
+        status = "in-use"
+
+    with (
+        patch("app.api.compute.instances.nova.list_volume_attachments", return_value=[vol_attachment]),
+        patch("app.api.compute.instances.cinder.get_volume", return_value=FakeVol()),
+    ):
+        resp = await client.get("/api/instances/inst-1/volumes")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["delete_on_termination"] is True
+
+
+@pytest.mark.asyncio
 async def test_attach_volume(client, mock_conn):
     with patch("app.api.compute.instances.nova.attach_volume", return_value={"id": "attach-1", "volumeId": "vol-1"}):
         resp = await client.post("/api/instances/inst-1/volumes", json={"volume_id": "vol-1"})
@@ -269,3 +295,404 @@ async def test_create_instance_invalid_name(client, mock_conn):
         },
     )
     assert resp.status_code == 422
+
+
+# ────── Floating IP 해제 — cleanup_instance_fips 범위 검증 ──────
+
+
+def _make_port(pid: str, subnet_id: str = "subnet-1"):
+    from unittest.mock import MagicMock
+
+    p = MagicMock()
+    p.id = pid
+    p.fixed_ips = [{"subnet_id": subnet_id, "ip_address": "10.0.0.5"}]
+    return p
+
+
+def _make_fip(fid: str, port_id: str | None):
+    from unittest.mock import MagicMock
+
+    f = MagicMock()
+    f.id = fid
+    f.port_id = port_id
+    return f
+
+
+@pytest.mark.asyncio
+async def test_release_floating_ip_only_targets_instance_ports(client, mock_conn):
+    """해제 시 해당 인스턴스 포트에 연결된 FIP만 update/delete 한다."""
+    mock_conn.network.ports.return_value = [_make_port("p1"), _make_port("p2")]
+    mock_conn.network.ips.return_value = [
+        _make_fip("fip-1", "p1"),  # 대상 인스턴스 포트
+        _make_fip("fip-2", "other-port"),  # 다른 인스턴스
+        _make_fip("fip-3", None),  # 미연결
+    ]
+
+    resp = await client.delete("/api/instances/inst-1/floating-ip")
+    assert resp.status_code == 204
+
+    called_ids = [call.args[0] for call in mock_conn.network.update_ip.call_args_list]
+    assert called_ids == ["fip-1"], f"expected only fip-1 to be updated, got {called_ids}"
+    called_delete_ids = [call.args[0] for call in mock_conn.network.delete_ip.call_args_list]
+    assert called_delete_ids == ["fip-1"], f"expected only fip-1 to be deleted, got {called_delete_ids}"
+
+
+@pytest.mark.asyncio
+async def test_release_floating_ip_no_ports_does_nothing(client, mock_conn):
+    """포트가 없는 인스턴스 해제 시 어떤 FIP도 건드리지 않는다."""
+    mock_conn.network.ports.return_value = []
+
+    resp = await client.delete("/api/instances/inst-1/floating-ip")
+    assert resp.status_code == 204
+
+    mock_conn.network.update_ip.assert_not_called()
+    mock_conn.network.delete_ip.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_delete_instance_only_cleans_own_fips(client, mock_conn):
+    """인스턴스 삭제 시에도 해당 인스턴스 FIP만 정리된다 (다른 FIP 무사)."""
+    inst = make_instance()
+    inst.metadata = {}
+    mock_conn.network.ports.return_value = [_make_port("p-inst")]
+    mock_conn.network.ips.return_value = [
+        _make_fip("fip-own", "p-inst"),
+        _make_fip("fip-other", "p-other"),
+    ]
+
+    with (
+        patch("app.api.compute.instances.nova.get_server", return_value=inst),
+        patch("app.api.compute.instances.nova.delete_server", return_value=None),
+        patch("app.api.compute.instances.cinder.delete_volume", return_value=None),
+    ):
+        resp = await client.delete("/api/instances/inst-1")
+    assert resp.status_code == 204
+
+    called_delete_ids = [call.args[0] for call in mock_conn.network.delete_ip.call_args_list]
+    assert "fip-own" in called_delete_ids
+    assert "fip-other" not in called_delete_ids
+
+
+@pytest.mark.asyncio
+async def test_release_floating_ip_per_fip_failure_isolated(client, mock_conn):
+    """첫 FIP 정리 실패해도 두 번째 FIP는 정상 처리된다 (best-effort)."""
+    mock_conn.network.ports.return_value = [_make_port("p1")]
+    mock_conn.network.ips.return_value = [
+        _make_fip("fip-fail", "p1"),
+        _make_fip("fip-ok", "p1"),
+    ]
+    mock_conn.network.update_ip.side_effect = [Exception("Neutron 오류"), None]
+
+    resp = await client.delete("/api/instances/inst-1/floating-ip")
+    assert resp.status_code == 204
+
+    update_calls = [call.args[0] for call in mock_conn.network.update_ip.call_args_list]
+    assert update_calls == ["fip-fail", "fip-ok"]
+
+
+# ────── Floating IP 할당 (assign) ──────
+
+
+def _make_net(net_id: str, is_external: bool = False):
+    from unittest.mock import MagicMock
+
+    n = MagicMock()
+    n.id = net_id
+    n.is_external = is_external
+    return n
+
+
+def _make_fip_info(fip_id: str, addr: str, port_id: str | None = None):
+    from app.models.storage import FloatingIpInfo
+
+    return FloatingIpInfo(id=fip_id, floating_ip_address=addr, port_id=port_id, floating_network_id="ext-net")
+
+
+@pytest.mark.asyncio
+async def test_assign_floating_ip_single_port_success(client, mock_conn):
+    """단일 포트 인스턴스에 FIP 정상 할당."""
+    mock_conn.network.ports.return_value = [_make_port("p1")]
+    mock_conn.network.ips.return_value = []  # 기존 FIP 없음
+
+    with (
+        patch(
+            "app.api.compute.instances.neutron.find_external_network_for_subnets",
+            return_value="ext-net",
+        ),
+        patch(
+            "app.api.compute.instances.neutron.create_floating_ip",
+            return_value=_make_fip_info("fip-new", "172.30.100.1"),
+        ),
+        patch(
+            "app.api.compute.instances.neutron.associate_floating_ip",
+            return_value=_make_fip_info("fip-new", "172.30.100.1", port_id="p1"),
+        ),
+    ):
+        resp = await client.post("/api/instances/inst-1/floating-ip")
+
+    assert resp.status_code == 200
+    assert resp.json()["floating_ip_address"] == "172.30.100.1"
+
+
+@pytest.mark.asyncio
+async def test_assign_floating_ip_multi_port_selects_available(client, mock_conn):
+    """다중 포트에서 첫 포트가 점유된 경우 두 번째 포트로 자동 선택."""
+    mock_conn.network.ports.return_value = [_make_port("p1"), _make_port("p2")]
+    # p1은 이미 FIP 점유, p2는 자유
+    mock_conn.network.ips.return_value = [_make_fip("fip-existing", "p1")]
+
+    captured_port = {}
+
+    def fake_associate(conn, fip_id, instance_id, port_id=None):
+        captured_port["id"] = port_id
+        return _make_fip_info("fip-new", "172.30.100.2", port_id=port_id)
+
+    with (
+        patch(
+            "app.api.compute.instances.neutron.find_external_network_for_subnets",
+            return_value="ext-net",
+        ),
+        patch(
+            "app.api.compute.instances.neutron.create_floating_ip",
+            return_value=_make_fip_info("fip-new", "172.30.100.2"),
+        ),
+        patch("app.api.compute.instances.neutron.associate_floating_ip", side_effect=fake_associate),
+    ):
+        resp = await client.post("/api/instances/inst-1/floating-ip")
+
+    assert resp.status_code == 200
+    # 사용 가능한 포트(p2)가 선택되어야 한다
+    assert captured_port["id"] == "p2"
+
+
+@pytest.mark.asyncio
+async def test_assign_floating_ip_all_ports_occupied_returns_400(client, mock_conn):
+    """모든 포트가 이미 FIP를 가진 경우 400 반환."""
+    mock_conn.network.ports.return_value = [_make_port("p1")]
+    mock_conn.network.ips.return_value = [_make_fip("fip-existing", "p1")]
+
+    resp = await client.post("/api/instances/inst-1/floating-ip")
+
+    assert resp.status_code == 400
+    assert "이미 Floating IP" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_assign_floating_ip_explicit_port_already_occupied_returns_409(client, mock_conn):
+    """명시적으로 지정한 port_id가 이미 점유된 경우 409 반환."""
+    mock_conn.network.ports.return_value = [_make_port("p1")]
+    mock_conn.network.ips.return_value = [_make_fip("fip-existing", "p1")]
+
+    resp = await client.post("/api/instances/inst-1/floating-ip?port_id=p1")
+
+    assert resp.status_code == 409
+    assert "이미 Floating IP" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_assign_floating_ip_conflict_exception_rolls_back(client, mock_conn):
+    """race로 ConflictException 발생 시 생성된 FIP를 삭제(rollback)한다."""
+    from openstack.exceptions import ConflictException
+
+    mock_conn.network.ports.return_value = [_make_port("p1")]
+    mock_conn.network.ips.return_value = []
+
+    deleted = []
+
+    def fake_delete(conn, fip_id):
+        deleted.append(fip_id)
+
+    with (
+        patch(
+            "app.api.compute.instances.neutron.find_external_network_for_subnets",
+            return_value="ext-net",
+        ),
+        patch(
+            "app.api.compute.instances.neutron.create_floating_ip",
+            return_value=_make_fip_info("fip-race", "172.30.100.3"),
+        ),
+        patch(
+            "app.api.compute.instances.neutron.associate_floating_ip",
+            side_effect=ConflictException("already has fip"),
+        ),
+        patch("app.api.compute.instances.neutron.delete_floating_ip", side_effect=fake_delete),
+    ):
+        resp = await client.post("/api/instances/inst-1/floating-ip")
+
+    assert resp.status_code == 409
+    assert "fip-race" in deleted
+
+
+@pytest.mark.asyncio
+async def test_assign_floating_ip_no_router_returns_422(client, mock_conn):
+    """서브넷이 라우터로 외부망에 연결되어 있지 않으면 422 + 안내 메시지."""
+    mock_conn.network.ports.return_value = [_make_port("p1")]
+    mock_conn.network.ips.return_value = []
+
+    with patch(
+        "app.api.compute.instances.neutron.find_external_network_for_subnets",
+        return_value=None,
+    ):
+        resp = await client.post("/api/instances/inst-1/floating-ip")
+
+    assert resp.status_code == 422
+    assert "라우터" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_assign_floating_ip_unreachable_external_network_returns_422(client, mock_conn):
+    """associate에서 'is not reachable from subnet' 오류 발생 시 422 + 안내."""
+    mock_conn.network.ports.return_value = [_make_port("p1")]
+    mock_conn.network.ips.return_value = []
+
+    deleted = []
+
+    def fake_delete(conn, fip_id):
+        deleted.append(fip_id)
+
+    with (
+        patch(
+            "app.api.compute.instances.neutron.find_external_network_for_subnets",
+            return_value="ext-mismatch",
+        ),
+        patch(
+            "app.api.compute.instances.neutron.create_floating_ip",
+            return_value=_make_fip_info("fip-orphan", "172.30.100.9"),
+        ),
+        patch(
+            "app.api.compute.instances.neutron.associate_floating_ip",
+            side_effect=Exception(
+                "ResourceNotFound: External network ext-mismatch is not reachable from subnet subnet-1."
+            ),
+        ),
+        patch("app.api.compute.instances.neutron.delete_floating_ip", side_effect=fake_delete),
+    ):
+        resp = await client.post("/api/instances/inst-1/floating-ip")
+
+    assert resp.status_code == 422
+    assert "도달 불가능" in resp.json()["detail"]
+    assert "fip-orphan" in deleted
+
+
+# ────── Union SG 자동 attach 테스트 ──────
+
+
+@pytest.mark.asyncio
+async def test_create_instance_with_libraries_attaches_union_sg(client, mock_conn):
+    """Union 라이브러리를 사용하는 VM 생성 시 union-egress SG가 자동으로 attach된다."""
+    from unittest.mock import MagicMock as MM
+
+    attached_sgs = []
+
+    def fake_create_server(conn, name, flavor_id, network_id, boot_volume_id, **kwargs):
+        attached_sgs.extend(kwargs.get("security_groups") or [])
+        return make_instance("srv-new")
+
+    fake_vol = MM()
+    fake_vol.id = "vol-boot"
+    fake_flavor = MM()
+    fake_flavor.id = "flavor-1"
+    fake_flavor.is_gpu = False
+    fake_flavor.extra_specs = {}
+    fake_upper = MM()
+    fake_upper.id = "vol-upper"
+    mock_conn.compute.create_volume_attachment.return_value = MM()
+
+    with (
+        patch("app.api.compute.instances.nova.list_flavors", return_value=[fake_flavor]),
+        patch("app.api.compute.instances.cinder.create_volume_from_image", return_value=fake_vol),
+        patch("app.api.compute.instances.cinder.rename_volume"),
+        patch("app.api.compute.instances.cinder.create_empty_volume", return_value=fake_upper),
+        patch("app.api.compute.instances.lib_svc.resolve_with_deps", return_value=["python311"]),
+        patch(
+            "app.api.compute.instances._prepare_prebuilt_file_storages",
+            return_value=[{"file_storage_id": "share-1", "name": "python311", "share_proto": "CEPHFS"}],
+        ),
+        patch("app.api.compute.instances.cloudinit.generate_userdata", return_value=b"userdata"),
+        patch("app.api.compute.instances.neutron.ensure_union_egress_sg", return_value="union-egress-default"),
+        patch("app.api.compute.instances.nova.create_server", side_effect=fake_create_server),
+        patch("app.api.compute.instances.neutron.list_networks", return_value=[]),
+        patch("app.api.compute.instances.is_db_available", return_value=False),
+    ):
+        resp = await client.post(
+            "/api/instances",
+            json={
+                "name": "test-vm",
+                "image_id": "img-1",
+                "flavor_id": "flavor-1",
+                "network_id": "net-1",
+                "libraries": ["python311"],
+                "strategy": "prebuilt",
+            },
+        )
+
+    assert resp.status_code in (200, 201, 202)
+    assert "union-egress-default" in attached_sgs
+
+
+@pytest.mark.asyncio
+async def test_create_instance_sg_skipped_when_disabled(client, mock_conn):
+    """union_auto_egress_sg_enabled=False 시 SG 자동 attach 생략."""
+    from unittest.mock import MagicMock as MM
+
+    ensure_called = []
+    fake_vol = MM()
+    fake_vol.id = "vol-boot"
+    fake_flavor = MM()
+    fake_flavor.id = "flavor-1"
+    fake_flavor.is_gpu = False
+    fake_flavor.extra_specs = {}
+    fake_upper = MM()
+    fake_upper.id = "vol-upper"
+    mock_conn.compute.create_volume_attachment.return_value = MM()
+
+    with (
+        patch("app.api.compute.instances.nova.list_flavors", return_value=[fake_flavor]),
+        patch("app.api.compute.instances.cinder.create_volume_from_image", return_value=fake_vol),
+        patch("app.api.compute.instances.cinder.rename_volume"),
+        patch("app.api.compute.instances.cinder.create_empty_volume", return_value=fake_upper),
+        patch("app.api.compute.instances.lib_svc.resolve_with_deps", return_value=["python311"]),
+        patch(
+            "app.api.compute.instances._prepare_prebuilt_file_storages",
+            return_value=[{"file_storage_id": "share-1", "name": "python311", "share_proto": "CEPHFS"}],
+        ),
+        patch("app.api.compute.instances.cloudinit.generate_userdata", return_value=b"userdata"),
+        patch(
+            "app.api.compute.instances.neutron.ensure_union_egress_sg",
+            side_effect=lambda *a, **kw: ensure_called.append(True) or "union-egress-default",
+        ),
+        patch("app.api.compute.instances.nova.create_server", return_value=make_instance("srv-new")),
+        patch("app.api.compute.instances.neutron.list_networks", return_value=[]),
+        patch("app.api.compute.instances.is_db_available", return_value=False),
+        patch("app.api.compute.instances.get_settings") as mock_settings,
+    ):
+        s = MM()
+        s.union_auto_egress_sg_enabled = False
+        s.union_egress_sg_name = "union-egress-default"
+        s.ceph_monitors = ""
+        s.upper_volume_size_gb = 10
+        s.os_manila_share_network_id = ""
+        s.os_manila_share_type = ""
+        s.os_manila_nfs_share_type = ""
+        s.default_availability_zone = ""
+        s.default_network_id = ""
+        s.default_network_external_id = ""
+        s.default_network_cidr = ""
+        s.health_report_url = ""
+        s.instance_volume_type = ""
+        s.boot_volume_size_gb = 50
+        mock_settings.return_value = s
+
+        await client.post(
+            "/api/instances",
+            json={
+                "name": "test-vm",
+                "image_id": "img-1",
+                "flavor_id": "flavor-1",
+                "network_id": "net-1",
+                "libraries": ["python311"],
+                "strategy": "prebuilt",
+            },
+        )
+
+    assert not ensure_called, "union_auto_egress_sg_enabled=False임에도 ensure_union_egress_sg가 호출됨"

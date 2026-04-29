@@ -1,12 +1,12 @@
 <script lang="ts">
-  import { auth } from '$lib/stores/auth';
   import { untrack } from 'svelte';
+  import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
-  import RefreshButton from '$lib/components/RefreshButton.svelte';
-  import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
+  import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
+  import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 
   interface ShareNetwork {
     id: string;
@@ -37,7 +37,6 @@
   let subnets = $state<Subnet[]>([]);
   let loading = $state(true);
   let refreshing = $state(false);
-  let autoRefresh = $state(false);
   let deleting = $state<string | null>(null);
   let error = $state('');
   let showModal = $state(false);
@@ -131,16 +130,17 @@
     }
   }
 
+  const ar = createAutoRefresh(() => fetchNetworks(), {
+    storageKey: 'dashboard-file-storage-networks',
+    defaultActive: true,
+    defaultInterval: 30,
+    intervalOptions: [10, 15, 30, 60],
+  });
+
   $effect(() => {
     if (!$auth.projectId) return;
     loading = true;
     untrack(() => fetchNetworks());
-  });
-
-  $effect(() => {
-    if (!$auth.projectId || !autoRefresh) return;
-    const interval = setInterval(() => untrack(() => fetchNetworks()), 30000);
-    return () => clearInterval(interval);
   });
 </script>
 
@@ -211,8 +211,13 @@
 <div class="p-4 md:p-8">
   <PageHeader breadcrumb="FILE STORAGE / NETWORKS" title="Share 네트워크">
     {#snippet actions()}
-      <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={30} />
-      <RefreshButton {refreshing} onclick={forceRefresh} />
+      <AutoRefreshControl
+        bind:active={ar.active}
+        bind:intervalSeconds={ar.intervalSeconds}
+        intervalOptions={ar.intervalOptions}
+        refreshing={refreshing || loading}
+        onManualRefresh={forceRefresh}
+      />
       <button onclick={openCreateModal}
         class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
         + Share 네트워크 생성

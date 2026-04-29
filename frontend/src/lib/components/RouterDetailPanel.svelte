@@ -2,6 +2,8 @@
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import { goto } from '$app/navigation';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	interface RouterInterface {
 		id: string;
@@ -71,6 +73,13 @@
 			externalNetworks = nets.filter(n => n.is_external);
 		} catch { /* 무시 */ }
 	}
+
+	const ar = createAutoRefresh(() => fetchRouter(), {
+		storageKey: 'router-detail-panel',
+		defaultActive: true,
+		defaultInterval: 30,
+		intervalOptions: [10, 15, 30, 60],
+	});
 
 	$effect(() => {
 		if (routerId && $auth.projectId) {
@@ -166,6 +175,13 @@
 	<div class="flex items-center justify-between mb-6 border-b border-gray-800 pb-4">
 		<h2 class="text-xl font-bold text-white">라우터 상세</h2>
 		<div class="flex items-center gap-2">
+			<AutoRefreshControl
+				bind:active={ar.active}
+				bind:intervalSeconds={ar.intervalSeconds}
+				intervalOptions={ar.intervalOptions}
+				refreshing={loading}
+				onManualRefresh={() => fetchRouter()}
+			/>
 			<button
 				onclick={() => goto(`/dashboard/network/routers/${routerId}`)}
 				class="text-xs text-gray-400 hover:text-blue-300 px-2 py-1 rounded border border-gray-700 hover:border-blue-700 transition-colors"

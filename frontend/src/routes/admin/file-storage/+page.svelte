@@ -8,6 +8,8 @@
 	import { projectNames } from '$lib/stores/projectNames';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import StatusChip from '$lib/components/ui/StatusChip.svelte';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	interface AdminFileStorage {
 		id: string;
@@ -25,6 +27,7 @@
 
 	let fileStorages = $state<AdminFileStorage[]>([]);
 	let loading = $state(true);
+	let refreshing = $state(false);
 	let tsData = $state<TsPoint[]>([]);
 	let tsRange = $state('7d');
 	let tsLoading = $state(true);
@@ -63,7 +66,8 @@
 	}
 
 	async function load() {
-		loading = true;
+		if (fileStorages.length === 0) loading = true;
+		else refreshing = true;
 		currentPage = 0;
 		try {
 			fileStorages = await api.get<AdminFileStorage[]>('/api/admin/all-file-storages', token, projectId);
@@ -71,8 +75,14 @@
 			fileStorages = [];
 		} finally {
 			loading = false;
+			refreshing = false;
 		}
 	}
+
+	const ar = createAutoRefresh(
+		() => { load(); loadTimeseries(tsRange); },
+		{ storageKey: 'admin-file-storage', defaultInterval: 30, intervalOptions: [15, 30, 60] }
+	);
 
 	onMount(() => {
 		load();
@@ -93,7 +103,13 @@
 					<option value={s}>{s}개</option>
 				{/each}
 			</select>
-			<button onclick={load} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
+			<AutoRefreshControl
+				bind:active={ar.active}
+				bind:intervalSeconds={ar.intervalSeconds}
+				intervalOptions={ar.intervalOptions}
+				refreshing={loading || refreshing}
+				onManualRefresh={load}
+			/>
 		{/snippet}
 	</PageHeader>
 
@@ -118,6 +134,7 @@
 	{:else if fileStorages.length === 0}
 		<div class="text-gray-600 text-sm">파일 스토리지가 없습니다</div>
 	{:else}
+		<div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 		<div class="overflow-x-auto">
 			<table class="w-full text-sm">
 				<thead>
@@ -206,5 +223,6 @@
 				</div>
 			</div>
 		{/if}
+		</div>
 	{/if}
 </div>

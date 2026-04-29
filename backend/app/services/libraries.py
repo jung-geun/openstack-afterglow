@@ -90,6 +90,20 @@ def check_python_version_conflict(selected_ids: list[str]) -> str | None:
     return None
 
 
+def get_dependency_tree(lib_id: str) -> dict:
+    """라이브러리의 의존성 트리를 반환한다 (재귀)."""
+    lib = _catalog_by_id.get(lib_id)
+    if lib is None:
+        return {"id": lib_id, "name": "알 수 없음", "deps": []}
+    return {
+        "id": lib.id,
+        "name": lib.name,
+        "version": lib.version,
+        "visibility": lib.visibility,
+        "deps": [get_dependency_tree(dep_id) for dep_id in lib.depends_on],
+    }
+
+
 def validate_compatibility(
     selected_ids: list[str],
     ubuntu_version: str | None = None,

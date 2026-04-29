@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -15,6 +16,7 @@ from app.services import manila
 from app.services.cache import cached_call, invalidate, ttl_fast
 
 router = APIRouter()
+_logger = logging.getLogger(__name__)
 
 
 @router.get("", response_model=list[ShareNetworkInfo])
@@ -65,7 +67,9 @@ async def create_share_network(
         await invalidate(f"afterglow:manila:{pid}:share_networks")
         return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Share 네트워크 생성 실패: {e}")
+        _logger.warning("Share 네트워크 생성 실패: %s", e)
+
+        raise HTTPException(status_code=500, detail="Share 네트워크 생성 실패")
 
 
 @router.delete("/{share_network_id}", status_code=204)
@@ -78,4 +82,6 @@ async def delete_share_network(
         await asyncio.to_thread(manila.delete_share_network, conn, share_network_id)
         await invalidate(f"afterglow:manila:{pid}:share_networks")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Share 네트워크 삭제 실패: {e}")
+        _logger.warning("Share 네트워크 삭제 실패: %s", e)
+
+        raise HTTPException(status_code=500, detail="Share 네트워크 삭제 실패")

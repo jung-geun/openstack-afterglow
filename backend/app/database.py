@@ -102,14 +102,115 @@ async def create_tables() -> None:
 
         # API LB 관련 컬럼 추가 (없는 경우에만)
         for col, col_def in [
-            ("api_lb_id", "VARCHAR(64)"),
-            ("api_fip_id", "VARCHAR(64)"),
-            ("api_fip_address", "VARCHAR(45)"),
+            ("api_lb_id", "VARCHAR(64) DEFAULT NULL"),
+            ("api_lb_pool_id", "VARCHAR(64) DEFAULT NULL"),
+            ("api_fip_id", "VARCHAR(64) DEFAULT NULL"),
+            ("api_fip_address", "VARCHAR(45) DEFAULT NULL"),
+            ("os_type", "VARCHAR(10) NOT NULL DEFAULT 'ubuntu'"),
+            ("plugin_status", "JSON DEFAULT NULL"),
+            ("secret_cloud_config_status", "VARCHAR(20) DEFAULT NULL"),
         ]:
             try:
-                await conn.exec_driver_sql(f"ALTER TABLE k3s_clusters ADD COLUMN {col} {col_def} DEFAULT NULL")
+                await conn.exec_driver_sql(f"ALTER TABLE k3s_clusters ADD COLUMN {col} {col_def}")
             except Exception:
                 pass  # 이미 존재하면 무시
+
+        # 프로젝트 기본 네트워크 테이블 생성 (없는 경우에만)
+        try:
+            await conn.exec_driver_sql(
+                "CREATE TABLE IF NOT EXISTS project_default_networks ("
+                "id INT AUTO_INCREMENT PRIMARY KEY,"
+                "project_id VARCHAR(64) NOT NULL,"
+                "network_id VARCHAR(64) NOT NULL,"
+                "subnet_id VARCHAR(64) DEFAULT NULL,"
+                "router_id VARCHAR(64) DEFAULT NULL,"
+                "auto_created BOOLEAN NOT NULL DEFAULT TRUE,"
+                "created_at DATETIME(6) NOT NULL,"
+                "updated_at DATETIME(6) DEFAULT NULL,"
+                "UNIQUE KEY uq_project_default_networks_project_id (project_id),"
+                "KEY ix_project_default_networks_project_id (project_id)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+        except Exception:
+            pass  # 이미 존재하면 무시
+
+        # Union Mount 레이어 시스템 테이블 (없는 경우에만)
+        # union_layers: 부모 자기참조 FK가 있어 먼저 생성
+        try:
+            await conn.exec_driver_sql(
+                "CREATE TABLE IF NOT EXISTS union_layers ("
+                "id VARCHAR(71) NOT NULL PRIMARY KEY,"
+                "name VARCHAR(128) NOT NULL,"
+                "version VARCHAR(64) NOT NULL,"
+                "created_at DATETIME(6) NOT NULL,"
+                "created_by VARCHAR(128) NOT NULL,"
+                "sealed BOOLEAN NOT NULL DEFAULT FALSE,"
+                "parent_id VARCHAR(71) DEFAULT NULL,"
+                "ubuntu_base VARCHAR(255) DEFAULT NULL,"
+                "build_recipe JSON NOT NULL,"
+                "installed_packages JSON NOT NULL,"
+                "content_hash VARCHAR(71) NOT NULL,"
+                "size_bytes BIGINT DEFAULT NULL,"
+                "file_count INT DEFAULT NULL,"
+                "KEY idx_union_layers_name_version (name, version),"
+                "KEY idx_union_layers_parent (parent_id),"
+                "CONSTRAINT fk_union_layers_parent FOREIGN KEY (parent_id)"
+                "  REFERENCES union_layers(id) ON DELETE RESTRICT"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+        except Exception:
+            pass  # 이미 존재하면 무시
+
+        # union_layers 컬럼 마이그레이션 (신규 컬럼 추가)
+        for _col_sql in [
+            "ALTER TABLE union_layers ADD COLUMN project_id VARCHAR(64) DEFAULT NULL",
+            "ALTER TABLE union_layers ADD COLUMN sealed_at DATETIME(6) DEFAULT NULL",
+            "ALTER TABLE union_layers ADD INDEX idx_union_layers_project (project_id)",
+            "ALTER TABLE union_layers ADD COLUMN license_type VARCHAR(64) DEFAULT NULL",
+            "ALTER TABLE union_layers ADD COLUMN max_concurrent_mounts INT DEFAULT NULL",
+        ]:
+            try:
+                await conn.exec_driver_sql(_col_sql)
+            except Exception:
+                pass  # 이미 존재하면 무시
+
+        try:
+            await conn.exec_driver_sql(
+                "CREATE TABLE IF NOT EXISTS union_templates ("
+                "name VARCHAR(128) NOT NULL,"
+                "version INT NOT NULL,"
+                "created_at DATETIME(6) NOT NULL,"
+                "created_by VARCHAR(128) NOT NULL,"
+                "parent_version INT DEFAULT NULL,"
+                "ubuntu_base VARCHAR(255) NOT NULL,"
+                "leaf_layer_id VARCHAR(71) NOT NULL,"
+                "note TEXT DEFAULT NULL,"
+                "PRIMARY KEY (name, version),"
+                "KEY idx_union_templates_leaf (leaf_layer_id),"
+                "CONSTRAINT fk_union_templates_leaf FOREIGN KEY (leaf_layer_id)"
+                "  REFERENCES union_layers(id) ON DELETE RESTRICT"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+        except Exception:
+            pass
+
+        try:
+            await conn.exec_driver_sql(
+                "CREATE TABLE IF NOT EXISTS union_user_mounts ("
+                "id INT AUTO_INCREMENT PRIMARY KEY,"
+                "user_id VARCHAR(128) NOT NULL,"
+                "vm_hostname VARCHAR(255) NOT NULL,"
+                "leaf_layer_id VARCHAR(71) NOT NULL,"
+                "mounted_at DATETIME(6) NOT NULL,"
+                "unmounted_at DATETIME(6) DEFAULT NULL,"
+                "KEY idx_union_user_mounts_user (user_id),"
+                "KEY idx_union_user_mounts_leaf (leaf_layer_id),"
+                "CONSTRAINT fk_union_user_mounts_leaf FOREIGN KEY (leaf_layer_id)"
+                "  REFERENCES union_layers(id) ON DELETE RESTRICT"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+        except Exception:
+            pass
 
     _logger.info("데이터베이스 테이블 생성/확인 완료")
 

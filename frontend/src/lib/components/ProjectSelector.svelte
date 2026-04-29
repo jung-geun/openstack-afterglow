@@ -32,6 +32,10 @@
 	function selectProject(project: Project) {
 		setProject(project.id, project.name);
 		isOpen = false;
+		// Default 네트워크 확인/생성 (fire-and-forget)
+		if ($auth.token) {
+			api.post('/api/networks/ensure-default', {}, $auth.token, project.id).catch(() => {});
+		}
 	}
 
 	function handleClickOutside(event: MouseEvent) {

@@ -14,7 +14,6 @@ from pydantic import BaseModel
 
 from app.api.deps import get_os_conn, require_admin
 from app.services import glance
-from app.services.cache import cached_call, ttl_static
 
 _logger = logging.getLogger(__name__)
 
@@ -50,22 +49,25 @@ def _serialize_image(img) -> dict:
 @router.get("/images", dependencies=[Depends(require_admin)])
 async def list_admin_images(
     conn: openstack.connection.Connection = Depends(get_os_conn),
-    refresh: bool = Query(False),
     limit: int = Query(default=20, ge=1, le=100),
     marker: str | None = Query(default=None),
     search: str | None = Query(default=None),
+    visibility: str | None = Query(default=None),
 ):
-    """전체 이미지 목록 (visibility 무관, 페이지네이션).
+    """전체 이미지 목록 (페이지네이션).
 
-    `search` 가 있으면 Glance `name` 정확 매칭 대신 전체 이미지를 가져와
-    case-insensitive substring 필터링 후 marker 기반 페이지네이션을 수동 처리한다.
+    `search` 가 있으면 전체 이미지를 가져와 case-insensitive substring 필터링 후
+    marker 기반 페이지네이션을 수동 처리한다.
+    `visibility` 가 있으면 Glance 서버에서 필터링한다.
     """
     try:
 
         def _list_paged():
-            kwargs: dict = {"limit": limit}
+            kwargs: dict = {}
             if marker:
                 kwargs["marker"] = marker
+            if visibility:
+                kwargs["visibility"] = visibility
             items: list[dict] = []
             for img in conn.image.images(**kwargs):
                 items.append(_serialize_image(img))
@@ -77,7 +79,10 @@ async def list_admin_images(
         def _list_search():
             needle = (search or "").lower()
             matched: list[dict] = []
-            for img in conn.image.images():
+            glance_kwargs: dict = {}
+            if visibility:
+                glance_kwargs["visibility"] = visibility
+            for img in conn.image.images(**glance_kwargs):
                 name = (img.name or "").lower()
                 if needle and needle not in name:
                     continue
@@ -96,9 +101,6 @@ async def list_admin_images(
 
         if search:
             return await asyncio.to_thread(_list_search)
-        # 마커가 없을 때만 캐시 사용
-        if not marker:
-            return await cached_call(f"afterglow:admin:images:{limit}", ttl_static(), _list_paged, refresh=refresh)
         return await asyncio.to_thread(_list_paged)
     except Exception:
         _logger.warning("관리자 이미지 목록 조회 실패", exc_info=True)
@@ -138,7 +140,9 @@ async def update_admin_image(
         )
         return result
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"이미지 수정 실패: {e}")
+        _logger.warning("이미지 수정 실패: %s", e)
+
+        raise HTTPException(status_code=400, detail="이미지 수정 실패")
 
 
 @router.delete("/images/{image_id}", dependencies=[Depends(require_admin)], status_code=204)
@@ -150,7 +154,9 @@ async def delete_admin_image(
     try:
         await asyncio.to_thread(glance.delete_image, conn, image_id)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"이미지 삭제 실패: {e}")
+        _logger.warning("이미지 삭제 실패: %s", e)
+
+        raise HTTPException(status_code=400, detail="이미지 삭제 실패")
 
 
 @router.post("/images/{image_id}/deactivate", dependencies=[Depends(require_admin)], status_code=200)
@@ -163,7 +169,9 @@ async def deactivate_admin_image(
         await asyncio.to_thread(glance.deactivate_image, conn, image_id)
         return {"status": "deactivated"}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"이미지 비활성화 실패: {e}")
+        _logger.warning("이미지 비활성화 실패: %s", e)
+
+        raise HTTPException(status_code=400, detail="이미지 비활성화 실패")
 
 
 @router.post("/images/{image_id}/reactivate", dependencies=[Depends(require_admin)], status_code=200)
@@ -176,4 +184,6 @@ async def reactivate_admin_image(
         await asyncio.to_thread(glance.reactivate_image, conn, image_id)
         return {"status": "active"}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"이미지 활성화 실패: {e}")
+        _logger.warning("이미지 활성화 실패: %s", e)
+
+        raise HTTPException(status_code=400, detail="이미지 활성화 실패")

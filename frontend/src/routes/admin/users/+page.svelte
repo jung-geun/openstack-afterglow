@@ -4,6 +4,8 @@
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	interface User {
 		id: string;
@@ -22,6 +24,7 @@
 
 	let users = $state<User[]>([]);
 	let loading = $state(true);
+	let refreshing = $state(false);
 	let pageSize = $state(20);
 	let markerStack = $state<string[]>([]);
 	let nextMarker = $state<string | null>(null);
@@ -45,14 +48,15 @@
 	const projectId = $derived($auth.projectId ?? undefined);
 
 	async function load(marker?: string) {
-		loading = true;
+		if (users.length === 0) loading = true;
+		else refreshing = true;
 		try {
 			let url = `/api/admin/users?limit=${pageSize}`;
 			if (marker) url += `&marker=${marker}`;
 			const res = await api.get<PagedResponse<User>>(url, token, projectId);
 			users = res.items;
 			nextMarker = res.next_marker;
-		} catch { users = []; } finally { loading = false; }
+		} catch { users = []; } finally { loading = false; refreshing = false; }
 	}
 
 	async function createUser() {
@@ -77,6 +81,15 @@
 		} catch (e) { editError = e instanceof ApiError ? e.message : '수정 실패'; } finally { updating = false; }
 	}
 
+	function autoRefreshLoad() { load(markerStack[markerStack.length - 1]); }
+
+	const ar = createAutoRefresh(autoRefreshLoad, {
+		storageKey: 'admin-users',
+		defaultActive: true,
+		defaultInterval: 60,
+		intervalOptions: [30, 60]
+	});
+
 	onMount(load);
 </script>
 
@@ -84,7 +97,13 @@
 	<PageHeader breadcrumb="IDENTITY / USERS" title="사용자">
 		{#snippet actions()}
 			<button onclick={() => { showCreate = true; createError = ''; }} class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg">+ 생성</button>
-			<button onclick={() => load()} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600">새로고침</button>
+			<AutoRefreshControl
+				bind:active={ar.active}
+				bind:intervalSeconds={ar.intervalSeconds}
+				intervalOptions={ar.intervalOptions}
+				refreshing={loading || refreshing}
+				onManualRefresh={() => load()}
+			/>
 			<div class="flex items-center gap-1 text-xs text-gray-500">
 				표시:
 				{#each [10, 20, 30] as n}
@@ -98,6 +117,7 @@
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={5} />
 	{:else}
+		<div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 		<div class="overflow-x-auto">
 			<table class="w-full text-sm">
 				<thead>
@@ -129,6 +149,7 @@
 				class="px-3 py-1.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-30">← 이전</button>
 			<button disabled={!nextMarker} onclick={() => { if (nextMarker) { markerStack = [...markerStack, nextMarker]; load(nextMarker); } }}
 				class="px-3 py-1.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-30">다음 →</button>
+		</div>
 		</div>
 	{/if}
 </div>

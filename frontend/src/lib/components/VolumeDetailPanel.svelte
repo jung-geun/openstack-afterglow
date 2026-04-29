@@ -2,6 +2,8 @@
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import { formatStorage } from '$lib/utils/format';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	interface Volume {
 		id: string;
@@ -67,6 +69,13 @@
 		detaching:          'text-amber-400 bg-amber-900/30',
 		error_deleting:     'text-rose-400 bg-rose-900/30',
 	};
+
+	const ar = createAutoRefresh(() => fetchAll(), {
+		storageKey: 'volume-detail-panel',
+		defaultActive: true,
+		defaultInterval: 15,
+		intervalOptions: [10, 15, 30, 60],
+	});
 
 	$effect(() => {
 		if (!volumeId || !$auth.token) return;
@@ -181,7 +190,16 @@
 				<span class="inline-block mt-1 px-2 py-0.5 rounded text-xs font-medium {statusColor[volume.status] ?? 'text-gray-400 bg-gray-800'}">{volume.status}</span>
 			{/if}
 		</div>
-		<button onclick={onClose} class="text-gray-400 hover:text-white transition-colors text-lg leading-none">✕</button>
+		<div class="flex items-center gap-2">
+			<AutoRefreshControl
+				bind:active={ar.active}
+				bind:intervalSeconds={ar.intervalSeconds}
+				intervalOptions={ar.intervalOptions}
+				refreshing={loading}
+				onManualRefresh={() => fetchAll()}
+			/>
+			<button onclick={onClose} class="text-gray-400 hover:text-white transition-colors text-lg leading-none">✕</button>
+		</div>
 	</div>
 
 	{#if loading}

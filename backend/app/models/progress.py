@@ -21,3 +21,4 @@ class ProgressMessage(BaseModel):
     message: str
     instance_id: str | None = None
     error: str | None = None
+    elapsed_seconds: float | None = None  # 단계 시작부터 경과 시간

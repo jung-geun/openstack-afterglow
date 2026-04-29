@@ -22,6 +22,7 @@ def _make_cluster_record():
         "network_id": "net-1",
         "key_name": None,
         "k3s_version": "v1.31.4+k3s1",
+        "server_vm_name": "mycluster-server",
         "created_at": "2024-01-01T00:00:00Z",
         "updated_at": "2024-01-01T00:00:00Z",
     }
@@ -335,3 +336,153 @@ async def test_delete_k3s_cluster_vm_wait_timeout(client):
     assert resp.status_code == 204
     mock_db.delete_cluster_record.assert_called_once()
     mock_neutron.delete_security_group.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# API LB octavia 서비스 단위 테스트 (LB-first 전략)
+# ---------------------------------------------------------------------------
+
+
+def test_octavia_create_lb_with_subnet():
+    """vip_subnet_id로 LB 생성 시 vip_subnet_id가 API 호출에 전달되어야 한다."""
+    from app.services import octavia
+
+    mock_conn = MagicMock()
+    mock_lb = MagicMock()
+    mock_lb.id = "lb-1"
+    mock_lb.name = "test-lb"
+    mock_lb.description = ""
+    mock_lb.provisioning_status = "ACTIVE"
+    mock_lb.operating_status = "ONLINE"
+    mock_lb.vip_address = "192.168.1.100"
+    mock_lb.vip_subnet_id = "subnet-1"
+    mock_lb.vip_network_id = "net-1"
+    mock_lb.vip_port_id = "port-1"
+    mock_lb.project_id = "proj-1"
+    mock_conn.load_balancer.create_load_balancer.return_value = mock_lb
+
+    result = octavia.create_load_balancer(mock_conn, "test-lb", "subnet-1", "desc")
+
+    mock_conn.load_balancer.create_load_balancer.assert_called_once_with(
+        name="test-lb", description="desc", vip_subnet_id="subnet-1"
+    )
+    assert result["id"] == "lb-1"
+
+
+def test_octavia_create_lb_with_vip_network_id():
+    """vip_network_id 설정 시 vip_subnet_id 대신 vip_network_id가 API 호출에 전달되어야 한다."""
+    from app.services import octavia
+
+    mock_conn = MagicMock()
+    mock_lb = MagicMock()
+    mock_lb.id = "lb-2"
+    mock_lb.name = "provider-lb"
+    mock_lb.description = ""
+    mock_lb.provisioning_status = "ACTIVE"
+    mock_lb.operating_status = "ONLINE"
+    mock_lb.vip_address = "10.100.0.50"
+    mock_lb.vip_subnet_id = None
+    mock_lb.vip_network_id = "provider-net-1"
+    mock_lb.vip_port_id = "port-2"
+    mock_lb.project_id = "proj-1"
+    mock_conn.load_balancer.create_load_balancer.return_value = mock_lb
+
+    result = octavia.create_load_balancer(
+        mock_conn, "provider-lb", description="provider VIP LB", vip_network_id="provider-net-1"
+    )
+
+    call_kwargs = mock_conn.load_balancer.create_load_balancer.call_args[1]
+    assert "vip_network_id" in call_kwargs
+    assert call_kwargs["vip_network_id"] == "provider-net-1"
+    assert "vip_subnet_id" not in call_kwargs
+    assert result["id"] == "lb-2"
+
+
+# ---------------------------------------------------------------------------
+# CreateK3sClusterRequest 모델 — allowed_cidrs 검증
+# ---------------------------------------------------------------------------
+
+
+def test_create_request_allowed_cidrs_default_is_none():
+    """allowed_cidrs 미지정 시 None이어야 한다."""
+    from app.models.k3s import CreateK3sClusterRequest
+
+    req = CreateK3sClusterRequest(name="test-cluster")
+    assert req.allowed_cidrs is None
+
+
+def test_create_request_allowed_cidrs_accepts_list():
+    """allowed_cidrs에 CIDR 목록을 지정하면 그대로 저장되어야 한다."""
+    from app.models.k3s import CreateK3sClusterRequest
+
+    cidrs = ["10.0.0.0/8", "192.168.1.0/24"]
+    req = CreateK3sClusterRequest(name="test-cluster", allowed_cidrs=cidrs)
+    assert req.allowed_cidrs == cidrs
+
+
+def test_create_request_allowed_cidrs_empty_list():
+    """allowed_cidrs에 빈 리스트를 지정하면 빈 리스트가 저장되어야 한다."""
+    from app.models.k3s import CreateK3sClusterRequest
+
+    req = CreateK3sClusterRequest(name="test-cluster", allowed_cidrs=[])
+    assert req.allowed_cidrs == []
+
+
+# ---------------------------------------------------------------------------
+# Plugin 부팅 데드락 게이팅 — Barbican KMS / Keystone Auth
+# ---------------------------------------------------------------------------
+
+
+def _make_plugin_settings(**kwargs):
+    """플러그인 테스트용 Settings MagicMock."""
+    from unittest.mock import MagicMock
+
+    defaults = {
+        "k3s_barbican_kms_enabled": False,
+        "k3s_barbican_kms_kek_id": "",
+        "k3s_keystone_auth_enabled": False,
+        "os_auth_url": "http://keystone:5000/v3",
+        "os_username": "admin",
+        "os_password": "secret",
+    }
+    defaults.update(kwargs)
+    mock = MagicMock()
+    for k, v in defaults.items():
+        setattr(mock, k, v)
+    return mock
+
+
+def test_barbican_kms_plugin_disabled_even_when_settings_enabled():
+    """Barbican KMS는 설정이 활성화되어도 should_deploy()가 False를 반환해야 한다 (부팅 데드락 방지)."""
+    from app.services.k3s_plugins.barbican_kms import BarbicanKmsPlugin
+
+    plugin = BarbicanKmsPlugin()
+    settings = _make_plugin_settings(k3s_barbican_kms_enabled=True, k3s_barbican_kms_kek_id="kek-uuid")
+    assert plugin.should_deploy(settings) is False
+
+
+def test_keystone_auth_plugin_disabled_even_when_settings_enabled():
+    """Keystone Auth는 설정이 활성화되어도 should_deploy()가 False를 반환해야 한다 (부팅 webhook 실패 방지)."""
+    from app.services.k3s_plugins.keystone_auth import KeystoneAuthPlugin
+
+    plugin = KeystoneAuthPlugin()
+    settings = _make_plugin_settings(k3s_keystone_auth_enabled=True)
+    assert plugin.should_deploy(settings) is False
+
+
+def test_barbican_kms_plugin_disabled_when_settings_disabled():
+    """Barbican KMS는 설정이 비활성화되면 should_deploy()가 False를 반환해야 한다."""
+    from app.services.k3s_plugins.barbican_kms import BarbicanKmsPlugin
+
+    plugin = BarbicanKmsPlugin()
+    settings = _make_plugin_settings(k3s_barbican_kms_enabled=False)
+    assert plugin.should_deploy(settings) is False
+
+
+def test_keystone_auth_plugin_disabled_when_settings_disabled():
+    """Keystone Auth는 설정이 비활성화되면 should_deploy()가 False를 반환해야 한다."""
+    from app.services.k3s_plugins.keystone_auth import KeystoneAuthPlugin
+
+    plugin = KeystoneAuthPlugin()
+    settings = _make_plugin_settings(k3s_keystone_auth_enabled=False)
+    assert plugin.should_deploy(settings) is False

@@ -98,7 +98,7 @@ _mark("stdlib")
 # ---------------------------------------------------------------------------
 # 프레임워크 (fastapi, slowapi)
 # ---------------------------------------------------------------------------
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exception_handlers import http_exception_handler as _default_http_handler
 from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
@@ -126,6 +126,7 @@ _mark("api.common")
 from app.api.compute import (
     flavors_router,
     images_router,
+    instance_health_router,
     instances_router,
     keypairs_router,
 )
@@ -147,6 +148,7 @@ from app.api.identity.admin_flavors import router as admin_flavors_router
 from app.api.identity.admin_gpu import router as admin_gpu_router
 from app.api.identity.admin_identity import router as admin_identity_router
 from app.api.identity.admin_images import router as admin_images_router
+from app.api.identity.admin_libraries import router as admin_libraries_router
 from app.api.identity.admin_notion import router as admin_notion_router
 from app.api.identity.admin_services import router as admin_services_router
 from app.api.identity.profile import router as profile_router
@@ -178,6 +180,7 @@ _mark("api.k3s_network_storage")
 # ---------------------------------------------------------------------------
 # 기타 앱 유틸리티
 # ---------------------------------------------------------------------------
+from app.api.deps import get_token_info
 from app.rate_limit import limiter
 from app.utils.version import read_app_version
 
@@ -324,12 +327,15 @@ app.include_router(admin_services_router, prefix="/api/admin", tags=["admin-serv
 app.include_router(admin_flavors_router, prefix="/api/admin", tags=["admin-flavors"])
 app.include_router(admin_identity_router, prefix="/api/admin", tags=["admin-identity"])
 app.include_router(admin_gpu_router, prefix="/api/admin", tags=["admin-gpu"])
+app.include_router(admin_libraries_router, prefix="/api/admin/libraries", tags=["admin-libraries"])
 app.include_router(admin_notion_router, prefix="/api/admin", tags=["admin-notion"])
 app.include_router(admin_images_router, prefix="/api/admin", tags=["admin-images"])
 app.include_router(profile_router, prefix="/api/profile", tags=["profile"])
 # Compute
 app.include_router(images_router, prefix="/api/images", tags=["images"])
 app.include_router(flavors_router, prefix="/api/flavors", tags=["flavors"])
+# instance_health_router을 instances_router보다 먼저 등록 (/health 경로 충돌 방지)
+app.include_router(instance_health_router, prefix="/api/instances", tags=["instance-health"])
 app.include_router(instances_router, prefix="/api/instances", tags=["instances"])
 app.include_router(keypairs_router, prefix="/api/keypairs", tags=["keypairs"])
 # Storage (backups 먼저 등록 — /api/volumes/{id} catch-all 보다 앞에)
@@ -362,6 +368,11 @@ if _svc_cfg.service_k3s_enabled:
     app.include_router(k3s_clusters_router, prefix="/api/k3s/clusters", tags=["k3s"])
     app.include_router(k3s_health_router, prefix="/api/k3s/clusters", tags=["k3s-health"])
     app.include_router(k3s_callback_router, prefix="/api/k3s", tags=["k3s-callback"])
+
+# Union Mount 레이어 시스템 (DB 연결 시 항상 활성화)
+from app.api.union import router as union_router  # noqa: E402
+
+app.include_router(union_router, prefix="/api/union", tags=["union"])
 if _svc_cfg.service_trove_enabled:
     from app.api.database.instances import router as trove_router
 
@@ -385,7 +396,7 @@ async def health():
 
 
 @app.get("/api/health/detail")
-async def health_detail():
+async def health_detail(token_info: dict = Depends(get_token_info)):
     """모니터링 대시보드용 상세 헬스체크. Redis 연결 상태 포함."""
     detail: dict = {"status": "ok", "redis": "unknown"}
     try:
@@ -493,6 +504,41 @@ async def _collect_snapshot() -> None:
                 "floating_ips_used": fips_used,
             }
 
+        async def _count_library_usage() -> dict[str, int]:
+            """Nova metadata + union_user_mounts 기반 라이브러리/레이어 사용 카운트."""
+            from sqlalchemy import text
+
+            from app.database import get_session_factory
+
+            counts: dict[str, int] = {}
+            try:
+                for s in conn.compute.servers(all_projects=True, details=True):
+                    libs_str = (s.metadata or {}).get("union_libraries", "")
+                    for lib in libs_str.split(","):
+                        lib = lib.strip()
+                        if lib:
+                            key = f"lib:{lib}"
+                            counts[key] = counts.get(key, 0) + 1
+            except Exception:
+                pass
+            try:
+                factory = get_session_factory()
+                if factory:
+                    async with factory() as db:
+                        result = await db.execute(
+                            text(
+                                "SELECT ul.name, COUNT(*) as cnt FROM union_user_mounts uum "
+                                "JOIN union_layers ul ON ul.id = uum.leaf_layer_id "
+                                "WHERE uum.unmounted_at IS NULL GROUP BY ul.name"
+                            )
+                        )
+                        for row in result:
+                            key = f"layer:{row[0]}"
+                            counts[key] = counts.get(key, 0) + int(row[1])
+            except Exception:
+                pass
+            return counts
+
         inst_data = await asyncio.to_thread(_count_instances)
         vol_data = await asyncio.to_thread(_count_volumes)
         if settings.service_manila_enabled:
@@ -500,18 +546,21 @@ async def _collect_snapshot() -> None:
         else:
             file_storage_data = {"total": 0}
         net_data = await asyncio.to_thread(_count_networks)
+        lib_usage_data = await _count_library_usage()
 
         await timeseries.record_snapshot("instances", inst_data)
         await timeseries.record_snapshot("volumes", vol_data)
         await timeseries.record_snapshot("file_storage", file_storage_data)
         await timeseries.record_snapshot("networks", net_data)
+        await timeseries.record_snapshot("library_usage", lib_usage_data)
 
         _logger.info(
-            "시계열 스냅샷 수집 완료: instances=%d volumes=%d file_storage=%d networks=%d",
+            "시계열 스냅샷 수집 완료: instances=%d volumes=%d file_storage=%d networks=%d library_keys=%d",
             inst_data["total"],
             vol_data["total"],
             file_storage_data["total"],
             net_data["total"],
+            len(lib_usage_data),
         )
     except Exception:
         _logger.warning("시계열 스냅샷 수집 오류", exc_info=True)
@@ -529,292 +578,6 @@ async def _snapshot_loop() -> None:
     while True:
         await _collect_snapshot()
         await asyncio.sleep(600)
-
-
-async def _run_notion_target_sync(target: dict) -> None:
-    """단일 NotionTarget에 대해 전체 동기화를 실행한다."""
-    from datetime import datetime
-
-    from app.api.identity.admin_gpu import (
-        build_alias_to_device_name_map,
-        get_gpu_spec_list,
-    )
-    from app.api.identity.admin_notion import (
-        collect_hypervisor_data,
-        collect_instance_data,
-    )
-    from app.services import notion_sync
-
-    target_id = target["id"]
-    api_key = target["api_key"]
-    database_id = target["database_id"]
-    users_db_id = target.get("users_database_id", "")
-    hypervisors_db_id = target.get("hypervisors_database_id", "")
-    gpu_spec_db_id = target.get("gpu_spec_database_id", "")
-
-    gpu_name_to_page_id: dict[str, str] = {}
-    if gpu_spec_db_id:
-        try:
-            gpu_specs = get_gpu_spec_list()
-            await notion_sync.sync_gpu_specs_to_notion(api_key, gpu_spec_db_id, gpu_specs)
-            gpu_name_to_page_id = await notion_sync.fetch_gpu_spec_page_ids_by_name(api_key, gpu_spec_db_id)
-        except Exception:
-            _logger.warning("Notion target %d GPU spec 동기화 오류", target_id, exc_info=True)
-
-    host_to_page_id: dict[str, str] = {}
-    hypervisors: list[dict] = []
-    if hypervisors_db_id:
-        try:
-            hypervisors = await collect_hypervisor_data(gpu_name_to_page_id=gpu_name_to_page_id)
-            await notion_sync.sync_hypervisors_to_notion(api_key, hypervisors_db_id, hypervisors)
-            host_to_page_id = await notion_sync.fetch_hypervisor_page_ids_by_name(api_key, hypervisors_db_id)
-        except Exception:
-            _logger.warning("Notion target %d 하이퍼바이저 동기화 오류", target_id, exc_info=True)
-
-    email_to_page_id: dict[str, str] = {}
-    if users_db_id:
-        email_to_page_id = await notion_sync.fetch_user_page_ids_by_email(api_key, users_db_id)
-
-    instances = await collect_instance_data(
-        email_to_page_id=email_to_page_id,
-        host_to_page_id=host_to_page_id,
-        gpu_name_to_page_id=gpu_name_to_page_id,
-    )
-
-    # GPU 사용량 집계
-    alias_to_device_name = build_alias_to_device_name_map()
-    usage_by_gpu: dict[str, dict] = {}
-    for h in hypervisors:
-        for g in h.get("gpu_groups", []):
-            device_name = g.get("device_name", "")
-            if not device_name:
-                continue
-            if device_name not in usage_by_gpu:
-                usage_by_gpu[device_name] = {
-                    "total_cpu_used": 0,
-                    "total_ram_used": 0,
-                    "total_gpu_used": 0,
-                    "instance_count": 0,
-                    "gpu_available": 0,
-                    "gpu_used": 0,
-                    "gpu_remaining": 0,
-                }
-            usage_by_gpu[device_name]["gpu_available"] += g.get("total", 0)
-    for inst in instances:
-        gpu_display = inst.get("gpu_name", "")
-        if not gpu_display or not inst.get("gpu_count"):
-            continue
-        canonical = alias_to_device_name.get(gpu_display, gpu_display)
-        if canonical not in usage_by_gpu:
-            usage_by_gpu[canonical] = {
-                "total_cpu_used": 0,
-                "total_ram_used": 0,
-                "total_gpu_used": 0,
-                "instance_count": 0,
-                "gpu_available": 0,
-                "gpu_used": 0,
-                "gpu_remaining": 0,
-            }
-        usage_by_gpu[canonical]["total_cpu_used"] += inst.get("vcpus", 0)
-        usage_by_gpu[canonical]["total_ram_used"] += inst.get("ram_gb", 0)
-        usage_by_gpu[canonical]["total_gpu_used"] += inst.get("gpu_count", 0)
-        usage_by_gpu[canonical]["instance_count"] += 1
-        usage_by_gpu[canonical]["gpu_used"] += inst.get("gpu_count", 0)
-    for u in usage_by_gpu.values():
-        u["gpu_remaining"] = u["gpu_available"] - u["gpu_used"]
-
-    if gpu_spec_db_id and usage_by_gpu:
-        try:
-            gpu_specs = get_gpu_spec_list()
-            await notion_sync.sync_gpu_specs_to_notion(api_key, gpu_spec_db_id, gpu_specs, usage_by_gpu=usage_by_gpu)
-        except Exception:
-            _logger.warning("Notion target %d GPU spec 집계 업데이트 오류", target_id, exc_info=True)
-
-    await notion_sync.sync_to_notion(api_key, database_id, instances)
-
-    now_iso = datetime.now(UTC).isoformat()
-    await notion_sync.update_notion_target(
-        target_id,
-        {
-            "last_sync": now_iso,
-            "hypervisors_last_sync": now_iso if hypervisors_db_id else None,
-            "gpu_spec_last_sync": now_iso if gpu_spec_db_id else None,
-        },
-    )
-    _logger.info("Notion target %d 동기화 완료 (instances=%d)", target_id, len(instances))
-
-
-async def _notion_sync_loop() -> None:
-    """Notion 연동이 활성화되어 있으면 주기적으로 동기화.
-    NotionTarget 다중 대상이 있으면 우선 사용하고, 없으면 NotionConfig fallback."""
-    from datetime import datetime
-
-    from app.api.identity.admin_gpu import (
-        build_alias_to_device_name_map,
-        get_gpu_spec_list,
-    )
-    from app.api.identity.admin_notion import (
-        collect_hypervisor_data,
-        collect_instance_data,
-    )
-    from app.services import notion_sync
-
-    await asyncio.sleep(60)  # 시작 후 1분 대기
-    while True:
-        try:
-            targets = await notion_sync.list_notion_targets(include_api_key=True)
-            if targets:
-                # 다중 타겟 모드: enabled이고 interval이 경과한 타겟만 동기화
-                now = datetime.now(UTC)
-                for target in targets:
-                    if not target.get("enabled"):
-                        continue
-                    last_sync_str = target.get("last_sync")
-                    interval_min = target.get("interval_minutes", 5)
-                    if last_sync_str:
-                        try:
-                            last_sync_dt = datetime.fromisoformat(last_sync_str.replace("Z", "+00:00"))
-                            elapsed_min = (now - last_sync_dt).total_seconds() / 60
-                            if elapsed_min < interval_min:
-                                continue
-                        except Exception:
-                            pass
-                    try:
-                        await _run_notion_target_sync(target)
-                    except Exception:
-                        _logger.warning("Notion target %d 동기화 오류", target["id"], exc_info=True)
-
-                await asyncio.sleep(60)
-                continue
-
-            # ── fallback: NotionConfig (싱글톤 레거시 설정) ──
-            config = await notion_sync.get_notion_config()
-            if config and config.get("enabled"):
-                api_key = config["api_key"]
-                users_db_id = config.get("users_database_id", "")
-                hypervisors_db_id = config.get("hypervisors_database_id", "")
-                gpu_spec_db_id = config.get("gpu_spec_database_id", "")
-
-                # 0. GPU spec 동기화 (정적 데이터, 페이지 생성/갱신)
-                gpu_name_to_page_id: dict[str, str] = {}
-                if gpu_spec_db_id:
-                    try:
-                        gpu_specs = get_gpu_spec_list()
-                        await notion_sync.sync_gpu_specs_to_notion(api_key, gpu_spec_db_id, gpu_specs)
-                        config["gpu_spec_last_sync"] = datetime.now(UTC).isoformat()
-                        # 동기화 후 page_id 맵 구축 (인스턴스 relation 설정에 사용)
-                        gpu_name_to_page_id = await notion_sync.fetch_gpu_spec_page_ids_by_name(api_key, gpu_spec_db_id)
-                    except Exception:
-                        _logger.warning("Notion GPU spec 동기화 오류", exc_info=True)
-
-                # 1. 하이퍼바이저 데이터 수집 (GPU 정보 포함) → 동기화 → page_id 맵 구축
-                host_to_page_id: dict[str, str] = {}
-                hypervisors: list[dict] = []
-                if hypervisors_db_id:
-                    try:
-                        hypervisors = await collect_hypervisor_data(gpu_name_to_page_id=gpu_name_to_page_id)
-                        await notion_sync.sync_hypervisors_to_notion(api_key, hypervisors_db_id, hypervisors)
-                        config["hypervisors_last_sync"] = datetime.now(UTC).isoformat()
-                        host_to_page_id = await notion_sync.fetch_hypervisor_page_ids_by_name(
-                            api_key, hypervisors_db_id
-                        )
-                    except Exception:
-                        _logger.warning("Notion 하이퍼바이저 동기화 오류", exc_info=True)
-
-                # 2. People DB에서 이메일 → page_id 맵 구축
-                email_to_page_id: dict[str, str] = {}
-                if users_db_id:
-                    email_to_page_id = await notion_sync.fetch_user_page_ids_by_email(api_key, users_db_id)
-
-                # 3. 인스턴스 수집 (GPU spec relation page_id 포함)
-                instances = await collect_instance_data(
-                    email_to_page_id=email_to_page_id,
-                    host_to_page_id=host_to_page_id,
-                    gpu_name_to_page_id=gpu_name_to_page_id,
-                )
-
-                # 4. GPU 사용량 집계 (하이퍼바이저 가용량 + 인스턴스 사용량)
-                alias_to_device_name = build_alias_to_device_name_map()
-                usage_by_gpu: dict[str, dict] = {}
-
-                # 4a. 하이퍼바이저별 GPU 가용량 집계
-                for h in hypervisors:
-                    for g in h.get("gpu_groups", []):
-                        device_name = g.get("device_name", "")
-                        total = g.get("total", 0)
-                        if not device_name:
-                            continue
-                        if device_name not in usage_by_gpu:
-                            usage_by_gpu[device_name] = {
-                                "total_cpu_used": 0,
-                                "total_ram_used": 0,
-                                "total_gpu_used": 0,
-                                "instance_count": 0,
-                                "gpu_available": 0,
-                                "gpu_used": 0,
-                                "gpu_remaining": 0,
-                            }
-                        usage_by_gpu[device_name]["gpu_available"] += total
-
-                # 4b. 인스턴스별 GPU 사용량 집계
-                for inst in instances:
-                    gpu_display = inst.get("gpu_name", "")
-                    if not gpu_display or not inst.get("gpu_count"):
-                        continue
-                    canonical = alias_to_device_name.get(gpu_display, gpu_display)
-                    if canonical not in usage_by_gpu:
-                        usage_by_gpu[canonical] = {
-                            "total_cpu_used": 0,
-                            "total_ram_used": 0,
-                            "total_gpu_used": 0,
-                            "instance_count": 0,
-                            "gpu_available": 0,
-                            "gpu_used": 0,
-                            "gpu_remaining": 0,
-                        }
-                    usage_by_gpu[canonical]["total_cpu_used"] += inst.get("vcpus", 0)
-                    usage_by_gpu[canonical]["total_ram_used"] += inst.get("ram_gb", 0)
-                    usage_by_gpu[canonical]["total_gpu_used"] += inst.get("gpu_count", 0)
-                    usage_by_gpu[canonical]["instance_count"] += 1
-                    usage_by_gpu[canonical]["gpu_used"] += inst.get("gpu_count", 0)
-
-                # 4c. 남은 GPU 계산
-                for u in usage_by_gpu.values():
-                    u["gpu_remaining"] = u["gpu_available"] - u["gpu_used"]
-
-                # 5. GPU spec DB 집계 데이터 업데이트
-                if gpu_spec_db_id:
-                    try:
-                        gpu_specs = get_gpu_spec_list()
-                        await notion_sync.sync_gpu_specs_to_notion(
-                            api_key,
-                            gpu_spec_db_id,
-                            gpu_specs,
-                            usage_by_gpu=usage_by_gpu,
-                        )
-                        config["gpu_spec_last_sync"] = datetime.now(UTC).isoformat()
-                    except Exception:
-                        _logger.warning("Notion GPU spec 집계 업데이트 오류", exc_info=True)
-
-                # 6. 인스턴스 동기화
-                await notion_sync.sync_to_notion(api_key, config["database_id"], instances)
-                config["last_sync"] = datetime.now(UTC).isoformat()
-
-                await notion_sync.save_notion_config(config)
-
-                # 7. 한국어 마이그레이션 (Redis 플래그로 1회만 실행)
-                try:
-                    await notion_sync.migrate_instance_db_to_korean(api_key, config["database_id"])
-                except Exception:
-                    _logger.warning("Notion DB 한국어 마이그레이션 오류", exc_info=True)
-
-                interval = config.get("interval_minutes", 5) * 60
-            else:
-                interval = 60  # 비활성 시 1분마다 설정 체크
-        except Exception:
-            _logger.warning("Notion 동기화 오류", exc_info=True)
-            interval = 300  # 오류 시 5분 후 재시도
-        await asyncio.sleep(interval)
 
 
 async def _k3s_cleanup_loop() -> None:
@@ -900,7 +663,6 @@ async def start_background_workers():
             asyncio.create_task(_deferred_create_tables())
 
     asyncio.create_task(_snapshot_loop())
-    asyncio.create_task(_notion_sync_loop())
     asyncio.create_task(_auto_backup_loop())
     if _svc_cfg.service_k3s_enabled:
         asyncio.create_task(_k3s_cleanup_loop())

@@ -6,10 +6,11 @@ if TYPE_CHECKING:
     import openstack
 import asyncio
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from app.api.deps import get_os_conn
+from app.rate_limit import limiter
 from app.services import nova
 from app.services.cache import cached_call, invalidate, ttl_slow
 
@@ -37,7 +38,9 @@ async def list_keypairs(conn: openstack.connection.Connection = Depends(get_os_c
 
 
 @router.post("", status_code=201)
+@limiter.limit("10/minute")
 async def create_keypair(
+    request: Request,
     req: CreateKeypairRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
@@ -51,7 +54,9 @@ async def create_keypair(
 
 
 @router.delete("/{keypair_name}", status_code=204)
+@limiter.limit("10/minute")
 async def delete_keypair(
+    request: Request,
     keypair_name: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):

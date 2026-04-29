@@ -25,7 +25,7 @@ write_files:
     permissions: "0600"
     content: |
       [client.{{ share.cephx_id | shlex_quote }}]
-          key = {{ share.cephx_key }}
+          key = {{ share.cephx_key | trim }}
 {% endif %}
 {% endfor %}
 
@@ -76,22 +76,152 @@ write_files:
       RemainAfterExit=yes
       ExecStart=/opt/union/overlay_setup.sh
       TimeoutStartSec=300
-      OnFailure=emergency.target
 
       [Install]
       WantedBy=multi-user.target
 
+{% if union_ro_share_export %}
+  # envmgr 설정 (layer-store-ro export 경로 포함)
+  - path: /etc/envmgr-union.conf
+    permissions: "0600"
+    content: |
+      LAYER_STORE_RO_EXPORT="{{ union_ro_share_export }}"
+{% if union_manifest_share_export %}
+      MANIFEST_STORE_EXPORT="{{ union_manifest_share_export }}"
+{% endif %}
+{% endif %}
+
+{% if gpu_available %}
+  # DCGM Exporter 설치 스크립트
+  - path: /opt/union/install_dcgm_exporter.sh
+    permissions: "0750"
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      VER="{{ dcgm_exporter_version }}"
+      ARCH="$(uname -m)"
+      case "$ARCH" in
+        x86_64) ARCH=amd64 ;;
+        aarch64) ARCH=arm64 ;;
+        *) echo "unsupported arch: $ARCH" >&2; exit 1 ;;
+      esac
+      TARBALL="dcgm-exporter-${VER}-linux-${ARCH}.tar.gz"
+      URL="https://github.com/NVIDIA/dcgm-exporter/releases/download/${VER}/${TARBALL}"
+      TMP=$(mktemp -d)
+      cd "$TMP"
+      curl -fsSL "$URL" -o "$TARBALL"
+      tar -xzf "$TARBALL"
+      install -m 0755 dcgm-exporter /usr/local/bin/dcgm-exporter
+      install -d -m 0755 /etc/dcgm-exporter
+      install -m 0644 etc/default-counters.csv /etc/dcgm-exporter/default-counters.csv
+      rm -rf "$TMP"
+
+  # DCGM Exporter systemd unit
+  - path: /etc/systemd/system/dcgm-exporter.service
+    content: |
+      [Unit]
+      Description=NVIDIA DCGM Exporter (Prometheus)
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=simple
+      ExecStart=/usr/local/bin/dcgm-exporter \
+        --address=0.0.0.0:9400 \
+        --collectors=/etc/dcgm-exporter/default-counters.csv
+      Restart=on-failure
+      RestartSec=10s
+      AmbientCapabilities=CAP_SYS_ADMIN
+
+      [Install]
+      WantedBy=multi-user.target
+{% endif %}
+
+{% if union_cephx_rotate_hours > 0 %}
+  # CephX 키 회전 systemd service
+  - path: /etc/systemd/system/union-rotate-key.service
+    content: |
+      [Unit]
+      Description=Union CephX Key Rotation
+      Wants=network-online.target
+      After=network-online.target
+
+      [Service]
+      Type=oneshot
+      EnvironmentFile=-/etc/envmgr.conf
+      ExecStart=/usr/local/bin/envmgr-rotate-key.sh
+
+  # CephX 키 회전 timer
+  - path: /etc/systemd/system/union-rotate-key.timer
+    content: |
+      [Unit]
+      Description=Union CephX Key Rotation Timer
+
+      [Timer]
+      OnBootSec=30min
+      OnUnitActiveSec={{ union_cephx_rotate_hours }}h
+      RandomizedDelaySec=5min
+      Unit=union-rotate-key.service
+
+      [Install]
+      WantedBy=timers.target
+{% endif %}
+
+{% if health_check_script %}
+  # 헬스체크 스크립트
+  - path: /opt/union/scripts/health-check.sh
+    permissions: "0750"
+    content: |
+{{ health_check_script | indent(6, first=True) }}
+
+  # 헬스체크 systemd service
+  - path: /etc/systemd/system/union-health.service
+    content: |
+      [Unit]
+      Description=Union Instance Health Check
+      Wants=union-overlay.service
+      After=union-overlay.service
+
+      [Service]
+      Type=oneshot
+      ExecStart=/opt/union/scripts/health-check.sh
+      StandardOutput=journal
+      StandardError=journal
+
+  # 헬스체크 systemd timer (5분 주기)
+  - path: /etc/systemd/system/union-health.timer
+    content: |
+      [Unit]
+      Description=Union Instance Health Check Timer
+
+      [Timer]
+      OnBootSec=2min
+      OnUnitActiveSec=5min
+      Unit=union-health.service
+
+      [Install]
+      WantedBy=timers.target
+{% endif %}
+
 runcmd:
-  - mkdir -p /opt/layers/{lower,upper,work,merged} /opt/union /var/lib/union
+  - mkdir -p /opt/layers/{lower,upper,work,merged} /opt/union/scripts /var/lib/union
   - systemctl daemon-reload
   - systemctl enable union-overlay
   - systemctl start union-overlay
+{% if health_check_script %}
+  - systemctl enable --now union-health.timer
+{% endif %}
 {% if strategy == "dynamic" %}
   - /opt/union/dynamic_install.sh
+{% endif %}
+{% if gpu_available %}
+  - /opt/union/install_dcgm_exporter.sh
+  - systemctl daemon-reload
+  - systemctl enable --now dcgm-exporter.service
 {% endif %}
 
 final_message: |
   Union VM 초기화 완료.
   전략: {{ strategy }}
   라이브러리: {{ libraries | join(", ") }}
-  OverlayFS 상태: $(mount | grep overlay | wc -l)개 마운트
+  OverlayFS 상세: journalctl -u union-overlay --no-pager | tail -20

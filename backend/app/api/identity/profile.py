@@ -4,7 +4,7 @@ import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.api.deps import get_os_conn, get_token_info
 from app.rate_limit import limiter
@@ -23,8 +23,8 @@ class UpdateProfileRequest(BaseModel):
 
 
 class ChangePasswordRequest(BaseModel):
-    current_password: str
-    new_password: str
+    current_password: str = Field(min_length=1, max_length=1024)
+    new_password: str = Field(min_length=1, max_length=1024)
 
 
 @router.get("")
@@ -87,7 +87,9 @@ async def update_profile(
         except HTTPException:
             raise
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"프로필 수정 실패: {e}")
+            _logger.warning("프로필 수정 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="프로필 수정 실패")
 
     try:
         return await asyncio.to_thread(_update)
@@ -119,7 +121,9 @@ async def change_password(
             conn.identity.update_user(user_id, password=req.new_password)
             return {"status": "changed"}
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"패스워드 변경 실패: {e}")
+            _logger.warning("패스워드 변경 실패: %s", e)
+
+            raise HTTPException(status_code=400, detail="패스워드 변경 실패")
 
     try:
         return await asyncio.to_thread(_change)

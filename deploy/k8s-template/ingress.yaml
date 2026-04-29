@@ -6,10 +6,12 @@ metadata:
   annotations:
     kubernetes.io/ingress.class: "traefik"
     traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+    traefik.ingress.kubernetes.io/router.middlewares: afterglow-upload-timeout@kubernetescrd
+    traefik.ingress.kubernetes.io/service.serverstransport: afterglow-backend-long-timeout@kubernetescrd
     cert-manager.io/cluster-issuer: "letsencrypt-prod-traefik" # 위에서 만든 ClusterIssuer
     # kubernetes.io/ingress.class: nginx
-    # nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
-    # nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    # nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    # nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
 spec:
   # TLS 설정 (HTTPS 사용 시 주석 해제 후 설정)
   tls:

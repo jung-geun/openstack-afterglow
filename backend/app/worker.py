@@ -1,4 +1,4 @@
-"""Afterglow 헬스체크 워커 — 별도 파드로 실행.
+"""Drover Health Manager — 별도 파드로 실행.
 
 사용법:
   uv run python -m app.worker
@@ -17,7 +17,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
 
-_logger = logging.getLogger("afterglow.worker")
+_logger = logging.getLogger("drover.health")
 
 _CHECK_INTERVAL = int(os.environ.get("K3S_HEALTH_INTERVAL", "180"))  # 기본 3분
 
@@ -30,7 +30,7 @@ async def _run_health_check() -> None:
 
 
 async def main() -> None:
-    _logger.info("Afterglow 헬스체크 워커 시작 (interval=%ds)", _CHECK_INTERVAL)
+    _logger.info("Drover Health Manager 시작 (interval=%ds)", _CHECK_INTERVAL)
     await asyncio.sleep(30)  # 초기 대기: 메인 API 및 DB 준비 시간
 
     while True:

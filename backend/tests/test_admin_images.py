@@ -102,6 +102,31 @@ async def test_list_admin_images_search_does_not_pass_name_to_glance(admin_clien
 
 
 @pytest.mark.asyncio
+async def test_list_admin_images_visibility_passed_to_glance(admin_client, mock_conn):
+    """?visibility=public 파라미터가 Glance 호출에 전달되어야 한다."""
+    images = [_make_image("1", "ubuntu", visibility="public")]
+    mock_conn.image.images.return_value = iter(images)
+    resp = await admin_client.get("/api/admin/images?visibility=public")
+    assert resp.status_code == 200
+    _, called_kwargs = mock_conn.image.images.call_args
+    assert called_kwargs.get("visibility") == "public"
+
+
+@pytest.mark.asyncio
+async def test_list_admin_images_no_visibility_no_filter(admin_client, mock_conn):
+    """?visibility 없으면 Glance에 visibility 인자 미전달 (모든 이미지 반환)."""
+    images = [
+        _make_image("1", "ubuntu", visibility="public"),
+        _make_image("2", "rocky", visibility="private"),
+    ]
+    mock_conn.image.images.return_value = iter(images)
+    resp = await admin_client.get("/api/admin/images?search=ub")
+    assert resp.status_code == 200
+    _, called_kwargs = mock_conn.image.images.call_args
+    assert "visibility" not in called_kwargs
+
+
+@pytest.mark.asyncio
 async def test_get_admin_image_requires_admin(non_admin_client):
     resp = await non_admin_client.get("/api/admin/images/img-1")
     assert resp.status_code == 403

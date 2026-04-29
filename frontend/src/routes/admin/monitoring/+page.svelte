@@ -4,6 +4,8 @@
 	import { api } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	interface MonitoringSummary {
 		compute: {
@@ -42,6 +44,7 @@
 
 	let summary = $state<MonitoringSummary | null>(null);
 	let loading = $state(true);
+	let refreshing = $state(false);
 
 	function pct(used: number, total: number) {
 		if (!total) return 0;
@@ -56,15 +59,24 @@
 	function gb(mb: number) { return Math.round(mb / 1024); }
 
 	async function load() {
-		loading = true;
+		if (!summary) loading = true;
+		else refreshing = true;
 		try {
 			summary = await api.get<MonitoringSummary>('/api/admin/monitoring/summary', token, projectId);
 		} catch {
 			summary = null;
 		} finally {
 			loading = false;
+			refreshing = false;
 		}
 	}
+
+	const ar = createAutoRefresh(load, {
+		storageKey: 'admin-monitoring',
+		defaultActive: true,
+		defaultInterval: 15,
+		intervalOptions: [10, 15, 30, 60]
+	});
 
 	onMount(load);
 </script>
@@ -72,12 +84,13 @@
 <div class="p-4 md:p-8 max-w-7xl">
 	<PageHeader breadcrumb="MONITORING" title="통합 모니터링">
 		{#snippet actions()}
-			<button
-				onclick={load}
-				class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600"
-			>
-				새로고침
-			</button>
+			<AutoRefreshControl
+				bind:active={ar.active}
+				bind:intervalSeconds={ar.intervalSeconds}
+				intervalOptions={ar.intervalOptions}
+				refreshing={loading || refreshing}
+				onManualRefresh={load}
+			/>
 		{/snippet}
 	</PageHeader>
 
@@ -86,6 +99,7 @@
 	{:else if !summary}
 		<div class="text-red-400 text-sm">모니터링 데이터를 불러올 수 없습니다.</div>
 	{:else}
+		<div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 		<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 			<!-- Compute -->
 			<div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
@@ -225,7 +239,7 @@
 					</div>
 					<div class="bg-gray-800 rounded-lg p-4 text-center">
 						<div class="text-2xl font-bold text-white">{summary.containers.k3s_count}</div>
-						<div class="text-xs text-gray-500 mt-1">k3s 클러스터</div>
+						<div class="text-xs text-gray-500 mt-1">Drover 클러스터</div>
 					</div>
 				</div>
 
@@ -233,11 +247,12 @@
 					<a href="/admin/containers" class="flex items-center justify-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 transition-colors bg-gray-800 rounded-lg py-2">
 						컨테이너 목록 →
 					</a>
-					<a href="/admin/containers/k3s" class="flex items-center justify-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 transition-colors bg-gray-800 rounded-lg py-2">
-						k3s 클러스터 →
+					<a href="/admin/drover" class="flex items-center justify-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 transition-colors bg-gray-800 rounded-lg py-2">
+						Drover 클러스터 →
 					</a>
 				</div>
 			</div>
+		</div>
 		</div>
 	{/if}
 </div>

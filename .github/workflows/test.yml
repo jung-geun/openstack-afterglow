@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
 
@@ -36,11 +36,11 @@ jobs:
         working-directory: backend
         run: uv sync --frozen --extra dev
 
-      - name: Lint — ruff check
+      - name: Lint ruff check
         working-directory: backend
         run: uv run ruff check .
 
-      - name: Lint — ruff format check
+      - name: Lint ruff format check
         working-directory: backend
         run: uv run ruff format --check .
 
@@ -49,6 +49,211 @@ jobs:
         env:
           AFTERGLOW_ALLOW_INSECURE: "1"
         run: uv run python -m pytest tests/ -v --ignore=tests/integration
+
+  # ─── MariaDB 통합 테스트 — dev 브랜치 push 시에만 실행 ──────────────────────
+  test-backend-db:
+    name: Backend (MariaDB integration)
+    needs: test-backend
+    if: github.ref == 'refs/heads/dev' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: dev
+          MARIADB_DATABASE: afterglow_test
+          MARIADB_USER: afterglow
+          MARIADB_PASSWORD: dev
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Sync deps (dev)
+        working-directory: backend
+        run: uv sync --frozen --extra dev
+
+      - name: MariaDB integration tests
+        working-directory: backend
+        env:
+          AFTERGLOW_ALLOW_INSECURE: "1"
+          AFTERGLOW_REDIS_URL: redis://localhost:6379/0
+          AFTERGLOW_TEST_DATABASE_URL: mysql+aiomysql://afterglow:dev@127.0.0.1:3306/afterglow_test
+        run: uv run python -m pytest tests/test_union_layers_db.py -v -m db
+
+  # ─── secret 존재 여부 + Keystone 인증 probe를 job output으로 노출 ──────────
+  # secrets 컨텍스트는 if: 표현식에서 직접 사용 불가 (GitHub Actions 제약).
+  # 별도 job에서 env로 secret을 받아 비어 있는지 검사하고,
+  # 존재하면 실제 Keystone token POST를 시도해 자격증명 유효성까지 확인한다.
+  # 만료된 시크릿이 "set"으로 오판되어 integration tests가 전량 401로 폭발하는 문제 방지.
+  # 보안: 모든 비밀값은 env: 블록으로만 주입하고 run에서 $VAR 형태로만 참조.
+  #        jq로 JSON body를 구성하므로 특수문자 이스케이프 문제 없음.
+  detect-integration:
+    name: Detect integration secrets
+    needs: version-check
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.check.outputs.enabled }}
+    steps:
+      - name: Check OpenStack secret and verify credentials
+        id: check
+        env:
+          OS_AUTH_URL: ${{ secrets.AFTERGLOW_OS_AUTH_URL }}
+          OS_USERNAME: ${{ secrets.AFTERGLOW_OS_USERNAME }}
+          OS_PASSWORD: ${{ secrets.AFTERGLOW_OS_PASSWORD }}
+          OS_PROJECT_NAME: ${{ secrets.AFTERGLOW_OS_PROJECT_NAME }}
+          OS_INTERFACE: ${{ vars.AFTERGLOW_OS_INTERFACE || 'public' }}
+        run: |
+          if [ -z "$OS_AUTH_URL" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "AFTERGLOW_OS_AUTH_URL secret is not set — skipping integration tests."
+            exit 0
+          fi
+
+          # jq로 JSON body 구성 (특수문자 이스케이프 보장)
+          jq -n \
+            --arg u "$OS_USERNAME" \
+            --arg p "$OS_PASSWORD" \
+            --arg proj "$OS_PROJECT_NAME" \
+            '{"auth":{"identity":{"methods":["password"],"password":{"user":{"name":$u,"password":$p,"domain":{"name":"Default"}}}},"scope":{"project":{"name":$proj,"domain":{"name":"Default"}}}}}' \
+            > /tmp/ks_body.json
+
+          # OS_AUTH_URL 정규화: trailing slash 제거 + version path 미존재 시 /v3 자동 부착
+          _RAW_URL="${OS_AUTH_URL%/}"
+          if echo "$_RAW_URL" | grep -qE '/v[0-9]+(\.[0-9]+)?$'; then
+            _AUTH_URL="$_RAW_URL"
+          else
+            _AUTH_URL="$_RAW_URL/v3"
+          fi
+
+          # Keystone v3 token probe (timeout 5s) — 응답 body 저장
+          STATUS=$(curl -sk -o /tmp/ks_resp.json -w "%{http_code}" \
+            --max-time 5 \
+            -X POST "${_AUTH_URL}/auth/tokens" \
+            -H "Content-Type: application/json" \
+            --data "@/tmp/ks_body.json")
+
+          if [ "$STATUS" != "201" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Integration tests skipped::Keystone probe returned HTTP $STATUS. Update AFTERGLOW_OS_* secrets or check the OpenStack endpoint."
+            exit 0
+          fi
+
+          echo "Keystone probe succeeded (HTTP $STATUS)."
+
+          # 카탈로그에서 network 엔드포인트 URL 추출 (interface 일치)
+          NET_URL=$(jq -r --arg intf "$OS_INTERFACE" \
+            '.token.catalog[] | select(.type=="network") | .endpoints[] | select(.interface==$intf) | .url' \
+            /tmp/ks_resp.json | head -n1)
+
+          if [ -z "$NET_URL" ] || [ "$NET_URL" = "null" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Integration tests skipped::network endpoint (interface=$OS_INTERFACE) not found in Keystone catalog."
+            exit 0
+          fi
+
+          echo "Found network endpoint: $NET_URL"
+
+          # 도달성 검사 — HTTP 응답 코드 무관, curl exit code만 검사
+          if curl -sk --max-time 5 -o /dev/null "$NET_URL"; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "Keystone + network endpoint reachable — integration tests will run."
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Integration tests skipped::network endpoint $NET_URL unreachable from runner (interface=$OS_INTERFACE)."
+          fi
+
+  # ─── 통합 테스트: detect-integration.outputs.enabled == 'true' 시만 실행 ───
+  # GitHub Secrets 등록 방법:
+  #   Settings > Secrets and variables > Actions > New repository secret
+  #
+  # 필수 Secrets:
+  #   AFTERGLOW_OS_AUTH_URL       — Keystone v3 endpoint
+  #   AFTERGLOW_OS_USERNAME       — admin 사용자 이름
+  #   AFTERGLOW_OS_PASSWORD       — admin 비밀번호
+  #   AFTERGLOW_OS_PROJECT_NAME   — admin 프로젝트 이름 (기본: admin)
+  #
+  # 선택 Secrets (다중 계정 통합 테스트):
+  #   AFTERGLOW_TEST_ADMIN_USER_USERNAME / PASSWORD / PROJECT
+  #   AFTERGLOW_TEST_USER_USERNAME / PASSWORD / PROJECT
+  #
+  # 선택 Variables (Settings > Variables, 기본값 있음):
+  #   AFTERGLOW_OS_PROJECT_DOMAIN_NAME — 기본: Default
+  #   AFTERGLOW_OS_USER_DOMAIN_NAME    — 기본: Default
+  #   AFTERGLOW_OS_REGION_NAME         — 기본: RegionOne
+  #   AFTERGLOW_OS_INTERFACE           — 기본: internal
+  test-backend-integration:
+    name: Backend (integration tests)
+    needs: [test-backend, detect-integration]
+    runs-on: ubuntu-latest
+    if: ${{ needs.detect-integration.outputs.enabled == 'true' }}
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Sync deps (dev)
+        working-directory: backend
+        run: uv sync --frozen --extra dev
+
+      - name: Integration tests
+        working-directory: backend
+        env:
+          AFTERGLOW_ALLOW_INSECURE: "1"
+          AFTERGLOW_REDIS_URL: redis://localhost:6379/0
+          OS_AUTH_URL: ${{ secrets.AFTERGLOW_OS_AUTH_URL }}
+          OS_USERNAME: ${{ secrets.AFTERGLOW_OS_USERNAME }}
+          OS_PASSWORD: ${{ secrets.AFTERGLOW_OS_PASSWORD }}
+          OS_PROJECT_NAME: ${{ secrets.AFTERGLOW_OS_PROJECT_NAME }}
+          OS_PROJECT_DOMAIN_NAME: ${{ vars.AFTERGLOW_OS_PROJECT_DOMAIN_NAME || 'Default' }}
+          OS_USER_DOMAIN_NAME: ${{ vars.AFTERGLOW_OS_USER_DOMAIN_NAME || 'Default' }}
+          OS_REGION_NAME: ${{ vars.AFTERGLOW_OS_REGION_NAME || 'RegionOne' }}
+          OS_INTERFACE: ${{ vars.AFTERGLOW_OS_INTERFACE || 'internal' }}
+          AFTERGLOW_TEST_ADMIN_USERNAME: ${{ secrets.AFTERGLOW_OS_USERNAME }}
+          AFTERGLOW_TEST_ADMIN_PASSWORD: ${{ secrets.AFTERGLOW_OS_PASSWORD }}
+          AFTERGLOW_TEST_ADMIN_PROJECT: ${{ secrets.AFTERGLOW_OS_PROJECT_NAME }}
+          AFTERGLOW_TEST_ADMIN_USER_USERNAME: ${{ secrets.AFTERGLOW_TEST_ADMIN_USER_USERNAME }}
+          AFTERGLOW_TEST_ADMIN_USER_PASSWORD: ${{ secrets.AFTERGLOW_TEST_ADMIN_USER_PASSWORD }}
+          AFTERGLOW_TEST_ADMIN_USER_PROJECT: ${{ secrets.AFTERGLOW_TEST_ADMIN_USER_PROJECT }}
+          AFTERGLOW_TEST_USER_USERNAME: ${{ secrets.AFTERGLOW_TEST_USER_USERNAME }}
+          AFTERGLOW_TEST_USER_PASSWORD: ${{ secrets.AFTERGLOW_TEST_USER_PASSWORD }}
+          AFTERGLOW_TEST_USER_PROJECT: ${{ secrets.AFTERGLOW_TEST_USER_PROJECT }}
+          AFTERGLOW_TEST_PROJECT_B_USERNAME: ${{ secrets.AFTERGLOW_TEST_PROJECT_B_USERNAME }}
+          AFTERGLOW_TEST_PROJECT_B_PASSWORD: ${{ secrets.AFTERGLOW_TEST_PROJECT_B_PASSWORD }}
+          AFTERGLOW_TEST_PROJECT_B_NAME: ${{ secrets.AFTERGLOW_TEST_PROJECT_B_NAME }}
+        run: uv run python -m pytest tests/integration -v -m slow
 
   test-frontend:
     name: Frontend (vitest)

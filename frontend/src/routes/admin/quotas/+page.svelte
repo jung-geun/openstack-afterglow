@@ -42,6 +42,7 @@
 	let showProjectDropdown = $state(false);
 	let quotas = $state<Quotas | null>(null);
 	let loading = $state(true);
+	let refreshing = $state(false);
 	let quotaLoading = $state(false);
 	let saving = $state(false);
 	let saveError = $state('');
@@ -87,11 +88,12 @@
 	);
 
 	async function loadProjects() {
-		loading = true;
+		if (projects.length === 0) loading = true;
+		else refreshing = true;
 		try {
 			const res = await api.get<{ id: string; name: string }[]>('/api/admin/projects/names', token, projectId);
 			projects = res || [];
-		} catch { projects = []; } finally { loading = false; }
+		} catch { projects = []; } finally { loading = false; refreshing = false; }
 	}
 
 	async function loadGpuAliases() {
@@ -210,6 +212,7 @@
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={3} />
 	{:else}
+		<div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 		<!-- 전체 프로젝트 기본 GPU Quota -->
 		<div class="bg-gray-900 border border-gray-800 rounded-xl p-6 mb-6">
 			<h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-1">전체 프로젝트 기본 GPU Quota</h2>
@@ -392,5 +395,6 @@
 				<div class="text-gray-600 text-sm">쿼터를 불러올 수 없습니다</div>
 			{/if}
 		{/if}
+		</div>
 	{/if}
 </div>

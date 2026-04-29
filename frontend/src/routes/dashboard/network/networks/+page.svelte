@@ -1,15 +1,16 @@
 <script lang="ts">
-  import { auth } from '$lib/stores/auth';
   import { untrack } from 'svelte';
+  import { auth } from '$lib/stores/auth';
   import { api, ApiError, memoryCache } from '$lib/api/client';
   import type { Network, FloatingIp } from '$lib/types/resources';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
-  import RefreshButton from '$lib/components/RefreshButton.svelte';
-  import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
+  import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+  import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
   import SlidePanel from '$lib/components/SlidePanel.svelte';
   import NetworkDetailPanel from '$lib/components/NetworkDetailPanel.svelte';
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
+  import ActionMenu from '$lib/components/ui/ActionMenu.svelte';
 
 
   let networks = $state<Network[]>([]);
@@ -17,9 +18,11 @@
   let loading = $state(true);
   let refreshing = $state(false);
   let error = $state('');
-  let autoRefresh = $state(false);
   let deleting = $state<string | null>(null);
   let selectedNetworkId = $state<string | null>(null);
+  let defaultNetworkId = $state<string | null>(null);
+  let settingDefault = $state<string | null>(null);
+  let openNetMenu = $state<string | null>(null);
 
   function openNetworkPanel(id: string) {
     selectedNetworkId = id;
@@ -62,6 +65,27 @@
       if (!cached) error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
     } finally {
       loading = false;
+    }
+  }
+
+  async function fetchDefaultNetwork() {
+    try {
+      const record = await api.get<{ network_id: string }>('/api/networks/default', $auth.token ?? undefined, $auth.projectId ?? undefined);
+      defaultNetworkId = record.network_id;
+    } catch {
+      defaultNetworkId = null;
+    }
+  }
+
+  async function setAsDefault(networkId: string) {
+    settingDefault = networkId;
+    try {
+      await api.put('/api/networks/default', { network_id: networkId }, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      defaultNetworkId = networkId;
+    } catch (e) {
+      alert('기본 네트워크 설정 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+    } finally {
+      settingDefault = null;
     }
   }
 
@@ -118,17 +142,24 @@
     }
   }
 
+  const ar = createAutoRefresh(() => { fetchNetworks(); fetchFloatingIps(); }, {
+    storageKey: 'dashboard-network-networks',
+    defaultActive: true,
+    defaultInterval: 30,
+    intervalOptions: [10, 15, 30, 60],
+  });
+
   $effect(() => {
     const projectId = $auth.projectId;
     if (!projectId) return;
     loading = true;
-    untrack(() => { fetchNetworks(); fetchFloatingIps(); });
+    untrack(() => { fetchNetworks(); fetchFloatingIps(); fetchDefaultNetwork(); });
   });
 
   $effect(() => {
-    if (!$auth.projectId || !autoRefresh) return;
-    const interval = setInterval(() => untrack(() => { fetchNetworks(); fetchFloatingIps(); }), 30000);
-    return () => clearInterval(interval);
+    const close = () => { openNetMenu = null; };
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
   });
 </script>
 
@@ -175,8 +206,13 @@
 <div class="p-4 md:p-8">
   <PageHeader breadcrumb="NETWORK / NETWORKS" title="네트워크">
     {#snippet actions()}
-      <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={30} />
-      <RefreshButton {refreshing} onclick={forceRefresh} />
+      <AutoRefreshControl
+        bind:active={ar.active}
+        bind:intervalSeconds={ar.intervalSeconds}
+        intervalOptions={ar.intervalOptions}
+        refreshing={refreshing}
+        onManualRefresh={forceRefresh}
+      />
       <button onclick={() => showModal = true} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 네트워크 생성</button>
     {/snippet}
   </PageHeader>
@@ -223,7 +259,12 @@
                   </svg>
                 </div>
                 <div class="min-w-0">
-                  <div class="text-white font-medium truncate">{net.name || net.id.slice(0, 12)}</div>
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-white font-medium truncate">{net.name || net.id.slice(0, 12)}</span>
+                    {#if net.id === defaultNetworkId}
+                      <span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/40 border border-blue-700/60 text-blue-400 shrink-0">기본</span>
+                    {/if}
+                  </div>
                   <div class="text-[11px] text-gray-500 font-mono truncate">{net.id.slice(0, 8)}…</div>
                 </div>
               </div>
@@ -246,13 +287,27 @@
               <!-- 상태 -->
               <div class="hidden sm:block"><StatusChip status={net.status} /></div>
               <!-- 액션 -->
-              <div class="hidden sm:block" onclick={(e) => e.stopPropagation()} role="none">
+              <div class="hidden sm:flex items-center justify-end" role="none">
                 {#if !net.is_external && !net.is_shared}
-                  <button
-                    onclick={(e) => { e.stopPropagation(); deleteNetwork(net.id, net.name, net.is_external, net.is_shared); }}
-                    disabled={deleting === net.id}
-                    class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-xs px-2 py-1 rounded border border-red-900 hover:border-red-700 disabled:border-gray-700 transition-colors"
-                  >{deleting === net.id ? '삭제 중...' : '삭제'}</button>
+                  <ActionMenu
+                    open={openNetMenu === net.id}
+                    onopen={() => { openNetMenu = net.id; }}
+                    onclose={() => { openNetMenu = null; }}
+                  >
+                    {#if net.id !== defaultNetworkId}
+                      <button
+                        onclick={() => { openNetMenu = null; setAsDefault(net.id); }}
+                        disabled={settingDefault === net.id}
+                        class="w-full text-left px-3 py-1.5 text-xs text-blue-400 hover:bg-gray-800 hover:text-blue-300 disabled:text-gray-600"
+                      >{settingDefault === net.id ? '설정 중...' : '기본 네트워크로 설정'}</button>
+                    {/if}
+                    <div class="border-t border-gray-800 my-1"></div>
+                    <button
+                      onclick={() => { openNetMenu = null; deleteNetwork(net.id, net.name, net.is_external, net.is_shared); }}
+                      disabled={deleting === net.id}
+                      class="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-gray-800 hover:text-red-300 disabled:text-gray-600"
+                    >{deleting === net.id ? '삭제 중...' : '삭제'}</button>
+                  </ActionMenu>
                 {/if}
               </div>
             </div>

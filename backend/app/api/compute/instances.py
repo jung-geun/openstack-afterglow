@@ -22,11 +22,14 @@ if TYPE_CHECKING:
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
+from openstack.exceptions import ConflictException
 
-from app.api.deps import get_os_conn
+from app.api.deps import get_os_conn, get_token_info, require_admin
 from app.config import get_settings
 from app.database import is_db_available
 from app.models.compute import (
+    AdminPasswordPrecheck,
+    AdminPasswordRequest,
     AttachInterfaceRequest,
     AttachVolumeRequest,
     CreateInstanceRequest,
@@ -123,16 +126,38 @@ async def create_instance(
     request: Request,
     req: CreateInstanceRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     """동기식 인스턴스 생성 (기존 방식)."""
     settings = get_settings()
     resolved_libs = lib_svc.resolve_with_deps(req.libraries)
+
+    # Default 네트워크 결정 (asyncio.to_thread 호출 전에 미리 처리)
+    if not req.network_id:
+        if settings.default_network_enabled:
+            try:
+                from app.services.default_network import ensure_default_network as _ensure_net
+
+                default_net = await _ensure_net(
+                    conn,
+                    conn._afterglow_project_id,
+                    external_network_id=settings.default_network_external_id or None,
+                    cidr=settings.default_network_cidr,
+                )
+                req = req.model_copy(update={"network_id": default_net.id})
+            except Exception:
+                logger.warning("Default 네트워크 조회 실패, 설정값 폴백", exc_info=True)
+                if settings.default_network_id:
+                    req = req.model_copy(update={"network_id": settings.default_network_id})
+        elif settings.default_network_id:
+            req = req.model_copy(update={"network_id": settings.default_network_id})
 
     # 수집된 리소스 (rollback 용)
     created_file_storage_ids: list[str] = []
     created_access_ids: list[tuple[str, str]] = []  # (file_storage_id, access_id)
     boot_volume_id: str | None = None
     upper_volume_id: str | None = None
+    created_upper: bool = False  # 신규 생성 시에만 rollback에서 삭제
     server_id: str | None = None
     floating_ip_id: str | None = None
 
@@ -177,16 +202,24 @@ async def create_instance(
         )
 
         # ------------------------------------------------------------------
-        # 3. Cinder: upper 볼륨 생성 (OverlayFS upperdir)
+        # 3. Cinder: upper 볼륨 — 신규 생성 또는 기존(복구된) 볼륨 재사용
         # ------------------------------------------------------------------
-        upper_vol = await asyncio.to_thread(
-            cinder.create_empty_volume,
-            conn,
-            f"union-upper-{req.name}",
-            settings.upper_volume_size_gb,
-            req.availability_zone or settings.default_availability_zone,
-        )
-        upper_volume_id = upper_vol.id
+        if req.existing_upper_volume_id:
+            upper_volume_id = req.existing_upper_volume_id
+            upper_vol = await asyncio.to_thread(cinder.get_volume, conn, upper_volume_id)
+            if upper_vol.status != "available":
+                raise HTTPException(400, f"upper 볼륨 상태가 available이 아닙니다: {upper_vol.status}")
+            created_upper = False
+        else:
+            upper_vol = await asyncio.to_thread(
+                cinder.create_empty_volume,
+                conn,
+                f"union-upper-{req.name}",
+                settings.upper_volume_size_gb,
+                req.availability_zone or settings.default_availability_zone,
+            )
+            upper_volume_id = upper_vol.id
+            created_upper = True
 
         # ------------------------------------------------------------------
         # 4. cloud-init userdata 생성
@@ -203,6 +236,21 @@ async def create_instance(
             if not ok:
                 raise HTTPException(status_code=409, detail=msg)
 
+        # 헬스 리포트 토큰 발급 (서버 생성 전에 UUID 선발급)
+        import uuid as _uuid
+
+        project_id = conn._afterglow_project_id
+        from app.services import instance_health as _ih
+
+        _health_id = str(_uuid.uuid4())  # userdata에 포함할 안정적 식별자
+        _report_url = settings.k3s_callback_base_url or ""  # 백엔드 공개 URL 재사용
+        _health_token = ""
+        if _report_url:
+            try:
+                _health_token = await _ih.issue_report_token(_health_id, project_id)
+            except Exception:
+                logger.warning("헬스 토큰 발급 실패, 헬스체크 없이 계속", exc_info=True)
+
         userdata = cloudinit.generate_userdata(
             libraries=resolved_libs,
             strategy=req.strategy,
@@ -210,33 +258,54 @@ async def create_instance(
             upper_device="/dev/vdb",  # Nova가 두 번째 블록으로 붙임
             ceph_monitors=settings.ceph_monitors,
             gpu_available=gpu_available,
+            instance_id=_health_id if _health_token else "",
+            report_url=_report_url if _health_token else "",
+            report_token=_health_token,
         )
 
         # ------------------------------------------------------------------
         # 5. Nova: 서버 생성
         # ------------------------------------------------------------------
+        if resolved_libs and settings.union_auto_egress_sg_enabled:
+            try:
+                _sg_name = await asyncio.to_thread(
+                    neutron.ensure_union_egress_sg,
+                    conn,
+                    project_id,
+                    settings.union_egress_sg_name,
+                )
+                _sgs = list(req.security_groups or [])
+                if _sg_name not in _sgs:
+                    _sgs.append(_sg_name)
+                req = req.model_copy(update={"security_groups": _sgs})
+            except Exception:
+                logger.warning("Union egress SG 자동 attach 실패, 계속 진행", exc_info=True)
+
         meta = {
             "union_libraries": ",".join(resolved_libs),
             "union_strategy": req.strategy,
             "union_share_ids": ",".join([s.get("file_storage_id", "") for s in file_storages_info]),
             "union_upper_volume_id": upper_volume_id,
         }
+        if _health_token:
+            meta["union_health_id"] = _health_id
 
         # upper 볼륨을 두 번째 블록 디바이스로 추가
         # (Nova block_device_mapping_v2 에 추가 볼륨 연결)
         server = await asyncio.to_thread(
             nova.create_server,
             conn,
-            req.name,
-            req.flavor_id,
-            req.network_id or settings.default_network_id,
-            boot_volume_id,
-            userdata,
-            req.key_name,
-            req.admin_pass,
-            req.availability_zone or settings.default_availability_zone,
-            meta,
-            req.delete_boot_volume_on_termination,
+            name=req.name,
+            flavor_id=req.flavor_id,
+            network_id=req.network_id,
+            boot_volume_id=boot_volume_id,
+            userdata=userdata,
+            key_name=req.key_name,
+            admin_pass=req.admin_pass,
+            availability_zone=req.availability_zone or settings.default_availability_zone,
+            metadata=meta,
+            delete_boot_volume_on_termination=req.delete_boot_volume_on_termination,
+            security_groups=req.security_groups if req.security_groups else None,
         )
         server_id = server.id
 
@@ -260,40 +329,98 @@ async def create_instance(
 
         return server
 
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"인스턴스 생성 실패, rollback 시작: {e}")
+        error_detail = str(e)
+        logger.error(f"인스턴스 생성 실패, rollback 시작: {error_detail}")
+
+        import re as _re
+
+        if not server_id:
+            _m = _re.search(r"Server:([0-9a-f-]{36})", error_detail)
+            if _m:
+                server_id = _m.group(1)
+
+        if server_id:
+            try:
+                srv = conn.compute.get_server(server_id)
+                raw_fault = getattr(srv, "fault", None)
+                if raw_fault:
+                    fault_msg = (
+                        raw_fault.get("message", "")
+                        if isinstance(raw_fault, dict)
+                        else getattr(raw_fault, "message", "")
+                    )
+                    if fault_msg:
+                        error_detail = fault_msg
+            except Exception:
+                pass
+
         await _rollback(
             conn,
             server_id,
             boot_volume_id,
-            upper_volume_id,
+            upper_volume_id if created_upper else None,
             created_file_storage_ids,
             created_access_ids,
             floating_ip_id,
         )
-        raise HTTPException(status_code=500, detail="인스턴스 생성 실패")
+        is_admin = token_info.get("is_system_admin", False)
+        detail = (
+            f"인스턴스 생성 실패: {error_detail}"
+            if is_admin
+            else "인스턴스 생성에 실패했습니다. 관리자에게 문의하세요."
+        )
+        raise HTTPException(status_code=500, detail=detail)
 
 
 @router.post("/async")
 async def create_instance_async(
     req: CreateInstanceRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     """SSE로 진행 상황을 스트리밍하는 비동기 인스턴스 생성."""
     settings = get_settings()
     resolved_libs = lib_svc.resolve_with_deps(req.libraries)
 
+    # Default 네트워크 결정 (SSE 시작 전에 미리 처리)
+    if not req.network_id:
+        if settings.default_network_enabled:
+            try:
+                from app.services.default_network import ensure_default_network as _ensure_net
+
+                default_net = await _ensure_net(
+                    conn,
+                    conn._afterglow_project_id,
+                    external_network_id=settings.default_network_external_id or None,
+                    cidr=settings.default_network_cidr,
+                )
+                req = req.model_copy(update={"network_id": default_net.id})
+            except Exception:
+                logger.warning("Default 네트워크 조회 실패, 설정값 폴백", exc_info=True)
+                if settings.default_network_id:
+                    req = req.model_copy(update={"network_id": settings.default_network_id})
+        elif settings.default_network_id:
+            req = req.model_copy(update={"network_id": settings.default_network_id})
+
     async def progress_generator():
+        import time
+
         # 수집된 리소스 (rollback 용)
         created_file_storage_ids: list[str] = []
         created_access_ids: list[tuple[str, str]] = []
         boot_volume_id: str | None = None
         upper_volume_id: str | None = None
+        created_upper: bool = False  # 신규 생성 시에만 rollback에서 삭제
         server_id: str | None = None
         floating_ip_id: str | None = None
+        _start_time = time.monotonic()
 
         def send_progress(step: ProgressStep, progress: int, message: str, **extra):
-            msg = ProgressMessage(step=step, progress=progress, message=message, **extra)
+            elapsed = round(time.monotonic() - _start_time, 1)
+            msg = ProgressMessage(step=step, progress=progress, message=message, elapsed_seconds=elapsed, **extra)
             return f"data: {msg.model_dump_json()}\n\n"
 
         try:
@@ -351,23 +478,45 @@ async def create_instance_async(
             yield send_progress(ProgressStep.BOOT_VOLUME_CREATING, 45, "부트 볼륨 생성 완료")
 
             if resolved_libs:
-                # Step 3: Upper volume (45-60%)
-                yield send_progress(ProgressStep.UPPER_VOLUME_CREATING, 45, "Upper 볼륨 생성 중...")
-                upper_vol = await asyncio.to_thread(
-                    cinder.create_empty_volume,
-                    conn,
-                    name=f"union-upper-{req.name}",
-                    size_gb=settings.upper_volume_size_gb,
-                    availability_zone=req.availability_zone or settings.default_availability_zone,
-                )
-                upper_volume_id = upper_vol.id
-                yield send_progress(ProgressStep.UPPER_VOLUME_CREATING, 60, "Upper 볼륨 생성 완료")
+                # Step 3: Upper volume (45-60%) — 신규 생성 또는 기존(복구된) 볼륨 재사용
+                if req.existing_upper_volume_id:
+                    yield send_progress(ProgressStep.UPPER_VOLUME_CREATING, 45, "기존 upper 볼륨 검증 중...")
+                    upper_volume_id = req.existing_upper_volume_id
+                    upper_vol = await asyncio.to_thread(cinder.get_volume, conn, upper_volume_id)
+                    if upper_vol.status != "available":
+                        raise HTTPException(400, f"upper 볼륨 상태가 available이 아닙니다: {upper_vol.status}")
+                    created_upper = False
+                else:
+                    yield send_progress(ProgressStep.UPPER_VOLUME_CREATING, 45, "Upper 볼륨 생성 중...")
+                    upper_vol = await asyncio.to_thread(
+                        cinder.create_empty_volume,
+                        conn,
+                        name=f"union-upper-{req.name}",
+                        size_gb=settings.upper_volume_size_gb,
+                        availability_zone=req.availability_zone or settings.default_availability_zone,
+                    )
+                    upper_volume_id = upper_vol.id
+                    created_upper = True
+                yield send_progress(ProgressStep.UPPER_VOLUME_CREATING, 60, "Upper 볼륨 준비 완료")
 
                 # Step 4: cloud-init (60-65%)
                 yield send_progress(ProgressStep.USERDATA_GENERATING, 60, "cloud-init 생성 중...")
                 flavors = await asyncio.to_thread(nova.list_flavors, conn)
                 flavor = next((f for f in flavors if f.id == req.flavor_id), None)
                 gpu_available = flavor.is_gpu if flavor else False
+
+                import uuid as _uuid2
+
+                _sse_health_id = str(_uuid2.uuid4())
+                _sse_report_url = settings.k3s_callback_base_url or ""
+                _sse_health_token = ""
+                if _sse_report_url:
+                    try:
+                        from app.services import instance_health as _ih2
+
+                        _sse_health_token = await _ih2.issue_report_token(_sse_health_id, conn._afterglow_project_id)
+                    except Exception:
+                        logger.warning("SSE 헬스 토큰 발급 실패", exc_info=True)
 
                 userdata = cloudinit.generate_userdata(
                     libraries=resolved_libs,
@@ -376,11 +525,30 @@ async def create_instance_async(
                     upper_device="/dev/vdb",
                     ceph_monitors=settings.ceph_monitors,
                     gpu_available=gpu_available,
+                    instance_id=_sse_health_id if _sse_health_token else "",
+                    report_url=_sse_report_url if _sse_health_token else "",
+                    report_token=_sse_health_token,
                 )
                 yield send_progress(ProgressStep.USERDATA_GENERATING, 65, "cloud-init 생성 완료")
 
             # Step 5: Nova server (65-95%)
             yield send_progress(ProgressStep.SERVER_CREATING, 65, "Nova 서버 생성 중...")
+            _sse_effective_sgs: list[str] | None = list(req.security_groups) if req.security_groups else None
+            if resolved_libs and settings.union_auto_egress_sg_enabled:
+                try:
+                    _sg_name = await asyncio.to_thread(
+                        neutron.ensure_union_egress_sg,
+                        conn,
+                        conn._afterglow_project_id,
+                        settings.union_egress_sg_name,
+                    )
+                    _sgs = list(req.security_groups or [])
+                    if _sg_name not in _sgs:
+                        _sgs.append(_sg_name)
+                    _sse_effective_sgs = _sgs
+                except Exception:
+                    logger.warning("Union egress SG 자동 attach 실패, 계속 진행", exc_info=True)
+
             meta = {
                 "union_libraries": ",".join(resolved_libs) if resolved_libs else "none",
                 "union_strategy": req.strategy or "none",
@@ -391,13 +559,15 @@ async def create_instance_async(
                 ),
                 "union_upper_volume_id": upper_volume_id or "none",
             }
+            if resolved_libs and _sse_health_token:
+                meta["union_health_id"] = _sse_health_id
 
             server = await asyncio.to_thread(
                 nova.create_server,
                 conn,
                 name=req.name,
                 flavor_id=req.flavor_id,
-                network_id=req.network_id or settings.default_network_id,
+                network_id=req.network_id,
                 boot_volume_id=boot_volume_id,
                 userdata=userdata,
                 key_name=req.key_name,
@@ -405,6 +575,7 @@ async def create_instance_async(
                 availability_zone=req.availability_zone or settings.default_availability_zone,
                 metadata=meta,
                 delete_boot_volume_on_termination=req.delete_boot_volume_on_termination,
+                security_groups=_sse_effective_sgs,
             )
             server_id = server.id
             yield send_progress(ProgressStep.SERVER_CREATING, 95, "Nova 서버 생성 완료")
@@ -459,18 +630,52 @@ async def create_instance_async(
             yield send_progress(ProgressStep.COMPLETED, 100, "인스턴스 생성 완료", instance_id=server_id)
 
         except Exception as e:
-            logger.error(f"인스턴스 생성 실패, rollback 시작: {e}")
+            error_detail = str(e)
+            logger.error(f"인스턴스 생성 실패, rollback 시작: {error_detail}")
+
+            # wait_for_server 실패 시 server_id가 미설정 — 예외 메시지에서 추출
+            import re as _re
+
+            if not server_id:
+                _m = _re.search(r"Server:([0-9a-f-]{36})", error_detail)
+                if _m:
+                    server_id = _m.group(1)
+
+            # ERROR 상태 서버의 fault 메시지를 우선 사용
+            if server_id:
+                try:
+                    srv = conn.compute.get_server(server_id)
+                    raw_fault = getattr(srv, "fault", None)
+                    if raw_fault:
+                        fault_msg = (
+                            raw_fault.get("message", "")
+                            if isinstance(raw_fault, dict)
+                            else getattr(raw_fault, "message", "")
+                        )
+                        if fault_msg:
+                            error_detail = fault_msg
+                except Exception:
+                    pass
+
+            # 비관리자에게는 상세 에러 숨김
+            is_admin = token_info.get("is_system_admin", False)
+            user_message = (
+                f"인스턴스 생성 실패: {error_detail}"
+                if is_admin
+                else "인스턴스 생성에 실패했습니다. 관리자에게 문의하세요."
+            )
+
             yield send_progress(
                 ProgressStep.FAILED,
                 0,
-                "인스턴스 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.",
-                error="인스턴스 생성 실패",
+                user_message,
+                error=error_detail if is_admin else "인스턴스 생성 실패",
             )
             await _rollback(
                 conn,
                 server_id,
                 boot_volume_id,
-                upper_volume_id,
+                upper_volume_id if created_upper else None,
                 created_file_storage_ids,
                 created_access_ids,
                 floating_ip_id,
@@ -500,6 +705,16 @@ async def delete_instance(
     upper_volume_id = server.union_upper_volume_id
     file_storage_ids = server.union_share_ids
     strategy = server.union_strategy
+    health_id = (server.metadata or {}).get("union_health_id", "")
+
+    # 헬스 토큰 폐기 (best-effort)
+    if health_id:
+        try:
+            from app.services import instance_health as _ih_del
+
+            await _ih_del.revoke_report_token_by_instance(health_id)
+        except Exception:
+            logger.warning("헬스 토큰 폐기 실패 (instance=%s)", instance_id)
 
     # Nova 서버 삭제
     await asyncio.to_thread(nova.delete_server, conn, instance_id)
@@ -807,8 +1022,13 @@ async def update_port_security_groups(
 async def _prepare_prebuilt_file_storages(
     conn, resolved_libs: list[str], instance_name: str, created_access_ids: list
 ) -> list[dict]:
-    """Strategy A: 사전 빌드된 read-only 파일 스토리지에 access rule 추가."""
-    prebuilt_file_storages = await asyncio.to_thread(manila.list_file_storages, conn, {"union_type": "prebuilt"})
+    """Strategy A: 사전 빌드된 read-only 파일 스토리지에 access rule 추가.
+
+    Manila 작업은 service 프로젝트 conn으로 수행한다.
+    prebuilt share는 service 프로젝트가 소유하므로 사용자 conn으로는 access rule을 만들 수 없다.
+    """
+    svc_conn = await asyncio.to_thread(keystone.get_service_project_connection)
+    prebuilt_file_storages = await asyncio.to_thread(manila.list_file_storages, svc_conn, {"union_type": "prebuilt"})
     prebuilt_map = {s.library_name: s for s in prebuilt_file_storages}
 
     file_storages_info = []
@@ -820,17 +1040,20 @@ async def _prepare_prebuilt_file_storages(
             )
 
         cephx_id = f"union-ro-{instance_name}-{lib_id}"
-        rule = await asyncio.to_thread(manila.create_access_rule, conn, file_storage.id, cephx_id, "ro")
+        rule = await asyncio.to_thread(manila.create_access_rule, svc_conn, file_storage.id, cephx_id, "ro")
         created_access_ids.append((file_storage.id, rule["access_id"]))
 
-        export_paths = await asyncio.to_thread(manila.get_export_locations, conn, file_storage.id)
+        export_paths = await asyncio.to_thread(manila.get_export_locations, svc_conn, file_storage.id)
         file_storages_info.append(
             {
                 "file_storage_id": file_storage.id,
                 "name": lib_id,
+                "share_proto": file_storage.share_proto,
                 "export_path": export_paths[0] if export_paths else "",
                 "cephx_id": cephx_id,
                 "cephx_key": rule["access_key"],
+                "nfs_export_location": file_storage.nfs_export_location or "",
+                "mount_options": "",
             }
         )
     return file_storages_info
@@ -869,13 +1092,16 @@ async def _prepare_dynamic_file_storage(
             "union_instance": instance_name,
             "union_libraries": ",".join(resolved_libs),
             "union_share_proto": share_proto.upper(),
+            "union_project_id": getattr(conn, "_afterglow_project_id", ""),
         },
     )
     created_file_storage_ids.append(file_storage.id)
 
     if share_proto.upper() == "NFS":
         # NFS: IP 기반 access rule
-        access_to = vm_ip_address if vm_ip_address else "0.0.0.0/0"
+        if not vm_ip_address:
+            raise HTTPException(status_code=503, detail="VM IP not yet allocated, retry shortly")
+        access_to = vm_ip_address
         rule = await asyncio.to_thread(
             manila.ensure_nfs_access_rule,
             conn,
@@ -898,7 +1124,7 @@ async def _prepare_dynamic_file_storage(
             "cephx_id": "",
             "cephx_key": "",
             "nfs_export_location": nfs_export,
-            "mount_options": "hard,intr,noatime,_netdev,timeo=10,retrans=3",
+            "mount_options": "hard,intr,noatime,nosuid,nodev,noexec,_netdev,timeo=10,retrans=3",
         }
     else:
         # CephFS: CephX access rule (기존 로직)
@@ -947,9 +1173,14 @@ async def _rollback(
             except Exception as e:
                 logger.error(f"Rollback - 볼륨 삭제 실패 {vol_id}: {e}")
 
+    # prebuilt share는 service 프로젝트 소유이므로 service conn으로 revoke (admin role로 dynamic share도 처리 가능)
+    try:
+        svc_conn = await asyncio.to_thread(keystone.get_service_project_connection)
+    except RuntimeError:
+        svc_conn = conn  # service 프로젝트 미설정 환경에서는 user conn으로 fallback
     for file_storage_id, access_id in access_ids:
         try:
-            await asyncio.to_thread(manila.revoke_access_rule, conn, file_storage_id, access_id)
+            await asyncio.to_thread(manila.revoke_access_rule, svc_conn, file_storage_id, access_id)
         except Exception as e:
             logger.error(f"Rollback - access rule 삭제 실패: {e}")
 
@@ -968,20 +1199,53 @@ async def _rollback(
 @router.post("/{instance_id}/floating-ip", response_model=dict)
 async def assign_floating_ip(
     instance_id: str,
+    port_id: str | None = Query(None, description="연결할 포트 ID (미지정 시 첫 번째 포트)"),
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """인스턴스에 새 Floating IP를 자동 생성하고 연결한다."""
     pid = conn._afterglow_project_id
     try:
-        all_nets = await asyncio.to_thread(neutron.list_networks, conn)
-        ext_net = next((n for n in all_nets if n.is_external), None)
-        if not ext_net:
-            raise HTTPException(status_code=400, detail="외부 네트워크가 없습니다")
-        fip = await asyncio.to_thread(neutron.create_floating_ip, conn, ext_net.id)
+        # 1) 인스턴스 포트 조회 + 점유 체크
+        ports = await asyncio.to_thread(lambda: list(conn.network.ports(device_id=instance_id)))
+        if not ports:
+            raise HTTPException(status_code=400, detail="인스턴스에 연결된 포트가 없습니다")
+        used_port_ids = await asyncio.to_thread(lambda: {f.port_id for f in conn.network.ips() if f.port_id})
+        if port_id:
+            target_port = next((p for p in ports if p.id == port_id), None)
+            if not target_port:
+                raise HTTPException(status_code=404, detail="해당 인터페이스를 찾을 수 없습니다")
+            if port_id in used_port_ids:
+                raise HTTPException(
+                    status_code=409,
+                    detail="해당 인터페이스에 이미 Floating IP가 할당되어 있습니다",
+                )
+        else:
+            available = [p for p in ports if p.id not in used_port_ids]
+            if not available:
+                raise HTTPException(
+                    status_code=400,
+                    detail="모든 인터페이스에 이미 Floating IP가 할당되어 있습니다",
+                )
+            target_port = available[0]
+            port_id = target_port.id
+
+        # 2) 인스턴스 서브넷 → 라우터 → 연결된 외부 네트워크 결정
+        subnet_ids = {fi.get("subnet_id") for fi in (target_port.fixed_ips or []) if fi.get("subnet_id")}
+        ext_net_id = await asyncio.to_thread(neutron.find_external_network_for_subnets, conn, subnet_ids)
+        if not ext_net_id:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "이 인터페이스의 서브넷이 외부 네트워크와 라우터로 연결되어 있지 않습니다. "
+                    "라우터로 외부 네트워크에 연결한 뒤 다시 시도하세요."
+                ),
+            )
+
+        # 3) FIP 생성 + 연결 (race 발생 시 rollback)
+        fip = await asyncio.to_thread(neutron.create_floating_ip, conn, ext_net_id)
         try:
-            result = await asyncio.to_thread(neutron.associate_floating_ip, conn, fip.id, instance_id)
+            result = await asyncio.to_thread(neutron.associate_floating_ip, conn, fip.id, instance_id, port_id)
         except Exception as ex:
-            # 연결 실패 시 생성된 FIP 정리
             try:
                 await asyncio.to_thread(neutron.delete_floating_ip, conn, fip.id)
             except Exception:
@@ -991,8 +1255,25 @@ async def assign_floating_ip(
         return {"id": result.id, "floating_ip_address": result.floating_ip_address}
     except HTTPException:
         raise
+    except ConflictException as ex:
+        logger.warning("Floating IP 할당 충돌: %s", ex)
+        raise HTTPException(
+            status_code=409,
+            detail="해당 인터페이스에 이미 Floating IP가 할당되어 있습니다",
+        )
     except Exception as ex:
-        raise HTTPException(status_code=500, detail=f"Floating IP 할당 실패: {ex}")
+        msg = str(ex)
+        if "is not reachable from subnet" in msg or "not reachable from" in msg:
+            logger.warning("Floating IP 할당 실패 (외부망 reachable 아님): %s", ex)
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "선택된 외부 네트워크가 인스턴스 서브넷에서 도달 불가능합니다. "
+                    "라우터의 외부 게이트웨이 설정을 확인하세요."
+                ),
+            )
+        logger.warning("Floating IP 할당 실패: %s", ex)
+        raise HTTPException(status_code=500, detail="Floating IP 할당 실패")
 
 
 @router.delete("/{instance_id}/floating-ip", status_code=204)
@@ -1006,4 +1287,111 @@ async def release_floating_ip(
         await asyncio.to_thread(neutron.cleanup_instance_fips, conn, instance_id)
         await invalidate(f"afterglow:neutron:{pid}:floating_ips")
     except Exception as ex:
-        raise HTTPException(status_code=500, detail=f"Floating IP 해제 실패: {ex}")
+        logger.warning("Floating IP 해제 실패: %s", ex)
+        raise HTTPException(status_code=500, detail="Floating IP 해제 실패")
+
+
+@router.get("/availability-zones")
+async def list_availability_zones(
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """사용 가능한 가용 영역 목록."""
+    try:
+        zones = await asyncio.to_thread(nova.list_availability_zones, conn)
+        return zones
+    except Exception:
+        raise HTTPException(status_code=500, detail="가용 영역 조회 실패")
+
+
+@router.get("/{server_id}/admin-password/precheck", response_model=AdminPasswordPrecheck)
+async def precheck_admin_password(
+    server_id: str,
+    _: None = Depends(require_admin),
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """관리자 패스워드 재설정 가능 여부를 사전 점검한다.
+    QGA 지원 여부, 인스턴스 상태, os_admin_user를 반환.
+    """
+    try:
+        s = await asyncio.to_thread(nova.get_server, conn, server_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="인스턴스를 찾을 수 없습니다")
+
+    if s.status != "ACTIVE":
+        return AdminPasswordPrecheck(
+            supported=False,
+            reason=f"인스턴스가 ACTIVE 상태가 아닙니다 (현재: {s.status})",
+            server_status=s.status,
+        )
+
+    try:
+        img_meta = await asyncio.to_thread(nova.get_server_image_meta, conn, server_id)
+    except Exception:
+        img_meta = {"qga_enabled": False, "os_admin_user": None, "image_id": None, "image_name": None}
+
+    if not img_meta["qga_enabled"]:
+        return AdminPasswordPrecheck(
+            supported=False,
+            reason="이미지에 QEMU Guest Agent(QGA)가 활성화되지 않았습니다. 이미지 메타데이터에 hw_qemu_guest_agent=yes 설정이 필요합니다.",
+            os_admin_user=img_meta.get("os_admin_user"),
+            server_status=s.status,
+        )
+
+    return AdminPasswordPrecheck(
+        supported=True,
+        os_admin_user=img_meta.get("os_admin_user"),
+        server_status=s.status,
+    )
+
+
+@router.post("/{server_id}/admin-password", status_code=204)
+async def set_admin_password(
+    server_id: str,
+    body: AdminPasswordRequest,
+    token_info: dict = Depends(get_token_info),
+    _: None = Depends(require_admin),
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """QEMU Guest Agent를 통해 인스턴스 관리자 계정의 패스워드를 재설정한다.
+    이미지에 hw_qemu_guest_agent=yes + 게스트 내 QGA 데몬 실행 중이어야 동작.
+    """
+    try:
+        s = await asyncio.to_thread(nova.get_server, conn, server_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="인스턴스를 찾을 수 없습니다")
+
+    if s.status != "ACTIVE":
+        raise HTTPException(
+            status_code=409,
+            detail=f"패스워드 변경은 ACTIVE 상태에서만 가능합니다 (현재: {s.status})",
+        )
+
+    img_meta = {"qga_enabled": False, "os_admin_user": None}
+    try:
+        img_meta = await asyncio.to_thread(nova.get_server_image_meta, conn, server_id)
+    except Exception:
+        pass
+
+    if not img_meta["qga_enabled"]:
+        raise HTTPException(
+            status_code=409,
+            detail="이미지에 QGA가 활성화되지 않아 패스워드 변경이 동작하지 않습니다. 이미지 메타데이터에 hw_qemu_guest_agent=yes 설정이 필요합니다.",
+        )
+
+    actor_id = token_info.get("user_id", "unknown")
+    project_id = token_info.get("project_id", "unknown")
+    logger.warning(
+        "admin_password_reset server=%s actor=%s project=%s os_admin_user=%s",
+        server_id,
+        actor_id,
+        project_id,
+        img_meta.get("os_admin_user"),
+    )
+
+    try:
+        await asyncio.to_thread(nova.change_server_password, conn, server_id, body.new_password)
+    except ConflictException as e:
+        raise HTTPException(status_code=409, detail=f"Nova 패스워드 변경 충돌: {e}")
+    except Exception as e:
+        logger.warning("admin_password_reset 실패 server=%s: %s", server_id, e)
+        raise HTTPException(status_code=500, detail="패스워드 변경 요청 실패")

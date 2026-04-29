@@ -12,10 +12,11 @@
 
 ---
 
-## 개발 워크플로우 (하네스 운용 규정)
+## 개발 워크플로우
 
-Claude Code는 하네스(비인터랙티브 모드)로 실행되므로 **plan 모드를 사용할 수 없다.**
-따라서 **모든 개발은 반드시 아래 단계를 순서대로 따른다.**
+Claude Code는 **인터랙티브 모드**(plan 모드 포함)와 **하네스(비인터랙티브 모드)** 두 가지로 실행될 수 있다.
+인터랙티브 모드에서는 plan 모드를 사용하여 설계를 먼저 확정한 뒤 구현으로 진행한다.
+하네스 모드(`--print`)로 실행될 때는 아래 단계를 순서대로 따른다.
 
 ### 단계 1 — Discord에서 플래닝 (Katherine 직접 수행)
 
@@ -80,15 +81,26 @@ pie_root가 변경 내용 검토 후 `dev → main` PR을 직접 생성하고 �
 ## 프로젝트 구조 요약
 
 ```
-backend/          FastAPI + openstacksdk (Python 3.12+)
-  app/api/        OpenStack 서비스별 라우터
-  app/services/   OpenStack 클라이언트 래퍼
-  app/models/     Pydantic 모델
-  app/templates/  cloud-init Jinja2 템플릿
+backend/              FastAPI + openstacksdk (Python 3.12+)
+  app/api/            OpenStack 서비스별 라우터
+    k3s/              k3s 클러스터 프로비저닝 API
+    union/            Union Mount 레이어 API (신규)
+  app/services/       OpenStack 클라이언트 래퍼
+    k3s_plugins/      Cloud Provider OpenStack 플러그인 레지스트리
+  app/models/         Pydantic 모델
+  app/templates/      cloud-init Jinja2 템플릿
+  tests/              pytest 단위 테스트 (엔드포인트별 의무)
 
-frontend/         SvelteKit + TypeScript + Tailwind CSS 4
-  src/routes/     페이지 라우터
-  src/lib/        컴포넌트, API 클라이언트, Svelte stores
+frontend/             SvelteKit + TypeScript + Tailwind CSS 4
+  src/routes/         페이지 라우터
+  src/lib/
+    components/       UI 컴포넌트 (AutoRefreshControl 등)
+    utils/            유틸리티 (autoRefresh.svelte.ts 등)
+    stores/           Svelte stores (auth, projectNames 등)
+    api/              API 클라이언트
+
+union.md              Union Mount 레이어 시스템 v2 설계 문서 (참조 필수)
+milestone.md          기능별 구현 현황 추적
 ```
 
 ## 기술 스택
@@ -98,7 +110,28 @@ frontend/         SvelteKit + TypeScript + Tailwind CSS 4
 | Backend | FastAPI 0.125, Python 3.12, openstacksdk 3.3 |
 | Frontend | SvelteKit 2.50, Svelte 5, Tailwind CSS 4 |
 | DB/Cache | SQLAlchemy 2.0 (asyncio) + asyncmy, Redis 7 |
-| 특화 기능 | k3s 프로비저닝, OverlayFS+Manila, AES-256-GCM kubeconfig |
+| 특화 기능 | k3s 프로비저닝, Content-addressable OverlayFS 레이어, AES-256-GCM kubeconfig |
+| 스토리지 | CephFS via Manila (layer-store-rw / layer-store-ro / manifest-store 3개 share) |
+
+---
+
+## 개발 규칙
+
+### 테스트 의무
+
+- **백엔드 엔드포인트를 구현하면 반드시 `backend/tests/` 에 pytest 테스트를 함께 작성한다.**
+- 커밋 전 반드시 실행: `npm run test:all` + `npm run lint:backend`
+- 테스트 없는 엔드포인트 구현은 미완료로 간주한다.
+
+### milestone.md 갱신 의무
+
+- 기능 구현 완료 시 `milestone.md`의 해당 항목을 `[ ]` → `[x]`로 업데이트한다.
+- 신규 기능을 추가할 경우 milestone.md에 항목을 먼저 추가한 후 구현에 착수한다.
+
+### Union Mount 설계
+
+- Union Mount 레이어 시스템 구현 시 **`union.md` 를 반드시 먼저 읽는다.**
+- Content-addressable 레이어, single-parent 상속, 3-lock 불변성 등 설계 원칙을 따른다.
 
 ---
 
@@ -115,3 +148,4 @@ frontend/         SvelteKit + TypeScript + Tailwind CSS 4
 - `git push --force`
 - `.env`, 인증 정보, 시크릿 파일 커밋
 - 플래닝 없이 대규모 리팩토링 착수
+- 테스트 없이 백엔드 엔드포인트 커밋

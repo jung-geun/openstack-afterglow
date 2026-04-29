@@ -4,12 +4,12 @@
   import { api, ApiError, memoryCache } from '$lib/api/client';
   import type { FileStorage } from '$lib/types/resources';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
-  import RefreshButton from '$lib/components/RefreshButton.svelte';
-  import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
+  import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
   import SlidePanel from '$lib/components/SlidePanel.svelte';
   import FileStorageDetailPanel from '$lib/components/FileStorageDetailPanel.svelte';
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
+  import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 
   // ────────── 공통 ──────────
   const token = $derived($auth.token ?? undefined);
@@ -33,7 +33,6 @@
   let refreshing = $state(false);
   let error = $state('');
   let deleting = $state<string | null>(null);
-  let autoRefresh = $state(false);
   let copiedExport = $state<string | null>(null);
 
   // ────────── 슬라이드 패널 ──────────
@@ -101,16 +100,17 @@
     finally { refreshing = false; }
   }
 
+  const ar = createAutoRefresh(() => { fetchFileStorages(); fetchQuota(); }, {
+    storageKey: 'dashboard-file-storage-list',
+    defaultActive: true,
+    defaultInterval: 15,
+    intervalOptions: [10, 15, 30, 60],
+  });
+
   $effect(() => {
     const pid = $auth.projectId;
     if (!pid) return;
     untrack(() => { fetchFileStorages(); fetchQuota(); });
-  });
-
-  $effect(() => {
-    if (!$auth.projectId || !autoRefresh) return;
-    const interval = setInterval(() => untrack(() => fetchFileStorages()), 10000);
-    return () => clearInterval(interval);
   });
 
   // ────────── 위저드 ──────────
@@ -574,8 +574,13 @@
 <div class="p-4 md:p-8">
   <PageHeader breadcrumb="FILE STORAGE" title="파일 스토리지">
     {#snippet actions()}
-      <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={10} />
-      <RefreshButton refreshing={refreshing} onclick={forceRefresh} />
+      <AutoRefreshControl
+        bind:active={ar.active}
+        bind:intervalSeconds={ar.intervalSeconds}
+        intervalOptions={ar.intervalOptions}
+        refreshing={refreshing || loading}
+        onManualRefresh={forceRefresh}
+      />
       <button onclick={openWizard} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 파일 스토리지 생성</button>
     {/snippet}
   </PageHeader>

@@ -1,9 +1,12 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	interface FileStorage {
 		id: string;
@@ -49,11 +52,20 @@
 		error: 'text-red-400 bg-red-900/30',
 	};
 
+	const ar = createAutoRefresh(
+		() => { const id = $page.params.id; return Promise.all([fetchFileStorage(id), fetchAccessRules(id)]); },
+		{
+			storageKey: 'dashboard-file-storage-detail',
+			defaultActive: true,
+			defaultInterval: 15,
+			intervalOptions: [10, 15, 30, 60],
+		}
+	);
+
 	$effect(() => {
 		const id = $page.params.id;
 		if (!id || !$auth.token) return;
-		fetchFileStorage(id);
-		fetchAccessRules(id);
+		untrack(() => { fetchFileStorage(id); fetchAccessRules(id); });
 	});
 
 	async function fetchFileStorage(id: string) {
@@ -182,6 +194,14 @@
 					</span>
 				</div>
 			</div>
+			<div class="flex items-center gap-2">
+			<AutoRefreshControl
+				bind:active={ar.active}
+				bind:intervalSeconds={ar.intervalSeconds}
+				intervalOptions={ar.intervalOptions}
+				refreshing={loading}
+				onManualRefresh={() => { const id = $page.params.id; fetchFileStorage(id); fetchAccessRules(id); }}
+			/>
 			<button
 				onclick={deleteFileStorage}
 				disabled={deleting}
@@ -189,6 +209,7 @@
 			>
 				{deleting ? '삭제 중...' : '삭제'}
 			</button>
+		</div>
 		</div>
 
 		<!-- 기본 정보 -->

@@ -1,10 +1,10 @@
 <script lang="ts">
-	import { auth } from '$lib/stores/auth';
 	import { untrack } from 'svelte';
+	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
-	import RefreshButton from '$lib/components/RefreshButton.svelte';
-	import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 
 	interface SecurityGroupRule {
@@ -28,7 +28,6 @@
 	let loading = $state(true);
 	let refreshing = $state(false);
 	let sgError = $state('');
-	let autoRefresh = $state(false);
 
 	let showSgModal = $state(false);
 	let sgForm = $state({ name: '', description: '' });
@@ -63,6 +62,13 @@
 			refreshing = false;
 		}
 	}
+
+	const ar = createAutoRefresh(() => fetchSecurityGroups(), {
+		storageKey: 'dashboard-network-sg',
+		defaultActive: true,
+		defaultInterval: 60,
+		intervalOptions: [10, 15, 30, 60],
+	});
 
 	async function createSecurityGroup() {
 		if (!sgForm.name.trim()) return;
@@ -102,6 +108,7 @@
 			if (ruleForm.protocol) body.protocol = ruleForm.protocol;
 			if (ruleForm.port_range_min) body.port_range_min = parseInt(ruleForm.port_range_min);
 			if (ruleForm.port_range_max) body.port_range_max = parseInt(ruleForm.port_range_max);
+			if (body.port_range_min != null && body.port_range_max == null) body.port_range_max = body.port_range_min;
 			if (ruleForm.remote_ip_prefix) body.remote_ip_prefix = ruleForm.remote_ip_prefix;
 			await api.post(`/api/security-groups/${sgId}/rules`, body, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			showAddRuleFor = null;
@@ -126,21 +133,20 @@
 	$effect(() => {
 		const pid = $auth.projectId;
 		if (!pid) return;
-		untrack(() => { fetchSecurityGroups(); });
-	});
-
-	$effect(() => {
-		if (!$auth.projectId || !autoRefresh) return;
-		const interval = setInterval(() => untrack(() => { fetchSecurityGroups(); }), 30000);
-		return () => clearInterval(interval);
+		untrack(() => fetchSecurityGroups());
 	});
 </script>
 
 <div class="p-4 md:p-8">
 	<PageHeader breadcrumb="NETWORK / SECURITY GROUPS" title="보안 그룹">
 		{#snippet actions()}
-			<AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={30} />
-			<RefreshButton {refreshing} onclick={forceRefresh} />
+			<AutoRefreshControl
+				bind:active={ar.active}
+				bind:intervalSeconds={ar.intervalSeconds}
+				intervalOptions={ar.intervalOptions}
+				refreshing={refreshing}
+				onManualRefresh={forceRefresh}
+			/>
 			<button
 				onclick={() => { showSgModal = true; sgCreateError = ''; }}
 				class="bg-blue-600 hover:bg-blue-500 text-white text-sm px-4 py-2 rounded-lg transition-colors"

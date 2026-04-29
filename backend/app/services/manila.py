@@ -363,7 +363,12 @@ def delete_file_storage(conn, file_storage_id: str) -> None:
     client.delete(f"shares/{file_storage_id}")
 
 
-def list_file_storages(conn, metadata_filter: dict | None = None, all_tenants: bool = False) -> list[FileStorageInfo]:
+def list_file_storages(
+    conn,
+    metadata_filter: dict | None = None,
+    all_tenants: bool = False,
+    caller_project_id: str | None = None,
+) -> list[FileStorageInfo]:
     client = get_client(conn)
     params: dict = {}
     if all_tenants:
@@ -378,6 +383,13 @@ def list_file_storages(conn, metadata_filter: dict | None = None, all_tenants: b
     file_storages = [_parse_file_storage(s) for s in data]
     if metadata_filter:
         file_storages = [s for s in file_storages if all(s.metadata.get(k) == v for k, v in metadata_filter.items())]
+    if caller_project_id is not None:
+        # 다른 프로젝트 소유 share는 is_public=True인 경우만 노출
+        file_storages = [
+            s
+            for s in file_storages
+            if s.is_public or s.metadata.get("union_project_id") in (caller_project_id, None, "")
+        ]
     return file_storages
 
 
@@ -431,6 +443,25 @@ def revoke_access_rule(conn, file_storage_id: str, access_id: str) -> None:
     client = get_client(conn)
     body = {"deny_access": {"access_id": access_id}}
     client.post(f"shares/{file_storage_id}/action", body)
+
+
+def rotate_cephx_access_rule(conn, file_storage_id: str, access_id: str) -> dict:
+    """CephX access rule 교체 (revoke 후 동일 access_to/level로 재생성).
+
+    Manila update-access API는 backend별 비호환이므로 revoke+create 방식을 사용한다.
+    반환: { access_id, access_key, access_to, access_level }
+    """
+    # 기존 rule 조회
+    rules = list_access_rules(conn, file_storage_id)
+    target = next((r for r in rules if r.get("id") == access_id), None)
+    if target is None:
+        raise KeyError(f"access_id {access_id}를 찾을 수 없습니다")
+    access_to = target["access_to"]
+    access_level = target["access_level"]
+
+    # revoke 후 재생성
+    revoke_access_rule(conn, file_storage_id, access_id)
+    return create_access_rule(conn, file_storage_id, access_to, access_level, "cephx")
 
 
 def list_access_rules(conn, file_storage_id: str) -> list[dict]:
@@ -493,6 +524,7 @@ def _parse_file_storage(data: dict) -> FileStorageInfo:
         project_id=data.get("project_id"),
         created_at=str(data["created_at"]) if data.get("created_at") else None,
         nfs_export_location=nfs_export_location,
+        is_public=bool(data.get("is_public", False)),
         library_name=meta.get("union_library"),
         library_version=meta.get("union_version"),
         built_at=meta.get("union_built_at"),
@@ -604,6 +636,18 @@ def delete_share_snapshot(conn, snapshot_id: str) -> None:
     """Manila share 스냅샷 삭제."""
     client = get_client(conn)
     client.delete(f"snapshots/{snapshot_id}")
+
+
+def get_share_snapshot(conn, snapshot_id: str) -> dict:
+    """Manila share 스냅샷 단건 조회."""
+    client = get_client(conn)
+    return client.get(f"snapshots/{snapshot_id}")["snapshot"]
+
+
+def revert_to_snapshot(conn, share_id: str, snapshot_id: str) -> None:
+    """share를 특정 스냅샷 시점으로 복원 (Manila microversion 2.27+)."""
+    client = get_client(conn)
+    client.post(f"shares/{share_id}/action", {"revert": {"snapshot_id": snapshot_id}})
 
 
 # ---------------------------------------------------------------------------

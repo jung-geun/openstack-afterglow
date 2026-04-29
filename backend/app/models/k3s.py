@@ -22,6 +22,10 @@ class K3sProgressMessage(BaseModel):
     message: str
     cluster_id: str | None = None
     error: str | None = None
+    elapsed_seconds: float | None = None
+
+
+_VALID_OS_TYPES = {"ubuntu", "fcos"}
 
 
 class CreateK3sClusterRequest(BaseModel):
@@ -30,6 +34,8 @@ class CreateK3sClusterRequest(BaseModel):
     agent_flavor_id: str | None = None
     network_id: str | None = None
     key_name: str | None = None
+    os_type: str = "ubuntu"  # "ubuntu" | "fcos"
+    allowed_cidrs: list[str] | None = None  # SSH/K3s API 접근 허용 CIDR (미지정 시 0.0.0.0/0)
 
     @field_validator("name")
     @classmethod
@@ -38,6 +44,13 @@ class CreateK3sClusterRequest(BaseModel):
             return f"k3s-{uuid.uuid4().hex[:8]}"
         if not _NAME_RE.match(v):
             raise ValueError("이름은 영문/숫자로 시작하고, 영문·숫자·하이픈·언더스코어만 허용됩니다 (최대 63자)")
+        return v
+
+    @field_validator("os_type")
+    @classmethod
+    def validate_os_type(cls, v: str) -> str:
+        if v not in _VALID_OS_TYPES:
+            raise ValueError(f"os_type은 {sorted(_VALID_OS_TYPES)} 중 하나여야 합니다")
         return v
 
 
@@ -67,6 +80,7 @@ class K3sClusterInfo(BaseModel):
     api_lb_id: str | None = None
     api_fip_id: str | None = None
     api_fip_address: str | None = None
+    os_type: str | None = None
 
 
 class K3sClusterInfoDeleted(K3sClusterInfo):
@@ -89,4 +103,5 @@ class K3sCallbackRequest(BaseModel):
     server_ip: str | None = None
     error: str | None = None
     occm_status: str | None = None  # 하위호환 유지 (deprecated)
-    plugin_status: dict[str, str] | None = None  # {"occm": "deployed", "cinder_csi": "failed"}
+    plugin_status: dict[str, str | dict] | None = None  # {"occm": {"status": "deployed", "error": ""}}
+    secret_cloud_config_status: str | None = None  # "ok" | "failed"

@@ -4,6 +4,7 @@
   import { goto } from '$app/navigation';
   import { api, ApiError, getBaseUrl } from '$lib/api/client';
   import InstanceDetailPanel from '$lib/components/InstanceDetailPanel.svelte';
+  import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 
   interface K3sCluster {
     id: string;
@@ -165,12 +166,12 @@
   }
 
   async function deleteCluster() {
-    if (!cluster || !confirm(`k3s 클러스터 "${cluster.name}"을 삭제하시겠습니까?`)) return;
+    if (!cluster || !confirm(`Drover 클러스터 "${cluster.name}"을 삭제하시겠습니까?`)) return;
     deleting = true;
     try {
       await api.delete(`${apiBase}/${clusterId}`, token, projectId);
       if (onClose) onClose();
-      else goto('/dashboard/containers/k3s');
+      else goto('/dashboard/drover');
     } catch (e) {
       alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
       deleting = false;
@@ -193,17 +194,22 @@
     }
   }
 
+  const eventPollAr = createAutoRefresh(() => untrack(() => {
+    fetchCluster();
+    fetchHealth();
+  }), {
+    storageKey: 'k3s-cluster-events',
+    defaultActive: true,
+    defaultInterval: 15,
+    intervalOptions: [10, 15, 30, 60]
+  });
+
   $effect(() => {
     if (!$auth.projectId || !clusterId) return;
     loading = true;
     scalingTarget = null;
     initialCheckDone = false;
     untrack(() => fetchCluster());
-    const interval = setInterval(() => untrack(() => {
-      fetchCluster();
-      fetchHealth();
-    }), 5000);
-    return () => clearInterval(interval);
   });
 
   // ACTIVE 진입 시 1회만 kubeconfig 가용성 확인 (폴링 시마다 재실행 방지)
@@ -241,8 +247,8 @@
         ✕ 닫기
       </button>
     {:else}
-      <a href="/dashboard/containers/k3s" class="text-gray-400 hover:text-gray-200 text-sm transition-colors">
-        ← k3s 클러스터
+      <a href="/dashboard/drover" class="text-gray-400 hover:text-gray-200 text-sm transition-colors">
+        ← Drover
       </a>
     {/if}
   </div>
@@ -344,7 +350,19 @@
       </div>
 
       <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
-        <h3 class="text-xs text-gray-500 uppercase tracking-wide mb-3">노드 현황</h3>
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-xs text-gray-500 uppercase tracking-wide">노드 현황</h3>
+          {#if health}
+            <div class="flex items-center gap-2">
+              <span class="px-2 py-0.5 rounded border text-xs font-medium {healthColor[health.status] ?? 'text-gray-500 bg-gray-800 border-gray-700'}">
+                {health.status}
+              </span>
+              <span class="text-xs text-gray-600">{new Date(health.checked_at).toLocaleTimeString('ko-KR')}</span>
+            </div>
+          {:else}
+            <span class="text-xs text-gray-600">미확인</span>
+          {/if}
+        </div>
         {#if health && health.nodes.length > 0}
           <div class="space-y-2">
             {#each health.nodes as node}

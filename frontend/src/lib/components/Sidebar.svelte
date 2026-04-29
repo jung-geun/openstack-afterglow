@@ -4,6 +4,7 @@
 	import { sidebarOpen } from '$lib/stores/sidebar';
 	import ProjectSelector from '$lib/components/ProjectSelector.svelte';
 	import { siteConfig } from '$lib/config/site';
+	import { openWizard } from '$lib/stores/wizard';
 
 	const sections = $state([
 		{
@@ -43,6 +44,16 @@
 			],
 		},
 		{
+			label: '라이브러리',
+			prefix: '/dashboard/library',
+			icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253',
+			open: false,
+			items: [
+				{ label: '레이어 카탈로그', href: '/dashboard/library', service: null },
+				{ label: '템플릿', href: '/dashboard/library/templates', service: null },
+			],
+		},
+		{
 			label: '컨테이너',
 			prefix: '/dashboard/containers',
 			icon: 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4',
@@ -51,7 +62,7 @@
 			items: [
 				{ label: 'K8s 클러스터', href: '/dashboard/containers/clusters', service: 'magnum' as const },
 				{ label: '컨테이너', href: '/dashboard/containers/instances', service: 'zun' as const },
-				{ label: 'k3s 클러스터', href: '/dashboard/containers/k3s', service: 'k3s' as const },
+				{ label: 'Drover', href: '/dashboard/drover', service: 'k3s' as const },
 			],
 		},
 		{
@@ -71,7 +82,7 @@
 			open: false,
 			service: 'swift' as const,
 			items: [
-				{ label: '컨테이너', href: '/dashboard/object-storage/containers', service: null },
+				{ label: '버킷', href: '/dashboard/object-storage/buckets', service: null },
 			],
 		},
 		{
@@ -145,13 +156,13 @@
 
 	<!-- VM 생성 버튼 -->
 	<div class="p-3">
-		<a
-			href="/create"
+		<button
+			onclick={openWizard}
 			class="flex items-center justify-center gap-1.5 w-full bg-blue-600 hover:bg-blue-500 text-white text-[13px] font-medium px-4 py-2 rounded-lg transition-colors"
 		>
 			<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v14M5 12h14"/></svg>
 			VM 생성
-		</a>
+		</button>
 	</div>
 
 	<nav class="flex-1 px-3 pb-4 space-y-0.5">
@@ -222,7 +233,7 @@
 		</div>
 
 		{#if $isAdmin}
-			<div class="px-3 pb-3 md:border-t md:border-gray-800 md:pt-3">
+			<div class="px-3 pb-3 md:hidden">
 				<!-- 모바일: 관리/사용자 모드 전환 -->
 				{#if $page.url.pathname.startsWith('/admin')}
 					<a href="/dashboard"

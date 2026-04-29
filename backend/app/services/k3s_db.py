@@ -11,7 +11,7 @@ from sqlalchemy import delete, select
 
 from app.database import get_session_factory, is_db_available
 from app.models.db import K3sAgentVM, K3sCluster
-from app.services.k3s_crypto import decrypt_kubeconfig, encrypt_kubeconfig
+from app.services.k3s_crypto import decrypt_kubeconfig, decrypt_node_token, encrypt_kubeconfig, encrypt_node_token
 
 _logger = logging.getLogger(__name__)
 
@@ -51,9 +51,13 @@ def _cluster_to_dict(cluster: K3sCluster) -> dict:
         "deleted_reason": cluster.deleted_reason,
         "occm_enabled": cluster.occm_enabled,
         "plugins_enabled": cluster.plugins_enabled or {},
+        "plugin_status": cluster.plugin_status or {},
+        "secret_cloud_config_status": cluster.secret_cloud_config_status,
         "api_lb_id": cluster.api_lb_id or "",
+        "api_lb_pool_id": cluster.api_lb_pool_id or "",
         "api_fip_id": cluster.api_fip_id or "",
         "api_fip_address": cluster.api_fip_address or "",
+        "os_type": cluster.os_type or "ubuntu",
     }
 
 
@@ -93,8 +97,10 @@ async def create_cluster_record(project_id: str, cluster_id: str, data: dict) ->
             created_by_user_id=data.get("created_by_user_id") or None,
             created_by_username=data.get("created_by_username") or None,
             api_lb_id=data.get("api_lb_id") or None,
+            api_lb_pool_id=data.get("api_lb_pool_id") or None,
             api_fip_id=data.get("api_fip_id") or None,
             api_fip_address=data.get("api_fip_address") or None,
+            os_type=data.get("os_type") or "ubuntu",
         )
         session.add(cluster)
         await session.commit()
@@ -226,12 +232,22 @@ async def update_cluster_status(
             "key_name",
             "ssh_public_key",
             "api_lb_id",
+            "api_lb_pool_id",
             "api_fip_id",
             "api_fip_address",
+            "plugin_status",
+            "secret_cloud_config_status",
         }
         for k, v in extra_fields.items():
             if k in _column_map:
-                setattr(cluster, k, v if v else None)
+                if k == "node_token" and v:
+                    setattr(cluster, k, encrypt_node_token(v))
+                elif k in ("plugin_status", "secret_cloud_config_status"):
+                    # None이면 기존 값 보존
+                    if v is not None:
+                        setattr(cluster, k, v)
+                else:
+                    setattr(cluster, k, v if v else None)
             # agent_vm_ids는 add_agent_vms()로 별도 처리
 
         await session.commit()
@@ -352,7 +368,18 @@ async def get_cluster_node_token(project_id: str, cluster_id: str) -> str | None
         stmt = select(K3sCluster.node_token).where(K3sCluster.id == cluster_id, K3sCluster.project_id == project_id)
         result = await session.execute(stmt)
         row = result.scalar_one_or_none()
-        return row
+        if not row:
+            return None
+        try:
+            return decrypt_node_token(row)
+        except Exception:
+            # 암호화 전 평문 토큰이 저장된 레거시 레코드 — 그대로 반환
+            # TODO: 마이그레이션 후 이 분기를 제거할 것
+            _logger.warning(
+                "cluster %s: node_token 복호화 실패 — 평문 레거시 레코드로 간주합니다. 재프로비저닝을 권장합니다.",
+                cluster_id,
+            )
+            return row
 
 
 async def update_agent_vm_status(cluster_id: str, vm_id: str, status: str) -> None:

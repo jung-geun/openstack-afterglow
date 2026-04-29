@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { auth } from '$lib/stores/auth';
   import { untrack } from 'svelte';
+  import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
-  import RefreshButton from '$lib/components/RefreshButton.svelte';
-  import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
+  import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+  import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
   import ImageDetailPanel from '$lib/components/ImageDetailPanel.svelte';
   import SlidePanel from '$lib/components/SlidePanel.svelte';
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
@@ -57,8 +57,8 @@
   let loading = $state(true);
   let refreshing = $state(false);
   let error = $state('');
-  let autoRefresh = $state(false);
   let deleting = $state<string | null>(null);
+  let togglingId = $state<string | null>(null);
   let selectedImageId = $state<string | null>(null);
 
   function openImagePanel(id: string) {
@@ -136,6 +136,19 @@
     }
   }
 
+  async function toggleActivation(img: ImageInfo) {
+    togglingId = img.id;
+    try {
+      const action = img.status === 'active' ? 'deactivate' : 'reactivate';
+      await api.post(`/api/images/${img.id}/${action}`, {}, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      await fetchImages({ refresh: true });
+    } catch (e) {
+      alert('상태 변경 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+    } finally {
+      togglingId = null;
+    }
+  }
+
   function openEdit(img: ImageInfo) {
     editTarget = img;
     editForm = {
@@ -190,16 +203,17 @@
     }
   }
 
-  $effect(() => {
-    const pid = $auth.projectId;
-    if (!pid) return;
-    untrack(() => { fetchImages(); });
+  const ar = createAutoRefresh(() => fetchImages(), {
+    storageKey: 'dashboard-compute-images',
+    defaultActive: true,
+    defaultInterval: 60,
+    intervalOptions: [10, 15, 30, 60],
   });
 
   $effect(() => {
-    if (!$auth.projectId || !autoRefresh) return;
-    const interval = setInterval(() => untrack(() => { fetchImages(); }), 60000);
-    return () => clearInterval(interval);
+    const pid = $auth.projectId;
+    if (!pid) return;
+    untrack(() => fetchImages());
   });
 </script>
 
@@ -249,8 +263,13 @@
 <div class="p-4 md:p-8">
   <PageHeader breadcrumb="COMPUTE / IMAGES" title="이미지">
     {#snippet actions()}
-      <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={60} />
-      <RefreshButton {refreshing} onclick={forceRefresh} />
+      <AutoRefreshControl
+        bind:active={ar.active}
+        bind:intervalSeconds={ar.intervalSeconds}
+        intervalOptions={ar.intervalOptions}
+        refreshing={refreshing}
+        onManualRefresh={forceRefresh}
+      />
       <button
         onclick={() => sortOrder = sortOrder === 'desc' ? 'asc' : 'desc'}
         class="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white px-3 py-1.5 rounded-lg border border-gray-700 hover:border-gray-600 transition-colors"
@@ -325,7 +344,7 @@
               {:else if img.visibility === 'community'}
                 <span class="px-1.5 py-0.5 rounded border text-[10px] font-medium bg-teal-900/25 border-teal-800 text-teal-400">커뮤니티</span>
               {:else}
-                <span class="px-1.5 py-0.5 rounded border text-[10px] font-medium bg-gray-800/70 border-gray-700 text-gray-400">{img.visibility ?? '비공개'}</span>
+                <span class="px-1.5 py-0.5 rounded border text-[10px] font-medium bg-gray-800/70 border-gray-700 text-gray-400">비공개</span>
               {/if}
               <span class="ml-auto text-gray-500">{formatSize(img.size)}</span>
             </div>
@@ -333,6 +352,13 @@
             <!-- Actions (own images only) -->
             {#if img.owner === $auth.projectId}
               <div class="flex items-center gap-1 pt-1 border-t border-gray-800" role="none" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
+                {#if img.status === 'active' || img.status === 'deactivated'}
+                  <button
+                    onclick={() => toggleActivation(img)}
+                    disabled={togglingId === img.id}
+                    class="text-[11px] {img.status === 'active' ? 'text-orange-400 hover:text-orange-300' : 'text-green-400 hover:text-green-300'} disabled:text-gray-600 transition-colors px-2 py-1 rounded hover:bg-gray-800"
+                  >{togglingId === img.id ? '...' : img.status === 'active' ? '비활성화' : '활성화'}</button>
+                {/if}
                 <button
                   onclick={() => openEdit(img)}
                   class="text-[11px] text-blue-400 hover:text-blue-300 transition-colors px-2 py-1 rounded hover:bg-blue-900/30"

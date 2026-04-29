@@ -33,13 +33,14 @@ export const ROUTE_LABELS: Record<string, string> = {
   // Containers
   containers: '컨테이너',
   clusters: '클러스터',
-  k3s: 'k3s 클러스터',
+  k3s: 'Drover',
 
   // Database
   database: 'DATABASE',
 
   // Object Storage
   'object-storage': 'OBJECT STORAGE',
+  buckets: '버킷',
 
   // Network
   network: '네트워크',
@@ -49,6 +50,11 @@ export const ROUTE_LABELS: Record<string, string> = {
   topology: '토폴로지',
   'floating-ips': 'Floating IP',
   ports: '포트',
+
+  // Library (Union Mount)
+  library: '라이브러리',
+  libraries: '라이브러리 관리',
+  templates: '템플릿',
 
   // Admin
   monitoring: '통합 모니터링',

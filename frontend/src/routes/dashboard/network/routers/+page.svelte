@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { auth } from '$lib/stores/auth';
   import { untrack } from 'svelte';
+  import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
   import type { Router, Network } from '$lib/types/resources';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
-  import RefreshButton from '$lib/components/RefreshButton.svelte';
-  import AutoRefreshToggle from '$lib/components/AutoRefreshToggle.svelte';
+  import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+  import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
   import SlidePanel from '$lib/components/SlidePanel.svelte';
   import RouterDetailPanel from '$lib/components/RouterDetailPanel.svelte';
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
@@ -28,7 +28,6 @@
   let loading = $state(true);
   let refreshing = $state(false);
   let error = $state('');
-  let autoRefresh = $state(false);
   let showModal = $state(false);
   let creating = $state(false);
   let createError = $state('');
@@ -85,17 +84,18 @@
     return net?.name || id.slice(0, 12) + '…';
   }
 
+  const ar = createAutoRefresh(() => fetchRouters(), {
+    storageKey: 'dashboard-network-routers',
+    defaultActive: true,
+    defaultInterval: 30,
+    intervalOptions: [10, 15, 30, 60],
+  });
+
   $effect(() => {
     const projectId = $auth.projectId;
     if (!projectId) return;
     loading = true;
     untrack(() => { fetchRouters(); fetchNetworks(); });
-  });
-
-  $effect(() => {
-    if (!$auth.projectId || !autoRefresh) return;
-    const interval = setInterval(() => untrack(() => { fetchRouters(); }), 15000);
-    return () => clearInterval(interval);
   });
 </script>
 
@@ -132,8 +132,13 @@
 <div class="p-4 md:p-8">
   <PageHeader breadcrumb="NETWORK / ROUTERS" title="라우터">
     {#snippet actions()}
-      <AutoRefreshToggle bind:active={autoRefresh} intervalSeconds={15} />
-      <RefreshButton {refreshing} onclick={forceRefresh} />
+      <AutoRefreshControl
+        bind:active={ar.active}
+        bind:intervalSeconds={ar.intervalSeconds}
+        intervalOptions={ar.intervalOptions}
+        refreshing={refreshing}
+        onManualRefresh={forceRefresh}
+      />
       <button onclick={() => showModal = true} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 라우터 생성</button>
     {/snippet}
   </PageHeader>

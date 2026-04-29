@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { api, ApiError } from '$lib/api/client';
+	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	interface SubnetDetail {
 		id: string;
@@ -43,6 +45,13 @@
 	let loading = $state(true);
 	let error = $state('');
 
+	const ar = createAutoRefresh(() => fetchNetwork(networkId), {
+		storageKey: 'network-detail-panel',
+		defaultActive: true,
+		defaultInterval: 30,
+		intervalOptions: [10, 15, 30, 60],
+	});
+
 	$effect(() => {
 		if (!networkId) return;
 		loading = true;
@@ -65,7 +74,16 @@
 <div class="flex flex-col h-full">
 	<div class="flex items-center justify-between px-5 py-4 border-b border-gray-800 flex-shrink-0">
 		<h2 class="text-sm font-semibold text-white truncate">{network?.name || networkId.slice(0, 12)}</h2>
-		<button onclick={onClose} class="text-gray-400 hover:text-white text-xl leading-none ml-3 flex-shrink-0">×</button>
+		<div class="flex items-center gap-2 ml-3 flex-shrink-0">
+			<AutoRefreshControl
+				bind:active={ar.active}
+				bind:intervalSeconds={ar.intervalSeconds}
+				intervalOptions={ar.intervalOptions}
+				refreshing={loading}
+				onManualRefresh={() => fetchNetwork(networkId)}
+			/>
+			<button onclick={onClose} class="text-gray-400 hover:text-white text-xl leading-none">×</button>
+		</div>
 	</div>
 
 	<div class="flex-1 overflow-y-auto p-5 space-y-4">

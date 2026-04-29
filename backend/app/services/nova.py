@@ -14,7 +14,8 @@ _logger = logging.getLogger(__name__)
 
 def list_flavors(conn: openstack.connection.Connection) -> list[FlavorInfo]:
     flavors = []
-    for f in conn.compute.flavors(is_public=True):
+    # is_public=None → 공개 + 접근 권한이 부여된 비공개 플레이버 모두 반환
+    for f in conn.compute.flavors(is_public=None):
         extra = dict(f.extra_specs) if f.extra_specs else {}
         # List API는 extra_specs를 포함하지 않을 수 있으므로 개별 조회 fallback
         if not extra:
@@ -30,7 +31,7 @@ def list_flavors(conn: openstack.connection.Connection) -> list[FlavorInfo]:
                 vcpus=f.vcpus,
                 ram=f.ram,
                 disk=f.disk,
-                is_public=True,
+                is_public=getattr(f, "is_public", True),
                 extra_specs=extra,
             )
         )
@@ -62,6 +63,7 @@ def create_server(
     metadata: dict | None = None,
     delete_boot_volume_on_termination: bool = False,
     security_groups: list[str] | None = None,
+    config_drive: bool = False,
 ) -> InstanceInfo:
     body = {
         "name": name,
@@ -76,6 +78,8 @@ def create_server(
             }
         ],
     }
+    if config_drive:
+        body["config_drive"] = True
     if userdata:
         body["user_data"] = userdata
     # network_id가 있으면 지정, 없으면 자동 할당
@@ -104,7 +108,13 @@ def get_console_output(conn: openstack.connection.Connection, server_id: str, le
 
 def list_volume_attachments(conn: openstack.connection.Connection, server_id: str) -> list[dict]:
     return [
-        {"id": a.id, "volume_id": a.volume_id, "device": a.device, "server_id": a.server_id}
+        {
+            "id": a.id,
+            "volume_id": a.volume_id,
+            "device": a.device,
+            "server_id": a.server_id,
+            "delete_on_termination": getattr(a, "delete_on_termination", False),
+        }
         for a in conn.compute.volume_attachments(server_id)
     ]
 
@@ -218,6 +228,20 @@ def get_project_usage(conn: openstack.connection.Connection, project_id: str, st
         }
 
 
+def list_availability_zones(conn: openstack.connection.Connection) -> list[dict]:
+    """사용 가능한 가용 영역 목록 조회."""
+    return [
+        {
+            "name": az.name,
+            "state": getattr(az, "state", {}).get("available", True)
+            if isinstance(getattr(az, "state", {}), dict)
+            else True,
+        }
+        for az in conn.compute.availability_zones()
+        if getattr(az, "name", "") not in ("internal",)
+    ]
+
+
 def list_keypairs(conn: openstack.connection.Connection) -> list[dict]:
     return [
         {"name": kp.name, "fingerprint": kp.fingerprint, "type": getattr(kp, "type", "ssh")}
@@ -317,6 +341,70 @@ def confirm_resize_server(conn: openstack.connection.Connection, server_id: str)
     conn.compute.confirm_server_resize(server_id)
 
 
+def resize_server(conn: openstack.connection.Connection, server_id: str, flavor_id: str) -> None:
+    """인스턴스 플레이버 변경 (cold resize). VERIFY_RESIZE 상태로 전이, confirm 필요."""
+    conn.compute.resize_server(server_id, flavor_id)
+
+
+def revert_resize_server(conn: openstack.connection.Connection, server_id: str) -> None:
+    """리사이즈 취소 — VERIFY_RESIZE 상태에서 이전 플레이버로 복귀."""
+    conn.compute.revert_server_resize(server_id)
+
+
+def change_server_password(
+    conn: openstack.connection.Connection,
+    server_id: str,
+    new_password: str,
+) -> None:
+    """QEMU Guest Agent를 통해 게스트 OS의 관리자 패스워드 변경.
+    이미지에 hw_qemu_guest_agent=yes + 게스트 내 QGA 데몬 실행 중이어야 동작.
+    """
+    conn.compute.change_server_password(server_id, new_password=new_password)
+
+
+def get_server_image_meta(conn: openstack.connection.Connection, server_id: str) -> dict:
+    """서버의 부트 이미지 메타데이터 조회.
+    Returns: {"qga_enabled": bool, "os_admin_user": str|None, "image_id": str|None, "image_name": str|None}
+    볼륨 부팅 인스턴스는 cinder volume_image_metadata에서 fallback.
+    """
+    from app.services import cinder  # 순환 임포트 방지
+
+    s = conn.compute.get_server(server_id)
+    image_id = s.image.get("id") if isinstance(s.image, dict) else None
+
+    if not image_id:
+        # 볼륨 부팅: /dev/vda 볼륨의 image_metadata에서 조회
+        try:
+            for att in conn.compute.volume_attachments(server_id):
+                if getattr(att, "device", "") == "/dev/vda":
+                    meta = cinder.get_volume_image_metadata(conn, att.volume_id)
+                    if meta:
+                        return {
+                            "qga_enabled": str(meta.get("hw_qemu_guest_agent", "")).lower() in ("yes", "true", "1"),
+                            "os_admin_user": meta.get("os_admin_user"),
+                            "image_id": meta.get("image_id"),
+                            "image_name": meta.get("image_name"),
+                        }
+        except Exception:
+            pass
+        return {"qga_enabled": False, "os_admin_user": None, "image_id": None, "image_name": None}
+
+    try:
+        img = conn.image.get_image(image_id)
+        props = dict(img.properties or {})
+        qga = props.get("hw_qemu_guest_agent") or getattr(img, "hw_qemu_guest_agent", None)
+        admin_user = props.get("os_admin_user") or getattr(img, "os_admin_user", None)
+        return {
+            "qga_enabled": str(qga or "").lower() in ("yes", "true", "1"),
+            "os_admin_user": admin_user,
+            "image_id": image_id,
+            "image_name": getattr(img, "name", None),
+        }
+    except Exception:
+        _logger.warning("이미지 메타 조회 실패 server=%s image=%s", server_id, image_id, exc_info=True)
+        return {"qga_enabled": False, "os_admin_user": None, "image_id": image_id, "image_name": None}
+
+
 def list_compute_hosts(conn: openstack.connection.Connection) -> list[dict]:
     """마이그레이션 대상 가능한 컴퓨트 호스트 목록."""
     endpoint = conn.compute.get_endpoint()
@@ -356,6 +444,12 @@ def _server_to_info(s) -> InstanceInfo:
         # 마이크로버전 2.47+에서는 "id" 없이 "original_name"만 반환
         flavor_name = s.flavor.get("original_name")
 
+    fault = None
+    if s.status == "ERROR":
+        raw_fault = getattr(s, "fault", None)
+        if raw_fault:
+            fault = dict(raw_fault) if not isinstance(raw_fault, dict) else raw_fault
+
     return InstanceInfo(
         id=s.id,
         name=s.name,
@@ -372,4 +466,6 @@ def _server_to_info(s) -> InstanceInfo:
         union_upper_volume_id=meta.get("union_upper_volume_id"),
         key_name=getattr(s, "key_name", None),
         user_id=getattr(s, "user_id", None),
+        project_id=getattr(s, "project_id", None) or getattr(s, "tenant_id", None),
+        fault=fault,
     )

@@ -76,6 +76,8 @@ class InstanceInfo(BaseModel):
     union_upper_volume_id: str | None = None
     key_name: str | None = None
     user_id: str | None = None
+    project_id: str | None = None
+    fault: dict | None = None  # OpenStack 서버 fault: {"message": "...", "code": 500, "created": "..."}
 
 
 class CreateInstanceRequest(BaseModel):
@@ -88,10 +90,13 @@ class CreateInstanceRequest(BaseModel):
     key_name: str | None = None
     admin_pass: str | None = Field(None, min_length=8, max_length=128)
     availability_zone: str | None = None
+    security_groups: list[str] = []
+    userdata: str | None = None
     boot_volume_size_gb: int | None = Field(None, ge=1, le=16384)
     delete_boot_volume_on_termination: bool = False
     additional_volume_ids: list[str] = []
     new_volumes: list["NewVolumeRequest"] = []
+    existing_upper_volume_id: str | None = None
 
     @field_validator("name")
     @classmethod
@@ -131,3 +136,14 @@ class AttachInterfaceRequest(BaseModel):
 
 class UpdateSecurityGroupsRequest(BaseModel):
     security_group_ids: list[str] = []
+
+
+class AdminPasswordRequest(BaseModel):
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class AdminPasswordPrecheck(BaseModel):
+    supported: bool
+    reason: str | None = None
+    os_admin_user: str | None = None
+    server_status: str

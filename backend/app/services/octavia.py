@@ -92,14 +92,22 @@ def get_load_balancer(conn: openstack.connection.Connection, lb_id: str) -> dict
 def create_load_balancer(
     conn: openstack.connection.Connection,
     name: str,
-    vip_subnet_id: str,
+    vip_subnet_id: str = "",
     description: str = "",
+    *,
+    vip_network_id: str | None = None,
 ) -> dict:
-    lb = conn.load_balancer.create_load_balancer(
-        name=name,
-        vip_subnet_id=vip_subnet_id,
-        description=description,
-    )
+    """Octavia LB 생성.
+
+    vip_network_id가 있으면 provider 네트워크에 직접 VIP를 생성 (FIP 불필요).
+    없으면 vip_subnet_id로 tenant 서브넷에 VIP를 생성.
+    """
+    kwargs: dict = {"name": name, "description": description}
+    if vip_network_id:
+        kwargs["vip_network_id"] = vip_network_id
+    else:
+        kwargs["vip_subnet_id"] = vip_subnet_id
+    lb = conn.load_balancer.create_load_balancer(**kwargs)
     return _lb_to_dict(lb)
 
 
@@ -297,3 +305,79 @@ def create_health_monitor(
 
 def delete_health_monitor(conn: openstack.connection.Connection, hm_id: str) -> None:
     conn.load_balancer.delete_health_monitor(hm_id, ignore_missing=True)
+
+
+# ---------------------------------------------------------------------------
+# 토폴로지 수집
+# ---------------------------------------------------------------------------
+
+
+def get_topology_lbs(
+    conn: openstack.connection.Connection,
+    project_id: str | None = None,
+    instances: list[dict] | None = None,
+) -> list[dict]:
+    """프로젝트의 LB 목록을 토폴로지용 dict로 반환.
+
+    LB별로 list_listeners + list_pools + list_members를 직접 호출해 listener/pool/member를
+    평탄화한다 (status tree보다 정확 — listener에 묶이지 않은 추가 pool도 포함).
+    member.address ↔ instance fixed_ip 매칭으로 server_id를 미리 채운다.
+    Octavia가 catalog에 없으면 빈 리스트 반환.
+    """
+    try:
+        lbs = list_load_balancers(conn, project_id=project_id)
+    except Exception:
+        return []
+
+    ip_to_server: dict[str, str] = {}
+    for srv in instances or []:
+        for ip_info in srv.get("ip_addresses") or []:
+            addr = ip_info.get("addr")
+            if addr and srv.get("id"):
+                ip_to_server[addr] = srv["id"]
+
+    result = []
+    for lb in lbs:
+        lb_id = lb["id"]
+
+        listeners_dicts: list[dict] = []
+        try:
+            for li in list_listeners(conn, lb_id=lb_id):
+                listeners_dicts.append(
+                    {
+                        "id": li.get("id", ""),
+                        "name": li.get("name", ""),
+                        "protocol": li.get("protocol", ""),
+                        "protocol_port": li.get("protocol_port", 0),
+                        "default_pool_id": li.get("default_pool_id"),
+                    }
+                )
+        except Exception:
+            pass
+
+        members_flat: list[dict] = []
+        try:
+            pools = list_pools(conn, lb_id=lb_id)
+        except Exception:
+            pools = []
+        for pool in pools:
+            pid = pool.get("id", "")
+            try:
+                pool_members = list_members(conn, pool_id=pid)
+            except Exception:
+                continue
+            for m in pool_members:
+                addr = m.get("address", "")
+                members_flat.append(
+                    {
+                        "id": m.get("id", ""),
+                        "address": addr,
+                        "protocol_port": m.get("protocol_port", 0),
+                        "status": m.get("status", ""),
+                        "subnet_id": m.get("subnet_id"),
+                        "pool_id": pid,
+                        "server_id": ip_to_server.get(addr),
+                    }
+                )
+        result.append({**lb, "listeners": listeners_dicts, "members": members_flat})
+    return result
