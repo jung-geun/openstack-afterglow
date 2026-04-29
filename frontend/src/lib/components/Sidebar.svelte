@@ -233,7 +233,7 @@
 		</div>
 
 		{#if $isAdmin}
-			<div class="px-3 pb-3 md:border-t md:border-gray-800 md:pt-3">
+			<div class="px-3 pb-3 md:hidden">
 				<!-- 모바일: 관리/사용자 모드 전환 -->
 				{#if $page.url.pathname.startsWith('/admin')}
 					<a href="/dashboard"

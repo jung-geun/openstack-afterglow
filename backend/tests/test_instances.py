@@ -220,6 +220,32 @@ async def test_get_console_log_length_negative(client, mock_conn):
 
 
 @pytest.mark.asyncio
+async def test_list_instance_volumes_includes_delete_on_termination(client, mock_conn):
+    vol_attachment = {
+        "id": "attach-1",
+        "volume_id": "vol-1",
+        "device": "/dev/vdb",
+        "server_id": "inst-1",
+        "delete_on_termination": True,
+    }
+
+    class FakeVol:
+        name = "test-vol"
+        size = 10
+        status = "in-use"
+
+    with (
+        patch("app.api.compute.instances.nova.list_volume_attachments", return_value=[vol_attachment]),
+        patch("app.api.compute.instances.cinder.get_volume", return_value=FakeVol()),
+    ):
+        resp = await client.get("/api/instances/inst-1/volumes")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["delete_on_termination"] is True
+
+
+@pytest.mark.asyncio
 async def test_attach_volume(client, mock_conn):
     with patch("app.api.compute.instances.nova.attach_volume", return_value={"id": "attach-1", "volumeId": "vol-1"}):
         resp = await client.post("/api/instances/inst-1/volumes", json={"volume_id": "vol-1"})

@@ -108,7 +108,13 @@ def get_console_output(conn: openstack.connection.Connection, server_id: str, le
 
 def list_volume_attachments(conn: openstack.connection.Connection, server_id: str) -> list[dict]:
     return [
-        {"id": a.id, "volume_id": a.volume_id, "device": a.device, "server_id": a.server_id}
+        {
+            "id": a.id,
+            "volume_id": a.volume_id,
+            "device": a.device,
+            "server_id": a.server_id,
+            "delete_on_termination": getattr(a, "delete_on_termination", False),
+        }
         for a in conn.compute.volume_attachments(server_id)
     ]
 

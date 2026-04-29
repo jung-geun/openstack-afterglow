@@ -66,6 +66,14 @@
 	let deleting = $state(false);
 	let deleteError = $state('');
 
+	let copiedId = $state<string | null>(null);
+	function copyId(id: string) {
+		navigator.clipboard.writeText(id).then(() => {
+			copiedId = id;
+			setTimeout(() => { copiedId = null; }, 1500);
+		});
+	}
+
 	// 접근 권한 패널
 	let accessProject = $state<Project | null>(null);
 	let members = $state<Member[]>([]);
@@ -275,7 +283,11 @@
 							<td class="py-2 pr-4 text-white">{p.name}</td>
 							<td class="py-2 pr-4 text-gray-400">{p.description || '-'}</td>
 							<td class="py-2 pr-4"><span class="px-1.5 py-0.5 rounded text-xs font-medium {p.enabled ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{p.enabled ? '활성' : '비활성'}</span></td>
-							<td class="py-2 pr-4 text-gray-500 font-mono text-xs">{p.id.slice(0, 8)}</td>
+							<td class="py-2 pr-4">
+								<button onclick={() => copyId(p.id)} class="text-gray-500 font-mono text-xs hover:text-gray-300 transition-colors" title={p.id}>
+									{copiedId === p.id ? '복사됨!' : p.id.slice(0, 8)}
+								</button>
+							</td>
 							<td class="py-2 pr-4 text-gray-500">{p.created_at?.slice(0, 10) ?? '-'}</td>
 							<td class="py-2">
 								<div class="flex items-center gap-1">

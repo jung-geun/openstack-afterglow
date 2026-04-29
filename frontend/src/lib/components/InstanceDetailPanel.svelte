@@ -56,6 +56,7 @@
 		name?: string;
 		size?: number;
 		status?: string;
+		delete_on_termination?: boolean;
 	}
 
 	interface SecurityGroup {
@@ -107,7 +108,6 @@
 	let error = $state('');
 	let deleting = $state(false);
 	let actioning = $state<string | null>(null);
-	let showPortSelector = $state(false);
 	// Console log
 	let showLog = $state(false);
 	let consoleLog = $state('');
@@ -290,8 +290,13 @@
 
 	async function deleteInstance() {
 		if (!instance) return;
-		if (!confirm(`"${instance.name}" 인스턴스를 삭제하시겠습니까?\n파일 스토리지와 볼륨도 함께 삭제됩니다.`))
-			return;
+		const autoDeleteVols = volumes.filter(v => v.delete_on_termination);
+		const keepVols = volumes.filter(v => !v.delete_on_termination);
+		const lines = [`"${instance.name}" 인스턴스를 삭제하시겠습니까?`];
+		if (autoDeleteVols.length) lines.push(`자동 삭제 볼륨: ${autoDeleteVols.map(v => v.name || v.device).join(', ')}`);
+		if (keepVols.length) lines.push(`유지(분리만): ${keepVols.map(v => v.name || v.device).join(', ')}`);
+		if (instance.union_upper_volume_id) lines.push('Upper 볼륨과 파일 스토리지(dynamic)도 삭제됩니다.');
+		if (!confirm(lines.join('\n'))) return;
 		deleting = true;
 		try {
 			await api.delete(
@@ -308,21 +313,11 @@
 		}
 	}
 
-	async function assignFloatingIp(portId?: string) {
+	async function assignFloatingIp(portId: string) {
 		if (!instance) return;
-		// 할당 가능한 인터페이스가 2개 이상이고 portId 미지정이면 선택 UI 표시
-		if (!portId && availableInterfaces.length > 1) {
-			showPortSelector = true;
-			return;
-		}
-		// 포트가 1개면 명시적으로 전달 (backend fallback에 의존하지 않음)
-		if (!portId && availableInterfaces.length === 1) {
-			portId = availableInterfaces[0].id;
-		}
-		showPortSelector = false;
-		actioning = 'fip-assign';
+		actioning = 'fip-assign-' + portId;
 		try {
-			const query = portId ? `?port_id=${portId}` : '';
+			const query = `?port_id=${portId}`;
 			await api.post(
 				`/api/instances/${instance.id}/floating-ip${query}`,
 				{},
@@ -744,7 +739,7 @@
 				>
 					{instance.status}
 				</span>
-				{#if instance.status === 'ERROR' && instance.fault?.message && $isAdmin}
+				{#if instance.status === 'ERROR' && instance.fault?.message && adminProjectId}
 					<div class="mt-2 p-3 rounded-lg bg-red-900/30 border border-red-800/40 text-red-300 text-sm max-w-xl">
 						<div class="font-medium mb-1 text-xs text-red-400">오류 상세 (관리자)</div>
 						<div class="text-xs opacity-90 break-words">{instance.fault.message}</div>
@@ -954,69 +949,6 @@
 			{/if}
 		</div>
 
-		<!-- Floating IP 관리 -->
-		<div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4">
-			<div class="flex items-center justify-between mb-4">
-				<h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide">Floating IP</h2>
-				{#if availableInterfaces.length > 0}
-					<button
-						onclick={() => assignFloatingIp()}
-						disabled={actioning === 'fip-assign'}
-						class="text-xs text-blue-400 hover:text-blue-300 px-2 py-1 border border-blue-900 hover:border-blue-700 rounded transition-colors disabled:text-gray-600 disabled:border-gray-700"
-					>
-						{actioning === 'fip-assign' ? '할당 중...' : '+ Floating IP 요청'}
-					</button>
-				{/if}
-			</div>
-
-			{#if showPortSelector}
-				<div class="mb-4 p-3 bg-gray-800 border border-gray-700 rounded-lg">
-					<p class="text-xs text-gray-400 mb-2">Floating IP를 연결할 인터페이스를 선택하세요:</p>
-					<div class="space-y-1.5">
-						{#each availableInterfaces as iface}
-							{@const netName = availableNetworks.find(n => n.id === iface.network_id)?.name ?? iface.network_id.slice(0, 8)}
-							<button
-								onclick={() => assignFloatingIp(iface.id)}
-								disabled={actioning === 'fip-assign'}
-								class="w-full text-left text-xs px-3 py-2 rounded border border-gray-600 hover:border-blue-500 hover:bg-gray-700 transition-colors disabled:opacity-50"
-							>
-								<span class="text-gray-300">{netName}</span>
-								<span class="text-gray-500 ml-2">{iface.fixed_ips.map(f => f.ip_address).join(', ')}</span>
-							</button>
-						{/each}
-					</div>
-					<button
-						onclick={() => showPortSelector = false}
-						class="mt-2 text-xs text-gray-500 hover:text-gray-300"
-					>취소</button>
-				</div>
-			{/if}
-
-			{#if floatingIps.length === 0 && !showPortSelector}
-				<p class="text-sm text-gray-500">연결된 Floating IP 없음</p>
-			{:else}
-				<div class="space-y-2">
-					{#each floatingIps as fip}
-						<div class="flex items-center justify-between">
-							<div class="flex items-center gap-2">
-								<span class="font-mono text-sm text-green-300">{fip.floating_ip_address}</span>
-								{#if fip.fixed_ip_address}
-									<span class="text-xs text-gray-500">→ {fip.fixed_ip_address}</span>
-								{/if}
-							</div>
-							<button
-								onclick={() => releaseFloatingIp(fip.id)}
-								disabled={actioning === 'fip-release-' + fip.id}
-								class="text-xs text-orange-400 hover:text-orange-300 px-2 py-1 border border-orange-900 hover:border-orange-700 rounded transition-colors disabled:text-gray-600"
-							>
-								{actioning === 'fip-release-' + fip.id ? '해제 중...' : '해제 및 삭제'}
-							</button>
-						</div>
-					{/each}
-				</div>
-			{/if}
-		</div>
-
 		<!-- 인터페이스 -->
 		<div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4">
 			<div class="flex items-center justify-between mb-4">
@@ -1058,6 +990,7 @@
 			{:else}
 				<div class="space-y-4">
 					{#each interfaces as iface}
+						{@const ifaceFip = floatingIps.find(f => f.port_id === iface.id)}
 						<div class="bg-gray-800/50 rounded-lg p-4">
 							<div class="flex items-start justify-between mb-3">
 								<div class="grid grid-cols-2 gap-x-6 gap-y-2 flex-1">
@@ -1079,20 +1012,42 @@
 									</div>
 									<div class="col-span-2">
 										<dt class="text-xs text-gray-500 mb-1">IP 주소</dt>
-										<dd class="flex flex-wrap gap-1.5">
+										<dd class="flex flex-wrap gap-1.5 items-center">
 											{#each iface.fixed_ips as fip}
 												<span class="text-xs font-mono text-gray-300 bg-gray-700 px-1.5 py-0.5 rounded">{fip.ip_address}</span>
 											{/each}
+											{#if ifaceFip}
+												<span class="text-xs font-mono text-green-300 bg-green-900/20 px-1.5 py-0.5 rounded">{ifaceFip.floating_ip_address}</span>
+											{/if}
 										</dd>
 									</div>
 								</div>
-								<button
-									onclick={() => detachInterface(iface.id)}
-									disabled={!!actioning}
-									class="ml-4 text-xs text-orange-400 hover:text-orange-300 px-2 py-1 border border-orange-900 hover:border-orange-700 rounded transition-colors disabled:text-gray-600 shrink-0"
-								>
-									{actioning === 'detach-iface-' + iface.id ? '제거 중...' : '제거'}
-								</button>
+								<div class="ml-4 flex flex-col gap-1.5 shrink-0">
+									{#if ifaceFip}
+										<button
+											onclick={() => releaseFloatingIp(ifaceFip.id)}
+											disabled={!!actioning}
+											class="text-xs text-orange-400 hover:text-orange-300 px-2 py-1 border border-orange-900 hover:border-orange-700 rounded transition-colors disabled:text-gray-600"
+										>
+											{actioning === 'fip-release-' + ifaceFip.id ? '해제 중...' : 'FIP 해제'}
+										</button>
+									{:else}
+										<button
+											onclick={() => assignFloatingIp(iface.id)}
+											disabled={!!actioning}
+											class="text-xs text-blue-400 hover:text-blue-300 px-2 py-1 border border-blue-900 hover:border-blue-700 rounded transition-colors disabled:text-gray-600"
+										>
+											{actioning === 'fip-assign-' + iface.id ? '할당 중...' : '+ FIP'}
+										</button>
+									{/if}
+									<button
+										onclick={() => detachInterface(iface.id)}
+										disabled={!!actioning}
+										class="text-xs text-orange-400 hover:text-orange-300 px-2 py-1 border border-orange-900 hover:border-orange-700 rounded transition-colors disabled:text-gray-600"
+									>
+										{actioning === 'detach-iface-' + iface.id ? '제거 중...' : '제거'}
+									</button>
+								</div>
 							</div>
 							<!-- 보안 그룹 -->
 							<div>
@@ -1274,6 +1229,11 @@
 								<span class="text-xs font-mono text-gray-500">{vol.device}</span>
 								{#if vol.status}
 									<span class="text-xs {vol.status === 'in-use' ? 'text-green-400' : 'text-gray-400'}">{vol.status}</span>
+								{/if}
+								{#if vol.delete_on_termination}
+									<span class="text-[10px] text-red-300 bg-red-900/30 px-1.5 py-0.5 rounded">인스턴스 삭제 시 자동 삭제</span>
+								{:else}
+									<span class="text-[10px] text-gray-400 bg-gray-800 px-1.5 py-0.5 rounded">유지</span>
 								{/if}
 							</div>
 							<button

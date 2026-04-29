@@ -108,6 +108,7 @@
 			if (ruleForm.protocol) body.protocol = ruleForm.protocol;
 			if (ruleForm.port_range_min) body.port_range_min = parseInt(ruleForm.port_range_min);
 			if (ruleForm.port_range_max) body.port_range_max = parseInt(ruleForm.port_range_max);
+			if (body.port_range_min != null && body.port_range_max == null) body.port_range_max = body.port_range_min;
 			if (ruleForm.remote_ip_prefix) body.remote_ip_prefix = ruleForm.remote_ip_prefix;
 			await api.post(`/api/security-groups/${sgId}/rules`, body, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			showAddRuleFor = null;
