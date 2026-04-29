@@ -65,24 +65,57 @@ async def _update_build_db(
         await session.commit()
 
 
+# 모든 라이브러리에서 공통으로 사용하는 uv 부트스트랩
+# uv는 astral.sh에서 제공하는 standalone installer를 사용한다.
+_UV_BOOTSTRAP = """\
+curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh
+export PATH=/usr/local/bin:$PATH
+"""
+
 # 설치 스크립트 템플릿 (라이브러리별)
+# share 내부 디렉토리 구조는 FHS를 따른다: usr/local/bin, usr/local/lib/python3.11, ...
+# 이렇게 해야 user VM의 overlay merged 뷰에서 PATH/PYTHONPATH가 정상 동작한다.
 _INSTALL_SCRIPTS: dict[str, str] = {
-    "python311": """
-apt-get update -qq
-apt-get install -y python3.11 python3.11-venv python3-pip
-mkdir -p /mnt/share/usr_local
-cp -a /usr/local/. /mnt/share/usr_local/
+    "python311": _UV_BOOTSTRAP
+    + """\
+# cpython-3.11 standalone 빌드를 share의 usr/local/ 아래에 배포
+uv python install cpython-3.11 --install-dir /tmp/py311
+PYDIR=$(ls /tmp/py311/ | grep cpython-3.11 | head -1)
+mkdir -p /mnt/share/usr/local
+cp -a /tmp/py311/"$PYDIR"/. /mnt/share/usr/local/
+mkdir -p /mnt/share/usr/local/lib/python3.11/site-packages
 """,
-    "torch": """
-pip3 install --no-cache-dir --target=/mnt/share/usr_local/lib/python3/dist-packages \
+    "torch": """\
+apt-get update -qq
+apt-get install -y python3.11
+"""
+    + _UV_BOOTSTRAP
+    + """\
+mkdir -p /mnt/share/usr/local/lib/python3.11/site-packages
+uv pip install --python python3.11 --no-cache \
+    --target /mnt/share/usr/local/lib/python3.11/site-packages \
     torch==2.4.0 torchvision==0.19.0 torchaudio==2.4.0
 """,
-    "vllm": """
-pip3 install --no-cache-dir --target=/mnt/share/usr_local/lib/python3/dist-packages \
+    "vllm": """\
+apt-get update -qq
+apt-get install -y python3.11
+"""
+    + _UV_BOOTSTRAP
+    + """\
+mkdir -p /mnt/share/usr/local/lib/python3.11/site-packages
+uv pip install --python python3.11 --no-cache \
+    --target /mnt/share/usr/local/lib/python3.11/site-packages \
     vllm==0.6.0
 """,
-    "jupyter": """
-pip3 install --no-cache-dir --target=/mnt/share/usr_local/lib/python3/dist-packages \
+    "jupyter": """\
+apt-get update -qq
+apt-get install -y python3.11
+"""
+    + _UV_BOOTSTRAP
+    + """\
+mkdir -p /mnt/share/usr/local/lib/python3.11/site-packages
+uv pip install --python python3.11 --no-cache \
+    --target /mnt/share/usr/local/lib/python3.11/site-packages \
     jupyterlab==4.2.0 ipykernel
 """,
 }
@@ -113,9 +146,9 @@ trap '_on_error $LINENO' ERR
 
 echo "[union-builder] Starting library build: {library_id}"
 
-# CephFS 마운트를 위한 패키지 설치
+# CephFS 마운트 및 uv 설치를 위한 패키지 설치
 apt-get update -qq
-apt-get install -y ceph-common python3-pip
+apt-get install -y ceph-common curl python3-pip
 
 # CephFS 마운트
 mkdir -p /mnt/share

@@ -76,7 +76,6 @@ write_files:
       RemainAfterExit=yes
       ExecStart=/opt/union/overlay_setup.sh
       TimeoutStartSec=300
-      OnFailure=emergency.target
 
       [Install]
       WantedBy=multi-user.target
@@ -225,4 +224,4 @@ final_message: |
   Union VM 초기화 완료.
   전략: {{ strategy }}
   라이브러리: {{ libraries | join(", ") }}
-  OverlayFS 상태: $(mount | grep overlay | wc -l)개 마운트
+  OverlayFS 상세: journalctl -u union-overlay --no-pager | tail -20

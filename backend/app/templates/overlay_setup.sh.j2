@@ -10,9 +10,9 @@ echo "[$(date)] union-overlay 시작"
 # ---------------------------------------------------------------------------
 # 1. 디렉토리 구조 생성
 # ---------------------------------------------------------------------------
-mkdir -p /opt/layers/{lower,upper,work,merged}
+mkdir -p /opt/layers/{upper,work,merged}
 {% for share in file_storages %}
-mkdir -p /opt/layers/lower/{{ share.name | shlex_quote }}
+mkdir -p /opt/layers/lower_{{ share.name | shlex_quote }}
 {% endfor %}
 
 # ---------------------------------------------------------------------------
@@ -33,9 +33,16 @@ mount_nfs() {
 
     echo "[$(date)] NFS 마운트 시도: ${name} -> ${export_location}"
     for i in $(seq 1 $MAX_RETRIES); do
-        if mount -t nfs -o "$mount_options" "$export_location" "$mountpoint" 2>/dev/null; then
-            echo "[$(date)] NFS 마운트 완료: ${name} -> ${mountpoint}"
-            return 0
+        if [ "$i" -eq "$MAX_RETRIES" ]; then
+            if mount -t nfs -o "$mount_options" "$export_location" "$mountpoint" 2>>"$LOG"; then
+                echo "[$(date)] NFS 마운트 완료: ${name} -> ${mountpoint}"
+                return 0
+            fi
+        else
+            if mount -t nfs -o "$mount_options" "$export_location" "$mountpoint" 2>/dev/null; then
+                echo "[$(date)] NFS 마운트 완료: ${name} -> ${mountpoint}"
+                return 0
+            fi
         fi
         echo "[$(date)] NFS 마운트 재시도 ${i}/${MAX_RETRIES}... (${RETRY_INTERVAL}초 후)"
         sleep $((RETRY_INTERVAL + RANDOM % 3))
@@ -64,17 +71,24 @@ mount_cephfs() {
 
     for i in $(seq 1 $MAX_RETRIES); do
         if modprobe ceph 2>/dev/null; then
-            if mount -t ceph "$export_path" "$mountpoint" \
-                -o "name=${cephx_id},secretfile=${keyring_path},_netdev" 2>/dev/null; then
-                echo "[$(date)] CephFS 마운트 완료: ${name} -> ${mountpoint}"
-                return 0
+            if [ "$i" -eq "$MAX_RETRIES" ]; then
+                mount -t ceph "$export_path" "$mountpoint" \
+                    -o "name=${cephx_id},secretfile=${keyring_path},_netdev" 2>>"$LOG" && {
+                    echo "[$(date)] CephFS 마운트 완료: ${name} -> ${mountpoint}"; return 0; }
+            else
+                mount -t ceph "$export_path" "$mountpoint" \
+                    -o "name=${cephx_id},secretfile=${keyring_path},_netdev" 2>/dev/null && {
+                    echo "[$(date)] CephFS 마운트 완료: ${name} -> ${mountpoint}"; return 0; }
             fi
         fi
         # ceph-fuse 폴백
         if command -v ceph-fuse >/dev/null 2>&1; then
-            if ceph-fuse "$mountpoint" --id="$cephx_id" --keyring="$keyring_path" 2>/dev/null; then
-                echo "[$(date)] ceph-fuse 마운트 완료: ${name} -> ${mountpoint}"
-                return 0
+            if [ "$i" -eq "$MAX_RETRIES" ]; then
+                ceph-fuse "$mountpoint" --id="$cephx_id" --keyring="$keyring_path" 2>>"$LOG" && {
+                    echo "[$(date)] ceph-fuse 마운트 완료: ${name} -> ${mountpoint}"; return 0; }
+            else
+                ceph-fuse "$mountpoint" --id="$cephx_id" --keyring="$keyring_path" 2>/dev/null && {
+                    echo "[$(date)] ceph-fuse 마운트 완료: ${name} -> ${mountpoint}"; return 0; }
             fi
         fi
         echo "[$(date)] CephFS 마운트 재시도 ${i}/${MAX_RETRIES}... (${RETRY_INTERVAL}초 후)"
@@ -96,6 +110,14 @@ mount_cephfs {{ share.name | shlex_quote }} {{ share.export_path | shlex_quote }
 # 3. Upper 볼륨 마운트 (Cinder 볼륨)
 # ---------------------------------------------------------------------------
 UPPER_DEV={{ upper_device | shlex_quote }}
+if [ -n "$UPPER_DEV" ]; then
+    udevadm settle 2>/dev/null || true
+    for _w in $(seq 1 15); do
+        [ -b "$UPPER_DEV" ] && break
+        echo "[$(date)] Upper 장치 ${UPPER_DEV} 대기 ${_w}/15..."
+        sleep 2
+    done
+fi
 if [ -n "$UPPER_DEV" ] && [ -b "$UPPER_DEV" ]; then
     if ! blkid "$UPPER_DEV" | grep -q ext4; then
         echo "[$(date)] Upper 볼륨 포맷: ${UPPER_DEV}"
