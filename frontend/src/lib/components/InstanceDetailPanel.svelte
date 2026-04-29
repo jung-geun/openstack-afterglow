@@ -4,6 +4,7 @@
 	import { goto } from '$app/navigation';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	interface IpAddress {
 		addr: string;
@@ -105,6 +106,7 @@
 	let availableNetworks = $state<NetworkInfo[]>([]);
 	let ownerDisplay = $state('');
 	let loading = $state(true);
+	let refreshing = $state(false);
 	let error = $state('');
 	let deleting = $state(false);
 	let actioning = $state<string | null>(null);
@@ -169,6 +171,22 @@
 		fetchInstance(instanceId);
 	});
 
+	// Instance detail auto-refresh
+	const detailPollAr = createAutoRefresh(() => {
+		if (!instanceId || !$auth.token) return;
+		return fetchInstance(instanceId, { silent: true });
+	}, {
+		storageKey: 'instance-detail',
+		defaultActive: true,
+		defaultInterval: 30,
+		intervalOptions: [15, 30, 60, 120]
+	});
+
+	function manualRefresh() {
+		if (!instanceId) return;
+		fetchInstance(instanceId, { silent: true });
+	}
+
 	// Console log auto-refresh when visible
 	const consolePollAr = createAutoRefresh(() => loadConsoleLog(logFull), {
 		storageKey: 'instance-detail-console',
@@ -184,9 +202,13 @@
 		}
 	});
 
-	async function fetchInstance(id: string) {
-		loading = true;
-		error = '';
+	async function fetchInstance(id: string, opts?: { silent?: boolean }) {
+		if (opts?.silent) {
+			refreshing = true;
+		} else {
+			loading = true;
+			error = '';
+		}
 		// 관리자가 다른 프로젝트 인스턴스를 볼 때 해당 project_id 사용
 		const effectiveProjectId = adminProjectId ?? ($auth.projectId ?? undefined);
 		try {
@@ -219,7 +241,8 @@
 		} catch (e) {
 			error = e instanceof ApiError ? `조회 실패 (${e.status}): ${e.message}` : '서버 오류';
 		} finally {
-			loading = false;
+			if (opts?.silent) refreshing = false;
+			else loading = false;
 		}
 	}
 
@@ -280,7 +303,7 @@
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined
 			);
-			await fetchInstance(instance.id);
+			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
 			alert(`${labels[action]} 실패: ` + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
@@ -324,7 +347,7 @@
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined
 			);
-			await fetchInstance(instance.id);
+			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
 			alert('Floating IP 할당 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
@@ -348,7 +371,7 @@
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined
 			);
-			await fetchInstance(instance.id);
+			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
 			alert('Floating IP 해제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
@@ -368,7 +391,7 @@
 			);
 			showAttachVolume = false;
 			selectedVolumeId = '';
-			await fetchInstance(instance.id);
+			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
 			alert('볼륨 연결 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
@@ -395,7 +418,7 @@
 			showAttachVolume = false;
 			newVolName = '';
 			newVolSize = 20;
-			await fetchInstance(instance.id);
+			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
 			alert('볼륨 생성/연결 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
@@ -413,7 +436,7 @@
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined
 			);
-			await fetchInstance(instance.id);
+			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
 			alert('볼륨 분리 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
@@ -433,7 +456,7 @@
 			);
 			showAddInterface = false;
 			selectedNetId = '';
-			await fetchInstance(instance.id);
+			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
 			alert('인터페이스 추가 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
@@ -451,7 +474,7 @@
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined
 			);
-			await fetchInstance(instance.id);
+			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
 			alert('인터페이스 제거 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
@@ -483,7 +506,7 @@
 				$auth.projectId ?? undefined
 			);
 			sgEditPortId = null;
-			await fetchInstance(instance.id);
+			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
 			alert('보안 그룹 업데이트 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
@@ -542,7 +565,7 @@
 				$auth.projectId ?? undefined
 			);
 			showResizeModal = false;
-			await fetchInstance(instance.id);
+			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
 			resizeError = e instanceof ApiError ? e.message : '리사이즈 실패';
 		} finally {
@@ -561,7 +584,7 @@
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined
 			);
-			await fetchInstance(instance.id);
+			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
 			alert('리사이즈 취소 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
@@ -682,7 +705,7 @@
 				);
 			}
 			showMigrateModal = false;
-			await fetchInstance(instance.id);
+			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
 			migrateError = e instanceof ApiError ? e.message : '마이그레이션 실패';
 		} finally {
@@ -701,7 +724,7 @@
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined
 			);
-			await fetchInstance(instance.id);
+			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
 			alert('리사이즈 확인 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
@@ -722,6 +745,13 @@
 				← 인스턴스
 			</a>
 		{/if}
+		<AutoRefreshControl
+			bind:active={detailPollAr.active}
+			bind:intervalSeconds={detailPollAr.intervalSeconds}
+			intervalOptions={detailPollAr.intervalOptions}
+			refreshing={refreshing}
+			onManualRefresh={manualRefresh}
+		/>
 	</div>
 
 	{#if error}
