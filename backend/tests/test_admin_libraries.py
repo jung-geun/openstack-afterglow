@@ -159,7 +159,7 @@ class TestBuildCancel:
         assert resp.status_code == 200
         data = resp.json()
         assert data["cancelled"] is True
-        assert mock_cancel.call_args[0][1] == 1  # build_id=1이 전달됐는지 검증
+        assert mock_cancel.call_args[0][0] == 1  # build_id=1이 전달됐는지 검증 (conn 제거 후 첫 번째 인자)
 
     @pytest.mark.asyncio
     async def test_cancel_nonexistent_build_returns_404(self, admin_client):

@@ -28,6 +28,10 @@ manila_share_network_id = ""
 manila_share_type = "cephfs"
 manila_nfs_share_type = "nfstype"  # NFS 프로토콜용 share type
 
+# Union Mount 전용 service 프로젝트 UUID (Manila share + Builder VM이 이 프로젝트에 생성됨)
+# 미설정 시 prebuilt 라이브러리 빌드/마운트 경로에서 RuntimeError 발생
+service_project_id = ""
+
 # Ceph 모니터 (cloud-init CephFS 마운트용, 콤마 구분)
 ceph_monitors = ""
 

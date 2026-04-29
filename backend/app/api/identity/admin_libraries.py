@@ -156,9 +156,11 @@ class TriggerBuildRequest(BaseModel):
 @router.post("/build", status_code=202, dependencies=[Depends(require_admin)])
 async def trigger_library_build(
     req: TriggerBuildRequest,
-    conn: openstack.connection.Connection = Depends(get_os_conn),
 ) -> dict:
-    """라이브러리 prebuilt 빌드 트리거. auto_install=True 시 Builder VM 자동 생성."""
+    """라이브러리 prebuilt 빌드 트리거. auto_install=True 시 Builder VM 자동 생성.
+
+    Manila share와 빌더 VM은 service 프로젝트에 생성된다.
+    """
     try:
         lib_svc.get_by_id(req.library_id)
     except KeyError:
@@ -166,21 +168,25 @@ async def trigger_library_build(
 
     if req.auto_install:
         try:
-            result = await library_builder.start_build(conn, req.library_id)
+            result = await library_builder.start_build(req.library_id)
             return result
         except RuntimeError as e:
             status_code = 409 if "이미 빌드 중" in str(e) else 400
             raise HTTPException(status_code=status_code, detail=str(e))
     else:
-        # auto_install=False: 빈 share 생성만 수행 (수동 설치용)
+        # auto_install=False: 빈 share 생성만 수행 (수동 설치용) — service 프로젝트에 생성
+        import asyncio
+
         from app.config import get_settings
+        from app.services.keystone import get_service_project_connection
 
         settings = get_settings()
         lib = lib_svc.get_by_id(req.library_id)
         try:
-            storage = await __import__("asyncio").to_thread(
+            svc_conn = await asyncio.to_thread(get_service_project_connection)
+            storage = await asyncio.to_thread(
                 manila.create_file_storage,
-                conn,
+                svc_conn,
                 name=f"union-prebuilt-{req.library_id}",
                 size_gb=20,
                 share_network_id=settings.os_manila_share_network_id,
@@ -198,6 +204,8 @@ async def trigger_library_build(
                 "library": req.library_id,
                 "message": "빈 share 생성 완료. 수동으로 패키지를 설치하세요.",
             }
+        except RuntimeError as e:
+            raise HTTPException(status_code=400, detail=str(e))
         except Exception as e:
             _logger.warning("Share 생성 실패: %s", e)
             raise HTTPException(status_code=502, detail="Share 생성 실패")
@@ -211,11 +219,10 @@ async def trigger_library_build(
 @router.post("/builds/{build_id}/cancel", dependencies=[Depends(require_admin)])
 async def cancel_library_build(
     build_id: int,
-    conn: openstack.connection.Connection = Depends(get_os_conn),
 ) -> dict:
     """진행 중인 라이브러리 빌드를 취소하고 VM 리소스를 정리한다. 관리자 전용."""
     try:
-        return await library_builder.cancel_build(conn, build_id)
+        return await library_builder.cancel_build(build_id)
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:

@@ -1022,8 +1022,13 @@ async def update_port_security_groups(
 async def _prepare_prebuilt_file_storages(
     conn, resolved_libs: list[str], instance_name: str, created_access_ids: list
 ) -> list[dict]:
-    """Strategy A: 사전 빌드된 read-only 파일 스토리지에 access rule 추가."""
-    prebuilt_file_storages = await asyncio.to_thread(manila.list_file_storages, conn, {"union_type": "prebuilt"})
+    """Strategy A: 사전 빌드된 read-only 파일 스토리지에 access rule 추가.
+
+    Manila 작업은 service 프로젝트 conn으로 수행한다.
+    prebuilt share는 service 프로젝트가 소유하므로 사용자 conn으로는 access rule을 만들 수 없다.
+    """
+    svc_conn = await asyncio.to_thread(keystone.get_service_project_connection)
+    prebuilt_file_storages = await asyncio.to_thread(manila.list_file_storages, svc_conn, {"union_type": "prebuilt"})
     prebuilt_map = {s.library_name: s for s in prebuilt_file_storages}
 
     file_storages_info = []
@@ -1035,10 +1040,10 @@ async def _prepare_prebuilt_file_storages(
             )
 
         cephx_id = f"union-ro-{instance_name}-{lib_id}"
-        rule = await asyncio.to_thread(manila.create_access_rule, conn, file_storage.id, cephx_id, "ro")
+        rule = await asyncio.to_thread(manila.create_access_rule, svc_conn, file_storage.id, cephx_id, "ro")
         created_access_ids.append((file_storage.id, rule["access_id"]))
 
-        export_paths = await asyncio.to_thread(manila.get_export_locations, conn, file_storage.id)
+        export_paths = await asyncio.to_thread(manila.get_export_locations, svc_conn, file_storage.id)
         file_storages_info.append(
             {
                 "file_storage_id": file_storage.id,
@@ -1168,9 +1173,14 @@ async def _rollback(
             except Exception as e:
                 logger.error(f"Rollback - 볼륨 삭제 실패 {vol_id}: {e}")
 
+    # prebuilt share는 service 프로젝트 소유이므로 service conn으로 revoke (admin role로 dynamic share도 처리 가능)
+    try:
+        svc_conn = await asyncio.to_thread(keystone.get_service_project_connection)
+    except RuntimeError:
+        svc_conn = conn  # service 프로젝트 미설정 환경에서는 user conn으로 fallback
     for file_storage_id, access_id in access_ids:
         try:
-            await asyncio.to_thread(manila.revoke_access_rule, conn, file_storage_id, access_id)
+            await asyncio.to_thread(manila.revoke_access_rule, svc_conn, file_storage_id, access_id)
         except Exception as e:
             logger.error(f"Rollback - access rule 삭제 실패: {e}")
 

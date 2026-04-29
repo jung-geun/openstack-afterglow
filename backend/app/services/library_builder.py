@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 from app.config import get_settings
 from app.services import libraries as lib_svc
 from app.services import manila
+from app.services.keystone import get_service_project_connection
 
 _logger = logging.getLogger(__name__)
 
@@ -179,14 +180,16 @@ def get_active_builds() -> dict[str, dict]:
 
 
 async def start_build(
-    conn: openstack.connection.Connection,
     library_id: str,
 ) -> dict:
     """라이브러리 파일 스토리지 자동 빌드 시작.
 
+    Manila share와 빌더 VM은 service 프로젝트에 생성된다.
+
     Returns: {file_storage_id, server_id, status}
     """
     settings = get_settings()
+    conn = await asyncio.to_thread(get_service_project_connection)
 
     if library_id in _active_builds:
         raise RuntimeError(f"이미 빌드 중인 라이브러리: {library_id}")
@@ -309,8 +312,8 @@ async def start_build(
     }
     _active_builds[library_id] = build_info
 
-    # 6. 백그라운드 모니터링 시작
-    asyncio.create_task(_monitor_build(conn, library_id, share_id, server_id, build_db_id))
+    # 6. 백그라운드 모니터링 시작 (service conn을 task 내부에서 새로 생성해 request-scope 닫힘 문제 해결)
+    asyncio.create_task(_monitor_build(library_id, share_id, server_id, build_db_id))
 
     return {
         "file_storage_id": share_id,
@@ -351,13 +354,17 @@ def _create_builder_vm(
 
 
 async def _monitor_build(
-    conn: openstack.connection.Connection,
     library_id: str,
     share_id: str,
     server_id: str,
     build_db_id: int | None = None,
 ):
-    """빌더 VM 상태를 모니터링하고 완료 시 정리."""
+    """빌더 VM 상태를 모니터링하고 완료 시 정리.
+
+    service 프로젝트 conn을 task 내부에서 새로 생성한다.
+    요청 핸들러 응답 후 conn이 닫히는 잠재 버그를 방지한다.
+    """
+    conn = await asyncio.to_thread(get_service_project_connection)
     _logger.info("[builder] 모니터링 시작: library=%s, server=%s", library_id, server_id)
     try:
         # 최대 30분 대기
@@ -555,8 +562,10 @@ async def _monitor_build(
             del _active_builds[library_id]
 
 
-async def cancel_build(conn: openstack.connection.Connection, build_db_id: int) -> dict:
+async def cancel_build(build_db_id: int) -> dict:
     """진행 중인 빌드를 취소하고 리소스를 정리한다.
+
+    빌더 VM 삭제는 service 프로젝트 conn으로 수행한다.
 
     Returns:
         { "cancelled": True, "library_id": str, "server_deleted": bool }
@@ -593,11 +602,12 @@ async def cancel_build(conn: openstack.connection.Connection, build_db_id: int) 
     if library_id in _active_builds:
         del _active_builds[library_id]
 
-    # VM 삭제 (best-effort)
+    # VM 삭제 (best-effort) — service 프로젝트 conn 사용
     server_deleted = False
     if server_id:
         try:
-            await asyncio.to_thread(conn.compute.delete_server, server_id, force=True)
+            svc_conn = await asyncio.to_thread(get_service_project_connection)
+            await asyncio.to_thread(svc_conn.compute.delete_server, server_id, force=True)
             server_deleted = True
             _logger.info("[builder] 취소로 인한 빌더 VM 삭제 완료: %s", server_id)
         except Exception:

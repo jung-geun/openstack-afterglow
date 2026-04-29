@@ -80,6 +80,7 @@ def _load_toml() -> dict:
     flat["os_manila_share_type"] = ost.get("manila_share_type", "cephfs")
     flat["os_manila_nfs_share_type"] = ost.get("manila_nfs_share_type", "nfstype")
     flat["ceph_monitors"] = ost.get("ceph_monitors", "")
+    flat["os_service_project_id"] = ost.get("service_project_id", "")
 
     app = data.get("app", {})
     flat["backend_port"] = app.get("backend_port", 8000)
@@ -232,6 +233,9 @@ class Settings(BaseSettings):
     os_cacert: str = ""
 
     # Manila 설정
+    os_service_project_id: str = (
+        ""  # Union Mount 빌더/share 전용 service 프로젝트 UUID. 미설정 시 prebuilt 경로 fail-fast.
+    )
     os_manila_endpoint: str = ""
     # Swift 설정
     os_swift_endpoint: str = ""
