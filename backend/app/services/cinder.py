@@ -232,6 +232,17 @@ def _backup_to_dict(b) -> dict:
     }
 
 
+def wait_volume_available(
+    conn: openstack.connection.Connection,
+    volume_id: str,
+    timeout: int = 120,
+) -> VolumeInfo:
+    """볼륨이 'available' 상태가 될 때까지 폴링."""
+    vol = conn.block_storage.get_volume(volume_id)
+    vol = conn.block_storage.wait_for_status(vol, status="available", wait=timeout)
+    return _vol_to_info(vol)
+
+
 def create_volume_transfer(
     conn: openstack.connection.Connection,
     volume_id: str,
