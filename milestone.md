@@ -835,7 +835,7 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 **향후 작업**:
 - [ ] Barbican KMS host static pod 재설계 (부팅 전 소켓 준비, apiserver 재시작 트리거)
 - [ ] Keystone Auth hostNetwork static pod 재설계 (webhook URL을 127.0.0.1:port로 변경)
-- [ ] callback.sh에서 k3s 재시작 루프 감지 시 success=false 보고
+- [x] callback.sh에서 k3s 재시작 루프 감지 시 success=false 보고
 
 ---
 
