@@ -1,0 +1,25 @@
+---
+- name: Bootstrap | Run DB schema initialization
+  become: true
+  community.docker.docker_container:
+    name: afterglow_bootstrap
+    image: "{{ afterglow_backend_image }}:{{ afterglow_image_tag }}"
+    command: ["python", "-m", "app.bootstrap"]
+    state: started
+    detach: false
+    auto_remove: true
+    volumes:
+      - "{{ afterglow_config_dir }}/config.toml:/app/config.toml:ro"
+    env:
+      DATABASE_URL: "mysql+asyncmy://{{ afterglow_database_user }}:{{ afterglow_database_password }}@{{ database_address | default('mariadb') }}:{{ database_port | default(3306) }}/{{ afterglow_database_name }}"
+      REDIS_URL: "redis://{{ afterglow_redis_password | default('') }}@{{ valkey_address | default('valkey') }}:{{ valkey_port | default(6379) }}/{{ afterglow_redis_db_index }}"
+  register: bootstrap_result
+  run_once: true
+  delegate_to: "{{ groups['afterglow'] | first }}"
+  failed_when: false
+
+- name: Bootstrap | Show bootstrap output
+  ansible.builtin.debug:
+    msg: "{{ bootstrap_result }}"
+  run_once: true
+  when: bootstrap_result is defined

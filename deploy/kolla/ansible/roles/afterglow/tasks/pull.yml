@@ -1,0 +1,11 @@
+---
+- name: Pull | Pull afterglow images
+  become: true
+  community.docker.docker_image:
+    name: "{{ item.value.image }}"
+    source: pull
+    force_source: true
+  loop: "{{ afterglow_services | dict2items }}"
+  when:
+    - inventory_hostname in groups['afterglow']
+    - item.value.enabled | bool

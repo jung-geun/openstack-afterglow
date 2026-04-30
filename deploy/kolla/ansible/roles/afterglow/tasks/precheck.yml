@@ -1,0 +1,76 @@
+---
+- name: Precheck | Verify enable_afterglow is set
+  ansible.builtin.assert:
+    that:
+      - enable_afterglow is defined
+    fail_msg: "enable_afterglow must be set in globals.yml"
+  run_once: true
+  tags: precheck
+
+- name: Precheck | Check required password variables
+  ansible.builtin.assert:
+    that:
+      - afterglow_database_password is defined and afterglow_database_password | length > 0
+      - afterglow_secret_key is defined and afterglow_secret_key | length > 0
+      - afterglow_admin_keystone_password is defined and afterglow_admin_keystone_password | length > 0
+      - afterglow_kubeconfig_encryption_key is defined and afterglow_kubeconfig_encryption_key | length > 0
+    fail_msg: "Required afterglow passwords are not set. Add them to passwords.yml from passwords.afterglow.additions.yml"
+  run_once: true
+  tags: precheck
+  when: enable_afterglow | bool
+
+- name: Precheck | Verify Manila microversion support
+  become: true
+  community.docker.docker_container_exec:
+    container: kolla_toolbox
+    command: >
+      bash -c "openstack --os-cloud=kolla --os-share-api-version={{ afterglow_manila_microversion }}
+      share api-versions show 2>&1 | head -5"
+  register: manila_version_check
+  failed_when: false
+  run_once: true
+  delegate_to: "{{ groups['control'] | first }}"
+  tags: precheck
+  when: enable_afterglow | bool and afterglow_service_manila_enabled | bool
+
+- name: Precheck | Fail if Manila microversion not supported
+  ansible.builtin.fail:
+    msg: "Manila does not support microversion {{ afterglow_manila_microversion }}. Wallaby (2021.1) or later required."
+  when:
+    - enable_afterglow | bool
+    - afterglow_service_manila_enabled | bool
+    - manila_version_check is defined
+    - "'error' in (manila_version_check.stdout | lower)"
+  run_once: true
+  tags: precheck
+
+- name: Precheck | Check Ceph monitors reachability
+  ansible.builtin.assert:
+    that:
+      - afterglow_ceph_monitors | length > 0
+    fail_msg: "afterglow_ceph_monitors must be set (e.g. '10.0.0.1:6789,10.0.0.2:6789')"
+  run_once: true
+  tags: precheck
+  when: enable_afterglow | bool and afterglow_service_manila_enabled | bool
+
+- name: Precheck | Verify Docker image accessibility (dry-run pull)
+  become: true
+  ansible.builtin.command:
+    cmd: "docker manifest inspect {{ afterglow_backend_image }}:{{ afterglow_image_tag }}"
+  register: image_check
+  failed_when: false
+  changed_when: false
+  run_once: true
+  delegate_to: "{{ groups['afterglow'] | first }}"
+  tags: precheck
+  when: enable_afterglow | bool
+
+- name: Precheck | Warn if backend image not accessible
+  ansible.builtin.debug:
+    msg: "WARNING: Cannot access {{ afterglow_backend_image }}:{{ afterglow_image_tag }}. Ensure GHCR credentials are configured."
+  when:
+    - enable_afterglow | bool
+    - image_check is defined
+    - image_check.rc != 0
+  run_once: true
+  tags: precheck

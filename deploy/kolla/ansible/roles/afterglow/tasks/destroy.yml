@@ -1,0 +1,16 @@
+---
+- name: Destroy | Stop and remove afterglow containers
+  become: true
+  community.docker.docker_container:
+    name: "{{ item.value.container_name }}"
+    state: absent
+  loop: "{{ afterglow_services | dict2items }}"
+  when: inventory_hostname in groups['afterglow']
+
+- name: Destroy | Remove haproxy afterglow config
+  become: true
+  ansible.builtin.file:
+    path: "{{ afterglow_haproxy_services_d }}/afterglow.cfg"
+    state: absent
+  when: inventory_hostname in groups['haproxy']
+  notify: Restart haproxy container

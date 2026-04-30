@@ -1,0 +1,13 @@
+---
+- name: Include secrets precondition tasks
+  ansible.builtin.import_tasks: preconditions_secrets.yml
+
+- name: Include database precondition tasks
+  ansible.builtin.import_tasks: preconditions_db.yml
+
+- name: Include keystone precondition tasks
+  ansible.builtin.import_tasks: preconditions_keystone.yml
+
+- name: Include manila precondition tasks
+  ansible.builtin.import_tasks: preconditions_manila.yml
+  when: afterglow_service_manila_enabled | bool

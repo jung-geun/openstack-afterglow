@@ -1,0 +1,20 @@
+{
+    "name": "afterglow_frontend",
+    "image": "{{ afterglow_frontend_image }}:{{ afterglow_image_tag }}",
+    "restart_policy": "unless-stopped",
+    "volumes": [
+        "kolla_logs:/var/log/kolla/"
+    ],
+    "environment": {
+        "ORIGIN": "{{ afterglow_external_url }}",
+        "PUBLIC_API_BASE": "{{ afterglow_external_url }}"
+    },
+    "healthcheck": {
+        "test": ["CMD", "curl", "-f", "http://localhost:3000/"],
+        "interval": "30s",
+        "timeout": "10s",
+        "retries": 3,
+        "start_period": "30s"
+    },
+    "ports": ["{{ afterglow_frontend_port }}:3000"]
+}

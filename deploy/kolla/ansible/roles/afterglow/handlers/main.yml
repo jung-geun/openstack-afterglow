@@ -1,0 +1,32 @@
+---
+- name: Restart afterglow-backend container
+  become: true
+  community.docker.docker_container:
+    name: afterglow_backend
+    state: started
+    restart: true
+  when: inventory_hostname in groups['afterglow']
+
+- name: Restart afterglow-frontend container
+  become: true
+  community.docker.docker_container:
+    name: afterglow_frontend
+    state: started
+    restart: true
+  when: inventory_hostname in groups['afterglow']
+
+- name: Restart afterglow-worker container
+  become: true
+  community.docker.docker_container:
+    name: afterglow_worker
+    state: started
+    restart: true
+  when: inventory_hostname in groups['afterglow']
+
+- name: Restart haproxy container
+  become: true
+  community.docker.docker_container:
+    name: haproxy
+    state: started
+    restart: true
+  when: inventory_hostname in groups['haproxy']

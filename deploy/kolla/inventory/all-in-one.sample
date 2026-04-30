@@ -1,0 +1,56 @@
+# Afterglow × kolla-ansible all-in-one inventory sample
+# 단일 노드에서 모든 서비스를 실행합니다
+
+[control]
+localhost ansible_connection=local
+
+[network:children]
+control
+
+[compute:children]
+control
+
+[monitoring:children]
+control
+
+[storage:children]
+control
+
+[deployment]
+localhost ansible_connection=local
+
+[afterglow:children]
+control
+
+[baremetal:children]
+control
+
+[haproxy:children]
+network
+
+[mariadb:children]
+control
+
+[rabbitmq:children]
+control
+
+[keystone:children]
+control
+
+[glance:children]
+control
+
+[nova:children]
+control
+
+[neutron:children]
+control
+
+[cinder:children]
+control
+
+[manila:children]
+control
+
+[horizon:children]
+control
