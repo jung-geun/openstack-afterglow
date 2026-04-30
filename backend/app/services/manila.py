@@ -404,27 +404,44 @@ def get_file_storage(conn, file_storage_id: str) -> FileStorageInfo:
 # ---------------------------------------------------------------------------
 
 
+def _build_nfs_access_metadata(root_squash: bool = True, sec_flavor: str = "sys") -> dict:
+    """NFS access rule에 첨부할 보안 메타데이터 빌드.
+
+    root_squash: True 시 Manila가 NFS 서버에 root→nobody 매핑을 적용하도록 요청.
+    sec_flavor: NFS 인증 방식 — "sys"(기본, UNIX UID/GID) 또는 "krb5"(Kerberos).
+    Manila API 2.65+를 사용하므로 메타데이터 필드는 표준으로 지원된다.
+    """
+    meta: dict = {}
+    if root_squash:
+        meta["root_squash"] = "True"
+    if sec_flavor:
+        meta["auth_flavor_list"] = [sec_flavor]
+    return meta
+
+
 def create_access_rule(
     conn,
     file_storage_id: str,
     access_to: str,
     access_level: str = "ro",  # "ro" | "rw"
     access_type: str = "cephx",  # "cephx" | "ip"
+    metadata: dict | None = None,  # NFS access rule 보안 메타데이터 (IP 타입에만 유효)
 ) -> dict:
     """
     접근 규칙 생성.
     - CephFS: access_type="cephx", access_to=cephx_id
-    - NFS: access_type="ip", access_to=IP/CIDR
+    - NFS: access_type="ip", access_to=IP/CIDR, metadata={root_squash, auth_flavor_list}
     반환: { access_id, access_key, access_to, access_level }
     """
     client = get_client(conn)
-    body = {
-        "allow_access": {
-            "access_type": access_type,
-            "access_to": access_to,
-            "access_level": access_level,
-        }
+    allow_access: dict = {
+        "access_type": access_type,
+        "access_to": access_to,
+        "access_level": access_level,
     }
+    if metadata and access_type == "ip":
+        allow_access["metadata"] = metadata
+    body = {"allow_access": allow_access}
     data = client.post(f"shares/{file_storage_id}/action", body)["access"]
 
     # access_key 조회 (CephX만 해당, IP 규칙은 없음)
@@ -541,10 +558,14 @@ def ensure_nfs_access_rule(
     file_storage_id: str,
     access_to: str,
     access_level: str = "rw",
+    root_squash: bool = True,
+    sec_flavor: str = "sys",
 ) -> dict:
     """
     NFS access rule이 없으면 생성하고, 이미 있으면 기존 rule을 반환.
     access_to: IP 주소 또는 CIDR (예: "192.168.1.100" 또는 "10.0.0.0/24")
+    root_squash: NFS root → nobody 매핑 강제 여부 (보안 권장: True)
+    sec_flavor: NFS 인증 flavor — "sys" 또는 "krb5"
     """
     # 기존 access rule 조회
     existing_rules = list_access_rules(conn, file_storage_id)
@@ -563,13 +584,15 @@ def ensure_nfs_access_rule(
                 "access_level": access_level,
             }
 
-    # 새로 생성
+    # 새로 생성 (보안 메타데이터 포함)
+    meta = _build_nfs_access_metadata(root_squash=root_squash, sec_flavor=sec_flavor)
     return create_access_rule(
         conn,
         file_storage_id=file_storage_id,
         access_to=access_to,
         access_level=access_level,
         access_type="ip",
+        metadata=meta or None,
     )
 
 

@@ -561,7 +561,7 @@ Step 5: 요약 & 배포
   - [ ] 라이선스/동시 접속 제한 검토 (상용 소프트웨어)
 
 - [x] 5.5 보안 강화
-  - [ ] NFS export 옵션 보안: `root_squash`, `sec=sys` vs `sec=krb5`
+  - [x] NFS export 옵션 보안: `root_squash`, `sec=sys` vs `sec=krb5` — `_build_nfs_access_metadata` + `create_access_rule(metadata=)` + `ensure_nfs_access_rule(root_squash, sec_flavor)` + 설정값 2개(`manila_nfs_root_squash`, `manila_nfs_sec_flavor`) + 단위테스트 13건
   - [x] CephX 키 로테이션 지원 — `rotate_cephx_access_rule` + `POST /api/instances/{id}/credentials/rotate-cephx` + systemd 타이머
   - [x] VM 간 데이터 격리 검증 (다른 프로젝트의 share 접근 차단) — `union_project_id` 메타 + list/get 필터
   - [x] NFS 방화벽 규칙 자동 관리 (Security Group) — `ensure_union_egress_sg` + instances.py auto-attach

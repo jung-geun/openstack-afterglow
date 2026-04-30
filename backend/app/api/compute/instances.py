@@ -1108,6 +1108,8 @@ async def _prepare_dynamic_file_storage(
             file_storage.id,
             access_to,
             "rw",
+            settings.manila_nfs_root_squash,
+            settings.manila_nfs_sec_flavor,
         )
         created_access_ids.append((file_storage.id, rule["access_id"]))
 
