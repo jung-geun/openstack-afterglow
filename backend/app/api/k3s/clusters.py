@@ -19,10 +19,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response, StreamingResponse
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+from sqlalchemy.exc import InterfaceError, OperationalError
 from starlette.requests import Request
 
 from app.api.deps import get_os_conn, get_token_info
 from app.config import get_settings
+from app.database import mark_db_unhealthy
 from app.models.k3s import (
     CreateK3sClusterRequest,
     K3sClusterInfo,
@@ -84,7 +86,12 @@ async def list_k3s_clusters(
     include_deleted: bool = Query(default=False),
 ):
     project_id = token_info["project_id"]
-    clusters = await k3s_cluster.list_clusters(project_id, include_deleted=include_deleted)
+    try:
+        clusters = await k3s_cluster.list_clusters(project_id, include_deleted=include_deleted)
+    except (OperationalError, InterfaceError):
+        _logger.warning("k3s 클러스터 목록 DB 조회 실패 — 빈 목록 반환", exc_info=True)
+        mark_db_unhealthy()
+        return []
     return [_cluster_to_info(c) for c in clusters]
 
 

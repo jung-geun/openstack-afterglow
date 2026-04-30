@@ -144,3 +144,64 @@ async def test_gpu_available_cache_refresh(client):
             resp = await client.get("/api/dashboard/gpu-available?refresh=true")
     # 200 또는 500(실제 admin conn 없음), 중요한 건 404가 아닌 것
     assert resp.status_code != 403
+
+
+# ---------------------------------------------------------------------------
+# GPU quota OperationalError → 200 + 빈 gpu 배열
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_dashboard_quotas_gpu_db_error_returns_empty_gpu(client):
+    """GPU quota DB OperationalError 발생 시 200 반환 + gpu 빈 배열."""
+    from sqlalchemy.exc import OperationalError
+
+    quota = {"limit": 10, "in_use": 2, "reserved": 0}
+    quota_int = 0
+    swift_meta = {"container_count": 0, "object_count": 0, "bytes_used": 0}
+
+    with (
+        patch(
+            "app.api.common.dashboard.cached_call",
+            new=AsyncMock(return_value=[quota, quota, quota, quota, quota_int, swift_meta]),
+        ),
+        patch("app.api.common.dashboard.is_db_available", return_value=True),
+        patch(
+            "app.api.common.dashboard.asyncio.gather",
+            new=AsyncMock(return_value=(OperationalError("lost", None, None), {})),
+        ),
+        patch("app.api.common.dashboard.mark_db_unhealthy") as mock_mark,
+    ):
+        resp = await client.get("/api/dashboard/quotas")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["gpu"] == []
+    mock_mark.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_get_dashboard_quotas_gpu_partial_error_returns_empty_gpu(client):
+    """GPU usage 조회만 실패해도 200 + gpu 빈 배열."""
+    from sqlalchemy.exc import OperationalError
+
+    quota = {"limit": 10, "in_use": 2, "reserved": 0}
+    quota_int = 0
+    swift_meta = {"container_count": 0, "object_count": 0, "bytes_used": 0}
+
+    with (
+        patch(
+            "app.api.common.dashboard.cached_call",
+            new=AsyncMock(return_value=[quota, quota, quota, quota, quota_int, swift_meta]),
+        ),
+        patch("app.api.common.dashboard.is_db_available", return_value=True),
+        patch(
+            "app.api.common.dashboard.asyncio.gather",
+            new=AsyncMock(return_value=({"RTX3090": 2}, OperationalError("lost", None, None))),
+        ),
+        patch("app.api.common.dashboard.mark_db_unhealthy"),
+    ):
+        resp = await client.get("/api/dashboard/quotas")
+
+    assert resp.status_code == 200
+    assert resp.json()["gpu"] == []

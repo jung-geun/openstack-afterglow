@@ -60,7 +60,7 @@
   const projectId = $derived($auth.projectId ?? undefined);
 
   const ar = createAutoRefresh(
-    () => Promise.all([fetchFileStorage(fileStorageId), fetchAccessRules(fileStorageId)]),
+    () => { void Promise.all([fetchFileStorage(fileStorageId), fetchAccessRules(fileStorageId)]); },
     {
       storageKey: 'file-storage-detail-panel',
       defaultActive: true,
