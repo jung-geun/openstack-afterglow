@@ -279,6 +279,52 @@ async def test_detach_interface(client, mock_conn):
     assert resp.status_code == 204
 
 
+# ────── 볼륨 delete_on_termination 토글 ──────
+
+
+@pytest.mark.asyncio
+async def test_update_volume_attachment_set_true(client, mock_conn):
+    with patch("app.api.compute.instances.nova.update_volume_attachment_delete_flag") as mock_update:
+        resp = await client.patch(
+            "/api/instances/inst-1/volumes/vol-1",
+            json={"delete_on_termination": True},
+        )
+    assert resp.status_code == 204
+    mock_update.assert_called_once_with(mock_conn, "inst-1", "vol-1", True)
+
+
+@pytest.mark.asyncio
+async def test_update_volume_attachment_set_false(client, mock_conn):
+    with patch("app.api.compute.instances.nova.update_volume_attachment_delete_flag") as mock_update:
+        resp = await client.patch(
+            "/api/instances/inst-1/volumes/vol-1",
+            json={"delete_on_termination": False},
+        )
+    assert resp.status_code == 204
+    mock_update.assert_called_once_with(mock_conn, "inst-1", "vol-1", False)
+
+
+@pytest.mark.asyncio
+async def test_update_volume_attachment_missing_body(client, mock_conn):
+    """body 누락 시 422."""
+    resp = await client.patch("/api/instances/inst-1/volumes/vol-1", json={})
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_update_volume_attachment_server_error(client, mock_conn):
+    """Nova 호출 실패 시 500."""
+    with patch(
+        "app.api.compute.instances.nova.update_volume_attachment_delete_flag",
+        side_effect=Exception("Nova 오류"),
+    ):
+        resp = await client.patch(
+            "/api/instances/inst-1/volumes/vol-1",
+            json={"delete_on_termination": True},
+        )
+    assert resp.status_code == 500
+
+
 # ────── 입력 검증 ──────
 
 

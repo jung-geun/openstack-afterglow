@@ -130,6 +130,10 @@ class AttachVolumeRequest(BaseModel):
     volume_id: str
 
 
+class UpdateVolumeAttachmentRequest(BaseModel):
+    delete_on_termination: bool
+
+
 class AttachInterfaceRequest(BaseModel):
     net_id: str
 

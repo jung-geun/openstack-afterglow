@@ -35,6 +35,7 @@ from app.models.compute import (
     CreateInstanceRequest,
     InstanceInfo,
     UpdateSecurityGroupsRequest,
+    UpdateVolumeAttachmentRequest,
 )
 from app.models.progress import ProgressMessage, ProgressStep
 from app.rate_limit import limiter
@@ -950,6 +951,27 @@ async def detach_volume_from_instance(
     pid = conn._afterglow_project_id
     try:
         await asyncio.to_thread(nova.detach_volume, conn, instance_id, volume_id)
+        await invalidate(f"afterglow:cinder:{pid}:vol_attach:{instance_id}")
+    except Exception:
+        raise HTTPException(status_code=500, detail="작업 실패")
+
+
+@router.patch("/{instance_id}/volumes/{volume_id}", status_code=204)
+async def update_volume_attachment(
+    instance_id: str,
+    volume_id: str,
+    body: UpdateVolumeAttachmentRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    pid = conn._afterglow_project_id
+    try:
+        await asyncio.to_thread(
+            nova.update_volume_attachment_delete_flag,
+            conn,
+            instance_id,
+            volume_id,
+            body.delete_on_termination,
+        )
         await invalidate(f"afterglow:cinder:{pid}:vol_attach:{instance_id}")
     except Exception:
         raise HTTPException(status_code=500, detail="작업 실패")
