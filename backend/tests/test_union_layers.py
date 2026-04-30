@@ -210,8 +210,11 @@ class TestSealLayer:
         from app.services.union_layers import seal_layer
 
         layer = _make_layer(layer_id=_sha("a"), sealed=False)
+        mock_dup_result = MagicMock()
+        mock_dup_result.scalar_one_or_none.return_value = None  # 중복 없음
         session = AsyncMock()
         session.get = AsyncMock(return_value=layer)
+        session.execute = AsyncMock(return_value=mock_dup_result)
 
         result = await seal_layer(session, _sha("a"))
         assert result.sealed is True
@@ -1358,8 +1361,11 @@ class TestSealTimestamp:
 
         layer = _make_layer(layer_id=_sha("a"), sealed=False)
         layer.sealed_at = None
+        mock_dup_result = MagicMock()
+        mock_dup_result.scalar_one_or_none.return_value = None
         session = AsyncMock()
         session.get = AsyncMock(return_value=layer)
+        session.execute = AsyncMock(return_value=mock_dup_result)
 
         result = await seal_layer(session, _sha("a"))
         assert result.sealed is True
@@ -1579,6 +1585,92 @@ class TestMountLimitGuard:
 
 
 # ---------------------------------------------------------------------------
+# A9: Rebuild hash 충돌 검사 — seal_layer overwrite 금지 정책
+# ---------------------------------------------------------------------------
+
+
+class TestSealHashCollision:
+    """seal_layer: 동일 (name, version, parent_id) 슬롯에 봉인 레이어 중복 시 거부."""
+
+    @pytest.mark.asyncio
+    async def test_seal_rejects_duplicate_slot(self):
+        """동일 name/version/parent 봉인 레이어가 이미 있으면 ValueError."""
+
+        from app.services.union_layers import seal_layer
+
+        existing_sealed = _make_layer(layer_id=_sha("sealed-dup"), name="torch", version="2.4", sealed=True)
+        existing_sealed.parent_id = _sha("parent")
+
+        target = _make_layer(layer_id=_sha("target-dup"), name="torch", version="2.4", sealed=False)
+        target.parent_id = _sha("parent")
+
+        async def _mock_get(model, lid):
+            if lid == target.id:
+                return target
+            return None
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = existing_sealed
+
+        session = MagicMock()
+        session.get = AsyncMock(side_effect=_mock_get)
+        session.execute = AsyncMock(return_value=mock_result)
+
+        with pytest.raises(ValueError, match="overwrite 금지"):
+            await seal_layer(session, target.id)
+
+    @pytest.mark.asyncio
+    async def test_seal_allows_different_version(self):
+        """version이 다르면 동일 name/parent라도 seal 허용."""
+        from app.services.union_layers import seal_layer
+
+        target = _make_layer(layer_id=_sha("target-v2"), name="torch", version="2.5", sealed=False)
+        target.parent_id = _sha("parent2")
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None  # 중복 없음
+
+        session = MagicMock()
+        session.get = AsyncMock(return_value=target)
+        session.execute = AsyncMock(return_value=mock_result)
+        session.commit = AsyncMock()
+
+        result = await seal_layer(session, target.id)
+        assert result.sealed is True
+
+    @pytest.mark.asyncio
+    async def test_seal_allows_different_parent(self):
+        """parent_id가 다르면 동일 name/version이라도 seal 허용."""
+        from app.services.union_layers import seal_layer
+
+        target = _make_layer(layer_id=_sha("target-p2"), name="torch", version="2.4", sealed=False)
+        target.parent_id = _sha("different-parent")
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+
+        session = MagicMock()
+        session.get = AsyncMock(return_value=target)
+        session.execute = AsyncMock(return_value=mock_result)
+        session.commit = AsyncMock()
+
+        result = await seal_layer(session, target.id)
+        assert result.sealed is True
+
+    @pytest.mark.asyncio
+    async def test_seal_already_sealed_raises(self):
+        """이미 봉인된 레이어 재봉인 시도 → ValueError."""
+        from app.services.union_layers import seal_layer
+
+        already = _make_layer(layer_id=_sha("already"), sealed=True)
+
+        session = MagicMock()
+        session.get = AsyncMock(return_value=already)
+
+        with pytest.raises(ValueError, match="이미 봉인"):
+            await seal_layer(session, already.id)
+
+
 # A7: seal 후 RW 차단 검증 — 파일 시스템 fixture
 # ---------------------------------------------------------------------------
 
@@ -1643,8 +1735,12 @@ class TestSealWriteProtection:
             layer.id = _sha("seal-test")
             layer.sealed = False
 
+            mock_dup_result = MagicMock()
+            mock_dup_result.scalar_one_or_none.return_value = None
+
             session = MagicMock()
             session.get = AsyncMock(return_value=layer)
+            session.execute = AsyncMock(return_value=mock_dup_result)
             session.commit = AsyncMock()
 
             result = await seal_layer(session, layer.id)

@@ -159,12 +159,31 @@ async def list_layers(
 
 
 async def seal_layer(session: AsyncSession, layer_id: str) -> SealLayerResponse:
-    """레이어 봉인 (sealed=True + sealed_at 기록)."""
+    """레이어 봉인 (sealed=True + sealed_at 기록).
+
+    동일 (name, version, parent_id) 조합의 봉인 레이어가 이미 존재하면 overwrite 금지 정책에 의해 거부된다.
+    """
     layer = await session.get(UnionLayer, layer_id)
     if layer is None:
         raise KeyError(f"레이어 {layer_id}를 찾을 수 없습니다")
     if layer.sealed:
         raise ValueError(f"레이어 {layer_id}는 이미 봉인되어 있습니다")
+
+    # overwrite 금지: 동일 (name, version, parent_id) 슬롯에 봉인 레이어가 이미 있으면 거부
+    dup_stmt = select(UnionLayer).where(
+        UnionLayer.name == layer.name,
+        UnionLayer.version == layer.version,
+        UnionLayer.parent_id == layer.parent_id,
+        UnionLayer.sealed.is_(True),
+        UnionLayer.id != layer_id,
+    )
+    dup_result = await session.execute(dup_stmt)
+    duplicate = dup_result.scalar_one_or_none()
+    if duplicate:
+        raise ValueError(
+            f"동일한 (name={layer.name}, version={layer.version}, parent={layer.parent_id}) "
+            f"봉인 레이어가 이미 존재합니다 ({duplicate.id}). overwrite 금지 정책에 의해 seal이 거부됩니다."
+        )
 
     now = datetime.now(UTC)
     layer.sealed = True
