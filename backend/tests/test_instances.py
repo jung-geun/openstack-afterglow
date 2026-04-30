@@ -696,3 +696,162 @@ async def test_create_instance_sg_skipped_when_disabled(client, mock_conn):
         )
 
     assert not ensure_called, "union_auto_egress_sg_enabled=False임에도 ensure_union_egress_sg가 호출됨"
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Monitoring SG auto-attach (A11)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+@pytest.mark.asyncio
+async def test_create_instance_attaches_monitoring_sg(client, mock_conn):
+    """monitoring_auto_sg_enabled=True + scrape_cidr 설정 시 monitoring SG가 자동 attach된다."""
+    from unittest.mock import MagicMock as MM
+
+    attached_sgs = []
+
+    def fake_create_server(conn, name, flavor_id, network_id, boot_volume_id, **kwargs):
+        attached_sgs.extend(kwargs.get("security_groups") or [])
+        return make_instance("srv-new")
+
+    fake_vol = MM()
+    fake_vol.id = "vol-boot"
+    fake_flavor = MM()
+    fake_flavor.id = "flavor-1"
+    fake_flavor.is_gpu = False
+    fake_flavor.extra_specs = {}
+    fake_upper = MM()
+    fake_upper.id = "vol-upper"
+    mock_conn.compute.create_volume_attachment.return_value = MM()
+
+    with (
+        patch("app.api.compute.instances.nova.list_flavors", return_value=[fake_flavor]),
+        patch("app.api.compute.instances.cinder.create_volume_from_image", return_value=fake_vol),
+        patch("app.api.compute.instances.cinder.rename_volume"),
+        patch("app.api.compute.instances.cinder.create_empty_volume", return_value=fake_upper),
+        patch("app.api.compute.instances.lib_svc.resolve_with_deps", return_value=["python311"]),
+        patch(
+            "app.api.compute.instances._prepare_prebuilt_file_storages",
+            return_value=[{"file_storage_id": "share-1", "name": "python311", "share_proto": "CEPHFS"}],
+        ),
+        patch("app.api.compute.instances.cloudinit.generate_userdata", return_value=b"userdata"),
+        patch("app.api.compute.instances.neutron.ensure_union_egress_sg", return_value="union-egress-default"),
+        patch(
+            "app.api.compute.instances.neutron.ensure_monitoring_ingress_sg",
+            return_value="monitoring",
+        ),
+        patch("app.api.compute.instances.nova.create_server", side_effect=fake_create_server),
+        patch("app.api.compute.instances.neutron.list_networks", return_value=[]),
+        patch("app.api.compute.instances.is_db_available", return_value=False),
+        patch("app.api.compute.instances.get_settings") as mock_settings,
+    ):
+        s = MM()
+        s.union_auto_egress_sg_enabled = True
+        s.union_egress_sg_name = "union-egress-default"
+        s.monitoring_auto_sg_enabled = True
+        s.monitoring_scrape_cidr = "10.0.0.0/8"
+        s.monitoring_sg_name = "monitoring"
+        s.ceph_monitors = ""
+        s.upper_volume_size_gb = 10
+        s.os_manila_share_network_id = ""
+        s.os_manila_share_type = ""
+        s.os_manila_nfs_share_type = ""
+        s.default_availability_zone = ""
+        s.default_network_id = ""
+        s.default_network_external_id = ""
+        s.default_network_cidr = ""
+        s.health_report_url = ""
+        s.instance_volume_type = ""
+        s.boot_volume_size_gb = 50
+        mock_settings.return_value = s
+
+        resp = await client.post(
+            "/api/instances",
+            json={
+                "name": "test-vm",
+                "image_id": "img-1",
+                "flavor_id": "flavor-1",
+                "network_id": "net-1",
+                "libraries": ["python311"],
+                "strategy": "prebuilt",
+            },
+        )
+
+    assert resp.status_code in (200, 201, 202)
+    assert "monitoring" in attached_sgs
+
+
+@pytest.mark.asyncio
+async def test_create_instance_monitoring_sg_skipped_when_disabled(client, mock_conn):
+    """monitoring_auto_sg_enabled=False 시 monitoring SG auto-attach 생략."""
+    from unittest.mock import MagicMock as MM
+
+    mon_ensure_called = []
+
+    def fake_create_server(conn, name, flavor_id, network_id, boot_volume_id, **kwargs):
+        return make_instance("srv-new")
+
+    fake_vol = MM()
+    fake_vol.id = "vol-boot"
+    fake_flavor = MM()
+    fake_flavor.id = "flavor-1"
+    fake_flavor.is_gpu = False
+    fake_flavor.extra_specs = {}
+    fake_upper = MM()
+    fake_upper.id = "vol-upper"
+    mock_conn.compute.create_volume_attachment.return_value = MM()
+
+    with (
+        patch("app.api.compute.instances.nova.list_flavors", return_value=[fake_flavor]),
+        patch("app.api.compute.instances.cinder.create_volume_from_image", return_value=fake_vol),
+        patch("app.api.compute.instances.cinder.rename_volume"),
+        patch("app.api.compute.instances.cinder.create_empty_volume", return_value=fake_upper),
+        patch("app.api.compute.instances.lib_svc.resolve_with_deps", return_value=["python311"]),
+        patch(
+            "app.api.compute.instances._prepare_prebuilt_file_storages",
+            return_value=[{"file_storage_id": "share-1", "name": "python311", "share_proto": "CEPHFS"}],
+        ),
+        patch("app.api.compute.instances.cloudinit.generate_userdata", return_value=b"userdata"),
+        patch("app.api.compute.instances.neutron.ensure_union_egress_sg", return_value="union-egress-default"),
+        patch(
+            "app.api.compute.instances.neutron.ensure_monitoring_ingress_sg",
+            side_effect=lambda *a, **kw: mon_ensure_called.append(True) or "monitoring",
+        ),
+        patch("app.api.compute.instances.nova.create_server", side_effect=fake_create_server),
+        patch("app.api.compute.instances.neutron.list_networks", return_value=[]),
+        patch("app.api.compute.instances.is_db_available", return_value=False),
+        patch("app.api.compute.instances.get_settings") as mock_settings,
+    ):
+        s = MM()
+        s.union_auto_egress_sg_enabled = True
+        s.union_egress_sg_name = "union-egress-default"
+        s.monitoring_auto_sg_enabled = False
+        s.monitoring_scrape_cidr = "10.0.0.0/8"
+        s.monitoring_sg_name = "monitoring"
+        s.ceph_monitors = ""
+        s.upper_volume_size_gb = 10
+        s.os_manila_share_network_id = ""
+        s.os_manila_share_type = ""
+        s.os_manila_nfs_share_type = ""
+        s.default_availability_zone = ""
+        s.default_network_id = ""
+        s.default_network_external_id = ""
+        s.default_network_cidr = ""
+        s.health_report_url = ""
+        s.instance_volume_type = ""
+        s.boot_volume_size_gb = 50
+        mock_settings.return_value = s
+
+        await client.post(
+            "/api/instances",
+            json={
+                "name": "test-vm",
+                "image_id": "img-1",
+                "flavor_id": "flavor-1",
+                "network_id": "net-1",
+                "libraries": ["python311"],
+                "strategy": "prebuilt",
+            },
+        )
+
+    assert not mon_ensure_called, "monitoring_auto_sg_enabled=False임에도 ensure_monitoring_ingress_sg가 호출됨"

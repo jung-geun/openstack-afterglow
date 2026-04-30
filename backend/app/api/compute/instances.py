@@ -281,6 +281,22 @@ async def create_instance(
             except Exception:
                 logger.warning("Union egress SG 자동 attach 실패, 계속 진행", exc_info=True)
 
+        if settings.monitoring_auto_sg_enabled and settings.monitoring_scrape_cidr:
+            try:
+                _mon_sg = await asyncio.to_thread(
+                    neutron.ensure_monitoring_ingress_sg,
+                    conn,
+                    project_id,
+                    settings.monitoring_sg_name,
+                    settings.monitoring_scrape_cidr,
+                )
+                _sgs = list(req.security_groups or [])
+                if _mon_sg not in _sgs:
+                    _sgs.append(_mon_sg)
+                req = req.model_copy(update={"security_groups": _sgs})
+            except Exception:
+                logger.warning("Monitoring ingress SG 자동 attach 실패, 계속 진행", exc_info=True)
+
         meta = {
             "union_libraries": ",".join(resolved_libs),
             "union_strategy": req.strategy,
@@ -548,6 +564,22 @@ async def create_instance_async(
                     _sse_effective_sgs = _sgs
                 except Exception:
                     logger.warning("Union egress SG 자동 attach 실패, 계속 진행", exc_info=True)
+
+            if settings.monitoring_auto_sg_enabled and settings.monitoring_scrape_cidr:
+                try:
+                    _mon_sg = await asyncio.to_thread(
+                        neutron.ensure_monitoring_ingress_sg,
+                        conn,
+                        conn._afterglow_project_id,
+                        settings.monitoring_sg_name,
+                        settings.monitoring_scrape_cidr,
+                    )
+                    _sgs = list(_sse_effective_sgs or req.security_groups or [])
+                    if _mon_sg not in _sgs:
+                        _sgs.append(_mon_sg)
+                    _sse_effective_sgs = _sgs
+                except Exception:
+                    logger.warning("Monitoring ingress SG 자동 attach 실패, 계속 진행", exc_info=True)
 
             meta = {
                 "union_libraries": ",".join(resolved_libs) if resolved_libs else "none",

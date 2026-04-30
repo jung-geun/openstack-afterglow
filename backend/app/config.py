@@ -328,6 +328,12 @@ class Settings(BaseSettings):
     union_auto_egress_sg_enabled: bool = True  # Union VM에 egress SG 자동 attach
     union_egress_sg_name: str = "union-egress-default"  # 자동 생성/재사용할 SG 이름
 
+    # 모니터링 (Prometheus + Grafana — Option A, label-based 프로젝트 격리)
+    monitoring_auto_sg_enabled: bool = True  # 프로젝트/인스턴스 생성 시 monitoring SG 자동 attach
+    monitoring_sg_name: str = "monitoring"  # 자동 생성/재사용할 SG 이름
+    monitoring_scrape_cidr: str = ""  # Prometheus scrape CIDR (예: 10.0.0.0/8). 미설정 시 ValueError
+    monitoring_sd_token: str = ""  # /api/sd/prometheus/targets 인증 토큰 (A12에서 함께 사용)
+
     # Notion 연동
     notion_config_encryption_key: str = ""  # 미설정 시 k3s_kubeconfig_encryption_key 재사용
 

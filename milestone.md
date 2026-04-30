@@ -1109,21 +1109,21 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 
 11.4의 `ensure_union_egress_sg` (egress 6 rule)를 직접 모방. 새 헬퍼는 ingress 방향 + 노출 범위가 핵심 차이.
 
-- [ ] `backend/app/services/neutron.py` — `ensure_monitoring_ingress_sg(conn, project_id, sg_name, scrape_cidr)` idempotent 헬퍼 추가
+- [x] `backend/app/services/neutron.py` — `ensure_monitoring_ingress_sg(conn, project_id, sg_name, scrape_cidr)` idempotent 헬퍼 추가
   - rule: `ingress tcp 9100/9100 remote_ip_prefix=<scrape_cidr>` + `ingress tcp 9400/9400 remote_ip_prefix=<scrape_cidr>`
   - `scrape_cidr`은 Prometheus 스크래퍼 IP/서브넷에 한정 (전체 0.0.0.0/0 금지)
   - 11.4 `_UNION_EGRESS_RULES` 상수 옆에 `_MONITORING_INGRESS_RULES` 추가
-- [ ] `backend/app/config.py` — 신규 설정값:
+- [x] `backend/app/config.py` — 신규 설정값:
   - `monitoring_auto_sg_enabled: bool = True`
   - `monitoring_sg_name: str = "monitoring"`
   - `monitoring_scrape_cidr: str` (필수, env로 주입)
-- [ ] `backend/app/api/identity/admin_identity.py:create_project` — 프로젝트 생성 후 `ensure_monitoring_ingress_sg` 호출하여 신규 프로젝트마다 monitoring SG 자동 생성
-- [ ] `backend/app/api/compute/instances.py:create_instance` + `create_instance_async` — 11.4 egress SG 자동 attach 패턴 옆에 monitoring SG attach 추가 (`req.security_groups`에 `monitoring_sg_name` append, 중복 방지)
-- [ ] `backend/app/api/admin/projects.py` (또는 신규 utility 라우터) — `POST /api/admin/projects/{id}/sync-monitoring-sg` 엔드포인트: 기존 프로젝트에 일괄 적용 (관리자 전용)
+- [x] `backend/app/api/identity/admin_identity.py:create_project` — 프로젝트 생성 후 `ensure_monitoring_ingress_sg` 호출하여 신규 프로젝트마다 monitoring SG 자동 생성
+- [x] `backend/app/api/compute/instances.py:create_instance` + `create_instance_async` — 11.4 egress SG 자동 attach 패턴 옆에 monitoring SG attach 추가 (`req.security_groups`에 `monitoring_sg_name` append, 중복 방지)
+- [x] `backend/app/api/admin/projects.py` (또는 신규 utility 라우터) — `POST /api/admin/projects/{id}/sync-monitoring-sg` 엔드포인트: 기존 프로젝트에 일괄 적용 (관리자 전용)
 - [ ] `frontend/src/lib/components/VmCreatePanel.svelte` — SG 단일 select 옆에 "monitoring SG 자동 포함됨" 안내 배지 (auto-attach 동작 가시화)
-- [ ] `backend/tests/test_neutron.py` — `ensure_monitoring_ingress_sg` 3건 (미존재 생성, idempotent, scrape_cidr 미설정 시 ValueError)
-- [ ] `backend/tests/test_admin_identity.py` — 프로젝트 생성 시 `ensure_monitoring_ingress_sg` 호출 검증 1건
-- [ ] `backend/tests/test_instances.py` — monitoring SG auto-attach 2건 (활성/비활성)
+- [x] `backend/tests/test_neutron.py` — `ensure_monitoring_ingress_sg` 5건 (미존재 생성, idempotent, 부분 추가, scrape_cidr 미설정 시 ValueError, 커스텀 이름)
+- [x] `backend/tests/test_admin_identity.py` — 프로젝트 생성 시 `ensure_monitoring_ingress_sg` 호출 검증 1건
+- [x] `backend/tests/test_instances.py` — monitoring SG auto-attach 2건 (활성/비활성)
 
 ### 12.3 Prometheus 스크래핑 — 메인 클러스터 통합 vs 프로젝트별 분리 (결정 필요)
 
