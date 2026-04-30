@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import openstack
-import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -15,6 +16,7 @@ from app.rate_limit import limiter
 from app.services import cinder, nova
 from app.services.cache import cached_call, invalidate, ttl_fast
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -114,41 +116,50 @@ async def create_volume_transfer(
     req: CreateVolumeTransferRequest | None = None,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    """볼륨 이전(transfer) 생성. VM에 연결된 경우 자동 detach 후 transfer를 생성한다."""
+    """볼륨 이전(transfer) 생성.
+
+    VM에 부착된 경우 자동으로 detach한 뒤 transfer를 생성한다.
+    transfer 생성 실패 시 detach한 서버에 볼륨을 다시 attach(rollback)한다.
+    """
     try:
         vol = await asyncio.to_thread(cinder.get_volume, conn, volume_id)
     except Exception:
         raise HTTPException(status_code=404, detail="볼륨을 찾을 수 없습니다")
 
+    # 부착된 VM에서 detach — 성공한 서버 ID를 rollback용으로 보관
+    detached_server_ids: list[str] = []
     for attachment in vol.attachments:
         server_id = attachment.get("server_id")
         if not server_id:
             continue
         try:
             await asyncio.to_thread(nova.detach_volume, conn, server_id, volume_id)
-        except Exception:
+            detached_server_ids.append(server_id)
+        except Exception as ex:
+            logger.warning("volume detach 실패 server=%s volume=%s: %s", server_id, volume_id, ex)
             raise HTTPException(
                 status_code=409,
                 detail=f"볼륨 detach 실패 (인스턴스 {server_id}) — 수동으로 분리 후 재시도 해주세요",
             )
 
-    if vol.attachments:
-        for _ in range(30):
-            await asyncio.sleep(2)
-            try:
-                refreshed = await asyncio.to_thread(cinder.get_volume, conn, volume_id)
-                if refreshed.status == "available":
-                    break
-            except Exception:
-                pass
-        else:
+    # detach 후 available 상태 대기
+    if detached_server_ids:
+        try:
+            await asyncio.to_thread(cinder.wait_volume_available, conn, volume_id)
+        except Exception:
             raise HTTPException(status_code=409, detail="볼륨 detach 대기 시간 초과")
 
+    # transfer 생성 — 실패 시 detach한 서버에 rollback
     try:
         name = req.name if req else None
         result = await asyncio.to_thread(cinder.create_volume_transfer, conn, volume_id, name)
         return result
     except Exception:
+        for server_id in detached_server_ids:
+            try:
+                await asyncio.to_thread(nova.attach_volume, conn, server_id, volume_id)
+            except Exception as rb_ex:
+                logger.error("rollback attach 실패 server=%s volume=%s: %s", server_id, volume_id, rb_ex)
         raise HTTPException(status_code=500, detail="볼륨 이전 생성 실패")
 
 

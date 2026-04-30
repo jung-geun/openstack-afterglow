@@ -3,7 +3,7 @@
 A4: volume transfer 생성 전 VM attachment 자동 detach + 상태 대기
 """
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -45,15 +45,14 @@ async def test_transfer_no_attachments_skips_detach(client):
 
 @pytest.mark.asyncio
 async def test_transfer_auto_detaches_attached_vm(client):
-    """attached 볼륨: detach 호출 후 available 확인 → transfer 생성."""
+    """attached 볼륨: detach 호출 후 available 대기 → transfer 생성."""
     attached = _make_volume("in-use", attachments=[{"server_id": "srv-1", "attachment_id": "att-1"}])
-    available = _make_volume("available")
 
     with (
-        patch("app.api.storage.volumes.cinder.get_volume", side_effect=[attached, available]),
+        patch("app.api.storage.volumes.cinder.get_volume", return_value=attached),
         patch("app.api.storage.volumes.nova.detach_volume") as mock_detach,
+        patch("app.api.storage.volumes.cinder.wait_volume_available", return_value=None),
         patch("app.api.storage.volumes.cinder.create_volume_transfer", return_value=_TRANSFER_RESULT),
-        patch("asyncio.sleep", new_callable=AsyncMock),
     ):
         resp = await client.post("/api/volumes/vol-1/transfer", json={})
     assert resp.status_code == 201
@@ -71,13 +70,12 @@ async def test_transfer_detaches_multiple_attachments(client):
             {"server_id": "srv-2", "attachment_id": "att-2"},
         ],
     )
-    available = _make_volume("available")
 
     with (
-        patch("app.api.storage.volumes.cinder.get_volume", side_effect=[attached, available]),
+        patch("app.api.storage.volumes.cinder.get_volume", return_value=attached),
         patch("app.api.storage.volumes.nova.detach_volume") as mock_detach,
+        patch("app.api.storage.volumes.cinder.wait_volume_available", return_value=None),
         patch("app.api.storage.volumes.cinder.create_volume_transfer", return_value=_TRANSFER_RESULT),
-        patch("asyncio.sleep", new_callable=AsyncMock),
     ):
         resp = await client.post("/api/volumes/vol-1/transfer", json={})
     assert resp.status_code == 201
