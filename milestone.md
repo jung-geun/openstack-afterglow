@@ -492,7 +492,7 @@ Step 5: 요약 & 배포
     - [x] NFS share 빌드 지원 (`--proto NFS` 옵션)
     - [x] 의존성 메타데이터 자동 기록
     - [x] 빌드 완료 후 자동 검증 (마운트 테스트) — probe VM (`_verify_layer_accessible`) VERIFY_OK/FAIL 판별 후 status=error 전환
-  - [ ] 백그라운드 빌드 워커 (선택): Celery/async 작업으로 비동기 빌드
+  - [x] 백그라운드 빌드 워커 (선택): asyncio.create_task 기반 비동기 빌드 (`library_builder.py:316`)
 
 - [x] 3.5 Frontend — Admin 패키지 관리 UI
   - [x] `routes/admin/libraries/+page.svelte` — 라이브러리 카탈로그 관리 페이지 (카드 그리드)
