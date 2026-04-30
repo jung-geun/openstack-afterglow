@@ -53,6 +53,7 @@ def _cluster_to_dict(cluster: K3sCluster) -> dict:
         "plugins_enabled": cluster.plugins_enabled or {},
         "plugin_status": cluster.plugin_status or {},
         "secret_cloud_config_status": cluster.secret_cloud_config_status,
+        "app_credential_id": cluster.app_credential_id or "",
         "api_lb_id": cluster.api_lb_id or "",
         "api_lb_pool_id": cluster.api_lb_pool_id or "",
         "api_fip_id": cluster.api_fip_id or "",
@@ -101,6 +102,7 @@ async def create_cluster_record(project_id: str, cluster_id: str, data: dict) ->
             api_fip_id=data.get("api_fip_id") or None,
             api_fip_address=data.get("api_fip_address") or None,
             os_type=data.get("os_type") or "ubuntu",
+            app_credential_id=data.get("app_credential_id") or None,
         )
         session.add(cluster)
         await session.commit()
@@ -237,6 +239,7 @@ async def update_cluster_status(
             "api_fip_address",
             "plugin_status",
             "secret_cloud_config_status",
+            "app_credential_id",
         }
         for k, v in extra_fields.items():
             if k in _column_map:
@@ -505,3 +508,65 @@ async def check_stale_clusters(timeout_minutes: int = 30) -> None:
             _logger.warning("k3s cluster %s marked as ERROR (stale)", cluster.id)
         if stale:
             await session.commit()
+
+
+# ---------------------------------------------------------------------------
+# Project Manager Credentials (Octavia Ingress App Cred 관리용)
+# ---------------------------------------------------------------------------
+
+
+async def get_manager_credentials(project_id: str) -> dict | None:
+    """프로젝트 관리 사용자 자격 조회. 없으면 None."""
+    if not is_db_available():
+        return None
+
+    from sqlalchemy import text
+
+    factory = get_session_factory()
+    async with factory() as session:
+        result = await session.execute(
+            text(
+                "SELECT user_id, username, encrypted_password FROM project_manager_credentials WHERE project_id = :pid"
+            ),
+            {"pid": project_id},
+        )
+        row = result.mappings().one_or_none()
+        if row is None:
+            return None
+        return {"user_id": row["user_id"], "username": row["username"], "encrypted_password": row["encrypted_password"]}
+
+
+async def save_manager_credentials(project_id: str, user_id: str, username: str, encrypted_password: str) -> None:
+    """프로젝트 관리 사용자 자격 저장 (INSERT OR REPLACE)."""
+    if not is_db_available():
+        return
+
+    from sqlalchemy import text
+
+    factory = get_session_factory()
+    async with factory() as session:
+        await session.execute(
+            text(
+                "INSERT INTO project_manager_credentials "
+                "(project_id, user_id, username, encrypted_password) "
+                "VALUES (:pid, :uid, :uname, :epw) "
+                "ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), "
+                "username = VALUES(username), encrypted_password = VALUES(encrypted_password)"
+            ),
+            {"pid": project_id, "uid": user_id, "uname": username, "epw": encrypted_password},
+        )
+        await session.commit()
+
+
+async def get_cluster_app_credential_id(project_id: str, cluster_id: str) -> str | None:
+    """클러스터의 app_credential_id 조회."""
+    if not is_db_available():
+        return None
+
+    factory = get_session_factory()
+    async with factory() as session:
+        stmt = select(K3sCluster.app_credential_id).where(
+            K3sCluster.id == cluster_id, K3sCluster.project_id == project_id
+        )
+        result = await session.execute(stmt)
+        return result.scalar_one_or_none()

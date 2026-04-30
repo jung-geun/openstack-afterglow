@@ -48,7 +48,7 @@ class OccmPlugin:
             lb_subnet_id=settings.k3s_lb_subnet_id,
         )
 
-    def generate_manifests(self, cluster_name: str, project_id: str, settings: Settings) -> str:
+    def generate_manifests(self, cluster_name: str, project_id: str, settings: Settings, **kwargs) -> str:
         tmpl = _jinja.get_template("occm/manifests.yaml.j2")
         return tmpl.render(
             occm_image=settings.k3s_occm_image,

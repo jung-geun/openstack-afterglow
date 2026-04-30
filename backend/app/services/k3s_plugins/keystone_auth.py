@@ -101,7 +101,7 @@ class KeystoneAuthPlugin:
             self._cert_cache[cluster_name] = _generate_self_signed_cert()
         return self._cert_cache[cluster_name]
 
-    def generate_manifests(self, cluster_name: str, project_id: str, settings: Settings) -> str:
+    def generate_manifests(self, cluster_name: str, project_id: str, settings: Settings, **kwargs) -> str:
         cert_pem, key_pem = self._get_or_create_cert(cluster_name)
         cert_b64 = base64.b64encode(cert_pem).decode()
         key_b64 = base64.b64encode(key_pem).decode()

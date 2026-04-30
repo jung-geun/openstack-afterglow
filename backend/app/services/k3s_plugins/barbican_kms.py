@@ -36,7 +36,7 @@ class BarbicanKmsPlugin:
         """[KeyManager] 섹션 추가."""
         return "[KeyManager]\nuse-barbican=true\n"
 
-    def generate_manifests(self, cluster_name: str, project_id: str, settings: Settings) -> str:
+    def generate_manifests(self, cluster_name: str, project_id: str, settings: Settings, **kwargs) -> str:
         return _jinja.get_template("k3s_plugins/barbican_kms/manifests.yaml.j2").render(
             barbican_kms_image=settings.k3s_barbican_kms_image,
             kek_id=settings.k3s_barbican_kms_kek_id,

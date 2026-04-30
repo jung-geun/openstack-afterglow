@@ -33,7 +33,7 @@ class CinderCsiPlugin:
         """[BlockStorage] 섹션 반환. cloud.conf [Global] 섹션과 병합된다."""
         return "[BlockStorage]\nbs-version=v3\n"
 
-    def generate_manifests(self, cluster_name: str, project_id: str, settings: Settings) -> str:
+    def generate_manifests(self, cluster_name: str, project_id: str, settings: Settings, **kwargs) -> str:
         tmpl = _jinja.get_template("k3s_plugins/cinder_csi/manifests.yaml.j2")
         return tmpl.render(
             cinder_csi_image=settings.k3s_cinder_csi_image,

@@ -18,7 +18,7 @@ class K3sPlugin(Protocol):
         """cloud.conf에 추가할 INI 섹션 문자열 반환 (없으면 빈 문자열)."""
         ...
 
-    def generate_manifests(self, cluster_name: str, project_id: str, settings: Settings) -> str:
+    def generate_manifests(self, cluster_name: str, project_id: str, settings: Settings, **kwargs) -> str:
         """K8s 매니페스트 YAML 반환."""
         ...
 

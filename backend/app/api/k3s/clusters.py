@@ -217,6 +217,7 @@ async def create_k3s_cluster_async(
         sg_id: str | None = None
         boot_volume_id: str | None = None
         server_vm_id: str | None = None
+        app_credential_id: str | None = None
 
         try:
             # --- Step 1: 보안 그룹 생성 ---
@@ -331,9 +332,33 @@ async def create_k3s_cluster_async(
 
             # 플러그인 레지스트리로 활성 플러그인 집계
             from app.services import k3s_plugins
+            from app.services import keystone as _keystone
 
             cloud_conf = k3s_plugins.aggregate_cloud_conf(project_id, s)
-            plugin_manifests, manifest_failures = k3s_plugins.aggregate_manifests(req.name, project_id, s)
+            active_plugins = k3s_plugins.get_active_plugin_names(s)
+            occm_active = active_plugins.get("occm", False)
+
+            # Octavia Ingress 활성 시 App Cred 발급 + subnet 도출
+            manifest_kwargs: dict = {}
+            if active_plugins.get("octavia_ingress", False):
+                yield event(K3sProgressStep.SERVER_CREATING, 38, "Octavia Ingress App Credential 발급 중...")
+                subnets = await asyncio.to_thread(lambda: list(conn.network.subnets(network_id=network_id)))
+                if not subnets:
+                    raise RuntimeError(
+                        f"네트워크 {network_id}에 subnet이 없습니다. Octavia Ingress를 위한 subnet 도출 실패."
+                    )
+                cluster_subnet_id = subnets[0].id
+                app_cred = await asyncio.to_thread(_keystone.create_app_credential_for_cluster, project_id, req.name)
+                app_credential_id = app_cred["id"]
+                manifest_kwargs = {
+                    "subnet_id": cluster_subnet_id,
+                    "app_credential": app_cred,
+                    "floating_network_id": s.k3s_octavia_ingress_floating_network_id or None,
+                }
+
+            plugin_manifests, manifest_failures = k3s_plugins.aggregate_manifests(
+                req.name, project_id, s, **manifest_kwargs
+            )
             if manifest_failures:
                 err_msg = f"플러그인 매니페스트 생성 실패: {', '.join(manifest_failures)}"
                 _logger.error("k3s cluster %s: %s", cluster_id, err_msg)
@@ -341,8 +366,6 @@ async def create_k3s_cluster_async(
                 return
             extra_server_args = k3s_plugins.aggregate_server_args(s)
             extra_write_files = k3s_plugins.aggregate_extra_write_files(project_id, req.name, s)
-            active_plugins = k3s_plugins.get_active_plugin_names(s)
-            occm_active = active_plugins.get("occm", False)
 
             userdata_result = k3s_cloudinit.generate_server_userdata(
                 cluster_name=req.name,
@@ -422,6 +445,7 @@ async def create_k3s_cluster_async(
                     "api_fip_address": "",
                     "os_type": os_type,
                     "server_vm_name": server_vm_name,
+                    "app_credential_id": app_credential_id or "",
                 },
             )
 
@@ -436,7 +460,7 @@ async def create_k3s_cluster_async(
             _logger.error("k3s cluster creation failed: %s", e, exc_info=True)
             yield event(K3sProgressStep.FAILED, 0, f"클러스터 생성 실패: {e}", error=str(e))
             # 롤백
-            await _rollback(conn, server_vm_id, boot_volume_id, sg_id)
+            await _rollback(conn, server_vm_id, boot_volume_id, sg_id, app_credential_id, project_id)
 
     return StreamingResponse(
         progress_generator(),
@@ -455,6 +479,8 @@ async def _rollback(
     server_vm_id: str | None,
     boot_volume_id: str | None,
     sg_id: str | None,
+    app_credential_id: str | None = None,
+    project_id: str | None = None,
 ) -> None:
     """생성 실패 시 리소스 역순 삭제."""
     if server_vm_id:
@@ -473,6 +499,13 @@ async def _rollback(
             await asyncio.to_thread(neutron.delete_security_group, conn, sg_id)
         except Exception as e:
             _logger.warning("Rollback: delete SG %s failed: %s", sg_id, e)
+    if app_credential_id and project_id:
+        try:
+            from app.services import keystone as _keystone
+
+            await asyncio.to_thread(_keystone.delete_app_credential, project_id, app_credential_id)
+        except Exception as e:
+            _logger.warning("Rollback: delete app credential %s failed: %s", app_credential_id, e)
 
 
 @router.patch("/{cluster_id}/scale")
@@ -674,21 +707,40 @@ async def delete_k3s_cluster(
         except Exception as e:
             _logger.warning("Delete API FIP %s failed: %s", _api_fip_id, e)
 
-    # OCCM이 생성한 Octavia LB 정리 (VM 삭제 전에 먼저 처리)
-    if cluster.get("occm_enabled"):
-        cluster_name = cluster.get("name") or ""
-        prefix = f"kube_service_{cluster_name}_"
+    # OCCM/Ingress가 생성한 Octavia LB 정리 (VM 삭제 전에 먼저 처리)
+    cluster_name = cluster.get("name") or ""
+    plugins_enabled = cluster.get("plugins_enabled") or {}
+    occm_enabled = cluster.get("occm_enabled") or plugins_enabled.get("occm", False)
+    ingress_enabled = plugins_enabled.get("octavia_ingress", False)
+    if occm_enabled or ingress_enabled:
+        lb_prefixes = []
+        if occm_enabled:
+            lb_prefixes.append(f"kube_service_{cluster_name}_")
+        if ingress_enabled:
+            lb_prefixes.append(f"kube_ingress_{cluster_name}_")
         try:
             all_lbs = await asyncio.to_thread(octavia.list_load_balancers, conn)
             for lb in all_lbs:
-                if lb.get("name", "").startswith(prefix):
+                lb_name = lb.get("name", "")
+                if any(lb_name.startswith(p) for p in lb_prefixes):
                     try:
                         await asyncio.to_thread(octavia.delete_load_balancer, conn, lb["id"], cascade=True)
-                        _logger.info("Deleted OCCM LB %s (%s)", lb["id"], lb["name"])
+                        _logger.info("Deleted LB %s (%s) for cluster %s", lb["id"], lb_name, cluster_id)
                     except Exception as e:
-                        _logger.warning("Delete OCCM LB %s failed: %s", lb["id"], e)
+                        _logger.warning("Delete LB %s failed: %s", lb["id"], e)
         except Exception as e:
-            _logger.warning("Failed to list/delete OCCM LBs for cluster %s: %s", cluster_id, e)
+            _logger.warning("Failed to list/delete LBs for cluster %s: %s", cluster_id, e)
+
+    # Octavia Ingress App Credential 회수 (신규 클러스터만; 기존 평문 클러스터는 skip)
+    _app_cred_id = cluster.get("app_credential_id") or ""
+    if _app_cred_id:
+        try:
+            from app.services import keystone as _keystone
+
+            await asyncio.to_thread(_keystone.delete_app_credential, project_id, _app_cred_id)
+            _logger.info("Deleted App Credential %s for cluster %s", _app_cred_id, cluster_id)
+        except Exception as e:
+            _logger.warning("Delete App Credential %s failed: %s", _app_cred_id, e)
 
     # 에이전트 VM 병렬 삭제
     agent_vm_ids = cluster.get("agent_vm_ids") or []

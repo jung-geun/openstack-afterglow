@@ -774,7 +774,7 @@ Step 5: 요약 & 배포
 - [x] **OCCM 이전**: `k3s_plugins/occm.py`로 로직 이전, `k3s_occm.py` 위임 래퍼로 유지 (하위호환)
 - [x] **Cinder CSI**: K8s PVC → Cinder 블록 스토리지 자동 프로비저닝. `k3s_plugins/cinder_csi.py` + `templates/k3s_plugins/cinder_csi/manifests.yaml.j2`
 - [x] **Manila CSI**: ReadWriteMany PVC → Manila NFS share. NFS CSI 드라이버 포함 배포. Union OverlayFS 시너지
-- [x] **Octavia Ingress Controller**: K3s Traefik과 공존, `ingressClassName: openstack`으로 분리
+- [x] **Octavia Ingress Controller**: K3s Traefik과 공존, `ingressClassName: openstack`으로 분리. **Per-project 관리 사용자 + Application Credential** 모델로 인증 일원화. subnet 클러스터 네트워크에서 자동 도출. 삭제 시 `kube_ingress_*` LB 자동 정리 + App Cred 회수.
 - [x] **Keystone Webhook Auth**: TLS self-signed 인증서 생성 + K3s API 서버 webhook 설정. `cryptography` 라이브러리 사용
 - [x] **Barbican KMS**: K8s Secret at-rest 암호화. `--encryption-provider-config` API 서버 인자 + Unix socket DaemonSet
 - [x] DB 마이그레이션: `plugins_enabled JSON` 컬럼 추가 (`004_k3s_plugins.sql`)

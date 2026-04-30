@@ -57,7 +57,7 @@ def aggregate_cloud_conf(project_id: str, settings: Settings) -> str | None:
 
 
 def aggregate_manifests(
-    cluster_name: str, project_id: str, settings: Settings
+    cluster_name: str, project_id: str, settings: Settings, **kwargs
 ) -> tuple[list[dict[str, str]], list[str]]:
     """활성 플러그인의 매니페스트 목록 반환.
 
@@ -69,7 +69,7 @@ def aggregate_manifests(
     failures: list[str] = []
     for plugin in get_active_plugins(settings):
         try:
-            content = plugin.generate_manifests(cluster_name, project_id, settings)
+            content = plugin.generate_manifests(cluster_name, project_id, settings, **kwargs)
             result.append({"name": plugin.name, "content": content})
         except Exception:
             _logger.exception("플러그인 %s 매니페스트 생성 실패", plugin.name)

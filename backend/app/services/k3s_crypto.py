@@ -80,3 +80,13 @@ def encrypt_notion_config(plaintext: str) -> str:
 def decrypt_notion_config(ciphertext_b64: str) -> str:
     """Decrypt Notion API key. Handles legacy and v2 ciphertexts."""
     return _aes_decrypt(_get_notion_key(), ciphertext_b64, aad=b"notion_config")
+
+
+def encrypt_manager_password(plaintext: str) -> str:
+    """Encrypt per-project cluster manager user password with AES-256-GCM (AAD-bound)."""
+    return _aes_encrypt(_get_key(), plaintext, aad=b"manager_password")
+
+
+def decrypt_manager_password(ciphertext_b64: str) -> str:
+    """Decrypt cluster manager user password."""
+    return _aes_decrypt(_get_key(), ciphertext_b64, aad=b"manager_password")

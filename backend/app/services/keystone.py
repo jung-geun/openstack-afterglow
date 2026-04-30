@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import secrets
 from typing import TYPE_CHECKING
 
 from keystoneauth1 import session as ks_session
@@ -296,6 +297,161 @@ def get_user(conn: openstack.connection.Connection, user_id: str) -> dict:
         "name": u.name or "",
         "email": getattr(u, "email", None) or "",
     }
+
+
+def ensure_cluster_manager_user(project_id: str) -> tuple[str, str]:
+    """프로젝트의 관리 사용자 (user_id, plaintext_password) 반환.
+
+    DB에 캐시된 자격이 있으면 복호화하여 반환.
+    없으면 admin conn으로 신규 생성, DB에 암호화 저장 후 반환.
+    동시 생성 경쟁 시 Keystone Conflict → list로 재조회하여 멱등 처리.
+    """
+    import asyncio
+
+    from app.services.k3s_crypto import decrypt_manager_password, encrypt_manager_password
+
+    # Keystone identity API 호출은 sync이므로 직접 호출
+    settings = get_settings()
+
+    # DB 조회 (sync via asyncio.get_event_loop)
+    async def _db_get():
+        from app.services.k3s_db import get_manager_credentials
+
+        return await get_manager_credentials(project_id)
+
+    async def _db_save(user_id: str, username: str, encrypted_pw: str):
+        from app.services.k3s_db import save_manager_credentials
+
+        await save_manager_credentials(project_id, user_id, username, encrypted_pw)
+
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+
+    cached = loop.run_until_complete(_db_get())
+    if cached:
+        return cached["user_id"], decrypt_manager_password(cached["encrypted_password"])
+
+    # 신규 생성
+    username = f"afterglow-cluster-mgr-{project_id[:8]}"
+    password = secrets.token_urlsafe(32)
+
+    admin_conn = get_admin_connection_for_project(project_id)
+    try:
+        # 도메인 ID 조회 (사용자 도메인)
+        domain_id = None
+        try:
+            domains = list(admin_conn.identity.domains(name=settings.os_user_domain_name))
+            if domains:
+                domain_id = domains[0].id
+        except Exception:
+            _logger.warning("도메인 ID 조회 실패, 기본 도메인 사용")
+
+        try:
+            create_kwargs: dict = {"name": username, "password": password, "enabled": True}
+            if domain_id:
+                create_kwargs["domain_id"] = domain_id
+            user = admin_conn.identity.create_user(**create_kwargs)
+            user_id = user.id
+        except Exception as e:
+            # Conflict: 이미 존재 (동시 생성 경쟁)
+            _logger.warning("관리 사용자 생성 실패 (이미 존재 가능성): %s", e)
+            existing = list(admin_conn.identity.users(name=username))
+            if not existing:
+                raise RuntimeError(f"관리 사용자 {username} 생성 및 조회 모두 실패") from e
+            user_id = existing[0].id
+            # 비밀번호 리셋 (DB 캐시 없는 상태에서 재발견한 경우)
+            admin_conn.identity.update_user(user_id, password=password)
+
+        # 역할 부여: member + load-balancer_member
+        for role_name in ("member", "load-balancer_member"):
+            try:
+                roles = list(admin_conn.identity.roles(name=role_name))
+                if not roles:
+                    raise RuntimeError(
+                        f"'{role_name}' 역할이 Keystone에 존재하지 않습니다. 운영자가 해당 role을 사전 생성해야 합니다."
+                    )
+                admin_conn.identity.assign_project_role_to_user(project=project_id, user=user_id, role=roles[0].id)
+            except RuntimeError:
+                raise
+            except Exception as e:
+                raise RuntimeError(f"역할 {role_name} 부여 실패: {e}") from e
+
+        encrypted_pw = encrypt_manager_password(password)
+        loop.run_until_complete(_db_save(user_id, username, encrypted_pw))
+        return user_id, password
+    finally:
+        admin_conn.close()
+
+
+def create_app_credential_for_cluster(project_id: str, cluster_name: str) -> dict:
+    """관리 사용자 자격으로 클러스터 전용 App Credential 발급.
+
+    Returns:
+        {"id": ..., "secret": ..., "user_id": ...}
+    """
+    import openstack
+
+    settings = get_settings()
+    user_id, password = ensure_cluster_manager_user(project_id)
+
+    # 관리 사용자로 project-scoped 연결
+    mgr_conn = openstack.connect(
+        load_envvars=False,
+        load_yaml_config=False,
+        auth_url=settings.os_auth_url,
+        auth_type="password",
+        username=f"afterglow-cluster-mgr-{project_id[:8]}",
+        password=password,
+        project_id=project_id,
+        user_domain_name=settings.os_user_domain_name,
+        project_domain_name=settings.os_project_domain_name,
+        region_name=settings.os_region_name,
+        interface=settings.os_interface,
+        api_timeout=30,
+        verify=settings.ssl_verify,
+    )
+    try:
+        app_cred = mgr_conn.identity.create_application_credential(
+            user=user_id,
+            name=f"k3s-ingress-{cluster_name}",
+            description=f"k3s cluster {cluster_name} octavia ingress controller",
+            roles=[{"name": "member"}, {"name": "load-balancer_member"}],
+        )
+        return {"id": app_cred.id, "secret": app_cred.secret, "user_id": user_id}
+    finally:
+        mgr_conn.close()
+
+
+def delete_app_credential(project_id: str, app_cred_id: str) -> None:
+    """관리 사용자 자격으로 App Credential 회수 (best-effort)."""
+    import openstack
+
+    settings = get_settings()
+    try:
+        _user_id, password = ensure_cluster_manager_user(project_id)
+        mgr_conn = openstack.connect(
+            load_envvars=False,
+            load_yaml_config=False,
+            auth_url=settings.os_auth_url,
+            auth_type="password",
+            username=f"afterglow-cluster-mgr-{project_id[:8]}",
+            password=password,
+            project_id=project_id,
+            user_domain_name=settings.os_user_domain_name,
+            project_domain_name=settings.os_project_domain_name,
+            region_name=settings.os_region_name,
+            interface=settings.os_interface,
+            api_timeout=30,
+            verify=settings.ssl_verify,
+        )
+        try:
+            mgr_conn.identity.delete_application_credential(_user_id, app_cred_id, ignore_missing=True)
+        finally:
+            mgr_conn.close()
+    except Exception:
+        _logger.warning("App Credential %s 회수 실패 (best-effort)", app_cred_id, exc_info=True)
 
 
 def list_projects(token: str) -> list[dict]:
