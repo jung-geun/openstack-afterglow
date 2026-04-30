@@ -26,6 +26,11 @@ _logger = logging.getLogger(__name__)
 # 빌드 중인 작업 추적 {library_id: {share_id, server_id, status}} (인메모리 캐시, DB가 원본)
 _active_builds: dict[str, dict] = {}
 
+# 빌드 대기 큐 (library_id 문자열)
+_build_queue: asyncio.Queue[str] = asyncio.Queue()
+# 큐에 있는 library_id 집합 (중복 요청 방지용 빠른 조회)
+_queued_libraries: set[str] = set()
+
 
 async def _update_build_db(
     build_id: int,
@@ -773,3 +778,59 @@ async def cancel_build(build_db_id: int) -> dict:
             _logger.warning("[builder] 취소 시 VM 삭제 실패: %s", server_id, exc_info=True)
 
     return {"cancelled": True, "library_id": library_id, "server_deleted": server_deleted}
+
+
+# ---------------------------------------------------------------------------
+# 빌드 큐 (A3)
+# ---------------------------------------------------------------------------
+
+
+async def queue_build(library_id: str) -> dict:
+    """라이브러리 빌드 요청을 큐에 추가한다.
+
+    이미 빌드 중이거나 큐에 대기 중인 동일 라이브러리는 거부된다.
+    실제 빌드는 _build_worker()가 큐에서 꺼내 처리한다.
+
+    Returns:
+        {"status": "queued", "library_id": ..., "queue_position": int}
+    """
+    if library_id in _active_builds:
+        raise RuntimeError(f"이미 빌드 중인 라이브러리: {library_id}")
+    if library_id in _queued_libraries:
+        raise RuntimeError(f"이미 빌드 큐에 있는 라이브러리: {library_id}")
+
+    _queued_libraries.add(library_id)
+    await _build_queue.put(library_id)
+    position = _build_queue.qsize()
+    _logger.info("[builder] 빌드 큐 추가: %s (대기 위치 %d)", library_id, position)
+    return {"status": "queued", "library_id": library_id, "queue_position": position}
+
+
+def get_build_queue_status() -> dict:
+    """빌드 큐 및 진행 중 빌드 상태 반환."""
+    return {
+        "queued": sorted(_queued_libraries),
+        "active": sorted(_active_builds.keys()),
+        "queue_size": _build_queue.qsize(),
+    }
+
+
+async def _build_worker() -> None:
+    """빌드 큐 워커 — 애플리케이션 lifespan 동안 실행되는 무한 루프.
+
+    큐에서 library_id를 꺼내 start_build()를 호출한다.
+    start_build() 내부에서 asyncio.create_task(_monitor_build(...))가 생성되므로
+    워커는 VM 완료를 기다리지 않고 다음 큐 항목을 즉시 처리할 수 있다.
+    같은 library_id의 중복 방지는 _active_builds + _queued_libraries 두 집합이 담당한다.
+    """
+    _logger.info("[builder] 빌드 큐 워커 시작")
+    while True:
+        library_id = await _build_queue.get()
+        _queued_libraries.discard(library_id)
+        try:
+            _logger.info("[builder] 큐에서 빌드 시작: %s", library_id)
+            await start_build(library_id)
+        except Exception:
+            _logger.error("[builder] 큐 빌드 실패: %s", library_id, exc_info=True)
+        finally:
+            _build_queue.task_done()

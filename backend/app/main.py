@@ -667,6 +667,10 @@ async def start_background_workers():
     if _svc_cfg.service_k3s_enabled:
         asyncio.create_task(_k3s_cleanup_loop())
 
+    from app.services.library_builder import _build_worker
+
+    asyncio.create_task(_build_worker())
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
