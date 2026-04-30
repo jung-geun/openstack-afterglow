@@ -12,6 +12,7 @@ from app.models.union import (
     BuilderAccessRequest,
     CreateLayerRequest,
     CreateTemplateRequest,
+    ForkLayerRequest,
     LayerInfo,
     MountInfo,
     RecordMountRequest,
@@ -95,6 +96,25 @@ async def seal_layer(
     _require_admin(token_info)
     try:
         return await union_layers.seal_layer(session, layer_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.post("/layers/{layer_id}/fork", response_model=LayerInfo, status_code=201)
+async def fork_layer(
+    layer_id: str,
+    req: ForkLayerRequest,
+    token_info: dict = Depends(get_token_info),
+    session=Depends(get_session),
+):
+    """봉인된 레이어에서 새 RW 레이어를 파생(fork)한다. 관리자 전용."""
+    _require_admin(token_info)
+    created_by = token_info.get("username") or token_info.get("user_id") or "unknown"
+    project_id = token_info.get("project_id") or None
+    try:
+        return await union_layers.fork_layer(session, layer_id, req, created_by=created_by, project_id=project_id)
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:

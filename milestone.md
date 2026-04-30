@@ -920,7 +920,7 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 
 ### 9.3 Phase 3 — 확장 (목표: Phase 2 완료 후)
 
-- [ ] **Fork 지원**: `POST /api/union/layers/{id}/fork` — sealed 레이어에서 새 RW 레이어 파생
+- [x] **Fork 지원**: `POST /api/union/layers/{id}/fork` — sealed 레이어에서 새 RW 레이어 파생
 - [ ] **Rebuild**: 동일 부모 + 다른 내용 → 새 hash 신규 레이어 (overwrite 금지 정책 유지)
 - [ ] **멀티 상속(실험)**: lowerdir에 여러 부모 지원 — 다이아몬드 충돌 해결 정책 필요
 - [x] **OverlayFS 상태 모니터링 에이전트**: User VM에서 마운트 상태 주기적 보고

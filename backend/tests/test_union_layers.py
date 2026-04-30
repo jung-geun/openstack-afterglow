@@ -1654,3 +1654,222 @@ class TestSealWriteProtection:
         import asyncio
 
         asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# A8: Fork API — fork_layer 서비스 + POST /api/union/layers/{id}/fork
+# ---------------------------------------------------------------------------
+
+
+class TestForkLayer:
+    """fork_layer 서비스 함수 단위 테스트."""
+
+    @pytest.mark.asyncio
+    async def test_fork_creates_new_rw_layer(self):
+        """봉인된 레이어를 fork하면 parent_id가 설정된 새 RW 레이어가 생성된다."""
+        from app.models.union import ForkLayerRequest
+        from app.services.union_layers import fork_layer
+
+        source = _make_layer(layer_id=_sha("source"), name="torch", version="2.4", sealed=True)
+        new_hash = _sha("forked")
+        req = ForkLayerRequest(content_hash=new_hash, version="2.4-fork")
+
+        added = []
+        session = MagicMock()
+        session.get = AsyncMock(side_effect=lambda model, lid: source if lid == source.id else None)
+        session.add = lambda obj: added.append(obj)
+        session.commit = AsyncMock()
+        session.refresh = AsyncMock(side_effect=lambda obj: None)
+
+        result = await fork_layer(session, source.id, req, created_by="user1")
+
+        assert result.parent_id == source.id
+        assert result.sealed is False
+        assert result.name == "torch"
+        assert result.version == "2.4-fork"
+        assert len(added) == 1
+
+    @pytest.mark.asyncio
+    async def test_fork_inherits_source_name_when_not_specified(self):
+        """name 미지정 시 소스 레이어의 이름을 상속한다."""
+        from app.models.union import ForkLayerRequest
+        from app.services.union_layers import fork_layer
+
+        source = _make_layer(layer_id=_sha("src2"), name="pytorch", version="2.0", sealed=True)
+        req = ForkLayerRequest(content_hash=_sha("fork2"), version="custom")
+
+        session = MagicMock()
+        session.get = AsyncMock(side_effect=lambda model, lid: source if lid == source.id else None)
+        session.add = MagicMock()
+        session.commit = AsyncMock()
+        session.refresh = AsyncMock()
+
+        result = await fork_layer(session, source.id, req, created_by="user1")
+        assert result.name == "pytorch"
+
+    @pytest.mark.asyncio
+    async def test_fork_custom_name_overrides_source(self):
+        """name 지정 시 소스 이름 대신 지정된 이름을 사용한다."""
+        from app.models.union import ForkLayerRequest
+        from app.services.union_layers import fork_layer
+
+        source = _make_layer(layer_id=_sha("src3"), name="base", version="1.0", sealed=True)
+        req = ForkLayerRequest(content_hash=_sha("fork3"), version="v2", name="custom-fork")
+
+        session = MagicMock()
+        session.get = AsyncMock(side_effect=lambda model, lid: source if lid == source.id else None)
+        session.add = MagicMock()
+        session.commit = AsyncMock()
+        session.refresh = AsyncMock()
+
+        result = await fork_layer(session, source.id, req, created_by="user1")
+        assert result.name == "custom-fork"
+
+    @pytest.mark.asyncio
+    async def test_fork_unsealed_layer_raises_value_error(self):
+        """봉인되지 않은 레이어를 fork하면 ValueError가 발생한다."""
+        from app.models.union import ForkLayerRequest
+        from app.services.union_layers import fork_layer
+
+        source = _make_layer(layer_id=_sha("unsealed"), sealed=False)
+        req = ForkLayerRequest(content_hash=_sha("fork4"), version="v1")
+
+        session = MagicMock()
+        session.get = AsyncMock(return_value=source)
+
+        with pytest.raises(ValueError, match="봉인되지 않았습니다"):
+            await fork_layer(session, source.id, req, created_by="user1")
+
+    @pytest.mark.asyncio
+    async def test_fork_missing_source_raises_key_error(self):
+        """존재하지 않는 레이어를 fork하면 KeyError가 발생한다."""
+        from app.models.union import ForkLayerRequest
+        from app.services.union_layers import fork_layer
+
+        req = ForkLayerRequest(content_hash=_sha("fork5"), version="v1")
+
+        session = MagicMock()
+        session.get = AsyncMock(return_value=None)
+
+        with pytest.raises(KeyError):
+            await fork_layer(session, _sha("nonexistent"), req, created_by="user1")
+
+    @pytest.mark.asyncio
+    async def test_fork_duplicate_content_hash_raises_value_error(self):
+        """이미 존재하는 content_hash로 fork하면 ValueError가 발생한다."""
+        from app.models.union import ForkLayerRequest
+        from app.services.union_layers import fork_layer
+
+        source = _make_layer(layer_id=_sha("src6"), sealed=True)
+        existing = _make_layer(layer_id=_sha("fork6"))
+        req = ForkLayerRequest(content_hash=_sha("fork6"), version="v1")
+
+        call_count = 0
+
+        async def _get(model, lid):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return source
+            return existing
+
+        session = MagicMock()
+        session.get = AsyncMock(side_effect=_get)
+
+        with pytest.raises(ValueError, match="이미 존재합니다"):
+            await fork_layer(session, source.id, req, created_by="user1")
+
+
+@pytest.mark.asyncio
+async def test_fork_api_returns_201(admin_client):
+    """POST /api/union/layers/{id}/fork → 201 + forked layer."""
+    from app.database import get_session
+
+    source_id = _sha("api-source")
+    fork_hash = _sha("api-fork")
+    forked_layer = _make_layer_info(
+        layer_id=fork_hash,
+        name="torch",
+        version="2.4-fork",
+        parent_id=source_id,
+        sealed=False,
+    )
+
+    mock_session = AsyncMock()
+
+    async def override_get_session():
+        yield mock_session
+
+    app.dependency_overrides[get_session] = override_get_session
+    try:
+        with patch("app.api.union.layers.union_layers.fork_layer", new_callable=AsyncMock, return_value=forked_layer):
+            resp = await admin_client.post(
+                f"/api/union/layers/{source_id}/fork",
+                json={"content_hash": fork_hash, "version": "2.4-fork"},
+            )
+    finally:
+        app.dependency_overrides.pop(get_session, None)
+
+    assert resp.status_code == 201
+    assert resp.json()["parent_id"] == source_id
+    assert resp.json()["sealed"] is False
+
+
+@pytest.mark.asyncio
+async def test_fork_api_source_not_found_returns_404(admin_client):
+    """존재하지 않는 소스 레이어 fork → 404."""
+    from app.database import get_session
+
+    source_id = _sha("no-layer")
+    fork_hash = _sha("api-fork2")
+
+    mock_session = AsyncMock()
+
+    async def override_get_session():
+        yield mock_session
+
+    app.dependency_overrides[get_session] = override_get_session
+    try:
+        with patch(
+            "app.api.union.layers.union_layers.fork_layer",
+            new_callable=AsyncMock,
+            side_effect=KeyError("레이어를 찾을 수 없습니다"),
+        ):
+            resp = await admin_client.post(
+                f"/api/union/layers/{source_id}/fork",
+                json={"content_hash": fork_hash, "version": "v1"},
+            )
+    finally:
+        app.dependency_overrides.pop(get_session, None)
+
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_fork_api_unsealed_source_returns_409(admin_client):
+    """봉인되지 않은 소스 레이어 fork → 409."""
+    from app.database import get_session
+
+    source_id = _sha("unsealed-src")
+    fork_hash = _sha("api-fork3")
+
+    mock_session = AsyncMock()
+
+    async def override_get_session():
+        yield mock_session
+
+    app.dependency_overrides[get_session] = override_get_session
+    try:
+        with patch(
+            "app.api.union.layers.union_layers.fork_layer",
+            new_callable=AsyncMock,
+            side_effect=ValueError("봉인되지 않았습니다"),
+        ):
+            resp = await admin_client.post(
+                f"/api/union/layers/{source_id}/fork",
+                json={"content_hash": fork_hash, "version": "v1"},
+            )
+    finally:
+        app.dependency_overrides.pop(get_session, None)
+
+    assert resp.status_code == 409

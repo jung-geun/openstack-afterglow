@@ -15,6 +15,7 @@ from app.models.union import (
     AncestorChain,
     CreateLayerRequest,
     CreateTemplateRequest,
+    ForkLayerRequest,
     LayerInfo,
     MountInfo,
     SealLayerResponse,
@@ -170,6 +171,56 @@ async def seal_layer(session: AsyncSession, layer_id: str) -> SealLayerResponse:
     layer.sealed_at = now
     await session.commit()
     return SealLayerResponse(id=layer.id, sealed=True, sealed_at=now)
+
+
+async def fork_layer(
+    session: AsyncSession,
+    source_layer_id: str,
+    req: ForkLayerRequest,
+    created_by: str,
+    project_id: str | None = None,
+) -> LayerInfo:
+    """봉인된 레이어에서 새 RW 레이어를 파생(fork)한다.
+
+    소스 레이어는 반드시 sealed=True여야 한다.
+    생성된 레이어는 source_layer_id를 parent_id로 가지며 sealed=False(RW)로 시작한다.
+    """
+    source = await session.get(UnionLayer, source_layer_id)
+    if source is None:
+        raise KeyError(f"레이어 {source_layer_id}를 찾을 수 없습니다")
+    if not source.sealed:
+        raise ValueError(f"레이어 {source_layer_id}는 봉인되지 않았습니다. 봉인된 레이어만 fork할 수 있습니다")
+
+    new_id = (
+        f"sha256:{req.content_hash[len('sha256:') :]}" if req.content_hash.startswith("sha256:") else req.content_hash
+    )
+    existing = await session.get(UnionLayer, new_id)
+    if existing:
+        raise ValueError(f"레이어 {new_id}는 이미 존재합니다")
+
+    forked = UnionLayer(
+        id=new_id,
+        name=req.name or source.name,
+        version=req.version,
+        created_at=datetime.now(UTC),
+        created_by=created_by,
+        sealed=False,
+        parent_id=source_layer_id,
+        ubuntu_base=source.ubuntu_base,
+        build_recipe={},
+        installed_packages={},
+        content_hash=req.content_hash,
+        size_bytes=None,
+        file_count=None,
+        project_id=project_id,
+        sealed_at=None,
+        license_type=source.license_type,
+        max_concurrent_mounts=source.max_concurrent_mounts,
+    )
+    session.add(forked)
+    await session.commit()
+    await session.refresh(forked)
+    return _layer_to_info(forked)
 
 
 async def get_ancestors(session: AsyncSession, layer_id: str) -> AncestorChain:

@@ -82,6 +82,19 @@ class AncestorChain(BaseModel):
     layers: list[LayerInfo]
 
 
+class ForkLayerRequest(BaseModel):
+    """레이어 fork 요청 — sealed 레이어에서 새 RW 레이어 파생."""
+
+    content_hash: str  # sha256:<64hex> — 새 레이어의 고유 식별자
+    version: str = Field(min_length=1, max_length=64)
+    name: str | None = Field(default=None, max_length=128)  # 미지정 시 원본 name 상속
+
+    @field_validator("content_hash")
+    @classmethod
+    def validate_content_hash(cls, v: str) -> str:
+        return _validate_sha256_id(v)
+
+
 class CreateTemplateRequest(BaseModel):
     """새 템플릿 생성 요청."""
 
