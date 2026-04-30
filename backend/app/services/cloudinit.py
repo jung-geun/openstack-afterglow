@@ -112,6 +112,12 @@ def generate_userdata(
             file_storages=file_storages,
         )
 
+    rotate_key_script = ""
+    if union_cephx_rotate_hours > 0:
+        rotate_key_script = _jinja.get_template("envmgr_rotate_key.sh.j2").render(
+            union_cephx_rotate_hours=union_cephx_rotate_hours,
+        )
+
     yaml_str = _jinja.get_template("cloudinit_base.yaml.j2").render(
         strategy=strategy,
         libraries=resolved_libs,
@@ -129,6 +135,7 @@ def generate_userdata(
         union_ro_share_export=union_ro_share_export or "",
         union_manifest_share_export=union_manifest_share_export or "",
         union_cephx_rotate_hours=union_cephx_rotate_hours,
+        rotate_key_script=rotate_key_script,
         dcgm_exporter_version=_DCGM_EXPORTER_VERSION,
     )
 

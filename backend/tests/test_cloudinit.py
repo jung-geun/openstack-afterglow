@@ -149,3 +149,38 @@ def test_userdata_with_gpu_uses_pinned_version():
     encoded = generate_userdata(**{**_COMMON_ARGS, "gpu_available": True})
     yaml_str = _decode_userdata(encoded)
     assert ci._DCGM_EXPORTER_VERSION in yaml_str
+
+
+def test_rotate_key_script_not_injected_when_disabled():
+    """union_cephx_rotate_hours=0 이면 rotate-key 스크립트 미포함."""
+    encoded = generate_userdata(**{**_COMMON_ARGS, "union_cephx_rotate_hours": 0})
+    yaml_str = _decode_userdata(encoded)
+    assert "envmgr-rotate-key.sh" not in yaml_str
+    assert "union-rotate-key.service" not in yaml_str
+
+
+def test_rotate_key_script_injected_to_write_files():
+    """union_cephx_rotate_hours > 0 이면 /usr/local/bin/envmgr-rotate-key.sh 주입."""
+    encoded = generate_userdata(**{**_COMMON_ARGS, "union_cephx_rotate_hours": 24})
+    yaml_str = _decode_userdata(encoded)
+    assert "path: /usr/local/bin/envmgr-rotate-key.sh" in yaml_str
+    assert 'permissions: "0750"' in yaml_str
+    assert "CephX 키 회전" in yaml_str
+
+
+def test_rotate_key_systemd_unit_present_when_enabled():
+    """union_cephx_rotate_hours > 0 이면 systemd service/timer 항목도 포함."""
+    encoded = generate_userdata(**{**_COMMON_ARGS, "union_cephx_rotate_hours": 24})
+    yaml_str = _decode_userdata(encoded)
+    assert "union-rotate-key.service" in yaml_str
+    assert "union-rotate-key.timer" in yaml_str
+    assert "ExecStart=/usr/local/bin/envmgr-rotate-key.sh" in yaml_str
+
+
+def test_rotate_key_script_before_systemd_unit():
+    """write_files에서 rotate-key.sh 주입이 systemd unit 선언보다 먼저 나와야 한다."""
+    encoded = generate_userdata(**{**_COMMON_ARGS, "union_cephx_rotate_hours": 24})
+    yaml_str = _decode_userdata(encoded)
+    script_pos = yaml_str.find("path: /usr/local/bin/envmgr-rotate-key.sh")
+    service_pos = yaml_str.find("path: /etc/systemd/system/union-rotate-key.service")
+    assert script_pos < service_pos, "rotate-key.sh write_files 항목이 service 선언보다 앞서야 함"

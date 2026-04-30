@@ -1009,11 +1009,12 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 - [x] `backend/app/services/manila.py` — `rotate_cephx_access_rule()` 헬퍼
 - [x] `backend/app/api/compute/instance_health.py` — `POST /api/instances/{id}/credentials/rotate-cephx` 추가 (Bearer 토큰 인증)
 - [x] `scripts/envmgr-rotate-key.sh` + systemd `union-rotate-key.timer` (신규, cloudinit_base.yaml.j2 통해 주입)
+  - [x] **버그 수정**: `write_files`에 스크립트 미주입 → `envmgr_rotate_key.sh.j2` 템플릿 추가 + `cloudinit.py` 렌더링 + `cloudinit_base.yaml.j2` 주입 완료
 - [x] `backend/app/api/union/layers.py` — `POST /api/union/user/access`, `DELETE /api/union/user/access/{access_id}` (3-share user wiring)
 - [x] `backend/app/services/cloudinit.py` — `union_ro_share_export` 파라미터 + write_files 주입 (`LAYER_STORE_RO_EXPORT`)
 - [x] `backend/app/config.py` — `union_cephx_rotate_hours: int = 24` 추가
 - [x] `backend/tests/test_manila_rotate.py` — `rotate_cephx_access_rule` 단위 테스트 3건
-- [x] `backend/tests/test_cloudinit.py` — `nosuid,nodev,noexec` + `LAYER_STORE_RO_EXPORT` 단위 테스트 2건
+- [x] `backend/tests/test_cloudinit.py` — `nosuid,nodev,noexec` + `LAYER_STORE_RO_EXPORT` 단위 테스트 2건 + rotate-key 주입 테스트 4건
 - [x] `backend/tests/test_endpoint_inventory.py` — rotate-cephx 엔드포인트 whitelist 추가
 
 ### 11.4 격리 검증 + SG 자동화 (Week 4) ✅
