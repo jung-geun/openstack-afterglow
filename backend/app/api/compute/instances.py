@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
-from openstack.exceptions import ConflictException
+from openstack.exceptions import ConflictException, HttpException
 
 from app.api.deps import get_os_conn, get_token_info, require_admin
 from app.config import get_settings
@@ -952,7 +952,10 @@ async def detach_volume_from_instance(
     try:
         await asyncio.to_thread(nova.detach_volume, conn, instance_id, volume_id)
         await invalidate(f"afterglow:cinder:{pid}:vol_attach:{instance_id}")
+    except HttpException as e:
+        raise HTTPException(status_code=e.http_status or 500, detail=e.message or str(e))
     except Exception:
+        logger.error("볼륨 분리 실패", exc_info=True)
         raise HTTPException(status_code=500, detail="작업 실패")
 
 
