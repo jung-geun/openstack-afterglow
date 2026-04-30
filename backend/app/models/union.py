@@ -95,6 +95,21 @@ class ForkLayerRequest(BaseModel):
         return _validate_sha256_id(v)
 
 
+class SnapshotLayerRequest(BaseModel):
+    """레이어 Manila 스냅샷 생성 요청."""
+
+    share_id: str = Field(min_length=1, description="레이어를 백업할 Manila share ID")
+    name: str | None = Field(default=None, max_length=255)
+    description: str | None = Field(default=None, max_length=255)
+
+
+class RestoreLayerRequest(BaseModel):
+    """레이어 Manila 스냅샷 복원 요청."""
+
+    share_id: str = Field(min_length=1, description="복원 대상 Manila share ID")
+    snapshot_id: str = Field(min_length=1, description="복원에 사용할 스냅샷 ID")
+
+
 class CreateTemplateRequest(BaseModel):
     """새 템플릿 생성 요청."""
 

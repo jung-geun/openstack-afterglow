@@ -18,10 +18,13 @@ from app.models.union import (
     ForkLayerRequest,
     LayerInfo,
     MountInfo,
+    RestoreLayerRequest,
     SealLayerResponse,
+    SnapshotLayerRequest,
     StorageStats,
     TemplateInfo,
 )
+from app.services import manila
 
 _logger = logging.getLogger(__name__)
 
@@ -240,6 +243,50 @@ async def fork_layer(
     await session.commit()
     await session.refresh(forked)
     return _layer_to_info(forked)
+
+
+async def snapshot_layer(
+    session: AsyncSession,
+    layer_id: str,
+    req: SnapshotLayerRequest,
+    conn,
+) -> dict:
+    """레이어 Manila share 스냅샷을 생성한다.
+
+    레이어가 존재해야 한다. share_id는 요청에서 명시적으로 전달받는다.
+    """
+    import asyncio
+
+    layer = await session.get(UnionLayer, layer_id)
+    if layer is None:
+        raise KeyError(f"레이어 {layer_id}를 찾을 수 없습니다")
+
+    snap_name = req.name or f"union-layer-{layer_id[:20]}"
+    return await asyncio.to_thread(manila.create_share_snapshot, conn, req.share_id, snap_name, req.description)
+
+
+async def restore_layer(
+    session: AsyncSession,
+    layer_id: str,
+    req: RestoreLayerRequest,
+    conn,
+) -> None:
+    """레이어 Manila share를 지정한 스냅샷으로 복원(revert)한다.
+
+    레이어가 존재해야 하며 복원 후 sealed=False로 재설정한다(수정 가능 상태 복귀).
+    """
+    import asyncio
+
+    layer = await session.get(UnionLayer, layer_id)
+    if layer is None:
+        raise KeyError(f"레이어 {layer_id}를 찾을 수 없습니다")
+
+    await asyncio.to_thread(manila.revert_to_snapshot, conn, req.share_id, req.snapshot_id)
+
+    if layer.sealed:
+        layer.sealed = False
+        layer.sealed_at = None
+        await session.commit()
 
 
 async def get_ancestors(session: AsyncSession, layer_id: str) -> AncestorChain:
