@@ -519,7 +519,7 @@ Step 5: 요약 & 배포
     - [x] `accept_volume_transfer()` — 볼륨 이전 수락
     - [x] `list_volume_transfers()` — 이전 목록 조회
     - [x] `delete_volume_transfer()` — 이전 취소
-  - [x] VM에 연결된 볼륨은 마이그레이션 전 detach 필요 — `POST /api/volumes/{id}/transfer` 자동 detach + available 상태 대기 구현
+  - [x] VM에 연결된 볼륨은 마이그레이션 전 detach 필요 — `POST /api/volumes/{id}/transfer` 자동 detach + `cinder.wait_volume_available` 대기 + transfer 실패 시 rollback attach 구현. 단위테스트 9건(`test_volume_transfer.py`)
 
 - [x] 4.2 API 엔드포인트
   - [x] `POST /api/volumes/{id}/transfer` — 이전 생성
