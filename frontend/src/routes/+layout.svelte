@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { auth, isLoggedIn, isAdmin, clearAuth } from '$lib/stores/auth';
+	import { auth, authReady, isLoggedIn, isAdmin, clearAuth } from '$lib/stores/auth';
 	import { theme, resolvedTheme } from '$lib/stores/theme';
 	import { api } from '$lib/api/client';
 	import ProjectSelector from '$lib/components/ProjectSelector.svelte';
@@ -51,7 +51,9 @@
 					'/api/auth/me', token, projectId ?? undefined,
 				);
 				auth.update((s) => ({ ...s, isSystemAdmin: me.is_system_admin === true, roles: me.roles ?? s.roles }));
+				authReady.set(true);
 			} catch {
+				authReady.set(false);
 				clearAuth();
 			}
 		})();

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { auth } from '$lib/stores/auth';
+  import { auth, authReady } from '$lib/stores/auth';
   import { api } from '$lib/api/client';
   import type { DashboardSummary } from '$lib/types/resources';
   import type { Instance } from '$lib/types/resources';
@@ -75,7 +75,8 @@
 
   $effect(() => {
     const pid = $auth.projectId;
-    if (!pid) return;
+    const ready = $authReady;
+    if (!pid || !ready) return;
     untrack(() => fetchAll());
   });
 

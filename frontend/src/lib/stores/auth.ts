@@ -1,5 +1,9 @@
 import { writable, derived } from 'svelte/store';
 
+// /api/auth/me 검증이 성공하면 true. 로그아웃/clearAuth 시 false.
+// localStorage에 영속화하지 않는다 — reload마다 /me 재검증 필요.
+export const authReady = writable(false);
+
 interface Project {
 	id: string;
 	name: string;
@@ -86,5 +90,6 @@ export function setAvailableProjects(projects: Project[]) {
 }
 
 export function clearAuth() {
+	authReady.set(false);
 	auth.set(initial);
 }
