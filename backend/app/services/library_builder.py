@@ -329,6 +329,134 @@ def _get_lib_size(library_id: str) -> int:
     return sizes.get(library_id, 20)
 
 
+def _generate_probe_cloudinit(
+    ceph_monitors: str,
+    share_path: str,
+    cephx_user: str,
+    cephx_key: str,
+) -> str:
+    """마운트 검증용 probe VM cloud-init 스크립트.
+
+    RO로 마운트 후 .union_build_complete 존재를 확인한다.
+    성공: [union-probe] VERIFY_OK  실패: [union-probe] VERIFY_FAIL
+    """
+    return f"""#!/bin/bash
+set -euo pipefail
+exec > /var/log/union-probe.log 2>&1
+
+apt-get update -qq
+apt-get install -y -qq ceph-common
+
+mkdir -p /mnt/probe
+echo "{cephx_key}" > /tmp/probe.secret
+mount -t ceph {ceph_monitors}:{share_path} /mnt/probe \\
+    -o name={cephx_user},secretfile=/tmp/probe.secret,ro || {{
+    echo "[union-probe] VERIFY_FAIL: mount error"
+    rm -f /tmp/probe.secret; poweroff; exit 1
+}}
+rm -f /tmp/probe.secret
+
+if [ -f /mnt/probe/.union_build_complete ]; then
+    echo "[union-probe] VERIFY_OK"
+else
+    echo "[union-probe] VERIFY_FAIL: marker not found"
+fi
+
+umount /mnt/probe
+poweroff
+"""
+
+
+async def _verify_layer_accessible(
+    conn: openstack.Connection,
+    share_id: str,
+    library_id: str,
+    image_id: str,
+    flavor_id: str,
+    network_id: str,
+) -> bool:
+    """빌드 완료된 레이어 share를 probe VM으로 마운트 검증.
+
+    임시 RO CephX access rule을 생성해 probe VM에 주입, SHUTOFF 후
+    console 로그에서 VERIFY_OK/FAIL을 판별한다.
+    """
+    probe_user = f"union-probe-{library_id}"
+    probe_server_id: str | None = None
+
+    try:
+        # 1. RO access rule 생성
+        rule = await asyncio.to_thread(manila.create_access_rule, conn, share_id, probe_user, "ro", "cephx")
+        cephx_key = rule["access_key"]
+
+        # 2. export location 조회
+        exports = await asyncio.to_thread(manila.get_export_locations, conn, share_id)
+        if not exports:
+            _logger.warning("[probe] export location 없음: %s", share_id)
+            return False
+        export = exports[0]
+        if ":" in export:
+            ceph_monitors, share_path = export.rsplit(":", 1)
+        else:
+            ceph_monitors = get_settings().ceph_monitors
+            share_path = export
+
+        # 3. probe VM cloud-init 생성 + VM 시작
+        script = _generate_probe_cloudinit(ceph_monitors, share_path, probe_user, cephx_key)
+        userdata_b64 = base64.b64encode(script.encode()).decode()
+        probe_server = await asyncio.to_thread(
+            conn.compute.create_server,
+            name=f"union-probe-{library_id}",
+            image_id=image_id,
+            flavor_id=flavor_id,
+            networks=[{"uuid": network_id}],
+            user_data=userdata_b64,
+            metadata={"union_type": "probe", "union_library": library_id},
+        )
+        probe_server_id = probe_server.id
+        _logger.info("[probe] VM 생성: %s", probe_server_id)
+
+        # 4. SHUTOFF 대기 (최대 10분)
+        for _ in range(60):
+            await asyncio.sleep(10)
+            srv = await asyncio.to_thread(conn.compute.get_server, probe_server_id)
+            if srv.status == "SHUTOFF":
+                break
+            if srv.status == "ERROR":
+                _logger.warning("[probe] VM ERROR 상태: %s", probe_server_id)
+                return False
+        else:
+            _logger.warning("[probe] 타임아웃: %s", probe_server_id)
+            return False
+
+        # 5. console 로그 검사
+        console = await asyncio.to_thread(conn.compute.get_server_console_output, probe_server_id, length=100)
+        log_text = console.get("output", "") if isinstance(console, dict) else (console or "")
+        if "[union-probe] VERIFY_OK" in log_text:
+            _logger.info("[probe] 검증 성공: %s", library_id)
+            return True
+        _logger.warning("[probe] VERIFY_FAIL 감지: %s", library_id)
+        return False
+
+    except Exception:
+        _logger.warning("[probe] 검증 중 예외: %s", library_id, exc_info=True)
+        return False
+    finally:
+        # probe access rule 정리
+        try:
+            rules = await asyncio.to_thread(manila.list_access_rules, conn, share_id)
+            for r in rules:
+                if r.get("access_to") == probe_user:
+                    await asyncio.to_thread(manila.revoke_access_rule, conn, share_id, r["id"])
+        except Exception:
+            pass
+        # probe VM 삭제
+        if probe_server_id:
+            try:
+                await asyncio.to_thread(conn.compute.delete_server, probe_server_id, force=True)
+            except Exception:
+                pass
+
+
 def _create_builder_vm(
     conn: openstack.connection.Connection,
     library_id: str,
@@ -421,6 +549,37 @@ async def _monitor_build(
                         _active_builds[library_id]["status"] = "error"
                         del _active_builds[library_id]
                     return
+
+                # 빌드 성공 후 마운트 가능 여부 probe VM으로 검증 (A2)
+                settings = get_settings()
+                image_id = settings.builder_image_id
+                flavor_id = settings.builder_flavor_id
+                network_id = settings.builder_network_id or settings.default_network_id
+                if image_id and flavor_id:
+                    if build_db_id:
+                        await _update_build_db(build_db_id, progress_step="마운트 검증 중", progress_pct=80)
+                    mount_ok = await _verify_layer_accessible(
+                        conn, share_id, library_id, image_id, flavor_id, network_id
+                    )
+                    if not mount_ok:
+                        _logger.error("[builder] 마운트 검증 실패: %s", library_id)
+                        await asyncio.to_thread(manila.update_share_metadata, conn, share_id, {"union_status": "error"})
+                        if build_db_id:
+                            await _update_build_db(
+                                build_db_id,
+                                status="error",
+                                progress_step="마운트 검증 실패",
+                                error_message="probe VM이 레이어를 마운트하거나 완료 마커를 찾지 못함",
+                                completed=True,
+                            )
+                        try:
+                            await asyncio.to_thread(conn.compute.delete_server, server_id, force=True)
+                        except Exception:
+                            pass
+                        if library_id in _active_builds:
+                            _active_builds[library_id]["status"] = "error"
+                            del _active_builds[library_id]
+                        return
 
                 # CephX access rule 정리 (빌더용)
                 try:
