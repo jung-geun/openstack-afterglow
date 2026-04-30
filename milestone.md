@@ -1164,8 +1164,8 @@ Option A 채택 시 본 절 진행. Option B 채택 시 사용자가 자체 구�
 - [ ] `deploy/k8s-template/monitoring/grafana/provisioning/dashboards/` — node-exporter-full + nvidia-dcgm 공식 대시보드 JSON 동봉
 - [ ] Grafana org/folder 자동 생성 — 프로젝트별 folder, datasource label filter `project_id="<keystone_project_id>"`
 - [ ] `frontend/src/routes/dashboard/observability/+page.svelte` — Grafana iframe + auth proxy (Grafana `auth.proxy` 또는 `auth.jwt` 모드 + 백엔드가 토큰 발급)
-- [ ] `backend/app/api/common/grafana_auth.py` (신규) — Grafana 임베드용 JWT 발급 엔드포인트
-- [ ] `backend/tests/test_grafana_auth.py` — 토큰 발급/만료/권한 3건
+- [x] `backend/app/api/common/grafana_auth.py` (신규) — Grafana 임베드용 JWT 발급 엔드포인트 (POST /api/grafana/token, HS256 JWT, standard library만 사용)
+- [x] `backend/tests/test_grafana_auth.py` — 토큰 발급/클레임 검증/시크릿 미설정 503 3건
 
 ### 12.5 Open Questions (사용자 확인 필요)
 

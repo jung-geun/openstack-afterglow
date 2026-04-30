@@ -111,6 +111,7 @@ _mark("fastapi")
 # ---------------------------------------------------------------------------
 from app.api.common import (
     dashboard_router,
+    grafana_auth_router,
     libraries_router,
     metrics_router,
     sd_targets_router,
@@ -387,6 +388,7 @@ app.include_router(dashboard_router, prefix="/api/dashboard", tags=["dashboard"]
 app.include_router(metrics_router, prefix="/api/metrics", tags=["metrics"])
 app.include_router(libraries_router, prefix="/api/libraries", tags=["libraries"])
 app.include_router(sd_targets_router, prefix="/api/sd", tags=["sd-targets"])
+app.include_router(grafana_auth_router, prefix="/api/grafana", tags=["grafana-auth"])
 app.include_router(site_router, prefix="/api/site-config", tags=["site"])
 app.include_router(user_dashboard_router, prefix="/api/user-dashboard", tags=["user-dashboard"])
 

@@ -2,6 +2,7 @@
 
 _ROUTERS = {
     "dashboard_router": ".dashboard",
+    "grafana_auth_router": ".grafana_auth",
     "libraries_router": ".libraries",
     "metrics_router": ".metrics",
     "sd_targets_router": ".sd_targets",
