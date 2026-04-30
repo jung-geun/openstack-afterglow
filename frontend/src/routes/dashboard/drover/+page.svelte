@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { auth } from '$lib/stores/auth';
+  import { auth, authReady } from '$lib/stores/auth';
   import { api, ApiError, getBaseUrl } from '$lib/api/client';
   import { toast } from '$lib/stores/toast';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
@@ -114,18 +114,31 @@
   const token = $derived($auth.token ?? undefined);
   const projectId = $derived($auth.projectId ?? undefined);
 
+  let inflight: AbortController | null = null;
+
   async function fetchClusters(opts?: { refresh?: boolean }) {
+    inflight?.abort();
+    const ctrl = new AbortController();
+    inflight = ctrl;
     try {
       const qs = showDeleted ? '?include_deleted=true' : '';
-      clusters = await api.get<K3sCluster[]>(`/api/k3s/clusters${qs}`, token, projectId, opts);
+      const data = await api.get<K3sCluster[]>(
+        `/api/k3s/clusters${qs}`,
+        token, projectId,
+        { ...(opts ?? {}), signal: ctrl.signal },
+      );
+      if (ctrl.signal.aborted) return;
+      clusters = data;
       error = '';
     } catch (e) {
+      if (ctrl.signal.aborted) return;
       if (e instanceof ApiError && e.status === 503) {
         error = 'k3s 서비스를 사용할 수 없습니다.';
       } else {
         error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
       }
     } finally {
+      if (inflight === ctrl) inflight = null;
       loading = false;
     }
   }
@@ -297,10 +310,13 @@
     defaultActive: true,
     defaultInterval: 10,
     intervalOptions: [10, 15, 30, 60],
+    invokeOnMount: false,
   });
 
   $effect(() => {
-    if (!$auth.projectId) return;
+    const pid = $auth.projectId;
+    const ready = $authReady;
+    if (!pid || !ready) return;
     loading = true;
     untrack(() => fetchClusters());
   });
