@@ -1134,10 +1134,10 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 - 장점: 운영 단일 스택, Grafana org/folder + label-based row-level security로 프로젝트 격리, 비용/리소스 효율
 - 단점: 사용자 정의 대시보드 자유도 낮음 (관리자가 템플릿 제공), Prometheus single-tenant 한계
 - [ ] `monitoring/prometheus.yml` + `deploy/k8s-template/monitoring/prometheus/configmap.yaml` — `nova_sd` 또는 `http_sd_config` 추가하여 OpenStack VM 자동 발견
-- [ ] `backend/app/api/common/sd_targets.py` (신규) — `GET /api/sd/prometheus/targets` Prometheus `http_sd` 호환 JSON 응답 (인스턴스 목록 + `instance`, `project_id`, `flavor`, `gpu` 라벨)
+- [x] `backend/app/api/common/sd_targets.py` (신규) — `GET /api/sd/prometheus/targets` Prometheus `http_sd` 호환 JSON 응답 (인스턴스 목록 + `instance`, `project_id`, `flavor`, `gpu` 라벨)
   - 인증: 별도 token (스크래퍼 전용), `monitoring_sd_token` 설정값
   - VM의 floating IP가 없어도 fixed IP를 그대로 노출 (스크래퍼가 internal network에 접근 가능하다는 가정)
-- [ ] `backend/tests/test_sd_targets.py` — 라벨 형식, token 검증, 권한 4건
+- [x] `backend/tests/test_sd_targets.py` — 라벨 형식, token 검증, 권한 4건
 - [ ] `deploy/k8s-template/monitoring/prometheus/configmap.yaml` — DCGM/Node 스크래핑 잡 추가 (`__meta_*` 라벨 → `project_id`/`instance` 재라벨)
 - [ ] `deploy/k8s-template/monitoring/grafana/` — provisioning datasource (Prometheus) + 기본 대시보드(JSON) 추가, `node_exporter`/`dcgm` 공식 대시보드 import
 - [ ] `frontend/src/routes/dashboard/observability/+page.svelte` (신규) — Grafana iframe 임베드 + 프로젝트별 URL 자동 생성 (`var-project_id={current}`)

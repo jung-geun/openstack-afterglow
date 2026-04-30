@@ -4,6 +4,7 @@ _ROUTERS = {
     "dashboard_router": ".dashboard",
     "libraries_router": ".libraries",
     "metrics_router": ".metrics",
+    "sd_targets_router": ".sd_targets",
     "site_router": ".site",
     "user_dashboard_router": ".user_dashboard",
 }
