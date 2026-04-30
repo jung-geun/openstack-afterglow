@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from app.api.deps import get_os_conn, require_admin
 from app.models.storage import CreateVolumeRequest, VolumeInfo
 from app.rate_limit import limiter
-from app.services import cinder
+from app.services import cinder, nova
 from app.services.cache import cached_call, invalidate, ttl_fast
 
 router = APIRouter()
@@ -114,7 +114,36 @@ async def create_volume_transfer(
     req: CreateVolumeTransferRequest | None = None,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    """볼륨 이전(transfer) 생성. 반환된 auth_key를 수락 측에 전달해야 함."""
+    """볼륨 이전(transfer) 생성. VM에 연결된 경우 자동 detach 후 transfer를 생성한다."""
+    try:
+        vol = await asyncio.to_thread(cinder.get_volume, conn, volume_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="볼륨을 찾을 수 없습니다")
+
+    for attachment in vol.attachments:
+        server_id = attachment.get("server_id")
+        if not server_id:
+            continue
+        try:
+            await asyncio.to_thread(nova.detach_volume, conn, server_id, volume_id)
+        except Exception:
+            raise HTTPException(
+                status_code=409,
+                detail=f"볼륨 detach 실패 (인스턴스 {server_id}) — 수동으로 분리 후 재시도 해주세요",
+            )
+
+    if vol.attachments:
+        for _ in range(30):
+            await asyncio.sleep(2)
+            try:
+                refreshed = await asyncio.to_thread(cinder.get_volume, conn, volume_id)
+                if refreshed.status == "available":
+                    break
+            except Exception:
+                pass
+        else:
+            raise HTTPException(status_code=409, detail="볼륨 detach 대기 시간 초과")
+
     try:
         name = req.name if req else None
         result = await asyncio.to_thread(cinder.create_volume_transfer, conn, volume_id, name)

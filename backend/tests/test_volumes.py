@@ -72,6 +72,7 @@ async def test_create_transfer_unauthenticated():
 @pytest.mark.asyncio
 async def test_create_transfer_success(client):
     with patch("app.api.storage.volumes.cinder") as mock_cinder:
+        mock_cinder.get_volume.return_value = make_mock_volume("vol-1", status="available")
         mock_cinder.create_volume_transfer.return_value = {
             "id": "tr-1",
             "name": "transfer-1",
