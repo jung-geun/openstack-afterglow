@@ -37,26 +37,24 @@
     inFlight = ctrl;
     if (!summary) summaryLoading = true;
     try {
-      const [s, q, inst] = await Promise.allSettled([
-        api.get<DashboardSummary>('/api/dashboard/summary', token, projectId, { ...opts, signal: ctrl.signal }),
-        api.get<Quotas>('/api/dashboard/quotas', token, projectId, { signal: ctrl.signal }),
-        api.get<Instance[]>('/api/instances', token, projectId, { ...opts, signal: ctrl.signal }),
+      await Promise.allSettled([
+        api.get<DashboardSummary>('/api/dashboard/summary', token, projectId, { ...opts, signal: ctrl.signal })
+          .then(v  => { if (!ctrl.signal.aborted) { summary = v; summaryLoading = false; } })
+          .catch(() => { summaryLoading = false; }),
+        api.get<Quotas>('/api/dashboard/quotas', token, projectId, { signal: ctrl.signal })
+          .then(v => { if (!ctrl.signal.aborted) quotas = v; })
+          .catch(() => {}),
+        api.get<Instance[]>('/api/instances', token, projectId, { ...opts, signal: ctrl.signal })
+          .then(v => { if (!ctrl.signal.aborted) recentInstances = v.slice(0, 5); })
+          .catch(() => {}),
+        api.get<unknown[]>('/api/k3s/clusters', token, projectId, { signal: ctrl.signal })
+          .then(v => { if (!ctrl.signal.aborted) k3sCount = v.filter((c: any) => c.status === 'ACTIVE' || c.provisioning_status === 'ACTIVE').length; })
+          .catch(() => { k3sCount = null; }),
       ]);
-      if (ctrl.signal.aborted) return;
-      if (s.status === 'fulfilled') summary = s.value;
-      if (q.status === 'fulfilled') quotas = q.value;
-      if (inst.status === 'fulfilled') recentInstances = inst.value.slice(0, 5);
     } finally {
       if (inFlight === ctrl) inFlight = null;
       summaryLoading = false;
     }
-    // k3s count (best effort)
-    try {
-      const clusters = await api.get<unknown[]>('/api/k3s/clusters', token, projectId, { signal: ctrl.signal });
-      if (!ctrl.signal.aborted) {
-        k3sCount = clusters.filter((c: any) => c.status === 'ACTIVE' || c.provisioning_status === 'ACTIVE').length;
-      }
-    } catch { k3sCount = null; }
   }
 
   async function forceRefresh() {
