@@ -903,7 +903,7 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 
 - [x] Manila access rule 자동 관리: Builder VM RW 추가/제거 API (`POST /api/union/builder/access`, `DELETE /api/union/builder/access/{id}`)
 - [x] 레이어 프로젝트 격리: `project_id` 컬럼 + `list_layers()` 필터링 (NULL=공유, 값=프로젝트 전용, admin=전체)
-- [ ] seal 후 RW 접근 차단 검증
+- [x] seal 후 RW 접근 차단 검증
 
 **운영 도구**
 

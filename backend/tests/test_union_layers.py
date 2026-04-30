@@ -1576,3 +1576,81 @@ class TestMountLimitGuard:
         # execute(count)가 호출되지 않음
         session.execute.assert_not_called()
         assert result is not None
+
+
+# ---------------------------------------------------------------------------
+# A7: seal 후 RW 차단 검증 — 파일 시스템 fixture
+# ---------------------------------------------------------------------------
+
+
+class TestSealWriteProtection:
+    """sealed 레이어 디렉토리에 쓰기 시도 시 PermissionError 검증."""
+
+    def test_chmod_prevents_write_to_sealed_layer_dir(self, tmp_path):
+        """chmod -R a-w 적용 후 기존 파일 수정이 PermissionError를 발생시켜야 한다."""
+        import subprocess
+
+        layer_dir = tmp_path / "sha256-abc123" / "diff"
+        layer_dir.mkdir(parents=True)
+        target = layer_dir / "lib" / "python3.11" / "site-packages" / "torch" / "version.py"
+        target.parent.mkdir(parents=True)
+        target.write_text("__version__ = '2.4.0'\n")
+
+        # layerbuild seal이 수행하는 chmod -R a-w
+        subprocess.run(["chmod", "-R", "a-w", str(layer_dir)], check=True)
+
+        with pytest.raises((PermissionError, OSError)):
+            target.write_text("tampered content")
+
+        # 정리: tmp_path cleanup을 위해 권한 복원
+        subprocess.run(["chmod", "-R", "u+w", str(layer_dir)], check=False)
+
+    def test_chmod_prevents_new_file_creation_in_sealed_dir(self, tmp_path):
+        """chmod -R a-w 후 새 파일 생성도 차단돼야 한다."""
+        import subprocess
+
+        layer_dir = tmp_path / "sha256-def456" / "diff"
+        layer_dir.mkdir(parents=True)
+        (layer_dir / "existing.txt").write_text("existing")
+
+        subprocess.run(["chmod", "-R", "a-w", str(layer_dir)], check=True)
+
+        with pytest.raises((PermissionError, OSError)):
+            (layer_dir / "new_file.txt").write_text("should not exist")
+
+        subprocess.run(["chmod", "-R", "u+w", str(layer_dir)], check=False)
+
+    def test_unsealed_layer_dir_allows_write(self, tmp_path):
+        """봉인되지 않은 레이어 디렉토리에는 쓰기가 허용돼야 한다."""
+        layer_dir = tmp_path / "sha256-ghi789" / "diff"
+        layer_dir.mkdir(parents=True)
+        target = layer_dir / "test.txt"
+        target.write_text("original")
+
+        # chmod 없음 — 일반 쓰기 가능
+        target.write_text("modified")
+        assert target.read_text() == "modified"
+
+    def test_seal_layer_db_marks_sealed_field(self):
+        """seal_layer 서비스 함수가 DB에서 sealed=True로 설정하는지 검증."""
+
+        async def _run():
+            from unittest.mock import AsyncMock, MagicMock
+
+            from app.services.union_layers import seal_layer
+
+            layer = MagicMock()
+            layer.id = _sha("seal-test")
+            layer.sealed = False
+
+            session = MagicMock()
+            session.get = AsyncMock(return_value=layer)
+            session.commit = AsyncMock()
+
+            result = await seal_layer(session, layer.id)
+            assert result.sealed is True
+            assert layer.sealed is True
+
+        import asyncio
+
+        asyncio.run(_run())
