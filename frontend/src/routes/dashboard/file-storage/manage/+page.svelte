@@ -42,18 +42,20 @@
   async function loadData() {
     if (fileStorages.length === 0) loading = true;
     else refreshing = true;
-    try {
-      [fileStorages, libraries] = await Promise.all([
-        api.get<FileStorage[]>('/api/admin/file-storage', token, projectId),
-        api.get<LibraryConfig[]>('/api/libraries', token, projectId),
-      ]);
-    } catch (e) {
-      error = e instanceof ApiError ? `로드 실패: ${e.message}` : '서버 오류';
-      fileStorages = [];
-    } finally {
-      loading = false;
-      refreshing = false;
-    }
+    await Promise.allSettled([
+      api.get<FileStorage[]>('/api/admin/file-storage', token, projectId)
+        .then(v => { fileStorages = v; loading = false; })
+        .catch(e => {
+          error = e instanceof ApiError ? `로드 실패: ${e.message}` : '서버 오류';
+          fileStorages = [];
+          loading = false;
+        }),
+      api.get<LibraryConfig[]>('/api/libraries', token, projectId)
+        .then(v => { libraries = v; })
+        .catch(() => {}),
+    ]);
+    loading = false;
+    refreshing = false;
   }
 
   async function buildFileStorage(libId: string) {

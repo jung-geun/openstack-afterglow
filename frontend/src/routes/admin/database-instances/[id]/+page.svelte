@@ -52,14 +52,21 @@
 
 	async function loadAll() {
 		loading = true;
-		try {
-			[instance, databases, users, backups] = await Promise.all([
-				api.get<DbInstance>(`/api/database-instances/${instanceId}`, token, projectId),
-				api.get<DbDatabase[]>(`/api/database-instances/${instanceId}/databases`, token, projectId),
-				api.get<DbUser[]>(`/api/database-instances/${instanceId}/users`, token, projectId),
-				api.get<DbBackup[]>(`/api/database-instances/${instanceId}/backups`, token, projectId),
-			]);
-		} catch { instance = null; } finally { loading = false; }
+		await Promise.allSettled([
+			api.get<DbInstance>(`/api/database-instances/${instanceId}`, token, projectId)
+				.then(v => { instance = v; loading = false; })
+				.catch(() => { instance = null; loading = false; }),
+			api.get<DbDatabase[]>(`/api/database-instances/${instanceId}/databases`, token, projectId)
+				.then(v => { databases = v; })
+				.catch(() => {}),
+			api.get<DbUser[]>(`/api/database-instances/${instanceId}/users`, token, projectId)
+				.then(v => { users = v; })
+				.catch(() => {}),
+			api.get<DbBackup[]>(`/api/database-instances/${instanceId}/backups`, token, projectId)
+				.then(v => { backups = v; })
+				.catch(() => {}),
+		]);
+		loading = false;
 	}
 
 	async function deleteInstance() {

@@ -49,17 +49,16 @@
     if (libraries.length === 0) loading = true;
     else refreshing = true;
     error = '';
-    try {
-      [libraries, fileStorages] = await Promise.all([
-        api.get<LibraryConfig[]>('/api/libraries', token, projectId),
-        api.get<FileStorage[]>('/api/admin/file-storage', token, projectId),
-      ]);
-    } catch (e) {
-      error = e instanceof ApiError ? e.message : '데이터 로드 실패';
-    } finally {
-      loading = false;
-      refreshing = false;
-    }
+    await Promise.allSettled([
+      api.get<LibraryConfig[]>('/api/libraries', token, projectId)
+        .then(v => { libraries = v; loading = false; })
+        .catch(e => { error = e instanceof ApiError ? e.message : '데이터 로드 실패'; loading = false; }),
+      api.get<FileStorage[]>('/api/admin/file-storage', token, projectId)
+        .then(v => { fileStorages = v; })
+        .catch(() => {}),
+    ]);
+    loading = false;
+    refreshing = false;
   }
 
   async function loadUsage(range: string) {

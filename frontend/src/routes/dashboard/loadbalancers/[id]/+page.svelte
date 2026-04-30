@@ -65,21 +65,19 @@
 
 	async function fetchAll() {
 		loading = true;
-		try {
-			const [lbData, listenersData, poolsData] = await Promise.all([
-				api.get<LoadBalancerDetail>(`/api/loadbalancers/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined),
-				api.get<Listener[]>(`/api/loadbalancers/${id}/listeners`, $auth.token ?? undefined, $auth.projectId ?? undefined),
-				api.get<Pool[]>(`/api/loadbalancers/${id}/pools`, $auth.token ?? undefined, $auth.projectId ?? undefined),
-			]);
-			lb = lbData;
-			listeners = listenersData;
-			pools = poolsData;
-			error = '';
-		} catch (e) {
-			error = e instanceof ApiError ? e.message : '조회 실패';
-		} finally {
-			loading = false;
-		}
+		error = '';
+		await Promise.allSettled([
+			api.get<LoadBalancerDetail>(`/api/loadbalancers/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined)
+				.then(v => { lb = v; loading = false; })
+				.catch(e => { error = e instanceof ApiError ? e.message : '조회 실패'; loading = false; }),
+			api.get<Listener[]>(`/api/loadbalancers/${id}/listeners`, $auth.token ?? undefined, $auth.projectId ?? undefined)
+				.then(v => { listeners = v; })
+				.catch(() => {}),
+			api.get<Pool[]>(`/api/loadbalancers/${id}/pools`, $auth.token ?? undefined, $auth.projectId ?? undefined)
+				.then(v => { pools = v; })
+				.catch(() => {}),
+		]);
+		loading = false;
 	}
 
 	$effect(() => { if ($auth.projectId) fetchAll(); });

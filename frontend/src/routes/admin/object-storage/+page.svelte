@@ -38,17 +38,16 @@
 	async function load() {
 		if (containers.length === 0) loading = true;
 		else refreshing = true;
-		try {
-			[containers, account] = await Promise.all([
-				api.get<SwiftContainer[]>('/api/object-storage', token, projectId),
-				api.get<AccountMeta>('/api/object-storage/account', token, projectId),
-			]);
-		} catch {
-			containers = [];
-		} finally {
-			loading = false;
-			refreshing = false;
-		}
+		await Promise.allSettled([
+			api.get<SwiftContainer[]>('/api/object-storage', token, projectId)
+				.then(v => { containers = v; loading = false; })
+				.catch(() => { containers = []; loading = false; }),
+			api.get<AccountMeta>('/api/object-storage/account', token, projectId)
+				.then(v => { account = v; })
+				.catch(() => {}),
+		]);
+		loading = false;
+		refreshing = false;
 	}
 
 	async function createContainer() {
