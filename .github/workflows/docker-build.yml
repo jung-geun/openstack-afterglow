@@ -6,8 +6,8 @@ on:
       - main
       - dev
     paths-ignore:
-      - 'deploy/k8s/overlays/**/.argocd-source-*.yaml'
-      - 'deploy/k8s/overlays/dev/kustomization.yaml'
+      - 'deploy/k8s-template/overlays/**/.argocd-source-*.yaml'
+      - 'deploy/k8s-template/overlays/dev/kustomization.yaml'
     tags:
       - 'v*'
   pull_request:
@@ -304,7 +304,7 @@ jobs:
           BACKEND_IMG: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/afterglow-api
           FRONTEND_IMG: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/afterglow
         run: |
-          KUST="deploy/k8s/overlays/dev/kustomization.yaml"
+          KUST="deploy/k8s-template/overlays/dev/kustomization.yaml"
 
           if echo "${TARGETS}" | jq -e '. | contains(["backend"])' > /dev/null; then
             BACKEND_DIGEST=$(docker buildx imagetools inspect "${BACKEND_IMG}:dev" \
@@ -329,7 +329,7 @@ jobs:
         run: |
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"
-          git add deploy/k8s/overlays/dev/kustomization.yaml
+          git add deploy/k8s-template/overlays/dev/kustomization.yaml
           if git diff --staged --quiet; then
             echo "Digest unchanged — no commit needed"
             exit 0
