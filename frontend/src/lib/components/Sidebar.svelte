@@ -102,16 +102,6 @@
 				{ label: 'Floating IP', href: '/dashboard/network/floating-ips', service: null },
 				{ label: '라우터', href: '/dashboard/network/routers', service: null },
 				{ label: '로드밸런서', href: '/dashboard/network/loadbalancers', service: null },
-			],
-		},
-		{
-			label: 'Identity & Access',
-			prefix: '/dashboard/account',
-			extraPrefixes: ['/dashboard/network/security-groups'],
-			icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z',
-			open: false,
-			items: [
-				{ label: '계정 설정', href: '/dashboard/account', service: null },
 				{ label: '보안 그룹', href: '/dashboard/network/security-groups', service: null },
 			],
 		},
@@ -207,6 +197,13 @@
 		>
 			<svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
 			토폴로지
+		</a>
+		<a
+			href="/dashboard/account"
+			class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors {$page.url.pathname.startsWith('/dashboard/account') ? 'bg-blue-600/20 text-blue-400 font-medium' : 'text-gray-400 hover:text-white hover:bg-gray-800'}"
+		>
+			<svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
+			계정 설정
 		</a>
 
 		<!-- 섹션들 -->
