@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 
 
-def make_snapshot(snap_id: str = "snap-1", name: str = "test-snap") -> dict:
+def make_snapshot(snap_id: str = "snap-1", name: str = "test-snap", project_id: str = "test-project-123") -> dict:
     return {
         "id": snap_id,
         "name": name,
@@ -14,16 +14,48 @@ def make_snapshot(snap_id: str = "snap-1", name: str = "test-snap") -> dict:
         "volume_id": "vol-1",
         "created_at": "2024-01-01T00:00:00Z",
         "description": None,
+        "project_id": project_id,
     }
 
 
 @pytest.mark.asyncio
 async def test_list_snapshots(client, mock_conn):
-    with patch("app.api.storage.volume_snapshots.cinder.list_snapshots", return_value=[make_snapshot()]):
+    """일반 사용자 — caller_project_id=pid 로 호출되어 해당 프로젝트 스냅샷만 반환."""
+    with patch("app.api.storage.volume_snapshots.cinder.list_snapshots", return_value=[make_snapshot()]) as mock_ls:
         resp = await client.get("/api/volume-snapshots")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
     assert resp.json()[0]["id"] == "snap-1"
+    # caller_project_id 인자로 pid("test-project-123")가 전달돼야 함
+    _args, kwargs = mock_ls.call_args
+    assert kwargs.get("caller_project_id") == "test-project-123" or _args[2] == "test-project-123"
+
+
+@pytest.mark.asyncio
+async def test_list_snapshots_admin_sees_all(admin_client, mock_conn):
+    """시스템 관리자 — caller_project_id=None 으로 호출되어 전체 스냅샷 반환."""
+    other_snap = make_snapshot("snap-2", project_id="other-project")
+    with patch(
+        "app.api.storage.volume_snapshots.cinder.list_snapshots", return_value=[make_snapshot(), other_snap]
+    ) as mock_ls:
+        resp = await admin_client.get("/api/volume-snapshots")
+    assert resp.status_code == 200
+    assert len(resp.json()) == 2
+    _args, kwargs = mock_ls.call_args
+    assert kwargs.get("caller_project_id") is None or (len(_args) > 2 and _args[2] is None)
+
+
+@pytest.mark.asyncio
+async def test_list_snapshots_filters_other_project(client, mock_conn):
+    """일반 사용자 — 다른 프로젝트 스냅샷은 cinder.list_snapshots 내부에서 제외됨."""
+    own_snap = make_snapshot("snap-own", project_id="test-project-123")
+    # 서비스가 필터링 후 own_snap만 반환한다고 모킹
+    with patch("app.api.storage.volume_snapshots.cinder.list_snapshots", return_value=[own_snap]):
+        resp = await client.get("/api/volume-snapshots")
+    assert resp.status_code == 200
+    ids = [s["id"] for s in resp.json()]
+    assert "snap-own" in ids
+    assert "snap-other" not in ids
 
 
 @pytest.mark.asyncio

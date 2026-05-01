@@ -9,7 +9,7 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from app.api.deps import get_os_conn
+from app.api.deps import get_os_conn, get_token_info
 from app.services import cinder
 from app.services.cache import cached_call, ttl_fast
 
@@ -27,17 +27,19 @@ class CreateSnapshotRequest(BaseModel):
 async def list_snapshots(
     volume_id: str | None = None,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
     refresh: bool = Query(False),
 ):
     pid = conn._afterglow_project_id
-    cache_key = (
-        f"afterglow:cinder:{pid}:snapshots" if not volume_id else f"afterglow:cinder:{pid}:snapshots:{volume_id}"
-    )
+    is_admin = token_info.get("is_system_admin", False)
+    caller_project_id = None if is_admin else pid
+    vol_part = volume_id or "all"
+    cache_key = f"afterglow:cinder:{pid}:snapshots:admin={int(is_admin)}:{vol_part}"
     try:
         return await cached_call(
             cache_key,
             ttl_fast(),
-            lambda: cinder.list_snapshots(conn, volume_id),
+            lambda: cinder.list_snapshots(conn, volume_id, caller_project_id),
             refresh=refresh,
         )
     except Exception:

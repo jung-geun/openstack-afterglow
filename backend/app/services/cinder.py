@@ -177,11 +177,18 @@ def restore_backup(conn: openstack.connection.Connection, backup_id: str, volume
     return {"volume_id": getattr(result, "volume_id", None), "volume_name": getattr(result, "volume_name", None)}
 
 
-def list_snapshots(conn: openstack.connection.Connection, volume_id: str | None = None) -> list[dict]:
+def list_snapshots(
+    conn: openstack.connection.Connection,
+    volume_id: str | None = None,
+    caller_project_id: str | None = None,
+) -> list[dict]:
     kwargs = {}
     if volume_id:
         kwargs["volume_id"] = volume_id
-    return [_snapshot_to_dict(s) for s in conn.block_storage.snapshots(details=True, **kwargs)]
+    snapshots = [_snapshot_to_dict(s) for s in conn.block_storage.snapshots(details=True, **kwargs)]
+    if caller_project_id is not None:
+        snapshots = [s for s in snapshots if s.get("project_id") == caller_project_id]
+    return snapshots
 
 
 def get_snapshot(conn: openstack.connection.Connection, snapshot_id: str) -> dict:
@@ -216,6 +223,7 @@ def _snapshot_to_dict(s) -> dict:
         "size": s.size,
         "description": getattr(s, "description", "") or "",
         "created_at": str(s.created_at) if getattr(s, "created_at", None) else None,
+        "project_id": getattr(s, "project_id", None),
     }
 
 
