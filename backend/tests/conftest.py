@@ -46,6 +46,15 @@ def make_token_info(
     }
 
 
+@pytest.fixture(autouse=True)
+def _reset_settings_cache():
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
 @pytest.fixture
 def mock_conn():
     return make_mock_conn()

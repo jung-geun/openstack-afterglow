@@ -193,11 +193,11 @@ async def start_build(
 
     Returns: {file_storage_id, server_id, status}
     """
-    settings = get_settings()
-    conn = await asyncio.to_thread(get_service_project_connection)
-
     if library_id in _active_builds:
         raise RuntimeError(f"이미 빌드 중인 라이브러리: {library_id}")
+
+    settings = get_settings()
+    conn = await asyncio.to_thread(get_service_project_connection)
 
     lib = lib_svc.get_by_id(library_id)
 
