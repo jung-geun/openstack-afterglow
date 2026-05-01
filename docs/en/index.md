@@ -25,6 +25,7 @@ Afterglow is an open-source web dashboard for OpenStack cloud environments. It p
 | [k3s cluster](k3s.md) | k3s provisioning and node management |
 | [Architecture](../architecture.md) _(Korean)_ | System design and data flow |
 | [API reference](../api-reference.md) _(Korean)_ | Complete REST API specification |
+| [kolla-ansible deployment](../deployment.md#kolla-ansible-배포) | Single-playbook deployment inside OpenStack |
 
 ---
 
@@ -35,6 +36,12 @@ Installs k3s directly onto OpenStack VMs to deliver a Kubernetes environment on 
 
 ### OverlayFS Library Layer
 Mounts Manila NFS/CephFS shares as OverlayFS lower layers so that AI/ML libraries (Python, PyTorch, vLLM) can be shared across many VMs. Storage efficiency and boot speed improve at the same time.
+
+### Monitoring Integration
+Issues Grafana embed JWTs (`POST /api/grafana/token`) and exposes VM targets for Prometheus via http_sd (`GET /api/sd/prometheus/targets`). Monitoring ingress security groups are attached automatically on project and instance creation.
+
+### kolla-ansible Integration
+Deploys Afterglow inside an existing OpenStack cluster using a single kolla-ansible playbook (`deploy/kolla/`).
 
 ### Complete OpenStack Service Coverage
 Nova, Glance, Cinder, Neutron, Manila, Octavia — every core service managed from a single dashboard.
@@ -54,3 +61,35 @@ Nova, Glance, Cinder, Neutron, Manila, Octavia — every core service managed fr
 ---
 
 [GitHub repository](https://github.com/jung-geun/openstack-afterglow){: .btn .btn-primary }
+
+---
+
+## Release Notes
+
+### v1.13.9 (2026-05-01)
+
+#### New Features
+- **kolla-ansible integration**: `deploy/kolla/` role and `install.sh` — single-playbook deployment inside OpenStack
+- **Union Mount layer v2**: Fork API, seal/unseal, Manila Snapshot backup/restore, background build worker, volume transfer auto-detach/rollback, NFS export security hardening
+- **Monitoring integration**: Grafana embed JWT, Prometheus http_sd targets, auto-attach monitoring SG
+- **Octavia Ingress**: per-project manager user + App Credential auth model
+- **Account settings page** (`/dashboard/account`): profile, password, theme, projects, keypairs
+- Floating IP shows connected instance info
+- Instance volume `delete_on_termination` toggle
+- Volume snapshot per-project filtering
+
+#### Improvements
+- Sidebar redesigned — Identity & Access section, topology promoted
+- API calls use `Promise.allSettled` for per-call error isolation
+- ArgoCD auto-sync: kustomization digest auto-updated after image push
+
+#### Bug Fixes
+- Admin libraries ~0.5s infinite re-render loop fixed (`untrack`)
+- Admin volumes action buttons condensed into `...` dropdown
+- Nova error messages preserved on volume detach failure
+
+---
+
+### v1.13.8 and earlier
+
+See [GitHub Releases](https://github.com/jung-geun/openstack-afterglow/releases).

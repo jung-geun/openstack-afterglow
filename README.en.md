@@ -44,10 +44,22 @@ Afterglow takes the strengths of both projects and fixes their weaknesses.
 - Cluster lifecycle management (create · delete history preserved)
 - kubeconfig download
 
-### OverlayFS Library Layer (AI/ML Focused)
+### OverlayFS Library Layer — Union Mount v2 (AI/ML Focused)
 - Mounts Manila NFS/CephFS shares as OverlayFS lower layers
 - Shares pre-built layers for Python, PyTorch, vLLM, Jupyter, etc.
 - Storage-efficient read-only library sharing across projects
+- Content-addressable immutable layers
+- Fork API: derive new RW layer from sealed layer
+- Manila Snapshot backup/restore
+
+### Monitoring Integration
+- Grafana embed JWT endpoint (`POST /api/grafana/token`)
+- Prometheus http_sd targets endpoint (`GET /api/sd/prometheus/targets`) — auto-exposes node exporter targets from VM fixed IPs
+- Auto-attach monitoring ingress SG on project/instance creation
+
+### kolla-ansible Deployment
+- `deploy/kolla/ansible/roles/afterglow/` role for deploying inside an OpenStack cluster
+- Compatible with existing kolla-ansible infrastructure
 
 ### Admin Capabilities
 - Per-project quota management
@@ -129,7 +141,7 @@ docker compose --profile monitoring up -d
 
 ```bash
 # Development
-kubectl apply -k deploy/k8s/overlays/dev
+kubectl apply -k deploy/k8s-template/overlays/dev
 
 # Production
 kubectl apply -k deploy/k8s/overlays/prod
@@ -269,7 +281,9 @@ npm run test:parallel # parallel execution
 - [x] GitHub Actions CI/CD (multi-platform Docker build)
 - [ ] Fedora CoreOS-based k3s nodes
 - [ ] OverlayFS state-monitoring agent
-- [ ] Manila share-snapshot management
+- [x] Manila share-snapshot management
 - [ ] Frontend — NFS option UI / library catalog
+- [x] kolla-ansible integration: single-playbook deployment inside OpenStack
+- [x] Monitoring integration: Grafana embed JWT, Prometheus http_sd targets
 
 Full roadmap: [milestone.md](milestone.md) _(Korean)_

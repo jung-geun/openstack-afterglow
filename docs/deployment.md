@@ -107,6 +107,89 @@ open http://localhost:3000
 
 ---
 
+## kolla-ansible 배포
+
+OpenStack 환경 내부(컨트롤러 노드)에서 kolla-ansible 플레이북으로 Afterglow를 배포합니다. Docker 기반 서비스를 기존 kolla 인프라와 동일한 방식으로 관리합니다.
+
+### 사전 요구사항
+
+- kolla-ansible 환경 구성 완료 (`/etc/kolla/globals.yml`, `/etc/kolla/passwords.yml` 존재)
+- Afterglow 컨테이너 이미지 접근 가능 (GHCR 또는 내부 레지스트리)
+- Python 가상 환경에 kolla-ansible 설치
+
+### 1. 역할 설치
+
+```bash
+# 저장소 클론
+git clone git@github.com:jung-geun/openstack-afterglow.git
+cd openstack-afterglow/deploy/kolla
+
+# kolla-ansible 가상 환경 활성화
+source /path/to/kolla-venv/bin/activate
+
+# Afterglow 역할이 kolla-ansible 역할 경로에 있어야 함
+# (install.sh가 자동으로 복사)
+bash install.sh
+```
+
+### 2. globals.yml 설정
+
+`/etc/kolla/globals.yml`에 Afterglow 관련 변수 추가:
+
+```yaml
+# Afterglow 활성화
+enable_afterglow: "yes"
+enable_afterglow_frontend: "yes"
+enable_afterglow_worker: "yes"
+
+# 접근 URL (외부에서 접근 가능한 주소)
+afterglow_external_url: "https://afterglow.example.com"
+
+# 이미지 설정
+afterglow_backend_image: "ghcr.io/jung-geun/afterglow-api"
+afterglow_frontend_image: "ghcr.io/jung-geun/afterglow"
+afterglow_image_tag: "latest"
+
+# OpenStack 서비스 연결
+afterglow_service_project_name: "service"
+afterglow_admin_keystone_user: "afterglow"
+```
+
+### 3. 패스워드 설정
+
+`/etc/kolla/passwords.yml`에 추가:
+
+```yaml
+afterglow_admin_keystone_password: "<keystone-password>"
+afterglow_database_password: "<db-password>"
+afterglow_secret_key: "<random-32-char-key>"
+afterglow_redis_password: ""  # Redis 인증 미사용 시 빈 문자열
+```
+
+### 4. 배포 실행
+
+```bash
+# 배포
+kolla-ansible deploy -i /etc/kolla/inventory --tags afterglow
+
+# 설정만 반영 (재시작 없이)
+kolla-ansible reconfigure -i /etc/kolla/inventory --tags afterglow
+```
+
+### 5. 서비스 확인
+
+```bash
+# Docker 컨테이너 상태 확인
+docker ps | grep afterglow
+
+# 로그 확인
+docker logs afterglow_backend
+docker logs afterglow_frontend
+docker logs afterglow_worker
+```
+
+---
+
 ## Kubernetes 배포
 
 프로덕션 환경 배포. Kustomize 기반 base + overlay 구조로 dev/prod 환경을 분리합니다.
@@ -122,7 +205,7 @@ open http://localhost:3000
 ### 디렉토리 구조
 
 ```
-deploy/k8s/
+deploy/k8s-template/
 ├── base/              # 공통 리소스
 │   ├── namespace.yaml
 │   ├── configmap.yaml
@@ -153,10 +236,10 @@ kubectl create secret generic afterglow-secrets \
 
 ```bash
 # 개발 환경
-kubectl apply -k deploy/k8s/overlays/dev
+kubectl apply -k deploy/k8s-template/overlays/dev
 
 # 프로덕션 환경
-kubectl apply -k deploy/k8s/overlays/prod
+kubectl apply -k deploy/k8s-template/overlays/prod
 ```
 
 ### 3. 배포 확인
@@ -172,7 +255,7 @@ kubectl logs -f deployment/frontend -n afterglow
 
 ### ConfigMap 주요 설정
 
-`deploy/k8s/base/configmap.yaml` 수정:
+`deploy/k8s-template/base/configmap.yaml` 수정:
 
 ```yaml
 data:
@@ -184,7 +267,7 @@ data:
 
 ### Ingress 도메인 설정
 
-`deploy/k8s/base/ingress.yaml`:
+`deploy/k8s-template/base/ingress.yaml`:
 
 ```yaml
 spec:
@@ -222,7 +305,7 @@ spec:
 
 ```bash
 # 전체 모니터링 배포
-kubectl apply -f deploy/k8s/base/monitoring/
+kubectl apply -f deploy/k8s-template/base/monitoring/
 
 # 포트 포워딩으로 로컬 접근
 kubectl port-forward svc/grafana 3001:3000 -n afterglow
@@ -258,7 +341,7 @@ spec:
   source:
     repoURL: https://github.com/jung-geun/openstack-afterglow
     targetRevision: dev          # 감시할 브랜치
-    path: deploy/k8s/overlays/dev
+    path: deploy/k8s-template/overlays/dev
   destination:
     server: https://kubernetes.default.svc
     namespace: afterglow-dev
@@ -284,7 +367,7 @@ cert-manager를 사용하여 Let's Encrypt 인증서를 자동으로 발급합�
 
 ```bash
 # cert-manager 설치
-kubectl apply -f deploy/k8s/base/cert-manager.yaml
+kubectl apply -f deploy/k8s-template/base/cert-manager.yaml
 ```
 
 ClusterIssuer 생성:

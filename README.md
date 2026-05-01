@@ -45,13 +45,29 @@ Afterglow는 두 프로젝트의 장점을 취하고 단점을 보완합니다.
 - kubeconfig 다운로드
 - **Cloud Provider OpenStack 통합** — OCCM, Cinder CSI, Manila CSI, Keystone Auth, Octavia Ingress, Barbican KMS 플러그인 지원
 
-### Union Mount 레이어 시스템 (AI/ML 특화)
-- **Content-addressable 불변 레이어** — 각 레이어를 `sha256(diff/)` 해시로 식별, OCI 스타일
-- **Single-parent 상속 체인** — Python base → PyTorch → vLLM 등 계층적 레이어 조합
-- **CephFS via Manila 3-share 구조**: `layer-store-rw`(빌더 전용) / `layer-store-ro`(사용자 RO) / `manifest-store`
-- **overlayfs 합성**: User VM에서 조상 체인을 `lowerdir=derived:parent:...:base`로 조립, upperdir은 로컬 디스크에 생성
-- **3-lock 불변성**: `chmod -R a-w` + `chattr +i` + DB `sealed=true` — seal 후 변경 불가
-- **Builder VM 격리**: Manila RW 접근 권한을 가진 전용 VM에서 `layerbuild` CLI로 레이어 빌드 및 seal
+### OverlayFS 라이브러리 레이어 — Union Mount v2 (AI/ML 특화)
+- Manila NFS/CephFS share를 OverlayFS lower layer로 마운트
+- Python, PyTorch, vLLM, Jupyter 등 사전 빌드 레이어 공유
+- 프로젝트 간 read-only 라이브러리 공유로 스토리지 효율화
+- **Content-addressable 불변 레이어** — seal 후 digest 고정, 이후 변경 불가
+- **Fork API** — sealed 레이어에서 새 RW 레이어 파생 (single-parent 상속)
+- **Manila Snapshot 기반 백업/복원** — 레이어 스냅샷 생성·복원 및 볼륨 transfer
+- **백그라운드 빌드 워커** — 레이어 빌드를 비동기 워커로 처리
+
+### 모니터링 통합
+- Grafana JWT 발급 (`POST /api/grafana/token`) — 대시보드 embedded 접근
+- Prometheus HTTP SD (`GET /api/sd/prometheus/targets`) — 동적 타깃 디스커버리
+- Monitoring 보안 그룹 자동화 — 프로젝트별 모니터링 SG 생성·관리
+
+### Octavia Ingress
+- per-project 관리 사용자 + Application Credential 인증 모델
+- 프로젝트별 격리된 LB 권한 관리
+
+### 계정 및 부가 기능
+- 계정 설정 페이지 (`/dashboard/account`) 신설
+- Floating IP 연결 인스턴스 정보 표시
+- 인스턴스 볼륨 `delete_on_termination` 토글 UI
+- 볼륨 스냅샷 프로젝트별 필터링
 
 ### 관리자 기능
 - 프로젝트별 쿼터 관리
@@ -79,6 +95,12 @@ graph LR
     subgraph k3s 프로비저닝
         Nova --> VM["Ubuntu VM"]
         VM --> K3S["k3s 클러스터"]
+    end
+
+    subgraph CI/CD 파이프라인
+        GH["GitHub Actions"] -->|이미지 빌드 & push| Registry["Container Registry"]
+        Registry -->|kustomization digest 자동 갱신| ArgoCD["ArgoCD"]
+        ArgoCD -->|auto-sync| K8S["Kubernetes 클러스터"]
     end
 ```
 
@@ -121,6 +143,22 @@ docker compose --profile monitoring up -d
 
 ---
 
+## kolla-ansible 배포 (OpenStack 환경 내부)
+
+OpenStack 클러스터 내에서 kolla-ansible 역할로 Afterglow를 직접 배포합니다.
+
+```bash
+git clone git@github.com:jung-geun/openstack-afterglow.git
+cd openstack-afterglow/deploy/kolla
+pip install kolla-ansible
+# 인벤토리와 globals.yml 설정 후:
+bash install.sh
+```
+
+역할 파일은 `deploy/kolla/ansible/roles/afterglow/`에 위치합니다. 자세한 설정은 [배포 가이드](docs/deployment.md)를 참고하세요.
+
+---
+
 ## Kubernetes 배포
 
 ### 사전 요구사항
@@ -133,10 +171,10 @@ docker compose --profile monitoring up -d
 
 ```bash
 # 개발 환경
-kubectl apply -k deploy/k8s/overlays/dev
+kubectl apply -k deploy/k8s-template/overlays/dev
 
 # 프로덕션 환경
-kubectl apply -k deploy/k8s/overlays/prod
+kubectl apply -k deploy/k8s-template/overlays/prod
 ```
 
 시크릿을 먼저 생성합니다:
@@ -220,9 +258,10 @@ openstack-afterglow/
 │   └── src/
 │       ├── routes/    # 페이지 라우트
 │       └── lib/       # 공유 컴포넌트 / 스토어 / API
-├── deploy/k8s/        # Kubernetes 매니페스트 (Kustomize)
-│   ├── base/          # 공통 리소스
-│   └── overlays/      # dev / prod 오버레이
+├── deploy/k8s-template/ # Kubernetes 매니페스트 (Kustomize)
+│   ├── base/            # 공통 리소스
+│   └── overlays/        # dev / prod 오버레이
+├── deploy/kolla/      # kolla-ansible 배포 역할
 ├── argocd/            # ArgoCD Application 설정
 ├── monitoring/        # Prometheus + Grafana 설정
 ├── scripts/           # 유틸리티 스크립트
@@ -238,9 +277,10 @@ openstack-afterglow/
 | 문서 | 내용 |
 |---|---|
 | [아키텍처](docs/architecture.md) | 시스템 구조, VM 생성 플로우, OverlayFS |
-| [배포 가이드](docs/deployment.md) | Docker Compose / Kubernetes / ArgoCD |
+| [배포 가이드](docs/deployment.md) | Docker Compose / Kubernetes / ArgoCD / kolla-ansible |
 | [k3s 클러스터](docs/k3s.md) | k3s 프로비저닝, 노드 구성, CoreOS 전환 계획 |
 | [API 레퍼런스](docs/api-reference.md) | 전체 REST API 엔드포인트 |
+| [kolla-ansible 배포](deploy/kolla/ansible/roles/afterglow/) | OpenStack 환경 내부 kolla-ansible 역할 배포 |
 
 ---
 
@@ -271,16 +311,14 @@ npm run test:parallel # 병렬 실행
 - [x] k3s 클러스터 프로비저닝 (soft-delete 이력 보존)
 - [x] 관리자 쿼터 관리 / 이미지 substring 검색
 - [x] GitHub Actions CI/CD (멀티 플랫폼 Docker 빌드)
-- [x] Cloud Provider OpenStack 전체 플러그인 통합 (OCCM, Cinder CSI, Manila CSI, Keystone Auth, Octavia Ingress, Barbican KMS)
-
-**Union Mount 레이어 시스템 v2**
-
-- [ ] Phase 1 (MVP): content-addressable 레이어 스토리지, `layerbuild` CLI, REST API, `envmgr-use` User VM 통합
-- [ ] Phase 2 (운영): Frontend 레이어 카탈로그 UI, VM 생성 wizard 통합, Builder VM 격리 관리
-- [ ] Phase 3 (확장): Fork/Rebuild 지원, OverlayFS 상태 모니터링 에이전트, Manila Share Snapshot
-
-**기타**
-
+- [x] Union Mount 레이어 시스템 v2 (Fork API, seal/unseal, 백그라운드 빌드 워커)
+- [x] Manila Share Snapshot 기반 백업/복원 + 볼륨 transfer
+- [x] kolla-ansible 통합 배포 (`deploy/kolla/ansible/roles/afterglow/`)
+- [x] 모니터링 통합 — Grafana JWT, Prometheus HTTP SD, Monitoring SG 자동화
+- [x] Octavia Ingress per-project 관리 사용자 + App Cred 인증 모델
+- [x] ArgoCD auto-sync — 이미지 push 후 kustomization digest 자동 갱신
 - [ ] Fedora CoreOS 기반 k3s 노드 전환
+- [ ] OverlayFS 상태 모니터링 에이전트
+- [ ] Frontend — NFS 옵션 UI / 라이브러리 카탈로그
 
-전체 로드맵: [milestone.md](milestone.md) · Union Mount 설계: [union.md](union.md)
+전체 로드맵: [milestone.md](milestone.md)
