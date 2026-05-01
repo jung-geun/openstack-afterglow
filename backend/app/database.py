@@ -5,6 +5,7 @@ url이 비어있으면 DB 연결 없이 Redis 폴백으로 동작.
 """
 
 import logging
+import time
 from collections.abc import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import (
@@ -19,6 +20,9 @@ _logger = logging.getLogger(__name__)
 
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker | None = None
+
+# circuit breaker: OperationalError 발생 시 일정 시간 DB 호출 차단
+_db_unhealthy_until: float = 0.0
 
 
 class Base(DeclarativeBase):
@@ -37,6 +41,9 @@ def init_db(database_url: str, pool_size: int = 5, max_overflow: int = 10) -> No
         pool_size=pool_size,
         max_overflow=max_overflow,
         pool_pre_ping=True,
+        pool_timeout=5,
+        pool_recycle=1800,
+        connect_args={"connect_timeout": 5},
         echo=False,
     )
     _session_factory = async_sessionmaker(_engine, expire_on_commit=False, class_=AsyncSession)
@@ -44,8 +51,19 @@ def init_db(database_url: str, pool_size: int = 5, max_overflow: int = 10) -> No
 
 
 def is_db_available() -> bool:
-    """DB 연결이 초기화되어 있으면 True."""
-    return _engine is not None
+    """DB 연결이 초기화되어 있고 circuit breaker가 열리지 않았으면 True."""
+    if _engine is None:
+        return False
+    if time.time() < _db_unhealthy_until:
+        return False
+    return True
+
+
+def mark_db_unhealthy(seconds: int = 30) -> None:
+    """OperationalError 발생 시 호출 — 지정 시간 동안 is_db_available() False 반환."""
+    global _db_unhealthy_until
+    _db_unhealthy_until = time.time() + seconds
+    _logger.warning("DB circuit breaker 활성화: %d초 동안 DB 호출 차단", seconds)
 
 
 async def create_tables() -> None:
@@ -109,6 +127,7 @@ async def create_tables() -> None:
             ("os_type", "VARCHAR(10) NOT NULL DEFAULT 'ubuntu'"),
             ("plugin_status", "JSON DEFAULT NULL"),
             ("secret_cloud_config_status", "VARCHAR(20) DEFAULT NULL"),
+            ("app_credential_id", "VARCHAR(64) DEFAULT NULL"),
         ]:
             try:
                 await conn.exec_driver_sql(f"ALTER TABLE k3s_clusters ADD COLUMN {col} {col_def}")

@@ -5,6 +5,7 @@ interface AutoRefreshOptions {
 	defaultActive?: boolean;
 	defaultInterval?: number;
 	intervalOptions?: number[];
+	invokeOnMount?: boolean;
 }
 
 export function createAutoRefresh(fn: () => void | Promise<void>, options: AutoRefreshOptions) {
@@ -12,7 +13,8 @@ export function createAutoRefresh(fn: () => void | Promise<void>, options: AutoR
 		storageKey,
 		defaultActive = true,
 		defaultInterval = 30,
-		intervalOptions = [10, 15, 30, 60]
+		intervalOptions = [10, 15, 30, 60],
+		invokeOnMount = true
 	} = options;
 
 	const state = $state({
@@ -68,7 +70,7 @@ export function createAutoRefresh(fn: () => void | Promise<void>, options: AutoR
 		}
 
 		if (!document.hidden) {
-			untrack(() => fn());
+			if (invokeOnMount) untrack(() => fn());
 			start();
 		}
 

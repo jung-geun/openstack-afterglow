@@ -70,6 +70,8 @@ class K3sCluster(Base):
     )  # {"occm": {"status": "deployed", "error": ""}}
     secret_cloud_config_status: Mapped[str | None] = mapped_column(VARCHAR(20), nullable=True)
     os_type: Mapped[str] = mapped_column(VARCHAR(10), nullable=False, default="ubuntu")
+    # Octavia Ingress Application Credential (per-cluster, managed by per-project manager user)
+    app_credential_id: Mapped[str | None] = mapped_column(VARCHAR(64), nullable=True)
 
     # 타임스탬프
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)

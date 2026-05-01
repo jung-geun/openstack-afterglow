@@ -33,7 +33,7 @@ class ManilaCsiPlugin:
         """Manila CSI는 별도 Secret 사용 — cloud.conf에 추가 섹션 없음."""
         return ""
 
-    def generate_manifests(self, cluster_name: str, project_id: str, settings: Settings) -> str:
+    def generate_manifests(self, cluster_name: str, project_id: str, settings: Settings, **kwargs) -> str:
         """Manila CSI + NFS CSI 드라이버 매니페스트 반환."""
         manila = _jinja.get_template("k3s_plugins/manila_csi/manifests.yaml.j2").render(
             manila_csi_image=settings.k3s_manila_csi_image,

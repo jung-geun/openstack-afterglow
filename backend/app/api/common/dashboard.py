@@ -10,10 +10,11 @@ import re
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.exc import OperationalError
 
 from app.api.deps import get_os_conn
 from app.config import get_settings
-from app.database import is_db_available
+from app.database import is_db_available, mark_db_unhealthy
 from app.services import cinder, nova
 from app.services import manila as manila_svc
 from app.services import neutron as neutron_svc
@@ -187,20 +188,26 @@ async def get_project_quotas(
         try:
             from app.services.gpu_quota import get_effective_gpu_quotas, get_project_gpu_usage
 
-            effective, usage = await asyncio.gather(
+            effective_result, usage_result = await asyncio.gather(
                 get_effective_gpu_quotas(project_id),
                 get_project_gpu_usage(conn, project_id),
+                return_exceptions=True,
             )
-            for gpu_type, limit in effective.items():
-                in_use = usage.get(gpu_type, 0)
-                gpu_quota.append(
-                    {
-                        "gpu_type": gpu_type,
-                        "limit": limit,
-                        "in_use": in_use,
-                        "available": (limit - in_use) if limit >= 0 else -1,
-                    }
-                )
+            if isinstance(effective_result, Exception) or isinstance(usage_result, Exception):
+                _logger.warning("GPU quota 조회 부분 실패: effective=%r usage=%r", effective_result, usage_result)
+                if isinstance(effective_result, OperationalError) or isinstance(usage_result, OperationalError):
+                    mark_db_unhealthy()
+            else:
+                for gpu_type, limit in effective_result.items():
+                    in_use = usage_result.get(gpu_type, 0)
+                    gpu_quota.append(
+                        {
+                            "gpu_type": gpu_type,
+                            "limit": limit,
+                            "in_use": in_use,
+                            "available": (limit - in_use) if limit >= 0 else -1,
+                        }
+                    )
         except Exception:
             _logger.warning("GPU quota 조회 실패", exc_info=True)
 

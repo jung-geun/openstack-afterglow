@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import delete, select
 
-from app.database import get_session_factory
+from app.database import get_session_factory, is_db_available
 
 _logger = logging.getLogger(__name__)
 
@@ -66,6 +66,8 @@ def _parse_alias_counts(extra_specs: dict) -> dict[str, int]:
 
 async def get_project_gpu_quotas(project_id: str) -> list[dict]:
     """프로젝트의 GPU quota 목록 반환."""
+    if not is_db_available():
+        return []
     factory = get_session_factory()
     if not factory:
         return []
@@ -162,6 +164,8 @@ async def get_effective_gpu_quotas(project_id: str) -> dict[str, int]:
 
     반환: {alias: limit}
     """
+    if not is_db_available():
+        return {}
     project_quotas = await get_project_gpu_quotas(project_id)
     default_quotas = await get_project_gpu_quotas(DEFAULT_PROJECT_ID)
 

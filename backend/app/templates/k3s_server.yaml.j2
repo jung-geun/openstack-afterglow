@@ -75,6 +75,18 @@ write_files:
       fi
       log "kube-apiserver is ready"
 
+      # k3s 재시작 루프 감지 — NRestarts 카운터로 비정상 재시작 여부 판단
+      K3S_RESTARTS=$(systemctl show k3s.service -p NRestarts --value 2>/dev/null || echo "0")
+      RESTART_THRESHOLD=5
+      if [ "${K3S_RESTARTS}" -ge "${RESTART_THRESHOLD}" ]; then
+        log "ERROR: k3s가 ${K3S_RESTARTS}회 재시작됨 — 재시작 루프 감지 (임계: ${RESTART_THRESHOLD})"
+        curl -sf -X POST "${CALLBACK_URL}/api/k3s/callback" \
+          -H "Content-Type: application/json" \
+          -d "{\"token\": \"${CALLBACK_TOKEN}\", \"success\": false, \"error\": \"k3s restart loop detected (${K3S_RESTARTS} restarts, threshold=${RESTART_THRESHOLD})\"}" || true
+        exit 1
+      fi
+      log "k3s restart count: ${K3S_RESTARTS} (threshold: ${RESTART_THRESHOLD}) — OK"
+
       log "Waiting for node-token (up to 5 min)..."
       for i in $(seq 1 60); do
         if [ -f /var/lib/rancher/k3s/server/node-token ]; then

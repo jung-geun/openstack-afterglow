@@ -79,6 +79,8 @@ def _load_toml() -> dict:
     flat["os_manila_share_network_id"] = ost.get("manila_share_network_id", "")
     flat["os_manila_share_type"] = ost.get("manila_share_type", "cephfs")
     flat["os_manila_nfs_share_type"] = ost.get("manila_nfs_share_type", "nfstype")
+    flat["manila_nfs_root_squash"] = ost.get("manila_nfs_root_squash", True)
+    flat["manila_nfs_sec_flavor"] = ost.get("manila_nfs_sec_flavor", "sys")
     flat["ceph_monitors"] = ost.get("ceph_monitors", "")
     flat["os_service_project_id"] = ost.get("service_project_id", "")
 
@@ -243,6 +245,8 @@ class Settings(BaseSettings):
     os_manila_share_network_id: str = ""
     os_manila_share_type: str = "cephfs"
     os_manila_nfs_share_type: str = "nfstype"
+    manila_nfs_root_squash: bool = True  # NFS access rule root_squash 강제 (보안 기본값)
+    manila_nfs_sec_flavor: str = "sys"  # NFS 인증 flavor: "sys"(기본) | "krb5"(Kerberos)
 
     # Ceph 모니터 (cloud-init CephFS 마운트용)
     ceph_monitors: str = ""
@@ -323,6 +327,14 @@ class Settings(BaseSettings):
     union_cephx_rotate_hours: int = 24  # CephX 키 자동 회전 주기 (0이면 비활성)
     union_auto_egress_sg_enabled: bool = True  # Union VM에 egress SG 자동 attach
     union_egress_sg_name: str = "union-egress-default"  # 자동 생성/재사용할 SG 이름
+
+    # 모니터링 (Prometheus + Grafana — Option A, label-based 프로젝트 격리)
+    monitoring_auto_sg_enabled: bool = True  # 프로젝트/인스턴스 생성 시 monitoring SG 자동 attach
+    monitoring_sg_name: str = "monitoring"  # 자동 생성/재사용할 SG 이름
+    monitoring_scrape_cidr: str = ""  # Prometheus scrape CIDR (예: 10.0.0.0/8). 미설정 시 ValueError
+    monitoring_sd_token: str = ""  # /api/sd/prometheus/targets 인증 토큰
+    grafana_jwt_secret: str = ""  # Grafana auth.jwt 서명 시크릿
+    grafana_base_url: str = ""  # Grafana 외부 URL (예: https://grafana.example.com)
 
     # Notion 연동
     notion_config_encryption_key: str = ""  # 미설정 시 k3s_kubeconfig_encryption_key 재사용

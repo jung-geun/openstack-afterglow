@@ -1,0 +1,8 @@
+---
+- name: Destroy afterglow containers
+  gather_facts: false
+  hosts:
+    - afterglow
+  serial: "{{ kolla_serial | default('0') }}"
+  roles:
+    - { role: afterglow, tags: destroy }

@@ -9,6 +9,8 @@
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import StatTile from '$lib/components/ui/StatTile.svelte';
 
+	const PREVIEW_LIMIT = 5;
+
 	interface InstanceItem {
 		id: string;
 		name: string;
@@ -75,8 +77,7 @@
 	async function load(opts?: { refresh?: boolean }) {
 		error = '';
 		try {
-			const result = await api.get<UserDashboardSummary>('/api/user-dashboard/summary', token, projectId, opts);
-			data = result;
+			data = await api.get<UserDashboardSummary>('/api/user-dashboard/summary', token, projectId, opts);
 		} catch (e) {
 			error = e instanceof ApiError ? e.message : '데이터를 불러올 수 없습니다';
 		} finally {
@@ -118,6 +119,24 @@
 </script>
 
 <div class="p-4 md:p-8 max-w-6xl">
+	<div class="flex items-center gap-3 mb-4">
+		<a
+			href="/dashboard"
+			class="inline-flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors px-2.5 py-1.5 rounded-md hover:bg-gray-800"
+		>
+			<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+			대시보드로 돌아가기
+		</a>
+		<span class="text-gray-700">·</span>
+		<a
+			href="/dashboard/account"
+			class="inline-flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 transition-colors px-2.5 py-1.5 rounded-md hover:bg-blue-500/10"
+		>
+			계정 설정
+			<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+		</a>
+	</div>
+
 	<PageHeader breadcrumb="" title="내 리소스">
 		{#snippet actions()}
 			<AutoRefreshControl
@@ -147,7 +166,7 @@
 		</div>
 	{:else if data}
 		<!-- 전체 사용량 요약 -->
-		<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3.5 mb-5">
+		<div class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3.5 mb-5">
 			<StatTile label="인스턴스" value={data.totals.instances} unit="개" accent="blue">
 				{#snippet icon()}
 					<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2"/></svg>
@@ -257,8 +276,8 @@
 					<span class="ml-auto text-xs text-gray-500">{allInstances.length}개</span>
 				</div>
 				<div class="flex flex-col">
-					{#each allInstances as inst, i (inst.id)}
-						<div class="flex items-center gap-3 py-2.5 {i < allInstances.length - 1 ? 'border-b border-gray-800' : ''}">
+					{#each allInstances.slice(0, PREVIEW_LIMIT) as inst, i (inst.id)}
+						<div class="flex items-center gap-3 py-2.5 border-b border-gray-800 last:border-b-0">
 							<div class="flex-1 min-w-0">
 								<div class="text-white text-[13px] font-medium truncate">{inst.name || inst.id.slice(0, 8)}</div>
 								<div class="text-[11px] text-gray-500 mt-0.5 font-mono truncate">{inst.flavor_name || '—'} · {inst.project}</div>
@@ -268,6 +287,10 @@
 					{/each}
 					{#if allInstances.length === 0}
 						<div class="text-gray-600 text-xs py-3 text-center">없음</div>
+					{:else if allInstances.length > PREVIEW_LIMIT}
+						<a href="/dashboard/instances" class="block text-center text-[11px] text-blue-400 hover:text-blue-300 transition-colors pt-2.5">
+							+{allInstances.length - PREVIEW_LIMIT}개 더 보기 →
+						</a>
 					{/if}
 				</div>
 			</div>
@@ -284,8 +307,8 @@
 					<span class="ml-auto text-xs text-gray-500">{allVolumes.length}개</span>
 				</div>
 				<div class="flex flex-col">
-					{#each allVolumes as vol, i (vol.id)}
-						<div class="flex items-center gap-3 py-2.5 {i < allVolumes.length - 1 ? 'border-b border-gray-800' : ''}">
+					{#each allVolumes.slice(0, PREVIEW_LIMIT) as vol, i (vol.id)}
+						<div class="flex items-center gap-3 py-2.5 border-b border-gray-800 last:border-b-0">
 							<div class="flex-1 min-w-0">
 								<div class="text-white text-[13px] font-medium truncate">{vol.name || vol.id.slice(0, 8)}</div>
 								<div class="text-[11px] text-gray-500 mt-0.5 font-mono truncate">{vol.size} GB · {vol.volume_type || '—'}</div>
@@ -295,26 +318,11 @@
 					{/each}
 					{#if allVolumes.length === 0}
 						<div class="text-gray-600 text-xs py-3 text-center">없음</div>
+					{:else if allVolumes.length > PREVIEW_LIMIT}
+						<a href="/dashboard/volumes" class="block text-center text-[11px] text-cyan-400 hover:text-cyan-300 transition-colors pt-2.5">
+							+{allVolumes.length - PREVIEW_LIMIT}개 더 보기 →
+						</a>
 					{/if}
-				</div>
-			</div>
-
-			<!-- 키페어 카드 -->
-			<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
-				<div class="flex items-center gap-2.5 mb-3.5">
-					<div class="w-10 h-10 rounded-[10px] bg-violet-500/15 border border-violet-500/30 text-violet-400 flex items-center justify-center shrink-0">
-						<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-						</svg>
-					</div>
-					<div class="text-white font-semibold text-sm">키페어</div>
-					<span class="ml-auto text-xs text-gray-500">{data.totals.instances > 0 ? '—' : '0'}개</span>
-				</div>
-				<div class="flex flex-col items-center justify-center py-6">
-					<div class="text-[11px] text-gray-600 text-center leading-relaxed">
-						키페어 목록은<br />
-						<a href="/dashboard/compute/keypairs" class="text-violet-400 hover:text-violet-300 transition-colors">컴퓨트 → 키페어</a>에서 확인하세요
-					</div>
 				</div>
 			</div>
 

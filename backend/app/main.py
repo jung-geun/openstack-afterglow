@@ -111,8 +111,10 @@ _mark("fastapi")
 # ---------------------------------------------------------------------------
 from app.api.common import (
     dashboard_router,
+    grafana_auth_router,
     libraries_router,
     metrics_router,
+    sd_targets_router,
     site_router,
     user_dashboard_router,
 )
@@ -385,6 +387,8 @@ if _svc_cfg.service_swift_enabled:
 app.include_router(dashboard_router, prefix="/api/dashboard", tags=["dashboard"])
 app.include_router(metrics_router, prefix="/api/metrics", tags=["metrics"])
 app.include_router(libraries_router, prefix="/api/libraries", tags=["libraries"])
+app.include_router(sd_targets_router, prefix="/api/sd", tags=["sd-targets"])
+app.include_router(grafana_auth_router, prefix="/api/grafana", tags=["grafana-auth"])
 app.include_router(site_router, prefix="/api/site-config", tags=["site"])
 app.include_router(user_dashboard_router, prefix="/api/user-dashboard", tags=["user-dashboard"])
 
@@ -666,6 +670,10 @@ async def start_background_workers():
     asyncio.create_task(_auto_backup_loop())
     if _svc_cfg.service_k3s_enabled:
         asyncio.create_task(_k3s_cleanup_loop())
+
+    from app.services.library_builder import _build_worker
+
+    asyncio.create_task(_build_worker())
 
 
 @app.on_event("shutdown")

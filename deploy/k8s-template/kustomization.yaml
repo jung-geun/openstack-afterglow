@@ -1,0 +1,27 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# 클러스터 레벨 인프라만 포함 (네임스페이스 미지정)
+# 앱 배포: kubectl apply -k overlays/dev  또는  overlays/prod
+
+resources:
+  # 1. cert-manager 설치 (CRD + 컨트롤러) — ArgoCD sync-wave 0
+  - https://github.com/cert-manager/cert-manager/releases/download/v1.17.2/cert-manager.yaml
+  # 2. ClusterIssuer — ArgoCD sync-wave 1 (cert-manager 준비 후 적용)
+  # - cert-manager.yaml
+  # 3. Traefik 타임아웃 설정 (kube-system)
+  # - traefik-config.yaml
+  # 4. 모니터링
+  - monitoring/
+
+patches:
+  # ArgoCD 사용 시: cert-manager가 완전히 준비된 뒤 ClusterIssuer 적용
+  - patch: |-
+      apiVersion: cert-manager.io/v1
+      kind: ClusterIssuer
+      metadata:
+        name: placeholder
+        annotations:
+          argocd.argoproj.io/sync-wave: "1"
+    target:
+      kind: ClusterIssuer

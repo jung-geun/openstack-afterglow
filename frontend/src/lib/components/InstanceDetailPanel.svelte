@@ -444,6 +444,26 @@
 		}
 	}
 
+	async function setDeleteOnTermination(volumeId: string, next: boolean) {
+		if (!instance) return;
+		const verb = next ? '활성화' : '비활성화';
+		if (!confirm(`이 볼륨의 "인스턴스 삭제 시 자동 삭제" 옵션을 ${verb}하시겠습니까?`)) return;
+		actioning = 'dot-' + volumeId;
+		try {
+			await api.patch(
+				`/api/instances/${instance.id}/volumes/${volumeId}`,
+				{ delete_on_termination: next },
+				$auth.token ?? undefined,
+				$auth.projectId ?? undefined
+			);
+			await fetchInstance(instance.id, { silent: true });
+		} catch (e) {
+			alert('변경 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+		} finally {
+			actioning = null;
+		}
+	}
+
 	async function attachInterface() {
 		if (!instance || !selectedNetId) return;
 		actioning = 'attach-iface';
@@ -1260,11 +1280,22 @@
 								{#if vol.status}
 									<span class="text-xs {vol.status === 'in-use' ? 'text-green-400' : 'text-gray-400'}">{vol.status}</span>
 								{/if}
-								{#if vol.delete_on_termination}
-									<span class="text-[10px] text-red-300 bg-red-900/30 px-1.5 py-0.5 rounded">인스턴스 삭제 시 자동 삭제</span>
-								{:else}
-									<span class="text-[10px] text-gray-400 bg-gray-800 px-1.5 py-0.5 rounded">유지</span>
-								{/if}
+								<button
+									type="button"
+									onclick={() => setDeleteOnTermination(vol.volume_id, !vol.delete_on_termination)}
+									disabled={actioning === 'dot-' + vol.volume_id}
+									title="클릭해서 토글"
+									class="text-[10px] px-1.5 py-0.5 rounded transition-colors disabled:opacity-50 cursor-pointer
+										{vol.delete_on_termination
+											? 'text-red-300 bg-red-900/30 hover:bg-red-900/50 border border-red-800/50'
+											: 'text-gray-400 bg-gray-800 hover:bg-gray-700 border border-gray-700'}"
+								>
+									{actioning === 'dot-' + vol.volume_id
+										? '변경 중...'
+										: vol.delete_on_termination
+											? '인스턴스 삭제 시 자동 삭제'
+											: '유지'}
+								</button>
 							</div>
 							<button
 								onclick={() => detachVolume(vol.volume_id)}

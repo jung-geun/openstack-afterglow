@@ -199,6 +199,9 @@ def test_manila_csi_no_cloud_conf_sections():
 # Octavia Ingress 플러그인
 # ---------------------------------------------------------------------------
 
+_FAKE_APP_CRED = {"id": "appcred-id-123", "secret": "appcred-secret-xyz", "user_id": "user-abc"}
+_FAKE_SUBNET_ID = "subnet-abc-123"
+
 
 def test_octavia_ingress_disabled_by_default():
     from app.services.k3s_plugins.octavia_ingress import OctaviaIngressPlugin
@@ -207,29 +210,72 @@ def test_octavia_ingress_disabled_by_default():
     assert OctaviaIngressPlugin().should_deploy(s) is False
 
 
-def test_octavia_ingress_requires_subnet_id():
+def test_octavia_ingress_deploys_without_subnet_id():
+    """subnet_id 미설정이어도 enabled+auth이면 should_deploy는 True (subnet은 런타임 도출)."""
     from app.services.k3s_plugins.octavia_ingress import OctaviaIngressPlugin
 
     s = _base_settings(k3s_octavia_ingress_enabled=True, k3s_octavia_ingress_subnet_id="")
-    assert OctaviaIngressPlugin().should_deploy(s) is False
+    assert OctaviaIngressPlugin().should_deploy(s) is True
 
 
 def test_octavia_ingress_should_deploy_true():
     from app.services.k3s_plugins.octavia_ingress import OctaviaIngressPlugin
 
-    s = _base_settings(k3s_octavia_ingress_enabled=True, k3s_octavia_ingress_subnet_id="subnet-123")
+    s = _base_settings(k3s_octavia_ingress_enabled=True)
     assert OctaviaIngressPlugin().should_deploy(s) is True
 
 
 def test_octavia_ingress_manifests_valid_yaml():
     from app.services.k3s_plugins.octavia_ingress import OctaviaIngressPlugin
 
-    s = _base_settings(k3s_octavia_ingress_enabled=True, k3s_octavia_ingress_subnet_id="subnet-123")
-    manifests = OctaviaIngressPlugin().generate_manifests("test-cluster", "proj-1", s)
+    s = _base_settings(k3s_octavia_ingress_enabled=True)
+    manifests = OctaviaIngressPlugin().generate_manifests(
+        "test-cluster", "proj-1", s, subnet_id=_FAKE_SUBNET_ID, app_credential=_FAKE_APP_CRED
+    )
     docs = [d for d in yaml.safe_load_all(manifests) if d]
     kinds = {d["kind"] for d in docs}
     assert "StatefulSet" in kinds
     assert "IngressClass" in kinds
+
+
+def test_octavia_ingress_manifests_uses_app_credential():
+    """ConfigMap에 application-credential-id/secret이 있고, username/password는 없어야 한다."""
+    from app.services.k3s_plugins.octavia_ingress import OctaviaIngressPlugin
+
+    s = _base_settings(k3s_octavia_ingress_enabled=True)
+    manifests = OctaviaIngressPlugin().generate_manifests(
+        "test-cluster", "proj-1", s, subnet_id=_FAKE_SUBNET_ID, app_credential=_FAKE_APP_CRED
+    )
+    assert "application-credential-id: appcred-id-123" in manifests
+    assert "application-credential-secret: appcred-secret-xyz" in manifests
+    assert "username:" not in manifests
+    assert "password:" not in manifests
+
+
+def test_octavia_ingress_manifests_missing_subnet_raises():
+    """subnet_id 미전달 시 ValueError."""
+    import pytest
+
+    from app.services.k3s_plugins.octavia_ingress import OctaviaIngressPlugin
+
+    s = _base_settings(k3s_octavia_ingress_enabled=True)
+    with pytest.raises(ValueError, match="subnet_id"):
+        OctaviaIngressPlugin().generate_manifests(
+            "test-cluster", "proj-1", s, subnet_id="", app_credential=_FAKE_APP_CRED
+        )
+
+
+def test_octavia_ingress_manifests_missing_app_cred_raises():
+    """app_credential 미전달 시 ValueError."""
+    import pytest
+
+    from app.services.k3s_plugins.octavia_ingress import OctaviaIngressPlugin
+
+    s = _base_settings(k3s_octavia_ingress_enabled=True)
+    with pytest.raises(ValueError, match="app_credential"):
+        OctaviaIngressPlugin().generate_manifests(
+            "test-cluster", "proj-1", s, subnet_id=_FAKE_SUBNET_ID, app_credential={}
+        )
 
 
 # ---------------------------------------------------------------------------

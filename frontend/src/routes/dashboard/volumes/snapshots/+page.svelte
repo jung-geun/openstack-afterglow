@@ -17,6 +17,7 @@
     size: number;
     description: string;
     created_at: string | null;
+    project_id?: string;
   }
 
   interface Volume {

@@ -1,0 +1,4 @@
+---
+afterglow_manila_microversion: "2.65"
+afterglow_config_dir: "/etc/kolla/afterglow"
+afterglow_haproxy_services_d: "/etc/kolla/haproxy/services.d"

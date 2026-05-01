@@ -491,8 +491,8 @@ Step 5: 요약 & 배포
   - [x] `scripts/build_library_shares.py` 확장:
     - [x] NFS share 빌드 지원 (`--proto NFS` 옵션)
     - [x] 의존성 메타데이터 자동 기록
-    - [ ] 빌드 완료 후 자동 검증 (마운트 테스트)
-  - [ ] 백그라운드 빌드 워커 (선택): Celery/async 작업으로 비동기 빌드
+    - [x] 빌드 완료 후 자동 검증 (마운트 테스트) — probe VM (`_verify_layer_accessible`) VERIFY_OK/FAIL 판별 후 status=error 전환
+  - [x] 백그라운드 빌드 워커: asyncio.Queue 기반 큐(`queue_build`/`_build_worker`/`get_build_queue_status`) + main.py 시작 시 워커 자동 실행
 
 - [x] 3.5 Frontend — Admin 패키지 관리 UI
   - [x] `routes/admin/libraries/+page.svelte` — 라이브러리 카탈로그 관리 페이지 (카드 그리드)
@@ -519,7 +519,7 @@ Step 5: 요약 & 배포
     - [x] `accept_volume_transfer()` — 볼륨 이전 수락
     - [x] `list_volume_transfers()` — 이전 목록 조회
     - [x] `delete_volume_transfer()` — 이전 취소
-  - [ ] VM에 연결된 볼륨은 마이그레이션 전 detach 필요
+  - [x] VM에 연결된 볼륨은 마이그레이션 전 detach 필요 — `POST /api/volumes/{id}/transfer` 자동 detach + `cinder.wait_volume_available` 대기 + transfer 실패 시 rollback attach 구현. 단위테스트 9건(`test_volume_transfer.py`)
 
 - [x] 4.2 API 엔드포인트
   - [x] `POST /api/volumes/{id}/transfer` — 이전 생성
@@ -561,7 +561,7 @@ Step 5: 요약 & 배포
   - [ ] 라이선스/동시 접속 제한 검토 (상용 소프트웨어)
 
 - [x] 5.5 보안 강화
-  - [ ] NFS export 옵션 보안: `root_squash`, `sec=sys` vs `sec=krb5`
+  - [x] NFS export 옵션 보안: `root_squash`, `sec=sys` vs `sec=krb5` — `_build_nfs_access_metadata` + `create_access_rule(metadata=)` + `ensure_nfs_access_rule(root_squash, sec_flavor)` + 설정값 2개(`manila_nfs_root_squash`, `manila_nfs_sec_flavor`) + 단위테스트 13건
   - [x] CephX 키 로테이션 지원 — `rotate_cephx_access_rule` + `POST /api/instances/{id}/credentials/rotate-cephx` + systemd 타이머
   - [x] VM 간 데이터 격리 검증 (다른 프로젝트의 share 접근 차단) — `union_project_id` 메타 + list/get 필터
   - [x] NFS 방화벽 규칙 자동 관리 (Security Group) — `ensure_union_egress_sg` + instances.py auto-attach
@@ -774,7 +774,7 @@ Step 5: 요약 & 배포
 - [x] **OCCM 이전**: `k3s_plugins/occm.py`로 로직 이전, `k3s_occm.py` 위임 래퍼로 유지 (하위호환)
 - [x] **Cinder CSI**: K8s PVC → Cinder 블록 스토리지 자동 프로비저닝. `k3s_plugins/cinder_csi.py` + `templates/k3s_plugins/cinder_csi/manifests.yaml.j2`
 - [x] **Manila CSI**: ReadWriteMany PVC → Manila NFS share. NFS CSI 드라이버 포함 배포. Union OverlayFS 시너지
-- [x] **Octavia Ingress Controller**: K3s Traefik과 공존, `ingressClassName: openstack`으로 분리
+- [x] **Octavia Ingress Controller**: K3s Traefik과 공존, `ingressClassName: openstack`으로 분리. **Per-project 관리 사용자 + Application Credential** 모델로 인증 일원화. subnet 클러스터 네트워크에서 자동 도출. 삭제 시 `kube_ingress_*` LB 자동 정리 + App Cred 회수.
 - [x] **Keystone Webhook Auth**: TLS self-signed 인증서 생성 + K3s API 서버 webhook 설정. `cryptography` 라이브러리 사용
 - [x] **Barbican KMS**: K8s Secret at-rest 암호화. `--encryption-provider-config` API 서버 인자 + Unix socket DaemonSet
 - [x] DB 마이그레이션: `plugins_enabled JSON` 컬럼 추가 (`004_k3s_plugins.sql`)
@@ -835,7 +835,7 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 **향후 작업**:
 - [ ] Barbican KMS host static pod 재설계 (부팅 전 소켓 준비, apiserver 재시작 트리거)
 - [ ] Keystone Auth hostNetwork static pod 재설계 (webhook URL을 127.0.0.1:port로 변경)
-- [ ] callback.sh에서 k3s 재시작 루프 감지 시 success=false 보고
+- [x] callback.sh에서 k3s 재시작 루프 감지 시 success=false 보고
 
 ---
 
@@ -903,7 +903,7 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 
 - [x] Manila access rule 자동 관리: Builder VM RW 추가/제거 API (`POST /api/union/builder/access`, `DELETE /api/union/builder/access/{id}`)
 - [x] 레이어 프로젝트 격리: `project_id` 컬럼 + `list_layers()` 필터링 (NULL=공유, 값=프로젝트 전용, admin=전체)
-- [ ] seal 후 RW 접근 차단 검증
+- [x] seal 후 RW 접근 차단 검증
 
 **운영 도구**
 
@@ -920,11 +920,11 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 
 ### 9.3 Phase 3 — 확장 (목표: Phase 2 완료 후)
 
-- [ ] **Fork 지원**: `POST /api/union/layers/{id}/fork` — sealed 레이어에서 새 RW 레이어 파생
-- [ ] **Rebuild**: 동일 부모 + 다른 내용 → 새 hash 신규 레이어 (overwrite 금지 정책 유지)
+- [x] **Fork 지원**: `POST /api/union/layers/{id}/fork` — sealed 레이어에서 새 RW 레이어 파생
+- [x] **Rebuild**: 동일 부모 + 다른 내용 → 새 hash 신규 레이어 (overwrite 금지 정책 유지)
 - [ ] **멀티 상속(실험)**: lowerdir에 여러 부모 지원 — 다이아몬드 충돌 해결 정책 필요
 - [x] **OverlayFS 상태 모니터링 에이전트**: User VM에서 마운트 상태 주기적 보고
-- [ ] **Manila Share Snapshot 관리**: 레이어 백업/복원
+- [x] **Manila Share Snapshot 관리**: 레이어 백업/복원
 
 ---
 
@@ -1009,11 +1009,12 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 - [x] `backend/app/services/manila.py` — `rotate_cephx_access_rule()` 헬퍼
 - [x] `backend/app/api/compute/instance_health.py` — `POST /api/instances/{id}/credentials/rotate-cephx` 추가 (Bearer 토큰 인증)
 - [x] `scripts/envmgr-rotate-key.sh` + systemd `union-rotate-key.timer` (신규, cloudinit_base.yaml.j2 통해 주입)
+  - [x] **버그 수정**: `write_files`에 스크립트 미주입 → `envmgr_rotate_key.sh.j2` 템플릿 추가 + `cloudinit.py` 렌더링 + `cloudinit_base.yaml.j2` 주입 완료
 - [x] `backend/app/api/union/layers.py` — `POST /api/union/user/access`, `DELETE /api/union/user/access/{access_id}` (3-share user wiring)
 - [x] `backend/app/services/cloudinit.py` — `union_ro_share_export` 파라미터 + write_files 주입 (`LAYER_STORE_RO_EXPORT`)
 - [x] `backend/app/config.py` — `union_cephx_rotate_hours: int = 24` 추가
 - [x] `backend/tests/test_manila_rotate.py` — `rotate_cephx_access_rule` 단위 테스트 3건
-- [x] `backend/tests/test_cloudinit.py` — `nosuid,nodev,noexec` + `LAYER_STORE_RO_EXPORT` 단위 테스트 2건
+- [x] `backend/tests/test_cloudinit.py` — `nosuid,nodev,noexec` + `LAYER_STORE_RO_EXPORT` 단위 테스트 2건 + rotate-key 주입 테스트 4건
 - [x] `backend/tests/test_endpoint_inventory.py` — rotate-cephx 엔드포인트 whitelist 추가
 
 ### 11.4 격리 검증 + SG 자동화 (Week 4) ✅
@@ -1108,21 +1109,21 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 
 11.4의 `ensure_union_egress_sg` (egress 6 rule)를 직접 모방. 새 헬퍼는 ingress 방향 + 노출 범위가 핵심 차이.
 
-- [ ] `backend/app/services/neutron.py` — `ensure_monitoring_ingress_sg(conn, project_id, sg_name, scrape_cidr)` idempotent 헬퍼 추가
+- [x] `backend/app/services/neutron.py` — `ensure_monitoring_ingress_sg(conn, project_id, sg_name, scrape_cidr)` idempotent 헬퍼 추가
   - rule: `ingress tcp 9100/9100 remote_ip_prefix=<scrape_cidr>` + `ingress tcp 9400/9400 remote_ip_prefix=<scrape_cidr>`
   - `scrape_cidr`은 Prometheus 스크래퍼 IP/서브넷에 한정 (전체 0.0.0.0/0 금지)
   - 11.4 `_UNION_EGRESS_RULES` 상수 옆에 `_MONITORING_INGRESS_RULES` 추가
-- [ ] `backend/app/config.py` — 신규 설정값:
+- [x] `backend/app/config.py` — 신규 설정값:
   - `monitoring_auto_sg_enabled: bool = True`
   - `monitoring_sg_name: str = "monitoring"`
   - `monitoring_scrape_cidr: str` (필수, env로 주입)
-- [ ] `backend/app/api/identity/admin_identity.py:create_project` — 프로젝트 생성 후 `ensure_monitoring_ingress_sg` 호출하여 신규 프로젝트마다 monitoring SG 자동 생성
-- [ ] `backend/app/api/compute/instances.py:create_instance` + `create_instance_async` — 11.4 egress SG 자동 attach 패턴 옆에 monitoring SG attach 추가 (`req.security_groups`에 `monitoring_sg_name` append, 중복 방지)
-- [ ] `backend/app/api/admin/projects.py` (또는 신규 utility 라우터) — `POST /api/admin/projects/{id}/sync-monitoring-sg` 엔드포인트: 기존 프로젝트에 일괄 적용 (관리자 전용)
+- [x] `backend/app/api/identity/admin_identity.py:create_project` — 프로젝트 생성 후 `ensure_monitoring_ingress_sg` 호출하여 신규 프로젝트마다 monitoring SG 자동 생성
+- [x] `backend/app/api/compute/instances.py:create_instance` + `create_instance_async` — 11.4 egress SG 자동 attach 패턴 옆에 monitoring SG attach 추가 (`req.security_groups`에 `monitoring_sg_name` append, 중복 방지)
+- [x] `backend/app/api/admin/projects.py` (또는 신규 utility 라우터) — `POST /api/admin/projects/{id}/sync-monitoring-sg` 엔드포인트: 기존 프로젝트에 일괄 적용 (관리자 전용)
 - [ ] `frontend/src/lib/components/VmCreatePanel.svelte` — SG 단일 select 옆에 "monitoring SG 자동 포함됨" 안내 배지 (auto-attach 동작 가시화)
-- [ ] `backend/tests/test_neutron.py` — `ensure_monitoring_ingress_sg` 3건 (미존재 생성, idempotent, scrape_cidr 미설정 시 ValueError)
-- [ ] `backend/tests/test_admin_identity.py` — 프로젝트 생성 시 `ensure_monitoring_ingress_sg` 호출 검증 1건
-- [ ] `backend/tests/test_instances.py` — monitoring SG auto-attach 2건 (활성/비활성)
+- [x] `backend/tests/test_neutron.py` — `ensure_monitoring_ingress_sg` 5건 (미존재 생성, idempotent, 부분 추가, scrape_cidr 미설정 시 ValueError, 커스텀 이름)
+- [x] `backend/tests/test_admin_identity.py` — 프로젝트 생성 시 `ensure_monitoring_ingress_sg` 호출 검증 1건
+- [x] `backend/tests/test_instances.py` — monitoring SG auto-attach 2건 (활성/비활성)
 
 ### 12.3 Prometheus 스크래핑 — 메인 클러스터 통합 vs 프로젝트별 분리 (결정 필요)
 
@@ -1133,10 +1134,10 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 - 장점: 운영 단일 스택, Grafana org/folder + label-based row-level security로 프로젝트 격리, 비용/리소스 효율
 - 단점: 사용자 정의 대시보드 자유도 낮음 (관리자가 템플릿 제공), Prometheus single-tenant 한계
 - [ ] `monitoring/prometheus.yml` + `deploy/k8s-template/monitoring/prometheus/configmap.yaml` — `nova_sd` 또는 `http_sd_config` 추가하여 OpenStack VM 자동 발견
-- [ ] `backend/app/api/common/sd_targets.py` (신규) — `GET /api/sd/prometheus/targets` Prometheus `http_sd` 호환 JSON 응답 (인스턴스 목록 + `instance`, `project_id`, `flavor`, `gpu` 라벨)
+- [x] `backend/app/api/common/sd_targets.py` (신규) — `GET /api/sd/prometheus/targets` Prometheus `http_sd` 호환 JSON 응답 (인스턴스 목록 + `instance`, `project_id`, `flavor`, `gpu` 라벨)
   - 인증: 별도 token (스크래퍼 전용), `monitoring_sd_token` 설정값
   - VM의 floating IP가 없어도 fixed IP를 그대로 노출 (스크래퍼가 internal network에 접근 가능하다는 가정)
-- [ ] `backend/tests/test_sd_targets.py` — 라벨 형식, token 검증, 권한 4건
+- [x] `backend/tests/test_sd_targets.py` — 라벨 형식, token 검증, 권한 4건
 - [ ] `deploy/k8s-template/monitoring/prometheus/configmap.yaml` — DCGM/Node 스크래핑 잡 추가 (`__meta_*` 라벨 → `project_id`/`instance` 재라벨)
 - [ ] `deploy/k8s-template/monitoring/grafana/` — provisioning datasource (Prometheus) + 기본 대시보드(JSON) 추가, `node_exporter`/`dcgm` 공식 대시보드 import
 - [ ] `frontend/src/routes/dashboard/observability/+page.svelte` (신규) — Grafana iframe 임베드 + 프로젝트별 URL 자동 생성 (`var-project_id={current}`)
@@ -1163,8 +1164,8 @@ Option A 채택 시 본 절 진행. Option B 채택 시 사용자가 자체 구�
 - [ ] `deploy/k8s-template/monitoring/grafana/provisioning/dashboards/` — node-exporter-full + nvidia-dcgm 공식 대시보드 JSON 동봉
 - [ ] Grafana org/folder 자동 생성 — 프로젝트별 folder, datasource label filter `project_id="<keystone_project_id>"`
 - [ ] `frontend/src/routes/dashboard/observability/+page.svelte` — Grafana iframe + auth proxy (Grafana `auth.proxy` 또는 `auth.jwt` 모드 + 백엔드가 토큰 발급)
-- [ ] `backend/app/api/common/grafana_auth.py` (신규) — Grafana 임베드용 JWT 발급 엔드포인트
-- [ ] `backend/tests/test_grafana_auth.py` — 토큰 발급/만료/권한 3건
+- [x] `backend/app/api/common/grafana_auth.py` (신규) — Grafana 임베드용 JWT 발급 엔드포인트 (POST /api/grafana/token, HS256 JWT, standard library만 사용)
+- [x] `backend/tests/test_grafana_auth.py` — 토큰 발급/클레임 검증/시크릿 미설정 503 3건
 
 ### 12.5 Open Questions (사용자 확인 필요)
 

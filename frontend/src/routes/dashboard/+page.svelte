@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { auth } from '$lib/stores/auth';
+  import { auth, authReady } from '$lib/stores/auth';
   import { api } from '$lib/api/client';
   import type { DashboardSummary } from '$lib/types/resources';
   import type { Instance } from '$lib/types/resources';
@@ -29,25 +29,32 @@
   const token = $derived($auth.token ?? undefined);
   const projectId = $derived($auth.projectId ?? undefined);
 
+  let inFlight: AbortController | null = null;
+
   async function fetchAll(opts?: { refresh?: boolean }) {
+    inFlight?.abort();
+    const ctrl = new AbortController();
+    inFlight = ctrl;
     if (!summary) summaryLoading = true;
     try {
-      const [s, q, inst] = await Promise.allSettled([
-        api.get<DashboardSummary>('/api/dashboard/summary', token, projectId, opts),
-        api.get<Quotas>('/api/dashboard/quotas', token, projectId),
-        api.get<Instance[]>('/api/instances', token, projectId, opts),
+      await Promise.allSettled([
+        api.get<DashboardSummary>('/api/dashboard/summary', token, projectId, { ...opts, signal: ctrl.signal })
+          .then(v  => { if (!ctrl.signal.aborted) { summary = v; summaryLoading = false; } })
+          .catch(() => { summaryLoading = false; }),
+        api.get<Quotas>('/api/dashboard/quotas', token, projectId, { signal: ctrl.signal })
+          .then(v => { if (!ctrl.signal.aborted) quotas = v; })
+          .catch(() => {}),
+        api.get<Instance[]>('/api/instances', token, projectId, { ...opts, signal: ctrl.signal })
+          .then(v => { if (!ctrl.signal.aborted) recentInstances = v.slice(0, 5); })
+          .catch(() => {}),
+        api.get<unknown[]>('/api/k3s/clusters', token, projectId, { signal: ctrl.signal })
+          .then(v => { if (!ctrl.signal.aborted) k3sCount = v.filter((c: any) => c.status === 'ACTIVE' || c.provisioning_status === 'ACTIVE').length; })
+          .catch(() => { k3sCount = null; }),
       ]);
-      if (s.status === 'fulfilled') summary = s.value;
-      if (q.status === 'fulfilled') quotas = q.value;
-      if (inst.status === 'fulfilled') recentInstances = inst.value.slice(0, 5);
-    } catch { /* ignore */ } finally {
+    } finally {
+      if (inFlight === ctrl) inFlight = null;
       summaryLoading = false;
     }
-    // k3s count (best effort)
-    try {
-      const clusters = await api.get<unknown[]>('/api/k3s/clusters', token, projectId);
-      k3sCount = clusters.filter((c: any) => c.status === 'ACTIVE' || c.provisioning_status === 'ACTIVE').length;
-    } catch { k3sCount = null; }
   }
 
   async function forceRefresh() {
@@ -61,11 +68,13 @@
     defaultActive: true,
     defaultInterval: 30,
     intervalOptions: [10, 15, 30, 60],
+    invokeOnMount: false,
   });
 
   $effect(() => {
     const pid = $auth.projectId;
-    if (!pid) return;
+    const ready = $authReady;
+    if (!pid || !ready) return;
     untrack(() => fetchAll());
   });
 

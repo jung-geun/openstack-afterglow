@@ -1,0 +1,169 @@
+---
+# Afterglow kolla role defaults
+
+# ── 이미지 ────────────────────────────────────────────────────────────────────
+afterglow_image_namespace: "ghcr.io/jung-geun"
+afterglow_image_tag: "latest"
+afterglow_backend_image: "{{ afterglow_image_namespace }}/afterglow-api"
+afterglow_frontend_image: "{{ afterglow_image_namespace }}/afterglow"
+
+# ── 토글 ──────────────────────────────────────────────────────────────────────
+enable_afterglow: "no"
+enable_afterglow_backend: "{{ enable_afterglow }}"
+enable_afterglow_frontend: "{{ enable_afterglow }}"
+enable_afterglow_worker: "{{ enable_afterglow }}"
+
+# ── 사전조건 실행 여부 ────────────────────────────────────────────────────────
+afterglow_run_preconditions: true
+
+# ── 포트 ──────────────────────────────────────────────────────────────────────
+afterglow_backend_port: 8000
+afterglow_frontend_port: 3000
+afterglow_backend_listen_port: "{{ afterglow_backend_port }}"
+afterglow_frontend_listen_port: "{{ afterglow_frontend_port }}"
+
+# ── HAProxy 참조 메타데이터 ───────────────────────────────────────────────────
+# 주의: kolla haproxy-config role은 kolla 핵심 서비스만 처리하므로 이 dict는
+# 외부 role에서 실제로 적용되지 않는다. 실제 HAProxy 통합은 config.yml에서
+# templates/haproxy-afterglow.cfg.j2 를 /etc/kolla/haproxy/services.d/ 에
+# 직접 렌더링하는 방식으로 이루어진다.
+afterglow_haproxy_backend_port: "{{ afterglow_backend_port }}"
+afterglow_haproxy_frontend_port: "{{ afterglow_frontend_port }}"
+
+# ── 노출 URL ──────────────────────────────────────────────────────────────────
+afterglow_external_url: "https://{{ kolla_external_fqdn | default('localhost') }}"
+
+# ── DB / Cache ────────────────────────────────────────────────────────────────
+afterglow_database_name: "afterglow"
+afterglow_database_user: "afterglow"
+afterglow_redis_db_index: 5
+
+# ── Keystone ──────────────────────────────────────────────────────────────────
+afterglow_admin_keystone_user: "afterglow_admin"
+afterglow_service_project_name: "afterglow-service"
+afterglow_service_project_id: ""  # preconditions_keystone에서 자동 채워짐
+
+# ── Manila ────────────────────────────────────────────────────────────────────
+afterglow_manila_microversion: "2.65"
+afterglow_manila_share_type: "cephfs"
+afterglow_ceph_monitors: ""
+afterglow_cephx_user: "client.afterglow"
+afterglow_manila_shares:
+  layer_store_rw:
+    name: layer-store-rw
+    size_gb: 100
+    protocol: CEPHFS
+    access_level: rw
+  layer_store_ro:
+    name: layer-store-ro
+    size_gb: 100
+    protocol: CEPHFS
+    access_level: ro
+  manifest_store:
+    name: manifest-store
+    size_gb: 10
+    protocol: CEPHFS
+    access_level: rw
+  metadata_store:
+    name: metadata-store
+    size_gb: 10
+    protocol: CEPHFS
+    access_level: rw
+
+# share ID (preconditions_manila에서 자동 채워짐)
+afterglow_share_layer_store_rw_id: ""
+afterglow_share_layer_store_ro_id: ""
+afterglow_share_manifest_store_id: ""
+afterglow_share_metadata_store_id: ""
+
+# ── k3s ──────────────────────────────────────────────────────────────────────
+afterglow_k3s_callback_base_url: "{{ afterglow_external_url }}"
+
+# ── 선택적 서비스 ─────────────────────────────────────────────────────────────
+afterglow_service_manila_enabled: true
+afterglow_service_swift_enabled: true
+afterglow_service_k3s_enabled: true
+afterglow_service_zun_enabled: false
+afterglow_service_trove_enabled: false
+afterglow_service_magnum_enabled: false
+afterglow_service_barbican_enabled: false
+
+# ── GHCR imagePullSecret ──────────────────────────────────────────────────────
+afterglow_image_pull_secret_b64: ""
+
+# ── afterglow_services dict (kolla_docker 루프 대상) ──────────────────────────
+afterglow_services:
+  afterglow-backend:
+    container_name: afterglow_backend
+    group: afterglow
+    enabled: "{{ enable_afterglow_backend | bool }}"
+    image: "{{ afterglow_backend_image }}:{{ afterglow_image_tag }}"
+    restart_policy: unless-stopped
+    volumes:
+      - "/etc/kolla/afterglow/config.toml:/app/config.toml:ro"
+      - "kolla_logs:/var/log/kolla/"
+    environment:
+      DATABASE_URL: "mysql+asyncmy://{{ afterglow_database_user }}:{{ afterglow_database_password }}@{{ database_address | default('mariadb') }}:{{ database_port | default(3306) }}/{{ afterglow_database_name }}"
+      REDIS_URL: "redis://:{{ afterglow_redis_password | default('') }}@{{ valkey_address | default('valkey') }}:{{ valkey_port | default(6379) }}/{{ afterglow_redis_db_index }}"
+      OS_PASSWORD: "{{ afterglow_admin_keystone_password }}"
+      OS_INTERFACE: "public"
+      SECRET_KEY: "{{ afterglow_secret_key }}"
+      GITLAB_OIDC_CLIENT_SECRET: "{{ afterglow_oidc_client_secret | default('') }}"
+      K3S_KUBECONFIG_ENCRYPTION_KEY: "{{ afterglow_kubeconfig_encryption_key }}"
+      UNION_OS_SERVICE_PROJECT_ID: "{{ afterglow_service_project_id }}"
+      UNION_LAYER_STORE_RW_SHARE_ID: "{{ afterglow_share_layer_store_rw_id }}"
+      UNION_LAYER_STORE_RO_SHARE_ID: "{{ afterglow_share_layer_store_ro_id }}"
+      UNION_MANIFEST_STORE_SHARE_ID: "{{ afterglow_share_manifest_store_id }}"
+      UNION_METADATA_STORE_SHARE_ID: "{{ afterglow_share_metadata_store_id }}"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    ports:
+      - "{{ afterglow_backend_port }}:8000"
+
+  afterglow-frontend:
+    container_name: afterglow_frontend
+    group: afterglow
+    enabled: "{{ enable_afterglow_frontend | bool }}"
+    image: "{{ afterglow_frontend_image }}:{{ afterglow_image_tag }}"
+    restart_policy: unless-stopped
+    volumes:
+      - "kolla_logs:/var/log/kolla/"
+    environment:
+      ORIGIN: "{{ afterglow_external_url }}"
+      PUBLIC_API_BASE: "{{ afterglow_external_url }}"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    ports:
+      - "{{ afterglow_frontend_port }}:3000"
+
+  afterglow-worker:
+    container_name: afterglow_worker
+    group: afterglow
+    enabled: "{{ enable_afterglow_worker | bool }}"
+    image: "{{ afterglow_backend_image }}:{{ afterglow_image_tag }}"
+    command: ["python", "-m", "app.worker"]
+    restart_policy: unless-stopped
+    volumes:
+      - "/etc/kolla/afterglow/config.toml:/app/config.toml:ro"
+      - "kolla_logs:/var/log/kolla/"
+    environment:
+      DATABASE_URL: "mysql+asyncmy://{{ afterglow_database_user }}:{{ afterglow_database_password }}@{{ database_address | default('mariadb') }}:{{ database_port | default(3306) }}/{{ afterglow_database_name }}"
+      REDIS_URL: "redis://:{{ afterglow_redis_password | default('') }}@{{ valkey_address | default('valkey') }}:{{ valkey_port | default(6379) }}/{{ afterglow_redis_db_index }}"
+      OS_PASSWORD: "{{ afterglow_admin_keystone_password }}"
+      OS_INTERFACE: "public"
+      SECRET_KEY: "{{ afterglow_secret_key }}"
+      K3S_KUBECONFIG_ENCRYPTION_KEY: "{{ afterglow_kubeconfig_encryption_key }}"
+      UNION_OS_SERVICE_PROJECT_ID: "{{ afterglow_service_project_id }}"
+      UNION_LAYER_STORE_RW_SHARE_ID: "{{ afterglow_share_layer_store_rw_id }}"
+      UNION_LAYER_STORE_RO_SHARE_ID: "{{ afterglow_share_layer_store_ro_id }}"
+      UNION_MANIFEST_STORE_SHARE_ID: "{{ afterglow_share_manifest_store_id }}"
+      UNION_METADATA_STORE_SHARE_ID: "{{ afterglow_share_metadata_store_id }}"
+      K3S_HEALTH_INTERVAL: "180"

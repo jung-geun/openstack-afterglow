@@ -1,7 +1,9 @@
 import asyncio
 import hashlib
+import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from pydantic import BaseModel
 
 from app.api.deps import extend_session, get_session_remaining, get_token_info
 from app.config import get_settings
@@ -9,6 +11,16 @@ from app.models.auth import GitLabCallbackRequest, LoginRequest, ProjectInfo, To
 from app.rate_limit import limiter
 from app.services import keystone
 from app.services.cache import cached_call, ttl_fast, ttl_normal, ttl_static
+
+_logger = logging.getLogger(__name__)
+
+
+class GroupInfo(BaseModel):
+    id: str
+    name: str
+    description: str | None = None
+    domain_id: str | None = None
+
 
 router = APIRouter()
 
@@ -134,6 +146,19 @@ async def logout(token_info: dict = Depends(get_token_info)):
     except Exception:
         pass
     return {"message": "로그아웃 완료"}
+
+
+@router.get("/groups", response_model=list[GroupInfo])
+async def list_my_groups(token_info: dict = Depends(get_token_info)):
+    """현재 사용자가 속한 keystone 그룹 목록. policy 불허 시 빈 리스트 반환."""
+    try:
+        groups = await asyncio.to_thread(keystone.list_user_groups, token_info["token"], token_info["user_id"])
+        return [GroupInfo(**g) for g in groups]
+    except PermissionError:
+        return []
+    except Exception:
+        _logger.exception("/api/auth/groups 처리 실패 (user_id=%s)", token_info.get("user_id"))
+        raise HTTPException(status_code=500, detail="그룹 목록 조회 실패")
 
 
 @router.get("/projects", response_model=list[ProjectInfo])

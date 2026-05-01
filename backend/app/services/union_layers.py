@@ -15,12 +15,16 @@ from app.models.union import (
     AncestorChain,
     CreateLayerRequest,
     CreateTemplateRequest,
+    ForkLayerRequest,
     LayerInfo,
     MountInfo,
+    RestoreLayerRequest,
     SealLayerResponse,
+    SnapshotLayerRequest,
     StorageStats,
     TemplateInfo,
 )
+from app.services import manila
 
 _logger = logging.getLogger(__name__)
 
@@ -158,18 +162,131 @@ async def list_layers(
 
 
 async def seal_layer(session: AsyncSession, layer_id: str) -> SealLayerResponse:
-    """레이어 봉인 (sealed=True + sealed_at 기록)."""
+    """레이어 봉인 (sealed=True + sealed_at 기록).
+
+    동일 (name, version, parent_id) 조합의 봉인 레이어가 이미 존재하면 overwrite 금지 정책에 의해 거부된다.
+    """
     layer = await session.get(UnionLayer, layer_id)
     if layer is None:
         raise KeyError(f"레이어 {layer_id}를 찾을 수 없습니다")
     if layer.sealed:
         raise ValueError(f"레이어 {layer_id}는 이미 봉인되어 있습니다")
 
+    # overwrite 금지: 동일 (name, version, parent_id) 슬롯에 봉인 레이어가 이미 있으면 거부
+    dup_stmt = select(UnionLayer).where(
+        UnionLayer.name == layer.name,
+        UnionLayer.version == layer.version,
+        UnionLayer.parent_id == layer.parent_id,
+        UnionLayer.sealed.is_(True),
+        UnionLayer.id != layer_id,
+    )
+    dup_result = await session.execute(dup_stmt)
+    duplicate = dup_result.scalar_one_or_none()
+    if duplicate:
+        raise ValueError(
+            f"동일한 (name={layer.name}, version={layer.version}, parent={layer.parent_id}) "
+            f"봉인 레이어가 이미 존재합니다 ({duplicate.id}). overwrite 금지 정책에 의해 seal이 거부됩니다."
+        )
+
     now = datetime.now(UTC)
     layer.sealed = True
     layer.sealed_at = now
     await session.commit()
     return SealLayerResponse(id=layer.id, sealed=True, sealed_at=now)
+
+
+async def fork_layer(
+    session: AsyncSession,
+    source_layer_id: str,
+    req: ForkLayerRequest,
+    created_by: str,
+    project_id: str | None = None,
+) -> LayerInfo:
+    """봉인된 레이어에서 새 RW 레이어를 파생(fork)한다.
+
+    소스 레이어는 반드시 sealed=True여야 한다.
+    생성된 레이어는 source_layer_id를 parent_id로 가지며 sealed=False(RW)로 시작한다.
+    """
+    source = await session.get(UnionLayer, source_layer_id)
+    if source is None:
+        raise KeyError(f"레이어 {source_layer_id}를 찾을 수 없습니다")
+    if not source.sealed:
+        raise ValueError(f"레이어 {source_layer_id}는 봉인되지 않았습니다. 봉인된 레이어만 fork할 수 있습니다")
+
+    new_id = (
+        f"sha256:{req.content_hash[len('sha256:') :]}" if req.content_hash.startswith("sha256:") else req.content_hash
+    )
+    existing = await session.get(UnionLayer, new_id)
+    if existing:
+        raise ValueError(f"레이어 {new_id}는 이미 존재합니다")
+
+    forked = UnionLayer(
+        id=new_id,
+        name=req.name or source.name,
+        version=req.version,
+        created_at=datetime.now(UTC),
+        created_by=created_by,
+        sealed=False,
+        parent_id=source_layer_id,
+        ubuntu_base=source.ubuntu_base,
+        build_recipe={},
+        installed_packages={},
+        content_hash=req.content_hash,
+        size_bytes=None,
+        file_count=None,
+        project_id=project_id,
+        sealed_at=None,
+        license_type=source.license_type,
+        max_concurrent_mounts=source.max_concurrent_mounts,
+    )
+    session.add(forked)
+    await session.commit()
+    await session.refresh(forked)
+    return _layer_to_info(forked)
+
+
+async def snapshot_layer(
+    session: AsyncSession,
+    layer_id: str,
+    req: SnapshotLayerRequest,
+    conn,
+) -> dict:
+    """레이어 Manila share 스냅샷을 생성한다.
+
+    레이어가 존재해야 한다. share_id는 요청에서 명시적으로 전달받는다.
+    """
+    import asyncio
+
+    layer = await session.get(UnionLayer, layer_id)
+    if layer is None:
+        raise KeyError(f"레이어 {layer_id}를 찾을 수 없습니다")
+
+    snap_name = req.name or f"union-layer-{layer_id[:20]}"
+    return await asyncio.to_thread(manila.create_share_snapshot, conn, req.share_id, snap_name, req.description)
+
+
+async def restore_layer(
+    session: AsyncSession,
+    layer_id: str,
+    req: RestoreLayerRequest,
+    conn,
+) -> None:
+    """레이어 Manila share를 지정한 스냅샷으로 복원(revert)한다.
+
+    레이어가 존재해야 하며 복원 후 sealed=False로 재설정한다(수정 가능 상태 복귀).
+    """
+    import asyncio
+
+    layer = await session.get(UnionLayer, layer_id)
+    if layer is None:
+        raise KeyError(f"레이어 {layer_id}를 찾을 수 없습니다")
+
+    await asyncio.to_thread(manila.revert_to_snapshot, conn, req.share_id, req.snapshot_id)
+
+    if layer.sealed:
+        layer.sealed = False
+        layer.sealed_at = None
+        await session.commit()
 
 
 async def get_ancestors(session: AsyncSession, layer_id: str) -> AncestorChain:

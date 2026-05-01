@@ -12,10 +12,13 @@ from app.models.union import (
     BuilderAccessRequest,
     CreateLayerRequest,
     CreateTemplateRequest,
+    ForkLayerRequest,
     LayerInfo,
     MountInfo,
     RecordMountRequest,
+    RestoreLayerRequest,
     SealLayerResponse,
+    SnapshotLayerRequest,
     StorageStats,
     TemplateInfo,
 )
@@ -99,6 +102,61 @@ async def seal_layer(
         raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.post("/layers/{layer_id}/fork", response_model=LayerInfo, status_code=201)
+async def fork_layer(
+    layer_id: str,
+    req: ForkLayerRequest,
+    token_info: dict = Depends(get_token_info),
+    session=Depends(get_session),
+):
+    """봉인된 레이어에서 새 RW 레이어를 파생(fork)한다. 관리자 전용."""
+    _require_admin(token_info)
+    created_by = token_info.get("username") or token_info.get("user_id") or "unknown"
+    project_id = token_info.get("project_id") or None
+    try:
+        return await union_layers.fork_layer(session, layer_id, req, created_by=created_by, project_id=project_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.post("/layers/{layer_id}/snapshot", status_code=201)
+async def snapshot_layer(
+    layer_id: str,
+    req: SnapshotLayerRequest,
+    token_info: dict = Depends(get_token_info),
+    session=Depends(get_session),
+    conn=Depends(get_os_conn),
+):
+    """레이어 Manila share 스냅샷 생성. 관리자 전용."""
+    _require_admin(token_info)
+    try:
+        return await union_layers.snapshot_layer(session, layer_id, req, conn)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"스냅샷 생성 실패: {e}")
+
+
+@router.post("/layers/{layer_id}/restore", status_code=204)
+async def restore_layer(
+    layer_id: str,
+    req: RestoreLayerRequest,
+    token_info: dict = Depends(get_token_info),
+    session=Depends(get_session),
+    conn=Depends(get_os_conn),
+):
+    """레이어 Manila share를 스냅샷 시점으로 복원. 관리자 전용."""
+    _require_admin(token_info)
+    try:
+        await union_layers.restore_layer(session, layer_id, req, conn)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"복원 실패: {e}")
 
 
 @router.get("/layers/{layer_id}/dependents", response_model=list[LayerInfo])

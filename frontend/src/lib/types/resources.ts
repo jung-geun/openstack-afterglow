@@ -77,4 +77,6 @@ export interface FloatingIp {
   status: string;
   fixed_ip_address: string | null;
   port_id: string | null;
+  instance_id?: string | null;
+  instance_name?: string | null;
 }

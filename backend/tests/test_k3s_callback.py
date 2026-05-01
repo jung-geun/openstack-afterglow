@@ -233,3 +233,66 @@ async def test_callback_invalid_json_returns_422():
             headers={"Content-Type": "application/json"},
         )
     assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# A6: k3s callback.sh 재시작 루프 감지 — 템플릿 생성 스크립트 검증
+# ---------------------------------------------------------------------------
+
+
+def _render_callback_script(k3s_version: str = "v1.31.0+k3s1") -> str:
+    """k3s_server.yaml.j2를 렌더링하여 callback.sh 본문을 추출한다."""
+    from pathlib import Path
+
+    from jinja2 import Environment, FileSystemLoader
+
+    tpl_dir = Path(__file__).parent.parent / "app" / "templates"
+    env = Environment(loader=FileSystemLoader(str(tpl_dir)))
+    tpl = env.get_template("k3s_server.yaml.j2")
+
+    rendered = tpl.render(
+        callback_url="http://backend:8000",
+        callback_token="tok-test",
+        k3s_version=k3s_version,
+        server_node_name="k3s-server",
+        extra_tls_sans=[],
+        extra_server_args=[],
+        needs_external_cloud_provider=False,
+        cloud_conf=None,
+        plugins=[],
+    )
+    # callback.sh 본문만 추출 (path: /opt/k3s/callback.sh 이후 runcmd 이전)
+    start = rendered.find("path: /opt/k3s/callback.sh")
+    end = rendered.find("runcmd:")
+    return rendered[start:end]
+
+
+def test_callback_script_contains_restart_check():
+    """callback.sh에 NRestarts 기반 재시작 루프 감지 로직이 포함돼야 한다."""
+    script = _render_callback_script()
+    assert "NRestarts" in script
+    assert "RESTART_THRESHOLD" in script
+
+
+def test_callback_script_sends_failure_on_restart_loop():
+    """재시작 루프 감지 시 success=false 콜백을 전송하는 curl 명령이 있어야 한다."""
+    script = _render_callback_script()
+    assert "restart loop detected" in script
+    # YAML 이스케이프: \"success\" → \\"success\\" 로 렌더링됨
+    assert "success" in script and "false" in script
+
+
+def test_callback_script_uses_systemctl_show():
+    """systemctl show k3s.service -p NRestarts 명령으로 재시작 횟수를 조회해야 한다."""
+    script = _render_callback_script()
+    assert "systemctl show k3s.service" in script
+    assert "-p NRestarts" in script
+
+
+def test_callback_script_exits_on_restart_loop():
+    """재시작 루프 감지 시 exit 1로 종료해야 한다."""
+    script = _render_callback_script()
+    # restart loop 감지 이후 exit 1 패턴
+    loop_pos = script.find("restart loop detected")
+    exit_pos = script.find("exit 1", loop_pos)
+    assert exit_pos != -1, "restart loop 감지 후 exit 1이 있어야 한다"

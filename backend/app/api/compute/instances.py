@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
-from openstack.exceptions import ConflictException
+from openstack.exceptions import ConflictException, HttpException
 
 from app.api.deps import get_os_conn, get_token_info, require_admin
 from app.config import get_settings
@@ -35,6 +35,7 @@ from app.models.compute import (
     CreateInstanceRequest,
     InstanceInfo,
     UpdateSecurityGroupsRequest,
+    UpdateVolumeAttachmentRequest,
 )
 from app.models.progress import ProgressMessage, ProgressStep
 from app.rate_limit import limiter
@@ -280,6 +281,22 @@ async def create_instance(
                 req = req.model_copy(update={"security_groups": _sgs})
             except Exception:
                 logger.warning("Union egress SG 자동 attach 실패, 계속 진행", exc_info=True)
+
+        if settings.monitoring_auto_sg_enabled and settings.monitoring_scrape_cidr:
+            try:
+                _mon_sg = await asyncio.to_thread(
+                    neutron.ensure_monitoring_ingress_sg,
+                    conn,
+                    project_id,
+                    settings.monitoring_sg_name,
+                    settings.monitoring_scrape_cidr,
+                )
+                _sgs = list(req.security_groups or [])
+                if _mon_sg not in _sgs:
+                    _sgs.append(_mon_sg)
+                req = req.model_copy(update={"security_groups": _sgs})
+            except Exception:
+                logger.warning("Monitoring ingress SG 자동 attach 실패, 계속 진행", exc_info=True)
 
         meta = {
             "union_libraries": ",".join(resolved_libs),
@@ -548,6 +565,22 @@ async def create_instance_async(
                     _sse_effective_sgs = _sgs
                 except Exception:
                     logger.warning("Union egress SG 자동 attach 실패, 계속 진행", exc_info=True)
+
+            if settings.monitoring_auto_sg_enabled and settings.monitoring_scrape_cidr:
+                try:
+                    _mon_sg = await asyncio.to_thread(
+                        neutron.ensure_monitoring_ingress_sg,
+                        conn,
+                        conn._afterglow_project_id,
+                        settings.monitoring_sg_name,
+                        settings.monitoring_scrape_cidr,
+                    )
+                    _sgs = list(_sse_effective_sgs or req.security_groups or [])
+                    if _mon_sg not in _sgs:
+                        _sgs.append(_mon_sg)
+                    _sse_effective_sgs = _sgs
+                except Exception:
+                    logger.warning("Monitoring ingress SG 자동 attach 실패, 계속 진행", exc_info=True)
 
             meta = {
                 "union_libraries": ",".join(resolved_libs) if resolved_libs else "none",
@@ -919,7 +952,34 @@ async def detach_volume_from_instance(
     try:
         await asyncio.to_thread(nova.detach_volume, conn, instance_id, volume_id)
         await invalidate(f"afterglow:cinder:{pid}:vol_attach:{instance_id}")
+    except HttpException as e:
+        raise HTTPException(status_code=e.http_status or 500, detail=e.message or str(e))
     except Exception:
+        logger.error("볼륨 분리 실패", exc_info=True)
+        raise HTTPException(status_code=500, detail="작업 실패")
+
+
+@router.patch("/{instance_id}/volumes/{volume_id}", status_code=204)
+async def update_volume_attachment(
+    instance_id: str,
+    volume_id: str,
+    body: UpdateVolumeAttachmentRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    pid = conn._afterglow_project_id
+    try:
+        await asyncio.to_thread(
+            nova.update_volume_attachment_delete_flag,
+            conn,
+            instance_id,
+            volume_id,
+            body.delete_on_termination,
+        )
+        await invalidate(f"afterglow:cinder:{pid}:vol_attach:{instance_id}")
+    except HttpException as e:
+        raise HTTPException(status_code=e.http_status or 500, detail=e.message or str(e))
+    except Exception:
+        logger.error("볼륨 연결 정보 업데이트 실패", exc_info=True)
         raise HTTPException(status_code=500, detail="작업 실패")
 
 
@@ -1108,6 +1168,8 @@ async def _prepare_dynamic_file_storage(
             file_storage.id,
             access_to,
             "rw",
+            settings.manila_nfs_root_squash,
+            settings.manila_nfs_sec_flavor,
         )
         created_access_ids.append((file_storage.id, rule["access_id"]))
 

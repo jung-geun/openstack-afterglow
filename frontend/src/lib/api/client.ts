@@ -63,9 +63,17 @@ async function request<T>(
 export const memoryCache = new Map<string, { data: unknown; timestamp: number }>();
 
 export const api = {
-	get: <T>(path: string, token?: string, projectId?: string, opts?: { refresh?: boolean }) => {
+	get: <T>(
+		path: string,
+		token?: string,
+		projectId?: string,
+		opts?: { refresh?: boolean; signal?: AbortSignal }
+	) => {
 		const url = opts?.refresh ? `${path}${path.includes('?') ? '&' : '?'}refresh=true` : path;
-		return request<T>(url, { method: 'GET' }, token, projectId);
+		const signal = opts?.signal
+			? AbortSignal.any([opts.signal, AbortSignal.timeout(30_000)])
+			: undefined;
+		return request<T>(url, { method: 'GET', signal }, token, projectId);
 	},
 	post: <T>(path: string, body: unknown, token?: string, projectId?: string) =>
 		request<T>(path, { method: 'POST', body: JSON.stringify(body) }, token, projectId),

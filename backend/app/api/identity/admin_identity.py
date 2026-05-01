@@ -257,7 +257,23 @@ async def create_project(
             raise HTTPException(status_code=400, detail="프로젝트 생성 실패")
 
     try:
-        return await asyncio.to_thread(_create)
+        from app.config import get_settings
+        from app.services import neutron
+
+        result = await asyncio.to_thread(_create)
+        _settings = get_settings()
+        if _settings.monitoring_auto_sg_enabled and _settings.monitoring_scrape_cidr:
+            try:
+                await asyncio.to_thread(
+                    neutron.ensure_monitoring_ingress_sg,
+                    conn,
+                    result["id"],
+                    _settings.monitoring_sg_name,
+                    _settings.monitoring_scrape_cidr,
+                )
+            except Exception:
+                _logger.warning("신규 프로젝트 monitoring SG 자동 생성 실패, 계속 진행", exc_info=True)
+        return result
     except HTTPException:
         raise
 
@@ -822,3 +838,34 @@ async def revoke_group_role(
         return await asyncio.to_thread(_revoke)
     except HTTPException:
         raise
+
+
+# ============================================================================
+# Monitoring SG 동기화
+# ============================================================================
+
+
+@router.post("/projects/{project_id}/sync-monitoring-sg", dependencies=[Depends(require_admin)])
+async def sync_monitoring_sg(
+    project_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """프로젝트에 Monitoring ingress SG를 idempotent하게 동기화한다. 관리자 전용."""
+    from app.config import get_settings
+    from app.services import neutron
+
+    settings = get_settings()
+    if not settings.monitoring_scrape_cidr:
+        raise HTTPException(status_code=422, detail="monitoring_scrape_cidr 설정이 필요합니다")
+
+    try:
+        sg_name = await asyncio.to_thread(
+            neutron.ensure_monitoring_ingress_sg,
+            conn,
+            project_id,
+            settings.monitoring_sg_name,
+            settings.monitoring_scrape_cidr,
+        )
+        return {"status": "ok", "sg_name": sg_name, "project_id": project_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Monitoring SG 동기화 실패: {e}")

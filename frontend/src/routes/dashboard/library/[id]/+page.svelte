@@ -47,20 +47,18 @@
   async function loadData() {
     loading = true;
     error = '';
-    try {
-      const [layerData, ancestorData, dependentData] = await Promise.all([
-        api.get<LayerInfo>(`/api/union/layers/${encodedId}`, token, projectId),
-        api.get<AncestorChain>(`/api/union/layers/${encodedId}/ancestors`, token, projectId),
-        api.get<LayerInfo[]>(`/api/union/layers/${encodedId}/dependents`, token, projectId),
-      ]);
-      layer = layerData;
-      ancestors = ancestorData.layers;
-      dependents = dependentData;
-    } catch (e) {
-      error = e instanceof ApiError ? e.message : '레이어 로드 실패';
-    } finally {
-      loading = false;
-    }
+    await Promise.allSettled([
+      api.get<LayerInfo>(`/api/union/layers/${encodedId}`, token, projectId)
+        .then(v => { layer = v; loading = false; })
+        .catch(e => { error = e instanceof ApiError ? e.message : '레이어 로드 실패'; loading = false; }),
+      api.get<AncestorChain>(`/api/union/layers/${encodedId}/ancestors`, token, projectId)
+        .then(v => { ancestors = v.layers; })
+        .catch(() => {}),
+      api.get<LayerInfo[]>(`/api/union/layers/${encodedId}/dependents`, token, projectId)
+        .then(v => { dependents = v; })
+        .catch(() => {}),
+    ]);
+    loading = false;
   }
 
   $effect(() => {

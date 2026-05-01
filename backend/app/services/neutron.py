@@ -264,7 +264,39 @@ def list_floating_ips(conn: openstack.connection.Connection, project_id: str | N
     kwargs: dict = {}
     if project_id:
         kwargs["project_id"] = project_id
-    return [_fip_to_info(f) for f in conn.network.ips(**kwargs)]
+    fips = list(conn.network.ips(**kwargs))
+    if not fips:
+        return []
+
+    needed_port_ids = {f.port_id for f in fips if getattr(f, "port_id", None)}
+    port_to_instance: dict[str, str] = {}
+    if needed_port_ids:
+        port_kwargs: dict = {}
+        if project_id:
+            port_kwargs["project_id"] = project_id
+        for p in conn.network.ports(**port_kwargs):
+            if p.id in needed_port_ids and p.device_id and (p.device_owner or "").startswith("compute:"):
+                port_to_instance[p.id] = p.device_id
+
+    instance_to_name: dict[str, str] = {}
+    needed_instance_ids = set(port_to_instance.values())
+    if needed_instance_ids:
+        srv_kwargs: dict = {}
+        if project_id:
+            srv_kwargs["project_id"] = project_id
+        for s in conn.compute.servers(**srv_kwargs):
+            if s.id in needed_instance_ids:
+                instance_to_name[s.id] = s.name or ""
+
+    out: list[FloatingIpInfo] = []
+    for f in fips:
+        info = _fip_to_info(f)
+        inst_id = port_to_instance.get(getattr(f, "port_id", None) or "") or None
+        if inst_id:
+            info.instance_id = inst_id
+            info.instance_name = instance_to_name.get(inst_id)
+        out.append(info)
+    return out
 
 
 def create_floating_ip(conn: openstack.connection.Connection, floating_network_id: str) -> FloatingIpInfo:
@@ -695,6 +727,60 @@ def ensure_union_egress_sg(
                 port_range_min=rule["port_range_min"],
                 port_range_max=rule["port_range_max"],
                 remote_ip_prefix="0.0.0.0/0",
+            )
+
+    return sg_name
+
+
+_MONITORING_INGRESS_RULES: list[dict] = [
+    {"protocol": "tcp", "port_range_min": 9100, "port_range_max": 9100},  # node_exporter
+    {"protocol": "tcp", "port_range_min": 9400, "port_range_max": 9400},  # dcgm_exporter (GPU)
+]
+
+
+def ensure_monitoring_ingress_sg(
+    conn: openstack.connection.Connection,
+    project_id: str,
+    sg_name: str = "monitoring",
+    scrape_cidr: str = "",
+) -> str:
+    """Prometheus scrape용 ingress SG를 idempotent하게 확보하고 SG 이름을 반환한다.
+
+    scrape_cidr이 비어있으면 ValueError를 발생시킨다(환경별 명시 주입 필수).
+    SG가 없으면 생성 후 node_exporter/dcgm_exporter ingress rule을 추가한다.
+    이미 있으면 누락된 rule만 보충한다.
+    """
+    if not scrape_cidr:
+        raise ValueError("monitoring_scrape_cidr must be set — env 주입 필수")
+
+    sgs = list_security_groups(conn, project_id=project_id)
+    existing = next((sg for sg in sgs if sg["name"] == sg_name), None)
+
+    if existing is None:
+        sg = create_security_group(conn, sg_name, "Prometheus scrape — node_exporter/dcgm_exporter ingress")
+        sg_id = sg["id"]
+        existing_rules: list[dict] = []
+    else:
+        sg_id = existing["id"]
+        existing_rules = existing.get("rules", [])
+
+    existing_keys = {
+        (r.get("protocol"), r.get("port_range_min"), r.get("port_range_max"), r.get("remote_ip_prefix"))
+        for r in existing_rules
+        if r.get("direction") == "ingress"
+    }
+
+    for rule in _MONITORING_INGRESS_RULES:
+        key = (rule["protocol"], rule["port_range_min"], rule["port_range_max"], scrape_cidr)
+        if key not in existing_keys:
+            create_security_group_rule(
+                conn,
+                sg_id,
+                direction="ingress",
+                protocol=rule["protocol"],
+                port_range_min=rule["port_range_min"],
+                port_range_max=rule["port_range_max"],
+                remote_ip_prefix=scrape_cidr,
             )
 
     return sg_name

@@ -11,10 +11,8 @@ data:
     openstack:
       auth-url: {{ os_auth_url }}
       region: {{ os_region }}
-      username: {{ os_username }}
-      password: {{ os_password }}
-      domain-name: {{ os_domain }}
-      project-id: {{ project_id }}
+      application-credential-id: {{ app_credential_id }}
+      application-credential-secret: {{ app_credential_secret }}
     octavia:
       use-octavia: true
       subnet-id: {{ subnet_id }}

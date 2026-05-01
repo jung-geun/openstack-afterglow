@@ -1,0 +1,65 @@
+# Afterglow × kolla-ansible multinode inventory sample
+# afterglow 컨테이너는 control 노드에 배포됩니다 (skyline/horizon 동일 패턴)
+
+[control]
+ctrl01 ansible_host=10.0.0.11 ansible_user=ubuntu
+ctrl02 ansible_host=10.0.0.12 ansible_user=ubuntu
+ctrl03 ansible_host=10.0.0.13 ansible_user=ubuntu
+
+[network:children]
+control
+
+[compute]
+compute01 ansible_host=10.0.0.21 ansible_user=ubuntu
+compute02 ansible_host=10.0.0.22 ansible_user=ubuntu
+
+[monitoring:children]
+control
+
+[storage]
+storage01 ansible_host=10.0.0.31 ansible_user=ubuntu
+
+[deployment]
+localhost ansible_connection=local
+
+# ── afterglow 그룹 (control 노드에 자동 배포) ──────────────────────────────────
+[afterglow:children]
+control
+
+# ── kolla 표준 논리 그룹 ──────────────────────────────────────────────────────
+[baremetal:children]
+control
+network
+compute
+storage
+monitoring
+
+[haproxy:children]
+network
+
+[mariadb:children]
+control
+
+[rabbitmq:children]
+control
+
+[keystone:children]
+control
+
+[glance:children]
+control
+
+[nova:children]
+control
+
+[neutron:children]
+control
+
+[cinder:children]
+control
+
+[manila:children]
+control
+
+[horizon:children]
+control

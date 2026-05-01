@@ -1,0 +1,32 @@
+---
+- name: Manila | Initialize share IDs dict
+  ansible.builtin.set_fact:
+    afterglow_share_ids: {}
+  run_once: true
+  delegate_to: "{{ groups['afterglow'][0] }}"
+
+- name: Manila | Check/create shares and access rules
+  ansible.builtin.include_tasks: preconditions_manila_share.yml
+  loop: "{{ afterglow_manila_shares | dict2items }}"
+  loop_control:
+    loop_var: share_item
+
+- name: Manila | Expand share IDs to individual facts
+  ansible.builtin.set_fact:
+    afterglow_share_layer_store_rw_id: "{{ afterglow_share_ids.layer_store_rw | default('') }}"
+    afterglow_share_layer_store_ro_id: "{{ afterglow_share_ids.layer_store_ro | default('') }}"
+    afterglow_share_manifest_store_id: "{{ afterglow_share_ids.manifest_store | default('') }}"
+    afterglow_share_metadata_store_id: "{{ afterglow_share_ids.metadata_store | default('') }}"
+  run_once: true
+  delegate_to: "{{ groups['afterglow'][0] }}"
+
+- name: Manila | Verify all share IDs are populated
+  ansible.builtin.assert:
+    that:
+      - afterglow_share_layer_store_rw_id | length > 0
+      - afterglow_share_layer_store_ro_id | length > 0
+      - afterglow_share_manifest_store_id | length > 0
+      - afterglow_share_metadata_store_id | length > 0
+    fail_msg: "Manila share ID가 비어있습니다. preconditions_manila 실행 결과를 확인하세요."
+  run_once: true
+  delegate_to: "{{ groups['afterglow'][0] }}"

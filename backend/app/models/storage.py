@@ -221,6 +221,8 @@ class FloatingIpInfo(BaseModel):
     port_id: str | None = None
     floating_network_id: str
     project_id: str | None = None
+    instance_id: str | None = None
+    instance_name: str | None = None
 
 
 class AssociateFipRequest(BaseModel):

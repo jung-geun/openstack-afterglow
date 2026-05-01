@@ -119,6 +119,27 @@ def list_volume_attachments(conn: openstack.connection.Connection, server_id: st
     ]
 
 
+def update_volume_attachment_delete_flag(
+    conn: openstack.connection.Connection,
+    server_id: str,
+    volume_id: str,
+    delete_on_termination: bool,
+) -> None:
+    """Nova microversion 2.85: 기존 attachment의 delete_on_termination 변경."""
+    endpoint = conn.compute.get_endpoint()
+    resp = conn.session.put(
+        f"{endpoint}/servers/{server_id}/os-volume_attachments/{volume_id}",
+        headers={"OpenStack-API-Version": "compute 2.85"},
+        json={
+            "volumeAttachment": {
+                "volumeId": volume_id,
+                "delete_on_termination": delete_on_termination,
+            }
+        },
+    )
+    resp.raise_for_status()
+
+
 def attach_volume(conn: openstack.connection.Connection, server_id: str, volume_id: str) -> dict:
     a = conn.compute.create_volume_attachment(server_id, volume_id=volume_id)
     return {"id": a.id, "volume_id": a.volume_id, "device": a.device}

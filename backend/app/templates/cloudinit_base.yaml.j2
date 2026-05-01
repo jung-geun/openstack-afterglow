@@ -138,6 +138,12 @@ write_files:
 {% endif %}
 
 {% if union_cephx_rotate_hours > 0 %}
+  # CephX 키 회전 스크립트 (ExecStart 대상 — write_files 주입 필수)
+  - path: /usr/local/bin/envmgr-rotate-key.sh
+    permissions: "0750"
+    content: |
+{{ rotate_key_script | indent(6, first=True) }}
+
   # CephX 키 회전 systemd service
   - path: /etc/systemd/system/union-rotate-key.service
     content: |

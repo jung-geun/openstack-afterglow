@@ -6,6 +6,8 @@
   - admin_client      → 403이 아님 (관문 통과, 실제 응답은 mock에 따라 다양)
 """
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -205,3 +207,39 @@ async def test_revoke_group_role_requires_admin(non_admin_client):
         "/api/admin/roles/assign-group", params={"group_id": "g", "project_id": "p", "role_id": "r"}
     )
     assert resp.status_code == 403
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Monitoring SG auto-attach (프로젝트 생성 시)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+@pytest.mark.asyncio
+async def test_create_project_calls_ensure_monitoring_sg(admin_client, mock_conn):
+    """프로젝트 생성 시 monitoring SG 자동 생성 호출 검증."""
+    mock_project = MagicMock()
+    mock_project.id = "proj-new-1"
+    mock_project.name = "test-proj"
+    mock_project.description = ""
+    mock_project.is_enabled = True
+    mock_conn.identity.create_project.return_value = mock_project
+
+    fake_settings = MagicMock()
+    fake_settings.monitoring_auto_sg_enabled = True
+    fake_settings.monitoring_scrape_cidr = "10.0.0.0/8"
+    fake_settings.monitoring_sg_name = "monitoring"
+
+    mon_called = []
+
+    with (
+        patch("app.config.get_settings", return_value=fake_settings),
+        patch(
+            "app.services.neutron.ensure_monitoring_ingress_sg",
+            side_effect=lambda *a, **kw: mon_called.append(a) or "monitoring",
+        ),
+    ):
+        resp = await admin_client.post("/api/admin/projects", json={"name": "test-proj"})
+
+    assert resp.status_code in (200, 201)
+    assert len(mon_called) == 1
+    assert mon_called[0][1] == "proj-new-1"  # project_id

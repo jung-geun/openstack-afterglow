@@ -369,3 +369,28 @@ async def test_get_gpu_quotas_union_of_alias_sources(admin_client):
     types = {item["gpu_type"] for item in resp.json()}
     assert "RTX3090" in types
     assert "GTX1080" in types
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# circuit breaker 가드 — is_db_available() False 시 빈 결과
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+@pytest.mark.asyncio
+async def test_get_project_gpu_quotas_returns_empty_when_db_unavailable():
+    """is_db_available() False 시 get_project_gpu_quotas가 즉시 빈 목록을 반환한다."""
+    with patch("app.services.gpu_quota.is_db_available", return_value=False):
+        from app.services.gpu_quota import get_project_gpu_quotas
+
+        result = await get_project_gpu_quotas("test-project")
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_get_effective_gpu_quotas_returns_empty_when_db_unavailable():
+    """is_db_available() False 시 get_effective_gpu_quotas가 즉시 빈 dict를 반환한다."""
+    with patch("app.services.gpu_quota.is_db_available", return_value=False):
+        from app.services.gpu_quota import get_effective_gpu_quotas
+
+        result = await get_effective_gpu_quotas("test-project")
+    assert result == {}

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
@@ -120,7 +120,7 @@
 
 	$effect(() => {
 		if (!$auth.token) return;
-		fetchTopology();
+		untrack(() => fetchTopology());
 	});
 
 	onMount(() => {

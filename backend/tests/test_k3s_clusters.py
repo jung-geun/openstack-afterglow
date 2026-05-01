@@ -486,3 +486,42 @@ def test_keystone_auth_plugin_disabled_when_settings_disabled():
     plugin = KeystoneAuthPlugin()
     settings = _make_plugin_settings(k3s_keystone_auth_enabled=False)
     assert plugin.should_deploy(settings) is False
+
+
+# ---------------------------------------------------------------------------
+# DB OperationalError → 빈 목록 graceful degrade
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_list_k3s_clusters_db_operational_error_returns_empty(client):
+    """DB OperationalError 발생 시 list_k3s_clusters가 200 + 빈 배열을 반환한다."""
+    from sqlalchemy.exc import OperationalError
+
+    with (
+        patch("app.api.k3s.clusters.k3s_cluster") as mock_db,
+        patch("app.api.k3s.clusters.mark_db_unhealthy") as mock_mark,
+    ):
+        mock_db.list_clusters = AsyncMock(side_effect=OperationalError("lost connection", None, None))
+        resp = await client.get("/api/k3s/clusters")
+
+    assert resp.status_code == 200
+    assert resp.json() == []
+    mock_mark.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_list_k3s_clusters_db_interface_error_returns_empty(client):
+    """DB InterfaceError 발생 시 list_k3s_clusters가 200 + 빈 배열을 반환한다."""
+    from sqlalchemy.exc import InterfaceError
+
+    with (
+        patch("app.api.k3s.clusters.k3s_cluster") as mock_db,
+        patch("app.api.k3s.clusters.mark_db_unhealthy") as mock_mark,
+    ):
+        mock_db.list_clusters = AsyncMock(side_effect=InterfaceError("connection reset", None, None))
+        resp = await client.get("/api/k3s/clusters")
+
+    assert resp.status_code == 200
+    assert resp.json() == []
+    mock_mark.assert_called_once()
