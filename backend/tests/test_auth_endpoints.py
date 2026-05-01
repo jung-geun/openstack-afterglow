@@ -132,6 +132,34 @@ async def test_list_projects(client):
     assert resp.json()[0]["id"] == "proj-1"
 
 
+# ────── groups ──────
+
+
+@pytest.mark.asyncio
+async def test_list_my_groups_success(client):
+    groups = [{"id": "grp-1", "name": "devteam", "description": "Dev Team", "domain_id": "default"}]
+    with patch("app.api.identity.auth.keystone.list_user_groups", return_value=groups):
+        resp = await client.get("/api/auth/groups")
+    assert resp.status_code == 200
+    assert resp.json()[0]["id"] == "grp-1"
+    assert resp.json()[0]["name"] == "devteam"
+
+
+@pytest.mark.asyncio
+async def test_list_my_groups_forbidden(client):
+    with patch("app.api.identity.auth.keystone.list_user_groups", side_effect=PermissionError("forbidden")):
+        resp = await client.get("/api/auth/groups")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+@pytest.mark.asyncio
+async def test_list_my_groups_server_error(client):
+    with patch("app.api.identity.auth.keystone.list_user_groups", side_effect=RuntimeError("conn error")):
+        resp = await client.get("/api/auth/groups")
+    assert resp.status_code == 500
+
+
 # ────── GitLab enabled ──────
 
 

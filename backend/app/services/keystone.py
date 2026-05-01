@@ -454,6 +454,27 @@ def delete_app_credential(project_id: str, app_cred_id: str) -> None:
         _logger.warning("App Credential %s 회수 실패 (best-effort)", app_cred_id, exc_info=True)
 
 
+def list_user_groups(token: str, user_id: str) -> list[dict]:
+    """사용자가 속한 keystone 그룹 목록. policy 불허 시 PermissionError."""
+    settings = get_settings()
+    auth_plugin = v3.Token(auth_url=settings.os_auth_url, token=token)
+    sess = ks_session.Session(auth=auth_plugin, verify=settings.ssl_verify)
+    from keystoneclient.v3 import client as ks_client
+
+    ks = ks_client.Client(session=sess)
+    try:
+        groups = ks.groups.list(user=user_id)
+    except Exception as e:
+        status = getattr(e, "http_status", None) or getattr(e, "status_code", None)
+        if status in (401, 403):
+            raise PermissionError(str(e)) from e
+        raise
+    return [
+        {"id": g.id, "name": g.name, "description": getattr(g, "description", None), "domain_id": g.domain_id}
+        for g in groups
+    ]
+
+
 def list_projects(token: str) -> list[dict]:
     """
     사용자가 접근 가능한 프로젝트 목록 반환.
