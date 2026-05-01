@@ -154,10 +154,35 @@ async def test_list_my_groups_forbidden(client):
 
 
 @pytest.mark.asyncio
-async def test_list_my_groups_server_error(client):
-    with patch("app.api.identity.auth.keystone.list_user_groups", side_effect=RuntimeError("conn error")):
+async def test_list_my_groups_unexpected_error_returns_empty(client):
+    # service 내부에서 어떤 예외든 PermissionError 로 변환되므로 endpoint 는 [] 반환
+    with patch("app.api.identity.auth.keystone.list_user_groups", side_effect=PermissionError("unexpected")):
         resp = await client.get("/api/auth/groups")
-    assert resp.status_code == 500
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_list_user_groups_converts_exception_to_permission_error():
+    """keystone client 가 임의 예외를 raise 해도 service 가 PermissionError 로 변환하는지 검증."""
+    from unittest.mock import MagicMock
+
+    mock_ks = MagicMock()
+    mock_ks.groups.list.side_effect = RuntimeError("kaboom")
+
+    with (
+        patch("app.services.keystone.get_settings") as mock_cfg,
+        patch("app.services.keystone.v3.Token"),
+        patch("app.services.keystone.ks_session.Session"),
+        patch("keystoneclient.v3.client.Client", return_value=mock_ks),
+    ):
+        mock_cfg.return_value.os_auth_url = "http://keystone:5000/v3"
+        mock_cfg.return_value.ssl_verify = False
+        import pytest as _pytest
+
+        from app.services.keystone import list_user_groups
+
+        with _pytest.raises(PermissionError):
+            list_user_groups("fake-token", "fake-user-id")
 
 
 # ────── GitLab enabled ──────

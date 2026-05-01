@@ -455,7 +455,12 @@ def delete_app_credential(project_id: str, app_cred_id: str) -> None:
 
 
 def list_user_groups(token: str, user_id: str) -> list[dict]:
-    """사용자가 속한 keystone 그룹 목록. policy 불허 시 PermissionError."""
+    """사용자가 속한 keystone 그룹 목록.
+
+    keystone policy 거부, API 오류, SDK 예외 등 어떤 실패도 PermissionError 로
+    변환해 호출부가 graceful 빈 리스트로 응답할 수 있게 한다. 정확한 원인은
+    서버 로그(traceback)에 남긴다.
+    """
     settings = get_settings()
     auth_plugin = v3.Token(auth_url=settings.os_auth_url, token=token)
     sess = ks_session.Session(auth=auth_plugin, verify=settings.ssl_verify)
@@ -465,12 +470,15 @@ def list_user_groups(token: str, user_id: str) -> list[dict]:
     try:
         groups = ks.groups.list(user=user_id)
     except Exception as e:
-        status = getattr(e, "http_status", None) or getattr(e, "status_code", None)
-        if status in (401, 403):
-            raise PermissionError(str(e)) from e
-        raise
+        _logger.exception("list_user_groups 실패 (user_id=%s)", user_id)
+        raise PermissionError(str(e)) from e
     return [
-        {"id": g.id, "name": g.name, "description": getattr(g, "description", None), "domain_id": g.domain_id}
+        {
+            "id": g.id,
+            "name": g.name,
+            "description": getattr(g, "description", None),
+            "domain_id": g.domain_id,
+        }
         for g in groups
     ]
 

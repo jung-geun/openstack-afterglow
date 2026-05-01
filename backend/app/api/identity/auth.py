@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -10,6 +11,8 @@ from app.models.auth import GitLabCallbackRequest, LoginRequest, ProjectInfo, To
 from app.rate_limit import limiter
 from app.services import keystone
 from app.services.cache import cached_call, ttl_fast, ttl_normal, ttl_static
+
+_logger = logging.getLogger(__name__)
 
 
 class GroupInfo(BaseModel):
@@ -154,6 +157,7 @@ async def list_my_groups(token_info: dict = Depends(get_token_info)):
     except PermissionError:
         return []
     except Exception:
+        _logger.exception("/api/auth/groups 처리 실패 (user_id=%s)", token_info.get("user_id"))
         raise HTTPException(status_code=500, detail="그룹 목록 조회 실패")
 
 
