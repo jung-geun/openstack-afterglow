@@ -134,16 +134,13 @@ async def list_objects(
         raise HTTPException(status_code=500, detail="오브젝트 목록 조회 실패")
 
 
-_MAX_UPLOAD_BYTES = 5 * 1024 * 1024 * 1024  # 5 GB
-
-
 @router.post("/{container_name}/objects", status_code=201)
 async def upload_object(
     container_name: str,
     file: UploadFile,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    """오브젝트 업로드 (multipart/form-data). 최대 5 GB."""
+    """오브젝트 업로드 (multipart/form-data). 1 GiB 초과 시 Swift SLO 자동 적용."""
     from app.services import swift
 
     # 파일 크기 확인 (file.size가 없으면 seek으로 계산)
@@ -153,9 +150,6 @@ async def upload_object(
         await file.seek(0, 2)
         file_size = await file.tell()
         await file.seek(0)
-
-    if file_size > _MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail="업로드 파일 크기는 5 GB를 초과할 수 없습니다")
 
     try:
         raw_filename = file.filename or "unnamed"

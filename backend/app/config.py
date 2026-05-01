@@ -75,7 +75,7 @@ def _load_toml() -> dict:
     flat["os_cacert"] = ost.get("cacert", "")
     flat["os_manila_endpoint"] = ost.get("manila_endpoint", "")
     flat["os_swift_endpoint"] = ost.get("swift_endpoint", "")
-    flat["os_swift_upload_timeout"] = ost.get("swift_upload_timeout", 600)
+    flat["os_swift_upload_timeout"] = ost.get("swift_upload_timeout", 1800)
     flat["os_manila_share_network_id"] = ost.get("manila_share_network_id", "")
     flat["os_manila_share_type"] = ost.get("manila_share_type", "cephfs")
     flat["os_manila_nfs_share_type"] = ost.get("manila_nfs_share_type", "nfstype")
@@ -241,7 +241,7 @@ class Settings(BaseSettings):
     os_manila_endpoint: str = ""
     # Swift 설정
     os_swift_endpoint: str = ""
-    os_swift_upload_timeout: int = 600  # 대용량 업로드용 타임아웃 (초)
+    os_swift_upload_timeout: int = 1800  # 대용량 업로드용 타임아웃 (초)
     os_manila_share_network_id: str = ""
     os_manila_share_type: str = "cephfs"
     os_manila_nfs_share_type: str = "nfstype"

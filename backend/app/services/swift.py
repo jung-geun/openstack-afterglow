@@ -260,28 +260,33 @@ def list_objects(conn, container: str, prefix: str = "", delimiter: str = "") ->
         return []
 
 
+_SLO_SEGMENT_SIZE = 1 * 1024 * 1024 * 1024  # 1 GiB — 이 크기 초과 시 Swift SLO 자동 적용
+
+
 def upload_object(conn, container: str, name: str, data, content_type: str = "", content_length: int = 0) -> dict:
     """오브젝트를 업로드하고 메타데이터를 반환.
 
     data: bytes 또는 file-like object (read() 메서드 지원).
-    대용량 파일의 경우 file-like object를 전달하면 스트리밍으로 업로드되어 메모리 사용을 줄인다.
+    1 GiB 초과 파일은 Swift SLO(Static Large Object)로 자동 분할 업로드된다.
+    segments 는 {container}_segments 컨테이너에 저장되고, manifest 만 원본 컨테이너에 남는다.
     """
     from app.config import get_settings
 
     _apply_endpoint_override(conn)
 
-    # 대용량 업로드를 위해 타임아웃을 임시로 늘림
     settings = get_settings()
-    upload_timeout = settings.os_swift_upload_timeout
     proxy = conn.object_store
     original_timeout = getattr(proxy, "timeout", None)
-    proxy.timeout = upload_timeout
+    proxy.timeout = settings.os_swift_upload_timeout
     try:
         kwargs: dict = {"data": data}
         if content_type:
             kwargs["content_type"] = content_type
         if content_length:
             kwargs["content_length"] = content_length
+        if content_length and content_length > _SLO_SEGMENT_SIZE:
+            kwargs["segment_size"] = _SLO_SEGMENT_SIZE
+            kwargs["use_slo"] = True
         obj = conn.object_store.create_object(container, name, **kwargs)
         actual_bytes = content_length if content_length else (len(data) if isinstance(data, bytes) else 0)
         return {
@@ -310,12 +315,35 @@ def delete_object(conn, container: str, name: str) -> None:
 
     trailing '/'가 있는 이름(디렉토리 마커)은 openstacksdk urljoin이 '/'를 strip하므로
     raw DELETE를 사용한다.
+    SLO manifest 는 ?multipart-manifest=delete 로 segments 까지 함께 정리하여 quota 누수를 방지한다.
     """
     import urllib.parse
 
     _apply_endpoint_override(conn)
     if name.endswith("/"):
         encoded = "/" + urllib.parse.quote(container, safe="") + "/" + urllib.parse.quote(name, safe="/")
+        conn.object_store.delete(encoded)
+        return
+
+    # SLO manifest 여부 확인 — segments quota 누수 방지
+    is_slo = False
+    try:
+        meta = conn.object_store.get_object_metadata(name, container=container)
+        is_slo = bool(
+            getattr(meta, "is_static_large_object", None)
+            or str(getattr(meta, "x_static_large_object", "") or "").lower() == "true"
+        )
+    except Exception:
+        pass
+
+    if is_slo:
+        encoded = (
+            "/"
+            + urllib.parse.quote(container, safe="")
+            + "/"
+            + urllib.parse.quote(name, safe="/")
+            + "?multipart-manifest=delete"
+        )
         conn.object_store.delete(encoded)
     else:
         conn.object_store.delete_object(name, ignore_missing=False, container=container)
