@@ -1174,3 +1174,28 @@ Option A 채택 시 본 절 진행. Option B 채택 시 사용자가 자체 구�
 3. **VM에서 Prometheus 도달성**: 사용자 VM은 보통 floating IP 없이 fixed IP만 가짐. Prometheus 스크래퍼가 VM의 fixed IP에 직접 접근 가능한 위치에 떠 있는가, 아니면 floating IP가 필수인가?
 4. **인증 모델**: Grafana org를 keystone project별로 1:1 매핑할지, 단일 org + folder + label filter로 격리할지?
 5. **옵션 A vs B 결정**: 본 결정이 12.3/12.4 작업량을 크게 좌우. 사용자 격리 정책 + 운영 인력 기준 판단 필요.
+
+---
+
+## 13. 오브젝트 스토리지 5GB+ 대용량 업로드 (Swift SLO)
+
+### 13.1 문제
+
+기존 업로드는 5GB 하드 캡으로 인해 대용량 파일(5GB 초과)을 버킷에 올릴 수 없었다:
+- Traefik middleware `maxRequestBodyBytes: 5GB`
+- 백엔드 `_MAX_UPLOAD_BYTES = 5GB` + 413 응답
+- Swift 단일 PUT 프로토콜 한도 5GB
+
+### 13.2 구현
+
+- [x] `backend/app/services/swift.py` — `_SLO_SEGMENT_SIZE = 1 GiB` 상수 추가; `upload_object` 에서 1 GiB 초과 시 `use_slo=True, segment_size=1GiB` 로 `create_object` 호출 (openstacksdk SLO 자동 분할)
+- [x] `backend/app/services/swift.py` — `delete_object` 에서 `is_static_large_object` 헤더 확인 후 SLO manifest 삭제 시 `?multipart-manifest=delete` 로 segments 까지 정리 (quota 누수 방지)
+- [x] `backend/app/api/object_storage/containers.py` — 5GB 하드 캡(`_MAX_UPLOAD_BYTES`) 및 413 분기 제거
+- [x] `backend/app/config.py` — `os_swift_upload_timeout` 기본값 600 → 1800 (30분)
+- [x] `deploy/k8s-template/middleware.yaml` — Traefik `maxRequestBodyBytes` 5GB → 50GB
+- [x] `backend/tests/test_object_storage.py` — `test_upload_large_object_uses_slo`, `test_upload_small_object_no_slo`, `test_delete_slo_object_purges_segments` 3건 추가
+
+### 13.3 검증 (사용자 직접)
+
+- Ceph RGW SLO 지원 확인 (`?multipart-manifest=put` 201 응답)
+- 5.5GB 더미 파일 업로드/다운로드/삭제 E2E
