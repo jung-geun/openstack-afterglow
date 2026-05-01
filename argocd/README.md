@@ -6,22 +6,35 @@
 
 ```
 argocd/
-  appproject.yaml   # ArgoCD AppProject (권한 범위 설정)
-  application.yaml  # ArgoCD Application (배포 대상 및 동기화 정책)
+  00-namespace.yaml              # argocd 네임스페이스
+  01-appproject.yaml             # AppProject (권한 범위)
+  02-application.dev.yaml        # dev Application (dev 브랜치 추적, CI digest 갱신)
+  02-application.prod.yaml       # prod Application (main 브랜치 추적, Image Updater 감지)
+  03-ingress.yaml                # ArgoCD UI Ingress
+  04-server-config.yaml          # ArgoCD server 설정 (insecure, URL 등)
+  image-updater/
+    install.yaml                 # Image Updater 공식 매니페스트 (v1.1.1)
+    kustomization.yaml           # Kustomize overlay (log level 패치)
+    config-patch.yaml            # ConfigMap 패치 (log.level=info)
+    imageupdater-prod.yaml       # ImageUpdater CR — prod app 감시 (useAnnotations)
 ```
 
 ## 배포 흐름
 
 ```
-npm run version:bump:patch
-  → git tag v1.x.x 생성
-  → git push origin main --tags
-  → GitHub Actions: ghcr.io/jung-geun/afterglow-api:latest 및 :vX.Y.Z 푸시
-  → ArgoCD Image Updater: :latest digest 변경 감지 (약 2분 내)
-  → ArgoCD 자동 sync → 새 Pod 롤아웃
+git tag v1.x.x && git push origin main --tags
+  → GitHub Actions: ghcr.io/jung-geun/afterglow-api:{vX.Y.Z, latest} 빌드/푸시
+  → ArgoCD: prod kustomization.yaml 의 newTag 변경 감지 → auto-sync → 새 Pod 롤아웃
+  → Image Updater: :latest digest 변경 감지 → 다음 릴리즈부터 자동 재배포
+
+dev 푸시
+  → GitHub Actions update-manifests: kustomization.yaml digest 갱신 커밋
+  → ArgoCD: dev digest 변경 감지 → auto-sync → 새 Pod 롤아웃
 ```
 
-## 사전 요구사항
+---
+
+## 최초 설치 순서
 
 ### 1. ArgoCD 설치
 
@@ -30,24 +43,23 @@ kubectl create namespace argocd
 kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 ```
 
-### 2. ArgoCD Image Updater 설치
+### 2. ArgoCD Image Updater 설치 (선언적, 파일로 직접)
 
 ```bash
-kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj-labs/argocd-image-updater/stable/manifests/install.yaml
+# 리포지터리 루트에서 실행
+kubectl apply -k argocd/image-updater/
 ```
 
-### 3. GitHub 레포 등록
+- `install.yaml` — CRD + RBAC + Deployment 등 공식 매니페스트 (v1.1.1)
+- `config-patch.yaml` — ConfigMap 패치: log.level=info
+- `imageupdater-prod.yaml` — ImageUpdater CR: afterglow-prod 앱의 annotation 읽어 digest 감시
 
-```bash
-argocd repo add https://github.com/jung-geun/openstack-afterglow.git \
-  --username jung-geun \
-  --password <GITHUB_PAT>
-```
+업그레이드 시 `argocd/image-updater/install.yaml` 을 새 버전으로 교체 후 재적용.
 
-### 4. ghcr.io pull-secret 생성 (필수 — private 패키지)
+### 3. GHCR pull-secret 생성 (필수 — private 패키지)
 
 Image Updater 가 GHCR 이미지 digest 를 polling 하려면 인증이 필요합니다.
-`argocd` 네임스페이스에 secret 을 생성하고, Application annotation 에 이미 선언된
+`argocd` 네임스페이스에 secret 을 생성하고, Application annotation 에 선언된
 `pullsecret:argocd/ghcr-secret` 과 이름을 맞춥니다.
 
 ```bash
@@ -61,36 +73,63 @@ kubectl create secret docker-registry ghcr-secret \
 > `02-application.prod.yaml` 의 `backend.pull-secret` / `frontend.pull-secret` annotation 이
 > 이 secret 을 가리킵니다. secret 이 없으면 Image Updater 가 401 로 실패합니다.
 
-## 적용 방법
+### 4. GitHub 레포 등록
 
 ```bash
-# 1. AppProject 먼저 적용
-kubectl apply -f argocd/appproject.yaml
-
-# 2. Application 적용
-kubectl apply -f argocd/application.yaml
-
-# 3. 상태 확인
-argocd app get afterglow
-argocd app sync afterglow  # 최초 수동 동기화 (이후 자동)
+argocd repo add https://github.com/jung-geun/openstack-afterglow.git \
+  --username jung-geun \
+  --password <GITHUB_PAT>
 ```
 
-## Test 환경 사용
+### 5. ArgoCD 리소스 적용
 
-동일한 `application.yaml`을 test 환경에서도 사용하려면 `targetRevision`과 `path`만 변경:
+```bash
+# 네임스페이스 → AppProject → Application 순서로 적용
+kubectl apply -f argocd/00-namespace.yaml
+kubectl apply -f argocd/01-appproject.yaml
+kubectl apply -f argocd/02-application.dev.yaml
+kubectl apply -f argocd/02-application.prod.yaml
+kubectl apply -f argocd/03-ingress.yaml
+kubectl apply -f argocd/04-server-config.yaml
 
-```yaml
-source:
-  targetRevision: dev   # dev 브랜치 추적
-  path: k8s-test        # test 매니페스트 사용
+# 최초 수동 sync (이후 자동)
+argocd app sync afterglow-dev
+argocd app sync afterglow-prod
 ```
 
-또는 별도 Application 리소스로 분리하여 두 환경을 동시에 관리할 수 있습니다.
+---
 
 ## 동작 방식
 
-- **Image Updater `digest` 전략**: `:latest` 태그가 가리키는 이미지 digest가 바뀌면 새 배포 트리거. semver 태그 없이 mutable tag만 사용해도 자동 감지 가능.
-- **`write-back-method: git`**: Image Updater가 `.argocd-source-afterglow.yaml` 파일을 git에 커밋하여 변경 이력 유지.
-- **`selfHeal: true`**: 클러스터 리소스가 git 상태와 달라지면 자동으로 되돌림.
-- **`prune: true`**: git에서 삭제된 매니페스트는 클러스터에서도 삭제.
-- **Secret 제외**: `ignoreDifferences`로 Secret data는 ArgoCD가 관리하지 않음 (수동 또는 외부 시크릿 매니저로 관리).
+### prod 환경
+- ArgoCD 가 `main` 브랜치의 `deploy/k8s-template/overlays/prod/kustomization.yaml` 을 추적.
+- 새 릴리즈 시 `newTag` 를 업데이트하는 PR → main 머지 → ArgoCD git-diff 감지 → auto-sync.
+- Image Updater 가 `:latest` digest 변경을 감지하면 ArgoCD Application 을 in-cluster patch → 롤아웃.
+
+### dev 환경
+- CI `update-manifests` job 이 dev 빌드마다 `kustomization.yaml` 의 `digest` 필드를 갱신 커밋.
+- ArgoCD 가 git-diff 를 감지하여 auto-sync.
+
+### Image Updater CR (`imageupdater-prod.yaml`)
+- `useAnnotations: true` — prod Application 의 `argocd-image-updater.argoproj.io/*` annotation 을 읽어 설정.
+- 별도 이미지 목록 설정 없이 Application annotation 으로 update-strategy/pull-secret 관리.
+
+---
+
+## Image Updater 상태 확인
+
+```bash
+# pod 상태
+kubectl -n argocd get pods -l app.kubernetes.io/name=argocd-image-updater
+
+# 로그 (afterglow 관련 + 에러)
+kubectl -n argocd logs deploy/argocd-image-updater-controller --tail=200 | \
+  grep -Ei 'afterglow|error|warn|unauthorized'
+
+# ImageUpdater CR 상태
+kubectl -n argocd get imageupdater afterglow-prod -o yaml
+
+# prod Application in-cluster image override 확인
+kubectl -n argocd get app afterglow-prod \
+  -o jsonpath='{.spec.source.kustomize.images}' && echo
+```
