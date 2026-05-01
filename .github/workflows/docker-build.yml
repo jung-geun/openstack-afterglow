@@ -329,12 +329,16 @@ jobs:
         run: |
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"
+          git diff --quiet deploy/k8s-template/overlays/dev/kustomization.yaml || {
+            git stash push deploy/k8s-template/overlays/dev/kustomization.yaml
+            git pull --rebase origin dev
+            git stash pop
+          }
           git add deploy/k8s-template/overlays/dev/kustomization.yaml
           if git diff --staged --quiet; then
             echo "Digest unchanged — no commit needed"
             exit 0
           fi
-          git pull --rebase origin dev
           git commit -m "chore(deploy): update dev image digests [skip ci]"
           git push origin dev
 
