@@ -13,10 +13,8 @@ argocd/
   03-ingress.yaml                # ArgoCD UI Ingress
   04-server-config.yaml          # ArgoCD server 설정 (insecure, URL 등)
   image-updater/
-    install.yaml                 # Image Updater 공식 매니페스트 (v1.1.1)
-    kustomization.yaml           # Kustomize overlay (log level 패치)
-    config-patch.yaml            # ConfigMap 패치 (log.level=info)
-    imageupdater-prod.yaml       # ImageUpdater CR — prod app 감시 (useAnnotations)
+    install.yaml                 # Image Updater 공식 매니페스트 v1.1.1 + log.level=info
+    imageupdater-prod.yaml       # ImageUpdater CR — prod app annotation 감시
 ```
 
 ## 배포 흐름
@@ -45,13 +43,17 @@ kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/st
 
 ### 2. ArgoCD Image Updater 설치 (선언적, 파일로 직접)
 
+두 단계로 나눠 적용합니다. CRD 가 등록된 뒤에 ImageUpdater CR 을 생성해야 합니다.
+
 ```bash
-# 리포지터리 루트에서 실행
-kubectl apply -k argocd/image-updater/
+# Step 1: CRD + RBAC + Deployment + ConfigMap (log.level=info 포함)
+kubectl apply -f argocd/image-updater/install.yaml
+
+# Step 2: ImageUpdater CR — CRD 등록 완료 후 적용
+kubectl apply -f argocd/image-updater/imageupdater-prod.yaml
 ```
 
-- `install.yaml` — CRD + RBAC + Deployment 등 공식 매니페스트 (v1.1.1)
-- `config-patch.yaml` — ConfigMap 패치: log.level=info
+- `install.yaml` — CRD, RBAC, Deployment, ConfigMap 일괄 포함 (v1.1.1, log.level=info 내장)
 - `imageupdater-prod.yaml` — ImageUpdater CR: afterglow-prod 앱의 annotation 읽어 digest 감시
 
 업그레이드 시 `argocd/image-updater/install.yaml` 을 새 버전으로 교체 후 재적용.
