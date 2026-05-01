@@ -11,6 +11,7 @@
 	import StatusChip from '$lib/components/ui/StatusChip.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
+	import ActionMenu from '$lib/components/ui/ActionMenu.svelte';
 
 	interface AdminVolume {
 		id: string;
@@ -50,6 +51,7 @@
 	let deleting = $state(false);
 	let deleteError = $state('');
 	let copiedProjectId = $state<string | null>(null);
+	let openActionMenu = $state<string | null>(null);
 	function copyProjectId(id: string) {
 		navigator.clipboard.writeText(id).then(() => {
 			copiedProjectId = id;
@@ -360,23 +362,29 @@
 							</td>
 							<td class="py-2 pr-4 text-gray-500">{v.created_at?.slice(0, 10) ?? '-'}</td>
 							<td class="py-2" onclick={(e) => e.stopPropagation()}>
-								<div class="flex items-center gap-1">
-									<button onclick={() => { editVolume = v; editName = v.name; editDesc = ''; editError = ''; }}
-										class="px-2 py-0.5 text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 rounded">수정</button>
-									<button onclick={() => { extendVolume = v; newSize = v.size + 10; extendError = ''; }}
-										class="px-2 py-0.5 text-xs bg-blue-900/40 hover:bg-blue-800/40 text-blue-400 rounded">확장</button>
-									{#if v.status === 'available'}
-										<button onclick={() => { transferVolume = v; transferSearch = ''; transferProjectId = ''; transferProjectName = ''; transferError = ''; }}
-											class="px-2 py-0.5 text-xs bg-purple-900/40 hover:bg-purple-800/40 text-purple-400 rounded">이전</button>
-									{/if}
-									<button onclick={() => { resetVolume = v; resetStatus = 'available'; resetError = ''; }}
-										class="px-2 py-0.5 text-xs bg-yellow-900/40 hover:bg-yellow-800/40 text-yellow-400 rounded">상태변경</button>
-									{#if /^(error|deleting)/i.test(v.status ?? '')}
-										<button onclick={() => { forceDeleteVolume = v; forceDeleteError = ''; }}
-											class="px-2 py-0.5 text-xs bg-rose-900/40 hover:bg-rose-800/40 text-rose-400 rounded border border-rose-700">강제삭제</button>
-									{/if}
-									<button onclick={() => { deleteVolume = v; deleteError = ''; }}
-										class="px-2 py-0.5 text-xs bg-red-900/30 hover:bg-red-900/50 text-red-400 rounded">삭제</button>
+								<div class="flex justify-end">
+									<ActionMenu
+										open={openActionMenu === v.id}
+										onopen={() => { openActionMenu = v.id; }}
+										onclose={() => { openActionMenu = null; }}
+									>
+										<button onclick={() => { openActionMenu = null; editVolume = v; editName = v.name; editDesc = ''; editError = ''; }}
+											class="w-full text-left px-3 py-1.5 text-[13px] text-gray-300 hover:text-white hover:bg-gray-800 transition-colors">수정</button>
+										<button onclick={() => { openActionMenu = null; extendVolume = v; newSize = v.size + 10; extendError = ''; }}
+											class="w-full text-left px-3 py-1.5 text-[13px] text-gray-300 hover:text-white hover:bg-gray-800 transition-colors">확장</button>
+										{#if v.status === 'available'}
+											<button onclick={() => { openActionMenu = null; transferVolume = v; transferSearch = ''; transferProjectId = ''; transferProjectName = ''; transferError = ''; }}
+												class="w-full text-left px-3 py-1.5 text-[13px] text-gray-300 hover:text-white hover:bg-gray-800 transition-colors">이전</button>
+										{/if}
+										<button onclick={() => { openActionMenu = null; resetVolume = v; resetStatus = 'available'; resetError = ''; }}
+											class="w-full text-left px-3 py-1.5 text-[13px] text-gray-300 hover:text-white hover:bg-gray-800 transition-colors">상태변경</button>
+										{#if /^(error|deleting)/i.test(v.status ?? '')}
+											<button onclick={() => { openActionMenu = null; forceDeleteVolume = v; forceDeleteError = ''; }}
+												class="w-full text-left px-3 py-1.5 text-[13px] text-rose-400 hover:text-rose-300 hover:bg-gray-800 transition-colors">강제삭제</button>
+										{/if}
+										<button onclick={() => { openActionMenu = null; deleteVolume = v; deleteError = ''; }}
+											class="w-full text-left px-3 py-1.5 text-[13px] text-red-400 hover:text-red-300 hover:bg-gray-800 transition-colors">삭제</button>
+									</ActionMenu>
 								</div>
 							</td>
 						</tr>

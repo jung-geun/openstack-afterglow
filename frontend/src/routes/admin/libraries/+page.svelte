@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
@@ -38,7 +39,6 @@
   let error = $state('');
   let message = $state('');
   let buildingId = $state<string | null>(null);
-  let autoRefresh = $state(false);
   let usageData = $state<TsPoint[]>([]);
   let usageRange = $state('7d');
 
@@ -70,10 +70,11 @@
   }
 
   $effect(() => {
-    if (token) {
+    if (!token) return;
+    untrack(() => {
       loadData();
       loadUsage(usageRange);
-    }
+    });
   });
 
   // 라이브러리에 해당하는 FileStorage 찾기
@@ -236,7 +237,6 @@
   <PageHeader title="라이브러리 관리" breadcrumb="라이브러리">
     {#snippet action()}
       <div class="flex items-center gap-2">
-        <AutoRefreshToggle bind:enabled={autoRefresh} interval={10000} onTick={loadData} />
         <button onclick={loadData} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600 flex items-center gap-1.5">새로고침</button>
       </div>
     {/snippet}

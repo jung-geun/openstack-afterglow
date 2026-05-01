@@ -3,7 +3,6 @@
   import ProfileSection from '$lib/components/account/ProfileSection.svelte';
   import PasswordSection from '$lib/components/account/PasswordSection.svelte';
   import ThemeSection from '$lib/components/account/ThemeSection.svelte';
-  import GroupsSection from '$lib/components/account/GroupsSection.svelte';
   import ProjectsSection from '$lib/components/account/ProjectsSection.svelte';
   import KeypairsSection from '$lib/components/account/KeypairsSection.svelte';
 </script>
@@ -33,7 +32,6 @@
     <PasswordSection />
     <ThemeSection />
     <ProjectsSection />
-    <GroupsSection />
     <div class="lg:col-span-2">
       <KeypairsSection />
     </div>
