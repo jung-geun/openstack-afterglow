@@ -8,7 +8,7 @@
     ],
     "environment": {
         "DATABASE_URL": "mysql+asyncmy://{{ afterglow_database_user }}:{{ afterglow_database_password }}@{{ database_address | default('mariadb') }}:{{ database_port | default(3306) }}/{{ afterglow_database_name }}",
-        "REDIS_URL": "redis://{{ afterglow_redis_password | default('') }}@{{ valkey_address | default('valkey') }}:{{ valkey_port | default(6379) }}/{{ afterglow_redis_db_index }}",
+        "REDIS_URL": "redis://:{{ afterglow_redis_password | default('') }}@{{ valkey_address | default('valkey') }}:{{ valkey_port | default(6379) }}/{{ afterglow_redis_db_index }}",
         "OS_PASSWORD": "{{ afterglow_admin_keystone_password }}",
         "OS_INTERFACE": "public",
         "SECRET_KEY": "{{ afterglow_secret_key }}",

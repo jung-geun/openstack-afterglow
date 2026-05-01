@@ -324,12 +324,7 @@ def ensure_cluster_manager_user(project_id: str) -> tuple[str, str]:
 
         await save_manager_credentials(project_id, user_id, username, encrypted_pw)
 
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-
-    cached = loop.run_until_complete(_db_get())
+    cached = asyncio.run(_db_get())
     if cached:
         return cached["user_id"], decrypt_manager_password(cached["encrypted_password"])
 
@@ -379,7 +374,7 @@ def ensure_cluster_manager_user(project_id: str) -> tuple[str, str]:
                 raise RuntimeError(f"역할 {role_name} 부여 실패: {e}") from e
 
         encrypted_pw = encrypt_manager_password(password)
-        loop.run_until_complete(_db_save(user_id, username, encrypted_pw))
+        asyncio.run(_db_save(user_id, username, encrypted_pw))
         return user_id, password
     finally:
         admin_conn.close()

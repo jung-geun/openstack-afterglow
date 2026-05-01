@@ -976,7 +976,10 @@ async def update_volume_attachment(
             body.delete_on_termination,
         )
         await invalidate(f"afterglow:cinder:{pid}:vol_attach:{instance_id}")
+    except HttpException as e:
+        raise HTTPException(status_code=e.http_status or 500, detail=e.message or str(e))
     except Exception:
+        logger.error("볼륨 연결 정보 업데이트 실패", exc_info=True)
         raise HTTPException(status_code=500, detail="작업 실패")
 
 

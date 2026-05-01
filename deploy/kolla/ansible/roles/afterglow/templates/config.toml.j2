@@ -25,7 +25,7 @@ favicon_path = "/favicon.ico"
 refresh_interval_ms = 5000
 
 [cache]
-redis_url = "redis://{{ afterglow_redis_password | default('') }}@{{ valkey_address | default('valkey') }}:{{ valkey_port | default(6379) }}/{{ afterglow_redis_db_index }}"
+redis_url = "redis://:{{ afterglow_redis_password | default('') }}@{{ valkey_address | default('valkey') }}:{{ valkey_port | default(6379) }}/{{ afterglow_redis_db_index }}"
 ttl_fast = 15
 ttl_normal = 30
 ttl_slow = 60

@@ -26,10 +26,9 @@ def _verify_sd_token(request: Request) -> None:
     if not expected:
         raise HTTPException(status_code=503, detail="monitoring_sd_token이 설정되지 않았습니다")
     auth = request.headers.get("Authorization", "")
-    if auth.startswith("Bearer "):
-        token = auth[len("Bearer ") :]
-    else:
-        token = request.query_params.get("token", "")
+    if not auth.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Authorization Bearer 토큰이 필요합니다")
+    token = auth[len("Bearer ") :]
     if token != expected:
         raise HTTPException(status_code=401, detail="유효하지 않은 SD 토큰")
 
