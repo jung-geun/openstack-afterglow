@@ -44,23 +44,22 @@ argocd repo add https://github.com/jung-geun/openstack-afterglow.git \
   --password <GITHUB_PAT>
 ```
 
-> Image Updater의 `write-back-method: git` 사용 시 **쓰기 권한**이 있는 토큰/키가 필요합니다.
+### 4. ghcr.io pull-secret 생성 (필수 — private 패키지)
 
-### 4. ghcr.io 레지스트리 설정 (private 패키지인 경우)
+Image Updater 가 GHCR 이미지 digest 를 polling 하려면 인증이 필요합니다.
+`argocd` 네임스페이스에 secret 을 생성하고, Application annotation 에 이미 선언된
+`pullsecret:argocd/ghcr-secret` 과 이름을 맞춥니다.
 
 ```bash
-# GitHub Container Registry용 pull secret
 kubectl create secret docker-registry ghcr-secret \
   --docker-server=ghcr.io \
   --docker-username=jung-geun \
-  --docker-password=<GITHUB_PAT> \
+  --docker-password=<GITHUB_PAT_READ_PACKAGES> \
   -n argocd
 ```
 
-그 후 `application.yaml`의 annotation에 추가:
-```yaml
-argocd-image-updater.argoproj.io/pull-secret: pullsecret:argocd/ghcr-secret
-```
+> `02-application.prod.yaml` 의 `backend.pull-secret` / `frontend.pull-secret` annotation 이
+> 이 secret 을 가리킵니다. secret 이 없으면 Image Updater 가 401 로 실패합니다.
 
 ## 적용 방법
 

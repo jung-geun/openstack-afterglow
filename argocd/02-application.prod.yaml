@@ -10,6 +10,8 @@ metadata:
     argocd-image-updater.argoproj.io/backend.update-strategy: digest
     argocd-image-updater.argoproj.io/frontend.update-strategy: digest
     argocd-image-updater.argoproj.io/write-back-method: argocd
+    argocd-image-updater.argoproj.io/backend.pull-secret: pullsecret:argocd/ghcr-secret
+    argocd-image-updater.argoproj.io/frontend.pull-secret: pullsecret:argocd/ghcr-secret
 spec:
   project: afterglow
   source:

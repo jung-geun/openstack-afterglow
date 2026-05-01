@@ -3,13 +3,7 @@ kind: Application
 metadata:
   name: afterglow-dev
   namespace: argocd
-  annotations:
-    # ArgoCD Image Updater: :dev 태그의 digest 변경을 감지하여 자동 재배포
-    argocd-image-updater.argoproj.io/image-list: |
-      backend=ghcr.io/jung-geun/afterglow-api:dev,frontend=ghcr.io/jung-geun/afterglow:dev
-    argocd-image-updater.argoproj.io/backend.update-strategy: digest
-    argocd-image-updater.argoproj.io/frontend.update-strategy: digest
-    argocd-image-updater.argoproj.io/write-back-method: argocd
+  annotations: {}
 spec:
   project: afterglow
   source:
