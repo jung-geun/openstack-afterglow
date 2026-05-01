@@ -264,7 +264,39 @@ def list_floating_ips(conn: openstack.connection.Connection, project_id: str | N
     kwargs: dict = {}
     if project_id:
         kwargs["project_id"] = project_id
-    return [_fip_to_info(f) for f in conn.network.ips(**kwargs)]
+    fips = list(conn.network.ips(**kwargs))
+    if not fips:
+        return []
+
+    needed_port_ids = {f.port_id for f in fips if getattr(f, "port_id", None)}
+    port_to_instance: dict[str, str] = {}
+    if needed_port_ids:
+        port_kwargs: dict = {}
+        if project_id:
+            port_kwargs["project_id"] = project_id
+        for p in conn.network.ports(**port_kwargs):
+            if p.id in needed_port_ids and p.device_id and (p.device_owner or "").startswith("compute:"):
+                port_to_instance[p.id] = p.device_id
+
+    instance_to_name: dict[str, str] = {}
+    needed_instance_ids = set(port_to_instance.values())
+    if needed_instance_ids:
+        srv_kwargs: dict = {}
+        if project_id:
+            srv_kwargs["project_id"] = project_id
+        for s in conn.compute.servers(**srv_kwargs):
+            if s.id in needed_instance_ids:
+                instance_to_name[s.id] = s.name or ""
+
+    out: list[FloatingIpInfo] = []
+    for f in fips:
+        info = _fip_to_info(f)
+        inst_id = port_to_instance.get(getattr(f, "port_id", None) or "") or None
+        if inst_id:
+            info.instance_id = inst_id
+            info.instance_name = instance_to_name.get(inst_id)
+        out.append(info)
+    return out
 
 
 def create_floating_ip(conn: openstack.connection.Connection, floating_network_id: str) -> FloatingIpInfo:

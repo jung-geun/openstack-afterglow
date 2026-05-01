@@ -62,3 +62,53 @@ async def test_delete_floating_ip(client, mock_conn):
     with patch("app.api.network.networks.neutron.delete_floating_ip", return_value=None):
         resp = await client.delete("/api/networks/floating-ips/fip-1")
     assert resp.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_list_floating_ips_with_instance(client, mock_conn):
+    """port_id 가 있는 FIP 는 응답에 instance_id, instance_name 이 포함되어야 한다."""
+    fip_with_instance = {
+        **make_fip(),
+        "port_id": "port-1",
+        "fixed_ip_address": "192.168.1.10",
+        "instance_id": "inst-1",
+        "instance_name": "my-server",
+    }
+
+    async def mock_cached_call(key, ttl, fn, **kw):
+        return fn()
+
+    with (
+        patch("app.api.network.networks.neutron.list_floating_ips", return_value=[fip_with_instance]),
+        patch("app.api.network.networks.cached_call", new=mock_cached_call),
+    ):
+        resp = await client.get("/api/networks/floating-ips")
+
+    assert resp.status_code == 200
+    result = resp.json()[0]
+    assert result["instance_id"] == "inst-1"
+    assert result["instance_name"] == "my-server"
+
+
+@pytest.mark.asyncio
+async def test_list_floating_ips_without_instance(client, mock_conn):
+    """port_id 가 없는 FIP 는 instance_id, instance_name 이 None 이어야 한다."""
+    fip_unassociated = {
+        **make_fip(),
+        "instance_id": None,
+        "instance_name": None,
+    }
+
+    async def mock_cached_call(key, ttl, fn, **kw):
+        return fn()
+
+    with (
+        patch("app.api.network.networks.neutron.list_floating_ips", return_value=[fip_unassociated]),
+        patch("app.api.network.networks.cached_call", new=mock_cached_call),
+    ):
+        resp = await client.get("/api/networks/floating-ips")
+
+    assert resp.status_code == 200
+    result = resp.json()[0]
+    assert result["instance_id"] is None
+    assert result["instance_name"] is None
