@@ -9,6 +9,24 @@
 </script>
 
 <div class="p-4 md:p-8 max-w-5xl">
+  <div class="flex items-center gap-3 mb-4">
+    <a
+      href="/dashboard"
+      class="inline-flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors px-2.5 py-1.5 rounded-md hover:bg-gray-800"
+    >
+      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+      대시보드로 돌아가기
+    </a>
+    <span class="text-gray-700">·</span>
+    <a
+      href="/dashboard/my-resources"
+      class="inline-flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 transition-colors px-2.5 py-1.5 rounded-md hover:bg-blue-500/10"
+    >
+      내 리소스
+      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+    </a>
+  </div>
+
   <PageHeader breadcrumb="" title="계정 설정" />
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
     <ProfileSection />

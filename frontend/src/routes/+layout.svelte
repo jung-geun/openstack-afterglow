@@ -6,7 +6,6 @@
 	import { theme, resolvedTheme } from '$lib/stores/theme';
 	import { api } from '$lib/api/client';
 	import ProjectSelector from '$lib/components/ProjectSelector.svelte';
-	import SettingsModal from '$lib/components/SettingsModal.svelte';
 	import { siteConfig, loadSiteConfig } from '$lib/config/site';
 	import { sidebarOpen } from '$lib/stores/sidebar';
 	import { deriveBreadcrumb } from '$lib/config/routes';
@@ -14,8 +13,6 @@
 	import './layout.css';
 
 	let { children } = $props();
-
-	let settingsOpen = $state(false);
 
 	// breadcrumb + title from URL
 	const crumb = $derived(deriveBreadcrumb($page.url.pathname));
@@ -215,11 +212,11 @@
 			</button>
 
 			<!-- 유저 아바타 -->
-			<button
-				onclick={() => settingsOpen = true}
+			<a
+				href="/dashboard/account"
 				class="w-[30px] h-[30px] rounded-full bg-gray-800 border border-gray-700 flex items-center justify-center text-gray-300 text-[11px] font-semibold hover:border-gray-600 transition-colors"
 				title={$auth.username}
-			>{initials}</button>
+			>{initials}</a>
 
 			<!-- 로그아웃 -->
 			<button
@@ -235,7 +232,6 @@
 	<main class="pt-14 min-h-screen bg-gray-950 text-white">
 		{@render children()}
 	</main>
-	<SettingsModal bind:open={settingsOpen} onclose={() => settingsOpen = false} />
 {:else}
 	{@render children()}
 {/if}
