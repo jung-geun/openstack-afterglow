@@ -10,17 +10,18 @@
 		{
 			label: 'Compute',
 			prefix: '/dashboard/compute',
+			extraPrefixes: [] as string[],
 			icon: 'M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2',
 			open: false,
 			items: [
 				{ label: '인스턴스', href: '/dashboard/compute/instances', service: null },
-				{ label: '키페어', href: '/dashboard/compute/keypairs', service: null },
 				{ label: '이미지', href: '/dashboard/compute/images', service: null },
 			],
 		},
 		{
 			label: '볼륨',
 			prefix: '/dashboard/volumes',
+			extraPrefixes: [] as string[],
 			icon: 'M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4',
 			open: false,
 			items: [
@@ -32,6 +33,7 @@
 		{
 			label: 'File Storage',
 			prefix: '/dashboard/file-storage',
+			extraPrefixes: [] as string[],
 			icon: 'M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z',
 			open: false,
 			service: 'manila' as const,
@@ -40,22 +42,24 @@
 				{ label: '스냅샷', href: '/dashboard/file-storage/snapshots', service: null },
 				{ label: 'Share 네트워크', href: '/dashboard/file-storage/networks', service: null },
 				{ label: 'Security Service', href: '/dashboard/file-storage/security-services', service: null },
-				{ label: '라이브러리 관리', href: '/dashboard/file-storage/manage', service: null },
 			],
 		},
 		{
 			label: '라이브러리',
 			prefix: '/dashboard/library',
+			extraPrefixes: ['/dashboard/file-storage/manage'],
 			icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253',
 			open: false,
 			items: [
 				{ label: '레이어 카탈로그', href: '/dashboard/library', service: null },
 				{ label: '템플릿', href: '/dashboard/library/templates', service: null },
+				{ label: '라이브러리 관리', href: '/dashboard/file-storage/manage', service: null },
 			],
 		},
 		{
 			label: '컨테이너',
 			prefix: '/dashboard/containers',
+			extraPrefixes: ['/dashboard/drover'],
 			icon: 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4',
 			open: false,
 			service: 'containers' as const,
@@ -68,6 +72,7 @@
 		{
 			label: 'Database',
 			prefix: '/dashboard/database',
+			extraPrefixes: [] as string[],
 			icon: 'M4 7c0-1.657 3.582-3 8-3s8 1.343 8 3M4 7v5c0 1.657 3.582 3 8 3s8-1.343 8-3V7M4 7c0 1.657 3.582 3 8 3s8-1.343 8-3M4 12v5c0 1.657 3.582 3 8 3s8-1.343 8-3v-5',
 			open: false,
 			service: 'trove' as const,
@@ -78,6 +83,7 @@
 		{
 			label: 'Object Storage',
 			prefix: '/dashboard/object-storage',
+			extraPrefixes: [] as string[],
 			icon: 'M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z',
 			open: false,
 			service: 'swift' as const,
@@ -88,15 +94,25 @@
 		{
 			label: '네트워크',
 			prefix: '/dashboard/network',
+			extraPrefixes: [] as string[],
 			icon: 'M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9',
 			open: false,
 			items: [
-				{ label: '토폴로지', href: '/dashboard/network/topology', service: null },
 				{ label: '네트워크', href: '/dashboard/network/networks', service: null },
 				{ label: 'Floating IP', href: '/dashboard/network/floating-ips', service: null },
 				{ label: '라우터', href: '/dashboard/network/routers', service: null },
-				{ label: '보안 그룹', href: '/dashboard/network/security-groups', service: null },
 				{ label: '로드밸런서', href: '/dashboard/network/loadbalancers', service: null },
+			],
+		},
+		{
+			label: 'Identity & Access',
+			prefix: '/dashboard/account',
+			extraPrefixes: ['/dashboard/network/security-groups'],
+			icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z',
+			open: false,
+			items: [
+				{ label: '계정 설정', href: '/dashboard/account', service: null },
+				{ label: '보안 그룹', href: '/dashboard/network/security-groups', service: null },
 			],
 		},
 	]);
@@ -104,7 +120,10 @@
 	$effect(() => {
 		const pathname = $page.url.pathname;
 		for (const section of sections) {
-			if (pathname.startsWith(section.prefix)) {
+			if (
+				pathname.startsWith(section.prefix) ||
+				section.extraPrefixes.some((p) => pathname.startsWith(p))
+			) {
 				section.open = true;
 			}
 		}
@@ -182,6 +201,13 @@
 			<svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
 			내 리소스
 		</a>
+		<a
+			href="/dashboard/network/topology"
+			class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors {$page.url.pathname === '/dashboard/network/topology' ? 'bg-blue-600/20 text-blue-400 font-medium' : 'text-gray-400 hover:text-white hover:bg-gray-800'}"
+		>
+			<svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+			토폴로지
+		</a>
 
 		<!-- 섹션들 -->
 		{#each sections as section}
@@ -189,7 +215,7 @@
 			<div>
 				<button
 					onclick={() => section.open = !section.open}
-					class="flex items-center justify-between w-full px-3 py-2 rounded-lg text-sm transition-colors {$page.url.pathname.startsWith(section.prefix) ? 'text-white' : 'text-gray-400 hover:text-white hover:bg-gray-800'}"
+					class="flex items-center justify-between w-full px-3 py-2 rounded-lg text-sm transition-colors {$page.url.pathname.startsWith(section.prefix) || section.extraPrefixes.some((p) => $page.url.pathname.startsWith(p)) ? 'text-white' : 'text-gray-400 hover:text-white hover:bg-gray-800'}"
 				>
 					<div class="flex items-center gap-1.5">
 						{#if section.icon}
