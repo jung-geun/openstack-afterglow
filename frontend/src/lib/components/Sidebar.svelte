@@ -93,6 +93,7 @@
 			items: [
 				{ label: '토폴로지', href: '/dashboard/network/topology', service: null },
 				{ label: '네트워크', href: '/dashboard/network/networks', service: null },
+				{ label: 'Floating IP', href: '/dashboard/network/floating-ips', service: null },
 				{ label: '라우터', href: '/dashboard/network/routers', service: null },
 				{ label: '보안 그룹', href: '/dashboard/network/security-groups', service: null },
 				{ label: '로드밸런서', href: '/dashboard/network/loadbalancers', service: null },
