@@ -145,6 +145,43 @@ export const api = {
 		return { promise, abort: () => xhr.abort() };
 	},
 
+	putWithProgress: <T>(
+		path: string,
+		blob: Blob,
+		contentType: string,
+		onProgress: (event: { loaded: number; total: number }) => void,
+		token?: string,
+		projectId?: string,
+	): { promise: Promise<T>; abort: () => void } => {
+		const xhr = new XMLHttpRequest();
+		const promise = new Promise<T>((resolve, reject) => {
+			xhr.open('PUT', `${getBaseUrl()}${path}`);
+			if (token) xhr.setRequestHeader('X-Auth-Token', token);
+			if (projectId) xhr.setRequestHeader('X-Project-Id', projectId);
+			xhr.setRequestHeader('Content-Type', contentType || 'application/octet-stream');
+			xhr.timeout = 0;
+
+			xhr.upload.onprogress = (e) => {
+				if (e.lengthComputable) onProgress({ loaded: e.loaded, total: e.total });
+			};
+			xhr.onload = () => {
+				if (xhr.status >= 200 && xhr.status < 300) {
+					if (xhr.status === 204) { resolve(undefined as T); return; }
+					try { resolve(JSON.parse(xhr.responseText)); }
+					catch { resolve(undefined as T); }
+				} else {
+					let detail = xhr.statusText;
+					try { detail = JSON.parse(xhr.responseText)?.detail || detail; } catch { /* empty */ }
+					reject(new ApiError(xhr.status, detail));
+				}
+			};
+			xhr.onerror = () => reject(new Error('네트워크 오류가 발생했습니다'));
+			xhr.onabort = () => reject(new ApiError(0, '업로드가 취소되었습니다'));
+			xhr.send(blob);
+		});
+		return { promise, abort: () => xhr.abort() };
+	},
+
 	downloadBlob: async (path: string, token?: string, projectId?: string): Promise<{ blob: Blob; filename: string }> => {
 		const headers: Record<string, string> = { 'Content-Type': 'application/json' };
 		if (token) headers['X-Auth-Token'] = token;

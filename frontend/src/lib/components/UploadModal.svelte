@@ -75,16 +75,12 @@
 
 		// prefix가 있으면 오브젝트명 앞에 붙임
 		const objectName = prefix ? prefix + file.name : file.name;
-		const renamedFile = objectName !== file.name
-			? new File([file], objectName, { type: file.type })
-			: file;
+		const encodedPath = objectName.split('/').map((p) => encodeURIComponent(p)).join('/');
 
-		const formData = new FormData();
-		formData.append('file', renamedFile);
-
-		const { promise, abort } = api.uploadWithProgress(
-			`/api/object-storage/${encodeURIComponent(containerName)}/objects`,
-			formData,
+		const { promise, abort } = api.putWithProgress(
+			`/api/object-storage/${encodeURIComponent(containerName)}/objects/${encodedPath}`,
+			file,
+			file.type || 'application/octet-stream',
 			(e) => {
 				loaded = e.loaded;
 				total = e.total;
