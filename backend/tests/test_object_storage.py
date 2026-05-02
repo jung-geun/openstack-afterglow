@@ -160,6 +160,82 @@ def test_upload_small_object_no_slo():
     assert "segment_size" not in kw
 
 
+# ---------------------------------------------------------------------------
+# 스트리밍 PUT 업로드
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_streaming_upload_missing_content_length():
+    """Content-Length 없이 PUT 요청 → 411."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        resp = await ac.put(
+            "/api/object-storage/test-container/objects/file.bin",
+            content=b"data",
+            headers={"Content-Type": "application/octet-stream"},
+        )
+    assert resp.status_code in (401, 404, 405, 411)
+
+
+@pytest.mark.asyncio
+async def test_streaming_upload_too_large():
+    """Content-Length > 100 GiB → 413 (또는 인증 먼저 401)."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        resp = await ac.put(
+            "/api/object-storage/test-container/objects/huge.bin",
+            content=b"x",
+            headers={
+                "Content-Type": "application/octet-stream",
+                "Content-Length": str(100 * 1024**3 + 1),
+            },
+        )
+    assert resp.status_code in (401, 404, 405, 413)
+
+
+def test_streaming_upload_small_no_slo():
+    """100 MB raw PUT → SLO 옵션 미사용."""
+    import io
+    from unittest.mock import MagicMock, patch
+
+    from app.services.swift import upload_object
+
+    conn = MagicMock()
+    mock_obj = MagicMock()
+    mock_obj.name = "small.bin"
+    mock_obj.etag = ""
+    conn.object_store.create_object.return_value = mock_obj
+
+    small_size = 100 * 1024 * 1024
+    with patch("app.services.swift._apply_endpoint_override"):
+        upload_object(conn, "bucket", "small.bin", io.BytesIO(b""), "application/octet-stream", small_size)
+
+    kw = conn.object_store.create_object.call_args[1]
+    assert "use_slo" not in kw
+    assert "segment_size" not in kw
+
+
+def test_streaming_upload_large_uses_slo():
+    """1.5 GiB raw PUT → use_slo=True, segment_size=1 GiB."""
+    import io
+    from unittest.mock import MagicMock, patch
+
+    from app.services.swift import _SLO_SEGMENT_SIZE, upload_object
+
+    conn = MagicMock()
+    mock_obj = MagicMock()
+    mock_obj.name = "large.bin"
+    mock_obj.etag = ""
+    conn.object_store.create_object.return_value = mock_obj
+
+    large_size = int(1.5 * 1024**3)
+    with patch("app.services.swift._apply_endpoint_override"):
+        upload_object(conn, "bucket", "large.bin", io.BytesIO(b""), "application/octet-stream", large_size)
+
+    kw = conn.object_store.create_object.call_args[1]
+    assert kw.get("use_slo") is True
+    assert kw.get("segment_size") == _SLO_SEGMENT_SIZE
+
+
 def test_delete_slo_object_purges_segments():
     """SLO manifest 삭제 시 ?multipart-manifest=delete 쿼리가 포함된 raw DELETE 가 호출된다."""
     from unittest.mock import MagicMock, patch

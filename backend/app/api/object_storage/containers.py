@@ -5,10 +5,12 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import openstack
 import asyncio
+import contextlib
 import logging
+import queue as _queue_module
 import urllib.parse
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.api.deps import get_os_conn
@@ -23,6 +25,49 @@ from app.models.storage import (
 
 router = APIRouter()
 _logger = logging.getLogger(__name__)
+
+_EOF = object()
+
+
+class _QueueIO:
+    """async producer → sync consumer bridge: read(n) blocks until queue has enough data."""
+
+    def __init__(self, q: _queue_module.Queue[object]) -> None:
+        self._q = q
+        self._buf = bytearray()
+        self._done = False
+
+    def read(self, n: int = -1) -> bytes:
+        while not self._done and (n < 0 or len(self._buf) < n):
+            item = self._q.get()
+            if item is _EOF:
+                self._done = True
+                break
+            self._buf.extend(item)  # type: ignore[arg-type]
+        if n < 0 or len(self._buf) <= n:
+            data = bytes(self._buf)
+            self._buf = bytearray()
+        else:
+            data = bytes(self._buf[:n])
+            del self._buf[:n]
+        return data
+
+
+async def _drain_to_queue(stream, q: _queue_module.Queue[object]) -> None:
+    try:
+        async for chunk in stream:
+            await asyncio.to_thread(q.put, chunk)
+    finally:
+        try:
+            await asyncio.to_thread(q.put, _EOF)
+        except BaseException:
+            pass
+
+
+def _sanitize_object_name(name: str) -> str:
+    name = "".join(c for c in name if ord(c) >= 0x20 and ord(c) != 0x7F)
+    name = name.strip("/").strip() or "unnamed"
+    return name[:1024]
 
 
 # ---------------------------------------------------------------------------
@@ -152,12 +197,7 @@ async def upload_object(
         await file.seek(0)
 
     try:
-        raw_filename = file.filename or "unnamed"
-        # 제어 문자(0x00-0x1f, 0x7f) 및 경로 순회 문자 제거 후 길이 제한
-        object_name = "".join(c for c in raw_filename if ord(c) >= 0x20 and ord(c) != 0x7F)
-        object_name = object_name.strip("/").strip() or "unnamed"
-        if len(object_name) > 1024:
-            object_name = object_name[:1024]
+        object_name = _sanitize_object_name(file.filename or "unnamed")
         content_type = file.content_type or ""
         # file.file (SpooledTemporaryFile)을 직접 전달해 스트리밍 업로드
         return await asyncio.to_thread(
@@ -174,6 +214,62 @@ async def upload_object(
     except Exception:
         _logger.exception("오브젝트 업로드 실패: container=%s name=%s", container_name, file.filename)
         raise HTTPException(status_code=500, detail="오브젝트 업로드 실패")
+
+
+@router.put("/{container_name}/objects/{object_name:path}", status_code=201)
+async def upload_object_stream(
+    container_name: str,
+    object_name: str,
+    request: Request,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """streaming PUT — disk spool 없이 raw body 를 Swift 에 직접 forward.
+
+    헤더: Content-Length (필수), Content-Type (선택).
+    Content-Length > 1 GiB 이면 Swift SLO 자동 적용.
+    """
+    from app.services import swift
+
+    cl = request.headers.get("content-length")
+    if cl is None:
+        raise HTTPException(status_code=411, detail="Content-Length 헤더 필수")
+    try:
+        file_size = int(cl)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Content-Length 값이 올바르지 않습니다")
+    if file_size > 100 * 1024**3:
+        raise HTTPException(status_code=413, detail="파일 크기는 100 GB를 초과할 수 없습니다")
+
+    content_type = request.headers.get("content-type", "application/octet-stream")
+    sanitized_name = _sanitize_object_name(object_name)
+
+    _q: _queue_module.Queue[object] = _queue_module.Queue(maxsize=4)
+    drain_task = asyncio.create_task(_drain_to_queue(request.stream(), _q))
+    try:
+        result = await asyncio.to_thread(
+            swift.upload_object,
+            conn,
+            container_name,
+            sanitized_name,
+            _QueueIO(_q),
+            content_type,
+            file_size,
+        )
+    except HTTPException:
+        raise
+    except Exception:
+        _logger.exception("스트리밍 업로드 실패: container=%s name=%s", container_name, sanitized_name)
+        raise HTTPException(status_code=500, detail="오브젝트 업로드 실패")
+    finally:
+        drain_task.cancel()
+        while not _q.empty():
+            try:
+                _q.get_nowait()
+            except _queue_module.Empty:
+                break
+        with contextlib.suppress(asyncio.CancelledError):
+            await drain_task
+    return result
 
 
 # ---------------------------------------------------------------------------
