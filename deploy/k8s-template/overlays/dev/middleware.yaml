@@ -5,7 +5,7 @@ metadata:
   namespace: afterglow-dev
 spec:
   buffering:
-    maxRequestBodyBytes: 5368709120  # 5 GB (백엔드 _MAX_UPLOAD_BYTES 와 동일)
+    maxRequestBodyBytes: 53687091200  # 50 GB (Swift SLO 대용량 업로드 지원)
     memRequestBodyBytes: 2097152     # 2 MB 인메모리 버퍼
     maxResponseBodyBytes: 0          # 응답 크기 무제한
     retryExpression: "IsNetworkError() && Attempts() < 2"
