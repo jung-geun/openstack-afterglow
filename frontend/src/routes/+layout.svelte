@@ -231,7 +231,7 @@
 	</nav>
 	<Toast />
 	<UploadDock />
-	<main class="pt-14 min-h-screen bg-gray-950 text-white">
+	<main class="min-h-screen bg-gray-950 text-white">
 		{@render children()}
 	</main>
 {:else}
