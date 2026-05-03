@@ -152,7 +152,7 @@
 	></button>
 {/if}
 
-<aside class="fixed top-14 left-0 bottom-0 z-30 w-60 bg-gray-900 border-r border-gray-800 flex flex-col overflow-y-auto transition-transform duration-200 ease-in-out {$sidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:sticky md:top-14 md:h-[calc(100vh-3.5rem)] md:translate-x-0 md:shrink-0 md:transition-none">
+<aside class="fixed top-0 left-0 bottom-0 z-30 w-60 bg-gray-900 border-r border-gray-800 flex flex-col overflow-y-auto transition-transform duration-200 ease-in-out {$sidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:sticky md:top-0 md:h-screen md:translate-x-0 md:shrink-0 md:transition-none">
 	<!-- 로고 헤더 -->
 	<div class="h-14 flex items-center gap-2.5 px-4 border-b border-gray-800 shrink-0">
 		<!-- RingMark logo -->

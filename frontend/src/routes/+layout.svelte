@@ -128,7 +128,7 @@
 {#if $isLoggedIn}
 	<!-- 세션 만료 경고 배너 -->
 	{#if sessionWarning}
-		<div class="fixed top-14 left-0 right-0 z-40 bg-yellow-900/90 border-b border-yellow-700 px-3 md:px-6 py-2 flex items-center gap-4 text-sm">
+		<div class="fixed top-14 left-0 md:left-60 right-0 z-40 bg-yellow-900/90 border-b border-yellow-700 px-3 md:px-6 py-2 flex items-center gap-4 text-sm">
 			<span class="text-yellow-200">세션이 <strong>{formatRemaining(sessionRemaining)}</strong> 후 만료됩니다.</span>
 			<button
 				onclick={extendSession}
@@ -138,7 +138,7 @@
 			<button onclick={() => sessionWarning = false} class="ml-auto text-yellow-400 hover:text-yellow-200 text-xs">✕</button>
 		</div>
 	{/if}
-	<nav class="fixed top-0 left-0 right-0 z-50 bg-[#0B1220] border-b border-gray-800 h-14 flex items-center px-4 md:px-6 gap-4 shrink-0">
+	<nav class="fixed top-0 left-0 md:left-60 right-0 z-50 bg-[#0B1220] border-b border-gray-800 h-14 flex items-center px-4 md:px-6 gap-4 shrink-0">
 		<!-- 모바일 햄버거 -->
 		<button
 			onclick={() => sidebarOpen.toggle()}

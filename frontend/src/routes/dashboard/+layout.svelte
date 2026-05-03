@@ -5,7 +5,7 @@
 	let { children } = $props();
 </script>
 
-<div class="flex" style="min-height: calc(100vh - 3.5rem)">
+<div class="flex min-h-screen">
 	<Sidebar />
 	<main class="flex-1 overflow-auto min-w-0">
 		{@render children()}
