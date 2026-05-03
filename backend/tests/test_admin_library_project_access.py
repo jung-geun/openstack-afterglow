@@ -10,6 +10,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 from app.models.storage import FileStorageInfo
+from tests.conftest import make_mock_conn, make_token_info
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -70,42 +71,16 @@ def make_network_detail(cidr: str = "10.10.0.0/24"):
 
 
 @pytest.fixture
-def admin_token_info():
-    return {
-        "token": "admin-token",
-        "user_id": "admin-id",
-        "username": "admin",
-        "project_id": "admin-project-id",
-        "is_system_admin": True,
-        "roles": ["admin"],
-    }
-
-
-@pytest.fixture
-def user_token_info():
-    return {
-        "token": "user-token",
-        "user_id": "user-id",
-        "username": "user",
-        "project_id": "user-project-id",
-        "is_system_admin": False,
-        "roles": ["member"],
-    }
-
-
-@pytest.fixture
 def mock_conn():
-    conn = MagicMock()
-    conn._afterglow_project_id = "admin-project-id"
-    return conn
+    return make_mock_conn("admin-project-id")
 
 
 @pytest.fixture
-async def admin_client(admin_token_info, mock_conn):
+async def admin_client(mock_conn):
     from app.api.deps import get_os_conn, get_token_info
 
     async def override_token():
-        return admin_token_info
+        return make_token_info(roles=["admin"], is_system_admin=True, project_id="admin-project-id")
 
     async def override_conn():
         yield mock_conn
@@ -119,11 +94,11 @@ async def admin_client(admin_token_info, mock_conn):
 
 
 @pytest.fixture
-async def user_client(user_token_info, mock_conn):
+async def user_client(mock_conn):
     from app.api.deps import get_os_conn, get_token_info
 
     async def override_token():
-        return user_token_info
+        return make_token_info(roles=["member"])
 
     async def override_conn():
         yield mock_conn
@@ -376,3 +351,133 @@ class TestListProjectAccess:
         """비관리자 → 403."""
         resp = await user_client.get("/api/admin/libraries/python311/project-access")
         assert resp.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_list_legacy_rules_grouped_as_unknown(self, admin_client):
+        """metadata가 없는 레거시 rule은 '__unknown__' 프로젝트로 그룹화."""
+        nfs_storage = make_nfs_storage()
+        rules = [
+            {
+                "id": "rule-legacy-1",
+                "access_type": "ip",
+                "access_to": "192.168.0.0/24",
+                # metadata 없음 — 레거시 rule
+            },
+            {
+                "id": "rule-modern-1",
+                "access_type": "ip",
+                "access_to": "10.10.0.0/24",
+                "metadata": {"union_grant_project": "proj-b"},
+            },
+        ]
+        with (
+            patch("app.api.identity.admin_libraries.get_service_project_connection", return_value=MagicMock()),
+            patch("app.api.identity.admin_libraries.manila.list_file_storages", return_value=[nfs_storage]),
+            patch("app.api.identity.admin_libraries.manila.list_access_rules", return_value=rules),
+        ):
+            resp = await admin_client.get("/api/admin/libraries/python311/project-access")
+        assert resp.status_code == 200
+        grants = {g["project_id"]: g for g in resp.json()["grants"]}
+        assert "__unknown__" in grants
+        assert "proj-b" in grants
+
+
+# ---------------------------------------------------------------------------
+# §3.3 Negative-path 보강
+# ---------------------------------------------------------------------------
+
+
+class TestGrantNegativePaths:
+    @pytest.mark.asyncio
+    async def test_grant_includes_ipv6_cidr(self, admin_client):
+        """dual-stack 네트워크(IPv4 + IPv6)가 있을 때 ensure가 두 CIDR 모두에 호출된다."""
+        nfs_storage = make_nfs_storage()
+        mock_ensure = MagicMock(
+            return_value={"access_id": "rule-1", "access_key": "", "access_to": "", "access_level": "ro"}
+        )
+        dual_stack_detail = MagicMock()
+        dual_stack_detail.subnet_details = [make_subnet_detail("10.10.0.0/24"), make_subnet_detail("fd00::/64")]
+        with (
+            patch("app.api.identity.admin_libraries.get_service_project_connection", return_value=MagicMock()),
+            patch("app.api.identity.admin_libraries.manila.list_file_storages", return_value=[nfs_storage]),
+            patch("app.api.identity.admin_libraries.neutron.get_network_detail", return_value=dual_stack_detail),
+            patch("app.api.identity.admin_libraries.manila.ensure_nfs_access_rule", mock_ensure),
+        ):
+            resp = await admin_client.post(
+                "/api/admin/libraries/python311/project-access",
+                json={"project_id": "proj-b", "network_id": "net-b"},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        granted_cidrs = data["granted_cidrs"]
+        assert "10.10.0.0/24" in granted_cidrs
+        assert "fd00::/64" in granted_cidrs
+        assert mock_ensure.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_grant_network_has_no_valid_cidrs_returns_400(self, admin_client):
+        """네트워크 subnet이 있지만 유효한 CIDR이 없는 경우 → 400."""
+        nfs_storage = make_nfs_storage()
+        empty_cidr_detail = MagicMock()
+        empty_subnet = MagicMock()
+        empty_subnet.cidr = None
+        empty_cidr_detail.subnet_details = [empty_subnet]
+        with (
+            patch("app.api.identity.admin_libraries.get_service_project_connection", return_value=MagicMock()),
+            patch("app.api.identity.admin_libraries.manila.list_file_storages", return_value=[nfs_storage]),
+            patch("app.api.identity.admin_libraries.neutron.get_network_detail", return_value=empty_cidr_detail),
+        ):
+            resp = await admin_client.post(
+                "/api/admin/libraries/python311/project-access",
+                json={"project_id": "proj-b", "network_id": "net-b"},
+            )
+        assert resp.status_code == 400
+        assert "CIDR" in resp.json()["detail"]
+
+    @pytest.mark.asyncio
+    async def test_grant_keystone_failure_returns_502(self, admin_client):
+        """`get_service_project_connection` 예외 시 502."""
+        with patch(
+            "app.api.identity.admin_libraries.get_service_project_connection",
+            side_effect=RuntimeError("Keystone 연결 불가"),
+        ):
+            resp = await admin_client.post(
+                "/api/admin/libraries/python311/project-access",
+                json={"project_id": "proj-b", "network_id": "net-b"},
+            )
+        assert resp.status_code == 502
+
+
+class TestRevokeNegativePaths:
+    @pytest.mark.asyncio
+    async def test_revoke_skips_legacy_rules_without_metadata(self, admin_client):
+        """metadata 없는 레거시 rule은 revoke 대상에서 제외된다."""
+        nfs_storage = make_nfs_storage()
+        mock_revoke = MagicMock()
+        rules = [
+            {
+                "id": "rule-legacy",
+                "access_type": "ip",
+                "access_to": "192.168.0.0/24",
+                # metadata 없음 — 레거시 rule
+            },
+            {
+                "id": "rule-modern",
+                "access_type": "ip",
+                "access_to": "10.10.0.0/24",
+                "metadata": {"union_grant_project": "proj-target"},
+            },
+        ]
+        with (
+            patch("app.api.identity.admin_libraries.get_service_project_connection", return_value=MagicMock()),
+            patch("app.api.identity.admin_libraries.manila.list_file_storages", return_value=[nfs_storage]),
+            patch("app.api.identity.admin_libraries.manila.list_access_rules", return_value=rules),
+            patch("app.api.identity.admin_libraries.manila.revoke_access_rule", mock_revoke),
+        ):
+            resp = await admin_client.delete("/api/admin/libraries/python311/project-access/proj-target")
+        assert resp.status_code == 200
+        assert resp.json()["revoked_count"] == 1
+        # 레거시 rule은 revoke되지 않아야 함
+        revoked_ids = [call[0][2] for call in mock_revoke.call_args_list]
+        assert "rule-legacy" not in revoked_ids
+        assert "rule-modern" in revoked_ids

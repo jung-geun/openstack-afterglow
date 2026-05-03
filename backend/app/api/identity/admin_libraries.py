@@ -272,7 +272,10 @@ async def grant_library_project_access(
 
     이미 rule이 있으면 idempotent하게 처리한다 (중복 생성 없음).
     """
-    svc_conn = await asyncio.to_thread(get_service_project_connection)
+    try:
+        svc_conn = await asyncio.to_thread(get_service_project_connection)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"서비스 프로젝트 연결 실패: {e}")
     storage = await asyncio.to_thread(_get_nfs_share_for_library, svc_conn, library_id)
 
     try:
@@ -321,7 +324,10 @@ async def revoke_library_project_access(
 
     union_grant_project metadata로 해당 프로젝트의 rule을 식별한다.
     """
-    svc_conn = await asyncio.to_thread(get_service_project_connection)
+    try:
+        svc_conn = await asyncio.to_thread(get_service_project_connection)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"서비스 프로젝트 연결 실패: {e}")
     storage = await asyncio.to_thread(_get_nfs_share_for_library, svc_conn, library_id)
 
     try:
@@ -359,7 +365,10 @@ async def list_library_project_access(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ) -> dict:
     """NFS prebuilt 라이브러리에 grant된 프로젝트별 CIDR access rule 목록을 반환한다."""
-    svc_conn = await asyncio.to_thread(get_service_project_connection)
+    try:
+        svc_conn = await asyncio.to_thread(get_service_project_connection)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"서비스 프로젝트 연결 실패: {e}")
     storage = await asyncio.to_thread(_get_nfs_share_for_library, svc_conn, library_id)
 
     try:

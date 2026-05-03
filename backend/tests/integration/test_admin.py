@@ -287,14 +287,6 @@ async def test_metrics_admin_access(admin_client):
     assert resp.status_code == 200
 
 
-@pytest.mark.xfail(
-    reason=(
-        "common/metrics.py 의 _require_admin 이 role_names 문자열만 체크 — "
-        "require_admin 으로 통일 시 일반 유저는 403. 현재 role에 'admin' 문자열이 "
-        "포함되면 프로젝트 admin도 통과함. 수정은 별도 PR."
-    ),
-    strict=False,
-)
 @pytest.mark.asyncio(loop_scope="session")
 async def test_metrics_rejects_non_admin(user_client):
     resp = await user_client.get("/api/metrics")

@@ -231,3 +231,46 @@ async def test_nfs_prebuilt_raises_if_no_cidr():
                 network_id="net-b",
                 project_id="proj-b",
             )
+
+
+@pytest.mark.asyncio
+async def test_grant_partial_failure_raises_and_first_rule_tracked():
+    """2 CIDR 중 2번째 ensure 실패 시 예외가 전파되고, 1번째 rule은 created_access_ids에 기록된다.
+
+    _prepare_prebuilt_file_storages는 내부 롤백을 수행하지 않는다 — 호출자가
+    created_access_ids를 이용해 revoke하는 것이 기대 동작이다.
+    """
+    nfs_storage = make_nfs_storage()
+    created: list = []
+
+    ensure_call_count = 0
+
+    def _ensure_side_effect(*args, **kwargs):
+        nonlocal ensure_call_count
+        ensure_call_count += 1
+        if ensure_call_count == 1:
+            return {"access_id": "rule-first", "access_key": "", "access_to": "10.10.0.0/24", "access_level": "ro"}
+        raise RuntimeError("Manila 연결 실패")
+
+    with (
+        patch("app.api.compute.instances.keystone.get_service_project_connection", return_value=MagicMock()),
+        patch("app.api.compute.instances.manila.list_file_storages", return_value=[nfs_storage]),
+        patch(
+            "app.api.compute.instances._resolve_project_subnet_cidrs",
+            return_value=["10.10.0.0/24", "10.20.0.0/24"],
+        ),
+        patch("app.api.compute.instances.manila.ensure_nfs_access_rule", side_effect=_ensure_side_effect),
+        patch("app.api.compute.instances.manila.get_export_locations", return_value=["10.0.0.1:/"]),
+    ):
+        with pytest.raises(RuntimeError, match="Manila"):
+            await _prepare_prebuilt_file_storages(
+                MagicMock(),
+                ["python311"],
+                "vm-test",
+                created,
+                network_id="net-b",
+                project_id="proj-b",
+            )
+
+    # 1번째 rule은 created_access_ids에 기록되어 호출자가 rollback 가능
+    assert any(rule_id == "rule-first" for _, rule_id in created)
