@@ -560,12 +560,14 @@ def ensure_nfs_access_rule(
     access_level: str = "rw",
     root_squash: bool = True,
     sec_flavor: str = "sys",
+    extra_metadata: dict | None = None,
 ) -> dict:
     """
     NFS access rule이 없으면 생성하고, 이미 있으면 기존 rule을 반환.
     access_to: IP 주소 또는 CIDR (예: "192.168.1.100" 또는 "10.0.0.0/24")
     root_squash: NFS root → nobody 매핑 강제 여부 (보안 권장: True)
     sec_flavor: NFS 인증 flavor — "sys" 또는 "krb5"
+    extra_metadata: root_squash/sec_flavor 외에 추가로 붙일 Manila metadata (예: union_grant_project)
     """
     # 기존 access rule 조회
     existing_rules = list_access_rules(conn, file_storage_id)
@@ -586,6 +588,8 @@ def ensure_nfs_access_rule(
 
     # 새로 생성 (보안 메타데이터 포함)
     meta = _build_nfs_access_metadata(root_squash=root_squash, sec_flavor=sec_flavor)
+    if extra_metadata:
+        meta.update(extra_metadata)
     return create_access_rule(
         conn,
         file_storage_id=file_storage_id,

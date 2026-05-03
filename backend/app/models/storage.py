@@ -194,6 +194,9 @@ class CreateAccessRuleRequest(BaseModel):
     access_to: str = Field(..., min_length=1, max_length=255)  # CephX ID 또는 IP/CIDR
     access_level: Literal["ro", "rw"] = "ro"
     access_type: Literal["cephx", "ip"] = "cephx"
+    # ip 타입 전용 NFS 보안 옵션 (기본값이 보안 권장 설정)
+    root_squash: bool = True
+    sec_flavor: Literal["sys", "krb5", "krb5i", "krb5p"] = "sys"
 
 
 class UpdateSubnetRequest(BaseModel):

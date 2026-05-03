@@ -170,7 +170,12 @@ async def create_instance(
 
         if req.strategy == "prebuilt":
             file_storages_info = await _prepare_prebuilt_file_storages(
-                conn, resolved_libs, req.name, created_access_ids
+                conn,
+                resolved_libs,
+                req.name,
+                created_access_ids,
+                network_id=req.network_id or "",
+                project_id=conn._afterglow_project_id,
             )
         else:
             file_storage_info = await _prepare_dynamic_file_storage(
@@ -449,7 +454,12 @@ async def create_instance_async(
                 yield send_progress(ProgressStep.MANILA_PREPARING, 0, "파일 스토리지 준비 중...")
                 if req.strategy == "prebuilt":
                     file_storages_info = await _prepare_prebuilt_file_storages(
-                        conn, resolved_libs, req.name, created_access_ids
+                        conn,
+                        resolved_libs,
+                        req.name,
+                        created_access_ids,
+                        network_id=req.network_id or "",
+                        project_id=conn._afterglow_project_id,
                     )
                 else:
                     file_storage_info = await _prepare_dynamic_file_storage(
@@ -770,19 +780,28 @@ async def delete_instance(
         except Exception as ex:
             logger.warning(f"Upper 볼륨 삭제 실패: {ex}")
 
-    # Strategy A(prebuilt): NFS access rule 정리 (best-effort)
+    # Strategy A(prebuilt): CephX access rule 정리 (best-effort, svc_conn 사용)
+    # NFS CIDR rule은 프로젝트 수준 grant이므로 VM 삭제 시 회수하지 않음 (관리자 수동 revoke).
     if strategy != "dynamic":
-        server_ips = {ip.addr for ip in (server.ip_addresses or [])}
-        for file_storage_id in file_storage_ids:
-            if not file_storage_id:
-                continue
-            try:
-                access_rules = await asyncio.to_thread(manila.list_access_rules, conn, file_storage_id)
-                for rule in access_rules:
-                    if rule.get("access_type") == "ip" and rule.get("access_to") in server_ips:
-                        await asyncio.to_thread(manila.revoke_access_rule, conn, file_storage_id, rule["id"])
-            except Exception as ex:
-                logger.warning(f"NFS access rule 정리 실패 (share={file_storage_id}): {ex}")
+        try:
+            svc_conn_del = await asyncio.to_thread(keystone.get_service_project_connection)
+            instance_name = server.name
+            for file_storage_id in file_storage_ids:
+                if not file_storage_id:
+                    continue
+                try:
+                    access_rules = await asyncio.to_thread(manila.list_access_rules, svc_conn_del, file_storage_id)
+                    for rule in access_rules:
+                        if rule.get("access_type") == "cephx" and rule.get("access_to", "").startswith(
+                            f"union-ro-{instance_name}-"
+                        ):
+                            await asyncio.to_thread(
+                                manila.revoke_access_rule, svc_conn_del, file_storage_id, rule["id"]
+                            )
+                except Exception as ex:
+                    logger.warning(f"prebuilt cephx rule 정리 실패 (share={file_storage_id}): {ex}")
+        except Exception as ex:
+            logger.warning(f"prebuilt access rule 정리 중 svc_conn 획득 실패: {ex}")
 
     # Floating IP 정리 (해제 + 삭제)
     try:
@@ -1079,17 +1098,37 @@ async def update_port_security_groups(
 # ---------------------------------------------------------------------------
 
 
+def _resolve_project_subnet_cidrs(conn, network_id: str) -> list[str]:
+    """주어진 네트워크의 subnet CIDR 목록을 반환."""
+    detail = neutron.get_network_detail(conn, network_id)
+    return [s.cidr for s in (detail.subnet_details or []) if s.cidr]
+
+
 async def _prepare_prebuilt_file_storages(
-    conn, resolved_libs: list[str], instance_name: str, created_access_ids: list
+    conn,
+    resolved_libs: list[str],
+    instance_name: str,
+    created_access_ids: list,
+    network_id: str = "",
+    project_id: str = "",
 ) -> list[dict]:
     """Strategy A: 사전 빌드된 read-only 파일 스토리지에 access rule 추가.
 
     Manila 작업은 service 프로젝트 conn으로 수행한다.
     prebuilt share는 service 프로젝트가 소유하므로 사용자 conn으로는 access rule을 만들 수 없다.
+    NFS share는 IP 기반 access rule이 필요하므로 project의 subnet CIDR로 rule을 추가한다.
     """
     svc_conn = await asyncio.to_thread(keystone.get_service_project_connection)
     prebuilt_file_storages = await asyncio.to_thread(manila.list_file_storages, svc_conn, {"union_type": "prebuilt"})
     prebuilt_map = {s.library_name: s for s in prebuilt_file_storages}
+
+    # NFS share가 있을 경우 project subnet CIDR 미리 조회
+    project_cidrs: list[str] = []
+    if network_id:
+        try:
+            project_cidrs = await asyncio.to_thread(_resolve_project_subnet_cidrs, svc_conn, network_id)
+        except Exception as e:
+            logger.warning(f"Project subnet CIDR 조회 실패 (network={network_id}): {e}")
 
     file_storages_info = []
     for lib_id in list(reversed(resolved_libs)):
@@ -1099,23 +1138,60 @@ async def _prepare_prebuilt_file_storages(
                 f"사전 빌드 파일 스토리지 없음: {lib_id}. Strategy B를 사용하거나 관리자에게 문의하세요."
             )
 
-        cephx_id = f"union-ro-{instance_name}-{lib_id}"
-        rule = await asyncio.to_thread(manila.create_access_rule, svc_conn, file_storage.id, cephx_id, "ro")
-        created_access_ids.append((file_storage.id, rule["access_id"]))
+        if file_storage.share_proto == "NFS":
+            # NFS: 프로젝트 subnet CIDR 단위 IP access rule
+            if not project_cidrs:
+                raise RuntimeError(
+                    f"NFS prebuilt share({lib_id}) 마운트를 위해 project subnet CIDR이 필요하지만 조회에 실패했습니다."
+                )
+            extra_meta = {"union_grant_project": project_id} if project_id else {}
+            for cidr in project_cidrs:
+                rule = await asyncio.to_thread(
+                    manila.ensure_nfs_access_rule,
+                    svc_conn,
+                    file_storage.id,
+                    cidr,
+                    "ro",
+                    True,
+                    "sys",
+                    extra_meta or None,
+                )
+                created_access_ids.append((file_storage.id, rule["access_id"]))
 
-        export_paths = await asyncio.to_thread(manila.get_export_locations, svc_conn, file_storage.id)
-        file_storages_info.append(
-            {
-                "file_storage_id": file_storage.id,
-                "name": lib_id,
-                "share_proto": file_storage.share_proto,
-                "export_path": export_paths[0] if export_paths else "",
-                "cephx_id": cephx_id,
-                "cephx_key": rule["access_key"],
-                "nfs_export_location": file_storage.nfs_export_location or "",
-                "mount_options": "",
-            }
-        )
+            export_paths = await asyncio.to_thread(manila.get_export_locations, svc_conn, file_storage.id)
+            file_storages_info.append(
+                {
+                    "file_storage_id": file_storage.id,
+                    "name": lib_id,
+                    "share_proto": "NFS",
+                    "export_path": "",
+                    "cephx_id": "",
+                    "cephx_key": "",
+                    "nfs_export_location": export_paths[0]
+                    if export_paths
+                    else (file_storage.nfs_export_location or ""),
+                    "mount_options": "hard,intr,noatime,nosuid,nodev,noexec,_netdev,timeo=10,retrans=3",
+                }
+            )
+        else:
+            # CephFS: CephX access rule (기존 로직)
+            cephx_id = f"union-ro-{instance_name}-{lib_id}"
+            rule = await asyncio.to_thread(manila.create_access_rule, svc_conn, file_storage.id, cephx_id, "ro")
+            created_access_ids.append((file_storage.id, rule["access_id"]))
+
+            export_paths = await asyncio.to_thread(manila.get_export_locations, svc_conn, file_storage.id)
+            file_storages_info.append(
+                {
+                    "file_storage_id": file_storage.id,
+                    "name": lib_id,
+                    "share_proto": file_storage.share_proto,
+                    "export_path": export_paths[0] if export_paths else "",
+                    "cephx_id": cephx_id,
+                    "cephx_key": rule["access_key"],
+                    "nfs_export_location": file_storage.nfs_export_location or "",
+                    "mount_options": "",
+                }
+            )
     return file_storages_info
 
 

@@ -13,6 +13,7 @@ from app.models.storage import CreateAccessRuleRequest, CreateFileStorageRequest
 from app.rate_limit import limiter
 from app.services import manila
 from app.services.cache import cached_call, invalidate, ttl_fast
+from app.services.manila import _build_nfs_access_metadata
 
 router = APIRouter()
 
@@ -138,7 +139,10 @@ async def create_access_rule(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     try:
-        return manila.create_access_rule(conn, file_storage_id, req.access_to, req.access_level, req.access_type)
+        metadata = _build_nfs_access_metadata(req.root_squash, req.sec_flavor) if req.access_type == "ip" else None
+        return manila.create_access_rule(
+            conn, file_storage_id, req.access_to, req.access_level, req.access_type, metadata=metadata
+        )
     except Exception:
         raise HTTPException(status_code=500, detail="접근 규칙 생성 실패")
 

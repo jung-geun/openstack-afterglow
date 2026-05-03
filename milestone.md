@@ -482,9 +482,12 @@ Step 5: 요약 & 배포
 - [x] 3.3 크로스 프로젝트 접근 관리
   - [x] Admin 프로젝트에서 NFS share 생성 시 다른 프로젝트 접근 허용:
     - [x] Manila share를 `public` 으로 설정 (`is_public=True`) — `set_share_public()` API 구현
-    - [ ] 특정 프로젝트에 대해 개별적으로 NFS access rule 부여 (VM IP/CIDR 자동 계산 미구현)
-    - [ ] VM 생성 시 해당 프로젝트의 네트워크 CIDR로 NFS access rule 자동 생성
+    - [x] VM 생성 시 해당 프로젝트의 네트워크 CIDR로 NFS access rule 자동 생성 — `_prepare_prebuilt_file_storages`에 NFS 분기 추가, service project conn으로 `ensure_nfs_access_rule` 호출
+    - [x] `POST /api/admin/libraries/{id}/project-access` — 관리자 수동 CIDR grant (idempotent)
+    - [x] `DELETE /api/admin/libraries/{id}/project-access/{project_id}` — 관리자 수동 revoke (`union_grant_project` metadata로 식별)
+    - [x] `GET /api/admin/libraries/{id}/project-access` — 프로젝트별 grant 목록 조회
   - [x] CephFS의 경우: 기존 CephX access rule 방식 유지
+  - [x] VM 삭제 cleanup: prebuilt cephx rule은 service conn으로 revoke, NFS CIDR rule은 lifecycle A(관리자 수동 revoke)
   - [x] `backend/app/services/libraries.py` — `get_dependency_tree()` 크로스 프로젝트 라이브러리 의존성 트리 조회 함수 추가
 
 - [x] 3.4 패키지 빌드 파이프라인 개선
