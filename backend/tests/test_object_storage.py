@@ -116,26 +116,31 @@ async def test_delete_object_unauthenticated():
 # ---------------------------------------------------------------------------
 
 
-def test_upload_large_object_uses_slo():
-    """1 GiB 초과 파일 업로드 시 create_object 에 use_slo=True, segment_size 가 전달된다."""
+def test_upload_large_object_uses_manual_slo():
+    """1 GiB 초과 파일 업로드 시 수동 SLO: proxy.put 을 (segments + 1) 회 호출하고 마지막 URL 에 multipart-manifest=put 포함."""
     import io
+    import math
     from unittest.mock import MagicMock, patch
 
     from app.services.swift import _SLO_SEGMENT_SIZE, upload_object
 
     conn = MagicMock()
-    mock_obj = MagicMock()
-    mock_obj.name = "big.bin"
-    mock_obj.etag = ""
-    conn.object_store.create_object.return_value = mock_obj
+    mock_resp = MagicMock()
+    mock_resp.headers = {"etag": '"abc123"'}
+    conn.object_store.put.return_value = mock_resp
 
-    large_size = _SLO_SEGMENT_SIZE + 1  # 1 GiB + 1 byte
-    with patch("app.services.swift._apply_endpoint_override"):
+    large_size = _SLO_SEGMENT_SIZE + 1  # 1 GiB + 1 byte → 2 segments
+    with (
+        patch("app.services.swift._apply_endpoint_override"),
+        patch("app.services.swift._ensure_segment_container") as mock_ensure,
+    ):
         upload_object(conn, "bucket", "big.bin", io.BytesIO(b""), "application/octet-stream", large_size)
 
-    kw = conn.object_store.create_object.call_args[1]
-    assert kw.get("use_slo") is True
-    assert kw.get("segment_size") == _SLO_SEGMENT_SIZE
+    num_segments = math.ceil(large_size / _SLO_SEGMENT_SIZE)
+    assert conn.object_store.put.call_count == num_segments + 1
+    manifest_url = conn.object_store.put.call_args_list[-1][0][0]
+    assert "multipart-manifest=put" in manifest_url
+    mock_ensure.assert_called_once_with(conn, "bucket_segments")
 
 
 def test_upload_small_object_no_slo():
@@ -214,26 +219,27 @@ def test_streaming_upload_small_no_slo():
     assert "segment_size" not in kw
 
 
-def test_streaming_upload_large_uses_slo():
-    """1.5 GiB raw PUT → use_slo=True, segment_size=1 GiB."""
+def test_streaming_upload_large_uses_manual_slo():
+    """1.5 GiB raw PUT → 수동 SLO: proxy.put 2(segments) + 1(manifest) = 3 회."""
     import io
+    import math
     from unittest.mock import MagicMock, patch
 
     from app.services.swift import _SLO_SEGMENT_SIZE, upload_object
 
     conn = MagicMock()
-    mock_obj = MagicMock()
-    mock_obj.name = "large.bin"
-    mock_obj.etag = ""
-    conn.object_store.create_object.return_value = mock_obj
+    mock_resp = MagicMock()
+    mock_resp.headers = {"etag": '"deadbeef"'}
+    conn.object_store.put.return_value = mock_resp
 
-    large_size = int(1.5 * 1024**3)
-    with patch("app.services.swift._apply_endpoint_override"):
+    large_size = int(1.5 * 1024**3)  # 2 segments
+    with patch("app.services.swift._apply_endpoint_override"), patch("app.services.swift._ensure_segment_container"):
         upload_object(conn, "bucket", "large.bin", io.BytesIO(b""), "application/octet-stream", large_size)
 
-    kw = conn.object_store.create_object.call_args[1]
-    assert kw.get("use_slo") is True
-    assert kw.get("segment_size") == _SLO_SEGMENT_SIZE
+    num_segments = math.ceil(large_size / _SLO_SEGMENT_SIZE)
+    assert conn.object_store.put.call_count == num_segments + 1
+    manifest_url = conn.object_store.put.call_args_list[-1][0][0]
+    assert "multipart-manifest=put" in manifest_url
 
 
 def test_delete_slo_object_purges_segments():

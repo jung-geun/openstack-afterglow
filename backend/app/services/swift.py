@@ -260,14 +260,114 @@ def list_objects(conn, container: str, prefix: str = "", delimiter: str = "") ->
         return []
 
 
-_SLO_SEGMENT_SIZE = 1 * 1024 * 1024 * 1024  # 1 GiB — 이 크기 초과 시 Swift SLO 자동 적용
+_SLO_SEGMENT_SIZE = 1 * 1024 * 1024 * 1024  # 1 GiB — 이 크기 초과 시 Swift SLO 수동 분할
+
+
+class _LimitedReader:
+    """file-like wrapper: read() 가 최대 limit 바이트까지만 반환."""
+
+    def __init__(self, source, limit: int) -> None:
+        self._source = source
+        self._remaining = limit
+
+    def read(self, size: int = -1) -> bytes:
+        if self._remaining <= 0:
+            return b""
+        if size < 0 or size > self._remaining:
+            size = self._remaining
+        chunk = self._source.read(size)
+        self._remaining -= len(chunk)
+        return chunk
+
+
+def _ensure_segment_container(conn, container_name: str) -> None:
+    """SLO segments 컨테이너가 없으면 생성."""
+    try:
+        conn.object_store.create_container(name=container_name)
+        _logger.debug("SLO segment 컨테이너 생성: %s", container_name)
+    except Exception:
+        pass  # 이미 존재하거나 계정 초기화 불필요
+
+
+def _upload_slo(
+    conn,
+    container: str,
+    name: str,
+    data,
+    content_type: str,
+    content_length: int,
+) -> dict:
+    """1 GiB 초과 파일을 Swift SLO(Static Large Object)로 수동 분할 업로드.
+
+    openstacksdk create_object 는 data= 가 file-like 일 때 use_slo/segment_size 를
+    무시하고 단일 PUT 을 보내므로, Swift HTTP API 를 직접 호출하여 SLO 를 구현한다.
+    segments 는 {container}_segments/{name}/{idx:08d} 경로에 저장된다.
+    """
+    import json
+    import math
+    import urllib.parse
+
+    proxy = conn.object_store
+    seg_container = f"{container}_segments"
+    _ensure_segment_container(conn, seg_container)
+
+    ct = content_type or "application/octet-stream"
+    num_segments = math.ceil(content_length / _SLO_SEGMENT_SIZE)
+    segments = []
+
+    for idx in range(num_segments):
+        seg_size = min(_SLO_SEGMENT_SIZE, content_length - idx * _SLO_SEGMENT_SIZE)
+        seg_name = f"{name}/{idx:08d}"
+        seg_path = "/" + urllib.parse.quote(seg_container, safe="") + "/" + urllib.parse.quote(seg_name, safe="/")
+        _logger.info(
+            "SLO segment %d/%d 업로드 시작: size=%d path=%s",
+            idx + 1,
+            num_segments,
+            seg_size,
+            seg_path,
+        )
+        resp = proxy.put(
+            seg_path,
+            data=_LimitedReader(data, seg_size),
+            headers={"Content-Length": str(seg_size), "Content-Type": ct},
+        )
+        etag = resp.headers.get("etag", "").strip('"')
+        segments.append(
+            {
+                "path": f"/{seg_container}/{seg_name}",
+                "etag": etag,
+                "size_bytes": seg_size,
+            }
+        )
+        _logger.info("SLO segment %d/%d 완료: etag=%s", idx + 1, num_segments, etag)
+
+    manifest_path = (
+        "/"
+        + urllib.parse.quote(container, safe="")
+        + "/"
+        + urllib.parse.quote(name, safe="/")
+        + "?multipart-manifest=put"
+    )
+    _logger.info("SLO manifest PUT: path=%s segments=%d", manifest_path, len(segments))
+    proxy.put(
+        manifest_path,
+        data=json.dumps(segments).encode(),
+        headers={"Content-Type": ct},
+    )
+    _logger.info("SLO 업로드 완료: container=%s name=%s bytes=%d", container, name, content_length)
+    return {
+        "name": name,
+        "container": container,
+        "bytes": content_length,
+        "etag": "",
+    }
 
 
 def upload_object(conn, container: str, name: str, data, content_type: str = "", content_length: int = 0) -> dict:
     """오브젝트를 업로드하고 메타데이터를 반환.
 
     data: bytes 또는 file-like object (read() 메서드 지원).
-    1 GiB 초과 파일은 Swift SLO(Static Large Object)로 자동 분할 업로드된다.
+    1 GiB 초과 파일은 Swift SLO(Static Large Object)로 수동 분할 업로드된다.
     segments 는 {container}_segments 컨테이너에 저장되고, manifest 만 원본 컨테이너에 남는다.
     """
     from app.config import get_settings
@@ -279,15 +379,14 @@ def upload_object(conn, container: str, name: str, data, content_type: str = "",
     original_timeout = getattr(proxy, "timeout", None)
     proxy.timeout = settings.os_swift_upload_timeout
     try:
+        if content_length and content_length > _SLO_SEGMENT_SIZE:
+            return _upload_slo(conn, container, name, data, content_type, content_length)
         kwargs: dict = {"data": data}
         if content_type:
             kwargs["content_type"] = content_type
         if content_length:
             kwargs["content_length"] = content_length
-        if content_length and content_length > _SLO_SEGMENT_SIZE:
-            kwargs["segment_size"] = _SLO_SEGMENT_SIZE
-            kwargs["use_slo"] = True
-        obj = conn.object_store.create_object(container, name, **kwargs)
+        obj = proxy.create_object(container, name, **kwargs)
         actual_bytes = content_length if content_length else (len(data) if isinstance(data, bytes) else 0)
         return {
             "name": obj.name or name,

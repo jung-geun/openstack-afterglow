@@ -257,9 +257,24 @@ async def upload_object_stream(
         )
     except HTTPException:
         raise
-    except Exception:
+    except Exception as _exc:
+        import openstack.exceptions as _oe
+
+        if isinstance(_exc, _oe.HttpException):
+            _detail = getattr(_exc, "details", None) or getattr(_exc, "message", None) or str(_exc)
+            _sc = getattr(_exc, "status_code", None) or 500
+            _sc = int(_sc) if isinstance(_sc, (int, str)) and str(_sc).isdigit() else 500
+            _sc = _sc if 400 <= _sc < 600 else 500
+            _logger.error(
+                "스트리밍 업로드 swift 오류: container=%s name=%s status=%d detail=%s",
+                container_name,
+                sanitized_name,
+                _sc,
+                _detail,
+            )
+            raise HTTPException(status_code=_sc, detail=f"swift 오류: {_detail}")
         _logger.exception("스트리밍 업로드 실패: container=%s name=%s", container_name, sanitized_name)
-        raise HTTPException(status_code=500, detail="오브젝트 업로드 실패")
+        raise HTTPException(status_code=500, detail=f"오브젝트 업로드 실패: {type(_exc).__name__}: {_exc}")
     finally:
         drain_task.cancel()
         while not _q.empty():
