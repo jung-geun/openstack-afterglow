@@ -8,7 +8,5 @@ resources:
 images:
   - name: ghcr.io/jung-geun/afterglow-api
     newTag: dev
-    digest: sha256:f1784d6c89a9d4ab1bb9a6af129b08f9133ab18af67a5dddbda8c6844e707f3d
   - name: ghcr.io/jung-geun/afterglow
     newTag: dev
-    digest: sha256:b65d47b74ca03ff01b897907f1a7c4632ce613c29ef40d0c6eee5ffc8cb1f134
