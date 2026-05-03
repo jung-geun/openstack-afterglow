@@ -143,6 +143,115 @@ def test_upload_large_object_uses_manual_slo():
     mock_ensure.assert_called_once_with(conn, "bucket_segments")
 
 
+def test_list_containers_hides_segments():
+    """_segments 접미사 컨테이너는 사용자 목록에서 숨겨진다."""
+    from unittest.mock import MagicMock, patch
+
+    from app.services.swift import list_containers
+
+    def make(name, count, bytes_):
+        c = MagicMock()
+        c.name = name
+        c.count = count
+        c.bytes = bytes_
+        return c
+
+    conn = MagicMock()
+    conn.object_store.containers.return_value = [
+        make("test", 7, 3 * 1024**3),
+        make("test_segments", 10, 9 * 1024**3),
+        make("photos", 100, 500 * 1024**2),
+    ]
+    with patch("app.services.swift._apply_endpoint_override"):
+        result = list_containers(conn)
+    names = [c["name"] for c in result]
+    assert "test" in names
+    assert "photos" in names
+    assert "test_segments" not in names
+
+
+def test_list_objects_enriches_slo_sizes():
+    """SLO 매니페스트의 bytes 가 segments 합계로 교체된다."""
+    from unittest.mock import MagicMock, patch
+
+    from app.services.swift import list_objects
+
+    # 정규 컨테이너에는 매니페스트(1.6 KB)와 일반 파일이 보임
+    manifest = MagicMock()
+    manifest.name = "big.zip"
+    manifest.size = 1638
+    manifest.content_type = "application/zip"
+    manifest.last_modified_at = ""
+    manifest.etag = ""
+    manifest.subdir = None
+    normal = MagicMock()
+    normal.name = "small.txt"
+    normal.size = 100
+    normal.content_type = "text/plain"
+    normal.last_modified_at = ""
+    normal.etag = ""
+    normal.subdir = None
+
+    # segments 컨테이너에는 big.zip/00000000, big.zip/00000001 두 segment
+    seg0 = MagicMock()
+    seg0.name = "big.zip/00000000"
+    seg0.size = 1024**3  # 1 GiB
+    seg1 = MagicMock()
+    seg1.name = "big.zip/00000001"
+    seg1.size = 500 * 1024**2  # 500 MiB
+
+    conn = MagicMock()
+
+    def objects_side_effect(container, **kwargs):
+        if container == "test":
+            return iter([manifest, normal])
+        if container == "test_segments":
+            return iter([seg0, seg1])
+        return iter([])
+
+    conn.object_store.objects.side_effect = objects_side_effect
+
+    with patch("app.services.swift._apply_endpoint_override"):
+        result = list_objects(conn, "test")
+
+    by_name = {r["name"]: r for r in result}
+    # SLO 매니페스트는 segments 합계로 보정 (1 GiB + 500 MiB)
+    assert by_name["big.zip"]["bytes"] == 1024**3 + 500 * 1024**2
+    # 일반 파일은 변경 없음
+    assert by_name["small.txt"]["bytes"] == 100
+
+
+def test_list_objects_no_segments_container_keeps_sizes():
+    """_segments 컨테이너가 없어도 listing 은 원본 사이즈로 정상 반환된다."""
+    from unittest.mock import MagicMock, patch
+
+    from app.services.swift import list_objects
+
+    obj = MagicMock()
+    obj.name = "file.bin"
+    obj.size = 12345
+    obj.content_type = "application/octet-stream"
+    obj.last_modified_at = ""
+    obj.etag = ""
+    obj.subdir = None
+
+    conn = MagicMock()
+
+    def objects_side_effect(container, **kwargs):
+        if container == "test":
+            return iter([obj])
+        # _segments LIST 시도 시 404 시뮬레이션
+        raise Exception("404")
+
+    conn.object_store.objects.side_effect = objects_side_effect
+
+    with patch("app.services.swift._apply_endpoint_override"):
+        result = list_objects(conn, "test")
+
+    assert len(result) == 1
+    assert result[0]["bytes"] == 12345
+
+
 def test_upload_small_object_no_slo():
     """100 MB 파일 업로드 시 SLO 옵션이 전달되지 않는다."""
     import io

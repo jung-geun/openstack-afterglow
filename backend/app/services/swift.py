@@ -56,6 +56,7 @@ def list_containers(conn) -> list[dict]:
             endpoint = "(resolve failed)"
         _logger.info("Swift list_containers: project_id=%s endpoint=%s", project_id, endpoint)
 
+        # SLO 내부 bookkeeping 용 {name}_segments 컨테이너는 사용자 목록에서 숨김
         result = [
             {
                 "name": c.name or "",
@@ -63,6 +64,7 @@ def list_containers(conn) -> list[dict]:
                 "bytes": getattr(c, "bytes", 0) or 0,
             }
             for c in conn.object_store.containers()
+            if not (c.name or "").endswith("_segments")
         ]
         _logger.info("Swift 컨테이너 목록 조회: %d개", len(result))
         return result
@@ -206,11 +208,50 @@ def get_container_metadata(conn, name: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _enrich_slo_sizes(conn, container: str, results: list[dict], prefix: str = "") -> None:
+    """SLO 매니페스트 객체의 bytes 를 segments 합계로 교체.
+
+    Swift LIST 는 SLO 매니페스트의 실제 저장 크기(JSON 수 KB)를 반환한다.
+    Ceph RGW 는 SLO 미들웨어처럼 listing bytes 를 보정해주지 않으므로,
+    {container}_segments 컨테이너를 한 번 LIST 하여 segment 들을 합산한 뒤
+    원본 객체의 bytes 를 덮어쓴다.
+    """
+    seg_container = f"{container}_segments"
+    name_to_total: dict[str, int] = {}
+    try:
+        kwargs: dict = {}
+        if prefix:
+            kwargs["prefix"] = prefix
+        for seg in conn.object_store.objects(seg_container, **kwargs):
+            seg_name = getattr(seg, "name", "") or ""
+            slash = seg_name.rfind("/")
+            if slash == -1:
+                continue
+            idx_part = seg_name[slash + 1 :]
+            # segment 명명 규약: <original_name>/<idx:08d>
+            if len(idx_part) != 8 or not idx_part.isdigit():
+                continue
+            original = seg_name[:slash]
+            size = int(getattr(seg, "size", None) or getattr(seg, "content_length", 0) or 0)
+            name_to_total[original] = name_to_total.get(original, 0) + size
+    except Exception:
+        # _segments 컨테이너 없음 또는 LIST 실패 — 원본 사이즈 유지
+        return
+
+    if not name_to_total:
+        return
+
+    for r in results:
+        if r["name"] in name_to_total:
+            r["bytes"] = name_to_total[r["name"]]
+
+
 def list_objects(conn, container: str, prefix: str = "", delimiter: str = "") -> list[dict]:
     """컨테이너 내 오브젝트 목록 반환.
 
     delimiter="/"를 사용하면 현재 prefix 바로 아래 파일/폴더만 반환한다.
     폴더(subdir)는 {"name": "folder/", "is_dir": True}로 반환된다.
+    SLO 매니페스트는 segments 합산으로 bytes 를 보정한다.
     """
     _apply_endpoint_override(conn)
     try:
@@ -254,6 +295,7 @@ def list_objects(conn, container: str, prefix: str = "", delimiter: str = "") ->
                         "is_dir": is_dir,
                     }
                 )
+        _enrich_slo_sizes(conn, container, results, prefix=prefix)
         return results
     except Exception:
         _logger.debug("Swift 오브젝트 목록 조회 실패 container=%s", container, exc_info=True)

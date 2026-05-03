@@ -19,3 +19,72 @@ export function formatStorage(gb: number): string {
 		return `${(gb / 1_000).toLocaleString(undefined, { maximumFractionDigits: 1 })} TB`;
 	return `${gb.toLocaleString()} GB`;
 }
+
+/** 긴 MIME 타입을 짧은 라벨로 변환 (예: application/vnd.openxmlformats-...presentation → PPTX) */
+const MIME_SHORT: Record<string, string> = {
+	'application/pdf': 'PDF',
+	'application/zip': 'ZIP',
+	'application/x-zip-compressed': 'ZIP',
+	'application/x-tar': 'TAR',
+	'application/x-xz': 'XZ',
+	'application/gzip': 'GZ',
+	'application/x-bzip2': 'BZ2',
+	'application/x-7z-compressed': '7Z',
+	'application/x-rar-compressed': 'RAR',
+	'application/octet-stream': 'BIN',
+	'application/json': 'JSON',
+	'application/xml': 'XML',
+	'application/javascript': 'JS',
+	'application/wasm': 'WASM',
+	'application/sql': 'SQL',
+	'application/yaml': 'YAML',
+	'application/x-yaml': 'YAML',
+	'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'DOCX',
+	'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'XLSX',
+	'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'PPTX',
+	'application/msword': 'DOC',
+	'application/vnd.ms-excel': 'XLS',
+	'application/vnd.ms-powerpoint': 'PPT',
+	'application/vnd.oasis.opendocument.text': 'ODT',
+	'application/vnd.oasis.opendocument.spreadsheet': 'ODS',
+	'application/directory': '폴더',
+	'image/png': 'PNG',
+	'image/jpeg': 'JPG',
+	'image/gif': 'GIF',
+	'image/svg+xml': 'SVG',
+	'image/webp': 'WEBP',
+	'image/x-icon': 'ICO',
+	'image/bmp': 'BMP',
+	'image/tiff': 'TIFF',
+	'video/mp4': 'MP4',
+	'video/webm': 'WEBM',
+	'video/quicktime': 'MOV',
+	'video/x-msvideo': 'AVI',
+	'audio/mpeg': 'MP3',
+	'audio/wav': 'WAV',
+	'audio/ogg': 'OGG',
+	'audio/flac': 'FLAC',
+	'text/plain': 'TXT',
+	'text/html': 'HTML',
+	'text/css': 'CSS',
+	'text/javascript': 'JS',
+	'text/csv': 'CSV',
+	'text/markdown': 'MD',
+	'text/yaml': 'YAML'
+};
+
+export function shortContentType(ct: string | null | undefined): string {
+	if (!ct) return '-';
+	const exact = MIME_SHORT[ct];
+	if (exact) return exact;
+	// fallback: subtype 의 마지막 마침표 뒤 토큰을 대문자로 (최대 8자)
+	const slash = ct.indexOf('/');
+	if (slash === -1) return ct.length > 12 ? ct.slice(0, 12) : ct;
+	let sub = ct.slice(slash + 1);
+	if (sub.startsWith('x-')) sub = sub.slice(2);
+	const dot = sub.lastIndexOf('.');
+	if (dot !== -1) sub = sub.slice(dot + 1);
+	const semi = sub.indexOf(';');
+	if (semi !== -1) sub = sub.slice(0, semi).trim();
+	return sub.toUpperCase().slice(0, 8) || '-';
+}

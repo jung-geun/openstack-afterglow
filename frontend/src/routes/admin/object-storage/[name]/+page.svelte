@@ -5,7 +5,7 @@
 	import { api, ApiError, getBaseUrl } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import UploadModal from '$lib/components/UploadModal.svelte';
-	import { formatStorage, formatDate } from '$lib/utils/format';
+	import { formatStorage, formatDate, shortContentType } from '$lib/utils/format';
 	import FileIcon from '$lib/components/ui/FileIcon.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
@@ -787,7 +787,14 @@
 							{#each filteredObjects() as obj (obj.name)}
 								{@const isDir = isDirectory(obj)}
 								{@const relName = displayName(obj.name)}
-								<tr class="group border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors {selected.has(obj.name) ? 'bg-indigo-950/20' : ''}">
+								<tr
+									class="group border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors cursor-pointer {selected.has(obj.name) ? 'bg-indigo-950/20' : ''}"
+									onclick={(e) => {
+										const t = e.target as HTMLElement;
+										if (t.closest('button, input, a, label')) return;
+										toggleSelect(obj.name);
+									}}
+								>
 									<td class="py-3 px-4">
 										<input type="checkbox"
 											checked={selected.has(obj.name)}
@@ -811,7 +818,10 @@
 											: obj.bytes >= 1048576 ? `${(obj.bytes / 1048576).toFixed(1)} MB`
 											: `${(obj.bytes / 1024).toFixed(1)} KB`}
 									</td>
-									<td class="py-3 px-4 text-gray-500 text-xs whitespace-nowrap">{isDir ? 'folder' : obj.content_type || '-'}</td>
+									<td
+										class="py-3 px-4 text-gray-500 text-xs whitespace-nowrap"
+										title={isDir ? 'folder' : obj.content_type || '-'}
+									>{isDir ? '폴더' : shortContentType(obj.content_type)}</td>
 									<td class="py-3 px-4 text-gray-500 text-xs whitespace-nowrap">{isDir ? '-' : formatDate(obj.last_modified)}</td>
 									<td class="py-3 px-4 text-right">
 										<div class="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
