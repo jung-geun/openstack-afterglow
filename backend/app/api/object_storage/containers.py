@@ -6,11 +6,13 @@ if TYPE_CHECKING:
     import openstack
 import asyncio
 import contextlib
+import json
 import logging
 import queue as _queue_module
+import secrets
 import urllib.parse
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.api.deps import get_os_conn
@@ -293,23 +295,97 @@ async def upload_object_stream(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/{container_name}/objects/{object_name:path}/download")
-async def download_object(
+def _make_content_disposition(disposition: str, object_name: str) -> str:
+    """RFC 5987 형식의 Content-Disposition 값 생성. 한글 파일명을 올바르게 처리."""
+    raw_name = object_name.split("/")[-1]
+    quoted = urllib.parse.quote(raw_name, safe="")
+    ascii_fallback = raw_name.encode("ascii", "replace").decode("ascii").replace("?", "_")
+    return f"{disposition}; filename=\"{ascii_fallback}\"; filename*=UTF-8''{quoted}"
+
+
+async def _resolve_swift_conn(
+    dl_token: str | None,
+    container_name: str,
+    object_name: str,
+    x_auth_token: str | None,
+    x_project_id: str | None,
+) -> openstack.connection.Connection:
+    """단발 다운로드 토큰 또는 헤더 인증으로 OpenStack 연결을 반환."""
+    from app.services import keystone as ks
+    from app.services.cache import _get_redis
+
+    if dl_token:
+        r = await _get_redis()
+        payload_str = await r.getdel(f"dl-token:{dl_token}")
+        if payload_str is None:
+            raise HTTPException(status_code=403, detail="유효하지 않거나 만료된 다운로드 토큰입니다")
+        payload = json.loads(payload_str)
+        if payload["container_name"] != container_name or payload["object_name"] != object_name:
+            raise HTTPException(status_code=403, detail="토큰이 요청한 리소스와 일치하지 않습니다")
+        return await asyncio.to_thread(ks.get_openstack_connection, payload["openstack_token"], payload["project_id"])
+
+    if not x_auth_token:
+        raise HTTPException(status_code=401, detail="X-Auth-Token 헤더가 필요합니다")
+    try:
+        import hashlib
+
+        from app.api.deps import _cached_validate, _check_session_timeout
+
+        token_hash = hashlib.sha256(x_auth_token.encode()).hexdigest()
+        await _check_session_timeout(token_hash, x_project_id or "")
+        token_info = await _cached_validate(x_auth_token, x_project_id or "")
+        return await asyncio.to_thread(ks.get_openstack_connection, token_info["token"], token_info["project_id"])
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=401, detail="유효하지 않은 토큰")
+
+
+@router.post("/{container_name}/objects/{object_name:path}/download-token", status_code=200)
+async def issue_download_token(
     container_name: str,
     object_name: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    """오브젝트 스트리밍 다운로드."""
+    """단발 다운로드 토큰 발급 (TTL 60초, 1회 사용). 브라우저 네이티브 다운로더 지원."""
+    from app.services.cache import _get_redis
+
+    token = secrets.token_urlsafe(32)
+    payload = json.dumps(
+        {
+            "openstack_token": conn._afterglow_token,
+            "project_id": conn._afterglow_project_id,
+            "container_name": container_name,
+            "object_name": object_name,
+        }
+    )
+    r = await _get_redis()
+    await r.set(f"dl-token:{token}", payload, ex=60)
+
+    encoded_container = urllib.parse.quote(container_name, safe="")
+    encoded_object = "/".join(urllib.parse.quote(p, safe="") for p in object_name.split("/"))
+    url = f"/api/object-storage/{encoded_container}/objects/{encoded_object}/download?token={token}"
+    return {"url": url, "expires_in": 60}
+
+
+@router.get("/{container_name}/objects/{object_name:path}/download")
+async def download_object(
+    container_name: str,
+    object_name: str,
+    dl_token: str | None = Query(None, alias="token"),
+    x_auth_token: str | None = Header(None),
+    x_project_id: str | None = Header(None),
+):
+    """오브젝트 스트리밍 다운로드. 단발 토큰(?token=) 또는 X-Auth-Token 헤더 인증."""
     from app.services import swift
 
+    conn = await _resolve_swift_conn(dl_token, container_name, object_name, x_auth_token, x_project_id)
     try:
-        # stream_object 는 동기 함수이므로 to_thread 에서 실행
         chunks, content_type, content_length = await asyncio.to_thread(
             swift.stream_object, conn, container_name, object_name
         )
-        filename = urllib.parse.quote(object_name.split("/")[-1])
-        headers = {
-            "Content-Disposition": f'attachment; filename="{filename}"',
+        headers: dict[str, str] = {
+            "Content-Disposition": _make_content_disposition("attachment", object_name),
         }
         if content_length:
             headers["Content-Length"] = str(content_length)
@@ -327,8 +403,12 @@ async def download_object(
                 yield chunk
 
         return StreamingResponse(_iter(), media_type=content_type, headers=headers)
+    except HTTPException:
+        raise
     except Exception:
         raise HTTPException(status_code=404, detail="오브젝트를 찾을 수 없습니다")
+    finally:
+        await asyncio.to_thread(conn.close)
 
 
 @router.delete("/{container_name}/objects/{object_name:path}", status_code=204)
@@ -374,9 +454,8 @@ async def preview_object(
         chunks, content_type, content_length = await asyncio.to_thread(
             swift.stream_object, conn, container_name, object_name
         )
-        filename = urllib.parse.quote(object_name.split("/")[-1])
         headers: dict[str, str] = {
-            "Content-Disposition": f'inline; filename="{filename}"',
+            "Content-Disposition": _make_content_disposition("inline", object_name),
         }
         if content_length:
             headers["Content-Length"] = str(content_length)

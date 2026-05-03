@@ -304,3 +304,32 @@
 
 /* 드롭다운 메뉴 그림자 (라이트에서 shadow-xl 오버라이드) */
 :root.light .shadow-xl { box-shadow: 0 10px 25px rgba(0,0,0,0.12) !important; }
+
+/* ============================================================
+   인디고 액션바·버튼 (Object Storage 버킷 일괄 선택)
+   ============================================================ */
+:root.light .bg-indigo-950\/40 { background-color: rgba(79,70,229,0.08) !important; }
+:root.light .bg-indigo-950\/20 { background-color: rgba(79,70,229,0.06) !important; }
+:root.light .border-indigo-800\/50 { border-color: rgba(99,102,241,0.35) !important; }
+:root.light .text-indigo-300 { color: #4338ca !important; }
+
+:root.light .bg-indigo-700 { background-color: #4f46e5 !important; }
+:root.light .hover\:bg-indigo-600:hover { background-color: #4338ca !important; }
+:root.light .border-indigo-600 { border-color: #4f46e5 !important; }
+
+/* indigo 단색 버튼 위 흰 글자 복원 (전역 .text-white 오버라이드 무력화) */
+:root.light button.bg-indigo-700,
+:root.light a.bg-indigo-700 { color: #ffffff !important; }
+:root.light .bg-indigo-700.text-white { color: #ffffff !important; }
+
+/* ============================================================
+   레드 삭제 버튼 (Object Storage 버킷 선택 삭제)
+   ============================================================ */
+:root.light .bg-red-700 { background-color: #dc2626 !important; }
+:root.light .hover\:bg-red-600:hover { background-color: #b91c1c !important; }
+:root.light .border-red-600 { border-color: #dc2626 !important; }
+
+/* red 단색 버튼 위 흰 글자 복원 */
+:root.light button.bg-red-700,
+:root.light a.bg-red-700 { color: #ffffff !important; }
+:root.light .bg-red-700.text-white { color: #ffffff !important; }

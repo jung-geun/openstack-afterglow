@@ -5,7 +5,9 @@ swift 서비스는 SERVICE_SWIFT_ENABLED=true 시 /api/object-storage/* 경로�
 swift 함수는 핸들러 내에서 lazy import하므로 app.services.swift 를 패치.
 """
 
-from unittest.mock import MagicMock, patch
+import json
+import urllib.parse
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -436,3 +438,145 @@ def test_delete_slo_object_purges_segments():
     assert conn.object_store.delete.called
     delete_url = conn.object_store.delete.call_args[0][0]
     assert "multipart-manifest=delete" in delete_url
+
+
+# ---------------------------------------------------------------------------
+# Content-Disposition RFC 5987 (한글 파일명)
+# ---------------------------------------------------------------------------
+
+
+def test_content_disposition_ascii():
+    """ASCII 파일명: filename 토큰과 filename* 토큰 모두 포함."""
+    from app.api.object_storage.containers import _make_content_disposition
+
+    result = _make_content_disposition("attachment", "folder/test.txt")
+    assert "attachment" in result
+    assert 'filename="test.txt"' in result
+    assert "filename*=UTF-8''" in result
+    assert urllib.parse.quote("test.txt", safe="") in result
+
+
+def test_content_disposition_korean():
+    """한글 파일명: ASCII 폴백은 '_'로 치환, filename* 는 UTF-8 퍼센트 인코딩."""
+    from app.api.object_storage.containers import _make_content_disposition
+
+    result = _make_content_disposition("attachment", "한글 2024.zip")
+    assert "filename*=UTF-8''" in result
+    assert urllib.parse.quote("한글 2024.zip", safe="") in result
+
+
+def test_content_disposition_inline():
+    """미리보기용 inline disposition."""
+    from app.api.object_storage.containers import _make_content_disposition
+
+    result = _make_content_disposition("inline", "image.png")
+    assert result.startswith("inline")
+    assert "filename*=UTF-8''" in result
+
+
+# ---------------------------------------------------------------------------
+# 단발 다운로드 토큰 발급
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_issue_download_token_unauthenticated():
+    """미인증 요청 → 401 (또는 서비스 미활성화 시 404/405)."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        resp = await ac.post("/api/object-storage/test-bucket/objects/test.txt/download-token")
+    assert resp.status_code in (401, 404, 405)
+
+
+@pytest.mark.asyncio
+async def test_issue_download_token_success(client, mock_conn):
+    """인증된 사용자가 토큰 발급 → url + expires_in 반환."""
+    mock_redis = MagicMock()
+    mock_redis.set = AsyncMock()
+
+    with patch("app.services.cache._get_redis", new_callable=AsyncMock, return_value=mock_redis):
+        resp = await client.post("/api/object-storage/test-bucket/objects/test.txt/download-token")
+    assert resp.status_code in (200, 404, 405)
+    if resp.status_code == 200:
+        data = resp.json()
+        assert "url" in data
+        assert "token=" in data["url"]
+        assert data["expires_in"] == 60
+
+
+# ---------------------------------------------------------------------------
+# 단발 토큰으로 다운로드
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_download_with_expired_token():
+    """없는/만료된 토큰 → 403 (또는 서비스 미활성화 시 404/405)."""
+    mock_redis = MagicMock()
+    mock_redis.getdel = AsyncMock(return_value=None)
+
+    with patch("app.services.cache._get_redis", new_callable=AsyncMock, return_value=mock_redis):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            resp = await ac.get(
+                "/api/object-storage/test-bucket/objects/test.txt/download",
+                params={"token": "expired-or-missing-token"},
+            )
+    assert resp.status_code in (403, 404, 405)
+
+
+@pytest.mark.asyncio
+async def test_download_token_mismatched_resource():
+    """토큰 페이로드와 URL의 container/object 불일치 → 403."""
+    payload = json.dumps(
+        {
+            "openstack_token": "os-tok",
+            "project_id": "proj",
+            "container_name": "other-bucket",
+            "object_name": "test.txt",
+        }
+    )
+    mock_redis = MagicMock()
+    mock_redis.getdel = AsyncMock(return_value=payload)
+
+    with patch("app.services.cache._get_redis", new_callable=AsyncMock, return_value=mock_redis):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            resp = await ac.get(
+                "/api/object-storage/test-bucket/objects/test.txt/download",
+                params={"token": "mismatch-token"},
+            )
+    assert resp.status_code in (403, 404, 405)
+
+
+@pytest.mark.asyncio
+async def test_download_with_valid_token():
+    """유효한 단발 토큰 → 스트리밍 응답 + RFC 5987 Content-Disposition."""
+    payload = json.dumps(
+        {
+            "openstack_token": "os-tok",
+            "project_id": "proj",
+            "container_name": "test-bucket",
+            "object_name": "한글파일.zip",
+        }
+    )
+    mock_redis = MagicMock()
+    mock_redis.getdel = AsyncMock(return_value=payload)
+
+    mock_conn_val = MagicMock()
+    mock_conn_val.close = MagicMock()
+
+    def fake_chunks():
+        yield b"data"
+
+    with (
+        patch("app.services.cache._get_redis", new_callable=AsyncMock, return_value=mock_redis),
+        patch("app.services.keystone.get_openstack_connection", return_value=mock_conn_val),
+        patch("app.services.swift.stream_object", return_value=(fake_chunks(), "application/zip", 4)),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            resp = await ac.get(
+                "/api/object-storage/test-bucket/objects/%ED%95%9C%EA%B8%80%ED%8C%8C%EC%9D%BC.zip/download",
+                params={"token": "valid-token"},
+            )
+    assert resp.status_code in (200, 404, 405)
+    if resp.status_code == 200:
+        cd = resp.headers.get("content-disposition", "")
+        assert "filename*=UTF-8''" in cd

@@ -321,14 +321,18 @@
 	async function downloadObject(name: string) {
 		downloading = name;
 		try {
-			const { blob, filename } = await api.downloadBlob(
-				`/api/object-storage/${encodeURIComponent(containerName)}/objects/${encObj(name)}/download`,
+			const { url } = await api.post<{ url: string; expires_in: number }>(
+				`/api/object-storage/${encodeURIComponent(containerName)}/objects/${encObj(name)}/download-token`,
+				{},
 				token, projectId
 			);
-			const url = URL.createObjectURL(blob);
+			const absoluteUrl = url.startsWith('http') ? url : `${getBaseUrl()}${url}`;
 			const a = document.createElement('a');
-			a.href = url; a.download = filename; a.click();
-			URL.revokeObjectURL(url);
+			a.href = absoluteUrl;
+			a.rel = 'noopener';
+			document.body.appendChild(a);
+			a.click();
+			a.remove();
 		} catch (e) {
 			alert('다운로드 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
