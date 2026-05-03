@@ -12,6 +12,7 @@
     "lint:backend": "cd backend && uv run ruff check . && uv run ruff format --check .",
     "lint:backend:fix": "cd backend && uv run ruff check --fix . && uv run ruff format .",
     "version": "node scripts/sync-version.js && git add backend/pyproject.toml backend/uv.lock frontend/package.json package.json",
+    "version:apply-tag": "node scripts/apply-tag-version.js",
     "version:sync": "node scripts/sync-version.js",
     "version:check": "node scripts/check-version-sync.js",
     "version:bump:patch": "npm version patch -m \"chore(release): v%s\"",

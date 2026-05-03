@@ -93,6 +93,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Install uv (tag push only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Apply tag version (tag push only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GITHUB_REF: ${{ github.ref }}
+        run: npm run version:apply-tag
+
       - name: Verify version sync
         run: bash scripts/check-version-sync.sh
         env:
