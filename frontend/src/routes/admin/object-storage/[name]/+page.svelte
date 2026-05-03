@@ -252,6 +252,36 @@
 		}
 	}
 
+	function hasFiles(e: DragEvent): boolean {
+		const types = e.dataTransfer?.types;
+		if (!types) return false;
+		for (let i = 0; i < types.length; i++) if (types[i] === 'Files') return true;
+		return false;
+	}
+
+	function onWindowDragEnter(e: DragEvent) {
+		if (!hasFiles(e)) return;
+		e.preventDefault();
+		dragActive = true;
+	}
+	function onWindowDragOver(e: DragEvent) {
+		if (!hasFiles(e)) return;
+		e.preventDefault();
+		dragActive = true;
+	}
+	function onWindowDragLeave(e: DragEvent) {
+		if (!hasFiles(e)) return;
+		if (e.clientX <= 0 || e.clientY <= 0 || e.clientX >= window.innerWidth || e.clientY >= window.innerHeight) {
+			dragActive = false;
+		}
+	}
+	function onWindowDrop(e: DragEvent) {
+		if (!hasFiles(e)) return;
+		e.preventDefault();
+		dragActive = false;
+		handleDrop(e);
+	}
+
 	async function downloadObject(name: string) {
 		downloading = name;
 		try {
@@ -436,6 +466,23 @@
 
 	onMount(() => { load(); loadContainerMeta(); });
 </script>
+
+<svelte:window
+	ondragenter={onWindowDragEnter}
+	ondragover={onWindowDragOver}
+	ondragleave={onWindowDragLeave}
+	ondrop={onWindowDrop}
+/>
+
+{#if dragActive}
+	<div class="fixed inset-0 z-50 pointer-events-none flex items-center justify-center bg-indigo-950/40 backdrop-blur-sm border-4 border-dashed border-indigo-500">
+		<div class="text-center">
+			<svg class="w-16 h-16 mx-auto text-indigo-300 mb-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+			<p class="text-indigo-100 font-semibold text-xl">{containerName}{prefix ? ` / ${prefix}` : ''} 에 업로드</p>
+			<p class="text-indigo-300 text-sm mt-1">파일을 여기에 떨어뜨리세요</p>
+		</div>
+	</div>
+{/if}
 
 <div class="p-4 md:p-8 max-w-7xl">
 	<!-- breadcrumb -->
@@ -689,22 +736,7 @@
 	{/if}
 
 	<div class="flex gap-6">
-		<div
-			class="flex-1 min-w-0 relative rounded-lg transition-all {dragActive ? 'ring-2 ring-indigo-500 ring-offset-2 ring-offset-gray-950' : ''}"
-			ondragover={(e) => { e.preventDefault(); dragActive = true; }}
-			ondragleave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) dragActive = false; }}
-			ondrop={(e) => { e.preventDefault(); dragActive = false; handleDrop(e); }}
-			role="region"
-			aria-label="파일 탐색기 — 파일을 여기로 드래그하여 업로드"
-		>
-			{#if dragActive}
-				<div class="absolute inset-0 z-10 flex items-center justify-center rounded-lg border-2 border-dashed border-indigo-500 bg-indigo-950/40 pointer-events-none">
-					<div class="text-center">
-						<svg class="w-10 h-10 mx-auto text-indigo-400 mb-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
-						<p class="text-indigo-300 font-medium text-sm">여기에 드롭하여 업로드</p>
-					</div>
-				</div>
-			{/if}
+		<div class="flex-1 min-w-0 relative">
 			{#if loading}
 				<LoadingSkeleton variant="table" rows={5} />
 			{:else if objects.length === 0}
