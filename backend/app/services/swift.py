@@ -56,16 +56,29 @@ def list_containers(conn) -> list[dict]:
             endpoint = "(resolve failed)"
         _logger.info("Swift list_containers: project_id=%s endpoint=%s", project_id, endpoint)
 
-        # SLO 내부 bookkeeping 용 {name}_segments 컨테이너는 사용자 목록에서 숨김
-        result = [
-            {
-                "name": c.name or "",
-                "count": getattr(c, "count", 0) or 0,
-                "bytes": getattr(c, "bytes", 0) or 0,
-            }
-            for c in conn.object_store.containers()
-            if not (c.name or "").endswith("_segments")
-        ]
+        # SLO segment 컨테이너({name}_segments)는 사용자 목록에서 숨기고,
+        # 그 bytes 는 원본 컨테이너에 합산해서 표시.
+        all_containers = list(conn.object_store.containers())
+        seg_bytes_by_origin: dict[str, int] = {}
+        for c in all_containers:
+            cname = c.name or ""
+            if cname.endswith("_segments"):
+                origin = cname[: -len("_segments")]
+                seg_bytes_by_origin[origin] = seg_bytes_by_origin.get(origin, 0) + (getattr(c, "bytes", 0) or 0)
+
+        result = []
+        for c in all_containers:
+            cname = c.name or ""
+            if cname.endswith("_segments"):
+                continue
+            base_bytes = getattr(c, "bytes", 0) or 0
+            result.append(
+                {
+                    "name": cname,
+                    "count": getattr(c, "count", 0) or 0,
+                    "bytes": base_bytes + seg_bytes_by_origin.get(cname, 0),
+                }
+            )
         _logger.info("Swift 컨테이너 목록 조회: %d개", len(result))
         return result
     except Exception as exc:
@@ -191,13 +204,28 @@ def delete_container(conn, name: str) -> None:
 
 
 def get_container_metadata(conn, name: str) -> dict:
-    """컨테이너 메타데이터(오브젝트 수, 바이트 등) 반환."""
+    """컨테이너 메타데이터(오브젝트 수, 바이트 등) 반환.
+
+    bytes 에는 SLO segment 컨테이너({name}_segments)의 bytes_used 도 합산.
+    Swift 의 bytes_used 는 SLO 매니페스트 JSON 크기만 잡으므로 segment 합계를 더해
+    실제 사용량을 반영한다.
+    """
     _apply_endpoint_override(conn)
     meta = conn.object_store.get_container_metadata(name)
+    base_bytes = int(getattr(meta, "bytes_used", 0) or 0)
+
+    seg_bytes = 0
+    try:
+        seg_meta = conn.object_store.get_container_metadata(f"{name}_segments")
+        seg_bytes = int(getattr(seg_meta, "bytes_used", 0) or 0)
+    except Exception:
+        # segments 컨테이너가 없는 경우(SLO 미사용 버킷) 정상 동작
+        pass
+
     return {
         "name": meta.name or name,
         "count": getattr(meta, "object_count", 0) or 0,
-        "bytes": getattr(meta, "bytes_used", 0) or 0,
+        "bytes": base_bytes + seg_bytes,
         "read_acl": getattr(meta, "read_ACL", "") or "",
         "write_acl": getattr(meta, "write_ACL", "") or "",
     }

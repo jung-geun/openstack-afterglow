@@ -164,10 +164,78 @@ def test_list_containers_hides_segments():
     ]
     with patch("app.services.swift._apply_endpoint_override"):
         result = list_containers(conn)
-    names = [c["name"] for c in result]
-    assert "test" in names
-    assert "photos" in names
-    assert "test_segments" not in names
+    by_name = {c["name"]: c for c in result}
+    assert "test" in by_name
+    assert "photos" in by_name
+    assert "test_segments" not in by_name
+    # segments 컨테이너 bytes 가 원본 컨테이너에 합산됨 (3 GiB + 9 GiB = 12 GiB)
+    assert by_name["test"]["bytes"] == 3 * 1024**3 + 9 * 1024**3
+    # segments 가 없는 컨테이너는 그대로 유지
+    assert by_name["photos"]["bytes"] == 500 * 1024**2
+
+
+def test_get_container_metadata_includes_segments():
+    """get_container_metadata 의 bytes 에 {name}_segments 의 bytes_used 가 합산된다."""
+    from unittest.mock import MagicMock, patch
+
+    from app.services.swift import get_container_metadata
+
+    base_meta = MagicMock()
+    base_meta.name = "test"
+    base_meta.object_count = 2
+    base_meta.bytes_used = 1024 * 1024 + 2000  # 매니페스트 + 일반 파일 ≈ 1 MiB
+    base_meta.read_ACL = ""
+    base_meta.write_ACL = ""
+
+    seg_meta = MagicMock()
+    seg_meta.bytes_used = 9 * 1024**3  # 9 GiB segments
+
+    conn = MagicMock()
+
+    def get_meta_side_effect(name):
+        if name == "test":
+            return base_meta
+        if name == "test_segments":
+            return seg_meta
+        raise Exception("404")
+
+    conn.object_store.get_container_metadata.side_effect = get_meta_side_effect
+
+    with patch("app.services.swift._apply_endpoint_override"):
+        result = get_container_metadata(conn, "test")
+
+    assert result["name"] == "test"
+    assert result["count"] == 2
+    # base + segments 합계
+    assert result["bytes"] == 1024 * 1024 + 2000 + 9 * 1024**3
+
+
+def test_get_container_metadata_no_segments():
+    """{name}_segments 컨테이너가 없는 경우 base bytes 만 반환한다."""
+    from unittest.mock import MagicMock, patch
+
+    from app.services.swift import get_container_metadata
+
+    base_meta = MagicMock()
+    base_meta.name = "photos"
+    base_meta.object_count = 100
+    base_meta.bytes_used = 500 * 1024**2
+    base_meta.read_ACL = ""
+    base_meta.write_ACL = ""
+
+    conn = MagicMock()
+
+    def get_meta_side_effect(name):
+        if name == "photos":
+            return base_meta
+        raise Exception("404")
+
+    conn.object_store.get_container_metadata.side_effect = get_meta_side_effect
+
+    with patch("app.services.swift._apply_endpoint_override"):
+        result = get_container_metadata(conn, "photos")
+
+    assert result["bytes"] == 500 * 1024**2
 
 
 def test_list_objects_enriches_slo_sizes():
