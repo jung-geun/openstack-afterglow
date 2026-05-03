@@ -8,9 +8,8 @@
 	// 자동 dismiss 타이머 (job id → timer id)
 	const timers = new Map<string, ReturnType<typeof setTimeout>>();
 
-	$effect(() => {
-		return uploadQueue.subscribe((list) => {
-			const prev = jobs;
+	onMount(() => {
+		const unsub = uploadQueue.subscribe((list) => {
 			jobs = list;
 
 			// 새로 완료된 job 에 5초 dismiss 타이머
@@ -32,6 +31,7 @@
 				}
 			}
 		});
+		return unsub;
 	});
 
 	const visible = $derived(jobs.length > 0);
