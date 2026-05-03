@@ -10,6 +10,7 @@
 	import { sidebarOpen } from '$lib/stores/sidebar';
 	import { deriveBreadcrumb } from '$lib/config/routes';
 	import Toast from '$lib/components/ui/Toast.svelte';
+	import UploadDock from '$lib/components/UploadDock.svelte';
 	import './layout.css';
 
 	let { children } = $props();
@@ -229,6 +230,7 @@
 		</div>
 	</nav>
 	<Toast />
+	<UploadDock />
 	<main class="pt-14 min-h-screen bg-gray-950 text-white">
 		{@render children()}
 	</main>

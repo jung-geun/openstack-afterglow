@@ -9,6 +9,7 @@
 	import FileIcon from '$lib/components/ui/FileIcon.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
+	import { uploadQueue } from '$lib/stores/uploadQueue';
 
 	interface ObjectItem {
 		name: string;
@@ -83,6 +84,9 @@
 	}
 
 	let showUpload = $state(false);
+
+	// 드래그앤드롭
+	let dragActive = $state(false);
 	let showNewDir = $state(false);
 	let newDirName = $state('');
 	let creatingDir = $state(false);
@@ -223,16 +227,29 @@
 			contentType === 'application/pdf' || contentType === 'application/json';
 	}
 
-	async function load() {
-		loading = true;
+	async function load(opts: { silent?: boolean } = {}) {
+		if (!opts.silent) loading = true;
 		try {
 			const qs = new URLSearchParams({ delimiter: '/' });
 			if (prefix) qs.set('prefix', prefix);
 			objects = await api.get<ObjectItem[]>(
 				`/api/object-storage/${encodeURIComponent(containerName)}/objects?${qs}`, token, projectId
 			);
-		} catch { objects = []; }
-		finally { loading = false; }
+		} catch { if (!opts.silent) objects = []; }
+		finally { if (!opts.silent) loading = false; }
+	}
+
+	function handleDrop(e: DragEvent) {
+		const files = Array.from(e.dataTransfer?.files ?? []);
+		for (const f of files) {
+			uploadQueue.enqueue(f, {
+				containerName,
+				prefix,
+				token,
+				projectId,
+				onComplete: (job) => { if (job.status === 'success') load({ silent: true }); }
+			});
+		}
 	}
 
 	async function downloadObject(name: string) {
@@ -410,7 +427,7 @@
 		return sortAsc ? '↑' : '↓';
 	}
 
-	const ar = createAutoRefresh(load, {
+	const ar = createAutoRefresh(() => load({ silent: true }), {
 		storageKey: 'admin-object-storage-detail',
 		defaultActive: true,
 		defaultInterval: 15,
@@ -511,7 +528,7 @@
 	{/if}
 
 	{#if showUpload}
-		<UploadModal {containerName} {prefix} {token} {projectId} onSuccess={load} onClose={() => { showUpload = false; }} />
+		<UploadModal {containerName} {prefix} {token} {projectId} onSuccess={() => load({ silent: true })} onClose={() => { showUpload = false; }} />
 	{/if}
 
 	{#if showNewDir}
@@ -672,7 +689,22 @@
 	{/if}
 
 	<div class="flex gap-6">
-		<div class="flex-1 min-w-0">
+		<div
+			class="flex-1 min-w-0 relative rounded-lg transition-all {dragActive ? 'ring-2 ring-indigo-500 ring-offset-2 ring-offset-gray-950' : ''}"
+			ondragover={(e) => { e.preventDefault(); dragActive = true; }}
+			ondragleave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) dragActive = false; }}
+			ondrop={(e) => { e.preventDefault(); dragActive = false; handleDrop(e); }}
+			role="region"
+			aria-label="파일 탐색기 — 파일을 여기로 드래그하여 업로드"
+		>
+			{#if dragActive}
+				<div class="absolute inset-0 z-10 flex items-center justify-center rounded-lg border-2 border-dashed border-indigo-500 bg-indigo-950/40 pointer-events-none">
+					<div class="text-center">
+						<svg class="w-10 h-10 mx-auto text-indigo-400 mb-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+						<p class="text-indigo-300 font-medium text-sm">여기에 드롭하여 업로드</p>
+					</div>
+				</div>
+			{/if}
 			{#if loading}
 				<LoadingSkeleton variant="table" rows={5} />
 			{:else if objects.length === 0}
@@ -720,7 +752,7 @@
 							</tr>
 						</thead>
 						<tbody>
-							{#each filteredObjects() as obj}
+							{#each filteredObjects() as obj (obj.name)}
 								{@const isDir = isDirectory(obj)}
 								{@const relName = displayName(obj.name)}
 								<tr class="group border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors {selected.has(obj.name) ? 'bg-indigo-950/20' : ''}">

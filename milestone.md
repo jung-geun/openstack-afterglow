@@ -1188,14 +1188,23 @@ Option A 채택 시 본 절 진행. Option B 채택 시 사용자가 자체 구�
 
 ### 13.2 구현
 
-- [x] `backend/app/services/swift.py` — `_SLO_SEGMENT_SIZE = 1 GiB` 상수 추가; `upload_object` 에서 1 GiB 초과 시 `use_slo=True, segment_size=1GiB` 로 `create_object` 호출 (openstacksdk SLO 자동 분할)
-- [x] `backend/app/services/swift.py` — `delete_object` 에서 `is_static_large_object` 헤더 확인 후 SLO manifest 삭제 시 `?multipart-manifest=delete` 로 segments 까지 정리 (quota 누수 방지)
-- [x] `backend/app/api/object_storage/containers.py` — 5GB 하드 캡(`_MAX_UPLOAD_BYTES`) 및 413 분기 제거
+- [x] `backend/app/services/swift.py` — `_SLO_SEGMENT_SIZE = 1 GiB`; `upload_object` 1 GiB 초과 시 수동 SLO: `_LimitedReader`로 1 GiB씩 `proxy.put()` 루프 → `?multipart-manifest=put` manifest PUT (openstacksdk file-like SLO 버그 우회)
+- [x] `backend/app/services/swift.py` — `delete_object` SLO `?multipart-manifest=delete` 정리 (quota 누수 방지)
+- [x] `backend/app/api/object_storage/containers.py` — streaming PUT endpoint + `HttpException` 에러 디테일 응답 노출
 - [x] `backend/app/config.py` — `os_swift_upload_timeout` 기본값 600 → 1800 (30분)
-- [x] `deploy/k8s-template/middleware.yaml` — Traefik `maxRequestBodyBytes` 5GB → 50GB
-- [x] `backend/tests/test_object_storage.py` — `test_upload_large_object_uses_slo`, `test_upload_small_object_no_slo`, `test_delete_slo_object_purges_segments` 3건 추가
+- [x] `deploy/k8s-template/middleware.yaml` — Traefik buffering 제거 → streaming pass-through
+- [x] `backend/tests/test_object_storage.py` — 수동 SLO 루프 검증 테스트 업데이트 (3건)
+- [x] `frontend/src/lib/stores/uploadQueue.ts` — 백그라운드 업로드 큐 store
+- [x] `frontend/src/lib/components/UploadDock.svelte` — 우하단 업로드 진행 도크 위젯
+- [x] `frontend/src/lib/components/UploadModal.svelte` — enqueue+즉시 닫기로 단순화 (진행 UI → Dock)
+- [x] `frontend/src/routes/+layout.svelte` — UploadDock 글로벌 마운트
+- [x] `frontend/src/routes/dashboard/object-storage/buckets/[name]/+page.svelte` — silent 자동새로고침 + keyed each + DnD 업로드
+- [x] `frontend/src/routes/admin/object-storage/[name]/+page.svelte` — 동일 패턴 적용
 
 ### 13.3 검증 (사용자 직접)
 
-- Ceph RGW SLO 지원 확인 (`?multipart-manifest=put` 201 응답)
-- 5.5GB 더미 파일 업로드/다운로드/삭제 E2E
+- [ ] Ceph RGW 9.58 GB 파일 업로드 → 200 응답 + `{container}_segments` 에 10개 세그먼트 확인
+- [ ] 다운로드 후 md5 일치
+- [ ] 자동새로고침 15초 폴링 중 표 깜빡임 없음
+- [ ] DnD로 파일 드롭 → Dock에 진행 표시
+- [ ] 업로드 중 다른 페이지 이동 → Dock 유지, 완료 후 목록 자동 갱신
