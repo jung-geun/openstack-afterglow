@@ -94,9 +94,7 @@ async def test_delete_instance_cleans_nfs_access_rules(client, mock_conn):
     with (
         patch("app.api.compute.instances.nova.get_server", return_value=inst),
         patch("app.api.compute.instances.nova.delete_server", return_value=None),
-        patch(
-            "app.api.compute.instances.keystone.get_service_project_connection", return_value=mock_svc_conn
-        ),
+        patch("app.api.compute.instances.keystone.get_service_project_connection", return_value=mock_svc_conn),
         patch("app.api.compute.instances.manila.list_access_rules", return_value=access_rules) as mock_list,
         patch("app.api.compute.instances.manila.revoke_access_rule") as mock_revoke,
         patch("app.api.compute.instances.neutron.cleanup_instance_fips", return_value=None),
