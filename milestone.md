@@ -1251,9 +1251,11 @@ Option A 채택 시 본 절 진행. Option B 채택 시 사용자가 자체 구�
 - [x] Phase 6d: `Toast` actionable 링크 (`action?: { label, onClick }`) + 토큰 기반 색상
 - [x] Phase 6e: `EmptyState.svelte` warm halo 신규 컴포넌트
 - [x] Phase 6f: `Card.svelte` 좌상단 radial warm highlight
+- [x] Phase 7: `Button.svelte` variant 컴포넌트 (primary/secondary/ghost/danger × sm/md/lg), primary CTA 15곳 warm gradient 통일
+- [x] Phase 5a: `DetailHeader.svelte` 상세 페이지 헤더 통일 (Instance/K3s/LB/Router/Volume/FileStorage 6종)
+- [x] Phase 5d: Cmd-K 팔레트 (`nav.ts` 추출, `palette.ts` store, `CmdPalette.svelte`, 상단바 ⌘K 트리거)
+- [x] Phase 5e: 대시보드 `TopologyCard.svelte` wrapper 임베드 (GlobalTopology 무변경)
 - [ ] Phase 4: `layout.css` override sheet 제거 (336 → ~70 라인)
-- [ ] Phase 5a: `DetailHeader.svelte` 상세 페이지 헤더 통일
-- [ ] Phase 5d: Cmd-K 팔레트
 
 ### 15.2 검증 (사용자 직접)
 
@@ -1262,3 +1264,6 @@ Option A 채택 시 본 절 진행. Option B 채택 시 사용자가 자체 구�
 - [ ] 다크/라이트 토글 시 사이드바 active 자연스럽게 전환
 - [ ] 인스턴스/볼륨 페이지 StatusChip BUILD/CREATING 상태 dot pulse 동작
 - [ ] VM 생성 위저드 스테퍼 완료/현재 step warm gradient 적용 확인
+- [ ] ⌘K 팔레트: 라우트 jump + 리소스 검색 fuzzy match + 상단바 버튼 트리거 동작 확인
+- [ ] 인스턴스/K3s/LB/Router/Volume/FileStorage 상세 헤더 `DetailHeader` 통일 확인
+- [ ] 대시보드 하단 네트워크 토폴로지 카드 노출 + 전체보기 링크 동작
