@@ -439,14 +439,14 @@
 					<div class="flex items-center gap-2">
 						{#if $wizard.step > step}
 							<!-- 완료 -->
-							<div class="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center">
+							<div class="step-done w-7 h-7 rounded-full flex items-center justify-center">
 								<svg class="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
 								</svg>
 							</div>
 						{:else if $wizard.step === step}
 							<!-- 현재 -->
-							<div class="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-sm font-bold text-white ring-2 ring-blue-500/30">
+							<div class="step-current w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white">
 								{step}
 							</div>
 						{:else}
@@ -458,7 +458,7 @@
 						<span class="text-xs hidden sm:inline {$wizard.step >= step ? 'text-white' : 'text-gray-600'}">{label}</span>
 					</div>
 					{#if i < stepLabels.length - 1}
-						<div class="flex-1 h-px {$wizard.step > step + 1 ? 'bg-blue-600' : 'bg-gray-800'} mx-1"></div>
+						<div class="flex-1 h-px {$wizard.step > step + 1 ? 'step-connector-done' : ''} bg-gray-800 mx-1"></div>
 					{/if}
 				{/each}
 			</div>
@@ -743,5 +743,18 @@
   .vm-deploy-btn:hover:not(:disabled) {
     filter: brightness(1.08);
     box-shadow: 0 10px 28px color-mix(in oklab, var(--color-warm) 35%, transparent);
+  }
+
+  .step-done {
+    background: var(--gradient-warm);
+  }
+  .step-current {
+    background: var(--gradient-warm);
+    box-shadow: 0 0 12px color-mix(in oklab, var(--color-warm) 40%, transparent);
+    ring-color: color-mix(in oklab, var(--color-warm) 30%, transparent);
+  }
+  .step-connector-done {
+    background: var(--color-warm) !important;
+    opacity: 0.6;
   }
 </style>
