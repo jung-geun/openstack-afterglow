@@ -37,6 +37,10 @@
   --warm-ring:   color-mix(in oklab, var(--color-warm) 30%, transparent);
   --accent-soft: color-mix(in oklab, var(--color-accent) 14%, transparent);
   --accent-ring: color-mix(in oklab, var(--color-accent) 30%, transparent);
+  --gradient-brand: linear-gradient(135deg, var(--color-warm), var(--color-accent-2));
+  --gradient-warm:  linear-gradient(135deg, var(--color-warm), var(--color-warm-2));
+  --glow-warm:   0 8px 24px color-mix(in oklab, var(--color-warm) 25%, transparent);
+  --glow-accent: 0 8px 24px color-mix(in oklab, var(--color-accent) 25%, transparent);
 }
 
 /* ============================================================
@@ -56,6 +60,11 @@
   --color-ink-1: #1e293b;
   --color-ink-2: #475569;
   --color-ink-3: #94a3b8;
+  /* warm 라이트 변종 — orange-600/700 기반, WCAG AA on white 통과 */
+  --color-warm:   #ea580c;
+  --color-warm-2: #c2410c;
+  --warm-soft:   color-mix(in oklab, var(--color-warm) 10%, transparent);
+  --warm-ring:   color-mix(in oklab, var(--color-warm) 35%, transparent);
   /* 배경 색상 오버라이드 */
   --tw-bg-base: #ffffff;
 }
