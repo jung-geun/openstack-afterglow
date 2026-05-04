@@ -5,6 +5,7 @@
   import { api, ApiError, getBaseUrl } from '$lib/api/client';
   import InstanceDetailPanel from '$lib/components/InstanceDetailPanel.svelte';
   import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+  import Button from '$lib/components/ui/Button.svelte';
 
   interface K3sCluster {
     id: string;
@@ -295,10 +296,9 @@
             class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-200 text-xs rounded-lg transition-colors disabled:opacity-50">
             {checkingHealth ? '확인 중...' : '헬스 체크'}
           </button>
-          <button onclick={downloadKubeconfig}
-            class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium rounded-lg transition-colors">
+          <Button onclick={downloadKubeconfig} size="sm">
             kubeconfig 다운로드
-          </button>
+          </Button>
         {/if}
         <button onclick={deleteCluster} disabled={deleting}
           class="px-3 py-1.5 bg-red-900/40 hover:bg-red-900/60 border border-red-800 text-red-400 text-xs rounded-lg transition-colors disabled:opacity-50">
@@ -405,12 +405,9 @@
                     onclick={() => scalingTarget = Math.min(10, (scalingTarget ?? cluster!.agent_count) + 1)}
                     class="w-5 h-5 flex items-center justify-center bg-gray-700 hover:bg-gray-600 text-white rounded text-xs transition-colors">+</button>
                   {#if scalingTarget !== null && scalingTarget !== cluster.agent_count}
-                    <button
-                      onclick={applyScale}
-                      disabled={scaling}
-                      class="px-2 py-0.5 bg-blue-600 hover:bg-blue-500 text-white text-xs rounded transition-colors disabled:opacity-50 ml-1">
+                    <Button onclick={applyScale} disabled={scaling} size="sm" class="ml-1">
                       {scaling ? '...' : '적용'}
-                    </button>
+                    </Button>
                   {/if}
                 {:else}
                   <span class="text-gray-300 text-xs">{cluster.agent_vm_ids.length} / {cluster.agent_count} 생성됨</span>
@@ -449,12 +446,9 @@
                 onclick={() => scalingTarget = Math.min(10, (scalingTarget ?? cluster!.agent_count) + 1)}
                 class="w-5 h-5 flex items-center justify-center bg-gray-700 hover:bg-gray-600 text-white rounded text-xs transition-colors">+</button>
               {#if scalingTarget !== null && scalingTarget !== cluster.agent_count}
-                <button
-                  onclick={applyScale}
-                  disabled={scaling}
-                  class="px-2 py-0.5 bg-blue-600 hover:bg-blue-500 text-white text-xs rounded transition-colors disabled:opacity-50 ml-1">
+                <Button onclick={applyScale} disabled={scaling} size="sm" class="ml-1">
                   {scaling ? '...' : '적용'}
-                </button>
+                </Button>
               {/if}
             </div>
             {#if scaleError}

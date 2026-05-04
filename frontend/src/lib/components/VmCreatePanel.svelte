@@ -12,6 +12,7 @@
 	import ProgressBar from '$lib/components/ProgressBar.svelte';
 	import LoadingSpinner from '$lib/components/LoadingSpinner.svelte';
 	import SlidePanel from '$lib/components/SlidePanel.svelte';
+	import Button from '$lib/components/ui/Button.svelte';
 	import type { Volume } from '$lib/types/resources';
 
 	const TOTAL_STEPS = 6;
@@ -717,17 +718,9 @@
 						>← 이전</button>
 					{/if}
 					{#if $wizard.step < TOTAL_STEPS}
-						<button
-							onclick={nextStep}
-							disabled={!canNext}
-							class="px-6 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium rounded-lg transition-colors"
-						>다음 →</button>
+						<Button onclick={nextStep} disabled={!canNext}>다음 →</Button>
 					{:else}
-						<button
-							onclick={deploy}
-							disabled={!canNext}
-							class="vm-deploy-btn px-6 py-2 disabled:bg-gray-700 disabled:text-gray-500 disabled:shadow-none text-white text-sm font-medium rounded-lg transition-all"
-						>VM 생성</button>
+						<Button onclick={deploy} disabled={!canNext}>VM 생성</Button>
 					{/if}
 				</div>
 			</div>
@@ -736,15 +729,6 @@
 </SlidePanel>
 
 <style>
-  .vm-deploy-btn {
-    background: var(--gradient-warm);
-    box-shadow: var(--glow-warm);
-  }
-  .vm-deploy-btn:hover:not(:disabled) {
-    filter: brightness(1.08);
-    box-shadow: 0 10px 28px color-mix(in oklab, var(--color-warm) 35%, transparent);
-  }
-
   .step-done {
     background: var(--gradient-warm);
   }

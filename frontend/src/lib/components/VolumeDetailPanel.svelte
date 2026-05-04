@@ -4,6 +4,7 @@
 	import { formatStorage } from '$lib/utils/format';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
+	import Button from '$lib/components/ui/Button.svelte';
 
 	interface Volume {
 		id: string;
@@ -275,11 +276,9 @@
 					{#if snapshotError}<p class="text-xs text-red-400">{snapshotError}</p>{/if}
 					<div class="flex gap-2 justify-end">
 						<button onclick={() => showSnapshotForm = false} class="text-xs text-gray-400 hover:text-white transition-colors">취소</button>
-						<button
-							onclick={createSnapshot}
-							disabled={creatingSnapshot || !snapshotName.trim()}
-							class="text-xs bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white px-3 py-1 rounded transition-colors"
-						>{creatingSnapshot ? '생성 중...' : '생성'}</button>
+						<Button onclick={createSnapshot} disabled={creatingSnapshot || !snapshotName.trim()} size="sm">
+							{creatingSnapshot ? '생성 중...' : '생성'}
+						</Button>
 					</div>
 				</div>
 			{/if}
@@ -309,10 +308,7 @@
 		<!-- Actions -->
 		<div class="flex gap-2 flex-wrap">
 			{#if volume.status === 'available'}
-				<button
-					onclick={openAttachModal}
-					class="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
-				>인스턴스에 연결</button>
+				<Button onclick={openAttachModal} size="sm">인스턴스에 연결</Button>
 			{/if}
 			<button
 				onclick={deleteVolume}
@@ -346,11 +342,9 @@
 			{#if attachError}<p class="text-xs text-red-400 mt-2">{attachError}</p>{/if}
 			<div class="flex justify-end gap-3 mt-5">
 				<button onclick={() => { showAttachModal = false; attachError = ''; }} class="text-sm text-gray-400 hover:text-white transition-colors">취소</button>
-				<button
-					onclick={attachVolume}
-					disabled={attaching || !attachInstanceId}
-					class="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm rounded-lg transition-colors"
-				>{attaching ? '연결 중...' : '연결'}</button>
+				<Button onclick={attachVolume} disabled={attaching || !attachInstanceId}>
+					{attaching ? '연결 중...' : '연결'}
+				</Button>
 			</div>
 		</div>
 	</div>

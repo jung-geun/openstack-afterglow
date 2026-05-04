@@ -3,6 +3,7 @@
   import { api, ApiError } from '$lib/api/client';
   import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
   import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
+  import Button from '$lib/components/ui/Button.svelte';
 
   interface FileStorage {
     id: string;
@@ -261,10 +262,9 @@
                 </select>
               </label>
             </div>
-            <button onclick={addAccessRule} disabled={addingRule || !ruleForm.access_to.trim()}
-              class="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm rounded transition-colors">
+            <Button onclick={addAccessRule} disabled={addingRule || !ruleForm.access_to.trim()} size="sm">
               {addingRule ? '추가 중...' : '추가'}
-            </button>
+            </Button>
           </div>
           {#if ruleError}<p class="text-red-400 text-xs mt-2">{ruleError}</p>{/if}
         </div>

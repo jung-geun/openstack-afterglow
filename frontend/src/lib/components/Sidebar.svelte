@@ -6,6 +6,7 @@
 	import { siteConfig } from '$lib/config/site';
 	import { openWizard } from '$lib/stores/wizard';
 	import RingMark from '$lib/components/ui/RingMark.svelte';
+	import Button from '$lib/components/ui/Button.svelte';
 
 	const sections = $state([
 		{
@@ -165,13 +166,10 @@
 
 	<!-- VM 생성 버튼 -->
 	<div class="p-3">
-		<button
-			onclick={openWizard}
-			class="btn-primary-warm flex items-center justify-center gap-1.5 w-full text-white text-[13px] font-medium px-4 py-2 rounded-lg transition-all"
-		>
+		<Button onclick={openWizard} class="w-full">
 			<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v14M5 12h14"/></svg>
 			VM 생성
-		</button>
+		</Button>
 	</div>
 
 	<nav class="flex-1 px-3 pb-4 space-y-0.5">
@@ -301,13 +299,4 @@
 		background: var(--color-warm);
 	}
 
-	.btn-primary-warm {
-		background: var(--gradient-warm);
-		box-shadow: var(--glow-warm);
-		border: none;
-	}
-	.btn-primary-warm:hover {
-		filter: brightness(1.08);
-		box-shadow: 0 10px 28px color-mix(in oklab, var(--color-warm) 35%, transparent);
-	}
 </style>

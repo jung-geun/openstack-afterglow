@@ -2,6 +2,7 @@
   import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+  import Button from '$lib/components/ui/Button.svelte';
 
   interface ImageDetail {
     id: string;
@@ -345,13 +346,9 @@
                 <option value={opt.value}>{opt.label}</option>
               {/each}
             </select>
-            <button
-              onclick={saveVisibility}
-              disabled={savingVisibility || visibilityValue === image.visibility}
-              class="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium rounded-lg transition-colors"
-            >
+            <Button onclick={saveVisibility} disabled={savingVisibility || visibilityValue === image.visibility}>
               {savingVisibility ? '저장 중...' : '저장'}
-            </button>
+            </Button>
             {#if visibilitySuccess}
               <span class="text-green-400 text-sm">저장됨</span>
             {/if}
@@ -375,13 +372,9 @@
               class="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 font-mono"
               onkeydown={(e) => e.key === 'Enter' && addMember()}
             />
-            <button
-              onclick={addMember}
-              disabled={addingMember || !newMemberId.trim()}
-              class="px-3 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium rounded-lg transition-colors whitespace-nowrap"
-            >
+            <Button onclick={addMember} disabled={addingMember || !newMemberId.trim()} size="sm">
               {addingMember ? '추가 중...' : '+ 추가'}
-            </button>
+            </Button>
           </div>
 
           {#if memberError}

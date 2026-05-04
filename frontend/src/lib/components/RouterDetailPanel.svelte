@@ -4,6 +4,7 @@
 	import { goto } from '$app/navigation';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
+	import Button from '$lib/components/ui/Button.svelte';
 
 	interface RouterInterface {
 		id: string;
@@ -252,11 +253,7 @@
 							<option value={net.id}>{net.name || net.id.slice(0, 12)}</option>
 						{/each}
 					</select>
-					<button
-						onclick={setGateway}
-						disabled={!selectedExtNetId || saving}
-						class="bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 text-white text-sm px-3 py-2 rounded transition-colors"
-					>설정</button>
+					<Button onclick={setGateway} disabled={!selectedExtNetId || saving} size="sm">설정</Button>
 					<button onclick={() => showSetGateway = false} class="text-gray-400 hover:text-gray-200 text-sm px-2">취소</button>
 				</div>
 			{/if}
@@ -289,11 +286,7 @@
 						</select>
 					</div>
 					<div class="flex gap-2">
-						<button
-							onclick={addInterface}
-							disabled={!selectedSubnetId || saving}
-							class="bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 text-white text-sm px-3 py-2 rounded transition-colors"
-						>추가</button>
+						<Button onclick={addInterface} disabled={!selectedSubnetId || saving} size="sm">추가</Button>
 						<button onclick={() => { showAddInterface = false; selectedNetId = ''; }} class="text-gray-400 hover:text-gray-200 text-sm px-2">취소</button>
 					</div>
 				</div>
