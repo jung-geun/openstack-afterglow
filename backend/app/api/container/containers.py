@@ -19,7 +19,8 @@ from fastapi import (
 )
 from pydantic import BaseModel
 
-from app.api.deps import get_os_conn
+from app.api.common.activity_recorder import rec
+from app.api.deps import get_os_conn, get_token_info
 from app.models.containers import (
     ContainerListResponse,
     CreateZunContainerRequest,
@@ -63,10 +64,11 @@ async def create_container(
     request: Request,
     req: CreateZunContainerRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     try:
         ports = [p.model_dump(exclude_none=True) for p in req.ports] if req.ports else None
-        return await asyncio.to_thread(
+        result = await asyncio.to_thread(
             zun.create_container,
             conn,
             req.name,
@@ -78,15 +80,40 @@ async def create_container(
             req.auto_remove,
             ports,
         )
-    except Exception:
+        await rec(token_info, conn, resource_type="container", action="create", resource_name=req.name)
+        return result
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="container",
+            action="create",
+            status="failed",
+            resource_name=req.name,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="컨테이너 생성 실패")
 
 
 @router.delete("/{container_id}", status_code=204)
-async def delete_container(container_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def delete_container(
+    container_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
     try:
         await asyncio.to_thread(zun.delete_container, conn, container_id)
-    except Exception:
+        await rec(token_info, conn, resource_type="container", action="delete", resource_id=container_id)
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="container",
+            action="delete",
+            status="failed",
+            resource_id=container_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="컨테이너 삭제 실패")
 
 

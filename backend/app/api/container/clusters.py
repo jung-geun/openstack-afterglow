@@ -12,7 +12,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from keystoneauth1 import exceptions as ks_exc
 from openstack import exceptions as os_exc
 
-from app.api.deps import get_os_conn
+from app.api.common.activity_recorder import rec
+from app.api.deps import get_os_conn, get_token_info
 
 logger = logging.getLogger(__name__)
 from app.models.containers import (
@@ -81,9 +82,10 @@ async def get_cluster(cluster_id: str, conn: openstack.connection.Connection = D
 async def create_cluster(
     req: CreateClusterRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     try:
-        return await asyncio.to_thread(
+        result = await asyncio.to_thread(
             magnum.create_cluster,
             conn,
             req.name,
@@ -93,15 +95,40 @@ async def create_cluster(
             req.keypair,
             req.create_timeout,
         )
-    except Exception:
+        await rec(token_info, conn, resource_type="container_cluster", action="create", resource_name=req.name)
+        return result
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="container_cluster",
+            action="create",
+            status="failed",
+            resource_name=req.name,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="클러스터 생성 실패")
 
 
 @router.delete("/{cluster_id}", status_code=204)
-async def delete_cluster(cluster_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def delete_cluster(
+    cluster_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
     try:
         await asyncio.to_thread(magnum.delete_cluster, conn, cluster_id)
-    except Exception:
+        await rec(token_info, conn, resource_type="container_cluster", action="delete", resource_id=cluster_id)
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="container_cluster",
+            action="delete",
+            status="failed",
+            resource_id=cluster_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="클러스터 삭제 실패")
 
 

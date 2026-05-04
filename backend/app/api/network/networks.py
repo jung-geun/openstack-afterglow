@@ -12,7 +12,8 @@ from pydantic import BaseModel
 
 _logger = logging.getLogger(__name__)
 
-from app.api.deps import get_os_conn
+from app.api.common.activity_recorder import rec
+from app.api.deps import get_os_conn, get_token_info
 from app.config import get_settings
 from app.models.storage import (
     AssociateFipRequest,
@@ -55,10 +56,22 @@ async def create_network(
     request: Request,
     req: CreateNetworkRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     try:
-        return await asyncio.to_thread(neutron.create_network, conn, req.name)
-    except Exception:
+        result = await asyncio.to_thread(neutron.create_network, conn, req.name)
+        await rec(token_info, conn, resource_type="network", action="create", resource_name=req.name)
+        return result
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="network",
+            action="create",
+            status="failed",
+            resource_name=req.name,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="네트워크 생성 실패")
 
 
@@ -76,6 +89,7 @@ class SetDefaultNetworkRequest(BaseModel):
 async def ensure_default_network(
     request: Request,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     """프로젝트의 Default 네트워크를 조회하거나 생성한다.
 
@@ -96,6 +110,7 @@ async def ensure_default_network(
         )
         # 네트워크 목록 캐시 무효화
         await invalidate(f"afterglow:neutron:{project_id}:networks")
+        await rec(token_info, conn, resource_type="network", action="ensure_default", resource_id=net_info.id)
         return net_info
     except Exception:
         _logger.exception("Default 네트워크 ensure 실패")
@@ -164,10 +179,22 @@ async def create_floating_ip(
     request: Request,
     req: CreateFipRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     try:
-        return await asyncio.to_thread(neutron.create_floating_ip, conn, req.floating_network_id)
-    except Exception:
+        result = await asyncio.to_thread(neutron.create_floating_ip, conn, req.floating_network_id)
+        await rec(
+            token_info,
+            conn,
+            resource_type="floating_ip",
+            action="create",
+            resource_id=result.id if hasattr(result, "id") else None,
+        )
+        return result
+    except Exception as e:
+        await rec(
+            token_info, conn, resource_type="floating_ip", action="create", status="failed", error_message=str(e)[:500]
+        )
         raise HTTPException(status_code=500, detail="Floating IP 생성 실패")
 
 
@@ -178,10 +205,22 @@ async def associate_floating_ip(
     fip_id: str,
     req: AssociateFipRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     try:
-        return await asyncio.to_thread(neutron.associate_floating_ip, conn, fip_id, req.instance_id)
-    except Exception:
+        result = await asyncio.to_thread(neutron.associate_floating_ip, conn, fip_id, req.instance_id)
+        await rec(token_info, conn, resource_type="floating_ip", action="associate", resource_id=fip_id)
+        return result
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="floating_ip",
+            action="associate",
+            status="failed",
+            resource_id=fip_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="Floating IP 연결 실패")
 
 
@@ -191,13 +230,24 @@ async def disassociate_floating_ip(
     request: Request,
     fip_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
     try:
         result = await asyncio.to_thread(neutron.disassociate_floating_ip, conn, fip_id)
         await invalidate(f"afterglow:neutron:{pid}:floating_ips")
+        await rec(token_info, conn, resource_type="floating_ip", action="disassociate", resource_id=fip_id)
         return result
-    except Exception:
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="floating_ip",
+            action="disassociate",
+            status="failed",
+            resource_id=fip_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="Floating IP 해제 실패")
 
 
@@ -207,12 +257,23 @@ async def delete_floating_ip(
     request: Request,
     fip_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
     try:
         await asyncio.to_thread(neutron.delete_floating_ip, conn, fip_id)
         await invalidate(f"afterglow:neutron:{pid}:floating_ips")
-    except Exception:
+        await rec(token_info, conn, resource_type="floating_ip", action="delete", resource_id=fip_id)
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="floating_ip",
+            action="delete",
+            status="failed",
+            resource_id=fip_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="Floating IP 삭제 실패")
 
 
@@ -226,12 +287,24 @@ async def update_subnet(
     subnet_id: str,
     req: UpdateSubnetRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     try:
-        return await asyncio.to_thread(
+        result = await asyncio.to_thread(
             neutron.update_subnet, conn, subnet_id, req.name, req.gateway_ip, req.enable_dhcp
         )
-    except Exception:
+        await rec(token_info, conn, resource_type="subnet", action="update", resource_id=subnet_id)
+        return result
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="subnet",
+            action="update",
+            status="failed",
+            resource_id=subnet_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="서브넷 업데이트 실패")
 
 
@@ -241,10 +314,21 @@ async def delete_subnet(
     request: Request,
     subnet_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     try:
         await asyncio.to_thread(neutron.delete_subnet, conn, subnet_id)
-    except Exception:
+        await rec(token_info, conn, resource_type="subnet", action="delete", resource_id=subnet_id)
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="subnet",
+            action="delete",
+            status="failed",
+            resource_id=subnet_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="서브넷 삭제 실패")
 
 
@@ -361,10 +445,21 @@ async def delete_network(
     request: Request,
     network_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     try:
         await asyncio.to_thread(neutron.delete_network, conn, network_id)
-    except Exception:
+        await rec(token_info, conn, resource_type="network", action="delete", resource_id=network_id)
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="network",
+            action="delete",
+            status="failed",
+            resource_id=network_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="네트워크 삭제 실패")
 
 
@@ -375,9 +470,10 @@ async def create_subnet(
     network_id: str,
     req: CreateSubnetRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     try:
-        return await asyncio.to_thread(
+        result = await asyncio.to_thread(
             neutron.create_subnet,
             conn,
             network_id,
@@ -386,5 +482,23 @@ async def create_subnet(
             req.gateway_ip,
             req.enable_dhcp,
         )
-    except Exception:
+        await rec(
+            token_info,
+            conn,
+            resource_type="subnet",
+            action="create",
+            resource_name=req.name,
+            resource_id=result.id if hasattr(result, "id") else None,
+        )
+        return result
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="subnet",
+            action="create",
+            status="failed",
+            resource_name=req.name,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="서브넷 생성 실패")

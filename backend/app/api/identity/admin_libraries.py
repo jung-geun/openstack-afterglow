@@ -16,7 +16,8 @@ if TYPE_CHECKING:
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from app.api.deps import get_os_conn, require_admin
+from app.api.common.activity_recorder import rec
+from app.api.deps import get_os_conn, get_token_info, require_admin
 from app.services import libraries as lib_svc
 from app.services import library_builder, manila, neutron
 from app.services.keystone import get_service_project_connection
@@ -158,6 +159,7 @@ class TriggerBuildRequest(BaseModel):
 @router.post("/build", status_code=202, dependencies=[Depends(require_admin)])
 async def trigger_library_build(
     req: TriggerBuildRequest,
+    token_info: dict = Depends(get_token_info),
 ) -> dict:
     """라이브러리 prebuilt 빌드 트리거. auto_install=True 시 Builder VM 자동 생성.
 
@@ -171,8 +173,18 @@ async def trigger_library_build(
     if req.auto_install:
         try:
             result = await library_builder.start_build(req.library_id)
+            await rec(token_info, None, resource_type="library", action="build", resource_id=req.library_id)
             return result
         except RuntimeError as e:
+            await rec(
+                token_info,
+                None,
+                resource_type="library",
+                action="build",
+                status="failed",
+                resource_id=req.library_id,
+                error_message=str(e)[:500],
+            )
             status_code = 409 if "이미 빌드 중" in str(e) else 400
             raise HTTPException(status_code=status_code, detail=str(e))
     else:
@@ -200,6 +212,7 @@ async def trigger_library_build(
                     "union_status": "pending",
                 },
             )
+            await rec(token_info, None, resource_type="library", action="prebuilt_build", resource_id=req.library_id)
             return {
                 "file_storage_id": storage.id,
                 "status": "pending",
@@ -207,9 +220,27 @@ async def trigger_library_build(
                 "message": "빈 share 생성 완료. 수동으로 패키지를 설치하세요.",
             }
         except RuntimeError as e:
+            await rec(
+                token_info,
+                None,
+                resource_type="library",
+                action="prebuilt_build",
+                status="failed",
+                resource_id=req.library_id,
+                error_message=str(e)[:500],
+            )
             raise HTTPException(status_code=400, detail=str(e))
         except Exception as e:
             _logger.warning("Share 생성 실패: %s", e)
+            await rec(
+                token_info,
+                None,
+                resource_type="library",
+                action="prebuilt_build",
+                status="failed",
+                resource_id=req.library_id,
+                error_message=str(e)[:500],
+            )
             raise HTTPException(status_code=502, detail="Share 생성 실패")
 
 
@@ -267,6 +298,7 @@ async def grant_library_project_access(
     library_id: str,
     req: GrantProjectAccessRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ) -> dict:
     """NFS prebuilt 라이브러리에 특정 프로젝트의 subnet CIDR access rule을 추가한다.
 
@@ -305,6 +337,14 @@ async def grant_library_project_access(
             _logger.error("NFS access rule 추가 실패 (cidr=%s): %s", cidr, e)
             raise HTTPException(status_code=502, detail=f"NFS access rule 추가 실패 (cidr={cidr}): {e}")
 
+    await rec(
+        token_info,
+        conn,
+        resource_type="library",
+        action="link",
+        resource_id=library_id,
+        extra={"project_id": req.project_id},
+    )
     return {
         "library_id": library_id,
         "share_id": storage.id,
@@ -319,6 +359,7 @@ async def revoke_library_project_access(
     library_id: str,
     project_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ) -> dict:
     """NFS prebuilt 라이브러리에서 특정 프로젝트의 CIDR access rule을 revoke한다.
 
@@ -350,6 +391,14 @@ async def revoke_library_project_access(
             _logger.error("NFS access rule revoke 실패 (rule=%s): %s", rule["id"], e)
             raise HTTPException(status_code=502, detail=f"access rule revoke 실패 (rule_id={rule['id']}): {e}")
 
+    await rec(
+        token_info,
+        conn,
+        resource_type="library",
+        action="unlink",
+        resource_id=library_id,
+        extra={"project_id": project_id},
+    )
     return {
         "library_id": library_id,
         "share_id": storage.id,

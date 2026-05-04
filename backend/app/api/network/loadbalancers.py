@@ -8,7 +8,8 @@ if TYPE_CHECKING:
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from app.api.deps import get_os_conn
+from app.api.common.activity_recorder import rec
+from app.api.deps import get_os_conn, get_token_info
 from app.rate_limit import limiter
 from app.services import octavia
 from app.services.cache import cached_call, invalidate, ttl_normal
@@ -86,13 +87,24 @@ async def create_load_balancer(
     request: Request,
     req: CreateLbRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
     try:
         result = octavia.create_load_balancer(conn, req.name, req.vip_subnet_id, req.description)
         await invalidate(f"afterglow:octavia:{pid}:lbs")
+        await rec(token_info, conn, resource_type="load_balancer", action="create", resource_name=req.name)
         return result
-    except Exception:
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="load_balancer",
+            action="create",
+            status="failed",
+            resource_name=req.name,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="로드밸런서 생성 실패")
 
 
@@ -112,10 +124,24 @@ async def delete_load_balancer(
     request: Request,
     lb_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
-    _handle(lambda: octavia.delete_load_balancer(conn, lb_id), "로드밸런서 삭제 실패")
-    await invalidate(f"afterglow:octavia:{pid}:lbs")
+    try:
+        octavia.delete_load_balancer(conn, lb_id)
+        await invalidate(f"afterglow:octavia:{pid}:lbs")
+        await rec(token_info, conn, resource_type="load_balancer", action="delete", resource_id=lb_id)
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="load_balancer",
+            action="delete",
+            status="failed",
+            resource_id=lb_id,
+            error_message=str(e)[:500],
+        )
+        raise HTTPException(status_code=500, detail="로드밸런서 삭제 실패")
 
 
 # ---------------------------------------------------------------------------
@@ -135,11 +161,25 @@ async def create_listener(
     lb_id: str,
     req: CreateListenerRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
-    return _handle(
-        lambda: octavia.create_listener(conn, lb_id, req.protocol, req.protocol_port, req.name, req.default_pool_id),
-        "리스너 생성 실패",
-    )
+    try:
+        result = octavia.create_listener(conn, lb_id, req.protocol, req.protocol_port, req.name, req.default_pool_id)
+        await rec(
+            token_info, conn, resource_type="lb_listener", action="create", resource_id=lb_id, resource_name=req.name
+        )
+        return result
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="lb_listener",
+            action="create",
+            status="failed",
+            resource_id=lb_id,
+            error_message=str(e)[:500],
+        )
+        raise HTTPException(status_code=500, detail="리스너 생성 실패")
 
 
 @router.delete("/{lb_id}/listeners/{listener_id}", status_code=204)
@@ -149,8 +189,22 @@ async def delete_listener(
     lb_id: str,
     listener_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
-    _handle(lambda: octavia.delete_listener(conn, listener_id), "리스너 삭제 실패")
+    try:
+        octavia.delete_listener(conn, listener_id)
+        await rec(token_info, conn, resource_type="lb_listener", action="delete", resource_id=listener_id)
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="lb_listener",
+            action="delete",
+            status="failed",
+            resource_id=listener_id,
+            error_message=str(e)[:500],
+        )
+        raise HTTPException(status_code=500, detail="리스너 삭제 실패")
 
 
 # ---------------------------------------------------------------------------
@@ -170,11 +224,23 @@ async def create_pool(
     lb_id: str,
     req: CreatePoolRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
-    return _handle(
-        lambda: octavia.create_pool(conn, lb_id, req.protocol, req.lb_algorithm, req.name, req.listener_id),
-        "풀 생성 실패",
-    )
+    try:
+        result = octavia.create_pool(conn, lb_id, req.protocol, req.lb_algorithm, req.name, req.listener_id)
+        await rec(token_info, conn, resource_type="lb_pool", action="create", resource_id=lb_id, resource_name=req.name)
+        return result
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="lb_pool",
+            action="create",
+            status="failed",
+            resource_id=lb_id,
+            error_message=str(e)[:500],
+        )
+        raise HTTPException(status_code=500, detail="풀 생성 실패")
 
 
 @router.delete("/{lb_id}/pools/{pool_id}", status_code=204)
@@ -184,8 +250,22 @@ async def delete_pool(
     lb_id: str,
     pool_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
-    _handle(lambda: octavia.delete_pool(conn, pool_id), "풀 삭제 실패")
+    try:
+        octavia.delete_pool(conn, pool_id)
+        await rec(token_info, conn, resource_type="lb_pool", action="delete", resource_id=pool_id)
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="lb_pool",
+            action="delete",
+            status="failed",
+            resource_id=pool_id,
+            error_message=str(e)[:500],
+        )
+        raise HTTPException(status_code=500, detail="풀 삭제 실패")
 
 
 # ---------------------------------------------------------------------------
@@ -206,11 +286,25 @@ async def add_member(
     pool_id: str,
     req: AddMemberRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
-    return _handle(
-        lambda: octavia.add_member(conn, pool_id, req.address, req.protocol_port, req.subnet_id, req.name, req.weight),
-        "멤버 추가 실패",
-    )
+    try:
+        result = octavia.add_member(conn, pool_id, req.address, req.protocol_port, req.subnet_id, req.name, req.weight)
+        await rec(
+            token_info, conn, resource_type="lb_member", action="create", resource_id=pool_id, resource_name=req.name
+        )
+        return result
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="lb_member",
+            action="create",
+            status="failed",
+            resource_id=pool_id,
+            error_message=str(e)[:500],
+        )
+        raise HTTPException(status_code=500, detail="멤버 추가 실패")
 
 
 @router.delete("/{lb_id}/pools/{pool_id}/members/{member_id}", status_code=204)
@@ -221,8 +315,22 @@ async def remove_member(
     pool_id: str,
     member_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
-    _handle(lambda: octavia.remove_member(conn, pool_id, member_id), "멤버 제거 실패")
+    try:
+        octavia.remove_member(conn, pool_id, member_id)
+        await rec(token_info, conn, resource_type="lb_member", action="delete", resource_id=member_id)
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="lb_member",
+            action="delete",
+            status="failed",
+            resource_id=member_id,
+            error_message=str(e)[:500],
+        )
+        raise HTTPException(status_code=500, detail="멤버 제거 실패")
 
 
 # ---------------------------------------------------------------------------
@@ -243,13 +351,32 @@ async def create_health_monitor(
     pool_id: str,
     req: CreateHealthMonitorRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
-    return _handle(
-        lambda: octavia.create_health_monitor(
+    try:
+        result = octavia.create_health_monitor(
             conn, pool_id, req.type, req.delay, req.timeout, req.max_retries, req.name
-        ),
-        "헬스모니터 생성 실패",
-    )
+        )
+        await rec(
+            token_info,
+            conn,
+            resource_type="lb_health_monitor",
+            action="create",
+            resource_id=pool_id,
+            resource_name=req.name,
+        )
+        return result
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="lb_health_monitor",
+            action="create",
+            status="failed",
+            resource_id=pool_id,
+            error_message=str(e)[:500],
+        )
+        raise HTTPException(status_code=500, detail="헬스모니터 생성 실패")
 
 
 @router.delete("/{lb_id}/pools/{pool_id}/health-monitor/{hm_id}", status_code=204)
@@ -260,5 +387,19 @@ async def delete_health_monitor(
     pool_id: str,
     hm_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
-    _handle(lambda: octavia.delete_health_monitor(conn, hm_id), "헬스모니터 삭제 실패")
+    try:
+        octavia.delete_health_monitor(conn, hm_id)
+        await rec(token_info, conn, resource_type="lb_health_monitor", action="delete", resource_id=hm_id)
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="lb_health_monitor",
+            action="delete",
+            status="failed",
+            resource_id=hm_id,
+            error_message=str(e)[:500],
+        )
+        raise HTTPException(status_code=500, detail="헬스모니터 삭제 실패")

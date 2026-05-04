@@ -22,6 +22,7 @@ from slowapi.util import get_remote_address
 from sqlalchemy.exc import InterfaceError, OperationalError
 from starlette.requests import Request
 
+from app.api.common.activity_recorder import rec
 from app.api.deps import get_os_conn, get_token_info
 from app.config import get_settings
 from app.database import mark_db_unhealthy
@@ -362,6 +363,15 @@ async def create_k3s_cluster_async(
             if manifest_failures:
                 err_msg = f"플러그인 매니페스트 생성 실패: {', '.join(manifest_failures)}"
                 _logger.error("k3s cluster %s: %s", cluster_id, err_msg)
+                await rec(
+                    token_info_obj or {},
+                    conn,
+                    resource_type="k3s_cluster",
+                    action="create",
+                    status="failed",
+                    resource_name=req.name,
+                    error_message=err_msg[:500],
+                )
                 yield event(K3sProgressStep.FAILED, 0, err_msg, cluster_id=cluster_id)
                 return
             extra_server_args = k3s_plugins.aggregate_server_args(s)
@@ -449,6 +459,15 @@ async def create_k3s_cluster_async(
                 },
             )
 
+            await rec(
+                token_info_obj or {},
+                conn,
+                resource_type="k3s_cluster",
+                action="create",
+                status="success",
+                resource_id=cluster_id,
+                resource_name=req.name,
+            )
             yield event(
                 K3sProgressStep.COMPLETED,
                 100,
@@ -458,6 +477,15 @@ async def create_k3s_cluster_async(
 
         except Exception as e:
             _logger.error("k3s cluster creation failed: %s", e, exc_info=True)
+            await rec(
+                token_info_obj or {},
+                conn,
+                resource_type="k3s_cluster",
+                action="create",
+                status="failed",
+                resource_name=req.name,
+                error_message=str(e)[:500],
+            )
             yield event(K3sProgressStep.FAILED, 0, f"클러스터 생성 실패: {e}", error=str(e))
             # 롤백
             await _rollback(conn, server_vm_id, boot_volume_id, sg_id, app_credential_id, project_id)
@@ -539,6 +567,14 @@ async def scale_k3s_cluster(
 
     await k3s_cluster.update_cluster_status(project_id, cluster_id, "SCALING")
     asyncio.create_task(_scale_agents(project_id, cluster_id, current_agent_ids, desired))
+    await rec(
+        token_info,
+        None,
+        resource_type="k3s_cluster",
+        action="scale",
+        resource_id=cluster_id,
+        extra={"desired_count": desired},
+    )
     return {"message": f"스케일링 시작: {current} → {desired}", "agent_count": desired}
 
 
@@ -815,3 +851,4 @@ async def delete_k3s_cluster(
     # soft-delete: 상태를 DELETED로 기록 (물리 삭제 안 함)
     user_id = token_info.get("user_id") if isinstance(token_info, dict) else None
     await k3s_cluster.delete_cluster_record(project_id, cluster_id, user_id=user_id, reason="사용자 삭제 요청")
+    await rec(token_info, conn, resource_type="k3s_cluster", action="delete", resource_id=cluster_id)
