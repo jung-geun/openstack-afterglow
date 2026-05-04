@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { auth, isAdmin } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
+	import MetricsPanel from '$lib/components/instance/MetricsPanel.svelte';
 	import { goto } from '$app/navigation';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
@@ -955,6 +956,15 @@
 					</dd>
 				</div>
 			</dl>
+		</div>
+
+		<!-- 성능 모니터링 -->
+		<div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4">
+			<div class="text-white text-[15px] font-semibold mb-4">성능 모니터링</div>
+			<MetricsPanel
+				instanceId={instance.id}
+				isGpu={(instance.flavor_name ?? '').toLowerCase().startsWith('gpu.')}
+			/>
 		</div>
 
 		<!-- 콘솔 로그 -->

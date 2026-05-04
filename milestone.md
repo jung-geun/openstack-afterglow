@@ -1276,3 +1276,10 @@ Option A 채택 시 본 절 진행. Option B 채택 시 사용자가 자체 구�
 - [x] Phase D: frontend apiMut 헬퍼 + 6개 핵심 mutation 사이트 toast 마이그
 - [x] Phase E: admin 프로젝트 상세 라우트 + ActivityLogTable 컴포넌트
 - [x] Phase F: account ActivitySection (본인 활동 조회)
+
+
+## 17. 인스턴스 성능 모니터링
+
+- [x] Phase 1: Prometheus http_sd 설정 + sd_targets.py 9100/9400 분리 (node_exporter / dcgm_exporter)
+- [x] Phase 2: PromQL 프록시 엔드포인트 신설 (`GET /api/instances/{id}/metrics`) + project_id 권한 검증
+- [x] Phase 3: InstanceDetailPanel MetricsPanel 카드 + 4종 차트 (GPU VM: +2 차트)
