@@ -335,6 +335,7 @@ class Settings(BaseSettings):
     monitoring_sd_token: str = ""  # /api/sd/prometheus/targets 인증 토큰
     grafana_jwt_secret: str = ""  # Grafana auth.jwt 서명 시크릿
     grafana_base_url: str = ""  # Grafana 외부 URL (예: https://grafana.example.com)
+    prometheus_base_url: str = "http://prometheus:9090"  # 클러스터 내 Prometheus URL
 
     # Notion 연동
     notion_config_encryption_key: str = ""  # 미설정 시 k3s_kubeconfig_encryption_key 재사용
