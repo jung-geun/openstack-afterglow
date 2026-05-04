@@ -1267,3 +1267,12 @@ Option A 채택 시 본 절 진행. Option B 채택 시 사용자가 자체 구�
 - [ ] ⌘K 팔레트: 라우트 jump + 리소스 검색 fuzzy match + 상단바 버튼 트리거 동작 확인
 - [ ] 인스턴스/K3s/LB/Router/Volume/FileStorage 상세 헤더 `DetailHeader` 통일 확인
 - [ ] 대시보드 하단 네트워크 토폴로지 카드 노출 + 전체보기 링크 동작
+
+## 16. Activity Log
+
+- [x] Phase A: TopologyCard fitWidth 버그 수정 (`{@const}` → `$derived`)
+- [x] Phase B: backend activity_logs 테이블 + 모델 + 서비스 + 라우터 (008 마이그레이션)
+- [x] Phase C: 6개 도메인 mutation 라우터에 rec() 활동 로그 통합
+- [x] Phase D: frontend apiMut 헬퍼 + 6개 핵심 mutation 사이트 toast 마이그
+- [x] Phase E: admin 프로젝트 상세 라우트 + ActivityLogTable 컴포넌트
+- [x] Phase F: account ActivitySection (본인 활동 조회)
