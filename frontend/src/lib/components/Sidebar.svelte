@@ -167,7 +167,7 @@
 	<div class="p-3">
 		<button
 			onclick={openWizard}
-			class="flex items-center justify-center gap-1.5 w-full bg-blue-600 hover:bg-blue-500 text-white text-[13px] font-medium px-4 py-2 rounded-lg transition-colors"
+			class="btn-primary-warm flex items-center justify-center gap-1.5 w-full text-white text-[13px] font-medium px-4 py-2 rounded-lg transition-all"
 		>
 			<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v14M5 12h14"/></svg>
 			VM 생성
@@ -299,5 +299,15 @@
 		width: 3px;
 		border-radius: 2px;
 		background: var(--color-warm);
+	}
+
+	.btn-primary-warm {
+		background: var(--gradient-warm);
+		box-shadow: var(--glow-warm);
+		border: none;
+	}
+	.btn-primary-warm:hover {
+		filter: brightness(1.08);
+		box-shadow: 0 10px 28px color-mix(in oklab, var(--color-warm) 35%, transparent);
 	}
 </style>

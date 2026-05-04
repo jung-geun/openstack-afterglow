@@ -726,7 +726,7 @@
 						<button
 							onclick={deploy}
 							disabled={!canNext}
-							class="px-6 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium rounded-lg transition-colors"
+							class="vm-deploy-btn px-6 py-2 disabled:bg-gray-700 disabled:text-gray-500 disabled:shadow-none text-white text-sm font-medium rounded-lg transition-all"
 						>VM 생성</button>
 					{/if}
 				</div>
@@ -734,3 +734,14 @@
 		{/if}
 	</div>
 </SlidePanel>
+
+<style>
+  .vm-deploy-btn {
+    background: var(--gradient-warm);
+    box-shadow: var(--glow-warm);
+  }
+  .vm-deploy-btn:hover:not(:disabled) {
+    filter: brightness(1.08);
+    box-shadow: 0 10px 28px color-mix(in oklab, var(--color-warm) 35%, transparent);
+  }
+</style>

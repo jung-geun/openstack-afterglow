@@ -10,6 +10,7 @@
   import StatTile from '$lib/components/ui/StatTile.svelte';
   import QuotaBar from '$lib/components/ui/QuotaBar.svelte';
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
+  import GradientText from '$lib/components/ui/GradientText.svelte';
 
   interface QuotaItem { limit: number; in_use: number; }
   interface Quotas {
@@ -88,7 +89,7 @@
   <div class="flex items-start justify-between">
     <div>
       <div class="text-[11px] text-gray-500 uppercase tracking-widest font-medium mb-1">OVERVIEW · 대시보드</div>
-      <h1 class="text-2xl font-bold text-white mb-1">안녕하세요, {$auth.username}님</h1>
+      <h1 class="text-2xl font-bold text-white mb-1">안녕하세요, <GradientText>{$auth.username}</GradientText>님</h1>
       <div class="text-gray-400 text-[13px]">
         {$auth.projectName ?? '—'} · 최근 동기화 방금 전
       </div>
