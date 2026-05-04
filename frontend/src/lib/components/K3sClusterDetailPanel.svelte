@@ -6,6 +6,7 @@
   import InstanceDetailPanel from '$lib/components/InstanceDetailPanel.svelte';
   import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
   import Button from '$lib/components/ui/Button.svelte';
+  import DetailHeader from '$lib/components/ui/DetailHeader.svelte';
 
   interface K3sCluster {
     id: string;
@@ -262,34 +263,22 @@
   {:else if error}
     <div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm">{error}</div>
   {:else if cluster}
-    <!-- 클러스터 헤더 -->
-    <div class="flex items-start justify-between mb-5">
-      <div>
-        <h1 class="text-xl font-bold text-white">{cluster.name}</h1>
-        <div class="flex items-center gap-2 mt-1.5">
-          <span class="px-2 py-0.5 rounded text-xs font-medium {statusColor[cluster.status] ?? 'text-gray-400 bg-gray-800'}">
-            {cluster.status}
-          </span>
-          {#if health}
-            <span class="px-2 py-0.5 rounded border text-xs font-medium {healthColor[health.status] ?? 'text-gray-500 bg-gray-800 border-gray-700'}">
-              {health.status}
-            </span>
-          {/if}
-          {#if cluster.k3s_version}
-            <span class="text-xs text-gray-500">{cluster.k3s_version}</span>
-          {/if}
-        </div>
-        {#if cluster.status_reason}
-          <p class="text-xs text-gray-500 mt-1">{cluster.status_reason}</p>
-        {/if}
-      </div>
-      <div class="flex items-center gap-2">
-        {#if cluster.status === 'CREATING' || cluster.status === 'PROVISIONING'}
+    <DetailHeader
+      title={cluster.name}
+      status={cluster.status}
+      secondaryStatus={health?.status ?? null}
+    >
+      {#snippet meta()}
+        {#if cluster!.k3s_version}<span class="text-xs text-gray-500">{cluster!.k3s_version}</span>{/if}
+        {#if cluster!.status_reason}<p class="text-xs text-gray-500">{cluster!.status_reason}</p>{/if}
+      {/snippet}
+      {#snippet actions()}
+        {#if cluster!.status === 'CREATING' || cluster!.status === 'PROVISIONING'}
           <div class="flex items-center gap-1.5 text-yellow-400 text-xs">
             <span class="animate-pulse">●</span>
             <span>초기화 중...</span>
           </div>
-        {:else if cluster.status === 'ACTIVE'}
+        {:else if cluster!.status === 'ACTIVE'}
           <button
             onclick={triggerHealthCheck}
             disabled={checkingHealth}
@@ -304,8 +293,8 @@
           class="px-3 py-1.5 bg-red-900/40 hover:bg-red-900/60 border border-red-800 text-red-400 text-xs rounded-lg transition-colors disabled:opacity-50">
           {deleting ? '삭제 중...' : '클러스터 삭제'}
         </button>
-      </div>
-    </div>
+      {/snippet}
+    </DetailHeader>
 
     <!-- 정보 카드 2열 -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">

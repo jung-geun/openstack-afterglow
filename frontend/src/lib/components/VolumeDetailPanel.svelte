@@ -5,6 +5,7 @@
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+	import DetailHeader from '$lib/components/ui/DetailHeader.svelte';
 
 	interface Volume {
 		id: string;
@@ -183,15 +184,11 @@
 </script>
 
 <div class="p-6">
-	<!-- Header -->
-	<div class="flex items-start justify-between mb-6">
-		<div>
-			<h2 class="text-xl font-bold text-white">{volume?.name || volumeId.slice(0, 8)}</h2>
-			{#if volume}
-				<span class="inline-block mt-1 px-2 py-0.5 rounded text-xs font-medium {statusColor[volume.status] ?? 'text-gray-400 bg-gray-800'}">{volume.status}</span>
-			{/if}
-		</div>
-		<div class="flex items-center gap-2">
+	<DetailHeader
+		title={volume?.name || volumeId.slice(0, 8)}
+		status={volume?.status ?? null}
+	>
+		{#snippet actions()}
 			<AutoRefreshControl
 				bind:active={ar.active}
 				bind:intervalSeconds={ar.intervalSeconds}
@@ -200,8 +197,8 @@
 				onManualRefresh={() => fetchAll()}
 			/>
 			<button onclick={onClose} class="text-gray-400 hover:text-white transition-colors text-lg leading-none">✕</button>
-		</div>
-	</div>
+		{/snippet}
+	</DetailHeader>
 
 	{#if loading}
 		<div class="space-y-3">

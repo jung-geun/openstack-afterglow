@@ -5,6 +5,7 @@
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
+	import DetailHeader from '$lib/components/ui/DetailHeader.svelte';
 
 	interface RouterInterface {
 		id: string;
@@ -198,23 +199,19 @@
 	{:else if error}
 		<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm">{error}</div>
 	{:else if router}
-		<!-- 기본 정보 -->
-		<div class="flex items-start justify-between mb-6">
-			<div>
-				<h3 class="text-lg font-semibold text-white">{router.name || router.id.slice(0, 12)}</h3>
-				<div class="flex items-center gap-3 mt-2">
-					<span class="px-2 py-0.5 rounded text-xs font-medium {router.status === 'ACTIVE' ? 'text-green-400 bg-green-900/30' : 'text-gray-400 bg-gray-800'}">
-						{router.status}
-					</span>
-					<span class="text-xs text-gray-500 font-mono">{router.id}</span>
-				</div>
-			</div>
-			<button
-				onclick={deleteRouter}
-				disabled={saving}
-				class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-red-900 hover:border-red-700 disabled:border-gray-700 transition-colors"
-			>삭제</button>
-		</div>
+		<DetailHeader
+			title={router.name || router.id.slice(0, 12)}
+			subtitle={router.id}
+			status={router.status}
+		>
+			{#snippet actions()}
+				<button
+					onclick={deleteRouter}
+					disabled={saving}
+					class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-red-900 hover:border-red-700 disabled:border-gray-700 transition-colors"
+				>삭제</button>
+			{/snippet}
+		</DetailHeader>
 
 		<!-- 외부 게이트웨이 -->
 		<section class="bg-gray-900 border border-gray-800 rounded-lg p-5 mb-4">
