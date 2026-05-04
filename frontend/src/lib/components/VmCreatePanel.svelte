@@ -4,6 +4,7 @@
 	import { auth } from '$lib/stores/auth';
 	import { wizard, resetWizard, closeWizard } from '$lib/stores/wizard';
 	import { api, ApiError, getBaseUrl } from '$lib/api/client';
+	import { toast } from '$lib/stores/toast';
 	import SelectImage from '$lib/components/wizard/SelectImage.svelte';
 	import SelectFlavor from '$lib/components/wizard/SelectFlavor.svelte';
 	import SelectLibraries from '$lib/components/wizard/SelectLibraries.svelte';
@@ -338,6 +339,7 @@
 
 							if (data.step === 'completed') {
 								const instanceId = data.instance_id;
+								toast.success(`인스턴스 생성 완료`);
 								setTimeout(() => {
 									resetWizard();
 									closeWizard();
@@ -348,6 +350,7 @@
 
 							if (data.step === 'failed') {
 								deployError = data.error || data.message;
+								toast.error(`인스턴스 생성 실패: ${deployError}`);
 								deploying = false;
 								return;
 							}

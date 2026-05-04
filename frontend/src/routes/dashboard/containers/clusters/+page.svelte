@@ -3,6 +3,7 @@
   import { goto } from '$app/navigation';
   import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
+  import { apiMut } from '$lib/api/mutations';
   import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
@@ -83,7 +84,7 @@
         master_count: form.master_count,
       };
       if (form.keypair.trim()) body.keypair = form.keypair;
-      await api.post('/api/clusters', body, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      await apiMut('K8s 클러스터 생성', () => api.post('/api/clusters', body, $auth.token ?? undefined, $auth.projectId ?? undefined));
       showModal = false;
       form = { name: '', cluster_template_id: templates[0]?.id ?? '', node_count: 1, master_count: 1, keypair: '' };
       await fetchClusters();
@@ -98,10 +99,10 @@
     if (!confirm(`클러스터 "${name}"을 삭제하시겠습니까?`)) return;
     deleting = id;
     try {
-      await api.delete(`/api/clusters/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      await apiMut('K8s 클러스터 삭제', () => api.delete(`/api/clusters/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined));
       await fetchClusters();
-    } catch (e) {
-      alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+    } catch {
+      // error toast shown by apiMut
     } finally {
       deleting = null;
     }

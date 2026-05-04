@@ -2,6 +2,7 @@
   import { auth } from '$lib/stores/auth';
   import { untrack } from 'svelte';
   import { api, ApiError, memoryCache } from '$lib/api/client';
+  import { apiMut } from '$lib/api/mutations';
   import type { FileStorage } from '$lib/types/resources';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
@@ -87,10 +88,10 @@
     if (!confirm(`파일 스토리지 "${name || id.slice(0, 8)}"을 삭제하시겠습니까?`)) return;
     deleting = id;
     try {
-      await api.delete(`/api/file-storage/${id}`, token, projectId);
+      await apiMut('파일 스토리지 삭제', () => api.delete(`/api/file-storage/${id}`, token, projectId));
       await fetchFileStorages();
-    } catch (e) {
-      alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+    } catch {
+      // error toast shown by apiMut
     } finally { deleting = null; }
   }
 
@@ -232,7 +233,7 @@
         validMeta.forEach(m => { metadata[m.key.trim()] = m.value; });
         body.metadata = metadata;
       }
-      const created = await api.post<FileStorage>('/api/file-storage', body, token, projectId);
+      const created = await apiMut('파일 스토리지 생성', () => api.post<FileStorage>('/api/file-storage', body, token, projectId));
       createdFs = created;
       // 접근 규칙 목록 초기 조회
       try { accessRules = await api.get<AccessRule[]>(`/api/file-storage/${created.id}/access-rules`, token, projectId); }

@@ -2,6 +2,7 @@
   import { untrack } from 'svelte';
   import { auth } from '$lib/stores/auth';
   import { api, ApiError, memoryCache } from '$lib/api/client';
+  import { apiMut } from '$lib/api/mutations';
   import type { Volume } from '$lib/types/resources';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import VolumeDetailPanel from '$lib/components/VolumeDetailPanel.svelte';
@@ -113,7 +114,7 @@
     creating = true;
     createError = '';
     try {
-      await api.post('/api/volumes', form, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      await apiMut('볼륨 생성', () => api.post('/api/volumes', form, $auth.token ?? undefined, $auth.projectId ?? undefined));
       showModal = false;
       form = { name: '', size_gb: 10 };
       await fetchVolumes();
@@ -128,10 +129,10 @@
     if (!confirm(`볼륨 "${name || id.slice(0, 8)}"을 삭제하시겠습니까?`)) return;
     deleting = id;
     try {
-      await api.delete(`/api/volumes/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      await apiMut('볼륨 삭제', () => api.delete(`/api/volumes/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined));
       await fetchVolumes();
-    } catch (e) {
-      alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+    } catch {
+      // error toast shown by apiMut
     } finally {
       deleting = null;
     }
@@ -147,10 +148,10 @@
     if (!confirm(`볼륨 "${name || id.slice(0, 8)}"을 강제 삭제하시겠습니까?\n이 작업은 오류 상태 볼륨을 강제로 제거합니다.`)) return;
     deleting = id;
     try {
-      await api.post(`/api/volumes/${id}/force-delete`, {}, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      await apiMut('볼륨 강제 삭제', () => api.post(`/api/volumes/${id}/force-delete`, {}, $auth.token ?? undefined, $auth.projectId ?? undefined));
       await fetchVolumes();
-    } catch (e) {
-      alert('강제 삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+    } catch {
+      // error toast shown by apiMut
     } finally {
       deleting = null;
     }
@@ -168,16 +169,17 @@
 
   async function toggleAutoBackup(volumeId: string) {
     autoBackupToggling = volumeId;
+    const enabling = !autoBackupConfigs.has(volumeId);
     try {
-      if (autoBackupConfigs.has(volumeId)) {
-        await api.delete(`/api/volumes/backups/auto-backup/${volumeId}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      if (!enabling) {
+        await apiMut('자동 백업 비활성화', () => api.delete(`/api/volumes/backups/auto-backup/${volumeId}`, $auth.token ?? undefined, $auth.projectId ?? undefined));
         autoBackupConfigs = new Set([...autoBackupConfigs].filter(id => id !== volumeId));
       } else {
-        await api.post(`/api/volumes/backups/auto-backup/${volumeId}`, {}, $auth.token ?? undefined, $auth.projectId ?? undefined);
+        await apiMut('자동 백업 활성화', () => api.post(`/api/volumes/backups/auto-backup/${volumeId}`, {}, $auth.token ?? undefined, $auth.projectId ?? undefined));
         autoBackupConfigs = new Set([...autoBackupConfigs, volumeId]);
       }
-    } catch (e) {
-      alert('자동 백업 설정 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+    } catch {
+      // error toast shown by apiMut
     } finally {
       autoBackupToggling = null;
     }
