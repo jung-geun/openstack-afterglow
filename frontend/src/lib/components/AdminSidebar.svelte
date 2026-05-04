@@ -4,6 +4,7 @@
 	import { sidebarOpen } from '$lib/stores/sidebar';
 	import ProjectSelector from '$lib/components/ProjectSelector.svelte';
 	import { siteConfig } from '$lib/config/site';
+	import RingMark from '$lib/components/ui/RingMark.svelte';
 
 	const sections = $state([
 		{
@@ -139,9 +140,7 @@
 <aside class="fixed top-0 left-0 bottom-0 z-30 w-60 bg-gray-900 border-r border-gray-800 flex flex-col overflow-y-auto transition-transform duration-200 ease-in-out {$sidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:sticky md:top-0 md:h-screen md:translate-x-0 md:shrink-0 md:transition-none">
 	<!-- 로고 헤더 with Admin badge -->
 	<div class="h-14 flex items-center gap-2.5 px-4 border-b border-gray-800 shrink-0">
-		<div class="rounded-full shrink-0" style="width:26px;height:26px;background:conic-gradient(from 220deg,#F4976C,#6E4F9A,#8893D4,#F4976C)">
-			<div class="rounded-full bg-gray-900 m-[3px]" style="width:20px;height:20px"></div>
-		</div>
+		<RingMark size={26} />
 		<a href="/admin" class="text-white font-bold text-base tracking-tight hover:text-gray-200 transition-colors">
 			{$siteConfig.site_name}
 		</a>

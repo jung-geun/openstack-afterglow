@@ -5,6 +5,7 @@
 	import ProjectSelector from '$lib/components/ProjectSelector.svelte';
 	import { siteConfig } from '$lib/config/site';
 	import { openWizard } from '$lib/stores/wizard';
+	import RingMark from '$lib/components/ui/RingMark.svelte';
 
 	const sections = $state([
 		{
@@ -156,9 +157,7 @@
 	<!-- 로고 헤더 -->
 	<div class="h-14 flex items-center gap-2.5 px-4 border-b border-gray-800 shrink-0">
 		<!-- RingMark logo -->
-		<div class="rounded-full shrink-0" style="width:26px;height:26px;background:conic-gradient(from 220deg,#F4976C,#6E4F9A,#8893D4,#F4976C)">
-			<div class="rounded-full bg-gray-900 m-[3px]" style="width:20px;height:20px"></div>
-		</div>
+		<RingMark size={26} />
 		<a href="/dashboard" class="text-white font-bold text-base tracking-tight hover:text-gray-200 transition-colors">
 			{$siteConfig.site_name}
 		</a>
