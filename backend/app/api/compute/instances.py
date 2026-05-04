@@ -24,6 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from openstack.exceptions import ConflictException, HttpException
 
+from app.api.common.activity_recorder import rec
 from app.api.deps import get_os_conn, get_token_info, require_admin
 from app.config import get_settings
 from app.database import is_db_available
@@ -349,6 +350,15 @@ async def create_instance(
                     floating_ip_id = fip.id
                     await asyncio.to_thread(neutron.associate_floating_ip, conn, fip.id, server_id)
 
+        await rec(
+            token_info,
+            conn,
+            resource_type="instance",
+            action="instance.create",
+            status="success",
+            resource_id=server.id,
+            resource_name=req.name,
+        )
         return server
 
     except HTTPException:
@@ -393,6 +403,15 @@ async def create_instance(
             f"인스턴스 생성 실패: {error_detail}"
             if is_admin
             else "인스턴스 생성에 실패했습니다. 관리자에게 문의하세요."
+        )
+        await rec(
+            token_info,
+            conn,
+            resource_type="instance",
+            action="instance.create",
+            status="failed",
+            resource_name=req.name,
+            error_message=error_detail[:500],
         )
         raise HTTPException(status_code=500, detail=detail)
 
@@ -671,6 +690,15 @@ async def create_instance_async(
 
             # Completed
             yield send_progress(ProgressStep.COMPLETED, 100, "인스턴스 생성 완료", instance_id=server_id)
+            await rec(
+                token_info,
+                conn,
+                resource_type="instance",
+                action="instance.create",
+                status="success",
+                resource_id=server_id,
+                resource_name=req.name,
+            )
 
         except Exception as e:
             error_detail = str(e)
@@ -714,6 +742,15 @@ async def create_instance_async(
                 user_message,
                 error=error_detail if is_admin else "인스턴스 생성 실패",
             )
+            await rec(
+                token_info,
+                conn,
+                resource_type="instance",
+                action="instance.create",
+                status="failed",
+                resource_name=req.name,
+                error_message=error_detail[:500],
+            )
             await _rollback(
                 conn,
                 server_id,
@@ -738,6 +775,7 @@ async def create_instance_async(
 async def delete_instance(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
     try:
@@ -763,6 +801,15 @@ async def delete_instance(
     await asyncio.to_thread(nova.delete_server, conn, instance_id)
     await invalidate(f"afterglow:nova:{pid}:instances")
     await invalidate(f"afterglow:nova:{pid}:instance:{instance_id}")
+    await rec(
+        token_info,
+        conn,
+        resource_type="instance",
+        action="instance.delete",
+        status="success",
+        resource_id=instance_id,
+        resource_name=server.name,
+    )
 
     # Strategy B: 전용 파일 스토리지 삭제
     if strategy == "dynamic":
@@ -814,13 +861,31 @@ async def delete_instance(
 async def start_instance(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
     try:
         await asyncio.to_thread(nova.start_server, conn, instance_id)
         await invalidate(f"afterglow:nova:{pid}:instance:{instance_id}")
         await invalidate(f"afterglow:nova:{pid}:instances")
-    except Exception:
+        await rec(
+            token_info,
+            conn,
+            resource_type="instance",
+            action="instance.start",
+            status="success",
+            resource_id=instance_id,
+        )
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="instance",
+            action="instance.start",
+            status="failed",
+            resource_id=instance_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="작업 실패")
 
 
@@ -828,13 +893,31 @@ async def start_instance(
 async def stop_instance(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
     try:
         await asyncio.to_thread(nova.stop_server, conn, instance_id)
         await invalidate(f"afterglow:nova:{pid}:instance:{instance_id}")
         await invalidate(f"afterglow:nova:{pid}:instances")
-    except Exception:
+        await rec(
+            token_info,
+            conn,
+            resource_type="instance",
+            action="instance.stop",
+            status="success",
+            resource_id=instance_id,
+        )
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="instance",
+            action="instance.stop",
+            status="failed",
+            resource_id=instance_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="작업 실패")
 
 
@@ -842,13 +925,31 @@ async def stop_instance(
 async def reboot_instance(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
     try:
         await asyncio.to_thread(nova.reboot_server, conn, instance_id)
         await invalidate(f"afterglow:nova:{pid}:instance:{instance_id}")
         await invalidate(f"afterglow:nova:{pid}:instances")
-    except Exception:
+        await rec(
+            token_info,
+            conn,
+            resource_type="instance",
+            action="instance.reboot",
+            status="success",
+            resource_id=instance_id,
+        )
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="instance",
+            action="instance.reboot",
+            status="failed",
+            resource_id=instance_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="작업 실패")
 
 
@@ -856,13 +957,31 @@ async def reboot_instance(
 async def shelve_instance(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
     try:
         await asyncio.to_thread(nova.shelve_server, conn, instance_id)
         await invalidate(f"afterglow:nova:{pid}:instance:{instance_id}")
         await invalidate(f"afterglow:nova:{pid}:instances")
-    except Exception:
+        await rec(
+            token_info,
+            conn,
+            resource_type="instance",
+            action="instance.shelve",
+            status="success",
+            resource_id=instance_id,
+        )
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="instance",
+            action="instance.shelve",
+            status="failed",
+            resource_id=instance_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="작업 실패")
 
 
@@ -870,13 +989,31 @@ async def shelve_instance(
 async def unshelve_instance(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
     try:
         await asyncio.to_thread(nova.unshelve_server, conn, instance_id)
         await invalidate(f"afterglow:nova:{pid}:instance:{instance_id}")
         await invalidate(f"afterglow:nova:{pid}:instances")
-    except Exception:
+        await rec(
+            token_info,
+            conn,
+            resource_type="instance",
+            action="instance.unshelve",
+            status="success",
+            resource_id=instance_id,
+        )
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="instance",
+            action="instance.unshelve",
+            status="failed",
+            resource_id=instance_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="작업 실패")
 
 
@@ -950,14 +1087,34 @@ async def attach_volume_to_instance(
     instance_id: str,
     body: AttachVolumeRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     volume_id = body.volume_id
     pid = conn._afterglow_project_id
     try:
         result = await asyncio.to_thread(nova.attach_volume, conn, instance_id, volume_id)
         await invalidate(f"afterglow:cinder:{pid}:vol_attach:{instance_id}")
+        await rec(
+            token_info,
+            conn,
+            resource_type="instance",
+            action="instance.attach_volume",
+            status="success",
+            resource_id=instance_id,
+            extra={"volume_id": volume_id},
+        )
         return result
-    except Exception:
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="instance",
+            action="instance.attach_volume",
+            status="failed",
+            resource_id=instance_id,
+            error_message=str(e)[:500],
+            extra={"volume_id": volume_id},
+        )
         raise HTTPException(status_code=500, detail="작업 실패")
 
 
@@ -966,14 +1123,42 @@ async def detach_volume_from_instance(
     instance_id: str,
     volume_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
     try:
         await asyncio.to_thread(nova.detach_volume, conn, instance_id, volume_id)
         await invalidate(f"afterglow:cinder:{pid}:vol_attach:{instance_id}")
+        await rec(
+            token_info,
+            conn,
+            resource_type="instance",
+            action="instance.detach_volume",
+            status="success",
+            resource_id=instance_id,
+            extra={"volume_id": volume_id},
+        )
     except HttpException as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="instance",
+            action="instance.detach_volume",
+            status="failed",
+            resource_id=instance_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=e.http_status or 500, detail=e.message or str(e))
-    except Exception:
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="instance",
+            action="instance.detach_volume",
+            status="failed",
+            resource_id=instance_id,
+            error_message=str(e)[:500],
+        )
         logger.error("볼륨 분리 실패", exc_info=True)
         raise HTTPException(status_code=500, detail="작업 실패")
 
@@ -1051,14 +1236,33 @@ async def attach_interface(
     instance_id: str,
     body: AttachInterfaceRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     net_id = body.net_id
     pid = conn._afterglow_project_id
     try:
         result = await asyncio.to_thread(nova.attach_interface, conn, instance_id, net_id)
         await invalidate(f"afterglow:neutron:{pid}:ports:{instance_id}")
+        await rec(
+            token_info,
+            conn,
+            resource_type="instance",
+            action="instance.attach_interface",
+            status="success",
+            resource_id=instance_id,
+            extra={"net_id": net_id},
+        )
         return result
-    except Exception:
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="instance",
+            action="instance.attach_interface",
+            status="failed",
+            resource_id=instance_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="작업 실패")
 
 
@@ -1067,12 +1271,31 @@ async def detach_interface(
     instance_id: str,
     port_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
     try:
         await asyncio.to_thread(nova.detach_interface, conn, instance_id, port_id)
         await invalidate(f"afterglow:neutron:{pid}:ports:{instance_id}")
-    except Exception:
+        await rec(
+            token_info,
+            conn,
+            resource_type="instance",
+            action="instance.detach_interface",
+            status="success",
+            resource_id=instance_id,
+            extra={"port_id": port_id},
+        )
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="instance",
+            action="instance.detach_interface",
+            status="failed",
+            resource_id=instance_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="작업 실패")
 
 
@@ -1082,14 +1305,32 @@ async def update_port_security_groups(
     port_id: str,
     body: UpdateSecurityGroupsRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     sg_ids = body.security_group_ids
     pid = conn._afterglow_project_id
     try:
         result = await asyncio.to_thread(neutron.update_port_security_groups, conn, port_id, sg_ids)
         await invalidate(f"afterglow:neutron:{pid}:sgs:{instance_id}")
+        await rec(
+            token_info,
+            conn,
+            resource_type="instance",
+            action="instance.update_security_groups",
+            status="success",
+            resource_id=instance_id,
+        )
         return result
-    except Exception:
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="instance",
+            action="instance.update_security_groups",
+            status="failed",
+            resource_id=instance_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="작업 실패")
 
 
@@ -1339,6 +1580,7 @@ async def assign_floating_ip(
     instance_id: str,
     port_id: str | None = Query(None, description="연결할 포트 ID (미지정 시 첫 번째 포트)"),
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     """인스턴스에 새 Floating IP를 자동 생성하고 연결한다."""
     pid = conn._afterglow_project_id
@@ -1390,11 +1632,28 @@ async def assign_floating_ip(
                 pass
             raise ex
         await invalidate(f"afterglow:neutron:{pid}:floating_ips")
+        await rec(
+            token_info,
+            conn,
+            resource_type="instance",
+            action="instance.assign_floating_ip",
+            status="success",
+            resource_id=instance_id,
+        )
         return {"id": result.id, "floating_ip_address": result.floating_ip_address}
     except HTTPException:
         raise
     except ConflictException as ex:
         logger.warning("Floating IP 할당 충돌: %s", ex)
+        await rec(
+            token_info,
+            conn,
+            resource_type="instance",
+            action="instance.assign_floating_ip",
+            status="failed",
+            resource_id=instance_id,
+            error_message=str(ex)[:500],
+        )
         raise HTTPException(
             status_code=409,
             detail="해당 인터페이스에 이미 Floating IP가 할당되어 있습니다",
@@ -1403,6 +1662,15 @@ async def assign_floating_ip(
         msg = str(ex)
         if "is not reachable from subnet" in msg or "not reachable from" in msg:
             logger.warning("Floating IP 할당 실패 (외부망 reachable 아님): %s", ex)
+            await rec(
+                token_info,
+                conn,
+                resource_type="instance",
+                action="instance.assign_floating_ip",
+                status="failed",
+                resource_id=instance_id,
+                error_message=msg[:500],
+            )
             raise HTTPException(
                 status_code=422,
                 detail=(
@@ -1411,6 +1679,15 @@ async def assign_floating_ip(
                 ),
             )
         logger.warning("Floating IP 할당 실패: %s", ex)
+        await rec(
+            token_info,
+            conn,
+            resource_type="instance",
+            action="instance.assign_floating_ip",
+            status="failed",
+            resource_id=instance_id,
+            error_message=msg[:500],
+        )
         raise HTTPException(status_code=500, detail="Floating IP 할당 실패")
 
 
@@ -1418,14 +1695,32 @@ async def assign_floating_ip(
 async def release_floating_ip(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     """인스턴스에 연결된 Floating IP를 해제하고 삭제한다."""
     pid = conn._afterglow_project_id
     try:
         await asyncio.to_thread(neutron.cleanup_instance_fips, conn, instance_id)
         await invalidate(f"afterglow:neutron:{pid}:floating_ips")
+        await rec(
+            token_info,
+            conn,
+            resource_type="instance",
+            action="instance.release_floating_ip",
+            status="success",
+            resource_id=instance_id,
+        )
     except Exception as ex:
         logger.warning("Floating IP 해제 실패: %s", ex)
+        await rec(
+            token_info,
+            conn,
+            resource_type="instance",
+            action="instance.release_floating_ip",
+            status="failed",
+            resource_id=instance_id,
+            error_message=str(ex)[:500],
+        )
         raise HTTPException(status_code=500, detail="Floating IP 해제 실패")
 
 
@@ -1528,8 +1823,34 @@ async def set_admin_password(
 
     try:
         await asyncio.to_thread(nova.change_server_password, conn, server_id, body.new_password)
+        await rec(
+            token_info,
+            conn,
+            resource_type="instance",
+            action="instance.set_admin_password",
+            status="success",
+            resource_id=server_id,
+        )
     except ConflictException as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="instance",
+            action="instance.set_admin_password",
+            status="failed",
+            resource_id=server_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=409, detail=f"Nova 패스워드 변경 충돌: {e}")
     except Exception as e:
         logger.warning("admin_password_reset 실패 server=%s: %s", server_id, e)
+        await rec(
+            token_info,
+            conn,
+            resource_type="instance",
+            action="instance.set_admin_password",
+            status="failed",
+            resource_id=server_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="패스워드 변경 요청 실패")

@@ -9,7 +9,8 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from app.api.deps import get_os_conn
+from app.api.common.activity_recorder import rec
+from app.api.deps import get_os_conn, get_token_info
 from app.rate_limit import limiter
 from app.services import nova
 from app.services.cache import cached_call, invalidate, ttl_slow
@@ -43,13 +44,26 @@ async def create_keypair(
     request: Request,
     req: CreateKeypairRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
     try:
         result = await asyncio.to_thread(nova.create_keypair, conn, req.name, req.public_key, req.key_type)
         await invalidate(f"afterglow:nova:{pid}:keypairs")
+        await rec(
+            token_info, conn, resource_type="keypair", action="keypair.create", status="success", resource_name=req.name
+        )
         return result
-    except Exception:
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="keypair",
+            action="keypair.create",
+            status="failed",
+            resource_name=req.name,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="키페어 생성 실패")
 
 
@@ -59,10 +73,30 @@ async def delete_keypair(
     request: Request,
     keypair_name: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
     try:
         await asyncio.to_thread(nova.delete_keypair, conn, keypair_name)
         await invalidate(f"afterglow:nova:{pid}:keypairs")
-    except Exception:
+        await rec(
+            token_info,
+            conn,
+            resource_type="keypair",
+            action="keypair.delete",
+            status="success",
+            resource_id=keypair_name,
+            resource_name=keypair_name,
+        )
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="keypair",
+            action="keypair.delete",
+            status="failed",
+            resource_id=keypair_name,
+            resource_name=keypair_name,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="키페어 삭제 실패")
