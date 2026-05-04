@@ -129,6 +129,7 @@ from app.api.compute import (
     flavors_router,
     images_router,
     instance_health_router,
+    instance_metrics_router,
     instances_router,
     keypairs_router,
 )
@@ -342,6 +343,7 @@ app.include_router(images_router, prefix="/api/images", tags=["images"])
 app.include_router(flavors_router, prefix="/api/flavors", tags=["flavors"])
 # instance_health_router을 instances_router보다 먼저 등록 (/health 경로 충돌 방지)
 app.include_router(instance_health_router, prefix="/api/instances", tags=["instance-health"])
+app.include_router(instance_metrics_router, prefix="/api/instances", tags=["instance-metrics"])
 app.include_router(instances_router, prefix="/api/instances", tags=["instances"])
 app.include_router(keypairs_router, prefix="/api/keypairs", tags=["keypairs"])
 # Storage (backups 먼저 등록 — /api/volumes/{id} catch-all 보다 앞에)

@@ -91,6 +91,8 @@ EXPECTED_PUBLIC = frozenset(
         ("POST", "/api/instances/{instance_id}/credentials/rotate-cephx"),
         # 단발 다운로드 토큰(?token=) 또는 X-Auth-Token 헤더 중 하나 수용 — 내부 분기로 인증
         ("GET", "/api/object-storage/{container_name}/objects/{object_name:path}/download"),
+        # Prometheus SD — Bearer monitoring_sd_token으로 자체 인증 (Keystone X-Auth-Token 불가)
+        ("GET", "/api/sd/prometheus/targets"),
     }
 )
 

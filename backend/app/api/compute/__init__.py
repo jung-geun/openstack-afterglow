@@ -5,6 +5,7 @@ _ROUTERS = {
     "images_router": ".images",
     "instances_router": ".instances",
     "instance_health_router": ".instance_health",
+    "instance_metrics_router": ".instance_metrics",
     "keypairs_router": ".keypairs",
 }
 
