@@ -416,11 +416,12 @@
 		if (total <= 1) return cy;
 		return cy + (index - (total - 1) / 2) * spacing;
 	}
+
+	const svgAttrs = $derived(fitWidth
+		? { width: '100%', height: 'auto', preserveAspectRatio: 'xMidYMid meet' }
+		: { style: `min-width:${svgW}px; height:${svgH}px;` });
 </script>
 
-{@const svgAttrs = fitWidth
-	? { width: '100%', height: 'auto', preserveAspectRatio: 'xMidYMid meet' }
-	: { style: `min-width:${svgW}px; height:${svgH}px;` }}
 <div class={fitWidth ? 'w-full' : 'w-full overflow-auto'}>
 	<svg
 		viewBox="0 0 {svgW} {svgH}"

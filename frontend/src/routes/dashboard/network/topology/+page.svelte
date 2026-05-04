@@ -55,14 +55,16 @@
 	}
 	interface TopologyLBMember {
 		id: string; address: string; protocol_port: number;
-		status: string; pool_id: string; server_id: string | null;
+		status: string; subnet_id: string | null; pool_id: string; server_id: string | null;
 	}
 	interface TopologyLBListener {
 		id: string; name: string; protocol: string; protocol_port: number;
+		default_pool_id: string | null;
 	}
 	interface TopologyLoadBalancer {
 		id: string; name: string;
 		vip_address: string | null; vip_port_id: string | null;
+		vip_subnet_id: string | null; vip_network_id: string | null;
 		provisioning_status: string; operating_status: string;
 		project_id: string | null;
 		listeners: TopologyLBListener[];
