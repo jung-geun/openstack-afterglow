@@ -178,14 +178,16 @@
 		<!-- 대시보드 -->
 		<a
 			href="/dashboard"
-			class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors {$page.url.pathname === '/dashboard' ? 'bg-blue-600/20 text-blue-400 font-medium' : 'text-gray-400 hover:text-white hover:bg-gray-800'}"
+			class="nav-item flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors"
+		class:nav-active={$page.url.pathname === '/dashboard'}
 		>
 			<svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg>
 			대시보드
 		</a>
 		<a
 			href="/dashboard/network/topology"
-			class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors {$page.url.pathname === '/dashboard/network/topology' ? 'bg-blue-600/20 text-blue-400 font-medium' : 'text-gray-400 hover:text-white hover:bg-gray-800'}"
+			class="nav-item flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors"
+		class:nav-active={$page.url.pathname === '/dashboard/network/topology'}
 		>
 			<svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
 			토폴로지
@@ -214,7 +216,8 @@
 							{#if isItemVisible(item)}
 							<a
 								href={item.href}
-								class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors {$page.url.pathname === item.href || ($page.url.pathname.startsWith(item.href + '/') && item.href !== '/dashboard/volumes') ? 'bg-blue-600/20 text-blue-400 font-medium' : 'text-gray-500 hover:text-gray-200 hover:bg-gray-800'}"
+								class="nav-item nav-sub flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors"
+								class:nav-active={$page.url.pathname === item.href || ($page.url.pathname.startsWith(item.href + '/') && item.href !== '/dashboard/volumes')}
 							>
 								{item.label}
 							</a>
@@ -246,7 +249,7 @@
 				<!-- 모바일: 관리/사용자 모드 전환 -->
 				{#if $page.url.pathname.startsWith('/admin')}
 					<a href="/dashboard"
-						class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors bg-blue-600/20 text-blue-400 font-medium md:hidden">
+						class="nav-item nav-active flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors md:hidden">
 						<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
 						사용자 모드
 					</a>
@@ -266,3 +269,35 @@
 		</div>
 	</div>
 </aside>
+
+<style>
+	.nav-item {
+		color: var(--color-ink-2);
+	}
+	.nav-item:hover:not(.nav-active) {
+		color: var(--color-ink-0);
+		background-color: color-mix(in oklab, var(--color-surface-sunken) 80%, transparent);
+	}
+	.nav-sub {
+		color: var(--color-ink-3);
+	}
+	.nav-sub:hover:not(.nav-active) {
+		color: var(--color-ink-1);
+	}
+	.nav-active {
+		background: var(--warm-soft);
+		color: var(--color-warm-2);
+		font-weight: 500;
+		position: relative;
+	}
+	.nav-active::before {
+		content: "";
+		position: absolute;
+		left: 0;
+		top: 6px;
+		bottom: 6px;
+		width: 3px;
+		border-radius: 2px;
+		background: var(--color-warm);
+	}
+</style>

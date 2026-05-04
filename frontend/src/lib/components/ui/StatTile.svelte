@@ -34,32 +34,33 @@
 
   const displayUnit = $derived(unit ?? suffix);
 
-  const ACCENT_CLASSES: Record<string, string> = {
-    blue:    'bg-blue-500/15 border-blue-500/30 text-blue-400',
-    cyan:    'bg-cyan-500/15 border-cyan-500/30 text-cyan-400',
-    violet:  'bg-violet-500/15 border-violet-500/30 text-violet-400',
-    emerald: 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400',
-    amber:   'bg-amber-500/15 border-amber-500/30 text-amber-400',
-    teal:    'bg-teal-500/15 border-teal-500/30 text-teal-400',
-    rose:    'bg-rose-500/15 border-rose-500/30 text-rose-400',
-    indigo:  'bg-indigo-500/15 border-indigo-500/30 text-indigo-400',
+  // Map legacy accent names to design-system tone classes
+  const TONE_MAP: Record<Accent, string> = {
+    blue:    'icon-accent',
+    cyan:    'icon-info',
+    violet:  'icon-accent2',
+    emerald: 'icon-success',
+    amber:   'icon-warning',
+    teal:    'icon-info',
+    rose:    'icon-danger',
+    indigo:  'icon-accent2',
   };
 
-  const chipClass = $derived(iconBgClass ?? (ACCENT_CLASSES[accent] ?? ACCENT_CLASSES.blue));
+  const chipClass = $derived(iconBgClass ?? TONE_MAP[accent] ?? TONE_MAP.blue);
 
   const pct = $derived(
     progress && progress.max > 0
       ? Math.min(100, Math.round((progress.value / progress.max) * 100))
       : 0
   );
-  const progressColor = $derived(
-    pct > 80 ? 'bg-red-500' : pct > 60 ? 'bg-yellow-500' : 'bg-blue-500'
+  const progressTone = $derived(
+    pct > 80 ? 'progress-danger' : pct > 60 ? 'progress-warning' : 'progress-accent'
   );
 </script>
 
 <div class="bg-gray-900 border border-gray-800 rounded-2xl p-[18px] flex items-center gap-3.5 {className}">
   {#if icon}
-    <div class="w-10 h-10 rounded-[10px] shrink-0 border flex items-center justify-center {chipClass}">
+    <div class="icon-chip {chipClass}">
       {@render icon()}
     </div>
   {/if}
@@ -72,7 +73,7 @@
     </div>
     {#if progress && progress.max > 0}
       <div class="mt-2 w-full bg-gray-800 rounded-full h-1 overflow-hidden">
-        <div class="h-1 rounded-full transition-all {progressColor}" style="width:{pct}%"></div>
+        <div class="progress-bar {progressTone} h-1 rounded-full transition-all" style="width:{pct}%"></div>
       </div>
     {:else if footer}
       <div class="mt-1">
@@ -81,3 +82,51 @@
     {/if}
   </div>
 </div>
+
+<style>
+  .icon-chip {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    border: 1px solid transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .icon-accent {
+    background: var(--accent-soft);
+    border-color: var(--accent-ring);
+    color: var(--color-accent);
+  }
+  .icon-accent2 {
+    background: color-mix(in oklab, var(--color-accent-2) 14%, transparent);
+    border-color: color-mix(in oklab, var(--color-accent-2) 30%, transparent);
+    color: var(--color-accent-2);
+  }
+  .icon-success {
+    background: color-mix(in oklab, var(--color-state-success) 14%, transparent);
+    border-color: color-mix(in oklab, var(--color-state-success) 30%, transparent);
+    color: var(--color-state-success);
+  }
+  .icon-warning {
+    background: color-mix(in oklab, var(--color-state-warning) 14%, transparent);
+    border-color: color-mix(in oklab, var(--color-state-warning) 30%, transparent);
+    color: var(--color-state-warning);
+  }
+  .icon-danger {
+    background: color-mix(in oklab, var(--color-state-danger) 14%, transparent);
+    border-color: color-mix(in oklab, var(--color-state-danger) 30%, transparent);
+    color: var(--color-state-danger);
+  }
+  .icon-info {
+    background: color-mix(in oklab, var(--color-state-info) 14%, transparent);
+    border-color: color-mix(in oklab, var(--color-state-info) 30%, transparent);
+    color: var(--color-state-info);
+  }
+
+  .progress-accent  { background: var(--color-accent); }
+  .progress-warning { background: var(--color-state-warning); }
+  .progress-danger  { background: var(--color-state-danger); }
+</style>
