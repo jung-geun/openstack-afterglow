@@ -93,12 +93,23 @@
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
+    position: relative;
+  }
+  .icon-chip::before {
+    content: "";
+    position: absolute;
+    inset: -8px;
+    border-radius: 16px;
+    background: radial-gradient(circle at center, currentColor 0%, transparent 70%);
+    opacity: 0.07;
+    pointer-events: none;
   }
 
   .icon-accent {
     background: var(--accent-soft);
     border-color: var(--accent-ring);
     color: var(--color-accent);
+    box-shadow: 0 0 16px color-mix(in oklab, var(--color-accent) 15%, transparent);
   }
   .icon-accent2 {
     background: color-mix(in oklab, var(--color-accent-2) 14%, transparent);
