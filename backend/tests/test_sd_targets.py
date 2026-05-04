@@ -4,7 +4,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 _NODE_TARGET = {
     "targets": ["10.0.0.1:9100"],
     "labels": {

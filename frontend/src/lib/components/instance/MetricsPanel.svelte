@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { api } from '$lib/api/client';
+	import { auth } from '$lib/stores/auth';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
@@ -17,6 +18,9 @@
 	}
 
 	let { instanceId, isGpu = false }: Props = $props();
+
+	const token = $derived($auth.token ?? undefined);
+	const projectId = $derived($auth.projectId ?? undefined);
 
 	let range: RangeKey = $state('1h');
 
@@ -39,7 +43,9 @@
 	async function fetchMetric(metric: MetricKey) {
 		try {
 			const resp = await api.get<{ series: Series[] }>(
-				`/api/instances/${instanceId}/metrics?metric=${metric}&range=${range}`
+				`/api/instances/${instanceId}/metrics?metric=${metric}&range=${range}`,
+				token,
+				projectId,
 			);
 			metrics[metric] = { data: resp.series, error: null };
 		} catch (e: unknown) {
@@ -52,6 +58,7 @@
 	const gpuMetrics: MetricKey[] = ['gpu_util', 'gpu_mem'];
 
 	async function loadAll() {
+		if (!token) return;
 		const keys: MetricKey[] = isGpu ? [...baseMetrics, ...gpuMetrics] : baseMetrics;
 		await Promise.allSettled(keys.map(fetchMetric));
 	}

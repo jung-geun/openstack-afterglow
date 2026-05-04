@@ -187,6 +187,17 @@ def _load_toml() -> dict:
     flat["union_layer_store_ro_share_id"] = union.get("layer_store_ro_share_id", "")
     flat["union_manifest_store_share_id"] = union.get("manifest_store_share_id", "")
 
+    mon = data.get("monitoring", {})
+    flat["prometheus_base_url"] = mon.get("prometheus_base_url", "http://prometheus:9090")
+    flat["prometheus_username"] = mon.get("prometheus_username", "")
+    flat["prometheus_password"] = mon.get("prometheus_password", "")
+    flat["monitoring_sd_token"] = mon.get("sd_token", "")
+    flat["monitoring_scrape_cidr"] = mon.get("scrape_cidr", "")
+    flat["monitoring_auto_sg_enabled"] = mon.get("auto_sg_enabled", True)
+    flat["monitoring_sg_name"] = mon.get("sg_name", "monitoring")
+    flat["grafana_base_url"] = mon.get("grafana_base_url", "")
+    flat["grafana_jwt_secret"] = mon.get("grafana_jwt_secret", "")
+
     notion = data.get("notion", {})
     flat["notion_config_encryption_key"] = notion.get("config_encryption_key", "")
 
@@ -335,7 +346,10 @@ class Settings(BaseSettings):
     monitoring_sd_token: str = ""  # /api/sd/prometheus/targets 인증 토큰
     grafana_jwt_secret: str = ""  # Grafana auth.jwt 서명 시크릿
     grafana_base_url: str = ""  # Grafana 외부 URL (예: https://grafana.example.com)
-    prometheus_base_url: str = "http://prometheus:9090"  # 클러스터 내 Prometheus URL
+    # Prometheus 서버 주소. 우선순위: 환경변수 PROMETHEUS_BASE_URL > config.toml [monitoring].prometheus_base_url > 기본값
+    prometheus_base_url: str = "http://prometheus:9090"
+    prometheus_username: str = ""  # basic auth 미사용 시 빈 문자열
+    prometheus_password: str = ""
 
     # Notion 연동
     notion_config_encryption_key: str = ""  # 미설정 시 k3s_kubeconfig_encryption_key 재사용

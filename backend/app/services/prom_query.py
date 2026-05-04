@@ -39,8 +39,11 @@ async def query_range(
         "end": end_ts,
         "step": f"{step_s}s",
     }
+    auth = None
+    if settings.prometheus_username and settings.prometheus_password:
+        auth = (settings.prometheus_username, settings.prometheus_password)
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with httpx.AsyncClient(timeout=15, auth=auth) as client:
             resp = await client.get(url, params=params)
     except (httpx.ConnectError, httpx.TimeoutException) as exc:
         raise PromUnavailable(f"Prometheus 연결 실패: {exc}") from exc

@@ -5,8 +5,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from tests.conftest import make_mock_conn, make_token_info
-
 _PROJECT_ID = "test-project-123"
 
 _FAKE_INSTANCE = MagicMock(

@@ -27,6 +27,11 @@ services:
       - ./config.toml:/app/config.toml:ro
       - ./config.gpu.toml:/app/config.gpu.toml:ro
       - ./logs:/app/logs
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - PROMETHEUS_BASE_URL=${PROMETHEUS_BASE_URL:-http://prometheus:9090}
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     depends_on:
       - redis
