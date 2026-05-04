@@ -146,6 +146,7 @@ _mark("api.container")
 # app.api.identity (admin, auth, sub-routers)
 # ---------------------------------------------------------------------------
 from app.api.identity import admin_router, auth_router
+from app.api.identity.admin_activity import router as admin_activity_router
 from app.api.identity.admin_flavors import router as admin_flavors_router
 from app.api.identity.admin_gpu import router as admin_gpu_router
 from app.api.identity.admin_identity import router as admin_identity_router
@@ -154,6 +155,7 @@ from app.api.identity.admin_libraries import router as admin_libraries_router
 from app.api.identity.admin_notion import router as admin_notion_router
 from app.api.identity.admin_services import router as admin_services_router
 from app.api.identity.profile import router as profile_router
+from app.api.identity.profile_activity import router as profile_activity_router
 
 _mark("api.identity")
 
@@ -333,6 +335,8 @@ app.include_router(admin_libraries_router, prefix="/api/admin/libraries", tags=[
 app.include_router(admin_notion_router, prefix="/api/admin", tags=["admin-notion"])
 app.include_router(admin_images_router, prefix="/api/admin", tags=["admin-images"])
 app.include_router(profile_router, prefix="/api/profile", tags=["profile"])
+app.include_router(profile_activity_router, prefix="/api/profile/activity", tags=["profile-activity"])
+app.include_router(admin_activity_router, prefix="/api/admin", tags=["admin-activity"])
 # Compute
 app.include_router(images_router, prefix="/api/images", tags=["images"])
 app.include_router(flavors_router, prefix="/api/flavors", tags=["flavors"])
