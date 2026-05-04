@@ -66,6 +66,7 @@
 		data,
 		projectId = null,
 		showAll = false,
+		fitWidth = false,
 		onSelectInstance = undefined,
 		onSelectRouter = undefined,
 		onSelectLoadBalancer = undefined,
@@ -73,6 +74,7 @@
 		data: TopologyData;
 		projectId?: string | null;
 		showAll?: boolean;
+		fitWidth?: boolean;
 		onSelectInstance?: (id: string) => void;
 		onSelectRouter?: (id: string) => void;
 		onSelectLoadBalancer?: (lb: TopologyLoadBalancer) => void;
@@ -416,11 +418,14 @@
 	}
 </script>
 
-<div class="w-full overflow-auto">
+{@const svgAttrs = fitWidth
+	? { width: '100%', height: 'auto', preserveAspectRatio: 'xMidYMid meet' }
+	: { style: `min-width:${svgW}px; height:${svgH}px;` }}
+<div class={fitWidth ? 'w-full' : 'w-full overflow-auto'}>
 	<svg
 		viewBox="0 0 {svgW} {svgH}"
-		style="min-width:{svgW}px; height:{svgH}px;"
 		xmlns="http://www.w3.org/2000/svg"
+		{...svgAttrs}
 	>
 		<!-- ── Network vertical bars ── -->
 		{#each orderedNetworks as net}

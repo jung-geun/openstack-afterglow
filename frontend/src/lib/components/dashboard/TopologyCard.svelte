@@ -93,7 +93,7 @@
     </div>
   {:else if data && (data.networks.length > 0 || data.routers.length > 0)}
     <div class="topology-clip">
-      <GlobalTopology {data} />
+      <GlobalTopology {data} fitWidth />
     </div>
   {:else}
     <div class="topology-clip flex items-center justify-center">
@@ -104,19 +104,9 @@
 
 <style>
   .topology-clip {
-    height: 300px;
+    height: 340px;
     overflow: hidden;
     position: relative;
     border-radius: 10px;
-  }
-  .topology-clip::after {
-    content: "";
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 60px;
-    background: linear-gradient(to bottom, transparent, var(--color-surface-base, #0b0f17));
-    pointer-events: none;
   }
 </style>
