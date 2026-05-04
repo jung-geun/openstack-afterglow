@@ -9,9 +9,10 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
+from app.api.common.activity_recorder import rec
 from app.api.deps import get_os_conn, get_token_info
 from app.services import cinder
-from app.services.cache import cached_call, ttl_fast
+from app.services.cache import cached_call, invalidate, ttl_fast
 
 router = APIRouter()
 
@@ -50,12 +51,34 @@ async def list_snapshots(
 async def create_snapshot(
     req: CreateSnapshotRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
+    pid = conn._afterglow_project_id
     try:
-        return await asyncio.to_thread(
+        result = await asyncio.to_thread(
             cinder.create_snapshot, conn, req.volume_id, req.name, req.description, req.force
         )
-    except Exception:
+        await invalidate(f"afterglow:cinder:{pid}:snapshots")
+        await rec(
+            token_info,
+            conn,
+            resource_type="volume_snapshot",
+            action="volume_snapshot.create",
+            status="success",
+            resource_name=req.name,
+            extra={"volume_id": req.volume_id},
+        )
+        return result
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="volume_snapshot",
+            action="volume_snapshot.create",
+            status="failed",
+            resource_name=req.name,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="스냅샷 생성 실패")
 
 
@@ -68,8 +91,31 @@ async def get_snapshot(snapshot_id: str, conn: openstack.connection.Connection =
 
 
 @router.delete("/{snapshot_id}", status_code=204)
-async def delete_snapshot(snapshot_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def delete_snapshot(
+    snapshot_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    pid = conn._afterglow_project_id
     try:
         await asyncio.to_thread(cinder.delete_snapshot, conn, snapshot_id)
-    except Exception:
+        await invalidate(f"afterglow:cinder:{pid}:snapshots")
+        await rec(
+            token_info,
+            conn,
+            resource_type="volume_snapshot",
+            action="volume_snapshot.delete",
+            status="success",
+            resource_id=snapshot_id,
+        )
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="volume_snapshot",
+            action="volume_snapshot.delete",
+            status="failed",
+            resource_id=snapshot_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="스냅샷 삭제 실패")

@@ -9,7 +9,8 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from app.api.deps import get_os_conn
+from app.api.common.activity_recorder import rec
+from app.api.deps import get_os_conn, get_token_info
 from app.services import auto_backup, cinder
 from app.services.cache import cached_call, ttl_fast
 
@@ -45,12 +46,32 @@ async def list_backups(conn: openstack.connection.Connection = Depends(get_os_co
 async def create_backup(
     req: CreateBackupRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     try:
-        return await asyncio.to_thread(
+        result = await asyncio.to_thread(
             cinder.create_backup, conn, req.volume_id, req.name, req.description, req.incremental
         )
-    except Exception:
+        await rec(
+            token_info,
+            conn,
+            resource_type="volume_backup",
+            action="volume_backup.create",
+            status="success",
+            resource_name=req.name,
+            extra={"volume_id": req.volume_id},
+        )
+        return result
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="volume_backup",
+            action="volume_backup.create",
+            status="failed",
+            resource_name=req.name,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="백업 생성 실패")
 
 
@@ -63,10 +84,31 @@ async def get_backup(backup_id: str, conn: openstack.connection.Connection = Dep
 
 
 @router.delete("/{backup_id}", status_code=204)
-async def delete_backup(backup_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def delete_backup(
+    backup_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
     try:
         await asyncio.to_thread(cinder.delete_backup, conn, backup_id)
-    except Exception:
+        await rec(
+            token_info,
+            conn,
+            resource_type="volume_backup",
+            action="volume_backup.delete",
+            status="success",
+            resource_id=backup_id,
+        )
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="volume_backup",
+            action="volume_backup.delete",
+            status="failed",
+            resource_id=backup_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="백업 삭제 실패")
 
 
@@ -75,10 +117,30 @@ async def restore_backup(
     backup_id: str,
     req: RestoreBackupRequest = RestoreBackupRequest(),
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     try:
-        return await asyncio.to_thread(cinder.restore_backup, conn, backup_id, req.volume_id)
-    except Exception:
+        result = await asyncio.to_thread(cinder.restore_backup, conn, backup_id, req.volume_id)
+        await rec(
+            token_info,
+            conn,
+            resource_type="volume_backup",
+            action="volume_backup.restore",
+            status="success",
+            resource_id=backup_id,
+            extra={"target_volume_id": req.volume_id},
+        )
+        return result
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="volume_backup",
+            action="volume_backup.restore",
+            status="failed",
+            resource_id=backup_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="백업 복원 실패")
 
 
@@ -121,18 +183,37 @@ async def enable_auto_backup(
     volume_id: str,
     req: AutoBackupRequest = AutoBackupRequest(),
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     """볼륨 자동 백업 활성화."""
     project_id = conn._afterglow_project_id
     try:
-        return await auto_backup.enable_auto_backup(
+        result = await auto_backup.enable_auto_backup(
             project_id,
             volume_id,
             max_daily=req.max_daily,
             max_weekly=req.max_weekly,
             max_monthly=req.max_monthly,
         )
-    except Exception:
+        await rec(
+            token_info,
+            conn,
+            resource_type="volume_backup",
+            action="volume.auto_backup_enable",
+            status="success",
+            resource_id=volume_id,
+        )
+        return result
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="volume_backup",
+            action="volume.auto_backup_enable",
+            status="failed",
+            resource_id=volume_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="자동 백업 활성화 실패")
 
 
@@ -140,10 +221,28 @@ async def enable_auto_backup(
 async def disable_auto_backup(
     volume_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     """볼륨 자동 백업 비활성화."""
     project_id = conn._afterglow_project_id
     try:
         await auto_backup.disable_auto_backup(project_id, volume_id)
-    except Exception:
+        await rec(
+            token_info,
+            conn,
+            resource_type="volume_backup",
+            action="volume.auto_backup_disable",
+            status="success",
+            resource_id=volume_id,
+        )
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="volume_backup",
+            action="volume.auto_backup_disable",
+            status="failed",
+            resource_id=volume_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="자동 백업 비활성화 실패")

@@ -7,6 +7,7 @@ if TYPE_CHECKING:
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
+from app.api.common.activity_recorder import rec
 from app.api.deps import get_os_conn, get_token_info
 from app.config import get_settings
 from app.models.storage import CreateAccessRuleRequest, CreateFileStorageRequest, FileStorageInfo
@@ -87,6 +88,7 @@ async def create_file_storage(
     request: Request,
     req: CreateFileStorageRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
     try:
@@ -101,8 +103,26 @@ async def create_file_storage(
             metadata=req.metadata,
         )
         await invalidate(f"afterglow:manila:{pid}:file_storages")
+        await rec(
+            token_info,
+            conn,
+            resource_type="file_storage",
+            action="file_storage.create",
+            status="success",
+            resource_name=req.name,
+            extra={"size_gb": req.size_gb},
+        )
         return result
-    except Exception:
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="file_storage",
+            action="file_storage.create",
+            status="failed",
+            resource_name=req.name,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="파일 스토리지 생성 실패")
 
 
@@ -110,12 +130,30 @@ async def create_file_storage(
 async def delete_file_storage(
     file_storage_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
     try:
         manila.delete_file_storage(conn, file_storage_id)
         await invalidate(f"afterglow:manila:{pid}:file_storages")
-    except Exception:
+        await rec(
+            token_info,
+            conn,
+            resource_type="file_storage",
+            action="file_storage.delete",
+            status="success",
+            resource_id=file_storage_id,
+        )
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="file_storage",
+            action="file_storage.delete",
+            status="failed",
+            resource_id=file_storage_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="파일 스토리지 삭제 실패")
 
 
@@ -137,13 +175,33 @@ async def create_access_rule(
     file_storage_id: str,
     req: CreateAccessRuleRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     try:
         metadata = _build_nfs_access_metadata(req.root_squash, req.sec_flavor) if req.access_type == "ip" else None
-        return manila.create_access_rule(
+        result = manila.create_access_rule(
             conn, file_storage_id, req.access_to, req.access_level, req.access_type, metadata=metadata
         )
-    except Exception:
+        await rec(
+            token_info,
+            conn,
+            resource_type="file_storage",
+            action="file_storage.grant_access",
+            status="success",
+            resource_id=file_storage_id,
+            extra={"access_to": req.access_to},
+        )
+        return result
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="file_storage",
+            action="file_storage.grant_access",
+            status="failed",
+            resource_id=file_storage_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="접근 규칙 생성 실패")
 
 
@@ -152,8 +210,26 @@ async def revoke_access_rule(
     file_storage_id: str,
     access_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     try:
         manila.revoke_access_rule(conn, file_storage_id, access_id)
-    except Exception:
+        await rec(
+            token_info,
+            conn,
+            resource_type="file_storage",
+            action="file_storage.revoke_access",
+            status="success",
+            resource_id=file_storage_id,
+        )
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="file_storage",
+            action="file_storage.revoke_access",
+            status="failed",
+            resource_id=file_storage_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="접근 규칙 삭제 실패")

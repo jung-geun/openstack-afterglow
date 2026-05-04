@@ -9,7 +9,8 @@ import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from app.api.deps import get_os_conn
+from app.api.common.activity_recorder import rec
+from app.api.deps import get_os_conn, get_token_info
 from app.models.storage import CreateSecurityServiceRequest, SecurityServiceInfo
 from app.rate_limit import limiter
 from app.services import manila
@@ -42,6 +43,7 @@ async def create_security_service(
     request: Request,
     req: CreateSecurityServiceRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
     try:
@@ -58,10 +60,26 @@ async def create_security_service(
             req.password,
         )
         await invalidate(f"afterglow:manila:{pid}:security_services")
+        await rec(
+            token_info,
+            conn,
+            resource_type="security_service",
+            action="security_service.create",
+            status="success",
+            resource_name=req.name,
+        )
         return result
     except Exception as e:
         _logger.warning("Security Service 생성 실패: %s", e)
-
+        await rec(
+            token_info,
+            conn,
+            resource_type="security_service",
+            action="security_service.create",
+            status="failed",
+            resource_name=req.name,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="Security Service 생성 실패")
 
 
@@ -69,14 +87,31 @@ async def create_security_service(
 async def delete_security_service(
     security_service_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
     try:
         await asyncio.to_thread(manila.delete_security_service, conn, security_service_id)
         await invalidate(f"afterglow:manila:{pid}:security_services")
+        await rec(
+            token_info,
+            conn,
+            resource_type="security_service",
+            action="security_service.delete",
+            status="success",
+            resource_id=security_service_id,
+        )
     except Exception as e:
         _logger.warning("Security Service 삭제 실패: %s", e)
-
+        await rec(
+            token_info,
+            conn,
+            resource_type="security_service",
+            action="security_service.delete",
+            status="failed",
+            resource_id=security_service_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="Security Service 삭제 실패")
 
 
@@ -85,6 +120,7 @@ async def attach_to_share_network(
     security_service_id: str,
     share_network_id: str = Query(...),
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     """Security Service를 Share Network에 연결."""
     pid = conn._afterglow_project_id
@@ -96,10 +132,27 @@ async def attach_to_share_network(
             security_service_id,
         )
         await invalidate(f"afterglow:manila:{pid}:share_networks")
+        await rec(
+            token_info,
+            conn,
+            resource_type="security_service",
+            action="security_service.attach",
+            status="success",
+            resource_id=security_service_id,
+            extra={"share_network_id": share_network_id},
+        )
         return result
     except Exception as e:
         _logger.warning("Security Service 연결 실패: %s", e)
-
+        await rec(
+            token_info,
+            conn,
+            resource_type="security_service",
+            action="security_service.attach",
+            status="failed",
+            resource_id=security_service_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="Security Service 연결 실패")
 
 
@@ -108,6 +161,7 @@ async def detach_from_share_network(
     security_service_id: str,
     share_network_id: str = Query(...),
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     """Security Service를 Share Network에서 해제."""
     pid = conn._afterglow_project_id
@@ -119,7 +173,24 @@ async def detach_from_share_network(
             security_service_id,
         )
         await invalidate(f"afterglow:manila:{pid}:share_networks")
+        await rec(
+            token_info,
+            conn,
+            resource_type="security_service",
+            action="security_service.detach",
+            status="success",
+            resource_id=security_service_id,
+            extra={"share_network_id": share_network_id},
+        )
     except Exception as e:
         _logger.warning("Security Service 해제 실패: %s", e)
-
+        await rec(
+            token_info,
+            conn,
+            resource_type="security_service",
+            action="security_service.detach",
+            status="failed",
+            resource_id=security_service_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="Security Service 해제 실패")

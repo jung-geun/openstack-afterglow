@@ -9,7 +9,8 @@ import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from app.api.deps import get_os_conn
+from app.api.common.activity_recorder import rec
+from app.api.deps import get_os_conn, get_token_info
 from app.models.storage import CreateShareNetworkRequest, ShareNetworkInfo
 from app.rate_limit import limiter
 from app.services import manila
@@ -53,6 +54,7 @@ async def create_share_network(
     request: Request,
     req: CreateShareNetworkRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
     try:
@@ -65,10 +67,26 @@ async def create_share_network(
             req.description,
         )
         await invalidate(f"afterglow:manila:{pid}:share_networks")
+        await rec(
+            token_info,
+            conn,
+            resource_type="share_network",
+            action="share_network.create",
+            status="success",
+            resource_name=req.name,
+        )
         return result
     except Exception as e:
         _logger.warning("Share 네트워크 생성 실패: %s", e)
-
+        await rec(
+            token_info,
+            conn,
+            resource_type="share_network",
+            action="share_network.create",
+            status="failed",
+            resource_name=req.name,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="Share 네트워크 생성 실패")
 
 
@@ -76,12 +94,29 @@ async def create_share_network(
 async def delete_share_network(
     share_network_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
     try:
         await asyncio.to_thread(manila.delete_share_network, conn, share_network_id)
         await invalidate(f"afterglow:manila:{pid}:share_networks")
+        await rec(
+            token_info,
+            conn,
+            resource_type="share_network",
+            action="share_network.delete",
+            status="success",
+            resource_id=share_network_id,
+        )
     except Exception as e:
         _logger.warning("Share 네트워크 삭제 실패: %s", e)
-
+        await rec(
+            token_info,
+            conn,
+            resource_type="share_network",
+            action="share_network.delete",
+            status="failed",
+            resource_id=share_network_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="Share 네트워크 삭제 실패")
