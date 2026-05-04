@@ -280,7 +280,7 @@
 				<tbody>
 					{#each projects as p (p.id)}
 						<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/50 transition-colors">
-							<td class="py-2 pr-4 text-white">{p.name}</td>
+							<td class="py-2 pr-4 text-white"><a href="/admin/projects/{p.id}" class="hover:text-blue-400 transition-colors">{p.name}</a></td>
 							<td class="py-2 pr-4 text-gray-400">{p.description || '-'}</td>
 							<td class="py-2 pr-4"><span class="px-1.5 py-0.5 rounded text-xs font-medium {p.enabled ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{p.enabled ? '활성' : '비활성'}</span></td>
 							<td class="py-2 pr-4">
