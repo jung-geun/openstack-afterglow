@@ -11,6 +11,7 @@
   import QuotaBar from '$lib/components/ui/QuotaBar.svelte';
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
   import GradientText from '$lib/components/ui/GradientText.svelte';
+  import TopologyCard from '$lib/components/dashboard/TopologyCard.svelte';
 
   interface QuotaItem { limit: number; in_use: number; }
   interface Quotas {
@@ -253,4 +254,7 @@
       {/if}
     </div>
   </div>
+
+  <!-- 네트워크 토폴로지 카드 -->
+  <TopologyCard />
 </div>
