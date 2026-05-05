@@ -144,6 +144,76 @@ def update_image_metadata(
     )
 
 
+# Glance 가 자동 관리하거나 hash/url 등 무결성 관련 키 — 사용자 편집 금지
+_RESERVED_PROPERTY_KEYS: frozenset[str] = frozenset(
+    {
+        "id",
+        "name",
+        "status",
+        "visibility",
+        "owner",
+        "size",
+        "virtual_size",
+        "disk_format",
+        "container_format",
+        "checksum",
+        "os_hash_algo",
+        "os_hash_value",
+        "min_disk",
+        "min_ram",
+        "tags",
+        "self",
+        "file",
+        "schema",
+        "direct_url",
+        "locations",
+        "created_at",
+        "updated_at",
+        "protected",
+    }
+)
+
+
+def _is_protected_key(key: str) -> bool:
+    """Glance 예약/내부 관리 키인지 검사 (편집/삭제 금지)."""
+    if key in _RESERVED_PROPERTY_KEYS:
+        return True
+    return key.startswith("os_glance_")
+
+
+def update_image_properties(
+    conn: openstack.connection.Connection,
+    image_id: str,
+    set_properties: dict[str, str] | None = None,
+    remove_keys: list[str] | None = None,
+) -> ImageDetail:
+    """이미지 임의 properties 추가/수정/삭제.
+
+    set_properties: key→value 추가 또는 갱신
+    remove_keys: 삭제할 key 목록
+    예약 키(`_RESERVED_PROPERTY_KEYS`, `os_glance_*`)는 무시.
+    """
+    set_properties = set_properties or {}
+    remove_keys = remove_keys or []
+
+    safe_set = {k: str(v) for k, v in set_properties.items() if not _is_protected_key(k)}
+    safe_remove = [k for k in remove_keys if not _is_protected_key(k)]
+
+    if safe_remove:
+        # openstacksdk update_image 는 추가/갱신만 지원하므로 삭제는 raw JSON Patch 호출
+        patch = [{"op": "remove", "path": f"/{k}"} for k in safe_remove]
+        conn.image.patch(
+            f"/v2/images/{image_id}",
+            json=patch,
+            headers={"Content-Type": "application/openstack-images-v2.1-json-patch"},
+        )
+
+    if safe_set:
+        conn.image.update_image(image_id, **safe_set)
+
+    return get_image(conn, image_id)
+
+
 def _guess_distro(name: str) -> str | None:
     """이미지 이름에서 OS 배포판 추정."""
     lower = name.lower()

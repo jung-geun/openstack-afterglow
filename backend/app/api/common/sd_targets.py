@@ -23,7 +23,7 @@ def _verify_sd_token(request: Request) -> None:
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Authorization Bearer 토큰이 필요합니다")
-    token = auth[len("Bearer "):]
+    token = auth[len("Bearer ") :]
     if token != expected:
         raise HTTPException(status_code=401, detail="유효하지 않은 SD 토큰")
 
@@ -78,15 +78,19 @@ def _collect_targets() -> list[dict]:
             "flavor": flavor_name,
             "gpu": "true" if is_gpu else "false",
         }
-        groups.append({
-            "targets": [f"{ip}:9100"],
-            "labels": {**base_labels, "job": "node_exporter"},
-        })
+        groups.append(
+            {
+                "targets": [f"{ip}:9100"],
+                "labels": {**base_labels, "job": "node_exporter"},
+            }
+        )
         if is_gpu:
-            groups.append({
-                "targets": [f"{ip}:9400"],
-                "labels": {**base_labels, "job": "dcgm_exporter"},
-            })
+            groups.append(
+                {
+                    "targets": [f"{ip}:9400"],
+                    "labels": {**base_labels, "job": "dcgm_exporter"},
+                }
+            )
     return groups
 
 

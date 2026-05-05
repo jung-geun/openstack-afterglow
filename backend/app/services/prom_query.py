@@ -58,10 +58,7 @@ async def query_range(
     if not results:
         return []
 
-    return [
-        {"ts": int(float(ts)), "value": float(val)}
-        for ts, val in results[0].get("values", [])
-    ]
+    return [{"ts": int(float(ts)), "value": float(val)} for ts, val in results[0].get("values", [])]
 
 
 def calc_step(range_seconds: int) -> int:

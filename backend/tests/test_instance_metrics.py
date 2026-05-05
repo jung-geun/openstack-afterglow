@@ -1,4 +1,5 @@
 """인스턴스 메트릭 엔드포인트 테스트."""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -36,8 +37,10 @@ _FAKE_SERIES = [{"ts": 1700000000, "value": 42.0}, {"ts": 1700000030, "value": 4
 
 @pytest.mark.anyio
 async def test_metrics_returns_series(client):
-    with patch("app.api.compute.instance_metrics.nova.get_server", return_value=_FAKE_INSTANCE), \
-         patch("app.api.compute.instance_metrics.query_range", new=AsyncMock(return_value=_FAKE_SERIES)):
+    with (
+        patch("app.api.compute.instance_metrics.nova.get_server", return_value=_FAKE_INSTANCE),
+        patch("app.api.compute.instance_metrics.query_range", new=AsyncMock(return_value=_FAKE_SERIES)),
+    ):
         resp = await client.get("/api/instances/inst-1/metrics?metric=cpu&range=1h")
     assert resp.status_code == 200
     body = resp.json()
@@ -49,8 +52,10 @@ async def test_metrics_returns_series(client):
 
 @pytest.mark.anyio
 async def test_metrics_empty_series(client):
-    with patch("app.api.compute.instance_metrics.nova.get_server", return_value=_FAKE_INSTANCE), \
-         patch("app.api.compute.instance_metrics.query_range", new=AsyncMock(return_value=[])):
+    with (
+        patch("app.api.compute.instance_metrics.nova.get_server", return_value=_FAKE_INSTANCE),
+        patch("app.api.compute.instance_metrics.query_range", new=AsyncMock(return_value=[])),
+    ):
         resp = await client.get("/api/instances/inst-1/metrics?metric=memory&range=15m")
     assert resp.status_code == 200
     assert resp.json()["series"] == []
@@ -65,8 +70,10 @@ async def test_metrics_unauthorized_other_project(client):
 
 @pytest.mark.anyio
 async def test_metrics_admin_can_query_any(admin_client):
-    with patch("app.api.compute.instance_metrics.nova.get_server", return_value=_OTHER_INSTANCE), \
-         patch("app.api.compute.instance_metrics.query_range", new=AsyncMock(return_value=_FAKE_SERIES)):
+    with (
+        patch("app.api.compute.instance_metrics.nova.get_server", return_value=_OTHER_INSTANCE),
+        patch("app.api.compute.instance_metrics.query_range", new=AsyncMock(return_value=_FAKE_SERIES)),
+    ):
         resp = await admin_client.get("/api/instances/inst-other/metrics?metric=cpu&range=1h")
     assert resp.status_code == 200
 
@@ -87,9 +94,11 @@ async def test_metrics_invalid_metric(client):
 @pytest.mark.anyio
 async def test_metrics_prom_unavailable(client):
     from app.services.prom_query import PromUnavailable
-    with patch("app.api.compute.instance_metrics.nova.get_server", return_value=_FAKE_INSTANCE), \
-         patch("app.api.compute.instance_metrics.query_range",
-               new=AsyncMock(side_effect=PromUnavailable("conn error"))):
+
+    with (
+        patch("app.api.compute.instance_metrics.nova.get_server", return_value=_FAKE_INSTANCE),
+        patch("app.api.compute.instance_metrics.query_range", new=AsyncMock(side_effect=PromUnavailable("conn error"))),
+    ):
         resp = await client.get("/api/instances/inst-1/metrics?metric=cpu&range=1h")
     assert resp.status_code == 503
 
@@ -103,14 +112,17 @@ async def test_metrics_gpu_on_non_gpu_instance(client):
 
 @pytest.mark.anyio
 async def test_metrics_gpu_on_gpu_instance(client):
-    with patch("app.api.compute.instance_metrics.nova.get_server", return_value=_GPU_INSTANCE), \
-         patch("app.api.compute.instance_metrics.query_range", new=AsyncMock(return_value=_FAKE_SERIES)):
+    with (
+        patch("app.api.compute.instance_metrics.nova.get_server", return_value=_GPU_INSTANCE),
+        patch("app.api.compute.instance_metrics.query_range", new=AsyncMock(return_value=_FAKE_SERIES)),
+    ):
         resp = await client.get("/api/instances/inst-gpu/metrics?metric=gpu_util&range=1h")
     assert resp.status_code == 200
 
 
 def test_step_calculation():
     from app.services.prom_query import calc_step
-    assert calc_step(900) == 15     # 15m → 900/200=4.5 → max(15,4)=15
-    assert calc_step(3600) == 18    # 1h → 3600/200=18
+
+    assert calc_step(900) == 15  # 15m → 900/200=4.5 → max(15,4)=15
+    assert calc_step(3600) == 18  # 1h → 3600/200=18
     assert calc_step(86400) == 432  # 24h → 86400/200=432

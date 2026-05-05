@@ -21,10 +21,14 @@ _RANGE_SECONDS: dict[str, int] = {
 }
 
 MetricKey = Literal[
-    "cpu", "memory",
-    "network_rx", "network_tx",
-    "disk_read", "disk_write",
-    "gpu_util", "gpu_mem",
+    "cpu",
+    "memory",
+    "network_rx",
+    "network_tx",
+    "disk_read",
+    "disk_write",
+    "gpu_util",
+    "gpu_mem",
 ]
 
 _GPU_METRICS = {"gpu_util", "gpu_mem"}
@@ -35,10 +39,7 @@ def _build_expr(metric: str, ip: str) -> str:
     dcgm = f"{ip}:9400"
     exclude_ifaces = r"lo|veth.*|docker.*|cni.*"
     if metric == "cpu":
-        return (
-            f'100 - (avg by (instance) (rate(node_cpu_seconds_total'
-            f'{{instance="{node}",mode="idle"}}[2m])) * 100)'
-        )
+        return f'100 - (avg by (instance) (rate(node_cpu_seconds_total{{instance="{node}",mode="idle"}}[2m])) * 100)'
     if metric == "memory":
         return (
             f'(1 - node_memory_MemAvailable_bytes{{instance="{node}"}}'
@@ -46,22 +47,18 @@ def _build_expr(metric: str, ip: str) -> str:
         )
     if metric == "network_rx":
         return (
-            f'sum by (instance) (rate(node_network_receive_bytes_total'
+            f"sum by (instance) (rate(node_network_receive_bytes_total"
             f'{{instance="{node}",device!~"{exclude_ifaces}"}}[2m]))'
         )
     if metric == "network_tx":
         return (
-            f'sum by (instance) (rate(node_network_transmit_bytes_total'
+            f"sum by (instance) (rate(node_network_transmit_bytes_total"
             f'{{instance="{node}",device!~"{exclude_ifaces}"}}[2m]))'
         )
     if metric == "disk_read":
-        return (
-            f'sum by (instance) (rate(node_disk_read_bytes_total{{instance="{node}"}}[2m]))'
-        )
+        return f'sum by (instance) (rate(node_disk_read_bytes_total{{instance="{node}"}}[2m]))'
     if metric == "disk_write":
-        return (
-            f'sum by (instance) (rate(node_disk_written_bytes_total{{instance="{node}"}}[2m]))'
-        )
+        return f'sum by (instance) (rate(node_disk_written_bytes_total{{instance="{node}"}}[2m]))'
     if metric == "gpu_util":
         return f'avg by (instance) (DCGM_FI_DEV_GPU_UTIL{{instance="{dcgm}"}})'
     if metric == "gpu_mem":

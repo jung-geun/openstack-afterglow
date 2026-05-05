@@ -47,6 +47,14 @@
 	const projectId = $derived($auth.projectId ?? undefined);
 	const selectedDs = $derived(datastores.find((d) => d.name === form.datastore_type));
 
+	const validationError = $derived.by(() => {
+		if (!form.name.trim()) return '이름을 입력하세요.';
+		if (!form.datastore_type) return '데이터스토어를 선택하세요.';
+		if (!form.datastore_version) return '데이터스토어 버전을 선택하세요.';
+		if (!form.flavor_id) return '플레이버를 선택하세요.';
+		return '';
+	});
+
 
 	async function load() {
 		if (instances.length === 0) loading = true;
@@ -72,14 +80,12 @@
 			createError = '플레이버/데이터스토어 목록을 불러오지 못했습니다. 네트워크 상태를 확인하세요.';
 			console.error('플레이버/데이터스토어 조회 실패:', e);
 		}
-		form = {
-			name: '',
-			flavor_id: flavors.length ? flavors[0].id : '',
-			volume_size: 5,
-			datastore_type: datastores.length ? datastores[0].name : '',
-			datastore_version: (datastores.length && datastores[0].versions.length)
-				? datastores[0].versions[0].name : '',
-		};
+		form.name = '';
+		form.volume_size = 5;
+		form.flavor_id = flavors.length ? flavors[0].id : '';
+		form.datastore_type = datastores.length ? datastores[0].name : '';
+		form.datastore_version = (datastores.length && datastores[0].versions.length)
+			? datastores[0].versions[0].name : '';
 		showModal = true;
 	}
 
@@ -207,12 +213,17 @@
 					<input type="number" bind:value={form.volume_size} min="1" max="1024"
 						class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500" />
 				</div>
-				{#if createError}<p class="text-red-400 text-xs">{createError}</p>{/if}
+				{#if createError}
+					<p class="text-red-400 text-xs">{createError}</p>
+				{:else if validationError}
+					<p class="text-amber-400 text-xs">{validationError}</p>
+				{/if}
 			</div>
 			<div class="flex justify-end gap-2 mt-5">
 				<button onclick={() => { showModal = false; }}
 					class="px-4 py-2 text-sm text-gray-400 hover:text-white border border-gray-700 rounded-lg transition-colors">취소</button>
-				<button onclick={createInstance} disabled={creating || !form.name.trim() || !form.flavor_id || !form.datastore_type || !form.datastore_version}
+				<button onclick={createInstance} disabled={creating || !!validationError}
+					title={validationError || ''}
 					class="px-4 py-2 text-sm bg-amber-600 hover:bg-amber-500 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-lg transition-colors">
 					{creating ? '생성 중...' : '생성'}
 				</button>

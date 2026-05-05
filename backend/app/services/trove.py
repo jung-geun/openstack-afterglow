@@ -224,39 +224,60 @@ _ALLOWED_DB_FLAVORS = {"cpu.2c_2g", "cpu.4c_8g", "cpu.8c_16g", "cpu.8c_32g"}
 
 
 def list_flavors(conn) -> list[dict]:
-    """DB 플레이버 목록 (허용된 flavor만 반환)."""
+    """DB 플레이버 목록 (허용된 flavor만 반환).
+
+    openstacksdk Flavor.id 가 일부 환경에서 정수/None 으로 반환되어
+    프론트엔드 select value 가 빈 문자열로 직렬화되는 문제 방지를 위해
+    str_id → id → name 순서로 fallback 하여 항상 비어있지 않은 string 반환.
+    """
     try:
-        return [
-            {
-                "id": f.id,
-                "name": f.name or "",
-                "ram": getattr(f, "ram", 0) or 0,
-                "vcpus": getattr(f, "vcpus", 0) or 0,
-                "disk": getattr(f, "disk", 0) or 0,
-            }
-            for f in conn.database.flavors()
-            if (f.name or "") in _ALLOWED_DB_FLAVORS
-        ]
+        result: list[dict] = []
+        for f in conn.database.flavors():
+            name = f.name or ""
+            if name not in _ALLOWED_DB_FLAVORS:
+                continue
+            raw_id = getattr(f, "str_id", None) or getattr(f, "id", None)
+            flavor_id = str(raw_id) if raw_id not in (None, "") else name
+            result.append(
+                {
+                    "id": flavor_id,
+                    "name": name,
+                    "ram": getattr(f, "ram", 0) or 0,
+                    "vcpus": getattr(f, "vcpus", 0) or 0,
+                    "disk": getattr(f, "disk", 0) or 0,
+                }
+            )
+        return result
     except Exception:
         _logger.debug("Trove 플레이버 목록 조회 실패", exc_info=True)
         return []
 
 
 def list_datastores(conn) -> list[dict]:
-    """데이터스토어 목록 (raw REST)."""
+    """데이터스토어 목록 (raw REST).
+
+    name/version 이 빈 문자열이면 select value 가 비어 form validation 실패 →
+    이름 없는 datastore/version 은 응답에서 제외.
+    """
     try:
         resp = conn.database.get("/datastores")
         body = resp.json() if hasattr(resp, "json") else {}
         datastores_raw = body.get("datastores", [])
         result = []
         for ds in datastores_raw:
+            ds_name = ds.get("name", "") or ""
+            if not ds_name:
+                continue
             versions = []
             for v in ds.get("versions", []):
-                versions.append({"id": v.get("id", ""), "name": v.get("name", "")})
+                v_name = v.get("name", "") or v.get("version", "") or ""
+                if not v_name:
+                    continue
+                versions.append({"id": str(v.get("id", "") or v_name), "name": v_name})
             result.append(
                 {
-                    "id": ds.get("id", ""),
-                    "name": ds.get("name", ""),
+                    "id": str(ds.get("id", "") or ds_name),
+                    "name": ds_name,
                     "versions": versions,
                 }
             )
