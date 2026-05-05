@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import openstack
 import asyncio
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -16,6 +17,8 @@ from app.models.database import (
     CreateUserRequest,
     RestoreFromBackupRequest,
 )
+
+_logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -49,6 +52,32 @@ async def list_datastores(
         return await asyncio.to_thread(trove.list_datastores, conn)
     except Exception:
         raise HTTPException(status_code=500, detail="데이터스토어 목록 조회 실패")
+
+
+@router.get("/configurations")
+async def list_db_configurations(
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """DB Configuration group 목록."""
+    from app.services import trove
+
+    try:
+        return await asyncio.to_thread(trove.list_configurations, conn)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Configuration group 목록 조회 실패")
+
+
+@router.get("/volume-types")
+async def list_db_volume_types(
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """볼륨 타입 목록 (DB 생성 폼용)."""
+    from app.services import cinder
+
+    try:
+        return await asyncio.to_thread(cinder.list_volume_types, conn)
+    except Exception:
+        raise HTTPException(status_code=500, detail="볼륨 타입 목록 조회 실패")
 
 
 # ---------------------------------------------------------------------------
@@ -119,14 +148,11 @@ async def create_database_instance(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """DB 인스턴스 생성."""
-    import logging
-
-    _logger = logging.getLogger(__name__)
-
     from app.services import trove
 
     try:
-        return await asyncio.to_thread(
+        users_raw = [u.model_dump(exclude_none=True) for u in req.users] if req.users else None
+        instance = await asyncio.to_thread(
             trove.create_instance,
             conn,
             req.name,
@@ -135,9 +161,28 @@ async def create_database_instance(
             req.datastore_type,
             req.datastore_version,
             req.databases or None,
-            None,
+            users_raw,
             req.restore_backup_id,
+            req.availability_zone,
+            req.volume_type,
+            req.nics or None,
+            req.locality,
+            req.configuration_id,
+            req.replica_of,
+            req.replica_count,
         )
+        if req.is_public or req.allowed_cidrs:
+            try:
+                await asyncio.to_thread(
+                    trove.set_instance_access,
+                    conn,
+                    instance["id"],
+                    req.is_public,
+                    req.allowed_cidrs,
+                )
+            except Exception:
+                _logger.warning("Trove set_instance_access 실패 instance=%s", instance["id"], exc_info=True)
+        return instance
     except Exception:
         _logger.exception(
             "DB 인스턴스 생성 실패: name=%s, datastore=%s/%s", req.name, req.datastore_type, req.datastore_version

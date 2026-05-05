@@ -321,3 +321,20 @@ def _vol_to_info(vol) -> VolumeInfo:
         volume_type=vol.volume_type,
         attachments=list(vol.attachments or []),
     )
+
+
+def list_volume_types(conn: openstack.connection.Connection) -> list[dict]:
+    """볼륨 타입 목록. DB 인스턴스 생성 시 volume.type 선택에 사용."""
+    try:
+        return [
+            {
+                "id": vt.id,
+                "name": vt.name or "",
+                "description": getattr(vt, "description", "") or "",
+                "is_public": getattr(vt, "is_public", True),
+            }
+            for vt in conn.block_storage.types()
+            if vt.name
+        ]
+    except Exception:
+        return []

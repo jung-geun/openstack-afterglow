@@ -70,6 +70,13 @@ def create_instance(
     databases: list | None = None,
     users: list | None = None,
     restore_backup_id: str | None = None,
+    availability_zone: str | None = None,
+    volume_type: str | None = None,
+    nics: list[str] | None = None,
+    locality: str | None = None,
+    configuration_id: str | None = None,
+    replica_of: str | None = None,
+    replica_count: int | None = None,
 ) -> dict:
     """DB 인스턴스 생성 (raw REST 방식으로 안정성 확보)."""
     instance_body: dict = {
@@ -77,14 +84,28 @@ def create_instance(
         "flavorRef": flavor_id,
         "volume": {"size": volume_size},
     }
+    if volume_type:
+        instance_body["volume"]["type"] = volume_type
     if datastore_type:
         instance_body["datastore"] = {"type": datastore_type, "version": datastore_version}
+    if availability_zone:
+        instance_body["availability_zone"] = availability_zone
+    if nics:
+        instance_body["nics"] = [{"net-id": nid} for nid in nics]
+    if locality:
+        instance_body["locality"] = locality
     if databases:
         instance_body["databases"] = [{"name": db} for db in databases]
     if users:
         instance_body["users"] = users
+    if configuration_id:
+        instance_body["configuration"] = configuration_id
     if restore_backup_id:
         instance_body["restorePoint"] = {"backupRef": restore_backup_id}
+    if replica_of:
+        instance_body["replica_of"] = replica_of
+        if replica_count:
+            instance_body["replica_count"] = replica_count
 
     payload = {"instance": instance_body}
     _logger.debug("Trove create_instance payload: %s", payload)
@@ -328,3 +349,44 @@ def get_backup(conn, backup_id: str) -> dict:
     resp = conn.database.get(f"/backups/{backup_id}")
     body = resp.json() if hasattr(resp, "json") else {}
     return _backup_to_dict(body.get("backup", {}))
+
+
+# ---------------------------------------------------------------------------
+# 접근 제어 (is_public / allowed_cidrs)
+# ---------------------------------------------------------------------------
+
+
+def set_instance_access(conn, instance_id: str, is_public: bool, allowed_cidrs: list[str]) -> None:
+    """인스턴스 접근 정책 설정 (is_public, allowed_cidrs)."""
+    payload = {"access": {"is_public": is_public, "allowed_cidrs": allowed_cidrs}}
+    conn.database.put(f"/instances/{instance_id}/access", json=payload)
+
+
+# ---------------------------------------------------------------------------
+# Configuration groups
+# ---------------------------------------------------------------------------
+
+
+def list_configurations(conn) -> list[dict]:
+    """DB Configuration group 목록 (raw REST)."""
+    try:
+        resp = conn.database.get("/configurations")
+        body = resp.json() if hasattr(resp, "json") else {}
+        result = []
+        for c in body.get("configurations", []):
+            cfg_name = c.get("name", "") or ""
+            cfg_id = str(c.get("id", "") or "")
+            if not cfg_id:
+                continue
+            result.append(
+                {
+                    "id": cfg_id,
+                    "name": cfg_name,
+                    "datastore_name": c.get("datastore_name", "") or "",
+                    "datastore_version_name": c.get("datastore_version_name", "") or "",
+                }
+            )
+        return result
+    except Exception:
+        _logger.debug("Trove configuration group 목록 조회 실패", exc_info=True)
+        return []
