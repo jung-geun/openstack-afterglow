@@ -258,3 +258,16 @@ def add_image_member(conn: openstack.connection.Connection, image_id: str, membe
 def remove_image_member(conn: openstack.connection.Connection, image_id: str, member_id: str) -> None:
     """이미지에서 프로젝트 멤버 삭제."""
     conn.image.remove_member(member_id, image_id)
+
+
+def get_total_image_bytes(conn) -> int:
+    """active 상태 모든 이미지의 size 합 (bytes). 실패 시 0."""
+    total = 0
+    try:
+        for img in conn.image.images():
+            if getattr(img, "status", None) != "active":
+                continue
+            total += int(getattr(img, "size", 0) or 0)
+    except Exception:
+        pass
+    return total
