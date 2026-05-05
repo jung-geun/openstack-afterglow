@@ -122,11 +122,20 @@ def create_instance(
     body = resp.json() if hasattr(resp, "json") else {}
     instance_data = body.get("instance")
     if not instance_data or not instance_data.get("id"):
+        fault = body.get("instanceFault") or {}
+        fault_msg = str(fault.get("message", "") or "")
+        import re as _re
+        m = _re.search(r"\(([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\)", fault_msg)
+        fault_id = m.group(1) if m else ""
         _logger.error(
-            "Trove create_instance 실패 status=%s payload_keys=%s body=%s",
-            status, list(instance_body.keys()), text,
+            "Trove create_instance 실패 status=%s payload_keys=%s fault_id=%s body=%s",
+            status, list(instance_body.keys()), fault_id, text,
         )
-        raise RuntimeError(f"Trove malformed response: status={status} body={text}")
+        raise RuntimeError(
+            f"Trove 생성 실패 (HTTP {status})"
+            + (f" — Trove fault ID: {fault_id}" if fault_id else "")
+            + (f" — {fault_msg[:200]}" if fault_msg else "")
+        )
 
     return {
         "id": instance_data.get("id", ""),

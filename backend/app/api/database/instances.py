@@ -183,6 +183,11 @@ async def create_database_instance(
             except Exception:
                 _logger.warning("Trove set_instance_access 실패 instance=%s", instance["id"], exc_info=True)
         return instance
+    except RuntimeError as e:
+        _logger.exception(
+            "DB 인스턴스 생성 실패: name=%s, datastore=%s/%s", req.name, req.datastore_type, req.datastore_version
+        )
+        raise HTTPException(status_code=502, detail=str(e))
     except Exception:
         _logger.exception(
             "DB 인스턴스 생성 실패: name=%s, datastore=%s/%s", req.name, req.datastore_type, req.datastore_version

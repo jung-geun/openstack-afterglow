@@ -385,6 +385,7 @@
 										<option value={vt.name}>{vt.name}</option>
 									{/each}
 								</select>
+								<p class="text-xs text-gray-500 mt-1">기본값을 권장합니다. 모든 Cinder 타입이 Trove 와 호환되지 않습니다.</p>
 							</div>
 						</div>
 
@@ -557,7 +558,7 @@
 			<!-- 에러 + 액션 -->
 			<div class="px-6 py-4 border-t border-gray-800 space-y-3">
 				{#if createError}
-					<div class="bg-red-900/20 border border-red-800 rounded-lg px-3 py-2 text-red-400 text-xs">
+					<div class="bg-red-900/20 border border-red-800 rounded-lg px-3 py-2 text-red-400 text-xs whitespace-pre-wrap break-all">
 						{createError}
 					</div>
 				{:else if step1Error && activeTab !== 0}
