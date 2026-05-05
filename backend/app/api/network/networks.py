@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 import time
 from typing import TYPE_CHECKING
 
@@ -32,7 +31,7 @@ from app.rate_limit import limiter
 from app.services import neutron, nova
 from app.services.cache import cached_call, invalidate, ttl_fast, ttl_normal
 from app.services.octavia import get_lb_stats, get_topology_lbs, lb_rate_from_snapshot, list_load_balancers
-from app.services.prom_query import PromUnavailable, query_instant_multi
+from app.services.prom_query import PromBadQuery, PromUnavailable, query_instant_multi
 
 _logger = logging.getLogger(__name__)
 
@@ -416,7 +415,9 @@ async def get_topology_traffic(
     _exclude = r"lo|veth.*|docker.*|cni.*|tap.*|qbr.*"
     instances: dict[str, dict[str, float]] = {}
     if instance_ids:
-        regex = "|".join(re.escape(i) for i in instance_ids)
+        # UUID 는 [0-9a-f-] 만 포함 — 정규식 메타문자 없으므로 escape 불필요.
+        # re.escape 를 쓰면 하이픈이 \- 로 escape 되어 Prometheus RE2 가 거부함.
+        regex = "|".join(instance_ids)
         rx_q = (
             f"sum by (instance_id) (rate(node_network_receive_bytes_total"
             f'{{instance_id=~"{regex}",device!~"{_exclude}"}}[2m]))'
@@ -427,7 +428,8 @@ async def get_topology_traffic(
                 query_instant_multi(rx_q),
                 query_instant_multi(tx_q),
             )
-        except PromUnavailable:
+        except (PromUnavailable, PromBadQuery) as exc:
+            _logger.warning("토폴로지 트래픽 PromQL 실패 — 폴백: %s", exc)
             rx_pairs, tx_pairs = [], []
         for labels, val in rx_pairs:
             iid = labels.get("instance_id")
