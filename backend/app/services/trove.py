@@ -87,12 +87,12 @@ def create_instance(
         instance_body["restorePoint"] = {"backupRef": restore_backup_id}
 
     payload = {"instance": instance_body}
-    _logger.info("Trove create_instance payload: %s", payload)
+    _logger.debug("Trove create_instance payload: %s", payload)
 
     resp = conn.database.post("/instances", json=payload)
     status = getattr(resp, "status_code", None)
     text = (getattr(resp, "text", "") or "")[:2000]
-    _logger.info("Trove create_instance response: status=%s body=%s", status, text)
+    _logger.debug("Trove create_instance response: status=%s body=%s", status, text)
 
     body = resp.json() if hasattr(resp, "json") else {}
     instance_data = body.get("instance")
@@ -215,25 +215,27 @@ _ALLOWED_DB_FLAVORS = {"cpu.2c_2g", "cpu.4c_8g", "cpu.8c_16g", "cpu.8c_32g"}
 def list_flavors(conn) -> list[dict]:
     """DB 플레이버 목록 (허용된 flavor만 반환).
 
-    openstacksdk Flavor.id 가 일부 환경에서 정수/None 으로 반환되어
-    프론트엔드 select value 가 빈 문자열로 직렬화되는 문제 방지를 위해
-    str_id → id → name 순서로 fallback 하여 항상 비어있지 않은 string 반환.
+    openstacksdk Flavor ORM 이 일부 환경에서 id 를 None 으로 반환해
+    flavorRef 에 name 이 전송되는 문제 → raw REST 로 숫자 id 를 직접 파싱.
     """
     try:
+        resp = conn.database.get("/flavors")
+        body = resp.json() if hasattr(resp, "json") else {}
         result: list[dict] = []
-        for f in conn.database.flavors():
-            name = f.name or ""
+        for f in body.get("flavors", []):
+            name = f.get("name", "") or ""
             if name not in _ALLOWED_DB_FLAVORS:
                 continue
-            raw_id = getattr(f, "str_id", None) or getattr(f, "id", None)
-            flavor_id = str(raw_id) if raw_id not in (None, "") else name
+            raw_id = f.get("id") or f.get("str_id")
+            if raw_id in (None, ""):
+                continue
             result.append(
                 {
-                    "id": flavor_id,
+                    "id": str(raw_id),
                     "name": name,
-                    "ram": getattr(f, "ram", 0) or 0,
-                    "vcpus": getattr(f, "vcpus", 0) or 0,
-                    "disk": getattr(f, "disk", 0) or 0,
+                    "ram": f.get("ram", 0) or 0,
+                    "vcpus": f.get("vcpus", 0) or 0,
+                    "disk": f.get("disk", 0) or 0,
                 }
             )
         return result
