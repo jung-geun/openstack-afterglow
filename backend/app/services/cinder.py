@@ -323,6 +323,40 @@ def _vol_to_info(vol) -> VolumeInfo:
     )
 
 
+def _safe_float(v) -> float:
+    try:
+        return round(float(v), 2)
+    except Exception:
+        return 0.0
+
+
+def list_storage_pools(conn) -> list[dict]:
+    """Cinder backend pool 목록 — total/free/allocated capacity_gb 정규화 반환."""
+    bs_ep = conn.block_storage.get_endpoint()
+    resp = conn.session.get(f"{bs_ep}/scheduler-stats/get_pools", params={"detail": "True"})
+    out = []
+    for pool in resp.json().get("pools", []):
+        caps = pool.get("capabilities", {})
+        total_gb = caps.get("total_capacity_gb", 0)
+        free_gb = caps.get("free_capacity_gb", 0)
+        allocated_gb = caps.get("allocated_capacity_gb", 0)
+        if isinstance(total_gb, str) and total_gb in ("infinite", "unknown"):
+            total_gb = 0
+        if isinstance(free_gb, str) and free_gb in ("infinite", "unknown"):
+            free_gb = 0
+        out.append(
+            {
+                "name": pool.get("name", ""),
+                "volume_backend_name": caps.get("volume_backend_name", ""),
+                "storage_protocol": caps.get("storage_protocol", ""),
+                "total_capacity_gb": _safe_float(total_gb),
+                "free_capacity_gb": _safe_float(free_gb),
+                "allocated_capacity_gb": _safe_float(allocated_gb),
+            }
+        )
+    return out
+
+
 def list_volume_types(conn: openstack.connection.Connection) -> list[dict]:
     """볼륨 타입 목록. DB 인스턴스 생성 시 volume.type 선택에 사용."""
     try:

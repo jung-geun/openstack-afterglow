@@ -267,31 +267,21 @@ def _fetch_endpoints(conn) -> list[dict]:
 
 
 def _fetch_storage_pools(conn) -> list[dict]:
+    from app.services.cinder import list_storage_pools
+
     result = []
     try:
-        bs_ep = conn.block_storage.get_endpoint()
-        pools_resp = conn.session.get(
-            f"{bs_ep}/scheduler-stats/get_pools", params={"detail": "True"}, timeout=_SERVICE_TIMEOUT
-        )
-        for pool in pools_resp.json().get("pools", []):
-            caps = pool.get("capabilities", {})
-            total_gb = caps.get("total_capacity_gb", 0)
-            free_gb = caps.get("free_capacity_gb", 0)
-            allocated_gb = caps.get("allocated_capacity_gb", 0)
-            if isinstance(total_gb, str):
-                total_gb = float(total_gb) if total_gb not in ("infinite", "unknown", None) else 0
-            if isinstance(free_gb, str):
-                free_gb = float(free_gb) if free_gb not in ("infinite", "unknown", None) else 0
+        for p in list_storage_pools(conn):
             result.append(
                 {
-                    "name": pool.get("name", ""),
-                    "volume_backend_name": caps.get("volume_backend_name", ""),
-                    "driver_version": caps.get("driver_version", ""),
-                    "storage_protocol": caps.get("storage_protocol", ""),
-                    "vendor_name": caps.get("vendor_name", ""),
-                    "total_capacity_gb": round(float(total_gb), 2),
-                    "free_capacity_gb": round(float(free_gb), 2),
-                    "allocated_capacity_gb": round(float(allocated_gb), 2) if allocated_gb else 0,
+                    "name": p["name"],
+                    "volume_backend_name": p["volume_backend_name"],
+                    "driver_version": "",
+                    "storage_protocol": p["storage_protocol"],
+                    "vendor_name": "",
+                    "total_capacity_gb": p["total_capacity_gb"],
+                    "free_capacity_gb": p["free_capacity_gb"],
+                    "allocated_capacity_gb": p["allocated_capacity_gb"],
                 }
             )
     except Exception:
