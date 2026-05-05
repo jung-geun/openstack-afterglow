@@ -282,9 +282,10 @@
         </div>
         <div class="h-1.5 bg-gray-800 rounded-full overflow-hidden">
           {#if quotas?.storage.gigabytes.limit && quotas.storage.gigabytes.limit > 0}
-            <div class="h-full rounded-full transition-all {totalGb / quotas.storage.gigabytes.limit >= 1 ? 'bg-red-500' : totalGb / quotas.storage.gigabytes.limit >= 0.8 ? 'bg-orange-500' : 'bg-blue-500'}" style="width: {Math.min(100, Math.round(totalGb / quotas.storage.gigabytes.limit * 100))}%"></div>
+            {@const vpct = totalGb / quotas.storage.gigabytes.limit * 100}
+            <div class="h-full rounded-full transition-all" style="width: {Math.min(100, Math.round(vpct))}%; background: {vpct >= 95 ? 'var(--gradient-usage-danger)' : vpct >= 80 ? 'var(--gradient-usage-warning)' : 'var(--gradient-usage)'}"></div>
           {:else}
-            <div class="h-full bg-blue-500 rounded-full transition-all" style="width: {Math.min(100, totalGb / 10)}%"></div>
+            <div class="h-full rounded-full transition-all" style="width: {Math.min(100, totalGb / 10)}%; background: var(--gradient-usage)"></div>
           {/if}
         </div>
       </div>

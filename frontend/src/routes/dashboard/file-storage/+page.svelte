@@ -632,7 +632,7 @@
               <span class="text-white font-medium">{fs.size} GB</span>
             </div>
             <div class="h-1.5 bg-gray-800 rounded-full overflow-hidden">
-              <div class="h-full bg-teal-400" style="width: 60%"></div>
+              <div class="h-full rounded-full transition-all" style="width: {(quota?.gigabytes?.limit ?? 0) > 0 ? Math.min(100, Math.round(fs.size / (quota?.gigabytes?.limit ?? 1) * 100)) : 0}%; background: var(--gradient-usage)"></div>
             </div>
           </div>
 

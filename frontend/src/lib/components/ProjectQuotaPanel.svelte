@@ -97,12 +97,12 @@
 		return Math.min(100, Math.round((inUse / limit) * 100));
 	}
 
-	function usageColor(inUse: number, limit: number): string {
-		if (limit <= 0) return 'bg-gray-600';
+	function usageGrad(inUse: number, limit: number): string {
+		if (limit <= 0) return '#374151';
 		const pct = (inUse / limit) * 100;
-		if (pct >= 100) return 'bg-red-500';
-		if (pct >= 80) return 'bg-orange-500';
-		return 'bg-blue-500';
+		if (pct >= 95) return 'var(--gradient-usage-danger)';
+		if (pct >= 80) return 'var(--gradient-usage-warning)';
+		return 'var(--gradient-usage)';
 	}
 
 	function limitLabel(limit: number): string {
@@ -156,8 +156,8 @@
 						{#if (quota.compute.instances?.limit ?? -1) > 0}
 							<div class="w-full h-1 bg-gray-800 rounded-full overflow-hidden mb-2">
 								<div
-									class="h-full rounded-full {usageColor(quota.compute.instances?.in_use ?? 0, quota.compute.instances?.limit ?? 0)}"
-									style="width: {usageBar(quota.compute.instances?.in_use ?? 0, quota.compute.instances?.limit ?? 0)}%"
+									class="h-full rounded-full transition-all"
+									style="width: {usageBar(quota.compute.instances?.in_use ?? 0, quota.compute.instances?.limit ?? 0)}%; background: {usageGrad(quota.compute.instances?.in_use ?? 0, quota.compute.instances?.limit ?? 0)}"
 								></div>
 							</div>
 						{/if}
@@ -180,8 +180,8 @@
 						{#if (quota.compute.cores?.limit ?? -1) > 0}
 							<div class="w-full h-1 bg-gray-800 rounded-full overflow-hidden mb-2">
 								<div
-									class="h-full rounded-full {usageColor(quota.compute.cores?.in_use ?? 0, quota.compute.cores?.limit ?? 0)}"
-									style="width: {usageBar(quota.compute.cores?.in_use ?? 0, quota.compute.cores?.limit ?? 0)}%"
+									class="h-full rounded-full transition-all"
+									style="width: {usageBar(quota.compute.cores?.in_use ?? 0, quota.compute.cores?.limit ?? 0)}%; background: {usageGrad(quota.compute.cores?.in_use ?? 0, quota.compute.cores?.limit ?? 0)}"
 								></div>
 							</div>
 						{/if}
@@ -203,8 +203,8 @@
 						{#if (quota.compute.ram?.limit ?? -1) > 0}
 							<div class="w-full h-1 bg-gray-800 rounded-full overflow-hidden mb-2">
 								<div
-									class="h-full rounded-full {usageColor(quota.compute.ram?.in_use ?? 0, quota.compute.ram?.limit ?? 0)}"
-									style="width: {usageBar(quota.compute.ram?.in_use ?? 0, quota.compute.ram?.limit ?? 0)}%"
+									class="h-full rounded-full transition-all"
+									style="width: {usageBar(quota.compute.ram?.in_use ?? 0, quota.compute.ram?.limit ?? 0)}%; background: {usageGrad(quota.compute.ram?.in_use ?? 0, quota.compute.ram?.limit ?? 0)}"
 								></div>
 							</div>
 						{/if}
@@ -232,8 +232,8 @@
 						{#if (quota.volume.volumes?.limit ?? -1) > 0}
 							<div class="w-full h-1 bg-gray-800 rounded-full overflow-hidden mb-2">
 								<div
-									class="h-full rounded-full {usageColor(quota.volume.volumes?.in_use ?? 0, quota.volume.volumes?.limit ?? 0)}"
-									style="width: {usageBar(quota.volume.volumes?.in_use ?? 0, quota.volume.volumes?.limit ?? 0)}%"
+									class="h-full rounded-full transition-all"
+									style="width: {usageBar(quota.volume.volumes?.in_use ?? 0, quota.volume.volumes?.limit ?? 0)}%; background: {usageGrad(quota.volume.volumes?.in_use ?? 0, quota.volume.volumes?.limit ?? 0)}"
 								></div>
 							</div>
 						{/if}
@@ -255,8 +255,8 @@
 						{#if (quota.volume.gigabytes?.limit ?? -1) > 0}
 							<div class="w-full h-1 bg-gray-800 rounded-full overflow-hidden mb-2">
 								<div
-									class="h-full rounded-full {usageColor(quota.volume.gigabytes?.in_use ?? 0, quota.volume.gigabytes?.limit ?? 0)}"
-									style="width: {usageBar(quota.volume.gigabytes?.in_use ?? 0, quota.volume.gigabytes?.limit ?? 0)}%"
+									class="h-full rounded-full transition-all"
+									style="width: {usageBar(quota.volume.gigabytes?.in_use ?? 0, quota.volume.gigabytes?.limit ?? 0)}%; background: {usageGrad(quota.volume.gigabytes?.in_use ?? 0, quota.volume.gigabytes?.limit ?? 0)}"
 								></div>
 							</div>
 						{/if}

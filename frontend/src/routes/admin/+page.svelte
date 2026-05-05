@@ -57,12 +57,12 @@
 		return `${pct}`;
 	}
 
-	function usageColor(used: number, quota: number): string {
-		if (quota <= 0) return 'bg-gray-600';
+	function usageGrad(used: number, quota: number): string {
+		if (quota <= 0) return '#374151';
 		const pct = (used / quota) * 100;
-		if (pct >= 100) return 'bg-red-500';
-		if (pct >= 80) return 'bg-orange-500';
-		return 'bg-blue-500';
+		if (pct >= 95) return 'var(--gradient-usage-danger)';
+		if (pct >= 80) return 'var(--gradient-usage-warning)';
+		return 'var(--gradient-usage)';
 	}
 
 	function formatQuota(used: number, quota: number, unit = ''): string {
@@ -234,19 +234,19 @@
 								<div class="text-right text-gray-300 font-mono text-xs">{formatQuota(p.instances.used, p.instances.quota)}</div>
 								<div class="flex items-center gap-1.5">
 									<div class="w-14 h-1.5 bg-gray-700 rounded-full overflow-hidden shrink-0">
-										<div class="h-full rounded-full {usageColor(p.cpu.used, p.cpu.quota)}" style="width: {usageBar(p.cpu.used, p.cpu.quota)}%"></div>
+										<div class="h-full rounded-full transition-all" style="width: {usageBar(p.cpu.used, p.cpu.quota)}%; background: {usageGrad(p.cpu.used, p.cpu.quota)}"></div>
 									</div>
 									<span class="text-gray-400 font-mono text-[11px] min-w-[24px]">{p.cpu.used}</span>
 								</div>
 								<div class="flex items-center gap-1.5">
 									<div class="w-14 h-1.5 bg-gray-700 rounded-full overflow-hidden shrink-0">
-										<div class="h-full rounded-full {usageColor(p.ram_mb.used, p.ram_mb.quota)}" style="width: {usageBar(p.ram_mb.used, p.ram_mb.quota)}%"></div>
+										<div class="h-full rounded-full transition-all" style="width: {usageBar(p.ram_mb.used, p.ram_mb.quota)}%; background: {usageGrad(p.ram_mb.used, p.ram_mb.quota)}"></div>
 									</div>
 									<span class="text-gray-400 font-mono text-[11px] min-w-[28px]">{Math.round(p.ram_mb.used/1024)}G</span>
 								</div>
 								<div class="flex items-center gap-1.5">
 									<div class="w-14 h-1.5 bg-gray-700 rounded-full overflow-hidden shrink-0">
-										<div class="h-full rounded-full {usageColor(p.disk_gb.used, p.disk_gb.quota)}" style="width: {usageBar(p.disk_gb.used, p.disk_gb.quota)}%"></div>
+										<div class="h-full rounded-full transition-all" style="width: {usageBar(p.disk_gb.used, p.disk_gb.quota)}%; background: {usageGrad(p.disk_gb.used, p.disk_gb.quota)}"></div>
 									</div>
 									<span class="text-gray-400 font-mono text-[11px] min-w-[28px]">{Math.round(p.disk_gb.used)}G</span>
 								</div>

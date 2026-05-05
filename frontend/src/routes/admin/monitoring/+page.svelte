@@ -6,6 +6,7 @@
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 	import MetricsPanel from '$lib/components/instance/MetricsPanel.svelte';
+	import QuotaBar from '$lib/components/ui/QuotaBar.svelte';
 
 	interface MonitoringSummary {
 		compute: {
@@ -68,12 +69,6 @@
 	function pct(used: number, total: number) {
 		if (!total) return 0;
 		return Math.min(100, Math.round((used / total) * 100));
-	}
-	function barColor(p: number) {
-		if (p >= 90) return 'bg-red-500';
-		if (p >= 70) return 'bg-orange-500';
-		if (p >= 50) return 'bg-yellow-500';
-		return 'bg-blue-500';
 	}
 	function gb(mb: number) { return Math.round(mb / 1024); }
 
@@ -197,30 +192,12 @@
 
 					<!-- vCPU -->
 					<div class="mb-4">
-						<div class="flex justify-between text-xs text-gray-400 mb-1">
-							<span>vCPU</span>
-							<span>{summary.compute.vcpus_used} / {summary.compute.vcpus_total}</span>
-						</div>
-						<div class="w-full bg-gray-800 rounded-full h-2">
-							<div
-								class="{barColor(pct(summary.compute.vcpus_used, summary.compute.vcpus_total))} h-2 rounded-full transition-all"
-								style="width: {pct(summary.compute.vcpus_used, summary.compute.vcpus_total)}%"
-							></div>
-						</div>
+						<QuotaBar label="vCPU" used={summary.compute.vcpus_used} limit={summary.compute.vcpus_total} size="md" />
 					</div>
 
 					<!-- RAM -->
 					<div class="mb-4">
-						<div class="flex justify-between text-xs text-gray-400 mb-1">
-							<span>RAM</span>
-							<span>{gb(summary.compute.memory_used_mb)} GB / {gb(summary.compute.memory_total_mb)} GB</span>
-						</div>
-						<div class="w-full bg-gray-800 rounded-full h-2">
-							<div
-								class="{barColor(pct(summary.compute.memory_used_mb, summary.compute.memory_total_mb))} h-2 rounded-full transition-all"
-								style="width: {pct(summary.compute.memory_used_mb, summary.compute.memory_total_mb)}%"
-							></div>
-						</div>
+						<QuotaBar label="RAM (GB)" used={gb(summary.compute.memory_used_mb)} limit={gb(summary.compute.memory_total_mb)} size="md" />
 					</div>
 
 					<!-- 인스턴스 상태 -->

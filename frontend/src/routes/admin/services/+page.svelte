@@ -515,8 +515,8 @@
 						</div>
 						<div class="w-full h-2 bg-gray-800 rounded-full overflow-hidden">
 							<div
-								class="h-full rounded-full transition-all {pct > 85 ? 'bg-red-500' : pct > 65 ? 'bg-yellow-500' : 'bg-blue-500'}"
-								style="width: {pct.toFixed(1)}%"
+								class="h-full rounded-full transition-all"
+								style="width: {pct.toFixed(1)}%; background: {pct > 85 ? 'var(--gradient-usage-danger)' : pct > 65 ? 'var(--gradient-usage-warning)' : 'var(--gradient-usage)'}"
 							></div>
 						</div>
 						<div class="text-xs text-gray-500 mt-1">{pct.toFixed(1)}% 사용 중</div>

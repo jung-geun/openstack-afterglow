@@ -100,13 +100,12 @@
 		return sortAsc ? '↑' : '↓';
 	}
 
-	function usageColor(used: number, total: number): string {
-		if (total === 0) return 'bg-gray-600';
-		const pct = used / total;
-		if (pct >= 0.9) return 'bg-red-500';
-		if (pct >= 0.7) return 'bg-orange-500';
-		if (pct >= 0.5) return 'bg-yellow-500';
-		return 'bg-blue-500';
+	function usageGrad(used: number, total: number): string {
+		if (total === 0) return '#374151';
+		const pct = (used / total) * 100;
+		if (pct >= 90) return 'var(--gradient-usage-danger)';
+		if (pct >= 70) return 'var(--gradient-usage-warning)';
+		return 'var(--gradient-usage)';
 	}
 
 	function usagePct(used: number, total: number): number {
@@ -258,7 +257,7 @@
 							<td class="py-2 pr-4">
 								<div class="flex items-center gap-2">
 									<div class="w-14 bg-gray-800 rounded-full h-1.5 flex-shrink-0">
-										<div class="{usageColor(h.vcpus_used, h.vcpus_allowed || h.vcpus)} h-1.5 rounded-full" style="width: {usagePct(h.vcpus_used, h.vcpus_allowed || h.vcpus)}%"></div>
+										<div class="h-1.5 rounded-full transition-all" style="width: {usagePct(h.vcpus_used, h.vcpus_allowed || h.vcpus)}%; background: {usageGrad(h.vcpus_used, h.vcpus_allowed || h.vcpus)}"></div>
 									</div>
 									<span class="text-gray-400 text-xs">{formatNumber(h.vcpus_used)}/{formatNumber(h.vcpus_allowed || h.vcpus)}</span>
 								</div>
@@ -266,7 +265,7 @@
 							<td class="py-2 pr-4">
 								<div class="flex items-center gap-2">
 									<div class="w-14 bg-gray-800 rounded-full h-1.5 flex-shrink-0">
-										<div class="{usageColor(h.memory_used_mb, h.memory_allowed_mb || h.memory_size_mb)} h-1.5 rounded-full" style="width: {usagePct(h.memory_used_mb, h.memory_allowed_mb || h.memory_size_mb)}%"></div>
+										<div class="h-1.5 rounded-full transition-all" style="width: {usagePct(h.memory_used_mb, h.memory_allowed_mb || h.memory_size_mb)}%; background: {usageGrad(h.memory_used_mb, h.memory_allowed_mb || h.memory_size_mb)}"></div>
 									</div>
 									<span class="text-gray-400 text-xs">{formatNumber(Math.round(h.memory_used_mb/1024))}/{formatNumber(Math.round((h.memory_allowed_mb || h.memory_size_mb)/1024))}</span>
 								</div>
@@ -274,7 +273,7 @@
 							<td class="py-2">
 								<div class="flex items-center gap-2">
 									<div class="w-14 bg-gray-800 rounded-full h-1.5 flex-shrink-0">
-										<div class="{usageColor(h.local_disk_used_gb, h.local_disk_gb)} h-1.5 rounded-full" style="width: {usagePct(h.local_disk_used_gb, h.local_disk_gb)}%"></div>
+										<div class="h-1.5 rounded-full transition-all" style="width: {usagePct(h.local_disk_used_gb, h.local_disk_gb)}%; background: {usageGrad(h.local_disk_used_gb, h.local_disk_gb)}"></div>
 									</div>
 									<span class="text-gray-400 text-xs">{formatStorage(h.local_disk_used_gb)}/{formatStorage(h.local_disk_gb)}</span>
 								</div>
