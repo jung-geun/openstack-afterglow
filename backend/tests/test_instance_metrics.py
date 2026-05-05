@@ -126,3 +126,37 @@ def test_step_calculation():
     assert calc_step(900) == 15  # 15m → 900/200=4.5 → max(15,4)=15
     assert calc_step(3600) == 18  # 1h → 3600/200=18
     assert calc_step(86400) == 432  # 24h → 86400/200=432
+
+
+# ---------------------------------------------------------------------------
+# _build_expr — kolla-ansible OpenStack SD 라벨 스킴 회귀 방지
+# ---------------------------------------------------------------------------
+
+
+def test_build_expr_uses_instance_id_label():
+    """모든 메트릭이 instance_id 라벨로 필터해야 한다 (IP:port 사용 금지)."""
+    from app.api.compute.instance_metrics import _build_expr
+
+    uuid = "16585e7b-cade-4136-a72a-6e55b54d5054"
+    for metric in ("cpu", "memory", "network_rx", "network_tx", "disk_read", "disk_write", "gpu_util", "gpu_mem"):
+        expr = _build_expr(metric, uuid)
+        assert f'instance_id="{uuid}"' in expr, f"{metric}: instance_id 셀렉터 누락"
+        assert ":9100" not in expr, f"{metric}: IP:port 셀렉터가 남아있음"
+        assert ":9400" not in expr, f"{metric}: DCGM IP:port 셀렉터가 남아있음"
+
+
+def test_build_expr_does_not_filter_by_job():
+    """job 필터는 두지 않아야 한다 — internal/external 양쪽 모두 매치되어야 한다."""
+    from app.api.compute.instance_metrics import _build_expr
+
+    expr = _build_expr("cpu", "uuid-1")
+    assert 'job=' not in expr, "job 필터가 있으면 internal/external 한쪽만 매치됨"
+
+
+def test_build_expr_cpu_shape():
+    """CPU PromQL 정확한 형태 검증."""
+    from app.api.compute.instance_metrics import _build_expr
+
+    expr = _build_expr("cpu", "abc")
+    expected = '100 - (avg by (instance_id) (rate(node_cpu_seconds_total{instance_id="abc",mode="idle"}[2m])) * 100)'
+    assert expr == expected

@@ -34,37 +34,38 @@ MetricKey = Literal[
 _GPU_METRICS = {"gpu_util", "gpu_mem"}
 
 
-def _build_expr(metric: str, ip: str) -> str:
-    node = f"{ip}:9100"
-    dcgm = f"{ip}:9400"
+def _build_expr(metric: str, instance_id: str) -> str:
+    # kolla-ansible OpenStack SD 가 부여한 라벨 — instance_id (UUID) 가 unique key.
+    # job 필터를 두지 않아 internal/external 두 job 모두 커버한다.
+    sel = f'instance_id="{instance_id}"'
     exclude_ifaces = r"lo|veth.*|docker.*|cni.*"
     if metric == "cpu":
-        return f'100 - (avg by (instance) (rate(node_cpu_seconds_total{{instance="{node}",mode="idle"}}[2m])) * 100)'
+        return f'100 - (avg by (instance_id) (rate(node_cpu_seconds_total{{{sel},mode="idle"}}[2m])) * 100)'
     if metric == "memory":
         return (
-            f'(1 - node_memory_MemAvailable_bytes{{instance="{node}"}}'
-            f' / node_memory_MemTotal_bytes{{instance="{node}"}}) * 100'
+            f'(1 - node_memory_MemAvailable_bytes{{{sel}}}'
+            f' / node_memory_MemTotal_bytes{{{sel}}}) * 100'
         )
     if metric == "network_rx":
         return (
-            f"sum by (instance) (rate(node_network_receive_bytes_total"
-            f'{{instance="{node}",device!~"{exclude_ifaces}"}}[2m]))'
+            f"sum by (instance_id) (rate(node_network_receive_bytes_total"
+            f'{{{sel},device!~"{exclude_ifaces}"}}[2m]))'
         )
     if metric == "network_tx":
         return (
-            f"sum by (instance) (rate(node_network_transmit_bytes_total"
-            f'{{instance="{node}",device!~"{exclude_ifaces}"}}[2m]))'
+            f"sum by (instance_id) (rate(node_network_transmit_bytes_total"
+            f'{{{sel},device!~"{exclude_ifaces}"}}[2m]))'
         )
     if metric == "disk_read":
-        return f'sum by (instance) (rate(node_disk_read_bytes_total{{instance="{node}"}}[2m]))'
+        return f'sum by (instance_id) (rate(node_disk_read_bytes_total{{{sel}}}[2m]))'
     if metric == "disk_write":
-        return f'sum by (instance) (rate(node_disk_written_bytes_total{{instance="{node}"}}[2m]))'
+        return f'sum by (instance_id) (rate(node_disk_written_bytes_total{{{sel}}}[2m]))'
     if metric == "gpu_util":
-        return f'avg by (instance) (DCGM_FI_DEV_GPU_UTIL{{instance="{dcgm}"}})'
+        return f'avg by (instance_id) (DCGM_FI_DEV_GPU_UTIL{{{sel}}})'
     if metric == "gpu_mem":
         return (
-            f'avg by (instance) (DCGM_FI_DEV_FB_USED{{instance="{dcgm}"}}'
-            f' / DCGM_FI_DEV_FB_TOTAL{{instance="{dcgm}"}}) * 100'
+            f'avg by (instance_id) (DCGM_FI_DEV_FB_USED{{{sel}}}'
+            f' / DCGM_FI_DEV_FB_TOTAL{{{sel}}}) * 100'
         )
     raise ValueError(f"unknown metric: {metric}")
 
@@ -99,20 +100,15 @@ async def get_instance_metrics(
         if not flavor_name.lower().startswith("gpu."):
             raise HTTPException(status_code=400, detail="GPU 메트릭은 GPU 인스턴스에서만 조회 가능합니다")
 
-    # fixed IP 추출
-    fixed_ips = [ip.addr for ip in server.ip_addresses if ip.type == "fixed"]
-    if not fixed_ips:
-        return {"instance_id": instance_id, "metric": metric, "range": range, "series": []}
-    ip = fixed_ips[0]
-
     # range → timestamps, step
     range_s = _RANGE_SECONDS[range]
     end_ts = int(time.time())
     start_ts = end_ts - range_s
     step_s = calc_step(range_s)
 
-    # PromQL 실행
-    expr = _build_expr(metric, ip)
+    # PromQL 실행 — kolla-ansible OpenStack SD 가 부여한 instance_id (UUID) 라벨로 필터.
+    # IP 기반 셀렉터(instance="IP:9100") 는 kolla 가 instance 라벨을 인스턴스 이름으로 재라벨링하므로 매칭되지 않는다.
+    expr = _build_expr(metric, server.id)
     try:
         series = await query_range(expr, start_ts=start_ts, end_ts=end_ts, step_s=step_s)
     except PromUnavailable as exc:
