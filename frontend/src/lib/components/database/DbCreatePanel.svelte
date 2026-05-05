@@ -235,7 +235,7 @@
 			availability_zone: availabilityZone || null,
 			volume_type: volumeType || null,
 			nics: selectedNics,
-			locality: locality || null,
+			locality: replicaOf ? (locality || null) : null,
 			databases: dbs,
 			users: users.map((u) => ({ name: u.name, password: u.password, host: u.host })),
 			is_public: isPublic,
@@ -388,24 +388,14 @@
 							</div>
 						</div>
 
-						<div class="grid grid-cols-2 gap-3">
-							<div>
-								<label class={labelCls}>가용 구역</label>
-								<select bind:value={availabilityZone} class={inputCls}>
-									<option value="">자동 선택</option>
-									{#each availabilityZones as az}
-										<option value={az.name}>{az.name}</option>
-									{/each}
-								</select>
-							</div>
-							<div>
-								<label class={labelCls}>배치 정책 (Locality)</label>
-								<select bind:value={locality} class={inputCls}>
-									<option value="">없음</option>
-									<option value="affinity">Affinity</option>
-									<option value="anti-affinity">Anti-Affinity</option>
-								</select>
-							</div>
+						<div>
+							<label class={labelCls}>가용 구역</label>
+							<select bind:value={availabilityZone} class={inputCls}>
+								<option value="">자동 선택</option>
+								{#each availabilityZones as az}
+									<option value={az.name}>{az.name}</option>
+								{/each}
+							</select>
 						</div>
 					</div>
 				{:else if activeTab === 1}
@@ -549,6 +539,17 @@
 								<input type="number" bind:value={replicaCount} min="1" max="10" class={inputCls} />
 							</div>
 						{/if}
+						<div>
+							<label class={labelCls}>배치 정책 (Locality)</label>
+							<select bind:value={locality} disabled={!replicaOf} class={inputCls}>
+								<option value="">없음</option>
+								<option value="affinity">Affinity</option>
+								<option value="anti-affinity">Anti-Affinity</option>
+							</select>
+							{#if !replicaOf}
+								<p class="text-xs text-gray-500 mt-1">복제 인스턴스 생성 시에만 적용됩니다.</p>
+							{/if}
+						</div>
 					</div>
 				{/if}
 			</div>
