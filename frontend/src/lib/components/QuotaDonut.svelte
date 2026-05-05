@@ -14,10 +14,15 @@
 
   const pct = $derived(limit > 0 ? Math.min(100, Math.round(used / limit * 100)) : 0);
   const dashOffset = $derived(circumference - (pct / 100) * circumference);
-  const color = $derived(
-    pct >= 100 ? '#ef4444'   // red-500 full
-    : pct > 80 ? '#f97316'   // orange-500 danger
-    : '#3b82f6'              // blue-500 normal
+  const gradientId = $derived(
+    pct >= 100 ? 'donut-grad-danger'
+    : pct > 80 ? 'donut-grad-warning'
+    : 'donut-grad-accent'
+  );
+  const textColor = $derived(
+    pct >= 100 ? '#ef4444'
+    : pct > 80 ? '#f59e0b'
+    : '#8893d4'
   );
 
   function fmt(v: number): string {
@@ -30,6 +35,24 @@
 <div class="flex flex-col items-center gap-1">
   <div class="relative {size === 'lg' ? 'w-28 h-28' : 'w-16 h-16'}">
     <svg viewBox="0 0 {size === 'lg' ? '112 112' : '72 72'}" class="w-full h-full -rotate-90">
+      <defs>
+        <linearGradient id="donut-grad-accent" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%"   stop-color="#8893d4"/>
+          <stop offset="35%"  stop-color="#b08cd6"/>
+          <stop offset="75%"  stop-color="#f4976c"/>
+          <stop offset="100%" stop-color="#f472b6"/>
+        </linearGradient>
+        <linearGradient id="donut-grad-warning" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%"   stop-color="#f4976c"/>
+          <stop offset="50%"  stop-color="#f59e0b"/>
+          <stop offset="100%" stop-color="#f472b6"/>
+        </linearGradient>
+        <linearGradient id="donut-grad-danger" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%"   stop-color="#ef4444"/>
+          <stop offset="50%"  stop-color="#dc2626"/>
+          <stop offset="100%" stop-color="#be185d"/>
+        </linearGradient>
+      </defs>
       <!-- Background track -->
       <circle
         cx={size === 'lg' ? 56 : 36} cy={size === 'lg' ? 56 : 36} r={r}
@@ -41,7 +64,7 @@
       <circle
         cx={size === 'lg' ? 56 : 36} cy={size === 'lg' ? 56 : 36} r={r}
         fill="none"
-        stroke={color}
+        stroke="url(#{gradientId})"
         stroke-width={size === 'lg' ? 10 : 8}
         stroke-linecap="round"
         stroke-dasharray={circumference}
@@ -50,7 +73,7 @@
       />
     </svg>
     <div class="absolute inset-0 flex items-center justify-center">
-      <span class="{size === 'lg' ? 'text-base' : 'text-xs'} font-bold" style="color: {color}">{limit > 0 ? `${pct}%` : '-'}</span>
+      <span class="{size === 'lg' ? 'text-base' : 'text-xs'} font-bold" style="color: {textColor}">{limit > 0 ? `${pct}%` : '-'}</span>
     </div>
   </div>
   <div class="text-center">
