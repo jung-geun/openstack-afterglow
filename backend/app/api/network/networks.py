@@ -1,16 +1,16 @@
 from __future__ import annotations
 
+import asyncio
+import logging
+import re
+import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import openstack
-import asyncio
-import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
-
-_logger = logging.getLogger(__name__)
 
 from app.api.common.activity_recorder import rec
 from app.api.deps import get_os_conn, get_token_info
@@ -31,7 +31,10 @@ from app.models.storage import (
 from app.rate_limit import limiter
 from app.services import neutron, nova
 from app.services.cache import cached_call, invalidate, ttl_fast, ttl_normal
-from app.services.octavia import get_topology_lbs
+from app.services.octavia import get_lb_stats, get_topology_lbs, lb_rate_from_snapshot, list_load_balancers
+from app.services.prom_query import PromUnavailable, query_instant_multi
+
+_logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -392,6 +395,78 @@ async def get_topology(conn: openstack.connection.Connection = Depends(get_os_co
     except Exception:
         _logger.exception("토폴로지 조회 실패")
         raise HTTPException(status_code=500, detail="토폴로지 조회 실패")
+
+
+@router.get("/topology/traffic")
+async def get_topology_traffic(
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+) -> dict:
+    """현재 토폴로지의 모든 리소스 instant 트래픽 (rx/tx bps).
+
+    구조 엔드포인트(/topology)와 분리 — 15s 단주기 폴링 전용.
+    반환: { ts, instances: {uuid: {rx_bps, tx_bps}}, networks, routers, load_balancers, _meta }
+    """
+    project_id = token_info.get("project_id", "") or conn._afterglow_project_id
+
+    # 1) compute port 매핑 (Neutron 1회) — instance_ids + network→[instance_id]
+    instance_ids, net_to_instances = await asyncio.to_thread(
+        neutron.list_project_compute_ports, conn, project_id
+    )
+
+    # 2) PromQL instant queries — VM rx/tx 각 1회 (병렬)
+    _exclude = r"lo|veth.*|docker.*|cni.*|tap.*|qbr.*"
+    instances: dict[str, dict[str, float]] = {}
+    if instance_ids:
+        regex = "|".join(re.escape(i) for i in instance_ids)
+        rx_q = (
+            f'sum by (instance_id) (rate(node_network_receive_bytes_total'
+            f'{{instance_id=~"{regex}",device!~"{_exclude}"}}[2m]))'
+        )
+        tx_q = rx_q.replace("receive", "transmit")
+        try:
+            rx_pairs, tx_pairs = await asyncio.gather(
+                query_instant_multi(rx_q),
+                query_instant_multi(tx_q),
+            )
+        except PromUnavailable:
+            rx_pairs, tx_pairs = [], []
+        for labels, val in rx_pairs:
+            iid = labels.get("instance_id")
+            if iid:
+                instances.setdefault(iid, {"rx_bps": 0.0, "tx_bps": 0.0})["rx_bps"] = val * 8
+        for labels, val in tx_pairs:
+            iid = labels.get("instance_id")
+            if iid:
+                instances.setdefault(iid, {"rx_bps": 0.0, "tx_bps": 0.0})["tx_bps"] = val * 8
+
+    # 3) 네트워크별 합산 — 백엔드에서 instance 결과 집계
+    networks: dict[str, dict[str, float]] = {}
+    for net_id, iids in net_to_instances.items():
+        rx = sum(instances.get(i, {}).get("rx_bps", 0.0) for i in iids)
+        tx = sum(instances.get(i, {}).get("tx_bps", 0.0) for i in iids)
+        networks[net_id] = {"rx_bps": rx, "tx_bps": tx}
+
+    # 4) LB stats — Octavia /stats 차분 (병렬)
+    lbs = await asyncio.to_thread(list_load_balancers, conn, project_id)
+
+    async def _lb_one(lb_id: str) -> tuple[str, dict[str, float]] | None:
+        cur = await asyncio.to_thread(get_lb_stats, conn, lb_id)
+        if cur is None:
+            return None
+        return lb_id, lb_rate_from_snapshot(lb_id, cur)
+
+    lb_results = await asyncio.gather(*(_lb_one(lb["id"]) for lb in lbs))
+    load_balancers = {lid: rate for lid, rate in (r for r in lb_results if r)}
+
+    return {
+        "ts": int(time.time()),
+        "instances": instances,
+        "networks": networks,
+        "routers": {},  # Phase 2 — kolla ovs/libvirt exporter 활성화 후 채워짐
+        "load_balancers": load_balancers,
+        "_meta": {"router_traffic": "exporter_required"},
+    }
 
 
 # ---------------------------------------------------------------------------

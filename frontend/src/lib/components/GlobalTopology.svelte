@@ -62,11 +62,22 @@
 
 	import { onMount } from 'svelte';
 
+	interface TrafficRate { rx_bps: number; tx_bps: number; }
+	interface TopologyTraffic {
+		ts: number;
+		instances: Record<string, TrafficRate>;
+		networks: Record<string, TrafficRate>;
+		routers: Record<string, TrafficRate>;
+		load_balancers: Record<string, TrafficRate>;
+		_meta?: { router_traffic?: string };
+	}
+
 	let {
 		data,
 		projectId = null,
 		showAll = false,
 		fitWidth = false,
+		traffic = null,
 		onSelectInstance = undefined,
 		onSelectRouter = undefined,
 		onSelectLoadBalancer = undefined,
@@ -75,6 +86,7 @@
 		projectId?: string | null;
 		showAll?: boolean;
 		fitWidth?: boolean;
+		traffic?: TopologyTraffic | null;
 		onSelectInstance?: (id: string) => void;
 		onSelectRouter?: (id: string) => void;
 		onSelectLoadBalancer?: (lb: TopologyLoadBalancer) => void;
@@ -307,11 +319,32 @@
 		rows.flatMap((r, i) => r.type === 'instance' ? [[r.id, i] as [string, number]] : [])
 	));
 
+	// ── Traffic helpers ───────────────────────────────────────────────────────
+	function formatBps(bps: number): string {
+		if (bps >= 1e9) return `${(bps / 1e9).toFixed(1)}G`;
+		if (bps >= 1e6) return `${(bps / 1e6).toFixed(1)}M`;
+		if (bps >= 1e3) return `${(bps / 1e3).toFixed(0)}k`;
+		if (bps > 0)    return `${bps.toFixed(0)}b`;
+		return '—';
+	}
+	function trafficColor(totalBps: number): string {
+		if (totalBps >= 1e8) return '#ef4444';   // ≥ 100 Mbps: red
+		if (totalBps >= 1e7) return '#f97316';   // ≥ 10 Mbps:  orange
+		if (totalBps >= 1e6) return '#fbbf24';   // ≥ 1 Mbps:   yellow
+		if (totalBps >= 1e5) return '#4ade80';   // ≥ 100 kbps: green
+		return '#64748b';                          // idle:       gray
+	}
+	function rowTrafficBps(row: ItemRow): number {
+		if (!traffic) return 0;
+		const t = row.type === 'instance' ? traffic.instances[row.id] : traffic.routers[row.id];
+		return t ? t.rx_bps + t.tx_bps : 0;
+	}
+
 	// ── SVG dimensions ────────────────────────────────────────────────────────
 	const barH  = $derived(Math.max(rows.length + lbItems.length, 1) * ROW_H + 20);
 	// Extra right space: items are placed to the RIGHT of their rightmost bar
 	const svgW  = $derived(Math.max(640,
-		L_PAD + Math.max(0, orderedNetworks.length - 1) * COL_W + IP_GAP + ITEM_W + 40
+		L_PAD + Math.max(0, orderedNetworks.length - 1) * COL_W + IP_GAP + ITEM_W + (traffic ? 88 : 40)
 	));
 	const svgH  = $derived(TOP_H + barH + BOT_H);
 
@@ -468,6 +501,16 @@
 				style="pointer-events:none"
 			>{net.is_external ? '외부 네트워크' : net.is_shared ? '공유 네트워크' : `내부 · ${net.subnet_details.length}서브넷`}</text>
 
+			<!-- 네트워크 합산 트래픽 라벨 -->
+			{#if traffic?.networks?.[net.id]}
+				{@const tn = traffic.networks[net.id]}
+				<text x={cx} y={50}
+					text-anchor="middle" font-size="8" font-weight="600"
+					fill={trafficColor(tn.rx_bps + tn.tx_bps)}
+					style="pointer-events:none"
+				>↓{formatBps(tn.rx_bps)} ↑{formatBps(tn.tx_bps)}</text>
+			{/if}
+
 			<!-- Bottom label: network name -->
 			<text
 				x={cx} y={svgH - 50}
@@ -538,10 +581,11 @@
 				{@const ipAnchor = isLeft ? 'start' : 'end'}
 
 				<!-- Horizontal line: bar → item box edge (Y 분산 적용) -->
+				{@const _edgeCol = traffic ? trafficColor(rowTrafficBps(row)) : col}
 				<line
 					x1={barX} y1={lineY}
 					x2={targetX} y2={lineY}
-					stroke={col} stroke-width="2.5" opacity="0.8"
+					stroke={_edgeCol} stroke-width="2.5" opacity="0.8"
 				/>
 
 				<!-- DVR 라우터: 같은 네트워크에 이중 포트가 있으면 두 번째 선 표시 -->
@@ -688,6 +732,15 @@
 				>인스턴스 · {trunc(row.status, 12)}</text>
 				<title>{row.name}{'\n'}ID: {row.id}{'\n'}상태: {row.status}{'\n'}IP: {[...row.netIps.values()].flat().join(', ')}</title>
 			{/if}
+
+			<!-- 트래픽 rx/tx 라벨 (박스 오른쪽) -->
+			{#if traffic}
+				{@const _tRow = row.type === 'instance' ? traffic.instances[row.id] : traffic.routers[row.id]}
+				{#if _tRow}
+					<text x={ix + ITEM_W + 6} y={cy - 3} font-size="9" fill="#94a3b8" style="pointer-events:none">↓{formatBps(_tRow.rx_bps)}</text>
+					<text x={ix + ITEM_W + 6} y={cy + 8} font-size="9" fill="#94a3b8" style="pointer-events:none">↑{formatBps(_tRow.tx_bps)}</text>
+				{/if}
+			{/if}
 		{/each}
 
 		<!-- ── Load Balancer nodes + edges ── -->
@@ -705,10 +758,11 @@
 
 			<!-- VIP 네트워크 연결선 -->
 			{#if vipNetId}
+				{@const _lbBps = traffic?.load_balancers?.[lb.id]}
 				<line
 					x1={barX} y1={cy}
 					x2={ix} y2={cy}
-					stroke={col} stroke-width="2.5" opacity="0.8"
+					stroke={_lbBps ? trafficColor(_lbBps.rx_bps + _lbBps.tx_bps) : col} stroke-width="2.5" opacity="0.8"
 				/>
 				<!-- VIP IP 라벨 -->
 				{#if lb.vip_address}
@@ -796,6 +850,13 @@
 				style="pointer-events:none"
 			>LB · {isActive ? 'ACTIVE' : lb.provisioning_status}</text>
 			<title>{lb.name}{'\n'}ID: {lb.id}{'\n'}VIP: {lb.vip_address ?? '-'}{'\n'}상태: {lb.provisioning_status}{'\n'}멤버: {lb.members.length}개</title>
+
+			<!-- LB 트래픽 rx/tx 라벨 (박스 오른쪽) -->
+			{#if traffic?.load_balancers?.[lb.id]}
+				{@const _tLB = traffic.load_balancers[lb.id]}
+				<text x={ix + ITEM_W + 6} y={cy - 3} font-size="9" fill="#94a3b8" style="pointer-events:none">↓{formatBps(_tLB.rx_bps)}</text>
+				<text x={ix + ITEM_W + 6} y={cy + 8} font-size="9" fill="#94a3b8" style="pointer-events:none">↑{formatBps(_tLB.tx_bps)}</text>
+			{/if}
 		{/each}
 
 		<!-- Empty state -->

@@ -78,10 +78,21 @@
 		load_balancers?: TopologyLoadBalancer[];
 	}
 
+	interface TrafficRate { rx_bps: number; tx_bps: number; }
+	interface TopologyTraffic {
+		ts: number;
+		instances: Record<string, TrafficRate>;
+		networks: Record<string, TrafficRate>;
+		routers: Record<string, TrafficRate>;
+		load_balancers: Record<string, TrafficRate>;
+		_meta?: { router_traffic?: string };
+	}
+
 	let data = $state<TopologyData | null>(null);
 	let loading = $state(true);
 	let refreshing = $state(false);
 	let error = $state('');
+	let traffic = $state<TopologyTraffic | null>(null);
 	let selectedInstanceId = $state<string | null>(null);
 	let selectedRouterId = $state<string | null>(null);
 	let selectedLB = $state<TopologyLoadBalancer | null>(null);
@@ -91,6 +102,24 @@
 		defaultActive: true,
 		defaultInterval: 30,
 		intervalOptions: [10, 15, 30, 60],
+	});
+
+	async function loadTraffic() {
+		if (!$auth.token) return;
+		try {
+			traffic = await api.get<TopologyTraffic>(
+				'/api/networks/topology/traffic',
+				$auth.token ?? undefined,
+				$auth.projectId ?? undefined,
+			);
+		} catch { /* silent — 토폴로지 표시는 traffic=null 로 유지 */ }
+	}
+
+	const arTraffic = createAutoRefresh(loadTraffic, {
+		storageKey: 'dashboard-network-topology-traffic',
+		defaultActive: true,
+		defaultInterval: 15,
+		intervalOptions: [10, 15, 30],
 	});
 
 	$effect(() => {
@@ -154,6 +183,7 @@
 		<div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4">
 			<GlobalTopology
 				{data}
+				{traffic}
 				projectId={$auth.projectId}
 				onSelectInstance={(id) => { selectedInstanceId = id; }}
 				onSelectRouter={(id) => { selectedRouterId = id; }}

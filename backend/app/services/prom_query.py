@@ -85,3 +85,33 @@ async def query_range(
 def calc_step(range_seconds: int) -> int:
     """range에 맞는 scrape step 계산 (최소 15초, 최대 100 포인트)."""
     return max(15, range_seconds // 100)
+
+
+async def query_instant_multi(promql: str) -> list[tuple[dict[str, str], float]]:
+    """Prometheus /api/v1/query — 다중 시계열의 (labels, value) 리스트 반환.
+
+    토폴로지 트래픽처럼 모든 인스턴스의 instant 값을 한 번에 받을 때 사용.
+    """
+    settings = get_settings()
+    url = f"{settings.prometheus_base_url.rstrip('/')}/api/v1/query"
+    try:
+        resp = await _get_client().get(url, params={"query": promql})
+    except (httpx.ConnectError, httpx.TimeoutException) as exc:
+        raise PromUnavailable(f"Prometheus 연결 실패: {exc}") from exc
+
+    if resp.status_code >= 500:
+        raise PromUnavailable(f"Prometheus {resp.status_code}: {resp.text[:200]}")
+    if resp.status_code >= 400:
+        raise PromBadQuery(f"PromQL 오류 {resp.status_code}: {resp.text[:200]}")
+
+    body = resp.json()
+    if body.get("status") != "success":
+        raise PromBadQuery(body.get("error", "unknown"))
+
+    out: list[tuple[dict[str, str], float]] = []
+    for r in body.get("data", {}).get("result", []):
+        try:
+            out.append((dict(r["metric"]), float(r["value"][1])))
+        except (KeyError, ValueError, TypeError):
+            continue
+    return out

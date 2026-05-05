@@ -958,3 +958,25 @@ def _net_to_info(n) -> NetworkInfo:
         is_external=bool(n.is_router_external),
         is_shared=bool(n.is_shared),
     )
+
+
+def list_project_compute_ports(conn, project_id: str) -> tuple[list[str], dict[str, list[str]]]:
+    """compute 포트를 순회해 (instance_ids, network_id→[instance_id]) 맵 반환.
+
+    get_topology_traffic 에서 PromQL regex 빌드 및 네트워크별 트래픽 합산에 사용.
+    """
+    instance_ids: list[str] = []
+    net_to_instances: dict[str, list[str]] = {}
+    for p in conn.network.ports(project_id=project_id):
+        dev_owner = p.device_owner or ""
+        if not p.device_id or not dev_owner.startswith("compute:"):
+            continue
+        server_id = p.device_id
+        net_id = p.network_id or ""
+        if server_id not in instance_ids:
+            instance_ids.append(server_id)
+        if net_id:
+            lst = net_to_instances.setdefault(net_id, [])
+            if server_id not in lst:
+                lst.append(server_id)
+    return instance_ids, net_to_instances
