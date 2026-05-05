@@ -123,9 +123,9 @@ async def test_metrics_gpu_on_gpu_instance(client):
 def test_step_calculation():
     from app.services.prom_query import calc_step
 
-    assert calc_step(900) == 15  # 15m → 900/200=4.5 → max(15,4)=15
-    assert calc_step(3600) == 18  # 1h → 3600/200=18
-    assert calc_step(86400) == 432  # 24h → 86400/200=432
+    assert calc_step(900) == 15   # 15m → 900/100=9 → max(15,9)=15
+    assert calc_step(3600) == 36  # 1h  → 3600/100=36
+    assert calc_step(86400) == 864  # 24h → 86400/100=864
 
 
 # ---------------------------------------------------------------------------
@@ -160,3 +160,75 @@ def test_build_expr_cpu_shape():
     expr = _build_expr("cpu", "abc")
     expected = '100 - (avg by (instance_id) (rate(node_cpu_seconds_total{instance_id="abc",mode="idle"}[2m])) * 100)'
     assert expr == expected
+
+
+# ---------------------------------------------------------------------------
+# batch 엔드포인트
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_batch_returns_all_requested_metrics(client):
+    """요청한 메트릭 키 모두 응답에 포함되어야 한다."""
+    fake = [{"ts": 1700000000, "value": 10.0}]
+    with (
+        patch("app.api.compute.instance_metrics.nova.get_server", return_value=_FAKE_INSTANCE),
+        patch("app.api.compute.instance_metrics.query_range", new=AsyncMock(return_value=fake)),
+    ):
+        resp = await client.get("/api/instances/inst-1/metrics-batch?metrics=cpu,memory&range=1h")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "cpu" in body["metrics"]
+    assert "memory" in body["metrics"]
+    assert body["metrics"]["cpu"]["series"][0]["value"] == 10.0
+    assert body["metrics"]["cpu"]["error"] is None
+
+
+@pytest.mark.anyio
+async def test_batch_per_metric_error_capsulated(client):
+    """한 메트릭이 PromUnavailable 이어도 다른 메트릭은 정상 반환되어야 한다."""
+    from app.services.prom_query import PromUnavailable
+
+    fake = [{"ts": 1700000000, "value": 5.0}]
+    call_count = 0
+
+    async def _side_effect(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise PromUnavailable("timeout")
+        return fake
+
+    with (
+        patch("app.api.compute.instance_metrics.nova.get_server", return_value=_FAKE_INSTANCE),
+        patch("app.api.compute.instance_metrics.query_range", new=AsyncMock(side_effect=_side_effect)),
+    ):
+        resp = await client.get("/api/instances/inst-1/metrics-batch?metrics=cpu,memory&range=1h")
+    assert resp.status_code == 200
+    body = resp.json()
+    # 첫 번째 메트릭 에러 캡슐화 — 전체 응답은 200
+    errors = [v["error"] for v in body["metrics"].values() if v["error"]]
+    oks = [v for v in body["metrics"].values() if not v["error"] and v["series"]]
+    assert len(errors) == 1
+    assert len(oks) == 1
+
+
+@pytest.mark.anyio
+async def test_batch_skips_gpu_on_non_gpu(client):
+    """non-GPU 인스턴스에 gpu_util 요청 시 silent skip (키 누락)."""
+    with (
+        patch("app.api.compute.instance_metrics.nova.get_server", return_value=_FAKE_INSTANCE),
+        patch("app.api.compute.instance_metrics.query_range", new=AsyncMock(return_value=[])),
+    ):
+        resp = await client.get("/api/instances/inst-1/metrics-batch?metrics=cpu,gpu_util&range=1h")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "cpu" in body["metrics"]
+    assert "gpu_util" not in body["metrics"]
+
+
+@pytest.mark.anyio
+async def test_batch_invalid_metric_returns_422(client):
+    """알 수 없는 메트릭 키 포함 시 422."""
+    resp = await client.get("/api/instances/inst-1/metrics-batch?metrics=cpu,xyz_unknown&range=1h")
+    assert resp.status_code == 422

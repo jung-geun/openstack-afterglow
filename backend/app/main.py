@@ -685,5 +685,7 @@ async def start_background_workers():
 @app.on_event("shutdown")
 async def shutdown_event():
     from app.database import close_db
+    from app.services import prom_query
 
     await close_db()
+    await prom_query.aclose_client()

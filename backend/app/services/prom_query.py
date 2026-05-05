@@ -10,6 +10,31 @@ from app.config import get_settings
 
 _logger = logging.getLogger(__name__)
 
+_client: httpx.AsyncClient | None = None
+
+
+def _get_client() -> httpx.AsyncClient:
+    global _client
+    if _client is None or _client.is_closed:
+        s = get_settings()
+        auth: tuple[str, str] | None = None
+        if s.prometheus_username and s.prometheus_password:
+            auth = (s.prometheus_username, s.prometheus_password)
+        _client = httpx.AsyncClient(
+            timeout=15,
+            auth=auth,
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+        )
+    return _client
+
+
+async def aclose_client() -> None:
+    """lifespan 종료 시 호출 — keep-alive 연결을 정상 종료한다."""
+    global _client
+    if _client is not None and not _client.is_closed:
+        await _client.aclose()
+    _client = None
+
 
 class PromUnavailable(Exception):
     """Prometheus 서버에 연결할 수 없거나 5xx 응답."""
@@ -39,12 +64,8 @@ async def query_range(
         "end": end_ts,
         "step": f"{step_s}s",
     }
-    auth = None
-    if settings.prometheus_username and settings.prometheus_password:
-        auth = (settings.prometheus_username, settings.prometheus_password)
     try:
-        async with httpx.AsyncClient(timeout=15, auth=auth) as client:
-            resp = await client.get(url, params=params)
+        resp = await _get_client().get(url, params=params)
     except (httpx.ConnectError, httpx.TimeoutException) as exc:
         raise PromUnavailable(f"Prometheus 연결 실패: {exc}") from exc
 
@@ -62,5 +83,5 @@ async def query_range(
 
 
 def calc_step(range_seconds: int) -> int:
-    """range에 맞는 scrape step 계산 (최소 15초)."""
-    return max(15, range_seconds // 200)
+    """range에 맞는 scrape step 계산 (최소 15초, 최대 100 포인트)."""
+    return max(15, range_seconds // 100)

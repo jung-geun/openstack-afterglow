@@ -40,27 +40,28 @@
 		gpu_mem: { data: null, error: null },
 	});
 
-	async function fetchMetric(metric: MetricKey) {
-		try {
-			const resp = await api.get<{ series: Series[] }>(
-				`/api/instances/${instanceId}/metrics?metric=${metric}&range=${range}`,
-				token,
-				projectId,
-			);
-			metrics[metric] = { data: resp.series, error: null };
-		} catch (e: unknown) {
-			const msg = e instanceof Error ? e.message : String(e);
-			metrics[metric] = { data: [], error: msg };
-		}
-	}
-
 	const baseMetrics: MetricKey[] = ['cpu', 'memory', 'network_rx', 'network_tx', 'disk_read', 'disk_write'];
 	const gpuMetrics: MetricKey[] = ['gpu_util', 'gpu_mem'];
 
 	async function loadAll() {
 		if (!token) return;
 		const keys: MetricKey[] = isGpu ? [...baseMetrics, ...gpuMetrics] : baseMetrics;
-		await Promise.allSettled(keys.map(fetchMetric));
+		try {
+			const resp = await api.get<{
+				metrics: Record<string, { series: Series[]; error: string | null }>;
+			}>(
+				`/api/instances/${instanceId}/metrics-batch?metrics=${keys.join(',')}&range=${range}`,
+				token,
+				projectId,
+			);
+			for (const k of keys) {
+				const r = resp.metrics[k];
+				metrics[k] = r ? { data: r.series, error: r.error } : { data: [], error: null };
+			}
+		} catch (e: unknown) {
+			const msg = e instanceof Error ? e.message : String(e);
+			for (const k of keys) metrics[k] = { data: [], error: msg };
+		}
 	}
 
 	const storageKey = instanceId;

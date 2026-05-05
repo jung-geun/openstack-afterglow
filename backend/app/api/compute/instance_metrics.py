@@ -1,9 +1,10 @@
-"""인스턴스별 Prometheus 메트릭 조회 — GET /api/instances/{id}/metrics."""
+"""인스턴스별 Prometheus 메트릭 조회."""
 
 from __future__ import annotations
 
+import asyncio
 import time
-from typing import Literal
+from typing import Literal, get_args
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -31,7 +32,8 @@ MetricKey = Literal[
     "gpu_mem",
 ]
 
-_GPU_METRICS = {"gpu_util", "gpu_mem"}
+_VALID_METRICS: frozenset[str] = frozenset(get_args(MetricKey))
+_GPU_METRICS: frozenset[str] = frozenset({"gpu_util", "gpu_mem"})
 
 
 def _build_expr(metric: str, instance_id: str) -> str:
@@ -70,6 +72,29 @@ def _build_expr(metric: str, instance_id: str) -> str:
     raise ValueError(f"unknown metric: {metric}")
 
 
+def _resolve_server(conn, instance_id: str):
+    try:
+        return nova.get_server(conn, instance_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="인스턴스를 찾을 수 없습니다")
+
+
+def _authorize(server, token_info: dict) -> None:
+    caller_project = token_info.get("project_id", "")
+    is_admin = token_info.get("is_system_admin", False)
+    if not is_admin and server.project_id != caller_project:
+        raise HTTPException(status_code=403, detail="해당 인스턴스에 접근 권한이 없습니다")
+
+
+def _is_gpu(server) -> bool:
+    return (server.flavor_name or "").lower().startswith("gpu.")
+
+
+# ---------------------------------------------------------------------------
+# 단일 메트릭 엔드포인트 (deprecated — batch 엔드포인트 사용 권장)
+# ---------------------------------------------------------------------------
+
+
 @router.get("/{instance_id}/metrics")
 async def get_instance_metrics(
     instance_id: str,
@@ -78,36 +103,22 @@ async def get_instance_metrics(
     conn=Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
 ) -> dict:
-    """인스턴스의 Prometheus 메트릭 시계열 조회.
+    """인스턴스의 Prometheus 메트릭 시계열 조회 (단일).
 
     반환: { instance_id, metric, range, series: [{"ts": int, "value": float}] }
+    batch 엔드포인트(/metrics-batch) 사용을 권장합니다.
     """
-    # 인스턴스 조회
-    try:
-        server = nova.get_server(conn, instance_id)
-    except Exception:
-        raise HTTPException(status_code=404, detail="인스턴스를 찾을 수 없습니다")
+    server = _resolve_server(conn, instance_id)
+    _authorize(server, token_info)
 
-    # 권한 검증 — 본인 프로젝트 또는 admin
-    caller_project = token_info.get("project_id", "")
-    is_admin = token_info.get("is_system_admin", False)
-    if not is_admin and server.project_id != caller_project:
-        raise HTTPException(status_code=403, detail="해당 인스턴스에 접근 권한이 없습니다")
+    if metric in _GPU_METRICS and not _is_gpu(server):
+        raise HTTPException(status_code=400, detail="GPU 메트릭은 GPU 인스턴스에서만 조회 가능합니다")
 
-    # GPU 메트릭은 GPU 인스턴스만
-    if metric in _GPU_METRICS:
-        flavor_name = server.flavor_name or ""
-        if not flavor_name.lower().startswith("gpu."):
-            raise HTTPException(status_code=400, detail="GPU 메트릭은 GPU 인스턴스에서만 조회 가능합니다")
-
-    # range → timestamps, step
     range_s = _RANGE_SECONDS[range]
     end_ts = int(time.time())
     start_ts = end_ts - range_s
     step_s = calc_step(range_s)
 
-    # PromQL 실행 — kolla-ansible OpenStack SD 가 부여한 instance_id (UUID) 라벨로 필터.
-    # IP 기반 셀렉터(instance="IP:9100") 는 kolla 가 instance 라벨을 인스턴스 이름으로 재라벨링하므로 매칭되지 않는다.
     expr = _build_expr(metric, server.id)
     try:
         series = await query_range(expr, start_ts=start_ts, end_ts=end_ts, step_s=step_s)
@@ -117,3 +128,62 @@ async def get_instance_metrics(
         raise HTTPException(status_code=500, detail=f"PromQL 오류: {exc}")
 
     return {"instance_id": instance_id, "metric": metric, "range": range, "series": series}
+
+
+# ---------------------------------------------------------------------------
+# Batch 메트릭 엔드포인트 — Nova/권한 1회, Prometheus N개 병렬
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{instance_id}/metrics-batch")
+async def get_instance_metrics_batch(
+    instance_id: str,
+    metrics: str = Query(..., description="쉼표 구분 메트릭 키: cpu,memory,network_rx,..."),
+    range: Literal["15m", "1h", "6h", "24h"] = Query("1h"),
+    conn=Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+) -> dict:
+    """인스턴스의 Prometheus 메트릭 시계열 일괄 조회.
+
+    Nova 조회 1회, 권한 검증 1회, Prometheus 쿼리 N개 병렬.
+    반환: { instance_id, range, metrics: { "<key>": { series, error } } }
+    """
+    keys = [k.strip() for k in metrics.split(",") if k.strip()]
+    if not keys:
+        raise HTTPException(status_code=422, detail="metrics 파라미터가 비어있습니다")
+    invalid = [k for k in keys if k not in _VALID_METRICS]
+    if invalid:
+        raise HTTPException(status_code=422, detail=f"알 수 없는 메트릭: {invalid}")
+
+    server = _resolve_server(conn, instance_id)
+    _authorize(server, token_info)
+
+    # GPU 메트릭은 GPU 인스턴스만 — batch 에서는 422 대신 silent skip
+    if not _is_gpu(server):
+        keys = [k for k in keys if k not in _GPU_METRICS]
+
+    range_s = _RANGE_SECONDS[range]
+    end_ts = int(time.time())
+    start_ts = end_ts - range_s
+    step_s = calc_step(range_s)
+
+    async def _one(metric: str) -> tuple[str, dict]:
+        try:
+            series = await query_range(
+                _build_expr(metric, server.id),
+                start_ts=start_ts,
+                end_ts=end_ts,
+                step_s=step_s,
+            )
+            return metric, {"series": series, "error": None}
+        except PromUnavailable as exc:
+            return metric, {"series": [], "error": f"prometheus_unavailable: {exc}"}
+        except PromBadQuery as exc:
+            return metric, {"series": [], "error": f"bad_query: {exc}"}
+
+    results = await asyncio.gather(*(_one(k) for k in keys))
+    return {
+        "instance_id": instance_id,
+        "range": range,
+        "metrics": dict(results),
+    }
