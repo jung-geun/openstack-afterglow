@@ -410,9 +410,7 @@ async def get_topology_traffic(
     project_id = token_info.get("project_id", "") or conn._afterglow_project_id
 
     # 1) compute port 매핑 (Neutron 1회) — instance_ids + network→[instance_id]
-    instance_ids, net_to_instances = await asyncio.to_thread(
-        neutron.list_project_compute_ports, conn, project_id
-    )
+    instance_ids, net_to_instances = await asyncio.to_thread(neutron.list_project_compute_ports, conn, project_id)
 
     # 2) PromQL instant queries — VM rx/tx 각 1회 (병렬)
     _exclude = r"lo|veth.*|docker.*|cni.*|tap.*|qbr.*"
@@ -420,7 +418,7 @@ async def get_topology_traffic(
     if instance_ids:
         regex = "|".join(re.escape(i) for i in instance_ids)
         rx_q = (
-            f'sum by (instance_id) (rate(node_network_receive_bytes_total'
+            f"sum by (instance_id) (rate(node_network_receive_bytes_total"
             f'{{instance_id=~"{regex}",device!~"{_exclude}"}}[2m]))'
         )
         tx_q = rx_q.replace("receive", "transmit")

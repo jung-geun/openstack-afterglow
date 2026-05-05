@@ -29,8 +29,16 @@ const FAKE_SERIES = [
 	{ ts: 1700000030, value: 45.0 },
 ];
 
+const ALL_METRIC_KEYS = ['cpu', 'memory', 'network_rx', 'network_tx', 'disk_read', 'disk_write', 'gpu_util', 'gpu_mem'];
+
+function makeBatchResponse(series: { ts: number; value: number }[]) {
+	const metrics: Record<string, { series: { ts: number; value: number }[]; error: null }> = {};
+	for (const k of ALL_METRIC_KEYS) metrics[k] = { series, error: null };
+	return { metrics };
+}
+
 function mockAllMetrics() {
-	mockGet.mockResolvedValue({ series: FAKE_SERIES });
+	mockGet.mockResolvedValue(makeBatchResponse(FAKE_SERIES));
 }
 
 beforeEach(() => {
@@ -60,7 +68,7 @@ describe('MetricsPanel', () => {
 	});
 
 	it('shows empty state when series is empty', async () => {
-		mockGet.mockResolvedValue({ series: [] });
+		mockGet.mockResolvedValue(makeBatchResponse([]));
 
 		render(MetricsPanel, { props: { instanceId: 'inst-1', isGpu: false } });
 

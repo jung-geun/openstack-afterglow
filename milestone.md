@@ -1283,3 +1283,16 @@ Option A 채택 시 본 절 진행. Option B 채택 시 사용자가 자체 구�
 - [x] Phase 1: Prometheus http_sd 설정 + sd_targets.py 9100/9400 분리 (node_exporter / dcgm_exporter)
 - [x] Phase 2: PromQL 프록시 엔드포인트 신설 (`GET /api/instances/{id}/metrics`) + project_id 권한 검증
 - [x] Phase 3: InstanceDetailPanel MetricsPanel 카드 + 4종 차트 (GPU VM: +2 차트)
+- [x] Phase 4: `/metrics-batch` 단일 엔드포인트 + httpx 커넥션 풀 + `calc_step` 최적화 (다중 차트 API 호출 1→1 통합)
+
+## 18. 네트워크 토폴로지 실시간 트래픽 시각화 (Phase 1)
+
+> VM + 네트워크 + LB 기준 instant rate. 라우터는 Phase 2(kolla exporter 활성화 후).
+
+- [x] `backend/app/services/prom_query.py` — `query_instant_multi` 헬퍼 신규 (Prometheus `/api/v1/query` 다중 시계열 instant 파싱)
+- [x] `backend/app/services/octavia.py` — `get_lb_stats`, `lb_rate_from_snapshot`, `_lb_snapshot` in-memory dict (Octavia 누적 카운터 차분으로 rate 계산)
+- [x] `backend/app/services/neutron.py` — `list_project_compute_ports` 헬퍼 추출 (port → server uuid + network_id 매핑)
+- [x] `backend/app/api/network/networks.py` — `GET /api/networks/topology/traffic` 신규 엔드포인트 (VM rx/tx PromQL + 네트워크 합산 + LB Octavia stats 병렬)
+- [x] `frontend/src/lib/components/GlobalTopology.svelte` — `traffic` prop, `formatBps`/`trafficColor`/`edgeColor` 유틸, 박스 옆 rx/tx 텍스트, 네트워크 막대 합산 라벨, 엣지 stroke 동적 색상
+- [x] `frontend/src/routes/dashboard/network/topology/+page.svelte` — 두 번째 `createAutoRefresh` 15s (traffic 전용) + `<GlobalTopology {traffic} />`
+- [x] `backend/tests/test_topology_traffic.py` — 신규 8건 (VM bps ×8, 네트워크 합산, routers={}, no instances 200, PromUnavailable fallback, LB first call 0, LB rate, query_instant_multi 파싱)

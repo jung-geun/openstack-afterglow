@@ -123,7 +123,7 @@ async def test_metrics_gpu_on_gpu_instance(client):
 def test_step_calculation():
     from app.services.prom_query import calc_step
 
-    assert calc_step(900) == 15   # 15m → 900/100=9 → max(15,9)=15
+    assert calc_step(900) == 15  # 15m → 900/100=9 → max(15,9)=15
     assert calc_step(3600) == 36  # 1h  → 3600/100=36
     assert calc_step(86400) == 864  # 24h → 86400/100=864
 
@@ -150,7 +150,7 @@ def test_build_expr_does_not_filter_by_job():
     from app.api.compute.instance_metrics import _build_expr
 
     expr = _build_expr("cpu", "uuid-1")
-    assert 'job=' not in expr, "job 필터가 있으면 internal/external 한쪽만 매치됨"
+    assert "job=" not in expr, "job 필터가 있으면 internal/external 한쪽만 매치됨"
 
 
 def test_build_expr_cpu_shape():

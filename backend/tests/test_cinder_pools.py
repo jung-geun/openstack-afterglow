@@ -2,7 +2,7 @@
 
 from unittest.mock import MagicMock
 
-from app.services.cinder import list_storage_pools, _safe_float
+from app.services.cinder import _safe_float, list_storage_pools
 
 
 def _make_conn(pools: list[dict]) -> MagicMock:
@@ -16,7 +16,18 @@ def _make_conn(pools: list[dict]) -> MagicMock:
 
 def test_normal_pool():
     conn = _make_conn(
-        [{"name": "ceph_hdd@rbd", "capabilities": {"total_capacity_gb": 1000.0, "free_capacity_gb": 400.0, "allocated_capacity_gb": 600.0, "volume_backend_name": "rbd", "storage_protocol": "ceph"}}]
+        [
+            {
+                "name": "ceph_hdd@rbd",
+                "capabilities": {
+                    "total_capacity_gb": 1000.0,
+                    "free_capacity_gb": 400.0,
+                    "allocated_capacity_gb": 600.0,
+                    "volume_backend_name": "rbd",
+                    "storage_protocol": "ceph",
+                },
+            }
+        ]
     )
     pools = list_storage_pools(conn)
     assert len(pools) == 1
@@ -28,7 +39,16 @@ def test_normal_pool():
 
 def test_infinite_capacity_normalised_to_zero():
     conn = _make_conn(
-        [{"name": "lvm@lvm", "capabilities": {"total_capacity_gb": "infinite", "free_capacity_gb": "infinite", "allocated_capacity_gb": 0}}]
+        [
+            {
+                "name": "lvm@lvm",
+                "capabilities": {
+                    "total_capacity_gb": "infinite",
+                    "free_capacity_gb": "infinite",
+                    "allocated_capacity_gb": 0,
+                },
+            }
+        ]
     )
     pools = list_storage_pools(conn)
     assert pools[0]["total_capacity_gb"] == 0.0
@@ -37,7 +57,16 @@ def test_infinite_capacity_normalised_to_zero():
 
 def test_unknown_capacity_normalised_to_zero():
     conn = _make_conn(
-        [{"name": "lvm@lvm", "capabilities": {"total_capacity_gb": "unknown", "free_capacity_gb": "unknown", "allocated_capacity_gb": None}}]
+        [
+            {
+                "name": "lvm@lvm",
+                "capabilities": {
+                    "total_capacity_gb": "unknown",
+                    "free_capacity_gb": "unknown",
+                    "allocated_capacity_gb": None,
+                },
+            }
+        ]
     )
     pools = list_storage_pools(conn)
     assert pools[0]["total_capacity_gb"] == 0.0
@@ -54,8 +83,14 @@ def test_missing_capabilities():
 def test_multiple_pools_sum():
     conn = _make_conn(
         [
-            {"name": "pool1", "capabilities": {"total_capacity_gb": 500.0, "free_capacity_gb": 100.0, "allocated_capacity_gb": 400.0}},
-            {"name": "pool2", "capabilities": {"total_capacity_gb": 300.0, "free_capacity_gb": 50.0, "allocated_capacity_gb": 250.0}},
+            {
+                "name": "pool1",
+                "capabilities": {"total_capacity_gb": 500.0, "free_capacity_gb": 100.0, "allocated_capacity_gb": 400.0},
+            },
+            {
+                "name": "pool2",
+                "capabilities": {"total_capacity_gb": 300.0, "free_capacity_gb": 50.0, "allocated_capacity_gb": 250.0},
+            },
         ]
     )
     pools = list_storage_pools(conn)

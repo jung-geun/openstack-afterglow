@@ -44,31 +44,19 @@ def _build_expr(metric: str, instance_id: str) -> str:
     if metric == "cpu":
         return f'100 - (avg by (instance_id) (rate(node_cpu_seconds_total{{{sel},mode="idle"}}[2m])) * 100)'
     if metric == "memory":
-        return (
-            f'(1 - node_memory_MemAvailable_bytes{{{sel}}}'
-            f' / node_memory_MemTotal_bytes{{{sel}}}) * 100'
-        )
+        return f"(1 - node_memory_MemAvailable_bytes{{{sel}}} / node_memory_MemTotal_bytes{{{sel}}}) * 100"
     if metric == "network_rx":
-        return (
-            f"sum by (instance_id) (rate(node_network_receive_bytes_total"
-            f'{{{sel},device!~"{exclude_ifaces}"}}[2m]))'
-        )
+        return f'sum by (instance_id) (rate(node_network_receive_bytes_total{{{sel},device!~"{exclude_ifaces}"}}[2m]))'
     if metric == "network_tx":
-        return (
-            f"sum by (instance_id) (rate(node_network_transmit_bytes_total"
-            f'{{{sel},device!~"{exclude_ifaces}"}}[2m]))'
-        )
+        return f'sum by (instance_id) (rate(node_network_transmit_bytes_total{{{sel},device!~"{exclude_ifaces}"}}[2m]))'
     if metric == "disk_read":
-        return f'sum by (instance_id) (rate(node_disk_read_bytes_total{{{sel}}}[2m]))'
+        return f"sum by (instance_id) (rate(node_disk_read_bytes_total{{{sel}}}[2m]))"
     if metric == "disk_write":
-        return f'sum by (instance_id) (rate(node_disk_written_bytes_total{{{sel}}}[2m]))'
+        return f"sum by (instance_id) (rate(node_disk_written_bytes_total{{{sel}}}[2m]))"
     if metric == "gpu_util":
-        return f'avg by (instance_id) (DCGM_FI_DEV_GPU_UTIL{{{sel}}})'
+        return f"avg by (instance_id) (DCGM_FI_DEV_GPU_UTIL{{{sel}}})"
     if metric == "gpu_mem":
-        return (
-            f'avg by (instance_id) (DCGM_FI_DEV_FB_USED{{{sel}}}'
-            f' / DCGM_FI_DEV_FB_TOTAL{{{sel}}}) * 100'
-        )
+        return f"avg by (instance_id) (DCGM_FI_DEV_FB_USED{{{sel}}} / DCGM_FI_DEV_FB_TOTAL{{{sel}}}) * 100"
     raise ValueError(f"unknown metric: {metric}")
 
 

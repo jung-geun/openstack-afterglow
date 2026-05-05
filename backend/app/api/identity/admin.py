@@ -187,7 +187,7 @@ def _fetch_overview_disk(conn) -> dict:
         pass
 
     try:
-        used_disk += round(get_total_image_bytes(conn) / (1024 ** 3), 2)
+        used_disk += round(get_total_image_bytes(conn) / (1024**3), 2)
     except Exception:
         pass
 

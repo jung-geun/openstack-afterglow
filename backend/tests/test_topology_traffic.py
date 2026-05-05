@@ -34,12 +34,16 @@ async def test_traffic_returns_instances_from_promql(client, mock_conn):
     """VM rx/tx bps 가 응답에 포함되고 byte→bit 변환(×8)이 적용돼야 한다."""
     mock_conn.network.ports.return_value = [_mock_port("uuid-1", "net-a")]
 
-    rx_pairs = _prom_instant_response([
-        ({"instance_id": "uuid-1"}, 125_000.0),  # 125kB/s → 1Mbps
-    ])
-    tx_pairs = _prom_instant_response([
-        ({"instance_id": "uuid-1"}, 62_500.0),   # 62.5kB/s → 500kbps
-    ])
+    rx_pairs = _prom_instant_response(
+        [
+            ({"instance_id": "uuid-1"}, 125_000.0),  # 125kB/s → 1Mbps
+        ]
+    )
+    tx_pairs = _prom_instant_response(
+        [
+            ({"instance_id": "uuid-1"}, 62_500.0),  # 62.5kB/s → 500kbps
+        ]
+    )
 
     with (
         patch("app.api.network.networks.query_instant_multi", new=AsyncMock(side_effect=[rx_pairs, tx_pairs])),
@@ -63,10 +67,12 @@ async def test_traffic_aggregates_by_network(client, mock_conn):
         _mock_port("uuid-2", "net-a"),
     ]
 
-    rx_pairs = _prom_instant_response([
-        ({"instance_id": "uuid-1"}, 100.0),
-        ({"instance_id": "uuid-2"}, 200.0),
-    ])
+    rx_pairs = _prom_instant_response(
+        [
+            ({"instance_id": "uuid-1"}, 100.0),
+            ({"instance_id": "uuid-2"}, 200.0),
+        ]
+    )
     tx_pairs: list = []
 
     with (
@@ -157,7 +163,9 @@ def test_traffic_lb_rate_from_snapshot():
     with octavia._snapshot_lock:
         octavia._lb_snapshot[lb_id] = (0, 0, t0)
 
-    result = octavia.lb_rate_from_snapshot(lb_id, {"bytes_in": 1_250_000, "bytes_out": 2_500_000, "active_connections": 5})
+    result = octavia.lb_rate_from_snapshot(
+        lb_id, {"bytes_in": 1_250_000, "bytes_out": 2_500_000, "active_connections": 5}
+    )
     # bytes_out 증분 2_500_000 bytes / 10s * 8 = 2_000_000 bps = 2 Mbps (rx)
     assert result["rx_bps"] > 0
     assert result["tx_bps"] > 0

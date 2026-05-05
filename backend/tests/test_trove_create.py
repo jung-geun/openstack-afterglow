@@ -1,7 +1,6 @@
 """trove.create_instance — locality safety net 단위 테스트."""
 
-from unittest.mock import MagicMock, patch
-import pytest
+from unittest.mock import MagicMock
 
 from app.services import trove
 
@@ -38,8 +37,7 @@ def test_locality_stripped_without_replica_context(caplog):
     payload = call_args.kwargs.get("json") or call_args.args[1] if call_args.args else call_args.kwargs["json"]
     assert "locality" not in payload["instance"], "locality가 payload에 포함되면 안 됩니다"
     assert result["id"] == "inst-1"
-    assert any("locality" in r.message and "무시" in r.message for r in caplog.records), \
-        "WARN 로그가 기록되어야 합니다"
+    assert any("locality" in r.message and "무시" in r.message for r in caplog.records), "WARN 로그가 기록되어야 합니다"
 
 
 def test_locality_kept_with_replica_context():

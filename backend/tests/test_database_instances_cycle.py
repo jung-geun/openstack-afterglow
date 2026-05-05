@@ -5,14 +5,15 @@ FastAPI 라우터/인증을 우회하고 trove.py 서비스 함수를 직접 호
 """
 
 from unittest.mock import MagicMock
+
 import pytest
 
 from app.services import trove
 
-
 # ---------------------------------------------------------------------------
 # 공통 mock 헬퍼
 # ---------------------------------------------------------------------------
+
 
 def _mock_create_resp(instance_id: str = "inst-abc", name: str = "test-db", status: str = "BUILD") -> MagicMock:
     resp = MagicMock()
@@ -49,6 +50,7 @@ def _make_conn(instance_id: str = "inst-abc") -> MagicMock:
 # 1. create → get → delete 전체 사이클
 # ---------------------------------------------------------------------------
 
+
 def test_create_get_delete_cycle():
     instance_id = "inst-cycle-001"
     conn = _make_conn(instance_id)
@@ -79,6 +81,7 @@ def test_create_get_delete_cycle():
 # ---------------------------------------------------------------------------
 # 2. 최소 페이로드 — 선택 필드 미포함 보장
 # ---------------------------------------------------------------------------
+
 
 def test_create_minimal_payload():
     """필수 인자만 전달 시 volume.type, nics, locality, databases 등 키가 없어야 한다."""
@@ -111,6 +114,7 @@ def test_create_minimal_payload():
 # 3. volume_type 명시 시 payload 에 포함됨 (검증 안 함 — 그대로 통과)
 # ---------------------------------------------------------------------------
 
+
 def test_create_with_volume_type_passes_through():
     """사용자가 명시한 volume_type 은 payload 에 포함된다.
     Trove 와 호환 여부는 우리가 검증하지 않는 결정을 명시한다."""
@@ -133,6 +137,7 @@ def test_create_with_volume_type_passes_through():
 # ---------------------------------------------------------------------------
 # 4. Trove fault ID 가 RuntimeError 에 포함됨
 # ---------------------------------------------------------------------------
+
 
 def test_create_propagates_trove_fault_id():
     """Trove 응답에 instanceFault.message 의 UUID 가 RuntimeError 메시지에 포함되어야 한다."""

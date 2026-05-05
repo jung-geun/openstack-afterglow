@@ -125,11 +125,15 @@ def create_instance(
         fault = body.get("instanceFault") or {}
         fault_msg = str(fault.get("message", "") or "")
         import re as _re
+
         m = _re.search(r"\(([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\)", fault_msg)
         fault_id = m.group(1) if m else ""
         _logger.error(
             "Trove create_instance 실패 status=%s payload_keys=%s fault_id=%s body=%s",
-            status, list(instance_body.keys()), fault_id, text,
+            status,
+            list(instance_body.keys()),
+            fault_id,
+            text,
         )
         raise RuntimeError(
             f"Trove 생성 실패 (HTTP {status})"

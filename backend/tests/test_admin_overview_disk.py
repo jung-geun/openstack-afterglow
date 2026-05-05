@@ -1,6 +1,6 @@
 """admin._fetch_overview_disk — 클러스터-와이드 블록 스토리지 보정 단위 테스트."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 
 def _make_conn(pool_resp: dict, volumes: list, image_bytes: int) -> MagicMock:
@@ -31,10 +31,26 @@ def test_total_disk_is_pool_sum():
     from app.api.identity.admin import _fetch_overview_disk
 
     conn = _make_conn(
-        pool_resp={"pools": [
-            {"name": "pool1", "capabilities": {"total_capacity_gb": 500.0, "free_capacity_gb": 100.0, "allocated_capacity_gb": 400.0}},
-            {"name": "pool2", "capabilities": {"total_capacity_gb": 300.0, "free_capacity_gb": 50.0, "allocated_capacity_gb": 250.0}},
-        ]},
+        pool_resp={
+            "pools": [
+                {
+                    "name": "pool1",
+                    "capabilities": {
+                        "total_capacity_gb": 500.0,
+                        "free_capacity_gb": 100.0,
+                        "allocated_capacity_gb": 400.0,
+                    },
+                },
+                {
+                    "name": "pool2",
+                    "capabilities": {
+                        "total_capacity_gb": 300.0,
+                        "free_capacity_gb": 50.0,
+                        "allocated_capacity_gb": 250.0,
+                    },
+                },
+            ]
+        },
         volumes=[10, 20],
         image_bytes=0,
     )
@@ -49,7 +65,18 @@ def test_used_disk_includes_volumes_and_images():
     # 이미지 1 GB = 1073741824 bytes
     image_bytes = 1073741824
     conn = _make_conn(
-        pool_resp={"pools": [{"name": "p", "capabilities": {"total_capacity_gb": 1000.0, "free_capacity_gb": 500.0, "allocated_capacity_gb": 500.0}}]},
+        pool_resp={
+            "pools": [
+                {
+                    "name": "p",
+                    "capabilities": {
+                        "total_capacity_gb": 1000.0,
+                        "free_capacity_gb": 500.0,
+                        "allocated_capacity_gb": 500.0,
+                    },
+                }
+            ]
+        },
         volumes=[10, 5],  # 15 GB
         image_bytes=image_bytes,
     )
@@ -63,10 +90,26 @@ def test_infinite_pool_not_counted():
     from app.api.identity.admin import _fetch_overview_disk
 
     conn = _make_conn(
-        pool_resp={"pools": [
-            {"name": "inf-pool", "capabilities": {"total_capacity_gb": "infinite", "free_capacity_gb": "infinite", "allocated_capacity_gb": 0}},
-            {"name": "real-pool", "capabilities": {"total_capacity_gb": 200.0, "free_capacity_gb": 50.0, "allocated_capacity_gb": 150.0}},
-        ]},
+        pool_resp={
+            "pools": [
+                {
+                    "name": "inf-pool",
+                    "capabilities": {
+                        "total_capacity_gb": "infinite",
+                        "free_capacity_gb": "infinite",
+                        "allocated_capacity_gb": 0,
+                    },
+                },
+                {
+                    "name": "real-pool",
+                    "capabilities": {
+                        "total_capacity_gb": 200.0,
+                        "free_capacity_gb": 50.0,
+                        "allocated_capacity_gb": 150.0,
+                    },
+                },
+            ]
+        },
         volumes=[],
         image_bytes=0,
     )
