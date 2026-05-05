@@ -59,11 +59,23 @@ def list_images(conn: openstack.connection.Connection, project_id: str | None = 
 
 def get_image(conn: openstack.connection.Connection, image_id: str) -> ImageDetail:
     img = conn.image.get_image(image_id)
-    props = img.properties or {}
-    os_distro = getattr(img, "os_distro", None) or props.get("os_distro") or _guess_distro(img.name)
-    # properties에서 별도 필드로 반환하는 키 제외
-    _exclude = {"os_distro", "os_type", "os_hash_algo", "os_hash_value"}
-    clean_props = {k: v for k, v in props.items() if k not in _exclude}
+    raw_props = dict(img.properties or {})
+    os_distro = getattr(img, "os_distro", None) or raw_props.get("os_distro") or _guess_distro(img.name)
+
+    # SDK 가 Image 본문 필드로 따로 노출하는 키들을 properties 에 병합 (OpenStack CLI 와 동일한 뷰)
+    _sdk_fields: dict = {
+        "os_distro": getattr(img, "os_distro", None),
+        "os_hash_algo": getattr(img, "os_hash_algo", None),
+        "os_hash_value": getattr(img, "os_hash_value", None),
+        "direct_url": getattr(img, "direct_url", None),
+    }
+    is_hidden = getattr(img, "is_hidden", None)
+    if is_hidden is not None:
+        _sdk_fields["os_hidden"] = "True" if is_hidden else "False"
+    for k, v in _sdk_fields.items():
+        if v is not None and k not in raw_props:
+            raw_props[k] = v if isinstance(v, str) else str(v)
+
     return ImageDetail(
         id=img.id,
         name=img.name,
@@ -72,7 +84,7 @@ def get_image(conn: openstack.connection.Connection, image_id: str) -> ImageDeta
         min_disk=img.min_disk or 0,
         min_ram=img.min_ram or 0,
         disk_format=img.disk_format,
-        os_type=props.get("os_type"),
+        os_type=raw_props.get("os_type"),
         os_distro=os_distro,
         created_at=str(img.created_at) if img.created_at else None,
         owner=getattr(img, "owner", None) or getattr(img, "project_id", None),
@@ -83,7 +95,7 @@ def get_image(conn: openstack.connection.Connection, image_id: str) -> ImageDeta
         updated_at=str(img.updated_at) if getattr(img, "updated_at", None) else None,
         protected=getattr(img, "is_protected", False) or False,
         tags=list(getattr(img, "tags", None) or []),
-        properties=clean_props,
+        properties=raw_props,
         os_hash_algo=getattr(img, "os_hash_algo", None),
         os_hash_value=getattr(img, "os_hash_value", None),
         direct_url=getattr(img, "direct_url", None),

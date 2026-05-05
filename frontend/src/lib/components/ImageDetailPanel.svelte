@@ -74,7 +74,7 @@
     'id', 'name', 'status', 'visibility', 'owner', 'size', 'virtual_size',
     'disk_format', 'container_format', 'checksum', 'os_hash_algo', 'os_hash_value',
     'min_disk', 'min_ram', 'tags', 'self', 'file', 'schema', 'direct_url',
-    'locations', 'created_at', 'updated_at', 'protected',
+    'locations', 'created_at', 'updated_at', 'protected', 'os_hidden',
   ]);
   const isReservedKey = (k: string) => RESERVED_KEYS.has(k) || k.startsWith('os_glance_');
 
@@ -519,7 +519,7 @@
       {#if Object.keys(image.properties).length > 0 || canEditMetadata}
         <div class="bg-gray-900 border border-gray-800 rounded-lg p-5">
           <div class="flex items-center justify-between mb-3">
-            <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wide">추가 속성</h3>
+            <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wide">추가 속성 <span class="normal-case font-normal text-gray-600">({Object.keys(image.properties).length})</span></h3>
             {#if canEditMetadata && !editingProps}
               <button onclick={startEditProps} class="text-xs text-blue-400 hover:text-blue-300">편집</button>
             {/if}
