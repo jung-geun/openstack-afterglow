@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from app.api.deps import get_os_conn, require_admin
+from app.models.compute import ImageDetail
 from app.services import glance
 
 _logger = logging.getLogger(__name__)
@@ -152,7 +153,7 @@ async def update_admin_image(
         raise HTTPException(status_code=400, detail="이미지 수정 실패")
 
 
-@router.patch("/images/{image_id}/properties", dependencies=[Depends(require_admin)])
+@router.patch("/images/{image_id}/properties", dependencies=[Depends(require_admin)], response_model=ImageDetail)
 async def update_admin_image_properties(
     image_id: str,
     req: AdminUpdatePropertiesRequest,

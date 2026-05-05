@@ -192,6 +192,10 @@ def update_image_properties(
     set_properties: key→value 추가 또는 갱신
     remove_keys: 삭제할 key 목록
     예약 키(`_RESERVED_PROPERTY_KEYS`, `os_glance_*`)는 무시.
+
+    set/remove 모두 JSON-Patch 로 단일 호출 처리.
+    update_image(**kwargs) 는 알려진 Image 속성만 반영하므로
+    임의 사용자 정의 키에는 사용하지 않는다.
     """
     set_properties = set_properties or {}
     remove_keys = remove_keys or []
@@ -199,17 +203,21 @@ def update_image_properties(
     safe_set = {k: str(v) for k, v in set_properties.items() if not _is_protected_key(k)}
     safe_remove = [k for k in remove_keys if not _is_protected_key(k)]
 
-    if safe_remove:
-        # openstacksdk update_image 는 추가/갱신만 지원하므로 삭제는 raw JSON Patch 호출
-        patch = [{"op": "remove", "path": f"/{k}"} for k in safe_remove]
+    existing_props = (conn.image.get_image(image_id).properties or {}) if safe_set else {}
+
+    patch_ops: list[dict] = []
+    for k, v in safe_set.items():
+        op = "replace" if k in existing_props else "add"
+        patch_ops.append({"op": op, "path": f"/{k}", "value": v})
+    for k in safe_remove:
+        patch_ops.append({"op": "remove", "path": f"/{k}"})
+
+    if patch_ops:
         conn.image.patch(
             f"/v2/images/{image_id}",
-            json=patch,
+            json=patch_ops,
             headers={"Content-Type": "application/openstack-images-v2.1-json-patch"},
         )
-
-    if safe_set:
-        conn.image.update_image(image_id, **safe_set)
 
     return get_image(conn, image_id)
 

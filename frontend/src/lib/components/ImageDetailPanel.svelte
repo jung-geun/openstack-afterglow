@@ -133,6 +133,16 @@
 
   async function saveProperties() {
     if (!image) return;
+    // 추가 인풋에 값이 남아있으면 자동 commit (UX 함정 제거)
+    const pendingKey = newPropKey.trim();
+    if (pendingKey && !isReservedKey(pendingKey)) {
+      propsDraft[pendingKey] = newPropValue.trim();
+      propsDraft = { ...propsDraft };
+      propsRemovedKeys.delete(pendingKey);
+      propsRemovedKeys = new Set(propsRemovedKeys);
+      newPropKey = '';
+      newPropValue = '';
+    }
     const original = image.properties;
     const setObj: Record<string, string> = {};
     for (const [k, v] of Object.entries(propsDraft)) {
