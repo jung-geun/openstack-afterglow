@@ -44,6 +44,9 @@ Cinder 블록 스토리지 볼륨, 백업, 스냅샷을 관리합니다.
 
 ### GET /api/volumes
 
+![볼륨 목록](../../assets/volume-list.png)
+*Cinder 볼륨 목록 — 크기·상태(available/in-use)·연결된 인스턴스·볼륨 타입 확인*
+
 프로젝트의 Cinder 볼륨 목록을 반환합니다. 응답은 15초간 캐시됩니다.
 
 **응답 (200 OK)** — `VolumeInfo[]` 배열

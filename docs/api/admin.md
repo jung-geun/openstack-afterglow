@@ -5,6 +5,9 @@
 
 모든 관리자 API는 관리자 권한이 필요합니다. 인증 헤더와 함께 관리자 역할이 부여된 토큰을 사용해야 합니다.
 
+![관리자 개요](../../assets/admin-page.png)
+*관리자 개요 페이지 — 클러스터 전체 vCPU·RAM·Disk 사용률, 총 VM/하이퍼바이저 수, 프로젝트별 리소스 할당량을 한 화면에서 조회*
+
 ---
 
 ## 인증 및 권한
@@ -96,6 +99,9 @@
 | `file_storage_count` | integer | Manila 파일 스토리지 수 |
 
 ### GET /api/admin/hypervisors
+
+![하이퍼바이저 목록](../../assets/admin-hv-list.png)
+*호스트별 VM 수, vCPU 사용률, RAM 사용량, 로컬 디스크 현황을 테이블로 일괄 조회*
 
 컴퓨트 하이퍼바이저 상세 목록을 반환합니다.
 
@@ -357,6 +363,9 @@
 ---
 
 ## 5. 볼륨 관리
+
+![전체 볼륨 관리](../../assets/admin-volume.png)
+*전체 프로젝트의 볼륨을 시계열 차트와 함께 일괄 조회 — 상태·크기·프로젝트별 필터링, 수정·삭제 지원*
 
 ### PATCH /api/admin/volumes/{volume_id}
 
@@ -1253,6 +1262,9 @@ Flavor의 특정 extra_spec을 삭제합니다.
 
 > 태그: `admin-gpu`
 
+![GPU 리소스 관리](../../assets/admin-gpu-list.png)
+*GPU 타입별(GTX 1080 Ti · RTX 2000 Ada · TITAN X · RTX 3090 · RTX 4090 등) 전체/사용 중/사용 가능 수량과 호스트별 GPU 구성 및 가동률*
+
 ### GET /api/admin/gpu-hosts
 
 Placement API에서 각 호스트별 GPU 정보를 조회합니다. PCI 디바이스 식별, 사용량, 호스트별 집계를 제공합니다.
@@ -1440,3 +1452,12 @@ GPU 리소스의 alias 정의와 프로젝트별 쿼터를 관리합니다.
 클러스터 전체 모니터링 요약을 반환합니다. 서비스 상태, 리소스 사용량, 알림 등을 종합합니다。
 
 **응답 (200 OK)** — 모니터링 요약 객체
+
+---
+
+## Notion 연동
+
+OpenStack 리소스를 Notion 데이터베이스와 동기화하는 관리자 기능입니다. 시스템 메뉴의 **Notion 연동** 페이지에서 설정합니다.
+
+![Notion 연동](../../assets/admin-notion.png)
+*Notion Integration 설정 — 다중 데이터베이스(인스턴스 DB·이미지 DB·GPU Spec DB) 연결, 즉시 동기화 및 마지막 동기화 시각 표시*

@@ -42,6 +42,9 @@ CREATING → ACTIVE → DELETED (soft-delete)
 
 ### `GET /api/k3s/clusters`
 
+![k3s 클러스터 목록](../../assets/k3s-cluster-list.png)
+*k3s 클러스터 목록 — 상태(CREATING/ACTIVE/ERROR)·노드 수·버전·생성일시 표시*
+
 현재 프로젝트의 k3s 클러스터 목록을 반환합니다. `include_deleted=true` 쿼리 파라미터로 삭제된 클러스터 이력을 포함할 수 있습니다.
 
 **응답 `200`** `K3sClusterInfo[]`

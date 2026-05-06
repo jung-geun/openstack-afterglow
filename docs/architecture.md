@@ -269,6 +269,9 @@ graph TD
 
 ## 7. 모니터링 아키텍처
 
+![통합 모니터링](../assets/admin-instance-metric.png)
+*통합 모니터링 페이지 — 전체 인스턴스 목록에서 선택한 VM의 실시간 CPU·메모리·네트워크·디스크 I/O를 1시간/6시간/24시간 구간별로 조회*
+
 ### Grafana 임베드 JWT
 
 `POST /api/grafana/token` 엔드포인트가 Grafana 대시보드 임베드에 필요한 단기 JWT를 발급합니다. 프론트엔드는 이 토큰을 `<iframe src="...&auth_token=JWT">` 형태로 활용합니다.
