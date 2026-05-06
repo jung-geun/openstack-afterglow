@@ -69,6 +69,13 @@
 		networks: Record<string, TrafficRate>;
 		routers: Record<string, TrafficRate>;
 		load_balancers: Record<string, TrafficRate>;
+		interfaces?: Record<string, {
+			instance_id: string;
+			network_id: string;
+			mac_address: string;
+			rx_bps: number;
+			tx_bps: number;
+		}>;
 		_meta?: { router_traffic?: string };
 	}
 
@@ -340,6 +347,26 @@
 		return t ? t.rx_bps + t.tx_bps : 0;
 	}
 
+	function edgeIntensity(bps: number): { opacity: number; width: number } {
+		if (bps >= 1e8) return { opacity: 1.00, width: 3.5 };
+		if (bps >= 1e7) return { opacity: 0.90, width: 3.0 };
+		if (bps >= 1e6) return { opacity: 0.80, width: 2.5 };
+		if (bps >= 1e5) return { opacity: 0.65, width: 2.0 };
+		return { opacity: 0.40, width: 1.5 };
+	}
+
+	const instNetBps = $derived.by(() => {
+		const m = new Map<string, { rx_bps: number; tx_bps: number }>();
+		if (!traffic?.interfaces) return m;
+		for (const ifc of Object.values(traffic.interfaces)) {
+			const key = `${ifc.instance_id}|${ifc.network_id}`;
+			const cur = m.get(key);
+			if (cur) { cur.rx_bps += ifc.rx_bps; cur.tx_bps += ifc.tx_bps; }
+			else     { m.set(key, { rx_bps: ifc.rx_bps, tx_bps: ifc.tx_bps }); }
+		}
+		return m;
+	});
+
 	// ── SVG dimensions ────────────────────────────────────────────────────────
 	const barH  = $derived(Math.max(rows.length + lbItems.length, 1) * ROW_H + 20);
 	// Extra right space: items are placed to the RIGHT of their rightmost bar
@@ -461,75 +488,6 @@
 		xmlns="http://www.w3.org/2000/svg"
 		{...svgAttrs}
 	>
-		<!-- ── Network vertical bars ── -->
-		{#each orderedNetworks as net}
-			{@const cx   = netCX.get(net.id) ?? 0}
-			{@const col  = netColors.get(net.id) ?? '#3b82f6'}
-			{@const bx   = cx - BAR_W / 2}
-
-			<!-- Bar -->
-			<rect
-				x={bx} y={TOP_H - 4}
-				width={BAR_W} height={barH + 4}
-				rx="4" fill={col}
-			/>
-
-			<!-- Top badge -->
-			<rect
-				x={cx - 72} y={8}
-				width={144} height={34}
-				rx="6"
-				fill={isLight ? '#f8fafc' : '#111827'} stroke={col} stroke-width="1.5"
-				style="cursor:pointer"
-				role="button"
-				tabindex="0"
-				onclick={() => goto(`/dashboard/networks/${net.id}`)}
-				onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && goto(`/dashboard/networks/${net.id}`)}
-			/>
-			<text
-				x={cx} y={20}
-				text-anchor="middle" fill={col}
-				font-size="10" font-weight="600"
-				font-family="ui-sans-serif, system-ui, sans-serif"
-				style="pointer-events:none"
-			>{trunc(net.name || net.id, 18)}</text>
-			<text
-				x={cx} y={34}
-				text-anchor="middle" fill={col}
-				font-size="9" opacity="0.75"
-				font-family="ui-sans-serif, system-ui, sans-serif"
-				style="pointer-events:none"
-			>{net.is_external ? '외부 네트워크' : net.is_shared ? '공유 네트워크' : `내부 · ${net.subnet_details.length}서브넷`}</text>
-
-			<!-- 네트워크 합산 트래픽 라벨 -->
-			{#if traffic?.networks?.[net.id]}
-				{@const tn = traffic.networks[net.id]}
-				<text x={cx} y={50}
-					text-anchor="middle" font-size="8" font-weight="600"
-					fill={trafficColor(tn.rx_bps + tn.tx_bps)}
-					style="pointer-events:none"
-				>↓{formatBps(tn.rx_bps)} ↑{formatBps(tn.tx_bps)}</text>
-			{/if}
-
-			<!-- Bottom label: network name -->
-			<text
-				x={cx} y={svgH - 50}
-				text-anchor="middle" fill={col}
-				font-size="10" opacity="0.6"
-				font-family="ui-sans-serif, system-ui, sans-serif"
-			>{trunc(net.name || net.id, 18)}</text>
-			<!-- Bottom label: subnet CIDRs -->
-			{#each net.subnet_details as subnet, si}
-				<text
-					x={cx} y={svgH - 36 + si * 13}
-					text-anchor="middle" fill={col}
-					font-size="9" opacity="0.5"
-					font-family="ui-monospace, monospace"
-					style="pointer-events:none"
-				>{subnet.cidr}</text>
-			{/each}
-		{/each}
-
 		<!-- ── Item rows ── -->
 		{#each rows as row, i}
 			{@const cy   = rowCY(i)}
@@ -548,8 +506,9 @@
 			<!-- Connection lines + IP labels -->
 			<!-- 같은 방향(좌/우)에 연결된 네트워크 목록을 미리 계산 (Y 분산용, floating 포함) -->
 			{@const fipNetIds = [...row.floatingNetIps.keys()]}
-			{@const allLeftNets  = [...row.connectedNetIds, ...fipNetIds].filter(id => (netCX.get(id) ?? 0) < cx)}
-			{@const allRightNets = [...row.connectedNetIds, ...fipNetIds].filter(id => (netCX.get(id) ?? 0) >= cx)}
+			{@const standaloneFloatNetIds = fipNetIds.filter(id => !row.connectedNetIds.includes(id))}
+			{@const allLeftNets  = [...new Set([...row.connectedNetIds, ...standaloneFloatNetIds])].filter(id => (netCX.get(id) ?? 0) < cx)}
+			{@const allRightNets = [...new Set([...row.connectedNetIds, ...standaloneFloatNetIds])].filter(id => (netCX.get(id) ?? 0) >= cx)}
 			{@const leftNets  = row.connectedNetIds.filter(id => (netCX.get(id) ?? 0) < cx)}
 			{@const rightNets = row.connectedNetIds.filter(id => (netCX.get(id) ?? 0) >= cx)}
 
@@ -581,13 +540,22 @@
 				{@const ipAnchor = isLeft ? 'start' : 'end'}
 
 				<!-- Horizontal line: bar → item box edge (Y 분산 적용) -->
-				{@const _tRow = traffic ? (row.type === 'instance' ? traffic.instances[row.id] : traffic.routers[row.id]) : null}
-				{@const _edgeCol = _tRow ? trafficColor(_tRow.rx_bps + _tRow.tx_bps) : col}
+				{@const edgePair = row.type === 'instance' ? instNetBps.get(`${row.id}|${netId}`) : undefined}
+				{@const edgeBps = (edgePair?.rx_bps ?? 0) + (edgePair?.tx_bps ?? 0)}
+				{@const ei = edgeIntensity(edgeBps)}
 				<line
 					x1={barX} y1={lineY}
 					x2={targetX} y2={lineY}
-					stroke={_edgeCol} stroke-width="2.5" opacity="0.8"
+					stroke={col} stroke-width={ei.width} opacity={ei.opacity}
 				/>
+				{#if edgePair && edgeBps > 0}
+					<text x={isLeft ? targetX - 6 : targetX + 6} y={lineY - 3}
+						text-anchor={isLeft ? 'end' : 'start'}
+						fill={col} font-size="8" opacity="0.85"
+						font-family="ui-monospace, monospace"
+						style="pointer-events:none"
+					>↓{formatBps(edgePair.rx_bps)} ↑{formatBps(edgePair.tx_bps)}</text>
+				{/if}
 
 				<!-- DVR 라우터: 같은 네트워크에 이중 포트가 있으면 두 번째 선 표시 -->
 				{#if isR}
@@ -632,11 +600,25 @@
 						style="pointer-events:none"
 					>+{hiddenCount}개</text>
 				{/if}
+				<!-- provider+floating 공존 네트워크: floating IP 를 lineY 아래쪽에 함께 표시 -->
+				{#if !isR && row.floatingNetIps.has(netId)}
+					{#each (row.floatingNetIps.get(netId) ?? []).slice(0, 2) as fip, fi}
+						<text
+							x={ipLabelX}
+							y={lineY + 11 + fi * 11}
+							text-anchor={ipAnchor}
+							fill={col} font-size="9" opacity="0.7"
+							font-family="ui-monospace, monospace"
+							style="pointer-events:none"
+						>★{fip}</text>
+					{/each}
+				{/if}
 			{/each}
 
-			<!-- Floating IP 점선 연결 (외부 네트워크 바 → 인스턴스 박스) -->
+			<!-- Floating IP 점선 연결 (provider 미공유 외부 네트워크만 — 공유 네트워크는 실선 위에 인라인 표시) -->
 			{#if !isR}
-				{#each [...row.floatingNetIps.entries()] as [fNetId, fIps]}
+				{#each standaloneFloatNetIds as fNetId}
+					{@const fIps     = row.floatingNetIps.get(fNetId) ?? []}
 					{@const fBarX    = netCX.get(fNetId) ?? 0}
 					{@const fCol     = netColors.get(fNetId) ?? '#ea580c'}
 					{@const fIsLeft  = fBarX < cx}
@@ -661,7 +643,7 @@
 							fill={fCol} font-size="9" opacity="0.7"
 							font-family="ui-monospace, monospace"
 							style="pointer-events:none"
-						>{fip}</text>
+						>★{fip}</text>
 					{/each}
 				{/each}
 			{/if}
@@ -858,6 +840,75 @@
 				<text x={ix + ITEM_W + 6} y={cy - 3} font-size="9" fill="#94a3b8" style="pointer-events:none">↓{formatBps(_tLB.rx_bps)}</text>
 				<text x={ix + ITEM_W + 6} y={cy + 8} font-size="9" fill="#94a3b8" style="pointer-events:none">↑{formatBps(_tLB.tx_bps)}</text>
 			{/if}
+		{/each}
+
+		<!-- ── Network vertical bars (연결선 위에 렌더링되도록 마지막에 배치) ── -->
+		{#each orderedNetworks as net}
+			{@const cx   = netCX.get(net.id) ?? 0}
+			{@const col  = netColors.get(net.id) ?? '#3b82f6'}
+			{@const bx   = cx - BAR_W / 2}
+
+			<!-- Bar -->
+			<rect
+				x={bx} y={TOP_H - 4}
+				width={BAR_W} height={barH + 4}
+				rx="4" fill={col}
+			/>
+
+			<!-- Top badge -->
+			<rect
+				x={cx - 72} y={8}
+				width={144} height={34}
+				rx="6"
+				fill={isLight ? '#f8fafc' : '#111827'} stroke={col} stroke-width="1.5"
+				style="cursor:pointer"
+				role="button"
+				tabindex="0"
+				onclick={() => goto(`/dashboard/networks/${net.id}`)}
+				onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && goto(`/dashboard/networks/${net.id}`)}
+			/>
+			<text
+				x={cx} y={20}
+				text-anchor="middle" fill={col}
+				font-size="10" font-weight="600"
+				font-family="ui-sans-serif, system-ui, sans-serif"
+				style="pointer-events:none"
+			>{trunc(net.name || net.id, 18)}</text>
+			<text
+				x={cx} y={34}
+				text-anchor="middle" fill={col}
+				font-size="9" opacity="0.75"
+				font-family="ui-sans-serif, system-ui, sans-serif"
+				style="pointer-events:none"
+			>{net.is_external ? '외부 네트워크' : net.is_shared ? '공유 네트워크' : `내부 · ${net.subnet_details.length}서브넷`}</text>
+
+			<!-- 네트워크 합산 트래픽 라벨 -->
+			{#if traffic?.networks?.[net.id]}
+				{@const tn = traffic.networks[net.id]}
+				<text x={cx} y={50}
+					text-anchor="middle" font-size="8" font-weight="600"
+					fill={trafficColor(tn.rx_bps + tn.tx_bps)}
+					style="pointer-events:none"
+				>↓{formatBps(tn.rx_bps)} ↑{formatBps(tn.tx_bps)}</text>
+			{/if}
+
+			<!-- Bottom label: network name -->
+			<text
+				x={cx} y={svgH - 50}
+				text-anchor="middle" fill={col}
+				font-size="10" opacity="0.6"
+				font-family="ui-sans-serif, system-ui, sans-serif"
+			>{trunc(net.name || net.id, 18)}</text>
+			<!-- Bottom label: subnet CIDRs -->
+			{#each net.subnet_details as subnet, si}
+				<text
+					x={cx} y={svgH - 36 + si * 13}
+					text-anchor="middle" fill={col}
+					font-size="9" opacity="0.5"
+					font-family="ui-monospace, monospace"
+					style="pointer-events:none"
+				>{subnet.cidr}</text>
+			{/each}
 		{/each}
 
 		<!-- Empty state -->
