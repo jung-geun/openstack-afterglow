@@ -1011,15 +1011,18 @@ def list_project_compute_ports(conn, project_id: str) -> tuple[list[str], dict[s
     return instance_ids, net_to_instances
 
 
-def list_project_port_map(conn, project_id: str) -> dict[str, dict]:
+def list_project_port_map(conn, project_id: str | None) -> dict[str, dict]:
     """compute 포트 상세 매핑 반환.
+
+    project_id=None 이면 모든 프로젝트의 compute 포트 조회 (admin 전용).
 
     Returns:
         {port_id: {"instance_id", "network_id", "mac_address"}}
     멀티-NIC 트래픽 demux 와 포트맵 캐싱에 사용.
     """
     out: dict[str, dict] = {}
-    for p in conn.network.ports(project_id=project_id):
+    kwargs = {"project_id": project_id} if project_id else {}
+    for p in conn.network.ports(**kwargs):
         if not p.device_id or not (p.device_owner or "").startswith("compute:"):
             continue
         out[p.id] = {

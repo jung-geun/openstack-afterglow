@@ -9,6 +9,19 @@ import pytest
 
 _PROJECT_ID = "test-project-123"
 
+
+# ── 픽스처 ───────────────────────────────────────────────────────────────────
+
+@pytest.fixture(autouse=True)
+def _bypass_port_cache():
+    """테스트 간 Redis 캐시 오염 방지: cached_call 을 항상 함수를 직접 호출하도록 패치."""
+    async def _passthrough(_key, _ttl, fn):
+        return fn()
+
+    with patch("app.api.network.networks.cached_call", side_effect=_passthrough):
+        yield
+
+
 # ── 헬퍼 ─────────────────────────────────────────────────────────────────────
 
 
@@ -493,3 +506,48 @@ async def test_traffic_libvirt_promql_uses_double_group_left(client, mock_conn):
     for q in lv_calls:
         assert "* on (domain, target_device) group_left(mac_address)" in q
         assert "* on (domain) group_left(instance_id)" in q
+
+
+# ── 테스트: all_projects 파라미터 ─────────────────────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_traffic_all_projects_requires_admin(non_admin_client, mock_conn):
+    """all_projects=true + is_system_admin=False → 403."""
+    resp = await non_admin_client.get("/api/networks/topology/traffic?all_projects=true")
+    assert resp.status_code == 403
+
+
+@pytest.mark.anyio
+async def test_traffic_all_projects_admin_unscoped_ports(admin_client, mock_conn):
+    """admin + all_projects=true → conn.network.ports 가 project_id 인자 없이 호출."""
+    mock_conn.network.ports.return_value = []
+
+    with (
+        patch("app.api.network.networks.query_instant_multi", new=AsyncMock(return_value=[])),
+        patch("app.api.network.networks.list_load_balancers", return_value=[]) as mock_lbs,
+    ):
+        resp = await admin_client.get("/api/networks/topology/traffic?all_projects=true")
+    assert resp.status_code == 200
+    assert mock_conn.network.ports.called
+    _, kwargs = mock_conn.network.ports.call_args
+    assert "project_id" not in kwargs
+    mock_lbs.assert_called_once()
+    lb_positional = mock_lbs.call_args.args
+    assert lb_positional[1] is None  # scope_project_id=None
+
+
+@pytest.mark.anyio
+async def test_traffic_default_scoped_to_project(client, mock_conn):
+    """all_projects 미지정(False) → ports(project_id=...) 로 스코프."""
+    mock_conn.network.ports.return_value = []
+
+    with (
+        patch("app.api.network.networks.query_instant_multi", new=AsyncMock(return_value=[])),
+        patch("app.api.network.networks.list_load_balancers", return_value=[]),
+    ):
+        resp = await client.get("/api/networks/topology/traffic")
+    assert resp.status_code == 200
+    assert mock_conn.network.ports.called
+    _, kwargs = mock_conn.network.ports.call_args
+    assert kwargs.get("project_id") == _PROJECT_ID

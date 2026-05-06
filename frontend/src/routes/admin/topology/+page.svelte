@@ -80,7 +80,26 @@
 		load_balancers?: TopologyLoadBalancer[];
 	}
 
+	interface TrafficRate { rx_bps: number; tx_bps: number; }
+	interface TopologyTrafficInterface {
+		instance_id: string;
+		network_id: string;
+		mac_address: string;
+		rx_bps: number;
+		tx_bps: number;
+	}
+	interface TopologyTraffic {
+		ts: number;
+		instances: Record<string, TrafficRate>;
+		networks: Record<string, TrafficRate>;
+		routers: Record<string, TrafficRate>;
+		load_balancers: Record<string, TrafficRate>;
+		interfaces?: Record<string, TopologyTrafficInterface>;
+		_meta?: { router_traffic?: string };
+	}
+
 	let data = $state<TopologyData | null>(null);
+	let traffic = $state<TopologyTraffic | null>(null);
 	let loading = $state(true);
 	let refreshing = $state(false);
 	let error = $state('');
@@ -125,9 +144,32 @@
 		intervalOptions: [15, 30, 60]
 	});
 
+	async function loadTraffic() {
+		if (!$auth.token) return;
+		try {
+			traffic = await api.get<TopologyTraffic>(
+				'/api/networks/topology/traffic?all_projects=true',
+				$auth.token ?? undefined,
+				$auth.projectId ?? undefined,
+			);
+		} catch { /* silent — traffic=null 로 표시 유지 */ }
+	}
+
+	const arTraffic = createAutoRefresh(loadTraffic, {
+		storageKey: 'admin-topology-traffic',
+		defaultActive: true,
+		defaultInterval: 15,
+		intervalOptions: [10, 15, 30],
+	});
+
 	$effect(() => {
 		if (!$auth.token) return;
 		untrack(() => fetchTopology());
+	});
+
+	$effect(() => {
+		if (!$auth.token) return;
+		untrack(() => loadTraffic());
 	});
 
 	onMount(() => {
@@ -215,6 +257,7 @@
 		<div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4">
 			<GlobalTopology
 				{data}
+				{traffic}
 				projectId={projectFilter}
 				showAll={projectFilter == null}
 				selectedId={topologySelectedId}

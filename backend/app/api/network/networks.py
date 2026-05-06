@@ -400,19 +400,28 @@ async def get_topology(conn: openstack.connection.Connection = Depends(get_os_co
 async def get_topology_traffic(
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
+    all_projects: bool = Query(False, description="admin 전용: 모든 프로젝트 트래픽 조회"),
 ) -> dict:
     """현재 토폴로지의 모든 리소스 instant 트래픽 (rx/tx bps).
 
     구조 엔드포인트(/topology)와 분리 — 15s 단주기 폴링 전용.
+    `all_projects=true` 는 시스템 admin 만 허용 — admin 토폴로지 페이지용.
     반환: { ts, instances, networks, interfaces, routers, load_balancers, _meta }
     """
-    project_id = token_info.get("project_id", "") or conn._afterglow_project_id
+    if all_projects:
+        if not token_info.get("is_system_admin", False):
+            raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다")
+        scope_project_id: str | None = None
+        cache_key = "afterglow:neutron:_all:port_mac_map"
+    else:
+        scope_project_id = token_info.get("project_id", "") or conn._afterglow_project_id
+        cache_key = f"afterglow:neutron:{scope_project_id}:port_mac_map"
 
     # 1) compute 포트맵 — MAC↔port_id↔network_id 매핑 (Redis 캐시, TTL 300s)
     port_map: dict[str, dict] = await cached_call(
-        f"afterglow:neutron:{project_id}:port_mac_map",
+        cache_key,
         ttl_static(),
-        lambda: neutron.list_project_port_map(conn, project_id),
+        lambda: neutron.list_project_port_map(conn, scope_project_id),
     )
     # mac_address → {port_id, instance_id, network_id} 역인덱스
     mac_idx: dict[str, dict] = {
@@ -535,7 +544,7 @@ async def get_topology_traffic(
         networks = {}
 
     # 3) LB stats — Octavia /stats 차분 (병렬)
-    lbs = await asyncio.to_thread(list_load_balancers, conn, project_id)
+    lbs = await asyncio.to_thread(list_load_balancers, conn, scope_project_id)
 
     async def _lb_one(lb_id: str) -> tuple[str, dict[str, float]] | None:
         cur = await asyncio.to_thread(get_lb_stats, conn, lb_id)
