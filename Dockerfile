@@ -65,7 +65,8 @@ RUN adduser --disabled-password --gecos "" appuser \
     && chown -R appuser:appuser /app
 USER appuser
 ENV PATH="/app/.venv/bin:$PATH"
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# named volume 캐시가 오래된 .venv를 갖고 있어도 의존성 자동 동기화
+CMD ["sh", "-c", "uv sync --frozen --no-install-project && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Frontend 스테이지
