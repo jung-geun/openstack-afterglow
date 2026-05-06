@@ -126,6 +126,8 @@ def render_secret(cfg: dict) -> str:
     oidc = cfg.get("gitlab_oidc", {})
     k3s = cfg.get("k3s", {})
     db = cfg.get("database", {})
+    mon = cfg.get("monitoring", {})
+    notion = cfg.get("notion", {})
 
     lines = [
         "apiVersion: v1",
@@ -168,6 +170,38 @@ def render_secret(cfg: dict) -> str:
             f'  DATABASE_URL: {_yaml_str(db_url)}',
         ])
 
+    prometheus_password = mon.get("prometheus_password", "")
+    if prometheus_password:
+        lines.extend([
+            "",
+            "  # Prometheus basic auth 비밀번호",
+            f'  PROMETHEUS_PASSWORD: {_yaml_str(prometheus_password)}',
+        ])
+
+    sd_token = mon.get("sd_token", "")
+    if sd_token:
+        lines.extend([
+            "",
+            "  # Prometheus SD 엔드포인트 인증 토큰",
+            f'  MONITORING_SD_TOKEN: {_yaml_str(sd_token)}',
+        ])
+
+    grafana_jwt_secret = mon.get("grafana_jwt_secret", "")
+    if grafana_jwt_secret:
+        lines.extend([
+            "",
+            "  # Grafana JWT 서명 시크릿",
+            f'  GRAFANA_JWT_SECRET: {_yaml_str(grafana_jwt_secret)}',
+        ])
+
+    notion_enc_key = notion.get("config_encryption_key", "")
+    if notion_enc_key:
+        lines.extend([
+            "",
+            "  # Notion 설정 암호화 키",
+            f'  NOTION_CONFIG_ENCRYPTION_KEY: {_yaml_str(notion_enc_key)}',
+        ])
+
     lines.append("")
     return "\n".join(lines)
 
@@ -187,10 +221,13 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     svc = cfg.get("services", {})
     k3s = cfg.get("k3s", {})
     builder = cfg.get("builder", {})
+    union = cfg.get("union", {})
     db = cfg.get("database", {})
     cors = cfg.get("cors", {})
     oidc = cfg.get("gitlab_oidc", {})
     logging_cfg = cfg.get("logging", {})
+    mon = cfg.get("monitoring", {})
+    notion = cfg.get("notion", {})
 
     lines = [
         "# Afterglow 통합 설정 파일",
@@ -220,6 +257,18 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     lines.append("")
     lines.append("# Ceph 모니터 (cloud-init CephFS 마운트용, 콤마 구분)")
     lines.append(f'ceph_monitors = {_toml_str(os_cfg.get("ceph_monitors", ""))}')
+    lines.append("")
+    lines.append("# Union Mount 전용 service 프로젝트 UUID (Manila share + Builder VM)")
+    lines.append(f'service_project_id = {_toml_str(os_cfg.get("service_project_id", ""))}')
+    lines.append("")
+    lines.append("# Swift 설정")
+    lines.append(f'swift_endpoint = {_toml_str(os_cfg.get("swift_endpoint", ""))}')
+    lines.append(f'swift_upload_timeout = {os_cfg.get("swift_upload_timeout", 600)}')
+    lines.append("")
+    lines.append("# Manila NFS 설정")
+    lines.append(f'manila_nfs_root_squash = {_toml_bool(os_cfg.get("manila_nfs_root_squash", True))}')
+    lines.append(f'manila_nfs_sec_flavor = {_toml_str(os_cfg.get("manila_nfs_sec_flavor", "sys"))}')
+    lines.append(f'interface = {_toml_str(os_cfg.get("interface", "internal"))}')
     lines.append("")
 
     # [app]
@@ -287,6 +336,13 @@ def _render_toml_for_k8s(cfg: dict) -> str:
             lines.append(f'network_id = {_toml_str(builder["network_id"])}')
         lines.append("")
 
+    # [union]
+    lines.append("[union]")
+    lines.append(f'layer_store_rw_share_id = {_toml_str(union.get("layer_store_rw_share_id", ""))}')
+    lines.append(f'layer_store_ro_share_id = {_toml_str(union.get("layer_store_ro_share_id", ""))}')
+    lines.append(f'manifest_store_share_id = {_toml_str(union.get("manifest_store_share_id", ""))}')
+    lines.append("")
+
     # [gpu] (디바이스 맵은 config.gpu.toml로 분리)
     lines.append("[gpu]")
     if "available_visible" in gpu:
@@ -305,12 +361,14 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     lines.append("[k3s]")
     k3s_keys_str = (
         "version", "server_flavor_id", "default_agent_flavor_id", "server_image_id",
+        "fcos_image_id",
         "callback_base_url", "occm_image", "occm_floating_network_id", "occm_public_network_name",
         "cinder_csi_image", "cinder_csi_default_az", "manila_csi_image", "manila_csi_nfs_image",
-        "manila_csi_share_protocol", "keystone_auth_image", "octavia_ingress_image",
+        "manila_csi_share_protocol", "keystone_auth_image", "keystone_auth_policy",
+        "octavia_ingress_image",
         "octavia_ingress_subnet_id", "octavia_ingress_floating_network_id",
         "barbican_kms_image", "barbican_kms_kek_id",
-        "api_lb_floating_network_id", "lb_subnet_id",
+        "api_lb_vip_network_id", "api_lb_floating_network_id", "lb_subnet_id",
     )
     k3s_keys_int = ("boot_volume_size_gb",)
     k3s_keys_bool = (
@@ -358,6 +416,26 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     lines.append(f'redirect_uri = {_toml_str(oidc.get("redirect_uri", ""))}')
     lines.append(f'scopes = {_toml_str(oidc.get("scopes", "openid email profile read_user"))}')
     lines.append("")
+
+    # [monitoring]
+    lines.append("[monitoring]")
+    lines.append(f'prometheus_base_url = {_toml_str(mon.get("prometheus_base_url", "http://prometheus:9090"))}')
+    lines.append(f'prometheus_username = {_toml_str(mon.get("prometheus_username", ""))}')
+    lines.append("# prometheus_password는 secret.yaml의 PROMETHEUS_PASSWORD 환경변수로 주입됩니다")
+    lines.append(f'scrape_cidr = {_toml_str(mon.get("scrape_cidr", ""))}')
+    lines.append(f'auto_sg_enabled = {_toml_bool(mon.get("auto_sg_enabled", True))}')
+    lines.append(f'node_exporter_sg_name = {_toml_str(mon.get("node_exporter_sg_name", "node_exporter"))}')
+    lines.append(f'dcgm_exporter_sg_name = {_toml_str(mon.get("dcgm_exporter_sg_name", "dcgm_exporter"))}')
+    lines.append(f'grafana_base_url = {_toml_str(mon.get("grafana_base_url", ""))}')
+    lines.append("# grafana_jwt_secret은 secret.yaml의 GRAFANA_JWT_SECRET 환경변수로 주입됩니다")
+    lines.append("# sd_token은 secret.yaml의 MONITORING_SD_TOKEN 환경변수로 주입됩니다")
+    lines.append("")
+
+    # [notion]
+    if notion.get("config_encryption_key"):
+        lines.append("[notion]")
+        lines.append("# config_encryption_key는 secret.yaml의 NOTION_CONFIG_ENCRYPTION_KEY 환경변수로 주입됩니다")
+        lines.append("")
 
     return "\n".join(lines)
 
