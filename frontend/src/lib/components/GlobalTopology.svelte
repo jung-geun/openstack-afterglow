@@ -31,14 +31,14 @@
 
 	// ── State ─────────────────────────────────────────────────────────────────
 	let selectedId = $state<string | null>(null);
+	let hoveredId = $state<string | null>(null);
 	let searchTerm = $state('');
 	let highlightedNetId = $state<string | null>(null);
+	let groupCollapsed = $state({ router: false, lb: false, instance: false });
 	let containerEl = $state<HTMLElement | null>(null);
 	let sidebarEl = $state<HTMLElement | null>(null);
-	let canvasEl = $state<HTMLElement | null>(null);
+	let sidebarHeight = $state(0);
 	let anchors = $state(new Map<string, { x: number; y: number }>());
-	let overlayW = $state(0);
-	let overlayH = $state(0);
 
 	// ── Color palettes ────────────────────────────────────────────────────────
 	const EXT_COLORS = ['#ea580c', '#f97316'];
@@ -89,10 +89,6 @@
 
 	const fipNetMap = $derived(new Map(
 		data.floating_ips.map(f => [f.floating_ip_address, f.floating_network_id])
-	));
-
-	const fipPortMap = $derived(new Map(
-		data.floating_ips.filter(f => f.port_id).map(f => [f.port_id!, f])
 	));
 
 	// ── IP helpers ────────────────────────────────────────────────────────────
@@ -281,41 +277,88 @@
 		return result;
 	});
 
-	// ── Lane X positions (center of each lane in overlay coords) ─────────────
+	// ── LB → member curves ────────────────────────────────────────────────────
+	interface LBCurve {
+		key: string;
+		x1: number; y1: number;
+		x2: number; y2: number;
+	}
+
+	const lbCurves = $derived.by((): LBCurve[] => {
+		const activeLbId = selectedId || hoveredId;
+		if (!activeLbId) return [];
+		const lbItem = filteredLbItems.find(({ lb }) => lb.id === activeLbId);
+		if (!lbItem) return [];
+
+		const result: LBCurve[] = [];
+		const lbAnchorKey = lbItem.vipNetId ? `lb|${lbItem.lb.id}|${lbItem.vipNetId}` : null;
+		const lbAnchor = lbAnchorKey ? anchors.get(lbAnchorKey) : null;
+		if (!lbAnchor) return [];
+
+		for (const member of lbItem.lb.members) {
+			if (!member.server_id) continue;
+			const row = instanceRows.find(r => r.id === member.server_id);
+			if (!row) continue;
+			const firstNetId = row.connectedNetIds[0];
+			if (!firstNetId) continue;
+			const instAnchor = anchors.get(`${row.id}|${firstNetId}`);
+			if (!instAnchor) continue;
+			result.push({
+				key: `lb-curve|${lbItem.lb.id}|${member.id}`,
+				x1: lbAnchor.x, y1: lbAnchor.y,
+				x2: instAnchor.x, y2: instAnchor.y,
+			});
+		}
+		return result;
+	});
+
+	// ── Layout constants ──────────────────────────────────────────────────────
 	const LANE_W = 180;
+	const LANE_GAP = 16;
 	const LANE_PAD = 16;
 	const SIDEBAR_W = 300;
+	const STAT_CARD_H = 80;
+
+	const canvasContentW = $derived(
+		LANE_PAD * 2 + orderedNetworks.length * LANE_W + Math.max(0, orderedNetworks.length - 1) * LANE_GAP
+	);
 
 	const laneXMap = $derived.by(() => {
 		const m = new Map<string, number>();
 		orderedNetworks.forEach((n, i) => {
-			// X is relative to the overlay container (full width)
-			// Canvas starts at SIDEBAR_W. Lane center within canvas:
-			const laneCenterInCanvas = LANE_PAD + i * LANE_W + LANE_W / 2;
+			const laneCenterInCanvas = LANE_PAD + i * (LANE_W + LANE_GAP) + LANE_W / 2;
 			m.set(n.id, SIDEBAR_W + laneCenterInCanvas);
 		});
 		return m;
 	});
 
-	// ── Anchor measurement ────────────────────────────────────────────────────
-	function measureAnchors() {
-		if (!containerEl || !sidebarEl) return;
-		const containerRect = containerEl.getBoundingClientRect();
-		const newAnchors = new Map<string, { x: number; y: number }>();
+	const laneHeight = $derived(Math.max(400, sidebarHeight - STAT_CARD_H));
 
-		const anchorEls = sidebarEl.querySelectorAll('[data-anchor-key]');
-		for (const el of anchorEls) {
-			const key = (el as HTMLElement).dataset.anchorKey;
+	// ── Anchor measurement (offsetLeft/offsetTop chain, sticky-safe) ──────────
+	function offsetWithin(el: HTMLElement, ancestor: HTMLElement): { x: number; y: number } {
+		let x = 0, y = 0;
+		let cur: HTMLElement | null = el;
+		while (cur && cur !== ancestor) {
+			x += cur.offsetLeft;
+			y += cur.offsetTop;
+			cur = cur.offsetParent as HTMLElement | null;
+		}
+		return { x, y };
+	}
+
+	function measureAnchors() {
+		if (!sidebarEl) return;
+		const m = new Map<string, { x: number; y: number }>();
+		for (const el of sidebarEl.querySelectorAll<HTMLElement>('[data-anchor-key]')) {
+			const key = el.dataset.anchorKey;
 			if (!key) continue;
-			const rect = (el as HTMLElement).getBoundingClientRect();
-			// Right edge of the interface row, vertically centered
-			newAnchors.set(key, {
-				x: rect.right - containerRect.left,
-				y: rect.top + rect.height / 2 - containerRect.top,
+			const off = offsetWithin(el, sidebarEl);
+			m.set(key, {
+				x: off.x + el.offsetWidth,
+				y: off.y + el.offsetHeight / 2,
 			});
 		}
-
-		untrack(() => { anchors = newAnchors; });
+		untrack(() => { anchors = m; });
 	}
 
 	let raf = 0;
@@ -325,30 +368,28 @@
 	}
 
 	onMount(() => {
-		const ro = new ResizeObserver(() => scheduleMeasure());
+		const ro = new ResizeObserver((entries) => {
+			for (const entry of entries) {
+				if (entry.target === sidebarEl) {
+					untrack(() => { sidebarHeight = entry.contentRect.height; });
+				}
+			}
+			scheduleMeasure();
+		});
 		if (containerEl) ro.observe(containerEl);
+		if (sidebarEl) ro.observe(sidebarEl);
 
-		tick().then(() => measureAnchors());
+		tick().then(() => {
+			if (sidebarEl) sidebarHeight = sidebarEl.offsetHeight;
+			measureAnchors();
+		});
 
 		return () => { ro.disconnect(); cancelAnimationFrame(raf); };
 	});
 
 	$effect(() => {
-		// Re-measure when card content changes (rows, search, lbItems)
 		void filteredRows; void filteredLbItems;
 		scheduleMeasure();
-	});
-
-	$effect(() => {
-		if (!containerEl) return;
-		overlayW = containerEl.offsetWidth;
-		overlayH = containerEl.offsetHeight;
-	});
-
-	// ── Lane height (height of lane vertical line) ────────────────────────────
-	const laneHeight = $derived.by(() => {
-		if (!canvasEl) return 400;
-		return Math.max(400, canvasEl.scrollHeight - 80);
 	});
 
 	// ── Selection ─────────────────────────────────────────────────────────────
@@ -363,10 +404,7 @@
 	}
 </script>
 
-<div
-	class="w-full relative"
-	bind:this={containerEl}
->
+<div class="w-full" bind:this={containerEl}>
 	<!-- Header bar -->
 	<div class="flex items-center gap-3 mb-4 flex-wrap">
 		<input
@@ -396,102 +434,143 @@
 		{/if}
 	</div>
 
-	<!-- Main layout: sidebar + canvas -->
-	<div class="flex gap-0 items-start relative">
-		<!-- Left sidebar: resource cards -->
-		<div
-			class="flex-shrink-0 flex flex-col gap-3 pr-4"
-			style="width: {SIDEBAR_W}px"
-			bind:this={sidebarEl}
-		>
-			{#if routerRows.length > 0}
-				<div class="text-[10px] font-semibold text-gray-500 uppercase tracking-wide px-1">
-					라우터 ({routerRows.length})
-				</div>
-				{#each routerRows as row (row.id)}
-					<ResourceCard
-						{row}
-						{netColors}
-						{instNetBps}
-						selected={selectedId === row.id}
-						onSelect={() => selectRow(row)}
-					/>
-				{/each}
-			{/if}
+	<!-- Scrollable viewport: horizontal scroll stays inside this box -->
+	<div class="overflow-x-auto">
+		<!-- Content row: sidebar + canvas. relative for SVG overlay anchor. -->
+		<div class="flex items-start relative" style="min-width: max-content">
+			<!-- Left sidebar: resource cards (sticky — stays visible when scrolled right) -->
+			<div
+				class="sticky left-0 z-20 bg-gray-900 flex-shrink-0 flex flex-col gap-3 pr-4"
+				style="width: {SIDEBAR_W}px"
+				bind:this={sidebarEl}
+			>
+				{#if routerRows.length > 0}
+					<button
+						type="button"
+						class="flex items-center gap-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wide px-1 w-full text-left hover:text-gray-400 transition-colors"
+						onclick={() => { groupCollapsed.router = !groupCollapsed.router; scheduleMeasure(); }}
+					>
+						<span class="text-gray-600">{groupCollapsed.router ? '▸' : '▾'}</span>
+						라우터 ({routerRows.length})
+					</button>
+					{#if !groupCollapsed.router}
+						{#each routerRows as row (row.id)}
+							<!-- svelte-ignore a11y_no_static_element_interactions -->
+							<div
+								onmouseenter={() => { hoveredId = row.id; }}
+								onmouseleave={() => { hoveredId = null; }}
+							>
+								<ResourceCard
+									{row}
+									{netColors}
+									{instNetBps}
+									selected={selectedId === row.id}
+									onSelect={() => selectRow(row)}
+								/>
+							</div>
+						{/each}
+					{/if}
+				{/if}
 
-			{#if filteredLbItems.length > 0}
-				<div class="text-[10px] font-semibold text-gray-500 uppercase tracking-wide px-1 mt-1">
-					로드밸런서 ({filteredLbItems.length})
-				</div>
-				{#each filteredLbItems as { lb, vipNetId } (lb.id)}
-					<ResourceCard
-						lbItem={{ lb, vipNetId }}
-						{netColors}
-						{instNetBps}
-						selected={selectedId === lb.id}
-						onSelect={() => selectLb(lb)}
-					/>
-				{/each}
-			{/if}
+				{#if filteredLbItems.length > 0}
+					<button
+						type="button"
+						class="flex items-center gap-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wide px-1 mt-1 w-full text-left hover:text-gray-400 transition-colors"
+						onclick={() => { groupCollapsed.lb = !groupCollapsed.lb; scheduleMeasure(); }}
+					>
+						<span class="text-gray-600">{groupCollapsed.lb ? '▸' : '▾'}</span>
+						로드밸런서 ({filteredLbItems.length})
+					</button>
+					{#if !groupCollapsed.lb}
+						{#each filteredLbItems as { lb, vipNetId } (lb.id)}
+							<!-- svelte-ignore a11y_no_static_element_interactions -->
+							<div
+								onmouseenter={() => { hoveredId = lb.id; }}
+								onmouseleave={() => { hoveredId = null; }}
+							>
+								<ResourceCard
+									lbItem={{ lb, vipNetId }}
+									{netColors}
+									{instNetBps}
+									selected={selectedId === lb.id}
+									onSelect={() => selectLb(lb)}
+								/>
+							</div>
+						{/each}
+					{/if}
+				{/if}
 
-			{#if instanceRows.length > 0}
-				<div class="text-[10px] font-semibold text-gray-500 uppercase tracking-wide px-1 mt-1">
-					인스턴스 ({instanceRows.length})
-				</div>
-				{#each instanceRows as row (row.id)}
-					<ResourceCard
-						{row}
-						{netColors}
-						{instNetBps}
-						selected={selectedId === row.id}
-						onSelect={() => {
-							selectRow(row);
-							if (!onSelectInstance) goto(`/dashboard/instances/${row.id}`);
-						}}
-					/>
-				{/each}
-			{/if}
+				{#if instanceRows.length > 0}
+					<button
+						type="button"
+						class="flex items-center gap-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wide px-1 mt-1 w-full text-left hover:text-gray-400 transition-colors"
+						onclick={() => { groupCollapsed.instance = !groupCollapsed.instance; scheduleMeasure(); }}
+					>
+						<span class="text-gray-600">{groupCollapsed.instance ? '▸' : '▾'}</span>
+						인스턴스 ({instanceRows.length})
+					</button>
+					{#if !groupCollapsed.instance}
+						{#each instanceRows as row (row.id)}
+							<!-- svelte-ignore a11y_no_static_element_interactions -->
+							<div
+								onmouseenter={() => { hoveredId = row.id; }}
+								onmouseleave={() => { hoveredId = null; }}
+							>
+								<ResourceCard
+									{row}
+									{netColors}
+									{instNetBps}
+									selected={selectedId === row.id}
+									onSelect={() => {
+										selectRow(row);
+										if (!onSelectInstance) goto(`/dashboard/instances/${row.id}`);
+									}}
+								/>
+							</div>
+						{/each}
+					{/if}
+				{/if}
 
-			{#if filteredRows.length === 0 && filteredLbItems.length === 0}
-				<div class="text-xs text-gray-600 px-2 py-4">리소스 없음</div>
-			{/if}
-		</div>
+				{#if filteredRows.length === 0 && filteredLbItems.length === 0}
+					<div class="text-xs text-gray-600 px-2 py-4">리소스 없음</div>
+				{/if}
+			</div>
 
-		<!-- Center canvas: network lanes -->
-		<div
-			class="flex-1 relative"
-			bind:this={canvasEl}
-		>
-			{#if orderedNetworks.length === 0}
-				<div class="flex items-center justify-center h-40 text-gray-600 text-sm">
-					네트워크 없음
-				</div>
-			{:else}
-				<div class="flex gap-0" style="padding: 0 {LANE_PAD}px">
-					{#each orderedNetworks as net (net.id)}
-						<div style="width: {LANE_W}px">
-							<NetworkLane
-								{net}
-								color={netColors.get(net.id) ?? '#3b82f6'}
-								{traffic}
-								highlighted={highlightedNetId === net.id}
-								dimmed={highlightedNetId !== null && highlightedNetId !== net.id}
-								{laneHeight}
-							/>
-						</div>
-					{/each}
-				</div>
-			{/if}
+			<!-- Center canvas: network lanes -->
+			<div class="flex-shrink-0" style="width: {canvasContentW}px">
+				{#if orderedNetworks.length === 0}
+					<div class="flex items-center justify-center h-40 text-gray-600 text-sm">
+						네트워크 없음
+					</div>
+				{:else}
+					<div class="flex" style="gap: {LANE_GAP}px; padding: 0 {LANE_PAD}px">
+						{#each orderedNetworks as net (net.id)}
+							<div style="width: {LANE_W}px; flex-shrink: 0">
+								<NetworkLane
+									{net}
+									color={netColors.get(net.id) ?? '#3b82f6'}
+									{traffic}
+									highlighted={highlightedNetId === net.id}
+									dimmed={highlightedNetId !== null && highlightedNetId !== net.id}
+									{laneHeight}
+								/>
+							</div>
+						{/each}
+					</div>
+				{/if}
+			</div>
+
+			<!-- SVG overlay: connection lines (absolute, covers full content width) -->
+			<ConnectionOverlay
+				width={SIDEBAR_W + canvasContentW}
+				height={sidebarHeight || 400}
+				{connections}
+				{laneXMap}
+				{anchors}
+				{lbCurves}
+				selectedKey={selectedId}
+				hoveredKey={hoveredId}
+			/>
 		</div>
 	</div>
-
-	<!-- SVG overlay: connection lines -->
-	<ConnectionOverlay
-		width={overlayW}
-		height={overlayH}
-		{connections}
-		{laneXMap}
-		{anchors}
-		selectedKey={selectedId}
-	/>
 </div>

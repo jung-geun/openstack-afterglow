@@ -48,11 +48,13 @@
 		{#if cidr}
 			<div class="text-[8px] font-mono text-gray-600 mt-0.5">{cidr}</div>
 		{/if}
-		{#if netTraffic && totalBps > 0}
-			<div class="text-[8px] font-mono mt-1" style="color: {trafficColor(totalBps)}">
+		<div class="text-[8px] font-mono mt-1" style="color: {totalBps > 0 ? trafficColor(totalBps) : '#374151'}">
+			{#if netTraffic && totalBps > 0}
 				↓{formatBps(netTraffic.rx_bps)} ↑{formatBps(netTraffic.tx_bps)}
-			</div>
-		{/if}
+			{:else}
+				—
+			{/if}
+		</div>
 	</div>
 
 	<!-- Vertical line -->
