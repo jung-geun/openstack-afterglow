@@ -132,12 +132,13 @@ async function _runMultipartUpload(
 			try {
 				const start = (part_number - 1) * part_size;
 				const end = Math.min(start + part_size, file.size);
-				const blob = file.slice(start, end);
+				// MIME 타입 없는 Blob → XHR이 Content-Type 헤더를 전송하지 않음
+				// (RGW presigned URL의 X-Amz-SignedHeaders=host 서명 검증 통과용)
+				const blob = new Blob([file.slice(start, end)]);
 
 				const { etag } = await api.putAbsoluteWithProgress(
 					url,
 					blob,
-					file.type || 'application/octet-stream',
 					(e) => {
 						aggLoaded.set(part_number, e.loaded);
 						reportProgress();

@@ -182,18 +182,18 @@ export const api = {
 		return { promise, abort: () => xhr.abort() };
 	},
 
-	/** 절대 URL에 PUT (RGW presigned 등). 인증 헤더 미부착, ETag 반환. */
+	/** 절대 URL에 PUT (RGW presigned 등). 인증 헤더·Content-Type 미부착, ETag 반환.
+	 * presigned upload_part는 X-Amz-SignedHeaders=host 만 서명하므로 Content-Type을 보내면
+	 * RGW가 서명 불일치로 403을 반환할 수 있다. 호출자는 MIME 타입 없는 Blob을 전달해야 한다. */
 	putAbsoluteWithProgress(
 		url: string,
 		body: Blob,
-		contentType: string,
 		onProgress: (p: { loaded: number; total: number }) => void,
 		signal?: AbortSignal,
 	): Promise<{ etag: string }> {
 		return new Promise((resolve, reject) => {
 			const xhr = new XMLHttpRequest();
 			xhr.open('PUT', url, true);
-			xhr.setRequestHeader('Content-Type', contentType);
 			xhr.upload.onprogress = (e) => {
 				if (e.lengthComputable) onProgress({ loaded: e.loaded, total: e.total });
 			};

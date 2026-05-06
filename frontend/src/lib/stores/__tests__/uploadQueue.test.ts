@@ -90,7 +90,6 @@ describe('uploadQueue', () => {
 		expect(api.putAbsoluteWithProgress).toHaveBeenCalledWith(
 			'https://rgw/p1',
 			expect.any(Blob),
-			'text/plain',
 			expect.any(Function),
 			expect.any(AbortSignal)
 		);
@@ -171,7 +170,7 @@ describe('uploadQueue', () => {
 		// init 성공, PUT 단계에서 AbortError 발생
 		vi.mocked(api.post).mockResolvedValueOnce(INIT_RESP);
 		vi.mocked(api.putAbsoluteWithProgress).mockImplementation(
-			(_url, _body, _ct, _onProgress, signal) =>
+			(_url, _body, _onProgress, signal) =>
 				new Promise((_res, rej) => {
 					signal?.addEventListener('abort', () => rej(new ApiError(0, '취소')));
 				})
