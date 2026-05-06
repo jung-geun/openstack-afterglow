@@ -12,11 +12,19 @@ _PROJECT_ID = "test-project-123"
 # ── 헬퍼 ─────────────────────────────────────────────────────────────────────
 
 
-def _mock_port(device_id: str, network_id: str, device_owner: str = "compute:nova"):
+def _mock_port(
+    device_id: str,
+    network_id: str,
+    device_owner: str = "compute:nova",
+    port_id: str | None = None,
+    mac_address: str | None = None,
+):
     p = MagicMock()
+    p.id = port_id or f"port-{device_id}"
     p.device_id = device_id
     p.device_owner = device_owner
     p.network_id = network_id
+    p.mac_address = mac_address or "fa:16:3e:00:00:01"
     p.fixed_ips = [{"ip_address": "10.0.0.1", "subnet_id": "sub-1"}]
     return p
 
@@ -31,17 +39,19 @@ def _prom_instant_response(label_val_pairs: list[tuple[dict, float]]):
 
 @pytest.mark.anyio
 async def test_traffic_returns_instances_from_promql(client, mock_conn):
-    """VM rx/tx bps 가 응답에 포함되고 byte→bit 변환(×8)이 적용돼야 한다."""
-    mock_conn.network.ports.return_value = [_mock_port("uuid-1", "net-a")]
+    """node_exporter 결과에서 VM rx/tx bps 가 응답에 포함되고 byte→bit 변환(×8)이 적용돼야 한다."""
+    mock_conn.network.ports.return_value = [
+        _mock_port("uuid-1", "net-a", port_id="port-1", mac_address="fa:16:3e:00:00:01")
+    ]
 
     rx_pairs = _prom_instant_response(
         [
-            ({"instance_id": "uuid-1"}, 125_000.0),  # 125kB/s → 1Mbps
+            ({"instance_id": "uuid-1", "device": "ens3"}, 125_000.0),  # 125kB/s → 1Mbps
         ]
     )
     tx_pairs = _prom_instant_response(
         [
-            ({"instance_id": "uuid-1"}, 62_500.0),  # 62.5kB/s → 500kbps
+            ({"instance_id": "uuid-1", "device": "ens3"}, 62_500.0),  # 62.5kB/s → 500kbps
         ]
     )
 
@@ -61,16 +71,16 @@ async def test_traffic_returns_instances_from_promql(client, mock_conn):
 
 @pytest.mark.anyio
 async def test_traffic_aggregates_by_network(client, mock_conn):
-    """같은 네트워크에 속한 VM들의 bps 가 network 합산에 반영돼야 한다."""
+    """같은 네트워크에 속한 VM 들의 bps 가 network 합산에 반영돼야 한다."""
     mock_conn.network.ports.return_value = [
-        _mock_port("uuid-1", "net-a"),
-        _mock_port("uuid-2", "net-a"),
+        _mock_port("uuid-1", "net-a", port_id="port-1", mac_address="fa:16:3e:00:00:01"),
+        _mock_port("uuid-2", "net-a", port_id="port-2", mac_address="fa:16:3e:00:00:02"),
     ]
 
     rx_pairs = _prom_instant_response(
         [
-            ({"instance_id": "uuid-1"}, 100.0),
-            ({"instance_id": "uuid-2"}, 200.0),
+            ({"instance_id": "uuid-1", "device": "ens3"}, 100.0),
+            ({"instance_id": "uuid-2", "device": "ens3"}, 200.0),
         ]
     )
     tx_pairs: list = []
@@ -123,7 +133,9 @@ async def test_traffic_prom_unavailable_falls_back(client, mock_conn):
     """PromUnavailable 발생 시 instances={} 로 fallback — 전체 500 금지."""
     from app.services.prom_query import PromUnavailable
 
-    mock_conn.network.ports.return_value = [_mock_port("uuid-1", "net-a")]
+    mock_conn.network.ports.return_value = [
+        _mock_port("uuid-1", "net-a", port_id="port-1", mac_address="fa:16:3e:00:00:01")
+    ]
 
     with (
         patch(
@@ -215,22 +227,24 @@ async def test_query_instant_multi_parses_results():
     assert val1 == 10.0
 
 
-# ── 테스트: libvirt-exporter 폴백 ────────────────────────────────────────────
+# ── 테스트: libvirt-exporter MAC 기반 demux ───────────────────────────────────
 
 
 @pytest.mark.anyio
 async def test_traffic_libvirt_fills_missing_instances(client, mock_conn):
-    """node_exporter 결과에 없는 instance 를 libvirt-exporter 결과로 채워야 한다."""
+    """node_exporter 에 없는 인스턴스를 libvirt MAC 기반 경로로 채워야 한다."""
+    MAC1 = "fa:16:3e:00:00:01"
+    MAC2 = "fa:16:3e:00:00:02"
     mock_conn.network.ports.return_value = [
-        _mock_port("uuid-1", "net-a"),
-        _mock_port("uuid-2", "net-a"),
+        _mock_port("uuid-1", "net-a", port_id="port-1", mac_address=MAC1),
+        _mock_port("uuid-2", "net-a", port_id="port-2", mac_address=MAC2),
     ]
 
     # uuid-1 은 node_exporter 에만, uuid-2 는 libvirt 에만 있음
-    ne_rx = _prom_instant_response([({"instance_id": "uuid-1"}, 100.0)])
+    ne_rx = _prom_instant_response([({"instance_id": "uuid-1", "device": "ens3"}, 100.0)])
     ne_tx: list = []
-    lv_rx = _prom_instant_response([({"instance_id": "uuid-2"}, 200.0)])
-    lv_tx = _prom_instant_response([({"instance_id": "uuid-2"}, 50.0)])
+    lv_rx = _prom_instant_response([({"instance_id": "uuid-2", "mac_address": MAC2}, 200.0)])
+    lv_tx = _prom_instant_response([({"instance_id": "uuid-2", "mac_address": MAC2}, 50.0)])
 
     with (
         patch("app.api.network.networks.query_instant_multi", new=AsyncMock(side_effect=[ne_rx, ne_tx, lv_rx, lv_tx])),
@@ -248,14 +262,29 @@ async def test_traffic_libvirt_fills_missing_instances(client, mock_conn):
 
 
 @pytest.mark.anyio
-async def test_traffic_node_exporter_takes_priority_over_libvirt(client, mock_conn):
-    """node_exporter 와 libvirt 양쪽에 같은 instance 가 있으면 node_exporter 값이 사용되어야 한다."""
-    mock_conn.network.ports.return_value = [_mock_port("uuid-1", "net-a")]
+async def test_traffic_libvirt_primary_node_exporter_supplements(client, mock_conn):
+    """libvirt 가 주 경로(NIC demux). libvirt 미관측 인스턴스는 node_exporter 로 보강."""
+    MAC1 = "fa:16:3e:00:00:01"
+    MAC2 = "fa:16:3e:00:00:02"
+    mock_conn.network.ports.return_value = [
+        _mock_port("uuid-1", "net-a", port_id="port-1", mac_address=MAC1),
+        _mock_port("uuid-2", "net-a", port_id="port-2", mac_address=MAC2),
+    ]
 
-    ne_rx = _prom_instant_response([({"instance_id": "uuid-1"}, 100.0)])
-    ne_tx = _prom_instant_response([({"instance_id": "uuid-1"}, 40.0)])
-    lv_rx = _prom_instant_response([({"instance_id": "uuid-1"}, 999.0)])  # 무시되어야 함
-    lv_tx = _prom_instant_response([({"instance_id": "uuid-1"}, 888.0)])  # 무시되어야 함
+    # uuid-1 은 libvirt + node_exporter 양쪽, uuid-2 는 node_exporter 만
+    ne_rx = _prom_instant_response(
+        [
+            ({"instance_id": "uuid-1", "device": "ens3"}, 100.0),  # libvirt 값(200)에 밀려야 함
+            ({"instance_id": "uuid-2", "device": "ens3"}, 50.0),  # libvirt 없으므로 보강
+        ]
+    )
+    ne_tx = _prom_instant_response(
+        [
+            ({"instance_id": "uuid-2", "device": "ens3"}, 10.0),
+        ]
+    )
+    lv_rx = _prom_instant_response([({"instance_id": "uuid-1", "mac_address": MAC1}, 200.0)])
+    lv_tx = _prom_instant_response([({"instance_id": "uuid-1", "mac_address": MAC1}, 80.0)])
 
     with (
         patch("app.api.network.networks.query_instant_multi", new=AsyncMock(side_effect=[ne_rx, ne_tx, lv_rx, lv_tx])),
@@ -264,15 +293,21 @@ async def test_traffic_node_exporter_takes_priority_over_libvirt(client, mock_co
         resp = await client.get("/api/networks/topology/traffic")
 
     assert resp.status_code == 200
-    inst = resp.json()["instances"]["uuid-1"]
-    assert abs(inst["rx_bps"] - 100.0 * 8) < 1
-    assert abs(inst["tx_bps"] - 40.0 * 8) < 1
+    body = resp.json()
+    # uuid-1 은 libvirt 값 사용 (200 * 8)
+    assert abs(body["instances"]["uuid-1"]["rx_bps"] - 200.0 * 8) < 1
+    assert abs(body["instances"]["uuid-1"]["tx_bps"] - 80.0 * 8) < 1
+    # uuid-2 는 node_exporter 보강 (50 * 8)
+    assert abs(body["instances"]["uuid-2"]["rx_bps"] - 50.0 * 8) < 1
+    assert abs(body["instances"]["uuid-2"]["tx_bps"] - 10.0 * 8) < 1
 
 
 @pytest.mark.anyio
 async def test_traffic_libvirt_query_uses_openstack_info_join(client, mock_conn):
-    """libvirt PromQL 2개가 libvirt_domain_interface_stats_* 와 libvirt_domain_openstack_info 조인을 사용하는지 검증."""
-    mock_conn.network.ports.return_value = [_mock_port("uuid-1", "net-a")]
+    """libvirt PromQL 2개가 openstack_info 조인과 double group_left 패턴을 사용하는지 검증."""
+    mock_conn.network.ports.return_value = [
+        _mock_port("uuid-1", "net-a", port_id="port-1", mac_address="fa:16:3e:00:00:01")
+    ]
 
     calls: list[str] = []
 
@@ -291,5 +326,170 @@ async def test_traffic_libvirt_query_uses_openstack_info_join(client, mock_conn)
     lv_calls = [q for q in calls if "libvirt_domain_interface_stats_" in q]
     assert len(lv_calls) == 2
     for q in lv_calls:
+        # 1단계 join: target_device 기준 mac_address 붙이기
+        assert "* on (domain, target_device) group_left(mac_address)" in q
+        assert "libvirt_domain_interface_stats_info" in q
+        # 2단계 join: domain 기준 instance_id 붙이기
         assert "* on (domain) group_left(instance_id)" in q
         assert "libvirt_domain_openstack_info" in q
+
+
+# ── 테스트: 멀티-NIC demux ─────────────────────────────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_traffic_multi_nic_demux(client, mock_conn):
+    """멀티-NIC 인스턴스의 NIC 가 다른 네트워크에 각각 demux 돼야 한다."""
+    MAC_A = "fa:16:3e:00:01:01"
+    MAC_B = "fa:16:3e:00:01:02"
+    mock_conn.network.ports.return_value = [
+        _mock_port("uuid-1", "net-a", port_id="port-a1", mac_address=MAC_A),
+        _mock_port("uuid-1", "net-b", port_id="port-b1", mac_address=MAC_B),
+    ]
+
+    lv_rx = _prom_instant_response(
+        [
+            ({"instance_id": "uuid-1", "mac_address": MAC_A}, 100.0),
+            ({"instance_id": "uuid-1", "mac_address": MAC_B}, 200.0),
+        ]
+    )
+    lv_tx = _prom_instant_response(
+        [
+            ({"instance_id": "uuid-1", "mac_address": MAC_A}, 10.0),
+            ({"instance_id": "uuid-1", "mac_address": MAC_B}, 20.0),
+        ]
+    )
+
+    with (
+        patch("app.api.network.networks.query_instant_multi", new=AsyncMock(side_effect=[[], [], lv_rx, lv_tx])),
+        patch("app.api.network.networks.list_load_balancers", return_value=[]),
+    ):
+        resp = await client.get("/api/networks/topology/traffic")
+
+    assert resp.status_code == 200
+    body = resp.json()
+
+    # interfaces 에 NIC 별로 2개 entry
+    assert "port-a1" in body["interfaces"]
+    assert "port-b1" in body["interfaces"]
+    assert body["interfaces"]["port-a1"]["network_id"] == "net-a"
+    assert body["interfaces"]["port-b1"]["network_id"] == "net-b"
+    assert abs(body["interfaces"]["port-a1"]["rx_bps"] - 100.0 * 8) < 1
+    assert abs(body["interfaces"]["port-b1"]["rx_bps"] - 200.0 * 8) < 1
+
+    # instances 합산 = 두 NIC 합
+    assert abs(body["instances"]["uuid-1"]["rx_bps"] - (100.0 + 200.0) * 8) < 1
+
+    # networks 가 NIC 단위로 분리
+    assert abs(body["networks"]["net-a"]["rx_bps"] - 100.0 * 8) < 1
+    assert abs(body["networks"]["net-b"]["rx_bps"] - 200.0 * 8) < 1
+
+
+@pytest.mark.anyio
+async def test_traffic_node_exporter_supplements_single_nic_to_networks(client, mock_conn):
+    """single-NIC 인스턴스가 libvirt 에 없고 node_exporter 에만 있으면 networks 에도 합산돼야 한다."""
+    MAC1 = "fa:16:3e:00:00:01"
+    mock_conn.network.ports.return_value = [
+        _mock_port("uuid-1", "net-a", port_id="port-1", mac_address=MAC1),
+    ]
+
+    ne_rx = _prom_instant_response([({"instance_id": "uuid-1", "device": "ens3"}, 100.0)])
+    ne_tx: list = []
+
+    with (
+        patch("app.api.network.networks.query_instant_multi", new=AsyncMock(side_effect=[ne_rx, ne_tx, [], []])),
+        patch("app.api.network.networks.list_load_balancers", return_value=[]),
+    ):
+        resp = await client.get("/api/networks/topology/traffic")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "uuid-1" in body["instances"]
+    assert abs(body["instances"]["uuid-1"]["rx_bps"] - 100.0 * 8) < 1
+    # single-NIC 이므로 networks 에도 합산
+    assert "net-a" in body["networks"]
+    assert abs(body["networks"]["net-a"]["rx_bps"] - 100.0 * 8) < 1
+
+
+@pytest.mark.anyio
+async def test_traffic_node_exporter_multi_nic_skips_networks_aggregation(client, mock_conn):
+    """multi-NIC 인스턴스가 libvirt 에 미관측이면 instances 는 채우되 networks 합산은 스킵해야 한다."""
+    MAC_A = "fa:16:3e:00:01:01"
+    MAC_B = "fa:16:3e:00:01:02"
+    mock_conn.network.ports.return_value = [
+        _mock_port("uuid-1", "net-a", port_id="port-a1", mac_address=MAC_A),
+        _mock_port("uuid-1", "net-b", port_id="port-b1", mac_address=MAC_B),
+    ]
+
+    ne_rx = _prom_instant_response([({"instance_id": "uuid-1", "device": "ens3"}, 300.0)])
+    ne_tx: list = []
+
+    with (
+        patch("app.api.network.networks.query_instant_multi", new=AsyncMock(side_effect=[ne_rx, ne_tx, [], []])),
+        patch("app.api.network.networks.list_load_balancers", return_value=[]),
+    ):
+        resp = await client.get("/api/networks/topology/traffic")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    # instances 는 채워져야 함
+    assert "uuid-1" in body["instances"]
+    assert abs(body["instances"]["uuid-1"]["rx_bps"] - 300.0 * 8) < 1
+    # multi-NIC 이므로 귀속 불명 → networks 에 합산 없음
+    assert "net-a" not in body["networks"]
+    assert "net-b" not in body["networks"]
+
+
+@pytest.mark.anyio
+async def test_traffic_new_attach_within_libvirt_scrape_window(client, mock_conn):
+    """attach 직후 libvirt 미스크레이프 윈도: port_map 에는 등장하되 libvirt 결과 비었을 때 200 OK."""
+    MAC1 = "fa:16:3e:00:00:01"
+    mock_conn.network.ports.return_value = [
+        _mock_port("uuid-1", "net-a", port_id="port-1", mac_address=MAC1),
+    ]
+
+    # libvirt 가 아직 스크레이프 못 한 상태 (lv_rx, lv_tx 모두 빈 리스트)
+    with (
+        patch("app.api.network.networks.query_instant_multi", new=AsyncMock(side_effect=[[], [], [], []])),
+        patch("app.api.network.networks.list_load_balancers", return_value=[]),
+    ):
+        resp = await client.get("/api/networks/topology/traffic")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    # 에러가 아닌 빈 dict 또는 rx/tx=0 으로 처리됨
+    assert isinstance(body["instances"], dict)
+    if "uuid-1" in body["instances"]:
+        assert body["instances"]["uuid-1"]["rx_bps"] == 0.0
+    assert "port-1" not in body["interfaces"]
+
+
+@pytest.mark.anyio
+async def test_traffic_libvirt_promql_uses_double_group_left(client, mock_conn):
+    """libvirt PromQL 에 mac_address 조인과 instance_id 조인이 모두 포함돼야 한다."""
+    mock_conn.network.ports.return_value = [
+        _mock_port("uuid-1", "net-a", port_id="port-1", mac_address="fa:16:3e:00:00:01")
+    ]
+
+    calls: list[str] = []
+
+    async def _capture_query(promql: str):
+        calls.append(promql)
+        return []
+
+    with (
+        patch("app.api.network.networks.query_instant_multi", side_effect=_capture_query),
+        patch("app.api.network.networks.list_load_balancers", return_value=[]),
+    ):
+        await client.get("/api/networks/topology/traffic")
+
+    lv_calls = [
+        q
+        for q in calls
+        if "libvirt_domain_interface_stats_receive_bytes_total" in q
+        or "libvirt_domain_interface_stats_transmit_bytes_total" in q
+    ]
+    assert len(lv_calls) == 2
+    for q in lv_calls:
+        assert "* on (domain, target_device) group_left(mac_address)" in q
+        assert "* on (domain) group_left(instance_id)" in q

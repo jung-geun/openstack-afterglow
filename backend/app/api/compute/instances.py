@@ -829,6 +829,7 @@ async def delete_instance(
     await asyncio.to_thread(nova.delete_server, conn, instance_id)
     await invalidate(f"afterglow:nova:{pid}:instances")
     await invalidate(f"afterglow:nova:{pid}:instance:{instance_id}")
+    await invalidate(f"afterglow:neutron:{pid}:port_mac_map")
     await rec(
         token_info,
         conn,
@@ -1271,6 +1272,7 @@ async def attach_interface(
     try:
         result = await asyncio.to_thread(nova.attach_interface, conn, instance_id, net_id)
         await invalidate(f"afterglow:neutron:{pid}:ports:{instance_id}")
+        await invalidate(f"afterglow:neutron:{pid}:port_mac_map")
         await rec(
             token_info,
             conn,
@@ -1305,6 +1307,7 @@ async def detach_interface(
     try:
         await asyncio.to_thread(nova.detach_interface, conn, instance_id, port_id)
         await invalidate(f"afterglow:neutron:{pid}:ports:{instance_id}")
+        await invalidate(f"afterglow:neutron:{pid}:port_mac_map")
         await rec(
             token_info,
             conn,

@@ -1296,3 +1296,7 @@ Option A 채택 시 본 절 진행. Option B 채택 시 사용자가 자체 구�
 - [x] `backend/app/api/network/networks.py` — libvirt-exporter 폴백: `libvirt_domain_interface_stats_*` × `libvirt_domain_openstack_info` 조인으로 node_exporter 미노출 인스턴스(테넌트망 격리) 보강. 4-fan-out 병렬 PromQL, node_exporter 우선
 - [x] `frontend/src/lib/components/GlobalTopology.svelte` — Prometheus 데이터 부재 시 인스턴스 엣지 색상을 회색이 아닌 네트워크 색으로 폴백 (`_tRow` null 체크)
 - [x] `backend/tests/test_topology_traffic.py` — 신규 3건 (libvirt 폴백, node_exporter 우선순위, PromQL 조인 패턴 검증)
+- [x] `backend/app/services/neutron.py` — `list_project_port_map` 신규 함수 (port_id → mac_address / network_id / instance_id 매핑)
+- [x] `backend/app/api/network/networks.py` — 멀티-NIC MAC 기반 demux: `libvirt_domain_interface_stats_info` 이중 group_left 조인으로 NIC 단위 `interfaces` 응답 필드 추가, `networks` 합산 정확도 개선, 포트맵 Redis 캐시(ttl_static=300s) 적용
+- [x] `backend/app/api/compute/instances.py` — attach_interface / detach_interface / delete_server 에 `port_mac_map` 캐시 무효화 hook 추가
+- [x] `backend/tests/test_topology_traffic.py` — 신규 8건 (멀티-NIC demux, single/multi-NIC networks 합산 분기, libvirt 주경로 + node_exporter 보강, libvirt 미스크레이프 윈도, PromQL double group_left 패턴 검증)

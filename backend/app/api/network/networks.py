@@ -29,7 +29,7 @@ from app.models.storage import (
 )
 from app.rate_limit import limiter
 from app.services import neutron, nova
-from app.services.cache import cached_call, invalidate, ttl_fast, ttl_normal
+from app.services.cache import cached_call, invalidate, ttl_fast, ttl_normal, ttl_static
 from app.services.octavia import get_lb_stats, get_topology_lbs, lb_rate_from_snapshot, list_load_balancers
 from app.services.prom_query import PromBadQuery, PromUnavailable, query_instant_multi
 
@@ -404,30 +404,47 @@ async def get_topology_traffic(
     """현재 토폴로지의 모든 리소스 instant 트래픽 (rx/tx bps).
 
     구조 엔드포인트(/topology)와 분리 — 15s 단주기 폴링 전용.
-    반환: { ts, instances: {uuid: {rx_bps, tx_bps}}, networks, routers, load_balancers, _meta }
+    반환: { ts, instances, networks, interfaces, routers, load_balancers, _meta }
     """
     project_id = token_info.get("project_id", "") or conn._afterglow_project_id
 
-    # 1) compute port 매핑 (Neutron 1회) — instance_ids + network→[instance_id]
-    instance_ids, net_to_instances = await asyncio.to_thread(neutron.list_project_compute_ports, conn, project_id)
+    # 1) compute 포트맵 — MAC↔port_id↔network_id 매핑 (Redis 캐시, TTL 300s)
+    port_map: dict[str, dict] = await cached_call(
+        f"afterglow:neutron:{project_id}:port_mac_map",
+        ttl_static(),
+        lambda: neutron.list_project_port_map(conn, project_id),
+    )
+    # mac_address → {port_id, instance_id, network_id} 역인덱스
+    mac_idx: dict[str, dict] = {
+        v["mac_address"]: {"port_id": pid, **v} for pid, v in port_map.items() if v.get("mac_address")
+    }
+    instance_ids = list({v["instance_id"] for v in port_map.values() if v.get("instance_id")})
+    # instance → [port_id] 맵 (단일NIC 판별용)
+    instance_ports: dict[str, list[str]] = {}
+    for pid, v in port_map.items():
+        iid = v.get("instance_id")
+        if iid:
+            instance_ports.setdefault(iid, []).append(pid)
 
-    # 2) PromQL instant queries — node_exporter + libvirt-exporter 폴백 병렬 실행
+    # 2) PromQL instant queries — 5-fan-out 병렬 실행
     _exclude = r"lo|veth.*|docker.*|cni.*|tap.*|qbr.*"
+    interfaces: dict[str, dict] = {}
     instances: dict[str, dict[str, float]] = {}
+
     if instance_ids:
-        # UUID 는 [0-9a-f-] 만 포함 — 정규식 메타문자 없으므로 escape 불필요.
-        # re.escape 를 쓰면 하이픈이 \- 로 escape 되어 Prometheus RE2 가 거부함.
+        # UUID 는 [0-9a-f-] 만 포함 — re.escape 쓰면 \- 로 인해 Prometheus RE2 거부.
         regex = "|".join(instance_ids)
         rx_q = (
-            f"sum by (instance_id) (rate(node_network_receive_bytes_total"
+            f"sum by (instance_id, device) (rate(node_network_receive_bytes_total"
             f'{{instance_id=~"{regex}",device!~"{_exclude}"}}[2m]))'
         )
         tx_q = rx_q.replace("receive", "transmit")
-        # libvirt-exporter: 테넌트망 격리로 node_exporter 미노출 인스턴스 보강.
-        # domain 라벨(instance-XXXXXXXX) → libvirt_domain_openstack_info 조인 → instance_id(UUID).
+        # libvirt: NIC 단위 demux. group_left 2단계 중첩으로 mac_address + instance_id 동시 보존.
         lv_rx_q = (
-            f"sum by (instance_id) ("
-            f"rate(libvirt_domain_interface_stats_receive_bytes_total[2m])"
+            f"sum by (instance_id, mac_address) ("
+            f"(rate(libvirt_domain_interface_stats_receive_bytes_total[2m])"
+            f" * on (domain, target_device) group_left(mac_address)"
+            f"   libvirt_domain_interface_stats_info)"
             f" * on (domain) group_left(instance_id)"
             f' libvirt_domain_openstack_info{{instance_id=~"{regex}"}})'
         )
@@ -442,37 +459,82 @@ async def get_topology_traffic(
         except (PromUnavailable, PromBadQuery) as exc:
             _logger.warning("토폴로지 트래픽 PromQL 실패 — 폴백: %s", exc)
             rx_pairs = tx_pairs = lv_rx_pairs = lv_tx_pairs = []
-        # node_exporter 우선 적용
+
+        # libvirt 결과 → interfaces (NIC demux 주 경로)
+        _lv_mac_rx: dict[str, float] = {}
+        for labels, val in lv_rx_pairs:
+            mac = (labels.get("mac_address") or "").lower()
+            iid = labels.get("instance_id")
+            info = mac_idx.get(mac)
+            if not info or info["instance_id"] != iid:
+                continue
+            pid = info["port_id"]
+            interfaces.setdefault(
+                pid,
+                {
+                    "instance_id": iid,
+                    "network_id": info["network_id"],
+                    "mac_address": mac,
+                    "rx_bps": 0.0,
+                    "tx_bps": 0.0,
+                },
+            )["rx_bps"] = val * 8
+            _lv_mac_rx[mac] = val * 8
+        for labels, val in lv_tx_pairs:
+            mac = (labels.get("mac_address") or "").lower()
+            iid = labels.get("instance_id")
+            info = mac_idx.get(mac)
+            if not info or info["instance_id"] != iid:
+                continue
+            pid = info["port_id"]
+            if pid in interfaces:
+                interfaces[pid]["tx_bps"] = val * 8
+            else:
+                interfaces[pid] = {
+                    "instance_id": iid,
+                    "network_id": info["network_id"],
+                    "mac_address": mac,
+                    "rx_bps": 0.0,
+                    "tx_bps": val * 8,
+                }
+
+        # interfaces → instances / networks 합산
+        networks: dict[str, dict[str, float]] = {}
+        for ent in interfaces.values():
+            iid, nid = ent["instance_id"], ent["network_id"]
+            inst = instances.setdefault(iid, {"rx_bps": 0.0, "tx_bps": 0.0})
+            inst["rx_bps"] += ent["rx_bps"]
+            inst["tx_bps"] += ent["tx_bps"]
+            net = networks.setdefault(nid, {"rx_bps": 0.0, "tx_bps": 0.0})
+            net["rx_bps"] += ent["rx_bps"]
+            net["tx_bps"] += ent["tx_bps"]
+
+        # node_exporter 결과 — libvirt 미관측 인스턴스 보강
+        ne_instances: dict[str, dict[str, float]] = {}
         for labels, val in rx_pairs:
             iid = labels.get("instance_id")
             if iid:
-                instances.setdefault(iid, {"rx_bps": 0.0, "tx_bps": 0.0})["rx_bps"] = val * 8
+                ne_instances.setdefault(iid, {"rx_bps": 0.0, "tx_bps": 0.0})["rx_bps"] = val * 8
         for labels, val in tx_pairs:
             iid = labels.get("instance_id")
             if iid:
-                instances.setdefault(iid, {"rx_bps": 0.0, "tx_bps": 0.0})["tx_bps"] = val * 8
-        # libvirt 폴백 — node_exporter 결과에 없는 instance 만 채움
-        _lv_added: set[str] = set()
-        for labels, val in lv_rx_pairs:
-            iid = labels.get("instance_id")
-            if iid and iid not in instances:
-                instances[iid] = {"rx_bps": val * 8, "tx_bps": 0.0}
-                _lv_added.add(iid)
-        for labels, val in lv_tx_pairs:
-            iid = labels.get("instance_id")
-            if iid and iid not in instances:
-                instances[iid] = {"rx_bps": 0.0, "tx_bps": val * 8}
-            elif iid in _lv_added:
-                instances[iid]["tx_bps"] = val * 8
+                ne_instances.setdefault(iid, {"rx_bps": 0.0, "tx_bps": 0.0})["tx_bps"] = val * 8
+        for iid, ne_vals in ne_instances.items():
+            if iid in instances:
+                continue
+            instances[iid] = ne_vals
+            # 단일NIC 인스턴스만 networks 합산 (다중NIC는 귀속 네트워크 불명확)
+            ports = instance_ports.get(iid, [])
+            if len(ports) == 1:
+                nid = port_map.get(ports[0], {}).get("network_id", "")
+                if nid:
+                    net = networks.setdefault(nid, {"rx_bps": 0.0, "tx_bps": 0.0})
+                    net["rx_bps"] += ne_vals["rx_bps"]
+                    net["tx_bps"] += ne_vals["tx_bps"]
+    else:
+        networks = {}
 
-    # 3) 네트워크별 합산 — 백엔드에서 instance 결과 집계
-    networks: dict[str, dict[str, float]] = {}
-    for net_id, iids in net_to_instances.items():
-        rx = sum(instances.get(i, {}).get("rx_bps", 0.0) for i in iids)
-        tx = sum(instances.get(i, {}).get("tx_bps", 0.0) for i in iids)
-        networks[net_id] = {"rx_bps": rx, "tx_bps": tx}
-
-    # 4) LB stats — Octavia /stats 차분 (병렬)
+    # 3) LB stats — Octavia /stats 차분 (병렬)
     lbs = await asyncio.to_thread(list_load_balancers, conn, project_id)
 
     async def _lb_one(lb_id: str) -> tuple[str, dict[str, float]] | None:
@@ -488,6 +550,7 @@ async def get_topology_traffic(
         "ts": int(time.time()),
         "instances": instances,
         "networks": networks,
+        "interfaces": interfaces,
         "routers": {},  # Phase 2 — kolla ovs/libvirt exporter 활성화 후 채워짐
         "load_balancers": load_balancers,
         "_meta": {"router_traffic": "exporter_required"},

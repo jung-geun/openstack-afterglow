@@ -1009,3 +1009,22 @@ def list_project_compute_ports(conn, project_id: str) -> tuple[list[str], dict[s
             if server_id not in lst:
                 lst.append(server_id)
     return instance_ids, net_to_instances
+
+
+def list_project_port_map(conn, project_id: str) -> dict[str, dict]:
+    """compute 포트 상세 매핑 반환.
+
+    Returns:
+        {port_id: {"instance_id", "network_id", "mac_address"}}
+    멀티-NIC 트래픽 demux 와 포트맵 캐싱에 사용.
+    """
+    out: dict[str, dict] = {}
+    for p in conn.network.ports(project_id=project_id):
+        if not p.device_id or not (p.device_owner or "").startswith("compute:"):
+            continue
+        out[p.id] = {
+            "instance_id": p.device_id,
+            "network_id": p.network_id or "",
+            "mac_address": (p.mac_address or "").lower(),
+        }
+    return out
