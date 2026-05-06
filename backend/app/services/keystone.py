@@ -478,6 +478,50 @@ def list_user_groups(token: str, user_id: str) -> list[dict]:
     ]
 
 
+def ensure_ec2_credentials(token: str, user_id: str, project_id: str) -> dict:
+    """Keystone EC2 credential 자동 발급 + 인메모리 캐시.
+
+    Returns: {"access": str, "secret": str}
+    """
+    import httpx
+
+    settings = get_settings()
+    base = settings.os_auth_url.rstrip("/")
+    # /v3/... 형태이면 그대로, 없으면 /v3 붙이기
+    if not base.endswith("/v3"):
+        base = base
+
+    headers = {"X-Auth-Token": token}
+    url = f"{base}/users/{user_id}/credentials/OS-EC2"
+
+    try:
+        resp = httpx.get(url, headers=headers, verify=settings.ssl_verify, timeout=15)
+        resp.raise_for_status()
+        existing = resp.json().get("credentials", [])
+    except Exception:
+        _logger.warning("EC2 credentials 조회 실패, 신규 발급 시도", exc_info=True)
+        existing = []
+
+    cred = next((c for c in existing if c.get("tenant_id") == project_id), None)
+
+    if not cred:
+        try:
+            post_resp = httpx.post(
+                url,
+                json={"tenant_id": project_id},
+                headers=headers,
+                verify=settings.ssl_verify,
+                timeout=15,
+            )
+            post_resp.raise_for_status()
+            cred = post_resp.json().get("credential", {})
+        except Exception as e:
+            _logger.exception("EC2 credential 발급 실패: user=%s project=%s", user_id, project_id)
+            raise RuntimeError(f"EC2 credential 발급 실패: {e}") from e
+
+    return {"access": cred["access"], "secret": cred["secret"]}
+
+
 def list_projects(token: str) -> list[dict]:
     """
     사용자가 접근 가능한 프로젝트 목록 반환.

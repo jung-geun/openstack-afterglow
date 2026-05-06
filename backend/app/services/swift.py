@@ -69,7 +69,7 @@ def list_containers(conn) -> list[dict]:
         result = []
         for c in all_containers:
             cname = c.name or ""
-            if cname.endswith("_segments"):
+            if cname.endswith("_segments") or cname.endswith("-quarantine"):
                 continue
             base_bytes = getattr(c, "bytes", 0) or 0
             result.append(

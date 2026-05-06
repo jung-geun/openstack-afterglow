@@ -12,20 +12,22 @@
 
 	const { containerName, prefix = '', token, projectId, onSuccess, onClose }: Props = $props();
 
-	let file = $state<File | null>(null);
+	let files = $state<FileList | null>(null);
 	let error = $state('');
 
 	function enqueue() {
-		if (!file) return;
-		uploadQueue.enqueue(file, {
-			containerName,
-			prefix,
-			token,
-			projectId,
-			onComplete: (job) => {
-				if (job.status === 'success') onSuccess();
-			}
-		});
+		if (!files || files.length === 0) return;
+		for (const file of Array.from(files)) {
+			uploadQueue.enqueue(file, {
+				containerName,
+				prefix,
+				token,
+				projectId,
+				onComplete: (job) => {
+					if (job.status === 'success') onSuccess();
+				}
+			});
+		}
 		onClose();
 	}
 
@@ -53,8 +55,9 @@
 		<div class="space-y-3">
 			<input
 				type="file"
+				multiple
 				onchange={(e) => {
-					file = (e.target as HTMLInputElement).files?.[0] ?? null;
+					files = (e.target as HTMLInputElement).files;
 					error = '';
 				}}
 				class="w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:bg-gray-700 file:text-white hover:file:bg-gray-600"
@@ -71,7 +74,7 @@
 			>취소</button>
 			<button
 				onclick={enqueue}
-				disabled={!file}
+				disabled={!files || files.length === 0}
 				class="px-4 py-2 text-sm bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-lg transition-colors"
 			>업로드</button>
 		</div>

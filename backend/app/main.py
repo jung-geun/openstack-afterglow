@@ -387,8 +387,10 @@ if _svc_cfg.service_trove_enabled:
     app.include_router(trove_router, prefix="/api/database-instances", tags=["database"])
 if _svc_cfg.service_swift_enabled:
     from app.api.object_storage.containers import router as swift_router
+    from app.api.object_storage.upload import router as swift_upload_router
 
     app.include_router(swift_router, prefix="/api/object-storage", tags=["object-storage"])
+    app.include_router(swift_upload_router)
 # Common
 app.include_router(dashboard_router, prefix="/api/dashboard", tags=["dashboard"])
 app.include_router(metrics_router, prefix="/api/metrics", tags=["metrics"])

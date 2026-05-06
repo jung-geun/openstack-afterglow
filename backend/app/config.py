@@ -157,6 +157,8 @@ def _load_toml() -> dict:
     flat["k3s_barbican_kms_kek_id"] = k3s.get("barbican_kms_kek_id", "")
     # LB 네트워크 분리: OCCM Service LB 공통 VIP 서브넷
     flat["k3s_lb_subnet_id"] = k3s.get("lb_subnet_id", "")
+    # API LB VIP 네트워크 (모드 A: provider 네트워크 직접 지정)
+    flat["k3s_api_lb_vip_network_id"] = k3s.get("api_lb_vip_network_id", "")
     # FCOS (Fedora CoreOS) 이미지 ID
     flat["k3s_fcos_image_id"] = k3s.get("fcos_image_id", "")
 
@@ -254,6 +256,12 @@ class Settings(BaseSettings):
     # Swift 설정
     os_swift_endpoint: str = ""
     os_swift_upload_timeout: int = 1800  # 대용량 업로드용 타임아웃 (초)
+    # S3 Direct Upload 설정 (Ceph RGW S3 endpoint 대상)
+    os_s3_endpoint: str = "https://s3.dmslab.re.kr"
+    upload_part_size_mb: int = 50
+    upload_url_expires_sec: int = 3600
+    upload_tx_ttl_sec: int = 86400
+    app_origin: str = "https://union.dmslab.re.kr"
     os_manila_share_network_id: str = ""
     os_manila_share_type: str = "cephfs"
     os_manila_nfs_share_type: str = "nfstype"
@@ -329,6 +337,8 @@ class Settings(BaseSettings):
     k3s_barbican_kms_kek_id: str = ""
     # LB 네트워크 분리: OCCM Service LB VIP 서브넷 (미설정 시 클러스터 네트워크의 첫 서브넷)
     k3s_lb_subnet_id: str = ""
+    # API LB VIP 네트워크 (모드 A: provider 네트워크 직접 지정, 설정 시 FIP 불필요)
+    k3s_api_lb_vip_network_id: str = ""
     # FCOS (Fedora CoreOS) 이미지 ID (os_type=fcos 클러스터에 사용)
     k3s_fcos_image_id: str = ""
 

@@ -657,10 +657,12 @@ def test_delete_container_cascades_segments():
     proxy.delete_container = MagicMock()
     proxy.delete_object = MagicMock()
     # SLO manifest 아님으로 설정 → delete_object 경로를 단순화
-    proxy.get_object_metadata = MagicMock(return_value=MagicMock(
-        is_static_large_object=False,
-        x_static_large_object="",
-    ))
+    proxy.get_object_metadata = MagicMock(
+        return_value=MagicMock(
+            is_static_large_object=False,
+            x_static_large_object="",
+        )
+    )
 
     conn = MagicMock()
     conn.object_store = proxy
@@ -714,11 +716,14 @@ def test_upload_object_below_5gib_uses_single_put():
     proxy.create_object = MagicMock(return_value=MagicMock(name="big.bin", etag="abc"))
     conn = MagicMock()
     conn.object_store = proxy
-    four_gib = 4 * 1024 ** 3
+    four_gib = 4 * 1024**3
 
     with patch.object(swift_svc, "_apply_endpoint_override"):
         result = swift_svc.upload_object(
-            conn, "test", "big.bin", BytesIO(b""),
+            conn,
+            "test",
+            "big.bin",
+            BytesIO(b""),
             content_type="application/octet-stream",
             content_length=four_gib,
         )
@@ -736,17 +741,61 @@ def test_upload_object_above_5gib_uses_slo():
 
     conn = MagicMock()
     conn.object_store = MagicMock()
-    six_gib = 6 * 1024 ** 3
+    six_gib = 6 * 1024**3
 
     with (
         patch.object(swift_svc, "_apply_endpoint_override"),
-        patch.object(swift_svc, "_upload_slo", return_value={"name": "huge.bin", "bytes": six_gib, "container": "test", "etag": ""}) as mock_slo,
+        patch.object(
+            swift_svc,
+            "_upload_slo",
+            return_value={"name": "huge.bin", "bytes": six_gib, "container": "test", "etag": ""},
+        ) as mock_slo,
     ):
         result = swift_svc.upload_object(
-            conn, "test", "huge.bin", BytesIO(b""),
+            conn,
+            "test",
+            "huge.bin",
+            BytesIO(b""),
             content_type="application/octet-stream",
             content_length=six_gib,
         )
 
     mock_slo.assert_called_once()
     assert result["bytes"] == six_gib
+
+
+def test_list_containers_filters_quarantine_suffix():
+    """list_containers가 -quarantine suffix 컨테이너를 결과에서 제외."""
+    from unittest.mock import MagicMock, patch
+
+    from app.services import swift as swift_svc
+
+    fake_conn = MagicMock()
+    c1 = MagicMock()
+    c1.name = "test"
+    c1.count = 5
+    c1.bytes = 1024
+    c2 = MagicMock()
+    c2.name = "test-quarantine"
+    c2.count = 0
+    c2.bytes = 0
+    c3 = MagicMock()
+    c3.name = "test_segments"
+    c3.count = 9
+    c3.bytes = 8 * 1024**3
+    c4 = MagicMock()
+    c4.name = "other"
+    c4.count = 1
+    c4.bytes = 100
+
+    fake_conn.object_store.containers.return_value = [c1, c2, c3, c4]
+    fake_conn.object_store.get_endpoint.return_value = "http://swift/v1"
+
+    with patch.object(swift_svc, "_apply_endpoint_override"):
+        out = swift_svc.list_containers(fake_conn)
+
+    names = [c["name"] for c in out]
+    assert "test" in names
+    assert "other" in names
+    assert "test-quarantine" not in names
+    assert "test_segments" not in names

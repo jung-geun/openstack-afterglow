@@ -182,6 +182,35 @@ export const api = {
 		return { promise, abort: () => xhr.abort() };
 	},
 
+	/** 절대 URL에 PUT (RGW presigned 등). 인증 헤더 미부착, ETag 반환. */
+	putAbsoluteWithProgress(
+		url: string,
+		body: Blob,
+		contentType: string,
+		onProgress: (p: { loaded: number; total: number }) => void,
+		signal?: AbortSignal,
+	): Promise<{ etag: string }> {
+		return new Promise((resolve, reject) => {
+			const xhr = new XMLHttpRequest();
+			xhr.open('PUT', url, true);
+			xhr.setRequestHeader('Content-Type', contentType);
+			xhr.upload.onprogress = (e) => {
+				if (e.lengthComputable) onProgress({ loaded: e.loaded, total: e.total });
+			};
+			xhr.onload = () => {
+				if (xhr.status >= 200 && xhr.status < 300) {
+					resolve({ etag: xhr.getResponseHeader('ETag') || '' });
+				} else {
+					reject(new ApiError(xhr.status, `PUT failed: ${xhr.status}`));
+				}
+			};
+			xhr.onerror = () => reject(new ApiError(0, '네트워크 오류가 발생했습니다'));
+			xhr.onabort = () => reject(new ApiError(0, '업로드가 취소되었습니다'));
+			signal?.addEventListener('abort', () => xhr.abort());
+			xhr.send(body);
+		});
+	},
+
 	downloadBlob: async (path: string, token?: string, projectId?: string): Promise<{ blob: Blob; filename: string }> => {
 		const headers: Record<string, string> = { 'Content-Type': 'application/json' };
 		if (token) headers['X-Auth-Token'] = token;
