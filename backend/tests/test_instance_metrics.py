@@ -232,3 +232,139 @@ async def test_batch_invalid_metric_returns_422(client):
     """알 수 없는 메트릭 키 포함 시 422."""
     resp = await client.get("/api/instances/inst-1/metrics-batch?metrics=cpu,xyz_unknown&range=1h")
     assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# libvirt-exporter 폴백 테스트
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_instance_metrics_cpu_fallback_to_libvirt(client):
+    """node_exporter 빈 시계열 → libvirt 폴백 호출 → 시계열 반환."""
+    libvirt_series = [{"ts": 1700000000, "value": 35.0}]
+
+    async def _side_effect(expr: str, **kwargs):
+        if "node_cpu_seconds_total" in expr:
+            return []
+        return libvirt_series
+
+    with (
+        patch("app.api.compute.instance_metrics.nova.get_server", return_value=_FAKE_INSTANCE),
+        patch("app.api.compute.instance_metrics.query_range", new=AsyncMock(side_effect=_side_effect)),
+    ):
+        resp = await client.get("/api/instances/inst-1/metrics?metric=cpu&range=1h")
+
+    assert resp.status_code == 200
+    assert resp.json()["series"] == libvirt_series
+
+
+@pytest.mark.anyio
+async def test_instance_metrics_memory_fallback(client):
+    """메모리 node_exporter 빈 → libvirt memory_stats_used_percent 폴백."""
+    libvirt_series = [{"ts": 1700000000, "value": 68.5}]
+
+    async def _side_effect(expr: str, **kwargs):
+        if "node_memory_MemAvailable_bytes" in expr:
+            return []
+        return libvirt_series
+
+    with (
+        patch("app.api.compute.instance_metrics.nova.get_server", return_value=_FAKE_INSTANCE),
+        patch("app.api.compute.instance_metrics.query_range", new=AsyncMock(side_effect=_side_effect)),
+    ):
+        resp = await client.get("/api/instances/inst-1/metrics?metric=memory&range=1h")
+
+    assert resp.status_code == 200
+    assert resp.json()["series"] == libvirt_series
+
+
+@pytest.mark.anyio
+async def test_instance_metrics_network_rx_fallback(client):
+    """network_rx node_exporter 빈 → libvirt interface_stats 폴백."""
+    libvirt_series = [{"ts": 1700000000, "value": 1024.0}]
+
+    async def _side_effect(expr: str, **kwargs):
+        if "node_network_receive_bytes_total" in expr:
+            return []
+        return libvirt_series
+
+    with (
+        patch("app.api.compute.instance_metrics.nova.get_server", return_value=_FAKE_INSTANCE),
+        patch("app.api.compute.instance_metrics.query_range", new=AsyncMock(side_effect=_side_effect)),
+    ):
+        resp = await client.get("/api/instances/inst-1/metrics?metric=network_rx&range=1h")
+
+    assert resp.status_code == 200
+    assert resp.json()["series"] == libvirt_series
+
+
+@pytest.mark.anyio
+async def test_instance_metrics_disk_read_fallback(client):
+    """disk_read node_exporter 빈 → libvirt block_stats 폴백."""
+    libvirt_series = [{"ts": 1700000000, "value": 512.0}]
+
+    async def _side_effect(expr: str, **kwargs):
+        if "node_disk_read_bytes_total" in expr:
+            return []
+        return libvirt_series
+
+    with (
+        patch("app.api.compute.instance_metrics.nova.get_server", return_value=_FAKE_INSTANCE),
+        patch("app.api.compute.instance_metrics.query_range", new=AsyncMock(side_effect=_side_effect)),
+    ):
+        resp = await client.get("/api/instances/inst-1/metrics?metric=disk_read&range=1h")
+
+    assert resp.status_code == 200
+    assert resp.json()["series"] == libvirt_series
+
+
+@pytest.mark.anyio
+async def test_instance_metrics_node_exporter_priority_no_fallback_call(client):
+    """node_exporter 결과가 있으면 libvirt 폴백 호출 없어야 한다."""
+    call_count = 0
+
+    async def _side_effect(expr: str, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        return _FAKE_SERIES
+
+    with (
+        patch("app.api.compute.instance_metrics.nova.get_server", return_value=_FAKE_INSTANCE),
+        patch("app.api.compute.instance_metrics.query_range", new=AsyncMock(side_effect=_side_effect)),
+    ):
+        resp = await client.get("/api/instances/inst-1/metrics?metric=cpu&range=1h")
+
+    assert resp.status_code == 200
+    assert resp.json()["series"] == _FAKE_SERIES
+    assert call_count == 1  # libvirt 폴백 호출 없음
+
+
+@pytest.mark.anyio
+async def test_instance_metrics_both_empty_returns_empty_series(client):
+    """node_exporter + libvirt 모두 빈 시계열 → 빈 배열, 500 금지."""
+    with (
+        patch("app.api.compute.instance_metrics.nova.get_server", return_value=_FAKE_INSTANCE),
+        patch("app.api.compute.instance_metrics.query_range", new=AsyncMock(return_value=[])),
+    ):
+        resp = await client.get("/api/instances/inst-1/metrics?metric=cpu&range=1h")
+
+    assert resp.status_code == 200
+    assert resp.json()["series"] == []
+
+
+def test_build_libvirt_expr_returns_single_series_format():
+    """libvirt 표현식이 sum/avg by(instance_id) 로 단일 시계열을 보장해야 한다."""
+    from app.api.compute.instance_metrics import _build_libvirt_expr
+
+    uuid = "test-uuid-1234"
+    for metric in ("cpu", "memory", "network_rx", "network_tx", "disk_read", "disk_write"):
+        expr = _build_libvirt_expr(metric, uuid)
+        assert expr is not None, f"{metric}: libvirt 표현식이 None"
+        assert f'instance_id="{uuid}"' in expr, f"{metric}: instance_id 셀렉터 누락"
+        assert "group_left(instance_id)" in expr, f"{metric}: group_left 조인 누락"
+        assert "libvirt_domain_openstack_info" in expr, f"{metric}: openstack_info 조인 누락"
+
+    # GPU 는 libvirt 대체 없음
+    assert _build_libvirt_expr("gpu_util", uuid) is None
+    assert _build_libvirt_expr("gpu_mem", uuid) is None

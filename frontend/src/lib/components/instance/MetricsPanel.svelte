@@ -186,7 +186,7 @@
 				{:else if m.error}
 					<div class="flex items-center justify-center h-20 text-red-500 text-xs">{m.error}</div>
 				{:else if m.data.length === 0}
-					<div class="flex items-center justify-center h-20 text-gray-600 text-xs">데이터 없음 (node_exporter 미설치 또는 Prometheus 연결 불가)</div>
+					<div class="flex items-center justify-center h-20 text-gray-600 text-xs">메트릭 없음 (인스턴스 미가동 또는 exporter 미연동)</div>
 				{:else}
 					{@const pts = m.data}
 					{@const exPts = ex?.data ?? []}

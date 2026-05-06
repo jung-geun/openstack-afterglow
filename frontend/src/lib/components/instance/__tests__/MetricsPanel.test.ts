@@ -72,7 +72,7 @@ describe('MetricsPanel', () => {
 
 		render(MetricsPanel, { props: { instanceId: 'inst-1', isGpu: false } });
 
-		const msgs = await screen.findAllByText(/데이터 없음/);
+		const msgs = await screen.findAllByText(/메트릭 없음/);
 		expect(msgs.length).toBeGreaterThan(0);
 	});
 

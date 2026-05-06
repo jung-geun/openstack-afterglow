@@ -60,6 +60,34 @@ def _build_expr(metric: str, instance_id: str) -> str:
     raise ValueError(f"unknown metric: {metric}")
 
 
+def _build_libvirt_expr(metric: str, instance_id: str) -> str | None:
+    """libvirt-exporter 기반 폴백 PromQL. node_exporter 미노출 인스턴스(테넌트망 격리)용.
+
+    domain 라벨(instance-XXXXXXXX) → libvirt_domain_openstack_info 조인 → instance_id(UUID).
+    GPU 메트릭은 DCGM 전용이므로 None 반환.
+    """
+    iid = f'instance_id="{instance_id}"'
+    join = f"* on (domain) group_left(instance_id) libvirt_domain_openstack_info{{{iid}}}"
+    if metric == "cpu":
+        # cpu_time_seconds 는 누적 counter — vCPU 수로 나눠 0-100% 정규화
+        return (
+            f"(sum by (instance_id) (rate(libvirt_domain_info_cpu_time_seconds_total[2m]) {join})"
+            f" / sum by (instance_id) (libvirt_domain_info_virtual_cpus {join})) * 100"
+        )
+    if metric == "memory":
+        # virtio-balloon 통계가 활성화된 인스턴스에서만 유효
+        return f"avg by (instance_id) (libvirt_domain_memory_stats_used_percent {join})"
+    if metric == "network_rx":
+        return f"sum by (instance_id) (rate(libvirt_domain_interface_stats_receive_bytes_total[2m]) {join})"
+    if metric == "network_tx":
+        return f"sum by (instance_id) (rate(libvirt_domain_interface_stats_transmit_bytes_total[2m]) {join})"
+    if metric == "disk_read":
+        return f"sum by (instance_id) (rate(libvirt_domain_block_stats_read_bytes_total[2m]) {join})"
+    if metric == "disk_write":
+        return f"sum by (instance_id) (rate(libvirt_domain_block_stats_write_bytes_total[2m]) {join})"
+    return None  # gpu_util, gpu_mem — DCGM 전용, libvirt 대체 불가
+
+
 def _resolve_server(conn, instance_id: str):
     try:
         return nova.get_server(conn, instance_id)
@@ -107,9 +135,12 @@ async def get_instance_metrics(
     start_ts = end_ts - range_s
     step_s = calc_step(range_s)
 
-    expr = _build_expr(metric, server.id)
     try:
-        series = await query_range(expr, start_ts=start_ts, end_ts=end_ts, step_s=step_s)
+        series = await query_range(_build_expr(metric, server.id), start_ts=start_ts, end_ts=end_ts, step_s=step_s)
+        if not series:
+            lv_expr = _build_libvirt_expr(metric, server.id)
+            if lv_expr:
+                series = await query_range(lv_expr, start_ts=start_ts, end_ts=end_ts, step_s=step_s)
     except PromUnavailable as exc:
         raise HTTPException(status_code=503, detail=f"Prometheus 연결 불가: {exc}")
     except PromBadQuery as exc:
@@ -163,6 +194,11 @@ async def get_instance_metrics_batch(
                 end_ts=end_ts,
                 step_s=step_s,
             )
+            # node_exporter 미노출 시 libvirt-exporter 폴백 (테넌트망 격리 인스턴스 대응)
+            if not series:
+                lv_expr = _build_libvirt_expr(metric, server.id)
+                if lv_expr:
+                    series = await query_range(lv_expr, start_ts=start_ts, end_ts=end_ts, step_s=step_s)
             return metric, {"series": series, "error": None}
         except PromUnavailable as exc:
             return metric, {"series": [], "error": f"prometheus_unavailable: {exc}"}
