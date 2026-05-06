@@ -78,19 +78,13 @@ def ensure_bucket(client, bucket: str) -> None:
 
 
 def _put_bucket_cors(client, bucket: str) -> None:
-    """RGW bucket에 CORS 설정 — cors_origins 전체를 AllowedOrigins 로 허용."""
-    from app.config import get_settings
-
-    origins = get_settings().cors_origin_list
-    if not origins:
-        _logger.warning("cors_origins 가 비어 있어 %s 의 CORS 미적용", bucket)
-        return
+    """RGW bucket에 CORS 설정 — presigned URL 은 서명으로 보호되므로 * 허용."""
     client.put_bucket_cors(
         Bucket=bucket,
         CORSConfiguration={
             "CORSRules": [
                 {
-                    "AllowedOrigins": origins,
+                    "AllowedOrigins": ["*"],
                     "AllowedMethods": ["PUT", "POST", "GET", "HEAD"],
                     "AllowedHeaders": ["*"],
                     "ExposeHeaders": ["ETag"],

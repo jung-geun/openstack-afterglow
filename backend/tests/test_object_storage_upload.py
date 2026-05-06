@@ -218,27 +218,17 @@ async def test_upload_abort_unknown_tx_ok(client, mock_conn, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_put_bucket_cors_uses_full_cors_origin_list(monkeypatch):
-    """_put_bucket_cors 가 cors_origins 의 모든 항목을 AllowedOrigins 로 전달."""
-    from app.config import get_settings
+def test_put_bucket_cors_uses_wildcard_origin():
+    """_put_bucket_cors 가 AllowedOrigins=["*"] 를 사용 (presigned URL 은 서명으로 보호)."""
     from app.services import s3 as s3_svc
 
-    settings = get_settings()
-    monkeypatch.setattr(
-        settings,
-        "cors_origins",
-        "https://test.cloud.dmslab.re.kr,http://localhost:3000",
-    )
     fake = MagicMock()
     s3_svc._put_bucket_cors(fake, "test-quarantine")
 
     fake.put_bucket_cors.assert_called_once()
     cfg = fake.put_bucket_cors.call_args.kwargs["CORSConfiguration"]
     rule = cfg["CORSRules"][0]
-    assert rule["AllowedOrigins"] == [
-        "https://test.cloud.dmslab.re.kr",
-        "http://localhost:3000",
-    ]
+    assert rule["AllowedOrigins"] == ["*"]
     assert rule["MaxAgeSeconds"] == 3600
     assert "PUT" in rule["AllowedMethods"]
     assert "ETag" in rule["ExposeHeaders"]
