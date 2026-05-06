@@ -1,7 +1,7 @@
 <script lang="ts">
   import { auth } from '$lib/stores/auth';
   import { api } from '$lib/api/client';
-  import GlobalTopology from '$lib/components/GlobalTopology.svelte';
+  import TopologyMini from '$lib/components/TopologyMini.svelte';
 
   interface SubnetDetail {
     id: string; name: string; cidr: string;
@@ -93,7 +93,7 @@
     </div>
   {:else if data && (data.networks.length > 0 || data.routers.length > 0)}
     <div class="topology-clip">
-      <GlobalTopology {data} fitWidth />
+      <TopologyMini {data} />
     </div>
   {:else}
     <div class="topology-clip flex items-center justify-center">
