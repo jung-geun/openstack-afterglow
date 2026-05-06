@@ -475,7 +475,17 @@ def _render_gpu_toml(cfg: dict) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def render_configmap(cfg: dict) -> str:
-    """configmap.yaml 생성: Redis URL, config.toml + config.gpu.toml 인라인."""
+    """configmap.yaml 생성: Redis URL, Origin, S3 base, config.toml + config.gpu.toml 인라인."""
+    cors = cfg.get("cors", {})
+    ost = cfg.get("openstack", {})
+
+    # APP_ORIGIN: cors.origins 의 첫 번째 항목 (프로덕션 도메인)
+    origins_raw = cors.get("origins", "http://localhost:3000")
+    app_origin = origins_raw.split(",")[0].strip()
+
+    # APP_S3_BASE: openstack.s3_endpoint (미설정 시 기본값)
+    app_s3_base = ost.get("s3_endpoint", "https://s3.dmslab.re.kr")
+
     # config.toml 인라인 (4칸 들여쓰기)
     toml_content = _render_toml_for_k8s(cfg)
     indented_toml = "\n".join("    " + line for line in toml_content.splitlines())
@@ -488,6 +498,8 @@ def render_configmap(cfg: dict) -> str:
         "  namespace: afterglow",
         "data:",
         f'  APP_REDIS_URL: "{REDIS_K8S}"',
+        f'  APP_ORIGIN: "{app_origin}"',
+        f'  APP_S3_BASE: "{app_s3_base}"',
         "  config.toml: |",
         indented_toml,
     ]

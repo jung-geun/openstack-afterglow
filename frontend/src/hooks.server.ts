@@ -7,18 +7,18 @@ const PUBLIC_PATHS = ['/', '/auth/gitlab/callback'];
 // 정적 파일로 판단할 확장자 패턴
 const STATIC_EXT = /\.(js|css|svg|png|jpg|jpeg|ico|woff2?|ttf|eot|map|webp|gif)$/;
 
-// connect-src에 API base URL 추가 (dev 환경에서 cross-origin 허용)
+// connect-src에 API + S3 URL 추가 (presigned PUT 허용)
 function buildConnectSrc(): string {
-	const apiBase = env.PUBLIC_API_BASE;
-	if (apiBase && apiBase !== '') {
+	const parts = ["'self'"];
+	for (const raw of [env.PUBLIC_API_BASE, env.PUBLIC_S3_BASE]) {
+		if (!raw) continue;
 		try {
-			const url = new URL(apiBase);
-			return `'self' ${url.origin}`;
+			parts.push(new URL(raw).origin);
 		} catch {
-			// 잘못된 URL이면 self만 사용
+			// 잘못된 URL 무시
 		}
 	}
-	return "'self'";
+	return parts.join(' ');
 }
 
 // 모든 응답에 추가할 보안 헤더
