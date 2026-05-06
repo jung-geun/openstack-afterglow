@@ -120,7 +120,7 @@
 	const BAR_W     = 8;     // network bar width
 	const BOT_H     = 70;    // height below bars for bottom labels (name + CIDRs)
 	const ICON_R    = 11;    // router circle radius
-	const IP_GAP    = 100;   // min gap between bar and item box (space for IP labels)
+	const IP_GAP    = 150;   // min gap between bar and item box (space for IP labels + traffic labels)
 
 	// ── Color palettes ────────────────────────────────────────────────────────
 	const EXT_COLORS = ['#ea580c', '#f97316'];
@@ -471,8 +471,10 @@
 		return nets[0].id; // fallback
 	}
 
-	/** 같은 방향(좌/우)에 N개 연결선이 있을 때 i번째 선의 Y 오프셋 계산. */
-	function connectionY(cy: number, index: number, total: number, spacing = 13): number {
+	/** 같은 방향(좌/우)에 N개 연결선이 있을 때 i번째 선의 Y 오프셋 계산.
+	 *  spacing 22 — 각 라인이 위(IP)/아래(★floating) 라벨 슬롯을 가질 수 있도록 충분히 떨어뜨린다.
+	 */
+	function connectionY(cy: number, index: number, total: number, spacing = 22): number {
 		if (total <= 1) return cy;
 		return cy + (index - (total - 1) / 2) * spacing;
 	}
@@ -549,12 +551,15 @@
 					stroke={col} stroke-width={ei.width} opacity={ei.opacity}
 				/>
 				{#if edgePair && edgeBps > 0}
-					<text x={isLeft ? targetX - 6 : targetX + 6} y={lineY - 3}
+					{@const trafficText = (edgePair.rx_bps > 0 ? `↓${formatBps(edgePair.rx_bps)}` : '')
+						+ (edgePair.rx_bps > 0 && edgePair.tx_bps > 0 ? ' ' : '')
+						+ (edgePair.tx_bps > 0 ? `↑${formatBps(edgePair.tx_bps)}` : '')}
+					<text x={isLeft ? targetX - 4 : targetX + 4} y={lineY - 5}
 						text-anchor={isLeft ? 'end' : 'start'}
-						fill={col} font-size="8" opacity="0.85"
+						fill={col} font-size="8" opacity="0.85" font-weight="600"
 						font-family="ui-monospace, monospace"
 						style="pointer-events:none"
-					>↓{formatBps(edgePair.rx_bps)} ↑{formatBps(edgePair.tx_bps)}</text>
+					>{trafficText}</text>
 				{/if}
 
 				<!-- DVR 라우터: 같은 네트워크에 이중 포트가 있으면 두 번째 선 표시 -->
@@ -716,13 +721,11 @@
 				<title>{row.name}{'\n'}ID: {row.id}{'\n'}상태: {row.status}{'\n'}IP: {[...row.netIps.values()].flat().join(', ')}</title>
 			{/if}
 
-			<!-- 트래픽 rx/tx 라벨 (박스 오른쪽) -->
-			{#if traffic}
-				{@const _tRow = row.type === 'instance' ? traffic.instances[row.id] : traffic.routers[row.id]}
-				{#if _tRow}
-					<text x={ix + ITEM_W + 6} y={cy - 3} font-size="9" fill="#94a3b8" style="pointer-events:none">↓{formatBps(_tRow.rx_bps)}</text>
-					<text x={ix + ITEM_W + 6} y={cy + 8} font-size="9" fill="#94a3b8" style="pointer-events:none">↑{formatBps(_tRow.tx_bps)}</text>
-				{/if}
+			<!-- 라우터 row 의 인스턴스 총합 트래픽 (라우터는 interfaces 데이터에 안 잡히므로 per-edge 가 아닌 총합 사용) -->
+			{#if isR && traffic?.routers?.[row.id]}
+				{@const _tRouter = traffic.routers[row.id]}
+				<text x={ix + ITEM_W + 6} y={cy - 3} font-size="9" fill="#94a3b8" style="pointer-events:none">↓{formatBps(_tRouter.rx_bps)}</text>
+				<text x={ix + ITEM_W + 6} y={cy + 8} font-size="9" fill="#94a3b8" style="pointer-events:none">↑{formatBps(_tRouter.tx_bps)}</text>
 			{/if}
 		{/each}
 
