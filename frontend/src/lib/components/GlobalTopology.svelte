@@ -15,6 +15,7 @@
 		showAll = false,
 		fitWidth: _fitWidth = false,
 		traffic = null,
+		selectedId: selectedIdProp = undefined as string | null | undefined,
 		onSelectInstance = undefined,
 		onSelectRouter = undefined,
 		onSelectLoadBalancer = undefined,
@@ -24,14 +25,18 @@
 		showAll?: boolean;
 		fitWidth?: boolean;
 		traffic?: TopologyTraffic | null;
+		selectedId?: string | null;
 		onSelectInstance?: (id: string) => void;
 		onSelectRouter?: (id: string) => void;
 		onSelectLoadBalancer?: (lb: TopologyLoadBalancer) => void;
 	} = $props();
 
 	// ── State ─────────────────────────────────────────────────────────────────
-	let selectedId = $state<string | null>(null);
+	// selectedId: 부모가 prop 으로 전달하면 controlled, 아니면 내부 상태 사용
+	let _selectedId = $state<string | null>(null);
+	const selectedId = $derived(selectedIdProp !== undefined ? selectedIdProp : _selectedId);
 	let hoveredId = $state<string | null>(null);
+	let isLight = $state(false);
 	let searchTerm = $state('');
 	let highlightedNetId = $state<string | null>(null);
 	let groupCollapsed = $state({ router: false, lb: false, instance: false });
@@ -317,7 +322,7 @@
 	const LANE_GAP = 16;
 	const LANE_PAD = 16;
 	const SIDEBAR_W = 300;
-	const STAT_CARD_H = 80;
+	const STAT_CARD_H = 90;
 
 	const canvasContentW = $derived(
 		LANE_PAD * 2 + orderedNetworks.length * LANE_W + Math.max(0, orderedNetworks.length - 1) * LANE_GAP
@@ -368,6 +373,12 @@
 	}
 
 	onMount(() => {
+		isLight = document.documentElement.classList.contains('light');
+		const themeObs = new MutationObserver(() => {
+			isLight = document.documentElement.classList.contains('light');
+		});
+		themeObs.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+
 		const ro = new ResizeObserver((entries) => {
 			for (const entry of entries) {
 				if (entry.target === sidebarEl) {
@@ -384,7 +395,7 @@
 			measureAnchors();
 		});
 
-		return () => { ro.disconnect(); cancelAnimationFrame(raf); };
+		return () => { themeObs.disconnect(); ro.disconnect(); cancelAnimationFrame(raf); };
 	});
 
 	$effect(() => {
@@ -394,12 +405,17 @@
 
 	// ── Selection ─────────────────────────────────────────────────────────────
 	function selectRow(row: ItemRow) {
-		selectedId = selectedId === row.id ? null : row.id;
+		if (selectedIdProp === undefined) {
+			// uncontrolled: 내부 상태 토글
+			_selectedId = _selectedId === row.id ? null : row.id;
+		}
 		if (row.type === 'instance') onSelectInstance?.(row.id);
 		else if (row.type === 'router') onSelectRouter?.(row.id);
 	}
 	function selectLb(lb: TopologyLoadBalancer) {
-		selectedId = selectedId === lb.id ? null : lb.id;
+		if (selectedIdProp === undefined) {
+			_selectedId = _selectedId === lb.id ? null : lb.id;
+		}
 		onSelectLoadBalancer?.(lb);
 	}
 </script>
@@ -411,11 +427,13 @@
 			type="text"
 			placeholder="이름 또는 IP 검색…"
 			bind:value={searchTerm}
-			class="text-xs px-3 py-1.5 rounded-lg bg-gray-800 border border-gray-700 text-gray-200 placeholder-gray-600
-				focus:outline-none focus:border-blue-500 w-52"
+			class="text-xs px-3 py-1.5 rounded-lg focus:outline-none focus:border-blue-500 w-52
+				{isLight
+					? 'bg-gray-100 border border-gray-300 text-gray-900 placeholder-gray-400'
+					: 'bg-gray-800 border border-gray-700 text-gray-200 placeholder-gray-600'}"
 		/>
-		<!-- Network filter chips -->
-		<div class="flex gap-1.5 flex-wrap">
+		<!-- Network filter chips (모바일에서 숨김) -->
+		<div class="hidden md:flex gap-1.5 flex-wrap">
 			{#each orderedNetworks as net}
 				{@const col = netColors.get(net.id) ?? '#3b82f6'}
 				<button
@@ -427,7 +445,8 @@
 			{/each}
 		</div>
 		{#if traffic?.ts}
-			<div class="ml-auto flex items-center gap-1.5 text-[10px] text-gray-500">
+			<div class="ml-auto flex items-center gap-1.5 text-[10px]"
+			     style="color: {isLight ? '#6b7280' : '#6b7280'}">
 				<span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
 				Live
 			</div>
@@ -440,8 +459,8 @@
 		<div class="flex items-start relative" style="min-width: max-content">
 			<!-- Left sidebar: resource cards (sticky — stays visible when scrolled right) -->
 			<div
-				class="sticky left-0 z-20 bg-gray-900 flex-shrink-0 flex flex-col gap-3 pr-4"
-				style="width: {SIDEBAR_W}px"
+				class="sticky left-0 z-20 flex-shrink-0 flex flex-col gap-3 pr-4"
+				style="width: {SIDEBAR_W}px; background: {isLight ? '#f9fafb' : '#111827'}"
 				bind:this={sidebarEl}
 			>
 				<!-- Top spacer: pushes cards below the network stat card row in the canvas -->
@@ -449,10 +468,11 @@
 				{#if routerRows.length > 0}
 					<button
 						type="button"
-						class="flex items-center gap-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wide px-1 w-full text-left hover:text-gray-400 transition-colors"
+						class="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide px-1 w-full text-left transition-colors
+						{isLight ? 'text-gray-600 hover:text-gray-800' : 'text-gray-500 hover:text-gray-400'}"
 						onclick={() => { groupCollapsed.router = !groupCollapsed.router; scheduleMeasure(); }}
 					>
-						<span class="text-gray-600">{groupCollapsed.router ? '▸' : '▾'}</span>
+						<span style="color: {isLight ? '#9ca3af' : '#4b5563'}">{groupCollapsed.router ? '▸' : '▾'}</span>
 						라우터 ({routerRows.length})
 					</button>
 					{#if !groupCollapsed.router}
@@ -477,10 +497,11 @@
 				{#if filteredLbItems.length > 0}
 					<button
 						type="button"
-						class="flex items-center gap-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wide px-1 mt-1 w-full text-left hover:text-gray-400 transition-colors"
+						class="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide px-1 mt-1 w-full text-left transition-colors
+						{isLight ? 'text-gray-600 hover:text-gray-800' : 'text-gray-500 hover:text-gray-400'}"
 						onclick={() => { groupCollapsed.lb = !groupCollapsed.lb; scheduleMeasure(); }}
 					>
-						<span class="text-gray-600">{groupCollapsed.lb ? '▸' : '▾'}</span>
+						<span style="color: {isLight ? '#9ca3af' : '#4b5563'}">{groupCollapsed.lb ? '▸' : '▾'}</span>
 						로드밸런서 ({filteredLbItems.length})
 					</button>
 					{#if !groupCollapsed.lb}
@@ -505,10 +526,11 @@
 				{#if instanceRows.length > 0}
 					<button
 						type="button"
-						class="flex items-center gap-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wide px-1 mt-1 w-full text-left hover:text-gray-400 transition-colors"
+						class="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide px-1 mt-1 w-full text-left transition-colors
+						{isLight ? 'text-gray-600 hover:text-gray-800' : 'text-gray-500 hover:text-gray-400'}"
 						onclick={() => { groupCollapsed.instance = !groupCollapsed.instance; scheduleMeasure(); }}
 					>
-						<span class="text-gray-600">{groupCollapsed.instance ? '▸' : '▾'}</span>
+						<span style="color: {isLight ? '#9ca3af' : '#4b5563'}">{groupCollapsed.instance ? '▸' : '▾'}</span>
 						인스턴스 ({instanceRows.length})
 					</button>
 					{#if !groupCollapsed.instance}
@@ -534,14 +556,15 @@
 				{/if}
 
 				{#if filteredRows.length === 0 && filteredLbItems.length === 0}
-					<div class="text-xs text-gray-600 px-2 py-4">리소스 없음</div>
+					<div class="text-xs px-2 py-4" style="color: {isLight ? '#9ca3af' : '#4b5563'}">리소스 없음</div>
 				{/if}
 			</div>
 
 			<!-- Center canvas: network lanes -->
 			<div class="flex-shrink-0" style="width: {canvasContentW}px">
 				{#if orderedNetworks.length === 0}
-					<div class="flex items-center justify-center h-40 text-gray-600 text-sm">
+					<div class="flex items-center justify-center h-40 text-sm"
+					     style="color: {isLight ? '#9ca3af' : '#4b5563'}">
 						네트워크 없음
 					</div>
 				{:else}

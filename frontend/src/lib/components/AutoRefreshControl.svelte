@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
+
 	interface Props {
 		active: boolean;
 		intervalSeconds: number;
@@ -12,51 +14,73 @@
 		intervalSeconds = $bindable(),
 		intervalOptions = [10, 15, 30, 60],
 		refreshing = false,
-		onManualRefresh
+		onManualRefresh,
 	}: Props = $props();
+
+	let isLight = $state(false);
+	onMount(() => {
+		isLight = document.documentElement.classList.contains('light');
+		const obs = new MutationObserver(() => {
+			isLight = document.documentElement.classList.contains('light');
+		});
+		obs.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+		return () => obs.disconnect();
+	});
+
+	const selectValue = $derived(active ? String(intervalSeconds) : 'off');
+
+	function handleSelect(e: Event) {
+		const v = (e.currentTarget as HTMLSelectElement).value;
+		if (v === 'off') {
+			active = false;
+		} else {
+			active = true;
+			intervalSeconds = parseInt(v, 10);
+		}
+	}
 </script>
 
-<div class="flex items-center gap-1.5">
-	<div class="flex items-center gap-0 rounded border border-gray-700 overflow-hidden text-xs">
-		<button
-			onclick={() => (active = !active)}
-			class="px-2 py-1.5 transition-colors {active
-				? 'bg-blue-600/20 text-blue-400 hover:bg-blue-600/30'
-				: 'bg-gray-800 text-gray-500 hover:text-gray-300 hover:bg-gray-700'}"
-			title={active ? '자동 새로고침 끄기' : '자동 새로고침 켜기'}
-		>
-			{#if active}
-				<span class="inline-flex items-center gap-1">
-					<svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
-						<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-						<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a10 10 0 100 20v-2a8 8 0 01-8-8z"></path>
-					</svg>
-					자동
-				</span>
-			{:else}
-				<span class="inline-flex items-center gap-1">
-					<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-						<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/>
-					</svg>
-					자동
-				</span>
-			{/if}
-		</button>
-		<select
-			bind:value={intervalSeconds}
-			class="bg-gray-800 text-gray-400 py-1.5 px-1 border-l border-gray-700 focus:outline-none text-xs cursor-pointer hover:bg-gray-700 transition-colors"
-			title="새로고침 주기"
-		>
-			{#each intervalOptions as opt}
-				<option value={opt}>{opt}s</option>
-			{/each}
-		</select>
-	</div>
+<div
+	class="flex items-center rounded border overflow-hidden text-xs"
+	style="border-color: {isLight ? '#d1d5db' : '#374151'}"
+>
 	<button
+		type="button"
 		onclick={onManualRefresh}
 		disabled={refreshing}
-		class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600 disabled:opacity-50"
+		title={refreshing ? '로딩 중…' : '지금 새로고침'}
+		class="flex items-center gap-1.5 px-2.5 py-1.5 transition-colors disabled:opacity-50
+			{isLight
+				? 'bg-white text-gray-700 hover:bg-gray-50'
+				: 'bg-gray-800 text-gray-300 hover:bg-gray-700'}"
 	>
-		{refreshing ? '로딩 중…' : '새로고침'}
+		<svg
+			class="w-3.5 h-3.5 {refreshing ? 'animate-spin' : ''}"
+			fill="none"
+			stroke="currentColor"
+			stroke-width="2"
+			viewBox="0 0 24 24"
+		>
+			<path
+				stroke-linecap="round"
+				stroke-linejoin="round"
+				d="M4 4v5h5M20 20v-5h-5M4 9a8 8 0 0114.93-3M20 15a8 8 0 01-14.93 3"
+			/>
+		</svg>
+		<span class="hidden md:inline">새로고침</span>
 	</button>
+	<select
+		value={selectValue}
+		onchange={handleSelect}
+		title="새로고침 주기"
+		class="py-1.5 pl-2 pr-1 border-l cursor-pointer focus:outline-none transition-colors
+			{isLight
+				? 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+				: 'bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700'}"
+	>
+		<option value="off">Off</option>
+		{#each intervalOptions as opt}
+			<option value={String(opt)}>{opt}s</option>
+		{/each}
+	</select>
 </div>

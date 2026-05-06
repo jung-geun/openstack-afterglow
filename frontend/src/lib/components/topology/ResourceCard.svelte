@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import type { ItemRow, LBItem } from './types.ts';
 
 	interface Props {
@@ -11,6 +12,16 @@
 	}
 
 	let { row = null, lbItem = null, netColors, instNetBps, selected, onSelect }: Props = $props();
+
+	let isLight = $state(false);
+	onMount(() => {
+		isLight = document.documentElement.classList.contains('light');
+		const obs = new MutationObserver(() => {
+			isLight = document.documentElement.classList.contains('light');
+		});
+		obs.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+		return () => obs.disconnect();
+	});
 
 	function formatBps(bps: number): string {
 		if (bps >= 1e9) return `${(bps / 1e9).toFixed(1)}G`;
@@ -49,8 +60,17 @@
 
 <button
 	type="button"
-	class="w-full text-left rounded-lg border transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 relative
-		{selected ? 'border-blue-500 bg-gray-750 shadow-lg shadow-blue-900/20' : 'border-gray-700 bg-gray-800 hover:border-gray-600'}"
+	class="w-full text-left rounded-lg border transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 relative"
+	class:shadow-lg={selected}
+	style="
+		border-color: {selected
+			? '#3b82f6'
+			: isLight ? '#d1d5db' : '#374151'};
+		background: {selected
+			? (isLight ? '#eff6ff' : 'rgb(17 24 39 / 0.95)')
+			: (isLight ? '#ffffff' : 'rgb(31 41 55 / 1)')};
+		box-shadow: {selected ? (isLight ? '0 4px 16px rgba(59,130,246,0.15)' : '0 4px 16px rgba(30,58,138,0.3)') : 'none'}
+	"
 	onclick={onSelect}
 >
 	<!-- Header -->
@@ -73,7 +93,8 @@
 			</svg>
 		{/if}
 
-		<span class="flex-1 text-xs font-semibold text-gray-100 truncate">
+		<span class="flex-1 text-xs font-semibold truncate"
+		      style="color: {isLight ? '#111827' : '#f3f4f6'}">
 			{row?.name ?? lbItem?.lb.name ?? ''}
 		</span>
 
@@ -92,11 +113,10 @@
 
 	<!-- Interface rows -->
 	{#if row && ifaceRows.length > 0}
-		<div class="border-t border-gray-700/50">
+		<div class="border-t" style="border-color: {isLight ? '#e5e7eb' : 'rgb(55 65 81 / 0.5)'}">
 			{#each ifaceRows as iface}
 				{@const col = netColors.get(iface.netId) ?? '#3b82f6'}
 				{@const totalBps = iface.rx_bps + iface.tx_bps}
-				<!-- data-anchor-key for ConnectionOverlay to find right-edge anchor -->
 				<div
 					class="flex items-center gap-2 px-3 py-1.5"
 					style="border-left: 3px solid {col}"
@@ -105,13 +125,13 @@
 					<div class="flex-1 min-w-0">
 						<div class="flex items-center gap-1 flex-wrap">
 							{#each iface.ips as ip}
-								<span class="text-[9px] font-mono text-gray-300">{ip}</span>
+								<span class="text-[9px] font-mono" style="color: {isLight ? '#374151' : '#d1d5db'}">{ip}</span>
 							{/each}
 							{#each iface.fips as fip}
 								<span class="text-[9px] font-mono text-orange-400">✦{fip}</span>
 							{/each}
 							{#if iface.ips.length === 0 && iface.fips.length === 0}
-								<span class="text-[9px] text-gray-600 italic">인터페이스</span>
+								<span class="text-[9px] italic" style="color: {isLight ? '#9ca3af' : '#4b5563'}">인터페이스</span>
 							{/if}
 						</div>
 						{#if totalBps > 0}
@@ -133,14 +153,14 @@
 	<!-- LB VIP row -->
 	{#if lbItem}
 		{@const col = netColors.get(lbItem.vipNetId ?? '') ?? '#06b6d4'}
-		<div class="border-t border-gray-700/50">
+		<div class="border-t" style="border-color: {isLight ? '#e5e7eb' : 'rgb(55 65 81 / 0.5)'}">
 			<div
 				class="flex items-center gap-2 px-3 py-1.5"
 				style="border-left: 3px solid {col}"
 				data-anchor-key="lb|{lbItem.lb.id}|{lbItem.vipNetId}"
 			>
 				{#if lbItem.lb.vip_address}
-					<span class="text-[9px] font-mono text-gray-300">VIP: {lbItem.lb.vip_address}</span>
+					<span class="text-[9px] font-mono" style="color: {isLight ? '#374151' : '#d1d5db'}">VIP: {lbItem.lb.vip_address}</span>
 				{/if}
 			</div>
 		</div>
