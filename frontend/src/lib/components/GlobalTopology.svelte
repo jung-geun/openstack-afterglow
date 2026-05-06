@@ -581,7 +581,8 @@
 				{@const ipAnchor = isLeft ? 'start' : 'end'}
 
 				<!-- Horizontal line: bar → item box edge (Y 분산 적용) -->
-				{@const _edgeCol = traffic ? trafficColor(rowTrafficBps(row)) : col}
+				{@const _tRow = traffic ? (row.type === 'instance' ? traffic.instances[row.id] : traffic.routers[row.id]) : null}
+				{@const _edgeCol = _tRow ? trafficColor(_tRow.rx_bps + _tRow.tx_bps) : col}
 				<line
 					x1={barX} y1={lineY}
 					x2={targetX} y2={lineY}

@@ -46,7 +46,7 @@ async def test_traffic_returns_instances_from_promql(client, mock_conn):
     )
 
     with (
-        patch("app.api.network.networks.query_instant_multi", new=AsyncMock(side_effect=[rx_pairs, tx_pairs])),
+        patch("app.api.network.networks.query_instant_multi", new=AsyncMock(side_effect=[rx_pairs, tx_pairs, [], []])),
         patch("app.api.network.networks.list_load_balancers", return_value=[]),
     ):
         resp = await client.get("/api/networks/topology/traffic")
@@ -76,7 +76,7 @@ async def test_traffic_aggregates_by_network(client, mock_conn):
     tx_pairs: list = []
 
     with (
-        patch("app.api.network.networks.query_instant_multi", new=AsyncMock(side_effect=[rx_pairs, tx_pairs])),
+        patch("app.api.network.networks.query_instant_multi", new=AsyncMock(side_effect=[rx_pairs, tx_pairs, [], []])),
         patch("app.api.network.networks.list_load_balancers", return_value=[]),
     ):
         resp = await client.get("/api/networks/topology/traffic")
@@ -213,3 +213,83 @@ async def test_query_instant_multi_parses_results():
     labels1, val1 = result[1]
     assert labels1["instance_id"] == "uuid-2"
     assert val1 == 10.0
+
+
+# ── 테스트: libvirt-exporter 폴백 ────────────────────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_traffic_libvirt_fills_missing_instances(client, mock_conn):
+    """node_exporter 결과에 없는 instance 를 libvirt-exporter 결과로 채워야 한다."""
+    mock_conn.network.ports.return_value = [
+        _mock_port("uuid-1", "net-a"),
+        _mock_port("uuid-2", "net-a"),
+    ]
+
+    # uuid-1 은 node_exporter 에만, uuid-2 는 libvirt 에만 있음
+    ne_rx = _prom_instant_response([({"instance_id": "uuid-1"}, 100.0)])
+    ne_tx: list = []
+    lv_rx = _prom_instant_response([({"instance_id": "uuid-2"}, 200.0)])
+    lv_tx = _prom_instant_response([({"instance_id": "uuid-2"}, 50.0)])
+
+    with (
+        patch("app.api.network.networks.query_instant_multi", new=AsyncMock(side_effect=[ne_rx, ne_tx, lv_rx, lv_tx])),
+        patch("app.api.network.networks.list_load_balancers", return_value=[]),
+    ):
+        resp = await client.get("/api/networks/topology/traffic")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "uuid-1" in body["instances"]
+    assert abs(body["instances"]["uuid-1"]["rx_bps"] - 100.0 * 8) < 1
+    assert "uuid-2" in body["instances"]
+    assert abs(body["instances"]["uuid-2"]["rx_bps"] - 200.0 * 8) < 1
+    assert abs(body["instances"]["uuid-2"]["tx_bps"] - 50.0 * 8) < 1
+
+
+@pytest.mark.anyio
+async def test_traffic_node_exporter_takes_priority_over_libvirt(client, mock_conn):
+    """node_exporter 와 libvirt 양쪽에 같은 instance 가 있으면 node_exporter 값이 사용되어야 한다."""
+    mock_conn.network.ports.return_value = [_mock_port("uuid-1", "net-a")]
+
+    ne_rx = _prom_instant_response([({"instance_id": "uuid-1"}, 100.0)])
+    ne_tx = _prom_instant_response([({"instance_id": "uuid-1"}, 40.0)])
+    lv_rx = _prom_instant_response([({"instance_id": "uuid-1"}, 999.0)])  # 무시되어야 함
+    lv_tx = _prom_instant_response([({"instance_id": "uuid-1"}, 888.0)])  # 무시되어야 함
+
+    with (
+        patch("app.api.network.networks.query_instant_multi", new=AsyncMock(side_effect=[ne_rx, ne_tx, lv_rx, lv_tx])),
+        patch("app.api.network.networks.list_load_balancers", return_value=[]),
+    ):
+        resp = await client.get("/api/networks/topology/traffic")
+
+    assert resp.status_code == 200
+    inst = resp.json()["instances"]["uuid-1"]
+    assert abs(inst["rx_bps"] - 100.0 * 8) < 1
+    assert abs(inst["tx_bps"] - 40.0 * 8) < 1
+
+
+@pytest.mark.anyio
+async def test_traffic_libvirt_query_uses_openstack_info_join(client, mock_conn):
+    """libvirt PromQL 2개가 libvirt_domain_interface_stats_* 와 libvirt_domain_openstack_info 조인을 사용하는지 검증."""
+    mock_conn.network.ports.return_value = [_mock_port("uuid-1", "net-a")]
+
+    calls: list[str] = []
+
+    async def _capture_query(promql: str):
+        calls.append(promql)
+        return []
+
+    with (
+        patch("app.api.network.networks.query_instant_multi", side_effect=_capture_query),
+        patch("app.api.network.networks.list_load_balancers", return_value=[]),
+    ):
+        resp = await client.get("/api/networks/topology/traffic")
+
+    assert resp.status_code == 200
+    assert len(calls) == 4
+    lv_calls = [q for q in calls if "libvirt_domain_interface_stats_" in q]
+    assert len(lv_calls) == 2
+    for q in lv_calls:
+        assert "* on (domain) group_left(instance_id)" in q
+        assert "libvirt_domain_openstack_info" in q

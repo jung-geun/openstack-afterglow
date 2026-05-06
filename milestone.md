@@ -1293,3 +1293,6 @@ Option A 채택 시 본 절 진행. Option B 채택 시 사용자가 자체 구�
 - [x] `frontend/src/lib/components/GlobalTopology.svelte` — `traffic` prop, `formatBps`/`trafficColor`/`edgeColor` 유틸, 박스 옆 rx/tx 텍스트, 네트워크 막대 합산 라벨, 엣지 stroke 동적 색상
 - [x] `frontend/src/routes/dashboard/network/topology/+page.svelte` — 두 번째 `createAutoRefresh` 15s (traffic 전용) + `<GlobalTopology {traffic} />`
 - [x] `backend/tests/test_topology_traffic.py` — 신규 8건 (VM bps ×8, 네트워크 합산, routers={}, no instances 200, PromUnavailable fallback, LB first call 0, LB rate, query_instant_multi 파싱)
+- [x] `backend/app/api/network/networks.py` — libvirt-exporter 폴백: `libvirt_domain_interface_stats_*` × `libvirt_domain_openstack_info` 조인으로 node_exporter 미노출 인스턴스(테넌트망 격리) 보강. 4-fan-out 병렬 PromQL, node_exporter 우선
+- [x] `frontend/src/lib/components/GlobalTopology.svelte` — Prometheus 데이터 부재 시 인스턴스 엣지 색상을 회색이 아닌 네트워크 색으로 폴백 (`_tRow` null 체크)
+- [x] `backend/tests/test_topology_traffic.py` — 신규 3건 (libvirt 폴백, node_exporter 우선순위, PromQL 조인 패턴 검증)

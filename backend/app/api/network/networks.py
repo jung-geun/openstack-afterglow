@@ -411,7 +411,7 @@ async def get_topology_traffic(
     # 1) compute port 매핑 (Neutron 1회) — instance_ids + network→[instance_id]
     instance_ids, net_to_instances = await asyncio.to_thread(neutron.list_project_compute_ports, conn, project_id)
 
-    # 2) PromQL instant queries — VM rx/tx 각 1회 (병렬)
+    # 2) PromQL instant queries — node_exporter + libvirt-exporter 폴백 병렬 실행
     _exclude = r"lo|veth.*|docker.*|cni.*|tap.*|qbr.*"
     instances: dict[str, dict[str, float]] = {}
     if instance_ids:
@@ -423,14 +423,26 @@ async def get_topology_traffic(
             f'{{instance_id=~"{regex}",device!~"{_exclude}"}}[2m]))'
         )
         tx_q = rx_q.replace("receive", "transmit")
+        # libvirt-exporter: 테넌트망 격리로 node_exporter 미노출 인스턴스 보강.
+        # domain 라벨(instance-XXXXXXXX) → libvirt_domain_openstack_info 조인 → instance_id(UUID).
+        lv_rx_q = (
+            f"sum by (instance_id) ("
+            f"rate(libvirt_domain_interface_stats_receive_bytes_total[2m])"
+            f" * on (domain) group_left(instance_id)"
+            f' libvirt_domain_openstack_info{{instance_id=~"{regex}"}})'
+        )
+        lv_tx_q = lv_rx_q.replace("receive", "transmit")
         try:
-            rx_pairs, tx_pairs = await asyncio.gather(
+            rx_pairs, tx_pairs, lv_rx_pairs, lv_tx_pairs = await asyncio.gather(
                 query_instant_multi(rx_q),
                 query_instant_multi(tx_q),
+                query_instant_multi(lv_rx_q),
+                query_instant_multi(lv_tx_q),
             )
         except (PromUnavailable, PromBadQuery) as exc:
             _logger.warning("토폴로지 트래픽 PromQL 실패 — 폴백: %s", exc)
-            rx_pairs, tx_pairs = [], []
+            rx_pairs = tx_pairs = lv_rx_pairs = lv_tx_pairs = []
+        # node_exporter 우선 적용
         for labels, val in rx_pairs:
             iid = labels.get("instance_id")
             if iid:
@@ -439,6 +451,19 @@ async def get_topology_traffic(
             iid = labels.get("instance_id")
             if iid:
                 instances.setdefault(iid, {"rx_bps": 0.0, "tx_bps": 0.0})["tx_bps"] = val * 8
+        # libvirt 폴백 — node_exporter 결과에 없는 instance 만 채움
+        _lv_added: set[str] = set()
+        for labels, val in lv_rx_pairs:
+            iid = labels.get("instance_id")
+            if iid and iid not in instances:
+                instances[iid] = {"rx_bps": val * 8, "tx_bps": 0.0}
+                _lv_added.add(iid)
+        for labels, val in lv_tx_pairs:
+            iid = labels.get("instance_id")
+            if iid and iid not in instances:
+                instances[iid] = {"rx_bps": 0.0, "tx_bps": val * 8}
+            elif iid in _lv_added:
+                instances[iid]["tx_bps"] = val * 8
 
     # 3) 네트워크별 합산 — 백엔드에서 instance 결과 집계
     networks: dict[str, dict[str, float]] = {}
