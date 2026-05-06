@@ -444,6 +444,8 @@
 				style="width: {SIDEBAR_W}px"
 				bind:this={sidebarEl}
 			>
+				<!-- Top spacer: pushes cards below the network stat card row in the canvas -->
+				<div style="height: {STAT_CARD_H}px; flex-shrink: 0"></div>
 				{#if routerRows.length > 0}
 					<button
 						type="button"
