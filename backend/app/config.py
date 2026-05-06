@@ -261,7 +261,6 @@ class Settings(BaseSettings):
     upload_part_size_mb: int = 50
     upload_url_expires_sec: int = 3600
     upload_tx_ttl_sec: int = 86400
-    app_origin: str = "https://union.dmslab.re.kr"
     os_manila_share_network_id: str = ""
     os_manila_share_type: str = "cephfs"
     os_manila_nfs_share_type: str = "nfstype"

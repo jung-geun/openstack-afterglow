@@ -282,7 +282,9 @@ grafana_jwt_secret = ""         # Grafana auth.jwt 서명 시크릿 (secret.yaml
 
 [cors]
 # CORS 허용 origin (쉼표 구분). 프론트엔드 실제 접근 URL로 설정.
-# 예: origins = "https://cloud.dmslab.re.kr"
+# 이 값이 S3 직접 업로드(multipart) 시 RGW quarantine 버킷 CORS 의 AllowedOrigins 로도 사용됨.
+# 프로덕션 도메인을 첫 번째로, 개발 도메인을 이후에 나열.
+# 예: origins = "https://cloud.dmslab.re.kr,http://localhost:3000"
 origins = "http://localhost:3000,http://localhost"
 
 [gitlab_oidc]

@@ -211,3 +211,60 @@ async def test_upload_abort_unknown_tx_ok(client, mock_conn, monkeypatch):
         json={"transaction_id": "missing"},
     )
     assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# CORS 다중 origin + ensure_bucket idempotent 재적용 테스트 (Phase 8.3)
+# ---------------------------------------------------------------------------
+
+
+def test_put_bucket_cors_uses_full_cors_origin_list(monkeypatch):
+    """_put_bucket_cors 가 cors_origins 의 모든 항목을 AllowedOrigins 로 전달."""
+    from app.config import get_settings
+    from app.services import s3 as s3_svc
+
+    settings = get_settings()
+    monkeypatch.setattr(
+        settings,
+        "cors_origins",
+        "https://test.cloud.dmslab.re.kr,http://localhost:3000",
+    )
+    fake = MagicMock()
+    s3_svc._put_bucket_cors(fake, "test-quarantine")
+
+    fake.put_bucket_cors.assert_called_once()
+    cfg = fake.put_bucket_cors.call_args.kwargs["CORSConfiguration"]
+    rule = cfg["CORSRules"][0]
+    assert rule["AllowedOrigins"] == [
+        "https://test.cloud.dmslab.re.kr",
+        "http://localhost:3000",
+    ]
+    assert rule["MaxAgeSeconds"] == 3600
+    assert "PUT" in rule["AllowedMethods"]
+    assert "ETag" in rule["ExposeHeaders"]
+
+
+def test_ensure_bucket_existing_reapplies_cors():
+    """기존 버킷(head_bucket 성공)도 CORS 가 매번 재적용되어야 한다."""
+    from app.services import s3 as s3_svc
+
+    fake = MagicMock()
+    fake.head_bucket.return_value = {}  # 이미 존재
+    s3_svc.ensure_bucket(fake, "test-quarantine")
+
+    fake.create_bucket.assert_not_called()
+    fake.put_bucket_cors.assert_called_once()
+
+
+def test_ensure_bucket_creates_when_missing_then_cors():
+    """버킷 부재 시 create_bucket → put_bucket_cors 순으로 호출."""
+    from botocore.exceptions import ClientError
+
+    from app.services import s3 as s3_svc
+
+    fake = MagicMock()
+    fake.head_bucket.side_effect = ClientError({"Error": {"Code": "NoSuchBucket"}}, "HeadBucket")
+    s3_svc.ensure_bucket(fake, "test-quarantine")
+
+    fake.create_bucket.assert_called_once_with(Bucket="test-quarantine")
+    fake.put_bucket_cors.assert_called_once()

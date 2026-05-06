@@ -52,32 +52,45 @@ def get_user_s3_client(token: str, user_id: str, project_id: str):
 
 
 def ensure_bucket(client, bucket: str) -> None:
-    """버킷이 없으면 생성하고 CORS를 설정."""
+    """버킷이 없으면 생성. 있든 없든 CORS 는 항상 최신 cors_origins 로 재적용 (idempotent).
+
+    기존 버킷의 CORS 가 옛 origin 으로 stuck 되는 문제를 방지.
+    """
     from botocore.exceptions import ClientError
 
     try:
         client.head_bucket(Bucket=bucket)
+        exists = True
     except ClientError as e:
         code = e.response.get("Error", {}).get("Code", "")
         if code in ("404", "NoSuchBucket", "NotFound"):
             client.create_bucket(Bucket=bucket)
-            _put_bucket_cors(client, bucket)
-            _logger.info("quarantine 버킷 생성 + CORS 설정: %s", bucket)
+            _logger.info("quarantine 버킷 생성: %s", bucket)
+            exists = False
         else:
             raise
 
+    try:
+        _put_bucket_cors(client, bucket)
+        _logger.debug("quarantine 버킷 CORS 갱신: %s (existing=%s)", bucket, exists)
+    except Exception:
+        _logger.warning("quarantine 버킷 CORS 갱신 실패: %s", bucket, exc_info=True)
+
 
 def _put_bucket_cors(client, bucket: str) -> None:
-    """RGW bucket에 CORS 설정 — 브라우저 직접 PUT 허용."""
+    """RGW bucket에 CORS 설정 — cors_origins 전체를 AllowedOrigins 로 허용."""
     from app.config import get_settings
 
-    origin = get_settings().app_origin
+    origins = get_settings().cors_origin_list
+    if not origins:
+        _logger.warning("cors_origins 가 비어 있어 %s 의 CORS 미적용", bucket)
+        return
     client.put_bucket_cors(
         Bucket=bucket,
         CORSConfiguration={
             "CORSRules": [
                 {
-                    "AllowedOrigins": [origin],
+                    "AllowedOrigins": origins,
                     "AllowedMethods": ["PUT", "POST", "GET", "HEAD"],
                     "AllowedHeaders": ["*"],
                     "ExposeHeaders": ["ETag"],

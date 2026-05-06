@@ -475,15 +475,7 @@ def _render_gpu_toml(cfg: dict) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def render_configmap(cfg: dict) -> str:
-    """configmap.yaml 생성: Redis URL, Origin, config.toml + config.gpu.toml 인라인."""
-    app = cfg.get("app", {})
-    cors = cfg.get("cors", {})
-    frontend_port = app.get("frontend_port", 3000)
-
-    # APP_ORIGIN: CORS origins의 첫 번째 값 사용
-    origins_raw = cors.get("origins", f"http://localhost:{frontend_port}")
-    app_origin = origins_raw.split(",")[0].strip()
-
+    """configmap.yaml 생성: Redis URL, config.toml + config.gpu.toml 인라인."""
     # config.toml 인라인 (4칸 들여쓰기)
     toml_content = _render_toml_for_k8s(cfg)
     indented_toml = "\n".join("    " + line for line in toml_content.splitlines())
@@ -496,8 +488,6 @@ def render_configmap(cfg: dict) -> str:
         "  namespace: afterglow",
         "data:",
         f'  APP_REDIS_URL: "{REDIS_K8S}"',
-        f'  # 실제 서비스 도메인으로 변경 필요 (예: https://afterglow.example.com)',
-        f'  APP_ORIGIN: "{app_origin}"',
         "  config.toml: |",
         indented_toml,
     ]
