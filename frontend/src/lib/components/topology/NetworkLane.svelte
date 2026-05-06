@@ -9,9 +9,10 @@
 		highlighted: boolean;
 		dimmed: boolean;
 		laneHeight: number;
+		onSelect?: () => void;
 	}
 
-	let { net, color, traffic = null, highlighted, dimmed, laneHeight }: Props = $props();
+	let { net, color, traffic = null, highlighted, dimmed, laneHeight, onSelect }: Props = $props();
 
 	let isLight = $state(false);
 	onMount(() => {
@@ -53,8 +54,10 @@
 	const typeLabel = $derived(net.is_external ? '외부' : net.is_shared ? '공유' : '내부');
 </script>
 
-<div
-	class="flex flex-col items-center transition-opacity duration-200"
+<button
+	type="button"
+	onclick={onSelect}
+	class="flex flex-col items-center transition-opacity duration-200 w-full appearance-none bg-transparent border-0 p-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 rounded"
 	style="opacity: {dimmed ? 0.25 : 1}"
 >
 	<!-- Stat card -->
@@ -100,4 +103,4 @@
 		class="w-0.5 transition-all duration-200"
 		style="height: {laneHeight}px; background: {color}; opacity: {highlighted ? 0.9 : 0.45}"
 	></div>
-</div>
+</button>

@@ -56,6 +56,7 @@
 	>
 		<svg
 			class="w-3.5 h-3.5 {refreshing ? 'animate-spin' : ''}"
+			style={refreshing ? 'animation-direction: reverse' : ''}
 			fill="none"
 			stroke="currentColor"
 			stroke-width="2"

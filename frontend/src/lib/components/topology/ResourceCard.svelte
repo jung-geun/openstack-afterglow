@@ -28,7 +28,7 @@
 		if (bps >= 1e6) return `${(bps / 1e6).toFixed(1)}M`;
 		if (bps >= 1e3) return `${(bps / 1e3).toFixed(0)}k`;
 		if (bps > 0) return `${bps.toFixed(0)}b`;
-		return '';
+		return '0';
 	}
 
 	function statusDot(status: string): string {
@@ -134,16 +134,16 @@
 								<span class="text-[9px] italic" style="color: {isLight ? '#9ca3af' : '#4b5563'}">인터페이스</span>
 							{/if}
 						</div>
-						{#if totalBps > 0}
-							<div class="flex gap-2 mt-0.5">
-								{#if iface.rx_bps > 0}
-									<span class="text-[8px] font-mono text-blue-400">↓{formatBps(iface.rx_bps)}</span>
-								{/if}
-								{#if iface.tx_bps > 0}
-									<span class="text-[8px] font-mono text-green-400">↑{formatBps(iface.tx_bps)}</span>
-								{/if}
-							</div>
-						{/if}
+						<div class="flex gap-2 mt-0.5">
+							<span class="text-[8px] font-mono"
+							      style="color: {iface.rx_bps > 0 ? '#60a5fa' : (isLight ? '#9ca3af' : '#4b5563')}">
+								↓{formatBps(iface.rx_bps)}
+							</span>
+							<span class="text-[8px] font-mono"
+							      style="color: {iface.tx_bps > 0 ? '#34d399' : (isLight ? '#9ca3af' : '#4b5563')}">
+								↑{formatBps(iface.tx_bps)}
+							</span>
+						</div>
 					</div>
 				</div>
 			{/each}

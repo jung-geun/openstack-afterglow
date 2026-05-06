@@ -216,6 +216,27 @@
 		return m;
 	});
 
+	function formatBps(bps: number): string {
+		if (bps >= 1e9) return `${(bps / 1e9).toFixed(1)}G`;
+		if (bps >= 1e6) return `${(bps / 1e6).toFixed(1)}M`;
+		if (bps >= 1e3) return `${(bps / 1e3).toFixed(0)}k`;
+		if (bps > 0) return `${bps.toFixed(0)}b`;
+		return '0';
+	}
+
+	const totalTraffic = $derived.by(() => {
+		let rx = 0, tx = 0;
+		if (!traffic?.interfaces) return { rx, tx };
+		const visibleIds = new Set(instanceRows.map(r => r.id));
+		for (const ifc of Object.values(traffic.interfaces)) {
+			if (visibleIds.has(ifc.instance_id)) {
+				rx += ifc.rx_bps;
+				tx += ifc.tx_bps;
+			}
+		}
+		return { rx, tx };
+	});
+
 	function edgeIntensity(bps: number): { opacity: number; width: number } {
 		if (bps >= 1e8) return { opacity: 1.00, width: 3.5 };
 		if (bps >= 1e7) return { opacity: 0.90, width: 3.0 };
@@ -432,23 +453,22 @@
 					? 'bg-gray-100 border border-gray-300 text-gray-900 placeholder-gray-400'
 					: 'bg-gray-800 border border-gray-700 text-gray-200 placeholder-gray-600'}"
 		/>
-		<!-- Network filter chips (모바일에서 숨김) -->
-		<div class="hidden md:flex gap-1.5 flex-wrap">
-			{#each orderedNetworks as net}
-				{@const col = netColors.get(net.id) ?? '#3b82f6'}
-				<button
-					type="button"
-					class="text-[10px] px-2 py-0.5 rounded-full border transition-all"
-					style="border-color: {col}; color: {highlightedNetId === net.id ? '#fff' : col}; background: {highlightedNetId === net.id ? col : 'transparent'}"
-					onclick={() => { highlightedNetId = highlightedNetId === net.id ? null : net.id; }}
-				>{net.name || net.id}</button>
-			{/each}
-		</div>
-		{#if traffic?.ts}
-			<div class="ml-auto flex items-center gap-1.5 text-[10px]"
-			     style="color: {isLight ? '#6b7280' : '#6b7280'}">
-				<span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
-				Live
+		{#if traffic?.interfaces || traffic?.ts}
+			<div class="ml-auto flex items-center gap-3 text-[10px]"
+			     style="color: {isLight ? '#6b7280' : '#9ca3af'}">
+				{#if traffic?.interfaces}
+					<div class="flex items-center gap-1.5 font-mono">
+						<span style="color: {isLight ? '#9ca3af' : '#6b7280'}">총합</span>
+						<span class="text-blue-400">↓{formatBps(totalTraffic.rx)}</span>
+						<span class="text-green-400">↑{formatBps(totalTraffic.tx)}</span>
+					</div>
+				{/if}
+				{#if traffic?.ts}
+					<div class="flex items-center gap-1.5">
+						<span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
+						Live
+					</div>
+				{/if}
 			</div>
 		{/if}
 	</div>
@@ -578,6 +598,7 @@
 									highlighted={highlightedNetId === net.id}
 									dimmed={highlightedNetId !== null && highlightedNetId !== net.id}
 									{laneHeight}
+									onSelect={() => { highlightedNetId = highlightedNetId === net.id ? null : net.id; }}
 								/>
 							</div>
 						{/each}
