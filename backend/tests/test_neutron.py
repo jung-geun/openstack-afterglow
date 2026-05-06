@@ -89,7 +89,7 @@ def test_ensure_union_egress_sg_adds_missing_rules(mock_list, mock_create_sg, mo
 
 
 # ---------------------------------------------------------------------------
-# A11: ensure_monitoring_ingress_sg 단위 테스트
+# A11: _ensure_single_port_ingress_sg / ensure_node_exporter_sg / ensure_dcgm_exporter_sg 단위 테스트
 # ---------------------------------------------------------------------------
 
 
@@ -108,38 +108,43 @@ def _make_ingress_rule(protocol: str, port_min: int, port_max: int, cidr: str = 
 @patch("app.services.neutron.create_security_group_rule")
 @patch("app.services.neutron.create_security_group")
 @patch("app.services.neutron.list_security_groups")
-def test_ensure_monitoring_ingress_sg_creates_when_missing(mock_list, mock_create_sg, mock_create_rule):
-    """SG 미존재 시 생성 + 2개 ingress rule 등록."""
-    from app.services.neutron import ensure_monitoring_ingress_sg
+def test_ensure_single_port_ingress_sg_creates_when_missing(mock_list, mock_create_sg, mock_create_rule):
+    """SG 미존재 시 생성 + 1개 ingress rule 등록."""
+    from app.services.neutron import _ensure_single_port_ingress_sg
 
     mock_list.return_value = []
-    mock_create_sg.return_value = _make_sg(sg_id="mon-sg-1", name="monitoring")
+    mock_create_sg.return_value = _make_sg(sg_id="ne-sg-1", name="node_exporter")
     conn = MagicMock()
 
-    result = ensure_monitoring_ingress_sg(conn, "proj-1", scrape_cidr="10.0.0.0/8")
+    result = _ensure_single_port_ingress_sg(
+        conn, "proj-1", "node_exporter", port=9100, scrape_cidr="10.0.0.0/8", description="test"
+    )
 
-    assert result == "monitoring"
+    assert result == "node_exporter"
     mock_create_sg.assert_called_once()
-    assert mock_create_rule.call_count == 2  # node_exporter + dcgm_exporter
+    assert mock_create_rule.call_count == 1
+    call_kwargs = mock_create_rule.call_args[1]
+    assert call_kwargs["port_range_min"] == 9100
+    assert call_kwargs["direction"] == "ingress"
+    assert call_kwargs["remote_ip_prefix"] == "10.0.0.0/8"
 
 
 @patch("app.services.neutron.create_security_group_rule")
 @patch("app.services.neutron.create_security_group")
 @patch("app.services.neutron.list_security_groups")
-def test_ensure_monitoring_ingress_sg_idempotent(mock_list, mock_create_sg, mock_create_rule):
-    """SG 존재 + 모든 rule 존재 시 생성/추가 없음."""
-    from app.services.neutron import ensure_monitoring_ingress_sg
+def test_ensure_single_port_ingress_sg_idempotent(mock_list, mock_create_sg, mock_create_rule):
+    """SG 존재 + rule 존재 시 생성/추가 없음."""
+    from app.services.neutron import _ensure_single_port_ingress_sg
 
-    all_rules = [
-        _make_ingress_rule("tcp", 9100, 9100, "10.0.0.0/8"),
-        _make_ingress_rule("tcp", 9400, 9400, "10.0.0.0/8"),
-    ]
-    mock_list.return_value = [_make_sg(name="monitoring", rules=all_rules)]
+    rules = [_make_ingress_rule("tcp", 9100, 9100, "10.0.0.0/8")]
+    mock_list.return_value = [_make_sg(name="node_exporter", rules=rules)]
     conn = MagicMock()
 
-    result = ensure_monitoring_ingress_sg(conn, "proj-1", scrape_cidr="10.0.0.0/8")
+    result = _ensure_single_port_ingress_sg(
+        conn, "proj-1", "node_exporter", port=9100, scrape_cidr="10.0.0.0/8", description="test"
+    )
 
-    assert result == "monitoring"
+    assert result == "node_exporter"
     mock_create_sg.assert_not_called()
     mock_create_rule.assert_not_called()
 
@@ -147,45 +152,77 @@ def test_ensure_monitoring_ingress_sg_idempotent(mock_list, mock_create_sg, mock
 @patch("app.services.neutron.create_security_group_rule")
 @patch("app.services.neutron.create_security_group")
 @patch("app.services.neutron.list_security_groups")
-def test_ensure_monitoring_ingress_sg_adds_missing_rule(mock_list, mock_create_sg, mock_create_rule):
-    """SG 존재 + 일부 rule 누락 시 누락분만 추가."""
-    from app.services.neutron import ensure_monitoring_ingress_sg
+def test_ensure_single_port_ingress_sg_adds_missing_rule(mock_list, mock_create_sg, mock_create_rule):
+    """SG 존재하나 rule 누락 시 rule만 추가."""
+    from app.services.neutron import _ensure_single_port_ingress_sg
 
-    partial_rules = [
-        _make_ingress_rule("tcp", 9100, 9100, "10.0.0.0/8"),
-        # 9400 누락
-    ]
-    mock_list.return_value = [_make_sg(name="monitoring", rules=partial_rules)]
+    mock_list.return_value = [_make_sg(name="node_exporter", rules=[])]
     conn = MagicMock()
 
-    ensure_monitoring_ingress_sg(conn, "proj-1", scrape_cidr="10.0.0.0/8")
+    _ensure_single_port_ingress_sg(
+        conn, "proj-1", "node_exporter", port=9100, scrape_cidr="10.0.0.0/8", description="test"
+    )
 
     mock_create_sg.assert_not_called()
     assert mock_create_rule.call_count == 1
 
 
-def test_ensure_monitoring_ingress_sg_raises_without_cidr():
+def test_ensure_single_port_ingress_sg_raises_without_cidr():
     """scrape_cidr 미설정 시 ValueError."""
-    from app.services.neutron import ensure_monitoring_ingress_sg
-
-    conn = MagicMock()
     import pytest
 
+    from app.services.neutron import _ensure_single_port_ingress_sg
+
+    conn = MagicMock()
     with pytest.raises(ValueError, match="monitoring_scrape_cidr must be set"):
-        ensure_monitoring_ingress_sg(conn, "proj-1", scrape_cidr="")
+        _ensure_single_port_ingress_sg(conn, "proj-1", "node_exporter", port=9100, scrape_cidr="", description="test")
 
 
 @patch("app.services.neutron.create_security_group_rule")
 @patch("app.services.neutron.create_security_group")
 @patch("app.services.neutron.list_security_groups")
-def test_ensure_monitoring_ingress_sg_custom_name(mock_list, mock_create_sg, mock_create_rule):
+def test_ensure_single_port_ingress_sg_custom_name(mock_list, mock_create_sg, mock_create_rule):
     """커스텀 SG 이름 사용."""
-    from app.services.neutron import ensure_monitoring_ingress_sg
+    from app.services.neutron import _ensure_single_port_ingress_sg
 
     mock_list.return_value = []
-    mock_create_sg.return_value = _make_sg(name="my-mon-sg")
+    mock_create_sg.return_value = _make_sg(name="custom-sg")
     conn = MagicMock()
 
-    result = ensure_monitoring_ingress_sg(conn, "proj-1", sg_name="my-mon-sg", scrape_cidr="172.16.0.0/12")
+    result = _ensure_single_port_ingress_sg(
+        conn, "proj-1", "custom-sg", port=9400, scrape_cidr="172.16.0.0/12", description="custom"
+    )
 
-    assert result == "my-mon-sg"
+    assert result == "custom-sg"
+
+
+@patch("app.services.neutron._ensure_single_port_ingress_sg")
+def test_ensure_node_exporter_sg_calls_generic(mock_generic):
+    """ensure_node_exporter_sg 가 port=9100, default sg_name='node_exporter' 로 호출."""
+    from app.services.neutron import ensure_node_exporter_sg
+
+    mock_generic.return_value = "node_exporter"
+    conn = MagicMock()
+
+    result = ensure_node_exporter_sg(conn, "proj-1", scrape_cidr="10.0.0.0/8")
+
+    assert result == "node_exporter"
+    _, call_kwargs = mock_generic.call_args[0], mock_generic.call_args[1]
+    assert call_kwargs["port"] == 9100
+    assert mock_generic.call_args[0][2] == "node_exporter"
+
+
+@patch("app.services.neutron._ensure_single_port_ingress_sg")
+def test_ensure_dcgm_exporter_sg_calls_generic(mock_generic):
+    """ensure_dcgm_exporter_sg 가 port=9400, default sg_name='dcgm_exporter' 로 호출."""
+    from app.services.neutron import ensure_dcgm_exporter_sg
+
+    mock_generic.return_value = "dcgm_exporter"
+    conn = MagicMock()
+
+    result = ensure_dcgm_exporter_sg(conn, "proj-1", scrape_cidr="10.0.0.0/8")
+
+    assert result == "dcgm_exporter"
+    _, call_kwargs = mock_generic.call_args[0], mock_generic.call_args[1]
+    assert call_kwargs["port"] == 9400
+    assert mock_generic.call_args[0][2] == "dcgm_exporter"

@@ -289,20 +289,35 @@ async def create_instance(
                 logger.warning("Union egress SG 자동 attach 실패, 계속 진행", exc_info=True)
 
         if settings.monitoring_auto_sg_enabled and settings.monitoring_scrape_cidr:
+            _sgs = list(req.security_groups or [])
+            if "default" not in _sgs:
+                _sgs.append("default")
             try:
-                _mon_sg = await asyncio.to_thread(
-                    neutron.ensure_monitoring_ingress_sg,
+                _ne = await asyncio.to_thread(
+                    neutron.ensure_node_exporter_sg,
                     conn,
                     project_id,
-                    settings.monitoring_sg_name,
+                    settings.node_exporter_sg_name,
                     settings.monitoring_scrape_cidr,
                 )
-                _sgs = list(req.security_groups or [])
-                if _mon_sg not in _sgs:
-                    _sgs.append(_mon_sg)
-                req = req.model_copy(update={"security_groups": _sgs})
+                if _ne not in _sgs:
+                    _sgs.append(_ne)
             except Exception:
-                logger.warning("Monitoring ingress SG 자동 attach 실패, 계속 진행", exc_info=True)
+                logger.warning("node_exporter SG 자동 attach 실패, 계속 진행", exc_info=True)
+            if gpu_available:
+                try:
+                    _dc = await asyncio.to_thread(
+                        neutron.ensure_dcgm_exporter_sg,
+                        conn,
+                        project_id,
+                        settings.dcgm_exporter_sg_name,
+                        settings.monitoring_scrape_cidr,
+                    )
+                    if _dc not in _sgs:
+                        _sgs.append(_dc)
+                except Exception:
+                    logger.warning("dcgm_exporter SG 자동 attach 실패, 계속 진행", exc_info=True)
+            req = req.model_copy(update={"security_groups": _sgs})
 
         meta = {
             "union_libraries": ",".join(resolved_libs),
@@ -492,17 +507,19 @@ async def create_instance_async(
                     file_storages_info = [file_storage_info]
                 yield send_progress(ProgressStep.MANILA_PREPARING, 20, "파일 스토리지 준비 완료")
 
-            # GPU quota 사전 체크
-            if is_db_available():
-                _all_flavors = await asyncio.to_thread(nova.list_flavors, conn)
-                _flavor = next((f for f in _all_flavors if f.id == req.flavor_id), None)
-                if _flavor and _flavor.is_gpu:
-                    from app.services.gpu_quota import check_gpu_quota
+            # GPU 플레이버 여부 확인 (항상 — SG attach와 cloud-init에 공용)
+            _sse_flavors = await asyncio.to_thread(nova.list_flavors, conn)
+            _sse_flavor = next((f for f in _sse_flavors if f.id == req.flavor_id), None)
+            gpu_available = _sse_flavor.is_gpu if _sse_flavor else False
 
-                    _ok, _msg = await check_gpu_quota(conn, conn._afterglow_project_id, _flavor.extra_specs or {})
-                    if not _ok:
-                        yield send_progress(ProgressStep.BOOT_VOLUME_CREATING, 0, f"GPU quota 초과: {_msg}")
-                        raise HTTPException(status_code=409, detail=_msg)
+            # GPU quota 사전 체크
+            if is_db_available() and _sse_flavor and _sse_flavor.is_gpu:
+                from app.services.gpu_quota import check_gpu_quota
+
+                _ok, _msg = await check_gpu_quota(conn, conn._afterglow_project_id, _sse_flavor.extra_specs or {})
+                if not _ok:
+                    yield send_progress(ProgressStep.BOOT_VOLUME_CREATING, 0, f"GPU quota 초과: {_msg}")
+                    raise HTTPException(status_code=409, detail=_msg)
 
             # Step 2: Boot volume (20-45%)
             yield send_progress(ProgressStep.BOOT_VOLUME_CREATING, 20, "부트 볼륨 생성 중...")
@@ -547,10 +564,6 @@ async def create_instance_async(
 
                 # Step 4: cloud-init (60-65%)
                 yield send_progress(ProgressStep.USERDATA_GENERATING, 60, "cloud-init 생성 중...")
-                flavors = await asyncio.to_thread(nova.list_flavors, conn)
-                flavor = next((f for f in flavors if f.id == req.flavor_id), None)
-                gpu_available = flavor.is_gpu if flavor else False
-
                 import uuid as _uuid2
 
                 _sse_health_id = str(_uuid2.uuid4())
@@ -596,20 +609,35 @@ async def create_instance_async(
                     logger.warning("Union egress SG 자동 attach 실패, 계속 진행", exc_info=True)
 
             if settings.monitoring_auto_sg_enabled and settings.monitoring_scrape_cidr:
+                _sgs = list(_sse_effective_sgs or req.security_groups or [])
+                if "default" not in _sgs:
+                    _sgs.append("default")
                 try:
-                    _mon_sg = await asyncio.to_thread(
-                        neutron.ensure_monitoring_ingress_sg,
+                    _ne = await asyncio.to_thread(
+                        neutron.ensure_node_exporter_sg,
                         conn,
                         conn._afterglow_project_id,
-                        settings.monitoring_sg_name,
+                        settings.node_exporter_sg_name,
                         settings.monitoring_scrape_cidr,
                     )
-                    _sgs = list(_sse_effective_sgs or req.security_groups or [])
-                    if _mon_sg not in _sgs:
-                        _sgs.append(_mon_sg)
-                    _sse_effective_sgs = _sgs
+                    if _ne not in _sgs:
+                        _sgs.append(_ne)
                 except Exception:
-                    logger.warning("Monitoring ingress SG 자동 attach 실패, 계속 진행", exc_info=True)
+                    logger.warning("node_exporter SG 자동 attach 실패, 계속 진행", exc_info=True)
+                if gpu_available:
+                    try:
+                        _dc = await asyncio.to_thread(
+                            neutron.ensure_dcgm_exporter_sg,
+                            conn,
+                            conn._afterglow_project_id,
+                            settings.dcgm_exporter_sg_name,
+                            settings.monitoring_scrape_cidr,
+                        )
+                        if _dc not in _sgs:
+                            _sgs.append(_dc)
+                    except Exception:
+                        logger.warning("dcgm_exporter SG 자동 attach 실패, 계속 진행", exc_info=True)
+                _sse_effective_sgs = _sgs
 
             meta = {
                 "union_libraries": ",".join(resolved_libs) if resolved_libs else "none",

@@ -194,7 +194,8 @@ def _load_toml() -> dict:
     flat["monitoring_sd_token"] = mon.get("sd_token", "")
     flat["monitoring_scrape_cidr"] = mon.get("scrape_cidr", "")
     flat["monitoring_auto_sg_enabled"] = mon.get("auto_sg_enabled", True)
-    flat["monitoring_sg_name"] = mon.get("sg_name", "monitoring")
+    flat["node_exporter_sg_name"] = mon.get("node_exporter_sg_name", "node_exporter")
+    flat["dcgm_exporter_sg_name"] = mon.get("dcgm_exporter_sg_name", "dcgm_exporter")
     flat["grafana_base_url"] = mon.get("grafana_base_url", "")
     flat["grafana_jwt_secret"] = mon.get("grafana_jwt_secret", "")
 
@@ -341,7 +342,8 @@ class Settings(BaseSettings):
 
     # 모니터링 (Prometheus + Grafana — Option A, label-based 프로젝트 격리)
     monitoring_auto_sg_enabled: bool = True  # 프로젝트/인스턴스 생성 시 monitoring SG 자동 attach
-    monitoring_sg_name: str = "monitoring"  # 자동 생성/재사용할 SG 이름
+    node_exporter_sg_name: str = "node_exporter"  # node_exporter ingress SG 이름 (tcp/9100)
+    dcgm_exporter_sg_name: str = "dcgm_exporter"  # dcgm_exporter ingress SG 이름 (tcp/9400, GPU 전용)
     monitoring_scrape_cidr: str = ""  # Prometheus scrape CIDR (예: 10.0.0.0/8). 미설정 시 ValueError
     monitoring_sd_token: str = ""  # /api/sd/prometheus/targets 인증 토큰
     grafana_jwt_secret: str = ""  # Grafana auth.jwt 서명 시크릿

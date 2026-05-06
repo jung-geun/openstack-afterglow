@@ -265,14 +265,24 @@ async def create_project(
         if _settings.monitoring_auto_sg_enabled and _settings.monitoring_scrape_cidr:
             try:
                 await asyncio.to_thread(
-                    neutron.ensure_monitoring_ingress_sg,
+                    neutron.ensure_node_exporter_sg,
                     conn,
                     result["id"],
-                    _settings.monitoring_sg_name,
+                    _settings.node_exporter_sg_name,
                     _settings.monitoring_scrape_cidr,
                 )
             except Exception:
-                _logger.warning("신규 프로젝트 monitoring SG 자동 생성 실패, 계속 진행", exc_info=True)
+                _logger.warning("신규 프로젝트 node_exporter SG 자동 생성 실패, 계속 진행", exc_info=True)
+            try:
+                await asyncio.to_thread(
+                    neutron.ensure_dcgm_exporter_sg,
+                    conn,
+                    result["id"],
+                    _settings.dcgm_exporter_sg_name,
+                    _settings.monitoring_scrape_cidr,
+                )
+            except Exception:
+                _logger.warning("신규 프로젝트 dcgm_exporter SG 자동 생성 실패, 계속 진행", exc_info=True)
         return result
     except HTTPException:
         raise
@@ -859,13 +869,24 @@ async def sync_monitoring_sg(
         raise HTTPException(status_code=422, detail="monitoring_scrape_cidr 설정이 필요합니다")
 
     try:
-        sg_name = await asyncio.to_thread(
-            neutron.ensure_monitoring_ingress_sg,
+        ne_name = await asyncio.to_thread(
+            neutron.ensure_node_exporter_sg,
             conn,
             project_id,
-            settings.monitoring_sg_name,
+            settings.node_exporter_sg_name,
             settings.monitoring_scrape_cidr,
         )
-        return {"status": "ok", "sg_name": sg_name, "project_id": project_id}
+        dc_name = await asyncio.to_thread(
+            neutron.ensure_dcgm_exporter_sg,
+            conn,
+            project_id,
+            settings.dcgm_exporter_sg_name,
+            settings.monitoring_scrape_cidr,
+        )
+        return {
+            "status": "ok",
+            "project_id": project_id,
+            "sg_names": {"node_exporter": ne_name, "dcgm_exporter": dc_name},
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Monitoring SG 동기화 실패: {e}")

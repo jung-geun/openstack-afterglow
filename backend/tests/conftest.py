@@ -55,6 +55,18 @@ def _reset_settings_cache():
     get_settings.cache_clear()
 
 
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter():
+    """각 테스트 전에 rate limiter storage를 리셋하여 테스트 간 간섭 방지."""
+    from app.rate_limit import limiter
+
+    try:
+        limiter._storage.reset()
+    except Exception:
+        pass
+    yield
+
+
 @pytest.fixture
 def mock_conn():
     return make_mock_conn()

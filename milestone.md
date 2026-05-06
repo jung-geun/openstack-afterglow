@@ -1109,25 +1109,21 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 - [ ] 본 저장소 변경: `backend/tests/integration/test_image_metadata.py` 신규 — 이미지 메타데이터에 `monitoring_ready=true` 태그가 있는지 사전 검증 (선택)
 - [ ] `backend/app/api/compute/instances.py` 인스턴스 생성 시 이미지 메타에서 `monitoring_ready` 추출하여 SG 자동 적용 분기에 활용 (12.2와 연동)
 
-### 12.2 Monitoring 보안 그룹 자동화 (ingress 9100/9400)
+### 12.2 Monitoring 보안 그룹 자동화 (node_exporter / dcgm_exporter 분리)
 
-11.4의 `ensure_union_egress_sg` (egress 6 rule)를 직접 모방. 새 헬퍼는 ingress 방향 + 노출 범위가 핵심 차이.
+11.4의 `ensure_union_egress_sg` 패턴을 ingress 변형으로 재사용. **단일 통합 SG 대신 exporter별 SG 2개로 분리**하여, GPU flavor만 `dcgm_exporter` SG가 attach되도록 한다. auto-attach 트리거 시 `default` SG도 명시적으로 보존한다.
 
-- [x] `backend/app/services/neutron.py` — `ensure_monitoring_ingress_sg(conn, project_id, sg_name, scrape_cidr)` idempotent 헬퍼 추가
-  - rule: `ingress tcp 9100/9100 remote_ip_prefix=<scrape_cidr>` + `ingress tcp 9400/9400 remote_ip_prefix=<scrape_cidr>`
-  - `scrape_cidr`은 Prometheus 스크래퍼 IP/서브넷에 한정 (전체 0.0.0.0/0 금지)
-  - 11.4 `_UNION_EGRESS_RULES` 상수 옆에 `_MONITORING_INGRESS_RULES` 추가
-- [x] `backend/app/config.py` — 신규 설정값:
-  - `monitoring_auto_sg_enabled: bool = True`
-  - `monitoring_sg_name: str = "monitoring"`
-  - `monitoring_scrape_cidr: str` (필수, env로 주입)
-- [x] `backend/app/api/identity/admin_identity.py:create_project` — 프로젝트 생성 후 `ensure_monitoring_ingress_sg` 호출하여 신규 프로젝트마다 monitoring SG 자동 생성
-- [x] `backend/app/api/compute/instances.py:create_instance` + `create_instance_async` — 11.4 egress SG 자동 attach 패턴 옆에 monitoring SG attach 추가 (`req.security_groups`에 `monitoring_sg_name` append, 중복 방지)
-- [x] `backend/app/api/admin/projects.py` (또는 신규 utility 라우터) — `POST /api/admin/projects/{id}/sync-monitoring-sg` 엔드포인트: 기존 프로젝트에 일괄 적용 (관리자 전용)
-- [ ] `frontend/src/lib/components/VmCreatePanel.svelte` — SG 단일 select 옆에 "monitoring SG 자동 포함됨" 안내 배지 (auto-attach 동작 가시화)
-- [x] `backend/tests/test_neutron.py` — `ensure_monitoring_ingress_sg` 5건 (미존재 생성, idempotent, 부분 추가, scrape_cidr 미설정 시 ValueError, 커스텀 이름)
-- [x] `backend/tests/test_admin_identity.py` — 프로젝트 생성 시 `ensure_monitoring_ingress_sg` 호출 검증 1건
-- [x] `backend/tests/test_instances.py` — monitoring SG auto-attach 2건 (활성/비활성)
+- [x] `backend/app/services/neutron.py` — `_ensure_single_port_ingress_sg` (internal generic) + `ensure_node_exporter_sg(conn, project_id, sg_name="node_exporter", scrape_cidr)` (tcp/9100) + `ensure_dcgm_exporter_sg(conn, project_id, sg_name="dcgm_exporter", scrape_cidr)` (tcp/9400) idempotent 헬퍼. 기존 `ensure_monitoring_ingress_sg` + `_MONITORING_INGRESS_RULES` 제거
+  - `scrape_cidr`은 Prometheus 스크래퍼 IP/서브넷에 한정 (0.0.0.0/0 금지)
+- [x] `backend/app/config.py` — `monitoring_sg_name` 제거, 신규 `node_exporter_sg_name: str = "node_exporter"`, `dcgm_exporter_sg_name: str = "dcgm_exporter"` 추가
+- [x] `backend/app/api/identity/admin_identity.py:create_project` — 두 SG 모두 사전 생성 (각 try/except 비차단)
+- [x] `backend/app/api/identity/admin_identity.py:sync_monitoring_sg` — 두 SG 모두 동기화, 응답 `{"sg_names": {"node_exporter": ..., "dcgm_exporter": ...}}`
+- [x] `backend/app/api/compute/instances.py:create_instance` + `create_instance_async` — node_exporter는 모든 인스턴스, dcgm_exporter는 GPU flavor만. auto-attach 트리거 시 `default` SG도 명시적 보존. async 경로 `gpu_available` 스코프 픽스 (flavor lookup을 `if resolved_libs:` 위로 끌어올림)
+- [ ] `frontend/src/lib/components/VmCreatePanel.svelte` — SG 자동 attach 안내 배지 (후속)
+- [x] `backend/tests/test_neutron.py` — generic 5건 + wrapper smoke 2건 (총 7건)
+- [x] `backend/tests/test_admin_identity.py` — create_project 두 SG 검증 + sync 엔드포인트 (총 2건)
+- [x] `backend/tests/test_instances.py` — non-GPU/GPU/disabled/no-cidr 4건
+- [x] `backend/tests/conftest.py` — rate limiter storage reset autouse fixture 추가 (테스트 격리)
 
 ### 12.3 Prometheus 스크래핑 — 메인 클러스터 통합 vs 프로젝트별 분리 (결정 필요)
 
