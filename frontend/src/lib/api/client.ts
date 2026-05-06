@@ -201,10 +201,19 @@ export const api = {
 				if (xhr.status >= 200 && xhr.status < 300) {
 					resolve({ etag: xhr.getResponseHeader('ETag') || '' });
 				} else {
+					const body = xhr.responseText?.slice(0, 400) || '';
+					console.error('[S3 PUT] HTTP error', { status: xhr.status, body });
 					reject(new ApiError(xhr.status, `PUT failed: ${xhr.status}`));
 				}
 			};
-			xhr.onerror = () => reject(new ApiError(0, '네트워크 오류가 발생했습니다'));
+			xhr.onerror = () => {
+				console.error('[S3 PUT] onerror (network failure)', {
+					status: xhr.status,
+					readyState: xhr.readyState,
+					url: url.split('?')[0],
+				});
+				reject(new ApiError(0, '네트워크 오류가 발생했습니다'));
+			};
 			xhr.onabort = () => reject(new ApiError(0, '업로드가 취소되었습니다'));
 			signal?.addEventListener('abort', () => xhr.abort());
 			xhr.send(body);
