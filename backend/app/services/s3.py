@@ -1,31 +1,14 @@
-"""boto3 기반 S3 wrapper. Ceph RGW S3 endpoint 대상."""
+"""boto3 기반 S3 wrapper. Ceph RGW S3 endpoint 대상.
+
+백엔드 프록시 업로드 흐름 (Phase 9):
+  client → backend (form) → quarantine bucket → 검증 → target bucket (server-side copy)
+"""
 
 from __future__ import annotations
 
 import logging
-import math
 
 _logger = logging.getLogger(__name__)
-
-PART_SIZE_MIN = 5 * 1024 * 1024  # 5 MiB (S3 spec, 마지막 part 제외)
-PART_COUNT_MAX = 1000
-
-
-def calc_parts(size: int) -> tuple[int, int]:
-    """파일 크기 → (part_count, part_size).
-
-    Returns:
-        (part_count, part_size_bytes)
-    """
-    from app.config import get_settings
-
-    target = get_settings().upload_part_size_mb * 1024 * 1024
-    if size <= target:
-        return 1, max(size, 1)
-    part_count = min(PART_COUNT_MAX, max(1, math.ceil(size / target)))
-    part_size = max(PART_SIZE_MIN, math.ceil(size / part_count))
-    actual_count = math.ceil(size / part_size)
-    return actual_count, part_size
 
 
 def get_user_s3_client(token: str, user_id: str, project_id: str):
@@ -52,10 +35,7 @@ def get_user_s3_client(token: str, user_id: str, project_id: str):
 
 
 def ensure_bucket(client, bucket: str) -> None:
-    """버킷이 없으면 생성. 있든 없든 CORS 는 항상 최신 cors_origins 로 재적용 (idempotent).
-
-    기존 버킷의 CORS 가 옛 origin 으로 stuck 되는 문제를 방지.
-    """
+    """버킷이 없으면 생성. 있든 없든 CORS 는 항상 최신 cors_origins 로 재적용 (idempotent)."""
     from botocore.exceptions import ClientError
 
     try:
@@ -78,7 +58,7 @@ def ensure_bucket(client, bucket: str) -> None:
 
 
 def _put_bucket_cors(client, bucket: str) -> None:
-    """RGW bucket에 CORS 설정 — presigned URL 은 서명으로 보호되므로 * 허용."""
+    """RGW bucket CORS 설정. Phase 9 흐름에서는 사실상 불필요하나 idempotent 유지."""
     client.put_bucket_cors(
         Bucket=bucket,
         CORSConfiguration={
@@ -95,48 +75,34 @@ def _put_bucket_cors(client, bucket: str) -> None:
     )
 
 
-def init_multipart(client, bucket: str, key: str, content_type: str) -> str:
-    """S3 Multipart Upload 초기화. upload_id 반환."""
-    resp = client.create_multipart_upload(Bucket=bucket, Key=key, ContentType=content_type)
-    return resp["UploadId"]
+def stream_upload_to_quarantine(
+    client,
+    quarantine_bucket: str,
+    key: str,
+    file_stream,
+    content_type: str,
+) -> None:
+    """boto3 upload_fileobj + TransferConfig 로 quarantine 버킷에 streaming upload.
 
+    multipart_threshold=8MB, multipart_chunksize=8MB, max_concurrency=4.
+    5 GB 이상은 자동 multipart upload, 5 TiB 까지 단일 호출로 처리.
+    file_stream 은 SpooledTemporaryFile 등 read/seek 지원 객체여야 한다.
+    """
+    from boto3.s3.transfer import TransferConfig
 
-def presign_part(client, bucket: str, key: str, upload_id: str, part_number: int) -> str:
-    """part 업로드용 presigned PUT URL 생성."""
-    from app.config import get_settings
-
-    return client.generate_presigned_url(
-        "upload_part",
-        Params={
-            "Bucket": bucket,
-            "Key": key,
-            "UploadId": upload_id,
-            "PartNumber": part_number,
-        },
-        ExpiresIn=get_settings().upload_url_expires_sec,
-        HttpMethod="PUT",
+    config = TransferConfig(
+        multipart_threshold=8 * 1024 * 1024,
+        multipart_chunksize=8 * 1024 * 1024,
+        max_concurrency=4,
+        use_threads=True,
     )
-
-
-def complete_multipart(client, bucket: str, key: str, upload_id: str, parts: list[dict]) -> str:
-    """S3 Multipart Upload 완료. parts = [{"part_number": int, "etag": str}, ...]. ETag 반환."""
-    resp = client.complete_multipart_upload(
-        Bucket=bucket,
+    client.upload_fileobj(
+        Fileobj=file_stream,
+        Bucket=quarantine_bucket,
         Key=key,
-        UploadId=upload_id,
-        MultipartUpload={
-            "Parts": [
-                {"PartNumber": p["part_number"], "ETag": p["etag"]}
-                for p in sorted(parts, key=lambda x: x["part_number"])
-            ]
-        },
+        ExtraArgs={"ContentType": content_type},
+        Config=config,
     )
-    return resp.get("ETag", "")
-
-
-def abort_multipart(client, bucket: str, key: str, upload_id: str) -> None:
-    """S3 Multipart Upload 중단."""
-    client.abort_multipart_upload(Bucket=bucket, Key=key, UploadId=upload_id)
 
 
 def copy_object(client, src_bucket: str, src_key: str, dst_bucket: str, dst_key: str) -> None:
@@ -151,3 +117,21 @@ def copy_object(client, src_bucket: str, src_key: str, dst_bucket: str, dst_key:
 def delete_object(client, bucket: str, key: str) -> None:
     """S3 객체 삭제."""
     client.delete_object(Bucket=bucket, Key=key)
+
+
+def move_to_target(
+    client,
+    quarantine_bucket: str,
+    target_bucket: str,
+    key: str,
+) -> dict:
+    """quarantine → target server-side copy + quarantine 원본 삭제. metadata 반환."""
+    copy_object(client, quarantine_bucket, key, target_bucket, key)
+    head = client.head_object(Bucket=target_bucket, Key=key)
+    delete_object(client, quarantine_bucket, key)
+    return {
+        "name": key,
+        "bytes": head.get("ContentLength", 0),
+        "etag": (head.get("ETag", "") or "").strip('"'),
+        "content_type": head.get("ContentType", ""),
+    }

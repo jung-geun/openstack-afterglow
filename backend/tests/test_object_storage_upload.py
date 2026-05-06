@@ -1,225 +1,216 @@
-"""Direct upload (S3 multipart) + quarantine 흐름 테스트."""
+"""백엔드 프록시 업로드 (Phase 9) 테스트.
+
+흐름: client → backend (form) → quarantine S3 → 검증 → target S3 → metadata 응답
+"""
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
-_USER_ID = "test-user-123"
-_PROJECT_ID = "test-project-123"
-
-
 # ---------------------------------------------------------------------------
-# calc_parts 단위 테스트
+# stream_upload_to_quarantine / move_to_target 단위 테스트
 # ---------------------------------------------------------------------------
 
 
-def test_calc_parts_small_file_single():
-    from app.services.s3 import calc_parts
+def test_stream_upload_uses_transfer_config():
+    """stream_upload_to_quarantine 가 TransferConfig 와 ContentType 를 전달한다."""
+    from app.services import s3 as s3_svc
 
-    count, _ = calc_parts(1024)
-    assert count == 1
+    fake = MagicMock()
+    stream = MagicMock()
+    s3_svc.stream_upload_to_quarantine(fake, "test-quarantine", "obj.bin", stream, "application/zip")
+
+    fake.upload_fileobj.assert_called_once()
+    kwargs = fake.upload_fileobj.call_args.kwargs
+    assert kwargs["Bucket"] == "test-quarantine"
+    assert kwargs["Key"] == "obj.bin"
+    assert kwargs["Fileobj"] is stream
+    assert kwargs["ExtraArgs"] == {"ContentType": "application/zip"}
+    assert kwargs["Config"] is not None
+    cfg = kwargs["Config"]
+    assert cfg.multipart_threshold == 8 * 1024 * 1024
+    assert cfg.multipart_chunksize == 8 * 1024 * 1024
+    assert cfg.max_concurrency == 4
 
 
-def test_calc_parts_50mib_threshold():
-    from app.services.s3 import calc_parts
+def test_move_to_target_copies_then_deletes_quarantine():
+    """move_to_target: copy → head → delete quarantine. metadata 반환."""
+    from app.services import s3 as s3_svc
 
-    count, _ = calc_parts(40 * 1024 * 1024)
-    assert count == 1
+    fake = MagicMock()
+    fake.head_object.return_value = {
+        "ContentLength": 1234,
+        "ETag": '"abc123"',
+        "ContentType": "application/pdf",
+    }
 
+    meta = s3_svc.move_to_target(fake, "test-quarantine", "test", "report.pdf")
 
-def test_calc_parts_8gib_chunks():
-    from app.services.s3 import calc_parts
-
-    count, size = calc_parts(8 * 1024**3)
-    assert 1 < count <= 1000
-    assert size >= 5 * 1024 * 1024
-
-
-def test_calc_parts_huge_caps_at_max():
-    from app.services.s3 import calc_parts
-
-    count, size = calc_parts(5 * 1024**4)  # 5 TiB
-    assert count == 1000
-    assert size >= 5 * 1024 * 1024
+    fake.copy.assert_called_once_with(
+        CopySource={"Bucket": "test-quarantine", "Key": "report.pdf"},
+        Bucket="test",
+        Key="report.pdf",
+    )
+    fake.head_object.assert_called_once_with(Bucket="test", Key="report.pdf")
+    fake.delete_object.assert_called_once_with(Bucket="test-quarantine", Key="report.pdf")
+    assert meta == {
+        "name": "report.pdf",
+        "bytes": 1234,
+        "etag": "abc123",
+        "content_type": "application/pdf",
+    }
 
 
 # ---------------------------------------------------------------------------
-# upload/init 엔드포인트 테스트
+# POST /upload 엔드포인트 통합 테스트
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_upload_init_creates_quarantine_and_returns_parts(client, mock_conn, monkeypatch):
-    from botocore.exceptions import ClientError
-
+async def test_upload_normal_flow(client, mock_conn, monkeypatch):
+    """정상 흐름: ensure_bucket → stream_upload → scan(True) → move_to_target → 200."""
     fake_s3 = MagicMock()
-    fake_s3.head_bucket.side_effect = ClientError({"Error": {"Code": "404"}}, "HeadBucket")
-    fake_s3.create_multipart_upload.return_value = {"UploadId": "up-1"}
-    fake_s3.generate_presigned_url.side_effect = lambda op, Params=None, ExpiresIn=None, HttpMethod=None, **kw: (
-        f"https://rgw/p{(Params or {}).get('PartNumber', 0)}"
-    )
+    fake_s3.head_object.return_value = {
+        "ContentLength": 7,
+        "ETag": '"deadbeef"',
+        "ContentType": "text/plain",
+    }
 
-    monkeypatch.setattr("app.api.object_storage.upload.s3_svc.get_user_s3_client", lambda *a, **kw: fake_s3)
+    monkeypatch.setattr(
+        "app.api.object_storage.upload.s3_svc.get_user_s3_client",
+        lambda *a, **kw: fake_s3,
+    )
     monkeypatch.setattr(
         "app.api.object_storage.upload.swift_svc.get_container_metadata",
         lambda *a, **kw: {"name": "test"},
     )
-    monkeypatch.setattr("app.api.object_storage.upload._save_tx", AsyncMock())
 
     resp = await client.post(
-        "/api/object-storage/test/upload/init",
-        json={"object_name": "Music.zip", "content_type": "application/zip", "size": 8 * 1024**3},
+        "/api/object-storage/test/upload",
+        files={"file": ("hello.txt", b"hello!\n", "text/plain")},
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["quarantine_bucket"] == "test-quarantine"
-    assert body["upload_id"] == "up-1"
-    assert len(body["parts"]) > 1
-    fake_s3.create_bucket.assert_called_once_with(Bucket="test-quarantine")
-    fake_s3.put_bucket_cors.assert_called_once()
+    assert body["success"] is True
+    assert body["name"] == "hello.txt"
+    assert body["bytes"] == 7
+    assert body["etag"] == "deadbeef"
+    fake_s3.upload_fileobj.assert_called_once()
+    fake_s3.copy.assert_called_once()
+    # quarantine 정상 정리: move_to_target 내부 delete_object 1회
+    assert fake_s3.delete_object.call_count == 1
+    fake_s3.delete_object.assert_called_with(Bucket="test-quarantine", Key="hello.txt")
 
 
 @pytest.mark.asyncio
-async def test_upload_init_rejects_nonexistent_container(client, mock_conn, monkeypatch):
+async def test_upload_rejects_nonexistent_container(client, mock_conn, monkeypatch):
+    """컨테이너 소유권 검증 실패 → 404."""
     monkeypatch.setattr(
         "app.api.object_storage.upload.swift_svc.get_container_metadata",
         MagicMock(side_effect=Exception("not found")),
     )
 
     resp = await client.post(
-        "/api/object-storage/other-bucket/upload/init",
-        json={"object_name": "x.bin", "content_type": "application/octet-stream", "size": 1024},
+        "/api/object-storage/other-bucket/upload",
+        files={"file": ("x.bin", b"x", "application/octet-stream")},
     )
     assert resp.status_code == 404
 
 
-# ---------------------------------------------------------------------------
-# upload/complete 엔드포인트 테스트
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
-async def test_upload_complete_copies_to_target_then_deletes_quarantine(client, mock_conn, monkeypatch):
+async def test_upload_scan_failure_cleans_quarantine(client, mock_conn, monkeypatch):
+    """검증 실패 → quarantine 객체 삭제 + 400."""
     fake_s3 = MagicMock()
-    monkeypatch.setattr("app.api.object_storage.upload.s3_svc.get_user_s3_client", lambda *a, **kw: fake_s3)
 
-    async def fake_get_tx(tx_id):
-        return {
-            "user_id": _USER_ID,
-            "project_id": _PROJECT_ID,
-            "target_bucket": "test",
-            "object_name": "Music.zip",
-            "quarantine_bucket": "test-quarantine",
-            "upload_id": "up-1",
-            "size": 1024,
-            "content_type": "application/zip",
-            "part_count": 1,
-            "part_size": 1024,
-        }
-
-    monkeypatch.setattr("app.api.object_storage.upload._get_tx", fake_get_tx)
-    monkeypatch.setattr("app.api.object_storage.upload._del_tx", AsyncMock())
+    monkeypatch.setattr(
+        "app.api.object_storage.upload.s3_svc.get_user_s3_client",
+        lambda *a, **kw: fake_s3,
+    )
+    monkeypatch.setattr(
+        "app.api.object_storage.upload.swift_svc.get_container_metadata",
+        lambda *a, **kw: {"name": "test"},
+    )
+    monkeypatch.setattr(
+        "app.api.object_storage.upload._scan_object",
+        lambda *a, **kw: False,
+    )
 
     resp = await client.post(
-        "/api/object-storage/test/upload/complete",
-        json={"transaction_id": "tx-1", "parts": [{"part_number": 1, "etag": '"abc"'}]},
+        "/api/object-storage/test/upload",
+        files={"file": ("malicious.bin", b"bad", "application/octet-stream")},
     )
-    assert resp.status_code == 200
-    fake_s3.complete_multipart_upload.assert_called_once()
-    fake_s3.copy.assert_called_once()
-    fake_s3.delete_object.assert_called_once_with(Bucket="test-quarantine", Key="Music.zip")
+    assert resp.status_code == 400
+    fake_s3.upload_fileobj.assert_called_once()
+    # copy 미호출
+    fake_s3.copy.assert_not_called()
+    # quarantine 객체 삭제
+    fake_s3.delete_object.assert_called_once_with(Bucket="test-quarantine", Key="malicious.bin")
 
 
 @pytest.mark.asyncio
-async def test_upload_complete_rejects_other_user(client, mock_conn, monkeypatch):
-    async def fake_get_tx(tx_id):
-        return {
-            "user_id": "other-user",
-            "project_id": "other-proj",
-            "target_bucket": "test",
-            "object_name": "x",
-            "quarantine_bucket": "test-quarantine",
-            "upload_id": "u",
-            "size": 1,
-            "part_count": 1,
-            "part_size": 1,
-        }
-
-    monkeypatch.setattr("app.api.object_storage.upload._get_tx", fake_get_tx)
-
-    resp = await client.post(
-        "/api/object-storage/test/upload/complete",
-        json={"transaction_id": "tx-1", "parts": []},
-    )
-    assert resp.status_code == 403
-
-
-@pytest.mark.asyncio
-async def test_upload_complete_unknown_tx_404(client, mock_conn, monkeypatch):
-    monkeypatch.setattr("app.api.object_storage.upload._get_tx", AsyncMock(return_value=None))
-
-    resp = await client.post(
-        "/api/object-storage/test/upload/complete",
-        json={"transaction_id": "missing", "parts": []},
-    )
-    assert resp.status_code == 404
-
-
-# ---------------------------------------------------------------------------
-# upload/abort 엔드포인트 테스트
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_upload_abort_calls_s3_abort(client, mock_conn, monkeypatch):
+async def test_upload_stream_exception_cleans_quarantine(client, mock_conn, monkeypatch):
+    """stream_upload 도중 예외 → quarantine best-effort 정리 + 500."""
     fake_s3 = MagicMock()
-    monkeypatch.setattr("app.api.object_storage.upload.s3_svc.get_user_s3_client", lambda *a, **kw: fake_s3)
+    fake_s3.upload_fileobj.side_effect = RuntimeError("RGW 네트워크 오류")
 
-    async def fake_get_tx(tx_id):
-        return {
-            "user_id": _USER_ID,
-            "project_id": _PROJECT_ID,
-            "target_bucket": "test",
-            "object_name": "Music.zip",
-            "quarantine_bucket": "test-quarantine",
-            "upload_id": "up-1",
-            "size": 1,
-            "part_count": 1,
-            "part_size": 1,
-        }
-
-    monkeypatch.setattr("app.api.object_storage.upload._get_tx", fake_get_tx)
-    monkeypatch.setattr("app.api.object_storage.upload._del_tx", AsyncMock())
+    monkeypatch.setattr(
+        "app.api.object_storage.upload.s3_svc.get_user_s3_client",
+        lambda *a, **kw: fake_s3,
+    )
+    monkeypatch.setattr(
+        "app.api.object_storage.upload.swift_svc.get_container_metadata",
+        lambda *a, **kw: {"name": "test"},
+    )
 
     resp = await client.post(
-        "/api/object-storage/test/upload/abort",
-        json={"transaction_id": "tx-1"},
+        "/api/object-storage/test/upload",
+        files={"file": ("crash.bin", b"data", "application/octet-stream")},
     )
-    assert resp.status_code == 200
-    fake_s3.abort_multipart_upload.assert_called_once()
+    assert resp.status_code == 500
+    # quarantine 정리 시도
+    fake_s3.delete_object.assert_called_once_with(Bucket="test-quarantine", Key="crash.bin")
 
 
 @pytest.mark.asyncio
-async def test_upload_abort_unknown_tx_ok(client, mock_conn, monkeypatch):
-    """트랜잭션 없어도 abort는 200 반환 (idempotent)."""
-    monkeypatch.setattr("app.api.object_storage.upload._get_tx", AsyncMock(return_value=None))
+async def test_upload_with_prefix(client, mock_conn, monkeypatch):
+    """prefix 가 object_name 에 포함된다."""
+    fake_s3 = MagicMock()
+    fake_s3.head_object.return_value = {
+        "ContentLength": 1,
+        "ETag": '"e"',
+        "ContentType": "text/plain",
+    }
+
+    monkeypatch.setattr(
+        "app.api.object_storage.upload.s3_svc.get_user_s3_client",
+        lambda *a, **kw: fake_s3,
+    )
+    monkeypatch.setattr(
+        "app.api.object_storage.upload.swift_svc.get_container_metadata",
+        lambda *a, **kw: {"name": "test"},
+    )
 
     resp = await client.post(
-        "/api/object-storage/test/upload/abort",
-        json={"transaction_id": "missing"},
+        "/api/object-storage/test/upload",
+        files={"file": ("notes.md", b"x", "text/markdown")},
+        data={"prefix": "docs/"},
     )
     assert resp.status_code == 200
+    body = resp.json()
+    assert body["name"] == "docs/notes.md"
+    upload_kwargs = fake_s3.upload_fileobj.call_args.kwargs
+    assert upload_kwargs["Key"] == "docs/notes.md"
 
 
 # ---------------------------------------------------------------------------
-# CORS 다중 origin + ensure_bucket idempotent 재적용 테스트 (Phase 8.3)
+# CORS 적용 회귀 (ensure_bucket idempotent)
 # ---------------------------------------------------------------------------
 
 
 def test_put_bucket_cors_uses_wildcard_origin():
-    """_put_bucket_cors 가 AllowedOrigins=["*"] 를 사용 (presigned URL 은 서명으로 보호)."""
+    """_put_bucket_cors 가 AllowedOrigins=["*"] 를 사용 (legacy)."""
     from app.services import s3 as s3_svc
 
     fake = MagicMock()
@@ -235,11 +226,11 @@ def test_put_bucket_cors_uses_wildcard_origin():
 
 
 def test_ensure_bucket_existing_reapplies_cors():
-    """기존 버킷(head_bucket 성공)도 CORS 가 매번 재적용되어야 한다."""
+    """기존 버킷도 CORS 가 매번 재적용 (idempotent)."""
     from app.services import s3 as s3_svc
 
     fake = MagicMock()
-    fake.head_bucket.return_value = {}  # 이미 존재
+    fake.head_bucket.return_value = {}
     s3_svc.ensure_bucket(fake, "test-quarantine")
 
     fake.create_bucket.assert_not_called()
