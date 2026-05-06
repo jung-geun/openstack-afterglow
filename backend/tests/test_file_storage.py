@@ -114,6 +114,91 @@ async def test_revoke_access_rule(client, mock_conn):
 
 
 # ─────────────────────────────────────────────────────────────────
+# CephFS share_network_id 차단 테스트
+# ─────────────────────────────────────────────────────────────────
+
+
+def test_create_file_storage_cephfs_omits_share_network():
+    """manila.create_file_storage: CephFS 일 때 share_network_id 를 share_body 에 포함하지 않는다."""
+    from unittest.mock import MagicMock
+
+    from app.services import manila as manila_svc
+
+    captured: dict = {}
+
+    fake_client = MagicMock()
+    fake_client.post.side_effect = lambda path, body: (
+        captured.update({"body": body}) or {"share": {"id": "s1", "status": "available"}}
+    )
+    fake_client.get.return_value = {
+        "share": {
+            "id": "s1",
+            "name": "f",
+            "status": "available",
+            "share_proto": "CEPHFS",
+            "size": 10,
+            "export_locations": [],
+            "metadata": {},
+            "is_public": False,
+            "project_id": "test-project-123",
+            "created_at": "2024-01-01T00:00:00Z",
+        }
+    }
+
+    with patch("app.services.manila.get_client", return_value=fake_client):
+        with patch("time.sleep"):
+            manila_svc.create_file_storage(
+                conn=MagicMock(),
+                name="f",
+                size_gb=10,
+                share_network_id="net-uuid",
+                share_proto="CEPHFS",
+            )
+
+    assert "share_network_id" not in captured["body"]["share"]
+
+
+def test_create_file_storage_nfs_includes_share_network():
+    """manila.create_file_storage: NFS 일 때 share_network_id 를 share_body 에 포함한다."""
+    from unittest.mock import MagicMock
+
+    from app.services import manila as manila_svc
+
+    captured: dict = {}
+
+    fake_client = MagicMock()
+    fake_client.post.side_effect = lambda path, body: (
+        captured.update({"body": body}) or {"share": {"id": "s2", "status": "available"}}
+    )
+    fake_client.get.return_value = {
+        "share": {
+            "id": "s2",
+            "name": "f",
+            "status": "available",
+            "share_proto": "NFS",
+            "size": 10,
+            "export_locations": [],
+            "metadata": {},
+            "is_public": False,
+            "project_id": "test-project-123",
+            "created_at": "2024-01-01T00:00:00Z",
+        }
+    }
+
+    with patch("app.services.manila.get_client", return_value=fake_client):
+        with patch("time.sleep"):
+            manila_svc.create_file_storage(
+                conn=MagicMock(),
+                name="f",
+                size_gb=10,
+                share_network_id="net-uuid",
+                share_proto="NFS",
+            )
+
+    assert captured["body"]["share"]["share_network_id"] == "net-uuid"
+
+
+# ─────────────────────────────────────────────────────────────────
 # Manila endpoint 정규화 단위 테스트 (회귀 방지)
 # ─────────────────────────────────────────────────────────────────
 

@@ -226,7 +226,7 @@
         name: fsForm.name, size_gb: fsForm.size_gb,
         share_type: fsForm.share_type, share_proto: fsForm.share_proto,
       };
-      if (selectedNetworkId) body.share_network_id = selectedNetworkId;
+      if (selectedNetworkId && fsForm.share_proto !== 'CEPHFS') body.share_network_id = selectedNetworkId;
       const validMeta = metaEntries.filter(m => m.key.trim());
       if (validMeta.length > 0) {
         const metadata: Record<string, string> = {};
@@ -384,23 +384,29 @@
           <div class="space-y-4">
             <!-- Share Network 선택 -->
             <div>
-              <div class="flex items-center justify-between mb-1.5">
-                <span class="text-xs text-gray-400 uppercase tracking-wide">Share Network {fsForm.share_proto === 'NFS' ? '*' : '(선택)'}</span>
-                <button type="button" onclick={() => { showInlineNetCreate = !showInlineNetCreate; inlineNetError = ''; }}
-                  class="text-xs text-blue-400 hover:text-blue-300 transition-colors">
-                  {showInlineNetCreate ? '접기' : '+ 새로 생성'}
-                </button>
-              </div>
-              {#if shareNetworks.length > 0}
-                <select bind:value={selectedNetworkId} class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
-                  <option value="">기본값 사용{fsForm.share_proto === 'NFS' ? '' : ' (권장)'}</option>
-                  {#each shareNetworks as net}<option value={net.id}>{net.name || net.id.slice(0, 8)}{net.status ? ` (${net.status})` : ''}</option>{/each}
-                </select>
-              {:else if !showInlineNetCreate}
-                <div class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-gray-500 text-sm">
-                  Share Network 없음 —
-                  <button onclick={() => showInlineNetCreate = true} class="text-blue-400 hover:text-blue-300 underline">지금 생성</button>
+              {#if fsForm.share_proto === 'CEPHFS'}
+                <div class="bg-gray-800/40 border border-gray-700 rounded-lg px-3 py-2.5 text-xs text-gray-500">
+                  CephFS native 프로토콜은 Share Network 없이 직접 마운트됩니다.
                 </div>
+              {:else}
+                <div class="flex items-center justify-between mb-1.5">
+                  <span class="text-xs text-gray-400 uppercase tracking-wide">Share Network {fsForm.share_proto === 'NFS' ? '*' : '(선택)'}</span>
+                  <button type="button" onclick={() => { showInlineNetCreate = !showInlineNetCreate; inlineNetError = ''; }}
+                    class="text-xs text-blue-400 hover:text-blue-300 transition-colors">
+                    {showInlineNetCreate ? '접기' : '+ 새로 생성'}
+                  </button>
+                </div>
+                {#if shareNetworks.length > 0}
+                  <select bind:value={selectedNetworkId} class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
+                    <option value="">기본값 사용{fsForm.share_proto === 'NFS' ? '' : ' (권장)'}</option>
+                    {#each shareNetworks as net}<option value={net.id}>{net.name || net.id.slice(0, 8)}{net.status ? ` (${net.status})` : ''}</option>{/each}
+                  </select>
+                {:else if !showInlineNetCreate}
+                  <div class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-gray-500 text-sm">
+                    Share Network 없음 —
+                    <button onclick={() => showInlineNetCreate = true} class="text-blue-400 hover:text-blue-300 underline">지금 생성</button>
+                  </div>
+                {/if}
               {/if}
             </div>
 

@@ -88,3 +88,45 @@ async def test_list_database_instances_error_handling(client, mock_conn):
     with patch("app.services.trove.list_instances", new=MagicMock(side_effect=Exception("trove error"))):
         resp = await client.get("/api/database-instances")
     assert resp.status_code in (500, 503)
+
+
+# ---------------------------------------------------------------------------
+# admin all_projects 테스트
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_list_db_instances_all_projects_requires_admin(non_admin_client):
+    """all_projects=true + is_system_admin=False → 403."""
+    resp = await non_admin_client.get("/api/database-instances?all_projects=true")
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_list_db_instances_all_projects_admin(admin_client, mock_conn):
+    """admin + all_projects=true → list_instances_admin_all_projects 호출 + project_id 반환."""
+    from unittest.mock import MagicMock, patch
+
+    fake_instance = {
+        "id": "inst-abc",
+        "name": "db1",
+        "status": "ACTIVE",
+        "datastore": {"type": "mysql"},
+        "flavor_id": "f1",
+        "flavor_ram": 1024,
+        "size": 10,
+        "created_at": "",
+        "hostname": "",
+        "ip": "",
+        "links": [],
+        "project_id": "other-project",
+    }
+    with patch(
+        "app.services.trove.list_instances_admin_all_projects",
+        new=MagicMock(return_value=[fake_instance]),
+    ):
+        resp = await admin_client.get("/api/database-instances?all_projects=true")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 1
+    assert body[0]["project_id"] == "other-project"

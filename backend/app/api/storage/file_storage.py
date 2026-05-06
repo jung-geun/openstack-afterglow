@@ -5,6 +5,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import openstack
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.api.common.activity_recorder import rec
@@ -17,6 +19,7 @@ from app.services.cache import cached_call, invalidate, ttl_fast
 from app.services.manila import _build_nfs_access_metadata
 
 router = APIRouter()
+_logger = logging.getLogger(__name__)
 
 
 @router.get("/quota")
@@ -114,6 +117,7 @@ async def create_file_storage(
         )
         return result
     except Exception as e:
+        _logger.exception("파일 스토리지 생성 실패: name=%s proto=%s", req.name, req.share_proto)
         await rec(
             token_info,
             conn,
@@ -123,7 +127,7 @@ async def create_file_storage(
             resource_name=req.name,
             error_message=str(e)[:500],
         )
-        raise HTTPException(status_code=500, detail="파일 스토리지 생성 실패")
+        raise HTTPException(status_code=500, detail=f"파일 스토리지 생성 실패: {str(e)[:200]}")
 
 
 @router.delete("/{file_storage_id}", status_code=204)

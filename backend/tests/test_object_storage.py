@@ -580,3 +580,51 @@ async def test_download_with_valid_token():
     if resp.status_code == 200:
         cd = resp.headers.get("content-disposition", "")
         assert "filename*=UTF-8''" in cd
+
+
+# ---------------------------------------------------------------------------
+# admin all_projects 테스트
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_list_containers_all_projects_requires_admin(non_admin_client):
+    """all_projects=true + is_system_admin=False → 403."""
+    resp = await non_admin_client.get("/api/object-storage?all_projects=true")
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_list_containers_all_projects_fans_out(admin_client):
+    """admin + all_projects=true → 프로젝트별 fan-out, project_id 포함 결과."""
+    from unittest.mock import MagicMock, patch
+
+    fake_projects = [{"id": "p1", "name": "alpha"}, {"id": "p2", "name": "beta"}]
+    sub_conn_p1 = MagicMock()
+    sub_conn_p1.close = MagicMock()
+    sub_conn_p2 = MagicMock()
+    sub_conn_p2.close = MagicMock()
+    conns = {"p1": sub_conn_p1, "p2": sub_conn_p2}
+    containers_by_conn_id = {
+        id(sub_conn_p1): [{"name": "bucket-a", "count": 3, "bytes": 1024}],
+        id(sub_conn_p2): [{"name": "bucket-b", "count": 5, "bytes": 2048}],
+    }
+
+    with (
+        patch("app.services.keystone.list_projects", return_value=fake_projects),
+        patch(
+            "app.services.keystone.get_admin_connection_for_project",
+            side_effect=lambda pid: conns[pid],
+        ),
+        patch(
+            "app.services.swift.list_containers",
+            side_effect=lambda conn: containers_by_conn_id[id(conn)],
+        ),
+    ):
+        resp = await admin_client.get("/api/object-storage?all_projects=true")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 2
+    assert {b["project_id"] for b in body} == {"p1", "p2"}
+    sub_conn_p1.close.assert_called_once()
+    sub_conn_p2.close.assert_called_once()

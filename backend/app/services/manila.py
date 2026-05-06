@@ -333,14 +333,16 @@ def create_file_storage(
     metadata: dict | None = None,
 ) -> FileStorageInfo:
     client = get_client(conn)
+    proto_upper = share_proto.upper()
     share_body: dict = {
         "name": name,
-        "share_proto": share_proto.upper(),
+        "share_proto": proto_upper,
         "size": size_gb,
         "share_type": share_type,
         "metadata": metadata or {},
     }
-    if share_network_id:
+    # CephFS native (DHSS=False) 는 share_network_id 를 거부 → error 상태 폴링 후 500
+    if share_network_id and proto_upper != "CEPHFS":
         share_body["share_network_id"] = share_network_id
     body = {"share": share_body}
     data = client.post("shares", body)["share"]

@@ -229,7 +229,7 @@
 			{#if projectDropdownOpen && projectSuggestions.length > 0}
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
 				<div
-					class="absolute top-full mt-1 left-0 w-64 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-20 overflow-hidden"
+					class="absolute top-full mt-1 left-0 w-64 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-30 overflow-hidden"
 					onmouseleave={() => {}}
 				>
 					{#each projectSuggestions as [id, name]}

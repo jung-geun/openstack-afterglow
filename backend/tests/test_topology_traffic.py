@@ -12,9 +12,11 @@ _PROJECT_ID = "test-project-123"
 
 # ── 픽스처 ───────────────────────────────────────────────────────────────────
 
+
 @pytest.fixture(autouse=True)
 def _bypass_port_cache():
     """테스트 간 Redis 캐시 오염 방지: cached_call 을 항상 함수를 직접 호출하도록 패치."""
+
     async def _passthrough(_key, _ttl, fn):
         return fn()
 

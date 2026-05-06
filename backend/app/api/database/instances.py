@@ -7,9 +7,9 @@ if TYPE_CHECKING:
 import asyncio
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.api.deps import get_os_conn
+from app.api.deps import get_os_conn, get_token_info
 from app.models.database import (
     CreateBackupRequest,
     CreateDatabaseRequest,
@@ -132,9 +132,20 @@ async def restore_from_backup(
 @router.get("")
 async def list_database_instances(
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+    all_projects: bool = Query(False, description="admin 전용: 모든 프로젝트 DB 인스턴스"),
 ):
-    """현재 프로젝트의 Trove DB 인스턴스 목록."""
+    """Trove DB 인스턴스 목록. all_projects=true 는 시스템 admin 전용."""
     from app.services import trove
+
+    if all_projects:
+        if not token_info.get("is_system_admin", False):
+            raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다")
+        try:
+            return await asyncio.to_thread(trove.list_instances_admin_all_projects, conn)
+        except Exception:
+            _logger.exception("관리자 DB 인스턴스 전체 조회 실패")
+            raise HTTPException(status_code=500, detail="DB 인스턴스 목록 조회 실패")
 
     try:
         return await asyncio.to_thread(trove.list_instances, conn)

@@ -46,6 +46,43 @@ def list_instances(conn) -> list[dict]:
         return []
 
 
+def list_instances_admin_all_projects(conn) -> list[dict]:
+    """admin 전용: Trove /mgmt/instances 로 모든 프로젝트 DB 인스턴스 반환.
+
+    반환 dict 에 project_id 필드 추가. mgmt API 미지원 환경에서는 빈 목록.
+    """
+    try:
+        endpoint = conn.database.get_endpoint()
+        resp = conn.session.get(f"{endpoint}/mgmt/instances")
+        resp.raise_for_status()
+        items = resp.json().get("instances", [])
+    except Exception:
+        _logger.warning("Trove /mgmt/instances 조회 실패", exc_info=True)
+        return []
+
+    out: list[dict] = []
+    for raw in items:
+        flavor = raw.get("flavor") or {}
+        volume = raw.get("volume") or {}
+        out.append(
+            {
+                "id": raw.get("id", ""),
+                "name": raw.get("name", "") or "",
+                "status": raw.get("status", "") or "",
+                "datastore": raw.get("datastore") or {},
+                "flavor_id": flavor.get("id", "") if isinstance(flavor, dict) else "",
+                "flavor_ram": flavor.get("ram", 0) if isinstance(flavor, dict) else 0,
+                "size": volume.get("size", 0) if isinstance(volume, dict) else 0,
+                "created_at": str(raw.get("created", "") or ""),
+                "hostname": raw.get("hostname", "") or "",
+                "ip": "",
+                "links": [lk.get("href", "") if isinstance(lk, dict) else str(lk) for lk in (raw.get("links") or [])],
+                "project_id": raw.get("tenant_id", "") or "",
+            }
+        )
+    return out
+
+
 def count_instances(conn) -> int:
     """현재 프로젝트의 DB 인스턴스 수 반환."""
     try:

@@ -17,6 +17,7 @@
 		flavor_id: string;
 		size: number;
 		created_at: string;
+		project_id?: string;
 	}
 
 	let instances = $state<DbInstance[]>([]);
@@ -35,7 +36,7 @@
 		if (instances.length === 0) loading = true;
 		else refreshing = true;
 		try {
-			instances = await api.get<DbInstance[]>('/api/database-instances', token, projectId);
+			instances = await api.get<DbInstance[]>('/api/database-instances?all_projects=true', token, projectId);
 		} catch {
 			instances = [];
 		} finally {

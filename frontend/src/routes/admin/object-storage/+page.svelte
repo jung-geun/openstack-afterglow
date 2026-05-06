@@ -12,6 +12,8 @@
 		name: string;
 		count: number;
 		bytes: number;
+		project_id?: string;
+		project_name?: string;
 	}
 
 	interface AccountMeta {
@@ -39,7 +41,7 @@
 		if (containers.length === 0) loading = true;
 		else refreshing = true;
 		await Promise.allSettled([
-			api.get<SwiftContainer[]>('/api/object-storage', token, projectId)
+			api.get<SwiftContainer[]>('/api/object-storage?all_projects=true', token, projectId)
 				.then(v => { containers = v; loading = false; })
 				.catch(() => { containers = []; loading = false; }),
 			api.get<AccountMeta>('/api/object-storage/account', token, projectId)
@@ -176,6 +178,7 @@
 				<thead>
 					<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
 						<th class="text-left py-3 px-4 font-medium">버킷 이름</th>
+						<th class="text-left py-3 px-4 font-medium">프로젝트</th>
 						<th class="text-left py-3 px-4 font-medium">오브젝트 수</th>
 						<th class="text-left py-3 px-4 font-medium">용량</th>
 						<th class="text-right py-3 px-4 font-medium">액션</th>
@@ -189,6 +192,9 @@
 									href="/admin/object-storage/{encodeURIComponent(c.name)}"
 									class="text-indigo-400 hover:text-indigo-300 font-medium"
 								>{c.name}</a>
+							</td>
+							<td class="py-3 px-4 text-gray-400 text-xs font-mono">
+								{c.project_name || c.project_id?.slice(0, 8) || '—'}
 							</td>
 							<td class="py-3 px-4 text-gray-300">{c.count}</td>
 							<td class="py-3 px-4 text-gray-300">{formatStorage(Math.round(c.bytes / 1073741824))}</td>

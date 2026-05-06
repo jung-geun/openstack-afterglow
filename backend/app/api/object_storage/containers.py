@@ -15,7 +15,7 @@ import urllib.parse
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
-from app.api.deps import get_os_conn
+from app.api.deps import get_os_conn, get_token_info
 from app.models.storage import (
     BulkDeleteRequest,
     CopyObjectRequest,
@@ -95,12 +95,46 @@ async def get_object_storage_account(
 # ---------------------------------------------------------------------------
 
 
+def _list_all_projects_containers(admin_token: str) -> list[dict]:
+    """모든 프로젝트로 fan-out 해서 Swift 컨테이너 집계."""
+    from app.services import keystone, swift
+
+    projects = keystone.list_projects(admin_token)
+    out: list[dict] = []
+    for p in projects:
+        pid = p.get("id")
+        if not pid:
+            continue
+        try:
+            sub_conn = keystone.get_admin_connection_for_project(pid)
+            try:
+                containers = swift.list_containers(sub_conn)
+            finally:
+                sub_conn.close()
+            for c in containers:
+                out.append({**c, "project_id": pid, "project_name": p.get("name", "")})
+        except Exception:
+            _logger.warning("프로젝트 %s 의 Swift 컨테이너 조회 실패", pid, exc_info=True)
+    return out
+
+
 @router.get("")
 async def list_object_storage_containers(
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+    all_projects: bool = Query(False, description="admin 전용: 모든 프로젝트 버킷"),
 ):
-    """현재 계정의 Swift 오브젝트 스토리지 컨테이너 목록."""
+    """Swift 오브젝트 스토리지 컨테이너 목록. all_projects=true 는 시스템 admin 전용."""
     from app.services import swift
+
+    if all_projects:
+        if not token_info.get("is_system_admin", False):
+            raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다")
+        try:
+            return await asyncio.to_thread(_list_all_projects_containers, token_info["token"])
+        except Exception:
+            _logger.exception("관리자 Swift 버킷 전체 조회 실패")
+            raise HTTPException(status_code=500, detail="오브젝트 스토리지 컨테이너 목록 조회 실패")
 
     try:
         return await asyncio.to_thread(swift.list_containers, conn)

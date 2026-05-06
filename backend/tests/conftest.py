@@ -8,6 +8,8 @@ os.environ.setdefault("SERVICE_MANILA_ENABLED", "true")
 os.environ.setdefault("SERVICE_MAGNUM_ENABLED", "true")
 os.environ.setdefault("SERVICE_ZUN_ENABLED", "true")
 os.environ.setdefault("SERVICE_K3S_ENABLED", "true")
+os.environ.setdefault("SERVICE_TROVE_ENABLED", "true")
+os.environ.setdefault("SERVICE_SWIFT_ENABLED", "true")
 
 from unittest.mock import MagicMock
 
