@@ -198,9 +198,44 @@ def create_container(conn, name: str) -> dict:
 
 
 def delete_container(conn, name: str) -> None:
-    """오브젝트 스토리지 컨테이너를 삭제."""
+    """오브젝트 스토리지 컨테이너를 삭제 (내용물 + SLO segments 캐스케이드).
+
+    동작:
+    1. 원본 컨테이너 내부의 모든 객체 삭제 (SLO manifest 는 delete_object 내부에서
+       ?multipart-manifest=delete 경로로 segments 자동 정리)
+    2. 원본 컨테이너 자체 삭제
+    3. {name}_segments 컨테이너가 남아 있으면 비우고 삭제 (orphan segment quota leak 방지)
+    """
     _apply_endpoint_override(conn)
+
+    # 1. 원본 컨테이너 비우기
+    try:
+        for o in conn.object_store.objects(name):
+            obj_name = o.name or ""
+            try:
+                delete_object(conn, name, obj_name)
+            except Exception:
+                _logger.warning("객체 삭제 실패 container=%s name=%s", name, obj_name, exc_info=True)
+    except Exception:
+        _logger.debug("컨테이너 객체 목록 조회 실패: %s", name, exc_info=True)
+
+    # 2. 원본 컨테이너 삭제
     conn.object_store.delete_container(name, ignore_missing=False)
+
+    # 3. _segments 컨테이너 정리 (SLO 분할 파일의 orphan 방지)
+    seg_name = f"{name}_segments"
+    try:
+        for o in conn.object_store.objects(seg_name):
+            obj_name = o.name or ""
+            try:
+                conn.object_store.delete_object(obj_name, container=seg_name, ignore_missing=True)
+            except Exception:
+                _logger.warning("SLO segment 삭제 실패 container=%s name=%s", seg_name, obj_name, exc_info=True)
+        conn.object_store.delete_container(seg_name, ignore_missing=True)
+        _logger.info("SLO segments 컨테이너 정리: %s", seg_name)
+    except Exception:
+        # segments 가 없는 경우(SLO 미사용 버킷) 정상
+        _logger.debug("SLO segments 정리 스킵 또는 부재: %s", seg_name, exc_info=True)
 
 
 def get_container_metadata(conn, name: str) -> dict:
@@ -330,7 +365,9 @@ def list_objects(conn, container: str, prefix: str = "", delimiter: str = "") ->
         return []
 
 
-_SLO_SEGMENT_SIZE = 1 * 1024 * 1024 * 1024  # 1 GiB — 이 크기 초과 시 Swift SLO 수동 분할
+# Ceph RGW 단일 PUT 한계(rgw_max_put_size 기본 5 GiB) 직전까지 단일 객체로 저장.
+# 5 GiB 이하는 _segments 컨테이너를 만들지 않음 → Horizon 에 segment 버킷 미노출.
+_SLO_SEGMENT_SIZE = 5 * 1024 * 1024 * 1024  # 5 GiB — 이 크기 초과 시 Swift SLO 수동 분할
 
 
 class _LimitedReader:

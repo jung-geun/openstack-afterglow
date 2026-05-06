@@ -399,7 +399,10 @@ def test_streaming_upload_small_no_slo():
 
 
 def test_streaming_upload_large_uses_manual_slo():
-    """1.5 GiB raw PUT → 수동 SLO: proxy.put 2(segments) + 1(manifest) = 3 회."""
+    """6.5 GiB raw PUT → 수동 SLO: proxy.put 2(segments) + 1(manifest) = 3 회.
+
+    SLO 임계값이 5 GiB 이므로 6.5 GiB 는 ceil(6.5/5) = 2 segments.
+    """
     import io
     import math
     from unittest.mock import MagicMock, patch
@@ -411,7 +414,7 @@ def test_streaming_upload_large_uses_manual_slo():
     mock_resp.headers = {"etag": '"deadbeef"'}
     conn.object_store.put.return_value = mock_resp
 
-    large_size = int(1.5 * 1024**3)  # 2 segments
+    large_size = int(6.5 * 1024**3)  # 5 GiB 초과 → SLO 발동, 2 segments
     with patch("app.services.swift._apply_endpoint_override"), patch("app.services.swift._ensure_segment_container"):
         upload_object(conn, "bucket", "large.bin", io.BytesIO(b""), "application/octet-stream", large_size)
 
@@ -628,3 +631,122 @@ async def test_list_containers_all_projects_fans_out(admin_client):
     assert {b["project_id"] for b in body} == {"p1", "p2"}
     sub_conn_p1.close.assert_called_once()
     sub_conn_p2.close.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# delete_container 캐스케이드 + SLO 임계값 테스트
+# ---------------------------------------------------------------------------
+
+
+def test_delete_container_cascades_segments():
+    """delete_container 가 원본 컨테이너 + 객체 + _segments 컨테이너를 모두 삭제."""
+    from unittest.mock import MagicMock, patch
+
+    from app.services import swift as swift_svc
+
+    proxy = MagicMock()
+    obj_a = MagicMock()
+    obj_a.name = "file.bin"
+    seg_a = MagicMock()
+    seg_a.name = "file.bin/00000000"
+    seg_b = MagicMock()
+    seg_b.name = "file.bin/00000001"
+
+    # 첫 호출(name="test"): 객체 1개; 두 번째 호출(name="test_segments"): segment 2개
+    proxy.objects.side_effect = [iter([obj_a]), iter([seg_a, seg_b])]
+    proxy.delete_container = MagicMock()
+    proxy.delete_object = MagicMock()
+    # SLO manifest 아님으로 설정 → delete_object 경로를 단순화
+    proxy.get_object_metadata = MagicMock(return_value=MagicMock(
+        is_static_large_object=False,
+        x_static_large_object="",
+    ))
+
+    conn = MagicMock()
+    conn.object_store = proxy
+    conn._afterglow_project_id = "p1"
+
+    with patch.object(swift_svc, "_apply_endpoint_override"):
+        swift_svc.delete_container(conn, "test")
+
+    # 원본 컨테이너 삭제
+    proxy.delete_container.assert_any_call("test", ignore_missing=False)
+    # _segments 컨테이너 내 segment 2개 삭제 시도
+    assert proxy.delete_object.call_count >= 2
+    # _segments 컨테이너 자체 삭제
+    proxy.delete_container.assert_any_call("test_segments", ignore_missing=True)
+
+
+def test_delete_container_no_segments_ok():
+    """_segments 컨테이너가 없는 경우 정상 종료."""
+    from unittest.mock import MagicMock, patch
+
+    from app.services import swift as swift_svc
+
+    proxy = MagicMock()
+
+    def objects_side_effect(name):
+        if name == "test":
+            return iter([])
+        raise Exception("404 NoSuchContainer")
+
+    proxy.objects.side_effect = objects_side_effect
+    proxy.delete_container = MagicMock()
+
+    conn = MagicMock()
+    conn.object_store = proxy
+    conn._afterglow_project_id = "p1"
+
+    with patch.object(swift_svc, "_apply_endpoint_override"):
+        swift_svc.delete_container(conn, "test")  # 예외 없이 종료
+
+    proxy.delete_container.assert_any_call("test", ignore_missing=False)
+
+
+def test_upload_object_below_5gib_uses_single_put():
+    """4 GiB 파일은 SLO 거치지 않고 create_object 단일 호출."""
+    from io import BytesIO
+    from unittest.mock import MagicMock, patch
+
+    from app.services import swift as swift_svc
+
+    proxy = MagicMock()
+    proxy.create_object = MagicMock(return_value=MagicMock(name="big.bin", etag="abc"))
+    conn = MagicMock()
+    conn.object_store = proxy
+    four_gib = 4 * 1024 ** 3
+
+    with patch.object(swift_svc, "_apply_endpoint_override"):
+        result = swift_svc.upload_object(
+            conn, "test", "big.bin", BytesIO(b""),
+            content_type="application/octet-stream",
+            content_length=four_gib,
+        )
+
+    proxy.create_object.assert_called_once()
+    assert result["bytes"] == four_gib
+
+
+def test_upload_object_above_5gib_uses_slo():
+    """6 GiB 파일은 _upload_slo 호출."""
+    from io import BytesIO
+    from unittest.mock import MagicMock, patch
+
+    from app.services import swift as swift_svc
+
+    conn = MagicMock()
+    conn.object_store = MagicMock()
+    six_gib = 6 * 1024 ** 3
+
+    with (
+        patch.object(swift_svc, "_apply_endpoint_override"),
+        patch.object(swift_svc, "_upload_slo", return_value={"name": "huge.bin", "bytes": six_gib, "container": "test", "etag": ""}) as mock_slo,
+    ):
+        result = swift_svc.upload_object(
+            conn, "test", "huge.bin", BytesIO(b""),
+            content_type="application/octet-stream",
+            content_length=six_gib,
+        )
+
+    mock_slo.assert_called_once()
+    assert result["bytes"] == six_gib

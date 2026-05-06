@@ -80,7 +80,7 @@
 	}
 
 	async function deleteContainer(name: string) {
-		if (!confirm(`버킷 "${name}"를 삭제하시겠습니까? 비어있어야 삭제됩니다.`)) return;
+		if (!confirm(`버킷 "${name}" 와 그 안의 모든 객체를 삭제합니다. 계속하시겠습니까?`)) return;
 		deleting = name;
 		try {
 			await api.delete(`/api/object-storage/${encodeURIComponent(name)}`, token, projectId);
