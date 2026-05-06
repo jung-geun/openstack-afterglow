@@ -1091,6 +1091,7 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 - [x] `backend/app/templates/cloudinit_base.yaml.j2` — `gpu_available=true` 시 설치 스크립트 + systemd unit 자동 생성 (네이티브 바이너리, `0.0.0.0:9400`)
 - [x] `backend/app/services/cloudinit.py` — `_DCGM_EXPORTER_VERSION` 핀 상수 추가, 템플릿 렌더에 버전 전달
 - [x] `backend/tests/test_cloudinit.py` — GPU/non-GPU 분기 3케이스 추가
+- [x] **GPU 스택 풀-스택 idempotent 설치** (베이스 이미지 무관): `install_dcgm_exporter.sh` 에 ① `nvidia-smi` 미발견 시 `ubuntu-drivers autoinstall`, ② `nvidia-dcgm.service` 미발견 시 CUDA repo (`cuda-keyring`) 등록 + `datacenter-gpu-manager` 설치, ③ dcgm-exporter 바이너리 다운로드 단계 추가. `dcgm-exporter.service` 의 `Requires=nvidia-dcgm.service` 추가로 데몬 부팅 후 exporter 기동 보장. `test_cloudinit.py` 에 드라이버/DCGM 데몬 자동 설치 + systemd 의존성 검증 2건 추가
 - [→] 보안 그룹 9400/tcp 자동 허용 — 12.2에서 통합 처리
 - [→] Prometheus 스크래핑 대상 자동 등록 — 12.3/12.4에서 통합 처리
 

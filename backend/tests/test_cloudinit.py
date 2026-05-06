@@ -151,6 +151,27 @@ def test_userdata_with_gpu_uses_pinned_version():
     assert ci._DCGM_EXPORTER_VERSION in yaml_str
 
 
+def test_userdata_with_gpu_installs_driver_and_dcgm_daemon():
+    """gpu_available=True 일 때 베이스 이미지가 비어 있어도 동작하도록 드라이버 + DCGM 데몬 자동 설치 단계가 포함돼야 한다."""
+    encoded = generate_userdata(**{**_COMMON_ARGS, "gpu_available": True})
+    yaml_str = _decode_userdata(encoded)
+    # 드라이버: nvidia-smi 가 없을 때만 ubuntu-drivers autoinstall
+    assert "ubuntu-drivers autoinstall" in yaml_str
+    assert "command -v nvidia-smi" in yaml_str
+    # DCGM 데몬: cuda-keyring 등록 + datacenter-gpu-manager 설치 + nvidia-dcgm 활성화
+    assert "cuda-keyring" in yaml_str
+    assert "datacenter-gpu-manager" in yaml_str
+    assert "systemctl enable --now nvidia-dcgm.service" in yaml_str
+
+
+def test_userdata_with_gpu_dcgm_exporter_requires_dcgm_daemon():
+    """dcgm-exporter.service 가 nvidia-dcgm.service 에 의존해야 한다 (데몬 먼저 떠야 메트릭 정상)."""
+    encoded = generate_userdata(**{**_COMMON_ARGS, "gpu_available": True})
+    yaml_str = _decode_userdata(encoded)
+    assert "Requires=nvidia-dcgm.service" in yaml_str
+    assert "After=network-online.target nvidia-dcgm.service" in yaml_str
+
+
 def test_rotate_key_script_not_injected_when_disabled():
     """union_cephx_rotate_hours=0 이면 rotate-key 스크립트 미포함."""
     encoded = generate_userdata(**{**_COMMON_ARGS, "union_cephx_rotate_hours": 0})
