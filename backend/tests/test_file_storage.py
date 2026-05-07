@@ -331,3 +331,119 @@ async def test_admin_can_get_cross_project_share(admin_client, mock_conn):
     with patch("app.api.storage.file_storage.manila.get_file_storage", return_value=other):
         resp = await admin_client.get("/api/file-storage/share-other")
     assert resp.status_code == 200
+
+
+# ─────────────────────────────────────────────────────────────────
+# share_type ↔ share_proto 매칭 / Manila 에러 표면화
+# ─────────────────────────────────────────────────────────────────
+
+
+def test_list_share_types_includes_supported_protocols():
+    """list_share_types 가 extra_specs.storage_protocol 을 supported_protocols 로 노출."""
+    from unittest.mock import MagicMock
+
+    from app.services import manila as manila_svc
+
+    fake_client = MagicMock()
+    fake_client.get.return_value = {
+        "share_types": [
+            {
+                "id": "t1",
+                "name": "cephfstype",
+                "share_type_access:is_public": True,
+                "extra_specs": {"storage_protocol": "CEPHFS", "vendor_name": "Ceph"},
+            }
+        ]
+    }
+    with patch("app.services.manila.get_client", return_value=fake_client):
+        types = manila_svc.list_share_types(MagicMock())
+
+    assert types[0]["name"] == "cephfstype"
+    assert types[0]["supported_protocols"] == ["CEPHFS"]
+    assert types[0]["extra_specs"]["vendor_name"] == "Ceph"
+
+
+def test_list_share_types_falls_back_to_vendor_name():
+    """storage_protocol 이 없으면 vendor_name / 이름 패턴으로 추정."""
+    from unittest.mock import MagicMock
+
+    from app.services import manila as manila_svc
+
+    fake_client = MagicMock()
+    fake_client.get.return_value = {
+        "share_types": [
+            {
+                "id": "t-ceph",
+                "name": "any-name",
+                "share_type_access:is_public": True,
+                "extra_specs": {"vendor_name": "Ceph"},
+            },
+            {
+                "id": "t-nfs",
+                "name": "generic-nfs",
+                "share_type_access:is_public": False,
+                "extra_specs": {"vendor_name": "Generic"},
+            },
+            {
+                "id": "t-unknown",
+                "name": "weird",
+                "share_type_access:is_public": True,
+                "extra_specs": {},
+            },
+        ]
+    }
+    with patch("app.services.manila.get_client", return_value=fake_client):
+        types = manila_svc.list_share_types(MagicMock())
+
+    by_id = {t["id"]: t for t in types}
+    assert by_id["t-ceph"]["supported_protocols"] == ["CEPHFS"]
+    assert by_id["t-nfs"]["supported_protocols"] == ["NFS"]
+    assert by_id["t-unknown"]["supported_protocols"] == []
+
+
+def _make_manila_status_error(status: int, message: str) -> "Exception":
+    """테스트용 httpx.HTTPStatusError 생성."""
+    import httpx
+
+    request = httpx.Request("POST", "http://manila.test/v2/p/shares")
+    response = httpx.Response(status, request=request, json={"badRequest": {"code": status, "message": message}})
+    return httpx.HTTPStatusError("error", request=request, response=response)
+
+
+@pytest.mark.asyncio
+async def test_create_file_storage_propagates_manila_400(client, mock_conn):
+    """Manila 400 → HTTPException 400 + Manila message 그대로 detail 에 포함."""
+    err = _make_manila_status_error(400, "Invalid share protocol provided: NFS. Available protocols: ['CEPHFS'].")
+    with patch("app.api.storage.file_storage.manila.create_file_storage", side_effect=err):
+        resp = await client.post(
+            "/api/file-storage",
+            json={
+                "name": "test-bad",
+                "size_gb": 10,
+                "share_type": "cephfstype",
+                "share_proto": "NFS",
+            },
+        )
+    assert resp.status_code == 400
+    assert "Invalid share protocol" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_create_file_storage_500_fallback(client, mock_conn):
+    """일반 Exception 은 여전히 500 으로 (detail 은 글로벌 핸들러가 마스킹)."""
+    with patch(
+        "app.api.storage.file_storage.manila.create_file_storage",
+        side_effect=RuntimeError("boom"),
+    ):
+        resp = await client.post(
+            "/api/file-storage",
+            json={
+                "name": "test-runtime",
+                "size_gb": 10,
+                "share_type": "default",
+                "share_proto": "CEPHFS",
+            },
+        )
+    # Manila 가 아닌 일반 RuntimeError 는 httpx.HTTPStatusError 분기에 잡히지 않고
+    # 일반 Exception 분기로 떨어져 500 으로 변환되어야 한다.
+    assert resp.status_code == 500

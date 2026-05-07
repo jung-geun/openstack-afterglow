@@ -123,9 +123,33 @@
   let createdFs = $state<FileStorage | null>(null);
 
   // Step 1: 기본 정보
-  let shareTypes = $state<{ id: string; name: string; is_default: boolean }[]>([]);
+  type ShareTypeMeta = {
+    id: string;
+    name: string;
+    is_default: boolean;
+    extra_specs?: Record<string, string>;
+    supported_protocols?: string[];
+  };
+  let shareTypes = $state<ShareTypeMeta[]>([]);
   let fsForm = $state({ name: '', size_gb: 10, share_type: '', share_proto: 'CEPHFS' as 'CEPHFS' | 'NFS' });
   let metaEntries = $state<MetaEntry[]>([{ key: '', value: '' }]);
+
+  // 선택된 share_type 이 지원하는 프로토콜만 노출. 메타가 비어 있으면 fallback 으로 모두 노출.
+  const currentShareType = $derived(shareTypes.find(t => t.name === fsForm.share_type));
+  const allowedProtos = $derived<('CEPHFS' | 'NFS')[]>(
+    (currentShareType?.supported_protocols && currentShareType.supported_protocols.length > 0)
+      ? (currentShareType.supported_protocols.filter(
+          (p): p is 'CEPHFS' | 'NFS' => p === 'CEPHFS' || p === 'NFS'
+        ))
+      : ['CEPHFS', 'NFS']
+  );
+
+  // share_type 이 바뀌어 현재 share_proto 가 호환되지 않으면 자동으로 첫 번째 옵션으로 보정.
+  $effect(() => {
+    if (allowedProtos.length > 0 && !allowedProtos.includes(fsForm.share_proto)) {
+      fsForm.share_proto = allowedProtos[0];
+    }
+  });
 
   // Step 2: 네트워크
   let shareNetworks = $state<ShareNetwork[]>([]);
@@ -158,13 +182,21 @@
 
     try {
       const [types, networks] = await Promise.all([
-        api.get<{ id: string; name: string; is_default: boolean }[]>('/api/file-storage/types', token, projectId),
+        api.get<ShareTypeMeta[]>('/api/file-storage/types', token, projectId),
         api.get<ShareNetwork[]>('/api/share-networks', token, projectId),
       ]);
       shareTypes = types;
       shareNetworks = networks;
       if (shareTypes.length > 0) {
-        fsForm.share_type = shareTypes.find(t => t.is_default)?.name ?? shareTypes[0].name;
+        const def = shareTypes.find(t => t.is_default) ?? shareTypes[0];
+        fsForm.share_type = def.name;
+        // share_type 의 supported_protocols 가 있으면 첫 번째 항목으로 share_proto 도 같이 설정
+        const protos = def.supported_protocols?.filter(
+          (p): p is 'CEPHFS' | 'NFS' => p === 'CEPHFS' || p === 'NFS'
+        );
+        if (protos && protos.length > 0) {
+          fsForm.share_proto = protos[0];
+        }
       }
     } catch { shareTypes = []; shareNetworks = []; }
   }
@@ -345,9 +377,13 @@
             <div>
               <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">프로토콜
                 <select bind:value={fsForm.share_proto} class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5">
-                  <option value="CEPHFS">CephFS</option>
-                  <option value="NFS">NFS</option>
+                  {#each allowedProtos as p (p)}
+                    <option value={p}>{p === 'CEPHFS' ? 'CephFS' : 'NFS'}</option>
+                  {/each}
                 </select>
+                {#if allowedProtos.length === 1 && currentShareType}
+                  <span class="block text-[10px] text-gray-500 mt-1">선택된 share type 이 {allowedProtos[0]} 만 지원합니다.</span>
+                {/if}
               </label>
             </div>
             <div>

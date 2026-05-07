@@ -7,6 +7,7 @@ if TYPE_CHECKING:
 
 import logging
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.api.common.activity_recorder import rec
@@ -16,7 +17,7 @@ from app.models.storage import CreateAccessRuleRequest, CreateFileStorageRequest
 from app.rate_limit import limiter
 from app.services import manila
 from app.services.cache import cached_call, invalidate, ttl_fast
-from app.services.manila import _build_nfs_access_metadata
+from app.services.manila import _build_nfs_access_metadata, extract_manila_error
 
 router = APIRouter()
 _logger = logging.getLogger(__name__)
@@ -116,6 +117,24 @@ async def create_file_storage(
             extra={"size_gb": req.size_gb},
         )
         return result
+    except httpx.HTTPStatusError as e:
+        # Manila API 가 4xx/5xx 응답을 준 경우 — status code 와 detail 메시지를 그대로 전달
+        status, message = extract_manila_error(e)
+        _logger.warning("Manila %s on share create: %s", status, message[:300])
+        await rec(
+            token_info,
+            conn,
+            resource_type="file_storage",
+            action="file_storage.create",
+            status="failed",
+            resource_name=req.name,
+            error_message=message[:500],
+        )
+        # 4xx 는 그대로, 5xx 는 외부 서비스 장애로 표현
+        raise HTTPException(
+            status_code=status if 400 <= status < 500 else 502,
+            detail=message,
+        )
     except Exception as e:
         _logger.exception("파일 스토리지 생성 실패: name=%s proto=%s", req.name, req.share_proto)
         await rec(
