@@ -221,7 +221,12 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 @app.exception_handler(HTTPException)
 async def sanitized_http_exception_handler(request: Request, exc: HTTPException):
-    """5xx 에러의 내부 상세 정보를 클라이언트에 노출하지 않고 로그에만 기록."""
+    """5xx 에러의 내부 상세 정보를 클라이언트에 노출하지 않고 로그에만 기록.
+
+    400/4xx 에 chained __cause__ 가 있으면 진짜 원인을 함께 로깅 — FastAPI 가
+    request body parsing 예외(MultiPartException 등)를 generic 400 으로 wrap 해
+    detail 만으로 진단 어려움 대응.
+    """
     if exc.status_code >= 500:
         _logger.error(
             "HTTP %d: %s %s — %s",
@@ -231,6 +236,17 @@ async def sanitized_http_exception_handler(request: Request, exc: HTTPException)
             exc.detail,
         )
         return JSONResponse(status_code=exc.status_code, content={"detail": "내부 서버 오류"})
+    cause = getattr(exc, "__cause__", None)
+    if cause is not None:
+        _logger.warning(
+            "HTTP %d: %s %s — %s (cause: %s: %s)",
+            exc.status_code,
+            request.method,
+            request.url.path,
+            exc.detail,
+            type(cause).__name__,
+            cause,
+        )
     return await _default_http_handler(request, exc)
 
 
