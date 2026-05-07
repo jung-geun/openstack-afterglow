@@ -95,8 +95,11 @@ async def get_object_storage_account(
 # ---------------------------------------------------------------------------
 
 
-def _list_all_projects_containers(admin_token: str) -> list[dict]:
-    """모든 프로젝트로 fan-out 해서 Swift 컨테이너 집계."""
+def _list_all_projects_containers(admin_token: str, include_quarantine: bool = False) -> list[dict]:
+    """모든 프로젝트로 fan-out 해서 Swift 컨테이너 집계.
+
+    include_quarantine=True 시 `*-quarantine` 버킷도 포함 (admin UI 모니터링 용).
+    """
     from app.services import keystone, swift
 
     projects = keystone.list_projects(admin_token)
@@ -108,7 +111,7 @@ def _list_all_projects_containers(admin_token: str) -> list[dict]:
         try:
             sub_conn = keystone.get_admin_connection_for_project(pid)
             try:
-                containers = swift.list_containers(sub_conn)
+                containers = swift.list_containers(sub_conn, include_quarantine=include_quarantine)
             finally:
                 sub_conn.close()
             for c in containers:
@@ -123,21 +126,29 @@ async def list_object_storage_containers(
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
     all_projects: bool = Query(False, description="admin 전용: 모든 프로젝트 버킷"),
+    include_quarantine: bool = Query(False, description="admin 전용: *-quarantine 버킷 포함"),
 ):
-    """Swift 오브젝트 스토리지 컨테이너 목록. all_projects=true 는 시스템 admin 전용."""
+    """Swift 오브젝트 스토리지 컨테이너 목록. all_projects/include_quarantine 는 시스템 admin 전용."""
     from app.services import swift
+
+    if include_quarantine and not token_info.get("is_system_admin", False):
+        raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다")
 
     if all_projects:
         if not token_info.get("is_system_admin", False):
             raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다")
         try:
-            return await asyncio.to_thread(_list_all_projects_containers, token_info["token"])
+            return await asyncio.to_thread(
+                _list_all_projects_containers,
+                token_info["token"],
+                include_quarantine,
+            )
         except Exception:
             _logger.exception("관리자 Swift 버킷 전체 조회 실패")
             raise HTTPException(status_code=500, detail="오브젝트 스토리지 컨테이너 목록 조회 실패")
 
     try:
-        return await asyncio.to_thread(swift.list_containers, conn)
+        return await asyncio.to_thread(swift.list_containers, conn, include_quarantine)
     except Exception:
         raise HTTPException(status_code=500, detail="오브젝트 스토리지 컨테이너 목록 조회 실패")
 

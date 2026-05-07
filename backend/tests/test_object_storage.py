@@ -176,6 +176,55 @@ def test_list_containers_hides_segments():
     assert by_name["photos"]["bytes"] == 500 * 1024**2
 
 
+def test_list_containers_quarantine_default_hidden():
+    """default 호출 시 *-quarantine 도 숨겨진다."""
+    from unittest.mock import MagicMock, patch
+
+    from app.services.swift import list_containers
+
+    def make(name, count, bytes_):
+        c = MagicMock()
+        c.name, c.count, c.bytes = name, count, bytes_
+        return c
+
+    conn = MagicMock()
+    conn.object_store.containers.return_value = [
+        make("test", 4, 1024),
+        make("test-quarantine", 17, 512),
+    ]
+    with patch("app.services.swift._apply_endpoint_override"):
+        result = list_containers(conn)
+    names = [c["name"] for c in result]
+    assert names == ["test"]
+
+
+def test_list_containers_include_quarantine_admin():
+    """include_quarantine=True 시 *-quarantine 포함 + is_quarantine 플래그."""
+    from unittest.mock import MagicMock, patch
+
+    from app.services.swift import list_containers
+
+    def make(name, count, bytes_):
+        c = MagicMock()
+        c.name, c.count, c.bytes = name, count, bytes_
+        return c
+
+    conn = MagicMock()
+    conn.object_store.containers.return_value = [
+        make("test", 4, 1024),
+        make("test-quarantine", 17, 512),
+        make("test_segments", 1, 2048),  # segments 는 여전히 숨김
+    ]
+    with patch("app.services.swift._apply_endpoint_override"):
+        result = list_containers(conn, include_quarantine=True)
+    by_name = {c["name"]: c for c in result}
+    assert "test" in by_name
+    assert "test-quarantine" in by_name
+    assert "test_segments" not in by_name
+    assert by_name["test-quarantine"]["is_quarantine"] is True
+    assert "is_quarantine" not in by_name["test"]
+
+
 def test_get_container_metadata_includes_segments():
     """get_container_metadata 의 bytes 에 {name}_segments 의 bytes_used 가 합산된다."""
     from unittest.mock import MagicMock, patch
@@ -621,7 +670,7 @@ async def test_list_containers_all_projects_fans_out(admin_client):
         ),
         patch(
             "app.services.swift.list_containers",
-            side_effect=lambda conn: containers_by_conn_id[id(conn)],
+            side_effect=lambda conn, include_quarantine=False: containers_by_conn_id[id(conn)],
         ),
     ):
         resp = await admin_client.get("/api/object-storage?all_projects=true")
@@ -631,6 +680,48 @@ async def test_list_containers_all_projects_fans_out(admin_client):
     assert {b["project_id"] for b in body} == {"p1", "p2"}
     sub_conn_p1.close.assert_called_once()
     sub_conn_p2.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_list_containers_include_quarantine_requires_admin(non_admin_client):
+    """include_quarantine=true + non-admin → 403."""
+    resp = await non_admin_client.get("/api/object-storage?include_quarantine=true")
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_list_containers_all_projects_include_quarantine_propagates(admin_client):
+    """admin all_projects + include_quarantine 가 list_containers 까지 전달된다."""
+    from unittest.mock import MagicMock, patch
+
+    fake_projects = [{"id": "p1", "name": "alpha"}]
+    sub_conn = MagicMock()
+    sub_conn.close = MagicMock()
+
+    captured: dict = {}
+
+    def _list(conn, include_quarantine=False):
+        captured["include_quarantine"] = include_quarantine
+        return [
+            {"name": "test", "count": 4, "bytes": 1024},
+            {"name": "test-quarantine", "count": 17, "bytes": 512, "is_quarantine": True},
+        ]
+
+    with (
+        patch("app.services.keystone.list_projects", return_value=fake_projects),
+        patch(
+            "app.services.keystone.get_admin_connection_for_project",
+            return_value=sub_conn,
+        ),
+        patch("app.services.swift.list_containers", side_effect=_list),
+    ):
+        resp = await admin_client.get("/api/object-storage?all_projects=true&include_quarantine=true")
+    assert resp.status_code == 200
+    assert captured["include_quarantine"] is True
+    body = resp.json()
+    quarantine_entries = [b for b in body if b.get("is_quarantine")]
+    assert len(quarantine_entries) == 1
+    assert quarantine_entries[0]["name"] == "test-quarantine"
 
 
 # ---------------------------------------------------------------------------

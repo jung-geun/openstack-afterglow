@@ -45,8 +45,13 @@ def _apply_endpoint_override(conn) -> None:
         _logger.debug("Swift endpoint override 적용: %s", override)
 
 
-def list_containers(conn) -> list[dict]:
-    """현재 계정의 오브젝트 스토리지 컨테이너(버킷) 목록 반환."""
+def list_containers(conn, include_quarantine: bool = False) -> list[dict]:
+    """현재 계정의 오브젝트 스토리지 컨테이너(버킷) 목록 반환.
+
+    include_quarantine=True 시 `*-quarantine` 버킷도 포함하고 결과에
+    `is_quarantine: True` 필드 표시. admin 모니터링 용도.
+    `_segments` 는 항상 숨김(원본 bytes 에 합산).
+    """
     _apply_endpoint_override(conn)
     try:
         project_id = getattr(conn, "_afterglow_project_id", "unknown")
@@ -69,17 +74,21 @@ def list_containers(conn) -> list[dict]:
         result = []
         for c in all_containers:
             cname = c.name or ""
-            if cname.endswith("_segments") or cname.endswith("-quarantine"):
+            if cname.endswith("_segments"):
+                continue
+            is_quarantine = cname.endswith("-quarantine")
+            if is_quarantine and not include_quarantine:
                 continue
             base_bytes = getattr(c, "bytes", 0) or 0
-            result.append(
-                {
-                    "name": cname,
-                    "count": getattr(c, "count", 0) or 0,
-                    "bytes": base_bytes + seg_bytes_by_origin.get(cname, 0),
-                }
-            )
-        _logger.info("Swift 컨테이너 목록 조회: %d개", len(result))
+            entry = {
+                "name": cname,
+                "count": getattr(c, "count", 0) or 0,
+                "bytes": base_bytes + seg_bytes_by_origin.get(cname, 0),
+            }
+            if is_quarantine:
+                entry["is_quarantine"] = True
+            result.append(entry)
+        _logger.info("Swift 컨테이너 목록 조회: %d개 (quarantine=%s)", len(result), include_quarantine)
         return result
     except Exception as exc:
         if _is_account_not_found(exc):

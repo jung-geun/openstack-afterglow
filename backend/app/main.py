@@ -234,6 +234,26 @@ async def sanitized_http_exception_handler(request: Request, exc: HTTPException)
     return await _default_http_handler(request, exc)
 
 
+try:
+    from starlette.requests import ClientDisconnect as _ClientDisconnect
+except ImportError:  # pragma: no cover - older starlette
+    _ClientDisconnect = None  # type: ignore[assignment]
+
+
+if _ClientDisconnect is not None:
+
+    @app.exception_handler(_ClientDisconnect)
+    async def client_disconnect_handler(request: Request, exc):  # type: ignore[no-untyped-def]
+        """클라이언트가 multipart body 수신 도중 연결을 끊은 경우.
+
+        이 시점에는 endpoint 함수가 아직 호출되지 않아 자체 cancel 로깅이
+        남지 않으므로 여기서 명시적으로 기록한다. 클라는 이미 disconnect 라
+        응답은 도달하지 않지만 access log 분류용으로 499 반환.
+        """
+        _logger.info("client disconnect: %s %s", request.method, request.url.path)
+        return JSONResponse(status_code=499, content={"detail": "클라이언트 연결 종료"})
+
+
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     """처리되지 않은 예외를 로그에 기록하고 500을 반환."""

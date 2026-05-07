@@ -14,6 +14,7 @@
 		bytes: number;
 		project_id?: string;
 		project_name?: string;
+		is_quarantine?: boolean;
 	}
 
 	interface AccountMeta {
@@ -41,7 +42,7 @@
 		if (containers.length === 0) loading = true;
 		else refreshing = true;
 		await Promise.allSettled([
-			api.get<SwiftContainer[]>('/api/object-storage?all_projects=true', token, projectId)
+			api.get<SwiftContainer[]>('/api/object-storage?all_projects=true&include_quarantine=true', token, projectId)
 				.then(v => { containers = v; loading = false; })
 				.catch(() => { containers = []; loading = false; }),
 			api.get<AccountMeta>('/api/object-storage/account', token, projectId)
@@ -186,12 +187,20 @@
 				</thead>
 				<tbody>
 					{#each containers as c}
-						<tr class="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
+						<tr class="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors {c.is_quarantine ? 'bg-amber-950/20' : ''}">
 							<td class="py-3 px-4">
 								<a
 									href="/admin/object-storage/{encodeURIComponent(c.name)}"
 									class="text-indigo-400 hover:text-indigo-300 font-medium"
 								>{c.name}</a>
+								{#if c.is_quarantine}
+									<span
+										class="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded border border-amber-800 bg-amber-950/50 text-amber-400"
+										title="업로드 검증 중인 파일이 임시로 격리되는 시스템 버킷입니다. 검증 통과 시 원본 버킷으로 자동 이동됩니다."
+									>
+										격리용
+									</span>
+								{/if}
 							</td>
 							<td class="py-3 px-4 text-gray-400 text-xs font-mono">
 								{c.project_name || c.project_id?.slice(0, 8) || '—'}
@@ -210,5 +219,13 @@
 				</tbody>
 			</table>
 		</div>
+		{#if containers.some((c) => c.is_quarantine)}
+			<div class="mt-4 px-4 py-3 text-xs text-amber-400/80 bg-amber-950/20 border border-amber-900/50 rounded-lg">
+				<strong class="text-amber-400">격리용 버킷 안내:</strong>
+				<code>*-quarantine</code> 버킷은 사용자가 업로드한 파일이 검증 단계 동안 임시 저장되는 시스템 영역입니다.
+				정상 업로드 시 원본 버킷으로 자동 이동되어 비워지지만, 검증 실패·취소·중단으로 객체가 남을 수 있습니다.
+				필요 시 직접 삭제할 수 있습니다.
+			</div>
+		{/if}
 	{/if}
 </div>
