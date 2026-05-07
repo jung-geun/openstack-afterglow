@@ -37,6 +37,23 @@ def _is_account_not_found(exc: Exception) -> bool:
     return isinstance(exc, ResourceNotFound) or (hasattr(exc, "status_code") and getattr(exc, "status_code", 0) == 404)
 
 
+def _is_unauthorized(exc: Exception) -> bool:
+    """Keystone/Swift 401 Unauthorized 검사.
+
+    admin fan-out 시 일부 프로젝트에 admin role 이 없으면 Keystone rescope 가
+    Unauthorized raise. traceback 출력하지 않고 info 로 swallow 하기 위해 분기.
+    """
+    try:
+        from keystoneauth1.exceptions.http import Unauthorized
+
+        if isinstance(exc, Unauthorized):
+            return True
+    except ImportError:
+        pass
+    status = getattr(exc, "http_status", None) or getattr(exc, "status_code", None)
+    return status == 401
+
+
 def _apply_endpoint_override(conn) -> None:
     """swift_endpoint 오버라이드가 설정된 경우 openstacksdk object_store proxy에 적용."""
     override = _get_swift_endpoint(conn)
@@ -93,6 +110,8 @@ def list_containers(conn, include_quarantine: bool = False) -> list[dict]:
     except Exception as exc:
         if _is_account_not_found(exc):
             _logger.info("Swift 계정 미초기화 (404) — 빈 목록 반환")
+        elif _is_unauthorized(exc):
+            _logger.info("Swift 401 Unauthorized — 권한 없음, 빈 목록 반환")
         else:
             _logger.warning("Swift 컨테이너 목록 조회 실패", exc_info=True)
         return []

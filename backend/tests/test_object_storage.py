@@ -725,6 +725,105 @@ async def test_list_containers_all_projects_include_quarantine_propagates(admin_
 
 
 # ---------------------------------------------------------------------------
+# Phase 10: 버킷 이름 검증 + admin fan-out 병렬화 테스트
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_create_container_rejects_reserved_name(client, mock_conn):
+    """예약어 이름 (admin) → 400 + 한국어 사유."""
+    resp = await client.post("/api/object-storage", json={"name": "admin"})
+    assert resp.status_code == 400
+    assert "예약" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_create_container_rejects_quarantine_suffix(client, mock_conn):
+    """`-quarantine` 접미사 → 400."""
+    resp = await client.post("/api/object-storage", json={"name": "foo-quarantine"})
+    assert resp.status_code == 400
+    assert "quarantine" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_create_container_accepts_valid_name(client, mock_conn):
+    """정상 이름 통과 → 검증 후 swift.create_container 호출."""
+    with patch("app.services.swift.create_container") as mock_create:
+        mock_create.return_value = {"name": "my-bucket-2025"}
+        resp = await client.post("/api/object-storage", json={"name": "my-bucket-2025"})
+    assert resp.status_code == 201
+    mock_create.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_list_containers_all_projects_runs_concurrently(admin_client):
+    """asyncio.gather 병렬화: 3 프로젝트 × 0.3s sleep → 전체 < 0.5s (sequential 이면 0.9s+)."""
+    import time
+
+    fake_projects = [{"id": f"p{i}", "name": f"proj{i}"} for i in range(1, 4)]
+    sub_conns = {pid["id"]: MagicMock() for pid in fake_projects}
+    for c in sub_conns.values():
+        c.close = MagicMock()
+
+    def _slow_list(conn, include_quarantine=False):
+        time.sleep(0.3)
+        return [{"name": "bucket", "count": 1, "bytes": 100}]
+
+    with (
+        patch("app.services.keystone.list_projects", return_value=fake_projects),
+        patch(
+            "app.services.keystone.get_admin_connection_for_project",
+            side_effect=lambda pid: sub_conns[pid],
+        ),
+        patch("app.services.swift.list_containers", side_effect=_slow_list),
+    ):
+        start = time.monotonic()
+        resp = await admin_client.get("/api/object-storage?all_projects=true")
+        elapsed = time.monotonic() - start
+
+    assert resp.status_code == 200
+    assert len(resp.json()) == 3
+    # sequential 이면 ~0.9s, parallel 이면 ~0.3s. 0.6s 이하면 병렬 동작 확인.
+    assert elapsed < 0.6, f"expected parallel <0.6s, got {elapsed:.2f}s"
+
+
+@pytest.mark.asyncio
+async def test_list_containers_all_projects_skips_unauthorized(admin_client):
+    """한 프로젝트는 401 raise → 결과에서 제외 + 다른 프로젝트는 정상 포함."""
+    from keystoneauth1.exceptions.http import Unauthorized
+
+    fake_projects = [
+        {"id": "p1", "name": "good"},
+        {"id": "p2", "name": "denied"},
+    ]
+    good_conn = MagicMock()
+    good_conn.close = MagicMock()
+
+    def _get_conn(pid: str):
+        if pid == "p2":
+            raise Unauthorized("not allowed")
+        return good_conn
+
+    with (
+        patch("app.services.keystone.list_projects", return_value=fake_projects),
+        patch(
+            "app.services.keystone.get_admin_connection_for_project",
+            side_effect=_get_conn,
+        ),
+        patch(
+            "app.services.swift.list_containers",
+            side_effect=lambda conn, include_quarantine=False: [{"name": "ok-bucket", "count": 1, "bytes": 100}],
+        ),
+    ):
+        resp = await admin_client.get("/api/object-storage?all_projects=true")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    project_ids = {b["project_id"] for b in body}
+    assert project_ids == {"p1"}, f"p2 should be skipped, got {project_ids}"
+
+
+# ---------------------------------------------------------------------------
 # delete_container 캐스케이드 + SLO 임계값 테스트
 # ---------------------------------------------------------------------------
 

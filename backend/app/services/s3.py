@@ -144,7 +144,13 @@ def move_to_target(
     target_bucket: str,
     key: str,
 ) -> dict:
-    """quarantine → target server-side copy + quarantine 원본 삭제. metadata 반환."""
+    """quarantine → target server-side copy + quarantine 원본 삭제.
+
+    boto3 client.copy() 가 RGW 내부에서 CopyObject (≤5 GiB) 또는
+    UploadPartCopy multipart copy (>5 GiB) 를 자동 선택. 모두 server-side
+    동작이므로 백엔드는 명령어만 보내고 데이터는 RGW 안에서 직접 이동 —
+    백엔드 통과 0 바이트, 5 GiB+ 파일도 추가 chunking 불요.
+    """
     copy_object(client, quarantine_bucket, key, target_bucket, key)
     head = client.head_object(Bucket=target_bucket, Key=key)
     delete_object(client, quarantine_bucket, key)

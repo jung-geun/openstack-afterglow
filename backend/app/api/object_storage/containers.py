@@ -95,30 +95,47 @@ async def get_object_storage_account(
 # ---------------------------------------------------------------------------
 
 
-def _list_all_projects_containers(admin_token: str, include_quarantine: bool = False) -> list[dict]:
-    """모든 프로젝트로 fan-out 해서 Swift 컨테이너 집계.
+async def _list_all_projects_containers(admin_token: str, include_quarantine: bool = False) -> list[dict]:
+    """모든 프로젝트로 fan-out 해서 Swift 컨테이너 집계 (asyncio.gather 병렬).
 
     include_quarantine=True 시 `*-quarantine` 버킷도 포함 (admin UI 모니터링 용).
+    프로젝트당 ~700ms × 9개 = 7초 sequential 동작을 ~1초 이내로 단축.
+    Semaphore(8) 로 Keystone/RGW 동시 부하 제한.
     """
     from app.services import keystone, swift
+    from app.services.swift import _is_unauthorized
 
-    projects = keystone.list_projects(admin_token)
-    out: list[dict] = []
-    for p in projects:
+    projects = await asyncio.to_thread(keystone.list_projects, admin_token)
+    semaphore = asyncio.Semaphore(8)
+
+    async def _one(p: dict) -> list[dict]:
         pid = p.get("id")
         if not pid:
-            continue
-        try:
-            sub_conn = keystone.get_admin_connection_for_project(pid)
+            return []
+        async with semaphore:
             try:
-                containers = swift.list_containers(sub_conn, include_quarantine=include_quarantine)
+                sub_conn = await asyncio.to_thread(keystone.get_admin_connection_for_project, pid)
+            except Exception as e:
+                if _is_unauthorized(e):
+                    _logger.info("프로젝트 %s 권한 없음 — skip", pid)
+                else:
+                    _logger.warning("프로젝트 %s connection 실패: %s", pid, e)
+                return []
+            try:
+                containers = await asyncio.to_thread(swift.list_containers, sub_conn, include_quarantine)
+            except Exception as e:
+                if _is_unauthorized(e):
+                    _logger.info("프로젝트 %s 권한 없음 — skip", pid)
+                else:
+                    _logger.warning("프로젝트 %s 의 Swift 컨테이너 조회 실패: %s", pid, e)
+                containers = []
             finally:
-                sub_conn.close()
-            for c in containers:
-                out.append({**c, "project_id": pid, "project_name": p.get("name", "")})
-        except Exception:
-            _logger.warning("프로젝트 %s 의 Swift 컨테이너 조회 실패", pid, exc_info=True)
-    return out
+                with contextlib.suppress(Exception):
+                    await asyncio.to_thread(sub_conn.close)
+            return [{**c, "project_id": pid, "project_name": p.get("name", "")} for c in containers]
+
+    results = await asyncio.gather(*[_one(p) for p in projects])
+    return [item for sublist in results for item in sublist]
 
 
 @router.get("")
@@ -138,11 +155,7 @@ async def list_object_storage_containers(
         if not token_info.get("is_system_admin", False):
             raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다")
         try:
-            return await asyncio.to_thread(
-                _list_all_projects_containers,
-                token_info["token"],
-                include_quarantine,
-            )
+            return await _list_all_projects_containers(token_info["token"], include_quarantine)
         except Exception:
             _logger.exception("관리자 Swift 버킷 전체 조회 실패")
             raise HTTPException(status_code=500, detail="오브젝트 스토리지 컨테이너 목록 조회 실패")
@@ -158,8 +171,18 @@ async def create_object_storage_container(
     req: CreateContainerRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    """오브젝트 스토리지 컨테이너(버킷) 생성."""
+    """오브젝트 스토리지 컨테이너(버킷) 생성.
+
+    이름 검증: bucket_naming.validate_bucket_name 으로 시스템 예약어 / S3 형식
+    위반 차단. 위반 시 400 + 한국어 사유.
+    """
     from app.services import swift
+    from app.services.bucket_naming import validate_bucket_name
+
+    try:
+        validate_bucket_name(req.name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     try:
         return await asyncio.to_thread(swift.create_container, conn, req.name)

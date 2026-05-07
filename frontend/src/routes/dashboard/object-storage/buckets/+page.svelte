@@ -7,6 +7,7 @@
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import { validateBucketName } from '$lib/utils/bucketName';
 
 	interface SwiftContainer {
 		name: string;
@@ -64,11 +65,17 @@
 	}
 
 	async function createContainer() {
-		if (!newName.trim()) return;
+		const trimmed = newName.trim();
+		if (!trimmed) return;
+		const validationError = validateBucketName(trimmed);
+		if (validationError) {
+			createError = validationError;
+			return;
+		}
 		creating = true;
 		createError = '';
 		try {
-			await api.post('/api/object-storage', { name: newName.trim() }, token, projectId);
+			await api.post('/api/object-storage', { name: trimmed }, token, projectId);
 			showModal = false;
 			newName = '';
 			await load();
