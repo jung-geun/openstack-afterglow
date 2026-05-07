@@ -66,6 +66,11 @@
 	});
 </script>
 
+<!--
+	Two-layer SVG:
+	- 하위 레이어(z-auto): 일반 connection lines. 사이드바(z-20) 카드 뒤에 깔려야 카드를 가리지 않음.
+	- 상위 레이어(z-25): LB 곡선 + 끝점 dot. 카드 위로 올라와 시작/끝점이 가려지지 않음.
+-->
 <svg
 	{width}
 	{height}
@@ -83,7 +88,14 @@
 			stroke-linecap="round"
 		/>
 	{/each}
+</svg>
 
+<svg
+	{width}
+	{height}
+	style="position:absolute;inset:0;pointer-events:none;overflow:visible;z-index:25"
+	xmlns="http://www.w3.org/2000/svg"
+>
 	<!-- LB → member instance curves: dashed amber bezier -->
 	{#each lbCurves as curve (curve.key)}
 		<path
@@ -95,5 +107,11 @@
 			opacity="0.75"
 			stroke-linecap="round"
 		/>
+	{/each}
+
+	<!-- LB curve endpoint markers: amber dots so start/end stay visible above cards -->
+	{#each lbCurves as curve (curve.key + '-mk')}
+		<circle cx={curve.x1} cy={curve.y1} r="3" fill="#f59e0b" />
+		<circle cx={curve.x2} cy={curve.y2} r="3" fill="#f59e0b" />
 	{/each}
 </svg>
