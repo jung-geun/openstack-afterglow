@@ -44,6 +44,10 @@
 	let sidebarEl = $state<HTMLElement | null>(null);
 	let sidebarHeight = $state(0);
 	let anchors = $state(new Map<string, { x: number; y: number }>());
+	// 본문 가로 스크롤 위치 — sticky 헤더 행 transform 동기화에 사용
+	let scrollEl = $state<HTMLElement | null>(null);
+	let scrollLeft = $state(0);
+	function onBodyScroll() { scrollLeft = scrollEl?.scrollLeft ?? 0; }
 
 	// ── Color palettes ────────────────────────────────────────────────────────
 	const EXT_COLORS = ['#ea580c', '#f97316'];
@@ -377,7 +381,9 @@
 		return m;
 	});
 
-	const laneHeight = $derived(Math.max(400, sidebarHeight - STAT_CARD_H));
+	// 헤더 카드 행이 sticky 로 별도 분리되어 사이드바 위쪽 spacer 가 사라졌으므로
+	// 사이드바 전체 높이가 곧 본문 캔버스 높이 기준이 된다.
+	const laneHeight = $derived(Math.max(400, sidebarHeight));
 
 	// ── Anchor measurement (offsetLeft/offsetTop chain, sticky-safe) ──────────
 	function offsetWithin(el: HTMLElement, ancestor: HTMLElement): { x: number; y: number } {
@@ -492,8 +498,41 @@
 		{/if}
 	</div>
 
+	<!--
+		네트워크 카드 행은 viewport sticky top 으로 고정되어야 하므로
+		overflow-x-auto 컨테이너 외부에 별도 행으로 둔다. 본문의 가로 스크롤
+		위치는 onscroll 에서 scrollLeft 로 캡처해 헤더의 transform 으로 미러링.
+	-->
+	{#if orderedNetworks.length > 0}
+		<div class="sticky top-0 z-30 overflow-hidden -mx-6 px-0 mb-1"
+		     style="background: {isLight ? '#f9fafb' : '#111827'}">
+			<div class="flex" style="width: max-content; transform: translateX({-scrollLeft}px); will-change: transform">
+				<!-- 사이드바 영역 spacer: 본문 사이드바와 같은 폭으로 좌측을 확보 -->
+				<div style="width: {SIDEBAR_W + 24}px; flex-shrink: 0"></div>
+				<div class="flex-shrink-0" style="width: {canvasContentW}px">
+					<div class="flex py-2" style="gap: {LANE_GAP}px; padding-left: {LANE_PAD}px; padding-right: {LANE_PAD}px">
+						{#each orderedNetworks as net (net.id)}
+							<div style="width: {LANE_W}px; flex-shrink: 0">
+								<NetworkLane
+									mode="card"
+									{net}
+									color={netColors.get(net.id) ?? '#3b82f6'}
+									{traffic}
+									highlighted={highlightedNetId === net.id}
+									dimmed={highlightedNetId !== null && highlightedNetId !== net.id}
+									{laneHeight}
+									onSelect={() => { highlightedNetId = highlightedNetId === net.id ? null : net.id; }}
+								/>
+							</div>
+						{/each}
+					</div>
+				</div>
+			</div>
+		</div>
+	{/if}
+
 	<!-- Scrollable viewport: horizontal scroll stays inside this box -->
-	<div class="overflow-x-auto">
+	<div class="overflow-x-auto" bind:this={scrollEl} onscroll={onBodyScroll}>
 		<!-- Content row: sidebar + canvas. relative for SVG overlay anchor. -->
 		<div class="flex items-start relative" style="min-width: max-content">
 			<!-- Left sidebar: resource cards (sticky — stays visible when scrolled right) -->
@@ -502,8 +541,6 @@
 				style="width: {SIDEBAR_W}px; background: {isLight ? '#f9fafb' : '#111827'}"
 				bind:this={sidebarEl}
 			>
-				<!-- Top spacer: pushes cards below the network stat card row in the canvas -->
-				<div style="height: {STAT_CARD_H}px; flex-shrink: 0"></div>
 				{#if routerRows.length > 0}
 					<button
 						type="button"
@@ -599,7 +636,7 @@
 				{/if}
 			</div>
 
-			<!-- Center canvas: network lanes -->
+			<!-- Center canvas: network lanes (rail-only — 헤더 카드는 sticky 행에 별도) -->
 			<div class="flex-shrink-0" style="width: {canvasContentW}px">
 				{#if orderedNetworks.length === 0}
 					<div class="flex items-center justify-center h-40 text-sm"
@@ -611,13 +648,13 @@
 						{#each orderedNetworks as net (net.id)}
 							<div style="width: {LANE_W}px; flex-shrink: 0">
 								<NetworkLane
+									mode="rail"
 									{net}
 									color={netColors.get(net.id) ?? '#3b82f6'}
 									{traffic}
 									highlighted={highlightedNetId === net.id}
 									dimmed={highlightedNetId !== null && highlightedNetId !== net.id}
 									{laneHeight}
-									onSelect={() => { highlightedNetId = highlightedNetId === net.id ? null : net.id; }}
 								/>
 							</div>
 						{/each}
