@@ -46,14 +46,25 @@ async def upload_object(
     - 검증 실패 시 quarantine 객체 정리, 400
     - 모든 예외 시 quarantine 정리 보장
     """
+    _logger.info(
+        "upload 요청: container=%s prefix=%r filename=%r content_type=%r size=%r",
+        container,
+        prefix,
+        file.filename,
+        file.content_type,
+        getattr(file, "size", None),
+    )
+
     try:
         await asyncio.to_thread(swift_svc.get_container_metadata, conn, container)
     except Exception:
+        _logger.warning("컨테이너 검증 실패: container=%s", container, exc_info=True)
         raise HTTPException(status_code=404, detail="컨테이너를 찾을 수 없거나 권한 없음")
 
     quarantine_bucket = f"{container}-quarantine"
     object_name = (prefix or "") + (file.filename or "")
     if not object_name:
+        _logger.warning("파일 이름 없음: prefix=%r filename=%r", prefix, file.filename)
         raise HTTPException(status_code=400, detail="파일 이름이 비어 있습니다")
     content_type = file.content_type or "application/octet-stream"
 
