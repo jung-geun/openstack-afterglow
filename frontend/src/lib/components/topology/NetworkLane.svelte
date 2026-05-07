@@ -44,6 +44,16 @@
 		return '#64748b';
 	}
 
+	// 세로 라인 굵기 — 트래픽 사용량에 따라 2~7px 범위에서 단계적으로 증가
+	function railWidthPx(totalBps: number): number {
+		if (totalBps >= 1e8) return 7; // ≥100Mbps
+		if (totalBps >= 1e7) return 6; // ≥10Mbps
+		if (totalBps >= 1e6) return 5; // ≥1Mbps
+		if (totalBps >= 1e5) return 4; // ≥100kbps
+		if (totalBps >= 1e4) return 3; // ≥10kbps
+		return 2;
+	}
+
 	// log10 스케일: 1bps=0%, 1Gbps=100%
 	function bpsToPct(bps: number): number {
 		if (bps <= 1) return 0;
@@ -59,11 +69,11 @@
 </script>
 
 {#if mode === 'rail'}
-	<!-- rail 모드: 세로 라인만 (본문 캔버스 용도, 클릭 불가) -->
+	<!-- rail 모드: 세로 라인만 (본문 캔버스 용도, 클릭 불가). 두께는 트래픽 사용량 따라 변동. -->
 	<div class="flex flex-col items-center w-full" style="opacity: {dimmed ? 0.25 : 1}">
 		<div
-			class="w-0.5 transition-all duration-200"
-			style="height: {laneHeight}px; background: {color}; opacity: {highlighted ? 0.9 : 0.45}"
+			class="rounded-full transition-all duration-300"
+			style="width: {railWidthPx(totalBps)}px; height: {laneHeight}px; background: {color}; opacity: {highlighted ? 0.9 : 0.45}"
 		></div>
 	</div>
 {:else}
@@ -112,10 +122,10 @@
 		</div>
 
 		{#if mode === 'full'}
-			<!-- Vertical line (full 모드 전용) -->
+			<!-- Vertical line (full 모드 전용) — 두께는 트래픽 사용량 따라 변동 -->
 			<div
-				class="w-0.5 transition-all duration-200"
-				style="height: {laneHeight}px; background: {color}; opacity: {highlighted ? 0.9 : 0.45}"
+				class="rounded-full transition-all duration-300"
+				style="width: {railWidthPx(totalBps)}px; height: {laneHeight}px; background: {color}; opacity: {highlighted ? 0.9 : 0.45}"
 			></div>
 		{/if}
 	</button>
