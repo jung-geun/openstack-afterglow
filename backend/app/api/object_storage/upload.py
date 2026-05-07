@@ -10,14 +10,20 @@
   7. 메타데이터 반환
 
 브라우저 → RGW 직접 PUT 의 CORS 차단 문제를 회피.
+
+취소(cancel): 클라가 connection 을 끊으면 disconnect watcher 가 cancel_event 를
+set → boto3 Callback 이 다음 part 시점에 UploadCanceled raise → multipart 자동
+abort → quarantine 정리. copy 단계까지 진입한 경우는 server-side 라 짧으므로
+중단하지 않음.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 
 from app.api.deps import get_os_conn, get_token_info
 from app.services import s3 as s3_svc
@@ -35,6 +41,7 @@ def _scan_object(client, bucket: str, key: str) -> bool:
 @router.post("/{container}/upload")
 async def upload_object(
     container: str,
+    request: Request,
     file: UploadFile = File(...),
     prefix: str = Form(""),
     conn=Depends(get_os_conn),
@@ -44,6 +51,7 @@ async def upload_object(
 
     - 5GB+ 자동 multipart (boto3 upload_fileobj + TransferConfig)
     - 검증 실패 시 quarantine 객체 정리, 400
+    - 클라 disconnect 시 boto3 Callback 으로 UploadCanceled raise → multipart abort
     - 모든 예외 시 quarantine 정리 보장
     """
     _logger.info(
@@ -68,6 +76,24 @@ async def upload_object(
         raise HTTPException(status_code=400, detail="파일 이름이 비어 있습니다")
     content_type = file.content_type or "application/octet-stream"
 
+    cancel_event = threading.Event()
+
+    async def _watch_disconnect() -> None:
+        """주기적으로 client disconnect 검사 → 감지 시 cancel_event 활성화."""
+        try:
+            while not cancel_event.is_set():
+                if await request.is_disconnected():
+                    cancel_event.set()
+                    _logger.info(
+                        "upload cancel: client disconnected (container=%s name=%s)",
+                        container,
+                        object_name,
+                    )
+                    return
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            pass
+
     def _do_pipeline() -> dict:
         client = s3_svc.get_user_s3_client(
             token_info["token"],
@@ -82,24 +108,34 @@ async def upload_object(
                 object_name,
                 file.file,
                 content_type,
+                cancel_event=cancel_event,
             )
+            if cancel_event.is_set():
+                raise s3_svc.UploadCanceled("client disconnected")
             if not _scan_object(client, quarantine_bucket, object_name):
-                _safe_delete_quarantine(client, quarantine_bucket, object_name)
                 raise HTTPException(status_code=400, detail="보안 스캔 실패")
             return s3_svc.move_to_target(client, quarantine_bucket, container, object_name)
-        except HTTPException:
-            raise
-        except Exception:
+        except BaseException:
+            # 모든 종료 경로에서 quarantine 정리 (성공 시는 move_to_target 가 이미 삭제)
             _safe_delete_quarantine(client, quarantine_bucket, object_name)
             raise
 
+    watch_task = asyncio.create_task(_watch_disconnect())
     try:
         meta = await asyncio.to_thread(_do_pipeline)
+    except s3_svc.UploadCanceled:
+        _logger.info("upload aborted: container=%s name=%s", container, object_name)
+        # 499 = "Client Closed Request" (nginx 관행). 클라는 이미 connection
+        # 닫혔으므로 응답은 도달하지 않음. 로그/메트릭 분류용.
+        raise HTTPException(status_code=499, detail="업로드가 취소되었습니다")
     except HTTPException:
         raise
     except Exception as e:
         _logger.exception("upload 실패: container=%s name=%s", container, object_name)
         raise HTTPException(status_code=500, detail=f"업로드 실패: {e!s:.200}")
+    finally:
+        cancel_event.set()
+        watch_task.cancel()
 
     return {"success": True, **meta}
 

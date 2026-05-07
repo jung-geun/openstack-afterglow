@@ -35,6 +35,45 @@ def test_stream_upload_uses_transfer_config():
     assert cfg.max_concurrency == 4
 
 
+def test_stream_upload_callback_raises_when_cancel_event_set():
+    """cancel_event 가 set 된 상태에서 boto3 Callback 호출 → UploadCanceled raise."""
+    import threading
+
+    from app.services import s3 as s3_svc
+
+    captured: dict = {}
+
+    def _capture_call(**kwargs):
+        captured.update(kwargs)
+
+    fake = MagicMock()
+    fake.upload_fileobj.side_effect = _capture_call
+
+    cancel_event = threading.Event()
+    s3_svc.stream_upload_to_quarantine(
+        fake, "test-quarantine", "obj.bin", MagicMock(), "text/plain", cancel_event=cancel_event
+    )
+
+    callback = captured["Callback"]
+    # cancel_event 미설정 → 정상 (no raise)
+    callback(1024)
+    # cancel_event set → UploadCanceled
+    cancel_event.set()
+    with pytest.raises(s3_svc.UploadCanceled):
+        callback(1024)
+
+
+def test_stream_upload_no_cancel_event_callback_safe():
+    """cancel_event 미전달 시 Callback 은 항상 no-op (raise 안 함)."""
+    from app.services import s3 as s3_svc
+
+    captured: dict = {}
+    fake = MagicMock()
+    fake.upload_fileobj.side_effect = lambda **kw: captured.update(kw)
+    s3_svc.stream_upload_to_quarantine(fake, "b", "k", MagicMock(), "text/plain")
+    captured["Callback"](1024)  # raise 없어야 함
+
+
 def test_move_to_target_copies_then_deletes_quarantine():
     """move_to_target: copy → head → delete quarantine. metadata 반환."""
     from app.services import s3 as s3_svc

@@ -21,6 +21,9 @@ def get_user_s3_client(token: str, user_id: str, project_id: str):
 
     creds = ensure_ec2_credentials(token, user_id, project_id)
     settings = get_settings()
+    # boto3 1.36+ 기본 동작은 모든 요청에 CRC32 등 추가 checksum 을 계산하는데,
+    # Ceph RGW 가 이 헤더를 SHA256 hash 로 오해해 XAmzContentSHA256Mismatch 로
+    # multipart upload_part 가 실패한다. when_required 로 명시해 회피.
     return boto3.client(
         "s3",
         endpoint_url=settings.os_s3_endpoint,
@@ -30,6 +33,8 @@ def get_user_s3_client(token: str, user_id: str, project_id: str):
         config=boto3.session.Config(
             signature_version="s3v4",
             s3={"addressing_style": "path"},
+            request_checksum_calculation="when_required",
+            response_checksum_validation="when_required",
         ),
     )
 
@@ -75,18 +80,26 @@ def _put_bucket_cors(client, bucket: str) -> None:
     )
 
 
+class UploadCanceled(Exception):
+    """클라이언트 disconnect 등으로 업로드가 취소되었을 때 raise."""
+
+
 def stream_upload_to_quarantine(
     client,
     quarantine_bucket: str,
     key: str,
     file_stream,
     content_type: str,
+    cancel_event=None,
 ) -> None:
     """boto3 upload_fileobj + TransferConfig 로 quarantine 버킷에 streaming upload.
 
     multipart_threshold=8MB, multipart_chunksize=8MB, max_concurrency=4.
     5 GB 이상은 자동 multipart upload, 5 TiB 까지 단일 호출로 처리.
     file_stream 은 SpooledTemporaryFile 등 read/seek 지원 객체여야 한다.
+
+    cancel_event (threading.Event) 가 set 되면 다음 part 진행 시점에
+    UploadCanceled 를 raise → boto3 가 multipart 자동 abort.
     """
     from boto3.s3.transfer import TransferConfig
 
@@ -96,12 +109,18 @@ def stream_upload_to_quarantine(
         max_concurrency=4,
         use_threads=True,
     )
+
+    def _progress(_bytes_amount: int) -> None:
+        if cancel_event is not None and cancel_event.is_set():
+            raise UploadCanceled("client disconnected")
+
     client.upload_fileobj(
         Fileobj=file_stream,
         Bucket=quarantine_bucket,
         Key=key,
         ExtraArgs={"ContentType": content_type},
         Config=config,
+        Callback=_progress,
     )
 
 
