@@ -96,6 +96,15 @@
 		data.floating_ips.map(f => [f.floating_ip_address, f.floating_network_id])
 	));
 
+	// FIP → fixed_ip_address 역매핑. 인스턴스 카드에서 FIP 를 매핑된 fixed IP NIC 의
+	// tenant 네트워크 줄에 합쳐 표시하기 위해 사용. 실제 패킷이 검출되는 NIC 는
+	// fixed IP 측이므로 트래픽도 그쪽 줄의 카운터를 그대로 노출한다.
+	const fipFixedMap = $derived(new Map(
+		data.floating_ips
+			.filter(f => f.fixed_ip_address)
+			.map(f => [f.floating_ip_address, f.fixed_ip_address as string])
+	));
+
 	// ── IP helpers ────────────────────────────────────────────────────────────
 	function _ipToNum(ip: string): number | null {
 		const parts = ip.split('.');
@@ -158,22 +167,32 @@
 			const netSet = new Set<string>();
 			const netIps = new Map<string, string[]>();
 			const floatingNetIps = new Map<string, string[]>();
+			// 인스턴스 로컬: fixed IP → 그 IP 가 속한 네트워크 ID. FIP 를 매핑된 fixed IP 의
+			// 네트워크 줄에 합쳐 표시하기 위해 1차 패스에서 채운다.
+			const fixedIpToNetId = new Map<string, string>();
+
 			for (const ipInfo of inst.ip_addresses) {
-				if (ipInfo.type === 'floating') {
-					const extNetId = fipNetMap.get(ipInfo.addr);
-					if (extNetId) {
-						const fips = floatingNetIps.get(extNetId) ?? [];
-						if (!fips.includes(ipInfo.addr)) fips.push(ipInfo.addr);
-						floatingNetIps.set(extNetId, fips);
-					}
-					continue;
-				}
+				if (ipInfo.type === 'floating') continue;
 				const nid = ipInfo.network_id || resolveNetId(ipInfo.network_name, ipInfo.addr);
 				if (!nid) continue;
 				netSet.add(nid);
 				const ips = netIps.get(nid) ?? [];
 				if (!ips.includes(ipInfo.addr)) ips.push(ipInfo.addr);
 				netIps.set(nid, ips);
+				fixedIpToNetId.set(ipInfo.addr, nid);
+			}
+
+			for (const ipInfo of inst.ip_addresses) {
+				if (ipInfo.type !== 'floating') continue;
+				const fixedAddr = fipFixedMap.get(ipInfo.addr);
+				const mappedNetId = fixedAddr ? fixedIpToNetId.get(fixedAddr) : undefined;
+				// 정상 케이스: 매핑된 fixed IP 의 tenant 네트워크 줄에 합쳐 표시.
+				// 매칭 실패(데이터 결손) 시에만 외부 네트워크 ID 로 fallback.
+				const targetNetId = mappedNetId ?? fipNetMap.get(ipInfo.addr);
+				if (!targetNetId) continue;
+				const fips = floatingNetIps.get(targetNetId) ?? [];
+				if (!fips.includes(ipInfo.addr)) fips.push(ipInfo.addr);
+				floatingNetIps.set(targetNetId, fips);
 			}
 			const connectedNetIds = [...netSet].sort((a, b) => (netIdx.get(a) ?? 0) - (netIdx.get(b) ?? 0));
 			const indices = connectedNetIds.map(id => netIdx.get(id) ?? 0);

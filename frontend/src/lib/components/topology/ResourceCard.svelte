@@ -46,11 +46,6 @@
 			const bps = instNetBps.get(`${row.id}|${netId}`);
 			result.push({ netId, ips, fips, rx_bps: bps?.rx_bps ?? 0, tx_bps: bps?.tx_bps ?? 0 });
 		}
-		for (const [netId, fips] of row.floatingNetIps) {
-			if (!row.connectedNetIds.includes(netId)) {
-				result.push({ netId, ips: [], fips, rx_bps: 0, tx_bps: 0 });
-			}
-		}
 		return result;
 	});
 
