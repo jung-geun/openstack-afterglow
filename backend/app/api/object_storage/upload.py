@@ -79,10 +79,16 @@ async def upload_object(
     cancel_event = threading.Event()
 
     async def _watch_disconnect() -> None:
-        """주기적으로 client disconnect 검사 → 감지 시 cancel_event 활성화."""
+        """request.receive() 에 block → http.disconnect 도달 시 cancel_event 활성화.
+
+        starlette 의 request.is_disconnected() 는 timeout=0 polling 이라 신뢰성
+        낮음. FastAPI 가 UploadFile 파라미터를 처리하며 body 를 모두 소비한 후
+        receive() 는 http.disconnect 만 큐에 들어옴 → block + 즉시 감지.
+        """
         try:
             while not cancel_event.is_set():
-                if await request.is_disconnected():
+                message = await request.receive()
+                if message.get("type") == "http.disconnect":
                     cancel_event.set()
                     _logger.info(
                         "upload cancel: client disconnected (container=%s name=%s)",
@@ -90,9 +96,10 @@ async def upload_object(
                         object_name,
                     )
                     return
-                await asyncio.sleep(1)
         except asyncio.CancelledError:
             pass
+        except Exception:
+            _logger.warning("disconnect watcher 오류", exc_info=True)
 
     def _do_pipeline() -> dict:
         client = s3_svc.get_user_s3_client(
