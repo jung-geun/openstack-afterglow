@@ -16,6 +16,8 @@ _jinja = Environment(
     undefined=StrictUndefined,
     trim_blocks=True,
     lstrip_blocks=True,
+    # YAML/Bash 출력 — HTML autoescape 비활성. 사용자 입력은 반드시 `| shlex_quote`.
+    autoescape=False,
 )
 _jinja.filters["shlex_quote"] = shlex.quote
 

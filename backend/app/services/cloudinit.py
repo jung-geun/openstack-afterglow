@@ -23,6 +23,9 @@ _jinja = Environment(
     undefined=StrictUndefined,
     trim_blocks=True,
     lstrip_blocks=True,
+    # 출력은 YAML/Bash 라 HTML autoescape 는 의미 없음 — 명시적으로 비활성하고,
+    # 모든 사용자 입력은 템플릿 측에서 반드시 `| shlex_quote` 를 거치도록 한다.
+    autoescape=False,
 )
 # shell 인자로 안전하게 사용하기 위한 이스케이프 필터
 _jinja.filters["shlex_quote"] = shlex.quote

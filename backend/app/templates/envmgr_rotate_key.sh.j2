@@ -41,12 +41,22 @@ if [ -z "$NEW_KEY" ]; then
     exit 1
 fi
 
-# 키링 파일 갱신
+# CephX 키는 base64 (AQA...==) — 영숫자/+/=/- 만 허용. 메타문자가 들어오면 즉시 거부.
+if ! printf '%s' "$NEW_KEY" | grep -Eq '^[A-Za-z0-9+/=_.\-]+$'; then
+    echo "[$(date)] 오류: NEW_KEY 형식이 invalid (예상하지 못한 문자)" >&2
+    exit 1
+fi
+if ! printf '%s' "$CEPHX_USER" | grep -Eq '^[A-Za-z0-9._\-]+$'; then
+    echo "[$(date)] 오류: CEPHX_USER 형식이 invalid" >&2
+    exit 1
+fi
+
+# 키링 파일 갱신 — heredoc 의 변수 expansion 안전을 위해 printf 로 라인 단위 작성
 KEYRING_PATH="/etc/ceph/ceph.client.${CEPHX_USER}.keyring"
-cat > "$KEYRING_PATH" << EOF
-[client.${CEPHX_USER}]
-    key = ${NEW_KEY}
-EOF
+{
+    printf '[client.%s]\n' "$CEPHX_USER"
+    printf '    key = %s\n' "$NEW_KEY"
+} > "$KEYRING_PATH"
 chmod 600 "$KEYRING_PATH"
 echo "[$(date)] 키링 갱신 완료: $KEYRING_PATH"
 

@@ -205,3 +205,69 @@ def test_rotate_key_script_before_systemd_unit():
     script_pos = yaml_str.find("path: /usr/local/bin/envmgr-rotate-key.sh")
     service_pos = yaml_str.find("path: /etc/systemd/system/union-rotate-key.service")
     assert script_pos < service_pos, "rotate-key.sh write_files 항목이 service 선언보다 앞서야 함"
+
+
+# ─────────────────────────────────────────────────────────────────
+# Shell 인젝션 회귀 방지
+# ─────────────────────────────────────────────────────────────────
+
+
+def test_health_check_quotes_malicious_share_name():
+    """share name 에 shell 메타문자가 들어와도 single-quote 로 감싸 인젝션 차단."""
+    fs = [
+        {
+            "name": "'\"; rm -rf / #",  # 악성 share name 시도
+            "share_proto": "NFS",
+            "nfs_export_location": "10.0.0.1:/vol",
+            "mount_options": "",
+        }
+    ]
+    encoded = generate_userdata(
+        libraries=[],
+        strategy="prebuilt",
+        file_storages=fs,
+        upper_device="/dev/vdb",
+        ceph_monitors="",
+        gpu_available=False,
+        instance_id="inst-uuid",
+        report_url="https://backend.example.com",
+        report_token="tok",
+    )
+    yaml_str = _decode_userdata(encoded)
+    # raw 한 `; rm -rf` 시퀀스가 unquoted 로 들어가면 안 된다 — single-quote 안에 들어가야
+    # 매 줄을 검사: SHARE_NAME= 라인을 찾아 unquoted 메타문자가 없는지.
+    for line in yaml_str.splitlines():
+        if line.strip().startswith("SHARE_NAME="):
+            value = line.strip().removeprefix("SHARE_NAME=")
+            # shlex.quote 결과는 single-quote 로 감싸진 형태여야 함
+            assert value.startswith("'") and value.endswith("'"), (
+                f"SHARE_NAME 값이 single-quote 로 감싸져 있지 않음: {value!r}"
+            )
+
+
+def test_health_check_quotes_report_url_and_token():
+    """report_url / instance_id / report_token 에 메타문자가 와도 quote."""
+    encoded = generate_userdata(
+        **_COMMON_ARGS,
+        instance_id="id'; touch /tmp/pwn",
+        report_url="https://x'; whoami",
+        report_token="$(whoami)",
+    )
+    yaml_str = _decode_userdata(encoded)
+    # 각 변수 라인이 single-quote 로 감싸졌는지
+    for prefix in ("REPORT_URL=", "INSTANCE_ID=", "REPORT_TOKEN="):
+        line = next((ln.strip() for ln in yaml_str.splitlines() if ln.strip().startswith(prefix)), None)
+        assert line is not None, f"{prefix} 라인 미발견"
+        value = line.removeprefix(prefix)
+        assert value.startswith("'") and value.endswith("'"), f"{prefix} 값이 quote 되지 않음: {value!r}"
+
+
+def test_envmgr_rotate_key_uses_printf_not_heredoc():
+    """envmgr_rotate_key.sh.j2 가 cat << EOF 가 아니라 printf 로 키링을 작성하는지."""
+    encoded = generate_userdata(**{**_COMMON_ARGS, "union_cephx_rotate_hours": 24})
+    yaml_str = _decode_userdata(encoded)
+    # 키링 작성 부분에 cat << EOF 헤어독이 사라지고 printf 가 사용되어야 함
+    assert "printf '[client.%s]\\n'" in yaml_str
+    assert "printf '    key = %s\\n'" in yaml_str
+    # 형식 검증 라인 존재
+    assert "NEW_KEY 형식이 invalid" in yaml_str

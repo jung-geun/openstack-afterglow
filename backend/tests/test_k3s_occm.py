@@ -182,10 +182,10 @@ class TestCallbackOccmStatus:
         from app.models.k3s import K3sCallbackRequest
 
         req = K3sCallbackRequest(
-            token="tok-1",
+            token="callbacktok-1",
             success=True,
             kubeconfig="kc",
-            node_token="nt",
+            node_token="K10nodetokendummy",
             server_ip="10.0.0.1",
             occm_status="deployed",
         )
@@ -195,5 +195,5 @@ class TestCallbackOccmStatus:
         """occm_status가 None이어도 유효한 요청."""
         from app.models.k3s import K3sCallbackRequest
 
-        req = K3sCallbackRequest(token="tok-1", success=True)
+        req = K3sCallbackRequest(token="callbacktok-1", success=True)
         assert req.occm_status is None

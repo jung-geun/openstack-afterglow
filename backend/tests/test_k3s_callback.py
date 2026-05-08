@@ -20,7 +20,7 @@ async def test_callback_invalid_token_returns_403():
                     "token": "invalid-token",
                     "success": True,
                     "kubeconfig": "apiVersion: v1\n",
-                    "node_token": "secret",
+                    "node_token": "K10dummytoken123abc",
                     "server_ip": "10.0.0.1",
                 },
             )
