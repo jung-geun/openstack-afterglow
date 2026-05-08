@@ -449,8 +449,24 @@ class Settings(BaseSettings):
         import os
 
         logger = logging.getLogger(__name__)
+        env = os.environ.get("AFTERGLOW_ENV", "development").strip().lower()
+        is_production = env == "production"
+        insecure_flag = os.environ.get("AFTERGLOW_ALLOW_INSECURE", "").strip() == "1"
+
+        # production 환경에서는 INSECURE 우회 자체를 금지 — 운영 부팅 실수 차단.
+        if is_production and insecure_flag:
+            raise ValueError(
+                "AFTERGLOW_ALLOW_INSECURE=1 must NOT be set when AFTERGLOW_ENV=production. "
+                "Provide a real SECRET_KEY (and other secrets) instead of bypassing the check."
+            )
+
         if self.secret_key == "change-me-in-production":
-            if os.environ.get("AFTERGLOW_ALLOW_INSECURE", "").strip() == "1":
+            if is_production:
+                raise ValueError(
+                    "SECRET_KEY is set to the default value 'change-me-in-production' "
+                    "while AFTERGLOW_ENV=production. Refusing to start with an insecure key."
+                )
+            if insecure_flag:
                 logger.warning(
                     "SECRET_KEY is set to the default insecure value. "
                     "AFTERGLOW_ALLOW_INSECURE=1 is set — this must NOT be used in production."
