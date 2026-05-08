@@ -18,6 +18,12 @@ from httpx import ASGITransport, AsyncClient
 
 from app.api.deps import get_os_conn, get_token_info
 from app.main import app
+from app.rate_limit import limiter as _rate_limiter
+
+# 단위 테스트는 rate limit 동작 자체를 검증하지 않는 한 limiter 를 비활성화 — 누적
+# state 가 다음 테스트에 누수되거나 동일 IP 로 5/min 같은 제한에 부딪히는 것을 회피.
+# 실제 limiter 의 IP 추출/거부 동작은 tests/test_rate_limit_proxies.py 에서 별도 검증.
+_rate_limiter.enabled = False
 
 
 def make_mock_conn(project_id: str = "test-project-123") -> MagicMock:

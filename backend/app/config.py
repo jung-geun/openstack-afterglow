@@ -276,6 +276,10 @@ class Settings(BaseSettings):
     secret_key: str = "change-me-in-production"
     # object-storage 업로드 단일 파일 최대 크기 (GiB). 0 또는 음수 = 사실상 무제한(기존 100GiB cap).
     app_max_upload_gb: int = 10
+    # rate-limit / 클라이언트 IP 추출 시 신뢰할 reverse proxy CIDR (쉼표 구분).
+    # 비어 있으면 X-Forwarded-For / X-Real-IP 헤더를 모두 무시 → 직접 연결 IP 사용.
+    # 운영(K8s/HAProxy) 에서는 ingress/HAProxy 의 pod CIDR 을 명시적으로 추가해야 한다.
+    trusted_proxies: str = "127.0.0.1/32,::1/128"
 
     # CORS 허용 origin (쉼표 구분)
     cors_origins: str = "http://localhost:3000,http://localhost"

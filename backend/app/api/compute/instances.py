@@ -808,7 +808,9 @@ async def create_instance_async(
 
 
 @router.delete("/{instance_id}", status_code=204)
+@limiter.limit("5/minute")
 async def delete_instance(
+    request: Request,
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
@@ -896,7 +898,9 @@ async def delete_instance(
 
 
 @router.post("/{instance_id}/start", status_code=204)
+@limiter.limit("30/minute")
 async def start_instance(
+    request: Request,
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
@@ -933,7 +937,9 @@ async def start_instance(
 
 
 @router.post("/{instance_id}/stop", status_code=204)
+@limiter.limit("30/minute")
 async def stop_instance(
+    request: Request,
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
@@ -970,7 +976,9 @@ async def stop_instance(
 
 
 @router.post("/{instance_id}/reboot", status_code=204)
+@limiter.limit("30/minute")
 async def reboot_instance(
+    request: Request,
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
@@ -1007,7 +1015,9 @@ async def reboot_instance(
 
 
 @router.post("/{instance_id}/shelve", status_code=204)
+@limiter.limit("30/minute")
 async def shelve_instance(
+    request: Request,
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
@@ -1044,7 +1054,9 @@ async def shelve_instance(
 
 
 @router.post("/{instance_id}/unshelve", status_code=204)
+@limiter.limit("30/minute")
 async def unshelve_instance(
+    request: Request,
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),

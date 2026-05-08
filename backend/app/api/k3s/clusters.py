@@ -537,7 +537,9 @@ async def _rollback(
 
 
 @router.patch("/{cluster_id}/scale")
+@limiter.limit("10/minute")
 async def scale_k3s_cluster(
+    request: Request,
     cluster_id: str,
     req: ScaleK3sClusterRequest,
     token_info: dict = Depends(get_token_info),
@@ -710,7 +712,9 @@ async def _scale_agents(
 
 
 @router.delete("/{cluster_id}", status_code=204)
+@limiter.limit("5/minute")
 async def delete_k3s_cluster(
+    request: Request,
     cluster_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),

@@ -8,35 +8,26 @@
 
 from __future__ import annotations
 
-import importlib
 import os
+from unittest.mock import patch
 
 import pytest
 
 
 def _build_settings_with_env(env: dict[str, str]):
-    """get_settings 의 lru_cache 를 비우고, env 로 새 Settings 인스턴스 빌드."""
-    from app import config as cfg
+    """env 로 Settings 클래스를 직접 instantiate. importlib.reload 는 다른 테스트에
+    누수되므로 사용하지 않고, 환경변수만 patch.dict 로 격리한다.
+    """
+    from app.config import Settings
 
-    saved = {k: os.environ.get(k) for k in env}
-    try:
-        for k, v in env.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
-        importlib.reload(cfg)
-        cfg.get_settings.cache_clear()
-        return cfg.get_settings()
-    finally:
-        # 원본 env 복원
-        for k, v in saved.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
-        importlib.reload(cfg)
-        cfg.get_settings.cache_clear()
+    # env 안의 None 은 변수 삭제 의미
+    target_env = {k: v for k, v in env.items() if v is not None}
+    clear_env = [k for k, v in env.items() if v is None]
+    with patch.dict(os.environ, target_env, clear=False):
+        # 명시적 None 삭제
+        for k in clear_env:
+            os.environ.pop(k, None)
+        return Settings()
 
 
 def test_production_with_insecure_flag_fails_fast():

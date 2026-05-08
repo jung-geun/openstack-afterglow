@@ -291,6 +291,7 @@ async def test_delete_k3s_cluster_continues_if_k8s_node_delete_fails(client):
 async def test_delete_k3s_cluster_vm_already_deleted(client):
     """VM이 이미 삭제된 상태(delete_server 404)여도 soft-delete까지 정상 완료해야 한다."""
     cluster = _make_cluster_record()
+    cluster["id"] = "k3s-vm-already-del"
     cluster["occm_enabled"] = False
 
     with patch("app.api.k3s.clusters.k3s_cluster") as mock_db:
@@ -306,7 +307,7 @@ async def test_delete_k3s_cluster_vm_already_deleted(client):
                 mock_neutron.delete_security_group = MagicMock()
                 with patch("app.api.k3s.clusters.k3s_kube") as mock_kube:
                     mock_kube.delete_k8s_nodes = AsyncMock()
-                    resp = await client.delete("/api/k3s/clusters/k3s-1")
+                    resp = await client.delete("/api/k3s/clusters/k3s-vm-already-del")
 
     assert resp.status_code == 204
     mock_db.delete_cluster_record.assert_called_once()
@@ -316,6 +317,7 @@ async def test_delete_k3s_cluster_vm_already_deleted(client):
 async def test_delete_k3s_cluster_vm_wait_timeout(client):
     """VM 삭제 대기 타임아웃이 발생해도 SG 삭제와 soft-delete는 계속 진행해야 한다."""
     cluster = _make_cluster_record()
+    cluster["id"] = "k3s-vm-wait-timeout"
     cluster["occm_enabled"] = False
     cluster["security_group_id"] = "sg-1"
 
@@ -331,7 +333,7 @@ async def test_delete_k3s_cluster_vm_wait_timeout(client):
                 mock_neutron.delete_security_group = MagicMock()
                 with patch("app.api.k3s.clusters.k3s_kube") as mock_kube:
                     mock_kube.delete_k8s_nodes = AsyncMock()
-                    resp = await client.delete("/api/k3s/clusters/k3s-1")
+                    resp = await client.delete("/api/k3s/clusters/k3s-vm-wait-timeout")
 
     assert resp.status_code == 204
     mock_db.delete_cluster_record.assert_called_once()
