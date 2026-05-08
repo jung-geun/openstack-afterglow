@@ -25,6 +25,7 @@ from fastapi.responses import StreamingResponse
 from openstack.exceptions import ConflictException, HttpException
 
 from app.api.common.activity_recorder import rec
+from app.api.common.owner_check import assert_instance_owner
 from app.api.deps import get_os_conn, get_token_info, require_admin
 from app.config import get_settings
 from app.database import is_db_available
@@ -110,13 +111,20 @@ async def list_instances(
 async def get_instance(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
+    try:
+        server = await asyncio.to_thread(nova.get_server, conn, instance_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="인스턴스를 찾을 수 없습니다")
+    # admin 외에는 본인 프로젝트의 인스턴스만 조회 가능 (RBAC 외 추가 방어선)
+    assert_instance_owner(server, conn, token_info)
     try:
         return await cached_call(
             f"afterglow:nova:{pid}:instance:{instance_id}",
             ttl_fast(),
-            lambda: _resolve_names([nova.get_server(conn, instance_id)], conn)[0],
+            lambda: _resolve_names([server], conn)[0],
         )
     except Exception:
         raise HTTPException(status_code=404, detail="인스턴스를 찾을 수 없습니다")
@@ -810,6 +818,7 @@ async def delete_instance(
         server = await asyncio.to_thread(nova.get_server, conn, instance_id)
     except Exception:
         raise HTTPException(status_code=404, detail="인스턴스를 찾을 수 없습니다")
+    assert_instance_owner(server, conn, token_info)
 
     upper_volume_id = server.union_upper_volume_id
     file_storage_ids = server.union_share_ids
@@ -894,6 +903,11 @@ async def start_instance(
 ):
     pid = conn._afterglow_project_id
     try:
+        server = await asyncio.to_thread(nova.get_server, conn, instance_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="인스턴스를 찾을 수 없습니다")
+    assert_instance_owner(server, conn, token_info)
+    try:
         await asyncio.to_thread(nova.start_server, conn, instance_id)
         await invalidate(f"afterglow:nova:{pid}:instance:{instance_id}")
         await invalidate(f"afterglow:nova:{pid}:instances")
@@ -925,6 +939,11 @@ async def stop_instance(
     token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
+    try:
+        server = await asyncio.to_thread(nova.get_server, conn, instance_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="인스턴스를 찾을 수 없습니다")
+    assert_instance_owner(server, conn, token_info)
     try:
         await asyncio.to_thread(nova.stop_server, conn, instance_id)
         await invalidate(f"afterglow:nova:{pid}:instance:{instance_id}")
@@ -958,6 +977,11 @@ async def reboot_instance(
 ):
     pid = conn._afterglow_project_id
     try:
+        server = await asyncio.to_thread(nova.get_server, conn, instance_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="인스턴스를 찾을 수 없습니다")
+    assert_instance_owner(server, conn, token_info)
+    try:
         await asyncio.to_thread(nova.reboot_server, conn, instance_id)
         await invalidate(f"afterglow:nova:{pid}:instance:{instance_id}")
         await invalidate(f"afterglow:nova:{pid}:instances")
@@ -990,6 +1014,11 @@ async def shelve_instance(
 ):
     pid = conn._afterglow_project_id
     try:
+        server = await asyncio.to_thread(nova.get_server, conn, instance_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="인스턴스를 찾을 수 없습니다")
+    assert_instance_owner(server, conn, token_info)
+    try:
         await asyncio.to_thread(nova.shelve_server, conn, instance_id)
         await invalidate(f"afterglow:nova:{pid}:instance:{instance_id}")
         await invalidate(f"afterglow:nova:{pid}:instances")
@@ -1021,6 +1050,11 @@ async def unshelve_instance(
     token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
+    try:
+        server = await asyncio.to_thread(nova.get_server, conn, instance_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="인스턴스를 찾을 수 없습니다")
+    assert_instance_owner(server, conn, token_info)
     try:
         await asyncio.to_thread(nova.unshelve_server, conn, instance_id)
         await invalidate(f"afterglow:nova:{pid}:instance:{instance_id}")

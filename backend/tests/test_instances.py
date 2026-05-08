@@ -57,6 +57,70 @@ async def test_get_instance(client, mock_conn):
     assert resp.json()["id"] == "inst-1"
 
 
+@pytest.mark.asyncio
+async def test_get_instance_other_project_returns_404(client, mock_conn):
+    """다른 프로젝트의 인스턴스를 ID 로 직접 조회 시 owner 검증으로 404."""
+    from unittest.mock import MagicMock
+
+    foreign = MagicMock()
+    foreign.id = "inst-foreign"
+    foreign.project_id = "other-project-999"  # mock_conn 의 test-project-123 과 다름
+    with patch("app.api.compute.instances.nova.get_server", return_value=foreign):
+        resp = await client.get("/api/instances/inst-foreign")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_admin_can_get_other_project_instance(admin_client, mock_conn):
+    """admin 은 다른 프로젝트 인스턴스도 직접 조회 가능."""
+    from unittest.mock import MagicMock
+
+    foreign = MagicMock(spec=InstanceInfo)
+    foreign.id = "inst-foreign"
+    foreign.name = "vm-foreign"
+    foreign.project_id = "other-project-999"
+    with (
+        patch("app.api.compute.instances.nova.get_server", return_value=foreign),
+        patch(
+            "app.api.compute.instances._resolve_names",
+            return_value=[make_instance(instance_id="inst-foreign", name="vm-foreign")],
+        ),
+    ):
+        resp = await admin_client.get("/api/instances/inst-foreign")
+    # admin 은 owner check 통과 — 200
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_delete_instance_other_project_returns_404(client, mock_conn):
+    """다른 프로젝트의 인스턴스 ID 로 DELETE 시 owner 검증으로 404."""
+    from unittest.mock import MagicMock
+
+    foreign = MagicMock()
+    foreign.id = "inst-foreign"
+    foreign.project_id = "other-project-999"
+    foreign.union_upper_volume_id = None
+    foreign.union_share_ids = []
+    foreign.union_strategy = None
+    foreign.metadata = {}
+    with patch("app.api.compute.instances.nova.get_server", return_value=foreign):
+        resp = await client.delete("/api/instances/inst-foreign")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_start_instance_other_project_returns_404(client, mock_conn):
+    """action 엔드포인트도 owner 검증으로 다른 프로젝트 차단."""
+    from unittest.mock import MagicMock
+
+    foreign = MagicMock()
+    foreign.id = "inst-foreign"
+    foreign.project_id = "other-project-999"
+    with patch("app.api.compute.instances.nova.get_server", return_value=foreign):
+        resp = await client.post("/api/instances/inst-foreign/start")
+    assert resp.status_code == 404
+
+
 # ────── DELETE ──────
 
 
@@ -154,37 +218,62 @@ async def test_delete_instance_dynamic_skips_nfs_rule_cleanup(client, mock_conn)
 # ────── 라이프사이클 액션 ──────
 
 
+def _own_server():
+    """owner check 통과용 — caller 와 동일한 project_id."""
+    from unittest.mock import MagicMock
+
+    s = MagicMock()
+    s.id = "inst-1"
+    s.project_id = "test-project-123"
+    return s
+
+
 @pytest.mark.asyncio
 async def test_start_instance(client, mock_conn):
-    with patch("app.api.compute.instances.nova.start_server", return_value=None):
+    with (
+        patch("app.api.compute.instances.nova.get_server", return_value=_own_server()),
+        patch("app.api.compute.instances.nova.start_server", return_value=None),
+    ):
         resp = await client.post("/api/instances/inst-1/start")
     assert resp.status_code == 204
 
 
 @pytest.mark.asyncio
 async def test_stop_instance(client, mock_conn):
-    with patch("app.api.compute.instances.nova.stop_server", return_value=None):
+    with (
+        patch("app.api.compute.instances.nova.get_server", return_value=_own_server()),
+        patch("app.api.compute.instances.nova.stop_server", return_value=None),
+    ):
         resp = await client.post("/api/instances/inst-1/stop")
     assert resp.status_code == 204
 
 
 @pytest.mark.asyncio
 async def test_reboot_instance(client, mock_conn):
-    with patch("app.api.compute.instances.nova.reboot_server", return_value=None):
+    with (
+        patch("app.api.compute.instances.nova.get_server", return_value=_own_server()),
+        patch("app.api.compute.instances.nova.reboot_server", return_value=None),
+    ):
         resp = await client.post("/api/instances/inst-1/reboot")
     assert resp.status_code == 204
 
 
 @pytest.mark.asyncio
 async def test_shelve_instance(client, mock_conn):
-    with patch("app.api.compute.instances.nova.shelve_server", return_value=None):
+    with (
+        patch("app.api.compute.instances.nova.get_server", return_value=_own_server()),
+        patch("app.api.compute.instances.nova.shelve_server", return_value=None),
+    ):
         resp = await client.post("/api/instances/inst-1/shelve")
     assert resp.status_code == 204
 
 
 @pytest.mark.asyncio
 async def test_unshelve_instance(client, mock_conn):
-    with patch("app.api.compute.instances.nova.unshelve_server", return_value=None):
+    with (
+        patch("app.api.compute.instances.nova.get_server", return_value=_own_server()),
+        patch("app.api.compute.instances.nova.unshelve_server", return_value=None),
+    ):
         resp = await client.post("/api/instances/inst-1/unshelve")
     assert resp.status_code == 204
 
