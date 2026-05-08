@@ -63,15 +63,40 @@ def ensure_bucket(client, bucket: str) -> None:
 
 
 def _put_bucket_cors(client, bucket: str) -> None:
-    """RGW bucket CORS 설정. Phase 9 흐름에서는 사실상 불필요하나 idempotent 유지."""
+    """RGW bucket CORS 설정. Phase 9 흐름에서는 백엔드 프록시 업로드를 쓰므로 사실상
+    불필요하지만, presigned URL flow 호환을 위해 idempotent 유지. 단 origin/header 는
+    `settings.cors_origin_list` 화이트리스트로 좁힌다 — wildcard `*` 는 사용하지 않는다.
+
+    화이트리스트가 비어 있으면 CORS rule 자체를 제거해 cross-origin 접근을 차단.
+    """
+    from app.config import get_settings
+
+    settings = get_settings()
+    origins = settings.cors_origin_list or []
+    if not origins:
+        try:
+            client.delete_bucket_cors(Bucket=bucket)
+        except Exception:
+            pass
+        return
     client.put_bucket_cors(
         Bucket=bucket,
         CORSConfiguration={
             "CORSRules": [
                 {
-                    "AllowedOrigins": ["*"],
+                    "AllowedOrigins": origins,
                     "AllowedMethods": ["PUT", "POST", "GET", "HEAD"],
-                    "AllowedHeaders": ["*"],
+                    # presigned URL 사용 시 필요한 헤더만 명시적으로 허용
+                    "AllowedHeaders": [
+                        "Content-Type",
+                        "Content-Length",
+                        "Content-MD5",
+                        "Authorization",
+                        "x-amz-content-sha256",
+                        "x-amz-date",
+                        "x-amz-security-token",
+                        "x-amz-user-agent",
+                    ],
                     "ExposeHeaders": ["ETag"],
                     "MaxAgeSeconds": 3600,
                 }

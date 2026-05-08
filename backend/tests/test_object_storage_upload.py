@@ -248,22 +248,6 @@ async def test_upload_with_prefix(client, mock_conn, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_put_bucket_cors_uses_wildcard_origin():
-    """_put_bucket_cors 가 AllowedOrigins=["*"] 를 사용 (legacy)."""
-    from app.services import s3 as s3_svc
-
-    fake = MagicMock()
-    s3_svc._put_bucket_cors(fake, "test-quarantine")
-
-    fake.put_bucket_cors.assert_called_once()
-    cfg = fake.put_bucket_cors.call_args.kwargs["CORSConfiguration"]
-    rule = cfg["CORSRules"][0]
-    assert rule["AllowedOrigins"] == ["*"]
-    assert rule["MaxAgeSeconds"] == 3600
-    assert "PUT" in rule["AllowedMethods"]
-    assert "ETag" in rule["ExposeHeaders"]
-
-
 def test_ensure_bucket_existing_reapplies_cors():
     """기존 버킷도 CORS 가 매번 재적용 (idempotent)."""
     from app.services import s3 as s3_svc
@@ -288,3 +272,73 @@ def test_ensure_bucket_creates_when_missing_then_cors():
 
     fake.create_bucket.assert_called_once_with(Bucket="test-quarantine")
     fake.put_bucket_cors.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# 보안 패치 — path traversal sanitize / CORS 화이트리스트 / 크기 cap
+# ---------------------------------------------------------------------------
+
+
+def test_sanitize_object_name_strips_path_traversal():
+    """`..` 와 `.` segment 를 제거해 경로 탈출 시도 차단."""
+    from app.api.object_storage.containers import _sanitize_object_name
+
+    assert _sanitize_object_name("../../../etc/passwd") == "etc/passwd"
+    assert _sanitize_object_name("foo/../bar") == "foo/bar"
+    assert _sanitize_object_name("/././etc/foo") == "etc/foo"
+    assert _sanitize_object_name("..") == "unnamed"
+    assert _sanitize_object_name("/") == "unnamed"
+
+
+def test_sanitize_object_name_strips_control_chars():
+    """제어문자 / NUL / DEL 제거."""
+    from app.api.object_storage.containers import _sanitize_object_name
+
+    assert _sanitize_object_name("foo\x00bar") == "foobar"
+    assert _sanitize_object_name("foo\nbar") == "foobar"
+    assert _sanitize_object_name("foo\x7fbar") == "foobar"
+
+
+def test_sanitize_object_name_truncates_long():
+    """1024자 초과는 잘라낸다."""
+    from app.api.object_storage.containers import _sanitize_object_name
+
+    long = "a" * 2000
+    out = _sanitize_object_name(long)
+    assert len(out) == 1024
+
+
+def test_put_bucket_cors_uses_origin_whitelist():
+    """RGW CORS 가 wildcard 가 아니라 settings.cors_origin_list 화이트리스트를 사용."""
+    from unittest.mock import patch
+
+    from app.services import s3 as s3_svc
+
+    fake = MagicMock()
+    mock_settings = MagicMock()
+    mock_settings.cors_origin_list = ["https://app.example.com", "https://staging.example.com"]
+    with patch("app.config.get_settings", return_value=mock_settings):
+        s3_svc._put_bucket_cors(fake, "test-bucket")
+
+    fake.put_bucket_cors.assert_called_once()
+    rule = fake.put_bucket_cors.call_args.kwargs["CORSConfiguration"]["CORSRules"][0]
+    assert rule["AllowedOrigins"] == ["https://app.example.com", "https://staging.example.com"]
+    assert "*" not in rule["AllowedOrigins"]
+    # AllowedHeaders 도 wildcard 가 아니어야 함
+    assert "*" not in rule["AllowedHeaders"]
+
+
+def test_put_bucket_cors_disables_when_no_whitelist():
+    """화이트리스트가 비어 있으면 CORS rule 자체를 제거 (cross-origin 차단)."""
+    from unittest.mock import patch
+
+    from app.services import s3 as s3_svc
+
+    fake = MagicMock()
+    mock_settings = MagicMock()
+    mock_settings.cors_origin_list = []
+    with patch("app.config.get_settings", return_value=mock_settings):
+        s3_svc._put_bucket_cors(fake, "test-bucket")
+
+    fake.delete_bucket_cors.assert_called_once_with(Bucket="test-bucket")
+    fake.put_bucket_cors.assert_not_called()

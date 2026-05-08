@@ -274,6 +274,8 @@ class Settings(BaseSettings):
     backend_port: int = 8000
     frontend_port: int = 3000
     secret_key: str = "change-me-in-production"
+    # object-storage 업로드 단일 파일 최대 크기 (GiB). 0 또는 음수 = 사실상 무제한(기존 100GiB cap).
+    app_max_upload_gb: int = 10
 
     # CORS 허용 origin (쉼표 구분)
     cors_origins: str = "http://localhost:3000,http://localhost"

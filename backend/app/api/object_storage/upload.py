@@ -26,6 +26,8 @@ import threading
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 
 from app.api.deps import get_os_conn, get_token_info
+from app.api.object_storage.containers import _sanitize_object_name
+from app.config import get_settings
 from app.services import s3 as s3_svc
 from app.services import swift as swift_svc
 
@@ -54,8 +56,8 @@ async def upload_object(
     - 클라 disconnect 시 boto3 Callback 으로 UploadCanceled raise → multipart abort
     - 모든 예외 시 quarantine 정리 보장
     """
-    _logger.info(
-        "upload 요청: container=%s prefix=%r filename=%r content_type=%r size=%r",
+    _logger.warning(
+        "[upload-entry] container=%s prefix=%r filename=%r content_type=%r size=%r",
         container,
         prefix,
         file.filename,
@@ -70,10 +72,24 @@ async def upload_object(
         raise HTTPException(status_code=404, detail="컨테이너를 찾을 수 없거나 권한 없음")
 
     quarantine_bucket = f"{container}-quarantine"
-    object_name = (prefix or "") + (file.filename or "")
-    if not object_name:
-        _logger.warning("파일 이름 없음: prefix=%r filename=%r", prefix, file.filename)
-        raise HTTPException(status_code=400, detail="파일 이름이 비어 있습니다")
+    raw_name = (prefix or "") + (file.filename or "")
+    object_name = _sanitize_object_name(raw_name)
+    # sanitize 후 의미 있는 이름이 남았는지 — `unnamed` fallback 은 명시적 거부
+    if not (file.filename or "").strip() or object_name == "unnamed":
+        _logger.warning("파일 이름 없음/유효치 않음: prefix=%r filename=%r", prefix, file.filename)
+        raise HTTPException(status_code=400, detail="파일 이름이 비어 있거나 유효하지 않습니다")
+
+    # 업로드 크기 cap — settings.app_max_upload_gb (기본 10GB). 클라가 헤더 위장해도
+    # boto3 streaming 단계에서 추가 검증되지만 빠른 거부를 위해 사전 체크.
+    settings = get_settings()
+    max_bytes = settings.app_max_upload_gb * 1024**3
+    incoming_size = getattr(file, "size", None)
+    if incoming_size is not None and incoming_size > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"업로드 파일이 최대 허용 크기({settings.app_max_upload_gb}GB)를 초과합니다",
+        )
+
     content_type = file.content_type or "application/octet-stream"
 
     cancel_event = threading.Event()

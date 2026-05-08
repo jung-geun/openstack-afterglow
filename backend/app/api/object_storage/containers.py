@@ -67,8 +67,18 @@ async def _drain_to_queue(stream, q: _queue_module.Queue[object]) -> None:
 
 
 def _sanitize_object_name(name: str) -> str:
+    """object key 정규화. 다음을 제거:
+
+    - ASCII 제어문자 (0x00-0x1F) 와 DEL (0x7F)
+    - path traversal segment (`.`, `..`)
+    - leading/trailing slash, 연속 slash
+    - max 1024자
+    """
+    # 1) 제어문자 + DEL + NUL 제거
     name = "".join(c for c in name if ord(c) >= 0x20 and ord(c) != 0x7F)
-    name = name.strip("/").strip() or "unnamed"
+    # 2) segment-level 정규화: 빈/`.`/`..` segment 제거
+    parts = [p for p in name.split("/") if p and p not in (".", "..")]
+    name = "/".join(parts).strip() or "unnamed"
     return name[:1024]
 
 
@@ -307,8 +317,14 @@ async def upload_object_stream(
         file_size = int(cl)
     except ValueError:
         raise HTTPException(status_code=400, detail="Content-Length 값이 올바르지 않습니다")
-    if file_size > 100 * 1024**3:
-        raise HTTPException(status_code=413, detail="파일 크기는 100 GB를 초과할 수 없습니다")
+    from app.config import get_settings as _get_settings
+
+    _max_gb = _get_settings().app_max_upload_gb
+    if _max_gb > 0 and file_size > _max_gb * 1024**3:
+        raise HTTPException(
+            status_code=413,
+            detail=f"파일 크기는 {_max_gb} GB를 초과할 수 없습니다",
+        )
 
     content_type = request.headers.get("content-type", "application/octet-stream")
     sanitized_name = _sanitize_object_name(object_name)
