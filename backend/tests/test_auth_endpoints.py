@@ -120,6 +120,33 @@ async def test_logout(client):
     assert "로그아웃" in resp.json()["message"]
 
 
+@pytest.mark.asyncio
+async def test_logout_invalidates_token_cache(client):
+    """logout 호출 시 invalidate_token_cache 가 호출되어 검증 캐시가 즉시 비워져야 한다."""
+    with (
+        patch("app.api.identity.auth.keystone.revoke_token", return_value=None),
+        patch(
+            "app.api.identity.auth.invalidate_token_cache",
+            new_callable=AsyncMock,
+        ) as mock_invalidate,
+    ):
+        resp = await client.post("/api/auth/logout")
+    assert resp.status_code == 200
+    # invalidate_token_cache 가 호출되어야 함 (token, project_id 인자)
+    assert mock_invalidate.await_count == 1
+    args, _ = mock_invalidate.await_args
+    assert args[0]  # token 비어있지 않음
+
+
+def test_token_cache_ttl_is_short():
+    """토큰 검증 캐시 TTL 이 60초 이하인지 (revoke window 제한)."""
+    from app.api import deps
+
+    assert deps._TOKEN_CACHE_TTL <= 60, (
+        f"토큰 캐시 TTL 이 {deps._TOKEN_CACHE_TTL}s 으로 너무 길다 — revoke 후 공격 window 가 벌어짐"
+    )
+
+
 # ────── projects ──────
 
 
