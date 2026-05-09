@@ -22,6 +22,7 @@ from slowapi.util import get_remote_address
 from sqlalchemy.exc import InterfaceError, OperationalError
 from starlette.requests import Request
 
+from app.api.common.activity_recorder import rec
 from app.api.deps import get_os_conn, get_token_info
 from app.config import get_settings
 from app.database import mark_db_unhealthy
@@ -105,8 +106,11 @@ async def get_k3s_cluster(cluster_id: str, token_info: dict = Depends(get_token_
 
 
 @router.api_route("/{cluster_id}/kubeconfig", methods=["GET", "HEAD"])
-async def download_kubeconfig(cluster_id: str, token_info: dict = Depends(get_token_info)):
-    """kubeconfig YAML 파일 다운로드. 아직 준비되지 않으면 404."""
+async def download_kubeconfig(request: Request, cluster_id: str, token_info: dict = Depends(get_token_info)):
+    """kubeconfig YAML 파일 다운로드. 아직 준비되지 않으면 404.
+
+    매 호출마다 audit log 기록 — 토큰 탈취 시 다운로드 추적이 가능하도록.
+    """
     project_id = token_info["project_id"]
     cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
     if not cluster:
@@ -123,6 +127,25 @@ async def download_kubeconfig(cluster_id: str, token_info: dict = Depends(get_to
         )
 
     cluster_name = cluster.get("name", cluster_id)
+
+    # audit log — HEAD 는 보통 브라우저 사전 요청이라 GET 일 때만 기록
+    if request.method == "GET":
+        try:
+            from app.rate_limit import _get_real_ip
+
+            source_ip = _get_real_ip(request)
+            await rec(
+                token_info,
+                None,
+                resource_type="k3s_cluster",
+                action="kubeconfig_download",
+                resource_id=cluster_id,
+                resource_name=cluster_name,
+                extra={"source_ip": source_ip},
+            )
+        except Exception:
+            _logger.warning("kubeconfig 다운로드 audit 기록 실패", exc_info=True)
+
     return Response(
         content=kubeconfig,
         media_type="application/yaml",
@@ -362,6 +385,15 @@ async def create_k3s_cluster_async(
             if manifest_failures:
                 err_msg = f"플러그인 매니페스트 생성 실패: {', '.join(manifest_failures)}"
                 _logger.error("k3s cluster %s: %s", cluster_id, err_msg)
+                await rec(
+                    token_info_obj or {},
+                    conn,
+                    resource_type="k3s_cluster",
+                    action="create",
+                    status="failed",
+                    resource_name=req.name,
+                    error_message=err_msg[:500],
+                )
                 yield event(K3sProgressStep.FAILED, 0, err_msg, cluster_id=cluster_id)
                 return
             extra_server_args = k3s_plugins.aggregate_server_args(s)
@@ -449,6 +481,15 @@ async def create_k3s_cluster_async(
                 },
             )
 
+            await rec(
+                token_info_obj or {},
+                conn,
+                resource_type="k3s_cluster",
+                action="create",
+                status="success",
+                resource_id=cluster_id,
+                resource_name=req.name,
+            )
             yield event(
                 K3sProgressStep.COMPLETED,
                 100,
@@ -458,6 +499,15 @@ async def create_k3s_cluster_async(
 
         except Exception as e:
             _logger.error("k3s cluster creation failed: %s", e, exc_info=True)
+            await rec(
+                token_info_obj or {},
+                conn,
+                resource_type="k3s_cluster",
+                action="create",
+                status="failed",
+                resource_name=req.name,
+                error_message=str(e)[:500],
+            )
             yield event(K3sProgressStep.FAILED, 0, f"클러스터 생성 실패: {e}", error=str(e))
             # 롤백
             await _rollback(conn, server_vm_id, boot_volume_id, sg_id, app_credential_id, project_id)
@@ -509,7 +559,9 @@ async def _rollback(
 
 
 @router.patch("/{cluster_id}/scale")
+@limiter.limit("10/minute")
 async def scale_k3s_cluster(
+    request: Request,
     cluster_id: str,
     req: ScaleK3sClusterRequest,
     token_info: dict = Depends(get_token_info),
@@ -539,6 +591,14 @@ async def scale_k3s_cluster(
 
     await k3s_cluster.update_cluster_status(project_id, cluster_id, "SCALING")
     asyncio.create_task(_scale_agents(project_id, cluster_id, current_agent_ids, desired))
+    await rec(
+        token_info,
+        None,
+        resource_type="k3s_cluster",
+        action="scale",
+        resource_id=cluster_id,
+        extra={"desired_count": desired},
+    )
     return {"message": f"스케일링 시작: {current} → {desired}", "agent_count": desired}
 
 
@@ -674,7 +734,9 @@ async def _scale_agents(
 
 
 @router.delete("/{cluster_id}", status_code=204)
+@limiter.limit("5/minute")
 async def delete_k3s_cluster(
+    request: Request,
     cluster_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
@@ -815,3 +877,4 @@ async def delete_k3s_cluster(
     # soft-delete: 상태를 DELETED로 기록 (물리 삭제 안 함)
     user_id = token_info.get("user_id") if isinstance(token_info, dict) else None
     await k3s_cluster.delete_cluster_record(project_id, cluster_id, user_id=user_id, reason="사용자 삭제 요청")
+    await rec(token_info, conn, resource_type="k3s_cluster", action="delete", resource_id=cluster_id)

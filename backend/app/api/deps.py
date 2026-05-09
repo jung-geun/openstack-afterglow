@@ -11,23 +11,50 @@ from fastapi import Depends, Header, HTTPException
 
 from app.config import get_settings
 from app.services import keystone
-from app.services.cache import cached_call, ttl_static
+from app.services.cache import cached_call, invalidate
 
 if TYPE_CHECKING:
     import openstack
 
 _logger = logging.getLogger(__name__)
 
+# 토큰 검증 결과 캐시 TTL — Keystone revoke / logout 후 공격자에게 노출되는 window 를
+# 60초로 제한. 이전엔 ttl_static() (300s) 였음.
+_TOKEN_CACHE_TTL = 60
+
 
 def _session_key(token_hash: str, project_id: str) -> str:
     return f"afterglow:session_start:{token_hash}:{project_id or 'noscope'}"
 
 
+def _validate_cache_key(token_hash: str, project_id: str) -> str:
+    return f"afterglow:session:{token_hash}:{project_id or 'noscope'}"
+
+
 async def _cached_validate(token: str, project_id: str) -> dict:
-    """토큰 검증 결과를 Redis에 캐시 (TTL 300s). 반복 API 호출 속도 향상."""
+    """토큰 검증 결과를 Redis에 짧게 캐시 (TTL 60s). logout/revoke 시 invalidate."""
     token_hash = hashlib.sha256(token.encode()).hexdigest()
-    cache_key = f"afterglow:session:{token_hash}:{project_id or 'noscope'}"
-    return await cached_call(cache_key, ttl_static(), lambda: keystone.validate_token(token, project_id=project_id))
+    cache_key = _validate_cache_key(token_hash, project_id)
+    return await cached_call(cache_key, _TOKEN_CACHE_TTL, lambda: keystone.validate_token(token, project_id=project_id))
+
+
+async def invalidate_token_cache(token: str, project_id: str | None) -> None:
+    """logout / revoke 직후 호출 — 검증 캐시 + 세션 시작/절대 키를 모두 삭제.
+
+    Redis 장애 시 silent fail (logout 흐름을 막지 않음).
+    """
+    pid = project_id or "noscope"
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    keys = [
+        _validate_cache_key(token_hash, pid),
+        _session_key(token_hash, pid),
+        f"afterglow:session-abs:{token_hash}:{pid}",
+    ]
+    for key in keys:
+        try:
+            await invalidate(key)
+        except Exception:
+            _logger.warning("토큰 캐시 invalidate 실패 (%s)", key, exc_info=True)
 
 
 async def _check_session_timeout(token_hash: str, project_id: str) -> None:

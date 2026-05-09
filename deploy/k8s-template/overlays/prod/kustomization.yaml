@@ -8,6 +8,6 @@ resources:
 
 images:
   - name: ghcr.io/jung-geun/afterglow-api
-    newTag: latest
+    newTag: v1.13.9
   - name: ghcr.io/jung-geun/afterglow
-    newTag: latest
+    newTag: v1.13.9

@@ -168,18 +168,74 @@ def get_file_storage_quota(conn) -> dict:
         }
 
 
+def _infer_supported_protocols(name: str, extra_specs: dict) -> list[str]:
+    """share_type 의 extra_specs / 이름으로 지원 프로토콜을 추정.
+
+    1순위: extra_specs.storage_protocol (Manila 가 명시)
+    2순위: vendor_name / share_backend_name 패턴 매칭
+    추정 실패 시 빈 리스트 → 프론트는 fallback 으로 모든 옵션 노출.
+    """
+    proto = extra_specs.get("storage_protocol") or extra_specs.get("share_backend_name") or ""
+    proto = str(proto).upper()
+    if proto in {"CEPHFS", "NFS", "CIFS", "GLUSTERFS"}:
+        return [proto]
+
+    # vendor / backend / 타입 이름으로 패턴 매칭
+    haystack = " ".join(
+        str(v)
+        for v in (
+            extra_specs.get("vendor_name", ""),
+            extra_specs.get("share_backend_name", ""),
+            name,
+        )
+    ).lower()
+    if "ceph" in haystack:
+        return ["CEPHFS"]
+    if any(k in haystack for k in ("nfs", "generic", "netapp", "glusterfs")):
+        return ["NFS"]
+    return []
+
+
 def list_share_types(conn) -> list[dict]:
-    """Manila에서 사용 가능한 share type 목록 조회."""
+    """Manila에서 사용 가능한 share type 목록 조회.
+
+    각 type 의 extra_specs 와 추정된 supported_protocols 를 함께 반환해
+    프론트엔드가 share_type 선택 시 호환되는 share_proto 만 노출할 수 있게 한다.
+    """
     client = get_client(conn)
     data = client.get("types")
-    return [
-        {
-            "id": t["id"],
-            "name": t["name"],
-            "is_default": t.get("share_type_access:is_public", True),
-        }
-        for t in data.get("share_types", [])
-    ]
+    result: list[dict] = []
+    for t in data.get("share_types", []):
+        extra_specs = t.get("extra_specs") or {}
+        result.append(
+            {
+                "id": t["id"],
+                "name": t["name"],
+                "is_default": t.get("share_type_access:is_public", True),
+                "extra_specs": extra_specs,
+                "supported_protocols": _infer_supported_protocols(t["name"], extra_specs),
+            }
+        )
+    return result
+
+
+def extract_manila_error(e: httpx.HTTPStatusError) -> tuple[int, str]:
+    """Manila API 의 HTTPStatusError 에서 (status_code, message) 추출.
+
+    Manila 응답 본문 예: {"badRequest": {"code": 400, "message": "..."}}
+    JSON 파싱 실패 시 plain text 또는 Exception str 로 fallback.
+    """
+    status = e.response.status_code
+    try:
+        body = e.response.json()
+        if isinstance(body, dict) and body:
+            first = next(iter(body.values()))
+            if isinstance(first, dict) and isinstance(first.get("message"), str):
+                return status, first["message"]
+    except Exception:
+        pass
+    text = (e.response.text or "").strip()
+    return status, text or str(e)
 
 
 def list_share_networks(conn) -> list[dict]:
@@ -333,14 +389,16 @@ def create_file_storage(
     metadata: dict | None = None,
 ) -> FileStorageInfo:
     client = get_client(conn)
+    proto_upper = share_proto.upper()
     share_body: dict = {
         "name": name,
-        "share_proto": share_proto.upper(),
+        "share_proto": proto_upper,
         "size": size_gb,
         "share_type": share_type,
         "metadata": metadata or {},
     }
-    if share_network_id:
+    # CephFS native (DHSS=False) 는 share_network_id 를 거부 → error 상태 폴링 후 500
+    if share_network_id and proto_upper != "CEPHFS":
         share_body["share_network_id"] = share_network_id
     body = {"share": share_body}
     data = client.post("shares", body)["share"]
@@ -560,12 +618,14 @@ def ensure_nfs_access_rule(
     access_level: str = "rw",
     root_squash: bool = True,
     sec_flavor: str = "sys",
+    extra_metadata: dict | None = None,
 ) -> dict:
     """
     NFS access rule이 없으면 생성하고, 이미 있으면 기존 rule을 반환.
     access_to: IP 주소 또는 CIDR (예: "192.168.1.100" 또는 "10.0.0.0/24")
     root_squash: NFS root → nobody 매핑 강제 여부 (보안 권장: True)
     sec_flavor: NFS 인증 flavor — "sys" 또는 "krb5"
+    extra_metadata: root_squash/sec_flavor 외에 추가로 붙일 Manila metadata (예: union_grant_project)
     """
     # 기존 access rule 조회
     existing_rules = list_access_rules(conn, file_storage_id)
@@ -586,6 +646,8 @@ def ensure_nfs_access_rule(
 
     # 새로 생성 (보안 메타데이터 포함)
     meta = _build_nfs_access_metadata(root_squash=root_squash, sec_flavor=sec_flavor)
+    if extra_metadata:
+        meta.update(extra_metadata)
     return create_access_rule(
         conn,
         file_storage_id=file_storage_id,

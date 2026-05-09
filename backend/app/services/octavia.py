@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+from threading import Lock
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -381,3 +383,45 @@ def get_topology_lbs(
                 )
         result.append({**lb, "listeners": listeners_dicts, "members": members_flat})
     return result
+
+
+# ---------------------------------------------------------------------------
+# LB 트래픽 stats (Octavia /stats API — 누적 카운터 차분으로 rate 계산)
+# ---------------------------------------------------------------------------
+
+_lb_snapshot: dict[str, tuple[int, int, float]] = {}  # lb_id → (bytes_in, bytes_out, ts)
+_snapshot_lock = Lock()
+
+
+def get_lb_stats(conn, lb_id: str) -> dict[str, int] | None:
+    """Octavia 누적 stats 반환. 실패 시 None."""
+    try:
+        s = conn.load_balancer.get_load_balancer_statistics(lb_id)
+        return {
+            "bytes_in": int(getattr(s, "bytes_in", 0) or 0),
+            "bytes_out": int(getattr(s, "bytes_out", 0) or 0),
+            "active_connections": int(getattr(s, "active_connections", 0) or 0),
+        }
+    except Exception:
+        return None
+
+
+def lb_rate_from_snapshot(lb_id: str, current: dict[str, int]) -> dict[str, float]:
+    """이전 스냅샷과 비교해 bps 계산 후 스냅샷 갱신.
+
+    최초 호출은 rx_bps=tx_bps=0 (스냅샷이 없음). 다음 폴링(15s 후)부터 정상 값.
+    """
+    now = time.time()
+    with _snapshot_lock:
+        prev = _lb_snapshot.get(lb_id)
+        _lb_snapshot[lb_id] = (current["bytes_in"], current["bytes_out"], now)
+    if prev is None:
+        return {"rx_bps": 0.0, "tx_bps": 0.0}
+    dt = now - prev[2]
+    if dt <= 0:
+        return {"rx_bps": 0.0, "tx_bps": 0.0}
+    # bytes_out = client 가 받는 응답 → client 입장 rx
+    return {
+        "rx_bps": max(0.0, (current["bytes_out"] - prev[1]) / dt) * 8,
+        "tx_bps": max(0.0, (current["bytes_in"] - prev[0]) / dt) * 8,
+    }

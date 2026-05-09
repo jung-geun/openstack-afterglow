@@ -46,9 +46,32 @@ graph LR
 
 FastAPI 백엔드는 모든 OpenStack 서비스와 통신하는 단일 게이트웨이 역할을 합니다. 브라우저는 SvelteKit을 통해서만 백엔드와 통신하며, OpenStack API에 직접 접근하지 않습니다. Redis는 OpenStack API 응답을 단기 캐싱하고 세션 시작 시간을 저장합니다.
 
+CI/CD 파이프라인은 GitHub Actions → GHCR(컨테이너 레지스트리) → ArgoCD → Kubernetes 순서로 연결됩니다. `dev` 브랜치 푸시 시 이미지가 자동 빌드·푸시되고, ArgoCD가 kustomization.yaml의 digest 변경을 감지하여 클러스터에 자동 배포합니다.
+
 ---
 
-## 2. VM 생성 플로우
+## 2. CI/CD 파이프라인 (ArgoCD GitOps)
+
+`dev` 브랜치 푸시 시 GitHub Actions 워크플로우가 다음 순서로 실행됩니다.
+
+```
+push to dev
+  → [Docker Build & Push]
+      → backend/frontend 이미지 빌드 (linux/amd64 + linux/arm64)
+      → GHCR에 :dev 태그로 push
+      → 멀티아치 manifest 생성
+      → deploy/k8s-template/overlays/dev/kustomization.yaml의
+        images[].digest 자동 갱신 ("chore(deploy): update dev image digests [skip ci]")
+  → ArgoCD가 kustomization.yaml diff 감지
+  → afterglow-dev Application 자동 sync
+  → 새 digest로 rolling update
+```
+
+`v*` 태그 푸시 시에는 `:vX.Y.Z` + `:latest` 태그로 이미지가 빌드됩니다.
+
+---
+
+## 3. VM 생성 플로우
 
 Afterglow는 VM 생성 시 SSE(Server-Sent Events) 스트림으로 실시간 진행률을 전달합니다. `POST /api/instances/async` 엔드포인트가 이를 처리합니다.
 
@@ -111,7 +134,7 @@ sequenceDiagram
 
 ---
 
-## 3. 인증 및 세션 관리
+## 4. 인증 및 세션 관리
 
 Afterglow는 Keystone 토큰을 브라우저 localStorage에 저장하고, Redis에 세션 시작 시간을 기록하여 별도의 앱 수준 세션 타임아웃을 구현합니다.
 
@@ -162,7 +185,7 @@ X-Project-Id: <project-uuid>
 
 ---
 
-## 4. OverlayFS 아키텍처
+## 5. OverlayFS 아키텍처
 
 Afterglow의 핵심 기능은 CephFS 라이브러리 공유를 OverlayFS 읽기 전용 하위 레이어로 사용하는 것입니다.
 
@@ -199,7 +222,7 @@ VM 내부 파일시스템 뷰
 
 ---
 
-## 5. 멀티 서브프로젝트 구조
+## 6. 멀티 서브프로젝트 구조
 
 이 저장소는 세 개의 서브프로젝트가 하나의 모노레포에 모여 있습니다.
 
@@ -244,7 +267,43 @@ graph TD
 
 ---
 
-## 5. K3s 클러스터 프로비저닝
+## 7. 모니터링 아키텍처
+
+![통합 모니터링](../assets/admin-instance-metric.png)
+*통합 모니터링 페이지 — 전체 인스턴스 목록에서 선택한 VM의 실시간 CPU·메모리·네트워크·디스크 I/O를 1시간/6시간/24시간 구간별로 조회*
+
+### Grafana 임베드 JWT
+
+`POST /api/grafana/token` 엔드포인트가 Grafana 대시보드 임베드에 필요한 단기 JWT를 발급합니다. 프론트엔드는 이 토큰을 `<iframe src="...&auth_token=JWT">` 형태로 활용합니다.
+
+### Prometheus HTTP SD
+
+`GET /api/sd/prometheus/targets` 엔드포인트는 Prometheus http_sd_config 포맷으로 VM 타깃을 반환합니다.
+
+```json
+[
+  {
+    "targets": ["10.0.0.5:9100"],
+    "labels": {
+      "instance": "my-vm",
+      "project_id": "abc123",
+      "flavor": "m1.small",
+      "gpu": "false"
+    }
+  }
+]
+```
+
+- GPU VM에는 `:9400` (dcgm_exporter) 타깃이 추가됩니다.
+- 인증은 `Authorization: Bearer <monitoring_sd_token>` 헤더만 허용합니다.
+
+### Monitoring SG 자동화
+
+신규 프로젝트 생성 시 `ensure_monitoring_ingress_sg()` 가 해당 프로젝트에 모니터링 전용 보안 그룹을 자동 생성하고, 이후 VM 생성 시 자동으로 해당 SG를 연결합니다.
+
+---
+
+## 8. K3s 클러스터 프로비저닝
 
 Union은 OpenStack VM 위에 k3s를 배포하여 Kubernetes 클러스터를 제공합니다. Magnum 없이 Nova + cloud-init만으로 동작합니다.
 
@@ -297,3 +356,49 @@ callback.sh 내 플러그인 배포 루프:
 | 에이전트 #2 | `{cluster_name}-agent-2` |
 
 스케일 다운 또는 클러스터 삭제 시 `k3s_kube.delete_k8s_nodes()`로 VM 삭제 전에 K8s 노드 오브젝트를 먼저 제거하여 OCCM의 `failed to find object` 무한 재시도를 방지합니다.
+
+---
+
+## 보안 모델 요약
+
+전체 보안 모델은 [docs/security.md](security.md) 를, 버전별 변경은 [CHANGELOG](../CHANGELOG.md) / [docs/releases/](releases/) 를 참고하세요.
+
+### 인증 흐름
+
+```
+[브라우저] ──X-Auth-Token + X-Project-Id──▶ [FastAPI]
+                                              │
+                                              ├─ Redis 토큰 캐시 (TTL 60s, logout 시 invalidate)
+                                              │   └ 미스 → Keystone 재검증
+                                              │
+                                              ├─ project-scoped Connection 생성
+                                              │   conn._afterglow_project_id 저장
+                                              │
+                                              ├─ assert_resource_owner (defense-in-depth)
+                                              │   - admin 토큰 우회
+                                              │   - 외부/공유 자원 면제
+                                              │   - mismatch 시 404 (enumeration 방지)
+                                              │
+                                              └─ activity_recorder.rec(...)
+                                                  audit_log row + source_ip
+```
+
+### 핵심 가드레일 (1.14.0)
+
+| 영역 | 가드 |
+|---|---|
+| Cross-tenant 접근 | `assert_resource_owner` 가 Network/LB/Trove/Cinder/Manila/Compute 의 mutation·detail 에 일관 적용. OpenStack policy 가 광범위해도 백엔드에서 차단 |
+| K3s 비밀 | HKDF-SHA256 sub-key 도메인 분리 (kubeconfig / node_token / manager_password / notion). 단일 마스터키 leak 시에도 도메인 간 cross-decrypt 불가 |
+| Kubeconfig 다운로드 | 매 GET 마다 audit_log + source IP. 토큰 탈취 forensic 가능 |
+| K3s callback | `_get_real_ip` (trusted_proxies 검증) 로 source IP 추출 + body.server_ip 와 불일치 시 warning |
+| Health Bearer 토큰 | 7일 절대 만료 (sliding TTL 제거). VM userdata 노출 시에도 7일 후 cephx rotate 권한 무효화 |
+| Cloud-init 템플릿 | Jinja2 `autoescape=False` 명시 + 모든 사용자 입력에 `shlex_quote` 적용 |
+| Production 부팅 | `AFTERGLOW_ENV=production` + `AFTERGLOW_ALLOW_INSECURE=1` 또는 default secret_key → ValueError |
+| Rate limiting | `_get_real_ip` 가 `trusted_proxies` CIDR 검증 — 외부 직접 요청의 X-Forwarded-For 무시 |
+
+### 면제 (intentional)
+
+- **외부 네트워크** (`is_router_external=True`) / **공유 네트워크** (`is_shared=True`) — cross-project 노출이 정상
+- **공개 share** (`is_public=True`) — Manila share 도 동일
+- **Object-storage** — Swift account 모델이 1차 방어선이라 backend 검증 없음 (신규 컨테이너에 owner metadata 부착만, 운영 도구 토대)
+- **admin 토큰** (`token_info.is_system_admin=True`) — 모든 owner check 우회

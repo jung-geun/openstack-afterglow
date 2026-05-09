@@ -76,6 +76,11 @@ spec:
                 secretKeyRef:
                   name: afterglow-secrets
                   key: DATABASE_URL
+            - name: PROMETHEUS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: afterglow-secrets
+                  key: PROMETHEUS_PASSWORD
           volumeMounts:
             - name: afterglow-config-volume
               mountPath: /app/config.toml

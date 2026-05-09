@@ -2,6 +2,7 @@
   import { auth } from '$lib/stores/auth';
   import { untrack } from 'svelte';
   import { api, ApiError, memoryCache } from '$lib/api/client';
+  import { apiMut } from '$lib/api/mutations';
   import type { FileStorage } from '$lib/types/resources';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
@@ -87,10 +88,10 @@
     if (!confirm(`파일 스토리지 "${name || id.slice(0, 8)}"을 삭제하시겠습니까?`)) return;
     deleting = id;
     try {
-      await api.delete(`/api/file-storage/${id}`, token, projectId);
+      await apiMut('파일 스토리지 삭제', () => api.delete(`/api/file-storage/${id}`, token, projectId));
       await fetchFileStorages();
-    } catch (e) {
-      alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+    } catch {
+      // error toast shown by apiMut
     } finally { deleting = null; }
   }
 
@@ -122,9 +123,33 @@
   let createdFs = $state<FileStorage | null>(null);
 
   // Step 1: 기본 정보
-  let shareTypes = $state<{ id: string; name: string; is_default: boolean }[]>([]);
+  type ShareTypeMeta = {
+    id: string;
+    name: string;
+    is_default: boolean;
+    extra_specs?: Record<string, string>;
+    supported_protocols?: string[];
+  };
+  let shareTypes = $state<ShareTypeMeta[]>([]);
   let fsForm = $state({ name: '', size_gb: 10, share_type: '', share_proto: 'CEPHFS' as 'CEPHFS' | 'NFS' });
   let metaEntries = $state<MetaEntry[]>([{ key: '', value: '' }]);
+
+  // 선택된 share_type 이 지원하는 프로토콜만 노출. 메타가 비어 있으면 fallback 으로 모두 노출.
+  const currentShareType = $derived(shareTypes.find(t => t.name === fsForm.share_type));
+  const allowedProtos = $derived<('CEPHFS' | 'NFS')[]>(
+    (currentShareType?.supported_protocols && currentShareType.supported_protocols.length > 0)
+      ? (currentShareType.supported_protocols.filter(
+          (p): p is 'CEPHFS' | 'NFS' => p === 'CEPHFS' || p === 'NFS'
+        ))
+      : ['CEPHFS', 'NFS']
+  );
+
+  // share_type 이 바뀌어 현재 share_proto 가 호환되지 않으면 자동으로 첫 번째 옵션으로 보정.
+  $effect(() => {
+    if (allowedProtos.length > 0 && !allowedProtos.includes(fsForm.share_proto)) {
+      fsForm.share_proto = allowedProtos[0];
+    }
+  });
 
   // Step 2: 네트워크
   let shareNetworks = $state<ShareNetwork[]>([]);
@@ -157,13 +182,21 @@
 
     try {
       const [types, networks] = await Promise.all([
-        api.get<{ id: string; name: string; is_default: boolean }[]>('/api/file-storage/types', token, projectId),
+        api.get<ShareTypeMeta[]>('/api/file-storage/types', token, projectId),
         api.get<ShareNetwork[]>('/api/share-networks', token, projectId),
       ]);
       shareTypes = types;
       shareNetworks = networks;
       if (shareTypes.length > 0) {
-        fsForm.share_type = shareTypes.find(t => t.is_default)?.name ?? shareTypes[0].name;
+        const def = shareTypes.find(t => t.is_default) ?? shareTypes[0];
+        fsForm.share_type = def.name;
+        // share_type 의 supported_protocols 가 있으면 첫 번째 항목으로 share_proto 도 같이 설정
+        const protos = def.supported_protocols?.filter(
+          (p): p is 'CEPHFS' | 'NFS' => p === 'CEPHFS' || p === 'NFS'
+        );
+        if (protos && protos.length > 0) {
+          fsForm.share_proto = protos[0];
+        }
       }
     } catch { shareTypes = []; shareNetworks = []; }
   }
@@ -225,14 +258,14 @@
         name: fsForm.name, size_gb: fsForm.size_gb,
         share_type: fsForm.share_type, share_proto: fsForm.share_proto,
       };
-      if (selectedNetworkId) body.share_network_id = selectedNetworkId;
+      if (selectedNetworkId && fsForm.share_proto !== 'CEPHFS') body.share_network_id = selectedNetworkId;
       const validMeta = metaEntries.filter(m => m.key.trim());
       if (validMeta.length > 0) {
         const metadata: Record<string, string> = {};
         validMeta.forEach(m => { metadata[m.key.trim()] = m.value; });
         body.metadata = metadata;
       }
-      const created = await api.post<FileStorage>('/api/file-storage', body, token, projectId);
+      const created = await apiMut('파일 스토리지 생성', () => api.post<FileStorage>('/api/file-storage', body, token, projectId));
       createdFs = created;
       // 접근 규칙 목록 초기 조회
       try { accessRules = await api.get<AccessRule[]>(`/api/file-storage/${created.id}/access-rules`, token, projectId); }
@@ -344,9 +377,13 @@
             <div>
               <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">프로토콜
                 <select bind:value={fsForm.share_proto} class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5">
-                  <option value="CEPHFS">CephFS</option>
-                  <option value="NFS">NFS</option>
+                  {#each allowedProtos as p (p)}
+                    <option value={p}>{p === 'CEPHFS' ? 'CephFS' : 'NFS'}</option>
+                  {/each}
                 </select>
+                {#if allowedProtos.length === 1 && currentShareType}
+                  <span class="block text-[10px] text-gray-500 mt-1">선택된 share type 이 {allowedProtos[0]} 만 지원합니다.</span>
+                {/if}
               </label>
             </div>
             <div>
@@ -383,23 +420,29 @@
           <div class="space-y-4">
             <!-- Share Network 선택 -->
             <div>
-              <div class="flex items-center justify-between mb-1.5">
-                <span class="text-xs text-gray-400 uppercase tracking-wide">Share Network {fsForm.share_proto === 'NFS' ? '*' : '(선택)'}</span>
-                <button type="button" onclick={() => { showInlineNetCreate = !showInlineNetCreate; inlineNetError = ''; }}
-                  class="text-xs text-blue-400 hover:text-blue-300 transition-colors">
-                  {showInlineNetCreate ? '접기' : '+ 새로 생성'}
-                </button>
-              </div>
-              {#if shareNetworks.length > 0}
-                <select bind:value={selectedNetworkId} class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
-                  <option value="">기본값 사용{fsForm.share_proto === 'NFS' ? '' : ' (권장)'}</option>
-                  {#each shareNetworks as net}<option value={net.id}>{net.name || net.id.slice(0, 8)}{net.status ? ` (${net.status})` : ''}</option>{/each}
-                </select>
-              {:else if !showInlineNetCreate}
-                <div class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-gray-500 text-sm">
-                  Share Network 없음 —
-                  <button onclick={() => showInlineNetCreate = true} class="text-blue-400 hover:text-blue-300 underline">지금 생성</button>
+              {#if fsForm.share_proto === 'CEPHFS'}
+                <div class="bg-gray-800/40 border border-gray-700 rounded-lg px-3 py-2.5 text-xs text-gray-500">
+                  CephFS native 프로토콜은 Share Network 없이 직접 마운트됩니다.
                 </div>
+              {:else}
+                <div class="flex items-center justify-between mb-1.5">
+                  <span class="text-xs text-gray-400 uppercase tracking-wide">Share Network {fsForm.share_proto === 'NFS' ? '*' : '(선택)'}</span>
+                  <button type="button" onclick={() => { showInlineNetCreate = !showInlineNetCreate; inlineNetError = ''; }}
+                    class="text-xs text-blue-400 hover:text-blue-300 transition-colors">
+                    {showInlineNetCreate ? '접기' : '+ 새로 생성'}
+                  </button>
+                </div>
+                {#if shareNetworks.length > 0}
+                  <select bind:value={selectedNetworkId} class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
+                    <option value="">기본값 사용{fsForm.share_proto === 'NFS' ? '' : ' (권장)'}</option>
+                    {#each shareNetworks as net}<option value={net.id}>{net.name || net.id.slice(0, 8)}{net.status ? ` (${net.status})` : ''}</option>{/each}
+                  </select>
+                {:else if !showInlineNetCreate}
+                  <div class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-gray-500 text-sm">
+                    Share Network 없음 —
+                    <button onclick={() => showInlineNetCreate = true} class="text-blue-400 hover:text-blue-300 underline">지금 생성</button>
+                  </div>
+                {/if}
               {/if}
             </div>
 
@@ -631,7 +674,7 @@
               <span class="text-white font-medium">{fs.size} GB</span>
             </div>
             <div class="h-1.5 bg-gray-800 rounded-full overflow-hidden">
-              <div class="h-full bg-teal-400" style="width: 60%"></div>
+              <div class="h-full rounded-full transition-all" style="width: {(quota?.gigabytes?.limit ?? 0) > 0 ? Math.min(100, Math.round(fs.size / (quota?.gigabytes?.limit ?? 1) * 100)) : 0}%; background: var(--gradient-usage)"></div>
             </div>
           </div>
 

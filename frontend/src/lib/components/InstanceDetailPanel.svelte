@@ -1,10 +1,12 @@
 <script lang="ts">
 	import { auth, isAdmin } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
+	import MetricsPanel from '$lib/components/instance/MetricsPanel.svelte';
 	import { goto } from '$app/navigation';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
+	import DetailHeader from '$lib/components/ui/DetailHeader.svelte';
 
 	interface IpAddress {
 		addr: string;
@@ -781,23 +783,17 @@
 	{:else if loading}
 		<LoadingSkeleton variant="card" rows={6} />
 	{:else if instance}
-		<div class="flex items-start justify-between mb-6">
-			<div>
-				<h1 class="text-2xl font-bold text-white">{instance.name}</h1>
-				<span
-					class="mt-2 inline-block px-2 py-0.5 rounded text-xs font-medium {statusColor[instance.status] ?? 'text-gray-400 bg-gray-800'}"
-				>
-					{instance.status}
-				</span>
-				{#if instance.status === 'ERROR' && instance.fault?.message && adminProjectId}
-					<div class="mt-2 p-3 rounded-lg bg-red-900/30 border border-red-800/40 text-red-300 text-sm max-w-xl">
+		<DetailHeader title={instance.name} status={instance.status} size="lg">
+			{#snippet meta()}
+				{#if instance!.status === 'ERROR' && instance!.fault?.message && adminProjectId}
+					<div class="p-3 rounded-lg bg-red-900/30 border border-red-800/40 text-red-300 text-sm max-w-xl">
 						<div class="font-medium mb-1 text-xs text-red-400">오류 상세 (관리자)</div>
-						<div class="text-xs opacity-90 break-words">{instance.fault.message}</div>
+						<div class="text-xs opacity-90 break-words">{instance!.fault!.message}</div>
 					</div>
 				{/if}
-			</div>
-			<div class="flex flex-wrap gap-2 justify-end">
-				{#if instance.status === 'SHUTOFF'}
+			{/snippet}
+			{#snippet actions()}
+				{#if instance!.status === 'SHUTOFF'}
 					<button
 						onclick={() => performAction('start')}
 						disabled={!!actioning}
@@ -806,7 +802,7 @@
 						{actioning === 'start' ? '시작 중...' : '시작'}
 					</button>
 				{/if}
-				{#if instance.status === 'SHELVED_OFFLOADED' || instance.status === 'SHELVED'}
+				{#if instance!.status === 'SHELVED_OFFLOADED' || instance!.status === 'SHELVED'}
 					<button
 						onclick={() => performAction('unshelve')}
 						disabled={!!actioning}
@@ -815,7 +811,7 @@
 						{actioning === 'unshelve' ? '보관 해제 중...' : '보관 해제'}
 					</button>
 				{/if}
-				{#if instance.status === 'ACTIVE'}
+				{#if instance!.status === 'ACTIVE'}
 					<button
 						onclick={openConsole}
 						class="text-gray-300 hover:text-white text-sm px-3 py-1.5 rounded border border-gray-700 hover:border-gray-500 transition-colors"
@@ -837,7 +833,7 @@
 						{actioning === 'reboot' ? '재부팅 중...' : '재부팅'}
 					</button>
 				{/if}
-				{#if instance.status === 'ACTIVE' || instance.status === 'SHUTOFF'}
+				{#if instance!.status === 'ACTIVE' || instance!.status === 'SHUTOFF'}
 					<button
 						onclick={() => performAction('shelve')}
 						disabled={!!actioning}
@@ -847,7 +843,7 @@
 					</button>
 				{/if}
 				{#if adminProjectId}
-					{#if instance.status === 'ACTIVE'}
+					{#if instance!.status === 'ACTIVE'}
 						<button
 							onclick={() => openMigrateModal('live')}
 							disabled={!!actioning}
@@ -856,7 +852,7 @@
 							라이브 마이그레이션
 						</button>
 					{/if}
-					{#if instance.status === 'ACTIVE' || instance.status === 'SHUTOFF'}
+					{#if instance!.status === 'ACTIVE' || instance!.status === 'SHUTOFF'}
 						<button
 							onclick={() => openMigrateModal('cold')}
 							disabled={!!actioning}
@@ -872,7 +868,7 @@
 							리사이즈
 						</button>
 					{/if}
-					{#if instance.status === 'VERIFY_RESIZE'}
+					{#if instance!.status === 'VERIFY_RESIZE'}
 						<button
 							onclick={confirmResize}
 							disabled={!!actioning}
@@ -904,8 +900,8 @@
 				>
 					{deleting ? '삭제 중...' : '삭제'}
 				</button>
-			</div>
-		</div>
+			{/snippet}
+		</DetailHeader>
 
 		<!-- 기본 정보 -->
 		<div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4">
@@ -960,6 +956,15 @@
 					</dd>
 				</div>
 			</dl>
+		</div>
+
+		<!-- 성능 모니터링 -->
+		<div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4">
+			<div class="text-white text-[15px] font-semibold mb-4">성능 모니터링</div>
+			<MetricsPanel
+				instanceId={instance.id}
+				isGpu={(instance.flavor_name ?? '').toLowerCase().startsWith('gpu.')}
+			/>
 		</div>
 
 		<!-- 콘솔 로그 -->

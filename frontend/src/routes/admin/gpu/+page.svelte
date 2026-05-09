@@ -311,7 +311,7 @@
 								{#if h.gpu_total > 0}
 									<div class="flex items-center justify-center gap-2">
 										<div class="w-16 bg-gray-800 rounded-full h-1.5">
-											<div class="bg-blue-500 h-1.5 rounded-full" style="width: {Math.round(h.gpu_used / h.gpu_total * 100)}%"></div>
+											<div class="h-1.5 rounded-full transition-all" style="width: {Math.round(h.gpu_used / h.gpu_total * 100)}%; background: var(--gradient-usage)"></div>
 										</div>
 										<span class="text-gray-400">{Math.round(h.gpu_used / h.gpu_total * 100)}%</span>
 									</div>

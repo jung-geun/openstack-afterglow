@@ -2,6 +2,7 @@
   import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+  import Button from '$lib/components/ui/Button.svelte';
 
   interface ImageDetail {
     id: string;
@@ -63,6 +64,113 @@
   let removingMember = $state<string | null>(null);
 
   const isOwner = $derived(image?.owner === $auth.projectId);
+  const canEditMetadata = $derived(isOwner || isAdmin);
+
+  // 메타데이터 편집 — admin 페이지는 /api/admin/images/.../properties, 일반은 /api/images/.../properties
+  const propertiesEndpoint = $derived(isAdmin ? '/api/admin/images' : '/api/images');
+
+  // Glance 예약 키 (편집/삭제 금지) — 백엔드 _is_protected_key 와 동기화
+  const RESERVED_KEYS = new Set([
+    'id', 'name', 'status', 'visibility', 'owner', 'size', 'virtual_size',
+    'disk_format', 'container_format', 'checksum', 'os_hash_algo', 'os_hash_value',
+    'min_disk', 'min_ram', 'tags', 'self', 'file', 'schema', 'direct_url',
+    'locations', 'created_at', 'updated_at', 'protected', 'os_hidden',
+  ]);
+  const isReservedKey = (k: string) => RESERVED_KEYS.has(k) || k.startsWith('os_glance_');
+
+  let editingProps = $state(false);
+  let propsDraft = $state<Record<string, string>>({});
+  let propsRemovedKeys = $state<Set<string>>(new Set());
+  let newPropKey = $state('');
+  let newPropValue = $state('');
+  let savingProps = $state(false);
+  let propsError = $state('');
+
+  function startEditProps() {
+    if (!image) return;
+    propsDraft = { ...image.properties };
+    propsRemovedKeys = new Set();
+    newPropKey = '';
+    newPropValue = '';
+    propsError = '';
+    editingProps = true;
+  }
+
+  function cancelEditProps() {
+    editingProps = false;
+    propsDraft = {};
+    propsRemovedKeys = new Set();
+    propsError = '';
+  }
+
+  function removeProperty(key: string) {
+    if (isReservedKey(key)) return;
+    delete propsDraft[key];
+    propsDraft = { ...propsDraft };
+    propsRemovedKeys.add(key);
+    propsRemovedKeys = new Set(propsRemovedKeys);
+  }
+
+  function addProperty() {
+    const key = newPropKey.trim();
+    const value = newPropValue.trim();
+    if (!key) {
+      propsError = '키를 입력하세요.';
+      return;
+    }
+    if (isReservedKey(key)) {
+      propsError = `"${key}" 는 시스템 예약 키라 편집할 수 없습니다.`;
+      return;
+    }
+    propsDraft[key] = value;
+    propsDraft = { ...propsDraft };
+    propsRemovedKeys.delete(key);
+    propsRemovedKeys = new Set(propsRemovedKeys);
+    newPropKey = '';
+    newPropValue = '';
+    propsError = '';
+  }
+
+  async function saveProperties() {
+    if (!image) return;
+    // 추가 인풋에 값이 남아있으면 자동 commit (UX 함정 제거)
+    const pendingKey = newPropKey.trim();
+    if (pendingKey && !isReservedKey(pendingKey)) {
+      propsDraft[pendingKey] = newPropValue.trim();
+      propsDraft = { ...propsDraft };
+      propsRemovedKeys.delete(pendingKey);
+      propsRemovedKeys = new Set(propsRemovedKeys);
+      newPropKey = '';
+      newPropValue = '';
+    }
+    const original = image.properties;
+    const setObj: Record<string, string> = {};
+    for (const [k, v] of Object.entries(propsDraft)) {
+      if (isReservedKey(k)) continue;
+      if (original[k] !== v) setObj[k] = v;
+    }
+    const removeList = Array.from(propsRemovedKeys).filter((k) => !isReservedKey(k));
+    if (Object.keys(setObj).length === 0 && removeList.length === 0) {
+      editingProps = false;
+      return;
+    }
+    savingProps = true;
+    propsError = '';
+    try {
+      const updated = await api.patch<ImageDetail>(
+        `${propertiesEndpoint}/${image.id}/properties`,
+        { set: setObj, remove: removeList },
+        $auth.token ?? undefined,
+        $auth.projectId ?? undefined,
+      );
+      image = { ...image, properties: updated.properties };
+      editingProps = false;
+    } catch (e) {
+      propsError = e instanceof ApiError ? e.message : '저장 실패';
+    } finally {
+      savingProps = false;
+    }
+  }
 
   $effect(() => {
     if (!imageId || !$auth.token) return;
@@ -345,13 +453,9 @@
                 <option value={opt.value}>{opt.label}</option>
               {/each}
             </select>
-            <button
-              onclick={saveVisibility}
-              disabled={savingVisibility || visibilityValue === image.visibility}
-              class="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium rounded-lg transition-colors"
-            >
+            <Button onclick={saveVisibility} disabled={savingVisibility || visibilityValue === image.visibility}>
               {savingVisibility ? '저장 중...' : '저장'}
-            </button>
+            </Button>
             {#if visibilitySuccess}
               <span class="text-green-400 text-sm">저장됨</span>
             {/if}
@@ -375,13 +479,9 @@
               class="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 font-mono"
               onkeydown={(e) => e.key === 'Enter' && addMember()}
             />
-            <button
-              onclick={addMember}
-              disabled={addingMember || !newMemberId.trim()}
-              class="px-3 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium rounded-lg transition-colors whitespace-nowrap"
-            >
+            <Button onclick={addMember} disabled={addingMember || !newMemberId.trim()} size="sm">
               {addingMember ? '추가 중...' : '+ 추가'}
-            </button>
+            </Button>
           </div>
 
           {#if memberError}
@@ -416,19 +516,79 @@
       {/if}
 
       <!-- 추가 속성 -->
-      {#if Object.keys(image.properties).length > 0}
+      {#if Object.keys(image.properties).length > 0 || canEditMetadata}
         <div class="bg-gray-900 border border-gray-800 rounded-lg p-5">
-          <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">추가 속성</h3>
-          <table class="w-full text-xs">
-            <tbody>
-              {#each Object.entries(image.properties) as [k, v]}
-                <tr class="border-b border-gray-800/50">
-                  <td class="py-1.5 pr-4 text-gray-400 font-mono w-2/5">{k}</td>
-                  <td class="py-1.5 text-gray-300 font-mono break-all">{v}</td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wide">추가 속성 <span class="normal-case font-normal text-gray-600">({Object.keys(image.properties).length})</span></h3>
+            {#if canEditMetadata && !editingProps}
+              <button onclick={startEditProps} class="text-xs text-blue-400 hover:text-blue-300">편집</button>
+            {/if}
+          </div>
+
+          {#if !editingProps}
+            {#if Object.keys(image.properties).length === 0}
+              <p class="text-xs text-gray-500">추가 속성이 없습니다.</p>
+            {:else}
+              <table class="w-full text-xs">
+                <tbody>
+                  {#each Object.entries(image.properties) as [k, v]}
+                    <tr class="border-b border-gray-800/50">
+                      <td class="py-1.5 pr-4 text-gray-400 font-mono w-2/5">{k}</td>
+                      <td class="py-1.5 text-gray-300 font-mono break-all">{v}</td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            {/if}
+          {:else}
+            <table class="w-full text-xs mb-3">
+              <tbody>
+                {#each Object.entries(propsDraft) as [k, v]}
+                  <tr class="border-b border-gray-800/50">
+                    <td class="py-1.5 pr-2 font-mono w-2/5 {isReservedKey(k) ? 'text-gray-600' : 'text-gray-400'}">
+                      {k}{#if isReservedKey(k)}&nbsp;<span class="text-[10px] text-gray-600">(예약)</span>{/if}
+                    </td>
+                    <td class="py-1.5 pr-2">
+                      {#if isReservedKey(k)}
+                        <span class="text-gray-500 font-mono break-all">{v}</span>
+                      {:else}
+                        <input bind:value={propsDraft[k]}
+                          class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-gray-300 font-mono text-xs focus:outline-none focus:border-blue-500" />
+                      {/if}
+                    </td>
+                    <td class="py-1.5 text-right w-10">
+                      {#if !isReservedKey(k)}
+                        <button onclick={() => removeProperty(k)} class="text-red-400 hover:text-red-300 text-xs">삭제</button>
+                      {/if}
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+
+            <div class="flex gap-2 mb-3">
+              <input bind:value={newPropKey} placeholder="키"
+                class="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white font-mono focus:outline-none focus:border-blue-500"
+                onkeydown={(e) => e.key === 'Enter' && addProperty()} />
+              <input bind:value={newPropValue} placeholder="값"
+                class="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white font-mono focus:outline-none focus:border-blue-500"
+                onkeydown={(e) => e.key === 'Enter' && addProperty()} />
+              <button onclick={addProperty} class="text-xs text-blue-400 hover:text-blue-300 px-2 shrink-0">+ 추가</button>
+            </div>
+
+            {#if propsError}
+              <p class="text-red-400 text-xs mb-2">{propsError}</p>
+            {/if}
+
+            <div class="flex gap-2 justify-end">
+              <button onclick={cancelEditProps} disabled={savingProps}
+                class="text-xs text-gray-400 hover:text-white px-3 py-1 border border-gray-700 rounded disabled:opacity-50">취소</button>
+              <button onclick={saveProperties} disabled={savingProps}
+                class="text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 px-3 py-1 rounded">
+                {savingProps ? '저장 중...' : '저장'}
+              </button>
+            </div>
+          {/if}
         </div>
       {/if}
 

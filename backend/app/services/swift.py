@@ -37,6 +37,23 @@ def _is_account_not_found(exc: Exception) -> bool:
     return isinstance(exc, ResourceNotFound) or (hasattr(exc, "status_code") and getattr(exc, "status_code", 0) == 404)
 
 
+def _is_unauthorized(exc: Exception) -> bool:
+    """Keystone/Swift 401 Unauthorized 검사.
+
+    admin fan-out 시 일부 프로젝트에 admin role 이 없으면 Keystone rescope 가
+    Unauthorized raise. traceback 출력하지 않고 info 로 swallow 하기 위해 분기.
+    """
+    try:
+        from keystoneauth1.exceptions.http import Unauthorized
+
+        if isinstance(exc, Unauthorized):
+            return True
+    except ImportError:
+        pass
+    status = getattr(exc, "http_status", None) or getattr(exc, "status_code", None)
+    return status == 401
+
+
 def _apply_endpoint_override(conn) -> None:
     """swift_endpoint 오버라이드가 설정된 경우 openstacksdk object_store proxy에 적용."""
     override = _get_swift_endpoint(conn)
@@ -45,8 +62,13 @@ def _apply_endpoint_override(conn) -> None:
         _logger.debug("Swift endpoint override 적용: %s", override)
 
 
-def list_containers(conn) -> list[dict]:
-    """현재 계정의 오브젝트 스토리지 컨테이너(버킷) 목록 반환."""
+def list_containers(conn, include_quarantine: bool = False) -> list[dict]:
+    """현재 계정의 오브젝트 스토리지 컨테이너(버킷) 목록 반환.
+
+    include_quarantine=True 시 `*-quarantine` 버킷도 포함하고 결과에
+    `is_quarantine: True` 필드 표시. admin 모니터링 용도.
+    `_segments` 는 항상 숨김(원본 bytes 에 합산).
+    """
     _apply_endpoint_override(conn)
     try:
         project_id = getattr(conn, "_afterglow_project_id", "unknown")
@@ -56,19 +78,40 @@ def list_containers(conn) -> list[dict]:
             endpoint = "(resolve failed)"
         _logger.info("Swift list_containers: project_id=%s endpoint=%s", project_id, endpoint)
 
-        result = [
-            {
-                "name": c.name or "",
+        # SLO segment 컨테이너({name}_segments)는 사용자 목록에서 숨기고,
+        # 그 bytes 는 원본 컨테이너에 합산해서 표시.
+        all_containers = list(conn.object_store.containers())
+        seg_bytes_by_origin: dict[str, int] = {}
+        for c in all_containers:
+            cname = c.name or ""
+            if cname.endswith("_segments"):
+                origin = cname[: -len("_segments")]
+                seg_bytes_by_origin[origin] = seg_bytes_by_origin.get(origin, 0) + (getattr(c, "bytes", 0) or 0)
+
+        result = []
+        for c in all_containers:
+            cname = c.name or ""
+            if cname.endswith("_segments"):
+                continue
+            is_quarantine = cname.endswith("-quarantine")
+            if is_quarantine and not include_quarantine:
+                continue
+            base_bytes = getattr(c, "bytes", 0) or 0
+            entry = {
+                "name": cname,
                 "count": getattr(c, "count", 0) or 0,
-                "bytes": getattr(c, "bytes", 0) or 0,
+                "bytes": base_bytes + seg_bytes_by_origin.get(cname, 0),
             }
-            for c in conn.object_store.containers()
-        ]
-        _logger.info("Swift 컨테이너 목록 조회: %d개", len(result))
+            if is_quarantine:
+                entry["is_quarantine"] = True
+            result.append(entry)
+        _logger.info("Swift 컨테이너 목록 조회: %d개 (quarantine=%s)", len(result), include_quarantine)
         return result
     except Exception as exc:
         if _is_account_not_found(exc):
             _logger.info("Swift 계정 미초기화 (404) — 빈 목록 반환")
+        elif _is_unauthorized(exc):
+            _logger.info("Swift 401 Unauthorized — 권한 없음, 빈 목록 반환")
         else:
             _logger.warning("Swift 컨테이너 목록 조회 실패", exc_info=True)
         return []
@@ -147,10 +190,20 @@ def create_container(conn, name: str) -> dict:
 
     Ceph RGW 환경에서 계정이 미초기화 상태이면 자동으로 계정을 초기화한 뒤
     컨테이너 생성을 재시도한다.
+
+    생성 시 caller project_id 를 X-Container-Meta-Owner-Project-Id 메타로 부착해
+    향후 admin/operator 도구가 컨테이너 owner 를 식별·검증할 수 있도록 한다
+    (defense-in-depth — 실제 RBAC 는 Swift account 모델이 담당).
     """
     _apply_endpoint_override(conn)
+    owner_pid = getattr(conn, "_afterglow_project_id", None) or ""
     try:
         c = conn.object_store.create_container(name=name)
+        if owner_pid:
+            try:
+                conn.object_store.set_container_metadata(c.name or name, owner_project_id=owner_pid)
+            except Exception:
+                _logger.warning("컨테이너 owner metadata 부착 실패: name=%s", name, exc_info=True)
         return {"name": c.name or name, "count": 0, "bytes": 0}
     except Exception as sdk_err:
         if not _is_account_not_found(sdk_err):
@@ -162,7 +215,10 @@ def create_container(conn, name: str) -> dict:
 
         # 2차: raw PUT으로 컨테이너 생성 재시도
         try:
-            resp = conn.object_store.put(f"/{name}", headers={"Content-Length": "0"})
+            headers = {"Content-Length": "0"}
+            if owner_pid:
+                headers["X-Container-Meta-Owner-Project-Id"] = owner_pid
+            resp = conn.object_store.put(f"/{name}", headers=headers)
             sc = getattr(resp, "status_code", 0)
             if sc in (201, 202, 204):
                 _logger.info("Swift 컨테이너 생성 성공 (계정 초기화 후): status=%d", sc)
@@ -174,6 +230,11 @@ def create_container(conn, name: str) -> dict:
         # 3차: SDK 재시도 (계정 초기화 성공 시 작동할 수 있음)
         try:
             c = conn.object_store.create_container(name=name)
+            if owner_pid:
+                try:
+                    conn.object_store.set_container_metadata(c.name or name, owner_project_id=owner_pid)
+                except Exception:
+                    _logger.warning("컨테이너 owner metadata 부착 실패: name=%s", name, exc_info=True)
             _logger.info("Swift 컨테이너 SDK 재시도 성공")
             return {"name": c.name or name, "count": 0, "bytes": 0}
         except Exception:
@@ -183,19 +244,69 @@ def create_container(conn, name: str) -> dict:
 
 
 def delete_container(conn, name: str) -> None:
-    """오브젝트 스토리지 컨테이너를 삭제."""
+    """오브젝트 스토리지 컨테이너를 삭제 (내용물 + SLO segments 캐스케이드).
+
+    동작:
+    1. 원본 컨테이너 내부의 모든 객체 삭제 (SLO manifest 는 delete_object 내부에서
+       ?multipart-manifest=delete 경로로 segments 자동 정리)
+    2. 원본 컨테이너 자체 삭제
+    3. {name}_segments 컨테이너가 남아 있으면 비우고 삭제 (orphan segment quota leak 방지)
+    """
     _apply_endpoint_override(conn)
+
+    # 1. 원본 컨테이너 비우기
+    try:
+        for o in conn.object_store.objects(name):
+            obj_name = o.name or ""
+            try:
+                delete_object(conn, name, obj_name)
+            except Exception:
+                _logger.warning("객체 삭제 실패 container=%s name=%s", name, obj_name, exc_info=True)
+    except Exception:
+        _logger.debug("컨테이너 객체 목록 조회 실패: %s", name, exc_info=True)
+
+    # 2. 원본 컨테이너 삭제
     conn.object_store.delete_container(name, ignore_missing=False)
+
+    # 3. _segments 컨테이너 정리 (SLO 분할 파일의 orphan 방지)
+    seg_name = f"{name}_segments"
+    try:
+        for o in conn.object_store.objects(seg_name):
+            obj_name = o.name or ""
+            try:
+                conn.object_store.delete_object(obj_name, container=seg_name, ignore_missing=True)
+            except Exception:
+                _logger.warning("SLO segment 삭제 실패 container=%s name=%s", seg_name, obj_name, exc_info=True)
+        conn.object_store.delete_container(seg_name, ignore_missing=True)
+        _logger.info("SLO segments 컨테이너 정리: %s", seg_name)
+    except Exception:
+        # segments 가 없는 경우(SLO 미사용 버킷) 정상
+        _logger.debug("SLO segments 정리 스킵 또는 부재: %s", seg_name, exc_info=True)
 
 
 def get_container_metadata(conn, name: str) -> dict:
-    """컨테이너 메타데이터(오브젝트 수, 바이트 등) 반환."""
+    """컨테이너 메타데이터(오브젝트 수, 바이트 등) 반환.
+
+    bytes 에는 SLO segment 컨테이너({name}_segments)의 bytes_used 도 합산.
+    Swift 의 bytes_used 는 SLO 매니페스트 JSON 크기만 잡으므로 segment 합계를 더해
+    실제 사용량을 반영한다.
+    """
     _apply_endpoint_override(conn)
     meta = conn.object_store.get_container_metadata(name)
+    base_bytes = int(getattr(meta, "bytes_used", 0) or 0)
+
+    seg_bytes = 0
+    try:
+        seg_meta = conn.object_store.get_container_metadata(f"{name}_segments")
+        seg_bytes = int(getattr(seg_meta, "bytes_used", 0) or 0)
+    except Exception:
+        # segments 컨테이너가 없는 경우(SLO 미사용 버킷) 정상 동작
+        pass
+
     return {
         "name": meta.name or name,
         "count": getattr(meta, "object_count", 0) or 0,
-        "bytes": getattr(meta, "bytes_used", 0) or 0,
+        "bytes": base_bytes + seg_bytes,
         "read_acl": getattr(meta, "read_ACL", "") or "",
         "write_acl": getattr(meta, "write_ACL", "") or "",
     }
@@ -206,11 +317,50 @@ def get_container_metadata(conn, name: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _enrich_slo_sizes(conn, container: str, results: list[dict], prefix: str = "") -> None:
+    """SLO 매니페스트 객체의 bytes 를 segments 합계로 교체.
+
+    Swift LIST 는 SLO 매니페스트의 실제 저장 크기(JSON 수 KB)를 반환한다.
+    Ceph RGW 는 SLO 미들웨어처럼 listing bytes 를 보정해주지 않으므로,
+    {container}_segments 컨테이너를 한 번 LIST 하여 segment 들을 합산한 뒤
+    원본 객체의 bytes 를 덮어쓴다.
+    """
+    seg_container = f"{container}_segments"
+    name_to_total: dict[str, int] = {}
+    try:
+        kwargs: dict = {}
+        if prefix:
+            kwargs["prefix"] = prefix
+        for seg in conn.object_store.objects(seg_container, **kwargs):
+            seg_name = getattr(seg, "name", "") or ""
+            slash = seg_name.rfind("/")
+            if slash == -1:
+                continue
+            idx_part = seg_name[slash + 1 :]
+            # segment 명명 규약: <original_name>/<idx:08d>
+            if len(idx_part) != 8 or not idx_part.isdigit():
+                continue
+            original = seg_name[:slash]
+            size = int(getattr(seg, "size", None) or getattr(seg, "content_length", 0) or 0)
+            name_to_total[original] = name_to_total.get(original, 0) + size
+    except Exception:
+        # _segments 컨테이너 없음 또는 LIST 실패 — 원본 사이즈 유지
+        return
+
+    if not name_to_total:
+        return
+
+    for r in results:
+        if r["name"] in name_to_total:
+            r["bytes"] = name_to_total[r["name"]]
+
+
 def list_objects(conn, container: str, prefix: str = "", delimiter: str = "") -> list[dict]:
     """컨테이너 내 오브젝트 목록 반환.
 
     delimiter="/"를 사용하면 현재 prefix 바로 아래 파일/폴더만 반환한다.
     폴더(subdir)는 {"name": "folder/", "is_dir": True}로 반환된다.
+    SLO 매니페스트는 segments 합산으로 bytes 를 보정한다.
     """
     _apply_endpoint_override(conn)
     try:
@@ -254,35 +404,142 @@ def list_objects(conn, container: str, prefix: str = "", delimiter: str = "") ->
                         "is_dir": is_dir,
                     }
                 )
+        _enrich_slo_sizes(conn, container, results, prefix=prefix)
         return results
     except Exception:
         _logger.debug("Swift 오브젝트 목록 조회 실패 container=%s", container, exc_info=True)
         return []
 
 
+# Ceph RGW 단일 PUT 한계(rgw_max_put_size 기본 5 GiB) 직전까지 단일 객체로 저장.
+# 5 GiB 이하는 _segments 컨테이너를 만들지 않음 → Horizon 에 segment 버킷 미노출.
+_SLO_SEGMENT_SIZE = 5 * 1024 * 1024 * 1024  # 5 GiB — 이 크기 초과 시 Swift SLO 수동 분할
+
+
+class _LimitedReader:
+    """file-like wrapper: read() 가 최대 limit 바이트까지만 반환."""
+
+    def __init__(self, source, limit: int) -> None:
+        self._source = source
+        self._remaining = limit
+
+    def read(self, size: int = -1) -> bytes:
+        if self._remaining <= 0:
+            return b""
+        if size < 0 or size > self._remaining:
+            size = self._remaining
+        chunk = self._source.read(size)
+        self._remaining -= len(chunk)
+        return chunk
+
+
+def _ensure_segment_container(conn, container_name: str) -> None:
+    """SLO segments 컨테이너가 없으면 생성."""
+    try:
+        conn.object_store.create_container(name=container_name)
+        _logger.debug("SLO segment 컨테이너 생성: %s", container_name)
+    except Exception:
+        pass  # 이미 존재하거나 계정 초기화 불필요
+
+
+def _upload_slo(
+    conn,
+    container: str,
+    name: str,
+    data,
+    content_type: str,
+    content_length: int,
+) -> dict:
+    """1 GiB 초과 파일을 Swift SLO(Static Large Object)로 수동 분할 업로드.
+
+    openstacksdk create_object 는 data= 가 file-like 일 때 use_slo/segment_size 를
+    무시하고 단일 PUT 을 보내므로, Swift HTTP API 를 직접 호출하여 SLO 를 구현한다.
+    segments 는 {container}_segments/{name}/{idx:08d} 경로에 저장된다.
+    """
+    import json
+    import math
+    import urllib.parse
+
+    proxy = conn.object_store
+    seg_container = f"{container}_segments"
+    _ensure_segment_container(conn, seg_container)
+
+    ct = content_type or "application/octet-stream"
+    num_segments = math.ceil(content_length / _SLO_SEGMENT_SIZE)
+    segments = []
+
+    for idx in range(num_segments):
+        seg_size = min(_SLO_SEGMENT_SIZE, content_length - idx * _SLO_SEGMENT_SIZE)
+        seg_name = f"{name}/{idx:08d}"
+        seg_path = "/" + urllib.parse.quote(seg_container, safe="") + "/" + urllib.parse.quote(seg_name, safe="/")
+        _logger.info(
+            "SLO segment %d/%d 업로드 시작: size=%d path=%s",
+            idx + 1,
+            num_segments,
+            seg_size,
+            seg_path,
+        )
+        resp = proxy.put(
+            seg_path,
+            data=_LimitedReader(data, seg_size),
+            headers={"Content-Length": str(seg_size), "Content-Type": ct},
+        )
+        etag = resp.headers.get("etag", "").strip('"')
+        segments.append(
+            {
+                "path": f"/{seg_container}/{seg_name}",
+                "etag": etag,
+                "size_bytes": seg_size,
+            }
+        )
+        _logger.info("SLO segment %d/%d 완료: etag=%s", idx + 1, num_segments, etag)
+
+    manifest_path = (
+        "/"
+        + urllib.parse.quote(container, safe="")
+        + "/"
+        + urllib.parse.quote(name, safe="/")
+        + "?multipart-manifest=put"
+    )
+    _logger.info("SLO manifest PUT: path=%s segments=%d", manifest_path, len(segments))
+    proxy.put(
+        manifest_path,
+        data=json.dumps(segments).encode(),
+        headers={"Content-Type": ct},
+    )
+    _logger.info("SLO 업로드 완료: container=%s name=%s bytes=%d", container, name, content_length)
+    return {
+        "name": name,
+        "container": container,
+        "bytes": content_length,
+        "etag": "",
+    }
+
+
 def upload_object(conn, container: str, name: str, data, content_type: str = "", content_length: int = 0) -> dict:
     """오브젝트를 업로드하고 메타데이터를 반환.
 
     data: bytes 또는 file-like object (read() 메서드 지원).
-    대용량 파일의 경우 file-like object를 전달하면 스트리밍으로 업로드되어 메모리 사용을 줄인다.
+    1 GiB 초과 파일은 Swift SLO(Static Large Object)로 수동 분할 업로드된다.
+    segments 는 {container}_segments 컨테이너에 저장되고, manifest 만 원본 컨테이너에 남는다.
     """
     from app.config import get_settings
 
     _apply_endpoint_override(conn)
 
-    # 대용량 업로드를 위해 타임아웃을 임시로 늘림
     settings = get_settings()
-    upload_timeout = settings.os_swift_upload_timeout
     proxy = conn.object_store
     original_timeout = getattr(proxy, "timeout", None)
-    proxy.timeout = upload_timeout
+    proxy.timeout = settings.os_swift_upload_timeout
     try:
+        if content_length and content_length > _SLO_SEGMENT_SIZE:
+            return _upload_slo(conn, container, name, data, content_type, content_length)
         kwargs: dict = {"data": data}
         if content_type:
             kwargs["content_type"] = content_type
         if content_length:
             kwargs["content_length"] = content_length
-        obj = conn.object_store.create_object(container, name, **kwargs)
+        obj = proxy.create_object(container, name, **kwargs)
         actual_bytes = content_length if content_length else (len(data) if isinstance(data, bytes) else 0)
         return {
             "name": obj.name or name,
@@ -310,12 +567,35 @@ def delete_object(conn, container: str, name: str) -> None:
 
     trailing '/'가 있는 이름(디렉토리 마커)은 openstacksdk urljoin이 '/'를 strip하므로
     raw DELETE를 사용한다.
+    SLO manifest 는 ?multipart-manifest=delete 로 segments 까지 함께 정리하여 quota 누수를 방지한다.
     """
     import urllib.parse
 
     _apply_endpoint_override(conn)
     if name.endswith("/"):
         encoded = "/" + urllib.parse.quote(container, safe="") + "/" + urllib.parse.quote(name, safe="/")
+        conn.object_store.delete(encoded)
+        return
+
+    # SLO manifest 여부 확인 — segments quota 누수 방지
+    is_slo = False
+    try:
+        meta = conn.object_store.get_object_metadata(name, container=container)
+        is_slo = bool(
+            getattr(meta, "is_static_large_object", None)
+            or str(getattr(meta, "x_static_large_object", "") or "").lower() == "true"
+        )
+    except Exception:
+        pass
+
+    if is_slo:
+        encoded = (
+            "/"
+            + urllib.parse.quote(container, safe="")
+            + "/"
+            + urllib.parse.quote(name, safe="/")
+            + "?multipart-manifest=delete"
+        )
         conn.object_store.delete(encoded)
     else:
         conn.object_store.delete_object(name, ignore_missing=False, container=container)

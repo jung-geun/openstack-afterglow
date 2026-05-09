@@ -77,6 +77,7 @@ async def test_create_file_storage(client, mock_conn):
 @pytest.mark.asyncio
 async def test_delete_file_storage(client, mock_conn):
     with (
+        patch("app.api.storage.file_storage.manila.get_file_storage", return_value=make_file_storage()),
         patch("app.api.storage.file_storage.manila.delete_file_storage", return_value=None),
         patch("app.api.storage.file_storage.invalidate"),
     ):
@@ -86,7 +87,10 @@ async def test_delete_file_storage(client, mock_conn):
 
 @pytest.mark.asyncio
 async def test_list_access_rules(client, mock_conn):
-    with patch("app.api.storage.file_storage.manila.list_access_rules", return_value=[make_access_rule()]):
+    with (
+        patch("app.api.storage.file_storage.manila.get_file_storage", return_value=make_file_storage()),
+        patch("app.api.storage.file_storage.manila.list_access_rules", return_value=[make_access_rule()]),
+    ):
         resp = await client.get("/api/file-storage/share-1/access-rules")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
@@ -94,7 +98,10 @@ async def test_list_access_rules(client, mock_conn):
 
 @pytest.mark.asyncio
 async def test_create_access_rule(client, mock_conn):
-    with patch("app.api.storage.file_storage.manila.create_access_rule", return_value=make_access_rule("rule-new")):
+    with (
+        patch("app.api.storage.file_storage.manila.get_file_storage", return_value=make_file_storage()),
+        patch("app.api.storage.file_storage.manila.create_access_rule", return_value=make_access_rule("rule-new")),
+    ):
         resp = await client.post(
             "/api/file-storage/share-1/access-rules",
             json={
@@ -108,9 +115,97 @@ async def test_create_access_rule(client, mock_conn):
 
 @pytest.mark.asyncio
 async def test_revoke_access_rule(client, mock_conn):
-    with patch("app.api.storage.file_storage.manila.revoke_access_rule", return_value=None):
+    with (
+        patch("app.api.storage.file_storage.manila.get_file_storage", return_value=make_file_storage()),
+        patch("app.api.storage.file_storage.manila.revoke_access_rule", return_value=None),
+    ):
         resp = await client.delete("/api/file-storage/share-1/access-rules/rule-1")
     assert resp.status_code == 204
+
+
+# ─────────────────────────────────────────────────────────────────
+# CephFS share_network_id 차단 테스트
+# ─────────────────────────────────────────────────────────────────
+
+
+def test_create_file_storage_cephfs_omits_share_network():
+    """manila.create_file_storage: CephFS 일 때 share_network_id 를 share_body 에 포함하지 않는다."""
+    from unittest.mock import MagicMock
+
+    from app.services import manila as manila_svc
+
+    captured: dict = {}
+
+    fake_client = MagicMock()
+    fake_client.post.side_effect = lambda path, body: (
+        captured.update({"body": body}) or {"share": {"id": "s1", "status": "available"}}
+    )
+    fake_client.get.return_value = {
+        "share": {
+            "id": "s1",
+            "name": "f",
+            "status": "available",
+            "share_proto": "CEPHFS",
+            "size": 10,
+            "export_locations": [],
+            "metadata": {},
+            "is_public": False,
+            "project_id": "test-project-123",
+            "created_at": "2024-01-01T00:00:00Z",
+        }
+    }
+
+    with patch("app.services.manila.get_client", return_value=fake_client):
+        with patch("time.sleep"):
+            manila_svc.create_file_storage(
+                conn=MagicMock(),
+                name="f",
+                size_gb=10,
+                share_network_id="net-uuid",
+                share_proto="CEPHFS",
+            )
+
+    assert "share_network_id" not in captured["body"]["share"]
+
+
+def test_create_file_storage_nfs_includes_share_network():
+    """manila.create_file_storage: NFS 일 때 share_network_id 를 share_body 에 포함한다."""
+    from unittest.mock import MagicMock
+
+    from app.services import manila as manila_svc
+
+    captured: dict = {}
+
+    fake_client = MagicMock()
+    fake_client.post.side_effect = lambda path, body: (
+        captured.update({"body": body}) or {"share": {"id": "s2", "status": "available"}}
+    )
+    fake_client.get.return_value = {
+        "share": {
+            "id": "s2",
+            "name": "f",
+            "status": "available",
+            "share_proto": "NFS",
+            "size": 10,
+            "export_locations": [],
+            "metadata": {},
+            "is_public": False,
+            "project_id": "test-project-123",
+            "created_at": "2024-01-01T00:00:00Z",
+        }
+    }
+
+    with patch("app.services.manila.get_client", return_value=fake_client):
+        with patch("time.sleep"):
+            manila_svc.create_file_storage(
+                conn=MagicMock(),
+                name="f",
+                size_gb=10,
+                share_network_id="net-uuid",
+                share_proto="NFS",
+            )
+
+    assert captured["body"]["share"]["share_network_id"] == "net-uuid"
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -246,3 +341,119 @@ async def test_admin_can_get_cross_project_share(admin_client, mock_conn):
     with patch("app.api.storage.file_storage.manila.get_file_storage", return_value=other):
         resp = await admin_client.get("/api/file-storage/share-other")
     assert resp.status_code == 200
+
+
+# ─────────────────────────────────────────────────────────────────
+# share_type ↔ share_proto 매칭 / Manila 에러 표면화
+# ─────────────────────────────────────────────────────────────────
+
+
+def test_list_share_types_includes_supported_protocols():
+    """list_share_types 가 extra_specs.storage_protocol 을 supported_protocols 로 노출."""
+    from unittest.mock import MagicMock
+
+    from app.services import manila as manila_svc
+
+    fake_client = MagicMock()
+    fake_client.get.return_value = {
+        "share_types": [
+            {
+                "id": "t1",
+                "name": "cephfstype",
+                "share_type_access:is_public": True,
+                "extra_specs": {"storage_protocol": "CEPHFS", "vendor_name": "Ceph"},
+            }
+        ]
+    }
+    with patch("app.services.manila.get_client", return_value=fake_client):
+        types = manila_svc.list_share_types(MagicMock())
+
+    assert types[0]["name"] == "cephfstype"
+    assert types[0]["supported_protocols"] == ["CEPHFS"]
+    assert types[0]["extra_specs"]["vendor_name"] == "Ceph"
+
+
+def test_list_share_types_falls_back_to_vendor_name():
+    """storage_protocol 이 없으면 vendor_name / 이름 패턴으로 추정."""
+    from unittest.mock import MagicMock
+
+    from app.services import manila as manila_svc
+
+    fake_client = MagicMock()
+    fake_client.get.return_value = {
+        "share_types": [
+            {
+                "id": "t-ceph",
+                "name": "any-name",
+                "share_type_access:is_public": True,
+                "extra_specs": {"vendor_name": "Ceph"},
+            },
+            {
+                "id": "t-nfs",
+                "name": "generic-nfs",
+                "share_type_access:is_public": False,
+                "extra_specs": {"vendor_name": "Generic"},
+            },
+            {
+                "id": "t-unknown",
+                "name": "weird",
+                "share_type_access:is_public": True,
+                "extra_specs": {},
+            },
+        ]
+    }
+    with patch("app.services.manila.get_client", return_value=fake_client):
+        types = manila_svc.list_share_types(MagicMock())
+
+    by_id = {t["id"]: t for t in types}
+    assert by_id["t-ceph"]["supported_protocols"] == ["CEPHFS"]
+    assert by_id["t-nfs"]["supported_protocols"] == ["NFS"]
+    assert by_id["t-unknown"]["supported_protocols"] == []
+
+
+def _make_manila_status_error(status: int, message: str) -> "Exception":
+    """테스트용 httpx.HTTPStatusError 생성."""
+    import httpx
+
+    request = httpx.Request("POST", "http://manila.test/v2/p/shares")
+    response = httpx.Response(status, request=request, json={"badRequest": {"code": status, "message": message}})
+    return httpx.HTTPStatusError("error", request=request, response=response)
+
+
+@pytest.mark.asyncio
+async def test_create_file_storage_propagates_manila_400(client, mock_conn):
+    """Manila 400 → HTTPException 400 + Manila message 그대로 detail 에 포함."""
+    err = _make_manila_status_error(400, "Invalid share protocol provided: NFS. Available protocols: ['CEPHFS'].")
+    with patch("app.api.storage.file_storage.manila.create_file_storage", side_effect=err):
+        resp = await client.post(
+            "/api/file-storage",
+            json={
+                "name": "test-bad",
+                "size_gb": 10,
+                "share_type": "cephfstype",
+                "share_proto": "NFS",
+            },
+        )
+    assert resp.status_code == 400
+    assert "Invalid share protocol" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_create_file_storage_500_fallback(client, mock_conn):
+    """일반 Exception 은 여전히 500 으로 (detail 은 글로벌 핸들러가 마스킹)."""
+    with patch(
+        "app.api.storage.file_storage.manila.create_file_storage",
+        side_effect=RuntimeError("boom"),
+    ):
+        resp = await client.post(
+            "/api/file-storage",
+            json={
+                "name": "test-runtime",
+                "size_gb": 10,
+                "share_type": "default",
+                "share_proto": "CEPHFS",
+            },
+        )
+    # Manila 가 아닌 일반 RuntimeError 는 httpx.HTTPStatusError 분기에 잡히지 않고
+    # 일반 Exception 분기로 떨어져 500 으로 변환되어야 한다.
+    assert resp.status_code == 500

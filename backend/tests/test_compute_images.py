@@ -6,6 +6,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
+from tests.conftest import make_token_info
 
 _MY_PROJECT = "my-project-id"
 _OTHER_PROJECT = "other-project-id"
@@ -17,18 +18,6 @@ _OTHER_PROJECT = "other-project-id"
 
 
 @pytest.fixture
-def token_info():
-    return {
-        "token": "user-token",
-        "user_id": "user-id",
-        "username": "user",
-        "project_id": _MY_PROJECT,
-        "is_system_admin": False,
-        "roles": ["member"],
-    }
-
-
-@pytest.fixture
 def mock_conn():
     conn = MagicMock()
     conn._afterglow_project_id = _MY_PROJECT
@@ -36,11 +25,11 @@ def mock_conn():
 
 
 @pytest.fixture
-async def user_client(token_info, mock_conn):
+async def user_client(mock_conn):
     from app.api.deps import get_os_conn, get_token_info
 
     async def override_token():
-        return token_info
+        return make_token_info(project_id=_MY_PROJECT, roles=["member"])
 
     async def override_conn():
         yield mock_conn

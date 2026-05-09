@@ -2,19 +2,25 @@ import { writable } from 'svelte/store';
 
 export type ToastType = 'success' | 'error' | 'warning' | 'info';
 
+export interface ToastAction {
+	label: string;
+	onClick: () => void;
+}
+
 export interface Toast {
 	id: string;
 	type: ToastType;
 	message: string;
 	duration: number;
+	action?: ToastAction;
 }
 
 function createToastStore() {
 	const { subscribe, update } = writable<Toast[]>([]);
 
-	function addToast(type: ToastType, message: string, duration = 4000): string {
+	function addToast(type: ToastType, message: string, duration = 4000, action?: ToastAction): string {
 		const id = crypto.randomUUID();
-		update(toasts => [...toasts, { id, type, message, duration }]);
+		update(toasts => [...toasts, { id, type, message, duration, action }]);
 		if (duration > 0) {
 			setTimeout(() => removeToast(id), duration);
 		}
@@ -27,10 +33,10 @@ function createToastStore() {
 
 	return {
 		subscribe,
-		success: (msg: string, duration?: number) => addToast('success', msg, duration),
-		error: (msg: string, duration = 6000) => addToast('error', msg, duration),
-		warning: (msg: string, duration?: number) => addToast('warning', msg, duration),
-		info: (msg: string, duration?: number) => addToast('info', msg, duration),
+		success: (msg: string, duration?: number, action?: ToastAction) => addToast('success', msg, duration, action),
+		error: (msg: string, duration = 6000, action?: ToastAction) => addToast('error', msg, duration, action),
+		warning: (msg: string, duration?: number, action?: ToastAction) => addToast('warning', msg, duration, action),
+		info: (msg: string, duration?: number, action?: ToastAction) => addToast('info', msg, duration, action),
 		remove: removeToast,
 	};
 }

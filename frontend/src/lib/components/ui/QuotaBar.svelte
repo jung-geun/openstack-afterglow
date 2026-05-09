@@ -4,11 +4,18 @@
     used: number;
     limit: number;
     color?: string;
+    size?: 'xs' | 'sm' | 'md';
   }
 
-  let { label, used, limit, color = 'bg-blue-500' }: Props = $props();
+  let { label, used, limit, color, size = 'xs' }: Props = $props();
 
   const pct = $derived(limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0);
+  const barTone = $derived(
+    color
+      ? null
+      : pct >= 95 ? 'danger' : pct >= 80 ? 'warning' : 'accent'
+  );
+  const trackH = $derived(size === 'md' ? 'h-2' : size === 'sm' ? 'h-1.5' : 'h-1');
 </script>
 
 <div>
@@ -16,7 +23,17 @@
     <span>{label}</span>
     <span><span class="text-white font-medium">{used}</span> / {limit}</span>
   </div>
-  <div class="h-1 bg-gray-800 rounded-full overflow-hidden">
-    <div class="{color} h-full rounded-full transition-all" style="width:{pct}%"></div>
+  <div class="{trackH} bg-gray-800 rounded-full overflow-hidden">
+    {#if barTone}
+      <div class="bar bar-{barTone} h-full rounded-full transition-all" style="width:{pct}%"></div>
+    {:else}
+      <div class="{color} h-full rounded-full transition-all" style="width:{pct}%"></div>
+    {/if}
   </div>
 </div>
+
+<style>
+  .bar-accent  { background: var(--gradient-usage); }
+  .bar-warning { background: var(--gradient-usage-warning); }
+  .bar-danger  { background: var(--gradient-usage-danger); }
+</style>

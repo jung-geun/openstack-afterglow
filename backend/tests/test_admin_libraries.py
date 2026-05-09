@@ -4,80 +4,8 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from httpx import ASGITransport, AsyncClient
-
-from app.main import app
 
 _NOW = datetime(2026, 4, 24, 0, 0, 0, tzinfo=UTC)
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def admin_token_info():
-    return {
-        "token": "admin-token",
-        "user_id": "admin-id",
-        "username": "admin",
-        "project_id": "admin-project-id",
-        "is_system_admin": True,
-        "roles": ["admin"],
-    }
-
-
-@pytest.fixture
-def user_token_info():
-    return {
-        "token": "user-token",
-        "user_id": "user-id",
-        "username": "user",
-        "project_id": "user-project-id",
-        "is_system_admin": False,
-        "roles": ["member"],
-    }
-
-
-@pytest.fixture
-def mock_conn():
-    return MagicMock()
-
-
-@pytest.fixture
-async def admin_client(admin_token_info, mock_conn):
-    from app.api.deps import get_os_conn, get_token_info
-
-    async def override_token():
-        return admin_token_info
-
-    async def override_conn():
-        yield mock_conn
-
-    app.dependency_overrides[get_token_info] = override_token
-    app.dependency_overrides[get_os_conn] = override_conn
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-        yield c
-    app.dependency_overrides.pop(get_token_info, None)
-    app.dependency_overrides.pop(get_os_conn, None)
-
-
-@pytest.fixture
-async def user_client(user_token_info, mock_conn):
-    from app.api.deps import get_os_conn, get_token_info
-
-    async def override_token():
-        return user_token_info
-
-    async def override_conn():
-        yield mock_conn
-
-    app.dependency_overrides[get_token_info] = override_token
-    app.dependency_overrides[get_os_conn] = override_conn
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-        yield c
-    app.dependency_overrides.pop(get_token_info, None)
-    app.dependency_overrides.pop(get_os_conn, None)
 
 
 # ---------------------------------------------------------------------------
@@ -99,9 +27,9 @@ class TestAdminLibraryList:
         assert "python311" in ids
 
     @pytest.mark.asyncio
-    async def test_list_admin_libraries_forbidden_for_non_admin(self, user_client):
+    async def test_list_admin_libraries_forbidden_for_non_admin(self, non_admin_client):
         """일반 사용자 → 403."""
-        resp = await user_client.get("/api/admin/libraries")
+        resp = await non_admin_client.get("/api/admin/libraries")
         assert resp.status_code == 403
 
     @pytest.mark.asyncio
@@ -135,9 +63,9 @@ class TestAdminLibraryDetail:
         assert resp.status_code == 404
 
     @pytest.mark.asyncio
-    async def test_get_library_forbidden_for_non_admin(self, user_client):
+    async def test_get_library_forbidden_for_non_admin(self, non_admin_client):
         """일반 사용자 → 403."""
-        resp = await user_client.get("/api/admin/libraries/python311")
+        resp = await non_admin_client.get("/api/admin/libraries/python311")
         assert resp.status_code == 403
 
 
@@ -182,9 +110,9 @@ class TestBuildCancel:
         assert resp.status_code == 409
 
     @pytest.mark.asyncio
-    async def test_cancel_forbidden_for_non_admin(self, user_client):
+    async def test_cancel_forbidden_for_non_admin(self, non_admin_client):
         """일반 사용자 취소 시도 → 403."""
-        resp = await user_client.post("/api/admin/libraries/builds/1/cancel")
+        resp = await non_admin_client.post("/api/admin/libraries/builds/1/cancel")
         assert resp.status_code == 403
 
 
@@ -265,7 +193,7 @@ class TestBuildList:
         assert resp.status_code in (200, 500)  # DB 없으면 500도 허용
 
     @pytest.mark.asyncio
-    async def test_list_builds_admin_only(self, user_client):
+    async def test_list_builds_admin_only(self, non_admin_client):
         """일반 사용자 → 403."""
-        resp = await user_client.get("/api/admin/libraries/builds")
+        resp = await non_admin_client.get("/api/admin/libraries/builds")
         assert resp.status_code == 403

@@ -291,6 +291,7 @@ async def test_delete_k3s_cluster_continues_if_k8s_node_delete_fails(client):
 async def test_delete_k3s_cluster_vm_already_deleted(client):
     """VM이 이미 삭제된 상태(delete_server 404)여도 soft-delete까지 정상 완료해야 한다."""
     cluster = _make_cluster_record()
+    cluster["id"] = "k3s-vm-already-del"
     cluster["occm_enabled"] = False
 
     with patch("app.api.k3s.clusters.k3s_cluster") as mock_db:
@@ -306,7 +307,7 @@ async def test_delete_k3s_cluster_vm_already_deleted(client):
                 mock_neutron.delete_security_group = MagicMock()
                 with patch("app.api.k3s.clusters.k3s_kube") as mock_kube:
                     mock_kube.delete_k8s_nodes = AsyncMock()
-                    resp = await client.delete("/api/k3s/clusters/k3s-1")
+                    resp = await client.delete("/api/k3s/clusters/k3s-vm-already-del")
 
     assert resp.status_code == 204
     mock_db.delete_cluster_record.assert_called_once()
@@ -316,6 +317,7 @@ async def test_delete_k3s_cluster_vm_already_deleted(client):
 async def test_delete_k3s_cluster_vm_wait_timeout(client):
     """VM 삭제 대기 타임아웃이 발생해도 SG 삭제와 soft-delete는 계속 진행해야 한다."""
     cluster = _make_cluster_record()
+    cluster["id"] = "k3s-vm-wait-timeout"
     cluster["occm_enabled"] = False
     cluster["security_group_id"] = "sg-1"
 
@@ -331,7 +333,7 @@ async def test_delete_k3s_cluster_vm_wait_timeout(client):
                 mock_neutron.delete_security_group = MagicMock()
                 with patch("app.api.k3s.clusters.k3s_kube") as mock_kube:
                     mock_kube.delete_k8s_nodes = AsyncMock()
-                    resp = await client.delete("/api/k3s/clusters/k3s-1")
+                    resp = await client.delete("/api/k3s/clusters/k3s-vm-wait-timeout")
 
     assert resp.status_code == 204
     mock_db.delete_cluster_record.assert_called_once()
@@ -426,6 +428,79 @@ def test_create_request_allowed_cidrs_empty_list():
 
     req = CreateK3sClusterRequest(name="test-cluster", allowed_cidrs=[])
     assert req.allowed_cidrs == []
+
+
+def test_create_request_allowed_cidrs_rejects_invalid():
+    """잘못된 CIDR 은 422 (ValidationError) 로 거부."""
+    import pytest as _pytest
+    from pydantic import ValidationError
+
+    from app.models.k3s import CreateK3sClusterRequest
+
+    for bad in ["not-a-cidr", "999.0.0.0/8", "10.0.0.0/33", "10.0.0.0; rm -rf /"]:
+        with _pytest.raises(ValidationError):
+            CreateK3sClusterRequest(name="test-cluster", allowed_cidrs=[bad])
+
+
+def test_create_request_allowed_cidrs_normalized():
+    """호스트 비트 포함 CIDR 은 네트워크 주소로 정규화된다 (strict=False)."""
+    from app.models.k3s import CreateK3sClusterRequest
+
+    req = CreateK3sClusterRequest(name="test-cluster", allowed_cidrs=["10.0.0.5/24"])
+    assert req.allowed_cidrs == ["10.0.0.0/24"]
+
+
+def test_create_request_allowed_cidrs_max_items():
+    """allowed_cidrs 21개 이상은 거부."""
+    import pytest as _pytest
+    from pydantic import ValidationError
+
+    from app.models.k3s import CreateK3sClusterRequest
+
+    too_many = [f"10.{i}.0.0/24" for i in range(21)]
+    with _pytest.raises(ValidationError):
+        CreateK3sClusterRequest(name="test-cluster", allowed_cidrs=too_many)
+
+
+# ---------------------------------------------------------------------------
+# K3sCallbackRequest — node_token / server_ip 형식 검증
+# ---------------------------------------------------------------------------
+
+
+def test_callback_node_token_pattern_rejects_metachars():
+    """node_token 에 shell 메타문자가 들어오면 거부 (cloud-init 인젝션 차단)."""
+    import pytest as _pytest
+    from pydantic import ValidationError
+
+    from app.models.k3s import K3sCallbackRequest
+
+    for bad in ['"; rm -rf /', "$(whoami)", "tok with space", "tok\nrm"]:
+        with _pytest.raises(ValidationError):
+            K3sCallbackRequest(token="callbacktok", success=True, node_token=bad)
+
+
+def test_callback_node_token_accepts_typical_k3s_token():
+    """K3s 가 발급하는 일반적인 형태의 node_token 은 통과."""
+    from app.models.k3s import K3sCallbackRequest
+
+    req = K3sCallbackRequest(
+        token="callbacktok",
+        success=True,
+        node_token="K10abc123def456::server:7890abcdef==",
+    )
+    assert req.node_token is not None
+
+
+def test_callback_server_ip_rejects_invalid():
+    """server_ip 에 IP 가 아닌 값이 들어오면 거부."""
+    import pytest as _pytest
+    from pydantic import ValidationError
+
+    from app.models.k3s import K3sCallbackRequest
+
+    for bad in ["not-an-ip", "256.256.256.256", "1.2.3.4; rm"]:
+        with _pytest.raises(ValidationError):
+            K3sCallbackRequest(token="callbacktok", success=True, server_ip=bad)
 
 
 # ---------------------------------------------------------------------------

@@ -482,9 +482,12 @@ Step 5: 요약 & 배포
 - [x] 3.3 크로스 프로젝트 접근 관리
   - [x] Admin 프로젝트에서 NFS share 생성 시 다른 프로젝트 접근 허용:
     - [x] Manila share를 `public` 으로 설정 (`is_public=True`) — `set_share_public()` API 구현
-    - [ ] 특정 프로젝트에 대해 개별적으로 NFS access rule 부여 (VM IP/CIDR 자동 계산 미구현)
-    - [ ] VM 생성 시 해당 프로젝트의 네트워크 CIDR로 NFS access rule 자동 생성
+    - [x] VM 생성 시 해당 프로젝트의 네트워크 CIDR로 NFS access rule 자동 생성 — `_prepare_prebuilt_file_storages`에 NFS 분기 추가, service project conn으로 `ensure_nfs_access_rule` 호출
+    - [x] `POST /api/admin/libraries/{id}/project-access` — 관리자 수동 CIDR grant (idempotent)
+    - [x] `DELETE /api/admin/libraries/{id}/project-access/{project_id}` — 관리자 수동 revoke (`union_grant_project` metadata로 식별)
+    - [x] `GET /api/admin/libraries/{id}/project-access` — 프로젝트별 grant 목록 조회
   - [x] CephFS의 경우: 기존 CephX access rule 방식 유지
+  - [x] VM 삭제 cleanup: prebuilt cephx rule은 service conn으로 revoke, NFS CIDR rule은 lifecycle A(관리자 수동 revoke)
   - [x] `backend/app/services/libraries.py` — `get_dependency_tree()` 크로스 프로젝트 라이브러리 의존성 트리 조회 함수 추가
 
 - [x] 3.4 패키지 빌드 파이프라인 개선
@@ -1088,6 +1091,7 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 - [x] `backend/app/templates/cloudinit_base.yaml.j2` — `gpu_available=true` 시 설치 스크립트 + systemd unit 자동 생성 (네이티브 바이너리, `0.0.0.0:9400`)
 - [x] `backend/app/services/cloudinit.py` — `_DCGM_EXPORTER_VERSION` 핀 상수 추가, 템플릿 렌더에 버전 전달
 - [x] `backend/tests/test_cloudinit.py` — GPU/non-GPU 분기 3케이스 추가
+- [x] **GPU 스택 풀-스택 idempotent 설치** (베이스 이미지 무관): `install_dcgm_exporter.sh` 에 ① `nvidia-smi` 미발견 시 `ubuntu-drivers autoinstall`, ② `nvidia-dcgm.service` 미발견 시 CUDA repo (`cuda-keyring`) 등록 + `datacenter-gpu-manager` 설치, ③ dcgm-exporter 바이너리 다운로드 단계 추가. `dcgm-exporter.service` 의 `Requires=nvidia-dcgm.service` 추가로 데몬 부팅 후 exporter 기동 보장. `test_cloudinit.py` 에 드라이버/DCGM 데몬 자동 설치 + systemd 의존성 검증 2건 추가
 - [→] 보안 그룹 9400/tcp 자동 허용 — 12.2에서 통합 처리
 - [→] Prometheus 스크래핑 대상 자동 등록 — 12.3/12.4에서 통합 처리
 
@@ -1105,25 +1109,21 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 - [ ] 본 저장소 변경: `backend/tests/integration/test_image_metadata.py` 신규 — 이미지 메타데이터에 `monitoring_ready=true` 태그가 있는지 사전 검증 (선택)
 - [ ] `backend/app/api/compute/instances.py` 인스턴스 생성 시 이미지 메타에서 `monitoring_ready` 추출하여 SG 자동 적용 분기에 활용 (12.2와 연동)
 
-### 12.2 Monitoring 보안 그룹 자동화 (ingress 9100/9400)
+### 12.2 Monitoring 보안 그룹 자동화 (node_exporter / dcgm_exporter 분리)
 
-11.4의 `ensure_union_egress_sg` (egress 6 rule)를 직접 모방. 새 헬퍼는 ingress 방향 + 노출 범위가 핵심 차이.
+11.4의 `ensure_union_egress_sg` 패턴을 ingress 변형으로 재사용. **단일 통합 SG 대신 exporter별 SG 2개로 분리**하여, GPU flavor만 `dcgm_exporter` SG가 attach되도록 한다. auto-attach 트리거 시 `default` SG도 명시적으로 보존한다.
 
-- [x] `backend/app/services/neutron.py` — `ensure_monitoring_ingress_sg(conn, project_id, sg_name, scrape_cidr)` idempotent 헬퍼 추가
-  - rule: `ingress tcp 9100/9100 remote_ip_prefix=<scrape_cidr>` + `ingress tcp 9400/9400 remote_ip_prefix=<scrape_cidr>`
-  - `scrape_cidr`은 Prometheus 스크래퍼 IP/서브넷에 한정 (전체 0.0.0.0/0 금지)
-  - 11.4 `_UNION_EGRESS_RULES` 상수 옆에 `_MONITORING_INGRESS_RULES` 추가
-- [x] `backend/app/config.py` — 신규 설정값:
-  - `monitoring_auto_sg_enabled: bool = True`
-  - `monitoring_sg_name: str = "monitoring"`
-  - `monitoring_scrape_cidr: str` (필수, env로 주입)
-- [x] `backend/app/api/identity/admin_identity.py:create_project` — 프로젝트 생성 후 `ensure_monitoring_ingress_sg` 호출하여 신규 프로젝트마다 monitoring SG 자동 생성
-- [x] `backend/app/api/compute/instances.py:create_instance` + `create_instance_async` — 11.4 egress SG 자동 attach 패턴 옆에 monitoring SG attach 추가 (`req.security_groups`에 `monitoring_sg_name` append, 중복 방지)
-- [x] `backend/app/api/admin/projects.py` (또는 신규 utility 라우터) — `POST /api/admin/projects/{id}/sync-monitoring-sg` 엔드포인트: 기존 프로젝트에 일괄 적용 (관리자 전용)
-- [ ] `frontend/src/lib/components/VmCreatePanel.svelte` — SG 단일 select 옆에 "monitoring SG 자동 포함됨" 안내 배지 (auto-attach 동작 가시화)
-- [x] `backend/tests/test_neutron.py` — `ensure_monitoring_ingress_sg` 5건 (미존재 생성, idempotent, 부분 추가, scrape_cidr 미설정 시 ValueError, 커스텀 이름)
-- [x] `backend/tests/test_admin_identity.py` — 프로젝트 생성 시 `ensure_monitoring_ingress_sg` 호출 검증 1건
-- [x] `backend/tests/test_instances.py` — monitoring SG auto-attach 2건 (활성/비활성)
+- [x] `backend/app/services/neutron.py` — `_ensure_single_port_ingress_sg` (internal generic) + `ensure_node_exporter_sg(conn, project_id, sg_name="node_exporter", scrape_cidr)` (tcp/9100) + `ensure_dcgm_exporter_sg(conn, project_id, sg_name="dcgm_exporter", scrape_cidr)` (tcp/9400) idempotent 헬퍼. 기존 `ensure_monitoring_ingress_sg` + `_MONITORING_INGRESS_RULES` 제거
+  - `scrape_cidr`은 Prometheus 스크래퍼 IP/서브넷에 한정 (0.0.0.0/0 금지)
+- [x] `backend/app/config.py` — `monitoring_sg_name` 제거, 신규 `node_exporter_sg_name: str = "node_exporter"`, `dcgm_exporter_sg_name: str = "dcgm_exporter"` 추가
+- [x] `backend/app/api/identity/admin_identity.py:create_project` — 두 SG 모두 사전 생성 (각 try/except 비차단)
+- [x] `backend/app/api/identity/admin_identity.py:sync_monitoring_sg` — 두 SG 모두 동기화, 응답 `{"sg_names": {"node_exporter": ..., "dcgm_exporter": ...}}`
+- [x] `backend/app/api/compute/instances.py:create_instance` + `create_instance_async` — node_exporter는 모든 인스턴스, dcgm_exporter는 GPU flavor만. auto-attach 트리거 시 `default` SG도 명시적 보존. async 경로 `gpu_available` 스코프 픽스 (flavor lookup을 `if resolved_libs:` 위로 끌어올림)
+- [ ] `frontend/src/lib/components/VmCreatePanel.svelte` — SG 자동 attach 안내 배지 (후속)
+- [x] `backend/tests/test_neutron.py` — generic 5건 + wrapper smoke 2건 (총 7건)
+- [x] `backend/tests/test_admin_identity.py` — create_project 두 SG 검증 + sync 엔드포인트 (총 2건)
+- [x] `backend/tests/test_instances.py` — non-GPU/GPU/disabled/no-cidr 4건
+- [x] `backend/tests/conftest.py` — rate limiter storage reset autouse fixture 추가 (테스트 격리)
 
 ### 12.3 Prometheus 스크래핑 — 메인 클러스터 통합 vs 프로젝트별 분리 (결정 필요)
 
@@ -1174,3 +1174,132 @@ Option A 채택 시 본 절 진행. Option B 채택 시 사용자가 자체 구�
 3. **VM에서 Prometheus 도달성**: 사용자 VM은 보통 floating IP 없이 fixed IP만 가짐. Prometheus 스크래퍼가 VM의 fixed IP에 직접 접근 가능한 위치에 떠 있는가, 아니면 floating IP가 필수인가?
 4. **인증 모델**: Grafana org를 keystone project별로 1:1 매핑할지, 단일 org + folder + label filter로 격리할지?
 5. **옵션 A vs B 결정**: 본 결정이 12.3/12.4 작업량을 크게 좌우. 사용자 격리 정책 + 운영 인력 기준 판단 필요.
+
+---
+
+## 13. 오브젝트 스토리지 5GB+ 대용량 업로드 (Swift SLO)
+
+### 13.1 문제
+
+기존 업로드는 5GB 하드 캡으로 인해 대용량 파일(5GB 초과)을 버킷에 올릴 수 없었다:
+- Traefik middleware `maxRequestBodyBytes: 5GB`
+- 백엔드 `_MAX_UPLOAD_BYTES = 5GB` + 413 응답
+- Swift 단일 PUT 프로토콜 한도 5GB
+
+### 13.2 구현
+
+- [x] `backend/app/services/swift.py` — `_SLO_SEGMENT_SIZE = 1 GiB`; `upload_object` 1 GiB 초과 시 수동 SLO: `_LimitedReader`로 1 GiB씩 `proxy.put()` 루프 → `?multipart-manifest=put` manifest PUT (openstacksdk file-like SLO 버그 우회)
+- [x] `backend/app/services/swift.py` — `delete_object` SLO `?multipart-manifest=delete` 정리 (quota 누수 방지)
+- [x] `backend/app/api/object_storage/containers.py` — streaming PUT endpoint + `HttpException` 에러 디테일 응답 노출
+- [x] `backend/app/config.py` — `os_swift_upload_timeout` 기본값 600 → 1800 (30분)
+- [x] `deploy/k8s-template/middleware.yaml` — Traefik buffering 제거 → streaming pass-through
+- [x] `backend/tests/test_object_storage.py` — 수동 SLO 루프 검증 테스트 업데이트 (3건)
+- [x] `frontend/src/lib/stores/uploadQueue.ts` — 백그라운드 업로드 큐 store
+- [x] `frontend/src/lib/components/UploadDock.svelte` — 우하단 업로드 진행 도크 위젯
+- [x] `frontend/src/lib/components/UploadModal.svelte` — enqueue+즉시 닫기로 단순화 (진행 UI → Dock)
+- [x] `frontend/src/routes/+layout.svelte` — UploadDock 글로벌 마운트
+- [x] `frontend/src/routes/dashboard/object-storage/buckets/[name]/+page.svelte` — silent 자동새로고침 + keyed each + DnD 업로드
+- [x] `frontend/src/routes/admin/object-storage/[name]/+page.svelte` — 동일 패턴 적용
+
+### 13.3 검증 (사용자 직접)
+
+- [ ] Ceph RGW 9.58 GB 파일 업로드 → 200 응답 + `{container}_segments` 에 10개 세그먼트 확인
+- [ ] 다운로드 후 md5 일치
+- [ ] 자동새로고침 15초 폴링 중 표 깜빡임 없음
+- [ ] DnD로 파일 드롭 → Dock에 진행 표시
+- [ ] 업로드 중 다른 페이지 이동 → Dock 유지, 완료 후 목록 자동 갱신
+
+## 14. 오브젝트 스토리지 대용량 다운로드 + 라이트 모드 색상
+
+### 14.1 문제
+
+- 9.5GB 파일 다운로드 시 `AbortError: The user aborted a request` (5분 fetch timeout + 메모리 blob 적재)
+- 한글 파일명 다운로드 시 `IT%E1%84...zip`으로 깨지는 문제
+- 버킷 선택 액션바·이동/삭제 버튼이 라이트 모드에서 흐릿/저가독
+
+### 14.2 구현
+
+- [x] `backend/app/api/object_storage/containers.py` — `_make_content_disposition()` 헬퍼 추가 (RFC 5987 `filename*=UTF-8''...` 형식)
+- [x] `backend/app/api/object_storage/containers.py` — `POST /{container}/objects/{object:path}/download-token` 신규 엔드포인트 (Redis 단발 토큰, TTL 60초, 1회 사용 강제)
+- [x] `backend/app/api/object_storage/containers.py` — `download_object` 토큰 쿼리 파라미터 분기 추가 (헤더 인증 경로 유지)
+- [x] `backend/app/api/object_storage/containers.py` — `preview_object` Content-Disposition RFC 5987 적용
+- [x] `backend/tests/test_object_storage.py` — Content-Disposition 포맷·토큰 발급·만료·불일치·유효 다운로드 테스트 추가
+- [x] `frontend/src/routes/dashboard/object-storage/buckets/[name]/+page.svelte` — `downloadObject()` 단발 토큰 발급 후 브라우저 네이티브 다운로더 트리거로 재작성
+- [x] `frontend/src/routes/layout.css` — 인디고 액션바·버튼, 레드 삭제 버튼 `:root.light` 오버라이드 추가
+
+### 14.3 검증 (사용자 직접)
+
+- [ ] 9.5 GB 파일 다운로드 → `AbortError` 없이 브라우저 다운로드 패널에서 진행
+- [ ] 한글 파일명("한글 2024.zip" 등) 다운로드 → 저장 파일명 정상
+- [ ] 토큰 재사용 시도 → 403
+- [ ] 라이트 모드 버킷 상세 → 선택 행·액션바·버튼 색상 가독성 확인
+
+## 15. UI/Design — Afterglow 브랜드 리디자인
+
+### 15.1 진행 현황
+
+- [x] Phase 1: `@theme` 토큰 블록, Geist 폰트, `RingMark.svelte` 컴포넌트화
+- [x] Phase 2: `statusColors.ts` → 5 semantic tone 재작성, `StatusChip.svelte` dot pulse
+- [x] Phase 3: 사이드바 active warm soft + 좌측 strip, `StatTile`/`QuotaBar` accent 토큰화
+- [x] Phase 3.5: 라이트 모드 warm WCAG AA 보정 (orange-600/700 오버라이드)
+- [x] Phase 6a: `--gradient-brand/warm`, `--glow-warm/accent` 토큰, `GradientText.svelte`, VM 생성 버튼 warm gradient
+- [x] Phase 6b: `StatTile` 아이콘 칩 radial halo + glow
+- [x] Phase 6c: 위저드 스테퍼 warm gradient (완료/현재 step 원 + connector)
+- [x] Phase 6d: `Toast` actionable 링크 (`action?: { label, onClick }`) + 토큰 기반 색상
+- [x] Phase 6e: `EmptyState.svelte` warm halo 신규 컴포넌트
+- [x] Phase 6f: `Card.svelte` 좌상단 radial warm highlight
+- [x] Phase 7: `Button.svelte` variant 컴포넌트 (primary/secondary/ghost/danger × sm/md/lg), primary CTA 15곳 warm gradient 통일
+- [x] Phase 5a: `DetailHeader.svelte` 상세 페이지 헤더 통일 (Instance/K3s/LB/Router/Volume/FileStorage 6종)
+- [x] Phase 5d: Cmd-K 팔레트 (`nav.ts` 추출, `palette.ts` store, `CmdPalette.svelte`, 상단바 ⌘K 트리거)
+- [x] Phase 5e: 대시보드 `TopologyCard.svelte` wrapper 임베드 (GlobalTopology 무변경)
+- [ ] Phase 4: `layout.css` override sheet 제거 (336 → ~70 라인)
+
+### 15.2 검증 (사용자 직접)
+
+- [ ] 다크모드: 대시보드 username warm gradient 텍스트, 사이드바 VM 생성 버튼 warm gradient glow
+- [ ] 라이트모드: 사이드바 active 항목이 진한 오렌지 텍스트 + 좌측 strip 명확히 보임
+- [ ] 다크/라이트 토글 시 사이드바 active 자연스럽게 전환
+- [ ] 인스턴스/볼륨 페이지 StatusChip BUILD/CREATING 상태 dot pulse 동작
+- [ ] VM 생성 위저드 스테퍼 완료/현재 step warm gradient 적용 확인
+- [ ] ⌘K 팔레트: 라우트 jump + 리소스 검색 fuzzy match + 상단바 버튼 트리거 동작 확인
+- [ ] 인스턴스/K3s/LB/Router/Volume/FileStorage 상세 헤더 `DetailHeader` 통일 확인
+- [ ] 대시보드 하단 네트워크 토폴로지 카드 노출 + 전체보기 링크 동작
+
+## 16. Activity Log
+
+- [x] Phase A: TopologyCard fitWidth 버그 수정 (`{@const}` → `$derived`)
+- [x] Phase B: backend activity_logs 테이블 + 모델 + 서비스 + 라우터 (008 마이그레이션)
+- [x] Phase C: 6개 도메인 mutation 라우터에 rec() 활동 로그 통합
+- [x] Phase D: frontend apiMut 헬퍼 + 6개 핵심 mutation 사이트 toast 마이그
+- [x] Phase E: admin 프로젝트 상세 라우트 + ActivityLogTable 컴포넌트
+- [x] Phase F: account ActivitySection (본인 활동 조회)
+
+
+## 17. 인스턴스 성능 모니터링
+
+- [x] Phase 1: Prometheus http_sd 설정 + sd_targets.py 9100/9400 분리 (node_exporter / dcgm_exporter)
+- [x] Phase 2: PromQL 프록시 엔드포인트 신설 (`GET /api/instances/{id}/metrics`) + project_id 권한 검증
+- [x] Phase 3: InstanceDetailPanel MetricsPanel 카드 + 4종 차트 (GPU VM: +2 차트)
+- [x] Phase 4: `/metrics-batch` 단일 엔드포인트 + httpx 커넥션 풀 + `calc_step` 최적화 (다중 차트 API 호출 1→1 통합)
+
+## 18. 네트워크 토폴로지 실시간 트래픽 시각화 (Phase 1)
+
+> VM + 네트워크 + LB 기준 instant rate. 라우터는 Phase 2(kolla exporter 활성화 후).
+
+- [x] `backend/app/services/prom_query.py` — `query_instant_multi` 헬퍼 신규 (Prometheus `/api/v1/query` 다중 시계열 instant 파싱)
+- [x] `backend/app/services/octavia.py` — `get_lb_stats`, `lb_rate_from_snapshot`, `_lb_snapshot` in-memory dict (Octavia 누적 카운터 차분으로 rate 계산)
+- [x] `backend/app/services/neutron.py` — `list_project_compute_ports` 헬퍼 추출 (port → server uuid + network_id 매핑)
+- [x] `backend/app/api/network/networks.py` — `GET /api/networks/topology/traffic` 신규 엔드포인트 (VM rx/tx PromQL + 네트워크 합산 + LB Octavia stats 병렬)
+- [x] `frontend/src/lib/components/GlobalTopology.svelte` — `traffic` prop, `formatBps`/`trafficColor`/`edgeColor` 유틸, 박스 옆 rx/tx 텍스트, 네트워크 막대 합산 라벨, 엣지 stroke 동적 색상
+- [x] `frontend/src/routes/dashboard/network/topology/+page.svelte` — 두 번째 `createAutoRefresh` 15s (traffic 전용) + `<GlobalTopology {traffic} />`
+- [x] `backend/tests/test_topology_traffic.py` — 신규 8건 (VM bps ×8, 네트워크 합산, routers={}, no instances 200, PromUnavailable fallback, LB first call 0, LB rate, query_instant_multi 파싱)
+- [x] `backend/app/api/network/networks.py` — libvirt-exporter 폴백: `libvirt_domain_interface_stats_*` × `libvirt_domain_openstack_info` 조인으로 node_exporter 미노출 인스턴스(테넌트망 격리) 보강. 4-fan-out 병렬 PromQL, node_exporter 우선
+- [x] `frontend/src/lib/components/GlobalTopology.svelte` — Prometheus 데이터 부재 시 인스턴스 엣지 색상을 회색이 아닌 네트워크 색으로 폴백 (`_tRow` null 체크)
+- [x] `backend/tests/test_topology_traffic.py` — 신규 3건 (libvirt 폴백, node_exporter 우선순위, PromQL 조인 패턴 검증)
+- [x] `backend/app/services/neutron.py` — `list_project_port_map` 신규 함수 (port_id → mac_address / network_id / instance_id 매핑)
+- [x] `backend/app/api/network/networks.py` — 멀티-NIC MAC 기반 demux: `libvirt_domain_interface_stats_info` 이중 group_left 조인으로 NIC 단위 `interfaces` 응답 필드 추가, `networks` 합산 정확도 개선, 포트맵 Redis 캐시(ttl_static=300s) 적용
+- [x] `backend/app/api/compute/instances.py` — attach_interface / detach_interface / delete_server 에 `port_mac_map` 캐시 무효화 hook 추가
+- [x] `backend/tests/test_topology_traffic.py` — 신규 8건 (멀티-NIC demux, single/multi-NIC networks 합산 분기, libvirt 주경로 + node_exporter 보강, libvirt 미스크레이프 윈도, PromQL double group_left 패턴 검증)
+- [x] `backend/app/api/compute/instance_metrics.py` — `_build_libvirt_expr` 신규 함수 (6개 메트릭 libvirt 폴백 PromQL, GPU는 None). `_one`/단일 엔드포인트에 순차 폴백(node_exporter 빈 시계열→libvirt 재시도) 적용
+- [x] `frontend/src/lib/components/instance/MetricsPanel.svelte` — 데이터 없음 메시지를 "메트릭 없음 (인스턴스 미가동 또는 exporter 미연동)"으로 완화
+- [x] `backend/tests/test_instance_metrics.py` — 신규 7건 (cpu/memory/network_rx/disk_read 폴백, node_exporter 우선·폴백 미호출, 양쪽 빈→빈 시계열, libvirt 표현식 단일 시계열 가드)

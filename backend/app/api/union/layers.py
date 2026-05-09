@@ -4,6 +4,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
+from app.api.common.activity_recorder import rec
 from app.api.deps import get_os_conn, get_token_info
 from app.database import get_session
 from app.models.union import (
@@ -97,7 +98,9 @@ async def seal_layer(
     """레이어 봉인 (관리자 전용). 봉인 후 수정 불가."""
     _require_admin(token_info)
     try:
-        return await union_layers.seal_layer(session, layer_id)
+        result = await union_layers.seal_layer(session, layer_id)
+        await rec(token_info, None, resource_type="union_layer", action="seal", resource_id=layer_id)
+        return result
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:
@@ -217,6 +220,7 @@ async def delete_layer(
     _require_admin(token_info)
     try:
         await union_layers.delete_layer(session, layer_id)
+        await rec(token_info, None, resource_type="union_layer", action="delete", resource_id=layer_id)
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:
@@ -234,7 +238,16 @@ async def create_layer(
     created_by = token_info.get("username") or token_info.get("user_id") or "unknown"
     project_id = token_info.get("project_id") or None
     try:
-        return await union_layers.create_layer(session, req, created_by=created_by, project_id=project_id)
+        result = await union_layers.create_layer(session, req, created_by=created_by, project_id=project_id)
+        await rec(
+            token_info,
+            None,
+            resource_type="union_layer",
+            action="create",
+            resource_id=result.id,
+            resource_name=req.name,
+        )
+        return result
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 

@@ -6,7 +6,6 @@ metadata:
   annotations:
     kubernetes.io/ingress.class: "traefik"
     traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
-    traefik.ingress.kubernetes.io/router.middlewares: afterglow-afterglow-upload-timeout@kubernetescrd
     traefik.ingress.kubernetes.io/service.serverstransport: afterglow-backend-long-timeout@kubernetescrd
     cert-manager.io/cluster-issuer: "letsencrypt-prod-traefik" # 위에서 만든 ClusterIssuer
 spec:

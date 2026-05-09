@@ -3,6 +3,8 @@
   import { api, ApiError } from '$lib/api/client';
   import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
   import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
+  import Button from '$lib/components/ui/Button.svelte';
+  import DetailHeader from '$lib/components/ui/DetailHeader.svelte';
 
   interface FileStorage {
     id: string;
@@ -167,19 +169,20 @@
       {#each [1,2,3] as _}<div class="h-16 bg-gray-800 rounded-lg animate-pulse"></div>{/each}
     </div>
   {:else if fileStorage}
-    <div class="flex items-start justify-between mb-6">
-      <div>
-        <h2 class="text-xl font-bold text-white">{fileStorage.name || fileStorage.id}</h2>
-        <div class="flex items-center gap-2 mt-2">
-          <span class="px-2 py-0.5 rounded text-xs font-medium {statusColor[fileStorage.status] ?? 'text-gray-400 bg-gray-800'}">{fileStorage.status}</span>
-          <span class="px-1.5 py-0.5 bg-purple-900/40 text-purple-300 rounded text-xs">{fileStorage.share_proto}</span>
-        </div>
-      </div>
-      <button onclick={deleteFileStorage} disabled={deleting}
-        class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-red-900 hover:border-red-700 disabled:border-gray-700 transition-colors">
-        {deleting ? '삭제 중...' : '삭제'}
-      </button>
-    </div>
+    <DetailHeader
+      title={fileStorage.name || fileStorage.id}
+      status={fileStorage.status}
+    >
+      {#snippet meta()}
+        <span class="px-1.5 py-0.5 bg-purple-900/40 text-purple-300 rounded text-xs">{fileStorage!.share_proto}</span>
+      {/snippet}
+      {#snippet actions()}
+        <button onclick={deleteFileStorage} disabled={deleting}
+          class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-red-900 hover:border-red-700 disabled:border-gray-700 transition-colors">
+          {deleting ? '삭제 중...' : '삭제'}
+        </button>
+      {/snippet}
+    </DetailHeader>
 
     <!-- 기본 정보 -->
     <div class="bg-gray-900 border border-gray-800 rounded-lg p-5 mb-4">
@@ -261,10 +264,9 @@
                 </select>
               </label>
             </div>
-            <button onclick={addAccessRule} disabled={addingRule || !ruleForm.access_to.trim()}
-              class="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm rounded transition-colors">
+            <Button onclick={addAccessRule} disabled={addingRule || !ruleForm.access_to.trim()} size="sm">
               {addingRule ? '추가 중...' : '추가'}
-            </button>
+            </Button>
           </div>
           {#if ruleError}<p class="text-red-400 text-xs mt-2">{ruleError}</p>{/if}
         </div>

@@ -63,3 +63,4 @@ k8s-test/
 setup.py
 *.toml.example
 
+assets/

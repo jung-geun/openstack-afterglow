@@ -26,9 +26,9 @@
 		<div class="text-xs text-gray-600 mt-4">잠시 후 대시보드로 이동합니다...</div>
 	</div>
 {:else}
-	<div class="flex" style="min-height: calc(100vh - 3.5rem)">
+	<div class="flex min-h-screen">
 		<AdminSidebar />
-		<main class="flex-1 overflow-auto min-w-0">
+		<main class="flex-1 overflow-auto min-w-0 pt-14">
 			{@render children()}
 		</main>
 	</div>

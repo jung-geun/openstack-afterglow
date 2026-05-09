@@ -2,6 +2,7 @@
   import { untrack } from 'svelte';
   import { auth } from '$lib/stores/auth';
   import { api, ApiError, memoryCache } from '$lib/api/client';
+  import { apiMut } from '$lib/api/mutations';
   import { goto } from '$app/navigation';
   import type { Instance } from '$lib/types/resources';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
@@ -67,20 +68,20 @@
   async function shelveInstance(id: string) {
     if (!confirm('인스턴스를 보관하시겠습니까? (SHELVED_OFFLOADED 상태로 전환됩니다)')) return;
     try {
-      await api.post(`/api/instances/${id}/shelve`, {}, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      await apiMut('인스턴스 보관', () => api.post(`/api/instances/${id}/shelve`, {}, $auth.token ?? undefined, $auth.projectId ?? undefined));
       await fetchInstances();
-    } catch (e) {
-      alert('보관 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+    } catch {
+      // error toast shown by apiMut
     }
   }
 
   async function unshelveInstance(id: string) {
     if (!confirm('인스턴스 보관을 해제하시겠습니까?')) return;
     try {
-      await api.post(`/api/instances/${id}/unshelve`, {}, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      await apiMut('인스턴스 보관 해제', () => api.post(`/api/instances/${id}/unshelve`, {}, $auth.token ?? undefined, $auth.projectId ?? undefined));
       await fetchInstances();
-    } catch (e) {
-      alert('보관 해제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+    } catch {
+      // error toast shown by apiMut
     }
   }
 
@@ -88,10 +89,10 @@
     if (!confirm(`"${name}" 인스턴스를 삭제하시겠습니까?\nManila share와 볼륨도 함께 삭제됩니다.`)) return;
     deleting = id;
     try {
-      await api.delete(`/api/instances/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      await apiMut('인스턴스 삭제', () => api.delete(`/api/instances/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined));
       await fetchInstances();
-    } catch (e) {
-      alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+    } catch {
+      // error toast shown by apiMut
     } finally {
       deleting = null;
     }

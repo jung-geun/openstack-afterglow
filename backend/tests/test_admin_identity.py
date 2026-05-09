@@ -215,8 +215,8 @@ async def test_revoke_group_role_requires_admin(non_admin_client):
 
 
 @pytest.mark.asyncio
-async def test_create_project_calls_ensure_monitoring_sg(admin_client, mock_conn):
-    """프로젝트 생성 시 monitoring SG 자동 생성 호출 검증."""
+async def test_create_project_calls_both_monitoring_sgs(admin_client, mock_conn):
+    """프로젝트 생성 시 node_exporter + dcgm_exporter SG 자동 생성 모두 호출 검증."""
     mock_project = MagicMock()
     mock_project.id = "proj-new-1"
     mock_project.name = "test-proj"
@@ -227,19 +227,50 @@ async def test_create_project_calls_ensure_monitoring_sg(admin_client, mock_conn
     fake_settings = MagicMock()
     fake_settings.monitoring_auto_sg_enabled = True
     fake_settings.monitoring_scrape_cidr = "10.0.0.0/8"
-    fake_settings.monitoring_sg_name = "monitoring"
+    fake_settings.node_exporter_sg_name = "node_exporter"
+    fake_settings.dcgm_exporter_sg_name = "dcgm_exporter"
 
-    mon_called = []
+    ne_called = []
+    dc_called = []
 
     with (
         patch("app.config.get_settings", return_value=fake_settings),
         patch(
-            "app.services.neutron.ensure_monitoring_ingress_sg",
-            side_effect=lambda *a, **kw: mon_called.append(a) or "monitoring",
+            "app.services.neutron.ensure_node_exporter_sg",
+            side_effect=lambda *a, **kw: ne_called.append(a) or "node_exporter",
+        ),
+        patch(
+            "app.services.neutron.ensure_dcgm_exporter_sg",
+            side_effect=lambda *a, **kw: dc_called.append(a) or "dcgm_exporter",
         ),
     ):
         resp = await admin_client.post("/api/admin/projects", json={"name": "test-proj"})
 
     assert resp.status_code in (200, 201)
-    assert len(mon_called) == 1
-    assert mon_called[0][1] == "proj-new-1"  # project_id
+    assert len(ne_called) == 1
+    assert ne_called[0][1] == "proj-new-1"  # project_id
+    assert len(dc_called) == 1
+    assert dc_called[0][1] == "proj-new-1"
+
+
+@pytest.mark.asyncio
+async def test_sync_monitoring_sg_returns_both_sg_names(admin_client, mock_conn):
+    """sync-monitoring-sg 엔드포인트가 두 SG 이름을 반환한다."""
+    fake_settings = MagicMock()
+    fake_settings.monitoring_scrape_cidr = "10.0.0.0/8"
+    fake_settings.node_exporter_sg_name = "node_exporter"
+    fake_settings.dcgm_exporter_sg_name = "dcgm_exporter"
+
+    with (
+        patch("app.config.get_settings", return_value=fake_settings),
+        patch("app.services.neutron.ensure_node_exporter_sg", return_value="node_exporter"),
+        patch("app.services.neutron.ensure_dcgm_exporter_sg", return_value="dcgm_exporter"),
+    ):
+        resp = await admin_client.post("/api/admin/projects/proj-abc/sync-monitoring-sg")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "ok"
+    assert data["project_id"] == "proj-abc"
+    assert data["sg_names"]["node_exporter"] == "node_exporter"
+    assert data["sg_names"]["dcgm_exporter"] == "dcgm_exporter"

@@ -35,11 +35,11 @@ def valid_keys(monkeypatch):
 
 
 @pytest.mark.crypto
-def test_encrypt_kubeconfig_returns_v2_prefix(valid_keys):
+def test_encrypt_kubeconfig_returns_v3_prefix(valid_keys):
     from app.services.k3s_crypto import encrypt_kubeconfig
 
     ct = encrypt_kubeconfig("apiVersion: v1")
-    assert ct.startswith("v2:")
+    assert ct.startswith("v3:")
 
 
 @pytest.mark.crypto
@@ -122,10 +122,10 @@ def test_node_token_aad_isolation(valid_keys):
 
 @pytest.mark.crypto
 def test_decrypt_kubeconfig_wrong_key_raises(valid_keys):
-    """다른 키로 만든 v2 ciphertext → InvalidTag."""
-    from app.services.k3s_crypto import _aes_encrypt, decrypt_kubeconfig
+    """다른 마스터키로 만든 v3 ciphertext → InvalidTag."""
+    from app.services.k3s_crypto import _aes_encrypt_v3, decrypt_kubeconfig
 
-    ct = _aes_encrypt(_OTHER_KEY_BYTES, "plain", aad=b"kubeconfig")
+    ct = _aes_encrypt_v3(_OTHER_KEY_BYTES, b"kubeconfig", "plain")
     with pytest.raises(InvalidTag):
         decrypt_kubeconfig(ct)
 
@@ -216,10 +216,10 @@ def test_notion_config_cross_key_rejection(valid_keys):
 
 
 @pytest.mark.crypto
-def test_v2_prefix_is_3_chars_exact(valid_keys):
-    from app.services.k3s_crypto import _V2_PREFIX, encrypt_kubeconfig
+def test_v3_prefix_is_3_chars_exact(valid_keys):
+    from app.services.k3s_crypto import _V3_PREFIX, encrypt_kubeconfig
 
-    assert _V2_PREFIX == "v2:"
+    assert _V3_PREFIX == "v3:"
     ct = encrypt_kubeconfig("test")
     # prefix 뒤는 base64 시작 (알파벳 또는 숫자)
     assert ct[3:4].isalnum() or ct[3:4] in ("+", "/")
@@ -228,10 +228,10 @@ def test_v2_prefix_is_3_chars_exact(valid_keys):
 @pytest.mark.crypto
 def test_nonce_is_12_bytes(valid_keys):
     """암호화 결과의 base64 raw 첫 12바이트가 nonce."""
-    from app.services.k3s_crypto import _V2_PREFIX, encrypt_kubeconfig
+    from app.services.k3s_crypto import _V3_PREFIX, encrypt_kubeconfig
 
     ct = encrypt_kubeconfig("nonce check")
-    raw = base64.b64decode(ct[len(_V2_PREFIX) :])
+    raw = base64.b64decode(ct[len(_V3_PREFIX) :])
     # nonce(12) + ciphertext + GCM tag(16)
     assert len(raw) > 12
     nonce = raw[:12]

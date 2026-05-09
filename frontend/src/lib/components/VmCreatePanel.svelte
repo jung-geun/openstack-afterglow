@@ -4,6 +4,7 @@
 	import { auth } from '$lib/stores/auth';
 	import { wizard, resetWizard, closeWizard } from '$lib/stores/wizard';
 	import { api, ApiError, getBaseUrl } from '$lib/api/client';
+	import { toast } from '$lib/stores/toast';
 	import SelectImage from '$lib/components/wizard/SelectImage.svelte';
 	import SelectFlavor from '$lib/components/wizard/SelectFlavor.svelte';
 	import SelectLibraries from '$lib/components/wizard/SelectLibraries.svelte';
@@ -12,6 +13,7 @@
 	import ProgressBar from '$lib/components/ProgressBar.svelte';
 	import LoadingSpinner from '$lib/components/LoadingSpinner.svelte';
 	import SlidePanel from '$lib/components/SlidePanel.svelte';
+	import Button from '$lib/components/ui/Button.svelte';
 	import type { Volume } from '$lib/types/resources';
 
 	const TOTAL_STEPS = 6;
@@ -337,6 +339,7 @@
 
 							if (data.step === 'completed') {
 								const instanceId = data.instance_id;
+								toast.success(`인스턴스 생성 완료`);
 								setTimeout(() => {
 									resetWizard();
 									closeWizard();
@@ -347,6 +350,7 @@
 
 							if (data.step === 'failed') {
 								deployError = data.error || data.message;
+								toast.error(`인스턴스 생성 실패: ${deployError}`);
 								deploying = false;
 								return;
 							}
@@ -439,14 +443,14 @@
 					<div class="flex items-center gap-2">
 						{#if $wizard.step > step}
 							<!-- 완료 -->
-							<div class="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center">
+							<div class="step-done w-7 h-7 rounded-full flex items-center justify-center">
 								<svg class="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
 								</svg>
 							</div>
 						{:else if $wizard.step === step}
 							<!-- 현재 -->
-							<div class="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-sm font-bold text-white ring-2 ring-blue-500/30">
+							<div class="step-current w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white">
 								{step}
 							</div>
 						{:else}
@@ -458,7 +462,7 @@
 						<span class="text-xs hidden sm:inline {$wizard.step >= step ? 'text-white' : 'text-gray-600'}">{label}</span>
 					</div>
 					{#if i < stepLabels.length - 1}
-						<div class="flex-1 h-px {$wizard.step > step + 1 ? 'bg-blue-600' : 'bg-gray-800'} mx-1"></div>
+						<div class="flex-1 h-px {$wizard.step > step + 1 ? 'step-connector-done' : ''} bg-gray-800 mx-1"></div>
 					{/if}
 				{/each}
 			</div>
@@ -717,20 +721,27 @@
 						>← 이전</button>
 					{/if}
 					{#if $wizard.step < TOTAL_STEPS}
-						<button
-							onclick={nextStep}
-							disabled={!canNext}
-							class="px-6 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium rounded-lg transition-colors"
-						>다음 →</button>
+						<Button onclick={nextStep} disabled={!canNext}>다음 →</Button>
 					{:else}
-						<button
-							onclick={deploy}
-							disabled={!canNext}
-							class="px-6 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium rounded-lg transition-colors"
-						>VM 생성</button>
+						<Button onclick={deploy} disabled={!canNext}>VM 생성</Button>
 					{/if}
 				</div>
 			</div>
 		{/if}
 	</div>
 </SlidePanel>
+
+<style>
+  .step-done {
+    background: var(--gradient-warm);
+  }
+  .step-current {
+    background: var(--gradient-warm);
+    box-shadow: 0 0 12px color-mix(in oklab, var(--color-warm) 40%, transparent);
+    ring-color: color-mix(in oklab, var(--color-warm) 30%, transparent);
+  }
+  .step-connector-done {
+    background: var(--color-warm) !important;
+    opacity: 0.6;
+  }
+</style>

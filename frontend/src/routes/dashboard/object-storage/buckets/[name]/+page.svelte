@@ -1,15 +1,17 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { onMount } from 'svelte';
+	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError, getBaseUrl } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import UploadModal from '$lib/components/UploadModal.svelte';
-	import { formatStorage, formatDate } from '$lib/utils/format';
+	import { formatStorage, formatDate, shortContentType } from '$lib/utils/format';
 	import FileIcon from '$lib/components/ui/FileIcon.svelte';
 	import StatTile from '$lib/components/ui/StatTile.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
+	import { uploadQueue } from '$lib/stores/uploadQueue';
 
 	interface ObjectItem {
 		name: string;
@@ -50,31 +52,39 @@
 
 	// 검색/필터
 	let filterText = $state('');
+	// 검색 모드: current(현재 폴더) | expanded(펼친 트리) | all(전체 버킷)
+	let searchScope = $state<'current' | 'expanded' | 'all'>('current');
 	// 정렬
 	let sortKey = $state<'name' | 'bytes' | 'last_modified'>('name');
 	let sortAsc = $state(true);
 
-	// 필터 + 정렬된 오브젝트 목록
-	const filteredObjects = $derived(() => {
-		// 현재 prefix 레벨의 항목만 표시 (하위 디렉토리 파일 및 자기 자신 marker 제외)
-		let list = objects.filter(o => {
-			if (o.name === prefix) return false; // 현재 디렉토리 marker 자체 제외
-			const rel = displayName(o.name);
-			const check = rel.endsWith('/') ? rel.slice(0, -1) : rel;
-			if (check.includes('/')) return false; // 하위 디렉토리 소속 파일 제외
-			return true;
-		});
-		if (filterText.trim()) {
-			const q = filterText.trim().toLowerCase();
-			list = list.filter(o => displayName(o.name).toLowerCase().includes(q));
-		}
-		return [...list].sort((a, b) => {
+	// 트리 펼침 상태 (폴더 prefix는 끝에 "/" 포함)
+	let expandedDirs = $state<SvelteSet<string>>(new SvelteSet());
+	// prefix별 listing 캐시 (key: 폴더 prefix 끝에 "/" 포함, value: 해당 폴더 직속 항목 배열)
+	let dirCache = $state<SvelteMap<string, ObjectItem[]>>(new SvelteMap());
+	// 페치 중인 prefix 집합 (스피너용)
+	let dirLoading = $state<SvelteSet<string>>(new SvelteSet());
+	// searchScope='all' 전용 — 버킷 전체 객체 캐시
+	let allObjectsCache = $state<ObjectItem[] | null>(null);
+	let allObjectsLoading = $state(false);
+
+	type TreeRow = {
+		obj: ObjectItem;
+		depth: number;
+		isDir: boolean;
+		isExpanded: boolean;
+		isLoading: boolean;
+		fullPath: boolean; // searchScope='all'일 때 풀 경로 표기
+	};
+
+	function sortItems(items: ObjectItem[]): ObjectItem[] {
+		return [...items].sort((a, b) => {
 			const aDir = isDirectory(a) ? 0 : 1;
 			const bDir = isDirectory(b) ? 0 : 1;
-			if (aDir !== bDir) return aDir - bDir; // 디렉토리 먼저
+			if (aDir !== bDir) return aDir - bDir;
 			let cmp = 0;
 			if (sortKey === 'name') {
-				cmp = displayName(a.name).localeCompare(displayName(b.name));
+				cmp = baseName(a.name).localeCompare(baseName(b.name));
 			} else if (sortKey === 'bytes') {
 				cmp = (a.bytes || 0) - (b.bytes || 0);
 			} else if (sortKey === 'last_modified') {
@@ -82,6 +92,123 @@
 			}
 			return sortAsc ? cmp : -cmp;
 		});
+	}
+
+	function baseName(fullName: string): string {
+		const stripped = fullName.endsWith('/') ? fullName.slice(0, -1) : fullName;
+		const idx = stripped.lastIndexOf('/');
+		return idx >= 0 ? stripped.slice(idx + 1) : stripped;
+	}
+
+	// 폴더 직속 항목만 추출 (자기 자신 marker 및 하위 디렉토리 소속 파일 제외)
+	function directChildren(parentPrefix: string, items: ObjectItem[] | undefined): ObjectItem[] {
+		if (!items) return [];
+		return items.filter(o => {
+			if (o.name === parentPrefix) return false;
+			const rel = parentPrefix && o.name.startsWith(parentPrefix) ? o.name.slice(parentPrefix.length) : o.name;
+			const check = rel.endsWith('/') ? rel.slice(0, -1) : rel;
+			if (check.includes('/')) return false;
+			return true;
+		});
+	}
+
+	function buildTreeRows(
+		p: string,
+		depth: number,
+		effectiveExpanded: Set<string> | SvelteSet<string>,
+		matchSet: Set<string> | null
+	): TreeRow[] {
+		const items = sortItems(directChildren(p, dirCache.get(p)));
+		const rows: TreeRow[] = [];
+		for (const obj of items) {
+			const isDir = isDirectory(obj);
+			let children: TreeRow[] = [];
+			if (isDir && effectiveExpanded.has(obj.name)) {
+				children = buildTreeRows(obj.name, depth + 1, effectiveExpanded, matchSet);
+			}
+			if (matchSet) {
+				const selfMatch = matchSet.has(obj.name);
+				if (!selfMatch && children.length === 0) continue;
+			}
+			const isLoading = isDir && effectiveExpanded.has(obj.name) && dirLoading.has(obj.name) && !dirCache.has(obj.name);
+			rows.push({
+				obj,
+				depth,
+				isDir,
+				isExpanded: isDir && effectiveExpanded.has(obj.name),
+				isLoading,
+				fullPath: false,
+			});
+			rows.push(...children);
+		}
+		return rows;
+	}
+
+	// 매칭된 항목의 모든 조상 prefix를 모음
+	function ancestorPrefixes(name: string): string[] {
+		const stripped = name.endsWith('/') ? name.slice(0, -1) : name;
+		const parts = stripped.split('/').filter(Boolean);
+		const result: string[] = [];
+		let acc = '';
+		for (let i = 0; i < parts.length - 1; i++) {
+			acc += parts[i] + '/';
+			result.push(acc);
+		}
+		// 항목이 디렉토리이면 자신도 조상으로 (자식 매칭일 때 자기 자신을 펼치도록)
+		if (name.endsWith('/')) result.push(name);
+		return result;
+	}
+
+	const treeRows = $derived(() => {
+		const q = filterText.trim().toLowerCase();
+		// 검색 없음: 일반 트리 빌드
+		if (!q) {
+			return buildTreeRows(prefix, 0, expandedDirs, null);
+		}
+		// 검색 활성: 모드별 분기
+		if (searchScope === 'all') {
+			if (!allObjectsCache) return [];
+			const matched = allObjectsCache
+				.filter(o => o.name.toLowerCase().includes(q))
+				.filter(o => !o.name.endsWith('/')); // 폴더 marker는 제외 (검색 결과는 파일 위주)
+			return sortItems(matched).map(obj => ({
+				obj,
+				depth: 0,
+				isDir: false,
+				isExpanded: false,
+				isLoading: false,
+				fullPath: true,
+			}));
+		}
+		if (searchScope === 'expanded') {
+			// dirCache 모든 항목에서 매칭 → matchSet + ancestorSet
+			const matchSet = new Set<string>();
+			const ancestorSet = new Set<string>();
+			for (const items of dirCache.values()) {
+				for (const o of items) {
+					if (baseName(o.name).toLowerCase().includes(q)) {
+						matchSet.add(o.name);
+						for (const a of ancestorPrefixes(o.name)) ancestorSet.add(a);
+					}
+				}
+			}
+			const effective = new Set<string>([...expandedDirs, ...ancestorSet]);
+			return buildTreeRows(prefix, 0, effective, matchSet);
+		}
+		// searchScope === 'current': view root 직속만 매칭 (기존 동작)
+		const items = sortItems(
+			directChildren(prefix, dirCache.get(prefix)).filter(o =>
+				baseName(o.name).toLowerCase().includes(q)
+			)
+		);
+		return items.map(obj => ({
+			obj,
+			depth: 0,
+			isDir: isDirectory(obj),
+			isExpanded: false,
+			isLoading: false,
+			fullPath: false,
+		}));
 	});
 
 	function toggleSort(key: typeof sortKey) {
@@ -91,6 +218,9 @@
 
 	// 업로드 모달
 	let showUpload = $state(false);
+
+	// 드래그앤드롭
+	let dragActive = $state(false);
 
 	// 디렉토리 생성 모달
 	let showNewDir = $state(false);
@@ -178,20 +308,141 @@
 		return name.split('/').map(encodeURIComponent).join('/');
 	}
 
-	async function load() {
-		loading = true;
+	async function fetchDir(p: string): Promise<ObjectItem[]> {
+		dirLoading.add(p);
 		try {
 			const qs = new URLSearchParams({ delimiter: '/' });
-			if (prefix) qs.set('prefix', prefix);
-			objects = await api.get<ObjectItem[]>(
+			if (p) qs.set('prefix', p);
+			const items = await api.get<ObjectItem[]>(
 				`/api/object-storage/${encodeURIComponent(containerName)}/objects?${qs}`,
 				token, projectId
 			);
-		} catch {
-			objects = [];
+			dirCache.set(p, items);
+			return items;
 		} finally {
-			loading = false;
+			dirLoading.delete(p);
 		}
+	}
+
+	async function load(opts: { silent?: boolean } = {}) {
+		if (!opts.silent) loading = true;
+		try {
+			const items = await fetchDir(prefix);
+			objects = items;
+		} catch {
+			if (!opts.silent) objects = [];
+		} finally {
+			if (!opts.silent) loading = false;
+		}
+	}
+
+	async function fetchAllObjects(opts: { silent?: boolean } = {}): Promise<void> {
+		if (!opts.silent) allObjectsLoading = true;
+		try {
+			const qs = new URLSearchParams({ delimiter: '' });
+			const items = await api.get<ObjectItem[]>(
+				`/api/object-storage/${encodeURIComponent(containerName)}/objects?${qs}`,
+				token, projectId
+			);
+			allObjectsCache = items;
+		} catch {
+			if (!opts.silent) allObjectsCache = [];
+		} finally {
+			if (!opts.silent) allObjectsLoading = false;
+		}
+	}
+
+	// 펼친 모든 prefix를 동시성 4로 병렬 재페치
+	async function refreshAll(opts: { silent?: boolean } = {}): Promise<void> {
+		if (!opts.silent) loading = true;
+		try {
+			const queue = [prefix, ...expandedDirs];
+			while (queue.length) {
+				const batch = queue.splice(0, 4);
+				await Promise.all(batch.map(p => fetchDir(p).catch(() => [])));
+			}
+			objects = dirCache.get(prefix) ?? [];
+			if (searchScope === 'all' && filterText.trim()) {
+				await fetchAllObjects({ silent: true });
+			}
+		} catch {
+			// 개별 fetchDir 실패는 무시
+		} finally {
+			if (!opts.silent) loading = false;
+		}
+	}
+
+	// 캐시된 모든 prefix에서 이름으로 객체 찾기
+	function findObject(name: string): ObjectItem | undefined {
+		for (const items of dirCache.values()) {
+			for (const o of items) {
+				if (o.name === name) return o;
+			}
+		}
+		if (allObjectsCache) {
+			return allObjectsCache.find(o => o.name === name);
+		}
+		return undefined;
+	}
+
+	async function toggleExpand(dirName: string): Promise<void> {
+		if (expandedDirs.has(dirName)) {
+			expandedDirs.delete(dirName);
+			return;
+		}
+		expandedDirs.add(dirName);
+		if (!dirCache.has(dirName)) {
+			try {
+				await fetchDir(dirName);
+			} catch {
+				// 실패 시 펼침 해제
+				expandedDirs.delete(dirName);
+			}
+		}
+	}
+
+	function handleDrop(e: DragEvent) {
+		const files = Array.from(e.dataTransfer?.files ?? []);
+		for (const f of files) {
+			uploadQueue.enqueue(f, {
+				containerName,
+				prefix,
+				token,
+				projectId,
+				onComplete: (job) => { if (job.status === 'success') refreshAll({ silent: true }); }
+			});
+		}
+	}
+
+	function hasFiles(e: DragEvent): boolean {
+		const types = e.dataTransfer?.types;
+		if (!types) return false;
+		for (let i = 0; i < types.length; i++) if (types[i] === 'Files') return true;
+		return false;
+	}
+
+	function onWindowDragEnter(e: DragEvent) {
+		if (!hasFiles(e)) return;
+		e.preventDefault();
+		dragActive = true;
+	}
+	function onWindowDragOver(e: DragEvent) {
+		if (!hasFiles(e)) return;
+		e.preventDefault();
+		dragActive = true;
+	}
+	function onWindowDragLeave(e: DragEvent) {
+		if (!hasFiles(e)) return;
+		// 뷰포트 바깥으로 나갔을 때만 overlay 해제
+		if (e.clientX <= 0 || e.clientY <= 0 || e.clientX >= window.innerWidth || e.clientY >= window.innerHeight) {
+			dragActive = false;
+		}
+	}
+	function onWindowDrop(e: DragEvent) {
+		if (!hasFiles(e)) return;
+		e.preventDefault();
+		dragActive = false;
+		handleDrop(e);
 	}
 
 	function navigatePrefix(newPrefix: string) {
@@ -199,7 +450,11 @@
 		selectedMeta = null;
 		showPreview = false;
 		filterText = '';
+		searchScope = 'current';
 		selected = new Set();
+		expandedDirs.clear();
+		dirCache.clear();
+		allObjectsCache = null;
 		load();
 	}
 
@@ -211,17 +466,17 @@
 	}
 
 	function toggleSelectAll() {
-		const all = filteredObjects();
+		const all = treeRows();
 		if (selected.size === all.length && all.length > 0) {
 			selected = new Set();
 		} else {
-			selected = new Set(all.map(o => o.name));
+			selected = new Set(all.map(r => r.obj.name));
 		}
 	}
 
 	async function bulkDelete() {
 		const dirs = [...selected].filter(n => {
-			const obj = objects.find(o => o.name === n);
+			const obj = findObject(n);
 			return obj && isDirectory(obj);
 		});
 		let msg = `${selected.size}개 항목을 삭제하시겠습니까?`;
@@ -237,7 +492,7 @@
 				token, projectId
 			);
 			selected = new Set();
-			await load();
+			await refreshAll();
 			loadContainerMeta();
 		} catch (e) {
 			alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
@@ -273,14 +528,18 @@
 	async function downloadObject(name: string) {
 		downloading = name;
 		try {
-			const { blob, filename } = await api.downloadBlob(
-				`/api/object-storage/${encodeURIComponent(containerName)}/objects/${encObj(name)}/download`,
+			const { url } = await api.post<{ url: string; expires_in: number }>(
+				`/api/object-storage/${encodeURIComponent(containerName)}/objects/${encObj(name)}/download-token`,
+				{},
 				token, projectId
 			);
-			const url = URL.createObjectURL(blob);
+			const absoluteUrl = url.startsWith('http') ? url : `${getBaseUrl()}${url}`;
 			const a = document.createElement('a');
-			a.href = url; a.download = filename; a.click();
-			URL.revokeObjectURL(url);
+			a.href = absoluteUrl;
+			a.rel = 'noopener';
+			document.body.appendChild(a);
+			a.click();
+			a.remove();
 		} catch (e) {
 			alert('다운로드 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
@@ -296,7 +555,7 @@
 				`/api/object-storage/${encodeURIComponent(containerName)}/objects/${encObj(name)}`,
 				token, projectId
 			);
-			await load();
+			await refreshAll();
 		} catch (e) {
 			alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
@@ -360,7 +619,7 @@
 				{ path }, token, projectId
 			);
 			showNewDir = false; newDirName = '';
-			await load();
+			await refreshAll();
 		} catch (e) {
 			dirError = e instanceof ApiError ? e.message : '폴더 생성 실패';
 		} finally {
@@ -371,7 +630,7 @@
 	// 이름 변경
 	function openRename(name: string) {
 		renameTarget = name;
-		renameIsDir = isDirectory(objects.find(o => o.name === name) ?? { name, bytes: 0, content_type: '', last_modified: '', etag: '' });
+		renameIsDir = isDirectory(findObject(name) ?? { name, bytes: 0, content_type: '', last_modified: '', etag: '' });
 		renameNew = displayName(name).replace(/\/$/, '');
 		renameError = ''; showRename = true;
 	}
@@ -387,7 +646,7 @@
 				{ source: renameTarget, new_name: newFullName }, token, projectId
 			);
 			showRename = false;
-			await load();
+			await refreshAll();
 		} catch (e) {
 			renameError = e instanceof ApiError ? e.message : '이름 변경 실패';
 		} finally {
@@ -469,7 +728,7 @@
 				token, projectId
 			);
 			showMove = false;
-			await load();
+			await refreshAll();
 		} catch (e) {
 			moveError = e instanceof ApiError ? e.message : '이동 실패';
 		} finally {
@@ -491,7 +750,7 @@
 		bulkMoving = true; moveError = '';
 		try {
 			for (const name of selected) {
-				const isDir = isDirectory(objects.find(o => o.name === name) ?? { name, bytes: 0, content_type: '', last_modified: '', etag: '' });
+				const isDir = isDirectory(findObject(name) ?? { name, bytes: 0, content_type: '', last_modified: '', etag: '' });
 				let dest: string;
 				if (isDir) {
 					const dirname = name.replace(/\/$/, '').split('/').pop() || name;
@@ -508,7 +767,7 @@
 			}
 			showBulkMove = false;
 			selected = new Set();
-			await load();
+			await refreshAll();
 			loadContainerMeta();
 		} catch (e) {
 			moveError = e instanceof ApiError ? e.message : '이동 실패';
@@ -522,10 +781,17 @@
 		return sortAsc ? '↑' : '↓';
 	}
 
-	const ar = createAutoRefresh(load, {
+	const ar = createAutoRefresh(() => refreshAll({ silent: true }), {
 		storageKey: 'dashboard-bucket-detail',
 		defaultInterval: 15,
 		intervalOptions: [10, 15, 30, 60]
+	});
+
+	// searchScope 변경 시 'all' 모드면 lazy fetch
+	$effect(() => {
+		if (searchScope === 'all' && filterText.trim() && allObjectsCache === null && !allObjectsLoading) {
+			fetchAllObjects();
+		}
 	});
 
 	onMount(() => {
@@ -533,6 +799,23 @@
 		loadContainerMeta();
 	});
 </script>
+
+<svelte:window
+	ondragenter={onWindowDragEnter}
+	ondragover={onWindowDragOver}
+	ondragleave={onWindowDragLeave}
+	ondrop={onWindowDrop}
+/>
+
+{#if dragActive}
+	<div class="fixed inset-0 z-50 pointer-events-none flex items-center justify-center bg-indigo-950/40 backdrop-blur-sm border-4 border-dashed border-indigo-500">
+		<div class="text-center">
+			<svg class="w-16 h-16 mx-auto text-indigo-300 mb-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+			<p class="text-indigo-100 font-semibold text-xl">{containerName}{prefix ? ` / ${prefix}` : ''} 에 업로드</p>
+			<p class="text-indigo-300 text-sm mt-1">파일을 여기에 떨어뜨리세요</p>
+		</div>
+	</div>
+{/if}
 
 <div class="p-4 md:p-8 max-w-7xl">
 	<!-- breadcrumb -->
@@ -596,6 +879,20 @@
 				class="w-full bg-gray-800 border border-gray-700 rounded-lg pl-9 pr-3 py-1.5 text-sm text-white focus:outline-none focus:border-indigo-500 placeholder-gray-600"
 			/>
 		</div>
+		{#if filterText.trim()}
+			<select
+				bind:value={searchScope}
+				title="검색 범위"
+				class="text-xs text-gray-300 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 focus:outline-none focus:border-indigo-500"
+			>
+				<option value="current">현재 폴더</option>
+				<option value="expanded">펼친 트리</option>
+				<option value="all">전체 버킷</option>
+			</select>
+			{#if searchScope === 'all' && allObjectsLoading}
+				<span class="text-xs text-gray-500">전체 인덱싱 중...</span>
+			{/if}
+		{/if}
 		<button onclick={() => toggleSort('name')}
 			class="text-xs text-gray-400 hover:text-white px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600 transition-colors">
 			이름순 {sortIcon('name')}
@@ -620,7 +917,7 @@
 			bind:intervalSeconds={ar.intervalSeconds}
 			intervalOptions={ar.intervalOptions}
 			refreshing={loading}
-			onManualRefresh={() => { load(); loadContainerMeta(); }}
+			onManualRefresh={() => { refreshAll(); loadContainerMeta(); }}
 		/>
 	</div>
 
@@ -643,7 +940,7 @@
 
 	<!-- 업로드 모달 -->
 	{#if showUpload}
-		<UploadModal {containerName} {prefix} {token} {projectId} onSuccess={load} onClose={() => { showUpload = false; }} />
+		<UploadModal {containerName} {prefix} {token} {projectId} onSuccess={() => refreshAll({ silent: true })} onClose={() => { showUpload = false; }} />
 	{/if}
 
 	<!-- 새 폴더 모달 -->
@@ -849,14 +1146,19 @@
 
 	<div class="flex gap-6">
 		<!-- 오브젝트 목록 -->
-		<div class="flex-1 min-w-0">
+		<div class="flex-1 min-w-0 relative">
 			{#if loading}
 				<LoadingSkeleton variant="table" rows={5} />
-			{:else if objects.length === 0}
+			{:else if treeRows().length === 0}
 				<div class="text-gray-600 text-sm py-8 text-center">
 					<svg class="w-12 h-12 mx-auto text-gray-700 mb-3" viewBox="0 0 20 20" fill="currentColor"><path d="M2 6a2 2 0 012-2h4l2 2h6a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/></svg>
-					<p>오브젝트가 없습니다</p>
-					<p class="text-gray-700 text-xs mt-1">파일을 업로드하거나 새 폴더를 만들어보세요</p>
+					{#if filterText.trim()}
+						<p>검색 결과가 없습니다</p>
+						<p class="text-gray-700 text-xs mt-1">다른 키워드를 입력하거나 검색 범위를 넓혀보세요</p>
+					{:else}
+						<p>오브젝트가 없습니다</p>
+						<p class="text-gray-700 text-xs mt-1">파일을 업로드하거나 새 폴더를 만들어보세요</p>
+					{/if}
 				</div>
 			{:else}
 				<div class="overflow-x-auto">
@@ -873,7 +1175,7 @@
 							<tr class="border-b border-gray-800 text-gray-500 text-xs uppercase tracking-wide">
 								<th class="py-3 px-4 w-10">
 									<input type="checkbox"
-										checked={selected.size > 0 && selected.size === filteredObjects().length}
+										checked={selected.size > 0 && selected.size === treeRows().length}
 										onchange={toggleSelectAll}
 										class="w-3.5 h-3.5 rounded border-gray-600 bg-gray-800 accent-indigo-500 cursor-pointer" />
 								</th>
@@ -901,10 +1203,22 @@
 							</tr>
 						</thead>
 						<tbody>
-							{#each filteredObjects() as obj}
-								{@const isDir = isDirectory(obj)}
-								{@const relName = displayName(obj.name)}
-								<tr class="group border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors {selected.has(obj.name) ? 'bg-indigo-950/20' : ''}">
+							{#each treeRows() as row (row.obj.name)}
+								{@const obj = row.obj}
+								{@const isDir = row.isDir}
+								{@const rowLabel = row.fullPath ? obj.name : (baseName(obj.name) || obj.name)}
+								<tr
+									class="group border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors cursor-pointer {selected.has(obj.name) ? 'bg-indigo-950/20' : ''}"
+									onclick={(e) => {
+										const t = e.target as HTMLElement;
+										if (t.closest('button, input, a, label')) return;
+										if (isDir && !row.fullPath) {
+											openDir(obj.name);
+										} else {
+											toggleSelect(obj.name);
+										}
+									}}
+								>
 									<td class="py-3 px-4">
 										<input type="checkbox"
 											checked={selected.has(obj.name)}
@@ -912,17 +1226,36 @@
 											class="w-3.5 h-3.5 rounded border-gray-600 bg-gray-800 accent-indigo-500 cursor-pointer" />
 									</td>
 									<td class="py-3 px-4">
-										<div class="flex items-center gap-2.5">
+										<div class="flex items-center gap-2.5" style="padding-left: {row.depth * 16}px">
+											{#if isDir && !row.fullPath && (!filterText.trim() || searchScope === 'expanded')}
+												<button
+													onclick={(e) => { e.stopPropagation(); toggleExpand(obj.name); }}
+													title={row.isExpanded ? '접기' : '펼치기'}
+													class="w-4 h-4 shrink-0 flex items-center justify-center text-gray-500 hover:text-gray-200 transition-colors"
+												>
+													{#if row.isLoading}
+														<svg class="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+															<path d="M12 2a10 10 0 0110 10" stroke-linecap="round"/>
+														</svg>
+													{:else}
+														<svg class="w-3 h-3 transition-transform {row.isExpanded ? 'rotate-90' : ''}" viewBox="0 0 20 20" fill="currentColor">
+															<path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"/>
+														</svg>
+													{/if}
+												</button>
+											{:else}
+												<span class="w-4 h-4 shrink-0"></span>
+											{/if}
 											<FileIcon name={obj.name} contentType={obj.content_type} isDir={isDir} />
-											{#if isDir}
+											{#if isDir && !row.fullPath}
 												<button onclick={() => openDir(obj.name)}
 													class="text-white hover:text-indigo-300 text-left truncate max-w-md font-medium hover:underline">
-													{relName || obj.name}
+													{rowLabel}
 												</button>
 											{:else}
 												<button onclick={() => showMeta(obj.name)}
-													class="text-gray-200 hover:text-white text-left truncate max-w-md hover:underline">
-													{relName || obj.name}
+													class="text-gray-200 hover:text-white text-left truncate max-w-md hover:underline {row.fullPath ? 'font-mono text-xs' : ''}">
+													{rowLabel}
 												</button>
 											{/if}
 										</div>
@@ -934,8 +1267,11 @@
 											? `${(obj.bytes / 1048576).toFixed(1)} MB`
 											: `${(obj.bytes / 1024).toFixed(1)} KB`}
 									</td>
-									<td class="py-3 px-4 text-gray-500 text-xs whitespace-nowrap">
-										{isDir ? 'folder' : obj.content_type || '-'}
+									<td
+										class="py-3 px-4 text-gray-500 text-xs whitespace-nowrap"
+										title={isDir ? 'folder' : obj.content_type || '-'}
+									>
+										{isDir ? '폴더' : shortContentType(obj.content_type)}
 									</td>
 									<td class="py-3 px-4 text-gray-500 text-xs whitespace-nowrap">
 										{isDir ? '-' : formatDate(obj.last_modified)}

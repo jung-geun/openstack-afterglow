@@ -732,22 +732,19 @@ def ensure_union_egress_sg(
     return sg_name
 
 
-_MONITORING_INGRESS_RULES: list[dict] = [
-    {"protocol": "tcp", "port_range_min": 9100, "port_range_max": 9100},  # node_exporter
-    {"protocol": "tcp", "port_range_min": 9400, "port_range_max": 9400},  # dcgm_exporter (GPU)
-]
-
-
-def ensure_monitoring_ingress_sg(
+def _ensure_single_port_ingress_sg(
     conn: openstack.connection.Connection,
     project_id: str,
-    sg_name: str = "monitoring",
-    scrape_cidr: str = "",
+    sg_name: str,
+    *,
+    port: int,
+    scrape_cidr: str,
+    description: str,
 ) -> str:
-    """Prometheus scrape용 ingress SG를 idempotent하게 확보하고 SG 이름을 반환한다.
+    """단일 TCP 포트 ingress SG를 idempotent하게 확보하고 SG 이름을 반환한다.
 
-    scrape_cidr이 비어있으면 ValueError를 발생시킨다(환경별 명시 주입 필수).
-    SG가 없으면 생성 후 node_exporter/dcgm_exporter ingress rule을 추가한다.
+    scrape_cidr이 비어있으면 ValueError(환경별 명시 주입 필수).
+    SG가 없으면 생성 후 ingress rule을 추가한다.
     이미 있으면 누락된 rule만 보충한다.
     """
     if not scrape_cidr:
@@ -757,7 +754,7 @@ def ensure_monitoring_ingress_sg(
     existing = next((sg for sg in sgs if sg["name"] == sg_name), None)
 
     if existing is None:
-        sg = create_security_group(conn, sg_name, "Prometheus scrape — node_exporter/dcgm_exporter ingress")
+        sg = create_security_group(conn, sg_name, description)
         sg_id = sg["id"]
         existing_rules: list[dict] = []
     else:
@@ -770,20 +767,52 @@ def ensure_monitoring_ingress_sg(
         if r.get("direction") == "ingress"
     }
 
-    for rule in _MONITORING_INGRESS_RULES:
-        key = (rule["protocol"], rule["port_range_min"], rule["port_range_max"], scrape_cidr)
-        if key not in existing_keys:
-            create_security_group_rule(
-                conn,
-                sg_id,
-                direction="ingress",
-                protocol=rule["protocol"],
-                port_range_min=rule["port_range_min"],
-                port_range_max=rule["port_range_max"],
-                remote_ip_prefix=scrape_cidr,
-            )
+    if ("tcp", port, port, scrape_cidr) not in existing_keys:
+        create_security_group_rule(
+            conn,
+            sg_id,
+            direction="ingress",
+            protocol="tcp",
+            port_range_min=port,
+            port_range_max=port,
+            remote_ip_prefix=scrape_cidr,
+        )
 
     return sg_name
+
+
+def ensure_node_exporter_sg(
+    conn: openstack.connection.Connection,
+    project_id: str,
+    sg_name: str = "node_exporter",
+    scrape_cidr: str = "",
+) -> str:
+    """node_exporter (tcp/9100) ingress SG를 idempotent하게 확보한다. 반환: sg_name."""
+    return _ensure_single_port_ingress_sg(
+        conn,
+        project_id,
+        sg_name,
+        port=9100,
+        scrape_cidr=scrape_cidr,
+        description="Prometheus scrape — node_exporter ingress (tcp/9100)",
+    )
+
+
+def ensure_dcgm_exporter_sg(
+    conn: openstack.connection.Connection,
+    project_id: str,
+    sg_name: str = "dcgm_exporter",
+    scrape_cidr: str = "",
+) -> str:
+    """dcgm_exporter (tcp/9400) ingress SG를 idempotent하게 확보한다. 반환: sg_name."""
+    return _ensure_single_port_ingress_sg(
+        conn,
+        project_id,
+        sg_name,
+        port=9400,
+        scrape_cidr=scrape_cidr,
+        description="Prometheus scrape — dcgm_exporter ingress (tcp/9400)",
+    )
 
 
 def update_port_security_groups(
@@ -958,3 +987,47 @@ def _net_to_info(n) -> NetworkInfo:
         is_external=bool(n.is_router_external),
         is_shared=bool(n.is_shared),
     )
+
+
+def list_project_compute_ports(conn, project_id: str) -> tuple[list[str], dict[str, list[str]]]:
+    """compute 포트를 순회해 (instance_ids, network_id→[instance_id]) 맵 반환.
+
+    get_topology_traffic 에서 PromQL regex 빌드 및 네트워크별 트래픽 합산에 사용.
+    """
+    instance_ids: list[str] = []
+    net_to_instances: dict[str, list[str]] = {}
+    for p in conn.network.ports(project_id=project_id):
+        dev_owner = p.device_owner or ""
+        if not p.device_id or not dev_owner.startswith("compute:"):
+            continue
+        server_id = p.device_id
+        net_id = p.network_id or ""
+        if server_id not in instance_ids:
+            instance_ids.append(server_id)
+        if net_id:
+            lst = net_to_instances.setdefault(net_id, [])
+            if server_id not in lst:
+                lst.append(server_id)
+    return instance_ids, net_to_instances
+
+
+def list_project_port_map(conn, project_id: str | None) -> dict[str, dict]:
+    """compute 포트 상세 매핑 반환.
+
+    project_id=None 이면 모든 프로젝트의 compute 포트 조회 (admin 전용).
+
+    Returns:
+        {port_id: {"instance_id", "network_id", "mac_address"}}
+    멀티-NIC 트래픽 demux 와 포트맵 캐싱에 사용.
+    """
+    out: dict[str, dict] = {}
+    kwargs = {"project_id": project_id} if project_id else {}
+    for p in conn.network.ports(**kwargs):
+        if not p.device_id or not (p.device_owner or "").startswith("compute:"):
+            continue
+        out[p.id] = {
+            "instance_id": p.device_id,
+            "network_id": p.network_id or "",
+            "mac_address": (p.mac_address or "").lower(),
+        }
+    return out

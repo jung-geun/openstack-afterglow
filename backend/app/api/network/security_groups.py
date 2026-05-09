@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -8,7 +9,9 @@ if TYPE_CHECKING:
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from app.api.deps import get_os_conn
+from app.api.common.activity_recorder import rec
+from app.api.common.owner_check import assert_resource_owner
+from app.api.deps import get_os_conn, get_token_info
 from app.rate_limit import limiter
 from app.services import neutron
 from app.services.cache import cached_call, invalidate, ttl_slow
@@ -52,14 +55,34 @@ async def create_security_group(
     request: Request,
     req: CreateSecurityGroupRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
     try:
         result = neutron.create_security_group(conn, req.name, req.description)
         await invalidate(f"afterglow:neutron:{pid}:security_groups")
+        await rec(token_info, conn, resource_type="security_group", action="create", resource_name=req.name)
         return result
-    except Exception:
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="security_group",
+            action="create",
+            status="failed",
+            resource_name=req.name,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="보안 그룹 생성 실패")
+
+
+async def _get_sg_with_owner_check(conn, sg_id: str, token_info: dict):
+    try:
+        sg = await asyncio.to_thread(conn.network.get_security_group, sg_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="보안 그룹을 찾을 수 없습니다")
+    assert_resource_owner(sg, conn, token_info, not_found_detail="보안 그룹을 찾을 수 없습니다")
+    return sg
 
 
 @router.delete("/{sg_id}", status_code=204)
@@ -68,12 +91,24 @@ async def delete_security_group(
     request: Request,
     sg_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
+    await _get_sg_with_owner_check(conn, sg_id, token_info)
     try:
         neutron.delete_security_group(conn, sg_id)
         await invalidate(f"afterglow:neutron:{pid}:security_groups")
-    except Exception:
+        await rec(token_info, conn, resource_type="security_group", action="delete", resource_id=sg_id)
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="security_group",
+            action="delete",
+            status="failed",
+            resource_id=sg_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="보안 그룹 삭제 실패")
 
 
@@ -84,8 +119,10 @@ async def create_security_group_rule(
     sg_id: str,
     req: CreateSecurityGroupRuleRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
+    await _get_sg_with_owner_check(conn, sg_id, token_info)
     try:
         result = neutron.create_security_group_rule(
             conn,
@@ -98,8 +135,18 @@ async def create_security_group_rule(
             ethertype=req.ethertype,
         )
         await invalidate(f"afterglow:neutron:{pid}:security_groups")
+        await rec(token_info, conn, resource_type="security_group", action="add_rule", resource_id=sg_id)
         return result
-    except Exception:
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="security_group",
+            action="add_rule",
+            status="failed",
+            resource_id=sg_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="보안 그룹 규칙 추가 실패")
 
 
@@ -110,10 +157,22 @@ async def delete_security_group_rule(
     sg_id: str,
     rule_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
+    await _get_sg_with_owner_check(conn, sg_id, token_info)
     try:
         neutron.delete_security_group_rule(conn, rule_id)
         await invalidate(f"afterglow:neutron:{pid}:security_groups")
-    except Exception:
+        await rec(token_info, conn, resource_type="security_group", action="remove_rule", resource_id=sg_id)
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="security_group",
+            action="remove_rule",
+            status="failed",
+            resource_id=sg_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="보안 그룹 규칙 삭제 실패")

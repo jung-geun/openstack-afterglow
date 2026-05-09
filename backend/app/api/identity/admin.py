@@ -168,22 +168,30 @@ def _fetch_overview_hypervisors(conn) -> dict:
 
 
 def _fetch_overview_disk(conn) -> dict:
-    """Cinder 디스크 사용량 + 용량 수집."""
-    used_disk = 0
-    total_disk = 0
+    """클러스터 등록 Cinder 풀 총용량 vs (볼륨 + 이미지) 사용량."""
+    from app.services.cinder import list_storage_pools
+    from app.services.glance import get_total_image_bytes
+
+    total_disk = 0.0
+    try:
+        for p in list_storage_pools(conn):
+            total_disk += p.get("total_capacity_gb", 0) or 0
+    except Exception:
+        pass
+
+    used_disk = 0.0
     try:
         for v in conn.block_storage.volumes(all_projects=True):
             used_disk += v.size or 0
     except Exception:
         pass
+
     try:
-        bs_endpoint = conn.block_storage.get_endpoint()
-        limits_resp = conn.session.get(f"{bs_endpoint}/limits")
-        abs_limits = limits_resp.json().get("limits", {}).get("absolute", {})
-        total_disk = abs_limits.get("maxTotalVolumeGigabytes", 0)
+        used_disk += round(get_total_image_bytes(conn) / (1024**3), 2)
     except Exception:
         pass
-    return {"used_disk": used_disk, "total_disk": total_disk}
+
+    return {"used_disk": round(used_disk, 2), "total_disk": round(total_disk, 2)}
 
 
 def _fetch_overview_placement(conn) -> dict:

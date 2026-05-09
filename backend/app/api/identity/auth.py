@@ -1,11 +1,10 @@
 import asyncio
-import hashlib
 import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from app.api.deps import extend_session, get_session_remaining, get_token_info
+from app.api.deps import extend_session, get_session_remaining, get_token_info, invalidate_token_cache
 from app.config import get_settings
 from app.models.auth import GitLabCallbackRequest, LoginRequest, ProjectInfo, TokenResponse, UserInfo
 from app.rate_limit import limiter
@@ -130,21 +129,19 @@ async def extend_session_endpoint(token_info: dict = Depends(get_token_info)):
 
 @router.post("/logout")
 async def logout(token_info: dict = Depends(get_token_info)):
-    """로그아웃: Redis 세션 삭제 및 Keystone 토큰 폐기."""
-    from app.services.cache import _get_redis
+    """로그아웃: Keystone 토큰 폐기 + 검증/세션 캐시 즉시 invalidate.
 
+    이전 구현은 검증 캐시(`afterglow:session:{hash[:32]}`)와 deps 의 캐시
+    키(`afterglow:session:{hash}` — 64자 full hash)가 어긋나 5분간 토큰이 유효했다.
+    `invalidate_token_cache` 헬퍼가 두 키를 통합해서 모두 삭제한다.
+    """
     token = token_info["token"]
     pid = token_info.get("project_id") or "noscope"
-    h = hashlib.sha256(token.encode()).hexdigest()[:32]
-    try:
-        r = await _get_redis()
-        await r.delete(f"afterglow:session:{h}:{pid}", f"afterglow:session-abs:{h}:{pid}")
-    except Exception:
-        pass
     try:
         await asyncio.to_thread(keystone.revoke_token, token)
     except Exception:
-        pass
+        _logger.warning("Keystone revoke 실패 — 캐시는 그대로 invalidate", exc_info=True)
+    await invalidate_token_cache(token, pid)
     return {"message": "로그아웃 완료"}
 
 

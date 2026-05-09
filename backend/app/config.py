@@ -75,7 +75,7 @@ def _load_toml() -> dict:
     flat["os_cacert"] = ost.get("cacert", "")
     flat["os_manila_endpoint"] = ost.get("manila_endpoint", "")
     flat["os_swift_endpoint"] = ost.get("swift_endpoint", "")
-    flat["os_swift_upload_timeout"] = ost.get("swift_upload_timeout", 600)
+    flat["os_swift_upload_timeout"] = ost.get("swift_upload_timeout", 1800)
     flat["os_manila_share_network_id"] = ost.get("manila_share_network_id", "")
     flat["os_manila_share_type"] = ost.get("manila_share_type", "cephfs")
     flat["os_manila_nfs_share_type"] = ost.get("manila_nfs_share_type", "nfstype")
@@ -157,6 +157,8 @@ def _load_toml() -> dict:
     flat["k3s_barbican_kms_kek_id"] = k3s.get("barbican_kms_kek_id", "")
     # LB 네트워크 분리: OCCM Service LB 공통 VIP 서브넷
     flat["k3s_lb_subnet_id"] = k3s.get("lb_subnet_id", "")
+    # API LB VIP 네트워크 (모드 A: provider 네트워크 직접 지정)
+    flat["k3s_api_lb_vip_network_id"] = k3s.get("api_lb_vip_network_id", "")
     # FCOS (Fedora CoreOS) 이미지 ID
     flat["k3s_fcos_image_id"] = k3s.get("fcos_image_id", "")
 
@@ -186,6 +188,18 @@ def _load_toml() -> dict:
     flat["union_layer_store_rw_share_id"] = union.get("layer_store_rw_share_id", "")
     flat["union_layer_store_ro_share_id"] = union.get("layer_store_ro_share_id", "")
     flat["union_manifest_store_share_id"] = union.get("manifest_store_share_id", "")
+
+    mon = data.get("monitoring", {})
+    flat["prometheus_base_url"] = mon.get("prometheus_base_url", "http://prometheus:9090")
+    flat["prometheus_username"] = mon.get("prometheus_username", "")
+    flat["prometheus_password"] = mon.get("prometheus_password", "")
+    flat["monitoring_sd_token"] = mon.get("sd_token", "")
+    flat["monitoring_scrape_cidr"] = mon.get("scrape_cidr", "")
+    flat["monitoring_auto_sg_enabled"] = mon.get("auto_sg_enabled", True)
+    flat["node_exporter_sg_name"] = mon.get("node_exporter_sg_name", "node_exporter")
+    flat["dcgm_exporter_sg_name"] = mon.get("dcgm_exporter_sg_name", "dcgm_exporter")
+    flat["grafana_base_url"] = mon.get("grafana_base_url", "")
+    flat["grafana_jwt_secret"] = mon.get("grafana_jwt_secret", "")
 
     notion = data.get("notion", {})
     flat["notion_config_encryption_key"] = notion.get("config_encryption_key", "")
@@ -241,7 +255,12 @@ class Settings(BaseSettings):
     os_manila_endpoint: str = ""
     # Swift 설정
     os_swift_endpoint: str = ""
-    os_swift_upload_timeout: int = 600  # 대용량 업로드용 타임아웃 (초)
+    os_swift_upload_timeout: int = 1800  # 대용량 업로드용 타임아웃 (초)
+    # S3 Direct Upload 설정 (Ceph RGW S3 endpoint 대상)
+    os_s3_endpoint: str = "https://s3.dmslab.re.kr"
+    upload_part_size_mb: int = 50
+    upload_url_expires_sec: int = 3600
+    upload_tx_ttl_sec: int = 86400
     os_manila_share_network_id: str = ""
     os_manila_share_type: str = "cephfs"
     os_manila_nfs_share_type: str = "nfstype"
@@ -255,6 +274,12 @@ class Settings(BaseSettings):
     backend_port: int = 8000
     frontend_port: int = 3000
     secret_key: str = "change-me-in-production"
+    # object-storage 업로드 단일 파일 최대 크기 (GiB). 0 또는 음수 = 사실상 무제한(기존 100GiB cap).
+    app_max_upload_gb: int = 10
+    # rate-limit / 클라이언트 IP 추출 시 신뢰할 reverse proxy CIDR (쉼표 구분).
+    # 비어 있으면 X-Forwarded-For / X-Real-IP 헤더를 모두 무시 → 직접 연결 IP 사용.
+    # 운영(K8s/HAProxy) 에서는 ingress/HAProxy 의 pod CIDR 을 명시적으로 추가해야 한다.
+    trusted_proxies: str = "127.0.0.1/32,::1/128"
 
     # CORS 허용 origin (쉼표 구분)
     cors_origins: str = "http://localhost:3000,http://localhost"
@@ -317,6 +342,8 @@ class Settings(BaseSettings):
     k3s_barbican_kms_kek_id: str = ""
     # LB 네트워크 분리: OCCM Service LB VIP 서브넷 (미설정 시 클러스터 네트워크의 첫 서브넷)
     k3s_lb_subnet_id: str = ""
+    # API LB VIP 네트워크 (모드 A: provider 네트워크 직접 지정, 설정 시 FIP 불필요)
+    k3s_api_lb_vip_network_id: str = ""
     # FCOS (Fedora CoreOS) 이미지 ID (os_type=fcos 클러스터에 사용)
     k3s_fcos_image_id: str = ""
 
@@ -330,11 +357,16 @@ class Settings(BaseSettings):
 
     # 모니터링 (Prometheus + Grafana — Option A, label-based 프로젝트 격리)
     monitoring_auto_sg_enabled: bool = True  # 프로젝트/인스턴스 생성 시 monitoring SG 자동 attach
-    monitoring_sg_name: str = "monitoring"  # 자동 생성/재사용할 SG 이름
+    node_exporter_sg_name: str = "node_exporter"  # node_exporter ingress SG 이름 (tcp/9100)
+    dcgm_exporter_sg_name: str = "dcgm_exporter"  # dcgm_exporter ingress SG 이름 (tcp/9400, GPU 전용)
     monitoring_scrape_cidr: str = ""  # Prometheus scrape CIDR (예: 10.0.0.0/8). 미설정 시 ValueError
     monitoring_sd_token: str = ""  # /api/sd/prometheus/targets 인증 토큰
     grafana_jwt_secret: str = ""  # Grafana auth.jwt 서명 시크릿
     grafana_base_url: str = ""  # Grafana 외부 URL (예: https://grafana.example.com)
+    # Prometheus 서버 주소. 우선순위: 환경변수 PROMETHEUS_BASE_URL > config.toml [monitoring].prometheus_base_url > 기본값
+    prometheus_base_url: str = "http://prometheus:9090"
+    prometheus_username: str = ""  # basic auth 미사용 시 빈 문자열
+    prometheus_password: str = ""
 
     # Notion 연동
     notion_config_encryption_key: str = ""  # 미설정 시 k3s_kubeconfig_encryption_key 재사용
@@ -423,8 +455,24 @@ class Settings(BaseSettings):
         import os
 
         logger = logging.getLogger(__name__)
+        env = os.environ.get("AFTERGLOW_ENV", "development").strip().lower()
+        is_production = env == "production"
+        insecure_flag = os.environ.get("AFTERGLOW_ALLOW_INSECURE", "").strip() == "1"
+
+        # production 환경에서는 INSECURE 우회 자체를 금지 — 운영 부팅 실수 차단.
+        if is_production and insecure_flag:
+            raise ValueError(
+                "AFTERGLOW_ALLOW_INSECURE=1 must NOT be set when AFTERGLOW_ENV=production. "
+                "Provide a real SECRET_KEY (and other secrets) instead of bypassing the check."
+            )
+
         if self.secret_key == "change-me-in-production":
-            if os.environ.get("AFTERGLOW_ALLOW_INSECURE", "").strip() == "1":
+            if is_production:
+                raise ValueError(
+                    "SECRET_KEY is set to the default value 'change-me-in-production' "
+                    "while AFTERGLOW_ENV=production. Refusing to start with an insecure key."
+                )
+            if insecure_flag:
                 logger.warning(
                     "SECRET_KEY is set to the default insecure value. "
                     "AFTERGLOW_ALLOW_INSECURE=1 is set — this must NOT be used in production."

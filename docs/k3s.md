@@ -285,32 +285,11 @@ cloud-init의 콜백 스크립트가 플러그인을 순차적으로 배포하�
 
 배포에 실패한 플러그인은 `failed` 상태로 표시되지만, 클러스터 자체는 정상 동작합니다。
 
-### Octavia Ingress 인증 모델
-
-`octavia_ingress` 플러그인 활성 시, 클러스터마다 **프로젝트 관리 사용자(per-project manager user) + Application Credential** 조합으로 인증합니다.
-
-```
-1. 클러스터 생성 시
-   ├── 프로젝트에 관리 사용자 lazy 생성 (afterglow-cluster-mgr-<project_id[:8]>)
-   │     member + load-balancer_member 역할 부여
-   ├── 해당 관리 사용자 자격으로 App Credential 발급 (k3s-ingress-<cluster_name>)
-   └── App Cred ID/Secret을 ConfigMap에 주입
-
-2. 클러스터 삭제 시
-   ├── App Credential 회수 (best-effort)
-   └── kube_ingress_{cluster_name}_* LB cascade 삭제
-```
-
-관리 사용자 비밀번호는 AES-256-GCM 암호화 후 `project_manager_credentials` 테이블에 저장됩니다. 프로젝트 단위로 1명만 생성되며 모든 클러스터가 공유합니다.
-
-**기존 클러스터 호환**: 이 변경 이전에 생성된 클러스터는 기존 평문 자격으로 계속 동작합니다. 재생성 시 새 모델이 적용됩니다.
-
 ### 클러스터 삭제 시 자동 정리
 
-클러스터 삭제 시 Octavia LB가 orphan되지 않도록 자동 정리됩니다:
+OCCM이 활성화된 클러스터 삭제 시, Kubernetes LoadBalancer 서비스가 생성한 Octavia LB가 orphan되지 않도록 자동 정리됩니다:
 
-- OCCM 활성: `kube_service_{cluster_name}_` 접두사 LB cascade 삭제
-- Octavia Ingress 활성: `kube_ingress_{cluster_name}_` 접두사 LB cascade 삭제
+- `kube_service_{cluster_name}_` 접두사로 매칭되는 모든 Octavia LB를 cascade 삭제
 - 정리 실패 시 warning 로그 후 삭제 계속 진행 (best-effort)
 
 ### 스케일 다운 시 노드 정리

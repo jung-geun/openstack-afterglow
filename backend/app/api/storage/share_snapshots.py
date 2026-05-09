@@ -8,7 +8,8 @@ import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.api.deps import get_os_conn
+from app.api.common.activity_recorder import rec
+from app.api.deps import get_os_conn, get_token_info
 from app.models.storage import CreateShareSnapshotRequest, ShareSnapshotInfo, ShareSnapshotRevertRequest
 from app.services import manila
 from app.services.cache import cached_call, invalidate, ttl_fast
@@ -43,13 +44,32 @@ async def list_share_snapshots(
 async def create_share_snapshot(
     req: CreateShareSnapshotRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
     try:
         result = await asyncio.to_thread(manila.create_share_snapshot, conn, req.share_id, req.name, req.description)
         await invalidate(f"afterglow:manila:{pid}:share_snapshots")
+        await rec(
+            token_info,
+            conn,
+            resource_type="share_snapshot",
+            action="share_snapshot.create",
+            status="success",
+            resource_name=req.name,
+            extra={"share_id": req.share_id},
+        )
         return _normalize_snapshot(result)
-    except Exception:
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="share_snapshot",
+            action="share_snapshot.create",
+            status="failed",
+            resource_name=req.name,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="스냅샷 생성 실패")
 
 
@@ -70,13 +90,32 @@ async def revert_to_snapshot(
     snapshot_id: str,
     req: ShareSnapshotRevertRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
     try:
         await asyncio.to_thread(manila.revert_to_snapshot, conn, req.share_id, snapshot_id)
         await invalidate(f"afterglow:manila:{pid}:share_snapshots")
         await invalidate(f"afterglow:manila:{pid}:share_snapshots:{req.share_id}")
-    except Exception:
+        await rec(
+            token_info,
+            conn,
+            resource_type="share_snapshot",
+            action="share_snapshot.revert",
+            status="success",
+            resource_id=snapshot_id,
+            extra={"share_id": req.share_id},
+        )
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="share_snapshot",
+            action="share_snapshot.revert",
+            status="failed",
+            resource_id=snapshot_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="스냅샷 복원 실패")
 
 
@@ -84,12 +123,30 @@ async def revert_to_snapshot(
 async def delete_share_snapshot(
     snapshot_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
     try:
         await asyncio.to_thread(manila.delete_share_snapshot, conn, snapshot_id)
         await invalidate(f"afterglow:manila:{pid}:share_snapshots")
-    except Exception:
+        await rec(
+            token_info,
+            conn,
+            resource_type="share_snapshot",
+            action="share_snapshot.delete",
+            status="success",
+            resource_id=snapshot_id,
+        )
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="share_snapshot",
+            action="share_snapshot.delete",
+            status="failed",
+            resource_id=snapshot_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="스냅샷 삭제 실패")
 
 

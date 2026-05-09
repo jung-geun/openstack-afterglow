@@ -3,6 +3,8 @@
   import { api, ApiError } from '$lib/api/client';
   import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
   import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
+  import Button from '$lib/components/ui/Button.svelte';
+  import DetailHeader from '$lib/components/ui/DetailHeader.svelte';
 
   interface Listener {
     id: string; name: string; protocol: string;
@@ -183,19 +185,19 @@
   {:else if error}
     <div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm">{error}</div>
   {:else if lb}
-    <!-- 헤더 -->
-    <div class="flex items-start justify-between mb-6">
-      <div>
-        <h2 class="text-xl font-bold text-white">{lb.name || lb.id.slice(0, 12)}</h2>
-        {#if lb.description}<p class="text-gray-400 text-sm mt-1">{lb.description}</p>{/if}
-        <div class="flex items-center gap-3 mt-2">
-          <span class="px-2 py-0.5 rounded text-xs {lb.status === 'ACTIVE' ? 'text-green-400 bg-green-900/30' : 'text-yellow-400 bg-yellow-900/30'}">{lb.status}</span>
-          <span class="px-2 py-0.5 rounded text-xs {lb.operating_status === 'ONLINE' ? 'text-green-400' : 'text-gray-400'}">{lb.operating_status}</span>
-          {#if lb.vip_address}<span class="text-xs text-gray-500 font-mono">VIP: {lb.vip_address}</span>{/if}
-        </div>
-      </div>
-      <button onclick={deleteLb} disabled={saving} class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-red-900 hover:border-red-700 disabled:border-gray-700 transition-colors">삭제</button>
-    </div>
+    <DetailHeader
+      title={lb.name || lb.id.slice(0, 12)}
+      subtitle={lb.description}
+      status={lb.status}
+      secondaryStatus={lb.operating_status}
+    >
+      {#snippet meta()}
+        {#if lb!.vip_address}<span class="text-xs text-gray-500 font-mono">VIP: {lb!.vip_address}</span>{/if}
+      {/snippet}
+      {#snippet actions()}
+        <button onclick={deleteLb} disabled={saving} class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-red-900 hover:border-red-700 disabled:border-gray-700 transition-colors">삭제</button>
+      {/snippet}
+    </DetailHeader>
 
     <!-- 에러 상태 상세 -->
     {#if lb.status === 'ERROR' || lb.status?.includes('ERROR')}
@@ -255,7 +257,7 @@
             {#each ['HTTP', 'HTTPS', 'TCP', 'UDP'] as p}<option value={p}>{p}</option>{/each}
           </select>
           <input bind:value={listenerForm.protocol_port} type="number" min="1" max="65535" placeholder="포트" class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200" />
-          <button onclick={createListener} disabled={saving} class="col-span-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 text-white text-sm px-3 py-2 rounded">생성</button>
+          <Button onclick={createListener} disabled={saving} class="col-span-2" size="sm">생성</Button>
           <button onclick={() => showAddListener = false} class="text-gray-400 hover:text-gray-200 text-sm px-2 text-center">취소</button>
         </div>
       {/if}
@@ -292,7 +294,7 @@
           <select bind:value={poolForm.lb_algorithm} class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200">
             {#each ['ROUND_ROBIN', 'LEAST_CONNECTIONS', 'SOURCE_IP'] as a}<option value={a}>{a}</option>{/each}
           </select>
-          <button onclick={createPool} disabled={saving} class="col-span-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 text-white text-sm px-3 py-2 rounded">생성</button>
+          <Button onclick={createPool} disabled={saving} class="col-span-2" size="sm">생성</Button>
           <button onclick={() => showAddPool = false} class="text-gray-400 hover:text-gray-200 text-sm px-2 text-center">취소</button>
         </div>
       {/if}
@@ -330,7 +332,7 @@
                       <input bind:value={memberForm.address} placeholder="IP 주소" class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200" />
                       <input bind:value={memberForm.protocol_port} type="number" min="1" max="65535" placeholder="포트" class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200" />
                       <input bind:value={memberForm.weight} type="number" min="1" max="256" placeholder="가중치" class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200" />
-                      <button onclick={addMember} disabled={saving || !memberForm.address} class="bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 text-white text-sm px-3 py-2 rounded">추가</button>
+                      <Button onclick={addMember} disabled={saving || !memberForm.address} size="sm">추가</Button>
                     </div>
                   {/if}
                   {#if selectedPoolMembers.length === 0}

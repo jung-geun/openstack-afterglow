@@ -92,37 +92,70 @@ write_files:
 {% endif %}
 
 {% if gpu_available %}
-  # DCGM Exporter 설치 스크립트
+  # GPU 스택(드라이버 + DCGM 데몬 + dcgm-exporter) 설치 스크립트
+  # 베이스 이미지에 무엇이 있든 idempotent 하게 동작 — nvidia-smi/nvidia-dcgm/dcgm-exporter 가
+  # 이미 있으면 각각 skip, 없으면 자동 설치.
   - path: /opt/union/install_dcgm_exporter.sh
     permissions: "0750"
     content: |
       #!/usr/bin/env bash
       set -euo pipefail
       VER="{{ dcgm_exporter_version }}"
-      ARCH="$(uname -m)"
-      case "$ARCH" in
-        x86_64) ARCH=amd64 ;;
-        aarch64) ARCH=arm64 ;;
-        *) echo "unsupported arch: $ARCH" >&2; exit 1 ;;
-      esac
-      TARBALL="dcgm-exporter-${VER}-linux-${ARCH}.tar.gz"
-      URL="https://github.com/NVIDIA/dcgm-exporter/releases/download/${VER}/${TARBALL}"
-      TMP=$(mktemp -d)
-      cd "$TMP"
-      curl -fsSL "$URL" -o "$TARBALL"
-      tar -xzf "$TARBALL"
-      install -m 0755 dcgm-exporter /usr/local/bin/dcgm-exporter
-      install -d -m 0755 /etc/dcgm-exporter
-      install -m 0644 etc/default-counters.csv /etc/dcgm-exporter/default-counters.csv
-      rm -rf "$TMP"
+      export DEBIAN_FRONTEND=noninteractive
 
-  # DCGM Exporter systemd unit
+      # ── 1. NVIDIA 드라이버 (없을 때만) ─────────────────────────────────
+      if ! command -v nvidia-smi >/dev/null 2>&1; then
+        echo "[gpu-install] NVIDIA 드라이버 미발견 — ubuntu-drivers autoinstall"
+        apt-get update
+        apt-get install -y ubuntu-drivers-common
+        ubuntu-drivers autoinstall
+      fi
+
+      # ── 2. CUDA repo + DCGM 데몬 (nvidia-dcgm) ─────────────────────────
+      if ! systemctl list-unit-files nvidia-dcgm.service >/dev/null 2>&1; then
+        echo "[gpu-install] nvidia-dcgm 데몬 미발견 — CUDA repo 등록 후 설치"
+        . /etc/os-release
+        DISTRO="ubuntu${VERSION_ID//./}"
+        ARCH_DEB="$(dpkg --print-architecture)"
+        KEYRING_PKG="cuda-keyring_1.1-1_all.deb"
+        if [ ! -f /usr/share/keyrings/cuda-archive-keyring.gpg ]; then
+          curl -fsSL "https://developer.download.nvidia.com/compute/cuda/repos/${DISTRO}/${ARCH_DEB}/${KEYRING_PKG}" \
+               -o "/tmp/${KEYRING_PKG}"
+          dpkg -i "/tmp/${KEYRING_PKG}"
+          apt-get update
+        fi
+        apt-get install -y datacenter-gpu-manager
+      fi
+      systemctl enable --now nvidia-dcgm.service
+
+      # ── 3. dcgm-exporter 바이너리 ──────────────────────────────────────
+      if ! command -v dcgm-exporter >/dev/null 2>&1; then
+        ARCH="$(uname -m)"
+        case "$ARCH" in
+          x86_64) ARCH=amd64 ;;
+          aarch64) ARCH=arm64 ;;
+          *) echo "unsupported arch: $ARCH" >&2; exit 1 ;;
+        esac
+        TARBALL="dcgm-exporter-${VER}-linux-${ARCH}.tar.gz"
+        URL="https://github.com/NVIDIA/dcgm-exporter/releases/download/${VER}/${TARBALL}"
+        TMP=$(mktemp -d)
+        cd "$TMP"
+        curl -fsSL "$URL" -o "$TARBALL"
+        tar -xzf "$TARBALL"
+        install -m 0755 dcgm-exporter /usr/local/bin/dcgm-exporter
+        install -d -m 0755 /etc/dcgm-exporter
+        install -m 0644 etc/default-counters.csv /etc/dcgm-exporter/default-counters.csv
+        rm -rf "$TMP"
+      fi
+
+  # DCGM Exporter systemd unit — nvidia-dcgm 데몬 의존
   - path: /etc/systemd/system/dcgm-exporter.service
     content: |
       [Unit]
       Description=NVIDIA DCGM Exporter (Prometheus)
-      After=network-online.target
+      After=network-online.target nvidia-dcgm.service
       Wants=network-online.target
+      Requires=nvidia-dcgm.service
 
       [Service]
       Type=simple

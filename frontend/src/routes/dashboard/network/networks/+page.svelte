@@ -2,6 +2,7 @@
   import { untrack } from 'svelte';
   import { auth } from '$lib/stores/auth';
   import { api, ApiError, memoryCache } from '$lib/api/client';
+  import { apiMut } from '$lib/api/mutations';
   import type { Network, FloatingIp } from '$lib/types/resources';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
@@ -117,7 +118,7 @@
           enable_dhcp: form.dhcp,
         };
       }
-      await api.post('/api/networks', body, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      await apiMut('네트워크 생성', () => api.post('/api/networks', body, $auth.token ?? undefined, $auth.projectId ?? undefined));
       showModal = false;
       form = { name: '', addSubnet: false, cidr: '10.0.0.0/24', gateway: '', dhcp: true };
       await fetchNetworks();
@@ -133,10 +134,10 @@
     if (!confirm(`네트워크 "${name || id.slice(0, 8)}"를 삭제하시겠습니까?`)) return;
     deleting = id;
     try {
-      await api.delete(`/api/networks/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      await apiMut('네트워크 삭제', () => api.delete(`/api/networks/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined));
       await fetchNetworks();
-    } catch (e) {
-      alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+    } catch {
+      // error toast shown by apiMut
     } finally {
       deleting = null;
     }

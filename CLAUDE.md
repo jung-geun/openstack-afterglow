@@ -128,6 +128,20 @@ milestone.md          기능별 구현 현황 추적
 - 기능 구현 완료 시 `milestone.md`의 해당 항목을 `[ ]` → `[x]`로 업데이트한다.
 - 신규 기능을 추가할 경우 milestone.md에 항목을 먼저 추가한 후 구현에 착수한다.
 
+### 설정 파일 동기화 의무
+
+**`config.toml` 항목 추가·변경 시 반드시 함께 갱신:**
+- `backend/app/config.py` — `_load_toml()` flat dict + `Settings` 클래스 필드
+- `generate_k8s.py` — 비밀 값은 `render_secret()`, 일반 값은 `_render_toml_for_k8s()`
+- `config.toml.example` — 새 항목을 예시/주석과 함께 문서화
+
+**`backend/app/config.py` 필드 추가·변경 시 반드시 함께 갱신:**
+- `generate_k8s.py` — K8s 배포 시 configmap 또는 secret에 포함되도록
+- `config.toml.example` — 해당 TOML 키가 예시 파일에 존재하도록
+
+> 비밀 값(password, secret, token, key) 기준: `render_secret()` → secret.yaml 환경변수로 주입.
+> 나머지는 `_render_toml_for_k8s()` → configmap의 config.toml 인라인에 포함.
+
 ### Union Mount 설계
 
 - Union Mount 레이어 시스템 구현 시 **`union.md` 를 반드시 먼저 읽는다.**

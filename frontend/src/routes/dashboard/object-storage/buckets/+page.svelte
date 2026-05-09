@@ -7,6 +7,7 @@
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import { validateBucketName } from '$lib/utils/bucketName';
 
 	interface SwiftContainer {
 		name: string;
@@ -64,11 +65,17 @@
 	}
 
 	async function createContainer() {
-		if (!newName.trim()) return;
+		const trimmed = newName.trim();
+		if (!trimmed) return;
+		const validationError = validateBucketName(trimmed);
+		if (validationError) {
+			createError = validationError;
+			return;
+		}
 		creating = true;
 		createError = '';
 		try {
-			await api.post('/api/object-storage', { name: newName.trim() }, token, projectId);
+			await api.post('/api/object-storage', { name: trimmed }, token, projectId);
 			showModal = false;
 			newName = '';
 			await load();
@@ -80,7 +87,7 @@
 	}
 
 	async function deleteContainer(name: string) {
-		if (!confirm(`버킷 "${name}"를 삭제하시겠습니까? 비어있어야 삭제됩니다.`)) return;
+		if (!confirm(`버킷 "${name}" 와 그 안의 모든 객체를 삭제합니다. 계속하시겠습니까?`)) return;
 		deleting = name;
 		try {
 			await api.delete(`/api/object-storage/${encodeURIComponent(name)}`, token, projectId);

@@ -12,14 +12,9 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
+from tests.conftest import make_token_info
 
 _NOW = datetime(2026, 4, 24, 0, 0, 0, tzinfo=UTC)
-_ADMIN_TOKEN_INFO = {
-    "user_id": "admin-uid",
-    "username": "admin",
-    "project_id": "proj-admin",
-    "is_system_admin": True,
-}
 
 
 def _sha(seed: str) -> str:
@@ -42,7 +37,7 @@ def _make_layer(layer_id: str, sealed: bool = True):
 @pytest.fixture
 def admin_client():
     async def _override_token():
-        return _ADMIN_TOKEN_INFO
+        return make_token_info(project_id="proj-admin", is_system_admin=True, roles=["admin"])
 
     from app.api.deps import get_token_info
 

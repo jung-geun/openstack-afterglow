@@ -5,6 +5,7 @@
 	import { api, ApiError } from '$lib/api/client';
 	import { siteConfig, loadSiteConfig } from '$lib/config/site';
 	import { resolvedTheme } from '$lib/stores/theme';
+	import Button from '$lib/components/ui/Button.svelte';
 
 	onMount(async () => {
 		loadSiteConfig();
@@ -174,13 +175,9 @@
 				/>
 			</div>
 
-			<button
-				type="submit"
-				disabled={loading}
-				class="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white font-medium rounded-lg py-2.5 text-sm transition-colors"
-			>
+			<Button type="submit" disabled={loading} class="w-full" size="lg">
 				{loading ? '로그인 중...' : '로그인'}
-			</button>
+			</Button>
 
 			{#if gitlabEnabled}
 				<div class="relative my-2">

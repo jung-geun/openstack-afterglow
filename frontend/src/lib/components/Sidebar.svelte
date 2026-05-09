@@ -5,6 +5,8 @@
 	import ProjectSelector from '$lib/components/ProjectSelector.svelte';
 	import { siteConfig } from '$lib/config/site';
 	import { openWizard } from '$lib/stores/wizard';
+	import RingMark from '$lib/components/ui/RingMark.svelte';
+	import Button from '$lib/components/ui/Button.svelte';
 
 	const sections = $state([
 		{
@@ -152,13 +154,11 @@
 	></button>
 {/if}
 
-<aside class="fixed top-14 left-0 bottom-0 z-30 w-60 bg-gray-900 border-r border-gray-800 flex flex-col overflow-y-auto transition-transform duration-200 ease-in-out {$sidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:sticky md:top-14 md:h-[calc(100vh-3.5rem)] md:translate-x-0 md:shrink-0 md:transition-none">
+<aside class="fixed top-0 left-0 bottom-0 z-30 w-60 bg-gray-900 border-r border-gray-800 flex flex-col overflow-y-auto transition-transform duration-200 ease-in-out {$sidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:sticky md:top-0 md:h-screen md:translate-x-0 md:shrink-0 md:transition-none">
 	<!-- 로고 헤더 -->
 	<div class="h-14 flex items-center gap-2.5 px-4 border-b border-gray-800 shrink-0">
 		<!-- RingMark logo -->
-		<div class="rounded-full shrink-0" style="width:26px;height:26px;background:conic-gradient(from 220deg,#F4976C,#6E4F9A,#8893D4,#F4976C)">
-			<div class="rounded-full bg-gray-900 m-[3px]" style="width:20px;height:20px"></div>
-		</div>
+		<RingMark size={26} />
 		<a href="/dashboard" class="text-white font-bold text-base tracking-tight hover:text-gray-200 transition-colors">
 			{$siteConfig.site_name}
 		</a>
@@ -166,27 +166,26 @@
 
 	<!-- VM 생성 버튼 -->
 	<div class="p-3">
-		<button
-			onclick={openWizard}
-			class="flex items-center justify-center gap-1.5 w-full bg-blue-600 hover:bg-blue-500 text-white text-[13px] font-medium px-4 py-2 rounded-lg transition-colors"
-		>
+		<Button onclick={openWizard} class="w-full">
 			<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v14M5 12h14"/></svg>
 			VM 생성
-		</button>
+		</Button>
 	</div>
 
 	<nav class="flex-1 px-3 pb-4 space-y-0.5">
 		<!-- 대시보드 -->
 		<a
 			href="/dashboard"
-			class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors {$page.url.pathname === '/dashboard' ? 'bg-blue-600/20 text-blue-400 font-medium' : 'text-gray-400 hover:text-white hover:bg-gray-800'}"
+			class="nav-item flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors"
+		class:nav-active={$page.url.pathname === '/dashboard'}
 		>
 			<svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg>
 			대시보드
 		</a>
 		<a
 			href="/dashboard/network/topology"
-			class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors {$page.url.pathname === '/dashboard/network/topology' ? 'bg-blue-600/20 text-blue-400 font-medium' : 'text-gray-400 hover:text-white hover:bg-gray-800'}"
+			class="nav-item flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors"
+		class:nav-active={$page.url.pathname === '/dashboard/network/topology'}
 		>
 			<svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
 			토폴로지
@@ -215,7 +214,8 @@
 							{#if isItemVisible(item)}
 							<a
 								href={item.href}
-								class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors {$page.url.pathname === item.href || ($page.url.pathname.startsWith(item.href + '/') && item.href !== '/dashboard/volumes') ? 'bg-blue-600/20 text-blue-400 font-medium' : 'text-gray-500 hover:text-gray-200 hover:bg-gray-800'}"
+								class="nav-item nav-sub flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors"
+								class:nav-active={$page.url.pathname === item.href || ($page.url.pathname.startsWith(item.href + '/') && item.href !== '/dashboard/volumes')}
 							>
 								{item.label}
 							</a>
@@ -247,7 +247,7 @@
 				<!-- 모바일: 관리/사용자 모드 전환 -->
 				{#if $page.url.pathname.startsWith('/admin')}
 					<a href="/dashboard"
-						class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors bg-blue-600/20 text-blue-400 font-medium md:hidden">
+						class="nav-item nav-active flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors md:hidden">
 						<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
 						사용자 모드
 					</a>
@@ -267,3 +267,36 @@
 		</div>
 	</div>
 </aside>
+
+<style>
+	.nav-item {
+		color: var(--color-ink-2);
+	}
+	.nav-item:hover:not(.nav-active) {
+		color: var(--color-ink-0);
+		background-color: color-mix(in oklab, var(--color-surface-sunken) 80%, transparent);
+	}
+	.nav-sub {
+		color: var(--color-ink-3);
+	}
+	.nav-sub:hover:not(.nav-active) {
+		color: var(--color-ink-1);
+	}
+	.nav-active {
+		background: var(--warm-soft);
+		color: var(--color-warm-2);
+		font-weight: 500;
+		position: relative;
+	}
+	.nav-active::before {
+		content: "";
+		position: absolute;
+		left: 0;
+		top: 6px;
+		bottom: 6px;
+		width: 3px;
+		border-radius: 2px;
+		background: var(--color-warm);
+	}
+
+</style>

@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from app.api.deps import get_os_conn, require_admin
+from app.models.compute import ImageDetail
 from app.services import glance
 
 _logger = logging.getLogger(__name__)
@@ -27,6 +28,13 @@ class AdminUpdateImageRequest(BaseModel):
     min_disk: int | None = None
     min_ram: int | None = None
     visibility: str | None = None
+
+
+class AdminUpdatePropertiesRequest(BaseModel):
+    """이미지 임의 메타데이터 추가/수정/삭제."""
+
+    set: dict[str, str] | None = None
+    remove: list[str] | None = None
 
 
 def _serialize_image(img) -> dict:
@@ -143,6 +151,26 @@ async def update_admin_image(
         _logger.warning("이미지 수정 실패: %s", e)
 
         raise HTTPException(status_code=400, detail="이미지 수정 실패")
+
+
+@router.patch("/images/{image_id}/properties", dependencies=[Depends(require_admin)], response_model=ImageDetail)
+async def update_admin_image_properties(
+    image_id: str,
+    req: AdminUpdatePropertiesRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """이미지 임의 properties 추가/수정/삭제 (관리자)."""
+    try:
+        return await asyncio.to_thread(
+            glance.update_image_properties,
+            conn,
+            image_id,
+            req.set,
+            req.remove,
+        )
+    except Exception as e:
+        _logger.warning("이미지 properties 수정 실패 image=%s: %s", image_id, e)
+        raise HTTPException(status_code=400, detail=f"properties 수정 실패: {e}")
 
 
 @router.delete("/images/{image_id}", dependencies=[Depends(require_admin)], status_code=204)

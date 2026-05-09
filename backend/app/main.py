@@ -129,6 +129,7 @@ from app.api.compute import (
     flavors_router,
     images_router,
     instance_health_router,
+    instance_metrics_router,
     instances_router,
     keypairs_router,
 )
@@ -146,6 +147,7 @@ _mark("api.container")
 # app.api.identity (admin, auth, sub-routers)
 # ---------------------------------------------------------------------------
 from app.api.identity import admin_router, auth_router
+from app.api.identity.admin_activity import router as admin_activity_router
 from app.api.identity.admin_flavors import router as admin_flavors_router
 from app.api.identity.admin_gpu import router as admin_gpu_router
 from app.api.identity.admin_identity import router as admin_identity_router
@@ -154,6 +156,7 @@ from app.api.identity.admin_libraries import router as admin_libraries_router
 from app.api.identity.admin_notion import router as admin_notion_router
 from app.api.identity.admin_services import router as admin_services_router
 from app.api.identity.profile import router as profile_router
+from app.api.identity.profile_activity import router as profile_activity_router
 
 _mark("api.identity")
 
@@ -218,7 +221,12 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 @app.exception_handler(HTTPException)
 async def sanitized_http_exception_handler(request: Request, exc: HTTPException):
-    """5xx 에러의 내부 상세 정보를 클라이언트에 노출하지 않고 로그에만 기록."""
+    """5xx 에러의 내부 상세 정보를 클라이언트에 노출하지 않고 로그에만 기록.
+
+    400/4xx 에 chained __cause__ 가 있으면 진짜 원인을 함께 로깅 — FastAPI 가
+    request body parsing 예외(MultiPartException 등)를 generic 400 으로 wrap 해
+    detail 만으로 진단 어려움 대응.
+    """
     if exc.status_code >= 500:
         _logger.error(
             "HTTP %d: %s %s — %s",
@@ -228,7 +236,36 @@ async def sanitized_http_exception_handler(request: Request, exc: HTTPException)
             exc.detail,
         )
         return JSONResponse(status_code=exc.status_code, content={"detail": "내부 서버 오류"})
+    if exc.status_code == 400:
+        cause = getattr(exc, "__cause__", None)
+        _logger.warning(
+            "HTTP 400: %s %s — detail=%r cause=%s",
+            request.method,
+            request.url.path,
+            exc.detail,
+            f"{type(cause).__name__}: {cause}" if cause else "<none>",
+        )
     return await _default_http_handler(request, exc)
+
+
+try:
+    from starlette.requests import ClientDisconnect as _ClientDisconnect
+except ImportError:  # pragma: no cover - older starlette
+    _ClientDisconnect = None  # type: ignore[assignment]
+
+
+if _ClientDisconnect is not None:
+
+    @app.exception_handler(_ClientDisconnect)
+    async def client_disconnect_handler(request: Request, exc):  # type: ignore[no-untyped-def]
+        """클라이언트가 multipart body 수신 도중 연결을 끊은 경우.
+
+        이 시점에는 endpoint 함수가 아직 호출되지 않아 자체 cancel 로깅이
+        남지 않으므로 여기서 명시적으로 기록한다. 클라는 이미 disconnect 라
+        응답은 도달하지 않지만 access log 분류용으로 499 반환.
+        """
+        _logger.info("client disconnect: %s %s", request.method, request.url.path)
+        return JSONResponse(status_code=499, content={"detail": "클라이언트 연결 종료"})
 
 
 @app.exception_handler(Exception)
@@ -333,11 +370,14 @@ app.include_router(admin_libraries_router, prefix="/api/admin/libraries", tags=[
 app.include_router(admin_notion_router, prefix="/api/admin", tags=["admin-notion"])
 app.include_router(admin_images_router, prefix="/api/admin", tags=["admin-images"])
 app.include_router(profile_router, prefix="/api/profile", tags=["profile"])
+app.include_router(profile_activity_router, prefix="/api/profile/activity", tags=["profile-activity"])
+app.include_router(admin_activity_router, prefix="/api/admin", tags=["admin-activity"])
 # Compute
 app.include_router(images_router, prefix="/api/images", tags=["images"])
 app.include_router(flavors_router, prefix="/api/flavors", tags=["flavors"])
 # instance_health_router을 instances_router보다 먼저 등록 (/health 경로 충돌 방지)
 app.include_router(instance_health_router, prefix="/api/instances", tags=["instance-health"])
+app.include_router(instance_metrics_router, prefix="/api/instances", tags=["instance-metrics"])
 app.include_router(instances_router, prefix="/api/instances", tags=["instances"])
 app.include_router(keypairs_router, prefix="/api/keypairs", tags=["keypairs"])
 # Storage (backups 먼저 등록 — /api/volumes/{id} catch-all 보다 앞에)
@@ -381,8 +421,10 @@ if _svc_cfg.service_trove_enabled:
     app.include_router(trove_router, prefix="/api/database-instances", tags=["database"])
 if _svc_cfg.service_swift_enabled:
     from app.api.object_storage.containers import router as swift_router
+    from app.api.object_storage.upload import router as swift_upload_router
 
     app.include_router(swift_router, prefix="/api/object-storage", tags=["object-storage"])
+    app.include_router(swift_upload_router)
 # Common
 app.include_router(dashboard_router, prefix="/api/dashboard", tags=["dashboard"])
 app.include_router(metrics_router, prefix="/api/metrics", tags=["metrics"])
@@ -679,5 +721,7 @@ async def start_background_workers():
 @app.on_event("shutdown")
 async def shutdown_event():
     from app.database import close_db
+    from app.services import prom_query
 
     await close_db()
+    await prom_query.aclose_client()

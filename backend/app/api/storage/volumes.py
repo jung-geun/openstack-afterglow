@@ -10,7 +10,9 @@ if TYPE_CHECKING:
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from app.api.deps import get_os_conn, require_admin
+from app.api.common.activity_recorder import rec
+from app.api.common.owner_check import assert_resource_owner
+from app.api.deps import get_os_conn, get_token_info, require_admin
 from app.models.storage import CreateVolumeRequest, VolumeInfo
 from app.rate_limit import limiter
 from app.services import cinder, nova
@@ -18,6 +20,18 @@ from app.services.cache import cached_call, invalidate, ttl_fast
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+async def _assert_volume_owner(
+    conn: openstack.connection.Connection,
+    volume_id: str,
+    token_info: dict,
+):
+    try:
+        v = await asyncio.to_thread(conn.block_storage.get_volume, volume_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="볼륨을 찾을 수 없습니다")
+    assert_resource_owner(v, conn, token_info, not_found_detail="볼륨을 찾을 수 없습니다")
 
 
 @router.get("", response_model=list[VolumeInfo])
@@ -35,7 +49,12 @@ async def list_volumes(conn: openstack.connection.Connection = Depends(get_os_co
 
 
 @router.get("/{volume_id}", response_model=VolumeInfo)
-async def get_volume(volume_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def get_volume(
+    volume_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    await _assert_volume_owner(conn, volume_id, token_info)
     try:
         return await asyncio.to_thread(cinder.get_volume, conn, volume_id)
     except Exception:
@@ -48,13 +67,32 @@ async def create_volume(
     request: Request,
     req: CreateVolumeRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
     try:
         result = await asyncio.to_thread(cinder.create_empty_volume, conn, req.name, req.size_gb, req.availability_zone)
         await invalidate(f"afterglow:cinder:{pid}:volumes")
+        await rec(
+            token_info,
+            conn,
+            resource_type="volume",
+            action="volume.create",
+            status="success",
+            resource_name=req.name,
+            extra={"size_gb": req.size_gb},
+        )
         return result
-    except Exception:
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="volume",
+            action="volume.create",
+            status="failed",
+            resource_name=req.name,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="볼륨 생성 실패")
 
 
@@ -62,12 +100,26 @@ async def create_volume(
 async def delete_volume(
     volume_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
+    await _assert_volume_owner(conn, volume_id, token_info)
     try:
         await asyncio.to_thread(cinder.delete_volume, conn, volume_id)
         await invalidate(f"afterglow:cinder:{pid}:volumes")
-    except Exception:
+        await rec(
+            token_info, conn, resource_type="volume", action="volume.delete", status="success", resource_id=volume_id
+        )
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="volume",
+            action="volume.delete",
+            status="failed",
+            resource_id=volume_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="볼륨 삭제 실패")
 
 
@@ -76,6 +128,7 @@ async def force_delete_volume(
     volume_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
     _: None = Depends(require_admin),
+    token_info: dict = Depends(get_token_info),
 ):
     """error/error_deleting 상태 볼륨을 강제 삭제한다. 관리자 전용."""
     pid = conn._afterglow_project_id
@@ -84,7 +137,24 @@ async def force_delete_volume(
         await asyncio.to_thread(cinder.reset_volume_status, conn, volume_id, "error")
         await asyncio.to_thread(cinder.force_delete_volume, conn, volume_id)
         await invalidate(f"afterglow:cinder:{pid}:volumes")
-    except Exception:
+        await rec(
+            token_info,
+            conn,
+            resource_type="volume",
+            action="volume.force_delete",
+            status="success",
+            resource_id=volume_id,
+        )
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="volume",
+            action="volume.force_delete",
+            status="failed",
+            resource_id=volume_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="볼륨 강제 삭제 실패")
 
 
@@ -115,12 +185,14 @@ async def create_volume_transfer(
     volume_id: str,
     req: CreateVolumeTransferRequest | None = None,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     """볼륨 이전(transfer) 생성.
 
     VM에 부착된 경우 자동으로 detach한 뒤 transfer를 생성한다.
     transfer 생성 실패 시 detach한 서버에 볼륨을 다시 attach(rollback)한다.
     """
+    await _assert_volume_owner(conn, volume_id, token_info)
     try:
         vol = await asyncio.to_thread(cinder.get_volume, conn, volume_id)
     except Exception:
@@ -153,8 +225,25 @@ async def create_volume_transfer(
     try:
         name = req.name if req else None
         result = await asyncio.to_thread(cinder.create_volume_transfer, conn, volume_id, name)
+        await rec(
+            token_info,
+            conn,
+            resource_type="volume",
+            action="volume.transfer_create",
+            status="success",
+            resource_id=volume_id,
+        )
         return result
-    except Exception:
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="volume",
+            action="volume.transfer_create",
+            status="failed",
+            resource_id=volume_id,
+            error_message=str(e)[:500],
+        )
         for server_id in detached_server_ids:
             try:
                 await asyncio.to_thread(nova.attach_volume, conn, server_id, volume_id)
@@ -168,13 +257,31 @@ async def accept_volume_transfer(
     transfer_id: str,
     req: AcceptVolumeTransferRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     """볼륨 이전 수락."""
     try:
         result = await asyncio.to_thread(cinder.accept_volume_transfer, conn, transfer_id, req.auth_key)
         await invalidate(f"afterglow:cinder:{conn._afterglow_project_id}:volumes")
+        await rec(
+            token_info,
+            conn,
+            resource_type="volume",
+            action="volume.transfer_accept",
+            status="success",
+            resource_id=transfer_id,
+        )
         return result
-    except Exception:
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="volume",
+            action="volume.transfer_accept",
+            status="failed",
+            resource_id=transfer_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="볼륨 이전 수락 실패")
 
 
@@ -182,9 +289,27 @@ async def accept_volume_transfer(
 async def delete_volume_transfer(
     transfer_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     """볼륨 이전 취소."""
     try:
         await asyncio.to_thread(cinder.delete_volume_transfer, conn, transfer_id)
-    except Exception:
+        await rec(
+            token_info,
+            conn,
+            resource_type="volume",
+            action="volume.transfer_delete",
+            status="success",
+            resource_id=transfer_id,
+        )
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="volume",
+            action="volume.transfer_delete",
+            status="failed",
+            resource_id=transfer_id,
+            error_message=str(e)[:500],
+        )
         raise HTTPException(status_code=500, detail="볼륨 이전 취소 실패")

@@ -7,6 +7,7 @@
 	import StatusChip from '$lib/components/ui/StatusChip.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
+	import DbCreatePanel from '$lib/components/database/DbCreatePanel.svelte';
 
 	interface DbInstance {
 		id: string;
@@ -16,18 +17,7 @@
 		flavor_id: string;
 		size: number;
 		created_at: string;
-	}
-
-	interface DbFlavor {
-		id: string;
-		name: string;
-		ram: number;
-	}
-
-	interface Datastore {
-		id: string;
-		name: string;
-		versions: { id: string; name: string }[];
+		project_id?: string;
 	}
 
 	let instances = $state<DbInstance[]>([]);
@@ -36,67 +26,22 @@
 	let deleting = $state<string | null>(null);
 	let restarting = $state<string | null>(null);
 
-	let showModal = $state(false);
-	let creating = $state(false);
-	let createError = $state('');
-	let flavors = $state<DbFlavor[]>([]);
-	let datastores = $state<Datastore[]>([]);
-	let form = $state({ name: '', flavor_id: '', volume_size: 5, datastore_type: '', datastore_version: '' });
+	let showCreatePanel = $state(false);
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
-	const selectedDs = $derived(datastores.find((d) => d.name === form.datastore_type));
 
 
 	async function load() {
 		if (instances.length === 0) loading = true;
 		else refreshing = true;
 		try {
-			instances = await api.get<DbInstance[]>('/api/database-instances', token, projectId);
+			instances = await api.get<DbInstance[]>('/api/database-instances?all_projects=true', token, projectId);
 		} catch {
 			instances = [];
 		} finally {
 			loading = false;
 			refreshing = false;
-		}
-	}
-
-	async function openModal() {
-		createError = '';
-		try {
-			[flavors, datastores] = await Promise.all([
-				api.get<DbFlavor[]>('/api/database-instances/flavors', token, projectId),
-				api.get<Datastore[]>('/api/database-instances/datastores', token, projectId),
-			]);
-		} catch (e) {
-			createError = '플레이버/데이터스토어 목록을 불러오지 못했습니다. 네트워크 상태를 확인하세요.';
-			console.error('플레이버/데이터스토어 조회 실패:', e);
-		}
-		form = {
-			name: '',
-			flavor_id: flavors.length ? flavors[0].id : '',
-			volume_size: 5,
-			datastore_type: datastores.length ? datastores[0].name : '',
-			datastore_version: (datastores.length && datastores[0].versions.length)
-				? datastores[0].versions[0].name : '',
-		};
-		showModal = true;
-	}
-
-	async function createInstance() {
-		if (!form.name.trim() || !form.flavor_id || !form.datastore_type || !form.datastore_version) {
-			createError = '이름, 데이터스토어, 플레이버를 모두 선택해주세요.';
-			return;
-		}
-		creating = true; createError = '';
-		try {
-			await api.post('/api/database-instances', { ...form, name: form.name.trim() }, token, projectId);
-			showModal = false;
-			await load();
-		} catch (e) {
-			createError = e instanceof ApiError ? e.message : 'DB 인스턴스 생성 실패';
-		} finally {
-			creating = false;
 		}
 	}
 
@@ -136,95 +81,12 @@
 	onMount(load);
 </script>
 
-{#if showModal}
-	<div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
-		onclick={() => { showModal = false; }}
-		role="dialog" aria-modal="true" tabindex="-1"
-		onkeydown={(e) => e.key === 'Escape' && (showModal = false)}>
-		<div class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-lg mx-4 shadow-2xl"
-			onclick={(e) => e.stopPropagation()} role="none" onkeydown={(e) => e.stopPropagation()}>
-			<h2 class="text-lg font-semibold text-white mb-4">DB 인스턴스 생성</h2>
-			<div class="space-y-3">
-				<div>
-					<label class="block text-xs text-gray-400 mb-1">이름</label>
-					<input type="text" bind:value={form.name} placeholder="my-database"
-						class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500" />
-				</div>
-				{#if datastores.length}
-					<div>
-						<label class="block text-xs text-gray-400 mb-1">데이터스토어</label>
-						<select bind:value={form.datastore_type}
-							onchange={() => {
-								const ds = datastores.find(d => d.name === form.datastore_type);
-								form.datastore_version = ds?.versions.length ? ds.versions[0].name : '';
-							}}
-							class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500">
-							{#each datastores as ds}<option value={ds.name}>{ds.name}</option>{/each}
-						</select>
-					</div>
-					{#if selectedDs && selectedDs.versions.length}
-						<div>
-							<label class="block text-xs text-gray-400 mb-1">버전</label>
-							<select bind:value={form.datastore_version}
-								class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500">
-								{#each selectedDs.versions as v}<option value={v.name}>{v.name}</option>{/each}
-							</select>
-						</div>
-					{:else if selectedDs}
-						<p class="text-xs text-amber-400">이 데이터스토어에 사용 가능한 버전이 없습니다.</p>
-					{/if}
-				{:else}
-					<div class="grid grid-cols-2 gap-2">
-						<div>
-							<label class="block text-xs text-gray-400 mb-1">데이터스토어 타입</label>
-							<input type="text" bind:value={form.datastore_type} placeholder="mysql"
-								class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500" />
-						</div>
-						<div>
-							<label class="block text-xs text-gray-400 mb-1">버전</label>
-							<input type="text" bind:value={form.datastore_version} placeholder="5.7"
-								class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500" />
-						</div>
-					</div>
-				{/if}
-				{#if flavors.length}
-					<div>
-						<label class="block text-xs text-gray-400 mb-1">플레이버</label>
-						<select bind:value={form.flavor_id}
-							class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500">
-							{#each flavors as f}<option value={f.id}>{f.name} ({f.ram} MB RAM)</option>{/each}
-						</select>
-					</div>
-				{:else}
-					<div>
-						<label class="block text-xs text-gray-400 mb-1">플레이버 ID</label>
-						<input type="text" bind:value={form.flavor_id} placeholder="flavor UUID"
-							class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500" />
-					</div>
-				{/if}
-				<div>
-					<label class="block text-xs text-gray-400 mb-1">볼륨 크기 (GB)</label>
-					<input type="number" bind:value={form.volume_size} min="1" max="1024"
-						class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500" />
-				</div>
-				{#if createError}<p class="text-red-400 text-xs">{createError}</p>{/if}
-			</div>
-			<div class="flex justify-end gap-2 mt-5">
-				<button onclick={() => { showModal = false; }}
-					class="px-4 py-2 text-sm text-gray-400 hover:text-white border border-gray-700 rounded-lg transition-colors">취소</button>
-				<button onclick={createInstance} disabled={creating || !form.name.trim() || !form.flavor_id || !form.datastore_type || !form.datastore_version}
-					class="px-4 py-2 text-sm bg-amber-600 hover:bg-amber-500 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-lg transition-colors">
-					{creating ? '생성 중...' : '생성'}
-				</button>
-			</div>
-		</div>
-	</div>
-{/if}
+<DbCreatePanel bind:open={showCreatePanel} onCreated={load} />
 
 <div class="p-4 md:p-8 max-w-6xl">
 	<PageHeader breadcrumb="STORAGE / DATABASE INSTANCES" title="DB 인스턴스">
 		{#snippet actions()}
-			<button onclick={openModal}
+			<button onclick={() => (showCreatePanel = true)}
 				class="text-xs text-white bg-amber-600 hover:bg-amber-500 transition-colors px-3 py-1.5 rounded border border-amber-500">+ 인스턴스 생성</button>
 			<AutoRefreshControl
 				bind:active={ar.active}

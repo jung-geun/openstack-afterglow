@@ -9,7 +9,7 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from app.api.deps import get_os_conn
+from app.api.deps import get_os_conn, get_token_info
 from app.models.compute import ImageDetail, ImageInfo
 from app.services import glance
 from app.services.cache import cached_call, ttl_static
@@ -24,6 +24,13 @@ class UpdateImageRequest(BaseModel):
     min_disk: int | None = None
     min_ram: int | None = None
     visibility: str | None = None
+
+
+class UpdatePropertiesRequest(BaseModel):
+    """이미지 임의 메타데이터 추가/수정/삭제."""
+
+    set: dict[str, str] | None = None
+    remove: list[str] | None = None
 
 
 @router.get("", response_model=list[ImageInfo])
@@ -80,6 +87,33 @@ async def update_image(
         return result
     except Exception:
         raise HTTPException(status_code=500, detail="이미지 메타데이터 수정 실패")
+
+
+@router.patch("/{image_id}/properties", response_model=ImageDetail)
+async def update_image_properties(
+    image_id: str,
+    req: UpdatePropertiesRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    """이미지 임의 properties 추가/수정/삭제. 소유자 또는 시스템 관리자만 가능."""
+    try:
+        img = await asyncio.to_thread(conn.image.get_image, image_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="이미지를 찾을 수 없습니다")
+    is_admin = token_info.get("is_system_admin", False)
+    if not is_admin and img.owner != conn._afterglow_project_id:
+        raise HTTPException(status_code=403, detail="본인 소유 이미지만 수정할 수 있습니다")
+    try:
+        return await asyncio.to_thread(
+            glance.update_image_properties,
+            conn,
+            image_id,
+            req.set,
+            req.remove,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"properties 수정 실패: {e}")
 
 
 # ---------------------------------------------------------------------------

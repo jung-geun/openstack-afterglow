@@ -2,9 +2,9 @@
 # Union VM 헬스체크 스크립트 — systemd timer에 의해 주기적 실행
 set -euo pipefail
 
-REPORT_URL="{{ report_url }}"
-INSTANCE_ID="{{ instance_id }}"
-REPORT_TOKEN="{{ report_token }}"
+REPORT_URL={{ report_url | shlex_quote }}
+INSTANCE_ID={{ instance_id | shlex_quote }}
+REPORT_TOKEN={{ report_token | shlex_quote }}
 
 # OverlayFS 마운트 상태
 if mountpoint -q /opt/layers/merged 2>/dev/null; then
@@ -36,9 +36,9 @@ UPTIME=$(awk '{print $1}' /proc/uptime 2>/dev/null || echo "0")
 SHARES_JSON="["
 FIRST=1
 {% for fs in file_storages %}
-SHARE_NAME="{{ fs.name }}"
-SHARE_PROTO="{{ fs.share_proto }}"
-SHARE_PATH="/opt/layers/lower_{{ fs.name }}"
+SHARE_NAME={{ fs.name | shlex_quote }}
+SHARE_PROTO={{ fs.share_proto | shlex_quote }}
+SHARE_PATH="/opt/layers/lower_${SHARE_NAME}"
 SHARE_MOUNTED="false"
 SHARE_STATUS="unreachable"
 

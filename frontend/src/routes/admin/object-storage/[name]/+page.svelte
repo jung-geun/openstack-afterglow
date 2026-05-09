@@ -5,10 +5,11 @@
 	import { api, ApiError, getBaseUrl } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import UploadModal from '$lib/components/UploadModal.svelte';
-	import { formatStorage, formatDate } from '$lib/utils/format';
+	import { formatStorage, formatDate, shortContentType } from '$lib/utils/format';
 	import FileIcon from '$lib/components/ui/FileIcon.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
+	import { uploadQueue } from '$lib/stores/uploadQueue';
 
 	interface ObjectItem {
 		name: string;
@@ -83,6 +84,9 @@
 	}
 
 	let showUpload = $state(false);
+
+	// 드래그앤드롭
+	let dragActive = $state(false);
 	let showNewDir = $state(false);
 	let newDirName = $state('');
 	let creatingDir = $state(false);
@@ -223,16 +227,59 @@
 			contentType === 'application/pdf' || contentType === 'application/json';
 	}
 
-	async function load() {
-		loading = true;
+	async function load(opts: { silent?: boolean } = {}) {
+		if (!opts.silent) loading = true;
 		try {
 			const qs = new URLSearchParams({ delimiter: '/' });
 			if (prefix) qs.set('prefix', prefix);
 			objects = await api.get<ObjectItem[]>(
 				`/api/object-storage/${encodeURIComponent(containerName)}/objects?${qs}`, token, projectId
 			);
-		} catch { objects = []; }
-		finally { loading = false; }
+		} catch { if (!opts.silent) objects = []; }
+		finally { if (!opts.silent) loading = false; }
+	}
+
+	function handleDrop(e: DragEvent) {
+		const files = Array.from(e.dataTransfer?.files ?? []);
+		for (const f of files) {
+			uploadQueue.enqueue(f, {
+				containerName,
+				prefix,
+				token,
+				projectId,
+				onComplete: (job) => { if (job.status === 'success') load({ silent: true }); }
+			});
+		}
+	}
+
+	function hasFiles(e: DragEvent): boolean {
+		const types = e.dataTransfer?.types;
+		if (!types) return false;
+		for (let i = 0; i < types.length; i++) if (types[i] === 'Files') return true;
+		return false;
+	}
+
+	function onWindowDragEnter(e: DragEvent) {
+		if (!hasFiles(e)) return;
+		e.preventDefault();
+		dragActive = true;
+	}
+	function onWindowDragOver(e: DragEvent) {
+		if (!hasFiles(e)) return;
+		e.preventDefault();
+		dragActive = true;
+	}
+	function onWindowDragLeave(e: DragEvent) {
+		if (!hasFiles(e)) return;
+		if (e.clientX <= 0 || e.clientY <= 0 || e.clientX >= window.innerWidth || e.clientY >= window.innerHeight) {
+			dragActive = false;
+		}
+	}
+	function onWindowDrop(e: DragEvent) {
+		if (!hasFiles(e)) return;
+		e.preventDefault();
+		dragActive = false;
+		handleDrop(e);
 	}
 
 	async function downloadObject(name: string) {
@@ -410,7 +457,7 @@
 		return sortAsc ? '↑' : '↓';
 	}
 
-	const ar = createAutoRefresh(load, {
+	const ar = createAutoRefresh(() => load({ silent: true }), {
 		storageKey: 'admin-object-storage-detail',
 		defaultActive: true,
 		defaultInterval: 15,
@@ -419,6 +466,23 @@
 
 	onMount(() => { load(); loadContainerMeta(); });
 </script>
+
+<svelte:window
+	ondragenter={onWindowDragEnter}
+	ondragover={onWindowDragOver}
+	ondragleave={onWindowDragLeave}
+	ondrop={onWindowDrop}
+/>
+
+{#if dragActive}
+	<div class="fixed inset-0 z-50 pointer-events-none flex items-center justify-center bg-indigo-950/40 backdrop-blur-sm border-4 border-dashed border-indigo-500">
+		<div class="text-center">
+			<svg class="w-16 h-16 mx-auto text-indigo-300 mb-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+			<p class="text-indigo-100 font-semibold text-xl">{containerName}{prefix ? ` / ${prefix}` : ''} 에 업로드</p>
+			<p class="text-indigo-300 text-sm mt-1">파일을 여기에 떨어뜨리세요</p>
+		</div>
+	</div>
+{/if}
 
 <div class="p-4 md:p-8 max-w-7xl">
 	<!-- breadcrumb -->
@@ -511,7 +575,7 @@
 	{/if}
 
 	{#if showUpload}
-		<UploadModal {containerName} {prefix} {token} {projectId} onSuccess={load} onClose={() => { showUpload = false; }} />
+		<UploadModal {containerName} {prefix} {token} {projectId} onSuccess={() => load({ silent: true })} onClose={() => { showUpload = false; }} />
 	{/if}
 
 	{#if showNewDir}
@@ -672,7 +736,7 @@
 	{/if}
 
 	<div class="flex gap-6">
-		<div class="flex-1 min-w-0">
+		<div class="flex-1 min-w-0 relative">
 			{#if loading}
 				<LoadingSkeleton variant="table" rows={5} />
 			{:else if objects.length === 0}
@@ -720,10 +784,17 @@
 							</tr>
 						</thead>
 						<tbody>
-							{#each filteredObjects() as obj}
+							{#each filteredObjects() as obj (obj.name)}
 								{@const isDir = isDirectory(obj)}
 								{@const relName = displayName(obj.name)}
-								<tr class="group border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors {selected.has(obj.name) ? 'bg-indigo-950/20' : ''}">
+								<tr
+									class="group border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors cursor-pointer {selected.has(obj.name) ? 'bg-indigo-950/20' : ''}"
+									onclick={(e) => {
+										const t = e.target as HTMLElement;
+										if (t.closest('button, input, a, label')) return;
+										toggleSelect(obj.name);
+									}}
+								>
 									<td class="py-3 px-4">
 										<input type="checkbox"
 											checked={selected.has(obj.name)}
@@ -747,7 +818,10 @@
 											: obj.bytes >= 1048576 ? `${(obj.bytes / 1048576).toFixed(1)} MB`
 											: `${(obj.bytes / 1024).toFixed(1)} KB`}
 									</td>
-									<td class="py-3 px-4 text-gray-500 text-xs whitespace-nowrap">{isDir ? 'folder' : obj.content_type || '-'}</td>
+									<td
+										class="py-3 px-4 text-gray-500 text-xs whitespace-nowrap"
+										title={isDir ? 'folder' : obj.content_type || '-'}
+									>{isDir ? '폴더' : shortContentType(obj.content_type)}</td>
 									<td class="py-3 px-4 text-gray-500 text-xs whitespace-nowrap">{isDir ? '-' : formatDate(obj.last_modified)}</td>
 									<td class="py-3 px-4 text-right">
 										<div class="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">

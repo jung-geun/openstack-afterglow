@@ -10,6 +10,9 @@
 	import { sidebarOpen } from '$lib/stores/sidebar';
 	import { deriveBreadcrumb } from '$lib/config/routes';
 	import Toast from '$lib/components/ui/Toast.svelte';
+	import UploadDock from '$lib/components/UploadDock.svelte';
+	import CmdPalette from '$lib/components/CmdPalette.svelte';
+	import { palette } from '$lib/stores/palette';
 	import './layout.css';
 
 	let { children } = $props();
@@ -127,7 +130,7 @@
 {#if $isLoggedIn}
 	<!-- 세션 만료 경고 배너 -->
 	{#if sessionWarning}
-		<div class="fixed top-14 left-0 right-0 z-40 bg-yellow-900/90 border-b border-yellow-700 px-3 md:px-6 py-2 flex items-center gap-4 text-sm">
+		<div class="fixed top-14 left-0 md:left-60 right-0 z-40 bg-yellow-900/90 border-b border-yellow-700 px-3 md:px-6 py-2 flex items-center gap-4 text-sm">
 			<span class="text-yellow-200">세션이 <strong>{formatRemaining(sessionRemaining)}</strong> 후 만료됩니다.</span>
 			<button
 				onclick={extendSession}
@@ -137,7 +140,7 @@
 			<button onclick={() => sessionWarning = false} class="ml-auto text-yellow-400 hover:text-yellow-200 text-xs">✕</button>
 		</div>
 	{/if}
-	<nav class="fixed top-0 left-0 right-0 z-50 bg-[#0B1220] border-b border-gray-800 h-14 flex items-center px-4 md:px-6 gap-4 shrink-0">
+	<nav class="fixed top-0 left-0 md:left-60 right-0 z-50 bg-[#0B1220] border-b border-gray-800 h-14 flex items-center px-4 md:px-6 gap-4 shrink-0">
 		<!-- 모바일 햄버거 -->
 		<button
 			onclick={() => sidebarOpen.toggle()}
@@ -157,17 +160,16 @@
 			<div class="text-white text-[15px] font-semibold leading-tight truncate">{crumb.title || $siteConfig.site_name}</div>
 		</div>
 
-		<!-- 검색 입력 -->
-		<div class="flex-1 max-w-sm mx-4 hidden md:block relative">
-			<span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none">
-				<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z"/></svg>
-			</span>
-			<input
-				type="search"
-				placeholder="리소스 검색..."
-				class="w-full bg-gray-900 border border-gray-800 text-gray-200 rounded-lg pl-8 pr-3 py-1.5 text-[13px] outline-none focus:border-gray-700 placeholder-gray-600"
-			/>
-		</div>
+		<!-- 검색 입력 (⌘K 트리거) -->
+		<button
+			onclick={() => palette.open()}
+			class="flex-1 max-w-sm mx-4 hidden md:flex items-center gap-2 bg-gray-900 border border-gray-800 text-gray-500 rounded-lg pl-3 pr-2 py-1.5 text-[13px] hover:border-gray-700 transition-colors cursor-text"
+			aria-label="검색 (⌘K)"
+		>
+			<svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z"/></svg>
+			<span class="flex-1 text-left text-gray-600">리소스 검색...</span>
+			<kbd class="text-[10px] border border-gray-700 px-1.5 py-0.5 rounded font-mono text-gray-600">⌘K</kbd>
+		</button>
 
 		<!-- 우측 컨트롤 -->
 		<div class="ml-auto flex items-center gap-2.5">
@@ -229,7 +231,9 @@
 		</div>
 	</nav>
 	<Toast />
-	<main class="pt-14 min-h-screen bg-gray-950 text-white">
+	<UploadDock />
+	<CmdPalette />
+	<main class="min-h-screen bg-gray-950 text-white">
 		{@render children()}
 	</main>
 {:else}

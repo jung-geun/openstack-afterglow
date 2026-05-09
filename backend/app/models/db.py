@@ -303,3 +303,7 @@ class UnionUserMount(Base):
     )
     mounted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
     unmounted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+# ActivityLog 모델을 Base.metadata 에 등록 (create_tables 자동 감지)
+from app.models.activity import ActivityLog  # noqa: E402,F401

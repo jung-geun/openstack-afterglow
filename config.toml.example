@@ -27,6 +27,8 @@ manila_endpoint = ""              # 서비스 카탈로그 대신 직접 지정�
 manila_share_network_id = ""
 manila_share_type = "cephfs"
 manila_nfs_share_type = "nfstype"  # NFS 프로토콜용 share type
+manila_nfs_root_squash = true      # NFS access rule root_squash 강제 (보안 기본값)
+manila_nfs_sec_flavor = "sys"      # NFS 인증 flavor: "sys"(기본) | "krb5"(Kerberos)
 
 # Union Mount 전용 service 프로젝트 UUID (Manila share + Builder VM이 이 프로젝트에 생성됨)
 # 미설정 시 prebuilt 라이브러리 빌드/마운트 경로에서 RuntimeError 발생
@@ -222,9 +224,9 @@ network_id = ""     # 빌더 VM 네트워크 ID (미설정 시 nova.default_netw
 [union]
 # Union Mount 레이어 시스템 v2 — Manila share ID 설정
 # union.md 설계 문서 참조: layer-store-rw / layer-store-ro / manifest-store 3개 share 필요
-# layer_store_rw_share_id = ""    # layer-store-rw Manila share ID (Builder VM 전용 RW)
-# layer_store_ro_share_id = ""    # layer-store-ro Manila share ID (User VM RO)
-# manifest_store_share_id = ""    # manifest-store Manila share ID
+layer_store_rw_share_id = ""    # layer-store-rw Manila share ID (Builder VM 전용 RW)
+layer_store_ro_share_id = ""    # layer-store-ro Manila share ID (User VM RO)
+manifest_store_share_id = ""    # manifest-store Manila share ID
 
 
 [notion]
@@ -260,9 +262,29 @@ max_overflow = 10
 # 앱 시작 시 테이블 자동 생성 (개발/테스트용, 운영에서는 false 후 migrations/ SQL 수동 실행 권장)
 auto_create_tables = true
 
+[monitoring]
+# Prometheus 서버 주소 (K8s 환경에서는 in-cluster DNS 권장)
+prometheus_base_url = "http://prometheus:9090"
+prometheus_username = ""        # basic auth 사용자명 (미사용 시 빈 문자열)
+prometheus_password = ""        # basic auth 비밀번호 (secret.yaml에서 주입)
+# Prometheus Service Discovery 인증 토큰 (/api/sd/prometheus/targets)
+sd_token = ""                   # secret.yaml에서 주입
+# Prometheus scrape 대역 CIDR (예: 10.0.0.0/8). monitoring API 사용 시 필수.
+scrape_cidr = ""
+# 프로젝트/인스턴스 생성 시 모니터링 Security Group 자동 부착
+auto_sg_enabled = true
+node_exporter_sg_name = "node_exporter"   # node_exporter ingress SG 이름 (tcp/9100)
+dcgm_exporter_sg_name = "dcgm_exporter"  # dcgm_exporter ingress SG 이름 (tcp/9400, GPU 전용)
+# Grafana 연동
+grafana_base_url = ""           # Grafana 외부 URL (예: https://grafana.example.com)
+grafana_jwt_secret = ""         # Grafana auth.jwt 서명 시크릿 (secret.yaml에서 주입)
+
+
 [cors]
 # CORS 허용 origin (쉼표 구분). 프론트엔드 실제 접근 URL로 설정.
-# 예: origins = "https://cloud.dmslab.re.kr"
+# 이 값이 S3 직접 업로드(multipart) 시 RGW quarantine 버킷 CORS 의 AllowedOrigins 로도 사용됨.
+# 프로덕션 도메인을 첫 번째로, 개발 도메인을 이후에 나열.
+# 예: origins = "https://cloud.dmslab.re.kr,http://localhost:3000"
 origins = "http://localhost:3000,http://localhost"
 
 [gitlab_oidc]

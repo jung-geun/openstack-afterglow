@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING
 
@@ -15,9 +16,11 @@ if TYPE_CHECKING:
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from app.api.deps import get_os_conn, require_admin
+from app.api.common.activity_recorder import rec
+from app.api.deps import get_os_conn, get_token_info, require_admin
 from app.services import libraries as lib_svc
-from app.services import library_builder, manila
+from app.services import library_builder, manila, neutron
+from app.services.keystone import get_service_project_connection
 
 _logger = logging.getLogger(__name__)
 
@@ -156,6 +159,7 @@ class TriggerBuildRequest(BaseModel):
 @router.post("/build", status_code=202, dependencies=[Depends(require_admin)])
 async def trigger_library_build(
     req: TriggerBuildRequest,
+    token_info: dict = Depends(get_token_info),
 ) -> dict:
     """라이브러리 prebuilt 빌드 트리거. auto_install=True 시 Builder VM 자동 생성.
 
@@ -169,8 +173,18 @@ async def trigger_library_build(
     if req.auto_install:
         try:
             result = await library_builder.start_build(req.library_id)
+            await rec(token_info, None, resource_type="library", action="build", resource_id=req.library_id)
             return result
         except RuntimeError as e:
+            await rec(
+                token_info,
+                None,
+                resource_type="library",
+                action="build",
+                status="failed",
+                resource_id=req.library_id,
+                error_message=str(e)[:500],
+            )
             status_code = 409 if "이미 빌드 중" in str(e) else 400
             raise HTTPException(status_code=status_code, detail=str(e))
     else:
@@ -198,6 +212,7 @@ async def trigger_library_build(
                     "union_status": "pending",
                 },
             )
+            await rec(token_info, None, resource_type="library", action="prebuilt_build", resource_id=req.library_id)
             return {
                 "file_storage_id": storage.id,
                 "status": "pending",
@@ -205,9 +220,27 @@ async def trigger_library_build(
                 "message": "빈 share 생성 완료. 수동으로 패키지를 설치하세요.",
             }
         except RuntimeError as e:
+            await rec(
+                token_info,
+                None,
+                resource_type="library",
+                action="prebuilt_build",
+                status="failed",
+                resource_id=req.library_id,
+                error_message=str(e)[:500],
+            )
             raise HTTPException(status_code=400, detail=str(e))
         except Exception as e:
             _logger.warning("Share 생성 실패: %s", e)
+            await rec(
+                token_info,
+                None,
+                resource_type="library",
+                action="prebuilt_build",
+                status="failed",
+                resource_id=req.library_id,
+                error_message=str(e)[:500],
+            )
             raise HTTPException(status_code=502, detail="Share 생성 실패")
 
 
@@ -229,3 +262,182 @@ async def cancel_library_build(
         raise HTTPException(status_code=409, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# NFS 크로스 프로젝트 access rule 관리 (§3.3)
+# ---------------------------------------------------------------------------
+
+
+class GrantProjectAccessRequest(BaseModel):
+    project_id: str
+    network_id: str
+
+
+def _get_nfs_share_for_library(conn, library_id: str):
+    """라이브러리 ID로 prebuilt NFS share를 조회. NFS가 아니거나 없으면 예외."""
+    try:
+        lib_svc.get_by_id(library_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"라이브러리 {library_id}를 찾을 수 없습니다")
+
+    storages = manila.list_file_storages(conn, metadata_filter={"union_type": "prebuilt", "union_library": library_id})
+    if not storages:
+        raise HTTPException(status_code=404, detail=f"라이브러리 {library_id}의 prebuilt share가 없습니다")
+    storage = storages[0]
+    if storage.share_proto != "NFS":
+        raise HTTPException(
+            status_code=400,
+            detail=f"라이브러리 {library_id}는 NFS가 아닙니다 (proto={storage.share_proto}). IP access rule이 필요하지 않습니다.",
+        )
+    return storage
+
+
+@router.post("/{library_id}/project-access", dependencies=[Depends(require_admin)])
+async def grant_library_project_access(
+    library_id: str,
+    req: GrantProjectAccessRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+) -> dict:
+    """NFS prebuilt 라이브러리에 특정 프로젝트의 subnet CIDR access rule을 추가한다.
+
+    이미 rule이 있으면 idempotent하게 처리한다 (중복 생성 없음).
+    """
+    try:
+        svc_conn = await asyncio.to_thread(get_service_project_connection)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"서비스 프로젝트 연결 실패: {e}")
+    storage = await asyncio.to_thread(_get_nfs_share_for_library, svc_conn, library_id)
+
+    try:
+        net_detail = await asyncio.to_thread(neutron.get_network_detail, conn, req.network_id)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"네트워크 CIDR 조회 실패: {e}")
+
+    cidrs = [s.cidr for s in (net_detail.subnet_details or []) if s.cidr]
+    if not cidrs:
+        raise HTTPException(status_code=400, detail="해당 네트워크에 subnet CIDR이 없습니다")
+
+    granted = []
+    for cidr in cidrs:
+        try:
+            rule = await asyncio.to_thread(
+                manila.ensure_nfs_access_rule,
+                svc_conn,
+                storage.id,
+                cidr,
+                "ro",
+                True,
+                "sys",
+                {"union_grant_project": req.project_id},
+            )
+            granted.append({"cidr": cidr, "rule_id": rule["access_id"]})
+        except Exception as e:
+            _logger.error("NFS access rule 추가 실패 (cidr=%s): %s", cidr, e)
+            raise HTTPException(status_code=502, detail=f"NFS access rule 추가 실패 (cidr={cidr}): {e}")
+
+    await rec(
+        token_info,
+        conn,
+        resource_type="library",
+        action="link",
+        resource_id=library_id,
+        extra={"project_id": req.project_id},
+    )
+    return {
+        "library_id": library_id,
+        "share_id": storage.id,
+        "project_id": req.project_id,
+        "granted_cidrs": [g["cidr"] for g in granted],
+        "rules": granted,
+    }
+
+
+@router.delete("/{library_id}/project-access/{project_id}", dependencies=[Depends(require_admin)])
+async def revoke_library_project_access(
+    library_id: str,
+    project_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+) -> dict:
+    """NFS prebuilt 라이브러리에서 특정 프로젝트의 CIDR access rule을 revoke한다.
+
+    union_grant_project metadata로 해당 프로젝트의 rule을 식별한다.
+    """
+    try:
+        svc_conn = await asyncio.to_thread(get_service_project_connection)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"서비스 프로젝트 연결 실패: {e}")
+    storage = await asyncio.to_thread(_get_nfs_share_for_library, svc_conn, library_id)
+
+    try:
+        access_rules = await asyncio.to_thread(manila.list_access_rules, svc_conn, storage.id)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"access rule 목록 조회 실패: {e}")
+
+    target_rules = [
+        r
+        for r in access_rules
+        if r.get("access_type") == "ip" and r.get("metadata", {}).get("union_grant_project") == project_id
+    ]
+
+    revoked_ids = []
+    for rule in target_rules:
+        try:
+            await asyncio.to_thread(manila.revoke_access_rule, svc_conn, storage.id, rule["id"])
+            revoked_ids.append(rule["id"])
+        except Exception as e:
+            _logger.error("NFS access rule revoke 실패 (rule=%s): %s", rule["id"], e)
+            raise HTTPException(status_code=502, detail=f"access rule revoke 실패 (rule_id={rule['id']}): {e}")
+
+    await rec(
+        token_info,
+        conn,
+        resource_type="library",
+        action="unlink",
+        resource_id=library_id,
+        extra={"project_id": project_id},
+    )
+    return {
+        "library_id": library_id,
+        "share_id": storage.id,
+        "project_id": project_id,
+        "revoked_count": len(revoked_ids),
+        "revoked_rule_ids": revoked_ids,
+    }
+
+
+@router.get("/{library_id}/project-access", dependencies=[Depends(require_admin)])
+async def list_library_project_access(
+    library_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+) -> dict:
+    """NFS prebuilt 라이브러리에 grant된 프로젝트별 CIDR access rule 목록을 반환한다."""
+    try:
+        svc_conn = await asyncio.to_thread(get_service_project_connection)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"서비스 프로젝트 연결 실패: {e}")
+    storage = await asyncio.to_thread(_get_nfs_share_for_library, svc_conn, library_id)
+
+    try:
+        access_rules = await asyncio.to_thread(manila.list_access_rules, svc_conn, storage.id)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"access rule 목록 조회 실패: {e}")
+
+    # union_grant_project metadata로 프로젝트별 grouping
+    grants: dict[str, dict] = {}
+    for rule in access_rules:
+        if rule.get("access_type") != "ip":
+            continue
+        pid = rule.get("metadata", {}).get("union_grant_project", "__unknown__")
+        if pid not in grants:
+            grants[pid] = {"project_id": pid, "cidrs": [], "rule_ids": []}
+        grants[pid]["cidrs"].append(rule.get("access_to", ""))
+        grants[pid]["rule_ids"].append(rule["id"])
+
+    return {
+        "library_id": library_id,
+        "share_id": storage.id,
+        "grants": list(grants.values()),
+    }

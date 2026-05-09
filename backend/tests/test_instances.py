@@ -57,6 +57,70 @@ async def test_get_instance(client, mock_conn):
     assert resp.json()["id"] == "inst-1"
 
 
+@pytest.mark.asyncio
+async def test_get_instance_other_project_returns_404(client, mock_conn):
+    """다른 프로젝트의 인스턴스를 ID 로 직접 조회 시 owner 검증으로 404."""
+    from unittest.mock import MagicMock
+
+    foreign = MagicMock()
+    foreign.id = "inst-foreign"
+    foreign.project_id = "other-project-999"  # mock_conn 의 test-project-123 과 다름
+    with patch("app.api.compute.instances.nova.get_server", return_value=foreign):
+        resp = await client.get("/api/instances/inst-foreign")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_admin_can_get_other_project_instance(admin_client, mock_conn):
+    """admin 은 다른 프로젝트 인스턴스도 직접 조회 가능."""
+    from unittest.mock import MagicMock
+
+    foreign = MagicMock(spec=InstanceInfo)
+    foreign.id = "inst-foreign"
+    foreign.name = "vm-foreign"
+    foreign.project_id = "other-project-999"
+    with (
+        patch("app.api.compute.instances.nova.get_server", return_value=foreign),
+        patch(
+            "app.api.compute.instances._resolve_names",
+            return_value=[make_instance(instance_id="inst-foreign", name="vm-foreign")],
+        ),
+    ):
+        resp = await admin_client.get("/api/instances/inst-foreign")
+    # admin 은 owner check 통과 — 200
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_delete_instance_other_project_returns_404(client, mock_conn):
+    """다른 프로젝트의 인스턴스 ID 로 DELETE 시 owner 검증으로 404."""
+    from unittest.mock import MagicMock
+
+    foreign = MagicMock()
+    foreign.id = "inst-foreign"
+    foreign.project_id = "other-project-999"
+    foreign.union_upper_volume_id = None
+    foreign.union_share_ids = []
+    foreign.union_strategy = None
+    foreign.metadata = {}
+    with patch("app.api.compute.instances.nova.get_server", return_value=foreign):
+        resp = await client.delete("/api/instances/inst-foreign")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_start_instance_other_project_returns_404(client, mock_conn):
+    """action 엔드포인트도 owner 검증으로 다른 프로젝트 차단."""
+    from unittest.mock import MagicMock
+
+    foreign = MagicMock()
+    foreign.id = "inst-foreign"
+    foreign.project_id = "other-project-999"
+    with patch("app.api.compute.instances.nova.get_server", return_value=foreign):
+        resp = await client.post("/api/instances/inst-foreign/start")
+    assert resp.status_code == 404
+
+
 # ────── DELETE ──────
 
 
@@ -75,21 +139,26 @@ async def test_delete_instance(client, mock_conn):
 
 @pytest.mark.asyncio
 async def test_delete_instance_cleans_nfs_access_rules(client, mock_conn):
-    """prebuilt strategy VM 삭제 시 NFS access rule이 revoke되어야 한다."""
-    from app.models.compute import IpAddress
+    """prebuilt strategy VM 삭제 시 해당 VM의 cephx access rule이 svc_conn으로 revoke된다.
 
-    inst = make_instance()
+    NFS CIDR rule은 프로젝트 수준 grant이므로 VM 삭제 시 회수하지 않는다 (lifecycle A).
+    """
+    from unittest.mock import MagicMock
+
+    inst = make_instance()  # name="test-vm"
     inst.union_strategy = "prebuilt"
     inst.union_share_ids = ["share-1"]
-    inst.ip_addresses = [IpAddress(addr="10.0.0.5", type="fixed")]
 
+    mock_svc_conn = MagicMock()
     access_rules = [
-        {"id": "rule-1", "access_type": "ip", "access_to": "10.0.0.5"},
-        {"id": "rule-2", "access_type": "ip", "access_to": "192.168.1.1"},  # 다른 VM의 rule
+        {"id": "rule-ceph-1", "access_type": "cephx", "access_to": "union-ro-test-vm-python311"},
+        {"id": "rule-ceph-2", "access_type": "cephx", "access_to": "union-ro-other-vm-python311"},  # 다른 VM
+        {"id": "rule-ip-1", "access_type": "ip", "access_to": "10.0.0.0/24"},  # CIDR: 회수 안 함
     ]
     with (
         patch("app.api.compute.instances.nova.get_server", return_value=inst),
         patch("app.api.compute.instances.nova.delete_server", return_value=None),
+        patch("app.api.compute.instances.keystone.get_service_project_connection", return_value=mock_svc_conn),
         patch("app.api.compute.instances.manila.list_access_rules", return_value=access_rules) as mock_list,
         patch("app.api.compute.instances.manila.revoke_access_rule") as mock_revoke,
         patch("app.api.compute.instances.neutron.cleanup_instance_fips", return_value=None),
@@ -97,24 +166,27 @@ async def test_delete_instance_cleans_nfs_access_rules(client, mock_conn):
         resp = await client.delete("/api/instances/inst-1")
 
     assert resp.status_code == 204
-    mock_list.assert_called_once_with(mock_conn, "share-1")
-    # IP가 일치하는 rule-1만 revoke
-    mock_revoke.assert_called_once_with(mock_conn, "share-1", "rule-1")
+    mock_list.assert_called_once_with(mock_svc_conn, "share-1")
+    # test-vm의 cephx rule만 revoke, 다른 VM과 CIDR rule은 회수 안 함
+    mock_revoke.assert_called_once_with(mock_svc_conn, "share-1", "rule-ceph-1")
 
 
 @pytest.mark.asyncio
 async def test_delete_instance_nfs_cleanup_failure_continues(client, mock_conn):
-    """NFS access rule 정리 실패해도 VM 삭제는 계속된다."""
-    from app.models.compute import IpAddress
+    """prebuilt access rule 정리 실패해도 VM 삭제는 계속된다."""
+    from unittest.mock import MagicMock
 
     inst = make_instance()
     inst.union_strategy = "prebuilt"
     inst.union_share_ids = ["share-1"]
-    inst.ip_addresses = [IpAddress(addr="10.0.0.5", type="fixed")]
 
     with (
         patch("app.api.compute.instances.nova.get_server", return_value=inst),
         patch("app.api.compute.instances.nova.delete_server", return_value=None),
+        patch(
+            "app.api.compute.instances.keystone.get_service_project_connection",
+            return_value=MagicMock(),
+        ),
         patch("app.api.compute.instances.manila.list_access_rules", side_effect=Exception("Manila 오류")),
         patch("app.api.compute.instances.neutron.cleanup_instance_fips", return_value=None),
     ):
@@ -146,37 +218,62 @@ async def test_delete_instance_dynamic_skips_nfs_rule_cleanup(client, mock_conn)
 # ────── 라이프사이클 액션 ──────
 
 
+def _own_server():
+    """owner check 통과용 — caller 와 동일한 project_id."""
+    from unittest.mock import MagicMock
+
+    s = MagicMock()
+    s.id = "inst-1"
+    s.project_id = "test-project-123"
+    return s
+
+
 @pytest.mark.asyncio
 async def test_start_instance(client, mock_conn):
-    with patch("app.api.compute.instances.nova.start_server", return_value=None):
+    with (
+        patch("app.api.compute.instances.nova.get_server", return_value=_own_server()),
+        patch("app.api.compute.instances.nova.start_server", return_value=None),
+    ):
         resp = await client.post("/api/instances/inst-1/start")
     assert resp.status_code == 204
 
 
 @pytest.mark.asyncio
 async def test_stop_instance(client, mock_conn):
-    with patch("app.api.compute.instances.nova.stop_server", return_value=None):
+    with (
+        patch("app.api.compute.instances.nova.get_server", return_value=_own_server()),
+        patch("app.api.compute.instances.nova.stop_server", return_value=None),
+    ):
         resp = await client.post("/api/instances/inst-1/stop")
     assert resp.status_code == 204
 
 
 @pytest.mark.asyncio
 async def test_reboot_instance(client, mock_conn):
-    with patch("app.api.compute.instances.nova.reboot_server", return_value=None):
+    with (
+        patch("app.api.compute.instances.nova.get_server", return_value=_own_server()),
+        patch("app.api.compute.instances.nova.reboot_server", return_value=None),
+    ):
         resp = await client.post("/api/instances/inst-1/reboot")
     assert resp.status_code == 204
 
 
 @pytest.mark.asyncio
 async def test_shelve_instance(client, mock_conn):
-    with patch("app.api.compute.instances.nova.shelve_server", return_value=None):
+    with (
+        patch("app.api.compute.instances.nova.get_server", return_value=_own_server()),
+        patch("app.api.compute.instances.nova.shelve_server", return_value=None),
+    ):
         resp = await client.post("/api/instances/inst-1/shelve")
     assert resp.status_code == 204
 
 
 @pytest.mark.asyncio
 async def test_unshelve_instance(client, mock_conn):
-    with patch("app.api.compute.instances.nova.unshelve_server", return_value=None):
+    with (
+        patch("app.api.compute.instances.nova.get_server", return_value=_own_server()),
+        patch("app.api.compute.instances.nova.unshelve_server", return_value=None),
+    ):
         resp = await client.post("/api/instances/inst-1/unshelve")
     assert resp.status_code == 204
 
@@ -745,16 +842,53 @@ async def test_create_instance_sg_skipped_when_disabled(client, mock_conn):
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Monitoring SG auto-attach (A11)
+# Monitoring SG auto-attach (A11 — node_exporter / dcgm_exporter 분리)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
+def _make_monitoring_settings(gpu: bool = False, enabled: bool = True, cidr: str = "10.0.0.0/8"):
+    """monitoring SG 관련 settings mock 헬퍼."""
+    from unittest.mock import MagicMock as MM
+
+    s = MM()
+    s.union_auto_egress_sg_enabled = True
+    s.union_egress_sg_name = "union-egress-default"
+    s.monitoring_auto_sg_enabled = enabled
+    s.monitoring_scrape_cidr = cidr
+    s.node_exporter_sg_name = "node_exporter"
+    s.dcgm_exporter_sg_name = "dcgm_exporter"
+    s.ceph_monitors = ""
+    s.upper_volume_size_gb = 10
+    s.os_manila_share_network_id = ""
+    s.os_manila_share_type = ""
+    s.os_manila_nfs_share_type = ""
+    s.default_availability_zone = ""
+    s.default_network_id = ""
+    s.default_network_external_id = ""
+    s.default_network_cidr = ""
+    s.k3s_callback_base_url = ""
+    s.instance_volume_type = ""
+    s.boot_volume_size_gb = 50
+    return s
+
+
+def _make_flavor(is_gpu: bool = False):
+    from unittest.mock import MagicMock as MM
+
+    f = MM()
+    f.id = "flavor-gpu" if is_gpu else "flavor-1"
+    f.is_gpu = is_gpu
+    f.extra_specs = {}
+    return f
+
+
 @pytest.mark.asyncio
-async def test_create_instance_attaches_monitoring_sg(client, mock_conn):
-    """monitoring_auto_sg_enabled=True + scrape_cidr 설정 시 monitoring SG가 자동 attach된다."""
+async def test_create_instance_non_gpu_attaches_node_exporter_only(client, mock_conn):
+    """non-GPU flavor — node_exporter SG + default 포함, dcgm_exporter 미호출."""
     from unittest.mock import MagicMock as MM
 
     attached_sgs = []
+    dc_called = []
 
     def fake_create_server(conn, name, flavor_id, network_id, boot_volume_id, **kwargs):
         attached_sgs.extend(kwargs.get("security_groups") or [])
@@ -762,16 +896,12 @@ async def test_create_instance_attaches_monitoring_sg(client, mock_conn):
 
     fake_vol = MM()
     fake_vol.id = "vol-boot"
-    fake_flavor = MM()
-    fake_flavor.id = "flavor-1"
-    fake_flavor.is_gpu = False
-    fake_flavor.extra_specs = {}
     fake_upper = MM()
     fake_upper.id = "vol-upper"
     mock_conn.compute.create_volume_attachment.return_value = MM()
 
     with (
-        patch("app.api.compute.instances.nova.list_flavors", return_value=[fake_flavor]),
+        patch("app.api.compute.instances.nova.list_flavors", return_value=[_make_flavor(is_gpu=False)]),
         patch("app.api.compute.instances.cinder.create_volume_from_image", return_value=fake_vol),
         patch("app.api.compute.instances.cinder.rename_volume"),
         patch("app.api.compute.instances.cinder.create_empty_volume", return_value=fake_upper),
@@ -782,35 +912,16 @@ async def test_create_instance_attaches_monitoring_sg(client, mock_conn):
         ),
         patch("app.api.compute.instances.cloudinit.generate_userdata", return_value=b"userdata"),
         patch("app.api.compute.instances.neutron.ensure_union_egress_sg", return_value="union-egress-default"),
+        patch("app.api.compute.instances.neutron.ensure_node_exporter_sg", return_value="node_exporter"),
         patch(
-            "app.api.compute.instances.neutron.ensure_monitoring_ingress_sg",
-            return_value="monitoring",
+            "app.api.compute.instances.neutron.ensure_dcgm_exporter_sg",
+            side_effect=lambda *a, **kw: dc_called.append(True) or "dcgm_exporter",
         ),
         patch("app.api.compute.instances.nova.create_server", side_effect=fake_create_server),
         patch("app.api.compute.instances.neutron.list_networks", return_value=[]),
         patch("app.api.compute.instances.is_db_available", return_value=False),
-        patch("app.api.compute.instances.get_settings") as mock_settings,
+        patch("app.api.compute.instances.get_settings", return_value=_make_monitoring_settings(gpu=False)),
     ):
-        s = MM()
-        s.union_auto_egress_sg_enabled = True
-        s.union_egress_sg_name = "union-egress-default"
-        s.monitoring_auto_sg_enabled = True
-        s.monitoring_scrape_cidr = "10.0.0.0/8"
-        s.monitoring_sg_name = "monitoring"
-        s.ceph_monitors = ""
-        s.upper_volume_size_gb = 10
-        s.os_manila_share_network_id = ""
-        s.os_manila_share_type = ""
-        s.os_manila_nfs_share_type = ""
-        s.default_availability_zone = ""
-        s.default_network_id = ""
-        s.default_network_external_id = ""
-        s.default_network_cidr = ""
-        s.health_report_url = ""
-        s.instance_volume_type = ""
-        s.boot_volume_size_gb = 50
-        mock_settings.return_value = s
-
         resp = await client.post(
             "/api/instances",
             json={
@@ -824,31 +935,81 @@ async def test_create_instance_attaches_monitoring_sg(client, mock_conn):
         )
 
     assert resp.status_code in (200, 201, 202)
-    assert "monitoring" in attached_sgs
+    assert "node_exporter" in attached_sgs
+    assert "default" in attached_sgs
+    assert not dc_called, "non-GPU 인스턴스에 dcgm_exporter SG가 attach됨"
 
 
 @pytest.mark.asyncio
-async def test_create_instance_monitoring_sg_skipped_when_disabled(client, mock_conn):
-    """monitoring_auto_sg_enabled=False 시 monitoring SG auto-attach 생략."""
+async def test_create_instance_gpu_attaches_both_sgs(client, mock_conn):
+    """GPU flavor — node_exporter + dcgm_exporter + default 모두 포함."""
     from unittest.mock import MagicMock as MM
 
-    mon_ensure_called = []
+    attached_sgs = []
 
     def fake_create_server(conn, name, flavor_id, network_id, boot_volume_id, **kwargs):
+        attached_sgs.extend(kwargs.get("security_groups") or [])
         return make_instance("srv-new")
 
     fake_vol = MM()
     fake_vol.id = "vol-boot"
-    fake_flavor = MM()
-    fake_flavor.id = "flavor-1"
-    fake_flavor.is_gpu = False
-    fake_flavor.extra_specs = {}
     fake_upper = MM()
     fake_upper.id = "vol-upper"
     mock_conn.compute.create_volume_attachment.return_value = MM()
 
     with (
-        patch("app.api.compute.instances.nova.list_flavors", return_value=[fake_flavor]),
+        patch("app.api.compute.instances.nova.list_flavors", return_value=[_make_flavor(is_gpu=True)]),
+        patch("app.api.compute.instances.cinder.create_volume_from_image", return_value=fake_vol),
+        patch("app.api.compute.instances.cinder.rename_volume"),
+        patch("app.api.compute.instances.cinder.create_empty_volume", return_value=fake_upper),
+        patch("app.api.compute.instances.lib_svc.resolve_with_deps", return_value=["python311"]),
+        patch(
+            "app.api.compute.instances._prepare_prebuilt_file_storages",
+            return_value=[{"file_storage_id": "share-1", "name": "python311", "share_proto": "CEPHFS"}],
+        ),
+        patch("app.api.compute.instances.cloudinit.generate_userdata", return_value=b"userdata"),
+        patch("app.api.compute.instances.neutron.ensure_union_egress_sg", return_value="union-egress-default"),
+        patch("app.api.compute.instances.neutron.ensure_node_exporter_sg", return_value="node_exporter"),
+        patch("app.api.compute.instances.neutron.ensure_dcgm_exporter_sg", return_value="dcgm_exporter"),
+        patch("app.api.compute.instances.nova.create_server", side_effect=fake_create_server),
+        patch("app.api.compute.instances.neutron.list_networks", return_value=[]),
+        patch("app.api.compute.instances.is_db_available", return_value=False),
+        patch("app.api.compute.instances.get_settings", return_value=_make_monitoring_settings(gpu=True)),
+    ):
+        resp = await client.post(
+            "/api/instances",
+            json={
+                "name": "test-vm",
+                "image_id": "img-1",
+                "flavor_id": "flavor-gpu",
+                "network_id": "net-1",
+                "libraries": ["python311"],
+                "strategy": "prebuilt",
+            },
+        )
+
+    assert resp.status_code in (200, 201, 202)
+    assert "node_exporter" in attached_sgs
+    assert "dcgm_exporter" in attached_sgs
+    assert "default" in attached_sgs
+
+
+@pytest.mark.asyncio
+async def test_create_instance_monitoring_sg_skipped_when_disabled(client, mock_conn):
+    """monitoring_auto_sg_enabled=False 시 두 SG 모두 미호출."""
+    from unittest.mock import MagicMock as MM
+
+    ne_called = []
+    dc_called = []
+
+    fake_vol = MM()
+    fake_vol.id = "vol-boot"
+    fake_upper = MM()
+    fake_upper.id = "vol-upper"
+    mock_conn.compute.create_volume_attachment.return_value = MM()
+
+    with (
+        patch("app.api.compute.instances.nova.list_flavors", return_value=[_make_flavor(is_gpu=False)]),
         patch("app.api.compute.instances.cinder.create_volume_from_image", return_value=fake_vol),
         patch("app.api.compute.instances.cinder.rename_volume"),
         patch("app.api.compute.instances.cinder.create_empty_volume", return_value=fake_upper),
@@ -860,34 +1021,21 @@ async def test_create_instance_monitoring_sg_skipped_when_disabled(client, mock_
         patch("app.api.compute.instances.cloudinit.generate_userdata", return_value=b"userdata"),
         patch("app.api.compute.instances.neutron.ensure_union_egress_sg", return_value="union-egress-default"),
         patch(
-            "app.api.compute.instances.neutron.ensure_monitoring_ingress_sg",
-            side_effect=lambda *a, **kw: mon_ensure_called.append(True) or "monitoring",
+            "app.api.compute.instances.neutron.ensure_node_exporter_sg",
+            side_effect=lambda *a, **kw: ne_called.append(True) or "node_exporter",
         ),
-        patch("app.api.compute.instances.nova.create_server", side_effect=fake_create_server),
+        patch(
+            "app.api.compute.instances.neutron.ensure_dcgm_exporter_sg",
+            side_effect=lambda *a, **kw: dc_called.append(True) or "dcgm_exporter",
+        ),
+        patch("app.api.compute.instances.nova.create_server", return_value=make_instance("srv-new")),
         patch("app.api.compute.instances.neutron.list_networks", return_value=[]),
         patch("app.api.compute.instances.is_db_available", return_value=False),
-        patch("app.api.compute.instances.get_settings") as mock_settings,
+        patch(
+            "app.api.compute.instances.get_settings",
+            return_value=_make_monitoring_settings(enabled=False),
+        ),
     ):
-        s = MM()
-        s.union_auto_egress_sg_enabled = True
-        s.union_egress_sg_name = "union-egress-default"
-        s.monitoring_auto_sg_enabled = False
-        s.monitoring_scrape_cidr = "10.0.0.0/8"
-        s.monitoring_sg_name = "monitoring"
-        s.ceph_monitors = ""
-        s.upper_volume_size_gb = 10
-        s.os_manila_share_network_id = ""
-        s.os_manila_share_type = ""
-        s.os_manila_nfs_share_type = ""
-        s.default_availability_zone = ""
-        s.default_network_id = ""
-        s.default_network_external_id = ""
-        s.default_network_cidr = ""
-        s.health_report_url = ""
-        s.instance_volume_type = ""
-        s.boot_volume_size_gb = 50
-        mock_settings.return_value = s
-
         await client.post(
             "/api/instances",
             json={
@@ -900,4 +1048,57 @@ async def test_create_instance_monitoring_sg_skipped_when_disabled(client, mock_
             },
         )
 
-    assert not mon_ensure_called, "monitoring_auto_sg_enabled=False임에도 ensure_monitoring_ingress_sg가 호출됨"
+    assert not ne_called, "monitoring_auto_sg_enabled=False인데 ensure_node_exporter_sg 호출됨"
+    assert not dc_called, "monitoring_auto_sg_enabled=False인데 ensure_dcgm_exporter_sg 호출됨"
+
+
+@pytest.mark.asyncio
+async def test_create_instance_monitoring_sg_skipped_when_no_cidr(client, mock_conn):
+    """monitoring_scrape_cidr 빈 값이면 두 SG 모두 미호출."""
+    from unittest.mock import MagicMock as MM
+
+    ne_called = []
+
+    fake_vol = MM()
+    fake_vol.id = "vol-boot"
+    fake_upper = MM()
+    fake_upper.id = "vol-upper"
+    mock_conn.compute.create_volume_attachment.return_value = MM()
+
+    with (
+        patch("app.api.compute.instances.nova.list_flavors", return_value=[_make_flavor(is_gpu=False)]),
+        patch("app.api.compute.instances.cinder.create_volume_from_image", return_value=fake_vol),
+        patch("app.api.compute.instances.cinder.rename_volume"),
+        patch("app.api.compute.instances.cinder.create_empty_volume", return_value=fake_upper),
+        patch("app.api.compute.instances.lib_svc.resolve_with_deps", return_value=["python311"]),
+        patch(
+            "app.api.compute.instances._prepare_prebuilt_file_storages",
+            return_value=[{"file_storage_id": "share-1", "name": "python311", "share_proto": "CEPHFS"}],
+        ),
+        patch("app.api.compute.instances.cloudinit.generate_userdata", return_value=b"userdata"),
+        patch("app.api.compute.instances.neutron.ensure_union_egress_sg", return_value="union-egress-default"),
+        patch(
+            "app.api.compute.instances.neutron.ensure_node_exporter_sg",
+            side_effect=lambda *a, **kw: ne_called.append(True) or "node_exporter",
+        ),
+        patch("app.api.compute.instances.nova.create_server", return_value=make_instance("srv-new")),
+        patch("app.api.compute.instances.neutron.list_networks", return_value=[]),
+        patch("app.api.compute.instances.is_db_available", return_value=False),
+        patch(
+            "app.api.compute.instances.get_settings",
+            return_value=_make_monitoring_settings(cidr=""),
+        ),
+    ):
+        await client.post(
+            "/api/instances",
+            json={
+                "name": "test-vm",
+                "image_id": "img-1",
+                "flavor_id": "flavor-1",
+                "network_id": "net-1",
+                "libraries": ["python311"],
+                "strategy": "prebuilt",
+            },
+        )
+
+    assert not ne_called, "scrape_cidr 미설정인데 ensure_node_exporter_sg 호출됨"

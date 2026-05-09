@@ -1,3 +1,4 @@
+import ipaddress
 import re
 import uuid
 from enum import Enum
@@ -5,6 +6,9 @@ from enum import Enum
 from pydantic import BaseModel, Field, field_validator
 
 _NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$")
+# k3s server 가 발급하는 node-token 은 영숫자 + : _ + / = . - 만 사용. shell variable 치환을 거치므로
+# 임의 메타문자 차단 — callback 단계에서 검증해 cloud-init 단계에서 인젝션을 차단한다.
+_NODE_TOKEN_RE = re.compile(r"^[A-Za-z0-9:_+/=.\-]{8,512}$")
 
 
 class K3sProgressStep(str, Enum):
@@ -35,7 +39,8 @@ class CreateK3sClusterRequest(BaseModel):
     network_id: str | None = None
     key_name: str | None = None
     os_type: str = "ubuntu"  # "ubuntu" | "fcos"
-    allowed_cidrs: list[str] | None = None  # SSH/K3s API 접근 허용 CIDR (미지정 시 0.0.0.0/0)
+    # SSH/K3s API 접근 허용 CIDR (미지정 시 0.0.0.0/0). 형식 검증 + 최대 20개로 quota 폭증 방지.
+    allowed_cidrs: list[str] | None = Field(default=None, max_length=20)
 
     @field_validator("name")
     @classmethod
@@ -52,6 +57,23 @@ class CreateK3sClusterRequest(BaseModel):
         if v not in _VALID_OS_TYPES:
             raise ValueError(f"os_type은 {sorted(_VALID_OS_TYPES)} 중 하나여야 합니다")
         return v
+
+    @field_validator("allowed_cidrs")
+    @classmethod
+    def validate_allowed_cidrs(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return v
+        validated: list[str] = []
+        for raw in v:
+            if not isinstance(raw, str):
+                raise ValueError("allowed_cidrs 의 각 항목은 문자열이어야 합니다")
+            try:
+                # strict=False — 호스트 비트를 0 으로 정규화
+                net = ipaddress.ip_network(raw, strict=False)
+            except (ValueError, TypeError) as e:
+                raise ValueError(f"allowed_cidrs '{raw}' 가 유효한 CIDR 이 아닙니다: {e}") from e
+            validated.append(str(net))
+        return validated
 
 
 class K3sClusterInfo(BaseModel):
@@ -96,12 +118,33 @@ class ScaleK3sClusterRequest(BaseModel):
 
 
 class K3sCallbackRequest(BaseModel):
-    token: str
+    token: str = Field(min_length=8, max_length=128)
     success: bool
-    kubeconfig: str | None = None
-    node_token: str | None = None
-    server_ip: str | None = None
-    error: str | None = None
-    occm_status: str | None = None  # 하위호환 유지 (deprecated)
+    kubeconfig: str | None = Field(default=None, max_length=65536)
+    # node_token 은 agent userdata 의 shell 변수로 들어가므로 메타문자 차단.
+    node_token: str | None = Field(default=None, max_length=512)
+    server_ip: str | None = Field(default=None, max_length=64)
+    error: str | None = Field(default=None, max_length=2048)
+    occm_status: str | None = Field(default=None, max_length=64)  # 하위호환 유지 (deprecated)
     plugin_status: dict[str, str | dict] | None = None  # {"occm": {"status": "deployed", "error": ""}}
-    secret_cloud_config_status: str | None = None  # "ok" | "failed"
+    secret_cloud_config_status: str | None = Field(default=None, max_length=64)  # "ok" | "failed"
+
+    @field_validator("node_token")
+    @classmethod
+    def validate_node_token(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if not _NODE_TOKEN_RE.match(v):
+            raise ValueError("node_token 형식이 올바르지 않습니다 (영숫자 + :_+/=.- 만 허용)")
+        return v
+
+    @field_validator("server_ip")
+    @classmethod
+    def validate_server_ip(cls, v: str | None) -> str | None:
+        if v is None or not v:
+            return v
+        try:
+            ipaddress.ip_address(v)
+        except ValueError as e:
+            raise ValueError(f"server_ip '{v}' 가 유효한 IP 주소가 아닙니다") from e
+        return v

@@ -29,7 +29,7 @@ def test_encrypt_decrypt_manager_password(monkeypatch):
     from app.services.k3s_crypto import decrypt_manager_password, encrypt_manager_password
 
     enc = encrypt_manager_password("my-secret-password")
-    assert enc.startswith("v2:")
+    assert enc.startswith("v3:")
     assert decrypt_manager_password(enc) == "my-secret-password"
 
 

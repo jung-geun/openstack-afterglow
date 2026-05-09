@@ -139,6 +139,30 @@ async def test_reissue_revokes_old_token(fake_redis):
     assert await svc.verify_report_token(old_token) is None
 
 
+@pytest.mark.asyncio
+async def test_token_ttl_is_seven_days(fake_redis):
+    """절대 만료 7일 — 이전 30일 sliding 에서 단축됨."""
+    assert svc._TOKEN_TTL == 86400 * 7
+
+
+@pytest.mark.asyncio
+async def test_verify_does_not_extend_ttl(fake_redis):
+    """sliding TTL 갱신 제거 검증 — verify 후에도 TTL 변하지 않음."""
+    import time
+
+    token = await svc.issue_report_token("inst-sliding", "proj-1")
+    key = f"{svc._TOKEN_PREFIX}{token}"
+    expiry_before = fake_redis._store[key][1]
+
+    # 1초 sleep 후 verify — sliding 이라면 expiry 가 갱신되어야 했지만 제거됨
+    time.sleep(0.05)
+    await svc.verify_report_token(token)
+    expiry_after = fake_redis._store[key][1]
+
+    # expire 가 호출됐다면 expiry_after > expiry_before. 호출되지 않으면 동일.
+    assert expiry_after == expiry_before
+
+
 # ---------------------------------------------------------------------------
 # 헬스 결과 캐시
 # ---------------------------------------------------------------------------

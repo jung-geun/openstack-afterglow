@@ -42,11 +42,11 @@ write_files:
 
       log "k3s 에이전트 설치 시작 (버전: {{ k3s_version }})..."
       curl -sfL https://get.k3s.io | \
-        INSTALL_K3S_VERSION="{{ k3s_version }}" \
-        K3S_URL="https://{{ server_ip }}:6443" \
-        K3S_TOKEN="{{ node_token }}" \
+        INSTALL_K3S_VERSION={{ k3s_version | shlex_quote }} \
+        K3S_URL={{ ('https://' ~ server_ip ~ ':6443') | shlex_quote }} \
+        K3S_TOKEN={{ node_token | shlex_quote }} \
 {% if extra_agent_args %}
-        INSTALL_K3S_EXEC="{{ extra_agent_args | join(' ') }}" \
+        INSTALL_K3S_EXEC={{ extra_agent_args | join(' ') | shlex_quote }} \
 {% endif %}
         sh - 2>&1 | tee -a "$LOG"
 
