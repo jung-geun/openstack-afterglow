@@ -12,7 +12,10 @@ _logger = logging.getLogger(__name__)
 _TOKEN_PREFIX = "afterglow:health:token:"
 _INSTANCE_PREFIX = "afterglow:health:instance:"
 _RESULT_PREFIX = "afterglow:health:result:"
-_TOKEN_TTL = 86400 * 30  # 30일 (sliding window으로 활성 VM은 만료되지 않음)
+# 절대 만료 7일 — sliding window 제거 (이전: 30일 sliding 으로 사실상 영구 토큰).
+# VM userdata 가 노출돼도 7일 후 토큰이 만료되어 cephx rotate 권한 무효화.
+# 인스턴스가 7일 이상 살아있으면 health_check.sh 의 재발급 흐름이 새 토큰을 받음.
+_TOKEN_TTL = 86400 * 7
 _RESULT_TTL = 1800  # 30분
 
 
@@ -40,18 +43,18 @@ async def issue_report_token(instance_id: str, project_id: str) -> str:
 
 
 async def verify_report_token(token: str) -> dict | None:
-    """토큰 검증. 성공 시 {instance_id, project_id} 반환 + TTL 갱신(sliding window)."""
+    """토큰 검증. 성공 시 {instance_id, project_id} 반환.
+
+    sliding TTL 갱신은 제거 (이전: 매 호출마다 r.expire(7d) 로 사실상 영구 토큰).
+    토큰은 발급 후 절대 만료 7일 — 만료 전 인스턴스 부팅 시 재발급되도록 cloud-init
+    측에서 처리.
+    """
     try:
         r = await _redis()
         raw = await r.get(f"{_TOKEN_PREFIX}{token}")
         if not raw:
             return None
-        data = json.loads(raw)
-        instance_id = data.get("instance_id", "")
-        # sliding window: 두 키 TTL 갱신
-        await r.expire(f"{_TOKEN_PREFIX}{token}", _TOKEN_TTL)
-        await r.expire(f"{_INSTANCE_PREFIX}{instance_id}", _TOKEN_TTL)
-        return data
+        return json.loads(raw)
     except Exception:
         _logger.warning("instance_health: 토큰 검증 실패", exc_info=True)
         return None
