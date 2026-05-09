@@ -9,6 +9,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.api.common.owner_check import assert_resource_owner
 from app.api.deps import get_os_conn, get_token_info
 from app.models.database import (
     CreateBackupRequest,
@@ -21,6 +22,20 @@ from app.models.database import (
 _logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+async def _assert_db_instance_owner(
+    conn: openstack.connection.Connection,
+    instance_id: str,
+    token_info: dict,
+):
+    """Trove 인스턴스 owner 검증 — sub-resource (databases/users/backups) 도
+    instance_id 가 caller-owned 면 간접적으로 보호된다."""
+    try:
+        inst = await asyncio.to_thread(conn.database.get_instance, instance_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="DB 인스턴스를 찾을 수 없습니다")
+    assert_resource_owner(inst, conn, token_info, not_found_detail="DB 인스턴스를 찾을 수 없습니다")
 
 
 # ---------------------------------------------------------------------------
@@ -85,14 +100,29 @@ async def list_db_volume_types(
 # ---------------------------------------------------------------------------
 
 
+async def _assert_db_backup_owner(
+    conn: openstack.connection.Connection,
+    backup_id: str,
+    token_info: dict,
+):
+    """Trove backup owner 검증."""
+    try:
+        bk = await asyncio.to_thread(conn.database.get_backup, backup_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="백업을 찾을 수 없습니다")
+    assert_resource_owner(bk, conn, token_info, not_found_detail="백업을 찾을 수 없습니다")
+
+
 @router.delete("/backups/{backup_id}", status_code=204)
 async def delete_backup(
     backup_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     """백업 삭제."""
     from app.services import trove
 
+    await _assert_db_backup_owner(conn, backup_id, token_info)
     try:
         await asyncio.to_thread(trove.delete_backup, conn, backup_id)
     except Exception:
@@ -103,10 +133,12 @@ async def delete_backup(
 async def restore_from_backup(
     req: RestoreFromBackupRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     """백업에서 새 인스턴스 복원."""
     from app.services import trove
 
+    await _assert_db_backup_owner(conn, req.backup_id, token_info)
     try:
         return await asyncio.to_thread(
             trove.create_instance,
@@ -215,10 +247,12 @@ async def create_database_instance(
 async def get_database_instance(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     """DB 인스턴스 상세."""
     from app.services import trove
 
+    await _assert_db_instance_owner(conn, instance_id, token_info)
     try:
         return await asyncio.to_thread(trove.get_instance, conn, instance_id)
     except Exception:
@@ -229,10 +263,12 @@ async def get_database_instance(
 async def delete_database_instance(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     """DB 인스턴스 삭제."""
     from app.services import trove
 
+    await _assert_db_instance_owner(conn, instance_id, token_info)
     try:
         await asyncio.to_thread(trove.delete_instance, conn, instance_id)
     except Exception:
@@ -243,10 +279,12 @@ async def delete_database_instance(
 async def restart_database_instance(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     """DB 인스턴스 재시작."""
     from app.services import trove
 
+    await _assert_db_instance_owner(conn, instance_id, token_info)
     try:
         await asyncio.to_thread(trove.restart_instance, conn, instance_id)
     except Exception:
@@ -257,10 +295,12 @@ async def restart_database_instance(
 async def enable_root_user(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     """root 유저 활성화. {name, password} 반환."""
     from app.services import trove
 
+    await _assert_db_instance_owner(conn, instance_id, token_info)
     try:
         return await asyncio.to_thread(trove.enable_root, conn, instance_id)
     except Exception:
@@ -276,10 +316,12 @@ async def enable_root_user(
 async def list_instance_databases(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     """인스턴스 내 데이터베이스 목록."""
     from app.services import trove
 
+    await _assert_db_instance_owner(conn, instance_id, token_info)
     try:
         return await asyncio.to_thread(trove.list_databases, conn, instance_id)
     except Exception:
@@ -291,10 +333,12 @@ async def create_instance_database(
     instance_id: str,
     req: CreateDatabaseRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     """인스턴스 내 데이터베이스 생성."""
     from app.services import trove
 
+    await _assert_db_instance_owner(conn, instance_id, token_info)
     try:
         await asyncio.to_thread(trove.create_database, conn, instance_id, req.name, req.character_set, req.collate)
         return {"name": req.name}
@@ -307,10 +351,12 @@ async def delete_instance_database(
     instance_id: str,
     db_name: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     """인스턴스 내 데이터베이스 삭제."""
     from app.services import trove
 
+    await _assert_db_instance_owner(conn, instance_id, token_info)
     try:
         await asyncio.to_thread(trove.delete_database, conn, instance_id, db_name)
     except Exception:
@@ -326,10 +372,12 @@ async def delete_instance_database(
 async def list_instance_users(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     """인스턴스 내 유저 목록."""
     from app.services import trove
 
+    await _assert_db_instance_owner(conn, instance_id, token_info)
     try:
         return await asyncio.to_thread(trove.list_users, conn, instance_id)
     except Exception:
@@ -341,10 +389,12 @@ async def create_instance_user(
     instance_id: str,
     req: CreateUserRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     """인스턴스 내 유저 생성."""
     from app.services import trove
 
+    await _assert_db_instance_owner(conn, instance_id, token_info)
     try:
         await asyncio.to_thread(trove.create_user, conn, instance_id, req.name, req.password, req.databases or None)
         return {"name": req.name}
@@ -357,10 +407,12 @@ async def delete_instance_user(
     instance_id: str,
     username: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     """인스턴스 내 유저 삭제."""
     from app.services import trove
 
+    await _assert_db_instance_owner(conn, instance_id, token_info)
     try:
         await asyncio.to_thread(trove.delete_user, conn, instance_id, username)
     except Exception:
@@ -376,10 +428,12 @@ async def delete_instance_user(
 async def list_instance_backups(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     """인스턴스 백업 목록."""
     from app.services import trove
 
+    await _assert_db_instance_owner(conn, instance_id, token_info)
     try:
         return await asyncio.to_thread(trove.list_backups, conn, instance_id)
     except Exception:
@@ -391,10 +445,12 @@ async def create_instance_backup(
     instance_id: str,
     req: CreateBackupRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
 ):
     """인스턴스 백업 생성."""
     from app.services import trove
 
+    await _assert_db_instance_owner(conn, instance_id, token_info)
     try:
         return await asyncio.to_thread(trove.create_backup, conn, instance_id, req.name, req.description)
     except Exception:

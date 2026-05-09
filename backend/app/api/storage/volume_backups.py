@@ -10,11 +10,28 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from app.api.common.activity_recorder import rec
+from app.api.common.owner_check import assert_resource_owner
 from app.api.deps import get_os_conn, get_token_info
 from app.services import auto_backup, cinder
 from app.services.cache import cached_call, ttl_fast
 
 router = APIRouter()
+
+
+async def _assert_backup_owner(conn, backup_id: str, token_info: dict):
+    try:
+        b = await asyncio.to_thread(conn.block_storage.get_backup, backup_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="백업을 찾을 수 없습니다")
+    assert_resource_owner(b, conn, token_info, not_found_detail="백업을 찾을 수 없습니다")
+
+
+async def _assert_volume_owner_local(conn, volume_id: str, token_info: dict):
+    try:
+        v = await asyncio.to_thread(conn.block_storage.get_volume, volume_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="볼륨을 찾을 수 없습니다")
+    assert_resource_owner(v, conn, token_info, not_found_detail="볼륨을 찾을 수 없습니다")
 
 
 class CreateBackupRequest(BaseModel):
@@ -48,6 +65,7 @@ async def create_backup(
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
 ):
+    await _assert_volume_owner_local(conn, req.volume_id, token_info)
     try:
         result = await asyncio.to_thread(
             cinder.create_backup, conn, req.volume_id, req.name, req.description, req.incremental
@@ -76,7 +94,12 @@ async def create_backup(
 
 
 @router.get("/{backup_id}")
-async def get_backup(backup_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def get_backup(
+    backup_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    await _assert_backup_owner(conn, backup_id, token_info)
     try:
         return await asyncio.to_thread(cinder.get_backup, conn, backup_id)
     except Exception:
@@ -89,6 +112,7 @@ async def delete_backup(
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
 ):
+    await _assert_backup_owner(conn, backup_id, token_info)
     try:
         await asyncio.to_thread(cinder.delete_backup, conn, backup_id)
         await rec(
@@ -119,6 +143,9 @@ async def restore_backup(
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
 ):
+    await _assert_backup_owner(conn, backup_id, token_info)
+    if req.volume_id:
+        await _assert_volume_owner_local(conn, req.volume_id, token_info)
     try:
         result = await asyncio.to_thread(cinder.restore_backup, conn, backup_id, req.volume_id)
         await rec(

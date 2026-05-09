@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from app.api.common.activity_recorder import rec
+from app.api.common.owner_check import assert_resource_owner
 from app.api.deps import get_os_conn, get_token_info, require_admin
 from app.models.storage import CreateVolumeRequest, VolumeInfo
 from app.rate_limit import limiter
@@ -19,6 +20,18 @@ from app.services.cache import cached_call, invalidate, ttl_fast
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+async def _assert_volume_owner(
+    conn: openstack.connection.Connection,
+    volume_id: str,
+    token_info: dict,
+):
+    try:
+        v = await asyncio.to_thread(conn.block_storage.get_volume, volume_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="볼륨을 찾을 수 없습니다")
+    assert_resource_owner(v, conn, token_info, not_found_detail="볼륨을 찾을 수 없습니다")
 
 
 @router.get("", response_model=list[VolumeInfo])
@@ -36,7 +49,12 @@ async def list_volumes(conn: openstack.connection.Connection = Depends(get_os_co
 
 
 @router.get("/{volume_id}", response_model=VolumeInfo)
-async def get_volume(volume_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def get_volume(
+    volume_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    await _assert_volume_owner(conn, volume_id, token_info)
     try:
         return await asyncio.to_thread(cinder.get_volume, conn, volume_id)
     except Exception:
@@ -85,6 +103,7 @@ async def delete_volume(
     token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
+    await _assert_volume_owner(conn, volume_id, token_info)
     try:
         await asyncio.to_thread(cinder.delete_volume, conn, volume_id)
         await invalidate(f"afterglow:cinder:{pid}:volumes")
@@ -173,6 +192,7 @@ async def create_volume_transfer(
     VM에 부착된 경우 자동으로 detach한 뒤 transfer를 생성한다.
     transfer 생성 실패 시 detach한 서버에 볼륨을 다시 attach(rollback)한다.
     """
+    await _assert_volume_owner(conn, volume_id, token_info)
     try:
         vol = await asyncio.to_thread(cinder.get_volume, conn, volume_id)
     except Exception:
