@@ -106,8 +106,13 @@ async def get_k3s_cluster(cluster_id: str, token_info: dict = Depends(get_token_
 
 
 @router.api_route("/{cluster_id}/kubeconfig", methods=["GET", "HEAD"])
-async def download_kubeconfig(cluster_id: str, token_info: dict = Depends(get_token_info)):
-    """kubeconfig YAML 파일 다운로드. 아직 준비되지 않으면 404."""
+async def download_kubeconfig(
+    request: Request, cluster_id: str, token_info: dict = Depends(get_token_info)
+):
+    """kubeconfig YAML 파일 다운로드. 아직 준비되지 않으면 404.
+
+    매 호출마다 audit log 기록 — 토큰 탈취 시 다운로드 추적이 가능하도록.
+    """
     project_id = token_info["project_id"]
     cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
     if not cluster:
@@ -124,6 +129,25 @@ async def download_kubeconfig(cluster_id: str, token_info: dict = Depends(get_to
         )
 
     cluster_name = cluster.get("name", cluster_id)
+
+    # audit log — HEAD 는 보통 브라우저 사전 요청이라 GET 일 때만 기록
+    if request.method == "GET":
+        try:
+            from app.rate_limit import _get_real_ip
+
+            source_ip = _get_real_ip(request)
+            await rec(
+                token_info,
+                None,
+                resource_type="k3s_cluster",
+                action="kubeconfig_download",
+                resource_id=cluster_id,
+                resource_name=cluster_name,
+                extra={"source_ip": source_ip},
+            )
+        except Exception:
+            _logger.warning("kubeconfig 다운로드 audit 기록 실패", exc_info=True)
+
     return Response(
         content=kubeconfig,
         media_type="application/yaml",

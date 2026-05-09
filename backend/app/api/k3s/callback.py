@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from app.api.k3s.clusters import _rand_suffix
 from app.models.k3s import K3sCallbackRequest
-from app.rate_limit import limiter
+from app.rate_limit import _get_real_ip, limiter
 from app.services import k3s_db as k3s_cluster
 
 router = APIRouter()
@@ -20,15 +20,34 @@ async def k3s_callback(request: Request, req: K3sCallbackRequest):
     """k3s 서버 VM의 cloud-init에서 kubeconfig + node-token 수신.
 
     일회성 토큰으로 보안 보장. 토큰 소비 후 에이전트 VM 생성은 백그라운드로 처리.
+    Source IP 는 audit/forensic 목적으로 로그에 기록 (트러스트한 proxies 통해
+    추출 — `_get_real_ip` 가 trusted_proxies 검증).
     """
+    source_ip = "unknown"
+    try:
+        source_ip = _get_real_ip(request)
+    except Exception:
+        _logger.debug("callback source IP 추출 실패", exc_info=True)
+
     # 일회성 토큰 검증 (atomic GET+DELETE)
     token_data = await k3s_cluster.consume_callback_token(req.token)
     if not token_data:
-        _logger.warning("k3s callback received with invalid/expired token")
+        _logger.warning("k3s callback received with invalid/expired token from %s", source_ip)
         raise HTTPException(status_code=403, detail="Forbidden")
 
     project_id = token_data["project_id"]
     cluster_id = token_data["cluster_id"]
+    _logger.info(
+        "k3s callback consumed: cluster=%s project=%s source_ip=%s server_ip=%s",
+        cluster_id, project_id, source_ip, req.server_ip,
+    )
+    if req.server_ip and source_ip != "unknown" and req.server_ip != source_ip:
+        # request body 의 server_ip 와 실제 source IP 가 다르면 의심 — 하지만 NAT/Floating
+        # IP 환경에서는 정상적으로 다를 수 있어 차단하지 않고 warning 만 기록.
+        _logger.warning(
+            "k3s callback IP 불일치 (분석 필요): cluster=%s body.server_ip=%s source_ip=%s",
+            cluster_id, req.server_ip, source_ip,
+        )
 
     if not req.success:
         error_msg = req.error or "서버 VM에서 알 수 없는 오류 발생"
