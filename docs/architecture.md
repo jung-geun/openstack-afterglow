@@ -356,3 +356,49 @@ callback.sh 내 플러그인 배포 루프:
 | 에이전트 #2 | `{cluster_name}-agent-2` |
 
 스케일 다운 또는 클러스터 삭제 시 `k3s_kube.delete_k8s_nodes()`로 VM 삭제 전에 K8s 노드 오브젝트를 먼저 제거하여 OCCM의 `failed to find object` 무한 재시도를 방지합니다.
+
+---
+
+## 보안 모델 요약
+
+전체 보안 모델은 [docs/security.md](security.md) 를, 버전별 변경은 [CHANGELOG](../CHANGELOG.md) / [docs/releases/](releases/) 를 참고하세요.
+
+### 인증 흐름
+
+```
+[브라우저] ──X-Auth-Token + X-Project-Id──▶ [FastAPI]
+                                              │
+                                              ├─ Redis 토큰 캐시 (TTL 60s, logout 시 invalidate)
+                                              │   └ 미스 → Keystone 재검증
+                                              │
+                                              ├─ project-scoped Connection 생성
+                                              │   conn._afterglow_project_id 저장
+                                              │
+                                              ├─ assert_resource_owner (defense-in-depth)
+                                              │   - admin 토큰 우회
+                                              │   - 외부/공유 자원 면제
+                                              │   - mismatch 시 404 (enumeration 방지)
+                                              │
+                                              └─ activity_recorder.rec(...)
+                                                  audit_log row + source_ip
+```
+
+### 핵심 가드레일 (1.14.0)
+
+| 영역 | 가드 |
+|---|---|
+| Cross-tenant 접근 | `assert_resource_owner` 가 Network/LB/Trove/Cinder/Manila/Compute 의 mutation·detail 에 일관 적용. OpenStack policy 가 광범위해도 백엔드에서 차단 |
+| K3s 비밀 | HKDF-SHA256 sub-key 도메인 분리 (kubeconfig / node_token / manager_password / notion). 단일 마스터키 leak 시에도 도메인 간 cross-decrypt 불가 |
+| Kubeconfig 다운로드 | 매 GET 마다 audit_log + source IP. 토큰 탈취 forensic 가능 |
+| K3s callback | `_get_real_ip` (trusted_proxies 검증) 로 source IP 추출 + body.server_ip 와 불일치 시 warning |
+| Health Bearer 토큰 | 7일 절대 만료 (sliding TTL 제거). VM userdata 노출 시에도 7일 후 cephx rotate 권한 무효화 |
+| Cloud-init 템플릿 | Jinja2 `autoescape=False` 명시 + 모든 사용자 입력에 `shlex_quote` 적용 |
+| Production 부팅 | `AFTERGLOW_ENV=production` + `AFTERGLOW_ALLOW_INSECURE=1` 또는 default secret_key → ValueError |
+| Rate limiting | `_get_real_ip` 가 `trusted_proxies` CIDR 검증 — 외부 직접 요청의 X-Forwarded-For 무시 |
+
+### 면제 (intentional)
+
+- **외부 네트워크** (`is_router_external=True`) / **공유 네트워크** (`is_shared=True`) — cross-project 노출이 정상
+- **공개 share** (`is_public=True`) — Manila share 도 동일
+- **Object-storage** — Swift account 모델이 1차 방어선이라 backend 검증 없음 (신규 컨테이너에 owner metadata 부착만, 운영 도구 토대)
+- **admin 토큰** (`token_info.is_system_admin=True`) — 모든 owner check 우회

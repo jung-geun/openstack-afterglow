@@ -464,3 +464,47 @@ kubectl describe pod -l app=backend -n afterglow
 kubectl get pvc -n afterglow
 kubectl describe nodes
 ```
+
+---
+
+## 보안 체크리스트 (배포 전)
+
+자세한 보안 모델은 [docs/security.md](security.md) 참고.
+
+### 필수 환경 변수
+
+| 변수 | 운영 시 |
+|---|---|
+| `AFTERGLOW_ENV=production` | 필수 |
+| `AFTERGLOW_ALLOW_INSECURE` | **설정 금지** (production 과 결합 시 백엔드가 ValueError 로 부팅 실패) |
+| `SECRET_KEY` | 32 자 이상 random hex (`change-me-in-production` default 금지) |
+| `K3S_KUBECONFIG_ENCRYPTION_KEY` | 64 hex chars (`openssl rand -hex 32`) — kubeconfig/node_token/manager_password/notion 의 마스터키. HKDF 로 도메인별 sub-key 자동 파생 |
+| `NOTION_CONFIG_ENCRYPTION_KEY` | 선택. 미설정 시 K3S_KUBECONFIG_ENCRYPTION_KEY 와 동일 마스터로 fallback (HKDF 로 분리됨) |
+| `TRUSTED_PROXIES` | 리버스 프록시의 CIDR 리스트. 기본 `127.0.0.1/32, ::1/128` — 실제 LB IP 추가 필요 |
+| `CORS_ORIGIN_LIST` | 신뢰할 수 있는 origin 만. wildcard 금지 |
+
+### 부팅 가드 검증
+
+```bash
+# 의도적으로 잘못된 조합으로 부팅 시도 → ValueError 가 떠야 함
+AFTERGLOW_ENV=production AFTERGLOW_ALLOW_INSECURE=1 \
+  uv run uvicorn app.main:app --port 8000
+# 예상: "AFTERGLOW_ALLOW_INSECURE=1 must NOT be set when AFTERGLOW_ENV=production"
+```
+
+### 정기 점검
+
+- **audit_log retention** — `kubeconfig_download` row 가 적정 기간 (예: 90일) 보관되는지
+- **Health Bearer 토큰** — `redis-cli SCAN MATCH afterglow:health:token:*` 의 TTL 이 7일 이내인지
+- **K3s ciphertext 버전** — `encrypted_kubeconfig NOT LIKE 'v3:%'` 행의 갯수 (1.15.0 전에 모두 v3 로 마이그레이션 권장)
+
+### 1.13.x → 1.14.0 업그레이드
+
+- **Backward-compatible**, 마이그레이션 작업 불필요
+- 다른 프로젝트의 ID 로 자원에 접근하던 자동화 스크립트는 404 를 받게 됨 — admin 토큰 또는 application credential 로 전환 필요
+- 첫 v2/legacy ciphertext 복호화 시 워커당 1회 deprecation warning 로그 확인 (스팸 X)
+
+### 1.14.0 → 1.15.0 (예정) 전 필수 작업
+
+- 별도 PR 로 제공될 마이그레이션 스크립트로 모든 v1/v2 ciphertext 를 v3 로 batch re-encrypt
+- 미실행 시 v1/v2 ciphertext 가 영구 복호화 불가

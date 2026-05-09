@@ -75,6 +75,14 @@ Afterglow는 두 프로젝트의 장점을 취하고 단점을 보완합니다.
 - Notion 동기화 (다중 데이터베이스, dedup)
 - 시계열 메트릭 대시보드
 
+### 보안 (1.14.0+)
+- **Defense-in-depth IDOR 가드** — Network/LB/Trove/Cinder/Manila/Compute 의 mutation·detail 엔드포인트가 OpenStack RBAC 외 백엔드에서 한번 더 owner 검증 (admin 우회 + 외부/공유 자원 면제)
+- **K3s 비밀 암호화** — HKDF-SHA256 sub-key 도메인 분리 (kubeconfig / node_token / manager_password / notion 키 분리)
+- **Kubeconfig 다운로드 audit log** — 매 GET 마다 source IP 와 함께 기록 (forensic)
+- **Health Bearer 토큰** — 7일 절대 만료 (sliding TTL 제거)
+- **Production 부팅 가드** — `AFTERGLOW_ENV=production` + `AFTERGLOW_ALLOW_INSECURE=1` 또는 default secret_key 조합 시 즉시 ValueError
+- 상세: [보안 모델 문서](docs/security.md)
+
 ---
 
 ## 아키텍처
@@ -280,6 +288,8 @@ openstack-afterglow/
 | [배포 가이드](docs/deployment.md) | Docker Compose / Kubernetes / ArgoCD / kolla-ansible |
 | [k3s 클러스터](docs/k3s.md) | k3s 프로비저닝, 노드 구성, CoreOS 전환 계획 |
 | [API 레퍼런스](docs/api-reference.md) | 전체 REST API 엔드포인트 |
+| [보안 모델](docs/security.md) | 인증·인가, IDOR 가드, HKDF 암호화, audit log |
+| [릴리스 노트](docs/releases/) | 버전별 변경사항 / [CHANGELOG](CHANGELOG.md) |
 | [kolla-ansible 배포](deploy/kolla/ansible/roles/afterglow/) | OpenStack 환경 내부 kolla-ansible 역할 배포 |
 
 ---

@@ -67,6 +67,14 @@ Afterglow takes the strengths of both projects and fixes their weaknesses.
 - Notion sync (multi-database, dedup)
 - Time-series metrics dashboard
 
+### Security (1.14.0+)
+- **Defense-in-depth IDOR guards** — Network/LB/Trove/Cinder/Manila/Compute mutation/detail endpoints perform a backend owner check on top of OpenStack RBAC (admin bypass + external/shared resources exempt)
+- **K3s secret encryption** — HKDF-SHA256 sub-key domain separation (kubeconfig / node_token / manager_password / notion sub-keys derived from a single master)
+- **Kubeconfig download audit log** — Every GET is recorded with source IP for forensics
+- **Health bearer token** — 7-day absolute expiry (sliding TTL removed)
+- **Production boot guard** — `AFTERGLOW_ENV=production` combined with `AFTERGLOW_ALLOW_INSECURE=1` or a default `secret_key` raises `ValueError` at startup
+- Details: [Security model](docs/security.md)
+
 ---
 
 ## Architecture
@@ -249,6 +257,8 @@ openstack-afterglow/
 | [k3s cluster](docs/en/k3s.md) | k3s provisioning, node topology, CoreOS migration plan |
 | [Architecture](docs/architecture.md) _(Korean)_ | System structure, VM-creation flow, OverlayFS |
 | [API reference](docs/api-reference.md) _(Korean)_ | Complete REST API endpoints |
+| [Security model](docs/security.md) _(Korean)_ | Authn/authz, IDOR guards, HKDF crypto, audit log |
+| [Release notes](docs/releases/) / [CHANGELOG](CHANGELOG.md) | Per-version changes |
 
 ---
 
