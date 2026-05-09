@@ -463,6 +463,21 @@ async def get_template(session: AsyncSession, name: str, version: int) -> Templa
     return _template_to_info(tmpl, stack=stack)
 
 
+async def delete_template(session: AsyncSession, name: str, version: int) -> bool:
+    """템플릿 삭제. 미존재 시 False(멱등), 삭제 성공 시 True.
+
+    템플릿은 마운트와 직접 연결되지 않으므로(마운트는 leaf_layer_id를 직접 참조)
+    삭제 차단 사유가 없다. 멱등 처리하여 cleanup 흐름을 단순화한다.
+    """
+    stmt = select(UnionTemplate).where(UnionTemplate.name == name, UnionTemplate.version == version)
+    tmpl = (await session.execute(stmt)).scalar_one_or_none()
+    if tmpl is None:
+        return False
+    await session.delete(tmpl)
+    await session.commit()
+    return True
+
+
 # ---------------------------------------------------------------------------
 # 사용자 마운트 추적
 # ---------------------------------------------------------------------------

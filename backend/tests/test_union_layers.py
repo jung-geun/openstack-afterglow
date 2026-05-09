@@ -1011,6 +1011,75 @@ class TestNewUnionLayersAPI:
             app.dependency_overrides.pop(get_session, None)
         assert resp.status_code == 404
 
+    @pytest.mark.asyncio
+    async def test_delete_template_admin_success(self, admin_client):
+        """관리자 템플릿 삭제 → 204."""
+        from app.database import get_session
+
+        mock_session = AsyncMock()
+
+        async def override_get_session():
+            yield mock_session
+
+        app.dependency_overrides[get_session] = override_get_session
+        try:
+            with patch("app.api.union.layers.union_layers.delete_template", AsyncMock(return_value=True)) as m:
+                resp = await admin_client.delete("/api/union/templates/ml-pytorch/1")
+        finally:
+            app.dependency_overrides.pop(get_session, None)
+        assert resp.status_code == 204
+        m.assert_called_once_with(mock_session, "ml-pytorch", 1)
+
+    @pytest.mark.asyncio
+    async def test_delete_template_not_found(self, admin_client):
+        """없는 템플릿 삭제 → 404."""
+        from app.database import get_session
+
+        mock_session = AsyncMock()
+
+        async def override_get_session():
+            yield mock_session
+
+        app.dependency_overrides[get_session] = override_get_session
+        try:
+            with patch("app.api.union.layers.union_layers.delete_template", AsyncMock(return_value=False)):
+                resp = await admin_client.delete("/api/union/templates/nonexistent/99")
+        finally:
+            app.dependency_overrides.pop(get_session, None)
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_delete_template_non_admin_forbidden(self, client):
+        """일반 사용자 템플릿 삭제 → 403."""
+        from app.database import get_session
+
+        mock_session = AsyncMock()
+
+        async def override_get_session():
+            yield mock_session
+
+        app.dependency_overrides[get_session] = override_get_session
+        try:
+            resp = await client.delete("/api/union/templates/ml-pytorch/1")
+        finally:
+            app.dependency_overrides.pop(get_session, None)
+        assert resp.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_delete_template_service_idempotent_returns_false(self):
+        """서비스 함수: 미존재 템플릿 → False (멱등)."""
+        from app.services.union_layers import delete_template
+
+        session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        session.execute = AsyncMock(return_value=mock_result)
+
+        result = await delete_template(session, "nonexistent", 99)
+        assert result is False
+        session.delete.assert_not_called()
+        session.commit.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # Phase A: Mount/Unmount 서비스 테스트

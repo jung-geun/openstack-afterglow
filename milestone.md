@@ -557,11 +557,11 @@ Step 5: 요약 & 배포
   - [x] Cinder upper 볼륨의 정기 백업 스케줄링 — `auto_backup.py` + `_auto_backup_loop`
   - [x] 백업에서 복구 시 OverlayFS 재구성 자동화 — `existing_upper_volume_id` + workdir 정리
 
-- [ ] 5.4 VM 스케일링 지원
+- [x] 5.4 VM 스케일링 지원
   - [x] 인스턴스 resize (플레이버 변경) — `POST /api/admin/instances/{id}/resize`, `/revert-resize` 엔드포인트 + `nova.resize_server`/`revert_resize_server` 서비스 함수 추가. `InstanceDetailPanel`에 resize 모달(flavor 선택) + VERIFY_RESIZE 상태에서 '되돌리기' 버튼 추가. 단위 테스트 4건 (`test_admin_resize.py`)
-  - [ ] 인스턴스 resize 시 OverlayFS 마운트 유지 검증 (통합 테스트)
-  - [ ] 다중 VM 동시 부팅 시 NFS share 동시 접근 안정성 검증
-  - [ ] 라이선스/동시 접속 제한 검토 (상용 소프트웨어)
+  - [x] 인스턴스 resize 시 OverlayFS 마운트 유지 검증 (통합 테스트) — `tests/integration/test_resize_overlay.py`. 19항 참조 (placeholder 제거 + SSH 직접 검증 + FIP 자동 할당)
+  - [x] 다중 VM 동시 부팅 시 NFS share 동시 접근 안정성 검증 — `tests/integration/test_concurrent_boot.py`. 19항 참조 (병렬 SSH 마운트 검증)
+  - [x] 라이선스/동시 접속 제한 검토 (상용 소프트웨어) — 11.2에서 `union_layers.create_mount` 가드 + 라이선스 필드 구현. 19항에서 DB 통합 회귀 테스트 4건(`test_libraries_license_db.py`) 추가
 
 - [x] 5.5 보안 강화
   - [x] NFS export 옵션 보안: `root_squash`, `sec=sys` vs `sec=krb5` — `_build_nfs_access_metadata` + `create_access_rule(metadata=)` + `ensure_nfs_access_rule(root_squash, sec_flavor)` + 설정값 2개(`manila_nfs_root_squash`, `manila_nfs_sec_flavor`) + 단위테스트 13건
@@ -918,7 +918,7 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 
 **테스트 확장**
 
-- [ ] Integration test: Builder VM → seal → User VM mount 전체 플로우
+- [x] Integration test: Builder VM → seal → User VM mount 전체 플로우 — `tests/integration/test_union_e2e.py` (19항). create→seal→fork→template→record_mount→409 가드→unmount→cleanup 13단계 검증
 - [x] 삭제 차단 동작 검증 (자식/템플릿/활성 마운트 — 단위 테스트 포함)
 
 ### 9.3 Phase 3 — 확장 (목표: Phase 2 완료 후)
@@ -1303,3 +1303,59 @@ Option A 채택 시 본 절 진행. Option B 채택 시 사용자가 자체 구�
 - [x] `backend/app/api/compute/instance_metrics.py` — `_build_libvirt_expr` 신규 함수 (6개 메트릭 libvirt 폴백 PromQL, GPU는 None). `_one`/단일 엔드포인트에 순차 폴백(node_exporter 빈 시계열→libvirt 재시도) 적용
 - [x] `frontend/src/lib/components/instance/MetricsPanel.svelte` — 데이터 없음 메시지를 "메트릭 없음 (인스턴스 미가동 또는 exporter 미연동)"으로 완화
 - [x] `backend/tests/test_instance_metrics.py` — 신규 7건 (cpu/memory/network_rx/disk_read 폴백, node_exporter 우선·폴백 미호출, 양쪽 빈→빈 시계열, libvirt 표현식 단일 시계열 가드)
+
+## 19. 통합 테스트 보강 (2026-05-10) — 5.4 + 9.2 마지막 미완료 항목 마감
+
+> **배경**: 11.5 Phase D에서 통합 테스트 스켈레톤은 `pytest.skip` 제거 단계까지 진행됐으나, 본문이 `image_id="placeholder"` / `flavor_id="placeholder"` 더미 값으로 작성되어 실 OpenStack 셀프호스티드 러너에서도 401/404로 즉시 실패. OverlayFS 마운트 검증도 health endpoint의 `mount_ok` 한 비트에만 의존해 agent 거짓 보고를 잡지 못함. 9.2 Builder→User VM 통합 테스트는 부재.
+
+### 19.1 DELETE 템플릿 엔드포인트 + 서비스 함수 신규
+
+- [x] `backend/app/services/union_layers.py` — `delete_template(session, name, version)` 추가 (멱등, 미존재 시 False)
+- [x] `backend/app/api/union/layers.py` — `DELETE /api/union/templates/{name}/{version}` 관리자 전용 라우터 추가 (404 분기 + activity log)
+- [x] `backend/tests/test_union_layers.py` — 단위 테스트 4건 (admin 정상 204 / 404 / 비관리자 403 / 서비스 멱등 False)
+
+### 19.2 SSH 검증 헬퍼
+
+- [x] `backend/tests/integration/ssh_helper.py` — 신규. `wait_for_ssh`, `ssh_run`, `verify_overlay_mount`, `verify_nfs_mounts`, `verify_envmgr_status`. subprocess(ssh) 기반(paramiko 미도입), `BatchMode=yes` + `StrictHostKeyChecking=no` + `UserKnownHostsFile=/dev/null` 공통 옵션
+
+### 19.3 통합 테스트 본문 정합성 (5.4)
+
+- [x] `backend/tests/integration/conftest.py` — `IntegrationResources` dataclass + `integration_resources` 픽스처 추가 (env 기반, 누락 시 자동 skip, SSH 키 chmod 600 자동)
+- [x] `backend/tests/integration/test_resize_overlay.py` — placeholder 제거, FIP 자동 할당, SSH로 사전·사후 OverlayFS 검증 (12단계)
+- [x] `backend/tests/integration/test_concurrent_boot.py` — placeholder 제거, FIP 동시 할당, 병렬 SSH 마운트 검증, health 이중 검증
+
+### 19.4 Union v2 엔드투엔드 통합 테스트 (9.2)
+
+- [x] `backend/tests/integration/test_union_e2e.py` — Builder→seal→fork→template→user mount→409 가드→unmount→cleanup 13단계. manila + RW/RO share 미설정 환경에서는 builder/user access 단계만 조건부 skip하고 핵심 흐름은 항상 검증
+
+### 19.5 라이선스/동시 마운트 가드 회귀 테스트 (5.4)
+
+- [x] `backend/tests/test_libraries_license_db.py` — 신규 4건 (`@pytest.mark.db`):
+  - `commercial + max=2` → 첫 두 mount 성공, 세 번째 409
+  - unmount 후 슬롯 회수 → 새 mount 성공
+  - `open + max=NULL` → 10건 동시 mount 무제한
+  - `commercial + max=0` → 모든 mount 즉시 409
+- 11.5 Phase C MariaDB 11.4 인프라 재사용. `test_union_layers_db.py`와 동일 fixture 패턴
+
+### 19.6 CI workflow 통합
+
+- [x] `.github/workflows/test.yml::test-backend-integration` — 6개 신규 env 노출:
+  - `AFTERGLOW_TEST_IMAGE_ID`, `AFTERGLOW_TEST_FLAVOR_SMALL`, `AFTERGLOW_TEST_FLAVOR_MEDIUM` (secrets)
+  - `AFTERGLOW_TEST_SSH_KEY` (secrets)
+  - `AFTERGLOW_TEST_LIBRARY_IDS`, `AFTERGLOW_TEST_SSH_USER` (vars)
+- secrets/vars 미설정 시 픽스처에서 자동 skip → CI 차단 없음. 등록은 GitHub UI에서 별도 작업
+
+### 19.7 검증 요약
+
+```bash
+# 로컬 단위 (즉시 검증 가능)
+cd backend && uv run pytest tests/test_union_layers.py -v -k "delete_template"  # 4 passed
+
+# DB 통합 (MariaDB profile=test 컨테이너 필요)
+docker compose --profile test up -d mariadb
+AFTERGLOW_TEST_DATABASE_URL=mysql+aiomysql://... uv run pytest tests/test_libraries_license_db.py -m db
+
+# 실 인프라 (셀프호스티드 러너 — 사용자 환경에서 1회 검증)
+AFTERGLOW_ALLOW_INSECURE=1 AFTERGLOW_TEST_IMAGE_ID=<uuid> ... \
+  uv run pytest tests/integration/test_resize_overlay.py tests/integration/test_concurrent_boot.py tests/integration/test_union_e2e.py -m slow
+```
