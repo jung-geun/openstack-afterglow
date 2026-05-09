@@ -99,6 +99,12 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Setup Node (tag push only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       - name: Apply tag version (tag push only)
         if: startsWith(github.ref, 'refs/tags/v')
         env:
