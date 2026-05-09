@@ -109,6 +109,33 @@ def _reset_rate_limiter():
     yield
 
 
+@pytest.fixture(autouse=True)
+async def _flush_afterglow_cache():
+    """각 테스트 시작과 종료 시 afterglow:* Redis 키를 flush.
+
+    cached_call() 캐시가 테스트 간 누수되어 다른 테스트의 cinder.list_snapshots
+    같은 mock 이 호출되지 않는 sequence-dependent flaky 회피. afterglow 자체
+    네임스페이스만 정리하므로 다른 시스템과 독립.
+    """
+
+    async def _flush():
+        try:
+            from app.services.cache import _get_client
+
+            client = _get_client()
+            keys: list = []
+            async for key in client.scan_iter(match="afterglow:*", count=100):
+                keys.append(key)
+            if keys:
+                await client.delete(*keys)
+        except Exception:
+            pass
+
+    await _flush()
+    yield
+    await _flush()
+
+
 @pytest.fixture
 def mock_conn():
     return make_mock_conn()
