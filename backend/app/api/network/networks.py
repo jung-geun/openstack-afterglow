@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from app.api.common.activity_recorder import rec
+from app.api.common.owner_check import assert_resource_owner
 from app.api.deps import get_os_conn, get_token_info
 from app.config import get_settings
 from app.models.storage import (
@@ -210,6 +211,11 @@ async def associate_floating_ip(
     token_info: dict = Depends(get_token_info),
 ):
     try:
+        fip = await asyncio.to_thread(conn.network.get_ip, fip_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Floating IP를 찾을 수 없습니다")
+    assert_resource_owner(fip, conn, token_info, not_found_detail="Floating IP를 찾을 수 없습니다")
+    try:
         result = await asyncio.to_thread(neutron.associate_floating_ip, conn, fip_id, req.instance_id)
         await rec(token_info, conn, resource_type="floating_ip", action="associate", resource_id=fip_id)
         return result
@@ -235,6 +241,11 @@ async def disassociate_floating_ip(
     token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
+    try:
+        fip = await asyncio.to_thread(conn.network.get_ip, fip_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Floating IP를 찾을 수 없습니다")
+    assert_resource_owner(fip, conn, token_info, not_found_detail="Floating IP를 찾을 수 없습니다")
     try:
         result = await asyncio.to_thread(neutron.disassociate_floating_ip, conn, fip_id)
         await invalidate(f"afterglow:neutron:{pid}:floating_ips")
@@ -262,6 +273,11 @@ async def delete_floating_ip(
     token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
+    try:
+        fip = await asyncio.to_thread(conn.network.get_ip, fip_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Floating IP를 찾을 수 없습니다")
+    assert_resource_owner(fip, conn, token_info, not_found_detail="Floating IP를 찾을 수 없습니다")
     try:
         await asyncio.to_thread(neutron.delete_floating_ip, conn, fip_id)
         await invalidate(f"afterglow:neutron:{pid}:floating_ips")
@@ -292,6 +308,11 @@ async def update_subnet(
     token_info: dict = Depends(get_token_info),
 ):
     try:
+        sub = await asyncio.to_thread(conn.network.get_subnet, subnet_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="서브넷을 찾을 수 없습니다")
+    assert_resource_owner(sub, conn, token_info, not_found_detail="서브넷을 찾을 수 없습니다")
+    try:
         result = await asyncio.to_thread(
             neutron.update_subnet, conn, subnet_id, req.name, req.gateway_ip, req.enable_dhcp
         )
@@ -318,6 +339,11 @@ async def delete_subnet(
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
 ):
+    try:
+        sub = await asyncio.to_thread(conn.network.get_subnet, subnet_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="서브넷을 찾을 수 없습니다")
+    assert_resource_owner(sub, conn, token_info, not_found_detail="서브넷을 찾을 수 없습니다")
     try:
         await asyncio.to_thread(neutron.delete_subnet, conn, subnet_id)
         await rec(token_info, conn, resource_type="subnet", action="delete", resource_id=subnet_id)
@@ -604,7 +630,18 @@ async def list_ports(conn: openstack.connection.Connection = Depends(get_os_conn
 
 
 @router.get("/{network_id}", response_model=NetworkDetail)
-async def get_network(network_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def get_network(
+    network_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    try:
+        net = await asyncio.to_thread(conn.network.get_network, network_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="네트워크를 찾을 수 없습니다")
+    # 외부/공유 네트워크는 cross-project 정상 노출이므로 owner check 면제
+    if not (getattr(net, "is_router_external", False) or getattr(net, "is_shared", False)):
+        assert_resource_owner(net, conn, token_info, not_found_detail="네트워크를 찾을 수 없습니다")
     try:
         return await asyncio.to_thread(neutron.get_network_detail, conn, network_id)
     except Exception:
@@ -619,6 +656,11 @@ async def delete_network(
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
 ):
+    try:
+        net = await asyncio.to_thread(conn.network.get_network, network_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="네트워크를 찾을 수 없습니다")
+    assert_resource_owner(net, conn, token_info, not_found_detail="네트워크를 찾을 수 없습니다")
     try:
         await asyncio.to_thread(neutron.delete_network, conn, network_id)
         await rec(token_info, conn, resource_type="network", action="delete", resource_id=network_id)

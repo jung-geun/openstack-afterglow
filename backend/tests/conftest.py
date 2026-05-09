@@ -27,12 +27,46 @@ _rate_limiter.enabled = False
 
 
 def make_mock_conn(project_id: str = "test-project-123") -> MagicMock:
-    """모의 OpenStack Connection 객체 생성."""
+    """모의 OpenStack Connection 객체 생성.
+
+    `assert_resource_owner` (defense-in-depth IDOR 가드) 가 호출하는 SDK 조회
+    `conn.network.get_*`, `conn.load_balancer.get_*` 등을 caller project 와 owner 가
+    일치하는 자원으로 default 응답하도록 stub. cross-project 거부 테스트는 매 테스트
+    별로 patch 하거나 다른 project_id 로 별도 mock 을 만들면 된다.
+    """
     conn = MagicMock()
     conn._afterglow_token = "test-token"
     conn._afterglow_project_id = project_id
     conn._afterglow_user_id = "test-user-123"
     conn.close = MagicMock()
+
+    def _owned():
+        m = MagicMock()
+        m.project_id = project_id
+        m.tenant_id = None
+        m.is_router_external = False
+        m.is_shared = False
+        return m
+
+    # return_value 패턴 — 테스트가 `mock_conn.network.get_*.return_value = X` 로
+    # override 할 때 정상 동작하도록 (side_effect 사용 시 override 가 무시됨)
+    # Neutron
+    conn.network.get_network = MagicMock(return_value=_owned())
+    conn.network.get_subnet = MagicMock(return_value=_owned())
+    conn.network.get_router = MagicMock(return_value=_owned())
+    conn.network.get_security_group = MagicMock(return_value=_owned())
+    conn.network.get_ip = MagicMock(return_value=_owned())
+    # Octavia
+    conn.load_balancer.get_load_balancer = MagicMock(return_value=_owned())
+    conn.load_balancer.get_listener = MagicMock(return_value=_owned())
+    conn.load_balancer.get_pool = MagicMock(return_value=_owned())
+    conn.load_balancer.get_health_monitor = MagicMock(return_value=_owned())
+    # Cinder
+    conn.block_storage.get_volume = MagicMock(return_value=_owned())
+    conn.block_storage.get_snapshot = MagicMock(return_value=_owned())
+    conn.block_storage.get_backup = MagicMock(return_value=_owned())
+    # Trove (database)
+    conn.database.get_instance = MagicMock(return_value=_owned())
     return conn
 
 

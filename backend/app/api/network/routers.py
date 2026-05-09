@@ -9,6 +9,7 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.api.common.activity_recorder import rec
+from app.api.common.owner_check import assert_resource_owner
 from app.api.deps import get_os_conn, get_token_info
 from app.models.storage import (
     CreateRouterRequest,
@@ -65,8 +66,24 @@ async def create_router(
         raise HTTPException(status_code=500, detail="라우터 생성 실패")
 
 
+async def _get_router_with_owner_check(
+    conn: openstack.connection.Connection, router_id: str, token_info: dict
+):
+    try:
+        r = await asyncio.to_thread(conn.network.get_router, router_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="라우터를 찾을 수 없습니다")
+    assert_resource_owner(r, conn, token_info, not_found_detail="라우터를 찾을 수 없습니다")
+    return r
+
+
 @router.get("/{router_id}", response_model=RouterDetail)
-async def get_router(router_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def get_router(
+    router_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    await _get_router_with_owner_check(conn, router_id, token_info)
     try:
         return await asyncio.to_thread(neutron.get_router_detail, conn, router_id)
     except Exception:
@@ -82,6 +99,7 @@ async def delete_router(
     token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
+    await _get_router_with_owner_check(conn, router_id, token_info)
     try:
         await asyncio.to_thread(neutron.delete_router, conn, router_id)
         await invalidate(f"afterglow:neutron:{pid}:routers")
@@ -108,6 +126,7 @@ async def add_interface(
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
 ):
+    await _get_router_with_owner_check(conn, router_id, token_info)
     try:
         result = await asyncio.to_thread(neutron.add_router_interface, conn, router_id, req.subnet_id)
         await rec(
@@ -141,6 +160,7 @@ async def remove_interface(
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
 ):
+    await _get_router_with_owner_check(conn, router_id, token_info)
     try:
         await asyncio.to_thread(neutron.remove_router_interface, conn, router_id, subnet_id)
         await rec(token_info, conn, resource_type="router", action="remove_interface", resource_id=router_id)
@@ -166,6 +186,7 @@ async def set_gateway(
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
 ):
+    await _get_router_with_owner_check(conn, router_id, token_info)
     try:
         await asyncio.to_thread(neutron.set_router_gateway, conn, router_id, req.external_network_id)
         await rec(token_info, conn, resource_type="router", action="set_gateway", resource_id=router_id)
@@ -190,6 +211,7 @@ async def remove_gateway(
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
 ):
+    await _get_router_with_owner_check(conn, router_id, token_info)
     try:
         await asyncio.to_thread(neutron.remove_router_gateway, conn, router_id)
         await rec(token_info, conn, resource_type="router", action="remove_gateway", resource_id=router_id)
