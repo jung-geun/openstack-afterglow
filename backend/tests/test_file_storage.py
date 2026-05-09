@@ -77,6 +77,7 @@ async def test_create_file_storage(client, mock_conn):
 @pytest.mark.asyncio
 async def test_delete_file_storage(client, mock_conn):
     with (
+        patch("app.api.storage.file_storage.manila.get_file_storage", return_value=make_file_storage()),
         patch("app.api.storage.file_storage.manila.delete_file_storage", return_value=None),
         patch("app.api.storage.file_storage.invalidate"),
     ):
@@ -86,7 +87,10 @@ async def test_delete_file_storage(client, mock_conn):
 
 @pytest.mark.asyncio
 async def test_list_access_rules(client, mock_conn):
-    with patch("app.api.storage.file_storage.manila.list_access_rules", return_value=[make_access_rule()]):
+    with (
+        patch("app.api.storage.file_storage.manila.get_file_storage", return_value=make_file_storage()),
+        patch("app.api.storage.file_storage.manila.list_access_rules", return_value=[make_access_rule()]),
+    ):
         resp = await client.get("/api/file-storage/share-1/access-rules")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
@@ -94,7 +98,10 @@ async def test_list_access_rules(client, mock_conn):
 
 @pytest.mark.asyncio
 async def test_create_access_rule(client, mock_conn):
-    with patch("app.api.storage.file_storage.manila.create_access_rule", return_value=make_access_rule("rule-new")):
+    with (
+        patch("app.api.storage.file_storage.manila.get_file_storage", return_value=make_file_storage()),
+        patch("app.api.storage.file_storage.manila.create_access_rule", return_value=make_access_rule("rule-new")),
+    ):
         resp = await client.post(
             "/api/file-storage/share-1/access-rules",
             json={
@@ -108,7 +115,10 @@ async def test_create_access_rule(client, mock_conn):
 
 @pytest.mark.asyncio
 async def test_revoke_access_rule(client, mock_conn):
-    with patch("app.api.storage.file_storage.manila.revoke_access_rule", return_value=None):
+    with (
+        patch("app.api.storage.file_storage.manila.get_file_storage", return_value=make_file_storage()),
+        patch("app.api.storage.file_storage.manila.revoke_access_rule", return_value=None),
+    ):
         resp = await client.delete("/api/file-storage/share-1/access-rules/rule-1")
     assert resp.status_code == 204
 

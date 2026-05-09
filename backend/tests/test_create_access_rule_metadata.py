@@ -8,6 +8,27 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from app.models.storage import FileStorageInfo
+
+
+def _owned_share() -> FileStorageInfo:
+    return FileStorageInfo(
+        id="share-1",
+        name="s",
+        status="available",
+        size=10,
+        share_proto="NFS",
+        export_locations=[],
+        metadata={"union_project_id": "test-project-123"},
+        project_id="test-project-123",
+        created_at="2024-01-01T00:00:00Z",
+        nfs_export_location=None,
+        library_name=None,
+        library_version=None,
+        built_at=None,
+        is_public=False,
+    )
+
 
 @pytest.mark.asyncio
 async def test_ip_rule_includes_nfs_metadata(client):
@@ -15,7 +36,10 @@ async def test_ip_rule_includes_nfs_metadata(client):
     mock_create = MagicMock(
         return_value={"access_id": "rule-1", "access_key": "", "access_to": "10.0.0.0/24", "access_level": "ro"}
     )
-    with patch("app.api.storage.file_storage.manila.create_access_rule", mock_create):
+    with (
+        patch("app.api.storage.file_storage.manila.get_file_storage", return_value=_owned_share()),
+        patch("app.api.storage.file_storage.manila.create_access_rule", mock_create),
+    ):
         resp = await client.post(
             "/api/file-storage/share-1/access-rules",
             json={"access_to": "10.0.0.0/24", "access_level": "ro", "access_type": "ip"},
@@ -35,7 +59,10 @@ async def test_ip_rule_custom_root_squash_false(client):
     mock_create = MagicMock(
         return_value={"access_id": "rule-2", "access_key": "", "access_to": "10.0.0.0/24", "access_level": "rw"}
     )
-    with patch("app.api.storage.file_storage.manila.create_access_rule", mock_create):
+    with (
+        patch("app.api.storage.file_storage.manila.get_file_storage", return_value=_owned_share()),
+        patch("app.api.storage.file_storage.manila.create_access_rule", mock_create),
+    ):
         resp = await client.post(
             "/api/file-storage/share-1/access-rules",
             json={"access_to": "10.0.0.0/24", "access_level": "rw", "access_type": "ip", "root_squash": False},
@@ -51,7 +78,10 @@ async def test_cephx_rule_no_metadata(client):
     mock_create = MagicMock(
         return_value={"access_id": "rule-3", "access_key": "secret", "access_to": "cephx-id", "access_level": "ro"}
     )
-    with patch("app.api.storage.file_storage.manila.create_access_rule", mock_create):
+    with (
+        patch("app.api.storage.file_storage.manila.get_file_storage", return_value=_owned_share()),
+        patch("app.api.storage.file_storage.manila.create_access_rule", mock_create),
+    ):
         resp = await client.post(
             "/api/file-storage/share-1/access-rules",
             json={"access_to": "cephx-id", "access_level": "ro", "access_type": "cephx"},
