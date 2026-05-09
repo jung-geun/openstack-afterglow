@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -9,12 +10,27 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from app.api.common.activity_recorder import rec
+from app.api.common.owner_check import assert_resource_owner
 from app.api.deps import get_os_conn, get_token_info
 from app.rate_limit import limiter
 from app.services import octavia
 from app.services.cache import cached_call, invalidate, ttl_normal
 
 router = APIRouter()
+
+
+async def _assert_lb_owner(
+    conn: openstack.connection.Connection,
+    lb_id: str,
+    token_info: dict,
+):
+    """LB owner 검증 — 모든 sub-resource(listener/pool/member/HM) 는 lb_id 가
+    caller-owned 라면 간접적으로 보호된다."""
+    try:
+        lb = await asyncio.to_thread(conn.load_balancer.get_load_balancer, lb_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="로드밸런서를 찾을 수 없습니다")
+    assert_resource_owner(lb, conn, token_info, not_found_detail="로드밸런서를 찾을 수 없습니다")
 
 
 class CreateLbRequest(BaseModel):
@@ -109,12 +125,22 @@ async def create_load_balancer(
 
 
 @router.get("/{lb_id}")
-async def get_load_balancer(lb_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def get_load_balancer(
+    lb_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    await _assert_lb_owner(conn, lb_id, token_info)
     return _handle(lambda: octavia.get_load_balancer(conn, lb_id), "로드밸런서 조회 실패")
 
 
 @router.get("/{lb_id}/status")
-async def get_lb_status_tree(lb_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def get_lb_status_tree(
+    lb_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    await _assert_lb_owner(conn, lb_id, token_info)
     return _handle(lambda: octavia.get_lb_status_tree(conn, lb_id), "상태 트리 조회 실패")
 
 
@@ -127,6 +153,7 @@ async def delete_load_balancer(
     token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
+    await _assert_lb_owner(conn, lb_id, token_info)
     try:
         octavia.delete_load_balancer(conn, lb_id)
         await invalidate(f"afterglow:octavia:{pid}:lbs")
@@ -150,7 +177,12 @@ async def delete_load_balancer(
 
 
 @router.get("/{lb_id}/listeners")
-async def list_listeners(lb_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def list_listeners(
+    lb_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    await _assert_lb_owner(conn, lb_id, token_info)
     return _handle(lambda: octavia.list_listeners(conn, lb_id=lb_id), "리스너 목록 조회 실패")
 
 
@@ -163,6 +195,7 @@ async def create_listener(
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
 ):
+    await _assert_lb_owner(conn, lb_id, token_info)
     try:
         result = octavia.create_listener(conn, lb_id, req.protocol, req.protocol_port, req.name, req.default_pool_id)
         await rec(
@@ -191,6 +224,7 @@ async def delete_listener(
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
 ):
+    await _assert_lb_owner(conn, lb_id, token_info)
     try:
         octavia.delete_listener(conn, listener_id)
         await rec(token_info, conn, resource_type="lb_listener", action="delete", resource_id=listener_id)
@@ -213,7 +247,12 @@ async def delete_listener(
 
 
 @router.get("/{lb_id}/pools")
-async def list_pools(lb_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def list_pools(
+    lb_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    await _assert_lb_owner(conn, lb_id, token_info)
     return _handle(lambda: octavia.list_pools(conn, lb_id=lb_id), "풀 목록 조회 실패")
 
 
@@ -226,6 +265,7 @@ async def create_pool(
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
 ):
+    await _assert_lb_owner(conn, lb_id, token_info)
     try:
         result = octavia.create_pool(conn, lb_id, req.protocol, req.lb_algorithm, req.name, req.listener_id)
         await rec(token_info, conn, resource_type="lb_pool", action="create", resource_id=lb_id, resource_name=req.name)
@@ -252,6 +292,7 @@ async def delete_pool(
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
 ):
+    await _assert_lb_owner(conn, lb_id, token_info)
     try:
         octavia.delete_pool(conn, pool_id)
         await rec(token_info, conn, resource_type="lb_pool", action="delete", resource_id=pool_id)
@@ -274,7 +315,13 @@ async def delete_pool(
 
 
 @router.get("/{lb_id}/pools/{pool_id}/members")
-async def list_members(lb_id: str, pool_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def list_members(
+    lb_id: str,
+    pool_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    await _assert_lb_owner(conn, lb_id, token_info)
     return _handle(lambda: octavia.list_members(conn, pool_id), "멤버 목록 조회 실패")
 
 
@@ -288,6 +335,7 @@ async def add_member(
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
 ):
+    await _assert_lb_owner(conn, lb_id, token_info)
     try:
         result = octavia.add_member(conn, pool_id, req.address, req.protocol_port, req.subnet_id, req.name, req.weight)
         await rec(
@@ -317,6 +365,7 @@ async def remove_member(
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
 ):
+    await _assert_lb_owner(conn, lb_id, token_info)
     try:
         octavia.remove_member(conn, pool_id, member_id)
         await rec(token_info, conn, resource_type="lb_member", action="delete", resource_id=member_id)
@@ -339,7 +388,13 @@ async def remove_member(
 
 
 @router.get("/{lb_id}/pools/{pool_id}/health-monitor")
-async def list_health_monitors(lb_id: str, pool_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def list_health_monitors(
+    lb_id: str,
+    pool_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    await _assert_lb_owner(conn, lb_id, token_info)
     return _handle(lambda: octavia.list_health_monitors(conn, pool_id=pool_id), "헬스모니터 조회 실패")
 
 
@@ -353,6 +408,7 @@ async def create_health_monitor(
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
 ):
+    await _assert_lb_owner(conn, lb_id, token_info)
     try:
         result = octavia.create_health_monitor(
             conn, pool_id, req.type, req.delay, req.timeout, req.max_retries, req.name
@@ -389,6 +445,7 @@ async def delete_health_monitor(
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
 ):
+    await _assert_lb_owner(conn, lb_id, token_info)
     try:
         octavia.delete_health_monitor(conn, hm_id)
         await rec(token_info, conn, resource_type="lb_health_monitor", action="delete", resource_id=hm_id)
