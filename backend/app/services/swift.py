@@ -190,10 +190,22 @@ def create_container(conn, name: str) -> dict:
 
     Ceph RGW 환경에서 계정이 미초기화 상태이면 자동으로 계정을 초기화한 뒤
     컨테이너 생성을 재시도한다.
+
+    생성 시 caller project_id 를 X-Container-Meta-Owner-Project-Id 메타로 부착해
+    향후 admin/operator 도구가 컨테이너 owner 를 식별·검증할 수 있도록 한다
+    (defense-in-depth — 실제 RBAC 는 Swift account 모델이 담당).
     """
     _apply_endpoint_override(conn)
+    owner_pid = getattr(conn, "_afterglow_project_id", None) or ""
     try:
         c = conn.object_store.create_container(name=name)
+        if owner_pid:
+            try:
+                conn.object_store.set_container_metadata(
+                    c.name or name, owner_project_id=owner_pid
+                )
+            except Exception:
+                _logger.warning("컨테이너 owner metadata 부착 실패: name=%s", name, exc_info=True)
         return {"name": c.name or name, "count": 0, "bytes": 0}
     except Exception as sdk_err:
         if not _is_account_not_found(sdk_err):
@@ -205,7 +217,10 @@ def create_container(conn, name: str) -> dict:
 
         # 2차: raw PUT으로 컨테이너 생성 재시도
         try:
-            resp = conn.object_store.put(f"/{name}", headers={"Content-Length": "0"})
+            headers = {"Content-Length": "0"}
+            if owner_pid:
+                headers["X-Container-Meta-Owner-Project-Id"] = owner_pid
+            resp = conn.object_store.put(f"/{name}", headers=headers)
             sc = getattr(resp, "status_code", 0)
             if sc in (201, 202, 204):
                 _logger.info("Swift 컨테이너 생성 성공 (계정 초기화 후): status=%d", sc)
@@ -217,6 +232,13 @@ def create_container(conn, name: str) -> dict:
         # 3차: SDK 재시도 (계정 초기화 성공 시 작동할 수 있음)
         try:
             c = conn.object_store.create_container(name=name)
+            if owner_pid:
+                try:
+                    conn.object_store.set_container_metadata(
+                        c.name or name, owner_project_id=owner_pid
+                    )
+                except Exception:
+                    _logger.warning("컨테이너 owner metadata 부착 실패: name=%s", name, exc_info=True)
             _logger.info("Swift 컨테이너 SDK 재시도 성공")
             return {"name": c.name or name, "count": 0, "bytes": 0}
         except Exception:
