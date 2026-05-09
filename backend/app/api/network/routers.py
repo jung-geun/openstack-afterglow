@@ -66,9 +66,7 @@ async def create_router(
         raise HTTPException(status_code=500, detail="라우터 생성 실패")
 
 
-async def _get_router_with_owner_check(
-    conn: openstack.connection.Connection, router_id: str, token_info: dict
-):
+async def _get_router_with_owner_check(conn: openstack.connection.Connection, router_id: str, token_info: dict):
     try:
         r = await asyncio.to_thread(conn.network.get_router, router_id)
     except Exception:

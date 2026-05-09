@@ -39,14 +39,19 @@ async def k3s_callback(request: Request, req: K3sCallbackRequest):
     cluster_id = token_data["cluster_id"]
     _logger.info(
         "k3s callback consumed: cluster=%s project=%s source_ip=%s server_ip=%s",
-        cluster_id, project_id, source_ip, req.server_ip,
+        cluster_id,
+        project_id,
+        source_ip,
+        req.server_ip,
     )
     if req.server_ip and source_ip != "unknown" and req.server_ip != source_ip:
         # request body 의 server_ip 와 실제 source IP 가 다르면 의심 — 하지만 NAT/Floating
         # IP 환경에서는 정상적으로 다를 수 있어 차단하지 않고 warning 만 기록.
         _logger.warning(
             "k3s callback IP 불일치 (분석 필요): cluster=%s body.server_ip=%s source_ip=%s",
-            cluster_id, req.server_ip, source_ip,
+            cluster_id,
+            req.server_ip,
+            source_ip,
         )
 
     if not req.success:

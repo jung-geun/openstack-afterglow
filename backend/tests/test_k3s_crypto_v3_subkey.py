@@ -106,6 +106,7 @@ def test_v2_fallback_still_decrypts_with_warning(valid_keys, caplog, reset_legac
     v2_b64 = "v2:" + base64.b64encode(nonce + ct).decode()
 
     import logging
+
     with caplog.at_level(logging.WARNING, logger="app.services.k3s_crypto"):
         result = decrypt_kubeconfig(v2_b64)
 
@@ -124,6 +125,7 @@ def test_legacy_no_prefix_fallback_with_warning(valid_keys, caplog, reset_legacy
     legacy_b64 = base64.b64encode(nonce + ct).decode()
 
     import logging
+
     with caplog.at_level(logging.WARNING, logger="app.services.k3s_crypto"):
         result = decrypt_node_token(legacy_b64)
 

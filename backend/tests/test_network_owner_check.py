@@ -94,9 +94,7 @@ async def test_delete_subnet_other_project_returns_404(client, mock_conn):
 @pytest.mark.asyncio
 async def test_associate_fip_other_project_returns_404(client, mock_conn):
     mock_conn.network.get_ip = MagicMock(return_value=_foreign_resource())
-    resp = await client.post(
-        "/api/networks/floating-ips/fip-foreign/associate", json={"instance_id": "i-1"}
-    )
+    resp = await client.post("/api/networks/floating-ips/fip-foreign/associate", json={"instance_id": "i-1"})
     assert resp.status_code == 404
 
 
@@ -134,18 +132,14 @@ async def test_delete_router_other_project_returns_404(client, mock_conn):
 @pytest.mark.asyncio
 async def test_add_interface_other_project_router_returns_404(client, mock_conn):
     mock_conn.network.get_router = MagicMock(return_value=_foreign_resource())
-    resp = await client.post(
-        "/api/routers/r-foreign/interfaces", json={"subnet_id": "s-1"}
-    )
+    resp = await client.post("/api/routers/r-foreign/interfaces", json={"subnet_id": "s-1"})
     assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_set_gateway_other_project_router_returns_404(client, mock_conn):
     mock_conn.network.get_router = MagicMock(return_value=_foreign_resource())
-    resp = await client.post(
-        "/api/routers/r-foreign/gateway", json={"external_network_id": "ext-1"}
-    )
+    resp = await client.post("/api/routers/r-foreign/gateway", json={"external_network_id": "ext-1"})
     assert resp.status_code == 404
 
 

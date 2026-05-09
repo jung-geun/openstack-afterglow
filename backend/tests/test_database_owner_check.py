@@ -62,9 +62,7 @@ async def _async_return(v):
 @pytest.mark.asyncio
 async def test_create_db_other_project_returns_404(client, mock_conn):
     mock_conn.database.get_instance = MagicMock(return_value=_foreign())
-    resp = await client.post(
-        "/api/database-instances/inst-foreign/databases", json={"name": "mydb"}
-    )
+    resp = await client.post("/api/database-instances/inst-foreign/databases", json={"name": "mydb"})
     assert resp.status_code == 404
 
 
@@ -81,9 +79,7 @@ async def test_create_user_other_project_returns_404(client, mock_conn):
 @pytest.mark.asyncio
 async def test_create_db_backup_other_project_returns_404(client, mock_conn):
     mock_conn.database.get_instance = MagicMock(return_value=_foreign())
-    resp = await client.post(
-        "/api/database-instances/inst-foreign/backups", json={"name": "b1"}
-    )
+    resp = await client.post("/api/database-instances/inst-foreign/backups", json={"name": "b1"})
     assert resp.status_code == 404
 
 

@@ -64,9 +64,7 @@ async def test_delete_snapshot_other_project_returns_404(client, mock_conn):
 @pytest.mark.asyncio
 async def test_create_snapshot_for_other_project_volume_returns_404(client, mock_conn):
     mock_conn.block_storage.get_volume = MagicMock(return_value=_foreign())
-    resp = await client.post(
-        "/api/volume-snapshots", json={"volume_id": "vol-foreign", "name": "s1"}
-    )
+    resp = await client.post("/api/volume-snapshots", json={"volume_id": "vol-foreign", "name": "s1"})
     assert resp.status_code == 404
 
 
@@ -90,9 +88,7 @@ async def test_delete_backup_other_project_returns_404(client, mock_conn):
 @pytest.mark.asyncio
 async def test_create_backup_for_other_project_volume_returns_404(client, mock_conn):
     mock_conn.block_storage.get_volume = MagicMock(return_value=_foreign())
-    resp = await client.post(
-        "/api/volumes/backups", json={"volume_id": "vol-foreign", "name": "b1"}
-    )
+    resp = await client.post("/api/volumes/backups", json={"volume_id": "vol-foreign", "name": "b1"})
     assert resp.status_code == 404
 
 

@@ -201,9 +201,7 @@ def create_container(conn, name: str) -> dict:
         c = conn.object_store.create_container(name=name)
         if owner_pid:
             try:
-                conn.object_store.set_container_metadata(
-                    c.name or name, owner_project_id=owner_pid
-                )
+                conn.object_store.set_container_metadata(c.name or name, owner_project_id=owner_pid)
             except Exception:
                 _logger.warning("컨테이너 owner metadata 부착 실패: name=%s", name, exc_info=True)
         return {"name": c.name or name, "count": 0, "bytes": 0}
@@ -234,9 +232,7 @@ def create_container(conn, name: str) -> dict:
             c = conn.object_store.create_container(name=name)
             if owner_pid:
                 try:
-                    conn.object_store.set_container_metadata(
-                        c.name or name, owner_project_id=owner_pid
-                    )
+                    conn.object_store.set_container_metadata(c.name or name, owner_project_id=owner_pid)
                 except Exception:
                     _logger.warning("컨테이너 owner metadata 부착 실패: name=%s", name, exc_info=True)
             _logger.info("Swift 컨테이너 SDK 재시도 성공")

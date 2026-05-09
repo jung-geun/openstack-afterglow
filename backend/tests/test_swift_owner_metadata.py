@@ -27,9 +27,7 @@ def test_create_container_attaches_owner_metadata():
     result = swift.create_container(conn, "my-bucket")
 
     assert result["name"] == "my-bucket"
-    conn.object_store.set_container_metadata.assert_called_once_with(
-        "my-bucket", owner_project_id="proj-123"
-    )
+    conn.object_store.set_container_metadata.assert_called_once_with("my-bucket", owner_project_id="proj-123")
 
 
 def test_create_container_swallows_metadata_failure():

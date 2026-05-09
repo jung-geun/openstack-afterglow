@@ -76,7 +76,8 @@ def _warn_legacy_once(domain: bytes, version: str) -> None:
     _LEGACY_WARNED.add(key)
     _logger.warning(
         "k3s_crypto: %s ciphertext detected for domain=%s — please migrate to v3 (HKDF sub-key) before next release",
-        version, domain.decode("latin-1"),
+        version,
+        domain.decode("latin-1"),
     )
 
 

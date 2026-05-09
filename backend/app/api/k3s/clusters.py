@@ -106,9 +106,7 @@ async def get_k3s_cluster(cluster_id: str, token_info: dict = Depends(get_token_
 
 
 @router.api_route("/{cluster_id}/kubeconfig", methods=["GET", "HEAD"])
-async def download_kubeconfig(
-    request: Request, cluster_id: str, token_info: dict = Depends(get_token_info)
-):
+async def download_kubeconfig(request: Request, cluster_id: str, token_info: dict = Depends(get_token_info)):
     """kubeconfig YAML 파일 다운로드. 아직 준비되지 않으면 404.
 
     매 호출마다 audit log 기록 — 토큰 탈취 시 다운로드 추적이 가능하도록.
