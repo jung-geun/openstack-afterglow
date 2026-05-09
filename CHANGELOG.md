@@ -5,7 +5,32 @@
 형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/) 1.1.0 을 따르며,
 프로젝트는 [SemVer](https://semver.org/lang/ko/) 2.0.0 을 따릅니다.
 
-## [1.14.0] - 2026-05-09
+## [1.14.1] - 2026-05-09
+
+### CI / 인프라
+
+`v1.14.0` release pipeline 이 두 단계에서 fail 하여, 동일 보안 패치 + workflow
+fix 를 묶은 정식 release 로 1.14.1 발행.
+
+- **`Apply tag version` 스텝의 npm not found** (PR #18) — `docker-build.yml` 에
+  tag push 일 때만 `actions/setup-node@v4` 추가
+- **arm64 self-hosted macos runner 의 uv cache lock race** (PR #19) —
+  backend/frontend 두 잡이 동일 `~/.cache/uv/.lock` 동시 접근 → 300s timeout.
+  `astral-sh/setup-uv` 의 `enable-cache` 를 `${{ matrix.arch == 'amd64' }}` 로
+  분기 (linux runner 별도 인스턴스만 캐시).
+
+`v1.14.0` 의 ghcr 이미지 (`-amd64`/`-arm64` single-platform 만 푸시되고
+멀티아치 manifest 미생성) 는 broken release 로 두고 1.14.1 을 정식 사용.
+
+보안 패치 내용은 1.14.0 과 동일 (PR #17). 상세는 아래 참조.
+
+---
+
+## [1.14.0] - 2026-05-09 (broken release)
+
+> ⚠️ 이 release 는 CI pipeline fail 로 ghcr 의 멀티아치 `:v1.14.0` manifest 가
+> 만들어지지 않은 broken release 입니다. 동일 변경사항을 1.14.1 로 재발행했으니
+> [1.14.1](#1141---2026-05-09) 을 사용하세요.
 
 ### 보안 (Security) — PR-A + PR-B (2차 보안 패치)
 
