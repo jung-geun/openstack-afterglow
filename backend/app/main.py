@@ -154,6 +154,7 @@ from app.api.identity.admin_identity import router as admin_identity_router
 from app.api.identity.admin_images import router as admin_images_router
 from app.api.identity.admin_libraries import router as admin_libraries_router
 from app.api.identity.admin_notion import router as admin_notion_router
+from app.api.identity.admin_orphans import router as admin_orphans_router
 from app.api.identity.admin_services import router as admin_services_router
 from app.api.identity.profile import router as profile_router
 from app.api.identity.profile_activity import router as profile_activity_router
@@ -372,6 +373,7 @@ app.include_router(admin_images_router, prefix="/api/admin", tags=["admin-images
 app.include_router(profile_router, prefix="/api/profile", tags=["profile"])
 app.include_router(profile_activity_router, prefix="/api/profile/activity", tags=["profile-activity"])
 app.include_router(admin_activity_router, prefix="/api/admin", tags=["admin-activity"])
+app.include_router(admin_orphans_router, prefix="/api/admin", tags=["admin-orphans"])
 # Compute
 app.include_router(images_router, prefix="/api/images", tags=["images"])
 app.include_router(flavors_router, prefix="/api/flavors", tags=["flavors"])
