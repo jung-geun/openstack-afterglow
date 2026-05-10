@@ -25,10 +25,17 @@
 	}
 
 	let containers = $state<SwiftContainer[]>([]);
-	let account = $state<AccountMeta | null>(null);
 	let loading = $state(true);
 	let refreshing = $state(false);
 	let deleting = $state<string | null>(null);
+
+	// 카운트 카드는 fan-out 결과(containers)에서 직접 합산.
+	// /api/object-storage/account 는 admin 본인 프로젝트만 보므로 cross-project 합산이 안 됨.
+	const account = $derived<AccountMeta>({
+		container_count: containers.length,
+		object_count: containers.reduce((s, c) => s + (c.count || 0), 0),
+		bytes_used: containers.reduce((s, c) => s + (c.bytes || 0), 0),
+	});
 
 	// 생성 모달
 	let showModal = $state(false);
@@ -42,16 +49,17 @@
 	async function load() {
 		if (containers.length === 0) loading = true;
 		else refreshing = true;
-		await Promise.allSettled([
-			api.get<SwiftContainer[]>('/api/object-storage?all_projects=true&include_quarantine=true', token, projectId)
-				.then(v => { containers = v; loading = false; })
-				.catch(() => { containers = []; loading = false; }),
-			api.get<AccountMeta>('/api/object-storage/account', token, projectId)
-				.then(v => { account = v; })
-				.catch(() => {}),
-		]);
-		loading = false;
-		refreshing = false;
+		try {
+			containers = await api.get<SwiftContainer[]>(
+				'/api/object-storage?all_projects=true&include_quarantine=true',
+				token, projectId
+			);
+		} catch {
+			containers = [];
+		} finally {
+			loading = false;
+			refreshing = false;
+		}
 	}
 
 	async function createContainer() {
@@ -197,7 +205,7 @@
 						<tr class="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors {c.is_quarantine ? 'bg-amber-950/20' : ''}">
 							<td class="py-3 px-4">
 								<a
-									href="/admin/object-storage/{encodeURIComponent(c.name)}"
+									href="/admin/object-storage/{encodeURIComponent(c.name)}{c.project_id ? `?project_id=${encodeURIComponent(c.project_id)}` : ''}"
 									class="text-indigo-400 hover:text-indigo-300 font-medium"
 								>{c.name}</a>
 								{#if c.is_quarantine}

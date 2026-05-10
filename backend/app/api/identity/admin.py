@@ -281,13 +281,21 @@ def _fetch_overview_database_instances(conn) -> int:
 
 
 def _fetch_overview_object_storage(conn) -> int:
-    """Swift 오브젝트 스토리지 컨테이너 수 수집 (현재 프로젝트/계정)."""
+    """Swift 오브젝트 스토리지 컨테이너 수 수집 — admin scope cross-project 합산.
+
+    swift 계정은 프로젝트별로 분리되므로 admin 본인 프로젝트의 conn.object_store만
+    보면 다른 프로젝트의 버킷이 누락된다. admin 토큰으로 fan-out 해서 모든 프로젝트의
+    버킷 수를 합산해야 admin overview 의 의미와 맞다.
+    """
     if not get_settings().service_swift_enabled:
         return 0
     try:
-        from app.services.swift import count_containers
+        from app.services.swift import count_containers_all_projects
 
-        return count_containers(conn)
+        admin_token = getattr(conn, "_afterglow_token", "") or ""
+        if not admin_token:
+            return 0
+        return count_containers_all_projects(admin_token)
     except Exception:
         return 0
 

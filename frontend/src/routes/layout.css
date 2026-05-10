@@ -31,6 +31,17 @@
   --font-mono: "Geist Mono", ui-monospace, monospace;
 }
 
+/* overscroll(rubber-band) 영역이 페이지 배경과 같게 보이도록 <html>/<body>에 배경 지정 */
+html,
+body {
+  background-color: #030712;
+}
+
+:root.light html,
+:root.light body {
+  background-color: #ffffff;
+}
+
 :root {
   --warm-grad: conic-gradient(from 220deg, #F4976C, #6E4F9A, #8893D4, #F4976C);
   --warm-soft:   color-mix(in oklab, var(--color-warm) 14%, transparent);
