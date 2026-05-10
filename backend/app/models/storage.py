@@ -96,6 +96,7 @@ class CreateRouterRequest(BaseModel):
 
 class RouterInterfaceRequest(BaseModel):
     subnet_id: str
+    auto_gateway: bool = False
 
 
 class RouterGatewayRequest(BaseModel):

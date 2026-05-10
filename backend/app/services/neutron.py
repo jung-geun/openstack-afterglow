@@ -573,7 +573,15 @@ def delete_router(conn: openstack.connection.Connection, router_id: str) -> None
     conn.network.delete_router(router_id, ignore_missing=True)
 
 
-def add_router_interface(conn: openstack.connection.Connection, router_id: str, subnet_id: str) -> dict:
+def add_router_interface(
+    conn: openstack.connection.Connection, router_id: str, subnet_id: str, auto_gateway: bool = False
+) -> dict:
+    if auto_gateway:
+        subnet = conn.network.get_subnet(subnet_id)
+        if not subnet.gateway_ip:
+            import ipaddress
+            gw = str(next(ipaddress.ip_network(subnet.cidr, strict=False).hosts()))
+            conn.network.update_subnet(subnet_id, gateway_ip=gw)
     result = conn.network.add_interface_to_router(router_id, subnet_id=subnet_id)
     return {"subnet_id": result.get("subnet_id", subnet_id), "port_id": result.get("port_id", "")}
 
