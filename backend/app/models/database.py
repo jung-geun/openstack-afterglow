@@ -41,6 +41,7 @@ class CreateDatabaseRequest(BaseModel):
 class CreateUserRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=64)
     password: str = Field(..., min_length=1)
+    host: str = "%"
     databases: list[str] = []
 
 

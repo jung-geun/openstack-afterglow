@@ -1717,3 +1717,232 @@ apiserver와 kubelet은 K3s 안에서 동일 `k3s server` 프로세스의 자식
 - **Keypair / Swift container** — admin scope 한계로 본 PR 제외 (위 25.5 참조).
 - **인스턴스 status 외 세부 분포 (Trove/k3s/LB)** — total + active 1차만.
 - **사이드바 재배치** — 기존 카드 유지.
+
+---
+
+## 26. DB 인스턴스 — 사용자 host 지원 / 호스트 정보 표시 / SHUTDOWN 라벨 (2026-05-11)
+
+### 26.1 동기
+
+- DB 사용자 생성이 500 에러 — `conn.database.create_user(instance_id, **user_body)` 가 Trove API 본문(`{"users":[{...}]}`)을 정확히 wrap 하지 못함.
+- 사용자 생성 폼이 Trove user identity(`name@host`)의 host 필드를 노출하지 않음 — 동명 다른 host 유저 생성 불가.
+- DB 인스턴스 IP 표시가 평탄 리스트라 어떤 네트워크 IP인지 불명확.
+- 관리자 페이지에서 삭제 진행 중인 인스턴스가 raw `SHUTDOWN` 상태로만 표시되어 사용자 혼란.
+
+### 26.2 백엔드
+
+- [x] `services/trove.py::create_user` — raw REST(`conn.database.post(/instances/{id}/users)`) 로 교체. `host` 파라미터 추가 (기본 `%`), 페이로드는 `{"users":[{...}]}`.
+- [x] `services/trove.py::delete_user` — raw REST(`conn.database.delete(/instances/{id}/users/{name@host})`) 로 교체. host-blind 삭제 방지 (동명 다른 host 유저 구분).
+- [x] `services/trove.py::list_users` — 응답 dict 에 `host` 필드 포함 (`getattr(u, "host", "%")`).
+- [x] `services/trove.py::_instance_to_dict` — `address_map: dict[str, list[str]]` 추가. Trove `i.addresses` dict → `{"private": ["192.168.0.10"]}` 매핑.
+- [x] `models/database.py::CreateUserRequest` — `host: str = "%"` 필드 추가.
+- [x] `api/database/instances.py::create_instance_user` — `req.host` 전달 + 실패 시 exception 로그.
+- [x] `api/database/instances.py::delete_instance_user` — `host` query param 추가, `trove.delete_user` 에 전달.
+- [x] `tests/test_db_users.py` — raw REST payload / host 기본값 / databases 형식 / delete URL host 인코딩 / list_users host / address_map 빌드/빈/우선순위 검증 (12건).
+
+### 26.3 프런트엔드
+
+- [x] `lib/config/statusColors.ts` — `StatusStyle.label?: string`, `SHUTDOWN: { tone: 'neutral', pulse: true, label: '삭제 중' }`.
+- [x] `lib/components/ui/StatusChip.svelte` — `s.label ?? status` 로 라벨 우선 사용.
+- [x] `lib/components/database/DbInstanceDetailPanel.svelte`:
+  - `address_map` 우선, `ips` fallback 으로 "private: 192.168.0.163" 표시 (인스턴스 정보 / 연결 정보 두 영역).
+  - 플레이버 ID → `cpu.4c_8g (4vCPU / 8192MB)` 매핑 (`/api/database-instances/flavors` 1회 fetch + 클라이언트 매핑).
+  - 사용자 생성 폼: `host` 입력 + 인스턴스 DB 체크박스 선택 (databases 빈 경우 안내).
+  - 사용자 목록: `name@host` 표시, 삭제 시 `host` 기준 식별.
+  - 인스턴스 헤더 status 라벨에 `SHUTDOWN → "삭제 중"` 표시.
+
+### 26.4 검증
+
+- [x] `tests/test_db_users.py` 10건 + 기존 24건 통과 (총 34건)
+- [x] `npm run lint:backend` 통과
+- 실 환경 검증 필요 (사용자): 동명 다른 host 유저 동시 생성 / Horizon 형식 IP 표시 / SHUTDOWN 회색 펄스 + "삭제 중" 라벨
+
+### 26.5 범위 외
+
+- **Trove `mgmt/instances/{id}` 폴백** — `i.addresses` 가 비어있을 때 admin API 로 강제 조회. 현재는 `ips` fallback 으로 충분.
+- **다른 프로젝트 인스턴스 IP 매핑** — Trove 가 사용자 네트워크에 NIC를 연결하지만 인스턴스 자체는 service tenant 소유. 사용자 권한 내 가능한 정보만 표시.
+- **사용자 권한 세분화 (READ/WRITE/ADMIN)** — Trove `databases` 권한 부여만 지원.
+
+---
+
+## 27. DB 인스턴스 — `is_public` floating IP 자동 할당 (2026-05-11)
+
+### 27.1 동기
+
+`is_public=True` 로 생성해도 인스턴스에 public IP 가 잡히지 않음. 기존 동작은 `set_instance_access` 만 호출 — Trove 의 access 정책(allowed_cidrs)만 설정하고 floating IP 는 자동 할당하지 않음. 사용자는 "public 으로 표시 = 외부 접근 가능" 으로 기대 → floating IP 자동 할당 필요.
+
+### 27.2 설계
+
+- **`is_public` 의미 확장**: Trove access 정책 + afterglow 의 floating IP best-effort 자동 할당. `set_instance_access` 동작은 유지.
+- **신규 인스턴스**: BackgroundTask 로 IP 폴링(5초 간격, 최대 10분) → port 매칭 → 라우터의 외부 네트워크 자동 탐색 → FIP 생성/할당.
+- **기존 인스턴스**: DbInstanceDetailPanel 에 "+ 공개 IP 할당" 버튼 (FIP 미할당 시 노출). 사용자 conn 으로 동기 실행.
+- **외부 네트워크 선택**: `find_external_network_for_subnets` 자동 탐색 (라우터 → external_gateway_info.network_id). 사용자 명시 선택은 미도입.
+- **Port 탐색**: `device_id` 매칭은 service tenant 소유라 불안정 → IP fixed_ips 매칭으로 변경. Trove backend port 는 사용자 네트워크에 attach 되어 user conn 에서 조회 가능.
+
+### 27.3 백엔드
+
+- [x] `api/database/instances.py::_attach_fip_to_instance_sync` — IP→port→external network→FIP 동기 헬퍼. 멱등(이미 할당된 port 는 기존 FIP 반환).
+- [x] `api/database/instances.py::_run_attach_fip_bg` — admin connection 으로 BUILD 폴링 + 자동 할당 BG task.
+- [x] `api/database/instances.py::create_database_instance` — `BackgroundTasks` 파라미터 + `is_public` 시 BG 등록.
+- [x] `api/database/instances.py::attach_floating_ip` — `POST /api/database-instances/{id}/floating-ip` 수동 할당 엔드포인트.
+- [x] `api/database/instances.py::detach_floating_ip` — `DELETE /api/database-instances/{id}/floating-ip?delete=true` 해제(또는 삭제).
+- [x] `tests/test_db_floating_ip.py` — port 매칭 / 멱등 / IP 미할당/port 미발견/외부망 미발견 에러 검증 (5건).
+
+### 27.4 프런트엔드
+
+- [x] `DbInstanceDetailPanel.svelte` — `FloatingIp` interface, `floatingIps` state, `instanceFips` derived (instance.ips ↔ fip.fixed_ip_address 매칭).
+- [x] 연결 정보 섹션에 "공개 IP (Floating)" 행 추가:
+  - 미할당 시: "+ 공개 IP 할당" 버튼 (instance.ip 대기 중이면 disabled)
+  - 할당된 경우: 에메랄드 칩 + "해제" / "삭제" 버튼
+- [x] `attachFip()` / `detachFip(deleteFip)` 함수, 에러 인라인 표시.
+- [x] `loadAll()` 에 `/api/networks/floating-ips` 병렬 로드 추가.
+
+### 27.5 검증
+
+- [x] 백엔드 1333 → 1338 (+5), lint/format 통과
+- [x] 프런트엔드 타입 체크 통과
+- 실 환경 검증 필요 (사용자):
+  - 신규 `is_public=true` 생성 → 몇 분 내 BG task 가 FIP 자동 할당
+  - 기존 4개 인스턴스에 대해 패널에서 "+ 공개 IP 할당" 클릭 → FIP 즉시 할당
+  - 라우터 미설정 환경에서는 "외부 네트워크 미연결" 에러 표시
+
+### 27.6 범위 외
+
+- **외부 네트워크 명시 선택** — 다중 외부망 환경에서 사용자가 직접 선택. 현재는 첫 매칭 라우터의 external network 자동 사용.
+- **FIP quota pre-check** — quota 초과 시 Neutron 에서 raise. afterglow 가 사전 검증하지 않음.
+- **DbCreatePanel 안내문** — "is_public 시 FIP 자동 할당" 인라인 안내. 별도 PR.
+
+---
+
+## 28. k3s 클러스터 생성 asyncio loop 충돌 + 라우트 매칭 순서 + DB 백업 글로벌 목록 (2026-05-11)
+
+### 28.1 동기
+
+- **k3s 클러스터 생성 시 "Future attached to a different loop" 에러**: `keystone.ensure_cluster_manager_user` 가 sync 함수인데 내부에서 `asyncio.run(_db_get())` 으로 SQLAlchemy async session 호출. caller(`clusters.py:374`)는 `await asyncio.to_thread(...)` 로 thread 에서 실행 → thread 의 새 loop 가 SQLAlchemy connection pool 의 원래 loop affinity 와 충돌.
+- **`/api/instances/availability-zones` 404**: `instances.py:110` `@router.get("/{instance_id}")` 가 먼저 등록되어 `availability-zones` 를 instance_id 로 해석. FastAPI 는 등록 순서 매칭.
+- **`/api/database-instances/backups` 404**: 글로벌 백업 목록 GET 엔드포인트 부재 (DELETE 만 존재). DbCreatePanel 의 백업 복원 폼이 호출.
+
+### 28.2 백엔드 — asyncio loop 충돌 해결
+
+`asyncio.run` 패턴을 제거하고 caller chain 을 async 로 통일.
+
+- [x] `services/keystone.py::ensure_cluster_manager_user` — `async def` 변환. DB 호출은 `await get_manager_credentials(...)` / `await save_manager_credentials(...)` 직접 호출. sync openstacksdk 호출은 `asyncio.to_thread` 로 wrap.
+- [x] `services/keystone.py::create_app_credential_for_cluster` — `async def` 변환. `await ensure_...` + `asyncio.to_thread(_create_app_cred_sync, ...)`.
+- [x] `services/keystone.py::delete_app_credential` — `async def` 변환 (best-effort). `await ensure_...` + `asyncio.to_thread(_delete_app_cred_sync, ...)`.
+- [x] `services/keystone.py::_connect_as_manager` — 헬퍼 추출 (관리 사용자로 openstack.connect, code 중복 제거).
+- [x] `services/keystone.py::_ensure_cluster_manager_user_sync_with_admin_conn` / `_create_app_cred_sync` / `_delete_app_cred_sync` — sync 부분 추출 → `asyncio.to_thread` 호출 가능.
+- [x] `api/k3s/clusters.py:374, 556, 802` — `await asyncio.to_thread(_keystone.X, ...)` → `await _keystone.X(...)`.
+
+### 28.3 백엔드 — 라우트 충돌 + 글로벌 백업 목록
+
+- [x] `api/compute/instances.py` — `@router.get("/availability-zones")` 를 `/{instance_id}` 위로 이동 (line 92 다음). 기존 line 1804 정의 제거.
+- [x] `api/database/instances.py::list_all_backups` — `@router.get("/backups")` 신규. `trove.list_backups(conn)` 호출 (instance_id 없이 전체). project-scoped conn 이라 별도 owner check 불필요.
+
+### 28.4 테스트 업데이트
+
+- [x] `tests/test_keystone_appcred.py` — sync 호출(`uid, pw = ensure_cluster_manager_user(...)`) → `asyncio.run(...)` wrap (4건).
+- [x] 기존 1335 → 1338 통과 유지 (회귀 없음).
+
+### 28.5 검증
+
+- [x] 백엔드 1338 테스트 통과, lint/format 통과
+- 실 환경 검증 필요:
+  - k3s 클러스터 생성 → "different loop" 에러 없이 BUILD 진행
+  - `/api/instances/availability-zones` GET 200 응답 (가용 영역 목록)
+  - `/api/database-instances/backups` GET 200 응답 (DB 복원 폼에 백업 목록 노출)
+
+### 28.6 범위 외
+
+- **다른 sync keystone 헬퍼의 async 변환** — 동일 호출 패턴이 없는 sync 함수는 그대로 유지 (advisor 권고대로 fix 범위 제한).
+- **다른 라우터의 정적-경로 vs `/{id}` 충돌 일괄 검증** — 본 PR 은 보고된 한 건만 수정.
+
+### 28.7 후속: `project_manager_credentials` 테이블 누락 DDL 추가
+
+asyncio loop fix 후 SQL 이 실제 실행되자 다음 에러가 노출됨:
+```
+pymysql.err.ProgrammingError: (1146, "Table 'afterglow.project_manager_credentials' doesn't exist")
+```
+
+`k3s_db.py::get_manager_credentials` / `save_manager_credentials` 가 raw SQL 로 read/write 하는데 ORM 모델 / DDL 누락. (k3s_db.py 의 raw SQL 참조는 이 테이블 1개뿐.)
+
+- [x] `app/database.py::create_tables` — `project_manager_credentials` DDL 추가:
+  ```sql
+  CREATE TABLE IF NOT EXISTS project_manager_credentials (
+    project_id VARCHAR(64) PRIMARY KEY,
+    user_id VARCHAR(64) NOT NULL,
+    username VARCHAR(255) NOT NULL,
+    encrypted_password TEXT NOT NULL,
+    created_at DATETIME(6) DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at DATETIME(6) DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+    KEY ix_project_manager_credentials_user_id (user_id)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  ```
+- [x] 검증: `database_auto_create_tables=True` (기본값) → 백엔드 startup 시 `_deferred_create_tables` 가 자동 실행하여 누락 테이블 생성.
+- 사용자 검증: 백엔드 컨테이너 재시작 1회 → k3s 클러스터 재시도 → 정상 진행.
+
+---
+
+## 29. 콘솔 로그 전체 페이지 + GPU cloud-init 회귀 테스트 (2026-05-11)
+
+### 29.1 동기
+
+- **콘솔 로그 일부만 표시** — `InstanceDetailPanel` 의 콘솔 로그 패널은 length 200/10000줄 까지만. Horizon 처럼 새 탭에서 전체 콘솔 출력을 보고 싶다는 요청.
+- **GPU 인스턴스 cloud-init 미실행 의심** — `gpu.1080ti_8c_16g` flavor 인스턴스 생성 후 GPU 메트릭 부재. 백엔드 진단 결과 `flavor.is_gpu` → True → `gpu_available=True` → `cloudinit_base.yaml.j2` 의 GPU 분기(install_dcgm_exporter.sh + dcgm-exporter.service) 활성화되어야 정상. 회귀 테스트로 backend 단의 user-data 정상 생성을 보장하고, 실제 진단은 사용자가 새로운 전체 로그 페이지로 검증.
+
+### 29.2 백엔드
+
+- [x] `api/compute/instances.py:get_console_log` — `length` 상한 `le=10000` → `le=100000`. 100k 라인까지 fetch 가능.
+- [x] `tests/test_cloudinit_gpu.py` 신규 — `generate_userdata(gpu_available=True)` 결과 base64 디코드 후 검증:
+  - `install_dcgm_exporter.sh` write_files 포함
+  - `ubuntu-drivers autoinstall` 명령 포함
+  - runcmd 에 `dcgm-exporter.service` enable 항목 포함
+  - dcgm-exporter systemd unit 파일 + ExecStart 0.0.0.0:9400
+  - CUDA_HOME export 포함
+  - gpu_available=False 시 모든 GPU 항목 부재 (회귀 방지)
+
+### 29.3 프런트엔드
+
+- [x] `routes/dashboard/compute/instances/[id]/console-log/+page.svelte` 신규 — 풀스크린 로그 뷰어:
+  - 검정 배경, monospace, ANSI escape raw 표시
+  - sticky 상단 바: 인스턴스 ID, 새로고침/닫기 버튼, 마지막 로드 시간
+  - `length=100000` 1회 fetch (자동 갱신 없음 — 큰 payload polling 회피, 사용자가 수동 새로고침)
+  - `<svelte:head>` title 인스턴스 prefix
+- [x] `lib/components/InstanceDetailPanel.svelte` — 콘솔 로그 패널에 "새 창에서 보기 ↗" 링크 추가 (`target="_blank"`).
+
+### 29.4 검증
+
+- [x] 백엔드 1338 → 1343 테스트 통과 (+5), lint/format 통과
+- [x] 프런트엔드 타입 체크 통과
+- 사용자 검증 필요:
+  - 인스턴스 상세 → 콘솔 로그 → "새 창에서 보기 ↗" 클릭 → 풀스크린 페이지 표시
+  - GPU 인스턴스에서 NVIDIA 설치 라인(`[gpu-install] NVIDIA 드라이버 미발견`) 새 페이지에서 확인 가능
+
+### 29.5 후속 fix: GPU only 인스턴스의 user-data 누락 (2026-05-11)
+
+**Root cause 확정**: 사용자가 전체 콘솔 로그를 공유 → cloud-init 이 130초만에 정상 완료했지만 NVIDIA 설치 단계 0건. `Frontend VmCreatePanel.svelte:291` 가 `/api/instances/async` 호출 → `instances.py:564` 의 `if resolved_libs:` 분기 안에서만 `cloudinit.generate_userdata()` 호출 → libraries=[] + GPU flavor 인스턴스는 **user-data 없이 부팅** → cloud-init 의 default cloud config 만 실행되고 NVIDIA 드라이버 미설치.
+
+(동기 `create_instance` 핸들러 line 282 는 이 버그가 없음 — 항상 generate_userdata 호출. 하지만 frontend 가 `/async` 만 사용해서 노출됨.)
+
+- [x] `api/compute/instances.py::create_instance_async` — cloud-init 생성 분기를 `if resolved_libs:` → `if resolved_libs or gpu_available:` 로 변경. Upper volume / Manila step 은 기존대로 `if resolved_libs:` 유지 (GPU only 인스턴스에는 불필요).
+- [x] `tests/test_cloudinit_gpu.py::test_async_handler_generates_userdata_for_gpu_only_instance` — 분기 진리표 회귀 테스트 (4 케이스: libraries × GPU 조합).
+- [x] 검증 안전성: `overlay_setup.sh` (set -euo pipefail) 는 systemd unit `union-overlay.service` 안에서만 실행 → mount 실패 해도 cloud-init runcmd 의 `/opt/union/install_dcgm_exporter.sh` 는 독립적으로 실행됨.
+- [x] Nova create — `upper_volume_id=None` 일 때 attach skip (line 696 `if upper_volume_id:`).
+
+### 29.6 사용자 작업 — 기존 인스턴스 NVIDIA 드라이버 설치
+
+코드 fix 는 **신규 인스턴스부터 적용**. 기존 `test-nvidia-driver` 등 이미 만든 GPU 인스턴스에는 user-data 가 비어있어 자동 설치 안 됨. 두 옵션:
+
+1. **인스턴스 재생성** — 가장 깔끔. 백엔드 재배포 후 동일 spec 으로 새로 생성.
+2. **SSH 후 수동 설치**:
+   ```bash
+   sudo apt-get update
+   sudo apt-get install -y ubuntu-drivers-common
+   sudo ubuntu-drivers autoinstall
+   sudo reboot
+   ```
+   재부팅 후 `nvidia-smi` 로 확인. dcgm-exporter 가 필요하면 `cloudinit_base.yaml.j2` 의 install_dcgm_exporter.sh 내용을 참조해 수동 실행.
+
+### 29.7 범위 외
+
+- `ubuntu-drivers autoinstall` 이 1080ti(Pascal) 에 잘못된 드라이버 선택 가능성 — 신규 인스턴스 검증 후 문제 시 별도 PR.
+- 외부 SG 의 apt repo egress 차단 가능성 — 별도 PR.

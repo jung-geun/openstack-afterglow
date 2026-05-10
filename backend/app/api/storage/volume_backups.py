@@ -21,9 +21,11 @@ router = APIRouter()
 async def _run_first_backup_bg(project_id: str, volume_id: str, config: dict) -> None:
     """자동 백업 활성화 직후 첫 번째 백업 사이클을 백그라운드에서 실행."""
     import logging
+
     _log = logging.getLogger(__name__)
     try:
         from app.services.keystone import get_admin_connection_for_project
+
         conn = await asyncio.to_thread(get_admin_connection_for_project, project_id)
         await auto_backup.run_backup_cycle(conn, project_id, volume_id, config)
         _log.info("auto_backup: 즉시 백업 사이클 완료 (volume=%s)", volume_id)

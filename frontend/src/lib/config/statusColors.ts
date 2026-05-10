@@ -5,6 +5,7 @@
 export interface StatusStyle {
   tone: 'success' | 'warning' | 'danger' | 'info' | 'neutral';
   pulse?: boolean;
+  label?: string;
 }
 
 export const STATUS_STYLES: Record<string, StatusStyle> = {
@@ -38,6 +39,9 @@ export const STATUS_STYLES: Record<string, StatusStyle> = {
 
   // warning — stopped, non-transitioning
   SHUTOFF:             { tone: 'warning' },
+
+  // neutral + pulse — Trove 비동기 삭제 진행 중 (ACTIVE → SHUTDOWN → 레코드 제거)
+  SHUTDOWN:            { tone: 'neutral', pulse: true, label: '삭제 중' },
 
   // danger — errors / failures
   ERROR:               { tone: 'danger' },

@@ -13,7 +13,7 @@
 
 <span class="chip chip-{s.tone} {className}" class:pulse={s.pulse}>
   <span class="dot"></span>
-  <span class="label">{status ?? '—'}</span>
+  <span class="label">{s.label ?? status ?? '—'}</span>
 </span>
 
 <style>

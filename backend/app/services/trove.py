@@ -9,50 +9,113 @@ import logging
 _logger = logging.getLogger(__name__)
 
 
+def _addresses_to_map(addresses_raw) -> dict[str, list[str]]:
+    """Trove `addresses` 필드를 network_name → [ips] dict 로 변환.
+
+    Trove 응답 형식 두 가지 지원:
+    - dict: {"private": [{"addr": "1.2.3.4"}, ...]} (Nova 스타일)
+    - list: [{"address": "1.2.3.4", "type": "private"}, ...] (Trove >= Yoga)
+    """
+    address_map: dict[str, list[str]] = {}
+    if isinstance(addresses_raw, dict):
+        for net_name, net_addrs in addresses_raw.items():
+            nets: list[str] = []
+            for addr in net_addrs or []:
+                addr_val = addr.get("addr", "") if isinstance(addr, dict) else str(addr)
+                if addr_val:
+                    nets.append(addr_val)
+            if nets:
+                address_map[net_name] = nets
+    elif isinstance(addresses_raw, list):
+        for addr in addresses_raw:
+            if not isinstance(addr, dict):
+                continue
+            addr_val = addr.get("address") or addr.get("addr") or ""
+            net_name = addr.get("type") or addr.get("network") or "default"
+            if addr_val:
+                address_map.setdefault(net_name, []).append(addr_val)
+    return address_map
+
+
+def _dict_from_raw(raw: dict) -> dict:
+    """Trove API instance JSON dict → 표준 dict 변환 (raw REST 응답 처리)."""
+    flavor = raw.get("flavor") or {}
+    volume = raw.get("volume") or {}
+    links = raw.get("links") or []
+
+    address_map = _addresses_to_map(raw.get("addresses"))
+
+    # IP 추출: Trove는 'ip' 리스트 또는 'addresses' dict/list 반환
+    ip_raw = raw.get("ip")
+    if ip_raw:
+        ips: list[str] = list(ip_raw) if not isinstance(ip_raw, str) else [ip_raw]
+    elif address_map:
+        ips = [a for addrs in address_map.values() for a in addrs]
+    else:
+        ips = []
+
+    return {
+        "id": raw.get("id", "") or "",
+        "name": raw.get("name", "") or "",
+        "status": raw.get("status", "") or "",
+        "datastore": raw.get("datastore") or {},
+        "flavor_id": str(flavor.get("id", "")) if isinstance(flavor, dict) else "",
+        "flavor_ram": flavor.get("ram", 0) if isinstance(flavor, dict) else 0,
+        "flavor_vcpus": flavor.get("vcpus", 0) if isinstance(flavor, dict) else 0,
+        "size": volume.get("size", 0) if isinstance(volume, dict) else 0,
+        "volume_used": round(volume.get("used", 0) or 0, 2) if isinstance(volume, dict) else 0,
+        "created_at": str(raw.get("created", "") or raw.get("created_at", "") or ""),
+        "updated_at": str(raw.get("updated", "") or raw.get("updated_at", "") or ""),
+        "hostname": raw.get("hostname", "") or "",
+        "ip": ips[0] if ips else "",
+        "ips": ips,
+        "address_map": address_map,
+        "links": [lk.get("href", "") if isinstance(lk, dict) else str(lk) for lk in links],
+    }
+
+
 def _instance_to_dict(i) -> dict:
+    """SDK Resource → 표준 dict (테스트 호환용 — 현 코드는 raw REST 사용)."""
     flavor = getattr(i, "flavor", {}) or {}
     volume = getattr(i, "volume", {}) or {}
     links = getattr(i, "links", []) or []
-    hostname = getattr(i, "hostname", None) or ""
 
-    # IP 추출: Trove는 'ip' 리스트 또는 'addresses' dict로 반환
+    address_map = _addresses_to_map(getattr(i, "addresses", None))
+
     ip_raw = getattr(i, "ip", None)
     if ip_raw:
         ips: list[str] = list(ip_raw) if not isinstance(ip_raw, str) else [ip_raw]
+    elif address_map:
+        ips = [a for addrs in address_map.values() for a in addrs]
     else:
-        addresses = getattr(i, "addresses", {}) or {}
         ips = []
-        for net_addrs in addresses.values():
-            for addr in (net_addrs or []):
-                addr_val = addr.get("addr", "") if isinstance(addr, dict) else str(addr)
-                if addr_val:
-                    ips.append(addr_val)
-
-    ip = ips[0] if ips else ""
 
     return {
         "id": i.id,
         "name": i.name or "",
         "status": i.status or "",
         "datastore": getattr(i, "datastore", {}) or {},
-        "flavor_id": flavor.get("id", "") if isinstance(flavor, dict) else "",
+        "flavor_id": str(flavor.get("id", "")) if isinstance(flavor, dict) else "",
         "flavor_ram": flavor.get("ram", 0) if isinstance(flavor, dict) else 0,
         "flavor_vcpus": flavor.get("vcpus", 0) if isinstance(flavor, dict) else 0,
         "size": volume.get("size", 0) if isinstance(volume, dict) else 0,
         "volume_used": round(volume.get("used", 0) or 0, 2) if isinstance(volume, dict) else 0,
         "created_at": str(getattr(i, "created_at", "") or ""),
         "updated_at": str(getattr(i, "updated_at", "") or ""),
-        "hostname": hostname,
-        "ip": ip,
+        "hostname": getattr(i, "hostname", None) or "",
+        "ip": ips[0] if ips else "",
         "ips": ips,
+        "address_map": address_map,
         "links": [lk.get("href", "") if isinstance(lk, dict) else str(lk) for lk in links],
     }
 
 
 def list_instances(conn) -> list[dict]:
-    """현재 프로젝트의 DB 인스턴스 목록 반환."""
+    """현재 프로젝트의 DB 인스턴스 목록 반환 (raw REST: ip/addresses 보장)."""
     try:
-        return [_instance_to_dict(i) for i in conn.database.instances()]
+        resp = conn.database.get("/instances")
+        body = resp.json() if hasattr(resp, "json") else {}
+        return [_dict_from_raw(raw) for raw in body.get("instances", [])]
     except Exception:
         _logger.debug("Trove 인스턴스 목록 조회 실패", exc_info=True)
         return []
@@ -74,24 +137,9 @@ def list_instances_admin_all_projects(conn) -> list[dict]:
 
     out: list[dict] = []
     for raw in items:
-        flavor = raw.get("flavor") or {}
-        volume = raw.get("volume") or {}
-        out.append(
-            {
-                "id": raw.get("id", ""),
-                "name": raw.get("name", "") or "",
-                "status": raw.get("status", "") or "",
-                "datastore": raw.get("datastore") or {},
-                "flavor_id": flavor.get("id", "") if isinstance(flavor, dict) else "",
-                "flavor_ram": flavor.get("ram", 0) if isinstance(flavor, dict) else 0,
-                "size": volume.get("size", 0) if isinstance(volume, dict) else 0,
-                "created_at": str(raw.get("created", "") or ""),
-                "hostname": raw.get("hostname", "") or "",
-                "ip": "",
-                "links": [lk.get("href", "") if isinstance(lk, dict) else str(lk) for lk in (raw.get("links") or [])],
-                "project_id": raw.get("tenant_id", "") or "",
-            }
-        )
+        d = _dict_from_raw(raw)
+        d["project_id"] = raw.get("tenant_id", "") or ""
+        out.append(d)
     return out
 
 
@@ -104,9 +152,14 @@ def count_instances(conn) -> int:
 
 
 def get_instance(conn, instance_id: str) -> dict:
-    """DB 인스턴스 상세 정보 반환."""
-    i = conn.database.get_instance(instance_id)
-    return _instance_to_dict(i)
+    """DB 인스턴스 상세 정보 반환 (raw REST: ip/addresses 보장).
+
+    SDK Instance Resource 는 `ip`/`addresses` body 필드가 정의되지 않아
+    attribute access 시 None 이 되는 문제 → raw REST 직접 호출.
+    """
+    resp = conn.database.get(f"/instances/{instance_id}")
+    body = resp.json() if hasattr(resp, "json") else {}
+    return _dict_from_raw(body.get("instance") or {})
 
 
 def create_instance(
@@ -268,31 +321,69 @@ def delete_database(conn, instance_id: str, db_name: str) -> None:
 
 
 def list_users(conn, instance_id: str) -> list[dict]:
-    """인스턴스 내 유저 목록."""
+    """인스턴스 내 유저 목록 (raw REST 우선, name@host 기준 dedup)."""
     try:
-        return [
-            {
-                "name": u.name or "",
-                "databases": getattr(u, "databases", []) or [],
-            }
-            for u in conn.database.users(instance_id)
-        ]
+        # raw REST: SDK 래핑이 host 를 누락하거나 중복 entry 를 만드는 경우 회피
+        try:
+            resp = conn.database.get(f"/instances/{instance_id}/users")
+            body = resp.json() if hasattr(resp, "json") else {}
+            raw_users = body.get("users", []) or []
+            entries = [
+                {
+                    "name": u.get("name", "") or "",
+                    "host": u.get("host", "%") or "%",
+                    "databases": u.get("databases", []) or [],
+                }
+                for u in raw_users
+                if u.get("name")
+            ]
+        except Exception:
+            entries = [
+                {
+                    "name": u.name or "",
+                    "host": getattr(u, "host", "%") or "%",
+                    "databases": getattr(u, "databases", []) or [],
+                }
+                for u in conn.database.users(instance_id)
+            ]
+
+        # dedup: (name, host) 동일 entry 는 1개로 (Trove 가 동일 user 중복 반환하는 경우 방어)
+        seen: dict[tuple[str, str], dict] = {}
+        for e in entries:
+            key = (e["name"], e["host"])
+            if key not in seen:
+                seen[key] = e
+        return list(seen.values())
     except Exception:
         _logger.debug("Trove 유저 목록 조회 실패 instance=%s", instance_id, exc_info=True)
         return []
 
 
-def create_user(conn, instance_id: str, name: str, password: str, databases: list[str] | None = None) -> None:
-    """인스턴스 내 유저 생성."""
-    user_body: dict = {"name": name, "password": password}
+def create_user(
+    conn,
+    instance_id: str,
+    name: str,
+    password: str,
+    host: str = "%",
+    databases: list[str] | None = None,
+) -> None:
+    """인스턴스 내 유저 생성 (raw REST: Trove POST /instances/{id}/users)."""
+    user: dict = {"name": name, "password": password, "host": host}
     if databases:
-        user_body["databases"] = [{"name": db} for db in databases]
-    conn.database.create_user(instance_id, **user_body)
+        user["databases"] = [{"name": db} for db in databases]
+    conn.database.post(f"/instances/{instance_id}/users", json={"users": [user]})
 
 
-def delete_user(conn, instance_id: str, username: str) -> None:
-    """인스턴스 내 유저 삭제."""
-    conn.database.delete_user(username, instance=instance_id, ignore_missing=False)
+def delete_user(conn, instance_id: str, username: str, host: str = "%") -> None:
+    """인스턴스 내 유저 삭제 (raw REST: name@host 식별).
+
+    Trove user identity 는 name@host 조합이므로 host 가 다르면 다른 유저.
+    SDK delete_user 는 host 파라미터를 받지 않아 동명 다른 host 유저 구분 불가 → raw REST.
+    """
+    from urllib.parse import quote
+
+    user_id = quote(f"{username}@{host}", safe="")
+    conn.database.delete(f"/instances/{instance_id}/users/{user_id}")
 
 
 # ---------------------------------------------------------------------------

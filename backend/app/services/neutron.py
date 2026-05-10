@@ -580,6 +580,7 @@ def add_router_interface(
         subnet = conn.network.get_subnet(subnet_id)
         if not subnet.gateway_ip:
             import ipaddress
+
             gw = str(next(ipaddress.ip_network(subnet.cidr, strict=False).hosts()))
             conn.network.update_subnet(subnet_id, gateway_ip=gw)
     result = conn.network.add_interface_to_router(router_id, subnet_id=subnet_id)

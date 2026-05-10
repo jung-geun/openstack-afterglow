@@ -980,6 +980,15 @@
 						>
 							{logFull ? '최근 200줄' : '전체 로그'}
 						</button>
+						<a
+							href="/dashboard/compute/instances/{instance.id}/console-log"
+							target="_blank"
+							rel="noopener noreferrer"
+							class="text-xs text-gray-400 hover:text-gray-200 px-2 py-1 border border-gray-700 hover:border-gray-500 rounded transition-colors"
+							title="새 창에서 전체 로그 보기"
+						>
+							새 창에서 보기 ↗
+						</a>
 						<button
 							onclick={() => loadConsoleLog(logFull)}
 							disabled={logLoading}

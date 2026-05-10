@@ -153,6 +153,23 @@ async def create_tables() -> None:
         except Exception:
             pass  # 이미 존재하면 무시
 
+        # 프로젝트 관리 사용자 자격 캐시 (k3s Octavia Ingress App Credential 발급용)
+        # — keystone.ensure_cluster_manager_user 가 raw SQL 로 read/write
+        try:
+            await conn.exec_driver_sql(
+                "CREATE TABLE IF NOT EXISTS project_manager_credentials ("
+                "project_id VARCHAR(64) NOT NULL PRIMARY KEY,"
+                "user_id VARCHAR(64) NOT NULL,"
+                "username VARCHAR(255) NOT NULL,"
+                "encrypted_password TEXT NOT NULL,"
+                "created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),"
+                "updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),"
+                "KEY ix_project_manager_credentials_user_id (user_id)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+        except Exception:
+            pass  # 이미 존재하면 무시
+
         # Union Mount 레이어 시스템 테이블 (없는 경우에만)
         # union_layers: 부모 자기참조 FK가 있어 먼저 생성
         try:

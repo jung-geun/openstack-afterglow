@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
+	import { pushState } from '$app/navigation';
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
@@ -36,12 +37,12 @@
 
 	function openPanel(id: string) {
 		selectedInstanceId = id;
-		history.pushState({ instanceId: id }, '', `/dashboard/database/instances/${id}`);
+		pushState(`/dashboard/database/instances/${id}`, { instanceId: id });
 	}
 
 	function closePanel() {
 		selectedInstanceId = null;
-		history.pushState({}, '', '/dashboard/database/instances');
+		pushState('/dashboard/database/instances', {});
 	}
 
 	const token = $derived($auth.token ?? undefined);

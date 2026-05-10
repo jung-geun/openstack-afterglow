@@ -23,25 +23,31 @@ def _mock_create_resp(instance_id: str = "inst-abc", name: str = "test-db", stat
     return resp
 
 
-def _mock_get_instance(instance_id: str = "inst-abc", name: str = "test-db", status: str = "ACTIVE") -> MagicMock:
-    obj = MagicMock()
-    obj.id = instance_id
-    obj.name = name
-    obj.status = status
-    obj.flavor = {"id": "5", "ram": 8192}
-    obj.volume = {"size": 10}
-    obj.datastore = {"type": "mariadb", "version": "10.11"}
-    obj.created_at = "2026-01-01T00:00:00"
-    obj.hostname = ""
-    obj.addresses = {}
-    obj.links = []
-    return obj
+def _mock_get_resp(instance_id: str = "inst-abc", name: str = "test-db", status: str = "ACTIVE") -> MagicMock:
+    """raw REST GET /instances/{id} 응답 mock."""
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {
+        "instance": {
+            "id": instance_id,
+            "name": name,
+            "status": status,
+            "flavor": {"id": "5", "ram": 8192},
+            "volume": {"size": 10},
+            "datastore": {"type": "mariadb", "version": "10.11"},
+            "created": "2026-01-01T00:00:00",
+            "hostname": "",
+            "addresses": {},
+            "links": [],
+        }
+    }
+    return resp
 
 
 def _make_conn(instance_id: str = "inst-abc") -> MagicMock:
     conn = MagicMock()
     conn.database.post.return_value = _mock_create_resp(instance_id)
-    conn.database.get_instance.return_value = _mock_get_instance(instance_id)
+    conn.database.get.return_value = _mock_get_resp(instance_id)
     conn.database.delete_instance.return_value = None
     return conn
 

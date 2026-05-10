@@ -4,7 +4,7 @@
 	import { auth } from '$lib/stores/auth';
 	import DbInstanceDetailPanel from '$lib/components/database/DbInstanceDetailPanel.svelte';
 
-	const instanceId = $derived($page.params.id);
+	const instanceId = $derived($page.params.id ?? '');
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
 </script>
