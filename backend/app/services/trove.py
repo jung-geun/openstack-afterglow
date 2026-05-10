@@ -13,15 +13,23 @@ def _instance_to_dict(i) -> dict:
     flavor = getattr(i, "flavor", {}) or {}
     volume = getattr(i, "volume", {}) or {}
     links = getattr(i, "links", []) or []
-    # hostname / ip 추출: links 또는 addresses 에서 시도
     hostname = getattr(i, "hostname", None) or ""
-    addresses = getattr(i, "addresses", {}) or {}
-    ip = ""
-    if not hostname and addresses:
+
+    # IP 추출: Trove는 'ip' 리스트 또는 'addresses' dict로 반환
+    ip_raw = getattr(i, "ip", None)
+    if ip_raw:
+        ips: list[str] = list(ip_raw) if not isinstance(ip_raw, str) else [ip_raw]
+    else:
+        addresses = getattr(i, "addresses", {}) or {}
+        ips = []
         for net_addrs in addresses.values():
-            if net_addrs:
-                ip = net_addrs[0].get("addr", "") if isinstance(net_addrs[0], dict) else ""
-                break
+            for addr in (net_addrs or []):
+                addr_val = addr.get("addr", "") if isinstance(addr, dict) else str(addr)
+                if addr_val:
+                    ips.append(addr_val)
+
+    ip = ips[0] if ips else ""
+
     return {
         "id": i.id,
         "name": i.name or "",
@@ -29,10 +37,14 @@ def _instance_to_dict(i) -> dict:
         "datastore": getattr(i, "datastore", {}) or {},
         "flavor_id": flavor.get("id", "") if isinstance(flavor, dict) else "",
         "flavor_ram": flavor.get("ram", 0) if isinstance(flavor, dict) else 0,
+        "flavor_vcpus": flavor.get("vcpus", 0) if isinstance(flavor, dict) else 0,
         "size": volume.get("size", 0) if isinstance(volume, dict) else 0,
+        "volume_used": round(volume.get("used", 0) or 0, 2) if isinstance(volume, dict) else 0,
         "created_at": str(getattr(i, "created_at", "") or ""),
+        "updated_at": str(getattr(i, "updated_at", "") or ""),
         "hostname": hostname,
         "ip": ip,
+        "ips": ips,
         "links": [lk.get("href", "") if isinstance(lk, dict) else str(lk) for lk in links],
     }
 

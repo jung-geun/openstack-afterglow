@@ -12,10 +12,14 @@
 		datastore: { type?: string; version?: string };
 		flavor_id: string;
 		flavor_ram: number;
+		flavor_vcpus: number;
 		size: number;
+		volume_used: number;
 		created_at: string;
+		updated_at: string;
 		hostname: string;
 		ip: string;
+		ips: string[];
 	}
 
 	interface DbDatabase { name: string; character_set: string; collate: string; }
@@ -78,13 +82,16 @@
 		dsType === 'redis' ? '6379' :
 		dsType === 'mongodb' ? '27017' : '3306'
 	);
+	const connectHost = $derived(
+		instance ? (instance.ips?.[0] || instance.hostname || '<host>') : '<host>'
+	);
 	const connectCmd = $derived(
 		instance
 			? dsType === 'postgresql'
-				? `psql -h ${instance.ip || instance.hostname || '<host>'} -p ${dbPort} -U <user> -d <database>`
+				? `psql -h ${connectHost} -p ${dbPort} -U <user> -d <database>`
 				: dsType === 'redis'
-				? `redis-cli -h ${instance.ip || instance.hostname || '<host>'} -p ${dbPort}`
-				: `mysql -h ${instance.ip || instance.hostname || '<host>'} -P ${dbPort} -u <user> -p`
+				? `redis-cli -h ${connectHost} -p ${dbPort}`
+				: `mysql -h ${connectHost} -P ${dbPort} -u <user> -p`
 			: ''
 	);
 
@@ -270,10 +277,40 @@
 	{:else}
 		<!-- 인스턴스 정보 -->
 		<div class="bg-gray-900 border border-gray-800 rounded-xl p-4 grid grid-cols-2 gap-3 text-sm">
-			<div><div class="text-gray-500 text-xs mb-0.5">ID</div><div class="text-gray-400 font-mono text-xs break-all">{instance.id}</div></div>
+			<div class="col-span-2"><div class="text-gray-500 text-xs mb-0.5">ID</div><div class="text-gray-400 font-mono text-xs break-all">{instance.id}</div></div>
 			<div><div class="text-gray-500 text-xs mb-0.5">데이터스토어</div><div class="text-white">{instance.datastore?.type ?? '-'} {instance.datastore?.version ?? ''}</div></div>
-			<div><div class="text-gray-500 text-xs mb-0.5">볼륨 크기</div><div class="text-white">{instance.size} GB</div></div>
 			<div><div class="text-gray-500 text-xs mb-0.5">생성일</div><div class="text-white">{instance.created_at ? instance.created_at.slice(0, 10) : '-'}</div></div>
+			<div>
+				<div class="text-gray-500 text-xs mb-0.5">볼륨 크기</div>
+				<div class="text-white">
+					{instance.size} GB
+					{#if instance.volume_used > 0}
+						<span class="text-gray-500 text-xs ml-1">({instance.volume_used} GB 사용)</span>
+					{/if}
+				</div>
+			</div>
+			<div>
+				<div class="text-gray-500 text-xs mb-0.5">플레이버</div>
+				<div class="text-white text-xs font-mono">
+					{instance.flavor_id ? instance.flavor_id.slice(0, 16) + (instance.flavor_id.length > 16 ? '…' : '') : '-'}
+					{#if instance.flavor_vcpus || instance.flavor_ram}
+						<span class="text-gray-400 ml-1">{instance.flavor_vcpus}vCPU / {instance.flavor_ram}MB</span>
+					{/if}
+				</div>
+			</div>
+			{#if instance.ips?.length > 0}
+				<div class="col-span-2">
+					<div class="text-gray-500 text-xs mb-1">IP 주소</div>
+					<div class="flex flex-wrap gap-1.5">
+						{#each instance.ips as addr}
+							<span class="text-white font-mono text-xs bg-gray-800 px-2 py-0.5 rounded">{addr}</span>
+						{/each}
+					</div>
+				</div>
+			{/if}
+			{#if instance.hostname}
+				<div class="col-span-2"><div class="text-gray-500 text-xs mb-0.5">호스트명</div><div class="text-white font-mono text-xs">{instance.hostname}</div></div>
+			{/if}
 		</div>
 
 		<!-- 연결 정보 -->
@@ -281,7 +318,18 @@
 			<h2 class="text-sm font-semibold text-white mb-3">연결 정보</h2>
 			<div class="space-y-2 text-sm">
 				<div class="flex gap-4">
-					<div><div class="text-gray-500 text-xs mb-0.5">호스트</div><div class="text-white font-mono">{instance.ip || instance.hostname || '-'}</div></div>
+					<div>
+						<div class="text-gray-500 text-xs mb-0.5">호스트</div>
+						{#if instance.ips?.length > 0}
+							<div class="space-y-0.5">
+								{#each instance.ips as addr}
+									<div class="text-white font-mono text-sm">{addr}</div>
+								{/each}
+							</div>
+						{:else}
+							<div class="text-gray-500 font-mono">-</div>
+						{/if}
+					</div>
 					<div><div class="text-gray-500 text-xs mb-0.5">포트</div><div class="text-white font-mono">{dbPort}</div></div>
 				</div>
 				{#if connectCmd}
