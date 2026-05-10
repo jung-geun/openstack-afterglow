@@ -23,6 +23,7 @@ def _make_layer(
     sealed: bool = False,
     parent_id: str | None = None,
     project_id: str | None = None,
+    parent_ids: list[str] | None = None,
 ):
     from app.models.db import UnionLayer
 
@@ -37,6 +38,7 @@ def _make_layer(
     layer.sealed = sealed
     layer.sealed_at = None
     layer.parent_id = parent_id
+    layer.parent_ids = parent_ids  # None = single 모드, list = multi 모드
     layer.project_id = project_id
     layer.ubuntu_base = None
     layer.build_recipe = {}
@@ -824,10 +826,11 @@ class TestDeleteLayer:
         session = AsyncMock()
         session.get = AsyncMock(return_value=layer)
 
-        # 자식 0, 템플릿 1
-        counts = [MagicMock(), MagicMock()]
-        counts[0].scalar_one.return_value = 0
-        counts[1].scalar_one.return_value = 1
+        # 자식(single) 0, 자식(multi) 0, 템플릿 1
+        counts = [MagicMock(), MagicMock(), MagicMock()]
+        counts[0].scalar_one.return_value = 0  # single 자식
+        counts[1].scalar_one.return_value = 0  # multi 자식
+        counts[2].scalar_one.return_value = 1  # 템플릿
         session.execute = AsyncMock(side_effect=counts)
 
         with pytest.raises(ValueError, match="템플릿"):
@@ -842,11 +845,12 @@ class TestDeleteLayer:
         session = AsyncMock()
         session.get = AsyncMock(return_value=layer)
 
-        # 자식 0, 템플릿 0, 마운트 1
-        counts = [MagicMock(), MagicMock(), MagicMock()]
-        counts[0].scalar_one.return_value = 0
-        counts[1].scalar_one.return_value = 0
-        counts[2].scalar_one.return_value = 1
+        # 자식(single) 0, 자식(multi) 0, 템플릿 0, 마운트 1
+        counts = [MagicMock(), MagicMock(), MagicMock(), MagicMock()]
+        counts[0].scalar_one.return_value = 0  # single 자식
+        counts[1].scalar_one.return_value = 0  # multi 자식
+        counts[2].scalar_one.return_value = 0  # 템플릿
+        counts[3].scalar_one.return_value = 1  # 마운트
         session.execute = AsyncMock(side_effect=counts)
 
         with pytest.raises(ValueError, match="활성 마운트"):
@@ -2038,3 +2042,263 @@ async def test_fork_api_unsealed_source_returns_409(admin_client):
         app.dependency_overrides.pop(get_session, None)
 
     assert resp.status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# Multi-parent (실험, opt-in) — 9.3
+# ---------------------------------------------------------------------------
+
+
+class TestMultiParent:
+    """parent_ids 멀티 부모 모드 검증. union.md §4.2 정책 회귀 방지."""
+
+    def _req(self, **kwargs):
+        from app.models.union import CreateLayerRequest
+
+        defaults = dict(
+            name="multi-child",
+            version="1.0",
+            content_hash=_sha("multi-child"),
+            ubuntu_base="ubuntu:22.04",
+        )
+        defaults.update(kwargs)
+        return CreateLayerRequest(**defaults)
+
+    @pytest.mark.asyncio
+    async def test_create_layer_multi_parent_success(self):
+        """두 봉인된 부모(같은 ubuntu_base) → 성공, parent_ids 저장 + parent_id NULL."""
+        from app.services.union_layers import create_layer
+
+        a = _make_layer(layer_id=_sha("A"), sealed=True, parent_id=None)
+        a.ubuntu_base = "ubuntu:22.04"
+        b = _make_layer(layer_id=_sha("B"), sealed=True, parent_id=None)
+        b.ubuntu_base = "ubuntu:22.04"
+
+        session = AsyncMock()
+
+        async def fake_get(_cls, lid):
+            if lid == _sha("A"):
+                return a
+            if lid == _sha("B"):
+                return b
+            if lid == _sha("multi-child"):
+                return None  # 신규 — 중복 없음
+            return None
+
+        session.get = AsyncMock(side_effect=fake_get)
+        # overwrite 검색은 빈 결과
+        empty_scalars = MagicMock()
+        empty_scalars.scalars = MagicMock(return_value=[])
+        session.execute = AsyncMock(return_value=empty_scalars)
+        session.refresh = AsyncMock(side_effect=lambda obj: None)
+
+        req = self._req(parent_ids=[_sha("A"), _sha("B")])
+        # SQLAlchemy ORM 인스턴스 생성은 자체 동작에 맡김 (mock 안 함)
+        result = await create_layer(session, req, created_by="tester")
+
+        assert result.parent_ids == [_sha("A"), _sha("B")]
+        assert result.parent_id is None  # multi 모드에서는 mirror 안 함
+
+    @pytest.mark.asyncio
+    async def test_create_layer_multi_parent_unsealed_rejected(self):
+        """한 부모 sealed=False → ValueError."""
+        from app.services.union_layers import create_layer
+
+        a = _make_layer(layer_id=_sha("A"), sealed=True)
+        a.ubuntu_base = "ubuntu:22.04"
+        b = _make_layer(layer_id=_sha("B"), sealed=False)  # 미봉인
+        b.ubuntu_base = "ubuntu:22.04"
+
+        session = AsyncMock()
+
+        async def fake_get(_cls, lid):
+            if lid == _sha("A"):
+                return a
+            if lid == _sha("B"):
+                return b
+            return None
+
+        session.get = AsyncMock(side_effect=fake_get)
+
+        req = self._req(parent_ids=[_sha("A"), _sha("B")])
+        with pytest.raises(ValueError, match="봉인되지 않았"):
+            await create_layer(session, req, created_by="tester")
+
+    @pytest.mark.asyncio
+    async def test_create_layer_multi_parent_base_mismatch_rejected(self):
+        """ubuntu_base 다른 두 root → ValueError."""
+        from app.services.union_layers import create_layer
+
+        a = _make_layer(layer_id=_sha("A"), sealed=True, parent_id=None)
+        a.ubuntu_base = "ubuntu:22.04"
+        b = _make_layer(layer_id=_sha("B"), sealed=True, parent_id=None)
+        b.ubuntu_base = "ubuntu:24.04"  # 불일치
+
+        session = AsyncMock()
+
+        async def fake_get(_cls, lid):
+            return {_sha("A"): a, _sha("B"): b}.get(lid)
+
+        session.get = AsyncMock(side_effect=fake_get)
+
+        req = self._req(parent_ids=[_sha("A"), _sha("B")])
+        with pytest.raises(ValueError, match="ubuntu_base가 일치하지 않습니다"):
+            await create_layer(session, req, created_by="tester")
+
+    def test_create_layer_multi_parent_single_item_rejected(self):
+        """parent_ids=[A] 1개 → 422 (Pydantic validator)."""
+        from pydantic import ValidationError
+
+        from app.models.union import CreateLayerRequest
+
+        with pytest.raises(ValidationError, match="2개 이상"):
+            CreateLayerRequest(
+                name="x",
+                version="1.0",
+                content_hash=_sha("x"),
+                parent_ids=[_sha("A")],
+            )
+
+    def test_create_layer_both_parent_id_and_parent_ids_rejected(self):
+        """parent_id + parent_ids 동시 지정 → 422."""
+        from pydantic import ValidationError
+
+        from app.models.union import CreateLayerRequest
+
+        with pytest.raises(ValidationError, match="동시에 지정할 수 없"):
+            CreateLayerRequest(
+                name="x",
+                version="1.0",
+                content_hash=_sha("x"),
+                parent_id=_sha("A"),
+                parent_ids=[_sha("B"), _sha("C")],
+            )
+
+    @pytest.mark.asyncio
+    async def test_create_layer_multi_parent_overwrite_rejected(self):
+        """동일 (name, version, parent_ids) sealed 존재 → ValueError."""
+        from app.services.union_layers import create_layer
+
+        a = _make_layer(layer_id=_sha("A"), sealed=True, parent_id=None)
+        a.ubuntu_base = "ubuntu:22.04"
+        b = _make_layer(layer_id=_sha("B"), sealed=True, parent_id=None)
+        b.ubuntu_base = "ubuntu:22.04"
+
+        # 이미 봉인된 동일 슬롯 후보
+        existing = _make_layer(layer_id=_sha("existing"), sealed=True)
+        existing.parent_ids = [_sha("A"), _sha("B")]
+
+        session = AsyncMock()
+
+        async def fake_get(_cls, lid):
+            return {_sha("A"): a, _sha("B"): b}.get(lid)
+
+        session.get = AsyncMock(side_effect=fake_get)
+        scalars_result = MagicMock()
+        scalars_result.scalars = MagicMock(return_value=[existing])
+        session.execute = AsyncMock(return_value=scalars_result)
+
+        req = self._req(parent_ids=[_sha("A"), _sha("B")])
+        with pytest.raises(ValueError, match="이미 존재"):
+            await create_layer(session, req, created_by="tester")
+
+    @pytest.mark.asyncio
+    async def test_get_ancestors_diamond_dedup(self):
+        """A→B, A→C, B→D, C→D, leaf→{B,C} 다이아몬드. D가 한 번만 등장."""
+        from app.services.union_layers import _get_ancestors_multi
+
+        leaf_id = _sha("leaf")
+        b_id = _sha("B")
+        c_id = _sha("C")
+        d_id = _sha("D")
+        a_id = _sha("A")
+
+        leaf = _make_layer(layer_id=leaf_id, sealed=False, parent_id=None, parent_ids=[b_id, c_id])
+        b = _make_layer(layer_id=b_id, sealed=True, parent_id=d_id)
+        c = _make_layer(layer_id=c_id, sealed=True, parent_id=d_id)
+        d = _make_layer(layer_id=d_id, sealed=True, parent_id=a_id)
+        a = _make_layer(layer_id=a_id, sealed=True, parent_id=None)
+        nodes = {leaf_id: leaf, b_id: b, c_id: c, d_id: d, a_id: a}
+
+        session = AsyncMock()
+        session.get = AsyncMock(side_effect=lambda _cls, lid: nodes.get(lid))
+
+        chain = await _get_ancestors_multi(session, leaf_id)
+        ids = [layer.id for layer in chain.layers]
+        assert ids.count(d_id) == 1, f"D가 두 번 등장: {ids}"
+        assert set(ids) == {a_id, b_id, c_id, d_id, leaf_id}
+        # base-first: A가 leaf보다 앞
+        assert ids.index(a_id) < ids.index(leaf_id)
+
+    @pytest.mark.asyncio
+    async def test_get_ancestors_multi_topo_order(self):
+        """선언 순서 결정성: parent_ids[0]이 [1]보다 base-first에서 앞."""
+        from app.services.union_layers import _get_ancestors_multi
+
+        leaf_id = _sha("leaf")
+        x_id = _sha("X")
+        y_id = _sha("Y")
+        leaf = _make_layer(layer_id=leaf_id, parent_id=None, parent_ids=[x_id, y_id])
+        x = _make_layer(layer_id=x_id, parent_id=None)
+        y = _make_layer(layer_id=y_id, parent_id=None)
+        nodes = {leaf_id: leaf, x_id: x, y_id: y}
+
+        session = AsyncMock()
+        session.get = AsyncMock(side_effect=lambda _cls, lid: nodes.get(lid))
+
+        chain = await _get_ancestors_multi(session, leaf_id)
+        ids = [layer.id for layer in chain.layers]
+        # X가 Y보다 앞 (선언 순서)
+        assert ids.index(x_id) < ids.index(y_id)
+        # leaf는 마지막
+        assert ids[-1] == leaf_id
+
+    @pytest.mark.asyncio
+    async def test_delete_layer_blocked_by_multi_parent_child(self):
+        """multi-parent 자식(parent_ids=[A,B])이 있으면 A 삭제도, B 삭제도 차단."""
+        from app.services.union_layers import delete_layer
+
+        # A 삭제 시도 — single 자식 0, multi 자식 1 → ValueError
+        for parent_id in (_sha("A"), _sha("B")):
+            layer = _make_layer(layer_id=parent_id, sealed=True)
+            session = AsyncMock()
+            session.get = AsyncMock(return_value=layer)
+            counts = [MagicMock(), MagicMock()]
+            counts[0].scalar_one.return_value = 0  # single 자식
+            counts[1].scalar_one.return_value = 1  # multi 자식 (JSON_CONTAINS)
+            session.execute = AsyncMock(side_effect=counts)
+
+            with pytest.raises(ValueError, match="멀티-부모 하위 레이어"):
+                await delete_layer(session, parent_id)
+
+    @pytest.mark.asyncio
+    async def test_validate_common_base_helper_consistent_returns_value(self):
+        """_validate_common_base: 모든 부모 base 일치 → 값 반환."""
+        from app.services.union_layers import _validate_common_base
+
+        a = _make_layer(layer_id=_sha("A"), parent_id=None)
+        a.ubuntu_base = "ubuntu:22.04"
+        b = _make_layer(layer_id=_sha("B"), parent_id=None)
+        b.ubuntu_base = "ubuntu:22.04"
+
+        session = AsyncMock()
+        session.get = AsyncMock(side_effect=lambda _cls, lid: {_sha("A"): a, _sha("B"): b}.get(lid))
+
+        result = await _validate_common_base(session, [_sha("A"), _sha("B")])
+        assert result == "ubuntu:22.04"
+
+    @pytest.mark.asyncio
+    async def test_validate_common_base_helper_mismatch_raises(self):
+        """_validate_common_base: 부모 base 불일치 → ValueError."""
+        from app.services.union_layers import _validate_common_base
+
+        a = _make_layer(layer_id=_sha("A"), parent_id=None)
+        a.ubuntu_base = "ubuntu:22.04"
+        b = _make_layer(layer_id=_sha("B"), parent_id=None)
+        b.ubuntu_base = "ubuntu:24.04"
+
+        session = AsyncMock()
+        session.get = AsyncMock(side_effect=lambda _cls, lid: {_sha("A"): a, _sha("B"): b}.get(lid))
+
+        with pytest.raises(ValueError, match="ubuntu_base가 일치하지 않습니다"):
+            await _validate_common_base(session, [_sha("A"), _sha("B")])

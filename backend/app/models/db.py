@@ -239,6 +239,9 @@ class UnionLayer(Base):
     parent_id: Mapped[str | None] = mapped_column(
         VARCHAR(71), ForeignKey("union_layers.id", ondelete="RESTRICT"), index=True
     )
+    # 다중 상속(실험, opt-in): parent_ids 가 NOT NULL 이면 multi 모드, parent_id 는 NULL.
+    # 단일/다중은 mutually exclusive (둘 중 하나만 사용).
+    parent_ids: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     # 최상위 레이어에만 있음: 어느 Ubuntu base 위에서 빌드됐는지
     ubuntu_base: Mapped[str | None] = mapped_column(VARCHAR(255))
 

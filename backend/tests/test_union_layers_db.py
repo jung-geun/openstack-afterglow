@@ -419,3 +419,52 @@ async def test_max_concurrent_mounts_enforced(sess):
     with pytest.raises(HTTPException) as exc_info:
         await svc.record_mount(sess, user_id="u3", vm_hostname="vm-3", leaf_layer_id=layer.id)
     assert exc_info.value.status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# C3-21  Multi-parent 다이아몬드 토폴로지 (실 SQL — JSON_CONTAINS 동작 검증)
+# ---------------------------------------------------------------------------
+
+
+async def test_multi_parent_diamond_toposort(sess):
+    """A→D, B→D, C→{A,B}. C의 조상 체인은 D 한 번만 포함, base-first 순."""
+    # D (root, ubuntu_base 명시)
+    d = await svc.create_layer(sess, _req(name="D", version="1", ubuntu_base="ubuntu:22.04"), created_by="u")
+    await svc.seal_layer(sess, d.id)
+    # A (child of D)
+    a_req = _req(name="A", version="1", ubuntu_base="ubuntu:22.04", parent_id=d.id)
+    a = await svc.create_layer(sess, a_req, created_by="u")
+    await svc.seal_layer(sess, a.id)
+    # B (child of D)
+    b_req = _req(name="B", version="1", ubuntu_base="ubuntu:22.04", parent_id=d.id)
+    b = await svc.create_layer(sess, b_req, created_by="u")
+    await svc.seal_layer(sess, b.id)
+    # C — multi-parent of A, B (다이아몬드). CreateLayerRequest로 parent_ids 직접 지정.
+    from app.models.union import CreateLayerRequest
+
+    c_full = CreateLayerRequest(
+        name="C",
+        version="1",
+        content_hash=_hash(),
+        ubuntu_base="ubuntu:22.04",
+        build_recipe={},
+        installed_packages={},
+        parent_ids=[a.id, b.id],
+    )
+    c = await svc.create_layer(sess, c_full, created_by="u")
+    assert c.parent_ids == [a.id, b.id]
+    assert c.parent_id is None  # multi 모드: mirror 안 함
+
+    # 조상 체인 조회 — D는 한 번만, base-first 순
+    chain = await svc.get_ancestors(sess, c.id)
+    ids = [layer.id for layer in chain.layers]
+    assert ids.count(d.id) == 1, f"D 다이아몬드 dedup 실패: {ids}"
+    assert set(ids) == {d.id, a.id, b.id, c.id}
+    assert ids.index(d.id) < ids.index(c.id)  # base-first
+
+    # multi 자식 차단: A 삭제 시도 → ValueError (C가 참조)
+    with pytest.raises(ValueError, match="멀티-부모 하위 레이어"):
+        await svc.delete_layer(sess, a.id)
+    # B 삭제도 동일하게 차단
+    with pytest.raises(ValueError, match="멀티-부모 하위 레이어"):
+        await svc.delete_layer(sess, b.id)

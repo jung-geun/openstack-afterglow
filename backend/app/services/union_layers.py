@@ -39,6 +39,7 @@ def _layer_to_info(layer: UnionLayer) -> LayerInfo:
         sealed=layer.sealed,
         sealed_at=getattr(layer, "sealed_at", None),
         parent_id=layer.parent_id,
+        parent_ids=getattr(layer, "parent_ids", None),
         project_id=getattr(layer, "project_id", None),
         ubuntu_base=layer.ubuntu_base,
         build_recipe=layer.build_recipe or {},
@@ -49,6 +50,12 @@ def _layer_to_info(layer: UnionLayer) -> LayerInfo:
         license_type=getattr(layer, "license_type", None),
         max_concurrent_mounts=getattr(layer, "max_concurrent_mounts", None),
     )
+
+
+def _is_multi_parent(layer: UnionLayer) -> bool:
+    """multi 모드 분기 조건. parent_ids가 NOT NULL이고 2개 이상."""
+    pids = getattr(layer, "parent_ids", None)
+    return pids is not None and len(pids) >= 2
 
 
 def _template_to_info(tmpl: UnionTemplate, stack: list[LayerInfo] | None = None) -> TemplateInfo:
@@ -70,13 +77,42 @@ def _template_to_info(tmpl: UnionTemplate, stack: list[LayerInfo] | None = None)
 # ---------------------------------------------------------------------------
 
 
+async def _validate_common_base(session: AsyncSession, parent_ids: list[str]) -> str | None:
+    """모든 부모(직접 + 조상)의 root ubuntu_base가 일치하는지 검증.
+
+    각 부모의 single-parent 조상 체인을 거슬러 root의 ubuntu_base를 수집한다.
+    모두 동일하거나 모두 None이면 그 값(또는 None) 반환. 불일치 시 ValueError.
+    """
+    bases: dict[str, str | None] = {}
+    for pid in parent_ids:
+        cursor_id: str | None = pid
+        last_base: str | None = None
+        seen: set[str] = set()
+        while cursor_id is not None:
+            if cursor_id in seen:
+                raise ValueError(f"조상 체인에 사이클이 감지됨: {cursor_id}")
+            seen.add(cursor_id)
+            node = await session.get(UnionLayer, cursor_id)
+            if node is None:
+                raise ValueError(f"부모 레이어 {cursor_id}를 찾을 수 없습니다")
+            if node.ubuntu_base is not None:
+                last_base = node.ubuntu_base
+            cursor_id = node.parent_id  # multi 부모는 root에 도달할 때까지 single-parent로만 거슬러 올라감
+        bases[pid] = last_base
+
+    unique_bases = {b for b in bases.values() if b is not None}
+    if len(unique_bases) > 1:
+        raise ValueError(f"부모 레이어의 ubuntu_base가 일치하지 않습니다 ({sorted(unique_bases)})")
+    return next(iter(unique_bases), None)
+
+
 async def create_layer(
     session: AsyncSession,
     data: CreateLayerRequest,
     created_by: str,
     project_id: str | None = None,
 ) -> LayerInfo:
-    """새 레이어 등록. 부모가 있으면 봉인 여부 검증."""
+    """새 레이어 등록. 부모가 있으면 봉인 여부 검증. multi-parent도 지원."""
     layer_id = (
         f"sha256:{data.content_hash[len('sha256:') :]}"
         if data.content_hash.startswith("sha256:")
@@ -88,7 +124,7 @@ async def create_layer(
     if existing:
         raise ValueError(f"레이어 {layer_id}는 이미 존재합니다")
 
-    # 부모 검증: 존재 + 봉인 여부
+    # 단일 부모 검증
     if data.parent_id:
         parent = await session.get(UnionLayer, data.parent_id)
         if parent is None:
@@ -97,6 +133,35 @@ async def create_layer(
             raise ValueError(
                 f"부모 레이어 {data.parent_id}가 아직 봉인되지 않았습니다. 봉인 후 자식 레이어를 생성하세요."
             )
+
+    # 다중 부모 검증 (실험, opt-in)
+    if data.parent_ids:
+        if layer_id in data.parent_ids:
+            raise ValueError("자기 자신을 부모로 지정할 수 없습니다")
+        for pid in data.parent_ids:
+            parent = await session.get(UnionLayer, pid)
+            if parent is None:
+                raise ValueError(f"부모 레이어 {pid}가 존재하지 않습니다")
+            if not parent.sealed:
+                raise ValueError(f"부모 레이어 {pid}가 아직 봉인되지 않았습니다. 봉인 후 자식 레이어를 생성하세요.")
+        await _validate_common_base(session, data.parent_ids)
+
+        # overwrite 금지: 동일 (name, version, parent_ids JSON) 슬롯에 봉인 레이어 존재 시 거부
+        # JSON 직접 비교 — 봉인된 같은 슬롯 검색은 service 레벨에서 list 비교로 처리
+        candidates = await session.execute(
+            select(UnionLayer).where(
+                UnionLayer.name == data.name,
+                UnionLayer.version == data.version,
+                UnionLayer.sealed.is_(True),
+                UnionLayer.parent_ids.is_not(None),
+            )
+        )
+        for cand in candidates.scalars():
+            if cand.parent_ids == data.parent_ids:
+                raise ValueError(
+                    f"동일한 (name={data.name}, version={data.version}, parent_ids={data.parent_ids}) "
+                    f"봉인 레이어가 이미 존재합니다 ({cand.id}). overwrite 금지."
+                )
 
     # project_id: 요청에 명시된 값 > 인자로 받은 값 > None(공유 레이어)
     effective_project_id = data.project_id or project_id or None
@@ -108,7 +173,8 @@ async def create_layer(
         created_at=datetime.now(UTC),
         created_by=created_by,
         sealed=False,
-        parent_id=data.parent_id,
+        parent_id=data.parent_id,  # multi 모드면 None 유지 (mirror 안 함)
+        parent_ids=data.parent_ids,  # multi 모드면 list, single 모드면 None
         ubuntu_base=data.ubuntu_base,
         build_recipe=data.build_recipe,
         installed_packages=data.installed_packages,
@@ -289,15 +355,71 @@ async def restore_layer(
         await session.commit()
 
 
-async def get_ancestors(session: AsyncSession, layer_id: str) -> AncestorChain:
-    """WITH RECURSIVE CTE로 조상 체인 조회 (base-first 순서).
+async def _get_ancestors_multi(session: AsyncSession, leaf_id: str) -> AncestorChain:
+    """multi-parent DAG 순회 (BFS + Kahn toposort, dedup, 선언 순서 결정성).
 
-    MySQL 8.0+ 필수.
+    base-first 순으로 반환. overlayfs lowerdir 조립 시 reverse(leftmost=leaf).
     """
+    # BFS로 모든 노드 수집 (dedup) + edges 구성
+    visited: dict[str, UnionLayer] = {}
+    edges: dict[str, list[str]] = {}  # child -> [parents]
+    queue = [leaf_id]
+    while queue:
+        cur_id = queue.pop(0)
+        if cur_id in visited:
+            continue
+        node = await session.get(UnionLayer, cur_id)
+        if node is None:
+            raise KeyError(f"레이어 {cur_id}를 찾을 수 없습니다 (조상 체인 누락)")
+        visited[cur_id] = node
+        parents: list[str] = []
+        if node.parent_ids:
+            parents = list(node.parent_ids)
+        elif node.parent_id:
+            parents = [node.parent_id]
+        edges[cur_id] = parents
+        for p in parents:
+            if p not in visited:
+                queue.append(p)
+
+    # Kahn toposort: in_degree 계산 (parent → child 방향)
+    in_degree: dict[str, int] = {nid: 0 for nid in visited}
+    for child, parents in edges.items():
+        in_degree[child] = len(parents)  # 자식의 in-degree = 부모 수
+
+    # 0-degree 노드(부모가 없는 root)부터 시작 — 결정성을 위해 visited 등록 순(=BFS 발견 순) 우선
+    discovery_order = list(visited.keys())  # BFS 순서 = 선언 순서 보존
+    order: list[str] = []
+    ready = [nid for nid in discovery_order if in_degree[nid] == 0]
+    while ready:
+        # 선언 순서 우선 — discovery_order 인덱스로 정렬
+        ready.sort(key=discovery_order.index)
+        cur = ready.pop(0)
+        order.append(cur)
+        # cur가 부모인 자식들의 in_degree 감소
+        for child, parents in edges.items():
+            if cur in parents:
+                in_degree[child] -= 1
+                if in_degree[child] == 0 and child not in order and child not in ready:
+                    ready.append(child)
+
+    if len(order) != len(visited):
+        raise ValueError(f"조상 체인 토폴로지 정렬 실패 (사이클 가능성): leaf={leaf_id}")
+
+    # base-first 순서: order는 root → leaf 순 (Kahn은 그렇게 동작)
+    return AncestorChain(layers=[_layer_to_info(visited[nid]) for nid in order])
+
+
+async def get_ancestors(session: AsyncSession, layer_id: str) -> AncestorChain:
+    """조상 체인 조회 (base-first 순서). MySQL 8.0+ CTE for single, Python BFS for multi."""
     # 먼저 leaf 존재 확인
     leaf = await session.get(UnionLayer, layer_id)
     if leaf is None:
         raise KeyError(f"레이어 {layer_id}를 찾을 수 없습니다")
+
+    # multi-parent 모드면 별도 경로
+    if _is_multi_parent(leaf):
+        return await _get_ancestors_multi(session, layer_id)
 
     sql = text("""
         WITH RECURSIVE ancestors AS (
@@ -402,29 +524,57 @@ async def list_templates(session: AsyncSession) -> list[TemplateInfo]:
 
 
 async def get_dependents(session: AsyncSession, layer_id: str) -> list[LayerInfo]:
-    """직접 자식 레이어 목록 (최신순). 부모 레이어 미존재 시 KeyError."""
+    """직접 자식 레이어 목록 (최신순). single + multi 모두 검색.
+
+    single 자식: parent_id == layer_id (parent_ids IS NULL)
+    multi 자식: JSON_CONTAINS(parent_ids, '"layer_id"')  (parent_id IS NULL)
+    """
     parent = await session.get(UnionLayer, layer_id)
     if parent is None:
         raise KeyError(f"레이어 {layer_id}를 찾을 수 없습니다")
-    stmt = select(UnionLayer).where(UnionLayer.parent_id == layer_id).order_by(UnionLayer.created_at.desc())
-    result = await session.execute(stmt)
-    return [_layer_to_info(row) for row in result.scalars()]
+
+    # single 자식
+    single_stmt = select(UnionLayer).where(UnionLayer.parent_id == layer_id)
+    single_result = await session.execute(single_stmt)
+    children = list(single_result.scalars())
+
+    # multi 자식 — JSON 배열 포함 검색
+    multi_candidates = await session.execute(select(UnionLayer).where(UnionLayer.parent_ids.is_not(None)))
+    for cand in multi_candidates.scalars():
+        if cand.parent_ids and layer_id in cand.parent_ids:
+            children.append(cand)
+
+    children.sort(key=lambda c: c.created_at, reverse=True)
+    return [_layer_to_info(row) for row in children]
 
 
 async def delete_layer(session: AsyncSession, layer_id: str) -> None:
-    """레이어 삭제 (GC). 자식/템플릿 참조/활성 마운트가 있으면 ValueError."""
+    """레이어 삭제 (GC). 자식(single+multi)/템플릿 참조/활성 마운트가 있으면 ValueError.
+
+    multi 자식의 경우 parent_ids 배열에 layer_id가 포함된 모든 레이어가 차단 사유 —
+    즉 부모 두 개 모두 삭제 차단됨.
+    """
     from sqlalchemy import func
 
     layer = await session.get(UnionLayer, layer_id)
     if layer is None:
         raise KeyError(f"레이어 {layer_id}를 찾을 수 없습니다")
 
-    # 자식 레이어 확인
-    child_count_result = await session.execute(
+    # single 자식 확인 (parent_ids IS NULL인 자식)
+    single_count_result = await session.execute(
         select(func.count()).select_from(UnionLayer).where(UnionLayer.parent_id == layer_id)
     )
-    if child_count_result.scalar_one() > 0:
+    if single_count_result.scalar_one() > 0:
         raise ValueError("하위 레이어가 존재하여 삭제할 수 없습니다")
+
+    # multi 자식 확인 (JSON 배열에 layer_id 포함). MySQL/MariaDB JSON_CONTAINS 사용.
+    multi_count_result = await session.execute(
+        select(func.count())
+        .select_from(UnionLayer)
+        .where(func.json_contains(UnionLayer.parent_ids, json.dumps(layer_id)))
+    )
+    if multi_count_result.scalar_one() > 0:
+        raise ValueError("멀티-부모 하위 레이어가 본 레이어를 참조하여 삭제할 수 없습니다")
 
     # 템플릿 참조 확인
     tmpl_count_result = await session.execute(
