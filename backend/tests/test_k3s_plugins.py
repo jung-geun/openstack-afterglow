@@ -13,8 +13,10 @@ def _base_settings(**kwargs) -> MagicMock:
         "os_auth_url": "https://keystone.example.com:5000/v3",
         "os_username": "admin",
         "os_password": "secret",
-        "os_region_name": "RegionOne",
+        "os_project_name": "admin",
         "os_user_domain_name": "Default",
+        "os_project_domain_name": "Default",
+        "os_region_name": "RegionOne",
         "os_insecure": False,
         "os_cacert": "",
         # OCCM
@@ -290,44 +292,85 @@ def test_keystone_auth_disabled_by_default():
     assert KeystoneAuthPlugin().should_deploy(s) is False
 
 
-def test_keystone_auth_should_deploy_gated():
-    """Keystone Auth는 설정 활성화 여부와 무관하게 should_deploy()가 False를 반환한다 (부팅 데드락 방지)."""
+def test_keystone_auth_should_deploy_when_enabled():
+    """8.14 데드락 해소 후: 설정 활성화 + image + os_auth_url 모두 충족 시 True."""
     from app.services.k3s_plugins.keystone_auth import KeystoneAuthPlugin
 
     s = _base_settings(k3s_keystone_auth_enabled=True)
+    assert KeystoneAuthPlugin().should_deploy(s) is True
+
+
+def test_keystone_auth_should_not_deploy_without_image():
+    from app.services.k3s_plugins.keystone_auth import KeystoneAuthPlugin
+
+    s = _base_settings(k3s_keystone_auth_enabled=True, k3s_keystone_auth_image="")
     assert KeystoneAuthPlugin().should_deploy(s) is False
 
 
-def test_keystone_auth_server_install_args():
+def test_keystone_auth_server_install_args_includes_kubelet_arg():
+    """webhook config + kubelet pod-manifest-path 모두 포함."""
     from app.services.k3s_plugins.keystone_auth import KeystoneAuthPlugin
 
     s = _base_settings(k3s_keystone_auth_enabled=True)
     args = KeystoneAuthPlugin().server_install_args(s)
     assert any("authentication-token-webhook-config-file" in a for a in args)
+    assert any("pod-manifest-path=/var/lib/rancher/k3s/agent/pod-manifests" in a for a in args)
 
 
-def test_keystone_auth_extra_write_files():
+def test_keystone_auth_extra_write_files_paths():
+    """static pod 운영에 필요한 host file 5건이 모두 포함된다."""
     from app.services.k3s_plugins.keystone_auth import KeystoneAuthPlugin
 
     s = _base_settings(k3s_keystone_auth_enabled=True)
     plugin = KeystoneAuthPlugin()
     files = plugin.extra_write_files("proj-1", "test-cluster", s)
-    assert len(files) == 1
-    assert files[0]["path"] == "/etc/kubernetes/keystone-webhook.yaml"
-    assert "webhook" in files[0]["content"].lower()
+    paths = {f["path"] for f in files}
+    assert paths == {
+        "/etc/kubernetes/keystone-webhook.yaml",
+        "/var/lib/rancher/k3s/agent/pod-manifests/k8s-keystone-auth.yaml",
+        "/etc/kubernetes/keystone-auth/tls.crt",
+        "/etc/kubernetes/keystone-auth/tls.key",
+        "/etc/kubernetes/keystone-auth/policy.json",
+    }
+    # tls.key는 0600
+    key_file = next(f for f in files if f["path"].endswith("tls.key"))
+    assert key_file["permissions"] == "0600"
 
 
-def test_keystone_auth_manifests_valid_yaml():
+def test_keystone_auth_webhook_endpoint_is_localhost():
+    """webhook config의 server endpoint는 https://127.0.0.1:8443/webhook."""
     from app.services.k3s_plugins.keystone_auth import KeystoneAuthPlugin
 
     s = _base_settings(k3s_keystone_auth_enabled=True)
     plugin = KeystoneAuthPlugin()
-    manifests = plugin.generate_manifests("test-cluster", "proj-1", s)
-    docs = [d for d in yaml.safe_load_all(manifests) if d]
-    kinds = {d["kind"] for d in docs}
-    assert "Deployment" in kinds
-    assert "Service" in kinds
-    assert "Secret" in kinds
+    files = plugin.extra_write_files("proj-1", "test-cluster", s)
+    webhook_yaml = next(f["content"] for f in files if f["path"].endswith("keystone-webhook.yaml"))
+    config = yaml.safe_load(webhook_yaml)
+    assert config["clusters"][0]["cluster"]["server"] == "https://127.0.0.1:8443/webhook"
+
+
+def test_keystone_auth_static_pod_listens_on_localhost():
+    """static pod manifest의 컨테이너 args에 --listen=127.0.0.1:8443 포함."""
+    from app.services.k3s_plugins.keystone_auth import KeystoneAuthPlugin
+
+    s = _base_settings(k3s_keystone_auth_enabled=True)
+    plugin = KeystoneAuthPlugin()
+    files = plugin.extra_write_files("proj-1", "test-cluster", s)
+    pod_yaml = next(f["content"] for f in files if f["path"].endswith("k8s-keystone-auth.yaml"))
+    pod = yaml.safe_load(pod_yaml)
+    assert pod["kind"] == "Pod"
+    assert pod["spec"]["hostNetwork"] is True
+    args = pod["spec"]["containers"][0]["args"]
+    assert "--listen=127.0.0.1:8443" in args
+    assert "--keystone-policy-file=/etc/policy/policy.json" in args
+
+
+def test_keystone_auth_generate_manifests_empty():
+    """static pod로 전환되어 K8s 매니페스트는 빈 문자열."""
+    from app.services.k3s_plugins.keystone_auth import KeystoneAuthPlugin
+
+    s = _base_settings(k3s_keystone_auth_enabled=True)
+    assert KeystoneAuthPlugin().generate_manifests("test-cluster", "proj-1", s) == ""
 
 
 # ---------------------------------------------------------------------------
@@ -349,39 +392,76 @@ def test_barbican_kms_requires_kek_id():
     assert BarbicanKmsPlugin().should_deploy(s) is False
 
 
-def test_barbican_kms_should_deploy_gated():
-    """Barbican KMS는 설정 활성화 여부와 무관하게 should_deploy()가 False를 반환한다 (부팅 데드락 방지)."""
+def test_barbican_kms_should_deploy_when_enabled_and_kek_set():
+    """8.14 데드락 해소 후: 설정 활성화 + KEK ID + OpenStack 자격증명 모두 충족 시 True."""
     from app.services.k3s_plugins.barbican_kms import BarbicanKmsPlugin
 
     s = _base_settings(k3s_barbican_kms_enabled=True, k3s_barbican_kms_kek_id="kek-uuid-123")
-    assert BarbicanKmsPlugin().should_deploy(s) is False
+    assert BarbicanKmsPlugin().should_deploy(s) is True
 
 
-def test_barbican_kms_server_install_args():
+def test_barbican_kms_server_install_args_includes_kubelet_arg():
+    """encryption-provider-config + kubelet pod-manifest-path 모두 포함."""
     from app.services.k3s_plugins.barbican_kms import BarbicanKmsPlugin
 
     s = _base_settings(k3s_barbican_kms_enabled=True, k3s_barbican_kms_kek_id="kek-uuid-123")
     args = BarbicanKmsPlugin().server_install_args(s)
     assert any("encryption-provider-config" in a for a in args)
+    assert any("pod-manifest-path=/var/lib/rancher/k3s/agent/pod-manifests" in a for a in args)
 
 
-def test_barbican_kms_extra_write_files():
+def test_barbican_kms_extra_write_files_paths_and_modes():
+    """static pod 운영에 필요한 host file 3건 + 모두 0600."""
     from app.services.k3s_plugins.barbican_kms import BarbicanKmsPlugin
 
     s = _base_settings(k3s_barbican_kms_enabled=True, k3s_barbican_kms_kek_id="kek-uuid-123")
     files = BarbicanKmsPlugin().extra_write_files("proj-1", "test-cluster", s)
-    assert len(files) == 1
-    assert files[0]["path"] == "/etc/kubernetes/encryption-config.yaml"
+    paths = {f["path"] for f in files}
+    assert paths == {
+        "/etc/kubernetes/encryption-config.yaml",
+        "/var/lib/rancher/k3s/agent/pod-manifests/barbican-kms.yaml",
+        "/etc/kubernetes/barbican-cloud.conf",
+    }
+    for f in files:
+        assert f["permissions"] == "0600"
 
 
-def test_barbican_kms_manifests_valid_yaml():
+def test_barbican_kms_static_pod_manifest_valid_pod():
+    """static pod manifest는 hostNetwork=true, hostPath /var/lib/kms 포함."""
     from app.services.k3s_plugins.barbican_kms import BarbicanKmsPlugin
 
     s = _base_settings(k3s_barbican_kms_enabled=True, k3s_barbican_kms_kek_id="kek-uuid-123")
-    manifests = BarbicanKmsPlugin().generate_manifests("test-cluster", "proj-1", s)
-    docs = [d for d in yaml.safe_load_all(manifests) if d]
-    kinds = {d["kind"] for d in docs}
-    assert "DaemonSet" in kinds
+    files = BarbicanKmsPlugin().extra_write_files("proj-1", "test-cluster", s)
+    pod_yaml = next(f["content"] for f in files if f["path"].endswith("barbican-kms.yaml"))
+    pod = yaml.safe_load(pod_yaml)
+    assert pod["kind"] == "Pod"
+    assert pod["spec"]["hostNetwork"] is True
+    socket_volume = next(v for v in pod["spec"]["volumes"] if v["name"] == "kms-socket")
+    assert socket_volume["hostPath"]["path"] == "/var/lib/kms"
+    args = pod["spec"]["containers"][0]["args"]
+    assert "--key-id=kek-uuid-123" in args
+    assert "--listen=/var/lib/kms/kms.sock" in args
+
+
+def test_barbican_kms_generate_manifests_empty():
+    """static pod로 전환되어 K8s 매니페스트는 빈 문자열."""
+    from app.services.k3s_plugins.barbican_kms import BarbicanKmsPlugin
+
+    s = _base_settings(k3s_barbican_kms_enabled=True, k3s_barbican_kms_kek_id="kek-uuid-123")
+    assert BarbicanKmsPlugin().generate_manifests("test-cluster", "proj-1", s) == ""
+
+
+def test_barbican_kms_arg_path_matches_write_file():
+    """--encryption-provider-config 인자의 path가 extra_write_files의 encryption-config.yaml path와 일치."""
+    from app.services.k3s_plugins.barbican_kms import BarbicanKmsPlugin
+
+    s = _base_settings(k3s_barbican_kms_enabled=True, k3s_barbican_kms_kek_id="kek-uuid-123")
+    plugin = BarbicanKmsPlugin()
+    args = plugin.server_install_args(s)
+    arg_path = next(a.split("=", 2)[2] for a in args if "encryption-provider-config" in a)
+    files = plugin.extra_write_files("proj-1", "test-cluster", s)
+    file_paths = {f["path"] for f in files}
+    assert arg_path in file_paths
 
 
 # ---------------------------------------------------------------------------
