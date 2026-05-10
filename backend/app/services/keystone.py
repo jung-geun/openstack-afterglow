@@ -19,6 +19,12 @@ _admin_project_id_cache: str | None = None
 _admin_role_id_cache: str | None = None
 
 
+def list_all_project_ids() -> set[str]:
+    """admin 자격으로 전체 프로젝트 ID 셋 반환. 캐싱 없음 — orphan 스캔처럼 호출 빈도 낮은 경로용."""
+    ks = _get_admin_ks_client()
+    return {p.id for p in ks.projects.list()}
+
+
 def _get_admin_ks_client():
     """서비스 admin 크리덴셜로 Keystone v3 Client 생성.
 

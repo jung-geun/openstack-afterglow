@@ -22,18 +22,40 @@
 		created_at: string | null;
 		age_days: number;
 	}
+	interface OrphanShareInfo {
+		id: string;
+		name: string | null;
+		size_gb: number;
+		project_id: string | null;
+		status: string;
+		created_at: string | null;
+		age_days: number;
+		snapshot_count: number;
+	}
+	interface OrphanSecurityGroupInfo {
+		id: string;
+		name: string;
+		description: string | null;
+		project_id: string | null;
+		created_at: string | null;
+		age_days: number;
+	}
 	interface OrphanScanResponse {
 		floating_ips: OrphanFipInfo[];
 		volumes: OrphanVolumeInfo[];
+		manila_shares: OrphanShareInfo[];
+		security_groups: OrphanSecurityGroupInfo[];
 	}
 	interface CleanupResult {
 		deleted: string[];
 		failed: { id: string; error: string }[];
 	}
-	type Kind = 'floating_ip' | 'volume';
+	type Kind = 'floating_ip' | 'volume' | 'manila_share' | 'security_group';
 
 	let fips = $state<OrphanFipInfo[]>([]);
 	let volumes = $state<OrphanVolumeInfo[]>([]);
+	let shares = $state<OrphanShareInfo[]>([]);
+	let secgroups = $state<OrphanSecurityGroupInfo[]>([]);
 	let loading = $state(true);
 	let scanError = $state('');
 
@@ -41,6 +63,8 @@
 
 	let selectedFips = $state(new Set<string>());
 	let selectedVolumes = $state(new Set<string>());
+	let selectedShares = $state(new Set<string>());
+	let selectedSGs = $state(new Set<string>());
 
 	let confirmKind = $state<Kind | null>(null);
 	let confirmIds = $state<string[]>([]);
@@ -62,15 +86,21 @@
 			);
 			fips = data.floating_ips;
 			volumes = data.volumes;
+			shares = data.manila_shares ?? [];
+			secgroups = data.security_groups ?? [];
 			// 응답에서 사라진 ID는 선택에서도 제거
 			selectedFips = new Set([...selectedFips].filter((id) => fips.some((f) => f.id === id)));
 			selectedVolumes = new Set(
 				[...selectedVolumes].filter((id) => volumes.some((v) => v.id === id))
 			);
+			selectedShares = new Set([...selectedShares].filter((id) => shares.some((s) => s.id === id)));
+			selectedSGs = new Set([...selectedSGs].filter((id) => secgroups.some((g) => g.id === id)));
 		} catch (e) {
 			scanError = e instanceof ApiError ? e.message : '스캔 실패';
 			fips = [];
 			volumes = [];
+			shares = [];
+			secgroups = [];
 		} finally {
 			loading = false;
 		}
@@ -96,9 +126,33 @@
 		if (selectedVolumes.size === volumes.length) selectedVolumes = new Set();
 		else selectedVolumes = new Set(volumes.map((v) => v.id));
 	}
+	function toggleShare(id: string) {
+		const next = new Set(selectedShares);
+		if (next.has(id)) next.delete(id);
+		else next.add(id);
+		selectedShares = next;
+	}
+	function toggleAllShares() {
+		if (selectedShares.size === shares.length) selectedShares = new Set();
+		else selectedShares = new Set(shares.map((s) => s.id));
+	}
+	function toggleSG(id: string) {
+		const next = new Set(selectedSGs);
+		if (next.has(id)) next.delete(id);
+		else next.add(id);
+		selectedSGs = next;
+	}
+	function toggleAllSGs() {
+		if (selectedSGs.size === secgroups.length) selectedSGs = new Set();
+		else selectedSGs = new Set(secgroups.map((g) => g.id));
+	}
 
 	function openConfirm(kind: Kind) {
-		const ids = kind === 'floating_ip' ? [...selectedFips] : [...selectedVolumes];
+		let ids: string[] = [];
+		if (kind === 'floating_ip') ids = [...selectedFips];
+		else if (kind === 'volume') ids = [...selectedVolumes];
+		else if (kind === 'manila_share') ids = [...selectedShares];
+		else ids = [...selectedSGs];
 		if (ids.length === 0) return;
 		confirmKind = kind;
 		confirmIds = ids;
@@ -123,10 +177,18 @@
 				const next = new Set(selectedFips);
 				for (const id of res.deleted) next.delete(id);
 				selectedFips = next;
-			} else {
+			} else if (confirmKind === 'volume') {
 				const next = new Set(selectedVolumes);
 				for (const id of res.deleted) next.delete(id);
 				selectedVolumes = next;
+			} else if (confirmKind === 'manila_share') {
+				const next = new Set(selectedShares);
+				for (const id of res.deleted) next.delete(id);
+				selectedShares = next;
+			} else {
+				const next = new Set(selectedSGs);
+				for (const id of res.deleted) next.delete(id);
+				selectedSGs = next;
 			}
 			await load();
 		} catch (e) {
@@ -317,6 +379,134 @@
 				</div>
 			{/if}
 		</section>
+
+		<!-- Manila Shares 섹션 -->
+		<section class="mb-8">
+			<div class="flex items-center justify-between mb-3">
+				<h2 class="text-base font-semibold text-white">고아 Manila Share ({shares.length})</h2>
+				<button
+					onclick={() => openConfirm('manila_share')}
+					disabled={selectedShares.size === 0}
+					class="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white text-xs font-medium rounded-lg disabled:opacity-30"
+				>
+					선택 {selectedShares.size}개 정리
+				</button>
+			</div>
+
+			{#if shares.length === 0}
+				<div class="text-xs text-gray-500 bg-gray-900 border border-gray-800 rounded-lg p-4">
+					Keystone 프로젝트가 사라진 share 없음.
+				</div>
+			{:else}
+				<div class="overflow-x-auto">
+					<table class="w-full text-sm">
+						<thead>
+							<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
+								<th class="text-left py-2 pr-4 w-8">
+									<input
+										type="checkbox"
+										checked={selectedShares.size === shares.length && shares.length > 0}
+										onchange={toggleAllShares}
+									/>
+								</th>
+								<th class="text-left py-2 pr-4">이름</th>
+								<th class="text-left py-2 pr-4">크기(GB)</th>
+								<th class="text-left py-2 pr-4">상태</th>
+								<th class="text-left py-2 pr-4">사라진 프로젝트</th>
+								<th class="text-left py-2 pr-4">생성일</th>
+								<th class="text-left py-2 pr-4">연령(일)</th>
+								<th class="text-left py-2 pr-4">ID</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each shares as s (s.id)}
+								<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/30 transition-colors">
+									<td class="py-2 pr-4">
+										<input
+											type="checkbox"
+											checked={selectedShares.has(s.id)}
+											onchange={() => toggleShare(s.id)}
+										/>
+									</td>
+									<td class="py-2 pr-4 text-gray-200">{s.name ?? '-'}</td>
+									<td class="py-2 pr-4 text-gray-300 font-mono">{s.size_gb}</td>
+									<td class="py-2 pr-4 text-green-400">{s.status}</td>
+									<td class="py-2 pr-4 text-gray-500 font-mono">{s.project_id?.slice(0, 8) ?? '-'}</td>
+									<td class="py-2 pr-4 text-gray-400">{s.created_at?.slice(0, 10) ?? '-'}</td>
+									<td class="py-2 pr-4 text-amber-400">{s.age_days}</td>
+									<td class="py-2 pr-4 text-gray-500 font-mono">{s.id.slice(0, 8)}</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			{/if}
+		</section>
+
+		<!-- Security Groups 섹션 -->
+		<section class="mb-4">
+			<div class="flex items-center justify-between mb-3">
+				<h2 class="text-base font-semibold text-white">고아 Security Group ({secgroups.length})</h2>
+				<button
+					onclick={() => openConfirm('security_group')}
+					disabled={selectedSGs.size === 0}
+					class="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white text-xs font-medium rounded-lg disabled:opacity-30"
+				>
+					선택 {selectedSGs.size}개 정리
+				</button>
+			</div>
+
+			<div class="text-xs text-gray-500 mb-2">
+				※ description에 <code class="text-gray-400">[afterglow-managed]</code> 마커가 있고 어떤 port에도 attach되지 않은 SG만 후보.
+			</div>
+
+			{#if secgroups.length === 0}
+				<div class="text-xs text-gray-500 bg-gray-900 border border-gray-800 rounded-lg p-4">
+					afterglow-managed marker가 있는 미부착 SG 없음.
+				</div>
+			{:else}
+				<div class="overflow-x-auto">
+					<table class="w-full text-sm">
+						<thead>
+							<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
+								<th class="text-left py-2 pr-4 w-8">
+									<input
+										type="checkbox"
+										checked={selectedSGs.size === secgroups.length && secgroups.length > 0}
+										onchange={toggleAllSGs}
+									/>
+								</th>
+								<th class="text-left py-2 pr-4">이름</th>
+								<th class="text-left py-2 pr-4">설명</th>
+								<th class="text-left py-2 pr-4">프로젝트</th>
+								<th class="text-left py-2 pr-4">생성일</th>
+								<th class="text-left py-2 pr-4">연령(일)</th>
+								<th class="text-left py-2 pr-4">ID</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each secgroups as g (g.id)}
+								<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/30 transition-colors">
+									<td class="py-2 pr-4">
+										<input
+											type="checkbox"
+											checked={selectedSGs.has(g.id)}
+											onchange={() => toggleSG(g.id)}
+										/>
+									</td>
+									<td class="py-2 pr-4 text-gray-200">{g.name}</td>
+									<td class="py-2 pr-4 text-gray-400 max-w-md truncate" title={g.description ?? ''}>{g.description ?? '-'}</td>
+									<td class="py-2 pr-4 text-gray-500 font-mono">{g.project_id?.slice(0, 8) ?? '-'}</td>
+									<td class="py-2 pr-4 text-gray-400">{g.created_at?.slice(0, 10) ?? '-'}</td>
+									<td class="py-2 pr-4 text-amber-400">{g.age_days}</td>
+									<td class="py-2 pr-4 text-gray-500 font-mono">{g.id.slice(0, 8)}</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			{/if}
+		</section>
 	{/if}
 </div>
 
@@ -335,7 +525,12 @@
 			role="document"
 		>
 			<h2 class="text-lg font-semibold text-white mb-3">
-				{confirmKind === 'floating_ip' ? 'Floating IP' : 'Volume'} 정리 ({confirmIds.length}개)
+				{#if confirmKind === 'floating_ip'}Floating IP
+				{:else if confirmKind === 'volume'}Volume
+				{:else if confirmKind === 'manila_share'}Manila Share
+				{:else}Security Group
+				{/if}
+				정리 ({confirmIds.length}개)
 			</h2>
 			{#if !cleanupResult}
 				<p class="text-sm text-gray-400 mb-4">
@@ -351,6 +546,14 @@
 				{#if confirmKind === 'volume'}
 					<p class="text-xs text-amber-400 mb-3">
 						※ 삭제 직전 재조회로 attachments / status를 한 번 더 검증합니다(race 방지).
+					</p>
+				{:else if confirmKind === 'manila_share'}
+					<p class="text-xs text-amber-400 mb-3">
+						※ 삭제 직전 재조회로 (1) project 복구 여부 (2) snapshot 부재 (3) status를 검증합니다.
+					</p>
+				{:else if confirmKind === 'security_group'}
+					<p class="text-xs text-amber-400 mb-3">
+						※ 삭제 직전 모든 port를 재조회해 attach가 발생하지 않았는지, marker가 유지되는지 검증합니다.
 					</p>
 				{/if}
 				{#if cleanupError}

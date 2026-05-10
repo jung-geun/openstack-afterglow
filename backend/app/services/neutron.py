@@ -25,6 +25,10 @@ _ROUTER_IFACE_OWNERS = [
     "network:ha_router_replicated_interface",
 ]
 
+# afterglow가 자동 생성한 Security Group을 식별하는 description 접미어.
+# orphan 검출에서 이 마커가 있는 SG만 cleanup 후보로 한정한다 (사용자 SG 보호).
+AFTERGLOW_MANAGED_TAG = "[afterglow-managed]"
+
 
 def _iter_router_interface_ports(conn, **kwargs):
     """DVR/HA를 포함한 모든 라우터 인터페이스 포트를 순회."""
@@ -702,7 +706,7 @@ def ensure_union_egress_sg(
     existing = next((sg for sg in sgs if sg["name"] == sg_name), None)
 
     if existing is None:
-        sg = create_security_group(conn, sg_name, "Union VM egress — NFS/CephFS/HTTP(S)")
+        sg = create_security_group(conn, sg_name, f"Union VM egress — NFS/CephFS/HTTP(S) {AFTERGLOW_MANAGED_TAG}")
         sg_id = sg["id"]
         existing_rules: list[dict] = []
     else:
@@ -794,7 +798,7 @@ def ensure_node_exporter_sg(
         sg_name,
         port=9100,
         scrape_cidr=scrape_cidr,
-        description="Prometheus scrape — node_exporter ingress (tcp/9100)",
+        description=f"Prometheus scrape — node_exporter ingress (tcp/9100) {AFTERGLOW_MANAGED_TAG}",
     )
 
 
@@ -811,7 +815,7 @@ def ensure_dcgm_exporter_sg(
         sg_name,
         port=9400,
         scrape_cidr=scrape_cidr,
-        description="Prometheus scrape — dcgm_exporter ingress (tcp/9400)",
+        description=f"Prometheus scrape — dcgm_exporter ingress (tcp/9400) {AFTERGLOW_MANAGED_TAG}",
     )
 
 
