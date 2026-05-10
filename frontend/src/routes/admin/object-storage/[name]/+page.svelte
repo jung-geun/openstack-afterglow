@@ -153,7 +153,11 @@
 	}
 
 	const token = $derived($auth.token ?? undefined);
-	const projectId = $derived($auth.projectId ?? undefined);
+	// admin 모드: ?project_id= 쿼리로 받은 대상 프로젝트로 X-Project-Id 헤더를 보내야
+	// 시스템 admin이 다른 프로젝트의 swift 컨테이너 객체를 조회할 수 있다.
+	const projectId = $derived(
+		$page.url.searchParams.get('project_id') ?? $auth.projectId ?? undefined
+	);
 
 	const breadcrumbs = $derived(
 		prefix ? prefix.replace(/\/$/, '').split('/').filter(Boolean) : []

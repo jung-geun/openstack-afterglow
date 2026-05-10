@@ -25,6 +25,10 @@
 			volume_by_status: Record<string, number>;
 			total_gb: number;
 			file_storage_count: number;
+			volume_snapshot_count?: number;
+			volume_backup_count?: number;
+			share_snapshot_count?: number;
+			image_count?: number;
 		};
 		network: {
 			network_count: number;
@@ -33,10 +37,22 @@
 			floatingip_count: number;
 			floatingip_active: number;
 			port_count: number;
+			subnet_count?: number;
+			security_group_count?: number;
+			load_balancer_count?: number;
+			load_balancer_active?: number;
 		};
 		containers: {
 			zun_count: number;
 			k3s_count: number;
+			k3s_active?: number;
+		};
+		data_services?: {
+			database_instance_count: number;
+		};
+		identity?: {
+			user_count: number;
+			project_count: number;
 		};
 	}
 
@@ -256,9 +272,27 @@
 						</div>
 					{/if}
 
-					<div class="mt-4 pt-4 border-t border-gray-800 flex items-center justify-between text-xs">
-						<span class="text-gray-500">파일 스토리지</span>
-						<span class="text-gray-300">{summary.storage.file_storage_count}개</span>
+					<div class="mt-4 pt-4 border-t border-gray-800 space-y-1.5 text-xs">
+						<div class="flex items-center justify-between">
+							<span class="text-gray-500">파일 스토리지</span>
+							<span class="text-gray-300">{summary.storage.file_storage_count}개</span>
+						</div>
+						<div class="flex items-center justify-between">
+							<span class="text-gray-500">볼륨 스냅샷</span>
+							<span class="text-gray-300">{summary.storage.volume_snapshot_count ?? 0}개</span>
+						</div>
+						<div class="flex items-center justify-between">
+							<span class="text-gray-500">볼륨 백업</span>
+							<span class="text-gray-300">{summary.storage.volume_backup_count ?? 0}개</span>
+						</div>
+						<div class="flex items-center justify-between">
+							<span class="text-gray-500">파일 스냅샷</span>
+							<span class="text-gray-300">{summary.storage.share_snapshot_count ?? 0}개</span>
+						</div>
+						<div class="flex items-center justify-between">
+							<span class="text-gray-500">이미지</span>
+							<span class="text-gray-300">{summary.storage.image_count ?? 0}개</span>
+						</div>
 					</div>
 				</div>
 
@@ -288,6 +322,26 @@
 							<div class="text-xs text-gray-500 mt-1">포트</div>
 						</div>
 					</div>
+
+					<div class="mt-3 pt-4 border-t border-gray-800 space-y-1.5 text-xs">
+						<div class="flex items-center justify-between">
+							<span class="text-gray-500">서브넷</span>
+							<span class="text-gray-300">{summary.network.subnet_count ?? 0}개</span>
+						</div>
+						<div class="flex items-center justify-between">
+							<span class="text-gray-500">Security Group</span>
+							<span class="text-gray-300">{summary.network.security_group_count ?? 0}개</span>
+						</div>
+						<div class="flex items-center justify-between">
+							<span class="text-gray-500">Load Balancer</span>
+							<span class="text-gray-300">
+								{summary.network.load_balancer_count ?? 0}개
+								{#if (summary.network.load_balancer_count ?? 0) > 0}
+									<span class="text-green-400">({summary.network.load_balancer_active ?? 0} active)</span>
+								{/if}
+							</span>
+						</div>
+					</div>
 				</div>
 
 				<!-- Containers -->
@@ -301,7 +355,12 @@
 						</div>
 						<div class="bg-gray-800 rounded-lg p-4 text-center">
 							<div class="text-2xl font-bold text-white">{summary.containers.k3s_count}</div>
-							<div class="text-xs text-gray-500 mt-1">Drover 클러스터</div>
+							<div class="text-xs text-gray-500 mt-1">
+								Drover 클러스터
+								{#if (summary.containers.k3s_count ?? 0) > 0}
+									<span class="text-green-400">({summary.containers.k3s_active ?? 0} active)</span>
+								{/if}
+							</div>
 						</div>
 					</div>
 
@@ -311,6 +370,45 @@
 						</a>
 						<a href="/admin/drover" class="flex items-center justify-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 transition-colors bg-gray-800 rounded-lg py-2">
 							Drover 클러스터 →
+						</a>
+					</div>
+				</div>
+
+				<!-- 데이터 서비스 -->
+				<div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+					<h2 class="text-sm font-semibold text-white mb-4">데이터 서비스</h2>
+					<div class="grid grid-cols-1 gap-3">
+						<div class="bg-gray-800 rounded-lg p-4 text-center">
+							<div class="text-2xl font-bold text-white">{summary.data_services?.database_instance_count ?? 0}</div>
+							<div class="text-xs text-gray-500 mt-1">DB 인스턴스 (Trove)</div>
+						</div>
+					</div>
+					<div class="mt-4 pt-4 border-t border-gray-800">
+						<a href="/admin/database-instances" class="flex items-center justify-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 transition-colors bg-gray-800 rounded-lg py-2">
+							DB 인스턴스 →
+						</a>
+					</div>
+				</div>
+
+				<!-- Identity -->
+				<div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+					<h2 class="text-sm font-semibold text-white mb-4">Identity</h2>
+					<div class="grid grid-cols-2 gap-3">
+						<div class="bg-gray-800 rounded-lg p-4 text-center">
+							<div class="text-2xl font-bold text-white">{summary.identity?.user_count ?? 0}</div>
+							<div class="text-xs text-gray-500 mt-1">사용자</div>
+						</div>
+						<div class="bg-gray-800 rounded-lg p-4 text-center">
+							<div class="text-2xl font-bold text-white">{summary.identity?.project_count ?? 0}</div>
+							<div class="text-xs text-gray-500 mt-1">프로젝트</div>
+						</div>
+					</div>
+					<div class="mt-4 pt-4 border-t border-gray-800 grid grid-cols-2 gap-2">
+						<a href="/admin/users" class="flex items-center justify-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 transition-colors bg-gray-800 rounded-lg py-2">
+							사용자 →
+						</a>
+						<a href="/admin/projects" class="flex items-center justify-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 transition-colors bg-gray-800 rounded-lg py-2">
+							프로젝트 →
 						</a>
 					</div>
 				</div>

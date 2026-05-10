@@ -19,6 +19,9 @@ admin/user 권한 분리 테스트를 위한 일반 유저 계정 설정:
   또는 환경변수: AFTERGLOW_TEST_USER_USERNAME, AFTERGLOW_TEST_USER_PASSWORD, AFTERGLOW_TEST_USER_PROJECT
 """
 
+import os
+from dataclasses import dataclass
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -26,6 +29,22 @@ from app.config import get_settings
 
 # 환경변수는 루트 tests/conftest.py에서 설정됨
 from app.main import app
+
+
+@dataclass
+class IntegrationResources:
+    """통합 테스트용 OpenStack 리소스 식별자 + SSH 자격증명.
+
+    환경변수 부재 시 픽스처 단계에서 pytest.skip으로 처리.
+    """
+
+    image_id: str
+    flavor_small: str
+    flavor_medium: str
+    library_ids: list[str]
+    ssh_key_path: str
+    ssh_user: str
+
 
 # ---------------------------------------------------------------------------
 # 공통 헬퍼
@@ -58,6 +77,53 @@ def require_service(flag: str) -> None:
 @pytest.fixture(scope="session")
 def settings():
     return get_settings()
+
+
+@pytest.fixture(scope="session")
+def integration_resources():
+    """실 인프라 통합 테스트용 image/flavor/SSH 자격증명.
+
+    누락 시 자동 skip — slow 마커가 붙은 테스트에서만 사용된다.
+    """
+    image_id = os.environ.get("AFTERGLOW_TEST_IMAGE_ID", "").strip()
+    flavor_small = os.environ.get("AFTERGLOW_TEST_FLAVOR_SMALL", "").strip()
+    flavor_medium = os.environ.get("AFTERGLOW_TEST_FLAVOR_MEDIUM", "").strip()
+    ssh_key_path = os.environ.get("AFTERGLOW_TEST_SSH_KEY", "").strip()
+
+    missing = [
+        name
+        for name, val in [
+            ("AFTERGLOW_TEST_IMAGE_ID", image_id),
+            ("AFTERGLOW_TEST_FLAVOR_SMALL", flavor_small),
+            ("AFTERGLOW_TEST_FLAVOR_MEDIUM", flavor_medium),
+            ("AFTERGLOW_TEST_SSH_KEY", ssh_key_path),
+        ]
+        if not val
+    ]
+    if missing:
+        pytest.skip(f"통합 테스트 환경변수 미설정: {', '.join(missing)}")
+
+    if not os.path.isfile(ssh_key_path):
+        pytest.skip(f"SSH 키 파일이 존재하지 않음: {ssh_key_path}")
+
+    # OpenSSH는 키 모드가 0o600(또는 더 제한적)이 아니면 거부 — CI에서 자동 보정.
+    try:
+        os.chmod(ssh_key_path, 0o600)
+    except OSError:
+        pass
+
+    library_ids_raw = os.environ.get("AFTERGLOW_TEST_LIBRARY_IDS", "python311").strip()
+    library_ids = [s.strip() for s in library_ids_raw.split(",") if s.strip()]
+    ssh_user = os.environ.get("AFTERGLOW_TEST_SSH_USER", "ubuntu").strip() or "ubuntu"
+
+    return IntegrationResources(
+        image_id=image_id,
+        flavor_small=flavor_small,
+        flavor_medium=flavor_medium,
+        library_ids=library_ids,
+        ssh_key_path=ssh_key_path,
+        ssh_user=ssh_user,
+    )
 
 
 @pytest.fixture(scope="session", autouse=True)

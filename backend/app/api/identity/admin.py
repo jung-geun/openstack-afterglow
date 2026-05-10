@@ -281,15 +281,108 @@ def _fetch_overview_database_instances(conn) -> int:
 
 
 def _fetch_overview_object_storage(conn) -> int:
-    """Swift 오브젝트 스토리지 컨테이너 수 수집 (현재 프로젝트/계정)."""
+    """Swift 오브젝트 스토리지 컨테이너 수 수집 — admin scope cross-project 합산.
+
+    swift 계정은 프로젝트별로 분리되므로 admin 본인 프로젝트의 conn.object_store만
+    보면 다른 프로젝트의 버킷이 누락된다. admin 토큰으로 fan-out 해서 모든 프로젝트의
+    버킷 수를 합산해야 admin overview 의 의미와 맞다.
+    """
     if not get_settings().service_swift_enabled:
         return 0
     try:
-        from app.services.swift import count_containers
+        from app.services.swift import count_containers_all_projects
 
-        return count_containers(conn)
+        admin_token = getattr(conn, "_afterglow_token", "") or ""
+        if not admin_token:
+            return 0
+        return count_containers_all_projects(admin_token)
     except Exception:
         return 0
+
+
+# ---------------------------------------------------------------------------
+# 통합 모니터링 카운터 — admin scope cross-project 보장
+# ---------------------------------------------------------------------------
+
+
+def _count_volume_snapshots(conn) -> int:
+    try:
+        return sum(1 for _ in conn.block_storage.snapshots(details=False, all_projects=True))
+    except Exception:
+        return 0
+
+
+def _count_volume_backups(conn) -> int:
+    try:
+        return sum(1 for _ in conn.block_storage.backups(details=False, all_projects=True))
+    except Exception:
+        return 0
+
+
+def _count_share_snapshots(conn) -> int:
+    if not get_settings().service_manila_enabled:
+        return 0
+    try:
+        return len(manila.list_share_snapshots(conn, all_tenants=True))
+    except Exception:
+        return 0
+
+
+def _count_images(conn) -> int:
+    try:
+        return sum(1 for _ in conn.image.images())
+    except Exception:
+        return 0
+
+
+def _count_subnets(conn) -> int:
+    try:
+        return sum(1 for _ in conn.network.subnets())
+    except Exception:
+        return 0
+
+
+def _count_security_groups(conn) -> int:
+    try:
+        return sum(1 for _ in conn.network.security_groups())
+    except Exception:
+        return 0
+
+
+def _count_load_balancers(conn) -> tuple[int, int]:
+    """(total, active) 반환. Octavia 엔드포인트 부재 환경은 try/except로 자동 0."""
+    try:
+        lbs = list(conn.load_balancer.load_balancers())
+    except Exception:
+        return 0, 0
+    total = len(lbs)
+    active = sum(1 for lb in lbs if (getattr(lb, "provisioning_status", "") or "") == "ACTIVE")
+    return total, active
+
+
+def _count_database_instances_admin(conn) -> int:
+    """Trove /mgmt/instances로 cross-project 합산. service flag 가드."""
+    if not get_settings().service_trove_enabled:
+        return 0
+    try:
+        from app.services.trove import list_instances_admin_all_projects
+
+        return len(list_instances_admin_all_projects(conn))
+    except Exception:
+        return 0
+
+
+def _count_identity_users_projects() -> tuple[int, int]:
+    """admin Keystone client로 (user_count, project_count) 반환."""
+    try:
+        from app.services.keystone import _get_admin_ks_client
+
+        ks = _get_admin_ks_client()
+        users = len(ks.users.list())
+        projects = len(ks.projects.list())
+        return users, projects
+    except Exception:
+        return 0, 0
 
 
 @router.get("/overview", dependencies=[Depends(require_admin)])
@@ -344,19 +437,111 @@ async def admin_overview(conn: openstack.connection.Connection = Depends(get_os_
         raise HTTPException(status_code=500, detail="개요 조회 실패")
 
 
+def _collect_storage_block(conn) -> dict:
+    """Cinder 볼륨 통계 (cross-project)."""
+    try:
+        vol_ep = conn.block_storage.get_endpoint()
+        vol_resp = conn.session.get(
+            f"{vol_ep}/volumes/detail",
+            params={"all_tenants": "1", "limit": "1000"},
+        )
+        volumes = vol_resp.json().get("volumes", [])
+        vol_by_status: dict = {}
+        total_gb = 0
+        for v in volumes:
+            s = v.get("status", "unknown")
+            vol_by_status[s] = vol_by_status.get(s, 0) + 1
+            total_gb += v.get("size", 0)
+        return {"volume_count": len(volumes), "volume_by_status": vol_by_status, "total_gb": total_gb}
+    except Exception:
+        return {"volume_count": 0, "volume_by_status": {}, "total_gb": 0}
+
+
+def _collect_network_block(conn) -> dict:
+    """Neutron 핵심 카운트 (cross-project)."""
+    try:
+        nets = list(conn.network.networks())
+        routers = list(conn.network.routers())
+        fips = list(conn.network.ips())
+        ports = list(conn.network.ports())
+        fip_active = sum(1 for f in fips if f.status == "ACTIVE")
+        router_active = sum(1 for r in routers if r.status == "ACTIVE")
+        return {
+            "network_count": len(nets),
+            "router_count": len(routers),
+            "router_active": router_active,
+            "floatingip_count": len(fips),
+            "floatingip_active": fip_active,
+            "port_count": len(ports),
+        }
+    except Exception:
+        return {
+            "network_count": 0,
+            "router_count": 0,
+            "router_active": 0,
+            "floatingip_count": 0,
+            "floatingip_active": 0,
+            "port_count": 0,
+        }
+
+
 @router.get("/monitoring/summary", dependencies=[Depends(require_admin)])
 async def get_monitoring_summary(
     conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)
 ):
-    """분야별 통합 모니터링 요약 (compute/storage/network/container)."""
-    try:
+    """분야별 통합 모니터링 요약 — Compute/Storage/Network/Containers/Data Services/Identity.
 
-        def _collect():
-            result: dict = {}
-            # -- Compute --
-            hyp_data = _fetch_hypervisors_raw(conn)
-            hyp_up = sum(1 for h in hyp_data if h.get("state") == "up")
-            result["compute"] = {
+    모든 카운트는 admin scope에서 cross-project 합산.
+    Trove/Manila/Octavia/Swift는 service_*_enabled 플래그로 가드.
+    """
+
+    async def _collect() -> dict:
+        # 1차: 동기 SDK 호출들을 ThreadPool 병렬로 (asyncio.to_thread + gather)
+        (
+            hyp_data,
+            srv_data,
+            storage_block,
+            network_block,
+            zun_count,
+            file_storage_count,
+            volume_snapshot_count,
+            volume_backup_count,
+            share_snapshot_count,
+            image_count,
+            subnet_count,
+            security_group_count,
+            lb_pair,
+            db_instance_count,
+            identity_pair,
+        ) = await asyncio.gather(
+            asyncio.to_thread(_fetch_hypervisors_raw, conn),
+            asyncio.to_thread(_fetch_overview_servers, conn),
+            asyncio.to_thread(_collect_storage_block, conn),
+            asyncio.to_thread(_collect_network_block, conn),
+            asyncio.to_thread(_fetch_overview_containers, conn),
+            asyncio.to_thread(_fetch_overview_file_storage, conn),
+            asyncio.to_thread(_count_volume_snapshots, conn),
+            asyncio.to_thread(_count_volume_backups, conn),
+            asyncio.to_thread(_count_share_snapshots, conn),
+            asyncio.to_thread(_count_images, conn),
+            asyncio.to_thread(_count_subnets, conn),
+            asyncio.to_thread(_count_security_groups, conn),
+            asyncio.to_thread(_count_load_balancers, conn),
+            asyncio.to_thread(_count_database_instances_admin, conn),
+            asyncio.to_thread(_count_identity_users_projects),
+        )
+
+        # 2차: k3s 클러스터 (async)
+        try:
+            clusters = await k3s_cluster.list_all_clusters()
+        except Exception:
+            clusters = []
+        k3s_total = len(clusters)
+        k3s_active = sum(1 for c in clusters if (c.get("status") or "") == "ACTIVE")
+
+        hyp_up = sum(1 for h in hyp_data if h.get("state") == "up")
+        result: dict = {
+            "compute": {
                 "hypervisors_total": len(hyp_data),
                 "hypervisors_up": hyp_up,
                 "vcpus_used": sum(h.get("vcpus_used", 0) or 0 for h in hyp_data),
@@ -364,67 +549,40 @@ async def get_monitoring_summary(
                 "memory_used_mb": sum(h.get("memory_mb_used", 0) or 0 for h in hyp_data),
                 "memory_total_mb": sum(h.get("memory_mb", 0) or 0 for h in hyp_data),
                 "running_vms": sum(h.get("running_vms", 0) or 0 for h in hyp_data),
-            }
-            srv_data = _fetch_overview_servers(conn)
-            result["compute"]["instance_stats"] = srv_data.get("instance_stats", {})
-            result["compute"]["gpu_instances"] = srv_data.get("gpu_instances", 0)
-            # -- Storage (volumes) --
-            try:
-                _ = conn.compute.get_endpoint().replace("/compute", "")
-                vol_ep = conn.block_storage.get_endpoint()
-                vol_resp = conn.session.get(
-                    f"{vol_ep}/volumes/detail",
-                    params={"all_tenants": "1", "limit": "1000"},
-                )
-                volumes = vol_resp.json().get("volumes", [])
-                vol_by_status: dict = {}
-                total_gb = 0
-                for v in volumes:
-                    s = v.get("status", "unknown")
-                    vol_by_status[s] = vol_by_status.get(s, 0) + 1
-                    total_gb += v.get("size", 0)
-                result["storage"] = {
-                    "volume_count": len(volumes),
-                    "volume_by_status": vol_by_status,
-                    "total_gb": total_gb,
-                }
-            except Exception:
-                result["storage"] = {"volume_count": 0, "volume_by_status": {}, "total_gb": 0}
-            # file storage
-            result["storage"]["file_storage_count"] = _fetch_overview_file_storage(conn)
-            # -- Network --
-            try:
-                nets = list(conn.network.networks())
-                routers = list(conn.network.routers())
-                fips = list(conn.network.ips())
-                ports = list(conn.network.ports())
-                fip_active = sum(1 for f in fips if f.status == "ACTIVE")
-                router_active = sum(1 for r in routers if r.status == "ACTIVE")
-                result["network"] = {
-                    "network_count": len(nets),
-                    "router_count": len(routers),
-                    "router_active": router_active,
-                    "floatingip_count": len(fips),
-                    "floatingip_active": fip_active,
-                    "port_count": len(ports),
-                }
-            except Exception:
-                result["network"] = {
-                    "network_count": 0,
-                    "router_count": 0,
-                    "router_active": 0,
-                    "floatingip_count": 0,
-                    "floatingip_active": 0,
-                    "port_count": 0,
-                }
-            # -- Containers --
-            result["containers"] = {
-                "zun_count": _fetch_overview_containers(conn),
-                "k3s_count": 0,
-            }
-            # k3s는 async이므로 별도 처리 불가 — 0으로 유지
-            return result
+                "instance_stats": srv_data.get("instance_stats", {}),
+                "gpu_instances": srv_data.get("gpu_instances", 0),
+            },
+            "storage": {
+                **storage_block,
+                "file_storage_count": file_storage_count,
+                "volume_snapshot_count": volume_snapshot_count,
+                "volume_backup_count": volume_backup_count,
+                "share_snapshot_count": share_snapshot_count,
+                "image_count": image_count,
+            },
+            "network": {
+                **network_block,
+                "subnet_count": subnet_count,
+                "security_group_count": security_group_count,
+                "load_balancer_count": lb_pair[0],
+                "load_balancer_active": lb_pair[1],
+            },
+            "containers": {
+                "zun_count": zun_count,
+                "k3s_count": k3s_total,
+                "k3s_active": k3s_active,
+            },
+            "data_services": {
+                "database_instance_count": db_instance_count,
+            },
+            "identity": {
+                "user_count": identity_pair[0],
+                "project_count": identity_pair[1],
+            },
+        }
+        return result
 
+    try:
         return await cached_call("afterglow:admin:monitoring", ttl_normal(), _collect, refresh=refresh)
     except Exception:
         _logger.warning("monitoring summary 조회 실패", exc_info=True)

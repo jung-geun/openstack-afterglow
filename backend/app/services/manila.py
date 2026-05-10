@@ -707,12 +707,21 @@ def create_share_snapshot(
     return client.post("snapshots", body)["snapshot"]
 
 
-def list_share_snapshots(conn, file_storage_id: str | None = None) -> list[dict]:
-    """Manila share 스냅샷 목록 조회."""
+def list_share_snapshots(
+    conn,
+    file_storage_id: str | None = None,
+    all_tenants: bool = False,
+) -> list[dict]:
+    """Manila share 스냅샷 목록 조회.
+
+    `all_tenants=True`는 admin scope에서 전(全) 프로젝트 스냅샷 합산용.
+    """
     client = get_client(conn)
     params: dict = {}
     if file_storage_id:
         params["share_id"] = file_storage_id
+    if all_tenants:
+        params["all_tenants"] = "1"
     data = client.get("snapshots/detail", params=params or None)
     return data.get("snapshots", [])
 

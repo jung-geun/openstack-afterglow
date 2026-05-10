@@ -1,5 +1,6 @@
 """keystone.py — ensure_cluster_manager_user / create/delete_app_credential 단위 테스트."""
 
+import asyncio
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -61,7 +62,7 @@ def test_ensure_cluster_manager_user_returns_cached(monkeypatch):
     ):
         from app.services.keystone import ensure_cluster_manager_user
 
-        uid, pw = ensure_cluster_manager_user("abcd1234-5678-xxxx-yyyy-zzzzzzzzzzzz")
+        uid, pw = asyncio.run(ensure_cluster_manager_user("abcd1234-5678-xxxx-yyyy-zzzzzzzzzzzz"))
 
     assert uid == "user-123"
     assert pw == "cached-pw"
@@ -100,7 +101,7 @@ def test_ensure_cluster_manager_user_creates_new(monkeypatch):
     ):
         from app.services.keystone import ensure_cluster_manager_user
 
-        uid, pw = ensure_cluster_manager_user("proj-5678-xxxx-yyyy-zzzzzzzzzzzz")
+        uid, pw = asyncio.run(ensure_cluster_manager_user("proj-5678-xxxx-yyyy-zzzzzzzzzzzz"))
 
     assert uid == "new-user-id"
     assert len(pw) > 0
@@ -137,7 +138,7 @@ def test_ensure_cluster_manager_user_role_missing_raises(monkeypatch):
     ):
         from app.services.keystone import ensure_cluster_manager_user
 
-        ensure_cluster_manager_user("proj-1234-xxxx")
+        asyncio.run(ensure_cluster_manager_user("proj-1234-xxxx"))
 
 
 # ---------------------------------------------------------------------------
@@ -167,4 +168,4 @@ def test_delete_app_credential_best_effort_on_failure(monkeypatch):
         from app.services.keystone import delete_app_credential
 
         # 예외가 전파되지 않아야 함
-        delete_app_credential("proj1234-xxxx", "cred-id-abc")
+        asyncio.run(delete_app_credential("proj1234-xxxx", "cred-id-abc"))

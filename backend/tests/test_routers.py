@@ -93,3 +93,17 @@ async def test_remove_router_gateway(client, mock_conn):
     with patch("app.api.network.routers.neutron.remove_router_gateway", return_value=None):
         resp = await client.delete("/api/routers/router-1/gateway")
     assert resp.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_add_router_interface_auto_gateway(client, mock_conn):
+    with patch(
+        "app.api.network.routers.neutron.add_router_interface",
+        return_value={"subnet_id": "subnet-1", "port_id": "port-1"},
+    ) as mock_add:
+        resp = await client.post(
+            "/api/routers/router-1/interfaces",
+            json={"subnet_id": "subnet-1", "auto_gateway": True},
+        )
+    assert resp.status_code in (200, 201)
+    mock_add.assert_called_once_with(mock_conn, "router-1", "subnet-1", True)

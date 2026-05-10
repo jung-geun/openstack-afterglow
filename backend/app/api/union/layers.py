@@ -290,6 +290,27 @@ async def create_template(
         raise HTTPException(status_code=422, detail=str(e))
 
 
+@router.delete("/templates/{name}/{version}", status_code=204)
+async def delete_template(
+    name: str,
+    version: int,
+    token_info: dict = Depends(get_token_info),
+    session=Depends(get_session),
+):
+    """템플릿 삭제 (관리자 전용). 미존재 시 404."""
+    _require_admin(token_info)
+    deleted = await union_layers.delete_template(session, name, version)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"템플릿 {name}@{version}을 찾을 수 없습니다")
+    await rec(
+        token_info,
+        None,
+        resource_type="union_template",
+        action="delete",
+        resource_name=f"{name}@{version}",
+    )
+
+
 # ---------------------------------------------------------------------------
 # 마운트 추적
 # ---------------------------------------------------------------------------

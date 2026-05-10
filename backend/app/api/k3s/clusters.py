@@ -371,7 +371,7 @@ async def create_k3s_cluster_async(
                         f"네트워크 {network_id}에 subnet이 없습니다. Octavia Ingress를 위한 subnet 도출 실패."
                     )
                 cluster_subnet_id = subnets[0].id
-                app_cred = await asyncio.to_thread(_keystone.create_app_credential_for_cluster, project_id, req.name)
+                app_cred = await _keystone.create_app_credential_for_cluster(project_id, req.name)
                 app_credential_id = app_cred["id"]
                 manifest_kwargs = {
                     "subnet_id": cluster_subnet_id,
@@ -553,7 +553,7 @@ async def _rollback(
         try:
             from app.services import keystone as _keystone
 
-            await asyncio.to_thread(_keystone.delete_app_credential, project_id, app_credential_id)
+            await _keystone.delete_app_credential(project_id, app_credential_id)
         except Exception as e:
             _logger.warning("Rollback: delete app credential %s failed: %s", app_credential_id, e)
 
@@ -799,7 +799,7 @@ async def delete_k3s_cluster(
         try:
             from app.services import keystone as _keystone
 
-            await asyncio.to_thread(_keystone.delete_app_credential, project_id, _app_cred_id)
+            await _keystone.delete_app_credential(project_id, _app_cred_id)
             _logger.info("Deleted App Credential %s for cluster %s", _app_cred_id, cluster_id)
         except Exception as e:
             _logger.warning("Delete App Credential %s failed: %s", _app_cred_id, e)

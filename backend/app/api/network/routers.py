@@ -126,7 +126,7 @@ async def add_interface(
 ):
     await _get_router_with_owner_check(conn, router_id, token_info)
     try:
-        result = await asyncio.to_thread(neutron.add_router_interface, conn, router_id, req.subnet_id)
+        result = await asyncio.to_thread(neutron.add_router_interface, conn, router_id, req.subnet_id, req.auto_gateway)
         await rec(
             token_info,
             conn,

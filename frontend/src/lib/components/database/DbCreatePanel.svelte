@@ -17,6 +17,8 @@
 	interface Network {
 		id: string;
 		name: string;
+		is_external: boolean;
+		is_shared: boolean;
 	}
 	interface AZ {
 		name: string;
@@ -164,7 +166,7 @@
 		await Promise.allSettled([
 			api
 				.get<Network[]>('/api/networks', ...opts)
-				.then((v) => (networks = v))
+				.then((v) => (networks = v.filter(n => !n.is_external && !n.is_shared)))
 				.catch(() => {}),
 			api
 				.get<AZ[]>('/api/instances/availability-zones', ...opts)

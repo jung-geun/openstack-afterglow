@@ -504,7 +504,7 @@ def test_callback_server_ip_rejects_invalid():
 
 
 # ---------------------------------------------------------------------------
-# Plugin 부팅 데드락 게이팅 — Barbican KMS / Keystone Auth
+# Plugin 게이팅 — Barbican KMS / Keystone Auth (8.14 데드락 해소 후 정상 분기)
 # ---------------------------------------------------------------------------
 
 
@@ -515,7 +515,9 @@ def _make_plugin_settings(**kwargs):
     defaults = {
         "k3s_barbican_kms_enabled": False,
         "k3s_barbican_kms_kek_id": "",
+        "k3s_barbican_kms_image": "registry.k8s.io/provider-os/barbican-kms-plugin:v1.31.0",
         "k3s_keystone_auth_enabled": False,
+        "k3s_keystone_auth_image": "registry.k8s.io/provider-os/k8s-keystone-auth:v1.34.1",
         "os_auth_url": "http://keystone:5000/v3",
         "os_username": "admin",
         "os_password": "secret",
@@ -527,22 +529,22 @@ def _make_plugin_settings(**kwargs):
     return mock
 
 
-def test_barbican_kms_plugin_disabled_even_when_settings_enabled():
-    """Barbican KMS는 설정이 활성화되어도 should_deploy()가 False를 반환해야 한다 (부팅 데드락 방지)."""
+def test_barbican_kms_plugin_enabled_when_settings_enabled():
+    """8.14 후속 — 설정 활성화 + KEK + 자격증명 충족 시 should_deploy()=True."""
     from app.services.k3s_plugins.barbican_kms import BarbicanKmsPlugin
 
     plugin = BarbicanKmsPlugin()
     settings = _make_plugin_settings(k3s_barbican_kms_enabled=True, k3s_barbican_kms_kek_id="kek-uuid")
-    assert plugin.should_deploy(settings) is False
+    assert plugin.should_deploy(settings) is True
 
 
-def test_keystone_auth_plugin_disabled_even_when_settings_enabled():
-    """Keystone Auth는 설정이 활성화되어도 should_deploy()가 False를 반환해야 한다 (부팅 webhook 실패 방지)."""
+def test_keystone_auth_plugin_enabled_when_settings_enabled():
+    """8.14 후속 — 설정 활성화 + image + os_auth_url 충족 시 should_deploy()=True."""
     from app.services.k3s_plugins.keystone_auth import KeystoneAuthPlugin
 
     plugin = KeystoneAuthPlugin()
     settings = _make_plugin_settings(k3s_keystone_auth_enabled=True)
-    assert plugin.should_deploy(settings) is False
+    assert plugin.should_deploy(settings) is True
 
 
 def test_barbican_kms_plugin_disabled_when_settings_disabled():

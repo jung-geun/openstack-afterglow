@@ -22,7 +22,8 @@ class CreateLayerRequest(BaseModel):
 
     name: str = Field(min_length=1, max_length=128)
     version: str = Field(min_length=1, max_length=64)
-    parent_id: str | None = None  # None = 최상위 레이어
+    parent_id: str | None = None  # None = 최상위 레이어 (단일 상속)
+    parent_ids: list[str] | None = None  # 다중 상속 (실험, opt-in). 2개 이상.
     ubuntu_base: str | None = Field(default=None, max_length=255)
     build_recipe: dict = Field(default_factory=dict)
     installed_packages: dict = Field(default_factory=dict)
@@ -45,6 +46,25 @@ class CreateLayerRequest(BaseModel):
             return _validate_sha256_id(v)
         return v
 
+    @field_validator("parent_ids")
+    @classmethod
+    def validate_parent_ids(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return v
+        if len(v) < 2:
+            raise ValueError("parent_ids는 2개 이상이어야 합니다 (단일 부모는 parent_id를 사용하세요)")
+        if len(set(v)) != len(v):
+            raise ValueError("parent_ids에 중복된 항목이 있습니다")
+        for pid in v:
+            _validate_sha256_id(pid)
+        return v
+
+    @model_validator(mode="after")
+    def validate_parent_exclusivity(self) -> "CreateLayerRequest":
+        if self.parent_id is not None and self.parent_ids is not None:
+            raise ValueError("parent_id와 parent_ids는 동시에 지정할 수 없습니다 (mutually exclusive)")
+        return self
+
 
 class LayerInfo(BaseModel):
     """레이어 상세 정보."""
@@ -56,7 +76,8 @@ class LayerInfo(BaseModel):
     created_by: str
     sealed: bool
     sealed_at: datetime | None = None
-    parent_id: str | None = None
+    parent_id: str | None = None  # 단일 상속 시 사용 (multi 모드에서는 NULL)
+    parent_ids: list[str] | None = None  # 다중 상속 시 사용 (single 모드에서는 NULL)
     project_id: str | None = None
     ubuntu_base: str | None = None
     build_recipe: dict = {}

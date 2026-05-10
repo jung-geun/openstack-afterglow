@@ -557,11 +557,11 @@ Step 5: 요약 & 배포
   - [x] Cinder upper 볼륨의 정기 백업 스케줄링 — `auto_backup.py` + `_auto_backup_loop`
   - [x] 백업에서 복구 시 OverlayFS 재구성 자동화 — `existing_upper_volume_id` + workdir 정리
 
-- [ ] 5.4 VM 스케일링 지원
+- [x] 5.4 VM 스케일링 지원
   - [x] 인스턴스 resize (플레이버 변경) — `POST /api/admin/instances/{id}/resize`, `/revert-resize` 엔드포인트 + `nova.resize_server`/`revert_resize_server` 서비스 함수 추가. `InstanceDetailPanel`에 resize 모달(flavor 선택) + VERIFY_RESIZE 상태에서 '되돌리기' 버튼 추가. 단위 테스트 4건 (`test_admin_resize.py`)
-  - [ ] 인스턴스 resize 시 OverlayFS 마운트 유지 검증 (통합 테스트)
-  - [ ] 다중 VM 동시 부팅 시 NFS share 동시 접근 안정성 검증
-  - [ ] 라이선스/동시 접속 제한 검토 (상용 소프트웨어)
+  - [x] 인스턴스 resize 시 OverlayFS 마운트 유지 검증 (통합 테스트) — `tests/integration/test_resize_overlay.py`. 19항 참조 (placeholder 제거 + SSH 직접 검증 + FIP 자동 할당)
+  - [x] 다중 VM 동시 부팅 시 NFS share 동시 접근 안정성 검증 — `tests/integration/test_concurrent_boot.py`. 19항 참조 (병렬 SSH 마운트 검증)
+  - [x] 라이선스/동시 접속 제한 검토 (상용 소프트웨어) — 11.2에서 `union_layers.create_mount` 가드 + 라이선스 필드 구현. 19항에서 DB 통합 회귀 테스트 4건(`test_libraries_license_db.py`) 추가
 
 - [x] 5.5 보안 강화
   - [x] NFS export 옵션 보안: `root_squash`, `sec=sys` vs `sec=krb5` — `_build_nfs_access_metadata` + `create_access_rule(metadata=)` + `ensure_nfs_access_rule(root_squash, sec_flavor)` + 설정값 2개(`manila_nfs_root_squash`, `manila_nfs_sec_flavor`) + 단위테스트 13건
@@ -836,8 +836,8 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 - [x] `backend/tests/test_k3s_clusters.py` — 플러그인 게이팅 신규 테스트 4건
 
 **향후 작업**:
-- [ ] Barbican KMS host static pod 재설계 (부팅 전 소켓 준비, apiserver 재시작 트리거)
-- [ ] Keystone Auth hostNetwork static pod 재설계 (webhook URL을 127.0.0.1:port로 변경)
+- [x] Barbican KMS host static pod 재설계 (부팅 전 소켓 준비, apiserver 재시작 트리거) — 20항 참조
+- [x] Keystone Auth hostNetwork static pod 재설계 (webhook URL을 127.0.0.1:port로 변경) — 20항 참조
 - [x] callback.sh에서 k3s 재시작 루프 감지 시 success=false 보고
 
 ---
@@ -859,6 +859,8 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
   - `layerbuild exec <recipe.sh>` — `systemd-nspawn -D merged/ bash recipe.sh` 격리 실행
   - `layerbuild seal` — 결정적 sha256 계산, `sha256-<hash>/diff/` 이동, 3-lock (chmod+chattr+API seal), API 레이어 등록
   - `layerbuild abort` — 진행 중인 빌드 취소 및 마운트 해제
+  - `layerbuild --dry-run <cmd>` — destructive subprocess + API 호출을 트레이스만 출력 (21항)
+  - `layerbuild resume-api <sha256:hash>` — seal 시 API 등록 실패한 레이어 재등록 (`.api_pending` 마커, 21항)
 
 **MySQL 8.0 스키마 + Pydantic 모델**
 
@@ -918,14 +920,14 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 
 **테스트 확장**
 
-- [ ] Integration test: Builder VM → seal → User VM mount 전체 플로우
+- [x] Integration test: Builder VM → seal → User VM mount 전체 플로우 — `tests/integration/test_union_e2e.py` (19항). create→seal→fork→template→record_mount→409 가드→unmount→cleanup 13단계 검증
 - [x] 삭제 차단 동작 검증 (자식/템플릿/활성 마운트 — 단위 테스트 포함)
 
 ### 9.3 Phase 3 — 확장 (목표: Phase 2 완료 후)
 
 - [x] **Fork 지원**: `POST /api/union/layers/{id}/fork` — sealed 레이어에서 새 RW 레이어 파생
 - [x] **Rebuild**: 동일 부모 + 다른 내용 → 새 hash 신규 레이어 (overwrite 금지 정책 유지)
-- [ ] **멀티 상속(실험)**: lowerdir에 여러 부모 지원 — 다이아몬드 충돌 해결 정책 필요
+- [x] **멀티 상속(실험)**: lowerdir에 여러 부모 지원 — 다이아몬드 충돌 해결 정책 필요. 22항 참조 (백엔드 API + DB + 서비스 레이어 도입, layerbuild CLI/envmgr 확장은 별도 작업)
 - [x] **OverlayFS 상태 모니터링 에이전트**: User VM에서 마운트 상태 주기적 보고
 - [x] **Manila Share Snapshot 관리**: 레이어 백업/복원
 
@@ -1303,3 +1305,644 @@ Option A 채택 시 본 절 진행. Option B 채택 시 사용자가 자체 구�
 - [x] `backend/app/api/compute/instance_metrics.py` — `_build_libvirt_expr` 신규 함수 (6개 메트릭 libvirt 폴백 PromQL, GPU는 None). `_one`/단일 엔드포인트에 순차 폴백(node_exporter 빈 시계열→libvirt 재시도) 적용
 - [x] `frontend/src/lib/components/instance/MetricsPanel.svelte` — 데이터 없음 메시지를 "메트릭 없음 (인스턴스 미가동 또는 exporter 미연동)"으로 완화
 - [x] `backend/tests/test_instance_metrics.py` — 신규 7건 (cpu/memory/network_rx/disk_read 폴백, node_exporter 우선·폴백 미호출, 양쪽 빈→빈 시계열, libvirt 표현식 단일 시계열 가드)
+
+## 19. 통합 테스트 보강 (2026-05-10) — 5.4 + 9.2 마지막 미완료 항목 마감
+
+> **배경**: 11.5 Phase D에서 통합 테스트 스켈레톤은 `pytest.skip` 제거 단계까지 진행됐으나, 본문이 `image_id="placeholder"` / `flavor_id="placeholder"` 더미 값으로 작성되어 실 OpenStack 셀프호스티드 러너에서도 401/404로 즉시 실패. OverlayFS 마운트 검증도 health endpoint의 `mount_ok` 한 비트에만 의존해 agent 거짓 보고를 잡지 못함. 9.2 Builder→User VM 통합 테스트는 부재.
+
+### 19.1 DELETE 템플릿 엔드포인트 + 서비스 함수 신규
+
+- [x] `backend/app/services/union_layers.py` — `delete_template(session, name, version)` 추가 (멱등, 미존재 시 False)
+- [x] `backend/app/api/union/layers.py` — `DELETE /api/union/templates/{name}/{version}` 관리자 전용 라우터 추가 (404 분기 + activity log)
+- [x] `backend/tests/test_union_layers.py` — 단위 테스트 4건 (admin 정상 204 / 404 / 비관리자 403 / 서비스 멱등 False)
+
+### 19.2 SSH 검증 헬퍼
+
+- [x] `backend/tests/integration/ssh_helper.py` — 신규. `wait_for_ssh`, `ssh_run`, `verify_overlay_mount`, `verify_nfs_mounts`, `verify_envmgr_status`. subprocess(ssh) 기반(paramiko 미도입), `BatchMode=yes` + `StrictHostKeyChecking=no` + `UserKnownHostsFile=/dev/null` 공통 옵션
+
+### 19.3 통합 테스트 본문 정합성 (5.4)
+
+- [x] `backend/tests/integration/conftest.py` — `IntegrationResources` dataclass + `integration_resources` 픽스처 추가 (env 기반, 누락 시 자동 skip, SSH 키 chmod 600 자동)
+- [x] `backend/tests/integration/test_resize_overlay.py` — placeholder 제거, FIP 자동 할당, SSH로 사전·사후 OverlayFS 검증 (12단계)
+- [x] `backend/tests/integration/test_concurrent_boot.py` — placeholder 제거, FIP 동시 할당, 병렬 SSH 마운트 검증, health 이중 검증
+
+### 19.4 Union v2 엔드투엔드 통합 테스트 (9.2)
+
+- [x] `backend/tests/integration/test_union_e2e.py` — Builder→seal→fork→template→user mount→409 가드→unmount→cleanup 13단계. manila + RW/RO share 미설정 환경에서는 builder/user access 단계만 조건부 skip하고 핵심 흐름은 항상 검증
+
+### 19.5 라이선스/동시 마운트 가드 회귀 테스트 (5.4)
+
+- [x] `backend/tests/test_libraries_license_db.py` — 신규 4건 (`@pytest.mark.db`):
+  - `commercial + max=2` → 첫 두 mount 성공, 세 번째 409
+  - unmount 후 슬롯 회수 → 새 mount 성공
+  - `open + max=NULL` → 10건 동시 mount 무제한
+  - `commercial + max=0` → 모든 mount 즉시 409
+- 11.5 Phase C MariaDB 11.4 인프라 재사용. `test_union_layers_db.py`와 동일 fixture 패턴
+
+### 19.6 CI workflow 통합
+
+- [x] `.github/workflows/test.yml::test-backend-integration` — 6개 신규 env 노출:
+  - `AFTERGLOW_TEST_IMAGE_ID`, `AFTERGLOW_TEST_FLAVOR_SMALL`, `AFTERGLOW_TEST_FLAVOR_MEDIUM` (secrets)
+  - `AFTERGLOW_TEST_SSH_KEY` (secrets)
+  - `AFTERGLOW_TEST_LIBRARY_IDS`, `AFTERGLOW_TEST_SSH_USER` (vars)
+- secrets/vars 미설정 시 픽스처에서 자동 skip → CI 차단 없음. 등록은 GitHub UI에서 별도 작업
+
+### 19.7 검증 요약
+
+```bash
+# 로컬 단위 (즉시 검증 가능)
+cd backend && uv run pytest tests/test_union_layers.py -v -k "delete_template"  # 4 passed
+
+# DB 통합 (MariaDB profile=test 컨테이너 필요)
+docker compose --profile test up -d mariadb
+AFTERGLOW_TEST_DATABASE_URL=mysql+aiomysql://... uv run pytest tests/test_libraries_license_db.py -m db
+
+# 실 인프라 (셀프호스티드 러너 — 사용자 환경에서 1회 검증)
+AFTERGLOW_ALLOW_INSECURE=1 AFTERGLOW_TEST_IMAGE_ID=<uuid> ... \
+  uv run pytest tests/integration/test_resize_overlay.py tests/integration/test_concurrent_boot.py tests/integration/test_union_e2e.py -m slow
+```
+
+## 20. K3s 부팅 데드락 해소 — Barbican KMS / Keystone Auth host static pod 전환 (2026-05-10) — 8.14 후속 마감
+
+> **배경**: 8.14에서 두 K3s 보안 플러그인이 부팅 데드락으로 강제 비활성화되어 있었다. Barbican KMS는 DaemonSet으로 동작해 apiserver 위에 놓여 KMS socket이 부팅 시 없어 chicken-and-egg, Keystone Auth는 cluster service URL을 webhook endpoint로 사용해 부팅 직후 DNS resolve 실패. 두 플러그인 모두 **host static pod**(`/var/lib/rancher/k3s/agent/pod-manifests/`)로 재구조화 — kubelet이 apiserver 의존 없이 직접 띄우므로 의존 역전 해소.
+
+### 20.1 Barbican KMS — host static pod 전환
+
+- [x] `backend/app/templates/k3s_plugins/barbican_kms/static_pod.yaml.j2` 신규 — kind=Pod, hostNetwork=true, priorityClassName=system-node-critical, hostPath /var/lib/kms (socket) + /etc/kubernetes/barbican-cloud.conf (cloud-config), securityContext.privileged=true
+- [x] `backend/app/templates/k3s_plugins/barbican_kms/cloud_conf.yaml.j2` 신규 — [Global] + [KeyManager] 섹션. Secret 의존 제거, host file 0600. **보안 trade-off**: 기존 Secret(=etcd, KMS 미작동 시 plaintext)과 동등한 plaintext-at-rest posture, 위치만 다름 (의도적)
+- [x] `backend/app/services/k3s_plugins/barbican_kms.py` 재작성:
+  - `should_deploy()` 강제 False 제거 → `enabled + KEK + 자격증명` 검증
+  - `extra_write_files()` 3건 (encryption-config.yaml, static pod manifest, barbican-cloud.conf) 모두 0600
+  - `generate_manifests()` 빈 문자열 반환 (DaemonSet 제거)
+  - `server_install_args()` 에 `--kubelet-arg=pod-manifest-path=/var/lib/rancher/k3s/agent/pod-manifests` 추가
+
+### 20.2 Keystone Auth — hostNetwork host static pod 전환
+
+- [x] `backend/app/templates/k3s_plugins/keystone_auth/static_pod.yaml.j2` 신규 — hostNetwork=true, `--listen=127.0.0.1:8443`, `--keystone-policy-file=/etc/policy/policy.json` (upstream 정확한 플래그명, PolicyFile은 PolicyConfigMap보다 우선이라 ConfigMap 의존 완전 제거)
+- [x] `backend/app/templates/k3s_plugins/keystone_auth/webhook_config.yaml.j2` — endpoint `https://k8s-keystone-auth.kube-system.svc.cluster.local:8443/webhook` → `https://127.0.0.1:8443/webhook`
+- [x] `backend/app/services/k3s_plugins/keystone_auth.py` 재작성:
+  - `should_deploy()` 강제 False 제거 → `enabled + image + os_auth_url` 검증
+  - `extra_write_files()` 5건 (webhook config, static pod manifest, tls.crt, tls.key, policy.json)
+  - `generate_manifests()` 빈 문자열 반환 (Deployment/Service/RBAC 제거)
+  - `server_install_args()` 에 `--kubelet-arg=pod-manifest-path=...` 추가 (Barbican과 동일, `aggregate_server_args` dedup으로 자동 처리)
+  - `_get_or_create_cert` 캐싱은 그대로 유지 (extra_write_files에서도 같은 cert/key 사용)
+
+### 20.3 단위 테스트
+
+- [x] `backend/tests/test_k3s_plugins.py` — 게이팅 테스트 정상 분기로 재작성 + 신규 11건:
+  - **Barbican (5건 + 1)**: should_deploy_when_enabled_and_kek_set, server_install_args_includes_kubelet_arg, extra_write_files_paths_and_modes, static_pod_manifest_valid_pod, generate_manifests_empty, arg_path_matches_write_file
+  - **Keystone (6건)**: should_deploy_when_enabled, should_not_deploy_without_image, server_install_args_includes_kubelet_arg, extra_write_files_paths, webhook_endpoint_is_localhost, static_pod_listens_on_localhost, generate_manifests_empty
+- [x] `backend/tests/test_k3s_clusters.py` — 8.14 게이팅 4건 (강제 False 검증) → 정상 분기 검증 (`should_deploy=True` when 설정 충족)으로 재작성
+- [x] `_base_settings()` / `_make_plugin_settings()` 에 `os_project_name`, `os_project_domain_name`, `k3s_keystone_auth_image`, `k3s_barbican_kms_image` 보강
+
+### 20.4 부팅 race 가정 명시
+
+apiserver와 kubelet은 K3s 안에서 동일 `k3s server` 프로세스의 자식이라 거의 동시 시작. apiserver의 KMS provider 초기화는 **`PluginInitTimeout`(최근 K8s 기본 60초)** 동안 socket 연결 retry → kubelet이 static pod를 띄워 KMS socket 생성하는 수초~십수 초 윈도우를 흡수. 향후 K8s가 timeout을 단축하면 추가 방어(`ExecStartPre` socket-wait) 필요. Keystone webhook은 lazy 연결이라 race 부담 없음.
+
+### 20.5 실 환경 검증 (사용자 1회)
+
+1. `config.toml` 에 `[k3s] barbican_kms_enabled=true`, `barbican_kms_kek_id=<id>`, `keystone_auth_enabled=true` 활성화
+2. 새 K3s 클러스터 생성 → 부팅 데드락 없이 ACTIVE 도달
+3. `kubectl get pods -n kube-system` → barbican-kms / k8s-keystone-auth Running
+4. `kubectl create secret generic test --from-literal=foo=bar` → etcd raw에서 KMS 암호화 적용 확인
+5. Keystone 토큰으로 kubectl 접근 가능 (`kubectl --token=<keystone_token> get nodes`)
+
+### 20.6 범위 외
+
+- 기존 `manifests.yaml.j2` (DaemonSet/Deployment) 파일 GC — 호출되지 않으나 보관, 차후 정리 PR
+- apiserver 인증서 갱신 시 자동 재시작 트리거 — 운영 절차로 분리
+- 외부 KMS 백엔드 (Vault 등) 추상화 — Barbican 한정 유지
+- 통합 테스트 자동화 — 셀프호스티드 K3s 러너 필요, 본 작업은 단위 검증 중심
+
+## 21. layerbuild CLI 검증 강화 (2026-05-10) — 9.1 Phase 1 안전망 도입
+
+> **배경**: `scripts/layerbuild.py`(387라인)는 Builder VM에서 Union v2 레이어를 만드는 핵심 CLI. 9.1에서 코드는 [x] 완료지만 **단위 테스트 0건**, 9.1 인프라(Manila 3개 share + Builder VM)도 미설정 상태라 운영 검증 부재. 회귀를 잡을 안전망이 전혀 없었다.
+
+### 21.1 `--dry-run` 글로벌 플래그 + `_run` helper
+
+- [x] `scripts/layerbuild.py` — `_run(cmd, *, dry_run=False, ...)` 헬퍼로 모든 subprocess 호출 일원화. dry-run에서는 명령 트레이스(`$ mount --bind ...` 형태)만 출력, 실제 destructive 작업 미수행.
+- [x] `_api_get` / `_api_post`도 dry-run 분기 추가 — stub 응답 반환.
+- [x] `_compute_layer_hash`도 dry-run에서는 placeholder hash(`sha256:0...0`) 반환 (옵션 B — 흐름 트레이스가 본질, real hash는 단위 테스트로 검증).
+- [x] dry-run 원칙: state file 미작성, mkdir 미수행 → **chainable 아님** (단일 명령 단위로만 동작). 사용자가 `init→exec→seal` 시퀀스를 미리 보려면 각 명령 독립 호출.
+- [x] argparse에 `--dry-run` 글로벌 플래그 추가, 모든 cmd 함수가 `args.dry_run` 전달받음.
+
+### 21.2 API 등록 실패 복구 — `.api_pending` 마커 + `cmd_resume_api`
+
+- [x] `cmd_seal`이 API POST 예외 시 `dest_dir/.api_pending` 파일에 등록 payload(JSON) 저장. layer dir은 디스크에 이미 락 적용된 상태로 남아도 재시도 경로 확보.
+- [x] 새 서브커맨드 `layerbuild resume-api <sha256:hash>` — `.api_pending` 읽고 POST 두 번 (등록 + 봉인) 재시도 → 성공 시 마커 삭제.
+- [x] `_require_api_env()` 헬퍼로 환경변수 사전 검증 (cmd_init parent 지정 시, cmd_resume_api에서 호출).
+
+### 21.3 단위 테스트 신규: `backend/tests/test_layerbuild.py` (21건)
+
+- [x] **Pure 헬퍼 (5)**: state I/O 라운드트립, `_compute_layer_hash` 결정성/콘텐츠 변경 검출/빈 디렉토리/dry-run placeholder. **GNU tar(`--sort=name`) 미설치 환경(macOS BSD tar)에서는 hash 결정성 테스트 3건 자동 skip** — `_has_gnu_tar()` 가드.
+- [x] **argparse (3)**: --version 필수 검증, 글로벌 --dry-run 파싱, resume-api 서브커맨드.
+- [x] **cmd_init (5)**: parent 없을 때 bind mount + state 생성, parent 지정 시 `_api_get` 조상 체인 → lowerdir 조립 검증, state 충돌 시 exit 1, dry-run에서 mount/state 미생성, parent + API env 미설정 시 명확한 exit.
+- [x] **cmd_seal (4)**: state 없으면 exit, API POST 두 번 순서 (`/api/union/layers` → `/api/union/layers/{id}/seal`), API 실패 시 `.api_pending` 마커 + content_hash 포함, dry-run 트레이스에 umount/chmod/chattr 포함.
+- [x] **cmd_abort (2)**: state 없으면 조용히 종료, umount + work rmtree + state 클리어.
+- [x] **cmd_resume_api (2)**: 마커 읽고 POST 두 번 → 마커 삭제, 마커 없으면 exit 1.
+- [x] **결정성 보장 fixture**: `_normalize_dir(path)`가 모든 파일/디렉토리에 명시적 `chmod 0o644/0o755 + os.utime((0, 0))` 적용 → 환경 의존(umask, mtime) 제거.
+- [x] **MagicMock 'parent' 속성 충돌 회피**: `argparse.Namespace` 사용 — MagicMock의 내부 `parent` 속성과 args.parent 충돌 방지.
+
+### 21.4 검증
+
+- [x] 백엔드 단위 테스트 1274건 그린 (1256 → 1274, +18 추가, 3건은 GNU tar 환경에서 추가 skip 해제 예정)
+- [x] ruff check + format 통과
+- [x] 수동 dry-run 검증: `python3 scripts/layerbuild.py --dry-run init test --version 1.0` → 명령 트레이스만 출력, 실제 mount/mkdir 미수행 확인
+
+### 21.5 범위 외
+
+- **Manila share 3개 실제 프로비저닝 + Builder VM 셋업** — 인프라 작업 (사용자 OpenStack 환경에서 수행). 본 plan 범위 외.
+- **layerbuild fork/rebuild 새 서브커맨드** — Phase 3에 별도 항목.
+- **GNU tar 의존을 Python `tarfile` 모듈로 분리** — cross-platform 가능하나 기존 GNU tar 동작과 정확히 일치한다는 보장이 어려움. 별도 PR.
+
+## 22. Union 멀티 상속 실험 도입 (2026-05-10) — 9.3 마지막 [ ] 마감 (백엔드 한정)
+
+> **배경**: union.md §4.2가 멀티 상속을 opt-in 실험 기능으로 정의 — 단일 상속 MVP 안정화 후 도입. 본 작업은 **백엔드 모델 + 서비스 + API**까지 도입하고, 단위/DB 통합 테스트로 다이아몬드/공통 base 검증 정책을 회귀 보호. layerbuild CLI 확장과 envmgr-use lowerdir 멀티 조립은 **별도 작업**.
+
+### 22.1 설계 결정
+
+- **mutually exclusive 모드**: single-parent는 `parent_id = X, parent_ids = NULL`, multi-parent는 `parent_id = NULL, parent_ids = [X, Y, ...]`. mirror 안 함 (advisor 검토 결과 — mirror하면 자식 검색 모호성 발생).
+- **분기 조건**: `parent_ids is not None and len >= 2`. 1개짜리는 422 reject.
+- **부모 순서는 정체성** (`union.md §4.2-2`): `[A, B]`와 `[B, A]`는 다른 레이어. overwrite 금지에서 JSON 비교.
+- **공통 base 검증** (`union.md §4.2-4`): 모든 부모의 root ubuntu_base가 일치해야 함.
+- **다이아몬드 dedup** (`union.md §4.2-3`): BFS + Kahn toposort + 선언 순서 결정성. 같은 조상이 여러 경로로 도달해도 한 번만 등장.
+
+### 22.2 DB 스키마 + ORM
+
+- [x] `backend/app/models/db.py` — `UnionLayer.parent_ids: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)` 추가
+- [x] `backend/app/database.py::create_tables` — `ALTER TABLE union_layers ADD COLUMN parent_ids JSON DEFAULT NULL` 마이그레이션 추가
+
+### 22.3 Pydantic 모델
+
+- [x] `backend/app/models/union.py::CreateLayerRequest`:
+  - `parent_ids: list[str] | None = None` 추가
+  - `field_validator`: 모두 sha256 형식 + dedup + 2개 이상
+  - `model_validator`: parent_id와 parent_ids 동시 지정 시 422
+- [x] `LayerInfo`: `parent_ids: list[str] | None = None` 응답 필드 추가
+
+### 22.4 서비스 레이어
+
+- [x] `backend/app/services/union_layers.py`:
+  - `_is_multi_parent(layer) -> bool` 헬퍼 (`parent_ids and len >= 2`)
+  - `_validate_common_base(session, parent_ids)` 신규 — 부모 root까지 거슬러 ubuntu_base 일치 검증
+  - `create_layer` 분기: parent_ids 검증(봉인, 자기참조, 공통 base, overwrite 금지 — JSON list 비교)
+  - `_get_ancestors_multi(session, leaf_id)` 신규 — Python BFS + Kahn toposort + 선언 순서 결정성 (base-first)
+  - `get_ancestors`는 leaf의 모드(`_is_multi_parent`)로 single CTE / multi BFS 분기
+  - `delete_layer` / `get_dependents`: single 자식(`parent_id == X`) + multi 자식(`JSON_CONTAINS(parent_ids, X)`) OR 검색. multi 자식은 모든 부모 차단.
+
+### 22.5 API
+
+- POST `/api/union/layers`: 기존 시그니처 유지 (CreateLayerRequest 확장만으로 자동 호환)
+- GET `/api/union/layers/{id}/ancestors`: 내부 분기로 자동 처리
+
+### 22.6 단위 테스트 — `TestMultiParent` 11건
+
+- [x] create 성공/실패 6건: success, unsealed_rejected, base_mismatch_rejected, single_item_rejected (Pydantic), both_specified_rejected (Pydantic), overwrite_rejected
+- [x] ancestors 2건: diamond_dedup (D 한 번만), multi_topo_order (선언 순서)
+- [x] delete 1건: blocked_by_multi_parent_child (A/B 두 부모 모두 차단)
+- [x] helper 2건: validate_common_base consistent / mismatch
+- [x] `_make_layer` 헬퍼에 `parent_ids` 인자 추가 (MagicMock spec 자동 mock 회피)
+
+### 22.7 DB 통합 테스트 — `test_union_layers_db.py` C3-21
+
+- [x] **다이아몬드 토폴로지 실 SQL 검증**: D→{A, B} → C(parent_ids=[A, B]). C의 조상 체인에 D가 한 번만 등장 + base-first 순. multi 자식 차단 검증 (A/B 둘 다 409).
+- MariaDB 11.4 (`@pytest.mark.db`) 환경에서 JSON_CONTAINS 실 동작 검증.
+
+### 22.8 검증
+
+- [x] 백엔드 단위 테스트 1285건 그린 (1274 → 1285, +11 신규)
+- [x] union_layers 단위 96건 그린 (회귀 없음)
+- [x] ruff check + format 통과
+- DB 통합 1건은 셀프호스티드 MariaDB 잡 또는 사용자 환경에서 1회 검증
+
+### 22.9 범위 외
+
+- **layerbuild CLI `--parents A,B,C` 확장** — 별도 작업. 본 plan은 backend API만.
+- **envmgr-use 멀티 lowerdir 조립** — 사용자 VM 측 변경. `get_ancestors` 응답을 reverse하여 사용하면 자동 호환.
+- **충돌 경로 탐지 (silent shadowing 경고)** — union.md §4.2-1. 빌드 시점 부모 디렉토리 비교 필요. 별도 PR.
+- **부모 ID 순서를 hash 입력에 포함** — layerbuild의 `_compute_layer_hash`에 부모 metadata 포함. CLI 변경 동반.
+- **join table로 마이그레이션** — 멀티 상속 사용량 증가 후 정식 채택 시 별도 PR.
+
+---
+
+## 23. Admin Orphan Resource Detection API (2026-05-10) — 운영 가시성 신규
+
+### 23.1 동기
+
+- VM 삭제·빌드 정리 best-effort 경로(`instances.py`, `library_builder.py`)에서 단계적 실패 시 **분리된 FIP** 또는 **장기 미사용 volume**이 누적.
+- 기존 admin/floating-ips, admin/all-volumes는 전체 목록만 노출 → 운영자가 수동으로 이상 항목을 식별해야 함.
+- **본 작업**: 한 화면에서 orphan 후보를 검색 + 안전 일괄 정리하는 admin 전용 API 도입.
+
+### 23.2 API
+
+- [x] `GET /api/admin/orphans?min_age_days=14` → `{floating_ips: [...], volumes: [...]}` 반환
+- [x] `POST /api/admin/orphans/cleanup` body `{kind: "floating_ip"|"volume", ids: [...]}` → `{deleted: [...], failed: [{id, error}]}`
+- [x] 두 엔드포인트 모두 `require_admin` 의존, admin scope 토큰 + `all_projects=True`로 cross-project 가시성
+
+### 23.3 검출 정책
+
+- [x] **Floating IP**: `port_id IS NULL` → 즉시 orphan (분리된 즉시)
+- [x] **Volume**: `status=available` + `attachments=[]` + `age_days >= min_age_days`(기본 14, 범위 [1, 365])
+- [x] `min_age_days=0` 미허용 — 갓 detach된 정상 volume 보호
+
+### 23.4 cleanup 안전 가드 (race-safe)
+
+- [x] **Volume**: delete 직전 `cinder.get_volume` 재조회 → `attachments != []` 또는 `status != available`이면 `failed[]`에 추가, delete 호출 안 함.
+- [x] **FIP**: 단순 delete + 예외 catch (분리된 FIP 재attach는 운영자 의도 행위로 race 위험 낮음).
+- [x] 각 ID별 audit log 기록 (`rec(... action="orphan.cleanup", status="success"|"failed")`)
+
+### 23.5 단위 테스트 — `test_admin_orphans.py` 12건
+
+- [x] `find_orphan_floating_ips` — port_id NULL 필터 + age_days 계산 (2건)
+- [x] `find_orphan_volumes` — min_age_days 필터 + attachments 제외 (2건)
+- [x] `cleanup_floating_ips` — 정상 + 부분 실패 (2건)
+- [x] `cleanup_volumes` — attachments race / status race / 정상 (3건)
+- [x] 엔드포인트 — 비관리자 403 / 잘못된 kind 422 / volume cleanup audit log (3건)
+
+### 23.6 검증
+
+- [x] 백엔드 단위 1297건 그린 (1285 → 1297, +12 신규)
+- [x] ruff check + format 통과
+- 실 환경 검증 (사용자 1회): `GET /api/admin/orphans` → ID 1개 cleanup → 해당 ID 사라짐 / 비관리자 토큰 → 403
+
+### 23.7 범위 외
+
+- **Manila share orphan 검출** — project 삭제 후 잔존 share. 사용자 데이터 잠재 손실 위험으로 별도 PR. → §24에서 마감.
+- **Security group orphan 검출** — afterglow 자동 생성 SG attach 0건. 운영자 정책 변경 가능성. 별도 PR. → §24에서 마감 (description marker 도입).
+- **프론트엔드 admin/orphans 페이지** — 백엔드 API만 본 PR. UI 별도 PR.
+- **Redis 캐싱** — 호출 빈도 분석 후 별도 PR.
+- **Cron 자동 cleanup** — 명시적 작업 유지(안전 우선). 알림만 향후 검토.
+
+---
+
+## 24. Admin Orphan 검출 확장 — Manila share + Security group (2026-05-10)
+
+### 24.1 동기
+
+§23(FIP/Volume)에서 의도적으로 분리해 두었던 두 종류를 같은 엔드포인트에 통합. 둘 다 단일 SDK 응답으로 분별 불가:
+
+- **Manila share**: project가 Keystone에서 사라진 share를 cleanup. project_id 매칭 + Keystone admin 조회 필요.
+- **Security group**: afterglow가 자동 생성한 SG(`node_exporter`, `dcgm_exporter`, `union-egress-default`) 중 미부착건 cleanup. 일반명이라 사용자 SG와 충돌 위험 → **description marker 도입으로 분별책 확보**.
+
+### 24.2 SG description marker 도입 (선결)
+
+- [x] `app/services/neutron.py` 상단에 `AFTERGLOW_MANAGED_TAG = "[afterglow-managed]"` 모듈 상수 추가
+- [x] 3개 ensure 함수의 description 끝에 ` {tag}` 접미어 부여 — `ensure_union_egress_sg`, `ensure_node_exporter_sg`, `ensure_dcgm_exporter_sg`
+- [x] 신규 생성 SG부터 marker 부여. 기존 SG는 idempotent 경로가 description 갱신을 안 하므로 자동 제외(안전 우선). backfill은 별도 PR.
+
+### 24.3 API 확장
+
+- [x] `OrphanCleanupRequest.kind` Literal 확장: `"floating_ip" | "volume" | "manila_share" | "security_group"`
+- [x] `OrphanScanResponse`에 `manila_shares`, `security_groups` 필드 추가
+- [x] `OrphanShareInfo` (size_gb, project_id, status, snapshot_count 등), `OrphanSecurityGroupInfo` (description, project_id 등) 신규 모델
+- [x] `cleanup_orphans` 엔드포인트에 `elif req.kind == "manila_share" / "security_group"` 분기 추가
+- [x] 각 ID별 audit log (기존 `rec` 패턴 재사용)
+
+### 24.4 Manila share 안전 가드
+
+- [x] 검출: `manila.list_file_storages(conn, all_tenants=True)` × `keystone.list_all_project_ids()` 차집합. `is_public=True` 제외.
+- [x] cleanup 직전 재검증:
+  1. `get_file_storage` 재조회 (없으면 이미 삭제)
+  2. `keystone.list_all_project_ids()` 재조회 후 project가 복구되었는지 확인 → 복구되면 fail
+  3. `list_share_snapshots` 0건 확인 → snapshot 있으면 fail (사용자 데이터 보존 우선)
+  4. `status in {available, error}` → 그 외 status는 fail
+- [x] `keystone.list_all_project_ids()` 헬퍼 신규 추가 (`app/services/keystone.py`)
+
+### 24.5 Security group 안전 가드
+
+- [x] 검출: `conn.network.security_groups()` 중 `description.endswith(AFTERGLOW_MANAGED_TAG)` + `conn.network.ports()` bulk-fetch 후 attach 0건
+- [x] cleanup 직전 재검증:
+  1. 모든 port 한 번 fetch → `attached_sg_ids` 셋 빌드 (SDK list-query 가정 회피)
+  2. SG 재조회 → marker 재확인 (없으면 fail — 사용자 SG 가능성)
+  3. attached 셋 포함 여부 → 포함되면 fail (race)
+  4. 통과 시 `neutron.delete_security_group`
+
+### 24.6 정책 사유 (운영자 참고)
+
+- **`is_public=True` Manila share 제외** — project 삭제와 무관하게 운영자/타 프로젝트가 의도적으로 공유한 자원이므로 cleanup 후보 아님.
+- **SG description marker 미부여 = 사용자 SG로 간주** — afterglow가 만든 SG만 marker가 있으므로, marker 부재 SG는 자동으로 안전.
+- **min_age_days 미적용 (Manila/SG)** — Manila는 project 부재, SG는 marker+attach=0이라는 binary 조건이므로 age 필터가 의미 흐림.
+
+### 24.7 단위 테스트 — `test_admin_orphans.py` +10건
+
+- [x] Manila: invalid project_id 추출 (`all_tenants=True` 호출 검증), is_public 제외 (2건)
+- [x] Manila cleanup: project 복구 차단, snapshot 차단, 정상 (3건)
+- [x] SG find: marker 요건 (None / "" / suffix 미일치 모두 제외) (1건), attach 1건 이상 제외 (1건)
+- [x] SG cleanup: race attach 차단, marker 사라짐 차단, 정상 (3건)
+
+### 24.8 프론트엔드
+
+- [x] `/admin/orphans` 페이지에 두 섹션(Manila, SG) 추가 — 컬럼 / 체크박스 / select-all / 일괄 정리 버튼 패턴 그대로 차용
+- [x] 정리 확인 모달에 종류별 안내문 (Manila: project 복구/snapshot 재검증, SG: port re-fetch + marker 재확인)
+- [x] SG 섹션 상단에 marker 정책 인라인 안내
+
+### 24.9 검증
+
+- [x] 백엔드 단위 1297 → 1307 (+10), ruff/format 통과
+- [x] 프론트엔드 빌드 통과
+- 실 환경 검증 (사용자 1회): GET 4종 후보 노출 / 사용자 SG가 후보에 없음 / 1개 cleanup → race-safe 응답
+
+### 24.10 범위 외
+
+- **기존 SG description backfill** — 운영 환경의 기존 SG에 marker 일괄 부여하는 마이그레이션. 별도 PR.
+- **Manila metadata 기반 검출** (`union_project_id` 메타 무효 사례) — 본 plan은 OpenStack `share.project_id` 매칭이 1차.
+- **사용자가 description에 marker를 박는 행위** — 운영자 책임. UI 안내문에 명시.
+
+---
+
+## 25. 통합 모니터링 전(全) 리소스 가시성 + Drover 카운트 버그 수정 (2026-05-10)
+
+### 25.1 동기
+
+`/admin/monitoring` "클러스터 요약"이 일부 리소스만 집계하고 있었음:
+- **Drover 클러스터 1대(`dms-cloud`, ACTIVE)인데 0으로 표시** — `_collect()`가 동기 함수인데 `k3s_db.list_all_clusters()`는 async라 `k3s_count: 0` 하드코딩(`admin.py:423-425` 옛 코드).
+- DB 인스턴스 / Volume Snapshot/Backup / Share Snapshot / Image / Subnet / Security Group / Load Balancer / 사용자·프로젝트 수가 노출되지 않았음.
+
+### 25.2 핵심 제약 — cross-project 보장
+
+사용자 불만의 본질이 "admin scope 일부만 보이는 것"이라, 추가하는 모든 카운터는 **admin scope에서 cross-project 합산**을 보장.
+
+- [x] Trove DB: `list_instances_admin_all_projects(conn)` (`/mgmt/instances`) — `count_instances`는 자기 프로젝트만이라 사용 안 함
+- [x] Volume snapshot/backup: `conn.block_storage.snapshots/backups(all_projects=True)`
+- [x] Share snapshot: `manila.list_share_snapshots(conn, all_tenants=True)` — `manila.py:710` 함수에 `all_tenants` 옵션 신규 추가
+- [x] Octavia LB: `conn.load_balancer.load_balancers()` — admin scope에서 cross-project. `provisioning_status == "ACTIVE"`로 active 분리
+- [x] Subnet/Security Group/Image: admin scope에서 SDK 기본 호출이 cross-project (admin.py 기존 패턴)
+- [x] Identity: `_get_admin_ks_client().users.list()` / `.projects.list()` 길이
+
+### 25.3 _collect async 변환 (Drover 버그 수정)
+
+- [x] `get_monitoring_summary` 내부 `_collect`를 async로 변환. `cached_call`은 이미 `iscoroutinefunction` 분기로 async fn 처리(`cache.py:110-113`)
+- [x] 동기 SDK 호출 15종을 `asyncio.to_thread + asyncio.gather`로 병렬 실행
+- [x] k3s 클러스터는 `await k3s_cluster.list_all_clusters()` 직접 호출 — `k3s_count`/`k3s_active` 정상 노출
+
+### 25.4 응답 스키마 확장 (호환 유지)
+
+기존 4개 그룹 유지 + 누락 필드 추가 + 신규 그룹 2개:
+- `storage`: `volume_snapshot_count`, `volume_backup_count`, `share_snapshot_count`, `image_count` 추가
+- `network`: `subnet_count`, `security_group_count`, `load_balancer_count`, `load_balancer_active` 추가
+- `containers`: `k3s_active` 추가 + `k3s_count` 정상 노출
+- `data_services` (신규): `database_instance_count`
+- `identity` (신규): `user_count`, `project_count`
+
+### 25.5 드롭 항목 (의도적 제외)
+
+- **Keypair 카운트** — Nova keypair는 per-user. admin도 자기 keypair만 보임 → cluster-wide 합산 불가능. 제외.
+- **Swift container 카운트** — admin account 한정. cross-project 합산은 Swift reseller 권한 + 사용자 iteration 필요. 별도 PR.
+
+### 25.6 프런트엔드 카드 재구성
+
+- [x] `MonitoringSummary` interface에 신규 필드 (옵셔널 + `?? 0` 안전)
+- [x] 스토리지 카드: 5줄 추가 (파일/볼륨 스냅샷·백업/파일 스냅샷/이미지)
+- [x] 네트워크 카드: 3줄 추가 (Subnet / SG / LB)
+- [x] 컨테이너 카드: Drover에 `(N active)` 배지
+- [x] 신규 카드 2개: 데이터 서비스(Trove), Identity(사용자·프로젝트)
+
+### 25.7 단위 테스트 — `test_admin_monitoring.py` 5건
+
+- [x] k3s `[{status:"ACTIVE"}]` mock → `k3s_count == 1`, `k3s_active == 1` (Drover 버그 수정 회귀 방지)
+- [x] k3s 빈 리스트 → 둘 다 0
+- [x] 신규 그룹 `data_services` / `identity` 키 + 누락 필드 응답 포함 확인
+- [x] 카운터 함수 일부 예외 시 다른 카운터 정상 (0 fallback)
+- [x] async `_collect`가 `cached_call` `iscoroutinefunction` 분기에서 정상 동작
+
+### 25.8 검증
+
+- [x] 백엔드 단위 1307 → 1312 (+5), ruff/format 통과
+- [x] 프런트엔드 빌드 통과
+- 실 환경 검증 (사용자 1회): Drover 카드에 1 (1 active) 노출, 새 카드 2개 정상, 누락 리소스 표시
+
+### 25.9 범위 외
+
+- **각 리소스 상태 분포 차트 / 시계열** — 본 PR은 카운트만.
+- **Keypair / Swift container** — admin scope 한계로 본 PR 제외 (위 25.5 참조).
+- **인스턴스 status 외 세부 분포 (Trove/k3s/LB)** — total + active 1차만.
+- **사이드바 재배치** — 기존 카드 유지.
+
+---
+
+## 26. DB 인스턴스 — 사용자 host 지원 / 호스트 정보 표시 / SHUTDOWN 라벨 (2026-05-11)
+
+### 26.1 동기
+
+- DB 사용자 생성이 500 에러 — `conn.database.create_user(instance_id, **user_body)` 가 Trove API 본문(`{"users":[{...}]}`)을 정확히 wrap 하지 못함.
+- 사용자 생성 폼이 Trove user identity(`name@host`)의 host 필드를 노출하지 않음 — 동명 다른 host 유저 생성 불가.
+- DB 인스턴스 IP 표시가 평탄 리스트라 어떤 네트워크 IP인지 불명확.
+- 관리자 페이지에서 삭제 진행 중인 인스턴스가 raw `SHUTDOWN` 상태로만 표시되어 사용자 혼란.
+
+### 26.2 백엔드
+
+- [x] `services/trove.py::create_user` — raw REST(`conn.database.post(/instances/{id}/users)`) 로 교체. `host` 파라미터 추가 (기본 `%`), 페이로드는 `{"users":[{...}]}`.
+- [x] `services/trove.py::delete_user` — raw REST(`conn.database.delete(/instances/{id}/users/{name@host})`) 로 교체. host-blind 삭제 방지 (동명 다른 host 유저 구분).
+- [x] `services/trove.py::list_users` — 응답 dict 에 `host` 필드 포함 (`getattr(u, "host", "%")`).
+- [x] `services/trove.py::_instance_to_dict` — `address_map: dict[str, list[str]]` 추가. Trove `i.addresses` dict → `{"private": ["192.168.0.10"]}` 매핑.
+- [x] `models/database.py::CreateUserRequest` — `host: str = "%"` 필드 추가.
+- [x] `api/database/instances.py::create_instance_user` — `req.host` 전달 + 실패 시 exception 로그.
+- [x] `api/database/instances.py::delete_instance_user` — `host` query param 추가, `trove.delete_user` 에 전달.
+- [x] `tests/test_db_users.py` — raw REST payload / host 기본값 / databases 형식 / delete URL host 인코딩 / list_users host / address_map 빌드/빈/우선순위 검증 (12건).
+
+### 26.3 프런트엔드
+
+- [x] `lib/config/statusColors.ts` — `StatusStyle.label?: string`, `SHUTDOWN: { tone: 'neutral', pulse: true, label: '삭제 중' }`.
+- [x] `lib/components/ui/StatusChip.svelte` — `s.label ?? status` 로 라벨 우선 사용.
+- [x] `lib/components/database/DbInstanceDetailPanel.svelte`:
+  - `address_map` 우선, `ips` fallback 으로 "private: 192.168.0.163" 표시 (인스턴스 정보 / 연결 정보 두 영역).
+  - 플레이버 ID → `cpu.4c_8g (4vCPU / 8192MB)` 매핑 (`/api/database-instances/flavors` 1회 fetch + 클라이언트 매핑).
+  - 사용자 생성 폼: `host` 입력 + 인스턴스 DB 체크박스 선택 (databases 빈 경우 안내).
+  - 사용자 목록: `name@host` 표시, 삭제 시 `host` 기준 식별.
+  - 인스턴스 헤더 status 라벨에 `SHUTDOWN → "삭제 중"` 표시.
+
+### 26.4 검증
+
+- [x] `tests/test_db_users.py` 10건 + 기존 24건 통과 (총 34건)
+- [x] `npm run lint:backend` 통과
+- 실 환경 검증 필요 (사용자): 동명 다른 host 유저 동시 생성 / Horizon 형식 IP 표시 / SHUTDOWN 회색 펄스 + "삭제 중" 라벨
+
+### 26.5 범위 외
+
+- **Trove `mgmt/instances/{id}` 폴백** — `i.addresses` 가 비어있을 때 admin API 로 강제 조회. 현재는 `ips` fallback 으로 충분.
+- **다른 프로젝트 인스턴스 IP 매핑** — Trove 가 사용자 네트워크에 NIC를 연결하지만 인스턴스 자체는 service tenant 소유. 사용자 권한 내 가능한 정보만 표시.
+- **사용자 권한 세분화 (READ/WRITE/ADMIN)** — Trove `databases` 권한 부여만 지원.
+
+---
+
+## 27. DB 인스턴스 — `is_public` floating IP 자동 할당 (2026-05-11)
+
+### 27.1 동기
+
+`is_public=True` 로 생성해도 인스턴스에 public IP 가 잡히지 않음. 기존 동작은 `set_instance_access` 만 호출 — Trove 의 access 정책(allowed_cidrs)만 설정하고 floating IP 는 자동 할당하지 않음. 사용자는 "public 으로 표시 = 외부 접근 가능" 으로 기대 → floating IP 자동 할당 필요.
+
+### 27.2 설계
+
+- **`is_public` 의미 확장**: Trove access 정책 + afterglow 의 floating IP best-effort 자동 할당. `set_instance_access` 동작은 유지.
+- **신규 인스턴스**: BackgroundTask 로 IP 폴링(5초 간격, 최대 10분) → port 매칭 → 라우터의 외부 네트워크 자동 탐색 → FIP 생성/할당.
+- **기존 인스턴스**: DbInstanceDetailPanel 에 "+ 공개 IP 할당" 버튼 (FIP 미할당 시 노출). 사용자 conn 으로 동기 실행.
+- **외부 네트워크 선택**: `find_external_network_for_subnets` 자동 탐색 (라우터 → external_gateway_info.network_id). 사용자 명시 선택은 미도입.
+- **Port 탐색**: `device_id` 매칭은 service tenant 소유라 불안정 → IP fixed_ips 매칭으로 변경. Trove backend port 는 사용자 네트워크에 attach 되어 user conn 에서 조회 가능.
+
+### 27.3 백엔드
+
+- [x] `api/database/instances.py::_attach_fip_to_instance_sync` — IP→port→external network→FIP 동기 헬퍼. 멱등(이미 할당된 port 는 기존 FIP 반환).
+- [x] `api/database/instances.py::_run_attach_fip_bg` — admin connection 으로 BUILD 폴링 + 자동 할당 BG task.
+- [x] `api/database/instances.py::create_database_instance` — `BackgroundTasks` 파라미터 + `is_public` 시 BG 등록.
+- [x] `api/database/instances.py::attach_floating_ip` — `POST /api/database-instances/{id}/floating-ip` 수동 할당 엔드포인트.
+- [x] `api/database/instances.py::detach_floating_ip` — `DELETE /api/database-instances/{id}/floating-ip?delete=true` 해제(또는 삭제).
+- [x] `tests/test_db_floating_ip.py` — port 매칭 / 멱등 / IP 미할당/port 미발견/외부망 미발견 에러 검증 (5건).
+
+### 27.4 프런트엔드
+
+- [x] `DbInstanceDetailPanel.svelte` — `FloatingIp` interface, `floatingIps` state, `instanceFips` derived (instance.ips ↔ fip.fixed_ip_address 매칭).
+- [x] 연결 정보 섹션에 "공개 IP (Floating)" 행 추가:
+  - 미할당 시: "+ 공개 IP 할당" 버튼 (instance.ip 대기 중이면 disabled)
+  - 할당된 경우: 에메랄드 칩 + "해제" / "삭제" 버튼
+- [x] `attachFip()` / `detachFip(deleteFip)` 함수, 에러 인라인 표시.
+- [x] `loadAll()` 에 `/api/networks/floating-ips` 병렬 로드 추가.
+
+### 27.5 검증
+
+- [x] 백엔드 1333 → 1338 (+5), lint/format 통과
+- [x] 프런트엔드 타입 체크 통과
+- 실 환경 검증 필요 (사용자):
+  - 신규 `is_public=true` 생성 → 몇 분 내 BG task 가 FIP 자동 할당
+  - 기존 4개 인스턴스에 대해 패널에서 "+ 공개 IP 할당" 클릭 → FIP 즉시 할당
+  - 라우터 미설정 환경에서는 "외부 네트워크 미연결" 에러 표시
+
+### 27.6 범위 외
+
+- **외부 네트워크 명시 선택** — 다중 외부망 환경에서 사용자가 직접 선택. 현재는 첫 매칭 라우터의 external network 자동 사용.
+- **FIP quota pre-check** — quota 초과 시 Neutron 에서 raise. afterglow 가 사전 검증하지 않음.
+- **DbCreatePanel 안내문** — "is_public 시 FIP 자동 할당" 인라인 안내. 별도 PR.
+
+---
+
+## 28. k3s 클러스터 생성 asyncio loop 충돌 + 라우트 매칭 순서 + DB 백업 글로벌 목록 (2026-05-11)
+
+### 28.1 동기
+
+- **k3s 클러스터 생성 시 "Future attached to a different loop" 에러**: `keystone.ensure_cluster_manager_user` 가 sync 함수인데 내부에서 `asyncio.run(_db_get())` 으로 SQLAlchemy async session 호출. caller(`clusters.py:374`)는 `await asyncio.to_thread(...)` 로 thread 에서 실행 → thread 의 새 loop 가 SQLAlchemy connection pool 의 원래 loop affinity 와 충돌.
+- **`/api/instances/availability-zones` 404**: `instances.py:110` `@router.get("/{instance_id}")` 가 먼저 등록되어 `availability-zones` 를 instance_id 로 해석. FastAPI 는 등록 순서 매칭.
+- **`/api/database-instances/backups` 404**: 글로벌 백업 목록 GET 엔드포인트 부재 (DELETE 만 존재). DbCreatePanel 의 백업 복원 폼이 호출.
+
+### 28.2 백엔드 — asyncio loop 충돌 해결
+
+`asyncio.run` 패턴을 제거하고 caller chain 을 async 로 통일.
+
+- [x] `services/keystone.py::ensure_cluster_manager_user` — `async def` 변환. DB 호출은 `await get_manager_credentials(...)` / `await save_manager_credentials(...)` 직접 호출. sync openstacksdk 호출은 `asyncio.to_thread` 로 wrap.
+- [x] `services/keystone.py::create_app_credential_for_cluster` — `async def` 변환. `await ensure_...` + `asyncio.to_thread(_create_app_cred_sync, ...)`.
+- [x] `services/keystone.py::delete_app_credential` — `async def` 변환 (best-effort). `await ensure_...` + `asyncio.to_thread(_delete_app_cred_sync, ...)`.
+- [x] `services/keystone.py::_connect_as_manager` — 헬퍼 추출 (관리 사용자로 openstack.connect, code 중복 제거).
+- [x] `services/keystone.py::_ensure_cluster_manager_user_sync_with_admin_conn` / `_create_app_cred_sync` / `_delete_app_cred_sync` — sync 부분 추출 → `asyncio.to_thread` 호출 가능.
+- [x] `api/k3s/clusters.py:374, 556, 802` — `await asyncio.to_thread(_keystone.X, ...)` → `await _keystone.X(...)`.
+
+### 28.3 백엔드 — 라우트 충돌 + 글로벌 백업 목록
+
+- [x] `api/compute/instances.py` — `@router.get("/availability-zones")` 를 `/{instance_id}` 위로 이동 (line 92 다음). 기존 line 1804 정의 제거.
+- [x] `api/database/instances.py::list_all_backups` — `@router.get("/backups")` 신규. `trove.list_backups(conn)` 호출 (instance_id 없이 전체). project-scoped conn 이라 별도 owner check 불필요.
+
+### 28.4 테스트 업데이트
+
+- [x] `tests/test_keystone_appcred.py` — sync 호출(`uid, pw = ensure_cluster_manager_user(...)`) → `asyncio.run(...)` wrap (4건).
+- [x] 기존 1335 → 1338 통과 유지 (회귀 없음).
+
+### 28.5 검증
+
+- [x] 백엔드 1338 테스트 통과, lint/format 통과
+- 실 환경 검증 필요:
+  - k3s 클러스터 생성 → "different loop" 에러 없이 BUILD 진행
+  - `/api/instances/availability-zones` GET 200 응답 (가용 영역 목록)
+  - `/api/database-instances/backups` GET 200 응답 (DB 복원 폼에 백업 목록 노출)
+
+### 28.6 범위 외
+
+- **다른 sync keystone 헬퍼의 async 변환** — 동일 호출 패턴이 없는 sync 함수는 그대로 유지 (advisor 권고대로 fix 범위 제한).
+- **다른 라우터의 정적-경로 vs `/{id}` 충돌 일괄 검증** — 본 PR 은 보고된 한 건만 수정.
+
+### 28.7 후속: `project_manager_credentials` 테이블 누락 DDL 추가
+
+asyncio loop fix 후 SQL 이 실제 실행되자 다음 에러가 노출됨:
+```
+pymysql.err.ProgrammingError: (1146, "Table 'afterglow.project_manager_credentials' doesn't exist")
+```
+
+`k3s_db.py::get_manager_credentials` / `save_manager_credentials` 가 raw SQL 로 read/write 하는데 ORM 모델 / DDL 누락. (k3s_db.py 의 raw SQL 참조는 이 테이블 1개뿐.)
+
+- [x] `app/database.py::create_tables` — `project_manager_credentials` DDL 추가:
+  ```sql
+  CREATE TABLE IF NOT EXISTS project_manager_credentials (
+    project_id VARCHAR(64) PRIMARY KEY,
+    user_id VARCHAR(64) NOT NULL,
+    username VARCHAR(255) NOT NULL,
+    encrypted_password TEXT NOT NULL,
+    created_at DATETIME(6) DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at DATETIME(6) DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+    KEY ix_project_manager_credentials_user_id (user_id)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  ```
+- [x] 검증: `database_auto_create_tables=True` (기본값) → 백엔드 startup 시 `_deferred_create_tables` 가 자동 실행하여 누락 테이블 생성.
+- 사용자 검증: 백엔드 컨테이너 재시작 1회 → k3s 클러스터 재시도 → 정상 진행.
+
+---
+
+## 29. 콘솔 로그 전체 페이지 + GPU cloud-init 회귀 테스트 (2026-05-11)
+
+### 29.1 동기
+
+- **콘솔 로그 일부만 표시** — `InstanceDetailPanel` 의 콘솔 로그 패널은 length 200/10000줄 까지만. Horizon 처럼 새 탭에서 전체 콘솔 출력을 보고 싶다는 요청.
+- **GPU 인스턴스 cloud-init 미실행 의심** — `gpu.1080ti_8c_16g` flavor 인스턴스 생성 후 GPU 메트릭 부재. 백엔드 진단 결과 `flavor.is_gpu` → True → `gpu_available=True` → `cloudinit_base.yaml.j2` 의 GPU 분기(install_dcgm_exporter.sh + dcgm-exporter.service) 활성화되어야 정상. 회귀 테스트로 backend 단의 user-data 정상 생성을 보장하고, 실제 진단은 사용자가 새로운 전체 로그 페이지로 검증.
+
+### 29.2 백엔드
+
+- [x] `api/compute/instances.py:get_console_log` — `length` 상한 `le=10000` → `le=100000`. 100k 라인까지 fetch 가능.
+- [x] `tests/test_cloudinit_gpu.py` 신규 — `generate_userdata(gpu_available=True)` 결과 base64 디코드 후 검증:
+  - `install_dcgm_exporter.sh` write_files 포함
+  - `ubuntu-drivers autoinstall` 명령 포함
+  - runcmd 에 `dcgm-exporter.service` enable 항목 포함
+  - dcgm-exporter systemd unit 파일 + ExecStart 0.0.0.0:9400
+  - CUDA_HOME export 포함
+  - gpu_available=False 시 모든 GPU 항목 부재 (회귀 방지)
+
+### 29.3 프런트엔드
+
+- [x] `routes/dashboard/compute/instances/[id]/console-log/+page.svelte` 신규 — 풀스크린 로그 뷰어:
+  - 검정 배경, monospace, ANSI escape raw 표시
+  - sticky 상단 바: 인스턴스 ID, 새로고침/닫기 버튼, 마지막 로드 시간
+  - `length=100000` 1회 fetch (자동 갱신 없음 — 큰 payload polling 회피, 사용자가 수동 새로고침)
+  - `<svelte:head>` title 인스턴스 prefix
+- [x] `lib/components/InstanceDetailPanel.svelte` — 콘솔 로그 패널에 "새 창에서 보기 ↗" 링크 추가 (`target="_blank"`).
+
+### 29.4 검증
+
+- [x] 백엔드 1338 → 1343 테스트 통과 (+5), lint/format 통과
+- [x] 프런트엔드 타입 체크 통과
+- 사용자 검증 필요:
+  - 인스턴스 상세 → 콘솔 로그 → "새 창에서 보기 ↗" 클릭 → 풀스크린 페이지 표시
+  - GPU 인스턴스에서 NVIDIA 설치 라인(`[gpu-install] NVIDIA 드라이버 미발견`) 새 페이지에서 확인 가능
+
+### 29.5 후속 fix: GPU only 인스턴스의 user-data 누락 (2026-05-11)
+
+**Root cause 확정**: 사용자가 전체 콘솔 로그를 공유 → cloud-init 이 130초만에 정상 완료했지만 NVIDIA 설치 단계 0건. `Frontend VmCreatePanel.svelte:291` 가 `/api/instances/async` 호출 → `instances.py:564` 의 `if resolved_libs:` 분기 안에서만 `cloudinit.generate_userdata()` 호출 → libraries=[] + GPU flavor 인스턴스는 **user-data 없이 부팅** → cloud-init 의 default cloud config 만 실행되고 NVIDIA 드라이버 미설치.
+
+(동기 `create_instance` 핸들러 line 282 는 이 버그가 없음 — 항상 generate_userdata 호출. 하지만 frontend 가 `/async` 만 사용해서 노출됨.)
+
+- [x] `api/compute/instances.py::create_instance_async` — cloud-init 생성 분기를 `if resolved_libs:` → `if resolved_libs or gpu_available:` 로 변경. Upper volume / Manila step 은 기존대로 `if resolved_libs:` 유지 (GPU only 인스턴스에는 불필요).
+- [x] `tests/test_cloudinit_gpu.py::test_async_handler_generates_userdata_for_gpu_only_instance` — 분기 진리표 회귀 테스트 (4 케이스: libraries × GPU 조합).
+- [x] 검증 안전성: `overlay_setup.sh` (set -euo pipefail) 는 systemd unit `union-overlay.service` 안에서만 실행 → mount 실패 해도 cloud-init runcmd 의 `/opt/union/install_dcgm_exporter.sh` 는 독립적으로 실행됨.
+- [x] Nova create — `upper_volume_id=None` 일 때 attach skip (line 696 `if upper_volume_id:`).
+
+### 29.6 사용자 작업 — 기존 인스턴스 NVIDIA 드라이버 설치
+
+코드 fix 는 **신규 인스턴스부터 적용**. 기존 `test-nvidia-driver` 등 이미 만든 GPU 인스턴스에는 user-data 가 비어있어 자동 설치 안 됨. 두 옵션:
+
+1. **인스턴스 재생성** — 가장 깔끔. 백엔드 재배포 후 동일 spec 으로 새로 생성.
+2. **SSH 후 수동 설치**:
+   ```bash
+   sudo apt-get update
+   sudo apt-get install -y ubuntu-drivers-common
+   sudo ubuntu-drivers autoinstall
+   sudo reboot
+   ```
+   재부팅 후 `nvidia-smi` 로 확인. dcgm-exporter 가 필요하면 `cloudinit_base.yaml.j2` 의 install_dcgm_exporter.sh 내용을 참조해 수동 실행.
+
+### 29.7 범위 외
+
+- `ubuntu-drivers autoinstall` 이 1080ti(Pascal) 에 잘못된 드라이버 선택 가능성 — 신규 인스턴스 검증 후 문제 시 별도 PR.
+- 외부 SG 의 apt repo egress 차단 가능성 — 별도 PR.

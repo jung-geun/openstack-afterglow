@@ -29,6 +29,7 @@
 		name: string;
 		cidr: string;
 		network_id: string;
+		gateway_ip?: string | null;
 	}
 
 	interface Network {
@@ -106,7 +107,9 @@
 		if (!selectedSubnetId) return;
 		saving = true;
 		try {
-			await api.post(`/api/routers/${id}/interfaces`, { subnet_id: selectedSubnetId }, $auth.token ?? undefined, $auth.projectId ?? undefined);
+			const selectedSubnet = allSubnets.find(s => s.id === selectedSubnetId);
+			const autoGateway = !selectedSubnet?.gateway_ip;
+			await api.post(`/api/routers/${id}/interfaces`, { subnet_id: selectedSubnetId, auto_gateway: autoGateway }, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			showAddInterface = false;
 			selectedNetId = '';
 			selectedSubnetId = '';
@@ -277,7 +280,9 @@
 						<select bind:value={selectedSubnetId} disabled={!allSubnets.length} class="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 disabled:opacity-50">
 							<option value="">서브넷 선택</option>
 							{#each allSubnets as subnet}
-								<option value={subnet.id}>{subnet.name || subnet.cidr}</option>
+								<option value={subnet.id}>
+									{subnet.name || subnet.cidr}{!subnet.gateway_ip ? ' (게이트웨이 없음 — 자동 생성)' : ''}
+								</option>
 							{/each}
 						</select>
 					</div>

@@ -9,6 +9,7 @@ Zun "컨테이너"와 혼동 방지를 위해 변수/응답 키에 object_storag
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from collections.abc import Iterator
 from typing import TYPE_CHECKING
@@ -126,6 +127,39 @@ def count_containers(conn) -> int:
         if not _is_account_not_found(exc):
             _logger.debug("Swift 컨테이너 수 조회 실패", exc_info=True)
         return 0
+
+
+def count_containers_all_projects(admin_token: str) -> int:
+    """admin 토큰으로 모든 프로젝트 fan-out 해서 swift 컨테이너 총 수 반환.
+
+    admin overview의 cross-project 카운트 용도. swift 계정은 프로젝트별로 분리되므로
+    admin 본인 프로젝트의 conn.object_store만 보면 0이 나올 수 있어 fan-out 필요.
+    한 프로젝트가 401/404여도 해당 프로젝트만 0으로 처리하고 나머지는 합산한다.
+    """
+    from app.services import keystone
+
+    try:
+        projects = keystone.list_projects(admin_token)
+    except Exception:
+        _logger.warning("admin 프로젝트 목록 조회 실패", exc_info=True)
+        return 0
+    total = 0
+    for p in projects:
+        pid = p.get("id")
+        if not pid:
+            continue
+        try:
+            sub_conn = keystone.get_admin_connection_for_project(pid)
+        except Exception as exc:
+            if not _is_unauthorized(exc):
+                _logger.debug("프로젝트 %s connection 실패", pid, exc_info=True)
+            continue
+        try:
+            total += count_containers(sub_conn)
+        finally:
+            with contextlib.suppress(Exception):
+                sub_conn.close()
+    return total
 
 
 def get_account_metadata(conn) -> dict:

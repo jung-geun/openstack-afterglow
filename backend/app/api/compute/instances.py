@@ -107,6 +107,19 @@ async def list_instances(
         raise HTTPException(status_code=500, detail="인스턴스 목록 조회 실패")
 
 
+# 정적 path 라우트는 /{instance_id} 보다 먼저 등록 (FastAPI 매칭 순서)
+@router.get("/availability-zones")
+async def list_availability_zones(
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """사용 가능한 가용 영역 목록."""
+    try:
+        zones = await asyncio.to_thread(nova.list_availability_zones, conn)
+        return zones
+    except Exception:
+        raise HTTPException(status_code=500, detail="가용 영역 조회 실패")
+
+
 @router.get("/{instance_id}", response_model=InstanceInfo)
 async def get_instance(
     instance_id: str,
@@ -570,7 +583,11 @@ async def create_instance_async(
                     created_upper = True
                 yield send_progress(ProgressStep.UPPER_VOLUME_CREATING, 60, "Upper 볼륨 준비 완료")
 
-                # Step 4: cloud-init (60-65%)
+            # Step 4: cloud-init userdata 생성 (60-65%)
+            # libraries 또는 GPU flavor 둘 중 하나라도 있으면 user-data 필요:
+            # - libraries → OverlayFS + Manila 마운트 + 환경변수
+            # - GPU only → NVIDIA 드라이버 + dcgm-exporter 설치 (libraries 없어도 필수)
+            if resolved_libs or gpu_available:
                 yield send_progress(ProgressStep.USERDATA_GENERATING, 60, "cloud-init 생성 중...")
                 import uuid as _uuid2
 
@@ -1107,7 +1124,7 @@ async def get_console(
 @router.get("/{instance_id}/log")
 async def get_console_log(
     instance_id: str,
-    length: int = Query(default=100, ge=0, le=10000),
+    length: int = Query(default=100, ge=0, le=100000),
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     try:
@@ -1799,18 +1816,6 @@ async def release_floating_ip(
             error_message=str(ex)[:500],
         )
         raise HTTPException(status_code=500, detail="Floating IP 해제 실패")
-
-
-@router.get("/availability-zones")
-async def list_availability_zones(
-    conn: openstack.connection.Connection = Depends(get_os_conn),
-):
-    """사용 가능한 가용 영역 목록."""
-    try:
-        zones = await asyncio.to_thread(nova.list_availability_zones, conn)
-        return zones
-    except Exception:
-        raise HTTPException(status_code=500, detail="가용 영역 조회 실패")
 
 
 @router.get("/{server_id}/admin-password/precheck", response_model=AdminPasswordPrecheck)
