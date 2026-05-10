@@ -6,7 +6,7 @@ if TYPE_CHECKING:
     import openstack
 import asyncio
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from app.api.common.activity_recorder import rec
@@ -16,6 +16,19 @@ from app.services import auto_backup, cinder
 from app.services.cache import cached_call, ttl_fast
 
 router = APIRouter()
+
+
+async def _run_first_backup_bg(project_id: str, volume_id: str, config: dict) -> None:
+    """자동 백업 활성화 직후 첫 번째 백업 사이클을 백그라운드에서 실행."""
+    import logging
+    _log = logging.getLogger(__name__)
+    try:
+        from app.services.keystone import get_admin_connection_for_project
+        conn = await asyncio.to_thread(get_admin_connection_for_project, project_id)
+        await auto_backup.run_backup_cycle(conn, project_id, volume_id, config)
+        _log.info("auto_backup: 즉시 백업 사이클 완료 (volume=%s)", volume_id)
+    except Exception:
+        _log.warning("auto_backup: 즉시 백업 사이클 실패 (volume=%s)", volume_id, exc_info=True)
 
 
 async def _assert_backup_owner(conn, backup_id: str, token_info: dict):
@@ -208,11 +221,12 @@ async def get_auto_backup_config(
 @router.post("/auto-backup/{volume_id}", status_code=201)
 async def enable_auto_backup(
     volume_id: str,
+    background_tasks: BackgroundTasks,
     req: AutoBackupRequest = AutoBackupRequest(),
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
 ):
-    """볼륨 자동 백업 활성화."""
+    """볼륨 자동 백업 활성화. 활성화 즉시 첫 번째 백업 사이클을 백그라운드에서 시작."""
     project_id = conn._afterglow_project_id
     try:
         result = await auto_backup.enable_auto_backup(
@@ -222,6 +236,7 @@ async def enable_auto_backup(
             max_weekly=req.max_weekly,
             max_monthly=req.max_monthly,
         )
+        background_tasks.add_task(_run_first_backup_bg, project_id, volume_id, result)
         await rec(
             token_info,
             conn,

@@ -8,6 +8,8 @@
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import DbCreatePanel from '$lib/components/database/DbCreatePanel.svelte';
+	import SlidePanel from '$lib/components/SlidePanel.svelte';
+	import DbInstanceDetailPanel from '$lib/components/database/DbInstanceDetailPanel.svelte';
 
 	interface DbInstance {
 		id: string;
@@ -28,6 +30,19 @@
 
 	// 생성 패널
 	let showCreatePanel = $state(false);
+
+	// 상세 패널
+	let selectedInstanceId = $state<string | null>(null);
+
+	function openPanel(id: string) {
+		selectedInstanceId = id;
+		history.pushState({ instanceId: id }, '', `/dashboard/database/instances/${id}`);
+	}
+
+	function closePanel() {
+		selectedInstanceId = null;
+		history.pushState({}, '', '/dashboard/database/instances');
+	}
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
@@ -101,6 +116,18 @@
 
 <DbCreatePanel bind:open={showCreatePanel} onCreated={load} />
 
+{#if selectedInstanceId}
+	<SlidePanel onClose={closePanel} width="w-full md:w-[70vw] max-w-4xl">
+		<DbInstanceDetailPanel
+			instanceId={selectedInstanceId}
+			token={$auth.token ?? undefined}
+			projectId={$auth.projectId ?? undefined}
+			onClose={closePanel}
+			onDeleted={() => { closePanel(); load(); }}
+		/>
+	</SlidePanel>
+{/if}
+
 
 <div class="p-4 md:p-8 max-w-6xl">
 	<PageHeader breadcrumb="DATABASE / INSTANCES" title="DB 인스턴스">
@@ -140,9 +167,9 @@
 					{#each instances as inst}
 						<tr class="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
 							<td class="py-3 px-4">
-								<a href="/dashboard/database/instances/{inst.id}" class="text-amber-400 hover:text-amber-300 font-medium">
+								<button onclick={() => openPanel(inst.id)} class="text-amber-400 hover:text-amber-300 font-medium text-left">
 									{inst.name}
-								</a>
+								</button>
 							</td>
 							<td class="py-3 px-4"><StatusChip status={inst.status} /></td>
 							<td class="py-3 px-4 text-gray-300">{inst.datastore?.type ?? '-'} {inst.datastore?.version ?? ''}</td>
