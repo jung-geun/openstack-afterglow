@@ -71,16 +71,18 @@ def test_extra_write_files_includes_systemd_unit():
 
 
 def test_extra_write_files_includes_install_script():
-    """install_kms.sh 가 0750 권한으로 작성되어야 한다."""
+    """install_kms.sh 가 0750 권한으로 작성되어야 한다 (podman 기반 — k3s containerd 의존 X)."""
     plugin = BarbicanKmsPlugin()
     files = plugin.extra_write_files("proj-1", "test-cluster", _settings_with_kms())
     install_files = [f for f in files if f["path"] == "/opt/k3s/install_kms.sh"]
     assert len(install_files) == 1
     assert install_files[0]["permissions"] == "0750"
     content = install_files[0]["content"]
-    assert "k3s ctr image pull" in content, "k3s ctr 로 image pull 해야 함"
+    assert "podman pull" in content, "podman 으로 image pull 해야 함 (k3s containerd 의존성 제거)"
+    assert "k3s ctr" not in content, "k3s ctr 사용 금지 — chicken-and-egg 데드락 원인"
     assert "registry.k8s.io/provider-os/barbican-kms-plugin:v1.34.1" in content
     assert "/usr/local/bin/barbican-kms-plugin" in content
+    assert 'file "$KMS_BIN_DEST"' in content, "binary ELF 검증 (entrypoint wrapper fail-fast)"
 
 
 def test_extra_write_files_includes_encryption_config():
@@ -135,8 +137,15 @@ def test_server_install_args_keeps_encryption_provider_config():
 # ---------------------------------------------------------------------------
 
 
-def test_k3s_server_userdata_kms_enabled_uses_skip_start_and_waits_sock():
-    """barbican_kms_enabled=True 시 cloud-init 가 INSTALL_K3S_SKIP_START + sock wait + manual k3s start 흐름이어야 한다."""
+def test_k3s_server_userdata_kms_enabled_orders_kms_before_k3s_install():
+    """PR3 hotfix: KMS install/start/sock-wait 가 k3s install 보다 먼저 위치해야 한다.
+
+    이전 흐름은 k3s install (SKIP_START 의도) → KMS install → sock wait → k3s start.
+    SKIP_START 가 env var 위치 잘못으로 효과 없어 chicken-and-egg 데드락.
+
+    새 흐름: KMS install → KMS start → sock wait → k3s install (자동 enable+start).
+    KMS sock 이 이미 존재하므로 k3s 자동 start 가 정상 부팅.
+    """
     import base64
     import gzip
 
@@ -156,12 +165,28 @@ def test_k3s_server_userdata_kms_enabled_uses_skip_start_and_waits_sock():
         barbican_kms_enabled=True,
     )
     yaml_str = gzip.decompress(base64.b64decode(result.data)).decode()
-    # KMS 활성화 시: SKIP_START 로 install 만 하고 KMS 준비 후 수동 start
-    assert "INSTALL_K3S_SKIP_START=true" in yaml_str
+
+    # SKIP_START / SKIP_ENABLE 모두 부재 (새 순서로 불필요)
+    assert "INSTALL_K3S_SKIP_START" not in yaml_str
+    assert "INSTALL_K3S_SKIP_ENABLE" not in yaml_str
+
+    # KMS 흐름 항목들 모두 존재
     assert "/opt/k3s/install_kms.sh" in yaml_str
     assert "systemctl enable --now barbican-kms.service" in yaml_str
     assert "/var/lib/kms/kms.sock" in yaml_str
-    assert "systemctl enable --now k3s.service" in yaml_str
+
+    # 순서: install_kms.sh → barbican-kms.service start → sock wait → k3s curl install
+    install_kms_pos = yaml_str.find("/opt/k3s/install_kms.sh")
+    kms_start_pos = yaml_str.find("systemctl enable --now barbican-kms.service")
+    sock_wait_pos = yaml_str.find("waiting for /var/lib/kms/kms.sock")
+    k3s_install_pos = yaml_str.find("https://get.k3s.io")
+    assert install_kms_pos < kms_start_pos < sock_wait_pos < k3s_install_pos, (
+        f"잘못된 순서: install_kms={install_kms_pos}, kms_start={kms_start_pos}, "
+        f"sock_wait={sock_wait_pos}, k3s_install={k3s_install_pos}"
+    )
+
+    # podman 이 packages 에 포함되어 cloud-init 가 미리 install
+    assert "  - podman" in yaml_str, "podman 이 packages 에 포함되어야 함 (k3s containerd 의존성 제거)"
 
 
 def test_k3s_server_userdata_kms_disabled_uses_default_flow():
@@ -188,6 +213,8 @@ def test_k3s_server_userdata_kms_disabled_uses_default_flow():
     assert "INSTALL_K3S_SKIP_START" not in yaml_str
     assert "install_kms.sh" not in yaml_str
     assert "barbican-kms.service" not in yaml_str
+    # KMS 비활성화 시 podman 도 packages 에 포함되지 않음
+    assert "  - podman" not in yaml_str
 
 
 # ---------------------------------------------------------------------------
@@ -239,3 +266,63 @@ def test_extra_write_files_signature_backward_compatible():
     # app_credential kwarg 미전달
     files = plugin.extra_write_files("proj-1", "test", _settings_with_kms())
     assert len(files) == 4  # systemd unit + install + cloud.conf + enc-config
+
+
+# ---------------------------------------------------------------------------
+# Integration test — 실제 binary --help 와 template ExecStart flag 일치 검증
+# (--key-id 같은 잘못된 flag 가 들어가는 회귀 방지)
+# ---------------------------------------------------------------------------
+
+
+import re
+import shutil
+import subprocess
+
+import pytest
+
+_BARBICAN_KMS_IMAGE = "registry.k8s.io/provider-os/barbican-kms-plugin:v1.34.1"
+
+
+@pytest.mark.skipif(shutil.which("docker") is None, reason="docker not available locally")
+def test_systemd_exec_flags_match_real_binary_help():
+    """systemd unit 의 ExecStart flag 가 실제 binary 의 --help 출력과 일치하는지 검증.
+
+    이전 PR3 hotfix 에서 --key-id flag 가 미지원인데도 template 에 들어간 회귀 방지.
+    docker 가 local 에 있을 때만 실행 (CI/dev 머신 의존).
+    """
+    # 1. 실제 binary --help 호출 (Mac 에서 amd64 image 실행 시 --platform 필수)
+    try:
+        out = subprocess.check_output(
+            ["docker", "run", "--platform=linux/amd64", "--rm", _BARBICAN_KMS_IMAGE, "--help"],
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=120,
+        )
+    except subprocess.CalledProcessError as e:
+        out = e.output
+    except subprocess.TimeoutExpired:
+        pytest.skip("docker pull/run timeout — network 환경 이슈")
+
+    # 2. supported flags 추출. 출력에 'Flags:' 섹션이 없으면 binary 가 정상 실행 안 된 것 (cross-arch 등) — skip.
+    if "Flags:" not in out:
+        pytest.skip(f"barbican-kms-plugin --help 출력에 'Flags:' 섹션 없음 (cross-arch?): {out[:300]}")
+    flags_section = out.split("Flags:", 1)[1]
+    supported = set(re.findall(r"--([a-z][a-z0-9-]*)", flags_section))
+    assert supported, f"Flags 섹션에서 flag 못 찾음: {flags_section[:300]}"
+
+    # 3. template 의 ExecStart flag 추출
+    plugin = BarbicanKmsPlugin()
+    files = plugin.extra_write_files("proj-1", "test", _settings_with_kms())
+    unit_content = next(f["content"] for f in files if f["path"].endswith("barbican-kms.service"))
+    exec_lines = [ln for ln in unit_content.split("\n") if "ExecStart=" in ln or ln.strip().startswith("--")]
+    used_flags = set()
+    for ln in exec_lines:
+        used_flags.update(re.findall(r"--([a-z][a-z0-9-]*)", ln))
+
+    # 4. 모든 used flags 가 supported 에 포함되어야 함
+    unsupported = used_flags - supported
+    assert not unsupported, (
+        f"barbican-kms-plugin {_BARBICAN_KMS_IMAGE} 가 지원하지 않는 flags 가 ExecStart 에 사용됨: {unsupported}\n"
+        f"supported: {sorted(supported)}\n"
+        f"used: {sorted(used_flags)}"
+    )
