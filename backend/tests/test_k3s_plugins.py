@@ -441,7 +441,11 @@ def test_barbican_kms_systemd_unit_runs_before_k3s_with_correct_args():
     assert "ExecStart=/usr/local/bin/barbican-kms-plugin" in unit
     assert "--socketpath=/var/lib/kms/kms.sock" in unit
     assert "--cloud-config=/etc/kubernetes/barbican-cloud.conf" in unit
-    assert "--key-id=kek-uuid-123" in unit
+    # KEK ID 는 cloud.conf [KeyManager] key-id 로 전달 (CLI flag 아님). 주석 라인 제외.
+    exec_lines = [ln for ln in unit.split("\n") if not ln.strip().startswith("#")]
+    assert not any("--key-id" in ln for ln in exec_lines), "barbican-kms-plugin 은 --key-id flag 미지원 (v1.34.1 검증)"
+    cc = next(f["content"] for f in files if f["path"] == "/etc/kubernetes/barbican-cloud.conf")
+    assert "key-id=kek-uuid-123" in cc
     assert "Restart=always" in unit
 
 

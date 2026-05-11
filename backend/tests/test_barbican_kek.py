@@ -198,25 +198,33 @@ def _settings_with_kms_globalkek(global_kek: str = "global-kek") -> MagicMock:
     return s
 
 
-def test_systemd_unit_uses_dynamic_kek_id_when_provided():
-    """PR2: kek_id 인자 전달 시 systemd unit 의 --key-id 가 그 값 사용 (글로벌 fallback 무시)."""
+def test_cloud_conf_uses_dynamic_kek_id_when_provided():
+    """PR2: kek_id 인자 전달 시 cloud.conf [KeyManager] key-id 가 그 값 사용.
+
+    KEK ID 는 systemd unit 의 CLI flag 가 아닌 cloud.conf 의 key-id 로 전달
+    (barbican-kms-plugin v1.34.1 은 --key-id flag 미지원 — 사용자 환경 검증).
+    """
     from app.services.k3s_plugins.barbican_kms import BarbicanKmsPlugin
 
     plugin = BarbicanKmsPlugin()
     files = plugin.extra_write_files("proj-1", "test", _settings_with_kms_globalkek("global-kek"), kek_id="dynamic-kek")
+    cc = next(f for f in files if f["path"] == "/etc/kubernetes/barbican-cloud.conf")
+    assert "key-id=dynamic-kek" in cc["content"]
+    assert "key-id=global-kek" not in cc["content"]
+    # systemd unit 의 ExecStart 라인에 --key-id 없어야 함 (CLI flag 미지원, 주석 라인 제외)
     unit = next(f for f in files if f["path"].endswith("barbican-kms.service"))
-    assert "--key-id=dynamic-kek" in unit["content"]
-    assert "--key-id=global-kek" not in unit["content"]
+    exec_lines = [ln for ln in unit["content"].split("\n") if not ln.strip().startswith("#")]
+    assert not any("--key-id" in ln for ln in exec_lines)
 
 
-def test_systemd_unit_falls_back_to_global_kek_when_no_dynamic():
-    """PR2 fallback: kek_id 미전달 시 settings.k3s_barbican_kms_kek_id 사용."""
+def test_cloud_conf_falls_back_to_global_kek_when_no_dynamic():
+    """PR2 fallback: kek_id 미전달 시 settings.k3s_barbican_kms_kek_id 가 cloud.conf 에 사용."""
     from app.services.k3s_plugins.barbican_kms import BarbicanKmsPlugin
 
     plugin = BarbicanKmsPlugin()
     files = plugin.extra_write_files("proj-1", "test", _settings_with_kms_globalkek("global-kek"))
-    unit = next(f for f in files if f["path"].endswith("barbican-kms.service"))
-    assert "--key-id=global-kek" in unit["content"]
+    cc = next(f for f in files if f["path"] == "/etc/kubernetes/barbican-cloud.conf")
+    assert "key-id=global-kek" in cc["content"]
 
 
 def test_should_deploy_no_longer_requires_global_kek():
@@ -229,11 +237,11 @@ def test_should_deploy_no_longer_requires_global_kek():
 
 
 def test_aggregate_passes_kek_id_to_kms_plugin():
-    """aggregate_extra_write_files(kek_id=...) 가 barbican_kms plugin 에 전달되어야 한다."""
+    """aggregate_extra_write_files(kek_id=...) 가 barbican_kms plugin 의 cloud.conf 에 전달되어야 한다."""
     from app.services import k3s_plugins
 
     s = _settings_with_kms_globalkek("global-kek")
     files = k3s_plugins.aggregate_extra_write_files("proj-1", "test", s, kek_id="aggregated-kek")
-    unit = next((f for f in files if f["path"].endswith("barbican-kms.service")), None)
-    assert unit is not None
-    assert "--key-id=aggregated-kek" in unit["content"]
+    cc = next((f for f in files if f["path"] == "/etc/kubernetes/barbican-cloud.conf"), None)
+    assert cc is not None
+    assert "key-id=aggregated-kek" in cc["content"]

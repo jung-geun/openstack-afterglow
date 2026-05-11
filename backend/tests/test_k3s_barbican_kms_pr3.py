@@ -59,7 +59,15 @@ def test_extra_write_files_includes_systemd_unit():
     assert "ExecStart=/usr/local/bin/barbican-kms-plugin" in content
     assert "--socketpath=/var/lib/kms/kms.sock" in content
     assert "--cloud-config=/etc/kubernetes/barbican-cloud.conf" in content
-    assert "--key-id=kek-uuid-test" in content
+    # KEK ID 는 CLI flag 가 아닌 cloud.conf [KeyManager] key-id 로 전달 (v1.34.1 검증).
+    # ExecStart 라인 (주석 아닌) 에 --key-id 가 없어야 함 — barbican-kms-plugin v1.34.1 미지원
+    exec_lines = [ln for ln in content.split("\n") if not ln.strip().startswith("#")]
+    assert not any("--key-id" in ln for ln in exec_lines), (
+        "barbican-kms-plugin 은 --key-id flag 를 지원하지 않음 — cloud.conf 로 전달"
+    )
+    # cloud.conf 에 key-id 가 들어있는지 별도 확인
+    cc = next(f for f in files if f["path"] == "/etc/kubernetes/barbican-cloud.conf")
+    assert "key-id=kek-uuid-test" in cc["content"]
 
 
 def test_extra_write_files_includes_install_script():

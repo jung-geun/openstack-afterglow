@@ -83,11 +83,10 @@ class BarbicanKmsPlugin:
         실제 service 시작은 cloud-init runcmd 에서 (k3s_server.yaml.j2 참조).
         """
         encryption_config = _jinja.get_template("k3s_plugins/barbican_kms/encryption_config.yaml.j2").render()
-        # PR2 — 동적 KEK 우선, 글로벌 settings fallback
+        # PR2 — 동적 KEK 우선, 글로벌 settings fallback. KEK ID 는 cloud.conf [KeyManager] key-id 로 전달
+        # (barbican-kms-plugin CLI 는 --key-id flag 를 지원하지 않음 — v1.34.1 검증 완료).
         effective_kek_id = kek_id or settings.k3s_barbican_kms_kek_id
-        systemd_unit = _jinja.get_template("k3s_plugins/barbican_kms/systemd_unit.j2").render(
-            kek_id=effective_kek_id,
-        )
+        systemd_unit = _jinja.get_template("k3s_plugins/barbican_kms/systemd_unit.j2").render()
         install_script = _jinja.get_template("k3s_plugins/barbican_kms/install_kms.sh.j2").render(
             kms_image=settings.k3s_barbican_kms_image,
         )
@@ -104,6 +103,8 @@ class BarbicanKmsPlugin:
             project_name=settings.os_project_name,
             project_domain_name=getattr(settings, "os_project_domain_name", "") or "",
             ca_file="" if settings.os_insecure else (settings.os_cacert or ""),
+            # § PR2 — KEK ID 를 [KeyManager] key-id 로 전달
+            kek_id=effective_kek_id,
         )
         return [
             {

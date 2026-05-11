@@ -23,3 +23,8 @@ ca-file={{ ca_file }}
 
 [KeyManager]
 use-barbican=true
+{% if kek_id %}
+# Per-project KEK (PR2 동적 발급) 또는 글로벌 fallback (settings.k3s_barbican_kms_kek_id).
+# barbican-kms-plugin 은 이 key-id 를 통해 Barbican secret 을 KEK 으로 사용.
+key-id={{ kek_id }}
+{% endif %}
