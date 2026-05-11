@@ -385,11 +385,12 @@ def test_barbican_kms_disabled_by_default():
     assert BarbicanKmsPlugin().should_deploy(s) is False
 
 
-def test_barbican_kms_requires_kek_id():
+def test_barbican_kms_no_longer_requires_global_kek_id_after_pr2():
+    """PR2 후: 글로벌 KEK ID 비어있어도 should_deploy=True (caller 가 ensure_project_kek 으로 동적 발급)."""
     from app.services.k3s_plugins.barbican_kms import BarbicanKmsPlugin
 
     s = _base_settings(k3s_barbican_kms_enabled=True, k3s_barbican_kms_kek_id="")
-    assert BarbicanKmsPlugin().should_deploy(s) is False
+    assert BarbicanKmsPlugin().should_deploy(s) is True
 
 
 def test_barbican_kms_should_deploy_when_enabled_and_kek_set():

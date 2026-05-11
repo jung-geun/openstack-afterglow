@@ -82,20 +82,27 @@ def aggregate_extra_write_files(
     cluster_name: str,
     settings: Settings,
     app_credential: dict | None = None,
+    kek_id: str | None = None,
 ) -> list[dict]:
     """활성 플러그인의 추가 write_files 항목 합산.
 
     Args:
         app_credential: cluster 별 app credential (PR1) — barbican_kms 등 인증 필요한 plugin 에 전달.
+        kek_id: project 별 동적 KEK (PR2) — barbican_kms 의 systemd unit `--key-id` 에 사용.
     """
     result = []
     for plugin in get_active_plugins(settings):
-        # 일부 plugin (barbican_kms) 만 app_credential 인자를 받음 → introspection
+        # 일부 plugin (barbican_kms) 만 app_credential / kek_id 인자를 받음 → introspection
         try:
-            files = plugin.extra_write_files(project_id, cluster_name, settings, app_credential=app_credential)
+            files = plugin.extra_write_files(
+                project_id, cluster_name, settings, app_credential=app_credential, kek_id=kek_id
+            )
         except TypeError:
-            # app_credential 인자 미지원 plugin (기존 시그니처)
-            files = plugin.extra_write_files(project_id, cluster_name, settings)
+            # 인자 미지원 plugin (기존 시그니처) — fallback
+            try:
+                files = plugin.extra_write_files(project_id, cluster_name, settings, app_credential=app_credential)
+            except TypeError:
+                files = plugin.extra_write_files(project_id, cluster_name, settings)
         result.extend(files)
     return result
 

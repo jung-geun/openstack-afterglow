@@ -371,6 +371,19 @@ async def create_k3s_cluster_async(
                 app_cred = await _keystone.create_app_credential_for_cluster(project_id, req.name)
                 app_credential_id = app_cred["id"]
 
+            # PR2 — KMS 활성 시 project owner Barbican 에서 KEK 조회/발급 (per-project 공유).
+            # 글로벌 settings.k3s_barbican_kms_kek_id 가 있으면 fallback (lazy migration).
+            kek_id: str | None = None
+            if active_plugins.get("barbican_kms", False):
+                yield event(K3sProgressStep.SERVER_CREATING, 39, "KEK (Barbican) 조회/발급 중...")
+                from app.services import barbican as _barbican
+
+                try:
+                    kek_id = await _barbican.ensure_project_kek(project_id)
+                except Exception:
+                    _logger.warning("ensure_project_kek 실패 — 글로벌 fallback 사용", exc_info=True)
+                    kek_id = s.k3s_barbican_kms_kek_id or None
+
             # Octavia Ingress 만 — subnet 도출 + manifest_kwargs 추가
             manifest_kwargs: dict = {}
             if active_plugins.get("octavia_ingress", False):
@@ -405,7 +418,7 @@ async def create_k3s_cluster_async(
                 return
             extra_server_args = k3s_plugins.aggregate_server_args(s)
             extra_write_files = k3s_plugins.aggregate_extra_write_files(
-                project_id, req.name, s, app_credential=app_cred
+                project_id, req.name, s, app_credential=app_cred, kek_id=kek_id
             )
 
             userdata_result = k3s_cloudinit.generate_server_userdata(

@@ -39,9 +39,8 @@ class BarbicanKmsPlugin:
     def should_deploy(self, settings: Settings) -> bool:
         if not settings.k3s_barbican_kms_enabled:
             return False
-        if not settings.k3s_barbican_kms_kek_id:
-            _logger.warning("Barbican KMS 활성화됨이지만 KEK ID 미설정 (PR2 land 후 per-project 동적 발급으로 대체)")
-            return False
+        # PR2 — KEK ID 글로벌 미설정 시에도 동적 발급으로 대체 가능. caller 가 ensure_project_kek
+        # 호출하여 cluster 별 KEK 결정.
         if not settings.os_username or not settings.os_password:
             _logger.warning("Barbican KMS 활성화됨이지만 OpenStack 인증 정보 미설정")
             return False
@@ -66,6 +65,7 @@ class BarbicanKmsPlugin:
         cluster_name: str,
         settings: Settings,
         app_credential: dict | None = None,
+        kek_id: str | None = None,
     ) -> list[dict]:
         """KMS 운영에 필요한 host file 4건 작성.
 
@@ -77,12 +77,16 @@ class BarbicanKmsPlugin:
         Args:
             app_credential: PR1 app credential dict {"id", "secret", "user_id"} 또는 None.
                 None 이면 admin password fallback (deprecated, dev 전용).
+            kek_id: PR2 cluster owner project 의 동적 KEK UUID. None 이면
+                settings.k3s_barbican_kms_kek_id (글로벌 fallback) 사용.
 
         실제 service 시작은 cloud-init runcmd 에서 (k3s_server.yaml.j2 참조).
         """
         encryption_config = _jinja.get_template("k3s_plugins/barbican_kms/encryption_config.yaml.j2").render()
+        # PR2 — 동적 KEK 우선, 글로벌 settings fallback
+        effective_kek_id = kek_id or settings.k3s_barbican_kms_kek_id
         systemd_unit = _jinja.get_template("k3s_plugins/barbican_kms/systemd_unit.j2").render(
-            kek_id=settings.k3s_barbican_kms_kek_id,
+            kek_id=effective_kek_id,
         )
         install_script = _jinja.get_template("k3s_plugins/barbican_kms/install_kms.sh.j2").render(
             kms_image=settings.k3s_barbican_kms_image,
