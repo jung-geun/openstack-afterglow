@@ -361,18 +361,25 @@ async def create_k3s_cluster_async(
             active_plugins = k3s_plugins.get_active_plugin_names(s)
             occm_active = active_plugins.get("occm", False)
 
-            # Octavia Ingress 활성 시 App Cred 발급 + subnet 도출
+            # PR1 — KMS 또는 Octavia Ingress 활성 시 cluster 별 App Credential 발급 (1회).
+            # KMS plugin 의 cloud.conf 에 admin password 대신 app cred 사용 → 노드 한 대
+            # compromise 시 OpenStack admin 권한 노출 방지.
+            app_cred: dict | None = None
+            needs_app_cred = active_plugins.get("octavia_ingress", False) or active_plugins.get("barbican_kms", False)
+            if needs_app_cred:
+                yield event(K3sProgressStep.SERVER_CREATING, 38, "App Credential 발급 중...")
+                app_cred = await _keystone.create_app_credential_for_cluster(project_id, req.name)
+                app_credential_id = app_cred["id"]
+
+            # Octavia Ingress 만 — subnet 도출 + manifest_kwargs 추가
             manifest_kwargs: dict = {}
             if active_plugins.get("octavia_ingress", False):
-                yield event(K3sProgressStep.SERVER_CREATING, 38, "Octavia Ingress App Credential 발급 중...")
                 subnets = await asyncio.to_thread(lambda: list(conn.network.subnets(network_id=network_id)))
                 if not subnets:
                     raise RuntimeError(
                         f"네트워크 {network_id}에 subnet이 없습니다. Octavia Ingress를 위한 subnet 도출 실패."
                     )
                 cluster_subnet_id = subnets[0].id
-                app_cred = await _keystone.create_app_credential_for_cluster(project_id, req.name)
-                app_credential_id = app_cred["id"]
                 manifest_kwargs = {
                     "subnet_id": cluster_subnet_id,
                     "app_credential": app_cred,
@@ -397,7 +404,9 @@ async def create_k3s_cluster_async(
                 yield event(K3sProgressStep.FAILED, 0, err_msg, cluster_id=cluster_id)
                 return
             extra_server_args = k3s_plugins.aggregate_server_args(s)
-            extra_write_files = k3s_plugins.aggregate_extra_write_files(project_id, req.name, s)
+            extra_write_files = k3s_plugins.aggregate_extra_write_files(
+                project_id, req.name, s, app_credential=app_cred
+            )
 
             userdata_result = k3s_cloudinit.generate_server_userdata(
                 cluster_name=req.name,

@@ -60,13 +60,23 @@ class BarbicanKmsPlugin:
         """K3s manifest 배포 불필요 (외부 systemd service). 빈 문자열 반환."""
         return ""
 
-    def extra_write_files(self, project_id: str, cluster_name: str, settings: Settings) -> list[dict]:
+    def extra_write_files(
+        self,
+        project_id: str,
+        cluster_name: str,
+        settings: Settings,
+        app_credential: dict | None = None,
+    ) -> list[dict]:
         """KMS 운영에 필요한 host file 4건 작성.
 
         1. encryption-config.yaml — apiserver 가 부팅 시 읽음
         2. systemd unit `barbican-kms.service` — k3s.service 보다 먼저 시작
         3. install script — k3s ctr 로 image pull + binary 추출 (runcmd 에서 호출)
         4. barbican-cloud.conf — KMS plugin 이 Barbican 인증에 사용
+
+        Args:
+            app_credential: PR1 app credential dict {"id", "secret", "user_id"} 또는 None.
+                None 이면 admin password fallback (deprecated, dev 전용).
 
         실제 service 시작은 cloud-init runcmd 에서 (k3s_server.yaml.j2 참조).
         """
@@ -80,6 +90,10 @@ class BarbicanKmsPlugin:
         cloud_conf = _jinja.get_template("k3s_plugins/barbican_kms/cloud_conf.yaml.j2").render(
             auth_url=settings.os_auth_url,
             region=settings.os_region_name,
+            # § PR1 app credential 우선 (admin password 노출 차단)
+            app_credential_id=(app_credential or {}).get("id", ""),
+            app_credential_secret=(app_credential or {}).get("secret", ""),
+            # Fallback — admin password (app_credential 없을 때만)
             username=settings.os_username,
             password=settings.os_password,
             user_domain_name=settings.os_user_domain_name,

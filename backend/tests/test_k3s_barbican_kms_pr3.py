@@ -180,3 +180,54 @@ def test_k3s_server_userdata_kms_disabled_uses_default_flow():
     assert "INSTALL_K3S_SKIP_START" not in yaml_str
     assert "install_kms.sh" not in yaml_str
     assert "barbican-kms.service" not in yaml_str
+
+
+# ---------------------------------------------------------------------------
+# PR1 — cloud.conf 인증을 admin password → application credential 로 전환
+# ---------------------------------------------------------------------------
+
+
+def test_cloud_conf_uses_app_credential_when_provided():
+    """PR1: app_credential 전달 시 cloud.conf 가 application-credential-id/secret 사용,
+    admin password 미노출."""
+    plugin = BarbicanKmsPlugin()
+    app_cred = {"id": "app-cred-id-test", "secret": "app-cred-secret-test", "user_id": "u1"}
+    files = plugin.extra_write_files("proj-1", "test", _settings_with_kms(), app_credential=app_cred)
+    cc = next(f for f in files if f["path"] == "/etc/kubernetes/barbican-cloud.conf")
+    content = cc["content"]
+    assert "application-credential-id=app-cred-id-test" in content
+    assert "application-credential-secret=app-cred-secret-test" in content
+    # admin password 가 cloud.conf 에 노출되지 않아야 한다
+    assert "password=secret" not in content
+    assert "username=admin" not in content
+
+
+def test_cloud_conf_falls_back_to_admin_password_when_no_app_cred():
+    """PR1 fallback: app_credential=None 시 admin password 사용 (deprecated, dev 전용)."""
+    plugin = BarbicanKmsPlugin()
+    files = plugin.extra_write_files("proj-1", "test", _settings_with_kms(), app_credential=None)
+    cc = next(f for f in files if f["path"] == "/etc/kubernetes/barbican-cloud.conf")
+    content = cc["content"]
+    assert "application-credential-id" not in content
+    assert "username=admin" in content
+    assert "password=secret" in content
+
+
+def test_aggregate_extra_write_files_passes_app_credential_to_kms():
+    """aggregate_extra_write_files(app_credential=...) 가 barbican_kms plugin 에 전달되어야 한다."""
+    from app.services import k3s_plugins
+
+    s = _settings_with_kms()
+    app_cred = {"id": "app-cred-id-test", "secret": "app-cred-secret-test", "user_id": "u1"}
+    files = k3s_plugins.aggregate_extra_write_files("proj-1", "test", s, app_credential=app_cred)
+    cc = next((f for f in files if f["path"] == "/etc/kubernetes/barbican-cloud.conf"), None)
+    assert cc is not None
+    assert "application-credential-id=app-cred-id-test" in cc["content"]
+
+
+def test_extra_write_files_signature_backward_compatible():
+    """app_credential 인자 미전달 시에도 동작 (PR1 land 전 caller 호환)."""
+    plugin = BarbicanKmsPlugin()
+    # app_credential kwarg 미전달
+    files = plugin.extra_write_files("proj-1", "test", _settings_with_kms())
+    assert len(files) == 4  # systemd unit + install + cloud.conf + enc-config
