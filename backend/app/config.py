@@ -152,7 +152,7 @@ def _load_toml() -> dict:
     # Barbican KMS
     flat["k3s_barbican_kms_enabled"] = k3s.get("barbican_kms_enabled", False)
     flat["k3s_barbican_kms_image"] = k3s.get(
-        "barbican_kms_image", "registry.k8s.io/provider-os/barbican-kms-plugin:v1.31.0"
+        "barbican_kms_image", "registry.k8s.io/provider-os/barbican-kms-plugin:v1.34.1"
     )
     flat["k3s_barbican_kms_kek_id"] = k3s.get("barbican_kms_kek_id", "")
     # LB 네트워크 분리: OCCM Service LB 공통 VIP 서브넷
@@ -338,7 +338,7 @@ class Settings(BaseSettings):
     k3s_octavia_ingress_floating_network_id: str = ""
     # Barbican KMS
     k3s_barbican_kms_enabled: bool = False
-    k3s_barbican_kms_image: str = "registry.k8s.io/provider-os/barbican-kms-plugin:v1.31.0"
+    k3s_barbican_kms_image: str = "registry.k8s.io/provider-os/barbican-kms-plugin:v1.34.1"
     k3s_barbican_kms_kek_id: str = ""
     # LB 네트워크 분리: OCCM Service LB VIP 서브넷 (미설정 시 클러스터 네트워크의 첫 서브넷)
     k3s_lb_subnet_id: str = ""
