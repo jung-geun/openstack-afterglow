@@ -400,18 +400,20 @@ def test_barbican_kms_should_deploy_when_enabled_and_kek_set():
     assert BarbicanKmsPlugin().should_deploy(s) is True
 
 
-def test_barbican_kms_server_install_args_includes_kubelet_arg():
-    """encryption-provider-config + kubelet pod-manifest-path 모두 포함."""
+def test_barbican_kms_server_install_args_only_encryption_provider():
+    """PR3 후: encryption-provider-config 만 포함. pod-manifest-path 는 host static pod 폐기로 제거."""
     from app.services.k3s_plugins.barbican_kms import BarbicanKmsPlugin
 
     s = _base_settings(k3s_barbican_kms_enabled=True, k3s_barbican_kms_kek_id="kek-uuid-123")
     args = BarbicanKmsPlugin().server_install_args(s)
     assert any("encryption-provider-config" in a for a in args)
-    assert any("pod-manifest-path=/var/lib/rancher/k3s/agent/pod-manifests" in a for a in args)
+    assert not any("pod-manifest-path" in a for a in args), (
+        "PR3 후 host static pod 폐기 — pod-manifest-path 인자가 더 이상 필요 없음"
+    )
 
 
-def test_barbican_kms_extra_write_files_paths_and_modes():
-    """static pod 운영에 필요한 host file 3건 + 모두 0600."""
+def test_barbican_kms_extra_write_files_systemd_pattern():
+    """PR3 후: 4개 host file (encryption-config + systemd unit + install script + cloud.conf)."""
     from app.services.k3s_plugins.barbican_kms import BarbicanKmsPlugin
 
     s = _base_settings(k3s_barbican_kms_enabled=True, k3s_barbican_kms_kek_id="kek-uuid-123")
@@ -419,28 +421,27 @@ def test_barbican_kms_extra_write_files_paths_and_modes():
     paths = {f["path"] for f in files}
     assert paths == {
         "/etc/kubernetes/encryption-config.yaml",
-        "/var/lib/rancher/k3s/agent/pod-manifests/barbican-kms.yaml",
+        "/etc/systemd/system/barbican-kms.service",
+        "/opt/k3s/install_kms.sh",
         "/etc/kubernetes/barbican-cloud.conf",
     }
-    for f in files:
-        assert f["permissions"] == "0600"
+    # host static pod manifest 는 더 이상 작성 안 함
+    assert not any("pod-manifests" in p for p in paths)
 
 
-def test_barbican_kms_static_pod_manifest_valid_pod():
-    """static pod manifest는 hostNetwork=true, hostPath /var/lib/kms 포함."""
+def test_barbican_kms_systemd_unit_runs_before_k3s_with_correct_args():
+    """PR3 후: systemd unit 이 k3s.service 보다 먼저 시작 + KEK ID + sock path 인자 포함."""
     from app.services.k3s_plugins.barbican_kms import BarbicanKmsPlugin
 
     s = _base_settings(k3s_barbican_kms_enabled=True, k3s_barbican_kms_kek_id="kek-uuid-123")
     files = BarbicanKmsPlugin().extra_write_files("proj-1", "test-cluster", s)
-    pod_yaml = next(f["content"] for f in files if f["path"].endswith("barbican-kms.yaml"))
-    pod = yaml.safe_load(pod_yaml)
-    assert pod["kind"] == "Pod"
-    assert pod["spec"]["hostNetwork"] is True
-    socket_volume = next(v for v in pod["spec"]["volumes"] if v["name"] == "kms-socket")
-    assert socket_volume["hostPath"]["path"] == "/var/lib/kms"
-    args = pod["spec"]["containers"][0]["args"]
-    assert "--key-id=kek-uuid-123" in args
-    assert "--listen=/var/lib/kms/kms.sock" in args
+    unit = next(f["content"] for f in files if f["path"].endswith("barbican-kms.service"))
+    assert "Before=k3s.service" in unit, "데드락 방지 — k3s.service 보다 먼저 시작되어야 함"
+    assert "ExecStart=/usr/local/bin/barbican-kms-plugin" in unit
+    assert "--socketpath=/var/lib/kms/kms.sock" in unit
+    assert "--cloud-config=/etc/kubernetes/barbican-cloud.conf" in unit
+    assert "--key-id=kek-uuid-123" in unit
+    assert "Restart=always" in unit
 
 
 def test_barbican_kms_generate_manifests_empty():

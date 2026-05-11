@@ -1,13 +1,18 @@
 """Barbican KMS Plugin — K8s Secret을 Barbican으로 암호화.
 
-8.14 데드락 해소 — host static pod 방식.
+§ PR3 재설계 — k3s 외부 systemd service 방식.
 
-기존엔 DaemonSet으로 KMS 데몬을 띄웠으나, 이는 apiserver 위에서 동작하므로
-부팅 시점 apiserver의 ``--encryption-provider-config`` 초기화와 chicken-and-egg
-데드락이 발생했다. 본 재설계는 kubelet이 apiserver 없이도 띄울 수 있는
-**host static pod**(`/var/lib/rancher/k3s/agent/pod-manifests/`)로 KMS 데몬을
-배포한다. KMS 소켓이 host에서 즉시 생성되어 apiserver의 KMS provider
-초기화 retry(`PluginInitTimeout`, 기본 60초)를 충족한다.
+이전 host static pod 패턴(§ 7f1de4c)은 K3s 1.34 의 kubelet startup sequence 와
+양립 불가 (kubelet 이 apiserver ready 후 시작 → static pod 영원히 미띄움 →
+KMS sock 영원히 미생성 → 데드락).
+
+본 재설계는 KMS plugin 을 **k3s 외부 systemd service** 로 분리:
+1. k3s install (INSTALL_K3S_SKIP_START=true) — binary + ctr 만 준비, service 미시작
+2. install_kms.sh — k3s ctr 로 KMS image pull + binary 추출 → /usr/local/bin/
+3. systemctl start barbican-kms.service → /var/lib/kms/kms.sock 생성
+4. systemctl start k3s.service → apiserver 가 이미 존재하는 sock 와 통신, 정상 부팅
+
+statically linked Go binary 라 host install 가능 (libc 의존성 없음).
 """
 
 import logging
@@ -27,8 +32,6 @@ _jinja = Environment(
     lstrip_blocks=True,
 )
 
-_STATIC_POD_DIR = "/var/lib/rancher/k3s/agent/pod-manifests"
-
 
 class BarbicanKmsPlugin:
     name = "barbican_kms"
@@ -37,7 +40,7 @@ class BarbicanKmsPlugin:
         if not settings.k3s_barbican_kms_enabled:
             return False
         if not settings.k3s_barbican_kms_kek_id:
-            _logger.warning("Barbican KMS 활성화됨이지만 KEK ID 미설정")
+            _logger.warning("Barbican KMS 활성화됨이지만 KEK ID 미설정 (PR2 land 후 per-project 동적 발급으로 대체)")
             return False
         if not settings.os_username or not settings.os_password:
             _logger.warning("Barbican KMS 활성화됨이지만 OpenStack 인증 정보 미설정")
@@ -45,29 +48,34 @@ class BarbicanKmsPlugin:
         return True
 
     def cloud_conf_sections(self, project_id: str, settings: Settings) -> str:
-        """OCCM의 cluster cloud.conf에 추가될 [KeyManager] 섹션 반환.
+        """OCCM 의 cluster cloud.conf 에 추가될 [KeyManager] 섹션 반환.
 
-        주의: 이 섹션은 **OCCM이 사용하는 cluster cloud.conf**에 추가되는 것이며,
-        KMS static pod가 사용하는 host file `/etc/kubernetes/barbican-cloud.conf` 와는
-        별개다 (KMS는 apiserver에 secret으로 접근할 수 없으므로 host file 필요).
+        주의: 이 섹션은 **OCCM 이 사용하는 cluster cloud.conf** 에 추가되는 것이며,
+        KMS systemd service 가 사용하는 host file `/etc/kubernetes/barbican-cloud.conf` 와는
+        별개다 (KMS 는 apiserver 와 무관한 외부 service).
         """
         return "[KeyManager]\nuse-barbican=true\n"
 
     def generate_manifests(self, cluster_name: str, project_id: str, settings: Settings, **kwargs) -> str:
-        """Static pod로 전환되어 K8s 매니페스트 배포 불필요. 빈 문자열 반환."""
+        """K3s manifest 배포 불필요 (외부 systemd service). 빈 문자열 반환."""
         return ""
 
     def extra_write_files(self, project_id: str, cluster_name: str, settings: Settings) -> list[dict]:
-        """Static pod 운영에 필요한 host file 3건 작성.
+        """KMS 운영에 필요한 host file 4건 작성.
 
-        1. encryption-config.yaml — apiserver가 부팅 시 읽음
-        2. static pod manifest — kubelet이 감시 → KMS pod 즉시 띄움
-        3. barbican-cloud.conf — KMS pod가 hostPath로 읽음 (Secret 의존 제거)
+        1. encryption-config.yaml — apiserver 가 부팅 시 읽음
+        2. systemd unit `barbican-kms.service` — k3s.service 보다 먼저 시작
+        3. install script — k3s ctr 로 image pull + binary 추출 (runcmd 에서 호출)
+        4. barbican-cloud.conf — KMS plugin 이 Barbican 인증에 사용
+
+        실제 service 시작은 cloud-init runcmd 에서 (k3s_server.yaml.j2 참조).
         """
         encryption_config = _jinja.get_template("k3s_plugins/barbican_kms/encryption_config.yaml.j2").render()
-        static_pod = _jinja.get_template("k3s_plugins/barbican_kms/static_pod.yaml.j2").render(
-            barbican_kms_image=settings.k3s_barbican_kms_image,
+        systemd_unit = _jinja.get_template("k3s_plugins/barbican_kms/systemd_unit.j2").render(
             kek_id=settings.k3s_barbican_kms_kek_id,
+        )
+        install_script = _jinja.get_template("k3s_plugins/barbican_kms/install_kms.sh.j2").render(
+            kms_image=settings.k3s_barbican_kms_image,
         )
         cloud_conf = _jinja.get_template("k3s_plugins/barbican_kms/cloud_conf.yaml.j2").render(
             auth_url=settings.os_auth_url,
@@ -86,9 +94,14 @@ class BarbicanKmsPlugin:
                 "content": encryption_config,
             },
             {
-                "path": f"{_STATIC_POD_DIR}/barbican-kms.yaml",
-                "permissions": "0600",
-                "content": static_pod,
+                "path": "/etc/systemd/system/barbican-kms.service",
+                "permissions": "0644",
+                "content": systemd_unit,
+            },
+            {
+                "path": "/opt/k3s/install_kms.sh",
+                "permissions": "0750",
+                "content": install_script,
             },
             {
                 "path": "/etc/kubernetes/barbican-cloud.conf",
@@ -98,9 +111,11 @@ class BarbicanKmsPlugin:
         ]
 
     def server_install_args(self, settings: Settings) -> list[str]:
+        """K3s 서버에 encryption-provider-config 만 전달.
+        kubelet pod-manifest-path 는 host static pod 패턴 폐기로 불필요.
+        """
         return [
             "--kube-apiserver-arg=encryption-provider-config=/etc/kubernetes/encryption-config.yaml",
-            f"--kubelet-arg=pod-manifest-path={_STATIC_POD_DIR}",
         ]
 
     def agent_install_args(self, settings: Settings) -> list[str]:

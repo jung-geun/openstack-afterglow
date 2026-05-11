@@ -412,6 +412,7 @@ async def create_k3s_cluster_async(
                 needs_external_cloud_provider=k3s_plugins.needs_external_cloud_provider(s),
                 os_type=os_type,
                 server_node_name=server_vm_name,
+                barbican_kms_enabled=any(p.name == "barbican_kms" for p in k3s_plugins.get_active_plugins(s)),
             )
 
             # --- Step 4: 서버 VM 생성 ---

@@ -174,7 +174,11 @@ write_files:
 runcmd:
   - |
     # k3s 서버 설치
+    # Barbican KMS 활성화 시: install 만 하고 service 미시작 (KMS sock 준비 후 수동 start)
     SERVER_IP=$(hostname -I | awk '{print $1}')
+{% if barbican_kms_enabled %}
+    INSTALL_K3S_SKIP_START=true \
+{% endif %}
     curl -sfL https://get.k3s.io | \
       INSTALL_K3S_VERSION="{{ k3s_version }}" \
       sh -s - server \
@@ -191,5 +195,25 @@ runcmd:
         {{ arg }} \
 {% endfor %}
         --node-name="{{ server_node_name }}"
+{% if barbican_kms_enabled %}
+  - |
+    # Barbican KMS plugin: image 에서 binary 추출 → systemd service 시작 → sock 생성 대기
+    # k3s 시작 전에 sock 가 준비되어야 apiserver 의 encryption-provider 가 정상 init.
+    bash /opt/k3s/install_kms.sh
+    systemctl daemon-reload
+    systemctl enable --now barbican-kms.service
+    echo "[k3s-server] waiting for /var/lib/kms/kms.sock (max 120s)..."
+    for i in $(seq 1 120); do
+      [ -S /var/lib/kms/kms.sock ] && break
+      sleep 1
+    done
+    if [ ! -S /var/lib/kms/kms.sock ]; then
+      echo "[k3s-server] ERROR: KMS sock not ready after 120s"
+      journalctl -u barbican-kms --no-pager -n 50
+      exit 1
+    fi
+    echo "[k3s-server] KMS sock ready, starting k3s.service"
+    systemctl enable --now k3s.service
+{% endif %}
   # 콜백 스크립트를 백그라운드 실행 (k3s 준비 대기 후 전송)
   - nohup /opt/k3s/callback.sh > /var/log/k3s-callback.log 2>&1 &
