@@ -20,6 +20,10 @@ export default defineConfig({
 				find: '$env/dynamic/public',
 				replacement: fileURLToPath(new URL('./src/__mocks__/sveltekit/env-dynamic-public.ts', import.meta.url)),
 			},
+			{
+				find: '$app/navigation',
+				replacement: fileURLToPath(new URL('./src/__mocks__/sveltekit/app-navigation.ts', import.meta.url)),
+			},
 		],
 	},
 	test: {
