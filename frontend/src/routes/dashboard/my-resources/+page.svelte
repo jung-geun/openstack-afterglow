@@ -118,7 +118,7 @@
 	});
 </script>
 
-<div class="p-4 md:p-8 max-w-6xl">
+<div class="p-4 md:p-8 max-w-7xl mx-auto">
 	<div class="flex items-center gap-3 mb-4">
 		<a
 			href="/dashboard"

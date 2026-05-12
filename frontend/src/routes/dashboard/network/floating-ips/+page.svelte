@@ -67,7 +67,7 @@
   });
 </script>
 
-<div class="p-4 md:p-8 max-w-5xl">
+<div class="p-4 md:p-8 max-w-7xl mx-auto">
   <PageHeader breadcrumb="네트워크" title="Floating IP">
     {#snippet actions()}
       <AutoRefreshControl

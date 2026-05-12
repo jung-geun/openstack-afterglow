@@ -196,7 +196,7 @@
 </script>
 
 <div class="flex h-full">
-<div class="flex-1 p-4 md:p-8 max-w-6xl overflow-auto">
+<div class="flex-1 p-4 md:p-8 max-w-7xl mx-auto overflow-auto">
 	<PageHeader breadcrumb="COMPUTE / HYPERVISORS" title="하이퍼바이저">
 		{#snippet actions()}
 			<AutoRefreshControl

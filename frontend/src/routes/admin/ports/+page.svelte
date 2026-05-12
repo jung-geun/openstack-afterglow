@@ -160,7 +160,7 @@
 	});
 </script>
 
-<div class="p-4 md:p-8 max-w-6xl">
+<div class="p-4 md:p-8 max-w-7xl mx-auto">
 	<PageHeader breadcrumb="NETWORK / PORTS" title="포트">
 		{#snippet actions()}
 			<button onclick={() => { showCreate = true; createError = ''; createForm = { network_id: '', name: '', project_id: '', fixed_ip: '' }; projectSearch = ''; selectedProjectName = ''; }} class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg">+ 생성</button>

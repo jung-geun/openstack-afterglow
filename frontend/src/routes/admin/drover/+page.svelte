@@ -76,7 +76,7 @@
 	</SlidePanel>
 {/if}
 
-<div class="p-4 md:p-8 max-w-7xl">
+<div class="p-4 md:p-8 max-w-7xl mx-auto">
 	<PageHeader breadcrumb="DROVER" title="Drover 클러스터">
 		{#snippet actions()}
 			<AutoRefreshControl

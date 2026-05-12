@@ -817,7 +817,7 @@
 	</div>
 {/if}
 
-<div class="p-4 md:p-8 max-w-7xl">
+<div class="p-4 md:p-8 max-w-7xl mx-auto">
 	<!-- breadcrumb -->
 	<div class="flex items-center gap-1 mb-2 flex-wrap text-sm">
 		<a href="/dashboard/object-storage/buckets" class="text-gray-500 hover:text-gray-300 flex items-center gap-1">

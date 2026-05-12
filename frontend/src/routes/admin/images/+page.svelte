@@ -176,7 +176,7 @@
 	});
 </script>
 
-<div class="p-4 md:p-8 max-w-7xl">
+<div class="p-4 md:p-8 max-w-7xl mx-auto">
 	<PageHeader breadcrumb="COMPUTE / IMAGES" title="이미지">
 		{#snippet actions()}
 			<AutoRefreshControl

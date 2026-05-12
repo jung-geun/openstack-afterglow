@@ -163,7 +163,7 @@
 	});
 </script>
 
-<div class="p-4 md:p-8 max-w-6xl">
+<div class="p-4 md:p-8 max-w-7xl mx-auto">
 	<PageHeader breadcrumb="COMPUTE / INSTANCES" title="전체 인스턴스">
 		{#snippet actions()}
 			<AutoRefreshControl

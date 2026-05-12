@@ -206,7 +206,7 @@
 	onMount(() => { loadProjects(); loadGpuAliases(); loadGpuDefaults(); });
 </script>
 
-<div class="p-4 md:p-8 max-w-6xl">
+<div class="p-4 md:p-8 max-w-7xl mx-auto">
 	<PageHeader breadcrumb="IDENTITY / QUOTAS" title="쿼터" />
 
 	{#if loading}

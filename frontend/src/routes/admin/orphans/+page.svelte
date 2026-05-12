@@ -215,7 +215,7 @@
 	onMount(load);
 </script>
 
-<div class="p-4 md:p-8 max-w-6xl">
+<div class="p-4 md:p-8 max-w-7xl mx-auto">
 	<PageHeader breadcrumb="시스템 / 고아 리소스" title="고아 리소스 정리">
 		{#snippet actions()}
 			<AutoRefreshControl
