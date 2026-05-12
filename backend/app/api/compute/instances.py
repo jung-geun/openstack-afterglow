@@ -179,6 +179,7 @@ async def create_instance(
     created_file_storage_ids: list[str] = []
     created_access_ids: list[tuple[str, str]] = []  # (file_storage_id, access_id)
     boot_volume_id: str | None = None
+    boot_volume_was_provided: bool = False  # 기존 볼륨 사용 시 rollback 에서 삭제 금지
     upper_volume_id: str | None = None
     created_upper: bool = False  # 신규 생성 시에만 rollback에서 삭제
     server_id: str | None = None
@@ -211,23 +212,32 @@ async def create_instance(
             file_storages_info = [file_storage_info]
 
         # ------------------------------------------------------------------
-        # 2. Cinder: 부트 볼륨 생성
+        # 2. Cinder: 부트 볼륨 생성 또는 기존 볼륨 검증
         # ------------------------------------------------------------------
-        boot_vol = await asyncio.to_thread(
-            cinder.create_volume_from_image,
-            conn,
-            f"{req.name}-boot",
-            req.image_id,
-            req.boot_volume_size_gb or settings.boot_volume_size_gb,
-            req.availability_zone or settings.default_availability_zone,
-        )
-        boot_volume_id = boot_vol.id
-        await asyncio.to_thread(
-            cinder.rename_volume,
-            conn,
-            boot_volume_id,
-            f"{req.name}-boot-{boot_volume_id[:8]}",
-        )
+        if req.boot_volume_id:
+            boot_vol = await asyncio.to_thread(cinder.get_volume, conn, req.boot_volume_id)
+            if boot_vol.status != "available":
+                raise HTTPException(400, f"부팅 볼륨 상태가 'available'이 아닙니다: {boot_vol.status}")
+            if not boot_vol.bootable:
+                raise HTTPException(400, "bootable=false 볼륨은 루트 디스크로 사용할 수 없습니다")
+            boot_volume_id = req.boot_volume_id
+            boot_volume_was_provided = True
+        else:
+            boot_vol = await asyncio.to_thread(
+                cinder.create_volume_from_image,
+                conn,
+                f"{req.name}-boot",
+                req.image_id,
+                req.boot_volume_size_gb or settings.boot_volume_size_gb,
+                req.availability_zone or settings.default_availability_zone,
+            )
+            boot_volume_id = boot_vol.id
+            await asyncio.to_thread(
+                cinder.rename_volume,
+                conn,
+                boot_volume_id,
+                f"{req.name}-boot-{boot_volume_id[:8]}",
+            )
 
         # ------------------------------------------------------------------
         # 3. Cinder: upper 볼륨 — 신규 생성 또는 기존(복구된) 볼륨 재사용
@@ -363,7 +373,9 @@ async def create_instance(
             admin_pass=req.admin_pass,
             availability_zone=req.availability_zone or settings.default_availability_zone,
             metadata=meta,
-            delete_boot_volume_on_termination=req.delete_boot_volume_on_termination,
+            delete_boot_volume_on_termination=(
+                False if boot_volume_was_provided else req.delete_boot_volume_on_termination
+            ),
             security_groups=req.security_groups if req.security_groups else None,
         )
         server_id = server.id
@@ -428,7 +440,7 @@ async def create_instance(
         await _rollback(
             conn,
             server_id,
-            boot_volume_id,
+            boot_volume_id if not boot_volume_was_provided else None,
             upper_volume_id if created_upper else None,
             created_file_storage_ids,
             created_access_ids,
@@ -489,6 +501,7 @@ async def create_instance_async(
         created_file_storage_ids: list[str] = []
         created_access_ids: list[tuple[str, str]] = []
         boot_volume_id: str | None = None
+        boot_volume_was_provided: bool = False  # 기존 볼륨 사용 시 rollback 에서 삭제 금지
         upper_volume_id: str | None = None
         created_upper: bool = False  # 신규 생성 시에만 rollback에서 삭제
         server_id: str | None = None
@@ -543,23 +556,34 @@ async def create_instance_async(
                     raise HTTPException(status_code=409, detail=_msg)
 
             # Step 2: Boot volume (20-45%)
-            yield send_progress(ProgressStep.BOOT_VOLUME_CREATING, 20, "부트 볼륨 생성 중...")
-            boot_vol = await asyncio.to_thread(
-                cinder.create_volume_from_image,
-                conn,
-                name=f"{req.name}-boot",
-                image_id=req.image_id,
-                size_gb=req.boot_volume_size_gb or settings.boot_volume_size_gb,
-                availability_zone=req.availability_zone or settings.default_availability_zone,
-            )
-            boot_volume_id = boot_vol.id
-            await asyncio.to_thread(
-                cinder.rename_volume,
-                conn,
-                boot_volume_id,
-                f"{req.name}-boot-{boot_volume_id[:8]}",
-            )
-            yield send_progress(ProgressStep.BOOT_VOLUME_CREATING, 45, "부트 볼륨 생성 완료")
+            if req.boot_volume_id:
+                yield send_progress(ProgressStep.BOOT_VOLUME_CREATING, 20, "기존 부팅 볼륨 검증 중...")
+                boot_vol = await asyncio.to_thread(cinder.get_volume, conn, req.boot_volume_id)
+                if boot_vol.status != "available":
+                    raise HTTPException(400, f"부팅 볼륨 상태가 'available'이 아닙니다: {boot_vol.status}")
+                if not boot_vol.bootable:
+                    raise HTTPException(400, "bootable=false 볼륨은 루트 디스크로 사용할 수 없습니다")
+                boot_volume_id = req.boot_volume_id
+                boot_volume_was_provided = True
+                yield send_progress(ProgressStep.BOOT_VOLUME_CREATING, 45, "부팅 볼륨 검증 완료")
+            else:
+                yield send_progress(ProgressStep.BOOT_VOLUME_CREATING, 20, "부트 볼륨 생성 중...")
+                boot_vol = await asyncio.to_thread(
+                    cinder.create_volume_from_image,
+                    conn,
+                    name=f"{req.name}-boot",
+                    image_id=req.image_id,
+                    size_gb=req.boot_volume_size_gb or settings.boot_volume_size_gb,
+                    availability_zone=req.availability_zone or settings.default_availability_zone,
+                )
+                boot_volume_id = boot_vol.id
+                await asyncio.to_thread(
+                    cinder.rename_volume,
+                    conn,
+                    boot_volume_id,
+                    f"{req.name}-boot-{boot_volume_id[:8]}",
+                )
+                yield send_progress(ProgressStep.BOOT_VOLUME_CREATING, 45, "부트 볼륨 생성 완료")
 
             if resolved_libs:
                 # Step 3: Upper volume (45-60%) — 신규 생성 또는 기존(복구된) 볼륨 재사용
@@ -689,7 +713,9 @@ async def create_instance_async(
                 admin_pass=req.admin_pass,
                 availability_zone=req.availability_zone or settings.default_availability_zone,
                 metadata=meta,
-                delete_boot_volume_on_termination=req.delete_boot_volume_on_termination,
+                delete_boot_volume_on_termination=(
+                    False if boot_volume_was_provided else req.delete_boot_volume_on_termination
+                ),
                 security_groups=_sse_effective_sgs,
             )
             server_id = server.id
@@ -807,7 +833,7 @@ async def create_instance_async(
             await _rollback(
                 conn,
                 server_id,
-                boot_volume_id,
+                boot_volume_id if not boot_volume_was_provided else None,
                 upper_volume_id if created_upper else None,
                 created_file_storage_ids,
                 created_access_ids,

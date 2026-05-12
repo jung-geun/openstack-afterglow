@@ -23,6 +23,8 @@ export interface Volume {
   size: number;
   volume_type: string | null;
   attachments: Record<string, unknown>[];
+  bootable?: boolean;
+  volume_image_metadata?: Record<string, string> | null;
 }
 
 export interface FileStorage {

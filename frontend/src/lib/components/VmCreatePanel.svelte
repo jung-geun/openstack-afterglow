@@ -262,7 +262,7 @@
 
 	let canNext = $derived((() => {
 		switch ($wizard.step) {
-			case 1: return !!$wizard.imageId;
+			case 1: return $wizard.bootSource === 'volume' ? !!$wizard.bootVolumeId : !!$wizard.imageId;
 			case 2: return !!$wizard.flavorId;
 			case 3: return true;
 			case 4: return true;
@@ -293,7 +293,13 @@
 				headers,
 				body: JSON.stringify({
 					name: $wizard.instanceName,
-					image_id: $wizard.imageId,
+					...($wizard.bootSource === 'volume'
+						? { boot_volume_id: $wizard.bootVolumeId }
+						: {
+							image_id: $wizard.imageId,
+							boot_volume_size_gb: $wizard.bootVolumeSizeGb,
+							delete_boot_volume_on_termination: $wizard.deleteBootVolumeOnTermination,
+						}),
 					flavor_id: $wizard.flavorId,
 					libraries: $wizard.libraries,
 					strategy: $wizard.strategy,
@@ -302,8 +308,6 @@
 					availability_zone: $wizard.availabilityZone,
 					security_groups: $wizard.securityGroups,
 					userdata: $wizard.cloudInit || null,
-					boot_volume_size_gb: $wizard.bootVolumeSizeGb,
-					delete_boot_volume_on_termination: $wizard.deleteBootVolumeOnTermination,
 				})
 			});
 
@@ -470,9 +474,46 @@
 			<!-- 단계별 내용 -->
 			<div class="mb-8">
 				{#if $wizard.step === 1}
-					<h2 class="text-lg font-semibold text-white mb-1">OS 이미지 선택</h2>
-					<p class="text-sm text-gray-400 mb-4">Glance에 등록된 공개 이미지, 직접 업로드한 이미지는 <a href="/dashboard/compute/images" class="text-blue-400 hover:underline">이미지 페이지</a>에서 관리할 수 있습니다.</p>
-					<SelectImage {images} selectedId={$wizard.imageId} onSelect={selectImage} />
+					<h2 class="text-lg font-semibold text-white mb-3">부트 소스 선택</h2>
+					<!-- 이미지 / 기존 볼륨 토글 -->
+					<div class="flex mb-5 rounded-lg overflow-hidden border border-gray-700">
+						<button
+							class="flex-1 py-2 text-sm transition-colors {$wizard.bootSource === 'image' ? 'bg-blue-700 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'}"
+							onclick={() => wizard.update(w => ({ ...w, bootSource: 'image', bootVolumeId: null, bootVolumeName: null }))}
+						>OS 이미지</button>
+						<button
+							class="flex-1 py-2 text-sm transition-colors {$wizard.bootSource === 'volume' ? 'bg-blue-700 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'}"
+							onclick={() => wizard.update(w => ({ ...w, bootSource: 'volume', imageId: null, imageName: null }))}
+						>기존 부팅 볼륨</button>
+					</div>
+
+					{#if $wizard.bootSource === 'image'}
+						<p class="text-sm text-gray-400 mb-4">Glance에 등록된 공개 이미지, 직접 업로드한 이미지는 <a href="/dashboard/compute/images" class="text-blue-400 hover:underline">이미지 페이지</a>에서 관리할 수 있습니다.</p>
+						<SelectImage {images} selectedId={$wizard.imageId} onSelect={selectImage} />
+					{:else}
+						{@const bootableVols = volumes.filter(v => v.bootable && v.status === 'available')}
+						<p class="text-sm text-gray-400 mb-4">부팅 가능하고 <span class="text-green-400">available</span> 상태인 볼륨만 표시됩니다.</p>
+						{#if bootableVols.length === 0}
+							<div class="text-center py-10 text-gray-600 text-sm">부팅 가능한 볼륨이 없습니다.</div>
+						{:else}
+							<div class="space-y-2 max-h-96 overflow-y-auto pr-1">
+								{#each bootableVols as vol}
+									<button
+										onclick={() => wizard.update(w => ({ ...w, bootVolumeId: vol.id, bootVolumeName: vol.name }))}
+										class="w-full text-left rounded-lg border px-4 py-3 transition-colors {$wizard.bootVolumeId === vol.id ? 'border-blue-500 bg-blue-900/20' : 'border-gray-700 bg-gray-900 hover:border-gray-500'}"
+									>
+										<div class="flex items-center justify-between">
+											<span class="text-sm text-white font-medium">{vol.name || vol.id.slice(0, 8)}</span>
+											<span class="text-xs text-gray-500 font-mono">{vol.size} GB</span>
+										</div>
+										{#if vol.volume_image_metadata?.image_name}
+											<div class="text-xs text-gray-500 mt-0.5">{vol.volume_image_metadata.image_name}</div>
+										{/if}
+									</button>
+								{/each}
+							</div>
+						{/if}
+					{/if}
 
 				{:else if $wizard.step === 2}
 					<h2 class="text-lg font-semibold text-white mb-1">플레이버 선택 <span class="text-gray-500 text-sm font-normal">VM의 vCPU / 메모리 / 디스크 스펙</span></h2>
@@ -607,6 +648,7 @@
 					</div>
 
 					<!-- 루트 디스크 -->
+					{#if $wizard.bootSource === 'image'}
 					<div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
 						<div>
 							<label for="boot-volume-size" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">루트 디스크 (GB)</label>
@@ -631,6 +673,11 @@
 							</label>
 						</div>
 					</div>
+					{:else}
+					<div class="mb-5 p-3 rounded-lg bg-blue-900/20 border border-blue-800/40 text-blue-300 text-xs">
+						기존 부팅 볼륨 사용 시 루트 디스크 크기 설정이 적용되지 않습니다. 볼륨: <span class="font-medium">{$wizard.bootVolumeName ?? $wizard.bootVolumeId}</span>
+					</div>
+					{/if}
 
 					<!-- cloud-init -->
 					<div class="mb-5">
@@ -652,10 +699,17 @@
 							<span class="text-gray-500">이름</span>
 							<span class="text-white font-medium">{$wizard.instanceName || '-'}</span>
 						</div>
+						{#if $wizard.bootSource === 'volume'}
+						<div class="flex justify-between">
+							<span class="text-gray-500">부트 소스</span>
+							<span class="text-white">기존 볼륨: {$wizard.bootVolumeName ?? $wizard.bootVolumeId ?? '-'}</span>
+						</div>
+						{:else}
 						<div class="flex justify-between">
 							<span class="text-gray-500">이미지</span>
 							<span class="text-white">{$wizard.imageName ?? '-'}</span>
 						</div>
+						{/if}
 						<div class="flex justify-between">
 							<span class="text-gray-500">플레이버</span>
 							<span class="text-white">{$wizard.flavorName ?? '-'} <span class="text-gray-500 text-xs">({selectedFlavorDetail})</span></span>
@@ -680,6 +734,7 @@
 							<span class="text-gray-500">네트워크</span>
 							<span class="text-white">{$wizard.networkName ?? '기본'}</span>
 						</div>
+						{#if $wizard.bootSource === 'image'}
 						<div class="flex justify-between">
 							<span class="text-gray-500">루트 디스크</span>
 							<span class="text-white">
@@ -687,6 +742,7 @@
 								<span class="text-gray-500 text-xs">({$wizard.deleteBootVolumeOnTermination ? 'VM 삭제 시 함께 삭제' : 'VM 삭제 후 보존'})</span>
 							</span>
 						</div>
+						{/if}
 					</div>
 
 					{#if $wizard.libraries.length > 0}

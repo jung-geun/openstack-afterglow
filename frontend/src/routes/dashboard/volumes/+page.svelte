@@ -14,6 +14,7 @@
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
   import ActionMenu from '$lib/components/ui/ActionMenu.svelte';
+  import { wizard, openWizard } from '$lib/stores/wizard';
 
   interface Snapshot {
     id: string;
@@ -155,6 +156,18 @@
     } finally {
       deleting = null;
     }
+  }
+
+  function bootFromVolume(vol: Volume) {
+    wizard.update(s => ({
+      ...s,
+      bootSource: 'volume',
+      bootVolumeId: vol.id,
+      bootVolumeName: vol.name,
+      imageId: null,
+      imageName: null,
+    }));
+    openWizard();
   }
 
   async function fetchAutoBackupConfigs() {
@@ -375,9 +388,12 @@
               {/if}
             </div>
             <!-- 부트 badge -->
-            <div class="hidden lg:block">
-              {#if vol.attachments.some((a: Record<string, unknown>) => a.device === '/dev/vda' || a.device === '/dev/sda')}
-                <span class="text-[11px] px-2 py-0.5 rounded-md bg-blue-900/30 border border-blue-800 text-blue-400">부트</span>
+            <div class="hidden lg:flex flex-col gap-0.5">
+              {#if vol.bootable}
+                <span class="text-[11px] px-2 py-0.5 rounded-md bg-blue-900/30 border border-blue-800 text-blue-400 w-fit">부트</span>
+                {#if vol.volume_image_metadata?.os_distro}
+                  <span class="text-[10px] text-gray-500 font-mono">{vol.volume_image_metadata.os_distro}{vol.volume_image_metadata.os_version ? ' ' + vol.volume_image_metadata.os_version : ''}</span>
+                {/if}
               {/if}
             </div>
             <!-- 자동 백업 토글 -->
@@ -405,6 +421,15 @@
                   <svg class="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
                   연결
                 </button>
+                {#if vol.status === 'available' && vol.bootable}
+                  <button
+                    onclick={() => { openActionMenu = null; bootFromVolume(vol); }}
+                    class="w-full text-left px-3 py-1.5 text-[13px] text-gray-300 hover:text-white hover:bg-gray-800 transition-colors flex items-center gap-2"
+                  >
+                    <svg class="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3l14 9-14 9V3z" /></svg>
+                    이 볼륨으로 VM 부팅
+                  </button>
+                {/if}
                 {#if vol.status === 'available'}
                   <button
                     onclick={() => { openActionMenu = null; openTransferModal(vol.id, vol.name); }}

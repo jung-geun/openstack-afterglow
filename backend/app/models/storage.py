@@ -43,6 +43,8 @@ class VolumeInfo(BaseModel):
     size: int  # GB
     volume_type: str | None = None
     attachments: list[dict] = []
+    bootable: bool = False
+    volume_image_metadata: dict | None = None
 
 
 class NetworkInfo(BaseModel):

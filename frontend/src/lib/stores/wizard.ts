@@ -17,8 +17,11 @@ export interface NewVolumeSpec {
 
 export interface WizardState {
 	step: number;
+	bootSource: 'image' | 'volume';
 	imageId: string | null;
 	imageName: string | null;
+	bootVolumeId: string | null;
+	bootVolumeName: string | null;
 	flavorId: string | null;
 	flavorName: string | null;
 	libraries: string[];
@@ -41,8 +44,11 @@ export interface WizardState {
 
 const initial: WizardState = {
 	step: 1,
+	bootSource: 'image',
 	imageId: null,
 	imageName: null,
+	bootVolumeId: null,
+	bootVolumeName: null,
 	flavorId: null,
 	flavorName: null,
 	libraries: [],
