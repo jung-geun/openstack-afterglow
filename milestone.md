@@ -1987,8 +1987,24 @@ sudo cat /var/log/union-overlay.log && ls /opt/layers/
   - `mount | grep overlay` 에서 `/opt/layers/merged` 확인
   - `python3.11 -c "import sys; print(sys.path)"` 에 `/opt/layers/merged/...` 포함
 
+### 30.3 추가 버그 수정 (코드 분석)
+
+- [x] `backend/app/services/library_builder.py`
+  - `_monitor_build:length=200` → `length=2000`: 콘솔 로그 잘림으로 성공 빌드를 실패 오판하는 CRITICAL 버그
+  - `_cleanup_builder_resources` 헬퍼 추출: ERROR/타임아웃 케이스 공통 정리 (share metadata + builder CephX rule revoke + VM 삭제). 기존엔 access rule이 정리 안 돼 유령 CephX user 잔류.
+- [x] `backend/app/services/manila.py`
+  - `_get_access_key`: 20회 재시도 후 빈 문자열 반환 → `RuntimeError` 발생. 빈 key가 cloud-init에 주입되면 CephFS 마운트가 반드시 실패하므로 호출부에서 인지 가능하게.
+  - `_revoke_access_rule_raw` 헬퍼 추가: key 발급 타임아웃 시 `create_access_rule`이 고아 rule 자동 revoke 후 예외 재발생.
+
+### 30.4 검증
+
+- [x] `npm run test:backend` 1369 passed (0 failed)
+- 사용자 검증 필요:
+  - 신규 VM 생성 → `ls /opt/layers/` 에 literal `{...}` 없음
+  - `mount | grep overlay` 에서 `/opt/layers/merged` 확인
+  - `python3.11 -c "import sys; print(sys.path)"` 에 `/opt/layers/merged/...` 포함
+
 ### 30.5 범위 외
 
 - 빌더 flavor 교체 (ephemeral=0) — Phase C-1: OpenStack CLI 결과 확인 후
 - CephFS 마운트 실패 근본 원인 — Phase C-3: 유저 VM overlay 로그 분석 후
-- 외부 SG 의 apt repo egress 차단 가능성 — 별도 PR.

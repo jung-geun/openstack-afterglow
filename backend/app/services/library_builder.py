@@ -486,6 +486,37 @@ def _create_builder_vm(
     return server
 
 
+async def _cleanup_builder_resources(
+    conn,
+    share_id: str,
+    server_id: str,
+    final_status: str,
+) -> None:
+    """빌드 실패/타임아웃 시 공통 정리: share 메타데이터 + builder CephX rule + VM 삭제."""
+    # 1. share 메타데이터 갱신
+    try:
+        await asyncio.to_thread(
+            manila.update_share_metadata, conn, share_id, {"union_status": final_status}
+        )
+    except Exception:
+        _logger.warning("[builder] share 메타데이터 갱신 실패 (status=%s)", final_status, exc_info=True)
+
+    # 2. builder CephX access rule 정리 (유령 user 방지)
+    try:
+        rules = await asyncio.to_thread(manila.list_access_rules, conn, share_id)
+        for rule in rules:
+            if rule.get("access_to", "").startswith("union-builder-"):
+                await asyncio.to_thread(manila.revoke_access_rule, conn, share_id, rule["id"])
+    except Exception:
+        _logger.warning("[builder] CephX builder rule 정리 실패 (share=%s)", share_id, exc_info=True)
+
+    # 3. VM 삭제
+    try:
+        await asyncio.to_thread(conn.compute.delete_server, server_id, force=True)
+    except Exception:
+        _logger.warning("[builder] VM 삭제 실패 (server=%s)", server_id, exc_info=True)
+
+
 async def _monitor_build(
     library_id: str,
     share_id: str,
@@ -514,10 +545,12 @@ async def _monitor_build(
                 _logger.info("[builder] 빌더 VM SHUTOFF 감지: %s", library_id)
 
                 # 빌드 성공 여부 콘솔 로그로 검증
+                # length=2000: cloud-init 출력 + 패키지 설치 로그가 수백 줄에 달하므로
+                # 200줄로는 "[union-builder] Build complete" 마커가 잘릴 수 있음.
                 build_success = False
                 try:
                     console_output = await asyncio.to_thread(
-                        conn.compute.get_server_console_output, server_id, length=200
+                        conn.compute.get_server_console_output, server_id, length=2000
                     )
                     log_text = ""
                     if isinstance(console_output, dict):
@@ -526,7 +559,8 @@ async def _monitor_build(
                         log_text = console_output
                     build_success = "[union-builder] Build complete" in log_text
                     if not build_success:
-                        _logger.warning("[builder] 완료 마커 없음 — 빌드 실패로 처리: %s", library_id)
+                        _logger.warning("[builder] 완료 마커 없음 — 빌드 실패로 처리: %s\n로그 마지막 500자: %s",
+                                        library_id, log_text[-500:] if log_text else "(비어있음)")
                 except Exception:
                     _logger.warning("[builder] 콘솔 로그 조회 실패, 성공으로 간주: %s", library_id, exc_info=True)
                     build_success = True
@@ -666,12 +700,7 @@ async def _monitor_build(
 
             if status == "ERROR":
                 _logger.error("[builder] 빌더 VM ERROR 상태: %s", server_id)
-                await asyncio.to_thread(
-                    manila.update_share_metadata,
-                    conn,
-                    share_id,
-                    {"union_status": "error"},
-                )
+                await _cleanup_builder_resources(conn, share_id, server_id, "error")
                 if build_db_id:
                     await _update_build_db(
                         build_db_id,
@@ -680,10 +709,6 @@ async def _monitor_build(
                         error_message="빌더 VM이 ERROR 상태로 전환됨",
                         completed=True,
                     )
-                try:
-                    await asyncio.to_thread(conn.compute.delete_server, server_id, force=True)
-                except Exception:
-                    pass
                 if library_id in _active_builds:
                     _active_builds[library_id]["status"] = "error"
                     del _active_builds[library_id]
@@ -691,12 +716,7 @@ async def _monitor_build(
 
         # 타임아웃
         _logger.error("[builder] 빌드 타임아웃 (30분): %s", library_id)
-        await asyncio.to_thread(
-            manila.update_share_metadata,
-            conn,
-            share_id,
-            {"union_status": "timeout"},
-        )
+        await _cleanup_builder_resources(conn, share_id, server_id, "timeout")
         if build_db_id:
             await _update_build_db(
                 build_db_id,
@@ -705,10 +725,6 @@ async def _monitor_build(
                 error_message="30분 내 빌드가 완료되지 않음",
                 completed=True,
             )
-        try:
-            await asyncio.to_thread(conn.compute.delete_server, server_id, force=True)
-        except Exception:
-            pass
         if library_id in _active_builds:
             del _active_builds[library_id]
 
