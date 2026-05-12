@@ -589,22 +589,45 @@ def _get_access_key(client: ManilaClient, file_storage_id: str, access_id: str, 
 
     _log = _logging.getLogger(__name__)
     max_attempts = max(1, timeout_seconds // 3)
+    # ~30초 간격으로 INFO 진행 로그를 찍어 hang 위치를 가시화한다.
+    info_interval = max(1, max_attempts // 10)
+    last_state = "?"
     for attempt in range(max_attempts):
         data = client.get(f"share-access-rules?share_id={file_storage_id}")
         rules = data.get("access_rules", [])
         for rule in rules:
-            if rule["id"] == access_id and rule.get("access_key"):
-                return rule["access_key"]
-        _log.debug(
-            "[manila] CephX key 미할당, 재시도 %d/%d (access_id=%s)",
-            attempt + 1,
-            max_attempts,
-            access_id,
-        )
+            if rule["id"] == access_id:
+                last_state = rule.get("state", "?")
+                if rule.get("access_key"):
+                    if attempt > 0:
+                        _log.info(
+                            "[manila] CephX key 획득 — %ds 경과, rule state=%s, access_id=%s",
+                            attempt * 3,
+                            last_state,
+                            access_id,
+                        )
+                    return rule["access_key"]
+                break
+        if attempt > 0 and attempt % info_interval == 0:
+            _log.info(
+                "[manila] CephX key 폴링 진행 %d/%d (~%ds 경과, rule state=%s, access_id=%s)",
+                attempt,
+                max_attempts,
+                attempt * 3,
+                last_state,
+                access_id,
+            )
+        else:
+            _log.debug(
+                "[manila] CephX key 미할당 %d/%d, rule state=%s",
+                attempt + 1,
+                max_attempts,
+                last_state,
+            )
         time.sleep(3)
     raise RuntimeError(
-        f"CephX access key 발급 타임아웃 (access_id={access_id}, share={file_storage_id}). "
-        f"Manila가 {timeout_seconds}초 내에 key를 할당하지 못했습니다."
+        f"CephX access key 발급 타임아웃 (access_id={access_id}, share={file_storage_id}, "
+        f"last_state={last_state}). Manila가 {timeout_seconds}초 내에 key를 할당하지 못했습니다."
     )
 
 
