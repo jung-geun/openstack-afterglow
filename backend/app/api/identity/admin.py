@@ -63,7 +63,7 @@ async def trigger_build(
 
     if auto_install:
         try:
-            result = await library_builder.start_build(conn, library_id)
+            result = await library_builder.start_build(library_id)
             return result
         except RuntimeError as e:
             raise HTTPException(status_code=400, detail=str(e))
