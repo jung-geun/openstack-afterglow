@@ -80,7 +80,7 @@
   // 라이브러리에 해당하는 FileStorage 찾기
   function getStorageForLibrary(lib: LibraryConfig): FileStorage | null {
     return fileStorages.find(
-      fs => fs.library_name === lib.name && fs.library_version === lib.version
+      fs => fs.library_name === lib.id && fs.library_version === lib.version
     ) ?? null;
   }
 
