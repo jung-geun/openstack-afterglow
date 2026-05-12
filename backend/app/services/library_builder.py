@@ -495,9 +495,7 @@ async def _cleanup_builder_resources(
     """빌드 실패/타임아웃 시 공통 정리: share 메타데이터 + builder CephX rule + VM 삭제."""
     # 1. share 메타데이터 갱신
     try:
-        await asyncio.to_thread(
-            manila.update_share_metadata, conn, share_id, {"union_status": final_status}
-        )
+        await asyncio.to_thread(manila.update_share_metadata, conn, share_id, {"union_status": final_status})
     except Exception:
         _logger.warning("[builder] share 메타데이터 갱신 실패 (status=%s)", final_status, exc_info=True)
 
@@ -559,8 +557,11 @@ async def _monitor_build(
                         log_text = console_output
                     build_success = "[union-builder] Build complete" in log_text
                     if not build_success:
-                        _logger.warning("[builder] 완료 마커 없음 — 빌드 실패로 처리: %s\n로그 마지막 500자: %s",
-                                        library_id, log_text[-500:] if log_text else "(비어있음)")
+                        _logger.warning(
+                            "[builder] 완료 마커 없음 — 빌드 실패로 처리: %s\n로그 마지막 500자: %s",
+                            library_id,
+                            log_text[-500:] if log_text else "(비어있음)",
+                        )
                 except Exception:
                     _logger.warning("[builder] 콘솔 로그 조회 실패, 성공으로 간주: %s", library_id, exc_info=True)
                     build_success = True

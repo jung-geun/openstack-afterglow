@@ -1511,16 +1511,23 @@ async def _prepare_prebuilt_file_storages(
         else:
             # CephFS: CephX access rule (기존 로직)
             cephx_id = f"union-ro-{instance_name}-{lib_id}"
+            # create_access_rule은 key 발급 실패 시 RuntimeError를 던지며 고아 rule을 자동 정리한다.
             rule = await asyncio.to_thread(manila.create_access_rule, svc_conn, file_storage.id, cephx_id, "ro")
+            # access_id를 즉시 추적 → rollback 시 정리 보장
             created_access_ids.append((file_storage.id, rule["access_id"]))
 
             export_paths = await asyncio.to_thread(manila.get_export_locations, svc_conn, file_storage.id)
+            if not export_paths:
+                raise RuntimeError(
+                    f"prebuilt share({lib_id}) export location을 찾을 수 없습니다. "
+                    "share가 available 상태인지 확인하세요."
+                )
             file_storages_info.append(
                 {
                     "file_storage_id": file_storage.id,
                     "name": lib_id,
                     "share_proto": file_storage.share_proto,
-                    "export_path": export_paths[0] if export_paths else "",
+                    "export_path": export_paths[0],
                     "cephx_id": cephx_id,
                     "cephx_key": rule["access_key"],
                     "nfs_export_location": file_storage.nfs_export_location or "",

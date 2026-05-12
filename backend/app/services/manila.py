@@ -586,6 +586,7 @@ def _get_access_key(client: ManilaClient, file_storage_id: str, access_id: str) 
             if rule["id"] == access_id and rule.get("access_key"):
                 return rule["access_key"]
         import logging as _logging
+
         _logging.getLogger(__name__).debug(
             "[manila] CephX key 미할당, 재시도 %d/20 (access_id=%s)", attempt + 1, access_id
         )
