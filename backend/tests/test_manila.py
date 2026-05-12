@@ -285,3 +285,87 @@ def test_settings_manila_nfs_env_override(monkeypatch):
     s = Settings()
     assert s.manila_nfs_root_squash is False
     assert s.manila_nfs_sec_flavor == "krb5"
+
+
+# ---------------------------------------------------------------------------
+# _get_access_key — timeout 기반 재시도 + RuntimeError
+# ---------------------------------------------------------------------------
+
+
+def test_get_access_key_returns_on_first_hit():
+    """첫 폴링에 key가 있으면 즉시 반환한다."""
+    from app.services.manila import _get_access_key
+
+    client = MagicMock()
+    client.get.return_value = {"access_rules": [{"id": "rule-1", "access_key": "AQTEST=="}]}
+    key = _get_access_key(client, "share-1", "rule-1", timeout_seconds=30)
+    assert key == "AQTEST=="
+    assert client.get.call_count == 1
+
+
+def test_get_access_key_retries_until_key_available():
+    """처음 몇 회는 빈 key, 이후 채워지면 정상 반환한다."""
+    from app.services.manila import _get_access_key
+
+    empty = {"access_rules": [{"id": "rule-1", "access_key": ""}]}
+    filled = {"access_rules": [{"id": "rule-1", "access_key": "AQfilled=="}]}
+    client = MagicMock()
+    client.get.side_effect = [empty, empty, filled]
+
+    with patch("time.sleep"):
+        key = _get_access_key(client, "share-1", "rule-1", timeout_seconds=30)
+
+    assert key == "AQfilled=="
+    assert client.get.call_count == 3
+
+
+def test_get_access_key_raises_on_timeout():
+    """timeout 내내 빈 key면 RuntimeError 를 발생시킨다."""
+    from app.services.manila import _get_access_key
+
+    client = MagicMock()
+    client.get.return_value = {"access_rules": [{"id": "rule-1", "access_key": ""}]}
+
+    with patch("time.sleep"):
+        try:
+            _get_access_key(client, "share-1", "rule-1", timeout_seconds=9)
+            assert False, "RuntimeError 미발생"
+        except RuntimeError as e:
+            assert "access_id=rule-1" in str(e)
+
+
+def test_get_access_key_respects_timeout_seconds():
+    """timeout_seconds=9 → max 3회(9//3) 시도 후 포기."""
+    from app.services.manila import _get_access_key
+
+    client = MagicMock()
+    client.get.return_value = {"access_rules": [{"id": "rule-1", "access_key": ""}]}
+
+    with patch("time.sleep"):
+        try:
+            _get_access_key(client, "share-1", "rule-1", timeout_seconds=9)
+        except RuntimeError:
+            pass
+    assert client.get.call_count == 3
+
+
+# ---------------------------------------------------------------------------
+# Settings — CephX key timeout 기본값
+# ---------------------------------------------------------------------------
+
+
+def test_settings_manila_cephx_key_timeout_default():
+    """manila_cephx_key_timeout_seconds 기본값은 300이다."""
+    from app.config import Settings
+
+    s = Settings()
+    assert s.manila_cephx_key_timeout_seconds == 300
+
+
+def test_settings_manila_cephx_key_timeout_env_override(monkeypatch):
+    """환경변수로 CephX timeout 을 오버라이드할 수 있다."""
+    from app.config import Settings
+
+    monkeypatch.setenv("MANILA_CEPHX_KEY_TIMEOUT_SECONDS", "600")
+    s = Settings()
+    assert s.manila_cephx_key_timeout_seconds == 600

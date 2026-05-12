@@ -268,6 +268,7 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     lines.append("# Manila NFS 설정")
     lines.append(f'manila_nfs_root_squash = {_toml_bool(os_cfg.get("manila_nfs_root_squash", True))}')
     lines.append(f'manila_nfs_sec_flavor = {_toml_str(os_cfg.get("manila_nfs_sec_flavor", "sys"))}')
+    lines.append(f'manila_cephx_key_timeout_seconds = {os_cfg.get("manila_cephx_key_timeout_seconds", 300)}')
     lines.append(f'interface = {_toml_str(os_cfg.get("interface", "internal"))}')
     lines.append("")
 

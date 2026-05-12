@@ -29,6 +29,7 @@ manila_share_type = "cephfs"
 manila_nfs_share_type = "nfstype"  # NFS 프로토콜용 share type
 manila_nfs_root_squash = true      # NFS access rule root_squash 강제 (보안 기본값)
 manila_nfs_sec_flavor = "sys"      # NFS 인증 flavor: "sys"(기본) | "krb5"(Kerberos)
+manila_cephx_key_timeout_seconds = 300  # CephX key 발급 폴링 최대 대기(초). devstack 환경에선 300 이상 권장.
 
 # Union Mount 전용 service 프로젝트 UUID (Manila share + Builder VM이 이 프로젝트에 생성됨)
 # 미설정 시 prebuilt 라이브러리 빌드/마운트 경로에서 RuntimeError 발생

@@ -506,7 +506,13 @@ def create_access_rule(
     access_key = ""
     if access_type == "cephx":
         try:
-            access_key = _get_access_key(client, file_storage_id, data["id"])
+            from app.config import get_settings as _get_settings
+
+            _timeout = _get_settings().manila_cephx_key_timeout_seconds
+        except Exception:
+            _timeout = 300
+        try:
+            access_key = _get_access_key(client, file_storage_id, data["id"], _timeout)
         except RuntimeError:
             # key 발급 타임아웃 → 생성된 고아 rule 자동 정리 후 예외 재발생
             try:
@@ -572,28 +578,33 @@ def _revoke_access_rule_raw(client: ManilaClient, file_storage_id: str, access_i
     client.post(f"shares/{file_storage_id}/action", {"deny_access": {"access_id": access_id}})
 
 
-def _get_access_key(client: ManilaClient, file_storage_id: str, access_id: str) -> str:
+def _get_access_key(client: ManilaClient, file_storage_id: str, access_id: str, timeout_seconds: int = 300) -> str:
     """access rule 에서 CephX secret key 추출 (Manila API v2.45+).
 
-    Manila는 access rule 생성 직후 key가 빈 문자열일 수 있으므로 최대 20회(약 60초) 재시도.
+    Manila는 access rule 생성 직후 key가 빈 문자열일 수 있으므로 timeout_seconds 동안 재시도.
     모두 실패하면 RuntimeError 발생 — 빈 key로 cloud-init에 주입되면 CephFS 마운트가
     반드시 실패하므로 호출부에서 인지할 수 있도록 예외를 선호한다.
     """
-    for attempt in range(20):
+    import logging as _logging
+
+    _log = _logging.getLogger(__name__)
+    max_attempts = max(1, timeout_seconds // 3)
+    for attempt in range(max_attempts):
         data = client.get(f"share-access-rules?share_id={file_storage_id}")
         rules = data.get("access_rules", [])
         for rule in rules:
             if rule["id"] == access_id and rule.get("access_key"):
                 return rule["access_key"]
-        import logging as _logging
-
-        _logging.getLogger(__name__).debug(
-            "[manila] CephX key 미할당, 재시도 %d/20 (access_id=%s)", attempt + 1, access_id
+        _log.debug(
+            "[manila] CephX key 미할당, 재시도 %d/%d (access_id=%s)",
+            attempt + 1,
+            max_attempts,
+            access_id,
         )
         time.sleep(3)
     raise RuntimeError(
         f"CephX access key 발급 타임아웃 (access_id={access_id}, share={file_storage_id}). "
-        "Manila가 60초 내에 key를 할당하지 못했습니다."
+        f"Manila가 {timeout_seconds}초 내에 key를 할당하지 못했습니다."
     )
 
 

@@ -229,14 +229,22 @@ async def start_build(
 
     # 2. CephX access rule 생성
     cephx_user = f"union-builder-{library_id}"
-    access_rule = await asyncio.to_thread(
-        manila.create_access_rule,
-        conn,
-        share_id,
-        cephx_user,
-        "rw",
-        "cephx",
-    )
+    try:
+        access_rule = await asyncio.to_thread(
+            manila.create_access_rule,
+            conn,
+            share_id,
+            cephx_user,
+            "rw",
+            "cephx",
+        )
+    except Exception:
+        _logger.error("[builder] CephX key 발급 실패 — share %s 회수", share_id)
+        try:
+            await asyncio.to_thread(manila.delete_file_storage, conn, share_id)
+        except Exception:
+            pass
+        raise
     cephx_secret = access_rule["access_key"]
     _logger.info("[builder] CephX access rule 생성: user=%s", cephx_user)
 

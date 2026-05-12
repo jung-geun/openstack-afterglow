@@ -81,6 +81,7 @@ def _load_toml() -> dict:
     flat["os_manila_nfs_share_type"] = ost.get("manila_nfs_share_type", "nfstype")
     flat["manila_nfs_root_squash"] = ost.get("manila_nfs_root_squash", True)
     flat["manila_nfs_sec_flavor"] = ost.get("manila_nfs_sec_flavor", "sys")
+    flat["manila_cephx_key_timeout_seconds"] = ost.get("manila_cephx_key_timeout_seconds", 300)
     flat["ceph_monitors"] = ost.get("ceph_monitors", "")
     flat["os_service_project_id"] = ost.get("service_project_id", "")
 
@@ -266,6 +267,7 @@ class Settings(BaseSettings):
     os_manila_nfs_share_type: str = "nfstype"
     manila_nfs_root_squash: bool = True  # NFS access rule root_squash 강제 (보안 기본값)
     manila_nfs_sec_flavor: str = "sys"  # NFS 인증 flavor: "sys"(기본) | "krb5"(Kerberos)
+    manila_cephx_key_timeout_seconds: int = 300  # CephX key 발급 폴링 최대 대기 (초)
 
     # Ceph 모니터 (cloud-init CephFS 마운트용)
     ceph_monitors: str = ""
