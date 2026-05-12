@@ -39,7 +39,7 @@ async def list_volumes(conn: openstack.connection.Connection = Depends(get_os_co
     pid = conn._afterglow_project_id
     try:
         return await cached_call(
-            f"afterglow:cinder:{pid}:volumes",
+            f"afterglow:cinder:{pid}:volumes:v2",
             ttl_fast(),
             lambda: [v.model_dump() for v in cinder.list_volumes(conn)],
             refresh=refresh,

@@ -313,9 +313,12 @@ def delete_volume_transfer(conn: openstack.connection.Connection, transfer_id: s
 
 
 def _vol_to_info(vol) -> VolumeInfo:
-    raw_bootable = getattr(vol, "bootable", False)
+    # Use original API field names (bootable, volume_image_metadata) since the SDK
+    # Python alias for bootable is `is_bootable`, not `bootable`.
+    raw = vol.to_dict(original_names=True, computed=False) if hasattr(vol, "to_dict") else {}
+    raw_bootable = raw.get("bootable", getattr(vol, "is_bootable", getattr(vol, "bootable", False)))
     bootable = raw_bootable if isinstance(raw_bootable, bool) else str(raw_bootable).lower() == "true"
-    raw_vim = getattr(vol, "volume_image_metadata", None)
+    raw_vim = raw.get("volume_image_metadata", getattr(vol, "volume_image_metadata", None))
     volume_image_metadata = raw_vim if isinstance(raw_vim, dict) else None
     return VolumeInfo(
         id=vol.id,

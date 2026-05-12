@@ -3,9 +3,47 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from openstack.block_storage.v3.volume import Volume
 
 from app.models.compute import InstanceInfo
 from app.models.storage import VolumeInfo
+from app.services.cinder import _vol_to_info
+
+
+def test_vol_to_info_reads_bootable_via_sdk_alias():
+    """openstacksdk는 Python alias `is_bootable`을 씀 — to_dict(original_names=True)로 API 필드 `bootable`을 읽는지 검증."""
+    vol = Volume.new(
+        **{
+            "id": "vol-x",
+            "name": "test-boot",
+            "status": "available",
+            "size": 30,
+            "volume_type": "ceph_hdd",
+            "attachments": [],
+            "bootable": "true",
+            "volume_image_metadata": {"os_distro": "ubuntu", "os_version": "22.04", "image_name": "ubuntu-22.04"},
+        }
+    )
+    info = _vol_to_info(vol)
+    assert info.bootable is True
+    assert info.volume_image_metadata is not None
+    assert info.volume_image_metadata["os_distro"] == "ubuntu"
+
+
+def test_vol_to_info_non_bootable_volume():
+    vol = Volume.new(
+        **{
+            "id": "vol-y",
+            "name": "data-vol",
+            "status": "in-use",
+            "size": 10,
+            "volume_type": "ceph_hdd",
+            "attachments": [],
+        }
+    )
+    info = _vol_to_info(vol)
+    assert info.bootable is False
+    assert info.volume_image_metadata is None
 
 
 def _make_boot_vol(status: str = "available", bootable: bool = True) -> VolumeInfo:
