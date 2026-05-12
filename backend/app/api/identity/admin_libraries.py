@@ -172,7 +172,7 @@ async def trigger_library_build(
 
     if req.auto_install:
         try:
-            result = await library_builder.start_build(req.library_id)
+            result = await library_builder.queue_build(req.library_id)
             await rec(token_info, None, resource_type="library", action="build", resource_id=req.library_id)
             return result
         except RuntimeError as e:
@@ -185,7 +185,7 @@ async def trigger_library_build(
                 resource_id=req.library_id,
                 error_message=str(e)[:500],
             )
-            status_code = 409 if "이미 빌드 중" in str(e) else 400
+            status_code = 409 if "이미" in str(e) else 400
             raise HTTPException(status_code=status_code, detail=str(e))
     else:
         # auto_install=False: 빈 share 생성만 수행 (수동 설치용) — service 프로젝트에 생성

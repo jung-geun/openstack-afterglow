@@ -63,10 +63,12 @@ async def trigger_build(
 
     if auto_install:
         try:
-            result = await library_builder.start_build(library_id)
+            result = await library_builder.queue_build(library_id)
             return result
         except RuntimeError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+            msg = str(e)
+            status_code = 409 if "이미" in msg else 400
+            raise HTTPException(status_code=status_code, detail=msg)
 
     file_storage = manila.create_file_storage(
         conn,
