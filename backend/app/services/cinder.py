@@ -67,6 +67,10 @@ def force_delete_volume(conn: openstack.connection.Connection, volume_id: str) -
     )
 
 
+def extend_volume(conn: openstack.connection.Connection, volume_id: str, new_size: int) -> None:
+    conn.block_storage.extend_volume(volume_id, new_size)
+
+
 def get_volume(conn: openstack.connection.Connection, volume_id: str) -> VolumeInfo:
     vol = conn.block_storage.get_volume(volume_id)
     return _vol_to_info(vol)

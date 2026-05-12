@@ -556,6 +556,9 @@ Step 5: 요약 & 배포
 - [x] 5.3 볼륨 백업 및 복구
   - [x] Cinder upper 볼륨의 정기 백업 스케줄링 — `auto_backup.py` + `_auto_backup_loop`
   - [x] 백업에서 복구 시 OverlayFS 재구성 자동화 — `existing_upper_volume_id` + workdir 정리
+  - [x] 볼륨 목록 ActionMenu 수동 백업 생성 — `VolumeBackupModal.svelte` + `POST /api/volumes/backups` (기존 endpoint 재사용)
+  - [x] 볼륨 목록 ActionMenu 스냅샷 생성 — `VolumeSnapshotModal.svelte` + `POST /api/volume-snapshots` (기존 endpoint 재사용)
+  - [x] 사용자용 볼륨 용량 확장 — `POST /api/volumes/{id}/extend` + `cinder.extend_volume` + `VolumeExtendModal.svelte` (available + in-use 모두 허용, 단위 테스트 7건)
 
 - [x] 5.4 VM 스케일링 지원
   - [x] 인스턴스 resize (플레이버 변경) — `POST /api/admin/instances/{id}/resize`, `/revert-resize` 엔드포인트 + `nova.resize_server`/`revert_resize_server` 서비스 함수 추가. `InstanceDetailPanel`에 resize 모달(flavor 선택) + VERIFY_RESIZE 상태에서 '되돌리기' 버튼 추가. 단위 테스트 4건 (`test_admin_resize.py`)
