@@ -123,27 +123,6 @@
     }
   }
 
-  // 빌드 상태에 따른 StatusChip 색상 매핑
-  function statusLabel(status: string): string {
-    const map: Record<string, string> = {
-      ready: 'ready',
-      building: 'building',
-      failed: 'error',
-      none: 'none',
-    };
-    return map[status] ?? status;
-  }
-
-  function statusText(status: string): string {
-    const map: Record<string, string> = {
-      ready: '빌드 완료',
-      building: '빌드 중',
-      failed: '빌드 실패',
-      none: '미빌드',
-    };
-    return map[status] ?? status;
-  }
-
   // 의존성 그래프 SVG 계산
   let showGraph = $state(false);
 
@@ -360,7 +339,7 @@
               <p class="text-xs text-gray-500 mt-0.5">v{lib.version}</p>
             </div>
             <div class="flex flex-col items-end gap-1">
-              <StatusChip status={statusLabel(buildStatus)} label={statusText(buildStatus)} />
+              <StatusChip status={buildStatus} />
               <div class="flex items-center gap-1 flex-wrap justify-end">
                 <span class="text-xs text-gray-600">{lib.share_proto ?? 'CEPHFS'}</span>
                 <span class="px-1.5 py-0.5 text-xs rounded {lib.visibility === 'private' ? 'bg-gray-700 text-gray-400' : 'bg-green-900/30 text-green-500'}">

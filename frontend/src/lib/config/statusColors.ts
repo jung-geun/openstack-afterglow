@@ -78,6 +78,12 @@ export const STATUS_STYLES: Record<string, StatusStyle> = {
   SHELVED_OFFLOADED:   { tone: 'neutral' },
   reserved:            { tone: 'neutral' },
   RESERVED:            { tone: 'neutral' },
+
+  // 라이브러리 빌드 의미 상태
+  ready:               { tone: 'success', label: '빌드 완료' },
+  building:            { tone: 'warning', pulse: true, label: '빌드 중' },
+  failed:              { tone: 'danger',  label: '빌드 실패' },
+  none:                { tone: 'neutral', label: '미빌드' },
 };
 
 const FALLBACK: StatusStyle = { tone: 'neutral' };
