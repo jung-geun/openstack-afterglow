@@ -16,6 +16,11 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import type { Volume } from '$lib/types/resources';
 
+	interface Props {
+		adminMode?: boolean;
+	}
+	let { adminMode = false }: Props = $props();
+
 	const TOTAL_STEPS = 6;
 
 	interface ProgressMessage {
@@ -88,53 +93,117 @@
 	let elapsedSeconds = $state<number | null>(null);
 	let loading = $state(false);
 
+	// admin 모드 전용 상태
+	interface ProjectInfo { id: string; name: string; }
+	let adminProjects = $state<ProjectInfo[]>([]);
+	let adminProjectsLoading = $state(false);
+	// $wizard.targetProjectId가 이미 설정된 경우(볼륨 → VM 진입) 그대로 사용
+	let adminSelectedProjectId = $state<string | null>(null);
+	let adminSelectedProjectName = $state<string | null>(null);
+
+	// admin 모드에서 프로젝트 목록 로드
+	async function loadAdminProjects() {
+		if (!adminMode) return;
+		adminProjectsLoading = true;
+		const token = $auth.token ?? undefined;
+		const projectId = $auth.projectId ?? undefined;
+		try {
+			const res = await api.get<any>('/api/admin/projects', token, projectId);
+			adminProjects = (Array.isArray(res) ? res : res?.projects ?? []).map((p: any) => ({
+				id: p.id,
+				name: p.name,
+			}));
+		} catch {
+			adminProjects = [];
+		} finally {
+			adminProjectsLoading = false;
+		}
+	}
+
+	function selectAdminProject(id: string, name: string) {
+		adminSelectedProjectId = id;
+		adminSelectedProjectName = name;
+		wizard.update(w => ({ ...w, networkId: null, networkName: null, securityGroups: [], keyName: null }));
+		loadData();
+	}
+
+	// admin 모드에서 선택된 프로젝트 기반으로 admin 엔드포인트 사용
 	async function loadData() {
 		loading = true;
 		loadError = '';
 		const token = $auth.token ?? undefined;
 		const projectId = $auth.projectId ?? undefined;
 		try {
-			[images, flavors, libraries, networks, keypairs, volumes] = await Promise.all([
-				api.get<any[]>('/api/images', token, projectId),
-				api.get<any[]>('/api/flavors', token, projectId),
-				api.get<any[]>('/api/libraries', token, projectId),
-				api.get<NetworkInfo[]>('/api/networks', token, projectId),
-				api.get<KeypairInfo[]>('/api/keypairs', token, projectId),
-				api.get<Volume[]>('/api/volumes', token, projectId),
-			]);
-			// 보안 그룹, AZ는 비동기 로드 (실패해도 무시)
-			try {
-				securityGroups = await api.get<SecurityGroupInfo[]>('/api/security-groups', token, projectId);
-			} catch { securityGroups = []; }
-			try {
-				availabilityZones = await api.get<AvailabilityZoneInfo[]>('/api/instances/availability-zones', token, projectId);
-			} catch { availabilityZones = []; }
-
-			if (keypairs.length === 1 && !$wizard.keyName) {
-				wizard.update(w => ({ ...w, keyName: keypairs[0].name }));
-			}
-			if (networks.length > 0 && !$wizard.networkId) {
-				let selectedNet = networks[0];
+			if (adminMode && adminSelectedProjectId) {
+				const pid = adminSelectedProjectId;
+				[images, flavors, libraries] = await Promise.all([
+					api.get<any[]>('/api/images', token, projectId),
+					api.get<any[]>('/api/flavors', token, projectId),
+					api.get<any[]>('/api/libraries', token, projectId),
+				]);
+				// admin 전용 프로젝트 리소스
+				[networks, volumes] = await Promise.all([
+					api.get<NetworkInfo[]>(`/api/admin/instances/networks-for-project?project_id=${pid}`, token, projectId).catch(() => [] as NetworkInfo[]),
+					api.get<Volume[]>(`/api/admin/instances/volumes-for-project?project_id=${pid}`, token, projectId).catch(() => [] as Volume[]),
+				]);
+				keypairs = []; // admin은 대상 프로젝트 키페어 조회 불가
 				try {
-					const defaultRecord = await api.get<{ network_id: string }>('/api/networks/default', token, projectId);
-					defaultNetworkId = defaultRecord.network_id;
-					const found = networks.find(n => n.id === defaultRecord.network_id);
-					if (found) selectedNet = found;
-				} catch {
-					const byName = networks.find(n => n.name === 'Default');
-					if (byName) selectedNet = byName;
-				}
-				wizard.update(w => ({ ...w, networkId: selectedNet.id, networkName: selectedNet.name }));
-			} else if ($wizard.networkId) {
+					securityGroups = await api.get<SecurityGroupInfo[]>(
+						`/api/admin/instances/security-groups-for-project?project_id=${pid}`,
+						token, projectId,
+					);
+				} catch { securityGroups = []; }
+				availabilityZones = [];
 				try {
-					const defaultRecord = await api.get<{ network_id: string }>('/api/networks/default', token, projectId);
-					defaultNetworkId = defaultRecord.network_id;
+					availabilityZones = await api.get<AvailabilityZoneInfo[]>('/api/instances/availability-zones', token, projectId);
 				} catch { /* 무시 */ }
+			} else {
+				[images, flavors, libraries, networks, keypairs, volumes] = await Promise.all([
+					api.get<any[]>('/api/images', token, projectId),
+					api.get<any[]>('/api/flavors', token, projectId),
+					api.get<any[]>('/api/libraries', token, projectId),
+					api.get<NetworkInfo[]>('/api/networks', token, projectId),
+					api.get<KeypairInfo[]>('/api/keypairs', token, projectId),
+					api.get<Volume[]>('/api/volumes', token, projectId),
+				]);
+				try {
+					securityGroups = await api.get<SecurityGroupInfo[]>('/api/security-groups', token, projectId);
+				} catch { securityGroups = []; }
+				try {
+					availabilityZones = await api.get<AvailabilityZoneInfo[]>('/api/instances/availability-zones', token, projectId);
+				} catch { availabilityZones = []; }
+
+				if (keypairs.length === 1 && !$wizard.keyName) {
+					wizard.update(w => ({ ...w, keyName: keypairs[0].name }));
+				}
+				if (networks.length > 0 && !$wizard.networkId) {
+					let selectedNet = networks[0];
+					try {
+						const defaultRecord = await api.get<{ network_id: string }>('/api/networks/default', token, projectId);
+						defaultNetworkId = defaultRecord.network_id;
+						const found = networks.find(n => n.id === defaultRecord.network_id);
+						if (found) selectedNet = found;
+					} catch {
+						const byName = networks.find(n => n.name === 'Default');
+						if (byName) selectedNet = byName;
+					}
+					wizard.update(w => ({ ...w, networkId: selectedNet.id, networkName: selectedNet.name }));
+				} else if ($wizard.networkId) {
+					try {
+						const defaultRecord = await api.get<{ network_id: string }>('/api/networks/default', token, projectId);
+						defaultNetworkId = defaultRecord.network_id;
+					} catch { /* 무시 */ }
+				}
 			}
 			// 보안 그룹 기본 선택 (default)
 			if (securityGroups.length > 0 && $wizard.securityGroups.length === 0) {
 				const defaultSg = securityGroups.find(sg => sg.name === 'default');
 				if (defaultSg) wizard.update(w => ({ ...w, securityGroups: [defaultSg.name] }));
+			}
+			// admin 모드: 네트워크 기본 선택
+			if (adminMode && networks.length > 0 && !$wizard.networkId) {
+				const net = networks[0];
+				wizard.update(w => ({ ...w, networkId: net.id, networkName: net.name }));
 			}
 		} catch (e) {
 			loadError = e instanceof ApiError ? `데이터 로드 실패 (${e.status})` : '서버 오류';
@@ -144,12 +213,29 @@
 	}
 
 	onMount(() => {
-		loadData();
+		if (adminMode) {
+			// targetProjectId가 이미 설정된 경우 (볼륨에서 진입)
+			if ($wizard.targetProjectId) {
+				adminSelectedProjectId = $wizard.targetProjectId;
+				const found = adminProjects.find(p => p.id === $wizard.targetProjectId);
+				adminSelectedProjectName = found?.name ?? $wizard.targetProjectId;
+				loadData();
+			}
+			loadAdminProjects();
+		} else {
+			loadData();
+		}
 	});
 
 	function handleReset() {
 		resetWizard();
-		loadData();
+		adminSelectedProjectId = null;
+		adminSelectedProjectName = null;
+		if (adminMode) {
+			loadAdminProjects();
+		} else {
+			loadData();
+		}
 	}
 
 	function nextStep() {
@@ -260,13 +346,14 @@
 		return parts.join(' · ');
 	});
 
+	// admin 모드에서는 키페어 없이도 배포 가능
 	let canNext = $derived((() => {
 		switch ($wizard.step) {
 			case 1: return $wizard.bootSource === 'volume' ? !!$wizard.bootVolumeId : !!$wizard.imageId;
 			case 2: return !!$wizard.flavorId;
 			case 3: return true;
 			case 4: return true;
-			case 5: return !!$wizard.instanceName.trim() && !!$wizard.keyName;
+			case 5: return !!$wizard.instanceName.trim() && (adminMode || !!$wizard.keyName);
 			case 6: return !!$wizard.instanceName.trim();
 			default: return false;
 		}
@@ -287,28 +374,37 @@
 		if ($auth.token) headers['X-Auth-Token'] = $auth.token;
 		if ($auth.projectId) headers['X-Project-Id'] = $auth.projectId;
 
+		const endpoint = adminMode
+			? `${baseUrl}/api/admin/instances/async`
+			: `${baseUrl}/api/instances/async`;
+
+		const body: Record<string, unknown> = {
+			name: $wizard.instanceName,
+			...($wizard.bootSource === 'volume'
+				? { boot_volume_id: $wizard.bootVolumeId }
+				: {
+					image_id: $wizard.imageId,
+					boot_volume_size_gb: $wizard.bootVolumeSizeGb,
+					delete_boot_volume_on_termination: $wizard.deleteBootVolumeOnTermination,
+				}),
+			flavor_id: $wizard.flavorId,
+			libraries: $wizard.libraries,
+			strategy: $wizard.strategy,
+			network_id: $wizard.networkId,
+			key_name: $wizard.keyName || null,
+			availability_zone: $wizard.availabilityZone,
+			security_groups: $wizard.securityGroups,
+			userdata: $wizard.cloudInit || null,
+		};
+		if (adminMode && adminSelectedProjectId) {
+			body.project_id = adminSelectedProjectId;
+		}
+
 		try {
-			const response = await fetch(`${baseUrl}/api/instances/async`, {
+			const response = await fetch(endpoint, {
 				method: 'POST',
 				headers,
-				body: JSON.stringify({
-					name: $wizard.instanceName,
-					...($wizard.bootSource === 'volume'
-						? { boot_volume_id: $wizard.bootVolumeId }
-						: {
-							image_id: $wizard.imageId,
-							boot_volume_size_gb: $wizard.bootVolumeSizeGb,
-							delete_boot_volume_on_termination: $wizard.deleteBootVolumeOnTermination,
-						}),
-					flavor_id: $wizard.flavorId,
-					libraries: $wizard.libraries,
-					strategy: $wizard.strategy,
-					network_id: $wizard.networkId,
-					key_name: $wizard.keyName,
-					availability_zone: $wizard.availabilityZone,
-					security_groups: $wizard.securityGroups,
-					userdata: $wizard.cloudInit || null,
-				})
+				body: JSON.stringify(body),
 			});
 
 			if (!response.ok) {
@@ -342,12 +438,13 @@
 							}
 
 							if (data.step === 'completed') {
-								const instanceId = data.instance_id;
 								toast.success(`인스턴스 생성 완료`);
 								setTimeout(() => {
 									resetWizard();
+									adminSelectedProjectId = null;
+									adminSelectedProjectName = null;
 									closeWizard();
-									goto(instanceId ? `/dashboard/compute/instances/${instanceId}` : '/dashboard');
+									goto(adminMode ? '/admin/instances' : '/dashboard');
 								}, 1000);
 								return;
 							}
@@ -381,11 +478,57 @@
 		5: '설정',
 		6: '배포',
 	};
+
+	// admin 모드: 프로젝트 미선택 상태
+	let needsProjectSelect = $derived(adminMode && !adminSelectedProjectId);
 </script>
 
 <SlidePanel onClose={closeWizard} width="w-full md:w-[75vw] max-w-4xl">
 	<div class="p-4 md:p-8">
-		{#if loading}
+		{#if needsProjectSelect}
+			<!-- admin 모드: 프로젝트 선택 -->
+			<div class="flex items-start justify-between mb-6">
+				<div>
+					<h1 class="text-xl font-bold text-white">VM 생성 <span class="text-sm font-normal text-amber-400 ml-1">관리자</span></h1>
+					<p class="text-sm text-gray-500 mt-0.5">대상 프로젝트 선택</p>
+				</div>
+				<button
+					onclick={closeWizard}
+					class="text-gray-500 hover:text-white transition-colors p-1 rounded hover:bg-gray-800"
+					aria-label="닫기"
+				>
+					<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+					</svg>
+				</button>
+			</div>
+			<p class="text-sm text-gray-400 mb-4">VM을 생성할 프로젝트를 선택하세요. 선택한 프로젝트의 네트워크, 볼륨, 보안 그룹을 사용합니다.</p>
+			{#if adminProjectsLoading}
+				<div class="flex items-center justify-center py-10">
+					<LoadingSpinner size="md" color="blue">프로젝트 로드 중...</LoadingSpinner>
+				</div>
+			{:else if adminProjects.length === 0}
+				<div class="text-center py-10 text-gray-500 text-sm">프로젝트 목록을 불러올 수 없습니다.</div>
+			{:else}
+				<div class="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
+					{#each adminProjects as proj}
+						<button
+							onclick={() => selectAdminProject(proj.id, proj.name)}
+							class="w-full text-left px-4 py-3 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-gray-500 transition-colors"
+						>
+							<div class="text-white text-sm font-medium">{proj.name}</div>
+							<div class="text-gray-500 text-xs font-mono mt-0.5">{proj.id}</div>
+						</button>
+					{/each}
+				</div>
+			{/if}
+			<div class="flex justify-start mt-6 pt-4 border-t border-gray-800">
+				<button
+					onclick={closeWizard}
+					class="px-4 py-2 text-sm text-gray-400 hover:text-white border border-gray-700 rounded-lg hover:border-gray-500 transition-colors"
+				>취소</button>
+			</div>
+		{:else if loading}
 			<div class="flex items-center justify-center py-16">
 				<LoadingSpinner size="lg" color="blue">데이터 로드 중...</LoadingSpinner>
 			</div>
@@ -414,7 +557,12 @@
 			<!-- 헤더 -->
 			<div class="flex items-start justify-between mb-6">
 				<div>
-					<h1 class="text-xl font-bold text-white">VM 생성</h1>
+					<h1 class="text-xl font-bold text-white">
+						VM 생성
+						{#if adminMode}
+							<span class="text-sm font-normal text-amber-400 ml-1">관리자 · {adminSelectedProjectName ?? adminSelectedProjectId}</span>
+						{/if}
+					</h1>
 					<p class="text-sm text-gray-500 mt-0.5">STEP {$wizard.step} / {TOTAL_STEPS} · {stepSubtitles[$wizard.step]}</p>
 				</div>
 				<div class="flex items-center gap-3">
@@ -591,20 +739,28 @@
 							</select>
 						</div>
 						<div>
-							<label for="create-keypair" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">키페어</label>
-							<select
-								id="create-keypair"
-								value={$wizard.keyName ?? ''}
-								onchange={e => wizard.update(w => ({ ...w, keyName: (e.target as HTMLSelectElement).value || null }))}
-								class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
-							>
-								<option value="">키페어 선택</option>
-								{#each keypairs as kp}
-									<option value={kp.name}>{kp.name}</option>
-								{/each}
-							</select>
-							{#if keypairs.length === 0}
-								<p class="text-xs text-amber-400 mt-1">등록된 키페어가 없습니다.</p>
+							{#if adminMode}
+								<label class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">키페어</label>
+								<div class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-gray-500 text-sm">
+									없음 (관리자 생성 — 콘솔 비밀번호 사용)
+								</div>
+								<p class="text-xs text-amber-400/80 mt-1">admin 모드에서는 대상 프로젝트의 키페어에 접근할 수 없습니다.</p>
+							{:else}
+								<label for="create-keypair" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">키페어</label>
+								<select
+									id="create-keypair"
+									value={$wizard.keyName ?? ''}
+									onchange={e => wizard.update(w => ({ ...w, keyName: (e.target as HTMLSelectElement).value || null }))}
+									class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
+								>
+									<option value="">키페어 선택</option>
+									{#each keypairs as kp}
+										<option value={kp.name}>{kp.name}</option>
+									{/each}
+								</select>
+								{#if keypairs.length === 0}
+									<p class="text-xs text-amber-400 mt-1">등록된 키페어가 없습니다.</p>
+								{/if}
 							{/if}
 						</div>
 					</div>
