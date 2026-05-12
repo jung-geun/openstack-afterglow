@@ -94,11 +94,17 @@
 				</label>
 			</div>
 			<div class="flex items-center gap-2">
-				<input type="checkbox" id="snap-force" bind:checked={force} class="rounded border-gray-600" />
+				<input
+					type="checkbox"
+					id="snap-force"
+					bind:checked={force}
+					disabled={volume.status === 'in-use'}
+					class="rounded border-gray-600 disabled:opacity-60"
+				/>
 				<label for="snap-force" class="text-sm text-gray-300">
 					연결된 볼륨 강제 스냅샷 (force)
 					{#if volume.status === 'in-use'}
-						<span class="ml-1 text-xs text-amber-400">— 연결된 볼륨, 권장</span>
+						<span class="ml-1 text-xs text-amber-400">— 사용 중인 볼륨은 필수</span>
 					{/if}
 				</label>
 			</div>
