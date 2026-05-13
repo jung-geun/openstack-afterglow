@@ -21,10 +21,19 @@
 		available: number;
 	}
 
-	let { flavors, selectedId, onSelect }: {
+	interface QuotaPair { limit: number; in_use: number; }
+	interface FlavorQuotaSummary {
+		instances?: QuotaPair;
+		cores?: QuotaPair;
+		ram?: QuotaPair;       // MB
+		gigabytes?: QuotaPair; // GB
+	}
+
+	let { flavors, selectedId, onSelect, quota }: {
 		flavors: FlavorInfo[];
 		selectedId: string | null;
 		onSelect: (id: string, name: string) => void;
+		quota?: FlavorQuotaSummary | null;
 	} = $props();
 
 	let gpuAvailability = $state<GpuTypeAvailability[]>([]);
@@ -146,6 +155,34 @@
 		return reqs.map(r => `${r.model} × ${r.count}`).join(', ');
 	}
 
+	function quotaRemaining(p?: QuotaPair): number {
+		if (!p) return -1;
+		if (p.limit < 0) return -1;
+		return Math.max(0, p.limit - p.in_use);
+	}
+
+	function quotaText(p?: QuotaPair, suffix = ''): string {
+		if (!p) return '-';
+		if (p.limit < 0) return '∞';
+		return `${Math.max(0, p.limit - p.in_use)}${suffix}`;
+	}
+
+	function quotaTitle(p?: QuotaPair, label = ''): string {
+		if (!p) return label;
+		const limit = p.limit < 0 ? '∞' : p.limit;
+		return `${label} 사용 ${p.in_use} / ${limit}`;
+	}
+
+	const selectedFlavor = $derived(flavors.find(f => f.id === selectedId));
+
+	const flavorChipClass = (remaining: number, requested: number) => {
+		if (remaining < 0) return 'bg-gray-800/60 text-gray-300 border border-gray-700';
+		if (requested > 0 && remaining - requested < 0) return 'bg-red-900/40 text-red-300 border border-red-800/50';
+		if (remaining === 0) return 'bg-red-900/40 text-red-300 border border-red-800/50';
+		if (requested > 0) return 'bg-yellow-900/30 text-yellow-300 border border-yellow-800/40';
+		return 'bg-green-900/30 text-green-300 border border-green-800/40';
+	};
+
 	function networkBandwidth(f: FlavorInfo): string {
 		const bw = f.extra_specs?.['quota:vif_outbound_peak'] ?? f.extra_specs?.['hw:bandwidth'] ?? '';
 		if (bw) return `${bw} Gbps`;
@@ -194,6 +231,78 @@
 		class="w-full bg-gray-900 border border-gray-800 text-gray-200 rounded-lg pl-9 pr-3 py-2 text-sm outline-none focus:border-gray-600 placeholder-gray-600"
 	/>
 </div>
+
+<!-- 프로젝트 quota 배너 -->
+{#if quota}
+	{@const reqVm = selectedFlavor ? 1 : 0}
+	{@const reqCpu = selectedFlavor?.vcpus ?? 0}
+	{@const reqRamMb = selectedFlavor?.ram ?? 0}
+	{@const reqDiskGb = selectedFlavor?.disk ?? 0}
+	{@const remVm = quotaRemaining(quota.instances)}
+	{@const remCpu = quotaRemaining(quota.cores)}
+	{@const remRamMb = quotaRemaining(quota.ram)}
+	{@const remDiskGb = quotaRemaining(quota.gigabytes)}
+	<div class="mb-4 p-3 rounded-lg bg-gray-800/60 border border-gray-700">
+		<div class="text-xs text-gray-400 mb-2">
+			프로젝트 잔여 quota
+			{#if selectedFlavor}<span class="text-blue-400">(선택 flavor 반영)</span>{/if}
+		</div>
+		<div class="flex flex-wrap gap-2">
+			<span
+				class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs {flavorChipClass(remVm, reqVm)}"
+				title={quotaTitle(quota.instances, 'VM 인스턴스')}
+			>
+				<span class="font-medium">VM</span>
+				{#if reqVm > 0 && remVm >= 0}
+					<span class="opacity-70">{remVm - reqVm}/{quota.instances?.limit}</span>
+					<span class="opacity-50">(-{reqVm})</span>
+				{:else}
+					<span class="opacity-70">{quotaText(quota.instances)}</span>
+				{/if}
+			</span>
+			<span
+				class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs {flavorChipClass(remCpu, reqCpu)}"
+				title={quotaTitle(quota.cores, 'vCPU')}
+			>
+				<span class="font-medium">vCPU</span>
+				{#if reqCpu > 0 && remCpu >= 0}
+					<span class="opacity-70">{remCpu - reqCpu}/{quota.cores?.limit}</span>
+					<span class="opacity-50">(-{reqCpu})</span>
+				{:else}
+					<span class="opacity-70">{quotaText(quota.cores)}</span>
+				{/if}
+			</span>
+			<span
+				class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs {flavorChipClass(remRamMb, reqRamMb)}"
+				title={quotaTitle(quota.ram, 'RAM (MB)')}
+			>
+				<span class="font-medium">RAM</span>
+				{#if reqRamMb > 0 && remRamMb >= 0}
+					<span class="opacity-70">{Math.floor((remRamMb - reqRamMb) / 1024)}GB / {Math.floor((quota.ram?.limit ?? 0) / 1024)}GB</span>
+					<span class="opacity-50">(-{reqRamMb >= 1024 ? Math.round(reqRamMb / 1024) + 'GB' : reqRamMb + 'MB'})</span>
+				{:else if remRamMb < 0}
+					<span class="opacity-70">∞</span>
+				{:else}
+					<span class="opacity-70">{Math.floor(remRamMb / 1024)}GB</span>
+				{/if}
+			</span>
+			<span
+				class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs {flavorChipClass(remDiskGb, reqDiskGb)}"
+				title={quotaTitle(quota.gigabytes, '볼륨 디스크 (GB)')}
+			>
+				<span class="font-medium">DISK</span>
+				{#if reqDiskGb > 0 && remDiskGb >= 0}
+					<span class="opacity-70">{remDiskGb - reqDiskGb}GB / {quota.gigabytes?.limit}GB</span>
+					<span class="opacity-50">(-{reqDiskGb}GB)</span>
+				{:else if remDiskGb < 0}
+					<span class="opacity-70">∞</span>
+				{:else}
+					<span class="opacity-70">{remDiskGb}GB</span>
+				{/if}
+			</span>
+		</div>
+	</div>
+{/if}
 
 <!-- GPU 가용량 배너 -->
 {#if gpuAvailability.length > 0 && (activeCategory === 'all' || activeCategory === 'gpu')}

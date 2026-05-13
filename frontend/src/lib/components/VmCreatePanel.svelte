@@ -121,6 +121,46 @@
 		);
 	});
 
+	// 플레이버 단계용 정규화된 quota (user/admin 양쪽 호환)
+	interface FlavorQuotaSummary {
+		instances?: { limit: number; in_use: number };
+		cores?: { limit: number; in_use: number };
+		ram?: { limit: number; in_use: number };       // MB
+		gigabytes?: { limit: number; in_use: number }; // GB
+	}
+	let flavorQuota = $state<FlavorQuotaSummary | null>(null);
+
+	async function loadFlavorQuota() {
+		const token = $auth.token ?? undefined;
+		const projectId = $auth.projectId ?? undefined;
+		try {
+			if (adminMode && adminSelectedProjectId) {
+				const r = await api.get<{ compute?: any; volume?: any }>(
+					`/api/admin/quotas/${encodeURIComponent(adminSelectedProjectId)}`,
+					token, projectId,
+				);
+				flavorQuota = {
+					instances: r.compute?.instances,
+					cores: r.compute?.cores,
+					ram: r.compute?.ram,
+					gigabytes: r.volume?.gigabytes,
+				};
+			} else if (!adminMode) {
+				const r = await api.get<{ compute?: any; storage?: any }>(
+					'/api/dashboard/quotas', token, projectId,
+				);
+				flavorQuota = {
+					instances: r.compute?.instances,
+					cores: r.compute?.cores,
+					ram: r.compute?.ram,
+					gigabytes: r.storage?.gigabytes,
+				};
+			}
+		} catch {
+			flavorQuota = null;
+		}
+	}
+
 	// admin 모드에서 프로젝트 목록 로드
 	async function loadAdminProjects() {
 		if (!adminMode) return;
@@ -170,6 +210,7 @@
 		adminSelectedProjectName = name;
 		wizard.update(w => ({ ...w, networkId: null, networkName: null, securityGroups: [], keyName: null }));
 		loadData();
+		loadFlavorQuota();
 	}
 
 	// admin 모드에서 선택된 프로젝트 기반으로 admin 엔드포인트 사용
@@ -265,10 +306,12 @@
 				const found = adminProjects.find(p => p.id === $wizard.targetProjectId);
 				adminSelectedProjectName = found?.name ?? $wizard.targetProjectId;
 				loadData();
+				loadFlavorQuota();
 			}
 			loadAdminProjects();
 		} else {
 			loadData();
+			loadFlavorQuota();
 		}
 	});
 
@@ -757,7 +800,7 @@
 
 				{:else if $wizard.step === 2}
 					<h2 class="text-lg font-semibold text-white mb-1">플레이버 선택 <span class="text-gray-500 text-sm font-normal">VM의 vCPU / 메모리 / 디스크 스펙</span></h2>
-					<SelectFlavor {flavors} selectedId={$wizard.flavorId} onSelect={selectFlavor} />
+					<SelectFlavor {flavors} selectedId={$wizard.flavorId} onSelect={selectFlavor} quota={flavorQuota} />
 
 				{:else if $wizard.step === 3}
 					<h2 class="text-lg font-semibold text-white mb-1">라이브러리 레이어 <span class="text-gray-500 text-sm font-normal">OverlayFS로 마운트할 사전 빌드 레이어</span></h2>
