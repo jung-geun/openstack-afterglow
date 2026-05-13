@@ -40,7 +40,7 @@
 	}
 
 	const selectedCount = $derived(selected.length);
-	const totalSize = $derived(() => {
+	const totalSize = $derived.by(() => {
 		const bytes = libraries
 			.filter(l => selected.includes(l.id))
 			.reduce((acc, l) => acc + (l.size_bytes ?? 0), 0);

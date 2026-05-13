@@ -7,8 +7,8 @@
 KMS sock 영원히 미생성 → 데드락).
 
 본 재설계는 KMS plugin 을 **k3s 외부 systemd service** 로 분리:
-1. k3s install (INSTALL_K3S_SKIP_START=true) — binary + ctr 만 준비, service 미시작
-2. install_kms.sh — k3s ctr 로 KMS image pull + binary 추출 → /usr/local/bin/
+1. k3s install (INSTALL_K3S_SKIP_START=true) — binary 만 준비, service 미시작
+2. install_kms.sh — podman 으로 KMS image pull + binary 추출 → /usr/local/bin/
 3. systemctl start barbican-kms.service → /var/lib/kms/kms.sock 생성
 4. systemctl start k3s.service → apiserver 가 이미 존재하는 sock 와 통신, 정상 부팅
 
