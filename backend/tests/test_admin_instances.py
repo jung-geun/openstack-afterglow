@@ -10,6 +10,7 @@ from tests.conftest import make_mock_conn
 # 헬퍼
 # ---------------------------------------------------------------------------
 
+
 def _make_server(server_id: str = "srv-admin-1") -> MagicMock:
     srv = MagicMock()
     srv.id = server_id
@@ -120,9 +121,7 @@ async def test_admin_list_networks_calls_admin_conn(admin_client):
         ) as mock_get_conn,
         patch("app.api.identity.admin_instances.neutron.list_networks", return_value=[]),
     ):
-        resp = await admin_client.get(
-            "/api/admin/instances/networks-for-project?project_id=target-project-abc"
-        )
+        resp = await admin_client.get("/api/admin/instances/networks-for-project?project_id=target-project-abc")
     assert resp.status_code == 200
     mock_get_conn.assert_called_once_with("target-project-abc")
 
@@ -140,9 +139,7 @@ async def test_admin_list_security_groups_returns_list(admin_client):
             return_value=[{"id": "sg-1", "name": "default"}],
         ),
     ):
-        resp = await admin_client.get(
-            "/api/admin/instances/security-groups-for-project?project_id=proj-1"
-        )
+        resp = await admin_client.get("/api/admin/instances/security-groups-for-project?project_id=proj-1")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
 
