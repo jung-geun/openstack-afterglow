@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from app.api.common.activity_recorder import rec
 from app.api.common.owner_check import assert_resource_owner
 from app.api.deps import get_os_conn, get_token_info, require_admin
-from app.models.storage import CreateVolumeRequest, VolumeInfo
+from app.models.storage import CreateVolumeRequest, ExtendVolumeRequest, VolumeInfo
 from app.rate_limit import limiter
 from app.services import cinder, nova
 from app.services.cache import cached_call, invalidate, ttl_fast
@@ -39,7 +39,7 @@ async def list_volumes(conn: openstack.connection.Connection = Depends(get_os_co
     pid = conn._afterglow_project_id
     try:
         return await cached_call(
-            f"afterglow:cinder:{pid}:volumes",
+            f"afterglow:cinder:{pid}:volumes:v2",
             ttl_fast(),
             lambda: [v.model_dump() for v in cinder.list_volumes(conn)],
             refresh=refresh,
@@ -72,7 +72,7 @@ async def create_volume(
     pid = conn._afterglow_project_id
     try:
         result = await asyncio.to_thread(cinder.create_empty_volume, conn, req.name, req.size_gb, req.availability_zone)
-        await invalidate(f"afterglow:cinder:{pid}:volumes")
+        await invalidate(f"afterglow:cinder:{pid}:volumes:v2")
         await rec(
             token_info,
             conn,
@@ -96,6 +96,57 @@ async def create_volume(
         raise HTTPException(status_code=500, detail="볼륨 생성 실패")
 
 
+@router.post("/{volume_id}/extend", response_model=VolumeInfo)
+@limiter.limit("10/minute")
+async def extend_volume(
+    request: Request,
+    volume_id: str,
+    req: ExtendVolumeRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    """볼륨 용량 확장. available 및 in-use 볼륨 모두 지원 (Ceph online extend)."""
+    await _assert_volume_owner(conn, volume_id, token_info)
+    try:
+        current = await asyncio.to_thread(conn.block_storage.get_volume, volume_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="볼륨을 찾을 수 없습니다")
+    if req.new_size <= current.size:
+        raise HTTPException(
+            status_code=400,
+            detail=f"새 크기({req.new_size}GB)는 현재 크기({current.size}GB)보다 커야 합니다",
+        )
+    pid = conn._afterglow_project_id
+    try:
+        await asyncio.to_thread(cinder.extend_volume, conn, volume_id, req.new_size)
+        await invalidate(f"afterglow:cinder:{pid}:volumes:v2")
+        await rec(
+            token_info,
+            conn,
+            resource_type="volume",
+            action="volume.extend",
+            status="success",
+            resource_id=volume_id,
+            resource_name=current.name or "",
+            extra={"old_size": current.size, "new_size": req.new_size},
+        )
+        return await asyncio.to_thread(cinder.get_volume, conn, volume_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning("볼륨 확장 실패: %s", e, exc_info=True)
+        await rec(
+            token_info,
+            conn,
+            resource_type="volume",
+            action="volume.extend",
+            status="failed",
+            resource_id=volume_id,
+            error_message=str(e)[:500],
+        )
+        raise HTTPException(status_code=400, detail=f"볼륨 확장 실패: {e}")
+
+
 @router.delete("/{volume_id}", status_code=204)
 async def delete_volume(
     volume_id: str,
@@ -106,7 +157,7 @@ async def delete_volume(
     await _assert_volume_owner(conn, volume_id, token_info)
     try:
         await asyncio.to_thread(cinder.delete_volume, conn, volume_id)
-        await invalidate(f"afterglow:cinder:{pid}:volumes")
+        await invalidate(f"afterglow:cinder:{pid}:volumes:v2")
         await rec(
             token_info, conn, resource_type="volume", action="volume.delete", status="success", resource_id=volume_id
         )
@@ -136,7 +187,7 @@ async def force_delete_volume(
         # reset_status → error 상태로 전환 후 force delete
         await asyncio.to_thread(cinder.reset_volume_status, conn, volume_id, "error")
         await asyncio.to_thread(cinder.force_delete_volume, conn, volume_id)
-        await invalidate(f"afterglow:cinder:{pid}:volumes")
+        await invalidate(f"afterglow:cinder:{pid}:volumes:v2")
         await rec(
             token_info,
             conn,
@@ -262,7 +313,7 @@ async def accept_volume_transfer(
     """볼륨 이전 수락."""
     try:
         result = await asyncio.to_thread(cinder.accept_volume_transfer, conn, transfer_id, req.auth_key)
-        await invalidate(f"afterglow:cinder:{conn._afterglow_project_id}:volumes")
+        await invalidate(f"afterglow:cinder:{conn._afterglow_project_id}:volumes:v2")
         await rec(
             token_info,
             conn,

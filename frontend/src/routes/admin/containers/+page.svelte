@@ -53,7 +53,7 @@
 	onMount(load);
 </script>
 
-<div class="p-4 md:p-8 max-w-6xl">
+<div class="p-4 md:p-8 max-w-7xl mx-auto">
 	<PageHeader breadcrumb="CONTAINERS" title="전체 컨테이너">
 		{#snippet actions()}
 			<AutoRefreshControl

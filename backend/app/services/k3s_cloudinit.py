@@ -242,6 +242,7 @@ def generate_server_userdata(
     needs_external_cloud_provider: bool = False,
     os_type: str = OS_TYPE_UBUNTU,
     server_node_name: str | None = None,
+    barbican_kms_enabled: bool = False,
     # 하위호환 파라미터 (deprecated — 레지스트리 우회 시에만 사용)
     occm_enabled: bool = False,
     occm_manifests: str | None = None,
@@ -294,6 +295,7 @@ def generate_server_userdata(
         extra_tls_sans=extra_tls_sans or [],
         needs_external_cloud_provider=needs_external_cloud_provider,
         server_node_name=server_node_name or f"{cluster_name}-server",
+        barbican_kms_enabled=barbican_kms_enabled,
     )
     yaml_str = _jinja.get_template("k3s_server.yaml.j2").render(**template_vars)
     encoded = base64.b64encode(gzip.compress(yaml_str.encode())).decode()

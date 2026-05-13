@@ -7,6 +7,7 @@ if TYPE_CHECKING:
 import asyncio
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from openstack.exceptions import HttpException
 from pydantic import BaseModel
 
 from app.api.common.activity_recorder import rec
@@ -95,6 +96,17 @@ async def create_backup(
             extra={"volume_id": req.volume_id},
         )
         return result
+    except HttpException as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="volume_backup",
+            action="volume_backup.create",
+            status="failed",
+            resource_name=req.name,
+            error_message=str(e)[:500],
+        )
+        raise HTTPException(status_code=e.status_code or 500, detail=e.message or str(e))
     except Exception as e:
         await rec(
             token_info,

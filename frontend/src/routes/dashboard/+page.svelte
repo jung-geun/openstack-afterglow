@@ -84,7 +84,7 @@
   }
 </script>
 
-<div class="p-6 flex flex-col gap-5">
+<div class="p-6 max-w-7xl mx-auto flex flex-col gap-5">
   <!-- 헤더 -->
   <div class="flex items-start justify-between">
     <div>

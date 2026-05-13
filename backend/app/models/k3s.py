@@ -18,6 +18,15 @@ class K3sProgressStep(str, Enum):
     WAITING_CALLBACK = "waiting_callback"
     COMPLETED = "completed"
     FAILED = "failed"
+    # 삭제 단계
+    DELETE_INIT = "delete_init"
+    DELETE_LB_CLEANUP = "delete_lb_cleanup"
+    DELETE_APP_CREDENTIAL = "delete_app_credential"
+    DELETE_K8S_NODES = "delete_k8s_nodes"
+    DELETE_AGENT_VMS = "delete_agent_vms"
+    DELETE_SERVER_VM = "delete_server_vm"
+    DELETE_SECURITY_GROUP = "delete_security_group"
+    DELETE_RECORD = "delete_record"
 
 
 class K3sProgressMessage(BaseModel):

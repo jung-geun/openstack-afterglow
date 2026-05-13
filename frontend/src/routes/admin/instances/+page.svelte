@@ -12,6 +12,7 @@
 	import StatusChip from '$lib/components/ui/StatusChip.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
+	import { openWizard } from '$lib/stores/wizard';
 
 	interface AdminInstance {
 		id: string;
@@ -163,9 +164,18 @@
 	});
 </script>
 
-<div class="p-4 md:p-8 max-w-6xl">
+<div class="p-4 md:p-8 max-w-7xl mx-auto">
 	<PageHeader breadcrumb="COMPUTE / INSTANCES" title="전체 인스턴스">
 		{#snippet actions()}
+			<button
+				onclick={() => openWizard()}
+				class="px-3 py-1.5 text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors flex items-center gap-1.5"
+			>
+				<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+				</svg>
+				VM 생성
+			</button>
 			<AutoRefreshControl
 				bind:active={ar.active}
 				bind:intervalSeconds={ar.intervalSeconds}

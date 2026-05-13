@@ -40,6 +40,13 @@ router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
 _logger = logging.getLogger(__name__)
 
+_SSE_HEADERS = {
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+    "Content-Encoding": "identity",
+}
+
 
 def _rand_suffix(length: int = 5) -> str:
     """K8s 스타일 랜덤 suffix (소문자+숫자). 매 생성마다 고유한 리소스 이름 보장."""
@@ -361,18 +368,38 @@ async def create_k3s_cluster_async(
             active_plugins = k3s_plugins.get_active_plugin_names(s)
             occm_active = active_plugins.get("occm", False)
 
-            # Octavia Ingress 활성 시 App Cred 발급 + subnet 도출
+            # PR1 — KMS 또는 Octavia Ingress 활성 시 cluster 별 App Credential 발급 (1회).
+            # KMS plugin 의 cloud.conf 에 admin password 대신 app cred 사용 → 노드 한 대
+            # compromise 시 OpenStack admin 권한 노출 방지.
+            app_cred: dict | None = None
+            needs_app_cred = active_plugins.get("octavia_ingress", False) or active_plugins.get("barbican_kms", False)
+            if needs_app_cred:
+                yield event(K3sProgressStep.SERVER_CREATING, 38, "App Credential 발급 중...")
+                app_cred = await _keystone.create_app_credential_for_cluster(project_id, req.name)
+                app_credential_id = app_cred["id"]
+
+            # PR2 — KMS 활성 시 project owner Barbican 에서 KEK 조회/발급 (per-project 공유).
+            # 글로벌 settings.k3s_barbican_kms_kek_id 가 있으면 fallback (lazy migration).
+            kek_id: str | None = None
+            if active_plugins.get("barbican_kms", False):
+                yield event(K3sProgressStep.SERVER_CREATING, 39, "KEK (Barbican) 조회/발급 중...")
+                from app.services import barbican as _barbican
+
+                try:
+                    kek_id = await _barbican.ensure_project_kek(project_id)
+                except Exception:
+                    _logger.warning("ensure_project_kek 실패 — 글로벌 fallback 사용", exc_info=True)
+                    kek_id = s.k3s_barbican_kms_kek_id or None
+
+            # Octavia Ingress 만 — subnet 도출 + manifest_kwargs 추가
             manifest_kwargs: dict = {}
             if active_plugins.get("octavia_ingress", False):
-                yield event(K3sProgressStep.SERVER_CREATING, 38, "Octavia Ingress App Credential 발급 중...")
                 subnets = await asyncio.to_thread(lambda: list(conn.network.subnets(network_id=network_id)))
                 if not subnets:
                     raise RuntimeError(
                         f"네트워크 {network_id}에 subnet이 없습니다. Octavia Ingress를 위한 subnet 도출 실패."
                     )
                 cluster_subnet_id = subnets[0].id
-                app_cred = await _keystone.create_app_credential_for_cluster(project_id, req.name)
-                app_credential_id = app_cred["id"]
                 manifest_kwargs = {
                     "subnet_id": cluster_subnet_id,
                     "app_credential": app_cred,
@@ -397,7 +424,9 @@ async def create_k3s_cluster_async(
                 yield event(K3sProgressStep.FAILED, 0, err_msg, cluster_id=cluster_id)
                 return
             extra_server_args = k3s_plugins.aggregate_server_args(s)
-            extra_write_files = k3s_plugins.aggregate_extra_write_files(project_id, req.name, s)
+            extra_write_files = k3s_plugins.aggregate_extra_write_files(
+                project_id, req.name, s, app_credential=app_cred, kek_id=kek_id
+            )
 
             userdata_result = k3s_cloudinit.generate_server_userdata(
                 cluster_name=req.name,
@@ -412,6 +441,7 @@ async def create_k3s_cluster_async(
                 needs_external_cloud_provider=k3s_plugins.needs_external_cloud_provider(s),
                 os_type=os_type,
                 server_node_name=server_vm_name,
+                barbican_kms_enabled=any(p.name == "barbican_kms" for p in k3s_plugins.get_active_plugins(s)),
             )
 
             # --- Step 4: 서버 VM 생성 ---
@@ -515,12 +545,7 @@ async def create_k3s_cluster_async(
     return StreamingResponse(
         progress_generator(),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-            "Content-Encoding": "identity",
-        },
+        headers=_SSE_HEADERS,
     )
 
 
@@ -733,27 +758,25 @@ async def _scale_agents(
     _logger.info("k3s cluster %s scaled to %d agents", cluster_id, desired_count)
 
 
-@router.delete("/{cluster_id}", status_code=204)
-@limiter.limit("5/minute")
-async def delete_k3s_cluster(
-    request: Request,
-    cluster_id: str,
-    conn: openstack.connection.Connection = Depends(get_os_conn),
-    token_info: dict = Depends(get_token_info),
-):
-    """k3s 클러스터 삭제: VM → SG 정리 후 soft-delete 처리."""
-    project_id = conn._afterglow_project_id
-    cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
-    if not cluster:
-        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
+async def _delete_cluster_progress(
+    conn: openstack.connection.Connection,
+    project_id: str,
+    cluster: dict,
+    token_info: dict | None,
+) -> AsyncGenerator[K3sProgressMessage, None]:
+    """k3s 클러스터 삭제 단계별 진행. 각 단계 진입 시 K3sProgressMessage 를 yield."""
+    import json
 
-    # 이미 삭제된 클러스터는 멱등 처리
-    if cluster.get("deleted_at"):
-        return
+    cluster_id: str = cluster["id"]
+    cluster_name: str = cluster.get("name") or ""
 
+    yield K3sProgressMessage(step=K3sProgressStep.DELETE_INIT, progress=5, message="클러스터 삭제 준비 중...")
     await k3s_cluster.update_cluster_status(project_id, cluster_id, "DELETING")
 
-    # API LB + FIP 정리 (VM 삭제 전에 먼저 처리)
+    # API LB + FIP 정리
+    yield K3sProgressMessage(
+        step=K3sProgressStep.DELETE_LB_CLEANUP, progress=15, message="API LoadBalancer / Floating IP 정리 중..."
+    )
     _api_lb_id = cluster.get("api_lb_id") or ""
     _api_fip_id = cluster.get("api_fip_id") or ""
     if _api_lb_id:
@@ -769,8 +792,7 @@ async def delete_k3s_cluster(
         except Exception as e:
             _logger.warning("Delete API FIP %s failed: %s", _api_fip_id, e)
 
-    # OCCM/Ingress가 생성한 Octavia LB 정리 (VM 삭제 전에 먼저 처리)
-    cluster_name = cluster.get("name") or ""
+    # OCCM/Ingress가 생성한 Octavia LB 정리
     plugins_enabled = cluster.get("plugins_enabled") or {}
     occm_enabled = cluster.get("occm_enabled") or plugins_enabled.get("occm", False)
     ingress_enabled = plugins_enabled.get("octavia_ingress", False)
@@ -793,7 +815,10 @@ async def delete_k3s_cluster(
         except Exception as e:
             _logger.warning("Failed to list/delete LBs for cluster %s: %s", cluster_id, e)
 
-    # Octavia Ingress App Credential 회수 (신규 클러스터만; 기존 평문 클러스터는 skip)
+    # App Credential 회수
+    yield K3sProgressMessage(
+        step=K3sProgressStep.DELETE_APP_CREDENTIAL, progress=25, message="App Credential 회수 중..."
+    )
     _app_cred_id = cluster.get("app_credential_id") or ""
     if _app_cred_id:
         try:
@@ -804,17 +829,16 @@ async def delete_k3s_cluster(
         except Exception as e:
             _logger.warning("Delete App Credential %s failed: %s", _app_cred_id, e)
 
-    # 에이전트 VM 병렬 삭제
+    # 에이전트 VM id 파싱
     agent_vm_ids = cluster.get("agent_vm_ids") or []
     if isinstance(agent_vm_ids, str):
-        import json
-
         try:
             agent_vm_ids = json.loads(agent_vm_ids)
         except Exception:
             agent_vm_ids = []
 
     # K8s 노드 삭제 (VM 삭제 전 먼저 수행, best-effort)
+    yield K3sProgressMessage(step=K3sProgressStep.DELETE_K8S_NODES, progress=35, message="Kubernetes 노드 정리 중...")
     all_node_names: list[str] = []
     if agent_vm_ids:
         vm_name_map = await k3s_cluster.get_agent_vm_names(cluster_id, agent_vm_ids)
@@ -828,6 +852,14 @@ async def delete_k3s_cluster(
             await k3s_kube.delete_k8s_nodes(cluster_id, all_node_names)
         except Exception as e:
             _logger.warning("k3s delete: K8s 노드 삭제 중 오류 (무시): %s", e)
+
+    # 에이전트 VM 병렬 삭제
+    n_agents = len(agent_vm_ids)
+    yield K3sProgressMessage(
+        step=K3sProgressStep.DELETE_AGENT_VMS,
+        progress=55,
+        message=f"에이전트 VM 삭제 중 ({n_agents}개)...",
+    )
 
     async def _del_vm_and_wait(vm_id: str) -> None:
         try:
@@ -846,6 +878,7 @@ async def delete_k3s_cluster(
     await asyncio.gather(*[_del_vm_and_wait(vid) for vid in agent_vm_ids], return_exceptions=True)
 
     # 서버 VM 삭제 + 완료 대기
+    yield K3sProgressMessage(step=K3sProgressStep.DELETE_SERVER_VM, progress=80, message="서버 VM 삭제 중...")
     server_vm_id = cluster.get("server_vm_id")
     if server_vm_id:
         try:
@@ -862,6 +895,7 @@ async def delete_k3s_cluster(
                 _logger.warning("k3s delete: server VM %s 대기 중 오류 (계속 진행): %s", server_vm_id, e)
 
     # 보안 그룹 삭제 (VM 삭제 완료 후, 재시도 포함)
+    yield K3sProgressMessage(step=K3sProgressStep.DELETE_SECURITY_GROUP, progress=92, message="보안 그룹 삭제 중...")
     sg_id = cluster.get("security_group_id")
     if sg_id:
         for attempt in range(3):
@@ -874,7 +908,80 @@ async def delete_k3s_cluster(
             except Exception as e:
                 _logger.warning("Delete SG %s attempt %d failed: %s", sg_id, attempt + 1, e)
 
-    # soft-delete: 상태를 DELETED로 기록 (물리 삭제 안 함)
+    # soft-delete: 상태를 DELETED로 기록
+    yield K3sProgressMessage(step=K3sProgressStep.DELETE_RECORD, progress=98, message="삭제 이력 기록 중...")
     user_id = token_info.get("user_id") if isinstance(token_info, dict) else None
     await k3s_cluster.delete_cluster_record(project_id, cluster_id, user_id=user_id, reason="사용자 삭제 요청")
-    await rec(token_info, conn, resource_type="k3s_cluster", action="delete", resource_id=cluster_id)
+    if token_info is not None:
+        await rec(token_info, conn, resource_type="k3s_cluster", action="delete", resource_id=cluster_id)
+
+    yield K3sProgressMessage(
+        step=K3sProgressStep.COMPLETED,
+        progress=100,
+        message=f'클러스터 "{cluster_name}" 삭제 완료',
+    )
+
+
+@router.delete("/{cluster_id}", status_code=204)
+@limiter.limit("5/minute")
+async def delete_k3s_cluster(
+    request: Request,
+    cluster_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    """k3s 클러스터 삭제: VM → SG 정리 후 soft-delete 처리."""
+    project_id = conn._afterglow_project_id
+    cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
+
+    if cluster.get("deleted_at"):
+        return
+
+    async for _msg in _delete_cluster_progress(conn, project_id, cluster, token_info):
+        pass
+
+
+@router.post("/{cluster_id}/delete-async")
+@limiter.limit("5/minute")
+async def delete_k3s_cluster_async(
+    request: Request,
+    cluster_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    """k3s 클러스터 삭제 — SSE 스트리밍 진행률 반환."""
+    project_id = conn._afterglow_project_id
+    cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
+
+    async def gen() -> AsyncGenerator[str, None]:
+        yield ": " + " " * 2048 + "\n\n"
+        start = time.monotonic()
+        if cluster.get("deleted_at"):
+            msg = K3sProgressMessage(
+                step=K3sProgressStep.COMPLETED,
+                progress=100,
+                message="이미 삭제된 클러스터입니다",
+                elapsed_seconds=0.0,
+            )
+            yield f"data: {msg.model_dump_json()}\n\n"
+            return
+        try:
+            async for msg in _delete_cluster_progress(conn, project_id, cluster, token_info):
+                msg.elapsed_seconds = round(time.monotonic() - start, 1)
+                yield f"data: {msg.model_dump_json()}\n\n"
+        except Exception as e:
+            _logger.error("k3s cluster %s async delete failed: %s", cluster_id, e, exc_info=True)
+            fail = K3sProgressMessage(
+                step=K3sProgressStep.FAILED,
+                progress=0,
+                message=f"삭제 실패: {e}",
+                error=str(e),
+                elapsed_seconds=round(time.monotonic() - start, 1),
+            )
+            yield f"data: {fail.model_dump_json()}\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers=_SSE_HEADERS)

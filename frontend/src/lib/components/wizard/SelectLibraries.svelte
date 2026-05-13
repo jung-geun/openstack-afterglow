@@ -39,6 +39,19 @@
 		return gb >= 1 ? `${Math.round(gb)} GB` : `${Math.round(gb * 1024)} MB`;
 	}
 
+	const selectedCount = $derived(selected.length);
+	const totalSize = $derived.by(() => {
+		const bytes = libraries
+			.filter(l => selected.includes(l.id))
+			.reduce((acc, l) => acc + (l.size_bytes ?? 0), 0);
+		return formatSize(bytes);
+	});
+	const allDepsSatisfied = $derived(
+		libraries
+			.filter(l => selected.includes(l.id))
+			.every(l => l.depends_on.every(dep => selected.includes(dep)))
+	);
+
 	$effect(() => {
 		const ids = [...selected];
 		if (validateTimer) clearTimeout(validateTimer);
@@ -99,26 +112,59 @@
 				{/if}
 			</div>
 
-			<!-- 이름 + 의존성 -->
+			<!-- 이름 + 배지 + 의존성 -->
 			<div class="flex-1 min-w-0">
-				<div class="flex items-center gap-2">
+				<div class="flex items-center gap-2 flex-wrap">
 					<span class="font-medium text-white text-sm">{lib.name}</span>
+					{#if lib.version}
+						<span class="font-mono text-[11px] text-gray-500 px-1.5 py-0.5 rounded bg-gray-800 border border-gray-700">{lib.version}</span>
+					{/if}
+					{#if lib.size_bytes}
+						<span class="text-[11px] text-gray-500 ml-auto flex-shrink-0">{formatSize(lib.size_bytes)}</span>
+					{/if}
 				</div>
 				{#if lib.depends_on.length > 0}
-					<div class="text-xs text-gray-500 mt-0.5">
-						↳ requires {lib.depends_on.join(', ')}
-						{#if locked}<span class="text-orange-400 ml-1">(의존 중)</span>{/if}
+					<div class="flex items-center gap-1.5 flex-wrap mt-1.5">
+						<span class="text-[11px] text-gray-500">요구사항:</span>
+						{#each lib.depends_on as dep}
+							{@const met = selected.includes(dep)}
+							<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full font-mono text-[10.5px]
+								{met
+									? 'bg-green-900/30 border border-green-800 text-green-400'
+									: 'bg-red-900/30 border border-red-800 text-red-400'}">
+								{met ? '✓' : '!'} {dep}
+							</span>
+						{/each}
+						{#if locked}
+							<span class="text-[10.5px] text-orange-400">(의존 중)</span>
+						{/if}
 					</div>
 				{/if}
 				{#if gpuWarn}
-					<div class="text-xs text-yellow-400 mt-1">GPU 플레이버 필요</div>
+					<div class="mt-1.5">
+						<span class="inline-flex items-center px-2 py-0.5 rounded-full bg-yellow-900/30 border border-yellow-800 text-yellow-400 font-mono text-[10.5px] font-semibold">GPU 플레이버 필요</span>
+					</div>
 				{/if}
 			</div>
-
-			<!-- 크기 -->
-			{#if lib.size_bytes}
-				<span class="text-xs text-gray-500 flex-shrink-0">{formatSize(lib.size_bytes)}</span>
-			{/if}
 		</button>
 	{/each}
 </div>
+
+<!-- 하단 summary strip -->
+{#if libraries.length > 0}
+	<div class="flex items-center gap-3 flex-wrap px-4 py-3 rounded-lg bg-gray-900 border border-gray-800 text-xs text-gray-400 mt-4">
+		<span>선택 <b class="text-white font-mono font-semibold">{selectedCount}</b>개 / {libraries.length}개</span>
+		{#if totalSize()}
+			<span class="text-gray-700">·</span>
+			<span>OverlayFS 추가 디스크 <b class="text-white font-mono">{totalSize()}</b></span>
+		{/if}
+		{#if selectedCount > 0}
+			<span class="text-gray-700">·</span>
+			{#if allDepsSatisfied}
+				<span>모든 의존성 충족 <span class="text-green-400 font-semibold">✓</span></span>
+			{:else}
+				<span>의존성 미충족 <span class="text-red-400 font-semibold">!</span></span>
+			{/if}
+		{/if}
+	</div>
+{/if}

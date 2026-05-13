@@ -243,7 +243,7 @@ write_files:
 {% endif %}
 
 runcmd:
-  - mkdir -p /opt/layers/{lower,upper,work,merged} /opt/union/scripts /var/lib/union
+  - mkdir -p /opt/layers/lower /opt/layers/upper /opt/layers/work /opt/layers/merged /opt/union/scripts /var/lib/union
   - systemctl daemon-reload
   - systemctl enable union-overlay
   - systemctl start union-overlay

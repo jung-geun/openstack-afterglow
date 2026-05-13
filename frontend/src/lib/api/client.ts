@@ -20,6 +20,34 @@ export class ApiError extends Error {
 	}
 }
 
+// 동시 다수 요청이 401 받을 때 redirect 중복 호출 방지
+let _redirectingTo401 = false;
+
+/**
+ * 401 응답 시 인증 상태 정리 + 로그인 페이지(/)로 자동 redirect.
+ * SSR 환경 또는 이미 로그인 페이지면 no-op.
+ */
+async function handleUnauthorized(): Promise<void> {
+	if (typeof window === 'undefined') return;
+	if (_redirectingTo401) return;
+	if (window.location.pathname === '/') return; // 이미 로그인 페이지
+	_redirectingTo401 = true;
+	try {
+		// dynamic import: client.ts ↔ stores/auth.ts circular dependency 회피
+		const [{ clearAuth }, { goto }] = await Promise.all([
+			import('$lib/stores/auth'),
+			import('$app/navigation'),
+		]);
+		clearAuth();
+		await goto('/');
+	} catch {
+		// dynamic import 실패 시 hard reload 로 fallback
+		window.location.href = '/';
+	} finally {
+		setTimeout(() => { _redirectingTo401 = false; }, 1000);
+	}
+}
+
 async function request<T>(
 	path: string,
 	options: RequestInit = {},
@@ -51,6 +79,10 @@ async function request<T>(
 			detail = body?.detail || JSON.stringify(body);
 		} catch {
 			detail = await res.text().catch(() => res.statusText);
+		}
+		// 401 (만료/유효하지 않은 토큰) 자동 로그인 페이지 redirect
+		if (res.status === 401) {
+			void handleUnauthorized();
 		}
 		throw new ApiError(res.status, detail);
 	}
@@ -102,6 +134,7 @@ export const api = {
 			} catch {
 				detail = await res.text().catch(() => res.statusText);
 			}
+			if (res.status === 401) void handleUnauthorized();
 			throw new ApiError(res.status, detail);
 		}
 		if (res.status === 204) return undefined as T;
@@ -135,6 +168,7 @@ export const api = {
 				} else {
 					let detail = xhr.statusText;
 					try { detail = JSON.parse(xhr.responseText)?.detail || detail; } catch { /* empty */ }
+					if (xhr.status === 401) void handleUnauthorized();
 					reject(new ApiError(xhr.status, detail));
 				}
 			};
@@ -172,6 +206,7 @@ export const api = {
 				} else {
 					let detail = xhr.statusText;
 					try { detail = JSON.parse(xhr.responseText)?.detail || detail; } catch { /* empty */ }
+					if (xhr.status === 401) void handleUnauthorized();
 					reject(new ApiError(xhr.status, detail));
 				}
 			};
@@ -232,6 +267,7 @@ export const api = {
 		if (!res.ok) {
 			let detail = res.statusText;
 			try { detail = (await res.json())?.detail || detail; } catch { /* empty */ }
+			if (res.status === 401) void handleUnauthorized();
 			throw new ApiError(res.status, detail);
 		}
 		const disposition = res.headers.get('Content-Disposition') || '';
@@ -278,6 +314,7 @@ export const api = {
 		}).then(async (response) => {
 			if (!response.ok) {
 				const text = await response.text();
+				if (response.status === 401) void handleUnauthorized();
 				throw new ApiError(response.status, text || response.statusText);
 			}
 

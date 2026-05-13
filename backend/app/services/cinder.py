@@ -67,6 +67,10 @@ def force_delete_volume(conn: openstack.connection.Connection, volume_id: str) -
     )
 
 
+def extend_volume(conn: openstack.connection.Connection, volume_id: str, new_size: int) -> None:
+    conn.block_storage.extend_volume(volume_id, new_size)
+
+
 def get_volume(conn: openstack.connection.Connection, volume_id: str) -> VolumeInfo:
     vol = conn.block_storage.get_volume(volume_id)
     return _vol_to_info(vol)
@@ -313,6 +317,13 @@ def delete_volume_transfer(conn: openstack.connection.Connection, transfer_id: s
 
 
 def _vol_to_info(vol) -> VolumeInfo:
+    # Use original API field names (bootable, volume_image_metadata) since the SDK
+    # Python alias for bootable is `is_bootable`, not `bootable`.
+    raw = vol.to_dict(original_names=True, computed=False) if hasattr(vol, "to_dict") else {}
+    raw_bootable = raw.get("bootable", getattr(vol, "is_bootable", getattr(vol, "bootable", False)))
+    bootable = raw_bootable if isinstance(raw_bootable, bool) else str(raw_bootable).lower() == "true"
+    raw_vim = raw.get("volume_image_metadata", getattr(vol, "volume_image_metadata", None))
+    volume_image_metadata = raw_vim if isinstance(raw_vim, dict) else None
     return VolumeInfo(
         id=vol.id,
         name=vol.name or "",
@@ -320,6 +331,8 @@ def _vol_to_info(vol) -> VolumeInfo:
         size=vol.size,
         volume_type=vol.volume_type,
         attachments=list(vol.attachments or []),
+        bootable=bootable,
+        volume_image_metadata=volume_image_metadata,
     )
 
 

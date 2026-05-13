@@ -1,6 +1,6 @@
 import re
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class IpAddress(BaseModel):
@@ -82,7 +82,7 @@ class InstanceInfo(BaseModel):
 
 class CreateInstanceRequest(BaseModel):
     name: str
-    image_id: str
+    image_id: str | None = None
     flavor_id: str
     libraries: list[str] = []
     strategy: str | None = None  # "prebuilt" | "dynamic" | None (no libraries)
@@ -97,6 +97,17 @@ class CreateInstanceRequest(BaseModel):
     additional_volume_ids: list[str] = []
     new_volumes: list["NewVolumeRequest"] = []
     existing_upper_volume_id: str | None = None
+    boot_volume_id: str | None = None  # 기존 부팅 볼륨 재사용 (image_id 와 상호 배타)
+
+    @model_validator(mode="after")
+    def validate_boot_source(self) -> "CreateInstanceRequest":
+        has_image = bool(self.image_id)
+        has_volume = bool(self.boot_volume_id)
+        if has_image and has_volume:
+            raise ValueError("image_id와 boot_volume_id를 동시에 지정할 수 없습니다")
+        if not has_image and not has_volume:
+            raise ValueError("image_id 또는 boot_volume_id 중 하나는 반드시 지정해야 합니다")
+        return self
 
     @field_validator("name")
     @classmethod

@@ -10,11 +10,19 @@
 	import SelectLibraries from '$lib/components/wizard/SelectLibraries.svelte';
 	import SelectTemplate from '$lib/components/wizard/SelectTemplate.svelte';
 	import SelectStrategy from '$lib/components/wizard/SelectStrategy.svelte';
+	import WizardStepper from '$lib/components/wizard/WizardStepper.svelte';
+	import WizardHeader from '$lib/components/wizard/WizardHeader.svelte';
+	import WizardFooter from '$lib/components/wizard/WizardFooter.svelte';
 	import ProgressBar from '$lib/components/ProgressBar.svelte';
 	import LoadingSpinner from '$lib/components/LoadingSpinner.svelte';
 	import SlidePanel from '$lib/components/SlidePanel.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import type { Volume } from '$lib/types/resources';
+
+	interface Props {
+		adminMode?: boolean;
+	}
+	let { adminMode = false }: Props = $props();
 
 	const TOTAL_STEPS = 6;
 
@@ -88,53 +96,211 @@
 	let elapsedSeconds = $state<number | null>(null);
 	let loading = $state(false);
 
+	// admin 모드 전용 상태
+	interface ProjectInfo { id: string; name: string; }
+	interface QuotaPair { used: number; quota: number; }
+	interface ProjectQuota {
+		project_id: string;
+		project_name: string;
+		cpu: QuotaPair;
+		ram_mb: QuotaPair;
+		instances: QuotaPair;
+		disk_gb: QuotaPair;
+		gpu_instances?: number;
+	}
+	let adminProjects = $state<ProjectInfo[]>([]);
+	let adminProjectsLoading = $state(false);
+	let adminProjectQuotas = $state<Map<string, ProjectQuota>>(new Map());
+	let adminProjectSearch = $state('');
+	// $wizard.targetProjectId가 이미 설정된 경우(볼륨 → VM 진입) 그대로 사용
+	let adminSelectedProjectId = $state<string | null>(null);
+	let adminSelectedProjectName = $state<string | null>(null);
+
+	let filteredAdminProjects = $derived.by(() => {
+		const q = adminProjectSearch.trim().toLowerCase();
+		if (!q) return adminProjects;
+		return adminProjects.filter(p =>
+			p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q)
+		);
+	});
+
+	// 플레이버 단계용 정규화된 quota (user/admin 양쪽 호환)
+	interface FlavorQuotaSummary {
+		instances?: { limit: number; in_use: number };
+		cores?: { limit: number; in_use: number };
+		ram?: { limit: number; in_use: number };       // MB
+		gigabytes?: { limit: number; in_use: number }; // GB
+	}
+	let flavorQuota = $state<FlavorQuotaSummary | null>(null);
+
+	async function loadFlavorQuota() {
+		const token = $auth.token ?? undefined;
+		const projectId = $auth.projectId ?? undefined;
+		try {
+			if (adminMode && adminSelectedProjectId) {
+				// admin: os-quota-sets/{pid}/detail REST 직접 호출이라 정확한 값 반환
+				const r = await api.get<{ compute?: any; volume?: any }>(
+					`/api/admin/quotas/${encodeURIComponent(adminSelectedProjectId)}`,
+					token, projectId,
+				);
+				flavorQuota = {
+					instances: r.compute?.instances,
+					cores: r.compute?.cores,
+					ram: r.compute?.ram,
+					gigabytes: r.volume?.gigabytes,
+				};
+			} else if (!adminMode) {
+				// user: /api/dashboard/quotas는 openstacksdk get_quota_set 파싱 이슈로
+				// 모든 값이 -1로 나오는 케이스가 있어 limits API 기반의 summary를 사용
+				const r = await api.get<{
+					compute?: { instances_used?: number; instances_limit?: number;
+						vcpus_used?: number; vcpus_limit?: number;
+						ram_used_mb?: number; ram_limit_mb?: number };
+					storage?: { gigabytes_used?: number; gigabytes_limit?: number };
+				}>('/api/dashboard/summary', token, projectId);
+				const c = r.compute ?? {};
+				const s = r.storage ?? {};
+				flavorQuota = {
+					instances: { limit: c.instances_limit ?? -1, in_use: c.instances_used ?? 0 },
+					cores: { limit: c.vcpus_limit ?? -1, in_use: c.vcpus_used ?? 0 },
+					ram: { limit: c.ram_limit_mb ?? -1, in_use: c.ram_used_mb ?? 0 },
+					gigabytes: { limit: s.gigabytes_limit ?? -1, in_use: s.gigabytes_used ?? 0 },
+				};
+			}
+		} catch {
+			flavorQuota = null;
+		}
+	}
+
+	// admin 모드에서 프로젝트 목록 로드
+	async function loadAdminProjects() {
+		if (!adminMode) return;
+		adminProjectsLoading = true;
+		const token = $auth.token ?? undefined;
+		const projectId = $auth.projectId ?? undefined;
+		try {
+			const res = await api.get<{ id: string; name: string }[]>('/api/admin/projects/names', token, projectId);
+			adminProjects = res.map(p => ({ id: p.id, name: p.name }));
+		} catch {
+			adminProjects = [];
+		} finally {
+			adminProjectsLoading = false;
+		}
+		loadAdminProjectQuotas();
+	}
+
+	// 프로젝트별 quota 정보 로드 (백그라운드, 실패해도 목록은 표시)
+	async function loadAdminProjectQuotas() {
+		if (!adminMode) return;
+		const token = $auth.token ?? undefined;
+		const projectId = $auth.projectId ?? undefined;
+		try {
+			const rows = await api.get<ProjectQuota[]>('/api/admin/overview/projects', token, projectId);
+			const map = new Map<string, ProjectQuota>();
+			for (const r of rows) map.set(r.project_id, r);
+			adminProjectQuotas = map;
+		} catch {
+			adminProjectQuotas = new Map();
+		}
+	}
+
+	function fmtRemaining(p?: QuotaPair): string {
+		if (!p) return '-';
+		if (p.quota < 0) return '∞';
+		return String(Math.max(0, p.quota - p.used));
+	}
+
+	function isExhausted(p?: QuotaPair): boolean {
+		if (!p) return false;
+		if (p.quota < 0) return false;
+		return p.used >= p.quota;
+	}
+
+	function selectAdminProject(id: string, name: string) {
+		adminSelectedProjectId = id;
+		adminSelectedProjectName = name;
+		wizard.update(w => ({ ...w, networkId: null, networkName: null, securityGroups: [], keyName: null }));
+		loadData();
+		loadFlavorQuota();
+	}
+
+	// admin 모드에서 선택된 프로젝트 기반으로 admin 엔드포인트 사용
 	async function loadData() {
 		loading = true;
 		loadError = '';
 		const token = $auth.token ?? undefined;
 		const projectId = $auth.projectId ?? undefined;
 		try {
-			[images, flavors, libraries, networks, keypairs, volumes] = await Promise.all([
-				api.get<any[]>('/api/images', token, projectId),
-				api.get<any[]>('/api/flavors', token, projectId),
-				api.get<any[]>('/api/libraries', token, projectId),
-				api.get<NetworkInfo[]>('/api/networks', token, projectId),
-				api.get<KeypairInfo[]>('/api/keypairs', token, projectId),
-				api.get<Volume[]>('/api/volumes', token, projectId),
-			]);
-			// 보안 그룹, AZ는 비동기 로드 (실패해도 무시)
-			try {
-				securityGroups = await api.get<SecurityGroupInfo[]>('/api/security-groups', token, projectId);
-			} catch { securityGroups = []; }
-			try {
-				availabilityZones = await api.get<AvailabilityZoneInfo[]>('/api/instances/availability-zones', token, projectId);
-			} catch { availabilityZones = []; }
-
-			if (keypairs.length === 1 && !$wizard.keyName) {
-				wizard.update(w => ({ ...w, keyName: keypairs[0].name }));
-			}
-			if (networks.length > 0 && !$wizard.networkId) {
-				let selectedNet = networks[0];
+			if (adminMode && adminSelectedProjectId) {
+				const pid = adminSelectedProjectId;
+				[images, flavors, libraries] = await Promise.all([
+					api.get<any[]>('/api/images', token, projectId),
+					api.get<any[]>('/api/flavors', token, projectId),
+					api.get<any[]>('/api/libraries', token, projectId),
+				]);
+				// admin 전용 프로젝트 리소스
+				[networks, volumes] = await Promise.all([
+					api.get<NetworkInfo[]>(`/api/admin/instances/networks-for-project?project_id=${pid}`, token, projectId).catch(() => [] as NetworkInfo[]),
+					api.get<Volume[]>(`/api/admin/instances/volumes-for-project?project_id=${pid}`, token, projectId).catch(() => [] as Volume[]),
+				]);
+				keypairs = []; // admin은 대상 프로젝트 키페어 조회 불가
 				try {
-					const defaultRecord = await api.get<{ network_id: string }>('/api/networks/default', token, projectId);
-					defaultNetworkId = defaultRecord.network_id;
-					const found = networks.find(n => n.id === defaultRecord.network_id);
-					if (found) selectedNet = found;
-				} catch {
-					const byName = networks.find(n => n.name === 'Default');
-					if (byName) selectedNet = byName;
-				}
-				wizard.update(w => ({ ...w, networkId: selectedNet.id, networkName: selectedNet.name }));
-			} else if ($wizard.networkId) {
+					securityGroups = await api.get<SecurityGroupInfo[]>(
+						`/api/admin/instances/security-groups-for-project?project_id=${pid}`,
+						token, projectId,
+					);
+				} catch { securityGroups = []; }
+				availabilityZones = [];
 				try {
-					const defaultRecord = await api.get<{ network_id: string }>('/api/networks/default', token, projectId);
-					defaultNetworkId = defaultRecord.network_id;
+					availabilityZones = await api.get<AvailabilityZoneInfo[]>('/api/instances/availability-zones', token, projectId);
 				} catch { /* 무시 */ }
+			} else {
+				[images, flavors, libraries, networks, keypairs, volumes] = await Promise.all([
+					api.get<any[]>('/api/images', token, projectId),
+					api.get<any[]>('/api/flavors', token, projectId),
+					api.get<any[]>('/api/libraries', token, projectId),
+					api.get<NetworkInfo[]>('/api/networks', token, projectId),
+					api.get<KeypairInfo[]>('/api/keypairs', token, projectId),
+					api.get<Volume[]>('/api/volumes', token, projectId),
+				]);
+				try {
+					securityGroups = await api.get<SecurityGroupInfo[]>('/api/security-groups', token, projectId);
+				} catch { securityGroups = []; }
+				try {
+					availabilityZones = await api.get<AvailabilityZoneInfo[]>('/api/instances/availability-zones', token, projectId);
+				} catch { availabilityZones = []; }
+
+				if (keypairs.length === 1 && !$wizard.keyName) {
+					wizard.update(w => ({ ...w, keyName: keypairs[0].name }));
+				}
+				if (networks.length > 0 && !$wizard.networkId) {
+					let selectedNet = networks[0];
+					try {
+						const defaultRecord = await api.get<{ network_id: string }>('/api/networks/default', token, projectId);
+						defaultNetworkId = defaultRecord.network_id;
+						const found = networks.find(n => n.id === defaultRecord.network_id);
+						if (found) selectedNet = found;
+					} catch {
+						const byName = networks.find(n => n.name === 'Default');
+						if (byName) selectedNet = byName;
+					}
+					wizard.update(w => ({ ...w, networkId: selectedNet.id, networkName: selectedNet.name }));
+				} else if ($wizard.networkId) {
+					try {
+						const defaultRecord = await api.get<{ network_id: string }>('/api/networks/default', token, projectId);
+						defaultNetworkId = defaultRecord.network_id;
+					} catch { /* 무시 */ }
+				}
 			}
 			// 보안 그룹 기본 선택 (default)
 			if (securityGroups.length > 0 && $wizard.securityGroups.length === 0) {
 				const defaultSg = securityGroups.find(sg => sg.name === 'default');
 				if (defaultSg) wizard.update(w => ({ ...w, securityGroups: [defaultSg.name] }));
+			}
+			// admin 모드: 네트워크 기본 선택
+			if (adminMode && networks.length > 0 && !$wizard.networkId) {
+				const net = networks[0];
+				wizard.update(w => ({ ...w, networkId: net.id, networkName: net.name }));
 			}
 		} catch (e) {
 			loadError = e instanceof ApiError ? `데이터 로드 실패 (${e.status})` : '서버 오류';
@@ -144,12 +310,31 @@
 	}
 
 	onMount(() => {
-		loadData();
+		if (adminMode) {
+			// targetProjectId가 이미 설정된 경우 (볼륨에서 진입)
+			if ($wizard.targetProjectId) {
+				adminSelectedProjectId = $wizard.targetProjectId;
+				const found = adminProjects.find(p => p.id === $wizard.targetProjectId);
+				adminSelectedProjectName = found?.name ?? $wizard.targetProjectId;
+				loadData();
+				loadFlavorQuota();
+			}
+			loadAdminProjects();
+		} else {
+			loadData();
+			loadFlavorQuota();
+		}
 	});
 
 	function handleReset() {
 		resetWizard();
-		loadData();
+		adminSelectedProjectId = null;
+		adminSelectedProjectName = null;
+		if (adminMode) {
+			loadAdminProjects();
+		} else {
+			loadData();
+		}
 	}
 
 	function nextStep() {
@@ -169,6 +354,10 @@
 				wizard.update(w => ({ ...w, step: w.step - 1 }));
 			}
 		}
+	}
+
+	function goTo(step: number) {
+		wizard.update(w => ({ ...w, step }));
 	}
 
 	function selectImage(id: string, name: string) {
@@ -260,13 +449,14 @@
 		return parts.join(' · ');
 	});
 
+	// admin 모드에서는 키페어 없이도 배포 가능
 	let canNext = $derived((() => {
 		switch ($wizard.step) {
-			case 1: return !!$wizard.imageId;
+			case 1: return $wizard.bootSource === 'volume' ? !!$wizard.bootVolumeId : !!$wizard.imageId;
 			case 2: return !!$wizard.flavorId;
 			case 3: return true;
 			case 4: return true;
-			case 5: return !!$wizard.instanceName.trim() && !!$wizard.keyName;
+			case 5: return !!$wizard.instanceName.trim() && (adminMode || !!$wizard.keyName);
 			case 6: return !!$wizard.instanceName.trim();
 			default: return false;
 		}
@@ -287,24 +477,37 @@
 		if ($auth.token) headers['X-Auth-Token'] = $auth.token;
 		if ($auth.projectId) headers['X-Project-Id'] = $auth.projectId;
 
-		try {
-			const response = await fetch(`${baseUrl}/api/instances/async`, {
-				method: 'POST',
-				headers,
-				body: JSON.stringify({
-					name: $wizard.instanceName,
+		const endpoint = adminMode
+			? `${baseUrl}/api/admin/instances/async`
+			: `${baseUrl}/api/instances/async`;
+
+		const body: Record<string, unknown> = {
+			name: $wizard.instanceName,
+			...($wizard.bootSource === 'volume'
+				? { boot_volume_id: $wizard.bootVolumeId }
+				: {
 					image_id: $wizard.imageId,
-					flavor_id: $wizard.flavorId,
-					libraries: $wizard.libraries,
-					strategy: $wizard.strategy,
-					network_id: $wizard.networkId,
-					key_name: $wizard.keyName,
-					availability_zone: $wizard.availabilityZone,
-					security_groups: $wizard.securityGroups,
-					userdata: $wizard.cloudInit || null,
 					boot_volume_size_gb: $wizard.bootVolumeSizeGb,
 					delete_boot_volume_on_termination: $wizard.deleteBootVolumeOnTermination,
-				})
+				}),
+			flavor_id: $wizard.flavorId,
+			libraries: $wizard.libraries,
+			strategy: $wizard.strategy,
+			network_id: $wizard.networkId,
+			key_name: $wizard.keyName || null,
+			availability_zone: $wizard.availabilityZone,
+			security_groups: $wizard.securityGroups,
+			userdata: $wizard.cloudInit || null,
+		};
+		if (adminMode && adminSelectedProjectId) {
+			body.project_id = adminSelectedProjectId;
+		}
+
+		try {
+			const response = await fetch(endpoint, {
+				method: 'POST',
+				headers,
+				body: JSON.stringify(body),
 			});
 
 			if (!response.ok) {
@@ -338,12 +541,13 @@
 							}
 
 							if (data.step === 'completed') {
-								const instanceId = data.instance_id;
 								toast.success(`인스턴스 생성 완료`);
 								setTimeout(() => {
 									resetWizard();
+									adminSelectedProjectId = null;
+									adminSelectedProjectName = null;
 									closeWizard();
-									goto(instanceId ? `/dashboard/compute/instances/${instanceId}` : '/dashboard');
+									goto(adminMode ? '/admin/instances' : '/dashboard');
 								}, 1000);
 								return;
 							}
@@ -377,11 +581,104 @@
 		5: '설정',
 		6: '배포',
 	};
+
+	// admin 모드: 프로젝트 미선택 상태
+	let needsProjectSelect = $derived(adminMode && !adminSelectedProjectId);
 </script>
 
 <SlidePanel onClose={closeWizard} width="w-full md:w-[75vw] max-w-4xl">
 	<div class="p-4 md:p-8">
-		{#if loading}
+		{#if needsProjectSelect}
+			<!-- admin 모드: 프로젝트 선택 -->
+			<div class="flex items-start justify-between mb-6">
+				<div>
+					<h1 class="text-xl font-bold text-white">VM 생성 <span class="text-sm font-normal text-amber-400 ml-1">관리자</span></h1>
+					<p class="text-sm text-gray-500 mt-0.5">대상 프로젝트 선택</p>
+				</div>
+				<button
+					onclick={closeWizard}
+					class="text-gray-500 hover:text-white transition-colors p-1 rounded hover:bg-gray-800"
+					aria-label="닫기"
+				>
+					<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+					</svg>
+				</button>
+			</div>
+			<p class="text-sm text-gray-400 mb-4">VM을 생성할 프로젝트를 선택하세요. 선택한 프로젝트의 네트워크, 볼륨, 보안 그룹을 사용합니다.</p>
+			{#if adminProjectsLoading}
+				<div class="flex items-center justify-center py-10">
+					<LoadingSpinner size="md" color="blue">프로젝트 로드 중...</LoadingSpinner>
+				</div>
+			{:else if adminProjects.length === 0}
+				<div class="text-center py-10 text-gray-500 text-sm">프로젝트 목록을 불러올 수 없습니다.</div>
+			{:else}
+				<div class="relative mb-3">
+					<svg class="w-4 h-4 text-gray-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M10 18a8 8 0 100-16 8 8 0 000 16z"/>
+					</svg>
+					<input
+						type="text"
+						bind:value={adminProjectSearch}
+						placeholder="프로젝트 이름 또는 ID 검색..."
+						class="w-full bg-gray-800 border border-gray-700 text-sm text-gray-200 rounded-lg pl-9 pr-9 py-2 focus:outline-none focus:border-blue-500 placeholder-gray-500"
+					/>
+					{#if adminProjectSearch}
+						<button
+							onclick={() => (adminProjectSearch = '')}
+							class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white text-sm"
+							aria-label="검색어 지우기"
+						>✕</button>
+					{/if}
+				</div>
+				{#if filteredAdminProjects.length === 0}
+					<div class="text-center py-10 text-gray-500 text-sm">검색 결과가 없습니다.</div>
+				{:else}
+					<div class="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
+						{#each filteredAdminProjects as proj}
+							{@const q = adminProjectQuotas.get(proj.id)}
+							<button
+								onclick={() => selectAdminProject(proj.id, proj.name)}
+								class="w-full text-left px-4 py-3 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-gray-500 transition-colors"
+							>
+								<div class="flex items-start justify-between gap-3">
+									<div class="min-w-0 flex-1">
+										<div class="text-white text-sm font-medium truncate">{proj.name}</div>
+										<div class="text-gray-500 text-xs font-mono mt-0.5 truncate">{proj.id}</div>
+									</div>
+									{#if adminProjectQuotas.size === 0}
+										<div class="text-gray-600 text-xs flex-shrink-0">quota 로딩 중...</div>
+									{:else if q}
+										<div class="flex flex-wrap items-center gap-1.5 flex-shrink-0 justify-end">
+											<span class="px-1.5 py-0.5 rounded text-[11px] font-mono {isExhausted(q.instances) ? 'bg-red-900/40 text-red-300 border border-red-800/50' : 'bg-gray-900 text-gray-400 border border-gray-700'}" title="남은 인스턴스 (사용 {q.instances?.used ?? 0} / {q.instances?.quota < 0 ? '∞' : q.instances?.quota})">
+												VM {fmtRemaining(q.instances)}
+											</span>
+											<span class="px-1.5 py-0.5 rounded text-[11px] font-mono {isExhausted(q.cpu) ? 'bg-red-900/40 text-red-300 border border-red-800/50' : 'bg-gray-900 text-gray-400 border border-gray-700'}" title="남은 vCPU (사용 {q.cpu?.used ?? 0} / {q.cpu?.quota < 0 ? '∞' : q.cpu?.quota})">
+												CPU {fmtRemaining(q.cpu)}
+											</span>
+											<span class="px-1.5 py-0.5 rounded text-[11px] font-mono {isExhausted(q.ram_mb) ? 'bg-red-900/40 text-red-300 border border-red-800/50' : 'bg-gray-900 text-gray-400 border border-gray-700'}" title="남은 RAM MB (사용 {q.ram_mb?.used ?? 0} / {q.ram_mb?.quota < 0 ? '∞' : q.ram_mb?.quota})">
+												RAM {q.ram_mb && q.ram_mb.quota >= 0 ? Math.max(0, Math.floor((q.ram_mb.quota - q.ram_mb.used) / 1024)) + 'GB' : '∞'}
+											</span>
+											<span class="px-1.5 py-0.5 rounded text-[11px] font-mono {isExhausted(q.disk_gb) ? 'bg-red-900/40 text-red-300 border border-red-800/50' : 'bg-gray-900 text-gray-400 border border-gray-700'}" title="남은 디스크 GB (사용 {q.disk_gb?.used ?? 0} / {q.disk_gb?.quota < 0 ? '∞' : q.disk_gb?.quota})">
+												DISK {fmtRemaining(q.disk_gb)}{q.disk_gb && q.disk_gb.quota >= 0 ? 'GB' : ''}
+											</span>
+										</div>
+									{:else}
+										<div class="text-gray-600 text-xs flex-shrink-0">quota 없음</div>
+									{/if}
+								</div>
+							</button>
+						{/each}
+					</div>
+				{/if}
+			{/if}
+			<div class="flex justify-start mt-6 pt-4 border-t border-gray-800">
+				<button
+					onclick={closeWizard}
+					class="px-4 py-2 text-sm text-gray-400 hover:text-white border border-gray-700 rounded-lg hover:border-gray-500 transition-colors"
+				>취소</button>
+			</div>
+		{:else if loading}
 			<div class="flex items-center justify-center py-16">
 				<LoadingSpinner size="lg" color="blue">데이터 로드 중...</LoadingSpinner>
 			</div>
@@ -408,27 +705,15 @@
 			</div>
 		{:else}
 			<!-- 헤더 -->
-			<div class="flex items-start justify-between mb-6">
-				<div>
-					<h1 class="text-xl font-bold text-white">VM 생성</h1>
-					<p class="text-sm text-gray-500 mt-0.5">STEP {$wizard.step} / {TOTAL_STEPS} · {stepSubtitles[$wizard.step]}</p>
-				</div>
-				<div class="flex items-center gap-3">
-					<button
-						onclick={handleReset}
-						class="text-xs text-gray-500 hover:text-gray-300 transition-colors"
-					>새로 시작</button>
-					<button
-						onclick={closeWizard}
-						class="text-gray-500 hover:text-white transition-colors p-1 rounded hover:bg-gray-800"
-						aria-label="닫기"
-					>
-						<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-						</svg>
-					</button>
-				</div>
-			</div>
+			<WizardHeader
+				step={$wizard.step}
+				totalSteps={TOTAL_STEPS}
+				stepName={stepLabels[$wizard.step - 1]}
+				{adminMode}
+				adminProjectName={adminSelectedProjectName}
+				onReset={handleReset}
+				onClose={closeWizard}
+			/>
 
 			{#if loadError}
 				<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-6">
@@ -437,46 +722,60 @@
 			{/if}
 
 			<!-- 스테퍼 -->
-			<div class="flex items-center gap-1 mb-8">
-				{#each stepLabels as label, i}
-					{@const step = i + 1}
-					<div class="flex items-center gap-2">
-						{#if $wizard.step > step}
-							<!-- 완료 -->
-							<div class="step-done w-7 h-7 rounded-full flex items-center justify-center">
-								<svg class="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
-								</svg>
-							</div>
-						{:else if $wizard.step === step}
-							<!-- 현재 -->
-							<div class="step-current w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white">
-								{step}
-							</div>
-						{:else}
-							<!-- 미래 -->
-							<div class="w-7 h-7 rounded-full bg-gray-800 flex items-center justify-center text-xs font-medium text-gray-500">
-								{step}
-							</div>
-						{/if}
-						<span class="text-xs hidden sm:inline {$wizard.step >= step ? 'text-white' : 'text-gray-600'}">{label}</span>
-					</div>
-					{#if i < stepLabels.length - 1}
-						<div class="flex-1 h-px {$wizard.step > step + 1 ? 'step-connector-done' : ''} bg-gray-800 mx-1"></div>
-					{/if}
-				{/each}
-			</div>
+			<WizardStepper
+				cur={$wizard.step}
+				totalSteps={TOTAL_STEPS}
+				{stepLabels}
+				{goTo}
+			/>
 
 			<!-- 단계별 내용 -->
 			<div class="mb-8">
 				{#if $wizard.step === 1}
-					<h2 class="text-lg font-semibold text-white mb-1">OS 이미지 선택</h2>
-					<p class="text-sm text-gray-400 mb-4">Glance에 등록된 공개 이미지, 직접 업로드한 이미지는 <a href="/dashboard/compute/images" class="text-blue-400 hover:underline">이미지 페이지</a>에서 관리할 수 있습니다.</p>
-					<SelectImage {images} selectedId={$wizard.imageId} onSelect={selectImage} />
+					<h2 class="text-lg font-semibold text-white mb-3">부트 소스 선택</h2>
+					<!-- 이미지 / 기존 볼륨 토글 -->
+					<div class="flex mb-5 rounded-lg overflow-hidden border border-gray-700">
+						<button
+							class="flex-1 py-2 text-sm transition-colors {$wizard.bootSource === 'image' ? 'bg-blue-700 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'}"
+							onclick={() => wizard.update(w => ({ ...w, bootSource: 'image', bootVolumeId: null, bootVolumeName: null }))}
+						>OS 이미지</button>
+						<button
+							class="flex-1 py-2 text-sm transition-colors {$wizard.bootSource === 'volume' ? 'bg-blue-700 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'}"
+							onclick={() => wizard.update(w => ({ ...w, bootSource: 'volume', imageId: null, imageName: null }))}
+						>기존 부팅 볼륨</button>
+					</div>
+
+					{#if $wizard.bootSource === 'image'}
+						<p class="text-sm text-gray-400 mb-4">Glance에 등록된 공개 이미지, 직접 업로드한 이미지는 <a href="/dashboard/compute/images" class="text-blue-400 hover:underline">이미지 페이지</a>에서 관리할 수 있습니다.</p>
+						<SelectImage {images} selectedId={$wizard.imageId} onSelect={selectImage} />
+					{:else}
+						{@const bootableVols = volumes.filter(v => v.bootable && v.status === 'available')}
+						<p class="text-sm text-gray-400 mb-4">부팅 가능하고 <span class="text-green-400">available</span> 상태인 볼륨만 표시됩니다.</p>
+						{#if bootableVols.length === 0}
+							<div class="text-center py-10 text-gray-600 text-sm">부팅 가능한 볼륨이 없습니다.</div>
+						{:else}
+							<div class="space-y-2 max-h-96 overflow-y-auto pr-1">
+								{#each bootableVols as vol}
+									<button
+										onclick={() => wizard.update(w => ({ ...w, bootVolumeId: vol.id, bootVolumeName: vol.name }))}
+										class="w-full text-left rounded-lg border px-4 py-3 transition-colors {$wizard.bootVolumeId === vol.id ? 'border-blue-500 bg-blue-900/20' : 'border-gray-700 bg-gray-900 hover:border-gray-500'}"
+									>
+										<div class="flex items-center justify-between">
+											<span class="text-sm text-white font-medium">{vol.name || vol.id.slice(0, 8)}</span>
+											<span class="text-xs text-gray-500 font-mono">{vol.size} GB</span>
+										</div>
+										{#if vol.volume_image_metadata?.image_name}
+											<div class="text-xs text-gray-500 mt-0.5">{vol.volume_image_metadata.image_name}</div>
+										{/if}
+									</button>
+								{/each}
+							</div>
+						{/if}
+					{/if}
 
 				{:else if $wizard.step === 2}
 					<h2 class="text-lg font-semibold text-white mb-1">플레이버 선택 <span class="text-gray-500 text-sm font-normal">VM의 vCPU / 메모리 / 디스크 스펙</span></h2>
-					<SelectFlavor {flavors} selectedId={$wizard.flavorId} onSelect={selectFlavor} />
+					<SelectFlavor {flavors} selectedId={$wizard.flavorId} onSelect={selectFlavor} quota={flavorQuota} />
 
 				{:else if $wizard.step === 3}
 					<h2 class="text-lg font-semibold text-white mb-1">라이브러리 레이어 <span class="text-gray-500 text-sm font-normal">OverlayFS로 마운트할 사전 빌드 레이어</span></h2>
@@ -520,8 +819,10 @@
 					<h2 class="text-lg font-semibold text-white mb-5">인스턴스 설정</h2>
 
 					<!-- VM 이름 -->
-					<div class="mb-5">
-						<label for="vm-name" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">VM 이름</label>
+					<div class="mb-4">
+						<label for="vm-name" class="block text-[11.5px] font-semibold text-gray-300 tracking-tight flex items-center gap-1.5 mb-1.5">
+							VM 이름 <span class="text-red-400">*</span>
+						</label>
 						<input
 							id="vm-name"
 							bind:value={$wizard.instanceName}
@@ -532,9 +833,11 @@
 					</div>
 
 					<!-- 네트워크 + 키페어 -->
-					<div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
+					<div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5 mb-4">
 						<div>
-							<label for="create-network" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">네트워크</label>
+							<label for="create-network" class="block text-[11.5px] font-semibold text-gray-300 tracking-tight flex items-center gap-1.5 mb-1.5">
+								네트워크 <span class="text-red-400">*</span>
+							</label>
 							<select
 								id="create-network"
 								value={$wizard.networkId ?? ''}
@@ -550,28 +853,42 @@
 							</select>
 						</div>
 						<div>
-							<label for="create-keypair" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">키페어</label>
-							<select
-								id="create-keypair"
-								value={$wizard.keyName ?? ''}
-								onchange={e => wizard.update(w => ({ ...w, keyName: (e.target as HTMLSelectElement).value || null }))}
-								class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
-							>
-								<option value="">키페어 선택</option>
-								{#each keypairs as kp}
-									<option value={kp.name}>{kp.name}</option>
-								{/each}
-							</select>
-							{#if keypairs.length === 0}
-								<p class="text-xs text-amber-400 mt-1">등록된 키페어가 없습니다.</p>
+							{#if adminMode}
+								<label class="block text-[11.5px] font-semibold text-gray-300 tracking-tight flex items-center gap-1.5 mb-1.5">
+									키페어 <span class="text-[10px] text-gray-500 font-normal px-1.5 py-0.5 rounded-full bg-gray-800">선택</span>
+								</label>
+								<div class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-gray-500 text-sm">
+									없음 (관리자 생성 — 콘솔 비밀번호 사용)
+								</div>
+								<p class="text-xs text-amber-400/80 mt-1">admin 모드에서는 대상 프로젝트의 키페어에 접근할 수 없습니다.</p>
+							{:else}
+								<label for="create-keypair" class="block text-[11.5px] font-semibold text-gray-300 tracking-tight flex items-center gap-1.5 mb-1.5">
+									키페어 <span class="text-red-400">*</span>
+								</label>
+								<select
+									id="create-keypair"
+									value={$wizard.keyName ?? ''}
+									onchange={e => wizard.update(w => ({ ...w, keyName: (e.target as HTMLSelectElement).value || null }))}
+									class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
+								>
+									<option value="">키페어 선택</option>
+									{#each keypairs as kp}
+										<option value={kp.name}>{kp.name}</option>
+									{/each}
+								</select>
+								{#if keypairs.length === 0}
+									<p class="text-xs text-amber-400 mt-1">등록된 키페어가 없습니다.</p>
+								{/if}
 							{/if}
 						</div>
 					</div>
 
 					<!-- 보안 그룹 + 가용 영역 -->
-					<div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
+					<div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5 mb-4">
 						<div>
-							<label for="create-sg" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">보안 그룹</label>
+							<label for="create-sg" class="block text-[11.5px] font-semibold text-gray-300 tracking-tight flex items-center gap-1.5 mb-1.5">
+								보안 그룹 <span class="text-[10px] text-gray-500 font-normal px-1.5 py-0.5 rounded-full bg-gray-800">선택</span>
+							</label>
 							<select
 								id="create-sg"
 								value={$wizard.securityGroups[0] ?? ''}
@@ -588,7 +905,9 @@
 							</select>
 						</div>
 						<div>
-							<label for="create-az" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">가용 영역</label>
+							<label for="create-az" class="block text-[11.5px] font-semibold text-gray-300 tracking-tight flex items-center gap-1.5 mb-1.5">
+								가용 영역 <span class="text-[10px] text-gray-500 font-normal px-1.5 py-0.5 rounded-full bg-gray-800">선택</span>
+							</label>
 							<select
 								id="create-az"
 								value={$wizard.availabilityZone ?? ''}
@@ -607,86 +926,167 @@
 					</div>
 
 					<!-- 루트 디스크 -->
-					<div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
+					{#if $wizard.bootSource === 'image'}
+					<div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5 mb-4">
 						<div>
-							<label for="boot-volume-size" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">루트 디스크 (GB)</label>
-							<input
-								id="boot-volume-size"
-								bind:value={$wizard.bootVolumeSizeGb}
-								type="number"
-								min="1"
-								max="16384"
-								class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
-							/>
-							<p class="text-xs text-gray-500 mt-1">VM 부트 볼륨 크기 (1–16384 GB)</p>
+							<label for="boot-volume-size" class="block text-[11.5px] font-semibold text-gray-300 tracking-tight flex items-center gap-1.5 mb-1.5">
+								루트 디스크 <span class="text-red-400">*</span>
+							</label>
+							<div class="flex items-center gap-3">
+								<input
+									id="boot-volume-size"
+									bind:value={$wizard.bootVolumeSizeGb}
+									type="number"
+									min="1"
+									max="16384"
+									class="w-24 bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
+								/>
+								<span class="text-[11px] text-gray-500">1 – 16,384 GB</span>
+							</div>
 						</div>
-						<div class="flex items-start sm:items-end">
-							<label class="flex items-center gap-2 text-sm text-gray-300 sm:pb-2 cursor-pointer">
+						<div class="flex items-end pb-1">
+							<label class="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-800/60 border border-gray-700 cursor-pointer w-full">
 								<input
 									type="checkbox"
 									bind:checked={$wizard.deleteBootVolumeOnTermination}
-									class="w-4 h-4 rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500"
+									class="w-4 h-4 rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500 flex-shrink-0"
 								/>
-								VM 삭제 시 루트 디스크 함께 삭제
+								<span class="text-sm text-gray-300">VM 삭제 시 루트 디스크 함께 삭제</span>
 							</label>
 						</div>
 					</div>
+					{:else}
+					<div class="mb-4 p-3 rounded-lg bg-blue-900/20 border border-blue-800/40 text-blue-300 text-xs">
+						기존 부팅 볼륨 사용 시 루트 디스크 크기 설정이 적용되지 않습니다. 볼륨: <span class="font-medium">{$wizard.bootVolumeName ?? $wizard.bootVolumeId}</span>
+					</div>
+					{/if}
 
-					<!-- cloud-init -->
-					<div class="mb-5">
-						<label for="cloud-init" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">CLOUD-INIT (선택)</label>
-						<textarea
-							id="cloud-init"
-							bind:value={$wizard.cloudInit}
-							rows="6"
-							placeholder="#cloud-config&#10;package_update: true&#10;packages:&#10;  - htop"
-							class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm font-mono focus:outline-none focus:border-blue-500 transition-colors resize-y"
-						></textarea>
+					<!-- cloud-init 다크 에디터 -->
+					<div class="mb-4">
+						<label for="cloud-init" class="block text-[11.5px] font-semibold text-gray-300 tracking-tight flex items-center gap-1.5 mb-1.5">
+							CLOUD-INIT <span class="text-[10px] text-gray-500 font-normal px-1.5 py-0.5 rounded-full bg-gray-800">선택</span>
+						</label>
+						<div class="relative">
+							<div class="absolute top-2 right-2 flex gap-1 z-[2] bg-gray-900 border border-gray-700 rounded-md p-0.5">
+								<button type="button" disabled class="px-2 py-1 text-[10.5px] font-mono text-gray-500 rounded opacity-50 cursor-not-allowed">예제 ▾</button>
+								<button type="button" disabled class="px-2 py-1 text-[10.5px] font-mono text-gray-500 rounded opacity-50 cursor-not-allowed">YAML ✓</button>
+							</div>
+							<textarea
+								id="cloud-init"
+								bind:value={$wizard.cloudInit}
+								rows="8"
+								placeholder="#cloud-config&#10;package_update: true&#10;packages:&#10;  - htop"
+								class="w-full p-3.5 font-mono text-xs bg-[#0f172a] text-slate-200 rounded-lg border border-gray-700 outline-none min-h-[140px] resize-y leading-relaxed focus:border-blue-500"
+							></textarea>
+						</div>
 					</div>
 
 				{:else if $wizard.step === 6}
-					<h2 class="text-lg font-semibold text-white mb-5">최종 확인</h2>
+					{@const reviewFlavor = flavors.find((f: any) => f.id === $wizard.flavorId)}
+					{@const reviewGpu = (() => {
+						if (!reviewFlavor) return '';
+						const alias = reviewFlavor.extra_specs?.['pci_passthrough:alias'] ?? '';
+						if (!alias) return '';
+						const parts = alias.split(',').filter((e: string) => e.includes(':') && !e.toLowerCase().includes('audio'));
+						return parts.map((e: string) => {
+							const idx = e.lastIndexOf(':');
+							return `${e.slice(0, idx).trim()} × ${parseInt(e.slice(idx + 1)) || 1}`;
+						}).join(', ');
+					})()}
+					<h2 class="text-lg font-semibold text-white mb-4">최종 확인</h2>
 
-					<div class="bg-gray-900 rounded-xl border border-gray-700 p-6 space-y-3 mb-6 text-sm">
-						<div class="flex justify-between">
-							<span class="text-gray-500">이름</span>
-							<span class="text-white font-medium">{$wizard.instanceName || '-'}</span>
+					<div class="rounded-xl bg-gray-900 border border-gray-800 overflow-hidden mb-4">
+						<!-- 이름 -->
+						<div class="grid grid-cols-[140px_1fr_auto] gap-4 items-center px-4 py-3.5 border-b border-gray-800">
+							<span class="text-xs text-gray-400 font-medium">이름</span>
+							<span class="text-sm text-white font-semibold font-mono">{$wizard.instanceName || '-'}</span>
+							<button onclick={() => goTo(5)} class="review-edit-btn">✎ 수정</button>
 						</div>
-						<div class="flex justify-between">
-							<span class="text-gray-500">이미지</span>
-							<span class="text-white">{$wizard.imageName ?? '-'}</span>
+						<!-- 이미지 / 볼륨 -->
+						<div class="grid grid-cols-[140px_1fr_auto] gap-4 items-center px-4 py-3.5 border-b border-gray-800">
+							<span class="text-xs text-gray-400 font-medium">
+								{$wizard.bootSource === 'volume' ? '부트 볼륨' : '이미지'}
+							</span>
+							<span class="flex flex-col gap-0.5 min-w-0 text-sm text-white font-mono">
+								{#if $wizard.bootSource === 'volume'}
+									{$wizard.bootVolumeName ?? $wizard.bootVolumeId ?? '-'}
+								{:else}
+									<span class="font-semibold truncate">{$wizard.imageName ?? '-'}</span>
+								{/if}
+							</span>
+							<button onclick={() => goTo(1)} class="review-edit-btn">✎ 수정</button>
 						</div>
-						<div class="flex justify-between">
-							<span class="text-gray-500">플레이버</span>
-							<span class="text-white">{$wizard.flavorName ?? '-'} <span class="text-gray-500 text-xs">({selectedFlavorDetail})</span></span>
+						<!-- 플레이버 -->
+						<div class="grid grid-cols-[140px_1fr_auto] gap-4 items-start px-4 py-3.5 border-b border-gray-800">
+							<span class="text-xs text-gray-400 font-medium mt-0.5">플레이버</span>
+							<span class="flex flex-col gap-2 min-w-0">
+								<span class="text-sm text-white font-mono font-semibold">{$wizard.flavorName ?? '-'}</span>
+								{#if reviewFlavor}
+									<div class="grid grid-cols-4 gap-2">
+										<div class="flex flex-col gap-0.5 px-2.5 py-2 rounded-md bg-gray-800/70 border border-gray-700">
+											<span class="text-[9.5px] uppercase tracking-wider text-gray-500 font-mono font-bold">vCPU</span>
+											<span class="font-mono text-sm font-semibold text-white">{reviewFlavor.vcpus}</span>
+										</div>
+										<div class="flex flex-col gap-0.5 px-2.5 py-2 rounded-md bg-gray-800/70 border border-gray-700">
+											<span class="text-[9.5px] uppercase tracking-wider text-gray-500 font-mono font-bold">RAM</span>
+											<span class="font-mono text-sm font-semibold text-white">{reviewFlavor.ram >= 1024 ? Math.round(reviewFlavor.ram / 1024) + 'G' : reviewFlavor.ram + 'M'}</span>
+										</div>
+										<div class="flex flex-col gap-0.5 px-2.5 py-2 rounded-md bg-gray-800/70 border border-gray-700">
+											<span class="text-[9.5px] uppercase tracking-wider text-gray-500 font-mono font-bold">Disk</span>
+											<span class="font-mono text-sm font-semibold text-white">{reviewFlavor.disk}G</span>
+										</div>
+										<div class="flex flex-col gap-0.5 px-2.5 py-2 rounded-md bg-gray-800/70 border border-gray-700">
+											<span class="text-[9.5px] uppercase tracking-wider text-gray-500 font-mono font-bold">GPU</span>
+											<span class="font-mono text-sm font-semibold {reviewGpu ? 'text-purple-400' : 'text-gray-600'}">{reviewGpu || '—'}</span>
+										</div>
+									</div>
+								{/if}
+							</span>
+							<button onclick={() => goTo(2)} class="review-edit-btn mt-0.5">✎ 수정</button>
 						</div>
+						<!-- 라이브러리 -->
 						{#if $wizard.libraries.length > 0}
-							<div class="flex justify-between">
-								<span class="text-gray-500">라이브러리</span>
-								<span class="text-white">{$wizard.libraries.join(', ')}</span>
-							</div>
+						<div class="grid grid-cols-[140px_1fr_auto] gap-4 items-center px-4 py-3.5 border-b border-gray-800">
+							<span class="text-xs text-gray-400 font-medium">라이브러리</span>
+							<span class="flex flex-wrap gap-1.5">
+								{#each $wizard.libraries as lib}
+									<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-900/30 border border-blue-800 text-blue-300 font-mono text-[11px]">{lib}</span>
+								{/each}
+							</span>
+							<button onclick={() => goTo(3)} class="review-edit-btn">✎ 수정</button>
+						</div>
 						{/if}
-						<div class="flex justify-between">
-							<span class="text-gray-500">키페어</span>
-							<span class="text-white">{$wizard.keyName ?? '없음'}</span>
+						<!-- 키페어 -->
+						<div class="grid grid-cols-[140px_1fr_auto] gap-4 items-center px-4 py-3.5 border-b border-gray-800">
+							<span class="text-xs text-gray-400 font-medium">키페어</span>
+							<span class="text-sm text-white font-mono">{$wizard.keyName ?? '없음'}</span>
+							<button onclick={() => goTo(5)} class="review-edit-btn">✎ 수정</button>
 						</div>
-						<div class="flex justify-between">
-							<span class="text-gray-500">전략</span>
-							<span class="text-white">
-								{$wizard.strategy === 'prebuilt' ? '일반 배포' : $wizard.strategy === 'dynamic' ? 'HA 배포' : '없음'}
+						<!-- 전략 -->
+						<div class="grid grid-cols-[140px_1fr_auto] gap-4 items-center px-4 py-3.5 border-b border-gray-800">
+							<span class="text-xs text-gray-400 font-medium">전략</span>
+							<span class="text-sm text-white">
+								{$wizard.strategy === 'prebuilt' ? '일반 배포 ⚡' : $wizard.strategy === 'dynamic' ? 'HA 배포 ⏱' : '없음'}
 							</span>
+							<button onclick={() => goTo(4)} class="review-edit-btn">✎ 수정</button>
 						</div>
-						<div class="flex justify-between">
-							<span class="text-gray-500">네트워크</span>
-							<span class="text-white">{$wizard.networkName ?? '기본'}</span>
+						<!-- 네트워크 -->
+						<div class="grid grid-cols-[140px_1fr_auto] gap-4 items-center px-4 py-3.5 border-b border-gray-800">
+							<span class="text-xs text-gray-400 font-medium">네트워크</span>
+							<span class="text-sm text-white font-mono">{$wizard.networkName ?? '기본'}</span>
+							<button onclick={() => goTo(5)} class="review-edit-btn">✎ 수정</button>
 						</div>
-						<div class="flex justify-between">
-							<span class="text-gray-500">루트 디스크</span>
-							<span class="text-white">
+						<!-- 루트 디스크 -->
+						{#if $wizard.bootSource === 'image'}
+						<div class="grid grid-cols-[140px_1fr_auto] gap-4 items-center px-4 py-3.5">
+							<span class="text-xs text-gray-400 font-medium">루트 디스크</span>
+							<span class="text-sm text-white font-mono">
 								{$wizard.bootVolumeSizeGb} GB
-								<span class="text-gray-500 text-xs">({$wizard.deleteBootVolumeOnTermination ? 'VM 삭제 시 함께 삭제' : 'VM 삭제 후 보존'})</span>
+								<span class="text-gray-500 text-xs ml-1">({$wizard.deleteBootVolumeOnTermination ? 'VM 삭제 시 함께 삭제' : '보존'})</span>
 							</span>
+							<button onclick={() => goTo(5)} class="review-edit-btn">✎ 수정</button>
 						</div>
+						{/if}
 					</div>
 
 					{#if $wizard.libraries.length > 0}
@@ -698,6 +1098,22 @@
 						</div>
 					{/if}
 
+					<!-- deploy banner -->
+					<div class="flex items-center gap-3.5 px-4 py-3.5 rounded-lg bg-blue-950/30 border border-blue-900/50 mb-4">
+						<div class="w-9 h-9 rounded-full bg-blue-600 text-white flex items-center justify-center flex-shrink-0">
+							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/>
+							</svg>
+						</div>
+						<div class="flex-1">
+							<b class="block text-sm text-white font-semibold mb-0.5">배포 준비 완료</b>
+							<small class="text-[11.5px] text-gray-400 leading-relaxed">
+								VM 생성 클릭 시 OpenStack에 요청을 보냅니다. cloud-init은 첫 부팅 시 자동 실행됩니다.
+								{#if reviewGpu} · GPU 가용성이 스케줄러에서 자동 확인됩니다.{/if}
+							</small>
+						</div>
+					</div>
+
 					{#if deployError}
 						<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">
 							{deployError}
@@ -707,41 +1123,37 @@
 			</div>
 
 			<!-- 하단 네비게이션 -->
-			<div class="flex items-center justify-between pt-4 border-t border-gray-800">
-				<button
-					onclick={closeWizard}
-					class="px-4 py-2 text-sm text-gray-400 hover:text-white border border-gray-700 rounded-lg hover:border-gray-500 transition-colors"
-				>취소</button>
-
-				<div class="flex items-center gap-3">
-					{#if $wizard.step > 1}
-						<button
-							onclick={prevStep}
-							class="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors flex items-center gap-1"
-						>← 이전</button>
-					{/if}
-					{#if $wizard.step < TOTAL_STEPS}
-						<Button onclick={nextStep} disabled={!canNext}>다음 →</Button>
-					{:else}
-						<Button onclick={deploy} disabled={!canNext}>VM 생성</Button>
-					{/if}
-				</div>
-			</div>
+			<WizardFooter
+				imageDisplay={$wizard.imageName ?? ($wizard.bootSource === 'volume' ? ($wizard.bootVolumeName ?? null) : null)}
+				flavorDisplay={$wizard.flavorName}
+				libCount={$wizard.libraries.length}
+				step={$wizard.step}
+				totalSteps={TOTAL_STEPS}
+				canPrev={$wizard.step > 1}
+				canNext={canNext}
+				onCancel={closeWizard}
+				onPrev={prevStep}
+				onNext={nextStep}
+				onDeploy={deploy}
+			/>
 		{/if}
 	</div>
 </SlidePanel>
 
 <style>
-  .step-done {
-    background: var(--gradient-warm);
+  .review-edit-btn {
+    font-size: 11.5px;
+    color: rgb(156 163 175);
+    padding: 2px 10px;
+    border-radius: 6px;
+    border: 1px solid rgb(55 65 81);
+    transition: all 0.15s;
+    white-space: nowrap;
+    flex-shrink: 0;
   }
-  .step-current {
-    background: var(--gradient-warm);
-    box-shadow: 0 0 12px color-mix(in oklab, var(--color-warm) 40%, transparent);
-    ring-color: color-mix(in oklab, var(--color-warm) 30%, transparent);
-  }
-  .step-connector-done {
-    background: var(--color-warm) !important;
-    opacity: 0.6;
+  .review-edit-btn:hover {
+    color: rgb(96 165 250);
+    border-color: rgb(29 78 216 / 0.7);
+    background: rgb(23 37 84 / 0.3);
   }
 </style>

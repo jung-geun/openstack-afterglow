@@ -505,7 +505,21 @@ def create_access_rule(
     # access_key 조회 (CephX만 해당, IP 규칙은 없음)
     access_key = ""
     if access_type == "cephx":
-        access_key = _get_access_key(client, file_storage_id, data["id"])
+        try:
+            from app.config import get_settings as _get_settings
+
+            _timeout = _get_settings().manila_cephx_key_timeout_seconds
+        except Exception:
+            _timeout = 300
+        try:
+            access_key = _get_access_key(client, file_storage_id, data["id"], _timeout)
+        except RuntimeError:
+            # key 발급 타임아웃 → 생성된 고아 rule 자동 정리 후 예외 재발생
+            try:
+                _revoke_access_rule_raw(client, file_storage_id, data["id"])
+            except Exception:
+                pass
+            raise
     return {
         "access_id": data["id"],
         "access_key": access_key,
@@ -559,17 +573,62 @@ def get_export_locations(conn, file_storage_id: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _get_access_key(client: ManilaClient, file_storage_id: str, access_id: str) -> str:
-    """access rule 에서 CephX secret key 추출 (Manila API v2.45+)."""
-    for _ in range(20):
-        # API v2.45+: use share-access-rules endpoint
+def _revoke_access_rule_raw(client: ManilaClient, file_storage_id: str, access_id: str) -> None:
+    """client 객체만 있을 때 access rule을 직접 revoke (create_access_rule 내부 rollback 전용)."""
+    client.post(f"shares/{file_storage_id}/action", {"deny_access": {"access_id": access_id}})
+
+
+def _get_access_key(client: ManilaClient, file_storage_id: str, access_id: str, timeout_seconds: int = 300) -> str:
+    """access rule 에서 CephX secret key 추출 (Manila API v2.45+).
+
+    Manila는 access rule 생성 직후 key가 빈 문자열일 수 있으므로 timeout_seconds 동안 재시도.
+    모두 실패하면 RuntimeError 발생 — 빈 key로 cloud-init에 주입되면 CephFS 마운트가
+    반드시 실패하므로 호출부에서 인지할 수 있도록 예외를 선호한다.
+    """
+    import logging as _logging
+
+    _log = _logging.getLogger(__name__)
+    max_attempts = max(1, timeout_seconds // 3)
+    # ~30초 간격으로 INFO 진행 로그를 찍어 hang 위치를 가시화한다.
+    info_interval = max(1, max_attempts // 10)
+    last_state = "?"
+    for attempt in range(max_attempts):
         data = client.get(f"share-access-rules?share_id={file_storage_id}")
         rules = data.get("access_rules", [])
         for rule in rules:
-            if rule["id"] == access_id and rule.get("access_key"):
-                return rule["access_key"]
+            if rule["id"] == access_id:
+                last_state = rule.get("state", "?")
+                if rule.get("access_key"):
+                    if attempt > 0:
+                        _log.info(
+                            "[manila] CephX key 획득 — %ds 경과, rule state=%s, access_id=%s",
+                            attempt * 3,
+                            last_state,
+                            access_id,
+                        )
+                    return rule["access_key"]
+                break
+        if attempt > 0 and attempt % info_interval == 0:
+            _log.info(
+                "[manila] CephX key 폴링 진행 %d/%d (~%ds 경과, rule state=%s, access_id=%s)",
+                attempt,
+                max_attempts,
+                attempt * 3,
+                last_state,
+                access_id,
+            )
+        else:
+            _log.debug(
+                "[manila] CephX key 미할당 %d/%d, rule state=%s",
+                attempt + 1,
+                max_attempts,
+                last_state,
+            )
         time.sleep(3)
-    return ""
+    raise RuntimeError(
+        f"CephX access key 발급 타임아웃 (access_id={access_id}, share={file_storage_id}, "
+        f"last_state={last_state}). Manila가 {timeout_seconds}초 내에 key를 할당하지 못했습니다."
+    )
 
 
 def _parse_file_storage(data: dict) -> FileStorageInfo:

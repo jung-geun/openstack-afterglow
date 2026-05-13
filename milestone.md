@@ -556,6 +556,9 @@ Step 5: 요약 & 배포
 - [x] 5.3 볼륨 백업 및 복구
   - [x] Cinder upper 볼륨의 정기 백업 스케줄링 — `auto_backup.py` + `_auto_backup_loop`
   - [x] 백업에서 복구 시 OverlayFS 재구성 자동화 — `existing_upper_volume_id` + workdir 정리
+  - [x] 볼륨 목록 ActionMenu 수동 백업 생성 — `VolumeBackupModal.svelte` + `POST /api/volumes/backups` (기존 endpoint 재사용)
+  - [x] 볼륨 목록 ActionMenu 스냅샷 생성 — `VolumeSnapshotModal.svelte` + `POST /api/volume-snapshots` (기존 endpoint 재사용)
+  - [x] 사용자용 볼륨 용량 확장 — `POST /api/volumes/{id}/extend` + `cinder.extend_volume` + `VolumeExtendModal.svelte` (available + in-use 모두 허용, 단위 테스트 7건)
 
 - [x] 5.4 VM 스케일링 지원
   - [x] 인스턴스 resize (플레이버 변경) — `POST /api/admin/instances/{id}/resize`, `/revert-resize` 엔드포인트 + `nova.resize_server`/`revert_resize_server` 서비스 함수 추가. `InstanceDetailPanel`에 resize 모달(flavor 선택) + VERIFY_RESIZE 상태에서 '되돌리기' 버튼 추가. 단위 테스트 4건 (`test_admin_resize.py`)
@@ -1945,4 +1948,175 @@ pymysql.err.ProgrammingError: (1146, "Table 'afterglow.project_manager_credentia
 ### 29.7 범위 외
 
 - `ubuntu-drivers autoinstall` 이 1080ti(Pascal) 에 잘못된 드라이버 선택 가능성 — 신규 인스턴스 검증 후 문제 시 별도 PR.
-- 외부 SG 의 apt repo egress 차단 가능성 — 별도 PR.
+
+---
+
+## 30. 라이브러리 빌더 안정화 — end-to-end 동작 확정 (2026-05-12)
+
+### 30.1 동기
+
+라이브러리 빌드 파이프라인(library_builder.py prebuilt share 트랙)을 실 환경에서 end-to-end 동작 가능 상태로 만든다.
+진단된 이슈 3건:
+1. 유저 VM cloud-init runcmd `mkdir -p /opt/layers/{lower,upper,work,merged}` — Ubuntu `/bin/sh`(dash)는 brace expansion 미지원 → literal 디렉토리 생성, union-overlay.service 실패.
+2. 빌더 VM vdb 50GB 블록 디바이스 정체 (flavor ephemeral 의심, OpenStack CLI 검증 대기).
+3. prebuilt share end-to-end (빌드 → probe VERIFY_OK → 메타데이터 갱신) 미검증.
+
+### 30.2 백엔드
+
+- [x] `backend/app/templates/cloudinit_base.yaml.j2:246` — runcmd mkdir brace expansion fix:
+  `mkdir -p /opt/layers/{lower,upper,work,merged}` → 4개 개별 인자로 분리
+  (dash `/bin/sh` 호환, bash brace expansion 의존 제거)
+- [x] `backend/tests/test_cloudinit_dirs.py` (신규) — brace expansion 회귀 테스트 3건:
+  - runcmd mkdir 라인에 `{`/`}` 없음
+  - 4개 디렉토리(`lower`/`upper`/`work`/`merged`) 모두 포함
+  - file_storages 있어도 동일
+
+### 30.3 진단 대기 (사용자 OpenStack CLI 결과 수신 후 Phase C 분기 결정)
+
+```bash
+# vdb 정체 확정
+openstack flavor show b9d8422a-ef0a-47e5-9e55-3cb01c7f0d68 -c disk -c ephemeral -c swap -c ram -c vcpus
+# 빌더 VM 빌드 로그
+openstack console log show union-builder-python311 | tail -200
+# 유저 VM union-overlay 실패 원인
+sudo cat /var/log/union-overlay.log && ls /opt/layers/
+```
+
+### 30.4 검증
+
+- [x] `npm run test:backend` 1369 passed (0 failed), lint 통과
+- 사용자 검증 필요:
+  - 신규 VM 생성 → `ls /opt/layers/` 에 literal `{...}` 없음
+  - `mount | grep overlay` 에서 `/opt/layers/merged` 확인
+  - `python3.11 -c "import sys; print(sys.path)"` 에 `/opt/layers/merged/...` 포함
+
+### 30.3 추가 버그 수정 (코드 분석)
+
+- [x] `backend/app/services/library_builder.py`
+  - `_monitor_build:length=200` → `length=2000`: 콘솔 로그 잘림으로 성공 빌드를 실패 오판하는 CRITICAL 버그
+  - `_cleanup_builder_resources` 헬퍼 추출: ERROR/타임아웃 케이스 공통 정리 (share metadata + builder CephX rule revoke + VM 삭제). 기존엔 access rule이 정리 안 돼 유령 CephX user 잔류.
+- [x] `backend/app/services/manila.py`
+  - `_get_access_key`: 20회 재시도 후 빈 문자열 반환 → `RuntimeError` 발생. 빈 key가 cloud-init에 주입되면 CephFS 마운트가 반드시 실패하므로 호출부에서 인지 가능하게.
+  - `_revoke_access_rule_raw` 헬퍼 추가: key 발급 타임아웃 시 `create_access_rule`이 고아 rule 자동 revoke 후 예외 재발생.
+
+### 30.4 검증
+
+- [x] `npm run test:backend` 1369 passed (0 failed)
+- 사용자 검증 필요:
+  - 신규 VM 생성 → `ls /opt/layers/` 에 literal `{...}` 없음
+  - `mount | grep overlay` 에서 `/opt/layers/merged` 확인
+  - `python3.11 -c "import sys; print(sys.path)"` 에 `/opt/layers/merged/...` 포함
+
+### 30.5 범위 외
+
+- 빌더 flavor 교체 (ephemeral=0) — Phase C-1: OpenStack CLI 결과 확인 후
+- CephFS 마운트 실패 근본 원인 — Phase C-3: 유저 VM overlay 로그 분석 후
+
+## 31. 기존 부팅 볼륨에서 VM 부팅 (2026-05-12)
+
+### 31.1 동기
+
+부팅 가능한(`bootable=true`) Cinder 볼륨을 루트 디스크로 재사용해 VM을 생성하는 기능 추가.
+기존엔 항상 이미지→볼륨 변환을 거쳐야 했으나, 스냅샷/백업으로 만든 부팅 볼륨을 직접 지정하면
+이미지 변환 시간 없이 즉시 인스턴스를 생성할 수 있다.
+
+### 31.2 백엔드
+
+- [x] `backend/app/models/storage.py` — `VolumeInfo`에 `bootable: bool = False`, `volume_image_metadata: dict | None = None` 필드 추가
+- [x] `backend/app/services/cinder.py` — `_vol_to_info`: bootable str→bool 정규화, volume_image_metadata 추출
+- [x] `backend/app/models/compute.py` — `CreateInstanceRequest`: `image_id` optional화, `boot_volume_id: str | None` 추가, `model_validator`로 상호배타 검증
+- [x] `backend/app/api/compute/instances.py` — step 2 분기: `boot_volume_id` 지정 시 `create_volume_from_image` 건너뜀, `available`/`bootable` 검증, rollback 시 제공된 볼륨 보호
+- [x] `backend/tests/test_instance_boot_from_volume.py` (신규) — 6개 테스트: create_img_not_called, delete_on_termination_forced_false, 동시지정 422, 미지정 422, in-use 400, non-bootable 400
+
+### 31.3 프런트엔드
+
+- [x] `frontend/src/lib/types/resources.ts` — `Volume` 인터페이스에 `bootable?: boolean`, `volume_image_metadata?: Record<string, string> | null` 추가
+- [x] `frontend/src/lib/stores/wizard.ts` — `WizardState`에 `bootSource: 'image' | 'volume'`, `bootVolumeId`, `bootVolumeName` 추가
+- [x] `frontend/src/routes/dashboard/volumes/+page.svelte` — 부트 badge `vol.bootable` 기반으로 교체 + OS 정보 표시, ActionMenu에 "이 볼륨으로 VM 부팅" 항목 추가
+- [x] `frontend/src/lib/components/VmCreatePanel.svelte` — Step 1: 이미지/기존 볼륨 토글, Step 5: bootSource=volume 시 루트 디스크 섹션 숨김, Step 6: 부트 소스 조건부 표시, deploy(): `boot_volume_id` 전송
+
+### 31.4 검증
+
+- [x] `npm run test:backend` 통과
+- 사용자 검증 필요:
+  - bootable 볼륨에서 ActionMenu "이 볼륨으로 VM 부팅" → 위저드 Step 1이 '기존 부팅 볼륨' 탭으로 열리고 해당 볼륨 선택 상태
+  - 위저드에서 VM 생성 완료 → `POST /api/instances/async` 바디에 `boot_volume_id` 포함, `image_id` 없음
+  - non-bootable / in-use 볼륨: ActionMenu 항목 미노출
+
+---
+
+## 32. K3s 클러스터 SSE 비동기 삭제 (2026-05-13)
+
+### 32.1 동기
+
+- 동기 `DELETE /api/k3s/clusters/{id}` 가 LB/K8s 노드/VM 대기/SG 순차 수행으로 30초 이상 소요.
+- 프런트 `client.ts:72` 의 `AbortSignal.timeout(30_000)` 으로 클러스터가 정상 삭제되어도 `TimeoutError: signal timed out` alert 발생.
+- Admin 동기 삭제에 LB / K8s 노드 / App Credential cleanup 미포함 → orphan 리소스 위험.
+
+### 32.2 백엔드
+
+- [x] `backend/app/models/k3s.py::K3sProgressStep` — delete 단계 8개 추가
+- [x] `backend/app/api/k3s/clusters.py` — `_SSE_HEADERS` 모듈 상수 추출 (생성/삭제 공유)
+- [x] `backend/app/api/k3s/clusters.py` — 공유 async generator `_delete_cluster_progress` 추출
+- [x] `backend/app/api/k3s/clusters.py` — `POST /api/k3s/clusters/{id}/delete-async` SSE 엔드포인트 신설
+- [x] `backend/app/api/k3s/clusters.py` — 기존 `delete_k3s_cluster` 동기 핸들러를 generator 소진형으로 리팩토링 (204 유지)
+- [x] `backend/app/api/identity/admin.py` — `POST /api/admin/k3s-clusters/{id}/delete-async` 신설 (user 와 동일 generator)
+- [x] `backend/app/api/identity/admin.py` — `delete_admin_k3s_cluster` 동기 핸들러도 generator 소진형으로 리팩토링 + LB/K8s/AppCred 단계 통일
+
+### 32.3 프런트엔드
+
+- [x] `frontend/src/lib/api/k3sSseStream.ts` (신규) — `streamK3sProgress` async generator 유틸 (30초 제한 우회)
+- [x] `frontend/src/lib/components/k3sSteps.ts` (신규) — `K3S_CREATE_STEPS`, `K3S_DELETE_STEPS` 상수
+- [x] `frontend/src/routes/dashboard/drover/+page.svelte` — `deleteCluster()` SSE 화, 진행 모달 mode 전환 (create/delete)
+- [x] `frontend/src/lib/components/K3sClusterDetailPanel.svelte` — `deleteCluster()` SSE 화, 패널 인라인 progress bar
+
+### 32.4 검증
+
+- [x] `backend/tests/test_k3s_clusters.py` — SSE 테스트 6건 추가 (client.stream + aiter_lines 첫 도입)
+- [x] 기존 동기 삭제 테스트 8건 통과 (44개 전체 통과 확인)
+- [x] `npm run lint:backend` 통과
+- 사용자 브라우저 검증 필요:
+  - 클러스터 삭제 클릭 → 단계별 진행 모달 표시 (delete_init → ... → completed)
+  - 30초 이상 소요 클러스터도 alert 없이 완료
+  - 상세 패널 삭제 → 패널 내 progress bar 표시 → 완료 후 목록 페이지 이동
+  - Admin 경로에서도 동일 동작
+
+### 32.5 향후
+
+- 생성 SSE 호출 (`drover/+page.svelte:190-258` 인라인)을 `streamK3sProgress` 유틸로 교체 (별 PR)
+
+## 33. VM 생성 위저드 디자인 시스템 반영 (2026-05-13)
+
+### 33.1 동기
+
+- Afterglow Design System 번들 (`vm-wizard-improved.html`) 에서 도출된 6단계 위저드 시각/구조 개선.
+- 현 위저드는 step indicator 평탄, quota 변화가 음수 표기로 직관성 낮음, cloud-init 일반 textarea, review 단조로움.
+- 색상 변경 없이 **구조/타이포/radius/레이아웃만** 반영 (primary = blue-500/600 유지).
+
+### 33.2 신규 컴포넌트
+
+- [x] `frontend/src/lib/components/wizard/WizardStepper.svelte` — progress fill bar (warm gradient) + done dot 클릭 이동
+- [x] `frontend/src/lib/components/wizard/WizardHeader.svelte` — 큰 타이틀 + STEP n/6 subtitle + 새로 시작 / ✕
+- [x] `frontend/src/lib/components/wizard/WizardFooter.svelte` — selection chips strip (이미지·플레이버·라이브러리) + 네비게이션
+
+### 33.3 기존 컴포넌트 개선
+
+- [x] `SelectImage.svelte` — 검색바 + OS chip count + hover lift + check pill
+- [x] `SelectFlavor.svelte` — quota delta 미터 grid (현재 회색 + 이번 VM 추가 blue fill), GPU stock pill delta
+- [x] `SelectLibraries.svelte` — 의존성 met (✓ green) / missing (! red) 칩 + 버전/req 배지 + 하단 summary strip
+- [x] `SelectStrategy.svelte` — list-card 패턴 + 우측 size-slot (⚡ ~30초 / ⏱ ~3-5분)
+- [x] `VmCreatePanel.svelte` (Settings) — 2열 grid + cloud-init 다크 코드 에디터 (bg-[#0f172a]) + toolbar placeholder + 라벨 톤 통일
+- [x] `VmCreatePanel.svelte` (Review) — row grid + 플레이버 4분할 spec card (vCPU/RAM/Disk/GPU) + 각 row ✎ 수정 + deploy banner
+
+### 33.4 검증
+
+- [x] `npm run check` — 위저드 관련 파일 신규 에러 없음 (기존 pre-existing 에러는 다른 파일)
+- [x] `npm run build` — production 빌드 통과 (4.40s)
+- [ ] 브라우저 수동 검증 (인스턴스 페이지 + admin/인스턴스 페이지)
+- [ ] light mode 전환 가독성 확인
+
+### 33.5 향후 (별 PR)
+
+- cloud-init YAML 실시간 검증 (js-yaml 도입) + 예제 프리셋 적용
+- review deploy banner cost 추정 ($/hour → backend cost API 필요)
+- OS 별 logo 컬러 매핑 (메모리 규칙 재확인 후)

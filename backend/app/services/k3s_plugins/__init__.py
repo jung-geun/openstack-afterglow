@@ -3,6 +3,7 @@
 활성 플러그인 집계 및 cloud-init 생성에 필요한 데이터를 제공한다.
 """
 
+import inspect
 import logging
 
 from app.config import Settings
@@ -77,11 +78,29 @@ def aggregate_manifests(
     return result, failures
 
 
-def aggregate_extra_write_files(project_id: str, cluster_name: str, settings: Settings) -> list[dict]:
-    """활성 플러그인의 추가 write_files 항목 합산."""
+def aggregate_extra_write_files(
+    project_id: str,
+    cluster_name: str,
+    settings: Settings,
+    app_credential: dict | None = None,
+    kek_id: str | None = None,
+) -> list[dict]:
+    """활성 플러그인의 추가 write_files 항목 합산.
+
+    Args:
+        app_credential: cluster 별 app credential (PR1) — barbican_kms 등 인증 필요한 plugin 에 전달.
+        kek_id: project 별 동적 KEK (PR2) — barbican_kms 의 cloud.conf [KeyManager] key-id 에 사용.
+    """
     result = []
     for plugin in get_active_plugins(settings):
-        result.extend(plugin.extra_write_files(project_id, cluster_name, settings))
+        params = inspect.signature(plugin.extra_write_files).parameters
+        kwargs: dict = {}
+        if "app_credential" in params:
+            kwargs["app_credential"] = app_credential
+        if "kek_id" in params:
+            kwargs["kek_id"] = kek_id
+        files = plugin.extra_write_files(project_id, cluster_name, settings, **kwargs)
+        result.extend(files)
     return result
 
 

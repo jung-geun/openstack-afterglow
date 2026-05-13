@@ -12,6 +12,7 @@
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 	import ActionMenu from '$lib/components/ui/ActionMenu.svelte';
+	import { openWizard } from '$lib/stores/wizard';
 
 	interface AdminVolume {
 		id: string;
@@ -20,6 +21,7 @@
 		size: number;
 		project_id: string | null;
 		created_at: string | null;
+		bootable?: boolean;
 	}
 	interface PagedResponse<T> {
 		items: T[];
@@ -232,7 +234,7 @@
 	});
 </script>
 
-<div class="p-4 md:p-8 max-w-6xl">
+<div class="p-4 md:p-8 max-w-7xl mx-auto">
 	<PageHeader breadcrumb="STORAGE / VOLUMES" title="전체 볼륨">
 		{#snippet actions()}
 			<AutoRefreshControl
@@ -372,6 +374,10 @@
 											class="w-full text-left px-3 py-1.5 text-[13px] text-gray-300 hover:text-white hover:bg-gray-800 transition-colors">수정</button>
 										<button onclick={() => { openActionMenu = null; extendVolume = v; newSize = v.size + 10; extendError = ''; }}
 											class="w-full text-left px-3 py-1.5 text-[13px] text-gray-300 hover:text-white hover:bg-gray-800 transition-colors">확장</button>
+										{#if v.status === 'available' && v.bootable}
+											<button onclick={() => { openActionMenu = null; openWizard({ targetProjectId: v.project_id ?? undefined, prefill: { bootSource: 'volume', bootVolumeId: v.id, bootVolumeName: v.name } }); }}
+												class="w-full text-left px-3 py-1.5 text-[13px] text-gray-300 hover:text-white hover:bg-gray-800 transition-colors">이 볼륨으로 VM 생성</button>
+										{/if}
 										{#if v.status === 'available'}
 											<button onclick={() => { openActionMenu = null; transferVolume = v; transferSearch = ''; transferProjectId = ''; transferProjectName = ''; transferError = ''; }}
 												class="w-full text-left px-3 py-1.5 text-[13px] text-gray-300 hover:text-white hover:bg-gray-800 transition-colors">이전</button>

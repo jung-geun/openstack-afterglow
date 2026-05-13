@@ -95,7 +95,7 @@
   });
 </script>
 
-<div class="p-4 md:p-8 max-w-5xl">
+<div class="p-4 md:p-8 max-w-7xl mx-auto">
   <PageHeader breadcrumb="FILE STORAGE / MANAGE" title="라이브러리 관리" subtitle="Strategy A (사전 빌드)에서 사용할 Manila CephFS 파일 스토리지를 관리합니다.">
     {#snippet actions()}
       <label class="flex items-center gap-2 text-xs text-gray-400 cursor-pointer">

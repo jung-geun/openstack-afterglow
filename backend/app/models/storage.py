@@ -43,6 +43,8 @@ class VolumeInfo(BaseModel):
     size: int  # GB
     volume_type: str | None = None
     attachments: list[dict] = []
+    bootable: bool = False
+    volume_image_metadata: dict | None = None
 
 
 class NetworkInfo(BaseModel):
@@ -118,6 +120,10 @@ class CreateVolumeRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     size_gb: int = Field(..., ge=1, le=16384)
     availability_zone: str | None = None
+
+
+class ExtendVolumeRequest(BaseModel):
+    new_size: int = Field(..., gt=0, description="새 용량 (GB), 현재 크기보다 커야 함")
 
 
 class CreateFileStorageRequest(BaseModel):

@@ -91,7 +91,7 @@
 	});
 </script>
 
-<div class="p-4 md:p-8 max-w-6xl">
+<div class="p-4 md:p-8 max-w-7xl mx-auto">
 	<PageHeader breadcrumb="STORAGE / FILE STORAGE" title="파일 스토리지">
 		{#snippet actions()}
 			<select

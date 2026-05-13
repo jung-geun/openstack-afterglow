@@ -3,6 +3,7 @@
   import { untrack } from 'svelte';
   import { goto } from '$app/navigation';
   import { api, ApiError, getBaseUrl } from '$lib/api/client';
+  import { streamK3sProgress } from '$lib/api/k3sSseStream';
   import InstanceDetailPanel from '$lib/components/InstanceDetailPanel.svelte';
   import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
   import Button from '$lib/components/ui/Button.svelte';
@@ -78,6 +79,7 @@
   let loading = $state(true);
   let error = $state('');
   let deleting = $state(false);
+  let deleteProgress = $state<{ step: string; pct: number; msg: string; error: string } | null>(null);
   let kubeconfigAvailable = $state(false);
   let checkingHealth = $state(false);
 
@@ -170,12 +172,25 @@
   async function deleteCluster() {
     if (!cluster || !confirm(`Drover 클러스터 "${cluster.name}"을 삭제하시겠습니까?`)) return;
     deleting = true;
+    deleteProgress = { step: '', pct: 0, msg: '삭제 준비 중...', error: '' };
     try {
-      await api.delete(`${apiBase}/${clusterId}`, token, projectId);
-      if (onClose) onClose();
-      else goto('/dashboard/drover');
+      for await (const msg of streamK3sProgress(
+        `${apiBase}/${clusterId}/delete-async`,
+        { method: 'POST', token, projectId },
+      )) {
+        deleteProgress = { step: msg.step, pct: msg.progress, msg: msg.message, error: msg.error ?? '' };
+        if (msg.step === 'completed') {
+          if (onClose) onClose();
+          else goto('/dashboard/drover');
+          return;
+        } else if (msg.step === 'failed') {
+          deleteProgress = { ...deleteProgress, error: msg.error ?? '알 수 없는 오류' };
+          deleting = false;
+          return;
+        }
+      }
     } catch (e) {
-      alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+      deleteProgress = { step: 'failed', pct: 0, msg: '삭제 실패', error: String(e) };
       deleting = false;
     }
   }
@@ -295,6 +310,22 @@
         </button>
       {/snippet}
     </DetailHeader>
+
+    <!-- 삭제 진행 상태 -->
+    {#if deleteProgress}
+      <div class="mb-4 bg-gray-900 border border-gray-700 rounded-xl p-4">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-sm text-gray-300">{deleteProgress.msg}</span>
+          <span class="text-xs text-gray-500">{deleteProgress.pct}%</span>
+        </div>
+        <div class="bg-gray-800 rounded-full h-1.5">
+          <div class="bg-red-500 h-1.5 rounded-full transition-all duration-500" style="width: {deleteProgress.pct}%"></div>
+        </div>
+        {#if deleteProgress.error}
+          <p class="text-xs text-red-400 mt-2">{deleteProgress.error}</p>
+        {/if}
+      </div>
+    {/if}
 
     <!-- 정보 카드 2열 -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">

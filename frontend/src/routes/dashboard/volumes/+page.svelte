@@ -7,6 +7,9 @@
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import VolumeDetailPanel from '$lib/components/VolumeDetailPanel.svelte';
   import VolumeTransferModal from '$lib/components/VolumeTransferModal.svelte';
+  import VolumeExtendModal from '$lib/components/VolumeExtendModal.svelte';
+  import VolumeBackupModal from '$lib/components/VolumeBackupModal.svelte';
+  import VolumeSnapshotModal from '$lib/components/VolumeSnapshotModal.svelte';
   import SlidePanel from '$lib/components/SlidePanel.svelte';
   import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
   import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
@@ -14,6 +17,7 @@
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
   import ActionMenu from '$lib/components/ui/ActionMenu.svelte';
+  import { wizard, openWizard } from '$lib/stores/wizard';
 
   interface Snapshot {
     id: string;
@@ -44,6 +48,9 @@
   let autoBackupConfigs = $state<Set<string>>(new Set());
   let autoBackupToggling = $state<string | null>(null);
   let openActionMenu = $state<string | null>(null);
+  let extendTargetVol = $state<Volume | null>(null);
+  let backupTargetVol = $state<Volume | null>(null);
+  let snapshotTargetVol = $state<Volume | null>(null);
 
   interface QuotaItem { limit: number; in_use: number; }
   interface VolumeQuotas { storage: { volumes: QuotaItem; gigabytes: QuotaItem; }; }
@@ -155,6 +162,18 @@
     } finally {
       deleting = null;
     }
+  }
+
+  function bootFromVolume(vol: Volume) {
+    wizard.update(s => ({
+      ...s,
+      bootSource: 'volume',
+      bootVolumeId: vol.id,
+      bootVolumeName: vol.name,
+      imageId: null,
+      imageName: null,
+    }));
+    openWizard();
   }
 
   async function fetchAutoBackupConfigs() {
@@ -375,9 +394,12 @@
               {/if}
             </div>
             <!-- 부트 badge -->
-            <div class="hidden lg:block">
-              {#if vol.attachments.some((a: Record<string, unknown>) => a.device === '/dev/vda' || a.device === '/dev/sda')}
-                <span class="text-[11px] px-2 py-0.5 rounded-md bg-blue-900/30 border border-blue-800 text-blue-400">부트</span>
+            <div class="hidden lg:flex flex-col gap-0.5">
+              {#if vol.bootable}
+                <span class="text-[11px] px-2 py-0.5 rounded-md bg-blue-900/30 border border-blue-800 text-blue-400 w-fit">부트</span>
+                {#if vol.volume_image_metadata?.os_distro}
+                  <span class="text-[10px] text-gray-500 font-mono">{vol.volume_image_metadata.os_distro}{vol.volume_image_metadata.os_version ? ' ' + vol.volume_image_metadata.os_version : ''}</span>
+                {/if}
               {/if}
             </div>
             <!-- 자동 백업 토글 -->
@@ -405,6 +427,40 @@
                   <svg class="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
                   연결
                 </button>
+                {#if vol.status === 'available' && vol.bootable}
+                  <button
+                    onclick={() => { openActionMenu = null; bootFromVolume(vol); }}
+                    class="w-full text-left px-3 py-1.5 text-[13px] text-gray-300 hover:text-white hover:bg-gray-800 transition-colors flex items-center gap-2"
+                  >
+                    <svg class="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3l14 9-14 9V3z" /></svg>
+                    이 볼륨으로 VM 부팅
+                  </button>
+                {/if}
+                {#if vol.status === 'available' || vol.status === 'in-use'}
+                  <button
+                    onclick={() => { openActionMenu = null; extendTargetVol = vol; }}
+                    class="w-full text-left px-3 py-1.5 text-[13px] text-gray-300 hover:text-white hover:bg-gray-800 transition-colors flex items-center gap-2"
+                  >
+                    <svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>
+                    용량 확장
+                  </button>
+                {/if}
+                <button
+                  onclick={() => { openActionMenu = null; snapshotTargetVol = vol; }}
+                  class="w-full text-left px-3 py-1.5 text-[13px] text-gray-300 hover:text-white hover:bg-gray-800 transition-colors flex items-center gap-2"
+                >
+                  <svg class="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                  스냅샷 생성
+                </button>
+                {#if vol.status === 'available' || vol.status === 'in-use'}
+                  <button
+                    onclick={() => { openActionMenu = null; backupTargetVol = vol; }}
+                    class="w-full text-left px-3 py-1.5 text-[13px] text-gray-300 hover:text-white hover:bg-gray-800 transition-colors flex items-center gap-2"
+                  >
+                    <svg class="w-3.5 h-3.5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" /></svg>
+                    백업 생성
+                  </button>
+                {/if}
                 {#if vol.status === 'available'}
                   <button
                     onclick={() => { openActionMenu = null; openTransferModal(vol.id, vol.name); }}
@@ -496,3 +552,24 @@
     onTransferred={() => { fetchVolumes(); showTransferModal = false; }}
   />
 {/if}
+
+<!-- Volume Extend Modal -->
+<VolumeExtendModal
+  volume={extendTargetVol}
+  onclose={() => extendTargetVol = null}
+  onsuccess={() => { extendTargetVol = null; fetchVolumes(true); }}
+/>
+
+<!-- Volume Backup Modal -->
+<VolumeBackupModal
+  volume={backupTargetVol}
+  onclose={() => backupTargetVol = null}
+  onsuccess={() => { backupTargetVol = null; }}
+/>
+
+<!-- Volume Snapshot Modal -->
+<VolumeSnapshotModal
+  volume={snapshotTargetVol}
+  onclose={() => snapshotTargetVol = null}
+  onsuccess={() => { snapshotTargetVol = null; fetchSnapshots(); }}
+/>

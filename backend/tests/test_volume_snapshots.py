@@ -1,8 +1,18 @@
 """볼륨 스냅샷 API 단위 테스트."""
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
+
+
+def _make_volume_in_use():
+    from unittest.mock import MagicMock
+
+    vol = MagicMock()
+    vol.project_id = "test-project-123"
+    vol.tenant_id = None
+    vol.status = "in-use"
+    return vol
 
 
 def make_snapshot(snap_id: str = "snap-1", name: str = "test-snap", project_id: str = "test-project-123") -> dict:
@@ -86,3 +96,27 @@ async def test_delete_snapshot(client, mock_conn):
     with patch("app.api.storage.volume_snapshots.cinder.delete_snapshot", return_value=None):
         resp = await client.delete("/api/volume-snapshots/snap-1")
     assert resp.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_create_snapshot_in_use_without_force_returns_400(client, mock_conn):
+    """in-use 볼륨에 force=False 로 스냅샷 생성 시 Cinder 400 메시지가 그대로 전달된다."""
+    from openstack.exceptions import BadRequestException
+
+    mock_conn.block_storage.get_volume.return_value = _make_volume_in_use()
+    with (
+        patch(
+            "app.api.storage.volume_snapshots.cinder.create_snapshot",
+            side_effect=BadRequestException(
+                message="Invalid volume: Volume is in use, force snapshot is required",
+                http_status=400,
+            ),
+        ),
+        patch("app.api.storage.volume_snapshots.rec", new_callable=AsyncMock),
+    ):
+        resp = await client.post(
+            "/api/volume-snapshots",
+            json={"volume_id": "vol-1", "name": "snap-fail", "force": False},
+        )
+    assert resp.status_code == 400
+    assert "force" in resp.json()["detail"].lower()

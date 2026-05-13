@@ -151,7 +151,7 @@
 	});
 </script>
 
-<div class="p-4 md:p-8 max-w-7xl">
+<div class="p-4 md:p-8 max-w-7xl mx-auto">
 	<PageHeader breadcrumb="MONITORING" title="통합 모니터링">
 		{#snippet actions()}
 			{#if tab === 'summary'}

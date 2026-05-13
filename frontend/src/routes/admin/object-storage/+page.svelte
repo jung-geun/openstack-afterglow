@@ -150,7 +150,7 @@
 	</div>
 {/if}
 
-<div class="p-4 md:p-8 max-w-6xl">
+<div class="p-4 md:p-8 max-w-7xl mx-auto">
 	<PageHeader breadcrumb="STORAGE / OBJECT STORAGE" title="오브젝트 스토리지">
 		{#snippet actions()}
 			<button

@@ -88,7 +88,7 @@
 	onMount(load);
 </script>
 
-<div class="p-4 md:p-8 max-w-6xl">
+<div class="p-4 md:p-8 max-w-7xl mx-auto">
 	<PageHeader breadcrumb="NETWORK / FLOATING IPs" title="Floating IP">
 		{#snippet actions()}
 			<button onclick={openCreate} class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg">+ 생성</button>

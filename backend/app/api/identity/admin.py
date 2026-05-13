@@ -11,7 +11,9 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from starlette.requests import Request
 
 from app.api.deps import get_os_conn, get_token_info, require_admin
 from app.utils.version import read_app_version
@@ -63,10 +65,12 @@ async def trigger_build(
 
     if auto_install:
         try:
-            result = await library_builder.start_build(conn, library_id)
+            result = await library_builder.queue_build(library_id)
             return result
         except RuntimeError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+            msg = str(e)
+            status_code = 409 if "이미" in msg else 400
+            raise HTTPException(status_code=status_code, detail=msg)
 
     file_storage = manila.create_file_storage(
         conn,
@@ -2167,52 +2171,67 @@ async def delete_admin_k3s_cluster(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """관리자용 k3s 클러스터 삭제."""
-    import asyncio
+    from app.api.k3s.clusters import _delete_cluster_progress
 
-    from app.services import neutron as _neutron
-    from app.services import nova as _nova
+    cluster = await k3s_cluster.get_cluster_admin(cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
+
+    if cluster.get("deleted_at"):
+        return
+
+    project_id = cluster.get("project_id", "")
+    async for _msg in _delete_cluster_progress(conn, project_id, cluster, token_info=None):
+        pass
+
+
+@router.post("/k3s-clusters/{cluster_id}/delete-async", dependencies=[Depends(require_admin)])
+async def delete_admin_k3s_cluster_async(
+    request: Request,
+    cluster_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """관리자용 k3s 클러스터 삭제 — SSE 스트리밍 진행률 반환."""
+    import time
+    from collections.abc import AsyncGenerator
+
+    from app.api.k3s.clusters import _SSE_HEADERS, _delete_cluster_progress
+    from app.models.k3s import K3sProgressMessage, K3sProgressStep
 
     cluster = await k3s_cluster.get_cluster_admin(cluster_id)
     if not cluster:
         raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
 
     project_id = cluster.get("project_id", "")
-    await k3s_cluster.update_cluster_status(project_id, cluster_id, "DELETING")
 
-    # 에이전트 VM 병렬 삭제
-    agent_vm_ids = cluster.get("agent_vm_ids") or []
-    if isinstance(agent_vm_ids, str):
-        import json
-
+    async def gen() -> AsyncGenerator[str, None]:
+        yield ": " + " " * 2048 + "\n\n"
+        start = time.monotonic()
+        if cluster.get("deleted_at"):
+            msg = K3sProgressMessage(
+                step=K3sProgressStep.COMPLETED,
+                progress=100,
+                message="이미 삭제된 클러스터입니다",
+                elapsed_seconds=0.0,
+            )
+            yield f"data: {msg.model_dump_json()}\n\n"
+            return
         try:
-            agent_vm_ids = json.loads(agent_vm_ids)
-        except Exception:
-            agent_vm_ids = []
-
-    async def _del_vm(vm_id: str) -> None:
-        try:
-            await asyncio.to_thread(_nova.delete_server, conn, vm_id)
+            async for msg in _delete_cluster_progress(conn, project_id, cluster, token_info=None):
+                msg.elapsed_seconds = round(time.monotonic() - start, 1)
+                yield f"data: {msg.model_dump_json()}\n\n"
         except Exception as e:
-            _logger.warning("Delete agent VM %s failed: %s", vm_id, e)
+            _logger.error("k3s cluster %s admin async delete failed: %s", cluster_id, e, exc_info=True)
+            fail = K3sProgressMessage(
+                step=K3sProgressStep.FAILED,
+                progress=0,
+                message=f"삭제 실패: {e}",
+                error=str(e),
+                elapsed_seconds=round(time.monotonic() - start, 1),
+            )
+            yield f"data: {fail.model_dump_json()}\n\n"
 
-    await asyncio.gather(*[_del_vm(vid) for vid in agent_vm_ids], return_exceptions=True)
-
-    server_vm_id = cluster.get("server_vm_id")
-    if server_vm_id:
-        try:
-            await asyncio.to_thread(_nova.delete_server, conn, server_vm_id)
-        except Exception as e:
-            _logger.warning("Delete server VM %s failed: %s", server_vm_id, e)
-
-    sg_id = cluster.get("security_group_id")
-    if sg_id:
-        try:
-            await asyncio.sleep(3)
-            await asyncio.to_thread(_neutron.delete_security_group, conn, sg_id)
-        except Exception as e:
-            _logger.warning("Delete SG %s failed: %s", sg_id, e)
-
-    await k3s_cluster.delete_cluster_record(project_id, cluster_id)
+    return StreamingResponse(gen(), media_type="text/event-stream", headers=_SSE_HEADERS)
 
 
 # ===========================================================================

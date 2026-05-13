@@ -1,6 +1,6 @@
 """볼륨 백업 API 테스트."""
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -72,3 +72,20 @@ async def test_restore_backup_to_existing_volume(client, mock_conn):
         resp = await client.post("/api/volumes/backups/backup-1/restore", json={"volume_id": "vol-target"})
     assert resp.status_code == 200
     mock_restore.assert_called_once_with(mock_conn, "backup-1", "vol-target")
+
+
+@pytest.mark.asyncio
+async def test_create_backup_sdk_error_propagates_status(client, mock_conn):
+    """Cinder HttpException 발생 시 status_code + 실제 메시지가 전달된다."""
+    from openstack.exceptions import HttpException
+
+    with (
+        patch(
+            "app.api.storage.volume_backups.cinder.create_backup",
+            side_effect=HttpException(message="Invalid backup request", http_status=400),
+        ),
+        patch("app.api.storage.volume_backups.rec", new_callable=AsyncMock),
+    ):
+        resp = await client.post("/api/volumes/backups", json={"volume_id": "vol-1", "name": "bad-backup"})
+    assert resp.status_code == 400
+    assert "Invalid backup request" in resp.json()["detail"]

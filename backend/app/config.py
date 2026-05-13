@@ -81,6 +81,7 @@ def _load_toml() -> dict:
     flat["os_manila_nfs_share_type"] = ost.get("manila_nfs_share_type", "nfstype")
     flat["manila_nfs_root_squash"] = ost.get("manila_nfs_root_squash", True)
     flat["manila_nfs_sec_flavor"] = ost.get("manila_nfs_sec_flavor", "sys")
+    flat["manila_cephx_key_timeout_seconds"] = ost.get("manila_cephx_key_timeout_seconds", 300)
     flat["ceph_monitors"] = ost.get("ceph_monitors", "")
     flat["os_service_project_id"] = ost.get("service_project_id", "")
 
@@ -152,7 +153,7 @@ def _load_toml() -> dict:
     # Barbican KMS
     flat["k3s_barbican_kms_enabled"] = k3s.get("barbican_kms_enabled", False)
     flat["k3s_barbican_kms_image"] = k3s.get(
-        "barbican_kms_image", "registry.k8s.io/provider-os/barbican-kms-plugin:v1.31.0"
+        "barbican_kms_image", "registry.k8s.io/provider-os/barbican-kms-plugin:v1.34.1"
     )
     flat["k3s_barbican_kms_kek_id"] = k3s.get("barbican_kms_kek_id", "")
     # LB 네트워크 분리: OCCM Service LB 공통 VIP 서브넷
@@ -266,6 +267,7 @@ class Settings(BaseSettings):
     os_manila_nfs_share_type: str = "nfstype"
     manila_nfs_root_squash: bool = True  # NFS access rule root_squash 강제 (보안 기본값)
     manila_nfs_sec_flavor: str = "sys"  # NFS 인증 flavor: "sys"(기본) | "krb5"(Kerberos)
+    manila_cephx_key_timeout_seconds: int = 300  # CephX key 발급 폴링 최대 대기 (초)
 
     # Ceph 모니터 (cloud-init CephFS 마운트용)
     ceph_monitors: str = ""
@@ -338,7 +340,7 @@ class Settings(BaseSettings):
     k3s_octavia_ingress_floating_network_id: str = ""
     # Barbican KMS
     k3s_barbican_kms_enabled: bool = False
-    k3s_barbican_kms_image: str = "registry.k8s.io/provider-os/barbican-kms-plugin:v1.31.0"
+    k3s_barbican_kms_image: str = "registry.k8s.io/provider-os/barbican-kms-plugin:v1.34.1"
     k3s_barbican_kms_kek_id: str = ""
     # LB 네트워크 분리: OCCM Service LB VIP 서브넷 (미설정 시 클러스터 네트워크의 첫 서브넷)
     k3s_lb_subnet_id: str = ""

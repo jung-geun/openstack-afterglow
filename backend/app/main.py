@@ -152,6 +152,7 @@ from app.api.identity.admin_flavors import router as admin_flavors_router
 from app.api.identity.admin_gpu import router as admin_gpu_router
 from app.api.identity.admin_identity import router as admin_identity_router
 from app.api.identity.admin_images import router as admin_images_router
+from app.api.identity.admin_instances import router as admin_instances_router
 from app.api.identity.admin_libraries import router as admin_libraries_router
 from app.api.identity.admin_notion import router as admin_notion_router
 from app.api.identity.admin_orphans import router as admin_orphans_router
@@ -362,6 +363,8 @@ async def options_handler(request: Request, rest_of_path: str):
 
 # Identity
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
+# admin_instances_router를 admin_router보다 먼저 등록 (정적 경로 /instances/async 우선 매칭)
+app.include_router(admin_instances_router, prefix="/api/admin", tags=["admin-instances"])
 app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
 app.include_router(admin_services_router, prefix="/api/admin", tags=["admin-services"])
 app.include_router(admin_flavors_router, prefix="/api/admin", tags=["admin-flavors"])

@@ -2,6 +2,8 @@
 	import { goto } from '$app/navigation';
 	import { isAdmin, auth } from '$lib/stores/auth';
 	import AdminSidebar from '$lib/components/AdminSidebar.svelte';
+	import VmCreatePanel from '$lib/components/VmCreatePanel.svelte';
+	import { wizardOpen } from '$lib/stores/wizard';
 
 	let redirecting = $state(false);
 
@@ -32,4 +34,7 @@
 			{@render children()}
 		</main>
 	</div>
+	{#if $wizardOpen}
+		<VmCreatePanel adminMode={true} />
+	{/if}
 {/if}
