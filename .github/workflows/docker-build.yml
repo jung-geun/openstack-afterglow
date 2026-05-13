@@ -13,6 +13,14 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      targets:
+        description: 'Build targets (backend, frontend, or both)'
+        required: false
+        default: 'both'
+        type: choice
+        options: [both, backend, frontend]
 
 env:
   REGISTRY: ${{ secrets.REGISTRY_URL || 'ghcr.io' }}
@@ -51,7 +59,19 @@ jobs:
         env:
           CHANGED_BACKEND: ${{ steps.filter.outputs.backend }}
           CHANGED_FRONTEND: ${{ steps.filter.outputs.frontend }}
+          DISPATCH_TARGETS: ${{ inputs.targets }}
         run: |
+          # workflow_dispatch: 입력값으로 타겟 결정
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            if [[ "${DISPATCH_TARGETS}" == "backend" ]]; then
+              echo 'targets=["backend"]' >> $GITHUB_OUTPUT
+            elif [[ "${DISPATCH_TARGETS}" == "frontend" ]]; then
+              echo 'targets=["frontend"]' >> $GITHUB_OUTPUT
+            else
+              echo 'targets=["backend","frontend"]' >> $GITHUB_OUTPUT
+            fi
+            exit 0
+          fi
           # dev 브랜치 이외(main, v* 태그, PR)는 항상 전체 빌드
           if [[ "${GITHUB_REF}" != "refs/heads/dev" ]]; then
             echo 'targets=["backend","frontend"]' >> $GITHUB_OUTPUT
