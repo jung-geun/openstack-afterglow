@@ -10,13 +10,10 @@
 </script>
 
 <div class="relative bg-gray-900 border border-gray-800 rounded-2xl px-6 py-4 mb-6">
-	<!-- progress track (background) -->
-	<div class="absolute left-6 right-6 top-1/2 h-[2px] bg-gray-800 rounded-full -translate-y-1/2"></div>
-	<!-- progress fill (warm gradient) -->
-	<div
-		class="absolute left-6 top-1/2 h-[2px] rounded-full -translate-y-1/2 progress-fill"
-		style="width: {progressPct}%"
-	></div>
+	<!-- progress track (background) + fill (자식으로 좌표계 통일) -->
+	<div class="absolute left-6 right-6 top-1/2 h-[2px] bg-gray-800 rounded-full -translate-y-1/2 overflow-hidden">
+		<div class="h-full progress-fill rounded-full" style="width: {progressPct}%"></div>
+	</div>
 
 	<!-- step dots + labels -->
 	<div class="relative flex justify-between">
