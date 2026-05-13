@@ -10,6 +10,9 @@
 	import SelectLibraries from '$lib/components/wizard/SelectLibraries.svelte';
 	import SelectTemplate from '$lib/components/wizard/SelectTemplate.svelte';
 	import SelectStrategy from '$lib/components/wizard/SelectStrategy.svelte';
+	import WizardStepper from '$lib/components/wizard/WizardStepper.svelte';
+	import WizardHeader from '$lib/components/wizard/WizardHeader.svelte';
+	import WizardFooter from '$lib/components/wizard/WizardFooter.svelte';
 	import ProgressBar from '$lib/components/ProgressBar.svelte';
 	import LoadingSpinner from '$lib/components/LoadingSpinner.svelte';
 	import SlidePanel from '$lib/components/SlidePanel.svelte';
@@ -351,6 +354,10 @@
 				wizard.update(w => ({ ...w, step: w.step - 1 }));
 			}
 		}
+	}
+
+	function goTo(step: number) {
+		wizard.update(w => ({ ...w, step }));
 	}
 
 	function selectImage(id: string, name: string) {
@@ -698,32 +705,15 @@
 			</div>
 		{:else}
 			<!-- 헤더 -->
-			<div class="flex items-start justify-between mb-6">
-				<div>
-					<h1 class="text-xl font-bold text-white">
-						VM 생성
-						{#if adminMode}
-							<span class="text-sm font-normal text-amber-400 ml-1">관리자 · {adminSelectedProjectName ?? adminSelectedProjectId}</span>
-						{/if}
-					</h1>
-					<p class="text-sm text-gray-500 mt-0.5">STEP {$wizard.step} / {TOTAL_STEPS} · {stepSubtitles[$wizard.step]}</p>
-				</div>
-				<div class="flex items-center gap-3">
-					<button
-						onclick={handleReset}
-						class="text-xs text-gray-500 hover:text-gray-300 transition-colors"
-					>새로 시작</button>
-					<button
-						onclick={closeWizard}
-						class="text-gray-500 hover:text-white transition-colors p-1 rounded hover:bg-gray-800"
-						aria-label="닫기"
-					>
-						<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-						</svg>
-					</button>
-				</div>
-			</div>
+			<WizardHeader
+				step={$wizard.step}
+				totalSteps={TOTAL_STEPS}
+				stepName={stepLabels[$wizard.step - 1]}
+				{adminMode}
+				adminProjectName={adminSelectedProjectName}
+				onReset={handleReset}
+				onClose={closeWizard}
+			/>
 
 			{#if loadError}
 				<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-6">
@@ -732,35 +722,12 @@
 			{/if}
 
 			<!-- 스테퍼 -->
-			<div class="flex items-center gap-1 mb-8">
-				{#each stepLabels as label, i}
-					{@const step = i + 1}
-					<div class="flex items-center gap-2">
-						{#if $wizard.step > step}
-							<!-- 완료 -->
-							<div class="step-done w-7 h-7 rounded-full flex items-center justify-center">
-								<svg class="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
-								</svg>
-							</div>
-						{:else if $wizard.step === step}
-							<!-- 현재 -->
-							<div class="step-current w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white">
-								{step}
-							</div>
-						{:else}
-							<!-- 미래 -->
-							<div class="w-7 h-7 rounded-full bg-gray-800 flex items-center justify-center text-xs font-medium text-gray-500">
-								{step}
-							</div>
-						{/if}
-						<span class="text-xs hidden sm:inline {$wizard.step >= step ? 'text-white' : 'text-gray-600'}">{label}</span>
-					</div>
-					{#if i < stepLabels.length - 1}
-						<div class="flex-1 h-px {$wizard.step > step + 1 ? 'step-connector-done' : ''} bg-gray-800 mx-1"></div>
-					{/if}
-				{/each}
-			</div>
+			<WizardStepper
+				cur={$wizard.step}
+				totalSteps={TOTAL_STEPS}
+				{stepLabels}
+				{goTo}
+			/>
 
 			<!-- 단계별 내용 -->
 			<div class="mb-8">
@@ -852,8 +819,10 @@
 					<h2 class="text-lg font-semibold text-white mb-5">인스턴스 설정</h2>
 
 					<!-- VM 이름 -->
-					<div class="mb-5">
-						<label for="vm-name" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">VM 이름</label>
+					<div class="mb-4">
+						<label for="vm-name" class="block text-[11.5px] font-semibold text-gray-300 tracking-tight flex items-center gap-1.5 mb-1.5">
+							VM 이름 <span class="text-red-400">*</span>
+						</label>
 						<input
 							id="vm-name"
 							bind:value={$wizard.instanceName}
@@ -864,9 +833,11 @@
 					</div>
 
 					<!-- 네트워크 + 키페어 -->
-					<div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
+					<div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5 mb-4">
 						<div>
-							<label for="create-network" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">네트워크</label>
+							<label for="create-network" class="block text-[11.5px] font-semibold text-gray-300 tracking-tight flex items-center gap-1.5 mb-1.5">
+								네트워크 <span class="text-red-400">*</span>
+							</label>
 							<select
 								id="create-network"
 								value={$wizard.networkId ?? ''}
@@ -883,13 +854,17 @@
 						</div>
 						<div>
 							{#if adminMode}
-								<label class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">키페어</label>
+								<label class="block text-[11.5px] font-semibold text-gray-300 tracking-tight flex items-center gap-1.5 mb-1.5">
+									키페어 <span class="text-[10px] text-gray-500 font-normal px-1.5 py-0.5 rounded-full bg-gray-800">선택</span>
+								</label>
 								<div class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-gray-500 text-sm">
 									없음 (관리자 생성 — 콘솔 비밀번호 사용)
 								</div>
 								<p class="text-xs text-amber-400/80 mt-1">admin 모드에서는 대상 프로젝트의 키페어에 접근할 수 없습니다.</p>
 							{:else}
-								<label for="create-keypair" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">키페어</label>
+								<label for="create-keypair" class="block text-[11.5px] font-semibold text-gray-300 tracking-tight flex items-center gap-1.5 mb-1.5">
+									키페어 <span class="text-red-400">*</span>
+								</label>
 								<select
 									id="create-keypair"
 									value={$wizard.keyName ?? ''}
@@ -909,9 +884,11 @@
 					</div>
 
 					<!-- 보안 그룹 + 가용 영역 -->
-					<div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
+					<div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5 mb-4">
 						<div>
-							<label for="create-sg" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">보안 그룹</label>
+							<label for="create-sg" class="block text-[11.5px] font-semibold text-gray-300 tracking-tight flex items-center gap-1.5 mb-1.5">
+								보안 그룹 <span class="text-[10px] text-gray-500 font-normal px-1.5 py-0.5 rounded-full bg-gray-800">선택</span>
+							</label>
 							<select
 								id="create-sg"
 								value={$wizard.securityGroups[0] ?? ''}
@@ -928,7 +905,9 @@
 							</select>
 						</div>
 						<div>
-							<label for="create-az" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">가용 영역</label>
+							<label for="create-az" class="block text-[11.5px] font-semibold text-gray-300 tracking-tight flex items-center gap-1.5 mb-1.5">
+								가용 영역 <span class="text-[10px] text-gray-500 font-normal px-1.5 py-0.5 rounded-full bg-gray-800">선택</span>
+							</label>
 							<select
 								id="create-az"
 								value={$wizard.availabilityZone ?? ''}
@@ -948,98 +927,164 @@
 
 					<!-- 루트 디스크 -->
 					{#if $wizard.bootSource === 'image'}
-					<div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
+					<div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5 mb-4">
 						<div>
-							<label for="boot-volume-size" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">루트 디스크 (GB)</label>
-							<input
-								id="boot-volume-size"
-								bind:value={$wizard.bootVolumeSizeGb}
-								type="number"
-								min="1"
-								max="16384"
-								class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
-							/>
-							<p class="text-xs text-gray-500 mt-1">VM 부트 볼륨 크기 (1–16384 GB)</p>
+							<label for="boot-volume-size" class="block text-[11.5px] font-semibold text-gray-300 tracking-tight flex items-center gap-1.5 mb-1.5">
+								루트 디스크 <span class="text-red-400">*</span>
+							</label>
+							<div class="flex items-center gap-3">
+								<input
+									id="boot-volume-size"
+									bind:value={$wizard.bootVolumeSizeGb}
+									type="number"
+									min="1"
+									max="16384"
+									class="w-24 bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
+								/>
+								<span class="text-[11px] text-gray-500">1 – 16,384 GB</span>
+							</div>
 						</div>
-						<div class="flex items-start sm:items-end">
-							<label class="flex items-center gap-2 text-sm text-gray-300 sm:pb-2 cursor-pointer">
+						<div class="flex items-end pb-1">
+							<label class="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-800/60 border border-gray-700 cursor-pointer w-full">
 								<input
 									type="checkbox"
 									bind:checked={$wizard.deleteBootVolumeOnTermination}
-									class="w-4 h-4 rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500"
+									class="w-4 h-4 rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500 flex-shrink-0"
 								/>
-								VM 삭제 시 루트 디스크 함께 삭제
+								<span class="text-sm text-gray-300">VM 삭제 시 루트 디스크 함께 삭제</span>
 							</label>
 						</div>
 					</div>
 					{:else}
-					<div class="mb-5 p-3 rounded-lg bg-blue-900/20 border border-blue-800/40 text-blue-300 text-xs">
+					<div class="mb-4 p-3 rounded-lg bg-blue-900/20 border border-blue-800/40 text-blue-300 text-xs">
 						기존 부팅 볼륨 사용 시 루트 디스크 크기 설정이 적용되지 않습니다. 볼륨: <span class="font-medium">{$wizard.bootVolumeName ?? $wizard.bootVolumeId}</span>
 					</div>
 					{/if}
 
-					<!-- cloud-init -->
-					<div class="mb-5">
-						<label for="cloud-init" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">CLOUD-INIT (선택)</label>
-						<textarea
-							id="cloud-init"
-							bind:value={$wizard.cloudInit}
-							rows="6"
-							placeholder="#cloud-config&#10;package_update: true&#10;packages:&#10;  - htop"
-							class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm font-mono focus:outline-none focus:border-blue-500 transition-colors resize-y"
-						></textarea>
+					<!-- cloud-init 다크 에디터 -->
+					<div class="mb-4">
+						<label for="cloud-init" class="block text-[11.5px] font-semibold text-gray-300 tracking-tight flex items-center gap-1.5 mb-1.5">
+							CLOUD-INIT <span class="text-[10px] text-gray-500 font-normal px-1.5 py-0.5 rounded-full bg-gray-800">선택</span>
+						</label>
+						<div class="relative">
+							<div class="absolute top-2 right-2 flex gap-1 z-[2] bg-gray-900 border border-gray-700 rounded-md p-0.5">
+								<button type="button" disabled class="px-2 py-1 text-[10.5px] font-mono text-gray-500 rounded opacity-50 cursor-not-allowed">예제 ▾</button>
+								<button type="button" disabled class="px-2 py-1 text-[10.5px] font-mono text-gray-500 rounded opacity-50 cursor-not-allowed">YAML ✓</button>
+							</div>
+							<textarea
+								id="cloud-init"
+								bind:value={$wizard.cloudInit}
+								rows="8"
+								placeholder="#cloud-config&#10;package_update: true&#10;packages:&#10;  - htop"
+								class="w-full p-3.5 font-mono text-xs bg-[#0f172a] text-slate-200 rounded-lg border border-gray-700 outline-none min-h-[140px] resize-y leading-relaxed focus:border-blue-500"
+							></textarea>
+						</div>
 					</div>
 
 				{:else if $wizard.step === 6}
-					<h2 class="text-lg font-semibold text-white mb-5">최종 확인</h2>
+					{@const reviewFlavor = flavors.find((f: any) => f.id === $wizard.flavorId)}
+					{@const reviewGpu = (() => {
+						if (!reviewFlavor) return '';
+						const alias = reviewFlavor.extra_specs?.['pci_passthrough:alias'] ?? '';
+						if (!alias) return '';
+						const parts = alias.split(',').filter((e: string) => e.includes(':') && !e.toLowerCase().includes('audio'));
+						return parts.map((e: string) => {
+							const idx = e.lastIndexOf(':');
+							return `${e.slice(0, idx).trim()} × ${parseInt(e.slice(idx + 1)) || 1}`;
+						}).join(', ');
+					})()}
+					<h2 class="text-lg font-semibold text-white mb-4">최종 확인</h2>
 
-					<div class="bg-gray-900 rounded-xl border border-gray-700 p-6 space-y-3 mb-6 text-sm">
-						<div class="flex justify-between">
-							<span class="text-gray-500">이름</span>
-							<span class="text-white font-medium">{$wizard.instanceName || '-'}</span>
+					<div class="rounded-xl bg-gray-900 border border-gray-800 overflow-hidden mb-4">
+						<!-- 이름 -->
+						<div class="grid grid-cols-[140px_1fr_auto] gap-4 items-center px-4 py-3.5 border-b border-gray-800">
+							<span class="text-xs text-gray-400 font-medium">이름</span>
+							<span class="text-sm text-white font-semibold font-mono">{$wizard.instanceName || '-'}</span>
+							<button onclick={() => goTo(5)} class="review-edit-btn">✎ 수정</button>
 						</div>
-						{#if $wizard.bootSource === 'volume'}
-						<div class="flex justify-between">
-							<span class="text-gray-500">부트 소스</span>
-							<span class="text-white">기존 볼륨: {$wizard.bootVolumeName ?? $wizard.bootVolumeId ?? '-'}</span>
+						<!-- 이미지 / 볼륨 -->
+						<div class="grid grid-cols-[140px_1fr_auto] gap-4 items-center px-4 py-3.5 border-b border-gray-800">
+							<span class="text-xs text-gray-400 font-medium">
+								{$wizard.bootSource === 'volume' ? '부트 볼륨' : '이미지'}
+							</span>
+							<span class="flex flex-col gap-0.5 min-w-0 text-sm text-white font-mono">
+								{#if $wizard.bootSource === 'volume'}
+									{$wizard.bootVolumeName ?? $wizard.bootVolumeId ?? '-'}
+								{:else}
+									<span class="font-semibold truncate">{$wizard.imageName ?? '-'}</span>
+								{/if}
+							</span>
+							<button onclick={() => goTo(1)} class="review-edit-btn">✎ 수정</button>
 						</div>
-						{:else}
-						<div class="flex justify-between">
-							<span class="text-gray-500">이미지</span>
-							<span class="text-white">{$wizard.imageName ?? '-'}</span>
+						<!-- 플레이버 -->
+						<div class="grid grid-cols-[140px_1fr_auto] gap-4 items-start px-4 py-3.5 border-b border-gray-800">
+							<span class="text-xs text-gray-400 font-medium mt-0.5">플레이버</span>
+							<span class="flex flex-col gap-2 min-w-0">
+								<span class="text-sm text-white font-mono font-semibold">{$wizard.flavorName ?? '-'}</span>
+								{#if reviewFlavor}
+									<div class="grid grid-cols-4 gap-2">
+										<div class="flex flex-col gap-0.5 px-2.5 py-2 rounded-md bg-gray-800/70 border border-gray-700">
+											<span class="text-[9.5px] uppercase tracking-wider text-gray-500 font-mono font-bold">vCPU</span>
+											<span class="font-mono text-sm font-semibold text-white">{reviewFlavor.vcpus}</span>
+										</div>
+										<div class="flex flex-col gap-0.5 px-2.5 py-2 rounded-md bg-gray-800/70 border border-gray-700">
+											<span class="text-[9.5px] uppercase tracking-wider text-gray-500 font-mono font-bold">RAM</span>
+											<span class="font-mono text-sm font-semibold text-white">{reviewFlavor.ram >= 1024 ? Math.round(reviewFlavor.ram / 1024) + 'G' : reviewFlavor.ram + 'M'}</span>
+										</div>
+										<div class="flex flex-col gap-0.5 px-2.5 py-2 rounded-md bg-gray-800/70 border border-gray-700">
+											<span class="text-[9.5px] uppercase tracking-wider text-gray-500 font-mono font-bold">Disk</span>
+											<span class="font-mono text-sm font-semibold text-white">{reviewFlavor.disk}G</span>
+										</div>
+										<div class="flex flex-col gap-0.5 px-2.5 py-2 rounded-md bg-gray-800/70 border border-gray-700">
+											<span class="text-[9.5px] uppercase tracking-wider text-gray-500 font-mono font-bold">GPU</span>
+											<span class="font-mono text-sm font-semibold {reviewGpu ? 'text-purple-400' : 'text-gray-600'}">{reviewGpu || '—'}</span>
+										</div>
+									</div>
+								{/if}
+							</span>
+							<button onclick={() => goTo(2)} class="review-edit-btn mt-0.5">✎ 수정</button>
 						</div>
-						{/if}
-						<div class="flex justify-between">
-							<span class="text-gray-500">플레이버</span>
-							<span class="text-white">{$wizard.flavorName ?? '-'} <span class="text-gray-500 text-xs">({selectedFlavorDetail})</span></span>
-						</div>
+						<!-- 라이브러리 -->
 						{#if $wizard.libraries.length > 0}
-							<div class="flex justify-between">
-								<span class="text-gray-500">라이브러리</span>
-								<span class="text-white">{$wizard.libraries.join(', ')}</span>
-							</div>
+						<div class="grid grid-cols-[140px_1fr_auto] gap-4 items-center px-4 py-3.5 border-b border-gray-800">
+							<span class="text-xs text-gray-400 font-medium">라이브러리</span>
+							<span class="flex flex-wrap gap-1.5">
+								{#each $wizard.libraries as lib}
+									<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-900/30 border border-blue-800 text-blue-300 font-mono text-[11px]">{lib}</span>
+								{/each}
+							</span>
+							<button onclick={() => goTo(3)} class="review-edit-btn">✎ 수정</button>
+						</div>
 						{/if}
-						<div class="flex justify-between">
-							<span class="text-gray-500">키페어</span>
-							<span class="text-white">{$wizard.keyName ?? '없음'}</span>
+						<!-- 키페어 -->
+						<div class="grid grid-cols-[140px_1fr_auto] gap-4 items-center px-4 py-3.5 border-b border-gray-800">
+							<span class="text-xs text-gray-400 font-medium">키페어</span>
+							<span class="text-sm text-white font-mono">{$wizard.keyName ?? '없음'}</span>
+							<button onclick={() => goTo(5)} class="review-edit-btn">✎ 수정</button>
 						</div>
-						<div class="flex justify-between">
-							<span class="text-gray-500">전략</span>
-							<span class="text-white">
-								{$wizard.strategy === 'prebuilt' ? '일반 배포' : $wizard.strategy === 'dynamic' ? 'HA 배포' : '없음'}
+						<!-- 전략 -->
+						<div class="grid grid-cols-[140px_1fr_auto] gap-4 items-center px-4 py-3.5 border-b border-gray-800">
+							<span class="text-xs text-gray-400 font-medium">전략</span>
+							<span class="text-sm text-white">
+								{$wizard.strategy === 'prebuilt' ? '일반 배포 ⚡' : $wizard.strategy === 'dynamic' ? 'HA 배포 ⏱' : '없음'}
 							</span>
+							<button onclick={() => goTo(4)} class="review-edit-btn">✎ 수정</button>
 						</div>
-						<div class="flex justify-between">
-							<span class="text-gray-500">네트워크</span>
-							<span class="text-white">{$wizard.networkName ?? '기본'}</span>
+						<!-- 네트워크 -->
+						<div class="grid grid-cols-[140px_1fr_auto] gap-4 items-center px-4 py-3.5 border-b border-gray-800">
+							<span class="text-xs text-gray-400 font-medium">네트워크</span>
+							<span class="text-sm text-white font-mono">{$wizard.networkName ?? '기본'}</span>
+							<button onclick={() => goTo(5)} class="review-edit-btn">✎ 수정</button>
 						</div>
+						<!-- 루트 디스크 -->
 						{#if $wizard.bootSource === 'image'}
-						<div class="flex justify-between">
-							<span class="text-gray-500">루트 디스크</span>
-							<span class="text-white">
+						<div class="grid grid-cols-[140px_1fr_auto] gap-4 items-center px-4 py-3.5">
+							<span class="text-xs text-gray-400 font-medium">루트 디스크</span>
+							<span class="text-sm text-white font-mono">
 								{$wizard.bootVolumeSizeGb} GB
-								<span class="text-gray-500 text-xs">({$wizard.deleteBootVolumeOnTermination ? 'VM 삭제 시 함께 삭제' : 'VM 삭제 후 보존'})</span>
+								<span class="text-gray-500 text-xs ml-1">({$wizard.deleteBootVolumeOnTermination ? 'VM 삭제 시 함께 삭제' : '보존'})</span>
 							</span>
+							<button onclick={() => goTo(5)} class="review-edit-btn">✎ 수정</button>
 						</div>
 						{/if}
 					</div>
@@ -1053,6 +1098,22 @@
 						</div>
 					{/if}
 
+					<!-- deploy banner -->
+					<div class="flex items-center gap-3.5 px-4 py-3.5 rounded-lg bg-blue-950/30 border border-blue-900/50 mb-4">
+						<div class="w-9 h-9 rounded-full bg-blue-600 text-white flex items-center justify-center flex-shrink-0">
+							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/>
+							</svg>
+						</div>
+						<div class="flex-1">
+							<b class="block text-sm text-white font-semibold mb-0.5">배포 준비 완료</b>
+							<small class="text-[11.5px] text-gray-400 leading-relaxed">
+								VM 생성 클릭 시 OpenStack에 요청을 보냅니다. cloud-init은 첫 부팅 시 자동 실행됩니다.
+								{#if reviewGpu} · GPU 가용성이 스케줄러에서 자동 확인됩니다.{/if}
+							</small>
+						</div>
+					</div>
+
 					{#if deployError}
 						<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">
 							{deployError}
@@ -1062,41 +1123,37 @@
 			</div>
 
 			<!-- 하단 네비게이션 -->
-			<div class="flex items-center justify-between pt-4 border-t border-gray-800">
-				<button
-					onclick={closeWizard}
-					class="px-4 py-2 text-sm text-gray-400 hover:text-white border border-gray-700 rounded-lg hover:border-gray-500 transition-colors"
-				>취소</button>
-
-				<div class="flex items-center gap-3">
-					{#if $wizard.step > 1}
-						<button
-							onclick={prevStep}
-							class="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors flex items-center gap-1"
-						>← 이전</button>
-					{/if}
-					{#if $wizard.step < TOTAL_STEPS}
-						<Button onclick={nextStep} disabled={!canNext}>다음 →</Button>
-					{:else}
-						<Button onclick={deploy} disabled={!canNext}>VM 생성</Button>
-					{/if}
-				</div>
-			</div>
+			<WizardFooter
+				imageDisplay={$wizard.imageName ?? ($wizard.bootSource === 'volume' ? ($wizard.bootVolumeName ?? null) : null)}
+				flavorDisplay={$wizard.flavorName}
+				libCount={$wizard.libraries.length}
+				step={$wizard.step}
+				totalSteps={TOTAL_STEPS}
+				canPrev={$wizard.step > 1}
+				canNext={canNext}
+				onCancel={closeWizard}
+				onPrev={prevStep}
+				onNext={nextStep}
+				onDeploy={deploy}
+			/>
 		{/if}
 	</div>
 </SlidePanel>
 
 <style>
-  .step-done {
-    background: var(--gradient-warm);
+  .review-edit-btn {
+    font-size: 11.5px;
+    color: rgb(156 163 175);
+    padding: 2px 10px;
+    border-radius: 6px;
+    border: 1px solid rgb(55 65 81);
+    transition: all 0.15s;
+    white-space: nowrap;
+    flex-shrink: 0;
   }
-  .step-current {
-    background: var(--gradient-warm);
-    box-shadow: 0 0 12px color-mix(in oklab, var(--color-warm) 40%, transparent);
-    ring-color: color-mix(in oklab, var(--color-warm) 30%, transparent);
-  }
-  .step-connector-done {
-    background: var(--color-warm) !important;
-    opacity: 0.6;
+  .review-edit-btn:hover {
+    color: rgb(96 165 250);
+    border-color: rgb(29 78 216 / 0.7);
+    background: rgb(23 37 84 / 0.3);
   }
 </style>

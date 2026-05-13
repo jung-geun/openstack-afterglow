@@ -234,74 +234,124 @@
 	/>
 </div>
 
-<!-- 프로젝트 quota 배너 -->
+<!-- 프로젝트 quota delta 미터 -->
 {#if quota}
 	{@const reqVm = selectedFlavor ? 1 : 0}
 	{@const reqCpu = selectedFlavor?.vcpus ?? 0}
 	{@const reqRamMb = selectedFlavor?.ram ?? 0}
 	{@const reqDiskGb = selectedFlavor?.disk ?? 0}
-	{@const remVm = quotaRemaining(quota.instances)}
-	{@const remCpu = quotaRemaining(quota.cores)}
-	{@const remRamMb = quotaRemaining(quota.ram)}
-	{@const remDiskGb = quotaRemaining(quota.gigabytes)}
-	<div class="mb-4 p-3 rounded-lg bg-gray-800/60 border border-gray-700">
-		<div class="text-xs text-gray-400 mb-2">
-			프로젝트 잔여 quota
-			{#if selectedFlavor}<span class="text-blue-400">(선택 flavor 반영)</span>{/if}
+	{@const limVm = quota.instances?.limit ?? -1}
+	{@const limCpu = quota.cores?.limit ?? -1}
+	{@const limRamMb = quota.ram?.limit ?? -1}
+	{@const limDiskGb = quota.gigabytes?.limit ?? -1}
+	{@const curVm = quota.instances?.in_use ?? 0}
+	{@const curCpu = quota.cores?.in_use ?? 0}
+	{@const curRamMb = quota.ram?.in_use ?? 0}
+	{@const curDiskGb = quota.gigabytes?.in_use ?? 0}
+	{@const critVm = limVm >= 0 && curVm + reqVm > limVm}
+	{@const critCpu = limCpu >= 0 && curCpu + reqCpu > limCpu}
+	{@const critRam = limRamMb >= 0 && curRamMb + reqRamMb > limRamMb}
+	{@const critDisk = limDiskGb >= 0 && curDiskGb + reqDiskGb > limDiskGb}
+	<div class="mb-4 rounded-xl bg-gray-900/70 border border-gray-800 overflow-hidden">
+		<div class="flex items-center justify-between px-3.5 py-2.5 border-b border-gray-800">
+			<span class="text-[11px] text-gray-400 font-medium">
+				프로젝트 잔여 쿼터
+				{#if selectedFlavor}<span class="text-blue-400 ml-1">— 선택 flavor 반영</span>{/if}
+			</span>
+			<div class="flex items-center gap-3 text-[10px] text-gray-500">
+				<span class="flex items-center gap-1"><i class="inline-block w-2 h-2 rounded-full bg-gray-500"></i>현재 사용</span>
+				<span class="flex items-center gap-1"><i class="inline-block w-2 h-2 rounded-full bg-blue-500"></i>이번 VM 추가</span>
+			</div>
 		</div>
-		<div class="flex flex-wrap gap-2">
-			<span
-				class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs {flavorChipClass(remVm, reqVm)}"
-				title={quotaTitle(quota.instances, 'VM 인스턴스')}
-			>
-				<span class="font-medium">VM</span>
-				{#if reqVm > 0 && remVm >= 0}
-					<span class="opacity-70">{remVm - reqVm}/{quota.instances?.limit}</span>
-					<span class="opacity-50">(-{reqVm})</span>
-				{:else}
-					<span class="opacity-70">{quotaText(quota.instances)}</span>
+		<div class="grid grid-cols-2 sm:grid-cols-4 gap-px bg-gray-800">
+			<!-- VM cell -->
+			<div class="flex flex-col gap-1.5 px-3 py-2.5 bg-gray-900">
+				<span class="text-[10px] uppercase tracking-wider text-gray-500 font-mono font-semibold">VM</span>
+				<div class="flex items-baseline gap-1 font-mono">
+					<span class="text-sm text-gray-300">{curVm}</span>
+					{#if reqVm > 0}
+						<span class="text-gray-600 text-[10px]">→</span>
+						<span class="text-sm font-bold {critVm ? 'text-red-400' : 'text-blue-400'}">{curVm + reqVm}</span>
+					{/if}
+					{#if limVm >= 0}<span class="text-gray-500 text-[11px]">/ {limVm}</span>{/if}
+				</div>
+				{#if limVm >= 0}
+					{@const curPct = Math.min(100, (curVm / limVm) * 100)}
+					{@const deltaPct = Math.min(100 - curPct, (reqVm / limVm) * 100)}
+					<div class="relative h-[5px] rounded-full bg-gray-800 overflow-hidden">
+						<div class="absolute left-0 top-0 h-full bg-gray-500 rounded-full" style="width:{curPct}%"></div>
+						<div class="absolute top-0 h-full rounded-r-full {critVm ? 'bg-red-500' : 'bg-blue-500'}" style="left:{curPct}%; width:{deltaPct}%"></div>
+					</div>
 				{/if}
-			</span>
-			<span
-				class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs {flavorChipClass(remCpu, reqCpu)}"
-				title={quotaTitle(quota.cores, 'vCPU')}
-			>
-				<span class="font-medium">vCPU</span>
-				{#if reqCpu > 0 && remCpu >= 0}
-					<span class="opacity-70">{remCpu - reqCpu}/{quota.cores?.limit}</span>
-					<span class="opacity-50">(-{reqCpu})</span>
-				{:else}
-					<span class="opacity-70">{quotaText(quota.cores)}</span>
+			</div>
+			<!-- vCPU cell -->
+			<div class="flex flex-col gap-1.5 px-3 py-2.5 bg-gray-900">
+				<span class="text-[10px] uppercase tracking-wider text-gray-500 font-mono font-semibold">vCPU</span>
+				<div class="flex items-baseline gap-1 font-mono">
+					<span class="text-sm text-gray-300">{curCpu}</span>
+					{#if reqCpu > 0}
+						<span class="text-gray-600 text-[10px]">→</span>
+						<span class="text-sm font-bold {critCpu ? 'text-red-400' : 'text-blue-400'}">{curCpu + reqCpu}</span>
+					{/if}
+					{#if limCpu >= 0}<span class="text-gray-500 text-[11px]">/ {limCpu}</span>{/if}
+				</div>
+				{#if limCpu >= 0}
+					{@const curPct = Math.min(100, (curCpu / limCpu) * 100)}
+					{@const deltaPct = Math.min(100 - curPct, (reqCpu / limCpu) * 100)}
+					<div class="relative h-[5px] rounded-full bg-gray-800 overflow-hidden">
+						<div class="absolute left-0 top-0 h-full bg-gray-500 rounded-full" style="width:{curPct}%"></div>
+						<div class="absolute top-0 h-full rounded-r-full {critCpu ? 'bg-red-500' : 'bg-blue-500'}" style="left:{curPct}%; width:{deltaPct}%"></div>
+					</div>
 				{/if}
-			</span>
-			<span
-				class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs {flavorChipClass(remRamMb, reqRamMb)}"
-				title={quotaTitle(quota.ram, 'RAM (MB)')}
-			>
-				<span class="font-medium">RAM</span>
-				{#if reqRamMb > 0 && remRamMb >= 0}
-					<span class="opacity-70">{Math.floor((remRamMb - reqRamMb) / 1024)}GB / {Math.floor((quota.ram?.limit ?? 0) / 1024)}GB</span>
-					<span class="opacity-50">(-{reqRamMb >= 1024 ? Math.round(reqRamMb / 1024) + 'GB' : reqRamMb + 'MB'})</span>
-				{:else if remRamMb < 0}
-					<span class="opacity-70">∞</span>
-				{:else}
-					<span class="opacity-70">{Math.floor(remRamMb / 1024)}GB</span>
+			</div>
+			<!-- RAM cell -->
+			<div class="flex flex-col gap-1.5 px-3 py-2.5 bg-gray-900">
+				<span class="text-[10px] uppercase tracking-wider text-gray-500 font-mono font-semibold">RAM</span>
+				<div class="flex items-baseline gap-1 font-mono">
+					<span class="text-sm text-gray-300">{Math.round(curRamMb / 1024)}GB</span>
+					{#if reqRamMb > 0}
+						<span class="text-gray-600 text-[10px]">→</span>
+						<span class="text-sm font-bold {critRam ? 'text-red-400' : 'text-blue-400'}">{Math.round((curRamMb + reqRamMb) / 1024)}GB</span>
+					{/if}
+					{#if limRamMb >= 0}<span class="text-gray-500 text-[11px]">/ {Math.round(limRamMb / 1024)}GB</span>{/if}
+				</div>
+				{#if limRamMb >= 0}
+					{@const curPct = Math.min(100, (curRamMb / limRamMb) * 100)}
+					{@const deltaPct = Math.min(100 - curPct, (reqRamMb / limRamMb) * 100)}
+					<div class="relative h-[5px] rounded-full bg-gray-800 overflow-hidden">
+						<div class="absolute left-0 top-0 h-full bg-gray-500 rounded-full" style="width:{curPct}%"></div>
+						<div class="absolute top-0 h-full rounded-r-full {critRam ? 'bg-red-500' : 'bg-blue-500'}" style="left:{curPct}%; width:{deltaPct}%"></div>
+					</div>
 				{/if}
-			</span>
-			<span
-				class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs {flavorChipClass(remDiskGb, reqDiskGb)}"
-				title={quotaTitle(quota.gigabytes, '볼륨 디스크 (GB)')}
-			>
-				<span class="font-medium">DISK</span>
-				{#if reqDiskGb > 0 && remDiskGb >= 0}
-					<span class="opacity-70">{remDiskGb - reqDiskGb}GB / {quota.gigabytes?.limit}GB</span>
-					<span class="opacity-50">(-{reqDiskGb}GB)</span>
-				{:else if remDiskGb < 0}
-					<span class="opacity-70">∞</span>
+			</div>
+			<!-- DISK cell -->
+			<div class="flex flex-col gap-1.5 px-3 py-2.5 bg-gray-900">
+				<span class="text-[10px] uppercase tracking-wider text-gray-500 font-mono font-semibold">DISK</span>
+				{#if limDiskGb < 0}
+					<div class="flex items-baseline gap-1 font-mono">
+						<span class="text-sm text-gray-300">{curDiskGb}GB</span>
+						<span class="text-gray-500 text-[11px]">/ ∞</span>
+					</div>
+					<div class="relative h-[5px] rounded-full bg-gray-800 overflow-hidden">
+						<div class="absolute left-0 top-0 h-full bg-gray-500 rounded-full" style="width:0%"></div>
+					</div>
 				{:else}
-					<span class="opacity-70">{remDiskGb}GB</span>
+					<div class="flex items-baseline gap-1 font-mono">
+						<span class="text-sm text-gray-300">{curDiskGb}GB</span>
+						{#if reqDiskGb > 0}
+							<span class="text-gray-600 text-[10px]">→</span>
+							<span class="text-sm font-bold {critDisk ? 'text-red-400' : 'text-blue-400'}">{curDiskGb + reqDiskGb}GB</span>
+						{/if}
+						<span class="text-gray-500 text-[11px]">/ {limDiskGb}GB</span>
+					</div>
+					{@const curPct = Math.min(100, (curDiskGb / limDiskGb) * 100)}
+					{@const deltaPct = Math.min(100 - curPct, (reqDiskGb / limDiskGb) * 100)}
+					<div class="relative h-[5px] rounded-full bg-gray-800 overflow-hidden">
+						<div class="absolute left-0 top-0 h-full bg-gray-500 rounded-full" style="width:{curPct}%"></div>
+						<div class="absolute top-0 h-full rounded-r-full {critDisk ? 'bg-red-500' : 'bg-blue-500'}" style="left:{curPct}%; width:{deltaPct}%"></div>
+					</div>
 				{/if}
-			</span>
+			</div>
 		</div>
 	</div>
 {/if}
@@ -313,19 +363,21 @@
 		<div class="flex flex-wrap gap-2">
 			{#each gpuAvailability as g}
 				{@const requested = selectedGpuRequest.get(g.device_name) ?? 0}
-				{@const effectiveAvail = g.available - requested}
-				<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs
-					{effectiveAvail > 0
+				{@const nextUsed = g.used + requested}
+				{@const avail = g.total - nextUsed}
+				<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full font-mono text-[11.5px]
+					{avail > 0 && requested === 0
 						? 'bg-green-900/30 text-green-300 border border-green-800/40'
-						: requested > 0
-							? 'bg-yellow-900/30 text-yellow-300 border border-yellow-800/40'
+						: avail >= 0 && requested > 0
+							? 'bg-blue-900/30 text-blue-300 border border-blue-800/40'
 							: 'bg-red-900/30 text-red-300 border border-red-800/40'}">
-					<span class="font-medium">{g.device_name}</span>
+					<b class="font-semibold">{g.device_name}</b>
 					{#if requested > 0}
-						<span class="opacity-70">{effectiveAvail}/{g.total}</span>
-						<span class="opacity-50 text-xs">(-{requested})</span>
+						<span class="opacity-70">{g.used}/{g.total}</span>
+						<span class="text-[10px] opacity-50">→</span>
+						<span class="font-bold text-blue-400">{nextUsed}/{g.total}</span>
 					{:else}
-						<span class="opacity-70">{g.available}/{g.total}</span>
+						<span class="opacity-70">{g.used}/{g.total}</span>
 					{/if}
 				</span>
 			{/each}
