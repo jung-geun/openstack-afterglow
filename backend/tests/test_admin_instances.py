@@ -1,11 +1,10 @@
 """관리자용 cross-project 인스턴스 생성 엔드포인트 단위 테스트."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from tests.conftest import make_mock_conn, make_token_info
-
+from tests.conftest import make_mock_conn
 
 # ---------------------------------------------------------------------------
 # 헬퍼
