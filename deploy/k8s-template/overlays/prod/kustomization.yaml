@@ -8,6 +8,6 @@ resources:
 
 images:
   - name: ghcr.io/openstack-afterglow/afterglow-api
-    newTag: v1.13.9
+    newTag: latest
   - name: ghcr.io/openstack-afterglow/afterglow
-    newTag: v1.13.9
+    newTag: latest

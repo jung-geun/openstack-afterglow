@@ -48,6 +48,7 @@
   let autoBackupConfigs = $state<Set<string>>(new Set());
   let autoBackupToggling = $state<string | null>(null);
   let openActionMenu = $state<string | null>(null);
+  let openSnapshotActionMenu = $state<string | null>(null);
   let extendTargetVol = $state<Volume | null>(null);
   let backupTargetVol = $state<Volume | null>(null);
   let snapshotTargetVol = $state<Volume | null>(null);
@@ -138,6 +139,21 @@
     try {
       await apiMut('볼륨 삭제', () => api.delete(`/api/volumes/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined));
       await fetchVolumes();
+    } catch {
+      // error toast shown by apiMut
+    } finally {
+      deleting = null;
+    }
+  }
+
+  async function deleteSnapshot(id: string, name: string) {
+    if (!confirm(`스냅샷 "${name || id.slice(0, 8)}"을 삭제하시겠습니까?`)) return;
+    deleting = id;
+    try {
+      await apiMut('스냅샷 삭제', () =>
+        api.delete(`/api/volume-snapshots/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined)
+      );
+      await fetchSnapshots();
     } catch {
       // error toast shown by apiMut
     } finally {
@@ -504,16 +520,17 @@
       {:else}
         <div class="bg-[#0B1220] border border-gray-800 rounded-[10px] overflow-hidden">
           <!-- Header -->
-          <div class="grid grid-cols-[1.6fr_1.2fr_80px_140px_110px] px-4 py-2.5 border-b border-gray-800 text-[11px] uppercase tracking-wider text-gray-500 font-medium">
+          <div class="grid grid-cols-[1.6fr_1.2fr_80px_140px_110px_56px] px-4 py-2.5 border-b border-gray-800 text-[11px] uppercase tracking-wider text-gray-500 font-medium">
             <div>이름</div>
             <div>원본 볼륨</div>
             <div>크기</div>
             <div>생성됨</div>
             <div>상태</div>
+            <div></div>
           </div>
           <!-- Rows -->
           {#each snapshots as snap (snap.id)}
-            <div class="grid grid-cols-[1.6fr_1.2fr_80px_140px_110px] px-4 py-3 text-[13px] items-center border-b border-gray-800 hover:bg-gray-800/30 transition-colors last:border-b-0">
+            <div class="grid grid-cols-[1.6fr_1.2fr_80px_140px_110px_56px] px-4 py-3 text-[13px] items-center border-b border-gray-800 hover:bg-gray-800/30 transition-colors last:border-b-0">
               <div class="min-w-0">
                 <div class="text-white font-medium truncate">{snap.name || snap.id.slice(0, 12)}</div>
                 <div class="text-[11px] text-gray-500 font-mono truncate">{snap.id.slice(0, 8)}…</div>
@@ -524,6 +541,24 @@
                 {snap.created_at ? new Date(snap.created_at).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'}
               </div>
               <div><StatusChip status={snap.status} /></div>
+              <div class="flex justify-end" role="none">
+                <ActionMenu
+                  open={openSnapshotActionMenu === snap.id}
+                  onopen={() => { openSnapshotActionMenu = snap.id; }}
+                  onclose={() => { openSnapshotActionMenu = null; }}
+                >
+                  <button
+                    onclick={() => { openSnapshotActionMenu = null; deleteSnapshot(snap.id, snap.name); }}
+                    disabled={deleting === snap.id}
+                    class="w-full text-left px-3 py-1.5 text-[13px] text-red-400 hover:text-red-300 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                  >
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                    {deleting === snap.id ? '삭제 중...' : '삭제'}
+                  </button>
+                </ActionMenu>
+              </div>
             </div>
           {/each}
         </div>
