@@ -135,6 +135,7 @@
 		const projectId = $auth.projectId ?? undefined;
 		try {
 			if (adminMode && adminSelectedProjectId) {
+				// admin: os-quota-sets/{pid}/detail REST 직접 호출이라 정확한 값 반환
 				const r = await api.get<{ compute?: any; volume?: any }>(
 					`/api/admin/quotas/${encodeURIComponent(adminSelectedProjectId)}`,
 					token, projectId,
@@ -146,14 +147,21 @@
 					gigabytes: r.volume?.gigabytes,
 				};
 			} else if (!adminMode) {
-				const r = await api.get<{ compute?: any; storage?: any }>(
-					'/api/dashboard/quotas', token, projectId,
-				);
+				// user: /api/dashboard/quotas는 openstacksdk get_quota_set 파싱 이슈로
+				// 모든 값이 -1로 나오는 케이스가 있어 limits API 기반의 summary를 사용
+				const r = await api.get<{
+					compute?: { instances_used?: number; instances_limit?: number;
+						vcpus_used?: number; vcpus_limit?: number;
+						ram_used_mb?: number; ram_limit_mb?: number };
+					storage?: { gigabytes_used?: number; gigabytes_limit?: number };
+				}>('/api/dashboard/summary', token, projectId);
+				const c = r.compute ?? {};
+				const s = r.storage ?? {};
 				flavorQuota = {
-					instances: r.compute?.instances,
-					cores: r.compute?.cores,
-					ram: r.compute?.ram,
-					gigabytes: r.storage?.gigabytes,
+					instances: { limit: c.instances_limit ?? -1, in_use: c.instances_used ?? 0 },
+					cores: { limit: c.vcpus_limit ?? -1, in_use: c.vcpus_used ?? 0 },
+					ram: { limit: c.ram_limit_mb ?? -1, in_use: c.ram_used_mb ?? 0 },
+					gigabytes: { limit: s.gigabytes_limit ?? -1, in_use: s.gigabytes_used ?? 0 },
 				};
 			}
 		} catch {
