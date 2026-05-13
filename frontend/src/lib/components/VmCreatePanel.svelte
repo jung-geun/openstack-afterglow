@@ -108,11 +108,8 @@
 		const token = $auth.token ?? undefined;
 		const projectId = $auth.projectId ?? undefined;
 		try {
-			const res = await api.get<any>('/api/admin/projects', token, projectId);
-			adminProjects = (Array.isArray(res) ? res : res?.projects ?? []).map((p: any) => ({
-				id: p.id,
-				name: p.name,
-			}));
+			const res = await api.get<{ id: string; name: string }[]>('/api/admin/projects/names', token, projectId);
+			adminProjects = res.map(p => ({ id: p.id, name: p.name }));
 		} catch {
 			adminProjects = [];
 		} finally {
