@@ -58,7 +58,7 @@ Nova, Glance, Cinder, Neutron, Manila, Octavia — 모든 핵심 서비스를 �
 
 ---
 
-[GitHub 저장소](https://github.com/jung-geun/openstack-afterglow){: .btn .btn-primary }
+[GitHub 저장소](https://github.com/openstack-afterglow/openstack-afterglow){: .btn .btn-primary }
 
 ---
 
@@ -102,4 +102,4 @@ Nova, Glance, Cinder, Neutron, Manila, Octavia — 모든 핵심 서비스를 �
 
 ### v1.13.8 및 이전
 
-[GitHub Releases](https://github.com/jung-geun/openstack-afterglow/releases)에서 확인하세요.
+[GitHub Releases](https://github.com/openstack-afterglow/openstack-afterglow/releases)에서 확인하세요.

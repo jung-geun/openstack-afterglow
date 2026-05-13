@@ -2,7 +2,7 @@
 # Afterglow kolla role defaults
 
 # ── 이미지 ────────────────────────────────────────────────────────────────────
-afterglow_image_namespace: "ghcr.io/jung-geun"
+afterglow_image_namespace: "ghcr.io/openstack-afterglow"
 afterglow_image_tag: "latest"
 afterglow_backend_image: "{{ afterglow_image_namespace }}/afterglow-api"
 afterglow_frontend_image: "{{ afterglow_image_namespace }}/afterglow"

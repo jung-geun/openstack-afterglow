@@ -129,7 +129,7 @@ ansible-playbook -i <inventory> deploy/kolla/playbooks/destroy.yml
 | `enable_afterglow_backend` | `"yes"` | FastAPI 백엔드 컨테이너 |
 | `enable_afterglow_frontend` | `"yes"` | SvelteKit 프론트엔드 컨테이너 |
 | `enable_afterglow_worker` | `"yes"` | 비동기 워커 컨테이너 |
-| `afterglow_image_namespace` | `"ghcr.io/jung-geun"` | 컨테이너 이미지 레지스트리 네임스페이스 |
+| `afterglow_image_namespace` | `"ghcr.io/openstack-afterglow"` | 컨테이너 이미지 레지스트리 네임스페이스 |
 | `afterglow_image_tag` | `"latest"` | 컨테이너 이미지 태그 |
 | `afterglow_image_pull_secret_b64` | `""` | GHCR private 이미지 접근용 Docker config base64 |
 | `afterglow_external_url` | `"https://{{ kolla_external_fqdn }}"` | afterglow 외부 접근 URL |

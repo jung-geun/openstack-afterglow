@@ -6,7 +6,7 @@ metadata:
 spec:
   description: "Afterglow - OpenStack Management Platform"
   sourceRepos:
-    - "https://github.com/jung-geun/openstack-afterglow.git"
+    - "https://github.com/openstack-afterglow/openstack-afterglow.git"
   destinations:
     - namespace: afterglow
       server: "https://kubernetes.default.svc"

@@ -9,7 +9,7 @@ enable_afterglow_frontend: "yes"
 enable_afterglow_worker: "yes"
 
 # ── 이미지 ────────────────────────────────────────────────────────────────────
-afterglow_image_namespace: "ghcr.io/jung-geun"
+afterglow_image_namespace: "ghcr.io/openstack-afterglow"
 afterglow_image_tag: "latest"
 # GHCR private 이미지 접근 시 base64 인코딩된 Docker config JSON
 # echo '{"auths":{"ghcr.io":{"auth":"<base64(user:token)>"}}}' | base64

@@ -111,5 +111,5 @@ OpenStack RBAC (project-scoped Keystone token) 이 1차 방어선이지만, poli
 
 ## [1.13.9] - 2026-05-07 이전
 
-이 릴리스 이전 변경사항은 [git tag history](https://github.com/jung-geun/openstack-afterglow/tags)
+이 릴리스 이전 변경사항은 [git tag history](https://github.com/openstack-afterglow/openstack-afterglow/tags)
 와 commit log 를 참고하세요. CHANGELOG 정식 운영은 1.14.0 부터 시작합니다.

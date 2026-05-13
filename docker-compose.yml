@@ -20,7 +20,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: backend
-    image: ghcr.io/jung-geun/afterglow-api:dev
+    image: ghcr.io/openstack-afterglow/afterglow-api:dev
     ports:
       - "8000:8000"
     volumes:
@@ -51,7 +51,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: frontend
-    image: ghcr.io/jung-geun/afterglow:dev
+    image: ghcr.io/openstack-afterglow/afterglow:dev
     ports:
       - "3000:3000"
     volumes:
@@ -82,7 +82,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: backend
-    image: ghcr.io/jung-geun/afterglow-api:dev
+    image: ghcr.io/openstack-afterglow/afterglow-api:dev
     command: python -m app.worker
     volumes:
       - ./config.toml:/app/config.toml:ro

@@ -6,7 +6,7 @@ resources:
   - middleware.yaml
   - ingress.yaml
 images:
-  - name: ghcr.io/jung-geun/afterglow-api
+  - name: ghcr.io/openstack-afterglow/afterglow-api
     newTag: dev
-  - name: ghcr.io/jung-geun/afterglow
+  - name: ghcr.io/openstack-afterglow/afterglow
     newTag: dev
