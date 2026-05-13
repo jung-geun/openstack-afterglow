@@ -71,11 +71,13 @@
 		if (!selectedId || !gpuAvailability.length) return map;
 		const f = flavors.find(fl => fl.id === selectedId);
 		if (!f) return map;
+		const norm = (s: string) => s.replace(/[\s\-_.]+/g, '').toLowerCase();
 		for (const r of parseGpuRequest(f)) {
-			const matched = gpuAvailability.find(g =>
-				g.device_name.replace(/\s+/g, '').toUpperCase().includes(r.model.toUpperCase()) ||
-				r.model.toUpperCase().includes(g.device_name.replace(/\s+/g, '').toUpperCase())
-			);
+			const reqNorm = norm(r.model);
+			const matched = gpuAvailability.find(g => {
+				const devNorm = norm(g.device_name);
+				return devNorm.includes(reqNorm) || reqNorm.includes(devNorm);
+			});
 			if (matched) {
 				map.set(matched.device_name, (map.get(matched.device_name) ?? 0) + r.count);
 			}
