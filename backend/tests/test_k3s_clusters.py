@@ -602,3 +602,149 @@ async def test_list_k3s_clusters_db_interface_error_returns_empty(client):
     assert resp.status_code == 200
     assert resp.json() == []
     mock_mark.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# POST /{cluster_id}/delete-async — SSE 비동기 삭제 엔드포인트
+# ---------------------------------------------------------------------------
+
+
+async def _consume_sse(resp) -> list[dict]:
+    """SSE 응답에서 data: 라인을 파싱해 메시지 목록을 반환한다."""
+    import json
+
+    msgs = []
+    async for line in resp.aiter_lines():
+        if line.startswith("data: "):
+            try:
+                msgs.append(json.loads(line[6:]))
+            except Exception:
+                pass
+    return msgs
+
+
+@pytest.mark.asyncio
+async def test_delete_k3s_cluster_async_unauthenticated():
+    """인증 없이 호출하면 401이 반환된다."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        resp = await ac.post("/api/k3s/clusters/k3s-1/delete-async")
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_delete_k3s_cluster_async_not_found(client):
+    """존재하지 않는 cluster_id이면 404가 반환된다 (SSE 스트림 시작 전)."""
+    with patch("app.api.k3s.clusters.k3s_cluster") as mock_db:
+        mock_db.get_cluster = AsyncMock(return_value=None)
+        resp = await client.post("/api/k3s/clusters/nonexistent/delete-async")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_k3s_cluster_async_happy_path(client):
+    """정상 흐름: delete_init → ... → delete_record → completed 순서로 이벤트가 수신되고 delete_cluster_record가 호출된다."""
+    cluster = _make_cluster_record()
+    cluster["id"] = "k3s-async-1"
+    cluster["occm_enabled"] = False
+    cluster["security_group_id"] = "sg-async-1"
+
+    with patch("app.api.k3s.clusters.k3s_cluster") as mock_db:
+        mock_db.get_cluster = AsyncMock(return_value=cluster)
+        mock_db.update_cluster_status = AsyncMock()
+        mock_db.delete_cluster_record = AsyncMock()
+        mock_db.get_agent_vm_names = AsyncMock(return_value={})
+        with patch("app.api.k3s.clusters.nova") as mock_nova:
+            mock_nova.delete_server = MagicMock()
+            mock_nova.wait_server_deleted = MagicMock()
+            with patch("app.api.k3s.clusters.neutron") as mock_neutron:
+                mock_neutron.delete_floating_ip = MagicMock()
+                mock_neutron.delete_security_group = MagicMock()
+                with patch("app.api.k3s.clusters.octavia") as mock_octavia:
+                    mock_octavia.delete_load_balancer = MagicMock()
+                    with patch("app.api.k3s.clusters.k3s_kube") as mock_kube:
+                        mock_kube.delete_k8s_nodes = AsyncMock()
+                        with patch("app.api.k3s.clusters.keystone"):
+                            async with client.stream("POST", "/api/k3s/clusters/k3s-async-1/delete-async") as resp:
+                                assert resp.status_code == 200
+                                msgs = await _consume_sse(resp)
+
+    steps = [m["step"] for m in msgs]
+    assert "delete_init" in steps
+    assert "delete_record" in steps
+    assert steps[-1] == "completed"
+    assert steps.index("delete_init") < steps.index("delete_record")
+    mock_db.delete_cluster_record.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_delete_k3s_cluster_async_partial_failure_continues(client):
+    """LB 목록 조회가 실패해도 최종 completed 이벤트 + delete_cluster_record 호출."""
+    cluster = _make_cluster_record()
+    cluster["id"] = "k3s-async-partial"
+    cluster["occm_enabled"] = True
+
+    with patch("app.api.k3s.clusters.k3s_cluster") as mock_db:
+        mock_db.get_cluster = AsyncMock(return_value=cluster)
+        mock_db.update_cluster_status = AsyncMock()
+        mock_db.delete_cluster_record = AsyncMock()
+        mock_db.get_agent_vm_names = AsyncMock(return_value={})
+        with patch("app.api.k3s.clusters.nova") as mock_nova:
+            mock_nova.delete_server = MagicMock()
+            mock_nova.wait_server_deleted = MagicMock()
+            with patch("app.api.k3s.clusters.neutron") as mock_neutron:
+                mock_neutron.delete_floating_ip = MagicMock()
+                mock_neutron.delete_security_group = MagicMock()
+                with patch("app.api.k3s.clusters.octavia") as mock_octavia:
+                    mock_octavia.list_load_balancers = MagicMock(side_effect=Exception("octavia error"))
+                    mock_octavia.delete_load_balancer = MagicMock()
+                    with patch("app.api.k3s.clusters.k3s_kube") as mock_kube:
+                        mock_kube.delete_k8s_nodes = AsyncMock()
+                        with patch("app.api.k3s.clusters.keystone"):
+                            async with client.stream(
+                                "POST", "/api/k3s/clusters/k3s-async-partial/delete-async"
+                            ) as resp:
+                                assert resp.status_code == 200
+                                msgs = await _consume_sse(resp)
+
+    steps = [m["step"] for m in msgs]
+    assert steps[-1] == "completed"
+    mock_db.delete_cluster_record.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_delete_k3s_cluster_async_already_deleted(client):
+    """이미 삭제된 클러스터는 단일 completed 이벤트를 반환하고 delete_cluster_record를 호출하지 않는다."""
+    cluster = _make_cluster_record()
+    cluster["id"] = "k3s-async-already"
+    cluster["deleted_at"] = "2024-01-01T00:00:00Z"
+
+    with patch("app.api.k3s.clusters.k3s_cluster") as mock_db:
+        mock_db.get_cluster = AsyncMock(return_value=cluster)
+        mock_db.delete_cluster_record = AsyncMock()
+        async with client.stream("POST", "/api/k3s/clusters/k3s-async-already/delete-async") as resp:
+            assert resp.status_code == 200
+            msgs = await _consume_sse(resp)
+
+    assert len(msgs) == 1
+    assert msgs[0]["step"] == "completed"
+    mock_db.delete_cluster_record.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_delete_k3s_cluster_async_fatal_failure(client):
+    """update_cluster_status가 치명적 예외를 던지면 failed 이벤트가 수신되고 delete_cluster_record는 호출되지 않는다."""
+    cluster = _make_cluster_record()
+    cluster["id"] = "k3s-async-fatal"
+    cluster["occm_enabled"] = False
+
+    with patch("app.api.k3s.clusters.k3s_cluster") as mock_db:
+        mock_db.get_cluster = AsyncMock(return_value=cluster)
+        mock_db.update_cluster_status = AsyncMock(side_effect=Exception("DB 연결 실패"))
+        mock_db.delete_cluster_record = AsyncMock()
+        async with client.stream("POST", "/api/k3s/clusters/k3s-async-fatal/delete-async") as resp:
+            assert resp.status_code == 200
+            msgs = await _consume_sse(resp)
+
+    steps = [m["step"] for m in msgs]
+    assert "failed" in steps
+    mock_db.delete_cluster_record.assert_not_called()

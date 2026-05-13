@@ -2,6 +2,7 @@
   import { untrack } from 'svelte';
   import { auth, authReady } from '$lib/stores/auth';
   import { api, ApiError, getBaseUrl } from '$lib/api/client';
+  import { streamK3sProgress } from '$lib/api/k3sSseStream';
   import { toast } from '$lib/stores/toast';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
@@ -10,6 +11,7 @@
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
   import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+  import { K3S_CREATE_STEPS, K3S_DELETE_STEPS } from '$lib/components/k3sSteps';
 
   interface K3sCluster {
     id: string;
@@ -50,13 +52,8 @@
   }
 
 
-  const k3sSteps = [
-    { id: 'security_group',   label: '보안 그룹' },
-    { id: 'server_volume',    label: '서버 볼륨' },
-    { id: 'server_creating',  label: '서버 VM' },
-    { id: 'waiting_callback', label: 'k3s 초기화' },
-    { id: 'completed',        label: '완료' },
-  ];
+  let progressMode = $state<'create' | 'delete'>('create');
+  const activeSteps = $derived(progressMode === 'delete' ? K3S_DELETE_STEPS : K3S_CREATE_STEPS);
 
   // 슬라이드 패널
   let selectedClusterId = $state<string | null>(null);
@@ -167,6 +164,7 @@
     createError = '';
     showModal = false;
     showProgress = true;
+    progressMode = 'create';
     progressStep = '';
     progressPct = 0;
     progressMsg = '클러스터 생성 준비 중...';
@@ -234,7 +232,7 @@
               lastStepSeen = msg.step;
               // 모달이 닫혀있으면 단계 전환을 toast로 알림 (completed/failed는 아래에서 별도 처리)
               if (!showProgress && msg.step !== 'completed' && msg.step !== 'failed') {
-                const stepLabel = k3sSteps.find(s => s.id === msg.step)?.label ?? msg.step;
+                const stepLabel = K3S_CREATE_STEPS.find(s => s.id === msg.step)?.label ?? msg.step;
                 toast.info(`${_clusterName}: ${stepLabel} 진행 중...`);
               }
             }
@@ -260,14 +258,52 @@
 
   async function deleteCluster(id: string, name: string) {
     if (!confirm(`Drover 클러스터 "${name}"을 삭제하시겠습니까?\n모든 VM과 보안 그룹이 삭제됩니다.`)) return;
+
     deleting = id;
+    progressMode = 'delete';
+    progressStep = '';
+    progressPct = 0;
+    progressMsg = '';
+    progressError = '';
+    createdClusterId = null;
+    elapsedSeconds = 0;
+    stepTimings = {};
+    lastStepSeen = '';
+    showProgress = true;
+
+    const _timerStart = performance.now();
+    const _timer = setInterval(() => {
+      elapsedSeconds = Math.round((performance.now() - _timerStart) / 100) / 10;
+    }, 500);
+
     try {
-      await api.delete(`/api/k3s/clusters/${id}`, token, projectId);
-      await fetchClusters();
+      for await (const msg of streamK3sProgress(
+        `/api/k3s/clusters/${id}/delete-async`,
+        { method: 'POST', token, projectId },
+      )) {
+        progressStep = msg.step;
+        progressPct = msg.progress;
+        progressMsg = msg.message;
+        if (msg.elapsed_seconds != null) elapsedSeconds = msg.elapsed_seconds;
+        if (msg.step !== lastStepSeen) {
+          stepTimings[msg.step] = msg.elapsed_seconds ?? elapsedSeconds;
+          lastStepSeen = msg.step;
+        }
+        if (msg.step === 'completed') {
+          toast.success(`클러스터 "${name}" 삭제 완료 (${elapsedSeconds}초)`);
+        } else if (msg.step === 'failed') {
+          progressError = msg.error || '알 수 없는 오류';
+          toast.error(`클러스터 삭제 실패: ${msg.error || '알 수 없는 오류'}`);
+        }
+      }
     } catch (e) {
-      alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+      progressError = String(e);
+      progressStep = 'failed';
+      toast.error(`클러스터 삭제 실패: ${String(e)}`);
     } finally {
+      clearInterval(_timer);
       deleting = null;
+      await fetchClusters();
     }
   }
 
@@ -438,12 +474,14 @@
 {#if showProgress}
   <div class="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
     <div class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl">
-      <h2 class="text-lg font-semibold text-white mb-4">Drover 클러스터 생성</h2>
+      <h2 class="text-lg font-semibold text-white mb-4">
+        {progressMode === 'delete' ? 'Drover 클러스터 삭제' : 'Drover 클러스터 생성'}
+      </h2>
       <!-- 스텝 표시 -->
       <div class="space-y-2 mb-4">
-        {#each k3sSteps as step}
+        {#each activeSteps as step}
           {@const isCurrent = progressStep === step.id}
-          {@const isDone = k3sSteps.findIndex(s => s.id === progressStep) > k3sSteps.findIndex(s => s.id === step.id)}
+          {@const isDone = activeSteps.findIndex(s => s.id === progressStep) > activeSteps.findIndex(s => s.id === step.id)}
           {@const stepTime = stepTimings[step.id]}
           <div class="flex items-center gap-2 text-sm {isDone ? 'text-green-400' : isCurrent ? 'text-blue-400' : 'text-gray-600'}">
             <span class="w-4 h-4 flex items-center justify-center flex-shrink-0">
@@ -475,7 +513,7 @@
         <div class="flex justify-end gap-3">
           <button onclick={() => { showProgress = false; }}
             class="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors">닫기</button>
-          {#if createdClusterId && progressStep === 'completed'}
+          {#if createdClusterId && progressStep === 'completed' && progressMode === 'create'}
             <button
               onclick={() => { showProgress = false; openClusterPanel(createdClusterId!); }}
               class="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors">
