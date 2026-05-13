@@ -95,11 +95,31 @@
 
 	// admin 모드 전용 상태
 	interface ProjectInfo { id: string; name: string; }
+	interface QuotaPair { used: number; quota: number; }
+	interface ProjectQuota {
+		project_id: string;
+		project_name: string;
+		cpu: QuotaPair;
+		ram_mb: QuotaPair;
+		instances: QuotaPair;
+		disk_gb: QuotaPair;
+		gpu_instances?: number;
+	}
 	let adminProjects = $state<ProjectInfo[]>([]);
 	let adminProjectsLoading = $state(false);
+	let adminProjectQuotas = $state<Map<string, ProjectQuota>>(new Map());
+	let adminProjectSearch = $state('');
 	// $wizard.targetProjectId가 이미 설정된 경우(볼륨 → VM 진입) 그대로 사용
 	let adminSelectedProjectId = $state<string | null>(null);
 	let adminSelectedProjectName = $state<string | null>(null);
+
+	let filteredAdminProjects = $derived.by(() => {
+		const q = adminProjectSearch.trim().toLowerCase();
+		if (!q) return adminProjects;
+		return adminProjects.filter(p =>
+			p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q)
+		);
+	});
 
 	// admin 모드에서 프로젝트 목록 로드
 	async function loadAdminProjects() {
@@ -115,6 +135,34 @@
 		} finally {
 			adminProjectsLoading = false;
 		}
+		loadAdminProjectQuotas();
+	}
+
+	// 프로젝트별 quota 정보 로드 (백그라운드, 실패해도 목록은 표시)
+	async function loadAdminProjectQuotas() {
+		if (!adminMode) return;
+		const token = $auth.token ?? undefined;
+		const projectId = $auth.projectId ?? undefined;
+		try {
+			const rows = await api.get<ProjectQuota[]>('/api/admin/overview/projects', token, projectId);
+			const map = new Map<string, ProjectQuota>();
+			for (const r of rows) map.set(r.project_id, r);
+			adminProjectQuotas = map;
+		} catch {
+			adminProjectQuotas = new Map();
+		}
+	}
+
+	function fmtRemaining(p?: QuotaPair): string {
+		if (!p) return '-';
+		if (p.quota < 0) return '∞';
+		return String(Math.max(0, p.quota - p.used));
+	}
+
+	function isExhausted(p?: QuotaPair): boolean {
+		if (!p) return false;
+		if (p.quota < 0) return false;
+		return p.used >= p.quota;
 	}
 
 	function selectAdminProject(id: string, name: string) {
@@ -507,17 +555,64 @@
 			{:else if adminProjects.length === 0}
 				<div class="text-center py-10 text-gray-500 text-sm">프로젝트 목록을 불러올 수 없습니다.</div>
 			{:else}
-				<div class="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
-					{#each adminProjects as proj}
+				<div class="relative mb-3">
+					<svg class="w-4 h-4 text-gray-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M10 18a8 8 0 100-16 8 8 0 000 16z"/>
+					</svg>
+					<input
+						type="text"
+						bind:value={adminProjectSearch}
+						placeholder="프로젝트 이름 또는 ID 검색..."
+						class="w-full bg-gray-800 border border-gray-700 text-sm text-gray-200 rounded-lg pl-9 pr-9 py-2 focus:outline-none focus:border-blue-500 placeholder-gray-500"
+					/>
+					{#if adminProjectSearch}
 						<button
-							onclick={() => selectAdminProject(proj.id, proj.name)}
-							class="w-full text-left px-4 py-3 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-gray-500 transition-colors"
-						>
-							<div class="text-white text-sm font-medium">{proj.name}</div>
-							<div class="text-gray-500 text-xs font-mono mt-0.5">{proj.id}</div>
-						</button>
-					{/each}
+							onclick={() => (adminProjectSearch = '')}
+							class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white text-sm"
+							aria-label="검색어 지우기"
+						>✕</button>
+					{/if}
 				</div>
+				{#if filteredAdminProjects.length === 0}
+					<div class="text-center py-10 text-gray-500 text-sm">검색 결과가 없습니다.</div>
+				{:else}
+					<div class="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
+						{#each filteredAdminProjects as proj}
+							{@const q = adminProjectQuotas.get(proj.id)}
+							<button
+								onclick={() => selectAdminProject(proj.id, proj.name)}
+								class="w-full text-left px-4 py-3 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-gray-500 transition-colors"
+							>
+								<div class="flex items-start justify-between gap-3">
+									<div class="min-w-0 flex-1">
+										<div class="text-white text-sm font-medium truncate">{proj.name}</div>
+										<div class="text-gray-500 text-xs font-mono mt-0.5 truncate">{proj.id}</div>
+									</div>
+									{#if adminProjectQuotas.size === 0}
+										<div class="text-gray-600 text-xs flex-shrink-0">quota 로딩 중...</div>
+									{:else if q}
+										<div class="flex flex-wrap items-center gap-1.5 flex-shrink-0 justify-end">
+											<span class="px-1.5 py-0.5 rounded text-[11px] font-mono {isExhausted(q.instances) ? 'bg-red-900/40 text-red-300 border border-red-800/50' : 'bg-gray-900 text-gray-400 border border-gray-700'}" title="남은 인스턴스 (사용 {q.instances?.used ?? 0} / {q.instances?.quota < 0 ? '∞' : q.instances?.quota})">
+												VM {fmtRemaining(q.instances)}
+											</span>
+											<span class="px-1.5 py-0.5 rounded text-[11px] font-mono {isExhausted(q.cpu) ? 'bg-red-900/40 text-red-300 border border-red-800/50' : 'bg-gray-900 text-gray-400 border border-gray-700'}" title="남은 vCPU (사용 {q.cpu?.used ?? 0} / {q.cpu?.quota < 0 ? '∞' : q.cpu?.quota})">
+												CPU {fmtRemaining(q.cpu)}
+											</span>
+											<span class="px-1.5 py-0.5 rounded text-[11px] font-mono {isExhausted(q.ram_mb) ? 'bg-red-900/40 text-red-300 border border-red-800/50' : 'bg-gray-900 text-gray-400 border border-gray-700'}" title="남은 RAM MB (사용 {q.ram_mb?.used ?? 0} / {q.ram_mb?.quota < 0 ? '∞' : q.ram_mb?.quota})">
+												RAM {q.ram_mb && q.ram_mb.quota >= 0 ? Math.max(0, Math.floor((q.ram_mb.quota - q.ram_mb.used) / 1024)) + 'GB' : '∞'}
+											</span>
+											<span class="px-1.5 py-0.5 rounded text-[11px] font-mono {isExhausted(q.disk_gb) ? 'bg-red-900/40 text-red-300 border border-red-800/50' : 'bg-gray-900 text-gray-400 border border-gray-700'}" title="남은 디스크 GB (사용 {q.disk_gb?.used ?? 0} / {q.disk_gb?.quota < 0 ? '∞' : q.disk_gb?.quota})">
+												DISK {fmtRemaining(q.disk_gb)}{q.disk_gb && q.disk_gb.quota >= 0 ? 'GB' : ''}
+											</span>
+										</div>
+									{:else}
+										<div class="text-gray-600 text-xs flex-shrink-0">quota 없음</div>
+									{/if}
+								</div>
+							</button>
+						{/each}
+					</div>
+				{/if}
 			{/if}
 			<div class="flex justify-start mt-6 pt-4 border-t border-gray-800">
 				<button
