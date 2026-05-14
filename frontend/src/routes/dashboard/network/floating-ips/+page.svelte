@@ -80,6 +80,11 @@
     {/snippet}
   </PageHeader>
 
+  <div class="mb-4 text-sm text-gray-500">
+    Floating IP 할당은
+    <a href="/dashboard/network/networks" class="text-blue-400 hover:text-blue-300 underline">네트워크 페이지</a>에서 수행할 수 있습니다.
+  </div>
+
   {#if error}
     <div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>
   {/if}

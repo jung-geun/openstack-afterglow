@@ -112,7 +112,12 @@
 				{#each jobs as j (j.id)}
 					<div class="px-4 py-3">
 						<div class="flex items-start justify-between gap-2 mb-1.5">
-							<span class="text-xs text-gray-200 truncate flex-1" title={j.name}>{j.name}</span>
+							<div class="flex items-center gap-1.5 min-w-0 flex-1">
+								{#if j.kind === 'image'}
+									<span class="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-purple-900/40 border border-purple-800 text-purple-300">이미지</span>
+								{/if}
+								<span class="text-xs text-gray-200 truncate" title={j.name}>{j.name}</span>
+							</div>
 							{#if j.status === 'uploading'}
 								<button
 									onclick={() => uploadQueue.cancel(j.id)}

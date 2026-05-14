@@ -12,6 +12,7 @@
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
   import ActionMenu from '$lib/components/ui/ActionMenu.svelte';
+  import FloatingIpAllocateModal from '$lib/components/network/FloatingIpAllocateModal.svelte';
 
 
   let networks = $state<Network[]>([]);
@@ -33,6 +34,8 @@
     selectedNetworkId = null;
     history.pushState({}, '', '/dashboard/network/networks');
   }
+
+  let showAllocateModal = $state(false);
 
   let showModal = $state(false);
   let creating = $state(false);
@@ -321,8 +324,12 @@
         <div class="flex items-center mb-3.5">
           <div class="text-white text-[15px] font-semibold">Floating IP</div>
           <div class="ml-auto flex gap-2">
-            <button class="px-3 py-1.5 text-[13px] text-gray-300 hover:text-white border border-gray-700 hover:border-gray-500 rounded-lg transition-colors">할당</button>
-            <button class="px-3 py-1.5 text-[13px] bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-lg transition-colors">IP 예약</button>
+            <button
+              onclick={() => (showAllocateModal = true)}
+              disabled={networks.filter((n) => n.is_external).length === 0}
+              class="px-3 py-1.5 text-[13px] bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white font-medium rounded-lg transition-colors"
+              title={networks.filter((n) => n.is_external).length === 0 ? '외부 네트워크가 없습니다' : 'Floating IP 할당'}
+            >+ Floating IP 할당</button>
           </div>
         </div>
         {#if floatingIps.length === 0}
@@ -346,6 +353,14 @@
     </div>
   {/if}
 </div>
+
+<FloatingIpAllocateModal
+  bind:open={showAllocateModal}
+  networks={networks}
+  token={$auth.token ?? undefined}
+  projectId={$auth.projectId ?? undefined}
+  onAllocated={fetchFloatingIps}
+/>
 
 {#if selectedNetworkId}
   <SlidePanel onClose={closeNetworkPanel} width="w-full md:w-[60vw] max-w-2xl">

@@ -6,6 +6,7 @@
   import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
   import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
   import ImageDetailPanel from '$lib/components/ImageDetailPanel.svelte';
+  import ImageUploadModal from '$lib/components/ImageUploadModal.svelte';
   import SlidePanel from '$lib/components/SlidePanel.svelte';
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
@@ -215,6 +216,47 @@
     if (!pid) return;
     untrack(() => fetchImages());
   });
+
+  // 업로드 모달
+  let showUploadModal = $state(false);
+  let uploadInitialFile = $state<File | null>(null);
+
+  // 페이지 드래그앤드롭
+  let pageDragActive = $state(false);
+
+  function hasFiles(e: DragEvent): boolean {
+    const types = e.dataTransfer?.types;
+    if (!types) return false;
+    for (let i = 0; i < types.length; i++) if (types[i] === 'Files') return true;
+    return false;
+  }
+
+  function onWindowDragEnter(e: DragEvent) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    pageDragActive = true;
+  }
+  function onWindowDragOver(e: DragEvent) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    pageDragActive = true;
+  }
+  function onWindowDragLeave(e: DragEvent) {
+    if (!hasFiles(e)) return;
+    if (e.clientX <= 0 || e.clientY <= 0 || e.clientX >= window.innerWidth || e.clientY >= window.innerHeight) {
+      pageDragActive = false;
+    }
+  }
+  function onWindowDrop(e: DragEvent) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    pageDragActive = false;
+    const f = e.dataTransfer?.files?.[0];
+    if (f) {
+      uploadInitialFile = f;
+      showUploadModal = true;
+    }
+  }
 </script>
 
 <!-- 편집 모달 -->
@@ -260,6 +302,21 @@
   </div>
 {/if}
 
+<svelte:window
+  ondragenter={onWindowDragEnter}
+  ondragover={onWindowDragOver}
+  ondragleave={onWindowDragLeave}
+  ondrop={onWindowDrop}
+/>
+
+{#if pageDragActive}
+  <div class="fixed inset-0 z-40 bg-blue-900/20 border-2 border-dashed border-blue-500 pointer-events-none flex items-center justify-center">
+    <div class="bg-gray-900 border border-blue-600 rounded-xl px-8 py-5 text-blue-300 text-base font-medium shadow-2xl">
+      이미지 파일을 놓으면 업로드 모달이 열립니다
+    </div>
+  </div>
+{/if}
+
 <div class="p-4 md:p-8">
   <PageHeader breadcrumb="COMPUTE / IMAGES" title="이미지">
     {#snippet actions()}
@@ -275,6 +332,12 @@
         class="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white px-3 py-1.5 rounded-lg border border-gray-700 hover:border-gray-600 transition-colors"
       >
         날짜 {sortOrder === 'desc' ? '↓ 최신순' : '↑ 오래된순'}
+      </button>
+      <button
+        onclick={() => { uploadInitialFile = null; showUploadModal = true; }}
+        class="flex items-center gap-1.5 text-xs text-white px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 transition-colors font-medium"
+      >
+        + 이미지 업로드
       </button>
     {/snippet}
   </PageHeader>
@@ -376,6 +439,15 @@
     {/if}
   {/if}
 </div>
+
+<ImageUploadModal
+  bind:open={showUploadModal}
+  token={$auth.token ?? undefined}
+  projectId={$auth.projectId ?? undefined}
+  initialFile={uploadInitialFile}
+  onUploaded={() => fetchImages({ refresh: true })}
+  onClose={() => { uploadInitialFile = null; }}
+/>
 
 {#if selectedImageId}
   <SlidePanel onClose={closeImagePanel} width="w-full md:w-[60vw] max-w-2xl">

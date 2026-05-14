@@ -1,9 +1,12 @@
 import { get, writable } from 'svelte/store';
 import { ApiError, api } from '$lib/api/client';
 
+export type UploadKind = 'object' | 'image';
+
 export interface UploadJob {
 	id: string;
 	name: string;
+	kind: UploadKind;
 	containerName: string;
 	prefix: string;
 	status: 'uploading' | 'success' | 'error' | 'canceled';
@@ -28,19 +31,27 @@ const jobs = writable<UploadJob[]>([]);
 function enqueue(
 	file: File,
 	params: {
-		containerName: string;
+		/** object-storage 업로드 시 사용. image 업로드 시에는 endpoint를 직접 지정. */
+		containerName?: string;
 		prefix?: string;
+		/** image 업로드 시 '/api/images' 등 엔드포인트를 직접 지정. */
+		endpoint?: string;
+		/** 추가 FormData 필드 (이미지 name, disk_format 등). */
+		extraFields?: Record<string, string>;
+		kind?: UploadKind;
 		token?: string;
 		projectId?: string;
 		onComplete?: (job: UploadJob) => void;
 	}
 ): string {
 	const id = crypto.randomUUID();
+	const kind: UploadKind = params.kind ?? 'object';
 
 	const job: UploadJob = {
 		id,
 		name: file.name,
-		containerName: params.containerName,
+		kind,
+		containerName: params.containerName ?? '',
 		prefix: params.prefix ?? '',
 		status: 'uploading',
 		loaded: 0,
@@ -52,10 +63,22 @@ function enqueue(
 
 	const formData = new FormData();
 	formData.append('file', file, file.name);
-	if (params.prefix) formData.append('prefix', params.prefix);
+
+	let uploadUrl: string;
+	if (params.endpoint) {
+		uploadUrl = params.endpoint;
+		if (params.extraFields) {
+			for (const [k, v] of Object.entries(params.extraFields)) {
+				formData.append(k, v);
+			}
+		}
+	} else {
+		uploadUrl = `/api/object-storage/${encodeURIComponent(params.containerName ?? '')}/upload`;
+		if (params.prefix) formData.append('prefix', params.prefix);
+	}
 
 	const { promise, abort } = api.uploadWithProgress<UploadResponse>(
-		`/api/object-storage/${encodeURIComponent(params.containerName)}/upload`,
+		uploadUrl,
 		formData,
 		(e) => _patch(id, { loaded: e.loaded }),
 		params.token,

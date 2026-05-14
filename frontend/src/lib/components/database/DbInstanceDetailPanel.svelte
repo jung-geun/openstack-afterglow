@@ -441,6 +441,11 @@
 								{detachingFip ? '...' : '삭제'}
 							</button>
 						</div>
+					{:else if instance?.status === 'BUILD' || instance?.status === 'BUILDING'}
+						<div class="flex items-center gap-2 text-sm text-yellow-400">
+							<svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+							<span class="text-xs">인스턴스 생성 중... Floating IP는 완료 후 자동 할당됩니다.</span>
+						</div>
 					{:else}
 						<div class="flex items-center gap-2">
 							<span class="text-gray-500 text-sm">미할당</span>

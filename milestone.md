@@ -155,6 +155,7 @@ POST /api/instances 호출 시 순서:
 |--------|------|------|
 | POST | `/api/auth/login` | Keystone 인증, token 반환 |
 | GET | `/api/images` | OS 이미지 목록 (Glance/Cinder) |
+| POST | `/api/images` | 이미지 파일 업로드 (multipart, raw/qcow2/vmdk 등) |
 | GET | `/api/flavors` | 플레이버 목록 |
 | GET | `/api/libraries` | 사용 가능한 라이브러리 설정 목록 |
 | GET | `/api/shares` | 사전 빌드된 Manila share 목록 |
@@ -2115,8 +2116,21 @@ sudo cat /var/log/union-overlay.log && ls /opt/layers/
 - [ ] 브라우저 수동 검증 (인스턴스 페이지 + admin/인스턴스 페이지)
 - [ ] light mode 전환 가독성 확인
 
+### 33.6 VM 스케줄링/HA 분리 (완료)
+
+- [x] `backend/app/models/compute.py` — `CreateInstanceRequest.scheduling` (Literal["standard","ha"], 기본 "standard") + `InstanceInfo.scheduling` 추가
+- [x] `backend/app/services/nova.py` — `_server_to_info()` 에서 metadata scheduling 읽어 InstanceInfo 채움
+- [x] `backend/app/api/compute/instances.py` (sync/async 두 분기) — meta 에 `scheduling`, HA 시 `HA_Enabled=True` 추가
+- [x] `backend/app/api/identity/admin_instances.py` — 동일 meta 패턴 적용
+- [x] `backend/tests/test_instance_scheduling.py` — 신규 8개 테스트 (model default, _server_to_info metadata 파싱)
+- [x] `frontend/src/lib/stores/wizard.ts` — `scheduling: 'standard' | 'ha'` 필드 추가 (기본 'standard')
+- [x] `frontend/src/lib/components/wizard/SelectStrategy.svelte` — 재작성: 섹션 A(스케줄링 항상) + 섹션 B(레이어 마운트 방식, 라이브러리 있을 때만)
+- [x] `frontend/src/lib/components/VmCreatePanel.svelte` — step skip 로직 제거, selectScheduling 핸들러, canNext step4 조건, deploy body에 scheduling, footer summary 업데이트
+- [x] 62개 테스트 통과, `npm run check` 신규 에러 없음
+
 ### 33.5 향후 (별 PR)
 
 - cloud-init YAML 실시간 검증 (js-yaml 도입) + 예제 프리셋 적용
 - review deploy banner cost 추정 ($/hour → backend cost API 필요)
 - OS 별 logo 컬러 매핑 (메모리 규칙 재확인 후)
+- HA evacuate 실제 동작: cluster 에 Masakari 설치 + segment/host 등록 필요 (운영 문서 별도)
