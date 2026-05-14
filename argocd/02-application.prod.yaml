@@ -19,6 +19,17 @@ spec:
   destination:
     server: "https://kubernetes.default.svc"
     namespace: afterglow
+  # Ingress spec.rules / spec.tls 는 최초 생성 후 운영자가 직접 패치하므로
+  # ArgoCD가 git의 placeholder 값으로 되돌리지 않도록 무시
+  ignoreDifferences:
+  - group: networking.k8s.io
+    kind: Ingress
+    name: afterglow-ingress
+    namespace: afterglow
+    jsonPointers:
+    - /spec/rules
+    - /spec/tls
+
   syncPolicy:
     automated:
       prune: true
@@ -27,6 +38,7 @@ spec:
       - CreateNamespace=true
       - PruneLast=true
       - ApplyOutOfSyncOnly=true
+      - RespectIgnoreDifferences=true
     retry:
       limit: 3
       backoff:

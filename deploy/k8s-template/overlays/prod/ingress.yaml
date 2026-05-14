@@ -12,10 +12,10 @@ spec:
   # TLS 설정 (HTTPS 사용 시 주석 해제 후 설정)
   tls:
     - hosts:
-        - cloud.dmslab.re.kr # 실제 도메인으로 변경
+        - your-domain.example.com # 실제 도메인으로 변경 후 kubectl apply
       secretName: afterglow-tls # cert-manager가 발급한 인증서를 저장할 Secret
   rules:
-    - host: cloud.dmslab.re.kr # 실제 도메인으로 변경
+    - host: your-domain.example.com # 실제 도메인으로 변경 후 kubectl apply
       http:
         paths:
           - path: /api
