@@ -1,0 +1,148 @@
+{
+  "__inputs": [],
+  "__requires": [
+    {"type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "1.0.0"}
+  ],
+  "annotations": {"list": []},
+  "description": "etcd 내장 Prometheus 메트릭 (v3)",
+  "editable": false,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "unit": "short"}
+      },
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 0},
+      "id": 1,
+      "targets": [
+        {
+          "expr": "etcd_server_has_leader{instance=~'$instance'}",
+          "legendFormat": "{{instance}} has_leader",
+          "refId": "A"
+        }
+      ],
+      "title": "리더 상태 (1=정상)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "unit": "short"}
+      },
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 0},
+      "id": 2,
+      "targets": [
+        {
+          "expr": "rate(etcd_server_proposals_committed_total{instance=~'$instance'}[5m])",
+          "legendFormat": "{{instance}} committed/s",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(etcd_server_proposals_failed_total{instance=~'$instance'}[5m])",
+          "legendFormat": "{{instance}} failed/s",
+          "refId": "B"
+        }
+      ],
+      "title": "Raft 제안 처리율",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "unit": "s"}
+      },
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 0},
+      "id": 3,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, rate(etcd_disk_wal_fsync_duration_seconds_bucket{instance=~'$instance'}[5m]))",
+          "legendFormat": "{{instance}} WAL fsync p99",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.99, rate(etcd_disk_backend_commit_duration_seconds_bucket{instance=~'$instance'}[5m]))",
+          "legendFormat": "{{instance}} backend commit p99",
+          "refId": "B"
+        }
+      ],
+      "title": "디스크 fsync 지연 (p99)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "unit": "s"}
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "id": 4,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, rate(etcd_network_peer_round_trip_time_seconds_bucket{instance=~'$instance'}[5m]))",
+          "legendFormat": "{{instance}} peer RTT p99",
+          "refId": "A"
+        }
+      ],
+      "title": "피어 RTT (p99)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "unit": "bytes"}
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "id": 5,
+      "targets": [
+        {
+          "expr": "etcd_mvcc_db_total_size_in_bytes{instance=~'$instance'}",
+          "legendFormat": "{{instance}} DB 크기",
+          "refId": "A"
+        },
+        {
+          "expr": "etcd_mvcc_db_total_size_in_use_in_bytes{instance=~'$instance'}",
+          "legendFormat": "{{instance}} 사용 중",
+          "refId": "B"
+        }
+      ],
+      "title": "DB 크기",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "tags": ["afterglow", "etcd"],
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "datasource": {"type": "prometheus"},
+        "definition": "label_values(etcd_server_has_leader, instance)",
+        "hide": 0,
+        "includeAll": true,
+        "multi": true,
+        "name": "instance",
+        "options": [],
+        "query": "label_values(etcd_server_has_leader, instance)",
+        "refresh": 2,
+        "type": "query",
+        "label": "Instance"
+      },
+      {
+        "current": {"selected": true, "text": "Prometheus", "value": "Prometheus"},
+        "hide": 2,
+        "name": "datasource",
+        "query": "prometheus",
+        "type": "datasource"
+      }
+    ]
+  },
+  "time": {"from": "now-1h", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Afterglow — etcd",
+  "uid": "afterglow-etcd",
+  "version": 1
+}

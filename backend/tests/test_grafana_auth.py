@@ -63,3 +63,19 @@ async def test_grafana_token_missing_secret_returns_503(client):
         resp = await client.post("/api/grafana/token")
 
     assert resp.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_grafana_token_admin_role(admin_client):
+    """admin 사용자는 JWT role이 Editor로 발급된다."""
+    fake_settings = MagicMock()
+    fake_settings.grafana_jwt_secret = "my-secret"
+    fake_settings.grafana_base_url = ""
+
+    with patch("app.api.common.grafana_auth.get_settings", return_value=fake_settings):
+        resp = await admin_client.post("/api/grafana/token")
+
+    assert resp.status_code == 200
+    token = resp.json()["token"]
+    payload = _decode_jwt_payload(token)
+    assert payload["role"] == "Editor"

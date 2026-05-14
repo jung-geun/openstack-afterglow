@@ -75,6 +75,17 @@
 			],
 		},
 		{
+			label: '인프라 서비스',
+			prefix: '/admin/messaging',
+			icon: 'M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z',
+			open: false,
+			items: [
+				{ label: 'RabbitMQ', href: '/admin/messaging/rabbitmq', service: null },
+				{ label: 'Memcached', href: '/admin/messaging/memcached', service: null },
+				{ label: 'etcd', href: '/admin/coordination/etcd', service: null },
+			],
+		},
+		{
 			label: '시스템',
 			prefix: '/admin/services',
 			icon: 'M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z',

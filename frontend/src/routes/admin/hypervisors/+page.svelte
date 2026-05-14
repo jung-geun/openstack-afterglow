@@ -8,6 +8,7 @@
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
+	import GrafanaEmbed from '$lib/components/monitoring/GrafanaEmbed.svelte';
 
 	interface Hypervisor {
 		id: string;
@@ -390,6 +391,18 @@
 	</div>
 {/if}
 </div>
+
+<!-- Node Exporter 메트릭 -->
+{#if !loading}
+<div class="mt-8">
+	<h2 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">하이퍼바이저 메트릭 (Node Exporter)</h2>
+	<GrafanaEmbed
+		dashboardKey="node"
+		height={400}
+		vars={selectedDetail ? { instance: `${selectedDetail.host_ip}:9100` } : {}}
+	/>
+</div>
+{/if}
 
 <!-- 마이그레이션 모달 -->
 {#if showMigrateModal}

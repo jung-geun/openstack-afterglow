@@ -8,6 +8,7 @@
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 	import DbCreatePanel from '$lib/components/database/DbCreatePanel.svelte';
+	import GrafanaEmbed from '$lib/components/monitoring/GrafanaEmbed.svelte';
 
 	interface DbInstance {
 		id: string;
@@ -146,5 +147,12 @@
 			</table>
 		</div>
 		</div>
+	{/if}
+
+	{#if !loading}
+	<div class="mt-8">
+		<h2 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">MySQL 메트릭 (mysqld_exporter)</h2>
+		<GrafanaEmbed dashboardKey="mysqld" height={400} />
+	</div>
 	{/if}
 </div>

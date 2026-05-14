@@ -1,0 +1,143 @@
+{
+  "__inputs": [],
+  "__requires": [
+    {"type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "1.0.0"}
+  ],
+  "annotations": {"list": []},
+  "description": "mysqld_exporter 기반 MySQL/MariaDB 메트릭",
+  "editable": false,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "unit": "short"}
+      },
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 0},
+      "id": 1,
+      "targets": [
+        {
+          "expr": "mysql_global_status_threads_connected{instance=~'$instance'}",
+          "legendFormat": "{{instance}} connected",
+          "refId": "A"
+        },
+        {
+          "expr": "mysql_global_status_threads_running{instance=~'$instance'}",
+          "legendFormat": "{{instance}} running",
+          "refId": "B"
+        }
+      ],
+      "title": "연결 스레드",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "unit": "short"}
+      },
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 0},
+      "id": 2,
+      "targets": [
+        {
+          "expr": "rate(mysql_global_status_queries{instance=~'$instance'}[5m])",
+          "legendFormat": "{{instance}} QPS",
+          "refId": "A"
+        }
+      ],
+      "title": "초당 쿼리 수 (QPS)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "unit": "Bps"}
+      },
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 0},
+      "id": 3,
+      "targets": [
+        {
+          "expr": "rate(mysql_global_status_bytes_received{instance=~'$instance'}[5m])",
+          "legendFormat": "{{instance}} rx",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(mysql_global_status_bytes_sent{instance=~'$instance'}[5m])",
+          "legendFormat": "{{instance}} tx",
+          "refId": "B"
+        }
+      ],
+      "title": "네트워크 처리량",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "unit": "short"}
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "id": 4,
+      "targets": [
+        {
+          "expr": "rate(mysql_global_status_slow_queries{instance=~'$instance'}[5m])",
+          "legendFormat": "{{instance}} slow queries",
+          "refId": "A"
+        }
+      ],
+      "title": "슬로우 쿼리",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "unit": "short"}
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "id": 5,
+      "targets": [
+        {
+          "expr": "mysql_global_status_innodb_buffer_pool_pages_data{instance=~'$instance'} / mysql_global_status_innodb_buffer_pool_pages_total{instance=~'$instance'}",
+          "legendFormat": "{{instance}} buffer pool 사용률",
+          "refId": "A"
+        }
+      ],
+      "title": "InnoDB Buffer Pool 사용률",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "tags": ["afterglow", "mysql"],
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "datasource": {"type": "prometheus"},
+        "definition": "label_values(mysql_up, instance)",
+        "hide": 0,
+        "includeAll": true,
+        "multi": true,
+        "name": "instance",
+        "options": [],
+        "query": "label_values(mysql_up, instance)",
+        "refresh": 2,
+        "type": "query",
+        "label": "Instance"
+      },
+      {
+        "current": {"selected": true, "text": "Prometheus", "value": "Prometheus"},
+        "hide": 2,
+        "name": "datasource",
+        "query": "prometheus",
+        "type": "datasource"
+      }
+    ]
+  },
+  "time": {"from": "now-1h", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Afterglow — MySQL",
+  "uid": "afterglow-mysqld",
+  "version": 1
+}

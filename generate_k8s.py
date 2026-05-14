@@ -436,6 +436,14 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     lines.append(f'grafana_base_url = {_toml_str(mon.get("grafana_base_url", ""))}')
     lines.append("# grafana_jwt_secret은 secret.yaml의 GRAFANA_JWT_SECRET 환경변수로 주입됩니다")
     lines.append("# sd_token은 secret.yaml의 MONITORING_SD_TOKEN 환경변수로 주입됩니다")
+    dashboards = mon.get("dashboards", {})
+    lines.append("")
+    lines.append("[monitoring.dashboards]")
+    lines.append(f'node_uid = {_toml_str(dashboards.get("node_uid", "afterglow-node"))}')
+    lines.append(f'rabbitmq_uid = {_toml_str(dashboards.get("rabbitmq_uid", "afterglow-rabbitmq"))}')
+    lines.append(f'mysqld_uid = {_toml_str(dashboards.get("mysqld_uid", "afterglow-mysqld"))}')
+    lines.append(f'memcached_uid = {_toml_str(dashboards.get("memcached_uid", "afterglow-memcached"))}')
+    lines.append(f'etcd_uid = {_toml_str(dashboards.get("etcd_uid", "afterglow-etcd"))}')
     lines.append("")
 
     # [notion]

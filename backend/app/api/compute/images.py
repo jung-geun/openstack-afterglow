@@ -102,9 +102,7 @@ async def upload_image(
         await rec(token_info, conn, resource_type="image", action="create", resource_id=getattr(img, "id", None))
         return {"id": img.id, "name": img.name, "status": img.status, "disk_format": img.disk_format}
     except Exception as e:
-        await rec(
-            token_info, conn, resource_type="image", action="create", status="failed", error_message=str(e)[:500]
-        )
+        await rec(token_info, conn, resource_type="image", action="create", status="failed", error_message=str(e)[:500])
         raise HTTPException(status_code=500, detail=f"이미지 업로드 실패: {e}")
 
 

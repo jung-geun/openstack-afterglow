@@ -1167,11 +1167,19 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 
 Option A 채택 시 본 절 진행. Option B 채택 시 사용자가 자체 구성하므로 본 절은 템플릿 제공으로 한정.
 
-- [ ] `deploy/k8s-template/monitoring/grafana/provisioning/dashboards/` — node-exporter-full + nvidia-dcgm 공식 대시보드 JSON 동봉
+- [x] `monitoring/grafana/provisioning/dashboards/` — node/rabbitmq/mysqld/memcached/etcd 5종 대시보드 JSON + provider yaml 프로비저닝
 - [ ] Grafana org/folder 자동 생성 — 프로젝트별 folder, datasource label filter `project_id="<keystone_project_id>"`
-- [ ] `frontend/src/routes/dashboard/observability/+page.svelte` — Grafana iframe + auth proxy (Grafana `auth.proxy` 또는 `auth.jwt` 모드 + 백엔드가 토큰 발급)
+- [x] `frontend/src/lib/components/monitoring/GrafanaEmbed.svelte` — Grafana iframe 임베드 컴포넌트 (JWT + 빈 상태 폴백)
+- [x] `frontend/src/lib/stores/grafana.ts` — Grafana JWT + 대시보드 매핑 캐시 store
 - [x] `backend/app/api/common/grafana_auth.py` (신규) — Grafana 임베드용 JWT 발급 엔드포인트 (POST /api/grafana/token, HS256 JWT, standard library만 사용)
-- [x] `backend/tests/test_grafana_auth.py` — 토큰 발급/클레임 검증/시크릿 미설정 503 3건
+- [x] `backend/app/api/common/grafana_auth.py` — GET /api/grafana/dashboards 엔드포인트 + admin role JWT 분기
+- [x] `backend/tests/test_grafana_auth.py` — 토큰 발급/클레임 검증/시크릿 미설정 503 + admin role 테스트
+- [x] `backend/tests/test_grafana_dashboards.py` — dashboards 엔드포인트 4건 신규
+- [x] `/admin/monitoring` 인프라 탭 — 5종 exporter GrafanaEmbed (node/rabbitmq/mysqld/memcached/etcd)
+- [x] `/admin/hypervisors` 하단 node_exporter 메트릭 위젯
+- [x] `/admin/database-instances` 하단 mysqld 메트릭 위젯
+- [x] `/admin/messaging/rabbitmq`, `/admin/messaging/memcached`, `/admin/coordination/etcd` 신규 관리자 페이지
+- [x] AdminSidebar "인프라 서비스" 섹션 추가 (RabbitMQ/Memcached/etcd nav)
 
 ### 12.5 Open Questions (사용자 확인 필요)
 

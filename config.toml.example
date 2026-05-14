@@ -295,6 +295,14 @@ dcgm_exporter_sg_name = "dcgm_exporter"  # dcgm_exporter ingress SG 이름 (tcp/
 grafana_base_url = ""           # Grafana 외부 URL (예: https://grafana.example.com)
 grafana_jwt_secret = ""         # Grafana auth.jwt 서명 시크릿 (secret.yaml에서 주입)
 
+[monitoring.dashboards]
+# Grafana 대시보드 UID. monitoring/grafana/provisioning/dashboards/ 에 JSON이 프로비저닝되어야 함.
+node_uid = "afterglow-node"
+rabbitmq_uid = "afterglow-rabbitmq"
+mysqld_uid = "afterglow-mysqld"
+memcached_uid = "afterglow-memcached"
+etcd_uid = "afterglow-etcd"
+
 
 [cors]
 # CORS 허용 origin (쉼표 구분). 프론트엔드 실제 접근 URL로 설정.

@@ -1,0 +1,148 @@
+{
+  "__inputs": [],
+  "__requires": [
+    {"type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "1.0.0"}
+  ],
+  "annotations": {"list": []},
+  "description": "memcached_exporter 기반 Memcached 메트릭",
+  "editable": false,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "unit": "short"}
+      },
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 0},
+      "id": 1,
+      "targets": [
+        {
+          "expr": "memcached_current_connections{instance=~'$instance'}",
+          "legendFormat": "{{instance}} connections",
+          "refId": "A"
+        }
+      ],
+      "title": "현재 연결 수",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "unit": "short"}
+      },
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 0},
+      "id": 2,
+      "targets": [
+        {
+          "expr": "rate(memcached_commands_total{instance=~'$instance', command='get'}[5m])",
+          "legendFormat": "{{instance}} get/s",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(memcached_commands_total{instance=~'$instance', command='set'}[5m])",
+          "legendFormat": "{{instance}} set/s",
+          "refId": "B"
+        }
+      ],
+      "title": "초당 명령 처리 (GET/SET)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "unit": "percentunit"}
+      },
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 0},
+      "id": 3,
+      "targets": [
+        {
+          "expr": "rate(memcached_commands_total{instance=~'$instance', command='get', status='hit'}[5m]) / rate(memcached_commands_total{instance=~'$instance', command='get'}[5m])",
+          "legendFormat": "{{instance}} hit rate",
+          "refId": "A"
+        }
+      ],
+      "title": "캐시 히트율",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "unit": "bytes"}
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "id": 4,
+      "targets": [
+        {
+          "expr": "memcached_current_bytes{instance=~'$instance'}",
+          "legendFormat": "{{instance}} used",
+          "refId": "A"
+        },
+        {
+          "expr": "memcached_limit_maxbytes{instance=~'$instance'}",
+          "legendFormat": "{{instance}} limit",
+          "refId": "B"
+        }
+      ],
+      "title": "메모리 사용량",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "unit": "short"}
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "id": 5,
+      "targets": [
+        {
+          "expr": "memcached_current_items{instance=~'$instance'}",
+          "legendFormat": "{{instance}} items",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(memcached_items_evicted_total{instance=~'$instance'}[5m])",
+          "legendFormat": "{{instance}} evicted/s",
+          "refId": "B"
+        }
+      ],
+      "title": "아이템 수 / 축출률",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "tags": ["afterglow", "memcached"],
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "datasource": {"type": "prometheus"},
+        "definition": "label_values(memcached_up, instance)",
+        "hide": 0,
+        "includeAll": true,
+        "multi": true,
+        "name": "instance",
+        "options": [],
+        "query": "label_values(memcached_up, instance)",
+        "refresh": 2,
+        "type": "query",
+        "label": "Instance"
+      },
+      {
+        "current": {"selected": true, "text": "Prometheus", "value": "Prometheus"},
+        "hide": 2,
+        "name": "datasource",
+        "query": "prometheus",
+        "type": "datasource"
+      }
+    ]
+  },
+  "time": {"from": "now-1h", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Afterglow — Memcached",
+  "uid": "afterglow-memcached",
+  "version": 1
+}

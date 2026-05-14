@@ -28,6 +28,7 @@ def _create_grafana_jwt(
     project_id: str,
     secret: str,
     ttl: int = _TOKEN_TTL,
+    is_admin: bool = False,
 ) -> str:
     """Grafana auth.jwt 호환 HS256 JWT 발급."""
     now = int(time.time())
@@ -39,7 +40,7 @@ def _create_grafana_jwt(
                 "login": username,
                 "name": username,
                 "email": f"{username}@afterglow",
-                "role": "Viewer",
+                "role": "Editor" if is_admin else "Viewer",
                 "project_id": project_id,
                 "iat": now,
                 "exp": now + ttl,
@@ -67,14 +68,38 @@ async def issue_grafana_token(
     if not settings.grafana_jwt_secret:
         raise HTTPException(status_code=503, detail="grafana_jwt_secret이 설정되지 않았습니다")
 
+    is_admin = "admin" in (token_info.get("roles") or [])
     token = _create_grafana_jwt(
         user_id=token_info["user_id"],
         username=token_info["username"],
         project_id=token_info["project_id"],
         secret=settings.grafana_jwt_secret,
+        is_admin=is_admin,
     )
     return {
         "token": token,
         "grafana_url": settings.grafana_base_url,
         "expires_in": _TOKEN_TTL,
+    }
+
+
+@router.get("/dashboards")
+async def get_grafana_dashboards(
+    token_info: dict = Depends(get_token_info),
+):
+    """Grafana 대시보드 UID 매핑 + 기본 URL 반환.
+
+    미설정 시 grafana_url은 빈 문자열, dashboards는 기본 UID 반환.
+    항상 200 — 프론트엔드가 grafana_url 유무로 빈 상태 판단.
+    """
+    settings = get_settings()
+    return {
+        "grafana_url": settings.grafana_base_url,
+        "dashboards": {
+            "node": settings.grafana_dashboard_node_uid,
+            "rabbitmq": settings.grafana_dashboard_rabbitmq_uid,
+            "mysqld": settings.grafana_dashboard_mysqld_uid,
+            "memcached": settings.grafana_dashboard_memcached_uid,
+            "etcd": settings.grafana_dashboard_etcd_uid,
+        },
     }
