@@ -102,7 +102,7 @@ jobs:
             runner: [self-hosted, linux]
             platform: linux/amd64
           - arch: arm64
-            runner: [self-hosted, arm64]
+            runner: [self-hosted, linux]
             platform: linux/arm64
     runs-on: ${{ matrix.runner }}
     permissions:
