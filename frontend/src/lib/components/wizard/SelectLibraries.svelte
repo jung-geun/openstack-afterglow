@@ -154,9 +154,9 @@
 {#if libraries.length > 0}
 	<div class="flex items-center gap-3 flex-wrap px-4 py-3 rounded-lg bg-gray-900 border border-gray-800 text-xs text-gray-400 mt-4">
 		<span>선택 <b class="text-white font-mono font-semibold">{selectedCount}</b>개 / {libraries.length}개</span>
-		{#if totalSize()}
+		{#if totalSize}
 			<span class="text-gray-700">·</span>
-			<span>OverlayFS 추가 디스크 <b class="text-white font-mono">{totalSize()}</b></span>
+			<span>OverlayFS 추가 디스크 <b class="text-white font-mono">{totalSize}</b></span>
 		{/if}
 		{#if selectedCount > 0}
 			<span class="text-gray-700">·</span>

@@ -339,20 +339,12 @@
 
 	function nextStep() {
 		if ($wizard.step < TOTAL_STEPS) {
-			if ($wizard.step === 3 && $wizard.libraries.length === 0) {
-				wizard.update(w => ({ ...w, step: 5, strategy: null }));
-			} else {
-				wizard.update(w => ({ ...w, step: w.step + 1 }));
-			}
+			wizard.update(w => ({ ...w, step: w.step + 1 }));
 		}
 	}
 	function prevStep() {
 		if ($wizard.step > 1) {
-			if ($wizard.step === 5 && $wizard.libraries.length === 0) {
-				wizard.update(w => ({ ...w, step: 3 }));
-			} else {
-				wizard.update(w => ({ ...w, step: w.step - 1 }));
-			}
+			wizard.update(w => ({ ...w, step: w.step - 1 }));
 		}
 	}
 
@@ -405,6 +397,10 @@
 		wizard.update(w => ({ ...w, strategy: s }));
 	}
 
+	function selectScheduling(s: 'standard' | 'ha') {
+		wizard.update(w => ({ ...w, scheduling: s }));
+	}
+
 	function selectMountProtocol(p: 'CEPHFS' | 'NFS') {
 		wizard.update(w => ({ ...w, mountProtocol: p }));
 	}
@@ -455,7 +451,11 @@
 			case 1: return $wizard.bootSource === 'volume' ? !!$wizard.bootVolumeId : !!$wizard.imageId;
 			case 2: return !!$wizard.flavorId;
 			case 3: return true;
-			case 4: return true;
+			case 4: {
+				if (!$wizard.scheduling) return false;
+				if ($wizard.libraries.length > 0 && !$wizard.strategy) return false;
+				return true;
+			}
 			case 5: return !!$wizard.instanceName.trim() && (adminMode || !!$wizard.keyName);
 			case 6: return !!$wizard.instanceName.trim();
 			default: return false;
@@ -493,6 +493,7 @@
 			flavor_id: $wizard.flavorId,
 			libraries: $wizard.libraries,
 			strategy: $wizard.strategy,
+			scheduling: $wizard.scheduling,
 			network_id: $wizard.networkId,
 			key_name: $wizard.keyName || null,
 			availability_zone: $wizard.availabilityZone,
@@ -806,12 +807,15 @@
 					{@render step3Tab()}
 
 				{:else if $wizard.step === 4}
-					<h2 class="text-lg font-semibold text-white mb-1">배포 전략 <span class="text-gray-500 text-sm font-normal">스케줄링 / 내고장성</span></h2>
+					<h2 class="text-lg font-semibold text-white mb-4">배포 전략 <span class="text-gray-500 text-sm font-normal">스케줄링 / 레이어 마운트</span></h2>
 					<SelectStrategy
-						selected={$wizard.strategy}
+						scheduling={$wizard.scheduling}
+						onSchedulingChange={selectScheduling}
+						strategy={$wizard.strategy}
+						hasLibraries={$wizard.libraries.length > 0}
 						{hasPrebuilt}
+						onStrategyChange={selectStrategy}
 						mountProtocol={$wizard.mountProtocol}
-						onSelect={selectStrategy}
 						onProtocolChange={selectMountProtocol}
 					/>
 
@@ -1066,7 +1070,10 @@
 						<div class="grid grid-cols-[140px_1fr_auto] gap-4 items-center px-4 py-3.5 border-b border-gray-800">
 							<span class="text-xs text-gray-400 font-medium">전략</span>
 							<span class="text-sm text-white">
-								{$wizard.strategy === 'prebuilt' ? '일반 배포 ⚡' : $wizard.strategy === 'dynamic' ? 'HA 배포 ⏱' : '없음'}
+								{$wizard.scheduling === 'ha' ? 'HA 🛡' : '일반 ⚡'}
+								{#if $wizard.strategy}
+									· {$wizard.strategy === 'prebuilt' ? '사전 빌드' : 'cloud-init'}
+								{/if}
 							</span>
 							<button onclick={() => goTo(4)} class="review-edit-btn">✎ 수정</button>
 						</div>

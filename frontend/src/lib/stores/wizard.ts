@@ -38,6 +38,7 @@ export interface WizardState {
 	flavorName: string | null;
 	libraries: string[];
 	strategy: 'prebuilt' | 'dynamic' | null;
+	scheduling: 'standard' | 'ha';
 	mountProtocol: 'CEPHFS' | 'NFS';
 	templateName: string | null;
 	templateVersion: number | null;
@@ -66,6 +67,7 @@ const initial: WizardState = {
 	flavorName: null,
 	libraries: [],
 	strategy: null,
+	scheduling: 'standard',
 	mountProtocol: 'NFS',
 	templateName: null,
 	templateVersion: null,

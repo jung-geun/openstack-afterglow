@@ -1,62 +1,151 @@
 <script lang="ts">
-	let { selected, hasPrebuilt, mountProtocol, onSelect, onProtocolChange }: {
-		selected: 'prebuilt' | 'dynamic' | null;
+	let {
+		scheduling,
+		onSchedulingChange,
+		strategy,
+		hasLibraries,
+		hasPrebuilt,
+		onStrategyChange,
+		mountProtocol,
+		onProtocolChange,
+	}: {
+		scheduling: 'standard' | 'ha';
+		onSchedulingChange: (s: 'standard' | 'ha') => void;
+		strategy: 'prebuilt' | 'dynamic' | null;
+		hasLibraries: boolean;
 		hasPrebuilt: boolean;
+		onStrategyChange: (s: 'prebuilt' | 'dynamic') => void;
 		mountProtocol: 'CEPHFS' | 'NFS';
-		onSelect: (s: 'prebuilt' | 'dynamic') => void;
 		onProtocolChange: (p: 'CEPHFS' | 'NFS') => void;
 	} = $props();
 </script>
 
-<p class="text-sm text-gray-400 mb-5">VM의 실패 대비 동작과 가용 영역을 지정하세요.</p>
-
-<div class="flex flex-col gap-3">
-	<!-- 일반 배포 (prebuilt) -->
-	<button
-		onclick={() => onSelect('prebuilt')}
-		class="flex items-start gap-3 p-4 rounded-xl border text-left transition-all {selected === 'prebuilt'
-			? 'border-blue-500 bg-blue-900/15 ring-1 ring-blue-500/30'
-			: 'border-gray-700 bg-gray-900 hover:border-gray-500'}"
-	>
-		<div class="w-5 h-5 rounded-md flex-shrink-0 mt-0.5 flex items-center justify-center border transition-colors
-			{selected === 'prebuilt' ? 'bg-blue-500 border-blue-500' : 'border-gray-600 bg-gray-800'}">
-			{#if selected === 'prebuilt'}
-				<svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
-				</svg>
-			{/if}
-		</div>
-		<div class="flex-1 flex flex-col gap-1.5">
-			<div class="flex items-center gap-2.5 flex-wrap">
-				<b class="text-sm font-semibold text-white">일반 배포</b>
-				<span class="ml-auto text-gray-500 font-mono text-[11.5px]">⚡ ~30초 부팅</span>
+<!-- 섹션 A: 스케줄링 (항상) -->
+<div class="mb-6">
+	<p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">스케줄링 / 내고장성</p>
+	<div class="flex flex-col gap-3">
+		<button
+			onclick={() => onSchedulingChange('standard')}
+			class="flex items-start gap-3 p-4 rounded-xl border text-left transition-all {scheduling === 'standard'
+				? 'border-blue-500 bg-blue-900/15 ring-1 ring-blue-500/30'
+				: 'border-gray-700 bg-gray-900 hover:border-gray-500'}"
+		>
+			<div class="w-5 h-5 rounded-md flex-shrink-0 mt-0.5 flex items-center justify-center border transition-colors
+				{scheduling === 'standard' ? 'bg-blue-500 border-blue-500' : 'border-gray-600 bg-gray-800'}">
+				{#if scheduling === 'standard'}
+					<svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+					</svg>
+				{/if}
 			</div>
-			<p class="text-xs text-gray-400 leading-relaxed">단일 VM, 호스트 고정 배치. 재시작이 없고 부팅이 빠릅니다.</p>
-		</div>
-	</button>
-
-	<!-- HA 배포 (dynamic) -->
-	<button
-		onclick={() => onSelect('dynamic')}
-		class="flex items-start gap-3 p-4 rounded-xl border text-left transition-all {selected === 'dynamic'
-			? 'border-blue-500 bg-blue-900/15 ring-1 ring-blue-500/30'
-			: 'border-gray-700 bg-gray-900 hover:border-gray-500'}"
-	>
-		<div class="w-5 h-5 rounded-md flex-shrink-0 mt-0.5 flex items-center justify-center border transition-colors
-			{selected === 'dynamic' ? 'bg-blue-500 border-blue-500' : 'border-gray-600 bg-gray-800'}">
-			{#if selected === 'dynamic'}
-				<svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
-				</svg>
-			{/if}
-		</div>
-		<div class="flex-1 flex flex-col gap-1.5">
-			<div class="flex items-center gap-2.5 flex-wrap">
-				<b class="text-sm font-semibold text-white">HA 배포</b>
-				<span class="px-1.5 py-0.5 rounded bg-blue-900/30 border border-blue-800 text-blue-400 text-[11px] font-mono">권장</span>
-				<span class="ml-auto text-gray-500 font-mono text-[11.5px]">⏱ ~3-5분 부팅</span>
+			<div class="flex-1 flex flex-col gap-1.5">
+				<div class="flex items-center gap-2.5 flex-wrap">
+					<b class="text-sm font-semibold text-white">일반 배포</b>
+					<span class="ml-auto text-gray-500 font-mono text-[11.5px]">⚡ ~30초 부팅</span>
+				</div>
+				<p class="text-xs text-gray-400 leading-relaxed">단일 호스트 고정 배치. 호스트 장애 시 수동 복구가 필요합니다.</p>
 			</div>
-			<p class="text-xs text-gray-400 leading-relaxed">호스트 장애 시 자동 마이그레이션. 클라우드 init 초기화가 추가됩니다.</p>
-		</div>
-	</button>
+		</button>
+
+		<button
+			onclick={() => onSchedulingChange('ha')}
+			class="flex items-start gap-3 p-4 rounded-xl border text-left transition-all {scheduling === 'ha'
+				? 'border-blue-500 bg-blue-900/15 ring-1 ring-blue-500/30'
+				: 'border-gray-700 bg-gray-900 hover:border-gray-500'}"
+		>
+			<div class="w-5 h-5 rounded-md flex-shrink-0 mt-0.5 flex items-center justify-center border transition-colors
+				{scheduling === 'ha' ? 'bg-blue-500 border-blue-500' : 'border-gray-600 bg-gray-800'}">
+				{#if scheduling === 'ha'}
+					<svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+					</svg>
+				{/if}
+			</div>
+			<div class="flex-1 flex flex-col gap-1.5">
+				<div class="flex items-center gap-2.5 flex-wrap">
+					<b class="text-sm font-semibold text-white">HA 배포</b>
+					<span class="px-1.5 py-0.5 rounded bg-blue-900/30 border border-blue-800 text-blue-400 text-[11px] font-mono">권장</span>
+					<span class="ml-auto text-gray-500 font-mono text-[11.5px]">🛡 고가용성</span>
+				</div>
+				<p class="text-xs text-gray-400 leading-relaxed">호스트 장애 시 자동 evacuate. Masakari 등 HA 솔루션 활성화 시 동작합니다.</p>
+			</div>
+		</button>
+	</div>
 </div>
+
+<!-- 섹션 B: 레이어 마운트 방식 (라이브러리 선택 시에만) -->
+{#if hasLibraries}
+	<div class="border-t border-gray-800 pt-5">
+		<p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">레이어 마운트 방식</p>
+
+		{#if !hasPrebuilt}
+			<div class="mb-3 px-3 py-2 rounded-lg bg-yellow-900/20 border border-yellow-800 text-yellow-400 text-xs">
+				선택된 라이브러리 중 사전 빌드 가능한 항목이 없어 동적 생성만 가능합니다.
+			</div>
+		{/if}
+
+		<div class="flex flex-col gap-3">
+			<button
+				onclick={() => { if (hasPrebuilt) onStrategyChange('prebuilt'); }}
+				disabled={!hasPrebuilt}
+				class="flex items-start gap-3 p-4 rounded-xl border text-left transition-all {strategy === 'prebuilt'
+					? 'border-blue-500 bg-blue-900/15 ring-1 ring-blue-500/30'
+					: 'border-gray-700 bg-gray-900 hover:border-gray-500'} {!hasPrebuilt ? 'opacity-40 cursor-not-allowed' : ''}"
+			>
+				<div class="w-5 h-5 rounded-md flex-shrink-0 mt-0.5 flex items-center justify-center border transition-colors
+					{strategy === 'prebuilt' ? 'bg-blue-500 border-blue-500' : 'border-gray-600 bg-gray-800'}">
+					{#if strategy === 'prebuilt'}
+						<svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+						</svg>
+					{/if}
+				</div>
+				<div class="flex-1 flex flex-col gap-1.5">
+					<div class="flex items-center gap-2.5 flex-wrap">
+						<b class="text-sm font-semibold text-white">사전 빌드 레이어 사용</b>
+						<span class="ml-auto text-gray-500 font-mono text-[11.5px]">⚡ 빠른 부팅</span>
+					</div>
+					<p class="text-xs text-gray-400 leading-relaxed">미리 빌드된 OverlayFS 레이어를 읽기 전용 마운트. 부팅이 빠릅니다.</p>
+				</div>
+			</button>
+
+			<button
+				onclick={() => onStrategyChange('dynamic')}
+				class="flex items-start gap-3 p-4 rounded-xl border text-left transition-all {strategy === 'dynamic'
+					? 'border-blue-500 bg-blue-900/15 ring-1 ring-blue-500/30'
+					: 'border-gray-700 bg-gray-900 hover:border-gray-500'}"
+			>
+				<div class="w-5 h-5 rounded-md flex-shrink-0 mt-0.5 flex items-center justify-center border transition-colors
+					{strategy === 'dynamic' ? 'bg-blue-500 border-blue-500' : 'border-gray-600 bg-gray-800'}">
+					{#if strategy === 'dynamic'}
+						<svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+						</svg>
+					{/if}
+				</div>
+				<div class="flex-1 flex flex-col gap-1.5">
+					<div class="flex items-center gap-2.5 flex-wrap">
+						<b class="text-sm font-semibold text-white">cloud-init 동적 생성</b>
+						<span class="ml-auto text-gray-500 font-mono text-[11.5px]">⏱ ~3-5분 부팅</span>
+					</div>
+					<p class="text-xs text-gray-400 leading-relaxed">첫 부팅 시 cloud-init 스크립트로 레이어를 직접 빌드. 유연하게 조합 가능합니다.</p>
+				</div>
+			</button>
+		</div>
+
+		<!-- mountProtocol 토글 (dynamic 선택 시) -->
+		{#if strategy === 'dynamic'}
+			<div class="mt-4 flex items-center gap-3">
+				<span class="text-xs text-gray-500">마운트 프로토콜</span>
+				{#each (['CEPHFS', 'NFS'] as const) as p}
+					<button
+						onclick={() => onProtocolChange(p)}
+						class="px-3 py-1 rounded-md text-xs font-mono border transition-colors {mountProtocol === p
+							? 'bg-blue-900/40 border-blue-600 text-blue-300'
+							: 'border-gray-700 text-gray-500 hover:border-gray-500'}"
+					>{p}</button>
+				{/each}
+			</div>
+		{/if}
+	</div>
+{/if}

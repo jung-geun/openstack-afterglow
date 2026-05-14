@@ -485,6 +485,7 @@ def _server_to_info(s) -> InstanceInfo:
         union_strategy=meta.get("union_strategy"),
         union_share_ids=meta.get("union_share_ids", "").split(",") if meta.get("union_share_ids") else [],
         union_upper_volume_id=meta.get("union_upper_volume_id"),
+        scheduling=meta.get("scheduling"),
         key_name=getattr(s, "key_name", None),
         user_id=getattr(s, "user_id", None),
         project_id=getattr(s, "project_id", None) or getattr(s, "tenant_id", None),

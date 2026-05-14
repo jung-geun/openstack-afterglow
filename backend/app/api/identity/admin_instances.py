@@ -275,7 +275,10 @@ async def admin_create_instance_async(
                     else "none"
                 ),
                 "union_upper_volume_id": upper_volume_id or "none",
+                "scheduling": req.scheduling,
             }
+            if req.scheduling == "ha":
+                meta["HA_Enabled"] = "True"
             if resolved_libs and _sse_health_token:
                 meta["union_health_id"] = _sse_health_id
 

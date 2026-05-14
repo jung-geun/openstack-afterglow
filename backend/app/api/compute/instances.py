@@ -355,7 +355,10 @@ async def create_instance(
             "union_strategy": req.strategy,
             "union_share_ids": ",".join([s.get("file_storage_id", "") for s in file_storages_info]),
             "union_upper_volume_id": upper_volume_id,
+            "scheduling": req.scheduling,
         }
+        if req.scheduling == "ha":
+            meta["HA_Enabled"] = "True"
         if _health_token:
             meta["union_health_id"] = _health_id
 
@@ -697,7 +700,10 @@ async def create_instance_async(
                     else "none"
                 ),
                 "union_upper_volume_id": upper_volume_id or "none",
+                "scheduling": req.scheduling,
             }
+            if req.scheduling == "ha":
+                meta["HA_Enabled"] = "True"
             if resolved_libs and _sse_health_token:
                 meta["union_health_id"] = _sse_health_id
 
