@@ -23,15 +23,24 @@ _session_factory: async_sessionmaker | None = None
 
 # circuit breaker: OperationalError 발생 시 일정 시간 DB 호출 차단
 _db_unhealthy_until: float = 0.0
+_default_unhealthy_seconds: int = 15
 
 
 class Base(DeclarativeBase):
     pass
 
 
-def init_db(database_url: str, pool_size: int = 5, max_overflow: int = 10) -> None:
+def init_db(
+    database_url: str,
+    pool_size: int = 5,
+    max_overflow: int = 10,
+    connect_timeout: int = 10,
+    pool_timeout: int = 10,
+    unhealthy_seconds: int = 15,
+) -> None:
     """앱 시작 시 호출. engine과 session factory를 초기화."""
-    global _engine, _session_factory
+    global _engine, _session_factory, _default_unhealthy_seconds
+    _default_unhealthy_seconds = unhealthy_seconds
     if not database_url:
         _logger.info("database.url 미설정 — DB 없이 Redis 폴백으로 동작합니다")
         return
@@ -41,9 +50,9 @@ def init_db(database_url: str, pool_size: int = 5, max_overflow: int = 10) -> No
         pool_size=pool_size,
         max_overflow=max_overflow,
         pool_pre_ping=True,
-        pool_timeout=5,
+        pool_timeout=pool_timeout,
         pool_recycle=1800,
-        connect_args={"connect_timeout": 5},
+        connect_args={"connect_timeout": connect_timeout},
         echo=False,
     )
     _session_factory = async_sessionmaker(_engine, expire_on_commit=False, class_=AsyncSession)
@@ -59,11 +68,15 @@ def is_db_available() -> bool:
     return True
 
 
-def mark_db_unhealthy(seconds: int = 30) -> None:
-    """OperationalError 발생 시 호출 — 지정 시간 동안 is_db_available() False 반환."""
+def mark_db_unhealthy(seconds: int | None = None) -> None:
+    """OperationalError 발생 시 호출 — 지정 시간 동안 is_db_available() False 반환.
+
+    seconds=None이면 init_db에서 설정한 기본값(_default_unhealthy_seconds) 사용.
+    """
     global _db_unhealthy_until
-    _db_unhealthy_until = time.time() + seconds
-    _logger.warning("DB circuit breaker 활성화: %d초 동안 DB 호출 차단", seconds)
+    duration = seconds if seconds is not None else _default_unhealthy_seconds
+    _db_unhealthy_until = time.time() + duration
+    _logger.warning("DB circuit breaker 활성화: %d초 동안 DB 호출 차단", duration)
 
 
 async def create_tables() -> None:

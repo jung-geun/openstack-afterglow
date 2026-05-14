@@ -399,6 +399,12 @@ def _render_toml_for_k8s(cfg: dict) -> str:
             lines.append(f'max_overflow = {db["max_overflow"]}')
         if "auto_create_tables" in db:
             lines.append(f'auto_create_tables = {_toml_bool(db["auto_create_tables"])}')
+        if "connect_timeout" in db:
+            lines.append(f'connect_timeout = {db["connect_timeout"]}')
+        if "pool_timeout" in db:
+            lines.append(f'pool_timeout = {db["pool_timeout"]}')
+        if "unhealthy_seconds" in db:
+            lines.append(f'unhealthy_seconds = {db["unhealthy_seconds"]}')
         lines.append("")
 
     # [cors]

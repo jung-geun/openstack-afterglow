@@ -220,6 +220,9 @@ def _load_toml() -> dict:
     flat["database_pool_size"] = db.get("pool_size", 5)
     flat["database_max_overflow"] = db.get("max_overflow", 10)
     flat["database_auto_create_tables"] = db.get("auto_create_tables", True)
+    flat["database_connect_timeout"] = db.get("connect_timeout", 10)
+    flat["database_pool_timeout"] = db.get("pool_timeout", 10)
+    flat["database_unhealthy_seconds"] = db.get("unhealthy_seconds", 15)
 
     cors = data.get("cors", {})
     flat["cors_origins"] = cors.get("origins", "http://localhost:3000,http://localhost")
@@ -400,6 +403,9 @@ class Settings(BaseSettings):
     database_pool_size: int = 5
     database_max_overflow: int = 10
     database_auto_create_tables: bool = True
+    database_connect_timeout: int = 10
+    database_pool_timeout: int = 10
+    database_unhealthy_seconds: int = 15
 
     # GitLab OIDC
     gitlab_oidc_enabled: bool = False

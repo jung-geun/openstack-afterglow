@@ -707,6 +707,9 @@ async def start_background_workers():
             _db_cfg.database_url,
             pool_size=_db_cfg.database_pool_size,
             max_overflow=_db_cfg.database_max_overflow,
+            connect_timeout=_db_cfg.database_connect_timeout,
+            pool_timeout=_db_cfg.database_pool_timeout,
+            unhealthy_seconds=_db_cfg.database_unhealthy_seconds,
         )
         if _db_cfg.database_auto_create_tables:
             # create_tables()를 await하지 않고 백그라운드 태스크로 실행해
