@@ -11,24 +11,47 @@
 	let { size = 'md', color = 'white', children, ...restProps }: Props = $props();
 
 	const sizeClasses = {
-		sm: 'w-4 h-4 border-2',
-		md: 'w-6 h-6 border-2',
-		lg: 'w-8 h-8 border-3',
+		sm: 'text-xs',
+		md: 'text-sm',
+		lg: 'text-base',
 	};
 
 	const colorClasses = {
-		white: 'border-white/30 border-t-white',
-		blue: 'border-blue-500/30 border-t-blue-400',
-		gray: 'border-gray-500/30 border-t-gray-400',
+		white: 'text-white',
+		blue:  'text-blue-400',
+		gray:  'text-gray-400',
 	};
 </script>
 
 <div class="inline-flex items-center gap-2" {...restProps}>
-	<div
-		class="animate-spin rounded-full {sizeClasses[size]} {colorClasses[color]}"
-		aria-hidden="true"
-	></div>
+	<span
+		class="af-loader font-mono font-semibold {sizeClasses[size]} {colorClasses[color]}"
+		aria-label="Loading"
+		role="status"
+	></span>
 	{#if children}
 		{@render children()}
 	{/if}
 </div>
+
+<style>
+	.af-loader {
+		display: inline-block;
+		line-height: 1.2em;
+		height: 1.2em;
+		overflow: hidden;
+		white-space: pre;
+	}
+	.af-loader::before {
+		content: "Loading...\A godnLai...\A oiaglni...\A Liongad...\A gindola...\A naloidg...";
+		display: inline-block;
+		white-space: pre;
+		animation: af-loader 1s steps(6) infinite;
+	}
+	@keyframes af-loader {
+		100% { transform: translateY(-100%); }
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.af-loader::before { animation: none; }
+	}
+</style>

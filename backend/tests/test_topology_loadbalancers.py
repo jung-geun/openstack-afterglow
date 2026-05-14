@@ -48,6 +48,29 @@ _MEMBERS_BY_POOL = {
 }
 
 
+def test_get_topology_lbs_includes_provisioning_status():
+    """토폴로지 응답에 provisioning_status 키가 포함되어야 한다 (frontend type contract)."""
+    from unittest.mock import patch
+
+    from app.services.octavia import get_topology_lbs
+
+    conn = MagicMock()
+    mock_lb = MagicMock()
+    mock_lb.id = "lb-1"
+    mock_lb.name = "lb"
+    mock_lb.provisioning_status = "ACTIVE"
+    mock_lb.operating_status = "ONLINE"
+    conn.load_balancer.load_balancers.return_value = [mock_lb]
+    with (
+        patch("app.services.octavia.list_listeners", return_value=[]),
+        patch("app.services.octavia.list_pools", return_value=[]),
+    ):
+        result = get_topology_lbs(conn)
+    assert result[0]["provisioning_status"] == "ACTIVE"
+    assert result[0]["status"] == "ACTIVE"
+    assert result[0]["operating_status"] == "ONLINE"
+
+
 def test_get_topology_lbs_octavia_unavailable():
     """Octavia catalog 부재 시 빈 리스트 반환."""
     from app.services.octavia import get_topology_lbs
