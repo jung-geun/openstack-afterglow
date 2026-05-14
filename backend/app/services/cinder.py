@@ -92,30 +92,35 @@ def get_volume_limits(conn: openstack.connection.Connection) -> dict:
     }
 
 
-def get_volume_quota(conn: openstack.connection.Connection, project_id: str) -> dict:
-    """프로젝트의 상세 Cinder 할당량 (usage 포함)."""
+_QUOTA_KEYS = ("volumes", "snapshots", "gigabytes", "backups", "backup_gigabytes")
 
-    def _extract(q):
-        if q is None:
-            return {"limit": -1, "in_use": 0}
+
+def get_volume_quota(conn: openstack.connection.Connection, project_id: str) -> dict:
+    """프로젝트의 상세 Cinder 할당량 (usage 포함).
+
+    openstacksdk `block_storage.get_quota_set(usage=True)` 가 nested
+    `{limit, in_use, reserved}` dict 를 plain int 로 평탄화해서 in_use 정보를
+    잃는 케이스가 있어 — admin endpoint 와 동일하게 raw Cinder REST API
+    `GET /os-quota-sets/{project_id}?usage=true` 를 직접 호출한다.
+    """
+
+    def _normalize(q) -> dict:
         if isinstance(q, dict):
-            return {"limit": q.get("limit", -1), "in_use": q.get("in_use", 0)}
-        return {"limit": getattr(q, "limit", -1), "in_use": getattr(q, "in_use", 0)}
+            return {"limit": int(q.get("limit", -1)), "in_use": int(q.get("in_use", 0))}
+        if isinstance(q, int):
+            return {"limit": q, "in_use": 0}
+        return {"limit": -1, "in_use": 0}
 
     try:
-        quota = conn.block_storage.get_quota_set(project_id, usage=True)
-        return {
-            "volumes": _extract(getattr(quota, "volumes", None)),
-            "snapshots": _extract(getattr(quota, "snapshots", None)),
-            "gigabytes": _extract(getattr(quota, "gigabytes", None)),
-            "backups": _extract(getattr(quota, "backups", None)),
-            "backup_gigabytes": _extract(getattr(quota, "backup_gigabytes", None)),
-        }
+        bs_endpoint = conn.block_storage.get_endpoint()
+        resp = conn.session.get(f"{bs_endpoint}/os-quota-sets/{project_id}", params={"usage": "true"})
+        qs = resp.json().get("quota_set", {})
+        return {k: _normalize(qs.get(k)) for k in _QUOTA_KEYS}
     except Exception:
         import logging as _logging
 
         _logging.getLogger(__name__).warning("Cinder quota_set 조회 실패 — limits API로 fallback", exc_info=True)
-        # fallback: limits API
+        # fallback: limits API (in_use 일부만 제공)
         limits = conn.block_storage.get_limits()
         a = limits.absolute
         return {
