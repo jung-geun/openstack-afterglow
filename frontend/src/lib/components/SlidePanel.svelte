@@ -5,10 +5,72 @@
   interface Props {
     onClose: () => void;
     width?: string;
+    resizable?: boolean;
+    storageKey?: string;
     children: Snippet;
   }
 
-  let { onClose, width = 'w-full md:w-[75vw] max-w-5xl', children }: Props = $props();
+  let {
+    onClose,
+    width = 'w-full md:w-[75vw] max-w-5xl',
+    resizable = true,
+    storageKey,
+    children,
+  }: Props = $props();
+
+  const MIN_PX = 360;
+  const SIDEBAR_WIDTH = 240;
+
+  let widthPx = $state<number | null>(null);
+  let panelEl = $state<HTMLElement | null>(null);
+
+  function resolvedKey(): string {
+    return storageKey ?? `slidePanel.${window.location.pathname}.width`;
+  }
+
+  // 마운트 시 저장된 폭 복원
+  $effect(() => {
+    const saved = localStorage.getItem(resolvedKey());
+    if (saved !== null) {
+      const n = parseInt(saved, 10);
+      if (!isNaN(n)) widthPx = n;
+    }
+  });
+
+  // widthPx 변경 시 영속화
+  $effect(() => {
+    if (widthPx !== null) {
+      localStorage.setItem(resolvedKey(), String(widthPx));
+    }
+  });
+
+  function onHandleMouseDown(e: MouseEvent) {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = widthPx ?? panelEl?.offsetWidth ?? 600;
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+
+    function onMove(ev: MouseEvent) {
+      const maxPx = window.innerWidth - SIDEBAR_WIDTH;
+      widthPx = Math.max(MIN_PX, Math.min(maxPx, startW + (startX - ev.clientX)));
+    }
+
+    function onUp() {
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    }
+
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }
+
+  function onHandleDblClick() {
+    widthPx = null;
+    localStorage.removeItem(resolvedKey());
+  }
 </script>
 
 <!-- main 영역(헤더 z-50 아래 + sidebar 우측)만 덮음. 헤더/sidebar 는 항상 보여 다른 페이지 navigation 가능.
@@ -22,9 +84,20 @@
     aria-label="패널 닫기"
   ></button>
   <div
+    bind:this={panelEl}
     class="absolute right-0 top-0 bottom-0 {width} bg-gray-950 border-l border-gray-700 overflow-y-auto shadow-2xl"
+    style={widthPx !== null ? `width: ${widthPx}px; max-width: none` : ''}
     transition:fly={{ x: 400, duration: 300, opacity: 1 }}
   >
+    {#if resizable}
+      <!-- 폭 조정 핸들: 데스크톱에서만 노출, 더블클릭으로 기본값 리셋 -->
+      <div
+        class="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-indigo-500/40 active:bg-indigo-500/60 z-10 hidden md:block"
+        aria-hidden="true"
+        onmousedown={onHandleMouseDown}
+        ondblclick={onHandleDblClick}
+      ></div>
+    {/if}
     {@render children()}
   </div>
 </div>
