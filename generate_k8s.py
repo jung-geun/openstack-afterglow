@@ -501,6 +501,9 @@ def render_configmap(cfg: dict) -> str:
     # APP_S3_BASE: openstack.s3_endpoint (미설정 시 기본값)
     app_s3_base = ost.get("s3_endpoint", "https://s3.dmslab.re.kr")
 
+    # APP_GRAFANA_BASE: monitoring.grafana_base_url (CSP frame-src 및 frontend 임베드용)
+    app_grafana_base = cfg.get("monitoring", {}).get("grafana_base_url", "")
+
     # config.toml 인라인 (4칸 들여쓰기)
     toml_content = _render_toml_for_k8s(cfg)
     indented_toml = "\n".join("    " + line for line in toml_content.splitlines())
@@ -515,6 +518,7 @@ def render_configmap(cfg: dict) -> str:
         f'  APP_REDIS_URL: "{REDIS_K8S}"',
         f'  APP_ORIGIN: "{app_origin}"',
         f'  APP_S3_BASE: "{app_s3_base}"',
+        f'  APP_GRAFANA_BASE: "{app_grafana_base}"',
         "  config.toml: |",
         indented_toml,
     ]

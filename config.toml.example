@@ -293,6 +293,7 @@ node_exporter_sg_name = "node_exporter"   # node_exporter ingress SG 이름 (tcp
 dcgm_exporter_sg_name = "dcgm_exporter"  # dcgm_exporter ingress SG 이름 (tcp/9400, GPU 전용)
 # Grafana 연동
 grafana_base_url = ""           # Grafana 외부 URL (예: https://grafana.example.com)
+                                # 이 값은 frontend 의 PUBLIC_GRAFANA_BASE 로도 주입되어 CSP frame-src 에 포함됩니다
 grafana_jwt_secret = ""         # Grafana auth.jwt 서명 시크릿 (secret.yaml에서 주입)
 
 [monitoring.dashboards]
