@@ -251,7 +251,7 @@
         <button onclick={() => showAddListener = !showAddListener} class="text-blue-400 hover:text-blue-300 text-xs px-2 py-1 rounded border border-blue-900 hover:border-blue-700 transition-colors">+ 추가</button>
       </div>
       {#if showAddListener}
-        <div class="mb-4 p-4 bg-gray-800/60 border border-gray-700 rounded-lg grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <div class="mb-4 p-4 bg-gray-800/60 border border-gray-700 rounded-lg grid grid-cols-1 @lg/panel:grid-cols-3 gap-2">
           <input bind:value={listenerForm.name} placeholder="이름 (선택)" class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200" />
           <select bind:value={listenerForm.protocol} class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200">
             {#each ['HTTP', 'HTTPS', 'TCP', 'UDP'] as p}<option value={p}>{p}</option>{/each}
@@ -286,7 +286,7 @@
         <button onclick={() => showAddPool = !showAddPool} class="text-blue-400 hover:text-blue-300 text-xs px-2 py-1 rounded border border-blue-900 hover:border-blue-700 transition-colors">+ 추가</button>
       </div>
       {#if showAddPool}
-        <div class="mb-4 p-4 bg-gray-800/60 border border-gray-700 rounded-lg grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <div class="mb-4 p-4 bg-gray-800/60 border border-gray-700 rounded-lg grid grid-cols-1 @lg/panel:grid-cols-3 gap-2">
           <input bind:value={poolForm.name} placeholder="이름 (선택)" class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200" />
           <select bind:value={poolForm.protocol} class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200">
             {#each ['HTTP', 'HTTPS', 'TCP', 'UDP'] as p}<option value={p}>{p}</option>{/each}
@@ -328,7 +328,7 @@
                     <button onclick={() => showAddMember = !showAddMember} class="text-blue-400 hover:text-blue-300 text-xs px-2 py-1 rounded border border-blue-900 hover:border-blue-700 transition-colors">+ 멤버 추가</button>
                   </div>
                   {#if showAddMember}
-                    <div class="mb-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div class="mb-3 grid grid-cols-1 @lg/panel:grid-cols-2 gap-2">
                       <input bind:value={memberForm.address} placeholder="IP 주소" class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200" />
                       <input bind:value={memberForm.protocol_port} type="number" min="1" max="65535" placeholder="포트" class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200" />
                       <input bind:value={memberForm.weight} type="number" min="1" max="256" placeholder="가중치" class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200" />

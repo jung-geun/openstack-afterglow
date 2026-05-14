@@ -328,7 +328,7 @@
     {/if}
 
     <!-- 정보 카드 2열 -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+    <div class="grid grid-cols-1 @xl/panel:grid-cols-2 gap-3 mb-4">
       <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
         <h3 class="text-xs text-gray-500 uppercase tracking-wide mb-3">클러스터 정보</h3>
         <dl class="space-y-1.5 text-sm">

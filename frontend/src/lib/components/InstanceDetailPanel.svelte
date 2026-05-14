@@ -906,7 +906,7 @@
 		<!-- 기본 정보 -->
 		<div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4">
 			<h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-4">기본 정보</h2>
-			<dl class="grid grid-cols-2 gap-x-8 gap-y-3">
+			<dl class="grid grid-cols-1 @xl/panel:grid-cols-2 gap-x-8 gap-y-3">
 				<div>
 					<dt class="text-xs text-gray-500 mb-0.5">ID</dt>
 					<dd class="text-sm text-gray-300 font-mono">{instance.id}</dd>
@@ -1057,7 +1057,7 @@
 						{@const ifaceFip = floatingIps.find(f => f.port_id === iface.id)}
 						<div class="bg-gray-800/50 rounded-lg p-4">
 							<div class="flex items-start justify-between mb-3">
-								<div class="grid grid-cols-2 gap-x-6 gap-y-2 flex-1">
+								<div class="grid grid-cols-1 @xl/panel:grid-cols-2 gap-x-6 gap-y-2 flex-1">
 									<div>
 										<dt class="text-xs text-gray-500 mb-0.5">포트 ID</dt>
 										<dd class="text-xs text-gray-300 font-mono">{iface.id}</dd>
@@ -1327,7 +1327,7 @@
 		<!-- Afterglow 정보 -->
 		<div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4">
 			<h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-4">Afterglow 정보</h2>
-			<dl class="grid grid-cols-2 gap-x-8 gap-y-3">
+			<dl class="grid grid-cols-1 @xl/panel:grid-cols-2 gap-x-8 gap-y-3">
 				<div>
 					<dt class="text-xs text-gray-500 mb-0.5">전략</dt>
 					<dd class="text-sm text-gray-300">

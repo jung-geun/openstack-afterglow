@@ -23,10 +23,19 @@
 
   let widthPx = $state<number | null>(null);
   let panelEl = $state<HTMLElement | null>(null);
+  let isDesktop = $state<boolean>(true);
 
   function resolvedKey(): string {
     return storageKey ?? `slidePanel.${window.location.pathname}.width`;
   }
+
+  $effect(() => {
+    const mq = window.matchMedia('(min-width: 768px)');
+    const update = () => { isDesktop = mq.matches; };
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  });
 
   // 마운트 시 저장된 폭 복원
   $effect(() => {
@@ -85,8 +94,8 @@
   ></button>
   <div
     bind:this={panelEl}
-    class="absolute right-0 top-0 bottom-0 {width} bg-gray-950 border-l border-gray-700 overflow-y-auto shadow-2xl"
-    style={widthPx !== null ? `width: ${widthPx}px; max-width: none` : ''}
+    class="@container/panel absolute right-0 top-0 bottom-0 {width} bg-gray-950 border-l border-gray-700 overflow-y-auto shadow-2xl"
+    style={isDesktop && widthPx !== null ? `width: ${widthPx}px; max-width: none` : ''}
     transition:fly={{ x: 400, duration: 300, opacity: 1 }}
   >
     {#if resizable}

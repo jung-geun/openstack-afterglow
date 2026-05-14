@@ -833,7 +833,7 @@
 					</div>
 
 					<!-- 네트워크 + 키페어 -->
-					<div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5 mb-4">
+					<div class="grid grid-cols-1 @lg/panel:grid-cols-2 gap-3.5 mb-4">
 						<div>
 							<label for="create-network" class="block text-[11.5px] font-semibold text-gray-300 tracking-tight flex items-center gap-1.5 mb-1.5">
 								네트워크 <span class="text-red-400">*</span>
@@ -884,7 +884,7 @@
 					</div>
 
 					<!-- 보안 그룹 + 가용 영역 -->
-					<div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5 mb-4">
+					<div class="grid grid-cols-1 @lg/panel:grid-cols-2 gap-3.5 mb-4">
 						<div>
 							<label for="create-sg" class="block text-[11.5px] font-semibold text-gray-300 tracking-tight flex items-center gap-1.5 mb-1.5">
 								보안 그룹 <span class="text-[10px] text-gray-500 font-normal px-1.5 py-0.5 rounded-full bg-gray-800">선택</span>
@@ -927,7 +927,7 @@
 
 					<!-- 루트 디스크 -->
 					{#if $wizard.bootSource === 'image'}
-					<div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5 mb-4">
+					<div class="grid grid-cols-1 @lg/panel:grid-cols-2 gap-3.5 mb-4">
 						<div>
 							<label for="boot-volume-size" class="block text-[11.5px] font-semibold text-gray-300 tracking-tight flex items-center gap-1.5 mb-1.5">
 								루트 디스크 <span class="text-red-400">*</span>
