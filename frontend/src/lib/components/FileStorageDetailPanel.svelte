@@ -187,7 +187,7 @@
     <!-- 기본 정보 -->
     <div class="bg-gray-900 border border-gray-800 rounded-lg p-5 mb-4">
       <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">기본 정보</h3>
-      <dl class="grid grid-cols-2 gap-x-6 gap-y-2.5">
+      <dl class="grid grid-cols-1 @3xl/panel:grid-cols-2 gap-x-6 gap-y-2.5">
         <div>
           <dt class="text-xs text-gray-500 mb-0.5">ID</dt>
           <dd class="text-sm text-gray-300 font-mono break-all">{fileStorage.id}</dd>

@@ -167,7 +167,7 @@
 		/>
 	</div>
 
-	<div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+	<div class="grid grid-cols-1 @3xl/panel:grid-cols-2 gap-4">
 		{#each activeCharts as chart}
 			{@const m = metrics[chart.key]}
 			{@const ex = chart.extraKey ? metrics[chart.extraKey] : null}
