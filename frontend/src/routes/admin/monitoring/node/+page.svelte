@@ -4,12 +4,12 @@
 </script>
 
 <div class="p-4 md:p-8 max-w-7xl mx-auto">
-	<PageHeader breadcrumb="인프라 서비스 / ETCD" title="etcd 메트릭" />
+	<PageHeader breadcrumb="MONITORING / NODE" title="노드 메트릭" />
 
 	<div class="mt-2">
 		<p class="text-xs text-gray-500 mb-4">
-			etcd 내장 Prometheus 엔드포인트를 통해 수집된 메트릭입니다.
+			node_exporter를 통해 수집된 호스트 메트릭입니다.
 		</p>
-		<GrafanaEmbed dashboardKey="etcd" height={600} />
+		<GrafanaEmbed dashboardKey="node" height={600} desktopHeight={1400} />
 	</div>
 </div>

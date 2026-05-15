@@ -26,5 +26,6 @@ async def get_grafana_dashboards(
             "mysqld": settings.grafana_dashboard_mysqld_uid,
             "memcached": settings.grafana_dashboard_memcached_uid,
             "etcd": settings.grafana_dashboard_etcd_uid,
+            "haproxy": settings.grafana_dashboard_haproxy_uid,
         },
     }

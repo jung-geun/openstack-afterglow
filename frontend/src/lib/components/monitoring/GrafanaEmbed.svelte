@@ -8,6 +8,7 @@
 		vars?: Record<string, string>;
 		range?: string;
 		height?: number;
+		desktopHeight?: number;
 		title?: string;
 	}
 
@@ -17,8 +18,22 @@
 		vars = {},
 		range = 'now-1h',
 		height = 360,
+		desktopHeight,
 		title,
 	}: Props = $props();
+
+	const containerHeight = $derived(
+		desktopHeight && desktopHeight > height
+			? `clamp(${height}px, 85vh, ${desktopHeight}px)`
+			: `${height}px`,
+	);
+	const iframeHeight = $derived(
+		title
+			? desktopHeight && desktopHeight > height
+				? `clamp(${height - 36}px, calc(85vh - 36px), ${desktopHeight - 36}px)`
+				: `${height - 36}px`
+			: containerHeight,
+	);
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
@@ -60,7 +75,7 @@
 	});
 </script>
 
-<div class="w-full rounded-xl overflow-hidden bg-gray-900 border border-gray-800" style="height: {height}px">
+<div class="w-full rounded-xl overflow-hidden bg-gray-900 border border-gray-800" style="height: {containerHeight}">
 	{#if loading}
 		<div class="w-full h-full flex items-center justify-center">
 			<div class="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
@@ -83,7 +98,7 @@
 		<iframe
 			src={iframeUrl}
 			class="w-full border-0"
-			style="height: {title ? height - 36 : height}px"
+			style="height: {iframeHeight}"
 			sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
 			loading="lazy"
 			title={title ?? dashboardKey}

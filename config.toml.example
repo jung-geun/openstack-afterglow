@@ -302,6 +302,7 @@ rabbitmq_uid = "afterglow-rabbitmq"
 mysqld_uid = "afterglow-mysqld"
 memcached_uid = "afterglow-memcached"
 etcd_uid = "afterglow-etcd"
+haproxy_uid = "afterglow-haproxy"
 
 
 [cors]

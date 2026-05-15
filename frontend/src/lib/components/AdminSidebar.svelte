@@ -72,17 +72,12 @@
 			open: false,
 			items: [
 				{ label: '통합 모니터링', href: '/admin/monitoring', service: null },
-			],
-		},
-		{
-			label: '인프라 서비스',
-			prefix: '/admin/messaging',
-			icon: 'M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z',
-			open: false,
-			items: [
-				{ label: 'RabbitMQ', href: '/admin/messaging/rabbitmq', service: null },
-				{ label: 'Memcached', href: '/admin/messaging/memcached', service: null },
-				{ label: 'etcd', href: '/admin/coordination/etcd', service: null },
+				{ label: '노드', href: '/admin/monitoring/node', service: null },
+				{ label: 'MySQL', href: '/admin/monitoring/mysql', service: null },
+				{ label: 'HAProxy', href: '/admin/monitoring/haproxy', service: null },
+				{ label: 'RabbitMQ', href: '/admin/monitoring/rabbitmq', service: null },
+				{ label: 'Memcached', href: '/admin/monitoring/memcached', service: null },
+				{ label: 'etcd', href: '/admin/monitoring/etcd', service: null },
 			],
 		},
 		{

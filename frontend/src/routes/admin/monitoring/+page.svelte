@@ -7,8 +7,6 @@
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 	import MetricsPanel from '$lib/components/instance/MetricsPanel.svelte';
 	import QuotaBar from '$lib/components/ui/QuotaBar.svelte';
-	import GrafanaEmbed from '$lib/components/monitoring/GrafanaEmbed.svelte';
-
 	interface MonitoringSummary {
 		compute: {
 			hypervisors_total: number;
@@ -76,7 +74,7 @@
 	const projectId = $derived($auth.projectId ?? undefined);
 
 	// --- 탭 ---
-	let tab = $state<'summary' | 'instances' | 'infra'>('summary');
+	let tab = $state<'summary' | 'instances'>('summary');
 
 	// --- 클러스터 요약 ---
 	let summary = $state<MonitoringSummary | null>(null);
@@ -187,11 +185,6 @@
 			class="px-4 py-2 text-sm font-medium transition-colors -mb-px border-b-2
 				{tab === 'instances' ? 'text-white border-blue-500' : 'text-gray-500 border-transparent hover:text-gray-300'}"
 		>인스턴스 메트릭</button>
-		<button
-			onclick={() => (tab = 'infra')}
-			class="px-4 py-2 text-sm font-medium transition-colors -mb-px border-b-2
-				{tab === 'infra' ? 'text-white border-blue-500' : 'text-gray-500 border-transparent hover:text-gray-300'}"
-		>인프라 메트릭</button>
 	</div>
 
 	<!-- 클러스터 요약 탭 -->
@@ -421,32 +414,6 @@
 			</div>
 			</div>
 		{/if}
-	{/if}
-
-	<!-- 인프라 메트릭 탭 -->
-	{#if tab === 'infra'}
-		<div class="space-y-6">
-			<div>
-				<h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">하이퍼바이저 (Node Exporter)</h3>
-				<GrafanaEmbed dashboardKey="node" height={400} />
-			</div>
-			<div>
-				<h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">메시지큐 (RabbitMQ)</h3>
-				<GrafanaEmbed dashboardKey="rabbitmq" height={400} />
-			</div>
-			<div>
-				<h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">데이터베이스 (MySQL)</h3>
-				<GrafanaEmbed dashboardKey="mysqld" height={400} />
-			</div>
-			<div>
-				<h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">캐시 (Memcached)</h3>
-				<GrafanaEmbed dashboardKey="memcached" height={400} />
-			</div>
-			<div>
-				<h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Coordination (etcd)</h3>
-				<GrafanaEmbed dashboardKey="etcd" height={400} />
-			</div>
-		</div>
 	{/if}
 
 	<!-- 인스턴스 메트릭 탭 -->

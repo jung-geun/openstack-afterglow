@@ -4,7 +4,7 @@
     {"type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "1.0.0"}
   ],
   "annotations": {"list": []},
-  "description": "etcd 내장 Prometheus 메트릭 (v3)",
+  "description": "haproxy_exporter를 통해 수집된 HAProxy 메트릭",
   "editable": false,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -16,7 +16,7 @@
       "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0}, "id": 100, "panels": []
     },
     {
-      "type": "stat", "title": "멤버 수",
+      "type": "stat", "title": "인스턴스 수",
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
       "fieldConfig": {
         "defaults": {
@@ -34,12 +34,12 @@
         "textMode": "auto"
       },
       "targets": [
-        {"expr": "count(etcd_server_has_leader{instance=~'$instance'})",
+        {"expr": "count(haproxy_up{instance=~'$instance'})",
          "legendFormat": "", "refId": "A", "instant": true}
       ]
     },
     {
-      "type": "stat", "title": "리더 상태",
+      "type": "stat", "title": "가동 상태",
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
       "fieldConfig": {
         "defaults": {
@@ -52,7 +52,7 @@
             ]
           },
           "mappings": [
-            {"options": {"0": {"text": "No Leader"}, "1": {"text": "OK"}}, "type": "value"}
+            {"options": {"0": {"text": "Down"}, "1": {"text": "Up"}}, "type": "value"}
           ],
           "unit": "short"
         },
@@ -66,55 +66,41 @@
         "textMode": "auto"
       },
       "targets": [
-        {"expr": "max(etcd_server_has_leader{instance=~'$instance'})",
+        {"expr": "min(haproxy_up{instance=~'$instance'})",
          "legendFormat": "", "refId": "A", "instant": true}
       ]
     },
     {
-      "type": "stat", "title": "리더 변경 횟수 (1h)",
+      "type": "stat", "title": "활성 프론트엔드",
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
       "fieldConfig": {
         "defaults": {
           "color": {"mode": "thresholds"},
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {"color": "green", "value": null},
-              {"color": "yellow", "value": 1},
-              {"color": "red", "value": 3}
-            ]
-          },
+          "thresholds": {"mode": "absolute", "steps": [{"color": "text", "value": null}]},
           "mappings": [], "unit": "short"
         },
         "overrides": []
       },
       "gridPos": {"h": 4, "w": 6, "x": 12, "y": 1}, "id": 3,
       "options": {
-        "colorMode": "background", "graphMode": "none", "justifyMode": "center",
+        "colorMode": "value", "graphMode": "none", "justifyMode": "center",
         "orientation": "auto",
         "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
         "textMode": "auto"
       },
       "targets": [
-        {"expr": "sum(increase(etcd_server_leader_changes_seen_total{instance=~'$instance'}[1h]))",
+        {"expr": "count(haproxy_frontend_current_sessions{instance=~'$instance'})",
          "legendFormat": "", "refId": "A", "instant": true}
       ]
     },
     {
-      "type": "stat", "title": "DB 크기",
+      "type": "stat", "title": "백엔드 서비스 수",
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
       "fieldConfig": {
         "defaults": {
           "color": {"mode": "thresholds"},
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {"color": "text", "value": null},
-              {"color": "yellow", "value": 1073741824},
-              {"color": "red", "value": 2147483648}
-            ]
-          },
-          "mappings": [], "unit": "bytes"
+          "thresholds": {"mode": "absolute", "steps": [{"color": "text", "value": null}]},
+          "mappings": [], "unit": "short"
         },
         "overrides": []
       },
@@ -126,16 +112,16 @@
         "textMode": "auto"
       },
       "targets": [
-        {"expr": "max(etcd_mvcc_db_total_size_in_bytes{instance=~'$instance'})",
+        {"expr": "count(count by (proxy) (haproxy_backend_status{instance=~'$instance'}))",
          "legendFormat": "", "refId": "A", "instant": true}
       ]
     },
     {
-      "type": "row", "title": "Raft", "collapsed": false,
+      "type": "row", "title": "Sessions", "collapsed": false,
       "gridPos": {"h": 1, "w": 24, "x": 0, "y": 5}, "id": 101, "panels": []
     },
     {
-      "type": "timeseries", "title": "Raft 제안 처리율",
+      "type": "timeseries", "title": "현재 세션 수",
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
       "fieldConfig": {
         "defaults": {
@@ -151,22 +137,20 @@
         "legend": {"displayMode": "list", "placement": "bottom", "calcs": ["mean", "last", "max"]}
       },
       "targets": [
-        {"expr": "rate(etcd_server_proposals_committed_total{instance=~'$instance'}[5m])",
-         "legendFormat": "{{instance}} committed/s", "refId": "A"},
-        {"expr": "rate(etcd_server_proposals_applied_total{instance=~'$instance'}[5m])",
-         "legendFormat": "{{instance}} applied/s", "refId": "B"},
-        {"expr": "rate(etcd_server_proposals_failed_total{instance=~'$instance'}[5m])",
-         "legendFormat": "{{instance}} failed/s", "refId": "C"}
+        {"expr": "haproxy_frontend_current_sessions{instance=~'$instance'}",
+         "legendFormat": "fe/{{proxy}}", "refId": "A"},
+        {"expr": "haproxy_backend_current_sessions{instance=~'$instance'}",
+         "legendFormat": "be/{{proxy}}", "refId": "B"}
       ]
     },
     {
-      "type": "timeseries", "title": "Raft 제안 대기열",
+      "type": "timeseries", "title": "신규 HTTP 요청율",
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
       "fieldConfig": {
         "defaults": {
           "color": {"mode": "palette-classic"},
           "custom": {"lineWidth": 1, "fillOpacity": 10, "spanNulls": false, "showPoints": "never"},
-          "unit": "short"
+          "unit": "reqps"
         },
         "overrides": []
       },
@@ -176,22 +160,22 @@
         "legend": {"displayMode": "list", "placement": "bottom", "calcs": ["mean", "last", "max"]}
       },
       "targets": [
-        {"expr": "etcd_server_proposals_pending{instance=~'$instance'}",
-         "legendFormat": "{{instance}} pending", "refId": "A"}
+        {"expr": "rate(haproxy_frontend_http_requests_total{instance=~'$instance'}[5m])",
+         "legendFormat": "{{proxy}}", "refId": "A"}
       ]
     },
     {
-      "type": "row", "title": "Disk", "collapsed": false,
+      "type": "row", "title": "Traffic", "collapsed": false,
       "gridPos": {"h": 1, "w": 24, "x": 0, "y": 14}, "id": 102, "panels": []
     },
     {
-      "type": "timeseries", "title": "WAL fsync 지연 (p99)",
+      "type": "timeseries", "title": "네트워크 입출력",
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
       "fieldConfig": {
         "defaults": {
           "color": {"mode": "palette-classic"},
           "custom": {"lineWidth": 1, "fillOpacity": 10, "spanNulls": false, "showPoints": "never"},
-          "unit": "s"
+          "unit": "Bps"
         },
         "overrides": []
       },
@@ -201,20 +185,20 @@
         "legend": {"displayMode": "list", "placement": "bottom", "calcs": ["mean", "last", "max"]}
       },
       "targets": [
-        {"expr": "histogram_quantile(0.99, rate(etcd_disk_wal_fsync_duration_seconds_bucket{instance=~'$instance'}[5m]))",
-         "legendFormat": "{{instance}} p99", "refId": "A"},
-        {"expr": "histogram_quantile(0.50, rate(etcd_disk_wal_fsync_duration_seconds_bucket{instance=~'$instance'}[5m]))",
-         "legendFormat": "{{instance}} p50", "refId": "B"}
+        {"expr": "rate(haproxy_frontend_bytes_in_total{instance=~'$instance'}[5m])",
+         "legendFormat": "{{proxy}} in", "refId": "A"},
+        {"expr": "rate(haproxy_frontend_bytes_out_total{instance=~'$instance'}[5m])",
+         "legendFormat": "{{proxy}} out", "refId": "B"}
       ]
     },
     {
-      "type": "timeseries", "title": "Backend Commit 지연 (p99)",
+      "type": "timeseries", "title": "HTTP 응답 코드별 처리율",
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
       "fieldConfig": {
         "defaults": {
           "color": {"mode": "palette-classic"},
-          "custom": {"lineWidth": 1, "fillOpacity": 10, "spanNulls": false, "showPoints": "never"},
-          "unit": "s"
+          "custom": {"lineWidth": 1, "fillOpacity": 20, "spanNulls": false, "showPoints": "never", "stacking": {"mode": "normal", "group": "A"}},
+          "unit": "reqps"
         },
         "overrides": []
       },
@@ -224,18 +208,16 @@
         "legend": {"displayMode": "list", "placement": "bottom", "calcs": ["mean", "last", "max"]}
       },
       "targets": [
-        {"expr": "histogram_quantile(0.99, rate(etcd_disk_backend_commit_duration_seconds_bucket{instance=~'$instance'}[5m]))",
-         "legendFormat": "{{instance}} p99", "refId": "A"},
-        {"expr": "histogram_quantile(0.50, rate(etcd_disk_backend_commit_duration_seconds_bucket{instance=~'$instance'}[5m]))",
-         "legendFormat": "{{instance}} p50", "refId": "B"}
+        {"expr": "sum by (code) (rate(haproxy_frontend_http_responses_total{instance=~'$instance'}[5m]))",
+         "legendFormat": "{{code}}xx", "refId": "A"}
       ]
     },
     {
-      "type": "row", "title": "Network", "collapsed": false,
+      "type": "row", "title": "Backend Health", "collapsed": false,
       "gridPos": {"h": 1, "w": 24, "x": 0, "y": 23}, "id": 103, "panels": []
     },
     {
-      "type": "timeseries", "title": "피어 RTT (p99)",
+      "type": "timeseries", "title": "백엔드 평균 응답 시간",
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
       "fieldConfig": {
         "defaults": {
@@ -251,12 +233,12 @@
         "legend": {"displayMode": "list", "placement": "bottom", "calcs": ["mean", "last", "max"]}
       },
       "targets": [
-        {"expr": "histogram_quantile(0.99, rate(etcd_network_peer_round_trip_time_seconds_bucket{instance=~'$instance'}[5m]))",
-         "legendFormat": "{{instance}} p99", "refId": "A"}
+        {"expr": "haproxy_backend_response_time_average_seconds{instance=~'$instance'}",
+         "legendFormat": "{{proxy}}", "refId": "A"}
       ]
     },
     {
-      "type": "timeseries", "title": "gRPC 요청율 (top 5)",
+      "type": "timeseries", "title": "백엔드 큐 대기",
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
       "fieldConfig": {
         "defaults": {
@@ -272,22 +254,22 @@
         "legend": {"displayMode": "list", "placement": "bottom", "calcs": ["mean", "last", "max"]}
       },
       "targets": [
-        {"expr": "topk(5, sum by (grpc_method) (rate(grpc_server_handled_total{instance=~'$instance'}[5m])))",
-         "legendFormat": "{{grpc_method}}", "refId": "A"}
+        {"expr": "haproxy_backend_current_queue{instance=~'$instance'}",
+         "legendFormat": "{{proxy}}", "refId": "A"}
       ]
     },
     {
-      "type": "row", "title": "Storage", "collapsed": false,
+      "type": "row", "title": "Errors & Server Status", "collapsed": false,
       "gridPos": {"h": 1, "w": 24, "x": 0, "y": 32}, "id": 104, "panels": []
     },
     {
-      "type": "timeseries", "title": "DB 크기",
+      "type": "timeseries", "title": "연결 오류율",
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
       "fieldConfig": {
         "defaults": {
           "color": {"mode": "palette-classic"},
           "custom": {"lineWidth": 1, "fillOpacity": 10, "spanNulls": false, "showPoints": "never"},
-          "unit": "bytes"
+          "unit": "reqps"
         },
         "overrides": []
       },
@@ -297,37 +279,50 @@
         "legend": {"displayMode": "list", "placement": "bottom", "calcs": ["mean", "last", "max"]}
       },
       "targets": [
-        {"expr": "etcd_mvcc_db_total_size_in_bytes{instance=~'$instance'}",
-         "legendFormat": "{{instance}} total", "refId": "A"},
-        {"expr": "etcd_mvcc_db_total_size_in_use_in_bytes{instance=~'$instance'}",
-         "legendFormat": "{{instance}} in use", "refId": "B"}
+        {"expr": "rate(haproxy_frontend_connection_errors_total{instance=~'$instance'}[5m])",
+         "legendFormat": "fe/{{proxy}}", "refId": "A"},
+        {"expr": "rate(haproxy_backend_connection_errors_total{instance=~'$instance'}[5m])",
+         "legendFormat": "be/{{proxy}}", "refId": "B"}
       ]
     },
     {
-      "type": "timeseries", "title": "키 수",
+      "type": "table", "title": "서버 상태",
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "palette-classic"},
-          "custom": {"lineWidth": 1, "fillOpacity": 10, "spanNulls": false, "showPoints": "never"},
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "green", "value": 1}
+            ]
+          },
+          "mappings": [
+            {"options": {"0": {"text": "DOWN", "color": "red"}, "1": {"text": "UP", "color": "green"}}, "type": "value"}
+          ],
           "unit": "short"
         },
         "overrides": []
       },
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 33}, "id": 12,
       "options": {
-        "tooltip": {"mode": "multi", "sort": "none"},
-        "legend": {"displayMode": "list", "placement": "bottom", "calcs": ["mean", "last", "max"]}
+        "showHeader": true,
+        "footer": {"show": false, "reducer": ["sum"], "countRows": false, "fields": ""}
       },
       "targets": [
-        {"expr": "etcd_debugging_mvcc_keys_total{instance=~'$instance'}",
-         "legendFormat": "{{instance}} keys", "refId": "A"}
+        {"expr": "haproxy_server_status{instance=~'$instance'}",
+         "legendFormat": "{{proxy}} / {{server}}", "refId": "A", "instant": true,
+         "format": "table"}
+      ],
+      "transformations": [
+        {"id": "organize", "options": {"excludeByName": {"__name__": true, "job": true}, "renameByName": {"proxy": "Proxy", "server": "Server", "Value": "Status"}}}
       ]
     }
   ],
   "refresh": "30s",
   "schemaVersion": 38,
-  "tags": ["afterglow", "etcd"],
+  "tags": ["afterglow", "haproxy"],
   "templating": {
     "list": [
       {
@@ -340,13 +335,13 @@
       {
         "current": {},
         "datasource": {"type": "prometheus"},
-        "definition": "label_values(etcd_server_has_leader, instance)",
+        "definition": "label_values(haproxy_up, instance)",
         "hide": 0,
         "includeAll": true,
         "multi": true,
         "name": "instance",
         "options": [],
-        "query": "label_values(etcd_server_has_leader, instance)",
+        "query": "label_values(haproxy_up, instance)",
         "refresh": 2,
         "type": "query",
         "label": "Instance"
@@ -356,7 +351,7 @@
   "time": {"from": "now-1h", "to": "now"},
   "timepicker": {},
   "timezone": "browser",
-  "title": "Afterglow — etcd",
-  "uid": "afterglow-etcd",
+  "title": "Afterglow — HAProxy",
+  "uid": "afterglow-haproxy",
   "version": 1
 }
