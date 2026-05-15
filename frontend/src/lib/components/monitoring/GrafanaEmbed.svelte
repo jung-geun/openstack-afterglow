@@ -38,40 +38,41 @@
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
 
-	let iframeUrl = $state<string | null>(null);
+	// ctx는 $state로 분리 — token/projectId 변경 시만 재로드 (캐시됨)
+	type GrafanaCtx = { grafanaUrl: string; dashboards: Record<GrafanaDashboardKey, string> };
+	let ctx = $state<GrafanaCtx | null>(null);
 	let loadError = $state(false);
 	let contextError = $state(false);
 	let loading = $state(true);
 
 	$effect(() => {
+		// 동기 구간에서 token, projectId를 읽어 의존성 등록
 		loading = true;
 		loadError = false;
 		contextError = false;
-		iframeUrl = null;
-		loadGrafanaContext(token, projectId).then((ctx) => {
+		ctx = null;
+		loadGrafanaContext(token, projectId).then((result) => {
 			loading = false;
-			if (!ctx) {
-				contextError = true;
-				return;
-			}
-			const uid = ctx.dashboards[dashboardKey];
-			if (!uid) {
-				contextError = true;
-				return;
-			}
-			const base = ctx.grafanaUrl;
-			const varParams = Object.entries(vars)
-				.map(([k, v]) => `var-${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
-				.join('&');
-			const timeParams = `from=${range}&to=now`;
-			const common = `orgId=1&theme=dark&kiosk&${timeParams}${varParams ? '&' + varParams : ''}`;
-
-			if (panelId !== undefined) {
-				iframeUrl = `${base}/d-solo/${uid}/_?panelId=${panelId}&${common}`;
-			} else {
-				iframeUrl = `${base}/d/${uid}/_?${common}`;
-			}
+			if (!result) { contextError = true; return; }
+			ctx = result;
 		});
+	});
+
+	// iframeUrl은 $derived — ctx, vars, dashboardKey, panelId, range 모두 동기 의존성으로 추적됨
+	const iframeUrl = $derived.by(() => {
+		if (!ctx) return null;
+		const uid = ctx.dashboards[dashboardKey];
+		if (!uid) return null;
+		const base = ctx.grafanaUrl;
+		const varParams = Object.entries(vars)
+			.map(([k, v]) => `var-${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+			.join('&');
+		const timeParams = `from=${range}&to=now`;
+		const common = `orgId=1&theme=dark&kiosk&${timeParams}${varParams ? '&' + varParams : ''}`;
+		if (panelId !== undefined) {
+			return `${base}/d-solo/${uid}/_?panelId=${panelId}&${common}`;
+		}
+		return `${base}/d/${uid}/_?${common}`;
 	});
 </script>
 
