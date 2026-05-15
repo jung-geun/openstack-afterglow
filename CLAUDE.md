@@ -163,3 +163,38 @@ milestone.md          기능별 구현 현황 추적
 - `.env`, 인증 정보, 시크릿 파일 커밋
 - 플래닝 없이 대규모 리팩토링 착수
 - 테스트 없이 백엔드 엔드포인트 커밋
+
+---
+
+## Grafana JWT 시크릿 운영
+
+### 동작 원리
+
+afterglow는 GitLab OIDC로 로그인한 사용자를 위해 **HS256 공유 시크릿**으로 JWT를 서명해
+Grafana iframe에 `?auth_token=<jwt>` 쿼리로 전달한다. Grafana는 같은 시크릿으로 검증 후
+자동 로그인한다. GitLab/Grafana가 발급하는 토큰이 아니며, 양쪽에 동일한 값만 넣으면 된다.
+
+### 시크릿 주입 위치 (2곳, 반드시 동일)
+
+| 시스템 | 파일 | 환경변수 |
+|--------|------|----------|
+| afterglow backend | `deploy/k8s/secret.yaml` → `GRAFANA_JWT_SECRET` | `Settings.grafana_jwt_secret` |
+| Grafana | `deploy/k8s/grafana-deployment.yaml` → `GF_AUTH_JWT_KEY` | Secret ref 참조 |
+
+`generate_k8s.py`를 실행하면 `config.toml`의 `[monitoring].grafana_jwt_secret` 값을
+위 두 곳에 자동으로 동기화한다.
+
+### 시크릿 생성
+
+```bash
+python3 -c "import secrets; print(secrets.token_hex(32))"
+```
+
+### 시크릿 회전 절차
+
+1. 새 시크릿 생성 (위 명령)
+2. `config.toml`의 `[monitoring].grafana_jwt_secret` 갱신
+3. `python3 generate_k8s.py` 재실행 → `secret.yaml` + `grafana-deployment.yaml` 동시 갱신
+4. `kubectl apply -f deploy/k8s/secret.yaml -f deploy/k8s/grafana-deployment.yaml`
+5. `kubectl rollout restart -n afterglow deploy/backend deploy/grafana`
+6. 활성 사용자는 JWT 80% TTL 도달 시 자동 재발급됨 (수동 재로그인 불필요)

@@ -294,7 +294,13 @@ dcgm_exporter_sg_name = "dcgm_exporter"  # dcgm_exporter ingress SG 이름 (tcp/
 # Grafana 연동
 grafana_base_url = ""           # Grafana 외부 URL (예: https://grafana.example.com)
                                 # 이 값은 frontend 의 PUBLIC_GRAFANA_BASE 로도 주입되어 CSP frame-src 에 포함됩니다
-grafana_jwt_secret = ""         # Grafana auth.jwt 서명 시크릿 (secret.yaml에서 주입)
+# Grafana auth.jwt 서명용 공유 시크릿.
+# - GitLab/Grafana와 무관한 임의 강력한 문자열이면 됩니다.
+# - 생성: python3 -c "import secrets; print(secrets.token_hex(32))"
+# - generate_k8s.py가 secret.yaml의 GRAFANA_JWT_SECRET 및
+#   grafana-deployment.yaml의 GF_AUTH_JWT_KEY 양쪽에 동일하게 주입합니다.
+# - 비워두면 /api/grafana/token이 503을 반환하고 모니터링 iframe이 동작하지 않습니다.
+grafana_jwt_secret = ""         # secret.yaml에서 주입
 
 [monitoring.dashboards]
 # Grafana 대시보드 UID. monitoring/grafana/provisioning/dashboards/ 에 JSON이 프로비저닝되어야 함.

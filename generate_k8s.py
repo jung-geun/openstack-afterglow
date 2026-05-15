@@ -723,6 +723,8 @@ def main() -> None:
         print(f"  {yellow('경고')}: monitoring.grafana_base_url 은 설정됐지만 "
               f"grafana_jwt_secret 이 비어 있습니다.")
         print(f"        Grafana 임베드는 동작하지 않습니다 (auth.jwt env 미생성).")
+        print(f"        시크릿 생성: python3 -c \"import secrets; print(secrets.token_hex(32))\"")
+        print(f"        config.toml [monitoring].grafana_jwt_secret 에 추가 후 재실행하세요.")
 
     print()
     print(f"{green('완료!')} K8s 매니페스트가 생성되었습니다.")
