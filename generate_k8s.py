@@ -4,9 +4,9 @@
 현재 config.toml (및 config.*.toml 오버라이드)을 읽어
 deploy/k8s/{secret.yaml, configmap.yaml, grafana-deployment.yaml}을 자동 생성합니다.
 
-grafana-deployment.yaml 은 iframe 임베드와 auth.jwt URL 로그인이 켜진
-Grafana Deployment 매니페스트로, GRAFANA_JWT_SECRET 을 afterglow-secrets 에서 참조합니다.
-monitoring.grafana_jwt_secret 이 비어 있으면 JWT 관련 env 는 출력되지 않습니다.
+grafana-deployment.yaml 은 anonymous 인증으로 동작하는 Grafana Deployment 매니페스트로,
+iframe 임베드를 위해 GF_SECURITY_ALLOW_EMBEDDING 이 활성화되어 있습니다.
+Afterglow 앱 인증이 실질적인 접근 게이트 역할을 합니다.
 
 사용법:
     python3 generate_k8s.py
@@ -429,8 +429,10 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     lines.append(f'auto_sg_enabled = {_toml_bool(mon.get("auto_sg_enabled", True))}')
     lines.append(f'node_exporter_sg_name = {_toml_str(mon.get("node_exporter_sg_name", "node_exporter"))}')
     lines.append(f'dcgm_exporter_sg_name = {_toml_str(mon.get("dcgm_exporter_sg_name", "dcgm_exporter"))}')
+    lines.append(f'node_exporter_port = {mon.get("node_exporter_port", 9100)}')
+    lines.append(f'dcgm_exporter_port = {mon.get("dcgm_exporter_port", 9400)}')
+    lines.append(f'gpu_flavor_prefix = {_toml_str(mon.get("gpu_flavor_prefix", "gpu."))}')
     lines.append(f'grafana_base_url = {_toml_str(mon.get("grafana_base_url", ""))}')
-    lines.append("# grafana_jwt_secret은 secret.yaml의 GRAFANA_JWT_SECRET 환경변수로 주입됩니다")
     lines.append("# sd_token은 secret.yaml의 MONITORING_SD_TOKEN 환경변수로 주입됩니다")
     dashboards = mon.get("dashboards", {})
     lines.append("")
@@ -545,7 +547,10 @@ def render_grafana_deployment(cfg: dict) -> str:
     """grafana-deployment.yaml 생성.
 
     iframe 임베드(GF_SECURITY_ALLOW_EMBEDDING)와 익명 접근(auth.anonymous)을 설정한다.
+    provisioning ConfigMap (datasource + dashboards)을 volumeMounts로 마운트한다.
     """
+    mon = cfg.get("monitoring", {})
+    admin_password = mon.get("grafana_admin_password", "admin")
     lines = [
         "apiVersion: apps/v1",
         "kind: Deployment",
@@ -571,17 +576,22 @@ def render_grafana_deployment(cfg: dict) -> str:
         "            - containerPort: 3000",
         "          env:",
         "            - name: GF_SECURITY_ADMIN_PASSWORD",
-        '              value: "admin"',
+        f'              value: "{admin_password}"',
         "            - name: GF_USERS_ALLOW_SIGN_UP",
         '              value: "false"',
-        "            # iframe 임베드 허용 (X-Frame-Options 해제)",
         "            - name: GF_SECURITY_ALLOW_EMBEDDING",
         '              value: "true"',
-        "            # 익명 접근 허용 — afterglow iframe에서 인증 없이 대시보드를 표시",
         "            - name: GF_AUTH_ANONYMOUS_ENABLED",
         '              value: "true"',
         "            - name: GF_AUTH_ANONYMOUS_ORG_ROLE",
         '              value: "Viewer"',
+        "          volumeMounts:",
+        "            - name: grafana-datasource",
+        "              mountPath: /etc/grafana/provisioning/datasources",
+        "            - name: grafana-dashboards-provider",
+        "              mountPath: /etc/grafana/provisioning/dashboards",
+        "            - name: grafana-dashboards",
+        "              mountPath: /var/lib/grafana/dashboards",
         "          resources:",
         "            requests:",
         '              memory: "128Mi"',
@@ -589,6 +599,16 @@ def render_grafana_deployment(cfg: dict) -> str:
         "            limits:",
         '              memory: "256Mi"',
         '              cpu: "200m"',
+        "      volumes:",
+        "        - name: grafana-datasource",
+        "          configMap:",
+        "            name: grafana-datasource",
+        "        - name: grafana-dashboards-provider",
+        "          configMap:",
+        "            name: grafana-dashboards-provider",
+        "        - name: grafana-dashboards",
+        "          configMap:",
+        "            name: grafana-dashboards",
         "",
     ]
     return "\n".join(lines)

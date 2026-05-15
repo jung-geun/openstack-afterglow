@@ -1,0 +1,40 @@
+# Grafana 외부 직접 접근 차단 NetworkPolicy
+#
+# 현재 kustomization에 Grafana Ingress가 없으므로 Grafana는 ClusterIP 전용으로
+# 클러스터 외부에서 접근 불가. 이 NetworkPolicy는 클러스터 내 other pod로부터의
+# 무단 접근을 방어한다.
+#
+# 프로덕션에서 Grafana iframe을 사용자 브라우저에 직접 노출하려면 (grafana_base_url을
+# 외부 URL로 설정하는 경우), Ingress 컨트롤러가 있는 namespace를 허용해야 한다:
+#
+#   - from:
+#       - namespaceSelector:
+#           matchLabels:
+#             kubernetes.io/metadata.name: kube-system  # Traefik 위치 확인 후 조정
+#
+# 또는 backend가 Grafana를 프록시하는 경로로 전환하면 아래 정책으로 충분하다.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: grafana-ingress
+  namespace: afterglow
+spec:
+  podSelector:
+    matchLabels:
+      app: grafana
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: backend
+        - podSelector:
+            matchLabels:
+              app: frontend
+        - podSelector:
+            matchLabels:
+              app: prometheus
+      ports:
+        - protocol: TCP
+          port: 3000

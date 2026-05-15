@@ -1131,9 +1131,9 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 - [x] `backend/tests/test_instances.py` — non-GPU/GPU/disabled/no-cidr 4건
 - [x] `backend/tests/conftest.py` — rate limiter storage reset autouse fixture 추가 (테스트 격리)
 
-### 12.3 Prometheus 스크래핑 — 메인 클러스터 통합 vs 프로젝트별 분리 (결정 필요)
+### 12.3 Prometheus 스크래핑 — 메인 클러스터 통합 vs 프로젝트별 분리 ✅ Option A 확정
 
-> **결정 미확정 (사용자 검토 필요)**: 옵션 A를 권장하나, 멀티테넌시 격리 요구 강도에 따라 B가 정답일 수 있음.
+> **결정 확정 (2026-05-15)**: Option A — 단일 Prometheus+Grafana 스택 + `var-project_id` URL 파라미터 기반 테넌트 분리. 운영 단순성, 기존 구현 기준.
 
 #### Option A: 메인 Prometheus + Grafana 단일 인스턴스 + tenant 라벨 분리 (권장)
 
@@ -1145,8 +1145,8 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
   - VM의 floating IP가 없어도 fixed IP를 그대로 노출 (스크래퍼가 internal network에 접근 가능하다는 가정)
 - [x] `backend/tests/test_sd_targets.py` — 라벨 형식, token 검증, 권한 4건
 - [ ] `deploy/k8s-template/monitoring/prometheus/configmap.yaml` — DCGM/Node 스크래핑 잡 추가 (`__meta_*` 라벨 → `project_id`/`instance` 재라벨)
-- [ ] `deploy/k8s-template/monitoring/grafana/` — provisioning datasource (Prometheus) + 기본 대시보드(JSON) 추가, `node_exporter`/`dcgm` 공식 대시보드 import
-- [ ] `frontend/src/routes/dashboard/observability/+page.svelte` (신규) — Grafana iframe 임베드 + 프로젝트별 URL 자동 생성 (`var-project_id={current}`)
+- [x] `deploy/k8s-template/monitoring/grafana/` — provisioning ConfigMaps (datasource + dashboards-provider + dashboards 9종) + volumeMounts + NetworkPolicy (외부 직접 접근 차단)
+- [x] `frontend/src/routes/dashboard/observability/+page.svelte` (신규) — Grafana iframe 임베드 + 프로젝트별 URL 자동 생성 (`var-project_id={current}`) + projectId null guard + 프론트엔드 테스트 4건
 
 #### Option B: 프로젝트별 컨테이너 모니터링 스택 (대안)
 

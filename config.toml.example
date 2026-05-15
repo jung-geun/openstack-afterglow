@@ -291,9 +291,26 @@ scrape_cidr = ""
 auto_sg_enabled = true
 node_exporter_sg_name = "node_exporter"   # node_exporter ingress SG 이름 (tcp/9100)
 dcgm_exporter_sg_name = "dcgm_exporter"  # dcgm_exporter ingress SG 이름 (tcp/9400, GPU 전용)
+# VM 메트릭 수집 포트 (기본값 유지 권장)
+node_exporter_port = 9100       # VM에 설치된 node_exporter 포트 (기본 9100)
+dcgm_exporter_port = 9400       # GPU VM의 dcgm_exporter 포트 (기본 9400)
+gpu_flavor_prefix = "gpu."      # GPU 노드 판별 flavor prefix (예: "gpu." → gpu.a100x1_80gb 등)
 # Grafana 연동
 grafana_base_url = ""           # Grafana 외부 URL (예: https://grafana.example.com)
                                 # 이 값은 frontend 의 PUBLIC_GRAFANA_BASE 로도 주입되어 CSP frame-src 에 포함됩니다
+
+# === Prometheus scrape 설정 참고 (K8s ConfigMap에서 자동 생성 — 직접 수정 불필요) ===
+# scrape_configs:
+#   - job_name: "instances-node"
+#     http_sd_configs:
+#       - url: "http://backend:8000/api/sd/prometheus/targets"
+#         refresh_interval: 30s
+#         authorization:
+#           credentials_file: /etc/prometheus/sd-token
+#   - job_name: "instances-dcgm"
+#     http_sd_configs:
+#       - url: "http://backend:8000/api/sd/prometheus/targets"
+#         refresh_interval: 30s
 
 [monitoring.dashboards]
 # Grafana 대시보드 UID. monitoring/grafana/provisioning/dashboards/ 에 JSON이 프로비저닝되어야 함.
