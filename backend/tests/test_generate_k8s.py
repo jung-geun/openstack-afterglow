@@ -3,7 +3,6 @@
 import sys
 from pathlib import Path
 
-import pytest
 import yaml
 
 # generate_k8s.py is at project root, not in backend/
