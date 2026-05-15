@@ -129,20 +129,13 @@ def test_openstack_dashboard_service_status_panels():
     up_exprs = [
         p["targets"][0]["expr"]
         for p in panels
-        if p.get("type") == "stat"
-        and p.get("targets")
-        and "_up" in p["targets"][0].get("expr", "")
+        if p.get("type") == "stat" and p.get("targets") and "_up" in p["targets"][0].get("expr", "")
     ]
     for svc in ["nova", "neutron", "cinder", "glance", "identity", "placement", "loadbalancer"]:
         assert any(f"openstack_{svc}_up" in e for e in up_exprs), f"{svc}_up 패널 없음"
 
-    ratio_exprs = [
-        p["targets"][0]["expr"]
-        for p in panels
-        if p.get("type") == "stat" and p.get("targets")
-    ]
+    ratio_exprs = [p["targets"][0]["expr"] for p in panels if p.get("type") == "stat" and p.get("targets")]
     for svc in ["nova", "neutron", "cinder"]:
-        assert any(
-            f"sum(openstack_{svc}_agent_state)" in e and "count(" in e
-            for e in ratio_exprs
-        ), f"{svc} 에이전트 활성 비율 패널 없음"
+        assert any(f"sum(openstack_{svc}_agent_state)" in e and "count(" in e for e in ratio_exprs), (
+            f"{svc} 에이전트 활성 비율 패널 없음"
+        )
