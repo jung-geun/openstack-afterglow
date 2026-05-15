@@ -30,5 +30,6 @@ async def get_grafana_dashboards(
             "libvirt": settings.grafana_dashboard_libvirt_uid,
             "openstack": settings.grafana_dashboard_openstack_uid,
             "ceph": settings.grafana_dashboard_ceph_uid,
+            "instance": settings.grafana_dashboard_instance_uid,
         },
     }

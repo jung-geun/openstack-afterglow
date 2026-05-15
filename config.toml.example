@@ -306,6 +306,7 @@ haproxy_uid = "afterglow-haproxy"
 libvirt_uid = "afterglow-libvirt"
 openstack_uid = "afterglow-openstack"
 ceph_uid = "afterglow-ceph"
+instance_uid = "afterglow-instance"   # 인스턴스 상세페이지 per-VM 대시보드
 
 
 [cors]

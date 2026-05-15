@@ -444,6 +444,7 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     lines.append(f'libvirt_uid = {_toml_str(dashboards.get("libvirt_uid", "afterglow-libvirt"))}')
     lines.append(f'openstack_uid = {_toml_str(dashboards.get("openstack_uid", "afterglow-openstack"))}')
     lines.append(f'ceph_uid = {_toml_str(dashboards.get("ceph_uid", "afterglow-ceph"))}')
+    lines.append(f'instance_uid = {_toml_str(dashboards.get("instance_uid", "afterglow-instance"))}')
     lines.append("")
 
     # [notion]

@@ -3,6 +3,7 @@
 	import { auth } from '$lib/stores/auth';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
+	import GrafanaEmbed from '$lib/components/monitoring/GrafanaEmbed.svelte';
 
 	interface Props {
 		instanceId: string;
@@ -21,6 +22,9 @@
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
+
+	type TabKey = 'chart' | 'grafana';
+	let activeTab: TabKey = $state('chart');
 
 	let range: RangeKey = $state('1h');
 
@@ -149,24 +153,48 @@
 </script>
 
 <div>
+	<!-- 탭 헤더 -->
 	<div class="flex items-center justify-between mb-4">
-		<!-- range 토글 -->
 		<div class="flex gap-1">
-			{#each RANGES as r}
-				<button
-					onclick={() => { range = r; }}
-					class="text-xs px-2 py-0.5 rounded transition-colors {range === r ? 'bg-blue-600 text-white' : 'text-gray-500 hover:text-gray-300'}"
-				>{RANGE_LABELS[r]}</button>
-			{/each}
+			<button
+				onclick={() => { activeTab = 'chart'; }}
+				class="text-xs px-3 py-1 rounded transition-colors {activeTab === 'chart' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:text-gray-300 border border-gray-700'}"
+			>차트</button>
+			<button
+				onclick={() => { activeTab = 'grafana'; }}
+				class="text-xs px-3 py-1 rounded transition-colors {activeTab === 'grafana' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:text-gray-300 border border-gray-700'}"
+			>Grafana</button>
 		</div>
-		<AutoRefreshControl
-			bind:active={ar.active}
-			bind:intervalSeconds={ar.intervalSeconds}
-			intervalOptions={ar.intervalOptions}
-			onManualRefresh={loadAll}
-		/>
+
+		{#if activeTab === 'chart'}
+		<div class="flex items-center gap-2">
+			<!-- range 토글 -->
+			<div class="flex gap-1">
+				{#each RANGES as r}
+					<button
+						onclick={() => { range = r; }}
+						class="text-xs px-2 py-0.5 rounded transition-colors {range === r ? 'bg-gray-600 text-white' : 'text-gray-500 hover:text-gray-300'}"
+					>{RANGE_LABELS[r]}</button>
+				{/each}
+			</div>
+			<AutoRefreshControl
+				bind:active={ar.active}
+				bind:intervalSeconds={ar.intervalSeconds}
+				intervalOptions={ar.intervalOptions}
+				onManualRefresh={loadAll}
+			/>
+		</div>
+		{/if}
 	</div>
 
+	{#if activeTab === 'grafana'}
+		<GrafanaEmbed
+			dashboardKey="instance"
+			vars={{ uuid: instanceId }}
+			height={520}
+			desktopHeight={700}
+		/>
+	{:else}
 	<div class="grid grid-cols-1 @3xl/panel:grid-cols-2 gap-4">
 		{#each activeCharts as chart}
 			{@const m = metrics[chart.key]}
@@ -262,4 +290,5 @@
 			</div>
 		{/each}
 	</div>
+	{/if}
 </div>
