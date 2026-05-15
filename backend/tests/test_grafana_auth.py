@@ -28,7 +28,17 @@ async def test_get_grafana_dashboards(client):
     assert data["grafana_url"] == "https://grafana.example.com"
     assert data["dashboards"]["node"] == "node-uid"
     assert data["dashboards"]["rabbitmq"] == "rabbitmq-uid"
-    assert set(data["dashboards"].keys()) == {"node", "rabbitmq", "mysqld", "memcached", "etcd", "haproxy", "libvirt", "openstack", "ceph"}
+    assert set(data["dashboards"].keys()) == {
+        "node",
+        "rabbitmq",
+        "mysqld",
+        "memcached",
+        "etcd",
+        "haproxy",
+        "libvirt",
+        "openstack",
+        "ceph",
+    }
 
 
 @pytest.mark.asyncio

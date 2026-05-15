@@ -156,9 +156,7 @@ async def test_collect_targets_uses_config_ports():
     fake_server.id = "vm-uuid"
     fake_server.project_id = "proj-1"
     fake_server.flavor = {"original_name": "gpu-a100", "id": "gpu-a100"}
-    fake_server.addresses = {
-        "network": [{"OS-EXT-IPS:type": "fixed", "addr": "10.0.0.1"}]
-    }
+    fake_server.addresses = {"network": [{"OS-EXT-IPS:type": "fixed", "addr": "10.0.0.1"}]}
 
     fake_conn = MagicMock()
     fake_conn.compute.servers.return_value = [fake_server]
@@ -168,6 +166,7 @@ async def test_collect_targets_uses_config_ports():
         patch("app.api.common.sd_targets._build_admin_conn", return_value=fake_conn),
     ):
         from app.api.common.sd_targets import _collect_targets
+
         result = _collect_targets()
 
     ports = {g["targets"][0].split(":")[1] for g in result}
