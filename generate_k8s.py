@@ -4,9 +4,9 @@
 현재 config.toml (및 config.*.toml 오버라이드)을 읽어
 deploy/k8s/{secret.yaml, configmap.yaml, grafana-deployment.yaml}을 자동 생성합니다.
 
-grafana-deployment.yaml 은 iframe 임베드와 auth.jwt URL 로그인이 켜진
-Grafana Deployment 매니페스트로, GRAFANA_JWT_SECRET 을 afterglow-secrets 에서 참조합니다.
-monitoring.grafana_jwt_secret 이 비어 있으면 JWT 관련 env 는 출력되지 않습니다.
+grafana-deployment.yaml 은 anonymous 인증으로 동작하는 Grafana Deployment 매니페스트로,
+iframe 임베드를 위해 GF_SECURITY_ALLOW_EMBEDDING 이 활성화되어 있습니다.
+Afterglow 앱 인증이 실질적인 접근 게이트 역할을 합니다.
 
 사용법:
     python3 generate_k8s.py
@@ -433,7 +433,6 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     lines.append(f'dcgm_exporter_port = {mon.get("dcgm_exporter_port", 9400)}')
     lines.append(f'gpu_flavor_prefix = {_toml_str(mon.get("gpu_flavor_prefix", "gpu."))}')
     lines.append(f'grafana_base_url = {_toml_str(mon.get("grafana_base_url", ""))}')
-    lines.append("# grafana_jwt_secret은 secret.yaml의 GRAFANA_JWT_SECRET 환경변수로 주입됩니다")
     lines.append("# sd_token은 secret.yaml의 MONITORING_SD_TOKEN 환경변수로 주입됩니다")
     dashboards = mon.get("dashboards", {})
     lines.append("")
