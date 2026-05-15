@@ -3,13 +3,12 @@
 	import GrafanaEmbed from '$lib/components/monitoring/GrafanaEmbed.svelte';
 </script>
 
-<div class="p-4 md:p-8 max-w-7xl mx-auto">
+<div class="h-[calc(100vh-56px)] overflow-hidden flex flex-col p-4 md:p-6">
 	<PageHeader breadcrumb="MONITORING / MYSQL" title="MySQL 메트릭" />
-
-	<div class="mt-2">
-		<p class="text-xs text-gray-500 mb-4">
-			mysqld_exporter를 통해 수집된 메트릭입니다.
-		</p>
-		<GrafanaEmbed dashboardKey="mysqld" height={600} desktopHeight={1400} />
+	<p class="text-xs text-gray-500 mb-2 flex-shrink-0">
+		mysqld_exporter를 통해 수집된 메트릭입니다.
+	</p>
+	<div class="flex-1 min-h-0">
+		<GrafanaEmbed dashboardKey="mysqld" fill />
 	</div>
 </div>

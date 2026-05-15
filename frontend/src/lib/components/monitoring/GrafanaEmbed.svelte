@@ -10,6 +10,7 @@
 		height?: number;
 		desktopHeight?: number;
 		title?: string;
+		fill?: boolean;
 	}
 
 	let {
@@ -20,19 +21,26 @@
 		height = 360,
 		desktopHeight,
 		title,
+		fill = false,
 	}: Props = $props();
 
 	const containerHeight = $derived(
-		desktopHeight && desktopHeight > height
-			? `clamp(${height}px, 85vh, ${desktopHeight}px)`
-			: `${height}px`,
+		fill
+			? '100%'
+			: desktopHeight && desktopHeight > height
+				? `clamp(${height}px, 85vh, ${desktopHeight}px)`
+				: `${height}px`,
 	);
 	const iframeHeight = $derived(
-		title
-			? desktopHeight && desktopHeight > height
-				? `clamp(${height - 36}px, calc(85vh - 36px), ${desktopHeight - 36}px)`
-				: `${height - 36}px`
-			: containerHeight,
+		fill
+			? title
+				? 'calc(100% - 36px)'
+				: '100%'
+			: title
+				? desktopHeight && desktopHeight > height
+					? `clamp(${height - 36}px, calc(85vh - 36px), ${desktopHeight - 36}px)`
+					: `${height - 36}px`
+				: containerHeight,
 	);
 
 	const token = $derived($auth.token ?? undefined);
