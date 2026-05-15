@@ -199,6 +199,9 @@ def _load_toml() -> dict:
     flat["monitoring_auto_sg_enabled"] = mon.get("auto_sg_enabled", True)
     flat["node_exporter_sg_name"] = mon.get("node_exporter_sg_name", "node_exporter")
     flat["dcgm_exporter_sg_name"] = mon.get("dcgm_exporter_sg_name", "dcgm_exporter")
+    flat["node_exporter_port"] = mon.get("node_exporter_port", 9100)
+    flat["dcgm_exporter_port"] = mon.get("dcgm_exporter_port", 9400)
+    flat["gpu_flavor_prefix"] = mon.get("gpu_flavor_prefix", "gpu.")
     flat["grafana_base_url"] = mon.get("grafana_base_url", "")
     dashboards = mon.get("dashboards", {})
     flat["grafana_dashboard_node_uid"] = dashboards.get("node_uid", "afterglow-node")
@@ -373,6 +376,9 @@ class Settings(BaseSettings):
     monitoring_auto_sg_enabled: bool = True  # 프로젝트/인스턴스 생성 시 monitoring SG 자동 attach
     node_exporter_sg_name: str = "node_exporter"  # node_exporter ingress SG 이름 (tcp/9100)
     dcgm_exporter_sg_name: str = "dcgm_exporter"  # dcgm_exporter ingress SG 이름 (tcp/9400, GPU 전용)
+    node_exporter_port: int = 9100  # VM에 설치된 node_exporter 포트
+    dcgm_exporter_port: int = 9400  # GPU VM의 dcgm_exporter 포트
+    gpu_flavor_prefix: str = "gpu."  # GPU 노드로 판별할 flavor 이름 prefix
     monitoring_scrape_cidr: str = ""  # Prometheus scrape CIDR (예: 10.0.0.0/8). 미설정 시 ValueError
     monitoring_sd_token: str = ""  # /api/sd/prometheus/targets 인증 토큰
     grafana_base_url: str = ""  # Grafana 외부 URL (예: https://grafana.example.com)
