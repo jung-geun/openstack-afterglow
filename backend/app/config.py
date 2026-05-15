@@ -213,7 +213,8 @@ def _load_toml() -> dict:
     flat["grafana_dashboard_libvirt_uid"] = dashboards.get("libvirt_uid", "afterglow-libvirt")
     flat["grafana_dashboard_openstack_uid"] = dashboards.get("openstack_uid", "afterglow-openstack")
     flat["grafana_dashboard_ceph_uid"] = dashboards.get("ceph_uid", "afterglow-ceph")
-    flat["grafana_dashboard_instance_uid"] = dashboards.get("instance_uid", "afterglow-instance")
+    flat["grafana_dashboard_instance_cpu_uid"] = dashboards.get("instance_cpu_uid", "afterglow-instance-cpu")
+    flat["grafana_dashboard_instance_gpu_uid"] = dashboards.get("instance_gpu_uid", "afterglow-instance-gpu")
 
     notion = data.get("notion", {})
     flat["notion_config_encryption_key"] = notion.get("config_encryption_key", "")
@@ -392,7 +393,8 @@ class Settings(BaseSettings):
     grafana_dashboard_libvirt_uid: str = "afterglow-libvirt"
     grafana_dashboard_openstack_uid: str = "afterglow-openstack"
     grafana_dashboard_ceph_uid: str = "afterglow-ceph"
-    grafana_dashboard_instance_uid: str = "afterglow-instance"
+    grafana_dashboard_instance_cpu_uid: str = "afterglow-instance-cpu"
+    grafana_dashboard_instance_gpu_uid: str = "afterglow-instance-gpu"
     # Prometheus 서버 주소. 우선순위: 환경변수 PROMETHEUS_BASE_URL > config.toml [monitoring].prometheus_base_url > 기본값
     prometheus_base_url: str = "http://prometheus:9090"
     prometheus_username: str = ""  # basic auth 미사용 시 빈 문자열

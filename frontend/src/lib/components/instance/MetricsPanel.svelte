@@ -189,7 +189,7 @@
 
 	{#if activeTab === 'grafana'}
 		<GrafanaEmbed
-			dashboardKey="instance"
+			dashboardKey={isGpu ? 'instance-gpu' : 'instance-cpu'}
 			vars={{ uuid: instanceId }}
 			height={520}
 			desktopHeight={700}

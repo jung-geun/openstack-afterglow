@@ -1,6 +1,6 @@
 {
-  "uid": "afterglow-instance",
-  "title": "Afterglow — Instance",
+  "uid": "afterglow-instance-cpu",
+  "title": "Afterglow — Instance (CPU)",
   "schemaVersion": 38,
   "version": 1,
   "time": { "from": "now-1h", "to": "now" },
@@ -139,70 +139,6 @@
           "expr": "(sum by (instance_id) (rate(node_disk_written_bytes_total{instance_id=\"$uuid\"}[2m])))\nor\n(sum by (instance_id) (rate(libvirt_domain_block_stats_write_bytes_total[2m]) * on (domain) group_left(instance_id) libvirt_domain_openstack_info{instance_id=\"$uuid\"}))",
           "legendFormat": "Write",
           "refId": "B"
-        }
-      ]
-    },
-    {
-      "type": "row",
-      "id": 100,
-      "title": "GPU (DCGM)",
-      "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 16 },
-      "panels": []
-    },
-    {
-      "type": "timeseries",
-      "id": 5,
-      "title": "GPU 사용률",
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": { "lineWidth": 2, "fillOpacity": 10, "spanNulls": false, "showPoints": "never" },
-          "unit": "percent",
-          "min": 0,
-          "max": 100
-        },
-        "overrides": []
-      },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 17 },
-      "options": {
-        "tooltip": { "mode": "multi", "sort": "none" },
-        "legend": { "displayMode": "list", "placement": "bottom", "calcs": ["mean", "last", "max"] }
-      },
-      "targets": [
-        {
-          "expr": "avg by (instance_id) (DCGM_FI_DEV_GPU_UTIL{instance_id=\"$uuid\"})",
-          "legendFormat": "GPU Util %",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "type": "timeseries",
-      "id": 6,
-      "title": "GPU 메모리 사용률",
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": { "lineWidth": 2, "fillOpacity": 10, "spanNulls": false, "showPoints": "never" },
-          "unit": "percent",
-          "min": 0,
-          "max": 100
-        },
-        "overrides": []
-      },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 17 },
-      "options": {
-        "tooltip": { "mode": "multi", "sort": "none" },
-        "legend": { "displayMode": "list", "placement": "bottom", "calcs": ["mean", "last", "max"] }
-      },
-      "targets": [
-        {
-          "expr": "avg by (instance_id) (DCGM_FI_DEV_FB_USED{instance_id=\"$uuid\"} / DCGM_FI_DEV_FB_TOTAL{instance_id=\"$uuid\"}) * 100",
-          "legendFormat": "GPU Mem %",
-          "refId": "A"
         }
       ]
     }

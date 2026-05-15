@@ -1180,9 +1180,10 @@ Option A 채택 시 본 절 진행. Option B 채택 시 사용자가 자체 구�
 - [x] `/admin/database-instances` 하단 mysqld 메트릭 위젯
 - [x] `/admin/messaging/rabbitmq`, `/admin/messaging/memcached`, `/admin/coordination/etcd` 신규 관리자 페이지
 - [x] AdminSidebar "인프라 서비스" 섹션 추가 (RabbitMQ/Memcached/etcd nav)
-- [x] `monitoring/grafana/provisioning/dashboards/instance.json` — per-instance 대시보드 (`afterglow-instance`, `$uuid` 변수, node_exporter 기본 + libvirt 폴백 `or` PromQL)
-- [x] `frontend/src/lib/components/instance/MetricsPanel.svelte` — 차트/Grafana 탭 추가 (Grafana 탭: GrafanaEmbed `var-uuid={instanceId}`)
-- [x] `backend/app/api/common/grafana_auth.py` / `config.py` / `generate_k8s.py` / `config.toml.example` — `instance` 대시보드 UID 설정 연동
+- [x] `monitoring/grafana/provisioning/dashboards/instance-cpu.json` — CPU 전용 per-instance 대시보드 (`afterglow-instance-cpu`, CPU/메모리/네트워크/디스크 4패널)
+- [x] `monitoring/grafana/provisioning/dashboards/instance-gpu.json` — GPU per-instance 대시보드 (`afterglow-instance-gpu`, CPU/메모리/네트워크/디스크 + GPU 6패널)
+- [x] `frontend/src/lib/components/instance/MetricsPanel.svelte` — 차트/Grafana 탭 추가 (`isGpu`에 따라 `instance-gpu` / `instance-cpu` 대시보드 자동 선택)
+- [x] `backend/app/api/common/grafana_auth.py` / `config.py` / `generate_k8s.py` / `config.toml.example` — `instance-cpu` / `instance-gpu` 대시보드 UID 설정 연동
 
 ### 12.5 Open Questions (사용자 확인 필요)
 

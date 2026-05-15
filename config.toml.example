@@ -323,7 +323,8 @@ haproxy_uid = "afterglow-haproxy"
 libvirt_uid = "afterglow-libvirt"
 openstack_uid = "afterglow-openstack"
 ceph_uid = "afterglow-ceph"
-instance_uid = "afterglow-instance"   # 인스턴스 상세페이지 per-VM 대시보드
+instance_cpu_uid = "afterglow-instance-cpu"   # CPU 전용 인스턴스 per-VM 대시보드
+instance_gpu_uid = "afterglow-instance-gpu"   # GPU 인스턴스 per-VM 대시보드
 
 
 [cors]

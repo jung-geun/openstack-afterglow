@@ -1,7 +1,7 @@
 import { writable, get } from 'svelte/store';
 import { api } from '$lib/api/client';
 
-export type GrafanaDashboardKey = 'node' | 'rabbitmq' | 'mysqld' | 'memcached' | 'etcd' | 'haproxy' | 'libvirt' | 'openstack' | 'ceph' | 'instance';
+export type GrafanaDashboardKey = 'node' | 'rabbitmq' | 'mysqld' | 'memcached' | 'etcd' | 'haproxy' | 'libvirt' | 'openstack' | 'ceph' | 'instance-cpu' | 'instance-gpu';
 
 interface GrafanaContext {
 	grafanaUrl: string;
