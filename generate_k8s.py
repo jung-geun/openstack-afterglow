@@ -190,14 +190,6 @@ def render_secret(cfg: dict) -> str:
             f'  MONITORING_SD_TOKEN: {_yaml_str(sd_token)}',
         ])
 
-    grafana_jwt_secret = mon.get("grafana_jwt_secret", "")
-    if grafana_jwt_secret:
-        lines.extend([
-            "",
-            "  # Grafana JWT 서명 시크릿",
-            f'  GRAFANA_JWT_SECRET: {_yaml_str(grafana_jwt_secret)}',
-        ])
-
     notion_enc_key = notion.get("config_encryption_key", "")
     if notion_enc_key:
         lines.extend([
@@ -547,16 +539,8 @@ def render_configmap(cfg: dict) -> str:
 def render_grafana_deployment(cfg: dict) -> str:
     """grafana-deployment.yaml 생성.
 
-    iframe 임베드(GF_SECURITY_ALLOW_EMBEDDING)와 auth.jwt URL 로그인 환경을 포함한다.
-    grafana_jwt_secret 이 설정된 경우에만 JWT 관련 env 를 출력하고,
-    JWT 키 자체는 afterglow-secrets/GRAFANA_JWT_SECRET 를 secretKeyRef 로 참조한다.
-
-    afterglow `_create_grafana_jwt` 가 생성하는 HS256 claim 구조(login/email)에 맞춰
-    username_claim=login, email_claim=email 로 설정된다.
+    iframe 임베드(GF_SECURITY_ALLOW_EMBEDDING)와 익명 접근(auth.anonymous)을 설정한다.
     """
-    mon = cfg.get("monitoring", {})
-    has_jwt = bool(mon.get("grafana_jwt_secret"))
-
     lines = [
         "apiVersion: apps/v1",
         "kind: Deployment",
@@ -588,29 +572,11 @@ def render_grafana_deployment(cfg: dict) -> str:
         "            # iframe 임베드 허용 (X-Frame-Options 해제)",
         "            - name: GF_SECURITY_ALLOW_EMBEDDING",
         '              value: "true"',
-    ]
-    if has_jwt:
-        lines.extend([
-            "            # auth.jwt URL 로그인: afterglow 발급 HS256 JWT 를 ?auth_token=... 쿼리로 수용",
-            "            - name: GF_AUTH_JWT_ENABLED",
-            '              value: "true"',
-            "            - name: GF_AUTH_JWT_URL_LOGIN",
-            '              value: "true"',
-            "            - name: GF_AUTH_JWT_HEADER_NAME",
-            '              value: "X-JWT-Assertion"',
-            "            - name: GF_AUTH_JWT_USERNAME_CLAIM",
-            '              value: "login"',
-            "            - name: GF_AUTH_JWT_EMAIL_CLAIM",
-            '              value: "email"',
-            "            - name: GF_AUTH_JWT_AUTO_SIGN_UP",
-            '              value: "true"',
-            "            - name: GF_AUTH_JWT_KEY",
-            "              valueFrom:",
-            "                secretKeyRef:",
-            "                  name: afterglow-secrets",
-            "                  key: GRAFANA_JWT_SECRET",
-        ])
-    lines.extend([
+        "            # 익명 접근 허용 — afterglow iframe에서 인증 없이 대시보드를 표시",
+        "            - name: GF_AUTH_ANONYMOUS_ENABLED",
+        '              value: "true"',
+        "            - name: GF_AUTH_ANONYMOUS_ORG_ROLE",
+        '              value: "Viewer"',
         "          resources:",
         "            requests:",
         '              memory: "128Mi"',
@@ -619,7 +585,7 @@ def render_grafana_deployment(cfg: dict) -> str:
         '              memory: "256Mi"',
         '              cpu: "200m"',
         "",
-    ])
+    ]
     return "\n".join(lines)
 
 
@@ -715,16 +681,6 @@ def main() -> None:
 
     write_atomic(grafana_deployment_path, grafana_deployment_content)
     print(f"  {green('✓')} {grafana_deployment_path}")
-
-    # Grafana 임베드 환경 점검 알림
-    mon = cfg.get("monitoring", {})
-    if mon.get("grafana_base_url") and not mon.get("grafana_jwt_secret"):
-        print()
-        print(f"  {yellow('경고')}: monitoring.grafana_base_url 은 설정됐지만 "
-              f"grafana_jwt_secret 이 비어 있습니다.")
-        print(f"        Grafana 임베드는 동작하지 않습니다 (auth.jwt env 미생성).")
-        print(f"        시크릿 생성: python3 -c \"import secrets; print(secrets.token_hex(32))\"")
-        print(f"        config.toml [monitoring].grafana_jwt_secret 에 추가 후 재실행하세요.")
 
     print()
     print(f"{green('완료!')} K8s 매니페스트가 생성되었습니다.")

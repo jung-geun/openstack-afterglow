@@ -6,8 +6,6 @@ export type GrafanaDashboardKey = 'node' | 'rabbitmq' | 'mysqld' | 'memcached' |
 interface GrafanaContext {
 	grafanaUrl: string;
 	dashboards: Record<GrafanaDashboardKey, string>;
-	jwt: string;
-	jwtExpiresAt: number;
 }
 
 interface GrafanaContextStore {
@@ -20,35 +18,23 @@ const store = writable<GrafanaContextStore>({ ctx: null, loading: false, error: 
 
 let _inflight: Promise<GrafanaContext | null> | null = null;
 
-function _isExpired(ctx: GrafanaContext): boolean {
-	return Date.now() / 1000 > ctx.jwtExpiresAt * 0.8;
-}
-
 export async function loadGrafanaContext(
 	token: string | undefined,
 	projectId: string | undefined
 ): Promise<GrafanaContext | null> {
 	const current = get(store);
-	if (current.ctx && !_isExpired(current.ctx)) return current.ctx;
+	if (current.ctx) return current.ctx;
 	if (current.loading && _inflight) return _inflight;
 
 	store.update((s) => ({ ...s, loading: true, error: false }));
 
 	_inflight = (async () => {
 		try {
-			const [dashData, tokenData] = await Promise.all([
-				api.get<{ grafana_url: string; dashboards: Record<string, string> }>(
-					'/api/grafana/dashboards',
-					token,
-					projectId
-				),
-				api.post<{ token: string; expires_in: number }>(
-					'/api/grafana/token',
-					null,
-					token,
-					projectId
-				),
-			]);
+			const dashData = await api.get<{ grafana_url: string; dashboards: Record<string, string> }>(
+				'/api/grafana/dashboards',
+				token,
+				projectId
+			);
 
 			if (!dashData.grafana_url) {
 				store.update((s) => ({ ...s, loading: false, ctx: null }));
@@ -58,8 +44,6 @@ export async function loadGrafanaContext(
 			const ctx: GrafanaContext = {
 				grafanaUrl: dashData.grafana_url.replace(/\/$/, ''),
 				dashboards: dashData.dashboards as Record<GrafanaDashboardKey, string>,
-				jwt: tokenData.token,
-				jwtExpiresAt: Math.floor(Date.now() / 1000) + tokenData.expires_in,
 			};
 			store.update((s) => ({ ...s, loading: false, ctx }));
 			return ctx;

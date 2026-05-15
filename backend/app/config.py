@@ -200,7 +200,6 @@ def _load_toml() -> dict:
     flat["node_exporter_sg_name"] = mon.get("node_exporter_sg_name", "node_exporter")
     flat["dcgm_exporter_sg_name"] = mon.get("dcgm_exporter_sg_name", "dcgm_exporter")
     flat["grafana_base_url"] = mon.get("grafana_base_url", "")
-    flat["grafana_jwt_secret"] = mon.get("grafana_jwt_secret", "")
     dashboards = mon.get("dashboards", {})
     flat["grafana_dashboard_node_uid"] = dashboards.get("node_uid", "afterglow-node")
     flat["grafana_dashboard_rabbitmq_uid"] = dashboards.get("rabbitmq_uid", "afterglow-rabbitmq")
@@ -372,7 +371,6 @@ class Settings(BaseSettings):
     dcgm_exporter_sg_name: str = "dcgm_exporter"  # dcgm_exporter ingress SG 이름 (tcp/9400, GPU 전용)
     monitoring_scrape_cidr: str = ""  # Prometheus scrape CIDR (예: 10.0.0.0/8). 미설정 시 ValueError
     monitoring_sd_token: str = ""  # /api/sd/prometheus/targets 인증 토큰
-    grafana_jwt_secret: str = ""  # Grafana auth.jwt 서명 시크릿
     grafana_base_url: str = ""  # Grafana 외부 URL (예: https://grafana.example.com)
     grafana_dashboard_node_uid: str = "afterglow-node"
     grafana_dashboard_rabbitmq_uid: str = "afterglow-rabbitmq"

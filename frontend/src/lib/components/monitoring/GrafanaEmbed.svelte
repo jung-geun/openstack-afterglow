@@ -49,7 +49,7 @@
 				.map(([k, v]) => `var-${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
 				.join('&');
 			const timeParams = `from=${range}&to=now`;
-			const common = `orgId=1&theme=dark&kiosk&auth_token=${encodeURIComponent(ctx.jwt)}&${timeParams}${varParams ? '&' + varParams : ''}`;
+			const common = `orgId=1&theme=dark&kiosk&${timeParams}${varParams ? '&' + varParams : ''}`;
 
 			if (panelId !== undefined) {
 				iframeUrl = `${base}/d-solo/${uid}/_?panelId=${panelId}&${common}`;
