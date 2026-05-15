@@ -418,9 +418,10 @@
 
 	<!-- 인스턴스 메트릭 탭 -->
 	{#if tab === 'instances'}
-		<div class="flex gap-4" style="min-height: calc(100vh - 200px)">
+		<div class="flex flex-col md:flex-row gap-4 h-[calc(100vh-180px)] overflow-hidden">
 			<!-- 왼쪽: 인스턴스 목록 -->
-			<div class="w-72 flex-shrink-0 bg-gray-900 border border-gray-800 rounded-xl overflow-hidden flex flex-col">
+			<div class="w-full md:w-72 flex-shrink-0 bg-gray-900 border border-gray-800 rounded-xl overflow-hidden flex flex-col
+				{selectedInst ? 'hidden md:flex' : 'flex'}">
 				<div class="p-3 border-b border-gray-800">
 					<input
 						type="text"
@@ -476,9 +477,15 @@
 			</div>
 
 			<!-- 오른쪽: MetricsPanel -->
-			<div class="flex-1 min-w-0">
+			<div class="flex-1 min-w-0 overflow-y-auto {selectedInst ? 'block' : 'hidden md:block'}">
 				{#if selectedInst}
 					<div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+						<button
+							onclick={() => (selectedInst = null)}
+							class="md:hidden mb-3 text-sm text-blue-400 hover:text-blue-300 flex items-center gap-1"
+						>
+							← 목록으로
+						</button>
 						<div class="flex items-center gap-3 mb-5">
 							<span class="text-white font-semibold">{selectedInst.name}</span>
 							<span class="text-xs text-gray-500 font-mono">{selectedInst.id.slice(0, 8)}…</span>
