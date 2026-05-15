@@ -18,6 +18,7 @@ async def test_get_grafana_dashboards(client):
     fake_settings.grafana_dashboard_haproxy_uid = "haproxy-uid"
     fake_settings.grafana_dashboard_libvirt_uid = "libvirt-uid"
     fake_settings.grafana_dashboard_openstack_uid = "openstack-uid"
+    fake_settings.grafana_dashboard_ceph_uid = "ceph-uid"
 
     with patch("app.api.common.grafana_auth.get_settings", return_value=fake_settings):
         resp = await client.get("/api/grafana/dashboards")
@@ -27,7 +28,7 @@ async def test_get_grafana_dashboards(client):
     assert data["grafana_url"] == "https://grafana.example.com"
     assert data["dashboards"]["node"] == "node-uid"
     assert data["dashboards"]["rabbitmq"] == "rabbitmq-uid"
-    assert set(data["dashboards"].keys()) == {"node", "rabbitmq", "mysqld", "memcached", "etcd", "haproxy", "libvirt", "openstack"}
+    assert set(data["dashboards"].keys()) == {"node", "rabbitmq", "mysqld", "memcached", "etcd", "haproxy", "libvirt", "openstack", "ceph"}
 
 
 @pytest.mark.asyncio
@@ -43,6 +44,7 @@ async def test_get_grafana_dashboards_no_url(client):
     fake_settings.grafana_dashboard_haproxy_uid = "afterglow-haproxy"
     fake_settings.grafana_dashboard_libvirt_uid = "afterglow-libvirt"
     fake_settings.grafana_dashboard_openstack_uid = "afterglow-openstack"
+    fake_settings.grafana_dashboard_ceph_uid = "afterglow-ceph"
 
     with patch("app.api.common.grafana_auth.get_settings", return_value=fake_settings):
         resp = await client.get("/api/grafana/dashboards")

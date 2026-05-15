@@ -209,6 +209,7 @@ def _load_toml() -> dict:
     flat["grafana_dashboard_haproxy_uid"] = dashboards.get("haproxy_uid", "afterglow-haproxy")
     flat["grafana_dashboard_libvirt_uid"] = dashboards.get("libvirt_uid", "afterglow-libvirt")
     flat["grafana_dashboard_openstack_uid"] = dashboards.get("openstack_uid", "afterglow-openstack")
+    flat["grafana_dashboard_ceph_uid"] = dashboards.get("ceph_uid", "afterglow-ceph")
 
     notion = data.get("notion", {})
     flat["notion_config_encryption_key"] = notion.get("config_encryption_key", "")
@@ -383,6 +384,7 @@ class Settings(BaseSettings):
     grafana_dashboard_haproxy_uid: str = "afterglow-haproxy"
     grafana_dashboard_libvirt_uid: str = "afterglow-libvirt"
     grafana_dashboard_openstack_uid: str = "afterglow-openstack"
+    grafana_dashboard_ceph_uid: str = "afterglow-ceph"
     # Prometheus 서버 주소. 우선순위: 환경변수 PROMETHEUS_BASE_URL > config.toml [monitoring].prometheus_base_url > 기본값
     prometheus_base_url: str = "http://prometheus:9090"
     prometheus_username: str = ""  # basic auth 미사용 시 빈 문자열

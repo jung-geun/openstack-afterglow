@@ -305,6 +305,7 @@ etcd_uid = "afterglow-etcd"
 haproxy_uid = "afterglow-haproxy"
 libvirt_uid = "afterglow-libvirt"
 openstack_uid = "afterglow-openstack"
+ceph_uid = "afterglow-ceph"
 
 
 [cors]

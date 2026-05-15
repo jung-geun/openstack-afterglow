@@ -29,5 +29,6 @@ async def get_grafana_dashboards(
             "haproxy": settings.grafana_dashboard_haproxy_uid,
             "libvirt": settings.grafana_dashboard_libvirt_uid,
             "openstack": settings.grafana_dashboard_openstack_uid,
+            "ceph": settings.grafana_dashboard_ceph_uid,
         },
     }

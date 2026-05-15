@@ -80,6 +80,7 @@
 				{ label: 'etcd', href: '/admin/monitoring/etcd', service: null },
 				{ label: 'Libvirt', href: '/admin/monitoring/libvirt', service: null },
 				{ label: 'OpenStack', href: '/admin/monitoring/openstack', service: null },
+				{ label: 'Ceph', href: '/admin/monitoring/ceph', service: null },
 			],
 		},
 		{
