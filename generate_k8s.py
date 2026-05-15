@@ -441,6 +441,8 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     lines.append(f'memcached_uid = {_toml_str(dashboards.get("memcached_uid", "afterglow-memcached"))}')
     lines.append(f'etcd_uid = {_toml_str(dashboards.get("etcd_uid", "afterglow-etcd"))}')
     lines.append(f'haproxy_uid = {_toml_str(dashboards.get("haproxy_uid", "afterglow-haproxy"))}')
+    lines.append(f'libvirt_uid = {_toml_str(dashboards.get("libvirt_uid", "afterglow-libvirt"))}')
+    lines.append(f'openstack_uid = {_toml_str(dashboards.get("openstack_uid", "afterglow-openstack"))}')
     lines.append("")
 
     # [notion]

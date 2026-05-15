@@ -27,5 +27,7 @@ async def get_grafana_dashboards(
             "memcached": settings.grafana_dashboard_memcached_uid,
             "etcd": settings.grafana_dashboard_etcd_uid,
             "haproxy": settings.grafana_dashboard_haproxy_uid,
+            "libvirt": settings.grafana_dashboard_libvirt_uid,
+            "openstack": settings.grafana_dashboard_openstack_uid,
         },
     }

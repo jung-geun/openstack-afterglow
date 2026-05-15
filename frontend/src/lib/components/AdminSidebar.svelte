@@ -78,6 +78,8 @@
 				{ label: 'RabbitMQ', href: '/admin/monitoring/rabbitmq', service: null },
 				{ label: 'Memcached', href: '/admin/monitoring/memcached', service: null },
 				{ label: 'etcd', href: '/admin/monitoring/etcd', service: null },
+				{ label: 'Libvirt', href: '/admin/monitoring/libvirt', service: null },
+				{ label: 'OpenStack', href: '/admin/monitoring/openstack', service: null },
 			],
 		},
 		{
