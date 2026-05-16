@@ -24,12 +24,8 @@ export interface TopologyInstance {
 	network_names: string[];
 	ip_addresses: { addr: string; type: string; network_name: string; network_id?: string | null }[];
 }
-export interface FloatingIpInfo {
-	id: string; floating_ip_address: string;
-	fixed_ip_address: string | null; status: string;
-	port_id: string | null; floating_network_id: string;
-	project_id?: string | null;
-}
+export type { FloatingIpInfo, FloatingIpDetail } from '$lib/types/resources';
+import type { FloatingIpInfo } from '$lib/types/resources';
 export interface TopologyLBMember {
 	id: string; address: string; protocol_port: number;
 	status: string; subnet_id: string | null;

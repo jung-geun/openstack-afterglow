@@ -5,20 +5,7 @@
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
-
-	interface FloatingIpInfo {
-		id: string;
-		floating_ip_address: string;
-		fixed_ip_address: string | null;
-		status: string;
-		port_id: string | null;
-		project_id: string | null;
-	}
-	interface NetworkInfo {
-		id: string;
-		name: string;
-		is_external: boolean;
-	}
+	import type { FloatingIpInfo, NetworkInfo } from '$lib/types/resources';
 
 	let fips = $state<FloatingIpInfo[]>([]);
 	let loading = $state(true);

@@ -10,20 +10,7 @@
   import SlidePanel from '$lib/components/SlidePanel.svelte';
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
-
-  interface ImageInfo {
-    id: string;
-    name: string;
-    status: string;
-    size: number | null;
-    min_disk: number;
-    min_ram: number;
-    disk_format: string | null;
-    os_distro: string | null;
-    created_at: string | null;
-    owner: string | null;
-    visibility: string | null;
-  }
+  import type { ImageInfo } from '$lib/types/resources';
 
   const KNOWN_DISTROS = ['ubuntu', 'centos', 'rocky', 'debian', 'fedora-coreos', 'fedora', 'rhel', 'windows', 'cirros'];
 
@@ -156,8 +143,8 @@
       name: img.name,
       os_distro: img.os_distro ?? '',
       os_type: '',
-      min_disk: img.min_disk,
-      min_ram: img.min_ram,
+      min_disk: img.min_disk ?? 0,
+      min_ram: img.min_ram ?? 0,
     };
     saveError = '';
   }
@@ -409,7 +396,7 @@
               {:else}
                 <span class="px-1.5 py-0.5 rounded border text-[10px] font-medium bg-gray-800/70 border-gray-700 text-gray-400">비공개</span>
               {/if}
-              <span class="ml-auto text-gray-500">{formatSize(img.size)}</span>
+              <span class="ml-auto text-gray-500">{formatSize(img.size ?? null)}</span>
             </div>
 
             <!-- Actions (own images only) -->

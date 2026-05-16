@@ -4,6 +4,7 @@
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
+	import type { FloatingIp } from '$lib/types/resources';
 
 	interface DbInstance {
 		id: string;
@@ -30,11 +31,6 @@
 		id: string; name: string; status: string;
 		size: number; created_at: string; description: string;
 	}
-	interface FloatingIp {
-		id: string; floating_ip_address: string; fixed_ip_address?: string;
-		port_id?: string; status: string;
-	}
-
 	interface Props {
 		instanceId: string;
 		token?: string;

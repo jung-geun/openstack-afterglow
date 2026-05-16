@@ -7,15 +7,8 @@
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
+	import type { Network as NetworkInfo } from '$lib/types/resources';
 
-	interface NetworkInfo {
-		id: string;
-		name: string;
-		status: string;
-		subnets: string[];
-		is_external: boolean;
-		is_shared: boolean;
-	}
 	interface TsPoint {
 		ts: number;
 		total?: number;

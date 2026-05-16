@@ -7,83 +7,16 @@
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 	import DetailHeader from '$lib/components/ui/DetailHeader.svelte';
-
-	interface IpAddress {
-		addr: string;
-		type: string;
-		network_name: string;
-	}
-
-	interface Instance {
-		id: string;
-		name: string;
-		status: string;
-		image_id: string | null;
-		image_name: string | null;
-		flavor_id: string | null;
-		flavor_name: string | null;
-		ip_addresses: IpAddress[];
-		created_at: string | null;
-		metadata: Record<string, string>;
-		union_libraries: string[];
-		union_strategy: string | null;
-		union_share_ids: string[];
-		union_upper_volume_id: string | null;
-		key_name: string | null;
-		user_id: string | null;
-		fault?: { message?: string; code?: number; created?: string } | null;
-	}
-
-	interface FloatingIp {
-		id: string;
-		floating_ip_address: string;
-		fixed_ip_address: string | null;
-		status: string;
-		port_id: string | null;
-		floating_network_id: string;
-	}
-
-	interface PortInfo {
-		id: string;
-		network_id: string;
-		mac_address: string;
-		fixed_ips: { ip_address: string; subnet_id: string }[];
-		security_group_ids: string[];
-		status: string;
-	}
-
-	interface VolumeAttachment {
-		id: string;
-		volume_id: string;
-		device: string;
-		name?: string;
-		size?: number;
-		status?: string;
-		delete_on_termination?: boolean;
-	}
-
-	interface SecurityGroup {
-		id: string;
-		name: string;
-		description: string;
-		rules: any[];
-	}
-
-	interface VolumeInfo {
-		id: string;
-		name: string;
-		status: string;
-		size: number;
-		attachments: any[];
-	}
-
-	interface NetworkInfo {
-		id: string;
-		name: string;
-		status: string;
-		is_external: boolean;
-		is_shared: boolean;
-	}
+	import type {
+		Instance,
+		FloatingIpDetail as FloatingIp,
+		PortInfo,
+		VolumeAttachment,
+		SecurityGroup,
+		SecurityGroupRule,
+		Volume as VolumeInfo,
+		NetworkInfo
+	} from '$lib/types/resources';
 
 	interface Props {
 		instanceId: string;

@@ -2,16 +2,7 @@
 	import { onMount } from 'svelte';
 	import { api } from '$lib/api/client';
 	import { auth } from '$lib/stores/auth';
-
-	interface FlavorInfo {
-		id: string;
-		name: string;
-		vcpus: number;
-		ram: number;
-		disk: number;
-		is_public: boolean;
-		extra_specs: Record<string, string>;
-	}
+	import type { FlavorInfo } from '$lib/types/resources';
 
 	interface GpuTypeAvailability {
 		device_name: string;
@@ -92,7 +83,7 @@
 	const PAGE_SIZE = 10;
 
 	function hasGpu(flavor: FlavorInfo): boolean {
-		return Object.keys(flavor.extra_specs).some(
+		return Object.keys(flavor.extra_specs ?? {}).some(
 			(k) => k.toLowerCase().includes('gpu') || k.toLowerCase().includes('pci')
 		);
 	}

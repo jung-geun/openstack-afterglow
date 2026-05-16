@@ -8,6 +8,7 @@
 	import { formatStorage } from '$lib/utils/format';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
+	import type { Instance } from '$lib/types/resources';
 
 	interface Volume {
 		id: string;
@@ -16,11 +17,6 @@
 		size: number;
 		volume_type: string | null;
 		attachments: Record<string, string>[];
-	}
-
-	interface Instance {
-		id: string;
-		name: string;
 	}
 
 	let volume = $state<Volume | null>(null);

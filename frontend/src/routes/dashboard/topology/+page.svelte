@@ -6,6 +6,7 @@
 	import GlobalTopology from '$lib/components/GlobalTopology.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
+	import type { FloatingIpInfo } from '$lib/types/resources';
 
 	interface SubnetDetail {
 		id: string; name: string; cidr: string;
@@ -32,12 +33,6 @@
 		id: string; name: string; status: string;
 		network_names: string[];
 		ip_addresses: { addr: string; type: string; network_name: string }[];
-	}
-	interface FloatingIpInfo {
-		id: string; floating_ip_address: string;
-		fixed_ip_address: string | null; status: string;
-		port_id: string | null; floating_network_id: string;
-		project_id?: string | null;
 	}
 	interface TopologyData {
 		networks: TopologyNetwork[];

@@ -10,6 +10,7 @@
 	import SlidePanel from '$lib/components/SlidePanel.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+	import type { FloatingIpInfo } from '$lib/types/resources';
 
 	let isLight = $state(false);
 	$effect(() => {
@@ -46,12 +47,6 @@
 		id: string; name: string; status: string;
 		network_names: string[];
 		ip_addresses: { addr: string; type: string; network_name: string }[];
-	}
-	interface FloatingIpInfo {
-		id: string; floating_ip_address: string;
-		fixed_ip_address: string | null; status: string;
-		port_id: string | null; floating_network_id: string;
-		project_id?: string | null;
 	}
 	interface TopologyLBMember {
 		id: string; address: string; protocol_port: number;

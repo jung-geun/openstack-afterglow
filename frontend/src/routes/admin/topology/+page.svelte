@@ -11,6 +11,7 @@
 	import { projectNames } from '$lib/stores/projectNames';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
+	import type { FloatingIpInfo } from '$lib/types/resources';
 
 	let isLight = $state(false);
 	onMount(() => {
@@ -48,12 +49,6 @@
 		project_id?: string | null;
 		network_names: string[];
 		ip_addresses: { addr: string; type: string; network_name: string }[];
-	}
-	interface FloatingIpInfo {
-		id: string; floating_ip_address: string;
-		fixed_ip_address: string | null; status: string;
-		port_id: string | null; floating_network_id: string;
-		project_id?: string | null;
 	}
 	interface TopologyLBMember {
 		id: string; address: string; protocol_port: number;

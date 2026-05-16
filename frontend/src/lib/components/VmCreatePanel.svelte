@@ -17,7 +17,13 @@
 	import LoadingSpinner from '$lib/components/LoadingSpinner.svelte';
 	import SlidePanel from '$lib/components/SlidePanel.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
-	import type { Volume } from '$lib/types/resources';
+	import type {
+		Volume,
+		NetworkInfo,
+		KeypairInfo,
+		SecurityGroup as SecurityGroupInfo,
+		AvailabilityZone as AvailabilityZoneInfo
+	} from '$lib/types/resources';
 
 	interface Props {
 		adminMode?: boolean;
@@ -33,31 +39,6 @@
 		instance_id?: string;
 		error?: string;
 		elapsed_seconds?: number | null;
-	}
-
-	interface NetworkInfo {
-		id: string;
-		name: string;
-		status: string;
-		is_external: boolean;
-		is_shared: boolean;
-	}
-
-	interface KeypairInfo {
-		name: string;
-		fingerprint: string;
-		type: string;
-	}
-
-	interface SecurityGroupInfo {
-		id: string;
-		name: string;
-		description: string;
-	}
-
-	interface AvailabilityZoneInfo {
-		name: string;
-		state: boolean;
 	}
 
 	const ALL_PROGRESS_STEPS = [

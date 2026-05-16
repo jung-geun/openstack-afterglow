@@ -6,25 +6,14 @@
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
+	import type { PortInfo, NetworkInfo } from '$lib/types/resources';
 
-	interface PortInfo {
-		id: string;
-		name: string;
-		status: string;
-		network_id: string;
-		device_owner: string;
-		device_id: string;
-		mac_address: string;
-		fixed_ips: { ip_address: string; subnet_id: string }[];
-		project_id: string | null;
-	}
 	interface PagedResponse<T> {
 		items: T[];
 		next_marker: string | null;
 		count: number;
 	}
 	interface ProjectName { id: string; name: string; }
-	interface NetworkInfo { id: string; name: string; }
 
 	let ports = $state<PortInfo[]>([]);
 	let loading = $state(true);
@@ -233,7 +222,7 @@
 							<td class="py-2">
 								{#if !p.device_owner || p.device_owner === ''}
 									<div class="flex items-center gap-1">
-										<button onclick={() => { editPort = p; editName = p.name; editError = ''; }}
+										<button onclick={() => { editPort = p; editName = p.name ?? ''; editError = ''; }}
 											class="px-2 py-0.5 text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 rounded">수정</button>
 										<button onclick={() => { deletePort = p; deleteError = ''; }}
 											class="px-2 py-0.5 text-xs bg-red-900/30 hover:bg-red-900/50 text-red-400 rounded">삭제</button>

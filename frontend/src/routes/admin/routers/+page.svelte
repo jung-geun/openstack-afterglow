@@ -5,6 +5,7 @@
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
+	import type { NetworkInfo } from '$lib/types/resources';
 
 	interface RouterInfo {
 		id: string;
@@ -13,11 +14,6 @@
 		external_gateway_network_id: string | null;
 		connected_subnet_ids: string[];
 		project_id: string | null;
-	}
-	interface NetworkInfo {
-		id: string;
-		name: string;
-		is_external: boolean;
 	}
 
 	let routers = $state<RouterInfo[]>([]);

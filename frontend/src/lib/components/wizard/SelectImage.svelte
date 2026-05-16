@@ -1,15 +1,5 @@
 <script lang="ts">
-	interface ImageInfo {
-		id: string;
-		name: string;
-		status: string;
-		min_disk: number;
-		min_ram: number;
-		disk_format: string | null;
-		os_type: string | null;
-		os_distro: string | null;
-		created_at: string | null;
-	}
+	import type { ImageInfo } from '$lib/types/resources';
 
 	let { images, selectedId, onSelect }: {
 		images: ImageInfo[];
@@ -154,14 +144,14 @@
 
 			<!-- 아바타 + 이름 -->
 			<div class="flex items-start gap-3 mb-2">
-				{#if logoPath(img.os_distro)}
+				{#if logoPath(img.os_distro ?? null)}
 					<img
-						src={logoPath(img.os_distro)}
+						src={logoPath(img.os_distro ?? null)}
 						alt={img.os_distro ?? ''}
 						class="w-9 h-9 rounded-lg object-contain bg-gray-800 border border-gray-700 p-0.5 flex-shrink-0"
 					/>
 				{:else}
-					<div class="w-9 h-9 rounded-lg {avatarColor(img.os_distro)} flex items-center justify-center text-white text-sm font-bold flex-shrink-0 border border-white/10">
+					<div class="w-9 h-9 rounded-lg {avatarColor(img.os_distro ?? null)} flex items-center justify-center text-white text-sm font-bold flex-shrink-0 border border-white/10">
 						{avatarLetter(img.name)}
 					</div>
 				{/if}

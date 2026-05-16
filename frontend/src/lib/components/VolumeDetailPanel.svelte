@@ -6,6 +6,7 @@
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import DetailHeader from '$lib/components/ui/DetailHeader.svelte';
+	import type { Instance } from '$lib/types/resources';
 
 	interface Volume {
 		id: string;
@@ -14,12 +15,6 @@
 		size: number;
 		volume_type: string | null;
 		attachments: Record<string, unknown>[];
-	}
-
-	interface Instance {
-		id: string;
-		name: string;
-		status: string;
 	}
 
 	interface Snapshot {
