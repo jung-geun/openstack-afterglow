@@ -3,42 +3,12 @@
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import { goto } from '$app/navigation';
-
-	interface Listener {
-		id: string;
-		name: string;
-		protocol: string;
-		protocol_port: number;
-		status: string;
-		default_pool_id: string | null;
-	}
-
-	interface Pool {
-		id: string;
-		name: string;
-		protocol: string;
-		lb_algorithm: string;
-		status: string;
-	}
-
-	interface Member {
-		id: string;
-		name: string;
-		address: string;
-		protocol_port: number;
-		weight: number;
-		status: string;
-	}
-
-	interface LoadBalancerDetail {
-		id: string;
-		name: string;
-		description: string;
-		status: string;
-		operating_status: string;
-		vip_address: string | null;
-		vip_subnet_id: string | null;
-	}
+	import type {
+		LoadBalancerDetail,
+		Listener,
+		Pool,
+		Member,
+	} from '$lib/types/resources';
 
 	const id = $derived($page.params.id);
 

@@ -6,42 +6,13 @@
 	import { goto } from '$app/navigation';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
-
-	interface Listener {
-		id: string;
-		name: string;
-		protocol: string;
-		protocol_port: number;
-		status: string;
-		default_pool_id: string | null;
-	}
-
-	interface Pool {
-		id: string;
-		name: string;
-		protocol: string;
-		lb_algorithm: string;
-		status: string;
-	}
-
-	interface Member {
-		id: string;
-		name: string;
-		address: string;
-		protocol_port: number;
-		weight: number;
-		status: string;
-	}
-
-	interface LoadBalancerDetail {
-		id: string;
-		name: string;
-		description: string;
-		status: string;
-		operating_status: string;
-		vip_address: string | null;
-		vip_subnet_id: string | null;
-	}
+	import type {
+		LoadBalancerDetail,
+		Listener,
+		Pool,
+		Member,
+		LbStatusNode,
+	} from '$lib/types/resources';
 
 	const id = $derived($page.params.id);
 
@@ -54,15 +25,6 @@
 	let error = $state('');
 	let saving = $state(false);
 
-	interface LbStatusNode {
-		id: string;
-		name: string;
-		provisioning_status: string;
-		operating_status: string;
-		listeners?: LbStatusNode[];
-		pools?: LbStatusNode[];
-		members?: LbStatusNode[];
-	}
 	let statusTree = $state<LbStatusNode | null>(null);
 
 	// 리스너 생성

@@ -319,3 +319,51 @@ export interface K3sClusterHealth {
   error: string | null;
   reachability: string;
 }
+
+// ——— LoadBalancer 도메인 ———
+
+export interface LoadBalancerDetail {
+  id: string;
+  name: string;
+  description: string;
+  status: string;
+  operating_status: string;
+  vip_address: string | null;
+  vip_subnet_id: string | null;
+}
+
+export interface Listener {
+  id: string;
+  name: string;
+  protocol: string;
+  protocol_port: number;
+  status: string;
+  default_pool_id: string | null;
+}
+
+export interface Pool {
+  id: string;
+  name: string;
+  protocol: string;
+  lb_algorithm: string;
+  status: string;
+}
+
+export interface Member {
+  id: string;
+  name: string;
+  address: string;
+  protocol_port: number;
+  weight: number;
+  status: string;
+}
+
+export interface LbStatusNode {
+  id: string;
+  name: string;
+  provisioning_status: string;
+  operating_status: string;
+  listeners?: LbStatusNode[];
+  pools?: LbStatusNode[];
+  members?: LbStatusNode[];
+}
