@@ -5,40 +5,7 @@
 	import { goto } from '$app/navigation';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
-
-	interface RouterInterface {
-		id: string;
-		subnet_id: string;
-		subnet_name: string;
-		network_id: string;
-		ip_address: string;
-	}
-
-	interface RouterDetail {
-		id: string;
-		name: string;
-		status: string;
-		project_id: string | null;
-		external_gateway_network_id: string | null;
-		external_gateway_network_name: string | null;
-		interfaces: RouterInterface[];
-	}
-
-	interface Subnet {
-		id: string;
-		name: string;
-		cidr: string;
-		network_id: string;
-		gateway_ip?: string | null;
-	}
-
-	interface Network {
-		id: string;
-		name: string;
-		is_external: boolean;
-		is_shared: boolean;
-		subnets: string[];
-	}
+	import type { RouterInterface, RouterDetail, SubnetDetail, Network } from '$lib/types/resources';
 
 	const id = $derived($page.params.id);
 
@@ -51,7 +18,7 @@
 	let showAddInterface = $state(false);
 	let availableNetworks = $state<Network[]>([]);
 	let selectedNetId = $state('');
-	let allSubnets = $state<Subnet[]>([]);
+	let allSubnets = $state<SubnetDetail[]>([]);
 	let selectedSubnetId = $state('');
 
 	// 외부 게이트웨이 설정
@@ -98,7 +65,7 @@
 		if (!selectedNetId) { allSubnets = []; selectedSubnetId = ''; return; }
 		const net = availableNetworks.find(n => n.id === selectedNetId);
 		if (!net) return;
-		api.get<{ subnet_details: Subnet[] }>(`/api/networks/${selectedNetId}`, $auth.token ?? undefined, $auth.projectId ?? undefined)
+		api.get<{ subnet_details: SubnetDetail[] }>(`/api/networks/${selectedNetId}`, $auth.token ?? undefined, $auth.projectId ?? undefined)
 			.then(d => { allSubnets = d.subnet_details ?? []; selectedSubnetId = allSubnets[0]?.id ?? ''; })
 			.catch(() => {});
 	});

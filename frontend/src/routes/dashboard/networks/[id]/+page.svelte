@@ -5,32 +5,7 @@
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import NetworkTopology from '$lib/components/NetworkTopology.svelte';
-
-	interface SubnetDetail {
-		id: string;
-		name: string;
-		cidr: string;
-		gateway_ip: string | null;
-		dhcp_enabled: boolean;
-	}
-
-	interface RouterInfo {
-		id: string;
-		name: string;
-		external_gateway_network_id: string | null;
-		connected_subnet_ids: string[];
-	}
-
-	interface NetworkDetail {
-		id: string;
-		name: string;
-		status: string;
-		subnets: string[];
-		is_external: boolean;
-		is_shared: boolean;
-		subnet_details: SubnetDetail[];
-		routers: RouterInfo[];
-	}
+	import type { SubnetDetail, NetworkDetail } from '$lib/types/resources';
 
 	let network = $state<NetworkDetail | null>(null);
 	let loading = $state(true);

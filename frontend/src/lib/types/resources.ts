@@ -132,6 +132,61 @@ export interface Router {
   connected_subnet_ids: string[];
 }
 
+// ——— Router/Network 상세 도메인 ———
+
+export interface RouterInterface {
+  id: string;
+  subnet_id: string;
+  subnet_name: string;
+  network_id: string;
+  ip_address: string;
+}
+
+export interface RouterDetail {
+  id: string;
+  name: string;
+  status: string;
+  project_id: string | null;
+  external_gateway_network_id: string | null;
+  external_gateway_network_name: string | null;
+  interfaces: RouterInterface[];
+}
+
+export interface SubnetDetail {
+  id: string;
+  name: string;
+  cidr: string;
+  network_id?: string;
+  gateway_ip: string | null;
+  dhcp_enabled: boolean;
+}
+
+export interface NetworkRouterInfo {
+  id: string;
+  name: string;
+  status: string;
+  project_id: string | null;
+  external_gateway_network_id: string | null;
+  connected_subnet_ids: string[];
+}
+
+export interface RouterListItem {
+  id: string;
+  name: string;
+  status: string;
+}
+
+export interface NetworkDetail {
+  id: string;
+  name: string;
+  status: string;
+  subnets: string[];
+  is_external: boolean;
+  is_shared: boolean;
+  subnet_details: SubnetDetail[];
+  routers: NetworkRouterInfo[];
+}
+
 export interface LoadBalancer {
   id: string;
   name: string;
