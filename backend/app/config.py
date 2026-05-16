@@ -7,6 +7,7 @@ import os
 import tomllib
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
@@ -102,6 +103,9 @@ def _load_toml() -> dict:
     flat["cache_ttl_normal"] = cache.get("ttl_normal", cache.get("default_ttl_seconds", 30))
     flat["cache_ttl_slow"] = cache.get("ttl_slow", 60)
     flat["cache_ttl_static"] = cache.get("ttl_static", 300)
+    flat["cache_backend"] = cache.get("backend", "redis")
+    flat["cache_dynamic_threshold_low"] = cache.get("dynamic_threshold_low", 5)
+    flat["cache_dynamic_threshold_high"] = cache.get("dynamic_threshold_high", 20)
 
     svc = data.get("services", {})
     flat["service_magnum_enabled"] = svc.get("magnum", False)
@@ -315,6 +319,11 @@ class Settings(BaseSettings):
     cache_ttl_normal: int = 30
     cache_ttl_slow: int = 60
     cache_ttl_static: int = 300
+    # 캐시 백엔드: "redis" | "valkey" (v1 동일 클라이언트, v2 에서 Memcached 추가 시 확장)
+    cache_backend: Literal["redis", "valkey"] = "redis"
+    # Dynamic TTL 조정 임계치 (시간당 mutation 횟수). Phase B 에서 활성화.
+    cache_dynamic_threshold_low: int = 5
+    cache_dynamic_threshold_high: int = 20
 
     # 선택적 서비스
     service_magnum_enabled: bool = False

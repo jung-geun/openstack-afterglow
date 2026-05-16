@@ -64,6 +64,12 @@ ttl_slow = 60       # 키페어, 보안그룹, 관리자 프로젝트/그룹/역
 ttl_static = 300    # 이미지, 플레이버, 토큰 검증
 default_ttl_seconds = 30  # TTL 티어 미지정 리소스의 기본 캐시 TTL (초)
 
+# 캐시 백엔드: "redis" 또는 "valkey" (v1 은 동일 redis-py 클라이언트 사용)
+backend = "redis"
+# Dynamic TTL 조정 임계치 (시간당 mutation 횟수). Phase B 에서 활성화.
+dynamic_threshold_low = 5
+dynamic_threshold_high = 20
+
 [session]
 # 세션 유지 시간 (초). 이 시간이 지나면 재로그인 필요.
 # Keystone 토큰 만료 시간보다 짧게 설정 권장 (Keystone 기본값: 3600초)

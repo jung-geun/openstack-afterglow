@@ -7,7 +7,7 @@ import time
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, Query
 
 from app.config import get_settings
 from app.services import keystone
@@ -186,3 +186,11 @@ async def get_os_conn(
         yield conn
     finally:
         await asyncio.to_thread(conn.close)
+
+
+async def cache_bypass(refresh: bool = Query(False)) -> bool:
+    """`?refresh=true` 쿼리스트링으로 캐시 우회를 허용하는 의존성.
+
+    cached_call(key, ttl, fn, refresh=bypass) 와 페어로 사용한다.
+    """
+    return refresh

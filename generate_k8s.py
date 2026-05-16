@@ -302,6 +302,9 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     lines.append(f'ttl_slow = {cache.get("ttl_slow", 60)}      # 키페어, 보안그룹')
     lines.append(f'ttl_static = {cache.get("ttl_static", 300)}   # 이미지, 플레이버, 토큰 검증')
     lines.append(f'default_ttl_seconds = {cache.get("default_ttl_seconds", 30)}')
+    lines.append(f'backend = {_toml_str(cache.get("backend", "redis"))}')
+    lines.append(f'dynamic_threshold_low = {cache.get("dynamic_threshold_low", 5)}')
+    lines.append(f'dynamic_threshold_high = {cache.get("dynamic_threshold_high", 20)}')
     lines.append("")
 
     # [session]
