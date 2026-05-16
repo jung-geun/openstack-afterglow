@@ -269,3 +269,42 @@ export interface ImageMember {
   status: string;
   created_at: string | null;
 }
+
+// ——— K3s 도메인 ———
+
+export interface K3sCluster {
+  id: string;
+  name: string;
+  status: string;
+  status_reason: string | null;
+  server_vm_id: string | null;
+  agent_vm_ids: string[];
+  agent_count: number;
+  api_address: string | null;
+  server_ip: string | null;
+  network_id: string | null;
+  key_name: string | null;
+  k3s_version: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface K3sNodeHealth {
+  name: string;
+  role: string;
+  ready: boolean;
+  conditions: string[];
+  kubelet_version: string | null;
+}
+
+export interface K3sClusterHealth {
+  cluster_id: string;
+  cluster_name: string;
+  status: string;
+  api_server_reachable: boolean;
+  healthz_ok: boolean;
+  nodes: K3sNodeHealth[];
+  checked_at: string;
+  error: string | null;
+  reachability: string;
+}
