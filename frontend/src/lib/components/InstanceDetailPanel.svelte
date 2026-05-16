@@ -1,88 +1,56 @@
 <script lang="ts">
+	import { setContext } from 'svelte';
 	import { auth, isAdmin } from '$lib/stores/auth';
-	import { api, ApiError } from '$lib/api/client';
-	import MetricsPanel from '$lib/components/instance/MetricsPanel.svelte';
 	import { goto } from '$app/navigation';
+	import MetricsPanel from '$lib/components/instance/MetricsPanel.svelte';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
-	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 	import DetailHeader from '$lib/components/ui/DetailHeader.svelte';
-	import type {
-		Instance,
-		FloatingIpDetail as FloatingIp,
-		PortInfo,
-		VolumeAttachment,
-		SecurityGroup,
-		SecurityGroupRule,
-		Volume as VolumeInfo,
-		NetworkInfo
-	} from '$lib/types/resources';
+	import { createInstanceDetailStore } from '$lib/stores/instanceDetail.svelte';
+	import type { PortInfo } from '$lib/types/resources';
 
 	interface Props {
 		instanceId: string;
 		onClose?: () => void;
-		adminProjectId?: string | null;  // 관리자가 다른 프로젝트의 인스턴스를 볼 때
+		adminProjectId?: string | null;
 	}
 
 	let { instanceId, onClose, adminProjectId = null }: Props = $props();
 
-	let instance = $state<Instance | null>(null);
-	let floatingIps = $state<FloatingIp[]>([]);
-	let interfaces = $state<PortInfo[]>([]);
-	const fixedIpsList = $derived(instance?.ip_addresses.filter(ip => ip.type === 'fixed') ?? []);
-	const floatingIpsList = $derived(instance?.ip_addresses.filter(ip => ip.type === 'floating') ?? []);
-	// floating IP가 이미 할당된 포트 ID 집합
-	const assignedPortIds = $derived(new Set(floatingIps.filter(f => f.port_id).map(f => f.port_id!)));
-	// floating IP 할당 가능한 (아직 미할당) 인터페이스
-	const availableInterfaces = $derived(interfaces.filter(i => !assignedPortIds.has(i.id)));
-	let volumes = $state<VolumeAttachment[]>([]);
-	let allSecurityGroups = $state<SecurityGroup[]>([]);
-	let availableVolumes = $state<VolumeInfo[]>([]);
-	let availableNetworks = $state<NetworkInfo[]>([]);
-	let ownerDisplay = $state('');
-	let loading = $state(true);
-	let refreshing = $state(false);
-	let error = $state('');
-	let deleting = $state(false);
-	let actioning = $state<string | null>(null);
-	// Console log
+	const s = createInstanceDetailStore({
+		instanceId: () => instanceId,
+		effectiveProjectId: () => adminProjectId ?? ($auth.projectId ?? undefined),
+		adminMode: () => !!adminProjectId,
+		onDelete: () => {
+			if (onClose) onClose();
+			else goto('/dashboard/compute/instances');
+		},
+	});
+
+	setContext('instance-detail', s);
+
+	// UI-only state
 	let showLog = $state(false);
-	let consoleLog = $state('');
-	let logLoading = $state(false);
-	let logFull = $state(false);
 	let logPreEl = $state<HTMLPreElement | null>(null);
-	// Volume panel
 	let showAttachVolume = $state(false);
 	let attachMode = $state<'existing' | 'new'>('existing');
 	let selectedVolumeId = $state('');
 	let newVolName = $state('');
 	let newVolSize = $state(20);
-	// Interface panel
 	let showAddInterface = $state(false);
 	let selectedNetId = $state('');
-	// Security groups
 	let sgEditPortId = $state<string | null>(null);
 	let sgEditSelected = $state<string[]>([]);
 	let expandedSgRules = $state<Set<string>>(new Set());
-
-	function toggleSgRules(sgId: string) {
-		const next = new Set(expandedSgRules);
-		next.has(sgId) ? next.delete(sgId) : next.add(sgId);
-		expandedSgRules = next;
-	}
-
-	function formatRule(r: any): string {
-		const dir = r.direction === 'ingress' ? '인바운드' : '아웃바운드';
-		if (!r.protocol) return `${dir} 전체 허용`;
-		const proto = (r.protocol as string).toUpperCase();
-		let port = '';
-		if (r.port_range_min != null && r.port_range_max != null) {
-			port = r.port_range_min === r.port_range_max
-				? ` ${r.port_range_min}` : ` ${r.port_range_min}-${r.port_range_max}`;
-		}
-		const remote = r.remote_ip_prefix ? ` ← ${r.remote_ip_prefix}` : '';
-		return `${dir} ${proto}${port}${remote}`;
-	}
+	let showResizeModal = $state(false);
+	let resizeFlavorId = $state('');
+	let showPasswordModal = $state(false);
+	let newPassword = $state('');
+	let confirmPassword = $state('');
+	let passwordError = $state('');
+	let showMigrateModal = $state(false);
+	let migrateType = $state<'live' | 'cold'>('live');
+	let migrateHost = $state('');
 
 	const statusColor: Record<string, string> = {
 		ACTIVE: 'text-green-400 bg-green-900/30',
@@ -99,347 +67,24 @@
 		dynamic: '동적 생성',
 	};
 
+	// Initial load when instanceId or token changes
 	$effect(() => {
 		if (!instanceId || !$auth.token) return;
-		loading = true;
-		error = '';
-		fetchInstance(instanceId);
+		s.fetchInstance(instanceId);
 	});
 
-	// Instance detail auto-refresh
-	const detailPollAr = createAutoRefresh(() => {
-		if (!instanceId || !$auth.token) return;
-		return fetchInstance(instanceId, { silent: true });
-	}, {
-		storageKey: 'instance-detail',
-		defaultActive: true,
-		defaultInterval: 30,
-		intervalOptions: [15, 30, 60, 120]
-	});
-
-	function manualRefresh() {
-		if (!instanceId) return;
-		fetchInstance(instanceId, { silent: true });
-	}
-
-	// Console log auto-refresh when visible
-	const consolePollAr = createAutoRefresh(() => loadConsoleLog(logFull), {
-		storageKey: 'instance-detail-console',
-		defaultActive: false,
-		defaultInterval: 15,
-		intervalOptions: [10, 15, 30, 60]
-	});
-
-	// Scroll to bottom when log updates
+	// Scroll to bottom when console log updates
 	$effect(() => {
-		if (consoleLog && logPreEl) {
+		if (s.consoleLog && logPreEl) {
 			logPreEl.scrollTop = logPreEl.scrollHeight;
 		}
 	});
 
-	async function fetchInstance(id: string, opts?: { silent?: boolean }) {
-		if (opts?.silent) {
-			refreshing = true;
-		} else {
-			loading = true;
-			error = '';
-		}
-		// 관리자가 다른 프로젝트 인스턴스를 볼 때 해당 project_id 사용
-		const effectiveProjectId = adminProjectId ?? ($auth.projectId ?? undefined);
-		try {
-			instance = await api.get<Instance>(
-				`/api/instances/${id}`,
-				$auth.token ?? undefined,
-				effectiveProjectId
-			);
-			const [fips, ifaces, vols, sgData, allVols, nets, ownerData] = await Promise.all([
-				api.get<FloatingIp[]>('/api/networks/floating-ips', $auth.token ?? undefined, effectiveProjectId).catch(() => []),
-				api.get<PortInfo[]>(`/api/instances/${id}/interfaces`, $auth.token ?? undefined, effectiveProjectId).catch(() => []),
-				api.get<VolumeAttachment[]>(`/api/instances/${id}/volumes`, $auth.token ?? undefined, effectiveProjectId).catch(() => []),
-				api.get<{ ports: PortInfo[]; security_groups: SecurityGroup[] }>(`/api/instances/${id}/security-groups`, $auth.token ?? undefined, effectiveProjectId).catch(() => ({ ports: [], security_groups: [] })),
-				api.get<VolumeInfo[]>('/api/volumes', $auth.token ?? undefined, effectiveProjectId).catch(() => []),
-				api.get<NetworkInfo[]>('/api/networks', $auth.token ?? undefined, effectiveProjectId).catch(() => []),
-				api.get<{ display: string }>(`/api/instances/${id}/owner`, $auth.token ?? undefined, effectiveProjectId).catch(() => ({ display: '' })),
-			]);
-			const instIps = new Set(instance.ip_addresses.filter(ip => ip.type === 'floating').map(ip => ip.addr));
-			floatingIps = fips.filter(f => instIps.has(f.floating_ip_address));
-			interfaces = ifaces;
-			volumes = vols;
-			allSecurityGroups = sgData.security_groups;
-			const attachedIds = new Set(vols.map(v => v.volume_id));
-			availableVolumes = allVols.filter(v => v.status === 'available' && !attachedIds.has(v.id));
-			availableNetworks = nets;
-			ownerDisplay = ownerData.display || '';
-			if (adminProjectId) {
-				fetchPasswordPrecheck(id);
-			}
-		} catch (e) {
-			error = e instanceof ApiError ? `조회 실패 (${e.status}): ${e.message}` : '서버 오류';
-		} finally {
-			if (opts?.silent) refreshing = false;
-			else loading = false;
-		}
-	}
-
-	async function loadConsoleLog(full = false) {
-		if (!instance) return;
-		logLoading = true;
-		const length = full ? 0 : 200;
-		try {
-			const data = await api.get<{ output: string }>(
-				`/api/instances/${instance.id}/log?length=${length}`,
-				$auth.token ?? undefined,
-				$auth.projectId ?? undefined
-			);
-			consoleLog = data.output || '(로그 없음)';
-		} catch {
-			consoleLog = '로그를 가져올 수 없습니다';
-		} finally {
-			logLoading = false;
-		}
-	}
-
-	async function toggleLog() {
-		showLog = !showLog;
-		consolePollAr.active = showLog;
-		if (showLog) {
-			await loadConsoleLog(logFull);
-		}
-	}
-
-	async function toggleFullLog() {
-		logFull = !logFull;
-		await loadConsoleLog(logFull);
-	}
-
-	async function openConsole() {
-		if (!instance) return;
-		try {
-			const data = await api.get<{ url: string }>(
-				`/api/instances/${instance.id}/console`,
-				$auth.token ?? undefined,
-				$auth.projectId ?? undefined
-			);
-			window.open(data.url, '_blank');
-		} catch {
-			alert('콘솔 URL을 가져올 수 없습니다');
-		}
-	}
-
-	async function performAction(action: 'start' | 'stop' | 'reboot' | 'shelve' | 'unshelve') {
-		if (!instance) return;
-		const labels: Record<string, string> = { start: '시작', stop: '정지', reboot: '재부팅', shelve: '보관', unshelve: '보관 해제' };
-		if (!confirm(`인스턴스를 ${labels[action]}하시겠습니까?`)) return;
-		actioning = action;
-		try {
-			await api.post(
-				`/api/instances/${instance.id}/${action}`,
-				{},
-				$auth.token ?? undefined,
-				$auth.projectId ?? undefined
-			);
-			await fetchInstance(instance.id, { silent: true });
-		} catch (e) {
-			alert(`${labels[action]} 실패: ` + (e instanceof ApiError ? e.message : String(e)));
-		} finally {
-			actioning = null;
-		}
-	}
-
-	async function deleteInstance() {
-		if (!instance) return;
-		const autoDeleteVols = volumes.filter(v => v.delete_on_termination);
-		const keepVols = volumes.filter(v => !v.delete_on_termination);
-		const lines = [`"${instance.name}" 인스턴스를 삭제하시겠습니까?`];
-		if (autoDeleteVols.length) lines.push(`자동 삭제 볼륨: ${autoDeleteVols.map(v => v.name || v.device).join(', ')}`);
-		if (keepVols.length) lines.push(`유지(분리만): ${keepVols.map(v => v.name || v.device).join(', ')}`);
-		if (instance.union_upper_volume_id) lines.push('Upper 볼륨과 파일 스토리지(dynamic)도 삭제됩니다.');
-		if (!confirm(lines.join('\n'))) return;
-		deleting = true;
-		try {
-			await api.delete(
-				`/api/instances/${instance.id}`,
-				$auth.token ?? undefined,
-				$auth.projectId ?? undefined
-			);
-			if (onClose) onClose();
-			else goto('/dashboard/compute/instances');
-		} catch (e) {
-			alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
-		} finally {
-			deleting = false;
-		}
-	}
-
-	async function assignFloatingIp(portId: string) {
-		if (!instance) return;
-		actioning = 'fip-assign-' + portId;
-		try {
-			const query = `?port_id=${portId}`;
-			await api.post(
-				`/api/instances/${instance.id}/floating-ip${query}`,
-				{},
-				$auth.token ?? undefined,
-				$auth.projectId ?? undefined
-			);
-			await fetchInstance(instance.id, { silent: true });
-		} catch (e) {
-			alert('Floating IP 할당 실패: ' + (e instanceof ApiError ? e.message : String(e)));
-		} finally {
-			actioning = null;
-		}
-	}
-
-	async function releaseFloatingIp(fipId: string) {
-		if (!instance) return;
-		if (!confirm('Floating IP를 해제하고 삭제하시겠습니까?')) return;
-		actioning = 'fip-release-' + fipId;
-		try {
-			await api.post(
-				`/api/networks/floating-ips/${fipId}/disassociate`,
-				{},
-				$auth.token ?? undefined,
-				$auth.projectId ?? undefined
-			);
-			await api.delete(
-				`/api/networks/floating-ips/${fipId}`,
-				$auth.token ?? undefined,
-				$auth.projectId ?? undefined
-			);
-			await fetchInstance(instance.id, { silent: true });
-		} catch (e) {
-			alert('Floating IP 해제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
-		} finally {
-			actioning = null;
-		}
-	}
-
-	async function attachVolume() {
-		if (!instance || !selectedVolumeId) return;
-		actioning = 'attach-vol';
-		try {
-			await api.post(
-				`/api/instances/${instance.id}/volumes`,
-				{ volume_id: selectedVolumeId },
-				$auth.token ?? undefined,
-				$auth.projectId ?? undefined
-			);
-			showAttachVolume = false;
-			selectedVolumeId = '';
-			await fetchInstance(instance.id, { silent: true });
-		} catch (e) {
-			alert('볼륨 연결 실패: ' + (e instanceof ApiError ? e.message : String(e)));
-		} finally {
-			actioning = null;
-		}
-	}
-
-	async function createAndAttachVolume() {
-		if (!instance || !newVolName.trim() || newVolSize < 1) return;
-		actioning = 'create-vol';
-		try {
-			const vol = await api.post<VolumeInfo>(
-				'/api/volumes',
-				{ name: newVolName.trim(), size_gb: newVolSize },
-				$auth.token ?? undefined,
-				$auth.projectId ?? undefined
-			);
-			await api.post(
-				`/api/instances/${instance.id}/volumes`,
-				{ volume_id: vol.id },
-				$auth.token ?? undefined,
-				$auth.projectId ?? undefined
-			);
-			showAttachVolume = false;
-			newVolName = '';
-			newVolSize = 20;
-			await fetchInstance(instance.id, { silent: true });
-		} catch (e) {
-			alert('볼륨 생성/연결 실패: ' + (e instanceof ApiError ? e.message : String(e)));
-		} finally {
-			actioning = null;
-		}
-	}
-
-	async function detachVolume(volumeId: string) {
-		if (!instance) return;
-		if (!confirm('볼륨을 분리하시겠습니까?')) return;
-		actioning = 'detach-' + volumeId;
-		try {
-			await api.delete(
-				`/api/instances/${instance.id}/volumes/${volumeId}`,
-				$auth.token ?? undefined,
-				$auth.projectId ?? undefined
-			);
-			await fetchInstance(instance.id, { silent: true });
-		} catch (e) {
-			alert('볼륨 분리 실패: ' + (e instanceof ApiError ? e.message : String(e)));
-		} finally {
-			actioning = null;
-		}
-	}
-
-	async function setDeleteOnTermination(volumeId: string, next: boolean) {
-		if (!instance) return;
-		const verb = next ? '활성화' : '비활성화';
-		if (!confirm(`이 볼륨의 "인스턴스 삭제 시 자동 삭제" 옵션을 ${verb}하시겠습니까?`)) return;
-		actioning = 'dot-' + volumeId;
-		try {
-			await api.patch(
-				`/api/instances/${instance.id}/volumes/${volumeId}`,
-				{ delete_on_termination: next },
-				$auth.token ?? undefined,
-				$auth.projectId ?? undefined
-			);
-			await fetchInstance(instance.id, { silent: true });
-		} catch (e) {
-			alert('변경 실패: ' + (e instanceof ApiError ? e.message : String(e)));
-		} finally {
-			actioning = null;
-		}
-	}
-
-	async function attachInterface() {
-		if (!instance || !selectedNetId) return;
-		actioning = 'attach-iface';
-		try {
-			await api.post(
-				`/api/instances/${instance.id}/interfaces`,
-				{ net_id: selectedNetId },
-				$auth.token ?? undefined,
-				$auth.projectId ?? undefined
-			);
-			showAddInterface = false;
-			selectedNetId = '';
-			await fetchInstance(instance.id, { silent: true });
-		} catch (e) {
-			alert('인터페이스 추가 실패: ' + (e instanceof ApiError ? e.message : String(e)));
-		} finally {
-			actioning = null;
-		}
-	}
-
-	async function detachInterface(portId: string) {
-		if (!instance) return;
-		if (!confirm('인터페이스를 제거하시겠습니까?')) return;
-		actioning = 'detach-iface-' + portId;
-		try {
-			await api.delete(
-				`/api/instances/${instance.id}/interfaces/${portId}`,
-				$auth.token ?? undefined,
-				$auth.projectId ?? undefined
-			);
-			await fetchInstance(instance.id, { silent: true });
-		} catch (e) {
-			alert('인터페이스 제거 실패: ' + (e instanceof ApiError ? e.message : String(e)));
-		} finally {
-			actioning = null;
-		}
-	}
-
-	function openSgEdit(port: PortInfo) {
-		sgEditPortId = port.id;
-		sgEditSelected = [...port.security_group_ids];
+	// UI-only handlers
+	function toggleSgRules(sgId: string) {
+		const next = new Set(expandedSgRules);
+		next.has(sgId) ? next.delete(sgId) : next.add(sgId);
+		expandedSgRules = next;
 	}
 
 	function toggleSg(sgId: string) {
@@ -450,143 +95,43 @@
 		}
 	}
 
-	async function saveSgEdit() {
-		if (!instance || !sgEditPortId) return;
-		actioning = 'sg-' + sgEditPortId;
-		try {
-			await api.post(
-				`/api/instances/${instance.id}/ports/${sgEditPortId}/security-groups`,
-				{ security_group_ids: sgEditSelected },
-				$auth.token ?? undefined,
-				$auth.projectId ?? undefined
-			);
-			sgEditPortId = null;
-			await fetchInstance(instance.id, { silent: true });
-		} catch (e) {
-			alert('보안 그룹 업데이트 실패: ' + (e instanceof ApiError ? e.message : String(e)));
-		} finally {
-			actioning = null;
-		}
+	function openSgEdit(port: PortInfo) {
+		sgEditPortId = port.id;
+		sgEditSelected = [...port.security_group_ids];
 	}
 
-	function formatDate(dt: string | null) {
-		if (!dt) return '-';
-		return new Date(dt).toLocaleString('ko-KR');
+	async function handleSaveSgEdit() {
+		if (!sgEditPortId) return;
+		await s.saveSgEdit(sgEditPortId, sgEditSelected);
+		sgEditPortId = null;
 	}
 
-	function sgNameById(id: string): string {
-		return allSecurityGroups.find(sg => sg.id === id)?.name ?? id.slice(0, 8) + '...';
+	async function toggleLog() {
+		showLog = !showLog;
+		s.consolePollAr.active = showLog;
+		if (showLog) await s.loadConsoleLog(s.logFull);
 	}
-
-	function networkNameById(id: string): string {
-		return availableNetworks.find(n => n.id === id)?.name ?? id.slice(0, 12) + '...';
-	}
-
-	// 리사이즈 (관리자 전용)
-	interface Flavor {
-		id: string;
-		name: string;
-		vcpus: number;
-		ram: number;
-		disk: number;
-	}
-	let showResizeModal = $state(false);
-	let resizeFlavors = $state<Flavor[]>([]);
-	let resizeFlavorId = $state('');
-	let resizeLoading = $state(false);
-	let resizeError = $state('');
 
 	async function openResizeModal() {
 		resizeFlavorId = '';
-		resizeError = '';
-		resizeFlavors = [];
+		s.resizeError = '';
 		showResizeModal = true;
-		try {
-			resizeFlavors = await api.get<Flavor[]>('/api/flavors', $auth.token ?? undefined, $auth.projectId ?? undefined);
-		} catch {
-			resizeFlavors = [];
-		}
+		await s.loadResizeFlavors();
 	}
 
-	async function doResize() {
-		if (!instance || !resizeFlavorId) return;
-		resizeLoading = true;
-		resizeError = '';
-		try {
-			await api.post(
-				`/api/admin/instances/${instance.id}/resize`,
-				{ flavor_id: resizeFlavorId },
-				$auth.token ?? undefined,
-				$auth.projectId ?? undefined
-			);
-			showResizeModal = false;
-			await fetchInstance(instance.id, { silent: true });
-		} catch (e) {
-			resizeError = e instanceof ApiError ? e.message : '리사이즈 실패';
-		} finally {
-			resizeLoading = false;
-		}
+	async function handleDoResize() {
+		const ok = await s.doResize(resizeFlavorId);
+		if (ok) showResizeModal = false;
 	}
 
-	async function revertResize() {
-		if (!instance) return;
-		if (!confirm('리사이즈를 취소하고 이전 플레이버로 복귀하시겠습니까?')) return;
-		actioning = 'revert-resize';
-		try {
-			await api.post(
-				`/api/admin/instances/${instance.id}/revert-resize`,
-				{},
-				$auth.token ?? undefined,
-				$auth.projectId ?? undefined
-			);
-			await fetchInstance(instance.id, { silent: true });
-		} catch (e) {
-			alert('리사이즈 취소 실패: ' + (e instanceof ApiError ? e.message : String(e)));
-		} finally {
-			actioning = null;
-		}
-	}
-
-	// 관리자 패스워드 재설정 (관리자 전용, QGA 필요)
-	interface PasswordPrecheck {
-		supported: boolean;
-		reason: string | null;
-		os_admin_user: string | null;
-		server_status: string;
-	}
-	let showPasswordModal = $state(false);
-	let passwordPrecheck = $state<PasswordPrecheck | null>(null);
-	let passwordPrecheckLoading = $state(false);
-	let newPassword = $state('');
-	let confirmPassword = $state('');
-	let passwordLoading = $state(false);
-	let passwordError = $state('');
-
-	async function fetchPasswordPrecheck(serverId: string) {
-		if (!adminProjectId) return;
-		passwordPrecheckLoading = true;
-		try {
-			passwordPrecheck = await api.get<PasswordPrecheck>(
-				`/api/instances/${serverId}/admin-password/precheck`,
-				$auth.token ?? undefined,
-				$auth.projectId ?? undefined
-			);
-		} catch {
-			passwordPrecheck = null;
-		} finally {
-			passwordPrecheckLoading = false;
-		}
-	}
-
-	async function openPasswordModal() {
+	function openPasswordModal() {
 		newPassword = '';
 		confirmPassword = '';
 		passwordError = '';
 		showPasswordModal = true;
 	}
 
-	async function doSetPassword() {
-		if (!instance) return;
+	async function handleDoSetPassword() {
 		if (newPassword !== confirmPassword) {
 			passwordError = '패스워드가 일치하지 않습니다';
 			return;
@@ -595,96 +140,47 @@
 			passwordError = '패스워드는 8자 이상이어야 합니다';
 			return;
 		}
-		passwordLoading = true;
 		passwordError = '';
-		try {
-			await api.post(
-				`/api/instances/${instance.id}/admin-password`,
-				{ new_password: newPassword },
-				$auth.token ?? undefined,
-				$auth.projectId ?? undefined
-			);
+		const err = await s.doSetPassword(newPassword);
+		if (err) {
+			passwordError = err;
+		} else {
 			showPasswordModal = false;
 			newPassword = '';
 			confirmPassword = '';
-		} catch (e) {
-			passwordError = e instanceof ApiError ? e.message : '패스워드 변경 실패';
-		} finally {
-			passwordLoading = false;
 		}
 	}
-
-	// 마이그레이션 (관리자 전용)
-	let showMigrateModal = $state(false);
-	let migrateType = $state<'live' | 'cold'>('live');
-	let migrateHosts = $state<{ name: string; state: string; status: string }[]>([]);
-	let migrateHost = $state('');
-	let migrateLoading = $state(false);
-	let migrateError = $state('');
 
 	async function openMigrateModal(type: 'live' | 'cold') {
 		migrateType = type;
 		migrateHost = '';
-		migrateError = '';
-		migrateHosts = [];
+		s.migrateError = '';
 		showMigrateModal = true;
-		try {
-			migrateHosts = await api.get<{ name: string; state: string; status: string }[]>(
-				'/api/admin/compute-hosts',
-				$auth.token ?? undefined,
-				$auth.projectId ?? undefined
-			);
-		} catch {
-			migrateHosts = [];
-		}
+		await s.loadMigrateHosts();
 	}
 
-	async function doMigrate() {
-		if (!instance) return;
-		migrateLoading = true;
-		migrateError = '';
-		try {
-			if (migrateType === 'live') {
-				await api.post(
-					`/api/admin/instances/${instance.id}/live-migrate`,
-					{ host: migrateHost || null, block_migration: 'auto' },
-					$auth.token ?? undefined,
-					$auth.projectId ?? undefined
-				);
-			} else {
-				await api.post(
-					`/api/admin/instances/${instance.id}/cold-migrate`,
-					{},
-					$auth.token ?? undefined,
-					$auth.projectId ?? undefined
-				);
-			}
-			showMigrateModal = false;
-			await fetchInstance(instance.id, { silent: true });
-		} catch (e) {
-			migrateError = e instanceof ApiError ? e.message : '마이그레이션 실패';
-		} finally {
-			migrateLoading = false;
-		}
+	async function handleDoMigrate() {
+		const ok = await s.doMigrate(migrateType, migrateHost);
+		if (ok) showMigrateModal = false;
 	}
 
-	async function confirmResize() {
-		if (!instance) return;
-		if (!confirm('리사이즈를 확인하시겠습니까?')) return;
-		actioning = 'confirm-resize';
-		try {
-			await api.post(
-				`/api/admin/instances/${instance.id}/confirm-resize`,
-				{},
-				$auth.token ?? undefined,
-				$auth.projectId ?? undefined
-			);
-			await fetchInstance(instance.id, { silent: true });
-		} catch (e) {
-			alert('리사이즈 확인 실패: ' + (e instanceof ApiError ? e.message : String(e)));
-		} finally {
-			actioning = null;
-		}
+	async function handleAttachVolume() {
+		await s.attachVolume(selectedVolumeId);
+		showAttachVolume = false;
+		selectedVolumeId = '';
+	}
+
+	async function handleCreateAndAttach() {
+		await s.createAndAttachVolume(newVolName.trim(), newVolSize);
+		showAttachVolume = false;
+		newVolName = '';
+		newVolSize = 20;
+	}
+
+	async function handleAttachInterface() {
+		await s.attachInterface(selectedNetId);
+		showAddInterface = false;
+		selectedNetId = '';
 	}
 </script>
 
@@ -701,137 +197,137 @@
 			</a>
 		{/if}
 		<AutoRefreshControl
-			bind:active={detailPollAr.active}
-			bind:intervalSeconds={detailPollAr.intervalSeconds}
-			intervalOptions={detailPollAr.intervalOptions}
-			refreshing={refreshing}
-			onManualRefresh={manualRefresh}
+			bind:active={s.detailPollAr.active}
+			bind:intervalSeconds={s.detailPollAr.intervalSeconds}
+			intervalOptions={s.detailPollAr.intervalOptions}
+			refreshing={s.refreshing}
+			onManualRefresh={s.manualRefresh}
 		/>
 	</div>
 
-	{#if error}
+	{#if s.error}
 		<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm">
-			{error}
+			{s.error}
 		</div>
-	{:else if loading}
+	{:else if s.loading}
 		<LoadingSkeleton variant="card" rows={6} />
-	{:else if instance}
-		<DetailHeader title={instance.name} status={instance.status} size="lg">
+	{:else if s.instance}
+		<DetailHeader title={s.instance.name} status={s.instance.status} size="lg">
 			{#snippet meta()}
-				{#if instance!.status === 'ERROR' && instance!.fault?.message && adminProjectId}
+				{#if s.instance!.status === 'ERROR' && s.instance!.fault?.message && adminProjectId}
 					<div class="p-3 rounded-lg bg-red-900/30 border border-red-800/40 text-red-300 text-sm max-w-xl">
 						<div class="font-medium mb-1 text-xs text-red-400">오류 상세 (관리자)</div>
-						<div class="text-xs opacity-90 break-words">{instance!.fault!.message}</div>
+						<div class="text-xs opacity-90 break-words">{s.instance!.fault!.message}</div>
 					</div>
 				{/if}
 			{/snippet}
 			{#snippet actions()}
-				{#if instance!.status === 'SHUTOFF'}
+				{#if s.instance!.status === 'SHUTOFF'}
 					<button
-						onclick={() => performAction('start')}
-						disabled={!!actioning}
+						onclick={() => s.performAction('start')}
+						disabled={!!s.actioning}
 						class="text-green-400 hover:text-green-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-green-900 hover:border-green-700 disabled:border-gray-700 transition-colors"
 					>
-						{actioning === 'start' ? '시작 중...' : '시작'}
+						{s.actioning === 'start' ? '시작 중...' : '시작'}
 					</button>
 				{/if}
-				{#if instance!.status === 'SHELVED_OFFLOADED' || instance!.status === 'SHELVED'}
+				{#if s.instance!.status === 'SHELVED_OFFLOADED' || s.instance!.status === 'SHELVED'}
 					<button
-						onclick={() => performAction('unshelve')}
-						disabled={!!actioning}
+						onclick={() => s.performAction('unshelve')}
+						disabled={!!s.actioning}
 						class="text-green-400 hover:text-green-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-green-900 hover:border-green-700 disabled:border-gray-700 transition-colors"
 					>
-						{actioning === 'unshelve' ? '보관 해제 중...' : '보관 해제'}
+						{s.actioning === 'unshelve' ? '보관 해제 중...' : '보관 해제'}
 					</button>
 				{/if}
-				{#if instance!.status === 'ACTIVE'}
+				{#if s.instance!.status === 'ACTIVE'}
 					<button
-						onclick={openConsole}
+						onclick={s.openConsole}
 						class="text-gray-300 hover:text-white text-sm px-3 py-1.5 rounded border border-gray-700 hover:border-gray-500 transition-colors"
 					>
 						콘솔 열기
 					</button>
 					<button
-						onclick={() => performAction('stop')}
-						disabled={!!actioning}
+						onclick={() => s.performAction('stop')}
+						disabled={!!s.actioning}
 						class="text-yellow-400 hover:text-yellow-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-yellow-900 hover:border-yellow-700 disabled:border-gray-700 transition-colors"
 					>
-						{actioning === 'stop' ? '정지 중...' : '정지'}
+						{s.actioning === 'stop' ? '정지 중...' : '정지'}
 					</button>
 					<button
-						onclick={() => performAction('reboot')}
-						disabled={!!actioning}
+						onclick={() => s.performAction('reboot')}
+						disabled={!!s.actioning}
 						class="text-blue-400 hover:text-blue-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-blue-900 hover:border-blue-700 disabled:border-gray-700 transition-colors"
 					>
-						{actioning === 'reboot' ? '재부팅 중...' : '재부팅'}
+						{s.actioning === 'reboot' ? '재부팅 중...' : '재부팅'}
 					</button>
 				{/if}
-				{#if instance!.status === 'ACTIVE' || instance!.status === 'SHUTOFF'}
+				{#if s.instance!.status === 'ACTIVE' || s.instance!.status === 'SHUTOFF'}
 					<button
-						onclick={() => performAction('shelve')}
-						disabled={!!actioning}
+						onclick={() => s.performAction('shelve')}
+						disabled={!!s.actioning}
 						class="text-purple-400 hover:text-purple-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-purple-900 hover:border-purple-700 disabled:border-gray-700 transition-colors"
 					>
-						{actioning === 'shelve' ? '보관 중...' : '보관'}
+						{s.actioning === 'shelve' ? '보관 중...' : '보관'}
 					</button>
 				{/if}
 				{#if adminProjectId}
-					{#if instance!.status === 'ACTIVE'}
+					{#if s.instance!.status === 'ACTIVE'}
 						<button
 							onclick={() => openMigrateModal('live')}
-							disabled={!!actioning}
+							disabled={!!s.actioning}
 							class="text-cyan-400 hover:text-cyan-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-cyan-900 hover:border-cyan-700 disabled:border-gray-700 transition-colors"
 						>
 							라이브 마이그레이션
 						</button>
 					{/if}
-					{#if instance!.status === 'ACTIVE' || instance!.status === 'SHUTOFF'}
+					{#if s.instance!.status === 'ACTIVE' || s.instance!.status === 'SHUTOFF'}
 						<button
 							onclick={() => openMigrateModal('cold')}
-							disabled={!!actioning}
+							disabled={!!s.actioning}
 							class="text-teal-400 hover:text-teal-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-teal-900 hover:border-teal-700 disabled:border-gray-700 transition-colors"
 						>
 							콜드 마이그레이션
 						</button>
 						<button
 							onclick={openResizeModal}
-							disabled={!!actioning}
+							disabled={!!s.actioning}
 							class="text-violet-400 hover:text-violet-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-violet-900 hover:border-violet-700 disabled:border-gray-700 transition-colors"
 						>
 							리사이즈
 						</button>
 					{/if}
-					{#if instance!.status === 'VERIFY_RESIZE'}
+					{#if s.instance!.status === 'VERIFY_RESIZE'}
 						<button
-							onclick={confirmResize}
-							disabled={!!actioning}
+							onclick={s.confirmResize}
+							disabled={!!s.actioning}
 							class="text-orange-400 hover:text-orange-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-orange-900 hover:border-orange-700 disabled:border-gray-700 transition-colors"
 						>
-							{actioning === 'confirm-resize' ? '확인 중...' : '리사이즈 확인'}
+							{s.actioning === 'confirm-resize' ? '확인 중...' : '리사이즈 확인'}
 						</button>
 						<button
-							onclick={revertResize}
-							disabled={!!actioning}
+							onclick={s.revertResize}
+							disabled={!!s.actioning}
 							class="text-yellow-400 hover:text-yellow-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-yellow-900 hover:border-yellow-700 disabled:border-gray-700 transition-colors"
 						>
-							{actioning === 'revert-resize' ? '취소 중...' : '되돌리기'}
+							{s.actioning === 'revert-resize' ? '취소 중...' : '되돌리기'}
 						</button>
 					{/if}
 					<button
 						onclick={openPasswordModal}
-						disabled={passwordPrecheckLoading || !passwordPrecheck?.supported}
-						title={passwordPrecheck?.reason ?? (passwordPrecheckLoading ? '점검 중...' : '')}
+						disabled={s.passwordPrecheckLoading || !s.passwordPrecheck?.supported}
+						title={s.passwordPrecheck?.reason ?? (s.passwordPrecheckLoading ? '점검 중...' : '')}
 						class="text-amber-400 hover:text-amber-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-amber-900 hover:border-amber-700 disabled:border-gray-700 transition-colors"
 					>
-						{passwordPrecheckLoading ? '점검 중...' : '비밀번호 재설정'}
+						{s.passwordPrecheckLoading ? '점검 중...' : '비밀번호 재설정'}
 					</button>
 				{/if}
 				<button
-					onclick={deleteInstance}
-					disabled={deleting}
+					onclick={s.deleteInstance}
+					disabled={s.deleting}
 					class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-red-900 hover:border-red-700 disabled:border-gray-700 transition-colors"
 				>
-					{deleting ? '삭제 중...' : '삭제'}
+					{s.deleting ? '삭제 중...' : '삭제'}
 				</button>
 			{/snippet}
 		</DetailHeader>
@@ -842,38 +338,38 @@
 			<dl class="grid grid-cols-1 @3xl/panel:grid-cols-2 gap-x-8 gap-y-3">
 				<div>
 					<dt class="text-xs text-gray-500 mb-0.5">ID</dt>
-					<dd class="text-sm text-gray-300 font-mono">{instance.id}</dd>
+					<dd class="text-sm text-gray-300 font-mono">{s.instance.id}</dd>
 				</div>
 				<div>
 					<dt class="text-xs text-gray-500 mb-0.5">생성일</dt>
-					<dd class="text-sm text-gray-300">{formatDate(instance.created_at)}</dd>
+					<dd class="text-sm text-gray-300">{s.formatDate(s.instance.created_at)}</dd>
 				</div>
 				<div>
 					<dt class="text-xs text-gray-500 mb-0.5">이미지</dt>
-					<dd class="text-sm text-gray-300">{instance.image_name ?? instance.image_id ?? '볼륨에서 부팅'}</dd>
+					<dd class="text-sm text-gray-300">{s.instance.image_name ?? s.instance.image_id ?? '볼륨에서 부팅'}</dd>
 				</div>
 				<div>
 					<dt class="text-xs text-gray-500 mb-0.5">플레이버</dt>
-					<dd class="text-sm text-gray-300">{instance.flavor_name ?? instance.flavor_id ?? '-'}</dd>
+					<dd class="text-sm text-gray-300">{s.instance.flavor_name ?? s.instance.flavor_id ?? '-'}</dd>
 				</div>
 				<div>
 					<dt class="text-xs text-gray-500 mb-0.5">키페어</dt>
-					<dd class="text-sm text-gray-300 font-mono">{instance.key_name ?? '-'}</dd>
+					<dd class="text-sm text-gray-300 font-mono">{s.instance.key_name ?? '-'}</dd>
 				</div>
-				{#if ownerDisplay}
+				{#if s.ownerDisplay}
 					<div class="overflow-hidden">
 						<dt class="text-xs text-gray-500 mb-0.5">생성자</dt>
-						<dd class="text-sm text-gray-300 font-mono truncate max-w-full" title={ownerDisplay}>{ownerDisplay}</dd>
+						<dd class="text-sm text-gray-300 font-mono truncate max-w-full" title={s.ownerDisplay}>{s.ownerDisplay}</dd>
 					</div>
 				{/if}
 				<div class="col-span-2">
 					<dt class="text-xs text-gray-500 mb-1.5">IP 주소</dt>
 					<dd class="flex flex-col gap-1.5">
-						{#if fixedIpsList.length === 0 && floatingIpsList.length === 0}
+						{#if s.fixedIpsList.length === 0 && s.floatingIpsList.length === 0}
 							<span class="text-sm text-gray-500">-</span>
 						{/if}
-						{#each fixedIpsList as fip}
-							{@const paired = floatingIpsList.find(fl => fl.network_name === fip.network_name)}
+						{#each s.fixedIpsList as fip}
+							{@const paired = s.floatingIpsList.find(fl => fl.network_name === fip.network_name)}
 							<div class="flex items-center gap-1.5 flex-wrap">
 								<span class="text-sm font-mono text-gray-300 bg-gray-800 px-2 py-0.5 rounded">{fip.addr}</span>
 								<span class="text-xs text-gray-600 bg-gray-800 px-1.5 py-0.5 rounded">fixed</span>
@@ -895,8 +391,8 @@
 		<div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4">
 			<div class="text-white text-[15px] font-semibold mb-4">성능 모니터링</div>
 			<MetricsPanel
-				instanceId={instance.id}
-				isGpu={(instance.flavor_name ?? '').toLowerCase().startsWith('gpu.')}
+				instanceId={s.instance.id}
+				isGpu={(s.instance.flavor_name ?? '').toLowerCase().startsWith('gpu.')}
 			/>
 		</div>
 
@@ -906,15 +402,15 @@
 				<h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide">콘솔 로그</h2>
 				<div class="flex gap-2 items-center">
 					{#if showLog}
-						<span class="text-xs text-gray-600">{consolePollAr.intervalSeconds}초마다 자동 갱신</span>
+						<span class="text-xs text-gray-600">{s.consolePollAr.intervalSeconds}초마다 자동 갱신</span>
 						<button
-							onclick={toggleFullLog}
-							class="text-xs {logFull ? 'text-yellow-400 border-yellow-900' : 'text-gray-400 border-gray-700'} hover:text-gray-200 px-2 py-1 border hover:border-gray-500 rounded transition-colors"
+							onclick={s.toggleFullLog}
+							class="text-xs {s.logFull ? 'text-yellow-400 border-yellow-900' : 'text-gray-400 border-gray-700'} hover:text-gray-200 px-2 py-1 border hover:border-gray-500 rounded transition-colors"
 						>
-							{logFull ? '최근 200줄' : '전체 로그'}
+							{s.logFull ? '최근 200줄' : '전체 로그'}
 						</button>
 						<a
-							href="/dashboard/compute/instances/{instance.id}/console-log"
+							href="/dashboard/compute/instances/{s.instance.id}/console-log"
 							target="_blank"
 							rel="noopener noreferrer"
 							class="text-xs text-gray-400 hover:text-gray-200 px-2 py-1 border border-gray-700 hover:border-gray-500 rounded transition-colors"
@@ -923,11 +419,11 @@
 							새 창에서 보기 ↗
 						</a>
 						<button
-							onclick={() => loadConsoleLog(logFull)}
-							disabled={logLoading}
+							onclick={() => s.loadConsoleLog(s.logFull)}
+							disabled={s.logLoading}
 							class="text-xs text-gray-400 hover:text-gray-200 px-2 py-1 border border-gray-700 hover:border-gray-500 rounded transition-colors disabled:text-gray-600"
 						>
-							{logLoading ? '로딩...' : '새로고침'}
+							{s.logLoading ? '로딩...' : '새로고침'}
 						</button>
 					{/if}
 					<button
@@ -942,7 +438,7 @@
 				<pre
 					bind:this={logPreEl}
 					class="bg-gray-950 border border-gray-800 rounded p-3 text-xs text-gray-300 font-mono overflow-x-auto max-h-96 overflow-y-auto whitespace-pre-wrap"
-				>{logLoading && !consoleLog ? '로딩 중...' : consoleLog}</pre>
+				>{s.logLoading && !s.consoleLog ? '로딩 중...' : s.consoleLog}</pre>
 			{/if}
 		</div>
 
@@ -967,27 +463,27 @@
 							class="flex-1 bg-gray-700 border border-gray-600 text-gray-200 text-sm rounded px-2 py-1.5 focus:outline-none focus:border-blue-500"
 						>
 							<option value="">네트워크 선택...</option>
-							{#each availableNetworks as net}
+							{#each s.availableNetworks as net}
 								<option value={net.id}>{net.name || net.id.slice(0, 12)}</option>
 							{/each}
 						</select>
 						<button
-							onclick={attachInterface}
-							disabled={!selectedNetId || actioning === 'attach-iface'}
+							onclick={handleAttachInterface}
+							disabled={!selectedNetId || s.actioning === 'attach-iface'}
 							class="text-xs text-blue-400 hover:text-blue-300 px-3 py-1.5 border border-blue-900 hover:border-blue-700 rounded transition-colors disabled:text-gray-600 disabled:border-gray-700"
 						>
-							{actioning === 'attach-iface' ? '추가 중...' : '추가'}
+							{s.actioning === 'attach-iface' ? '추가 중...' : '추가'}
 						</button>
 					</div>
 				</div>
 			{/if}
 
-			{#if interfaces.length === 0}
+			{#if s.interfaces.length === 0}
 				<p class="text-sm text-gray-500">인터페이스 정보 없음</p>
 			{:else}
 				<div class="space-y-4">
-					{#each interfaces as iface}
-						{@const ifaceFip = floatingIps.find(f => f.port_id === iface.id)}
+					{#each s.interfaces as iface}
+						{@const ifaceFip = s.floatingIps.find(f => f.port_id === iface.id)}
 						<div class="bg-gray-800/50 rounded-lg p-4">
 							<div class="flex items-start justify-between mb-3">
 								<div class="grid grid-cols-1 @3xl/panel:grid-cols-2 gap-x-6 gap-y-2 flex-1">
@@ -1001,7 +497,7 @@
 									</div>
 									<div>
 										<dt class="text-xs text-gray-500 mb-0.5">네트워크</dt>
-										<dd class="text-xs text-gray-300">{networkNameById(iface.network_id)}</dd>
+										<dd class="text-xs text-gray-300">{s.networkNameById(iface.network_id)}</dd>
 									</div>
 									<div>
 										<dt class="text-xs text-gray-500 mb-0.5">상태</dt>
@@ -1022,27 +518,27 @@
 								<div class="ml-4 flex flex-col gap-1.5 shrink-0">
 									{#if ifaceFip}
 										<button
-											onclick={() => releaseFloatingIp(ifaceFip.id)}
-											disabled={!!actioning}
+											onclick={() => s.releaseFloatingIp(ifaceFip.id)}
+											disabled={!!s.actioning}
 											class="text-xs text-orange-400 hover:text-orange-300 px-2 py-1 border border-orange-900 hover:border-orange-700 rounded transition-colors disabled:text-gray-600"
 										>
-											{actioning === 'fip-release-' + ifaceFip.id ? '해제 중...' : 'FIP 해제'}
+											{s.actioning === 'fip-release-' + ifaceFip.id ? '해제 중...' : 'FIP 해제'}
 										</button>
 									{:else}
 										<button
-											onclick={() => assignFloatingIp(iface.id)}
-											disabled={!!actioning}
+											onclick={() => s.assignFloatingIp(iface.id)}
+											disabled={!!s.actioning}
 											class="text-xs text-blue-400 hover:text-blue-300 px-2 py-1 border border-blue-900 hover:border-blue-700 rounded transition-colors disabled:text-gray-600"
 										>
-											{actioning === 'fip-assign-' + iface.id ? '할당 중...' : '+ FIP'}
+											{s.actioning === 'fip-assign-' + iface.id ? '할당 중...' : '+ FIP'}
 										</button>
 									{/if}
 									<button
-										onclick={() => detachInterface(iface.id)}
-										disabled={!!actioning}
+										onclick={() => s.detachInterface(iface.id)}
+										disabled={!!s.actioning}
 										class="text-xs text-orange-400 hover:text-orange-300 px-2 py-1 border border-orange-900 hover:border-orange-700 rounded transition-colors disabled:text-gray-600"
 									>
-										{actioning === 'detach-iface-' + iface.id ? '제거 중...' : '제거'}
+										{s.actioning === 'detach-iface-' + iface.id ? '제거 중...' : '제거'}
 									</button>
 								</div>
 							</div>
@@ -1061,7 +557,7 @@
 									<div class="bg-gray-700 rounded p-3 mt-2">
 										<p class="text-xs text-gray-500 mb-2">이 프로젝트의 보안 그룹</p>
 										<div class="space-y-1.5 mb-3 max-h-56 overflow-y-auto">
-											{#each allSecurityGroups as sg}
+											{#each s.allSecurityGroups as sg}
 												<div>
 													<label class="flex items-center gap-2 cursor-pointer">
 														<input
@@ -1085,7 +581,7 @@
 													{#if expandedSgRules.has(sg.id)}
 														<div class="ml-5 mt-1 mb-1 space-y-0.5 pl-2 border-l border-gray-700">
 															{#each sg.rules as rule}
-																<div class="text-xs text-gray-500 font-mono">{formatRule(rule)}</div>
+																<div class="text-xs text-gray-500 font-mono">{s.formatRule(rule)}</div>
 															{/each}
 															{#if sg.rules.length === 0}
 																<div class="text-xs text-gray-600 italic">규칙 없음</div>
@@ -1097,11 +593,11 @@
 										</div>
 										<div class="flex gap-2">
 											<button
-												onclick={saveSgEdit}
-												disabled={actioning === 'sg-' + iface.id}
+												onclick={handleSaveSgEdit}
+												disabled={s.actioning === 'sg-' + iface.id}
 												class="text-xs text-blue-400 hover:text-blue-300 px-2 py-1 border border-blue-900 hover:border-blue-700 rounded transition-colors disabled:text-gray-600"
 											>
-												{actioning === 'sg-' + iface.id ? '저장 중...' : '저장'}
+												{s.actioning === 'sg-' + iface.id ? '저장 중...' : '저장'}
 											</button>
 											<button
 												onclick={() => { sgEditPortId = null; }}
@@ -1117,7 +613,7 @@
 											<span class="text-xs text-gray-500">없음</span>
 										{:else}
 											{#each iface.security_group_ids as sgId}
-												<span class="text-xs text-purple-300 bg-purple-900/30 px-1.5 py-0.5 rounded">{sgNameById(sgId)}</span>
+												<span class="text-xs text-purple-300 bg-purple-900/30 px-1.5 py-0.5 rounded">{s.sgNameById(sgId)}</span>
 											{/each}
 										{/if}
 									</dd>
@@ -1159,7 +655,7 @@
 					</div>
 
 					{#if attachMode === 'existing'}
-						{#if availableVolumes.length === 0}
+						{#if s.availableVolumes.length === 0}
 							<p class="text-sm text-gray-500">연결 가능한 볼륨이 없습니다. "새 볼륨 생성"을 이용하세요.</p>
 						{:else}
 							<div class="flex gap-2">
@@ -1168,16 +664,16 @@
 									class="flex-1 bg-gray-700 border border-gray-600 text-gray-200 text-sm rounded px-2 py-1.5 focus:outline-none focus:border-blue-500"
 								>
 									<option value="">볼륨 선택...</option>
-									{#each availableVolumes as vol}
+									{#each s.availableVolumes as vol}
 										<option value={vol.id}>{vol.name || vol.id.slice(0, 8)} ({vol.size}GB)</option>
 									{/each}
 								</select>
 								<button
-									onclick={attachVolume}
-									disabled={!selectedVolumeId || actioning === 'attach-vol'}
+									onclick={handleAttachVolume}
+									disabled={!selectedVolumeId || s.actioning === 'attach-vol'}
 									class="text-xs text-blue-400 hover:text-blue-300 px-3 py-1.5 border border-blue-900 hover:border-blue-700 rounded transition-colors disabled:text-gray-600 disabled:border-gray-700"
 								>
-									{actioning === 'attach-vol' ? '연결 중...' : '연결'}
+									{s.actioning === 'attach-vol' ? '연결 중...' : '연결'}
 								</button>
 							</div>
 						{/if}
@@ -1198,11 +694,11 @@
 									class="w-24 bg-gray-700 border border-gray-600 text-gray-200 text-sm rounded px-2 py-1.5 focus:outline-none focus:border-blue-500"
 								/>
 								<button
-									onclick={createAndAttachVolume}
-									disabled={!newVolName.trim() || newVolSize < 1 || actioning === 'create-vol'}
+									onclick={handleCreateAndAttach}
+									disabled={!newVolName.trim() || newVolSize < 1 || s.actioning === 'create-vol'}
 									class="text-xs text-green-400 hover:text-green-300 px-3 py-1.5 border border-green-900 hover:border-green-700 rounded transition-colors disabled:text-gray-600 disabled:border-gray-700 whitespace-nowrap"
 								>
-									{actioning === 'create-vol' ? '생성 중...' : '생성 및 연결'}
+									{s.actioning === 'create-vol' ? '생성 중...' : '생성 및 연결'}
 								</button>
 							</div>
 						</div>
@@ -1210,11 +706,11 @@
 				</div>
 			{/if}
 
-			{#if volumes.length === 0}
+			{#if s.volumes.length === 0}
 				<p class="text-sm text-gray-500">연결된 볼륨 없음</p>
 			{:else}
 				<div class="space-y-2">
-					{#each volumes as vol}
+					{#each s.volumes as vol}
 						<div class="flex items-center justify-between bg-gray-800/50 rounded px-3 py-2">
 							<div class="flex items-center gap-4">
 								<span class="text-xs font-mono text-blue-400 hover:text-blue-300">
@@ -1229,15 +725,15 @@
 								{/if}
 								<button
 									type="button"
-									onclick={() => setDeleteOnTermination(vol.volume_id, !vol.delete_on_termination)}
-									disabled={actioning === 'dot-' + vol.volume_id}
+									onclick={() => s.setDeleteOnTermination(vol.volume_id, !vol.delete_on_termination)}
+									disabled={s.actioning === 'dot-' + vol.volume_id}
 									title="클릭해서 토글"
 									class="text-[10px] px-1.5 py-0.5 rounded transition-colors disabled:opacity-50 cursor-pointer
 										{vol.delete_on_termination
 											? 'text-red-300 bg-red-900/30 hover:bg-red-900/50 border border-red-800/50'
 											: 'text-gray-400 bg-gray-800 hover:bg-gray-700 border border-gray-700'}"
 								>
-									{actioning === 'dot-' + vol.volume_id
+									{s.actioning === 'dot-' + vol.volume_id
 										? '변경 중...'
 										: vol.delete_on_termination
 											? '인스턴스 삭제 시 자동 삭제'
@@ -1245,11 +741,11 @@
 								</button>
 							</div>
 							<button
-								onclick={() => detachVolume(vol.volume_id)}
-								disabled={actioning === 'detach-' + vol.volume_id}
+								onclick={() => s.detachVolume(vol.volume_id)}
+								disabled={s.actioning === 'detach-' + vol.volume_id}
 								class="text-xs text-orange-400 hover:text-orange-300 px-2 py-1 border border-orange-900 hover:border-orange-700 rounded transition-colors disabled:text-gray-600"
 							>
-								{actioning === 'detach-' + vol.volume_id ? '분리 중...' : '분리'}
+								{s.actioning === 'detach-' + vol.volume_id ? '분리 중...' : '분리'}
 							</button>
 						</div>
 					{/each}
@@ -1264,37 +760,37 @@
 				<div>
 					<dt class="text-xs text-gray-500 mb-0.5">전략</dt>
 					<dd class="text-sm text-gray-300">
-						{instance.union_strategy ? strategyLabel[instance.union_strategy] ?? instance.union_strategy : '-'}
+						{s.instance.union_strategy ? strategyLabel[s.instance.union_strategy] ?? s.instance.union_strategy : '-'}
 					</dd>
 				</div>
 				<div>
 					<dt class="text-xs text-gray-500 mb-0.5">라이브러리</dt>
 					<dd class="flex flex-wrap gap-1">
-						{#each instance.union_libraries.filter(Boolean) as lib}
+						{#each s.instance.union_libraries.filter(Boolean) as lib}
 							<span class="px-1.5 py-0.5 bg-blue-900/40 text-blue-300 rounded text-xs">{lib}</span>
 						{:else}
 							<span class="text-sm text-gray-500">-</span>
 						{/each}
 					</dd>
 				</div>
-				{#if instance.union_upper_volume_id}
+				{#if s.instance.union_upper_volume_id}
 					<div class="col-span-2">
 						<dt class="text-xs text-gray-500 mb-0.5">Upper 볼륨</dt>
 						<dd>
 							<a
-								href="/dashboard/volumes/{instance.union_upper_volume_id}"
+								href="/dashboard/volumes/{s.instance.union_upper_volume_id}"
 								class="text-sm text-blue-400 hover:text-blue-300 font-mono transition-colors"
 							>
-								{instance.union_upper_volume_id}
+								{s.instance.union_upper_volume_id}
 							</a>
 						</dd>
 					</div>
 				{/if}
-				{#if instance.union_share_ids.filter(Boolean).length > 0}
+				{#if s.instance.union_share_ids.filter(Boolean).length > 0}
 					<div class="col-span-2">
 						<dt class="text-xs text-gray-500 mb-1.5">연결된 파일 스토리지</dt>
 						<dd class="flex flex-col gap-1">
-							{#each instance.union_share_ids.filter(Boolean) as sid}
+							{#each s.instance.union_share_ids.filter(Boolean) as sid}
 								<a
 									href="/dashboard/file-storage/{sid}"
 									class="text-sm text-blue-400 hover:text-blue-300 font-mono transition-colors"
@@ -1309,12 +805,12 @@
 		</div>
 
 		<!-- 메타데이터 -->
-		{#if Object.keys(instance.metadata).length > 0}
+		{#if Object.keys(s.instance.metadata).length > 0}
 			<div class="bg-gray-900 border border-gray-800 rounded-lg p-6">
 				<h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-4">메타데이터</h2>
 				<table class="w-full text-sm">
 					<tbody>
-						{#each Object.entries(instance.metadata) as [k, v]}
+						{#each Object.entries(s.instance.metadata) as [k, v]}
 							<tr class="border-b border-gray-800/50">
 								<td class="py-2 pr-4 text-gray-500 text-xs w-1/3">{k}</td>
 								<td class="py-2 text-gray-300 font-mono text-xs break-all">{v}</td>
@@ -1333,15 +829,15 @@
 		<div class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl" onclick={(e) => e.stopPropagation()}>
 			<h2 class="text-lg font-semibold text-white mb-1">{migrateType === 'live' ? '라이브 마이그레이션' : '콜드 마이그레이션'}</h2>
 			<p class="text-xs text-gray-500 mb-5">{migrateType === 'live' ? '인스턴스 실행 중에 다른 호스트로 이동합니다.' : '인스턴스를 종료하고 다른 호스트로 이동합니다.'}</p>
-			{#if migrateError}
-				<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{migrateError}</div>
+			{#if s.migrateError}
+				<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{s.migrateError}</div>
 			{/if}
 			<div class="space-y-4">
 				<div>
 					<label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">대상 호스트 <span class="text-gray-600">(선택 안 하면 자동)</span></label>
 					<select bind:value={migrateHost} class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
 						<option value="">자동 선택</option>
-						{#each migrateHosts as h}
+						{#each s.migrateHosts as h}
 							<option value={h.name}>{h.name}</option>
 						{/each}
 					</select>
@@ -1349,8 +845,8 @@
 			</div>
 			<div class="flex justify-end gap-3 mt-6">
 				<button onclick={() => { showMigrateModal = false; }} class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded-lg">취소</button>
-				<button onclick={doMigrate} disabled={migrateLoading} class="px-4 py-2 bg-cyan-700 hover:bg-cyan-600 text-white text-sm font-medium rounded-lg disabled:opacity-30">
-					{migrateLoading ? '마이그레이션 중...' : '마이그레이션'}
+				<button onclick={handleDoMigrate} disabled={s.migrateLoading} class="px-4 py-2 bg-cyan-700 hover:bg-cyan-600 text-white text-sm font-medium rounded-lg disabled:opacity-30">
+					{s.migrateLoading ? '마이그레이션 중...' : '마이그레이션'}
 				</button>
 			</div>
 		</div>
@@ -1361,9 +857,9 @@
 	<div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" role="dialog" onclick={() => { showPasswordModal = false; }} onkeydown={(e) => e.key === 'Escape' && (showPasswordModal = false)} tabindex="-1">
 		<div class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl" onclick={(e) => e.stopPropagation()} role="document">
 			<h3 class="text-white font-semibold text-lg mb-1">관리자 비밀번호 재설정</h3>
-			<p class="text-gray-400 text-sm mb-4">인스턴스: <span class="text-white">{instance?.name}</span></p>
-			{#if passwordPrecheck?.os_admin_user}
-				<p class="text-xs text-gray-500 mb-4">대상 계정: <span class="text-amber-400">{passwordPrecheck.os_admin_user}</span> (이미지 메타 기준)</p>
+			<p class="text-gray-400 text-sm mb-4">인스턴스: <span class="text-white">{s.instance?.name}</span></p>
+			{#if s.passwordPrecheck?.os_admin_user}
+				<p class="text-xs text-gray-500 mb-4">대상 계정: <span class="text-amber-400">{s.passwordPrecheck.os_admin_user}</span> (이미지 메타 기준)</p>
 			{:else}
 				<p class="text-xs text-gray-500 mb-4">대상 계정: 이미지 메타데이터의 <code class="text-amber-400">os_admin_user</code>로 자동 결정</p>
 			{/if}
@@ -1402,8 +898,8 @@
 			</div>
 			<div class="flex justify-end gap-3">
 				<button onclick={() => { showPasswordModal = false; }} class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded-lg">취소</button>
-				<button onclick={doSetPassword} disabled={passwordLoading || !newPassword || !confirmPassword} class="px-4 py-2 bg-amber-700 hover:bg-amber-600 text-white text-sm font-medium rounded-lg disabled:opacity-30">
-					{passwordLoading ? '변경 중...' : '변경'}
+				<button onclick={handleDoSetPassword} disabled={s.passwordPrecheckLoading || !newPassword || !confirmPassword} class="px-4 py-2 bg-amber-700 hover:bg-amber-600 text-white text-sm font-medium rounded-lg disabled:opacity-30">
+					{s.passwordPrecheckLoading ? '변경 중...' : '변경'}
 				</button>
 			</div>
 		</div>
@@ -1415,15 +911,15 @@
 		<div class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl" onclick={(e) => e.stopPropagation()}>
 			<h2 class="text-lg font-semibold text-white mb-1">인스턴스 리사이즈</h2>
 			<p class="text-xs text-gray-500 mb-5">플레이버를 변경합니다. 완료 후 '리사이즈 확인' 또는 '되돌리기'를 선택하세요.</p>
-			{#if resizeError}
-				<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{resizeError}</div>
+			{#if s.resizeError}
+				<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{s.resizeError}</div>
 			{/if}
 			<div class="space-y-4">
 				<div>
 					<label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">새 플레이버</label>
 					<select bind:value={resizeFlavorId} class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-violet-500">
 						<option value="">플레이버 선택</option>
-						{#each resizeFlavors as f}
+						{#each s.resizeFlavors as f}
 							<option value={f.id}>{f.name} ({f.vcpus} vCPU / {f.ram >= 1024 ? (f.ram / 1024).toFixed(0) + ' GB' : f.ram + ' MB'} RAM)</option>
 						{/each}
 					</select>
@@ -1431,8 +927,8 @@
 			</div>
 			<div class="flex justify-end gap-3 mt-6">
 				<button onclick={() => { showResizeModal = false; }} class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded-lg">취소</button>
-				<button onclick={doResize} disabled={resizeLoading || !resizeFlavorId} class="px-4 py-2 bg-violet-700 hover:bg-violet-600 text-white text-sm font-medium rounded-lg disabled:opacity-30">
-					{resizeLoading ? '리사이즈 중...' : '리사이즈'}
+				<button onclick={handleDoResize} disabled={s.resizeLoading || !resizeFlavorId} class="px-4 py-2 bg-violet-700 hover:bg-violet-600 text-white text-sm font-medium rounded-lg disabled:opacity-30">
+					{s.resizeLoading ? '리사이즈 중...' : '리사이즈'}
 				</button>
 			</div>
 		</div>
