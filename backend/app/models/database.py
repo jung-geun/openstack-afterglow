@@ -34,8 +34,8 @@ class CreateDbInstanceRequest(BaseModel):
 
 class CreateDatabaseRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=64)
-    character_set: str = "utf8"
-    collate: str = "utf8_general_ci"
+    character_set: str | None = None
+    collate: str | None = None
 
 
 class CreateUserRequest(BaseModel):

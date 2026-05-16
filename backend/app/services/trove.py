@@ -304,10 +304,36 @@ def list_databases(conn, instance_id: str) -> list[dict]:
 
 
 def create_database(
-    conn, instance_id: str, name: str, character_set: str = "utf8", collate: str = "utf8_general_ci"
+    conn,
+    instance_id: str,
+    name: str,
+    character_set: str | None = None,
+    collate: str | None = None,
 ) -> None:
-    """인스턴스 내 데이터베이스 생성."""
-    conn.database.create_database(instance_id, name=name, character_set=character_set, collate=collate)
+    """인스턴스 내 데이터베이스 생성 (raw REST: Trove POST /instances/{id}/databases).
+
+    SDK Database 리소스는 _prepare_request 오버라이드가 없어 {"database": {...}} 단수
+    키로 직렬화하지만, Trove API는 {"databases": [{...}]} 복수 배열을 요구한다.
+
+    주의: openstack proxy.post 는 raise_exc=False 기본이라 4xx/5xx 도 silent 통과.
+    반드시 resp.ok 를 직접 검증해야 한다.
+
+    PostgreSQL datastore 는 MySQL 형식의 character_set/collate 를 LC_COLLATE 로 그대로
+    전달해 실패하므로, 호출자가 None 을 주면 페이로드에서 제외한다 (PG 기본 locale 사용).
+    """
+    db: dict = {"name": name}
+    if character_set:
+        db["character_set"] = character_set
+    if collate:
+        db["collate"] = collate
+    resp = conn.database.post(
+        f"/instances/{instance_id}/databases", json={"databases": [db]}
+    )
+    if not resp.ok:
+        body = (getattr(resp, "text", "") or "")[:500]
+        raise RuntimeError(
+            f"Trove POST /databases status={resp.status_code} body={body}"
+        )
 
 
 def delete_database(conn, instance_id: str, db_name: str) -> None:
