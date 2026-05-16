@@ -23,7 +23,7 @@ from sqlalchemy.exc import InterfaceError, OperationalError
 from starlette.requests import Request
 
 from app.api.common.activity_recorder import rec
-from app.api.deps import get_os_conn, get_token_info
+from app.api.deps import cache_bypass, get_os_conn, get_token_info
 from app.config import get_settings
 from app.database import mark_db_unhealthy
 from app.models.k3s import (
@@ -35,6 +35,10 @@ from app.models.k3s import (
 )
 from app.services import cinder, k3s_cloudinit, k3s_kube, keystone, neutron, nova, octavia
 from app.services import k3s_db as k3s_cluster
+from app.services.cache import cached_call, invalidate
+from app.services.cache import invalidation as cache_invalidation
+from app.services.cache import keys as cache_keys
+from app.services.cache import ttl_normal, ttl_slow
 
 router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
@@ -92,42 +96,95 @@ def _cluster_to_info(c: dict) -> K3sClusterInfo:
 async def list_k3s_clusters(
     token_info: dict = Depends(get_token_info),
     include_deleted: bool = Query(default=False),
+    bypass: bool = Depends(cache_bypass),
 ):
     project_id = token_info["project_id"]
+    sub = "all" if include_deleted else None
+    cache_key = cache_keys.project_key("k3s", project_id, "clusters", sub=sub)
+
+    async def _fetch():
+        try:
+            clusters = await k3s_cluster.list_clusters(project_id, include_deleted=include_deleted)
+        except (OperationalError, InterfaceError):
+            _logger.warning("k3s 클러스터 목록 DB 조회 실패 — 빈 목록 반환", exc_info=True)
+            mark_db_unhealthy()
+            return []
+        return [_cluster_to_info(c) for c in clusters]
+
     try:
-        clusters = await k3s_cluster.list_clusters(project_id, include_deleted=include_deleted)
+        return await cached_call(cache_key, ttl_normal(), _fetch, refresh=bypass)
     except (OperationalError, InterfaceError):
         _logger.warning("k3s 클러스터 목록 DB 조회 실패 — 빈 목록 반환", exc_info=True)
         mark_db_unhealthy()
         return []
-    return [_cluster_to_info(c) for c in clusters]
 
 
 @router.get("/{cluster_id}", response_model=K3sClusterInfo)
-async def get_k3s_cluster(cluster_id: str, token_info: dict = Depends(get_token_info)):
+async def get_k3s_cluster(
+    cluster_id: str,
+    token_info: dict = Depends(get_token_info),
+    bypass: bool = Depends(cache_bypass),
+):
     project_id = token_info["project_id"]
-    cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
-    if not cluster:
-        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
-    return _cluster_to_info(cluster)
+    cache_key = cache_keys.project_key("k3s", project_id, "clusters", sub=cluster_id)
+
+    async def _fetch():
+        cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
+        if not cluster:
+            raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
+        return _cluster_to_info(cluster)
+
+    return await cached_call(cache_key, ttl_normal(), _fetch, refresh=bypass)
 
 
 @router.api_route("/{cluster_id}/kubeconfig", methods=["GET", "HEAD"])
-async def download_kubeconfig(request: Request, cluster_id: str, token_info: dict = Depends(get_token_info)):
+async def download_kubeconfig(
+    request: Request,
+    cluster_id: str,
+    token_info: dict = Depends(get_token_info),
+    bypass: bool = Depends(cache_bypass),
+):
     """kubeconfig YAML 파일 다운로드. 아직 준비되지 않으면 404.
 
     매 호출마다 audit log 기록 — 토큰 탈취 시 다운로드 추적이 가능하도록.
+    None 결과는 캐시하지 않는다 (초기화 중인 클러스터 UX 보호).
     """
+    from app.services.cache import get_backend
+    import json as _json
+
     project_id = token_info["project_id"]
     cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
     if not cluster:
         raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
 
-    try:
-        kubeconfig = await k3s_cluster.get_kubeconfig(project_id, cluster_id)
-    except Exception as e:
-        _logger.error("kubeconfig 복호화 실패: %s", e)
-        raise HTTPException(status_code=500, detail="kubeconfig 복호화에 실패했습니다. 관리자에게 문의하세요.")
+    cache_key = cache_keys.project_key("k3s", project_id, "clusters", sub=f"{cluster_id}:kubeconfig")
+    kubeconfig: bytes | None = None
+
+    # 캐시 조회 (bypass=True 이면 건너뜀)
+    if not bypass:
+        try:
+            backend = get_backend()
+            cached_raw = await backend.get(cache_key)
+            if cached_raw is not None:
+                kubeconfig = _json.loads(cached_raw).encode()
+        except Exception:
+            pass  # 캐시 장애 → fallthrough
+
+    if kubeconfig is None:
+        try:
+            kubeconfig = await k3s_cluster.get_kubeconfig(project_id, cluster_id)
+        except Exception as e:
+            _logger.error("kubeconfig 복호화 실패: %s", e)
+            raise HTTPException(status_code=500, detail="kubeconfig 복호화에 실패했습니다. 관리자에게 문의하세요.")
+
+        # None이 아닐 때만 캐시 저장
+        if kubeconfig is not None:
+            try:
+                backend = get_backend()
+                await backend.set(cache_key, _json.dumps(kubeconfig.decode()), ttl_slow())
+            except Exception:
+                pass  # 캐시 장애 → silent fail
+
     if not kubeconfig:
         raise HTTPException(
             status_code=404, detail="kubeconfig가 아직 준비되지 않았습니다. 클러스터가 초기화 중입니다."
@@ -510,6 +567,11 @@ async def create_k3s_cluster_async(
                     "app_credential_id": app_credential_id or "",
                 },
             )
+            try:
+                await invalidate(f"afterglow:k3s:{project_id}:*")
+                await cache_invalidation.invalidate_mutation_count("k3s", project_id)
+            except Exception:
+                pass
 
             await rec(
                 token_info_obj or {},
@@ -615,6 +677,11 @@ async def scale_k3s_cluster(
         return {"message": "변경 없음", "agent_count": current}
 
     await k3s_cluster.update_cluster_status(project_id, cluster_id, "SCALING")
+    try:
+        await invalidate(f"afterglow:k3s:{project_id}:*")
+        await cache_invalidation.invalidate_mutation_count("k3s", project_id)
+    except Exception:
+        pass
     asyncio.create_task(_scale_agents(project_id, cluster_id, current_agent_ids, desired))
     await rec(
         token_info,
@@ -939,6 +1006,12 @@ async def delete_k3s_cluster(
     if cluster.get("deleted_at"):
         return
 
+    try:
+        await invalidate(f"afterglow:k3s:{project_id}:*")
+        await cache_invalidation.invalidate_mutation_count("k3s", project_id)
+    except Exception:
+        pass
+
     async for _msg in _delete_cluster_progress(conn, project_id, cluster, token_info):
         pass
 
@@ -956,6 +1029,12 @@ async def delete_k3s_cluster_async(
     cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
     if not cluster:
         raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
+
+    try:
+        await invalidate(f"afterglow:k3s:{project_id}:*")
+        await cache_invalidation.invalidate_mutation_count("k3s", project_id)
+    except Exception:
+        pass
 
     async def gen() -> AsyncGenerator[str, None]:
         yield ": " + " " * 2048 + "\n\n"
