@@ -431,3 +431,43 @@ export interface LbStatusNode {
   pools?: LbStatusNode[];
   members?: LbStatusNode[];
 }
+
+// ——— Container (Zun) 도메인 ———
+
+export interface ZunContainer {
+  uuid: string;
+  name: string;
+  status: string;
+  status_reason: string | null;
+  image: string | null;
+  command: string | null;
+  cpu: number | null;
+  memory: string | null;
+  created_at: string | null;
+  addresses: Record<string, { addr: string }[]> | null;
+  host: string | null;
+}
+
+// ——— Admin Volume 도메인 ———
+
+export interface AdminVolumeAttachment {
+  server_id: string;
+  device: string;
+  id: string;
+}
+
+export interface AdminVolumeDetail {
+  id: string;
+  name: string;
+  status: string;
+  size: number;
+  volume_type: string;
+  project_id: string | null;
+  attachments: AdminVolumeAttachment[];
+  created_at: string | null;
+  description: string;
+  bootable: boolean | null;
+  encrypted: boolean | null;
+  multiattach: boolean | null;
+  metadata: Record<string, string>;
+}

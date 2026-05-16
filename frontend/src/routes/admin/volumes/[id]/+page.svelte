@@ -6,22 +6,7 @@
 	import { api, ApiError } from '$lib/api/client';
 	import { projectNames } from '$lib/stores/projectNames';
 	import { formatNumber } from '$lib/utils/format';
-
-	interface AdminVolume {
-		id: string;
-		name: string;
-		status: string;
-		size: number;
-		volume_type: string;
-		project_id: string | null;
-		attachments: { server_id: string; device: string; id: string }[];
-		created_at: string | null;
-		description: string;
-		bootable: boolean | null;
-		encrypted: boolean | null;
-		multiattach: boolean | null;
-		metadata: Record<string, string>;
-	}
+	import type { AdminVolumeDetail } from '$lib/types/resources';
 
 	const statusColor: Record<string, string> = {
 		available:      'text-green-400 bg-green-900/30',
@@ -39,7 +24,7 @@
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
 
-	let volume = $state<AdminVolume | null>(null);
+	let volume = $state<AdminVolumeDetail | null>(null);
 	let loading = $state(true);
 	let error = $state('');
 	let deleting = $state(false);
@@ -57,7 +42,7 @@
 	async function fetchVolume() {
 		if (!volumeId) return;
 		try {
-			volume = await api.get<AdminVolume>(`/api/admin/volumes/${volumeId}`, token, projectId);
+			volume = await api.get<AdminVolumeDetail>(`/api/admin/volumes/${volumeId}`, token, projectId);
 			newSize = volume.size + 10;
 			error = '';
 		} catch (e) {
