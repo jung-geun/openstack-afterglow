@@ -7,28 +7,7 @@
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
-
-	interface FileStorage {
-		id: string;
-		name: string;
-		status: string;
-		size: number;
-		share_proto: string;
-		export_locations: string[];
-		metadata: Record<string, string>;
-		library_name: string | null;
-		library_version: string | null;
-		built_at: string | null;
-	}
-
-	interface AccessRule {
-		id: string;
-		access_type: string;
-		access_to: string;
-		access_level: string;
-		access_key: string | null;
-		state: string;
-	}
+	import type { FileStorage, AccessRule } from '$lib/types/resources';
 
 	let fileStorage = $state<FileStorage | null>(null);
 	let loading = $state(true);

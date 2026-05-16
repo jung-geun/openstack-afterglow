@@ -60,6 +60,15 @@ export interface FileStorage {
   built_at: string | null;
 }
 
+export interface AccessRule {
+  id: string;
+  access_type: string;
+  access_to: string;
+  access_level: string;
+  access_key: string | null;
+  state: string;
+}
+
 export interface Network {
   id: string;
   name: string;
