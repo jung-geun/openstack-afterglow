@@ -89,3 +89,67 @@ async def test_create_backup_sdk_error_propagates_status(client, mock_conn):
         resp = await client.post("/api/volumes/backups", json={"volume_id": "vol-1", "name": "bad-backup"})
     assert resp.status_code == 400
     assert "Invalid backup request" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_get_backup_cached(client, mock_conn):
+    """GET /{backup_id} 는 cached_call 을 통해 반환된다."""
+    with patch("app.api.storage.volume_backups.cinder.get_backup", return_value=make_backup()) as mock_get:
+        resp = await client.get("/api/volumes/backups/backup-1")
+    assert resp.status_code == 200
+    assert resp.json()["id"] == "backup-1"
+    mock_get.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_create_backup_invalidates_cache(client, mock_conn):
+    """백업 생성 후 backups* 패턴 무효화 + mutation count 증가."""
+    with (
+        patch("app.api.storage.volume_backups.cinder.create_backup", return_value=make_backup("backup-new")),
+        patch("app.api.storage.volume_backups.invalidate", new_callable=AsyncMock) as mock_inv,
+        patch(
+            "app.api.storage.volume_backups.invalidation.invalidate_mutation_count", new_callable=AsyncMock
+        ) as mock_mut,
+        patch("app.api.storage.volume_backups.rec", new_callable=AsyncMock),
+    ):
+        resp = await client.post("/api/volumes/backups", json={"volume_id": "vol-1", "name": "my-backup"})
+    assert resp.status_code == 201
+    mock_inv.assert_called_once_with("afterglow:cinder:test-project-123:backups*")
+    mock_mut.assert_called_once_with("cinder", "test-project-123")
+
+
+@pytest.mark.asyncio
+async def test_delete_backup_invalidates_cache(client, mock_conn):
+    """백업 삭제 후 backups* 패턴 무효화 + mutation count 증가."""
+    with (
+        patch("app.api.storage.volume_backups.cinder.delete_backup", return_value=None),
+        patch("app.api.storage.volume_backups.invalidate", new_callable=AsyncMock) as mock_inv,
+        patch(
+            "app.api.storage.volume_backups.invalidation.invalidate_mutation_count", new_callable=AsyncMock
+        ) as mock_mut,
+        patch("app.api.storage.volume_backups.rec", new_callable=AsyncMock),
+    ):
+        resp = await client.delete("/api/volumes/backups/backup-1")
+    assert resp.status_code == 204
+    mock_inv.assert_called_once_with("afterglow:cinder:test-project-123:backups*")
+    mock_mut.assert_called_once_with("cinder", "test-project-123")
+
+
+@pytest.mark.asyncio
+async def test_restore_backup_invalidates_cache(client, mock_conn):
+    """백업 복원 후 backups* 패턴 무효화 + mutation count 증가."""
+    with (
+        patch(
+            "app.api.storage.volume_backups.cinder.restore_backup",
+            return_value={"volume_id": "vol-restored", "volume_name": "restored-vol"},
+        ),
+        patch("app.api.storage.volume_backups.invalidate", new_callable=AsyncMock) as mock_inv,
+        patch(
+            "app.api.storage.volume_backups.invalidation.invalidate_mutation_count", new_callable=AsyncMock
+        ) as mock_mut,
+        patch("app.api.storage.volume_backups.rec", new_callable=AsyncMock),
+    ):
+        resp = await client.post("/api/volumes/backups/backup-1/restore")
+    assert resp.status_code == 200
+    mock_inv.assert_called_once_with("afterglow:cinder:test-project-123:backups*")
+    mock_mut.assert_called_once_with("cinder", "test-project-123")

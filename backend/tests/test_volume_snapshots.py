@@ -1,6 +1,6 @@
 """볼륨 스냅샷 API 단위 테스트."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 
 import pytest
 
@@ -96,6 +96,53 @@ async def test_delete_snapshot(client, mock_conn):
     with patch("app.api.storage.volume_snapshots.cinder.delete_snapshot", return_value=None):
         resp = await client.delete("/api/volume-snapshots/snap-1")
     assert resp.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_get_snapshot_cached(client, mock_conn):
+    """GET /{snapshot_id} 는 cached_call 을 통해 반환된다."""
+    with patch("app.api.storage.volume_snapshots.cinder.get_snapshot", return_value=make_snapshot()) as mock_get:
+        resp = await client.get("/api/volume-snapshots/snap-1")
+    assert resp.status_code == 200
+    assert resp.json()["id"] == "snap-1"
+    mock_get.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_create_snapshot_invalidates_cache(client, mock_conn):
+    """스냅샷 생성 후 snapshots* 패턴 무효화 + mutation count 증가."""
+    with (
+        patch("app.api.storage.volume_snapshots.cinder.create_snapshot", return_value=make_snapshot("snap-new")),
+        patch("app.api.storage.volume_snapshots.invalidate", new_callable=AsyncMock) as mock_inv,
+        patch(
+            "app.api.storage.volume_snapshots.invalidation.invalidate_mutation_count", new_callable=AsyncMock
+        ) as mock_mut,
+        patch("app.api.storage.volume_snapshots.rec", new_callable=AsyncMock),
+    ):
+        resp = await client.post(
+            "/api/volume-snapshots",
+            json={"volume_id": "vol-1", "name": "snap-new", "force": False},
+        )
+    assert resp.status_code == 201
+    mock_inv.assert_called_once_with("afterglow:cinder:test-project-123:snapshots*")
+    mock_mut.assert_called_once_with("cinder", "test-project-123")
+
+
+@pytest.mark.asyncio
+async def test_delete_snapshot_invalidates_cache(client, mock_conn):
+    """스냅샷 삭제 후 snapshots* 패턴 무효화 + mutation count 증가."""
+    with (
+        patch("app.api.storage.volume_snapshots.cinder.delete_snapshot", return_value=None),
+        patch("app.api.storage.volume_snapshots.invalidate", new_callable=AsyncMock) as mock_inv,
+        patch(
+            "app.api.storage.volume_snapshots.invalidation.invalidate_mutation_count", new_callable=AsyncMock
+        ) as mock_mut,
+        patch("app.api.storage.volume_snapshots.rec", new_callable=AsyncMock),
+    ):
+        resp = await client.delete("/api/volume-snapshots/snap-1")
+    assert resp.status_code == 204
+    mock_inv.assert_called_once_with("afterglow:cinder:test-project-123:snapshots*")
+    mock_mut.assert_called_once_with("cinder", "test-project-123")
 
 
 @pytest.mark.asyncio
