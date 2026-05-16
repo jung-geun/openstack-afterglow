@@ -15,7 +15,7 @@ import urllib.parse
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
-from app.api.deps import get_os_conn, get_token_info
+from app.api.deps import cache_bypass, get_os_conn, get_token_info
 from app.models.storage import (
     BulkDeleteRequest,
     CopyObjectRequest,
@@ -24,6 +24,8 @@ from app.models.storage import (
     MoveObjectRequest,
     RenameObjectRequest,
 )
+from app.services import cache
+from app.services.cache import invalidation, keys
 
 router = APIRouter()
 _logger = logging.getLogger(__name__)
@@ -154,6 +156,7 @@ async def list_object_storage_containers(
     token_info: dict = Depends(get_token_info),
     all_projects: bool = Query(False, description="admin 전용: 모든 프로젝트 버킷"),
     include_quarantine: bool = Query(False, description="admin 전용: *-quarantine 버킷 포함"),
+    bypass: bool = Depends(cache_bypass),
 ):
     """Swift 오브젝트 스토리지 컨테이너 목록. all_projects/include_quarantine 는 시스템 admin 전용."""
     from app.services import swift
@@ -170,8 +173,17 @@ async def list_object_storage_containers(
             _logger.exception("관리자 Swift 버킷 전체 조회 실패")
             raise HTTPException(status_code=500, detail="오브젝트 스토리지 컨테이너 목록 조회 실패")
 
+    pid = conn._afterglow_project_id
+    # include_quarantine 여부에 따라 별도 캐시 항목 사용
+    cache_sub = "q" if include_quarantine else None
+    key = keys.project_key("swift", pid, "containers", sub=cache_sub)
     try:
-        return await asyncio.to_thread(swift.list_containers, conn, include_quarantine)
+        return await cache.cached_call(
+            key,
+            cache.ttl_normal(),
+            lambda: swift.list_containers(conn, include_quarantine),
+            refresh=bypass,
+        )
     except Exception:
         raise HTTPException(status_code=500, detail="오브젝트 스토리지 컨테이너 목록 조회 실패")
 
@@ -195,10 +207,15 @@ async def create_object_storage_container(
         raise HTTPException(status_code=400, detail=str(e))
 
     try:
-        return await asyncio.to_thread(swift.create_container, conn, req.name)
+        result = await asyncio.to_thread(swift.create_container, conn, req.name)
     except Exception:
         _logger.exception("Swift 컨테이너 생성 실패: name=%s", req.name)
         raise HTTPException(status_code=500, detail="컨테이너 생성 실패")
+
+    pid = conn._afterglow_project_id
+    await cache.invalidate(f"afterglow:swift:{pid}:*")
+    await invalidation.invalidate_mutation_count("swift", pid)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -210,12 +227,20 @@ async def create_object_storage_container(
 async def get_object_storage_container(
     container_name: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    bypass: bool = Depends(cache_bypass),
 ):
     """컨테이너 메타데이터(오브젝트 수, 바이트 등) 조회."""
     from app.services import swift
 
+    pid = conn._afterglow_project_id
+    key = keys.project_key("swift", pid, "containers", sub=container_name)
     try:
-        return await asyncio.to_thread(swift.get_container_metadata, conn, container_name)
+        return await cache.cached_call(
+            key,
+            cache.ttl_slow(),
+            lambda: swift.get_container_metadata(conn, container_name),
+            refresh=bypass,
+        )
     except Exception:
         raise HTTPException(status_code=404, detail="컨테이너를 찾을 수 없습니다")
 
@@ -233,6 +258,10 @@ async def delete_object_storage_container(
     except Exception:
         raise HTTPException(status_code=500, detail="컨테이너 삭제 실패")
 
+    pid = conn._afterglow_project_id
+    await cache.invalidate(f"afterglow:swift:{pid}:*")
+    await invalidation.invalidate_mutation_count("swift", pid)
+
 
 # ---------------------------------------------------------------------------
 # 오브젝트 목록 / 업로드
@@ -245,6 +274,7 @@ async def list_objects(
     prefix: str = Query(default=""),
     delimiter: str = Query(default="/"),
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    bypass: bool = Depends(cache_bypass),
 ):
     """컨테이너 내 오브젝트 목록.
 
@@ -253,8 +283,16 @@ async def list_objects(
     """
     from app.services import swift
 
+    pid = conn._afterglow_project_id
+    # prefix / delimiter 조합마다 별도 캐시 항목. 모두 afterglow:swift:{pid}:* 로 무효화됨.
+    key = keys.project_key("swift", pid, "objects", sub=f"{container_name}:{prefix}:{delimiter}")
     try:
-        return await asyncio.to_thread(swift.list_objects, conn, container_name, prefix, delimiter)
+        return await cache.cached_call(
+            key,
+            cache.ttl_fast(),
+            lambda: swift.list_objects(conn, container_name, prefix, delimiter),
+            refresh=bypass,
+        )
     except Exception:
         raise HTTPException(status_code=500, detail="오브젝트 목록 조회 실패")
 
@@ -280,7 +318,7 @@ async def upload_object(
         object_name = _sanitize_object_name(file.filename or "unnamed")
         content_type = file.content_type or ""
         # file.file (SpooledTemporaryFile)을 직접 전달해 스트리밍 업로드
-        return await asyncio.to_thread(
+        result = await asyncio.to_thread(
             swift.upload_object,
             conn,
             container_name,
@@ -294,6 +332,11 @@ async def upload_object(
     except Exception:
         _logger.exception("오브젝트 업로드 실패: container=%s name=%s", container_name, file.filename)
         raise HTTPException(status_code=500, detail="오브젝트 업로드 실패")
+
+    pid = conn._afterglow_project_id
+    await cache.invalidate(f"afterglow:swift:{pid}:*")
+    await invalidation.invalidate_mutation_count("swift", pid)
+    return result
 
 
 @router.put("/{container_name}/objects/{object_name:path}", status_code=201)
@@ -370,6 +413,10 @@ async def upload_object_stream(
                 break
         with contextlib.suppress(asyncio.CancelledError):
             await drain_task
+
+    pid = conn._afterglow_project_id
+    await cache.invalidate(f"afterglow:swift:{pid}:*")
+    await invalidation.invalidate_mutation_count("swift", pid)
     return result
 
 
@@ -509,6 +556,10 @@ async def delete_object(
     except Exception:
         raise HTTPException(status_code=500, detail="오브젝트 삭제 실패")
 
+    pid = conn._afterglow_project_id
+    await cache.invalidate(f"afterglow:swift:{pid}:*")
+    await invalidation.invalidate_mutation_count("swift", pid)
+
 
 @router.get("/{container_name}/objects/{object_name:path}/metadata")
 async def get_object_metadata(
@@ -581,9 +632,13 @@ async def bulk_delete_objects(
 
     try:
         result = await asyncio.to_thread(swift.bulk_delete_objects, conn, container_name, body.objects, body.recursive)
-        return result
     except Exception:
         raise HTTPException(status_code=500, detail="일괄 삭제 실패")
+
+    pid = conn._afterglow_project_id
+    await cache.invalidate(f"afterglow:swift:{pid}:*")
+    await invalidation.invalidate_mutation_count("swift", pid)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -601,10 +656,15 @@ async def create_directory(
     from app.services import swift
 
     try:
-        return await asyncio.to_thread(swift.create_directory, conn, container_name, body.path)
+        result = await asyncio.to_thread(swift.create_directory, conn, container_name, body.path)
     except Exception:
         _logger.exception("디렉토리 생성 실패: container=%s path=%s", container_name, body.path)
         raise HTTPException(status_code=500, detail="디렉토리 생성 실패")
+
+    pid = conn._afterglow_project_id
+    await cache.invalidate(f"afterglow:swift:{pid}:*")
+    await invalidation.invalidate_mutation_count("swift", pid)
+    return result
 
 
 @router.post("/{container_name}/objects/copy", status_code=200)
@@ -618,12 +678,17 @@ async def copy_object(
 
     dest_container = body.dest_container or container_name
     try:
-        return await asyncio.to_thread(
+        result = await asyncio.to_thread(
             swift.copy_object, conn, container_name, body.source, dest_container, body.destination
         )
     except Exception:
         _logger.exception("오브젝트 복사 실패: %s -> %s", body.source, body.destination)
         raise HTTPException(status_code=500, detail="오브젝트 복사 실패")
+
+    pid = conn._afterglow_project_id
+    await cache.invalidate(f"afterglow:swift:{pid}:*")
+    await invalidation.invalidate_mutation_count("swift", pid)
+    return result
 
 
 @router.post("/{container_name}/objects/move", status_code=200)
@@ -646,10 +711,15 @@ async def move_object(
         original_filename = body.source.rsplit("/", 1)[-1]
         dest_name = dest_name + original_filename
     try:
-        return await asyncio.to_thread(swift.move_object, conn, container_name, body.source, dest_container, dest_name)
+        result = await asyncio.to_thread(swift.move_object, conn, container_name, body.source, dest_container, dest_name)
     except Exception:
         _logger.exception("오브젝트 이동 실패: %s -> %s", body.source, body.destination)
         raise HTTPException(status_code=500, detail="오브젝트 이동 실패")
+
+    pid = conn._afterglow_project_id
+    await cache.invalidate(f"afterglow:swift:{pid}:*")
+    await invalidation.invalidate_mutation_count("swift", pid)
+    return result
 
 
 @router.post("/{container_name}/objects/rename", status_code=200)
@@ -662,7 +732,12 @@ async def rename_object(
     from app.services import swift
 
     try:
-        return await asyncio.to_thread(swift.rename_object, conn, container_name, body.source, body.new_name)
+        result = await asyncio.to_thread(swift.rename_object, conn, container_name, body.source, body.new_name)
     except Exception:
         _logger.exception("오브젝트 이름 변경 실패: %s -> %s", body.source, body.new_name)
         raise HTTPException(status_code=500, detail="오브젝트 이름 변경 실패")
+
+    pid = conn._afterglow_project_id
+    await cache.invalidate(f"afterglow:swift:{pid}:*")
+    await invalidation.invalidate_mutation_count("swift", pid)
+    return result

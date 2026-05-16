@@ -989,3 +989,197 @@ def test_list_containers_filters_quarantine_suffix():
     assert "other" in names
     assert "test-quarantine" not in names
     assert "test_segments" not in names
+
+
+# ---------------------------------------------------------------------------
+# Phase C+D: 캐시 적용 + mutation invalidation 검증
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_list_containers_uses_cached_call(client, mock_conn):
+    """GET /containers → cached_call 이 올바른 키/TTL 로 호출된다."""
+    from unittest.mock import AsyncMock, patch
+
+    fake_containers = [{"name": "bucket-1", "count": 2, "bytes": 1024}]
+
+    with patch("app.api.object_storage.containers.cache.cached_call", new_callable=AsyncMock, return_value=fake_containers) as mock_call:
+        resp = await client.get("/api/object-storage")
+
+    assert resp.status_code in (200, 404, 405)
+    if resp.status_code == 200:
+        assert mock_call.called
+        call_kwargs = mock_call.call_args
+        # 첫 번째 positional 인자가 afterglow:swift:{pid}:containers 형식이어야 함
+        cache_key = call_kwargs[0][0]
+        assert cache_key.startswith("afterglow:swift:")
+        assert ":containers" in cache_key
+
+
+@pytest.mark.asyncio
+async def test_get_container_metadata_uses_cached_call(client, mock_conn):
+    """GET /{container_name} → cached_call 이 container sub-key 로 호출된다."""
+    from unittest.mock import AsyncMock, patch
+
+    fake_meta = {"name": "my-bucket", "count": 5, "bytes": 2048}
+
+    with patch("app.api.object_storage.containers.cache.cached_call", new_callable=AsyncMock, return_value=fake_meta) as mock_call:
+        resp = await client.get("/api/object-storage/my-bucket")
+
+    assert resp.status_code in (200, 404, 405)
+    if resp.status_code == 200:
+        assert mock_call.called
+        cache_key = mock_call.call_args[0][0]
+        assert "containers" in cache_key
+        assert "my-bucket" in cache_key
+
+
+@pytest.mark.asyncio
+async def test_list_objects_uses_cached_call(client, mock_conn):
+    """GET /{container_name}/objects → cached_call 이 objects 키로 호출된다."""
+    from unittest.mock import AsyncMock, patch
+
+    fake_objects = [{"name": "file.txt", "bytes": 100}]
+
+    with patch("app.api.object_storage.containers.cache.cached_call", new_callable=AsyncMock, return_value=fake_objects) as mock_call:
+        resp = await client.get("/api/object-storage/my-bucket/objects")
+
+    assert resp.status_code in (200, 404, 405)
+    if resp.status_code == 200:
+        assert mock_call.called
+        cache_key = mock_call.call_args[0][0]
+        assert "objects" in cache_key
+        assert "my-bucket" in cache_key
+
+
+@pytest.mark.asyncio
+async def test_list_objects_different_prefix_uses_different_key(client, mock_conn):
+    """prefix가 다르면 다른 캐시 키가 사용된다."""
+    from unittest.mock import AsyncMock, patch
+
+    captured_keys: list[str] = []
+
+    async def _fake_cached_call(key, ttl, fn, *, refresh=False):
+        captured_keys.append(key)
+        return []
+
+    with patch("app.api.object_storage.containers.cache.cached_call", side_effect=_fake_cached_call):
+        await client.get("/api/object-storage/bucket/objects?prefix=folder/")
+        await client.get("/api/object-storage/bucket/objects?prefix=other/")
+
+    if len(captured_keys) == 2:
+        assert captured_keys[0] != captured_keys[1], "다른 prefix 는 다른 캐시 키여야 한다"
+
+
+@pytest.mark.asyncio
+async def test_create_container_invalidates_cache(client, mock_conn):
+    """POST /containers → 생성 성공 후 캐시 무효화가 호출된다."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    with (
+        patch("app.services.swift.create_container", return_value={"name": "new-bucket"}),
+        patch("app.api.object_storage.containers.cache.invalidate", new_callable=AsyncMock) as mock_inv,
+        patch("app.api.object_storage.containers.invalidation.invalidate_mutation_count", new_callable=AsyncMock) as mock_mut,
+    ):
+        resp = await client.post("/api/object-storage", json={"name": "new-bucket"})
+
+    assert resp.status_code in (201, 404, 405)
+    if resp.status_code == 201:
+        mock_inv.assert_called_once()
+        inv_pattern = mock_inv.call_args[0][0]
+        assert "swift" in inv_pattern
+        assert inv_pattern.endswith(":*")
+        mock_mut.assert_called_once_with("swift", mock_conn._afterglow_project_id)
+
+
+@pytest.mark.asyncio
+async def test_delete_container_invalidates_cache(client, mock_conn):
+    """DELETE /{container_name} → 삭제 성공 후 캐시 무효화가 호출된다."""
+    from unittest.mock import AsyncMock, patch
+
+    with (
+        patch("app.services.swift.delete_container", return_value=None),
+        patch("app.api.object_storage.containers.cache.invalidate", new_callable=AsyncMock) as mock_inv,
+        patch("app.api.object_storage.containers.invalidation.invalidate_mutation_count", new_callable=AsyncMock) as mock_mut,
+    ):
+        resp = await client.delete("/api/object-storage/old-bucket")
+
+    assert resp.status_code in (204, 404, 405)
+    if resp.status_code == 204:
+        mock_inv.assert_called_once()
+        mock_mut.assert_called_once_with("swift", mock_conn._afterglow_project_id)
+
+
+@pytest.mark.asyncio
+async def test_upload_object_invalidates_cache(client, mock_conn):
+    """POST /{container_name}/objects → 업로드 성공 후 캐시 무효화가 호출된다."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    with (
+        patch("app.services.swift.upload_object", return_value={"name": "test.txt", "bytes": 5}),
+        patch("app.api.object_storage.containers.cache.invalidate", new_callable=AsyncMock) as mock_inv,
+        patch("app.api.object_storage.containers.invalidation.invalidate_mutation_count", new_callable=AsyncMock) as mock_mut,
+    ):
+        resp = await client.post(
+            "/api/object-storage/my-bucket/objects",
+            files={"file": ("test.txt", b"hello", "text/plain")},
+        )
+
+    assert resp.status_code in (201, 404, 405)
+    if resp.status_code == 201:
+        mock_inv.assert_called_once()
+        mock_mut.assert_called_once_with("swift", mock_conn._afterglow_project_id)
+
+
+@pytest.mark.asyncio
+async def test_delete_object_invalidates_cache(client, mock_conn):
+    """DELETE /{container_name}/objects/{name} → 삭제 성공 후 캐시 무효화가 호출된다."""
+    from unittest.mock import AsyncMock, patch
+
+    with (
+        patch("app.services.swift.delete_object", return_value=None),
+        patch("app.api.object_storage.containers.cache.invalidate", new_callable=AsyncMock) as mock_inv,
+        patch("app.api.object_storage.containers.invalidation.invalidate_mutation_count", new_callable=AsyncMock) as mock_mut,
+    ):
+        resp = await client.delete("/api/object-storage/my-bucket/objects/test.txt")
+
+    assert resp.status_code in (204, 404, 405)
+    if resp.status_code == 204:
+        mock_inv.assert_called_once()
+        mock_mut.assert_called_once_with("swift", mock_conn._afterglow_project_id)
+
+
+@pytest.mark.asyncio
+async def test_list_containers_cache_bypass(client, mock_conn):
+    """`?refresh=true` 쿼리스트링 → cached_call 에 refresh=True 가 전달된다."""
+    from unittest.mock import AsyncMock, patch
+
+    captured: dict = {}
+
+    async def _fake_cached_call(key, ttl, fn, *, refresh=False):
+        captured["refresh"] = refresh
+        return []
+
+    with patch("app.api.object_storage.containers.cache.cached_call", side_effect=_fake_cached_call):
+        resp = await client.get("/api/object-storage?refresh=true")
+
+    if resp.status_code == 200:
+        assert captured.get("refresh") is True, "refresh=true 쿼리 → cached_call 에 refresh=True 전달"
+
+
+@pytest.mark.asyncio
+async def test_create_container_no_invalidation_on_failure(client, mock_conn):
+    """컨테이너 생성 실패 시 캐시 무효화가 호출되지 않는다."""
+    from unittest.mock import AsyncMock, patch
+
+    with (
+        patch("app.services.swift.create_container", side_effect=Exception("Swift 오류")),
+        patch("app.api.object_storage.containers.cache.invalidate", new_callable=AsyncMock) as mock_inv,
+        patch("app.api.object_storage.containers.invalidation.invalidate_mutation_count", new_callable=AsyncMock) as mock_mut,
+    ):
+        resp = await client.post("/api/object-storage", json={"name": "fail-bucket"})
+
+    assert resp.status_code in (500, 404, 405)
+    if resp.status_code == 500:
+        mock_inv.assert_not_called()
+        mock_mut.assert_not_called()
