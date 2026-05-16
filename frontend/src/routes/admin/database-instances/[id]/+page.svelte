@@ -5,17 +5,7 @@
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
-
-	interface DbInstance {
-		id: string; name: string; status: string;
-		datastore: { type?: string; version?: string };
-		flavor_id: string; flavor_ram: number; size: number;
-		created_at: string; hostname: string; ip: string;
-	}
-
-	interface DbDatabase { name: string; character_set: string; collate: string; }
-	interface DbUser { name: string; databases: { name: string }[]; }
-	interface DbBackup { id: string; name: string; status: string; size: number; created_at: string; }
+	import type { DbInstance, DbDatabase, DbUser, DbBackup } from '$lib/types/resources';
 
 	const instanceId = $derived($page.params.id);
 	const token = $derived($auth.token ?? undefined);

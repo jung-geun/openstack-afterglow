@@ -2,14 +2,8 @@
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import { toast } from '$lib/stores/toast';
+	import type { DbFlavor, DbInstance, DbBackup } from '$lib/types/resources';
 
-	interface DbFlavor {
-		id: string;
-		name: string;
-		ram: number;
-		vcpus: number;
-		disk: number;
-	}
 	interface Datastore {
 		id: string;
 		name: string;
@@ -32,15 +26,6 @@
 		id: string;
 		name: string;
 		datastore_name: string;
-	}
-	interface DbInstance {
-		id: string;
-		name: string;
-	}
-	interface DbBackup {
-		id: string;
-		name: string;
-		instance_id: string;
 	}
 	interface UserDraft {
 		name: string;

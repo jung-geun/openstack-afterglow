@@ -200,3 +200,41 @@ export interface DashboardSummary {
   storage: { volumes_used: number; volumes_limit: number; gigabytes_used: number; gigabytes_limit: number };
   gpu_used: number;
 }
+
+// ——— Database 도메인 ———
+
+export interface Datastore {
+  type?: string;
+  version?: string;
+}
+
+export interface DbInstance {
+  id: string;
+  name: string;
+  status: string;
+  datastore: Datastore;
+  flavor_id: string;
+  flavor_ram: number;
+  flavor_vcpus: number;
+  size: number;
+  volume_used: number;
+  created_at: string;
+  updated_at: string;
+  hostname: string;
+  ip: string;
+  ips: string[];
+  address_map?: Record<string, string[]>;
+}
+
+export interface DbFlavor { id: string; name: string; ram: number; vcpus: number; disk: number; }
+export interface DbDatabase { name: string; character_set: string; collate: string; }
+export interface DbUser { name: string; host?: string; databases: { name: string }[]; }
+export interface DbBackup {
+  id: string;
+  name: string;
+  status: string;
+  size: number;
+  created_at: string;
+  description: string;
+  instance_id?: string;
+}

@@ -11,17 +11,7 @@
 	import DbCreatePanel from '$lib/components/database/DbCreatePanel.svelte';
 	import SlidePanel from '$lib/components/SlidePanel.svelte';
 	import DbInstanceDetailPanel from '$lib/components/database/DbInstanceDetailPanel.svelte';
-
-	interface DbInstance {
-		id: string;
-		name: string;
-		status: string;
-		datastore: { type?: string; version?: string };
-		flavor_id: string;
-		size: number;
-		created_at: string;
-	}
-
+	import type { DbInstance } from '$lib/types/resources';
 
 	let instances = $state<DbInstance[]>([]);
 	let loading = $state(true);
