@@ -106,6 +106,12 @@ def _load_toml() -> dict:
     flat["cache_backend"] = cache.get("backend", "redis")
     flat["cache_dynamic_threshold_low"] = cache.get("dynamic_threshold_low", 5)
     flat["cache_dynamic_threshold_high"] = cache.get("dynamic_threshold_high", 20)
+    flat["cache_ttl_identity_stable"] = cache.get("ttl_identity_stable", 86400)
+    flat["cache_ttl_catalog_slow"] = cache.get("ttl_catalog_slow", 900)
+    flat["cache_ttl_project_meta"] = cache.get("ttl_project_meta", 300)
+    flat["cache_ttl_operational_live"] = cache.get("ttl_operational_live", 30)
+    flat["cache_ttl_admin_overview"] = cache.get("ttl_admin_overview", 60)
+    flat["cache_ttl_auth_token"] = cache.get("ttl_auth_token", 60)
 
     svc = data.get("services", {})
     flat["service_magnum_enabled"] = svc.get("magnum", False)
@@ -321,9 +327,16 @@ class Settings(BaseSettings):
     cache_ttl_static: int = 300
     # 캐시 백엔드: "redis" | "valkey" (v1 동일 클라이언트, v2 에서 Memcached 추가 시 확장)
     cache_backend: Literal["redis", "valkey"] = "redis"
-    # Dynamic TTL 조정 임계치 (시간당 mutation 횟수). Phase B 에서 활성화.
+    # Dynamic TTL 조정 임계치 (시간당 mutation 횟수)
     cache_dynamic_threshold_low: int = 5
     cache_dynamic_threshold_high: int = 20
+    # 3-tier TTL 카테고리 (Phase B)
+    cache_ttl_identity_stable: int = 86400   # 개인 프로필, role/group 멤버십
+    cache_ttl_catalog_slow: int = 900        # flavors, image 메타, 데이터스토어
+    cache_ttl_project_meta: int = 300        # keypair, SG 정의, 네트워크 메타
+    cache_ttl_operational_live: int = 30     # instances/volumes/FIP/컨테이너 상태
+    cache_ttl_admin_overview: int = 60       # admin 토폴로지, 하이퍼바이저
+    cache_ttl_auth_token: int = 60           # Keystone 토큰 검증 결과
 
     # 선택적 서비스
     service_magnum_enabled: bool = False

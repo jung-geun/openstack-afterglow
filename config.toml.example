@@ -66,9 +66,17 @@ default_ttl_seconds = 30  # TTL 티어 미지정 리소스의 기본 캐시 TTL 
 
 # 캐시 백엔드: "redis" 또는 "valkey" (v1 은 동일 redis-py 클라이언트 사용)
 backend = "redis"
-# Dynamic TTL 조정 임계치 (시간당 mutation 횟수). Phase B 에서 활성화.
+# Dynamic TTL 조정 임계치 (시간당 mutation 횟수)
 dynamic_threshold_low = 5
 dynamic_threshold_high = 20
+
+# 3-tier TTL 카테고리 (초) — 데이터 특성 기반 분류
+ttl_identity_stable = 86400  # 개인 프로필, role/group 멤버십 (1일)
+ttl_catalog_slow = 900       # flavors, image 메타, 데이터스토어, 클러스터 템플릿 (15분)
+ttl_project_meta = 300       # keypair, SG 정의, 네트워크 메타 (5분)
+ttl_operational_live = 30    # instances/volumes/FIP/컨테이너 상태 (30초)
+ttl_admin_overview = 60      # admin 토폴로지, 하이퍼바이저 (60초)
+ttl_auth_token = 60          # Keystone 토큰 검증 결과 (60초)
 
 [session]
 # 세션 유지 시간 (초). 이 시간이 지나면 재로그인 필요.

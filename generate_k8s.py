@@ -305,6 +305,12 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     lines.append(f'backend = {_toml_str(cache.get("backend", "redis"))}')
     lines.append(f'dynamic_threshold_low = {cache.get("dynamic_threshold_low", 5)}')
     lines.append(f'dynamic_threshold_high = {cache.get("dynamic_threshold_high", 20)}')
+    lines.append(f'ttl_identity_stable = {cache.get("ttl_identity_stable", 86400)}')
+    lines.append(f'ttl_catalog_slow = {cache.get("ttl_catalog_slow", 900)}')
+    lines.append(f'ttl_project_meta = {cache.get("ttl_project_meta", 300)}')
+    lines.append(f'ttl_operational_live = {cache.get("ttl_operational_live", 30)}')
+    lines.append(f'ttl_admin_overview = {cache.get("ttl_admin_overview", 60)}')
+    lines.append(f'ttl_auth_token = {cache.get("ttl_auth_token", 60)}')
     lines.append("")
 
     # [session]

@@ -1,11 +1,12 @@
-"""compute/flavors.py 엔드포인트 단위 테스트 (1개)."""
+"""compute/flavors.py 엔드포인트 단위 테스트."""
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
+from app.services.cache import ttl_static
 
 
 @pytest.mark.asyncio
@@ -17,8 +18,55 @@ async def test_list_flavors_unauthenticated():
 
 @pytest.mark.asyncio
 async def test_list_flavors_success(client, mock_conn):
-    with patch("app.api.compute.flavors.nova") as mock_nova:
-        mock_nova.list_flavors.return_value = []
+    """nova.list_flavors 결과를 정상 반환한다."""
+    async def mock_cached_call(key, ttl, fn, *, refresh=False, **kw):
+        return await fn()
+
+    with (
+        patch("app.api.compute.flavors.nova.list_flavors", return_value=[]),
+        patch("app.services.cache.cached_call", new=mock_cached_call),
+    ):
         resp = await client.get("/api/flavors")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
+
+
+@pytest.mark.asyncio
+async def test_list_flavors_uses_static_ttl(client, mock_conn):
+    """캐시 TTL이 ttl_static() (300s)으로 호출되어야 한다."""
+    captured = {}
+
+    async def mock_cached_call(key, ttl, fn, *, refresh=False, **kw):
+        captured["key"] = key
+        captured["ttl"] = ttl
+        return await fn()
+
+    with (
+        patch("app.api.compute.flavors.nova.list_flavors", return_value=[]),
+        patch("app.services.cache.cached_call", new=mock_cached_call),
+    ):
+        resp = await client.get("/api/flavors")
+
+    assert resp.status_code == 200
+    assert "flavors" in captured.get("key", "")
+    assert "nova" in captured.get("key", "")
+    assert captured.get("ttl") == ttl_static()
+
+
+@pytest.mark.asyncio
+async def test_list_flavors_cache_bypass(client, mock_conn):
+    """?refresh=true 쿼리스트링이 cached_call에 refresh=True로 전달되어야 한다."""
+    captured = {}
+
+    async def mock_cached_call(key, ttl, fn, *, refresh=False, **kw):
+        captured["refresh"] = refresh
+        return await fn()
+
+    with (
+        patch("app.api.compute.flavors.nova.list_flavors", return_value=[]),
+        patch("app.services.cache.cached_call", new=mock_cached_call),
+    ):
+        resp = await client.get("/api/flavors?refresh=true")
+
+    assert resp.status_code == 200
+    assert captured.get("refresh") is True
