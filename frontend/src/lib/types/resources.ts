@@ -270,6 +270,17 @@ export interface ImageMember {
   created_at: string | null;
 }
 
+// ——— Volume 도메인 ———
+
+export interface VolumeSnapshot {
+  id: string;
+  name: string;
+  status: string;
+  size: number;
+  description: string;
+  created_at: string | null;
+}
+
 // ——— K3s 도메인 ———
 
 export interface K3sCluster {

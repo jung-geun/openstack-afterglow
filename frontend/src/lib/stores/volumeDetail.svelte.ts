@@ -1,0 +1,232 @@
+import { getContext, setContext } from 'svelte';
+import { api, ApiError } from '$lib/api/client';
+import type { Volume, VolumeSnapshot, Instance } from '$lib/types/resources';
+
+export type { Volume, VolumeSnapshot };
+
+export const statusColor: Record<string, string> = {
+  available:      'text-green-400 bg-green-900/30',
+  creating:       'text-amber-400 bg-amber-900/30',
+  deleting:       'text-orange-400 bg-orange-900/30',
+  error:          'text-red-400 bg-red-900/30',
+  in_use:         'text-blue-400 bg-blue-900/30',
+  reserved:       'text-purple-400 bg-purple-900/30',
+  attaching:      'text-cyan-400 bg-cyan-900/30',
+  detaching:      'text-amber-400 bg-amber-900/30',
+  error_deleting: 'text-rose-400 bg-rose-900/30',
+};
+
+export interface VolumeDetailOpts {
+  volumeId: () => string;
+  token: () => string | undefined;
+  projectId: () => string | undefined;
+  onDeleted?: () => void;
+  onClose?: () => void;
+}
+
+export function createVolumeDetailStore(opts: VolumeDetailOpts) {
+  let volume = $state<Volume | null>(null);
+  let snapshots = $state<VolumeSnapshot[]>([]);
+  let instances = $state<Instance[]>([]);
+  let loading = $state(true);
+  let error = $state('');
+  let deleting = $state(false);
+  let deletingSnapshot = $state<string | null>(null);
+
+  let showSnapshotForm = $state(false);
+  let snapshotName = $state('');
+  let snapshotDesc = $state('');
+  let creatingSnapshot = $state(false);
+  let snapshotError = $state('');
+
+  let showAttachModal = $state(false);
+  let attachInstanceId = $state('');
+  let attaching = $state(false);
+  let attachError = $state('');
+
+  const canDelete = $derived(
+    !!volume && (volume.attachments?.length ?? 0) === 0 && !deleting
+  );
+
+  async function loadAll() {
+    const id = opts.volumeId();
+    const tok = opts.token();
+    const proj = opts.projectId();
+    try {
+      const [vol, snaps] = await Promise.all([
+        api.get<Volume>(`/api/volumes/${id}`, tok, proj),
+        api.get<VolumeSnapshot[]>(`/api/volume-snapshots?volume_id=${id}`, tok, proj).catch(() => [] as VolumeSnapshot[]),
+      ]);
+      volume = vol;
+      snapshots = snaps;
+      error = '';
+    } catch (e) {
+      error = e instanceof ApiError ? e.message : '볼륨 정보를 불러올 수 없습니다';
+    } finally {
+      loading = false;
+    }
+  }
+
+  function reset() {
+    volume = null;
+    snapshots = [];
+    instances = [];
+    loading = true;
+    error = '';
+    showSnapshotForm = false;
+    snapshotName = '';
+    snapshotDesc = '';
+    snapshotError = '';
+    showAttachModal = false;
+    attachInstanceId = '';
+    attachError = '';
+  }
+
+  async function openAttachModal() {
+    showAttachModal = true;
+    attachError = '';
+    try {
+      instances = await api.get<Instance[]>('/api/instances', opts.token(), opts.projectId());
+    } catch {
+      instances = [];
+    }
+  }
+
+  function closeAttachModal() {
+    showAttachModal = false;
+    attachError = '';
+  }
+
+  async function attachVolume() {
+    if (!attachInstanceId) return;
+    attaching = true;
+    attachError = '';
+    try {
+      await api.post(
+        `/api/instances/${attachInstanceId}/volumes`,
+        { volume_id: opts.volumeId() },
+        opts.token(),
+        opts.projectId(),
+      );
+      showAttachModal = false;
+      attachInstanceId = '';
+      await loadAll();
+    } catch (e) {
+      attachError = e instanceof ApiError ? e.message : '연결 실패';
+    } finally {
+      attaching = false;
+    }
+  }
+
+  async function deleteVolume() {
+    const v = volume;
+    const id = opts.volumeId();
+    if (!v) return;
+    if (!confirm(`볼륨 "${v.name || id.slice(0, 8)}"을 삭제하시겠습니까?`)) return;
+    deleting = true;
+    try {
+      await api.delete(`/api/volumes/${id}`, opts.token(), opts.projectId());
+      opts.onDeleted?.();
+      opts.onClose?.();
+    } catch (e) {
+      alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+    } finally {
+      deleting = false;
+    }
+  }
+
+  function startSnapshot() {
+    showSnapshotForm = true;
+    snapshotError = '';
+  }
+
+  function cancelSnapshot() {
+    showSnapshotForm = false;
+    snapshotName = '';
+    snapshotDesc = '';
+    snapshotError = '';
+  }
+
+  async function createSnapshot() {
+    if (!snapshotName.trim()) return;
+    creatingSnapshot = true;
+    snapshotError = '';
+    try {
+      await api.post(
+        '/api/volume-snapshots',
+        { volume_id: opts.volumeId(), name: snapshotName.trim(), description: snapshotDesc.trim() || undefined },
+        opts.token(),
+        opts.projectId(),
+      );
+      snapshotName = '';
+      snapshotDesc = '';
+      showSnapshotForm = false;
+      await loadAll();
+    } catch (e) {
+      snapshotError = e instanceof ApiError ? e.message : '스냅샷 생성 실패';
+    } finally {
+      creatingSnapshot = false;
+    }
+  }
+
+  async function deleteSnapshot(id: string, name: string) {
+    if (!confirm(`스냅샷 "${name || id.slice(0, 8)}"을 삭제하시겠습니까?`)) return;
+    deletingSnapshot = id;
+    try {
+      await api.delete(`/api/volume-snapshots/${id}`, opts.token(), opts.projectId());
+      snapshots = snapshots.filter(s => s.id !== id);
+    } catch (e) {
+      alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+    } finally {
+      deletingSnapshot = null;
+    }
+  }
+
+  return {
+    get volume() { return volume; },
+    get snapshots() { return snapshots; },
+    get instances() { return instances; },
+    get loading() { return loading; },
+    get error() { return error; },
+    get deleting() { return deleting; },
+    get deletingSnapshot() { return deletingSnapshot; },
+    get showSnapshotForm() { return showSnapshotForm; },
+    set showSnapshotForm(v: boolean) { showSnapshotForm = v; },
+    get snapshotName() { return snapshotName; },
+    set snapshotName(v: string) { snapshotName = v; },
+    get snapshotDesc() { return snapshotDesc; },
+    set snapshotDesc(v: string) { snapshotDesc = v; },
+    get creatingSnapshot() { return creatingSnapshot; },
+    get snapshotError() { return snapshotError; },
+    get showAttachModal() { return showAttachModal; },
+    get attachInstanceId() { return attachInstanceId; },
+    set attachInstanceId(v: string) { attachInstanceId = v; },
+    get attaching() { return attaching; },
+    get attachError() { return attachError; },
+    get canDelete() { return canDelete; },
+    loadAll,
+    reset,
+    openAttachModal,
+    closeAttachModal,
+    attachVolume,
+    deleteVolume,
+    startSnapshot,
+    cancelSnapshot,
+    createSnapshot,
+    deleteSnapshot,
+  };
+}
+
+export type VolumeDetailStore = ReturnType<typeof createVolumeDetailStore>;
+
+const VOLUME_DETAIL_KEY = Symbol('volume-detail');
+
+export function provideVolumeDetail(store: VolumeDetailStore) {
+  setContext(VOLUME_DETAIL_KEY, store);
+}
+
+export function useVolumeDetail(): VolumeDetailStore {
+  const store = getContext<VolumeDetailStore | undefined>(VOLUME_DETAIL_KEY);
+  if (!store) throw new Error('useVolumeDetail must be called within VolumeDetailPanel');
+  return store;
+}

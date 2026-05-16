@@ -6,10 +6,10 @@
   import type { Volume } from '$lib/types/resources';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import VolumeDetailPanel from '$lib/components/VolumeDetailPanel.svelte';
-  import VolumeTransferModal from '$lib/components/VolumeTransferModal.svelte';
-  import VolumeExtendModal from '$lib/components/VolumeExtendModal.svelte';
-  import VolumeBackupModal from '$lib/components/VolumeBackupModal.svelte';
-  import VolumeSnapshotModal from '$lib/components/VolumeSnapshotModal.svelte';
+  import VolumeTransferModal from '$lib/components/volume/VolumeTransferModal.svelte';
+  import VolumeExtendModal from '$lib/components/volume/VolumeExtendModal.svelte';
+  import VolumeBackupModal from '$lib/components/volume/VolumeBackupModal.svelte';
+  import VolumeSnapshotModal from '$lib/components/volume/VolumeSnapshotModal.svelte';
   import SlidePanel from '$lib/components/SlidePanel.svelte';
   import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
   import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
