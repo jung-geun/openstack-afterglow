@@ -53,6 +53,7 @@ from app.services.cache import (
     ttl_slow,
     ttl_static,
 )
+from app.services.cache import invalidation as cache_invalidation
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -349,6 +350,8 @@ async def create_instance(
             resource_id=server.id,
             resource_name=req.name,
         )
+        await invalidate(f"afterglow:nova:{project_id}:instances")
+        await cache_invalidation.invalidate_mutation_count("nova", project_id)
         return server
 
     except HTTPException:
@@ -659,6 +662,9 @@ async def create_instance_async(
                 resource_id=server_id,
                 resource_name=req.name,
             )
+            _pid = conn._afterglow_project_id
+            await invalidate(f"afterglow:nova:{_pid}:instances")
+            await cache_invalidation.invalidate_mutation_count("nova", _pid)
 
         except Exception as e:
             error_detail = str(e)
@@ -765,6 +771,7 @@ async def delete_instance(
     await invalidate(f"afterglow:nova:{pid}:instances")
     await invalidate(f"afterglow:nova:{pid}:instance:{instance_id}")
     await invalidate(f"afterglow:neutron:{pid}:port_mac_map")
+    await cache_invalidation.invalidate_mutation_count("nova", pid)
     await rec(
         token_info,
         conn,
@@ -1218,6 +1225,7 @@ async def _simple_action(
         await asyncio.to_thread(nova_fn, conn, instance_id)
         await invalidate(f"afterglow:nova:{pid}:instance:{instance_id}")
         await invalidate(f"afterglow:nova:{pid}:instances")
+        await cache_invalidation.invalidate_mutation_count("nova", pid)
         await rec(
             token_info,
             conn,
