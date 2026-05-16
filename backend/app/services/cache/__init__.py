@@ -43,7 +43,6 @@ from app.services.cache.ttl import ttl_fast, ttl_normal, ttl_slow, ttl_static
 logger = logging.getLogger(__name__)
 
 
-# ── 전역 백엔드 싱글톤 ─────────────────────────────────────────────────────
 _backend: Cache | None = None
 
 
@@ -66,7 +65,6 @@ def set_backend(backend: Cache | None) -> None:
     _backend = backend
 
 
-# ── 직렬화 헬퍼 ────────────────────────────────────────────────────────────
 def _make_serializable(obj: Any) -> Any:
     """Pydantic 모델 등을 JSON 직렬화 가능한 형태로 변환."""
     if hasattr(obj, "model_dump"):
@@ -78,7 +76,6 @@ def _make_serializable(obj: Any) -> Any:
     return obj
 
 
-# ── 레거시 호환 API ────────────────────────────────────────────────────────
 def _get_client() -> aioredis.Redis:
     """레거시 호환 — 동기 진입점에서도 raw redis 클라이언트를 반환.
 
@@ -91,17 +88,7 @@ def _get_client() -> aioredis.Redis:
 
 
 async def _get_redis() -> aioredis.Redis:
-    """Redis 클라이언트를 반환. 세션 관리 등 캐시 레이어 외부에서 직접 사용 시.
-
-    레거시 호환 — 다음 모듈들이 사용:
-    - app/api/deps.py (세션 timeout/extend)
-    - app/api/object_storage/containers.py
-    - app/api/identity/admin_identity.py
-    - app/api/container/containers.py
-    - app/services/auto_backup.py
-    - app/services/notion_sync.py
-    - app/main.py
-    """
+    """레거시 호환 — raw redis 클라이언트를 반환 (캐시 레이어 외부 직접 접근용)."""
     return _get_client()
 
 
@@ -191,7 +178,6 @@ async def invalidate_project(project_id: str, service: str = "*") -> None:
     await invalidate(f"afterglow:{service}:{project_id}:*")
 
 
-# ── public 재노출 ───────────────────────────────────────────────────────────
 __all__ = [
     # 레거시 호환
     "cached_call",

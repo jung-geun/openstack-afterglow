@@ -16,9 +16,8 @@ from collections.abc import AsyncIterator
 import redis.asyncio as aioredis
 
 from app.config import get_settings
-from app.services.cache import metrics as metrics
+from app.services.cache import metrics
 from app.services.cache.base import Cache
-from app.services.cache.keys import tag_key as build_tag_key
 
 logger = logging.getLogger(__name__)
 
@@ -162,12 +161,6 @@ class RedisBackend(Cache):
             logger.warning("SCAN 실패 (%s): %s", pattern, e)
         return keys
 
-    async def scan_iter(self, pattern: str) -> AsyncIterator[str]:
-        """레거시 호환용 — invalidate(pattern) 헬퍼에서 사용."""
-        client = self._get_client()
-        async for key in client.scan_iter(match=pattern, count=100):
-            yield key
-
     def raw_client(self) -> aioredis.Redis:
         """레거시 _get_redis() / _get_client() 호환용 raw 핸들."""
         return self._get_client()
@@ -182,5 +175,4 @@ class RedisBackend(Cache):
         return f"tag:{tag}"
 
 
-# build_tag_key 는 keys.py 의 정규 빌더. backend 외부에서 일관된 키 생성용으로 재노출.
-__all__ = ["RedisBackend", "TAG_SET_TTL", "build_tag_key"]
+__all__ = ["RedisBackend", "TAG_SET_TTL"]
