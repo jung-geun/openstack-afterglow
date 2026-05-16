@@ -1,4 +1,5 @@
 import { get } from 'svelte/store';
+import { getContext, setContext } from 'svelte';
 import { auth } from '$lib/stores/auth';
 import { api, ApiError } from '$lib/api/client';
 import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
@@ -543,3 +544,15 @@ export function createInstanceDetailStore(opts: InstanceDetailStoreOpts) {
 }
 
 export type InstanceDetailStore = ReturnType<typeof createInstanceDetailStore>;
+
+const INSTANCE_DETAIL_KEY = Symbol('instance-detail');
+
+export function provideInstanceDetail(store: InstanceDetailStore) {
+	setContext(INSTANCE_DETAIL_KEY, store);
+}
+
+export function useInstanceDetail(): InstanceDetailStore {
+	const store = getContext<InstanceDetailStore | undefined>(INSTANCE_DETAIL_KEY);
+	if (!store) throw new Error('useInstanceDetail must be called within InstanceDetailPanel');
+	return store;
+}
