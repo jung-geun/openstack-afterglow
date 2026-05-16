@@ -238,3 +238,34 @@ export interface DbBackup {
   description: string;
   instance_id?: string;
 }
+
+export interface ImageDetail {
+  id: string;
+  name: string;
+  status: string;
+  size: number | null;
+  min_disk: number;
+  min_ram: number;
+  disk_format: string | null;
+  os_type: string | null;
+  os_distro: string | null;
+  created_at: string | null;
+  owner: string | null;
+  visibility: string | null;
+  checksum: string | null;
+  container_format: string | null;
+  virtual_size: number | null;
+  updated_at: string | null;
+  protected: boolean;
+  tags: string[];
+  properties: Record<string, string>;
+  os_hash_algo: string | null;
+  os_hash_value: string | null;
+  direct_url: string | null;
+}
+
+export interface ImageMember {
+  member_id: string;
+  status: string;
+  created_at: string | null;
+}

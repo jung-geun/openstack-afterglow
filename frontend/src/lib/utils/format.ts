@@ -73,6 +73,40 @@ const MIME_SHORT: Record<string, string> = {
 	'text/yaml': 'YAML'
 };
 
+/** 바이트를 GB/MB로 포맷 (이미지 크기 표시용) */
+export function formatSize(bytes: number | null): string {
+	if (!bytes) return '-';
+	const gb = bytes / 1024 / 1024 / 1024;
+	return gb >= 1 ? `${Math.round(gb * 10) / 10} GB` : `${Math.round(bytes / 1024 / 1024)} MB`;
+}
+
+/** ISO 날짜시간 문자열을 "YYYY-MM-DD HH:mm:ss" 형식으로 표시 */
+export function formatIsoDateTime(s: string | null): string {
+	if (!s) return '-';
+	return s.replace('T', ' ').slice(0, 19);
+}
+
+/** 이미지 공개 범위에 따른 배지 CSS 클래스 */
+export function visibilityBadge(v: string | null): string {
+	switch (v) {
+		case 'public':    return 'text-green-400 bg-green-900/30';
+		case 'shared':    return 'text-blue-400 bg-blue-900/30';
+		case 'community': return 'text-cyan-400 bg-cyan-900/30';
+		default:          return 'text-gray-400 bg-gray-800';
+	}
+}
+
+/** 이미지 공개 범위 한글 레이블 */
+export function visibilityLabel(v: string | null): string {
+	switch (v) {
+		case 'public':    return '공개';
+		case 'shared':    return '공유';
+		case 'community': return '커뮤니티';
+		case 'private':   return '비공개';
+		default:          return v ?? '-';
+	}
+}
+
 export function shortContentType(ct: string | null | undefined): string {
 	if (!ct) return '-';
 	const exact = MIME_SHORT[ct];
