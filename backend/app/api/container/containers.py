@@ -20,7 +20,9 @@ from fastapi import (
 from pydantic import BaseModel
 
 from app.api.common.activity_recorder import rec
-from app.api.deps import get_os_conn, get_token_info
+from app.api.deps import cache_bypass, get_os_conn, get_token_info
+from app.services import cache
+from app.services.cache import invalidation, keys
 from app.models.containers import (
     ContainerListResponse,
     CreateZunContainerRequest,
@@ -36,24 +38,47 @@ router = APIRouter()
 
 
 @router.get("", response_model=ContainerListResponse)
-async def list_containers(conn: openstack.connection.Connection = Depends(get_os_conn)):
-    try:
-        items = await asyncio.to_thread(zun.list_containers, conn)
-        return ContainerListResponse(items=items)
-    except ZunServiceUnavailable:
-        return ContainerListResponse(
-            items=[],
-            service_available=False,
-            message="컨테이너 서비스에 연결할 수 없습니다",
-        )
-    except Exception:
-        raise HTTPException(status_code=500, detail="컨테이너 목록 조회 실패")
+async def list_containers(
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    bypass: bool = Depends(cache_bypass),
+):
+    pid = conn._afterglow_project_id
+
+    async def _load():
+        try:
+            items = await asyncio.to_thread(zun.list_containers, conn)
+            return ContainerListResponse(items=items)
+        except ZunServiceUnavailable:
+            return ContainerListResponse(
+                items=[],
+                service_available=False,
+                message="컨테이너 서비스에 연결할 수 없습니다",
+            )
+        except Exception:
+            raise HTTPException(status_code=500, detail="컨테이너 목록 조회 실패")
+
+    return await cache.cached_call(
+        keys.project_key("zun", pid, "containers"),
+        cache.ttl_normal(),
+        _load,
+        refresh=bypass,
+    )
 
 
 @router.get("/{container_id}", response_model=ZunContainerInfo)
-async def get_container(container_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def get_container(
+    container_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    bypass: bool = Depends(cache_bypass),
+):
+    pid = conn._afterglow_project_id
     try:
-        return await asyncio.to_thread(zun.get_container, conn, container_id)
+        return await cache.cached_call(
+            keys.project_key("zun", pid, "containers", sub=container_id),
+            cache.ttl_normal(),
+            lambda: zun.get_container(conn, container_id),
+            refresh=bypass,
+        )
     except Exception:
         raise HTTPException(status_code=404, detail="컨테이너를 찾을 수 없습니다")
 
@@ -80,6 +105,9 @@ async def create_container(
             req.auto_remove,
             ports,
         )
+        pid = conn._afterglow_project_id
+        await cache.invalidate(f"afterglow:zun:{pid}:*")
+        await invalidation.invalidate_mutation_count("zun", pid)
         await rec(token_info, conn, resource_type="container", action="create", resource_name=req.name)
         return result
     except Exception as e:
@@ -103,6 +131,9 @@ async def delete_container(
 ):
     try:
         await asyncio.to_thread(zun.delete_container, conn, container_id)
+        pid = conn._afterglow_project_id
+        await cache.invalidate(f"afterglow:zun:{pid}:*")
+        await invalidation.invalidate_mutation_count("zun", pid)
         await rec(token_info, conn, resource_type="container", action="delete", resource_id=container_id)
     except Exception as e:
         await rec(
@@ -121,6 +152,9 @@ async def delete_container(
 async def start_container(container_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
     try:
         await asyncio.to_thread(zun.start_container, conn, container_id)
+        pid = conn._afterglow_project_id
+        await cache.invalidate(f"afterglow:zun:{pid}:containers:{container_id}")
+        await invalidation.invalidate_mutation_count("zun", pid)
     except Exception:
         raise HTTPException(status_code=500, detail="컨테이너 시작 실패")
 
@@ -129,6 +163,9 @@ async def start_container(container_id: str, conn: openstack.connection.Connecti
 async def stop_container(container_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
     try:
         await asyncio.to_thread(zun.stop_container, conn, container_id)
+        pid = conn._afterglow_project_id
+        await cache.invalidate(f"afterglow:zun:{pid}:containers:{container_id}")
+        await invalidation.invalidate_mutation_count("zun", pid)
     except Exception:
         raise HTTPException(status_code=500, detail="컨테이너 중지 실패")
 

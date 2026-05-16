@@ -46,8 +46,7 @@ async def test_get_container_unauthenticated():
 
 @pytest.mark.asyncio
 async def test_get_container_success(client):
-    with patch("app.api.container.containers.asyncio") as mock_asyncio:
-        mock_asyncio.to_thread = AsyncMock(return_value=_make_container())
+    with patch("app.api.container.containers.zun.get_container", return_value=_make_container()):
         resp = await client.get("/api/containers/c-1")
     assert resp.status_code == 200
 

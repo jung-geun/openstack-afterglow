@@ -84,8 +84,7 @@ async def test_get_cluster_unauthenticated():
 
 @pytest.mark.asyncio
 async def test_get_cluster_success(client):
-    with patch("app.api.container.clusters.asyncio") as mock_asyncio:
-        mock_asyncio.to_thread = AsyncMock(return_value=_make_cluster())
+    with patch("app.api.container.clusters.magnum.get_cluster", return_value=_make_cluster()):
         resp = await client.get("/api/clusters/cl-1")
     assert resp.status_code == 200
 
