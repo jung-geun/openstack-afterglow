@@ -2,11 +2,23 @@
 	import { onMount } from 'svelte';
 	import { auth } from '$lib/stores/auth';
 	import { api } from '$lib/api/client';
-	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import { siteConfig } from '$lib/config/site';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
+	import ServiceTable from '$lib/components/admin/services/ServiceTable.svelte';
+	import NetworkAgentTable from '$lib/components/admin/services/NetworkAgentTable.svelte';
+	import EndpointsTable from '$lib/components/admin/services/EndpointsTable.svelte';
+	import StoragePoolsList from '$lib/components/admin/services/StoragePoolsList.svelte';
+	import ServiceTabs from '$lib/components/admin/services/ServiceTabs.svelte';
+	import {
+		COMPUTE_COLUMNS,
+		BLOCK_STORAGE_COLUMNS,
+		SHARED_FS_COLUMNS,
+		ORCHESTRATION_COLUMNS,
+		CONTAINER_COLUMNS,
+		CONTAINER_INFRA_COLUMNS,
+	} from '$lib/components/admin/services/serviceColumns.js';
 
 	interface Service {
 		id: string;
@@ -58,10 +70,8 @@
 	let endpoints = $state<EndpointGroup[]>([]);
 	let storagePools = $state<StoragePool[]>([]);
 
-	// 카테고리별 독립 로딩 상태
 	const allCategories: TabKey[] = ['compute', 'network', 'block_storage', 'shared_file_system', 'orchestration', 'container', 'container_infra', 'endpoints', 'storage_pools'];
 
-	// 선택적 서비스와 탭 키 매핑 (서비스가 비활성이면 탭 숨김)
 	const serviceTabMap: Partial<Record<TabKey, keyof NonNullable<typeof $siteConfig>['services']>> = {
 		container_infra: 'magnum',
 		shared_file_system: 'manila',
@@ -69,7 +79,6 @@
 	};
 
 	let loadingMap = $state<Record<TabKey, boolean>>(Object.fromEntries(allCategories.map(c => [c, true])) as Record<TabKey, boolean>);
-
 	let activeTab = $state<TabKey>('compute');
 
 	const token = $derived($auth.token ?? undefined);
@@ -126,15 +135,9 @@
 		}
 	}
 
-	function loadAll(isRefresh = false) {
-		activeCategories.forEach(cat => loadCategory(cat, isRefresh));
-	}
+	function loadAll(isRefresh = false) { activeCategories.forEach(cat => loadCategory(cat, isRefresh)); }
+	function refresh() { loadAll(true); }
 
-	function refresh() {
-		loadAll(true);
-	}
-
-	// activeTab이 숨겨진 탭이면 첫 번째 visible 탭으로 이동
 	$effect(() => {
 		if (visibleTabs.length > 0 && !visibleTabs.find(t => t.key === activeTab)) {
 			activeTab = visibleTabs[0].key;
@@ -145,15 +148,10 @@
 		storageKey: 'admin-services',
 		defaultActive: true,
 		defaultInterval: 15,
-		intervalOptions: [10, 15, 30, 60]
+		intervalOptions: [10, 15, 30, 60],
 	});
 
 	onMount(() => { loadAll(); });
-
-	function fmtTime(s: string | null) {
-		if (!s) return '-';
-		return s.slice(0, 19).replace('T', ' ');
-	}
 </script>
 
 <div class="p-4 md:p-8 max-w-7xl mx-auto">
@@ -163,367 +161,34 @@
 				bind:active={ar.active}
 				bind:intervalSeconds={ar.intervalSeconds}
 				intervalOptions={ar.intervalOptions}
-				onManualRefresh={() => { refresh(); }}
+				onManualRefresh={refresh}
 			/>
 		{/snippet}
 	</PageHeader>
 
-	<!-- 탭 바 -->
-	<div class="flex flex-wrap gap-1 mb-6 border-b border-gray-800 pb-0">
-		{#each visibleTabs as tab}
-			<button
-				onclick={() => activeTab = tab.key}
-				class="px-3 py-2 text-xs font-medium rounded-t-lg transition-colors relative -mb-px border-b-2 {activeTab === tab.key
-					? 'border-blue-500 text-blue-400 bg-blue-900/10'
-					: 'border-transparent text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'}"
-			>
-				{tab.label}
-				{#if loadingMap[tab.key]}
-					<span class="ml-1.5 inline-block w-3 h-3 border border-gray-500 border-t-blue-400 rounded-full animate-spin"></span>
-				{:else}
-					<span class="ml-1.5 text-xs px-1.5 py-0.5 rounded-full {activeTab === tab.key ? 'bg-blue-900/50 text-blue-300' : 'bg-gray-800 text-gray-500'}">{tab.count()}</span>
-				{/if}
-			</button>
-		{/each}
-	</div>
+	<ServiceTabs
+		tabs={visibleTabs.map(t => ({ key: t.key, label: t.label, count: t.count() }))}
+		bind:activeTab
+		{loadingMap}
+	/>
 
-	<!-- Compute (Nova) -->
 	{#if activeTab === 'compute'}
-		{#if loadingMap.compute}
-			<LoadingSkeleton variant="table" rows={8} />
-		{:else if computeServices.length === 0}
-			<div class="text-gray-500 text-sm py-8 text-center">데이터 없음</div>
-		{:else}
-			<div class="overflow-x-auto">
-				<table class="w-full text-sm">
-					<thead>
-						<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
-							<th class="text-left py-2 pr-4">Binary</th>
-							<th class="text-left py-2 pr-4">Host</th>
-							<th class="text-left py-2 pr-4">Zone</th>
-							<th class="text-left py-2 pr-4">Status</th>
-							<th class="text-left py-2 pr-4">State</th>
-							<th class="text-left py-2 pr-4">Disabled Reason</th>
-							<th class="text-left py-2">Updated</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each computeServices as s (s.id || s.binary + s.host)}
-							<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/30">
-								<td class="py-2 pr-4 text-white font-mono">{s.binary}</td>
-								<td class="py-2 pr-4 text-gray-300">{s.host}</td>
-								<td class="py-2 pr-4 text-gray-400">{s.zone}</td>
-								<td class="py-2 pr-4"><span class="px-1.5 py-0.5 rounded text-xs font-medium {s.status === 'enabled' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{s.status}</span></td>
-								<td class="py-2 pr-4"><span class="px-1.5 py-0.5 rounded text-xs font-medium {s.state === 'up' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{s.state}</span></td>
-								<td class="py-2 pr-4 text-gray-500">{s.disabled_reason || '-'}</td>
-								<td class="py-2 text-gray-500">{fmtTime(s.updated_at)}</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			</div>
-		{/if}
+		<ServiceTable services={computeServices} columns={COMPUTE_COLUMNS} loading={loadingMap.compute} emptyMessage="데이터 없음" />
+	{:else if activeTab === 'network'}
+		<NetworkAgentTable agents={networkAgents} loading={loadingMap.network} emptyMessage="데이터 없음" />
+	{:else if activeTab === 'block_storage'}
+		<ServiceTable services={blockStorageServices} columns={BLOCK_STORAGE_COLUMNS} loading={loadingMap.block_storage} emptyMessage="데이터 없음" />
+	{:else if activeTab === 'shared_file_system'}
+		<ServiceTable services={sharedFsServices} columns={SHARED_FS_COLUMNS} loading={loadingMap.shared_file_system} emptyMessage="Manila 서비스가 없거나 접근할 수 없습니다" />
+	{:else if activeTab === 'orchestration'}
+		<ServiceTable services={orchestrationServices} columns={ORCHESTRATION_COLUMNS} loading={loadingMap.orchestration} emptyMessage="Heat 서비스가 없거나 접근할 수 없습니다" />
+	{:else if activeTab === 'container'}
+		<ServiceTable services={containerServices} columns={CONTAINER_COLUMNS} loading={loadingMap.container} emptyMessage="Zun 서비스가 없거나 접근할 수 없습니다" />
+	{:else if activeTab === 'container_infra'}
+		<ServiceTable services={magnumServices} columns={CONTAINER_INFRA_COLUMNS} loading={loadingMap.container_infra} emptyMessage="Magnum 서비스가 없거나 접근할 수 없습니다" />
+	{:else if activeTab === 'endpoints'}
+		<EndpointsTable {endpoints} loading={loadingMap.endpoints} emptyMessage="엔드포인트 정보를 가져올 수 없습니다" />
+	{:else if activeTab === 'storage_pools'}
+		<StoragePoolsList pools={storagePools} loading={loadingMap.storage_pools} emptyMessage="스토리지 풀 정보를 가져올 수 없습니다" />
 	{/if}
-
-	<!-- Network (Neutron) -->
-	{#if activeTab === 'network'}
-		{#if loadingMap.network}
-			<LoadingSkeleton variant="table" rows={8} />
-		{:else if networkAgents.length === 0}
-			<div class="text-gray-500 text-sm py-8 text-center">데이터 없음</div>
-		{:else}
-			<div class="overflow-x-auto">
-				<table class="w-full text-sm">
-					<thead>
-						<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
-							<th class="text-left py-2 pr-4">Agent Type</th>
-							<th class="text-left py-2 pr-4">Binary</th>
-							<th class="text-left py-2 pr-4">Host</th>
-							<th class="text-left py-2 pr-4">Zone</th>
-							<th class="text-left py-2 pr-4">Alive</th>
-							<th class="text-left py-2 pr-4">Admin State</th>
-							<th class="text-left py-2">Updated</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each networkAgents as a (a.id)}
-							<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/30">
-								<td class="py-2 pr-4 text-white">{a.agent_type}</td>
-								<td class="py-2 pr-4 text-gray-300 font-mono">{a.binary}</td>
-								<td class="py-2 pr-4 text-gray-300">{a.host}</td>
-								<td class="py-2 pr-4 text-gray-400">{a.availability_zone || '-'}</td>
-								<td class="py-2 pr-4"><span class="px-1.5 py-0.5 rounded text-xs font-medium {a.alive ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{a.alive ? 'alive' : 'down'}</span></td>
-								<td class="py-2 pr-4"><span class="px-1.5 py-0.5 rounded text-xs font-medium {a.admin_state_up ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{a.admin_state_up ? 'UP' : 'DOWN'}</span></td>
-								<td class="py-2 text-gray-500">{fmtTime(a.updated_at)}</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			</div>
-		{/if}
-	{/if}
-
-	<!-- Block Storage (Cinder) -->
-	{#if activeTab === 'block_storage'}
-		{#if loadingMap.block_storage}
-			<LoadingSkeleton variant="table" rows={8} />
-		{:else if blockStorageServices.length === 0}
-			<div class="text-gray-500 text-sm py-8 text-center">데이터 없음</div>
-		{:else}
-			<div class="overflow-x-auto">
-				<table class="w-full text-sm">
-					<thead>
-						<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
-							<th class="text-left py-2 pr-4">Binary</th>
-							<th class="text-left py-2 pr-4">Host</th>
-							<th class="text-left py-2 pr-4">Zone</th>
-							<th class="text-left py-2 pr-4">Status</th>
-							<th class="text-left py-2 pr-4">State</th>
-							<th class="text-left py-2 pr-4">Disabled Reason</th>
-							<th class="text-left py-2">Updated</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each blockStorageServices as s (s.id || s.binary + s.host)}
-							<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/30">
-								<td class="py-2 pr-4 text-white font-mono">{s.binary}</td>
-								<td class="py-2 pr-4 text-gray-300">{s.host}</td>
-								<td class="py-2 pr-4 text-gray-400">{s.zone}</td>
-								<td class="py-2 pr-4"><span class="px-1.5 py-0.5 rounded text-xs font-medium {s.status === 'enabled' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{s.status}</span></td>
-								<td class="py-2 pr-4"><span class="px-1.5 py-0.5 rounded text-xs font-medium {s.state === 'up' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{s.state}</span></td>
-								<td class="py-2 pr-4 text-gray-500">{s.disabled_reason || '-'}</td>
-								<td class="py-2 text-gray-500">{fmtTime(s.updated_at)}</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			</div>
-		{/if}
-	{/if}
-
-	<!-- File Storage (Manila) -->
-	{#if activeTab === 'shared_file_system'}
-		{#if loadingMap.shared_file_system}
-			<LoadingSkeleton variant="table" rows={8} />
-		{:else if sharedFsServices.length === 0}
-			<div class="text-gray-500 text-sm py-8 text-center">Manila 서비스가 없거나 접근할 수 없습니다</div>
-		{:else}
-			<div class="overflow-x-auto">
-				<table class="w-full text-sm">
-					<thead>
-						<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
-							<th class="text-left py-2 pr-4">Binary</th>
-							<th class="text-left py-2 pr-4">Host</th>
-							<th class="text-left py-2 pr-4">Zone</th>
-							<th class="text-left py-2 pr-4">Status</th>
-							<th class="text-left py-2 pr-4">State</th>
-							<th class="text-left py-2">Updated</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each sharedFsServices as s (s.id || s.binary + s.host)}
-							<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/30">
-								<td class="py-2 pr-4 text-white font-mono">{s.binary}</td>
-								<td class="py-2 pr-4 text-gray-300">{s.host}</td>
-								<td class="py-2 pr-4 text-gray-400">{s.zone}</td>
-								<td class="py-2 pr-4"><span class="px-1.5 py-0.5 rounded text-xs font-medium {s.status === 'enabled' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{s.status}</span></td>
-								<td class="py-2 pr-4"><span class="px-1.5 py-0.5 rounded text-xs font-medium {s.state === 'up' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{s.state}</span></td>
-								<td class="py-2 text-gray-500">{fmtTime(s.updated_at)}</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			</div>
-		{/if}
-	{/if}
-
-	<!-- Orchestrator (Heat) -->
-	{#if activeTab === 'orchestration'}
-		{#if loadingMap.orchestration}
-			<LoadingSkeleton variant="table" rows={8} />
-		{:else if orchestrationServices.length === 0}
-			<div class="text-gray-500 text-sm py-8 text-center">Heat 서비스가 없거나 접근할 수 없습니다</div>
-		{:else}
-			<div class="overflow-x-auto">
-				<table class="w-full text-sm">
-					<thead>
-						<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
-							<th class="text-left py-2 pr-4">Binary</th>
-							<th class="text-left py-2 pr-4">Host</th>
-							<th class="text-left py-2 pr-4">Status</th>
-							<th class="text-left py-2 pr-4">State</th>
-							<th class="text-left py-2">Updated</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each orchestrationServices as s (s.id || s.binary + s.host)}
-							<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/30">
-								<td class="py-2 pr-4 text-white font-mono">{s.binary}</td>
-								<td class="py-2 pr-4 text-gray-300">{s.host}</td>
-								<td class="py-2 pr-4"><span class="px-1.5 py-0.5 rounded text-xs font-medium {s.status === 'enabled' || s.status === 'up' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{s.status}</span></td>
-								<td class="py-2 pr-4"><span class="px-1.5 py-0.5 rounded text-xs font-medium {s.state === 'up' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{s.state}</span></td>
-								<td class="py-2 text-gray-500">{fmtTime(s.updated_at)}</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			</div>
-		{/if}
-	{/if}
-
-	<!-- Container (Zun) -->
-	{#if activeTab === 'container'}
-		{#if loadingMap.container}
-			<LoadingSkeleton variant="table" rows={8} />
-		{:else if containerServices.length === 0}
-			<div class="text-gray-500 text-sm py-8 text-center">Zun 서비스가 없거나 접근할 수 없습니다</div>
-		{:else}
-			<div class="overflow-x-auto">
-				<table class="w-full text-sm">
-					<thead>
-						<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
-							<th class="text-left py-2 pr-4">Binary</th>
-							<th class="text-left py-2 pr-4">Host</th>
-							<th class="text-left py-2 pr-4">Zone</th>
-							<th class="text-left py-2 pr-4">Status</th>
-							<th class="text-left py-2 pr-4">State</th>
-							<th class="text-left py-2">Updated</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each containerServices as s (s.id || s.binary + s.host)}
-							<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/30">
-								<td class="py-2 pr-4 text-white font-mono">{s.binary}</td>
-								<td class="py-2 pr-4 text-gray-300">{s.host}</td>
-								<td class="py-2 pr-4 text-gray-400">{s.zone}</td>
-								<td class="py-2 pr-4"><span class="px-1.5 py-0.5 rounded text-xs font-medium {s.status === 'enabled' || s.status === 'up' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{s.status}</span></td>
-								<td class="py-2 pr-4"><span class="px-1.5 py-0.5 rounded text-xs font-medium {s.state === 'up' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{s.state}</span></td>
-								<td class="py-2 text-gray-500">{fmtTime(s.updated_at)}</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			</div>
-		{/if}
-	{/if}
-
-	<!-- Magnum (Container Infra) -->
-	{#if activeTab === 'container_infra'}
-		{#if loadingMap.container_infra}
-			<LoadingSkeleton variant="table" rows={8} />
-		{:else if magnumServices.length === 0}
-			<div class="text-gray-500 text-sm py-8 text-center">Magnum 서비스가 없거나 접근할 수 없습니다</div>
-		{:else}
-			<div class="overflow-x-auto">
-				<table class="w-full text-sm">
-					<thead>
-						<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
-							<th class="text-left py-2 pr-4">Binary</th>
-							<th class="text-left py-2 pr-4">Host</th>
-							<th class="text-left py-2 pr-4">Status</th>
-							<th class="text-left py-2 pr-4">State</th>
-							<th class="text-left py-2 pr-4">Disabled Reason</th>
-							<th class="text-left py-2">Updated</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each magnumServices as s (s.id || s.binary + s.host)}
-							<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/30">
-								<td class="py-2 pr-4 text-white font-mono">{s.binary}</td>
-								<td class="py-2 pr-4 text-gray-300">{s.host}</td>
-								<td class="py-2 pr-4"><span class="px-1.5 py-0.5 rounded text-xs font-medium {s.status === 'enabled' || s.status === 'up' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{s.status}</span></td>
-								<td class="py-2 pr-4"><span class="px-1.5 py-0.5 rounded text-xs font-medium {s.state === 'up' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{s.state}</span></td>
-								<td class="py-2 pr-4 text-gray-500">{s.disabled_reason || '-'}</td>
-								<td class="py-2 text-gray-500">{fmtTime(s.updated_at)}</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			</div>
-		{/if}
-	{/if}
-
-	<!-- API Endpoints -->
-	{#if activeTab === 'endpoints'}
-		{#if loadingMap.endpoints}
-			<LoadingSkeleton variant="table" rows={8} />
-		{:else if endpoints.length === 0}
-			<div class="text-gray-500 text-sm py-8 text-center">엔드포인트 정보를 가져올 수 없습니다</div>
-		{:else}
-			<div class="overflow-x-auto">
-				<table class="w-full text-sm">
-					<thead>
-						<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
-							<th class="text-left py-2 pr-6">Name</th>
-							<th class="text-left py-2 pr-6">Service</th>
-							<th class="text-left py-2 pr-6">Region</th>
-							<th class="text-left py-2">Endpoints</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each [...endpoints].sort((a, b) => (a.name || '').localeCompare(b.name || '')) as ep (ep.service_id)}
-							<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/30 align-top">
-								<td class="py-3 pr-6 text-white font-medium">{ep.name}</td>
-								<td class="py-3 pr-6 text-gray-400">{ep.service}</td>
-								<td class="py-3 pr-6 text-gray-400">{ep.region}</td>
-								<td class="py-3">
-									<div class="space-y-1">
-										{#each Object.entries(ep.endpoints).sort() as [iface, url]}
-											<div class="flex items-start gap-2">
-												<span class="text-gray-500 w-14 shrink-0 font-medium">{iface}:</span>
-												<span class="text-gray-300 font-mono break-all">{url}</span>
-											</div>
-										{/each}
-									</div>
-								</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			</div>
-		{/if}
-	{/if}
-
-	<!-- Storage Pools -->
-	{#if activeTab === 'storage_pools'}
-		{#if loadingMap.storage_pools}
-			<LoadingSkeleton variant="table" rows={4} />
-		{:else if storagePools.length === 0}
-			<div class="text-gray-500 text-sm py-8 text-center">스토리지 풀 정보를 가져올 수 없습니다</div>
-		{:else}
-			<div class="space-y-4">
-				{#each storagePools as pool (pool.name)}
-					{@const usedGb = pool.total_capacity_gb - pool.free_capacity_gb}
-					{@const pct = pool.total_capacity_gb > 0 ? Math.min(100, (usedGb / pool.total_capacity_gb) * 100) : 0}
-					<div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
-						<div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
-							<div>
-								<div class="text-sm font-medium text-white">{pool.name}</div>
-								<div class="text-xs text-gray-500 mt-0.5">
-									{#if pool.storage_protocol}<span class="mr-3">Protocol: {pool.storage_protocol}</span>{/if}
-									{#if pool.volume_backend_name}<span class="mr-3">Backend: {pool.volume_backend_name}</span>{/if}
-									{#if pool.vendor_name}<span>Vendor: {pool.vendor_name}</span>{/if}
-								</div>
-							</div>
-							<div class="text-right">
-								<div class="text-sm text-white">
-									<span class="font-medium">{usedGb.toFixed(1)}</span>
-									<span class="text-gray-400"> / {pool.total_capacity_gb.toFixed(1)} GiB</span>
-								</div>
-								<div class="text-xs text-gray-500">여유: {pool.free_capacity_gb.toFixed(1)} GiB</div>
-							</div>
-						</div>
-						<div class="w-full h-2 bg-gray-800 rounded-full overflow-hidden">
-							<div
-								class="h-full rounded-full transition-all"
-								style="width: {pct.toFixed(1)}%; background: {pct > 85 ? 'var(--gradient-usage-danger)' : pct > 65 ? 'var(--gradient-usage-warning)' : 'var(--gradient-usage)'}"
-							></div>
-						</div>
-						<div class="text-xs text-gray-500 mt-1">{pct.toFixed(1)}% 사용 중</div>
-					</div>
-				{/each}
-			</div>
-		{/if}
-	{/if}
-
 </div>
