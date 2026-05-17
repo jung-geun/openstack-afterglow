@@ -64,6 +64,60 @@ write_files:
       journalctl -u k3s-agent --no-pager -n 50 >> "$LOG" 2>&1 || true
       exit 1
 
+  - path: /usr/local/sbin/afterglow-nic-up.sh
+    permissions: "0750"
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      IFACE="${1:-}"
+      [ -z "${IFACE}" ] && exit 0
+      # 가상/루프 인터페이스 제외
+      case "${IFACE}" in
+        lo|lo:*|cni*|flannel*|veth*|kube*|dummy*|tunl*) exit 0 ;;
+      esac
+      NETPLAN_FILE="/etc/netplan/90-afterglow-${IFACE}.yaml"
+      LOCK="/run/afterglow-nic.lock"
+      exec 9>"${LOCK}"
+      flock -x 9
+      if [ -f "${NETPLAN_FILE}" ]; then
+        echo "[afterglow-nic-up] ${IFACE}: netplan already configured, skipping" | systemd-cat -t afterglow-nic-up
+        exit 0
+      fi
+      cat > "${NETPLAN_FILE}" <<EOF
+      network:
+        version: 2
+        ethernets:
+          ${IFACE}:
+            dhcp4: true
+            dhcp6: false
+            link-local: []
+      EOF
+      echo "[afterglow-nic-up] ${IFACE}: applying netplan..." | systemd-cat -t afterglow-nic-up
+      if netplan apply 2>&1 | systemd-cat -t afterglow-nic-up; then
+        echo "[afterglow-nic-up] ${IFACE}: done" | systemd-cat -t afterglow-nic-up
+      else
+        echo "[afterglow-nic-up] ${IFACE}: netplan apply failed, rolling back" | systemd-cat -t afterglow-nic-up
+        rm -f "${NETPLAN_FILE}"
+      fi
+
+  - path: /etc/systemd/system/afterglow-nic-up@.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Afterglow NIC up handler for %i
+      After=network.target
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/sbin/afterglow-nic-up.sh %i
+      StandardOutput=journal
+      StandardError=journal
+
+  - path: /etc/udev/rules.d/99-afterglow-nic.rules
+    permissions: "0644"
+    content: |
+      SUBSYSTEM=="net", ACTION=="add", KERNEL!="lo", KERNEL!="cni*", KERNEL!="flannel*", KERNEL!="veth*", KERNEL!="kube*", KERNEL!="dummy*", KERNEL!="tunl*", RUN+="/bin/systemctl --no-block start afterglow-nic-up@%k.service"
+
   - path: /etc/systemd/system/k3s-agent-join.service
     permissions: "0644"
     content: |
@@ -87,5 +141,6 @@ write_files:
       WantedBy=multi-user.target
 
 runcmd:
+  - udevadm control --reload-rules
   - systemctl daemon-reload
   - systemctl enable --now k3s-agent-join.service

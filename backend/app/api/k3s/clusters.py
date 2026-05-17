@@ -28,7 +28,9 @@ from app.config import get_settings
 from app.database import mark_db_unhealthy
 from app.models.k3s import (
     CreateK3sClusterRequest,
+    K3sAttachInterfaceRequest,
     K3sClusterInfo,
+    K3sInterfaceInfo,
     K3sProgressMessage,
     K3sProgressStep,
     ScaleK3sClusterRequest,
@@ -1064,3 +1066,134 @@ async def delete_k3s_cluster_async(
             yield f"data: {fail.model_dump_json()}\n\n"
 
     return StreamingResponse(gen(), media_type="text/event-stream", headers=_SSE_HEADERS)
+
+
+# ---------------------------------------------------------------------------
+# 노드 네트워크 인터페이스 attach / detach
+# ---------------------------------------------------------------------------
+
+
+def _assert_vm_in_cluster(vm_id: str, cluster: dict) -> str:
+    """vm_id 가 해당 클러스터에 속하면 'server'|'agent' 반환, 아니면 HTTPException 403."""
+    if cluster.get("server_vm_id") == vm_id:
+        return "server"
+    if vm_id in (cluster.get("agent_vm_ids") or []):
+        return "agent"
+    raise HTTPException(status_code=403, detail="해당 VM은 이 클러스터에 속하지 않습니다")
+
+
+@router.get("/{cluster_id}/nodes/{vm_id}/interfaces")
+async def list_node_interfaces(
+    cluster_id: str,
+    vm_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    project_id = conn._afterglow_project_id
+    cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
+    node_role = _assert_vm_in_cluster(vm_id, cluster)
+    ifaces = await asyncio.to_thread(
+        lambda: list(conn.compute.server_interfaces(vm_id))
+    )
+    return [
+        K3sInterfaceInfo(
+            port_id=i.port_id,
+            net_id=i.net_id,
+            fixed_ips=i.fixed_ips or [],
+            vm_id=vm_id,
+            node_role=node_role,
+        )
+        for i in ifaces
+    ]
+
+
+@router.post("/{cluster_id}/nodes/{vm_id}/interfaces", status_code=201)
+async def attach_node_interface(
+    cluster_id: str,
+    vm_id: str,
+    body: K3sAttachInterfaceRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    project_id = conn._afterglow_project_id
+    cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
+    node_role = _assert_vm_in_cluster(vm_id, cluster)
+    try:
+        result = await asyncio.to_thread(nova.attach_interface, conn, vm_id, body.net_id)
+        await invalidate(f"afterglow:neutron:{project_id}:ports:{vm_id}")
+        await invalidate(f"afterglow:neutron:{project_id}:port_mac_map")
+        await invalidate(f"afterglow:k3s:{project_id}:cluster:{cluster_id}")
+        await rec(
+            token_info,
+            conn,
+            resource_type="k3s_cluster",
+            action="k3s.attach_interface",
+            status="success",
+            resource_id=cluster_id,
+            extra={"vm_id": vm_id, "net_id": body.net_id, "node_role": node_role},
+        )
+        return K3sInterfaceInfo(
+            port_id=result["port_id"],
+            net_id=result["net_id"],
+            fixed_ips=result["fixed_ips"],
+            vm_id=vm_id,
+            node_role=node_role,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="k3s_cluster",
+            action="k3s.attach_interface",
+            status="failed",
+            resource_id=cluster_id,
+            error_message=str(e)[:500],
+        )
+        raise HTTPException(status_code=500, detail="인터페이스 attach 실패")
+
+
+@router.delete("/{cluster_id}/nodes/{vm_id}/interfaces/{port_id}", status_code=204)
+async def detach_node_interface(
+    cluster_id: str,
+    vm_id: str,
+    port_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    project_id = conn._afterglow_project_id
+    cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
+    node_role = _assert_vm_in_cluster(vm_id, cluster)
+    try:
+        await asyncio.to_thread(nova.detach_interface, conn, vm_id, port_id)
+        await invalidate(f"afterglow:neutron:{project_id}:ports:{vm_id}")
+        await invalidate(f"afterglow:neutron:{project_id}:port_mac_map")
+        await invalidate(f"afterglow:k3s:{project_id}:cluster:{cluster_id}")
+        await rec(
+            token_info,
+            conn,
+            resource_type="k3s_cluster",
+            action="k3s.detach_interface",
+            status="success",
+            resource_id=cluster_id,
+            extra={"vm_id": vm_id, "port_id": port_id, "node_role": node_role},
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="k3s_cluster",
+            action="k3s.detach_interface",
+            status="failed",
+            resource_id=cluster_id,
+            error_message=str(e)[:500],
+        )
+        raise HTTPException(status_code=500, detail="인터페이스 detach 실패")

@@ -393,18 +393,21 @@ async def get_database_instance(
     token_info: dict = Depends(get_token_info),
     bypass: bool = Depends(cache_bypass),
 ):
-    """DB 인스턴스 상세."""
+    """DB 인스턴스 상세. deleted=1 인 경우 404."""
     from app.services import trove
 
     await _assert_db_instance_owner(conn, instance_id, token_info)
     pid = getattr(conn, "_afterglow_project_id", "unknown")
     key = keys.project_key("trove", pid, "instances", sub=instance_id)
     try:
-        return await cache.cached_call(
+        inst = await cache.cached_call(
             key, cache.ttl_normal(), lambda: trove.get_instance(conn, instance_id), refresh=bypass
         )
     except Exception:
         raise HTTPException(status_code=404, detail="DB 인스턴스를 찾을 수 없습니다")
+    if inst.get("deleted"):
+        raise HTTPException(status_code=404, detail="DB 인스턴스를 찾을 수 없습니다")
+    return inst
 
 
 @router.delete("/{instance_id}", status_code=204)

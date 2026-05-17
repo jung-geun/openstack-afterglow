@@ -844,6 +844,11 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 - [x] Keystone Auth hostNetwork static pod 재설계 (webhook URL을 127.0.0.1:port로 변경) — 20항 참조
 - [x] callback.sh에서 k3s 재시작 루프 감지 시 success=false 보고
 
+### 8.15 k3s 노드 멀티 NIC + DB deleted 인스턴스 필터링 (2026-05-17)
+
+- [x] k3s 노드 멀티 NIC attach/detach API + udev/netplan 자동 적용
+- [x] DB 인스턴스 deleted 필터링 (Trove deleted=1 행 제외)
+
 ---
 
 ## 9. Union Mount 레이어 시스템 v2 (content-addressable)

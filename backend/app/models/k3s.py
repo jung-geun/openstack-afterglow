@@ -157,3 +157,15 @@ class K3sCallbackRequest(BaseModel):
         except ValueError as e:
             raise ValueError(f"server_ip '{v}' 가 유효한 IP 주소가 아닙니다") from e
         return v
+
+
+class K3sAttachInterfaceRequest(BaseModel):
+    net_id: str
+
+
+class K3sInterfaceInfo(BaseModel):
+    port_id: str
+    net_id: str
+    fixed_ips: list[dict]
+    vm_id: str
+    node_role: str  # "server" | "agent"

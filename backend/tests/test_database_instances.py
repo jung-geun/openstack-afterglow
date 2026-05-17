@@ -587,3 +587,57 @@ async def test_mutation_does_not_invalidate_on_failure(client, mock_conn):
         resp = await client.delete("/api/database-instances/inst-1")
     assert resp.status_code == 500
     mock_inv.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# deleted 필터링 (목록에서 deleted=1 행 제외 검증)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_list_instances_filters_deleted():
+    """list_instances가 deleted=1 행을 응답에서 제외하는지 검증."""
+    from app.services import trove as trove_svc
+
+    raw_instances = [
+        {"id": "alive-1", "name": "alive", "status": "ACTIVE", "deleted": 0},
+        {"id": "dead-1", "name": "dead", "status": "SHUTDOWN", "deleted": 1},
+        {"id": "alive-2", "name": "alive2", "status": "HEALTHY", "deleted": False},
+        {"id": "dead-2", "name": "dead2", "status": "DELETED", "deleted": True},
+    ]
+
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {"instances": raw_instances}
+
+    mock_conn = MagicMock()
+    mock_conn.database.get.return_value = mock_resp
+
+    result = trove_svc.list_instances(mock_conn)
+    ids = [r["id"] for r in result]
+    assert "alive-1" in ids
+    assert "alive-2" in ids
+    assert "dead-1" not in ids
+    assert "dead-2" not in ids
+
+
+@pytest.mark.asyncio
+async def test_list_instances_admin_filters_deleted():
+    """list_instances_admin_all_projects도 deleted=1 행을 제외하는지 검증."""
+    from app.services import trove as trove_svc
+
+    raw_instances = [
+        {"id": "a1", "name": "ok", "status": "ACTIVE", "deleted": 0, "tenant_id": "p1"},
+        {"id": "d1", "name": "gone", "status": "SHUTDOWN", "deleted": 1, "tenant_id": "p2"},
+    ]
+
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {"instances": raw_instances}
+    mock_resp.raise_for_status = MagicMock()
+
+    mock_conn = MagicMock()
+    mock_conn.database.get_endpoint.return_value = "http://trove:8779/v1"
+    mock_conn.session.get.return_value = mock_resp
+
+    result = trove_svc.list_instances_admin_all_projects(mock_conn)
+    ids = [r["id"] for r in result]
+    assert "a1" in ids
+    assert "d1" not in ids
