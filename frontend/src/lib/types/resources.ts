@@ -503,3 +503,23 @@ export interface SwiftContainer {
   count: number;
   bytes: number;
 }
+
+export interface ConfigMapInfo {
+  name: string;
+  namespace: string;
+  data: Record<string, string>;
+  binary_data?: Record<string, string> | null;
+  labels: Record<string, string>;
+  annotations: Record<string, string>;
+  created_at: string;
+}
+
+export interface SecretInfo {
+  name: string;
+  namespace: string;
+  type: string;
+  data: Record<string, string>; // base64 인코딩된 값
+  labels: Record<string, string>;
+  annotations: Record<string, string>;
+  created_at: string;
+}

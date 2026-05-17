@@ -849,6 +849,29 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 - [x] k3s 노드 멀티 NIC attach/detach API + udev/netplan 자동 적용
 - [x] DB 인스턴스 deleted 필터링 (Trove deleted=1 행 제외)
 
+### 8.16 k3s ConfigMap/Secret CRUD 프론트엔드 (2026-05-17)
+
+- [x] `frontend/src/lib/types/resources.ts` — `ConfigMapInfo`, `SecretInfo` 타입 추가
+- [x] `frontend/src/lib/api/k3sResources.ts` — namespaces/configmaps/secrets CRUD API 클라이언트
+- [x] `frontend/src/lib/stores/k3sClusterDetail.svelte.ts` — namespace/cm/secret 상태 + load/save/delete 메서드 추가
+- [x] `frontend/src/lib/components/k3s/K3sNamespaceSelector.svelte` — 네임스페이스 셀렉터
+- [x] `frontend/src/lib/components/k3s/K3sResourceEditor.svelte` — key-value 편집 모달
+- [x] `frontend/src/lib/components/k3s/K3sSecretValueDisplay.svelte` — base64 디코딩 + Reveal 토글 + 복사
+- [x] `frontend/src/lib/components/k3s/K3sClusterConfigMapsCard.svelte` — ConfigMap 목록/생성/편집/삭제
+- [x] `frontend/src/lib/components/k3s/K3sClusterSecretsCard.svelte` — Secret 목록/생성/편집/삭제 (type 선택)
+- [x] `frontend/src/lib/components/K3sClusterDetailPanel.svelte` — namespace selector + ConfigMaps/Secrets 카드 통합
+
+### 8.17 k3s ConfigMap/Secret CRUD 백엔드 (2026-05-17)
+
+- [x] `backend/app/services/k3s_kube.py` — `_kube_client` asynccontextmanager (mTLS K8s API 클라이언트), `list_namespaces`, ConfigMap/Secret CRUD (list/get/create/update/delete). Secret 은 함수 내에서 plain text → base64 인코딩 처리
+- [x] `backend/app/models/k3s.py` — `ConfigMapInfo`, `ConfigMapCreateRequest`, `ConfigMapWriteRequest`, `SecretInfo`, `SecretCreateRequest`, `SecretWriteRequest` Pydantic 모델 추가
+- [x] `backend/app/api/k3s/configmaps.py` — **신규** ConfigMap CRUD 라우터 + namespace 목록 (`/api/k3s/clusters/{id}/namespaces`, `/configmaps`, `/namespaces/{ns}/configmaps/{name}`)
+- [x] `backend/app/api/k3s/secrets.py` — **신규** Secret CRUD 라우터 (rec extra 에 data 미포함, 이름/namespace 만)
+- [x] `backend/app/api/k3s/__init__.py` — `k3s_configmaps_router`, `k3s_secrets_router` lazy import 추가
+- [x] `backend/app/main.py` — 두 라우터 `service_k3s_enabled` 블록에 마운트
+- [x] `backend/tests/test_k3s_configmaps.py` — **신규** 8개 테스트 (401/404/list/get/create/update/delete + namespaces)
+- [x] `backend/tests/test_k3s_secrets.py` — **신규** 8개 테스트 (401/404/list/get/create/update/delete + plain→service 전달 확인)
+
 ---
 
 ## 9. Union Mount 레이어 시스템 v2 (content-addressable)

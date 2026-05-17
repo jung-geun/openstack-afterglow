@@ -169,3 +169,57 @@ class K3sInterfaceInfo(BaseModel):
     fixed_ips: list[dict]
     vm_id: str
     node_role: str  # "server" | "agent"
+
+
+# ---------------------------------------------------------------------------
+# ConfigMap / Secret
+# ---------------------------------------------------------------------------
+
+
+class ConfigMapInfo(BaseModel):
+    name: str
+    namespace: str
+    data: dict[str, str] = Field(default_factory=dict)
+    binary_data: dict[str, str] | None = None
+    labels: dict[str, str] = Field(default_factory=dict)
+    annotations: dict[str, str] = Field(default_factory=dict)
+    created_at: str = ""
+
+
+class ConfigMapCreateRequest(BaseModel):
+    name: str
+    data: dict[str, str] = Field(default_factory=dict)
+    labels: dict[str, str] | None = None
+    annotations: dict[str, str] | None = None
+
+
+class ConfigMapWriteRequest(BaseModel):
+    data: dict[str, str] = Field(default_factory=dict)
+    labels: dict[str, str] | None = None
+    annotations: dict[str, str] | None = None
+    binary_data: dict[str, str] | None = None
+
+
+class SecretInfo(BaseModel):
+    name: str
+    namespace: str
+    type: str = "Opaque"
+    data: dict[str, str] = Field(default_factory=dict)  # base64 인코딩 값
+    labels: dict[str, str] = Field(default_factory=dict)
+    annotations: dict[str, str] = Field(default_factory=dict)
+    created_at: str = ""
+
+
+class SecretCreateRequest(BaseModel):
+    name: str
+    type: str = "Opaque"
+    data: dict[str, str] = Field(default_factory=dict)  # plain text
+    labels: dict[str, str] | None = None
+    annotations: dict[str, str] | None = None
+
+
+class SecretWriteRequest(BaseModel):
+    type: str = "Opaque"
+    data: dict[str, str] = Field(default_factory=dict)  # plain text
+    labels: dict[str, str] | None = None
+    annotations: dict[str, str] | None = None

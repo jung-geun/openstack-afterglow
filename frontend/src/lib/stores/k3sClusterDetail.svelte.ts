@@ -1,8 +1,19 @@
 import { getContext, setContext } from 'svelte';
 import { api, ApiError, getBaseUrl } from '$lib/api/client';
 import { streamK3sProgress } from '$lib/api/k3sSseStream';
-import type { K3sCluster, K3sClusterHealth, K3sInterfaceInfo, NetworkInfo } from '$lib/types/resources';
+import type { K3sCluster, K3sClusterHealth, K3sInterfaceInfo, NetworkInfo, ConfigMapInfo, SecretInfo } from '$lib/types/resources';
 import { listNodeInterfaces, attachNodeInterface, detachNodeInterface } from '$lib/api/k3s';
+import {
+  listNamespaces,
+  listConfigMaps,
+  listSecrets,
+  createConfigMap,
+  updateConfigMap,
+  deleteConfigMap,
+  createSecret,
+  updateSecret,
+  deleteSecret
+} from '$lib/api/k3sResources';
 
 export type { K3sCluster, K3sClusterHealth };
 
@@ -48,6 +59,12 @@ export function createK3sClusterDetailStore(opts: K3sClusterDetailOpts) {
   let interfaces = $state<Record<string, K3sInterfaceInfo[]>>({});
   let networks = $state<NetworkInfo[]>([]);
   let interfaceActioning = $state<string | null>(null); // vmId or `${vmId}:${portId}`
+  let namespaces = $state<string[]>([]);
+  let selectedNamespace = $state('default');
+  let configMaps = $state<ConfigMapInfo[]>([]);
+  let secrets = $state<SecretInfo[]>([]);
+  let cmActioning = $state<string | null>(null); // `${ns}:${name}`
+  let namespacesLoaded = $state(false);
 
   const apiBase = $derived(opts.adminMode() ? '/api/admin/k3s-clusters' : '/api/k3s/clusters');
   const isActive = $derived(cluster?.status === 'ACTIVE');
@@ -234,6 +251,99 @@ export function createK3sClusterDetailStore(opts: K3sClusterDetailOpts) {
     }
   }
 
+  async function loadNamespaces() {
+    const id = opts.clusterId();
+    if (!id || namespacesLoaded) return;
+    try {
+      const ns = await listNamespaces(id, opts.token(), opts.projectId());
+      namespaces = ns;
+      if (!namespaces.includes(selectedNamespace)) {
+        selectedNamespace = namespaces[0] ?? 'default';
+      }
+      namespacesLoaded = true;
+    } catch {
+      namespaces = ['default'];
+    }
+  }
+
+  async function loadConfigMaps() {
+    const id = opts.clusterId();
+    if (!id) return;
+    try {
+      configMaps = await listConfigMaps(id, selectedNamespace, opts.token(), opts.projectId());
+    } catch {
+      configMaps = [];
+    }
+  }
+
+  async function loadSecrets() {
+    const id = opts.clusterId();
+    if (!id) return;
+    try {
+      secrets = await listSecrets(id, selectedNamespace, opts.token(), opts.projectId());
+    } catch {
+      secrets = [];
+    }
+  }
+
+  async function saveConfigMap(name: string, data: Record<string, string>, isNew: boolean) {
+    const id = opts.clusterId();
+    if (!id || cmActioning) return;
+    cmActioning = `${selectedNamespace}:${name}`;
+    try {
+      if (isNew) {
+        const cm = await createConfigMap(id, selectedNamespace, { name, data }, opts.token(), opts.projectId());
+        configMaps = [...configMaps, cm];
+      } else {
+        const cm = await updateConfigMap(id, selectedNamespace, name, { data }, opts.token(), opts.projectId());
+        configMaps = configMaps.map((c) => (c.name === name ? cm : c));
+      }
+    } finally {
+      cmActioning = null;
+    }
+  }
+
+  async function deleteCm(name: string) {
+    const id = opts.clusterId();
+    if (!id || cmActioning) return;
+    cmActioning = `${selectedNamespace}:${name}`;
+    try {
+      await deleteConfigMap(id, selectedNamespace, name, opts.token(), opts.projectId());
+      configMaps = configMaps.filter((c) => c.name !== name);
+    } finally {
+      cmActioning = null;
+    }
+  }
+
+  async function saveSecret(name: string, type: string, data: Record<string, string>, isNew: boolean) {
+    const id = opts.clusterId();
+    if (!id || cmActioning) return;
+    cmActioning = `${selectedNamespace}:${name}`;
+    try {
+      if (isNew) {
+        const s = await createSecret(id, selectedNamespace, { name, type, data }, opts.token(), opts.projectId());
+        secrets = [...secrets, s];
+      } else {
+        const s = await updateSecret(id, selectedNamespace, name, { type, data }, opts.token(), opts.projectId());
+        secrets = secrets.map((x) => (x.name === name ? s : x));
+      }
+    } finally {
+      cmActioning = null;
+    }
+  }
+
+  async function deleteSecretItem(name: string) {
+    const id = opts.clusterId();
+    if (!id || cmActioning) return;
+    cmActioning = `${selectedNamespace}:${name}`;
+    try {
+      await deleteSecret(id, selectedNamespace, name, opts.token(), opts.projectId());
+      secrets = secrets.filter((s) => s.name !== name);
+    } finally {
+      cmActioning = null;
+    }
+  }
+
   function reset() {
     cluster = null;
     health = null;
@@ -247,6 +357,12 @@ export function createK3sClusterDetailStore(opts: K3sClusterDetailOpts) {
     interfaces = {};
     networks = [];
     interfaceActioning = null;
+    namespaces = [];
+    selectedNamespace = 'default';
+    configMaps = [];
+    secrets = [];
+    cmActioning = null;
+    namespacesLoaded = false;
   }
 
   function setViewingInstance(id: string | null) {
@@ -294,6 +410,19 @@ export function createK3sClusterDetailStore(opts: K3sClusterDetailOpts) {
     loadInterfaces,
     attachInterface,
     detachInterface,
+    get namespaces() { return namespaces; },
+    get selectedNamespace() { return selectedNamespace; },
+    set selectedNamespace(v: string) { selectedNamespace = v; },
+    get configMaps() { return configMaps; },
+    get secrets() { return secrets; },
+    get cmActioning() { return cmActioning; },
+    loadNamespaces,
+    loadConfigMaps,
+    loadSecrets,
+    saveConfigMap,
+    deleteCm,
+    saveSecret,
+    deleteSecretItem,
   };
 }
 

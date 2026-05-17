@@ -11,6 +11,9 @@
   import K3sClusterVmList from '$lib/components/k3s/K3sClusterVmList.svelte';
   import K3sInstanceViewerOverlay from '$lib/components/k3s/K3sInstanceViewerOverlay.svelte';
   import K3sClusterNetworksCard from '$lib/components/k3s/K3sClusterNetworksCard.svelte';
+  import K3sNamespaceSelector from '$lib/components/k3s/K3sNamespaceSelector.svelte';
+  import K3sClusterConfigMapsCard from '$lib/components/k3s/K3sClusterConfigMapsCard.svelte';
+  import K3sClusterSecretsCard from '$lib/components/k3s/K3sClusterSecretsCard.svelte';
 
   interface Props {
     clusterId: string;
@@ -90,6 +93,9 @@
       </div>
       <K3sClusterVmList />
       <K3sClusterNetworksCard />
+      <K3sNamespaceSelector />
+      <K3sClusterConfigMapsCard />
+      <K3sClusterSecretsCard />
     {/if}
   </div>
 </div>

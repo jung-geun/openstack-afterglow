@@ -1,0 +1,147 @@
+<script lang="ts">
+  import { untrack } from 'svelte';
+  import { useK3sClusterDetail } from '$lib/stores/k3sClusterDetail.svelte';
+  import K3sResourceEditor from './K3sResourceEditor.svelte';
+  import K3sSecretValueDisplay from './K3sSecretValueDisplay.svelte';
+
+  const s = useK3sClusterDetail();
+
+  let showCreate = $state(false);
+  let newName = $state('');
+  let newType = $state('Opaque');
+  let editingSecret = $state<{ name: string; type: string; data: Record<string, string> } | null>(null);
+  let saving = $state(false);
+  let createError = $state('');
+  let loadError = $state('');
+
+  $effect(() => {
+    const ns = s.selectedNamespace;
+    if (!ns) return;
+    loadError = '';
+    untrack(() => s.loadSecrets()).catch(() => { loadError = 'Secret 로드 실패'; });
+  });
+
+  async function handleCreate(data: Record<string, string>) {
+    if (!newName.trim()) { createError = '이름을 입력하세요'; return; }
+    saving = true;
+    createError = '';
+    try {
+      await s.saveSecret(newName.trim(), newType, data, true);
+      showCreate = false;
+      newName = '';
+      newType = 'Opaque';
+    } catch (e) {
+      createError = e instanceof Error ? e.message : '생성 실패';
+    } finally {
+      saving = false;
+    }
+  }
+
+  async function handleEdit(data: Record<string, string>) {
+    if (!editingSecret) return;
+    saving = true;
+    try {
+      await s.saveSecret(editingSecret.name, editingSecret.type, data, false);
+      editingSecret = null;
+    } finally {
+      saving = false;
+    }
+  }
+
+  async function handleDelete(name: string) {
+    if (!confirm(`Secret "${name}"을 삭제하시겠습니까?`)) return;
+    await s.deleteSecretItem(name);
+  }
+</script>
+
+<div class="bg-gray-900 border border-gray-800 rounded-xl p-4 mt-3">
+  <div class="flex items-center justify-between mb-3">
+    <h3 class="text-xs text-gray-500 uppercase tracking-wide">Secrets</h3>
+    <button
+      onclick={() => { showCreate = !showCreate; newName = ''; createError = ''; newType = 'Opaque'; }}
+      class="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+    >{showCreate ? '닫기' : '+ 생성'}</button>
+  </div>
+
+  {#if showCreate}
+    <div class="mb-3 bg-gray-800 rounded-lg p-3">
+      <div class="flex gap-2 mb-2">
+        <input
+          bind:value={newName}
+          placeholder="Secret 이름"
+          class="flex-1 bg-gray-700 border border-gray-600 text-gray-200 text-xs rounded px-2 py-1.5 font-mono focus:outline-none focus:border-blue-500"
+        />
+        <select
+          bind:value={newType}
+          class="bg-gray-700 border border-gray-600 text-gray-200 text-xs rounded px-2 py-1.5 focus:outline-none focus:border-blue-500"
+        >
+          <option value="Opaque">Opaque</option>
+          <option value="kubernetes.io/tls">kubernetes.io/tls</option>
+          <option value="kubernetes.io/dockerconfigjson">dockerconfigjson</option>
+        </select>
+      </div>
+      {#if createError}
+        <p class="text-xs text-red-400 mb-1">{createError}</p>
+      {/if}
+      <p class="text-xs text-gray-500 mb-2">값은 plain text로 입력하세요. 백엔드에서 base64 인코딩합니다.</p>
+      <K3sResourceEditor
+        title="Secret 생성"
+        onSave={handleCreate}
+        onClose={() => { showCreate = false; }}
+        {saving}
+      />
+    </div>
+  {/if}
+
+  {#if loadError}
+    <p class="text-xs text-red-400">{loadError}</p>
+  {:else if s.secrets.length === 0}
+    <p class="text-xs text-gray-500">Secret 없음</p>
+  {:else}
+    <div class="space-y-1.5">
+      {#each s.secrets as secret}
+        {@const actionKey = `${s.selectedNamespace}:${secret.name}`}
+        <div class="bg-gray-800/50 rounded-lg p-3">
+          <div class="flex items-start justify-between gap-3 mb-2">
+            <div>
+              <span class="text-xs text-gray-200 font-mono font-medium">{secret.name}</span>
+              <span class="text-xs text-gray-600 ml-2">{secret.type}</span>
+            </div>
+            <div class="flex gap-1 shrink-0">
+              <button
+                onclick={() => { editingSecret = { name: secret.name, type: secret.type, data: {} }; }}
+                class="text-xs text-gray-400 hover:text-gray-200 px-2 py-1 border border-gray-700 hover:border-gray-500 rounded transition-colors"
+              >편집</button>
+              <button
+                onclick={() => handleDelete(secret.name)}
+                disabled={s.cmActioning === actionKey}
+                class="text-xs text-orange-400 hover:text-orange-300 px-2 py-1 border border-orange-900 hover:border-orange-700 rounded transition-colors disabled:text-gray-600 disabled:border-gray-700 disabled:cursor-not-allowed"
+              >{s.cmActioning === actionKey ? '삭제 중...' : '삭제'}</button>
+            </div>
+          </div>
+          {#if Object.keys(secret.data).length > 0}
+            <div class="space-y-1.5">
+              {#each Object.entries(secret.data) as [k, v]}
+                <div class="flex items-center gap-2">
+                  <span class="text-xs text-gray-500 font-mono w-28 shrink-0 truncate">{k}</span>
+                  <K3sSecretValueDisplay b64value={v} />
+                </div>
+              {/each}
+            </div>
+          {:else}
+            <span class="text-xs text-gray-600">데이터 없음</span>
+          {/if}
+        </div>
+      {/each}
+    </div>
+  {/if}
+</div>
+
+{#if editingSecret}
+  <K3sResourceEditor
+    title={`Secret 편집 — ${editingSecret.name}`}
+    onSave={handleEdit}
+    onClose={() => { editingSecret = null; }}
+    {saving}
+  />
+{/if}
