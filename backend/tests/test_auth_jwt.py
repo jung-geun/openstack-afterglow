@@ -72,8 +72,6 @@ class TestJwtService:
             username="alice",
             project_id="p1",
             project_name="proj",
-            roles=["member"],
-            is_system_admin=False,
             refresh_jti="rjti-123",
         )
         payload = verify_access(token)
@@ -82,6 +80,21 @@ class TestJwtService:
         assert payload["rjti"] == "rjti-123"
         assert payload["jti"] == jti
         assert payload["exp"] == exp
+
+    def test_access_payload_no_auth_claims(self):
+        """JWT payload에 권한 정보(roles, is_system_admin)가 포함되지 않아야 한다."""
+        from app.services.jwt_service import sign_access, verify_access
+
+        token, _, _ = sign_access(
+            user_id="u1",
+            username="alice",
+            project_id="p1",
+            project_name="proj",
+            refresh_jti="rjti-1",
+        )
+        payload = verify_access(token)
+        assert "roles" not in payload
+        assert "is_system_admin" not in payload
 
     def test_refresh_roundtrip(self):
         from app.services.jwt_service import sign_refresh, verify_refresh
@@ -97,7 +110,7 @@ class TestJwtService:
 
         from app.services.jwt_service import sign_access, verify_access
 
-        token, _, _ = sign_access("u1", "alice", "p1", "proj", [], False, "rjti")
+        token, _, _ = sign_access("u1", "alice", "p1", "proj", "rjti")
         # 만료 강제: exp를 과거로 덮어쓰기
         payload = jwt.decode(token, options={"verify_signature": False, "verify_exp": False})
         payload["exp"] = int(time.time()) - 10
@@ -111,7 +124,7 @@ class TestJwtService:
         from app.services.jwt_service import sign_access, verify_refresh
 
         # access 토큰을 refresh 경로로 검증하면 실패
-        token, _, _ = sign_access("u1", "alice", "p1", "proj", [], False, "rjti")
+        token, _, _ = sign_access("u1", "alice", "p1", "proj", "rjti")
         with pytest.raises(jwt.InvalidTokenError):
             verify_refresh(token)
 
@@ -146,6 +159,30 @@ class TestSessionStore:
         from app.services.session_store import get_session
 
         assert await get_session("nonexistent-jti") is None
+
+    @pytest.mark.asyncio
+    async def test_revoke_user_sessions(self):
+        """revoke_user_sessions는 해당 유저의 모든 세션을 삭제하고 다른 유저는 건드리지 않는다."""
+        from app.services.session_store import get_session, revoke_user_sessions, store_session
+
+        exp = int(time.time()) + 600
+        await store_session("jti-rev-1", "ks-tok-1", "proj-1", "user-42", exp)
+        await store_session("jti-rev-2", "ks-tok-2", "proj-1", "user-42", exp)
+        await store_session("jti-other", "ks-tok-3", "proj-1", "user-99", exp)
+
+        count = await revoke_user_sessions("user-42")
+        assert count == 2
+        assert await get_session("jti-rev-1") is None
+        assert await get_session("jti-rev-2") is None
+        assert await get_session("jti-other") is not None
+
+    @pytest.mark.asyncio
+    async def test_revoke_user_sessions_empty(self):
+        """세션이 없는 유저에 대한 revoke는 0을 반환해야 한다."""
+        from app.services.session_store import revoke_user_sessions
+
+        count = await revoke_user_sessions("user-nonexistent")
+        assert count == 0
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -209,7 +246,7 @@ async def test_login_returns_access_and_refresh(
 
 @pytest.mark.asyncio
 async def test_bearer_access_protects_me_endpoint(
-    _ks_authenticate, _ks_get_user, _rate_limiter_off
+    _ks_authenticate, _ks_get_user, _ks_validate_ok, _rate_limiter_off
 ):
     """Bearer access JWT로 /me 엔드포인트에 접근 가능해야 한다."""
     from httpx import ASGITransport, AsyncClient
@@ -254,7 +291,6 @@ async def test_legacy_x_auth_token_still_works(_rate_limiter_off):
 async def test_expired_access_jwt_returns_401(_rate_limiter_off):
     """만료된 access JWT로 요청 시 401을 반환해야 한다."""
     import jwt as pyjwt
-
     from httpx import ASGITransport, AsyncClient
 
     from app.main import app
@@ -310,7 +346,7 @@ async def test_refresh_rotates_tokens(
 
 @pytest.mark.asyncio
 async def test_logout_revokes_refresh_session(
-    _ks_authenticate, _ks_get_user, _rate_limiter_off
+    _ks_authenticate, _ks_get_user, _ks_validate_ok, _rate_limiter_off
 ):
     """로그아웃 후 refresh 토큰으로 갱신 시도 시 401을 반환해야 한다."""
     from httpx import ASGITransport, AsyncClient
@@ -347,3 +383,31 @@ async def test_no_auth_header_returns_401(_rate_limiter_off):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.get("/api/auth/me")
     assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_bearer_jwt_uses_cached_validate_not_payload(
+    _ks_authenticate, _ks_get_user, _rate_limiter_off
+):
+    """Bearer JWT 요청은 JWT payload가 아닌 _cached_validate(Keystone live)에서 권한 정보를 읽어야 한다."""
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import app
+
+    # 로그인: JWT payload에 권한 정보 없음
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        login = await ac.post(
+            "/api/auth/login",
+            json={"username": "alice", "password": "pw", "project_name": "myproject"},
+        )
+    access = login.json()["token"]
+
+    # Keystone이 is_system_admin=True를 반환하도록 모킹
+    elevated_ks_data = dict(_KS_DATA, is_system_admin=True, roles=["admin", "member"])
+    with patch("app.api.deps._cached_validate", new=AsyncMock(return_value=elevated_ks_data)):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            me = await ac.get("/api/auth/me", headers={"Authorization": f"Bearer {access}"})
+
+    assert me.status_code == 200
+    # JWT payload에는 is_system_admin이 없지만 Keystone mock이 True를 반환하므로 True여야 함
+    assert me.json()["is_system_admin"] is True

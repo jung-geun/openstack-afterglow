@@ -26,11 +26,12 @@ def sign_access(
     username: str,
     project_id: str,
     project_name: str,
-    roles: list[str],
-    is_system_admin: bool,
     refresh_jti: str,
 ) -> tuple[str, str, int]:
     """Access JWT 발급.
+
+    권한 정보(roles, is_system_admin)는 payload에 포함하지 않는다.
+    매 요청 Keystone live 검증(60s 캐시)으로 결정한다.
 
     Returns:
         (token_str, access_jti, exp_unix_timestamp)
@@ -48,8 +49,6 @@ def sign_access(
         "username": username,
         "project_id": project_id,
         "project_name": project_name,
-        "roles": roles,
-        "is_system_admin": is_system_admin,
     }
     token = jwt.encode(payload, _secret(), algorithm="HS256")
     return token, jti, exp

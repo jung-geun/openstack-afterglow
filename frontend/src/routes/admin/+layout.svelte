@@ -1,6 +1,8 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { isAdmin, auth } from '$lib/stores/auth';
+	import { api } from '$lib/api/client';
 	import AdminSidebar from '$lib/components/AdminSidebar.svelte';
 	import VmCreatePanel from '$lib/components/VmCreatePanel.svelte';
 	import { wizardOpen } from '$lib/stores/wizard';
@@ -12,6 +14,21 @@
 		if ($auth.token !== null && !$isAdmin) {
 			redirecting = true;
 			setTimeout(() => goto('/dashboard'), 2000);
+		}
+	});
+
+	// mount 시 /me를 강제 호출해 stale 캐시 우회 — 60s 내 admin 박탈을 즉시 반영
+	onMount(async () => {
+		if (!$auth.token) return;
+		try {
+			const me = await api.get<{ is_system_admin: boolean; roles: string[] }>(
+				'/api/auth/me',
+				$auth.token,
+				$auth.projectId ?? undefined,
+			);
+			auth.update((s) => ({ ...s, isSystemAdmin: me.is_system_admin === true, roles: me.roles ?? s.roles }));
+		} catch {
+			// 실패 시 기존 상태 유지 — $effect의 isAdmin 감시가 처리
 		}
 	});
 

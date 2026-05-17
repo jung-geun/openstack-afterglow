@@ -156,28 +156,18 @@ async def _resolve_jwt_token_info(bearer_token: str, x_project_id: str | None) -
     jwt_project_id = payload.get("project_id", "")
     target_project_id = x_project_id or jwt_project_id
 
-    # 프로젝트 전환: Keystone rescope (60s 캐시 적용)
-    if target_project_id and target_project_id != sess["project_id"]:
-        info = await _cached_validate(sess["keystone_token"], target_project_id)
-        return {
-            "token": info["token"],
-            "user_id": info["user_id"],
-            "username": info.get("username", payload.get("username", "")),
-            "project_id": info["project_id"],
-            "project_name": info.get("project_name", ""),
-            "roles": info.get("roles", []),
-            "is_system_admin": info.get("is_system_admin", False),
-            "refresh_jti": refresh_jti,
-        }
-
+    # 권한 정보는 항상 Keystone live 검증(60s 캐시). JWT payload에서 꺼내지 않는다.
+    # 프로젝트 전환 여부와 무관하게 동일 경로로 통합 — stale window 제거.
+    effective_project_id = target_project_id or sess.get("project_id", jwt_project_id)
+    info = await _cached_validate(sess["keystone_token"], effective_project_id)
     return {
-        "token": sess["keystone_token"],
-        "user_id": payload["sub"],
-        "username": payload.get("username", ""),
-        "project_id": jwt_project_id,
-        "project_name": payload.get("project_name", ""),
-        "roles": payload.get("roles", []),
-        "is_system_admin": payload.get("is_system_admin", False),
+        "token": info["token"],
+        "user_id": info.get("user_id", payload.get("sub", "")),
+        "username": info.get("username", payload.get("username", "")),
+        "project_id": info.get("project_id", effective_project_id),
+        "project_name": info.get("project_name", payload.get("project_name", "")),
+        "roles": info.get("roles", []),
+        "is_system_admin": info.get("is_system_admin", False),
         "refresh_jti": refresh_jti,
     }
 

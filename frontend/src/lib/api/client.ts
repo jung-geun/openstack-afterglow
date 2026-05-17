@@ -22,8 +22,33 @@ export class ApiError extends Error {
 
 // 동시 다수 요청이 401 받을 때 redirect 중복 호출 방지
 let _redirectingTo401 = false;
+// /api/admin/ 403 핸들러 중복 호출 방지
+let _handling403Admin = false;
 // 동시 다수 요청이 토큰 refresh를 중복 호출하지 않도록 직렬화
 let _refreshPromise: Promise<string | null> | null = null;
+
+/**
+ * /api/admin/ 경로에서 403 응답 시 isSystemAdmin=false 강등 + /dashboard로 이동.
+ * one-shot 가드로 무한 루프 방지.
+ */
+async function handleAdminForbidden(): Promise<void> {
+	if (typeof window === 'undefined') return;
+	if (_handling403Admin) return;
+	if (!window.location.pathname.startsWith('/admin')) return;
+	_handling403Admin = true;
+	try {
+		const [{ auth }, { goto }] = await Promise.all([
+			import('$lib/stores/auth'),
+			import('$app/navigation'),
+		]);
+		auth.update((s) => ({ ...s, isSystemAdmin: false }));
+		await goto('/dashboard');
+	} catch {
+		window.location.href = '/dashboard';
+	} finally {
+		setTimeout(() => { _handling403Admin = false; }, 5000);
+	}
+}
 
 /**
  * 401 응답 시 인증 상태 정리 + 로그인 페이지(/)로 자동 redirect.
@@ -149,6 +174,9 @@ async function request<T>(
 		}
 		if (res.status === 401) {
 			void handleUnauthorized();
+		}
+		if (res.status === 403 && path.includes('/admin')) {
+			void handleAdminForbidden();
 		}
 		throw new ApiError(res.status, detail);
 	}

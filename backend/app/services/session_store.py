@@ -14,10 +14,15 @@ from datetime import UTC, datetime
 from app.services.cache import _get_redis
 
 _PREFIX = "afterglow:refresh:"
+_USER_INDEX_PREFIX = "afterglow:user-sessions:"
 
 
 def _key(jti: str) -> str:
     return f"{_PREFIX}{jti}"
+
+
+def _user_index_key(user_id: str) -> str:
+    return f"{_USER_INDEX_PREFIX}{user_id}"
 
 
 async def store_session(
@@ -37,7 +42,11 @@ async def store_session(
         "user_id": user_id,
         "exp": exp,
     })
-    await r.setex(_key(jti), ttl, data)
+    async with r.pipeline() as pipe:
+        pipe.setex(_key(jti), ttl, data)
+        pipe.sadd(_user_index_key(user_id), jti)
+        pipe.expire(_user_index_key(user_id), ttl)
+        await pipe.execute()
 
 
 async def get_session(jti: str) -> dict | None:
@@ -52,4 +61,30 @@ async def get_session(jti: str) -> dict | None:
 async def delete_session(jti: str) -> None:
     """refresh JTI 세션 삭제. 로그아웃·토큰 회전 시 호출."""
     r = await _get_redis()
+    raw = await r.get(_key(jti))
+    if raw:
+        try:
+            sess = json.loads(raw)
+            uid = sess.get("user_id", "")
+            if uid:
+                await r.srem(_user_index_key(uid), jti)
+        except Exception:
+            pass
     await r.delete(_key(jti))
+
+
+async def revoke_user_sessions(user_id: str) -> int:
+    """사용자의 모든 refresh 세션을 즉시 삭제. admin role 박탈 등 강제 로그아웃 시 호출.
+
+    Returns:
+        삭제된 세션 수
+    """
+    r = await _get_redis()
+    index_key = _user_index_key(user_id)
+    raw_jtis = await r.smembers(index_key)
+    if not raw_jtis:
+        return 0
+    jtis = [j.decode() if isinstance(j, bytes) else j for j in raw_jtis]
+    keys = [_key(jti) for jti in jtis] + [index_key]
+    await r.delete(*keys)
+    return len(jtis)

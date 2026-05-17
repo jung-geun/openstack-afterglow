@@ -12,7 +12,8 @@ import logging
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel
 
-from app.api.deps import get_os_conn, require_admin
+from app.api.deps import get_os_conn, get_token_info, require_admin
+from app.services import activity, keystone, session_store
 from app.services.cache import cached_call, invalidate, ttl_slow
 
 _logger = logging.getLogger(__name__)
@@ -755,6 +756,7 @@ class AssignRoleRequest(BaseModel):
 @router.post("/roles/assign", dependencies=[Depends(require_admin)])
 async def assign_role(
     req: AssignRoleRequest,
+    token_info: dict = Depends(get_token_info),
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """역할 할당."""
@@ -765,13 +767,28 @@ async def assign_role(
             return {"status": "assigned"}
         except Exception as e:
             _logger.warning("역할 할당 실패: %s", e)
-
             raise HTTPException(status_code=400, detail="역할 할당 실패")
 
     try:
-        return await asyncio.to_thread(_assign)
+        result = await asyncio.to_thread(_assign)
     except HTTPException:
         raise
+
+    _, admin_role_id = await asyncio.to_thread(keystone._resolve_admin_ids)
+    is_admin_role = admin_role_id is not None and req.role_id == admin_role_id
+    if is_admin_role:
+        await session_store.revoke_user_sessions(req.user_id)
+    await activity.record(
+        project_id=token_info["project_id"],
+        user_id=token_info["user_id"],
+        username=token_info.get("username", ""),
+        resource_type="identity",
+        action="admin_role_grant" if is_admin_role else "role_grant",
+        status="success",
+        resource_id=req.user_id,
+        extra={"role_id": req.role_id, "target_project_id": req.project_id},
+    )
+    return result
 
 
 @router.delete("/roles/assign", dependencies=[Depends(require_admin)])
@@ -779,6 +796,7 @@ async def revoke_role(
     user_id: str = Query(...),
     project_id: str = Query(...),
     role_id: str = Query(...),
+    token_info: dict = Depends(get_token_info),
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """역할 회수."""
@@ -789,13 +807,28 @@ async def revoke_role(
             return {"status": "revoked"}
         except Exception as e:
             _logger.warning("역할 회수 실패: %s", e)
-
             raise HTTPException(status_code=400, detail="역할 회수 실패")
 
     try:
-        return await asyncio.to_thread(_revoke)
+        result = await asyncio.to_thread(_revoke)
     except HTTPException:
         raise
+
+    _, admin_role_id = await asyncio.to_thread(keystone._resolve_admin_ids)
+    is_admin_role = admin_role_id is not None and role_id == admin_role_id
+    if is_admin_role:
+        await session_store.revoke_user_sessions(user_id)
+    await activity.record(
+        project_id=token_info["project_id"],
+        user_id=token_info["user_id"],
+        username=token_info.get("username", ""),
+        resource_type="identity",
+        action="admin_role_revoke" if is_admin_role else "role_revoke",
+        status="success",
+        resource_id=user_id,
+        extra={"role_id": role_id, "target_project_id": project_id},
+    )
+    return result
 
 
 class AssignGroupRoleRequest(BaseModel):

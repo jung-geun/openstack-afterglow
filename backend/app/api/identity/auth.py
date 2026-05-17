@@ -48,8 +48,6 @@ async def _build_token_response(
         username=username,
         project_id=project_id,
         project_name=project_name,
-        roles=roles,
-        is_system_admin=is_system_admin,
         refresh_jti=r_jti,
     )
     await session_store.store_session(
