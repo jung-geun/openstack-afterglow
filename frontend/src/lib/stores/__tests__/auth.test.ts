@@ -41,7 +41,7 @@ describe('auth store', () => {
       username: 'testuser',
       projectId: 'proj-1',
       projectName: 'Test Project',
-      expiresAt: null,
+      accessExpiresAt: null,
       roles: ['member', 'admin'],
     });
     const state = get(auth);
@@ -50,17 +50,17 @@ describe('auth store', () => {
   });
 
   it('isAdmin은 isSystemAdmin이 true일 때 true', () => {
-    setAuth({ token: 'tok', userId: 'u', username: 'u', projectId: 'p', projectName: 'p', expiresAt: null, roles: ['admin'], isSystemAdmin: true });
+    setAuth({ token: 'tok', userId: 'u', username: 'u', projectId: 'p', projectName: 'p', accessExpiresAt: null, roles: ['admin'], isSystemAdmin: true });
     expect(get(isAdmin)).toBe(true);
   });
 
   it('isAdmin은 isSystemAdmin이 false일 때 false', () => {
-    setAuth({ token: 'tok', userId: 'u', username: 'u', projectId: 'p', projectName: 'p', expiresAt: null, roles: ['admin'], isSystemAdmin: false });
+    setAuth({ token: 'tok', userId: 'u', username: 'u', projectId: 'p', projectName: 'p', accessExpiresAt: null, roles: ['admin'], isSystemAdmin: false });
     expect(get(isAdmin)).toBe(false);
   });
 
   it('clearAuth 후 초기 상태로 복원', () => {
-    setAuth({ token: 'tok', userId: 'u', username: 'u', projectId: 'p', projectName: 'p', expiresAt: null, roles: ['admin'] });
+    setAuth({ token: 'tok', userId: 'u', username: 'u', projectId: 'p', projectName: 'p', accessExpiresAt: null, roles: ['admin'] });
     clearAuth();
     const state = get(auth);
     expect(state.token).toBeNull();

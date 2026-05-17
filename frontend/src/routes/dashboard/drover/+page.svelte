@@ -147,7 +147,7 @@
     const baseUrl = getBaseUrl();
     const res = await fetch(`${baseUrl}/api/k3s/clusters/${id}/kubeconfig`, {
       headers: {
-        ...(token ? { 'X-Auth-Token': token } : {}),
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
         ...(projectId ? { 'X-Project-Id': projectId } : {}),
       },
     });

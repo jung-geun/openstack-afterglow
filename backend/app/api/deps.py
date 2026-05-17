@@ -132,13 +132,73 @@ async def extend_session(token: str, project_id: str) -> None:
         _logger.warning("Redis 장애로 세션 연장을 건너뜁니다", exc_info=True)
 
 
+async def _resolve_jwt_token_info(bearer_token: str, x_project_id: str | None) -> dict:
+    """Bearer access JWT 검증 → Redis 세션 조회 → token_info dict 반환.
+
+    x_project_id가 JWT의 project_id와 다르면 Keystone rescope (프로젝트 전환용).
+    """
+    from app.services import jwt_service
+    from app.services.session_store import get_session
+
+    try:
+        payload = jwt_service.verify_access(bearer_token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="유효하지 않은 액세스 토큰")
+
+    refresh_jti = payload.get("rjti")
+    if not refresh_jti:
+        raise HTTPException(status_code=401, detail="액세스 토큰 형식 오류")
+
+    sess = await get_session(refresh_jti)
+    if sess is None:
+        raise HTTPException(status_code=401, detail="세션이 만료되었습니다. 다시 로그인해 주세요.")
+
+    jwt_project_id = payload.get("project_id", "")
+    target_project_id = x_project_id or jwt_project_id
+
+    # 프로젝트 전환: Keystone rescope (60s 캐시 적용)
+    if target_project_id and target_project_id != sess["project_id"]:
+        info = await _cached_validate(sess["keystone_token"], target_project_id)
+        return {
+            "token": info["token"],
+            "user_id": info["user_id"],
+            "username": info.get("username", payload.get("username", "")),
+            "project_id": info["project_id"],
+            "project_name": info.get("project_name", ""),
+            "roles": info.get("roles", []),
+            "is_system_admin": info.get("is_system_admin", False),
+            "refresh_jti": refresh_jti,
+        }
+
+    return {
+        "token": sess["keystone_token"],
+        "user_id": payload["sub"],
+        "username": payload.get("username", ""),
+        "project_id": jwt_project_id,
+        "project_name": payload.get("project_name", ""),
+        "roles": payload.get("roles", []),
+        "is_system_admin": payload.get("is_system_admin", False),
+        "refresh_jti": refresh_jti,
+    }
+
+
 async def get_token_info(
+    authorization: str | None = Header(None),
     x_auth_token: str | None = Header(None),
     x_project_id: str | None = Header(None),
 ) -> dict:
-    """모든 인증 필요 엔드포인트에서 사용하는 Depends 함수."""
+    """모든 인증 필요 엔드포인트에서 사용하는 Depends 함수.
+
+    우선순위:
+    1. Authorization: Bearer <access_jwt>  — JWT 경로 (신규)
+    2. X-Auth-Token: <keystone_token>      — 레거시 경로 (하위호환)
+    """
+    if authorization and authorization.startswith("Bearer "):
+        bearer = authorization[7:]
+        return await _resolve_jwt_token_info(bearer, x_project_id)
+
     if not x_auth_token:
-        raise HTTPException(status_code=401, detail="X-Auth-Token 헤더가 필요합니다")
+        raise HTTPException(status_code=401, detail="인증 헤더가 필요합니다")
     try:
         token_hash = hashlib.sha256(x_auth_token.encode()).hexdigest()
         await _check_session_timeout(token_hash, x_project_id or "")
@@ -156,6 +216,7 @@ def require_admin(token_info: dict = Depends(get_token_info)):
 
 
 async def get_os_conn(
+    authorization: str | None = Header(None),
     x_auth_token: str | None = Header(None),
     x_project_id: str | None = Header(None),
 ) -> AsyncGenerator[openstack.connection.Connection, None]:
@@ -164,21 +225,18 @@ async def get_os_conn(
     Manila 등 openstacksdk 외부 클라이언트에서 그대로 사용할 수 있도록 한다.
     요청 완료 후 Connection을 닫아 리소스 누수를 방지한다.
     """
-    if not x_auth_token:
-        raise HTTPException(status_code=401, detail="X-Auth-Token 헤더가 필요합니다")
+    token_info = await get_token_info(
+        authorization=authorization,
+        x_auth_token=x_auth_token,
+        x_project_id=x_project_id,
+    )
+    scoped_token = token_info["token"]
+    project_id = token_info["project_id"]
     try:
-        token_hash = hashlib.sha256(x_auth_token.encode()).hexdigest()
-        await _check_session_timeout(token_hash, x_project_id or "")
-        token_info = await _cached_validate(x_auth_token, x_project_id or "")
-        scoped_token = token_info["token"]
-        project_id = token_info["project_id"]
         conn = keystone.get_openstack_connection(scoped_token, project_id)
-        # 프로젝트에 rescope된 토큰을 저장 (Manila 등 외부 클라이언트에서 사용)
         conn._afterglow_token = scoped_token
         conn._afterglow_project_id = project_id
         conn._afterglow_user_id = token_info.get("user_id", "")
-    except HTTPException:
-        raise
     except Exception:
         raise HTTPException(status_code=401, detail="유효하지 않은 토큰")
 

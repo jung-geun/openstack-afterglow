@@ -49,7 +49,7 @@ describe('auth store — 보안 테스트', () => {
       username: 'testuser',
       projectId: 'p1',
       projectName: 'MyProject',
-      expiresAt: null,
+      accessExpiresAt: null,
       roles: ['member'],
     });
     expect(storage['afterglow_auth']).toBeTruthy();
@@ -65,7 +65,7 @@ describe('auth store — 보안 테스트', () => {
       username: 'testuser',
       projectId: 'p1',
       projectName: 'MyProject',
-      expiresAt: null,
+      accessExpiresAt: null,
       roles: ['member'],
     });
     // 저장 확인
@@ -79,7 +79,7 @@ describe('auth store — 보안 테스트', () => {
   });
 
   it('clearAuth 후 auth store의 token이 null', () => {
-    setAuth({ token: 'tok', userId: 'u', username: 'u', projectId: 'p', projectName: 'p', expiresAt: null, roles: [] });
+    setAuth({ token: 'tok', userId: 'u', username: 'u', projectId: 'p', projectName: 'p', accessExpiresAt: null, roles: [] });
     clearAuth();
     expect(get(auth).token).toBeNull();
   });

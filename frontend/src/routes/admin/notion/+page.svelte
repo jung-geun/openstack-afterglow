@@ -60,7 +60,7 @@
 		testErrors = { ...testErrors, [id]: '' };
 		try {
 			const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-			if ($auth.token) headers['X-Auth-Token'] = $auth.token;
+			if ($auth.token) headers['Authorization'] = `Bearer ${$auth.token}`;
 			if ($auth.projectId) headers['X-Project-Id'] = $auth.projectId;
 			const resp = await fetch(`${getBaseUrl()}/api/admin/notion/targets/${id}/test`, {
 				method: 'POST',

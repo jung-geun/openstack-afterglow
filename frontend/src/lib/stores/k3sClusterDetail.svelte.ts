@@ -115,7 +115,7 @@ export function createK3sClusterDetailStore(opts: K3sClusterDetailOpts) {
       const res = await fetch(`${baseUrl}${apiBase}/${id}/kubeconfig`, {
         method: 'HEAD',
         headers: {
-          ...(opts.token() ? { 'X-Auth-Token': opts.token()! } : {}),
+          ...(opts.token() ? { 'Authorization': `Bearer ${opts.token()!}` } : {}),
           ...(opts.projectId() ? { 'X-Project-Id': opts.projectId()! } : {}),
         },
       });
@@ -131,7 +131,7 @@ export function createK3sClusterDetailStore(opts: K3sClusterDetailOpts) {
     const baseUrl = getBaseUrl();
     const res = await fetch(`${baseUrl}${apiBase}/${id}/kubeconfig`, {
       headers: {
-        ...(opts.token() ? { 'X-Auth-Token': opts.token()! } : {}),
+        ...(opts.token() ? { 'Authorization': `Bearer ${opts.token()!}` } : {}),
         ...(opts.projectId() ? { 'X-Project-Id': opts.projectId()! } : {}),
       },
     });

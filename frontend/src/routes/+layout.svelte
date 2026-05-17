@@ -27,11 +27,6 @@
 
 	const publicRoutes = ['/', '/auth/gitlab/callback'];
 
-	let sessionWarning = $state(false);
-	let sessionExpired = $state(false);
-	let sessionRemaining = $state(0);
-	let extendingSession = $state(false);
-
 	$effect(() => {
 		if (!$isLoggedIn && !publicRoutes.includes($page.url.pathname)) {
 			goto('/');
@@ -62,50 +57,35 @@
 	onMount(() => {
 		loadSiteConfig();
 
-		// 세션 타이머: 1분마다 남은 시간 체크
+		// access JWT 만료 2분 전에 자동 갱신 (client.ts의 401 재시도 보완)
 		const interval = setInterval(async () => {
-			if (!$auth.token) return;
-			try {
-				const info = await api.get<{ remaining_seconds: number; warning_before_seconds: number }>(
-					'/api/auth/session-info', $auth.token, $auth.projectId ?? undefined
-				);
-				sessionRemaining = info.remaining_seconds;
-				if (info.remaining_seconds <= 0) {
-					sessionExpired = true;
-					sessionWarning = false;
-					clearAuth();
-					goto('/');
-				} else if (info.remaining_seconds <= info.warning_before_seconds) {
-					sessionWarning = true;
-				} else {
-					sessionWarning = false;
+			if (!$auth.token || !$auth.refreshToken) return;
+			const expiresAt = $auth.accessExpiresAt;
+			if (!expiresAt) return;
+			const remaining = expiresAt - Math.floor(Date.now() / 1000);
+			if (remaining < 120) {
+				try {
+					const data = await api.post<{
+						token: string;
+						refresh_token?: string;
+						expires_at?: string;
+					}>('/api/auth/refresh', { refresh_token: $auth.refreshToken });
+					auth.update((s) => ({
+						...s,
+						token: data.token,
+						refreshToken: data.refresh_token ?? s.refreshToken,
+						accessExpiresAt: data.expires_at
+							? Math.floor(new Date(data.expires_at).getTime() / 1000)
+							: s.accessExpiresAt,
+					}));
+				} catch {
+					// refresh 실패 시 client.ts의 401 흐름이 처리
 				}
-			} catch {
-				// 세션 체크 실패 시 무시
 			}
 		}, 60_000);
 
 		return () => clearInterval(interval);
 	});
-
-	async function extendSession() {
-		if (!$auth.token || extendingSession) return;
-		extendingSession = true;
-		try {
-			await api.post('/api/auth/extend-session', {}, $auth.token, $auth.projectId ?? undefined);
-			sessionWarning = false;
-		} catch {
-			// 연장 실패 시 무시
-		} finally {
-			extendingSession = false;
-		}
-	}
-
-	function formatRemaining(seconds: number): string {
-		const m = Math.floor(seconds / 60);
-		const s = seconds % 60;
-		return m > 0 ? `${m}분 ${s}초` : `${s}초`;
-	}
 
 	// 테마 변경 시 <html> 클래스 업데이트
 	$effect(() => {
@@ -128,18 +108,6 @@
 <svelte:head><link rel="icon" href={$siteConfig.favicon_path} /></svelte:head>
 
 {#if $isLoggedIn}
-	<!-- 세션 만료 경고 배너 -->
-	{#if sessionWarning}
-		<div class="fixed top-14 left-0 md:left-60 right-0 z-40 bg-yellow-900/90 border-b border-yellow-700 px-3 md:px-6 py-2 flex items-center gap-4 text-sm">
-			<span class="text-yellow-200">세션이 <strong>{formatRemaining(sessionRemaining)}</strong> 후 만료됩니다.</span>
-			<button
-				onclick={extendSession}
-				disabled={extendingSession}
-				class="text-xs bg-yellow-700 hover:bg-yellow-600 text-white px-3 py-1 rounded transition-colors disabled:opacity-50"
-			>{extendingSession ? '연장 중...' : '세션 연장'}</button>
-			<button onclick={() => sessionWarning = false} class="ml-auto text-yellow-400 hover:text-yellow-200 text-xs">✕</button>
-		</div>
-	{/if}
 	<nav class="fixed top-0 left-0 md:left-60 right-0 z-50 bg-[#0B1220] border-b border-gray-800 h-14 flex items-center px-4 md:px-6 gap-4 shrink-0">
 		<!-- 모바일 햄버거 -->
 		<button

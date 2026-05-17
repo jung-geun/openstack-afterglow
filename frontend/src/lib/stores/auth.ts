@@ -1,7 +1,6 @@
 import { writable, derived } from 'svelte/store';
 
 // /api/auth/me 검증이 성공하면 true. 로그아웃/clearAuth 시 false.
-// localStorage에 영속화하지 않는다 — reload마다 /me 재검증 필요.
 export const authReady = writable(false);
 
 interface Project {
@@ -11,13 +10,14 @@ interface Project {
 }
 
 export interface AuthState {
-	token: string | null;
+	token: string | null;           // access JWT
+	refreshToken: string | null;    // refresh JWT
+	accessExpiresAt: number | null; // access JWT 만료 unix timestamp
 	userId: string | null;
 	username: string | null;
 	projectId: string | null;
 	projectName: string | null;
 	availableProjects: Project[];
-	expiresAt: string | null;
 	sessionTimeoutSeconds: number;
 	sessionWarningBeforeSeconds: number;
 	roles: string[];
@@ -26,12 +26,13 @@ export interface AuthState {
 
 const initial: AuthState = {
 	token: null,
+	refreshToken: null,
+	accessExpiresAt: null,
 	userId: null,
 	username: null,
 	projectId: null,
 	projectName: null,
 	availableProjects: [],
-	expiresAt: null,
 	sessionTimeoutSeconds: 3600,
 	sessionWarningBeforeSeconds: 300,
 	roles: [],
@@ -49,13 +50,11 @@ function loadPersistedAuth(): AuthState {
 
 export const auth = writable<AuthState>(loadPersistedAuth());
 
-// 자동 영속화: token이 있으면 localStorage에 저장, 없으면 제거
-// 동시에 서버 사이드 인증 미들웨어(hooks.server.ts)를 위한 마커 쿠키도 관리
+// 자동 영속화
 if (typeof window !== 'undefined') {
 	auth.subscribe(($auth) => {
 		if ($auth.token) {
 			localStorage.setItem('afterglow_auth', JSON.stringify($auth));
-			// 서버 사이드 라우트 보호용 마커 쿠키 (httpOnly 아님 — 토큰 자체는 저장하지 않음)
 			document.cookie = 'afterglow_session=1; path=/; SameSite=Strict; Secure';
 		} else {
 			localStorage.removeItem('afterglow_auth');
@@ -92,4 +91,10 @@ export function setAvailableProjects(projects: Project[]) {
 export function clearAuth() {
 	authReady.set(false);
 	auth.set(initial);
+}
+
+/** access JWT의 만료까지 남은 초. 토큰 없으면 0. */
+export function getAccessSecondsRemaining(state: AuthState): number {
+	if (!state.accessExpiresAt) return 0;
+	return Math.max(0, state.accessExpiresAt - Math.floor(Date.now() / 1000));
 }

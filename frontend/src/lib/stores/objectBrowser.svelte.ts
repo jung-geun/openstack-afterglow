@@ -481,7 +481,7 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 		const base = getBaseUrl();
 		const headers: Record<string, string> = {};
 		const tok = opts.token(); const pid = opts.projectId();
-		if (tok) headers['X-Auth-Token'] = tok;
+		if (tok) headers['Authorization'] = `Bearer ${tok}`;
 		if (pid) headers['X-Project-Id'] = pid;
 		const encodedPath = `/api/object-storage/${encodeURIComponent(opts.containerName())}/objects/${encObj(obj.name)}/preview`;
 		try {

@@ -419,7 +419,7 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 			'Content-Type': 'application/json',
 			'Accept': 'text/event-stream',
 		};
-		if (authState.token) headers['X-Auth-Token'] = authState.token;
+		if (authState.token) headers['Authorization'] = `Bearer ${authState.token}`;
 		if (authState.projectId) headers['X-Project-Id'] = authState.projectId;
 
 		const endpoint = opts.adminMode()

@@ -318,6 +318,8 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     lines.append(f'timeout_seconds = {sess.get("timeout_seconds", 3600)}')
     lines.append(f'warning_before_seconds = {sess.get("warning_before_seconds", 300)}')
     lines.append(f'absolute_timeout = {sess.get("absolute_timeout", 14400)}')
+    lines.append(f'jwt_access_ttl = {sess.get("jwt_access_ttl", 900)}')
+    lines.append(f'jwt_refresh_ttl = {sess.get("jwt_refresh_ttl", 604800)}')
     lines.append("")
 
     # [nova]

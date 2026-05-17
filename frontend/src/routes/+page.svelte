@@ -104,11 +104,14 @@
 
 			setAuth({
 				token: data.token,
+				refreshToken: (data as { refresh_token?: string }).refresh_token ?? null,
+				accessExpiresAt: data.expires_at
+					? Math.floor(new Date(data.expires_at).getTime() / 1000)
+					: null,
 				userId: data.user_id,
 				username: data.username,
 				projectId: selectedProjectId,
 				projectName: selectedProjectName,
-				expiresAt: data.expires_at ?? null,
 				sessionTimeoutSeconds,
 				sessionWarningBeforeSeconds,
 				roles: data.roles ?? [],

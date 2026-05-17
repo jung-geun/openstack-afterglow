@@ -86,6 +86,9 @@ timeout_seconds = 3600
 warning_before_seconds = 300
 # 절대 세션 만료 시간 (초). 활동 여부와 무관하게 이 시간이 지나면 강제 로그아웃.
 absolute_timeout = 14400
+# JWT access/refresh 토큰 수명 (초)
+jwt_access_ttl = 900      # access 토큰 (기본 15분)
+jwt_refresh_ttl = 604800  # refresh 토큰 (기본 7일)
 
 [nova]
 default_network_id = ""
