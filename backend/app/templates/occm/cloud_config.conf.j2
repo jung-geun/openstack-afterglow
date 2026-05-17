@@ -19,6 +19,9 @@ subnet-id={{ lb_subnet_id }}
 {% endif %}
 
 [Networking]
+{% if internal_network_name %}
+internal-network-name={{ internal_network_name }}
+{% endif %}
 {% if public_network_name %}
 public-network-name={{ public_network_name }}
 {% endif %}

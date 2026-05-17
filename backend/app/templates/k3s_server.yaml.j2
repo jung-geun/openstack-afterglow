@@ -61,6 +61,9 @@ write_files:
             dhcp4: true
             dhcp6: false
             link-local: []
+            optional: true
+            dhcp4-overrides:
+              use-routes: false
       EOF
       echo "[afterglow-nic-up] ${IFACE}: applying netplan..." | systemd-cat -t afterglow-nic-up
       if netplan apply 2>&1 | systemd-cat -t afterglow-nic-up; then
@@ -185,7 +188,8 @@ write_files:
       fi
 
 {% endfor %}
-      SERVER_IP=$(hostname -I | awk '{print $1}')
+      SERVER_IP=$(ip route get 8.8.8.8 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); break}}')
+      [ -z "${SERVER_IP}" ] && SERVER_IP=$(hostname -I | awk '{print $1}')
       KUBECONFIG_RAW=$(cat /etc/rancher/k3s/k3s.yaml)
       # 127.0.0.1 → 실제 서버 IP로 치환
       KUBECONFIG_FIXED=$(echo "${KUBECONFIG_RAW}" | sed "s/127\.0\.0\.1/${SERVER_IP}/g")
@@ -263,6 +267,7 @@ runcmd:
         --tls-san "{{ san }}" \
 {% endfor %}
         --write-kubeconfig-mode 644 \
+        --node-ip "${SERVER_IP}" \
 {% if needs_external_cloud_provider %}
         --disable-cloud-controller \
         --kubelet-arg="cloud-provider=external" \

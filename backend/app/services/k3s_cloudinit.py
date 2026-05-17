@@ -106,7 +106,8 @@ def _build_server_ignition(
     node_name = server_node_name or f"{cluster_name}-server"
     install_script = f"""#!/bin/bash
 set -e
-SERVER_IP=$(hostname -I | awk '{{print $1}}')
+SERVER_IP=$(ip route get 8.8.8.8 2>/dev/null | awk '{{for(i=1;i<=NF;i++) if($i=="src"){{print $(i+1); break}}}}')
+[ -z "${{SERVER_IP}}" ] && SERVER_IP=$(hostname -I | awk '{{print $1}}')
 curl -sfL https://get.k3s.io | \\
   INSTALL_K3S_VERSION="{k3s_version}" \\
   INSTALL_K3S_SKIP_SELINUX_RPM=true \\
@@ -114,6 +115,7 @@ curl -sfL https://get.k3s.io | \\
     --tls-san "${{SERVER_IP}}" \\
     {tls_sans_args} \\
     --write-kubeconfig-mode 644 \\
+    --node-ip "${{SERVER_IP}}" \\
     {cloud_controller_args} \\
     {extra_args_str} \\
     --node-name="{node_name}"

@@ -37,10 +37,9 @@ from app.models.k3s import (
 )
 from app.services import cinder, k3s_cloudinit, k3s_kube, keystone, neutron, nova, octavia
 from app.services import k3s_db as k3s_cluster
-from app.services.cache import cached_call, invalidate
+from app.services.cache import cached_call, invalidate, ttl_normal, ttl_slow
 from app.services.cache import invalidation as cache_invalidation
 from app.services.cache import keys as cache_keys
-from app.services.cache import ttl_normal, ttl_slow
 
 router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
@@ -151,8 +150,9 @@ async def download_kubeconfig(
     매 호출마다 audit log 기록 — 토큰 탈취 시 다운로드 추적이 가능하도록.
     None 결과는 캐시하지 않는다 (초기화 중인 클러스터 UX 보호).
     """
-    from app.services.cache import get_backend
     import json as _json
+
+    from app.services.cache import get_backend
 
     project_id = token_info["project_id"]
     cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
@@ -423,7 +423,13 @@ async def create_k3s_cluster_async(
             from app.services import k3s_plugins
             from app.services import keystone as _keystone
 
-            cloud_conf = k3s_plugins.aggregate_cloud_conf(project_id, s)
+            _internal_network_name = ""
+            try:
+                _net_obj = await asyncio.to_thread(lambda: conn.network.get_network(network_id))
+                _internal_network_name = _net_obj.name or ""
+            except Exception:
+                pass
+            cloud_conf = k3s_plugins.aggregate_cloud_conf(project_id, s, internal_network_name=_internal_network_name)
             active_plugins = k3s_plugins.get_active_plugin_names(s)
             occm_active = active_plugins.get("occm", False)
 

@@ -32,7 +32,7 @@ class OccmPlugin:
             return False
         return True
 
-    def cloud_conf_sections(self, project_id: str, settings: Settings) -> str:
+    def cloud_conf_sections(self, project_id: str, settings: Settings, internal_network_name: str = "") -> str:
         """OCCM의 cloud.conf 전체 내용 반환 (Global + LoadBalancer + Networking)."""
         tmpl = _jinja.get_template("occm/cloud_config.conf.j2")
         return tmpl.render(
@@ -46,6 +46,7 @@ class OccmPlugin:
             floating_network_id=settings.k3s_occm_floating_network_id,
             public_network_name=settings.k3s_occm_public_network_name,
             lb_subnet_id=settings.k3s_lb_subnet_id,
+            internal_network_name=internal_network_name,
         )
 
     def generate_manifests(self, cluster_name: str, project_id: str, settings: Settings, **kwargs) -> str:

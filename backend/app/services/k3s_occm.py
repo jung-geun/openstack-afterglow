@@ -13,8 +13,8 @@ def should_deploy_occm(settings: Settings) -> bool:
     return _occm.should_deploy(settings)
 
 
-def generate_cloud_conf(project_id: str, settings: Settings) -> str:
-    return _occm.cloud_conf_sections(project_id, settings)
+def generate_cloud_conf(project_id: str, settings: Settings, internal_network_name: str = "") -> str:
+    return _occm.cloud_conf_sections(project_id, settings, internal_network_name=internal_network_name)
 
 
 def generate_occm_manifests(cluster_name: str, settings: Settings) -> str:

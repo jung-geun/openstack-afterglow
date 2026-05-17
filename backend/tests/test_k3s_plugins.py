@@ -717,7 +717,7 @@ def test_cloudinit_server_multi_plugins():
 
 
 def test_cloudinit_agent_no_extra_args():
-    """에이전트: extra_agent_args 없을 때 INSTALL_K3S_EXEC 없어야 한다."""
+    """에이전트: extra_agent_args 없어도 --node-ip가 INSTALL_K3S_EXEC에 포함되어야 한다."""
     from app.services.k3s_cloudinit import generate_agent_userdata
 
     result = generate_agent_userdata(
@@ -729,7 +729,8 @@ def test_cloudinit_agent_no_extra_args():
     assert result.config_drive is False
     decoded = gzip.decompress(base64.b64decode(result.data)).decode()
     assert "#cloud-config" in decoded
-    assert "INSTALL_K3S_EXEC" not in decoded
+    assert "INSTALL_K3S_EXEC" in decoded
+    assert "--node-ip" in decoded
 
 
 def test_cloudinit_agent_with_cloud_provider():
