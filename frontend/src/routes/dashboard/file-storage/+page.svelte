@@ -4,30 +4,20 @@
   import { api, ApiError, memoryCache } from '$lib/api/client';
   import { apiMut } from '$lib/api/mutations';
   import type { FileStorage } from '$lib/types/resources';
-  import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
   import SlidePanel from '$lib/components/SlidePanel.svelte';
   import FileStorageDetailPanel from '$lib/components/FileStorageDetailPanel.svelte';
-  import StatusChip from '$lib/components/ui/StatusChip.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
   import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
-
-  // ────────── 공통 ──────────
-  const token = $derived($auth.token ?? undefined);
-  const projectId = $derived($auth.projectId ?? undefined);
-
+  import FileStorageWizard from '$lib/components/file-storage/wizard/FileStorageWizard.svelte';
+  import FileStorageCard from '$lib/components/file-storage/FileStorageCard.svelte';
 
   interface QuotaItem { limit: number; in_use: number; }
   interface Quota { shares: QuotaItem; gigabytes: QuotaItem; share_networks: QuotaItem; }
-  interface MetaEntry { key: string; value: string; }
-  interface ShareNetwork { id: string; name: string; neutron_net_id: string | null; status: string; }
-  interface NeutronNetwork { id: string; name: string; status: string; subnets: string[]; }
-  interface Subnet { id: string; name: string; cidr: string; }
-  interface AccessRule {
-    id: string; access_type: string; access_to: string;
-    access_level: string; access_key: string | null; state: string;
-  }
-  // ────────── 목록 ──────────
+
+  const token = $derived($auth.token ?? undefined);
+  const projectId = $derived($auth.projectId ?? undefined);
+
   let fileStorages = $state<FileStorage[]>([]);
   let quota = $state<Quota | null>(null);
   let loading = $state(true);
@@ -36,8 +26,8 @@
   let deleting = $state<string | null>(null);
   let copiedExport = $state<string | null>(null);
 
-  // ────────── 슬라이드 패널 ──────────
   let selectedId = $state<string | null>(null);
+  let showWizard = $state(false);
 
   function openDetailPanel(id: string) {
     selectedId = id;
@@ -113,507 +103,13 @@
     if (!pid) return;
     untrack(() => { fetchFileStorages(); fetchQuota(); });
   });
-
-  // ────────── 위저드 ──────────
-  type WizardStep = 1 | 2 | 3;
-  let showWizard = $state(false);
-  let wizardStep = $state<WizardStep>(1);
-  let wizardError = $state('');
-  let creating = $state(false);
-  let createdFs = $state<FileStorage | null>(null);
-
-  // Step 1: 기본 정보
-  type ShareTypeMeta = {
-    id: string;
-    name: string;
-    is_default: boolean;
-    extra_specs?: Record<string, string>;
-    supported_protocols?: string[];
-  };
-  let shareTypes = $state<ShareTypeMeta[]>([]);
-  let fsForm = $state({ name: '', size_gb: 10, share_type: '', share_proto: 'CEPHFS' as 'CEPHFS' | 'NFS' });
-  let metaEntries = $state<MetaEntry[]>([{ key: '', value: '' }]);
-
-  // 선택된 share_type 이 지원하는 프로토콜만 노출. 메타가 비어 있으면 fallback 으로 모두 노출.
-  const currentShareType = $derived(shareTypes.find(t => t.name === fsForm.share_type));
-  const allowedProtos = $derived<('CEPHFS' | 'NFS')[]>(
-    (currentShareType?.supported_protocols && currentShareType.supported_protocols.length > 0)
-      ? (currentShareType.supported_protocols.filter(
-          (p): p is 'CEPHFS' | 'NFS' => p === 'CEPHFS' || p === 'NFS'
-        ))
-      : ['CEPHFS', 'NFS']
-  );
-
-  // share_type 이 바뀌어 현재 share_proto 가 호환되지 않으면 자동으로 첫 번째 옵션으로 보정.
-  $effect(() => {
-    if (allowedProtos.length > 0 && !allowedProtos.includes(fsForm.share_proto)) {
-      fsForm.share_proto = allowedProtos[0];
-    }
-  });
-
-  // Step 2: 네트워크
-  let shareNetworks = $state<ShareNetwork[]>([]);
-  let selectedNetworkId = $state('');
-  let showInlineNetCreate = $state(false);
-  let neutronNetworks = $state<NeutronNetwork[]>([]);
-  let subnets = $state<Subnet[]>([]);
-  let loadingSubnets = $state(false);
-  let inlineNetForm = $state({ name: '', description: '', neutron_net_id: '', neutron_subnet_id: '' });
-  let inlineNetCreating = $state(false);
-  let inlineNetError = $state('');
-
-  // Step 3: 접근 규칙
-  let accessRules = $state<AccessRule[]>([]);
-  let ruleForm = $state({ access_to: '', access_level: 'rw' });
-  let addingRule = $state(false);
-  let ruleError = $state('');
-  let copiedKey = $state<string | null>(null);
-
-  function addMeta() { metaEntries = [...metaEntries, { key: '', value: '' }]; }
-  function removeMeta(i: number) { metaEntries = metaEntries.filter((_, idx) => idx !== i); }
-
-  async function openWizard() {
-    showWizard = true; wizardStep = 1; wizardError = ''; createdFs = null;
-    fsForm = { name: '', size_gb: 10, share_type: '', share_proto: 'CEPHFS' };
-    metaEntries = [{ key: '', value: '' }];
-    selectedNetworkId = ''; showInlineNetCreate = false;
-    inlineNetForm = { name: '', description: '', neutron_net_id: '', neutron_subnet_id: '' };
-    accessRules = []; ruleForm = { access_to: '', access_level: 'rw' };
-
-    try {
-      const [types, networks] = await Promise.all([
-        api.get<ShareTypeMeta[]>('/api/file-storage/types', token, projectId),
-        api.get<ShareNetwork[]>('/api/share-networks', token, projectId),
-      ]);
-      shareTypes = types;
-      shareNetworks = networks;
-      if (shareTypes.length > 0) {
-        const def = shareTypes.find(t => t.is_default) ?? shareTypes[0];
-        fsForm.share_type = def.name;
-        // share_type 의 supported_protocols 가 있으면 첫 번째 항목으로 share_proto 도 같이 설정
-        const protos = def.supported_protocols?.filter(
-          (p): p is 'CEPHFS' | 'NFS' => p === 'CEPHFS' || p === 'NFS'
-        );
-        if (protos && protos.length > 0) {
-          fsForm.share_proto = protos[0];
-        }
-      }
-    } catch { shareTypes = []; shareNetworks = []; }
-  }
-
-  function closeWizard() {
-    showWizard = false;
-    if (createdFs) fetchFileStorages();
-  }
-
-  function goStep2() {
-    if (!fsForm.name.trim() || fsForm.size_gb < 1) {
-      wizardError = '이름과 크기를 입력하세요.'; return;
-    }
-    wizardError = '';
-    wizardStep = 2;
-    // Neutron 네트워크 미리 로드
-    if (neutronNetworks.length === 0) {
-      api.get<NeutronNetwork[]>('/api/networks', token, projectId)
-        .then(r => neutronNetworks = r)
-        .catch(() => neutronNetworks = []);
-    }
-  }
-
-  async function onInlineNetworkChange() {
-    inlineNetForm.neutron_subnet_id = ''; subnets = [];
-    if (!inlineNetForm.neutron_net_id) return;
-    loadingSubnets = true;
-    try {
-      const detail = await api.get<{ id: string; subnet_details: Subnet[] }>(`/api/networks/${inlineNetForm.neutron_net_id}`, token, projectId);
-      subnets = detail.subnet_details ?? [];
-    } catch { subnets = []; }
-    finally { loadingSubnets = false; }
-  }
-
-  async function createInlineNetwork() {
-    if (!inlineNetForm.name.trim() || !inlineNetForm.neutron_net_id || !inlineNetForm.neutron_subnet_id) return;
-    inlineNetCreating = true; inlineNetError = '';
-    try {
-      const net = await api.post<ShareNetwork>('/api/share-networks', {
-        name: inlineNetForm.name, description: inlineNetForm.description,
-        neutron_net_id: inlineNetForm.neutron_net_id, neutron_subnet_id: inlineNetForm.neutron_subnet_id,
-      }, token, projectId);
-      shareNetworks = [...shareNetworks, net];
-      selectedNetworkId = net.id;
-      showInlineNetCreate = false;
-      inlineNetForm = { name: '', description: '', neutron_net_id: '', neutron_subnet_id: '' };
-    } catch (e) {
-      inlineNetError = e instanceof ApiError ? e.message : '생성 실패';
-    } finally { inlineNetCreating = false; }
-  }
-
-  async function createFileStorage() {
-    if (fsForm.share_proto === 'NFS' && !selectedNetworkId) {
-      wizardError = 'NFS 프로토콜은 Share Network가 필수입니다.'; return;
-    }
-    creating = true; wizardError = '';
-    try {
-      const body: Record<string, unknown> = {
-        name: fsForm.name, size_gb: fsForm.size_gb,
-        share_type: fsForm.share_type, share_proto: fsForm.share_proto,
-      };
-      if (selectedNetworkId && fsForm.share_proto !== 'CEPHFS') body.share_network_id = selectedNetworkId;
-      const validMeta = metaEntries.filter(m => m.key.trim());
-      if (validMeta.length > 0) {
-        const metadata: Record<string, string> = {};
-        validMeta.forEach(m => { metadata[m.key.trim()] = m.value; });
-        body.metadata = metadata;
-      }
-      const created = await apiMut('파일 스토리지 생성', () => api.post<FileStorage>('/api/file-storage', body, token, projectId));
-      createdFs = created;
-      // 접근 규칙 목록 초기 조회
-      try { accessRules = await api.get<AccessRule[]>(`/api/file-storage/${created.id}/access-rules`, token, projectId); }
-      catch { accessRules = []; }
-      wizardStep = 3;
-    } catch (e) {
-      wizardError = e instanceof ApiError ? e.message : '생성 실패';
-    } finally { creating = false; }
-  }
-
-  async function addAccessRule() {
-    if (!createdFs || !ruleForm.access_to.trim()) return;
-    addingRule = true; ruleError = '';
-    try {
-      const access_type = createdFs.share_proto === 'NFS' ? 'ip' : 'cephx';
-      const rule = await api.post<AccessRule>(
-        `/api/file-storage/${createdFs.id}/access-rules`,
-        { access_to: ruleForm.access_to.trim(), access_level: ruleForm.access_level, access_type },
-        token, projectId
-      );
-      accessRules = [...accessRules, rule];
-      ruleForm = { access_to: '', access_level: 'rw' };
-    } catch (e) {
-      ruleError = e instanceof ApiError ? e.message : '추가 실패';
-    } finally { addingRule = false; }
-  }
-
-  async function copyKey(key: string, ruleId: string) {
-    await navigator.clipboard.writeText(key);
-    copiedKey = ruleId;
-    setTimeout(() => (copiedKey = null), 2000);
-  }
 </script>
 
-<!-- ===== 위저드 모달 ===== -->
-{#if showWizard}
-  <div
-    class="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
-    onclick={closeWizard}
-    role="dialog" aria-modal="true" tabindex="-1"
-    onkeydown={(e) => e.key === 'Escape' && closeWizard()}
-  >
-    <div
-      class="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-xl mx-4 shadow-2xl max-h-[90vh] overflow-y-auto"
-      onclick={(e) => e.stopPropagation()}
-      role="none" onkeydown={(e) => e.stopPropagation()}
-    >
-      <!-- 스텝 인디케이터 -->
-      <div class="flex items-center gap-0 px-6 pt-6 pb-4 border-b border-gray-800">
-        {#each [
-          { step: 1, label: '기본 정보' },
-          { step: 2, label: '네트워크' },
-          { step: 3, label: '접근 설정' },
-        ] as s}
-          <div class="flex items-center {s.step < 3 ? 'flex-1' : ''}">
-            <div class="flex flex-col items-center">
-              <div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-colors
-                {wizardStep === s.step ? 'border-blue-500 bg-blue-900/40 text-blue-400' :
-                 wizardStep > s.step ? 'border-green-600 bg-green-900/30 text-green-400' :
-                 'border-gray-700 bg-gray-800 text-gray-500'}">
-                {wizardStep > s.step ? '✓' : s.step}
-              </div>
-              <span class="text-xs mt-1 {wizardStep === s.step ? 'text-blue-400' : wizardStep > s.step ? 'text-green-400' : 'text-gray-600'}">{s.label}</span>
-            </div>
-            {#if s.step < 3}
-              <div class="flex-1 h-px mx-3 mt-[-14px] {wizardStep > s.step ? 'bg-green-700' : 'bg-gray-700'}"></div>
-            {/if}
-          </div>
-        {/each}
-      </div>
+<FileStorageWizard
+  bind:open={showWizard}
+  onCreated={() => fetchFileStorages()}
+/>
 
-      <div class="p-6">
-
-        <!-- ===== STEP 1: 기본 정보 ===== -->
-        {#if wizardStep === 1}
-          <h2 class="text-base font-semibold text-white mb-4">파일 스토리지 기본 정보</h2>
-          <div class="space-y-4">
-            <div>
-              <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">이름 *
-                <input bind:value={fsForm.name} type="text" placeholder="my-file-storage"
-                  class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5" />
-              </label>
-            </div>
-            <div>
-              <span class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">크기 (GB)</span>
-              <div class="flex gap-2 mb-2">
-                {#each [10, 20, 50, 100] as preset}
-                  <button type="button" onclick={() => fsForm.size_gb = preset}
-                    class="flex-1 py-1.5 text-xs rounded-lg border transition-colors {fsForm.size_gb === preset ? 'border-blue-500 bg-blue-900/30 text-blue-400' : 'border-gray-600 text-gray-400 hover:border-gray-500'}">
-                    {preset} GB
-                  </button>
-                {/each}
-              </div>
-              <input bind:value={fsForm.size_gb} type="number" min="1" placeholder="직접 입력"
-                class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" />
-            </div>
-            <div>
-              <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">Share Type
-                {#if shareTypes.length > 0}
-                  <select bind:value={fsForm.share_type} class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5">
-                    {#each shareTypes as st}<option value={st.name}>{st.name}{st.is_default ? ' (기본값)' : ''}</option>{/each}
-                  </select>
-                {:else}
-                  <input bind:value={fsForm.share_type} type="text" placeholder="share type 이름"
-                    class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 font-mono mt-1.5" />
-                {/if}
-              </label>
-            </div>
-            <div>
-              <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">프로토콜
-                <select bind:value={fsForm.share_proto} class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5">
-                  {#each allowedProtos as p (p)}
-                    <option value={p}>{p === 'CEPHFS' ? 'CephFS' : 'NFS'}</option>
-                  {/each}
-                </select>
-                {#if allowedProtos.length === 1 && currentShareType}
-                  <span class="block text-[10px] text-gray-500 mt-1">선택된 share type 이 {allowedProtos[0]} 만 지원합니다.</span>
-                {/if}
-              </label>
-            </div>
-            <div>
-              <div class="flex items-center justify-between mb-2">
-                <span class="block text-xs text-gray-400 uppercase tracking-wide">메타데이터 (선택)</span>
-                <button type="button" onclick={addMeta} class="text-xs text-blue-400 hover:text-blue-300 transition-colors">+ 추가</button>
-              </div>
-              <div class="space-y-2">
-                {#each metaEntries as meta, i (i)}
-                  <div class="flex gap-2 items-center">
-                    <input bind:value={meta.key} type="text" placeholder="key"
-                      class="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-3 py-1.5 text-white text-xs focus:outline-none focus:border-blue-500 font-mono" />
-                    <span class="text-gray-600 text-xs">=</span>
-                    <input bind:value={meta.value} type="text" placeholder="value"
-                      class="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-3 py-1.5 text-white text-xs focus:outline-none focus:border-blue-500 font-mono" />
-                    <button type="button" onclick={() => removeMeta(i)} class="text-gray-600 hover:text-red-400 transition-colors text-xs px-1">✕</button>
-                  </div>
-                {/each}
-              </div>
-            </div>
-          </div>
-          {#if wizardError}<div class="mt-4 text-red-400 text-xs bg-red-900/20 border border-red-800 rounded px-3 py-2">{wizardError}</div>{/if}
-          <div class="flex justify-end gap-3 mt-6">
-            <button onclick={closeWizard} class="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors">취소</button>
-            <button onclick={goStep2} class="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors">다음 →</button>
-          </div>
-
-        <!-- ===== STEP 2: 네트워크 설정 ===== -->
-        {:else if wizardStep === 2}
-          <h2 class="text-base font-semibold text-white mb-1">네트워크 설정</h2>
-          <p class="text-xs text-gray-500 mb-4">
-            {fsForm.share_proto === 'NFS' ? 'NFS 프로토콜은 Share Network 선택이 필수입니다.' : 'CephFS는 Share Network 없이도 기본값으로 동작합니다.'}
-          </p>
-          <div class="space-y-4">
-            <!-- Share Network 선택 -->
-            <div>
-              {#if fsForm.share_proto === 'CEPHFS'}
-                <div class="bg-gray-800/40 border border-gray-700 rounded-lg px-3 py-2.5 text-xs text-gray-500">
-                  CephFS native 프로토콜은 Share Network 없이 직접 마운트됩니다.
-                </div>
-              {:else}
-                <div class="flex items-center justify-between mb-1.5">
-                  <span class="text-xs text-gray-400 uppercase tracking-wide">Share Network {fsForm.share_proto === 'NFS' ? '*' : '(선택)'}</span>
-                  <button type="button" onclick={() => { showInlineNetCreate = !showInlineNetCreate; inlineNetError = ''; }}
-                    class="text-xs text-blue-400 hover:text-blue-300 transition-colors">
-                    {showInlineNetCreate ? '접기' : '+ 새로 생성'}
-                  </button>
-                </div>
-                {#if shareNetworks.length > 0}
-                  <select bind:value={selectedNetworkId} class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
-                    <option value="">기본값 사용{fsForm.share_proto === 'NFS' ? '' : ' (권장)'}</option>
-                    {#each shareNetworks as net}<option value={net.id}>{net.name || net.id.slice(0, 8)}{net.status ? ` (${net.status})` : ''}</option>{/each}
-                  </select>
-                {:else if !showInlineNetCreate}
-                  <div class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-gray-500 text-sm">
-                    Share Network 없음 —
-                    <button onclick={() => showInlineNetCreate = true} class="text-blue-400 hover:text-blue-300 underline">지금 생성</button>
-                  </div>
-                {/if}
-              {/if}
-            </div>
-
-            <!-- 인라인 Share Network 생성 폼 -->
-            {#if showInlineNetCreate}
-              <div class="border border-gray-700 rounded-lg p-4 bg-gray-800/40 space-y-3">
-                <p class="text-xs text-gray-400 font-medium uppercase tracking-wide">새 Share Network 생성</p>
-                <div>
-                  <label class="block text-xs text-gray-500 mb-1">이름 *
-                    <input bind:value={inlineNetForm.name} type="text" placeholder="my-share-network"
-                      class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1" />
-                  </label>
-                </div>
-                <div>
-                  <label class="block text-xs text-gray-500 mb-1">설명 (선택)
-                    <input bind:value={inlineNetForm.description} type="text" placeholder="설명"
-                      class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1" />
-                  </label>
-                </div>
-                <div>
-                  <label class="block text-xs text-gray-500 mb-1">Neutron 네트워크 *
-                    <select bind:value={inlineNetForm.neutron_net_id} onchange={onInlineNetworkChange}
-                      class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1">
-                      <option value="">네트워크 선택</option>
-                      {#each neutronNetworks as net}<option value={net.id}>{net.name || net.id.slice(0, 12)} ({net.status})</option>{/each}
-                    </select>
-                  </label>
-                </div>
-                <div>
-                  <label class="block text-xs text-gray-500 mb-1">서브넷 *
-                    {#if loadingSubnets}
-                      <div class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-gray-500 text-sm mt-1">로딩 중...</div>
-                    {:else}
-                      <select bind:value={inlineNetForm.neutron_subnet_id} disabled={subnets.length === 0}
-                        class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1 disabled:text-gray-600">
-                        <option value="">{subnets.length === 0 ? '네트워크를 먼저 선택하세요' : '서브넷 선택'}</option>
-                        {#each subnets as subnet}<option value={subnet.id}>{subnet.name || subnet.id.slice(0, 12)} {subnet.cidr ? `(${subnet.cidr})` : ''}</option>{/each}
-                      </select>
-                    {/if}
-                  </label>
-                </div>
-                {#if inlineNetError}<div class="text-red-400 text-xs bg-red-900/20 border border-red-800 rounded px-3 py-2">{inlineNetError}</div>{/if}
-                <div class="flex justify-end gap-2">
-                  <button onclick={() => { showInlineNetCreate = false; inlineNetError = ''; }} class="px-3 py-1.5 text-xs text-gray-400 hover:text-white transition-colors">취소</button>
-                  <button onclick={createInlineNetwork} disabled={inlineNetCreating || !inlineNetForm.name.trim() || !inlineNetForm.neutron_net_id || !inlineNetForm.neutron_subnet_id}
-                    class="px-4 py-1.5 bg-blue-700 hover:bg-blue-600 disabled:bg-gray-700 disabled:text-gray-500 text-white text-xs font-medium rounded-lg transition-colors">
-                    {inlineNetCreating ? '생성 중...' : 'Share Network 생성'}
-                  </button>
-                </div>
-              </div>
-            {/if}
-          </div>
-
-          {#if wizardError}<div class="mt-4 text-red-400 text-xs bg-red-900/20 border border-red-800 rounded px-3 py-2">{wizardError}</div>{/if}
-          <div class="flex justify-between gap-3 mt-6">
-            <button onclick={() => { wizardStep = 1; wizardError = ''; }} class="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors">← 이전</button>
-            <div class="flex gap-3">
-              <button onclick={closeWizard} class="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors">취소</button>
-              <button onclick={createFileStorage} disabled={creating}
-                class="px-5 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium rounded-lg transition-colors">
-                {creating ? '생성 중...' : '생성'}
-              </button>
-            </div>
-          </div>
-
-        <!-- ===== STEP 3: 접근 규칙 설정 ===== -->
-        {:else if wizardStep === 3 && createdFs}
-          <div class="flex items-center gap-2 mb-4">
-            <span class="w-5 h-5 rounded-full bg-green-900/50 border border-green-600 flex items-center justify-center text-green-400 text-xs">✓</span>
-            <h2 class="text-base font-semibold text-white">"{createdFs.name}" 생성 완료</h2>
-          </div>
-
-          <!-- Export Location -->
-          {#if createdFs.export_locations && createdFs.export_locations.length > 0}
-            <div class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 mb-4">
-              <p class="text-xs text-gray-500 mb-1">Export Location (마운트 경로)</p>
-              <div class="flex items-center gap-2">
-                <code class="text-xs text-green-300 font-mono flex-1 truncate">{createdFs.export_locations[0]}</code>
-                <button onclick={() => copyExportPath(createdFs!.export_locations[0], createdFs!.id)}
-                  class="shrink-0 text-gray-500 hover:text-gray-300 text-xs px-2 py-1 rounded border border-gray-700 transition-colors">
-                  {copiedExport === createdFs.id ? '복사됨' : '복사'}
-                </button>
-              </div>
-            </div>
-          {/if}
-
-          <!-- 접근 규칙 추가 -->
-          <div class="mb-4">
-            <p class="text-xs text-gray-400 uppercase tracking-wide mb-3">접근 규칙 추가</p>
-            <div class="flex gap-2 items-end">
-              <div class="flex-1">
-                <label class="block text-xs text-gray-500 mb-1">
-                  {createdFs.share_proto === 'NFS' ? 'IP / CIDR' : 'CephX ID'}
-                  <input bind:value={ruleForm.access_to} type="text"
-                    placeholder={createdFs.share_proto === 'NFS' ? '예: 192.168.1.0/24' : '예: my-client'}
-                    class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1 font-mono" />
-                </label>
-              </div>
-              <div>
-                <label class="block text-xs text-gray-500 mb-1">권한
-                  <select bind:value={ruleForm.access_level}
-                    class="bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1">
-                    <option value="rw">읽기/쓰기</option>
-                    <option value="ro">읽기 전용</option>
-                  </select>
-                </label>
-              </div>
-              <button onclick={addAccessRule} disabled={addingRule || !ruleForm.access_to.trim()}
-                class="px-4 py-2 bg-blue-700 hover:bg-blue-600 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm rounded-lg transition-colors whitespace-nowrap mb-[1px]">
-                {addingRule ? '추가 중...' : '+ 추가'}
-              </button>
-            </div>
-            {#if ruleError}<div class="mt-2 text-red-400 text-xs bg-red-900/20 border border-red-800 rounded px-3 py-2">{ruleError}</div>{/if}
-          </div>
-
-          <!-- 추가된 규칙 목록 -->
-          {#if accessRules.length > 0}
-            <div class="border border-gray-700 rounded-lg overflow-hidden mb-4">
-              <table class="w-full text-xs">
-                <thead>
-                  <tr class="border-b border-gray-700 text-gray-500 uppercase tracking-wide bg-gray-800/50">
-                    <th class="text-left px-3 py-2">{createdFs.share_proto === 'NFS' ? 'IP/CIDR' : 'CephX ID'}</th>
-                    <th class="text-left px-3 py-2">권한</th>
-                    <th class="text-left px-3 py-2">상태</th>
-                    {#if createdFs.share_proto !== 'NFS'}<th class="text-left px-3 py-2">Access Key</th>{/if}
-                  </tr>
-                </thead>
-                <tbody>
-                  {#each accessRules as rule (rule.id)}
-                    <tr class="border-b border-gray-800 last:border-0">
-                      <td class="px-3 py-2 font-mono text-gray-300">{rule.access_to}</td>
-                      <td class="px-3 py-2">
-                        <span class="px-1.5 py-0.5 rounded {rule.access_level === 'rw' ? 'bg-blue-900/30 text-blue-300' : 'bg-gray-800 text-gray-400'}">{rule.access_level}</span>
-                      </td>
-                      <td class="px-3 py-2 text-gray-500">{rule.state}</td>
-                      {#if createdFs.share_proto !== 'NFS'}
-                        <td class="px-3 py-2">
-                          {#if rule.access_key}
-                            <div class="flex items-center gap-1.5">
-                              <code class="text-gray-400 font-mono truncate max-w-[120px]">{rule.access_key.slice(0, 12)}…</code>
-                              <button onclick={() => copyKey(rule.access_key!, rule.id)}
-                                class="text-gray-600 hover:text-gray-300 transition-colors">
-                                {copiedKey === rule.id ? '✓' : '⎘'}
-                              </button>
-                            </div>
-                          {:else}
-                            <span class="text-gray-600">대기 중</span>
-                          {/if}
-                        </td>
-                      {/if}
-                    </tr>
-                  {/each}
-                </tbody>
-              </table>
-            </div>
-          {:else}
-            <p class="text-xs text-gray-600 mb-4">아직 추가된 접근 규칙이 없습니다.</p>
-          {/if}
-
-          <div class="flex justify-end gap-3 mt-2">
-            <button onclick={closeWizard} class="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors">건너뛰기</button>
-            <button onclick={closeWizard} class="px-5 py-2 bg-green-700 hover:bg-green-600 text-white text-sm font-medium rounded-lg transition-colors">완료</button>
-          </div>
-        {/if}
-
-      </div>
-    </div>
-  </div>
-{/if}
-
-<!-- ===== 메인 페이지 ===== -->
 <div class="p-4 md:p-8">
   <PageHeader breadcrumb="FILE STORAGE" title="파일 스토리지">
     {#snippet actions()}
@@ -624,7 +120,7 @@
         refreshing={refreshing || loading}
         onManualRefresh={forceRefresh}
       />
-      <button onclick={openWizard} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 파일 스토리지 생성</button>
+      <button onclick={() => (showWizard = true)} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 파일 스토리지 생성</button>
     {/snippet}
   </PageHeader>
 
@@ -640,77 +136,25 @@
     <div class="text-center py-20 text-gray-600">
       <div class="text-5xl mb-4">🗂️</div>
       <p class="text-lg">파일 스토리지가 없습니다</p>
-      <button onclick={openWizard} class="text-blue-400 hover:text-blue-300 text-sm mt-2 inline-block">첫 파일 스토리지를 생성하세요 →</button>
+      <button onclick={() => (showWizard = true)} class="text-blue-400 hover:text-blue-300 text-sm mt-2 inline-block">첫 파일 스토리지를 생성하세요 →</button>
     </div>
   {:else}
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
       {#each fileStorages as fs (fs.id)}
-        <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
-          <!-- 헤더 -->
-          <div class="flex items-center gap-2.5 mb-3.5">
-            <div class="w-10 h-10 rounded-[10px] bg-teal-500/15 border border-teal-500/30 text-teal-400 flex items-center justify-center shrink-0">
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-              </svg>
-            </div>
-            <div class="flex-1 min-w-0">
-              <div class="text-white text-[14px] font-semibold font-mono truncate">
-                {fs.name || fs.id.slice(0, 8)}
-              </div>
-              <div class="text-[11px] text-gray-500 mt-0.5">
-                {fs.share_proto}
-                {#if fs.library_name}
-                  · <span class="text-blue-400">{fs.library_name}{fs.library_version ? ` v${fs.library_version}` : ''}</span>
-                {/if}
-              </div>
-            </div>
-            <StatusChip status={fs.status} />
-          </div>
-
-          <!-- 할당 크기 바 -->
-          <div>
-            <div class="flex justify-between text-[11px] text-gray-400 mb-1.5">
-              <span>할당 크기</span>
-              <span class="text-white font-medium">{fs.size} GB</span>
-            </div>
-            <div class="h-1.5 bg-gray-800 rounded-full overflow-hidden">
-              <div class="h-full rounded-full transition-all" style="width: {(quota?.gigabytes?.limit ?? 0) > 0 ? Math.min(100, Math.round(fs.size / (quota?.gigabytes?.limit ?? 1) * 100)) : 0}%; background: var(--gradient-usage)"></div>
-            </div>
-          </div>
-
-          <!-- Export Location -->
-          {#if fs.export_locations && fs.export_locations.length > 0}
-            <div class="mt-3.5 flex items-center gap-1.5 p-2.5 bg-[#0B1220] border border-gray-800 rounded-md">
-              <span class="text-gray-600 font-mono text-[11px] shrink-0">$</span>
-              <span class="font-mono text-[11px] text-gray-400 truncate flex-1">{fs.export_locations[0]}</span>
-              <button
-                onclick={(e) => { e.stopPropagation(); copyExportPath(fs.export_locations[0], fs.id); }}
-                class="shrink-0 text-gray-600 hover:text-gray-300 transition-colors text-[11px]"
-                title="경로 복사"
-              >{copiedExport === fs.id ? '✓' : '⎘'}</button>
-            </div>
-          {/if}
-
-          <!-- 액션 -->
-          <div class="mt-3.5 flex items-center gap-2 pt-3 border-t border-gray-800">
-            <button
-              onclick={() => openDetailPanel(fs.id)}
-              class="text-xs text-blue-400 hover:text-blue-300 transition-colors"
-            >상세</button>
-            <div class="flex-1"></div>
-            <button
-              onclick={(e) => { e.stopPropagation(); deleteFileStorage(fs.id, fs.name); }}
-              disabled={deleting === fs.id}
-              class="text-xs px-2 py-1 rounded border border-red-900 hover:border-red-700 text-red-400 hover:text-red-300 disabled:text-gray-600 disabled:border-gray-700 transition-colors"
-            >{deleting === fs.id ? '삭제 중...' : '삭제'}</button>
-          </div>
-        </div>
+        <FileStorageCard
+          {fs}
+          quotaLimit={quota?.gigabytes?.limit ?? 0}
+          {copiedExport}
+          {deleting}
+          onOpenDetail={openDetailPanel}
+          onCopyExport={copyExportPath}
+          onDelete={deleteFileStorage}
+        />
       {/each}
     </div>
   {/if}
 </div>
 
-<!-- File Storage Detail Panel -->
 {#if selectedId}
   <SlidePanel onClose={closeDetailPanel} width="w-full md:w-[60vw] max-w-2xl">
     <FileStorageDetailPanel

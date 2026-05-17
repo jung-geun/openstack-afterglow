@@ -1,0 +1,79 @@
+<script lang="ts">
+	import type { FileStorage } from '$lib/types/resources';
+	import StatusChip from '$lib/components/ui/StatusChip.svelte';
+
+	let {
+		fs,
+		quotaLimit,
+		copiedExport,
+		deleting,
+		onOpenDetail,
+		onCopyExport,
+		onDelete,
+	}: {
+		fs: FileStorage;
+		quotaLimit: number;
+		copiedExport: string | null;
+		deleting: string | null;
+		onOpenDetail: (id: string) => void;
+		onCopyExport: (path: string, id: string) => void;
+		onDelete: (id: string, name: string) => void;
+	} = $props();
+</script>
+
+<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
+	<div class="flex items-center gap-2.5 mb-3.5">
+		<div class="w-10 h-10 rounded-[10px] bg-teal-500/15 border border-teal-500/30 text-teal-400 flex items-center justify-center shrink-0">
+			<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+			</svg>
+		</div>
+		<div class="flex-1 min-w-0">
+			<div class="text-white text-[14px] font-semibold font-mono truncate">
+				{fs.name || fs.id.slice(0, 8)}
+			</div>
+			<div class="text-[11px] text-gray-500 mt-0.5">
+				{fs.share_proto}
+				{#if fs.library_name}
+					· <span class="text-blue-400">{fs.library_name}{fs.library_version ? ` v${fs.library_version}` : ''}</span>
+				{/if}
+			</div>
+		</div>
+		<StatusChip status={fs.status} />
+	</div>
+
+	<div>
+		<div class="flex justify-between text-[11px] text-gray-400 mb-1.5">
+			<span>할당 크기</span>
+			<span class="text-white font-medium">{fs.size} GB</span>
+		</div>
+		<div class="h-1.5 bg-gray-800 rounded-full overflow-hidden">
+			<div class="h-full rounded-full transition-all" style="width: {quotaLimit > 0 ? Math.min(100, Math.round(fs.size / quotaLimit * 100)) : 0}%; background: var(--gradient-usage)"></div>
+		</div>
+	</div>
+
+	{#if fs.export_locations && fs.export_locations.length > 0}
+		<div class="mt-3.5 flex items-center gap-1.5 p-2.5 bg-[#0B1220] border border-gray-800 rounded-md">
+			<span class="text-gray-600 font-mono text-[11px] shrink-0">$</span>
+			<span class="font-mono text-[11px] text-gray-400 truncate flex-1">{fs.export_locations[0]}</span>
+			<button
+				onclick={(e) => { e.stopPropagation(); onCopyExport(fs.export_locations[0], fs.id); }}
+				class="shrink-0 text-gray-600 hover:text-gray-300 transition-colors text-[11px]"
+				title="경로 복사"
+			>{copiedExport === fs.id ? '✓' : '⎘'}</button>
+		</div>
+	{/if}
+
+	<div class="mt-3.5 flex items-center gap-2 pt-3 border-t border-gray-800">
+		<button
+			onclick={() => onOpenDetail(fs.id)}
+			class="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+		>상세</button>
+		<div class="flex-1"></div>
+		<button
+			onclick={(e) => { e.stopPropagation(); onDelete(fs.id, fs.name); }}
+			disabled={deleting === fs.id}
+			class="text-xs px-2 py-1 rounded border border-red-900 hover:border-red-700 text-red-400 hover:text-red-300 disabled:text-gray-600 disabled:border-gray-700 transition-colors"
+		>{deleting === fs.id ? '삭제 중...' : '삭제'}</button>
+	</div>
+</div>
