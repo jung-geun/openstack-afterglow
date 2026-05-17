@@ -14,6 +14,7 @@
   import K3sNamespaceSelector from '$lib/components/k3s/K3sNamespaceSelector.svelte';
   import K3sClusterConfigMapsCard from '$lib/components/k3s/K3sClusterConfigMapsCard.svelte';
   import K3sClusterSecretsCard from '$lib/components/k3s/K3sClusterSecretsCard.svelte';
+  import K3sCloudShellOverlay from '$lib/components/k3s/K3sCloudShellOverlay.svelte';
 
   interface Props {
     clusterId: string;
@@ -60,6 +61,10 @@
 </script>
 
 <div class="relative h-full">
+  {#if s.shellOpen}
+    <K3sCloudShellOverlay />
+  {/if}
+
   {#if s.viewingInstanceId}
     <K3sInstanceViewerOverlay />
   {/if}

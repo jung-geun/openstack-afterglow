@@ -872,6 +872,17 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 - [x] `backend/tests/test_k3s_configmaps.py` — **신규** 8개 테스트 (401/404/list/get/create/update/delete + namespaces)
 - [x] `backend/tests/test_k3s_secrets.py` — **신규** 8개 테스트 (401/404/list/get/create/update/delete + plain→service 전달 확인)
 
+### 8.18 k3s Cloud Shell 프론트엔드 (2026-05-17)
+
+- [x] k3s Cloud Shell — 웹 kubectl 터미널 (PVC 영속, user impersonation, idle 15분)
+- [x] `frontend/src/lib/types/resources.ts` — `CloudShellTicket` 타입 추가
+- [x] `frontend/src/lib/api/k3sResources.ts` — `createShellTicket()` 헬퍼 추가
+- [x] `frontend/src/lib/stores/k3sClusterDetail.svelte.ts` — `shellOpen` state + `openShell`/`closeShell` 메서드 + reset 정리
+- [x] `frontend/src/lib/components/k3s/K3sCloudShellOverlay.svelte` — **신규** 풀스크린 오버레이, xterm.js + K8s exec WebSocket (v4.channel.k8s.io binary framing, channel 0/1/2/4) + ResizeObserver + idle timeout(4408) UI
+- [x] `frontend/src/lib/components/k3s/K3sCloudShellButton.svelte` — **신규** 헤더 진입 버튼 (ACTIVE + kubeconfig 준비 시만 표시)
+- [x] `frontend/src/lib/components/k3s/K3sClusterHeader.svelte` — kubeconfig 다운로드 버튼 앞에 Cloud Shell 버튼 추가
+- [x] `frontend/src/lib/components/K3sClusterDetailPanel.svelte` — `shellOpen` 시 overlay 마운트
+
 ---
 
 ## 9. Union Mount 레이어 시스템 v2 (content-addressable)

@@ -523,3 +523,8 @@ export interface SecretInfo {
   annotations: Record<string, string>;
   created_at: string;
 }
+
+export interface CloudShellTicket {
+  ticket: string;
+  expires_in: number;
+}

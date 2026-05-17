@@ -385,3 +385,213 @@ async def delete_secret(cluster_id: str, namespace: str, name: str, *, project_i
             return
         if resp.status_code not in (200, 202):
             _raise_k8s_error(resp, f"Secret {namespace}/{name} 삭제")
+
+
+# ---------------------------------------------------------------------------
+# WebSocket 연결 파라미터
+# ---------------------------------------------------------------------------
+
+@contextlib.asynccontextmanager
+async def _kube_ws_params(cluster_id: str, *, project_id: str | None = None):
+    """K8s WS exec 용 (ssl_ctx, wss_server_url) yield.
+    _kube_client 와 동일하게 kubeconfig 복호화하되 HTTP 클라이언트를 생성하지 않음.
+    """
+    if project_id is not None:
+        kubeconfig_yaml = await k3s_db.get_kubeconfig(project_id=project_id, cluster_id=cluster_id)
+    else:
+        kubeconfig_yaml = await k3s_db.get_kubeconfig_admin(cluster_id)
+    if not kubeconfig_yaml:
+        raise HTTPException(status_code=502, detail="kubeconfig 를 찾을 수 없습니다 (클러스터 미준비)")
+    cert_pem, key_pem, server_url = _parse_kubeconfig(kubeconfig_yaml)
+    ssl_ctx = _make_ssl_context(cert_pem, key_pem)
+    wss_url = server_url.replace("https://", "wss://").replace("http://", "ws://")
+    yield ssl_ctx, wss_url
+
+
+# ---------------------------------------------------------------------------
+# Pod / PVC / RBAC CRUD (Cloud Shell 용)
+# ---------------------------------------------------------------------------
+
+async def get_namespace(cluster_id: str, name: str, *, project_id: str | None = None) -> dict | None:
+    async with _kube_client(cluster_id, project_id=project_id) as (client, server_url):
+        resp = await client.get(f"{server_url}/api/v1/namespaces/{name}")
+        if resp.status_code == 404:
+            return None
+        if resp.status_code != 200:
+            _raise_k8s_error(resp, f"get namespace {name}")
+        return resp.json()
+
+
+async def create_namespace(cluster_id: str, name: str, *, project_id: str | None = None) -> dict:
+    body = {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": name}}
+    async with _kube_client(cluster_id, project_id=project_id) as (client, server_url):
+        resp = await client.post(f"{server_url}/api/v1/namespaces", json=body)
+        if resp.status_code not in (200, 201):
+            _raise_k8s_error(resp, f"create namespace {name}")
+        return resp.json()
+
+
+async def ensure_namespace(cluster_id: str, name: str, *, project_id: str | None = None) -> None:
+    existing = await get_namespace(cluster_id, name, project_id=project_id)
+    if not existing:
+        try:
+            await create_namespace(cluster_id, name, project_id=project_id)
+        except HTTPException as e:
+            if e.status_code != 409:  # 409 Conflict = 이미 존재
+                raise
+
+
+async def get_pvc(cluster_id: str, namespace: str, name: str, *, project_id: str | None = None) -> dict | None:
+    async with _kube_client(cluster_id, project_id=project_id) as (client, server_url):
+        resp = await client.get(f"{server_url}/api/v1/namespaces/{namespace}/persistentvolumeclaims/{name}")
+        if resp.status_code == 404:
+            return None
+        if resp.status_code != 200:
+            _raise_k8s_error(resp, f"get pvc {name}")
+        return resp.json()
+
+
+async def create_pvc(cluster_id: str, namespace: str, name: str, size: str = "1Gi", *,
+                     storage_class: str | None = None, project_id: str | None = None) -> dict:
+    spec: dict = {
+        "accessModes": ["ReadWriteOnce"],
+        "resources": {"requests": {"storage": size}},
+    }
+    if storage_class:
+        spec["storageClassName"] = storage_class
+    body = {
+        "apiVersion": "v1", "kind": "PersistentVolumeClaim",
+        "metadata": {"name": name, "namespace": namespace},
+        "spec": spec,
+    }
+    async with _kube_client(cluster_id, project_id=project_id) as (client, server_url):
+        resp = await client.post(f"{server_url}/api/v1/namespaces/{namespace}/persistentvolumeclaims", json=body)
+        if resp.status_code not in (200, 201):
+            _raise_k8s_error(resp, f"create pvc {name}")
+        return resp.json()
+
+
+async def ensure_pvc(cluster_id: str, namespace: str, name: str, size: str = "1Gi", *,
+                     project_id: str | None = None) -> None:
+    existing = await get_pvc(cluster_id, namespace, name, project_id=project_id)
+    if not existing:
+        try:
+            await create_pvc(cluster_id, namespace, name, size, project_id=project_id)
+        except HTTPException as e:
+            if e.status_code != 409:
+                raise
+
+
+async def get_pod(cluster_id: str, namespace: str, name: str, *, project_id: str | None = None) -> dict | None:
+    async with _kube_client(cluster_id, project_id=project_id) as (client, server_url):
+        resp = await client.get(f"{server_url}/api/v1/namespaces/{namespace}/pods/{name}")
+        if resp.status_code == 404:
+            return None
+        if resp.status_code != 200:
+            _raise_k8s_error(resp, f"get pod {name}")
+        return resp.json()
+
+
+async def create_pod(cluster_id: str, namespace: str, body: dict, *, project_id: str | None = None) -> dict:
+    async with _kube_client(cluster_id, project_id=project_id) as (client, server_url):
+        resp = await client.post(f"{server_url}/api/v1/namespaces/{namespace}/pods", json=body)
+        if resp.status_code not in (200, 201):
+            _raise_k8s_error(resp, f"create pod {body.get('metadata', {}).get('name', '?')}")
+        return resp.json()
+
+
+async def delete_pod(cluster_id: str, namespace: str, name: str, *, project_id: str | None = None) -> None:
+    async with _kube_client(cluster_id, project_id=project_id) as (client, server_url):
+        resp = await client.delete(f"{server_url}/api/v1/namespaces/{namespace}/pods/{name}")
+        if resp.status_code not in (200, 202, 404):
+            _raise_k8s_error(resp, f"delete pod {name}")
+
+
+async def wait_pod_ready(cluster_id: str, namespace: str, name: str, *,
+                         timeout: float = 90.0, project_id: str | None = None) -> bool:
+    """pod 의 phase=Running + containerStatuses[*].ready=True 까지 대기."""
+    import asyncio as _asyncio
+    deadline = _asyncio.get_event_loop().time() + timeout
+    while True:
+        pod = await get_pod(cluster_id, namespace, name, project_id=project_id)
+        if pod:
+            phase = pod.get("status", {}).get("phase", "")
+            statuses = pod.get("status", {}).get("containerStatuses", [])
+            if phase == "Running" and statuses and all(s.get("ready") for s in statuses):
+                return True
+            if phase in ("Failed", "Succeeded", "Unknown"):
+                return False
+        remaining = deadline - _asyncio.get_event_loop().time()
+        if remaining <= 0:
+            return False
+        await _asyncio.sleep(min(2.0, remaining))
+
+
+async def get_cluster_role_binding(cluster_id: str, name: str, *,
+                                   project_id: str | None = None) -> dict | None:
+    async with _kube_client(cluster_id, project_id=project_id) as (client, server_url):
+        resp = await client.get(f"{server_url}/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/{name}")
+        if resp.status_code == 404:
+            return None
+        if resp.status_code != 200:
+            _raise_k8s_error(resp, f"get clusterrolebinding {name}")
+        return resp.json()
+
+
+async def create_cluster_role_binding(cluster_id: str, name: str, user_name: str,
+                                      role_name: str = "cluster-admin", *,
+                                      project_id: str | None = None) -> dict:
+    body = {
+        "apiVersion": "rbac.authorization.k8s.io/v1",
+        "kind": "ClusterRoleBinding",
+        "metadata": {"name": name},
+        "roleRef": {
+            "apiGroup": "rbac.authorization.k8s.io",
+            "kind": "ClusterRole",
+            "name": role_name,
+        },
+        "subjects": [{"apiGroup": "rbac.authorization.k8s.io", "kind": "User", "name": user_name}],
+    }
+    async with _kube_client(cluster_id, project_id=project_id) as (client, server_url):
+        resp = await client.post(
+            f"{server_url}/apis/rbac.authorization.k8s.io/v1/clusterrolebindings", json=body
+        )
+        if resp.status_code not in (200, 201):
+            _raise_k8s_error(resp, f"create clusterrolebinding {name}")
+        return resp.json()
+
+
+async def ensure_cluster_role_binding_for_user(cluster_id: str, k8s_user: str, *,
+                                                project_id: str | None = None) -> None:
+    crb_name = f"afterglow-shell-{k8s_user}"
+    existing = await get_cluster_role_binding(cluster_id, crb_name, project_id=project_id)
+    if not existing:
+        try:
+            await create_cluster_role_binding(cluster_id, crb_name, k8s_user,
+                                              project_id=project_id)
+        except HTTPException as e:
+            if e.status_code != 409:
+                raise
+
+
+async def create_k8s_secret(cluster_id: str, namespace: str, name: str,
+                             string_data: dict[str, str], *,
+                             project_id: str | None = None) -> dict:
+    """generic Opaque secret (stringData)."""
+    body = {
+        "apiVersion": "v1", "kind": "Secret",
+        "metadata": {"name": name, "namespace": namespace},
+        "type": "Opaque",
+        "stringData": string_data,
+    }
+    async with _kube_client(cluster_id, project_id=project_id) as (client, server_url):
+        resp = await client.post(f"{server_url}/api/v1/namespaces/{namespace}/secrets", json=body)
+        if resp.status_code == 409:
+            # 이미 존재 — PUT 으로 교체 (kubeconfig 가 갱신될 수 있음)
+            resp = await client.put(
+                f"{server_url}/api/v1/namespaces/{namespace}/secrets/{name}",
+                json={**body, "metadata": {"name": name, "namespace": namespace}},
+            )
+        if resp.status_code not in (200, 201):
+            _raise_k8s_error(resp, f"upsert secret {name}")
+        return resp.json()

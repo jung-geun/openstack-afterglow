@@ -2,6 +2,7 @@
   import { useK3sClusterDetail } from '$lib/stores/k3sClusterDetail.svelte';
   import DetailHeader from '$lib/components/ui/DetailHeader.svelte';
   import Button from '$lib/components/ui/Button.svelte';
+  import K3sCloudShellButton from './K3sCloudShellButton.svelte';
 
   const s = useK3sClusterDetail();
 </script>
@@ -28,6 +29,7 @@
         class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-200 text-xs rounded-lg transition-colors disabled:opacity-50">
         {s.checkingHealth ? '확인 중...' : '헬스 체크'}
       </button>
+      <K3sCloudShellButton />
       <Button onclick={() => s.downloadKubeconfig()} size="sm">
         kubeconfig 다운로드
       </Button>

@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { ConfigMapInfo, SecretInfo } from '$lib/types/resources';
+import type { ConfigMapInfo, SecretInfo, CloudShellTicket } from '$lib/types/resources';
 
 export async function listNamespaces(
 	clusterId: string,
@@ -148,6 +148,19 @@ export async function deleteSecret(
 ): Promise<void> {
 	return api.delete<void>(
 		`/api/k3s/clusters/${clusterId}/namespaces/${namespace}/secrets/${name}`,
+		token,
+		projectId
+	);
+}
+
+export async function createShellTicket(
+	clusterId: string,
+	token: string | undefined,
+	projectId: string | undefined
+): Promise<CloudShellTicket> {
+	return api.post<CloudShellTicket>(
+		`/api/k3s/clusters/${clusterId}/shell-ticket`,
+		{},
 		token,
 		projectId
 	);

@@ -65,6 +65,7 @@ export function createK3sClusterDetailStore(opts: K3sClusterDetailOpts) {
   let secrets = $state<SecretInfo[]>([]);
   let cmActioning = $state<string | null>(null); // `${ns}:${name}`
   let namespacesLoaded = $state(false);
+  let shellOpen = $state(false);
 
   const apiBase = $derived(opts.adminMode() ? '/api/admin/k3s-clusters' : '/api/k3s/clusters');
   const isActive = $derived(cluster?.status === 'ACTIVE');
@@ -344,6 +345,9 @@ export function createK3sClusterDetailStore(opts: K3sClusterDetailOpts) {
     }
   }
 
+  function openShell() { shellOpen = true; }
+  function closeShell() { shellOpen = false; }
+
   function reset() {
     cluster = null;
     health = null;
@@ -363,6 +367,7 @@ export function createK3sClusterDetailStore(opts: K3sClusterDetailOpts) {
     secrets = [];
     cmActioning = null;
     namespacesLoaded = false;
+    shellOpen = false;
   }
 
   function setViewingInstance(id: string | null) {
@@ -423,6 +428,9 @@ export function createK3sClusterDetailStore(opts: K3sClusterDetailOpts) {
     deleteCm,
     saveSecret,
     deleteSecretItem,
+    get shellOpen() { return shellOpen; },
+    openShell,
+    closeShell,
   };
 }
 
