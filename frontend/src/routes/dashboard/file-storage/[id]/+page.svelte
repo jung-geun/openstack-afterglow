@@ -6,39 +6,26 @@
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
-	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 	import type { FileStorage, AccessRule } from '$lib/types/resources';
+	import FileStorageHeader from '$lib/components/dashboard/file-storage/[id]/FileStorageHeader.svelte';
+	import FileStorageInfoCard from '$lib/components/dashboard/file-storage/[id]/FileStorageInfoCard.svelte';
+	import ExportLocationList from '$lib/components/dashboard/file-storage/[id]/ExportLocationList.svelte';
+	import AccessRulesSection from '$lib/components/dashboard/file-storage/[id]/AccessRulesSection.svelte';
+	import FileStorageMetadata from '$lib/components/dashboard/file-storage/[id]/FileStorageMetadata.svelte';
 
 	let fileStorage = $state<FileStorage | null>(null);
 	let loading = $state(true);
 	let error = $state('');
-	let copiedIndex = $state<number | null>(null);
 	let deleting = $state(false);
-
 	let accessRules = $state<AccessRule[]>([]);
 	let accessLoading = $state(false);
-	let showAddRule = $state(false);
-	let ruleForm = $state({ access_to: '', access_level: 'ro' });
 	let addingRule = $state(false);
 	let ruleError = $state('');
 	let revokingId = $state<string | null>(null);
-	let copiedKey = $state<string | null>(null);
-
-	const statusColor: Record<string, string> = {
-		available: 'text-green-400 bg-green-900/30',
-		creating: 'text-yellow-400 bg-yellow-900/30',
-		deleting: 'text-orange-400 bg-orange-900/30',
-		error: 'text-red-400 bg-red-900/30',
-	};
 
 	const ar = createAutoRefresh(
-		() => { const id = $page.params.id; return Promise.all([fetchFileStorage(id), fetchAccessRules(id)]); },
-		{
-			storageKey: 'dashboard-file-storage-detail',
-			defaultActive: true,
-			defaultInterval: 15,
-			intervalOptions: [10, 15, 30, 60],
-		}
+		async () => { const id = $page.params.id ?? ''; await Promise.all([fetchFileStorage(id), fetchAccessRules(id)]); },
+		{ storageKey: 'dashboard-file-storage-detail', defaultActive: true, defaultInterval: 15, intervalOptions: [10, 15, 30, 60] }
 	);
 
 	$effect(() => {
@@ -48,329 +35,82 @@
 	});
 
 	async function fetchFileStorage(id: string) {
-		loading = true;
-		error = '';
+		loading = true; error = '';
 		try {
-			fileStorage = await api.get<FileStorage>(
-				`/api/file-storage/${id}`,
-				$auth.token ?? undefined,
-				$auth.projectId ?? undefined
-			);
+			fileStorage = await api.get<FileStorage>(`/api/file-storage/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
 		} catch (e) {
 			error = e instanceof ApiError ? `조회 실패 (${e.status}): ${e.message}` : '서버 오류';
-		} finally {
-			loading = false;
-		}
+		} finally { loading = false; }
 	}
 
 	async function fetchAccessRules(id: string) {
 		accessLoading = true;
 		try {
-			accessRules = await api.get<AccessRule[]>(
-				`/api/file-storage/${id}/access-rules`,
-				$auth.token ?? undefined,
-				$auth.projectId ?? undefined
-			);
-		} catch {
-			accessRules = [];
-		} finally {
-			accessLoading = false;
-		}
+			accessRules = await api.get<AccessRule[]>(`/api/file-storage/${id}/access-rules`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+		} catch { accessRules = []; } finally { accessLoading = false; }
 	}
 
-	async function addAccessRule() {
-		if (!fileStorage || !ruleForm.access_to.trim()) return;
-		addingRule = true;
-		ruleError = '';
+	async function handleAddRule(form: { access_to: string; access_level: string }): Promise<boolean> {
+		if (!fileStorage || !form.access_to.trim()) return false;
+		addingRule = true; ruleError = '';
 		const access_type = fileStorage.share_proto === 'NFS' ? 'ip' : 'cephx';
 		try {
-			await api.post(
-				`/api/file-storage/${fileStorage.id}/access-rules`,
-				{ access_to: ruleForm.access_to.trim(), access_level: ruleForm.access_level, access_type },
-				$auth.token ?? undefined,
-				$auth.projectId ?? undefined
-			);
-			ruleForm = { access_to: '', access_level: 'ro' };
-			showAddRule = false;
+			await api.post(`/api/file-storage/${fileStorage.id}/access-rules`,
+				{ access_to: form.access_to.trim(), access_level: form.access_level, access_type },
+				$auth.token ?? undefined, $auth.projectId ?? undefined);
 			await fetchAccessRules(fileStorage.id);
-		} catch (e) {
-			ruleError = e instanceof ApiError ? e.message : '생성 실패';
-		} finally {
-			addingRule = false;
-		}
+			return true;
+		} catch (e) { ruleError = e instanceof ApiError ? e.message : '생성 실패'; return false; }
+		finally { addingRule = false; }
 	}
 
-	async function revokeAccessRule(accessId: string) {
-		if (!fileStorage) return;
-		if (!confirm('이 접근 규칙을 삭제하시겠습니까?')) return;
+	async function handleRevokeRule(accessId: string): Promise<void> {
+		if (!fileStorage || !confirm('이 접근 규칙을 삭제하시겠습니까?')) return;
 		revokingId = accessId;
 		try {
-			await api.delete(
-				`/api/file-storage/${fileStorage.id}/access-rules/${accessId}`,
-				$auth.token ?? undefined,
-				$auth.projectId ?? undefined
-			);
+			await api.delete(`/api/file-storage/${fileStorage.id}/access-rules/${accessId}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			await fetchAccessRules(fileStorage.id);
-		} catch (e) {
-			alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
-		} finally {
-			revokingId = null;
-		}
-	}
-
-	async function copyPath(path: string, index: number) {
-		await navigator.clipboard.writeText(path);
-		copiedIndex = index;
-		setTimeout(() => (copiedIndex = null), 2000);
-	}
-
-	async function copyKey(key: string, id: string) {
-		await navigator.clipboard.writeText(key);
-		copiedKey = id;
-		setTimeout(() => (copiedKey = null), 2000);
+		} catch (e) { alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e))); }
+		finally { revokingId = null; }
 	}
 
 	async function deleteFileStorage() {
-		if (!fileStorage) return;
-		if (!confirm(`파일 스토리지 "${fileStorage.name || fileStorage.id}"를 삭제하시겠습니까?`)) return;
+		if (!fileStorage || !confirm(`파일 스토리지 "${fileStorage.name || fileStorage.id}"를 삭제하시겠습니까?`)) return;
 		deleting = true;
 		try {
 			await api.delete(`/api/file-storage/${fileStorage.id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			goto('/dashboard');
-		} catch (e) {
-			alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
-		} finally {
-			deleting = false;
-		}
+		} catch (e) { alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e))); }
+		finally { deleting = false; }
 	}
 </script>
 
 <div class="p-4 md:p-8 max-w-4xl mx-auto">
 	<div class="mb-6">
-		<a href="/dashboard" class="text-gray-400 hover:text-gray-200 text-sm transition-colors">
-			← 대시보드
-		</a>
+		<a href="/dashboard" class="text-gray-400 hover:text-gray-200 text-sm transition-colors">← 대시보드</a>
 	</div>
 
 	{#if error}
-		<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm">
-			{error}
-		</div>
+		<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm">{error}</div>
 	{:else if loading}
 		<LoadingSkeleton variant="card" rows={5} />
 	{:else if fileStorage}
-		<div class="flex items-start justify-between mb-6">
-			<div>
-				<h1 class="text-2xl font-bold text-white">{fileStorage.name || fileStorage.id}</h1>
-				<div class="flex items-center gap-2 mt-2">
-					<span
-						class="px-2 py-0.5 rounded text-xs font-medium {statusColor[fileStorage.status] ?? 'text-gray-400 bg-gray-800'}"
-					>
-						{fileStorage.status}
-					</span>
-					<span class="px-1.5 py-0.5 bg-purple-900/40 text-purple-300 rounded text-xs">
-						{fileStorage.share_proto}
-					</span>
-				</div>
-			</div>
-			<div class="flex items-center gap-2">
-			<AutoRefreshControl
-				bind:active={ar.active}
-				bind:intervalSeconds={ar.intervalSeconds}
-				intervalOptions={ar.intervalOptions}
-				refreshing={loading}
-				onManualRefresh={() => { const id = $page.params.id; fetchFileStorage(id); fetchAccessRules(id); }}
-			/>
-			<button
-				onclick={deleteFileStorage}
-				disabled={deleting}
-				class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-sm px-3 py-1.5 rounded border border-red-900 hover:border-red-700 disabled:border-gray-700 transition-colors"
-			>
-				{deleting ? '삭제 중...' : '삭제'}
-			</button>
-		</div>
-		</div>
-
-		<!-- 기본 정보 -->
-		<div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4">
-			<h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-4">기본 정보</h2>
-			<dl class="grid grid-cols-2 gap-x-8 gap-y-3">
-				<div>
-					<dt class="text-xs text-gray-500 mb-0.5">ID</dt>
-					<dd class="text-sm text-gray-300 font-mono">{fileStorage.id}</dd>
-				</div>
-				<div>
-					<dt class="text-xs text-gray-500 mb-0.5">크기</dt>
-					<dd class="text-sm text-gray-300">{fileStorage.size} GB</dd>
-				</div>
-				{#if fileStorage.library_name}
-					<div>
-						<dt class="text-xs text-gray-500 mb-0.5">라이브러리</dt>
-						<dd class="text-sm text-gray-300">{fileStorage.library_name}</dd>
-					</div>
-					<div>
-						<dt class="text-xs text-gray-500 mb-0.5">버전</dt>
-						<dd class="text-sm text-gray-300">{fileStorage.library_version ?? '-'}</dd>
-					</div>
-					{#if fileStorage.built_at}
-						<div class="col-span-2">
-							<dt class="text-xs text-gray-500 mb-0.5">빌드 일시</dt>
-							<dd class="text-sm text-gray-300">{fileStorage.built_at}</dd>
-						</div>
-					{/if}
-				{/if}
-			</dl>
-		</div>
-
-		<!-- Export Locations -->
-		{#if fileStorage.export_locations.length > 0}
-			<div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4">
-				<h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-4">
-					Export Locations
-				</h2>
-				<div class="space-y-2">
-					{#each fileStorage.export_locations as path, i}
-						<div class="flex items-center gap-2">
-							<code
-								class="flex-1 text-xs text-gray-300 bg-gray-800 px-3 py-2 rounded font-mono break-all"
-							>
-								{path}
-							</code>
-							<button
-								onclick={() => copyPath(path, i)}
-								class="shrink-0 text-xs px-2 py-1.5 rounded border transition-colors {copiedIndex === i
-									? 'border-green-700 text-green-400'
-									: 'border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500'}"
-							>
-								{copiedIndex === i ? '복사됨' : '복사'}
-							</button>
-						</div>
-					{/each}
-				</div>
-			</div>
-		{/if}
-
-		<!-- 접근 규칙 (Access Rules) -->
-		<div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4">
-			<div class="flex items-center justify-between mb-4">
-				<h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide">접근 규칙 {fileStorage.share_proto === 'NFS' ? '(IP)' : '(CephX)'}</h2>
-				<button
-					onclick={() => { showAddRule = !showAddRule; ruleError = ''; }}
-					class="text-xs text-blue-400 hover:text-blue-300 transition-colors"
-				>
-					{showAddRule ? '취소' : '+ 추가'}
-				</button>
-			</div>
-
-			{#if showAddRule}
-				<div class="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-4">
-					<div class="flex gap-3 items-end">
-						<div class="flex-1">
-							<label class="block text-xs text-gray-400 mb-1">{fileStorage.share_proto === 'NFS' ? 'IP / CIDR' : 'CephX ID'}
-							<input
-								bind:value={ruleForm.access_to}
-								type="text"
-								placeholder={fileStorage.share_proto === 'NFS' ? '예: 10.0.0.0/24' : '예: my-instance'}
-								class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500 font-mono mt-1"
-							/>
-						</label>
-						</div>
-						<div>
-							<label class="block text-xs text-gray-400 mb-1">권한
-							<select
-								bind:value={ruleForm.access_level}
-								class="bg-gray-900 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500 mt-1"
-							>
-								<option value="ro">읽기 전용 (ro)</option>
-								<option value="rw">읽기/쓰기 (rw)</option>
-							</select>
-							</label>
-						</div>
-						<button
-							onclick={addAccessRule}
-							disabled={addingRule || !ruleForm.access_to.trim()}
-							class="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm rounded transition-colors"
-						>
-							{addingRule ? '추가 중...' : '추가'}
-						</button>
-					</div>
-					{#if ruleError}<p class="text-red-400 text-xs mt-2">{ruleError}</p>{/if}
-				</div>
-			{/if}
-
-			{#if accessLoading}
-				<p class="text-gray-500 text-sm text-center py-4">로딩 중...</p>
-			{:else if accessRules.length === 0}
-				<p class="text-gray-600 text-sm text-center py-4">접근 규칙이 없습니다</p>
-			{:else}
-				<div class="overflow-x-auto">
-					<table class="w-full text-sm">
-						<thead>
-							<tr class="border-b border-gray-800 text-gray-500 text-xs uppercase tracking-wide">
-								<th class="text-left py-2 pr-4">접근 대상</th>
-								<th class="text-left py-2 pr-4">권한</th>
-								<th class="text-left py-2 pr-4">상태</th>
-								<th class="text-left py-2 pr-4">Access Key</th>
-								<th class="text-right py-2"></th>
-							</tr>
-						</thead>
-						<tbody>
-							{#each accessRules as rule (rule.id)}
-								<tr class="border-b border-gray-800/50">
-									<td class="py-2 pr-4 font-mono text-xs text-gray-300">{rule.access_to ?? '-'}</td>
-									<td class="py-2 pr-4">
-										<span class="text-xs px-1.5 py-0.5 rounded {rule.access_level === 'rw' ? 'bg-orange-900/30 text-orange-400' : 'bg-gray-800 text-gray-400'}">
-											{rule.access_level}
-										</span>
-									</td>
-									<td class="py-2 pr-4 text-xs text-gray-400">{rule.state || '-'}</td>
-									<td class="py-2 pr-4 text-xs font-mono">
-										{#if rule.access_key}
-											<div class="flex items-center gap-2">
-												<span class="text-gray-500 truncate max-w-[120px]">{rule.access_key.slice(0, 16)}...</span>
-												<button
-													onclick={() => copyKey(rule.access_key!, rule.id)}
-													class="text-xs px-1.5 py-0.5 rounded border transition-colors {copiedKey === rule.id ? 'border-green-700 text-green-400' : 'border-gray-700 text-gray-400 hover:text-gray-200'}"
-												>
-													{copiedKey === rule.id ? '복사됨' : '복사'}
-												</button>
-											</div>
-										{:else}
-											<span class="text-gray-600">-</span>
-										{/if}
-									</td>
-									<td class="py-2 text-right">
-										<button
-											onclick={() => revokeAccessRule(rule.id)}
-											disabled={revokingId === rule.id}
-											class="text-xs text-red-400 hover:text-red-300 disabled:opacity-40 transition-colors"
-										>
-											{revokingId === rule.id ? '삭제 중...' : '삭제'}
-										</button>
-									</td>
-								</tr>
-							{/each}
-						</tbody>
-					</table>
-				</div>
-			{/if}
-		</div>
-
-		<!-- 메타데이터 -->
-		{#if Object.keys(fileStorage.metadata).length > 0}
-			<div class="bg-gray-900 border border-gray-800 rounded-lg p-6">
-				<h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-4">메타데이터</h2>
-				<table class="w-full text-sm">
-					<tbody>
-						{#each Object.entries(fileStorage.metadata) as [k, v]}
-							<tr class="border-b border-gray-800/50">
-								<td class="py-2 pr-4 text-gray-500 text-xs w-1/3">{k}</td>
-								<td class="py-2 text-gray-300 font-mono text-xs break-all">{v}</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			</div>
-		{/if}
+		<FileStorageHeader
+			{fileStorage} {deleting} {loading}
+			bind:arActive={ar.active}
+			bind:arInterval={ar.intervalSeconds}
+			arIntervalOptions={ar.intervalOptions}
+			onManualRefresh={() => { const id = $page.params.id ?? ''; fetchFileStorage(id); fetchAccessRules(id); }}
+			onDelete={deleteFileStorage}
+		/>
+		<FileStorageInfoCard {fileStorage} />
+		<ExportLocationList paths={fileStorage.export_locations} />
+		<AccessRulesSection
+			shareProto={fileStorage.share_proto}
+			{accessRules} {accessLoading}
+			onAdd={handleAddRule} onRevoke={handleRevokeRule}
+			{addingRule} addError={ruleError} {revokingId}
+		/>
+		<FileStorageMetadata metadata={fileStorage.metadata} />
 	{/if}
 </div>
