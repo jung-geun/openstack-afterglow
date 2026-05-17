@@ -10,6 +10,7 @@
   import K3sClusterNodesCard from '$lib/components/k3s/K3sClusterNodesCard.svelte';
   import K3sClusterVmList from '$lib/components/k3s/K3sClusterVmList.svelte';
   import K3sInstanceViewerOverlay from '$lib/components/k3s/K3sInstanceViewerOverlay.svelte';
+  import K3sClusterNetworksCard from '$lib/components/k3s/K3sClusterNetworksCard.svelte';
 
   interface Props {
     clusterId: string;
@@ -88,6 +89,7 @@
         <K3sClusterNodesCard />
       </div>
       <K3sClusterVmList />
+      <K3sClusterNetworksCard />
     {/if}
   </div>
 </div>

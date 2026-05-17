@@ -1,7 +1,8 @@
 import { getContext, setContext } from 'svelte';
 import { api, ApiError, getBaseUrl } from '$lib/api/client';
 import { streamK3sProgress } from '$lib/api/k3sSseStream';
-import type { K3sCluster, K3sClusterHealth } from '$lib/types/resources';
+import type { K3sCluster, K3sClusterHealth, K3sInterfaceInfo, NetworkInfo } from '$lib/types/resources';
+import { listNodeInterfaces, attachNodeInterface, detachNodeInterface } from '$lib/api/k3s';
 
 export type { K3sCluster, K3sClusterHealth };
 
@@ -44,6 +45,9 @@ export function createK3sClusterDetailStore(opts: K3sClusterDetailOpts) {
   let scaling = $state(false);
   let scaleError = $state('');
   let initialCheckDone = $state(false);
+  let interfaces = $state<Record<string, K3sInterfaceInfo[]>>({});
+  let networks = $state<NetworkInfo[]>([]);
+  let interfaceActioning = $state<string | null>(null); // vmId or `${vmId}:${portId}`
 
   const apiBase = $derived(opts.adminMode() ? '/api/admin/k3s-clusters' : '/api/k3s/clusters');
   const isActive = $derived(cluster?.status === 'ACTIVE');
@@ -180,6 +184,56 @@ export function createK3sClusterDetailStore(opts: K3sClusterDetailOpts) {
     scalingTarget = Math.max(0, (scalingTarget ?? cluster?.agent_count ?? 0) - 1);
   }
 
+  async function loadNetworks() {
+    if (networks.length > 0) return;
+    try {
+      networks = await api.get<NetworkInfo[]>('/api/networks', opts.token(), opts.projectId());
+    } catch {
+      networks = [];
+    }
+  }
+
+  async function loadInterfaces(vmIds: string[]) {
+    const id = opts.clusterId();
+    if (!id) return;
+    await Promise.all(
+      vmIds.map(async (vmId) => {
+        try {
+          const list = await listNodeInterfaces(id, vmId, opts.token(), opts.projectId());
+          interfaces = { ...interfaces, [vmId]: list };
+        } catch {
+          // 개별 노드 실패는 무시
+        }
+      })
+    );
+  }
+
+  async function attachInterface(vmId: string, netId: string) {
+    const id = opts.clusterId();
+    if (!id || interfaceActioning) return;
+    interfaceActioning = vmId;
+    try {
+      await attachNodeInterface(id, vmId, netId, opts.token(), opts.projectId());
+      const list = await listNodeInterfaces(id, vmId, opts.token(), opts.projectId());
+      interfaces = { ...interfaces, [vmId]: list };
+    } finally {
+      interfaceActioning = null;
+    }
+  }
+
+  async function detachInterface(vmId: string, portId: string) {
+    const id = opts.clusterId();
+    if (!id || interfaceActioning) return;
+    interfaceActioning = `${vmId}:${portId}`;
+    try {
+      await detachNodeInterface(id, vmId, portId, opts.token(), opts.projectId());
+      const list = await listNodeInterfaces(id, vmId, opts.token(), opts.projectId());
+      interfaces = { ...interfaces, [vmId]: list };
+    } finally {
+      interfaceActioning = null;
+    }
+  }
+
   function reset() {
     cluster = null;
     health = null;
@@ -190,6 +244,9 @@ export function createK3sClusterDetailStore(opts: K3sClusterDetailOpts) {
     scalingTarget = null;
     initialCheckDone = false;
     scaleError = '';
+    interfaces = {};
+    networks = [];
+    interfaceActioning = null;
   }
 
   function setViewingInstance(id: string | null) {
@@ -218,6 +275,9 @@ export function createK3sClusterDetailStore(opts: K3sClusterDetailOpts) {
     set initialCheckDone(v: boolean) { initialCheckDone = v; },
     get apiBase() { return apiBase; },
     get isActive() { return isActive; },
+    get interfaces() { return interfaces; },
+    get networks() { return networks; },
+    get interfaceActioning() { return interfaceActioning; },
     loadCluster,
     loadHealth,
     triggerHealthCheck,
@@ -230,6 +290,10 @@ export function createK3sClusterDetailStore(opts: K3sClusterDetailOpts) {
     reset,
     setViewingInstance,
     clearViewingInstance,
+    loadNetworks,
+    loadInterfaces,
+    attachInterface,
+    detachInterface,
   };
 }
 

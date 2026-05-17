@@ -384,6 +384,14 @@ export interface K3sClusterHealth {
   reachability: string;
 }
 
+export interface K3sInterfaceInfo {
+  port_id: string;
+  net_id: string;
+  fixed_ips: { ip_address: string; subnet_id: string }[];
+  vm_id: string;
+  node_role: 'server' | 'agent';
+}
+
 // ——— LoadBalancer 도메인 ———
 
 export interface LoadBalancerDetail {
