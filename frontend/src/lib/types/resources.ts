@@ -281,3 +281,25 @@ export interface AdminNetwork {
   project_id?: string | null;
   project_name?: string;
 }
+
+export interface ShareSnapshot {
+  id: string;
+  name: string;
+  status: string;
+  share_id: string;
+  size: number;
+  description: string | null;
+  created_at: string | null;
+}
+
+export interface AdminFileStorage {
+  id: string;
+  name: string;
+  status: string;
+  size: number;
+  share_proto: string;
+  metadata: Record<string, string>;
+  project_id: string | null;
+  created_at: string | null;
+  export_locations: string[];
+}
