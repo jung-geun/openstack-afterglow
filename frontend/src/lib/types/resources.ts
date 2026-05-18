@@ -303,3 +303,23 @@ export interface AdminFileStorage {
   created_at: string | null;
   export_locations: string[];
 }
+
+export interface AdminRouter {
+  id: string;
+  name: string;
+  status: string;
+  external_gateway_network_id: string | null;
+  connected_subnet_ids: string[];
+  project_id: string | null;
+}
+
+export interface VolumeSnapshot {
+  id: string;
+  name: string;
+  status: string;
+  volume_id: string;
+  size: number;
+  description: string;
+  created_at: string | null;
+  project_id?: string;
+}
