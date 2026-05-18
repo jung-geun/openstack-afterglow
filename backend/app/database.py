@@ -147,6 +147,17 @@ async def create_tables() -> None:
             except Exception:
                 pass  # 이미 존재하면 무시
 
+        # Master HA + 인증서 회전 컬럼 (없는 경우에만)
+        for col, col_def in [
+            ("master_count", "INT NOT NULL DEFAULT 1"),
+            ("last_rotation_at", "DATETIME(6) DEFAULT NULL"),
+            ("last_rotation_initiated_by", "VARCHAR(64) DEFAULT NULL"),
+        ]:
+            try:
+                await conn.exec_driver_sql(f"ALTER TABLE k3s_clusters ADD COLUMN {col} {col_def}")
+            except Exception:
+                pass  # 이미 존재하면 무시
+
         # 프로젝트 기본 네트워크 테이블 생성 (없는 경우에만)
         try:
             await conn.exec_driver_sql(
