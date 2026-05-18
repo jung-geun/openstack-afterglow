@@ -323,3 +323,13 @@ export interface VolumeSnapshot {
   created_at: string | null;
   project_id?: string;
 }
+
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  enabled: boolean;
+  domain_id: string | null;
+  default_project_id: string | null;
+  created_at: string | null;
+}
