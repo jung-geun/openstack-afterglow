@@ -231,6 +231,9 @@ def _load_toml() -> dict:
     notion = data.get("notion", {})
     flat["notion_config_encryption_key"] = notion.get("config_encryption_key", "")
 
+    security = data.get("security", {})
+    flat["admin_legacy_project_policy"] = security.get("admin_legacy_project_policy", True)
+
     gl = data.get("gitlab_oidc", {})
     flat["gitlab_oidc_enabled"] = gl.get("enabled", False)
     flat["gitlab_oidc_gitlab_url"] = gl.get("gitlab_url", "")
@@ -333,12 +336,12 @@ class Settings(BaseSettings):
     cache_dynamic_threshold_low: int = 5
     cache_dynamic_threshold_high: int = 20
     # 3-tier TTL 카테고리 (Phase B)
-    cache_ttl_identity_stable: int = 86400   # 개인 프로필, role/group 멤버십
-    cache_ttl_catalog_slow: int = 900        # flavors, image 메타, 데이터스토어
-    cache_ttl_project_meta: int = 300        # keypair, SG 정의, 네트워크 메타
-    cache_ttl_operational_live: int = 30     # instances/volumes/FIP/컨테이너 상태
-    cache_ttl_admin_overview: int = 60       # admin 토폴로지, 하이퍼바이저
-    cache_ttl_auth_token: int = 60           # Keystone 토큰 검증 결과
+    cache_ttl_identity_stable: int = 86400  # 개인 프로필, role/group 멤버십
+    cache_ttl_catalog_slow: int = 900  # flavors, image 메타, 데이터스토어
+    cache_ttl_project_meta: int = 300  # keypair, SG 정의, 네트워크 메타
+    cache_ttl_operational_live: int = 30  # instances/volumes/FIP/컨테이너 상태
+    cache_ttl_admin_overview: int = 60  # admin 토폴로지, 하이퍼바이저
+    cache_ttl_auth_token: int = 60  # Keystone 토큰 검증 결과
 
     # 선택적 서비스
     service_magnum_enabled: bool = False
@@ -434,8 +437,13 @@ class Settings(BaseSettings):
     session_timeout_seconds: int = 3600
     session_warning_before_seconds: int = 300
     session_absolute_timeout: int = 14400  # 절대 만료: 기본 4시간, 초과 시 연장 불가
-    jwt_access_ttl: int = 900      # access JWT 수명 (초), 기본 15분
+    jwt_access_ttl: int = 900  # access JWT 수명 (초), 기본 15분
     jwt_refresh_ttl: int = 604800  # refresh JWT 수명 (초), 기본 7일
+
+    # 보안 정책
+    # True: system:all role OR admin project+role 모두 system admin 인정 (마이그레이션 호환 모드)
+    # False: system:all role만 system admin으로 인정 (자기복제 권한 상승 완전 차단)
+    admin_legacy_project_policy: bool = True
 
     # Nova 기본값
     default_network_id: str = ""  # 레거시 폴백 (default_network_enabled=false 시 사용)

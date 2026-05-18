@@ -884,6 +884,104 @@ async def revoke_group_role(
 
 
 # ============================================================================
+# System Roles (Keystone system:all scope)
+# ============================================================================
+
+
+class SystemRoleRequest(BaseModel):
+    user_id: str
+
+
+@router.get("/identity/system-roles", dependencies=[Depends(require_admin)])
+async def list_system_roles():
+    """system:all scope에서 admin role을 보유한 사용자 목록 조회."""
+
+    def _list():
+        try:
+            _, admin_role_id = keystone._resolve_admin_ids()
+            if not admin_role_id:
+                return []
+            ks = keystone._get_admin_ks_client()
+            assignments = ks.role_assignments.list(role=admin_role_id, system="all")
+            return [{"user_id": a.user["id"]} for a in assignments if hasattr(a, "user")]
+        except Exception as e:
+            _logger.warning("system role 목록 조회 실패: %s", e)
+            raise HTTPException(status_code=500, detail="system role 목록 조회 실패")
+
+    return await asyncio.to_thread(_list)
+
+
+@router.post("/identity/system-roles/grant", dependencies=[Depends(require_admin)])
+async def grant_system_role(
+    req: SystemRoleRequest,
+    token_info: dict = Depends(get_token_info),
+):
+    """사용자에게 Keystone system:all admin role 부여."""
+
+    def _grant():
+        try:
+            _, admin_role_id = keystone._resolve_admin_ids()
+            if not admin_role_id:
+                raise HTTPException(status_code=500, detail="admin role ID 조회 실패")
+            ks = keystone._get_admin_ks_client()
+            ks.roles.grant(role=admin_role_id, user=req.user_id, system="all")
+            return {"status": "granted"}
+        except HTTPException:
+            raise
+        except Exception as e:
+            _logger.warning("system role grant 실패: %s", e)
+            raise HTTPException(status_code=500, detail="system role grant 실패")
+
+    result = await asyncio.to_thread(_grant)
+    await session_store.revoke_user_sessions(req.user_id)
+    await activity.record(
+        project_id=token_info["project_id"],
+        user_id=token_info["user_id"],
+        username=token_info.get("username", ""),
+        resource_type="identity",
+        action="admin_system_role_grant",
+        status="success",
+        resource_id=req.user_id,
+    )
+    return result
+
+
+@router.post("/identity/system-roles/revoke", dependencies=[Depends(require_admin)])
+async def revoke_system_role(
+    req: SystemRoleRequest,
+    token_info: dict = Depends(get_token_info),
+):
+    """사용자로부터 Keystone system:all admin role 회수."""
+
+    def _revoke():
+        try:
+            _, admin_role_id = keystone._resolve_admin_ids()
+            if not admin_role_id:
+                raise HTTPException(status_code=500, detail="admin role ID 조회 실패")
+            ks = keystone._get_admin_ks_client()
+            ks.roles.revoke(role=admin_role_id, user=req.user_id, system="all")
+            return {"status": "revoked"}
+        except HTTPException:
+            raise
+        except Exception as e:
+            _logger.warning("system role revoke 실패: %s", e)
+            raise HTTPException(status_code=500, detail="system role revoke 실패")
+
+    result = await asyncio.to_thread(_revoke)
+    await session_store.revoke_user_sessions(req.user_id)
+    await activity.record(
+        project_id=token_info["project_id"],
+        user_id=token_info["user_id"],
+        username=token_info.get("username", ""),
+        resource_type="identity",
+        action="admin_system_role_revoke",
+        status="success",
+        resource_id=req.user_id,
+    )
+    return result
+
+
+# ============================================================================
 # Monitoring SG 동기화
 # ============================================================================
 

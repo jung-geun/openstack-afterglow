@@ -467,6 +467,12 @@ def _render_toml_for_k8s(cfg: dict) -> str:
         lines.append("# config_encryption_key는 secret.yaml의 NOTION_CONFIG_ENCRYPTION_KEY 환경변수로 주입됩니다")
         lines.append("")
 
+    # [security]
+    security = cfg.get("security", {})
+    lines.append("[security]")
+    lines.append(f'admin_legacy_project_policy = {_toml_bool(security.get("admin_legacy_project_policy", True))}')
+    lines.append("")
+
     return "\n".join(lines)
 
 
