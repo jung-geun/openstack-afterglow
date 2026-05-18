@@ -147,8 +147,10 @@ async def create_tables() -> None:
             except Exception:
                 pass  # 이미 존재하면 무시
 
-        # Master HA + 인증서 회전 컬럼 (없는 경우에만)
+        # Template (PR 1) + Master HA (PR 2) + 인증서 회전 (PR 3-B) 컬럼 (없는 경우에만)
         for col, col_def in [
+            ("template_id", "CHAR(36) DEFAULT NULL"),
+            ("template_snapshot", "JSON DEFAULT NULL"),
             ("master_count", "INT NOT NULL DEFAULT 1"),
             ("last_rotation_at", "DATETIME(6) DEFAULT NULL"),
             ("last_rotation_initiated_by", "VARCHAR(64) DEFAULT NULL"),
