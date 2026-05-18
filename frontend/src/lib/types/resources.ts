@@ -205,3 +205,36 @@ export interface SecurityGroup {
     ethertype: string;
   }[];
 }
+
+export interface QuotaItem {
+  limit: number;
+  in_use: number;
+}
+
+export interface Quotas {
+  compute: { instances: QuotaItem; cores: QuotaItem; ram: QuotaItem; };
+  storage: { volumes: QuotaItem; gigabytes: QuotaItem; };
+  network: { floatingip: QuotaItem; };
+  file_storage: { shares: QuotaItem; gigabytes: QuotaItem; };
+}
+
+export interface VolumeBackup {
+  id: string;
+  name: string;
+  description: string | null;
+  volume_id: string;
+  status: string;
+  size: number;
+  created_at: string | null;
+  is_incremental: boolean;
+  has_dependent_backups: boolean;
+}
+
+export interface SwiftContainer {
+  name: string;
+  count: number;
+  bytes: number;
+  project_id?: string;
+  project_name?: string;
+  is_quarantine?: boolean;
+}
