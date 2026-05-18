@@ -903,7 +903,22 @@ async def list_system_roles():
                 return []
             ks = keystone._get_admin_ks_client()
             assignments = ks.role_assignments.list(role=admin_role_id, system="all")
-            return [{"user_id": a.user["id"]} for a in assignments if hasattr(a, "user")]
+            user_ids = [a.user["id"] for a in assignments if hasattr(a, "user")]
+            result = []
+            for uid in user_ids:
+                try:
+                    u = ks.users.get(uid)
+                    result.append(
+                        {
+                            "user_id": uid,
+                            "name": getattr(u, "name", ""),
+                            "email": getattr(u, "email", ""),
+                            "enabled": getattr(u, "enabled", False),
+                        }
+                    )
+                except Exception:
+                    result.append({"user_id": uid, "name": "", "email": "", "enabled": False})
+            return result
         except Exception as e:
             _logger.warning("system role 목록 조회 실패: %s", e)
             raise HTTPException(status_code=500, detail="system role 목록 조회 실패")
@@ -959,6 +974,10 @@ async def revoke_system_role(
             if not admin_role_id:
                 raise HTTPException(status_code=500, detail="admin role ID 조회 실패")
             ks = keystone._get_admin_ks_client()
+            assignments = ks.role_assignments.list(role=admin_role_id, system="all")
+            current_admins = [a.user["id"] for a in assignments if hasattr(a, "user")]
+            if len(current_admins) <= 1 and req.user_id in current_admins:
+                raise HTTPException(status_code=422, detail="마지막 system admin은 회수할 수 없습니다")
             ks.roles.revoke(role=admin_role_id, user=req.user_id, system="all")
             return {"status": "revoked"}
         except HTTPException:

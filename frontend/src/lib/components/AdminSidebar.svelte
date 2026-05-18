@@ -105,6 +105,7 @@
 				{ label: '쿼터', href: '/admin/quotas', service: null },
 				{ label: '그룹', href: '/admin/groups', service: null },
 				{ label: '역할', href: '/admin/roles', service: null },
+				{ label: '시스템 관리자', href: '/admin/system-admins', service: null },
 			],
 		},
 	]);

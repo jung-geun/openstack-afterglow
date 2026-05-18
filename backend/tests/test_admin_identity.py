@@ -436,6 +436,118 @@ async def test_revoke_system_role_revokes_sessions(admin_client):
 
 
 @pytest.mark.asyncio
+async def test_list_system_roles_returns_enriched_fields(admin_client):
+    """list_system_roles 응답에 name/email/enabled 필드가 포함된다."""
+    mock_assignment = MagicMock()
+    mock_assignment.user = {"id": "sys-user-1"}
+
+    mock_user = MagicMock()
+    mock_user.name = "Alice"
+    mock_user.email = "alice@example.com"
+    mock_user.enabled = True
+
+    mock_ks = MagicMock()
+    mock_ks.role_assignments.list.return_value = [mock_assignment]
+    mock_ks.users.get.return_value = mock_user
+
+    with (
+        patch(
+            "app.api.identity.admin_identity.keystone._resolve_admin_ids",
+            return_value=(None, _ADMIN_ROLE_ID),
+        ),
+        patch(
+            "app.api.identity.admin_identity.keystone._get_admin_ks_client",
+            return_value=mock_ks,
+        ),
+    ):
+        resp = await admin_client.get("/api/admin/identity/system-roles")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["user_id"] == "sys-user-1"
+    assert data[0]["name"] == "Alice"
+    assert data[0]["email"] == "alice@example.com"
+    assert data[0]["enabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_revoke_last_system_admin_blocked(admin_client):
+    """마지막 system admin 회수 시도 → 422."""
+    mock_assignment = MagicMock()
+    mock_assignment.user = {"id": "last-admin"}
+
+    mock_ks = MagicMock()
+    mock_ks.role_assignments.list.return_value = [mock_assignment]
+
+    with (
+        patch(
+            "app.api.identity.admin_identity.keystone._resolve_admin_ids",
+            return_value=(None, _ADMIN_ROLE_ID),
+        ),
+        patch(
+            "app.api.identity.admin_identity.keystone._get_admin_ks_client",
+            return_value=mock_ks,
+        ),
+        patch(
+            "app.api.identity.admin_identity.session_store.revoke_user_sessions",
+            new=AsyncMock(return_value=0),
+        ),
+        patch(
+            "app.api.identity.admin_identity.activity.record",
+            new=AsyncMock(),
+        ),
+    ):
+        resp = await admin_client.post(
+            "/api/admin/identity/system-roles/revoke",
+            json={"user_id": "last-admin"},
+        )
+
+    assert resp.status_code == 422
+    assert "마지막" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_revoke_with_other_admins_succeeds(admin_client):
+    """system admin이 2명 이상인 경우 회수 성공 → 200."""
+
+    def _make_assign(uid: str):
+        a = MagicMock()
+        a.user = {"id": uid}
+        return a
+
+    mock_ks = MagicMock()
+    mock_ks.role_assignments.list.return_value = [_make_assign("admin-1"), _make_assign("admin-2")]
+    mock_ks.roles.revoke = MagicMock(return_value=None)
+
+    with (
+        patch(
+            "app.api.identity.admin_identity.keystone._resolve_admin_ids",
+            return_value=(None, _ADMIN_ROLE_ID),
+        ),
+        patch(
+            "app.api.identity.admin_identity.keystone._get_admin_ks_client",
+            return_value=mock_ks,
+        ),
+        patch(
+            "app.api.identity.admin_identity.session_store.revoke_user_sessions",
+            new=AsyncMock(return_value=1),
+        ),
+        patch(
+            "app.api.identity.admin_identity.activity.record",
+            new=AsyncMock(),
+        ),
+    ):
+        resp = await admin_client.post(
+            "/api/admin/identity/system-roles/revoke",
+            json={"user_id": "admin-1"},
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "revoked"
+
+
+@pytest.mark.asyncio
 async def test_revoke_non_admin_role_no_revoke(admin_client, mock_conn):
     """일반 role 회수 시 세션 무효화는 수행하지 않고 audit만 기록된다."""
     mock_conn.identity.unassign_project_role_from_user = MagicMock(return_value=None)
