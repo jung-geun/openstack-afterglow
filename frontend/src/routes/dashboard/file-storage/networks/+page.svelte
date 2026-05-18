@@ -4,46 +4,19 @@
   import { api, ApiError } from '$lib/api/client';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
-  import StatusChip from '$lib/components/ui/StatusChip.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
   import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
-
-  interface ShareNetwork {
-    id: string;
-    name: string;
-    description: string;
-    neutron_net_id: string | null;
-    neutron_subnet_id: string | null;
-    status: string;
-    created_at: string | null;
-  }
-
-  interface NeutronNetwork {
-    id: string;
-    name: string;
-    status: string;
-    subnets: string[];
-  }
-
-  interface Subnet {
-    id: string;
-    name: string;
-    cidr: string;
-  }
-
+  import type { ShareNetwork } from '$lib/types/shareNetwork';
+  import ShareNetworkCreateModal from '$lib/components/dashboard/file-storage/networks/ShareNetworkCreateModal.svelte';
+  import ShareNetworkTable from '$lib/components/dashboard/file-storage/networks/ShareNetworkTable.svelte';
 
   let networks = $state<ShareNetwork[]>([]);
-  let neutronNetworks = $state<NeutronNetwork[]>([]);
-  let subnets = $state<Subnet[]>([]);
   let loading = $state(true);
   let refreshing = $state(false);
   let deleting = $state<string | null>(null);
   let error = $state('');
   let showModal = $state(false);
   let creating = $state(false);
-  let createError = $state('');
-  let form = $state({ name: '', description: '', neutron_net_id: '', neutron_subnet_id: '' });
-  let loadingSubnets = $state(false);
 
   const token = $derived($auth.token ?? undefined);
   const projectId = $derived($auth.projectId ?? undefined);
@@ -59,50 +32,12 @@
     }
   }
 
-  async function openCreateModal() {
-    showModal = true;
-    form = { name: '', description: '', neutron_net_id: '', neutron_subnet_id: '' };
-    subnets = [];
-    createError = '';
-    try {
-      neutronNetworks = await api.get<NeutronNetwork[]>('/api/networks', token, projectId);
-    } catch {
-      neutronNetworks = [];
-    }
-  }
-
-  async function onNetworkChange() {
-    form.neutron_subnet_id = '';
-    subnets = [];
-    if (!form.neutron_net_id) return;
-    loadingSubnets = true;
-    try {
-      const detail = await api.get<{ id: string; subnet_details: Subnet[] }>(
-        `/api/networks/${form.neutron_net_id}`, token, projectId
-      );
-      subnets = detail.subnet_details ?? [];
-    } catch {
-      subnets = [];
-    } finally {
-      loadingSubnets = false;
-    }
-  }
-
-  async function createNetwork() {
-    if (!form.name.trim() || !form.neutron_net_id || !form.neutron_subnet_id) return;
+  async function createNetwork(form: { name: string; description: string; neutron_net_id: string; neutron_subnet_id: string }): Promise<boolean> {
     creating = true;
-    createError = '';
     try {
-      await api.post('/api/share-networks', {
-        name: form.name,
-        description: form.description,
-        neutron_net_id: form.neutron_net_id,
-        neutron_subnet_id: form.neutron_subnet_id,
-      }, token, projectId);
-      showModal = false;
+      await api.post('/api/share-networks', form, token, projectId);
       await fetchNetworks();
-    } catch (e) {
-      createError = e instanceof ApiError ? e.message : '생성 실패';
+      return true;
     } finally {
       creating = false;
     }
@@ -121,15 +56,6 @@
     }
   }
 
-  async function forceRefresh() {
-    refreshing = true;
-    try {
-      await fetchNetworks({ refresh: true });
-    } finally {
-      refreshing = false;
-    }
-  }
-
   const ar = createAutoRefresh(() => fetchNetworks(), {
     storageKey: 'dashboard-file-storage-networks',
     defaultActive: true,
@@ -144,69 +70,7 @@
   });
 </script>
 
-{#if showModal}
-  <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
-    onclick={() => { showModal = false; createError = ''; }}
-    role="dialog" aria-modal="true" tabindex="-1"
-    onkeydown={(e) => e.key === 'Escape' && (showModal = false)}>
-    <div class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-lg mx-4 shadow-2xl"
-      onclick={(e) => e.stopPropagation()} role="none" onkeydown={(e) => e.stopPropagation()}>
-      <h2 class="text-lg font-semibold text-white mb-5">Share 네트워크 생성</h2>
-      <div class="space-y-4">
-        <div>
-          <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">이름 *
-            <input bind:value={form.name} type="text" placeholder="my-share-network"
-              class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5" />
-          </label>
-        </div>
-        <div>
-          <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">설명 (선택)
-            <input bind:value={form.description} type="text" placeholder="설명"
-              class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5" />
-          </label>
-        </div>
-        <div>
-          <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">Neutron 네트워크 *
-            <select bind:value={form.neutron_net_id} onchange={onNetworkChange}
-              class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5">
-              <option value="">네트워크 선택</option>
-              {#each neutronNetworks as net}
-                <option value={net.id}>{net.name || net.id.slice(0, 12)} ({net.status})</option>
-              {/each}
-            </select>
-          </label>
-        </div>
-        <div>
-          <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">서브넷 *
-            {#if loadingSubnets}
-              <div class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-gray-500 text-sm mt-1.5">로딩 중...</div>
-            {:else}
-              <select bind:value={form.neutron_subnet_id}
-                disabled={subnets.length === 0}
-                class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5 disabled:text-gray-600">
-                <option value="">{subnets.length === 0 ? '네트워크를 먼저 선택하세요' : '서브넷 선택'}</option>
-                {#each subnets as subnet}
-                  <option value={subnet.id}>{subnet.name || subnet.id.slice(0, 12)} {subnet.cidr ? `(${subnet.cidr})` : ''}</option>
-                {/each}
-              </select>
-            {/if}
-          </label>
-        </div>
-      </div>
-      {#if createError}
-        <div class="mt-4 text-red-400 text-xs bg-red-900/20 border border-red-800 rounded px-3 py-2">{createError}</div>
-      {/if}
-      <div class="flex justify-end gap-3 mt-6">
-        <button onclick={() => { showModal = false; createError = ''; }}
-          class="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors">취소</button>
-        <button onclick={createNetwork} disabled={creating || !form.name.trim() || !form.neutron_net_id || !form.neutron_subnet_id}
-          class="px-5 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium rounded-lg transition-colors">
-          {creating ? '생성 중...' : '생성'}
-        </button>
-      </div>
-    </div>
-  </div>
-{/if}
+<ShareNetworkCreateModal bind:open={showModal} {creating} {token} {projectId} onCreate={createNetwork} />
 
 <div class="p-4 md:p-8">
   <PageHeader breadcrumb="FILE STORAGE / NETWORKS" title="Share 네트워크">
@@ -216,9 +80,9 @@
         bind:intervalSeconds={ar.intervalSeconds}
         intervalOptions={ar.intervalOptions}
         refreshing={refreshing || loading}
-        onManualRefresh={forceRefresh}
+        onManualRefresh={async () => { refreshing = true; try { await fetchNetworks({ refresh: true }); } finally { refreshing = false; } }}
       />
-      <button onclick={openCreateModal}
+      <button onclick={() => { showModal = true; }}
         class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
         + Share 네트워크 생성
       </button>
@@ -237,49 +101,9 @@
     <div class="text-center py-20 text-gray-600">
       <div class="text-5xl mb-4">🔗</div>
       <p class="text-lg">Share 네트워크가 없습니다</p>
-      <button onclick={openCreateModal} class="text-blue-400 hover:text-blue-300 text-sm mt-2 inline-block">
-        첫 Share 네트워크를 생성하세요 →
-      </button>
+      <button onclick={() => { showModal = true; }} class="text-blue-400 hover:text-blue-300 text-sm mt-2 inline-block">첫 Share 네트워크를 생성하세요 →</button>
     </div>
   {:else}
-    <div class="overflow-x-auto">
-      <table class="w-full text-sm">
-        <thead>
-          <tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
-            <th class="text-left py-3 pr-6">이름</th>
-            <th class="text-left py-3 pr-6">상태</th>
-            <th class="text-left py-3 pr-6">Neutron 네트워크 ID</th>
-            <th class="text-left py-3 pr-6">서브넷 ID</th>
-            <th class="text-left py-3 pr-6">생성일</th>
-            <th class="text-right py-3">액션</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each networks as net (net.id)}
-            <tr class="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
-              <td class="py-3 pr-6 font-medium text-white">
-                {#if net.name}{net.name}{:else}<span class="text-gray-400 font-mono text-xs">{net.id.slice(0, 8)}</span>{/if}
-                {#if net.description}
-                  <div class="text-xs text-gray-500">{net.description}</div>
-                {/if}
-              </td>
-              <td class="py-3 pr-6">
-                <StatusChip status={net.status || null} />
-              </td>
-              <td class="py-3 pr-6 font-mono text-xs text-gray-400">{net.neutron_net_id?.slice(0, 20) ?? '-'}...</td>
-              <td class="py-3 pr-6 font-mono text-xs text-gray-400">{net.neutron_subnet_id?.slice(0, 20) ?? '-'}...</td>
-              <td class="py-3 pr-6 text-xs text-gray-500">{net.created_at ? net.created_at.split('T')[0] : '-'}</td>
-              <td class="py-3 text-right">
-                <button onclick={() => deleteNetwork(net.id, net.name)}
-                  disabled={deleting === net.id}
-                  class="text-red-400 hover:text-red-300 disabled:text-gray-600 text-xs px-2 py-1 rounded border border-red-900 hover:border-red-700 disabled:border-gray-700 transition-colors">
-                  {deleting === net.id ? '삭제 중...' : '삭제'}
-                </button>
-              </td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
-    </div>
+    <ShareNetworkTable {networks} {deleting} onDelete={deleteNetwork} />
   {/if}
 </div>
