@@ -2311,6 +2311,48 @@ async def get_admin_k3s_certificate_expiry(cluster_id: str):
     )
 
 
+@router.post("/k3s-clusters/{cluster_id}/rotate-certs", dependencies=[Depends(require_admin)])
+async def rotate_admin_k3s_certs(cluster_id: str):
+    """관리자용 k3s 인증서 회전 (SSE 스트림)."""
+    from app.api.k3s.clusters import _SSE_HEADERS
+    from app.config import get_settings
+    from app.services.k3s_cert_rotation import acquire_rotation_lock, release_rotation_lock, rotate_certificates
+
+    cluster = await k3s_cluster.get_cluster_admin(cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
+    if cluster.get("status") not in ("ACTIVE", "ERROR"):
+        raise HTTPException(status_code=409, detail="클러스터가 ACTIVE 상태가 아닙니다.")
+
+    master_count = cluster.get("master_count", 1)
+    if master_count < 3:
+        raise HTTPException(
+            status_code=422,
+            detail="단일 마스터 클러스터는 인증서 회전 중 다운타임이 발생합니다. HA 클러스터에서만 지원합니다.",
+        )
+
+    if not await acquire_rotation_lock(cluster_id):
+        raise HTTPException(status_code=409, detail="이미 진행 중인 인증서 회전 작업이 있습니다.")
+
+    settings = get_settings()
+    project_id = cluster.get("project_id", "")
+
+    async def _gen():
+        try:
+            async for msg in rotate_certificates(
+                cluster_id,
+                project_id,
+                "admin",
+                node_timeout=float(settings.k3s_cert_rotation_node_timeout_sec),
+                job_image=settings.k3s_cert_rotation_job_image,
+            ):
+                yield f"data: {msg.model_dump_json()}\n\n"
+        finally:
+            await release_rotation_lock(cluster_id)
+
+    return StreamingResponse(_gen(), media_type="text/event-stream", headers=_SSE_HEADERS)
+
+
 # k3s 클러스터 템플릿 관리 (관리자)
 
 

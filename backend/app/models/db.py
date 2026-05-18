@@ -89,6 +89,10 @@ class K3sCluster(Base):
     template_id: Mapped[str | None] = mapped_column(CHAR(36), nullable=True)
     template_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
+    # 인증서 회전 추적
+    last_rotation_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_rotation_initiated_by: Mapped[str | None] = mapped_column(VARCHAR(64), nullable=True)
+
     # 관계
     agent_vms: Mapped[list["K3sAgentVM"]] = relationship(
         "K3sAgentVM", back_populates="cluster", cascade="all, delete-orphan"

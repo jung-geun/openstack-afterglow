@@ -21,6 +21,11 @@ class K3sProgressStep(str, Enum):
     # HA 부트스트랩 단계
     SERVER_HA_BOOTSTRAP = "server_ha_bootstrap"
     SERVER_HA_JOIN = "server_ha_join"
+    # 인증서 회전 단계
+    ROTATE_DISCOVER = "rotate_discover"
+    ROTATE_SERVER = "rotate_server"
+    ROTATE_AGENT = "rotate_agent"
+    ROTATE_VERIFY = "rotate_verify"
     # 삭제 단계
     DELETE_INIT = "delete_init"
     DELETE_LB_CLEANUP = "delete_lb_cleanup"

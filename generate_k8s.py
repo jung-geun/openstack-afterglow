@@ -377,8 +377,9 @@ def _render_toml_for_k8s(cfg: dict) -> str:
         "octavia_ingress_subnet_id", "octavia_ingress_floating_network_id",
         "barbican_kms_image", "barbican_kms_kek_id",
         "api_lb_vip_network_id", "api_lb_floating_network_id", "lb_subnet_id",
+        "cert_rotation_job_image",
     )
-    k3s_keys_int = ("boot_volume_size_gb",)
+    k3s_keys_int = ("boot_volume_size_gb", "cert_rotation_node_timeout_sec")
     k3s_keys_bool = (
         "occm_enabled", "cinder_csi_enabled", "manila_csi_enabled",
         "keystone_auth_enabled", "octavia_ingress_enabled", "barbican_kms_enabled",

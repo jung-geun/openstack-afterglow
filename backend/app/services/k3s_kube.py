@@ -595,3 +595,87 @@ async def create_k8s_secret(cluster_id: str, namespace: str, name: str,
         if resp.status_code not in (200, 201):
             _raise_k8s_error(resp, f"upsert secret {name}")
         return resp.json()
+
+
+# ---------------------------------------------------------------------------
+# 인증서 회전 헬퍼
+# ---------------------------------------------------------------------------
+
+
+async def list_server_nodes(cluster_id: str) -> list[str]:
+    """control-plane 역할 노드 이름 목록 반환 (관리자 kubeconfig 사용)."""
+    async with _kube_client(cluster_id) as (client, server_url):
+        resp = await client.get(
+            f"{server_url}/api/v1/nodes",
+            params={"labelSelector": "node-role.kubernetes.io/control-plane"},
+            headers={"Accept": "application/json"},
+        )
+        if resp.status_code != 200:
+            _raise_k8s_error(resp, "control-plane 노드 목록 조회")
+        items = resp.json().get("items", [])
+        return [it["metadata"]["name"] for it in items if it.get("metadata", {}).get("name")]
+
+
+async def create_job(cluster_id: str, namespace: str, job: dict) -> dict:
+    """K8s Job 생성 (관리자 kubeconfig 사용)."""
+    async with _kube_client(cluster_id) as (client, server_url):
+        resp = await client.post(
+            f"{server_url}/apis/batch/v1/namespaces/{namespace}/jobs",
+            json=job,
+            headers={"Accept": "application/json", "Content-Type": "application/json"},
+        )
+        if resp.status_code not in (200, 201):
+            _raise_k8s_error(resp, f"Job {job.get('metadata', {}).get('name', '?')} 생성")
+        return resp.json()
+
+
+async def wait_job_completed(
+    cluster_id: str, namespace: str, job_name: str, *, timeout: float = 180.0
+) -> bool:
+    """Job succeeded≥1 또는 failed≥1 을 대기한다. 성공 시 True, 실패/타임아웃 시 False."""
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            async with _kube_client(cluster_id) as (client, server_url):
+                resp = await client.get(
+                    f"{server_url}/apis/batch/v1/namespaces/{namespace}/jobs/{job_name}",
+                    headers={"Accept": "application/json"},
+                )
+                if resp.status_code == 200:
+                    status = resp.json().get("status", {})
+                    if (status.get("succeeded") or 0) >= 1:
+                        return True
+                    if (status.get("failed") or 0) >= 1:
+                        return False
+        except Exception:
+            pass
+        import asyncio
+        await asyncio.sleep(3)
+    return False
+
+
+async def wait_node_ready(cluster_id: str, node_name: str, *, timeout: float = 300.0) -> bool:
+    """노드 Ready 상태를 대기한다. K8s API 재시작 중 연결 오류는 무시하고 재시도한다."""
+    import asyncio
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            async with _kube_client(cluster_id) as (client, server_url):
+                resp = await client.get(
+                    f"{server_url}/api/v1/nodes/{node_name}",
+                    headers={"Accept": "application/json"},
+                )
+                if resp.status_code == 200:
+                    conditions = resp.json().get("status", {}).get("conditions", [])
+                    for cond in conditions:
+                        if cond.get("type") == "Ready" and cond.get("status") == "True":
+                            return True
+        except Exception:
+            # k3s restart 중 API 서버 일시 불가 — 재시도
+            pass
+        await asyncio.sleep(5)
+    return False

@@ -1,20 +1,23 @@
 <script lang="ts">
 	import { api } from '$lib/api/client';
 	import type { CertificateExpiryResponse, CertificateInfo } from '$lib/types/k3s';
+	import K3sRotateProgressModal from './K3sRotateProgressModal.svelte';
 
 	interface Props {
 		clusterId: string;
 		clusterName: string;
+		masterCount?: number;
 		token?: string;
 		projectId?: string;
 		onclose: () => void;
 	}
 
-	const { clusterId, clusterName, token, projectId, onclose }: Props = $props();
+	const { clusterId, clusterName, masterCount = 1, token, projectId, onclose }: Props = $props();
 
 	let data = $state<CertificateExpiryResponse | null>(null);
 	let loading = $state(true);
 	let error = $state('');
+	let showRotateModal = $state(false);
 
 	$effect(() => {
 		void load();
@@ -126,6 +129,15 @@
 			>
 				새로고침
 			</button>
+			{#if masterCount >= 3}
+				<button
+					onclick={() => (showRotateModal = true)}
+					class="text-xs px-3 py-1.5 rounded-lg bg-amber-700 hover:bg-amber-600 text-white transition-colors"
+					title="인증서 rolling 회전 (HA 클러스터 전용)"
+				>
+					인증서 회전
+				</button>
+			{/if}
 			<button
 				onclick={onclose}
 				class="text-xs px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-white transition-colors"
@@ -135,3 +147,16 @@
 		</div>
 	</div>
 </div>
+
+{#if showRotateModal}
+	<K3sRotateProgressModal
+		{clusterId}
+		{clusterName}
+		{token}
+		{projectId}
+		onclose={() => {
+			showRotateModal = false;
+			void load();
+		}}
+	/>
+{/if}

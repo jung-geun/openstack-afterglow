@@ -606,3 +606,23 @@ async def incr_ha_join_count(cluster_id: str) -> int:
     from app.services import k3s_cluster as _redis
 
     return await _redis.incr_ha_join_count(cluster_id)
+
+
+async def record_rotation(cluster_id: str, initiated_by: str) -> None:
+    """인증서 회전 완료 기록 — last_rotation_at, last_rotation_initiated_by 갱신."""
+    if not is_db_available():
+        _logger.warning("record_rotation: DB 미설정 — 회전 기록 스킵 (cluster=%s)", cluster_id)
+        return
+
+    factory = get_session_factory()
+    async with factory() as session:
+        stmt = select(K3sCluster).where(K3sCluster.id == cluster_id)
+        result = await session.execute(stmt)
+        cluster = result.scalar_one_or_none()
+        if cluster is None:
+            _logger.warning("record_rotation: cluster %s not found", cluster_id)
+            return
+        cluster.last_rotation_at = datetime.now(UTC)
+        cluster.last_rotation_initiated_by = initiated_by
+        cluster.updated_at = datetime.now(UTC)
+        await session.commit()

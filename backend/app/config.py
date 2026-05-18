@@ -174,6 +174,12 @@ def _load_toml() -> dict:
     flat["k3s_api_lb_floating_network_id"] = k3s.get("api_lb_floating_network_id", "")
     # FCOS (Fedora CoreOS) 이미지 ID
     flat["k3s_fcos_image_id"] = k3s.get("fcos_image_id", "")
+    # 인증서 회전
+    flat["k3s_cert_rotation_node_timeout_sec"] = k3s.get("cert_rotation_node_timeout_sec", 300)
+    flat["k3s_cert_rotation_job_image"] = k3s.get(
+        "cert_rotation_job_image",
+        "registry.k8s.io/util-linux/util-linux:latest",
+    )
 
     gpu = data.get("gpu", {})
     flat["gpu_available_visible"] = gpu.get("available_visible", False)
@@ -396,6 +402,9 @@ class Settings(BaseSettings):
     k3s_api_lb_floating_network_id: str = ""
     # FCOS (Fedora CoreOS) 이미지 ID (os_type=fcos 클러스터에 사용)
     k3s_fcos_image_id: str = ""
+    # 인증서 회전
+    k3s_cert_rotation_node_timeout_sec: int = 300
+    k3s_cert_rotation_job_image: str = "registry.k8s.io/util-linux/util-linux:latest"
 
     # Union Mount 레이어 시스템 — Manila share ID
     union_layer_store_rw_share_id: str = ""  # layer-store-rw (Builder 전용 RW)
