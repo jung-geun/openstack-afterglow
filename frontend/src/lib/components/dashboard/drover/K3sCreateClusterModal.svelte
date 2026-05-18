@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { api } from '$lib/api/client';
-	import type { K3sFlavor, K3sNetwork, K3sKeypair } from '$lib/types/k3s';
+	import type { K3sFlavor, K3sNetwork, K3sKeypair, K3sClusterTemplate } from '$lib/types/k3s';
 
 	let {
 		open = $bindable(false),
@@ -22,18 +22,20 @@
 			network_id: string;
 			key_name: string;
 			os_type: string;
+			template_id?: string;
 		}) => void;
 	} = $props();
 
-	let form = $state({ name: '', agent_count: 1, agent_flavor_id: '', network_id: '', key_name: '', os_type: 'ubuntu' });
+	let form = $state({ name: '', agent_count: 1, agent_flavor_id: '', network_id: '', key_name: '', os_type: 'ubuntu', template_id: '' });
 	let networkCategory = $state<'tenant' | 'provider'>('tenant');
 	let flavors = $state<K3sFlavor[]>([]);
 	let networks = $state<K3sNetwork[]>([]);
 	let keypairs = $state<K3sKeypair[]>([]);
+	let templates = $state<K3sClusterTemplate[]>([]);
 
 	$effect(() => {
 		if (open) {
-			form = { name: '', agent_count: 1, agent_flavor_id: '', network_id: '', key_name: '', os_type: 'ubuntu' };
+			form = { name: '', agent_count: 1, agent_flavor_id: '', network_id: '', key_name: '', os_type: 'ubuntu', template_id: '' };
 			networkCategory = 'tenant';
 			void loadDeps();
 		}
@@ -41,16 +43,26 @@
 
 	async function loadDeps() {
 		try {
-			[flavors, networks, keypairs] = await Promise.all([
+			[flavors, networks, keypairs, templates] = await Promise.all([
 				api.get<K3sFlavor[]>('/api/flavors', token, projectId),
 				api.get<K3sNetwork[]>('/api/networks', token, projectId),
 				api.get<K3sKeypair[]>('/api/keypairs', token, projectId),
+				api.get<K3sClusterTemplate[]>('/api/k3s/cluster-templates', token, projectId).catch(() => []),
 			]);
 			const defaultNet = networks.find(n => !n.is_external && (n.name === 'Default' || n.name === 'default'));
 			if (defaultNet) form.network_id = defaultNet.id;
 		} catch {
 			flavors = []; networks = []; keypairs = [];
 		}
+	}
+
+	function applyTemplate(templateId: string) {
+		form.template_id = templateId;
+		const tmpl = templates.find(t => t.id === templateId);
+		if (!tmpl) return;
+		if (tmpl.default_node_count !== undefined) form.agent_count = tmpl.default_node_count;
+		if (tmpl.default_agent_flavor_id) form.agent_flavor_id = tmpl.default_agent_flavor_id;
+		if (tmpl.os_type) form.os_type = tmpl.os_type;
 	}
 
 	function categoryChange(c: 'tenant' | 'provider') {
@@ -68,6 +80,22 @@
 			onclick={(e) => e.stopPropagation()} role="none" onkeydown={(e) => e.stopPropagation()}>
 			<h2 class="text-lg font-semibold text-white mb-5">Drover 클러스터 생성</h2>
 			<div class="space-y-4">
+				{#if templates.length > 0}
+				<div>
+					<label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">템플릿 (선택)
+						<select
+							value={form.template_id}
+							onchange={(e) => applyTemplate((e.target as HTMLSelectElement).value)}
+							class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5"
+						>
+							<option value="">템플릿 없이 직접 설정</option>
+							{#each templates as t}
+								<option value={t.id}>{t.name}{t.description ? ` — ${t.description}` : ''}</option>
+							{/each}
+						</select>
+					</label>
+				</div>
+				{/if}
 				<div>
 					<label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">클러스터 이름
 						<input bind:value={form.name} type="text" placeholder="미입력 시 자동 생성"
@@ -159,7 +187,7 @@
 			<div class="flex justify-end gap-3 mt-6">
 				<button onclick={() => open = false}
 					class="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors">취소</button>
-				<button onclick={() => { open = false; onCreate(form); }} disabled={creating}
+				<button onclick={() => { open = false; onCreate({...form, template_id: form.template_id || undefined}); }} disabled={creating}
 					class="px-5 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium rounded-lg transition-colors">
 					생성
 				</button>

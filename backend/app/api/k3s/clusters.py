@@ -273,6 +273,23 @@ async def create_k3s_cluster_async(
         else:
             network_id = s.default_network_id
 
+    # 템플릿 적용 (지정 시 기본값 병합, 요청 본문 값이 있으면 override)
+    _template_snapshot: dict | None = None
+    if req.template_id:
+        from app.services import k3s_template as _tmpl_svc
+
+        _tmpl = await _tmpl_svc.get_template(req.template_id)
+        if not _tmpl:
+            raise HTTPException(status_code=400, detail=f"템플릿을 찾을 수 없습니다: {req.template_id}")
+        _template_snapshot = dict(_tmpl)
+        # 요청 본문에 명시적 값이 없으면 템플릿 기본값 적용
+        if req.agent_count == 1 and _tmpl.get("default_node_count") is not None:
+            req = req.model_copy(update={"agent_count": _tmpl["default_node_count"]})
+        if not req.agent_flavor_id and _tmpl.get("default_agent_flavor_id"):
+            req = req.model_copy(update={"agent_flavor_id": _tmpl["default_agent_flavor_id"]})
+        if req.os_type == "ubuntu" and _tmpl.get("os_type") and _tmpl["os_type"] != "ubuntu":
+            req = req.model_copy(update={"os_type": _tmpl["os_type"]})
+
     k3s_version = s.k3s_version
     boot_volume_size = s.k3s_boot_volume_size_gb
     cluster_id = str(uuid.uuid4())
@@ -573,6 +590,8 @@ async def create_k3s_cluster_async(
                     "os_type": os_type,
                     "server_vm_name": server_vm_name,
                     "app_credential_id": app_credential_id or "",
+                    "template_id": req.template_id or None,
+                    "template_snapshot": _template_snapshot,
                 },
             )
             try:

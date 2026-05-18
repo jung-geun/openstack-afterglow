@@ -59,6 +59,8 @@ def _cluster_to_dict(cluster: K3sCluster) -> dict:
         "api_fip_id": cluster.api_fip_id or "",
         "api_fip_address": cluster.api_fip_address or "",
         "os_type": cluster.os_type or "ubuntu",
+        "template_id": cluster.template_id or None,
+        "template_snapshot": cluster.template_snapshot or None,
     }
 
 
@@ -103,6 +105,8 @@ async def create_cluster_record(project_id: str, cluster_id: str, data: dict) ->
             api_fip_address=data.get("api_fip_address") or None,
             os_type=data.get("os_type") or "ubuntu",
             app_credential_id=data.get("app_credential_id") or None,
+            template_id=data.get("template_id") or None,
+            template_snapshot=data.get("template_snapshot") or None,
         )
         session.add(cluster)
         await session.commit()

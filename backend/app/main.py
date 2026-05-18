@@ -172,6 +172,7 @@ from app.api.k3s import (
     k3s_health_router,
     k3s_secrets_router,
     k3s_shell_router,
+    k3s_templates_router,
 )
 from app.api.network import (
     loadbalancers_router,
@@ -425,6 +426,7 @@ if _svc_cfg.service_k3s_enabled:
     app.include_router(k3s_configmaps_router, prefix="/api/k3s/clusters", tags=["k3s-configmaps"])
     app.include_router(k3s_secrets_router, prefix="/api/k3s/clusters", tags=["k3s-secrets"])
     app.include_router(k3s_shell_router, prefix="/api/k3s/clusters", tags=["k3s-shell"])
+    app.include_router(k3s_templates_router, prefix="/api/k3s/cluster-templates", tags=["k3s-templates"])
 
 # Union Mount 레이어 시스템 (DB 연결 시 항상 활성화)
 from app.api.union import router as union_router  # noqa: E402

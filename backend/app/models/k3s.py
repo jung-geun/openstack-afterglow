@@ -50,6 +50,8 @@ class CreateK3sClusterRequest(BaseModel):
     os_type: str = "ubuntu"  # "ubuntu" | "fcos"
     # SSH/K3s API 접근 허용 CIDR (미지정 시 0.0.0.0/0). 형식 검증 + 최대 20개로 quota 폭증 방지.
     allowed_cidrs: list[str] | None = Field(default=None, max_length=20)
+    # 템플릿 선택 (지정 시 템플릿 기본값으로 폼 채움, 요청 본문 값이 있으면 override)
+    template_id: str | None = None
 
     @field_validator("name")
     @classmethod
@@ -223,3 +225,68 @@ class SecretWriteRequest(BaseModel):
     data: dict[str, str] = Field(default_factory=dict)  # plain text
     labels: dict[str, str] | None = None
     annotations: dict[str, str] | None = None
+
+
+# ---------------------------------------------------------------------------
+# Cluster Template
+# ---------------------------------------------------------------------------
+
+
+class K3sClusterTemplateInfo(BaseModel):
+    id: str
+    name: str
+    description: str | None = None
+    k3s_version: str | None = None
+    default_node_count: int = 1
+    default_agent_flavor_id: str | None = None
+    default_image_id: str | None = None
+    plugins_enabled: dict[str, bool] = {}
+    os_type: str = "ubuntu"
+    public_visible: bool = True
+    created_by: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class CreateK3sClusterTemplateRequest(BaseModel):
+    name: str
+    description: str | None = None
+    k3s_version: str | None = None
+    default_node_count: int = Field(default=1, ge=0, le=20)
+    default_agent_flavor_id: str | None = None
+    default_image_id: str | None = None
+    plugins_enabled: dict[str, bool] | None = None
+    os_type: str = "ubuntu"
+    public_visible: bool = True
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        if not _NAME_RE.match(v):
+            raise ValueError("이름은 영문/숫자로 시작하고, 영문·숫자·하이픈·언더스코어만 허용됩니다 (최대 63자)")
+        return v
+
+    @field_validator("os_type")
+    @classmethod
+    def validate_os_type(cls, v: str) -> str:
+        if v not in _VALID_OS_TYPES:
+            raise ValueError(f"os_type은 {sorted(_VALID_OS_TYPES)} 중 하나여야 합니다")
+        return v
+
+
+class UpdateK3sClusterTemplateRequest(BaseModel):
+    description: str | None = None
+    k3s_version: str | None = None
+    default_node_count: int | None = Field(default=None, ge=0, le=20)
+    default_agent_flavor_id: str | None = None
+    default_image_id: str | None = None
+    plugins_enabled: dict[str, bool] | None = None
+    os_type: str | None = None
+    public_visible: bool | None = None
+
+    @field_validator("os_type")
+    @classmethod
+    def validate_os_type(cls, v: str | None) -> str | None:
+        if v is not None and v not in _VALID_OS_TYPES:
+            raise ValueError(f"os_type은 {sorted(_VALID_OS_TYPES)} 중 하나여야 합니다")
+        return v

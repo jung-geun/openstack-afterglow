@@ -20,3 +20,19 @@ export interface K3sCluster {
 export interface K3sFlavor { id: string; name: string; vcpus: number; ram: number; disk: number; }
 export interface K3sNetwork { id: string; name: string; is_external: boolean; }
 export interface K3sKeypair { name: string; }
+
+export interface K3sClusterTemplate {
+	id: string;
+	name: string;
+	description: string | null;
+	k3s_version: string | null;
+	default_node_count: number;
+	default_agent_flavor_id: string | null;
+	default_image_id: string | null;
+	plugins_enabled: Record<string, boolean>;
+	os_type: string;
+	public_visible: boolean;
+	created_by: string | null;
+	created_at: string | null;
+	updated_at: string | null;
+}

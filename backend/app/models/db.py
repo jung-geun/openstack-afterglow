@@ -82,6 +82,10 @@ class K3sCluster(Base):
     deleted_by_user_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     deleted_reason: Mapped[str | None] = mapped_column(VARCHAR(255))
 
+    # Template 추적 (생성 시 사용한 템플릿)
+    template_id: Mapped[str | None] = mapped_column(CHAR(36), nullable=True)
+    template_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
     # 관계
     agent_vms: Mapped[list["K3sAgentVM"]] = relationship(
         "K3sAgentVM", back_populates="cluster", cascade="all, delete-orphan"
@@ -306,6 +310,27 @@ class UnionUserMount(Base):
     )
     mounted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
     unmounted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class K3sClusterTemplate(Base):
+    """k3s 클러스터 프리셋. 운영자가 정의하고 사용자가 클러스터 생성 시 선택."""
+
+    __tablename__ = "k3s_cluster_templates"
+
+    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True)
+    name: Mapped[str] = mapped_column(VARCHAR(63), nullable=False, index=True)
+    description: Mapped[str | None] = mapped_column(TEXT)
+    k3s_version: Mapped[str | None] = mapped_column(VARCHAR(32))
+    default_node_count: Mapped[int] = mapped_column(INT, nullable=False, default=1)
+    default_agent_flavor_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    default_image_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    plugins_enabled: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    os_type: Mapped[str] = mapped_column(VARCHAR(10), nullable=False, default="ubuntu")
+    public_visible: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=True)
+    created_by: Mapped[str | None] = mapped_column(VARCHAR(64), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 # ActivityLog 모델을 Base.metadata 에 등록 (create_tables 자동 감지)

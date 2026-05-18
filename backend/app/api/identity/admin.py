@@ -2234,6 +2234,17 @@ async def delete_admin_k3s_cluster_async(
     return StreamingResponse(gen(), media_type="text/event-stream", headers=_SSE_HEADERS)
 
 
+# k3s 클러스터 템플릿 관리 (관리자)
+
+
+@router.get("/k3s-cluster-templates", dependencies=[Depends(require_admin)])
+async def list_admin_k3s_cluster_templates():
+    """관리자용 템플릿 전체 목록 (public=False 포함)."""
+    from app.services import k3s_template as _tmpl_svc
+
+    return await _tmpl_svc.list_templates(admin=True)
+
+
 # ===========================================================================
 # 시스템 버전 정보
 # ===========================================================================

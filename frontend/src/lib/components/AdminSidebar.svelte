@@ -63,6 +63,7 @@
 			items: [
 				{ label: '전체 컨테이너', href: '/admin/containers', service: 'zun' as const },
 				{ label: 'Drover', href: '/admin/drover', service: 'k3s' as const },
+				{ label: '클러스터 템플릿', href: '/admin/drover/templates', service: 'k3s' as const },
 			],
 		},
 		{
