@@ -290,3 +290,64 @@ class UpdateK3sClusterTemplateRequest(BaseModel):
         if v is not None and v not in _VALID_OS_TYPES:
             raise ValueError(f"os_type은 {sorted(_VALID_OS_TYPES)} 중 하나여야 합니다")
         return v
+
+
+# ---------------------------------------------------------------------------
+# Nodegroup
+# ---------------------------------------------------------------------------
+
+_VALID_NG_ROLES = {"server", "agent"}
+
+
+class K3sNodegroupVMInfo(BaseModel):
+    vm_id: str
+    name: str | None = None
+    status: str = "CREATING"
+
+
+class K3sNodegroupInfo(BaseModel):
+    id: str
+    cluster_id: str
+    name: str
+    role: str = "agent"
+    node_count: int = 0
+    flavor_id: str | None = None
+    image_id: str | None = None
+    labels: dict[str, str] = {}
+    taints: list[dict] = []
+    is_default: bool = False
+    vms: list[K3sNodegroupVMInfo] = []
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class CreateK3sNodegroupRequest(BaseModel):
+    name: str
+    role: str = "agent"
+    node_count: int = Field(default=0, ge=0, le=20)
+    flavor_id: str | None = None
+    image_id: str | None = None
+    labels: dict[str, str] | None = None
+    taints: list[dict] | None = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        if not _NAME_RE.match(v):
+            raise ValueError("이름은 영문/숫자로 시작하고, 영문·숫자·하이픈·언더스코어만 허용됩니다 (최대 63자)")
+        return v
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, v: str) -> str:
+        if v not in _VALID_NG_ROLES:
+            raise ValueError(f"role은 {sorted(_VALID_NG_ROLES)} 중 하나여야 합니다")
+        return v
+
+
+class UpdateK3sNodegroupRequest(BaseModel):
+    node_count: int | None = Field(default=None, ge=0, le=20)
+    flavor_id: str | None = None
+    image_id: str | None = None
+    labels: dict[str, str] | None = None
+    taints: list[dict] | None = None

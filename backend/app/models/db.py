@@ -90,6 +90,9 @@ class K3sCluster(Base):
     agent_vms: Mapped[list["K3sAgentVM"]] = relationship(
         "K3sAgentVM", back_populates="cluster", cascade="all, delete-orphan"
     )
+    nodegroups: Mapped[list["K3sNodegroup"]] = relationship(
+        "K3sNodegroup", back_populates="cluster", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (Index("idx_k3s_cluster_project_created", "project_id", "created_at"),)
 
@@ -310,6 +313,55 @@ class UnionUserMount(Base):
     )
     mounted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
     unmounted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class K3sNodegroup(Base):
+    """k3s 노드그룹. 클러스터 내 동일 role/flavor VM 집합."""
+
+    __tablename__ = "k3s_nodegroups"
+
+    id: Mapped[str] = mapped_column(CHAR(36), primary_key=True)
+    cluster_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("k3s_clusters.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(VARCHAR(63), nullable=False)
+    role: Mapped[str] = mapped_column(VARCHAR(10), nullable=False, default="agent")  # "server" | "agent"
+    node_count: Mapped[int] = mapped_column(INT, nullable=False, default=0)
+    flavor_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    image_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    labels: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    taints: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    is_default: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    cluster: Mapped["K3sCluster"] = relationship("K3sCluster", back_populates="nodegroups")
+    vms: Mapped[list["K3sNodegroupVM"]] = relationship(
+        "K3sNodegroupVM", back_populates="nodegroup", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (Index("idx_ng_cluster_role", "cluster_id", "role"),)
+
+
+class K3sNodegroupVM(Base):
+    """노드그룹 내 개별 VM 추적."""
+
+    __tablename__ = "k3s_nodegroup_vms"
+
+    id: Mapped[int] = mapped_column(INT, primary_key=True, autoincrement=True)
+    nodegroup_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("k3s_nodegroups.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    cluster_id: Mapped[str] = mapped_column(
+        CHAR(36), ForeignKey("k3s_clusters.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    vm_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, index=True)
+    name: Mapped[str | None] = mapped_column(VARCHAR(255))
+    status: Mapped[str] = mapped_column(VARCHAR(20), nullable=False, default="CREATING")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+
+    nodegroup: Mapped["K3sNodegroup"] = relationship("K3sNodegroup", back_populates="vms")
 
 
 class K3sClusterTemplate(Base):

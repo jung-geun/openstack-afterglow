@@ -9,6 +9,7 @@
   import K3sClusterInfoCard from '$lib/components/k3s/K3sClusterInfoCard.svelte';
   import K3sClusterNodesCard from '$lib/components/k3s/K3sClusterNodesCard.svelte';
   import K3sClusterVmList from '$lib/components/k3s/K3sClusterVmList.svelte';
+  import K3sNodegroupsSection from '$lib/components/k3s/K3sNodegroupsSection.svelte';
   import K3sInstanceViewerOverlay from '$lib/components/k3s/K3sInstanceViewerOverlay.svelte';
   import K3sClusterNetworksCard from '$lib/components/k3s/K3sClusterNetworksCard.svelte';
   import K3sNamespaceSelector from '$lib/components/k3s/K3sNamespaceSelector.svelte';
@@ -97,6 +98,7 @@
         <K3sClusterNodesCard />
       </div>
       <K3sClusterVmList />
+      <K3sNodegroupsSection />
       <K3sClusterNetworksCard />
       <K3sNamespaceSelector />
       <K3sClusterConfigMapsCard />

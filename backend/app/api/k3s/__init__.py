@@ -5,6 +5,7 @@ _ROUTERS = {
     "k3s_clusters_router": ".clusters",
     "k3s_configmaps_router": ".configmaps",
     "k3s_health_router": ".health",
+    "k3s_nodegroups_router": ".nodegroups",
     "k3s_secrets_router": ".secrets",
     "k3s_shell_router": ".shell",
     "k3s_templates_router": ".templates",

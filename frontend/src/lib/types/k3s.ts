@@ -21,6 +21,28 @@ export interface K3sFlavor { id: string; name: string; vcpus: number; ram: numbe
 export interface K3sNetwork { id: string; name: string; is_external: boolean; }
 export interface K3sKeypair { name: string; }
 
+export interface K3sNodegroupVM {
+	vm_id: string;
+	name: string | null;
+	status: string;
+}
+
+export interface K3sNodegroup {
+	id: string;
+	cluster_id: string;
+	name: string;
+	role: 'server' | 'agent';
+	node_count: number;
+	flavor_id: string | null;
+	image_id: string | null;
+	labels: Record<string, string>;
+	taints: Record<string, unknown>[];
+	is_default: boolean;
+	vms: K3sNodegroupVM[];
+	created_at: string | null;
+	updated_at: string | null;
+}
+
 export interface K3sClusterTemplate {
 	id: string;
 	name: string;
