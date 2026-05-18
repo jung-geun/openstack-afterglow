@@ -5,7 +5,9 @@
 	import { goto } from '$app/navigation';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
-	import type { RouterInterface, RouterDetail, SubnetDetail, Network } from '$lib/types/resources';
+	import type { RouterInterface, RouterDetail } from '$lib/types/router';
+	import type { SubnetDetail } from '$lib/types/networks';
+	import type { Network } from '$lib/types/resources';
 
 	const id = $derived($page.params.id);
 

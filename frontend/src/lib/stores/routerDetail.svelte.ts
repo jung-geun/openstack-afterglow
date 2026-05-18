@@ -2,7 +2,9 @@ import { getContext, setContext } from 'svelte';
 import { untrack } from 'svelte';
 import { goto } from '$app/navigation';
 import { api, ApiError } from '$lib/api/client';
-import type { RouterDetail, SubnetDetail, Network } from '$lib/types/resources';
+import type { RouterDetail } from '$lib/types/router';
+import type { SubnetDetail } from '$lib/types/networks';
+import type { Network } from '$lib/types/resources';
 
 interface Options {
 	routerId: () => string;
