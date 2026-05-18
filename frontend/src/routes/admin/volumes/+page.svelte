@@ -2,9 +2,8 @@
 	import { onMount } from 'svelte';
 	import { auth } from '$lib/stores/auth';
 	import { api } from '$lib/api/client';
+	import type { AdminVolume, PagedResponse, TsPoint } from '$lib/types/resources';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
-	import SlidePanel from '$lib/components/SlidePanel.svelte';
-	import TimeSeriesChart from '$lib/components/TimeSeriesChart.svelte';
 	import { projectNames } from '$lib/stores/projectNames';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
@@ -18,22 +17,10 @@
 	import AdminVolumeResetStatusModal from '$lib/components/admin/volumes/AdminVolumeResetStatusModal.svelte';
 	import AdminVolumeForceDeleteModal from '$lib/components/admin/volumes/AdminVolumeForceDeleteModal.svelte';
 	import AdminVolumeTransferModal from '$lib/components/admin/volumes/AdminVolumeTransferModal.svelte';
-
-	interface AdminVolume {
-		id: string;
-		name: string;
-		status: string;
-		size: number;
-		project_id: string | null;
-		created_at: string | null;
-		bootable?: boolean;
-	}
-	interface PagedResponse<T> {
-		items: T[];
-		next_marker: string | null;
-		count: number;
-	}
-	interface TsPoint { ts: number; total?: number; in_use?: number; available?: number; [key: string]: number | undefined; }
+	import AdminVolumeTimeseries from '$lib/components/admin/volumes/AdminVolumeTimeseries.svelte';
+	import AdminVolumePagination from '$lib/components/admin/volumes/AdminVolumePagination.svelte';
+	import AdminVolumePageSizeToggle from '$lib/components/admin/volumes/AdminVolumePageSizeToggle.svelte';
+	import AdminVolumeDetailSlide from '$lib/components/admin/volumes/AdminVolumeDetailSlide.svelte';
 
 	let allVolumes = $state<AdminVolume[]>([]);
 	let loading = $state(true);
@@ -49,13 +36,11 @@
 	let openActionMenu = $state<string | null>(null);
 	let selectedVolumeId = $state<string | null>(null);
 
-	// 필터
 	let projectFilter = $state('');
 	let projectSearchText = $state('');
 	let statusFilter = $state('');
 	let nameSearch = $state('');
 
-	// 모달 트리거
 	let editVolume = $state<AdminVolume | null>(null);
 	let deleteVolume = $state<AdminVolume | null>(null);
 	let extendVolume = $state<AdminVolume | null>(null);
@@ -131,34 +116,19 @@
 					load();
 				}}
 			/>
-			<div class="flex items-center gap-1 text-xs text-gray-500">
-				표시:
-				{#each [10, 20, 30] as n}
-					<button
-						onclick={() => { pageSize = n; markerStack = []; nextMarker = null; load(); }}
-						class="px-2 py-0.5 rounded {pageSize === n ? 'bg-blue-600 text-white' : 'bg-gray-800 hover:bg-gray-700 text-gray-400'}"
-					>{n}</button>
-				{/each}
-			</div>
+			<AdminVolumePageSizeToggle
+				value={pageSize}
+				onChange={(n) => { pageSize = n; markerStack = []; nextMarker = null; load(); }}
+			/>
 		{/snippet}
 	</PageHeader>
 
-	<div class="mb-6">
-		{#if tsLoading}
-			<div class="bg-gray-900 border border-gray-800 rounded-xl p-5 h-48 flex items-center justify-center">
-				<div class="text-gray-600 text-sm">차트 로딩 중...</div>
-			</div>
-		{:else}
-			<TimeSeriesChart
-				data={tsData}
-				title="볼륨 수 추이"
-				mainKey="total"
-				extraKeys={['in_use', 'available']}
-				currentRange={tsRange}
-				onRangeChange={(r) => { tsRange = r; loadTimeseries(r); }}
-			/>
-		{/if}
-	</div>
+	<AdminVolumeTimeseries
+		data={tsData}
+		loading={tsLoading}
+		range={tsRange}
+		onRangeChange={(r) => { tsRange = r; loadTimeseries(r); }}
+	/>
 
 	<AdminVolumeFilters
 		bind:projectFilter
@@ -194,70 +164,37 @@
 					})}
 			/>
 		</div>
-		<div class="flex items-center justify-between mt-3">
-			<button
-				disabled={markerStack.length === 0}
-				onclick={() => {
-					const prev = markerStack.slice(0, -1);
-					const marker = prev[prev.length - 1];
-					markerStack = prev;
-					load(marker);
-				}}
-				class="px-3 py-1.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed"
-			>← 이전</button>
-			<button
-				disabled={!nextMarker}
-				onclick={() => {
-					if (!nextMarker) return;
-					markerStack = [...markerStack, nextMarker];
-					load(nextMarker);
-				}}
-				class="px-3 py-1.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed"
-			>다음 →</button>
-		</div>
+		<AdminVolumePagination
+			{markerStack}
+			{nextMarker}
+			onPrev={() => {
+				const prev = markerStack.slice(0, -1);
+				const marker = prev[prev.length - 1];
+				markerStack = prev;
+				load(marker);
+			}}
+			onNext={() => {
+				if (!nextMarker) return;
+				markerStack = [...markerStack, nextMarker];
+				load(nextMarker);
+			}}
+		/>
 	{/if}
 </div>
 
-<!-- 볼륨 상세 패널 -->
 {#if selectedVolumeId}
-	<SlidePanel onClose={() => { selectedVolumeId = null; }} width="w-full md:w-[50vw] max-w-2xl">
-		{#await import('$lib/components/AdminVolumeDetailPanel.svelte') then { default: Panel }}
-			<Panel volumeId={selectedVolumeId} onClose={() => { selectedVolumeId = null; }} onRefresh={() => load(markerStack[markerStack.length - 1])} token={token} projectId={projectId} />
-		{:catch}
-			<div class="p-6">
-				<a href="/admin/volumes/{selectedVolumeId}" class="text-blue-400 hover:text-blue-300">상세 페이지에서 보기 →</a>
-			</div>
-		{/await}
-	</SlidePanel>
+	<AdminVolumeDetailSlide
+		volumeId={selectedVolumeId}
+		{token}
+		{projectId}
+		onClose={() => { selectedVolumeId = null; }}
+		onRefresh={() => load(markerStack[markerStack.length - 1])}
+	/>
 {/if}
 
-<AdminVolumeEditModal
-	volume={editVolume}
-	onClose={() => (editVolume = null)}
-	onSuccess={() => load()}
-/>
-<AdminVolumeDeleteModal
-	volume={deleteVolume}
-	onClose={() => (deleteVolume = null)}
-	onSuccess={() => load()}
-/>
-<AdminVolumeExtendModal
-	volume={extendVolume}
-	onClose={() => (extendVolume = null)}
-	onSuccess={() => load()}
-/>
-<AdminVolumeResetStatusModal
-	volume={resetVolume}
-	onClose={() => (resetVolume = null)}
-	onSuccess={() => load(markerStack[markerStack.length - 1])}
-/>
-<AdminVolumeForceDeleteModal
-	volume={forceDeleteVolume}
-	onClose={() => (forceDeleteVolume = null)}
-	onSuccess={() => load(markerStack[markerStack.length - 1])}
-/>
-<AdminVolumeTransferModal
-	volume={transferVolume}
-	onClose={() => (transferVolume = null)}
-	onSuccess={() => load(markerStack[markerStack.length - 1])}
-/>
+<AdminVolumeEditModal volume={editVolume} onClose={() => (editVolume = null)} onSuccess={() => load()} />
+<AdminVolumeDeleteModal volume={deleteVolume} onClose={() => (deleteVolume = null)} onSuccess={() => load()} />
+<AdminVolumeExtendModal volume={extendVolume} onClose={() => (extendVolume = null)} onSuccess={() => load()} />
+<AdminVolumeResetStatusModal volume={resetVolume} onClose={() => (resetVolume = null)} onSuccess={() => load(markerStack[markerStack.length - 1])} />
+<AdminVolumeForceDeleteModal volume={forceDeleteVolume} onClose={() => (forceDeleteVolume = null)} onSuccess={() => load(markerStack[markerStack.length - 1])} />
+<AdminVolumeTransferModal volume={transferVolume} onClose={() => (transferVolume = null)} onSuccess={() => load(markerStack[markerStack.length - 1])} />
