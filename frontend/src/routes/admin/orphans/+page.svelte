@@ -8,52 +8,17 @@
 	import OrphanSection from '$lib/components/admin/orphans/OrphanSection.svelte';
 	import OrphanCleanupModal from '$lib/components/admin/orphans/OrphanCleanupModal.svelte';
 	import { pruneSelection, removeFromSelection } from '$lib/utils/selectionSet';
+	import type {
+		OrphanFipInfo,
+		OrphanVolumeInfo,
+		OrphanShareInfo,
+		OrphanSecurityGroupInfo,
+		OrphanScanResponse,
+		CleanupResult,
+		OrphanKind,
+	} from '$lib/types/orphan';
 
-	interface OrphanFipInfo {
-		id: string;
-		address: string;
-		project_id: string | null;
-		created_at: string | null;
-		age_days: number;
-	}
-	interface OrphanVolumeInfo {
-		id: string;
-		name: string | null;
-		size_gb: number;
-		project_id: string | null;
-		status: string;
-		created_at: string | null;
-		age_days: number;
-	}
-	interface OrphanShareInfo {
-		id: string;
-		name: string | null;
-		size_gb: number;
-		project_id: string | null;
-		status: string;
-		created_at: string | null;
-		age_days: number;
-		snapshot_count: number;
-	}
-	interface OrphanSecurityGroupInfo {
-		id: string;
-		name: string;
-		description: string | null;
-		project_id: string | null;
-		created_at: string | null;
-		age_days: number;
-	}
-	interface OrphanScanResponse {
-		floating_ips: OrphanFipInfo[];
-		volumes: OrphanVolumeInfo[];
-		manila_shares: OrphanShareInfo[];
-		security_groups: OrphanSecurityGroupInfo[];
-	}
-	interface CleanupResult {
-		deleted: string[];
-		failed: { id: string; error: string }[];
-	}
-	type Kind = 'floating_ip' | 'volume' | 'manila_share' | 'security_group';
+	type Kind = OrphanKind;
 
 	let fips = $state<OrphanFipInfo[]>([]);
 	let volumes = $state<OrphanVolumeInfo[]>([]);

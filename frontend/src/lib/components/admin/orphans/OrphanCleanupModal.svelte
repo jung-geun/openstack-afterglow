@@ -1,9 +1,6 @@
 <script lang="ts">
-	type Kind = 'floating_ip' | 'volume' | 'manila_share' | 'security_group';
-	interface CleanupResult {
-		deleted: string[];
-		failed: { id: string; error: string }[];
-	}
+	import type { OrphanKind, CleanupResult } from '$lib/types/orphan';
+	type Kind = OrphanKind;
 
 	let {
 		kind,
