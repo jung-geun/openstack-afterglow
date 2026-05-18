@@ -3,13 +3,8 @@
   import { auth } from '$lib/stores/auth';
   import { api, ApiError, memoryCache } from '$lib/api/client';
   import { apiMut } from '$lib/api/mutations';
-  import type { Volume } from '$lib/types/resources';
-  import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
+  import type { Volume, Snapshot, QuotaItem } from '$lib/types/resources';
   import VolumeDetailPanel from '$lib/components/VolumeDetailPanel.svelte';
-  import VolumeTransferModal from '$lib/components/volume/VolumeTransferModal.svelte';
-  import VolumeExtendModal from '$lib/components/volume/VolumeExtendModal.svelte';
-  import VolumeBackupModal from '$lib/components/volume/VolumeBackupModal.svelte';
-  import VolumeSnapshotModal from '$lib/components/volume/VolumeSnapshotModal.svelte';
   import VolumeCreateModal from '$lib/components/volume/VolumeCreateModal.svelte';
   import VolumeSummaryCards from '$lib/components/volume/VolumeSummaryCards.svelte';
   import VolumeListTable from '$lib/components/volume/VolumeListTable.svelte';
@@ -19,16 +14,12 @@
   import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
   import { wizard, openWizard } from '$lib/stores/wizard';
+  import VolumesTabs from '$lib/components/volume/VolumesTabs.svelte';
+  import VolumesLoadingState from '$lib/components/volume/VolumesLoadingState.svelte';
+  import VolumesEmptyState from '$lib/components/volume/VolumesEmptyState.svelte';
+  import VolumesModalStack from '$lib/components/volume/VolumesModalStack.svelte';
 
-  interface Snapshot {
-    id: string;
-    name: string;
-    status: string;
-    volume_id: string;
-    size: number;
-    description: string;
-    created_at: string | null;
-  }
+  interface VolumeQuotas { storage: { volumes: QuotaItem; gigabytes: QuotaItem; }; }
 
   let volumes = $state<Volume[]>([]);
   let snapshots = $state<Snapshot[]>([]);
@@ -40,7 +31,7 @@
   let showTransferModal = $state(false);
   let transferVolumeId = $state('');
   let transferVolumeName = $state('');
-  let tab = $state('volumes');
+  let tab = $state<'volumes' | 'snapshots'>('volumes');
 
   let selectedVolumeId = $state<string | null>(null);
   let autoBackupConfigs = $state<Set<string>>(new Set());
@@ -50,10 +41,6 @@
   let extendTargetVol = $state<Volume | null>(null);
   let backupTargetVol = $state<Volume | null>(null);
   let snapshotTargetVol = $state<Volume | null>(null);
-
-  interface QuotaItem { limit: number; in_use: number; }
-  interface VolumeQuotas { storage: { volumes: QuotaItem; gigabytes: QuotaItem; }; }
-
   let quotas = $state<VolumeQuotas | null>(null);
 
   function openVolumePanel(id: string) {
@@ -229,35 +216,12 @@
   {#if error}<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>{/if}
 
   {#if loading}
-    <div class="grid grid-cols-3 gap-3.5 mb-5">
-      {#each [1,2,3] as _}
-        <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 animate-pulse">
-          <div class="h-3 w-20 bg-gray-800 rounded mb-3"></div>
-          <div class="h-8 w-16 bg-gray-800 rounded mb-3"></div>
-          <div class="h-1.5 w-full bg-gray-800 rounded-full"></div>
-        </div>
-      {/each}
-    </div>
-    <LoadingSkeleton variant="table" rows={5} />
+    <VolumesLoadingState />
   {:else if volumes.length === 0}
-    <div class="text-center py-20 text-gray-600">
-      <div class="text-5xl mb-4">💾</div>
-      <p class="text-lg">볼륨이 없습니다</p>
-      <button onclick={() => showModal = true} class="text-blue-400 hover:text-blue-300 text-sm mt-2 inline-block">첫 볼륨을 생성하세요 →</button>
-    </div>
+    <VolumesEmptyState onCreate={() => showModal = true} />
   {:else}
     <VolumeSummaryCards {volumes} {snapshots} {quotas} />
-
-    <div class="flex gap-1 mb-4 border-b border-gray-800">
-      <button onclick={() => tab = 'volumes'}
-        class="px-4 py-2 text-[13px] font-medium border-b-2 -mb-px transition-colors {tab === 'volumes' ? 'border-blue-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-200'}">
-        볼륨 {volumes.length}
-      </button>
-      <button onclick={() => tab = 'snapshots'}
-        class="px-4 py-2 text-[13px] font-medium border-b-2 -mb-px transition-colors {tab === 'snapshots' ? 'border-blue-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-200'}">
-        스냅샷 {snapshots.length}
-      </button>
-    </div>
+    <VolumesTabs bind:tab volumeCount={volumes.length} snapshotCount={snapshots.length} />
 
     {#if tab === 'volumes'}
       <VolumeListTable
@@ -293,7 +257,6 @@
   {/if}
 </div>
 
-<!-- Volume Detail Panel -->
 {#if selectedVolumeId}
   <SlidePanel onClose={closeVolumePanel} width="w-full md:w-[60vw] max-w-2xl">
     <VolumeDetailPanel
@@ -304,33 +267,18 @@
   </SlidePanel>
 {/if}
 
-<!-- Volume Transfer Modal -->
-{#if showTransferModal}
-  <VolumeTransferModal
-    volumeId={transferVolumeId}
-    volumeName={transferVolumeName}
-    onClose={() => showTransferModal = false}
-    onTransferred={() => { fetchVolumes(); showTransferModal = false; }}
-  />
-{/if}
-
-<!-- Volume Extend Modal -->
-<VolumeExtendModal
-  volume={extendTargetVol}
-  onclose={() => extendTargetVol = null}
-  onsuccess={() => { extendTargetVol = null; fetchVolumes(true); }}
-/>
-
-<!-- Volume Backup Modal -->
-<VolumeBackupModal
-  volume={backupTargetVol}
-  onclose={() => backupTargetVol = null}
-  onsuccess={() => { backupTargetVol = null; }}
-/>
-
-<!-- Volume Snapshot Modal -->
-<VolumeSnapshotModal
-  volume={snapshotTargetVol}
-  onclose={() => snapshotTargetVol = null}
-  onsuccess={() => { snapshotTargetVol = null; fetchSnapshots(); }}
+<VolumesModalStack
+  transferVolumeId={transferVolumeId}
+  transferVolumeName={transferVolumeName}
+  showTransfer={showTransferModal}
+  extendTarget={extendTargetVol}
+  backupTarget={backupTargetVol}
+  snapshotTarget={snapshotTargetVol}
+  onCloseTransfer={() => showTransferModal = false}
+  onTransferred={() => { fetchVolumes(); showTransferModal = false; }}
+  onCloseExtend={() => extendTargetVol = null}
+  onExtendSuccess={() => { extendTargetVol = null; fetchVolumes(true); }}
+  onCloseBackup={() => backupTargetVol = null}
+  onCloseSnapshot={() => snapshotTargetVol = null}
+  onSnapshotSuccess={() => { snapshotTargetVol = null; fetchSnapshots(); }}
 />

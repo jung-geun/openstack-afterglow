@@ -238,3 +238,46 @@ export interface SwiftContainer {
   project_name?: string;
   is_quarantine?: boolean;
 }
+
+export interface Snapshot {
+  id: string;
+  name: string;
+  status: string;
+  volume_id: string;
+  size: number;
+  description: string;
+  created_at: string | null;
+}
+
+export interface AdminVolume {
+  id: string;
+  name: string;
+  status: string;
+  size: number;
+  project_id: string | null;
+  created_at: string | null;
+  bootable?: boolean;
+  project_name?: string;
+}
+
+export interface PagedResponse<T> {
+  items: T[];
+  next_marker: string | null;
+  count: number;
+}
+
+export interface TsPoint {
+  ts: number;
+  [key: string]: number | undefined;
+}
+
+export interface AdminNetwork {
+  id: string;
+  name: string;
+  status: string;
+  subnets: string[];
+  is_external: boolean;
+  is_shared: boolean;
+  project_id?: string | null;
+  project_name?: string;
+}
