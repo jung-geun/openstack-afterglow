@@ -174,3 +174,34 @@ export interface DbBackup {
   size: number;
   created_at: string;
 }
+
+export interface AdminVolumeDetail {
+  id: string;
+  name: string;
+  status: string;
+  size: number;
+  volume_type: string;
+  project_id: string | null;
+  attachments: { server_id: string; device: string; id: string }[];
+  created_at: string | null;
+  description: string;
+  bootable: boolean | null;
+  encrypted: boolean | null;
+  multiattach: boolean | null;
+  metadata: Record<string, string>;
+}
+
+export interface SecurityGroup {
+  id: string;
+  name: string;
+  description: string;
+  rules: {
+    id: string;
+    direction: string;
+    protocol: string | null;
+    port_range_min: number | null;
+    port_range_max: number | null;
+    remote_ip_prefix: string | null;
+    ethertype: string;
+  }[];
+}
