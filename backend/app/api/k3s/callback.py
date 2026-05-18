@@ -5,7 +5,6 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Request
 
-from app.api.k3s.clusters import _rand_suffix
 from app.models.k3s import K3sCallbackRequest
 from app.rate_limit import _get_real_ip, limiter
 from app.services import k3s_db as k3s_cluster
@@ -19,9 +18,9 @@ _logger = logging.getLogger(__name__)
 async def k3s_callback(request: Request, req: K3sCallbackRequest):
     """k3s 서버 VM의 cloud-init에서 kubeconfig + node-token 수신.
 
-    일회성 토큰으로 보안 보장. 토큰 소비 후 에이전트 VM 생성은 백그라운드로 처리.
-    Source IP 는 audit/forensic 목적으로 로그에 기록 (트러스트한 proxies 통해
-    추출 — `_get_real_ip` 가 trusted_proxies 검증).
+    일회성 토큰으로 보안 보장. 단일 마스터: 토큰 소비 후 에이전트 VM 생성 백그라운드 처리.
+    HA 서버#1: bootstrap_ha_servers 스폰. HA 서버#2/#3: 조인 카운터 증가, 모두 조인 시 provision_agents 스폰.
+    Source IP 는 audit/forensic 목적으로 로그에 기록.
     """
     source_ip = "unknown"
     try:
@@ -29,37 +28,35 @@ async def k3s_callback(request: Request, req: K3sCallbackRequest):
     except Exception:
         _logger.debug("callback source IP 추출 실패", exc_info=True)
 
-    # 일회성 토큰 검증 (atomic GET+DELETE)
-    token_data = await k3s_cluster.consume_callback_token(req.token)
+    # HA 토큰 먼저 시도 (server_index 포함), 없으면 일반 토큰
+    token_data = await k3s_cluster.consume_ha_callback_token(req.token)
+    if token_data is None:
+        token_data = await k3s_cluster.consume_callback_token(req.token)
+
     if not token_data:
         _logger.warning("k3s callback received with invalid/expired token from %s", source_ip)
         raise HTTPException(status_code=403, detail="Forbidden")
 
     project_id = token_data["project_id"]
     cluster_id = token_data["cluster_id"]
+    server_index: int | None = token_data.get("server_index")  # HA 토큰만 포함
     _logger.info(
-        "k3s callback consumed: cluster=%s project=%s source_ip=%s server_ip=%s",
-        cluster_id,
-        project_id,
-        source_ip,
-        req.server_ip,
+        "k3s callback consumed: cluster=%s project=%s source_ip=%s server_ip=%s server_index=%s",
+        cluster_id, project_id, source_ip, req.server_ip, server_index,
     )
-    if req.server_ip and source_ip != "unknown" and req.server_ip != source_ip:
-        # request body 의 server_ip 와 실제 source IP 가 다르면 의심 — 하지만 NAT/Floating
-        # IP 환경에서는 정상적으로 다를 수 있어 차단하지 않고 warning 만 기록.
-        _logger.warning(
-            "k3s callback IP 불일치 (분석 필요): cluster=%s body.server_ip=%s source_ip=%s",
-            cluster_id,
-            req.server_ip,
-            source_ip,
-        )
 
     if not req.success:
         error_msg = req.error or "서버 VM에서 알 수 없는 오류 발생"
-        _logger.error("k3s cluster %s server init failed: %s", cluster_id, error_msg)
+        _logger.error("k3s cluster %s server%s init failed: %s",
+                      cluster_id, f"#{server_index}" if server_index else "", error_msg)
         await k3s_cluster.update_cluster_status(project_id, cluster_id, "ERROR", f"서버 초기화 실패: {error_msg}")
         return {"ok": True}
 
+    # HA 조인 서버 (server_index >= 2) — kubeconfig/node_token 불필요
+    if server_index is not None and server_index >= 2:
+        return await _handle_ha_joiner(project_id, cluster_id, server_index, req)
+
+    # server#1 (단일 마스터 또는 HA 초기화 서버) — 표준 필드 필수
     if not req.kubeconfig or not req.node_token or not req.server_ip:
         _logger.error("k3s cluster %s callback missing fields", cluster_id)
         await k3s_cluster.update_cluster_status(
@@ -67,7 +64,6 @@ async def k3s_callback(request: Request, req: K3sCallbackRequest):
         )
         return {"ok": True}
 
-    # kubeconfig 암호화 저장
     try:
         await k3s_cluster.store_kubeconfig(project_id, cluster_id, req.kubeconfig)
     except Exception as e:
@@ -75,12 +71,9 @@ async def k3s_callback(request: Request, req: K3sCallbackRequest):
         await k3s_cluster.update_cluster_status(project_id, cluster_id, "ERROR", f"kubeconfig 저장 실패: {e}")
         return {"ok": True}
 
-    # 클러스터 레코드에 server_ip, node_token, api_address, plugin_status 업데이트
     api_address = f"https://{req.server_ip}:6443"
     await k3s_cluster.update_cluster_status(
-        project_id,
-        cluster_id,
-        "PROVISIONING",
+        project_id, cluster_id, "PROVISIONING",
         server_ip=req.server_ip,
         api_address=api_address,
         node_token=req.node_token,
@@ -91,133 +84,89 @@ async def k3s_callback(request: Request, req: K3sCallbackRequest):
     if req.occm_status:
         _logger.info("k3s cluster %s OCCM status (deprecated): %s", cluster_id, req.occm_status)
     if req.secret_cloud_config_status and req.secret_cloud_config_status != "ok":
-        _logger.warning("k3s cluster %s cloud-config secret 생성 실패: %s", cluster_id, req.secret_cloud_config_status)
+        _logger.warning("k3s cluster %s cloud-config secret 생성 실패: %s",
+                        cluster_id, req.secret_cloud_config_status)
     if req.plugin_status:
         for name, info in req.plugin_status.items():
-            status = info.get("status", info) if isinstance(info, dict) else info
-            error = info.get("error", "") if isinstance(info, dict) else ""
-            if status == "deployed":
+            st = info.get("status", info) if isinstance(info, dict) else info
+            err = info.get("error", "") if isinstance(info, dict) else ""
+            if st == "deployed":
                 _logger.info("k3s cluster %s plugin %s: deployed", cluster_id, name)
             else:
-                _logger.error("k3s cluster %s plugin %s: %s — %s", cluster_id, name, status, error)
+                _logger.error("k3s cluster %s plugin %s: %s — %s", cluster_id, name, st, err)
 
-    _logger.info("k3s cluster %s server ready, spawning agent VMs", cluster_id)
+    # HA server#1: bootstrap_ha_servers 스폰, 에이전트는 모든 서버 조인 후 처리
+    cluster_info = await k3s_cluster.get_cluster(project_id, cluster_id)
+    master_count = int((cluster_info or {}).get("master_count") or 1)
+    lb_pool_id = (cluster_info or {}).get("api_lb_pool_id") or ""
+    lb_fip_address = (cluster_info or {}).get("api_fip_address") or ""
 
-    # 에이전트 VM 생성은 백그라운드 태스크로 (콜백 응답을 빠르게 반환)
-    asyncio.create_task(_provision_agents(project_id, cluster_id, req.server_ip, req.node_token))
+    if master_count >= 3:
+        _logger.info("k3s cluster %s HA mode: bootstrapping servers #2/#3", cluster_id)
+        from app.services.k3s_provisioner import bootstrap_ha_servers
+        asyncio.create_task(bootstrap_ha_servers(
+            project_id, cluster_id, req.server_ip, req.node_token,
+            master_count, lb_pool_id, lb_fip_address,
+        ))
+    else:
+        _logger.info("k3s cluster %s server ready, spawning agent VMs", cluster_id)
+        from app.services.k3s_provisioner import provision_agents
+        asyncio.create_task(provision_agents(project_id, cluster_id, req.server_ip, req.node_token))
 
     return {"ok": True}
 
 
-async def _provision_agents(
+async def _handle_ha_joiner(
     project_id: str,
     cluster_id: str,
-    server_ip: str,
-    node_token: str,
-) -> None:
-    """에이전트 VM 생성 백그라운드 태스크."""
-    import asyncio
+    server_index: int,
+    req: K3sCallbackRequest,
+) -> dict:
+    """HA 조인 서버(server_index >= 2) 콜백 처리: LB member 추가 + 조인 카운터 관리."""
+    from app.services import octavia
 
-    from app.config import get_settings
-    from app.services import cinder, k3s_cloudinit, keystone, nova
+    cluster_info = await k3s_cluster.get_cluster(project_id, cluster_id)
+    if not cluster_info:
+        _logger.error("HA joiner: cluster %s not found", cluster_id)
+        return {"ok": True}
 
-    cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
-    if not cluster:
-        _logger.error("k3s agent provision: cluster %s not found", cluster_id)
-        return
+    master_count = int(cluster_info.get("master_count") or 3)
+    lb_pool_id = cluster_info.get("api_lb_pool_id") or ""
+    network_id = cluster_info.get("network_id") or ""
 
-    agent_count = int(cluster.get("agent_count") or 0)
-    if agent_count == 0:
-        await k3s_cluster.update_cluster_status(project_id, cluster_id, "ACTIVE", "")
-        return
-
-    s = get_settings()
-    agent_flavor_id = cluster.get("agent_flavor_id") or s.k3s_default_agent_flavor_id
-    if not agent_flavor_id:
-        _logger.error("k3s agent provision: agent_flavor_id not configured")
-        await k3s_cluster.update_cluster_status(project_id, cluster_id, "ERROR", "에이전트 플레이버 미설정")
-        return
-    network_id = cluster.get("network_id") or s.default_network_id
-    ssh_public_key = cluster.get("ssh_public_key") or None
-    cluster_name = cluster.get("name") or cluster_id
-    k3s_version = cluster.get("k3s_version") or s.k3s_version
-    os_type = cluster.get("os_type") or "ubuntu"
-    image_id = s.k3s_fcos_image_id if os_type == "fcos" else s.k3s_server_image_id
-    boot_volume_size = s.k3s_boot_volume_size_gb
-    sg_id = cluster.get("security_group_id") or None
-
-    # 관리자 OpenStack 연결로 VM 생성 (에이전트는 사용자 프로젝트에 생성)
-    try:
-        conn = keystone.get_admin_connection_for_project(project_id)
-    except Exception as e:
-        _logger.error("k3s agent provision: cannot get OpenStack connection: %s", e)
-        await k3s_cluster.update_cluster_status(project_id, cluster_id, "ERROR", f"OpenStack 연결 실패: {e}")
-        return
-
-    agent_vm_ids: list[str] = []
-    failed_count = 0
-
-    new_agent_entries: list[dict] = []
-    for _i in range(agent_count):
-        agent_name = f"{cluster_name}-{_rand_suffix()}"
+    # LB pool에 이 서버 추가
+    if lb_pool_id and req.server_ip:
         try:
-            # 에이전트 부트 볼륨 생성
-            vol = await asyncio.to_thread(
-                cinder.create_volume_from_image, conn, f"{agent_name}-boot", image_id, boot_volume_size
-            )
-            # 에이전트 cloud-init 생성 (활성 플러그인 인자 반영)
-            from app.services import k3s_plugins
+            from app.services import keystone
 
-            _agent_args = k3s_plugins.aggregate_agent_args(s)
-            if not _agent_args and cluster.get("occm_enabled"):
-                # 레거시 클러스터 (plugins_enabled 없음): occm_enabled로 폴백
-                _agent_args = ["--kubelet-arg=cloud-provider=external"]
-            agent_userdata = k3s_cloudinit.generate_agent_userdata(
-                cluster_name=cluster_name,
-                k3s_version=k3s_version,
-                server_ip=server_ip,
-                node_token=node_token,
-                ssh_public_key=ssh_public_key,
-                extra_agent_args=_agent_args,
-                os_type=os_type,
+            conn = keystone.get_admin_connection_for_project(project_id)
+            subnets = await asyncio.to_thread(lambda: list(conn.network.subnets(network_id=network_id)))
+            subnet_id = subnets[0].id if subnets else None
+            cluster_name = cluster_info.get("name") or cluster_id
+            await asyncio.to_thread(
+                octavia.add_member, conn, lb_pool_id, req.server_ip, 6443,
+                subnet_id=subnet_id,
+                name=f"{cluster_name}-server{server_index}",
             )
-            # 에이전트 VM 생성 (admin conn이므로 key_name 대신 cloud-init으로 공개키 주입)
-            vm = await asyncio.to_thread(
-                nova.create_server,
-                conn,
-                agent_name,
-                agent_flavor_id,
-                network_id,
-                vol.id,
-                userdata=agent_userdata.data,
-                metadata={"k3s_horse_generator_role": "k3s_agent", "k3s_horse_generator_cluster_id": cluster_id},
-                delete_boot_volume_on_termination=True,
-                security_groups=[sg_id] if sg_id else None,
-                config_drive=agent_userdata.config_drive,
-            )
-            agent_vm_ids.append(vm.id)
-            new_agent_entries.append({"vm_id": vm.id, "name": agent_name})
-            _logger.info("k3s agent %s created: %s", agent_name, vm.id)
+            _logger.info("HA: server#%d %s added to LB pool %s", server_index, req.server_ip, lb_pool_id)
         except Exception as e:
-            _logger.error("k3s agent %s creation failed: %s", agent_name, e)
-            failed_count += 1
+            _logger.warning("HA: failed to add server#%d to LB pool: %s", server_index, e)
 
-    # 에이전트 VM DB 저장
-    if new_agent_entries:
-        await k3s_cluster.add_agent_vms(cluster_id, new_agent_entries)
+    # 조인 카운터 증가
+    join_count = await k3s_cluster.incr_ha_join_count(cluster_id)
+    _logger.info("HA: cluster %s join count: %d / %d", cluster_id, join_count, master_count - 1)
 
-    # 클러스터 상태 업데이트
-    reason = f"에이전트 {failed_count}개 생성 실패" if failed_count else ""
-    await k3s_cluster.update_cluster_status(
-        project_id,
-        cluster_id,
-        "ACTIVE",
-        reason,
-        agent_vm_ids=agent_vm_ids,
-    )
-    _logger.info(
-        "k3s cluster %s ACTIVE: %d agents created, %d failed",
-        cluster_id,
-        len(agent_vm_ids),
-        failed_count,
-    )
+    # 모든 추가 서버가 조인 완료 → provision_agents 스폰
+    if join_count >= master_count - 1:
+        server_ip = cluster_info.get("server_ip") or ""
+        node_token = cluster_info.get("node_token") or ""
+        if server_ip and node_token:
+            _logger.info("HA: all servers joined for cluster %s, spawning agent VMs", cluster_id)
+            from app.services.k3s_provisioner import provision_agents
+            asyncio.create_task(provision_agents(project_id, cluster_id, server_ip, node_token))
+        else:
+            _logger.error("HA: cluster %s missing server_ip/node_token after HA join", cluster_id)
+
+    return {"ok": True}
+
+

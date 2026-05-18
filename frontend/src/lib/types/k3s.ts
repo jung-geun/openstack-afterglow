@@ -16,6 +16,7 @@ export interface K3sCluster {
 	deleted_at: string | null;
 	deleted_by_user_id: string | null;
 	deleted_reason: string | null;
+	master_count?: number;
 }
 export interface K3sFlavor { id: string; name: string; vcpus: number; ram: number; disk: number; }
 export interface K3sNetwork { id: string; name: string; is_external: boolean; }

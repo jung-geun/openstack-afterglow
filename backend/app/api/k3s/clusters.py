@@ -90,6 +90,7 @@ def _cluster_to_info(c: dict) -> K3sClusterInfo:
         api_lb_id=c.get("api_lb_id") or None,
         api_fip_id=c.get("api_fip_id") or None,
         api_fip_address=c.get("api_fip_address") or None,
+        master_count=int(c.get("master_count") or 1),
     )
 
 
@@ -324,6 +325,10 @@ async def create_k3s_cluster_async(
         boot_volume_id: str | None = None
         server_vm_id: str | None = None
         app_credential_id: str | None = None
+        ha_lb_id: str | None = None
+        ha_lb_pool_id: str | None = None
+        ha_fip_id: str | None = None
+        ha_fip_address: str | None = None
 
         try:
             # --- Step 1: 보안 그룹 생성 ---
@@ -406,6 +411,51 @@ async def create_k3s_cluster_async(
             yield event(K3sProgressStep.SECURITY_GROUP, 10, "보안 그룹 생성 완료")
 
             extra_tls_sans: list[str] = []
+
+            # --- Step 1-B: HA LB + FIP 생성 (master_count >= 3) ---
+            if req.master_count >= 3:
+                yield event(K3sProgressStep.SERVER_HA_BOOTSTRAP, 12, "HA API LB 생성 중...")
+                subnets_for_lb = await asyncio.to_thread(
+                    lambda: list(conn.network.subnets(network_id=network_id))
+                )
+                lb_subnet_id = subnets_for_lb[0].id if subnets_for_lb else None
+                ha_lb = await asyncio.to_thread(
+                    octavia.create_load_balancer,
+                    conn,
+                    f"k3s-ha-{req.name}-{cluster_id[:8]}",
+                    *(lb_subnet_id,) if lb_subnet_id else (),
+                    vip_network_id=s.k3s_api_lb_vip_network_id or None,
+                )
+                ha_lb_id = ha_lb["id"]
+                await asyncio.to_thread(octavia.wait_for_load_balancer, conn, ha_lb_id)
+                listener = await asyncio.to_thread(
+                    octavia.create_listener, conn, ha_lb_id, "TCP", 6443,
+                    name=f"k3s-ha-{req.name}-6443"
+                )
+                ha_lb_pool_id_raw = await asyncio.to_thread(
+                    octavia.create_pool, conn, ha_lb_id, "TCP",
+                    name=f"k3s-ha-{req.name}-pool",
+                    listener_id=listener["id"],
+                )
+                ha_lb_pool_id = ha_lb_pool_id_raw["id"]
+
+                # FIP 할당 (모드 B: floating network)
+                _fip_net = s.k3s_api_lb_floating_network_id or s.k3s_occm_floating_network_id or ""
+                if _fip_net:
+                    _lb_vip_port = ha_lb.get("vip_port_id")
+                    _fip = await asyncio.to_thread(
+                        lambda: conn.network.create_ip(
+                            floating_network_id=_fip_net,
+                            port_id=_lb_vip_port,
+                        )
+                    )
+                    ha_fip_id = _fip["id"]
+                    ha_fip_address = _fip["floating_ip_address"]
+                    extra_tls_sans.append(ha_fip_address)
+                    yield event(K3sProgressStep.SERVER_HA_BOOTSTRAP, 18,
+                                f"HA API LB 준비 완료 (FIP: {ha_fip_address})")
+                else:
+                    yield event(K3sProgressStep.SERVER_HA_BOOTSTRAP, 18, "HA API LB 준비 완료")
 
             # --- Step 2: 서버 부트 볼륨 생성 ---
             # K8s 스타일: 매 생성마다 고유한 suffix로 이름 충돌 방지
@@ -524,6 +574,7 @@ async def create_k3s_cluster_async(
                 os_type=os_type,
                 server_node_name=server_vm_name,
                 barbican_kms_enabled=any(p.name == "barbican_kms" for p in k3s_plugins.get_active_plugins(s)),
+                cluster_init=req.master_count >= 3,
             )
 
             # --- Step 4: 서버 VM 생성 ---
@@ -583,10 +634,11 @@ async def create_k3s_cluster_async(
                     "created_by_username": _creator_username or "",
                     "created_at": now,
                     "updated_at": now,
-                    "api_lb_id": "",
-                    "api_lb_pool_id": "",
-                    "api_fip_id": "",
-                    "api_fip_address": "",
+                    "api_lb_id": ha_lb_id or "",
+                    "api_lb_pool_id": ha_lb_pool_id or "",
+                    "api_fip_id": ha_fip_id or "",
+                    "api_fip_address": ha_fip_address or "",
+                    "master_count": req.master_count,
                     "os_type": os_type,
                     "server_vm_name": server_vm_name,
                     "app_credential_id": app_credential_id or "",
@@ -629,7 +681,8 @@ async def create_k3s_cluster_async(
             )
             yield event(K3sProgressStep.FAILED, 0, f"클러스터 생성 실패: {e}", error=str(e))
             # 롤백
-            await _rollback(conn, server_vm_id, boot_volume_id, sg_id, app_credential_id, project_id)
+            await _rollback(conn, server_vm_id, boot_volume_id, sg_id, app_credential_id, project_id,
+                            lb_id=ha_lb_id, fip_id=ha_fip_id)
 
     return StreamingResponse(
         progress_generator(),
@@ -645,6 +698,8 @@ async def _rollback(
     sg_id: str | None,
     app_credential_id: str | None = None,
     project_id: str | None = None,
+    lb_id: str | None = None,
+    fip_id: str | None = None,
 ) -> None:
     """생성 실패 시 리소스 역순 삭제."""
     if server_vm_id:
@@ -658,6 +713,16 @@ async def _rollback(
             await asyncio.to_thread(cinder.delete_volume, conn, boot_volume_id)
         except Exception as e:
             _logger.warning("Rollback: delete volume %s failed: %s", boot_volume_id, e)
+    if fip_id:
+        try:
+            await asyncio.to_thread(lambda: conn.network.delete_ip(fip_id, ignore_missing=True))
+        except Exception as e:
+            _logger.warning("Rollback: delete FIP %s failed: %s", fip_id, e)
+    if lb_id:
+        try:
+            await asyncio.to_thread(octavia.delete_load_balancer, conn, lb_id, cascade=True)
+        except Exception as e:
+            _logger.warning("Rollback: delete LB %s failed: %s", lb_id, e)
     if sg_id:
         try:
             await asyncio.to_thread(neutron.delete_security_group, conn, sg_id)

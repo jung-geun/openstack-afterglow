@@ -23,10 +23,11 @@
 			key_name: string;
 			os_type: string;
 			template_id?: string;
+			master_count: number;
 		}) => void;
 	} = $props();
 
-	let form = $state({ name: '', agent_count: 1, agent_flavor_id: '', network_id: '', key_name: '', os_type: 'ubuntu', template_id: '' });
+	let form = $state({ name: '', agent_count: 1, agent_flavor_id: '', network_id: '', key_name: '', os_type: 'ubuntu', template_id: '', master_count: 1 });
 	let networkCategory = $state<'tenant' | 'provider'>('tenant');
 	let flavors = $state<K3sFlavor[]>([]);
 	let networks = $state<K3sNetwork[]>([]);
@@ -35,7 +36,7 @@
 
 	$effect(() => {
 		if (open) {
-			form = { name: '', agent_count: 1, agent_flavor_id: '', network_id: '', key_name: '', os_type: 'ubuntu', template_id: '' };
+			form = { name: '', agent_count: 1, agent_flavor_id: '', network_id: '', key_name: '', os_type: 'ubuntu', template_id: '', master_count: 1 };
 			networkCategory = 'tenant';
 			void loadDeps();
 		}
@@ -130,6 +131,26 @@
 						</div>
 					{/if}
 				</div>
+				<div>
+						<span class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">마스터 수</span>
+						<div class="flex gap-2 mt-1.5">
+							<button type="button"
+								onclick={() => form.master_count = 1}
+								class="flex-1 px-3 py-2 rounded-lg border text-sm transition-colors {form.master_count === 1 ? 'border-blue-500 bg-blue-900/30 text-white' : 'border-gray-600 bg-gray-800 text-gray-400 hover:border-gray-500'}">
+								1 (단일)
+							</button>
+							<button type="button"
+								onclick={() => form.master_count = 3}
+								class="flex-1 px-3 py-2 rounded-lg border text-sm transition-colors {form.master_count === 3 ? 'border-purple-500 bg-purple-900/30 text-white' : 'border-gray-600 bg-gray-800 text-gray-400 hover:border-gray-500'}">
+								3 (HA)
+							</button>
+						</div>
+						{#if form.master_count === 3}
+							<p class="mt-1.5 text-xs text-purple-400/80">
+								embedded etcd HA — API LB + FIP가 자동 생성됩니다.
+							</p>
+						{/if}
+					</div>
 				<div>
 					<label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">에이전트 수 (0-10)
 						<input bind:value={form.agent_count} type="number" min="0" max="10"

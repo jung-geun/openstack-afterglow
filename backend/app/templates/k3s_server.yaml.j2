@@ -268,6 +268,12 @@ runcmd:
 {% endfor %}
         --write-kubeconfig-mode 644 \
         --node-ip "${SERVER_IP}" \
+{% if cluster_init %}
+        --cluster-init \
+{% elif join_url %}
+        --server "{{ join_url }}" \
+        --token "{{ ha_node_token }}" \
+{% endif %}
 {% if needs_external_cloud_provider %}
         --disable-cloud-controller \
         --kubelet-arg="cloud-provider=external" \

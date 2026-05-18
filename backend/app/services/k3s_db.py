@@ -61,6 +61,7 @@ def _cluster_to_dict(cluster: K3sCluster) -> dict:
         "os_type": cluster.os_type or "ubuntu",
         "template_id": cluster.template_id or None,
         "template_snapshot": cluster.template_snapshot or None,
+        "master_count": cluster.master_count if hasattr(cluster, "master_count") else 1,
     }
 
 
@@ -107,6 +108,7 @@ async def create_cluster_record(project_id: str, cluster_id: str, data: dict) ->
             app_credential_id=data.get("app_credential_id") or None,
             template_id=data.get("template_id") or None,
             template_snapshot=data.get("template_snapshot") or None,
+            master_count=int(data.get("master_count") or 1),
         )
         session.add(cluster)
         await session.commit()
@@ -244,6 +246,7 @@ async def update_cluster_status(
             "plugin_status",
             "secret_cloud_config_status",
             "app_credential_id",
+            "master_count",
         }
         for k, v in extra_fields.items():
             if k in _column_map:
@@ -574,3 +577,32 @@ async def get_cluster_app_credential_id(project_id: str, cluster_id: str) -> str
         )
         result = await session.execute(stmt)
         return result.scalar_one_or_none()
+
+
+# ---------------------------------------------------------------------------
+# HA 콜백 토큰 / 조인 카운터 — Redis 전담 (k3s_cluster.py 위임)
+# ---------------------------------------------------------------------------
+
+
+async def create_ha_callback_token(project_id: str, cluster_id: str, server_index: int) -> str:
+    from app.services import k3s_cluster as _redis
+
+    return await _redis.create_ha_callback_token(project_id, cluster_id, server_index)
+
+
+async def consume_ha_callback_token(token: str) -> dict | None:
+    from app.services import k3s_cluster as _redis
+
+    return await _redis.consume_ha_callback_token(token)
+
+
+async def get_ha_join_count(cluster_id: str) -> int:
+    from app.services import k3s_cluster as _redis
+
+    return await _redis.get_ha_join_count(cluster_id)
+
+
+async def incr_ha_join_count(cluster_id: str) -> int:
+    from app.services import k3s_cluster as _redis
+
+    return await _redis.incr_ha_join_count(cluster_id)

@@ -82,6 +82,9 @@ class K3sCluster(Base):
     deleted_by_user_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     deleted_reason: Mapped[str | None] = mapped_column(VARCHAR(255))
 
+    # HA 멀티 마스터 (1 | 3)
+    master_count: Mapped[int] = mapped_column(INT, nullable=False, default=1)
+
     # Template 추적 (생성 시 사용한 템플릿)
     template_id: Mapped[str | None] = mapped_column(CHAR(36), nullable=True)
     template_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)

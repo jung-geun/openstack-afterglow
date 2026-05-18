@@ -22,6 +22,14 @@ def _cluster_key(project_id: str, cluster_id: str) -> str:
     return f"afterglow:k3s:{project_id}:cluster:{cluster_id}"
 
 
+def _ha_callback_key(token: str) -> str:
+    return f"afterglow:k3s:ha_cb:{token}"
+
+
+def _ha_join_key(cluster_id: str) -> str:
+    return f"afterglow:k3s:{cluster_id}:ha_joined"
+
+
 def _clusters_set_key(project_id: str) -> str:
     return f"afterglow:k3s:{project_id}:clusters"
 
@@ -186,6 +194,53 @@ async def get_kubeconfig(project_id: str, cluster_id: str) -> str | None:
         return None
     raw_str = raw.decode() if isinstance(raw, bytes) else raw
     return decrypt_kubeconfig(raw_str)
+
+
+# ---------------------------------------------------------------------------
+# HA 콜백 토큰 (server_index 포함)
+# ---------------------------------------------------------------------------
+
+
+async def create_ha_callback_token(project_id: str, cluster_id: str, server_index: int) -> str:
+    """HA 조인용 일회성 콜백 토큰 (TTL 30분). server_index=1이 초기화 서버."""
+    token = secrets.token_urlsafe(48)
+    client = _get_client()
+    payload = json.dumps({"project_id": project_id, "cluster_id": cluster_id, "server_index": server_index})
+    await client.setex(_ha_callback_key(token), _CALLBACK_TTL, payload)
+    return token
+
+
+async def consume_ha_callback_token(token: str) -> dict | None:
+    """HA 콜백 토큰을 원자적으로 GET+DELETE. 없거나 만료되면 None."""
+    client = _get_client()
+    raw = await client.getdel(_ha_callback_key(token))
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except Exception:
+        return None
+
+
+async def get_ha_join_count(cluster_id: str) -> int:
+    """HA 서버 조인 완료 수 조회. 키 없으면 0."""
+    client = _get_client()
+    raw = await client.get(_ha_join_key(cluster_id))
+    if not raw:
+        return 0
+    try:
+        return int(raw)
+    except Exception:
+        return 0
+
+
+async def incr_ha_join_count(cluster_id: str) -> int:
+    """HA 서버 조인 카운터 증가(INCR). TTL=2h. 증가 후 값 반환."""
+    client = _get_client()
+    key = _ha_join_key(cluster_id)
+    count = await client.incr(key)
+    await client.expire(key, 7200)
+    return int(count)
 
 
 # ---------------------------------------------------------------------------

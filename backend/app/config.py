@@ -170,6 +170,8 @@ def _load_toml() -> dict:
     flat["k3s_lb_subnet_id"] = k3s.get("lb_subnet_id", "")
     # API LB VIP 네트워크 (모드 A: provider 네트워크 직접 지정)
     flat["k3s_api_lb_vip_network_id"] = k3s.get("api_lb_vip_network_id", "")
+    # API LB Floating IP 외부 네트워크 (모드 B: FIP 할당)
+    flat["k3s_api_lb_floating_network_id"] = k3s.get("api_lb_floating_network_id", "")
     # FCOS (Fedora CoreOS) 이미지 ID
     flat["k3s_fcos_image_id"] = k3s.get("fcos_image_id", "")
 
@@ -390,6 +392,8 @@ class Settings(BaseSettings):
     k3s_lb_subnet_id: str = ""
     # API LB VIP 네트워크 (모드 A: provider 네트워크 직접 지정, 설정 시 FIP 불필요)
     k3s_api_lb_vip_network_id: str = ""
+    # API LB Floating IP 외부 네트워크 (모드 B: FIP 할당, 미설정 시 k3s_occm_floating_network_id fallback)
+    k3s_api_lb_floating_network_id: str = ""
     # FCOS (Fedora CoreOS) 이미지 ID (os_type=fcos 클러스터에 사용)
     k3s_fcos_image_id: str = ""
 

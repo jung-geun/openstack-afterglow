@@ -18,6 +18,9 @@ class K3sProgressStep(str, Enum):
     WAITING_CALLBACK = "waiting_callback"
     COMPLETED = "completed"
     FAILED = "failed"
+    # HA 부트스트랩 단계
+    SERVER_HA_BOOTSTRAP = "server_ha_bootstrap"
+    SERVER_HA_JOIN = "server_ha_join"
     # 삭제 단계
     DELETE_INIT = "delete_init"
     DELETE_LB_CLEANUP = "delete_lb_cleanup"
@@ -52,6 +55,15 @@ class CreateK3sClusterRequest(BaseModel):
     allowed_cidrs: list[str] | None = Field(default=None, max_length=20)
     # 템플릿 선택 (지정 시 템플릿 기본값으로 폼 채움, 요청 본문 값이 있으면 override)
     template_id: str | None = None
+    # HA 멀티 마스터 (1 = 단일, 3 = embedded-etcd HA)
+    master_count: int = Field(default=1)
+
+    @field_validator("master_count")
+    @classmethod
+    def validate_master_count(cls, v: int) -> int:
+        if v not in (1, 3):
+            raise ValueError("master_count는 1 또는 3이어야 합니다")
+        return v
 
     @field_validator("name")
     @classmethod
@@ -114,6 +126,7 @@ class K3sClusterInfo(BaseModel):
     api_fip_id: str | None = None
     api_fip_address: str | None = None
     os_type: str | None = None
+    master_count: int = 1
 
 
 class K3sClusterInfoDeleted(K3sClusterInfo):
