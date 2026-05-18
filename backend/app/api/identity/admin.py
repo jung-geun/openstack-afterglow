@@ -2234,6 +2234,83 @@ async def delete_admin_k3s_cluster_async(
     return StreamingResponse(gen(), media_type="text/event-stream", headers=_SSE_HEADERS)
 
 
+@router.get("/k3s-clusters/{cluster_id}/ca-certificate", dependencies=[Depends(require_admin)])
+async def download_admin_k3s_ca_certificate(cluster_id: str):
+    """관리자용 k3s CA 인증서 PEM 다운로드."""
+    from fastapi.responses import Response
+
+    from app.services.k3s_certs import extract_ca_pem
+
+    cluster = await k3s_cluster.get_cluster_admin(cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
+
+    project_id = cluster.get("project_id", "")
+    kc = await k3s_cluster.get_kubeconfig_admin(cluster_id)
+    if not kc:
+        raise HTTPException(status_code=404, detail="kubeconfig를 찾을 수 없습니다")
+
+    try:
+        pem = extract_ca_pem(kc)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"CA 인증서 추출 실패: {e}")
+
+    cluster_name = cluster.get("name", cluster_id)
+    _logger.info("k3s CA 다운로드 (admin): cluster=%s project=%s", cluster_id, project_id)
+    return Response(
+        content=pem.encode(),
+        media_type="application/x-pem-file",
+        headers={"Content-Disposition": f'attachment; filename="ca-{cluster_name}.pem"'},
+    )
+
+
+@router.get("/k3s-clusters/{cluster_id}/certificate-expiry", dependencies=[Depends(require_admin)])
+async def get_admin_k3s_certificate_expiry(cluster_id: str):
+    """관리자용 k3s 인증서 만료 조회."""
+    from app.models.k3s import CertificateExpiryResponse, CertificateInfo
+    from app.services.cache import cached_call
+    from app.services.cache import keys as cache_keys
+    from app.services.k3s_certs import parse_kubeconfig_certs, probe_tls_server_cert
+
+    cluster = await k3s_cluster.get_cluster_admin(cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
+
+    project_id = cluster.get("project_id", "")
+    kc = await k3s_cluster.get_kubeconfig_admin(cluster_id)
+    if not kc:
+        raise HTTPException(status_code=404, detail="kubeconfig를 찾을 수 없습니다")
+
+    cache_key = cache_keys.project_key("k3s", project_id, cluster_id, sub="cert_expiry")
+
+    async def _compute() -> dict:
+        import yaml
+
+        certs = parse_kubeconfig_certs(kc)
+        server_via_tls: list[dict] = []
+        try:
+            parsed = yaml.safe_load(kc)
+            server_url = parsed["clusters"][0]["cluster"]["server"]
+            host = server_url.split("//")[-1].split(":")[0]
+            port_str = server_url.split(":")[-1].split("/")[0]
+            port = int(port_str) if port_str.isdigit() else 6443
+            server_via_tls = await probe_tls_server_cert(host, port)
+        except Exception as e:
+            _logger.debug("TLS 프로브 실패: %s", e)
+        return {"ca": certs.get("ca"), "client": certs.get("client"), "server_via_tls": server_via_tls}
+
+    data = await cached_call(cache_key, 3600, _compute)
+
+    def _to_info(d: dict | None) -> CertificateInfo | None:
+        return CertificateInfo(**d) if d else None
+
+    return CertificateExpiryResponse(
+        ca=_to_info(data.get("ca")),
+        client=_to_info(data.get("client")),
+        server_via_tls=[CertificateInfo(**s) for s in (data.get("server_via_tls") or [])],
+    )
+
+
 # k3s 클러스터 템플릿 관리 (관리자)
 
 

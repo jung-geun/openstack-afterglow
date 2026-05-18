@@ -364,3 +364,22 @@ class UpdateK3sNodegroupRequest(BaseModel):
     image_id: str | None = None
     labels: dict[str, str] | None = None
     taints: list[dict] | None = None
+
+
+# ---------------------------------------------------------------------------
+# 인증서 만료 조회
+# ---------------------------------------------------------------------------
+
+
+class CertificateInfo(BaseModel):
+    not_after: str
+    not_before: str
+    subject: str
+    issuer: str
+    days_remaining: int
+
+
+class CertificateExpiryResponse(BaseModel):
+    ca: CertificateInfo | None = None
+    client: CertificateInfo | None = None
+    server_via_tls: list[CertificateInfo] = []

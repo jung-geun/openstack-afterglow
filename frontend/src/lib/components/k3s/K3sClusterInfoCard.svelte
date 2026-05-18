@@ -1,7 +1,40 @@
 <script lang="ts">
+  import { auth } from '$lib/stores/auth';
+  import { api, getBaseUrl } from '$lib/api/client';
   import { useK3sClusterDetail } from '$lib/stores/k3sClusterDetail.svelte';
+  import K3sCertificateExpiryModal from '$lib/components/k3s/K3sCertificateExpiryModal.svelte';
 
   const s = useK3sClusterDetail();
+  const token = $derived($auth.token ?? undefined);
+  const projectId = $derived($auth.projectId ?? undefined);
+
+  let showCertModal = $state(false);
+  let downloadingCa = $state(false);
+
+  async function downloadCa() {
+    if (!s.cluster) return;
+    downloadingCa = true;
+    try {
+      const url = `${getBaseUrl()}/api/k3s/clusters/${s.cluster.id}/ca-certificate`;
+      const res = await fetch(url, {
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(projectId ? { 'X-Project-Id': projectId } : {}),
+        },
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const blob = await res.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `ca-${s.cluster.name}.pem`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e) {
+      console.error('CA 다운로드 실패:', e);
+    } finally {
+      downloadingCa = false;
+    }
+  }
 </script>
 
 <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
@@ -23,6 +56,24 @@
       <dt class="text-gray-400 text-xs">키페어</dt>
       <dd class="text-gray-300 text-xs">{s.cluster!.key_name || '-'}</dd>
     </div>
+    <div class="flex justify-between items-center">
+      <dt class="text-gray-400 text-xs">인증서</dt>
+      <dd class="flex gap-1.5">
+        <button
+          onclick={downloadCa}
+          disabled={downloadingCa}
+          class="text-xs px-2 py-0.5 rounded bg-gray-700 hover:bg-gray-600 text-gray-200 disabled:opacity-50 transition-colors"
+        >
+          {downloadingCa ? '...' : 'CA 다운로드'}
+        </button>
+        <button
+          onclick={() => (showCertModal = true)}
+          class="text-xs px-2 py-0.5 rounded bg-gray-700 hover:bg-gray-600 text-gray-200 transition-colors"
+        >
+          만료 조회
+        </button>
+      </dd>
+    </div>
     {#if s.health}
       <div class="flex justify-between">
         <dt class="text-gray-400 text-xs">API 서버</dt>
@@ -43,3 +94,13 @@
     {/if}
   </dl>
 </div>
+
+{#if showCertModal && s.cluster}
+  <K3sCertificateExpiryModal
+    clusterId={s.cluster.id}
+    clusterName={s.cluster.name}
+    {token}
+    {projectId}
+    onclose={() => (showCertModal = false)}
+  />
+{/if}

@@ -44,6 +44,20 @@ export interface K3sNodegroup {
 	updated_at: string | null;
 }
 
+export interface CertificateInfo {
+	not_after: string;
+	not_before: string;
+	subject: string;
+	issuer: string;
+	days_remaining: number;
+}
+
+export interface CertificateExpiryResponse {
+	ca: CertificateInfo | null;
+	client: CertificateInfo | null;
+	server_via_tls: CertificateInfo[];
+}
+
 export interface K3sClusterTemplate {
 	id: string;
 	name: string;
