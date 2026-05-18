@@ -15,6 +15,20 @@ export interface Cluster {
   stack_id: string | null;
 }
 
+export interface ClusterTemplate {
+  id: string;
+  name: string;
+  coe: string;
+}
+
+export interface CreateClusterForm {
+  name: string;
+  cluster_template_id: string;
+  node_count: number;
+  master_count: number;
+  keypair: string;
+}
+
 export interface StackResource {
   resource_name: string;
   resource_type: string;
