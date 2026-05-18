@@ -5,8 +5,11 @@
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
-	import OrphanSection from '$lib/components/admin/orphans/OrphanSection.svelte';
 	import OrphanCleanupModal from '$lib/components/admin/orphans/OrphanCleanupModal.svelte';
+	import OrphanFipSection from '$lib/components/admin/orphans/OrphanFipSection.svelte';
+	import OrphanVolumeSection from '$lib/components/admin/orphans/OrphanVolumeSection.svelte';
+	import OrphanShareSection from '$lib/components/admin/orphans/OrphanShareSection.svelte';
+	import OrphanSecurityGroupSection from '$lib/components/admin/orphans/OrphanSecurityGroupSection.svelte';
 	import { pruneSelection, removeFromSelection } from '$lib/utils/selectionSet';
 	import type {
 		OrphanFipInfo,
@@ -172,112 +175,10 @@
 	{#if loading}
 		<div class="text-gray-500 text-sm">로딩 중...</div>
 	{:else}
-		<OrphanSection
-			title="분리된 Floating IPs"
-			items={fips}
-			bind:selected={selectedFips}
-			emptyMessage="분리된 Floating IP 없음."
-			onCleanup={() => openConfirm('floating_ip')}
-		>
-			{#snippet headers()}
-				<th class="text-left py-2 pr-4">주소</th>
-				<th class="text-left py-2 pr-4">프로젝트</th>
-				<th class="text-left py-2 pr-4">생성일</th>
-				<th class="text-left py-2 pr-4">연령(일)</th>
-				<th class="text-left py-2 pr-4">ID</th>
-			{/snippet}
-			{#snippet row(f)}
-				<td class="py-2 pr-4 font-mono text-green-400">{f.address}</td>
-				<td class="py-2 pr-4 text-gray-500 font-mono">{f.project_id?.slice(0, 8) ?? '-'}</td>
-				<td class="py-2 pr-4 text-gray-400">{f.created_at?.slice(0, 10) ?? '-'}</td>
-				<td class="py-2 pr-4 text-amber-400">{f.age_days}</td>
-				<td class="py-2 pr-4 text-gray-500 font-mono">{f.id.slice(0, 8)}</td>
-			{/snippet}
-		</OrphanSection>
-
-		<OrphanSection
-			title="장기 미사용 Volumes"
-			items={volumes}
-			bind:selected={selectedVolumes}
-			emptyMessage="임계치({minAgeDays}일) 이상의 장기 미사용 volume 없음."
-			onCleanup={() => openConfirm('volume')}
-		>
-			{#snippet headers()}
-				<th class="text-left py-2 pr-4">이름</th>
-				<th class="text-left py-2 pr-4">크기(GB)</th>
-				<th class="text-left py-2 pr-4">상태</th>
-				<th class="text-left py-2 pr-4">프로젝트</th>
-				<th class="text-left py-2 pr-4">생성일</th>
-				<th class="text-left py-2 pr-4">연령(일)</th>
-				<th class="text-left py-2 pr-4">ID</th>
-			{/snippet}
-			{#snippet row(v)}
-				<td class="py-2 pr-4 text-gray-200">{v.name ?? '-'}</td>
-				<td class="py-2 pr-4 text-gray-300 font-mono">{v.size_gb}</td>
-				<td class="py-2 pr-4 text-green-400">{v.status}</td>
-				<td class="py-2 pr-4 text-gray-500 font-mono">{v.project_id?.slice(0, 8) ?? '-'}</td>
-				<td class="py-2 pr-4 text-gray-400">{v.created_at?.slice(0, 10) ?? '-'}</td>
-				<td class="py-2 pr-4 text-amber-400">{v.age_days}</td>
-				<td class="py-2 pr-4 text-gray-500 font-mono">{v.id.slice(0, 8)}</td>
-			{/snippet}
-		</OrphanSection>
-
-		<OrphanSection
-			title="고아 Manila Share"
-			items={shares}
-			bind:selected={selectedShares}
-			emptyMessage="Keystone 프로젝트가 사라진 share 없음."
-			onCleanup={() => openConfirm('manila_share')}
-		>
-			{#snippet headers()}
-				<th class="text-left py-2 pr-4">이름</th>
-				<th class="text-left py-2 pr-4">크기(GB)</th>
-				<th class="text-left py-2 pr-4">상태</th>
-				<th class="text-left py-2 pr-4">사라진 프로젝트</th>
-				<th class="text-left py-2 pr-4">생성일</th>
-				<th class="text-left py-2 pr-4">연령(일)</th>
-				<th class="text-left py-2 pr-4">ID</th>
-			{/snippet}
-			{#snippet row(s)}
-				<td class="py-2 pr-4 text-gray-200">{s.name ?? '-'}</td>
-				<td class="py-2 pr-4 text-gray-300 font-mono">{s.size_gb}</td>
-				<td class="py-2 pr-4 text-green-400">{s.status}</td>
-				<td class="py-2 pr-4 text-gray-500 font-mono">{s.project_id?.slice(0, 8) ?? '-'}</td>
-				<td class="py-2 pr-4 text-gray-400">{s.created_at?.slice(0, 10) ?? '-'}</td>
-				<td class="py-2 pr-4 text-amber-400">{s.age_days}</td>
-				<td class="py-2 pr-4 text-gray-500 font-mono">{s.id.slice(0, 8)}</td>
-			{/snippet}
-		</OrphanSection>
-
-		<OrphanSection
-			title="고아 Security Group"
-			items={secgroups}
-			bind:selected={selectedSGs}
-			emptyMessage="afterglow-managed marker가 있는 미부착 SG 없음."
-			onCleanup={() => openConfirm('security_group')}
-		>
-			{#snippet headerNote()}
-				<div class="text-xs text-gray-500 mb-2">
-					※ description에 <code class="text-gray-400">[afterglow-managed]</code> 마커가 있고 어떤 port에도 attach되지 않은 SG만 후보.
-				</div>
-			{/snippet}
-			{#snippet headers()}
-				<th class="text-left py-2 pr-4">이름</th>
-				<th class="text-left py-2 pr-4">설명</th>
-				<th class="text-left py-2 pr-4">프로젝트</th>
-				<th class="text-left py-2 pr-4">생성일</th>
-				<th class="text-left py-2 pr-4">연령(일)</th>
-				<th class="text-left py-2 pr-4">ID</th>
-			{/snippet}
-			{#snippet row(g)}
-				<td class="py-2 pr-4 text-gray-200">{g.name}</td>
-				<td class="py-2 pr-4 text-gray-400 max-w-md truncate" title={g.description ?? ''}>{g.description ?? '-'}</td>
-				<td class="py-2 pr-4 text-gray-500 font-mono">{g.project_id?.slice(0, 8) ?? '-'}</td>
-				<td class="py-2 pr-4 text-gray-400">{g.created_at?.slice(0, 10) ?? '-'}</td>
-				<td class="py-2 pr-4 text-amber-400">{g.age_days}</td>
-				<td class="py-2 pr-4 text-gray-500 font-mono">{g.id.slice(0, 8)}</td>
-			{/snippet}
-		</OrphanSection>
+		<OrphanFipSection items={fips} bind:selected={selectedFips} onCleanup={() => openConfirm('floating_ip')} />
+		<OrphanVolumeSection items={volumes} bind:selected={selectedVolumes} {minAgeDays} onCleanup={() => openConfirm('volume')} />
+		<OrphanShareSection items={shares} bind:selected={selectedShares} onCleanup={() => openConfirm('manila_share')} />
+		<OrphanSecurityGroupSection items={secgroups} bind:selected={selectedSGs} onCleanup={() => openConfirm('security_group')} />
 	{/if}
 </div>
 
