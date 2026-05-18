@@ -333,3 +333,17 @@ export interface User {
   default_project_id: string | null;
   created_at: string | null;
 }
+
+export interface NetworkInfo {
+  id: string;
+  name: string;
+}
+
+export interface PortInfo {
+  id: string;
+  name: string | null;
+  status: string;
+  device_owner: string | null;
+  fixed_ips: { ip_address: string }[];
+  project_id: string | null;
+}
