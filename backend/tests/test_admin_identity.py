@@ -353,6 +353,116 @@ async def test_revoke_admin_role_revokes_sessions(admin_client, mock_conn):
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Security Policy
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+@pytest.mark.asyncio
+async def test_security_policy_requires_admin(non_admin_client):
+    resp = await non_admin_client.get("/api/admin/identity/security-policy")
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_security_policy_returns_compat_flag_and_count(admin_client):
+    """security-policy가 legacy_compat, system_admin_count, admin_project_member_count를 반환한다."""
+
+    def _make_assign(uid: str):
+        a = MagicMock()
+        a.user = {"id": uid}
+        return a
+
+    mock_ks = MagicMock()
+    mock_ks.role_assignments.list.side_effect = lambda **kwargs: (
+        [_make_assign("sys-1"), _make_assign("sys-2")] if kwargs.get("system") == "all" else [_make_assign("proj-1")]
+    )
+
+    with (
+        patch(
+            "app.api.identity.admin_identity.keystone._resolve_admin_ids",
+            return_value=("proj-id", _ADMIN_ROLE_ID),
+        ),
+        patch(
+            "app.api.identity.admin_identity.keystone._get_admin_ks_client",
+            return_value=mock_ks,
+        ),
+        patch(
+            "app.config.get_settings",
+            return_value=MagicMock(admin_legacy_project_policy=True),
+        ),
+    ):
+        resp = await admin_client.get("/api/admin/identity/security-policy")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["legacy_compat"] is True
+    assert data["system_admin_count"] == 2
+    assert data["admin_project_member_count"] == 1
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# migrate-from-project
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+@pytest.mark.asyncio
+async def test_migrate_from_project_requires_admin(non_admin_client):
+    resp = await non_admin_client.post("/api/admin/identity/system-roles/migrate-from-project")
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_migrate_from_project_grants_only_missing(admin_client):
+    """이미 system admin인 멤버는 skip, 아닌 멤버만 grant → migrated/skipped 카운트 정확."""
+
+    def _make_assign(uid: str):
+        a = MagicMock()
+        a.user = {"id": uid}
+        return a
+
+    mock_ks = MagicMock()
+
+    def _list_side(**kwargs):
+        if kwargs.get("system") == "all":
+            return [_make_assign("already-admin")]
+        return [_make_assign("already-admin"), _make_assign("new-admin")]
+
+    mock_ks.role_assignments.list.side_effect = _list_side
+    mock_ks.roles.grant = MagicMock(return_value=None)
+
+    with (
+        patch(
+            "app.api.identity.admin_identity.keystone._resolve_admin_ids",
+            return_value=("admin-proj-id", _ADMIN_ROLE_ID),
+        ),
+        patch(
+            "app.api.identity.admin_identity.keystone._get_admin_ks_client",
+            return_value=mock_ks,
+        ),
+        patch(
+            "app.api.identity.admin_identity.session_store.revoke_user_sessions",
+            new=AsyncMock(return_value=1),
+        ) as mock_revoke,
+        patch(
+            "app.api.identity.admin_identity.activity.record",
+            new=AsyncMock(),
+        ) as mock_record,
+    ):
+        resp = await admin_client.post("/api/admin/identity/system-roles/migrate-from-project")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["migrated"] == 1
+    assert data["skipped"] == 1
+    assert data["errors"] == []
+    mock_ks.roles.grant.assert_called_once()
+    mock_revoke.assert_awaited_once_with("new-admin")
+    mock_record.assert_awaited_once()
+    assert mock_record.call_args.kwargs["action"] == "admin_system_role_grant"
+    assert mock_record.call_args.kwargs["resource_id"] == "new-admin"
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # System Roles (system:all scope)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

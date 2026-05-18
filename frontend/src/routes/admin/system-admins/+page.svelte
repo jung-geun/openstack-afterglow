@@ -8,6 +8,8 @@
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import SystemAdminTable from '$lib/components/admin/system-admins/SystemAdminTable.svelte';
 	import SystemAdminGrantModal from '$lib/components/admin/system-admins/SystemAdminGrantModal.svelte';
+	import SecurityPolicyBanner from '$lib/components/admin/system-admins/SecurityPolicyBanner.svelte';
+	import MigrateModal from '$lib/components/admin/system-admins/MigrateModal.svelte';
 
 	interface SystemAdmin {
 		user_id: string;
@@ -16,10 +18,18 @@
 		enabled: boolean;
 	}
 
+	interface SecurityPolicy {
+		legacy_compat: boolean;
+		system_admin_count: number;
+		admin_project_member_count: number;
+	}
+
 	let admins = $state<SystemAdmin[]>([]);
+	let policy = $state<SecurityPolicy | null>(null);
 	let loading = $state(true);
 	let refreshing = $state(false);
 	let showGrant = $state(false);
+	let showMigrate = $state(false);
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
@@ -28,7 +38,10 @@
 		if (admins.length === 0) loading = true;
 		else refreshing = true;
 		try {
-			admins = await api.get<SystemAdmin[]>('/api/admin/identity/system-roles', token, projectId);
+			[admins, policy] = await Promise.all([
+				api.get<SystemAdmin[]>('/api/admin/identity/system-roles', token, projectId),
+				api.get<SecurityPolicy>('/api/admin/identity/security-policy', token, projectId),
+			]);
 		} catch {
 			admins = [];
 		} finally {
@@ -68,17 +81,31 @@
 
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={3} />
-	{:else if admins.length === 0}
-		<div class="text-gray-500 text-sm py-12 text-center">
-			등록된 system admin이 없습니다.
-		</div>
 	{:else}
 		<div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
-			<SystemAdminTable {admins} onRevoked={load} />
+			{#if policy}
+				<SecurityPolicyBanner {policy} onMigrate={() => (showMigrate = true)} />
+			{/if}
+
+			{#if admins.length === 0}
+				<div class="text-gray-500 text-sm py-12 text-center">
+					등록된 system admin이 없습니다.
+				</div>
+			{:else}
+				<SystemAdminTable {admins} onRevoked={load} />
+			{/if}
 		</div>
 	{/if}
 </div>
 
 {#if showGrant}
 	<SystemAdminGrantModal onClose={() => (showGrant = false)} onGranted={load} />
+{/if}
+
+{#if showMigrate && policy}
+	<MigrateModal
+		adminProjectMemberCount={policy.admin_project_member_count}
+		onClose={() => (showMigrate = false)}
+		onMigrated={load}
+	/>
 {/if}

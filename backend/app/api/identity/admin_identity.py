@@ -1000,6 +1000,92 @@ async def revoke_system_role(
     return result
 
 
+@router.get("/identity/security-policy", dependencies=[Depends(require_admin)])
+async def get_security_policy():
+    """호환 모드 상태 + system admin/admin project 멤버 수 반환."""
+
+    def _get():
+        from app.config import get_settings
+
+        settings = get_settings()
+        legacy_compat = settings.admin_legacy_project_policy
+        try:
+            admin_project_id, admin_role_id = keystone._resolve_admin_ids()
+            ks = keystone._get_admin_ks_client()
+            if admin_role_id:
+                sys_assignments = ks.role_assignments.list(role=admin_role_id, system="all")
+                system_admin_count = len([a for a in sys_assignments if hasattr(a, "user")])
+            else:
+                system_admin_count = 0
+            if admin_role_id and admin_project_id:
+                proj_assignments = ks.role_assignments.list(role=admin_role_id, project=admin_project_id)
+                admin_project_member_count = len([a for a in proj_assignments if hasattr(a, "user")])
+            else:
+                admin_project_member_count = 0
+        except Exception as e:
+            _logger.warning("security-policy 조회 실패: %s", e)
+            system_admin_count = 0
+            admin_project_member_count = 0
+        return {
+            "legacy_compat": legacy_compat,
+            "system_admin_count": system_admin_count,
+            "admin_project_member_count": admin_project_member_count,
+        }
+
+    return await asyncio.to_thread(_get)
+
+
+@router.post("/identity/system-roles/migrate-from-project", dependencies=[Depends(require_admin)])
+async def migrate_from_project(token_info: dict = Depends(get_token_info)):
+    """admin project 멤버 중 system admin이 아닌 사용자에게 system:all admin role 일괄 부여."""
+
+    def _migrate():
+        try:
+            admin_project_id, admin_role_id = keystone._resolve_admin_ids()
+            if not admin_role_id or not admin_project_id:
+                raise HTTPException(status_code=500, detail="admin role/project ID 조회 실패")
+            ks = keystone._get_admin_ks_client()
+            sys_assignments = ks.role_assignments.list(role=admin_role_id, system="all")
+            system_admin_ids = {a.user["id"] for a in sys_assignments if hasattr(a, "user")}
+            proj_assignments = ks.role_assignments.list(role=admin_role_id, project=admin_project_id)
+            project_member_ids = [a.user["id"] for a in proj_assignments if hasattr(a, "user")]
+            migrated = 0
+            skipped = 0
+            errors = []
+            grant_uids = []
+            for uid in project_member_ids:
+                if uid in system_admin_ids:
+                    skipped += 1
+                else:
+                    try:
+                        ks.roles.grant(role=admin_role_id, user=uid, system="all")
+                        migrated += 1
+                        grant_uids.append(uid)
+                    except Exception as e:
+                        errors.append({"user_id": uid, "reason": str(e)})
+            return {"migrated": migrated, "skipped": skipped, "errors": errors, "_grant_uids": grant_uids}
+        except HTTPException:
+            raise
+        except Exception as e:
+            _logger.warning("migrate-from-project 실패: %s", e)
+            raise HTTPException(status_code=500, detail="마이그레이션 실패")
+
+    result = await asyncio.to_thread(_migrate)
+    grant_uids = result.pop("_grant_uids", [])
+    for uid in grant_uids:
+        await session_store.revoke_user_sessions(uid)
+        await activity.record(
+            project_id=token_info["project_id"],
+            user_id=token_info["user_id"],
+            username=token_info.get("username", ""),
+            resource_type="identity",
+            action="admin_system_role_grant",
+            status="success",
+            resource_id=uid,
+        )
+    return result
+
+
 # ============================================================================
 # Monitoring SG 동기화
 # ============================================================================

@@ -726,6 +726,31 @@ async def start_background_workers():
             # API가 DB DDL 완료를 기다리지 않고 즉시 요청을 받을 수 있게 한다.
             asyncio.create_task(_deferred_create_tables())
 
+    # compat OFF + system admin 0명 → lockout 경고
+    try:
+        from app.config import get_settings as _gs
+        from app.services import keystone as _ks
+
+        _cfg = _gs()
+        if not _cfg.admin_legacy_project_policy:
+            _, _admin_role_id = _ks._resolve_admin_ids()
+            if _admin_role_id:
+                _ks_client = _ks._get_admin_ks_client()
+                _count = len(
+                    [
+                        a
+                        for a in _ks_client.role_assignments.list(role=_admin_role_id, system="all")
+                        if hasattr(a, "user")
+                    ]
+                )
+                if _count == 0:
+                    _logger.error(
+                        "LOCKOUT WARNING: admin_legacy_project_policy=False이고 system admin이 0명입니다. "
+                        "관리자 접근이 차단됩니다. scripts/manage_system_admins.py로 복구하세요."
+                    )
+    except Exception:
+        pass
+
     asyncio.create_task(_snapshot_loop())
     asyncio.create_task(_auto_backup_loop())
     if _svc_cfg.service_k3s_enabled:
