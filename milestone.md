@@ -2646,3 +2646,15 @@ k3s는 재시작 시 만료 90일 이내 인증서를 자동 갱신한다.
 - [x] `admin/drover/templates/+page.svelte` 인라인 백드롭 1곳 → `<Modal>` 교체
 - [x] npm run check 62 errors (기존과 동일)
 - [x] npm run test 7 failed / 215 passed (기존과 동일)
+
+### Phase 48 — 180줄 잔존 파일 예외 처리 (architect 검증 완료)
+
+다음 5개 파일은 Phase 48b 명시 스코프(5개)에 포함되지 않았으며, architect 검토 결과 controller 추출 ROI 부족으로 **의도적으로 제외**:
+
+| 파일 | 줄수 | 제외 사유 |
+|---|---|---|
+| `admin/volumes/+page.svelte` | 200 | modal 합성 컨테이너, template 98줄 고정 — 추출 가치 < 비용 |
+| `admin/orphans/+page.svelte` | 193 | bind:selected 양방향 바인딩 4개, 추출 시 wrapping 오버헤드 |
+| `admin/ports/+page.svelte` | 193 | Phase 49+ 후속 분리 검토 대상 |
+| `dashboard/network/security-groups/+page.svelte` | 187 | bind:ruleForm 양방향 바인딩, Phase 49+ 검토 |
+| `dashboard/network/networks/[id]/+page.svelte` | 185 | Phase 49+ 후속 분리 검토 대상 |
