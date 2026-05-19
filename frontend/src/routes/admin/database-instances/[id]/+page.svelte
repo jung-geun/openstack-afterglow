@@ -11,6 +11,7 @@
 	import DbDatabasesSection from '$lib/components/admin/database-instances/id/DbDatabasesSection.svelte';
 	import DbUsersSection from '$lib/components/admin/database-instances/id/DbUsersSection.svelte';
 	import DbBackupsSection from '$lib/components/admin/database-instances/id/DbBackupsSection.svelte';
+	import DbInstanceMetaGrid from '$lib/components/admin/database-instances/id/DbInstanceMetaGrid.svelte';
 
 	const instanceId = $derived($page.params.id);
 	const token = $derived($auth.token ?? undefined);
@@ -150,12 +151,7 @@
 	{:else}
 		<DbInstanceHeader {instance} {deleting} onDelete={deleteInstance} />
 
-		<div class="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-4 grid grid-cols-2 gap-3 text-sm">
-			<div><div class="text-gray-500 text-xs mb-0.5">ID</div><div class="text-gray-400 font-mono text-xs">{instance.id}</div></div>
-			<div><div class="text-gray-500 text-xs mb-0.5">데이터스토어</div><div class="text-white">{instance.datastore?.type ?? '-'} {instance.datastore?.version ?? ''}</div></div>
-			<div><div class="text-gray-500 text-xs mb-0.5">볼륨 크기</div><div class="text-white">{instance.size} GB</div></div>
-			<div><div class="text-gray-500 text-xs mb-0.5">생성일</div><div class="text-white">{instance.created_at ? instance.created_at.slice(0, 10) : '-'}</div></div>
-		</div>
+		<DbInstanceMetaGrid {instance} />
 
 		<DbConnectionInfoCard {instance} {rootInfo} {enablingRoot} onEnableRoot={enableRoot} />
 
