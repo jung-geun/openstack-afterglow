@@ -14,6 +14,7 @@
 	import AdminInstanceFilters from '$lib/components/admin/instances/AdminInstanceFilters.svelte';
 	import AdminInstanceTable from '$lib/components/admin/instances/AdminInstanceTable.svelte';
 	import type { AdminInstance, PagedResponse, TsPoint } from '$lib/types/adminInstance';
+	import { StatTile } from '$lib/components/ui';
 
 	let allInstances = $state<AdminInstance[]>([]);
 	let loading = $state(true);
@@ -32,6 +33,15 @@
 	let tsLoading = $state(true);
 	let selectedInstanceId = $state<string | null>(null);
 	let selectedProjectId = $state<string | null>(null);
+
+	interface InstanceHealth {
+		total: number;
+		active: number;
+		error: number;
+		with_alerts: number;
+		gpu_count: number;
+	}
+	let health = $state<InstanceHealth | null>(null);
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
@@ -66,6 +76,12 @@
 		finally { tsLoading = false; }
 	}
 
+	async function loadHealth() {
+		try {
+			health = await api.get<InstanceHealth>('/api/admin/instances/health', token, projectId);
+		} catch { health = null; }
+	}
+
 	function openDetail(inst: AdminInstance) { selectedInstanceId = inst.id; selectedProjectId = inst.project_id; }
 	function closeDetail() { selectedInstanceId = null; selectedProjectId = null; }
 	function onFilterChange() { markerStack = []; nextMarker = null; load(); }
@@ -81,7 +97,7 @@
 		{ storageKey: 'admin-instances', defaultActive: true, defaultInterval: 15, intervalOptions: [10, 15, 30, 60] }
 	);
 
-	onMount(() => { load(); loadTimeseries(tsRange); loadHosts(); projectNames.load(token, projectId); });
+	onMount(() => { load(); loadTimeseries(tsRange); loadHosts(); loadHealth(); projectNames.load(token, projectId); });
 </script>
 
 <div class="p-4 md:p-8 max-w-7xl mx-auto">
@@ -114,6 +130,16 @@
 			</div>
 		{/snippet}
 	</PageHeader>
+
+	{#if health}
+		<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5 mb-4">
+			<StatTile label="전체 VM" value={health.total} unit="instances" accent="blue" />
+			<StatTile label="ACTIVE" value={health.active} unit="/ {health.total}" accent="emerald" />
+			<StatTile label="ERROR" value={health.error} unit="instances" accent="rose" />
+			<StatTile label="알림 있음" value={health.with_alerts} unit="instances" accent="amber" />
+			<StatTile label="GPU VM" value={health.gpu_count} unit="가속" accent="violet" />
+		</div>
+	{/if}
 
 	<AdminInstanceFilters
 		{availableHosts}
