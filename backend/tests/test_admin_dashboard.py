@@ -225,3 +225,43 @@ async def test_identity_summary_returns_counts(admin_client, mock_conn):
     assert data["counts"]["projects"] == 3
     assert data["counts"]["roles"] == 1
     assert "top_roles" in data
+    assert data.get("partial") is False
+
+
+@pytest.mark.asyncio
+async def test_identity_summary_partial_when_users_fails(admin_client, mock_conn):
+    """users 조회 실패 시 200 응답 + partial=True + users count=0."""
+    mock_conn.identity.users.side_effect = Exception("403 Forbidden")
+    mock_conn.identity.projects.return_value = [MagicMock(), MagicMock()]
+    mock_conn.identity.roles.return_value = [MagicMock(id="r1", name="admin")]
+    mock_conn.identity.groups.return_value = []
+    mock_conn.identity.domains.return_value = []
+
+    with _patch_redis():
+        resp = await admin_client.get("/api/admin/identity/summary")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["partial"] is True
+    assert data["counts"]["users"] == 0
+    assert data["counts"]["projects"] == 2
+
+
+@pytest.mark.asyncio
+async def test_identity_summary_partial_when_roles_fails(admin_client, mock_conn):
+    """roles 조회 실패 시 200 응답 + partial=True + roles count=0."""
+    u1 = MagicMock(is_enabled=True)
+    mock_conn.identity.users.return_value = [u1]
+    mock_conn.identity.projects.return_value = [MagicMock()]
+    mock_conn.identity.roles.side_effect = Exception("roles unavailable")
+    mock_conn.identity.groups.return_value = []
+    mock_conn.identity.domains.return_value = []
+
+    with _patch_redis():
+        resp = await admin_client.get("/api/admin/identity/summary")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["partial"] is True
+    assert data["counts"]["roles"] == 0
+    assert data["counts"]["users"] == 1

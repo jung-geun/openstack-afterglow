@@ -1138,24 +1138,40 @@ async def get_identity_summary(
 ):
     """users / projects / roles / groups / domains 카운트 + 최근 변경 요약."""
     def _collect():
-        users = list(conn.identity.users(limit=1000))
-        projects = list(conn.identity.projects(limit=1000))
-        roles = list(conn.identity.roles(limit=200))
-        groups = []
+        partial = False
+        users: list = []
+        try:
+            users = list(conn.identity.users(limit=1000))
+        except Exception as exc:
+            _logger.warning("identity summary partial: users failed: %s", exc, exc_info=True)
+            partial = True
+        projects: list = []
+        try:
+            projects = list(conn.identity.projects(limit=1000))
+        except Exception as exc:
+            _logger.warning("identity summary partial: projects failed: %s", exc, exc_info=True)
+            partial = True
+        roles: list = []
+        try:
+            roles = list(conn.identity.roles(limit=200))
+        except Exception as exc:
+            _logger.warning("identity summary partial: roles failed: %s", exc, exc_info=True)
+            partial = True
+        groups: list = []
         try:
             groups = list(conn.identity.groups(limit=500))
         except Exception:
             pass
-        domains = []
+        domains: list = []
         try:
             domains = list(conn.identity.domains(limit=50))
         except Exception:
             pass
 
-        # 최근 30일 내 활성 사용자 (created_at 기준, 없으면 0)
         recent_enabled = sum(1 for u in users if getattr(u, "is_enabled", True))
 
         return {
+            "partial": partial,
             "counts": {
                 "users": len(users),
                 "users_enabled": recent_enabled,
@@ -1173,7 +1189,8 @@ async def get_identity_summary(
             ttl_slow(),
             _collect,
         )
-    except Exception:
+    except Exception as exc:
+        _logger.exception("admin identity summary 조회 실패: %s", exc)
         raise HTTPException(status_code=500, detail="Identity 요약 조회 실패")
 
     return summary
