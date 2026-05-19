@@ -1,4 +1,5 @@
-import { api, ApiError, memoryCache } from '$lib/api/client';
+import { api, ApiError } from '$lib/api/client';
+import { createSwr } from '$lib/utils/swr.svelte';
 import { apiMut } from '$lib/api/mutations';
 import { wizard, openWizard } from '$lib/stores/wizard';
 import type { Volume, Snapshot, QuotaItem } from '$lib/types/resources';
@@ -11,6 +12,7 @@ export interface VolumesControllerOpts {
 }
 
 export function createVolumesController(opts: VolumesControllerOpts) {
+  const { swrGet, swrSet } = createSwr(opts.projectId);
   let volumes = $state<Volume[]>([]);
   let snapshots = $state<Snapshot[]>([]);
   let loading = $state(true);
@@ -31,16 +33,6 @@ export function createVolumesController(opts: VolumesControllerOpts) {
   let backupTargetVol = $state<Volume | null>(null);
   let snapshotTargetVol = $state<Volume | null>(null);
   let quotas = $state<VolumeQuotas | null>(null);
-
-  function swrGet<T>(path: string): T | null {
-    const key = `${path}:${opts.projectId()}`;
-    const c = memoryCache.get(key);
-    return c ? (c.data as T) : null;
-  }
-
-  function swrSet(path: string, data: unknown) {
-    memoryCache.set(`${path}:${opts.projectId()}`, { data, timestamp: Date.now() });
-  }
 
   async function fetchVolumes(manual = false) {
     const path = '/api/volumes';

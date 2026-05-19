@@ -1,7 +1,8 @@
 <script lang="ts">
   import { auth } from '$lib/stores/auth';
   import { untrack } from 'svelte';
-  import { api, ApiError, memoryCache } from '$lib/api/client';
+  import { api, ApiError } from '$lib/api/client';
+  import { createSwr } from '$lib/utils/swr.svelte';
   import { apiMut } from '$lib/api/mutations';
   import type { FileStorage } from '$lib/types/resources';
   import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
@@ -39,14 +40,7 @@
     history.pushState({}, '', '/dashboard/file-storage');
   }
 
-  function swrGet<T>(path: string): T | null {
-    const key = `${path}:${$auth.projectId}`;
-    const c = memoryCache.get(key);
-    return c ? (c.data as T) : null;
-  }
-  function swrSet(path: string, data: unknown) {
-    memoryCache.set(`${path}:${$auth.projectId}`, { data, timestamp: Date.now() });
-  }
+  const { swrGet, swrSet } = createSwr(() => $auth.projectId);
 
   async function fetchFileStorages(opts?: { refresh?: boolean }) {
     const path = '/api/file-storage';

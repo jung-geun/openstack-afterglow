@@ -1,7 +1,8 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { auth } from '$lib/stores/auth';
-  import { api, ApiError, memoryCache } from '$lib/api/client';
+  import { api, ApiError } from '$lib/api/client';
+  import { createSwr } from '$lib/utils/swr.svelte';
   import { apiMut } from '$lib/api/mutations';
   import type { Network, FloatingIp } from '$lib/types/resources';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
@@ -33,14 +34,7 @@
 
   const tok = () => $auth.token ?? undefined;
   const pid = () => $auth.projectId ?? undefined;
-
-  function swrGet<T>(path: string): T | null {
-    const c = memoryCache.get(`${path}:${$auth.projectId}`);
-    return c ? (c.data as T) : null;
-  }
-  function swrSet(path: string, data: unknown) {
-    memoryCache.set(`${path}:${$auth.projectId}`, { data, timestamp: Date.now() });
-  }
+  const { swrGet, swrSet } = createSwr(() => $auth.projectId);
 
   async function fetchNetworks(opts?: { refresh?: boolean }) {
     const path = '/api/networks';

@@ -2598,3 +2598,44 @@ k3s는 재시작 시 만료 90일 이내 인증서를 자동 갱신한다.
 - [ ] 실 환경: HA(3-master) 클러스터에서 회전 → SSE 스트림 완료, cert NotAfter 갱신 확인
 - [ ] 실 환경: 단일 마스터 클러스터에서 회전 → 422 확인
 - [ ] 실 환경: 동시 회전 → 두 번째 요청 409 확인
+
+---
+
+## Phase 48 — Frontend 공통 패턴 추출
+
+### Phase 48a — SWR 헬퍼 추출
+
+- [x] `frontend/src/lib/utils/swr.svelte.ts` 신규 생성 (`createSwr` 팩토리)
+- [x] `volumesController.svelte.ts` 인라인 swrGet/swrSet → `createSwr` import
+- [x] `dashboard/network/networks/+page.svelte` 인라인 swrGet/swrSet → `createSwr` import
+- [x] `dashboard/compute/instances/+page.svelte` 인라인 swrGet/swrSet → `createSwr` import
+- [x] `dashboard/file-storage/+page.svelte` 인라인 swrGet/swrSet → `createSwr` import
+- [x] npm run check 62 errors (기존과 동일, 신규 없음)
+- [x] npm run test 7 failed / 215 passed (기존과 동일, 신규 없음)
+
+### Phase 48b — Controller 추출 (진행 중)
+
+- [ ] `admin/database-instances/[id]` → `adminDatabaseInstanceDetailController.svelte.ts`
+- [ ] `dashboard/network/loadbalancers/[id]` → `loadbalancerDetailController.svelte.ts`
+- [ ] `dashboard/loadbalancers/[id]` → controller 추출
+- [ ] `admin/quotas` → `adminQuotasController.svelte.ts`
+- [ ] `admin/groups` → `adminGroupsController.svelte.ts`
+
+### Phase 48c — 인라인 타입 통합 (예정)
+
+- [ ] `dashboard/topology/+page.svelte` 5개 인라인 타입 → `lib/types/topology.ts`
+- [ ] `Network`/`SubnetDetail` 중복 3곳 → `lib/types/networks.ts`
+- [ ] `Project` 중복 → `lib/types/project.ts` (신규)
+- [ ] `PagedResponse<T>` → `lib/types/api.ts` (신규)
+
+### Phase 48d — ConfirmDialog 추출 (예정)
+
+- [ ] `lib/components/ui/ConfirmDialog.svelte` 신규
+- [ ] `lib/stores/confirm.svelte.ts` 신규
+- [ ] 34개 페이지 `confirm()` → `confirmDialog()` 치환
+
+### Phase 48e — Modal/FormModal 추출 (예정)
+
+- [ ] `lib/components/ui/Modal.svelte` 신규
+- [ ] `lib/components/ui/FormModal.svelte` 신규
+- [ ] 인라인 백드롭 2곳 + showModal 변수 14곳 → `bind:open` 사용
