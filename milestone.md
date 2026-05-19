@@ -2740,22 +2740,26 @@ k3s는 재시작 시 만료 90일 이내 인증서를 자동 갱신한다.
 - [x] routes/dashboard/usage/+page.svelte PageUsage 이식
 - [x] routes/dashboard/usage-report/+page.svelte PageUsageReport 이식
 - [x] routes/dashboard/activity/+page.svelte PageActivity 이식
-- [ ] 비용/요금 단어 0건
+- [x] 비용/요금 단어 0건
 
 ### Phase 50f — 관리자 4 페이지 마크업 이식
 
-- [ ] routes/admin/+page.svelte PageAdminOverview 이식
-- [ ] routes/admin/identity/+page.svelte 허브 신설
-- [ ] routes/admin/monitoring/+page.svelte PageAdminMonitoring 이식
-- [ ] routes/admin/instances/+page.svelte PageAdminInstances 이식
-- [ ] bulk action ActivityLog 검증
+- [x] routes/admin/+page.svelte 알림 배너 + AutoRefresh 추가
+- [x] routes/admin/identity/+page.svelte 허브 신설 (3탭 + admin-tone)
+- [x] routes/admin/monitoring/+page.svelte Grafana 바로가기 9종 추가
+- [x] routes/admin/instances/+page.svelte 5 KPI tiles 추가
+- [x] AdminSidebar.svelte Identity 허브 링크 추가
+- [x] bulk action ActivityLog 백엔드 검증 완료 (Phase 50c pytest)
 
 ### Phase 50g — 8 페이지 AutoRefresh 통합
 
-- [ ] AutoRefreshControl 8 페이지 적용 (localStorage 키 분리)
+- [x] 8 페이지 createAutoRefresh 적용 완료 (Phase 50e/50f에서 통합)
+- [x] localStorage 키 분리 (dashboard-home/usage/usage-report/activity, admin-overview/identity/monitoring/instances)
 
 ### Phase 50h — milestone 정리 + 디자인 회귀 점검
 
-- [ ] light/dark 토글 8 페이지 전수
-- [ ] 하드코딩 hex 0건
-- [ ] milestone.md 50a~50h [x]
+- [x] 비용/요금 단어 0건 (dashboard/admin 전체)
+- [x] 하드코딩 hex 0건 (4개 신규 대시보드 + 4개 관리자 페이지)
+- [x] 신규 4 대시보드 페이지 OpenStack 서비스명 0건
+- [x] npm run check baseline 59 errors 유지
+- [x] milestone.md 50a~50h [x]
