@@ -50,8 +50,7 @@ export function createAdminQuotasController(opts: AdminQuotasControllerOpts) {
     try {
       const res = await api.get<{ aliases: string[] }>('/api/admin/gpu-aliases', tok(), pid());
       gpuAliases = res.aliases ?? [];
-    } catch (e) {
-      console.warn('[Quotas] GPU alias 로드 실패:', e instanceof ApiError ? e.message : e);
+    } catch {
       gpuAliases = [];
     }
   }
