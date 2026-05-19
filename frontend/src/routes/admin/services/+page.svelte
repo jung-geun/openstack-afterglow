@@ -6,59 +6,9 @@
 	import { siteConfig } from '$lib/config/site';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
-	import ServiceTable from '$lib/components/admin/services/ServiceTable.svelte';
-	import NetworkAgentTable from '$lib/components/admin/services/NetworkAgentTable.svelte';
-	import EndpointsTable from '$lib/components/admin/services/EndpointsTable.svelte';
-	import StoragePoolsList from '$lib/components/admin/services/StoragePoolsList.svelte';
 	import ServiceTabs from '$lib/components/admin/services/ServiceTabs.svelte';
-	import {
-		COMPUTE_COLUMNS,
-		BLOCK_STORAGE_COLUMNS,
-		SHARED_FS_COLUMNS,
-		ORCHESTRATION_COLUMNS,
-		CONTAINER_COLUMNS,
-		CONTAINER_INFRA_COLUMNS,
-	} from '$lib/components/admin/services/serviceColumns.js';
-
-	interface Service {
-		id: string;
-		binary: string;
-		host: string;
-		status: string;
-		state: string;
-		zone: string;
-		updated_at: string | null;
-		disabled_reason: string | null;
-	}
-	interface NetworkAgent {
-		id: string;
-		binary: string;
-		host: string;
-		agent_type: string;
-		availability_zone: string | null;
-		alive: boolean | null;
-		admin_state_up: boolean;
-		updated_at: string | null;
-	}
-	interface EndpointGroup {
-		service_id: string;
-		name: string;
-		service: string;
-		region: string;
-		endpoints: Record<string, string>;
-	}
-	interface StoragePool {
-		name: string;
-		volume_backend_name: string;
-		driver_version: string;
-		storage_protocol: string;
-		vendor_name: string;
-		total_capacity_gb: number;
-		free_capacity_gb: number;
-		allocated_capacity_gb: number;
-	}
-
-	type TabKey = 'compute' | 'network' | 'block_storage' | 'shared_file_system' | 'orchestration' | 'container' | 'container_infra' | 'endpoints' | 'storage_pools';
+	import ServiceTabPanel from '$lib/components/admin/services/ServiceTabPanel.svelte';
+	import type { Service, NetworkAgent, EndpointGroup, StoragePool, TabKey } from '$lib/types/adminServices';
 
 	let computeServices = $state<Service[]>([]);
 	let blockStorageServices = $state<Service[]>([]);
@@ -172,23 +122,17 @@
 		{loadingMap}
 	/>
 
-	{#if activeTab === 'compute'}
-		<ServiceTable services={computeServices} columns={COMPUTE_COLUMNS} loading={loadingMap.compute} emptyMessage="데이터 없음" />
-	{:else if activeTab === 'network'}
-		<NetworkAgentTable agents={networkAgents} loading={loadingMap.network} emptyMessage="데이터 없음" />
-	{:else if activeTab === 'block_storage'}
-		<ServiceTable services={blockStorageServices} columns={BLOCK_STORAGE_COLUMNS} loading={loadingMap.block_storage} emptyMessage="데이터 없음" />
-	{:else if activeTab === 'shared_file_system'}
-		<ServiceTable services={sharedFsServices} columns={SHARED_FS_COLUMNS} loading={loadingMap.shared_file_system} emptyMessage="Manila 서비스가 없거나 접근할 수 없습니다" />
-	{:else if activeTab === 'orchestration'}
-		<ServiceTable services={orchestrationServices} columns={ORCHESTRATION_COLUMNS} loading={loadingMap.orchestration} emptyMessage="Heat 서비스가 없거나 접근할 수 없습니다" />
-	{:else if activeTab === 'container'}
-		<ServiceTable services={containerServices} columns={CONTAINER_COLUMNS} loading={loadingMap.container} emptyMessage="Zun 서비스가 없거나 접근할 수 없습니다" />
-	{:else if activeTab === 'container_infra'}
-		<ServiceTable services={magnumServices} columns={CONTAINER_INFRA_COLUMNS} loading={loadingMap.container_infra} emptyMessage="Magnum 서비스가 없거나 접근할 수 없습니다" />
-	{:else if activeTab === 'endpoints'}
-		<EndpointsTable {endpoints} loading={loadingMap.endpoints} emptyMessage="엔드포인트 정보를 가져올 수 없습니다" />
-	{:else if activeTab === 'storage_pools'}
-		<StoragePoolsList pools={storagePools} loading={loadingMap.storage_pools} emptyMessage="스토리지 풀 정보를 가져올 수 없습니다" />
-	{/if}
+	<ServiceTabPanel
+		{activeTab}
+		{computeServices}
+		{blockStorageServices}
+		{networkAgents}
+		{sharedFsServices}
+		{orchestrationServices}
+		{containerServices}
+		{magnumServices}
+		{endpoints}
+		{storagePools}
+		{loadingMap}
+	/>
 </div>
