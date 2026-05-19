@@ -2731,8 +2731,8 @@ k3s는 재시작 시 만료 90일 이내 인증서를 자동 갱신한다.
 
 ### Phase 50d — 사이드바 nav + 신규 라우트 3종 스켈레톤
 
-- [ ] Sidebar.svelte 대시보드 섹션 4개 메뉴
-- [ ] dashboard/usage, usage-report, activity 라우트 스켈레톤
+- [x] Sidebar.svelte 대시보드 섹션 4개 메뉴
+- [x] dashboard/usage, usage-report, activity 라우트 스켈레톤
 
 ### Phase 50e — 대시보드 4 페이지 마크업 이식
 

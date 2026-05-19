@@ -8,6 +8,8 @@
 	import RingMark from '$lib/components/ui/RingMark.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 
+	let dashboardOpen = $state(false);
+
 	const sections = $state([
 		{
 			label: 'Compute',
@@ -111,6 +113,10 @@
 
 	$effect(() => {
 		const pathname = $page.url.pathname;
+		const dashboardPaths = ['/dashboard/usage', '/dashboard/usage-report', '/dashboard/activity'];
+		if (pathname === '/dashboard' || dashboardPaths.some((p) => pathname.startsWith(p))) {
+			dashboardOpen = true;
+		}
 		for (const section of sections) {
 			if (
 				pathname.startsWith(section.prefix) ||
@@ -173,15 +179,27 @@
 	</div>
 
 	<nav class="flex-1 px-3 pb-4 space-y-0.5">
-		<!-- 대시보드 -->
-		<a
-			href="/dashboard"
-			class="nav-item flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors"
-		class:nav-active={$page.url.pathname === '/dashboard'}
-		>
-			<svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg>
-			대시보드
-		</a>
+		<!-- 대시보드 섹션 -->
+		<div>
+			<button
+				onclick={() => dashboardOpen = !dashboardOpen}
+				class="flex items-center justify-between w-full px-3 py-2 rounded-lg text-sm transition-colors {$page.url.pathname === '/dashboard' || ['/dashboard/usage', '/dashboard/usage-report', '/dashboard/activity'].some((p) => $page.url.pathname.startsWith(p)) ? 'text-white' : 'text-gray-400 hover:text-white hover:bg-gray-800'}"
+			>
+				<div class="flex items-center gap-1.5">
+					<svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg>
+					<span>대시보드</span>
+				</div>
+				<span class="text-xs text-gray-600">{dashboardOpen ? '▾' : '▸'}</span>
+			</button>
+			{#if dashboardOpen}
+				<div class="ml-3 mt-0.5 space-y-0.5">
+					<a href="/dashboard" class="nav-item nav-sub flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors" class:nav-active={$page.url.pathname === '/dashboard'}>개요</a>
+					<a href="/dashboard/usage" class="nav-item nav-sub flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors" class:nav-active={$page.url.pathname.startsWith('/dashboard/usage') && !$page.url.pathname.startsWith('/dashboard/usage-report')}>사용량</a>
+					<a href="/dashboard/usage-report" class="nav-item nav-sub flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors" class:nav-active={$page.url.pathname.startsWith('/dashboard/usage-report')}>사용량 리포트</a>
+					<a href="/dashboard/activity" class="nav-item nav-sub flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors" class:nav-active={$page.url.pathname.startsWith('/dashboard/activity')}>활동</a>
+				</div>
+			{/if}
+		</div>
 		<a
 			href="/dashboard/network/topology"
 			class="nav-item flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors"
