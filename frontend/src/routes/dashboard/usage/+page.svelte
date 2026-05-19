@@ -8,6 +8,7 @@
 		Pill,
 		QuotaBar,
 		StatusChip,
+		Spark,
 	} from '$lib/components/ui';
 
 	interface TopInstance {
@@ -33,7 +34,21 @@
 		volumes_by_type: VolumeByType[];
 	}
 
+	interface TrendSeries {
+		data: number[];
+		points: number;
+		available: boolean;
+	}
+
+	interface TrendData {
+		vcpu: TrendSeries;
+		memory: TrendSeries;
+		storage: TrendSeries;
+		prometheus_available: boolean;
+	}
+
 	let data = $state<UsageStats | null>(null);
+	let trendData = $state<TrendData | null>(null);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	let period = $state<'24h' | '7d' | '30d'>('7d');
@@ -46,10 +61,14 @@
 		loading = !data;
 		error = null;
 		try {
-			const res = await api.get<UsageStats>(`/api/dashboard/usage-stats?range=${period}`, token, projectId);
-			data = res;
-		} catch (e) {
-			error = e instanceof Error ? e.message : '데이터 로딩 실패';
+			await Promise.allSettled([
+				api.get<UsageStats>(`/api/dashboard/usage-stats?range=${period}`, token, projectId)
+					.then(v => { data = v; })
+					.catch(e => { error = e instanceof Error ? e.message : '데이터 로딩 실패'; }),
+				api.get<TrendData>('/api/dashboard/metrics/trend?range=24h', token, projectId)
+					.then(v => { trendData = v; })
+					.catch(() => {}),
+			]);
 		} finally {
 			loading = false;
 		}
@@ -128,18 +147,20 @@
 	{:else if error}
 		<div class="text-[var(--color-state-danger)] text-sm py-4">{error}</div>
 	{:else if data}
-		<!-- Spark trend cards -->
+		<!-- Spark trend cards — 24h flavor-relative -->
 		<div class="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
 			{#each [
-				{ key: 'vCPU', unit: 'cores' },
-				{ key: 'RAM', unit: 'GB' },
-				{ key: '네트워크', unit: 'Mbps' },
+				{ label: 'vCPU 24h 추세', unit: '%', color: 'var(--color-accent)', key: 'vcpu' as const },
+				{ label: 'RAM 24h 추세', unit: '%', color: 'var(--color-accent-2)', key: 'memory' as const },
+				{ label: '네트워크 24h 추세', unit: 'KiB/s', color: 'var(--color-warm)', key: 'storage' as const },
 			] as card}
+				{@const series = trendData?.[card.key]}
 				<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
-					<SectionHeader title="{card.key} 24h 추세" meta={card.unit} />
-					<div class="mt-4 flex items-center justify-center h-14 text-[11px] text-gray-500">
-						Prometheus 미설정
-					</div>
+					<p class="text-[10px] uppercase tracking-wide text-[var(--color-ink-3)] mb-3">{card.label}</p>
+					<Spark data={series?.data ?? []} color={card.color} height={44} />
+					{#if !trendData || !trendData.prometheus_available}
+						<p class="text-[11px] italic text-[var(--color-ink-3)] mt-2">메트릭 수집 미설정 — <a href="/dashboard/observability" class="underline hover:text-[var(--color-ink-0)]">Grafana 보기</a></p>
+					{/if}
 				</div>
 			{/each}
 		</div>
