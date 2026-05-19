@@ -143,17 +143,28 @@ export interface FloatingIp {
   instance_name?: string | null;
 }
 
+export interface DbFlavor {
+  id: string | number;
+  name: string;
+  vcpus: number;
+  ram: number;
+}
+
 export interface DbInstance {
   id: string;
   name: string;
   status: string;
   datastore: { type?: string; version?: string };
   flavor_id: string;
-  flavor_ram: number;
+  flavor_ram?: number;
+  flavor_vcpus?: number;
   size: number;
   created_at: string;
-  hostname: string;
-  ip: string;
+  hostname?: string;
+  ip?: string;
+  ips?: string[];
+  address_map?: Record<string, string[]>;
+  volume_used?: number;
 }
 
 export interface DbDatabase {
@@ -164,6 +175,7 @@ export interface DbDatabase {
 
 export interface DbUser {
   name: string;
+  host?: string;
   databases: { name: string }[];
 }
 
