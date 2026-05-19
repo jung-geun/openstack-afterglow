@@ -1,6 +1,7 @@
 import { setContext, getContext } from 'svelte';
 import { SvelteSet, SvelteMap } from 'svelte/reactivity';
 import { api, ApiError, getBaseUrl } from '$lib/api/client';
+import { downloadBlobAs } from '$lib/utils/downloadBlob';
 import { uploadQueue } from '$lib/stores/uploadQueue';
 import type { SwiftObject, SwiftObjectMeta, SwiftContainer } from '$lib/types/resources';
 
@@ -439,10 +440,7 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 					`/api/object-storage/${encodeURIComponent(opts.containerName())}/objects/${encObj(name)}/download`,
 					opts.token(), opts.projectId()
 				);
-				const url = URL.createObjectURL(blob);
-				const a = document.createElement('a');
-				a.href = url; a.download = filename; a.click();
-				URL.revokeObjectURL(url);
+				downloadBlobAs(blob, filename);
 			}
 		} catch (e) {
 			alert('다운로드 실패: ' + (e instanceof ApiError ? e.message : String(e)));

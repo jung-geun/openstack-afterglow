@@ -1,6 +1,7 @@
 <script lang="ts">
   import { auth } from '$lib/stores/auth';
   import { api, getBaseUrl } from '$lib/api/client';
+  import { downloadBlobAs } from '$lib/utils/downloadBlob';
   import { useK3sClusterDetail } from '$lib/stores/k3sClusterDetail.svelte';
   import K3sCertificateExpiryModal from '$lib/components/k3s/K3sCertificateExpiryModal.svelte';
 
@@ -24,11 +25,7 @@
       });
       if (!res.ok) throw new Error(await res.text());
       const blob = await res.blob();
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `ca-${s.cluster.name}.pem`;
-      a.click();
-      URL.revokeObjectURL(a.href);
+      downloadBlobAs(blob, `ca-${s.cluster.name}.pem`);
     } catch (e) {
       console.error('CA 다운로드 실패:', e);
     } finally {

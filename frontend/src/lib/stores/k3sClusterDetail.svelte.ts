@@ -1,5 +1,6 @@
 import { getContext, setContext } from 'svelte';
 import { api, ApiError, getBaseUrl } from '$lib/api/client';
+import { downloadBlobAs } from '$lib/utils/downloadBlob';
 import { streamK3sProgress } from '$lib/api/k3sSseStream';
 import type { K3sCluster, K3sClusterHealth, K3sInterfaceInfo, NetworkInfo, ConfigMapInfo, SecretInfo } from '$lib/types/resources';
 import { listNodeInterfaces, attachNodeInterface, detachNodeInterface } from '$lib/api/k3s';
@@ -140,12 +141,7 @@ export function createK3sClusterDetailStore(opts: K3sClusterDetailOpts) {
       return;
     }
     const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `kubeconfig-${cluster.name}.yaml`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadBlobAs(blob, `kubeconfig-${cluster.name}.yaml`);
   }
 
   async function deleteCluster() {
