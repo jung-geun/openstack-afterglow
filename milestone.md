@@ -2736,10 +2736,10 @@ k3s는 재시작 시 만료 90일 이내 인증서를 자동 갱신한다.
 
 ### Phase 50e — 대시보드 4 페이지 마크업 이식
 
-- [ ] routes/dashboard/+page.svelte PageOverview 이식
-- [ ] routes/dashboard/usage/+page.svelte PageUsage 이식
-- [ ] routes/dashboard/usage-report/+page.svelte PageUsageReport 이식
-- [ ] routes/dashboard/activity/+page.svelte PageActivity 이식
+- [x] routes/dashboard/+page.svelte PageOverview 이식 (14d 추세 + 알림 섹션 추가)
+- [x] routes/dashboard/usage/+page.svelte PageUsage 이식
+- [x] routes/dashboard/usage-report/+page.svelte PageUsageReport 이식
+- [x] routes/dashboard/activity/+page.svelte PageActivity 이식
 - [ ] 비용/요금 단어 0건
 
 ### Phase 50f — 관리자 4 페이지 마크업 이식
