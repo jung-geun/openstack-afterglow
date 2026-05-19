@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { LoadBalancerDetail, LbStatusNode } from '$lib/types/resources';
+	import type { LoadBalancerDetail, LbStatusNode } from '$lib/types/loadbalancer';
 
 	let { lb, statusTree }: { lb: LoadBalancerDetail; statusTree: LbStatusNode | null } = $props();
 </script>

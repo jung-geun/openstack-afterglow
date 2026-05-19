@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { DbDatabase } from '$lib/types/resources';
+	import type { DbDatabase } from '$lib/types/database';
 
 	let {
 		databases,

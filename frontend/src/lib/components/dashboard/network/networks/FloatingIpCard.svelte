@@ -1,6 +1,6 @@
 <script lang="ts">
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
-  import type { FloatingIp } from '$lib/types/resources';
+  import type { FloatingIp } from '$lib/types/networks';
 
   let {
     floatingIps,

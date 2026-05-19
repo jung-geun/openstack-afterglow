@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { AdminRouter } from '$lib/types/resources';
+	import type { AdminRouter } from '$lib/types/networks';
 
 	let {
 		router = $bindable(),

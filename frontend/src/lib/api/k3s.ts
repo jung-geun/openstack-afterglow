@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { K3sInterfaceInfo } from '$lib/types/resources';
+import type { K3sInterfaceInfo } from '$lib/types/k3s';
 
 export async function listNodeInterfaces(
 	clusterId: string,

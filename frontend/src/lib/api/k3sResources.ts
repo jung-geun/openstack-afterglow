@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { ConfigMapInfo, SecretInfo, CloudShellTicket } from '$lib/types/resources';
+import type { ConfigMapInfo, SecretInfo, CloudShellTicket } from '$lib/types/k3s';
 
 export async function listNamespaces(
 	clusterId: string,

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { SecurityGroup } from '$lib/types/resources';
+	import type { SecurityGroup } from '$lib/types/securityGroup';
 
 	let {
 		groups,

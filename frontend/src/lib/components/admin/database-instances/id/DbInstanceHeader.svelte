@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { DbInstance } from '$lib/types/resources';
+	import type { DbInstance } from '$lib/types/database';
 
 	const statusColor: Record<string, string> = {
 		ACTIVE: 'text-green-400',

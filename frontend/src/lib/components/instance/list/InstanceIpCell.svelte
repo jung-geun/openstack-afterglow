@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { IpAddress } from '$lib/types/resources';
+	import type { IpAddress } from '$lib/types/compute';
 
 	let { addresses }: { addresses: IpAddress[] } = $props();
 </script>

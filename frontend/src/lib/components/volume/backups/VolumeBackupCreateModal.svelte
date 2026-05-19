@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Volume, VolumeBackup } from '$lib/types/resources';
+	import type { Volume, VolumeBackup } from '$lib/types/volume';
 	import { formatStorage } from '$lib/utils/format';
 
 	let {

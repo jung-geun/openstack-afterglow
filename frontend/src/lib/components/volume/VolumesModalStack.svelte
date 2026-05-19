@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Volume } from '$lib/types/resources';
+	import type { Volume } from '$lib/types/volume';
 	import VolumeTransferModal from '$lib/components/volume/VolumeTransferModal.svelte';
 	import VolumeExtendModal from '$lib/components/volume/VolumeExtendModal.svelte';
 	import VolumeBackupModal from '$lib/components/volume/VolumeBackupModal.svelte';

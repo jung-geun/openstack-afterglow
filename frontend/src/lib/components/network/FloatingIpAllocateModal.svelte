@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { api, ApiError } from '$lib/api/client';
-	import type { Network } from '$lib/types/resources';
+	import type { Network } from '$lib/types/networks';
 
 	interface Props {
 		open: boolean;

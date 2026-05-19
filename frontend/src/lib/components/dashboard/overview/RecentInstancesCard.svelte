@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Instance } from '$lib/types/resources';
+	import type { Instance } from '$lib/types/compute';
 	import StatusChip from '$lib/components/ui/StatusChip.svelte';
 
 	let {

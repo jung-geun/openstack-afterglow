@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { VolumeBackup } from '$lib/types/resources';
+	import type { VolumeBackup } from '$lib/types/volume';
 	import StatusChip from '$lib/components/ui/StatusChip.svelte';
 	import { formatStorage } from '$lib/utils/format';
 

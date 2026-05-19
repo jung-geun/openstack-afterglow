@@ -3,7 +3,7 @@ import { get } from 'svelte/store';
 import { auth } from '$lib/stores/auth';
 import { api, ApiError } from '$lib/api/client';
 import { apiMut } from '$lib/api/mutations';
-import type { FileStorage } from '$lib/types/resources';
+import type { FileStorage } from '$lib/types/fileStorage';
 
 export type WizardStep = 1 | 2 | 3;
 

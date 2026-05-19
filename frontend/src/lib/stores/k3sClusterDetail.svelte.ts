@@ -3,7 +3,8 @@ import { api, ApiError, getBaseUrl } from '$lib/api/client';
 import { downloadBlobAs } from '$lib/utils/downloadBlob';
 import { streamK3sProgress } from '$lib/api/k3sSseStream';
 import { toast } from '$lib/stores/toast';
-import type { K3sCluster, K3sClusterHealth, K3sInterfaceInfo, NetworkInfo, ConfigMapInfo, SecretInfo } from '$lib/types/resources';
+import type { NetworkInfo } from '$lib/types/networks';
+import type { K3sCluster, K3sClusterHealth, K3sInterfaceInfo, ConfigMapInfo, SecretInfo } from '$lib/types/k3s';
 import { listNodeInterfaces, attachNodeInterface, detachNodeInterface } from '$lib/api/k3s';
 import {
   listNamespaces,

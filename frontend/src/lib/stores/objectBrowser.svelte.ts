@@ -3,7 +3,8 @@ import { SvelteSet, SvelteMap } from 'svelte/reactivity';
 import { api, ApiError, getBaseUrl } from '$lib/api/client';
 import { downloadBlobAs } from '$lib/utils/downloadBlob';
 import { uploadQueue } from '$lib/stores/uploadQueue';
-import type { SwiftObject, SwiftObjectMeta, SwiftContainer } from '$lib/types/resources';
+import type { SwiftContainer } from '$lib/types/common';
+import type { SwiftObject, SwiftObjectMeta } from '$lib/types/objectStorage';
 import { confirmDialog } from '$lib/stores/confirm.svelte';
 import { toast } from '$lib/stores/toast';
 

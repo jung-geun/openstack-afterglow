@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Listener, Pool } from '$lib/types/resources';
+	import type { Listener, Pool } from '$lib/types/loadbalancer';
 
 	let {
 		listeners,

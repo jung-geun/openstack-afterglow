@@ -2,7 +2,8 @@ import { getContext, setContext } from 'svelte';
 import { api, ApiError } from '$lib/api/client';
 import { confirmDialog } from '$lib/stores/confirm.svelte';
 import { toast } from '$lib/stores/toast';
-import type { Volume, VolumeSnapshot, Instance } from '$lib/types/resources';
+import type { Instance } from '$lib/types/compute';
+import type { Volume, VolumeSnapshot } from '$lib/types/volume';
 
 export type { Volume, VolumeSnapshot };
 

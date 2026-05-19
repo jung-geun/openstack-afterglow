@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { DbInstance } from '$lib/types/resources';
+	import type { DbInstance } from '$lib/types/database';
 
 	let {
 		instance,

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Volume } from '$lib/types/resources';
+  import type { Volume } from '$lib/types/volume';
   import type { Snippet } from 'svelte';
 
   const statusColor: Record<string, string> = {

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { RouterDetail } from '$lib/types/router';
-	import type { Network } from '$lib/types/resources';
+	import type { Network } from '$lib/types/networks';
 
 	let {
 		router,

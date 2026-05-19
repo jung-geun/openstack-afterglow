@@ -2684,9 +2684,9 @@ k3s는 재시작 시 만료 90일 이내 인증서를 자동 갱신한다.
 
 ### Phase 49d — resources.ts 도메인 분리
 
-- [ ] 7개 중복 이름 단일 source 통합
-- [ ] common.ts/compute.ts/volume.ts 등 도메인 파일 분리
-- [ ] 142개 import 업데이트
+- [x] 7개 중복 이름 단일 source 통합 (Network/NetworkDetail/SubnetDetail → networks.ts, SecurityGroup → securityGroup.ts, Quotas → quotas.ts DashboardQuotas, QuotaItem/PagedResponse → 각 도메인)
+- [x] common.ts/compute.ts/volume.ts/loadbalancer.ts/database.ts/fileStorage.ts 도메인 파일 분리
+- [x] 143개 import 업데이트 — from '$lib/types/resources' 잔존 0건
 
 ### Phase 49e — 11개 Detail store controller 컨벤션 정렬
 

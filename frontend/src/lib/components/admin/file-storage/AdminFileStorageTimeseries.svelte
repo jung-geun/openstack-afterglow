@@ -1,6 +1,6 @@
 <script lang="ts">
 	import TimeSeriesChart from '$lib/components/TimeSeriesChart.svelte';
-	import type { TsPoint } from '$lib/types/resources';
+	import type { TsPoint } from '$lib/types/common';
 
 	let {
 		data,

@@ -1,6 +1,6 @@
 import { getContext, setContext } from 'svelte';
 import { api, ApiError } from '$lib/api/client';
-import type { ImageDetail, ImageMember } from '$lib/types/resources';
+import type { ImageDetail, ImageMember } from '$lib/types/adminImage';
 import { confirmDialog } from '$lib/stores/confirm.svelte';
 import { toast } from '$lib/stores/toast';
 

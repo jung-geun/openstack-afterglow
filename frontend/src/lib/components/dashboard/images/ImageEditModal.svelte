@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
-	import type { ImageInfo } from '$lib/types/resources';
+	import type { ImageInfo } from '$lib/types/compute';
 
 	let {
 		target,

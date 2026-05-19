@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { AccessRule } from '$lib/types/resources';
+	import type { AccessRule } from '$lib/types/fileStorage';
 
 	let {
 		shareProto, accessRules, accessLoading,

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { AdminVolumeDetail } from '$lib/types/resources';
+	import type { AdminVolumeDetail } from '$lib/types/volume';
 
 	let { metadata }: { metadata: AdminVolumeDetail['metadata'] } = $props();
 </script>

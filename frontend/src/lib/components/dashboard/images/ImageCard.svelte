@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { OS_LOGOS, OS_EMOJI, osLabel } from '$lib/utils/imageOs';
 	import StatusChip from '$lib/components/ui/StatusChip.svelte';
-	import type { ImageInfo } from '$lib/types/resources';
+	import type { ImageInfo } from '$lib/types/compute';
 
 	let {
 		img,

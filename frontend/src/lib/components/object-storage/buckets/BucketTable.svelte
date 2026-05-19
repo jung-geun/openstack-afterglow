@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { SwiftContainer } from '$lib/types/resources';
+	import type { SwiftContainer } from '$lib/types/common';
 	import BucketRow from './BucketRow.svelte';
 
 	let {

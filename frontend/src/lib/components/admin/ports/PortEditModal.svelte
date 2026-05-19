@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { PortInfo } from '$lib/types/resources';
+	import type { PortInfo } from '$lib/types/networks';
 
 	let {
 		target = $bindable(),

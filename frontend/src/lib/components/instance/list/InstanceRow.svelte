@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Instance } from '$lib/types/resources';
+	import type { Instance } from '$lib/types/compute';
 	import StatusChip from '$lib/components/ui/StatusChip.svelte';
 	import InstanceIpCell from './InstanceIpCell.svelte';
 	import InstanceRowActions from './InstanceRowActions.svelte';

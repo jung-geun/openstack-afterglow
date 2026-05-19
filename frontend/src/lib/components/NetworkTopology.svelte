@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { NetworkDetail } from '$lib/types/resources';
+	import type { NetworkDetail } from '$lib/types/networks';
 
 	let { network }: { network: NetworkDetail } = $props();
 

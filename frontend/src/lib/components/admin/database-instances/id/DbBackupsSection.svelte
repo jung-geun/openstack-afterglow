@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { DbBackup } from '$lib/types/resources';
+	import type { DbBackup } from '$lib/types/database';
 
 	let {
 		backups,

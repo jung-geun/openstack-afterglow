@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { AdminNetwork } from '$lib/types/resources';
+	import type { AdminNetwork } from '$lib/types/networks';
 
 	let {
 		open = $bindable(),

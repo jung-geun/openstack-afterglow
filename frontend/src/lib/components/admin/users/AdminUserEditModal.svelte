@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { User } from '$lib/types/resources';
+  import type { User } from '$lib/types/common';
 
   let {
     user = $bindable<User | null>(),

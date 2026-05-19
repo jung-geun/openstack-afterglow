@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Network } from '$lib/types/resources';
+  import type { Network } from '$lib/types/networks';
 
   let {
     open = $bindable(),

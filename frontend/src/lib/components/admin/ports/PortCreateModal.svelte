@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { NetworkInfo } from '$lib/types/resources';
+	import type { NetworkInfo } from '$lib/types/networks';
 	import type { ProjectName } from '$lib/types/adminPort';
 
 	let {

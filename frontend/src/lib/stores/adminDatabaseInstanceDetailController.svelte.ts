@@ -1,7 +1,7 @@
 import { confirmDialog } from '$lib/stores/confirm.svelte';
 import { api, ApiError } from '$lib/api/client';
 import { goto } from '$app/navigation';
-import type { DbInstance, DbDatabase, DbUser, DbBackup } from '$lib/types/resources';
+import type { DbInstance, DbDatabase, DbUser, DbBackup } from '$lib/types/database';
 import { toast } from '$lib/stores/toast';
 
 export interface AdminDbInstanceDetailOpts {

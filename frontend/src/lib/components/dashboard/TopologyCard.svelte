@@ -2,7 +2,7 @@
   import { auth } from '$lib/stores/auth';
   import { api } from '$lib/api/client';
   import TopologyMini from '$lib/components/TopologyMini.svelte';
-  import type { FloatingIpInfo } from '$lib/types/resources';
+  import type { FloatingIpInfo } from '$lib/types/networks';
 
   interface SubnetDetail {
     id: string; name: string; cidr: string;

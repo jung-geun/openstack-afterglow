@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Instance } from '$lib/types/resources';
+	import type { Instance } from '$lib/types/compute';
 	import InstanceRow from './InstanceRow.svelte';
 
 	let {

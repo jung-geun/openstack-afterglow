@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Pool, Member } from '$lib/types/resources';
+	import type { Pool, Member } from '$lib/types/loadbalancer';
 
 	let {
 		pools,

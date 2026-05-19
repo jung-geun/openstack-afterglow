@@ -1,5 +1,6 @@
 <script lang="ts">
-	import type { DashboardSummary, Quotas } from '$lib/types/resources';
+	import type { DashboardSummary } from '$lib/types/compute';
+	import type { DashboardQuotas as Quotas } from '$lib/types/quotas';
 	import QuotaBar from '$lib/components/ui/QuotaBar.svelte';
 
 	let {

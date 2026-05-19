@@ -3,7 +3,7 @@
     useLoadBalancerDetail,
     provisioningColor,
   } from '$lib/stores/loadBalancerDetail.svelte';
-  import type { LbStatusNode } from '$lib/types/resources';
+  import type { LbStatusNode } from '$lib/types/loadbalancer';
   import Self from './LoadBalancerErrorTree.svelte';
 
   interface Props {

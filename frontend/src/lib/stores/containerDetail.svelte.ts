@@ -1,6 +1,6 @@
 import { getContext, setContext } from 'svelte';
 import { api, ApiError } from '$lib/api/client';
-import type { ZunContainer } from '$lib/types/resources';
+import type { ZunContainer } from '$lib/types/zunContainer';
 import { confirmDialog } from '$lib/stores/confirm.svelte';
 
 interface Options {

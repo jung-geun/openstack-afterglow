@@ -2,13 +2,7 @@ import { getContext, setContext, untrack } from 'svelte';
 import { api, ApiError } from '$lib/api/client';
 import { confirmDialog } from '$lib/stores/confirm.svelte';
 import { toast } from '$lib/stores/toast';
-import type {
-  LoadBalancerDetail,
-  Listener,
-  Pool,
-  Member,
-  LbStatusNode,
-} from '$lib/types/resources';
+import type { LoadBalancerDetail, Listener, Pool, Member, LbStatusNode } from '$lib/types/loadbalancer';
 
 export function provisioningColor(status: string): string {
   return status === 'ERROR' ? 'text-red-400' : 'text-gray-400';

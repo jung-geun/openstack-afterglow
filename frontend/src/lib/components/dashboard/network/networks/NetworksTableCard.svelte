@@ -1,7 +1,7 @@
 <script lang="ts">
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
   import ActionMenu from '$lib/components/ui/ActionMenu.svelte';
-  import type { Network } from '$lib/types/resources';
+  import type { Network } from '$lib/types/networks';
 
   let {
     networks,

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { NetworkRouterInfo } from '$lib/types/resources';
+	import type { NetworkRouterInfo } from '$lib/types/networks';
 
 	let { routers }: { routers: NetworkRouterInfo[] } = $props();
 </script>

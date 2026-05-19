@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { ImageInfo } from '$lib/types/resources';
+	import type { ImageInfo } from '$lib/types/compute';
 
 	let { images, selectedId, onSelect }: {
 		images: ImageInfo[];

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Router } from '$lib/types/resources';
+  import type { Router } from '$lib/types/networks';
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
 
   let {

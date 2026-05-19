@@ -1,7 +1,7 @@
 import { confirmDialog } from '$lib/stores/confirm.svelte';
 import { api, ApiError } from '$lib/api/client';
 import { goto } from '$app/navigation';
-import type { LoadBalancerDetail, Listener, Pool, Member } from '$lib/types/resources';
+import type { LoadBalancerDetail, Listener, Pool, Member } from '$lib/types/loadbalancer';
 import { toast } from '$lib/stores/toast';
 
 export interface LbDetailOpts {

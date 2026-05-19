@@ -3,7 +3,7 @@ import { get } from 'svelte/store';
 import { auth } from '$lib/stores/auth';
 import { api, ApiError } from '$lib/api/client';
 import { toast } from '$lib/stores/toast';
-import type { DbFlavor, DbInstance, DbBackup } from '$lib/types/resources';
+import type { DbFlavor, DbInstance, DbBackup } from '$lib/types/database';
 
 interface DbDatastore {
 	id: string;

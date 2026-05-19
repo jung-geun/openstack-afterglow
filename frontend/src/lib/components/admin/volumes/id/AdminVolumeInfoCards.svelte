@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { AdminVolumeDetail } from '$lib/types/resources';
+	import type { AdminVolumeDetail } from '$lib/types/volume';
 	import { projectNames } from '$lib/stores/projectNames';
 	import { formatNumber } from '$lib/utils/format';
 

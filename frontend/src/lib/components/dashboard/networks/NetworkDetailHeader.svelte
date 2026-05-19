@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { NetworkDetail } from '$lib/types/resources';
+	import type { NetworkDetail } from '$lib/types/networks';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	let {

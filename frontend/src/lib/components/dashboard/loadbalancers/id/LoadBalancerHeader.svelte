@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import type { LoadBalancerDetail } from '$lib/types/resources';
+	import type { LoadBalancerDetail } from '$lib/types/loadbalancer';
 
 	let {
 		lb,

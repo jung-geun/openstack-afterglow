@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { DbUser } from '$lib/types/resources';
+	import type { DbUser } from '$lib/types/database';
 
 	let {
 		users,

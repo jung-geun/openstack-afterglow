@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { LoadBalancerDetail } from '$lib/types/resources';
+	import type { LoadBalancerDetail } from '$lib/types/loadbalancer';
 
 	let {
 		lb,

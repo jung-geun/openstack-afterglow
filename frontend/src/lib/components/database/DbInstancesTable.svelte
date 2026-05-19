@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { DbInstance } from '$lib/types/resources';
+  import type { DbInstance } from '$lib/types/database';
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
 
   let {

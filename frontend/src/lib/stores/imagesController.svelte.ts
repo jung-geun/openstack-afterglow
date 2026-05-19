@@ -1,6 +1,6 @@
 import { api, ApiError } from '$lib/api/client';
 import { KNOWN_DISTROS } from '$lib/utils/imageOs';
-import type { ImageInfo } from '$lib/types/resources';
+import type { ImageInfo } from '$lib/types/compute';
 import { confirmDialog } from '$lib/stores/confirm.svelte';
 import { toast } from '$lib/stores/toast';
 

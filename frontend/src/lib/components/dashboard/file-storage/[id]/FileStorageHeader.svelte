@@ -1,6 +1,6 @@
 <script lang="ts">
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
-	import type { FileStorage } from '$lib/types/resources';
+	import type { FileStorage } from '$lib/types/fileStorage';
 
 	const statusColor: Record<string, string> = {
 		available: 'text-green-400 bg-green-900/30',

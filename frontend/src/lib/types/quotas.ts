@@ -8,3 +8,10 @@ export interface GpuQuota { gpu_type: string; limit: number; in_use: number; ava
 export interface GpuDefaultQuota { gpu_type: string; limit: number; }
 export interface QuotaItem { limit: number; in_use: number; }
 export interface ManilaFileQuota { shares: QuotaItem; gigabytes: QuotaItem; share_networks: QuotaItem; }
+
+export interface DashboardQuotas {
+  compute: { instances: QuotaItem; cores: QuotaItem; ram: QuotaItem; };
+  storage: { volumes: QuotaItem; gigabytes: QuotaItem; };
+  network: { floatingip: QuotaItem; };
+  file_storage: { shares: QuotaItem; gigabytes: QuotaItem; };
+}

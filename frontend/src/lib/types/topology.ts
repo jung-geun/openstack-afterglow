@@ -1,4 +1,4 @@
-import type { FloatingIpInfo } from '$lib/types/resources';
+import type { FloatingIpInfo } from '$lib/types/networks';
 
 export interface SubnetDetail {
 	id: string; name: string; cidr: string;

@@ -2,7 +2,8 @@ import { api, ApiError } from '$lib/api/client';
 import { createSwr } from '$lib/utils/swr.svelte';
 import { apiMut } from '$lib/api/mutations';
 import { wizard, openWizard } from '$lib/stores/wizard';
-import type { Volume, Snapshot, QuotaItem } from '$lib/types/resources';
+import type { QuotaItem } from '$lib/types/quotas';
+import type { Volume, Snapshot } from '$lib/types/volume';
 import { confirmDialog } from '$lib/stores/confirm.svelte';
 
 interface VolumeQuotas { storage: { volumes: QuotaItem; gigabytes: QuotaItem; }; }

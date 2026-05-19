@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
-	import type { Volume } from '$lib/types/resources';
+	import type { Volume } from '$lib/types/volume';
 
 	let { volume, onclose, onsuccess }: {
 		volume: Volume | null;

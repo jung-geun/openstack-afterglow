@@ -5,16 +5,12 @@ import { api, ApiError } from '$lib/api/client';
 import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 import { confirmDialog } from '$lib/stores/confirm.svelte';
 import { toast } from '$lib/stores/toast';
-import type {
-	Instance,
-	FloatingIpDetail,
-	PortInfo,
-	VolumeAttachment,
-	SecurityGroup,
-	SecurityGroupRule,
-	Volume as VolumeInfo,
-	NetworkInfo,
-} from '$lib/types/resources';
+import type { Instance } from '$lib/types/compute';
+import type { FloatingIpDetail, PortInfo, NetworkInfo } from '$lib/types/networks';
+import type { SecurityGroup } from '$lib/types/securityGroup';
+import type { Volume as VolumeInfo } from '$lib/types/volume';
+import type { VolumeAttachment } from '$lib/types/volume';
+import type { SecurityGroupRule } from '$lib/types/securityGroup';
 
 export interface Flavor {
 	id: string;

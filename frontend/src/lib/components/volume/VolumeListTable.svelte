@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Volume } from '$lib/types/resources';
+	import type { Volume } from '$lib/types/volume';
 	import { formatStorage } from '$lib/utils/format';
 	import StatusChip from '$lib/components/ui/StatusChip.svelte';
 	import ActionMenu from '$lib/components/ui/ActionMenu.svelte';

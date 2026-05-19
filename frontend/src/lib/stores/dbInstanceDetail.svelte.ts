@@ -3,7 +3,8 @@ import { api, ApiError } from '$lib/api/client';
 import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 import { confirmDialog } from '$lib/stores/confirm.svelte';
 import { toast } from '$lib/stores/toast';
-import type { FloatingIp, DbInstance, DbFlavor, DbDatabase, DbUser, DbBackup } from '$lib/types/resources';
+import type { DbInstance, DbFlavor, DbDatabase, DbUser, DbBackup } from '$lib/types/database';
+import type { FloatingIp } from '$lib/types/networks';
 
 export interface DbInstanceDetailStoreOpts {
 	instanceId: () => string;

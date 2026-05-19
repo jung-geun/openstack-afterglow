@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { useDbInstanceDetail } from '$lib/stores/dbInstanceDetail.svelte';
-	import type { DbUser } from '$lib/types/resources';
+	import type { DbUser } from '$lib/types/database';
 
 	const s = useDbInstanceDetail();
 

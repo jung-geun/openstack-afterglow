@@ -5,13 +5,11 @@ import { wizard, resetWizard, closeWizard } from '$lib/stores/wizard';
 import { api, ApiError, getBaseUrl } from '$lib/api/client';
 import { auth } from '$lib/stores/auth';
 import { toast } from '$lib/stores/toast';
-import type {
-	Volume,
-	NetworkInfo,
-	KeypairInfo,
-	SecurityGroup as SecurityGroupInfo,
-	AvailabilityZone as AvailabilityZoneInfo,
-} from '$lib/types/resources';
+import type { NetworkInfo } from '$lib/types/networks';
+import type { SecurityGroup as SecurityGroupInfo } from '$lib/types/securityGroup';
+import type { Volume } from '$lib/types/volume';
+import type { KeypairInfo } from '$lib/types/keypair';
+import type { AvailabilityZone as AvailabilityZoneInfo } from '$lib/types/compute';
 
 interface ProgressMessage {
 	step: string;

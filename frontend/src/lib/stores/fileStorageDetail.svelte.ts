@@ -2,7 +2,7 @@ import { getContext, setContext } from 'svelte';
 import { api, ApiError } from '$lib/api/client';
 import { confirmDialog } from '$lib/stores/confirm.svelte';
 import { toast } from '$lib/stores/toast';
-import type { FileStorage, AccessRule } from '$lib/types/resources';
+import type { FileStorage, AccessRule } from '$lib/types/fileStorage';
 
 export const statusColor: Record<string, string> = {
 	available: 'text-green-400 bg-green-900/30',

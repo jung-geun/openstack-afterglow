@@ -1,6 +1,6 @@
 import { getContext, setContext } from 'svelte';
 import { api, ApiError } from '$lib/api/client';
-import type { AdminVolumeDetail } from '$lib/types/resources';
+import type { AdminVolumeDetail } from '$lib/types/volume';
 
 interface Options {
 	volumeId: () => string;

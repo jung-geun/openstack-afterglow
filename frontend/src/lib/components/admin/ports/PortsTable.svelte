@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { projectNames } from '$lib/stores/projectNames';
-	import type { PortInfo } from '$lib/types/resources';
+	import type { PortInfo } from '$lib/types/networks';
 
 	let {
 		ports,

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { AdminFileStorage } from '$lib/types/resources';
+	import type { AdminFileStorage } from '$lib/types/fileStorage';
 	import { projectNames } from '$lib/stores/projectNames';
 	import { formatNumber } from '$lib/utils/format';
 	import StatusChip from '$lib/components/ui/StatusChip.svelte';

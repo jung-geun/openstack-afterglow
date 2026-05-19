@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { FileStorage } from '$lib/types/resources';
+  import type { FileStorage } from '$lib/types/fileStorage';
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
 
   let {

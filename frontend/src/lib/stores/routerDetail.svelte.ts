@@ -6,7 +6,7 @@ import { confirmDialog } from '$lib/stores/confirm.svelte';
 import { toast } from '$lib/stores/toast';
 import type { RouterDetail } from '$lib/types/router';
 import type { SubnetDetail } from '$lib/types/networks';
-import type { Network } from '$lib/types/resources';
+import type { Network } from '$lib/types/networks';
 
 interface Options {
 	routerId: () => string;

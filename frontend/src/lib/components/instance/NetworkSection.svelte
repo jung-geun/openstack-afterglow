@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { useInstanceDetail } from '$lib/stores/instanceDetail.svelte';
-	import type { PortInfo } from '$lib/types/resources';
+	import type { PortInfo } from '$lib/types/networks';
 
 	const s = useInstanceDetail();
 

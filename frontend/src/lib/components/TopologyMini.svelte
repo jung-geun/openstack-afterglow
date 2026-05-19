@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import type { FloatingIpInfo } from '$lib/types/resources';
+	import type { FloatingIpInfo } from '$lib/types/networks';
 
 	interface SubnetDetail { id: string; name: string; cidr: string; gateway_ip: string | null; dhcp_enabled: boolean; }
 	interface TopologyNetwork { id: string; name: string; status: string; is_external: boolean; is_shared: boolean; project_id: string | null; subnet_details: SubnetDetail[]; }

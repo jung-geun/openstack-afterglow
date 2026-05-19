@@ -1,6 +1,6 @@
 import { getContext, setContext } from 'svelte';
 import { api, ApiError } from '$lib/api/client';
-import type { NetworkDetail, NetworkRouterInfo, RouterListItem } from '$lib/types/resources';
+import type { NetworkDetail, NetworkRouterInfo, RouterListItem } from '$lib/types/networks';
 import { confirmDialog } from '$lib/stores/confirm.svelte';
 import { toast } from '$lib/stores/toast';
 
