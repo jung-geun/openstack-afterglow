@@ -1170,17 +1170,50 @@ async def get_identity_summary(
 
         recent_enabled = sum(1 for u in users if getattr(u, "is_enabled", True))
 
+        def _sort_key(obj):
+            val = getattr(obj, "created_at", None)
+            return val if isinstance(val, str) else ""
+
+        recent_users_raw = sorted(users, key=_sort_key, reverse=True)[:5]
+        recent_projects_raw = sorted(projects, key=_sort_key, reverse=True)[:5]
+
+        counts = {
+            "users": len(users),
+            "users_enabled": recent_enabled,
+            "projects": len(projects),
+            "roles": len(roles),
+            "groups": len(groups),
+            "domains": len(domains),
+        }
+
         return {
             "partial": partial,
-            "counts": {
-                "users": len(users),
-                "users_enabled": recent_enabled,
-                "projects": len(projects),
-                "roles": len(roles),
-                "groups": len(groups),
-                "domains": len(domains),
-            },
+            "counts": counts,
+            # 프론트 IdentitySummary 인터페이스 flat alias
+            "user_count": counts["users"],
+            "project_count": counts["projects"],
+            "role_count": counts["roles"],
+            "group_count": counts["groups"],
+            "domain_count": counts["domains"],
             "top_roles": [{"id": r.id, "name": r.name} for r in roles[:10]],
+            "recent_users": [
+                {
+                    "id": u.id,
+                    "name": getattr(u, "name", ""),
+                    "email": getattr(u, "email", "") or "",
+                    "enabled": getattr(u, "is_enabled", True),
+                }
+                for u in recent_users_raw
+            ],
+            "recent_projects": [
+                {
+                    "id": p.id,
+                    "name": getattr(p, "name", ""),
+                    "description": getattr(p, "description", "") or "",
+                    "enabled": getattr(p, "is_enabled", True),
+                }
+                for p in recent_projects_raw
+            ],
         }
 
     try:

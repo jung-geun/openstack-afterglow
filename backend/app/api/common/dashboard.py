@@ -23,6 +23,7 @@ from app.services import neutron as neutron_svc
 from app.services import swift as swift_svc
 from app.services import trove as trove_svc
 from app.services.cache import cached_call, ttl_fast, ttl_normal, ttl_static
+from app.services import prom_query
 
 router = APIRouter()
 _logger = logging.getLogger(__name__)
@@ -31,14 +32,42 @@ _logger = logging.getLogger(__name__)
 def _list_servers_as_dicts(conn):
     """서버 목록을 dict 리스트로 반환 (캐시 직렬화 호환)."""
     return [
-        {"id": s.id, "status": s.status, "flavor_id": s.flavor_id, "flavor_name": s.flavor_name}
+        {
+            "id": s.id,
+            "name": getattr(s, "name", "") or "",
+            "status": s.status,
+            "flavor_id": s.flavor_id,
+            "flavor_name": s.flavor_name,
+            "created_at": getattr(s, "created_at", None),
+        }
         for s in nova.list_servers(conn)
     ]
 
 
 def _list_flavors_as_dicts(conn):
     """플레이버 목록을 dict 리스트로 반환 (캐시 직렬화 호환)."""
-    return [{"id": f.id, "name": f.name, "extra_specs": f.extra_specs} for f in nova.list_flavors(conn)]
+    return [
+        {
+            "id": f.id,
+            "name": f.name,
+            "vcpus": f.vcpus,
+            "ram": f.ram,
+            "disk": f.disk,
+            "extra_specs": f.extra_specs,
+        }
+        for f in nova.list_flavors(conn)
+    ]
+
+
+def _usage_hours(created_at: str | None) -> float:
+    """created_at ISO 문자열 → 현재까지 경과 시간(hours), 파싱 실패 시 0.0."""
+    if not created_at:
+        return 0.0
+    try:
+        dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+        return max(0.0, round((datetime.now(UTC) - dt).total_seconds() / 3600, 1))
+    except Exception:
+        return 0.0
 
 
 def _gpu_count_from_flavor(name: str, extra_specs: dict) -> int:
@@ -505,26 +534,35 @@ async def get_dashboard_usage_stats(
     flavors_by_id = {f["id"]: f for f in flavors}
     flavors_by_name = {f["name"]: f for f in flavors}
 
-    # 인스턴스별 vCPU/RAM (active 기준)
+    # 인스턴스별 vCPU/RAM (모든 상태 포함, vCPU 내림차순)
     top_instances = []
     for s in servers:
-        if s.get("status") != "ACTIVE":
-            continue
         fl = flavors_by_id.get(s.get("flavor_id") or "") or flavors_by_name.get(s.get("flavor_name") or "", {})
+        fl_vcpus = fl.get("vcpus", 0) if isinstance(fl, dict) else 0
+        fl_ram = fl.get("ram", 0) if isinstance(fl, dict) else 0
+        fl_disk = fl.get("disk", 0) if isinstance(fl, dict) else 0
+        fl_name = fl.get("name", s.get("flavor_name", "")) if isinstance(fl, dict) else s.get("flavor_name", "")
+        fl_extra = fl.get("extra_specs", {}) if isinstance(fl, dict) else {}
         top_instances.append({
             "id": s.get("id"),
             "name": s.get("name", ""),
-            "flavor": fl.get("name", s.get("flavor_name", "")),
-            "vcpus": fl.get("vcpus", 0) if isinstance(fl, dict) else 0,
-            "ram_mb": fl.get("ram", 0) if isinstance(fl, dict) else 0,
-            "gpu": _gpu_count_from_flavor(fl.get("name", ""), fl.get("extra_specs", {})) if isinstance(fl, dict) else 0,
+            "flavor_name": fl_name,
+            "vcpus": fl_vcpus,
+            "ram_mb": fl_ram,
+            "disk_gb": fl_disk,
+            "status": s.get("status", "ACTIVE"),
+            "usage_hours": _usage_hours(s.get("created_at")),
+            "gpu": _gpu_count_from_flavor(fl_name, fl_extra),
         })
     top_instances.sort(key=lambda x: x["vcpus"], reverse=True)
 
     # 볼륨 타입별 집계
     vol_by_type: dict[str, int] = defaultdict(int)
+    vol_count_by_type: dict[str, int] = defaultdict(int)
     for v in volumes:
-        vol_by_type[v.get("volume_type", "standard")] += v.get("size", 0)
+        vtype = v.get("volume_type", "standard")
+        vol_by_type[vtype] += v.get("size", 0)
+        vol_count_by_type[vtype] += 1
 
     # Nova usage (instance_hours)
     usage_data = nova_usage if not isinstance(nova_usage, Exception) else {}
@@ -534,7 +572,10 @@ async def get_dashboard_usage_stats(
         "start": start_dt,
         "end": end_dt,
         "top_instances": top_instances[:20],
-        "volumes_by_type": [{"type": k, "size_gb": v} for k, v in sorted(vol_by_type.items(), key=lambda x: -x[1])],
+        "volumes_by_type": [
+            {"type": k, "total_gb": v, "count": vol_count_by_type[k]}
+            for k, v in sorted(vol_by_type.items(), key=lambda x: -x[1])
+        ],
         "instance_hours": usage_data.get("total_hours", 0) if isinstance(usage_data, dict) else 0,
         "vcpu_hours": usage_data.get("total_vcpu_hours", 0) if isinstance(usage_data, dict) else 0,
     }
@@ -588,10 +629,20 @@ async def get_dashboard_usage_report(
     total_hours = usage.get("total_hours", sum(su.get("hours", 0) for su in server_usages)) if isinstance(usage, dict) else 0.0
     total_vcpu_hours = usage.get("total_vcpu_hours", 0.0) if isinstance(usage, dict) else 0.0
 
-    # 선형 쿼터 예측: 현재 사용률 + 일별 성장률로 30일 후 예측
-    vcpus_in_use = quota.get("cores", {}).get("in_use", 0) if isinstance(quota, dict) else 0
-    vcpus_limit = quota.get("cores", {}).get("limit", 0) if isinstance(quota, dict) else 0
-    forecast_pct = min(100, round((vcpus_in_use / vcpus_limit * 100) if vcpus_limit > 0 else 0, 1))
+    # 쿼터 조회
+    cores_q = quota.get("cores", {}) if isinstance(quota, dict) else {}
+    ram_q = quota.get("ram", {}) if isinstance(quota, dict) else {}
+    storage_q = quota.get("gigabytes", {}) if isinstance(quota, dict) else {}
+
+    vcpus_in_use = cores_q.get("in_use", 0)
+    vcpus_limit = cores_q.get("limit", 0)
+    ram_in_use = ram_q.get("in_use", 0)
+    ram_limit = ram_q.get("limit", 0)
+    storage_in_use = storage_q.get("in_use", 0)
+    storage_limit = storage_q.get("limit", 0)
+
+    def _pct(used: float, limit: float) -> float:
+        return min(100.0, round((used / limit * 100) if limit > 0 else 0.0, 1))
 
     return {
         "range": period,
@@ -607,8 +658,61 @@ async def get_dashboard_usage_report(
         "quota": {
             "vcpus_in_use": vcpus_in_use,
             "vcpus_limit": vcpus_limit,
-            "forecast_pct": forecast_pct,
         },
+        "forecast": {
+            "vcpu_pct": _pct(vcpus_in_use, vcpus_limit),
+            "memory_pct": _pct(ram_in_use, ram_limit),
+            "storage_pct": _pct(storage_in_use, storage_limit),
+        },
+    }
+
+
+@router.get("/metrics/trend")
+async def get_dashboard_metrics_trend(
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """14일 vCPU/메모리/스토리지 추세 (PromQL). Prometheus 미설치 시 prometheus_available=false."""
+    project_id = conn._afterglow_project_id
+
+    now = int(datetime.now(UTC).timestamp())
+    start = now - 14 * 86400
+    step = 86400  # 1일 = 14 포인트
+
+    def _vals(series: list[dict]) -> list[float]:
+        return [round(p["value"], 2) for p in series]
+
+    async def _safe_query(expr: str) -> list[float]:
+        try:
+            series = await prom_query.query_range(expr, start_ts=start, end_ts=now, step_s=step)
+            return _vals(series)
+        except Exception:
+            return []
+
+    vcpu_expr = (
+        f'avg_over_time(sum(libvirt_domain_info_cpu_time_seconds_total'
+        f'{{project_id="{project_id}"}})[1d:1h])'
+    )
+    mem_expr = (
+        f'avg_over_time((sum(libvirt_domain_info_memory_actual_bytes{{project_id="{project_id}"}}) / '
+        f'sum(libvirt_domain_info_memory_max_bytes{{project_id="{project_id}"}}) * 100)[1d:1h])'
+    )
+    storage_expr = (
+        f'sum(cinder_volume_capacity_bytes{{project_id="{project_id}"}}) / 1073741824'
+    )
+
+    vcpu_data, mem_data, storage_data = await asyncio.gather(
+        _safe_query(vcpu_expr),
+        _safe_query(mem_expr),
+        _safe_query(storage_expr),
+    )
+
+    prometheus_available = any([vcpu_data, mem_data, storage_data])
+
+    return {
+        "vcpu": {"data": vcpu_data, "points": len(vcpu_data), "available": bool(vcpu_data)},
+        "memory": {"data": mem_data, "points": len(mem_data), "available": bool(mem_data)},
+        "storage": {"data": storage_data, "points": len(storage_data), "available": bool(storage_data)},
+        "prometheus_available": prometheus_available,
     }
 
 

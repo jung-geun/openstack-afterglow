@@ -226,6 +226,12 @@ async def test_identity_summary_returns_counts(admin_client, mock_conn):
     assert data["counts"]["roles"] == 1
     assert "top_roles" in data
     assert data.get("partial") is False
+    # Phase 52c: flat alias 검증
+    assert data["user_count"] == 2
+    assert data["project_count"] == 3
+    assert data["role_count"] == 1
+    assert "recent_users" in data
+    assert "recent_projects" in data
 
 
 @pytest.mark.asyncio
@@ -245,6 +251,8 @@ async def test_identity_summary_partial_when_users_fails(admin_client, mock_conn
     assert data["partial"] is True
     assert data["counts"]["users"] == 0
     assert data["counts"]["projects"] == 2
+    assert data["user_count"] == 0
+    assert data["recent_users"] == []
 
 
 @pytest.mark.asyncio

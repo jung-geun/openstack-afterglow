@@ -56,6 +56,7 @@
       untrack(() => {
         s.checkKubeconfig();
         s.loadHealth();
+        s.loadNamespaces();
       });
     }
   });

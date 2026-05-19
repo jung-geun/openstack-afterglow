@@ -18,12 +18,26 @@
 		count: number;
 	}
 
+	interface TrendSeries {
+		data: number[];
+		points: number;
+		available: boolean;
+	}
+
+	interface TrendData {
+		vcpu: TrendSeries;
+		memory: TrendSeries;
+		storage: TrendSeries;
+		prometheus_available: boolean;
+	}
+
 	let summary = $state<DashboardSummary | null>(null);
 	let summaryLoading = $state(true);
 	let quotas = $state<Quotas | null>(null);
 	let recentInstances = $state<Instance[]>([]);
 	let k3sCount = $state<number | null>(null);
 	let notifications = $state<Notification[]>([]);
+	let trendData = $state<TrendData | null>(null);
 	let refreshing = $state(false);
 
 	const token = $derived($auth.token ?? undefined);
@@ -52,6 +66,9 @@
 					.catch(() => { k3sCount = null; }),
 				api.get<{ notifications: Notification[] }>('/api/dashboard/notifications', token, projectId, { signal: ctrl.signal })
 					.then(v => { if (!ctrl.signal.aborted) notifications = v.notifications ?? []; })
+					.catch(() => {}),
+				api.get<TrendData>('/api/dashboard/metrics/trend', token, projectId, { signal: ctrl.signal })
+					.then(v => { if (!ctrl.signal.aborted) trendData = v; })
 					.catch(() => {}),
 			]);
 		} finally {
@@ -112,14 +129,17 @@
 	<!-- 14d 사용 추세 -->
 	<div class="grid grid-cols-1 md:grid-cols-3 gap-3.5">
 		{#each [
-			{ label: 'vCPU 사용률 (14d)', color: 'var(--color-accent)' },
-			{ label: '메모리 (14d)', color: 'var(--color-accent-2)' },
-			{ label: '스토리지 (14d)', color: 'var(--color-warm)' },
-		] as trend}
+			{ label: 'vCPU 사용률 (14d)', color: 'var(--color-accent)', key: 'vcpu' as const },
+			{ label: '메모리 (14d)', color: 'var(--color-accent-2)', key: 'memory' as const },
+			{ label: '스토리지 (14d)', color: 'var(--color-warm)', key: 'storage' as const },
+		] as card}
+			{@const series = trendData?.[card.key]}
 			<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
-				<p class="text-[10px] uppercase tracking-wide text-[var(--color-ink-3)] mb-3">{trend.label}</p>
-				<Spark data={[]} color={trend.color} height={44} />
-				<p class="text-[11px] italic text-[var(--color-ink-3)] mt-2">메트릭 수집 미설정 — 관리자에게 Grafana 설정 문의</p>
+				<p class="text-[10px] uppercase tracking-wide text-[var(--color-ink-3)] mb-3">{card.label}</p>
+				<Spark data={series?.data ?? []} color={card.color} height={44} />
+				{#if !trendData || !trendData.prometheus_available}
+					<p class="text-[11px] italic text-[var(--color-ink-3)] mt-2">메트릭 수집 미설정 — <a href="/dashboard/observability" class="underline hover:text-[var(--color-ink-0)]">Grafana 보기</a></p>
+				{/if}
 			</div>
 		{/each}
 	</div>

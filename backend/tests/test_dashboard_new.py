@@ -119,7 +119,7 @@ async def test_usage_stats_returns_expected_structure(client, mock_conn):
     data = resp.json()
     assert data["range"] == "30d"
     assert "top_instances" in data
-    assert "volume_by_type" in data
+    assert "volumes_by_type" in data
     assert data["instance_hours"] == 72.0
 
 
@@ -199,7 +199,7 @@ async def test_usage_report_structure(client, mock_conn):
     assert data["stats"]["instance_hours"] == 240.0
     assert len(data["flavor_hours"]) == 2
     assert data["quota"]["vcpus_in_use"] == 6
-    assert data["quota"]["forecast_pct"] == 30.0
+    assert data["forecast"]["vcpu_pct"] == 30.0
 
 
 @pytest.mark.asyncio
@@ -251,7 +251,7 @@ async def test_activity_hour_distribution_always_24_buckets(client, mock_conn):
     assert resp.status_code == 200
     dist = resp.json()["hour_distribution"]
     assert len(dist) == 24
-    assert all("hour" in d and "count" in d for d in dist)
+    assert all(isinstance(v, int) for v in dist)
 
 
 @pytest.mark.asyncio
