@@ -2695,5 +2695,5 @@ k3s는 재시작 시 만료 90일 이내 인증서를 자동 갱신한다.
 
 ### Phase 49f — GlobalTopology.svelte 678줄 내부 분해
 
-- [ ] lib/components/topology/ 신규 (TopologyCanvas, TopologyControls, topologyLayout)
-- [ ] GlobalTopology.svelte ≤ 250줄
+- [x] lib/components/topology/ 신규 (topologyHelpers.ts, topologyDerivedController.svelte.ts, TopologyHeader.svelte, TopologySidebar.svelte)
+- [x] GlobalTopology.svelte ≤ 250줄 (241줄)
