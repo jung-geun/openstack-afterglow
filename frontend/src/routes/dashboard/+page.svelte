@@ -50,7 +50,7 @@
 				api.get<unknown[]>('/api/k3s/clusters', token, projectId, { signal: ctrl.signal })
 					.then(v => { if (!ctrl.signal.aborted) k3sCount = v.filter((c: any) => c.status === 'ACTIVE' || c.provisioning_status === 'ACTIVE').length; })
 					.catch(() => { k3sCount = null; }),
-				api.get<{ notifications: Notification[] }>('/api/admin/notifications', token, projectId, { signal: ctrl.signal })
+				api.get<{ notifications: Notification[] }>('/api/dashboard/notifications', token, projectId, { signal: ctrl.signal })
 					.then(v => { if (!ctrl.signal.aborted) notifications = v.notifications ?? []; })
 					.catch(() => {}),
 			]);
@@ -119,7 +119,7 @@
 			<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
 				<p class="text-[10px] uppercase tracking-wide text-[var(--color-ink-3)] mb-3">{trend.label}</p>
 				<Spark data={[]} color={trend.color} height={44} />
-				<p class="text-[11px] italic text-[var(--color-ink-3)] mt-2">지표 수집 서버 미설정</p>
+				<p class="text-[11px] italic text-[var(--color-ink-3)] mt-2">메트릭 수집 미설정 — 관리자에게 Grafana 설정 문의</p>
 			</div>
 		{/each}
 	</div>

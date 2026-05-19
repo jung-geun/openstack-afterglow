@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { auth } from '$lib/stores/auth';
+	import { untrack } from 'svelte';
+	import { auth, authReady } from '$lib/stores/auth';
 	import { api } from '$lib/api/client';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import {
@@ -55,8 +56,11 @@
 	}
 
 	$effect(() => {
+		const pid = $auth.projectId;
+		const ready = $authReady;
 		void [token, projectId, period];
-		fetchData();
+		if (!pid || !ready) return;
+		untrack(() => fetchData());
 	});
 
 	const ar = createAutoRefresh(fetchData, {

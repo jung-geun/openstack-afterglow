@@ -534,7 +534,7 @@ async def get_dashboard_usage_stats(
         "start": start_dt,
         "end": end_dt,
         "top_instances": top_instances[:20],
-        "volume_by_type": [{"type": k, "size_gb": v} for k, v in sorted(vol_by_type.items(), key=lambda x: -x[1])],
+        "volumes_by_type": [{"type": k, "size_gb": v} for k, v in sorted(vol_by_type.items(), key=lambda x: -x[1])],
         "instance_hours": usage_data.get("total_hours", 0) if isinstance(usage_data, dict) else 0,
         "vcpu_hours": usage_data.get("total_vcpu_hours", 0) if isinstance(usage_data, dict) else 0,
     }
@@ -680,6 +680,35 @@ async def get_dashboard_activity(
     return {
         "range": period,
         "kpi": kpi,
-        "hour_distribution": [{"hour": h, "count": hour_dist[h]} for h in range(24)],
+        "hour_distribution": hour_dist,
         "recent_actions": recent_actions,
+        "db_status": "ok" if is_db_available() else "unavailable",
     }
+
+
+@router.get("/notifications")
+async def get_dashboard_notifications(
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """현재 프로젝트의 사용자 알림 — ERROR 인스턴스 카운트."""
+    project_id = conn._afterglow_project_id
+    notifications = []
+
+    try:
+        servers = await cached_call(
+            f"afterglow:nova:{project_id}:servers",
+            ttl_fast(),
+            lambda: _list_servers_as_dicts(conn),
+        )
+        error_count = sum(1 for s in servers if s.get("status") == "ERROR")
+        if error_count > 0:
+            notifications.append({
+                "type": "instance_error",
+                "severity": "danger",
+                "message": f"오류 상태 인스턴스 {error_count}개",
+                "count": error_count,
+            })
+    except Exception:
+        pass
+
+    return {"notifications": notifications}
