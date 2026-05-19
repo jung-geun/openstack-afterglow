@@ -2679,8 +2679,8 @@ k3s는 재시작 시 만료 90일 이내 인증서를 자동 갱신한다.
 
 ### Phase 49c — legacy dashboard/loadbalancers/new/ 삭제
 
-- [ ] +page.svelte + +page.server.ts 삭제
-- [ ] npm run check + npm run test 통과
+- [x] +page.svelte + +page.server.ts 삭제 (진입 link 0건 사전 확인)
+- [x] npm run check 62 errors baseline 유지
 
 ### Phase 49d — resources.ts 도메인 분리
 
