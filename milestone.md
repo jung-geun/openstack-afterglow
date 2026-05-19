@@ -2697,3 +2697,65 @@ k3s는 재시작 시 만료 90일 이내 인증서를 자동 갱신한다.
 
 - [x] lib/components/topology/ 신규 (topologyHelpers.ts, topologyDerivedController.svelte.ts, TopologyHeader.svelte, TopologySidebar.svelte)
 - [x] GlobalTopology.svelte ≤ 250줄 (241줄)
+
+---
+
+## Phase 50 — Anthropic Design Handoff 적용 (대시보드 4 + 관리자 4 페이지)
+
+### Phase 50a — 디자인 토큰 + UI primitive 5종 신규
+
+- [x] --admin-tone CSS 변수 추가 (layout.css dark/light)
+- [x] Pill.svelte 신규 (8 tone)
+- [x] SectionHeader.svelte 신규 (uppercase + meta + right slot)
+- [x] Spark.svelte 신규 (SVG path, fixedWidth/stretch)
+- [x] Donut.svelte 신규 (SVG strokeDasharray + center slot)
+- [x] CapacityBar.svelte 신규 (80%/95% 자동 톤)
+- [x] StatTile.svelte admin-tone accent 추가
+- [x] lib/components/ui/index.ts barrel export 신규
+- [x] npm run check baseline 유지 (59 errors ≤ 62 baseline)
+
+### Phase 50b — 백엔드 endpoint (대시보드 4-A~4-E) + pytest
+
+- [ ] backend/app/api/dashboard/ 5개 endpoint
+- [ ] backend/app/models/dashboard.py Pydantic 모델
+- [ ] backend/tests/test_dashboard_*.py pytest
+- [ ] pytest 통과
+
+### Phase 50c — 백엔드 endpoint (관리자 A-1~A-7) + pytest
+
+- [ ] admin_dashboard.py A-1~A-6 endpoint
+- [ ] admin_identity.py A-7 summary
+- [ ] bulk-action ActivityLog 자동 기록
+- [ ] backend/tests/test_admin_dashboard.py require_admin 거부 케이스 포함
+- [ ] pytest 통과
+
+### Phase 50d — 사이드바 nav + 신규 라우트 3종 스켈레톤
+
+- [ ] Sidebar.svelte 대시보드 섹션 4개 메뉴
+- [ ] dashboard/usage, usage-report, activity 라우트 스켈레톤
+
+### Phase 50e — 대시보드 4 페이지 마크업 이식
+
+- [ ] routes/dashboard/+page.svelte PageOverview 이식
+- [ ] routes/dashboard/usage/+page.svelte PageUsage 이식
+- [ ] routes/dashboard/usage-report/+page.svelte PageUsageReport 이식
+- [ ] routes/dashboard/activity/+page.svelte PageActivity 이식
+- [ ] 비용/요금 단어 0건
+
+### Phase 50f — 관리자 4 페이지 마크업 이식
+
+- [ ] routes/admin/+page.svelte PageAdminOverview 이식
+- [ ] routes/admin/identity/+page.svelte 허브 신설
+- [ ] routes/admin/monitoring/+page.svelte PageAdminMonitoring 이식
+- [ ] routes/admin/instances/+page.svelte PageAdminInstances 이식
+- [ ] bulk action ActivityLog 검증
+
+### Phase 50g — 8 페이지 AutoRefresh 통합
+
+- [ ] AutoRefreshControl 8 페이지 적용 (localStorage 키 분리)
+
+### Phase 50h — milestone 정리 + 디자인 회귀 점검
+
+- [ ] light/dark 토글 8 페이지 전수
+- [ ] 하드코딩 hex 0건
+- [ ] milestone.md 50a~50h [x]

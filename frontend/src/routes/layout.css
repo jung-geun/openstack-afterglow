@@ -43,6 +43,9 @@ body {
 }
 
 :root {
+  --admin-tone:      var(--color-state-warning);
+  --admin-tone-soft: color-mix(in oklab, var(--color-state-warning) 14%, transparent);
+  --admin-tone-ring: color-mix(in oklab, var(--color-state-warning) 30%, transparent);
   --warm-grad: conic-gradient(from 220deg, #F4976C, #6E4F9A, #8893D4, #F4976C);
   --warm-soft:   color-mix(in oklab, var(--color-warm) 14%, transparent);
   --warm-ring:   color-mix(in oklab, var(--color-warm) 30%, transparent);
