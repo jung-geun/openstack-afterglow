@@ -1,6 +1,7 @@
 import { api, ApiError } from '$lib/api/client';
 import { KNOWN_DISTROS } from '$lib/utils/imageOs';
 import type { ImageInfo } from '$lib/types/resources';
+import { confirmDialog } from '$lib/stores/confirm.svelte';
 
 export interface ImagesControllerOpts {
   token: () => string | undefined;
@@ -78,7 +79,7 @@ export function createImagesController(opts: ImagesControllerOpts) {
   }
 
   async function deleteImage(id: string, name: string) {
-    if (!confirm(`이미지 "${name}"을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.`)) return;
+    if (!(await confirmDialog(`이미지 "${name}"을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.`))) return;
     deleting = id;
     try {
       await api.delete(`/api/images/${id}`, opts.token(), opts.projectId());

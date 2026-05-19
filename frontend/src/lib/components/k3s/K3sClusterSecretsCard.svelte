@@ -3,6 +3,7 @@
   import { useK3sClusterDetail } from '$lib/stores/k3sClusterDetail.svelte';
   import K3sResourceEditor from './K3sResourceEditor.svelte';
   import K3sSecretValueDisplay from './K3sSecretValueDisplay.svelte';
+  import { confirmDialog } from '$lib/stores/confirm.svelte';
 
   const s = useK3sClusterDetail();
 
@@ -49,7 +50,7 @@
   }
 
   async function handleDelete(name: string) {
-    if (!confirm(`Secret "${name}"을 삭제하시겠습니까?`)) return;
+    if (!(await confirmDialog(`Secret "${name}"을 삭제하시겠습니까?`))) return;
     await s.deleteSecretItem(name);
   }
 </script>

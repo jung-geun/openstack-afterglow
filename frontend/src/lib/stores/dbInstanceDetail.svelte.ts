@@ -1,6 +1,7 @@
 import { getContext, setContext } from 'svelte';
 import { api, ApiError } from '$lib/api/client';
 import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+import { confirmDialog } from '$lib/stores/confirm.svelte';
 import type { FloatingIp, DbInstance, DbFlavor, DbDatabase, DbUser, DbBackup } from '$lib/types/resources';
 
 export interface DbInstanceDetailStoreOpts {
@@ -140,7 +141,7 @@ export function createDbInstanceDetailStore(opts: DbInstanceDetailStoreOpts) {
 		const tok = opts.token();
 		const proj = opts.projectId();
 		const verb = deleteFip ? '삭제' : '해제';
-		if (!confirm(`이 인스턴스의 floating IP를 ${verb}하시겠습니까?`)) return;
+		if (!(await confirmDialog(`이 인스턴스의 floating IP를 ${verb}하시겠습니까?`))) return;
 		detachingFip = true; fipError = '';
 		try {
 			await api.delete(
@@ -156,7 +157,7 @@ export function createDbInstanceDetailStore(opts: DbInstanceDetailStoreOpts) {
 		const id = opts.instanceId();
 		const tok = opts.token();
 		const proj = opts.projectId();
-		if (!confirm(`DB 인스턴스 "${instance?.name}"를 삭제하시겠습니까?`)) return;
+		if (!(await confirmDialog(`DB 인스턴스 "${instance?.name}"를 삭제하시겠습니까?`))) return;
 		deleting = true;
 		try {
 			await api.delete(`/api/database-instances/${id}`, tok, proj);
@@ -204,7 +205,7 @@ export function createDbInstanceDetailStore(opts: DbInstanceDetailStoreOpts) {
 		const id = opts.instanceId();
 		const tok = opts.token();
 		const proj = opts.projectId();
-		if (!confirm(`데이터베이스 "${name}"를 삭제하시겠습니까?`)) return;
+		if (!(await confirmDialog(`데이터베이스 "${name}"를 삭제하시겠습니까?`))) return;
 		deletingDb = name;
 		try {
 			await api.delete(`/api/database-instances/${id}/databases/${encodeURIComponent(name)}`, tok, proj);
@@ -237,7 +238,7 @@ export function createDbInstanceDetailStore(opts: DbInstanceDetailStoreOpts) {
 		const proj = opts.projectId();
 		const host = u.host || '%';
 		const label = host !== '%' ? `${u.name}@${host}` : u.name;
-		if (!confirm(`유저 "${label}"를 삭제하시겠습니까?`)) return;
+		if (!(await confirmDialog(`유저 "${label}"를 삭제하시겠습니까?`))) return;
 		deletingUser = label;
 		try {
 			const url = `/api/database-instances/${id}/users/${encodeURIComponent(u.name)}`
@@ -262,7 +263,7 @@ export function createDbInstanceDetailStore(opts: DbInstanceDetailStoreOpts) {
 	}
 
 	async function deleteBackup(backupId: string) {
-		if (!confirm('백업을 삭제하시겠습니까?')) return;
+		if (!(await confirmDialog('백업을 삭제하시겠습니까?'))) return;
 		const tok = opts.token();
 		const proj = opts.projectId();
 		deletingBackup = backupId;

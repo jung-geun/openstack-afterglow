@@ -1,6 +1,7 @@
 import { getContext, setContext } from 'svelte';
 import { api, ApiError } from '$lib/api/client';
 import type { ImageDetail, ImageMember } from '$lib/types/resources';
+import { confirmDialog } from '$lib/stores/confirm.svelte';
 
 const RESERVED_KEYS = new Set([
 	'id', 'name', 'status', 'visibility', 'owner', 'size', 'virtual_size',
@@ -254,7 +255,7 @@ export function createImageDetailStore(opts: ImageDetailStoreOpts) {
 		if (!image) return;
 		const tok = opts.token();
 		const proj = opts.projectId();
-		if (!confirm(`이미지 "${image.name}"을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.`)) return;
+		if (!(await confirmDialog(`이미지 "${image.name}"을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.`))) return;
 		deleting = true;
 		try {
 			await api.delete(`/api/images/${image.id}`, tok, proj);

@@ -2658,3 +2658,39 @@ k3s는 재시작 시 만료 90일 이내 인증서를 자동 갱신한다.
 | `admin/ports/+page.svelte` | 193 | Phase 49+ 후속 분리 검토 대상 |
 | `dashboard/network/security-groups/+page.svelte` | 187 | bind:ruleForm 양방향 바인딩, Phase 49+ 검토 |
 | `dashboard/network/networks/[id]/+page.svelte` | 185 | Phase 49+ 후속 분리 검토 대상 |
+
+## Phase 49 — Frontend 후속 리팩토링 (UX 일관성 + 구조 개선)
+
+### Phase 49a — confirm() 잔존 39건 confirmDialog 치환
+
+- [x] lib/stores 14개 파일 (instanceDetail, dbInstanceDetail, loadBalancerDetail, routerDetail, fileStorageDetail, volumeDetail, volumesController, networkDetail, objectBrowser, k3sClusterDetail, imageDetail, k3sClusterListController, containerDetail, imagesController) confirm() → await confirmDialog()
+- [x] lib/components 4개 (K3sClusterConfigMapsCard, K3sClusterSecretsCard, KeypairsSection, SystemAdminTable) confirm() → await confirmDialog()
+- [x] grep confirm() 0건 확인
+- [x] npm run check 62 errors baseline 유지
+- [x] npm run test 7 known failures 외 회귀 없음
+
+### Phase 49b — alert() 128건 toast 교체
+
+- [ ] 에러성 alert → toast.error, 검증실패 → toast.warning, 성공 → toast.success
+- [ ] npm run check baseline 유지, npm run test 통과
+
+### Phase 49c — legacy dashboard/loadbalancers/new/ 삭제
+
+- [ ] +page.svelte + +page.server.ts 삭제
+- [ ] npm run check + npm run test 통과
+
+### Phase 49d — resources.ts 도메인 분리
+
+- [ ] 7개 중복 이름 단일 source 통합
+- [ ] common.ts/compute.ts/volume.ts 등 도메인 파일 분리
+- [ ] 142개 import 업데이트
+
+### Phase 49e — 11개 Detail store controller 컨벤션 정렬
+
+- [ ] 파일명 xxxDetailController.svelte.ts, factory createXxxDetailController
+- [ ] loadBalancerDetail 신·구 공존 해소
+
+### Phase 49f — GlobalTopology.svelte 678줄 내부 분해
+
+- [ ] lib/components/topology/ 신규 (TopologyCanvas, TopologyControls, topologyLayout)
+- [ ] GlobalTopology.svelte ≤ 250줄

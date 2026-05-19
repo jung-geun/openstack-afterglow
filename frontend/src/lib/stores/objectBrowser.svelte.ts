@@ -4,6 +4,7 @@ import { api, ApiError, getBaseUrl } from '$lib/api/client';
 import { downloadBlobAs } from '$lib/utils/downloadBlob';
 import { uploadQueue } from '$lib/stores/uploadQueue';
 import type { SwiftObject, SwiftObjectMeta, SwiftContainer } from '$lib/types/resources';
+import { confirmDialog } from '$lib/stores/confirm.svelte';
 
 export type TreeRow = {
 	obj: SwiftObject;
@@ -407,7 +408,7 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 		});
 		let msg = `${selected.size}개 항목을 삭제하시겠습니까?`;
 		if (dirs.length > 0) msg += `\n\n⚠️ ${dirs.length}개 디렉토리 포함 — 하위 파일이 모두 삭제됩니다.`;
-		if (!confirm(msg)) return;
+		if (!(await confirmDialog(msg))) return;
 		bulkDeleting = true;
 		try {
 			await api.post(
@@ -448,7 +449,7 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 	}
 
 	async function deleteObject(name: string) {
-		if (!confirm(`"${displayName(name)}" 오브젝트를 삭제하시겠습니까?`)) return;
+		if (!(await confirmDialog(`"${displayName(name)}" 오브젝트를 삭제하시겠습니까?`))) return;
 		deleting = name;
 		try {
 			await api.delete(

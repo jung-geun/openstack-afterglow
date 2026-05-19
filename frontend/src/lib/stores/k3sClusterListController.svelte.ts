@@ -5,6 +5,7 @@ import { K3S_CREATE_STEPS } from '$lib/components/k3sSteps';
 import { downloadBlobAs } from '$lib/utils/downloadBlob';
 import type { K3sCluster } from '$lib/types/k3s';
 import type { K3sProgressController } from '$lib/stores/k3sProgress.svelte';
+import { confirmDialog } from '$lib/stores/confirm.svelte';
 
 export interface K3sClusterListOpts {
   token: () => string | undefined;
@@ -95,7 +96,7 @@ export function createK3sClusterListController(opts: K3sClusterListOpts) {
   }
 
   async function deleteCluster(id: string, name: string) {
-    if (!confirm(`Drover 클러스터 "${name}"을 삭제하시겠습니까?\n모든 VM과 보안 그룹이 삭제됩니다.`)) return;
+    if (!(await confirmDialog(`Drover 클러스터 "${name}"을 삭제하시겠습니까?\n모든 VM과 보안 그룹이 삭제됩니다.`))) return;
     deleting = id;
     opts.progress.begin('delete');
     try {

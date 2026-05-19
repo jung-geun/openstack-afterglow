@@ -1,6 +1,7 @@
 import { getContext, setContext } from 'svelte';
 import { api, ApiError } from '$lib/api/client';
 import type { NetworkDetail, NetworkRouterInfo, RouterListItem } from '$lib/types/resources';
+import { confirmDialog } from '$lib/stores/confirm.svelte';
 
 interface Options {
 	networkId: () => string;
@@ -84,7 +85,7 @@ function createNetworkDetailStore(opts: Options) {
 			alert('연결된 서브넷을 찾을 수 없습니다.');
 			return;
 		}
-		if (!confirm(`라우터 "${router.name || router.id.slice(0, 8)}"과의 연결을 해제하시겠습니까?`)) return;
+		if (!(await confirmDialog(`라우터 "${router.name || router.id.slice(0, 8)}"과의 연결을 해제하시겠습니까?`))) return;
 		try {
 			await api.delete(`/api/routers/${router.id}/interfaces/${targetSubnet}`, opts.token(), opts.projectId());
 			await fetchNetwork();

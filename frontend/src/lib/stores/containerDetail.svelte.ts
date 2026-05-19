@@ -1,6 +1,7 @@
 import { getContext, setContext } from 'svelte';
 import { api, ApiError } from '$lib/api/client';
 import type { ZunContainer } from '$lib/types/resources';
+import { confirmDialog } from '$lib/stores/confirm.svelte';
 
 interface Options {
 	containerId: () => string;
@@ -63,7 +64,7 @@ function createContainerDetailStore(opts: Options) {
 
 	async function handleDelete() {
 		if (!container) return;
-		if (!confirm(`컨테이너 "${container.name}"을 삭제하시겠습니까?`)) return;
+		if (!(await confirmDialog(`컨테이너 "${container.name}"을 삭제하시겠습니까?`))) return;
 		actioning = true;
 		actionError = '';
 		try {

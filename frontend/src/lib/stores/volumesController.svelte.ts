@@ -3,6 +3,7 @@ import { createSwr } from '$lib/utils/swr.svelte';
 import { apiMut } from '$lib/api/mutations';
 import { wizard, openWizard } from '$lib/stores/wizard';
 import type { Volume, Snapshot, QuotaItem } from '$lib/types/resources';
+import { confirmDialog } from '$lib/stores/confirm.svelte';
 
 interface VolumeQuotas { storage: { volumes: QuotaItem; gigabytes: QuotaItem; }; }
 
@@ -88,7 +89,7 @@ export function createVolumesController(opts: VolumesControllerOpts) {
   }
 
   async function deleteVolume(id: string, name: string) {
-    if (!confirm(`볼륨 "${name || id.slice(0, 8)}"을 삭제하시겠습니까?`)) return;
+    if (!(await confirmDialog(`볼륨 "${name || id.slice(0, 8)}"을 삭제하시겠습니까?`))) return;
     deleting = id;
     try {
       await apiMut('볼륨 삭제', () => api.delete(`/api/volumes/${id}`, opts.token(), opts.projectId()));
@@ -101,7 +102,7 @@ export function createVolumesController(opts: VolumesControllerOpts) {
   }
 
   async function deleteSnapshot(id: string, name: string) {
-    if (!confirm(`스냅샷 "${name || id.slice(0, 8)}"을 삭제하시겠습니까?`)) return;
+    if (!(await confirmDialog(`스냅샷 "${name || id.slice(0, 8)}"을 삭제하시겠습니까?`))) return;
     deleting = id;
     try {
       await apiMut('스냅샷 삭제', () =>
@@ -122,7 +123,7 @@ export function createVolumesController(opts: VolumesControllerOpts) {
   }
 
   async function forceDeleteVolume(id: string, name: string) {
-    if (!confirm(`볼륨 "${name || id.slice(0, 8)}"을 강제 삭제하시겠습니까?\n이 작업은 오류 상태 볼륨을 강제로 제거합니다.`)) return;
+    if (!(await confirmDialog(`볼륨 "${name || id.slice(0, 8)}"을 강제 삭제하시겠습니까?\n이 작업은 오류 상태 볼륨을 강제로 제거합니다.`))) return;
     deleting = id;
     try {
       await apiMut('볼륨 강제 삭제', () => api.post(`/api/volumes/${id}/force-delete`, {}, opts.token(), opts.projectId()));

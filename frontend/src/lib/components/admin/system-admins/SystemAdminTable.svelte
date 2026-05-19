@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
+	import { confirmDialog } from '$lib/stores/confirm.svelte';
 
 	interface SystemAdmin {
 		user_id: string;
@@ -27,7 +28,7 @@
 	async function revoke(admin: SystemAdmin) {
 		const isSelf = admin.user_id === currentUserId;
 		if (isSelf) {
-			if (!confirm('본인 권한을 회수하면 즉시 로그아웃됩니다. 계속하시겠습니까?')) return;
+			if (!(await confirmDialog('본인 권한을 회수하면 즉시 로그아웃됩니다. 계속하시겠습니까?'))) return;
 		}
 		revoking = admin.user_id;
 		revokeError = '';

@@ -1,5 +1,6 @@
 import { getContext, setContext, untrack } from 'svelte';
 import { api, ApiError } from '$lib/api/client';
+import { confirmDialog } from '$lib/stores/confirm.svelte';
 import type {
   LoadBalancerDetail,
   Listener,
@@ -109,7 +110,7 @@ export function createLoadBalancerDetailStore(opts: LoadBalancerDetailOpts) {
   }
 
   async function deleteListener(listenerId: string) {
-    if (!confirm('리스너를 삭제하시겠습니까?')) return;
+    if (!(await confirmDialog('리스너를 삭제하시겠습니까?'))) return;
     saving = true;
     try {
       await api.delete(
@@ -149,7 +150,7 @@ export function createLoadBalancerDetailStore(opts: LoadBalancerDetailOpts) {
   }
 
   async function deletePool(poolId: string) {
-    if (!confirm('풀을 삭제하시겠습니까?')) return;
+    if (!(await confirmDialog('풀을 삭제하시겠습니까?'))) return;
     saving = true;
     try {
       await api.delete(
@@ -199,7 +200,7 @@ export function createLoadBalancerDetailStore(opts: LoadBalancerDetailOpts) {
   }
 
   async function removeMember(memberId: string) {
-    if (!selectedPoolId || !confirm('멤버를 제거하시겠습니까?')) return;
+    if (!selectedPoolId || !(await confirmDialog('멤버를 제거하시겠습니까?'))) return;
     saving = true;
     try {
       await api.delete(
@@ -221,7 +222,7 @@ export function createLoadBalancerDetailStore(opts: LoadBalancerDetailOpts) {
 
   async function deleteLb() {
     const id = opts.lbId();
-    if (!confirm(`로드밸런서 "${lb?.name || id}"을 삭제하시겠습니까? (연결된 리스너/풀/멤버도 모두 삭제됩니다)`))
+    if (!(await confirmDialog(`로드밸런서 "${lb?.name || id}"을 삭제하시겠습니까? (연결된 리스너/풀/멤버도 모두 삭제됩니다)`)))
       return;
     saving = true;
     try {

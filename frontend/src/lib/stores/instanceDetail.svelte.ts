@@ -3,6 +3,7 @@ import { getContext, setContext } from 'svelte';
 import { auth } from '$lib/stores/auth';
 import { api, ApiError } from '$lib/api/client';
 import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+import { confirmDialog } from '$lib/stores/confirm.svelte';
 import type {
 	Instance,
 	FloatingIpDetail,
@@ -200,7 +201,7 @@ export function createInstanceDetailStore(opts: InstanceDetailStoreOpts) {
 	async function performAction(action: 'start' | 'stop' | 'reboot' | 'shelve' | 'unshelve') {
 		if (!instance) return;
 		const labels: Record<string, string> = { start: '시작', stop: '정지', reboot: '재부팅', shelve: '보관', unshelve: '보관 해제' };
-		if (!confirm(`인스턴스를 ${labels[action]}하시겠습니까?`)) return;
+		if (!(await confirmDialog(`인스턴스를 ${labels[action]}하시겠습니까?`))) return;
 		actioning = action;
 		try {
 			await api.post(`/api/instances/${instance.id}/${action}`, {}, tok(), ownPid());
@@ -220,7 +221,7 @@ export function createInstanceDetailStore(opts: InstanceDetailStoreOpts) {
 		if (autoDeleteVols.length) lines.push(`자동 삭제 볼륨: ${autoDeleteVols.map(v => v.name || v.device).join(', ')}`);
 		if (keepVols.length) lines.push(`유지(분리만): ${keepVols.map(v => v.name || v.device).join(', ')}`);
 		if (instance.union_upper_volume_id) lines.push('Upper 볼륨과 파일 스토리지(dynamic)도 삭제됩니다.');
-		if (!confirm(lines.join('\n'))) return;
+		if (!(await confirmDialog(lines.join('\n')))) return;
 		deleting = true;
 		try {
 			await api.delete(`/api/instances/${instance.id}`, tok(), ownPid());
@@ -247,7 +248,7 @@ export function createInstanceDetailStore(opts: InstanceDetailStoreOpts) {
 
 	async function releaseFloatingIp(fipId: string) {
 		if (!instance) return;
-		if (!confirm('Floating IP를 해제하고 삭제하시겠습니까?')) return;
+		if (!(await confirmDialog('Floating IP를 해제하고 삭제하시겠습니까?'))) return;
 		actioning = 'fip-release-' + fipId;
 		try {
 			await api.post(`/api/networks/floating-ips/${fipId}/disassociate`, {}, tok(), ownPid());
@@ -289,7 +290,7 @@ export function createInstanceDetailStore(opts: InstanceDetailStoreOpts) {
 
 	async function detachVolume(volumeId: string) {
 		if (!instance) return;
-		if (!confirm('볼륨을 분리하시겠습니까?')) return;
+		if (!(await confirmDialog('볼륨을 분리하시겠습니까?'))) return;
 		actioning = 'detach-' + volumeId;
 		try {
 			await api.delete(`/api/instances/${instance.id}/volumes/${volumeId}`, tok(), ownPid());
@@ -304,7 +305,7 @@ export function createInstanceDetailStore(opts: InstanceDetailStoreOpts) {
 	async function setDeleteOnTermination(volumeId: string, next: boolean) {
 		if (!instance) return;
 		const verb = next ? '활성화' : '비활성화';
-		if (!confirm(`이 볼륨의 "인스턴스 삭제 시 자동 삭제" 옵션을 ${verb}하시겠습니까?`)) return;
+		if (!(await confirmDialog(`이 볼륨의 "인스턴스 삭제 시 자동 삭제" 옵션을 ${verb}하시겠습니까?`))) return;
 		actioning = 'dot-' + volumeId;
 		try {
 			await api.patch(`/api/instances/${instance.id}/volumes/${volumeId}`, { delete_on_termination: next }, tok(), ownPid());
@@ -331,7 +332,7 @@ export function createInstanceDetailStore(opts: InstanceDetailStoreOpts) {
 
 	async function detachInterface(portId: string) {
 		if (!instance) return;
-		if (!confirm('인터페이스를 제거하시겠습니까?')) return;
+		if (!(await confirmDialog('인터페이스를 제거하시겠습니까?'))) return;
 		actioning = 'detach-iface-' + portId;
 		try {
 			await api.delete(`/api/instances/${instance.id}/interfaces/${portId}`, tok(), ownPid());
@@ -390,7 +391,7 @@ export function createInstanceDetailStore(opts: InstanceDetailStoreOpts) {
 
 	async function revertResize() {
 		if (!instance) return;
-		if (!confirm('리사이즈를 취소하고 이전 플레이버로 복귀하시겠습니까?')) return;
+		if (!(await confirmDialog('리사이즈를 취소하고 이전 플레이버로 복귀하시겠습니까?'))) return;
 		actioning = 'revert-resize';
 		try {
 			await api.post(`/api/admin/instances/${instance.id}/revert-resize`, {}, tok(), ownPid());
@@ -404,7 +405,7 @@ export function createInstanceDetailStore(opts: InstanceDetailStoreOpts) {
 
 	async function confirmResize() {
 		if (!instance) return;
-		if (!confirm('리사이즈를 확인하시겠습니까?')) return;
+		if (!(await confirmDialog('리사이즈를 확인하시겠습니까?'))) return;
 		actioning = 'confirm-resize';
 		try {
 			await api.post(`/api/admin/instances/${instance.id}/confirm-resize`, {}, tok(), ownPid());

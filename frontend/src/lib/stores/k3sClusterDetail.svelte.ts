@@ -15,6 +15,7 @@ import {
   updateSecret,
   deleteSecret
 } from '$lib/api/k3sResources';
+import { confirmDialog } from '$lib/stores/confirm.svelte';
 
 export type { K3sCluster, K3sClusterHealth };
 
@@ -147,7 +148,7 @@ export function createK3sClusterDetailStore(opts: K3sClusterDetailOpts) {
   async function deleteCluster() {
     const c = cluster;
     const id = opts.clusterId();
-    if (!c || !confirm(`Drover 클러스터 "${c.name}"을 삭제하시겠습니까?`)) return;
+    if (!c || !(await confirmDialog(`Drover 클러스터 "${c.name}"을 삭제하시겠습니까?`))) return;
     deleting = true;
     deleteProgress = { step: '', pct: 0, msg: '삭제 준비 중...', error: '' };
     try {
@@ -177,7 +178,7 @@ export function createK3sClusterDetailStore(opts: K3sClusterDetailOpts) {
     const id = opts.clusterId();
     if (scalingTarget === null || !c) return;
     if (scalingTarget === c.agent_vm_ids.length && scalingTarget === c.agent_count) return;
-    if (!confirm(`에이전트 수를 ${c.agent_vm_ids.length}개에서 ${scalingTarget}개로 변경하시겠습니까?`)) return;
+    if (!(await confirmDialog(`에이전트 수를 ${c.agent_vm_ids.length}개에서 ${scalingTarget}개로 변경하시겠습니까?`))) return;
     scaling = true;
     scaleError = '';
     try {

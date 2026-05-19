@@ -1,5 +1,6 @@
 import { getContext, setContext } from 'svelte';
 import { api, ApiError } from '$lib/api/client';
+import { confirmDialog } from '$lib/stores/confirm.svelte';
 import type { Volume, VolumeSnapshot, Instance } from '$lib/types/resources';
 
 export type { Volume, VolumeSnapshot };
@@ -122,7 +123,7 @@ export function createVolumeDetailStore(opts: VolumeDetailOpts) {
     const v = volume;
     const id = opts.volumeId();
     if (!v) return;
-    if (!confirm(`볼륨 "${v.name || id.slice(0, 8)}"을 삭제하시겠습니까?`)) return;
+    if (!(await confirmDialog(`볼륨 "${v.name || id.slice(0, 8)}"을 삭제하시겠습니까?`))) return;
     deleting = true;
     try {
       await api.delete(`/api/volumes/${id}`, opts.token(), opts.projectId());
@@ -170,7 +171,7 @@ export function createVolumeDetailStore(opts: VolumeDetailOpts) {
   }
 
   async function deleteSnapshot(id: string, name: string) {
-    if (!confirm(`스냅샷 "${name || id.slice(0, 8)}"을 삭제하시겠습니까?`)) return;
+    if (!(await confirmDialog(`스냅샷 "${name || id.slice(0, 8)}"을 삭제하시겠습니까?`))) return;
     deletingSnapshot = id;
     try {
       await api.delete(`/api/volume-snapshots/${id}`, opts.token(), opts.projectId());

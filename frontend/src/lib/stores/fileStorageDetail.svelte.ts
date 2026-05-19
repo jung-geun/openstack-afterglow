@@ -1,5 +1,6 @@
 import { getContext, setContext } from 'svelte';
 import { api, ApiError } from '$lib/api/client';
+import { confirmDialog } from '$lib/stores/confirm.svelte';
 import type { FileStorage, AccessRule } from '$lib/types/resources';
 
 export const statusColor: Record<string, string> = {
@@ -92,7 +93,7 @@ function createFileStorageDetailStore(opts: Options) {
 
 	async function revokeAccessRule(accessId: string) {
 		if (!fileStorage) return;
-		if (!confirm('이 접근 규칙을 삭제하시겠습니까?')) return;
+		if (!(await confirmDialog('이 접근 규칙을 삭제하시겠습니까?'))) return;
 		revokingId = accessId;
 		try {
 			await api.delete(
@@ -122,7 +123,7 @@ function createFileStorageDetailStore(opts: Options) {
 
 	async function deleteFileStorage() {
 		if (!fileStorage) return;
-		if (!confirm(`파일 스토리지 "${fileStorage.name || fileStorage.id}"를 삭제하시겠습니까?`)) return;
+		if (!(await confirmDialog(`파일 스토리지 "${fileStorage.name || fileStorage.id}"를 삭제하시겠습니까?`))) return;
 		deleting = true;
 		try {
 			await api.delete(`/api/file-storage/${fileStorage.id}`, opts.token(), opts.projectId());

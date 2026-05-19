@@ -2,6 +2,7 @@ import { getContext, setContext } from 'svelte';
 import { untrack } from 'svelte';
 import { goto } from '$app/navigation';
 import { api, ApiError } from '$lib/api/client';
+import { confirmDialog } from '$lib/stores/confirm.svelte';
 import type { RouterDetail } from '$lib/types/router';
 import type { SubnetDetail } from '$lib/types/networks';
 import type { Network } from '$lib/types/resources';
@@ -86,7 +87,7 @@ function createRouterDetailStore(opts: Options) {
 	}
 
 	async function removeInterface(subnetId: string) {
-		if (!confirm('인터페이스를 제거하시겠습니까?')) return;
+		if (!(await confirmDialog('인터페이스를 제거하시겠습니까?'))) return;
 		saving = true;
 		try {
 			await api.delete(`/api/routers/${opts.routerId()}/interfaces/${subnetId}`, opts.token(), opts.projectId());
@@ -114,7 +115,7 @@ function createRouterDetailStore(opts: Options) {
 	}
 
 	async function removeGateway() {
-		if (!confirm('외부 게이트웨이를 제거하시겠습니까?')) return;
+		if (!(await confirmDialog('외부 게이트웨이를 제거하시겠습니까?'))) return;
 		saving = true;
 		try {
 			await api.delete(`/api/routers/${opts.routerId()}/gateway`, opts.token(), opts.projectId());
@@ -127,7 +128,7 @@ function createRouterDetailStore(opts: Options) {
 	}
 
 	async function deleteRouter() {
-		if (!confirm(`라우터 "${router?.name || opts.routerId()}"을 삭제하시겠습니까?`)) return;
+		if (!(await confirmDialog(`라우터 "${router?.name || opts.routerId()}"을 삭제하시겠습니까?`))) return;
 		saving = true;
 		try {
 			await api.delete(`/api/routers/${opts.routerId()}`, opts.token(), opts.projectId());
