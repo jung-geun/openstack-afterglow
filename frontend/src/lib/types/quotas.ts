@@ -6,3 +6,5 @@ export interface Quotas {
 }
 export interface GpuQuota { gpu_type: string; limit: number; in_use: number; available: number; }
 export interface GpuDefaultQuota { gpu_type: string; limit: number; }
+export interface QuotaItem { limit: number; in_use: number; }
+export interface ManilaFileQuota { shares: QuotaItem; gigabytes: QuotaItem; share_networks: QuotaItem; }

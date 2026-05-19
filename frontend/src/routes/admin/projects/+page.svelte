@@ -12,19 +12,8 @@
 	import AdminProjectDeleteModal from '$lib/components/admin/projects/AdminProjectDeleteModal.svelte';
 	import AdminProjectAccessModal from '$lib/components/admin/projects/AdminProjectAccessModal.svelte';
 
-	interface Project {
-		id: string;
-		name: string;
-		description: string;
-		enabled: boolean;
-		domain_id: string | null;
-		created_at: string | null;
-	}
-	interface PagedResponse<T> {
-		items: T[];
-		next_marker: string | null;
-		count: number;
-	}
+	import type { Project } from '$lib/types/project';
+	import type { PagedResponse } from '$lib/types/resources';
 
 	let projects = $state<Project[]>([]);
 	let loading = $state(true);

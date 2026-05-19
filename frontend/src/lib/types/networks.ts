@@ -1,3 +1,10 @@
+export interface Network {
+  id: string;
+  name: string;
+  subnets: string[];
+  is_external: boolean;
+}
+
 export interface SubnetDetail {
   id: string;
   name: string;

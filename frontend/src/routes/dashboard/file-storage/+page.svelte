@@ -13,8 +13,7 @@
   import FileStorageWizard from '$lib/components/file-storage/wizard/FileStorageWizard.svelte';
   import FileStorageCard from '$lib/components/file-storage/FileStorageCard.svelte';
 
-  interface QuotaItem { limit: number; in_use: number; }
-  interface Quota { shares: QuotaItem; gigabytes: QuotaItem; share_networks: QuotaItem; }
+  import type { QuotaItem, ManilaFileQuota as Quota } from '$lib/types/quotas';
 
   const token = $derived($auth.token ?? undefined);
   const projectId = $derived($auth.projectId ?? undefined);

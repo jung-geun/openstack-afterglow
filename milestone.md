@@ -2613,20 +2613,22 @@ k3s는 재시작 시 만료 90일 이내 인증서를 자동 갱신한다.
 - [x] npm run check 62 errors (기존과 동일, 신규 없음)
 - [x] npm run test 7 failed / 215 passed (기존과 동일, 신규 없음)
 
-### Phase 48b — Controller 추출 (진행 중)
+### Phase 48b — Controller 추출
 
-- [ ] `admin/database-instances/[id]` → `adminDatabaseInstanceDetailController.svelte.ts`
-- [ ] `dashboard/network/loadbalancers/[id]` → `loadbalancerDetailController.svelte.ts`
-- [ ] `dashboard/loadbalancers/[id]` → controller 추출
-- [ ] `admin/quotas` → `adminQuotasController.svelte.ts`
-- [ ] `admin/groups` → `adminGroupsController.svelte.ts`
+- [x] `admin/database-instances/[id]` → `adminDatabaseInstanceDetailController.svelte.ts`
+- [x] `dashboard/network/loadbalancers/[id]` → `networkLoadbalancerDetailController.svelte.ts`
+- [x] `dashboard/loadbalancers/[id]` → `loadbalancerDetailController.svelte.ts`
+- [x] `admin/quotas` → `adminQuotasController.svelte.ts`
+- [x] `admin/groups` → `adminGroupsController.svelte.ts`
 
-### Phase 48c — 인라인 타입 통합 (예정)
+### Phase 48c — 인라인 타입 통합
 
-- [ ] `dashboard/topology/+page.svelte` 5개 인라인 타입 → `lib/types/topology.ts`
-- [ ] `Network`/`SubnetDetail` 중복 3곳 → `lib/types/networks.ts`
-- [ ] `Project` 중복 → `lib/types/project.ts` (신규)
-- [ ] `PagedResponse<T>` → `lib/types/api.ts` (신규)
+- [x] `dashboard/topology/+page.svelte` 5개 인라인 타입 → `lib/types/topology.ts`
+- [x] `Network`/`SubnetDetail` 중복 2곳 → `lib/types/networks.ts`
+- [x] `Project`/`ProjectMember` → `lib/types/project.ts` (신규)
+- [x] `PagedResponse<T>` → `lib/types/resources.ts` (기존)
+- [x] `SecurityGroupRule`/`SecurityGroup` → `lib/types/securityGroup.ts` (신규)
+- [x] `QuotaItem`/`ManilaFileQuota` → `lib/types/quotas.ts` 확장
 
 ### Phase 48d — ConfirmDialog 추출 (예정)
 
