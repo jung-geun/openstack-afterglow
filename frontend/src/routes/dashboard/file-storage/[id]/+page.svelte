@@ -7,7 +7,7 @@
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
-	import type { FileStorage, AccessRule } from '$lib/types/resources';
+	import type { FileStorage, AccessRule } from '$lib/types/fileStorage';
 	import FileStorageHeader from '$lib/components/dashboard/file-storage/[id]/FileStorageHeader.svelte';
 	import FileStorageInfoCard from '$lib/components/dashboard/file-storage/[id]/FileStorageInfoCard.svelte';
 	import ExportLocationList from '$lib/components/dashboard/file-storage/[id]/ExportLocationList.svelte';

@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { useContainerDetail } from '$lib/stores/containerDetail.svelte';
+	import { useContainerDetailController } from '$lib/stores/containerDetailController.svelte';
 
-	const s = useContainerDetail();
+	const s = useContainerDetailController();
 </script>
 
 <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">

@@ -1,8 +1,8 @@
 <script lang="ts">
 	import DetailHeader from '$lib/components/ui/DetailHeader.svelte';
-	import { useRouterDetail } from '$lib/stores/routerDetail.svelte';
+	import { useRouterDetailController } from '$lib/stores/routerDetailController.svelte';
 
-	const s = useRouterDetail();
+	const s = useRouterDetailController();
 </script>
 
 <DetailHeader

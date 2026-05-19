@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { useInstanceDetail } from '$lib/stores/instanceDetail.svelte';
+	import { useInstanceDetailController } from '$lib/stores/instanceDetailController.svelte';
 
-	const s = useInstanceDetail();
+	const s = useInstanceDetailController();
 </script>
 
 <div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4">

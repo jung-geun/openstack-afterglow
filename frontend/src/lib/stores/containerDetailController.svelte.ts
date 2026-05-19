@@ -12,7 +12,7 @@ interface Options {
 	onRefresh?: () => void;
 }
 
-function createContainerDetailStore(opts: Options) {
+function createContainerDetailController(opts: Options) {
 	let container = $state<ZunContainer | null>(null);
 	let loading = $state(true);
 	let error = $state('');
@@ -99,17 +99,17 @@ function createContainerDetailStore(opts: Options) {
 	};
 }
 
-export type ContainerDetailStore = ReturnType<typeof createContainerDetailStore>;
-export { createContainerDetailStore };
+export type ContainerDetailController = ReturnType<typeof createContainerDetailController>;
+export { createContainerDetailController };
 
 const CONTAINER_DETAIL_KEY = Symbol('container-detail');
 
-export function provideContainerDetail(store: ContainerDetailStore) {
+export function provideContainerDetailController(store: ContainerDetailController) {
 	setContext(CONTAINER_DETAIL_KEY, store);
 }
 
-export function useContainerDetail(): ContainerDetailStore {
-	const store = getContext<ContainerDetailStore | undefined>(CONTAINER_DETAIL_KEY);
-	if (!store) throw new Error('useContainerDetail must be called within ContainerDetailPanel');
+export function useContainerDetailController(): ContainerDetailController {
+	const store = getContext<ContainerDetailController | undefined>(CONTAINER_DETAIL_KEY);
+	if (!store) throw new Error('useContainerDetailController must be called within ContainerDetailPanel');
 	return store;
 }

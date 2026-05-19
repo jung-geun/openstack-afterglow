@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { useLoadBalancerDetail } from '$lib/stores/loadBalancerDetail.svelte';
+  import { useLoadbalancerDetailController } from '$lib/stores/loadbalancerDetailController.svelte';
   import Button from '$lib/components/ui/Button.svelte';
 
   interface Props {
@@ -10,7 +10,7 @@
   let { poolId: _poolId }: Props = $props();
   void _poolId;
 
-  const s = useLoadBalancerDetail();
+  const s = useLoadbalancerDetailController();
 </script>
 
 <div class="mt-2 ml-4 bg-gray-800/30 rounded-lg p-4 border border-gray-700">

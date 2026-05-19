@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { useImageDetail } from '$lib/stores/imageDetail.svelte';
+	import { useImageDetailController } from '$lib/stores/imageDetailController.svelte';
 
-	const s = useImageDetail();
+	const s = useImageDetailController();
 </script>
 
 <div class="pt-2 pb-4">

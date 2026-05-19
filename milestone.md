@@ -2690,8 +2690,8 @@ k3s는 재시작 시 만료 90일 이내 인증서를 자동 갱신한다.
 
 ### Phase 49e — 11개 Detail store controller 컨벤션 정렬
 
-- [ ] 파일명 xxxDetailController.svelte.ts, factory createXxxDetailController
-- [ ] loadBalancerDetail 신·구 공존 해소
+- [x] 파일명 xxxDetailController.svelte.ts, factory createXxxDetailController
+- [x] loadBalancerDetail 신·구 공존 해소
 
 ### Phase 49f — GlobalTopology.svelte 678줄 내부 분해
 

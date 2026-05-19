@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { auth } from '$lib/stores/auth';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
-	import { createFileStorageDetailStore, provideFileStorageDetail } from '$lib/stores/fileStorageDetail.svelte';
+	import { createFileStorageDetailController, provideFileStorageDetailController } from '$lib/stores/fileStorageDetailController.svelte';
 	import DetailHeader from '$lib/components/ui/DetailHeader.svelte';
 	import FileStorageDetailHeader from '$lib/components/file-storage/FileStorageDetailHeader.svelte';
 	import FileStorageInfoSection from '$lib/components/file-storage/FileStorageInfoSection.svelte';
@@ -17,14 +17,14 @@
 
 	let { fileStorageId, onClose, onDeleted }: Props = $props();
 
-	const s = createFileStorageDetailStore({
+	const s = createFileStorageDetailController({
 		fileStorageId: () => fileStorageId,
 		token: () => $auth.token ?? undefined,
 		projectId: () => $auth.projectId ?? undefined,
 		onDeleted: () => onDeleted?.(),
 		onClose: () => onClose?.(),
 	});
-	provideFileStorageDetail(s);
+	provideFileStorageDetailController(s);
 
 	const ar = createAutoRefresh(() => s.fetchAll(), {
 		storageKey: 'file-storage-detail-panel',

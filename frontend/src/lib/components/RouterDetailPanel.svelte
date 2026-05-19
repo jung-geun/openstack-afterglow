@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { auth } from '$lib/stores/auth';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
-	import { createRouterDetailStore, provideRouterDetail } from '$lib/stores/routerDetail.svelte';
+	import { createRouterDetailController, provideRouterDetailController } from '$lib/stores/routerDetailController.svelte';
 	import RouterDetailHeader from '$lib/components/router/RouterDetailHeader.svelte';
 	import RouterInfoSection from '$lib/components/router/RouterInfoSection.svelte';
 	import RouterGatewaySection from '$lib/components/router/RouterGatewaySection.svelte';
@@ -15,14 +15,14 @@
 
 	let { routerId, onClose, onDeleted }: Props = $props();
 
-	const s = createRouterDetailStore({
+	const s = createRouterDetailController({
 		routerId: () => routerId,
 		token: () => $auth.token ?? undefined,
 		projectId: () => $auth.projectId ?? undefined,
 		onDeleted: () => onDeleted?.(),
 		onClose: () => onClose?.(),
 	});
-	provideRouterDetail(s);
+	provideRouterDetailController(s);
 
 	const ar = createAutoRefresh(() => s.fetchRouter(), {
 		storageKey: 'router-detail-panel',

@@ -8,7 +8,8 @@
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
-	import type { Instance, Volume } from '$lib/types/resources';
+	import type { Instance } from '$lib/types/compute';
+	import type { Volume } from '$lib/types/volume';
 	import VolumePageHeader from '$lib/components/volume/VolumePageHeader.svelte';
 	import VolumeBasicInfoCard from '$lib/components/volume/VolumeBasicInfoCard.svelte';
 	import VolumeAttachmentsTable from '$lib/components/volume/VolumeAttachmentsTable.svelte';

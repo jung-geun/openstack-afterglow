@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { useLoadBalancerDetail } from '$lib/stores/loadBalancerDetail.svelte';
+  import { useLoadbalancerDetailController } from '$lib/stores/loadbalancerDetailController.svelte';
   import DetailHeader from '$lib/components/ui/DetailHeader.svelte';
   import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
@@ -9,7 +9,7 @@
   }
   let { ar = $bindable(), onClose }: Props = $props();
 
-  const s = useLoadBalancerDetail();
+  const s = useLoadbalancerDetailController();
 </script>
 
 <div class="flex items-center justify-between mb-4">

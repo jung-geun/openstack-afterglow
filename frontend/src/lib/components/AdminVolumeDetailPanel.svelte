@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { createAdminVolumeDetailStore, provideAdminVolumeDetail } from '$lib/stores/adminVolumeDetail.svelte';
+	import { createAdminVolumeDetailController, provideAdminVolumeDetailController } from '$lib/stores/adminVolumeDetailController.svelte';
 	import AdminVolumeDetailHeader from '$lib/components/admin-volume/AdminVolumeDetailHeader.svelte';
 	import AdminVolumeStatusBar from '$lib/components/admin-volume/AdminVolumeStatusBar.svelte';
 	import AdminVolumeBasicInfoSection from '$lib/components/admin-volume/AdminVolumeBasicInfoSection.svelte';
@@ -17,14 +17,14 @@
 
 	let { volumeId, onClose, onRefresh, token, projectId }: Props = $props();
 
-	const s = createAdminVolumeDetailStore({
+	const s = createAdminVolumeDetailController({
 		volumeId: () => volumeId,
 		token: () => token,
 		projectId: () => projectId,
 		onClose: () => onClose?.(),
 		onRefresh: () => onRefresh?.(),
 	});
-	provideAdminVolumeDetail(s);
+	provideAdminVolumeDetailController(s);
 </script>
 
 <div class="flex flex-col h-full">

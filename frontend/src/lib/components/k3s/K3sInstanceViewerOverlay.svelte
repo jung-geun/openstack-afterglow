@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { useK3sClusterDetail } from '$lib/stores/k3sClusterDetail.svelte';
+  import { useK3sClusterDetailController } from '$lib/stores/k3sClusterDetailController.svelte';
   import InstanceDetailPanel from '$lib/components/InstanceDetailPanel.svelte';
 
-  const s = useK3sClusterDetail();
+  const s = useK3sClusterDetailController();
 </script>
 
 <div class="absolute inset-0 z-10 bg-gray-950 overflow-y-auto">

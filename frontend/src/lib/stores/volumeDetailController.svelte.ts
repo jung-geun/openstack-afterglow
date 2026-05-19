@@ -27,7 +27,7 @@ export interface VolumeDetailOpts {
   onClose?: () => void;
 }
 
-export function createVolumeDetailStore(opts: VolumeDetailOpts) {
+export function createVolumeDetailController(opts: VolumeDetailOpts) {
   let volume = $state<Volume | null>(null);
   let snapshots = $state<VolumeSnapshot[]>([]);
   let instances = $state<Instance[]>([]);
@@ -220,16 +220,16 @@ export function createVolumeDetailStore(opts: VolumeDetailOpts) {
   };
 }
 
-export type VolumeDetailStore = ReturnType<typeof createVolumeDetailStore>;
+export type VolumeDetailController = ReturnType<typeof createVolumeDetailController>;
 
 const VOLUME_DETAIL_KEY = Symbol('volume-detail');
 
-export function provideVolumeDetail(store: VolumeDetailStore) {
+export function provideVolumeDetailController(store: VolumeDetailController) {
   setContext(VOLUME_DETAIL_KEY, store);
 }
 
-export function useVolumeDetail(): VolumeDetailStore {
-  const store = getContext<VolumeDetailStore | undefined>(VOLUME_DETAIL_KEY);
-  if (!store) throw new Error('useVolumeDetail must be called within VolumeDetailPanel');
+export function useVolumeDetailController(): VolumeDetailController {
+  const store = getContext<VolumeDetailController | undefined>(VOLUME_DETAIL_KEY);
+  if (!store) throw new Error('useVolumeDetailController must be called within VolumeDetailPanel');
   return store;
 }

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { auth } from '$lib/stores/auth';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
-	import { createContainerDetailStore, provideContainerDetail } from '$lib/stores/containerDetail.svelte';
+	import { createContainerDetailController, provideContainerDetailController } from '$lib/stores/containerDetailController.svelte';
 	import ContainerDetailHeader from '$lib/components/container/ContainerDetailHeader.svelte';
 	import ContainerActionsBar from '$lib/components/container/ContainerActionsBar.svelte';
 	import ContainerBasicInfoSection from '$lib/components/container/ContainerBasicInfoSection.svelte';
@@ -17,7 +17,7 @@
 
 	let { containerId, onClose, adminMode = false, onRefresh }: Props = $props();
 
-	const s = createContainerDetailStore({
+	const s = createContainerDetailController({
 		containerId: () => containerId,
 		adminMode: () => adminMode,
 		token: () => $auth.token ?? undefined,
@@ -25,7 +25,7 @@
 		onClose: () => onClose?.(),
 		onRefresh: () => onRefresh?.(),
 	});
-	provideContainerDetail(s);
+	provideContainerDetailController(s);
 
 	const ar = createAutoRefresh(() => s.fetchContainer(), {
 		storageKey: 'container-detail-panel',

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { useDbInstanceDetail } from '$lib/stores/dbInstanceDetail.svelte';
+	import { useDbInstanceDetailController } from '$lib/stores/dbInstanceDetailController.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
 	interface Props {
@@ -8,7 +8,7 @@
 
 	let { onClose }: Props = $props();
 
-	const s = useDbInstanceDetail();
+	const s = useDbInstanceDetailController();
 
 	const statusColor: Record<string, string> = {
 		ACTIVE: 'text-green-400',

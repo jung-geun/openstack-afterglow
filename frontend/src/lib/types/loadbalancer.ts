@@ -43,6 +43,8 @@ export interface Member {
 }
 
 export interface LbStatusNode {
+  id?: string;
+  name?: string;
   provisioning_status?: string | null;
   operating_status?: string | null;
   listeners?: Array<{
@@ -64,5 +66,10 @@ export interface LbStatusNode {
     id?: string;
     name?: string;
     provisioning_status?: string;
+    members?: Array<{
+      id?: string;
+      name?: string;
+      provisioning_status?: string;
+    }>;
   }>;
 }

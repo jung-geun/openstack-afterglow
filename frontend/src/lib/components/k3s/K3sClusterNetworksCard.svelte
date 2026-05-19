@@ -1,8 +1,8 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { useK3sClusterDetail } from '$lib/stores/k3sClusterDetail.svelte';
+  import { useK3sClusterDetailController } from '$lib/stores/k3sClusterDetailController.svelte';
 
-  const s = useK3sClusterDetail();
+  const s = useK3sClusterDetailController();
 
   // vmId → label 매핑
   const nodeOptions = $derived((() => {

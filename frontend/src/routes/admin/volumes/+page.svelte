@@ -2,7 +2,8 @@
 	import { onMount } from 'svelte';
 	import { auth } from '$lib/stores/auth';
 	import { api } from '$lib/api/client';
-	import type { AdminVolume, PagedResponse, TsPoint } from '$lib/types/resources';
+	import type { PagedResponse, TsPoint } from '$lib/types/common';
+	import type { AdminVolume } from '$lib/types/volume';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { projectNames } from '$lib/stores/projectNames';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';

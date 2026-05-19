@@ -10,7 +10,7 @@ interface Options {
 	onRefresh?: () => void;
 }
 
-function createAdminVolumeDetailStore(opts: Options) {
+function createAdminVolumeDetailController(opts: Options) {
 	let volume = $state<AdminVolumeDetail | null>(null);
 	let loading = $state(true);
 	let error = $state('');
@@ -42,17 +42,17 @@ function createAdminVolumeDetailStore(opts: Options) {
 	};
 }
 
-export type AdminVolumeDetailStore = ReturnType<typeof createAdminVolumeDetailStore>;
-export { createAdminVolumeDetailStore };
+export type AdminVolumeDetailController = ReturnType<typeof createAdminVolumeDetailController>;
+export { createAdminVolumeDetailController };
 
 const ADMIN_VOLUME_DETAIL_KEY = Symbol('admin-volume-detail');
 
-export function provideAdminVolumeDetail(store: AdminVolumeDetailStore) {
+export function provideAdminVolumeDetailController(store: AdminVolumeDetailController) {
 	setContext(ADMIN_VOLUME_DETAIL_KEY, store);
 }
 
-export function useAdminVolumeDetail(): AdminVolumeDetailStore {
-	const store = getContext<AdminVolumeDetailStore | undefined>(ADMIN_VOLUME_DETAIL_KEY);
-	if (!store) throw new Error('useAdminVolumeDetail must be called within AdminVolumeDetailPanel');
+export function useAdminVolumeDetailController(): AdminVolumeDetailController {
+	const store = getContext<AdminVolumeDetailController | undefined>(ADMIN_VOLUME_DETAIL_KEY);
+	if (!store) throw new Error('useAdminVolumeDetailController must be called within AdminVolumeDetailPanel');
 	return store;
 }

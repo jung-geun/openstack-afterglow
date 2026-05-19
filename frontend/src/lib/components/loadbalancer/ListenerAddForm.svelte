@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { useLoadBalancerDetail } from '$lib/stores/loadBalancerDetail.svelte';
+  import { useLoadbalancerDetailController } from '$lib/stores/loadbalancerDetailController.svelte';
   import Button from '$lib/components/ui/Button.svelte';
 
-  const s = useLoadBalancerDetail();
+  const s = useLoadbalancerDetailController();
 </script>
 
 {#if s.showAddListener}

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { useInstanceDetail } from '$lib/stores/instanceDetail.svelte';
+	import { useInstanceDetailController } from '$lib/stores/instanceDetailController.svelte';
 
 	interface Props {
 		type: 'live' | 'cold';
@@ -8,7 +8,7 @@
 
 	let { type, onClose }: Props = $props();
 
-	const s = useInstanceDetail();
+	const s = useInstanceDetailController();
 
 	let migrateHost = $state('');
 

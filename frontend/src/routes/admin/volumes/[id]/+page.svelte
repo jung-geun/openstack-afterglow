@@ -6,7 +6,7 @@
 	import { goto } from '$app/navigation';
 	import { api, ApiError } from '$lib/api/client';
 	import { projectNames } from '$lib/stores/projectNames';
-	import type { AdminVolumeDetail } from '$lib/types/resources';
+	import type { AdminVolumeDetail } from '$lib/types/volume';
 	import AdminVolumeDetailHeader from '$lib/components/admin/volumes/id/AdminVolumeDetailHeader.svelte';
 	import AdminVolumeInfoCards from '$lib/components/admin/volumes/id/AdminVolumeInfoCards.svelte';
 	import AdminVolumeAttachmentTable from '$lib/components/admin/volumes/id/AdminVolumeAttachmentTable.svelte';

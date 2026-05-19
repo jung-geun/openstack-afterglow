@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { useDbInstanceDetail } from '$lib/stores/dbInstanceDetail.svelte';
+	import { useDbInstanceDetailController } from '$lib/stores/dbInstanceDetailController.svelte';
 
-	const s = useDbInstanceDetail();
+	const s = useDbInstanceDetailController();
 
 	let showBackupForm = $state(false);
 	let newBackup = $state({ name: '', description: '' });

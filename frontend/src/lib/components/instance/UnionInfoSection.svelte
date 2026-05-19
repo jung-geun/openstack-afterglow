@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { useInstanceDetail } from '$lib/stores/instanceDetail.svelte';
+	import { useInstanceDetailController } from '$lib/stores/instanceDetailController.svelte';
 
-	const s = useInstanceDetail();
+	const s = useInstanceDetailController();
 
 	const strategyLabel: Record<string, string> = {
 		prebuilt: '사전 빌드',

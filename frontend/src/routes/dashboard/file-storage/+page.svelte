@@ -5,7 +5,7 @@
   import { api, ApiError } from '$lib/api/client';
   import { createSwr } from '$lib/utils/swr.svelte';
   import { apiMut } from '$lib/api/mutations';
-  import type { FileStorage } from '$lib/types/resources';
+  import type { FileStorage } from '$lib/types/fileStorage';
   import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
   import SlidePanel from '$lib/components/SlidePanel.svelte';
   import FileStorageDetailPanel from '$lib/components/FileStorageDetailPanel.svelte';

@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { useLoadBalancerDetail } from '$lib/stores/loadBalancerDetail.svelte';
+  import { useLoadbalancerDetailController } from '$lib/stores/loadbalancerDetailController.svelte';
   import PoolAddForm from './PoolAddForm.svelte';
   import PoolMembersPanel from './PoolMembersPanel.svelte';
 
-  const s = useLoadBalancerDetail();
+  const s = useLoadbalancerDetailController();
 </script>
 
 <section class="bg-gray-900 border border-gray-800 rounded-lg p-5 mb-4">

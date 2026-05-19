@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { useVolumeDetail } from '$lib/stores/volumeDetail.svelte';
+  import { useVolumeDetailController } from '$lib/stores/volumeDetailController.svelte';
   import Button from '$lib/components/ui/Button.svelte';
 
-  const s = useVolumeDetail();
+  const s = useVolumeDetailController();
 </script>
 
 <div class="flex gap-2 flex-wrap">

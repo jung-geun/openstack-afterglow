@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { useInstanceDetail } from '$lib/stores/instanceDetail.svelte';
+	import { useInstanceDetailController } from '$lib/stores/instanceDetailController.svelte';
 	import type { PortInfo } from '$lib/types/networks';
 
-	const s = useInstanceDetail();
+	const s = useInstanceDetailController();
 
 	let showAddInterface = $state(false);
 	let selectedNetId = $state('');

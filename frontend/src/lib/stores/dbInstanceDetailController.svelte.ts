@@ -6,14 +6,14 @@ import { toast } from '$lib/stores/toast';
 import type { DbInstance, DbFlavor, DbDatabase, DbUser, DbBackup } from '$lib/types/database';
 import type { FloatingIp } from '$lib/types/networks';
 
-export interface DbInstanceDetailStoreOpts {
+export interface DbInstanceDetailControllerOpts {
 	instanceId: () => string;
 	token: () => string | undefined;
 	projectId: () => string | undefined;
 	onDeleted?: () => void;
 }
 
-export function createDbInstanceDetailStore(opts: DbInstanceDetailStoreOpts) {
+export function createDbInstanceDetailController(opts: DbInstanceDetailControllerOpts) {
 	// Domain state
 	let instance = $state<DbInstance | null>(null);
 	let databases = $state<DbDatabase[]>([]);
@@ -353,16 +353,16 @@ export function createDbInstanceDetailStore(opts: DbInstanceDetailStoreOpts) {
 	};
 }
 
-export type DbInstanceDetailStore = ReturnType<typeof createDbInstanceDetailStore>;
+export type DbInstanceDetailController = ReturnType<typeof createDbInstanceDetailController>;
 
 const DB_INSTANCE_DETAIL_KEY = Symbol('db-instance-detail');
 
-export function provideDbInstanceDetail(store: DbInstanceDetailStore) {
+export function provideDbInstanceDetailController(store: DbInstanceDetailController) {
 	setContext(DB_INSTANCE_DETAIL_KEY, store);
 }
 
-export function useDbInstanceDetail(): DbInstanceDetailStore {
-	const store = getContext<DbInstanceDetailStore | undefined>(DB_INSTANCE_DETAIL_KEY);
-	if (!store) throw new Error('useDbInstanceDetail must be called within DbInstanceDetailPanel');
+export function useDbInstanceDetailController(): DbInstanceDetailController {
+	const store = getContext<DbInstanceDetailController | undefined>(DB_INSTANCE_DETAIL_KEY);
+	if (!store) throw new Error('useDbInstanceDetailController must be called within DbInstanceDetailPanel');
 	return store;
 }

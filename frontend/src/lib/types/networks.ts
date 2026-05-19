@@ -28,6 +28,7 @@ export interface SubnetDetail {
 export interface RouterInfo {
   id: string;
   name: string;
+  status?: string;
   external_gateway_network_id: string | null;
   connected_subnet_ids: string[];
 }
@@ -56,6 +57,7 @@ export interface FloatingIp {
   instance_name?: string | null;
   project_id?: string | null;
   router_id?: string | null;
+  floating_network_id?: string | null;
 }
 
 export type FloatingIpInfo = FloatingIp;
@@ -85,6 +87,7 @@ export interface NetworkInfo {
   id: string;
   name: string;
   is_external?: boolean;
+  is_shared?: boolean;
 }
 
 export interface PortInfo {

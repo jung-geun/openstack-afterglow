@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { useVolumeDetail } from '$lib/stores/volumeDetail.svelte';
+  import { useVolumeDetailController } from '$lib/stores/volumeDetailController.svelte';
   import { formatStorage } from '$lib/utils/format';
 
-  const s = useVolumeDetail();
+  const s = useVolumeDetailController();
 </script>
 
 <div class="bg-gray-900 rounded-xl border border-gray-700 p-4 mb-4 space-y-2 text-sm">

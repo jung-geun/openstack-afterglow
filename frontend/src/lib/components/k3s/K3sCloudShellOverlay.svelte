@@ -1,11 +1,11 @@
 <script lang="ts">
   import { onDestroy, onMount, tick } from 'svelte';
-  import { useK3sClusterDetail } from '$lib/stores/k3sClusterDetail.svelte';
+  import { useK3sClusterDetailController } from '$lib/stores/k3sClusterDetailController.svelte';
   import { createShellTicket } from '$lib/api/k3sResources';
   import { auth } from '$lib/stores/auth';
   import { getBaseUrl } from '$lib/api/client';
 
-  const s = useK3sClusterDetail();
+  const s = useK3sClusterDetailController();
 
   let terminalEl: HTMLDivElement | undefined = $state();
   let terminal: import('@xterm/xterm').Terminal | null = null;

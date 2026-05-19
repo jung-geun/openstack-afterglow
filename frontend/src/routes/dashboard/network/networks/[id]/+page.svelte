@@ -8,7 +8,7 @@
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import NetworkTopology from '$lib/components/NetworkTopology.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
-	import type { NetworkDetail } from '$lib/types/resources';
+	import type { NetworkDetail } from '$lib/types/networks';
 	import NetworkDetailHeader from '$lib/components/dashboard/networks/NetworkDetailHeader.svelte';
 	import NetworkInfoCard from '$lib/components/dashboard/networks/NetworkInfoCard.svelte';
 	import SubnetTableSection from '$lib/components/dashboard/networks/SubnetTableSection.svelte';

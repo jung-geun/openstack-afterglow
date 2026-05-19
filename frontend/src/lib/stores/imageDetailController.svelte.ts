@@ -20,7 +20,7 @@ export const VISIBILITY_OPTIONS = [
 	{ value: 'community', label: '커뮤니티 (Community)' },
 ];
 
-export interface ImageDetailStoreOpts {
+export interface ImageDetailControllerOpts {
 	imageId: () => string;
 	token: () => string | undefined;
 	projectId: () => string | undefined;
@@ -29,7 +29,7 @@ export interface ImageDetailStoreOpts {
 	onClose?: () => void;
 }
 
-export function createImageDetailStore(opts: ImageDetailStoreOpts) {
+export function createImageDetailController(opts: ImageDetailControllerOpts) {
 	// Domain state
 	let image = $state<ImageDetail | null>(null);
 	let members = $state<ImageMember[]>([]);
@@ -315,16 +315,16 @@ export function createImageDetailStore(opts: ImageDetailStoreOpts) {
 	};
 }
 
-export type ImageDetailStore = ReturnType<typeof createImageDetailStore>;
+export type ImageDetailController = ReturnType<typeof createImageDetailController>;
 
 const IMAGE_DETAIL_KEY = Symbol('image-detail');
 
-export function provideImageDetail(store: ImageDetailStore) {
+export function provideImageDetailController(store: ImageDetailController) {
 	setContext(IMAGE_DETAIL_KEY, store);
 }
 
-export function useImageDetail(): ImageDetailStore {
-	const store = getContext<ImageDetailStore | undefined>(IMAGE_DETAIL_KEY);
-	if (!store) throw new Error('useImageDetail must be called within ImageDetailPanel');
+export function useImageDetailController(): ImageDetailController {
+	const store = getContext<ImageDetailController | undefined>(IMAGE_DETAIL_KEY);
+	if (!store) throw new Error('useImageDetailController must be called within ImageDetailPanel');
 	return store;
 }

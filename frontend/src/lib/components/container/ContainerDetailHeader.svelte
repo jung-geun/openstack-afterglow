@@ -1,6 +1,6 @@
 <script lang="ts">
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
-	import { useContainerDetail } from '$lib/stores/containerDetail.svelte';
+	import { useContainerDetailController } from '$lib/stores/containerDetailController.svelte';
 
 	interface Props {
 		containerId: string;
@@ -10,7 +10,7 @@
 
 	let { containerId, onClose, ar }: Props = $props();
 
-	const s = useContainerDetail();
+	const s = useContainerDetailController();
 </script>
 
 <div class="flex items-center justify-between px-5 py-4 border-b border-gray-800 flex-shrink-0">

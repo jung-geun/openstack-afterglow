@@ -1,11 +1,11 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { useK3sClusterDetail } from '$lib/stores/k3sClusterDetail.svelte';
+  import { useK3sClusterDetailController } from '$lib/stores/k3sClusterDetailController.svelte';
   import K3sResourceEditor from './K3sResourceEditor.svelte';
   import K3sSecretValueDisplay from './K3sSecretValueDisplay.svelte';
   import { confirmDialog } from '$lib/stores/confirm.svelte';
 
-  const s = useK3sClusterDetail();
+  const s = useK3sClusterDetailController();
 
   let showCreate = $state(false);
   let newName = $state('');

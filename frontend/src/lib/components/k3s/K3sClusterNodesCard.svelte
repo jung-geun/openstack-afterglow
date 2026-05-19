@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { useK3sClusterDetail, healthColor } from '$lib/stores/k3sClusterDetail.svelte';
+  import { useK3sClusterDetailController, healthColor } from '$lib/stores/k3sClusterDetailController.svelte';
   import Button from '$lib/components/ui/Button.svelte';
 
-  const s = useK3sClusterDetail();
+  const s = useK3sClusterDetailController();
 </script>
 
 <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">

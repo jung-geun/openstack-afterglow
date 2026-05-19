@@ -1,8 +1,8 @@
 <script lang="ts">
 	import RouterInterfaceAddForm from './RouterInterfaceAddForm.svelte';
-	import { useRouterDetail } from '$lib/stores/routerDetail.svelte';
+	import { useRouterDetailController } from '$lib/stores/routerDetailController.svelte';
 
-	const s = useRouterDetail();
+	const s = useRouterDetailController();
 </script>
 
 <section class="bg-gray-900 border border-gray-800 rounded-lg p-5">

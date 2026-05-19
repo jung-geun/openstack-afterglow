@@ -3,7 +3,8 @@
 	import { goto } from '$app/navigation';
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
-	import type { AdminNetwork, TsPoint } from '$lib/types/resources';
+	import type { TsPoint } from '$lib/types/common';
+	import type { AdminNetwork } from '$lib/types/networks';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';

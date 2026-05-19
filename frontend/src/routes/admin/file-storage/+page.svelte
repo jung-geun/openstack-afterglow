@@ -2,7 +2,8 @@
 	import { onMount } from 'svelte';
 	import { auth } from '$lib/stores/auth';
 	import { api } from '$lib/api/client';
-	import type { AdminFileStorage, TsPoint } from '$lib/types/resources';
+	import type { TsPoint } from '$lib/types/common';
+	import type { AdminFileStorage } from '$lib/types/fileStorage';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';

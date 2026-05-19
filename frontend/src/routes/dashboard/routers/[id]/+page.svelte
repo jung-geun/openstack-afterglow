@@ -5,7 +5,7 @@
 	import { api, ApiError } from '$lib/api/client';
 	import { goto } from '$app/navigation';
 	import type { RouterDetail } from '$lib/types/router';
-	import type { Network } from '$lib/types/resources';
+	import type { Network } from '$lib/types/networks';
 	import RouterDetailHeader from '$lib/components/dashboard/routers/id/RouterDetailHeader.svelte';
 	import RouterGatewaySection from '$lib/components/dashboard/routers/id/RouterGatewaySection.svelte';
 	import RouterInterfacesSection from '$lib/components/dashboard/routers/id/RouterInterfacesSection.svelte';

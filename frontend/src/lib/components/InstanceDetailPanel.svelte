@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
-	import { createInstanceDetailStore, provideInstanceDetail } from '$lib/stores/instanceDetail.svelte';
+	import { createInstanceDetailController, provideInstanceDetailController } from '$lib/stores/instanceDetailController.svelte';
 	import InstanceHeader from '$lib/components/instance/InstanceHeader.svelte';
 	import InfoSection from '$lib/components/instance/InfoSection.svelte';
 	import MetricsPanel from '$lib/components/instance/MetricsPanel.svelte';
@@ -23,7 +23,7 @@
 
 	let { instanceId, onClose, adminProjectId = null }: Props = $props();
 
-	const s = createInstanceDetailStore({
+	const s = createInstanceDetailController({
 		instanceId: () => instanceId,
 		effectiveProjectId: () => adminProjectId ?? ($auth.projectId ?? undefined),
 		adminMode: () => !!adminProjectId,
@@ -33,7 +33,7 @@
 		},
 	});
 
-	provideInstanceDetail(s);
+	provideInstanceDetailController(s);
 
 	// Modal control
 	let showMigrateModal = $state(false);

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { useInstanceDetail } from '$lib/stores/instanceDetail.svelte';
+	import { useInstanceDetailController } from '$lib/stores/instanceDetailController.svelte';
 
 	interface Props {
 		onClose: () => void;
@@ -7,7 +7,7 @@
 
 	let { onClose }: Props = $props();
 
-	const s = useInstanceDetail();
+	const s = useInstanceDetailController();
 
 	let newPassword = $state('');
 	let confirmPassword = $state('');

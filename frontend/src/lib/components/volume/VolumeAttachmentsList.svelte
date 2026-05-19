@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { useVolumeDetail } from '$lib/stores/volumeDetail.svelte';
+  import { useVolumeDetailController } from '$lib/stores/volumeDetailController.svelte';
 
-  const s = useVolumeDetail();
+  const s = useVolumeDetailController();
 </script>
 
 {#if s.volume!.attachments.length > 0}

@@ -2,7 +2,8 @@
 	import { untrack } from 'svelte';
 	import { auth, authReady } from '$lib/stores/auth';
 	import { api } from '$lib/api/client';
-	import type { DashboardSummary, Quotas, Instance } from '$lib/types/resources';
+	import type { DashboardSummary, Instance } from '$lib/types/compute';
+	import type { DashboardQuotas as Quotas } from '$lib/types/quotas';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import DashboardGreetingHeader from '$lib/components/dashboard/overview/DashboardGreetingHeader.svelte';
 	import DashboardStatTiles from '$lib/components/dashboard/overview/DashboardStatTiles.svelte';

@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { useK3sClusterDetail } from '$lib/stores/k3sClusterDetail.svelte';
+  import { useK3sClusterDetailController } from '$lib/stores/k3sClusterDetailController.svelte';
   import { untrack } from 'svelte';
 
-  const s = useK3sClusterDetail();
+  const s = useK3sClusterDetailController();
 
   $effect(() => {
     if (s.isActive) {

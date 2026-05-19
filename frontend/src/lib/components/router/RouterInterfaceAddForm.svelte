@@ -1,8 +1,8 @@
 <script lang="ts">
 	import Button from '$lib/components/ui/Button.svelte';
-	import { useRouterDetail } from '$lib/stores/routerDetail.svelte';
+	import { useRouterDetailController } from '$lib/stores/routerDetailController.svelte';
 
-	const s = useRouterDetail();
+	const s = useRouterDetailController();
 </script>
 
 <div class="mb-4 p-4 bg-gray-800/60 border border-gray-700 rounded-lg">

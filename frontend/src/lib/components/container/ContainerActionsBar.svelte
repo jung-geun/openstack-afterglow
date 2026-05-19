@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { useContainerDetail } from '$lib/stores/containerDetail.svelte';
+	import { useContainerDetailController } from '$lib/stores/containerDetailController.svelte';
 
-	const s = useContainerDetail();
+	const s = useContainerDetailController();
 
 	const statusColor: Record<string, string> = {
 		Running:  'text-green-400 bg-green-900/30',

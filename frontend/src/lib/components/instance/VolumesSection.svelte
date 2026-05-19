@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { useInstanceDetail } from '$lib/stores/instanceDetail.svelte';
+	import { useInstanceDetailController } from '$lib/stores/instanceDetailController.svelte';
 
-	const s = useInstanceDetail();
+	const s = useInstanceDetailController();
 
 	let showAttachVolume = $state(false);
 	let attachMode = $state<'existing' | 'new'>('existing');

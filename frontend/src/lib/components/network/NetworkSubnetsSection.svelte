@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { useNetworkDetail } from '$lib/stores/networkDetail.svelte';
+	import { useNetworkDetailController } from '$lib/stores/networkDetailController.svelte';
 
-	const s = useNetworkDetail();
+	const s = useNetworkDetailController();
 </script>
 
 {#if s.network!.subnet_details.length > 0}

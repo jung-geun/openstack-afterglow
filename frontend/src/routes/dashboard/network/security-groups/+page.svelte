@@ -7,7 +7,7 @@
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import type { SecurityGroup } from '$lib/types/resources';
+	import type { SecurityGroup } from '$lib/types/securityGroup';
 	import SecurityGroupList from '$lib/components/dashboard/network/security-groups/SecurityGroupList.svelte';
 	import SecurityGroupRulesPanel from '$lib/components/dashboard/network/security-groups/SecurityGroupRulesPanel.svelte';
 	import SecurityGroupCreateModal from '$lib/components/dashboard/network/security-groups/SecurityGroupCreateModal.svelte';

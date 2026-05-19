@@ -1,8 +1,8 @@
 <script lang="ts">
   import {
-    useLoadBalancerDetail,
+    useLoadbalancerDetailController,
     provisioningColor,
-  } from '$lib/stores/loadBalancerDetail.svelte';
+  } from '$lib/stores/loadbalancerDetailController.svelte';
   import type { LbStatusNode } from '$lib/types/loadbalancer';
   import Self from './LoadBalancerErrorTree.svelte';
 
@@ -12,7 +12,7 @@
   }
   let { node = null, depth = 0 }: Props = $props();
 
-  const s = useLoadBalancerDetail();
+  const s = useLoadbalancerDetailController();
 
   const labelByDepth: Record<number, string> = {
     1: '└ 리스너',

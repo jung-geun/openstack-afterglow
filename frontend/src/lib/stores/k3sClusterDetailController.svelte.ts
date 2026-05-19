@@ -38,7 +38,7 @@ export const healthColor: Record<string, string> = {
   UNKNOWN:     'text-gray-500 bg-gray-800/30 border-gray-700',
 };
 
-export interface K3sClusterDetailOpts {
+export interface K3sClusterDetailControllerOpts {
   clusterId: () => string;
   token: () => string | undefined;
   projectId: () => string | undefined;
@@ -46,7 +46,7 @@ export interface K3sClusterDetailOpts {
   onClose?: () => void;
 }
 
-export function createK3sClusterDetailStore(opts: K3sClusterDetailOpts) {
+export function createK3sClusterDetailController(opts: K3sClusterDetailControllerOpts) {
   let cluster = $state<K3sCluster | null>(null);
   let health = $state<K3sClusterHealth | null>(null);
   let loading = $state(true);
@@ -434,16 +434,16 @@ export function createK3sClusterDetailStore(opts: K3sClusterDetailOpts) {
   };
 }
 
-export type K3sClusterDetailStore = ReturnType<typeof createK3sClusterDetailStore>;
+export type K3sClusterDetailController = ReturnType<typeof createK3sClusterDetailController>;
 
 const K3S_CLUSTER_DETAIL_KEY = Symbol('k3s-cluster-detail');
 
-export function provideK3sClusterDetail(store: K3sClusterDetailStore) {
+export function provideK3sClusterDetailController(store: K3sClusterDetailController) {
   setContext(K3S_CLUSTER_DETAIL_KEY, store);
 }
 
-export function useK3sClusterDetail(): K3sClusterDetailStore {
-  const store = getContext<K3sClusterDetailStore | undefined>(K3S_CLUSTER_DETAIL_KEY);
-  if (!store) throw new Error('useK3sClusterDetail must be called within K3sClusterDetailPanel');
+export function useK3sClusterDetailController(): K3sClusterDetailController {
+  const store = getContext<K3sClusterDetailController | undefined>(K3S_CLUSTER_DETAIL_KEY);
+  if (!store) throw new Error('useK3sClusterDetailController must be called within K3sClusterDetailPanel');
   return store;
 }

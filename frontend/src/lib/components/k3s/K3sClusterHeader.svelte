@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { useK3sClusterDetail } from '$lib/stores/k3sClusterDetail.svelte';
+  import { useK3sClusterDetailController } from '$lib/stores/k3sClusterDetailController.svelte';
   import DetailHeader from '$lib/components/ui/DetailHeader.svelte';
   import Button from '$lib/components/ui/Button.svelte';
   import K3sCloudShellButton from './K3sCloudShellButton.svelte';
 
-  const s = useK3sClusterDetail();
+  const s = useK3sClusterDetailController();
 </script>
 
 <DetailHeader

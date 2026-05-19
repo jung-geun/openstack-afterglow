@@ -5,7 +5,7 @@
   import { api, ApiError } from '$lib/api/client';
   import { createSwr } from '$lib/utils/swr.svelte';
   import { apiMut } from '$lib/api/mutations';
-  import type { Network, FloatingIp } from '$lib/types/resources';
+  import type { Network, FloatingIp } from '$lib/types/networks';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
   import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';

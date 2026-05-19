@@ -5,7 +5,7 @@
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
-	import type { FloatingIpInfo, NetworkInfo } from '$lib/types/resources';
+	import type { FloatingIpInfo, NetworkInfo } from '$lib/types/networks';
 	import Modal from '$lib/components/ui/Modal.svelte';
 
 	let fips = $state<FloatingIpInfo[]>([]);

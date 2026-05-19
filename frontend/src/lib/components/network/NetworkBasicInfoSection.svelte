@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { useNetworkDetail } from '$lib/stores/networkDetail.svelte';
+	import { useNetworkDetailController } from '$lib/stores/networkDetailController.svelte';
 
-	const s = useNetworkDetail();
+	const s = useNetworkDetailController();
 </script>
 
 <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">

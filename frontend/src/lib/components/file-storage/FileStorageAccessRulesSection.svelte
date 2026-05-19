@@ -1,8 +1,8 @@
 <script lang="ts">
 	import Button from '$lib/components/ui/Button.svelte';
-	import { useFileStorageDetail } from '$lib/stores/fileStorageDetail.svelte';
+	import { useFileStorageDetailController } from '$lib/stores/fileStorageDetailController.svelte';
 
-	const s = useFileStorageDetail();
+	const s = useFileStorageDetailController();
 </script>
 
 <div class="bg-gray-900 border border-gray-800 rounded-lg p-5 mb-4">

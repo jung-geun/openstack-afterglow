@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { useImageDetail } from '$lib/stores/imageDetail.svelte';
+	import { useImageDetailController } from '$lib/stores/imageDetailController.svelte';
 	import { visibilityBadge, visibilityLabel } from '$lib/utils/format';
 
 	interface Props {
@@ -7,7 +7,7 @@
 	}
 	let { onClose }: Props = $props();
 
-	const s = useImageDetail();
+	const s = useImageDetailController();
 </script>
 
 <div class="flex items-start justify-between px-6 py-4 border-b border-gray-800 shrink-0">

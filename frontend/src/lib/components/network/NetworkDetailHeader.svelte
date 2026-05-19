@@ -1,6 +1,6 @@
 <script lang="ts">
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
-	import { useNetworkDetail } from '$lib/stores/networkDetail.svelte';
+	import { useNetworkDetailController } from '$lib/stores/networkDetailController.svelte';
 
 	interface Props {
 		onClose?: () => void;
@@ -8,7 +8,7 @@
 	}
 
 	let { onClose, ar }: Props = $props();
-	const s = useNetworkDetail();
+	const s = useNetworkDetailController();
 </script>
 
 <div class="flex items-center justify-between px-5 py-4 border-b border-gray-800 flex-shrink-0">

@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { useDbInstanceDetail } from '$lib/stores/dbInstanceDetail.svelte';
+	import { useDbInstanceDetailController } from '$lib/stores/dbInstanceDetailController.svelte';
 	import type { DbUser } from '$lib/types/database';
 
-	const s = useDbInstanceDetail();
+	const s = useDbInstanceDetailController();
 
 	let showUserForm = $state(false);
 	let newUser = $state<{ name: string; password: string; host: string; dbNames: string[] }>({

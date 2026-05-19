@@ -12,7 +12,7 @@ interface Options {
 	onClose?: () => void;
 }
 
-function createNetworkDetailStore(opts: Options) {
+function createNetworkDetailController(opts: Options) {
 	let network = $state<NetworkDetail | null>(null);
 	let loading = $state(true);
 	let error = $state('');
@@ -115,17 +115,17 @@ function createNetworkDetailStore(opts: Options) {
 	};
 }
 
-export type NetworkDetailStore = ReturnType<typeof createNetworkDetailStore>;
-export { createNetworkDetailStore };
+export type NetworkDetailController = ReturnType<typeof createNetworkDetailController>;
+export { createNetworkDetailController };
 
 const NETWORK_DETAIL_KEY = Symbol('network-detail');
 
-export function provideNetworkDetail(store: NetworkDetailStore) {
+export function provideNetworkDetailController(store: NetworkDetailController) {
 	setContext(NETWORK_DETAIL_KEY, store);
 }
 
-export function useNetworkDetail(): NetworkDetailStore {
-	const store = getContext<NetworkDetailStore | undefined>(NETWORK_DETAIL_KEY);
-	if (!store) throw new Error('useNetworkDetail must be called within NetworkDetailPanel');
+export function useNetworkDetailController(): NetworkDetailController {
+	const store = getContext<NetworkDetailController | undefined>(NETWORK_DETAIL_KEY);
+	if (!store) throw new Error('useNetworkDetailController must be called within NetworkDetailPanel');
 	return store;
 }

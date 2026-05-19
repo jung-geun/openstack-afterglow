@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { useImageDetail } from '$lib/stores/imageDetail.svelte';
+	import { useImageDetailController } from '$lib/stores/imageDetailController.svelte';
 	import { formatIsoDateTime } from '$lib/utils/format';
 
-	const s = useImageDetail();
+	const s = useImageDetailController();
 </script>
 
 <div class="bg-gray-900 border border-gray-800 rounded-lg p-5">

@@ -2,7 +2,7 @@
   import { auth } from '$lib/stores/auth';
   import { untrack } from 'svelte';
   import { goto } from '$app/navigation';
-  import { createK3sClusterDetailStore, provideK3sClusterDetail } from '$lib/stores/k3sClusterDetail.svelte';
+  import { createK3sClusterDetailController, provideK3sClusterDetailController } from '$lib/stores/k3sClusterDetailController.svelte';
   import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
   import K3sClusterHeader from '$lib/components/k3s/K3sClusterHeader.svelte';
   import K3sDeleteProgress from '$lib/components/k3s/K3sDeleteProgress.svelte';
@@ -25,14 +25,14 @@
 
   let { clusterId, onClose, adminMode = false }: Props = $props();
 
-  const s = createK3sClusterDetailStore({
+  const s = createK3sClusterDetailController({
     clusterId: () => clusterId,
     token: () => $auth.token ?? undefined,
     projectId: () => $auth.projectId ?? undefined,
     adminMode: () => adminMode,
     onClose: onClose ?? (() => goto('/dashboard/drover')),
   });
-  provideK3sClusterDetail(s);
+  provideK3sClusterDetailController(s);
 
   createAutoRefresh(() => untrack(() => {
     s.loadCluster();

@@ -2,10 +2,10 @@
   import { auth } from '$lib/stores/auth';
   import { api, getBaseUrl } from '$lib/api/client';
   import { downloadBlobAs } from '$lib/utils/downloadBlob';
-  import { useK3sClusterDetail } from '$lib/stores/k3sClusterDetail.svelte';
+  import { useK3sClusterDetailController } from '$lib/stores/k3sClusterDetailController.svelte';
   import K3sCertificateExpiryModal from '$lib/components/k3s/K3sCertificateExpiryModal.svelte';
 
-  const s = useK3sClusterDetail();
+  const s = useK3sClusterDetailController();
   const token = $derived($auth.token ?? undefined);
   const projectId = $derived($auth.projectId ?? undefined);
 

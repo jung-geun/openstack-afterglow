@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { useK3sClusterDetail } from '$lib/stores/k3sClusterDetail.svelte';
+  import { useK3sClusterDetailController } from '$lib/stores/k3sClusterDetailController.svelte';
 
-  const s = useK3sClusterDetail();
+  const s = useK3sClusterDetailController();
 </script>
 
 <div class="mb-4 bg-gray-900 border border-gray-700 rounded-xl p-4">

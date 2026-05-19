@@ -12,7 +12,7 @@
 	import SlidePanel from '$lib/components/SlidePanel.svelte';
 	import DbInstanceDetailPanel from '$lib/components/database/DbInstanceDetailPanel.svelte';
 	import DbInstancesTable from '$lib/components/database/DbInstancesTable.svelte';
-	import type { DbInstance } from '$lib/types/resources';
+	import type { DbInstance } from '$lib/types/database';
 	import { toast } from '$lib/stores/toast';
 
 	let instances = $state<DbInstance[]>([]);

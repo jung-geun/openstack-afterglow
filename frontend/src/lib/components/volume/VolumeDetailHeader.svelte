@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { useVolumeDetail } from '$lib/stores/volumeDetail.svelte';
+  import { useVolumeDetailController } from '$lib/stores/volumeDetailController.svelte';
   import DetailHeader from '$lib/components/ui/DetailHeader.svelte';
   import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 
@@ -9,7 +9,7 @@
   }
   let { ar = $bindable(), onClose }: Props = $props();
 
-  const s = useVolumeDetail();
+  const s = useVolumeDetailController();
 </script>
 
 <DetailHeader title={s.volume?.name || 'Volume'} status={s.volume?.status ?? null}>

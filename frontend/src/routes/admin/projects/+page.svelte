@@ -13,7 +13,7 @@
 	import AdminProjectAccessModal from '$lib/components/admin/projects/AdminProjectAccessModal.svelte';
 
 	import type { Project } from '$lib/types/project';
-	import type { PagedResponse } from '$lib/types/resources';
+	import type { PagedResponse } from '$lib/types/common';
 
 	let projects = $state<Project[]>([]);
 	let loading = $state(true);

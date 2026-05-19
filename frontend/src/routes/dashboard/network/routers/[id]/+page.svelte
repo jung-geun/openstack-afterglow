@@ -9,7 +9,7 @@
 	import RouterGatewaySection from '$lib/components/dashboard/routers/id/RouterGatewaySection.svelte';
 	import RouterInterfacesSection from '$lib/components/dashboard/routers/id/RouterInterfacesSection.svelte';
 	import type { RouterDetail } from '$lib/types/router';
-	import type { Network } from '$lib/types/resources';
+	import type { Network } from '$lib/types/networks';
 	import { toast } from '$lib/stores/toast';
 
 	const id = $derived($page.params.id);

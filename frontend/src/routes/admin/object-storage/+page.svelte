@@ -3,7 +3,7 @@
 	import { onMount } from 'svelte';
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
-	import type { SwiftContainer } from '$lib/types/resources';
+	import type { SwiftContainer } from '$lib/types/common';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { formatStorage } from '$lib/utils/format';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';

@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { useVolumeDetail, statusColor } from '$lib/stores/volumeDetail.svelte';
+  import { useVolumeDetailController, statusColor } from '$lib/stores/volumeDetailController.svelte';
   import Button from '$lib/components/ui/Button.svelte';
   import { formatStorage } from '$lib/utils/format';
 
-  const s = useVolumeDetail();
+  const s = useVolumeDetailController();
 </script>
 
 <div class="mb-4">

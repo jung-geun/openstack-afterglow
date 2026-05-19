@@ -3,7 +3,7 @@
   import { untrack } from 'svelte';
   import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
-  import type { FileStorage, ShareSnapshot } from '$lib/types/resources';
+  import type { FileStorage, ShareSnapshot } from '$lib/types/fileStorage';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';

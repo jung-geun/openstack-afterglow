@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { useAdminVolumeDetail } from '$lib/stores/adminVolumeDetail.svelte';
+	import { useAdminVolumeDetailController } from '$lib/stores/adminVolumeDetailController.svelte';
 
-	const s = useAdminVolumeDetail();
+	const s = useAdminVolumeDetailController();
 </script>
 
 <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">

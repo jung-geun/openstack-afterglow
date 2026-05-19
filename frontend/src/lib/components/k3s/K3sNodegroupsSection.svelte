@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
-	import { useK3sClusterDetail } from '$lib/stores/k3sClusterDetail.svelte';
+	import { useK3sClusterDetailController } from '$lib/stores/k3sClusterDetailController.svelte';
 	import K3sNodegroupCard from '$lib/components/dashboard/drover/K3sNodegroupCard.svelte';
 	import K3sNodegroupCreateModal from '$lib/components/dashboard/drover/K3sNodegroupCreateModal.svelte';
 	import type { K3sNodegroup } from '$lib/types/k3s';
 
-	const s = useK3sClusterDetail();
+	const s = useK3sClusterDetailController();
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);

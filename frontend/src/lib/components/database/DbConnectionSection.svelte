@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { useDbInstanceDetail } from '$lib/stores/dbInstanceDetail.svelte';
+	import { useDbInstanceDetailController } from '$lib/stores/dbInstanceDetailController.svelte';
 
-	const s = useDbInstanceDetail();
+	const s = useDbInstanceDetailController();
 </script>
 
 <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">

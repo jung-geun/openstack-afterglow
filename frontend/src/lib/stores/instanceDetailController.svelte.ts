@@ -27,14 +27,14 @@ export interface PasswordPrecheck {
 	server_status: string;
 }
 
-export interface InstanceDetailStoreOpts {
+export interface InstanceDetailControllerOpts {
 	instanceId: () => string;
 	effectiveProjectId: () => string | undefined;
 	adminMode: () => boolean;
 	onDelete: () => void;
 }
 
-export function createInstanceDetailStore(opts: InstanceDetailStoreOpts) {
+export function createInstanceDetailController(opts: InstanceDetailControllerOpts) {
 	// Domain state
 	let instance = $state<Instance | null>(null);
 	let floatingIps = $state<FloatingIpDetail[]>([]);
@@ -541,16 +541,16 @@ export function createInstanceDetailStore(opts: InstanceDetailStoreOpts) {
 	};
 }
 
-export type InstanceDetailStore = ReturnType<typeof createInstanceDetailStore>;
+export type InstanceDetailController = ReturnType<typeof createInstanceDetailController>;
 
 const INSTANCE_DETAIL_KEY = Symbol('instance-detail');
 
-export function provideInstanceDetail(store: InstanceDetailStore) {
+export function provideInstanceDetailController(store: InstanceDetailController) {
 	setContext(INSTANCE_DETAIL_KEY, store);
 }
 
-export function useInstanceDetail(): InstanceDetailStore {
-	const store = getContext<InstanceDetailStore | undefined>(INSTANCE_DETAIL_KEY);
-	if (!store) throw new Error('useInstanceDetail must be called within InstanceDetailPanel');
+export function useInstanceDetailController(): InstanceDetailController {
+	const store = getContext<InstanceDetailController | undefined>(INSTANCE_DETAIL_KEY);
+	if (!store) throw new Error('useInstanceDetailController must be called within InstanceDetailPanel');
 	return store;
 }

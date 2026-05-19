@@ -16,7 +16,7 @@ interface Options {
 	onClose?: () => void;
 }
 
-function createRouterDetailStore(opts: Options) {
+function createRouterDetailController(opts: Options) {
 	let router = $state<RouterDetail | null>(null);
 	let loading = $state(true);
 	let error = $state('');
@@ -174,17 +174,17 @@ function createRouterDetailStore(opts: Options) {
 	};
 }
 
-export type RouterDetailStore = ReturnType<typeof createRouterDetailStore>;
-export { createRouterDetailStore };
+export type RouterDetailController = ReturnType<typeof createRouterDetailController>;
+export { createRouterDetailController };
 
 const ROUTER_DETAIL_KEY = Symbol('router-detail');
 
-export function provideRouterDetail(store: RouterDetailStore) {
+export function provideRouterDetailController(store: RouterDetailController) {
 	setContext(ROUTER_DETAIL_KEY, store);
 }
 
-export function useRouterDetail(): RouterDetailStore {
-	const store = getContext<RouterDetailStore | undefined>(ROUTER_DETAIL_KEY);
-	if (!store) throw new Error('useRouterDetail must be called within RouterDetailPanel');
+export function useRouterDetailController(): RouterDetailController {
+	const store = getContext<RouterDetailController | undefined>(ROUTER_DETAIL_KEY);
+	if (!store) throw new Error('useRouterDetailController must be called within RouterDetailPanel');
 	return store;
 }

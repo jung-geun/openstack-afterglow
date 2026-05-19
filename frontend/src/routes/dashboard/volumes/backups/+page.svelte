@@ -3,7 +3,7 @@
 	import { untrack } from 'svelte';
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
-	import type { Volume, VolumeBackup } from '$lib/types/resources';
+	import type { Volume, VolumeBackup } from '$lib/types/volume';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';

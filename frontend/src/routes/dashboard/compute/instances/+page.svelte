@@ -5,7 +5,7 @@
 	import { api, ApiError } from '$lib/api/client';
 	import { createSwr } from '$lib/utils/swr.svelte';
 	import { apiMut } from '$lib/api/mutations';
-	import type { Instance } from '$lib/types/resources';
+	import type { Instance } from '$lib/types/compute';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import InstanceDetailPanel from '$lib/components/InstanceDetailPanel.svelte';
 	import SlidePanel from '$lib/components/SlidePanel.svelte';

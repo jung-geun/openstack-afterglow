@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { auth } from '$lib/stores/auth';
-	import { createImageDetailStore, provideImageDetail } from '$lib/stores/imageDetail.svelte';
+	import { createImageDetailController, provideImageDetailController } from '$lib/stores/imageDetailController.svelte';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import ImageDetailHeader from '$lib/components/image/ImageDetailHeader.svelte';
 	import ImageInfoSection from '$lib/components/image/ImageInfoSection.svelte';
@@ -20,7 +20,7 @@
 
 	let { imageId, isAdmin = false, onClose, onDelete }: Props = $props();
 
-	const s = createImageDetailStore({
+	const s = createImageDetailController({
 		imageId: () => imageId,
 		token: () => $auth.token ?? undefined,
 		projectId: () => $auth.projectId ?? undefined,
@@ -28,7 +28,7 @@
 		onDelete,
 		onClose,
 	});
-	provideImageDetail(s);
+	provideImageDetailController(s);
 
 	$effect(() => {
 		if (imageId && $auth.token) {

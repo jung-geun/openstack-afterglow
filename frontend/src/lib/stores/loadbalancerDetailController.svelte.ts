@@ -1,135 +1,228 @@
-import { confirmDialog } from '$lib/stores/confirm.svelte';
+import { getContext, setContext, untrack } from 'svelte';
 import { api, ApiError } from '$lib/api/client';
-import { goto } from '$app/navigation';
-import type { LoadBalancerDetail, Listener, Pool, Member } from '$lib/types/loadbalancer';
+import { confirmDialog } from '$lib/stores/confirm.svelte';
 import { toast } from '$lib/stores/toast';
+import type { LoadBalancerDetail, Listener, Pool, Member, LbStatusNode } from '$lib/types/loadbalancer';
 
-export interface LbDetailOpts {
+export function provisioningColor(status: string): string {
+  return status === 'ERROR' ? 'text-red-400' : 'text-gray-400';
+}
+
+export interface LoadbalancerDetailControllerOpts {
   lbId: () => string;
   token: () => string | undefined;
   projectId: () => string | undefined;
+  onDeleted?: () => void;
+  onClose?: () => void;
 }
 
-export function createLoadbalancerDetailController(opts: LbDetailOpts) {
+export function createLoadbalancerDetailController(opts: LoadbalancerDetailControllerOpts) {
   let lb = $state<LoadBalancerDetail | null>(null);
   let listeners = $state<Listener[]>([]);
   let pools = $state<Pool[]>([]);
   let selectedPoolMembers = $state<Member[]>([]);
+  let statusTree = $state<LbStatusNode | null>(null);
   let selectedPoolId = $state<string | null>(null);
   let loading = $state(true);
   let error = $state('');
   let saving = $state(false);
-  let addingMember = $state(false);
-  let addMemberError = $state('');
-  let membersLoading = $state(false);
 
-  const id = opts.lbId;
-  const tok = opts.token;
-  const pid = opts.projectId;
+  let showAddListener = $state(false);
+  let listenerForm = $state({ protocol: 'HTTP', protocol_port: 80, name: '' });
+  let showAddPool = $state(false);
+  let poolForm = $state({ protocol: 'HTTP', lb_algorithm: 'ROUND_ROBIN', name: '' });
+  let showAddMember = $state(false);
+  let memberForm = $state({ address: '', protocol_port: 80, weight: 1, name: '' });
+
+  const isErrored = $derived(
+    !!lb && (lb.status === 'ERROR' || lb.status?.includes('ERROR')),
+  );
+
+  // selectedPoolId 변화 시 멤버 fetch (token/projectId는 untrack)
+  $effect(() => {
+    const poolId = selectedPoolId;
+    if (!poolId) {
+      selectedPoolMembers = [];
+      return;
+    }
+    const t = untrack(() => opts.token());
+    const pid = untrack(() => opts.projectId());
+    api
+      .get<Member[]>(`/api/loadbalancers/${opts.lbId()}/pools/${poolId}/members`, t, pid)
+      .then((m) => {
+        selectedPoolMembers = m;
+      })
+      .catch(() => {});
+  });
 
   async function fetchAll() {
+    const id = opts.lbId();
+    const t = opts.token();
+    const pid = opts.projectId();
     loading = true;
-    error = '';
-    await Promise.allSettled([
-      api.get<LoadBalancerDetail>(`/api/loadbalancers/${id()}`, tok(), pid())
-        .then(v => { lb = v; loading = false; })
-        .catch(e => { error = e instanceof ApiError ? e.message : '조회 실패'; loading = false; }),
-      api.get<Listener[]>(`/api/loadbalancers/${id()}/listeners`, tok(), pid())
-        .then(v => { listeners = v; }).catch(() => {}),
-      api.get<Pool[]>(`/api/loadbalancers/${id()}/pools`, tok(), pid())
-        .then(v => { pools = v; }).catch(() => {}),
-    ]);
-    loading = false;
+    try {
+      const [lbData, listenersData, poolsData] = await Promise.all([
+        api.get<LoadBalancerDetail>(`/api/loadbalancers/${id}`, t, pid),
+        api.get<Listener[]>(`/api/loadbalancers/${id}/listeners`, t, pid),
+        api.get<Pool[]>(`/api/loadbalancers/${id}/pools`, t, pid),
+      ]);
+      lb = lbData;
+      listeners = listenersData;
+      pools = poolsData;
+      error = '';
+      if (lbData.status === 'ERROR') {
+        api
+          .get<LbStatusNode>(`/api/loadbalancers/${id}/status`, t, pid)
+          .then((tree) => {
+            statusTree = tree;
+          })
+          .catch(() => {});
+      }
+    } catch (e) {
+      error = e instanceof ApiError ? e.message : '조회 실패';
+    } finally {
+      loading = false;
+    }
   }
 
-  async function loadPoolMembers(poolId: string | null) {
-    selectedPoolId = poolId;
-  }
-
-  async function fetchPoolMembers() {
-    if (!selectedPoolId) { selectedPoolMembers = []; return; }
-    api.get<Member[]>(`/api/loadbalancers/${id()}/pools/${selectedPoolId}/members`, tok(), pid())
-      .then(m => { selectedPoolMembers = m; })
-      .catch(() => {});
-  }
-
-  async function createListener(form: { protocol: string; protocol_port: number; name: string }): Promise<boolean> {
+  async function createListener() {
     saving = true;
     try {
-      await api.post(`/api/loadbalancers/${id()}/listeners`, form, tok(), pid());
+      await api.post(
+        `/api/loadbalancers/${opts.lbId()}/listeners`,
+        listenerForm,
+        opts.token(),
+        opts.projectId(),
+      );
+      showAddListener = false;
+      listenerForm = { protocol: 'HTTP', protocol_port: 80, name: '' };
       await fetchAll();
-      return true;
     } catch (e) {
       toast.error('리스너 생성 실패: ' + (e instanceof ApiError ? e.message : String(e)));
-      return false;
-    } finally { saving = false; }
+    } finally {
+      saving = false;
+    }
   }
 
-  async function deleteListener(listenerId: string): Promise<void> {
-    if (!await confirmDialog('리스너를 삭제하시겠습니까?')) return;
+  async function deleteListener(listenerId: string) {
+    if (!(await confirmDialog('리스너를 삭제하시겠습니까?'))) return;
     saving = true;
     try {
-      await api.delete(`/api/loadbalancers/${id()}/listeners/${listenerId}`, tok(), pid());
+      await api.delete(
+        `/api/loadbalancers/${opts.lbId()}/listeners/${listenerId}`,
+        opts.token(),
+        opts.projectId(),
+      );
       await fetchAll();
     } catch (e) {
       toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
-    } finally { saving = false; }
+    } finally {
+      saving = false;
+    }
   }
 
-  async function createPool(form: { protocol: string; lb_algorithm: string; name: string }): Promise<boolean> {
+  function toggleAddListener() {
+    showAddListener = !showAddListener;
+  }
+
+  async function createPool() {
     saving = true;
     try {
-      await api.post(`/api/loadbalancers/${id()}/pools`, form, tok(), pid());
+      await api.post(
+        `/api/loadbalancers/${opts.lbId()}/pools`,
+        poolForm,
+        opts.token(),
+        opts.projectId(),
+      );
+      showAddPool = false;
+      poolForm = { protocol: 'HTTP', lb_algorithm: 'ROUND_ROBIN', name: '' };
       await fetchAll();
-      return true;
     } catch (e) {
       toast.error('풀 생성 실패: ' + (e instanceof ApiError ? e.message : String(e)));
-      return false;
-    } finally { saving = false; }
+    } finally {
+      saving = false;
+    }
   }
 
-  async function deletePool(poolId: string): Promise<void> {
-    if (!await confirmDialog('풀을 삭제하시겠습니까?')) return;
+  async function deletePool(poolId: string) {
+    if (!(await confirmDialog('풀을 삭제하시겠습니까?'))) return;
     saving = true;
     try {
-      await api.delete(`/api/loadbalancers/${id()}/pools/${poolId}`, tok(), pid());
+      await api.delete(
+        `/api/loadbalancers/${opts.lbId()}/pools/${poolId}`,
+        opts.token(),
+        opts.projectId(),
+      );
       if (selectedPoolId === poolId) selectedPoolId = null;
       await fetchAll();
     } catch (e) {
       toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
-    } finally { saving = false; }
+    } finally {
+      saving = false;
+    }
   }
 
-  async function addMember(form: { address: string; protocol_port: number; weight: number; name: string }): Promise<boolean> {
-    if (!selectedPoolId) return false;
-    addingMember = true;
+  function togglePool(id: string) {
+    selectedPoolId = selectedPoolId === id ? null : id;
+  }
+
+  function toggleAddPool() {
+    showAddPool = !showAddPool;
+  }
+
+  async function addMember() {
+    if (!selectedPoolId) return;
+    saving = true;
     try {
-      await api.post(`/api/loadbalancers/${id()}/pools/${selectedPoolId}/members`, form, tok(), pid());
-      selectedPoolMembers = await api.get<Member[]>(`/api/loadbalancers/${id()}/pools/${selectedPoolId}/members`, tok(), pid());
-      return true;
+      await api.post(
+        `/api/loadbalancers/${opts.lbId()}/pools/${selectedPoolId}/members`,
+        memberForm,
+        opts.token(),
+        opts.projectId(),
+      );
+      showAddMember = false;
+      memberForm = { address: '', protocol_port: 80, weight: 1, name: '' };
+      selectedPoolMembers = await api.get<Member[]>(
+        `/api/loadbalancers/${opts.lbId()}/pools/${selectedPoolId}/members`,
+        opts.token(),
+        opts.projectId(),
+      );
     } catch (e) {
       toast.error('멤버 추가 실패: ' + (e instanceof ApiError ? e.message : String(e)));
-      return false;
-    } finally { addingMember = false; }
+    } finally {
+      saving = false;
+    }
   }
 
-  async function removeMember(memberId: string): Promise<void> {
-    if (!selectedPoolId || !await confirmDialog('멤버를 제거하시겠습니까?')) return;
-    addingMember = true;
+  async function removeMember(memberId: string) {
+    if (!selectedPoolId || !(await confirmDialog('멤버를 제거하시겠습니까?'))) return;
+    saving = true;
     try {
-      await api.delete(`/api/loadbalancers/${id()}/pools/${selectedPoolId}/members/${memberId}`, tok(), pid());
-      selectedPoolMembers = selectedPoolMembers.filter(m => m.id !== memberId);
+      await api.delete(
+        `/api/loadbalancers/${opts.lbId()}/pools/${selectedPoolId}/members/${memberId}`,
+        opts.token(),
+        opts.projectId(),
+      );
+      selectedPoolMembers = selectedPoolMembers.filter((m) => m.id !== memberId);
     } catch (e) {
       toast.error('제거 실패: ' + (e instanceof ApiError ? e.message : String(e)));
-    } finally { addingMember = false; }
+    } finally {
+      saving = false;
+    }
+  }
+
+  function toggleAddMember() {
+    showAddMember = !showAddMember;
   }
 
   async function deleteLb() {
-    if (!await confirmDialog(`로드밸런서 "${lb?.name || id()}"을 삭제하시겠습니까? (연결된 리스너/풀/멤버도 모두 삭제됩니다)`)) return;
+    const id = opts.lbId();
+    if (!(await confirmDialog(`로드밸런서 "${lb?.name || id}"을 삭제하시겠습니까? (연결된 리스너/풀/멤버도 모두 삭제됩니다)`)))
+      return;
     saving = true;
     try {
-      await api.delete(`/api/loadbalancers/${id()}`, tok(), pid());
-      goto('/dashboard');
+      await api.delete(`/api/loadbalancers/${id}`, opts.token(), opts.projectId());
+      opts.onDeleted?.();
     } catch (e) {
       toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
       saving = false;
@@ -137,26 +230,54 @@ export function createLoadbalancerDetailController(opts: LbDetailOpts) {
   }
 
   return {
+    // State getters
     get lb() { return lb; },
     get listeners() { return listeners; },
     get pools() { return pools; },
     get selectedPoolMembers() { return selectedPoolMembers; },
+    get statusTree() { return statusTree; },
     get selectedPoolId() { return selectedPoolId; },
     get loading() { return loading; },
     get error() { return error; },
     get saving() { return saving; },
-    get addingMember() { return addingMember; },
-    get addMemberError() { return addMemberError; },
-    get membersLoading() { return membersLoading; },
+    // Form state (mutable via bind:)
+    get showAddListener() { return showAddListener; },
+    set showAddListener(v: boolean) { showAddListener = v; },
+    get listenerForm() { return listenerForm; },
+    get showAddPool() { return showAddPool; },
+    set showAddPool(v: boolean) { showAddPool = v; },
+    get poolForm() { return poolForm; },
+    get showAddMember() { return showAddMember; },
+    set showAddMember(v: boolean) { showAddMember = v; },
+    get memberForm() { return memberForm; },
+    // Derived
+    get isErrored() { return isErrored; },
+    // Handlers
     fetchAll,
-    loadPoolMembers,
-    fetchPoolMembers,
     createListener,
     deleteListener,
+    toggleAddListener,
     createPool,
     deletePool,
+    togglePool,
+    toggleAddPool,
     addMember,
     removeMember,
+    toggleAddMember,
     deleteLb,
   };
+}
+
+export type LoadbalancerDetailController = ReturnType<typeof createLoadbalancerDetailController>;
+
+const LB_DETAIL_KEY = Symbol('lb-detail');
+
+export function provideLoadbalancerDetailController(store: LoadbalancerDetailController) {
+  setContext(LB_DETAIL_KEY, store);
+}
+
+export function useLoadbalancerDetailController(): LoadbalancerDetailController {
+  const store = getContext<LoadbalancerDetailController | undefined>(LB_DETAIL_KEY);
+  if (!store) throw new Error('useLoadbalancerDetailController must be called within LoadBalancerDetailPanel');
+  return store;
 }

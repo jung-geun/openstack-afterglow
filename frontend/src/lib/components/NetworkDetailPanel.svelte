@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
-	import { createNetworkDetailStore, provideNetworkDetail } from '$lib/stores/networkDetail.svelte';
+	import { createNetworkDetailController, provideNetworkDetailController } from '$lib/stores/networkDetailController.svelte';
 	import NetworkDetailHeader from '$lib/components/network/NetworkDetailHeader.svelte';
 	import NetworkBasicInfoSection from '$lib/components/network/NetworkBasicInfoSection.svelte';
 	import NetworkSubnetsSection from '$lib/components/network/NetworkSubnetsSection.svelte';
@@ -16,14 +16,14 @@
 
 	let { networkId, apiBase = '/api/admin/networks', onClose, token, projectId }: Props = $props();
 
-	const s = createNetworkDetailStore({
+	const s = createNetworkDetailController({
 		networkId: () => networkId,
 		apiBase: () => apiBase,
 		token: () => token,
 		projectId: () => projectId,
 		onClose: () => onClose?.(),
 	});
-	provideNetworkDetail(s);
+	provideNetworkDetailController(s);
 
 	const ar = createAutoRefresh(() => s.fetchNetwork(), {
 		storageKey: 'network-detail-panel',

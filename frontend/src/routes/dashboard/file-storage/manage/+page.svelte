@@ -2,7 +2,7 @@
   import { untrack } from 'svelte';
   import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
-  import type { FileStorage } from '$lib/types/resources';
+  import type { FileStorage } from '$lib/types/fileStorage';
   import type { LibraryConfig } from '$lib/types/library';
   import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
   import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';

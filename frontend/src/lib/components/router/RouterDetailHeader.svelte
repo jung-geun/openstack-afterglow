@@ -1,7 +1,7 @@
 <script lang="ts">
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 	import { goto } from '$app/navigation';
-	import { useRouterDetail } from '$lib/stores/routerDetail.svelte';
+	import { useRouterDetailController } from '$lib/stores/routerDetailController.svelte';
 
 	interface Props {
 		onClose?: () => void;
@@ -10,7 +10,7 @@
 	}
 
 	let { onClose, routerId, ar }: Props = $props();
-	const s = useRouterDetail();
+	const s = useRouterDetailController();
 </script>
 
 <div class="flex items-center justify-between mb-6 border-b border-gray-800 pb-4">

@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { useAdminVolumeDetail } from '$lib/stores/adminVolumeDetail.svelte';
+	import { useAdminVolumeDetailController } from '$lib/stores/adminVolumeDetailController.svelte';
 
-	const s = useAdminVolumeDetail();
+	const s = useAdminVolumeDetailController();
 
 	const statusColor: Record<string, string> = {
 		available: 'text-green-400',

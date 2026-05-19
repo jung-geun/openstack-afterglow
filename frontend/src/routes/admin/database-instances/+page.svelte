@@ -10,7 +10,7 @@
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 	import DbCreatePanel from '$lib/components/database/DbCreatePanel.svelte';
 	import GrafanaEmbed from '$lib/components/monitoring/GrafanaEmbed.svelte';
-	import type { DbInstance } from '$lib/types/resources';
+	import type { DbInstance } from '$lib/types/database';
 	import { toast } from '$lib/stores/toast';
 
 	let instances = $state<DbInstance[]>([]);

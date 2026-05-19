@@ -19,7 +19,7 @@ interface Options {
 	onClose?: () => void;
 }
 
-function createFileStorageDetailStore(opts: Options) {
+function createFileStorageDetailController(opts: Options) {
 	let fileStorage = $state<FileStorage | null>(null);
 	let loading = $state(true);
 	let error = $state('');
@@ -161,17 +161,17 @@ function createFileStorageDetailStore(opts: Options) {
 	};
 }
 
-export type FileStorageDetailStore = ReturnType<typeof createFileStorageDetailStore>;
-export { createFileStorageDetailStore };
+export type FileStorageDetailController = ReturnType<typeof createFileStorageDetailController>;
+export { createFileStorageDetailController };
 
 const FS_DETAIL_KEY = Symbol('fs-detail');
 
-export function provideFileStorageDetail(store: FileStorageDetailStore) {
+export function provideFileStorageDetailController(store: FileStorageDetailController) {
 	setContext(FS_DETAIL_KEY, store);
 }
 
-export function useFileStorageDetail(): FileStorageDetailStore {
-	const store = getContext<FileStorageDetailStore | undefined>(FS_DETAIL_KEY);
-	if (!store) throw new Error('useFileStorageDetail must be called within FileStorageDetailPanel');
+export function useFileStorageDetailController(): FileStorageDetailController {
+	const store = getContext<FileStorageDetailController | undefined>(FS_DETAIL_KEY);
+	if (!store) throw new Error('useFileStorageDetailController must be called within FileStorageDetailPanel');
 	return store;
 }

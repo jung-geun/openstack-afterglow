@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { useImageDetail, VISIBILITY_OPTIONS } from '$lib/stores/imageDetail.svelte';
+	import { useImageDetailController, VISIBILITY_OPTIONS } from '$lib/stores/imageDetailController.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 
-	const s = useImageDetail();
+	const s = useImageDetailController();
 </script>
 
 <div class="bg-gray-900 border border-gray-800 rounded-lg p-5">

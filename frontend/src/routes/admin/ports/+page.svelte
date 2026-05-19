@@ -11,7 +11,7 @@
 	import PortEditModal from '$lib/components/admin/ports/PortEditModal.svelte';
 	import PortDeleteModal from '$lib/components/admin/ports/PortDeleteModal.svelte';
 	import PortsFilterBar from '$lib/components/admin/ports/PortsFilterBar.svelte';
-	import type { PortInfo, NetworkInfo } from '$lib/types/resources';
+	import type { PortInfo, NetworkInfo } from '$lib/types/networks';
 	import type { PagedResponse, ProjectName } from '$lib/types/adminPort';
 
 	let ports = $state<PortInfo[]>([]);

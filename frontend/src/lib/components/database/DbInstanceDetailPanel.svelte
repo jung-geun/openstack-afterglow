@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { createDbInstanceDetailStore, provideDbInstanceDetail } from '$lib/stores/dbInstanceDetail.svelte';
+	import { createDbInstanceDetailController, provideDbInstanceDetailController } from '$lib/stores/dbInstanceDetailController.svelte';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import DbInstanceHeader from '$lib/components/database/DbInstanceHeader.svelte';
 	import DbInfoSection from '$lib/components/database/DbInfoSection.svelte';
@@ -18,13 +18,13 @@
 
 	let { instanceId, token, projectId, onClose, onDeleted }: Props = $props();
 
-	const s = createDbInstanceDetailStore({
+	const s = createDbInstanceDetailController({
 		instanceId: () => instanceId,
 		token: () => token,
 		projectId: () => projectId,
 		onDeleted,
 	});
-	provideDbInstanceDetail(s);
+	provideDbInstanceDetailController(s);
 
 	$effect(() => {
 		if (instanceId) {

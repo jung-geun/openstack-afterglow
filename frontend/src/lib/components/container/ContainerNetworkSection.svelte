@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { useContainerDetail } from '$lib/stores/containerDetail.svelte';
+	import { useContainerDetailController } from '$lib/stores/containerDetailController.svelte';
 
-	const s = useContainerDetail();
+	const s = useContainerDetailController();
 </script>
 
 {#if s.container?.addresses && Object.keys(s.container.addresses).length > 0}

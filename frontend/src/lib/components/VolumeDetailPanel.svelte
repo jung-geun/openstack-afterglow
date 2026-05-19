@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { auth } from '$lib/stores/auth';
-	import { createVolumeDetailStore, provideVolumeDetail } from '$lib/stores/volumeDetail.svelte';
+	import { createVolumeDetailController, provideVolumeDetailController } from '$lib/stores/volumeDetailController.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import VolumeDetailHeader from '$lib/components/volume/VolumeDetailHeader.svelte';
 	import VolumeInfoCard from '$lib/components/volume/VolumeInfoCard.svelte';
@@ -17,14 +17,14 @@
 
 	let { volumeId, onClose, onDeleted }: Props = $props();
 
-	const s = createVolumeDetailStore({
+	const s = createVolumeDetailController({
 		volumeId: () => volumeId,
 		token: () => $auth.token ?? undefined,
 		projectId: () => $auth.projectId ?? undefined,
 		onDeleted,
 		onClose,
 	});
-	provideVolumeDetail(s);
+	provideVolumeDetailController(s);
 
 	const ar = createAutoRefresh(() => s.loadAll(), {
 		storageKey: 'volume-detail-panel',

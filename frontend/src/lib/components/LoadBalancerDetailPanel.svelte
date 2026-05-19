@@ -2,9 +2,9 @@
   import { auth } from '$lib/stores/auth';
   import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
   import {
-    createLoadBalancerDetailStore,
-    provideLoadBalancerDetail,
-  } from '$lib/stores/loadBalancerDetail.svelte';
+    createLoadbalancerDetailController,
+    provideLoadbalancerDetailController,
+  } from '$lib/stores/loadbalancerDetailController.svelte';
   import LoadBalancerDetailHeader from '$lib/components/loadbalancer/LoadBalancerDetailHeader.svelte';
   import LoadBalancerErrorTree from '$lib/components/loadbalancer/LoadBalancerErrorTree.svelte';
   import LoadBalancerListenersSection from '$lib/components/loadbalancer/LoadBalancerListenersSection.svelte';
@@ -18,14 +18,14 @@
 
   let { lbId, onClose, onDeleted }: Props = $props();
 
-  const s = createLoadBalancerDetailStore({
+  const s = createLoadbalancerDetailController({
     lbId: () => lbId,
     token: () => $auth.token ?? undefined,
     projectId: () => $auth.projectId ?? undefined,
     onDeleted,
     onClose,
   });
-  provideLoadBalancerDetail(s);
+  provideLoadbalancerDetailController(s);
 
   const ar = createAutoRefresh(() => s.fetchAll(), {
     storageKey: 'lb-detail-panel',

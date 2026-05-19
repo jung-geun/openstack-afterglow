@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { useAdminVolumeDetail } from '$lib/stores/adminVolumeDetail.svelte';
+	import { useAdminVolumeDetailController } from '$lib/stores/adminVolumeDetailController.svelte';
 
 	interface Props {
 		onClose?: () => void;
@@ -7,7 +7,7 @@
 
 	let { onClose }: Props = $props();
 
-	const s = useAdminVolumeDetail();
+	const s = useAdminVolumeDetailController();
 </script>
 
 <div class="flex items-center justify-between px-5 py-4 border-b border-gray-800 flex-shrink-0">

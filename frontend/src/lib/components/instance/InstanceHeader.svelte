@@ -1,6 +1,6 @@
 <script lang="ts">
 	import DetailHeader from '$lib/components/ui/DetailHeader.svelte';
-	import { useInstanceDetail } from '$lib/stores/instanceDetail.svelte';
+	import { useInstanceDetailController } from '$lib/stores/instanceDetailController.svelte';
 
 	interface Props {
 		adminProjectId: string | null;
@@ -11,7 +11,7 @@
 
 	let { adminProjectId, onOpenMigrateModal, onOpenPasswordModal, onOpenResizeModal }: Props = $props();
 
-	const s = useInstanceDetail();
+	const s = useInstanceDetailController();
 </script>
 
 <DetailHeader title={s.instance!.name} status={s.instance!.status} size="lg">
