@@ -9,6 +9,7 @@
 	import K3sClusterTemplateCard from '$lib/components/admin/drover/K3sClusterTemplateCard.svelte';
 	import K3sClusterTemplateModal from '$lib/components/admin/drover/K3sClusterTemplateModal.svelte';
 	import type { K3sClusterTemplate } from '$lib/types/k3s';
+	import Modal from '$lib/components/ui/Modal.svelte';
 
 	let templates = $state<K3sClusterTemplate[]>([]);
 	let loading = $state(true);
@@ -112,17 +113,8 @@
 {/if}
 
 {#if deleteTarget}
-	<div
-		class="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
-		onclick={() => (deleteTarget = null)}
-		onkeydown={(e) => e.key === 'Escape' && (deleteTarget = null)}
-		role="dialog"
-		tabindex="-1"
-	>
-		<div
-			class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-sm mx-4 shadow-2xl"
-			onclick={(e) => e.stopPropagation()}
-		>
+	<Modal open={true} onClose={() => (deleteTarget = null)}>
+		<div class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-sm mx-4 shadow-2xl">
 			<h2 class="text-lg font-semibold text-white mb-3">템플릿 삭제</h2>
 			<p class="text-sm text-gray-300 mb-5">
 				<strong class="text-white">{deleteTarget.name}</strong> 템플릿을 삭제합니다. 이미 생성된 클러스터에는 영향 없습니다.
@@ -132,11 +124,8 @@
 			{/if}
 			<div class="flex justify-end gap-3">
 				<button onclick={() => (deleteTarget = null)} class="px-4 py-2 text-sm text-gray-400 hover:text-white">취소</button>
-				<button
-					onclick={confirmDelete}
-					class="px-4 py-2 bg-red-700 hover:bg-red-600 text-white text-sm font-medium rounded-lg"
-				>삭제</button>
+				<button onclick={confirmDelete} class="px-4 py-2 bg-red-700 hover:bg-red-600 text-white text-sm font-medium rounded-lg">삭제</button>
 			</div>
 		</div>
-	</div>
+	</Modal>
 {/if}

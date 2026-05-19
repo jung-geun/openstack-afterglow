@@ -2638,8 +2638,11 @@ k3s는 재시작 시 만료 90일 이내 인증서를 자동 갱신한다.
 - [x] routes 31개 파일 42곳 `confirm()` → `await confirmDialog()` 치환
 - [x] Phase 48b controller 3개 내부 `confirm()` 동일 치환
 
-### Phase 48e — Modal/FormModal 추출 (예정)
+### Phase 48e — Modal/FormModal 추출
 
-- [ ] `lib/components/ui/Modal.svelte` 신규
-- [ ] `lib/components/ui/FormModal.svelte` 신규
-- [ ] 인라인 백드롭 2곳 + showModal 변수 14곳 → `bind:open` 사용
+- [x] `lib/components/ui/Modal.svelte` 신규 (백드롭 + ESC 닫기)
+- [x] `lib/components/ui/FormModal.svelte` 신규 (Modal 래핑, submit/cancel 슬롯)
+- [x] `admin/floating-ips/+page.svelte` 인라인 백드롭 2곳 → `<Modal bind:open>` 교체
+- [x] `admin/drover/templates/+page.svelte` 인라인 백드롭 1곳 → `<Modal>` 교체
+- [x] npm run check 62 errors (기존과 동일)
+- [x] npm run test 7 failed / 215 passed (기존과 동일)
