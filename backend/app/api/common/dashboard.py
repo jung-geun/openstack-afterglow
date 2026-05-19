@@ -10,7 +10,7 @@ import re
 from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import and_, func, select
 from sqlalchemy.exc import OperationalError
 
@@ -583,6 +583,7 @@ async def get_dashboard_usage_stats(
 
 @router.get("/usage-report")
 async def get_dashboard_usage_report(
+    response: Response,
     period: str = Query("30d", alias="range", description="7d|14d|30d"),
     conn: openstack.connection.Connection = Depends(get_os_conn),
     refresh: bool = Query(False),
@@ -644,6 +645,7 @@ async def get_dashboard_usage_report(
     def _pct(used: float, limit: float) -> float:
         return min(100.0, round((used / limit * 100) if limit > 0 else 0.0, 1))
 
+    response.headers["Cache-Control"] = "private, max-age=60"
     return {
         "range": period,
         "start": start_dt,
@@ -670,13 +672,19 @@ async def get_dashboard_usage_report(
 @router.get("/metrics/trend")
 async def get_dashboard_metrics_trend(
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    range_: str = Query("14d", alias="range", description="24h|14d"),
 ):
-    """14일 vCPU/메모리/스토리지 추세 (PromQL). Prometheus 미설치 시 prometheus_available=false."""
+    """vCPU/메모리/스토리지 추세 (PromQL). range=24h(5분 step) / range=14d(1일 step).
+    Prometheus 미설치 시 prometheus_available=false."""
     project_id = conn._afterglow_project_id
 
     now = int(datetime.now(UTC).timestamp())
-    start = now - 14 * 86400
-    step = 86400  # 1일 = 14 포인트
+    if range_ == "24h":
+        start = now - 86400
+        step = 300  # 5분 → 최대 288 포인트
+    else:
+        start = now - 14 * 86400
+        step = 86400  # 1일 → 14 포인트
 
     def _vals(series: list[dict]) -> list[float]:
         return [round(p["value"], 2) for p in series]
@@ -688,23 +696,45 @@ async def get_dashboard_metrics_trend(
         except Exception:
             return []
 
-    vcpu_expr = (
-        f'avg_over_time(sum(libvirt_domain_info_cpu_time_seconds_total'
-        f'{{project_id="{project_id}"}})[1d:1h])'
-    )
-    mem_expr = (
-        f'avg_over_time((sum(libvirt_domain_info_memory_actual_bytes{{project_id="{project_id}"}}) / '
-        f'sum(libvirt_domain_info_memory_max_bytes{{project_id="{project_id}"}}) * 100)[1d:1h])'
-    )
-    storage_expr = (
-        f'sum(cinder_volume_capacity_bytes{{project_id="{project_id}"}}) / 1073741824'
-    )
-
-    vcpu_data, mem_data, storage_data = await asyncio.gather(
-        _safe_query(vcpu_expr),
-        _safe_query(mem_expr),
-        _safe_query(storage_expr),
-    )
+    if range_ == "24h":
+        # flavor-relative: 할당된 vCPU/메모리 대비 실제 사용률 (%)
+        vcpu_expr = (
+            f'sum(rate(libvirt_domain_info_cpu_time_seconds_total{{project_id="{project_id}"}}[5m]))'
+            f' / sum(libvirt_domain_info_virtual_cpus{{project_id="{project_id}"}}) * 100'
+        )
+        mem_expr = (
+            f'sum(libvirt_domain_info_memory_actual_bytes{{project_id="{project_id}"}}) / '
+            f'sum(libvirt_domain_info_memory_max_bytes{{project_id="{project_id}"}}) * 100'
+        )
+        # 네트워크: bytes/s → KiB/s (절대값, flavor 무관)
+        net_expr = (
+            f'(sum(rate(libvirt_domain_interface_stats_receive_bytes_total{{project_id="{project_id}"}}[5m]))'
+            f' + sum(rate(libvirt_domain_interface_stats_transmit_bytes_total{{project_id="{project_id}"}}[5m])))'
+            f' / 1024'
+        )
+        vcpu_data, mem_data, storage_data = await asyncio.gather(
+            _safe_query(vcpu_expr),
+            _safe_query(mem_expr),
+            _safe_query(net_expr),
+        )
+    else:
+        # 14d: 일별 평균 추세
+        vcpu_expr = (
+            f'avg_over_time(sum(libvirt_domain_info_cpu_time_seconds_total'
+            f'{{project_id="{project_id}"}})[1d:1h])'
+        )
+        mem_expr = (
+            f'avg_over_time((sum(libvirt_domain_info_memory_actual_bytes{{project_id="{project_id}"}}) / '
+            f'sum(libvirt_domain_info_memory_max_bytes{{project_id="{project_id}"}}) * 100)[1d:1h])'
+        )
+        storage_expr = (
+            f'sum(cinder_volume_capacity_bytes{{project_id="{project_id}"}}) / 1073741824'
+        )
+        vcpu_data, mem_data, storage_data = await asyncio.gather(
+            _safe_query(vcpu_expr),
+            _safe_query(mem_expr),
+            _safe_query(storage_expr),
+        )
 
     prometheus_available = any([vcpu_data, mem_data, storage_data])
 

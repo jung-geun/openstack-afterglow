@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { auth } from '$lib/stores/auth';
 	import { api } from '$lib/api/client';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
@@ -55,13 +56,14 @@
 
 	$effect(() => {
 		void [token, projectId, period];
-		fetchData();
+		untrack(() => fetchData());
 	});
 
 	const ar = createAutoRefresh(fetchData, {
 		storageKey: 'dashboard-usage-report',
 		defaultActive: true,
 		defaultInterval: 300,
+		intervalOptions: [60, 120, 300, 600],
 		invokeOnMount: false,
 	});
 

@@ -1,4 +1,4 @@
-"""Phase 52b — /api/dashboard/usage-report forecast 구조 검증."""
+"""Phase 52b / 53a — /api/dashboard/usage-report forecast 구조 + Cache-Control 헤더 검증."""
 
 from unittest.mock import AsyncMock, patch
 
@@ -96,3 +96,37 @@ async def test_usage_report_quota_still_present(client, mock_conn):
     assert "quota" in data
     assert data["quota"]["vcpus_in_use"] == 5
     assert data["quota"]["vcpus_limit"] == 20
+
+
+# ---------------------------------------------------------------------------
+# Phase 53a — Cache-Control 헤더 검증 (요청 폭주 방지)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_usage_report_cache_control_header(client, mock_conn):
+    """응답에 Cache-Control: private, max-age=60 헤더 포함 — 클라이언트 캐시 유도."""
+    with (
+        _patch_redis(),
+        patch("app.api.common.dashboard.nova.get_project_usage", return_value={}),
+        patch("app.api.common.dashboard.nova.get_project_quota", return_value={}),
+    ):
+        resp = await client.get("/api/dashboard/usage-report")
+
+    assert resp.status_code == 200
+    cc = resp.headers.get("cache-control", "")
+    assert "private" in cc
+    assert "max-age=60" in cc
+
+
+@pytest.mark.asyncio
+async def test_usage_report_cache_control_present_on_different_ranges(client, mock_conn):
+    """range 파라미터 무관하게 Cache-Control 헤더 항상 포함."""
+    with (
+        _patch_redis(),
+        patch("app.api.common.dashboard.nova.get_project_usage", return_value={}),
+        patch("app.api.common.dashboard.nova.get_project_quota", return_value={}),
+    ):
+        for range_val in ("7d", "30d", "90d"):
+            resp = await client.get(f"/api/dashboard/usage-report?range={range_val}")
+            assert resp.status_code == 200
+            assert "max-age=60" in resp.headers.get("cache-control", ""), f"range={range_val} missing Cache-Control"

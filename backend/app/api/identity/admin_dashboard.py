@@ -155,12 +155,17 @@ async def get_admin_notifications(
 # A-2  GET /admin/instances/health
 # ---------------------------------------------------------------------------
 
+def _is_gpu_flavor(flavor: dict) -> bool:
+    """서버 응답의 flavor dict에서 GPU 여부를 이름 기반으로 판별."""
+    name = (flavor.get("original_name") or "").lower()
+    return name.startswith("g1.") or name.startswith("gpu") or "gpu." in name
+
+
 @router.get("/instances/health", dependencies=[Depends(require_admin)])
 async def get_instances_health(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    """전체 인스턴스 중 CPU/RAM 사용률 80% 이상 경보 목록 (Prometheus 미사용 시 empty)."""
-    # Prometheus 없이도 at least ERROR/SHUTOFF 인스턴스 정보 제공
+    """전체 인스턴스 상태 집계 (total/active/error/with_alerts/gpu_count) + ERROR 목록."""
     try:
         def _collect():
             endpoint = conn.compute.get_endpoint()
@@ -169,11 +174,20 @@ async def get_instances_health(
                 params={"all_tenants": "1", "limit": "200"},
             )
             servers = resp.json().get("servers", [])
-            warnings = []
+
+            total = len(servers)
+            active_count = 0
+            error_count = 0
+            gpu_count = 0
+            error_items: list[dict] = []
+
             for s in servers:
                 status = (s.get("status") or "").upper()
-                if status == "ERROR":
-                    warnings.append({
+                if status == "ACTIVE":
+                    active_count += 1
+                elif status == "ERROR":
+                    error_count += 1
+                    error_items.append({
                         "id": s["id"],
                         "name": s.get("name") or "",
                         "project_id": s.get("tenant_id") or "",
@@ -181,9 +195,20 @@ async def get_instances_health(
                         "status": status,
                         "reason": "오류 상태",
                     })
-            return warnings
+                if _is_gpu_flavor(s.get("flavor") or {}):
+                    gpu_count += 1
 
-        instances = await cached_call(
+            return {
+                "total": total,
+                "active": active_count,
+                "error": error_count,
+                "with_alerts": error_count,  # Prometheus 미사용 시 ERROR 수로 polyfill
+                "gpu_count": gpu_count,
+                "items": error_items,
+                "count": len(error_items),
+            }
+
+        result = await cached_call(
             "afterglow:admin:instances_health",
             ttl_fast(),
             _collect,
@@ -191,7 +216,7 @@ async def get_instances_health(
     except Exception:
         raise HTTPException(status_code=500, detail="인스턴스 상태 조회 실패")
 
-    return {"items": instances, "count": len(instances)}
+    return result
 
 
 # ---------------------------------------------------------------------------

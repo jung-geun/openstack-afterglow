@@ -71,8 +71,8 @@ async def test_instances_health_non_admin_returns_403(non_admin_client):
 async def test_instances_health_returns_list(admin_client, mock_conn):
     mock_conn.session.get.return_value.json.return_value = {
         "servers": [
-            {"id": "s1", "name": "vm-1", "status": "ACTIVE", "tenant_id": "p1", "OS-EXT-SRV-ATTR:host": "host1"},
-            {"id": "s2", "name": "vm-err", "status": "ERROR", "tenant_id": "p1", "OS-EXT-SRV-ATTR:host": "host1"},
+            {"id": "s1", "name": "vm-1", "status": "ACTIVE", "tenant_id": "p1", "OS-EXT-SRV-ATTR:host": "host1", "flavor": {}},
+            {"id": "s2", "name": "vm-err", "status": "ERROR", "tenant_id": "p1", "OS-EXT-SRV-ATTR:host": "host1", "flavor": {}},
         ]
     }
     with _patch_redis():
@@ -83,6 +83,46 @@ async def test_instances_health_returns_list(admin_client, mock_conn):
     assert "items" in data
     assert data["count"] == 1  # ERROR 인스턴스 1개만
     assert data["items"][0]["status"] == "ERROR"
+
+
+@pytest.mark.asyncio
+async def test_instances_health_kpi_fields(admin_client, mock_conn):
+    """Phase 53b: total/active/error/with_alerts/gpu_count KPI 5필드 모두 존재."""
+    mock_conn.session.get.return_value.json.return_value = {
+        "servers": [
+            {"id": "s1", "status": "ACTIVE", "tenant_id": "p1", "OS-EXT-SRV-ATTR:host": "h1", "name": "vm-1", "flavor": {"original_name": "c2.medium"}},
+            {"id": "s2", "status": "ACTIVE", "tenant_id": "p1", "OS-EXT-SRV-ATTR:host": "h1", "name": "vm-2", "flavor": {"original_name": "gpu.large"}},
+            {"id": "s3", "status": "ERROR", "tenant_id": "p1", "OS-EXT-SRV-ATTR:host": "h2", "name": "vm-err", "flavor": {}},
+            {"id": "s4", "status": "SHUTOFF", "tenant_id": "p1", "OS-EXT-SRV-ATTR:host": "h2", "name": "vm-off", "flavor": {}},
+        ]
+    }
+    with _patch_redis():
+        resp = await admin_client.get("/api/admin/instances/health")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == 4
+    assert data["active"] == 2
+    assert data["error"] == 1
+    assert data["with_alerts"] == 1  # ERROR 수와 동일
+    assert data["gpu_count"] == 1   # gpu.large 1개
+    assert data["count"] == 1       # ERROR 목록 호환
+
+
+@pytest.mark.asyncio
+async def test_instances_health_empty(admin_client, mock_conn):
+    """서버 없을 때 KPI 0 반환."""
+    mock_conn.session.get.return_value.json.return_value = {"servers": []}
+    with _patch_redis():
+        resp = await admin_client.get("/api/admin/instances/health")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == 0
+    assert data["active"] == 0
+    assert data["error"] == 0
+    assert data["gpu_count"] == 0
+    assert data["items"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -257,7 +297,7 @@ async def test_identity_summary_partial_when_users_fails(admin_client, mock_conn
 
 @pytest.mark.asyncio
 async def test_identity_summary_partial_when_roles_fails(admin_client, mock_conn):
-    """roles 조회 실패 시 200 응답 + partial=True + roles count=0."""
+    """roles 조회 실패 시 200 응답 + partial=True + roles count=0 + partial_reasons 포함."""
     u1 = MagicMock(is_enabled=True)
     mock_conn.identity.users.return_value = [u1]
     mock_conn.identity.projects.return_value = [MagicMock()]
@@ -273,3 +313,43 @@ async def test_identity_summary_partial_when_roles_fails(admin_client, mock_conn
     assert data["partial"] is True
     assert data["counts"]["roles"] == 0
     assert data["counts"]["users"] == 1
+    # Phase 53d: partial_reasons 필드 존재 + roles 항목 포함
+    assert "partial_reasons" in data
+    assert any("roles" in r for r in data["partial_reasons"])
+
+
+@pytest.mark.asyncio
+async def test_identity_summary_partial_reasons_403_classified(admin_client, mock_conn):
+    """HTTP 403 예외 시 insufficient_privileges로 분류."""
+    mock_conn.identity.users.return_value = []
+    mock_conn.identity.projects.return_value = []
+    mock_conn.identity.roles.side_effect = Exception("HTTP 403 Forbidden: policy")
+    mock_conn.identity.groups.return_value = []
+    mock_conn.identity.domains.return_value = []
+
+    with _patch_redis():
+        resp = await admin_client.get("/api/admin/identity/summary")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["partial"] is True
+    reasons = data.get("partial_reasons", [])
+    assert any("insufficient_privileges" in r for r in reasons)
+
+
+@pytest.mark.asyncio
+async def test_identity_summary_no_partial_reasons_when_success(admin_client, mock_conn):
+    """정상 조회 시 partial=False + partial_reasons=[]."""
+    mock_conn.identity.users.return_value = []
+    mock_conn.identity.projects.return_value = []
+    mock_conn.identity.roles.return_value = []
+    mock_conn.identity.groups.return_value = []
+    mock_conn.identity.domains.return_value = []
+
+    with _patch_redis():
+        resp = await admin_client.get("/api/admin/identity/summary")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["partial"] is False
+    assert data.get("partial_reasons", []) == []
