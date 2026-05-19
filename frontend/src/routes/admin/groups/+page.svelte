@@ -49,7 +49,7 @@
 	{:else if ctrl.groups.length === 0}
 		<div class="text-center text-gray-500 text-sm py-8">그룹이 없습니다</div>
 	{:else}
-		<div class:opacity-60={ctrl.refreshing} class:pointer-events-none={ctrl.refreshing}>
+		<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5" class:opacity-60={ctrl.refreshing} class:pointer-events-none={ctrl.refreshing}>
 			<div class="space-y-2">
 				{#each ctrl.groups as g (g.id)}
 					<GroupCard

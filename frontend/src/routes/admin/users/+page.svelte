@@ -95,14 +95,16 @@
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={5} />
 	{:else}
-		<AdminUsersTable
-			{users}
-			{refreshing}
-			hasPrev={markerStack.length > 0}
-			hasNext={nextMarker !== null}
-			onEdit={(u) => { editUser = u; }}
-			onPrev={() => { const prev = markerStack.slice(0, -1); markerStack = prev; load(prev[prev.length - 1]); }}
-			onNext={() => { if (nextMarker) { markerStack = [...markerStack, nextMarker]; load(nextMarker); } }}
-		/>
+		<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
+			<AdminUsersTable
+				{users}
+				{refreshing}
+				hasPrev={markerStack.length > 0}
+				hasNext={nextMarker !== null}
+				onEdit={(u) => { editUser = u; }}
+				onPrev={() => { const prev = markerStack.slice(0, -1); markerStack = prev; load(prev[prev.length - 1]); }}
+				onNext={() => { if (nextMarker) { markerStack = [...markerStack, nextMarker]; load(nextMarker); } }}
+			/>
+		</div>
 	{/if}
 </div>
