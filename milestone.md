@@ -2846,3 +2846,47 @@ k3s는 재시작 시 만료 90일 이내 인증서를 자동 갱신한다.
 
 - [x] pytest 41 passed (test_dashboard_new + test_dashboard_usage_report + test_dashboard_metrics + test_admin_dashboard + test_activity_silent_skip + test_dashboard_notifications)
 - [x] npm run check 59 errors baseline 유지
+
+## Phase 53 — Phase 52 후속 프로덕션 버그 5건 수정
+
+### Phase 53a — /dashboard/usage-report 요청 폭주 차단
+
+- [x] usage-report `$effect` untrack 래핑 — Svelte 5 무한 루프 차단
+- [x] intervalOptions에 300초 추가 (localStorage 복원 강등 방지)
+- [x] /api/dashboard/usage-report 응답에 `Cache-Control: private, max-age=60` 추가
+- [x] /api/dashboard/metrics/trend `range=24h` 지원 (step=300, flavor-relative PromQL)
+- [x] test_dashboard_usage_report.py Cache-Control 헤더 검증 추가
+- [x] test_dashboard_usage_spark.py 신규 5케이스
+
+### Phase 53b — /admin/instances 상단 KPI 응답 스키마 정렬
+
+- [x] /admin/instances/health 응답에 total/active/error/with_alerts/gpu_count 5필드 추가
+- [x] _is_gpu_flavor() 헬퍼 (original_name 기반 GPU 감지)
+- [x] 기존 items/count 호환 유지
+- [x] test_admin_dashboard.py KPI 5필드 검증 케이스 추가
+
+### Phase 53c — /dashboard/usage 24h Spark 카드 연결
+
+- [x] dashboard/usage/+page.svelte placeholder 제거 → Spark 컴포넌트 + PromQL 실데이터 연결
+- [x] vCPU/RAM flavor-relative %, 네트워크 KiB/s 표시
+- [x] prometheus_available=false 시 "메트릭 수집 미설정" 안내
+
+### Phase 53d — /admin/identity 역할 권한 부족 안내 + 상세 테마 통일
+
+- [x] _collect partial_reasons 필드 추가 (insufficient_privileges / connection_error 분류)
+- [x] admin/identity/+page.svelte partial 경고 배지 표시
+- [x] 상세 4개 페이지(users/projects/groups/roles) md:p-8 → md:p-6 정렬
+- [x] test_admin_dashboard.py partial_reasons 검증 케이스 추가
+
+### Phase 53e — /dashboard/topology 서버측 project_id 필터링
+
+- [x] _fetch_topology_sync project_id 파라미터 추가 (user scope 필터)
+- [x] 인스턴스: 현재 프로젝트만, 네트워크: 자기 프로젝트 + external + shared, 라우터: 자기 프로젝트만
+- [x] get_topology → _fetch_topology_sync(project_id=pid) 전달
+- [x] test_topology.py 신규 5케이스
+
+### Phase 53f — 검증
+
+- [x] pytest 36 passed (test_admin_dashboard + test_dashboard_usage_report + test_dashboard_usage_spark + test_topology)
+- [x] alert()/confirm() 잔존 0건, 비용/요금 0건, Nova/Cinder/Manila/Neutron(dashboard) 0건
+- [x] npm run check baseline 유지
