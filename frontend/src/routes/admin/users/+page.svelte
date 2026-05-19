@@ -71,7 +71,7 @@
 <AdminUserCreateModal bind:open={showCreate} onCreate={create} />
 <AdminUserEditModal bind:user={editUser} onUpdate={update} />
 
-<div class="p-4 md:p-8 max-w-7xl mx-auto">
+<div class="p-4 md:p-6 max-w-7xl mx-auto">
 	<PageHeader breadcrumb="IDENTITY / USERS" title="사용자">
 		{#snippet actions()}
 			<button onclick={() => { showCreate = true; }} class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg">+ 생성</button>

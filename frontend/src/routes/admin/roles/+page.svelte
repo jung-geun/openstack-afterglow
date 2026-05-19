@@ -38,7 +38,7 @@
 	onMount(load);
 </script>
 
-<div class="p-4 md:p-8 max-w-7xl mx-auto">
+<div class="p-4 md:p-6 max-w-7xl mx-auto">
 	<PageHeader breadcrumb="IDENTITY / ROLES" title="역할">
 		{#snippet actions()}
 			<AutoRefreshControl

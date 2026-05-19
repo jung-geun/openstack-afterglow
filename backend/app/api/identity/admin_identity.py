@@ -1137,26 +1137,38 @@ async def get_identity_summary(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """users / projects / roles / groups / domains 카운트 + 최근 변경 요약."""
+    def _classify_exc(exc: Exception) -> str:
+        s = str(exc).lower()
+        if "403" in s or "forbidden" in s:
+            return "insufficient_privileges"
+        if "connection" in s or "timeout" in s:
+            return "connection_error"
+        return "unknown"
+
     def _collect():
         partial = False
+        partial_reasons: list[str] = []
         users: list = []
         try:
             users = list(conn.identity.users(limit=1000))
         except Exception as exc:
             _logger.warning("identity summary partial: users failed: %s", exc, exc_info=True)
             partial = True
+            partial_reasons.append(f"users:{_classify_exc(exc)}")
         projects: list = []
         try:
             projects = list(conn.identity.projects(limit=1000))
         except Exception as exc:
             _logger.warning("identity summary partial: projects failed: %s", exc, exc_info=True)
             partial = True
+            partial_reasons.append(f"projects:{_classify_exc(exc)}")
         roles: list = []
         try:
             roles = list(conn.identity.roles(limit=200))
         except Exception as exc:
             _logger.warning("identity summary partial: roles failed: %s", exc, exc_info=True)
             partial = True
+            partial_reasons.append(f"roles:{_classify_exc(exc)}")
         groups: list = []
         try:
             groups = list(conn.identity.groups(limit=500))
@@ -1188,6 +1200,7 @@ async def get_identity_summary(
 
         return {
             "partial": partial,
+            "partial_reasons": partial_reasons,
             "counts": counts,
             # 프론트 IdentitySummary 인터페이스 flat alias
             "user_count": counts["users"],

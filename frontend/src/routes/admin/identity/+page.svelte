@@ -11,6 +11,8 @@
 		role_count: number;
 		group_count: number;
 		domain_count: number;
+		partial?: boolean;
+		partial_reasons?: string[];
 		recent_users: { id: string; name: string; email: string; enabled: boolean }[];
 		recent_projects: { id: string; name: string; enabled: boolean; description: string }[];
 	}
@@ -117,6 +119,18 @@
 				{/snippet}
 			</StatTile>
 		</div>
+
+		<!-- partial 경고 배지 (역할/사용자/프로젝트 조회 권한 부족 시) -->
+		{#if data?.partial && data.partial_reasons && data.partial_reasons.length > 0}
+			<div class="flex items-center gap-2.5 px-4 py-2.5 rounded-xl border text-xs"
+			     style="background: color-mix(in oklab, var(--color-state-warning) 10%, transparent); border-color: color-mix(in oklab, var(--color-state-warning) 30%, transparent); color: var(--color-state-warning);">
+				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0">
+					<path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+					<line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+				</svg>
+				<span>일부 정보 미완 — {data.partial_reasons.map(r => r.includes('insufficient_privileges') ? r.split(':')[0] + ' 권한 부족 (system-scope 필요)' : r).join(', ')}</span>
+			</div>
+		{/if}
 
 		<!-- Sub-tabs -->
 		<div class="flex items-center gap-1 border-b" style="border-color: var(--color-line);">
