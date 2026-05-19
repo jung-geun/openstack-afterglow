@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { confirmDialog } from '$lib/stores/confirm.svelte';
   import { untrack } from 'svelte';
   import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
@@ -41,7 +42,7 @@
   }
 
   async function deleteFip(id: string, addr: string) {
-    if (!confirm(`Floating IP "${addr}"를 해제하시겠습니까?`)) return;
+    if (!await confirmDialog(`Floating IP "${addr}"를 해제하시겠습니까?`)) return;
     deleting = id;
     try {
       await api.delete(`/api/networks/floating-ips/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);

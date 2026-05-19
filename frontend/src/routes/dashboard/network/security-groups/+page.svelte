@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { confirmDialog } from '$lib/stores/confirm.svelte';
 	import { untrack } from 'svelte';
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
@@ -73,7 +74,7 @@
 	}
 
 	async function deleteSecurityGroup(sgId: string, name: string) {
-		if (!confirm(`"${name}" 보안 그룹을 삭제하시겠습니까?`)) return;
+		if (!await confirmDialog(`"${name}" 보안 그룹을 삭제하시겠습니까?`)) return;
 		try {
 			await api.delete(`/api/security-groups/${sgId}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			if (selectedSg === name) selectedSg = null;

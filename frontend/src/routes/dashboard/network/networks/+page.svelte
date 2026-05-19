@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { confirmDialog } from '$lib/stores/confirm.svelte';
   import { untrack } from 'svelte';
   import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
@@ -92,7 +93,7 @@
 
   async function deleteNetwork(id: string, name: string, isExternal: boolean, isShared: boolean) {
     if (isExternal || isShared) { alert('외부/공유 네트워크는 삭제할 수 없습니다.'); return; }
-    if (!confirm(`네트워크 "${name || id.slice(0, 8)}"를 삭제하시겠습니까?`)) return;
+    if (!await confirmDialog(`네트워크 "${name || id.slice(0, 8)}"를 삭제하시겠습니까?`)) return;
     deleting = id;
     try {
       await apiMut('네트워크 삭제', () => api.delete(`/api/networks/${id}`, tok(), pid()));

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { confirmDialog } from '$lib/stores/confirm.svelte';
   import { untrack } from 'svelte';
   import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
@@ -76,7 +77,7 @@
   }
 
   async function deleteService(id: string, name: string) {
-    if (!confirm(`Security Service "${name}"을 삭제하시겠습니까?`)) return;
+    if (!await confirmDialog(`Security Service "${name}"을 삭제하시겠습니까?`)) return;
     deleting = id;
     try { await api.delete(`/api/security-services/${id}`, token, projectId); await fetchServices(); }
     catch (e) { alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e))); }

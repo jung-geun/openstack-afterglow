@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { confirmDialog } from '$lib/stores/confirm.svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { auth } from '$lib/stores/auth';
@@ -43,7 +44,7 @@
 
 	async function deleteNetwork() {
 		if (!network) return;
-		if (!confirm(`네트워크 "${network.name || network.id}"를 삭제하시겠습니까?`)) return;
+		if (!await confirmDialog(`네트워크 "${network.name || network.id}"를 삭제하시겠습니까?`)) return;
 		deleting = true;
 		try {
 			await api.delete(`/api/admin/networks/${network.id}`, token, projectId);
@@ -104,7 +105,7 @@
 	}
 
 	async function deleteSubnet(subnetId: string, subnetName: string) {
-		if (!confirm(`서브넷 "${subnetName || subnetId.slice(0, 8)}"를 삭제하시겠습니까?`)) return;
+		if (!await confirmDialog(`서브넷 "${subnetName || subnetId.slice(0, 8)}"를 삭제하시겠습니까?`)) return;
 		deletingSubnetId = subnetId;
 		try {
 			await api.delete(`/api/networks/subnets/${subnetId}`, token, projectId);

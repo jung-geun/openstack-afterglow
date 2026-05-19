@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { confirmDialog } from '$lib/stores/confirm.svelte';
   import { untrack } from 'svelte';
   import { goto } from '$app/navigation';
   import { auth } from '$lib/stores/auth';
@@ -63,7 +64,7 @@
   }
 
   async function deleteCluster(id: string, name: string) {
-    if (!confirm(`클러스터 "${name}"을 삭제하시겠습니까?`)) return;
+    if (!await confirmDialog(`클러스터 "${name}"을 삭제하시겠습니까?`)) return;
     deleting = id;
     try {
       await apiMut('K8s 클러스터 삭제', () => api.delete(`/api/clusters/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined));

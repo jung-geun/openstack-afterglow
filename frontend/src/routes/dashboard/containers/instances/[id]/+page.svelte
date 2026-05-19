@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { confirmDialog } from '$lib/stores/confirm.svelte';
   import { onMount } from 'svelte';
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
@@ -59,7 +60,7 @@
 
   async function handleDelete() {
     if (!container) return;
-    if (!confirm(`컨테이너 "${container.name}"을 삭제하시겠습니까?`)) return;
+    if (!await confirmDialog(`컨테이너 "${container.name}"을 삭제하시겠습니까?`)) return;
     try {
       await api.delete(`/api/containers/${containerId}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
       goto('/dashboard/containers/instances');

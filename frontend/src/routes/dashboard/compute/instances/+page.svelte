@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { confirmDialog } from '$lib/stores/confirm.svelte';
 	import { untrack } from 'svelte';
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
@@ -54,7 +55,7 @@
 	});
 
 	async function shelveInstance(id: string) {
-		if (!confirm('인스턴스를 보관하시겠습니까? (SHELVED_OFFLOADED 상태로 전환됩니다)')) return;
+		if (!await confirmDialog('인스턴스를 보관하시겠습니까? (SHELVED_OFFLOADED 상태로 전환됩니다)')) return;
 		try {
 			await apiMut('인스턴스 보관', () => api.post(`/api/instances/${id}/shelve`, {}, $auth.token ?? undefined, $auth.projectId ?? undefined));
 			await fetchInstances();
@@ -62,7 +63,7 @@
 	}
 
 	async function unshelveInstance(id: string) {
-		if (!confirm('인스턴스 보관을 해제하시겠습니까?')) return;
+		if (!await confirmDialog('인스턴스 보관을 해제하시겠습니까?')) return;
 		try {
 			await apiMut('인스턴스 보관 해제', () => api.post(`/api/instances/${id}/unshelve`, {}, $auth.token ?? undefined, $auth.projectId ?? undefined));
 			await fetchInstances();
@@ -70,7 +71,7 @@
 	}
 
 	async function deleteInstance(id: string, name: string) {
-		if (!confirm(`"${name}" 인스턴스를 삭제하시겠습니까?\nManila share와 볼륨도 함께 삭제됩니다.`)) return;
+		if (!await confirmDialog(`"${name}" 인스턴스를 삭제하시겠습니까?\nManila share와 볼륨도 함께 삭제됩니다.`)) return;
 		try {
 			await apiMut('인스턴스 삭제', () => api.delete(`/api/instances/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined));
 			await fetchInstances();

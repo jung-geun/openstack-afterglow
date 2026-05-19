@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { confirmDialog } from '$lib/stores/confirm.svelte';
   import { onMount } from 'svelte';
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
@@ -72,7 +73,7 @@
 
   async function handleDelete() {
     if (!cluster) return;
-    if (!confirm(`클러스터 "${cluster.name}"을 삭제하시겠습니까?`)) return;
+    if (!await confirmDialog(`클러스터 "${cluster.name}"을 삭제하시겠습니까?`)) return;
     try {
       await api.delete(`/api/clusters/${clusterId}`, token, projectId);
       goto('/dashboard/containers/clusters');

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { confirmDialog } from '$lib/stores/confirm.svelte';
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import { env } from '$env/dynamic/public';
@@ -41,7 +42,7 @@
 	}
 
 	async function deleteTarget(id: number) {
-		if (!confirm('이 연동 대상을 삭제하시겠습니까?')) return;
+		if (!await confirmDialog('이 연동 대상을 삭제하시겠습니까?')) return;
 		try {
 			await api.delete(
 				`/api/admin/notion/targets/${id}`,

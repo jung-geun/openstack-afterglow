@@ -2630,11 +2630,13 @@ k3s는 재시작 시 만료 90일 이내 인증서를 자동 갱신한다.
 - [x] `SecurityGroupRule`/`SecurityGroup` → `lib/types/securityGroup.ts` (신규)
 - [x] `QuotaItem`/`ManilaFileQuota` → `lib/types/quotas.ts` 확장
 
-### Phase 48d — ConfirmDialog 추출 (예정)
+### Phase 48d — ConfirmDialog 추출
 
-- [ ] `lib/components/ui/ConfirmDialog.svelte` 신규
-- [ ] `lib/stores/confirm.svelte.ts` 신규
-- [ ] 34개 페이지 `confirm()` → `confirmDialog()` 치환
+- [x] `lib/components/ui/ConfirmDialog.svelte` 신규 (ESC 닫기 포함)
+- [x] `lib/stores/confirm.svelte.ts` 신규 (`confirmDialog()` Promise<boolean>)
+- [x] `+layout.svelte`에 `<ConfirmDialog />` 마운트
+- [x] routes 31개 파일 42곳 `confirm()` → `await confirmDialog()` 치환
+- [x] Phase 48b controller 3개 내부 `confirm()` 동일 치환
 
 ### Phase 48e — Modal/FormModal 추출 (예정)
 

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { confirmDialog } from '$lib/stores/confirm.svelte';
 	import { untrack } from 'svelte';
 	import { pushState } from '$app/navigation';
 	import { auth } from '$lib/stores/auth';
@@ -59,7 +60,7 @@
 	}
 
 	async function deleteInstance(id: string, name: string) {
-		if (!confirm(`DB 인스턴스 "${name || id.slice(0, 8)}"를 삭제하시겠습니까?`)) return;
+		if (!await confirmDialog(`DB 인스턴스 "${name || id.slice(0, 8)}"를 삭제하시겠습니까?`)) return;
 		deleting = id;
 		try {
 			await api.delete(`/api/database-instances/${id}`, token, projectId);
@@ -72,7 +73,7 @@
 	}
 
 	async function restartInstance(id: string, name: string) {
-		if (!confirm(`DB 인스턴스 "${name || id.slice(0, 8)}"를 재시작하시겠습니까?`)) return;
+		if (!await confirmDialog(`DB 인스턴스 "${name || id.slice(0, 8)}"를 재시작하시겠습니까?`)) return;
 		restarting = id;
 		try {
 			await api.post(`/api/database-instances/${id}/restart`, {}, token, projectId);

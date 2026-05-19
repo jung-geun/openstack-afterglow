@@ -1,3 +1,4 @@
+import { confirmDialog } from '$lib/stores/confirm.svelte';
 import { api, ApiError } from '$lib/api/client';
 import { goto } from '$app/navigation';
 import type { LoadBalancerDetail, Listener, Pool, Member } from '$lib/types/resources';
@@ -64,7 +65,7 @@ export function createLoadbalancerDetailController(opts: LbDetailOpts) {
   }
 
   async function deleteListener(listenerId: string): Promise<void> {
-    if (!confirm('리스너를 삭제하시겠습니까?')) return;
+    if (!await confirmDialog('리스너를 삭제하시겠습니까?')) return;
     saving = true;
     try {
       await api.delete(`/api/loadbalancers/${id()}/listeners/${listenerId}`, tok(), pid());
@@ -87,7 +88,7 @@ export function createLoadbalancerDetailController(opts: LbDetailOpts) {
   }
 
   async function deletePool(poolId: string): Promise<void> {
-    if (!confirm('풀을 삭제하시겠습니까?')) return;
+    if (!await confirmDialog('풀을 삭제하시겠습니까?')) return;
     saving = true;
     try {
       await api.delete(`/api/loadbalancers/${id()}/pools/${poolId}`, tok(), pid());
@@ -112,7 +113,7 @@ export function createLoadbalancerDetailController(opts: LbDetailOpts) {
   }
 
   async function removeMember(memberId: string): Promise<void> {
-    if (!selectedPoolId || !confirm('멤버를 제거하시겠습니까?')) return;
+    if (!selectedPoolId || !await confirmDialog('멤버를 제거하시겠습니까?')) return;
     addingMember = true;
     try {
       await api.delete(`/api/loadbalancers/${id()}/pools/${selectedPoolId}/members/${memberId}`, tok(), pid());
@@ -123,7 +124,7 @@ export function createLoadbalancerDetailController(opts: LbDetailOpts) {
   }
 
   async function deleteLb() {
-    if (!confirm(`로드밸런서 "${lb?.name || id()}"을 삭제하시겠습니까? (연결된 리스너/풀/멤버도 모두 삭제됩니다)`)) return;
+    if (!await confirmDialog(`로드밸런서 "${lb?.name || id()}"을 삭제하시겠습니까? (연결된 리스너/풀/멤버도 모두 삭제됩니다)`)) return;
     saving = true;
     try {
       await api.delete(`/api/loadbalancers/${id()}`, tok(), pid());

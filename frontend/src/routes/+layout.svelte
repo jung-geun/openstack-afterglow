@@ -13,6 +13,7 @@
 	import UploadDock from '$lib/components/UploadDock.svelte';
 	import CmdPalette from '$lib/components/CmdPalette.svelte';
 	import { palette } from '$lib/stores/palette';
+	import ConfirmDialog from '$lib/components/ui/ConfirmDialog.svelte';
 	import './layout.css';
 
 	let { children } = $props();
@@ -201,6 +202,7 @@
 	<Toast />
 	<UploadDock />
 	<CmdPalette />
+	<ConfirmDialog />
 	<main class="min-h-screen bg-gray-950 text-white">
 		{@render children()}
 	</main>

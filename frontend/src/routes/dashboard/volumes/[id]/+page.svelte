@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { confirmDialog } from '$lib/stores/confirm.svelte';
 	import { untrack } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
@@ -76,7 +77,7 @@
 			alert('연결된 볼륨은 삭제할 수 없습니다. 먼저 인스턴스에서 분리하세요.');
 			return;
 		}
-		if (!confirm(`볼륨 "${volume.name || volume.id}"을 삭제하시겠습니까?`)) return;
+		if (!await confirmDialog(`볼륨 "${volume.name || volume.id}"을 삭제하시겠습니까?`)) return;
 		deleting = true;
 		try {
 			await api.delete(`/api/volumes/${volume.id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);

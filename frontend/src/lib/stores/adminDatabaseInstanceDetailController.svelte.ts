@@ -1,3 +1,4 @@
+import { confirmDialog } from '$lib/stores/confirm.svelte';
 import { api, ApiError } from '$lib/api/client';
 import { goto } from '$app/navigation';
 import type { DbInstance, DbDatabase, DbUser, DbBackup } from '$lib/types/resources';
@@ -52,7 +53,7 @@ export function createAdminDatabaseInstanceDetailController(opts: AdminDbInstanc
   }
 
   async function deleteInstance() {
-    if (!confirm(`DB 인스턴스 "${instance?.name}"를 삭제하시겠습니까?`)) return;
+    if (!await confirmDialog(`DB 인스턴스 "${instance?.name}"를 삭제하시겠습니까?`)) return;
     deleting = true;
     try {
       await api.delete(`/api/database-instances/${id()}`, tok(), pid());
@@ -83,7 +84,7 @@ export function createAdminDatabaseInstanceDetailController(opts: AdminDbInstanc
   }
 
   async function deleteDb(name: string) {
-    if (!confirm(`데이터베이스 "${name}"를 삭제하시겠습니까?`)) return;
+    if (!await confirmDialog(`데이터베이스 "${name}"를 삭제하시겠습니까?`)) return;
     deletingDb = name;
     try {
       await api.delete(`/api/database-instances/${id()}/databases/${encodeURIComponent(name)}`, tok(), pid());
@@ -104,7 +105,7 @@ export function createAdminDatabaseInstanceDetailController(opts: AdminDbInstanc
   }
 
   async function deleteUser(name: string) {
-    if (!confirm(`유저 "${name}"를 삭제하시겠습니까?`)) return;
+    if (!await confirmDialog(`유저 "${name}"를 삭제하시겠습니까?`)) return;
     deletingUser = name;
     try {
       await api.delete(`/api/database-instances/${id()}/users/${encodeURIComponent(name)}`, tok(), pid());
@@ -124,7 +125,7 @@ export function createAdminDatabaseInstanceDetailController(opts: AdminDbInstanc
   }
 
   async function deleteBackup(backupId: string) {
-    if (!confirm('백업을 삭제하시겠습니까?')) return;
+    if (!await confirmDialog('백업을 삭제하시겠습니까?')) return;
     deletingBackup = backupId;
     try {
       await api.delete(`/api/database-instances/backups/${backupId}`, tok(), pid());

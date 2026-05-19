@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { confirmDialog } from '$lib/stores/confirm.svelte';
 	import { untrack } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
@@ -57,7 +58,7 @@
 			alert('외부/공유 네트워크는 삭제할 수 없습니다.');
 			return;
 		}
-		if (!confirm(`네트워크 "${network.name || network.id}"를 삭제하시겠습니까?`)) return;
+		if (!await confirmDialog(`네트워크 "${network.name || network.id}"를 삭제하시겠습니까?`)) return;
 		deleting = true;
 		try {
 			await api.delete(`/api/networks/${network.id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
@@ -120,7 +121,7 @@
 	}
 
 	async function deleteSubnet(subnetId: string, subnetName: string) {
-		if (!confirm(`서브넷 "${subnetName || subnetId.slice(0, 8)}"를 삭제하시겠습니까?`)) return;
+		if (!await confirmDialog(`서브넷 "${subnetName || subnetId.slice(0, 8)}"를 삭제하시겠습니까?`)) return;
 		try {
 			await api.delete(
 				`/api/networks/subnets/${subnetId}`,

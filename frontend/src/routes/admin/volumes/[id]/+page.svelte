@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { confirmDialog } from '$lib/stores/confirm.svelte';
 	import { page } from '$app/stores';
 	import { auth } from '$lib/stores/auth';
 	import { untrack } from 'svelte';
@@ -39,7 +40,7 @@
 	}
 
 	async function deleteVolume() {
-		if (!volume || !confirm(`볼륨 "${volume.name || volume.id}"을 삭제하시겠습니까?`)) return;
+		if (!volume || !await confirmDialog(`볼륨 "${volume.name || volume.id}"을 삭제하시겠습니까?`)) return;
 		deleting = true;
 		try {
 			await api.delete(`/api/admin/volumes/${volumeId}`, token, projectId);

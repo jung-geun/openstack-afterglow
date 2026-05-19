@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { confirmDialog } from '$lib/stores/confirm.svelte';
 	import { onMount } from 'svelte';
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
@@ -62,7 +63,7 @@
 	}
 
 	async function deleteFlavor(id: string) {
-		if (!confirm('이 Flavor를 삭제하시겠습니까?')) return;
+		if (!await confirmDialog('이 Flavor를 삭제하시겠습니까?')) return;
 		try {
 			await api.delete(`/api/admin/flavors/${id}`, token, projectId);
 			await load();

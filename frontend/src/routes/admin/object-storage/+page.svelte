@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { confirmDialog } from '$lib/stores/confirm.svelte';
 	import { onMount } from 'svelte';
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
@@ -60,7 +61,7 @@
 	}
 
 	async function deleteContainer(name: string) {
-		if (!confirm(`버킷 "${name}" 와 그 안의 모든 객체를 삭제합니다. 계속하시겠습니까?`)) return;
+		if (!await confirmDialog(`버킷 "${name}" 와 그 안의 모든 객체를 삭제합니다. 계속하시겠습니까?`)) return;
 		deleting = name;
 		try {
 			await api.delete(`/api/object-storage/${encodeURIComponent(name)}`, token, projectId);

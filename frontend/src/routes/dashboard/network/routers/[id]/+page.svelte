@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { confirmDialog } from '$lib/stores/confirm.svelte';
 	import { page } from '$app/stores';
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
@@ -72,7 +73,7 @@
 	}
 
 	async function removeInterface(subnetId: string): Promise<void> {
-		if (!confirm('인터페이스를 제거하시겠습니까?')) return;
+		if (!await confirmDialog('인터페이스를 제거하시겠습니까?')) return;
 		saving = true;
 		try {
 			await api.delete(`/api/routers/${id}/interfaces/${subnetId}`, token, projectId);
@@ -99,7 +100,7 @@
 	}
 
 	async function removeGateway(): Promise<void> {
-		if (!confirm('외부 게이트웨이를 제거하시겠습니까?')) return;
+		if (!await confirmDialog('외부 게이트웨이를 제거하시겠습니까?')) return;
 		saving = true;
 		try {
 			await api.delete(`/api/routers/${id}/gateway`, token, projectId);
@@ -112,7 +113,7 @@
 	}
 
 	async function deleteRouter(): Promise<void> {
-		if (!confirm(`라우터 "${router?.name || id}"을 삭제하시겠습니까?`)) return;
+		if (!await confirmDialog(`라우터 "${router?.name || id}"을 삭제하시겠습니까?`)) return;
 		saving = true;
 		try {
 			await api.delete(`/api/routers/${id}`, token, projectId);

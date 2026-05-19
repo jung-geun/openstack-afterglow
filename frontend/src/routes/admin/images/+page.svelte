@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { confirmDialog } from '$lib/stores/confirm.svelte';
 	import { onMount } from 'svelte';
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
@@ -59,7 +60,7 @@
 	}
 
 	async function deleteImage(img: AdminImage) {
-		if (!confirm(`이미지 "${img.name}"을 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) return;
+		if (!await confirmDialog(`이미지 "${img.name}"을 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) return;
 		try { await api.delete(`/api/admin/images/${img.id}`, token, projectId); await load(curMarker); }
 		catch (e) { alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e))); }
 	}

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { confirmDialog } from '$lib/stores/confirm.svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { auth } from '$lib/stores/auth';
@@ -46,7 +47,7 @@
 			alert('외부/공유 네트워크는 삭제할 수 없습니다.');
 			return;
 		}
-		if (!confirm(`네트워크 "${network.name || network.id}"를 삭제하시겠습니까?`)) return;
+		if (!await confirmDialog(`네트워크 "${network.name || network.id}"를 삭제하시겠습니까?`)) return;
 		deleting = true;
 		try {
 			await api.delete(`/api/networks/${network.id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);

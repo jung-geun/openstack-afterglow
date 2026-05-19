@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { confirmDialog } from '$lib/stores/confirm.svelte';
 	import { untrack } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
@@ -65,7 +66,7 @@
 	}
 
 	async function handleRevokeRule(accessId: string): Promise<void> {
-		if (!fileStorage || !confirm('이 접근 규칙을 삭제하시겠습니까?')) return;
+		if (!fileStorage || !await confirmDialog('이 접근 규칙을 삭제하시겠습니까?')) return;
 		revokingId = accessId;
 		try {
 			await api.delete(`/api/file-storage/${fileStorage.id}/access-rules/${accessId}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
@@ -75,7 +76,7 @@
 	}
 
 	async function deleteFileStorage() {
-		if (!fileStorage || !confirm(`파일 스토리지 "${fileStorage.name || fileStorage.id}"를 삭제하시겠습니까?`)) return;
+		if (!fileStorage || !await confirmDialog(`파일 스토리지 "${fileStorage.name || fileStorage.id}"를 삭제하시겠습니까?`)) return;
 		deleting = true;
 		try {
 			await api.delete(`/api/file-storage/${fileStorage.id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);

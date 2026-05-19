@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { confirmDialog } from '$lib/stores/confirm.svelte';
   import { untrack } from 'svelte';
   import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
@@ -60,7 +61,7 @@
   }
 
   async function deleteKeypair(name: string) {
-    if (!confirm(`키페어 "${name}"을 삭제하시겠습니까?`)) return;
+    if (!await confirmDialog(`키페어 "${name}"을 삭제하시겠습니까?`)) return;
     deleting = name;
     try {
       await api.delete(`/api/keypairs/${name}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
