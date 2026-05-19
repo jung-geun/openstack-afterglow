@@ -13,6 +13,7 @@
 	import ExportLocationList from '$lib/components/dashboard/file-storage/[id]/ExportLocationList.svelte';
 	import AccessRulesSection from '$lib/components/dashboard/file-storage/[id]/AccessRulesSection.svelte';
 	import FileStorageMetadata from '$lib/components/dashboard/file-storage/[id]/FileStorageMetadata.svelte';
+	import { toast } from '$lib/stores/toast';
 
 	let fileStorage = $state<FileStorage | null>(null);
 	let loading = $state(true);
@@ -71,7 +72,7 @@
 		try {
 			await api.delete(`/api/file-storage/${fileStorage.id}/access-rules/${accessId}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			await fetchAccessRules(fileStorage.id);
-		} catch (e) { alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e))); }
+		} catch (e) { toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e))); }
 		finally { revokingId = null; }
 	}
 
@@ -81,7 +82,7 @@
 		try {
 			await api.delete(`/api/file-storage/${fileStorage.id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			goto('/dashboard');
-		} catch (e) { alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e))); }
+		} catch (e) { toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e))); }
 		finally { deleting = false; }
 	}
 </script>

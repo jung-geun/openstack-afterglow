@@ -1,6 +1,7 @@
 import { getContext, setContext } from 'svelte';
 import { api, ApiError } from '$lib/api/client';
 import { confirmDialog } from '$lib/stores/confirm.svelte';
+import { toast } from '$lib/stores/toast';
 import type { Volume, VolumeSnapshot, Instance } from '$lib/types/resources';
 
 export type { Volume, VolumeSnapshot };
@@ -130,7 +131,7 @@ export function createVolumeDetailStore(opts: VolumeDetailOpts) {
       opts.onDeleted?.();
       opts.onClose?.();
     } catch (e) {
-      alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+      toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
     } finally {
       deleting = false;
     }
@@ -177,7 +178,7 @@ export function createVolumeDetailStore(opts: VolumeDetailOpts) {
       await api.delete(`/api/volume-snapshots/${id}`, opts.token(), opts.projectId());
       snapshots = snapshots.filter(s => s.id !== id);
     } catch (e) {
-      alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+      toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
     } finally {
       deletingSnapshot = null;
     }

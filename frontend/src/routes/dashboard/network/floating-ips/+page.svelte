@@ -9,6 +9,7 @@
   import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
+  import { toast } from '$lib/stores/toast';
 
   let fips = $state<FloatingIp[]>([]);
   let loading = $state(true);
@@ -48,7 +49,7 @@
       await api.delete(`/api/networks/floating-ips/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
       await load();
     } catch (e) {
-      alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+      toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
     } finally {
       deleting = null;
     }

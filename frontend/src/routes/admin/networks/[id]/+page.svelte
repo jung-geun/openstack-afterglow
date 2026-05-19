@@ -10,6 +10,7 @@
 	import SubnetSection from '$lib/components/admin/networks/SubnetSection.svelte';
 	import RouterTable from '$lib/components/admin/networks/RouterTable.svelte';
 	import type { NetworkDetail } from '$lib/types/networks';
+	import { toast } from '$lib/stores/toast';
 
 	let network = $state<NetworkDetail | null>(null);
 	let loading = $state(true);
@@ -50,7 +51,7 @@
 			await api.delete(`/api/admin/networks/${network.id}`, token, projectId);
 			goto('/admin/networks');
 		} catch (e) {
-			alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			deleting = false;
 		}
@@ -111,7 +112,7 @@
 			await api.delete(`/api/networks/subnets/${subnetId}`, token, projectId);
 			await fetchNetwork(network!.id);
 		} catch (e) {
-			alert('서브넷 삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('서브넷 삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			deletingSubnetId = null;
 		}

@@ -12,6 +12,7 @@
   import ContainerDetailGrid from '$lib/components/dashboard/containers/instances/id/ContainerDetailGrid.svelte';
   import ContainerTerminalPanel from '$lib/components/dashboard/containers/instances/id/ContainerTerminalPanel.svelte';
   import ContainerLogsPanel from '$lib/components/dashboard/containers/instances/id/ContainerLogsPanel.svelte';
+  import { toast } from '$lib/stores/toast';
 
   let container = $state<ZunContainerDetail | null>(null);
   let logs = $state('');
@@ -52,7 +53,7 @@
       await api.post(`/api/containers/${containerId}/${action}`, {}, $auth.token ?? undefined, $auth.projectId ?? undefined);
       await fetchContainer();
     } catch (e) {
-      alert(`${action === 'start' ? '시작' : '중지'} 실패: ` + (e instanceof ApiError ? e.message : String(e)));
+      toast.error(`${action === 'start' ? '시작' : '중지'} 실패: ` + (e instanceof ApiError ? e.message : String(e)));
     } finally {
       actioning = false;
     }
@@ -65,7 +66,7 @@
       await api.delete(`/api/containers/${containerId}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
       goto('/dashboard/containers/instances');
     } catch (e) {
-      alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+      toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
     }
   }
 

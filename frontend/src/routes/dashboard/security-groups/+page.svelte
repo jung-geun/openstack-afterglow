@@ -7,6 +7,7 @@
 	import SecurityGroupCreateModal from '$lib/components/dashboard/security-groups/SecurityGroupCreateModal.svelte';
 
 	import type { SecurityGroupRule, SecurityGroup } from '$lib/types/securityGroup';
+	import { toast } from '$lib/stores/toast';
 
 	let securityGroups = $state<SecurityGroup[]>([]);
 	let loading = $state(true);
@@ -41,7 +42,7 @@
 			await api.delete(`/api/security-groups/${sgId}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			await fetchSecurityGroups();
 		} catch (e) {
-			alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		}
 	}
 
@@ -71,7 +72,7 @@
 			await api.delete(`/api/security-groups/${sgId}/rules/${ruleId}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			await fetchSecurityGroups();
 		} catch (e) {
-			alert('규칙 삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('규칙 삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		}
 	}
 

@@ -2,6 +2,7 @@ import { getContext, setContext } from 'svelte';
 import { api, ApiError } from '$lib/api/client';
 import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 import { confirmDialog } from '$lib/stores/confirm.svelte';
+import { toast } from '$lib/stores/toast';
 import type { FloatingIp, DbInstance, DbFlavor, DbDatabase, DbUser, DbBackup } from '$lib/types/resources';
 
 export interface DbInstanceDetailStoreOpts {
@@ -163,7 +164,7 @@ export function createDbInstanceDetailStore(opts: DbInstanceDetailStoreOpts) {
 			await api.delete(`/api/database-instances/${id}`, tok, proj);
 			opts.onDeleted?.();
 		} catch (e) {
-			alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 			deleting = false;
 		}
 	}
@@ -178,7 +179,7 @@ export function createDbInstanceDetailStore(opts: DbInstanceDetailStoreOpts) {
 				`/api/database-instances/${id}/root`, {}, tok, proj
 			);
 		} catch (e) {
-			alert('root 활성화 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('root 활성화 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			enablingRoot = false;
 		}
@@ -210,7 +211,7 @@ export function createDbInstanceDetailStore(opts: DbInstanceDetailStoreOpts) {
 		try {
 			await api.delete(`/api/database-instances/${id}/databases/${encodeURIComponent(name)}`, tok, proj);
 			databases = databases.filter(d => d.name !== name);
-		} catch (e) { alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e))); }
+		} catch (e) { toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e))); }
 		finally { deletingDb = null; }
 	}
 
@@ -245,7 +246,7 @@ export function createDbInstanceDetailStore(opts: DbInstanceDetailStoreOpts) {
 				+ `?host=${encodeURIComponent(host)}`;
 			await api.delete(url, tok, proj);
 			users = users.filter(x => !(x.name === u.name && x.host === u.host));
-		} catch (e) { alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e))); }
+		} catch (e) { toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e))); }
 		finally { deletingUser = null; }
 	}
 
@@ -270,7 +271,7 @@ export function createDbInstanceDetailStore(opts: DbInstanceDetailStoreOpts) {
 		try {
 			await api.delete(`/api/database-instances/backups/${backupId}`, tok, proj);
 			backups = backups.filter(b => b.id !== backupId);
-		} catch (e) { alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e))); }
+		} catch (e) { toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e))); }
 		finally { deletingBackup = null; }
 	}
 
@@ -286,9 +287,9 @@ export function createDbInstanceDetailStore(opts: DbInstanceDetailStoreOpts) {
 				flavor_id: instance?.flavor_id ?? '',
 				volume_size: instance?.size ?? 5,
 			}, tok, proj);
-			alert('복원 인스턴스 생성이 시작되었습니다.');
+			toast.success('복원 인스턴스 생성이 시작되었습니다.');
 			opts.onDeleted?.();
-		} catch (e) { alert('복원 실패: ' + (e instanceof ApiError ? e.message : String(e))); }
+		} catch (e) { toast.error('복원 실패: ' + (e instanceof ApiError ? e.message : String(e))); }
 		finally { restoringBackup = null; }
 	}
 

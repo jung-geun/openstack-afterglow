@@ -2671,8 +2671,11 @@ k3s는 재시작 시 만료 90일 이내 인증서를 자동 갱신한다.
 
 ### Phase 49b — alert() 128건 toast 교체
 
-- [ ] 에러성 alert → toast.error, 검증실패 → toast.warning, 성공 → toast.success
-- [ ] npm run check baseline 유지, npm run test 통과
+- [x] lib/stores 14개 + lib/components 2개 alert() → toast.error/warning/success 치환
+- [x] routes/ 29개 파일 alert() → toast.error/warning/success 치환
+- [x] grep alert() 0건 확인
+- [x] npm run check 62 errors baseline 유지
+- [x] npm run test 7 known failures 외 회귀 없음
 
 ### Phase 49c — legacy dashboard/loadbalancers/new/ 삭제
 

@@ -16,6 +16,7 @@
   import NetworkCreateModal from '$lib/components/dashboard/network/networks/NetworkCreateModal.svelte';
   import NetworksTableCard from '$lib/components/dashboard/network/networks/NetworksTableCard.svelte';
   import FloatingIpCard from '$lib/components/dashboard/network/networks/FloatingIpCard.svelte';
+  import { toast } from '$lib/stores/toast';
 
   let networks = $state<Network[]>([]);
   let floatingIps = $state<FloatingIp[]>([]);
@@ -63,7 +64,7 @@
       await api.put('/api/networks/default', { network_id: networkId }, tok(), pid());
       defaultNetworkId = networkId;
     } catch (e) {
-      alert('기본 네트워크 설정 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+      toast.error('기본 네트워크 설정 실패: ' + (e instanceof ApiError ? e.message : String(e)));
     } finally { settingDefault = null; }
   }
 
@@ -92,7 +93,7 @@
   }
 
   async function deleteNetwork(id: string, name: string, isExternal: boolean, isShared: boolean) {
-    if (isExternal || isShared) { alert('외부/공유 네트워크는 삭제할 수 없습니다.'); return; }
+    if (isExternal || isShared) { toast.warning('외부/공유 네트워크는 삭제할 수 없습니다.'); return; }
     if (!await confirmDialog(`네트워크 "${name || id.slice(0, 8)}"를 삭제하시겠습니까?`)) return;
     deleting = id;
     try {

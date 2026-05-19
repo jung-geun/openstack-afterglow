@@ -11,6 +11,7 @@
 	import VolumeBackupCreateModal from '$lib/components/volume/backups/VolumeBackupCreateModal.svelte';
 	import VolumeBackupRestoreModal from '$lib/components/volume/backups/VolumeBackupRestoreModal.svelte';
 	import VolumeBackupListTable from '$lib/components/volume/backups/VolumeBackupListTable.svelte';
+	import { toast } from '$lib/stores/toast';
 
 	let backups = $state<VolumeBackup[]>([]);
 	let volumes = $state<Volume[]>([]);
@@ -70,7 +71,7 @@
 			await api.delete(`/api/volumes/backups/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			await fetchBackups();
 		} catch (e) {
-			alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			deleting = null;
 		}

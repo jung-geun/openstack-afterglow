@@ -8,6 +8,7 @@
 	import NotionTargetEditForm from '$lib/components/admin/notion/NotionTargetEditForm.svelte';
 	import NotionTargetCard from '$lib/components/admin/notion/NotionTargetCard.svelte';
 	import type { NotionTarget } from '$lib/components/admin/notion/NotionTargetCard.svelte';
+	import { toast } from '$lib/stores/toast';
 
 	function getBaseUrl(): string {
 		if (typeof window !== 'undefined') {
@@ -51,7 +52,7 @@
 			);
 			await fetchTargets();
 		} catch {
-			alert('삭제 실패');
+			toast.error('삭제 실패');
 		}
 	}
 

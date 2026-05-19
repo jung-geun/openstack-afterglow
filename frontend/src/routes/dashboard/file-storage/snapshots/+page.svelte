@@ -11,6 +11,7 @@
   import SnapshotCreateModal from '$lib/components/file-storage/SnapshotCreateModal.svelte';
   import SnapshotListTable from '$lib/components/file-storage/SnapshotListTable.svelte';
   import SnapshotsEmptyState from '$lib/components/file-storage/SnapshotsEmptyState.svelte';
+  import { toast } from '$lib/stores/toast';
 
   let snapshots = $state<ShareSnapshot[]>([]);
   let fileStorages = $state<FileStorage[]>([]);
@@ -64,7 +65,7 @@
       await api.delete(`/api/share-snapshots/${id}`, token, projectId);
       await fetchSnapshots();
     } catch (e) {
-      alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+      toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
     } finally {
       deleting = null;
     }

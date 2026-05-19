@@ -11,6 +11,7 @@
   import SecurityServiceCreateModal from '$lib/components/dashboard/file-storage/security-services/SecurityServiceCreateModal.svelte';
   import SecurityServiceAttachModal from '$lib/components/dashboard/file-storage/security-services/SecurityServiceAttachModal.svelte';
   import SecurityServiceTable from '$lib/components/dashboard/file-storage/security-services/SecurityServiceTable.svelte';
+  import { toast } from '$lib/stores/toast';
 
   let services = $state<SecurityService[]>([]);
   let shareNetworks = $state<ShareNetwork[]>([]);
@@ -68,7 +69,7 @@
     attaching = true; attachError = '';
     try {
       await api.post(`/api/security-services/${selectedServiceId}/attach?share_network_id=${selectedNetworkId}`, {}, token, projectId);
-      alert('Share Network에 Security Service가 연결되었습니다.');
+      toast.success('Share Network에 Security Service가 연결되었습니다.');
       return true;
     } catch (e) {
       attachError = e instanceof ApiError ? e.message : '연결 실패';
@@ -80,7 +81,7 @@
     if (!await confirmDialog(`Security Service "${name}"을 삭제하시겠습니까?`)) return;
     deleting = id;
     try { await api.delete(`/api/security-services/${id}`, token, projectId); await fetchServices(); }
-    catch (e) { alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e))); }
+    catch (e) { toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e))); }
     finally { deleting = null; }
   }
 

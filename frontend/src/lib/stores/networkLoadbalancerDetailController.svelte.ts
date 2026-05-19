@@ -2,6 +2,7 @@ import { confirmDialog } from '$lib/stores/confirm.svelte';
 import { api, ApiError } from '$lib/api/client';
 import { goto } from '$app/navigation';
 import type { LoadBalancerDetail, Listener, Pool, Member, LbStatusNode } from '$lib/types/resources';
+import { toast } from '$lib/stores/toast';
 
 export interface NetworkLbDetailOpts {
   lbId: () => string;
@@ -61,7 +62,7 @@ export function createNetworkLoadbalancerDetailController(opts: NetworkLbDetailO
       await fetchAll();
       return true;
     } catch (e) {
-      alert('리스너 생성 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+      toast.error('리스너 생성 실패: ' + (e instanceof ApiError ? e.message : String(e)));
       return false;
     } finally { saving = false; }
   }
@@ -73,7 +74,7 @@ export function createNetworkLoadbalancerDetailController(opts: NetworkLbDetailO
       await api.delete(`/api/loadbalancers/${id()}/listeners/${listenerId}`, tok(), pid());
       await fetchAll();
     } catch (e) {
-      alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+      toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
     } finally { saving = false; }
   }
 
@@ -84,7 +85,7 @@ export function createNetworkLoadbalancerDetailController(opts: NetworkLbDetailO
       await fetchAll();
       return true;
     } catch (e) {
-      alert('풀 생성 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+      toast.error('풀 생성 실패: ' + (e instanceof ApiError ? e.message : String(e)));
       return false;
     } finally { saving = false; }
   }
@@ -97,7 +98,7 @@ export function createNetworkLoadbalancerDetailController(opts: NetworkLbDetailO
       if (selectedPoolId === poolId) selectedPoolId = null;
       await fetchAll();
     } catch (e) {
-      alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+      toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
     } finally { saving = false; }
   }
 
@@ -109,7 +110,7 @@ export function createNetworkLoadbalancerDetailController(opts: NetworkLbDetailO
       selectedPoolMembers = await api.get<Member[]>(`/api/loadbalancers/${id()}/pools/${selectedPoolId}/members`, tok(), pid());
       return true;
     } catch (e) {
-      alert('멤버 추가 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+      toast.error('멤버 추가 실패: ' + (e instanceof ApiError ? e.message : String(e)));
       return false;
     } finally { saving = false; }
   }
@@ -121,7 +122,7 @@ export function createNetworkLoadbalancerDetailController(opts: NetworkLbDetailO
       await api.delete(`/api/loadbalancers/${id()}/pools/${selectedPoolId}/members/${memberId}`, tok(), pid());
       selectedPoolMembers = selectedPoolMembers.filter(m => m.id !== memberId);
     } catch (e) {
-      alert('제거 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+      toast.error('제거 실패: ' + (e instanceof ApiError ? e.message : String(e)));
     } finally { saving = false; }
   }
 
@@ -132,7 +133,7 @@ export function createNetworkLoadbalancerDetailController(opts: NetworkLbDetailO
       await api.delete(`/api/loadbalancers/${id()}`, tok(), pid());
       goto('/dashboard/network/loadbalancers');
     } catch (e) {
-      alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+      toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
       saving = false;
     }
   }

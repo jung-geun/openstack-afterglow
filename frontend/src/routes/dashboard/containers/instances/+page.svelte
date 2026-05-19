@@ -13,6 +13,7 @@
   import ZunServiceUnavailable from '$lib/components/dashboard/containers/instances/ZunServiceUnavailable.svelte';
   import ContainersTable from '$lib/components/dashboard/containers/instances/ContainersTable.svelte';
   import ContainerCreateModal from '$lib/components/dashboard/containers/instances/ContainerCreateModal.svelte';
+  import { toast } from '$lib/stores/toast';
 
   let containers = $state<ZunContainer[]>([]);
   let serviceAvailable = $state(true);
@@ -75,7 +76,7 @@
       await api.post(`/api/containers/${uuid}/start`, {}, $auth.token ?? undefined, $auth.projectId ?? undefined);
       await fetchContainers();
     } catch (e) {
-      alert('시작 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+      toast.error('시작 실패: ' + (e instanceof ApiError ? e.message : String(e)));
     } finally {
       actionTarget = null;
     }
@@ -87,7 +88,7 @@
       await api.post(`/api/containers/${uuid}/stop`, {}, $auth.token ?? undefined, $auth.projectId ?? undefined);
       await fetchContainers();
     } catch (e) {
-      alert('중지 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+      toast.error('중지 실패: ' + (e instanceof ApiError ? e.message : String(e)));
     } finally {
       actionTarget = null;
     }
@@ -100,7 +101,7 @@
       await api.delete(`/api/containers/${uuid}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
       await fetchContainers();
     } catch (e) {
-      alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+      toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
     } finally {
       actionTarget = null;
     }

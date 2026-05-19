@@ -12,6 +12,7 @@
 	import BucketCreateModal from '$lib/components/object-storage/buckets/BucketCreateModal.svelte';
 	import BucketTable from '$lib/components/object-storage/buckets/BucketTable.svelte';
 	import QuarantineNotice from '$lib/components/object-storage/buckets/QuarantineNotice.svelte';
+	import { toast } from '$lib/stores/toast';
 
 	interface AccountMeta {
 		container_count: number;
@@ -67,7 +68,7 @@
 			await api.delete(`/api/object-storage/${encodeURIComponent(name)}`, token, projectId);
 			await load();
 		} catch (e) {
-			alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			deleting = null;
 		}

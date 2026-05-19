@@ -10,6 +10,7 @@
   import type { ShareNetwork } from '$lib/types/shareNetwork';
   import ShareNetworkCreateModal from '$lib/components/dashboard/file-storage/networks/ShareNetworkCreateModal.svelte';
   import ShareNetworkTable from '$lib/components/dashboard/file-storage/networks/ShareNetworkTable.svelte';
+  import { toast } from '$lib/stores/toast';
 
   let networks = $state<ShareNetwork[]>([]);
   let loading = $state(true);
@@ -51,7 +52,7 @@
       await api.delete(`/api/share-networks/${id}`, token, projectId);
       await fetchNetworks();
     } catch (e) {
-      alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+      toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
     } finally {
       deleting = null;
     }

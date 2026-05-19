@@ -3,6 +3,7 @@ import { untrack } from 'svelte';
 import { goto } from '$app/navigation';
 import { api, ApiError } from '$lib/api/client';
 import { confirmDialog } from '$lib/stores/confirm.svelte';
+import { toast } from '$lib/stores/toast';
 import type { RouterDetail } from '$lib/types/router';
 import type { SubnetDetail } from '$lib/types/networks';
 import type { Network } from '$lib/types/resources';
@@ -80,7 +81,7 @@ function createRouterDetailStore(opts: Options) {
 			selectedSubnetId = '';
 			await fetchRouter();
 		} catch (e) {
-			alert('인터페이스 추가 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('인터페이스 추가 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			saving = false;
 		}
@@ -93,7 +94,7 @@ function createRouterDetailStore(opts: Options) {
 			await api.delete(`/api/routers/${opts.routerId()}/interfaces/${subnetId}`, opts.token(), opts.projectId());
 			await fetchRouter();
 		} catch (e) {
-			alert('인터페이스 제거 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('인터페이스 제거 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			saving = false;
 		}
@@ -108,7 +109,7 @@ function createRouterDetailStore(opts: Options) {
 			selectedExtNetId = '';
 			await fetchRouter();
 		} catch (e) {
-			alert('게이트웨이 설정 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('게이트웨이 설정 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			saving = false;
 		}
@@ -121,7 +122,7 @@ function createRouterDetailStore(opts: Options) {
 			await api.delete(`/api/routers/${opts.routerId()}/gateway`, opts.token(), opts.projectId());
 			await fetchRouter();
 		} catch (e) {
-			alert('게이트웨이 제거 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('게이트웨이 제거 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			saving = false;
 		}
@@ -139,7 +140,7 @@ function createRouterDetailStore(opts: Options) {
 				goto('/dashboard/network/routers');
 			}
 		} catch (e) {
-			alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 			saving = false;
 		}
 	}

@@ -2,6 +2,7 @@ import { getContext, setContext } from 'svelte';
 import { api, ApiError, getBaseUrl } from '$lib/api/client';
 import { downloadBlobAs } from '$lib/utils/downloadBlob';
 import { streamK3sProgress } from '$lib/api/k3sSseStream';
+import { toast } from '$lib/stores/toast';
 import type { K3sCluster, K3sClusterHealth, K3sInterfaceInfo, NetworkInfo, ConfigMapInfo, SecretInfo } from '$lib/types/resources';
 import { listNodeInterfaces, attachNodeInterface, detachNodeInterface } from '$lib/api/k3s';
 import {
@@ -138,7 +139,8 @@ export function createK3sClusterDetailStore(opts: K3sClusterDetailOpts) {
       },
     });
     if (!res.ok) {
-      alert(res.status === 404 ? 'kubeconfig가 아직 준비되지 않았습니다.' : `다운로드 실패: HTTP ${res.status}`);
+      if (res.status === 404) toast.warning('kubeconfig가 아직 준비되지 않았습니다.');
+      else toast.error(`다운로드 실패: HTTP ${res.status}`);
       return;
     }
     const blob = await res.blob();

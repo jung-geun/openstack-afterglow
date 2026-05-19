@@ -5,6 +5,7 @@ import { downloadBlobAs } from '$lib/utils/downloadBlob';
 import { uploadQueue } from '$lib/stores/uploadQueue';
 import type { SwiftObject, SwiftObjectMeta, SwiftContainer } from '$lib/types/resources';
 import { confirmDialog } from '$lib/stores/confirm.svelte';
+import { toast } from '$lib/stores/toast';
 
 export type TreeRow = {
 	obj: SwiftObject;
@@ -420,7 +421,7 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 			await doRefresh();
 			loadContainerMeta();
 		} catch (e) {
-			alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally { bulkDeleting = false; }
 	}
 
@@ -444,7 +445,7 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 				downloadBlobAs(blob, filename);
 			}
 		} catch (e) {
-			alert('다운로드 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('다운로드 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally { downloading = null; }
 	}
 
@@ -458,7 +459,7 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 			);
 			await doRefresh();
 		} catch (e) {
-			alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally { deleting = null; }
 	}
 

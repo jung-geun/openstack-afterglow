@@ -4,6 +4,7 @@ import { auth } from '$lib/stores/auth';
 import { api, ApiError } from '$lib/api/client';
 import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 import { confirmDialog } from '$lib/stores/confirm.svelte';
+import { toast } from '$lib/stores/toast';
 import type {
 	Instance,
 	FloatingIpDetail,
@@ -194,7 +195,7 @@ export function createInstanceDetailStore(opts: InstanceDetailStoreOpts) {
 			const data = await api.get<{ url: string }>(`/api/instances/${instance.id}/console`, tok(), ownPid());
 			window.open(data.url, '_blank');
 		} catch {
-			alert('콘솔 URL을 가져올 수 없습니다');
+			toast.error('콘솔 URL을 가져올 수 없습니다');
 		}
 	}
 
@@ -207,7 +208,7 @@ export function createInstanceDetailStore(opts: InstanceDetailStoreOpts) {
 			await api.post(`/api/instances/${instance.id}/${action}`, {}, tok(), ownPid());
 			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
-			alert(`${labels[action]} 실패: ` + (e instanceof ApiError ? e.message : String(e)));
+			toast.error(`${labels[action]} 실패: ` + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			actioning = null;
 		}
@@ -227,7 +228,7 @@ export function createInstanceDetailStore(opts: InstanceDetailStoreOpts) {
 			await api.delete(`/api/instances/${instance.id}`, tok(), ownPid());
 			opts.onDelete();
 		} catch (e) {
-			alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			deleting = false;
 		}
@@ -240,7 +241,7 @@ export function createInstanceDetailStore(opts: InstanceDetailStoreOpts) {
 			await api.post(`/api/instances/${instance.id}/floating-ip?port_id=${portId}`, {}, tok(), ownPid());
 			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
-			alert('Floating IP 할당 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('Floating IP 할당 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			actioning = null;
 		}
@@ -255,7 +256,7 @@ export function createInstanceDetailStore(opts: InstanceDetailStoreOpts) {
 			await api.delete(`/api/networks/floating-ips/${fipId}`, tok(), ownPid());
 			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
-			alert('Floating IP 해제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('Floating IP 해제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			actioning = null;
 		}
@@ -268,7 +269,7 @@ export function createInstanceDetailStore(opts: InstanceDetailStoreOpts) {
 			await api.post(`/api/instances/${instance.id}/volumes`, { volume_id: volumeId }, tok(), ownPid());
 			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
-			alert('볼륨 연결 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('볼륨 연결 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			actioning = null;
 		}
@@ -282,7 +283,7 @@ export function createInstanceDetailStore(opts: InstanceDetailStoreOpts) {
 			await api.post(`/api/instances/${instance.id}/volumes`, { volume_id: vol.id }, tok(), ownPid());
 			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
-			alert('볼륨 생성/연결 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('볼륨 생성/연결 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			actioning = null;
 		}
@@ -296,7 +297,7 @@ export function createInstanceDetailStore(opts: InstanceDetailStoreOpts) {
 			await api.delete(`/api/instances/${instance.id}/volumes/${volumeId}`, tok(), ownPid());
 			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
-			alert('볼륨 분리 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('볼륨 분리 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			actioning = null;
 		}
@@ -311,7 +312,7 @@ export function createInstanceDetailStore(opts: InstanceDetailStoreOpts) {
 			await api.patch(`/api/instances/${instance.id}/volumes/${volumeId}`, { delete_on_termination: next }, tok(), ownPid());
 			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
-			alert('변경 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('변경 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			actioning = null;
 		}
@@ -324,7 +325,7 @@ export function createInstanceDetailStore(opts: InstanceDetailStoreOpts) {
 			await api.post(`/api/instances/${instance.id}/interfaces`, { net_id: netId }, tok(), ownPid());
 			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
-			alert('인터페이스 추가 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('인터페이스 추가 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			actioning = null;
 		}
@@ -338,7 +339,7 @@ export function createInstanceDetailStore(opts: InstanceDetailStoreOpts) {
 			await api.delete(`/api/instances/${instance.id}/interfaces/${portId}`, tok(), ownPid());
 			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
-			alert('인터페이스 제거 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('인터페이스 제거 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			actioning = null;
 		}
@@ -356,7 +357,7 @@ export function createInstanceDetailStore(opts: InstanceDetailStoreOpts) {
 			);
 			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
-			alert('보안 그룹 업데이트 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('보안 그룹 업데이트 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			actioning = null;
 		}
@@ -397,7 +398,7 @@ export function createInstanceDetailStore(opts: InstanceDetailStoreOpts) {
 			await api.post(`/api/admin/instances/${instance.id}/revert-resize`, {}, tok(), ownPid());
 			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
-			alert('리사이즈 취소 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('리사이즈 취소 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			actioning = null;
 		}
@@ -411,7 +412,7 @@ export function createInstanceDetailStore(opts: InstanceDetailStoreOpts) {
 			await api.post(`/api/admin/instances/${instance.id}/confirm-resize`, {}, tok(), ownPid());
 			await fetchInstance(instance.id, { silent: true });
 		} catch (e) {
-			alert('리사이즈 확인 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('리사이즈 확인 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			actioning = null;
 		}

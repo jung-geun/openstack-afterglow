@@ -11,6 +11,7 @@
   import KeypairCreateModal from '$lib/components/keypair/KeypairCreateModal.svelte';
   import KeypairListTable from '$lib/components/keypair/KeypairListTable.svelte';
   import KeypairEmptyState from '$lib/components/keypair/KeypairEmptyState.svelte';
+  import { toast } from '$lib/stores/toast';
 
   let keypairs = $state<Keypair[]>([]);
   let loading = $state(true);
@@ -67,7 +68,7 @@
       await api.delete(`/api/keypairs/${name}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
       await fetchKeypairs();
     } catch (e) {
-      alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+      toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
     } finally {
       deleting = null;
     }

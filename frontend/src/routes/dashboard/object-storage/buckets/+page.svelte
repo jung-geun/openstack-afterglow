@@ -11,6 +11,7 @@
 	import BucketCreateDialog from '$lib/components/object-storage/BucketCreateDialog.svelte';
 	import BucketCardGrid from '$lib/components/object-storage/BucketCardGrid.svelte';
 	import BucketCardSkeleton from '$lib/components/object-storage/BucketCardSkeleton.svelte';
+	import { toast } from '$lib/stores/toast';
 
 	let containers = $state<SwiftContainer[]>([]);
 	let account = $state<AccountMeta | null>(null);
@@ -67,7 +68,7 @@
 			await api.delete(`/api/object-storage/${encodeURIComponent(name)}`, token, projectId);
 			await load();
 		} catch (e) {
-			alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			deleting = null;
 		}

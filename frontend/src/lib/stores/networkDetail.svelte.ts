@@ -2,6 +2,7 @@ import { getContext, setContext } from 'svelte';
 import { api, ApiError } from '$lib/api/client';
 import type { NetworkDetail, NetworkRouterInfo, RouterListItem } from '$lib/types/resources';
 import { confirmDialog } from '$lib/stores/confirm.svelte';
+import { toast } from '$lib/stores/toast';
 
 interface Options {
 	networkId: () => string;
@@ -72,7 +73,7 @@ function createNetworkDetailStore(opts: Options) {
 			showRouterConnect = false;
 			await fetchNetwork();
 		} catch (e) {
-			alert('라우터 연결 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('라우터 연결 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			connectingRouter = false;
 		}
@@ -82,7 +83,7 @@ function createNetworkDetailStore(opts: Options) {
 		const subnetIds = network?.subnet_details.map(s => s.id) ?? [];
 		const targetSubnet = router.connected_subnet_ids.find(sid => subnetIds.includes(sid));
 		if (!targetSubnet) {
-			alert('연결된 서브넷을 찾을 수 없습니다.');
+			toast.warning('연결된 서브넷을 찾을 수 없습니다.');
 			return;
 		}
 		if (!(await confirmDialog(`라우터 "${router.name || router.id.slice(0, 8)}"과의 연결을 해제하시겠습니까?`))) return;
@@ -90,7 +91,7 @@ function createNetworkDetailStore(opts: Options) {
 			await api.delete(`/api/routers/${router.id}/interfaces/${targetSubnet}`, opts.token(), opts.projectId());
 			await fetchNetwork();
 		} catch (e) {
-			alert('라우터 연결 해제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('라우터 연결 해제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		}
 	}
 

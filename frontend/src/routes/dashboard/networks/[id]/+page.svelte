@@ -11,6 +11,7 @@
 	import DashboardSubnetSection from '$lib/components/dashboard/networks/id/DashboardSubnetSection.svelte';
 	import DashboardRouterTable from '$lib/components/dashboard/networks/id/DashboardRouterTable.svelte';
 	import type { NetworkDetail } from '$lib/types/networks';
+	import { toast } from '$lib/stores/toast';
 
 	let network = $state<NetworkDetail | null>(null);
 	let loading = $state(true);
@@ -44,7 +45,7 @@
 	async function deleteNetwork() {
 		if (!network) return;
 		if (network.is_external || network.is_shared) {
-			alert('외부/공유 네트워크는 삭제할 수 없습니다.');
+			toast.warning('외부/공유 네트워크는 삭제할 수 없습니다.');
 			return;
 		}
 		if (!await confirmDialog(`네트워크 "${network.name || network.id}"를 삭제하시겠습니까?`)) return;
@@ -53,7 +54,7 @@
 			await api.delete(`/api/networks/${network.id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			goto('/dashboard');
 		} catch (e) {
-			alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			deleting = false;
 		}

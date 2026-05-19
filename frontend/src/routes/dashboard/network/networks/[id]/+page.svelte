@@ -13,6 +13,7 @@
 	import NetworkInfoCard from '$lib/components/dashboard/networks/NetworkInfoCard.svelte';
 	import SubnetTableSection from '$lib/components/dashboard/networks/SubnetTableSection.svelte';
 	import ConnectedRouterTable from '$lib/components/dashboard/networks/ConnectedRouterTable.svelte';
+	import { toast } from '$lib/stores/toast';
 
 	let network = $state<NetworkDetail | null>(null);
 	let loading = $state(true);
@@ -55,7 +56,7 @@
 	async function deleteNetwork() {
 		if (!network) return;
 		if (network.is_external || network.is_shared) {
-			alert('외부/공유 네트워크는 삭제할 수 없습니다.');
+			toast.warning('외부/공유 네트워크는 삭제할 수 없습니다.');
 			return;
 		}
 		if (!await confirmDialog(`네트워크 "${network.name || network.id}"를 삭제하시겠습니까?`)) return;
@@ -64,7 +65,7 @@
 			await api.delete(`/api/networks/${network.id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			goto('/dashboard/network/networks');
 		} catch (e) {
-			alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			deleting = false;
 		}
@@ -130,7 +131,7 @@
 			);
 			await fetchNetwork(network!.id);
 		} catch (e) {
-			alert('서브넷 삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('서브넷 삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		}
 	}
 </script>

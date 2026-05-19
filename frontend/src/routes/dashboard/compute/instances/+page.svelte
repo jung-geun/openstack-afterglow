@@ -14,6 +14,7 @@
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import { openWizard } from '$lib/stores/wizard';
 	import InstancesTable from '$lib/components/instance/list/InstancesTable.svelte';
+	import { toast } from '$lib/stores/toast';
 
 	let instances = $state<Instance[]>([]);
 	let loading = $state(true);
@@ -83,7 +84,7 @@
 			const data = await api.get<{ url: string }>(`/api/instances/${id}/console`, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			window.open(data.url, '_blank');
 		} catch {
-			alert('콘솔 URL을 가져올 수 없습니다');
+			toast.error('콘솔 URL을 가져올 수 없습니다');
 		}
 	}
 

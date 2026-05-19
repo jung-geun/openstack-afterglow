@@ -3,6 +3,7 @@
   import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
   import { confirmDialog } from '$lib/stores/confirm.svelte';
+  import { toast } from '$lib/stores/toast';
 
   interface Keypair {
     name: string;
@@ -67,7 +68,7 @@
       await api.delete(`/api/keypairs/${name}`, token, projectId);
       await fetchKeypairs();
     } catch (e) {
-      alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+      toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
     } finally {
       deleting = null;
     }

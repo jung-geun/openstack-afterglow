@@ -127,9 +127,9 @@ export function createK3sClusterListController(opts: K3sClusterListOpts) {
     });
     if (!res.ok) {
       if (res.status === 404) {
-        alert('kubeconfig가 아직 준비되지 않았습니다. 클러스터가 초기화 중입니다.');
+        toast.warning('kubeconfig가 아직 준비되지 않았습니다. 클러스터가 초기화 중입니다.');
       } else {
-        alert(`다운로드 실패: HTTP ${res.status}`);
+        toast.error(`다운로드 실패: HTTP ${res.status}`);
       }
       return;
     }

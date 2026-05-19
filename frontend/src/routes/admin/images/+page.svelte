@@ -13,6 +13,7 @@
 	import AdminImagesTable from '$lib/components/admin/images/AdminImagesTable.svelte';
 	import ImageEditModal from '$lib/components/admin/images/ImageEditModal.svelte';
 	import type { AdminImage, PagedResponse } from '$lib/types/adminImage';
+	import { toast } from '$lib/stores/toast';
 
 	let images = $state<AdminImage[]>([]);
 	let loading = $state(true), refreshing = $state(false), error = $state('');
@@ -62,7 +63,7 @@
 	async function deleteImage(img: AdminImage) {
 		if (!await confirmDialog(`이미지 "${img.name}"을 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) return;
 		try { await api.delete(`/api/admin/images/${img.id}`, token, projectId); await load(curMarker); }
-		catch (e) { alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e))); }
+		catch (e) { toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e))); }
 	}
 
 	async function toggleActivation(img: AdminImage) {
@@ -70,7 +71,7 @@
 		try {
 			await api.post(`/api/admin/images/${img.id}/${img.status === 'active' ? 'deactivate' : 'reactivate'}`, {}, token, projectId);
 			await load(curMarker);
-		} catch (e) { alert('상태 변경 실패: ' + (e instanceof ApiError ? e.message : String(e))); }
+		} catch (e) { toast.error('상태 변경 실패: ' + (e instanceof ApiError ? e.message : String(e))); }
 		finally { togglingId = null; }
 	}
 

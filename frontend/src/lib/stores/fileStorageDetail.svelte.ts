@@ -1,6 +1,7 @@
 import { getContext, setContext } from 'svelte';
 import { api, ApiError } from '$lib/api/client';
 import { confirmDialog } from '$lib/stores/confirm.svelte';
+import { toast } from '$lib/stores/toast';
 import type { FileStorage, AccessRule } from '$lib/types/resources';
 
 export const statusColor: Record<string, string> = {
@@ -103,7 +104,7 @@ function createFileStorageDetailStore(opts: Options) {
 			);
 			await fetchAccessRules();
 		} catch (e) {
-			alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			revokingId = null;
 		}
@@ -130,7 +131,7 @@ function createFileStorageDetailStore(opts: Options) {
 			opts.onDeleted?.();
 			opts.onClose?.();
 		} catch (e) {
-			alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			deleting = false;
 		}

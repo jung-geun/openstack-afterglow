@@ -12,6 +12,7 @@
 	import VolumePageHeader from '$lib/components/volume/VolumePageHeader.svelte';
 	import VolumeBasicInfoCard from '$lib/components/volume/VolumeBasicInfoCard.svelte';
 	import VolumeAttachmentsTable from '$lib/components/volume/VolumeAttachmentsTable.svelte';
+	import { toast } from '$lib/stores/toast';
 
 	let volume = $state<Volume | null>(null);
 	let attachedInstances = $state<Map<string, string>>(new Map());
@@ -74,7 +75,7 @@
 	async function deleteVolume() {
 		if (!volume) return;
 		if (volume.attachments.length > 0) {
-			alert('연결된 볼륨은 삭제할 수 없습니다. 먼저 인스턴스에서 분리하세요.');
+			toast.warning('연결된 볼륨은 삭제할 수 없습니다. 먼저 인스턴스에서 분리하세요.');
 			return;
 		}
 		if (!await confirmDialog(`볼륨 "${volume.name || volume.id}"을 삭제하시겠습니까?`)) return;
@@ -83,7 +84,7 @@
 			await api.delete(`/api/volumes/${volume.id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			goto('/dashboard');
 		} catch (e) {
-			alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			deleting = false;
 		}

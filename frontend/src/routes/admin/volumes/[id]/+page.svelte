@@ -13,6 +13,7 @@
 	import AdminVolumeMetadataCard from '$lib/components/admin/volumes/id/AdminVolumeMetadataCard.svelte';
 	import AdminVolumeExtendModal from '$lib/components/admin/volumes/id/AdminVolumeExtendModal.svelte';
 	import AdminVolumeResetStatusModal from '$lib/components/admin/volumes/id/AdminVolumeResetStatusModal.svelte';
+	import { toast } from '$lib/stores/toast';
 
 	const volumeId = $derived($page.params.id);
 	const token = $derived($auth.token ?? undefined);
@@ -46,7 +47,7 @@
 			await api.delete(`/api/admin/volumes/${volumeId}`, token, projectId);
 			goto('/admin/volumes');
 		} catch (e) {
-			alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 			deleting = false;
 		}
 	}
@@ -59,7 +60,7 @@
 			await fetchVolume();
 			return true;
 		} catch (e) {
-			alert('상태 초기화 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('상태 초기화 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 			return false;
 		} finally {
 			resetting = false;
@@ -68,7 +69,7 @@
 
 	async function extendVolume(newSize: number): Promise<boolean> {
 		if (!volume || newSize <= volume.size) {
-			alert('새 크기는 현재 크기보다 커야 합니다.');
+			toast.warning('새 크기는 현재 크기보다 커야 합니다.');
 			return false;
 		}
 		extending = true;
@@ -78,7 +79,7 @@
 			await fetchVolume();
 			return true;
 		} catch (e) {
-			alert('확장 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('확장 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 			return false;
 		} finally {
 			extending = false;

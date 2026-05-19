@@ -2,6 +2,7 @@ import { getContext, setContext } from 'svelte';
 import { api, ApiError } from '$lib/api/client';
 import type { ImageDetail, ImageMember } from '$lib/types/resources';
 import { confirmDialog } from '$lib/stores/confirm.svelte';
+import { toast } from '$lib/stores/toast';
 
 const RESERVED_KEYS = new Set([
 	'id', 'name', 'status', 'visibility', 'owner', 'size', 'virtual_size',
@@ -262,7 +263,7 @@ export function createImageDetailStore(opts: ImageDetailStoreOpts) {
 			opts.onDelete?.(image.id);
 			opts.onClose?.();
 		} catch (e) {
-			alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 			deleting = false;
 		}
 	}

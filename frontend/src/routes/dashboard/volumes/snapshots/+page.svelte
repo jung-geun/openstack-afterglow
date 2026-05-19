@@ -11,6 +11,7 @@
   import VolumeSnapshotCreateModal from '$lib/components/volume/snapshots/VolumeSnapshotCreateModal.svelte';
   import VolumeSnapshotsTable from '$lib/components/volume/snapshots/VolumeSnapshotsTable.svelte';
   import VolumeSnapshotsEmptyState from '$lib/components/volume/snapshots/VolumeSnapshotsEmptyState.svelte';
+  import { toast } from '$lib/stores/toast';
 
   let snapshots = $state<VolumeSnapshot[]>([]);
   let volumes = $state<Volume[]>([]);
@@ -54,7 +55,7 @@
       await api.delete(`/api/volume-snapshots/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
       await fetchSnapshots();
     } catch (e) {
-      alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+      toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
     } finally {
       deleting = null;
     }

@@ -2,6 +2,7 @@ import { api, ApiError } from '$lib/api/client';
 import { KNOWN_DISTROS } from '$lib/utils/imageOs';
 import type { ImageInfo } from '$lib/types/resources';
 import { confirmDialog } from '$lib/stores/confirm.svelte';
+import { toast } from '$lib/stores/toast';
 
 export interface ImagesControllerOpts {
   token: () => string | undefined;
@@ -85,7 +86,7 @@ export function createImagesController(opts: ImagesControllerOpts) {
       await api.delete(`/api/images/${id}`, opts.token(), opts.projectId());
       images = images.filter(img => img.id !== id);
     } catch (e) {
-      alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+      toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
     } finally {
       deleting = null;
     }
@@ -98,7 +99,7 @@ export function createImagesController(opts: ImagesControllerOpts) {
       await api.post(`/api/images/${img.id}/${action}`, {}, opts.token(), opts.projectId());
       await fetchImages({ refresh: true });
     } catch (e) {
-      alert('상태 변경 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+      toast.error('상태 변경 실패: ' + (e instanceof ApiError ? e.message : String(e)));
     } finally {
       togglingId = null;
     }

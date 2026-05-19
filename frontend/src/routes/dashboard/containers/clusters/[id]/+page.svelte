@@ -13,6 +13,7 @@
   import ClusterDetailGrid from '$lib/components/dashboard/containers/clusters/id/ClusterDetailGrid.svelte';
   import ClusterResourcesTab from '$lib/components/dashboard/containers/clusters/id/ClusterResourcesTab.svelte';
   import ClusterEventsTab from '$lib/components/dashboard/containers/clusters/id/ClusterEventsTab.svelte';
+  import { toast } from '$lib/stores/toast';
 
   type Tab = 'detail' | 'resources' | 'events';
   let activeTab = $state<Tab>('detail');
@@ -78,7 +79,7 @@
       await api.delete(`/api/clusters/${clusterId}`, token, projectId);
       goto('/dashboard/containers/clusters');
     } catch (e) {
-      alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+      toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
     }
   }
 

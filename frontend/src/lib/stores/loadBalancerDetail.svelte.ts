@@ -1,6 +1,7 @@
 import { getContext, setContext, untrack } from 'svelte';
 import { api, ApiError } from '$lib/api/client';
 import { confirmDialog } from '$lib/stores/confirm.svelte';
+import { toast } from '$lib/stores/toast';
 import type {
   LoadBalancerDetail,
   Listener,
@@ -103,7 +104,7 @@ export function createLoadBalancerDetailStore(opts: LoadBalancerDetailOpts) {
       listenerForm = { protocol: 'HTTP', protocol_port: 80, name: '' };
       await fetchAll();
     } catch (e) {
-      alert('리스너 생성 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+      toast.error('리스너 생성 실패: ' + (e instanceof ApiError ? e.message : String(e)));
     } finally {
       saving = false;
     }
@@ -120,7 +121,7 @@ export function createLoadBalancerDetailStore(opts: LoadBalancerDetailOpts) {
       );
       await fetchAll();
     } catch (e) {
-      alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+      toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
     } finally {
       saving = false;
     }
@@ -143,7 +144,7 @@ export function createLoadBalancerDetailStore(opts: LoadBalancerDetailOpts) {
       poolForm = { protocol: 'HTTP', lb_algorithm: 'ROUND_ROBIN', name: '' };
       await fetchAll();
     } catch (e) {
-      alert('풀 생성 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+      toast.error('풀 생성 실패: ' + (e instanceof ApiError ? e.message : String(e)));
     } finally {
       saving = false;
     }
@@ -161,7 +162,7 @@ export function createLoadBalancerDetailStore(opts: LoadBalancerDetailOpts) {
       if (selectedPoolId === poolId) selectedPoolId = null;
       await fetchAll();
     } catch (e) {
-      alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+      toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
     } finally {
       saving = false;
     }
@@ -193,7 +194,7 @@ export function createLoadBalancerDetailStore(opts: LoadBalancerDetailOpts) {
         opts.projectId(),
       );
     } catch (e) {
-      alert('멤버 추가 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+      toast.error('멤버 추가 실패: ' + (e instanceof ApiError ? e.message : String(e)));
     } finally {
       saving = false;
     }
@@ -210,7 +211,7 @@ export function createLoadBalancerDetailStore(opts: LoadBalancerDetailOpts) {
       );
       selectedPoolMembers = selectedPoolMembers.filter((m) => m.id !== memberId);
     } catch (e) {
-      alert('제거 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+      toast.error('제거 실패: ' + (e instanceof ApiError ? e.message : String(e)));
     } finally {
       saving = false;
     }
@@ -229,7 +230,7 @@ export function createLoadBalancerDetailStore(opts: LoadBalancerDetailOpts) {
       await api.delete(`/api/loadbalancers/${id}`, opts.token(), opts.projectId());
       opts.onDeleted?.();
     } catch (e) {
-      alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+      toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
       saving = false;
     }
   }

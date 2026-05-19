@@ -10,6 +10,7 @@
 	import RouterInterfacesSection from '$lib/components/dashboard/routers/id/RouterInterfacesSection.svelte';
 	import type { RouterDetail } from '$lib/types/router';
 	import type { Network } from '$lib/types/resources';
+	import { toast } from '$lib/stores/toast';
 
 	const id = $derived($page.params.id);
 
@@ -65,7 +66,7 @@
 			await fetchRouter();
 			return true;
 		} catch (e) {
-			alert('인터페이스 추가 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('인터페이스 추가 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 			return false;
 		} finally {
 			saving = false;
@@ -79,7 +80,7 @@
 			await api.delete(`/api/routers/${id}/interfaces/${subnetId}`, token, projectId);
 			await fetchRouter();
 		} catch (e) {
-			alert('인터페이스 제거 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('인터페이스 제거 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			saving = false;
 		}
@@ -92,7 +93,7 @@
 			await fetchRouter();
 			return true;
 		} catch (e) {
-			alert('게이트웨이 설정 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('게이트웨이 설정 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 			return false;
 		} finally {
 			saving = false;
@@ -106,7 +107,7 @@
 			await api.delete(`/api/routers/${id}/gateway`, token, projectId);
 			await fetchRouter();
 		} catch (e) {
-			alert('게이트웨이 제거 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('게이트웨이 제거 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			saving = false;
 		}
@@ -119,7 +120,7 @@
 			await api.delete(`/api/routers/${id}`, token, projectId);
 			goto('/dashboard/network/routers');
 		} catch (e) {
-			alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 			saving = false;
 		}
 	}

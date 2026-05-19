@@ -11,6 +11,7 @@
 	import DbCreatePanel from '$lib/components/database/DbCreatePanel.svelte';
 	import GrafanaEmbed from '$lib/components/monitoring/GrafanaEmbed.svelte';
 	import type { DbInstance } from '$lib/types/resources';
+	import { toast } from '$lib/stores/toast';
 
 	let instances = $state<DbInstance[]>([]);
 	let loading = $state(true);
@@ -44,7 +45,7 @@
 			await api.delete(`/api/database-instances/${id}`, token, projectId);
 			await load();
 		} catch (e) {
-			alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			deleting = null;
 		}
@@ -57,7 +58,7 @@
 			await api.post(`/api/database-instances/${id}/restart`, {}, token, projectId);
 			await load();
 		} catch (e) {
-			alert('재시작 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('재시작 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			restarting = null;
 		}

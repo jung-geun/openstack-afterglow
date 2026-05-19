@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
+	import { toast } from '$lib/stores/toast';
 
 	interface Transfer {
 		id: string;
@@ -115,7 +116,7 @@
 			);
 			await loadTransfers();
 		} catch (e) {
-			alert('취소 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('취소 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			cancellingId = null;
 		}

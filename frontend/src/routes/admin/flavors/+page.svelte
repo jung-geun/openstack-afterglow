@@ -13,6 +13,7 @@
 	import AdminFlavorsFilters from '$lib/components/admin/flavors/AdminFlavorsFilters.svelte';
 	import AdminFlavorsTable from '$lib/components/admin/flavors/AdminFlavorsTable.svelte';
 	import type { Flavor, PagedResponse } from '$lib/types/flavor';
+	import { toast } from '$lib/stores/toast';
 
 	let flavors = $state<Flavor[]>([]);
 	let loading = $state(true);
@@ -68,7 +69,7 @@
 			await api.delete(`/api/admin/flavors/${id}`, token, projectId);
 			await load();
 		} catch (e) {
-			alert('Flavor 삭제 실패: ' + (e instanceof ApiError ? e.message : '오류'));
+			toast.error('Flavor 삭제 실패: ' + (e instanceof ApiError ? e.message : '오류'));
 		}
 	}
 
