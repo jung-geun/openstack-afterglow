@@ -2716,18 +2716,18 @@ k3s는 재시작 시 만료 90일 이내 인증서를 자동 갱신한다.
 
 ### Phase 50b — 백엔드 endpoint (대시보드 4-A~4-E) + pytest
 
-- [ ] backend/app/api/dashboard/ 5개 endpoint
-- [ ] backend/app/models/dashboard.py Pydantic 모델
-- [ ] backend/tests/test_dashboard_*.py pytest
-- [ ] pytest 통과
+- [x] backend/app/api/dashboard/ 5개 endpoint
+- [x] backend/app/models/dashboard.py Pydantic 모델
+- [x] backend/tests/test_dashboard_*.py pytest
+- [x] pytest 통과
 
 ### Phase 50c — 백엔드 endpoint (관리자 A-1~A-7) + pytest
 
-- [ ] admin_dashboard.py A-1~A-6 endpoint
-- [ ] admin_identity.py A-7 summary
-- [ ] bulk-action ActivityLog 자동 기록
-- [ ] backend/tests/test_admin_dashboard.py require_admin 거부 케이스 포함
-- [ ] pytest 통과
+- [x] admin_dashboard.py A-1~A-6 endpoint
+- [x] admin_identity.py A-7 summary
+- [x] bulk-action ActivityLog 자동 기록
+- [x] backend/tests/test_admin_dashboard.py require_admin 거부 케이스 포함
+- [x] pytest 통과
 
 ### Phase 50d — 사이드바 nav + 신규 라우트 3종 스켈레톤
 

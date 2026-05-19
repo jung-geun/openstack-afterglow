@@ -1126,3 +1126,54 @@ async def sync_monitoring_sg(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Monitoring SG 동기화 실패: {e}")
+
+
+# ---------------------------------------------------------------------------
+# A-7  GET /admin/identity/summary  (Phase 50c)
+# ---------------------------------------------------------------------------
+
+@router.get("/identity/summary", dependencies=[Depends(require_admin)])
+async def get_identity_summary(
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """users / projects / roles / groups / domains 카운트 + 최근 변경 요약."""
+    def _collect():
+        users = list(conn.identity.users(limit=1000))
+        projects = list(conn.identity.projects(limit=1000))
+        roles = list(conn.identity.roles(limit=200))
+        groups = []
+        try:
+            groups = list(conn.identity.groups(limit=500))
+        except Exception:
+            pass
+        domains = []
+        try:
+            domains = list(conn.identity.domains(limit=50))
+        except Exception:
+            pass
+
+        # 최근 30일 내 활성 사용자 (created_at 기준, 없으면 0)
+        recent_enabled = sum(1 for u in users if getattr(u, "is_enabled", True))
+
+        return {
+            "counts": {
+                "users": len(users),
+                "users_enabled": recent_enabled,
+                "projects": len(projects),
+                "roles": len(roles),
+                "groups": len(groups),
+                "domains": len(domains),
+            },
+            "top_roles": [{"id": r.id, "name": r.name} for r in roles[:10]],
+        }
+
+    try:
+        summary = await cached_call(
+            "afterglow:admin:identity:summary",
+            ttl_slow(),
+            _collect,
+        )
+    except Exception:
+        raise HTTPException(status_code=500, detail="Identity 요약 조회 실패")
+
+    return summary
