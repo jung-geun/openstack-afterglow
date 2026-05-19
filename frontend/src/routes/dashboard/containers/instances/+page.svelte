@@ -6,8 +6,10 @@
   import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
   import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+  import { buildContainerCreatePayload } from '$lib/utils/containerCreatePayload';
   import type { ZunContainer, ContainerListResponse, EnvVar, PortMapping } from '$lib/types/zunContainer';
   import ZunServiceBanner from '$lib/components/dashboard/containers/instances/ZunServiceBanner.svelte';
+  import ZunServiceUnavailable from '$lib/components/dashboard/containers/instances/ZunServiceUnavailable.svelte';
   import ContainersTable from '$lib/components/dashboard/containers/instances/ContainersTable.svelte';
   import ContainerCreateModal from '$lib/components/dashboard/containers/instances/ContainerCreateModal.svelte';
 
@@ -54,31 +56,7 @@
     creating = true;
     createError = '';
     try {
-      const body: Record<string, unknown> = {
-        name: payload.name,
-        image: payload.image,
-        cpu: payload.cpu,
-        memory: payload.memory,
-      };
-      if (payload.command.trim()) body.command = payload.command;
-
-      const envEntries = payload.environment.filter(e => e.key.trim());
-      if (envEntries.length > 0) {
-        const environment: Record<string, string> = {};
-        envEntries.forEach(e => { environment[e.key.trim()] = e.value; });
-        body.environment = environment;
-      }
-
-      const validPorts = payload.ports.filter(p => p.container_port > 0);
-      if (validPorts.length > 0) {
-        body.ports = validPorts.map(p => ({
-          container_port: p.container_port,
-          ...(p.host_port > 0 ? { host_port: p.host_port } : {}),
-          protocol: p.protocol,
-        }));
-      }
-
-      await api.post('/api/containers', body, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      await api.post('/api/containers', buildContainerCreatePayload(payload), $auth.token ?? undefined, $auth.projectId ?? undefined);
       showModal = false;
       await fetchContainers();
       return true;
@@ -174,10 +152,7 @@
   {#if loading}
     <LoadingSkeleton variant="table" rows={4} />
   {:else if !serviceAvailable}
-    <div class="text-center py-20 text-gray-600">
-      <p class="text-lg mb-2">Zun 서비스를 사용할 수 없습니다</p>
-      <p class="text-sm">OpenStack 관리자에게 Zun 배포를 요청하세요</p>
-    </div>
+    <ZunServiceUnavailable />
   {:else}
     <ContainersTable
       {containers}
