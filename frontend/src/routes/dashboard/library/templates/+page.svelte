@@ -91,7 +91,7 @@
 
 <div class="flex flex-col h-full overflow-auto bg-gray-900 text-gray-100 p-6">
   <PageHeader title="템플릿" breadcrumb="라이브러리">
-    {#snippet action()}
+    {#snippet actions()}
       <div class="flex items-center gap-2">
         {#if $isAdmin}
           <button

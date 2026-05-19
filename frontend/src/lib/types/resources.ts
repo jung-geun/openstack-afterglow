@@ -14,6 +14,13 @@ export interface Instance {
   created_at: string | null;
   union_libraries: string[];
   union_strategy: string | null;
+  union_upper_volume_id?: string | null;
+  union_share_ids?: string[];
+  metadata?: Record<string, string>;
+  fault?: { code?: number; message?: string; details?: string; created?: string } | null;
+  image_id?: string | null;
+  flavor_id?: string | null;
+  key_name?: string | null;
 }
 
 export interface Volume {
@@ -141,6 +148,8 @@ export interface FloatingIp {
   port_id: string | null;
   instance_id?: string | null;
   instance_name?: string | null;
+  project_id?: string | null;
+  router_id?: string | null;
 }
 
 export interface DbFlavor {
@@ -349,6 +358,7 @@ export interface User {
 export interface NetworkInfo {
   id: string;
   name: string;
+  is_external?: boolean;
 }
 
 export interface PortInfo {
@@ -358,4 +368,66 @@ export interface PortInfo {
   device_owner: string | null;
   fixed_ips: { ip_address: string }[];
   project_id: string | null;
+  security_group_ids?: string[];
+  mac_address?: string;
+  network_id?: string;
+}
+
+export type FloatingIpInfo = FloatingIp;
+export type FloatingIpDetail = FloatingIp;
+
+export interface SubnetDetail {
+  id: string;
+  name: string;
+  cidr: string;
+  gateway_ip: string | null;
+  dhcp_enabled: boolean;
+}
+
+export interface NetworkRouterInfo {
+  id: string;
+  name: string;
+  connected_subnet_ids: string[];
+  external_gateway_network_id: string | null;
+}
+
+export type RouterListItem = Router;
+
+export interface NetworkDetail {
+  id: string;
+  name: string;
+  status: string;
+  is_external: boolean;
+  is_shared: boolean;
+  subnet_details: SubnetDetail[];
+  routers: NetworkRouterInfo[];
+  project_id?: string | null;
+}
+
+export interface ImageInfo {
+  id: string;
+  name: string;
+  status: string;
+  visibility?: string;
+  size?: number;
+  min_disk?: number;
+  min_ram?: number;
+  disk_format?: string;
+  container_format?: string;
+  created_at?: string;
+  updated_at?: string;
+  owner?: string;
+  protected?: boolean;
+  tags?: string[];
+  os_distro?: string;
+  os_type?: string;
+}
+
+export interface AccessRule {
+  id: string;
+  access_to: string;
+  access_level: string;
+  access_type?: string;
+  state: string;
+  access_key?: string;
 }

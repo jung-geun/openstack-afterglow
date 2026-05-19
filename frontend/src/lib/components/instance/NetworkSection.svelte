@@ -26,7 +26,7 @@
 
 	function openSgEdit(port: PortInfo) {
 		sgEditPortId = port.id;
-		sgEditSelected = [...port.security_group_ids];
+		sgEditSelected = [...(port.security_group_ids ?? [])];
 	}
 
 	async function handleSaveSgEdit() {
@@ -208,10 +208,10 @@
 							</div>
 						{:else}
 							<dd class="flex flex-wrap gap-1.5">
-								{#if iface.security_group_ids.length === 0}
+								{#if !(iface.security_group_ids?.length)}
 									<span class="text-xs text-gray-500">없음</span>
 								{:else}
-									{#each iface.security_group_ids as sgId}
+									{#each (iface.security_group_ids ?? []) as sgId}
 										<span class="text-xs text-purple-300 bg-purple-900/30 px-1.5 py-0.5 rounded">{s.sgNameById(sgId)}</span>
 									{/each}
 								{/if}

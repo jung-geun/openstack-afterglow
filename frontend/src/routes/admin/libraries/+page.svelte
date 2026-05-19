@@ -109,7 +109,7 @@
 
 <div class="flex flex-col h-full overflow-auto bg-gray-900 text-gray-100 p-6">
   <PageHeader title="라이브러리 관리" breadcrumb="라이브러리">
-    {#snippet action()}
+    {#snippet actions()}
       <div class="flex items-center gap-2">
         <button onclick={loadData} class="text-xs text-gray-400 hover:text-white transition-colors px-3 py-1.5 rounded border border-gray-700 hover:border-gray-600 flex items-center gap-1.5">새로고침</button>
       </div>

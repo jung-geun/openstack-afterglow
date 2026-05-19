@@ -41,11 +41,11 @@
 				</dd>
 			</div>
 		{/if}
-		{#if s.instance!.union_share_ids.filter(Boolean).length > 0}
+		{#if (s.instance!.union_share_ids ?? []).filter(Boolean).length > 0}
 			<div class="col-span-2">
 				<dt class="text-xs text-gray-500 mb-1.5">연결된 파일 스토리지</dt>
 				<dd class="flex flex-col gap-1">
-					{#each s.instance!.union_share_ids.filter(Boolean) as sid}
+					{#each (s.instance!.union_share_ids ?? []).filter(Boolean) as sid}
 						<a
 							href="/dashboard/file-storage/{sid}"
 							class="text-sm text-blue-400 hover:text-blue-300 font-mono transition-colors"
@@ -59,12 +59,12 @@
 	</dl>
 </div>
 
-{#if Object.keys(s.instance!.metadata).length > 0}
+{#if Object.keys(s.instance!.metadata ?? {}).length > 0}
 	<div class="bg-gray-900 border border-gray-800 rounded-lg p-6">
 		<h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-4">메타데이터</h2>
 		<table class="w-full text-sm">
 			<tbody>
-				{#each Object.entries(s.instance!.metadata) as [k, v]}
+				{#each Object.entries(s.instance!.metadata ?? {}) as [k, v]}
 					<tr class="border-b border-gray-800/50">
 						<td class="py-2 pr-4 text-gray-500 text-xs w-1/3">{k}</td>
 						<td class="py-2 text-gray-300 font-mono text-xs break-all">{v}</td>

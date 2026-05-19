@@ -76,7 +76,7 @@
 
 <div class="flex flex-col h-full overflow-auto bg-gray-900 text-gray-100 p-6">
   <PageHeader title={layer?.name ?? '레이어 상세'} breadcrumb="라이브러리">
-    {#snippet action()}
+    {#snippet actions()}
       <a href="/dashboard/library" class="text-sm text-gray-400 hover:text-gray-200">← 목록으로</a>
     {/snippet}
   </PageHeader>
