@@ -34,7 +34,7 @@
         "textMode": "auto"
       },
       "targets": [
-        {"expr": "count(count by (instance) (node_uname_info{instance=~'$instance'}))",
+        {"expr": "count(count by (instance) (node_uname_info{job=\"node\", instance=~'$instance'}))",
          "legendFormat": "", "refId": "A", "instant": true}
       ]
     },
@@ -57,7 +57,7 @@
         "textMode": "auto"
       },
       "targets": [
-        {"expr": "sum(count by (instance, cpu) (node_cpu_seconds_total{instance=~'$instance', mode='idle'}))",
+        {"expr": "sum(count by (instance, cpu) (node_cpu_seconds_total{job=\"node\", instance=~'$instance', mode='idle'}))",
          "legendFormat": "", "refId": "A", "instant": true}
       ]
     },
@@ -80,7 +80,7 @@
         "textMode": "auto"
       },
       "targets": [
-        {"expr": "sum(node_memory_MemTotal_bytes{instance=~'$instance'})",
+        {"expr": "sum(node_memory_MemTotal_bytes{job=\"node\", instance=~'$instance'})",
          "legendFormat": "", "refId": "A", "instant": true}
       ]
     },
@@ -103,7 +103,7 @@
         "textMode": "auto"
       },
       "targets": [
-        {"expr": "avg(node_time_seconds{instance=~'$instance'} - node_boot_time_seconds{instance=~'$instance'})",
+        {"expr": "avg(node_time_seconds{job=\"node\", instance=~'$instance'} - node_boot_time_seconds{job=\"node\", instance=~'$instance'})",
          "legendFormat": "", "refId": "A", "instant": true}
       ]
     },
@@ -128,7 +128,7 @@
         "legend": {"displayMode": "list", "placement": "bottom", "calcs": ["mean", "last", "max"]}
       },
       "targets": [
-        {"expr": "1 - avg by(instance) (rate(node_cpu_seconds_total{mode='idle', instance=~'$instance'}[5m]))",
+        {"expr": "1 - avg by(instance) (rate(node_cpu_seconds_total{job=\"node\", mode='idle', instance=~'$instance'}[5m]))",
          "legendFormat": "{{instance}}", "refId": "A"}
       ]
     },
@@ -149,9 +149,9 @@
         "legend": {"displayMode": "list", "placement": "bottom", "calcs": ["mean", "last", "max"]}
       },
       "targets": [
-        {"expr": "node_load1{instance=~'$instance'}", "legendFormat": "{{instance}} 1m", "refId": "A"},
-        {"expr": "node_load5{instance=~'$instance'}", "legendFormat": "{{instance}} 5m", "refId": "B"},
-        {"expr": "node_load15{instance=~'$instance'}", "legendFormat": "{{instance}} 15m", "refId": "C"}
+        {"expr": "node_load1{job=\"node\", instance=~'$instance'}", "legendFormat": "{{instance}} 1m", "refId": "A"},
+        {"expr": "node_load5{job=\"node\", instance=~'$instance'}", "legendFormat": "{{instance}} 5m", "refId": "B"},
+        {"expr": "node_load15{job=\"node\", instance=~'$instance'}", "legendFormat": "{{instance}} 15m", "refId": "C"}
       ]
     },
     {
@@ -178,11 +178,11 @@
         "legend": {"displayMode": "list", "placement": "bottom", "calcs": ["mean", "last"]}
       },
       "targets": [
-        {"expr": "node_memory_MemTotal_bytes{instance=~'$instance'} - node_memory_MemAvailable_bytes{instance=~'$instance'}",
+        {"expr": "node_memory_MemTotal_bytes{job=\"node\", instance=~'$instance'} - node_memory_MemAvailable_bytes{job=\"node\", instance=~'$instance'}",
          "legendFormat": "{{instance}} used", "refId": "A"},
-        {"expr": "node_memory_Buffers_bytes{instance=~'$instance'}",
+        {"expr": "node_memory_Buffers_bytes{job=\"node\", instance=~'$instance'}",
          "legendFormat": "{{instance}} buffers", "refId": "B"},
-        {"expr": "node_memory_Cached_bytes{instance=~'$instance'}",
+        {"expr": "node_memory_Cached_bytes{job=\"node\", instance=~'$instance'}",
          "legendFormat": "{{instance}} cached", "refId": "C"}
       ]
     },
@@ -203,9 +203,9 @@
         "legend": {"displayMode": "list", "placement": "bottom", "calcs": ["mean", "last", "max"]}
       },
       "targets": [
-        {"expr": "node_memory_SwapTotal_bytes{instance=~'$instance'} - node_memory_SwapFree_bytes{instance=~'$instance'}",
+        {"expr": "node_memory_SwapTotal_bytes{job=\"node\", instance=~'$instance'} - node_memory_SwapFree_bytes{job=\"node\", instance=~'$instance'}",
          "legendFormat": "{{instance}} used", "refId": "A"},
-        {"expr": "node_memory_SwapTotal_bytes{instance=~'$instance'}",
+        {"expr": "node_memory_SwapTotal_bytes{job=\"node\", instance=~'$instance'}",
          "legendFormat": "{{instance}} total", "refId": "B"}
       ]
     },
@@ -230,9 +230,9 @@
         "legend": {"displayMode": "list", "placement": "bottom", "calcs": ["mean", "last", "max"]}
       },
       "targets": [
-        {"expr": "rate(node_network_receive_bytes_total{instance=~'$instance', device!~'lo|vnet.*|tap.*|vxlan.*|br.*|virbr.*'}[5m])",
+        {"expr": "rate(node_network_receive_bytes_total{job=\"node\", instance=~'$instance', device!~'lo|vnet.*|tap.*|vxlan.*|br.*|virbr.*'}[5m])",
          "legendFormat": "{{instance}} {{device}} rx", "refId": "A"},
-        {"expr": "rate(node_network_transmit_bytes_total{instance=~'$instance', device!~'lo|vnet.*|tap.*|vxlan.*|br.*|virbr.*'}[5m])",
+        {"expr": "rate(node_network_transmit_bytes_total{job=\"node\", instance=~'$instance', device!~'lo|vnet.*|tap.*|vxlan.*|br.*|virbr.*'}[5m])",
          "legendFormat": "{{instance}} {{device}} tx", "refId": "B"}
       ]
     },
@@ -253,11 +253,11 @@
         "legend": {"displayMode": "list", "placement": "bottom", "calcs": ["mean", "last", "max"]}
       },
       "targets": [
-        {"expr": "node_netstat_Tcp_CurrEstab{instance=~'$instance'}",
+        {"expr": "node_netstat_Tcp_CurrEstab{job=\"node\", instance=~'$instance'}",
          "legendFormat": "{{instance}} established", "refId": "A"},
-        {"expr": "rate(node_netstat_Tcp_InSegs{instance=~'$instance'}[5m])",
+        {"expr": "rate(node_netstat_Tcp_InSegs{job=\"node\", instance=~'$instance'}[5m])",
          "legendFormat": "{{instance}} in/s", "refId": "B"},
-        {"expr": "rate(node_netstat_Tcp_OutSegs{instance=~'$instance'}[5m])",
+        {"expr": "rate(node_netstat_Tcp_OutSegs{job=\"node\", instance=~'$instance'}[5m])",
          "legendFormat": "{{instance}} out/s", "refId": "C"}
       ]
     },
@@ -282,9 +282,9 @@
         "legend": {"displayMode": "list", "placement": "bottom", "calcs": ["mean", "last", "max"]}
       },
       "targets": [
-        {"expr": "rate(node_disk_read_bytes_total{instance=~'$instance', device=~'sd.*|vd.*|nvme.*'}[5m])",
+        {"expr": "rate(node_disk_read_bytes_total{job=\"node\", instance=~'$instance', device=~'sd.*|vd.*|nvme.*'}[5m])",
          "legendFormat": "{{instance}} {{device}} read", "refId": "A"},
-        {"expr": "rate(node_disk_written_bytes_total{instance=~'$instance', device=~'sd.*|vd.*|nvme.*'}[5m])",
+        {"expr": "rate(node_disk_written_bytes_total{job=\"node\", instance=~'$instance', device=~'sd.*|vd.*|nvme.*'}[5m])",
          "legendFormat": "{{instance}} {{device}} write", "refId": "B"}
       ]
     },
@@ -305,9 +305,9 @@
         "legend": {"displayMode": "list", "placement": "bottom", "calcs": ["mean", "last", "max"]}
       },
       "targets": [
-        {"expr": "rate(node_disk_reads_completed_total{instance=~'$instance', device=~'sd.*|vd.*|nvme.*'}[5m])",
+        {"expr": "rate(node_disk_reads_completed_total{job=\"node\", instance=~'$instance', device=~'sd.*|vd.*|nvme.*'}[5m])",
          "legendFormat": "{{instance}} {{device}} read", "refId": "A"},
-        {"expr": "rate(node_disk_writes_completed_total{instance=~'$instance', device=~'sd.*|vd.*|nvme.*'}[5m])",
+        {"expr": "rate(node_disk_writes_completed_total{job=\"node\", instance=~'$instance', device=~'sd.*|vd.*|nvme.*'}[5m])",
          "legendFormat": "{{instance}} {{device}} write", "refId": "B"}
       ]
     },
@@ -337,7 +337,7 @@
         "showThresholdLabels": false
       },
       "targets": [
-        {"expr": "1 - (node_filesystem_avail_bytes{instance=~'$instance', fstype!~'tmpfs|fuse.*|overlay|squashfs'} / node_filesystem_size_bytes{instance=~'$instance', fstype!~'tmpfs|fuse.*|overlay|squashfs'})",
+        {"expr": "1 - (node_filesystem_avail_bytes{job=\"node\", instance=~'$instance', fstype!~'tmpfs|fuse.*|overlay|squashfs'} / node_filesystem_size_bytes{job=\"node\", instance=~'$instance', fstype!~'tmpfs|fuse.*|overlay|squashfs'})",
          "legendFormat": "{{instance}} {{mountpoint}}", "refId": "A", "instant": true}
       ]
     }
@@ -357,13 +357,13 @@
       {
         "current": {},
         "datasource": {"type": "prometheus"},
-        "definition": "label_values(node_uname_info, instance)",
+        "definition": "label_values(node_uname_info{job=\"node\"}, instance)",
         "hide": 0,
         "includeAll": true,
         "multi": true,
         "name": "instance",
         "options": [],
-        "query": "label_values(node_uname_info, instance)",
+        "query": "label_values(node_uname_info{job=\"node\"}, instance)",
         "refresh": 2,
         "type": "query",
         "label": "Instance"
