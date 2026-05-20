@@ -138,7 +138,7 @@
 				{ label: `vCPU ${trendRange} 추세`,    unit: '%',     color: 'var(--color-accent)',      key: 'vcpu'    as const },
 				{ label: `RAM ${trendRange} 추세`,      unit: '%',     color: 'var(--color-accent-2)',    key: 'memory'  as const },
 				{ label: `디스크 ${trendRange} 추세`,   unit: '%',     color: 'var(--color-warm)',        key: 'storage' as const,
-				  fallback: '인스턴스에 node_exporter 미설치 — 게스트 OS 내부 설치 필요' },
+				  fallback: '게스트 OS 내부 메트릭 미수집' },
 				{ label: `네트워크 ${trendRange} 추세`, unit: trendData?.network?.unit ?? 'KiB/s', color: 'var(--color-state-info)', key: 'network' as const },
 			] as card}
 				{@const rawSeries  = trendData?.[card.key]}
@@ -162,9 +162,9 @@
 						{#if hasData}
 							<Spark data={seriesData} color={card.color} height={72} class="w-full" />
 						{:else if !trendData || !trendData.prometheus_available}
-							<p class="text-[11px] italic text-[var(--color-ink-3)]">메트릭 수집 미설정 — <a href="/dashboard/observability" class="underline hover:text-[var(--color-ink-0)]">Grafana 보기</a></p>
+							<p class="text-[11px] italic text-[var(--color-ink-3)]">메트릭 수집 미설정</p>
 						{:else if 'fallback' in card}
-							<p class="text-[11px] italic text-[var(--color-ink-3)]">{card.fallback} — <a href="/dashboard/observability" class="underline hover:text-[var(--color-ink-0)]">Grafana 보기</a></p>
+							<p class="text-[11px] italic text-[var(--color-ink-3)]">{card.fallback}</p>
 						{:else}
 							<p class="text-[11px] text-[var(--color-ink-3)]">수집 대기 중</p>
 						{/if}
