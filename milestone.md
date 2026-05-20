@@ -2958,3 +2958,15 @@ k3s는 재시작 시 만료 90일 이내 인증서를 자동 갱신한다.
 - [x] **결론**: libvirt_exporter 단일 소스로 인스턴스별 디스크 사용률 % 산출 불가 → 디스크 카드는 `node_filesystem_*` 의존 유지
 - [x] fallback UX 정정: `prometheus_available=true` + storage `available=false` 시 "수집 대기 중" 대신 "node_exporter 미설치" 메시지 명시
 - [x] 후속(Phase 미정): QEMU Guest Agent 기반 디스크 메트릭 pipeline 검토 필요
+
+### Phase 53k — 사용량 페이지 상단 카드 충실화 + 인스턴스별 실 사용률
+
+- [x] 상단 4 카드(vCPU/RAM/디스크/네트워크) — Overview 3-row 패턴 통일: current값 + `class="w-full"` Spark + min·max 푸터
+- [x] 스토리지 카드 Phase 53j fallback 메시지("node_exporter 미설치") 적용
+- [x] 백엔드 `/api/dashboard/usage-stats` — per-instance `cpu_pct`/`ram_pct` 추가
+  - libvirt PromQL 2건(`query_instant_multi`) + UUID regex 조인 (`asyncio.gather` 병렬)
+  - Prometheus 미가용 시 silent fallback → 두 필드 `null`
+- [x] 상위 인스턴스 테이블 VCPU/RAM bar 의미 교체: 프로젝트 quota 대비 → 인스턴스 실 사용률 0~100%
+  - 데이터 없는 인스턴스: "—" 텍스트 + 빈 bar
+- [x] 하단 "14일 추세" + "볼륨 분포" 섹션 제거 (`trendData14d` state + fetch 정리)
+- [x] pytest 신규 케이스 4건 통과 (live usage 주입 / PromUnavailable fallback / 누락 UUID / 빈 프로젝트)

@@ -556,6 +556,45 @@ async def get_dashboard_usage_stats(
             "gpu": _gpu_count_from_flavor(fl_name, fl_extra),
         })
     top_instances.sort(key=lambda x: x["vcpus"], reverse=True)
+    top20 = top_instances[:20]
+
+    # 인스턴스별 실 사용률 — libvirt instant query (Prometheus 미가용 시 silent fallback)
+    uuids = [inst["id"] for inst in top20 if inst.get("id")]
+    cpu_by_id: dict[str, float] = {}
+    ram_by_id: dict[str, float] = {}
+    if uuids:
+        uuid_re = "|".join(uuids)
+        cpu_expr = (
+            f'sum by (instance_id) (rate(libvirt_domain_info_cpu_time_seconds_total[2m])'
+            f' * on (domain) group_left(instance_id) libvirt_domain_openstack_info{{instance_id=~"{uuid_re}"}})'
+            f' / sum by (instance_id) (libvirt_domain_info_virtual_cpus'
+            f' * on (domain) group_left(instance_id) libvirt_domain_openstack_info{{instance_id=~"{uuid_re}"}})'
+            f' * 100'
+        )
+        ram_expr = (
+            f'avg by (instance_id) (libvirt_domain_memory_stats_used_percent'
+            f' * on (domain) group_left(instance_id) libvirt_domain_openstack_info{{instance_id=~"{uuid_re}"}})'
+        )
+        try:
+            cpu_results, ram_results = await asyncio.gather(
+                prom_query.query_instant_multi(cpu_expr),
+                prom_query.query_instant_multi(ram_expr),
+            )
+            cpu_by_id = {
+                lbl["instance_id"]: round(v, 1)
+                for lbl, v in cpu_results
+                if "instance_id" in lbl and not math.isnan(v)
+            }
+            ram_by_id = {
+                lbl["instance_id"]: round(v, 1)
+                for lbl, v in ram_results
+                if "instance_id" in lbl and not math.isnan(v)
+            }
+        except Exception:
+            pass
+    for inst in top20:
+        inst["cpu_pct"] = cpu_by_id.get(inst["id"])
+        inst["ram_pct"] = ram_by_id.get(inst["id"])
 
     # 볼륨 타입별 집계
     vol_by_type: dict[str, int] = defaultdict(int)
@@ -572,7 +611,7 @@ async def get_dashboard_usage_stats(
         "range": period,
         "start": start_dt,
         "end": end_dt,
-        "top_instances": top_instances[:20],
+        "top_instances": top20,
         "volumes_by_type": [
             {"type": k, "total_gb": v, "count": vol_count_by_type[k]}
             for k, v in sorted(vol_by_type.items(), key=lambda x: -x[1])
