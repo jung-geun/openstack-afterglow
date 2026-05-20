@@ -38,7 +38,7 @@
 		<StatTile
 			label="블록 볼륨"
 			value={summary?.storage.volumes_used ?? 0}
-			unit={summary && summary.storage.volumes_limit > 0 ? `/ ${summary.storage.volumes_limit}` : undefined}
+			unit={summary && summary.storage.volumes_limit > 0 ? `/ ${summary.storage.volumes_limit}` : (summary?.storage.volumes_limit === -1 ? '/ 무제한' : undefined)}
 			accent="cyan"
 		>
 			{#snippet icon()}
@@ -49,7 +49,7 @@
 		<StatTile
 			label="Floating IP"
 			value={quotas?.network.floatingip.in_use ?? 0}
-			unit={quotas && quotas.network.floatingip.limit > 0 ? `/ ${quotas.network.floatingip.limit}` : undefined}
+			unit={quotas && quotas.network.floatingip.limit > 0 ? `/ ${quotas.network.floatingip.limit}` : (quotas?.network.floatingip.limit === -1 ? '/ 무제한' : undefined)}
 			accent="violet"
 		>
 			{#snippet icon()}

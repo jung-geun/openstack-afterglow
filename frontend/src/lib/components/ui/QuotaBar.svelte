@@ -23,7 +23,7 @@
   {#if showValue}
   <div class="flex justify-between text-xs text-gray-400 mb-1.5">
     <span>{label}</span>
-    <span><span class="text-white font-medium">{used}</span> / {limit}</span>
+    <span><span class="text-white font-medium">{used}</span> / {limit === -1 ? '무제한' : limit}</span>
   </div>
   {/if}
   <div class="{trackH} bg-gray-800 rounded-full overflow-hidden">

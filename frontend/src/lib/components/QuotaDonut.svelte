@@ -81,6 +81,8 @@
     <div class="{size === 'lg' ? 'text-sm' : 'text-xs'} text-gray-500 leading-tight">
       {#if limit > 0}
         {fmt(used)} / {fmt(limit)}
+      {:else if limit === -1}
+        {fmt(used)} / 무제한
       {:else}
         {fmt(used)}
       {/if}

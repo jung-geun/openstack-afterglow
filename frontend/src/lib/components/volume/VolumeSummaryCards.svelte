@@ -41,6 +41,8 @@
 			{totalGb}
 			{#if quotas?.storage.gigabytes.limit && quotas.storage.gigabytes.limit > 0}
 				<span class="text-[14px] font-normal text-gray-400">/ {quotas.storage.gigabytes.limit} GB</span>
+			{:else if quotas?.storage.gigabytes.limit === -1}
+				<span class="text-[14px] font-normal text-gray-400">/ 무제한 GB</span>
 			{:else}
 				<span class="text-[14px] font-normal text-gray-400">GB</span>
 			{/if}
@@ -66,6 +68,8 @@
 			{volumes.length}
 			{#if quotas?.storage.volumes.limit && quotas.storage.volumes.limit > 0}
 				<span class="text-[14px] font-normal text-gray-400">/ {quotas.storage.volumes.limit}</span>
+			{:else if quotas?.storage.volumes.limit === -1}
+				<span class="text-[14px] font-normal text-gray-400">/ 무제한</span>
 			{/if}
 		</div>
 		<div class="text-[11px] text-gray-500 mb-3">

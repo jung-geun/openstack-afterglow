@@ -2976,3 +2976,11 @@ k3s는 재시작 시 만료 90일 이내 인증서를 자동 갱신한다.
 - [x] `admin_dashboard.py` `_is_gpu_flavor` 강화: `extra_specs`(`pci_passthrough:alias`, `:category`) + `id` fallback
 - [x] Nova `/servers/detail` 호출에 `OpenStack-API-Version: compute 2.53` 헤더 추가 (기본 2.1에서는 `original_name` 미포함)
 - [x] pytest 신규 5건 통과 (original_name 검출 / pci alias 검출 / audio alias 무시 / CPU 플레이버 0 / 마이크로버전 헤더 송신)
+
+### Phase 53m — Quota -1 → "무제한" 일관 표기
+
+- [x] `QuotaBar.svelte` — `limit === -1` 시 raw `-1` 대신 `무제한` 텍스트 표시 (dashboard 쿼터 사용률 카드 Floating IP 등 일괄 처리)
+- [x] `DashboardStatTiles.svelte` — 블록 볼륨 / Floating IP 타일: limit=-1 시 `/ 무제한` 단위 표시
+- [x] `VolumeSummaryCards.svelte` — 총 할당 용량 / 볼륨 개수 카드: limit=-1 시 `/ 무제한 GB` / `/ 무제한` 표기
+- [x] `QuotaDonut.svelte` — limit=-1 시 `used/무제한` 표기 (limit>0 가드 우회 분기 추가)
+- [x] 백엔드 변경 없음 (OpenStack 표준 -1 의미 보존)
