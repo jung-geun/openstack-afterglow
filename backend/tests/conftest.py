@@ -114,6 +114,25 @@ def _reset_rate_limiter():
 
 
 @pytest.fixture(autouse=True)
+def _fake_redis_global(monkeypatch):
+    """CI 환경에서 Redis 없이 테스트 가능하도록 fakeredis 전역 패치.
+
+    session_store 는 `from app.services.cache import _get_redis` 로 참조를 복사하므로
+    cache 모듈 경로와 session_store 모듈 경로 두 곳을 모두 패치한다.
+    """
+    import fakeredis.aioredis as _fakeredis
+
+    fake = _fakeredis.FakeRedis()
+
+    async def _get_fake():
+        return fake
+
+    monkeypatch.setattr("app.services.cache._get_redis", _get_fake, raising=False)
+    monkeypatch.setattr("app.services.session_store._get_redis", _get_fake, raising=False)
+    return fake
+
+
+@pytest.fixture(autouse=True)
 async def _flush_afterglow_cache():
     """각 테스트 시작과 종료 시 afterglow:* Redis 키를 flush.
 

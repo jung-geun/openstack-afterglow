@@ -16,10 +16,8 @@ async def test_record_skips_and_warns_when_db_unavailable(caplog):
 
     act_mod._last_db_warn_ts = 0.0
 
-    with (
-        patch("app.services.activity.is_db_available", return_value=False),
-        caplog.at_level(logging.WARNING, logger="app.services.activity"),
-    ):
+    caplog.set_level(logging.WARNING, logger="app.services.activity")
+    with patch("app.services.activity.is_db_available", return_value=False):
         await record(
             project_id="p1",
             user_id="u1",
@@ -31,7 +29,8 @@ async def test_record_skips_and_warns_when_db_unavailable(caplog):
 
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert len(warnings) == 1
-    assert "db unavailable" in warnings[0].message.lower() or "ActivityLog skipped" in warnings[0].message
+    msg = warnings[0].getMessage()
+    assert "db unavailable" in msg.lower() or "ActivityLog skipped" in msg
 
 
 @pytest.mark.asyncio
@@ -51,10 +50,8 @@ async def test_record_rate_limits_warnings(caplog):
             status="success",
         )
 
-    with (
-        patch("app.services.activity.is_db_available", return_value=False),
-        caplog.at_level(logging.WARNING, logger="app.services.activity"),
-    ):
+    caplog.set_level(logging.WARNING, logger="app.services.activity")
+    with patch("app.services.activity.is_db_available", return_value=False):
         await _call()
         # rate limit 시뮬레이션: _last_db_warn_ts를 현재로 업데이트하여 60초 이내 간주
         act_mod._last_db_warn_ts = time_mod.monotonic()

@@ -48,6 +48,7 @@ EXEMPT_ROUTERS: set[str] = {
     "identity/admin_notion.py",
     "identity/admin_orphans.py",
     "identity/admin_services.py",
+    "identity/admin_dashboard.py",  # admin bulk action — manages OS infra directly, not per-project cache
     # ------------------------------------------------------------------
     # Phase C/D TODO — cache not yet wired up in these modules.
     # Remove each entry as the corresponding phase lands.
@@ -57,6 +58,15 @@ EXEMPT_ROUTERS: set[str] = {
     "container/containers.py",  # TODO: Phase C/D — Zun
     "database/instances.py",  # TODO: Phase C/D — Trove
     "k3s/clusters.py",  # TODO: Phase C/D — k3s
+    "k3s/certificates.py",  # TODO: Phase C/D — k3s cert rotation, no k3s resource cache yet
+    "k3s/configmaps.py",  # TODO: Phase C/D — k3s configmap ops
+    "k3s/k3s_services.py",  # TODO: Phase C/D — k3s service ops
+    "k3s/nodegroups.py",  # TODO: Phase C/D — k3s nodegroup ops
+    "k3s/pods.py",  # TODO: Phase C/D — k3s pod ops
+    "k3s/secrets.py",  # TODO: Phase C/D — k3s secret ops
+    "k3s/shell.py",  # ephemeral shell ticket — no OS resource cache state
+    "k3s/templates.py",  # TODO: Phase C/D — k3s cluster templates
+    "k3s/workloads.py",  # TODO: Phase C/D — k3s workload ops
     "union/layers.py",  # TODO: Phase C/D — Union layers
     "network/loadbalancers.py",  # TODO: Phase C/D — listener/pool/member sub-resources
     "network/networks.py",  # TODO: Phase C/D — floating_ip / subnet sub-resources
