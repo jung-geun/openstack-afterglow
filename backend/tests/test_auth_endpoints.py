@@ -48,7 +48,7 @@ async def test_login_success(client):
         )
     assert resp.status_code == 200
     data = resp.json()
-    assert data["token"] == "test-token"
+    assert data["token"] and data["token"].count(".") == 2  # JWT: header.payload.sig
     assert data["user_id"] == "test-user-123"
 
 
