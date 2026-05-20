@@ -6,7 +6,6 @@ import pytest
 
 from app.models.storage import (
     TopologyData,
-    TopologyInstance,
     TopologyNetwork,
     TopologyRouter,
 )

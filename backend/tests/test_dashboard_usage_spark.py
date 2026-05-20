@@ -7,8 +7,7 @@ NaN 필터, Redis 캐시, invalid range 400.
 from __future__ import annotations
 
 import json
-import math
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 

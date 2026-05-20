@@ -21,15 +21,14 @@ from pydantic import BaseModel
 
 from app.api.common.activity_recorder import rec
 from app.api.deps import cache_bypass, get_os_conn, get_token_info
-from app.services import cache
-from app.services.cache import invalidation, keys
 from app.models.containers import (
     ContainerListResponse,
     CreateZunContainerRequest,
     ZunContainerInfo,
 )
 from app.rate_limit import limiter
-from app.services import zun
+from app.services import cache, zun
+from app.services.cache import invalidation, keys
 from app.services.zun import ZunServiceUnavailable
 
 logger = logging.getLogger(__name__)

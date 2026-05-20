@@ -13,8 +13,9 @@ Exemption tiers:
                     treated as covered (e.g. _simple_action).
 """
 import ast
-import pytest
 from pathlib import Path
+
+import pytest
 
 API_DIR = Path(__file__).parent.parent / "app" / "api"
 

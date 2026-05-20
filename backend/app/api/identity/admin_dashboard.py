@@ -20,7 +20,6 @@ from pydantic import BaseModel
 
 from app.api.common.activity_recorder import rec
 from app.api.deps import get_os_conn, get_token_info, require_admin
-from app.services import nova
 from app.services.cache import cached_call, ttl_fast, ttl_normal
 
 _logger = logging.getLogger(__name__)

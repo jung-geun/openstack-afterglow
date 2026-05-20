@@ -18,13 +18,12 @@ from sqlalchemy.exc import OperationalError
 from app.api.deps import get_os_conn
 from app.config import get_settings
 from app.database import get_session_factory, is_db_available, mark_db_unhealthy
-from app.services import cinder, nova
+from app.services import cinder, nova, prom_query
 from app.services import manila as manila_svc
 from app.services import neutron as neutron_svc
 from app.services import swift as swift_svc
 from app.services import trove as trove_svc
 from app.services.cache import cached_call, ttl_fast, ttl_normal, ttl_static
-from app.services import prom_query
 
 router = APIRouter()
 _logger = logging.getLogger(__name__)

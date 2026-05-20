@@ -1,6 +1,6 @@
 """볼륨 스냅샷 API 단위 테스트."""
 
-from unittest.mock import ANY, AsyncMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 

@@ -155,8 +155,8 @@ async def test_usage_stats_unauthenticated(non_admin_client):
         patch("app.api.common.dashboard.nova.get_project_usage", return_value={}),
     ):
         # non_admin_client의 conn mock 설정
-        from app.main import app
         from app.api.deps import get_os_conn
+        from app.main import app
         mock_conn = MagicMock()
         mock_conn._afterglow_project_id = "test-project-123"
         mock_conn.block_storage.volumes.return_value = []

@@ -65,7 +65,7 @@ describe('api.upload', () => {
 		const [url, opts] = mockFetch.mock.calls[0];
 		expect(url).toContain('/api/upload');
 		expect(opts.method).toBe('POST');
-		expect(opts.headers['X-Auth-Token']).toBe('my-token');
+		expect(opts.headers['Authorization']).toBe('Bearer my-token');
 		expect(opts.headers['X-Project-Id']).toBe('proj-1');
 		expect(opts.headers['Content-Type']).toBeUndefined();
 		expect(result).toEqual({ id: 'obj-1' });
@@ -99,7 +99,7 @@ describe('api.uploadWithProgress', () => {
 		const { api } = await import('../client');
 		api.uploadWithProgress('/api/upload', new FormData(), vi.fn(), 'tok', 'my-proj');
 
-		expect(lastXhr._headers['X-Auth-Token']).toBe('tok');
+		expect(lastXhr._headers['Authorization']).toBe('Bearer tok');
 		expect(lastXhr._headers['X-Project-Id']).toBe('my-proj');
 		expect(lastXhr._method).toBe('POST');
 	});
@@ -181,7 +181,7 @@ describe('api.putWithProgress', () => {
 
 		expect(lastXhr._method).toBe('PUT');
 		expect(lastXhr._headers['Content-Type']).toBe('text/plain');
-		expect(lastXhr._headers['X-Auth-Token']).toBe('tok');
+		expect(lastXhr._headers['Authorization']).toBe('Bearer tok');
 		expect(lastXhr._body).toBe(blob);
 	});
 
@@ -258,7 +258,7 @@ describe('api.downloadBlob', () => {
 		await api.downloadBlob('/api/download', 'tok', 'proj-1');
 
 		const [, opts] = mockFetch.mock.calls[0];
-		expect(opts.headers['X-Auth-Token']).toBe('tok');
+		expect(opts.headers['Authorization']).toBe('Bearer tok');
 		expect(opts.headers['X-Project-Id']).toBe('proj-1');
 	});
 
@@ -343,7 +343,7 @@ describe('api.postSse', () => {
 		await new Promise((r) => setTimeout(r, 10));
 
 		const [, opts] = mockFetch.mock.calls[0];
-		expect(opts.headers['X-Auth-Token']).toBe('my-tok');
+		expect(opts.headers['Authorization']).toBe('Bearer my-tok');
 		expect(opts.headers['X-Project-Id']).toBe('my-proj');
 		expect(opts.headers['Accept']).toBe('text/event-stream');
 	});

@@ -7,10 +7,10 @@
   const VALID_TABS: ActiveTab[] = ['main', 'configmaps', 'secrets', 'services', 'workloads', 'pods'];
 
   const clusterId = $derived($page.params.id);
-  const initialTab = $derived<ActiveTab>(() => {
+  const initialTab = $derived.by<ActiveTab>(() => {
     const t = $page.url.searchParams.get('tab') as ActiveTab | null;
     return t && VALID_TABS.includes(t) ? t : 'main';
-  }());
+  });
 
   function handleTabChange(tab: ActiveTab) {
     const url = new URL($page.url);

@@ -1055,7 +1055,7 @@ async def test_list_objects_uses_cached_call(client, mock_conn):
 @pytest.mark.asyncio
 async def test_list_objects_different_prefix_uses_different_key(client, mock_conn):
     """prefix가 다르면 다른 캐시 키가 사용된다."""
-    from unittest.mock import AsyncMock, patch
+    from unittest.mock import patch
 
     captured_keys: list[str] = []
 
@@ -1074,7 +1074,7 @@ async def test_list_objects_different_prefix_uses_different_key(client, mock_con
 @pytest.mark.asyncio
 async def test_create_container_invalidates_cache(client, mock_conn):
     """POST /containers → 생성 성공 후 캐시 무효화가 호출된다."""
-    from unittest.mock import AsyncMock, MagicMock, patch
+    from unittest.mock import AsyncMock, patch
 
     with (
         patch("app.services.swift.create_container", return_value={"name": "new-bucket"}),
@@ -1113,7 +1113,7 @@ async def test_delete_container_invalidates_cache(client, mock_conn):
 @pytest.mark.asyncio
 async def test_upload_object_invalidates_cache(client, mock_conn):
     """POST /{container_name}/objects → 업로드 성공 후 캐시 무효화가 호출된다."""
-    from unittest.mock import AsyncMock, MagicMock, patch
+    from unittest.mock import AsyncMock, patch
 
     with (
         patch("app.services.swift.upload_object", return_value={"name": "test.txt", "bytes": 5}),
@@ -1152,7 +1152,7 @@ async def test_delete_object_invalidates_cache(client, mock_conn):
 @pytest.mark.asyncio
 async def test_list_containers_cache_bypass(client, mock_conn):
     """`?refresh=true` 쿼리스트링 → cached_call 에 refresh=True 가 전달된다."""
-    from unittest.mock import AsyncMock, patch
+    from unittest.mock import patch
 
     captured: dict = {}
 
