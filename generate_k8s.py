@@ -443,6 +443,7 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     lines.append(f'dcgm_exporter_sg_name = {_toml_str(mon.get("dcgm_exporter_sg_name", "dcgm_exporter"))}')
     lines.append(f'node_exporter_port = {mon.get("node_exporter_port", 9100)}')
     lines.append(f'dcgm_exporter_port = {mon.get("dcgm_exporter_port", 9400)}')
+    lines.append(f'libvirt_exporter_port = {mon.get("libvirt_exporter_port", 9177)}')
     lines.append(f'gpu_flavor_prefix = {_toml_str(mon.get("gpu_flavor_prefix", "gpu."))}')
     lines.append(f'grafana_base_url = {_toml_str(mon.get("grafana_base_url", ""))}')
     lines.append("# sd_token은 secret.yaml의 MONITORING_SD_TOKEN 환경변수로 주입됩니다")

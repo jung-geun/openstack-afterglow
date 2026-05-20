@@ -2930,3 +2930,20 @@ k3s는 재시작 시 만료 90일 이내 인증서를 자동 갱신한다.
   - Spark height 44 → 72 (카드 빈 공간 해소)
   - 하단: `min X% · max Y%` 메타 행
 - [x] pytest 14 passed (신규 2건: `test_trend_vcpu_uses_node_cpu_expr`, `test_trend_memory_uses_node_memory_expr`)
+
+### Phase 53i — Overview 사용률 카드 libvirt_exporter 통합 + 그래프 폭 정정
+
+- [x] kolla `globals.afterglow.sample.yml` — `enable_prometheus_libvirt_exporter: "yes"` + `prometheus_libvirt_exporter_port: 9177` 추가
+  - 운영자: `kolla-ansible -i inventory reconfigure -t prometheus` 필요
+- [x] Prometheus configmap — `instances-libvirt` scrape job 추가 (http_sd → `/api/sd/prometheus/libvirt-targets`)
+- [x] Afterglow SD — `/api/sd/prometheus/libvirt-targets` 신설 (`_collect_libvirt_targets`: Nova hypervisors 목록)
+- [x] 설정 동기화 — `libvirt_exporter_port = 9177` (`config.py` / `config.toml.example` / `generate_k8s.py`)
+- [x] dashboard.py PromQL 교체
+  - vCPU: `libvirt_domain_info_cpu_time_seconds_total * on (domain) group_left(instance_id) libvirt_domain_openstack_info{instance_id=~"…"}` (UUID regex 조인)
+  - RAM: `libvirt_domain_memory_stats_used_percent` 평균 + 동일 조인
+  - 디스크: `node_filesystem_*` 유지 (libvirt에 디스크 사용률 메트릭 없음)
+  - 네트워크: `libvirt_domain_interface_stats_*` + UUID regex 조인
+  - 빈 프로젝트 early-return — PromQL 호출 0회 + prometheus_available=false
+- [x] **커버리지 개선**: node_exporter 미설치 인스턴스(BIO, SYSTEM 등)도 vCPU/RAM 데이터 표시 (kolla reconfigure 후)
+- [x] 카드 그래프 폭 정정: `<Spark … class="w-full" />` 로 좌→우 전체 채움
+- [x] pytest 15 passed (신규: `test_trend_empty_project_skips_prometheus`)

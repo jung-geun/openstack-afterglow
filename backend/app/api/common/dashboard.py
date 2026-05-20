@@ -710,26 +710,46 @@ async def get_dashboard_metrics_trend(
             except Exception:
                 return []
 
-        # vCPU: node_exporter 기반 guest OS 실제 사용률 % (project_id 라벨은 node 타깃에만 주입됨)
+        # 프로젝트 인스턴스 UUID 리스트 수집 — libvirt 조인에 사용 (networks.py:488 패턴)
+        uuids = [s.id for s in conn.compute.servers() if s.id]
+        empty: list[float] = []
+        if not uuids:
+            return {
+                "vcpu": {"data": empty, "points": 0, "available": False},
+                "memory": {"data": empty, "points": 0, "available": False},
+                "storage": {"data": empty, "points": 0, "available": False},
+                "network": {"data": empty, "points": 0, "available": False, "unit": "KiB/s"},
+                "prometheus_available": False,
+                "range": range_,
+            }
+        uuid_re = "|".join(uuids)  # UUID는 [0-9a-f-]만 — re.escape 불필요
+
+        # vCPU: libvirt cpu_time / virtual_cpus, instance_id 조인 (모든 인스턴스 커버)
         vcpu_expr = (
-            f'100 - (avg(rate(node_cpu_seconds_total{{project_id="{project_id}",mode="idle"}}[5m])) * 100)'
+            f'sum(rate(libvirt_domain_info_cpu_time_seconds_total[5m])'
+            f' * on (domain) group_left(instance_id) libvirt_domain_openstack_info{{instance_id=~"{uuid_re}"}})'
+            f' / sum(libvirt_domain_info_virtual_cpus'
+            f' * on (domain) group_left(instance_id) libvirt_domain_openstack_info{{instance_id=~"{uuid_re}"}})'
+            f' * 100'
         )
-        # RAM: node_exporter MemAvailable 기반 사용률 % (buff/cache 보정)
+        # RAM: virtio-balloon stats_used_percent 평균 (미활성 인스턴스는 자연 제외)
         mem_expr = (
-            f'(1 - sum(node_memory_MemAvailable_bytes{{project_id="{project_id}"}})'
-            f' / sum(node_memory_MemTotal_bytes{{project_id="{project_id}"}})) * 100'
+            f'avg(libvirt_domain_memory_stats_used_percent'
+            f' * on (domain) group_left(instance_id) libvirt_domain_openstack_info{{instance_id=~"{uuid_re}"}})'
         )
-        # Storage: node_exporter root fs 사용률 % (Cinder 볼륨 아님)
+        # Storage: node_exporter root fs 사용률 % (libvirt에 디스크 사용률 메트릭 없음)
         storage_expr = (
             f'(1 - sum(node_filesystem_avail_bytes{{project_id="{project_id}",mountpoint="/",'
             f'fstype!~"tmpfs|overlay|squashfs|devtmpfs"}})'
             f' / sum(node_filesystem_size_bytes{{project_id="{project_id}",mountpoint="/",'
             f'fstype!~"tmpfs|overlay|squashfs|devtmpfs"}})) * 100'
         )
-        # Network: KiB/s (usage 페이지 전용 — prometheus_available 판정에서 제외)
+        # Network: libvirt interface_stats + instance_id 조인 KiB/s (prometheus_available 판정 제외)
         net_expr = (
-            f'(sum(rate(libvirt_domain_interface_stats_receive_bytes_total{{project_id="{project_id}"}}[5m]))'
-            f' + sum(rate(libvirt_domain_interface_stats_transmit_bytes_total{{project_id="{project_id}"}}[5m])))'
+            f'(sum(rate(libvirt_domain_interface_stats_receive_bytes_total[5m])'
+            f' * on (domain) group_left(instance_id) libvirt_domain_openstack_info{{instance_id=~"{uuid_re}"}})'
+            f' + sum(rate(libvirt_domain_interface_stats_transmit_bytes_total[5m])'
+            f' * on (domain) group_left(instance_id) libvirt_domain_openstack_info{{instance_id=~"{uuid_re}"}}))'
             f' / 1024'
         )
 

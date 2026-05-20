@@ -94,6 +94,23 @@ def _collect_targets() -> list[dict]:
     return groups
 
 
+def _collect_libvirt_targets() -> list[dict]:
+    """모든 compute 노드의 libvirt_exporter 타깃 반환.
+
+    Nova admin 연결로 hypervisors 목록을 조회, host_ip:libvirt_exporter_port 를 단일 그룹으로 노출.
+    libvirt_exporter가 hypervisor 측에서 실행되므로 게스트 OS의 node_exporter 설치 여부와 무관하게
+    모든 VM의 메트릭을 커버한다.
+    """
+    settings = get_settings()
+    conn = _build_admin_conn()
+    targets: list[str] = []
+    for hv in conn.compute.hypervisors(details=True):
+        host_ip = getattr(hv, "host_ip", None) or hv.name
+        if host_ip:
+            targets.append(f"{host_ip}:{settings.libvirt_exporter_port}")
+    return [{"targets": targets, "labels": {"job": "libvirt_exporter"}}] if targets else []
+
+
 @router.get("/prometheus/targets")
 async def prometheus_sd_targets(request: Request):
     """Prometheus http_sd_config 호환 타깃 목록 반환.
@@ -114,3 +131,25 @@ async def prometheus_sd_targets(request: Request):
     except Exception:
         _logger.exception("SD 타깃 수집 실패")
         raise HTTPException(status_code=503, detail="SD 타깃 수집 실패")
+
+
+@router.get("/prometheus/libvirt-targets")
+async def prometheus_libvirt_sd_targets(request: Request):
+    """Prometheus http_sd_config 호환 libvirt_exporter 타깃 목록 반환.
+
+    compute 노드별 host_ip:libvirt_exporter_port 를 단일 그룹으로 노출.
+    kolla `enable_prometheus_libvirt_exporter: yes` 설정 후 reconfigure 필요.
+    인증: Bearer 토큰 (monitoring_sd_token 설정값).
+    """
+    _verify_sd_token(request)
+    try:
+        return await cached_call(
+            "afterglow:sd:prometheus:libvirt-targets",
+            ttl_slow(),
+            _collect_libvirt_targets,
+        )
+    except HTTPException:
+        raise
+    except Exception:
+        _logger.exception("libvirt SD 타깃 수집 실패")
+        raise HTTPException(status_code=503, detail="libvirt SD 타깃 수집 실패")

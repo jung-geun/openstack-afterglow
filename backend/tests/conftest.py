@@ -67,6 +67,10 @@ def make_mock_conn(project_id: str = "test-project-123") -> MagicMock:
     conn.block_storage.get_backup = MagicMock(return_value=_owned())
     # Trove (database)
     conn.database.get_instance = MagicMock(return_value=_owned())
+    # Nova compute.servers — trend 엔드포인트가 UUID 리스트 수집에 사용
+    _dummy_server = MagicMock()
+    _dummy_server.id = "test-instance-uuid-1"
+    conn.compute.servers = MagicMock(return_value=[_dummy_server])
     return conn
 
 

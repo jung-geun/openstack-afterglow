@@ -178,7 +178,7 @@
 				</div>
 				<div class="min-h-[72px] flex items-center">
 					{#if hasData}
-						<Spark data={series!.data} color={card.color} height={72} />
+						<Spark data={series!.data} color={card.color} height={72} class="w-full" />
 					{:else if !trendData || !trendData.prometheus_available}
 						<p class="text-[11px] italic text-[var(--color-ink-3)]">메트릭 수집 미설정 — <a href="/dashboard/observability" class="underline hover:text-[var(--color-ink-0)]">Grafana 보기</a></p>
 					{:else}

@@ -317,6 +317,7 @@ dcgm_exporter_sg_name = "dcgm_exporter"  # dcgm_exporter ingress SG 이름 (tcp/
 # VM 메트릭 수집 포트 (기본값 유지 권장)
 node_exporter_port = 9100       # VM에 설치된 node_exporter 포트 (기본 9100)
 dcgm_exporter_port = 9400       # GPU VM의 dcgm_exporter 포트 (기본 9400)
+libvirt_exporter_port = 9177    # compute 노드 libvirt_exporter 포트 (기본 9177, kolla enable_prometheus_libvirt_exporter)
 gpu_flavor_prefix = "gpu."      # GPU 노드 판별 flavor prefix (예: "gpu." → gpu.a100x1_80gb 등)
 # Grafana 연동
 grafana_base_url = ""           # Grafana 외부 URL (예: https://grafana.example.com)

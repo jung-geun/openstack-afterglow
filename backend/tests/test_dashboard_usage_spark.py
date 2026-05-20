@@ -158,8 +158,8 @@ async def test_trend_range_7d_step_3600(client, mock_conn):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_trend_vcpu_uses_node_cpu_expr(client, mock_conn):
-    """vCPU PromQL 식에 node_cpu_seconds_total(idle)이 포함되고 libvirt_domain_info_cpu가 없다."""
+async def test_trend_vcpu_uses_libvirt_cpu_expr(client, mock_conn):
+    """vCPU PromQL 식에 libvirt_domain_info_cpu_time + libvirt_domain_openstack_info 조인이 포함된다."""
     captured_exprs: list[str] = []
 
     async def _capture(expr, *, start_ts, end_ts, step_s):
@@ -169,16 +169,17 @@ async def test_trend_vcpu_uses_node_cpu_expr(client, mock_conn):
     with patch("app.api.common.dashboard.prom_query.query_range", side_effect=_capture):
         await client.get("/api/dashboard/metrics/trend?range=24h")
 
-    cpu_exprs = [e for e in captured_exprs if "node_cpu_seconds_total" in e]
-    assert cpu_exprs, "node_cpu_seconds_total 식이 쿼리에 없음"
-    assert any('mode="idle"' in e for e in cpu_exprs), "mode=\"idle\" 필터가 없음"
-    libvirt_cpu = [e for e in captured_exprs if "libvirt_domain_info_cpu_time_seconds_total" in e]
-    assert not libvirt_cpu, "libvirt_domain_info_cpu_time_seconds_total이 여전히 쿼리에 남아 있음"
+    cpu_exprs = [e for e in captured_exprs if "libvirt_domain_info_cpu_time_seconds_total" in e]
+    assert cpu_exprs, "libvirt_domain_info_cpu_time_seconds_total 식이 쿼리에 없음"
+    assert any("libvirt_domain_openstack_info" in e for e in cpu_exprs), "libvirt_domain_openstack_info 조인이 없음"
+    assert any("instance_id=~" in e for e in cpu_exprs), "instance_id=~ UUID regex 필터가 없음"
+    node_cpu = [e for e in captured_exprs if "node_cpu_seconds_total" in e]
+    assert not node_cpu, "node_cpu_seconds_total이 여전히 쿼리에 남아 있음"
 
 
 @pytest.mark.asyncio
-async def test_trend_memory_uses_node_memory_expr(client, mock_conn):
-    """RAM PromQL 식에 node_memory_MemAvailable/MemTotal이 포함되고 libvirt memory가 없다."""
+async def test_trend_memory_uses_libvirt_memory_expr(client, mock_conn):
+    """RAM PromQL 식에 libvirt_domain_memory_stats_used_percent + openstack_info 조인이 포함된다."""
     captured_exprs: list[str] = []
 
     async def _capture(expr, *, start_ts, end_ts, step_s):
@@ -188,12 +189,29 @@ async def test_trend_memory_uses_node_memory_expr(client, mock_conn):
     with patch("app.api.common.dashboard.prom_query.query_range", side_effect=_capture):
         await client.get("/api/dashboard/metrics/trend?range=24h")
 
-    avail_exprs = [e for e in captured_exprs if "node_memory_MemAvailable_bytes" in e]
-    total_exprs = [e for e in captured_exprs if "node_memory_MemTotal_bytes" in e]
-    assert avail_exprs, "node_memory_MemAvailable_bytes 식이 쿼리에 없음"
-    assert total_exprs, "node_memory_MemTotal_bytes 식이 쿼리에 없음"
-    libvirt_mem = [e for e in captured_exprs if "libvirt_domain_info_memory_actual_bytes" in e]
-    assert not libvirt_mem, "libvirt_domain_info_memory_actual_bytes가 여전히 쿼리에 남아 있음"
+    mem_exprs = [e for e in captured_exprs if "libvirt_domain_memory_stats_used_percent" in e]
+    assert mem_exprs, "libvirt_domain_memory_stats_used_percent 식이 쿼리에 없음"
+    assert any("libvirt_domain_openstack_info" in e for e in mem_exprs), "libvirt_domain_openstack_info 조인이 없음"
+    node_mem = [e for e in captured_exprs if "node_memory_MemAvailable_bytes" in e]
+    assert not node_mem, "node_memory_MemAvailable_bytes가 여전히 쿼리에 남아 있음"
+
+
+# ---------------------------------------------------------------------------
+# 빈 프로젝트 — Prometheus 호출 없이 available=false 즉시 반환
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_trend_empty_project_skips_prometheus(client, mock_conn):
+    """인스턴스가 없는 프로젝트는 PromQL 호출 없이 prometheus_available=False를 반환한다."""
+    mock_conn.compute.servers.return_value = []
+    with _patch_prom_query([]) as mock_qr:
+        resp = await client.get("/api/dashboard/metrics/trend?range=24h")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["prometheus_available"] is False
+    assert data["vcpu"]["available"] is False
+    assert mock_qr.call_count == 0, f"빈 프로젝트에서 PromQL 호출 불필요, 실제: {mock_qr.call_count}"
 
 
 # ---------------------------------------------------------------------------
