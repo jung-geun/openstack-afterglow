@@ -2984,3 +2984,9 @@ k3s는 재시작 시 만료 90일 이내 인증서를 자동 갱신한다.
 - [x] `VolumeSummaryCards.svelte` — 총 할당 용량 / 볼륨 개수 카드: limit=-1 시 `/ 무제한 GB` / `/ 무제한` 표기
 - [x] `QuotaDonut.svelte` — limit=-1 시 `used/무제한` 표기 (limit>0 가드 우회 분기 추가)
 - [x] 백엔드 변경 없음 (OpenStack 표준 -1 의미 보존)
+
+### Phase 53n — 사용량 페이지 기간 버튼 trend API 연동
+
+- [x] trend API 호출을 `range=24h` 고정 → 선택된 period 기반 동적 호출
+  - `30d` 선택 시 trend API 최대 범위(14d)로 fallback (`trendRange` $derived)
+- [x] 상단 4개 카드 레이블을 `trendRange` 기반 동적 표시 (예: `vCPU 7d 추세`)

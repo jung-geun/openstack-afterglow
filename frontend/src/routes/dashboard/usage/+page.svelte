@@ -52,6 +52,7 @@
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
+	const trendRange = $derived<'24h' | '7d' | '14d'>(period === '30d' ? '14d' : period);
 
 	async function fetchData() {
 		if (!token || !projectId) return;
@@ -62,7 +63,7 @@
 				api.get<UsageStats>(`/api/dashboard/usage-stats?range=${period}`, token, projectId)
 					.then(v => { data = v; })
 					.catch(e => { error = e instanceof Error ? e.message : '데이터 로딩 실패'; }),
-				api.get<TrendData>('/api/dashboard/metrics/trend?range=24h', token, projectId)
+				api.get<TrendData>(`/api/dashboard/metrics/trend?range=${trendRange}`, token, projectId)
 					.then(v => { trendData = v; })
 					.catch(() => {}),
 			]);
@@ -134,11 +135,11 @@
 		<!-- Spark trend cards — 24h 추세 (3-row: 현재값 + 그래프 + min/max) -->
 		<div class="grid grid-cols-1 sm:grid-cols-4 gap-3.5">
 			{#each [
-				{ label: 'vCPU 24h 추세',    unit: '%',     color: 'var(--color-accent)',      key: 'vcpu'    as const },
-				{ label: 'RAM 24h 추세',      unit: '%',     color: 'var(--color-accent-2)',    key: 'memory'  as const },
-				{ label: '디스크 24h 추세',   unit: '%',     color: 'var(--color-warm)',        key: 'storage' as const,
+				{ label: `vCPU ${trendRange} 추세`,    unit: '%',     color: 'var(--color-accent)',      key: 'vcpu'    as const },
+				{ label: `RAM ${trendRange} 추세`,      unit: '%',     color: 'var(--color-accent-2)',    key: 'memory'  as const },
+				{ label: `디스크 ${trendRange} 추세`,   unit: '%',     color: 'var(--color-warm)',        key: 'storage' as const,
 				  fallback: '인스턴스에 node_exporter 미설치 — 게스트 OS 내부 설치 필요' },
-				{ label: '네트워크 24h 추세', unit: trendData?.network?.unit ?? 'KiB/s', color: 'var(--color-state-info)', key: 'network' as const },
+				{ label: `네트워크 ${trendRange} 추세`, unit: trendData?.network?.unit ?? 'KiB/s', color: 'var(--color-state-info)', key: 'network' as const },
 			] as card}
 				{@const rawSeries  = trendData?.[card.key]}
 				{@const netScaled  = card.key === 'network' && rawSeries?.data?.length ? scaleNetwork(rawSeries.data) : null}
