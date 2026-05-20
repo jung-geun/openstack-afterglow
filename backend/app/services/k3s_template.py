@@ -83,6 +83,7 @@ async def list_templates(user_id: str | None = None, admin: bool = False) -> lis
         stmt = select(K3sClusterTemplate).where(K3sClusterTemplate.deleted_at.is_(None))
         if not admin:
             from sqlalchemy import or_
+
             conditions = [K3sClusterTemplate.public_visible.is_(True)]
             if user_id:
                 conditions.append(K3sClusterTemplate.created_by == user_id)

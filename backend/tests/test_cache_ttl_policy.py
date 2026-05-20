@@ -1,4 +1,5 @@
 """Phase B: TTL 카테고리 + jitter + dynamic 조정 테스트."""
+
 from __future__ import annotations
 
 import pytest
@@ -6,6 +7,7 @@ import pytest
 # ---------------------------------------------------------------------------
 # jittered() 분포 검증
 # ---------------------------------------------------------------------------
+
 
 def test_jittered_within_bounds():
     from app.services.cache.ttl import jittered
@@ -26,6 +28,7 @@ def test_jittered_not_always_same():
 # ---------------------------------------------------------------------------
 # dynamic_adjust() 임계치 동작
 # ---------------------------------------------------------------------------
+
 
 def test_dynamic_adjust_below_low(settings_override):
     from app.services.cache.ttl import dynamic_adjust
@@ -66,13 +69,17 @@ def test_dynamic_adjust_small_base_stays_at_floor(settings_override):
 # 카테고리 기본값 확인
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("category,expected_min,expected_max", [
-    ("identity_stable", 73440, 99360),   # 86400 ±15%
-    ("catalog_slow", 765, 1036),         # 900 ±15%
-    ("project_meta", 255, 346),          # 300 ±15%
-    ("operational_live", 25, 35),        # 30 ±15%
-    ("admin_overview", 51, 70),          # 60 ±15%
-])
+
+@pytest.mark.parametrize(
+    "category,expected_min,expected_max",
+    [
+        ("identity_stable", 73440, 99360),  # 86400 ±15%
+        ("catalog_slow", 765, 1036),  # 900 ±15%
+        ("project_meta", 255, 346),  # 300 ±15%
+        ("operational_live", 25, 35),  # 30 ±15%
+        ("admin_overview", 51, 70),  # 60 ±15%
+    ],
+)
 def test_category_base_ttl_range(category, expected_min, expected_max):
     from app.services.cache.ttl import _base_for_category, jittered
 
@@ -87,6 +94,7 @@ def test_category_base_ttl_range(category, expected_min, expected_max):
 # ---------------------------------------------------------------------------
 # for_category() async 호출
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_for_category_identity_stable():
@@ -109,6 +117,7 @@ async def test_for_category_operational_live_no_service():
 # ---------------------------------------------------------------------------
 # fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def settings_override(monkeypatch):

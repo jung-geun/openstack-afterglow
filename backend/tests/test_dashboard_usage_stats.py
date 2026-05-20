@@ -33,6 +33,7 @@ def _make_flavor(name: str = "cpu.4c_8g", vcpus: int = 4, ram: int = 8192, disk:
 # cpu_pct / ram_pct 정상 주입
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_usage_stats_includes_live_cpu_ram(client, mock_conn):
     """query_instant_multi 결과가 top_instances 각 항목에 cpu_pct/ram_pct로 주입된다."""
@@ -44,8 +45,11 @@ async def test_usage_stats_includes_live_cpu_ram(client, mock_conn):
         patch("app.api.common.dashboard.nova.list_servers", return_value=[_make_server(uuid1)]),
         patch("app.api.common.dashboard.nova.list_flavors", return_value=[_make_flavor()]),
         patch("app.api.common.dashboard.nova.get_project_usage", return_value={}),
-        patch("app.api.common.dashboard.prom_query.query_instant_multi", new_callable=AsyncMock,
-              side_effect=[cpu_results, ram_results]),
+        patch(
+            "app.api.common.dashboard.prom_query.query_instant_multi",
+            new_callable=AsyncMock,
+            side_effect=[cpu_results, ram_results],
+        ),
     ):
         resp = await client.get("/api/dashboard/usage-stats?range=7d")
 
@@ -60,6 +64,7 @@ async def test_usage_stats_includes_live_cpu_ram(client, mock_conn):
 # PromUnavailable — silent fallback, 200 응답 유지
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_usage_stats_prometheus_unavailable_fallback(client, mock_conn):
     """Prometheus 미가용 시 200 + cpu_pct/ram_pct는 None."""
@@ -71,8 +76,7 @@ async def test_usage_stats_prometheus_unavailable_fallback(client, mock_conn):
         patch("app.api.common.dashboard.nova.list_servers", return_value=[_make_server(uuid1)]),
         patch("app.api.common.dashboard.nova.list_flavors", return_value=[_make_flavor()]),
         patch("app.api.common.dashboard.nova.get_project_usage", return_value={}),
-        patch("app.api.common.dashboard.prom_query.query_instant_multi",
-              side_effect=PromUnavailable("no prometheus")),
+        patch("app.api.common.dashboard.prom_query.query_instant_multi", side_effect=PromUnavailable("no prometheus")),
     ):
         resp = await client.get("/api/dashboard/usage-stats?range=7d")
 
@@ -86,6 +90,7 @@ async def test_usage_stats_prometheus_unavailable_fallback(client, mock_conn):
 # 일부 UUID만 결과 — 누락 인스턴스는 None
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_usage_stats_unknown_instance_returns_none(client, mock_conn):
     """PromQL 결과에 없는 UUID는 cpu_pct=None으로 반환된다."""
@@ -95,14 +100,20 @@ async def test_usage_stats_unknown_instance_returns_none(client, mock_conn):
     ram_results = [({"instance_id": uuid_known}, 50.0)]
 
     with (
-        patch("app.api.common.dashboard.nova.list_servers", return_value=[
-            _make_server(uuid_known, name="vm-a"),
-            _make_server(uuid_unknown, name="vm-b"),
-        ]),
+        patch(
+            "app.api.common.dashboard.nova.list_servers",
+            return_value=[
+                _make_server(uuid_known, name="vm-a"),
+                _make_server(uuid_unknown, name="vm-b"),
+            ],
+        ),
         patch("app.api.common.dashboard.nova.list_flavors", return_value=[_make_flavor()]),
         patch("app.api.common.dashboard.nova.get_project_usage", return_value={}),
-        patch("app.api.common.dashboard.prom_query.query_instant_multi", new_callable=AsyncMock,
-              side_effect=[cpu_results, ram_results]),
+        patch(
+            "app.api.common.dashboard.prom_query.query_instant_multi",
+            new_callable=AsyncMock,
+            side_effect=[cpu_results, ram_results],
+        ),
     ):
         resp = await client.get("/api/dashboard/usage-stats?range=7d")
 
@@ -117,6 +128,7 @@ async def test_usage_stats_unknown_instance_returns_none(client, mock_conn):
 # 빈 프로젝트 — PromQL 호출 없음
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_usage_stats_empty_project_skips_prometheus(client, mock_conn):
     """인스턴스가 없으면 query_instant_multi를 호출하지 않는다."""
@@ -124,13 +136,10 @@ async def test_usage_stats_empty_project_skips_prometheus(client, mock_conn):
         patch("app.api.common.dashboard.nova.list_servers", return_value=[]),
         patch("app.api.common.dashboard.nova.list_flavors", return_value=[]),
         patch("app.api.common.dashboard.nova.get_project_usage", return_value={}),
-        patch("app.api.common.dashboard.prom_query.query_instant_multi",
-              new_callable=AsyncMock) as mock_qr,
+        patch("app.api.common.dashboard.prom_query.query_instant_multi", new_callable=AsyncMock) as mock_qr,
     ):
         resp = await client.get("/api/dashboard/usage-stats?range=7d")
 
     assert resp.status_code == 200
     assert resp.json()["top_instances"] == []
-    assert mock_qr.call_count == 0, (
-        f"빈 프로젝트에서 PromQL 호출 불필요, 실제: {mock_qr.call_count}"
-    )
+    assert mock_qr.call_count == 0, f"빈 프로젝트에서 PromQL 호출 불필요, 실제: {mock_qr.call_count}"

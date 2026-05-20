@@ -26,6 +26,7 @@ def _patch_prom_query(return_value=None):
 def _patch_prom_unavailable():
     """Prometheus 미설치 환경 시뮬레이션 — PromUnavailable 예외."""
     from app.services.prom_query import PromUnavailable
+
     return patch(
         "app.api.common.dashboard.prom_query.query_range",
         side_effect=PromUnavailable("Prometheus not configured"),
@@ -35,6 +36,7 @@ def _patch_prom_unavailable():
 # ---------------------------------------------------------------------------
 # range=14d
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_trend_14d_structure(client, mock_conn):
@@ -81,6 +83,7 @@ async def test_trend_14d_prometheus_unavailable_fallback(client, mock_conn):
 # ---------------------------------------------------------------------------
 # range=24h
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_trend_24h_structure(client, mock_conn):
@@ -132,6 +135,7 @@ async def test_trend_range_24h_returns_network_field(client, mock_conn):
 # range=7d
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_trend_range_7d_structure(client, mock_conn):
     """range=7d 응답에 range='7d' 반환."""
@@ -155,6 +159,7 @@ async def test_trend_range_7d_step_3600(client, mock_conn):
 # ---------------------------------------------------------------------------
 # vCPU/RAM PromQL 식 검증 (node_exporter 기반, libvirt 미사용 확인)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_trend_vcpu_uses_libvirt_cpu_expr(client, mock_conn):
@@ -199,6 +204,7 @@ async def test_trend_memory_uses_libvirt_memory_expr(client, mock_conn):
 # 빈 프로젝트 — Prometheus 호출 없이 available=false 즉시 반환
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_trend_empty_project_skips_prometheus(client, mock_conn):
     """인스턴스가 없는 프로젝트는 PromQL 호출 없이 prometheus_available=False를 반환한다."""
@@ -216,6 +222,7 @@ async def test_trend_empty_project_skips_prometheus(client, mock_conn):
 # ---------------------------------------------------------------------------
 # Storage PromQL 식 검증
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_trend_storage_uses_node_filesystem_expr(client, mock_conn):
@@ -239,6 +246,7 @@ async def test_trend_storage_uses_node_filesystem_expr(client, mock_conn):
 # Invalid range → 400
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_trend_invalid_range_returns_400(client, mock_conn):
     """허용되지 않는 range 값은 400 반환."""
@@ -254,6 +262,7 @@ async def test_trend_invalid_range_returns_400(client, mock_conn):
 # ---------------------------------------------------------------------------
 # NaN 필터
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_trend_nan_values_filtered(client, mock_conn):
@@ -271,6 +280,7 @@ async def test_trend_nan_values_filtered(client, mock_conn):
 # ---------------------------------------------------------------------------
 # Redis 캐시 — 연속 호출 시 prom_query 한 번만 호출
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_trend_14d_uses_redis_cache(client, mock_conn):
@@ -300,8 +310,6 @@ async def test_trend_14d_uses_redis_cache(client, mock_conn):
             await client.get("/api/dashboard/metrics/trend?range=14d")
 
         # 4개 식(vcpu, memory, storage, network) × 1회 = 4 (두 번째 호출은 캐시 히트)
-        assert mock_qr.call_count == 4, (
-            f"캐시가 작동하면 4번 호출 기대, 실제: {mock_qr.call_count}"
-        )
+        assert mock_qr.call_count == 4, f"캐시가 작동하면 4번 호출 기대, 실제: {mock_qr.call_count}"
     finally:
         set_backend(None)

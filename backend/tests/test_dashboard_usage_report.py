@@ -20,16 +20,22 @@ async def test_usage_report_forecast_structure(client, mock_conn):
     """forecast.vcpu_pct / memory_pct / storage_pct 필드 존재 + 0~100 범위."""
     with (
         _patch_redis(),
-        patch("app.api.common.dashboard.nova.get_project_usage", return_value={
-            "total_hours": 100.0,
-            "total_vcpu_hours": 200.0,
-            "server_usages": [],
-        }),
-        patch("app.api.common.dashboard.nova.get_project_quota", return_value={
-            "cores": {"in_use": 4, "limit": 20},
-            "ram": {"in_use": 8192, "limit": 51200},
-            "gigabytes": {"in_use": 100, "limit": 1000},
-        }),
+        patch(
+            "app.api.common.dashboard.nova.get_project_usage",
+            return_value={
+                "total_hours": 100.0,
+                "total_vcpu_hours": 200.0,
+                "server_usages": [],
+            },
+        ),
+        patch(
+            "app.api.common.dashboard.nova.get_project_quota",
+            return_value={
+                "cores": {"in_use": 4, "limit": 20},
+                "ram": {"in_use": 8192, "limit": 51200},
+                "gigabytes": {"in_use": 100, "limit": 1000},
+            },
+        ),
     ):
         resp = await client.get("/api/dashboard/usage-report?range=30d")
 
@@ -52,9 +58,12 @@ async def test_usage_report_forecast_vcpu_pct_matches_quota(client, mock_conn):
     with (
         _patch_redis(),
         patch("app.api.common.dashboard.nova.get_project_usage", return_value={}),
-        patch("app.api.common.dashboard.nova.get_project_quota", return_value={
-            "cores": {"in_use": 10, "limit": 20},
-        }),
+        patch(
+            "app.api.common.dashboard.nova.get_project_quota",
+            return_value={
+                "cores": {"in_use": 10, "limit": 20},
+            },
+        ),
     ):
         resp = await client.get("/api/dashboard/usage-report")
 
@@ -85,9 +94,12 @@ async def test_usage_report_quota_still_present(client, mock_conn):
     with (
         _patch_redis(),
         patch("app.api.common.dashboard.nova.get_project_usage", return_value={}),
-        patch("app.api.common.dashboard.nova.get_project_quota", return_value={
-            "cores": {"in_use": 5, "limit": 20},
-        }),
+        patch(
+            "app.api.common.dashboard.nova.get_project_quota",
+            return_value={
+                "cores": {"in_use": 5, "limit": 20},
+            },
+        ),
     ):
         resp = await client.get("/api/dashboard/usage-report")
 
@@ -101,6 +113,7 @@ async def test_usage_report_quota_still_present(client, mock_conn):
 # ---------------------------------------------------------------------------
 # Phase 53a — Cache-Control 헤더 검증 (요청 폭주 방지)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_usage_report_cache_control_header(client, mock_conn):

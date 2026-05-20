@@ -19,6 +19,7 @@ async def test_list_flavors_unauthenticated():
 @pytest.mark.asyncio
 async def test_list_flavors_success(client, mock_conn):
     """nova.list_flavors 결과를 정상 반환한다."""
+
     async def mock_cached_call(key, ttl, fn, *, refresh=False, **kw):
         return await fn()
 

@@ -42,13 +42,18 @@ async def k3s_callback(request: Request, req: K3sCallbackRequest):
     server_index: int | None = token_data.get("server_index")  # HA 토큰만 포함
     _logger.info(
         "k3s callback consumed: cluster=%s project=%s source_ip=%s server_ip=%s server_index=%s",
-        cluster_id, project_id, source_ip, req.server_ip, server_index,
+        cluster_id,
+        project_id,
+        source_ip,
+        req.server_ip,
+        server_index,
     )
 
     if not req.success:
         error_msg = req.error or "서버 VM에서 알 수 없는 오류 발생"
-        _logger.error("k3s cluster %s server%s init failed: %s",
-                      cluster_id, f"#{server_index}" if server_index else "", error_msg)
+        _logger.error(
+            "k3s cluster %s server%s init failed: %s", cluster_id, f"#{server_index}" if server_index else "", error_msg
+        )
         await k3s_cluster.update_cluster_status(project_id, cluster_id, "ERROR", f"서버 초기화 실패: {error_msg}")
         return {"ok": True}
 
@@ -73,7 +78,9 @@ async def k3s_callback(request: Request, req: K3sCallbackRequest):
 
     api_address = f"https://{req.server_ip}:6443"
     await k3s_cluster.update_cluster_status(
-        project_id, cluster_id, "PROVISIONING",
+        project_id,
+        cluster_id,
+        "PROVISIONING",
         server_ip=req.server_ip,
         api_address=api_address,
         node_token=req.node_token,
@@ -84,8 +91,7 @@ async def k3s_callback(request: Request, req: K3sCallbackRequest):
     if req.occm_status:
         _logger.info("k3s cluster %s OCCM status (deprecated): %s", cluster_id, req.occm_status)
     if req.secret_cloud_config_status and req.secret_cloud_config_status != "ok":
-        _logger.warning("k3s cluster %s cloud-config secret 생성 실패: %s",
-                        cluster_id, req.secret_cloud_config_status)
+        _logger.warning("k3s cluster %s cloud-config secret 생성 실패: %s", cluster_id, req.secret_cloud_config_status)
     if req.plugin_status:
         for name, info in req.plugin_status.items():
             st = info.get("status", info) if isinstance(info, dict) else info
@@ -104,13 +110,22 @@ async def k3s_callback(request: Request, req: K3sCallbackRequest):
     if master_count >= 3:
         _logger.info("k3s cluster %s HA mode: bootstrapping servers #2/#3", cluster_id)
         from app.services.k3s_provisioner import bootstrap_ha_servers
-        asyncio.create_task(bootstrap_ha_servers(
-            project_id, cluster_id, req.server_ip, req.node_token,
-            master_count, lb_pool_id, lb_fip_address,
-        ))
+
+        asyncio.create_task(
+            bootstrap_ha_servers(
+                project_id,
+                cluster_id,
+                req.server_ip,
+                req.node_token,
+                master_count,
+                lb_pool_id,
+                lb_fip_address,
+            )
+        )
     else:
         _logger.info("k3s cluster %s server ready, spawning agent VMs", cluster_id)
         from app.services.k3s_provisioner import provision_agents
+
         asyncio.create_task(provision_agents(project_id, cluster_id, req.server_ip, req.node_token))
 
     return {"ok": True}
@@ -144,7 +159,11 @@ async def _handle_ha_joiner(
             subnet_id = subnets[0].id if subnets else None
             cluster_name = cluster_info.get("name") or cluster_id
             await asyncio.to_thread(
-                octavia.add_member, conn, lb_pool_id, req.server_ip, 6443,
+                octavia.add_member,
+                conn,
+                lb_pool_id,
+                req.server_ip,
+                6443,
                 subnet_id=subnet_id,
                 name=f"{cluster_name}-server{server_index}",
             )
@@ -163,10 +182,9 @@ async def _handle_ha_joiner(
         if server_ip and node_token:
             _logger.info("HA: all servers joined for cluster %s, spawning agent VMs", cluster_id)
             from app.services.k3s_provisioner import provision_agents
+
             asyncio.create_task(provision_agents(project_id, cluster_id, server_ip, node_token))
         else:
             _logger.error("HA: cluster %s missing server_ip/node_token after HA join", cluster_id)
 
     return {"ok": True}
-
-

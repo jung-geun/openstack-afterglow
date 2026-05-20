@@ -20,6 +20,7 @@ router = APIRouter()
 
 def _check_cluster(cluster):
     from fastapi import HTTPException
+
     if not cluster:
         raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
 
@@ -73,7 +74,9 @@ async def get_pod_log(
     cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
     _check_cluster(cluster)
     log = await k3s_kube.get_pod_log(
-        cluster_id, namespace, name,
+        cluster_id,
+        namespace,
+        name,
         container=container,
         tail_lines=tail_lines,
         project_id=project_id,

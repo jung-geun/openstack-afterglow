@@ -407,12 +407,7 @@ def _fetch_topology_sync(conn, project_id: str | None = None) -> dict:
     if project_id:
         instance_list = [i for i in instance_list if i.project_id == project_id]
         # 네트워크: 현재 프로젝트 소유 + external + shared 만 유지
-        topo.networks = [
-            n for n in topo.networks
-            if n.project_id == project_id
-            or n.is_external
-            or n.is_shared
-        ]
+        topo.networks = [n for n in topo.networks if n.project_id == project_id or n.is_external or n.is_shared]
         # 라우터: 현재 프로젝트 소유만 유지
         topo.routers = [r for r in topo.routers if getattr(r, "project_id", None) == project_id]
 

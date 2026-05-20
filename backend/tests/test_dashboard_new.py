@@ -31,6 +31,7 @@ MOCK_FLAVORS = [
 # GET /api/dashboard/overview
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_overview_returns_stats(client, mock_conn):
     """정상 조회: stats / recent_instances / alerts 반환."""
@@ -38,13 +39,19 @@ async def test_overview_returns_stats(client, mock_conn):
     with (
         _patch_redis(),
         patch("app.api.common.dashboard._list_servers_as_dicts", return_value=MOCK_SERVERS),
-        patch("app.api.common.dashboard.nova.get_project_limits", return_value={
-            "cores": {"in_use": 4, "limit": 20},
-            "ram": {"in_use": 8192, "limit": 51200},
-        }),
-        patch("app.api.common.dashboard.cinder.get_volume_limits", return_value={
-            "gigabytes": {"in_use": 100, "limit": 1000},
-        }),
+        patch(
+            "app.api.common.dashboard.nova.get_project_limits",
+            return_value={
+                "cores": {"in_use": 4, "limit": 20},
+                "ram": {"in_use": 8192, "limit": 51200},
+            },
+        ),
+        patch(
+            "app.api.common.dashboard.cinder.get_volume_limits",
+            return_value={
+                "gigabytes": {"in_use": 100, "limit": 1000},
+            },
+        ),
     ):
         resp = await client.get("/api/dashboard/overview")
 
@@ -96,6 +103,7 @@ async def test_overview_no_instances(client, mock_conn):
 # GET /api/dashboard/usage-stats
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_usage_stats_returns_expected_structure(client, mock_conn):
     """top_instances / volume_by_type / instance_hours 반환."""
@@ -107,11 +115,14 @@ async def test_usage_stats_returns_expected_structure(client, mock_conn):
         _patch_redis(),
         patch("app.api.common.dashboard._list_servers_as_dicts", return_value=MOCK_SERVERS),
         patch("app.api.common.dashboard._list_flavors_as_dicts", return_value=MOCK_FLAVORS),
-        patch("app.api.common.dashboard.nova.get_project_usage", return_value={
-            "total_hours": 72.0,
-            "total_vcpu_hours": 144.0,
-            "server_usages": [],
-        }),
+        patch(
+            "app.api.common.dashboard.nova.get_project_usage",
+            return_value={
+                "total_hours": 72.0,
+                "total_vcpu_hours": 144.0,
+                "server_usages": [],
+            },
+        ),
     ):
         resp = await client.get("/api/dashboard/usage-stats?range=30d")
 
@@ -148,6 +159,7 @@ async def test_usage_stats_unauthenticated(non_admin_client):
     """인증 없이 접근 — 401 (auth 헤더 없는 별도 client 사용 시)."""
     # non_admin_client는 일반 사용자 — 정상 접근 가능해야 함 (admin 전용 아님)
     from unittest.mock import MagicMock, patch
+
     with (
         _patch_redis(),
         patch("app.api.common.dashboard._list_servers_as_dicts", return_value=[]),
@@ -157,6 +169,7 @@ async def test_usage_stats_unauthenticated(non_admin_client):
         # non_admin_client의 conn mock 설정
         from app.api.deps import get_os_conn
         from app.main import app
+
         mock_conn = MagicMock()
         mock_conn._afterglow_project_id = "test-project-123"
         mock_conn.block_storage.volumes.return_value = []
@@ -174,22 +187,29 @@ async def test_usage_stats_unauthenticated(non_admin_client):
 # GET /api/dashboard/usage-report
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_usage_report_structure(client, mock_conn):
     """stats / flavor_hours / quota 구조 반환."""
     with (
         _patch_redis(),
-        patch("app.api.common.dashboard.nova.get_project_usage", return_value={
-            "total_hours": 240.0,
-            "total_vcpu_hours": 480.0,
-            "server_usages": [
-                {"flavor": "c2.medium", "hours": 120.0, "state": "active"},
-                {"flavor": "c4.large", "hours": 120.0, "state": "active"},
-            ],
-        }),
-        patch("app.api.common.dashboard.nova.get_project_quota", return_value={
-            "cores": {"in_use": 6, "limit": 20},
-        }),
+        patch(
+            "app.api.common.dashboard.nova.get_project_usage",
+            return_value={
+                "total_hours": 240.0,
+                "total_vcpu_hours": 480.0,
+                "server_usages": [
+                    {"flavor": "c2.medium", "hours": 120.0, "state": "active"},
+                    {"flavor": "c4.large", "hours": 120.0, "state": "active"},
+                ],
+            },
+        ),
+        patch(
+            "app.api.common.dashboard.nova.get_project_quota",
+            return_value={
+                "cores": {"in_use": 6, "limit": 20},
+            },
+        ),
     ):
         resp = await client.get("/api/dashboard/usage-report?range=30d")
 
@@ -207,14 +227,17 @@ async def test_usage_report_flavor_hours_sorted(client, mock_conn):
     """flavor_hours는 usage_hours 내림차순 정렬."""
     with (
         _patch_redis(),
-        patch("app.api.common.dashboard.nova.get_project_usage", return_value={
-            "total_hours": 300.0,
-            "total_vcpu_hours": 600.0,
-            "server_usages": [
-                {"flavor": "small", "hours": 50.0, "state": "active"},
-                {"flavor": "large", "hours": 250.0, "state": "active"},
-            ],
-        }),
+        patch(
+            "app.api.common.dashboard.nova.get_project_usage",
+            return_value={
+                "total_hours": 300.0,
+                "total_vcpu_hours": 600.0,
+                "server_usages": [
+                    {"flavor": "small", "hours": 50.0, "state": "active"},
+                    {"flavor": "large", "hours": 250.0, "state": "active"},
+                ],
+            },
+        ),
         patch("app.api.common.dashboard.nova.get_project_quota", return_value={}),
     ):
         resp = await client.get("/api/dashboard/usage-report?range=7d")
@@ -227,6 +250,7 @@ async def test_usage_report_flavor_hours_sorted(client, mock_conn):
 # ---------------------------------------------------------------------------
 # GET /api/dashboard/activity
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_activity_no_db_returns_empty_kpi(client, mock_conn):

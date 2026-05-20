@@ -34,9 +34,7 @@ async def test_notifications_error_instance_triggers_alert(client, mock_conn):
     """ERROR 인스턴스가 있으면 danger 알림 반환."""
     from app.services import nova as nova_svc
 
-    error_server = type(
-        "S", (), {"id": "s1", "status": "ERROR", "flavor_id": None, "flavor_name": "m1.small"}
-    )()
+    error_server = type("S", (), {"id": "s1", "status": "ERROR", "flavor_id": None, "flavor_name": "m1.small"})()
 
     with _patch_redis(), patch.object(nova_svc, "list_servers", return_value=[error_server]):
         resp = await client.get("/api/dashboard/notifications")
@@ -55,9 +53,7 @@ async def test_notifications_project_scoped(client, mock_conn):
     """project-scoped connection 사용 — 정상 인스턴스는 알림 없음."""
     from app.services import nova as nova_svc
 
-    active_server = type(
-        "S", (), {"id": "s2", "status": "ACTIVE", "flavor_id": None, "flavor_name": "m1.small"}
-    )()
+    active_server = type("S", (), {"id": "s2", "status": "ACTIVE", "flavor_id": None, "flavor_name": "m1.small"})()
 
     with _patch_redis(), patch.object(nova_svc, "list_servers", return_value=[active_server]):
         resp = await client.get("/api/dashboard/notifications")

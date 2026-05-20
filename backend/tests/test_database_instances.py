@@ -593,6 +593,7 @@ async def test_mutation_does_not_invalidate_on_failure(client, mock_conn):
 # deleted 필터링 (목록에서 deleted=1 행 제외 검증)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_list_instances_filters_deleted():
     """list_instances가 deleted=1 행을 응답에서 제외하는지 검증."""

@@ -1,4 +1,5 @@
 """k3s 인증서 API — CA 다운로드, 만료 조회, 인증서 회전."""
+
 from __future__ import annotations
 
 import logging
@@ -34,7 +35,9 @@ async def _get_kubeconfig_for_user(project_id: str, cluster_id: str) -> str:
         raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다.")
     kc = await k3s_db.get_kubeconfig(project_id, cluster_id)
     if not kc:
-        raise HTTPException(status_code=404, detail="kubeconfig를 찾을 수 없습니다. 클러스터가 아직 초기화 중일 수 있습니다.")
+        raise HTTPException(
+            status_code=404, detail="kubeconfig를 찾을 수 없습니다. 클러스터가 아직 초기화 중일 수 있습니다."
+        )
     return kc
 
 

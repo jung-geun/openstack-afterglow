@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 # 기존 4-티어 helpers (하위 호환 — 85 개 호출처 유지)
 # ---------------------------------------------------------------------------
 
+
 def ttl_fast() -> int:
     """빈번히 변하는 리소스 TTL (인스턴스, 볼륨, 플로팅IP 등)."""
     return get_settings().cache_ttl_fast

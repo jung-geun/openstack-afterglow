@@ -1,4 +1,5 @@
 """k3s Cloud Shell — ephemeral pod 세션 관리."""
+
 from __future__ import annotations
 
 import hashlib
@@ -142,9 +143,7 @@ async def ensure_session(cluster_id: str, user_id: str, *, project_id: str) -> s
 
     manifest = build_pod_manifest(user_id, kc_secret, pvc)
     await k3s_kube.create_pod(cluster_id, SHELL_NAMESPACE, manifest, project_id=project_id)
-    ready = await k3s_kube.wait_pod_ready(
-        cluster_id, SHELL_NAMESPACE, p_name, timeout=120.0, project_id=project_id
-    )
+    ready = await k3s_kube.wait_pod_ready(cluster_id, SHELL_NAMESPACE, p_name, timeout=120.0, project_id=project_id)
     if not ready:
         raise HTTPException(504, "Shell pod 가 준비되지 않았습니다 (timeout)")
     return p_name

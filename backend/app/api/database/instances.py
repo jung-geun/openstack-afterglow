@@ -175,9 +175,7 @@ async def list_db_configurations(
     pid = getattr(conn, "_afterglow_project_id", "unknown")
     key = keys.project_key("trove", pid, "configurations")
     try:
-        return await cache.cached_call(
-            key, cache.ttl_slow(), lambda: trove.list_configurations(conn), refresh=bypass
-        )
+        return await cache.cached_call(key, cache.ttl_slow(), lambda: trove.list_configurations(conn), refresh=bypass)
     except Exception:
         raise HTTPException(status_code=500, detail="Configuration group 목록 조회 실패")
 
@@ -193,9 +191,7 @@ async def list_db_volume_types(
     pid = getattr(conn, "_afterglow_project_id", "unknown")
     key = keys.project_key("cinder", pid, "volume-types")
     try:
-        return await cache.cached_call(
-            key, cache.ttl_static(), lambda: cinder.list_volume_types(conn), refresh=bypass
-        )
+        return await cache.cached_call(key, cache.ttl_static(), lambda: cinder.list_volume_types(conn), refresh=bypass)
     except Exception:
         raise HTTPException(status_code=500, detail="볼륨 타입 목록 조회 실패")
 

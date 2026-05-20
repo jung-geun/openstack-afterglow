@@ -20,6 +20,7 @@ router = APIRouter()
 
 def _check_cluster(cluster):
     from fastapi import HTTPException
+
     if not cluster:
         raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
 
@@ -86,9 +87,7 @@ async def scale_deployment(
     project_id = conn._afterglow_project_id
     cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
     _check_cluster(cluster)
-    result = await k3s_kube.scale_deployment(
-        cluster_id, namespace, name, body.replicas, project_id=project_id
-    )
+    result = await k3s_kube.scale_deployment(cluster_id, namespace, name, body.replicas, project_id=project_id)
     await rec(
         token_info,
         conn,

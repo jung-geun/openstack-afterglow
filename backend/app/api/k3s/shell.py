@@ -1,4 +1,5 @@
 """k3s Cloud Shell — 티켓 발급 + WebSocket exec 프록시."""
+
 from __future__ import annotations
 
 import asyncio
@@ -38,16 +39,19 @@ async def create_shell_ticket(
         raise HTTPException(status_code=409, detail="클러스터가 ACTIVE 상태가 아닙니다")
 
     ticket = secrets.token_urlsafe(32)
-    payload = json.dumps({
-        "cluster_id": cluster_id,
-        "project_id": pid,
-        "user_id": token_info["user_id"],
-        "token": token_info["token"],
-    })
+    payload = json.dumps(
+        {
+            "cluster_id": cluster_id,
+            "project_id": pid,
+            "user_id": token_info["user_id"],
+            "token": token_info["token"],
+        }
+    )
     r = await _get_redis()
     await r.setex(f"{_TICKET_KEY_PREFIX}{ticket}", _TICKET_TTL, payload)
     await rec(
-        token_info, conn,
+        token_info,
+        conn,
         resource_type="k3s_cluster",
         action="k3s.shell.ticket",
         status="success",
@@ -100,7 +104,7 @@ async def shell_ws(
                 exec_url,
                 ssl=ssl_ctx,
                 subprotocols=["v4.channel.k8s.io"],
-                max_size=2 ** 20,
+                max_size=2**20,
                 ping_interval=20,
                 ping_timeout=10,
                 open_timeout=30,

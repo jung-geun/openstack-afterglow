@@ -711,7 +711,9 @@ async def move_object(
         original_filename = body.source.rsplit("/", 1)[-1]
         dest_name = dest_name + original_filename
     try:
-        result = await asyncio.to_thread(swift.move_object, conn, container_name, body.source, dest_container, dest_name)
+        result = await asyncio.to_thread(
+            swift.move_object, conn, container_name, body.source, dest_container, dest_name
+        )
     except Exception:
         _logger.exception("오브젝트 이동 실패: %s -> %s", body.source, body.destination)
         raise HTTPException(status_code=500, detail="오브젝트 이동 실패")

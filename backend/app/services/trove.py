@@ -118,11 +118,7 @@ def list_instances(conn) -> list[dict]:
     try:
         resp = conn.database.get("/instances")
         body = resp.json() if hasattr(resp, "json") else {}
-        return [
-            _dict_from_raw(raw)
-            for raw in body.get("instances", [])
-            if not raw.get("deleted")
-        ]
+        return [_dict_from_raw(raw) for raw in body.get("instances", []) if not raw.get("deleted")]
     except Exception:
         _logger.debug("Trove 인스턴스 목록 조회 실패", exc_info=True)
         return []
@@ -345,14 +341,10 @@ def create_database(
         db["character_set"] = character_set
     if collate:
         db["collate"] = collate
-    resp = conn.database.post(
-        f"/instances/{instance_id}/databases", json={"databases": [db]}
-    )
+    resp = conn.database.post(f"/instances/{instance_id}/databases", json={"databases": [db]})
     if not resp.ok:
         body = (getattr(resp, "text", "") or "")[:500]
-        raise RuntimeError(
-            f"Trove POST /databases status={resp.status_code} body={body}"
-        )
+        raise RuntimeError(f"Trove POST /databases status={resp.status_code} body={body}")
 
 
 def delete_database(conn, instance_id: str, db_name: str) -> None:

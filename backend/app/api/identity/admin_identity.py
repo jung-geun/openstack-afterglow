@@ -1132,11 +1132,13 @@ async def sync_monitoring_sg(
 # A-7  GET /admin/identity/summary  (Phase 50c)
 # ---------------------------------------------------------------------------
 
+
 @router.get("/identity/summary", dependencies=[Depends(require_admin)])
 async def get_identity_summary(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """users / projects / roles / groups / domains 카운트 + 최근 변경 요약."""
+
     def _classify_exc(exc: Exception) -> str:
         s = str(exc).lower()
         if "403" in s or "forbidden" in s:

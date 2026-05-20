@@ -12,6 +12,7 @@ Exemption tiers:
                     internally; any handler that delegates to one of these is
                     treated as covered (e.g. _simple_action).
 """
+
 import ast
 from pathlib import Path
 
@@ -51,20 +52,20 @@ EXEMPT_ROUTERS: set[str] = {
     # Phase C/D TODO — cache not yet wired up in these modules.
     # Remove each entry as the corresponding phase lands.
     # ------------------------------------------------------------------
-    "compute/images.py",            # TODO: Phase C/D — image cache
-    "container/clusters.py",        # TODO: Phase C/D — Magnum
-    "container/containers.py",      # TODO: Phase C/D — Zun
-    "database/instances.py",        # TODO: Phase C/D — Trove
-    "k3s/clusters.py",              # TODO: Phase C/D — k3s
-    "union/layers.py",              # TODO: Phase C/D — Union layers
-    "network/loadbalancers.py",     # TODO: Phase C/D — listener/pool/member sub-resources
-    "network/networks.py",          # TODO: Phase C/D — floating_ip / subnet sub-resources
-    "network/routers.py",           # TODO: Phase C/D — interface / gateway sub-resources
-    "object_storage/containers.py", # TODO: Phase C/D — Swift object storage
-    "object_storage/upload.py",     # TODO: Phase C/D — Swift upload
-    "storage/file_storage.py",      # TODO: Phase C/D — access rule sub-resources
-    "storage/volumes.py",           # TODO: Phase C/D — volume transfer sub-resources
-    "storage/volume_backups.py",    # TODO: Phase C/D — backup / restore
+    "compute/images.py",  # TODO: Phase C/D — image cache
+    "container/clusters.py",  # TODO: Phase C/D — Magnum
+    "container/containers.py",  # TODO: Phase C/D — Zun
+    "database/instances.py",  # TODO: Phase C/D — Trove
+    "k3s/clusters.py",  # TODO: Phase C/D — k3s
+    "union/layers.py",  # TODO: Phase C/D — Union layers
+    "network/loadbalancers.py",  # TODO: Phase C/D — listener/pool/member sub-resources
+    "network/networks.py",  # TODO: Phase C/D — floating_ip / subnet sub-resources
+    "network/routers.py",  # TODO: Phase C/D — interface / gateway sub-resources
+    "object_storage/containers.py",  # TODO: Phase C/D — Swift object storage
+    "object_storage/upload.py",  # TODO: Phase C/D — Swift upload
+    "storage/file_storage.py",  # TODO: Phase C/D — access rule sub-resources
+    "storage/volumes.py",  # TODO: Phase C/D — volume transfer sub-resources
+    "storage/volume_backups.py",  # TODO: Phase C/D — backup / restore
 }
 
 # ---------------------------------------------------------------------------
@@ -88,6 +89,7 @@ INVALIDATING_HELPERS: set[str] = {
 # ---------------------------------------------------------------------------
 # AST helpers
 # ---------------------------------------------------------------------------
+
 
 def get_http_methods(node: ast.AsyncFunctionDef) -> list[str]:
     """Return HTTP method decorators (post/put/patch/delete) on a function."""
@@ -146,15 +148,14 @@ def find_mutation_handlers_without_invalidation(filepath: Path) -> list[str]:
                 continue
             http_methods = get_http_methods(node)
             if http_methods and not has_invalidation_call(node):
-                missing.append(
-                    f"{filepath.name}:{node.name} ({', '.join(http_methods)})"
-                )
+                missing.append(f"{filepath.name}:{node.name} ({', '.join(http_methods)})")
     return missing
 
 
 # ---------------------------------------------------------------------------
 # Test
 # ---------------------------------------------------------------------------
+
 
 def test_mutation_handlers_have_invalidation() -> None:
     """All POST/PUT/PATCH/DELETE handlers must call cache invalidation.

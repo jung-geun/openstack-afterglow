@@ -36,12 +36,14 @@ async def store_session(
     r = await _get_redis()
     now = int(datetime.now(UTC).timestamp())
     ttl = max(exp - now, 1)
-    data = json.dumps({
-        "keystone_token": keystone_token,
-        "project_id": project_id,
-        "user_id": user_id,
-        "exp": exp,
-    })
+    data = json.dumps(
+        {
+            "keystone_token": keystone_token,
+            "project_id": project_id,
+            "user_id": user_id,
+            "exp": exp,
+        }
+    )
     async with r.pipeline() as pipe:
         pipe.setex(_key(jti), ttl, data)
         pipe.sadd(_user_index_key(user_id), jti)

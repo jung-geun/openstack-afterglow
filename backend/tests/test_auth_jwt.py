@@ -63,6 +63,7 @@ def patch_settings(monkeypatch):
 # jwt_service 단위 테스트
 # ──────────────────────────────────────────────────────────────────
 
+
 class TestJwtService:
     def test_access_roundtrip(self):
         from app.services.jwt_service import sign_access, verify_access
@@ -133,6 +134,7 @@ class TestJwtService:
 # session_store 단위 테스트
 # ──────────────────────────────────────────────────────────────────
 
+
 class TestSessionStore:
     @pytest.mark.asyncio
     async def test_store_and_get(self):
@@ -189,6 +191,7 @@ class TestSessionStore:
 # HTTP 엔드포인트 통합 테스트
 # ──────────────────────────────────────────────────────────────────
 
+
 @pytest.fixture
 def _ks_authenticate():
     with patch("app.api.identity.auth.keystone.authenticate", return_value=dict(_KS_DATA)) as m:
@@ -221,9 +224,7 @@ def _rate_limiter_off():
 
 
 @pytest.mark.asyncio
-async def test_login_returns_access_and_refresh(
-    _ks_authenticate, _ks_get_user, _rate_limiter_off
-):
+async def test_login_returns_access_and_refresh(_ks_authenticate, _ks_get_user, _rate_limiter_off):
     """로그인 응답에 token(access JWT)과 refresh_token이 모두 포함되어야 한다."""
     from httpx import ASGITransport, AsyncClient
 
@@ -245,9 +246,7 @@ async def test_login_returns_access_and_refresh(
 
 
 @pytest.mark.asyncio
-async def test_bearer_access_protects_me_endpoint(
-    _ks_authenticate, _ks_get_user, _ks_validate_ok, _rate_limiter_off
-):
+async def test_bearer_access_protects_me_endpoint(_ks_authenticate, _ks_get_user, _ks_validate_ok, _rate_limiter_off):
     """Bearer access JWT로 /me 엔드포인트에 접근 가능해야 한다."""
     from httpx import ASGITransport, AsyncClient
 
@@ -271,12 +270,15 @@ async def test_legacy_x_auth_token_still_works(_rate_limiter_off):
 
     from app.main import app
 
-    with patch(
-        "app.api.deps._cached_validate",
-        new=AsyncMock(return_value=dict(_KS_DATA)),
-    ), patch(
-        "app.api.deps._check_session_timeout",
-        new=AsyncMock(),
+    with (
+        patch(
+            "app.api.deps._cached_validate",
+            new=AsyncMock(return_value=dict(_KS_DATA)),
+        ),
+        patch(
+            "app.api.deps._check_session_timeout",
+            new=AsyncMock(),
+        ),
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             me = await ac.get(
@@ -315,9 +317,7 @@ async def test_expired_access_jwt_returns_401(_rate_limiter_off):
 
 
 @pytest.mark.asyncio
-async def test_refresh_rotates_tokens(
-    _ks_authenticate, _ks_get_user, _ks_validate_ok, _rate_limiter_off
-):
+async def test_refresh_rotates_tokens(_ks_authenticate, _ks_get_user, _ks_validate_ok, _rate_limiter_off):
     """refresh 호출 시 새 토큰 쌍이 발급되고, 기존 refresh로 재호출 시 401."""
     from httpx import ASGITransport, AsyncClient
 
@@ -345,9 +345,7 @@ async def test_refresh_rotates_tokens(
 
 
 @pytest.mark.asyncio
-async def test_logout_revokes_refresh_session(
-    _ks_authenticate, _ks_get_user, _ks_validate_ok, _rate_limiter_off
-):
+async def test_logout_revokes_refresh_session(_ks_authenticate, _ks_get_user, _ks_validate_ok, _rate_limiter_off):
     """로그아웃 후 refresh 토큰으로 갱신 시도 시 401을 반환해야 한다."""
     from httpx import ASGITransport, AsyncClient
 
@@ -386,9 +384,7 @@ async def test_no_auth_header_returns_401(_rate_limiter_off):
 
 
 @pytest.mark.asyncio
-async def test_bearer_jwt_uses_cached_validate_not_payload(
-    _ks_authenticate, _ks_get_user, _rate_limiter_off
-):
+async def test_bearer_jwt_uses_cached_validate_not_payload(_ks_authenticate, _ks_get_user, _rate_limiter_off):
     """Bearer JWT 요청은 JWT payload가 아닌 _cached_validate(Keystone live)에서 권한 정보를 읽어야 한다."""
     from httpx import ASGITransport, AsyncClient
 

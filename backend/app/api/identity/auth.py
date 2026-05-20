@@ -244,9 +244,7 @@ async def switch_project(req: SwitchProjectRequest, token_info: dict = Depends(g
     """현재 JWT를 새 프로젝트로 rescope하여 새 토큰 쌍 발급."""
     keystone_token = token_info["token"]
     try:
-        kc_info = await asyncio.to_thread(
-            keystone.validate_token, keystone_token, project_id=req.project_id
-        )
+        kc_info = await asyncio.to_thread(keystone.validate_token, keystone_token, project_id=req.project_id)
     except Exception:
         raise HTTPException(status_code=403, detail="해당 프로젝트에 접근 권한이 없습니다")
 

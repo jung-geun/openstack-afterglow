@@ -1,4 +1,5 @@
 """PR 3-B — k3s 인증서 회전 테스트."""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
@@ -96,7 +97,9 @@ async def test_rotate_certificates_multi_node_calls_job_per_node():
 
     mock_create_job = AsyncMock(return_value={})
     with (
-        patch("app.services.k3s_cert_rotation.k3s_kube.list_server_nodes", new=AsyncMock(return_value=["n1", "n2", "n3"])),
+        patch(
+            "app.services.k3s_cert_rotation.k3s_kube.list_server_nodes", new=AsyncMock(return_value=["n1", "n2", "n3"])
+        ),
         patch("app.services.k3s_cert_rotation.k3s_kube.create_job", new=mock_create_job),
         patch("app.services.k3s_cert_rotation.k3s_kube.wait_job_completed", new=AsyncMock(return_value=True)),
         patch("app.services.k3s_cert_rotation.k3s_kube.wait_node_ready", new=AsyncMock(return_value=True)),
@@ -137,7 +140,9 @@ async def test_record_rotation_called_on_success():
 @pytest.mark.asyncio
 async def test_rotate_certs_single_master_returns_422(client):
     """단일 마스터 클러스터 → 422."""
-    with patch("app.api.k3s.certificates.k3s_db.get_cluster", new=AsyncMock(return_value=_make_cluster(master_count=1))):
+    with patch(
+        "app.api.k3s.certificates.k3s_db.get_cluster", new=AsyncMock(return_value=_make_cluster(master_count=1))
+    ):
         resp = await client.post("/api/k3s/clusters/c1/rotate-certs")
     assert resp.status_code == 422
 
@@ -178,6 +183,7 @@ async def test_rotate_certs_sse_stream_returns_200(client):
 
     async def _fake_rotate(*args, **kwargs):
         from app.models.k3s import K3sProgressMessage, K3sProgressStep
+
         yield K3sProgressMessage(step=K3sProgressStep.ROTATE_DISCOVER, progress=5, message="검색 중", cluster_id="c1")
         yield K3sProgressMessage(step=K3sProgressStep.COMPLETED, progress=100, message="완료", cluster_id="c1")
 

@@ -37,7 +37,9 @@ def _cluster():
 
 
 def _k8s_pod(name="mypod", phase="Running", ready=True, restarts=3):
-    state = {"running": {"startedAt": "2024-01-01T00:00:00Z"}} if ready else {"waiting": {"reason": "ContainerCreating"}}
+    state = (
+        {"running": {"startedAt": "2024-01-01T00:00:00Z"}} if ready else {"waiting": {"reason": "ContainerCreating"}}
+    )
     return {
         "metadata": {
             "name": name,
@@ -210,14 +212,14 @@ async def test_get_pod_log_passes_tail_lines(client):
     ):
         mc.get_cluster = AsyncMock(return_value=_cluster())
         mk.get_pod_log = AsyncMock(return_value="line1\nline2\n")
-        resp = await client.get(
-            "/api/k3s/clusters/k3s-1/namespaces/default/pods/mypod/log?tail_lines=50"
-        )
+        resp = await client.get("/api/k3s/clusters/k3s-1/namespaces/default/pods/mypod/log?tail_lines=50")
     assert resp.status_code == 200
     body = resp.json()
     assert "line1" in body["log"]
     mk.get_pod_log.assert_called_once_with(
-        "k3s-1", "default", "mypod",
+        "k3s-1",
+        "default",
+        "mypod",
         container=None,
         tail_lines=50,
         project_id=ANY,
@@ -247,9 +249,7 @@ async def test_restart_deployment_patches_annotation(client):
     ):
         mc.get_cluster = AsyncMock(return_value=_cluster())
         mk.restart_deployment = AsyncMock(return_value=dep_result)
-        resp = await client.post(
-            "/api/k3s/clusters/k3s-1/namespaces/default/deployments/mydeploy/restart"
-        )
+        resp = await client.post("/api/k3s/clusters/k3s-1/namespaces/default/deployments/mydeploy/restart")
     assert resp.status_code == 200
     mk.restart_deployment.assert_called_once_with("k3s-1", "default", "mydeploy", project_id=ANY)
     assert resp.json()["name"] == "mydeploy"

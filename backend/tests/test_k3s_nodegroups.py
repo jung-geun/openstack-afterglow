@@ -75,8 +75,9 @@ def _cluster_access_ok():
 
 @pytest.mark.asyncio
 async def test_list_nodegroups(client):
-    with _cluster_access_ok(), patch(
-        "app.services.k3s_nodegroup.list_nodegroups", new=AsyncMock(return_value=[_NG_SERVER, _NG_AGENT])
+    with (
+        _cluster_access_ok(),
+        patch("app.services.k3s_nodegroup.list_nodegroups", new=AsyncMock(return_value=[_NG_SERVER, _NG_AGENT])),
     ):
         resp = await client.get(f"/api/k3s/clusters/{_CLUSTER_ID}/nodegroups")
     assert resp.status_code == 200
@@ -100,9 +101,7 @@ async def test_list_nodegroups_cluster_not_found(client):
 
 @pytest.mark.asyncio
 async def test_get_nodegroup(client):
-    with _cluster_access_ok(), patch(
-        "app.services.k3s_nodegroup.get_nodegroup", new=AsyncMock(return_value=_NG_AGENT)
-    ):
+    with _cluster_access_ok(), patch("app.services.k3s_nodegroup.get_nodegroup", new=AsyncMock(return_value=_NG_AGENT)):
         resp = await client.get(f"/api/k3s/clusters/{_CLUSTER_ID}/nodegroups/{_NG_AGENT['id']}")
     assert resp.status_code == 200
     assert resp.json()["name"] == "default-agent"
@@ -111,9 +110,7 @@ async def test_get_nodegroup(client):
 
 @pytest.mark.asyncio
 async def test_get_nodegroup_not_found(client):
-    with _cluster_access_ok(), patch(
-        "app.services.k3s_nodegroup.get_nodegroup", new=AsyncMock(return_value=None)
-    ):
+    with _cluster_access_ok(), patch("app.services.k3s_nodegroup.get_nodegroup", new=AsyncMock(return_value=None)):
         resp = await client.get(f"/api/k3s/clusters/{_CLUSTER_ID}/nodegroups/nonexistent")
     assert resp.status_code == 404
 
@@ -125,8 +122,9 @@ async def test_get_nodegroup_not_found(client):
 
 @pytest.mark.asyncio
 async def test_create_nodegroup_success(client):
-    with _cluster_access_ok(), patch(
-        "app.services.k3s_nodegroup.create_nodegroup", new=AsyncMock(return_value=_NG_CUSTOM)
+    with (
+        _cluster_access_ok(),
+        patch("app.services.k3s_nodegroup.create_nodegroup", new=AsyncMock(return_value=_NG_CUSTOM)),
     ):
         resp = await client.post(
             f"/api/k3s/clusters/{_CLUSTER_ID}/nodegroups",
@@ -161,9 +159,12 @@ async def test_create_nodegroup_invalid_role(client):
 
 @pytest.mark.asyncio
 async def test_create_nodegroup_duplicate_name(client):
-    with _cluster_access_ok(), patch(
-        "app.services.k3s_nodegroup.create_nodegroup",
-        new=AsyncMock(side_effect=ValueError("이미 같은 이름의 노드그룹이 존재합니다: default-agent")),
+    with (
+        _cluster_access_ok(),
+        patch(
+            "app.services.k3s_nodegroup.create_nodegroup",
+            new=AsyncMock(side_effect=ValueError("이미 같은 이름의 노드그룹이 존재합니다: default-agent")),
+        ),
     ):
         resp = await client.post(
             f"/api/k3s/clusters/{_CLUSTER_ID}/nodegroups",
@@ -174,9 +175,12 @@ async def test_create_nodegroup_duplicate_name(client):
 
 @pytest.mark.asyncio
 async def test_create_nodegroup_db_unavailable(client):
-    with _cluster_access_ok(), patch(
-        "app.services.k3s_nodegroup.create_nodegroup",
-        new=AsyncMock(side_effect=RuntimeError("DB가 설정되지 않아 노드그룹 기능을 사용할 수 없습니다.")),
+    with (
+        _cluster_access_ok(),
+        patch(
+            "app.services.k3s_nodegroup.create_nodegroup",
+            new=AsyncMock(side_effect=RuntimeError("DB가 설정되지 않아 노드그룹 기능을 사용할 수 없습니다.")),
+        ),
     ):
         resp = await client.post(
             f"/api/k3s/clusters/{_CLUSTER_ID}/nodegroups",
@@ -193,8 +197,9 @@ async def test_create_nodegroup_db_unavailable(client):
 @pytest.mark.asyncio
 async def test_update_nodegroup_node_count(client):
     updated = {**_NG_AGENT, "node_count": 5}
-    with _cluster_access_ok(), patch(
-        "app.services.k3s_nodegroup.update_nodegroup", new=AsyncMock(return_value=updated)
+    with (
+        _cluster_access_ok(),
+        patch("app.services.k3s_nodegroup.update_nodegroup", new=AsyncMock(return_value=updated)),
     ):
         resp = await client.patch(
             f"/api/k3s/clusters/{_CLUSTER_ID}/nodegroups/{_NG_AGENT['id']}",
@@ -206,9 +211,7 @@ async def test_update_nodegroup_node_count(client):
 
 @pytest.mark.asyncio
 async def test_update_nodegroup_not_found(client):
-    with _cluster_access_ok(), patch(
-        "app.services.k3s_nodegroup.update_nodegroup", new=AsyncMock(return_value=None)
-    ):
+    with _cluster_access_ok(), patch("app.services.k3s_nodegroup.update_nodegroup", new=AsyncMock(return_value=None)):
         resp = await client.patch(
             f"/api/k3s/clusters/{_CLUSTER_ID}/nodegroups/nonexistent",
             json={"node_count": 3},
@@ -223,35 +226,30 @@ async def test_update_nodegroup_not_found(client):
 
 @pytest.mark.asyncio
 async def test_delete_custom_nodegroup(client):
-    with _cluster_access_ok(), patch(
-        "app.services.k3s_nodegroup.delete_nodegroup", new=AsyncMock(return_value=True)
-    ):
-        resp = await client.delete(
-            f"/api/k3s/clusters/{_CLUSTER_ID}/nodegroups/{_NG_CUSTOM['id']}"
-        )
+    with _cluster_access_ok(), patch("app.services.k3s_nodegroup.delete_nodegroup", new=AsyncMock(return_value=True)):
+        resp = await client.delete(f"/api/k3s/clusters/{_CLUSTER_ID}/nodegroups/{_NG_CUSTOM['id']}")
     assert resp.status_code == 204
 
 
 @pytest.mark.asyncio
 async def test_delete_default_nodegroup_rejected(client):
-    with _cluster_access_ok(), patch(
-        "app.services.k3s_nodegroup.delete_nodegroup",
-        new=AsyncMock(side_effect=ValueError("기본 노드그룹(default-server / default-agent)은 삭제할 수 없습니다.")),
+    with (
+        _cluster_access_ok(),
+        patch(
+            "app.services.k3s_nodegroup.delete_nodegroup",
+            new=AsyncMock(
+                side_effect=ValueError("기본 노드그룹(default-server / default-agent)은 삭제할 수 없습니다.")
+            ),
+        ),
     ):
-        resp = await client.delete(
-            f"/api/k3s/clusters/{_CLUSTER_ID}/nodegroups/{_NG_AGENT['id']}"
-        )
+        resp = await client.delete(f"/api/k3s/clusters/{_CLUSTER_ID}/nodegroups/{_NG_AGENT['id']}")
     assert resp.status_code == 422
 
 
 @pytest.mark.asyncio
 async def test_delete_nodegroup_not_found(client):
-    with _cluster_access_ok(), patch(
-        "app.services.k3s_nodegroup.delete_nodegroup", new=AsyncMock(return_value=False)
-    ):
-        resp = await client.delete(
-            f"/api/k3s/clusters/{_CLUSTER_ID}/nodegroups/nonexistent"
-        )
+    with _cluster_access_ok(), patch("app.services.k3s_nodegroup.delete_nodegroup", new=AsyncMock(return_value=False)):
+        resp = await client.delete(f"/api/k3s/clusters/{_CLUSTER_ID}/nodegroups/nonexistent")
     assert resp.status_code == 404
 
 

@@ -1003,7 +1003,9 @@ async def test_list_containers_uses_cached_call(client, mock_conn):
 
     fake_containers = [{"name": "bucket-1", "count": 2, "bytes": 1024}]
 
-    with patch("app.api.object_storage.containers.cache.cached_call", new_callable=AsyncMock, return_value=fake_containers) as mock_call:
+    with patch(
+        "app.api.object_storage.containers.cache.cached_call", new_callable=AsyncMock, return_value=fake_containers
+    ) as mock_call:
         resp = await client.get("/api/object-storage")
 
     assert resp.status_code in (200, 404, 405)
@@ -1023,7 +1025,9 @@ async def test_get_container_metadata_uses_cached_call(client, mock_conn):
 
     fake_meta = {"name": "my-bucket", "count": 5, "bytes": 2048}
 
-    with patch("app.api.object_storage.containers.cache.cached_call", new_callable=AsyncMock, return_value=fake_meta) as mock_call:
+    with patch(
+        "app.api.object_storage.containers.cache.cached_call", new_callable=AsyncMock, return_value=fake_meta
+    ) as mock_call:
         resp = await client.get("/api/object-storage/my-bucket")
 
     assert resp.status_code in (200, 404, 405)
@@ -1041,7 +1045,9 @@ async def test_list_objects_uses_cached_call(client, mock_conn):
 
     fake_objects = [{"name": "file.txt", "bytes": 100}]
 
-    with patch("app.api.object_storage.containers.cache.cached_call", new_callable=AsyncMock, return_value=fake_objects) as mock_call:
+    with patch(
+        "app.api.object_storage.containers.cache.cached_call", new_callable=AsyncMock, return_value=fake_objects
+    ) as mock_call:
         resp = await client.get("/api/object-storage/my-bucket/objects")
 
     assert resp.status_code in (200, 404, 405)
@@ -1079,7 +1085,9 @@ async def test_create_container_invalidates_cache(client, mock_conn):
     with (
         patch("app.services.swift.create_container", return_value={"name": "new-bucket"}),
         patch("app.api.object_storage.containers.cache.invalidate", new_callable=AsyncMock) as mock_inv,
-        patch("app.api.object_storage.containers.invalidation.invalidate_mutation_count", new_callable=AsyncMock) as mock_mut,
+        patch(
+            "app.api.object_storage.containers.invalidation.invalidate_mutation_count", new_callable=AsyncMock
+        ) as mock_mut,
     ):
         resp = await client.post("/api/object-storage", json={"name": "new-bucket"})
 
@@ -1100,7 +1108,9 @@ async def test_delete_container_invalidates_cache(client, mock_conn):
     with (
         patch("app.services.swift.delete_container", return_value=None),
         patch("app.api.object_storage.containers.cache.invalidate", new_callable=AsyncMock) as mock_inv,
-        patch("app.api.object_storage.containers.invalidation.invalidate_mutation_count", new_callable=AsyncMock) as mock_mut,
+        patch(
+            "app.api.object_storage.containers.invalidation.invalidate_mutation_count", new_callable=AsyncMock
+        ) as mock_mut,
     ):
         resp = await client.delete("/api/object-storage/old-bucket")
 
@@ -1118,7 +1128,9 @@ async def test_upload_object_invalidates_cache(client, mock_conn):
     with (
         patch("app.services.swift.upload_object", return_value={"name": "test.txt", "bytes": 5}),
         patch("app.api.object_storage.containers.cache.invalidate", new_callable=AsyncMock) as mock_inv,
-        patch("app.api.object_storage.containers.invalidation.invalidate_mutation_count", new_callable=AsyncMock) as mock_mut,
+        patch(
+            "app.api.object_storage.containers.invalidation.invalidate_mutation_count", new_callable=AsyncMock
+        ) as mock_mut,
     ):
         resp = await client.post(
             "/api/object-storage/my-bucket/objects",
@@ -1139,7 +1151,9 @@ async def test_delete_object_invalidates_cache(client, mock_conn):
     with (
         patch("app.services.swift.delete_object", return_value=None),
         patch("app.api.object_storage.containers.cache.invalidate", new_callable=AsyncMock) as mock_inv,
-        patch("app.api.object_storage.containers.invalidation.invalidate_mutation_count", new_callable=AsyncMock) as mock_mut,
+        patch(
+            "app.api.object_storage.containers.invalidation.invalidate_mutation_count", new_callable=AsyncMock
+        ) as mock_mut,
     ):
         resp = await client.delete("/api/object-storage/my-bucket/objects/test.txt")
 
@@ -1175,7 +1189,9 @@ async def test_create_container_no_invalidation_on_failure(client, mock_conn):
     with (
         patch("app.services.swift.create_container", side_effect=Exception("Swift 오류")),
         patch("app.api.object_storage.containers.cache.invalidate", new_callable=AsyncMock) as mock_inv,
-        patch("app.api.object_storage.containers.invalidation.invalidate_mutation_count", new_callable=AsyncMock) as mock_mut,
+        patch(
+            "app.api.object_storage.containers.invalidation.invalidate_mutation_count", new_callable=AsyncMock
+        ) as mock_mut,
     ):
         resp = await client.post("/api/object-storage", json={"name": "fail-bucket"})
 

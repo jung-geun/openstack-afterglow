@@ -20,6 +20,7 @@ router = APIRouter()
 
 def _check_cluster(cluster):
     from fastapi import HTTPException
+
     if not cluster:
         raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
 

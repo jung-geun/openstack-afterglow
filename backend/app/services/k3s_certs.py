@@ -1,4 +1,5 @@
 """k3s 인증서 분석 서비스 — CA 추출, 만료 파싱, TLS 프로브."""
+
 from __future__ import annotations
 
 import asyncio
@@ -99,16 +100,19 @@ async def probe_tls_server_cert(host: str, port: int = 6443, timeout: float = 3.
         ctx.verify_mode = ssl.CERT_NONE
 
         def _probe() -> list[dict[str, Any]]:
-            with socket.create_connection((host, port), timeout=timeout) as sock, ctx.wrap_socket(sock, server_hostname=host) as ssock:
-                    der = ssock.getpeercert(binary_form=True)
-                    if not der:
-                        return []
-                    from cryptography import x509
-                    from cryptography.hazmat.primitives import serialization
+            with (
+                socket.create_connection((host, port), timeout=timeout) as sock,
+                ctx.wrap_socket(sock, server_hostname=host) as ssock,
+            ):
+                der = ssock.getpeercert(binary_form=True)
+                if not der:
+                    return []
+                from cryptography import x509
+                from cryptography.hazmat.primitives import serialization
 
-                    cert = x509.load_der_x509_certificate(der)
-                    pem = cert.public_bytes(serialization.Encoding.PEM)
-                    return [_cert_info_from_pem(pem)]
+                cert = x509.load_der_x509_certificate(der)
+                pem = cert.public_bytes(serialization.Encoding.PEM)
+                return [_cert_info_from_pem(pem)]
 
         return await asyncio.to_thread(_probe)
     except Exception as e:

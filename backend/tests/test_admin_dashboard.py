@@ -19,6 +19,7 @@ def _patch_redis():
 # GET /api/admin/notifications
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_notifications_non_admin_returns_403(non_admin_client):
     resp = await non_admin_client.get("/api/admin/notifications")
@@ -61,6 +62,7 @@ async def test_notifications_error_instances_trigger_alert(admin_client, mock_co
 # GET /api/admin/instances/health
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_instances_health_non_admin_returns_403(non_admin_client):
     resp = await non_admin_client.get("/api/admin/instances/health")
@@ -71,8 +73,22 @@ async def test_instances_health_non_admin_returns_403(non_admin_client):
 async def test_instances_health_returns_list(admin_client, mock_conn):
     mock_conn.session.get.return_value.json.return_value = {
         "servers": [
-            {"id": "s1", "name": "vm-1", "status": "ACTIVE", "tenant_id": "p1", "OS-EXT-SRV-ATTR:host": "host1", "flavor": {}},
-            {"id": "s2", "name": "vm-err", "status": "ERROR", "tenant_id": "p1", "OS-EXT-SRV-ATTR:host": "host1", "flavor": {}},
+            {
+                "id": "s1",
+                "name": "vm-1",
+                "status": "ACTIVE",
+                "tenant_id": "p1",
+                "OS-EXT-SRV-ATTR:host": "host1",
+                "flavor": {},
+            },
+            {
+                "id": "s2",
+                "name": "vm-err",
+                "status": "ERROR",
+                "tenant_id": "p1",
+                "OS-EXT-SRV-ATTR:host": "host1",
+                "flavor": {},
+            },
         ]
     }
     with _patch_redis():
@@ -90,10 +106,38 @@ async def test_instances_health_kpi_fields(admin_client, mock_conn):
     """Phase 53b: total/active/error/with_alerts/gpu_count KPI 5필드 모두 존재."""
     mock_conn.session.get.return_value.json.return_value = {
         "servers": [
-            {"id": "s1", "status": "ACTIVE", "tenant_id": "p1", "OS-EXT-SRV-ATTR:host": "h1", "name": "vm-1", "flavor": {"original_name": "c2.medium"}},
-            {"id": "s2", "status": "ACTIVE", "tenant_id": "p1", "OS-EXT-SRV-ATTR:host": "h1", "name": "vm-2", "flavor": {"original_name": "gpu.large"}},
-            {"id": "s3", "status": "ERROR", "tenant_id": "p1", "OS-EXT-SRV-ATTR:host": "h2", "name": "vm-err", "flavor": {}},
-            {"id": "s4", "status": "SHUTOFF", "tenant_id": "p1", "OS-EXT-SRV-ATTR:host": "h2", "name": "vm-off", "flavor": {}},
+            {
+                "id": "s1",
+                "status": "ACTIVE",
+                "tenant_id": "p1",
+                "OS-EXT-SRV-ATTR:host": "h1",
+                "name": "vm-1",
+                "flavor": {"original_name": "c2.medium"},
+            },
+            {
+                "id": "s2",
+                "status": "ACTIVE",
+                "tenant_id": "p1",
+                "OS-EXT-SRV-ATTR:host": "h1",
+                "name": "vm-2",
+                "flavor": {"original_name": "gpu.large"},
+            },
+            {
+                "id": "s3",
+                "status": "ERROR",
+                "tenant_id": "p1",
+                "OS-EXT-SRV-ATTR:host": "h2",
+                "name": "vm-err",
+                "flavor": {},
+            },
+            {
+                "id": "s4",
+                "status": "SHUTOFF",
+                "tenant_id": "p1",
+                "OS-EXT-SRV-ATTR:host": "h2",
+                "name": "vm-off",
+                "flavor": {},
+            },
         ]
     }
     with _patch_redis():
@@ -105,8 +149,8 @@ async def test_instances_health_kpi_fields(admin_client, mock_conn):
     assert data["active"] == 2
     assert data["error"] == 1
     assert data["with_alerts"] == 1  # ERROR 수와 동일
-    assert data["gpu_count"] == 1   # gpu.large 1개
-    assert data["count"] == 1       # ERROR 목록 호환
+    assert data["gpu_count"] == 1  # gpu.large 1개
+    assert data["count"] == 1  # ERROR 목록 호환
 
 
 @pytest.mark.asyncio
@@ -128,6 +172,7 @@ async def test_instances_health_empty(admin_client, mock_conn):
 # ---------------------------------------------------------------------------
 # POST /api/admin/instances/bulk-action
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_bulk_action_non_admin_returns_403(non_admin_client):
@@ -177,6 +222,7 @@ async def test_bulk_action_too_many_ids_returns_400(admin_client, mock_conn):
 @pytest.mark.asyncio
 async def test_bulk_action_partial_failure_still_records_all(admin_client, mock_conn):
     """일부 실패해도 성공/실패 모두 ActivityLog에 기록."""
+
     def _fail_on_s2(instance_id):
         if instance_id == "s2":
             raise RuntimeError("서버 없음")
@@ -201,6 +247,7 @@ async def test_bulk_action_partial_failure_still_records_all(admin_client, mock_
 # ---------------------------------------------------------------------------
 # GET /api/admin/floating-ips/pool-stats
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_fip_pool_stats_non_admin_returns_403(non_admin_client):
@@ -239,6 +286,7 @@ async def test_fip_pool_stats_returns_structure(admin_client, mock_conn):
 # ---------------------------------------------------------------------------
 # GET /api/admin/identity/summary
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_identity_summary_non_admin_returns_403(non_admin_client):

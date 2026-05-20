@@ -1,4 +1,5 @@
 """PR 2B — k3s Master HA 테스트."""
+
 from __future__ import annotations
 
 import json
@@ -123,9 +124,7 @@ async def test_create_and_consume_ha_callback_token():
     mock_client = AsyncMock()
     mock_client.setex = AsyncMock()
     mock_client.getdel = AsyncMock(
-        return_value=json.dumps(
-            {"project_id": "proj1", "cluster_id": "clus1", "server_index": 2}
-        ).encode()
+        return_value=json.dumps({"project_id": "proj1", "cluster_id": "clus1", "server_index": 2}).encode()
     )
 
     with patch("app.services.k3s_cluster._get_client", return_value=mock_client):

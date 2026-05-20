@@ -380,6 +380,7 @@ async def get_project_usage(
 # Phase 50 신규 엔드포인트 (4-A ~ 4-D)
 # ---------------------------------------------------------------------------
 
+
 def _range_to_dates(range_str: str) -> tuple[str, str]:
     """range=24h|7d|14d|30d → (start_iso, end_iso)."""
     today = date.today()
@@ -444,6 +445,7 @@ async def get_dashboard_overview(
     if settings.service_k3s_enabled:
         try:
             from app.services import k3s_cluster
+
             clusters = await asyncio.to_thread(k3s_cluster.list_clusters_for_project, conn, project_id)
             k3s_count = len(clusters)
             k3s_active = sum(1 for c in clusters if c.get("status") == "CREATE_COMPLETE")
@@ -543,17 +545,19 @@ async def get_dashboard_usage_stats(
         fl_disk = fl.get("disk", 0) if isinstance(fl, dict) else 0
         fl_name = fl.get("name", s.get("flavor_name", "")) if isinstance(fl, dict) else s.get("flavor_name", "")
         fl_extra = fl.get("extra_specs", {}) if isinstance(fl, dict) else {}
-        top_instances.append({
-            "id": s.get("id"),
-            "name": s.get("name", ""),
-            "flavor_name": fl_name,
-            "vcpus": fl_vcpus,
-            "ram_mb": fl_ram,
-            "disk_gb": fl_disk,
-            "status": s.get("status", "ACTIVE"),
-            "usage_hours": _usage_hours(s.get("created_at")),
-            "gpu": _gpu_count_from_flavor(fl_name, fl_extra),
-        })
+        top_instances.append(
+            {
+                "id": s.get("id"),
+                "name": s.get("name", ""),
+                "flavor_name": fl_name,
+                "vcpus": fl_vcpus,
+                "ram_mb": fl_ram,
+                "disk_gb": fl_disk,
+                "status": s.get("status", "ACTIVE"),
+                "usage_hours": _usage_hours(s.get("created_at")),
+                "gpu": _gpu_count_from_flavor(fl_name, fl_extra),
+            }
+        )
     top_instances.sort(key=lambda x: x["vcpus"], reverse=True)
     top20 = top_instances[:20]
 
@@ -564,14 +568,14 @@ async def get_dashboard_usage_stats(
     if uuids:
         uuid_re = "|".join(uuids)
         cpu_expr = (
-            f'sum by (instance_id) (rate(libvirt_domain_info_cpu_time_seconds_total[2m])'
+            f"sum by (instance_id) (rate(libvirt_domain_info_cpu_time_seconds_total[2m])"
             f' * on (domain) group_left(instance_id) libvirt_domain_openstack_info{{instance_id=~"{uuid_re}"}})'
-            f' / sum by (instance_id) (libvirt_domain_info_virtual_cpus'
+            f" / sum by (instance_id) (libvirt_domain_info_virtual_cpus"
             f' * on (domain) group_left(instance_id) libvirt_domain_openstack_info{{instance_id=~"{uuid_re}"}})'
-            f' * 100'
+            f" * 100"
         )
         ram_expr = (
-            f'avg by (instance_id) (libvirt_domain_memory_stats_used_percent'
+            f"avg by (instance_id) (libvirt_domain_memory_stats_used_percent"
             f' * on (domain) group_left(instance_id) libvirt_domain_openstack_info{{instance_id=~"{uuid_re}"}})'
         )
         try:
@@ -580,14 +584,10 @@ async def get_dashboard_usage_stats(
                 prom_query.query_instant_multi(ram_expr),
             )
             cpu_by_id = {
-                lbl["instance_id"]: round(v, 1)
-                for lbl, v in cpu_results
-                if "instance_id" in lbl and not math.isnan(v)
+                lbl["instance_id"]: round(v, 1) for lbl, v in cpu_results if "instance_id" in lbl and not math.isnan(v)
             }
             ram_by_id = {
-                lbl["instance_id"]: round(v, 1)
-                for lbl, v in ram_results
-                if "instance_id" in lbl and not math.isnan(v)
+                lbl["instance_id"]: round(v, 1) for lbl, v in ram_results if "instance_id" in lbl and not math.isnan(v)
             }
         except Exception:
             pass
@@ -666,7 +666,9 @@ async def get_dashboard_usage_report(
         flavor_map[fname]["instance_count"] += 1
         flavor_map[fname]["usage_hours"] += su.get("hours", 0.0)
 
-    total_hours = usage.get("total_hours", sum(su.get("hours", 0) for su in server_usages)) if isinstance(usage, dict) else 0.0
+    total_hours = (
+        usage.get("total_hours", sum(su.get("hours", 0) for su in server_usages)) if isinstance(usage, dict) else 0.0
+    )
     total_vcpu_hours = usage.get("total_vcpu_hours", 0.0) if isinstance(usage, dict) else 0.0
 
     # 쿼터 조회
@@ -726,8 +728,8 @@ async def get_dashboard_metrics_trend(
     project_id = conn._afterglow_project_id
 
     _RANGE_CFG = {
-        "24h": {"seconds": 86400,      "step": 300,      "ttl": 15},
-        "7d":  {"seconds": 7 * 86400,  "step": 3600,     "ttl": 120},
+        "24h": {"seconds": 86400, "step": 300, "ttl": 15},
+        "7d": {"seconds": 7 * 86400, "step": 3600, "ttl": 120},
         "14d": {"seconds": 14 * 86400, "step": 6 * 3600, "ttl": 300},
     }
     cfg = _RANGE_CFG[range_]
@@ -764,15 +766,15 @@ async def get_dashboard_metrics_trend(
 
         # vCPU: libvirt cpu_time / virtual_cpus, instance_id 조인 (모든 인스턴스 커버)
         vcpu_expr = (
-            f'sum(rate(libvirt_domain_info_cpu_time_seconds_total[5m])'
+            f"sum(rate(libvirt_domain_info_cpu_time_seconds_total[5m])"
             f' * on (domain) group_left(instance_id) libvirt_domain_openstack_info{{instance_id=~"{uuid_re}"}})'
-            f' / sum(libvirt_domain_info_virtual_cpus'
+            f" / sum(libvirt_domain_info_virtual_cpus"
             f' * on (domain) group_left(instance_id) libvirt_domain_openstack_info{{instance_id=~"{uuid_re}"}})'
-            f' * 100'
+            f" * 100"
         )
         # RAM: virtio-balloon stats_used_percent 평균 (미활성 인스턴스는 자연 제외)
         mem_expr = (
-            f'avg(libvirt_domain_memory_stats_used_percent'
+            f"avg(libvirt_domain_memory_stats_used_percent"
             f' * on (domain) group_left(instance_id) libvirt_domain_openstack_info{{instance_id=~"{uuid_re}"}})'
         )
         # Storage: node_exporter root fs 사용률 % (libvirt에 디스크 사용률 메트릭 없음)
@@ -784,11 +786,11 @@ async def get_dashboard_metrics_trend(
         )
         # Network: libvirt interface_stats + instance_id 조인 KiB/s (prometheus_available 판정 제외)
         net_expr = (
-            f'(sum(rate(libvirt_domain_interface_stats_receive_bytes_total[5m])'
+            f"(sum(rate(libvirt_domain_interface_stats_receive_bytes_total[5m])"
             f' * on (domain) group_left(instance_id) libvirt_domain_openstack_info{{instance_id=~"{uuid_re}"}})'
-            f' + sum(rate(libvirt_domain_interface_stats_transmit_bytes_total[5m])'
+            f" + sum(rate(libvirt_domain_interface_stats_transmit_bytes_total[5m])"
             f' * on (domain) group_left(instance_id) libvirt_domain_openstack_info{{instance_id=~"{uuid_re}"}}))'
-            f' / 1024'
+            f" / 1024"
         )
 
         vcpu_data, mem_data, storage_data, net_data = await asyncio.gather(
@@ -869,8 +871,9 @@ async def get_dashboard_activity(
 
                     # 고유 사용자 수
                     users_res = await session.execute(
-                        select(func.count(func.distinct(AL.user_id)))
-                        .where(and_(AL.project_id == project_id, AL.created_at >= since))
+                        select(func.count(func.distinct(AL.user_id))).where(
+                            and_(AL.project_id == project_id, AL.created_at >= since)
+                        )
                     )
                     kpi["unique_users"] = users_res.scalar() or 0
             except Exception:
@@ -901,12 +904,14 @@ async def get_dashboard_notifications(
         )
         error_count = sum(1 for s in servers if s.get("status") == "ERROR")
         if error_count > 0:
-            notifications.append({
-                "type": "instance_error",
-                "severity": "danger",
-                "message": f"오류 상태 인스턴스 {error_count}개",
-                "count": error_count,
-            })
+            notifications.append(
+                {
+                    "type": "instance_error",
+                    "severity": "danger",
+                    "message": f"오류 상태 인스턴스 {error_count}개",
+                    "count": error_count,
+                }
+            )
     except Exception:
         pass
 

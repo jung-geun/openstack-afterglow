@@ -391,6 +391,7 @@ async def delete_secret(cluster_id: str, namespace: str, name: str, *, project_i
 # WebSocket 연결 파라미터
 # ---------------------------------------------------------------------------
 
+
 @contextlib.asynccontextmanager
 async def _kube_ws_params(cluster_id: str, *, project_id: str | None = None):
     """K8s WS exec 용 (ssl_ctx, wss_server_url) yield.
@@ -411,6 +412,7 @@ async def _kube_ws_params(cluster_id: str, *, project_id: str | None = None):
 # ---------------------------------------------------------------------------
 # Pod / PVC / RBAC CRUD (Cloud Shell 용)
 # ---------------------------------------------------------------------------
+
 
 async def get_namespace(cluster_id: str, name: str, *, project_id: str | None = None) -> dict | None:
     async with _kube_client(cluster_id, project_id=project_id) as (client, server_url):
@@ -451,8 +453,15 @@ async def get_pvc(cluster_id: str, namespace: str, name: str, *, project_id: str
         return resp.json()
 
 
-async def create_pvc(cluster_id: str, namespace: str, name: str, size: str = "1Gi", *,
-                     storage_class: str | None = None, project_id: str | None = None) -> dict:
+async def create_pvc(
+    cluster_id: str,
+    namespace: str,
+    name: str,
+    size: str = "1Gi",
+    *,
+    storage_class: str | None = None,
+    project_id: str | None = None,
+) -> dict:
     spec: dict = {
         "accessModes": ["ReadWriteOnce"],
         "resources": {"requests": {"storage": size}},
@@ -460,7 +469,8 @@ async def create_pvc(cluster_id: str, namespace: str, name: str, size: str = "1G
     if storage_class:
         spec["storageClassName"] = storage_class
     body = {
-        "apiVersion": "v1", "kind": "PersistentVolumeClaim",
+        "apiVersion": "v1",
+        "kind": "PersistentVolumeClaim",
         "metadata": {"name": name, "namespace": namespace},
         "spec": spec,
     }
@@ -471,8 +481,9 @@ async def create_pvc(cluster_id: str, namespace: str, name: str, size: str = "1G
         return resp.json()
 
 
-async def ensure_pvc(cluster_id: str, namespace: str, name: str, size: str = "1Gi", *,
-                     project_id: str | None = None) -> None:
+async def ensure_pvc(
+    cluster_id: str, namespace: str, name: str, size: str = "1Gi", *, project_id: str | None = None
+) -> None:
     existing = await get_pvc(cluster_id, namespace, name, project_id=project_id)
     if not existing:
         try:
@@ -507,10 +518,12 @@ async def delete_pod(cluster_id: str, namespace: str, name: str, *, project_id: 
             _raise_k8s_error(resp, f"delete pod {name}")
 
 
-async def wait_pod_ready(cluster_id: str, namespace: str, name: str, *,
-                         timeout: float = 90.0, project_id: str | None = None) -> bool:
+async def wait_pod_ready(
+    cluster_id: str, namespace: str, name: str, *, timeout: float = 90.0, project_id: str | None = None
+) -> bool:
     """pod 의 phase=Running + containerStatuses[*].ready=True 까지 대기."""
     import asyncio as _asyncio
+
     deadline = _asyncio.get_event_loop().time() + timeout
     while True:
         pod = await get_pod(cluster_id, namespace, name, project_id=project_id)
@@ -527,8 +540,7 @@ async def wait_pod_ready(cluster_id: str, namespace: str, name: str, *,
         await _asyncio.sleep(min(2.0, remaining))
 
 
-async def get_cluster_role_binding(cluster_id: str, name: str, *,
-                                   project_id: str | None = None) -> dict | None:
+async def get_cluster_role_binding(cluster_id: str, name: str, *, project_id: str | None = None) -> dict | None:
     async with _kube_client(cluster_id, project_id=project_id) as (client, server_url):
         resp = await client.get(f"{server_url}/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/{name}")
         if resp.status_code == 404:
@@ -538,9 +550,9 @@ async def get_cluster_role_binding(cluster_id: str, name: str, *,
         return resp.json()
 
 
-async def create_cluster_role_binding(cluster_id: str, name: str, user_name: str,
-                                      role_name: str = "cluster-admin", *,
-                                      project_id: str | None = None) -> dict:
+async def create_cluster_role_binding(
+    cluster_id: str, name: str, user_name: str, role_name: str = "cluster-admin", *, project_id: str | None = None
+) -> dict:
     body = {
         "apiVersion": "rbac.authorization.k8s.io/v1",
         "kind": "ClusterRoleBinding",
@@ -553,33 +565,32 @@ async def create_cluster_role_binding(cluster_id: str, name: str, user_name: str
         "subjects": [{"apiGroup": "rbac.authorization.k8s.io", "kind": "User", "name": user_name}],
     }
     async with _kube_client(cluster_id, project_id=project_id) as (client, server_url):
-        resp = await client.post(
-            f"{server_url}/apis/rbac.authorization.k8s.io/v1/clusterrolebindings", json=body
-        )
+        resp = await client.post(f"{server_url}/apis/rbac.authorization.k8s.io/v1/clusterrolebindings", json=body)
         if resp.status_code not in (200, 201):
             _raise_k8s_error(resp, f"create clusterrolebinding {name}")
         return resp.json()
 
 
-async def ensure_cluster_role_binding_for_user(cluster_id: str, k8s_user: str, *,
-                                                project_id: str | None = None) -> None:
+async def ensure_cluster_role_binding_for_user(
+    cluster_id: str, k8s_user: str, *, project_id: str | None = None
+) -> None:
     crb_name = f"afterglow-shell-{k8s_user}"
     existing = await get_cluster_role_binding(cluster_id, crb_name, project_id=project_id)
     if not existing:
         try:
-            await create_cluster_role_binding(cluster_id, crb_name, k8s_user,
-                                              project_id=project_id)
+            await create_cluster_role_binding(cluster_id, crb_name, k8s_user, project_id=project_id)
         except HTTPException as e:
             if e.status_code != 409:
                 raise
 
 
-async def create_k8s_secret(cluster_id: str, namespace: str, name: str,
-                             string_data: dict[str, str], *,
-                             project_id: str | None = None) -> dict:
+async def create_k8s_secret(
+    cluster_id: str, namespace: str, name: str, string_data: dict[str, str], *, project_id: str | None = None
+) -> dict:
     """generic Opaque secret (stringData)."""
     body = {
-        "apiVersion": "v1", "kind": "Secret",
+        "apiVersion": "v1",
+        "kind": "Secret",
         "metadata": {"name": name, "namespace": namespace},
         "type": "Opaque",
         "stringData": string_data,
@@ -629,9 +640,7 @@ async def create_job(cluster_id: str, namespace: str, job: dict) -> dict:
         return resp.json()
 
 
-async def wait_job_completed(
-    cluster_id: str, namespace: str, job_name: str, *, timeout: float = 180.0
-) -> bool:
+async def wait_job_completed(cluster_id: str, namespace: str, job_name: str, *, timeout: float = 180.0) -> bool:
     """Job succeeded≥1 또는 failed≥1 을 대기한다. 성공 시 True, 실패/타임아웃 시 False."""
     import time
 
@@ -652,6 +661,7 @@ async def wait_job_completed(
         except Exception:
             pass
         import asyncio
+
         await asyncio.sleep(3)
     return False
 
@@ -710,13 +720,15 @@ def _pod_from_k8s(item: dict) -> dict:
             state = "terminated"
         else:
             state = ""
-        containers.append({
-            "name": c.get("name", ""),
-            "image": c.get("image", ""),
-            "ready": cs.get("ready", False),
-            "restart_count": cs.get("restartCount", 0),
-            "state": state,
-        })
+        containers.append(
+            {
+                "name": c.get("name", ""),
+                "image": c.get("image", ""),
+                "ready": cs.get("ready", False),
+                "restart_count": cs.get("restartCount", 0),
+                "state": state,
+            }
+        )
 
     return {
         "name": meta.get("name", ""),
@@ -737,13 +749,15 @@ def _svc_from_k8s(item: dict) -> dict:
     spec = item.get("spec", {})
     ports = []
     for p in spec.get("ports", []):
-        ports.append({
-            "name": p.get("name"),
-            "port": p.get("port", 0),
-            "target_port": p.get("targetPort"),
-            "node_port": p.get("nodePort"),
-            "protocol": p.get("protocol", "TCP"),
-        })
+        ports.append(
+            {
+                "name": p.get("name"),
+                "port": p.get("port", 0),
+                "target_port": p.get("targetPort"),
+                "node_port": p.get("nodePort"),
+                "protocol": p.get("protocol", "TCP"),
+            }
+        )
     return {
         "name": meta.get("name", ""),
         "namespace": meta.get("namespace", ""),
@@ -828,9 +842,9 @@ async def list_replicasets(cluster_id: str, namespace: str, *, project_id: str) 
         return [_rs_from_k8s(item) for item in resp.json().get("items", [])]
 
 
-async def get_pod_log(cluster_id: str, namespace: str, name: str, *,
-                      container: str | None = None, tail_lines: int = 200,
-                      project_id: str) -> str:
+async def get_pod_log(
+    cluster_id: str, namespace: str, name: str, *, container: str | None = None, tail_lines: int = 200, project_id: str
+) -> str:
     params: dict = {"tailLines": str(tail_lines)}
     if container:
         params["container"] = container
@@ -855,6 +869,7 @@ async def delete_service(cluster_id: str, namespace: str, name: str, *, project_
 
 async def restart_deployment(cluster_id: str, namespace: str, name: str, *, project_id: str) -> dict:
     import datetime
+
     now = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
     patch = {
         "spec": {
@@ -878,8 +893,7 @@ async def restart_deployment(cluster_id: str, namespace: str, name: str, *, proj
         return _deploy_from_k8s(resp.json())
 
 
-async def scale_deployment(cluster_id: str, namespace: str, name: str, replicas: int, *,
-                            project_id: str) -> dict:
+async def scale_deployment(cluster_id: str, namespace: str, name: str, replicas: int, *, project_id: str) -> dict:
     scale_body = {
         "apiVersion": "autoscaling/v1",
         "kind": "Scale",
@@ -894,9 +908,7 @@ async def scale_deployment(cluster_id: str, namespace: str, name: str, replicas:
         if resp.status_code not in (200, 201):
             _raise_k8s_error(resp, f"scale deployment {name}")
         # scale 응답은 Scale 객체 — deployment 정보를 재조회
-        resp2 = await client.get(
-            f"{server_url}/apis/apps/v1/namespaces/{namespace}/deployments/{name}"
-        )
+        resp2 = await client.get(f"{server_url}/apis/apps/v1/namespaces/{namespace}/deployments/{name}")
         if resp2.status_code != 200:
             _raise_k8s_error(resp2, f"get deployment {name} after scale")
         return _deploy_from_k8s(resp2.json())

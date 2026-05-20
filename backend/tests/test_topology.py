@@ -95,16 +95,28 @@ async def test_topology_includes_external_networks(client, mock_conn):
     mock_conn.network.ports.return_value = []
 
     ext_net = TopologyNetwork(
-        id="net-ext", name="public", status="ACTIVE",
-        is_external=True, is_shared=False, project_id=None,
+        id="net-ext",
+        name="public",
+        status="ACTIVE",
+        is_external=True,
+        is_shared=False,
+        project_id=None,
     )
     priv_net = TopologyNetwork(
-        id="net-prv", name="private-a", status="ACTIVE",
-        is_external=False, is_shared=False, project_id=PROJECT_A,
+        id="net-prv",
+        name="private-a",
+        status="ACTIVE",
+        is_external=False,
+        is_shared=False,
+        project_id=PROJECT_A,
     )
     other_net = TopologyNetwork(
-        id="net-other", name="private-b", status="ACTIVE",
-        is_external=False, is_shared=False, project_id=PROJECT_B,
+        id="net-other",
+        name="private-b",
+        status="ACTIVE",
+        is_external=False,
+        is_shared=False,
+        project_id=PROJECT_B,
     )
 
     topo = _make_topo(networks=[ext_net, priv_net, other_net])
@@ -124,8 +136,8 @@ async def test_topology_includes_external_networks(client, mock_conn):
     assert resp.status_code == 200
     data = resp.json()
     net_ids = [n["id"] for n in data["networks"]]
-    assert "net-ext" in net_ids    # external 포함
-    assert "net-prv" in net_ids    # 자기 프로젝트 포함
+    assert "net-ext" in net_ids  # external 포함
+    assert "net-prv" in net_ids  # 자기 프로젝트 포함
     assert "net-other" not in net_ids  # 다른 프로젝트 private 제외
 
 
@@ -136,8 +148,12 @@ async def test_topology_includes_shared_networks(client, mock_conn):
     mock_conn.network.ports.return_value = []
 
     shared_net = TopologyNetwork(
-        id="net-shared", name="shared-net", status="ACTIVE",
-        is_external=False, is_shared=True, project_id=PROJECT_B,
+        id="net-shared",
+        name="shared-net",
+        status="ACTIVE",
+        is_external=False,
+        is_shared=True,
+        project_id=PROJECT_B,
     )
     topo = _make_topo(networks=[shared_net])
     patches = _apply(_patch_topology_deps(topo, []))
@@ -166,10 +182,16 @@ async def test_topology_filters_other_project_routers(client, mock_conn):
     mock_conn.network.ports.return_value = []
 
     router_a = TopologyRouter(
-        id="r-a", name="router-a", status="ACTIVE", project_id=PROJECT_A,
+        id="r-a",
+        name="router-a",
+        status="ACTIVE",
+        project_id=PROJECT_A,
     )
     router_b = TopologyRouter(
-        id="r-b", name="router-b", status="ACTIVE", project_id=PROJECT_B,
+        id="r-b",
+        name="router-b",
+        status="ACTIVE",
+        project_id=PROJECT_B,
     )
     topo = _make_topo(routers=[router_a, router_b])
     patches = _apply(_patch_topology_deps(topo, []))
@@ -200,7 +222,10 @@ async def test_topology_empty_project_returns_empty(client, mock_conn):
 
     servers = [_make_server("s1", "vm-b", PROJECT_B)]
     router_b = TopologyRouter(
-        id="r-b", name="router-b", status="ACTIVE", project_id=PROJECT_B,
+        id="r-b",
+        name="router-b",
+        status="ACTIVE",
+        project_id=PROJECT_B,
     )
     topo = _make_topo(routers=[router_b])
     patches = _apply(_patch_topology_deps(topo, servers))

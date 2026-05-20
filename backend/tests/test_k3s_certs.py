@@ -1,4 +1,5 @@
 """PR 3-A — k3s 인증서 CA 다운로드 / 만료 조회 테스트."""
+
 from __future__ import annotations
 
 import base64

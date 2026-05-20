@@ -32,6 +32,7 @@ BulkAction = Literal["start", "stop", "reboot", "hard-reboot", "snapshot"]
 # A-1  GET /admin/notifications
 # ---------------------------------------------------------------------------
 
+
 @router.get("/notifications", dependencies=[Depends(require_admin)])
 async def get_admin_notifications(
     conn: openstack.connection.Connection = Depends(get_os_conn),
@@ -41,6 +42,7 @@ async def get_admin_notifications(
 
     # 오류 인스턴스 수집 (all-tenants)
     try:
+
         def _error_servers():
             endpoint = conn.compute.get_endpoint()
             resp = conn.session.get(
@@ -51,17 +53,20 @@ async def get_admin_notifications(
 
         error_servers = await asyncio.to_thread(_error_servers)
         if error_servers:
-            notifications.append({
-                "type": "error",
-                "severity": "high",
-                "message": f"오류 상태 인스턴스 {len(error_servers)}개",
-                "count": len(error_servers),
-            })
+            notifications.append(
+                {
+                    "type": "error",
+                    "severity": "high",
+                    "message": f"오류 상태 인스턴스 {len(error_servers)}개",
+                    "count": len(error_servers),
+                }
+            )
     except Exception:
         _logger.debug("error_servers 조회 실패", exc_info=True)
 
     # 하이퍼바이저 가용 리소스 부족 경고
     try:
+
         def _hypervisors():
             hvs = list(conn.compute.hypervisors(details=True))
             low = []
@@ -78,28 +83,28 @@ async def get_admin_notifications(
             _hypervisors,
         )
         if low_ram_hosts:
-            notifications.append({
-                "type": "resource",
-                "severity": "warning",
-                "message": f"RAM 10% 미만 호스트 {len(low_ram_hosts)}개",
-                "count": len(low_ram_hosts),
-                "hosts": low_ram_hosts[:5],
-            })
+            notifications.append(
+                {
+                    "type": "resource",
+                    "severity": "warning",
+                    "message": f"RAM 10% 미만 호스트 {len(low_ram_hosts)}개",
+                    "count": len(low_ram_hosts),
+                    "hosts": low_ram_hosts[:5],
+                }
+            )
     except Exception:
         _logger.debug("hypervisor 알림 조회 실패", exc_info=True)
 
     # k3s 클러스터 대기/오류 (선택적)
     try:
         from app.config import get_settings
+
         if get_settings().service_k3s_enabled:
             from app.services import k3s_cluster
 
             def _k3s_pending():
                 clusters = list(k3s_cluster.list_all_clusters(conn))
-                return [
-                    c for c in clusters
-                    if c.get("status") in ("CREATE_IN_PROGRESS", "UPDATE_IN_PROGRESS", "ERROR")
-                ]
+                return [c for c in clusters if c.get("status") in ("CREATE_IN_PROGRESS", "UPDATE_IN_PROGRESS", "ERROR")]
 
             pending = await cached_call(
                 "afterglow:admin:notifications:k3s_pending",
@@ -107,17 +112,20 @@ async def get_admin_notifications(
                 _k3s_pending,
             )
             if pending:
-                notifications.append({
-                    "type": "k3s",
-                    "severity": "info",
-                    "message": f"대기/오류 k3s 클러스터 {len(pending)}개",
-                    "count": len(pending),
-                })
+                notifications.append(
+                    {
+                        "type": "k3s",
+                        "severity": "info",
+                        "message": f"대기/오류 k3s 클러스터 {len(pending)}개",
+                        "count": len(pending),
+                    }
+                )
     except Exception:
         _logger.debug("k3s 알림 조회 실패", exc_info=True)
 
     # FIP 풀 고갈 경고
     try:
+
         def _fip_pool():
             pools: dict[str, dict] = {}
             for ip in conn.network.ips(all_projects=True):
@@ -127,10 +135,7 @@ async def get_admin_notifications(
                 pools[pool]["total"] += 1
                 if ip.port_id:
                     pools[pool]["in_use"] += 1
-            return [
-                p for p in pools.values()
-                if p["total"] > 0 and (p["in_use"] / p["total"]) > 0.9
-            ]
+            return [p for p in pools.values() if p["total"] > 0 and (p["in_use"] / p["total"]) > 0.9]
 
         exhausted = await cached_call(
             "afterglow:admin:notifications:fip_pool",
@@ -138,12 +143,14 @@ async def get_admin_notifications(
             _fip_pool,
         )
         if exhausted:
-            notifications.append({
-                "type": "network",
-                "severity": "warning",
-                "message": f"Floating IP 풀 90% 이상 소진 {len(exhausted)}개",
-                "count": len(exhausted),
-            })
+            notifications.append(
+                {
+                    "type": "network",
+                    "severity": "warning",
+                    "message": f"Floating IP 풀 90% 이상 소진 {len(exhausted)}개",
+                    "count": len(exhausted),
+                }
+            )
     except Exception:
         _logger.debug("FIP 풀 알림 조회 실패", exc_info=True)
 
@@ -153,6 +160,7 @@ async def get_admin_notifications(
 # ---------------------------------------------------------------------------
 # A-2  GET /admin/instances/health
 # ---------------------------------------------------------------------------
+
 
 def _is_gpu_flavor(flavor: dict) -> bool:
     """서버 응답의 embedded flavor dict 에서 GPU 여부 판별.
@@ -183,6 +191,7 @@ async def get_instances_health(
 ):
     """전체 인스턴스 상태 집계 (total/active/error/with_alerts/gpu_count) + ERROR 목록."""
     try:
+
         def _collect():
             endpoint = conn.compute.get_endpoint()
             resp = conn.session.get(
@@ -204,14 +213,16 @@ async def get_instances_health(
                     active_count += 1
                 elif status == "ERROR":
                     error_count += 1
-                    error_items.append({
-                        "id": s["id"],
-                        "name": s.get("name") or "",
-                        "project_id": s.get("tenant_id") or "",
-                        "host": s.get("OS-EXT-SRV-ATTR:host") or "",
-                        "status": status,
-                        "reason": "오류 상태",
-                    })
+                    error_items.append(
+                        {
+                            "id": s["id"],
+                            "name": s.get("name") or "",
+                            "project_id": s.get("tenant_id") or "",
+                            "host": s.get("OS-EXT-SRV-ATTR:host") or "",
+                            "status": status,
+                            "reason": "오류 상태",
+                        }
+                    )
                 if _is_gpu_flavor(s.get("flavor") or {}):
                     gpu_count += 1
 
@@ -239,6 +250,7 @@ async def get_instances_health(
 # ---------------------------------------------------------------------------
 # A-4  POST /admin/instances/bulk-action
 # ---------------------------------------------------------------------------
+
 
 class BulkActionRequest(BaseModel):
     instance_ids: list[str]
@@ -312,12 +324,14 @@ def _apply_action(
 # A-6  GET /admin/floating-ips/pool-stats
 # ---------------------------------------------------------------------------
 
+
 @router.get("/floating-ips/pool-stats", dependencies=[Depends(require_admin)])
 async def get_fip_pool_stats(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """Floating IP 네트워크(풀)별 in_use / total / util% 통계."""
     try:
+
         def _collect():
             pools: dict[str, dict] = {}
 

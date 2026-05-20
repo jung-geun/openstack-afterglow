@@ -3,6 +3,7 @@
 k3s는 재시작 시 만료 90일 이내 인증서를 자동 갱신한다.
 SSH 없이 K8s Job으로 각 control-plane 노드의 k3s를 순차 재시작한다.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -84,10 +85,17 @@ def _build_restart_job(node_name: str, image: str) -> dict:
                             "image": image,
                             "command": [
                                 "nsenter",
-                                "-t", "1",
-                                "-m", "-u", "-i", "-n", "-p",
+                                "-t",
+                                "1",
+                                "-m",
+                                "-u",
+                                "-i",
+                                "-n",
+                                "-p",
                                 "--",
-                                "systemctl", "restart", "k3s",
+                                "systemctl",
+                                "restart",
+                                "k3s",
                             ],
                             "securityContext": {"privileged": True},
                         }
@@ -167,9 +175,7 @@ async def rotate_certificates(
             f"[{i + 1}/{n}] {node_name}: k3s restart 완료 대기 중 (Job: {job_name})...",
         )
 
-        completed = await k3s_kube.wait_job_completed(
-            cluster_id, _JOB_NAMESPACE, job_name, timeout=120.0
-        )
+        completed = await k3s_kube.wait_job_completed(cluster_id, _JOB_NAMESPACE, job_name, timeout=120.0)
         if not completed:
             yield _msg(
                 K3sProgressStep.FAILED,
@@ -182,9 +188,7 @@ async def rotate_certificates(
         yield _msg(K3sProgressStep.ROTATE_SERVER, base + 15, f"[{i + 1}/{n}] {node_name}: 노드 Ready 대기 중...")
 
         # 노드 Ready 대기 — 긴 대기 동안 SSE keepalive 전송
-        ready_task = asyncio.create_task(
-            k3s_kube.wait_node_ready(cluster_id, node_name, timeout=node_timeout)
-        )
+        ready_task = asyncio.create_task(k3s_kube.wait_node_ready(cluster_id, node_name, timeout=node_timeout))
         while not ready_task.done():
             await asyncio.sleep(10)
             if not ready_task.done():

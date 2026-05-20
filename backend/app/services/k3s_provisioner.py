@@ -107,9 +107,7 @@ async def provision_agents(project_id: str, cluster_id: str, server_ip: str, nod
         await k3s_cluster.add_agent_vms(cluster_id, new_agent_entries)
 
     reason = f"에이전트 {failed_count}개 생성 실패" if failed_count else ""
-    await k3s_cluster.update_cluster_status(
-        project_id, cluster_id, "ACTIVE", reason, agent_vm_ids=agent_vm_ids
-    )
+    await k3s_cluster.update_cluster_status(project_id, cluster_id, "ACTIVE", reason, agent_vm_ids=agent_vm_ids)
     _logger.info(
         "k3s cluster %s ACTIVE: %d agents created, %d failed",
         cluster_id,
@@ -126,9 +124,9 @@ async def provision_agents(project_id: str, cluster_id: str, server_ip: str, nod
 async def bootstrap_ha_servers(
     project_id: str,
     cluster_id: str,
-    server_ip: str,      # server#1 내부 IP
-    node_token: str,     # k3s node-token (server#1에서 수신)
-    master_count: int,   # 3
+    server_ip: str,  # server#1 내부 IP
+    node_token: str,  # k3s node-token (server#1에서 수신)
+    master_count: int,  # 3
     lb_pool_id: str,
     lb_fip_address: str,
 ) -> None:
@@ -172,8 +170,13 @@ async def bootstrap_ha_servers(
         subnet_id = subnets[0].id if subnets else None
         if lb_pool_id and server_ip:
             await asyncio.to_thread(
-                octavia.add_member, conn, lb_pool_id, server_ip, 6443,
-                subnet_id=subnet_id, name=f"{cluster_name}-server1"
+                octavia.add_member,
+                conn,
+                lb_pool_id,
+                server_ip,
+                6443,
+                subnet_id=subnet_id,
+                name=f"{cluster_name}-server1",
             )
             _logger.info("HA: server#1 %s added to LB pool %s", server_ip, lb_pool_id)
     except Exception as e:

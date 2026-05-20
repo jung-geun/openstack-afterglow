@@ -415,9 +415,7 @@ async def create_k3s_cluster_async(
             # --- Step 1-B: HA LB + FIP 생성 (master_count >= 3) ---
             if req.master_count >= 3:
                 yield event(K3sProgressStep.SERVER_HA_BOOTSTRAP, 12, "HA API LB 생성 중...")
-                subnets_for_lb = await asyncio.to_thread(
-                    lambda: list(conn.network.subnets(network_id=network_id))
-                )
+                subnets_for_lb = await asyncio.to_thread(lambda: list(conn.network.subnets(network_id=network_id)))
                 lb_subnet_id = subnets_for_lb[0].id if subnets_for_lb else None
                 ha_lb = await asyncio.to_thread(
                     octavia.create_load_balancer,
@@ -429,11 +427,13 @@ async def create_k3s_cluster_async(
                 ha_lb_id = ha_lb["id"]
                 await asyncio.to_thread(octavia.wait_for_load_balancer, conn, ha_lb_id)
                 listener = await asyncio.to_thread(
-                    octavia.create_listener, conn, ha_lb_id, "TCP", 6443,
-                    name=f"k3s-ha-{req.name}-6443"
+                    octavia.create_listener, conn, ha_lb_id, "TCP", 6443, name=f"k3s-ha-{req.name}-6443"
                 )
                 ha_lb_pool_id_raw = await asyncio.to_thread(
-                    octavia.create_pool, conn, ha_lb_id, "TCP",
+                    octavia.create_pool,
+                    conn,
+                    ha_lb_id,
+                    "TCP",
                     name=f"k3s-ha-{req.name}-pool",
                     listener_id=listener["id"],
                 )
@@ -452,8 +452,7 @@ async def create_k3s_cluster_async(
                     ha_fip_id = _fip["id"]
                     ha_fip_address = _fip["floating_ip_address"]
                     extra_tls_sans.append(ha_fip_address)
-                    yield event(K3sProgressStep.SERVER_HA_BOOTSTRAP, 18,
-                                f"HA API LB 준비 완료 (FIP: {ha_fip_address})")
+                    yield event(K3sProgressStep.SERVER_HA_BOOTSTRAP, 18, f"HA API LB 준비 완료 (FIP: {ha_fip_address})")
                 else:
                     yield event(K3sProgressStep.SERVER_HA_BOOTSTRAP, 18, "HA API LB 준비 완료")
 
@@ -681,8 +680,16 @@ async def create_k3s_cluster_async(
             )
             yield event(K3sProgressStep.FAILED, 0, f"클러스터 생성 실패: {e}", error=str(e))
             # 롤백
-            await _rollback(conn, server_vm_id, boot_volume_id, sg_id, app_credential_id, project_id,
-                            lb_id=ha_lb_id, fip_id=ha_fip_id)
+            await _rollback(
+                conn,
+                server_vm_id,
+                boot_volume_id,
+                sg_id,
+                app_credential_id,
+                project_id,
+                lb_id=ha_lb_id,
+                fip_id=ha_fip_id,
+            )
 
     return StreamingResponse(
         progress_generator(),
@@ -1183,9 +1190,7 @@ async def list_node_interfaces(
     if not cluster:
         raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
     node_role = _assert_vm_in_cluster(vm_id, cluster)
-    ifaces = await asyncio.to_thread(
-        lambda: list(conn.compute.server_interfaces(vm_id))
-    )
+    ifaces = await asyncio.to_thread(lambda: list(conn.compute.server_interfaces(vm_id)))
     return [
         K3sInterfaceInfo(
             port_id=i.port_id,

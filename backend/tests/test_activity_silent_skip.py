@@ -16,8 +16,9 @@ async def test_record_skips_and_warns_when_db_unavailable(caplog):
 
     act_mod._last_db_warn_ts = 0.0
 
-    with patch("app.services.activity.is_db_available", return_value=False), caplog.at_level(
-        logging.WARNING, logger="app.services.activity"
+    with (
+        patch("app.services.activity.is_db_available", return_value=False),
+        caplog.at_level(logging.WARNING, logger="app.services.activity"),
     ):
         await record(
             project_id="p1",
@@ -50,8 +51,9 @@ async def test_record_rate_limits_warnings(caplog):
             status="success",
         )
 
-    with patch("app.services.activity.is_db_available", return_value=False), caplog.at_level(
-        logging.WARNING, logger="app.services.activity"
+    with (
+        patch("app.services.activity.is_db_available", return_value=False),
+        caplog.at_level(logging.WARNING, logger="app.services.activity"),
     ):
         await _call()
         # rate limit 시뮬레이션: _last_db_warn_ts를 현재로 업데이트하여 60초 이내 간주
