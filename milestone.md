@@ -2947,3 +2947,14 @@ k3s는 재시작 시 만료 90일 이내 인증서를 자동 갱신한다.
 - [x] **커버리지 개선**: node_exporter 미설치 인스턴스(BIO, SYSTEM 등)도 vCPU/RAM 데이터 표시 (kolla reconfigure 후)
 - [x] 카드 그래프 폭 정정: `<Spark … class="w-full" />` 로 좌→우 전체 채움
 - [x] pytest 15 passed (신규: `test_trend_empty_project_skips_prometheus`)
+
+### Phase 53j — Overview 디스크 카드 libvirt_exporter 가용성 조사 + fallback UX 정정
+
+- [x] `inovex/prometheus-libvirt-exporter` v2.3.1 메트릭 전수 조사
+  - `libvirt_domain_block_stats_capacity_bytes`: 정적값(= flavor root_disk), 실제 점유율 미반영
+  - `libvirt_domain_block_stats_read/write_bytes_total`: I/O 처리량 카운터, 공간 점유와 무관
+  - `allocation_bytes`/`physical_bytes`: exporter 의도적 미노출 (v2.3.1까지 변경 없음)
+  - `libvirt_storage_pool_allocation_bytes`: 풀 단위 합계, 인스턴스별 분해 불가
+- [x] **결론**: libvirt_exporter 단일 소스로 인스턴스별 디스크 사용률 % 산출 불가 → 디스크 카드는 `node_filesystem_*` 의존 유지
+- [x] fallback UX 정정: `prometheus_available=true` + storage `available=false` 시 "수집 대기 중" 대신 "node_exporter 미설치" 메시지 명시
+- [x] 후속(Phase 미정): QEMU Guest Agent 기반 디스크 메트릭 pipeline 검토 필요
