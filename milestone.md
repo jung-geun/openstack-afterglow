@@ -2918,3 +2918,15 @@ k3s는 재시작 시 만료 90일 이내 인증서를 자동 갱신한다.
   - 디스크 사용률 카드 신규 추가 (24h 그룹, 4번째)
   - 14d 추세 placeholder 연결 — `trendData14d` 별도 조회, vCPU/RAM/디스크 mini-grid
 - [x] pytest 38 passed, tsc --noEmit 오류 0건
+
+### Phase 53h — Overview 사용률 카드 표시 회귀 정정
+
+- [x] vCPU/RAM PromQL을 node_exporter 기반으로 전환
+  - 근본 원인: libvirt scrape job이 Afterglow Prometheus configmap에 없어 `libvirt_domain_info_*{project_id="…"}` 가 빈 시리즈 반환
+  - 수정: `node_cpu_seconds_total{mode="idle"}` + `node_memory_MemAvailable/MemTotal_bytes`
+  - **의미 변경**: flavor-relative % → guest OS 실제 사용률 % (어떤 인스턴스가 무거운지 판단하는 목적에 더 정확)
+- [x] 카드 레이아웃 3행 재구성
+  - 헤더 우측: 현재값 (시리즈 마지막 포인트, `text-xl font-semibold tabular-nums`)
+  - Spark height 44 → 72 (카드 빈 공간 해소)
+  - 하단: `min X% · max Y%` 메타 행
+- [x] pytest 14 passed (신규 2건: `test_trend_vcpu_uses_node_cpu_expr`, `test_trend_memory_uses_node_memory_expr`)

@@ -158,18 +158,37 @@
 	</div>
 	<div class="grid grid-cols-1 md:grid-cols-3 gap-3.5">
 		{#each [
-			{ label: `vCPU 사용률 (${range})`, color: 'var(--color-accent)', key: 'vcpu' as const },
-			{ label: `메모리 (${range})`, color: 'var(--color-accent-2)', key: 'memory' as const },
-			{ label: `디스크 사용률 (${range})`, color: 'var(--color-warm)', key: 'storage' as const },
+			{ label: `vCPU 사용률 (${range})`, color: 'var(--color-accent)',   key: 'vcpu'    as const, unit: '%' },
+			{ label: `메모리 (${range})`,       color: 'var(--color-accent-2)', key: 'memory'  as const, unit: '%' },
+			{ label: `디스크 사용률 (${range})`, color: 'var(--color-warm)',     key: 'storage' as const, unit: '%' },
 		] as card}
-			{@const series = trendData?.[card.key]}
-			<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
-				<p class="text-[10px] uppercase tracking-wide text-[var(--color-ink-3)] mb-3">{card.label}</p>
-				<Spark data={series?.data ?? []} color={card.color} height={44} />
-				{#if !trendData || !trendData.prometheus_available}
-					<p class="text-[11px] italic text-[var(--color-ink-3)] mt-2">메트릭 수집 미설정 — <a href="/dashboard/observability" class="underline hover:text-[var(--color-ink-0)]">Grafana 보기</a></p>
-				{:else if series && !series.available}
-					<p class="text-[11px] text-[var(--color-ink-3)] mt-2">수집 대기 중</p>
+			{@const series  = trendData?.[card.key]}
+			{@const hasData = (series?.data?.length ?? 0) > 0}
+			{@const current = hasData ? series!.data.at(-1)! : null}
+			{@const min     = hasData ? Math.min(...series!.data) : null}
+			{@const max     = hasData ? Math.max(...series!.data) : null}
+			<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 flex flex-col gap-2">
+				<div class="flex items-baseline justify-between">
+					<p class="text-[10px] uppercase tracking-wide text-[var(--color-ink-3)]">{card.label}</p>
+					{#if current !== null}
+						<span class="text-xl font-semibold tabular-nums text-[var(--color-ink-0)]">
+							{current.toFixed(1)}<span class="text-[10px] text-[var(--color-ink-3)] ml-0.5">{card.unit}</span>
+						</span>
+					{/if}
+				</div>
+				<div class="min-h-[72px] flex items-center">
+					{#if hasData}
+						<Spark data={series!.data} color={card.color} height={72} />
+					{:else if !trendData || !trendData.prometheus_available}
+						<p class="text-[11px] italic text-[var(--color-ink-3)]">메트릭 수집 미설정 — <a href="/dashboard/observability" class="underline hover:text-[var(--color-ink-0)]">Grafana 보기</a></p>
+					{:else}
+						<p class="text-[11px] text-[var(--color-ink-3)]">수집 대기 중</p>
+					{/if}
+				</div>
+				{#if hasData}
+					<p class="text-[10px] tabular-nums text-[var(--color-ink-3)]">
+						min {min!.toFixed(1)}{card.unit} · max {max!.toFixed(1)}{card.unit}
+					</p>
 				{/if}
 			</div>
 		{/each}

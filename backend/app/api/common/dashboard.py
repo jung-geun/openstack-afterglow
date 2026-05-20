@@ -710,15 +710,14 @@ async def get_dashboard_metrics_trend(
             except Exception:
                 return []
 
-        # vCPU: libvirt flavor-relative %
+        # vCPU: node_exporter 기반 guest OS 실제 사용률 % (project_id 라벨은 node 타깃에만 주입됨)
         vcpu_expr = (
-            f'sum(rate(libvirt_domain_info_cpu_time_seconds_total{{project_id="{project_id}"}}[5m]))'
-            f' / sum(libvirt_domain_info_virtual_cpus{{project_id="{project_id}"}}) * 100'
+            f'100 - (avg(rate(node_cpu_seconds_total{{project_id="{project_id}",mode="idle"}}[5m])) * 100)'
         )
-        # Memory: libvirt flavor-relative %
+        # RAM: node_exporter MemAvailable 기반 사용률 % (buff/cache 보정)
         mem_expr = (
-            f'sum(libvirt_domain_info_memory_actual_bytes{{project_id="{project_id}"}}) /'
-            f' sum(libvirt_domain_info_memory_max_bytes{{project_id="{project_id}"}}) * 100'
+            f'(1 - sum(node_memory_MemAvailable_bytes{{project_id="{project_id}"}})'
+            f' / sum(node_memory_MemTotal_bytes{{project_id="{project_id}"}})) * 100'
         )
         # Storage: node_exporter root fs 사용률 % (Cinder 볼륨 아님)
         storage_expr = (
