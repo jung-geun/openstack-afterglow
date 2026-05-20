@@ -156,9 +156,26 @@ async def get_admin_notifications(
 # ---------------------------------------------------------------------------
 
 def _is_gpu_flavor(flavor: dict) -> bool:
-    """서버 응답의 flavor dict에서 GPU 여부를 이름 기반으로 판별."""
-    name = (flavor.get("original_name") or "").lower()
-    return name.startswith("g1.") or name.startswith("gpu") or "gpu." in name
+    """서버 응답의 embedded flavor dict 에서 GPU 여부 판별.
+
+    마이크로버전 2.47+ 응답: original_name + extra_specs 포함.
+    기본 2.1 응답: id + links 만 → id fallback.
+    """
+    extra_specs = flavor.get("extra_specs") or {}
+    alias = extra_specs.get("pci_passthrough:alias", "")
+    if alias:
+        for entry in alias.split(","):
+            entry = entry.strip()
+            if ":" not in entry:
+                continue
+            dev, _num = entry.rsplit(":", 1)
+            if "audio" in dev.lower():
+                continue
+            return True
+    if "gpu" in (extra_specs.get(":category", "") or "").lower():
+        return True
+    name = (flavor.get("original_name") or flavor.get("id") or "").lower()
+    return "gpu" in name or name.startswith("g1.")
 
 
 @router.get("/instances/health", dependencies=[Depends(require_admin)])
@@ -172,6 +189,7 @@ async def get_instances_health(
             resp = conn.session.get(
                 f"{endpoint}/servers/detail",
                 params={"all_tenants": "1", "limit": "200"},
+                headers={"OpenStack-API-Version": "compute 2.53"},
             )
             servers = resp.json().get("servers", [])
 

@@ -2970,3 +2970,9 @@ k3s는 재시작 시 만료 90일 이내 인증서를 자동 갱신한다.
   - 데이터 없는 인스턴스: "—" 텍스트 + 빈 bar
 - [x] 하단 "14일 추세" + "볼륨 분포" 섹션 제거 (`trendData14d` state + fetch 정리)
 - [x] pytest 신규 케이스 4건 통과 (live usage 주입 / PromUnavailable fallback / 누락 UUID / 빈 프로젝트)
+
+### Phase 53l — Admin 인스턴스 GPU VM 카운트 0 버그 수정
+
+- [x] `admin_dashboard.py` `_is_gpu_flavor` 강화: `extra_specs`(`pci_passthrough:alias`, `:category`) + `id` fallback
+- [x] Nova `/servers/detail` 호출에 `OpenStack-API-Version: compute 2.53` 헤더 추가 (기본 2.1에서는 `original_name` 미포함)
+- [x] pytest 신규 5건 통과 (original_name 검출 / pci alias 검출 / audio alias 무시 / CPU 플레이버 0 / 마이크로버전 헤더 송신)
