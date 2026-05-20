@@ -4,7 +4,7 @@ import { downloadBlobAs } from '$lib/utils/downloadBlob';
 import { streamK3sProgress } from '$lib/api/k3sSseStream';
 import { toast } from '$lib/stores/toast';
 import type { NetworkInfo } from '$lib/types/networks';
-import type { K3sCluster, K3sClusterHealth, K3sInterfaceInfo, ConfigMapInfo, SecretInfo } from '$lib/types/k3s';
+import type { K3sCluster, K3sClusterHealth, K3sInterfaceInfo, ConfigMapInfo, SecretInfo, PodInfo, ServiceInfo, DeploymentInfo, ReplicaSetInfo } from '$lib/types/k3s';
 import { listNodeInterfaces, attachNodeInterface, detachNodeInterface } from '$lib/api/k3s';
 import {
   listNamespaces,
@@ -17,7 +17,20 @@ import {
   updateSecret,
   deleteSecret
 } from '$lib/api/k3sResources';
+import {
+  listPods,
+  deletePod,
+  getPodLog,
+  listServices,
+  deleteService,
+  listDeployments,
+  listReplicaSets,
+  restartDeployment as apiRestartDeployment,
+  scaleDeployment as apiScaleDeployment,
+} from '$lib/api/k3sWorkloads';
 import { confirmDialog } from '$lib/stores/confirm.svelte';
+
+export type ActiveTab = 'main' | 'configmaps' | 'secrets' | 'services' | 'workloads' | 'pods';
 
 export type { K3sCluster, K3sClusterHealth };
 
@@ -70,6 +83,15 @@ export function createK3sClusterDetailController(opts: K3sClusterDetailControlle
   let cmActioning = $state<string | null>(null); // `${ns}:${name}`
   let namespacesLoaded = $state(false);
   let shellOpen = $state(false);
+  let activeTab = $state<ActiveTab>('main');
+  let pods = $state<PodInfo[]>([]);
+  let services = $state<ServiceInfo[]>([]);
+  let deployments = $state<DeploymentInfo[]>([]);
+  let replicasets = $state<ReplicaSetInfo[]>([]);
+  let workloadActioning = $state<string | null>(null); // `${ns}:${kind}:${name}`
+  let podsLoaded = $state(false);
+  let servicesLoaded = $state(false);
+  let deploymentsLoaded = $state(false);
 
   const apiBase = $derived(opts.adminMode() ? '/api/admin/k3s-clusters' : '/api/k3s/clusters');
   const isActive = $derived(cluster?.status === 'ACTIVE');
@@ -348,6 +370,127 @@ export function createK3sClusterDetailController(opts: K3sClusterDetailControlle
   function openShell() { shellOpen = true; }
   function closeShell() { shellOpen = false; }
 
+  function _invalidateWorkloadCaches() {
+    podsLoaded = false;
+    servicesLoaded = false;
+    deploymentsLoaded = false;
+    pods = [];
+    services = [];
+    deployments = [];
+    replicasets = [];
+  }
+
+  async function loadPods() {
+    const id = opts.clusterId();
+    if (!id) return;
+    try {
+      pods = await listPods(id, selectedNamespace, opts.token(), opts.projectId());
+      podsLoaded = true;
+    } catch {
+      pods = [];
+    }
+  }
+
+  async function loadServices() {
+    const id = opts.clusterId();
+    if (!id) return;
+    try {
+      services = await listServices(id, selectedNamespace, opts.token(), opts.projectId());
+      servicesLoaded = true;
+    } catch {
+      services = [];
+    }
+  }
+
+  async function loadDeployments() {
+    const id = opts.clusterId();
+    if (!id) return;
+    try {
+      const [deps, rss] = await Promise.all([
+        listDeployments(id, selectedNamespace, opts.token(), opts.projectId()),
+        listReplicaSets(id, selectedNamespace, opts.token(), opts.projectId()),
+      ]);
+      deployments = deps;
+      replicasets = rss;
+      deploymentsLoaded = true;
+    } catch {
+      deployments = [];
+      replicasets = [];
+    }
+  }
+
+  async function removePod(name: string) {
+    const id = opts.clusterId();
+    if (!id || workloadActioning) return;
+    const confirmed = await confirmDialog(`Pod "${name}"를 삭제하시겠습니까?`);
+    if (!confirmed) return;
+    workloadActioning = `${selectedNamespace}:pod:${name}`;
+    try {
+      await deletePod(id, selectedNamespace, name, opts.token(), opts.projectId());
+      pods = pods.filter((p) => p.name !== name);
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : 'Pod 삭제 실패');
+    } finally {
+      workloadActioning = null;
+    }
+  }
+
+  async function removeSvc(name: string) {
+    const id = opts.clusterId();
+    if (!id || workloadActioning) return;
+    const confirmed = await confirmDialog(`Service "${name}"를 삭제하시겠습니까?`);
+    if (!confirmed) return;
+    workloadActioning = `${selectedNamespace}:svc:${name}`;
+    try {
+      await deleteService(id, selectedNamespace, name, opts.token(), opts.projectId());
+      services = services.filter((s) => s.name !== name);
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : 'Service 삭제 실패');
+    } finally {
+      workloadActioning = null;
+    }
+  }
+
+  async function rolloutRestartDeployment(name: string) {
+    const id = opts.clusterId();
+    if (!id || workloadActioning) return;
+    workloadActioning = `${selectedNamespace}:deploy:${name}`;
+    try {
+      const updated = await apiRestartDeployment(id, selectedNamespace, name, opts.token(), opts.projectId());
+      deployments = deployments.map((d) => (d.name === name ? updated : d));
+      toast.success(`Deployment "${name}" 재시작 요청`);
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : 'Deployment 재시작 실패');
+    } finally {
+      workloadActioning = null;
+    }
+  }
+
+  async function scaleDeploymentTo(name: string, replicas: number) {
+    const id = opts.clusterId();
+    if (!id || workloadActioning) return;
+    workloadActioning = `${selectedNamespace}:deploy:${name}`;
+    try {
+      const updated = await apiScaleDeployment(id, selectedNamespace, name, replicas, opts.token(), opts.projectId());
+      deployments = deployments.map((d) => (d.name === name ? updated : d));
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : 'Deployment 스케일 실패');
+    } finally {
+      workloadActioning = null;
+    }
+  }
+
+  async function fetchPodLog(name: string, opts2: { container?: string; tailLines?: number }) {
+    const id = opts.clusterId();
+    if (!id) return null;
+    try {
+      return await getPodLog(id, selectedNamespace, name, opts2, opts.token(), opts.projectId());
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : 'Pod 로그 조회 실패');
+      return null;
+    }
+  }
+
   function reset() {
     cluster = null;
     health = null;
@@ -368,6 +511,15 @@ export function createK3sClusterDetailController(opts: K3sClusterDetailControlle
     cmActioning = null;
     namespacesLoaded = false;
     shellOpen = false;
+    activeTab = 'main';
+    pods = [];
+    services = [];
+    deployments = [];
+    replicasets = [];
+    workloadActioning = null;
+    podsLoaded = false;
+    servicesLoaded = false;
+    deploymentsLoaded = false;
   }
 
   function setViewingInstance(id: string | null) {
@@ -417,7 +569,14 @@ export function createK3sClusterDetailController(opts: K3sClusterDetailControlle
     detachInterface,
     get namespaces() { return namespaces; },
     get selectedNamespace() { return selectedNamespace; },
-    set selectedNamespace(v: string) { selectedNamespace = v; },
+    set selectedNamespace(v: string) {
+      if (v !== selectedNamespace) {
+        selectedNamespace = v;
+        _invalidateWorkloadCaches();
+        configMaps = [];
+        secrets = [];
+      }
+    },
     get configMaps() { return configMaps; },
     get secrets() { return secrets; },
     get cmActioning() { return cmActioning; },
@@ -431,6 +590,24 @@ export function createK3sClusterDetailController(opts: K3sClusterDetailControlle
     get shellOpen() { return shellOpen; },
     openShell,
     closeShell,
+    get activeTab() { return activeTab; },
+    set activeTab(v: ActiveTab) { activeTab = v; },
+    get pods() { return pods; },
+    get services() { return services; },
+    get deployments() { return deployments; },
+    get replicasets() { return replicasets; },
+    get workloadActioning() { return workloadActioning; },
+    get podsLoaded() { return podsLoaded; },
+    get servicesLoaded() { return servicesLoaded; },
+    get deploymentsLoaded() { return deploymentsLoaded; },
+    loadPods,
+    loadServices,
+    loadDeployments,
+    removePod,
+    removeSvc,
+    rolloutRestartDeployment,
+    scaleDeploymentTo,
+    fetchPodLog,
   };
 }
 

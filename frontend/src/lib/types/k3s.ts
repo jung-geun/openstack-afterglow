@@ -58,6 +58,79 @@ export interface CertificateExpiryResponse {
 	server_via_tls: CertificateInfo[];
 }
 
+export interface ContainerStatus {
+	name: string;
+	image: string;
+	ready: boolean;
+	restart_count: number;
+	state: string;
+}
+
+export interface PodInfo {
+	name: string;
+	namespace: string;
+	phase: string;
+	ready: string;
+	restarts: number;
+	node: string | null;
+	pod_ip: string | null;
+	containers: ContainerStatus[];
+	labels: Record<string, string>;
+	created_at: string;
+}
+
+export interface PodLogResponse {
+	name: string;
+	namespace: string;
+	container: string | null;
+	log: string;
+}
+
+export interface ServicePort {
+	name: string | null;
+	port: number;
+	target_port: number | string | null;
+	node_port: number | null;
+	protocol: string;
+}
+
+export interface ServiceInfo {
+	name: string;
+	namespace: string;
+	type: string;
+	cluster_ip: string | null;
+	external_ips: string[];
+	ports: ServicePort[];
+	selector: Record<string, string>;
+	created_at: string;
+}
+
+export interface DeploymentInfo {
+	name: string;
+	namespace: string;
+	replicas: number;
+	available: number;
+	ready: number;
+	updated: number;
+	strategy: string;
+	selector: Record<string, string>;
+	images: string[];
+	created_at: string;
+}
+
+export interface ReplicaSetInfo {
+	name: string;
+	namespace: string;
+	replicas: number;
+	ready: number;
+	available: number;
+	owner_kind: string | null;
+	owner_name: string | null;
+	selector: Record<string, string>;
+	images: string[];
+	created_at: string;
+}
+
 export interface K3sClusterTemplate {
 	id: string;
 	name: string;

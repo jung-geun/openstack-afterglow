@@ -388,3 +388,85 @@ class CertificateExpiryResponse(BaseModel):
     ca: CertificateInfo | None = None
     client: CertificateInfo | None = None
     server_via_tls: list[CertificateInfo] = []
+
+
+# ---------------------------------------------------------------------------
+# 워크로드 조회 모델 (Phase 53o)
+# ---------------------------------------------------------------------------
+
+
+class ContainerStatus(BaseModel):
+    name: str
+    image: str
+    ready: bool = False
+    restart_count: int = 0
+    state: str = ""
+
+
+class PodInfo(BaseModel):
+    name: str
+    namespace: str
+    phase: str = ""
+    ready: str = ""
+    restarts: int = 0
+    node: str | None = None
+    pod_ip: str | None = None
+    containers: list[ContainerStatus] = []
+    labels: dict[str, str] = Field(default_factory=dict)
+    created_at: str = ""
+
+
+class ServicePort(BaseModel):
+    name: str | None = None
+    port: int
+    target_port: int | str | None = None
+    node_port: int | None = None
+    protocol: str = "TCP"
+
+
+class ServiceInfo(BaseModel):
+    name: str
+    namespace: str
+    type: str = "ClusterIP"
+    cluster_ip: str | None = None
+    external_ips: list[str] = []
+    ports: list[ServicePort] = []
+    selector: dict[str, str] = Field(default_factory=dict)
+    created_at: str = ""
+
+
+class DeploymentInfo(BaseModel):
+    name: str
+    namespace: str
+    replicas: int = 0
+    available: int = 0
+    ready: int = 0
+    updated: int = 0
+    strategy: str = ""
+    selector: dict[str, str] = Field(default_factory=dict)
+    images: list[str] = []
+    created_at: str = ""
+
+
+class ReplicaSetInfo(BaseModel):
+    name: str
+    namespace: str
+    replicas: int = 0
+    ready: int = 0
+    available: int = 0
+    owner_kind: str | None = None
+    owner_name: str | None = None
+    selector: dict[str, str] = Field(default_factory=dict)
+    images: list[str] = []
+    created_at: str = ""
+
+
+class ScaleDeploymentRequest(BaseModel):
+    replicas: int = Field(ge=0, le=100)
+
+
+class PodLogResponse(BaseModel):
+    name: str
+    namespace: str
+    container: str | None = None
+    log: str

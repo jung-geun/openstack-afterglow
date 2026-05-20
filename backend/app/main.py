@@ -173,9 +173,12 @@ from app.api.k3s import (
     k3s_configmaps_router,
     k3s_health_router,
     k3s_nodegroups_router,
+    k3s_pods_router,
     k3s_secrets_router,
+    k3s_services_router,
     k3s_shell_router,
     k3s_templates_router,
+    k3s_workloads_router,
 )
 from app.api.network import (
     loadbalancers_router,
@@ -429,6 +432,9 @@ if _svc_cfg.service_k3s_enabled:
     app.include_router(k3s_callback_router, prefix="/api/k3s", tags=["k3s-callback"])
     app.include_router(k3s_configmaps_router, prefix="/api/k3s/clusters", tags=["k3s-configmaps"])
     app.include_router(k3s_secrets_router, prefix="/api/k3s/clusters", tags=["k3s-secrets"])
+    app.include_router(k3s_pods_router, prefix="/api/k3s/clusters", tags=["k3s-pods"])
+    app.include_router(k3s_services_router, prefix="/api/k3s/clusters", tags=["k3s-services"])
+    app.include_router(k3s_workloads_router, prefix="/api/k3s/clusters", tags=["k3s-workloads"])
     app.include_router(k3s_shell_router, prefix="/api/k3s/clusters", tags=["k3s-shell"])
     app.include_router(k3s_templates_router, prefix="/api/k3s/cluster-templates", tags=["k3s-templates"])
     app.include_router(k3s_nodegroups_router, prefix="/api/k3s/clusters", tags=["k3s-nodegroups"])

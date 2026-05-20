@@ -2990,3 +2990,36 @@ k3s는 재시작 시 만료 90일 이내 인증서를 자동 갱신한다.
 - [x] trend API 호출을 `range=24h` 고정 → 선택된 period 기반 동적 호출
   - `30d` 선택 시 trend API 최대 범위(14d)로 fallback (`trendRange` $derived)
 - [x] 상단 4개 카드 레이블을 `trendRange` 기반 동적 표시 (예: `vCPU 7d 추세`)
+
+### Phase 53o — Drover 상세 페이지 6-탭 구조 + K8s 워크로드 조회·기본 액션
+
+**목표**: `/dashboard/drover/[id]` 를 6개 탭으로 재구성하고 누락된 워크로드 API/UI 를 추가한다.
+
+**탭 구성**: 메인 / ConfigMap / Secret / Service / Deployment·RS / Pod
+
+**백엔드**
+- [x] `backend/app/models/k3s.py` — 신규 Pydantic 모델 8개 (ContainerStatus, PodInfo, ServicePort, ServiceInfo, DeploymentInfo, ReplicaSetInfo, ScaleDeploymentRequest, PodLogResponse)
+- [x] `backend/app/services/k3s_kube.py` — K8s API 헬퍼 8개 + 정규화 함수 4개 (list_pods, list_services, list_deployments, list_replicasets, get_pod_log, delete_service, restart_deployment, scale_deployment)
+  - Pod 로그: `text/plain` 응답 → `resp.text` 직접 반환 (`_raise_k8s_error` 우회)
+  - Deployment restart: `Content-Type: application/strategic-merge-patch+json` 헤더
+  - Scale: `PUT .../scale` + `autoscaling/v1` Scale 객체
+- [x] `backend/app/api/k3s/pods.py` — GET /pods, DELETE /pods/{name}, GET /pods/{name}/log
+- [x] `backend/app/api/k3s/k3s_services.py` — GET /services, DELETE /services/{name}
+- [x] `backend/app/api/k3s/workloads.py` — GET/restart/scale deployments, GET replicasets
+- [x] `backend/app/api/k3s/__init__.py` — 3개 라우터 등록
+- [x] `backend/app/main.py` — 3개 라우터 include
+- [x] `backend/tests/test_k3s_workloads.py` — pytest 12건 통과 (헬퍼 정규화 4건 + 엔드포인트 8건)
+
+**프론트엔드**
+- [x] `frontend/src/lib/types/k3s.ts` — ContainerStatus, PodInfo, PodLogResponse, ServicePort, ServiceInfo, DeploymentInfo, ReplicaSetInfo 타입 추가
+- [x] `frontend/src/lib/api/k3sWorkloads.ts` — 신규 API 클라이언트 (pods/services/deployments/replicasets/log/restart/scale)
+- [x] `frontend/src/lib/stores/k3sClusterDetailController.svelte.ts` — 신규 state·메서드 추가: activeTab, pods/services/deployments/replicasets, loadPods/Services/Deployments, removePod/Svc, rolloutRestartDeployment, scaleDeploymentTo, fetchPodLog; selectedNamespace setter 워크로드 캐시 무효화
+- [x] `K3sClusterTabs.svelte` (신규) — 6탭 헤더 (ServiceTabs 패턴)
+- [x] `K3sClusterMainPanel.svelte` (신규) — 기존 카드 묶음
+- [x] `K3sClusterServicesCard.svelte` (신규) — Service 목록 + 삭제
+- [x] `K3sClusterDeploymentsCard.svelte` (신규) — Deployment + ReplicaSet 표 + restart/scale
+- [x] `K3sClusterPodsCard.svelte` (신규) — Pod 목록 + 삭제 + 로그
+- [x] `K3sPodLogOverlay.svelte` (신규) — Pod 로그 모달 (container 선택, tail_lines 토글)
+- [x] `K3sScaleModal.svelte` (신규) — Deployment replicas +/- modal
+- [x] `K3sClusterDetailPanel.svelte` — 탭 기반 레이아웃으로 리팩토링 (세로 스택 → 탭 분기)
+- [x] `frontend/src/routes/dashboard/drover/[id]/+page.svelte` — `?tab=` 쿼리 파라미터 URL 동기화

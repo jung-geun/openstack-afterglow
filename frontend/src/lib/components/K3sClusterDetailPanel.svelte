@@ -1,29 +1,29 @@
 <script lang="ts">
-  import { auth } from '$lib/stores/auth';
   import { untrack } from 'svelte';
+  import { auth } from '$lib/stores/auth';
   import { goto } from '$app/navigation';
-  import { createK3sClusterDetailController, provideK3sClusterDetailController } from '$lib/stores/k3sClusterDetailController.svelte';
+  import { createK3sClusterDetailController, provideK3sClusterDetailController, type ActiveTab } from '$lib/stores/k3sClusterDetailController.svelte';
   import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
-  import K3sClusterHeader from '$lib/components/k3s/K3sClusterHeader.svelte';
-  import K3sDeleteProgress from '$lib/components/k3s/K3sDeleteProgress.svelte';
-  import K3sClusterInfoCard from '$lib/components/k3s/K3sClusterInfoCard.svelte';
-  import K3sClusterNodesCard from '$lib/components/k3s/K3sClusterNodesCard.svelte';
-  import K3sClusterVmList from '$lib/components/k3s/K3sClusterVmList.svelte';
-  import K3sNodegroupsSection from '$lib/components/k3s/K3sNodegroupsSection.svelte';
-  import K3sInstanceViewerOverlay from '$lib/components/k3s/K3sInstanceViewerOverlay.svelte';
-  import K3sClusterNetworksCard from '$lib/components/k3s/K3sClusterNetworksCard.svelte';
-  import K3sNamespaceSelector from '$lib/components/k3s/K3sNamespaceSelector.svelte';
+  import K3sClusterTabs from '$lib/components/k3s/K3sClusterTabs.svelte';
+  import K3sClusterMainPanel from '$lib/components/k3s/K3sClusterMainPanel.svelte';
   import K3sClusterConfigMapsCard from '$lib/components/k3s/K3sClusterConfigMapsCard.svelte';
   import K3sClusterSecretsCard from '$lib/components/k3s/K3sClusterSecretsCard.svelte';
+  import K3sClusterServicesCard from '$lib/components/k3s/K3sClusterServicesCard.svelte';
+  import K3sClusterDeploymentsCard from '$lib/components/k3s/K3sClusterDeploymentsCard.svelte';
+  import K3sClusterPodsCard from '$lib/components/k3s/K3sClusterPodsCard.svelte';
+  import K3sNamespaceSelector from '$lib/components/k3s/K3sNamespaceSelector.svelte';
+  import K3sInstanceViewerOverlay from '$lib/components/k3s/K3sInstanceViewerOverlay.svelte';
   import K3sCloudShellOverlay from '$lib/components/k3s/K3sCloudShellOverlay.svelte';
 
   interface Props {
     clusterId: string;
     onClose?: () => void;
     adminMode?: boolean;
+    initialTab?: ActiveTab;
+    onTabChange?: (tab: ActiveTab) => void;
   }
 
-  let { clusterId, onClose, adminMode = false }: Props = $props();
+  let { clusterId, onClose, adminMode = false, initialTab = 'main', onTabChange }: Props = $props();
 
   const s = createK3sClusterDetailController({
     clusterId: () => clusterId,
@@ -33,6 +33,17 @@
     onClose: onClose ?? (() => goto('/dashboard/drover')),
   });
   provideK3sClusterDetailController(s);
+
+  // Set initial tab from URL
+  $effect.pre(() => {
+    s.activeTab = initialTab;
+  });
+
+  // Notify parent when tab changes (for URL sync)
+  $effect(() => {
+    const tab = s.activeTab;
+    untrack(() => onTabChange?.(tab));
+  });
 
   createAutoRefresh(() => untrack(() => {
     s.loadCluster();
@@ -59,6 +70,17 @@
         s.loadNamespaces();
       });
     }
+  });
+
+  // Lazy-load per tab when first activated
+  $effect(() => {
+    const tab = s.activeTab;
+    if (!s.cluster || s.cluster.status !== 'ACTIVE') return;
+    untrack(() => {
+      if (tab === 'configmaps' || tab === 'secrets' || tab === 'services' || tab === 'workloads' || tab === 'pods') {
+        s.loadNamespaces();
+      }
+    });
   });
 </script>
 
@@ -92,18 +114,26 @@
     {:else if s.error}
       <div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm">{s.error}</div>
     {:else if s.cluster}
-      <K3sClusterHeader />
-      {#if s.deleteProgress}<K3sDeleteProgress />{/if}
-      <div class="grid grid-cols-1 @3xl/panel:grid-cols-2 gap-3 mb-4">
-        <K3sClusterInfoCard />
-        <K3sClusterNodesCard />
-      </div>
-      <K3sClusterVmList />
-      <K3sNodegroupsSection />
-      <K3sClusterNetworksCard />
-      <K3sNamespaceSelector />
-      <K3sClusterConfigMapsCard />
-      <K3sClusterSecretsCard />
+      <K3sClusterTabs />
+
+      {#if s.activeTab === 'main'}
+        <K3sClusterMainPanel />
+      {:else if s.activeTab === 'configmaps'}
+        <K3sNamespaceSelector />
+        <K3sClusterConfigMapsCard />
+      {:else if s.activeTab === 'secrets'}
+        <K3sNamespaceSelector />
+        <K3sClusterSecretsCard />
+      {:else if s.activeTab === 'services'}
+        <K3sNamespaceSelector />
+        <K3sClusterServicesCard />
+      {:else if s.activeTab === 'workloads'}
+        <K3sNamespaceSelector />
+        <K3sClusterDeploymentsCard />
+      {:else if s.activeTab === 'pods'}
+        <K3sNamespaceSelector />
+        <K3sClusterPodsCard />
+      {/if}
     {/if}
   </div>
 </div>

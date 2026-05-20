@@ -679,3 +679,224 @@ async def wait_node_ready(cluster_id: str, node_name: str, *, timeout: float = 3
             pass
         await asyncio.sleep(5)
     return False
+
+
+# ---------------------------------------------------------------------------
+# 워크로드 조회/액션 헬퍼 (Phase 53o)
+# ---------------------------------------------------------------------------
+
+
+def _pod_from_k8s(item: dict) -> dict:
+    meta = item.get("metadata", {})
+    spec = item.get("spec", {})
+    status = item.get("status", {})
+    container_statuses = status.get("containerStatuses", [])
+    init_statuses = status.get("initContainerStatuses", [])
+    all_statuses = container_statuses + init_statuses
+
+    ready_count = sum(1 for s in container_statuses if s.get("ready"))
+    total_count = len(spec.get("containers", []))
+    restarts = sum(s.get("restartCount", 0) for s in all_statuses)
+
+    containers = []
+    for c in spec.get("containers", []):
+        cs = next((s for s in all_statuses if s.get("name") == c.get("name")), {})
+        state_obj = cs.get("state", {})
+        if "running" in state_obj:
+            state = "running"
+        elif "waiting" in state_obj:
+            state = "waiting"
+        elif "terminated" in state_obj:
+            state = "terminated"
+        else:
+            state = ""
+        containers.append({
+            "name": c.get("name", ""),
+            "image": c.get("image", ""),
+            "ready": cs.get("ready", False),
+            "restart_count": cs.get("restartCount", 0),
+            "state": state,
+        })
+
+    return {
+        "name": meta.get("name", ""),
+        "namespace": meta.get("namespace", ""),
+        "phase": status.get("phase", ""),
+        "ready": f"{ready_count}/{total_count}",
+        "restarts": restarts,
+        "node": spec.get("nodeName"),
+        "pod_ip": status.get("podIP"),
+        "containers": containers,
+        "labels": meta.get("labels", {}),
+        "created_at": meta.get("creationTimestamp", ""),
+    }
+
+
+def _svc_from_k8s(item: dict) -> dict:
+    meta = item.get("metadata", {})
+    spec = item.get("spec", {})
+    ports = []
+    for p in spec.get("ports", []):
+        ports.append({
+            "name": p.get("name"),
+            "port": p.get("port", 0),
+            "target_port": p.get("targetPort"),
+            "node_port": p.get("nodePort"),
+            "protocol": p.get("protocol", "TCP"),
+        })
+    return {
+        "name": meta.get("name", ""),
+        "namespace": meta.get("namespace", ""),
+        "type": spec.get("type", "ClusterIP"),
+        "cluster_ip": spec.get("clusterIP"),
+        "external_ips": spec.get("externalIPs", []),
+        "ports": ports,
+        "selector": spec.get("selector", {}),
+        "created_at": meta.get("creationTimestamp", ""),
+    }
+
+
+def _deploy_from_k8s(item: dict) -> dict:
+    meta = item.get("metadata", {})
+    spec = item.get("spec", {})
+    status = item.get("status", {})
+    images = [c.get("image", "") for c in spec.get("template", {}).get("spec", {}).get("containers", [])]
+    return {
+        "name": meta.get("name", ""),
+        "namespace": meta.get("namespace", ""),
+        "replicas": spec.get("replicas", 0),
+        "available": status.get("availableReplicas", 0),
+        "ready": status.get("readyReplicas", 0),
+        "updated": status.get("updatedReplicas", 0),
+        "strategy": spec.get("strategy", {}).get("type", ""),
+        "selector": spec.get("selector", {}).get("matchLabels", {}),
+        "images": images,
+        "created_at": meta.get("creationTimestamp", ""),
+    }
+
+
+def _rs_from_k8s(item: dict) -> dict:
+    meta = item.get("metadata", {})
+    spec = item.get("spec", {})
+    status = item.get("status", {})
+    owners = meta.get("ownerReferences", [])
+    owner = owners[0] if owners else {}
+    images = [c.get("image", "") for c in spec.get("template", {}).get("spec", {}).get("containers", [])]
+    return {
+        "name": meta.get("name", ""),
+        "namespace": meta.get("namespace", ""),
+        "replicas": spec.get("replicas", 0),
+        "ready": status.get("readyReplicas", 0),
+        "available": status.get("availableReplicas", 0),
+        "owner_kind": owner.get("kind"),
+        "owner_name": owner.get("name"),
+        "selector": spec.get("selector", {}).get("matchLabels", {}),
+        "images": images,
+        "created_at": meta.get("creationTimestamp", ""),
+    }
+
+
+async def list_pods(cluster_id: str, namespace: str, *, project_id: str) -> list[dict]:
+    async with _kube_client(cluster_id, project_id=project_id) as (client, server_url):
+        resp = await client.get(f"{server_url}/api/v1/namespaces/{namespace}/pods")
+        if resp.status_code != 200:
+            _raise_k8s_error(resp, "list pods")
+        return [_pod_from_k8s(item) for item in resp.json().get("items", [])]
+
+
+async def list_services(cluster_id: str, namespace: str, *, project_id: str) -> list[dict]:
+    async with _kube_client(cluster_id, project_id=project_id) as (client, server_url):
+        resp = await client.get(f"{server_url}/api/v1/namespaces/{namespace}/services")
+        if resp.status_code != 200:
+            _raise_k8s_error(resp, "list services")
+        return [_svc_from_k8s(item) for item in resp.json().get("items", [])]
+
+
+async def list_deployments(cluster_id: str, namespace: str, *, project_id: str) -> list[dict]:
+    async with _kube_client(cluster_id, project_id=project_id) as (client, server_url):
+        resp = await client.get(f"{server_url}/apis/apps/v1/namespaces/{namespace}/deployments")
+        if resp.status_code != 200:
+            _raise_k8s_error(resp, "list deployments")
+        return [_deploy_from_k8s(item) for item in resp.json().get("items", [])]
+
+
+async def list_replicasets(cluster_id: str, namespace: str, *, project_id: str) -> list[dict]:
+    async with _kube_client(cluster_id, project_id=project_id) as (client, server_url):
+        resp = await client.get(f"{server_url}/apis/apps/v1/namespaces/{namespace}/replicasets")
+        if resp.status_code != 200:
+            _raise_k8s_error(resp, "list replicasets")
+        return [_rs_from_k8s(item) for item in resp.json().get("items", [])]
+
+
+async def get_pod_log(cluster_id: str, namespace: str, name: str, *,
+                      container: str | None = None, tail_lines: int = 200,
+                      project_id: str) -> str:
+    params: dict = {"tailLines": str(tail_lines)}
+    if container:
+        params["container"] = container
+    async with _kube_client(cluster_id, project_id=project_id) as (client, server_url):
+        resp = await client.get(
+            f"{server_url}/api/v1/namespaces/{namespace}/pods/{name}/log",
+            params=params,
+        )
+        if resp.status_code == 404:
+            raise HTTPException(status_code=404, detail="Pod not found")
+        if resp.status_code != 200:
+            raise HTTPException(status_code=502, detail=f"K8s log error: {resp.status_code}")
+        return resp.text
+
+
+async def delete_service(cluster_id: str, namespace: str, name: str, *, project_id: str) -> None:
+    async with _kube_client(cluster_id, project_id=project_id) as (client, server_url):
+        resp = await client.delete(f"{server_url}/api/v1/namespaces/{namespace}/services/{name}")
+        if resp.status_code not in (200, 202, 404):
+            _raise_k8s_error(resp, f"delete service {name}")
+
+
+async def restart_deployment(cluster_id: str, namespace: str, name: str, *, project_id: str) -> dict:
+    import datetime
+    now = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    patch = {
+        "spec": {
+            "template": {
+                "metadata": {
+                    "annotations": {
+                        "kubectl.kubernetes.io/restartedAt": now,
+                    }
+                }
+            }
+        }
+    }
+    async with _kube_client(cluster_id, project_id=project_id) as (client, server_url):
+        resp = await client.patch(
+            f"{server_url}/apis/apps/v1/namespaces/{namespace}/deployments/{name}",
+            json=patch,
+            headers={"Content-Type": "application/strategic-merge-patch+json"},
+        )
+        if resp.status_code not in (200, 201):
+            _raise_k8s_error(resp, f"restart deployment {name}")
+        return _deploy_from_k8s(resp.json())
+
+
+async def scale_deployment(cluster_id: str, namespace: str, name: str, replicas: int, *,
+                            project_id: str) -> dict:
+    scale_body = {
+        "apiVersion": "autoscaling/v1",
+        "kind": "Scale",
+        "metadata": {"name": name, "namespace": namespace},
+        "spec": {"replicas": replicas},
+    }
+    async with _kube_client(cluster_id, project_id=project_id) as (client, server_url):
+        resp = await client.put(
+            f"{server_url}/apis/apps/v1/namespaces/{namespace}/deployments/{name}/scale",
+            json=scale_body,
+        )
+        if resp.status_code not in (200, 201):
+            _raise_k8s_error(resp, f"scale deployment {name}")
+        # scale 응답은 Scale 객체 — deployment 정보를 재조회
+        resp2 = await client.get(
+            f"{server_url}/apis/apps/v1/namespaces/{namespace}/deployments/{name}"
+        )
+        if resp2.status_code != 200:
+            _raise_k8s_error(resp2, f"get deployment {name} after scale")
+        return _deploy_from_k8s(resp2.json())
