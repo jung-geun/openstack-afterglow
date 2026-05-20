@@ -10,6 +10,7 @@
 	import DashboardStatTiles from '$lib/components/dashboard/overview/DashboardStatTiles.svelte';
 	import RecentInstancesCard from '$lib/components/dashboard/overview/RecentInstancesCard.svelte';
 	import QuotaUsageCard from '$lib/components/dashboard/overview/QuotaUsageCard.svelte';
+	import RangeToggle from '$lib/components/dashboard/overview/RangeToggle.svelte';
 
 	interface Notification {
 		type: string;
@@ -28,7 +29,9 @@
 		vcpu: TrendSeries;
 		memory: TrendSeries;
 		storage: TrendSeries;
+		network: TrendSeries & { unit: string };
 		prometheus_available: boolean;
+		range: '24h' | '7d' | '14d';
 	}
 
 	let summary = $state<DashboardSummary | null>(null);
@@ -40,10 +43,28 @@
 	let trendData = $state<TrendData | null>(null);
 	let refreshing = $state(false);
 
+	const _VALID_RANGES = ['24h', '7d', '14d'] as const;
+	const _savedRange = typeof localStorage !== 'undefined'
+		? localStorage.getItem('dashboard-overview-range') as '24h' | '7d' | '14d' | null
+		: null;
+	let range = $state<'24h' | '7d' | '14d'>(
+		_savedRange && (_VALID_RANGES as readonly string[]).includes(_savedRange) ? _savedRange : '14d'
+	);
+
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
 
 	let inFlight: AbortController | null = null;
+
+	async function fetchTrend(opts?: { refresh?: boolean }) {
+		const qs = opts?.refresh ? `?range=${range}&refresh=true` : `?range=${range}`;
+		try {
+			const v = await api.get<TrendData>(`/api/dashboard/metrics/trend${qs}`, token, projectId);
+			trendData = v;
+		} catch {
+			// Prometheus 미설치 시 silent fail
+		}
+	}
 
 	async function fetchAll(opts?: { refresh?: boolean }) {
 		inFlight?.abort();
@@ -67,9 +88,7 @@
 				api.get<{ notifications: Notification[] }>('/api/dashboard/notifications', token, projectId, { signal: ctrl.signal })
 					.then(v => { if (!ctrl.signal.aborted) notifications = v.notifications ?? []; })
 					.catch(() => {}),
-				api.get<TrendData>('/api/dashboard/metrics/trend', token, projectId, { signal: ctrl.signal })
-					.then(v => { if (!ctrl.signal.aborted) trendData = v; })
-					.catch(() => {}),
+				fetchTrend(opts),
 			]);
 		} finally {
 			if (inFlight === ctrl) inFlight = null;
@@ -81,6 +100,12 @@
 		refreshing = true;
 		try { await fetchAll({ refresh: true }); }
 		finally { refreshing = false; }
+	}
+
+	function handleRangeChange(r: '24h' | '7d' | '14d') {
+		range = r;
+		localStorage.setItem('dashboard-overview-range', r);
+		if (token && projectId) fetchTrend();
 	}
 
 	const ar = createAutoRefresh(() => fetchAll(), {
@@ -126,12 +151,16 @@
 		loading={summaryLoading}
 	/>
 
-	<!-- 14d 사용 추세 -->
+	<!-- 사용 추세 -->
+	<div class="flex items-center justify-between mb-1">
+		<p class="text-[10px] uppercase tracking-wide text-[var(--color-ink-3)]">사용 추세</p>
+		<RangeToggle value={range} onchange={handleRangeChange} />
+	</div>
 	<div class="grid grid-cols-1 md:grid-cols-3 gap-3.5">
 		{#each [
-			{ label: 'vCPU 사용률 (14d)', color: 'var(--color-accent)', key: 'vcpu' as const },
-			{ label: '메모리 (14d)', color: 'var(--color-accent-2)', key: 'memory' as const },
-			{ label: '스토리지 (14d)', color: 'var(--color-warm)', key: 'storage' as const },
+			{ label: `vCPU 사용률 (${range})`, color: 'var(--color-accent)', key: 'vcpu' as const },
+			{ label: `메모리 (${range})`, color: 'var(--color-accent-2)', key: 'memory' as const },
+			{ label: `디스크 사용률 (${range})`, color: 'var(--color-warm)', key: 'storage' as const },
 		] as card}
 			{@const series = trendData?.[card.key]}
 			<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
@@ -139,6 +168,8 @@
 				<Spark data={series?.data ?? []} color={card.color} height={44} />
 				{#if !trendData || !trendData.prometheus_available}
 					<p class="text-[11px] italic text-[var(--color-ink-3)] mt-2">메트릭 수집 미설정 — <a href="/dashboard/observability" class="underline hover:text-[var(--color-ink-0)]">Grafana 보기</a></p>
+				{:else if series && !series.available}
+					<p class="text-[11px] text-[var(--color-ink-3)] mt-2">수집 대기 중</p>
 				{/if}
 			</div>
 		{/each}

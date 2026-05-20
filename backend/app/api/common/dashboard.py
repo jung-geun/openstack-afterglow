@@ -6,6 +6,7 @@ if TYPE_CHECKING:
     import openstack
 import asyncio
 import logging
+import math
 import re
 from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
@@ -672,78 +673,85 @@ async def get_dashboard_usage_report(
 @router.get("/metrics/trend")
 async def get_dashboard_metrics_trend(
     conn: openstack.connection.Connection = Depends(get_os_conn),
-    range_: str = Query("14d", alias="range", description="24h|14d"),
+    range_: str = Query("14d", alias="range", description="24h|7d|14d"),
+    refresh: bool = Query(False, description="캐시 강제 무효화"),
 ):
-    """vCPU/메모리/스토리지 추세 (PromQL). range=24h(5분 step) / range=14d(1일 step).
-    Prometheus 미설치 시 prometheus_available=false."""
+    """vCPU/메모리/스토리지/네트워크 추세 (PromQL).
+
+    range 별 step: 24h=5분(288pt), 7d=1시간(168pt), 14d=6시간(56pt).
+    스토리지는 인스턴스 root fs 사용률 %(node_exporter) — Cinder 볼륨 아님.
+    Prometheus 미설치 시 prometheus_available=false.
+    """
+    if range_ not in ("24h", "7d", "14d"):
+        raise HTTPException(status_code=400, detail=f"유효하지 않은 range: {range_}. 허용값: 24h, 7d, 14d")
+
     project_id = conn._afterglow_project_id
 
-    now = int(datetime.now(UTC).timestamp())
-    if range_ == "24h":
-        start = now - 86400
-        step = 300  # 5분 → 최대 288 포인트
-    else:
-        start = now - 14 * 86400
-        step = 86400  # 1일 → 14 포인트
+    _RANGE_CFG = {
+        "24h": {"seconds": 86400,      "step": 300,      "ttl": 15},
+        "7d":  {"seconds": 7 * 86400,  "step": 3600,     "ttl": 120},
+        "14d": {"seconds": 14 * 86400, "step": 6 * 3600, "ttl": 300},
+    }
+    cfg = _RANGE_CFG[range_]
+    cache_key = f"afterglow:dashboard:trend:{project_id}:{range_}"
 
-    def _vals(series: list[dict]) -> list[float]:
-        return [round(p["value"], 2) for p in series]
+    async def _query_all() -> dict:
+        now = int(datetime.now(UTC).timestamp())
+        start = now - cfg["seconds"]
+        step = cfg["step"]
 
-    async def _safe_query(expr: str) -> list[float]:
-        try:
-            series = await prom_query.query_range(expr, start_ts=start, end_ts=now, step_s=step)
-            return _vals(series)
-        except Exception:
-            return []
+        def _vals(series: list[dict]) -> list[float]:
+            return [round(p["value"], 2) for p in series if not math.isnan(p["value"])]
 
-    if range_ == "24h":
-        # flavor-relative: 할당된 vCPU/메모리 대비 실제 사용률 (%)
+        async def _safe_query(expr: str) -> list[float]:
+            try:
+                series = await prom_query.query_range(expr, start_ts=start, end_ts=now, step_s=step)
+                return _vals(series)
+            except Exception:
+                return []
+
+        # vCPU: libvirt flavor-relative %
         vcpu_expr = (
             f'sum(rate(libvirt_domain_info_cpu_time_seconds_total{{project_id="{project_id}"}}[5m]))'
             f' / sum(libvirt_domain_info_virtual_cpus{{project_id="{project_id}"}}) * 100'
         )
+        # Memory: libvirt flavor-relative %
         mem_expr = (
-            f'sum(libvirt_domain_info_memory_actual_bytes{{project_id="{project_id}"}}) / '
-            f'sum(libvirt_domain_info_memory_max_bytes{{project_id="{project_id}"}}) * 100'
+            f'sum(libvirt_domain_info_memory_actual_bytes{{project_id="{project_id}"}}) /'
+            f' sum(libvirt_domain_info_memory_max_bytes{{project_id="{project_id}"}}) * 100'
         )
-        # 네트워크: bytes/s → KiB/s (절대값, flavor 무관)
+        # Storage: node_exporter root fs 사용률 % (Cinder 볼륨 아님)
+        storage_expr = (
+            f'(1 - sum(node_filesystem_avail_bytes{{project_id="{project_id}",mountpoint="/",'
+            f'fstype!~"tmpfs|overlay|squashfs|devtmpfs"}})'
+            f' / sum(node_filesystem_size_bytes{{project_id="{project_id}",mountpoint="/",'
+            f'fstype!~"tmpfs|overlay|squashfs|devtmpfs"}})) * 100'
+        )
+        # Network: KiB/s (usage 페이지 전용 — prometheus_available 판정에서 제외)
         net_expr = (
             f'(sum(rate(libvirt_domain_interface_stats_receive_bytes_total{{project_id="{project_id}"}}[5m]))'
             f' + sum(rate(libvirt_domain_interface_stats_transmit_bytes_total{{project_id="{project_id}"}}[5m])))'
             f' / 1024'
         )
-        vcpu_data, mem_data, storage_data = await asyncio.gather(
-            _safe_query(vcpu_expr),
-            _safe_query(mem_expr),
-            _safe_query(net_expr),
-        )
-    else:
-        # 14d: 일별 평균 추세
-        vcpu_expr = (
-            f'avg_over_time(sum(libvirt_domain_info_cpu_time_seconds_total'
-            f'{{project_id="{project_id}"}})[1d:1h])'
-        )
-        mem_expr = (
-            f'avg_over_time((sum(libvirt_domain_info_memory_actual_bytes{{project_id="{project_id}"}}) / '
-            f'sum(libvirt_domain_info_memory_max_bytes{{project_id="{project_id}"}}) * 100)[1d:1h])'
-        )
-        storage_expr = (
-            f'sum(cinder_volume_capacity_bytes{{project_id="{project_id}"}}) / 1073741824'
-        )
-        vcpu_data, mem_data, storage_data = await asyncio.gather(
+
+        vcpu_data, mem_data, storage_data, net_data = await asyncio.gather(
             _safe_query(vcpu_expr),
             _safe_query(mem_expr),
             _safe_query(storage_expr),
+            _safe_query(net_expr),
         )
 
-    prometheus_available = any([vcpu_data, mem_data, storage_data])
+        prometheus_available = any([vcpu_data, mem_data, storage_data])
+        return {
+            "vcpu": {"data": vcpu_data, "points": len(vcpu_data), "available": bool(vcpu_data)},
+            "memory": {"data": mem_data, "points": len(mem_data), "available": bool(mem_data)},
+            "storage": {"data": storage_data, "points": len(storage_data), "available": bool(storage_data)},
+            "network": {"data": net_data, "points": len(net_data), "available": bool(net_data), "unit": "KiB/s"},
+            "prometheus_available": prometheus_available,
+            "range": range_,
+        }
 
-    return {
-        "vcpu": {"data": vcpu_data, "points": len(vcpu_data), "available": bool(vcpu_data)},
-        "memory": {"data": mem_data, "points": len(mem_data), "available": bool(mem_data)},
-        "storage": {"data": storage_data, "points": len(storage_data), "available": bool(storage_data)},
-        "prometheus_available": prometheus_available,
-    }
+    return await cached_call(cache_key, cfg["ttl"], _query_all, refresh=refresh)
 
 
 @router.get("/activity")

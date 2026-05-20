@@ -2890,3 +2890,31 @@ k3s는 재시작 시 만료 90일 이내 인증서를 자동 갱신한다.
 - [x] pytest 36 passed (test_admin_dashboard + test_dashboard_usage_report + test_dashboard_usage_spark + test_topology)
 - [x] alert()/confirm() 잔존 0건, 비용/요금 0건, Nova/Cinder/Manila/Neutron(dashboard) 0건
 - [x] npm run check baseline 유지
+
+### Phase 53g — Overview 사용률 카드 Prometheus 통합
+
+**목표**: `/dashboard` Overview의 VCPU/메모리/스토리지 카드를 Prometheus 실데이터로 연결 + range 토글 추가.
+
+**스토리지 의미**: 인스턴스 root fs 사용률 % (node_exporter `node_filesystem_*`) — Cinder 볼륨 GB **아님**. 향후 Cinder 볼륨 추세는 openstack-exporter 도입 시 별도 Phase에서 다룸.
+
+- [x] `backend/app/api/common/dashboard.py` — `/metrics/trend` 엔드포인트 전면 재작성
+  - range=24h|7d|14d 지원 (기존 24h|14d에서 확장). step: 24h=300s, 7d=3600s, 14d=6h
+  - vCPU/Memory: 모든 range에서 동일 libvirt flavor-relative % 식 (24h range-별 분기 제거)
+  - Storage: `node_filesystem_avail/size_bytes{project_id="…",mountpoint="/"}` root fs 사용률 % (cinder_volume_capacity_bytes 제거)
+  - Network: `libvirt_domain_interface_stats_*` KiB/s — 응답에 별도 `network` 필드로 분리 (Phase 53c 버그: storage slot에 네트워크 데이터 혼입 → 수정)
+  - NaN 가드: `_safe_query`에서 `math.isnan` 포인트 제거 (인스턴스 0개 시 available 오판 방지)
+  - Redis 캐시: `cached_call(key, ttl, fn)` — TTL 24h=15s, 7d=120s, 14d=300s
+  - `?refresh=true` 쿼리스트링으로 캐시 강제 무효화
+- [x] `backend/tests/test_dashboard_usage_spark.py` — 기존 5케이스 assertion 갱신 + 신규 7케이스
+  - network 필드 분리 확인, 7d step=3600 검증, node_filesystem expr 확인, invalid range 400, NaN 필터, Redis 캐시 히트 확인
+- [x] `frontend/src/lib/components/dashboard/overview/RangeToggle.svelte` — 신규 segmented control (24h/7d/14d, aria-pressed, 화살표 네비)
+- [x] `frontend/src/routes/dashboard/+page.svelte` — range 토글 + fetchTrend() 분리
+  - range 상태 localStorage 영속 (`dashboard-overview-range`, 기본 14d)
+  - range 변경 시 5개 API 재호출 없이 trend만 부분 재조회
+  - 카드 라벨 동적 (`vCPU 사용률 (${range})` 등), 스토리지 라벨 "디스크 사용률"로 명시
+  - 카드 별 available 체크 → "수집 대기 중" 문구 (prometheus_available=true이나 특정 카드만 빈 경우)
+- [x] `frontend/src/routes/dashboard/usage/+page.svelte`
+  - Phase 53c 잔존 버그 수정: 네트워크 카드가 `storage.data`를 참조하던 것 → `network.data`로 정정
+  - 디스크 사용률 카드 신규 추가 (24h 그룹, 4번째)
+  - 14d 추세 placeholder 연결 — `trendData14d` 별도 조회, vCPU/RAM/디스크 mini-grid
+- [x] pytest 38 passed, tsc --noEmit 오류 0건

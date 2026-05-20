@@ -44,11 +44,14 @@
 		vcpu: TrendSeries;
 		memory: TrendSeries;
 		storage: TrendSeries;
+		network: TrendSeries & { unit: string };
 		prometheus_available: boolean;
+		range: '24h' | '7d' | '14d';
 	}
 
 	let data = $state<UsageStats | null>(null);
 	let trendData = $state<TrendData | null>(null);
+	let trendData14d = $state<TrendData | null>(null);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	let period = $state<'24h' | '7d' | '30d'>('7d');
@@ -67,6 +70,9 @@
 					.catch(e => { error = e instanceof Error ? e.message : '데이터 로딩 실패'; }),
 				api.get<TrendData>('/api/dashboard/metrics/trend?range=24h', token, projectId)
 					.then(v => { trendData = v; })
+					.catch(() => {}),
+				api.get<TrendData>('/api/dashboard/metrics/trend?range=14d', token, projectId)
+					.then(v => { trendData14d = v; })
 					.catch(() => {}),
 			]);
 		} finally {
@@ -148,11 +154,12 @@
 		<div class="text-[var(--color-state-danger)] text-sm py-4">{error}</div>
 	{:else if data}
 		<!-- Spark trend cards — 24h flavor-relative -->
-		<div class="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+		<div class="grid grid-cols-1 sm:grid-cols-4 gap-3.5">
 			{#each [
 				{ label: 'vCPU 24h 추세', unit: '%', color: 'var(--color-accent)', key: 'vcpu' as const },
 				{ label: 'RAM 24h 추세', unit: '%', color: 'var(--color-accent-2)', key: 'memory' as const },
-				{ label: '네트워크 24h 추세', unit: 'KiB/s', color: 'var(--color-warm)', key: 'storage' as const },
+				{ label: '디스크 24h 추세', unit: '%', color: 'var(--color-warm)', key: 'storage' as const },
+				{ label: '네트워크 24h 추세', unit: 'KiB/s', color: 'var(--color-state-info)', key: 'network' as const },
 			] as card}
 				{@const series = trendData?.[card.key]}
 				<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
@@ -228,9 +235,25 @@
 			<!-- 14d trend -->
 			<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
 				<SectionHeader title="14일 추세" />
-				<div class="mt-4 flex items-center justify-center h-20 text-[11px] text-gray-500">
-					Prometheus 미설정
-				</div>
+				{#if !trendData14d || !trendData14d.prometheus_available}
+					<div class="mt-4 flex items-center justify-center h-20 text-[11px] text-gray-500">
+						메트릭 수집 미설정 — <a href="/dashboard/observability" class="underline ml-1 hover:text-[var(--color-ink-0)]">Grafana 보기</a>
+					</div>
+				{:else}
+					<div class="mt-4 grid grid-cols-3 gap-3">
+						{#each [
+							{ label: 'vCPU', color: 'var(--color-accent)', key: 'vcpu' as const },
+							{ label: 'RAM', color: 'var(--color-accent-2)', key: 'memory' as const },
+							{ label: '디스크', color: 'var(--color-warm)', key: 'storage' as const },
+						] as card}
+							{@const s = trendData14d[card.key]}
+							<div>
+								<p class="text-[10px] uppercase tracking-wide text-[var(--color-ink-3)] mb-2">{card.label}</p>
+								<Spark data={s?.data ?? []} color={card.color} height={36} />
+							</div>
+						{/each}
+					</div>
+				{/if}
 			</div>
 
 			<!-- Volume distribution -->
