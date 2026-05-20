@@ -5,9 +5,10 @@
     limit: number;
     color?: string;
     size?: 'xs' | 'sm' | 'md';
+    showValue?: boolean;
   }
 
-  let { label, used, limit, color, size = 'xs' }: Props = $props();
+  let { label, used, limit, color, size = 'xs', showValue = true }: Props = $props();
 
   const pct = $derived(limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0);
   const barTone = $derived(
@@ -19,10 +20,12 @@
 </script>
 
 <div>
+  {#if showValue}
   <div class="flex justify-between text-xs text-gray-400 mb-1.5">
     <span>{label}</span>
     <span><span class="text-white font-medium">{used}</span> / {limit}</span>
   </div>
+  {/if}
   <div class="{trackH} bg-gray-800 rounded-full overflow-hidden">
     {#if barTone}
       <div class="bar bar-{barTone} h-full rounded-full transition-all" style="width:{pct}%"></div>

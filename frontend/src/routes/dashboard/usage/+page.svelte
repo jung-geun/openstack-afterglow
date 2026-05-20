@@ -90,6 +90,13 @@
 		const lower = flavorName.toLowerCase();
 		return lower.startsWith('g1.') || lower.startsWith('gpu');
 	}
+
+	function scaleNetwork(data: number[]): { data: number[]; unit: string } {
+		const maxVal = data.length > 0 ? Math.max(...data) : 0;
+		if (maxVal >= 1024 * 1024) return { data: data.map(v => v / (1024 * 1024)), unit: 'GiB/s' };
+		if (maxVal >= 1024) return { data: data.map(v => v / 1024), unit: 'MiB/s' };
+		return { data, unit: 'KiB/s' };
+	}
 </script>
 
 <div class="p-6 max-w-7xl mx-auto space-y-6">
@@ -133,23 +140,26 @@
 				  fallback: '인스턴스에 node_exporter 미설치 — 게스트 OS 내부 설치 필요' },
 				{ label: '네트워크 24h 추세', unit: trendData?.network?.unit ?? 'KiB/s', color: 'var(--color-state-info)', key: 'network' as const },
 			] as card}
-				{@const series  = trendData?.[card.key]}
-				{@const hasData = (series?.data?.length ?? 0) > 0}
-				{@const current = hasData ? series!.data.at(-1)! : null}
-				{@const min     = hasData ? Math.min(...series!.data) : null}
-				{@const max     = hasData ? Math.max(...series!.data) : null}
+				{@const rawSeries  = trendData?.[card.key]}
+				{@const netScaled  = card.key === 'network' && rawSeries?.data?.length ? scaleNetwork(rawSeries.data) : null}
+				{@const seriesData = netScaled ? netScaled.data : (rawSeries?.data ?? [])}
+				{@const displayUnit = netScaled ? netScaled.unit : card.unit}
+				{@const hasData = seriesData.length > 0}
+				{@const current = hasData ? seriesData.at(-1)! : null}
+				{@const min     = hasData ? Math.min(...seriesData) : null}
+				{@const max     = hasData ? Math.max(...seriesData) : null}
 				<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 flex flex-col gap-2">
 					<div class="flex items-baseline justify-between">
 						<p class="text-[10px] uppercase tracking-wide text-[var(--color-ink-3)]">{card.label}</p>
 						{#if current !== null}
 							<span class="text-xl font-semibold tabular-nums text-[var(--color-ink-0)]">
-								{current.toFixed(1)}<span class="text-[10px] text-[var(--color-ink-3)] ml-0.5">{card.unit}</span>
+								{current.toFixed(1)}<span class="text-[10px] text-[var(--color-ink-3)] ml-0.5">{displayUnit}</span>
 							</span>
 						{/if}
 					</div>
 					<div class="min-h-[72px] flex items-center">
 						{#if hasData}
-							<Spark data={series!.data} color={card.color} height={72} class="w-full" />
+							<Spark data={seriesData} color={card.color} height={72} class="w-full" />
 						{:else if !trendData || !trendData.prometheus_available}
 							<p class="text-[11px] italic text-[var(--color-ink-3)]">메트릭 수집 미설정 — <a href="/dashboard/observability" class="underline hover:text-[var(--color-ink-0)]">Grafana 보기</a></p>
 						{:else if 'fallback' in card}
@@ -160,7 +170,7 @@
 					</div>
 					{#if hasData}
 						<p class="text-[10px] tabular-nums text-[var(--color-ink-3)]">
-							min {min!.toFixed(1)}{card.unit} · max {max!.toFixed(1)}{card.unit}
+							min {min!.toFixed(1)}{displayUnit} · max {max!.toFixed(1)}{displayUnit}
 						</p>
 					{/if}
 				</div>
@@ -205,7 +215,7 @@
 												{inst.cpu_pct != null ? `${inst.cpu_pct.toFixed(0)}%` : '—'}
 											</span>
 											<div class="flex-1 min-w-[48px]">
-												<QuotaBar label="" used={inst.cpu_pct ?? 0} limit={100} size="xs" />
+												<QuotaBar label="" used={inst.cpu_pct ?? 0} limit={100} size="xs" showValue={false} />
 											</div>
 										</div>
 									</td>
@@ -216,7 +226,7 @@
 												{inst.ram_pct != null ? `${inst.ram_pct.toFixed(0)}%` : '—'}
 											</span>
 											<div class="flex-1 min-w-[48px]">
-												<QuotaBar label="" used={inst.ram_pct ?? 0} limit={100} size="xs" />
+												<QuotaBar label="" used={inst.ram_pct ?? 0} limit={100} size="xs" showValue={false} />
 											</div>
 										</div>
 									</td>
