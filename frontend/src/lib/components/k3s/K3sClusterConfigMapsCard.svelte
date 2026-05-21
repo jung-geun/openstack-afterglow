@@ -2,7 +2,9 @@
   import { untrack } from 'svelte';
   import { useK3sClusterDetailController } from '$lib/stores/k3sClusterDetailController.svelte';
   import K3sResourceEditor from './K3sResourceEditor.svelte';
+  import K3sYamlView from './K3sYamlView.svelte';
   import { confirmDialog } from '$lib/stores/confirm.svelte';
+  import { toConfigMapYaml } from '$lib/utils/k8sYaml';
 
   const s = useK3sClusterDetailController();
 
@@ -71,9 +73,11 @@
       {#if createError}
         <p class="text-xs text-red-400 mb-1">{createError}</p>
       {/if}
-      <p class="text-xs text-gray-500 mb-2">데이터를 추가하고 저장 버튼을 누르세요. 데이터 없이도 저장 가능합니다.</p>
       <K3sResourceEditor
         title="ConfigMap 생성"
+        mode="configmap"
+        resourceName={newName}
+        namespace={s.selectedNamespace ?? ''}
         onSave={handleCreate}
         onClose={() => { showCreate = false; }}
         {saving}
@@ -86,33 +90,27 @@
   {:else if s.configMaps.length === 0}
     <p class="text-xs text-gray-500">ConfigMap 없음</p>
   {:else}
-    <div class="space-y-1.5">
+    <div class="space-y-2">
       {#each s.configMaps as cm}
         {@const actionKey = `${s.selectedNamespace}:${cm.name}`}
-        <div class="bg-gray-800/50 rounded-lg p-3 flex items-start justify-between gap-3">
-          <div class="min-w-0 flex-1">
-            <div class="text-xs text-gray-200 font-mono font-medium">{cm.name}</div>
-            {#if Object.keys(cm.data).length > 0}
-              <div class="flex flex-wrap gap-1 mt-1">
-                {#each Object.keys(cm.data) as k}
-                  <span class="text-xs bg-gray-700 text-gray-400 px-1.5 py-0.5 rounded font-mono">{k}</span>
-                {/each}
-              </div>
-            {:else}
-              <span class="text-xs text-gray-600 mt-0.5 block">데이터 없음</span>
-            {/if}
+        <div class="bg-gray-800/50 rounded-lg p-3">
+          <div class="flex items-center justify-between gap-3 mb-2">
+            <span class="text-xs text-gray-200 font-mono font-medium">{cm.name}</span>
+            <div class="flex gap-1 shrink-0">
+              <button
+                onclick={() => { editingCm = { name: cm.name, data: { ...cm.data } }; }}
+                class="text-xs text-gray-400 hover:text-gray-200 px-2 py-1 border border-gray-700 hover:border-gray-500 rounded transition-colors"
+              >편집</button>
+              <button
+                onclick={() => handleDelete(cm.name)}
+                disabled={s.cmActioning === actionKey}
+                class="text-xs text-orange-400 hover:text-orange-300 px-2 py-1 border border-orange-900 hover:border-orange-700 rounded transition-colors disabled:text-gray-600 disabled:border-gray-700 disabled:cursor-not-allowed"
+              >{s.cmActioning === actionKey ? '삭제 중...' : '삭제'}</button>
+            </div>
           </div>
-          <div class="flex gap-1 shrink-0">
-            <button
-              onclick={() => { editingCm = { name: cm.name, data: { ...cm.data } }; }}
-              class="text-xs text-gray-400 hover:text-gray-200 px-2 py-1 border border-gray-700 hover:border-gray-500 rounded transition-colors"
-            >편집</button>
-            <button
-              onclick={() => handleDelete(cm.name)}
-              disabled={s.cmActioning === actionKey}
-              class="text-xs text-orange-400 hover:text-orange-300 px-2 py-1 border border-orange-900 hover:border-orange-700 rounded transition-colors disabled:text-gray-600 disabled:border-gray-700 disabled:cursor-not-allowed"
-            >{s.cmActioning === actionKey ? '삭제 중...' : '삭제'}</button>
-          </div>
+          <K3sYamlView
+            text={toConfigMapYaml(cm.name, s.selectedNamespace ?? '', cm.data)}
+          />
         </div>
       {/each}
     </div>
@@ -122,6 +120,9 @@
 {#if editingCm}
   <K3sResourceEditor
     title={`ConfigMap 편집 — ${editingCm.name}`}
+    mode="configmap"
+    resourceName={editingCm.name}
+    namespace={s.selectedNamespace ?? ''}
     initialData={editingCm.data}
     onSave={handleEdit}
     onClose={() => { editingCm = null; }}

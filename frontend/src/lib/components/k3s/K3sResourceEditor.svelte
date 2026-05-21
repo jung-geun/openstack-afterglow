@@ -1,40 +1,70 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import {
+    toConfigMapYaml,
+    toSecretEditYaml,
+    fromConfigMapEditYaml,
+    fromSecretEditYaml,
+  } from '$lib/utils/k8sYaml';
 
   interface Props {
     title: string;
+    mode?: 'configmap' | 'secret';
+    resourceName?: string;
+    namespace?: string;
+    secretType?: string;
     initialData?: Record<string, string>;
     onSave: (data: Record<string, string>) => Promise<void>;
     onClose: () => void;
     saving?: boolean;
   }
 
-  let { title, initialData = {}, onSave, onClose, saving = false }: Props = $props();
+  let {
+    title,
+    mode = 'configmap',
+    resourceName = '',
+    namespace = '',
+    secretType = 'Opaque',
+    initialData = {},
+    onSave,
+    onClose,
+    saving = false,
+  }: Props = $props();
 
-  let entries = $state(
-    untrack(() => Object.entries(initialData).map(([k, v]) => ({ k, v, id: Math.random() })))
-  );
-  let error = $state('');
-
-  function addEntry() {
-    entries = [...entries, { k: '', v: '', id: Math.random() }];
+  function buildInitialYaml(): string {
+    if (mode === 'secret') {
+      return toSecretEditYaml(resourceName, secretType, namespace || undefined);
+    }
+    return toConfigMapYaml(resourceName, namespace, initialData);
   }
 
-  function removeEntry(id: number) {
-    entries = entries.filter((e) => e.id !== id);
+  let yamlText = $state(buildInitialYaml());
+  let parseError = $state('');
+
+  function validate(text: string): string {
+    try {
+      if (mode === 'secret') {
+        fromSecretEditYaml(text);
+      } else {
+        fromConfigMapEditYaml(text);
+      }
+      return '';
+    } catch (e) {
+      return e instanceof Error ? e.message : String(e);
+    }
   }
+
+  let liveError = $derived(validate(yamlText));
 
   async function handleSave() {
-    error = '';
-    const data: Record<string, string> = {};
-    for (const e of entries) {
-      if (!e.k.trim()) continue;
-      data[e.k.trim()] = e.v;
-    }
+    parseError = '';
     try {
+      const data =
+        mode === 'secret'
+          ? fromSecretEditYaml(yamlText)
+          : fromConfigMapEditYaml(yamlText);
       await onSave(data);
-    } catch (err) {
-      error = err instanceof Error ? err.message : '저장 실패';
+    } catch (e) {
+      parseError = e instanceof Error ? e.message : '저장 실패';
     }
   }
 </script>
@@ -45,7 +75,7 @@
   role="presentation"
 >
   <div
-    class="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-lg max-h-[80vh] overflow-hidden flex flex-col"
+    class="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col"
     onclick={(e) => e.stopPropagation()}
     role="presentation"
   >
@@ -54,42 +84,30 @@
       <button onclick={onClose} class="text-gray-500 hover:text-gray-300 text-lg leading-none">&times;</button>
     </div>
 
-    <div class="overflow-y-auto flex-1 p-4 space-y-2">
-      {#each entries as entry (entry.id)}
-        <div class="flex gap-2 items-start">
-          <input
-            bind:value={entry.k}
-            placeholder="키"
-            class="w-1/3 bg-gray-800 border border-gray-700 text-gray-200 text-xs rounded px-2 py-1.5 font-mono focus:outline-none focus:border-blue-500"
-          />
-          <textarea
-            bind:value={entry.v}
-            placeholder="값"
-            rows="1"
-            class="flex-1 bg-[#0f172a] border border-gray-700 text-gray-200 text-xs rounded px-2 py-1.5 font-mono focus:outline-none focus:border-blue-500 resize-y"
-          ></textarea>
-          <button
-            onclick={() => removeEntry(entry.id)}
-            class="text-gray-600 hover:text-red-400 text-xs px-1 py-1.5 shrink-0"
-          >✕</button>
-        </div>
-      {/each}
-      <button
-        onclick={addEntry}
-        class="text-xs text-blue-400 hover:text-blue-300 mt-1"
-      >+ 항목 추가</button>
+    <div class="overflow-y-auto flex-1 p-4">
+      <textarea
+        bind:value={yamlText}
+        spellcheck={false}
+        class="w-full h-72 bg-gray-950 border border-gray-700 text-gray-200 text-xs rounded-lg px-3 py-3 font-mono focus:outline-none focus:border-blue-500 resize-y leading-relaxed"
+        placeholder={mode === 'secret'
+          ? 'stringData:\n  KEY: value'
+          : 'data:\n  KEY: value'}
+      ></textarea>
+      {#if liveError}
+        <p class="text-xs text-red-400 mt-1">{liveError}</p>
+      {/if}
     </div>
 
-    {#if error}
-      <p class="text-xs text-red-400 px-4 pb-2">{error}</p>
+    {#if parseError}
+      <p class="text-xs text-red-400 px-4 pb-2">{parseError}</p>
     {/if}
 
     <div class="flex justify-end gap-2 px-4 py-3 border-t border-gray-800">
       <button onclick={onClose} class="text-xs text-gray-400 hover:text-gray-300 px-3 py-1.5">취소</button>
       <button
         onclick={handleSave}
-        disabled={saving}
-        class="text-xs text-blue-400 hover:text-blue-300 px-3 py-1.5 border border-blue-900 hover:border-blue-700 rounded transition-colors disabled:text-gray-600 disabled:border-gray-700"
+        disabled={saving || !!liveError}
+        class="text-xs text-blue-400 hover:text-blue-300 px-3 py-1.5 border border-blue-900 hover:border-blue-700 rounded transition-colors disabled:text-gray-600 disabled:border-gray-700 disabled:cursor-not-allowed"
       >
         {saving ? '저장 중...' : '저장'}
       </button>

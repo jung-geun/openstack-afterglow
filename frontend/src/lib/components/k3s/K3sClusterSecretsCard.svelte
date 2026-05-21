@@ -2,8 +2,9 @@
   import { untrack } from 'svelte';
   import { useK3sClusterDetailController } from '$lib/stores/k3sClusterDetailController.svelte';
   import K3sResourceEditor from './K3sResourceEditor.svelte';
-  import K3sSecretValueDisplay from './K3sSecretValueDisplay.svelte';
+  import K3sYamlView from './K3sYamlView.svelte';
   import { confirmDialog } from '$lib/stores/confirm.svelte';
+  import { toSecretReadYaml } from '$lib/utils/k8sYaml';
 
   const s = useK3sClusterDetailController();
 
@@ -84,9 +85,12 @@
       {#if createError}
         <p class="text-xs text-red-400 mb-1">{createError}</p>
       {/if}
-      <p class="text-xs text-gray-500 mb-2">값은 plain text로 입력하세요. 백엔드에서 base64 인코딩합니다.</p>
       <K3sResourceEditor
         title="Secret 생성"
+        mode="secret"
+        resourceName={newName}
+        namespace={s.selectedNamespace ?? ''}
+        secretType={newType}
         onSave={handleCreate}
         onClose={() => { showCreate = false; }}
         {saving}
@@ -99,11 +103,17 @@
   {:else if s.secrets.length === 0}
     <p class="text-xs text-gray-500">Secret 없음</p>
   {:else}
-    <div class="space-y-1.5">
+    <div class="space-y-2">
       {#each s.secrets as secret}
         {@const actionKey = `${s.selectedNamespace}:${secret.name}`}
+        {@const { text, maskedKeys } = toSecretReadYaml(
+          secret.name,
+          s.selectedNamespace ?? '',
+          secret.type,
+          secret.data
+        )}
         <div class="bg-gray-800/50 rounded-lg p-3">
-          <div class="flex items-start justify-between gap-3 mb-2">
+          <div class="flex items-center justify-between gap-3 mb-2">
             <div>
               <span class="text-xs text-gray-200 font-mono font-medium">{secret.name}</span>
               <span class="text-xs text-gray-600 ml-2">{secret.type}</span>
@@ -120,18 +130,7 @@
               >{s.cmActioning === actionKey ? '삭제 중...' : '삭제'}</button>
             </div>
           </div>
-          {#if Object.keys(secret.data).length > 0}
-            <div class="space-y-1.5">
-              {#each Object.entries(secret.data) as [k, v]}
-                <div class="flex items-center gap-2">
-                  <span class="text-xs text-gray-500 font-mono w-28 shrink-0 truncate">{k}</span>
-                  <K3sSecretValueDisplay b64value={v} />
-                </div>
-              {/each}
-            </div>
-          {:else}
-            <span class="text-xs text-gray-600">데이터 없음</span>
-          {/if}
+          <K3sYamlView {text} {maskedKeys} />
         </div>
       {/each}
     </div>
@@ -141,6 +140,10 @@
 {#if editingSecret}
   <K3sResourceEditor
     title={`Secret 편집 — ${editingSecret.name}`}
+    mode="secret"
+    resourceName={editingSecret.name}
+    namespace={s.selectedNamespace ?? ''}
+    secretType={editingSecret.type}
     onSave={handleEdit}
     onClose={() => { editingSecret = null; }}
     {saving}
