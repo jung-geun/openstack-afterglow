@@ -1,8 +1,8 @@
 """
 라이브러리 파일 스토리지 자동 빌드 서비스.
 
-Manila CephFS share 생성 → CephX access rule → 임시 VM(cloud-init) 자동 생성
-→ VM 내부에서 패키지 설치 → VM SHUTOFF 감지 → 메타데이터 업데이트 → VM 삭제
+Manila CephFS share 생성 → CephX access rule → 영구 Builder VM에 SSH 접속
+→ 원격 패키지 설치 → 진행률 DB 업데이트 → 메타데이터 갱신
 """
 
 from __future__ import annotations
@@ -10,11 +10,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import re
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    import openstack
 
 from app.config import get_settings
 from app.services import libraries as lib_svc
@@ -23,7 +20,7 @@ from app.services.keystone import get_service_project_connection
 
 _logger = logging.getLogger(__name__)
 
-# 빌드 중인 작업 추적 {library_id: {share_id, server_id, status}} (인메모리 캐시, DB가 원본)
+# 빌드 중인 작업 추적 {library_id: {share_id, status, ...}} (인메모리 캐시, DB가 원본)
 _active_builds: dict[str, dict] = {}
 
 # 빌드 대기 큐 (library_id 문자열)
@@ -56,6 +53,8 @@ async def _update_build_db(
         row = (await session.execute(select(LibraryBuild).where(LibraryBuild.id == build_id))).scalar_one_or_none()
         if row is None:
             return
+        if row.status in {"complete", "error", "timeout", "cancelled"}:
+            return
         if status is not None:
             row.status = status
         if progress_step is not None:
@@ -72,7 +71,6 @@ async def _update_build_db(
 
 
 # 모든 라이브러리에서 공통으로 사용하는 uv 부트스트랩
-# uv는 astral.sh에서 제공하는 standalone installer를 사용한다.
 _UV_BOOTSTRAP = """\
 curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh
 export PATH=/usr/local/bin:$PATH
@@ -126,57 +124,11 @@ uv pip install --python python3.11 --no-cache \
 """,
 }
 
+# UI 전송 ID 'pytorch' → 'torch' 동일 스크립트로 처리
+_INSTALL_SCRIPTS["pytorch"] = _INSTALL_SCRIPTS["torch"]
 
-def _generate_cloudinit(
-    ceph_monitors: str,
-    share_path: str,
-    cephx_user: str,
-    cephx_secret: str,
-    library_id: str,
-) -> str:
-    """빌더 VM용 cloud-init 스크립트 생성."""
-    install_script = _INSTALL_SCRIPTS.get(library_id, "echo 'Unknown library'")
-
-    return f"""#!/bin/bash
-set -e
-exec > /var/log/union-builder.log 2>&1
-
-# 오류 발생 시 에러 마커 작성 후 종료
-_on_error() {{
-    echo "[union-builder] BUILD FAILED at line $1"
-    sync 2>/dev/null || true
-    umount /mnt/share 2>/dev/null || true
-    poweroff
-}}
-trap '_on_error $LINENO' ERR
-
-echo "[union-builder] Starting library build: {library_id}"
-
-# CephFS 마운트 및 uv 설치를 위한 패키지 설치
-apt-get update -qq
-apt-get install -y ceph-common curl python3-pip
-
-# CephFS 마운트
-mkdir -p /mnt/share
-echo "{cephx_secret}" > /tmp/ceph.secret
-mount -t ceph {ceph_monitors}:{share_path} /mnt/share -o name={cephx_user},secretfile=/tmp/ceph.secret
-rm -f /tmp/ceph.secret
-
-echo "[union-builder] CephFS mounted, starting package installation"
-
-# 패키지 설치
-{install_script}
-
-# 완료 마커 파일 작성
-echo '{{"status": "ready", "built_at": "'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'", "library": "{library_id}"}}' > /mnt/share/.union_build_complete
-
-# 동기화 및 언마운트
-sync
-umount /mnt/share
-
-echo "[union-builder] Build complete, shutting down"
-poweroff
-"""
+# [progress] N 단계명 라인 파싱
+_PROGRESS_RE = re.compile(r"\[progress\]\s+(\d+)\s+(.*)")
 
 
 def get_active_builds() -> dict[str, dict]:
@@ -184,14 +136,56 @@ def get_active_builds() -> dict[str, dict]:
     return dict(_active_builds)
 
 
-async def start_build(
-    library_id: str,
-) -> dict:
-    """라이브러리 파일 스토리지 자동 빌드 시작.
+def _get_lib_size(library_id: str) -> int:
+    """라이브러리별 적정 share 크기 (GB)."""
+    sizes = {"python311": 5, "torch": 20, "pytorch": 20, "vllm": 15, "jupyter": 5}
+    return sizes.get(library_id, 20)
 
-    Manila share와 빌더 VM은 service 프로젝트에 생성된다.
 
-    Returns: {file_storage_id, server_id, status}
+def _build_ssh_command(
+    ceph_mons: str,
+    share_path: str,
+    cephx_user: str,
+    cephx_secret: str,
+    install_script: str,
+) -> str:
+    """Builder VM에서 실행할 마운트+설치 SSH 명령을 구성한다.
+
+    cephx_secret과 install_script는 base64로 인코딩해 특수문자 문제를 회피한다.
+    """
+    secret_b64 = base64.b64encode(cephx_secret.encode()).decode()
+    install_b64 = base64.b64encode(install_script.encode()).decode()
+
+    return (
+        "set -euo pipefail\n"
+        "CEPH_SECRET_FILE=$(mktemp /tmp/ceph.XXXXXX)\n"
+        f"printf '%s' '{secret_b64}' | base64 -d > \"$CEPH_SECRET_FILE\"\n"
+        "chmod 600 \"$CEPH_SECRET_FILE\"\n"
+        "MNT=/mnt/share\n"
+        "mkdir -p \"$MNT\"\n"
+        f"mount -t ceph '{ceph_mons}:{share_path}' \"$MNT\" "
+        f"-o 'name={cephx_user}',secretfile=\"$CEPH_SECRET_FILE\"\n"
+        "rm -f \"$CEPH_SECRET_FILE\"\n"
+        "echo '[progress] 30 CephFS 마운트 완료'\n"
+        "INSTALL_SH=$(mktemp /tmp/install.XXXXXX.sh)\n"
+        f"printf '%s' '{install_b64}' | base64 -d > \"$INSTALL_SH\"\n"
+        "bash \"$INSTALL_SH\"\n"
+        "rm -f \"$INSTALL_SH\"\n"
+        "echo '[progress] 80 패키지 설치 완료'\n"
+        "touch \"$MNT/.union_build_complete\"\n"
+        "sync\n"
+        "umount \"$MNT\"\n"
+        "echo '[progress] 100 빌드 완료'\n"
+    )
+
+
+async def start_build(library_id: str) -> dict:
+    """영구 Builder VM에 SSH로 접속해 라이브러리를 빌드한다.
+
+    Manila share와 CephX rule은 service 프로젝트에 생성된다.
+    실제 설치는 _ssh_build_task 백그라운드 태스크가 수행한다.
+
+    Returns: {file_storage_id, status, library}
     """
     if library_id in _active_builds:
         raise RuntimeError(f"이미 빌드 중인 라이브러리: {library_id}")
@@ -201,15 +195,12 @@ async def start_build(
 
     lib = lib_svc.get_by_id(library_id)
 
-    # 빌더 설정 확인
-    image_id = settings.builder_image_id
-    flavor_id = settings.builder_flavor_id
-    network_id = settings.builder_network_id or settings.default_network_id
-    if not image_id or not flavor_id:
-        raise RuntimeError("빌더 VM 설정이 없습니다 (config.toml [builder] image_id, flavor_id 필요)")
+    install_script = _INSTALL_SCRIPTS.get(library_id)
+    if install_script is None:
+        raise RuntimeError(f"알 수 없는 라이브러리 ID: {library_id}")
 
     # 1. Manila share 생성
-    _logger.info("[builder] Manila share 생성 시작: %s", library_id)
+    _logger.info("[builder] Manila share 생성: %s", library_id)
     file_storage = await asyncio.to_thread(
         manila.create_file_storage,
         conn,
@@ -227,7 +218,7 @@ async def start_build(
     share_id = file_storage.id
     _logger.info("[builder] Share 생성 완료: %s", share_id)
 
-    # 2. CephX access rule 생성
+    # 2. CephX RW access rule
     cephx_user = f"union-builder-{library_id}"
     try:
         access_rule = await asyncio.to_thread(
@@ -239,25 +230,19 @@ async def start_build(
             "cephx",
         )
     except Exception:
-        _logger.error("[builder] CephX key 발급 실패 — share %s 회수", share_id)
+        _logger.error("[builder] CephX rule 생성 실패 — share %s 회수", share_id)
         try:
             await asyncio.to_thread(manila.delete_file_storage, conn, share_id)
         except Exception:
             pass
         raise
     cephx_secret = access_rule["access_key"]
-    _logger.info("[builder] CephX access rule 생성: user=%s", cephx_user)
+    _logger.info("[builder] CephX RW rule 생성: user=%s", cephx_user)
 
     # 3. Export location 조회
-    export_locations = await asyncio.to_thread(
-        manila.get_export_locations,
-        conn,
-        share_id,
-    )
+    export_locations = await asyncio.to_thread(manila.get_export_locations, conn, share_id)
     if not export_locations:
         raise RuntimeError(f"Share {share_id}의 export location을 찾을 수 없습니다")
-    # CephFS export path: "mon1,mon2,mon3:/volumes/_nogroup/xxx"
-    # 모니터 주소와 경로를 분리
     export_path = export_locations[0]
     if ":" in export_path:
         ceph_mons, share_path = export_path.rsplit(":", 1)
@@ -265,31 +250,7 @@ async def start_build(
         ceph_mons = settings.ceph_monitors
         share_path = export_path
 
-    # 4. cloud-init 스크립트 생성
-    userdata = _generate_cloudinit(
-        ceph_monitors=ceph_mons,
-        share_path=share_path,
-        cephx_user=cephx_user,
-        cephx_secret=cephx_secret,
-        library_id=library_id,
-    )
-    userdata_b64 = base64.b64encode(userdata.encode()).decode()
-
-    # 5. 임시 VM 생성 (이미지에서 직접 부팅)
-    _logger.info("[builder] 빌더 VM 생성 시작")
-    server = await asyncio.to_thread(
-        _create_builder_vm,
-        conn,
-        library_id,
-        image_id,
-        flavor_id,
-        network_id,
-        userdata_b64,
-    )
-    server_id = server.id
-    _logger.info("[builder] 빌더 VM 생성 완료: %s", server_id)
-
-    # DB에 빌드 레코드 생성
+    # 4. DB 빌드 레코드 생성
     build_db_id: int | None = None
     try:
         from app.database import get_session_factory
@@ -301,463 +262,196 @@ async def start_build(
                 build_row = LibraryBuild(
                     library_id=library_id,
                     file_storage_id=share_id,
-                    server_id=server_id,
                     status="building",
-                    progress_step="VM 생성 완료, 패키지 설치 중",
-                    progress_pct=40,
+                    progress_step="Builder VM 연결 중",
+                    progress_pct=10,
                 )
                 session.add(build_row)
                 await session.commit()
                 await session.refresh(build_row)
                 build_db_id = build_row.id
     except Exception:
-        _logger.warning("[builder] DB 빌드 레코드 생성 실패", exc_info=True)
+        _logger.warning("[builder] DB 레코드 생성 실패", exc_info=True)
 
-    # 인메모리 캐시 (호환성 유지)
-    build_info = {
+    _active_builds[library_id] = {
         "library_id": library_id,
         "file_storage_id": share_id,
-        "server_id": server_id,
         "cephx_user": cephx_user,
         "status": "building",
         "started_at": datetime.now(UTC).isoformat(),
         "build_db_id": build_db_id,
     }
-    _active_builds[library_id] = build_info
 
-    # 6. 백그라운드 모니터링 시작 (service conn을 task 내부에서 새로 생성해 request-scope 닫힘 문제 해결)
-    asyncio.create_task(_monitor_build(library_id, share_id, server_id, build_db_id))
+    # 5. 백그라운드 SSH 빌드 태스크 시작
+    asyncio.create_task(
+        _ssh_build_task(
+            library_id=library_id,
+            share_id=share_id,
+            ceph_mons=ceph_mons,
+            share_path=share_path,
+            cephx_user=cephx_user,
+            cephx_secret=cephx_secret,
+            install_script=install_script,
+            build_db_id=build_db_id,
+        )
+    )
 
     return {
         "file_storage_id": share_id,
-        "server_id": server_id,
         "status": "building",
         "library": library_id,
     }
 
 
-def _get_lib_size(library_id: str) -> int:
-    """라이브러리별 적정 share 크기 (GB)."""
-    sizes = {"python311": 5, "torch": 20, "vllm": 15, "jupyter": 5}
-    return sizes.get(library_id, 20)
-
-
-def _generate_probe_cloudinit(
-    ceph_monitors: str,
+async def _ssh_build_task(
+    library_id: str,
+    share_id: str,
+    ceph_mons: str,
     share_path: str,
     cephx_user: str,
-    cephx_key: str,
-) -> str:
-    """마운트 검증용 probe VM cloud-init 스크립트.
+    cephx_secret: str,
+    install_script: str,
+    build_db_id: int | None,
+) -> None:
+    """Builder VM에 SSH로 접속해 라이브러리를 설치하고 결과를 DB에 반영한다.
 
-    RO로 마운트 후 .union_build_complete 존재를 확인한다.
-    성공: [union-probe] VERIFY_OK  실패: [union-probe] VERIFY_FAIL
+    service 프로젝트 conn을 내부에서 새로 생성해 start_build()의 conn 닫힘 문제를 방지한다.
     """
-    return f"""#!/bin/bash
-set -euo pipefail
-exec > /var/log/union-probe.log 2>&1
+    from app.services import builder_vm as bvm
+    from app.services.ssh_executor import stream_command
 
-apt-get update -qq
-apt-get install -y -qq ceph-common
-
-mkdir -p /mnt/probe
-echo "{cephx_key}" > /tmp/probe.secret
-mount -t ceph {ceph_monitors}:{share_path} /mnt/probe \\
-    -o name={cephx_user},secretfile=/tmp/probe.secret,ro || {{
-    echo "[union-probe] VERIFY_FAIL: mount error"
-    rm -f /tmp/probe.secret; poweroff; exit 1
-}}
-rm -f /tmp/probe.secret
-
-if [ -f /mnt/probe/.union_build_complete ]; then
-    echo "[union-probe] VERIFY_OK"
-else
-    echo "[union-probe] VERIFY_FAIL: marker not found"
-fi
-
-umount /mnt/probe
-poweroff
-"""
-
-
-async def _verify_layer_accessible(
-    conn: openstack.Connection,
-    share_id: str,
-    library_id: str,
-    image_id: str,
-    flavor_id: str,
-    network_id: str,
-) -> bool:
-    """빌드 완료된 레이어 share를 probe VM으로 마운트 검증.
-
-    임시 RO CephX access rule을 생성해 probe VM에 주입, SHUTOFF 후
-    console 로그에서 VERIFY_OK/FAIL을 판별한다.
-    """
-    probe_user = f"union-probe-{library_id}"
-    probe_server_id: str | None = None
+    conn = await asyncio.to_thread(get_service_project_connection)
 
     try:
-        # 1. RO access rule 생성
-        rule = await asyncio.to_thread(manila.create_access_rule, conn, share_id, probe_user, "ro", "cephx")
-        cephx_key = rule["access_key"]
+        settings = get_settings()
 
-        # 2. export location 조회
-        exports = await asyncio.to_thread(manila.get_export_locations, conn, share_id)
-        if not exports:
-            _logger.warning("[probe] export location 없음: %s", share_id)
-            return False
-        export = exports[0]
-        if ":" in export:
-            ceph_monitors, share_path = export.rsplit(":", 1)
-        else:
-            ceph_monitors = get_settings().ceph_monitors
-            share_path = export
+        endpoint = await bvm.ensure_builder_vm(conn)
+        _logger.info("[builder] Builder VM 접속: host=%s, library=%s", endpoint.host, library_id)
 
-        # 3. probe VM cloud-init 생성 + VM 시작
-        script = _generate_probe_cloudinit(ceph_monitors, share_path, probe_user, cephx_key)
-        userdata_b64 = base64.b64encode(script.encode()).decode()
-        probe_server = await asyncio.to_thread(
-            conn.compute.create_server,
-            name=f"union-probe-{library_id}",
-            image_id=image_id,
-            flavor_id=flavor_id,
-            networks=[{"uuid": network_id}],
-            user_data=userdata_b64,
-            metadata={"union_type": "probe", "union_library": library_id},
+        if build_db_id:
+            await _update_build_db(build_db_id, progress_step="Builder VM 연결 완료", progress_pct=20)
+
+        cmd = _build_ssh_command(
+            ceph_mons=ceph_mons,
+            share_path=share_path,
+            cephx_user=cephx_user,
+            cephx_secret=cephx_secret,
+            install_script=install_script,
         )
-        probe_server_id = probe_server.id
-        _logger.info("[probe] VM 생성: %s", probe_server_id)
 
-        # 4. SHUTOFF 대기 (최대 10분)
-        for _ in range(60):
-            await asyncio.sleep(10)
-            srv = await asyncio.to_thread(conn.compute.get_server, probe_server_id)
-            if srv.status == "SHUTOFF":
-                break
-            if srv.status == "ERROR":
-                _logger.warning("[probe] VM ERROR 상태: %s", probe_server_id)
-                return False
-        else:
-            _logger.warning("[probe] 타임아웃: %s", probe_server_id)
-            return False
+        def _make_progress_callback(db_id: int | None, lib_id: str) -> object:
+            def callback(line: str) -> None:
+                _logger.debug("[builder:%s] %s", lib_id, line)
+                m = _PROGRESS_RE.match(line)
+                if m and db_id:
+                    pct = int(m.group(1))
+                    step = m.group(2)
+                    asyncio.create_task(_update_build_db(db_id, progress_pct=pct, progress_step=step))
 
-        # 5. console 로그 검사
-        console = await asyncio.to_thread(conn.compute.get_server_console_output, probe_server_id, length=100)
-        log_text = console.get("output", "") if isinstance(console, dict) else (console or "")
-        if "[union-probe] VERIFY_OK" in log_text:
-            _logger.info("[probe] 검증 성공: %s", library_id)
-            return True
-        _logger.warning("[probe] VERIFY_FAIL 감지: %s", library_id)
-        return False
+            return callback
 
-    except Exception:
-        _logger.warning("[probe] 검증 중 예외: %s", library_id, exc_info=True)
-        return False
-    finally:
-        # probe access rule 정리
+        exit_code, stderr = await stream_command(
+            host=endpoint.host,
+            key_path=endpoint.key_path,
+            command=cmd,
+            line_callback=_make_progress_callback(build_db_id, library_id),
+            username=endpoint.username,
+            timeout=settings.builder_build_timeout,
+        )
+
+        if exit_code != 0:
+            error_msg = (stderr[-2000:] if stderr else "") or f"SSH 명령 실패 (exit_code={exit_code})"
+            _logger.error("[builder] 빌드 실패 (exit=%d): %s\n%s", exit_code, library_id, error_msg)
+            await asyncio.to_thread(
+                manila.update_share_metadata, conn, share_id, {"union_status": "error"}
+            )
+            if build_db_id:
+                await _update_build_db(
+                    build_db_id,
+                    status="error",
+                    progress_step="빌드 실패",
+                    error_message=f"exit_code={exit_code}: {error_msg[-500:]}",
+                    completed=True,
+                )
+            _active_builds.pop(library_id, None)
+            return
+
+        # 빌드 성공 처리
+        _logger.info("[builder] 빌드 성공: %s", library_id)
+
+        # RW CephX rule 회수
         try:
             rules = await asyncio.to_thread(manila.list_access_rules, conn, share_id)
-            for r in rules:
-                if r.get("access_to") == probe_user:
-                    await asyncio.to_thread(manila.revoke_access_rule, conn, share_id, r["id"])
+            for rule in rules:
+                if rule.get("access_to") == cephx_user:
+                    await asyncio.to_thread(manila.revoke_access_rule, conn, share_id, rule["id"])
         except Exception:
-            pass
-        # probe VM 삭제
-        if probe_server_id:
-            try:
-                await asyncio.to_thread(conn.compute.delete_server, probe_server_id, force=True)
-            except Exception:
-                pass
+            _logger.warning("[builder] RW CephX rule 회수 실패", exc_info=True)
 
+        # RO CephX rule 생성
+        ro_user = f"union-ro-{library_id}"
+        try:
+            await asyncio.to_thread(
+                manila.create_access_rule, conn, share_id, ro_user, "ro", "cephx"
+            )
+            _logger.info("[builder] RO CephX rule 생성: user=%s", ro_user)
+        except Exception:
+            _logger.warning("[builder] RO CephX rule 생성 실패", exc_info=True)
+            ro_user = ""
 
-def _create_builder_vm(
-    conn: openstack.connection.Connection,
-    library_id: str,
-    image_id: str,
-    flavor_id: str,
-    network_id: str,
-    userdata_b64: str,
-) -> object:
-    """이미지에서 직접 부팅하는 임시 VM 생성 (BUILD 상태로 즉시 반환).
+        # 메타데이터 갱신
+        metadata: dict[str, str] = {
+            "union_status": "ready",
+            "union_built_at": datetime.now(UTC).isoformat(),
+        }
+        if ro_user:
+            metadata["union_cephx_user"] = ro_user
+        await asyncio.to_thread(manila.update_share_metadata, conn, share_id, metadata)
 
-    ACTIVE 대기는 _monitor_build가 폴링으로 처리하므로 여기서 기다리지 않는다.
-    요청 핸들러가 VM 부팅(수 분)을 기다리지 않게 해 트리거 타임아웃을 방지한다.
-    """
-    server = conn.compute.create_server(
-        name=f"union-builder-{library_id}",
-        image_id=image_id,
-        flavor_id=flavor_id,
-        networks=[{"uuid": network_id}],
-        user_data=userdata_b64,
-        metadata={"union_type": "builder", "union_library": library_id},
-    )
-    return server
+        # share 공개 (모든 프로젝트에서 접근 가능)
+        try:
+            await asyncio.to_thread(manila.set_share_public, conn, share_id, True)
+        except Exception:
+            _logger.warning("[builder] set_share_public 실패", exc_info=True)
 
-
-async def _cleanup_builder_resources(
-    conn,
-    share_id: str,
-    server_id: str,
-    final_status: str,
-) -> None:
-    """빌드 실패/타임아웃 시 공통 정리: share 메타데이터 + builder CephX rule + VM 삭제."""
-    # 1. share 메타데이터 갱신
-    try:
-        await asyncio.to_thread(manila.update_share_metadata, conn, share_id, {"union_status": final_status})
-    except Exception:
-        _logger.warning("[builder] share 메타데이터 갱신 실패 (status=%s)", final_status, exc_info=True)
-
-    # 2. builder CephX access rule 정리 (유령 user 방지)
-    try:
-        rules = await asyncio.to_thread(manila.list_access_rules, conn, share_id)
-        for rule in rules:
-            if rule.get("access_to", "").startswith("union-builder-"):
-                await asyncio.to_thread(manila.revoke_access_rule, conn, share_id, rule["id"])
-    except Exception:
-        _logger.warning("[builder] CephX builder rule 정리 실패 (share=%s)", share_id, exc_info=True)
-
-    # 3. VM 삭제
-    try:
-        await asyncio.to_thread(conn.compute.delete_server, server_id, force=True)
-    except Exception:
-        _logger.warning("[builder] VM 삭제 실패 (server=%s)", server_id, exc_info=True)
-
-
-async def _monitor_build(
-    library_id: str,
-    share_id: str,
-    server_id: str,
-    build_db_id: int | None = None,
-):
-    """빌더 VM 상태를 모니터링하고 완료 시 정리.
-
-    service 프로젝트 conn을 task 내부에서 새로 생성한다.
-    요청 핸들러 응답 후 conn이 닫히는 잠재 버그를 방지한다.
-    """
-    conn = await asyncio.to_thread(get_service_project_connection)
-    _logger.info("[builder] 모니터링 시작: library=%s, server=%s", library_id, server_id)
-    try:
-        # 최대 30분 대기
-        for _ in range(180):
-            await asyncio.sleep(10)
-            try:
-                server = await asyncio.to_thread(conn.compute.get_server, server_id)
-                status = server.status
-            except Exception:
-                _logger.warning("[builder] VM 상태 조회 실패: %s", server_id, exc_info=True)
-                continue
-
-            if status == "SHUTOFF":
-                _logger.info("[builder] 빌더 VM SHUTOFF 감지: %s", library_id)
-
-                # 빌드 성공 여부 콘솔 로그로 검증
-                # length=2000: cloud-init 출력 + 패키지 설치 로그가 수백 줄에 달하므로
-                # 200줄로는 "[union-builder] Build complete" 마커가 잘릴 수 있음.
-                build_success = False
-                try:
-                    console_output = await asyncio.to_thread(
-                        conn.compute.get_server_console_output, server_id, length=2000
-                    )
-                    log_text = ""
-                    if isinstance(console_output, dict):
-                        log_text = console_output.get("output", "")
-                    elif isinstance(console_output, str):
-                        log_text = console_output
-                    build_success = "[union-builder] Build complete" in log_text
-                    if not build_success:
-                        _logger.warning(
-                            "[builder] 완료 마커 없음 — 빌드 실패로 처리: %s\n로그 마지막 500자: %s",
-                            library_id,
-                            log_text[-500:] if log_text else "(비어있음)",
-                        )
-                except Exception:
-                    _logger.warning("[builder] 콘솔 로그 조회 실패, 성공으로 간주: %s", library_id, exc_info=True)
-                    build_success = True
-
-                if not build_success:
-                    await asyncio.to_thread(
-                        manila.update_share_metadata,
-                        conn,
-                        share_id,
-                        {"union_status": "error"},
-                    )
-                    if build_db_id:
-                        await _update_build_db(
-                            build_db_id,
-                            status="error",
-                            progress_step="빌드 검증 실패",
-                            error_message="콘솔 로그에서 완료 마커를 찾을 수 없음",
-                            completed=True,
-                        )
-                    try:
-                        await asyncio.to_thread(conn.compute.delete_server, server_id, force=True)
-                    except Exception:
-                        pass
-                    if library_id in _active_builds:
-                        _active_builds[library_id]["status"] = "error"
-                        del _active_builds[library_id]
-                    return
-
-                # 빌드 성공 후 마운트 가능 여부 probe VM으로 검증 (A2)
-                settings = get_settings()
-                image_id = settings.builder_image_id
-                flavor_id = settings.builder_flavor_id
-                network_id = settings.builder_network_id or settings.default_network_id
-                if image_id and flavor_id:
-                    if build_db_id:
-                        await _update_build_db(build_db_id, progress_step="마운트 검증 중", progress_pct=80)
-                    mount_ok = await _verify_layer_accessible(
-                        conn, share_id, library_id, image_id, flavor_id, network_id
-                    )
-                    if not mount_ok:
-                        _logger.error("[builder] 마운트 검증 실패: %s", library_id)
-                        await asyncio.to_thread(manila.update_share_metadata, conn, share_id, {"union_status": "error"})
-                        if build_db_id:
-                            await _update_build_db(
-                                build_db_id,
-                                status="error",
-                                progress_step="마운트 검증 실패",
-                                error_message="probe VM이 레이어를 마운트하거나 완료 마커를 찾지 못함",
-                                completed=True,
-                            )
-                        try:
-                            await asyncio.to_thread(conn.compute.delete_server, server_id, force=True)
-                        except Exception:
-                            pass
-                        if library_id in _active_builds:
-                            _active_builds[library_id]["status"] = "error"
-                            del _active_builds[library_id]
-                        return
-
-                # CephX access rule 정리 (빌더용)
-                try:
-                    rules = await asyncio.to_thread(
-                        manila.list_access_rules,
-                        conn,
-                        share_id,
-                    )
-                    for rule in rules:
-                        if rule.get("access_to", "").startswith("union-builder-"):
-                            await asyncio.to_thread(
-                                manila.revoke_access_rule,
-                                conn,
-                                share_id,
-                                rule["id"],
-                            )
-                except Exception:
-                    _logger.warning("[builder] CephX rule 정리 실패", exc_info=True)
-
-                # 읽기 전용 CephX access rule 생성
-                ro_user = f"union-ro-{library_id}"
-                try:
-                    await asyncio.to_thread(
-                        manila.create_access_rule,
-                        conn,
-                        share_id,
-                        ro_user,
-                        "ro",
-                        "cephx",
-                    )
-                    _logger.info("[builder] 읽기 전용 CephX rule 생성 완료: user=%s", ro_user)
-                except Exception:
-                    _logger.warning("[builder] 읽기 전용 rule 생성 실패", exc_info=True)
-                    ro_user = ""
-
-                # 메타데이터 업데이트
-                metadata: dict[str, str] = {
-                    "union_status": "ready",
-                    "union_built_at": datetime.now(UTC).isoformat(),
-                }
-                if ro_user:
-                    metadata["union_cephx_user"] = ro_user
-                await asyncio.to_thread(
-                    manila.update_share_metadata,
-                    conn,
-                    share_id,
-                    metadata,
-                )
-                # prebuilt share는 모든 프로젝트에서 접근할 수 있도록 공개
-                try:
-                    await asyncio.to_thread(manila.set_share_public, conn, share_id, True)
-                except Exception:
-                    _logger.warning(
-                        "[builder] set_share_public 실패 (격리 필터에서 노출 불가): %s", share_id, exc_info=True
-                    )
-                _logger.info("[builder] 빌드 완료 처리: %s", library_id)
-
-                # DB 상태 업데이트
-                if build_db_id:
-                    await _update_build_db(
-                        build_db_id,
-                        status="complete",
-                        progress_step="빌드 완료",
-                        progress_pct=100,
-                        completed=True,
-                    )
-
-                # VM 삭제
-                try:
-                    await asyncio.to_thread(conn.compute.delete_server, server_id, force=True)
-                    _logger.info("[builder] 빌더 VM 삭제 완료: %s", server_id)
-                except Exception:
-                    _logger.warning("[builder] VM 삭제 실패: %s", server_id, exc_info=True)
-
-                if library_id in _active_builds:
-                    _active_builds[library_id]["status"] = "complete"
-                    del _active_builds[library_id]
-                return
-
-            if status == "ERROR":
-                _logger.error("[builder] 빌더 VM ERROR 상태: %s", server_id)
-                await _cleanup_builder_resources(conn, share_id, server_id, "error")
-                if build_db_id:
-                    await _update_build_db(
-                        build_db_id,
-                        status="error",
-                        progress_step="VM 오류 발생",
-                        error_message="빌더 VM이 ERROR 상태로 전환됨",
-                        completed=True,
-                    )
-                if library_id in _active_builds:
-                    _active_builds[library_id]["status"] = "error"
-                    del _active_builds[library_id]
-                return
-
-        # 타임아웃
-        _logger.error("[builder] 빌드 타임아웃 (30분): %s", library_id)
-        await _cleanup_builder_resources(conn, share_id, server_id, "timeout")
+        # DB 완료
         if build_db_id:
             await _update_build_db(
                 build_db_id,
-                status="timeout",
-                progress_step="빌드 타임아웃",
-                error_message="30분 내 빌드가 완료되지 않음",
+                status="complete",
+                progress_step="빌드 완료",
+                progress_pct=100,
                 completed=True,
             )
+
         if library_id in _active_builds:
+            _active_builds[library_id]["status"] = "complete"
             del _active_builds[library_id]
 
     except Exception:
-        _logger.error("[builder] 모니터링 예외: %s", library_id, exc_info=True)
+        _logger.error("[builder] SSH 빌드 태스크 예외: %s", library_id, exc_info=True)
+        try:
+            await asyncio.to_thread(
+                manila.update_share_metadata, conn, share_id, {"union_status": "error"}
+            )
+        except Exception:
+            pass
         if build_db_id:
             await _update_build_db(
                 build_db_id,
                 status="error",
-                progress_step="모니터링 예외",
-                error_message="모니터링 중 예외 발생",
+                progress_step="빌드 예외",
+                error_message="빌드 중 예외 발생",
                 completed=True,
             )
-        if library_id in _active_builds:
-            del _active_builds[library_id]
+        _active_builds.pop(library_id, None)
 
 
 async def cancel_build(build_db_id: int) -> dict:
-    """진행 중인 빌드를 취소하고 리소스를 정리한다.
-
-    빌더 VM 삭제는 service 프로젝트 conn으로 수행한다.
+    """진행 중인 빌드를 취소하고 Manila share RW rule을 정리한다.
 
     Returns:
-        { "cancelled": True, "library_id": str, "server_deleted": bool }
+        { "cancelled": True, "library_id": str }
     """
     from app.database import get_session_factory
     from app.models.db import LibraryBuild
@@ -769,7 +463,9 @@ async def cancel_build(build_db_id: int) -> dict:
     async with factory() as session:
         from sqlalchemy import select
 
-        row = (await session.execute(select(LibraryBuild).where(LibraryBuild.id == build_db_id))).scalar_one_or_none()
+        row = (
+            await session.execute(select(LibraryBuild).where(LibraryBuild.id == build_db_id))
+        ).scalar_one_or_none()
         if row is None:
             raise KeyError(f"빌드 {build_db_id}를 찾을 수 없습니다")
 
@@ -778,35 +474,33 @@ async def cancel_build(build_db_id: int) -> dict:
             raise ValueError(f"이미 종료된 빌드입니다 (상태: {row.status})")
 
         library_id = row.library_id
-        server_id = row.server_id
+        share_id = row.file_storage_id
 
-        # DB 상태 취소로 변경
         row.status = "cancelled"
         row.progress_step = "사용자 취소"
         row.error_message = "관리자에 의해 취소됨"
         row.completed_at = datetime.now(UTC)
         await session.commit()
 
-    # 인메모리 캐시 정리
-    if library_id in _active_builds:
-        del _active_builds[library_id]
+    _active_builds.pop(library_id, None)
 
-    # VM 삭제 (best-effort) — service 프로젝트 conn 사용
-    server_deleted = False
-    if server_id:
+    # Manila RW rule 정리 (best-effort)
+    if share_id:
         try:
-            svc_conn = await asyncio.to_thread(get_service_project_connection)
-            await asyncio.to_thread(svc_conn.compute.delete_server, server_id, force=True)
-            server_deleted = True
-            _logger.info("[builder] 취소로 인한 빌더 VM 삭제 완료: %s", server_id)
+            conn = await asyncio.to_thread(get_service_project_connection)
+            rules = await asyncio.to_thread(manila.list_access_rules, conn, share_id)
+            for rule in rules:
+                if rule.get("access_to", "").startswith("union-builder-"):
+                    await asyncio.to_thread(manila.revoke_access_rule, conn, share_id, rule["id"])
+            _logger.info("[builder] 취소 — RW CephX rule 정리 완료: share=%s", share_id)
         except Exception:
-            _logger.warning("[builder] 취소 시 VM 삭제 실패: %s", server_id, exc_info=True)
+            _logger.warning("[builder] 취소 시 RW rule 정리 실패: share=%s", share_id, exc_info=True)
 
-    return {"cancelled": True, "library_id": library_id, "server_deleted": server_deleted}
+    return {"cancelled": True, "library_id": library_id}
 
 
 # ---------------------------------------------------------------------------
-# 빌드 큐 (A3)
+# 빌드 큐
 # ---------------------------------------------------------------------------
 
 
@@ -814,7 +508,6 @@ async def queue_build(library_id: str) -> dict:
     """라이브러리 빌드 요청을 큐에 추가한다.
 
     이미 빌드 중이거나 큐에 대기 중인 동일 라이브러리는 거부된다.
-    실제 빌드는 _build_worker()가 큐에서 꺼내 처리한다.
 
     Returns:
         {"status": "queued", "library_id": ..., "queue_position": int}
@@ -844,9 +537,8 @@ async def _build_worker() -> None:
     """빌드 큐 워커 — 애플리케이션 lifespan 동안 실행되는 무한 루프.
 
     큐에서 library_id를 꺼내 start_build()를 호출한다.
-    start_build() 내부에서 asyncio.create_task(_monitor_build(...))가 생성되므로
-    워커는 VM 완료를 기다리지 않고 다음 큐 항목을 즉시 처리할 수 있다.
-    같은 library_id의 중복 방지는 _active_builds + _queued_libraries 두 집합이 담당한다.
+    start_build() 내부에서 asyncio.create_task(_ssh_build_task(...))가 생성되므로
+    워커는 SSH 빌드 완료를 기다리지 않고 다음 큐 항목을 즉시 처리할 수 있다.
     """
     _logger.info("[builder] 빌드 큐 워커 시작")
     while True:

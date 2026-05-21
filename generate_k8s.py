@@ -342,6 +342,18 @@ def _render_toml_for_k8s(cfg: dict) -> str:
             lines.append(f'flavor_id = {_toml_str(builder["flavor_id"])}')
         if "network_id" in builder:
             lines.append(f'network_id = {_toml_str(builder["network_id"])}')
+        if "persistent_server_id" in builder:
+            lines.append(f'persistent_server_id = {_toml_str(builder["persistent_server_id"])}')
+        if "ssh_user" in builder:
+            lines.append(f'ssh_user = {_toml_str(builder["ssh_user"])}')
+        if "ssh_key_path" in builder:
+            lines.append(f'ssh_key_path = {_toml_str(builder["ssh_key_path"])}')
+        if "ssh_host" in builder:
+            lines.append(f'ssh_host = {_toml_str(builder["ssh_host"])}')
+        if "floating_network_id" in builder:
+            lines.append(f'floating_network_id = {_toml_str(builder["floating_network_id"])}')
+        if "build_timeout" in builder:
+            lines.append(f'build_timeout = {builder["build_timeout"]}')
         lines.append("")
 
     # [union]

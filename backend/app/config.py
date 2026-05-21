@@ -204,6 +204,12 @@ def _load_toml() -> dict:
     flat["builder_image_id"] = builder.get("image_id", "")
     flat["builder_flavor_id"] = builder.get("flavor_id", "")
     flat["builder_network_id"] = builder.get("network_id", "")
+    flat["builder_persistent_server_id"] = builder.get("persistent_server_id", "")
+    flat["builder_ssh_user"] = builder.get("ssh_user", "ubuntu")
+    flat["builder_ssh_key_path"] = builder.get("ssh_key_path", "/etc/afterglow/ssh/builder.key")
+    flat["builder_ssh_host"] = builder.get("ssh_host", "")
+    flat["builder_floating_network_id"] = builder.get("floating_network_id", "")
+    flat["builder_build_timeout"] = builder.get("build_timeout", 3600)
 
     union = data.get("union", {})
     flat["union_layer_store_rw_share_id"] = union.get("layer_store_rw_share_id", "")
@@ -473,6 +479,13 @@ class Settings(BaseSettings):
     builder_image_id: str = ""  # 빌더 VM 부팅 이미지 ID (Ubuntu 22.04+)
     builder_flavor_id: str = ""  # 빌더 VM 플레이버 ID
     builder_network_id: str = ""  # 빌더 VM 네트워크 ID (미지정 시 default_network_id 사용)
+    # 영구 Builder VM SSH 설정
+    builder_persistent_server_id: str = ""  # 영구 Builder VM server ID (Nova UUID)
+    builder_ssh_user: str = "ubuntu"  # Builder VM SSH 사용자
+    builder_ssh_key_path: str = "/etc/afterglow/ssh/builder.key"  # SSH 개인키 경로
+    builder_ssh_host: str = ""  # Builder VM FIP 주소 (비워두면 Nova에서 자동 조회)
+    builder_floating_network_id: str = ""  # Builder VM FIP 할당용 외부 네트워크 ID
+    builder_build_timeout: int = 3600  # 빌드 SSH 명령 최대 대기 시간 (초)
 
     # 데이터베이스 (MariaDB/MySQL, 선택적)
     database_url: str = ""

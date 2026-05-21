@@ -1,233 +1,190 @@
 """library_builder 단위 테스트.
 
-A2: 빌드 완료 후 probe VM 마운트 검증 — _verify_layer_accessible / _generate_probe_cloudinit
-A3: 백그라운드 빌드 워커 — asyncio.create_task 기반 비동기 빌드 검증
+SSH 기반 영구 Builder VM 파이프라인:
+- start_build(): Manila share 생성 + CephX rule + _ssh_build_task 백그라운드 실행
+- queue_build() / _build_worker(): asyncio.Queue 직렬화
+- _build_ssh_command(): 마운트+설치 명령 구성
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+
 # ---------------------------------------------------------------------------
-# _generate_probe_cloudinit
+# _INSTALL_SCRIPTS 키 검증
 # ---------------------------------------------------------------------------
 
 
-def test_probe_cloudinit_contains_mount_command():
-    """생성된 cloud-init에 CephFS 마운트 명령이 포함돼야 한다."""
-    from app.services.library_builder import _generate_probe_cloudinit
+def test_install_scripts_contains_pytorch_alias():
+    """'pytorch' 키는 'torch'와 동일한 스크립트를 가리켜야 한다 (UI 호환성)."""
+    from app.services.library_builder import _INSTALL_SCRIPTS
 
-    script = _generate_probe_cloudinit(
-        ceph_monitors="10.0.0.1:6789",
-        share_path="/volumes/_nogroup/abc123",
-        cephx_user="union-probe-torch",
-        cephx_key="AQTEST==",
+    assert "pytorch" in _INSTALL_SCRIPTS
+    assert _INSTALL_SCRIPTS["pytorch"] == _INSTALL_SCRIPTS["torch"]
+
+
+def test_install_scripts_has_all_expected_keys():
+    """카탈로그에 정의된 라이브러리 ID가 모두 _INSTALL_SCRIPTS에 존재해야 한다."""
+    from app.services.library_builder import _INSTALL_SCRIPTS
+
+    for lib_id in ("python311", "torch", "pytorch", "vllm", "jupyter"):
+        assert lib_id in _INSTALL_SCRIPTS, f"'{lib_id}' 키가 _INSTALL_SCRIPTS에 없음"
+
+
+# ---------------------------------------------------------------------------
+# _build_ssh_command
+# ---------------------------------------------------------------------------
+
+
+def test_build_ssh_command_contains_mount_command():
+    """생성된 SSH 명령에 CephFS mount 명령이 포함돼야 한다."""
+    from app.services.library_builder import _build_ssh_command
+
+    cmd = _build_ssh_command(
+        ceph_mons="10.0.0.1",
+        share_path="/volumes/_nogroup/abc",
+        cephx_user="union-builder-python311",
+        cephx_secret="AQTEST==",
+        install_script="echo installing",
     )
-    assert "mount -t ceph 10.0.0.1:6789:/volumes/_nogroup/abc123" in script
-    assert "union-probe-torch" in script
+    assert "mount -t ceph" in cmd
+    assert "union-builder-python311" in cmd
 
 
-def test_probe_cloudinit_checks_marker_file():
-    """생성된 cloud-init이 .union_build_complete 존재를 확인해야 한다."""
-    from app.services.library_builder import _generate_probe_cloudinit
+def test_build_ssh_command_creates_build_complete_marker():
+    """.union_build_complete 마커 생성 명령이 있어야 한다."""
+    from app.services.library_builder import _build_ssh_command
 
-    script = _generate_probe_cloudinit("mon", "/path", "user", "key")
-    assert ".union_build_complete" in script
-    assert "VERIFY_OK" in script
-    assert "VERIFY_FAIL" in script
-
-
-def test_probe_cloudinit_uses_ro_option():
-    """RO 마운트 옵션이 포함돼야 한다."""
-    from app.services.library_builder import _generate_probe_cloudinit
-
-    script = _generate_probe_cloudinit("mon", "/path", "user", "key")
-    assert ",ro" in script
+    cmd = _build_ssh_command(
+        ceph_mons="mon", share_path="/path",
+        cephx_user="u", cephx_secret="s", install_script="echo ok",
+    )
+    assert ".union_build_complete" in cmd
 
 
-# ---------------------------------------------------------------------------
-# _verify_layer_accessible
-# ---------------------------------------------------------------------------
+def test_build_ssh_command_progress_markers():
+    """[progress] N 마커가 3단계(30, 80, 100) 포함돼야 한다."""
+    from app.services.library_builder import _build_ssh_command
+
+    cmd = _build_ssh_command(
+        ceph_mons="mon", share_path="/path",
+        cephx_user="u", cephx_secret="s", install_script="echo ok",
+    )
+    assert "[progress] 30" in cmd
+    assert "[progress] 80" in cmd
+    assert "[progress] 100" in cmd
 
 
-def _make_probe_server(sid: str = "probe-srv-1", status: str = "SHUTOFF"):
-    srv = MagicMock()
-    srv.id = sid
-    srv.status = status
-    return srv
+def test_build_ssh_command_encodes_secret_as_base64():
+    """cephx_secret이 base64로 인코딩되어 원본이 노출되지 않아야 한다."""
+    import base64
+
+    from app.services.library_builder import _build_ssh_command
+
+    secret = "AQ+special/chars==\nwith newline"
+    cmd = _build_ssh_command(
+        ceph_mons="mon", share_path="/path",
+        cephx_user="u", cephx_secret=secret, install_script="echo ok",
+    )
+    expected_b64 = base64.b64encode(secret.encode()).decode()
+    assert expected_b64 in cmd
+    assert secret not in cmd
 
 
-@pytest.mark.asyncio
-async def test_verify_layer_accessible_returns_true_on_verify_ok():
-    """probe VM 콘솔에 VERIFY_OK가 있으면 True 반환."""
-    from app.services.library_builder import _verify_layer_accessible
+def test_build_ssh_command_encodes_install_script_as_base64():
+    """설치 스크립트가 base64로 인코딩되어 전달돼야 한다."""
+    import base64
 
-    conn = MagicMock()
-    conn.compute.create_server.return_value = _make_probe_server()
-    conn.compute.get_server.return_value = _make_probe_server(status="SHUTOFF")
-    conn.compute.get_server_console_output.return_value = {"output": "[union-probe] VERIFY_OK\n"}
+    from app.services.library_builder import _build_ssh_command
 
-    with (
-        patch(
-            "app.services.library_builder.manila.create_access_rule",
-            return_value={"access_key": "AQTEST==", "access_id": "rule-1"},
-        ),
-        patch(
-            "app.services.library_builder.manila.get_export_locations",
-            return_value=["10.0.0.1:6789:/volumes/_nogroup/abc"],
-        ),
-        patch("app.services.library_builder.manila.list_access_rules", return_value=[]),
-        patch("app.services.library_builder.asyncio.sleep", new_callable=AsyncMock),
-    ):
-        result = await _verify_layer_accessible(conn, "share-1", "torch", "img-1", "flv-1", "net-1")
-
-    assert result is True
+    script = "uv pip install torch\necho done"
+    cmd = _build_ssh_command(
+        ceph_mons="mon", share_path="/path",
+        cephx_user="u", cephx_secret="s", install_script=script,
+    )
+    expected_b64 = base64.b64encode(script.encode()).decode()
+    assert expected_b64 in cmd
 
 
-@pytest.mark.asyncio
-async def test_verify_layer_accessible_returns_false_on_verify_fail():
-    """probe VM 콘솔에 VERIFY_FAIL이 있으면 False 반환."""
-    from app.services.library_builder import _verify_layer_accessible
+def test_build_ssh_command_uses_set_euo_pipefail():
+    """엄격 오류 처리(set -euo pipefail)가 포함돼야 한다."""
+    from app.services.library_builder import _build_ssh_command
 
-    conn = MagicMock()
-    conn.compute.create_server.return_value = _make_probe_server()
-    conn.compute.get_server.return_value = _make_probe_server(status="SHUTOFF")
-    conn.compute.get_server_console_output.return_value = {"output": "[union-probe] VERIFY_FAIL: marker not found\n"}
-
-    with (
-        patch(
-            "app.services.library_builder.manila.create_access_rule",
-            return_value={"access_key": "AQTEST==", "access_id": "rule-1"},
-        ),
-        patch(
-            "app.services.library_builder.manila.get_export_locations",
-            return_value=["10.0.0.1:6789:/volumes/_nogroup/abc"],
-        ),
-        patch("app.services.library_builder.manila.list_access_rules", return_value=[]),
-        patch("app.services.library_builder.asyncio.sleep", new_callable=AsyncMock),
-    ):
-        result = await _verify_layer_accessible(conn, "share-1", "torch", "img-1", "flv-1", "net-1")
-
-    assert result is False
-
-
-@pytest.mark.asyncio
-async def test_verify_layer_accessible_cleans_up_probe_rule():
-    """검증 완료 후 probe access rule이 정리돼야 한다."""
-    from app.services.library_builder import _verify_layer_accessible
-
-    conn = MagicMock()
-    conn.compute.create_server.return_value = _make_probe_server()
-    conn.compute.get_server.return_value = _make_probe_server(status="SHUTOFF")
-    conn.compute.get_server_console_output.return_value = {"output": "[union-probe] VERIFY_OK"}
-
-    mock_revoke = MagicMock()
-    with (
-        patch(
-            "app.services.library_builder.manila.create_access_rule",
-            return_value={"access_key": "AQTEST==", "access_id": "rule-1"},
-        ),
-        patch(
-            "app.services.library_builder.manila.get_export_locations",
-            return_value=["10.0.0.1:6789:/volumes/_nogroup/abc"],
-        ),
-        patch(
-            "app.services.library_builder.manila.list_access_rules",
-            return_value=[{"id": "rule-1", "access_to": "union-probe-python311"}],
-        ),
-        patch("app.services.library_builder.manila.revoke_access_rule", mock_revoke),
-        patch("app.services.library_builder.asyncio.sleep", new_callable=AsyncMock),
-    ):
-        await _verify_layer_accessible(conn, "share-1", "python311", "img-1", "flv-1", "net-1")
-
-    mock_revoke.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_verify_layer_accessible_returns_false_on_vm_error():
-    """probe VM이 ERROR 상태면 False 반환."""
-    from app.services.library_builder import _verify_layer_accessible
-
-    conn = MagicMock()
-    conn.compute.create_server.return_value = _make_probe_server()
-    conn.compute.get_server.return_value = _make_probe_server(status="ERROR")
-
-    with (
-        patch(
-            "app.services.library_builder.manila.create_access_rule",
-            return_value={"access_key": "AQTEST==", "access_id": "rule-1"},
-        ),
-        patch(
-            "app.services.library_builder.manila.get_export_locations",
-            return_value=["10.0.0.1:6789:/vol"],
-        ),
-        patch("app.services.library_builder.manila.list_access_rules", return_value=[]),
-        patch("app.services.library_builder.asyncio.sleep", new_callable=AsyncMock),
-    ):
-        result = await _verify_layer_accessible(conn, "share-1", "torch", "img-1", "flv-1", "net-1")
-
-    assert result is False
+    cmd = _build_ssh_command("m", "/p", "u", "s", "echo ok")
+    assert "set -euo pipefail" in cmd
 
 
 # ---------------------------------------------------------------------------
-# A3: start_build — asyncio.create_task 백그라운드 워커
+# start_build
 # ---------------------------------------------------------------------------
 
 
+def _make_lib():
+    lib = MagicMock()
+    lib.id = "python311"
+    lib.version = "3.11.0"
+    return lib
+
+
 @pytest.mark.asyncio
-async def test_start_build_creates_background_task():
-    """start_build()는 asyncio.create_task로 모니터링 코루틴을 백그라운드에서 실행한다."""
+async def test_start_build_creates_background_ssh_task():
+    """start_build()는 asyncio.create_task로 _ssh_build_task를 백그라운드에서 실행한다."""
     from app.services import library_builder
 
-    captured_tasks = []
+    captured_tasks: list = []
 
     def _fake_create_task(coro):
         captured_tasks.append(coro)
-        # 코루틴을 닫아 "never awaited" 경고 방지
-        coro.close()
+        coro.close()  # "never awaited" 경고 방지
         return MagicMock()
 
     mock_file_storage = MagicMock()
     mock_file_storage.id = "share-build-1"
 
-    mock_server = MagicMock()
-    mock_server.id = "builder-vm-1"
+    call_results = iter([
+        MagicMock(),  # get_service_project_connection
+        mock_file_storage,  # create_file_storage
+        {"access_key": "AQTEST==", "access_id": "r1"},  # create_access_rule
+        ["10.0.0.1:6789:/vol/lib"],  # get_export_locations
+    ])
+
+    async def _fake_to_thread(fn, *args, **kwargs):
+        return next(call_results)
+
+    settings = MagicMock()
+    settings.os_manila_share_network_id = "snet-1"
+    settings.os_manila_share_type = "cephfstype"
+    settings.ceph_monitors = "10.0.0.1"
 
     with (
         patch("app.services.library_builder.get_service_project_connection", return_value=MagicMock()),
-        patch("app.services.library_builder.asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread,
+        patch("app.services.library_builder.asyncio.to_thread", side_effect=_fake_to_thread),
         patch("app.services.library_builder.asyncio.create_task", side_effect=_fake_create_task),
-        patch("app.services.library_builder.get_settings") as mock_settings,
+        patch("app.services.library_builder.get_settings", return_value=settings),
+        patch("app.services.library_builder.lib_svc.get_by_id", return_value=_make_lib()),
         patch("app.services.library_builder._active_builds", {}),
     ):
-        settings = MagicMock()
-        settings.builder_image_id = "img-ubuntu"
-        settings.builder_flavor_id = "flv-small"
-        settings.builder_network_id = "net-mgmt"
-        settings.default_network_id = "net-mgmt"
-        settings.os_manila_share_network_id = "snet-1"
-        settings.os_manila_share_type = "cephfstype"
-        mock_settings.return_value = settings
-
-        # to_thread 호출 순서 (start_build에서 모두 asyncio.to_thread로 호출됨):
-        #   1. get_service_project_connection → conn
-        #   2. create_file_storage → mock_file_storage
-        #   3. create_access_rule → dict
-        #   4. get_export_locations → list
-        #   5. _create_builder_vm → mock_server
-        mock_conn = MagicMock()
-        mock_to_thread.side_effect = [
-            mock_conn,  # get_service_project_connection
-            mock_file_storage,  # create_file_storage
-            {"access_key": "AQTEST==", "access_id": "r1"},  # create_access_rule
-            ["10.0.0.1:6789:/vol/lib"],  # get_export_locations
-            mock_server,  # _create_builder_vm
-        ]
-
         result = await library_builder.start_build("python311")
 
     assert result["status"] == "building"
-    assert len(captured_tasks) == 1, "create_task가 정확히 한 번 호출돼야 한다"
+    assert result["file_storage_id"] == "share-build-1"
+    assert len(captured_tasks) == 1, "_ssh_build_task가 create_task로 한 번 실행되어야 한다"
+
+
+@pytest.mark.asyncio
+async def test_start_build_rejects_unknown_library():
+    """_INSTALL_SCRIPTS에 없는 library_id는 RuntimeError를 발생시켜야 한다."""
+    from app.services import library_builder
+
+    with (
+        patch("app.services.library_builder.get_service_project_connection", return_value=MagicMock()),
+        patch("app.services.library_builder.asyncio.to_thread", new_callable=AsyncMock),
+        patch("app.services.library_builder.lib_svc.get_by_id", return_value=_make_lib()),
+        patch("app.services.library_builder._active_builds", {}),
+    ):
+        with pytest.raises(RuntimeError, match="알 수 없는 라이브러리"):
+            await library_builder.start_build("nonexistent_lib_xyz")
 
 
 @pytest.mark.asyncio
@@ -236,14 +193,57 @@ async def test_start_build_rejects_duplicate_library():
     from app.services import library_builder
 
     fake_active = {"python311": {"status": "building"}}
-
     with patch("app.services.library_builder._active_builds", fake_active):
         with pytest.raises(RuntimeError, match="이미 빌드 중인"):
             await library_builder.start_build("python311")
 
 
+@pytest.mark.asyncio
+async def test_start_build_cleans_up_share_on_cephx_failure():
+    """CephX rule 생성 실패 시 Manila share가 삭제되어야 한다."""
+    from app.services import library_builder
+
+    mock_file_storage = MagicMock()
+    mock_file_storage.id = "share-fail-1"
+
+    delete_called: list[str] = []
+
+    async def _fake_to_thread(fn, *args, **kwargs):
+        fn_name = getattr(fn, "__name__", str(fn))
+        if "create_file_storage" in fn_name or (args and callable(args[0])):
+            return mock_file_storage
+        if "create_access_rule" in fn_name:
+            raise RuntimeError("CephX quota 초과")
+        if "delete_file_storage" in fn_name:
+            delete_called.append("deleted")
+            return None
+        return MagicMock()
+
+    settings = MagicMock()
+    settings.os_manila_share_network_id = "snet-1"
+    settings.os_manila_share_type = "cephfstype"
+
+    with (
+        patch("app.services.library_builder.get_service_project_connection", return_value=MagicMock()),
+        patch(
+            "app.services.library_builder.asyncio.to_thread",
+            side_effect=[
+                mock_file_storage,  # create_file_storage 성공
+                RuntimeError("CephX quota 초과"),  # create_access_rule 실패
+                None,  # delete_file_storage
+            ],
+        ),
+        patch("app.services.library_builder.get_settings", return_value=settings),
+        patch("app.services.library_builder.lib_svc.get_by_id", return_value=_make_lib()),
+        patch("app.services.library_builder._active_builds", {}),
+        patch("app.services.library_builder.manila.delete_file_storage"),
+    ):
+        with pytest.raises(RuntimeError):
+            await library_builder.start_build("python311")
+
+
 # ---------------------------------------------------------------------------
-# A3: queue_build / _build_worker / get_build_queue_status
+# queue_build / _build_worker / get_build_queue_status
 # ---------------------------------------------------------------------------
 
 
@@ -254,7 +254,6 @@ async def test_queue_build_adds_to_queue():
 
     from app.services import library_builder
 
-    # 격리된 큐로 교체
     fresh_queue: asyncio.Queue[str] = asyncio.Queue()
 
     with (
@@ -350,9 +349,7 @@ async def test_build_worker_calls_start_build_and_marks_done():
         patch("app.services.library_builder._queued_libraries", queued),
         patch("app.services.library_builder.start_build", side_effect=_fake_start_build),
     ):
-        # 워커를 짧은 타임아웃으로 실행 (큐가 비면 await 대기에 걸리므로 cancel)
         worker_task = asyncio.create_task(library_builder._build_worker())
-        # 큐가 처리될 때까지 잠시 대기
         await asyncio.wait_for(fresh_queue.join(), timeout=2.0)
         worker_task.cancel()
         try:

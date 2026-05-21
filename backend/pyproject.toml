@@ -23,6 +23,7 @@ dependencies = [
     "boto3>=1.35.0",
     "websockets>=14.0",
     "pyjwt>=2.9.0",
+    "asyncssh>=2.18",
 ]
 
 [build-system]

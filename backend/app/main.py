@@ -774,6 +774,22 @@ async def start_background_workers():
 
     asyncio.create_task(_build_worker())
 
+    # 영구 Builder VM 사전 확인 (Manila 활성화 시)
+    if _svc_cfg.service_manila_enabled:
+        async def _ensure_builder_vm_background() -> None:
+            try:
+                from app.services import builder_vm as _bvm
+                from app.services.keystone import get_service_project_connection as _get_svc_conn
+
+                svc_conn = await asyncio.to_thread(_get_svc_conn)
+                await _bvm.ensure_builder_vm(svc_conn)
+            except Exception:
+                _logger.warning(
+                    "Builder VM 초기화 실패 — 첫 빌드 요청 시 재시도합니다", exc_info=True
+                )
+
+        asyncio.create_task(_ensure_builder_vm_background())
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
