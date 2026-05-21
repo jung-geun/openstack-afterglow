@@ -77,8 +77,8 @@ data:
     ).toThrow('ConfigMap');
   });
 
-  it('잘못된 YAML은 오류를 던진다', () => {
-    expect(() => fromConfigMapEditYaml('{')).toThrow();
+  it('인식 불가 입력은 빈 data를 반환한다', () => {
+    expect(fromConfigMapEditYaml('{')).toEqual({});
   });
 
   it('multiline 블록 스칼라를 올바르게 파싱한다', () => {
