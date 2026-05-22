@@ -109,10 +109,13 @@ class TestCreateEphemeralVm:
 
         server = _make_server(server_id="srv-xyz", fixed_ip="10.0.0.7")
         fip = _make_fip(addr="5.5.5.5", fip_id="fip-999")
+        port = MagicMock()
+        port.id = "port-abc"
         svc_conn = MagicMock()
         svc_conn.compute.create_server.return_value = server
         svc_conn.compute.get_server.return_value = server
         svc_conn.network.create_ip.return_value = fip
+        svc_conn.network.ports.return_value = [port]
 
         with (
             patch(
@@ -120,9 +123,9 @@ class TestCreateEphemeralVm:
                 return_value=_make_settings(),
             ),
             patch(
-                "app.services.builder_vm._ensure_keypair",
+                "app.services.builder_vm._ensure_ephemeral_keypair",
                 new_callable=AsyncMock,
-                return_value="afterglow-builder-key",
+                return_value="afterglow-ephemeral-key",
             ),
             patch("app.services.builder_vm._wait_for_active", new_callable=AsyncMock),
             patch("app.services.builder_vm._wait_for_ssh", new_callable=AsyncMock),
@@ -154,7 +157,7 @@ class TestCreateEphemeralVm:
                 return_value=_make_settings(),
             ),
             patch(
-                "app.services.builder_vm._ensure_keypair",
+                "app.services.builder_vm._ensure_ephemeral_keypair",
                 new_callable=AsyncMock,
                 return_value="kp",
             ),

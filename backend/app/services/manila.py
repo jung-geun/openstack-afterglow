@@ -47,7 +47,7 @@ class ManilaClient:
             if not r.is_success:
                 logger.error(f"Manila POST {url} → {r.status_code}: {r.text}")
             r.raise_for_status()
-            return r.json()
+            return r.json() if r.content else {}
 
     def put(self, path: str, body: dict) -> dict:
         with httpx.Client() as c:
