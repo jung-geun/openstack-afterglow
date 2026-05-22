@@ -265,6 +265,51 @@ async def cancel_library_build(
 
 
 # ---------------------------------------------------------------------------
+# Ephemeral Builder VM 스모크 테스트
+# ---------------------------------------------------------------------------
+
+
+@router.post("/builder-vm/_smoke", status_code=200, dependencies=[Depends(require_admin)])
+async def smoke_test_ephemeral_vm() -> dict:
+    """임시 Builder VM 생성 → SSH 연결 확인 → 삭제. 관리자 전용 연결 검증 엔드포인트."""
+    from app.services import builder_vm as bvm
+    from app.services.ssh_executor import run_command
+
+    svc_conn = await asyncio.to_thread(get_service_project_connection)
+    vm: bvm.EphemeralBuilderVM | None = None
+    try:
+        vm = await bvm.create_ephemeral_vm(svc_conn)
+
+        rc, stdout, stderr = await run_command(
+            vm.host,
+            vm.key_path,
+            "echo ok && hostname && uname -r",
+            username=vm.username,
+        )
+        if rc != 0:
+            raise HTTPException(
+                status_code=500,
+                detail=f"SSH 명령 실패 (exit={rc}): {stderr}",
+            )
+
+        return {
+            "status": "ok",
+            "server_id": vm.server_id,
+            "fip": vm.host,
+            "internal_ip": vm.internal_ip,
+            "ssh_output": stdout.strip(),
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    finally:
+        if vm is not None:
+            cleanup_conn = await asyncio.to_thread(get_service_project_connection)
+            await bvm.delete_ephemeral_vm(cleanup_conn, vm.server_id, vm.fip_id)
+
+
+# ---------------------------------------------------------------------------
 # NFS 크로스 프로젝트 access rule 관리 (§3.3)
 # ---------------------------------------------------------------------------
 

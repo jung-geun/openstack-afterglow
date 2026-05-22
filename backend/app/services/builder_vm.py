@@ -1,7 +1,6 @@
-"""영구 Builder VM 관리 서비스.
+"""Builder VM 관리 서비스.
 
-서비스 프로젝트에 단일 영구 Builder VM을 보장하고,
-SSH로 도달 가능한 BuilderEndpoint를 반환한다.
+영구 Builder VM(기존)과 빌드별 임시 Ephemeral Builder VM(신규) 두 가지를 모두 지원한다.
 """
 
 from __future__ import annotations
@@ -11,6 +10,7 @@ import base64
 import logging
 import os
 import stat
+import uuid
 from dataclasses import dataclass
 
 from app.config import get_settings
@@ -285,3 +285,141 @@ async def _wait_for_ssh(
         except Exception:
             pass
     raise TimeoutError(f"Builder VM SSH 도달 불가: {host} ({timeout_seconds}초 초과)")
+
+
+# ---------------------------------------------------------------------------
+# Ephemeral Builder VM — 빌드마다 새로 생성·삭제
+# ---------------------------------------------------------------------------
+
+_EPHEMERAL_CLOUD_INIT = """\
+#!/bin/bash
+set -e
+apt-get update -qq
+apt-get install -y --no-install-recommends nfs-common ceph-common
+"""
+
+
+@dataclass
+class EphemeralBuilderVM:
+    server_id: str
+    host: str         # FIP 주소 (SSH 접속용)
+    username: str
+    key_path: str
+    internal_ip: str  # Fixed IP (NFS access rule 등록용)
+    fip_id: str       # FIP ID (삭제용)
+
+
+def _short_id() -> str:
+    return uuid.uuid4().hex[:8]
+
+
+def _extract_fixed_ip(server) -> str | None:
+    """서버 addresses에서 Fixed(internal) IP를 추출한다."""
+    for network_addrs in (server.addresses or {}).values():
+        for addr in network_addrs:
+            if addr.get("OS-EXT-IPS:type") == "fixed":
+                return addr["addr"]
+    return None
+
+
+async def _allocate_new_fip(svc_conn, server_id: str, floating_network_id: str) -> tuple[str, str]:
+    """FIP를 새로 생성해 서버에 붙이고 (addr, fip_id)를 반환한다."""
+    fip = await asyncio.to_thread(
+        svc_conn.network.create_ip,
+        floating_network_id=floating_network_id,
+    )
+    await asyncio.to_thread(
+        svc_conn.compute.add_floating_ip_to_server,
+        server_id,
+        fip.floating_ip_address,
+    )
+    _logger.info(
+        "[ephemeral_vm] FIP 할당: %s → %s (fip_id=%s)",
+        server_id,
+        fip.floating_ip_address,
+        fip.id,
+    )
+    return fip.floating_ip_address, fip.id
+
+
+async def create_ephemeral_vm(svc_conn) -> EphemeralBuilderVM:
+    """service 프로젝트에 임시 Builder VM을 생성하고 SSH 도달 상태를 확인해 반환한다.
+
+    cloud-init으로 nfs-common과 ceph-common을 설치한 뒤 SSH 연결이 확인되면 반환한다.
+    VM은 호출자가 사용 후 delete_ephemeral_vm()으로 정리해야 한다.
+    """
+    settings = get_settings()
+
+    image_id = settings.builder_image_id
+    flavor_id = settings.builder_flavor_id
+    network_id = settings.builder_network_id or settings.default_network_id
+
+    if not image_id or not flavor_id:
+        raise RuntimeError(
+            "Ephemeral Builder VM 설정이 없습니다 (config.toml [builder] image_id, flavor_id 필요)"
+        )
+    if not settings.builder_floating_network_id:
+        raise RuntimeError(
+            "config.toml [builder] floating_network_id가 필요합니다 (ephemeral VM SSH 접속용)"
+        )
+
+    keypair_name = await _ensure_keypair(svc_conn, settings.builder_ssh_key_path)
+    userdata_b64 = base64.b64encode(_EPHEMERAL_CLOUD_INIT.encode()).decode()
+
+    vm_name = f"afterglow-builder-{_short_id()}"
+    server = await asyncio.to_thread(
+        svc_conn.compute.create_server,
+        name=vm_name,
+        image_id=image_id,
+        flavor_id=flavor_id,
+        networks=[{"uuid": network_id}],
+        user_data=userdata_b64,
+        key_name=keypair_name,
+        metadata={"union_type": "ephemeral-builder", "afterglow_managed": "true"},
+    )
+    server_id = server.id
+    _logger.info("[ephemeral_vm] VM 생성 중: %s (%s)", vm_name, server_id)
+
+    await _wait_for_active(svc_conn, server_id)
+    server = await asyncio.to_thread(svc_conn.compute.get_server, server_id)
+
+    internal_ip = _extract_fixed_ip(server)
+    if not internal_ip:
+        raise RuntimeError(f"Ephemeral Builder VM {server_id}: internal IP를 찾을 수 없습니다")
+
+    fip_addr, fip_id = await _allocate_new_fip(
+        svc_conn, server_id, settings.builder_floating_network_id
+    )
+
+    await _wait_for_ssh(fip_addr, settings.builder_ssh_key_path, settings.builder_ssh_user)
+
+    _logger.info(
+        "[ephemeral_vm] VM 준비 완료: server_id=%s, fip=%s, internal_ip=%s",
+        server_id,
+        fip_addr,
+        internal_ip,
+    )
+    return EphemeralBuilderVM(
+        server_id=server_id,
+        host=fip_addr,
+        username=settings.builder_ssh_user,
+        key_path=settings.builder_ssh_key_path,
+        internal_ip=internal_ip,
+        fip_id=fip_id,
+    )
+
+
+async def delete_ephemeral_vm(svc_conn, server_id: str, fip_id: str | None) -> None:
+    """임시 Builder VM과 FIP를 정리한다. 각 단계는 best-effort로 처리한다."""
+    if fip_id:
+        try:
+            await asyncio.to_thread(svc_conn.network.delete_ip, fip_id)
+            _logger.info("[ephemeral_vm] FIP 반납: %s", fip_id)
+        except Exception:
+            _logger.warning("[ephemeral_vm] FIP 반납 실패: %s", fip_id, exc_info=True)
+
+    try:
+        await asyncio.to_thread(svc_conn.compute.delete_server, server_id)
+        _logger.info("[ephemeral_vm] VM 삭제: %s", server_id)
+    except Exception:
+        _logger.warning("[ephemeral_vm] VM 삭제 실패: %s", server_id, exc_info=True)
