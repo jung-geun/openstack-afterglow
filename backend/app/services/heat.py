@@ -1,15 +1,28 @@
-"""Heat 오케스트레이션 서비스 — Magnum K8s 클러스터 스택 추적용."""
+"""Heat 오케스트레이션 서비스 — Magnum K8s 클러스터 스택 추적 및 ephemeral 스택 관리."""
 
 from __future__ import annotations
 
+import logging
+import time
+from pathlib import Path
 from typing import TYPE_CHECKING
+
+from jinja2 import Environment, FileSystemLoader
 
 if TYPE_CHECKING:
     import openstack
 
+_logger = logging.getLogger(__name__)
+
+_TEMPLATES_DIR = Path(__file__).parent.parent / "templates" / "heat"
+
 
 class HeatServiceUnavailable(Exception):
     """Heat 서비스가 배포되지 않았거나 접근할 수 없을 때 발생."""
+
+
+class HeatStackError(RuntimeError):
+    """Heat stack 생성/삭제 중 오류."""
 
 
 def _get_stack(conn: openstack.connection.Connection, stack_id: str):
@@ -93,3 +106,77 @@ def list_stack_events(conn: openstack.connection.Connection, stack_id: str) -> l
         raise
     except Exception as e:
         raise HeatServiceUnavailable(f"이벤트 목록 조회 실패: {e}") from e
+
+
+# ---------------------------------------------------------------------------
+# Ephemeral stack 생성 / 대기 / 삭제 (Phase 1 smoke-mount-heat)
+# ---------------------------------------------------------------------------
+
+
+def render_template(template_name: str, variables: dict) -> str:
+    """Jinja2 로 Heat HOT 템플릿을 렌더링한다."""
+    env = Environment(loader=FileSystemLoader(str(_TEMPLATES_DIR)), autoescape=False)
+    return env.get_template(template_name).render(**variables)
+
+
+def create_stack(
+    conn: openstack.connection.Connection,
+    stack_name: str,
+    template_str: str,
+    parameters: dict,
+) -> str:
+    """Heat stack 을 생성하고 stack_id 를 반환한다."""
+    try:
+        stack = conn.orchestration.create_stack(
+            name=stack_name,
+            template=template_str,
+            parameters=parameters,
+        )
+        _logger.info("[heat] stack 생성 중: %s (%s)", stack_name, stack.id)
+        return stack.id
+    except Exception as e:
+        err = str(e).lower()
+        if "endpoint" in err or "503" in err:
+            raise HeatServiceUnavailable(f"Heat 서비스에 접근할 수 없습니다: {e}") from e
+        raise HeatStackError(f"stack 생성 실패: {e}") from e
+
+
+def wait_for_stack_complete(
+    conn: openstack.connection.Connection,
+    stack_id: str,
+    timeout: int = 600,
+    poll_interval: int = 5,
+) -> dict:
+    """stack 이 CREATE_COMPLETE 될 때까지 폴링하고 outputs dict 를 반환한다."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            stack = conn.orchestration.get_stack(stack_id)
+        except Exception as e:
+            raise HeatStackError(f"stack 조회 실패: {e}") from e
+
+        status = getattr(stack, "status", "") or ""
+        _logger.debug("[heat] stack %s 상태: %s", stack_id, status)
+
+        if status == "CREATE_COMPLETE":
+            outputs = {}
+            for item in getattr(stack, "outputs", []) or []:
+                outputs[item.get("output_key", "")] = item.get("output_value", "")
+            return outputs
+
+        if "FAILED" in status:
+            reason = getattr(stack, "status_reason", "") or ""
+            raise HeatStackError(f"stack {stack_id} 실패: {status} — {reason}")
+
+        time.sleep(poll_interval)
+
+    raise HeatStackError(f"stack {stack_id} 완료 대기 시간 초과 ({timeout}s)")
+
+
+def delete_stack(conn: openstack.connection.Connection, stack_id: str) -> None:
+    """Heat stack 을 삭제한다. 오류는 경고로 기록하고 best-effort 로 처리한다."""
+    try:
+        conn.orchestration.delete_stack(stack_id)
+        _logger.info("[heat] stack 삭제 요청: %s", stack_id)
+    except Exception as e:
+        _logger.warning("[heat] stack 삭제 실패 (dangling 가능): %s — %s", stack_id, e)

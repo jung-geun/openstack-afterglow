@@ -393,6 +393,211 @@ async def smoke_test_ephemeral_mount(req: SmokeMountRequest) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Heat stack 기반 smoke-mount (Phase 1 PoC)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/builder-vm/_smoke-mount-heat", status_code=200, dependencies=[Depends(require_admin)])
+async def smoke_test_mount_heat(req: SmokeMountRequest) -> dict:
+    """Heat HOT stack 으로 VM + FIP 선언 → Manila share/access rule Python 처리 → 마운트 검증."""
+    import uuid
+
+    from app.config import get_settings
+    from app.services import builder_vm as bvm
+    from app.services import ephemeral_mount as emount
+    from app.services import heat as heat_svc
+
+    proto = req.share_proto.upper()
+    if proto not in ("NFS", "CEPHFS"):
+        raise HTTPException(status_code=400, detail="share_proto는 NFS 또는 CEPHFS여야 합니다")
+
+    settings = get_settings()
+    svc_conn = await asyncio.to_thread(get_service_project_connection)
+    stack_id: str | None = None
+    share_id: str | None = None
+    access_rule: dict | None = None
+
+    try:
+        keypair_name = await bvm._ensure_ephemeral_keypair(svc_conn, settings.builder_ssh_key_path)
+
+        share_name = f"smoke-heat-{uuid.uuid4().hex[:8]}"
+        share_id = await emount.create_builder_share(svc_conn, share_name, req.size_gb, proto)
+
+        vm_name = f"afterglow-builder-{uuid.uuid4().hex[:8]}"
+        template_str = await asyncio.to_thread(heat_svc.render_template, "builder_smoke.yaml.j2", {})
+        parameters = {
+            "image_id": settings.builder_image_id,
+            "flavor_id": settings.builder_flavor_id,
+            "network_id": settings.builder_network_id or settings.default_network_id,
+            "keypair_name": keypair_name,
+            "user_data": bvm._EPHEMERAL_CLOUD_INIT,
+            "vm_name": vm_name,
+            "floating_network_id": settings.builder_floating_network_id or "",
+        }
+        stack_name = f"afterglow-smoke-{uuid.uuid4().hex[:8]}"
+        stack_id = await asyncio.to_thread(
+            heat_svc.create_stack, svc_conn, stack_name, template_str, parameters
+        )
+
+        outputs = await asyncio.to_thread(heat_svc.wait_for_stack_complete, svc_conn, stack_id)
+        internal_ip = outputs.get("internal_ip", "")
+        ssh_host = outputs.get("ssh_host", internal_ip)
+        server_id = outputs.get("server_id", "")
+
+        if not internal_ip:
+            raise RuntimeError("Heat stack outputs 에서 internal_ip 를 찾을 수 없습니다")
+
+        await bvm._wait_for_ssh(ssh_host, settings.builder_ssh_key_path, settings.builder_ssh_user)
+        await bvm._wait_for_cloud_init(ssh_host, settings.builder_ssh_key_path, settings.builder_ssh_user)
+
+        access_rule = await emount.add_vm_access_rule(svc_conn, share_id, internal_ip, proto)
+
+        vm = bvm.EphemeralBuilderVM(
+            server_id=server_id,
+            host=ssh_host,
+            username=settings.builder_ssh_user,
+            key_path=settings.builder_ssh_key_path,
+            internal_ip=internal_ip,
+            fip_id=outputs.get("fip_id") or None,
+        )
+        mount_cmd = await emount.build_mount_command(svc_conn, share_id, proto, access_rule)
+        result = await emount.verify_mount_via_ssh(vm, mount_cmd)
+
+        if not result["mounted"]:
+            raise HTTPException(status_code=500, detail=f"마운트 검증 실패: {result.get('error')}")
+
+        return {
+            "status": "ok",
+            "tool": "heat",
+            "share_proto": proto,
+            "share_id": share_id,
+            "server_id": server_id,
+            "internal_ip": internal_ip,
+            "df_output": result["df_output"],
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    finally:
+        cleanup_conn = await asyncio.to_thread(get_service_project_connection)
+        if share_id and access_rule:
+            try:
+                await asyncio.to_thread(
+                    manila.revoke_access_rule, cleanup_conn, share_id, access_rule["access_id"]
+                )
+            except Exception:
+                _logger.warning("[smoke-mount-heat] access rule revoke 실패", exc_info=True)
+        if share_id:
+            try:
+                await asyncio.to_thread(manila.delete_file_storage, cleanup_conn, share_id)
+            except Exception:
+                _logger.warning("[smoke-mount-heat] share 삭제 실패", exc_info=True)
+        if stack_id:
+            await asyncio.to_thread(heat_svc.delete_stack, cleanup_conn, stack_id)
+
+
+# ---------------------------------------------------------------------------
+# OpenTofu 기반 smoke-mount (Phase 1 PoC)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/builder-vm/_smoke-mount-tofu", status_code=200, dependencies=[Depends(require_admin)])
+async def smoke_test_mount_tofu(req: SmokeMountRequest) -> dict:
+    """OpenTofu 로 VM + FIP + Manila share + access rule 선언 → SSH 마운트 검증."""
+    import base64
+    import uuid
+
+    from app.config import get_settings
+    from app.services import builder_vm as bvm
+    from app.services import ephemeral_mount as emount
+    from app.services import tofu_runner
+
+    proto = req.share_proto.upper()
+    if proto not in ("NFS", "CEPHFS"):
+        raise HTTPException(status_code=400, detail="share_proto는 NFS 또는 CEPHFS여야 합니다")
+
+    settings = get_settings()
+    svc_conn = await asyncio.to_thread(get_service_project_connection)
+    workdir = None
+
+    try:
+        keypair_name = await bvm._ensure_ephemeral_keypair(svc_conn, settings.builder_ssh_key_path)
+
+        vm_name = f"afterglow-builder-{uuid.uuid4().hex[:8]}"
+        share_name = f"smoke-tofu-{uuid.uuid4().hex[:8]}"
+        userdata_b64 = base64.b64encode(bvm._EPHEMERAL_CLOUD_INIT.encode()).decode()
+
+        variables = {
+            "vm_name": vm_name,
+            "image_id": settings.builder_image_id,
+            "flavor_id": settings.builder_flavor_id,
+            "network_id": settings.builder_network_id or settings.default_network_id,
+            "keypair_name": keypair_name,
+            "user_data_b64": userdata_b64,
+            "floating_network_id": settings.builder_floating_network_id or "",
+            "share_name": share_name,
+            "share_proto": proto,
+            "size_gb": req.size_gb,
+            "share_type": (
+                settings.os_manila_nfs_share_type if proto == "NFS" else settings.os_manila_share_type
+            ),
+            "share_network_id": settings.os_manila_share_network_id if proto == "NFS" else "",
+        }
+
+        workdir, outputs = await tofu_runner.apply("builder_smoke", variables, svc_conn)
+
+        internal_ip = outputs.get("internal_ip", "")
+        ssh_host = outputs.get("ssh_host", internal_ip)
+        share_id = outputs.get("share_id", "")
+        access_key = outputs.get("access_key", "")
+        server_id = outputs.get("server_id", "")
+
+        if not internal_ip or not share_id:
+            raise RuntimeError("tofu outputs 에서 internal_ip 또는 share_id 를 찾을 수 없습니다")
+
+        vm = bvm.EphemeralBuilderVM(
+            server_id=server_id,
+            host=ssh_host,
+            username=settings.builder_ssh_user,
+            key_path=settings.builder_ssh_key_path,
+            internal_ip=internal_ip,
+            fip_id=outputs.get("fip_id") or None,
+        )
+
+        await bvm._wait_for_ssh(ssh_host, settings.builder_ssh_key_path, settings.builder_ssh_user)
+        await bvm._wait_for_cloud_init(ssh_host, settings.builder_ssh_key_path, settings.builder_ssh_user)
+
+        access_rule_info = {"access_to": f"builder-{vm_name}", "access_key": access_key}
+        mount_cmd = await emount.build_mount_command(svc_conn, share_id, proto, access_rule_info)
+        result = await emount.verify_mount_via_ssh(vm, mount_cmd)
+
+        if not result["mounted"]:
+            raise HTTPException(status_code=500, detail=f"마운트 검증 실패: {result.get('error')}")
+
+        return {
+            "status": "ok",
+            "tool": "tofu",
+            "share_proto": proto,
+            "share_id": share_id,
+            "server_id": server_id,
+            "internal_ip": internal_ip,
+            "df_output": result["df_output"],
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    finally:
+        if workdir is not None:
+            cleanup_conn = await asyncio.to_thread(get_service_project_connection)
+            try:
+                await tofu_runner.destroy(workdir, cleanup_conn)
+            except Exception:
+                _logger.warning("[smoke-mount-tofu] tofu destroy 실패", exc_info=True)
+
+
+# ---------------------------------------------------------------------------
 # NFS 크로스 프로젝트 access rule 관리 (§3.3)
 # ---------------------------------------------------------------------------
 

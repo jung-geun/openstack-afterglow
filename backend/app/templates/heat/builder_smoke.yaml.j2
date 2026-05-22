@@ -1,0 +1,86 @@
+heat_template_version: 2021-04-16
+description: >
+  Afterglow ephemeral builder VM — smoke-mount PoC (Phase 1).
+  Nova server + 조건부 FIP 를 Heat stack 으로 선언한다.
+  Manila share/access rule 은 Python 레이어에서 별도 처리한다.
+
+parameters:
+  image_id:
+    type: string
+    description: Nova 서버 이미지 UUID
+  flavor_id:
+    type: string
+    description: Nova 서버 Flavor UUID
+  network_id:
+    type: string
+    description: 서버를 연결할 내부 네트워크 UUID
+  keypair_name:
+    type: string
+    description: SSH 키페어 이름
+  user_data:
+    type: string
+    description: cloud-init 스크립트 (평문)
+  vm_name:
+    type: string
+    description: 서버 이름 (afterglow-builder-<id>)
+  floating_network_id:
+    type: string
+    default: ""
+    description: FIP 를 할당할 외부 네트워크 UUID. 비워두면 FIP 미생성.
+
+conditions:
+  use_fip: {not: {equals: [{get_param: floating_network_id}, ""]}}
+
+resources:
+  vm:
+    type: OS::Nova::Server
+    properties:
+      name: {get_param: vm_name}
+      image: {get_param: image_id}
+      flavor: {get_param: flavor_id}
+      key_name: {get_param: keypair_name}
+      user_data_format: RAW
+      user_data: {get_param: user_data}
+      networks:
+        - network: {get_param: network_id}
+      metadata:
+        union_type: ephemeral-builder
+        afterglow_managed: "true"
+
+  fip:
+    type: OS::Neutron::FloatingIP
+    condition: use_fip
+    properties:
+      floating_network: {get_param: floating_network_id}
+
+  fip_assoc:
+    type: OS::Neutron::FloatingIPAssociation
+    condition: use_fip
+    properties:
+      floatingip_id: {get_resource: fip}
+      port_id: {get_attr: [vm, addresses, {get_param: network_id}, 0, port]}
+
+outputs:
+  server_id:
+    description: Nova 서버 UUID
+    value: {get_resource: vm}
+
+  internal_ip:
+    description: 서버 내부 Fixed IP (Manila access rule 등록용)
+    value: {get_attr: [vm, first_address]}
+
+  ssh_host:
+    description: SSH 접속 주소 (FIP 또는 Fixed IP)
+    value:
+      if:
+        - use_fip
+        - {get_attr: [fip, floating_ip_address]}
+        - {get_attr: [vm, first_address]}
+
+  fip_id:
+    description: FIP UUID (정리용)
+    value:
+      if:
+        - use_fip
+        - {get_resource: fip}
+        - ""

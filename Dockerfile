@@ -38,12 +38,21 @@ COPY --from=backend-builder /app/.venv /app/.venv
 
 COPY backend/pyproject.toml backend/uv.lock ./
 COPY backend/app/ ./app/
+COPY backend/tofu/ ./tofu/
 
 # .pyc 직접 사용으로 cold start 가속
 RUN python -m compileall -q app/
 
-# apt 캐시/목록 제거 + 불필요 파일 정리로 레이어 최소화
-RUN rm -rf /var/lib/apt/lists/* /tmp/* /root/.cache
+# OpenTofu CLI 설치 (MPL-2.0, ~80MB)
+ARG TOFU_VERSION=1.8.3
+RUN apt-get update && apt-get install -y --no-install-recommends curl unzip \
+    && curl -fsSL "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.zip" -o /tmp/tofu.zip \
+    && unzip /tmp/tofu.zip tofu -d /usr/local/bin/ \
+    && rm /tmp/tofu.zip \
+    && apt-get purge -y --auto-remove curl unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN rm -rf /tmp/* /root/.cache
 
 RUN adduser --disabled-password --gecos "" appuser \
     && chown -R appuser:appuser /app
