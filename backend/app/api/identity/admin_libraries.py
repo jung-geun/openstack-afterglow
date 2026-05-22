@@ -310,6 +310,89 @@ async def smoke_test_ephemeral_vm() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Ephemeral Builder VM + Manila 마운트 검증 스모크 테스트
+# ---------------------------------------------------------------------------
+
+
+class SmokeMountRequest(BaseModel):
+    share_proto: str = "NFS"  # "NFS" | "CEPHFS"
+    size_gb: int = 1
+
+
+@router.post("/builder-vm/_smoke-mount", status_code=200, dependencies=[Depends(require_admin)])
+async def smoke_test_ephemeral_mount(req: SmokeMountRequest) -> dict:
+    """임시 Builder VM 생성 → Manila share 생성 → 마운트 검증 → 전체 정리.
+
+    share_proto=NFS (기본) 또는 CEPHFS를 선택해 실제 마운트까지 검증한다.
+    """
+    import uuid
+
+    from app.services import builder_vm as bvm
+    from app.services import ephemeral_mount as emount
+
+    proto = req.share_proto.upper()
+    if proto not in ("NFS", "CEPHFS"):
+        raise HTTPException(status_code=400, detail="share_proto는 NFS 또는 CEPHFS여야 합니다")
+
+    svc_conn = await asyncio.to_thread(get_service_project_connection)
+    vm: bvm.EphemeralBuilderVM | None = None
+    share_id: str | None = None
+    access_rule: dict | None = None
+
+    try:
+        vm = await bvm.create_ephemeral_vm(svc_conn)
+
+        share_name = f"smoke-mount-{uuid.uuid4().hex[:8]}"
+        share_id = await emount.create_builder_share(svc_conn, share_name, req.size_gb, proto)
+
+        access_rule = await emount.add_vm_access_rule(
+            svc_conn, share_id, vm.internal_ip, proto
+        )
+
+        mount_cmd = await emount.build_mount_command(svc_conn, share_id, proto, access_rule)
+
+        result = await emount.verify_mount_via_ssh(vm, mount_cmd)
+
+        if not result["mounted"]:
+            raise HTTPException(
+                status_code=500,
+                detail=f"마운트 검증 실패: {result.get('error')}",
+            )
+
+        return {
+            "status": "ok",
+            "share_proto": proto,
+            "share_id": share_id,
+            "server_id": vm.server_id,
+            "internal_ip": vm.internal_ip,
+            "df_output": result["df_output"],
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    finally:
+        cleanup_conn = await asyncio.to_thread(get_service_project_connection)
+        if share_id and access_rule:
+            try:
+                await asyncio.to_thread(
+                    manila.revoke_access_rule,
+                    cleanup_conn,
+                    share_id,
+                    access_rule["access_id"],
+                )
+            except Exception:
+                _logger.warning("[smoke-mount] access rule revoke 실패", exc_info=True)
+        if share_id:
+            try:
+                await asyncio.to_thread(manila.delete_file_storage, cleanup_conn, share_id)
+            except Exception:
+                _logger.warning("[smoke-mount] share 삭제 실패", exc_info=True)
+        if vm is not None:
+            await bvm.delete_ephemeral_vm(cleanup_conn, vm.server_id, vm.fip_id)
+
+
+# ---------------------------------------------------------------------------
 # NFS 크로스 프로젝트 access rule 관리 (§3.3)
 # ---------------------------------------------------------------------------
 
