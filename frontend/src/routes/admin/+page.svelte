@@ -20,6 +20,15 @@
 		href: string;
 	}
 
+	interface IdentitySummary {
+		user_count: number;
+		project_count: number;
+		role_count: number;
+		group_count: number;
+		partial?: boolean;
+		partial_reasons?: string[];
+	}
+
 	let overview = $state<Overview | null>(null);
 	let overviewLoading = $state(true);
 	let error = $state('');
@@ -29,6 +38,7 @@
 	let versionOpen = $state(false);
 	let selectedProject = $state<ProjectUsage | null>(null);
 	let notifications = $state<Notification[]>([]);
+	let identitySummary = $state<IdentitySummary | null>(null);
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
@@ -63,6 +73,10 @@
 
 		api.get<Notification[]>('/api/admin/notifications', token, projectId)
 			.then(r => { notifications = r; })
+			.catch(() => {});
+
+		api.get<IdentitySummary>('/api/admin/identity/summary', token, projectId)
+			.then(r => { identitySummary = r; })
 			.catch(() => {});
 	});
 </script>
@@ -130,6 +144,54 @@
 		<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 animate-pulse h-[260px]"></div>
 	{:else if overview}
 		<KpiCardRow {overview} />
+
+		<!-- Identity 통계: 사용자/프로젝트/역할/그룹 -->
+		{#if identitySummary}
+			<div class="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+				<StatTile label="사용자" value={identitySummary.user_count} unit="명" accent="amber">
+					{#snippet icon()}
+						<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+							<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/>
+						</svg>
+					{/snippet}
+				</StatTile>
+				<StatTile label="프로젝트" value={identitySummary.project_count} unit="활성" accent="blue">
+					{#snippet icon()}
+						<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+							<path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+						</svg>
+					{/snippet}
+				</StatTile>
+				<StatTile label="역할" value={identitySummary.role_count} unit="정의됨" accent="violet">
+					{#snippet icon()}
+						<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+							<path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+						</svg>
+					{/snippet}
+				</StatTile>
+				<StatTile label="그룹" value={identitySummary.group_count} unit="그룹" accent="cyan">
+					{#snippet icon()}
+						<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+							<path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
+							<circle cx="9" cy="7" r="4"/>
+							<path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/>
+						</svg>
+					{/snippet}
+				</StatTile>
+			</div>
+
+			{#if identitySummary.partial && identitySummary.partial_reasons && identitySummary.partial_reasons.length > 0}
+				<div class="flex items-center gap-2.5 px-4 py-2.5 rounded-xl border text-xs"
+				     style="background: color-mix(in oklab, var(--color-state-warning) 10%, transparent); border-color: color-mix(in oklab, var(--color-state-warning) 30%, transparent); color: var(--color-state-warning);">
+					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0">
+						<path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+						<line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+					</svg>
+					<span>일부 정보 미완 — {identitySummary.partial_reasons.map(r => r.includes('insufficient_privileges') ? r.split(':')[0] + ' 권한 부족 (system-scope 필요)' : r).join(', ')}</span>
+				</div>
+			{/if}
+		{/if}
+
 		<ResourceDonutsCard {overview} />
 
 		<div class="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-3.5">
