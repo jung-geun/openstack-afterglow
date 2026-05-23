@@ -1143,9 +1143,11 @@ async def get_identity_summary(
         s = str(exc).lower()
         if "403" in s or "forbidden" in s:
             return "insufficient_privileges"
+        if "401" in s or "unauthorized" in s:
+            return "unauthorized"
         if "connection" in s or "timeout" in s:
             return "connection_error"
-        return "unknown"
+        return f"error:{type(exc).__name__}"
 
     def _collect():
         partial = False
@@ -1166,7 +1168,7 @@ async def get_identity_summary(
             partial_reasons.append(f"projects:{_classify_exc(exc)}")
         roles: list = []
         try:
-            roles = list(conn.identity.roles(limit=200))
+            roles = list(conn.identity.roles())
         except Exception as exc:
             _logger.warning("identity summary partial: roles failed: %s", exc, exc_info=True)
             partial = True
