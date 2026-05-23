@@ -58,11 +58,11 @@
 	}
 </script>
 
-<div class="min-h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-white">
+<div class="min-h-screen bg-gray-950 text-white">
 	<!-- 상단 알림 바 -->
-	<div class="border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+	<div class="border-b border-gray-800 bg-[#0B1220]">
 		<div class="max-w-6xl mx-auto px-6 py-3 flex items-center justify-between gap-4">
-			<div class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+			<div class="flex items-center gap-2 text-sm text-gray-400">
 				<svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
 				</svg>
@@ -70,7 +70,7 @@
 			</div>
 			<button
 				onclick={logout}
-				class="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
+				class="text-sm text-gray-500 hover:text-white transition-colors"
 			>
 				로그아웃
 			</button>
@@ -79,16 +79,16 @@
 
 	<!-- 본문 -->
 	<div class="max-w-6xl mx-auto px-6 py-10">
-		<h1 class="text-xl font-semibold text-gray-900 dark:text-white mb-6">최근 프로젝트 선택</h1>
+		<h1 class="text-lg font-semibold text-white mb-6">최근 프로젝트 선택</h1>
 
 		{#if loading}
 			<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
 				{#each [1, 2, 3, 4, 5] as _}
-					<div class="h-28 bg-gray-100 dark:bg-gray-800 rounded-xl animate-pulse"></div>
+					<div class="h-28 bg-gray-800 rounded-xl animate-pulse"></div>
 				{/each}
 			</div>
 		{:else if error}
-			<div class="text-red-500 text-sm">{error}</div>
+			<div class="text-red-400 text-sm">{error}</div>
 		{:else if projects.length === 0}
 			<div class="text-gray-500 text-sm text-center py-16">접근 가능한 프로젝트가 없습니다.</div>
 		{:else}
@@ -96,13 +96,13 @@
 				{#each projects as proj (proj.id)}
 					<button
 						onclick={() => selectProject(proj)}
-						class="text-left border border-gray-200 dark:border-gray-700 rounded-xl p-5 bg-white dark:bg-gray-900 hover:border-blue-400 dark:hover:border-blue-500 hover:shadow-sm transition-all cursor-pointer"
+						class="text-left border border-gray-700 rounded-xl p-5 bg-gray-900 hover:border-blue-500 hover:bg-gray-800 transition-all cursor-pointer"
 					>
-						<div class="font-medium text-gray-900 dark:text-white mb-3 truncate">{proj.name}</div>
-						<div class="space-y-1 text-[13px] text-gray-500 dark:text-gray-400">
+						<div class="font-medium text-white mb-3 truncate">{proj.name}</div>
+						<div class="space-y-1 text-[13px] text-gray-400">
 							<div class="flex gap-1.5">
 								<span class="shrink-0">프로젝트 ID:</span>
-								<span class="truncate font-mono text-gray-600 dark:text-gray-300">{proj.id}</span>
+								<span class="truncate font-mono text-gray-300">{proj.id}</span>
 							</div>
 							<div class="flex gap-1.5">
 								<span class="shrink-0">조직:</span>
