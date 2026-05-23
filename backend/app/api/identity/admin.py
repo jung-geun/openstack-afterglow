@@ -1152,41 +1152,6 @@ async def create_port(
         raise HTTPException(status_code=400, detail="포트 생성 실패")
 
 
-@router.get("/quotas/{project_id}", dependencies=[Depends(require_admin)])
-async def get_quotas(project_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
-    """특정 프로젝트의 쿼터 조회 (Compute + Volume, 실제 사용량 포함)."""
-    try:
-
-        def _get():
-            result: dict = {"compute": {}, "volume": {}}
-            compute_endpoint = conn.compute.get_endpoint()
-            bs_endpoint = conn.block_storage.get_endpoint()
-            try:
-                cq = conn.session.get(f"{compute_endpoint}/os-quota-sets/{project_id}/detail")
-                qs = cq.json().get("quota_set", {})
-                for key in ("instances", "cores", "ram"):
-                    q = qs.get(key, {})
-                    result["compute"][key] = {"limit": q.get("limit", 0), "in_use": q.get("in_use", 0)}
-            except Exception:
-                result["compute"] = {}
-            try:
-                bq = conn.session.get(f"{bs_endpoint}/os-quota-sets/{project_id}", params={"usage": "true"})
-                bqs = bq.json().get("quota_set", {})
-                for key in ("volumes", "gigabytes"):
-                    q = bqs.get(key, {})
-                    if isinstance(q, dict):
-                        result["volume"][key] = {"limit": q.get("limit", 0), "in_use": q.get("in_use", 0)}
-                    else:
-                        result["volume"][key] = {"limit": q, "in_use": 0}
-            except Exception:
-                result["volume"] = {}
-            return result
-
-        return await asyncio.to_thread(_get)
-    except Exception:
-        raise HTTPException(status_code=500, detail="쿼터 조회 실패")
-
-
 @router.get("/overview/projects", dependencies=[Depends(require_admin)])
 async def admin_overview_projects(
     conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)
