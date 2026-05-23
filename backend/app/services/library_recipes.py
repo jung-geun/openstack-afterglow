@@ -31,7 +31,7 @@ async def get_recipe(library_id: str, version: int | None = None):
 
 
 async def seed_default_recipes() -> None:
-    """_INSTALL_SCRIPTS 기반 기본 레시피를 DB에 없으면 삽입한다."""
+    """기본 라이브러리 레시피를 DB에 없으면 삽입한다."""
     from app.database import get_session_factory
     from app.models.db import LibraryRecipe
 
