@@ -210,6 +210,31 @@ class NotionConfig(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
 
 
+class LibraryRecipe(Base):
+    """라이브러리별 빌드 레시피 — cloud-init ephemeral 빌드에 사용."""
+
+    __tablename__ = "library_recipes"
+
+    id: Mapped[int] = mapped_column(INT, primary_key=True, autoincrement=True)
+    library_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, index=True)
+    version: Mapped[int] = mapped_column(INT, nullable=False, default=1)
+
+    # [{step: str, progress_pct: int, script: str}]
+    commands: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    apt_packages: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    pip_packages: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
+    base_image_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    share_size_gb: Mapped[int] = mapped_column(INT, nullable=False, default=20)
+    share_proto: Mapped[str] = mapped_column(VARCHAR(10), nullable=False, default="NFS")
+    cloud_init_template_version: Mapped[int] = mapped_column(INT, nullable=False, default=1)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+    __table_args__ = (Index("idx_library_recipes_lib_ver", "library_id", "version", unique=True),)
+
+
 class LibraryBuild(Base):
     """라이브러리 사전빌드 작업 추적 — Manila share + 빌더 VM 상태를 DB에 기록."""
 
@@ -219,6 +244,14 @@ class LibraryBuild(Base):
     library_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, index=True)
     file_storage_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
     server_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+
+    # ephemeral 빌드 추가 필드
+    recipe_id: Mapped[int | None] = mapped_column(INT, nullable=True)
+    port_id: Mapped[str | None] = mapped_column(VARCHAR(64), nullable=True)
+    build_token: Mapped[str | None] = mapped_column(CHAR(32), nullable=True, unique=True)
+    console_log_excerpt: Mapped[str | None] = mapped_column(TEXT, nullable=True)
+    # queued/booting/installing/finalizing/success/failure/indeterminate
+    cloud_init_status: Mapped[str | None] = mapped_column(VARCHAR(20), nullable=True)
 
     # 상태: pending, creating_share, creating_access, creating_vm, building, verifying, cleanup, complete, error, timeout
     status: Mapped[str] = mapped_column(VARCHAR(32), nullable=False, default="pending")

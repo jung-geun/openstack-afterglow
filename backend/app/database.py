@@ -275,6 +275,20 @@ async def create_tables() -> None:
         except Exception:
             pass
 
+        # library_builds 에 ephemeral 빌드 컬럼 추가 (없는 경우에만)
+        for _col_sql in [
+            "ALTER TABLE library_builds ADD COLUMN recipe_id INT DEFAULT NULL",
+            "ALTER TABLE library_builds ADD COLUMN port_id VARCHAR(64) DEFAULT NULL",
+            "ALTER TABLE library_builds ADD COLUMN build_token CHAR(32) DEFAULT NULL",
+            "ALTER TABLE library_builds ADD UNIQUE KEY uq_library_builds_token (build_token)",
+            "ALTER TABLE library_builds ADD COLUMN console_log_excerpt TEXT DEFAULT NULL",
+            "ALTER TABLE library_builds ADD COLUMN cloud_init_status VARCHAR(20) DEFAULT NULL",
+        ]:
+            try:
+                await conn.exec_driver_sql(_col_sql)
+            except Exception:
+                pass  # 이미 존재하면 무시
+
     _logger.info("데이터베이스 테이블 생성/확인 완료")
 
 

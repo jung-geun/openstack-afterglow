@@ -101,8 +101,10 @@ def create_server(
     return _server_to_info(s)
 
 
-def get_console_output(conn: openstack.connection.Connection, server_id: str, length: int = 100) -> str:
-    output = conn.compute.get_server_console_output(server_id, length=length)
+def get_console_output(conn: openstack.connection.Connection, server_id: str, length: int | None = 100) -> str:
+    """서버 serial console 출력을 반환한다. length=None 이면 전체 출력."""
+    kwargs: dict = {} if length is None else {"length": length}
+    output = conn.compute.get_server_console_output(server_id, **kwargs)
     return output.get("output", "")
 
 

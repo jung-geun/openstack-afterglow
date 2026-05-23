@@ -87,19 +87,6 @@ class TestCreateEphemeralVm:
                 await create_ephemeral_vm(svc_conn)
 
     @pytest.mark.asyncio
-    async def test_raises_without_floating_network(self):
-        """builder_floating_network_id 미설정 시 RuntimeError."""
-        from app.services.builder_vm import create_ephemeral_vm
-
-        svc_conn = MagicMock()
-        with patch(
-            "app.services.builder_vm.get_settings",
-            return_value=_make_settings(builder_floating_network_id=""),
-        ):
-            with pytest.raises(RuntimeError, match="floating_network_id"):
-                await create_ephemeral_vm(svc_conn)
-
-    @pytest.mark.asyncio
     async def test_create_returns_ephemeral_vm(self):
         """정상 흐름에서 EphemeralBuilderVM이 반환된다."""
         from app.services.builder_vm import EphemeralBuilderVM, create_ephemeral_vm

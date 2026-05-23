@@ -710,6 +710,13 @@ async def _deferred_create_tables() -> None:
             exc_info=True,
         )
 
+    try:
+        from app.services.library_recipes import seed_default_recipes
+
+        await seed_default_recipes()
+    except Exception:
+        _logger.warning("라이브러리 기본 레시피 seed 실패", exc_info=True)
+
 
 @app.on_event("startup")
 async def start_background_workers():

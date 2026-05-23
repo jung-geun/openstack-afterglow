@@ -341,8 +341,8 @@ def test_get_build_queue_status():
 
 
 @pytest.mark.asyncio
-async def test_build_worker_calls_start_build_and_marks_done():
-    """_build_worker()는 큐에서 꺼낸 library_id로 start_build()를 호출한다."""
+async def test_build_worker_calls_start_ephemeral_build_and_marks_done():
+    """_build_worker()는 큐에서 꺼낸 library_id로 start_ephemeral_build()를 호출한다."""
     import asyncio
 
     from app.services import library_builder
@@ -353,14 +353,14 @@ async def test_build_worker_calls_start_build_and_marks_done():
 
     calls: list[str] = []
 
-    async def _fake_start_build(lid: str) -> dict:
+    async def _fake_start_ephemeral(lid: str) -> dict:
         calls.append(lid)
         return {"status": "building", "library_id": lid}
 
     with (
         patch("app.services.library_builder._build_queue", fresh_queue),
         patch("app.services.library_builder._queued_libraries", queued),
-        patch("app.services.library_builder.start_build", side_effect=_fake_start_build),
+        patch("app.services.library_builder.start_ephemeral_build", side_effect=_fake_start_ephemeral),
     ):
         worker_task = asyncio.create_task(library_builder._build_worker())
         await asyncio.wait_for(fresh_queue.join(), timeout=2.0)
