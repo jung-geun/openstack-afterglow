@@ -160,21 +160,21 @@ def _build_ssh_command(
         "set -euo pipefail\n"
         "CEPH_SECRET_FILE=$(mktemp /tmp/ceph.XXXXXX)\n"
         f"printf '%s' '{secret_b64}' | base64 -d > \"$CEPH_SECRET_FILE\"\n"
-        "chmod 600 \"$CEPH_SECRET_FILE\"\n"
+        'chmod 600 "$CEPH_SECRET_FILE"\n'
         "MNT=/mnt/share\n"
-        "mkdir -p \"$MNT\"\n"
+        'mkdir -p "$MNT"\n'
         f"mount -t ceph '{ceph_mons}:{share_path}' \"$MNT\" "
         f"-o 'name={cephx_user}',secretfile=\"$CEPH_SECRET_FILE\"\n"
-        "rm -f \"$CEPH_SECRET_FILE\"\n"
+        'rm -f "$CEPH_SECRET_FILE"\n'
         "echo '[progress] 30 CephFS 마운트 완료'\n"
         "INSTALL_SH=$(mktemp /tmp/install.XXXXXX.sh)\n"
         f"printf '%s' '{install_b64}' | base64 -d > \"$INSTALL_SH\"\n"
-        "bash \"$INSTALL_SH\"\n"
-        "rm -f \"$INSTALL_SH\"\n"
+        'bash "$INSTALL_SH"\n'
+        'rm -f "$INSTALL_SH"\n'
         "echo '[progress] 80 패키지 설치 완료'\n"
-        "touch \"$MNT/.union_build_complete\"\n"
+        'touch "$MNT/.union_build_complete"\n'
         "sync\n"
-        "umount \"$MNT\"\n"
+        'umount "$MNT"\n'
         "echo '[progress] 100 빌드 완료'\n"
     )
 
@@ -362,9 +362,7 @@ async def _ssh_build_task(
         if exit_code != 0:
             error_msg = (stderr[-2000:] if stderr else "") or f"SSH 명령 실패 (exit_code={exit_code})"
             _logger.error("[builder] 빌드 실패 (exit=%d): %s\n%s", exit_code, library_id, error_msg)
-            await asyncio.to_thread(
-                manila.update_share_metadata, conn, share_id, {"union_status": "error"}
-            )
+            await asyncio.to_thread(manila.update_share_metadata, conn, share_id, {"union_status": "error"})
             if build_db_id:
                 await _update_build_db(
                     build_db_id,
@@ -391,9 +389,7 @@ async def _ssh_build_task(
         # RO CephX rule 생성
         ro_user = f"union-ro-{library_id}"
         try:
-            await asyncio.to_thread(
-                manila.create_access_rule, conn, share_id, ro_user, "ro", "cephx"
-            )
+            await asyncio.to_thread(manila.create_access_rule, conn, share_id, ro_user, "ro", "cephx")
             _logger.info("[builder] RO CephX rule 생성: user=%s", ro_user)
         except Exception:
             _logger.warning("[builder] RO CephX rule 생성 실패", exc_info=True)
@@ -431,9 +427,7 @@ async def _ssh_build_task(
     except Exception:
         _logger.error("[builder] SSH 빌드 태스크 예외: %s", library_id, exc_info=True)
         try:
-            await asyncio.to_thread(
-                manila.update_share_metadata, conn, share_id, {"union_status": "error"}
-            )
+            await asyncio.to_thread(manila.update_share_metadata, conn, share_id, {"union_status": "error"})
         except Exception:
             pass
         if build_db_id:
@@ -463,9 +457,7 @@ async def cancel_build(build_db_id: int) -> dict:
     async with factory() as session:
         from sqlalchemy import select
 
-        row = (
-            await session.execute(select(LibraryBuild).where(LibraryBuild.id == build_db_id))
-        ).scalar_one_or_none()
+        row = (await session.execute(select(LibraryBuild).where(LibraryBuild.id == build_db_id))).scalar_one_or_none()
         if row is None:
             raise KeyError(f"빌드 {build_db_id}를 찾을 수 없습니다")
 

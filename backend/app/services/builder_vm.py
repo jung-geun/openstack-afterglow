@@ -122,9 +122,7 @@ async def _find_existing_server(svc_conn, settings) -> object | None:
 
     # 2. 이름으로 탐색 (afterglow-builder*)
     try:
-        candidates = await asyncio.to_thread(
-            lambda: list(svc_conn.compute.servers(name=_BUILDER_VM_NAME))
-        )
+        candidates = await asyncio.to_thread(lambda: list(svc_conn.compute.servers(name=_BUILDER_VM_NAME)))
         # ACTIVE > BUILD > SHUTOFF 우선순위로 정렬
         priority = {"ACTIVE": 0, "BUILD": 1, "SHUTOFF": 2}
         candidates.sort(key=lambda s: priority.get(s.status, 9))
@@ -143,9 +141,7 @@ async def _create_new_builder_vm(svc_conn, settings) -> BuilderEndpoint:
     network_id = settings.builder_network_id or settings.default_network_id
 
     if not image_id or not flavor_id:
-        raise RuntimeError(
-            "Builder VM 설정이 없습니다 (config.toml [builder] image_id, flavor_id 필요)"
-        )
+        raise RuntimeError("Builder VM 설정이 없습니다 (config.toml [builder] image_id, flavor_id 필요)")
 
     keypair_name = await _ensure_keypair(svc_conn, settings.builder_ssh_key_path)
     userdata_b64 = base64.b64encode(_BOOTSTRAP_CLOUD_INIT.encode()).decode()
@@ -168,9 +164,7 @@ async def _create_new_builder_vm(svc_conn, settings) -> BuilderEndpoint:
     host = settings.builder_ssh_host
     if not host:
         if not settings.builder_floating_network_id:
-            raise RuntimeError(
-                "config.toml [builder] floating_network_id 또는 ssh_host를 설정하세요."
-            )
+            raise RuntimeError("config.toml [builder] floating_network_id 또는 ssh_host를 설정하세요.")
         host = await _ensure_fip(svc_conn, server_id, settings.builder_floating_network_id)
 
     await _wait_for_ssh(host, settings.builder_ssh_key_path, settings.builder_ssh_user)
@@ -236,9 +230,7 @@ async def _ensure_fip(svc_conn, server_id: str, floating_network_id: str) -> str
     if existing:
         return existing
 
-    ports = await asyncio.to_thread(
-        lambda: list(svc_conn.network.ports(device_id=server_id))
-    )
+    ports = await asyncio.to_thread(lambda: list(svc_conn.network.ports(device_id=server_id)))
     if not ports:
         raise RuntimeError(f"서버 {server_id}에 네트워크 포트가 없습니다")
 
@@ -276,7 +268,9 @@ async def _wait_for_ssh(
         await asyncio.sleep(10)
         try:
             rc, _, _ = await run_command(
-                host, key_path, "echo ok",
+                host,
+                key_path,
+                "echo ok",
                 username=username,
                 connect_timeout=5,
                 timeout=10,
@@ -303,7 +297,8 @@ async def _wait_for_cloud_init(
         await asyncio.sleep(10)
         try:
             rc, stdout, _ = await run_command(
-                host, key_path,
+                host,
+                key_path,
                 "cloud-init status",
                 username=username,
                 timeout=10,
@@ -336,11 +331,11 @@ apt-get install -y --no-install-recommends nfs-common ceph-common
 @dataclass
 class EphemeralBuilderVM:
     server_id: str
-    host: str         # FIP 주소 (SSH 접속용)
+    host: str  # FIP 주소 (SSH 접속용)
     username: str
     key_path: str
     internal_ip: str  # Fixed IP (NFS access rule 등록용)
-    fip_id: str       # FIP ID (삭제용)
+    fip_id: str  # FIP ID (삭제용)
 
 
 def _short_id() -> str:
@@ -405,9 +400,7 @@ def _extract_fixed_ip(server) -> str | None:
 
 async def _allocate_new_fip(svc_conn, server_id: str, floating_network_id: str) -> tuple[str, str]:
     """FIP를 새로 생성해 서버에 붙이고 (addr, fip_id)를 반환한다."""
-    ports = await asyncio.to_thread(
-        lambda: list(svc_conn.network.ports(device_id=server_id))
-    )
+    ports = await asyncio.to_thread(lambda: list(svc_conn.network.ports(device_id=server_id)))
     if not ports:
         raise RuntimeError(f"서버 {server_id}에 네트워크 포트가 없습니다")
 
@@ -438,9 +431,7 @@ async def create_ephemeral_vm(svc_conn) -> EphemeralBuilderVM:
     network_id = settings.builder_network_id or settings.default_network_id
 
     if not image_id or not flavor_id:
-        raise RuntimeError(
-            "Ephemeral Builder VM 설정이 없습니다 (config.toml [builder] image_id, flavor_id 필요)"
-        )
+        raise RuntimeError("Ephemeral Builder VM 설정이 없습니다 (config.toml [builder] image_id, flavor_id 필요)")
 
     keypair_name = await _ensure_ephemeral_keypair(svc_conn, settings.builder_ssh_key_path)
     userdata_b64 = base64.b64encode(_EPHEMERAL_CLOUD_INIT.encode()).decode()
@@ -468,9 +459,7 @@ async def create_ephemeral_vm(svc_conn) -> EphemeralBuilderVM:
 
     # FIP가 설정된 경우만 할당; 없으면 provider 네트워크 fixed IP를 직접 사용
     if settings.builder_floating_network_id:
-        fip_addr, fip_id = await _allocate_new_fip(
-            svc_conn, server_id, settings.builder_floating_network_id
-        )
+        fip_addr, fip_id = await _allocate_new_fip(svc_conn, server_id, settings.builder_floating_network_id)
         ssh_host = fip_addr
     else:
         fip_addr, fip_id = internal_ip, None

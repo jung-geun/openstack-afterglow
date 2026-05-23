@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # 헬퍼
 # ---------------------------------------------------------------------------
@@ -57,9 +56,7 @@ class TestExtractFixedIp:
         from app.services.builder_vm import _extract_fixed_ip
 
         server = MagicMock()
-        server.addresses = {
-            "net": [{"addr": "1.2.3.4", "OS-EXT-IPS:type": "floating"}]
-        }
+        server.addresses = {"net": [{"addr": "1.2.3.4", "OS-EXT-IPS:type": "floating"}]}
         assert _extract_fixed_ip(server) is None
 
     def test_returns_none_when_addresses_empty(self):

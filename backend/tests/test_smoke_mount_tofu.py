@@ -1,4 +1,5 @@
 """OpenTofu runner 서비스 단위 테스트."""
+
 from __future__ import annotations
 
 import json
@@ -73,14 +74,16 @@ def _completed(returncode: int, stdout: str = "", stderr: str = "") -> subproces
     return r
 
 
-FAKE_OUTPUTS_JSON = json.dumps({
-    "server_id": {"value": "srv-tofu-1"},
-    "internal_ip": {"value": "10.0.1.5"},
-    "ssh_host": {"value": "10.0.1.5"},
-    "share_id": {"value": "share-tofu-nfs"},
-    "fip_id": {"value": ""},
-    "access_key": {"value": ""},
-})
+FAKE_OUTPUTS_JSON = json.dumps(
+    {
+        "server_id": {"value": "srv-tofu-1"},
+        "internal_ip": {"value": "10.0.1.5"},
+        "ssh_host": {"value": "10.0.1.5"},
+        "share_id": {"value": "share-tofu-nfs"},
+        "fip_id": {"value": ""},
+        "access_key": {"value": ""},
+    }
+)
 
 
 @pytest.mark.asyncio
@@ -94,8 +97,8 @@ async def test_apply_returns_workdir_and_outputs(tmp_path):
     conn.auth = {"auth_url": "https://ks/v3", "username": "u", "password": "p"}
 
     side_effects = [
-        _completed(0),                            # init
-        _completed(0),                            # apply
+        _completed(0),  # init
+        _completed(0),  # apply
         _completed(0, stdout=FAKE_OUTPUTS_JSON),  # output
     ]
 
@@ -105,12 +108,14 @@ async def test_apply_returns_workdir_and_outputs(tmp_path):
         patch("app.services.tofu_runner._TOFU_MODULES_DIR", tmp_path),
     ):
         from app.services import tofu_runner
+
         workdir, outputs = await tofu_runner.apply("builder_smoke", {"vm_name": "test"}, conn)
 
     assert outputs["server_id"] == "srv-tofu-1"
     assert outputs["internal_ip"] == "10.0.1.5"
     assert workdir.exists()
     import shutil
+
     shutil.rmtree(workdir, ignore_errors=True)
 
 
@@ -129,6 +134,7 @@ async def test_apply_raises_on_init_failure(tmp_path):
         patch("app.services.tofu_runner._TOFU_MODULES_DIR", tmp_path),
     ):
         from app.services import tofu_runner
+
         with pytest.raises(TofuApplyError, match="init 실패"):
             await tofu_runner.apply("builder_smoke", {}, conn)
 
@@ -148,6 +154,7 @@ async def test_destroy_removes_workdir(tmp_path):
         patch("subprocess.run", return_value=_completed(0)),
     ):
         from app.services import tofu_runner
+
         await tofu_runner.destroy(workdir, conn)
 
     assert not workdir.exists()
@@ -167,6 +174,7 @@ async def test_destroy_raises_on_failure(tmp_path):
         patch("subprocess.run", return_value=_completed(1, stderr="state lock")),
     ):
         from app.services import tofu_runner
+
         with pytest.raises(TofuDestroyError):
             await tofu_runner.destroy(workdir, conn)
 

@@ -59,6 +59,7 @@ async def stream_command(
         connect_timeout=connect_timeout,
     ) as conn:
         async with conn.create_process(command) as proc:
+
             async def _collect_stderr() -> None:
                 async for line in proc.stderr:
                     stderr_lines.append(line)

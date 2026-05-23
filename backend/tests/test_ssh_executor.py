@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # run_command
 # ---------------------------------------------------------------------------
@@ -112,7 +111,9 @@ async def test_stream_command_calls_callback_per_line():
         from app.services.ssh_executor import stream_command
 
         rc, stderr = await stream_command(
-            "10.0.0.1", "/tmp/key", "some cmd",
+            "10.0.0.1",
+            "/tmp/key",
+            "some cmd",
             line_callback=lambda line: collected.append(line),
         )
 
@@ -145,7 +146,9 @@ async def test_stream_command_returns_stderr():
         from app.services.ssh_executor import stream_command
 
         rc, stderr = await stream_command(
-            "10.0.0.1", "/tmp/key", "bad cmd",
+            "10.0.0.1",
+            "/tmp/key",
+            "bad cmd",
             line_callback=lambda line: None,
         )
 

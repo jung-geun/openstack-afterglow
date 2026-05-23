@@ -10,7 +10,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # _INSTALL_SCRIPTS 키 검증
 # ---------------------------------------------------------------------------
@@ -57,8 +56,11 @@ def test_build_ssh_command_creates_build_complete_marker():
     from app.services.library_builder import _build_ssh_command
 
     cmd = _build_ssh_command(
-        ceph_mons="mon", share_path="/path",
-        cephx_user="u", cephx_secret="s", install_script="echo ok",
+        ceph_mons="mon",
+        share_path="/path",
+        cephx_user="u",
+        cephx_secret="s",
+        install_script="echo ok",
     )
     assert ".union_build_complete" in cmd
 
@@ -68,8 +70,11 @@ def test_build_ssh_command_progress_markers():
     from app.services.library_builder import _build_ssh_command
 
     cmd = _build_ssh_command(
-        ceph_mons="mon", share_path="/path",
-        cephx_user="u", cephx_secret="s", install_script="echo ok",
+        ceph_mons="mon",
+        share_path="/path",
+        cephx_user="u",
+        cephx_secret="s",
+        install_script="echo ok",
     )
     assert "[progress] 30" in cmd
     assert "[progress] 80" in cmd
@@ -84,8 +89,11 @@ def test_build_ssh_command_encodes_secret_as_base64():
 
     secret = "AQ+special/chars==\nwith newline"
     cmd = _build_ssh_command(
-        ceph_mons="mon", share_path="/path",
-        cephx_user="u", cephx_secret=secret, install_script="echo ok",
+        ceph_mons="mon",
+        share_path="/path",
+        cephx_user="u",
+        cephx_secret=secret,
+        install_script="echo ok",
     )
     expected_b64 = base64.b64encode(secret.encode()).decode()
     assert expected_b64 in cmd
@@ -100,8 +108,11 @@ def test_build_ssh_command_encodes_install_script_as_base64():
 
     script = "uv pip install torch\necho done"
     cmd = _build_ssh_command(
-        ceph_mons="mon", share_path="/path",
-        cephx_user="u", cephx_secret="s", install_script=script,
+        ceph_mons="mon",
+        share_path="/path",
+        cephx_user="u",
+        cephx_secret="s",
+        install_script=script,
     )
     expected_b64 = base64.b64encode(script.encode()).decode()
     assert expected_b64 in cmd
@@ -142,12 +153,14 @@ async def test_start_build_creates_background_ssh_task():
     mock_file_storage = MagicMock()
     mock_file_storage.id = "share-build-1"
 
-    call_results = iter([
-        MagicMock(),  # get_service_project_connection
-        mock_file_storage,  # create_file_storage
-        {"access_key": "AQTEST==", "access_id": "r1"},  # create_access_rule
-        ["10.0.0.1:6789:/vol/lib"],  # get_export_locations
-    ])
+    call_results = iter(
+        [
+            MagicMock(),  # get_service_project_connection
+            mock_file_storage,  # create_file_storage
+            {"access_key": "AQTEST==", "access_id": "r1"},  # create_access_rule
+            ["10.0.0.1:6789:/vol/lib"],  # get_export_locations
+        ]
+    )
 
     async def _fake_to_thread(fn, *args, **kwargs):
         return next(call_results)

@@ -345,9 +345,7 @@ async def smoke_test_ephemeral_mount(req: SmokeMountRequest) -> dict:
         share_name = f"smoke-mount-{uuid.uuid4().hex[:8]}"
         share_id = await emount.create_builder_share(svc_conn, share_name, req.size_gb, proto)
 
-        access_rule = await emount.add_vm_access_rule(
-            svc_conn, share_id, vm.internal_ip, proto
-        )
+        access_rule = await emount.add_vm_access_rule(svc_conn, share_id, vm.internal_ip, proto)
 
         mount_cmd = await emount.build_mount_command(svc_conn, share_id, proto, access_rule)
 
@@ -435,9 +433,7 @@ async def smoke_test_mount_heat(req: SmokeMountRequest) -> dict:
             "floating_network_id": settings.builder_floating_network_id or "",
         }
         stack_name = f"afterglow-smoke-{uuid.uuid4().hex[:8]}"
-        stack_id = await asyncio.to_thread(
-            heat_svc.create_stack, svc_conn, stack_name, template_str, parameters
-        )
+        stack_id = await asyncio.to_thread(heat_svc.create_stack, svc_conn, stack_name, template_str, parameters)
 
         outputs = await asyncio.to_thread(heat_svc.wait_for_stack_complete, svc_conn, stack_id)
         internal_ip = outputs.get("internal_ip", "")
@@ -483,9 +479,7 @@ async def smoke_test_mount_heat(req: SmokeMountRequest) -> dict:
         cleanup_conn = await asyncio.to_thread(get_service_project_connection)
         if share_id and access_rule:
             try:
-                await asyncio.to_thread(
-                    manila.revoke_access_rule, cleanup_conn, share_id, access_rule["access_id"]
-                )
+                await asyncio.to_thread(manila.revoke_access_rule, cleanup_conn, share_id, access_rule["access_id"])
             except Exception:
                 _logger.warning("[smoke-mount-heat] access rule revoke 실패", exc_info=True)
         if share_id:
@@ -539,9 +533,7 @@ async def smoke_test_mount_tofu(req: SmokeMountRequest) -> dict:
             "share_name": share_name,
             "share_proto": proto,
             "size_gb": req.size_gb,
-            "share_type": (
-                settings.os_manila_nfs_share_type if proto == "NFS" else settings.os_manila_share_type
-            ),
+            "share_type": (settings.os_manila_nfs_share_type if proto == "NFS" else settings.os_manila_share_type),
             "share_network_id": settings.os_manila_share_network_id if proto == "NFS" else "",
         }
 

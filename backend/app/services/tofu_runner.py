@@ -1,4 +1,5 @@
 """OpenTofu subprocess 래퍼 — ephemeral 인프라 선언적 관리."""
+
 from __future__ import annotations
 
 import asyncio
@@ -40,8 +41,7 @@ def _tofu_bin() -> str:
     path = shutil.which(_TOFU_BIN)
     if not path:
         raise TofuNotFound(
-            f"'{_TOFU_BIN}' 를 PATH 에서 찾을 수 없습니다. "
-            "Dockerfile 에 OpenTofu CLI 가 설치됐는지 확인하세요."
+            f"'{_TOFU_BIN}' 를 PATH 에서 찾을 수 없습니다. Dockerfile 에 OpenTofu CLI 가 설치됐는지 확인하세요."
         )
     return path
 
@@ -58,7 +58,7 @@ def _env_from_conn(conn: openstack.connection.Connection) -> dict[str, str]:
         "OS_PROJECT_NAME": auth.get("project_name", ""),
         "OS_USER_DOMAIN_NAME": auth.get("user_domain_name", "Default"),
         "OS_PROJECT_DOMAIN_NAME": auth.get("project_domain_name", "Default"),
-        "OS_REGION_NAME": getattr(conn, "config", {}).get("region_name", ""),
+        "OS_REGION_NAME": getattr(getattr(conn, "config", None), "region_name", "") or "",
         # tofu 비대화형 실행
         "TF_IN_AUTOMATION": "1",
         "TF_CLI_ARGS_apply": "-auto-approve",
@@ -70,7 +70,18 @@ def _env_from_conn(conn: openstack.connection.Connection) -> dict[str, str]:
             env[k] = str(v)
         elif k in env:
             del env[k]
+
+    # OS_INSECURE: openstack provider는 소문자 bool 문자열("true"/"false")만 허용
+    if "OS_INSECURE" in env:
+        val = env["OS_INSECURE"].strip().lower()
+        env["OS_INSECURE"] = "true" if val in ("1", "true", "yes") else "false"
+
     return env
+
+
+def _var_file_args(workdir: Path) -> list[str]:
+    """workdir 의 *.tfvars.json 파일을 -var-file 인자 목록으로 반환한다."""
+    return [f"-var-file={vf}" for vf in sorted(workdir.glob("*.tfvars.json"))]
 
 
 def _run_tofu(args: list[str], cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess:
@@ -133,9 +144,7 @@ async def apply(
             raise TofuApplyError(f"tofu apply 실패: {apply_result.stderr}")
 
         # output
-        out_result = await asyncio.to_thread(
-            _run_tofu, ["output", "-json"], workdir, env
-        )
+        out_result = await asyncio.to_thread(_run_tofu, ["output", "-json"], workdir, env)
         if out_result.returncode != 0:
             raise TofuApplyError(f"tofu output 실패: {out_result.stderr}")
 
@@ -148,7 +157,8 @@ async def apply(
         # apply 실패 시 workdir 정리 시도 (best-effort)
         try:
             env = await asyncio.to_thread(_env_from_conn, conn)
-            await asyncio.to_thread(_run_tofu, ["destroy", "-input=false"], workdir, env)
+            destroy_args = ["destroy", "-input=false"] + _var_file_args(workdir)
+            await asyncio.to_thread(_run_tofu, destroy_args, workdir, env)
         except Exception:
             pass
         shutil.rmtree(workdir, ignore_errors=True)
@@ -161,9 +171,8 @@ async def destroy(workdir: Path, conn: openstack.connection.Connection) -> None:
         return
     try:
         env = await asyncio.to_thread(_env_from_conn, conn)
-        result = await asyncio.to_thread(
-            _run_tofu, ["destroy", "-input=false"], workdir, env
-        )
+        destroy_args = ["destroy", "-input=false"] + _var_file_args(workdir)
+        result = await asyncio.to_thread(_run_tofu, destroy_args, workdir, env)
         if result.returncode != 0:
             _logger.error("[tofu] destroy 실패 (state 잔존 가능): %s", result.stderr)
             raise TofuDestroyError(f"tofu destroy 실패: {result.stderr}")

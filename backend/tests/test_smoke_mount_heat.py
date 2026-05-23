@@ -1,4 +1,5 @@
 """Heat smoke-mount 서비스 단위 테스트."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -79,8 +80,10 @@ class TestWaitForStackComplete:
         conn = MagicMock()
         conn.orchestration.get_stack.return_value = _stack_with_status(
             "CREATE_COMPLETE",
-            [{"output_key": "internal_ip", "output_value": "10.0.0.5"},
-             {"output_key": "ssh_host", "output_value": "10.0.0.5"}],
+            [
+                {"output_key": "internal_ip", "output_value": "10.0.0.5"},
+                {"output_key": "ssh_host", "output_value": "10.0.0.5"},
+            ],
         )
         outputs = wait_for_stack_complete(conn, "stack-1", timeout=10)
         assert outputs["internal_ip"] == "10.0.0.5"

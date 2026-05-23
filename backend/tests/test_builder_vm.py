@@ -13,9 +13,7 @@ def _make_server(sid: str = "srv-1", status: str = "ACTIVE", fip: str | None = "
     srv.id = sid
     srv.status = status
     if fip:
-        srv.addresses = {
-            "net": [{"OS-EXT-IPS:type": "floating", "addr": fip}]
-        }
+        srv.addresses = {"net": [{"OS-EXT-IPS:type": "floating", "addr": fip}]}
     else:
         srv.addresses = {}
     return srv
@@ -192,8 +190,11 @@ def test_build_ssh_command_encodes_secret_as_base64():
 
     secret = "AQ+specialchars==\nwith newline"
     cmd = _build_ssh_command(
-        ceph_mons="mon", share_path="/path", cephx_user="user",
-        cephx_secret=secret, install_script="echo ok",
+        ceph_mons="mon",
+        share_path="/path",
+        cephx_user="user",
+        cephx_secret=secret,
+        install_script="echo ok",
     )
     expected_b64 = base64.b64encode(secret.encode()).decode()
     assert expected_b64 in cmd

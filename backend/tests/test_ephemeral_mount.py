@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # 헬퍼
 # ---------------------------------------------------------------------------
@@ -144,9 +143,7 @@ class TestAddVmAccessRule:
         ) as mock_create:
             from app.services.ephemeral_mount import add_vm_access_rule
 
-            result = await add_vm_access_rule(
-                svc_conn, "shareabc1234", "10.0.0.7", "CEPHFS", cephx_user="my-builder"
-            )
+            result = await add_vm_access_rule(svc_conn, "shareabc1234", "10.0.0.7", "CEPHFS", cephx_user="my-builder")
 
         assert result["access_id"] == "rule-ceph-1"
         assert result["access_key"] == "AQBsecret=="
@@ -252,9 +249,9 @@ class TestVerifyMountViaSsh:
             "app.services.ephemeral_mount.run_command",
             new_callable=AsyncMock,
             side_effect=[
-                (0, "", ""),                           # mount 성공
+                (0, "", ""),  # mount 성공
                 (0, "Filesystem ...\nMOUNT_OK", ""),  # verify 성공
-                (0, "", ""),                           # umount
+                (0, "", ""),  # umount
             ],
         ):
             from app.services.ephemeral_mount import verify_mount_via_ssh
@@ -288,9 +285,9 @@ class TestVerifyMountViaSsh:
         vm = _make_vm()
         mock_run = AsyncMock(
             side_effect=[
-                (0, "", ""),      # mount 성공
-                (1, "", "err"),   # verify 실패
-                (0, "", ""),      # umount
+                (0, "", ""),  # mount 성공
+                (1, "", "err"),  # verify 실패
+                (0, "", ""),  # umount
             ]
         )
 
@@ -405,7 +402,12 @@ class TestSmokeMountEndpoint:
             patch(
                 "app.services.ephemeral_mount.add_vm_access_rule",
                 new_callable=AsyncMock,
-                return_value={"access_id": "rule-fail", "access_key": "", "access_to": "10.0.0.7", "access_level": "rw"},
+                return_value={
+                    "access_id": "rule-fail",
+                    "access_key": "",
+                    "access_to": "10.0.0.7",
+                    "access_level": "rw",
+                },
             ),
             patch(
                 "app.services.ephemeral_mount.build_mount_command",

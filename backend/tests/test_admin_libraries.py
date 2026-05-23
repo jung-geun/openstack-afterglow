@@ -1,7 +1,7 @@
 """Admin Library API 단위 테스트 (§3.1 + §3.3)."""
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 

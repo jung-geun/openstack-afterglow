@@ -105,19 +105,14 @@ async def build_mount_command(
     export_location을 Manila API에서 조회해 프로토콜별 mount 명령을 구성한다.
     """
     proto_upper = share_proto.upper()
-    export_locations = await asyncio.to_thread(
-        manila.get_export_locations, svc_conn, share_id
-    )
+    export_locations = await asyncio.to_thread(manila.get_export_locations, svc_conn, share_id)
     if not export_locations:
         raise RuntimeError(f"Share {share_id}의 export location이 없습니다")
 
     export_path = export_locations[0]
 
     if proto_upper == "NFS":
-        return (
-            f"sudo mkdir -p {mount_point}\n"
-            f"sudo mount -t nfs {export_path} {mount_point} -o rw,hard,intr\n"
-        )
+        return f"sudo mkdir -p {mount_point}\nsudo mount -t nfs {export_path} {mount_point} -o rw,hard,intr\n"
     else:
         # CephFS export 형식: "mon1,mon2,mon3:/subpath"
         if ":" in export_path:
@@ -133,10 +128,10 @@ async def build_mount_command(
             f"sudo mkdir -p {mount_point}\n"
             "SECRET_FILE=$(mktemp /tmp/ceph.XXXXXX)\n"
             f"printf '%s' '{secret_b64}' | base64 -d > \"$SECRET_FILE\"\n"
-            "sudo chmod 600 \"$SECRET_FILE\"\n"
+            'sudo chmod 600 "$SECRET_FILE"\n'
             f"sudo mount -t ceph '{ceph_mons}:{ceph_path}' {mount_point} "
-            f"-o name={cephx_user},secretfile=\"$SECRET_FILE\"\n"
-            "rm -f \"$SECRET_FILE\"\n"
+            f'-o name={cephx_user},secretfile="$SECRET_FILE"\n'
+            'rm -f "$SECRET_FILE"\n'
         )
 
 
@@ -170,11 +165,7 @@ async def verify_mount_via_ssh(
         }
 
     # 검증: mountpoint + df
-    verify_cmd = (
-        f"mountpoint -q {mount_point} && "
-        f"df -h {mount_point} && "
-        "echo MOUNT_OK"
-    )
+    verify_cmd = f"mountpoint -q {mount_point} && df -h {mount_point} && echo MOUNT_OK"
     rc2, stdout2, stderr2 = await run_command(
         vm.host,
         vm.key_path,
