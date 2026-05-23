@@ -27,6 +27,8 @@
 		group_count: number;
 		partial?: boolean;
 		partial_reasons?: string[];
+		recent_users?: { id: string; name: string }[];
+		recent_projects?: { id: string; name: string }[];
 	}
 
 	let overview = $state<Overview | null>(null);
@@ -148,36 +150,60 @@
 		<!-- Identity 통계: 사용자/프로젝트/역할/그룹 -->
 		{#if identitySummary}
 			<div class="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
-				<StatTile label="사용자" value={identitySummary.user_count} unit="명" accent="amber">
-					{#snippet icon()}
-						<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-							<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/>
-						</svg>
-					{/snippet}
-				</StatTile>
-				<StatTile label="프로젝트" value={identitySummary.project_count} unit="활성" accent="blue">
-					{#snippet icon()}
-						<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-							<path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
-						</svg>
-					{/snippet}
-				</StatTile>
-				<StatTile label="역할" value={identitySummary.role_count} unit="정의됨" accent="violet">
-					{#snippet icon()}
-						<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-							<path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
-						</svg>
-					{/snippet}
-				</StatTile>
-				<StatTile label="그룹" value={identitySummary.group_count} unit="그룹" accent="cyan">
-					{#snippet icon()}
-						<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-							<path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
-							<circle cx="9" cy="7" r="4"/>
-							<path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/>
-						</svg>
-					{/snippet}
-				</StatTile>
+				<a href="/admin/users" class="block group">
+					<StatTile label="사용자" value={identitySummary.user_count} unit="명" accent="amber" class="group-hover:border-amber-500/40 transition-colors h-full">
+						{#snippet icon()}
+							<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+								<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/>
+							</svg>
+						{/snippet}
+						{#if identitySummary.recent_users && identitySummary.recent_users.length > 0}
+							{#snippet footer()}
+								<span class="flex items-center gap-1 text-[10px] text-emerald-400">
+									<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0 animate-pulse"></span>
+									최근 추가 {identitySummary.recent_users.length}명
+								</span>
+							{/snippet}
+						{/if}
+					</StatTile>
+				</a>
+				<a href="/admin/projects" class="block group">
+					<StatTile label="프로젝트" value={identitySummary.project_count} unit="활성" accent="blue" class="group-hover:border-blue-500/40 transition-colors h-full">
+						{#snippet icon()}
+							<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+								<path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+							</svg>
+						{/snippet}
+						{#if identitySummary.recent_projects && identitySummary.recent_projects.length > 0}
+							{#snippet footer()}
+								<span class="flex items-center gap-1 text-[10px] text-emerald-400">
+									<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0 animate-pulse"></span>
+									최근 추가 {identitySummary.recent_projects.length}개
+								</span>
+							{/snippet}
+						{/if}
+					</StatTile>
+				</a>
+				<a href="/admin/roles" class="block group">
+					<StatTile label="역할" value={identitySummary.role_count} unit="정의됨" accent="violet" class="group-hover:border-violet-500/40 transition-colors h-full">
+						{#snippet icon()}
+							<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+								<path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+							</svg>
+						{/snippet}
+					</StatTile>
+				</a>
+				<a href="/admin/groups" class="block group">
+					<StatTile label="그룹" value={identitySummary.group_count} unit="그룹" accent="cyan" class="group-hover:border-cyan-500/40 transition-colors h-full">
+						{#snippet icon()}
+							<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+								<path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
+								<circle cx="9" cy="7" r="4"/>
+								<path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/>
+							</svg>
+						{/snippet}
+					</StatTile>
+				</a>
 			</div>
 
 			{#if identitySummary.partial && identitySummary.partial_reasons && identitySummary.partial_reasons.length > 0}
