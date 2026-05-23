@@ -35,7 +35,9 @@ class ProjectInfo(BaseModel):
     name: str
     description: str = ""
     domain_id: str | None = None
+    domain_name: str | None = None
     enabled: bool = True
+    last_accessed_at: str | None = None
 
 
 class GitLabCallbackRequest(BaseModel):

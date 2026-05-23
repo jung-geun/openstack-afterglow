@@ -578,12 +578,18 @@ def list_projects(token: str) -> list[dict]:
     user_id = auth_plugin.get_access(sess).user_id
     projects = ks.projects.list(user=user_id)
 
+    try:
+        domain_map = {d.id: d.name for d in ks.domains.list()}
+    except Exception:
+        domain_map = {}
+
     return [
         {
             "id": p.id,
             "name": p.name,
             "description": p.description or "",
             "domain_id": p.domain_id,
+            "domain_name": domain_map.get(p.domain_id),
             "enabled": p.enabled,
         }
         for p in projects

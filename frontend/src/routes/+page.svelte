@@ -72,14 +72,19 @@
 				sessionWarningBeforeSeconds = sessionInfo.warning_before_seconds;
 			} catch { /* 기본값 유지 */ }
 
-			let selectedProjectId = data.project_id;
-			let selectedProjectName = data.project_name;
+			let selectedProjectId: string | null = null;
+			let selectedProjectName: string | null = null;
+
 			if (data.default_project_id && projects.length > 0) {
 				const defaultProject = projects.find(p => p.id === data.default_project_id);
 				if (defaultProject) {
 					selectedProjectId = defaultProject.id;
 					selectedProjectName = defaultProject.name;
 				}
+			}
+			if (!selectedProjectId && projects.length === 1) {
+				selectedProjectId = projects[0].id;
+				selectedProjectName = projects[0].name;
 			}
 
 			setAuth({
@@ -98,7 +103,7 @@
 				isSystemAdmin: data.is_system_admin ?? false,
 			});
 			setAvailableProjects(projects);
-			goto('/dashboard');
+			goto(selectedProjectId ? '/dashboard' : '/select-project');
 		} catch (e) {
 			error = e instanceof ApiError ? `인증 실패 (${e.status})` : '서버 오류가 발생했습니다';
 		} finally {

@@ -160,6 +160,14 @@ async def _resolve_jwt_token_info(bearer_token: str, x_project_id: str | None) -
     # 프로젝트 전환 여부와 무관하게 동일 경로로 통합 — stale window 제거.
     effective_project_id = target_project_id or sess.get("project_id", jwt_project_id)
     info = await _cached_validate(sess["keystone_token"], effective_project_id)
+
+    # X-Project-Id로 실제 rescope가 발생한 경우에만 접근 기록 (fire-and-forget)
+    user_id_for_record = info.get("user_id", payload.get("sub", ""))
+    if x_project_id and x_project_id != jwt_project_id and user_id_for_record:
+        from app.services.recent_projects import record_project_access
+
+        asyncio.create_task(record_project_access(user_id_for_record, x_project_id))
+
     return {
         "token": info["token"],
         "user_id": info.get("user_id", payload.get("sub", "")),

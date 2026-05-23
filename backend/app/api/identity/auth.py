@@ -11,6 +11,7 @@ from app.models.auth import GitLabCallbackRequest, LoginRequest, ProjectInfo, To
 from app.rate_limit import limiter
 from app.services import jwt_service, keystone, session_store
 from app.services.cache import cached_call, ttl_fast, ttl_normal, ttl_static
+from app.services.recent_projects import get_recent_project_ids, record_project_access
 
 _logger = logging.getLogger(__name__)
 
@@ -130,8 +131,9 @@ async def login(request: Request, req: LoginRequest, background_tasks: Backgroun
     except Exception:
         pass
 
-    # 대시보드 캐시 프리워밍 (백그라운드)
+    # 대시보드 캐시 프리워밍 + 최근 프로젝트 기록 (백그라운드)
     background_tasks.add_task(_prewarm_dashboard, data["token"], data["project_id"])
+    background_tasks.add_task(record_project_access, data["user_id"], data["project_id"])
 
     return await _build_token_response(
         keystone_token=data["token"],
@@ -256,6 +258,7 @@ async def switch_project(req: SwitchProjectRequest, token_info: dict = Depends(g
         except Exception:
             pass
 
+    await record_project_access(kc_info["user_id"], kc_info["project_id"])
     return await _build_token_response(
         keystone_token=kc_info["token"],
         project_id=kc_info["project_id"],
@@ -288,6 +291,37 @@ async def list_projects(token_info: dict = Depends(get_token_info)):
         return [ProjectInfo(**p) for p in projects]
     except Exception:
         raise HTTPException(status_code=500, detail="프로젝트 목록 조회 실패")
+
+
+@router.get("/projects/recent", response_model=list[ProjectInfo])
+async def list_projects_recent(token_info: dict = Depends(get_token_info)):
+    """최근 접근 순으로 정렬된 프로젝트 목록 반환.
+
+    Redis에 기록된 접근 시각 기준으로 정렬하고, last_accessed_at 필드를 포함한다.
+    Redis 기록이 없는 프로젝트는 이름순으로 뒤에 덧붙인다.
+    """
+    try:
+        projects = await asyncio.to_thread(keystone.list_projects, token_info["token"])
+    except Exception:
+        raise HTTPException(status_code=500, detail="프로젝트 목록 조회 실패")
+
+    user_id = token_info["user_id"]
+    recent_ids = await get_recent_project_ids(user_id)
+    recent_map: dict[str, int] = {pid: ts for pid, ts in recent_ids}
+
+    project_infos: list[ProjectInfo] = []
+    for p in projects:
+        ts = recent_map.get(p["id"])
+        last_accessed_at = datetime.fromtimestamp(ts / 1000, tz=UTC).isoformat() if ts else None
+        project_infos.append(ProjectInfo(**p, last_accessed_at=last_accessed_at))
+
+    # 최근 접근 기록 있는 것 먼저(최신순), 없는 것은 이름순
+    def _sort_key(pi: ProjectInfo) -> tuple[int, str]:
+        ts = recent_map.get(pi.id, 0)
+        return (-ts, pi.name)
+
+    project_infos.sort(key=_sort_key)
+    return project_infos
 
 
 @router.get("/gitlab/enabled")
@@ -329,6 +363,7 @@ async def gitlab_callback(request: Request, req: GitLabCallbackRequest, backgrou
     # default_project_id는 동기 Keystone 호출로 1초 안팎 지연이 발생하므로
     # 응답 경로에서 제외한다. exchange_code의 scoped 토큰 project_id를 그대로 사용.
     background_tasks.add_task(_prewarm_dashboard, data["token"], data["project_id"])
+    background_tasks.add_task(record_project_access, data["user_id"], data["project_id"])
 
     return await _build_token_response(
         keystone_token=data["token"],
