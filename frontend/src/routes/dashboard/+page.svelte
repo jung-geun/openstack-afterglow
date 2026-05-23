@@ -135,6 +135,7 @@
 	}
 </script>
 
+{#key $auth.projectId}
 <div class="p-6 max-w-7xl mx-auto flex flex-col gap-5">
 	<DashboardGreetingHeader
 		username={$auth.username ?? ''}
@@ -177,8 +178,10 @@
 						</span>
 					{/if}
 				</div>
-				<div class="min-h-[72px] flex items-center">
-					{#if hasData}
+				<div class="min-h-[72px] flex items-center w-full">
+					{#if summaryLoading && !hasData}
+						<div class="h-[72px] w-full bg-gray-800/60 rounded animate-pulse"></div>
+					{:else if hasData}
 						<Spark data={series!.data} color={card.color} height={72} class="w-full" />
 					{:else if !trendData || !trendData.prometheus_available}
 						<p class="text-[11px] italic text-[var(--color-ink-3)]">메트릭 수집 미설정</p>
@@ -206,7 +209,12 @@
 			<!-- System Alerts card -->
 			<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
 				<SectionHeader title="시스템 알림" />
-				{#if notifications.length === 0}
+				{#if summaryLoading && notifications.length === 0}
+					<ul class="mt-3 flex flex-col gap-2 animate-pulse">
+						<li class="h-4 bg-gray-800/60 rounded"></li>
+						<li class="h-4 bg-gray-800/60 rounded w-3/4"></li>
+					</ul>
+				{:else if notifications.length === 0}
 					<p class="text-sm text-[var(--color-ink-3)] mt-4">알림 없음</p>
 				{:else}
 					<ul class="mt-3 flex flex-col gap-2">
@@ -230,3 +238,4 @@
 		</div>
 	</div>
 </div>
+{/key}

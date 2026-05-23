@@ -83,6 +83,7 @@
 	});
 </script>
 
+{#key $auth.projectId}
 <div class="p-6 flex flex-col gap-5">
 	<!-- 헤더 -->
 	<div class="flex items-start justify-between gap-3">
@@ -257,3 +258,4 @@
 		onUpdated={() => { loadProjectUsage(); }}
 	/>
 {/if}
+{/key}

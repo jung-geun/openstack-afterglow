@@ -1,11 +1,12 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { auth, clearAuth, setProject } from '$lib/stores/auth';
+	import { auth, clearAuth, setAuth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import type { Project } from '$lib/stores/auth';
 
 	let projects = $state<Project[]>([]);
 	let loading = $state(true);
+	let switching = $state(false);
 	let error = $state('');
 
 	async function load() {
@@ -24,9 +25,38 @@
 		if ($auth.token) load();
 	});
 
-	function selectProject(proj: Project) {
-		setProject(proj.id, proj.name);
-		goto('/dashboard');
+	async function selectProject(proj: Project) {
+		if (!$auth.token || switching) return;
+		switching = true;
+		try {
+			const resp = await api.post<{
+				token: string;
+				refresh_token: string;
+				expires_at: string;
+				project_id: string;
+				project_name: string;
+				user_id: string;
+				username: string;
+				roles: string[];
+				is_system_admin: boolean;
+			}>('/api/auth/switch-project', { project_id: proj.id }, $auth.token);
+			setAuth({
+				token: resp.token,
+				refreshToken: resp.refresh_token,
+				accessExpiresAt: resp.expires_at
+					? Math.floor(new Date(resp.expires_at).getTime() / 1000)
+					: null,
+				projectId: resp.project_id,
+				projectName: resp.project_name,
+				roles: resp.roles ?? [],
+				isSystemAdmin: !!resp.is_system_admin,
+			});
+			goto('/dashboard');
+		} catch (e) {
+			error = e instanceof ApiError ? `프로젝트 전환 실패: ${e.message}` : '프로젝트 전환 실패';
+		} finally {
+			switching = false;
+		}
 	}
 
 	function logout() {
@@ -96,7 +126,8 @@
 				{#each projects as proj (proj.id)}
 					<button
 						onclick={() => selectProject(proj)}
-						class="text-left border border-gray-700 rounded-xl p-5 bg-gray-900 hover:border-blue-500 hover:bg-gray-800 transition-all cursor-pointer"
+						disabled={switching}
+						class="text-left border border-gray-700 rounded-xl p-5 bg-gray-900 hover:border-blue-500 hover:bg-gray-800 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
 					>
 						<div class="font-medium text-white mb-3 truncate">{proj.name}</div>
 						<div class="space-y-1 text-[13px] text-gray-400">

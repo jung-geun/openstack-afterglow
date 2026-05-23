@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { auth, setProject } from '$lib/stores/auth';
+	import { auth, setAuth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSpinner from './LoadingSpinner.svelte';
 
@@ -12,6 +12,7 @@
 
 	let projects = $state<Project[]>([]);
 	let loading = $state(true);
+	let switching = $state(false);
 	let error = $state('');
 	let isOpen = $state(false);
 	let dropdownRef: HTMLDivElement | null = $state(null);
@@ -29,12 +30,44 @@
 		}
 	}
 
-	function selectProject(project: Project) {
-		setProject(project.id, project.name);
-		isOpen = false;
-		// Default 네트워크 확인/생성 (fire-and-forget)
-		if ($auth.token) {
-			api.post('/api/networks/ensure-default', {}, $auth.token, project.id).catch(() => {});
+	async function selectProject(project: Project) {
+		if (!$auth.token || switching) return;
+		if (project.id === $auth.projectId) { isOpen = false; return; }
+
+		switching = true;
+		try {
+			const resp = await api.post<{
+				token: string;
+				refresh_token: string;
+				expires_at: string;
+				project_id: string;
+				project_name: string;
+				user_id: string;
+				username: string;
+				roles: string[];
+				is_system_admin: boolean;
+			}>('/api/auth/switch-project', { project_id: project.id }, $auth.token);
+
+			setAuth({
+				token: resp.token,
+				refreshToken: resp.refresh_token,
+				accessExpiresAt: resp.expires_at
+					? Math.floor(new Date(resp.expires_at).getTime() / 1000)
+					: null,
+				projectId: resp.project_id,
+				projectName: resp.project_name,
+				roles: resp.roles ?? [],
+				isSystemAdmin: !!resp.is_system_admin,
+			});
+
+			isOpen = false;
+
+			// Default 네트워크 확인/생성 (fire-and-forget)
+			api.post('/api/networks/ensure-default', {}, resp.token, resp.project_id).catch(() => {});
+		} catch (e) {
+			error = e instanceof ApiError ? `프로젝트 전환 실패: ${e.message}` : '프로젝트 전환 실패';
+		} finally {
+			switching = false;
 		}
 	}
 
@@ -53,11 +86,11 @@
 
 <div class="relative" bind:this={dropdownRef}>
 	<button
-		onclick={() => { if (!loading) isOpen = !isOpen; }}
-		disabled={loading}
+		onclick={() => { if (!loading && !switching) isOpen = !isOpen; }}
+		disabled={loading || switching}
 		class="flex items-center gap-2 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 disabled:bg-gray-800/50 rounded-lg text-sm transition-colors"
 	>
-		{#if loading}
+		{#if loading || switching}
 			<LoadingSpinner size="sm" color="gray" />
 		{:else}
 			<svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -81,7 +114,8 @@
 					{#each projects as project}
 						<button
 							onclick={() => selectProject(project)}
-							class="w-full text-left px-3 py-2 hover:bg-gray-800 transition-colors
+							disabled={switching}
+							class="w-full text-left px-3 py-2 hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed
 								{project.id === $auth.projectId ? 'bg-blue-900/30 border-l-2 border-blue-500' : ''}"
 						>
 							<div class="text-sm font-medium text-white">{project.name}</div>
