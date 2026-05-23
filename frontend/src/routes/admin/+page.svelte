@@ -151,7 +151,7 @@
 		{#if identitySummary}
 			<div class="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
 				<a href="/admin/users" class="block group">
-					<StatTile label="사용자" value={identitySummary.user_count} unit="명" accent="amber" class="group-hover:border-amber-500/40 transition-colors h-full">
+					<StatTile label="사용자" value={identitySummary.user_count} unit="명" accent="amber" class="group-hover:border-amber-500/40 group-hover:bg-gray-800 transition-colors h-full">
 						{#snippet icon()}
 							<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
 								<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/>
@@ -168,7 +168,7 @@
 					</StatTile>
 				</a>
 				<a href="/admin/projects" class="block group">
-					<StatTile label="프로젝트" value={identitySummary.project_count} unit="활성" accent="blue" class="group-hover:border-blue-500/40 transition-colors h-full">
+					<StatTile label="프로젝트" value={identitySummary.project_count} unit="활성" accent="blue" class="group-hover:border-blue-500/40 group-hover:bg-gray-800 transition-colors h-full">
 						{#snippet icon()}
 							<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
 								<path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
@@ -185,7 +185,7 @@
 					</StatTile>
 				</a>
 				<a href="/admin/roles" class="block group">
-					<StatTile label="역할" value={identitySummary.role_count} unit="정의됨" accent="violet" class="group-hover:border-violet-500/40 transition-colors h-full">
+					<StatTile label="역할" value={identitySummary.role_count} unit="정의됨" accent="violet" class="group-hover:border-violet-500/40 group-hover:bg-gray-800 transition-colors h-full">
 						{#snippet icon()}
 							<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
 								<path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
@@ -194,7 +194,7 @@
 					</StatTile>
 				</a>
 				<a href="/admin/groups" class="block group">
-					<StatTile label="그룹" value={identitySummary.group_count} unit="그룹" accent="cyan" class="group-hover:border-cyan-500/40 transition-colors h-full">
+					<StatTile label="그룹" value={identitySummary.group_count} unit="그룹" accent="cyan" class="group-hover:border-cyan-500/40 group-hover:bg-gray-800 transition-colors h-full">
 						{#snippet icon()}
 							<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
 								<path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
