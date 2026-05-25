@@ -77,7 +77,10 @@ async def list_project_members(
         members = []
         seen = set()
         for a in assignments:
-            user_id = getattr(getattr(a, "user", None), "id", None)
+            user_raw = getattr(a, "user", None)
+            if not user_raw:
+                continue
+            user_id = user_raw.get("id") if isinstance(user_raw, dict) else getattr(user_raw, "id", None)
             if not user_id or user_id in seen:
                 continue
             seen.add(user_id)
