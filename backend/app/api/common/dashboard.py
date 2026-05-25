@@ -892,27 +892,49 @@ async def get_dashboard_activity(
 async def get_dashboard_notifications(
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    """현재 프로젝트의 사용자 알림 — ERROR 인스턴스 카운트."""
+    """현재 프로젝트의 사용자 알림 — ERROR 인스턴스 + 쿼터 임박/초과."""
     project_id = conn._afterglow_project_id
-    notifications = []
+    notifications: list[dict] = []
 
-    try:
-        servers = await cached_call(
-            f"afterglow:nova:{project_id}:servers",
-            ttl_fast(),
-            lambda: _list_servers_as_dicts(conn),
-        )
+    servers, compute_limits, volume_limits = await asyncio.gather(
+        cached_call(f"afterglow:nova:{project_id}:servers", ttl_fast(), lambda: _list_servers_as_dicts(conn)),
+        cached_call(f"afterglow:nova:{project_id}:limits", ttl_normal(), lambda: nova.get_project_limits(conn)),
+        cached_call(f"afterglow:cinder:{project_id}:limits", ttl_normal(), lambda: cinder.get_volume_limits(conn)),
+        return_exceptions=True,
+    )
+
+    # ERROR 인스턴스
+    if not isinstance(servers, Exception):
         error_count = sum(1 for s in servers if s.get("status") == "ERROR")
         if error_count > 0:
             notifications.append(
-                {
-                    "type": "instance_error",
-                    "severity": "danger",
-                    "message": f"오류 상태 인스턴스 {error_count}개",
-                    "count": error_count,
-                }
+                {"type": "instance_error", "severity": "danger", "message": f"오류 상태 인스턴스 {error_count}개", "count": error_count}
             )
-    except Exception:
-        pass
+
+    # 컴퓨트 쿼터 경고
+    def _quota_notif(resource: str, used: int, limit: int) -> dict | None:
+        if limit <= 0:
+            return None
+        pct = used / limit
+        if pct >= 1.0:
+            return {"type": f"quota_full_{resource}", "severity": "danger", "message": f"{resource} 쿼터 가득 참 ({used}/{limit})", "count": 1}
+        if pct >= 0.9:
+            return {"type": f"quota_warn_{resource}", "severity": "warning", "message": f"{resource} 쿼터 {int(pct * 100)}% 사용 ({used}/{limit})", "count": 1}
+        return None
+
+    if isinstance(compute_limits, dict):
+        for key, label in (("instances", "인스턴스"), ("cores", "vCPU"), ("ram", "RAM")):
+            q = compute_limits.get(key, {})
+            if isinstance(q, dict):
+                n = _quota_notif(label, q.get("in_use", 0), q.get("limit", 0))
+                if n:
+                    notifications.append(n)
+
+    if isinstance(volume_limits, dict):
+        q = volume_limits.get("gigabytes", {})
+        if isinstance(q, dict):
+            n = _quota_notif("스토리지(GB)", q.get("in_use", 0), q.get("limit", 0))
+            if n:
+                notifications.append(n)
 
     return {"notifications": notifications}
