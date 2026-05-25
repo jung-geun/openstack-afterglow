@@ -158,8 +158,10 @@ from app.api.identity.admin_libraries import router as admin_libraries_router
 from app.api.identity.admin_notion import router as admin_notion_router
 from app.api.identity.admin_orphans import router as admin_orphans_router
 from app.api.identity.admin_services import router as admin_services_router
+from app.api.identity.invitations import router as invitations_router
 from app.api.identity.profile import router as profile_router
 from app.api.identity.profile_activity import router as profile_activity_router
+from app.api.identity.projects import router as projects_router
 
 _mark("api.identity")
 
@@ -388,6 +390,8 @@ app.include_router(admin_gpu_router, prefix="/api/admin", tags=["admin-gpu"])
 app.include_router(admin_libraries_router, prefix="/api/admin/libraries", tags=["admin-libraries"])
 app.include_router(admin_notion_router, prefix="/api/admin", tags=["admin-notion"])
 app.include_router(admin_images_router, prefix="/api/admin", tags=["admin-images"])
+app.include_router(projects_router, prefix="/api/projects", tags=["projects"])
+app.include_router(invitations_router, prefix="/api/invitations", tags=["invitations"])
 app.include_router(profile_router, prefix="/api/profile", tags=["profile"])
 app.include_router(profile_activity_router, prefix="/api/profile/activity", tags=["profile-activity"])
 app.include_router(admin_activity_router, prefix="/api/admin", tags=["admin-activity"])

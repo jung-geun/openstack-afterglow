@@ -55,6 +55,9 @@ favicon_path = "/favicon.ico"
 # 권장 범위: 3000 ~ 30000
 refresh_interval_ms = 5000
 
+# 초대 이메일 링크 생성에 사용할 프론트엔드 기본 URL (예: https://afterglow.example.com)
+frontend_base_url = ""
+
 [cache]
 redis_url = "redis://redis:6379/0"
 # TTL 티어 (초). 리소스 변경 빈도에 따라 분류.
@@ -365,6 +368,21 @@ openstack_uid = "afterglow-openstack"
 ceph_uid = "afterglow-ceph"
 instance_cpu_uid = "afterglow-instance-cpu"   # CPU 전용 인스턴스 per-VM 대시보드
 instance_gpu_uid = "afterglow-instance-gpu"   # GPU 인스턴스 per-VM 대시보드
+
+
+[smtp]
+# 이메일 전송 설정 (프로젝트 초대 기능에 사용)
+enabled = false
+host = ""                   # SMTP 서버 호스트 (예: smtp.gmail.com)
+port = 587                  # SMTP 포트 (587 = STARTTLS, 465 = SSL)
+username = ""               # SMTP 인증 사용자명
+password = ""               # SMTP 인증 비밀번호 (secret.yaml에서 주입)
+from_address = "noreply@afterglow.example.com"
+from_name = "Afterglow"
+use_tls = true              # STARTTLS 사용 여부
+
+[smtp.invitation]
+token_expiry_days = 7       # 초대 링크 유효 기간 (일)
 
 
 [cors]

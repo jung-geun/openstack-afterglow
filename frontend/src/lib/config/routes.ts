@@ -56,6 +56,10 @@ export const ROUTE_LABELS: Record<string, string> = {
   libraries: '라이브러리 관리',
   templates: '템플릿',
 
+  // Project settings
+  'project-settings': '프로젝트 설정',
+  invitations: '초대',
+
   // Admin
   monitoring: '통합 모니터링',
   services: '서비스 상태',

@@ -289,6 +289,48 @@ async def create_tables() -> None:
             except Exception:
                 pass  # 이미 존재하면 무시
 
+        # 셀프서비스 프로젝트 관리자 역할 테이블
+        try:
+            await conn.exec_driver_sql(
+                "CREATE TABLE IF NOT EXISTS project_roles ("
+                "id INT AUTO_INCREMENT PRIMARY KEY,"
+                "project_id VARCHAR(64) NOT NULL,"
+                "user_id VARCHAR(64) NOT NULL,"
+                "role VARCHAR(32) NOT NULL DEFAULT 'manager',"
+                "granted_by VARCHAR(64) NOT NULL,"
+                "created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),"
+                "UNIQUE KEY uq_project_user_role (project_id, user_id, role),"
+                "KEY idx_project_roles_project (project_id),"
+                "KEY idx_project_roles_user (user_id)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+        except Exception:
+            pass
+
+        # 프로젝트 이메일 초대 테이블
+        try:
+            await conn.exec_driver_sql(
+                "CREATE TABLE IF NOT EXISTS project_invitations ("
+                "id INT AUTO_INCREMENT PRIMARY KEY,"
+                "project_id VARCHAR(64) NOT NULL,"
+                "invited_email VARCHAR(255) NOT NULL,"
+                "invited_user_id VARCHAR(64) DEFAULT NULL,"
+                "invited_by VARCHAR(64) NOT NULL,"
+                "invited_by_name VARCHAR(255) NOT NULL DEFAULT '',"
+                "token_hash VARCHAR(64) NOT NULL UNIQUE,"
+                "status VARCHAR(16) NOT NULL DEFAULT 'pending',"
+                "keystone_role VARCHAR(64) NOT NULL DEFAULT 'member',"
+                "expires_at DATETIME(6) NOT NULL,"
+                "accepted_at DATETIME(6) DEFAULT NULL,"
+                "created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),"
+                "updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),"
+                "KEY idx_project_invitations_status (project_id, status),"
+                "KEY idx_project_invitations_email (invited_email)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+        except Exception:
+            pass
+
     _logger.info("데이터베이스 테이블 생성/확인 완료")
 
 

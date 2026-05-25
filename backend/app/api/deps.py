@@ -213,6 +213,34 @@ def require_admin(token_info: dict = Depends(get_token_info)):
         raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다")
 
 
+async def require_project_manager(
+    project_id: str,
+    token_info: dict = Depends(get_token_info),
+) -> dict:
+    """현재 프로젝트의 manager가 아니면 403. system admin은 bypass.
+
+    엔드포인트에서 Path 파라미터로 project_id를 직접 전달받아 사용:
+        manager = await require_project_manager(project_id, token_info=Depends(get_token_info))
+    또는 헬퍼 함수로 직접 호출:
+        await check_project_manager(project_id, token_info, session)
+    """
+    if token_info.get("is_system_admin", False):
+        return token_info
+
+    from app.database import get_session_factory
+    from app.services.project_service import is_project_manager
+
+    factory = get_session_factory()
+    if factory is None:
+        raise HTTPException(status_code=503, detail="DB를 사용할 수 없습니다")
+
+    async with factory() as session:
+        if not await is_project_manager(project_id, token_info["user_id"], session):
+            raise HTTPException(status_code=403, detail="프로젝트 관리자 권한이 필요합니다")
+
+    return token_info
+
+
 async def get_os_conn(
     authorization: str | None = Header(None),
     x_auth_token: str | None = Header(None),

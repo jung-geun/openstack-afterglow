@@ -29,14 +29,16 @@
 	const publicRoutes = ['/', '/auth/gitlab/callback'];
 	const projectAgnosticRoutes = ['/', '/auth/gitlab/callback', '/select-project'];
 
+	const isInvitationRoute = $derived($page.url.pathname.startsWith('/invitations/'));
+
 	$effect(() => {
-		if (!$isLoggedIn && !publicRoutes.includes($page.url.pathname)) {
+		if (!$isLoggedIn && !publicRoutes.includes($page.url.pathname) && !isInvitationRoute) {
 			goto('/');
 		}
 	});
 
 	$effect(() => {
-		if ($authReady && $isLoggedIn && !$auth.projectId && !projectAgnosticRoutes.includes($page.url.pathname)) {
+		if ($authReady && $isLoggedIn && !$auth.projectId && !projectAgnosticRoutes.includes($page.url.pathname) && !isInvitationRoute) {
 			goto('/select-project');
 		}
 	});
@@ -115,7 +117,7 @@
 
 <svelte:head><link rel="icon" href={$siteConfig.favicon_path} /></svelte:head>
 
-{#if $isLoggedIn && $page.url.pathname.startsWith('/select-project')}
+{#if ($isLoggedIn && $page.url.pathname.startsWith('/select-project')) || isInvitationRoute}
 	<Toast />
 	<main class="min-h-screen bg-gray-950 text-white">
 		{@render children()}

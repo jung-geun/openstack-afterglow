@@ -425,5 +425,49 @@ class K3sClusterTemplate(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class ProjectRole(Base):
+    """afterglow 자체 프로젝트 관리자 역할 (Keystone role과 별개)."""
+
+    __tablename__ = "project_roles"
+
+    id: Mapped[int] = mapped_column(INT, primary_key=True, autoincrement=True)
+    project_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, index=True)
+    role: Mapped[str] = mapped_column(VARCHAR(32), nullable=False, default="manager")
+    granted_by: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+
+    from sqlalchemy import UniqueConstraint
+
+    __table_args__ = (UniqueConstraint("project_id", "user_id", "role", name="uq_project_user_role"),)
+
+
+class ProjectInvitation(Base):
+    """프로젝트 이메일 초대 수명주기."""
+
+    __tablename__ = "project_invitations"
+
+    id: Mapped[int] = mapped_column(INT, primary_key=True, autoincrement=True)
+    project_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, index=True)
+    invited_email: Mapped[str] = mapped_column(VARCHAR(255), nullable=False)
+    invited_user_id: Mapped[str | None] = mapped_column(VARCHAR(64), nullable=True)
+    invited_by: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    invited_by_name: Mapped[str] = mapped_column(VARCHAR(255), nullable=False, default="")
+    token_hash: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, unique=True)
+    status: Mapped[str] = mapped_column(VARCHAR(16), nullable=False, default="pending")
+    keystone_role: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, default="member")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
+    )
+
+    __table_args__ = (
+        Index("idx_project_invitations_status", "project_id", "status"),
+        Index("idx_project_invitations_email", "invited_email"),
+    )
+
+
 # ActivityLog 모델을 Base.metadata 에 등록 (create_tables 자동 감지)
 from app.models.activity import ActivityLog  # noqa: E402,F401

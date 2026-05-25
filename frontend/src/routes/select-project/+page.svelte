@@ -3,11 +3,13 @@
 	import { auth, clearAuth, setAuth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import type { Project } from '$lib/stores/auth';
+	import CreateProjectModal from '$lib/components/projects/CreateProjectModal.svelte';
 
 	let projects = $state<Project[]>([]);
 	let loading = $state(true);
 	let switching = $state(false);
 	let error = $state('');
+	let showCreateModal = $state(false);
 
 	async function load() {
 		loading = true;
@@ -109,7 +111,18 @@
 
 	<!-- 본문 -->
 	<div class="max-w-6xl mx-auto px-6 py-10">
-		<h1 class="text-lg font-semibold text-white mb-6">최근 프로젝트 선택</h1>
+		<div class="flex items-center justify-between mb-6">
+			<h1 class="text-lg font-semibold text-white">최근 프로젝트 선택</h1>
+			<button
+				onclick={() => (showCreateModal = true)}
+				class="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
+			>
+				<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v14M5 12h14"/>
+				</svg>
+				새 프로젝트
+			</button>
+		</div>
 
 		{#if loading}
 			<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -150,3 +163,13 @@
 		{/if}
 	</div>
 </div>
+
+{#if showCreateModal}
+	<CreateProjectModal
+		onClose={() => (showCreateModal = false)}
+		onSuccess={(proj) => {
+			showCreateModal = false;
+			load();
+		}}
+	/>
+{/if}

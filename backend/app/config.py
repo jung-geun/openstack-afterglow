@@ -95,6 +95,7 @@ def _load_toml() -> dict:
     flat["site_description"] = app.get("site_description", "OpenStack VM + OverlayFS 배포 플랫폼")
     flat["logo_path"] = app.get("logo_path", "/logo.png")
     flat["favicon_path"] = app.get("favicon_path", "/favicon.ico")
+    flat["frontend_base_url"] = app.get("frontend_base_url", "")
 
     cache = data.get("cache", {})
     flat["redis_url"] = cache.get("redis_url", "redis://localhost:6379/0")
@@ -265,6 +266,19 @@ def _load_toml() -> dict:
     flat["database_connect_timeout"] = db.get("connect_timeout", 10)
     flat["database_pool_timeout"] = db.get("pool_timeout", 10)
     flat["database_unhealthy_seconds"] = db.get("unhealthy_seconds", 15)
+
+    smtp = data.get("smtp", {})
+    flat["smtp_enabled"] = smtp.get("enabled", False)
+    flat["smtp_host"] = smtp.get("host", "")
+    flat["smtp_port"] = smtp.get("port", 587)
+    flat["smtp_username"] = smtp.get("username", "")
+    flat["smtp_password"] = smtp.get("password", "")
+    flat["smtp_from_address"] = smtp.get("from_address", "noreply@afterglow.example.com")
+    flat["smtp_from_name"] = smtp.get("from_name", "Afterglow")
+    flat["smtp_use_tls"] = smtp.get("use_tls", True)
+    flat["smtp_timeout_seconds"] = smtp.get("timeout_seconds", 10)
+    smtp_inv = smtp.get("invitation", {})
+    flat["smtp_invitation_token_expiry_days"] = smtp_inv.get("token_expiry_days", 7)
 
     cors = data.get("cors", {})
     flat["cors_origins"] = cors.get("origins", "http://localhost:3000,http://localhost")
@@ -500,6 +514,21 @@ class Settings(BaseSettings):
     gitlab_oidc_protocol_id: str = "openid"
     gitlab_oidc_redirect_uri: str = ""
     gitlab_oidc_scopes: str = "openid email profile read_user"
+
+    # SMTP 이메일 전송
+    smtp_enabled: bool = False
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_address: str = "noreply@afterglow.example.com"
+    smtp_from_name: str = "Afterglow"
+    smtp_use_tls: bool = True
+    smtp_timeout_seconds: int = 10
+    smtp_invitation_token_expiry_days: int = 7
+
+    # 프론트엔드 기본 URL (초대 이메일 링크 생성에 사용)
+    frontend_base_url: str = ""
 
     # 로깅 설정
     log_file_path: str = "/app/logs/afterglow-backend.log"

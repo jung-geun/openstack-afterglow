@@ -198,6 +198,15 @@ def render_secret(cfg: dict) -> str:
             f'  NOTION_CONFIG_ENCRYPTION_KEY: {_yaml_str(notion_enc_key)}',
         ])
 
+    smtp = cfg.get("smtp", {})
+    smtp_password = smtp.get("password", "")
+    if smtp_password:
+        lines.extend([
+            "",
+            "  # SMTP 이메일 서버 인증 비밀번호",
+            f'  SMTP_PASSWORD: {_yaml_str(smtp_password)}',
+        ])
+
     lines.append("")
     return "\n".join(lines)
 

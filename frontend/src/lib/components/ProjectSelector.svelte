@@ -3,6 +3,7 @@
 	import { auth, setAuth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSpinner from './LoadingSpinner.svelte';
+	import CreateProjectModal from './projects/CreateProjectModal.svelte';
 
 	interface Project {
 		id: string;
@@ -16,6 +17,7 @@
 	let error = $state('');
 	let isOpen = $state(false);
 	let dropdownRef: HTMLDivElement | null = $state(null);
+	let showCreateModal = $state(false);
 
 	async function fetchProjects() {
 		if (!$auth.token) return;
@@ -110,7 +112,7 @@
 			{:else if projects.length === 0}
 				<div class="p-3 text-sm text-gray-500">접근 가능한 프로젝트가 없습니다</div>
 			{:else}
-				<div class="overflow-y-auto max-h-[calc(50vh-1rem)] sm:max-h-64">
+				<div class="overflow-y-auto max-h-[calc(50vh-4rem)] sm:max-h-52">
 					{#each projects as project}
 						<button
 							onclick={() => selectProject(project)}
@@ -126,6 +128,25 @@
 					{/each}
 				</div>
 			{/if}
+			<div class="border-t border-gray-800">
+				<button
+					onclick={() => { isOpen = false; showCreateModal = true; }}
+					class="w-full text-left px-3 py-2 text-xs text-gray-500 hover:text-white hover:bg-gray-800 transition-colors flex items-center gap-1.5"
+				>
+					<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v14M5 12h14"/></svg>
+					새 프로젝트
+				</button>
+			</div>
 		</div>
 	{/if}
 </div>
+
+{#if showCreateModal}
+	<CreateProjectModal
+		onClose={() => (showCreateModal = false)}
+		onSuccess={(proj) => {
+			showCreateModal = false;
+			fetchProjects();
+		}}
+	/>
+{/if}
