@@ -60,7 +60,7 @@
             {#if isActive}
               <span class="text-[10px] text-blue-400 font-medium px-1.5 py-0.5 rounded bg-blue-500/15 border border-blue-500/30">활성</span>
               <a
-                href="/dashboard/project-settings"
+                href="/dashboard/account#project-members"
                 class="text-[10px] text-gray-500 hover:text-white px-1.5 py-0.5 rounded hover:bg-gray-700 transition-colors"
               >관리</a>
             {/if}
