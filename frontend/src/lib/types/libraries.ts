@@ -20,6 +20,28 @@ export interface FileStorage {
   metadata: Record<string, string>;
 }
 
+export interface LibraryBuild {
+  id: number;
+  library_id: string;
+  file_storage_id: string;
+  server_id: string | null;
+  status: string;
+  cloud_init_status: string | null;
+  progress_step: string;
+  progress_pct: number;
+  error_message: string | null;
+  console_log_excerpt: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string | null;
+}
+
+export interface LibraryBuildDetail extends LibraryBuild {
+  vm_status: string | null;
+  vm_ip: string | null;
+  live_console: string | null;
+}
+
 export interface TsPoint { ts: number; [key: string]: number | undefined; }
 
 export interface GraphNode {

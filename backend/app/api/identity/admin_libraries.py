@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from app.api.common.activity_recorder import rec
 from app.api.deps import get_os_conn, get_token_info, require_admin
 from app.services import libraries as lib_svc
-from app.services import library_builder, manila, neutron
+from app.services import library_builder, manila, neutron, nova
 from app.services.keystone import get_service_project_connection
 
 _logger = logging.getLogger(__name__)
@@ -99,14 +99,84 @@ async def list_library_builds(
             "file_storage_id": row.file_storage_id,
             "server_id": row.server_id,
             "status": row.status,
+            "cloud_init_status": row.cloud_init_status,
             "progress_step": row.progress_step,
             "progress_pct": row.progress_pct,
             "error_message": row.error_message,
+            "console_log_excerpt": (row.console_log_excerpt or "")[-500:] if row.console_log_excerpt else None,
             "started_at": row.started_at.isoformat() if row.started_at else None,
             "completed_at": row.completed_at.isoformat() if row.completed_at else None,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
         }
         for row in rows
     ]
+
+
+@router.get("/builds/{build_id}", dependencies=[Depends(require_admin)])
+async def get_library_build(build_id: int) -> dict:
+    """빌드 상세 조회 — VM 실시간 상태·콘솔 로그 포함. 관리자 전용."""
+    from sqlalchemy import select
+
+    from app.database import get_session_factory
+    from app.models.db import LibraryBuild
+
+    factory = get_session_factory()
+    if factory is None:
+        raise HTTPException(status_code=503, detail="DB가 초기화되지 않았습니다")
+
+    async with factory() as session:
+        row = (
+            await session.execute(select(LibraryBuild).where(LibraryBuild.id == build_id))
+        ).scalar_one_or_none()
+
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"빌드 {build_id}를 찾을 수 없습니다")
+
+    _TERMINAL = {"complete", "error", "timeout", "cancelled"}
+    is_active = row.status not in _TERMINAL
+
+    vm_status: str | None = None
+    vm_ip: str | None = None
+    live_console: str | None = None
+
+    if row.server_id:
+        try:
+            svc_conn = await asyncio.to_thread(get_service_project_connection)
+            server = await asyncio.to_thread(nova.get_server, svc_conn, row.server_id)
+            vm_status = server.status
+            # fixed IP 우선, 없으면 floating
+            ips = [a.addr for a in (server.ip_addresses or []) if a.type == "fixed"]
+            if not ips:
+                ips = [a.addr for a in (server.ip_addresses or [])]
+            vm_ip = ips[0] if ips else None
+
+            if is_active:
+                live_console = await asyncio.to_thread(
+                    nova.get_console_output, svc_conn, row.server_id, 300
+                )
+        except Exception:
+            _logger.warning("[admin_libraries] VM 정보 조회 실패: server_id=%s", row.server_id, exc_info=True)
+
+    return {
+        "id": row.id,
+        "library_id": row.library_id,
+        "file_storage_id": row.file_storage_id,
+        "server_id": row.server_id,
+        "port_id": row.port_id,
+        "status": row.status,
+        "cloud_init_status": row.cloud_init_status,
+        "progress_step": row.progress_step,
+        "progress_pct": row.progress_pct,
+        "error_message": row.error_message,
+        "console_log_excerpt": row.console_log_excerpt,
+        "started_at": row.started_at.isoformat() if row.started_at else None,
+        "completed_at": row.completed_at.isoformat() if row.completed_at else None,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        # 실시간 VM 정보
+        "vm_status": vm_status,
+        "vm_ip": vm_ip,
+        "live_console": live_console,
+    }
 
 
 @router.get("/{library_id}", dependencies=[Depends(require_admin)])
