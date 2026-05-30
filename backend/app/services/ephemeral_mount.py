@@ -21,11 +21,16 @@ async def create_builder_share(
     name: str,
     size_gb: int,
     share_proto: str,  # "NFS" | "CEPHFS"
+    metadata: dict | None = None,
 ) -> str:
     """Manila share를 생성하고 share ID를 반환한다.
 
     NFS: os_manila_nfs_share_type + os_manila_share_network_id 사용.
     CephFS: os_manila_share_type 사용, share_network_id 생략(DHSS=False 백엔드 대응).
+
+    Args:
+        metadata: 기본 메타데이터(union_type, union_status)에 병합할 추가 키-값.
+                  예: {"union_library": library_id, "union_version": "3.11"}
     """
     settings = get_settings()
     proto_upper = share_proto.upper()
@@ -37,6 +42,10 @@ async def create_builder_share(
         share_type = settings.os_manila_share_type
         share_network_id = ""
 
+    base_metadata: dict = {"union_type": "ephemeral-build", "union_status": "building"}
+    if metadata:
+        base_metadata.update(metadata)
+
     storage = await asyncio.to_thread(
         manila.create_file_storage,
         svc_conn,
@@ -45,7 +54,7 @@ async def create_builder_share(
         share_network_id=share_network_id,
         share_type=share_type,
         share_proto=proto_upper,
-        metadata={"union_type": "ephemeral-build", "union_status": "building"},
+        metadata=base_metadata,
     )
     _logger.info("[ephemeral_mount] share 생성 완료: %s (%s, %dGB)", storage.id, proto_upper, size_gb)
     return storage.id

@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 
 from app.config import get_settings
 from app.services import ephemeral_mount, library_recipes, manila, neutron, nova
+from app.services import libraries as lib_svc
 from app.services.builder_vm import _ensure_ephemeral_keypair
 from app.services.cloud_init_builder import render_user_data
 from app.services.keystone import get_service_project_connection
@@ -153,6 +154,9 @@ async def run_ephemeral_build(library_id: str, build_db_id: int) -> None:
         if recipe is None:
             raise RuntimeError(f"라이브러리 레시피가 없습니다: {library_id}")
 
+        lib = lib_svc.get_by_id(library_id)
+        library_version: str = lib.version
+
         proto = (recipe.share_proto or "NFS").upper()
         image_id = recipe.base_image_id or settings.builder_image_id
         if not image_id:
@@ -165,6 +169,10 @@ async def run_ephemeral_build(library_id: str, build_db_id: int) -> None:
             name=f"union-prebuilt-{library_id}-{build_token[:8]}",
             size_gb=recipe.share_size_gb,
             share_proto=proto,
+            metadata={
+                "union_library": library_id,
+                "union_version": library_version,
+            },
         )
         await _update_db(build_db_id, file_storage_id=share_id)
 
@@ -283,7 +291,7 @@ async def run_ephemeral_build(library_id: str, build_db_id: int) -> None:
         failure_tok = f"{_FAILURE_SENTINEL}{build_token}"
 
         if success_tok in console:
-            await _handle_success(conn, library_id, share_id, proto, build_db_id, rw_access_id)
+            await _handle_success(conn, library_id, library_version, share_id, proto, build_db_id, rw_access_id)
             rw_access_id = None  # 이미 회수됨
         elif failure_tok in console:
             raise RuntimeError("cloud-init FAILURE sentinel 감지 — console_log_excerpt 참조")
@@ -346,6 +354,7 @@ async def run_ephemeral_build(library_id: str, build_db_id: int) -> None:
 async def _handle_success(
     conn,
     library_id: str,
+    library_version: str,
     share_id: str,
     proto: str,
     build_db_id: int,
@@ -364,9 +373,11 @@ async def _handle_success(
     # RO CephX rule 생성 (CephFS만)
     ro_user = f"union-ro-{library_id}"
     metadata: dict[str, str] = {
+        "union_type": "prebuilt",   # 완료 share를 prebuilt로 승격 → 409 dedup 정상 작동
         "union_status": "ready",
         "union_built_at": datetime.now(UTC).isoformat(),
         "union_library": library_id,
+        "union_version": library_version,
     }
 
     if proto == "CEPHFS":

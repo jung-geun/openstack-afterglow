@@ -67,8 +67,18 @@
   function getBuildStatus(lib: LibraryConfig): string {
     const fs = getStorageForLibrary(lib);
     if (!fs) return 'none';
-    const unionStatus = fs.metadata?.union_status ?? fs.status;
-    if (unionStatus === 'available' || fs.status === 'available') return 'ready';
+
+    // union_status 메타데이터를 1순위로 판단
+    const unionStatus = fs.metadata?.union_status;
+    if (unionStatus) {
+      if (unionStatus === 'ready') return 'ready';
+      if (unionStatus === 'building' || unionStatus === 'pending') return 'building';
+      if (unionStatus === 'error' || unionStatus === 'indeterminate') return 'failed';
+      if (unionStatus === 'cancelled') return 'none';
+    }
+
+    // union_status 없을 때 Manila share status 폴백
+    if (fs.status === 'available') return 'ready';
     if (fs.status === 'creating' || fs.status === 'extending') return 'building';
     if (fs.status === 'error') return 'failed';
     return fs.status;
