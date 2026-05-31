@@ -104,9 +104,9 @@ async def list_library_builds(
             "progress_pct": row.progress_pct,
             "error_message": row.error_message,
             "console_log_excerpt": (row.console_log_excerpt or "")[-500:] if row.console_log_excerpt else None,
-            "started_at": row.started_at.isoformat() if row.started_at else None,
-            "completed_at": row.completed_at.isoformat() if row.completed_at else None,
-            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "started_at": row.started_at.isoformat() + "Z" if row.started_at else None,
+            "completed_at": row.completed_at.isoformat() + "Z" if row.completed_at else None,
+            "created_at": row.created_at.isoformat() + "Z" if row.created_at else None,
         }
         for row in rows
     ]
@@ -169,9 +169,9 @@ async def get_library_build(build_id: int) -> dict:
         "progress_pct": row.progress_pct,
         "error_message": row.error_message,
         "console_log_excerpt": row.console_log_excerpt,
-        "started_at": row.started_at.isoformat() if row.started_at else None,
-        "completed_at": row.completed_at.isoformat() if row.completed_at else None,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "started_at": row.started_at.isoformat() + "Z" if row.started_at else None,
+        "completed_at": row.completed_at.isoformat() + "Z" if row.completed_at else None,
+        "created_at": row.created_at.isoformat() + "Z" if row.created_at else None,
         # 실시간 VM 정보
         "vm_status": vm_status,
         "vm_ip": vm_ip,

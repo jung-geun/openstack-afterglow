@@ -78,12 +78,16 @@
 
   function fmtRelative(iso: string | null | undefined): string {
     if (!iso) return '—';
-    const ms = Date.now() - new Date(iso).getTime();
+    // timezone suffix 없는 UTC naive datetime을 로컬 시간으로 오해석하는 것을 방지
+    const utcIso = iso.endsWith('Z') || iso.includes('+') ? iso : iso + 'Z';
+    const ms = Date.now() - new Date(utcIso).getTime();
     const s = Math.floor(ms / 1000);
     if (s < 60) return `${s}초 전`;
     const m = Math.floor(s / 60);
     if (m < 60) return `${m}분 전`;
-    return `${Math.floor(m / 60)}시간 전`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}시간 전`;
+    return `${Math.floor(h / 24)}일 전`;
   }
 
   async function loadUsage(range: string) {
