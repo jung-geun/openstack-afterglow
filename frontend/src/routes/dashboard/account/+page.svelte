@@ -2,9 +2,6 @@
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
   import ProfileSection from '$lib/components/account/ProfileSection.svelte';
   import PasswordSection from '$lib/components/account/PasswordSection.svelte';
-  import ThemeSection from '$lib/components/account/ThemeSection.svelte';
-  import ProjectsSection from '$lib/components/account/ProjectsSection.svelte';
-  import ProjectSettingsSection from '$lib/components/account/ProjectSettingsSection.svelte';
   import KeypairsSection from '$lib/components/account/KeypairsSection.svelte';
   import ActivitySection from '$lib/components/account/ActivitySection.svelte';
 </script>
@@ -32,11 +29,6 @@
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
     <ProfileSection />
     <PasswordSection />
-    <ThemeSection />
-    <ProjectsSection />
-    <div class="lg:col-span-2" id="project-members">
-      <ProjectSettingsSection />
-    </div>
     <div class="lg:col-span-2">
       <KeypairsSection />
     </div>
