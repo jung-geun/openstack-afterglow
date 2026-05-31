@@ -781,8 +781,9 @@ async def start_background_workers():
     if _svc_cfg.service_k3s_enabled:
         asyncio.create_task(_k3s_cleanup_loop())
 
-    from app.services.library_builder import _build_worker
+    from app.services.library_builder import _build_worker, cleanup_stale_builds
 
+    await cleanup_stale_builds()
     asyncio.create_task(_build_worker())
 
 

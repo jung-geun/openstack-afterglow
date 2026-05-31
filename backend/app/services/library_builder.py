@@ -204,6 +204,48 @@ def get_build_queue_status() -> dict:
     }
 
 
+async def cleanup_stale_builds() -> None:
+    """백엔드 재시작 시 비터미널 상태로 남은 고아 빌드를 error 로 마킹한다.
+
+    asyncio.Queue 는 인메모리이므로 재시작하면 진행 중이던 태스크가 사라지지만
+    DB row 는 building/queued 등 비터미널 상태로 남는다. 이 함수는 startup 시
+    해당 row 들을 error 로 마킹해 UI 에서 영구 멈춤으로 보이지 않도록 한다.
+    """
+    from sqlalchemy import select
+
+    from app.database import get_session_factory
+    from app.models.db import LibraryBuild
+
+    factory = get_session_factory()
+    if factory is None:
+        return
+
+    _TERMINAL = {"complete", "error", "timeout", "cancelled"}
+    now = datetime.now(UTC)
+
+    async with factory() as session:
+        rows = (
+            await session.execute(
+                select(LibraryBuild).where(LibraryBuild.status.notin_(_TERMINAL))
+            )
+        ).scalars().all()
+
+        if not rows:
+            return
+
+        ids = [r.id for r in rows]
+        for row in rows:
+            row.status = "error"
+            row.cloud_init_status = "failure"
+            row.progress_step = "백엔드 재시작으로 중단됨"
+            row.error_message = "백엔드 프로세스가 재시작되어 빌드가 중단되었습니다"
+            row.completed_at = now
+
+        await session.commit()
+
+    _logger.warning("[builder] 고아 빌드 %d건 정리됨: ids=%s", len(ids), ids)
+
+
 async def _build_worker() -> None:
     """빌드 큐 워커 — 애플리케이션 lifespan 동안 실행되는 무한 루프.
 
