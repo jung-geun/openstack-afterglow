@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { auth } from '$lib/stores/auth';
+  import { auth, setAuth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
 
   interface Project {
@@ -13,6 +13,7 @@
 
   let projects = $state<Project[]>([]);
   let loading = $state(true);
+  let switching = $state(false);
   let error = $state('');
 
   async function load() {
@@ -24,6 +25,45 @@
       error = e instanceof ApiError ? e.message : '조회 실패';
     } finally {
       loading = false;
+    }
+  }
+
+  async function selectProject(proj: Project) {
+    if (!$auth.token || switching) return;
+    if (proj.id === $auth.projectId) return;
+
+    switching = true;
+    try {
+      const resp = await api.post<{
+        token: string;
+        refresh_token: string;
+        expires_at: string;
+        project_id: string;
+        project_name: string;
+        user_id: string;
+        username: string;
+        roles: string[];
+        is_system_admin: boolean;
+      }>('/api/auth/switch-project', { project_id: proj.id }, $auth.token);
+
+      setAuth({
+        token: resp.token,
+        refreshToken: resp.refresh_token,
+        accessExpiresAt: resp.expires_at
+          ? Math.floor(new Date(resp.expires_at).getTime() / 1000)
+          : null,
+        projectId: resp.project_id,
+        projectName: resp.project_name,
+        roles: resp.roles ?? [],
+        isSystemAdmin: !!resp.is_system_admin,
+      });
+
+      // 기본 네트워크 확인/생성 (fire-and-forget)
+      api.post('/api/networks/ensure-default', {}, resp.token, resp.project_id).catch(() => {});
+    } catch (e) {
+      error = e instanceof ApiError ? `전환 실패: ${e.message}` : '프로젝트 전환 실패';
+    } finally {
+      switching = false;
     }
   }
 
@@ -49,7 +89,14 @@
     <div class="space-y-2">
       {#each projects as proj (proj.id)}
         {@const isActive = $auth.projectId === proj.id}
-        <div class="flex items-center gap-3 px-3 py-2.5 rounded-lg {isActive ? 'bg-blue-500/10 border border-blue-500/30' : 'bg-gray-800/50'}">
+        <button
+          onclick={() => selectProject(proj)}
+          disabled={switching || isActive}
+          class="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors disabled:cursor-default
+            {isActive
+              ? 'bg-blue-500/10 border border-blue-500/30'
+              : 'bg-gray-800/50 hover:bg-gray-700/60 cursor-pointer'}"
+        >
           <div class="flex-1 min-w-0">
             <div class="text-sm font-medium truncate {isActive ? 'text-blue-300' : 'text-white'}">{proj.name}</div>
             {#if proj.description}
@@ -59,9 +106,14 @@
           <div class="flex items-center gap-1.5 shrink-0">
             {#if isActive}
               <span class="text-[10px] text-blue-400 font-medium px-1.5 py-0.5 rounded bg-blue-500/15 border border-blue-500/30">활성</span>
+            {:else if switching}
+              <svg class="w-3.5 h-3.5 text-gray-500 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
+              </svg>
             {/if}
           </div>
-        </div>
+        </button>
       {/each}
     </div>
   {/if}

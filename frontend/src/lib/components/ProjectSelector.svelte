@@ -106,13 +106,13 @@
 	</button>
 
 	{#if isOpen && !loading}
-		<div class="fixed left-0 bottom-0 w-full sm:absolute sm:bottom-auto sm:top-full sm:mt-1 sm:left-0 sm:w-64 max-h-[50vh] sm:max-h-64 bg-gray-900 border border-gray-700 rounded-t-lg sm:rounded-lg shadow-xl z-50 overflow-hidden">
+		<div class="fixed left-0 bottom-0 w-full sm:absolute sm:bottom-auto sm:top-full sm:mt-1 sm:left-0 sm:w-64 max-h-[50vh] bg-gray-900 border border-gray-700 rounded-t-lg sm:rounded-lg shadow-xl z-50 overflow-hidden">
 			{#if error}
 				<div class="p-3 text-sm text-red-400">{error}</div>
 			{:else if projects.length === 0}
 				<div class="p-3 text-sm text-gray-500">접근 가능한 프로젝트가 없습니다</div>
 			{:else}
-				<div class="overflow-y-auto max-h-[calc(50vh-4rem)] sm:max-h-52">
+				<div class="overflow-y-auto max-h-[calc(50vh-6rem)] sm:max-h-52">
 					{#each projects as project}
 						<button
 							onclick={() => selectProject(project)}
