@@ -161,8 +161,11 @@ def _render_runcmd_body(mount_lines: list[str], build_token: str) -> str:
     failure_sentinel = f"::AFTERGLOW::FAILURE::{build_token}"
 
     # mount_lines를 &&로 연결하고 run-build.sh 까지 포함
+    # NOTE: 멀티라인 \\\n && 연결 시 YAML literal block scalar 내에서 &&로 시작하는
+    # 라인이 block scalar 확립 들여쓰기보다 얕아져 YAML 앵커(&)로 오해석되는 버그가
+    # 발생한다. 단일 라인 && 연결로 고정한다.
     chain_lines = mount_lines + ["bash /usr/local/bin/run-build.sh"]
-    mount_and_build = " \\\n  && ".join(chain_lines)
+    mount_and_build = " && ".join(chain_lines)
 
     return textwrap.dedent(f"""\
         set +e
