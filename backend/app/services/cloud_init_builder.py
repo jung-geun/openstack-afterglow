@@ -71,6 +71,10 @@ def render_user_data(
         "#cloud-config",
         "package_update: true",
         "package_upgrade: false",
+        # apt-daily-upgrade가 빌드 VM에서 30분 타임아웃을 유발하는 것을 방지
+        "bootcmd:",
+        "  - systemctl mask apt-daily.service apt-daily-upgrade.service 2>/dev/null || true",
+        "  - systemctl stop apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true",
     ]
 
     if apt_pkgs:
