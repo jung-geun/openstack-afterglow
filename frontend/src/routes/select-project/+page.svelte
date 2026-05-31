@@ -15,7 +15,19 @@
 		loading = true;
 		error = '';
 		try {
-			projects = await api.get<Project[]>('/api/auth/projects/recent', $auth.token ?? undefined);
+			const [projs, profile] = await Promise.all([
+				api.get<Project[]>('/api/auth/projects/recent', $auth.token ?? undefined),
+				api.get<{ default_project_id: string }>('/api/profile', $auth.token ?? undefined).catch(() => null),
+			]);
+			projects = projs;
+
+			if (profile?.default_project_id) {
+				const defaultProj = projs.find(p => p.id === profile.default_project_id);
+				if (defaultProj) {
+					await selectProject(defaultProj);
+					return;
+				}
+			}
 		} catch (e) {
 			error = e instanceof ApiError ? e.message : '프로젝트 목록을 불러오지 못했습니다';
 		} finally {
