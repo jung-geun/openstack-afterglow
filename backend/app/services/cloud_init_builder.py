@@ -180,13 +180,15 @@ def _render_runcmd_body(mount_lines: list[str], build_token: str) -> str:
             touch /mnt/share/.union_build_complete
             mkdir -p /mnt/share/_build_logs
             cp /var/log/cloud-init-output.log /mnt/share/_build_logs/ 2>/dev/null || true
-            sync
             umount /mnt/share 2>/dev/null || true
             echo "{success_sentinel}"
           else
-            sync
             umount /mnt/share 2>/dev/null || true
             echo "{failure_sentinel}::rc=$_rc"
           fi
         }} 2>&1 | tee /dev/console
+        # power_state: poweroff 는 cloud-init 전체 완료 후 실행되므로
+        # runcmd 에서 직접 poweroff 해 SHUTOFF 지연을 방지한다
+        sync
+        poweroff
     """)
