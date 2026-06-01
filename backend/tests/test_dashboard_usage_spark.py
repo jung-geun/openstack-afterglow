@@ -7,9 +7,18 @@ NaN 필터, Redis 캐시, invalid range 400.
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _default_servers(mock_conn):
+    """대시보드 PromQL 핸들러는 UUID 필터 구성을 위해 서버 1개 이상이 필요하다.
+    빈 프로젝트 테스트는 mock_conn.compute.servers.return_value = [] 로 덮어쓴다."""
+    s = MagicMock()
+    s.id = "test-server-uuid-1"
+    mock_conn.compute.servers.return_value = [s]
 
 
 def _patch_prom_query(return_value=None):

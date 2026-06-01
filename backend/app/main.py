@@ -156,17 +156,33 @@ from app.api.identity.admin_instances import router as admin_instances_router
 from app.api.identity.admin_libraries import router as admin_libraries_router
 from app.api.identity.admin_notion import router as admin_notion_router
 from app.api.identity.admin_orphans import router as admin_orphans_router
+from app.api.identity.admin_dashboard import router as admin_dashboard_router
 from app.api.identity.admin_secrets import router as admin_secrets_router
 from app.api.identity.admin_services import router as admin_services_router
+from app.api.identity.invitations import router as invitations_router
 from app.api.identity.profile import router as profile_router
 from app.api.identity.profile_activity import router as profile_activity_router
+from app.api.identity.projects import router as projects_router
 
 _mark("api.identity")
 
 # ---------------------------------------------------------------------------
 # app.api.k3s + network + storage
 # ---------------------------------------------------------------------------
-from app.api.k3s import k3s_callback_router, k3s_clusters_router, k3s_health_router
+from app.api.k3s import (
+    k3s_callback_router,
+    k3s_certificates_router,
+    k3s_clusters_router,
+    k3s_configmaps_router,
+    k3s_health_router,
+    k3s_nodegroups_router,
+    k3s_pods_router,
+    k3s_secrets_router,
+    k3s_services_router,
+    k3s_shell_router,
+    k3s_templates_router,
+    k3s_workloads_router,
+)
 from app.api.network import (
     loadbalancers_router,
     networks_router,
@@ -378,6 +394,9 @@ app.include_router(profile_router, prefix="/api/profile", tags=["profile"])
 app.include_router(profile_activity_router, prefix="/api/profile/activity", tags=["profile-activity"])
 app.include_router(admin_activity_router, prefix="/api/admin", tags=["admin-activity"])
 app.include_router(admin_orphans_router, prefix="/api/admin", tags=["admin-orphans"])
+app.include_router(admin_dashboard_router, prefix="/api/admin", tags=["admin-dashboard"])
+app.include_router(projects_router, prefix="/api/projects", tags=["projects"])
+app.include_router(invitations_router, prefix="/api/invitations", tags=["invitations"])
 # Compute
 app.include_router(images_router, prefix="/api/images", tags=["images"])
 app.include_router(flavors_router, prefix="/api/flavors", tags=["flavors"])
@@ -416,6 +435,15 @@ if _svc_cfg.service_k3s_enabled:
     app.include_router(k3s_clusters_router, prefix="/api/k3s/clusters", tags=["k3s"])
     app.include_router(k3s_health_router, prefix="/api/k3s/clusters", tags=["k3s-health"])
     app.include_router(k3s_callback_router, prefix="/api/k3s", tags=["k3s-callback"])
+    app.include_router(k3s_configmaps_router, prefix="/api/k3s/clusters", tags=["k3s-configmaps"])
+    app.include_router(k3s_secrets_router, prefix="/api/k3s/clusters", tags=["k3s-secrets"])
+    app.include_router(k3s_pods_router, prefix="/api/k3s/clusters", tags=["k3s-pods"])
+    app.include_router(k3s_services_router, prefix="/api/k3s/clusters", tags=["k3s-services"])
+    app.include_router(k3s_workloads_router, prefix="/api/k3s/clusters", tags=["k3s-workloads"])
+    app.include_router(k3s_shell_router, prefix="/api/k3s/clusters", tags=["k3s-shell"])
+    app.include_router(k3s_templates_router, prefix="/api/k3s/cluster-templates", tags=["k3s-templates"])
+    app.include_router(k3s_nodegroups_router, prefix="/api/k3s/clusters", tags=["k3s-nodegroups"])
+    app.include_router(k3s_certificates_router, prefix="/api/k3s/clusters", tags=["k3s-certificates"])
 
 # Union Mount 레이어 시스템 (DB 연결 시 항상 활성화)
 from app.api.union import router as union_router  # noqa: E402

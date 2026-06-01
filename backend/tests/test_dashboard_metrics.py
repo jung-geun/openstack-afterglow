@@ -1,8 +1,16 @@
 """Phase 52e — /api/dashboard/metrics/trend PromQL trend endpoint 검증."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _default_servers(mock_conn):
+    """대시보드 PromQL 핸들러는 UUID 필터 구성을 위해 서버 1개 이상이 필요하다."""
+    s = MagicMock()
+    s.id = "test-server-uuid-1"
+    mock_conn.compute.servers.return_value = [s]
 
 
 @pytest.mark.asyncio

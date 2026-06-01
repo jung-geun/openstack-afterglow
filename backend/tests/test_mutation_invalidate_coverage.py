@@ -96,6 +96,14 @@ EXEMPT_HANDLERS: set[str] = {
     "demote_manager",
     "accept_invitation",
     "decline_invitation",
+    # Barbican ACL / quota operations — state is owned by the Barbican service.
+    # These mutations do not affect any local resource-cache keys, so local
+    # cache invalidation is not applicable here.
+    "set_project_quota",
+    "delete_project_quota",
+    "set_secret_acl",
+    "delete_secret_acl",
+    "set_container_acl",
 }
 
 # ---------------------------------------------------------------------------
