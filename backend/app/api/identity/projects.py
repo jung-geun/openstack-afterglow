@@ -57,7 +57,7 @@ async def list_project_members(
     token_info: dict = Depends(get_token_info),
     session: AsyncSession = Depends(get_session),
 ):
-    """프로젝트 멤버 목록 (Keystone role 할당 + manager 뱃지)."""
+    """프로젝트 멤버 목록 (Keystone role 할당 + manager 뱃지 + 본인 그룹 멤버 확장)."""
     await require_project_manager(project_id, token_info)
 
     # afterglow manager 목록
@@ -68,37 +68,74 @@ async def list_project_members(
         )
     )
     manager_user_ids = {r.user_id for r in result.scalars().all()}
+    current_user_id = token_info["user_id"]
 
-    # Keystone role 할당 목록
     def _list_members():
         from app.services import keystone
         ks = keystone._get_admin_ks_client()
         assignments = ks.role_assignments.list(project=project_id)
+
         members = []
-        seen = set()
+        seen: set[str] = set()
+        group_ids: list[str] = []
+
+        # 직접 할당된 사용자 수집
         for a in assignments:
             user_raw = getattr(a, "user", None)
-            if not user_raw:
-                continue
-            user_id = user_raw.get("id") if isinstance(user_raw, dict) else getattr(user_raw, "id", None)
-            if not user_id or user_id in seen:
-                continue
-            seen.add(user_id)
+            group_raw = getattr(a, "group", None)
+            if user_raw:
+                user_id = user_raw.get("id") if isinstance(user_raw, dict) else getattr(user_raw, "id", None)
+                if not user_id or user_id in seen:
+                    continue
+                seen.add(user_id)
+                try:
+                    u = ks.users.get(user_id)
+                    members.append({
+                        "user_id": user_id,
+                        "username": u.name or "",
+                        "email": getattr(u, "email", "") or "",
+                        "is_manager": user_id in manager_user_ids,
+                        "source": "direct",
+                    })
+                except Exception:
+                    members.append({
+                        "user_id": user_id,
+                        "username": "",
+                        "email": "",
+                        "is_manager": user_id in manager_user_ids,
+                        "source": "direct",
+                    })
+            elif group_raw:
+                group_id = group_raw.get("id") if isinstance(group_raw, dict) else getattr(group_raw, "id", None)
+                if group_id and group_id not in group_ids:
+                    group_ids.append(group_id)
+
+        # 본인이 속한 그룹의 멤버 확장
+        for group_id in group_ids:
             try:
-                u = ks.users.get(user_id)
-                members.append({
-                    "user_id": user_id,
-                    "username": u.name or "",
-                    "email": getattr(u, "email", "") or "",
-                    "is_manager": user_id in manager_user_ids,
-                })
+                group_members = list(ks.users.list(group=group_id))
+                if not any(m.id == current_user_id for m in group_members):
+                    continue
+                try:
+                    group_info = ks.groups.get(group_id)
+                    group_name = group_info.name or group_id
+                except Exception:
+                    group_name = group_id
+                for m in group_members:
+                    if m.id in seen:
+                        continue
+                    seen.add(m.id)
+                    members.append({
+                        "user_id": m.id,
+                        "username": m.name or "",
+                        "email": getattr(m, "email", "") or "",
+                        "is_manager": m.id in manager_user_ids,
+                        "source": "group",
+                        "group_name": group_name,
+                    })
             except Exception:
-                members.append({
-                    "user_id": user_id,
-                    "username": "",
-                    "email": "",
-                    "is_manager": user_id in manager_user_ids,
-                })
+                continue
+
         return members
 
     try:

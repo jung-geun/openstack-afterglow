@@ -21,6 +21,8 @@ export interface ProjectManagerMember {
 	username: string;
 	email: string;
 	is_manager: boolean;
+	source?: 'direct' | 'group';
+	group_name?: string;
 }
 
 export interface ProjectInvitation {
