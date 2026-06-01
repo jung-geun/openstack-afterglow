@@ -161,6 +161,14 @@ async def _resolve_jwt_token_info(bearer_token: str, x_project_id: str | None) -
     effective_project_id = target_project_id or sess.get("project_id", jwt_project_id)
     info = await _cached_validate(sess["keystone_token"], effective_project_id)
 
+    # validate_token은 POST /v3/auth/tokens으로 새 Keystone 토큰을 발급한다.
+    # 새 토큰이 원본과 다르면 Redis 세션에 역기록해 Keystone TTL 만료 문제를 방지.
+    new_ks_token = info.get("token", "")
+    if new_ks_token and new_ks_token != sess.get("keystone_token"):
+        from app.services.session_store import update_session_token
+
+        asyncio.create_task(update_session_token(refresh_jti, new_ks_token))
+
     # X-Project-Id로 실제 rescope가 발생한 경우에만 접근 기록 (fire-and-forget)
     user_id_for_record = info.get("user_id", payload.get("sub", ""))
     if x_project_id and x_project_id != jwt_project_id and user_id_for_record:
@@ -193,7 +201,12 @@ async def get_token_info(
     """
     if authorization and authorization.startswith("Bearer "):
         bearer = authorization[7:]
-        return await _resolve_jwt_token_info(bearer, x_project_id)
+        try:
+            return await _resolve_jwt_token_info(bearer, x_project_id)
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(status_code=401, detail="세션이 만료되었습니다. 다시 로그인해 주세요.")
 
     if not x_auth_token:
         raise HTTPException(status_code=401, detail="인증 헤더가 필요합니다")

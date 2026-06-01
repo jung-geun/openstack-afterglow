@@ -75,6 +75,26 @@ async def delete_session(jti: str) -> None:
     await r.delete(_key(jti))
 
 
+async def update_session_token(jti: str, new_keystone_token: str) -> None:
+    """세션의 keystone_token을 새 토큰으로 갱신. TTL은 기존 값 유지.
+
+    validate_token이 POST /v3/auth/tokens으로 새 Keystone 토큰을 발급할 때 호출.
+    원본 토큰이 만료되기 전에 세션을 갱신해 1시간 TTL 문제를 방지.
+    """
+    r = await _get_redis()
+    key = _key(jti)
+    raw = await r.get(key)
+    if raw is None:
+        return
+    sess = json.loads(raw)
+    if sess.get("keystone_token") == new_keystone_token:
+        return
+    sess["keystone_token"] = new_keystone_token
+    ttl = await r.ttl(key)
+    if ttl > 0:
+        await r.setex(key, ttl, json.dumps(sess))
+
+
 async def revoke_user_sessions(user_id: str) -> int:
     """사용자의 모든 refresh 세션을 즉시 삭제. admin role 박탈 등 강제 로그아웃 시 호출.
 
