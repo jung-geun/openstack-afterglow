@@ -331,6 +331,25 @@ async def create_tables() -> None:
         except Exception:
             pass
 
+        # Stampede 오토스케일 컬럼 추가 (014_stampede, 없는 경우에만)
+        try:
+            await conn.exec_driver_sql(
+                "ALTER TABLE k3s_clusters ADD COLUMN stampede_enabled TINYINT(1) NOT NULL DEFAULT 0"
+            )
+        except Exception:
+            pass  # 이미 존재하면 무시
+
+        for _col_sql in [
+            "ALTER TABLE k3s_nodegroups ADD COLUMN stampede_enabled TINYINT(1) NOT NULL DEFAULT 0",
+            "ALTER TABLE k3s_nodegroups ADD COLUMN min_size INT NOT NULL DEFAULT 0",
+            "ALTER TABLE k3s_nodegroups ADD COLUMN max_size INT NOT NULL DEFAULT 5",
+            "ALTER TABLE k3s_nodegroups ADD COLUMN stampede_state JSON DEFAULT NULL",
+        ]:
+            try:
+                await conn.exec_driver_sql(_col_sql)
+            except Exception:
+                pass  # 이미 존재하면 무시
+
     _logger.info("데이터베이스 테이블 생성/확인 완료")
 
 
