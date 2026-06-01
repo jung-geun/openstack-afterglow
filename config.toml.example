@@ -265,6 +265,12 @@ ssh_user = "ubuntu"
 #   - K8s: Secret 볼륨으로 /etc/afterglow/ssh/builder.key 에 마운트
 #   - 로컬/Compose: 최초 생성 시 이 경로에 자동 저장
 ssh_key_path = "/etc/afterglow/ssh/builder.key"
+# ssh_private_key: SSH 개인키 내용 (PEM 형식)
+#   - K8s 배포 전용: generate_k8s.py가 이 값을 secret.yaml의 BUILDER_SSH_PRIVATE_KEY 로 출력
+#     → deployment.yaml이 afterglow-secrets의 BUILDER_SSH_PRIVATE_KEY 를 ssh_key_path 경로에 마운트
+#   - 로컬 환경에서는 이 필드를 비워 두거나 생략 (파일을 직접 관리)
+#   - 생성: ssh-keygen -t ed25519 -C "afterglow-builder" -f builder.key
+ssh_private_key = ""
 # ssh_host: Builder VM의 Floating IP (비워두면 Nova에서 자동 조회)
 ssh_host = ""
 # floating_network_id: FIP 할당용 외부 네트워크 ID (ssh_host 미설정 시 필수)

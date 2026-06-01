@@ -87,6 +87,20 @@ def _yaml_str(v: str) -> str:
     return f'"{v}"'
 
 
+def _yaml_block_scalar(v: str) -> str:
+    """멀티라인 YAML block scalar (|) 렌더링 — SSH 개인키 등에 사용.
+
+    단일 라인이면 _yaml_str로 위임. 빈 값이면 빈 문자열 반환.
+    """
+    if not v:
+        return '""'
+    if "\n" not in v:
+        return _yaml_str(v)
+    lines = v.splitlines()
+    body = "\n".join("    " + line for line in lines)
+    return "|\n" + body
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # TOML 헬퍼 (렌더링용)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -132,6 +146,7 @@ def render_secret(cfg: dict) -> str:
     db = cfg.get("database", {})
     mon = cfg.get("monitoring", {})
     notion = cfg.get("notion", {})
+    builder = cfg.get("builder", {})
 
     lines = [
         "apiVersion: v1",
@@ -205,6 +220,14 @@ def render_secret(cfg: dict) -> str:
             "",
             "  # SMTP 이메일 서버 인증 비밀번호",
             f'  SMTP_PASSWORD: {_yaml_str(smtp_password)}',
+        ])
+
+    ssh_private_key = builder.get("ssh_private_key", "")
+    if ssh_private_key:
+        lines.extend([
+            "",
+            "  # Builder VM SSH 개인키 — /etc/afterglow/ssh/builder.key 로 볼륨 마운트됨",
+            f'  BUILDER_SSH_PRIVATE_KEY: {_yaml_block_scalar(ssh_private_key)}',
         ])
 
     lines.append("")
