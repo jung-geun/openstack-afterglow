@@ -24,6 +24,20 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONFIG_TOML="$REPO_ROOT/config.toml"
 
+# config.toml에서 service_project_id 읽기
+# _ensure_ephemeral_keypair가 get_service_project_connection() 스코프로 동작하므로
+# 키페어는 반드시 admin 유저 + service project 에 등록해야 함
+SERVICE_PROJECT_ID=$(python3 -c "
+import sys
+try:
+    import tomllib
+except ImportError:
+    import tomli as tomllib
+with open('$CONFIG_TOML', 'rb') as f:
+    cfg = tomllib.load(f)
+print(cfg.get('openstack', {}).get('service_project_id', ''))
+" 2>/dev/null || true)
+
 # ─────────────────────────────────────────────────────────────
 # 사전 조건 검사
 # ─────────────────────────────────────────────────────────────
@@ -64,14 +78,22 @@ generate_keypair() {
 # 2. Nova 키페어 등록
 # ─────────────────────────────────────────────────────────────
 register_nova_keypair() {
-    echo "[2/5] Nova 키페어 등록: $KEYPAIR_NAME"
-
-    if openstack keypair show "$KEYPAIR_NAME" &>/dev/null; then
-        echo "      기존 키페어 삭제 중..."
-        openstack keypair delete "$KEYPAIR_NAME"
+    # _ensure_ephemeral_keypair는 admin유저 + service project 스코프로 키페어를 조회/생성함.
+    # service_project_id가 확인된 경우 --os-project-id로 동일 스코프에 등록.
+    local os_project_opt=()
+    if [[ -n "${SERVICE_PROJECT_ID:-}" ]]; then
+        os_project_opt=(--os-project-id "$SERVICE_PROJECT_ID")
+        echo "[2/5] Nova 키페어 등록: $KEYPAIR_NAME (project: $SERVICE_PROJECT_ID)"
+    else
+        echo "[2/5] Nova 키페어 등록: $KEYPAIR_NAME (service_project_id 미확인 — CLI 기본 스코프 사용)"
     fi
 
-    openstack keypair create \
+    if openstack "${os_project_opt[@]}" keypair show "$KEYPAIR_NAME" &>/dev/null; then
+        echo "      기존 키페어 삭제 중..."
+        openstack "${os_project_opt[@]}" keypair delete "$KEYPAIR_NAME"
+    fi
+
+    openstack "${os_project_opt[@]}" keypair create \
         --public-key "$KEY_FILE.pub" \
         "$KEYPAIR_NAME" \
         --format value -c name > /dev/null
@@ -165,6 +187,18 @@ apply_secret() {
 main() {
     echo "=== afterglow Builder SSH 키 설정 ==="
     echo ""
+
+    if [[ -z "${SERVICE_PROJECT_ID:-}" ]]; then
+        echo "경고: config.toml에서 service_project_id를 읽지 못했습니다."
+        echo "      openstack CLI의 현재 프로젝트 스코프로 키페어를 등록합니다."
+        echo "      (admin 유저 + service project 스코프가 맞는지 확인하세요)"
+        echo ""
+    else
+        echo "  service project : $SERVICE_PROJECT_ID"
+        echo "  Nova 키페어 등록 유저: openstack CLI 현재 인증 유저 (admin 권장)"
+        echo ""
+    fi
+
     check_deps
     generate_keypair
     register_nova_keypair
