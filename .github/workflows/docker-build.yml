@@ -180,7 +180,7 @@ jobs:
         run: |
           DOCKER_CONF_DIR="${RUNNER_TEMP}/docker-config"
           mkdir -p "${DOCKER_CONF_DIR}"
-          AUTH=$(printf "%s:%s" "${REG_USER}" "${REG_PASS}" | base64)
+          AUTH=$(printf "%s:%s" "${REG_USER}" "${REG_PASS}" | base64 | tr -d '\r\n')
           printf '{"auths":{"%s":{"auth":"%s"}}}\n' "${REGISTRY}" "${AUTH}" \
             > "${DOCKER_CONF_DIR}/config.json"
           echo "DOCKER_CONFIG=${DOCKER_CONF_DIR}" >> "$GITHUB_ENV"
