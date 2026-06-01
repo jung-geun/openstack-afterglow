@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -13,6 +14,8 @@ from app.models.barbican import ProjectQuotaSetRequest
 from app.rate_limit import limiter
 from app.services import barbican as bsvc
 
+_logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 
@@ -22,8 +25,17 @@ async def list_project_quotas(
 ):
     try:
         return await asyncio.to_thread(bsvc.list_project_quotas, conn)
-    except Exception:
-        raise HTTPException(status_code=500, detail="프로젝트 쿼터 목록 조회 실패")
+    except Exception as e:
+        _logger.exception("Barbican project-quotas 조회 실패: %s", e)
+        http_status = getattr(e, "http_status", None) or getattr(getattr(e, "response", None), "status_code", None)
+        if http_status == 403:
+            raise HTTPException(
+                status_code=500,
+                detail="Barbican에서 권한 거부됐습니다. OpenStack admin 사용자에게 key-manager:service-admin role을 부여하세요.",
+            )
+        if http_status == 404:
+            return []
+        raise HTTPException(status_code=500, detail=f"프로젝트 쿼터 목록 조회 실패: {e}")
 
 
 @router.get("/key-manager/project-quotas/{project_id}", dependencies=[Depends(require_admin)])

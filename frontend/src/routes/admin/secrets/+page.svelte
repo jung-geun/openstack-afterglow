@@ -39,7 +39,7 @@
 			quotas = (await secretsApi.listProjectQuotas($auth.token ?? undefined, $auth.projectId ?? undefined)) as ProjectQuota[];
 			error = '';
 		} catch (e) {
-			error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
+			error = e instanceof ApiError ? (e.message || `조회 실패 (${e.status})`) : '서버 오류';
 		} finally {
 			loading = false;
 		}
