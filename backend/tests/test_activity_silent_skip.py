@@ -12,7 +12,7 @@ from app.services.activity import record
 @pytest.mark.asyncio
 async def test_record_skips_and_warns_when_db_unavailable():
     """is_db_available() False 시 ActivityLog 기록 skip + warning 로그 1회."""
-    act_mod._last_db_warn_ts = 0.0
+    act_mod._last_db_warn_ts = float("-inf")
 
     with patch.object(act_mod.logger, "warning") as mock_warn:
         with patch("app.services.activity.is_db_available", return_value=False):
@@ -33,7 +33,7 @@ async def test_record_skips_and_warns_when_db_unavailable():
 @pytest.mark.asyncio
 async def test_record_rate_limits_warnings():
     """60초 이내 반복 호출 시 warning 1회만 emit."""
-    act_mod._last_db_warn_ts = 0.0
+    act_mod._last_db_warn_ts = float("-inf")
 
     async def _call():
         await record(
@@ -58,7 +58,7 @@ async def test_record_rate_limits_warnings():
 @pytest.mark.asyncio
 async def test_record_does_not_raise_when_db_unavailable():
     """DB 미연결 시 예외 미발생 — best-effort 보장."""
-    act_mod._last_db_warn_ts = 0.0
+    act_mod._last_db_warn_ts = float("-inf")
 
     with patch("app.services.activity.is_db_available", return_value=False):
         await record(

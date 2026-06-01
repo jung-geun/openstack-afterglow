@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 ActionStatus = Literal["started", "success", "failed"]
 
-_last_db_warn_ts: float = 0.0
+_last_db_warn_ts: float = float("-inf")  # 첫 번째 경고는 항상 즉시 출력
 
 
 def _warn_db_unavailable(msg: str) -> None:
