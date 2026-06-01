@@ -148,7 +148,6 @@ _mark("api.container")
 # ---------------------------------------------------------------------------
 from app.api.identity import admin_router, auth_router
 from app.api.identity.admin_activity import router as admin_activity_router
-from app.api.identity.admin_dashboard import router as admin_dashboard_router
 from app.api.identity.admin_flavors import router as admin_flavors_router
 from app.api.identity.admin_gpu import router as admin_gpu_router
 from app.api.identity.admin_identity import router as admin_identity_router
@@ -157,31 +156,17 @@ from app.api.identity.admin_instances import router as admin_instances_router
 from app.api.identity.admin_libraries import router as admin_libraries_router
 from app.api.identity.admin_notion import router as admin_notion_router
 from app.api.identity.admin_orphans import router as admin_orphans_router
+from app.api.identity.admin_secrets import router as admin_secrets_router
 from app.api.identity.admin_services import router as admin_services_router
-from app.api.identity.invitations import router as invitations_router
 from app.api.identity.profile import router as profile_router
 from app.api.identity.profile_activity import router as profile_activity_router
-from app.api.identity.projects import router as projects_router
 
 _mark("api.identity")
 
 # ---------------------------------------------------------------------------
 # app.api.k3s + network + storage
 # ---------------------------------------------------------------------------
-from app.api.k3s import (
-    k3s_callback_router,
-    k3s_certificates_router,
-    k3s_clusters_router,
-    k3s_configmaps_router,
-    k3s_health_router,
-    k3s_nodegroups_router,
-    k3s_pods_router,
-    k3s_secrets_router,
-    k3s_services_router,
-    k3s_shell_router,
-    k3s_templates_router,
-    k3s_workloads_router,
-)
+from app.api.k3s import k3s_callback_router, k3s_clusters_router, k3s_health_router
 from app.api.network import (
     loadbalancers_router,
     networks_router,
@@ -381,7 +366,6 @@ async def options_handler(request: Request, rest_of_path: str):
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 # admin_instances_router를 admin_router보다 먼저 등록 (정적 경로 /instances/async 우선 매칭)
 app.include_router(admin_instances_router, prefix="/api/admin", tags=["admin-instances"])
-app.include_router(admin_dashboard_router, prefix="/api/admin", tags=["admin-dashboard"])
 app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
 app.include_router(admin_services_router, prefix="/api/admin", tags=["admin-services"])
 app.include_router(admin_flavors_router, prefix="/api/admin", tags=["admin-flavors"])
@@ -390,8 +374,6 @@ app.include_router(admin_gpu_router, prefix="/api/admin", tags=["admin-gpu"])
 app.include_router(admin_libraries_router, prefix="/api/admin/libraries", tags=["admin-libraries"])
 app.include_router(admin_notion_router, prefix="/api/admin", tags=["admin-notion"])
 app.include_router(admin_images_router, prefix="/api/admin", tags=["admin-images"])
-app.include_router(projects_router, prefix="/api/projects", tags=["projects"])
-app.include_router(invitations_router, prefix="/api/invitations", tags=["invitations"])
 app.include_router(profile_router, prefix="/api/profile", tags=["profile"])
 app.include_router(profile_activity_router, prefix="/api/profile/activity", tags=["profile-activity"])
 app.include_router(admin_activity_router, prefix="/api/admin", tags=["admin-activity"])
@@ -434,15 +416,6 @@ if _svc_cfg.service_k3s_enabled:
     app.include_router(k3s_clusters_router, prefix="/api/k3s/clusters", tags=["k3s"])
     app.include_router(k3s_health_router, prefix="/api/k3s/clusters", tags=["k3s-health"])
     app.include_router(k3s_callback_router, prefix="/api/k3s", tags=["k3s-callback"])
-    app.include_router(k3s_configmaps_router, prefix="/api/k3s/clusters", tags=["k3s-configmaps"])
-    app.include_router(k3s_secrets_router, prefix="/api/k3s/clusters", tags=["k3s-secrets"])
-    app.include_router(k3s_pods_router, prefix="/api/k3s/clusters", tags=["k3s-pods"])
-    app.include_router(k3s_services_router, prefix="/api/k3s/clusters", tags=["k3s-services"])
-    app.include_router(k3s_workloads_router, prefix="/api/k3s/clusters", tags=["k3s-workloads"])
-    app.include_router(k3s_shell_router, prefix="/api/k3s/clusters", tags=["k3s-shell"])
-    app.include_router(k3s_templates_router, prefix="/api/k3s/cluster-templates", tags=["k3s-templates"])
-    app.include_router(k3s_nodegroups_router, prefix="/api/k3s/clusters", tags=["k3s-nodegroups"])
-    app.include_router(k3s_certificates_router, prefix="/api/k3s/clusters", tags=["k3s-certificates"])
 
 # Union Mount 레이어 시스템 (DB 연결 시 항상 활성화)
 from app.api.union import router as union_router  # noqa: E402
@@ -458,6 +431,13 @@ if _svc_cfg.service_swift_enabled:
 
     app.include_router(swift_router, prefix="/api/object-storage", tags=["object-storage"])
     app.include_router(swift_upload_router)
+if _svc_cfg.service_barbican_enabled:
+    from app.api.secrets import containers_router, orders_router, secrets_router
+
+    app.include_router(secrets_router, prefix="/api/secrets", tags=["secrets"])
+    app.include_router(containers_router, prefix="/api/secret-containers", tags=["secret-containers"])
+    app.include_router(orders_router, prefix="/api/secret-orders", tags=["secret-orders"])
+    app.include_router(admin_secrets_router, prefix="/api/admin", tags=["admin-key-manager"])
 # Common
 app.include_router(dashboard_router, prefix="/api/dashboard", tags=["dashboard"])
 app.include_router(metrics_router, prefix="/api/metrics", tags=["metrics"])
@@ -714,21 +694,6 @@ async def _deferred_create_tables() -> None:
             exc_info=True,
         )
 
-    try:
-        from app.services.library_recipes import seed_default_recipes
-
-        await seed_default_recipes()
-    except Exception:
-        _logger.warning("라이브러리 기본 레시피 seed 실패", exc_info=True)
-
-    try:
-        from app.services.libraries import load_catalog_from_db, seed_default_catalog
-
-        await seed_default_catalog()
-        await load_catalog_from_db()
-    except Exception:
-        _logger.warning("라이브러리 카탈로그 DB 초기화 실패", exc_info=True)
-
 
 @app.on_event("startup")
 async def start_background_workers():
@@ -750,48 +715,19 @@ async def start_background_workers():
             _db_cfg.database_url,
             pool_size=_db_cfg.database_pool_size,
             max_overflow=_db_cfg.database_max_overflow,
-            connect_timeout=_db_cfg.database_connect_timeout,
-            pool_timeout=_db_cfg.database_pool_timeout,
-            unhealthy_seconds=_db_cfg.database_unhealthy_seconds,
         )
         if _db_cfg.database_auto_create_tables:
             # create_tables()를 await하지 않고 백그라운드 태스크로 실행해
             # API가 DB DDL 완료를 기다리지 않고 즉시 요청을 받을 수 있게 한다.
             asyncio.create_task(_deferred_create_tables())
 
-    # compat OFF + system admin 0명 → lockout 경고
-    try:
-        from app.config import get_settings as _gs
-        from app.services import keystone as _ks
-
-        _cfg = _gs()
-        if not _cfg.admin_legacy_project_policy:
-            _, _admin_role_id = _ks._resolve_admin_ids()
-            if _admin_role_id:
-                _ks_client = _ks._get_admin_ks_client()
-                _count = len(
-                    [
-                        a
-                        for a in _ks_client.role_assignments.list(role=_admin_role_id, system="all")
-                        if hasattr(a, "user")
-                    ]
-                )
-                if _count == 0:
-                    _logger.error(
-                        "LOCKOUT WARNING: admin_legacy_project_policy=False이고 system admin이 0명입니다. "
-                        "관리자 접근이 차단됩니다. scripts/manage_system_admins.py로 복구하세요."
-                    )
-    except Exception:
-        pass
-
     asyncio.create_task(_snapshot_loop())
     asyncio.create_task(_auto_backup_loop())
     if _svc_cfg.service_k3s_enabled:
         asyncio.create_task(_k3s_cleanup_loop())
 
-    from app.services.library_builder import _build_worker, cleanup_stale_builds
+    from app.services.library_builder import _build_worker
 
-    await cleanup_stale_builds()
     asyncio.create_task(_build_worker())
 
 
