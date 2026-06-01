@@ -58,7 +58,7 @@ def test_validate_incompatible_ubuntu_version():
     from app.services import libraries as lib_svc
 
     # ubuntu_versions=['22.04'] 라이브러리를 ubuntu 24.04와 함께 검증
-    old_catalog = lib_svc.LIBRARY_CATALOG[:]
+    old_catalog = lib_svc._catalog[:]
     old_map = dict(lib_svc._catalog_by_id)
     try:
         restricted = LibraryConfig(
@@ -68,13 +68,13 @@ def test_validate_incompatible_ubuntu_version():
             packages=[],
             ubuntu_versions=["22.04"],
         )
-        lib_svc.LIBRARY_CATALOG.append(restricted)
+        lib_svc._catalog.append(restricted)
         lib_svc._catalog_by_id["restricted_lib"] = restricted
 
         msgs = lib_svc.validate_compatibility(["restricted_lib"], ubuntu_version="24.04")
         assert any("24.04" in m for m in msgs)
     finally:
-        lib_svc.LIBRARY_CATALOG[:] = old_catalog
+        lib_svc._catalog[:] = old_catalog
         lib_svc._catalog_by_id.clear()
         lib_svc._catalog_by_id.update(old_map)
 
@@ -92,7 +92,7 @@ def test_check_python_version_conflict():
     from app.models.storage import LibraryConfig
     from app.services import libraries as lib_svc
 
-    old_catalog = lib_svc.LIBRARY_CATALOG[:]
+    old_catalog = lib_svc._catalog[:]
     old_map = dict(lib_svc._catalog_by_id)
     try:
         py312 = LibraryConfig(
@@ -101,14 +101,14 @@ def test_check_python_version_conflict():
             version="3.12",
             packages=[],
         )
-        lib_svc.LIBRARY_CATALOG.append(py312)
+        lib_svc._catalog.append(py312)
         lib_svc._catalog_by_id["python312"] = py312
 
         conflict = lib_svc.check_python_version_conflict(["python311", "python312"])
         assert conflict is not None
         assert "충돌" in conflict
     finally:
-        lib_svc.LIBRARY_CATALOG[:] = old_catalog
+        lib_svc._catalog[:] = old_catalog
         lib_svc._catalog_by_id.clear()
         lib_svc._catalog_by_id.update(old_map)
 

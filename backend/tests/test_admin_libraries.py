@@ -176,3 +176,197 @@ class TestBuildList:
         """일반 사용자 → 403."""
         resp = await non_admin_client.get("/api/admin/libraries/builds")
         assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# 카탈로그 CRUD
+# ---------------------------------------------------------------------------
+
+
+_CATALOG_CREATE_PAYLOAD = {
+    "library_id": "testlib",
+    "name": "Test Library",
+    "version": "1.0",
+    "packages": ["testpkg"],
+    "depends_on": [],
+    "share_proto": "CEPHFS",
+    "ubuntu_versions": ["22.04", "24.04"],
+    "visibility": "public",
+}
+
+
+def _make_mock_session(existing=None):
+    """DB 세션 AsyncMock 생성. existing=None이면 scalar_one_or_none → None.
+
+    add()/delete()는 SQLAlchemy AsyncSession에서 동기 메서드이므로 MagicMock으로 설정해
+    'coroutine never awaited' RuntimeWarning을 방지한다.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    mock_session = AsyncMock()
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = existing
+    mock_session.execute.return_value = mock_result
+    mock_session.add = MagicMock()      # AsyncSession.add()는 동기 메서드
+    mock_session.delete = AsyncMock()   # AsyncSession.delete()는 async 메서드
+    return mock_session
+
+
+class TestCatalogCreate:
+    @pytest.mark.asyncio
+    async def test_create_catalog_entry_success(self, admin_client):
+        """새 카탈로그 항목 생성 → 201 + ok:true."""
+        from app.database import get_session
+        from app.main import app
+
+        mock_session = _make_mock_session(existing=None)
+
+        async def _override():
+            yield mock_session
+
+        app.dependency_overrides[get_session] = _override
+        try:
+            with patch("app.api.identity.admin_libraries.lib_svc.reload_catalog", AsyncMock()):
+                resp = await admin_client.post("/api/admin/libraries/catalog", json=_CATALOG_CREATE_PAYLOAD)
+        finally:
+            app.dependency_overrides.pop(get_session, None)
+
+        assert resp.status_code == 201
+        assert resp.json()["ok"] is True
+
+    @pytest.mark.asyncio
+    async def test_create_catalog_entry_duplicate_returns_409(self, admin_client):
+        """이미 존재하는 library_id → 409."""
+        from unittest.mock import MagicMock
+
+        from app.database import get_session
+        from app.main import app
+
+        mock_session = _make_mock_session(existing=MagicMock())  # already exists
+
+        async def _override():
+            yield mock_session
+
+        app.dependency_overrides[get_session] = _override
+        try:
+            resp = await admin_client.post("/api/admin/libraries/catalog", json=_CATALOG_CREATE_PAYLOAD)
+        finally:
+            app.dependency_overrides.pop(get_session, None)
+
+        assert resp.status_code == 409
+
+    @pytest.mark.asyncio
+    async def test_create_catalog_entry_forbidden_for_non_admin(self, non_admin_client):
+        """일반 사용자 → 403."""
+        resp = await non_admin_client.post("/api/admin/libraries/catalog", json=_CATALOG_CREATE_PAYLOAD)
+        assert resp.status_code == 403
+
+
+class TestCatalogUpdate:
+    @pytest.mark.asyncio
+    async def test_update_catalog_entry_success(self, admin_client):
+        """존재하는 항목 수정 → 200 + ok:true."""
+        from unittest.mock import MagicMock
+
+        from app.database import get_session
+        from app.main import app
+
+        existing_row = MagicMock()
+        mock_session = _make_mock_session(existing=existing_row)
+
+        async def _override():
+            yield mock_session
+
+        app.dependency_overrides[get_session] = _override
+        try:
+            with patch("app.api.identity.admin_libraries.lib_svc.reload_catalog", AsyncMock()):
+                resp = await admin_client.patch(
+                    "/api/admin/libraries/catalog/testlib",
+                    json={"name": "Updated Name", "version": "2.0"},
+                )
+        finally:
+            app.dependency_overrides.pop(get_session, None)
+
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+
+    @pytest.mark.asyncio
+    async def test_update_catalog_entry_not_found_returns_404(self, admin_client):
+        """존재하지 않는 library_id 수정 → 404."""
+        from app.database import get_session
+        from app.main import app
+
+        mock_session = _make_mock_session(existing=None)
+
+        async def _override():
+            yield mock_session
+
+        app.dependency_overrides[get_session] = _override
+        try:
+            resp = await admin_client.patch(
+                "/api/admin/libraries/catalog/nonexistent",
+                json={"name": "Ghost"},
+            )
+        finally:
+            app.dependency_overrides.pop(get_session, None)
+
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_update_catalog_entry_forbidden_for_non_admin(self, non_admin_client):
+        """일반 사용자 → 403."""
+        resp = await non_admin_client.patch(
+            "/api/admin/libraries/catalog/testlib",
+            json={"name": "Hacked"},
+        )
+        assert resp.status_code == 403
+
+
+class TestCatalogDelete:
+    @pytest.mark.asyncio
+    async def test_delete_catalog_entry_success(self, admin_client):
+        """존재하는 항목 삭제 → 204."""
+        from unittest.mock import MagicMock
+
+        from app.database import get_session
+        from app.main import app
+
+        existing_row = MagicMock()
+        mock_session = _make_mock_session(existing=existing_row)
+
+        async def _override():
+            yield mock_session
+
+        app.dependency_overrides[get_session] = _override
+        try:
+            with patch("app.api.identity.admin_libraries.lib_svc.reload_catalog", AsyncMock()):
+                resp = await admin_client.delete("/api/admin/libraries/catalog/testlib")
+        finally:
+            app.dependency_overrides.pop(get_session, None)
+
+        assert resp.status_code == 204
+
+    @pytest.mark.asyncio
+    async def test_delete_catalog_entry_not_found_returns_404(self, admin_client):
+        """존재하지 않는 library_id 삭제 → 404."""
+        from app.database import get_session
+        from app.main import app
+
+        mock_session = _make_mock_session(existing=None)
+
+        async def _override():
+            yield mock_session
+
+        app.dependency_overrides[get_session] = _override
+        try:
+            resp = await admin_client.delete("/api/admin/libraries/catalog/nonexistent")
+        finally:
+            app.dependency_overrides.pop(get_session, None)
+
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_delete_catalog_entry_forbidden_for_non_admin(self, non_admin_client):
+        """일반 사용자 → 403."""
+        resp = await non_admin_client.delete("/api/admin/libraries/catalog/testlib")
+        assert resp.status_code == 403

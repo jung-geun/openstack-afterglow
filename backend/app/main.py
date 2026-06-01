@@ -721,6 +721,14 @@ async def _deferred_create_tables() -> None:
     except Exception:
         _logger.warning("라이브러리 기본 레시피 seed 실패", exc_info=True)
 
+    try:
+        from app.services.libraries import load_catalog_from_db, seed_default_catalog
+
+        await seed_default_catalog()
+        await load_catalog_from_db()
+    except Exception:
+        _logger.warning("라이브러리 카탈로그 DB 초기화 실패", exc_info=True)
+
 
 @app.on_event("startup")
 async def start_background_workers():

@@ -15,9 +15,11 @@ if TYPE_CHECKING:
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import select
 
 from app.api.common.activity_recorder import rec
 from app.api.deps import get_os_conn, get_token_info, require_admin
+from app.database import get_session
 from app.services import libraries as lib_svc
 from app.services import library_builder, manila, neutron, nova
 from app.services.keystone import get_service_project_connection
@@ -836,3 +838,95 @@ async def list_library_project_access(
         "share_id": storage.id,
         "grants": list(grants.values()),
     }
+
+
+# ---------------------------------------------------------------------------
+# 카탈로그 관리 (CRUD)
+# ---------------------------------------------------------------------------
+
+
+class CatalogCreateRequest(BaseModel):
+    library_id: str
+    name: str
+    version: str
+    packages: list[str] = []
+    depends_on: list[str] = []
+    share_proto: str = "CEPHFS"
+    ubuntu_versions: list[str] = ["22.04", "24.04"]
+    visibility: str = "public"
+    license_type: str | None = None
+    max_concurrent_mounts: int | None = None
+
+
+class CatalogUpdateRequest(BaseModel):
+    name: str | None = None
+    version: str | None = None
+    packages: list[str] | None = None
+    depends_on: list[str] | None = None
+    share_proto: str | None = None
+    ubuntu_versions: list[str] | None = None
+    visibility: str | None = None
+    license_type: str | None = None
+    max_concurrent_mounts: int | None = None
+
+
+@router.post("/catalog", status_code=201)
+async def create_catalog_entry(
+    req: CatalogCreateRequest,
+    token_info=Depends(require_admin),
+    session=Depends(get_session),
+) -> dict:
+    """카탈로그 항목 생성. 관리자 전용."""
+    from app.models.db import LibraryCatalog
+
+    existing = (
+        await session.execute(select(LibraryCatalog).where(LibraryCatalog.library_id == req.library_id))
+    ).scalar_one_or_none()
+    if existing:
+        raise HTTPException(status_code=409, detail="이미 존재하는 라이브러리 ID")
+    row = LibraryCatalog(**req.model_dump())
+    session.add(row)
+    await session.commit()
+    await lib_svc.reload_catalog()
+    return {"ok": True}
+
+
+@router.patch("/catalog/{library_id}")
+async def update_catalog_entry(
+    library_id: str,
+    req: CatalogUpdateRequest,
+    token_info=Depends(require_admin),
+    session=Depends(get_session),
+) -> dict:
+    """카탈로그 항목 수정. 관리자 전용."""
+    from app.models.db import LibraryCatalog
+
+    row = (
+        await session.execute(select(LibraryCatalog).where(LibraryCatalog.library_id == library_id))
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="라이브러리를 찾을 수 없습니다")
+    for field, val in req.model_dump(exclude_none=True).items():
+        setattr(row, field, val)
+    await session.commit()
+    await lib_svc.reload_catalog()
+    return {"ok": True}
+
+
+@router.delete("/catalog/{library_id}", status_code=204)
+async def delete_catalog_entry(
+    library_id: str,
+    token_info=Depends(require_admin),
+    session=Depends(get_session),
+) -> None:
+    """카탈로그 항목 삭제. 관리자 전용."""
+    from app.models.db import LibraryCatalog
+
+    row = (
+        await session.execute(select(LibraryCatalog).where(LibraryCatalog.library_id == library_id))
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="라이브러리를 찾을 수 없습니다")
+    await session.delete(row)
+    await session.commit()
+    await lib_svc.reload_catalog()

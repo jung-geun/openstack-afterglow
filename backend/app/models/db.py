@@ -469,5 +469,24 @@ class ProjectInvitation(Base):
     )
 
 
+class LibraryCatalog(Base):
+    """라이브러리 카탈로그 — 선택 가능한 라이브러리 정의 (이전: 코드 하드코딩)."""
+
+    __tablename__ = "library_catalog"
+
+    library_id: Mapped[str] = mapped_column(VARCHAR(64), primary_key=True)
+    name: Mapped[str] = mapped_column(VARCHAR(128), nullable=False)
+    version: Mapped[str] = mapped_column(VARCHAR(32), nullable=False)
+    packages: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    depends_on: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    share_proto: Mapped[str] = mapped_column(VARCHAR(10), nullable=False, default="CEPHFS")
+    ubuntu_versions: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    visibility: Mapped[str] = mapped_column(VARCHAR(16), nullable=False, default="public")
+    license_type: Mapped[str | None] = mapped_column(VARCHAR(64), nullable=True)
+    max_concurrent_mounts: Mapped[int | None] = mapped_column(INT, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+
 # ActivityLog 모델을 Base.metadata 에 등록 (create_tables 자동 감지)
 from app.models.activity import ActivityLog  # noqa: E402,F401
