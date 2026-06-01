@@ -62,6 +62,8 @@ class CreateK3sClusterRequest(BaseModel):
     template_id: str | None = None
     # HA 멀티 마스터 (1 = 단일, 3 = embedded-etcd HA)
     master_count: int = Field(default=1)
+    # Stampede 오토스케일 모드 (개발 단계, 기본값 비활성화)
+    stampede_enabled: bool = False
 
     @field_validator("master_count")
     @classmethod

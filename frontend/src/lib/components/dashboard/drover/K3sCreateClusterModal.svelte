@@ -24,10 +24,11 @@
 			os_type: string;
 			template_id?: string;
 			master_count: number;
+			stampede_enabled: boolean;
 		}) => void;
 	} = $props();
 
-	let form = $state({ name: '', agent_count: 1, agent_flavor_id: '', network_id: '', key_name: '', os_type: 'ubuntu', template_id: '', master_count: 1 });
+	let form = $state({ name: '', agent_count: 1, agent_flavor_id: '', network_id: '', key_name: '', os_type: 'ubuntu', template_id: '', master_count: 1, stampede_enabled: false });
 	let networkCategory = $state<'tenant' | 'provider'>('tenant');
 	let flavors = $state<K3sFlavor[]>([]);
 	let networks = $state<K3sNetwork[]>([]);
@@ -36,7 +37,7 @@
 
 	$effect(() => {
 		if (open) {
-			form = { name: '', agent_count: 1, agent_flavor_id: '', network_id: '', key_name: '', os_type: 'ubuntu', template_id: '', master_count: 1 };
+			form = { name: '', agent_count: 1, agent_flavor_id: '', network_id: '', key_name: '', os_type: 'ubuntu', template_id: '', master_count: 1, stampede_enabled: false };
 			networkCategory = 'tenant';
 			void loadDeps();
 		}
@@ -200,6 +201,35 @@
 							{/each}
 						</select>
 					</label>
+				</div>
+
+				<!-- Stampede 오토스케일 모드 -->
+				<div class="border border-gray-700 rounded-lg p-3 bg-gray-800/50">
+					<div class="flex items-center justify-between">
+						<div class="flex items-center gap-2">
+							<span class="text-sm font-medium text-gray-200">Stampede 모드</span>
+							<span class="text-xs bg-yellow-900/60 text-yellow-400 border border-yellow-700/50 rounded px-1.5 py-0.5 leading-none">개발 단계</span>
+						</div>
+						<button
+							type="button"
+							role="switch"
+							aria-checked={form.stampede_enabled}
+							onclick={() => form.stampede_enabled = !form.stampede_enabled}
+							class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none {form.stampede_enabled ? 'bg-blue-600' : 'bg-gray-600'}"
+						>
+							<span
+								class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out {form.stampede_enabled ? 'translate-x-4' : 'translate-x-0'}"
+							></span>
+						</button>
+					</div>
+					<p class="mt-1.5 text-xs text-gray-500">
+						pod 배포 시 노드(VM)를 자동으로 확장/축소합니다. 노드그룹에서 min/max를 별도 설정해야 합니다.
+					</p>
+					{#if form.stampede_enabled}
+						<div class="mt-2 text-xs text-yellow-400/90 bg-yellow-900/10 border border-yellow-800/40 rounded px-2.5 py-1.5">
+							⚠ 개발 단계 기능입니다. 서버에서 <code class="font-mono">k3s.stampede_enabled = true</code> 설정이 필요합니다.
+						</div>
+					{/if}
 				</div>
 			</div>
 			{#if createError}

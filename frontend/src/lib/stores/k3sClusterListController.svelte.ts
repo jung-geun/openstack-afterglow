@@ -55,6 +55,7 @@ export function createK3sClusterListController(opts: K3sClusterListOpts) {
   async function createCluster(form: {
     name: string; agent_count: number; agent_flavor_id: string;
     network_id: string; key_name: string; os_type: string; template_id?: string;
+    master_count: number; stampede_enabled?: boolean;
   }) {
     creating = true;
     createError = '';
@@ -70,6 +71,7 @@ export function createK3sClusterListController(opts: K3sClusterListOpts) {
         ...(form.network_id ? { network_id: form.network_id } : {}),
         ...(form.key_name ? { key_name: form.key_name } : {}),
         ...(form.template_id ? { template_id: form.template_id } : {}),
+        ...(form.stampede_enabled ? { stampede_enabled: true } : {}),
       };
       for await (const msg of streamK3sProgress('/api/k3s/clusters/async', {
         method: 'POST', body, token: opts.token(), projectId: opts.projectId(),

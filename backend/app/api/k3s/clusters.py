@@ -643,6 +643,7 @@ async def create_k3s_cluster_async(
                     "app_credential_id": app_credential_id or "",
                     "template_id": req.template_id or None,
                     "template_snapshot": _template_snapshot,
+                    "stampede_enabled": req.stampede_enabled,
                 },
             )
             try:
