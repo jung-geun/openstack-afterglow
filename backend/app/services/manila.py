@@ -238,6 +238,19 @@ def extract_manila_error(e: httpx.HTTPStatusError) -> tuple[int, str]:
     return status, text or str(e)
 
 
+def format_error_message(exc: httpx.HTTPStatusError) -> str:
+    """HTTPStatusError에서 사람이 읽을 수 있는 메시지 반환.
+
+    create_file_storage()가 "share type not found" 404를 enrichment한 경우
+    exc.args[0]에 가용 type 목록이 포함됨 → 그 쪽을 우선 반환.
+    그 외에는 extract_manila_error()로 응답 본문 메시지를 반환.
+    """
+    if exc.args and str(exc.args[0]).startswith("Manila API"):
+        return str(exc.args[0])
+    status, message = extract_manila_error(exc)
+    return f"Manila API {status}: {message}"
+
+
 def list_share_networks(conn) -> list[dict]:
     """Manila에서 사용 가능한 share network 목록 조회."""
     client = get_client(conn)
@@ -401,7 +414,23 @@ def create_file_storage(
     if share_network_id and proto_upper != "CEPHFS":
         share_body["share_network_id"] = share_network_id
     body = {"share": share_body}
-    data = client.post("shares", body)["share"]
+    try:
+        data = client.post("shares", body)["share"]
+    except httpx.HTTPStatusError as e:
+        status, message = extract_manila_error(e)
+        if status == 404 and "share type" in message.lower():
+            # 가용 share type 목록을 조회해 에러 메시지에 첨부 (진단 지원)
+            try:
+                available = [t["name"] for t in list_share_types(conn)]
+            except Exception:
+                available = []
+            hint = f" 가용 share type: {available}" if available else ""
+            raise httpx.HTTPStatusError(
+                f"Manila API {status}: {message}{hint}",
+                request=e.request,
+                response=e.response,
+            ) from e
+        raise
     file_storage_id = data["id"]
 
     # available 상태까지 폴링

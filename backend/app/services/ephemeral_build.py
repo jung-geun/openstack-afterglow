@@ -11,6 +11,8 @@ import asyncio
 import base64
 import logging
 import uuid
+
+import httpx
 from datetime import UTC, datetime
 
 from app.config import get_settings
@@ -323,12 +325,17 @@ async def run_ephemeral_build(library_id: str, build_db_id: int) -> None:
                 await asyncio.to_thread(manila.update_share_metadata, conn, share_id, {"union_status": "error"})
             except Exception:
                 pass
+        # httpx.HTTPStatusError의 경우 Manila 응답 본문 메시지 (+ 가용 type 목록) 를 표시
+        if isinstance(exc, httpx.HTTPStatusError):
+            error_text = manila.format_error_message(exc)[:1000]
+        else:
+            error_text = str(exc)[:1000]
         await _update_db(
             build_db_id,
             status="error",
             cloud_init_status="failure",
             progress_step="빌드 실패",
-            error_message=str(exc)[:1000],
+            error_message=error_text,
             completed=True,
         )
 
