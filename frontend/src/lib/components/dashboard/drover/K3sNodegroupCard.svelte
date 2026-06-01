@@ -19,15 +19,23 @@
 	);
 
 	const runningVms = $derived(nodegroup.vms.filter(v => v.status === 'RUNNING' || v.status === 'ACTIVE').length);
+	const inFlight = $derived((nodegroup.stampede_state as Record<string, number>)?.in_flight_count ?? 0);
 </script>
 
 <div class="bg-gray-800/50 border border-gray-700 rounded-lg p-3 space-y-2">
 	<div class="flex items-center justify-between">
-		<div class="flex items-center gap-2">
+		<div class="flex items-center gap-2 flex-wrap">
 			<span class="text-xs border rounded px-1.5 py-0.5 {roleBadgeClass}">{roleLabel}</span>
 			<span class="text-sm font-medium text-white">{nodegroup.name}</span>
 			{#if nodegroup.is_default}
 				<span class="text-xs text-gray-500">(기본)</span>
+			{/if}
+			{#if nodegroup.stampede_enabled}
+				<span class="text-xs bg-blue-900/50 text-blue-300 border border-blue-700/60 rounded px-1.5 py-0.5 leading-none">Stampede</span>
+				<span class="text-xs text-gray-500">{nodegroup.min_size}–{nodegroup.max_size}</span>
+				{#if inFlight > 0}
+					<span class="text-xs text-yellow-400 animate-pulse">▲ +{inFlight} 프로비저닝 중</span>
+				{/if}
 			{/if}
 		</div>
 		<div class="flex items-center gap-1">

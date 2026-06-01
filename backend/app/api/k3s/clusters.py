@@ -91,6 +91,7 @@ def _cluster_to_info(c: dict) -> K3sClusterInfo:
         api_fip_id=c.get("api_fip_id") or None,
         api_fip_address=c.get("api_fip_address") or None,
         master_count=int(c.get("master_count") or 1),
+        stampede_enabled=bool(c.get("stampede_enabled", False)),
     )
 
 

@@ -4,6 +4,7 @@
 	import { useK3sClusterDetailController } from '$lib/stores/k3sClusterDetailController.svelte';
 	import K3sNodegroupCard from '$lib/components/dashboard/drover/K3sNodegroupCard.svelte';
 	import K3sNodegroupCreateModal from '$lib/components/dashboard/drover/K3sNodegroupCreateModal.svelte';
+	import K3sNodegroupEditModal from '$lib/components/dashboard/drover/K3sNodegroupEditModal.svelte';
 	import type { K3sNodegroup } from '$lib/types/k3s';
 
 	const s = useK3sClusterDetailController();
@@ -15,6 +16,7 @@
 	let nodegroups = $state<K3sNodegroup[]>([]);
 	let loading = $state(false);
 	let showCreate = $state(false);
+	let editTarget = $state<K3sNodegroup | null>(null);
 	let deleteTarget = $state<K3sNodegroup | null>(null);
 	let deleteError = $state('');
 	let deleting = $state(false);
@@ -73,12 +75,24 @@
 			{#each nodegroups as ng (ng.id)}
 				<K3sNodegroupCard
 					nodegroup={ng}
+					onEdit={(n) => { editTarget = n; }}
 					onDelete={(n) => { deleteTarget = n; deleteError = ''; }}
 				/>
 			{/each}
 		</div>
 	{/if}
 </div>
+
+{#if editTarget}
+	<K3sNodegroupEditModal
+		clusterId={clusterId}
+		nodegroup={editTarget}
+		{token}
+		{projectId}
+		onClose={() => { editTarget = null; }}
+		onSaved={() => { editTarget = null; void load(); }}
+	/>
+{/if}
 
 {#if showCreate}
 	<K3sNodegroupCreateModal

@@ -127,6 +127,9 @@ async def create_nodegroup(cluster_id: str, data: dict) -> dict:
             labels=data.get("labels") or None,
             taints=data.get("taints") or None,
             is_default=False,
+            stampede_enabled=bool(data.get("stampede_enabled", False)),
+            min_size=int(data.get("min_size", 0)),
+            max_size=int(data.get("max_size", 5)),
         )
         session.add(ng)
         await session.commit()

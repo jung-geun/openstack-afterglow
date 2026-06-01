@@ -17,6 +17,7 @@ export interface K3sCluster {
 	deleted_by_user_id: string | null;
 	deleted_reason: string | null;
 	master_count?: number;
+	stampede_enabled?: boolean;
 }
 export interface K3sFlavor { id: string; name: string; vcpus: number; ram: number; disk: number; }
 export interface K3sNetwork { id: string; name: string; is_external: boolean; }
@@ -39,6 +40,11 @@ export interface K3sNodegroup {
 	labels: Record<string, string>;
 	taints: Record<string, unknown>[];
 	is_default: boolean;
+	// Stampede 오토스케일
+	stampede_enabled: boolean;
+	min_size: number;
+	max_size: number;
+	stampede_state: Record<string, unknown>;
 	vms: K3sNodegroupVM[];
 	created_at: string | null;
 	updated_at: string | null;

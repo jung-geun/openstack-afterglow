@@ -3,7 +3,7 @@ import re
 import uuid
 from enum import Enum
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 _NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$")
 # k3s server 가 발급하는 node-token 은 영숫자 + : _ + / = . - 만 사용. shell variable 치환을 거치므로
@@ -134,6 +134,7 @@ class K3sClusterInfo(BaseModel):
     api_fip_address: str | None = None
     os_type: str | None = None
     master_count: int = 1
+    stampede_enabled: bool = False
 
 
 class K3sClusterInfoDeleted(K3sClusterInfo):
@@ -336,6 +337,11 @@ class K3sNodegroupInfo(BaseModel):
     labels: dict[str, str] = {}
     taints: list[dict] = []
     is_default: bool = False
+    # Stampede 오토스케일
+    stampede_enabled: bool = False
+    min_size: int = 0
+    max_size: int = 5
+    stampede_state: dict = {}
     vms: list[K3sNodegroupVMInfo] = []
     created_at: str | None = None
     updated_at: str | None = None
@@ -349,6 +355,10 @@ class CreateK3sNodegroupRequest(BaseModel):
     image_id: str | None = None
     labels: dict[str, str] | None = None
     taints: list[dict] | None = None
+    # Stampede 오토스케일
+    stampede_enabled: bool = False
+    min_size: int = Field(default=0, ge=0)
+    max_size: int = Field(default=5, ge=0)
 
     @field_validator("name")
     @classmethod
@@ -371,6 +381,17 @@ class UpdateK3sNodegroupRequest(BaseModel):
     image_id: str | None = None
     labels: dict[str, str] | None = None
     taints: list[dict] | None = None
+    # Stampede 오토스케일
+    stampede_enabled: bool | None = None
+    min_size: int | None = Field(default=None, ge=0)
+    max_size: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_stampede_sizes(self) -> "UpdateK3sNodegroupRequest":
+        if self.min_size is not None and self.max_size is not None:
+            if self.min_size > self.max_size:
+                raise ValueError("min_size는 max_size보다 클 수 없습니다")
+        return self
 
 
 # ---------------------------------------------------------------------------
