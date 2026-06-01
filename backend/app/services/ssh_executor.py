@@ -32,5 +32,3 @@ async def run_command(
             timeout=timeout,
         )
         return result.exit_status or 0, result.stdout or "", result.stderr or ""
-
-

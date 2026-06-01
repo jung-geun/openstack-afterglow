@@ -32,6 +32,7 @@ def make_token_info(is_manager=False, is_admin=False, user_id="user-abc", email=
 
 # ─── /api/projects ──────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_create_project_requires_auth():
     """인증 없이 프로젝트 생성 불가."""
@@ -66,6 +67,7 @@ async def test_create_project_success():
 
     app.dependency_overrides[get_token_info] = override_token
     from app.database import get_session
+
     app.dependency_overrides[get_session] = override_session
 
     with (
@@ -100,6 +102,7 @@ async def test_create_project_empty_name_rejected():
 
     app.dependency_overrides[get_token_info] = override_token
     from app.database import get_session
+
     app.dependency_overrides[get_session] = override_session
 
     async with AsyncClient(
@@ -114,13 +117,12 @@ async def test_create_project_empty_name_rejected():
 
 # ─── 초대 생성 ────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_create_invitation_requires_manager():
     """manager가 아닌 사용자는 초대 불가 (403)."""
     mock_session = AsyncMock()
-    mock_session.execute = AsyncMock(
-        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None))
-    )
+    mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
 
     async def override_token():
         return make_token_info(is_manager=False, is_admin=False)
@@ -130,6 +132,7 @@ async def test_create_invitation_requires_manager():
 
     app.dependency_overrides[get_token_info] = override_token
     from app.database import get_session
+
     app.dependency_overrides[get_session] = override_session
 
     with patch("app.database.get_session_factory", return_value=None):
@@ -173,6 +176,7 @@ async def test_create_invitation_success():
 
     app.dependency_overrides[get_token_info] = override_token
     from app.database import get_session
+
     app.dependency_overrides[get_session] = override_session
 
     with (
@@ -195,6 +199,7 @@ async def test_create_invitation_success():
 
 # ─── 초대 수락/거절 ───────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_accept_invitation_email_mismatch():
     """수락자 이메일 != invited_email → 403."""
@@ -210,11 +215,10 @@ async def test_accept_invitation_email_mismatch():
     mock_inv.expires_at = datetime.now(UTC) + timedelta(days=7)
 
     mock_session = AsyncMock()
-    mock_session.execute = AsyncMock(
-        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=mock_inv))
-    )
+    mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=mock_inv)))
 
     from fastapi import HTTPException
+
     with pytest.raises(HTTPException) as exc_info:
         await accept_invitation(
             plaintext_token=token,
@@ -241,12 +245,11 @@ async def test_accept_invitation_expired():
     mock_inv.expires_at = expired
 
     mock_session = AsyncMock()
-    mock_session.execute = AsyncMock(
-        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=mock_inv))
-    )
+    mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=mock_inv)))
     mock_session.commit = AsyncMock()
 
     from fastapi import HTTPException
+
     with pytest.raises(HTTPException) as exc_info:
         await accept_invitation(
             plaintext_token=token,
@@ -263,11 +266,10 @@ async def test_accept_invitation_invalid_token():
     from app.services.project_service import accept_invitation
 
     mock_session = AsyncMock()
-    mock_session.execute = AsyncMock(
-        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None))
-    )
+    mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
 
     from fastapi import HTTPException
+
     with pytest.raises(HTTPException) as exc_info:
         await accept_invitation("nonexistent-token", "user", "user@example.com", mock_session)
     assert exc_info.value.status_code == 404
@@ -286,9 +288,7 @@ async def test_decline_invitation_success():
     mock_inv.status = "pending"
 
     mock_session = AsyncMock()
-    mock_session.execute = AsyncMock(
-        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=mock_inv))
-    )
+    mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=mock_inv)))
     mock_session.commit = AsyncMock()
 
     result = await decline_invitation(token, mock_session)
@@ -309,15 +309,14 @@ async def test_decline_invitation_idempotent():
     mock_inv.status = "accepted"
 
     mock_session = AsyncMock()
-    mock_session.execute = AsyncMock(
-        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=mock_inv))
-    )
+    mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=mock_inv)))
 
     result = await decline_invitation(token, mock_session)
     assert result["status"] == "accepted"
 
 
 # ─── 매니저 관리 ──────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_demote_last_manager_blocked():
@@ -333,6 +332,7 @@ async def test_demote_last_manager_blocked():
     )
 
     from fastapi import HTTPException
+
     with pytest.raises(HTTPException) as exc_info:
         await demote_manager(PROJECT_ID, "user-abc", mock_session)
     assert exc_info.value.status_code == 409
@@ -358,6 +358,7 @@ async def test_system_admin_can_invite():
 
     app.dependency_overrides[get_token_info] = override_token
     from app.database import get_session
+
     app.dependency_overrides[get_session] = override_session
 
     with (
@@ -379,6 +380,7 @@ async def test_system_admin_can_invite():
 
 # ─── 이메일 서비스 ────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_send_email_skipped_when_smtp_disabled(monkeypatch):
     """SMTP 비활성 시 이메일 전송 건너뜀 — False 반환."""
@@ -386,6 +388,7 @@ async def test_send_email_skipped_when_smtp_disabled(monkeypatch):
 
     monkeypatch.setenv("SMTP_ENABLED", "false")
     from app.config import get_settings
+
     get_settings.cache_clear()
 
     result = await send_email("user@example.com", "Test", "<p>hi</p>", "hi")

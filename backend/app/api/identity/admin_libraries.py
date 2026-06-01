@@ -127,9 +127,7 @@ async def get_library_build(build_id: int) -> dict:
         raise HTTPException(status_code=503, detail="DB가 초기화되지 않았습니다")
 
     async with factory() as session:
-        row = (
-            await session.execute(select(LibraryBuild).where(LibraryBuild.id == build_id))
-        ).scalar_one_or_none()
+        row = (await session.execute(select(LibraryBuild).where(LibraryBuild.id == build_id))).scalar_one_or_none()
 
     if row is None:
         raise HTTPException(status_code=404, detail=f"빌드 {build_id}를 찾을 수 없습니다")
@@ -153,9 +151,7 @@ async def get_library_build(build_id: int) -> dict:
             vm_ip = ips[0] if ips else None
 
             if is_active:
-                live_console = await asyncio.to_thread(
-                    nova.get_console_output, svc_conn, row.server_id, 300
-                )
+                live_console = await asyncio.to_thread(nova.get_console_output, svc_conn, row.server_id, 300)
         except Exception:
             _logger.warning("[admin_libraries] VM 정보 조회 실패: server_id=%s", row.server_id, exc_info=True)
 
@@ -870,10 +866,9 @@ class CatalogUpdateRequest(BaseModel):
     max_concurrent_mounts: int | None = None
 
 
-@router.post("/catalog", status_code=201)
+@router.post("/catalog", status_code=201, dependencies=[Depends(require_admin)])
 async def create_catalog_entry(
     req: CatalogCreateRequest,
-    token_info=Depends(require_admin),
     session=Depends(get_session),
 ) -> dict:
     """카탈로그 항목 생성. 관리자 전용."""
@@ -891,11 +886,10 @@ async def create_catalog_entry(
     return {"ok": True}
 
 
-@router.patch("/catalog/{library_id}")
+@router.patch("/catalog/{library_id}", dependencies=[Depends(require_admin)])
 async def update_catalog_entry(
     library_id: str,
     req: CatalogUpdateRequest,
-    token_info=Depends(require_admin),
     session=Depends(get_session),
 ) -> dict:
     """카탈로그 항목 수정. 관리자 전용."""
@@ -913,10 +907,9 @@ async def update_catalog_entry(
     return {"ok": True}
 
 
-@router.delete("/catalog/{library_id}", status_code=204)
+@router.delete("/catalog/{library_id}", status_code=204, dependencies=[Depends(require_admin)])
 async def delete_catalog_entry(
     library_id: str,
-    token_info=Depends(require_admin),
     session=Depends(get_session),
 ) -> None:
     """카탈로그 항목 삭제. 관리자 전용."""

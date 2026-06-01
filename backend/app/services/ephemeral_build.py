@@ -22,8 +22,8 @@ from app.services.keystone import get_service_project_connection
 
 _logger = logging.getLogger(__name__)
 
-_SHUTOFF_POLL_INTERVAL = 15    # 폴링 간격 (초)
-_SHUTOFF_MAX_WAIT = 1800       # 최대 대기 30분
+_SHUTOFF_POLL_INTERVAL = 15  # 폴링 간격 (초)
+_SHUTOFF_MAX_WAIT = 1800  # 최대 대기 30분
 _SUCCESS_SENTINEL = "::AFTERGLOW::SUCCESS::"
 _FAILURE_SENTINEL = "::AFTERGLOW::FAILURE::"
 
@@ -58,9 +58,7 @@ async def _update_db(
         return
 
     async with factory() as session:
-        row = (
-            await session.execute(select(LibraryBuild).where(LibraryBuild.id == build_id))
-        ).scalar_one_or_none()
+        row = (await session.execute(select(LibraryBuild).where(LibraryBuild.id == build_id))).scalar_one_or_none()
         if row is None:
             return
         terminal = {"complete", "error", "timeout", "cancelled"}
@@ -271,8 +269,11 @@ async def run_ephemeral_build(library_id: str, build_db_id: int) -> None:
         )
         server_id = server.id
         await _update_db(
-            build_db_id, server_id=server_id, cloud_init_status="booting",
-            progress_step="VM 부팅 중", progress_pct=20,
+            build_db_id,
+            server_id=server_id,
+            cloud_init_status="booting",
+            progress_step="VM 부팅 중",
+            progress_pct=20,
         )
         _logger.info("[ephemeral_build] VM 생성: %s (%s)", vm_name, server_id)
 
@@ -303,8 +304,7 @@ async def run_ephemeral_build(library_id: str, build_db_id: int) -> None:
                 cloud_init_status="indeterminate",
                 progress_step="sentinel 부재",
                 error_message=(
-                    "console_output에서 sentinel을 찾을 수 없습니다. "
-                    "VM panic 또는 console buffer 초과 가능성."
+                    "console_output에서 sentinel을 찾을 수 없습니다. VM panic 또는 console buffer 초과 가능성."
                 ),
                 completed=True,
             )
@@ -320,9 +320,7 @@ async def run_ephemeral_build(library_id: str, build_db_id: int) -> None:
         _logger.error("[ephemeral_build] 빌드 실패: library=%s", library_id, exc_info=True)
         if share_id:
             try:
-                await asyncio.to_thread(
-                    manila.update_share_metadata, conn, share_id, {"union_status": "error"}
-                )
+                await asyncio.to_thread(manila.update_share_metadata, conn, share_id, {"union_status": "error"})
             except Exception:
                 pass
         await _update_db(
@@ -373,7 +371,7 @@ async def _handle_success(
     # RO CephX rule 생성 (CephFS만)
     ro_user = f"union-ro-{library_id}"
     metadata: dict[str, str] = {
-        "union_type": "prebuilt",   # 완료 share를 prebuilt로 승격 → 409 dedup 정상 작동
+        "union_type": "prebuilt",  # 완료 share를 prebuilt로 승격 → 409 dedup 정상 작동
         "union_status": "ready",
         "union_built_at": datetime.now(UTC).isoformat(),
         "union_library": library_id,
@@ -382,9 +380,7 @@ async def _handle_success(
 
     if proto == "CEPHFS":
         try:
-            await asyncio.to_thread(
-                manila.create_access_rule, conn, share_id, ro_user, "ro", "cephx"
-            )
+            await asyncio.to_thread(manila.create_access_rule, conn, share_id, ro_user, "ro", "cephx")
             metadata["union_cephx_user"] = ro_user
             _logger.info("[ephemeral_build] RO CephX rule 생성: %s", ro_user)
         except Exception:
@@ -425,9 +421,7 @@ async def cancel_ephemeral_build(build_db_id: int) -> dict:
         raise RuntimeError("DB가 초기화되지 않았습니다")
 
     async with factory() as session:
-        row = (
-            await session.execute(select(LibraryBuild).where(LibraryBuild.id == build_db_id))
-        ).scalar_one_or_none()
+        row = (await session.execute(select(LibraryBuild).where(LibraryBuild.id == build_db_id))).scalar_one_or_none()
         if row is None:
             raise KeyError(f"빌드 {build_db_id}를 찾을 수 없습니다")
 
@@ -475,9 +469,7 @@ async def cancel_ephemeral_build(build_db_id: int) -> dict:
                     rule.get("access_type") == "ip" and rule.get("access_level") == "rw"
                 ):
                     await asyncio.to_thread(manila.revoke_access_rule, conn, share_id, rule["id"])
-            await asyncio.to_thread(
-                manila.update_share_metadata, conn, share_id, {"union_status": "cancelled"}
-            )
+            await asyncio.to_thread(manila.update_share_metadata, conn, share_id, {"union_status": "cancelled"})
         except Exception:
             _logger.warning("[ephemeral_build] cancel: access rule 정리 실패", exc_info=True)
 

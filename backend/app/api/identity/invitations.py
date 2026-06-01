@@ -19,6 +19,7 @@ async def get_invitation_info(
 ):
     """초대 링크 정보 조회 (인증 불필요). 초대 수락 페이지에서 호출."""
     from app.services.project_service import get_invitation_info
+
     return await get_invitation_info(token, session)
 
 
@@ -47,12 +48,14 @@ async def decline_invitation(
 ):
     """초대 거절 (인증 불필요 — 토큰만으로 처리)."""
     from app.services.project_service import decline_invitation
+
     return await decline_invitation(token, session)
 
 
 async def _get_user_email(user_id: str) -> str:
     """Keystone에서 사용자 이메일 조회."""
     import asyncio
+
     from app.services import keystone
 
     def _lookup():

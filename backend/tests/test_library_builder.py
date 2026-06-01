@@ -4,10 +4,9 @@ Ephemeral 빌드 파이프라인:
 - queue_build() / _build_worker(): asyncio.Queue 직렬화
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # queue_build / _build_worker / get_build_queue_status

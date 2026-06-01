@@ -86,6 +86,16 @@ EXEMPT_HANDLERS: set[str] = {
     # QGA password reset via Nova compute API — does not alter any field that
     # is stored in the instance cache (status, metadata, etc.).
     "set_admin_password",
+    # Project / invitation membership operations — identity state managed in
+    # Keystone + DB. No per-project resource cache keys are keyed on membership
+    # or invitation data, so cache invalidation is not applicable here.
+    "create_project",
+    "create_invitation",
+    "revoke_invitation",
+    "promote_manager",
+    "demote_manager",
+    "accept_invitation",
+    "decline_invitation",
 }
 
 # ---------------------------------------------------------------------------

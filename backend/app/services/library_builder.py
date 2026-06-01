@@ -225,10 +225,8 @@ async def cleanup_stale_builds() -> None:
 
     async with factory() as session:
         rows = (
-            await session.execute(
-                select(LibraryBuild).where(LibraryBuild.status.notin_(_TERMINAL))
-            )
-        ).scalars().all()
+            (await session.execute(select(LibraryBuild).where(LibraryBuild.status.notin_(_TERMINAL)))).scalars().all()
+        )
 
         if not rows:
             return

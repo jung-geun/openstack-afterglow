@@ -908,7 +908,12 @@ async def get_dashboard_notifications(
         error_count = sum(1 for s in servers if s.get("status") == "ERROR")
         if error_count > 0:
             notifications.append(
-                {"type": "instance_error", "severity": "danger", "message": f"오류 상태 인스턴스 {error_count}개", "count": error_count}
+                {
+                    "type": "instance_error",
+                    "severity": "danger",
+                    "message": f"오류 상태 인스턴스 {error_count}개",
+                    "count": error_count,
+                }
             )
 
     # 컴퓨트 쿼터 경고
@@ -917,9 +922,19 @@ async def get_dashboard_notifications(
             return None
         pct = used / limit
         if pct >= 1.0:
-            return {"type": f"quota_full_{resource}", "severity": "danger", "message": f"{resource} 쿼터 가득 참 ({used}/{limit})", "count": 1}
+            return {
+                "type": f"quota_full_{resource}",
+                "severity": "danger",
+                "message": f"{resource} 쿼터 가득 참 ({used}/{limit})",
+                "count": 1,
+            }
         if pct >= 0.9:
-            return {"type": f"quota_warn_{resource}", "severity": "warning", "message": f"{resource} 쿼터 {int(pct * 100)}% 사용 ({used}/{limit})", "count": 1}
+            return {
+                "type": f"quota_warn_{resource}",
+                "severity": "warning",
+                "message": f"{resource} 쿼터 {int(pct * 100)}% 사용 ({used}/{limit})",
+                "count": 1,
+            }
         return None
 
     if isinstance(compute_limits, dict):

@@ -28,6 +28,7 @@ class CreateInvitationRequest(BaseModel):
 
 # ─── 프로젝트 생성 ────────────────────────────────────────────────────────────
 
+
 @router.post("", status_code=201)
 async def create_project(
     req: CreateProjectRequest,
@@ -51,6 +52,7 @@ async def create_project(
 
 # ─── 멤버 조회 ────────────────────────────────────────────────────────────────
 
+
 @router.get("/{project_id}/members")
 async def list_project_members(
     project_id: str = Path(...),
@@ -72,6 +74,7 @@ async def list_project_members(
 
     def _list_members():
         from app.services import keystone
+
         ks = keystone._get_admin_ks_client()
         assignments = ks.role_assignments.list(project=project_id)
 
@@ -90,21 +93,25 @@ async def list_project_members(
                 seen.add(user_id)
                 try:
                     u = ks.users.get(user_id)
-                    members.append({
-                        "user_id": user_id,
-                        "username": u.name or "",
-                        "email": getattr(u, "email", "") or "",
-                        "is_manager": user_id in manager_user_ids,
-                        "source": "direct",
-                    })
+                    members.append(
+                        {
+                            "user_id": user_id,
+                            "username": u.name or "",
+                            "email": getattr(u, "email", "") or "",
+                            "is_manager": user_id in manager_user_ids,
+                            "source": "direct",
+                        }
+                    )
                 except Exception:
-                    members.append({
-                        "user_id": user_id,
-                        "username": "",
-                        "email": "",
-                        "is_manager": user_id in manager_user_ids,
-                        "source": "direct",
-                    })
+                    members.append(
+                        {
+                            "user_id": user_id,
+                            "username": "",
+                            "email": "",
+                            "is_manager": user_id in manager_user_ids,
+                            "source": "direct",
+                        }
+                    )
             elif group_raw:
                 group_id = group_raw.get("id") if isinstance(group_raw, dict) else getattr(group_raw, "id", None)
                 if group_id and group_id not in group_ids:
@@ -125,14 +132,16 @@ async def list_project_members(
                     if m.id in seen:
                         continue
                     seen.add(m.id)
-                    members.append({
-                        "user_id": m.id,
-                        "username": m.name or "",
-                        "email": getattr(m, "email", "") or "",
-                        "is_manager": m.id in manager_user_ids,
-                        "source": "group",
-                        "group_name": group_name,
-                    })
+                    members.append(
+                        {
+                            "user_id": m.id,
+                            "username": m.name or "",
+                            "email": getattr(m, "email", "") or "",
+                            "is_manager": m.id in manager_user_ids,
+                            "source": "group",
+                            "group_name": group_name,
+                        }
+                    )
             except Exception:
                 continue
 
@@ -145,6 +154,7 @@ async def list_project_members(
 
 
 # ─── 초대 ─────────────────────────────────────────────────────────────────────
+
 
 @router.post("/{project_id}/invitations", status_code=201)
 async def create_invitation(
@@ -159,6 +169,7 @@ async def create_invitation(
     project_name = await _get_project_name(project_id)
 
     from app.services.project_service import create_invitation
+
     return await create_invitation(
         project_id=project_id,
         project_name=project_name,
@@ -229,6 +240,7 @@ async def revoke_invitation(
 
 # ─── 매니저 관리 ──────────────────────────────────────────────────────────────
 
+
 @router.post("/{project_id}/managers/{user_id}", status_code=204)
 async def promote_manager(
     project_id: str = Path(...),
@@ -240,6 +252,7 @@ async def promote_manager(
     await require_project_manager(project_id, token_info)
 
     from app.services.project_service import promote_to_manager
+
     await promote_to_manager(project_id, user_id, token_info["user_id"], session)
 
 
@@ -254,10 +267,12 @@ async def demote_manager(
     await require_project_manager(project_id, token_info)
 
     from app.services.project_service import demote_manager
+
     await demote_manager(project_id, user_id, session)
 
 
 # ─── 헬퍼 ─────────────────────────────────────────────────────────────────────
+
 
 async def _get_project_name(project_id: str) -> str:
     from app.services import keystone

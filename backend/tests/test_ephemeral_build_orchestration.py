@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # 픽스처
 # ---------------------------------------------------------------------------
@@ -302,6 +301,7 @@ async def test_port_created_before_access_rule():
         patch("app.services.ephemeral_build._update_db", new=AsyncMock()),
         patch("app.services.ephemeral_build._wait_for_shutoff", new=AsyncMock()),
     ):
+
         def _create_port(*a, **kw):
             call_order.append("create_port")
             return {"id": "port-001", "fixed_ip": "10.0.0.5"}

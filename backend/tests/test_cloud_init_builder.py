@@ -149,7 +149,7 @@ def test_run_build_sh_content_is_base64():
     content_lines = [ln.strip() for ln in lines if ln.strip().startswith("content: ")]
     assert content_lines, "write_files content 라인이 없음"
     for cl in content_lines:
-        b64_part = cl[len("content: "):]
+        b64_part = cl[len("content: ") :]
         decoded = base64.b64decode(b64_part)
         assert len(decoded) > 0
 

@@ -18,6 +18,7 @@ _logger = logging.getLogger(__name__)
 
 # ─── 프로젝트 생성 ────────────────────────────────────────────────────────────
 
+
 async def create_project_for_user(
     name: str,
     description: str,
@@ -76,12 +77,16 @@ async def create_project_for_user(
                 conn = keystone.get_admin_connection_for_project(project_id)
                 try:
                     neutron.ensure_node_exporter_sg(
-                        conn, project_id,
-                        settings.node_exporter_sg_name, settings.monitoring_scrape_cidr,
+                        conn,
+                        project_id,
+                        settings.node_exporter_sg_name,
+                        settings.monitoring_scrape_cidr,
                     )
                     neutron.ensure_dcgm_exporter_sg(
-                        conn, project_id,
-                        settings.dcgm_exporter_sg_name, settings.monitoring_scrape_cidr,
+                        conn,
+                        project_id,
+                        settings.dcgm_exporter_sg_name,
+                        settings.monitoring_scrape_cidr,
                     )
                 finally:
                     conn.close()
@@ -109,6 +114,7 @@ async def _compensate_delete_keystone_project(project_id: str) -> None:
     from app.services import keystone
 
     try:
+
         def _delete():
             ks = keystone._get_admin_ks_client()
             ks.projects.delete(project_id)
@@ -120,6 +126,7 @@ async def _compensate_delete_keystone_project(project_id: str) -> None:
 
 
 # ─── 관리자 확인 ──────────────────────────────────────────────────────────────
+
 
 async def is_project_manager(project_id: str, user_id: str, session: AsyncSession) -> bool:
     """project_roles 테이블에서 manager 여부 확인."""
@@ -134,6 +141,7 @@ async def is_project_manager(project_id: str, user_id: str, session: AsyncSessio
 
 
 # ─── 초대 ─────────────────────────────────────────────────────────────────────
+
 
 async def create_invitation(
     project_id: str,
@@ -221,9 +229,7 @@ async def accept_invitation(
     """초대 수락 — 이메일 일치 검증 + Keystone role 할당."""
     token_hash = hashlib.sha256(plaintext_token.encode()).hexdigest()
 
-    result = await session.execute(
-        select(ProjectInvitation).where(ProjectInvitation.token_hash == token_hash)
-    )
+    result = await session.execute(select(ProjectInvitation).where(ProjectInvitation.token_hash == token_hash))
     inv = result.scalar_one_or_none()
     if inv is None:
         raise HTTPException(status_code=404, detail="유효하지 않은 초대 링크입니다")
@@ -272,9 +278,7 @@ async def decline_invitation(plaintext_token: str, session: AsyncSession) -> dic
     """초대 거절."""
     token_hash = hashlib.sha256(plaintext_token.encode()).hexdigest()
 
-    result = await session.execute(
-        select(ProjectInvitation).where(ProjectInvitation.token_hash == token_hash)
-    )
+    result = await session.execute(select(ProjectInvitation).where(ProjectInvitation.token_hash == token_hash))
     inv = result.scalar_one_or_none()
     if inv is None:
         raise HTTPException(status_code=404, detail="유효하지 않은 초대 링크입니다")
@@ -320,13 +324,12 @@ async def _find_keystone_user_by_email(email: str) -> dict | None:
 
 # ─── 초대 정보 공개 조회 ──────────────────────────────────────────────────────
 
+
 async def get_invitation_info(plaintext_token: str, session: AsyncSession) -> dict:
     """토큰으로 초대 정보 조회 (공개 엔드포인트용)."""
     token_hash = hashlib.sha256(plaintext_token.encode()).hexdigest()
 
-    result = await session.execute(
-        select(ProjectInvitation).where(ProjectInvitation.token_hash == token_hash)
-    )
+    result = await session.execute(select(ProjectInvitation).where(ProjectInvitation.token_hash == token_hash))
     inv = result.scalar_one_or_none()
     if inv is None:
         raise HTTPException(status_code=404, detail="유효하지 않은 초대 링크입니다")
@@ -369,6 +372,7 @@ async def _get_project_name(project_id: str) -> str:
 
 
 # ─── 매니저 관리 ──────────────────────────────────────────────────────────────
+
 
 async def promote_to_manager(
     project_id: str,

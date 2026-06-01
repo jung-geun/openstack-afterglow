@@ -207,8 +207,8 @@ def _make_mock_session(existing=None):
     mock_result = MagicMock()
     mock_result.scalar_one_or_none.return_value = existing
     mock_session.execute.return_value = mock_result
-    mock_session.add = MagicMock()      # AsyncSession.add()는 동기 메서드
-    mock_session.delete = AsyncMock()   # AsyncSession.delete()는 async 메서드
+    mock_session.add = MagicMock()  # AsyncSession.add()는 동기 메서드
+    mock_session.delete = AsyncMock()  # AsyncSession.delete()는 async 메서드
     return mock_session
 
 

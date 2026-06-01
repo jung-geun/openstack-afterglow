@@ -140,8 +140,7 @@ def _render_run_build_sh(commands: list[dict]) -> str:
         "mkdir -p /mnt/share/_build_logs",
         "",
         "_on_error() {",
-        "  tail -n 100 /var/log/cloud-init-output.log"
-        " > /mnt/share/_build_logs/error.txt 2>/dev/null || true",
+        "  tail -n 100 /var/log/cloud-init-output.log > /mnt/share/_build_logs/error.txt 2>/dev/null || true",
         "}",
         "trap _on_error ERR",
         "",
