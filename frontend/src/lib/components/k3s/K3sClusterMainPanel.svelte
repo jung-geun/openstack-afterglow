@@ -13,8 +13,11 @@
 	const s = useK3sClusterDetailController();
 
 	const isStampede = $derived(s.cluster?.stampede_enabled === true);
+	const canEnableStampede = $derived(!isStampede && s.cluster?.status === 'ACTIVE');
 
 	let disabling = $state(false);
+	let enabling = $state(false);
+
 	async function disableStampede() {
 		if (!s.cluster?.id || disabling) return;
 		disabling = true;
@@ -22,11 +25,24 @@
 		const projectId = $auth.projectId ?? undefined;
 		try {
 			await api.post(`/api/k3s/clusters/${s.cluster.id}/stampede/disable`, {}, token, projectId);
-			// 클러스터 상세는 자동 새로고침 주기에 반영됨
 		} catch {
 			// best-effort
 		} finally {
 			disabling = false;
+		}
+	}
+
+	async function enableStampede() {
+		if (!s.cluster?.id || enabling) return;
+		enabling = true;
+		const token = $auth.token ?? undefined;
+		const projectId = $auth.projectId ?? undefined;
+		try {
+			await api.post(`/api/k3s/clusters/${s.cluster.id}/stampede/enable`, {}, token, projectId);
+		} catch {
+			// best-effort
+		} finally {
+			enabling = false;
 		}
 	}
 </script>
@@ -42,8 +58,21 @@
 		</div>
 		<button
 			onclick={disableStampede}
-			class="text-xs text-blue-400/70 hover:text-red-400 transition-colors px-2 py-1 rounded"
-		>비활성화</button>
+			disabled={disabling}
+			class="text-xs text-blue-400/70 hover:text-red-400 disabled:opacity-50 transition-colors px-2 py-1 rounded"
+		>{disabling ? '...' : '비활성화'}</button>
+	</div>
+{:else if canEnableStampede}
+	<div class="mb-3 flex items-center justify-between bg-gray-800/50 border border-gray-700 rounded-lg px-3 py-2.5">
+		<div class="flex items-center gap-2">
+			<span class="text-gray-400 text-sm">Stampede 오토스케일</span>
+			<span class="text-xs text-gray-500">노드그룹별 min/max 설정 후 활성화하세요</span>
+		</div>
+		<button
+			onclick={enableStampede}
+			disabled={enabling}
+			class="text-xs text-gray-400 hover:text-blue-400 disabled:opacity-50 transition-colors px-2 py-1 rounded border border-gray-600 hover:border-blue-500"
+		>{enabling ? '...' : '활성화'}</button>
 	</div>
 {/if}
 

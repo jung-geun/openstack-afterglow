@@ -53,6 +53,16 @@
       <dt class="text-gray-400 text-xs">키페어</dt>
       <dd class="text-gray-300 text-xs">{s.cluster!.key_name || '-'}</dd>
     </div>
+    <div class="flex justify-between">
+      <dt class="text-gray-400 text-xs">Stampede</dt>
+      <dd class="text-xs">
+        {#if s.cluster!.stampede_enabled}
+          <span class="text-blue-400">⚡ 활성</span>
+        {:else}
+          <span class="text-gray-500">비활성</span>
+        {/if}
+      </dd>
+    </div>
     <div class="flex justify-between items-center">
       <dt class="text-gray-400 text-xs">인증서</dt>
       <dd class="flex gap-1.5">

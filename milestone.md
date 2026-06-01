@@ -3352,9 +3352,9 @@ uv run ruff check app/services/library_builder.py app/services/builder_vm.py app
 
 ### 63.3 Frontend (미구현 — 후속)
 
-- [ ] `K3sNodegroupCard.svelte` / `K3sNodegroupCreateModal.svelte` — min/max/stampede 토글 UI
-- [ ] `K3sClusterDetailPanel.svelte` / `K3sClusterInfoCard.svelte` — Stampede 상태 뱃지
-- [ ] `k3sClusterDetailController.svelte.ts` — `enableStampede` / `disableStampede` 액션
+- [x] `K3sNodegroupCard.svelte` / `K3sNodegroupCreateModal.svelte` — min/max/stampede 토글 UI
+- [x] `K3sClusterDetailPanel.svelte` / `K3sClusterInfoCard.svelte` — Stampede 상태 뱃지
+- [x] `K3sClusterMainPanel.svelte` — `enableStampede` / `disableStampede` 액션 (클러스터 ACTIVE 시 활성화 버튼 표시)
 
 ### 63.4 Phase 2 (후속)
 
