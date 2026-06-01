@@ -6,18 +6,19 @@
 - ephemeral_build: HTTPStatusError 시 format_error_message 사용
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # extract_manila_error 회귀
 # ---------------------------------------------------------------------------
 
 
-def _make_http_error(status: int, body: bytes | str, url: str = "https://manila.example.com/v2/proj/shares") -> httpx.HTTPStatusError:
+def _make_http_error(
+    status: int, body: bytes | str, url: str = "https://manila.example.com/v2/proj/shares"
+) -> httpx.HTTPStatusError:
     request = httpx.Request("POST", url)
     response = httpx.Response(status, content=body if isinstance(body, bytes) else body.encode())
     return httpx.HTTPStatusError("original", request=request, response=response)

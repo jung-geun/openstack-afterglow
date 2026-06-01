@@ -935,8 +935,14 @@ def _parse_memory_bytes(s: str) -> int:
         return 0
     s = s.strip()
     _suffixes = {
-        "Ki": 1024, "Mi": 1024**2, "Gi": 1024**3, "Ti": 1024**4,
-        "K": 1000, "M": 1000**2, "G": 1000**3, "T": 1000**4,
+        "Ki": 1024,
+        "Mi": 1024**2,
+        "Gi": 1024**3,
+        "Ti": 1024**4,
+        "K": 1000,
+        "M": 1000**2,
+        "G": 1000**3,
+        "T": 1000**4,
     }
     for suffix, mul in _suffixes.items():
         if s.endswith(suffix):
@@ -1000,15 +1006,17 @@ async def list_unschedulable_pods(cluster_id: str) -> list[dict]:
             memory_bytes += _parse_memory_bytes(req.get("memory", "0"))
             gpu += int(req.get("nvidia.com/gpu", 0))
 
-        result.append({
-            "name": meta.get("name", ""),
-            "namespace": meta.get("namespace", "default"),
-            "node_selector": spec.get("nodeSelector") or {},
-            "resource_requests": {"cpu_m": cpu_m, "memory_bytes": memory_bytes, "gpu": gpu},
-            "tolerations": spec.get("tolerations") or [],
-            "affinity": spec.get("affinity") or {},
-            "message": msg,
-        })
+        result.append(
+            {
+                "name": meta.get("name", ""),
+                "namespace": meta.get("namespace", "default"),
+                "node_selector": spec.get("nodeSelector") or {},
+                "resource_requests": {"cpu_m": cpu_m, "memory_bytes": memory_bytes, "gpu": gpu},
+                "tolerations": spec.get("tolerations") or [],
+                "affinity": spec.get("affinity") or {},
+                "message": msg,
+            }
+        )
     return result
 
 
@@ -1050,17 +1058,19 @@ async def get_node_capacity(cluster_id: str) -> list[dict]:
                 ready = True
                 break
 
-        result.append({
-            "name": meta.get("name", ""),
-            "allocatable": {
-                "cpu_m": _parse_cpu_millicores(allocatable.get("cpu", "0")),
-                "memory_bytes": _parse_memory_bytes(allocatable.get("memory", "0")),
-                "gpu": int(allocatable.get("nvidia.com/gpu", 0)),
-            },
-            "labels": meta.get("labels") or {},
-            "taints": spec.get("taints") or [],
-            "ready": ready,
-        })
+        result.append(
+            {
+                "name": meta.get("name", ""),
+                "allocatable": {
+                    "cpu_m": _parse_cpu_millicores(allocatable.get("cpu", "0")),
+                    "memory_bytes": _parse_memory_bytes(allocatable.get("memory", "0")),
+                    "gpu": int(allocatable.get("nvidia.com/gpu", 0)),
+                },
+                "labels": meta.get("labels") or {},
+                "taints": spec.get("taints") or [],
+                "ready": ready,
+            }
+        )
     return result
 
 
@@ -1102,12 +1112,14 @@ async def get_pod_resource_usage(cluster_id: str) -> list[dict]:
             req = container.get("resources", {}).get("requests", {})
             cpu_m += _parse_cpu_millicores(req.get("cpu", "0"))
             memory_bytes += _parse_memory_bytes(req.get("memory", "0"))
-        result.append({
-            "node": node_name,
-            "namespace": meta.get("namespace", "default"),
-            "cpu_m": cpu_m,
-            "memory_bytes": memory_bytes,
-        })
+        result.append(
+            {
+                "node": node_name,
+                "namespace": meta.get("namespace", "default"),
+                "cpu_m": cpu_m,
+                "memory_bytes": memory_bytes,
+            }
+        )
     return result
 
 
@@ -1195,10 +1207,12 @@ async def drain_node(cluster_id: str, node_name: str, *, timeout: float = 120.0)
             if is_daemonset:
                 continue
 
-            evict_pods.append({
-                "name": meta.get("name", ""),
-                "namespace": meta.get("namespace", "default"),
-            })
+            evict_pods.append(
+                {
+                    "name": meta.get("name", ""),
+                    "namespace": meta.get("namespace", "default"),
+                }
+            )
 
         if not evict_pods:
             _logger.info("stampede: drain %s — evict 대상 없음 (빈 노드)", node_name)

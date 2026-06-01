@@ -26,6 +26,7 @@ async def _record_stampede_event(
     """Stampede 스케일 이벤트를 activity_logs에 영속화 (best-effort)."""
     try:
         from app.services.activity import record
+
         await record(
             project_id=project_id,
             user_id="stampede-system",
@@ -152,7 +153,8 @@ def _select_flavor(
     max_pod_gpu = max((p["resource_requests"].get("gpu", 0) for p in pending_pods), default=0)
 
     candidates = [
-        f for f in available_flavors
+        f
+        for f in available_flavors
         if f.get("vcpus_m", 0) >= max(max_pod_cpu_m, target_cpu_m)
         and f.get("ram_bytes", 0) >= max(max_pod_mem, target_mem)
         and (not needs_gpu or f.get("gpu", 0) >= max_pod_gpu)
@@ -161,7 +163,8 @@ def _select_flavor(
     if not candidates:
         # target을 맞출 수 없으면 최소한 한 pod라도 담을 수 있는 것 선택
         candidates = [
-            f for f in available_flavors
+            f
+            for f in available_flavors
             if f.get("vcpus_m", 0) >= max_pod_cpu_m
             and f.get("ram_bytes", 0) >= max_pod_mem
             and (not needs_gpu or f.get("gpu", 0) >= max_pod_gpu)
@@ -194,13 +197,15 @@ async def _get_available_flavors(project_id: str) -> list[dict]:
                         gpu += int(str(v).split(":")[-1])
                     except (ValueError, IndexError):
                         pass
-            result.append({
-                "id": f.id,
-                "name": f.name,
-                "vcpus_m": vcpus * 1000,
-                "ram_bytes": ram_mb * 1024 * 1024,
-                "gpu": gpu,
-            })
+            result.append(
+                {
+                    "id": f.id,
+                    "name": f.name,
+                    "vcpus_m": vcpus * 1000,
+                    "ram_bytes": ram_mb * 1024 * 1024,
+                    "gpu": gpu,
+                }
+            )
         return result
     except Exception as e:
         _logger.warning("_get_available_flavors 오류 (project=%s): %s", project_id, e)
@@ -249,8 +254,9 @@ async def _scale_up_nodegroup(
     last_up = state.get("last_scale_up", 0)
     cooldown = s.k3s_stampede_scale_up_cooldown
     if time.time() - last_up < cooldown:
-        _logger.debug("stampede: nodegroup %s scale-up 쿨다운 중 (%.0fs 남음)",
-                      ng_id, cooldown - (time.time() - last_up))
+        _logger.debug(
+            "stampede: nodegroup %s scale-up 쿨다운 중 (%.0fs 남음)", ng_id, cooldown - (time.time() - last_up)
+        )
         return
 
     # in-flight 노드 수 (아직 Ready 안 된 것)
@@ -301,9 +307,10 @@ async def _scale_up_nodegroup(
     # max 초과 체크
     if node_count + in_flight >= max_size:
         _logger.warning(
-            "stampede: nodegroup %s — max_size(%d) 도달, scale-up 중단. "
-            "pending pod %d개 해결 불가",
-            ng_id, max_size, len(unresolvable_pods)
+            "stampede: nodegroup %s — max_size(%d) 도달, scale-up 중단. pending pod %d개 해결 불가",
+            ng_id,
+            max_size,
+            len(unresolvable_pods),
         )
         return
 
@@ -329,8 +336,7 @@ async def _scale_up_nodegroup(
 
     if not flavor:
         _logger.warning(
-            "stampede: nodegroup %s — 적합한 flavor 없음 (pod requests 초과?). "
-            "pending pod: cpu=%dm mem=%dMi",
+            "stampede: nodegroup %s — 적합한 flavor 없음 (pod requests 초과?). pending pod: cpu=%dm mem=%dMi",
             ng_id,
             max((p["resource_requests"]["cpu_m"] for p in unresolvable_pods), default=0),
             max((p["resource_requests"]["memory_bytes"] for p in unresolvable_pods), default=0) // (1024**2),
@@ -338,9 +344,13 @@ async def _scale_up_nodegroup(
         return
 
     # 필요한 노드 수 계산: unresolvable_pods를 한 노드에 몇 개나 담을 수 있는지
-    max_fit = max(1, flavor["vcpus_m"] // max(p["resource_requests"]["cpu_m"] for p in unresolvable_pods
-                                               if p["resource_requests"]["cpu_m"] > 0)
-                  if any(p["resource_requests"]["cpu_m"] > 0 for p in unresolvable_pods) else 1)
+    max_fit = max(
+        1,
+        flavor["vcpus_m"]
+        // max(p["resource_requests"]["cpu_m"] for p in unresolvable_pods if p["resource_requests"]["cpu_m"] > 0)
+        if any(p["resource_requests"]["cpu_m"] > 0 for p in unresolvable_pods)
+        else 1,
+    )
     add_count = min(
         max(1, -(-len(unresolvable_pods) // max_fit)),  # ceil division
         max_size - node_count - in_flight,
@@ -348,19 +358,31 @@ async def _scale_up_nodegroup(
 
     _logger.info(
         "stampede: nodegroup %s scale-up %d개 (flavor=%s, unresolvable_pods=%d, in_flight=%d)",
-        ng_id, add_count, flavor["name"], len(unresolvable_pods), in_flight
+        ng_id,
+        add_count,
+        flavor["name"],
+        len(unresolvable_pods),
+        in_flight,
     )
 
     # in-flight 증가 (즉시 DB 갱신 → 다음 루프에서 중복 scale-up 방지)
-    await _update_stampede_state(ng_id, cluster_id, {
-        "in_flight_count": in_flight + add_count,
-        "in_flight_since": time.time(),
-        "last_scale_up": time.time(),
-    })
+    await _update_stampede_state(
+        ng_id,
+        cluster_id,
+        {
+            "in_flight_count": in_flight + add_count,
+            "in_flight_since": time.time(),
+            "last_scale_up": time.time(),
+        },
+    )
     # node_count도 즉시 증가
-    await k3s_nodegroup.update_nodegroup(cluster_id, ng_id, {
-        "node_count": node_count + add_count,
-    })
+    await k3s_nodegroup.update_nodegroup(
+        cluster_id,
+        ng_id,
+        {
+            "node_count": node_count + add_count,
+        },
+    )
 
     # scale-up 이벤트 기록
     await _record_stampede_event(
@@ -431,9 +453,13 @@ async def _provision_and_track(
     if ng:
         state = dict(ng.get("stampede_state") or {})
         current_in_flight = max(0, state.get("in_flight_count", 0) - add_count)
-        await _update_stampede_state(nodegroup_id, cluster_id, {
-            "in_flight_count": current_in_flight,
-        })
+        await _update_stampede_state(
+            nodegroup_id,
+            cluster_id,
+            {
+                "in_flight_count": current_in_flight,
+            },
+        )
 
     # 완료 이벤트 기록
     final_status = "success" if not failed_nodes else ("failed" if not ready_nodes else "success")
@@ -523,7 +549,10 @@ async def _scale_down_nodegroup(
     if consecutive * interval < window:
         _logger.debug(
             "stampede: nodegroup %s — 유휴 노드 %d개, stabilization window 대기 (%d/%ds)",
-            ng_id, len(idle_nodes), consecutive * interval, window,
+            ng_id,
+            len(idle_nodes),
+            consecutive * interval,
+            window,
         )
         return
 
@@ -544,13 +573,21 @@ async def _scale_down_nodegroup(
     _logger.info("stampede: nodegroup %s scale-down — node %s 제거 시작", ng_id, remove_name)
 
     # node_count 감소 + 쿨다운 갱신
-    await k3s_nodegroup.update_nodegroup(cluster_id, ng_id, {
-        "node_count": max(min_size, node_count - 1),
-    })
-    await _update_stampede_state(ng_id, cluster_id, {
-        "last_scale_down": time.time(),
-        "consecutive_idle_checks": 0,
-    })
+    await k3s_nodegroup.update_nodegroup(
+        cluster_id,
+        ng_id,
+        {
+            "node_count": max(min_size, node_count - 1),
+        },
+    )
+    await _update_stampede_state(
+        ng_id,
+        cluster_id,
+        {
+            "last_scale_down": time.time(),
+            "consecutive_idle_checks": 0,
+        },
+    )
 
     # scale-down 이벤트 기록
     await _record_stampede_event(
@@ -616,11 +653,17 @@ async def reconcile_cluster(cluster: dict) -> None:
                 if actual_creating != recorded_in_flight:
                     _logger.info(
                         "stampede: nodegroup %s in_flight 재조정 %d→%d (worker 재시작 보정)",
-                        ng["id"], recorded_in_flight, actual_creating,
+                        ng["id"],
+                        recorded_in_flight,
+                        actual_creating,
                     )
-                    await _update_stampede_state(ng["id"], cluster_id, {
-                        "in_flight_count": actual_creating,
-                    })
+                    await _update_stampede_state(
+                        ng["id"],
+                        cluster_id,
+                        {
+                            "in_flight_count": actual_creating,
+                        },
+                    )
                     # ng dict 갱신 (이후 로직에서 사용)
                     ng = dict(ng)
                     state = dict(state)
@@ -633,10 +676,7 @@ async def reconcile_cluster(cluster: dict) -> None:
         ng_id = ng["id"]
         try:
             # 이 노드그룹에 할당될 pending pod 필터
-            ng_pending = [
-                p for p in pending_pods
-                if _node_matches_nodegroup(p, ng) and not _is_pvc_issue(p)
-            ]
+            ng_pending = [p for p in pending_pods if _node_matches_nodegroup(p, ng) and not _is_pvc_issue(p)]
 
             if ng_pending:
                 await _scale_up_nodegroup(
@@ -675,10 +715,7 @@ async def run_all() -> None:
         _logger.warning("stampede: 클러스터 목록 조회 실패: %s", e)
         return
 
-    active_stampede = [
-        c for c in all_clusters
-        if c.get("status") == "ACTIVE" and c.get("stampede_enabled")
-    ]
+    active_stampede = [c for c in all_clusters if c.get("status") == "ACTIVE" and c.get("stampede_enabled")]
 
     if not active_stampede:
         return

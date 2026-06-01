@@ -256,6 +256,7 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     logging_cfg = cfg.get("logging", {})
     mon = cfg.get("monitoring", {})
     notion = cfg.get("notion", {})
+    smtp = cfg.get("smtp", {})
 
     lines = [
         "# Afterglow 통합 설정 파일",
@@ -316,6 +317,9 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     lines.append("")
     lines.append("# 프론트엔드 대시보드 자동 새로고침 간격 (밀리초)")
     lines.append(f'refresh_interval_ms = {app.get("refresh_interval_ms", 5000)}')
+    lines.append("")
+    lines.append("# 초대 이메일 링크 생성에 사용하는 프론트엔드 베이스 URL")
+    lines.append(f'frontend_base_url = {_toml_str(app.get("frontend_base_url", ""))}')
     lines.append("")
 
     # [logging] (선택)
@@ -484,6 +488,24 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     lines.append(f'redirect_uri = {_toml_str(oidc.get("redirect_uri", ""))}')
     lines.append(f'scopes = {_toml_str(oidc.get("scopes", "openid email profile read_user"))}')
     lines.append("")
+
+    # [smtp]
+    if smtp.get("host") or smtp.get("enabled"):
+        lines.append("[smtp]")
+        lines.append(f'enabled = {_toml_bool(smtp.get("enabled", False))}')
+        lines.append(f'host = {_toml_str(smtp.get("host", ""))}')
+        lines.append(f'port = {smtp.get("port", 587)}')
+        lines.append(f'username = {_toml_str(smtp.get("username", ""))}')
+        lines.append("# password는 secret.yaml의 SMTP_PASSWORD 환경변수로 주입됩니다")
+        lines.append(f'from_address = {_toml_str(smtp.get("from_address", "noreply@afterglow.example.com"))}')
+        lines.append(f'from_name = {_toml_str(smtp.get("from_name", "Afterglow"))}')
+        lines.append(f'use_tls = {_toml_bool(smtp.get("use_tls", True))}')
+        lines.append(f'timeout_seconds = {smtp.get("timeout_seconds", 10)}')
+        smtp_inv = smtp.get("invitation", {})
+        lines.append("")
+        lines.append("[smtp.invitation]")
+        lines.append(f'token_expiry_days = {smtp_inv.get("token_expiry_days", 7)}')
+        lines.append("")
 
     # [monitoring]
     lines.append("[monitoring]")

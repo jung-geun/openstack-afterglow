@@ -388,9 +388,8 @@ class UpdateK3sNodegroupRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_stampede_sizes(self) -> "UpdateK3sNodegroupRequest":
-        if self.min_size is not None and self.max_size is not None:
-            if self.min_size > self.max_size:
-                raise ValueError("min_size는 max_size보다 클 수 없습니다")
+        if self.min_size is not None and self.max_size is not None and self.min_size > self.max_size:
+            raise ValueError("min_size는 max_size보다 클 수 없습니다")
         return self
 
 

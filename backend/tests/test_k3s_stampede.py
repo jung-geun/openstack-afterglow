@@ -7,7 +7,6 @@ from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 
-
 # ---------------------------------------------------------------------------
 # 공통 픽스처
 # ---------------------------------------------------------------------------
@@ -208,8 +207,10 @@ async def test_stampede_enable_unauthenticated():
 @pytest.mark.asyncio
 async def test_stampede_enable_cluster_not_found(client):
     """클러스터 없으면 404."""
-    with patch("app.api.k3s.clusters.k3s_cluster") as mock_db, \
-         patch("app.api.k3s.clusters.get_settings") as mock_settings:
+    with (
+        patch("app.api.k3s.clusters.k3s_cluster") as mock_db,
+        patch("app.api.k3s.clusters.get_settings") as mock_settings,
+    ):
         mock_db.get_cluster = AsyncMock(return_value=None)
         s = MagicMock()
         s.k3s_stampede_enabled = True
@@ -221,8 +222,10 @@ async def test_stampede_enable_cluster_not_found(client):
 @pytest.mark.asyncio
 async def test_stampede_enable_global_disabled(client):
     """전역 stampede_enabled=false면 400."""
-    with patch("app.api.k3s.clusters.k3s_cluster") as mock_db, \
-         patch("app.api.k3s.clusters.get_settings") as mock_settings:
+    with (
+        patch("app.api.k3s.clusters.k3s_cluster") as mock_db,
+        patch("app.api.k3s.clusters.get_settings") as mock_settings,
+    ):
         mock_db.get_cluster = AsyncMock(return_value=_make_cluster())
         s = MagicMock()
         s.k3s_stampede_enabled = False
@@ -250,9 +253,11 @@ async def test_stampede_status_unauthenticated():
 @pytest.mark.asyncio
 async def test_stampede_status_success(client):
     """Stampede 상태 조회 성공."""
-    with patch("app.api.k3s.clusters.k3s_cluster") as mock_db, \
-         patch("app.api.k3s.clusters.get_settings") as mock_settings, \
-         patch("app.services.k3s_nodegroup.list_nodegroups", new=AsyncMock(return_value=[_make_nodegroup()])):
+    with (
+        patch("app.api.k3s.clusters.k3s_cluster") as mock_db,
+        patch("app.api.k3s.clusters.get_settings") as mock_settings,
+        patch("app.services.k3s_nodegroup.list_nodegroups", new=AsyncMock(return_value=[_make_nodegroup()])),
+    ):
         mock_db.get_cluster = AsyncMock(return_value=_make_cluster())
         s = MagicMock()
         s.k3s_stampede_enabled = True
@@ -277,18 +282,22 @@ async def test_run_all_skips_when_disabled():
         s.k3s_stampede_enabled = False
         mock_s.return_value = s
         from app.services.k3s_stampede import run_all
+
         await run_all()  # 예외 없이 종료되어야 함
 
 
 @pytest.mark.asyncio
 async def test_run_all_no_active_clusters():
     """stampede_enabled 클러스터가 없으면 reconcile 실행 안 함."""
-    with patch("app.services.k3s_stampede.get_settings") as mock_s, \
-         patch("app.services.k3s_db.list_all_clusters", new=AsyncMock(return_value=[])):
+    with (
+        patch("app.services.k3s_stampede.get_settings") as mock_s,
+        patch("app.services.k3s_db.list_all_clusters", new=AsyncMock(return_value=[])),
+    ):
         s = MagicMock()
         s.k3s_stampede_enabled = True
         mock_s.return_value = s
         from app.services.k3s_stampede import run_all
+
         await run_all()  # 예외 없이 종료되어야 함
 
 
@@ -298,13 +307,22 @@ async def test_scale_up_respects_max_size():
     from app.services.k3s_stampede import _scale_up_nodegroup
 
     ng = _make_nodegroup(node_count=3, max_size=3)
-    pending = [{"resource_requests": {"cpu_m": 500, "memory_bytes": 256 * 1024**2, "gpu": 0},
-                "node_selector": {}, "tolerations": [], "affinity": {}, "message": "Insufficient cpu"}]
+    pending = [
+        {
+            "resource_requests": {"cpu_m": 500, "memory_bytes": 256 * 1024**2, "gpu": 0},
+            "node_selector": {},
+            "tolerations": [],
+            "affinity": {},
+            "message": "Insufficient cpu",
+        }
+    ]
 
-    with patch("app.services.k3s_stampede.get_settings") as mock_s, \
-         patch("app.services.k3s_stampede._get_stampede_state", new=AsyncMock(return_value={})), \
-         patch("app.services.k3s_stampede._update_stampede_state", new=AsyncMock()), \
-         patch("app.services.k3s_stampede._get_available_flavors", new=AsyncMock(return_value=[])):
+    with (
+        patch("app.services.k3s_stampede.get_settings") as mock_s,
+        patch("app.services.k3s_stampede._get_stampede_state", new=AsyncMock(return_value={})),
+        patch("app.services.k3s_stampede._update_stampede_state", new=AsyncMock()),
+        patch("app.services.k3s_stampede._get_available_flavors", new=AsyncMock(return_value=[])),
+    ):
         s = MagicMock()
         s.k3s_stampede_scale_up_cooldown = 0
         s.k3s_stampede_resource_headroom_factor = 0.3
@@ -348,8 +366,14 @@ async def test_scale_down_respects_min_size():
 @pytest.mark.asyncio
 async def test_reconcile_cluster_no_stampede_nodegroups():
     """stampede_enabled nodegroup이 없으면 K8s API 조회를 하지 않는다."""
-    with patch("app.services.k3s_nodegroup.list_nodegroups", new=AsyncMock(return_value=[_make_nodegroup(stampede_enabled=False)])), \
-         patch("app.services.k3s_kube.list_unschedulable_pods") as mock_pods:
+    with (
+        patch(
+            "app.services.k3s_nodegroup.list_nodegroups",
+            new=AsyncMock(return_value=[_make_nodegroup(stampede_enabled=False)]),
+        ),
+        patch("app.services.k3s_kube.list_unschedulable_pods") as mock_pods,
+    ):
         from app.services.k3s_stampede import reconcile_cluster
+
         await reconcile_cluster(_make_cluster())
         mock_pods.assert_not_called()

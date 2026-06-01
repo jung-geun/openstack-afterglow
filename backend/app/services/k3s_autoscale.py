@@ -79,9 +79,13 @@ async def provision_nodegroup_vms(
         if s.default_network_enabled:
             try:
                 from app.services.default_network import ensure_default_network as _ensure_net
-                _net = await _ensure_net(conn, project_id,
-                                         external_network_id=s.default_network_external_id or None,
-                                         cidr=s.default_network_cidr)
+
+                _net = await _ensure_net(
+                    conn,
+                    project_id,
+                    external_network_id=s.default_network_external_id or None,
+                    cidr=s.default_network_cidr,
+                )
                 network_id = _net.id
             except Exception:
                 _logger.warning("provision_nodegroup_vms: default network 조회 실패", exc_info=True)
@@ -103,7 +107,7 @@ async def provision_nodegroup_vms(
     _agent_args.append("--node-label=afterglow.io/stampede=true")
 
     # 노드그룹 taints → --node-taint
-    for taint in (taints or []):
+    for taint in taints or []:
         # taint 형식: {"key": "k", "value": "v", "effect": "NoSchedule"}
         # 또는 단순 문자열 "k=v:Effect"
         if isinstance(taint, dict):
@@ -213,6 +217,7 @@ async def delete_nodegroup_vms(
     if project_id:
         try:
             from app.services.activity import record
+
             await record(
                 project_id=project_id,
                 user_id="stampede-system",

@@ -1335,8 +1335,14 @@ async def enable_stampede(
                 await session.commit()
 
     await invalidate(f"afterglow:k3s:{project_id}:cluster:{cluster_id}")
-    await rec(token_info, conn, resource_type="k3s_cluster",
-              action="k3s.stampede_enable", status="success", resource_id=cluster_id)
+    await rec(
+        token_info,
+        conn,
+        resource_type="k3s_cluster",
+        action="k3s.stampede_enable",
+        status="success",
+        resource_id=cluster_id,
+    )
     return {"message": "Stampede 모드가 활성화되었습니다", "cluster_id": cluster_id}
 
 
@@ -1368,8 +1374,14 @@ async def disable_stampede(
                 await session.commit()
 
     await invalidate(f"afterglow:k3s:{project_id}:cluster:{cluster_id}")
-    await rec(token_info, conn, resource_type="k3s_cluster",
-              action="k3s.stampede_disable", status="success", resource_id=cluster_id)
+    await rec(
+        token_info,
+        conn,
+        resource_type="k3s_cluster",
+        action="k3s.stampede_disable",
+        status="success",
+        resource_id=cluster_id,
+    )
     return {"message": "Stampede 모드가 비활성화되었습니다", "cluster_id": cluster_id}
 
 

@@ -159,8 +159,17 @@ async def update_nodegroup(cluster_id: str, nodegroup_id: str, updates: dict) ->
         if ng is None:
             return None
 
-        _allowed = {"node_count", "flavor_id", "image_id", "labels", "taints",
-                    "stampede_enabled", "min_size", "max_size", "stampede_state"}
+        _allowed = {
+            "node_count",
+            "flavor_id",
+            "image_id",
+            "labels",
+            "taints",
+            "stampede_enabled",
+            "min_size",
+            "max_size",
+            "stampede_state",
+        }
         for k, v in updates.items():
             if k in _allowed:
                 setattr(ng, k, v)
