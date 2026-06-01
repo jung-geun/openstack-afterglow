@@ -21,14 +21,14 @@
 		"@tailwindcss/vite": "^4.1.18",
 		"@testing-library/svelte": "^5.0.0",
 		"@types/node": "^25.6.0",
-		"@vitest/coverage-v8": "^3",
+		"@vitest/coverage-v8": "^4",
 		"jsdom": "^25.0.0",
 		"svelte": "^5.54.0",
 		"svelte-check": "^4.4.2",
 		"tailwindcss": "^4.1.18",
 		"typescript": "^5.9.3",
 		"vite": "^7.3.1",
-		"vitest": "^3"
+		"vitest": "^4"
 	},
 	"dependencies": {
 		"@xterm/addon-fit": "^0.11.0",
