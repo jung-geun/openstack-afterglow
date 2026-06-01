@@ -7,6 +7,7 @@
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 	import AdminProjectTable from '$lib/components/admin/projects/AdminProjectTable.svelte';
+	import Pagination from '$lib/components/ui/Pagination.svelte';
 	import AdminProjectCreateModal from '$lib/components/admin/projects/AdminProjectCreateModal.svelte';
 	import AdminProjectEditModal from '$lib/components/admin/projects/AdminProjectEditModal.svelte';
 	import AdminProjectDeleteModal from '$lib/components/admin/projects/AdminProjectDeleteModal.svelte';
@@ -101,18 +102,13 @@
 				onDelete={(p) => (deleteProject = p)}
 			/>
 		</div>
-		<div class="flex items-center justify-between mt-3">
-			<button
-				disabled={markerStack.length === 0}
-				onclick={() => { const prev = markerStack.slice(0, -1); markerStack = prev; load(prev[prev.length - 1]); }}
-				class="px-3 py-1.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-30"
-			>← 이전</button>
-			<button
-				disabled={!nextMarker}
-				onclick={() => { if (nextMarker) { markerStack = [...markerStack, nextMarker]; load(nextMarker); } }}
-				class="px-3 py-1.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-30"
-			>다음 →</button>
-		</div>
+		<Pagination
+			page={markerStack.length + 1}
+			hasPrev={markerStack.length > 0}
+			hasNext={!!nextMarker}
+			onPrev={() => { const prev = markerStack.slice(0, -1); markerStack = prev; load(prev[prev.length - 1]); }}
+			onNext={() => { if (nextMarker) { markerStack = [...markerStack, nextMarker]; load(nextMarker); } }}
+		/>
 	{/if}
 </div>
 

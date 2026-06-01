@@ -1,5 +1,6 @@
 <script lang="ts">
 	import StatusChip from '$lib/components/ui/StatusChip.svelte';
+	import Pagination from '$lib/components/ui/Pagination.svelte';
 	import { projectNames } from '$lib/stores/projectNames';
 	import type { AdminImage } from '$lib/types/adminImage';
 	import { visibilityColor } from '$lib/types/adminImage';
@@ -100,15 +101,10 @@
 		</tbody>
 	</table>
 </div>
-<div class="flex items-center justify-between mt-3">
-	<button
-		disabled={markerStack.length === 0}
-		onclick={onPrev}
-		class="px-3 py-1.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed"
-	>← 이전</button>
-	<button
-		disabled={!nextMarker}
-		onclick={onNext}
-		class="px-3 py-1.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed"
-	>다음 →</button>
-</div>
+<Pagination
+	page={markerStack.length + 1}
+	hasPrev={markerStack.length > 0}
+	hasNext={!!nextMarker}
+	{onPrev}
+	{onNext}
+/>

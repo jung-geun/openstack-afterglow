@@ -11,6 +11,7 @@ export { default as FormModal } from './FormModal.svelte';
 export { default as GradientText } from './GradientText.svelte';
 export { default as Modal } from './Modal.svelte';
 export { default as PageHeader } from './PageHeader.svelte';
+export { default as Pagination } from './Pagination.svelte';
 export { default as Pill } from './Pill.svelte';
 export { default as QuotaBar } from './QuotaBar.svelte';
 export { default as RingMark } from './RingMark.svelte';

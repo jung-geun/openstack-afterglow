@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Flavor } from '$lib/types/flavor';
+	import Pagination from '$lib/components/ui/Pagination.svelte';
 
 	let {
 		flavors,
@@ -145,25 +146,15 @@
 			</tbody>
 		</table>
 	</div>
-	<div class="flex items-center justify-between mt-3">
-		<button
-			disabled={currentPage === 0}
-			onclick={() => { currentPage -= 1; }}
-			class="px-3 py-1.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed"
-		>← 이전</button>
-		<span class="text-xs text-gray-500">
-			{flavors.length}개 중 {currentPage * pageSize + 1}–{Math.min(
-				(currentPage + 1) * pageSize,
-				flavors.length,
-			)}
-			{#if flavors.length < totalUnfiltered}
-				(전체 {totalUnfiltered}개 필터됨)
-			{/if}
-		</span>
-		<button
-			disabled={currentPage >= totalPages - 1}
-			onclick={() => { currentPage += 1; }}
-			class="px-3 py-1.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed"
-		>다음 →</button>
-	</div>
+	<Pagination
+		page={currentPage + 1}
+		{totalPages}
+		total={flavors.length}
+		{pageSize}
+		hasPrev={currentPage > 0}
+		hasNext={currentPage < totalPages - 1}
+		onPrev={() => { currentPage -= 1; }}
+		onNext={() => { currentPage += 1; }}
+		note={flavors.length < totalUnfiltered ? `(전체 ${totalUnfiltered}개 필터됨)` : null}
+	/>
 </div>

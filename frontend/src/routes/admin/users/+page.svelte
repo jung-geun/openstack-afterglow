@@ -99,6 +99,7 @@
 			<AdminUsersTable
 				{users}
 				{refreshing}
+				page={markerStack.length + 1}
 				hasPrev={markerStack.length > 0}
 				hasNext={nextMarker !== null}
 				onEdit={(u) => { editUser = u; }}

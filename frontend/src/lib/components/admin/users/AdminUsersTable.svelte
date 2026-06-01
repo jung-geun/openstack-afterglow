@@ -1,9 +1,11 @@
 <script lang="ts">
   import type { User } from '$lib/types/common';
+  import Pagination from '$lib/components/ui/Pagination.svelte';
 
   let {
     users,
     refreshing,
+    page,
     hasPrev,
     hasNext,
     onEdit,
@@ -12,6 +14,7 @@
   }: {
     users: User[];
     refreshing: boolean;
+    page: number;
     hasPrev: boolean;
     hasNext: boolean;
     onEdit: (user: User) => void;
@@ -50,16 +53,11 @@
       </tbody>
     </table>
   </div>
-  <div class="flex items-center justify-between mt-3">
-    <button
-      disabled={!hasPrev}
-      onclick={onPrev}
-      class="px-3 py-1.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-30"
-    >← 이전</button>
-    <button
-      disabled={!hasNext}
-      onclick={onNext}
-      class="px-3 py-1.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-30"
-    >다음 →</button>
-  </div>
+  <Pagination
+    {page}
+    {hasPrev}
+    {hasNext}
+    {onPrev}
+    {onNext}
+  />
 </div>

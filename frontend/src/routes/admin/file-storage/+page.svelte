@@ -11,7 +11,7 @@
 	import { projectNames } from '$lib/stores/projectNames';
 	import AdminFileStorageTimeseries from '$lib/components/admin/file-storage/AdminFileStorageTimeseries.svelte';
 	import AdminFileStorageTable from '$lib/components/admin/file-storage/AdminFileStorageTable.svelte';
-	import AdminFileStoragePagination from '$lib/components/admin/file-storage/AdminFileStoragePagination.svelte';
+	import Pagination from '$lib/components/ui/Pagination.svelte';
 
 	let fileStorages = $state<AdminFileStorage[]>([]);
 	let loading = $state(true);
@@ -106,11 +106,15 @@
 		<div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 			<AdminFileStorageTable storages={displayedStorages} />
 			{#if totalPages > 1}
-				<AdminFileStoragePagination
-					bind:currentPage
+				<Pagination
+					page={currentPage + 1}
 					{totalPages}
 					total={fileStorages.length}
 					{pageSize}
+					hasPrev={currentPage > 0}
+					hasNext={currentPage < totalPages - 1}
+					onPrev={() => { currentPage--; }}
+					onNext={() => { currentPage++; }}
 				/>
 			{/if}
 		</div>

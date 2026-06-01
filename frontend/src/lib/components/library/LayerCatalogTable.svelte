@@ -3,6 +3,7 @@
   import type { LayerInfo } from '$lib/types/layer';
   import { formatLayerSize, layerHref } from '$lib/types/layer';
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
+  import Pagination from '$lib/components/ui/Pagination.svelte';
 
   let {
     layers,
@@ -96,17 +97,11 @@
       </tbody>
     </table>
   </div>
-  <div class="mt-4 flex items-center gap-2 text-sm text-gray-400">
-    <button
-      onclick={onPrev}
-      disabled={currentPage === 0}
-      class="px-3 py-1 bg-gray-800 rounded disabled:opacity-40 hover:bg-gray-700 disabled:cursor-not-allowed"
-    >이전</button>
-    <span>페이지 {currentPage + 1}</span>
-    <button
-      onclick={onNext}
-      disabled={layers.length < pageSize}
-      class="px-3 py-1 bg-gray-800 rounded disabled:opacity-40 hover:bg-gray-700 disabled:cursor-not-allowed"
-    >다음</button>
-  </div>
+  <Pagination
+    page={currentPage + 1}
+    hasPrev={currentPage > 0}
+    hasNext={layers.length >= pageSize}
+    {onPrev}
+    {onNext}
+  />
 </div>

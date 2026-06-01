@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { projectNames } from '$lib/stores/projectNames';
 	import type { PortInfo } from '$lib/types/networks';
+	import Pagination from '$lib/components/ui/Pagination.svelte';
 
 	let {
 		ports,
@@ -68,16 +69,11 @@
 		</tbody>
 	</table>
 </div>
-<div class="flex items-center justify-between mt-3">
-	<button
-		disabled={markerStack.length === 0}
-		onclick={onPrev}
-		class="px-3 py-1.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed"
-	>← 이전</button>
-	<span class="text-xs text-gray-600">{ports.length}개 포트</span>
-	<button
-		disabled={!nextMarker}
-		onclick={onNext}
-		class="px-3 py-1.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed"
-	>다음 →</button>
-</div>
+<Pagination
+	page={markerStack.length + 1}
+	hasPrev={markerStack.length > 0}
+	hasNext={!!nextMarker}
+	note="{ports.length}개 포트"
+	{onPrev}
+	{onNext}
+/>

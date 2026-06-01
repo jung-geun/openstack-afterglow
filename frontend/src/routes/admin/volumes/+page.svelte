@@ -19,7 +19,7 @@
 	import AdminVolumeForceDeleteModal from '$lib/components/admin/volumes/AdminVolumeForceDeleteModal.svelte';
 	import AdminVolumeTransferModal from '$lib/components/admin/volumes/AdminVolumeTransferModal.svelte';
 	import AdminVolumeTimeseries from '$lib/components/admin/volumes/AdminVolumeTimeseries.svelte';
-	import AdminVolumePagination from '$lib/components/admin/volumes/AdminVolumePagination.svelte';
+	import Pagination from '$lib/components/ui/Pagination.svelte';
 	import AdminVolumePageSizeToggle from '$lib/components/admin/volumes/AdminVolumePageSizeToggle.svelte';
 	import AdminVolumeDetailSlide from '$lib/components/admin/volumes/AdminVolumeDetailSlide.svelte';
 
@@ -165,9 +165,10 @@
 					})}
 			/>
 		</div>
-		<AdminVolumePagination
-			{markerStack}
-			{nextMarker}
+		<Pagination
+			page={markerStack.length + 1}
+			hasPrev={markerStack.length > 0}
+			hasNext={!!nextMarker}
 			onPrev={() => {
 				const prev = markerStack.slice(0, -1);
 				const marker = prev[prev.length - 1];
