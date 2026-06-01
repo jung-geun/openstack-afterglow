@@ -307,6 +307,32 @@ def get_admin_connection_for_project(project_id: str) -> openstack.connection.Co
     )
 
 
+def get_admin_project_connection() -> openstack.connection.Connection:
+    """afterglow admin 크리덴셜로 admin 프로젝트에 스코프된 연결.
+
+    Barbican project-quotas 등 admin 프로젝트 스코프가 필요한 cross-project 관리 API에 사용.
+    사용자의 현재 프로젝트 선택과 무관하게 항상 admin 프로젝트로 스코프됨.
+    """
+    import openstack
+
+    settings = get_settings()
+    return openstack.connect(
+        load_envvars=False,
+        load_yaml_config=False,
+        auth_url=settings.os_auth_url,
+        auth_type="password",
+        username=settings.os_username,
+        password=settings.os_password,
+        project_name=settings.os_project_name,
+        user_domain_name=settings.os_user_domain_name,
+        project_domain_name=settings.os_project_domain_name,
+        region_name=settings.os_region_name,
+        interface=settings.os_interface,
+        api_timeout=30,
+        verify=settings.ssl_verify,
+    )
+
+
 def get_service_project_connection() -> openstack.connection.Connection:
     """Union Mount 전용 service 프로젝트로 스코프된 admin 자격 conn.
 
