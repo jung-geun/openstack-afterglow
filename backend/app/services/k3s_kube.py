@@ -912,3 +912,335 @@ async def scale_deployment(cluster_id: str, namespace: str, name: str, replicas:
         if resp2.status_code != 200:
             _raise_k8s_error(resp2, f"get deployment {name} after scale")
         return _deploy_from_k8s(resp2.json())
+
+
+# ---------------------------------------------------------------------------
+# Stampede 오토스케일 전용 함수 (admin kubeconfig, HTTPException 미사용)
+# ---------------------------------------------------------------------------
+
+
+def _parse_cpu_millicores(s: str) -> int:
+    """K8s CPU 수량 문자열 → 밀리코어(int). 예: '500m'→500, '2'→2000."""
+    if not s:
+        return 0
+    s = s.strip()
+    if s.endswith("m"):
+        return int(s[:-1])
+    return int(float(s) * 1000)
+
+
+def _parse_memory_bytes(s: str) -> int:
+    """K8s 메모리 수량 문자열 → 바이트(int). 예: '512Mi'→536870912."""
+    if not s:
+        return 0
+    s = s.strip()
+    _suffixes = {
+        "Ki": 1024, "Mi": 1024**2, "Gi": 1024**3, "Ti": 1024**4,
+        "K": 1000, "M": 1000**2, "G": 1000**3, "T": 1000**4,
+    }
+    for suffix, mul in _suffixes.items():
+        if s.endswith(suffix):
+            return int(float(s[: -len(suffix)]) * mul)
+    return int(s)
+
+
+async def list_unschedulable_pods(cluster_id: str) -> list[dict]:
+    """전체 네임스페이스에서 Unschedulable Pending pod 목록 반환 (admin kubeconfig).
+
+    반환 구조:
+      {name, namespace, node_selector, resource_requests{cpu_m, memory_bytes, gpu},
+       tolerations, affinity, message}
+    """
+    try:
+        kubeconfig_yaml = await k3s_db.get_kubeconfig_admin(cluster_id)
+        if not kubeconfig_yaml:
+            return []
+        cert_pem, key_pem, server_url = _parse_kubeconfig(kubeconfig_yaml)
+        ssl_ctx = _make_ssl_context(cert_pem, key_pem)
+        async with httpx.AsyncClient(verify=ssl_ctx, timeout=15.0) as client:
+            resp = await client.get(
+                f"{server_url}/api/v1/pods",
+                params={"fieldSelector": "status.phase=Pending"},
+                headers={"Accept": "application/json"},
+            )
+            if resp.status_code != 200:
+                _logger.warning("list_unschedulable_pods HTTP %d: %s", resp.status_code, resp.text[:200])
+                return []
+            items = resp.json().get("items", [])
+    except Exception as e:
+        _logger.warning("list_unschedulable_pods 오류 (cluster=%s): %s", cluster_id, e)
+        return []
+
+    result = []
+    for item in items:
+        meta = item.get("metadata", {})
+        spec = item.get("spec", {})
+        status = item.get("status", {})
+
+        # PodScheduled=False, reason=Unschedulable 조건 확인
+        conditions = status.get("conditions", [])
+        unschedulable = False
+        msg = ""
+        for cond in conditions:
+            if cond.get("type") == "PodScheduled" and cond.get("status") == "False":
+                if cond.get("reason") == "Unschedulable":
+                    unschedulable = True
+                    msg = cond.get("message", "")
+                break
+        if not unschedulable:
+            continue
+
+        # resource requests 집계 (모든 컨테이너 합산)
+        cpu_m = 0
+        memory_bytes = 0
+        gpu = 0
+        for container in spec.get("containers", []) + spec.get("initContainers", []):
+            req = container.get("resources", {}).get("requests", {})
+            cpu_m += _parse_cpu_millicores(req.get("cpu", "0"))
+            memory_bytes += _parse_memory_bytes(req.get("memory", "0"))
+            gpu += int(req.get("nvidia.com/gpu", 0))
+
+        result.append({
+            "name": meta.get("name", ""),
+            "namespace": meta.get("namespace", "default"),
+            "node_selector": spec.get("nodeSelector") or {},
+            "resource_requests": {"cpu_m": cpu_m, "memory_bytes": memory_bytes, "gpu": gpu},
+            "tolerations": spec.get("tolerations") or [],
+            "affinity": spec.get("affinity") or {},
+            "message": msg,
+        })
+    return result
+
+
+async def get_node_capacity(cluster_id: str) -> list[dict]:
+    """전체 노드의 capacity/allocatable/Ready 상태 반환 (admin kubeconfig).
+
+    반환 구조:
+      {name, allocatable{cpu_m, memory_bytes, gpu}, labels, taints, ready}
+    """
+    try:
+        kubeconfig_yaml = await k3s_db.get_kubeconfig_admin(cluster_id)
+        if not kubeconfig_yaml:
+            return []
+        cert_pem, key_pem, server_url = _parse_kubeconfig(kubeconfig_yaml)
+        ssl_ctx = _make_ssl_context(cert_pem, key_pem)
+        async with httpx.AsyncClient(verify=ssl_ctx, timeout=15.0) as client:
+            resp = await client.get(
+                f"{server_url}/api/v1/nodes",
+                headers={"Accept": "application/json"},
+            )
+            if resp.status_code != 200:
+                _logger.warning("get_node_capacity HTTP %d", resp.status_code)
+                return []
+            items = resp.json().get("items", [])
+    except Exception as e:
+        _logger.warning("get_node_capacity 오류 (cluster=%s): %s", cluster_id, e)
+        return []
+
+    result = []
+    for item in items:
+        meta = item.get("metadata", {})
+        status = item.get("status", {})
+        spec = item.get("spec", {})
+        allocatable = status.get("allocatable", {})
+
+        ready = False
+        for cond in status.get("conditions", []):
+            if cond.get("type") == "Ready" and cond.get("status") == "True":
+                ready = True
+                break
+
+        result.append({
+            "name": meta.get("name", ""),
+            "allocatable": {
+                "cpu_m": _parse_cpu_millicores(allocatable.get("cpu", "0")),
+                "memory_bytes": _parse_memory_bytes(allocatable.get("memory", "0")),
+                "gpu": int(allocatable.get("nvidia.com/gpu", 0)),
+            },
+            "labels": meta.get("labels") or {},
+            "taints": spec.get("taints") or [],
+            "ready": ready,
+        })
+    return result
+
+
+async def get_pod_resource_usage(cluster_id: str) -> list[dict]:
+    """전체 Running pod의 resource requests 반환 (admin kubeconfig).
+
+    반환 구조:
+      {node, namespace, cpu_m, memory_bytes}
+    """
+    try:
+        kubeconfig_yaml = await k3s_db.get_kubeconfig_admin(cluster_id)
+        if not kubeconfig_yaml:
+            return []
+        cert_pem, key_pem, server_url = _parse_kubeconfig(kubeconfig_yaml)
+        ssl_ctx = _make_ssl_context(cert_pem, key_pem)
+        async with httpx.AsyncClient(verify=ssl_ctx, timeout=15.0) as client:
+            resp = await client.get(
+                f"{server_url}/api/v1/pods",
+                params={"fieldSelector": "status.phase=Running"},
+                headers={"Accept": "application/json"},
+            )
+            if resp.status_code != 200:
+                return []
+            items = resp.json().get("items", [])
+    except Exception as e:
+        _logger.warning("get_pod_resource_usage 오류 (cluster=%s): %s", cluster_id, e)
+        return []
+
+    result = []
+    for item in items:
+        meta = item.get("metadata", {})
+        spec = item.get("spec", {})
+        node_name = spec.get("nodeName", "")
+        if not node_name:
+            continue
+        cpu_m = 0
+        memory_bytes = 0
+        for container in spec.get("containers", []):
+            req = container.get("resources", {}).get("requests", {})
+            cpu_m += _parse_cpu_millicores(req.get("cpu", "0"))
+            memory_bytes += _parse_memory_bytes(req.get("memory", "0"))
+        result.append({
+            "node": node_name,
+            "namespace": meta.get("namespace", "default"),
+            "cpu_m": cpu_m,
+            "memory_bytes": memory_bytes,
+        })
+    return result
+
+
+async def cordon_node(cluster_id: str, node_name: str) -> bool:
+    """노드를 cordon(스케줄 불가)으로 설정한다 (admin kubeconfig).
+
+    Returns: True=성공, False=실패
+    """
+    try:
+        kubeconfig_yaml = await k3s_db.get_kubeconfig_admin(cluster_id)
+        if not kubeconfig_yaml:
+            return False
+        cert_pem, key_pem, server_url = _parse_kubeconfig(kubeconfig_yaml)
+        ssl_ctx = _make_ssl_context(cert_pem, key_pem)
+        patch_body = {"spec": {"unschedulable": True}}
+        async with httpx.AsyncClient(verify=ssl_ctx, timeout=10.0) as client:
+            resp = await client.patch(
+                f"{server_url}/api/v1/nodes/{node_name}",
+                json=patch_body,
+                headers={
+                    "Content-Type": "application/merge-patch+json",
+                    "Accept": "application/json",
+                },
+            )
+            if resp.status_code in (200, 201):
+                _logger.info("stampede: node %s cordoned", node_name)
+                return True
+            _logger.warning("stampede: cordon %s 실패 HTTP %d: %s", node_name, resp.status_code, resp.text[:200])
+            return False
+    except Exception as e:
+        _logger.warning("stampede: cordon %s 오류: %s", node_name, e)
+        return False
+
+
+async def drain_node(cluster_id: str, node_name: str, *, timeout: float = 120.0) -> bool:
+    """노드를 drain한다 (DaemonSet/mirror pod 제외, PDB 존중, admin kubeconfig).
+
+    Returns: True=drain 완료, False=timeout 또는 오류 (호출자가 강제 삭제 진행)
+    """
+    import asyncio
+    import time
+
+    try:
+        kubeconfig_yaml = await k3s_db.get_kubeconfig_admin(cluster_id)
+        if not kubeconfig_yaml:
+            return False
+        cert_pem, key_pem, server_url = _parse_kubeconfig(kubeconfig_yaml)
+        ssl_ctx = _make_ssl_context(cert_pem, key_pem)
+    except Exception as e:
+        _logger.warning("stampede: drain %s kubeconfig 오류: %s", node_name, e)
+        return False
+
+    async with httpx.AsyncClient(verify=ssl_ctx, timeout=15.0) as client:
+        # 노드의 모든 pod 조회
+        try:
+            resp = await client.get(
+                f"{server_url}/api/v1/pods",
+                params={"fieldSelector": f"spec.nodeName={node_name}"},
+                headers={"Accept": "application/json"},
+            )
+            if resp.status_code != 200:
+                _logger.warning("stampede: drain %s pod 조회 실패 HTTP %d", node_name, resp.status_code)
+                return False
+            items = resp.json().get("items", [])
+        except Exception as e:
+            _logger.warning("stampede: drain %s pod 조회 오류: %s", node_name, e)
+            return False
+
+        # 제외 대상 필터링: DaemonSet pod / mirror pod / 이미 종료된 pod
+        evict_pods = []
+        for item in items:
+            meta = item.get("metadata", {})
+            annotations = meta.get("annotations") or {}
+            owner_refs = meta.get("ownerReferences") or []
+            phase = item.get("status", {}).get("phase", "")
+
+            # 이미 종료된 pod 제외
+            if phase in ("Succeeded", "Failed"):
+                continue
+            # mirror pod 제외 (static pod)
+            if "kubernetes.io/config.mirror" in annotations:
+                continue
+            # DaemonSet pod 제외
+            is_daemonset = any(ref.get("kind") == "DaemonSet" for ref in owner_refs)
+            if is_daemonset:
+                continue
+
+            evict_pods.append({
+                "name": meta.get("name", ""),
+                "namespace": meta.get("namespace", "default"),
+            })
+
+        if not evict_pods:
+            _logger.info("stampede: drain %s — evict 대상 없음 (빈 노드)", node_name)
+            return True
+
+        _logger.info("stampede: drain %s — %d개 pod eviction 시작", node_name, len(evict_pods))
+        deadline = time.monotonic() + timeout
+
+        for pod in evict_pods:
+            if time.monotonic() >= deadline:
+                _logger.warning("stampede: drain %s — timeout 초과", node_name)
+                return False
+            ns = pod["namespace"]
+            name = pod["name"]
+            eviction_body = {
+                "apiVersion": "policy/v1",
+                "kind": "Eviction",
+                "metadata": {"name": name, "namespace": ns},
+            }
+            retry = 0
+            while time.monotonic() < deadline:
+                try:
+                    r = await client.post(
+                        f"{server_url}/api/v1/namespaces/{ns}/pods/{name}/eviction",
+                        json=eviction_body,
+                        headers={"Accept": "application/json"},
+                    )
+                    if r.status_code in (200, 201, 404):
+                        # 성공 또는 이미 없음
+                        break
+                    if r.status_code == 429:
+                        # PDB 위반 — 백오프 재시도
+                        wait = min(5 * (2**retry), 30)
+                        _logger.info("stampede: drain %s/%s PDB 위반, %ds 후 재시도", ns, name, wait)
+                        await asyncio.sleep(wait)
+                        retry += 1
+                        continue
+                    _logger.warning("stampede: evict %s/%s HTTP %d: %s", ns, name, r.status_code, r.text[:100])
+                    break
+                except Exception as e:
+                    _logger.warning("stampede: evict %s/%s 오류: %s", ns, name, e)
+                    break
+
+        _logger.info("stampede: drain %s 완료", node_name)
+        return True

@@ -62,6 +62,7 @@ def _cluster_to_dict(cluster: K3sCluster) -> dict:
         "template_id": cluster.template_id or None,
         "template_snapshot": cluster.template_snapshot or None,
         "master_count": cluster.master_count if hasattr(cluster, "master_count") else 1,
+        "stampede_enabled": bool(cluster.stampede_enabled) if hasattr(cluster, "stampede_enabled") else False,
     }
 
 

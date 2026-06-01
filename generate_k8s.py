@@ -423,18 +423,27 @@ def _render_toml_for_k8s(cfg: dict) -> str:
         "api_lb_vip_network_id", "api_lb_floating_network_id", "lb_subnet_id",
         "cert_rotation_job_image",
     )
-    k3s_keys_int = ("boot_volume_size_gb", "cert_rotation_node_timeout_sec")
+    k3s_keys_int = (
+        "boot_volume_size_gb", "cert_rotation_node_timeout_sec",
+        "stampede_interval", "stampede_scale_down_window",
+        "stampede_scale_up_cooldown", "stampede_scale_down_cooldown",
+    )
+    k3s_keys_float = ("stampede_scale_down_threshold", "stampede_resource_headroom_factor")
     k3s_keys_bool = (
         "occm_enabled", "cinder_csi_enabled", "manila_csi_enabled",
         "keystone_auth_enabled", "octavia_ingress_enabled", "barbican_kms_enabled",
-        "api_lb_enabled",
+        "api_lb_enabled", "stampede_enabled",
     )
+    k3s_keys_str = k3s_keys_str + ("stampede_project_id",)
     for key in k3s_keys_str:
         if key in k3s:
             lines.append(f'{key} = {_toml_str(k3s[key])}')
     for key in k3s_keys_int:
         if key in k3s:
             lines.append(f'{key} = {k3s[key]}')
+    for key in k3s_keys_float:
+        if key in k3s:
+            lines.append(f'{key} = {float(k3s[key])}')
     for key in k3s_keys_bool:
         if key in k3s:
             lines.append(f'{key} = {_toml_bool(k3s[key])}')

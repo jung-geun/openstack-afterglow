@@ -30,6 +30,11 @@ def _ng_to_dict(ng: K3sNodegroup) -> dict:
         "labels": ng.labels or {},
         "taints": ng.taints or [],
         "is_default": bool(ng.is_default),
+        # Stampede 오토스케일
+        "stampede_enabled": bool(ng.stampede_enabled),
+        "min_size": ng.min_size,
+        "max_size": ng.max_size,
+        "stampede_state": ng.stampede_state or {},
         "vms": [{"vm_id": v.vm_id, "name": v.name, "status": v.status} for v in vms],
         "created_at": ng.created_at.isoformat() if ng.created_at else None,
         "updated_at": ng.updated_at.isoformat() if ng.updated_at else None,
@@ -151,7 +156,8 @@ async def update_nodegroup(cluster_id: str, nodegroup_id: str, updates: dict) ->
         if ng is None:
             return None
 
-        _allowed = {"node_count", "flavor_id", "image_id", "labels", "taints"}
+        _allowed = {"node_count", "flavor_id", "image_id", "labels", "taints",
+                    "stampede_enabled", "min_size", "max_size", "stampede_state"}
         for k, v in updates.items():
             if k in _allowed:
                 setattr(ng, k, v)

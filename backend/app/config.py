@@ -181,6 +181,15 @@ def _load_toml() -> dict:
         "cert_rotation_job_image",
         "registry.k8s.io/util-linux/util-linux:latest",
     )
+    # Stampede 오토스케일
+    flat["k3s_stampede_enabled"] = k3s.get("stampede_enabled", False)
+    flat["k3s_stampede_interval"] = k3s.get("stampede_interval", 60)
+    flat["k3s_stampede_scale_down_threshold"] = k3s.get("stampede_scale_down_threshold", 0.5)
+    flat["k3s_stampede_scale_down_window"] = k3s.get("stampede_scale_down_window", 600)
+    flat["k3s_stampede_scale_up_cooldown"] = k3s.get("stampede_scale_up_cooldown", 120)
+    flat["k3s_stampede_scale_down_cooldown"] = k3s.get("stampede_scale_down_cooldown", 300)
+    flat["k3s_stampede_resource_headroom_factor"] = k3s.get("stampede_resource_headroom_factor", 0.3)
+    flat["k3s_stampede_project_id"] = k3s.get("stampede_project_id", "")
 
     gpu = data.get("gpu", {})
     flat["gpu_available_visible"] = gpu.get("available_visible", False)
@@ -424,6 +433,15 @@ class Settings(BaseSettings):
     # 인증서 회전
     k3s_cert_rotation_node_timeout_sec: int = 300
     k3s_cert_rotation_job_image: str = "registry.k8s.io/util-linux/util-linux:latest"
+    # Stampede 오토스케일
+    k3s_stampede_enabled: bool = False
+    k3s_stampede_interval: int = 60
+    k3s_stampede_scale_down_threshold: float = 0.5
+    k3s_stampede_scale_down_window: int = 600
+    k3s_stampede_scale_up_cooldown: int = 120
+    k3s_stampede_scale_down_cooldown: int = 300
+    k3s_stampede_resource_headroom_factor: float = 0.3
+    k3s_stampede_project_id: str = ""
 
     # Union Mount 레이어 시스템 — Manila share ID
     union_layer_store_rw_share_id: str = ""  # layer-store-rw (Builder 전용 RW)

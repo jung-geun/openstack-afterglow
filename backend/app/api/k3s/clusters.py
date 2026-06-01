@@ -1292,3 +1292,116 @@ async def detach_node_interface(
             error_message=str(e)[:500],
         )
         raise HTTPException(status_code=500, detail="인터페이스 detach 실패")
+
+
+# ---------------------------------------------------------------------------
+# Stampede 오토스케일 API
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{cluster_id}/stampede/enable", status_code=200)
+async def enable_stampede(
+    cluster_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    """클러스터의 Stampede 오토스케일 모드를 활성화한다."""
+
+    project_id = conn._afterglow_project_id
+    cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
+
+    if not get_settings().k3s_stampede_enabled:
+        raise HTTPException(status_code=400, detail="Stampede 기능이 서버에서 비활성화 상태입니다")
+
+    await k3s_cluster.update_cluster_status(project_id, cluster_id, cluster["status"], "")
+    # stampede_enabled 컬럼 갱신
+    from sqlalchemy import select as _select
+
+    from app.database import get_session_factory, is_db_available
+    from app.models.db import K3sCluster
+
+    if is_db_available():
+        factory = get_session_factory()
+        async with factory() as session:
+            stmt = _select(K3sCluster).where(K3sCluster.id == cluster_id)
+            result = await session.execute(stmt)
+            c = result.scalar_one_or_none()
+            if c:
+                c.stampede_enabled = True
+                await session.commit()
+
+    await invalidate(f"afterglow:k3s:{project_id}:cluster:{cluster_id}")
+    await rec(token_info, conn, resource_type="k3s_cluster",
+              action="k3s.stampede_enable", status="success", resource_id=cluster_id)
+    return {"message": "Stampede 모드가 활성화되었습니다", "cluster_id": cluster_id}
+
+
+@router.post("/{cluster_id}/stampede/disable", status_code=200)
+async def disable_stampede(
+    cluster_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    """클러스터의 Stampede 오토스케일 모드를 비활성화한다."""
+    project_id = conn._afterglow_project_id
+    cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
+
+    from sqlalchemy import select as _select
+
+    from app.database import get_session_factory, is_db_available
+    from app.models.db import K3sCluster
+
+    if is_db_available():
+        factory = get_session_factory()
+        async with factory() as session:
+            stmt = _select(K3sCluster).where(K3sCluster.id == cluster_id)
+            result = await session.execute(stmt)
+            c = result.scalar_one_or_none()
+            if c:
+                c.stampede_enabled = False
+                await session.commit()
+
+    await invalidate(f"afterglow:k3s:{project_id}:cluster:{cluster_id}")
+    await rec(token_info, conn, resource_type="k3s_cluster",
+              action="k3s.stampede_disable", status="success", resource_id=cluster_id)
+    return {"message": "Stampede 모드가 비활성화되었습니다", "cluster_id": cluster_id}
+
+
+@router.get("/{cluster_id}/stampede")
+async def get_stampede_status(
+    cluster_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    """클러스터의 Stampede 오토스케일 상태를 조회한다."""
+    from app.services import k3s_nodegroup as _k3s_ng
+
+    project_id = conn._afterglow_project_id
+    cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
+
+    all_ngs = await _k3s_ng.list_nodegroups(cluster_id)
+    stampede_ngs = [
+        {
+            "id": ng["id"],
+            "name": ng["name"],
+            "stampede_enabled": ng["stampede_enabled"],
+            "min_size": ng["min_size"],
+            "max_size": ng["max_size"],
+            "node_count": ng["node_count"],
+            "stampede_state": ng.get("stampede_state") or {},
+        }
+        for ng in all_ngs
+    ]
+
+    return {
+        "cluster_id": cluster_id,
+        "stampede_enabled": bool(cluster.get("stampede_enabled", False)),
+        "global_stampede_enabled": get_settings().k3s_stampede_enabled,
+        "nodegroups": stampede_ngs,
+    }

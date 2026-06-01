@@ -89,6 +89,9 @@ class K3sCluster(Base):
     template_id: Mapped[str | None] = mapped_column(CHAR(36), nullable=True)
     template_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
+    # Stampede 오토스케일 모드
+    stampede_enabled: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False)
+
     # 인증서 회전 추적
     last_rotation_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_rotation_initiated_by: Mapped[str | None] = mapped_column(VARCHAR(64), nullable=True)
@@ -372,6 +375,11 @@ class K3sNodegroup(Base):
     labels: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     taints: Mapped[list | None] = mapped_column(JSON, nullable=True)
     is_default: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False)
+    # Stampede 오토스케일
+    stampede_enabled: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False)
+    min_size: Mapped[int] = mapped_column(INT, nullable=False, default=0)
+    max_size: Mapped[int] = mapped_column(INT, nullable=False, default=5)
+    stampede_state: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
