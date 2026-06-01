@@ -1,11 +1,16 @@
 name: Docker Build & Push
 
 on:
-  # Unit Tests 워크플로우가 완료된 후에만 실행
-  # → 테스트가 통과한 커밋에 한해서만 이미지 빌드/푸시
-  workflow_run:
-    workflows: ["Unit Tests"]
-    types: [completed]
+  push:
+    branches: [main, dev]
+    tags: ['v*']
+    paths-ignore:
+      # test.yml + docker-build.yml(main) paths-ignore 합집합
+      - 'deploy/k8s/overlays/**/.argocd-source-*.yaml'
+      - 'deploy/k8s-template/overlays/**/.argocd-source-*.yaml'
+      - 'deploy/k8s-template/overlays/dev/kustomization.yaml'
+  pull_request:
+    branches: [main]
   workflow_dispatch:
     inputs:
       targets:
@@ -20,13 +25,17 @@ env:
   IMAGE_OWNER: ${{ github.repository_owner }}
 
 jobs:
+  # ─── 테스트: 단위 테스트 통과 후에만 빌드로 진행 ───
+  test:
+    name: Unit Tests
+    uses: ./.github/workflows/test.yml
+    secrets: inherit
+
   # ─── 변경 감지: dev 브랜치에서만 선택적 빌드, 나머지는 항상 전체 빌드 ───
   changes:
     name: Detect changed targets
+    needs: test
     runs-on: ubuntu-latest
-    # workflow_dispatch: 수동 실행은 테스트 의존 없이 허용
-    # workflow_run: Unit Tests가 성공한 경우에만 진행
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     permissions:
       contents: read
       pull-requests: read
@@ -38,46 +47,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.workflow_run.head_sha }}
+          ref: ${{ github.sha }}
           fetch-depth: 2
 
-      # workflow_run 이벤트는 github.ref 가 트리거한 원본 push/PR ref 와 다르므로
-      # head_branch 에서 재구성한다.
-      # 보안: ${{ }} 표현식을 run: 블록에 직접 인터폴레이션하면 브랜치명을 통한
-      # 스크립트 인젝션이 가능하므로 env: 를 통해서만 전달한다.
+      # push/PR/workflow_dispatch 이벤트는 github.ref 가 정확한 ref 를 직접 가리킨다.
       - name: Resolve effective ref
         id: eff-ref
-        env:
-          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
-          WR_EVENT: ${{ github.event.workflow_run.event }}
-          WR_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
-          THIS_REPO: ${{ github.repository }}
         run: |
-          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
-            echo "ref=$GITHUB_REF" >> $GITHUB_OUTPUT
-            echo "is_pr=false" >> $GITHUB_OUTPUT
+          echo "ref=$GITHUB_REF" >> $GITHUB_OUTPUT
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            echo "is_pr=true" >> $GITHUB_OUTPUT
           else
-            # 포크 PR이 권한 있는 빌드 단계에 도달하지 않도록 저장소 일치 여부 확인
-            if [[ "$WR_REPO" != "$THIS_REPO" ]]; then
-              echo "::error::workflow_run 트리거 저장소 불일치 ($WR_REPO != $THIS_REPO) — 중단"
-              exit 1
-            fi
-            # 브랜치명을 안전한 문자셋으로 제한 (인젝션 방지)
-            if [[ ! "$HEAD_BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]]; then
-              echo "::error::유효하지 않은 브랜치명: $HEAD_BRANCH"
-              exit 1
-            fi
-            # 태그 push: head_branch 가 "v1.2.3" 형태
-            if [[ "$HEAD_BRANCH" =~ ^v[0-9] ]]; then
-              echo "ref=refs/tags/${HEAD_BRANCH}" >> $GITHUB_OUTPUT
-            else
-              echo "ref=refs/heads/${HEAD_BRANCH}" >> $GITHUB_OUTPUT
-            fi
-            if [[ "$WR_EVENT" == "pull_request" ]]; then
-              echo "is_pr=true" >> $GITHUB_OUTPUT
-            else
-              echo "is_pr=false" >> $GITHUB_OUTPUT
-            fi
+            echo "is_pr=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Detect file changes
@@ -170,7 +151,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.workflow_run.head_sha }}
+          ref: ${{ github.sha }}
 
       - name: Install uv (tag push only)
         if: startsWith(needs.changes.outputs.effective_ref, 'refs/tags/v')
