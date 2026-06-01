@@ -142,6 +142,11 @@
 					</button>
 				</div>
 				{#if form.stampede_enabled}
+					{#if Number(form.min_size) === 0}
+						<div class="mt-2 text-xs text-amber-400/90 bg-amber-900/10 border border-amber-800/40 rounded px-2.5 py-1.5">
+							⚠ min=0 (scale-to-zero): 유휴 시 모든 노드가 자동 제거됩니다.
+						</div>
+					{/if}
 					<div class="mt-3 grid grid-cols-2 gap-3">
 						<label class="block text-xs text-gray-400 uppercase tracking-wide">
 							최소 노드

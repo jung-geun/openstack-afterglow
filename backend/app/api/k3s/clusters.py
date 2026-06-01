@@ -1407,3 +1407,52 @@ async def get_stampede_status(
         "global_stampede_enabled": get_settings().k3s_stampede_enabled,
         "nodegroups": stampede_ngs,
     }
+
+
+@router.get("/{cluster_id}/stampede/events")
+async def get_stampede_events(
+    cluster_id: str,
+    limit: int = Query(default=50, ge=1, le=200),
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    """Stampede 스케일 이벤트 이력 조회 (최신순)."""
+    from sqlalchemy import desc
+    from sqlalchemy import select as _select
+
+    from app.database import get_session_factory, is_db_available
+    from app.models.activity import ActivityLog
+
+    project_id = conn._afterglow_project_id
+    cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
+
+    if not is_db_available():
+        return []
+
+    factory = get_session_factory()
+    async with factory() as session:
+        stmt = (
+            _select(ActivityLog)
+            .where(
+                ActivityLog.resource_type == "k3s_stampede",
+                ActivityLog.resource_id == cluster_id,
+            )
+            .order_by(desc(ActivityLog.created_at))
+            .limit(limit)
+        )
+        result = await session.execute(stmt)
+        rows = result.scalars().all()
+
+    return [
+        {
+            "id": r.id,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "action": r.action,
+            "status": r.status,
+            "nodegroup_id": r.resource_name,
+            "extra": r.extra or {},
+        }
+        for r in rows
+    ]

@@ -12,6 +12,7 @@
   import K3sClusterDeploymentsCard from '$lib/components/k3s/K3sClusterDeploymentsCard.svelte';
   import K3sClusterPodsCard from '$lib/components/k3s/K3sClusterPodsCard.svelte';
   import K3sNamespaceSelector from '$lib/components/k3s/K3sNamespaceSelector.svelte';
+  import K3sStampedeTab from '$lib/components/k3s/K3sStampedeTab.svelte';
   import K3sInstanceViewerOverlay from '$lib/components/k3s/K3sInstanceViewerOverlay.svelte';
   import K3sCloudShellOverlay from '$lib/components/k3s/K3sCloudShellOverlay.svelte';
 
@@ -133,6 +134,8 @@
       {:else if s.activeTab === 'pods'}
         <K3sNamespaceSelector />
         <K3sClusterPodsCard />
+      {:else if s.activeTab === 'stampede'}
+        <K3sStampedeTab />
       {/if}
     {/if}
   </div>

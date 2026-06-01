@@ -14,6 +14,33 @@ from app.config import get_settings
 
 _logger = logging.getLogger("drover.stampede")
 
+
+async def _record_stampede_event(
+    project_id: str,
+    cluster_id: str,
+    nodegroup_id: str,
+    action: str,
+    status: str,
+    extra: dict | None = None,
+) -> None:
+    """Stampede 스케일 이벤트를 activity_logs에 영속화 (best-effort)."""
+    try:
+        from app.services.activity import record
+        await record(
+            project_id=project_id,
+            user_id="stampede-system",
+            username="Stampede",
+            resource_type="k3s_stampede",
+            resource_id=cluster_id,
+            resource_name=nodegroup_id,
+            action=action,
+            status=status,  # type: ignore[arg-type]
+            extra=extra or {},
+        )
+    except Exception as e:
+        _logger.debug("stampede: 이벤트 기록 실패 (무시): %s", e)
+
+
 # ---------------------------------------------------------------------------
 # 내부 헬퍼
 # ---------------------------------------------------------------------------
@@ -335,6 +362,16 @@ async def _scale_up_nodegroup(
         "node_count": node_count + add_count,
     })
 
+    # scale-up 이벤트 기록
+    await _record_stampede_event(
+        project_id=project_id,
+        cluster_id=cluster_id,
+        nodegroup_id=ng_id,
+        action="scale_up",
+        status="started",
+        extra={"add_count": add_count, "flavor_id": flavor["id"], "flavor_name": flavor.get("name", "")},
+    )
+
     # 비동기 VM 프로비저닝 시작 (fire-and-forget, in-flight 해소는 태스크 완료 시)
     asyncio.create_task(
         _provision_and_track(
@@ -375,24 +412,44 @@ async def _provision_and_track(
     )
 
     # VM Ready 대기 (최대 40분)
+    ready_nodes = []
+    failed_nodes = []
     for vm in new_vms:
         node_name = vm.get("name", "")
         if node_name:
             ready = await k3s_kube.wait_node_ready(cluster_id, node_name, timeout=2400.0)
             if ready:
-                await k3s_nodegroup.update_nodegroup(cluster_id, nodegroup_id, {})  # updated_at 갱신
+                await k3s_nodegroup.update_nodegroup(cluster_id, nodegroup_id, {})
                 _logger.info("stampede: node %s Ready 확인됨", node_name)
+                ready_nodes.append(node_name)
             else:
                 _logger.warning("stampede: node %s Ready 대기 timeout (40분)", node_name)
+                failed_nodes.append(node_name)
 
-    # 실제 생성된 수만큼 in-flight 감소 (실패한 것 포함 보정)
+    # in-flight 감소: add_count 기준 (provision 실패 포함 정확한 보정)
     ng = await k3s_nodegroup.get_nodegroup(cluster_id, nodegroup_id)
     if ng:
         state = dict(ng.get("stampede_state") or {})
-        current_in_flight = max(0, state.get("in_flight_count", 0) - len(new_vms))
+        current_in_flight = max(0, state.get("in_flight_count", 0) - add_count)
         await _update_stampede_state(nodegroup_id, cluster_id, {
             "in_flight_count": current_in_flight,
         })
+
+    # 완료 이벤트 기록
+    final_status = "success" if not failed_nodes else ("failed" if not ready_nodes else "success")
+    await _record_stampede_event(
+        project_id=project_id,
+        cluster_id=cluster_id,
+        nodegroup_id=nodegroup_id,
+        action="scale_up",
+        status=final_status,
+        extra={
+            "add_count": add_count,
+            "flavor_id": flavor_id,
+            "ready_nodes": ready_nodes,
+            "failed_nodes": failed_nodes,
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -495,6 +552,16 @@ async def _scale_down_nodegroup(
         "consecutive_idle_checks": 0,
     })
 
+    # scale-down 이벤트 기록
+    await _record_stampede_event(
+        project_id=project_id,
+        cluster_id=cluster_id,
+        nodegroup_id=ng_id,
+        action="scale_down",
+        status="started",
+        extra={"node_name": remove_name, "vm_id": vm_entry.get("vm_id", "")},
+    )
+
     # 비동기 삭제
     asyncio.create_task(
         k3s_autoscale.delete_nodegroup_vms(
@@ -538,6 +605,29 @@ async def reconcile_cluster(cluster: dict) -> None:
     except Exception as e:
         _logger.warning("stampede: cluster %s K8s API 조회 실패: %s", cluster_id, e)
         return
+
+    # in_flight 재조정 (worker 재시작 대비 — 실제 CREATING VM 수와 비교)
+    for ng in stampede_ngs:
+        state = ng.get("stampede_state") or {}
+        recorded_in_flight = state.get("in_flight_count", 0)
+        if recorded_in_flight > 0:
+            try:
+                actual_creating = await k3s_nodegroup.count_creating_vms(ng["id"])
+                if actual_creating != recorded_in_flight:
+                    _logger.info(
+                        "stampede: nodegroup %s in_flight 재조정 %d→%d (worker 재시작 보정)",
+                        ng["id"], recorded_in_flight, actual_creating,
+                    )
+                    await _update_stampede_state(ng["id"], cluster_id, {
+                        "in_flight_count": actual_creating,
+                    })
+                    # ng dict 갱신 (이후 로직에서 사용)
+                    ng = dict(ng)
+                    state = dict(state)
+                    state["in_flight_count"] = actual_creating
+                    ng["stampede_state"] = state
+            except Exception as e:
+                _logger.warning("stampede: in_flight 재조정 실패 (%s): %s", ng["id"], e)
 
     for ng in stampede_ngs:
         ng_id = ng["id"]

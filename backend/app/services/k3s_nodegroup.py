@@ -241,6 +241,23 @@ async def remove_nodegroup_vms(nodegroup_id: str, vm_ids: list[str]) -> None:
         await session.commit()
 
 
+async def count_creating_vms(nodegroup_id: str) -> int:
+    """노드그룹에서 status='CREATING'인 VM 수 반환 (in_flight 재조정용)."""
+    if not is_db_available():
+        return 0
+
+    from sqlalchemy import func
+
+    factory = get_session_factory()
+    async with factory() as session:
+        stmt = select(func.count()).where(
+            K3sNodegroupVM.nodegroup_id == nodegroup_id,
+            K3sNodegroupVM.status == "CREATING",
+        )
+        result = await session.execute(stmt)
+        return result.scalar_one() or 0
+
+
 async def get_default_agent_nodegroup_id(cluster_id: str) -> str | None:
     """클러스터의 default-agent 노드그룹 ID 반환. 없으면 None."""
     if not is_db_available():

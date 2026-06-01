@@ -208,3 +208,21 @@ async def delete_nodegroup_vms(
 
     # DB 레코드 제거
     await k3s_nodegroup.remove_nodegroup_vms(nodegroup_id, vm_ids)
+
+    # scale-down 완료 이벤트 (best-effort, project_id 없으면 스킵)
+    if project_id:
+        try:
+            from app.services.activity import record
+            await record(
+                project_id=project_id,
+                user_id="stampede-system",
+                username="Stampede",
+                resource_type="k3s_stampede",
+                resource_id=cluster_id,
+                resource_name=nodegroup_id,
+                action="scale_down",
+                status="success",
+                extra={"removed_count": len(vm_entries), "node_names": [e.get("name") for e in vm_entries]},
+            )
+        except Exception:
+            pass

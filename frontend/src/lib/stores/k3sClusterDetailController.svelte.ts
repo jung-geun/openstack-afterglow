@@ -30,7 +30,7 @@ import {
 } from '$lib/api/k3sWorkloads';
 import { confirmDialog } from '$lib/stores/confirm.svelte';
 
-export type ActiveTab = 'main' | 'configmaps' | 'secrets' | 'services' | 'workloads' | 'pods';
+export type ActiveTab = 'main' | 'configmaps' | 'secrets' | 'services' | 'workloads' | 'pods' | 'stampede';
 
 export type { K3sCluster, K3sClusterHealth };
 

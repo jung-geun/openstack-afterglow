@@ -11,6 +11,7 @@
 		{ key: 'services',   label: 'Service' },
 		{ key: 'workloads',  label: 'Deployment / RS' },
 		{ key: 'pods',       label: 'Pod' },
+		{ key: 'stampede',   label: '⚡ Stampede' },
 	];
 </script>
 
