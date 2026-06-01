@@ -148,6 +148,7 @@ _mark("api.container")
 # ---------------------------------------------------------------------------
 from app.api.identity import admin_router, auth_router
 from app.api.identity.admin_activity import router as admin_activity_router
+from app.api.identity.admin_dashboard import router as admin_dashboard_router
 from app.api.identity.admin_flavors import router as admin_flavors_router
 from app.api.identity.admin_gpu import router as admin_gpu_router
 from app.api.identity.admin_identity import router as admin_identity_router
@@ -156,7 +157,6 @@ from app.api.identity.admin_instances import router as admin_instances_router
 from app.api.identity.admin_libraries import router as admin_libraries_router
 from app.api.identity.admin_notion import router as admin_notion_router
 from app.api.identity.admin_orphans import router as admin_orphans_router
-from app.api.identity.admin_dashboard import router as admin_dashboard_router
 from app.api.identity.admin_secrets import router as admin_secrets_router
 from app.api.identity.admin_services import router as admin_services_router
 from app.api.identity.invitations import router as invitations_router
