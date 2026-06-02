@@ -323,7 +323,7 @@
 	</PageHeader>
 
 	<!-- 탭 -->
-	<div class="flex gap-1 mb-6 border-b border-gray-700">
+	<div class="flex gap-1 mb-0 border-b border-gray-700">
 		{#each (['secrets', 'containers', 'orders', 'quota'] as Tab[]) as tab}
 			<button
 				onclick={() => activeTab = tab}
@@ -334,6 +334,49 @@
 			</button>
 		{/each}
 	</div>
+
+	<!-- 탭별 설명 -->
+	{#if activeTab === 'secrets'}
+		<div class="my-4 flex items-start gap-3 bg-gray-800/40 border border-gray-700/60 rounded-lg px-4 py-3 text-sm text-gray-400">
+			<span class="text-lg leading-none mt-0.5">🔑</span>
+			<div>
+				<span class="text-gray-200 font-medium">비밀(Secret)</span>은 비밀번호, API 키, 인증서, 암호화 키 등 민감한 값을 안전하게 저장하는 단위입니다.
+				저장된 값은 암호화되어 보관되며, <span class="text-white">"값 보기"</span> 버튼으로만 복호화할 수 있습니다.
+				타입에 따라 <span class="text-gray-300">passphrase</span>(비밀번호), <span class="text-gray-300">certificate</span>(인증서 PEM),
+				<span class="text-gray-300">symmetric</span>(대칭키), <span class="text-gray-300">public/private</span>(비대칭키쌍) 등을 구분해 저장합니다.
+				🔒 표시된 항목은 시스템이 관리하는 secret으로 삭제할 수 없습니다.
+			</div>
+		</div>
+	{:else if activeTab === 'containers'}
+		<div class="my-4 flex items-start gap-3 bg-gray-800/40 border border-gray-700/60 rounded-lg px-4 py-3 text-sm text-gray-400">
+			<span class="text-lg leading-none mt-0.5">📦</span>
+			<div>
+				<span class="text-gray-200 font-medium">컨테이너(Container)</span>는 여러 Secret을 하나로 묶는 논리적 그룹입니다.
+				<span class="text-gray-300">generic</span>은 임의의 secret 묶음,
+				<span class="text-gray-300">rsa</span>는 공개키·개인키 쌍,
+				<span class="text-gray-300">certificate</span>는 TLS 인증서·개인키·체인을 한 벌로 관리합니다.
+				Octavia 로드밸런서의 TLS termination이나 서비스 간 인증서 공유에 활용됩니다.
+			</div>
+		</div>
+	{:else if activeTab === 'orders'}
+		<div class="my-4 flex items-start gap-3 bg-gray-800/40 border border-gray-700/60 rounded-lg px-4 py-3 text-sm text-gray-400">
+			<span class="text-lg leading-none mt-0.5">⚙️</span>
+			<div>
+				<span class="text-gray-200 font-medium">Key Orders</span>는 Barbican에 암호화 키 생성을 비동기로 요청하는 작업입니다.
+				<span class="text-gray-300">대칭키(AES)</span> 또는 <span class="text-gray-300">비대칭키(RSA)</span>를 지정한 비트 길이로 생성해달라고 요청하면,
+				Barbican이 백그라운드에서 안전하게 키를 생성하고 Secret으로 저장합니다.
+				직접 키를 입력하지 않고 서버 측에서 생성하므로 키가 네트워크를 거치지 않아 더 안전합니다.
+			</div>
+		</div>
+	{:else if activeTab === 'quota'}
+		<div class="my-4 flex items-start gap-3 bg-gray-800/40 border border-gray-700/60 rounded-lg px-4 py-3 text-sm text-gray-400">
+			<span class="text-lg leading-none mt-0.5">📊</span>
+			<div>
+				<span class="text-gray-200 font-medium">쿼터(Quota)</span>는 이 프로젝트에서 생성할 수 있는 리소스 한도입니다.
+				<span class="text-white">∞</span>는 무제한을 의미합니다. 한도는 관리자 페이지의 Key Manager 쿼터 설정에서 변경할 수 있습니다.
+			</div>
+		</div>
+	{/if}
 
 	{#if error}<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>{/if}
 
