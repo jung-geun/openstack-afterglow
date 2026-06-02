@@ -120,8 +120,23 @@ milestone.md          기능별 구현 현황 추적
 ### 테스트 의무
 
 - **백엔드 엔드포인트를 구현하면 반드시 `backend/tests/` 에 pytest 테스트를 함께 작성한다.**
-- 커밋 전 반드시 실행: `npm run test:all` + `npm run lint:backend`
 - 테스트 없는 엔드포인트 구현은 미완료로 간주한다.
+
+#### 커밋 전 필수 검증 절차 (반드시 순서대로 실행)
+
+```bash
+# 1. 전체 테스트 + lint 실행
+npm run test:all
+npm run lint:backend
+
+# 2. 위 명령이 모두 0(success) 으로 종료된 경우에만 커밋·push 진행
+git add <변경 파일>
+git commit -m "type: 요약"
+git push origin dev
+```
+
+> **규칙**: 테스트나 lint 중 하나라도 실패하면 **커밋하지 않는다.**
+> 실패 원인을 먼저 수정하고 재실행 후 전부 통과된 상태에서만 커밋한다.
 
 ### milestone.md 갱신 의무
 
