@@ -1,4 +1,4 @@
-import { api } from './client';
+import { api, getBaseUrl } from './client';
 
 export interface SecretInfo {
 	id: string;
@@ -56,7 +56,7 @@ export const secretsApi = {
 		const headers: Record<string, string> = {};
 		if (token) headers['Authorization'] = `Bearer ${token}`;
 		if (projectId) headers['X-Project-Id'] = projectId;
-		const res = await fetch(`/api/secrets/${id}/payload`, { headers });
+		const res = await fetch(`${getBaseUrl()}/api/secrets/${id}/payload`, { headers });
 		if (!res.ok) throw new Error('payload 조회 실패');
 		const buf = await res.arrayBuffer();
 		return new TextDecoder().decode(buf);
