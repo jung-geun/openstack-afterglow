@@ -63,12 +63,19 @@ def _apply_endpoint_override(conn) -> None:
         _logger.debug("Swift endpoint override 적용: %s", override)
 
 
-def list_containers(conn, include_quarantine: bool = False) -> list[dict]:
+def list_containers(
+    conn,
+    include_quarantine: bool = False,
+    include_trash: bool = False,
+) -> list[dict]:
     """현재 계정의 오브젝트 스토리지 컨테이너(버킷) 목록 반환.
 
     include_quarantine=True 시 `*-quarantine` 버킷도 포함하고 결과에
     `is_quarantine: True` 필드 표시. admin 모니터링 용도.
+    include_trash=True 시 `*-trash` 버킷도 포함하고 결과에
+    `is_trash: True` 필드 표시. admin 모니터링 용도.
     `_segments` 는 항상 숨김(원본 bytes 에 합산).
+    소프트 삭제(is_deleted) 마킹은 호출자(API handler)가 Redis 조회 후 처리한다.
     """
     _apply_endpoint_override(conn)
     try:
@@ -97,6 +104,9 @@ def list_containers(conn, include_quarantine: bool = False) -> list[dict]:
             is_quarantine = cname.endswith("-quarantine")
             if is_quarantine and not include_quarantine:
                 continue
+            is_trash = cname.endswith("-trash")
+            if is_trash and not include_trash:
+                continue
             base_bytes = getattr(c, "bytes", 0) or 0
             entry = {
                 "name": cname,
@@ -105,8 +115,15 @@ def list_containers(conn, include_quarantine: bool = False) -> list[dict]:
             }
             if is_quarantine:
                 entry["is_quarantine"] = True
+            if is_trash:
+                entry["is_trash"] = True
             result.append(entry)
-        _logger.info("Swift 컨테이너 목록 조회: %d개 (quarantine=%s)", len(result), include_quarantine)
+        _logger.info(
+            "Swift 컨테이너 목록 조회: %d개 (quarantine=%s, trash=%s)",
+            len(result),
+            include_quarantine,
+            include_trash,
+        )
         return result
     except Exception as exc:
         if _is_account_not_found(exc):
@@ -718,8 +735,12 @@ def copy_object(
     source: str,
     dest_container: str,
     dest_name: str,
+    extra_headers: dict | None = None,
 ) -> dict:
-    """오브젝트를 복사한다 (Swift X-Copy-From 헤더 사용)."""
+    """오브젝트를 복사한다 (Swift X-Copy-From 헤더 사용).
+
+    extra_headers: COPY 요청에 추가로 보낼 헤더 (예: X-Object-Meta-* 메타데이터).
+    """
     import urllib.parse
 
     from app.config import get_settings
@@ -734,11 +755,11 @@ def copy_object(
     # 한글 등 non-ASCII 문자를 URL-encode 하여 latin-1 인코딩 문제 방지
     encoded_src = "/" + urllib.parse.quote(container, safe="") + "/" + urllib.parse.quote(source, safe="/")
     encoded_dest = "/" + urllib.parse.quote(dest_container, safe="") + "/" + urllib.parse.quote(dest_name, safe="/")
+    headers = {"X-Copy-From": encoded_src, "Content-Length": "0"}
+    if extra_headers:
+        headers.update(extra_headers)
     try:
-        proxy.put(
-            encoded_dest,
-            headers={"X-Copy-From": encoded_src, "Content-Length": "0"},
-        )
+        proxy.put(encoded_dest, headers=headers)
     finally:
         proxy.timeout = original_timeout
     return {
@@ -790,3 +811,277 @@ def move_object(
 def rename_object(conn, container: str, old_name: str, new_name: str) -> dict:
     """오브젝트 이름을 변경한다 (같은 컨테이너 내 move)."""
     return move_object(conn, container, old_name, container, new_name)
+
+
+# ---------------------------------------------------------------------------
+# 휴지통 (오브젝트 소프트 삭제)
+# ---------------------------------------------------------------------------
+
+# 휴지통 버킷 접미사
+TRASH_SUFFIX = "-trash"
+
+
+def _trash_container_name(container: str) -> str:
+    """원본 버킷 이름에서 휴지통 버킷 이름 반환."""
+    return f"{container}{TRASH_SUFFIX}"
+
+
+def _ensure_trash_container(conn, container: str) -> None:
+    """휴지통 버킷이 없으면 생성. 이미 있으면 no-op."""
+    trash_name = _trash_container_name(container)
+    _apply_endpoint_override(conn)
+    try:
+        conn.object_store.get_container_metadata(trash_name)
+    except Exception:
+        # 존재하지 않으면 생성
+        try:
+            create_container(conn, trash_name)
+        except Exception:
+            _logger.warning("휴지통 버킷 생성 실패: %s", trash_name, exc_info=True)
+            raise
+
+
+def soft_delete_object(conn, container: str, name: str) -> dict:
+    """오브젝트를 휴지통 버킷({container}-trash)으로 이동 (소프트 삭제).
+
+    휴지통 키 형식: {epoch_seconds}/{uuid8}/{original_name}
+    이 형식을 통해 purge 루프가 오브젝트별 HEAD 없이 이름만으로 만료 여부를 판정할 수 있다.
+
+    디렉토리(trailing '/')의 경우 move_object 의 재귀 로직을 재사용하여 하위 파일
+    전체를 휴지통으로 이동한다 — copy+delete 를 단순 호출하면 하위 파일이 원본 버킷에
+    고아로 남는 버그가 발생한다.
+    """
+    import time
+    import uuid as _uuid
+
+    _ensure_trash_container(conn, container)
+
+    epoch = int(time.time())
+    uid = _uuid.uuid4().hex[:8]
+    trash_key = f"{epoch}/{uid}/{name}"
+    trash_container = _trash_container_name(container)
+
+    if name.endswith("/"):
+        # 디렉토리: move_object 가 하위 파일 전체를 재귀 COPY+DELETE 처리
+        move_object(conn, container, name, trash_container, trash_key)
+    else:
+        extra_meta: dict[str, str] = {
+            "X-Object-Meta-Orig-Name": name,
+            "X-Object-Meta-Orig-Container": container,
+            "X-Object-Meta-Deleted-At": str(epoch),
+        }
+        copy_object(conn, container, name, trash_container, trash_key, extra_headers=extra_meta)
+        delete_object(conn, container, name)
+
+    _logger.info(
+        "오브젝트 소프트 삭제: container=%s name=%s → trash_key=%s",
+        container,
+        name,
+        trash_key,
+    )
+    return {
+        "trash_key": trash_key,
+        "original_name": name,
+        "deleted_at": epoch,
+        "container": container,
+        "trash_container": trash_container,
+    }
+
+
+def bulk_soft_delete_objects(conn, container: str, names: list[str], recursive: bool = False) -> dict:
+    """여러 오브젝트를 휴지통으로 이동.
+
+    recursive=True 이면 디렉토리 하위 전체를 소프트 삭제한다.
+    반환: {"moved": [...], "failed": [...]}
+    """
+    moved: list[str] = []
+    failed: list[dict] = []
+
+    for name in names:
+        if name.endswith("/") and recursive:
+            try:
+                children = list_objects(conn, container, prefix=name, delimiter="")
+            except Exception as e:
+                failed.append({"name": name, "error": str(e)})
+                continue
+            for child in children:
+                child_name = child["name"]
+                if child_name == name:
+                    continue
+                try:
+                    soft_delete_object(conn, container, child_name)
+                    moved.append(child_name)
+                except Exception as e:
+                    failed.append({"name": child_name, "error": str(e)})
+        try:
+            soft_delete_object(conn, container, name)
+            moved.append(name)
+        except Exception as e:
+            failed.append({"name": name, "error": str(e)})
+
+    return {"moved": moved, "failed": failed}
+
+
+def list_trash_objects(conn, container: str) -> list[dict]:
+    """휴지통 버킷의 오브젝트 목록 반환.
+
+    각 항목에 trash_key, original_name, deleted_at(epoch_seconds) 필드 포함.
+    """
+    trash_container = _trash_container_name(container)
+    try:
+        objects = list_objects(conn, trash_container, delimiter="")
+    except Exception:
+        return []
+
+    result = []
+    for obj in objects:
+        key = obj.get("name", "")
+        # 키 형식: {epoch}/{uuid8}/{original_name}
+        parts = key.split("/", 2)
+        if len(parts) < 3:
+            _logger.debug("휴지통 키 형식 불일치, 건너뜀: %s", key)
+            continue
+        epoch_str, _uid, orig_name = parts
+        try:
+            deleted_at = int(epoch_str)
+        except ValueError:
+            deleted_at = 0
+        result.append(
+            {
+                **obj,
+                "trash_key": key,
+                "original_name": orig_name,
+                "deleted_at": deleted_at,
+            }
+        )
+    return result
+
+
+def restore_trash_object(conn, container: str, trash_key: str) -> dict:
+    """휴지통 오브젝트를 원본 버킷으로 복구.
+
+    원본 버킷에 동명 파일이 이미 있으면 '(복구됨)' 접미사를 붙인다.
+    """
+    trash_container = _trash_container_name(container)
+
+    parts = trash_key.split("/", 2)
+    if len(parts) < 3:
+        raise ValueError(f"잘못된 휴지통 키 형식: {trash_key}")
+    orig_name = parts[2]
+
+    # 동명 충돌 확인
+    _apply_endpoint_override(conn)
+    dest_name = orig_name
+    try:
+        conn.object_store.get_object_metadata(orig_name, container=container)
+        # 동명 파일 존재 — 접미사 추가
+        if "." in orig_name.rsplit("/", 1)[-1]:
+            base, dot, ext = orig_name.rpartition(".")
+            dest_name = f"{base}-(복구됨).{ext}"
+        else:
+            dest_name = f"{orig_name}-(복구됨)"
+    except Exception:
+        pass  # 원본 없음 — 그대로 복구
+
+    move_object(conn, trash_container, trash_key, container, dest_name)
+
+    _logger.info(
+        "오브젝트 복구: trash_key=%s → container=%s name=%s",
+        trash_key,
+        container,
+        dest_name,
+    )
+    return {
+        "restored_name": dest_name,
+        "original_name": orig_name,
+        "container": container,
+    }
+
+
+def purge_trash_object(conn, container: str, trash_key: str) -> None:
+    """휴지통 오브젝트를 영구 삭제."""
+    trash_container = _trash_container_name(container)
+    delete_object(conn, trash_container, trash_key)
+    _logger.info("오브젝트 영구 삭제 (휴지통): container=%s key=%s", container, trash_key)
+
+
+def purge_expired_trash_objects(conn, container: str, retention_days: int) -> dict:
+    """만료된 휴지통 오브젝트를 모두 영구 삭제.
+
+    retention_days 경과한 오브젝트만 삭제한다.
+    반환: {"purged": [trash_key, ...], "failed": [...]}
+    """
+    import time
+
+    cutoff = int(time.time()) - retention_days * 86400
+    objects = list_trash_objects(conn, container)
+    purged: list[str] = []
+    failed: list[dict] = []
+
+    for obj in objects:
+        if obj.get("deleted_at", 0) <= cutoff:
+            key = obj["trash_key"]
+            try:
+                purge_trash_object(conn, container, key)
+                purged.append(key)
+            except Exception as e:
+                failed.append({"trash_key": key, "error": str(e)})
+
+    return {"purged": purged, "failed": failed}
+
+
+# ---------------------------------------------------------------------------
+# 버킷 소프트 삭제 (컨테이너 레벨)
+# ---------------------------------------------------------------------------
+
+_CONTAINER_DELETED_META_KEY = "afterglow-deleted-at"
+
+
+def soft_delete_container_metadata(conn, name: str, epoch: int) -> None:
+    """컨테이너에 삭제 타임스탬프 메타데이터 부착 (소프트 삭제 마킹).
+
+    실제 데이터 이동은 없음. 격리용 연산 비용 zero.
+    """
+    _apply_endpoint_override(conn)
+    # openstacksdk set_container_metadata: kwarg key → X-Container-Meta-{key}
+    # 'afterglow_deleted_at' → 'X-Container-Meta-Afterglow-Deleted-At'
+    conn.object_store.set_container_metadata(name, afterglow_deleted_at=str(epoch))
+    _logger.info("컨테이너 소프트 삭제 마킹: name=%s deleted_at=%d", name, epoch)
+
+
+def restore_container_metadata(conn, name: str) -> None:
+    """컨테이너에서 삭제 타임스탬프 메타데이터 제거 (복구 마킹)."""
+    _apply_endpoint_override(conn)
+    conn.object_store.set_container_metadata(name, afterglow_deleted_at="")
+    _logger.info("컨테이너 소프트 삭제 마킹 해제: name=%s", name)
+
+
+def get_container_deleted_at(conn, name: str) -> int | None:
+    """컨테이너의 소프트 삭제 타임스탬프 반환. 소프트 삭제 아니면 None."""
+    _apply_endpoint_override(conn)
+    try:
+        meta = conn.object_store.get_container_metadata(name)
+        # openstacksdk는 X-Container-Meta-Afterglow-Deleted-At을
+        # x_container_meta_afterglow_deleted_at 속성으로 노출
+        for attr in (
+            "x_container_meta_afterglow_deleted_at",
+            "afterglow_deleted_at",
+        ):
+            v = getattr(meta, attr, None)
+            if v:
+                try:
+                    return int(v)
+                except (ValueError, TypeError):
+                    pass
+        # metadata dict fallback (openstacksdk 버전에 따라 다를 수 있음)
+        md = getattr(meta, "metadata", None) or {}
+        for key in ("afterglow-deleted-at", "Afterglow-Deleted-At"):
+            v = md.get(key)
+            if v:
+                try:
+                    return int(v)
+                except (ValueError, TypeError):
+                    pass
+    except Exception:
+        _logger.debug("컨테이너 메타데이터 조회 실패: %s", name, exc_info=True)
+    return None

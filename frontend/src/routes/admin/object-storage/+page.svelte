@@ -12,6 +12,7 @@
 	import BucketCreateModal from '$lib/components/object-storage/buckets/BucketCreateModal.svelte';
 	import BucketTable from '$lib/components/object-storage/buckets/BucketTable.svelte';
 	import QuarantineNotice from '$lib/components/object-storage/buckets/QuarantineNotice.svelte';
+	import TrashNotice from '$lib/components/object-storage/buckets/TrashNotice.svelte';
 	import { toast } from '$lib/stores/toast';
 
 	interface AccountMeta {
@@ -40,7 +41,7 @@
 		else refreshing = true;
 		try {
 			containers = await api.get<SwiftContainer[]>(
-				'/api/object-storage?all_projects=true&include_quarantine=true',
+				'/api/object-storage?all_projects=true&include_quarantine=true&include_trash=true&include_deleted=true',
 				token, projectId
 			);
 		} catch {
@@ -62,7 +63,7 @@
 	}
 
 	async function deleteContainer(name: string) {
-		if (!await confirmDialog(`버킷 "${name}" 와 그 안의 모든 객체를 삭제합니다. 계속하시겠습니까?`)) return;
+		if (!await confirmDialog(`버킷 "${name}"을 휴지통으로 이동합니다. 보관 기간 내에 복구할 수 있습니다. 계속하시겠습니까?`)) return;
 		deleting = name;
 		try {
 			await api.delete(`/api/object-storage/${encodeURIComponent(name)}`, token, projectId);
@@ -128,6 +129,9 @@
 		<BucketTable {containers} deletingId={deleting} {refreshing} onDelete={deleteContainer} />
 		{#if containers.some((c) => c.is_quarantine)}
 			<QuarantineNotice />
+		{/if}
+		{#if containers.some((c) => c.is_trash || c.is_deleted)}
+			<TrashNotice />
 		{/if}
 	{/if}
 </div>

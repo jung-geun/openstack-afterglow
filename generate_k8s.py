@@ -293,6 +293,7 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     lines.append("# Swift 설정")
     lines.append(f'swift_endpoint = {_toml_str(os_cfg.get("swift_endpoint", ""))}')
     lines.append(f'swift_upload_timeout = {os_cfg.get("swift_upload_timeout", 600)}')
+    lines.append(f'trash_retention_days = {os_cfg.get("trash_retention_days", 30)}')
     lines.append("")
     lines.append("# Manila NFS 설정")
     lines.append(f'manila_nfs_root_squash = {_toml_bool(os_cfg.get("manila_nfs_root_squash", True))}')

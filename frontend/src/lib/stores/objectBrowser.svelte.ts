@@ -408,8 +408,8 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 			const obj = findObject(n);
 			return obj && isDirectory(obj);
 		});
-		let msg = `${selected.size}개 항목을 삭제하시겠습니까?`;
-		if (dirs.length > 0) msg += `\n\n⚠️ ${dirs.length}개 디렉토리 포함 — 하위 파일이 모두 삭제됩니다.`;
+		let msg = `${selected.size}개 항목을 휴지통으로 이동합니다. 보관 기간 내에 복구할 수 있습니다.`;
+		if (dirs.length > 0) msg += `\n\n⚠️ ${dirs.length}개 디렉토리 포함 — 하위 파일이 모두 휴지통으로 이동됩니다.`;
 		if (!(await confirmDialog(msg))) return;
 		bulkDeleting = true;
 		try {
@@ -451,7 +451,7 @@ export function createObjectBrowserStore(opts: ObjectBrowserOpts) {
 	}
 
 	async function deleteObject(name: string) {
-		if (!(await confirmDialog(`"${displayName(name)}" 오브젝트를 삭제하시겠습니까?`))) return;
+		if (!(await confirmDialog(`"${displayName(name)}"을(를) 휴지통으로 이동합니다. 보관 기간 내에 복구할 수 있습니다.`))) return;
 		deleting = name;
 		try {
 			await api.delete(

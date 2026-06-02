@@ -670,7 +670,7 @@ async def test_list_containers_all_projects_fans_out(admin_client):
         ),
         patch(
             "app.services.swift.list_containers",
-            side_effect=lambda conn, include_quarantine=False: containers_by_conn_id[id(conn)],
+            side_effect=lambda conn, include_quarantine=False, include_trash=False: containers_by_conn_id[id(conn)],
         ),
     ):
         resp = await admin_client.get("/api/object-storage?all_projects=true")
@@ -700,7 +700,7 @@ async def test_list_containers_all_projects_include_quarantine_propagates(admin_
 
     captured: dict = {}
 
-    def _list(conn, include_quarantine=False):
+    def _list(conn, include_quarantine=False, include_trash=False):
         captured["include_quarantine"] = include_quarantine
         return [
             {"name": "test", "count": 4, "bytes": 1024},
@@ -765,7 +765,7 @@ async def test_list_containers_all_projects_runs_concurrently(admin_client):
     for c in sub_conns.values():
         c.close = MagicMock()
 
-    def _slow_list(conn, include_quarantine=False):
+    def _slow_list(conn, include_quarantine=False, include_trash=False):
         time.sleep(0.3)
         return [{"name": "bucket", "count": 1, "bytes": 100}]
 
@@ -812,7 +812,9 @@ async def test_list_containers_all_projects_skips_unauthorized(admin_client):
         ),
         patch(
             "app.services.swift.list_containers",
-            side_effect=lambda conn, include_quarantine=False: [{"name": "ok-bucket", "count": 1, "bytes": 100}],
+            side_effect=lambda conn, include_quarantine=False, include_trash=False: [
+                {"name": "ok-bucket", "count": 1, "bytes": 100}
+            ],
         ),
     ):
         resp = await admin_client.get("/api/object-storage?all_projects=true")

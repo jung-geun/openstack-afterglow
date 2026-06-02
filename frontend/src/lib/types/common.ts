@@ -16,6 +16,9 @@ export interface SwiftContainer {
   project_id?: string;
   project_name?: string;
   is_quarantine?: boolean;
+  is_trash?: boolean;
+  is_deleted?: boolean;
+  deleted_at?: number;
 }
 
 export interface User {

@@ -77,6 +77,7 @@ def _load_toml() -> dict:
     flat["os_manila_endpoint"] = ost.get("manila_endpoint", "")
     flat["os_swift_endpoint"] = ost.get("swift_endpoint", "")
     flat["os_swift_upload_timeout"] = ost.get("swift_upload_timeout", 1800)
+    flat["os_trash_retention_days"] = ost.get("trash_retention_days", 30)
     flat["os_manila_share_network_id"] = ost.get("manila_share_network_id", "")
     flat["os_manila_share_type"] = ost.get("manila_share_type", "cephfs")
     flat["os_manila_nfs_share_type"] = ost.get("manila_nfs_share_type", "nfstype")
@@ -325,6 +326,7 @@ class Settings(BaseSettings):
     # Swift 설정
     os_swift_endpoint: str = ""
     os_swift_upload_timeout: int = 1800  # 대용량 업로드용 타임아웃 (초)
+    os_trash_retention_days: int = 30  # 휴지통 보관 기간 (일). 만료 후 자동 영구 삭제.
     # S3 Direct Upload 설정 (Ceph RGW S3 endpoint 대상)
     os_s3_endpoint: str = "https://s3.dmslab.re.kr"
     upload_part_size_mb: int = 50

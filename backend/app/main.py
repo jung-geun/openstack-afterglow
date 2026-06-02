@@ -680,6 +680,104 @@ async def _k3s_cleanup_loop() -> None:
         await asyncio.sleep(300)
 
 
+async def _trash_cleanup_loop() -> None:
+    """1시간 간격으로 만료된 휴지통 오브젝트·버킷을 영구 삭제.
+
+    오브젝트 휴지통: 각 프로젝트의 모든 *-trash 버킷에서 retention_days 경과 항목 삭제.
+    버킷 휴지통: Redis sorted-set에서 만료된 소프트 삭제 컨테이너를 하드 삭제.
+    """
+    await asyncio.sleep(180)  # 시작 후 3분 대기
+    while True:
+        try:
+            import time as _time
+
+            from app.api.object_storage.containers import (
+                _get_deleted_containers,
+                _unmark_container_deleted,
+            )
+            from app.config import get_settings
+            from app.services import swift
+            from app.services.keystone import (
+                get_admin_connection_for_project,
+                list_all_project_ids,
+            )
+
+            settings = get_settings()
+            retention_days = settings.os_trash_retention_days
+            cutoff = int(_time.time()) - retention_days * 86400
+
+            try:
+                project_ids: set[str] = await asyncio.to_thread(list_all_project_ids)
+            except Exception:
+                _logger.warning("trash_cleanup: 프로젝트 목록 조회 실패", exc_info=True)
+                project_ids = set()
+
+            for pid in project_ids:
+                if not pid:
+                    continue
+                try:
+                    conn = await asyncio.to_thread(get_admin_connection_for_project, pid)
+                except Exception:
+                    _logger.debug("trash_cleanup: 프로젝트 %s 연결 실패", pid, exc_info=True)
+                    continue
+
+                try:
+                    # 1. 오브젝트 휴지통 — 모든 *-trash 버킷의 만료 항목 삭제
+                    try:
+                        all_containers = await asyncio.to_thread(swift.list_containers, conn, False, True)
+                        trash_containers = [c for c in all_containers if c.get("is_trash")]
+                        for tc in trash_containers:
+                            # 원본 버킷 이름 추출 (suffix "-trash" 제거)
+                            origin = tc["name"][: -len(swift.TRASH_SUFFIX)]
+                            try:
+                                result = await asyncio.to_thread(
+                                    swift.purge_expired_trash_objects, conn, origin, retention_days
+                                )
+                                if result["purged"]:
+                                    _logger.info(
+                                        "trash_cleanup: pid=%s bucket=%s purged=%d",
+                                        pid,
+                                        origin,
+                                        len(result["purged"]),
+                                    )
+                            except Exception:
+                                _logger.debug(
+                                    "trash_cleanup: 오브젝트 purge 실패 pid=%s bucket=%s",
+                                    pid,
+                                    origin,
+                                    exc_info=True,
+                                )
+                    except Exception:
+                        _logger.debug("trash_cleanup: pid=%s 오브젝트 휴지통 처리 실패", pid, exc_info=True)
+
+                    # 2. 버킷 휴지통 — 만료된 소프트 삭제 컨테이너 하드 삭제
+                    try:
+                        deleted_map = await _get_deleted_containers(pid)
+                        for cname, epoch in deleted_map.items():
+                            if epoch <= cutoff:
+                                try:
+                                    await asyncio.to_thread(swift.delete_container, conn, cname)
+                                    _logger.info("trash_cleanup: 버킷 영구 삭제 pid=%s name=%s", pid, cname)
+                                except Exception:
+                                    _logger.debug(
+                                        "trash_cleanup: 버킷 삭제 실패 pid=%s name=%s", pid, cname, exc_info=True
+                                    )
+                                finally:
+                                    await _unmark_container_deleted(pid, cname)
+                    except Exception:
+                        _logger.debug("trash_cleanup: pid=%s 버킷 휴지통 처리 실패", pid, exc_info=True)
+
+                finally:
+                    import contextlib as _cl
+
+                    with _cl.suppress(Exception):
+                        await asyncio.to_thread(conn.close)
+
+        except Exception:
+            _logger.warning("trash_cleanup: 루프 오류", exc_info=True)
+        await asyncio.sleep(3600)  # 1시간
+
+
 async def _auto_backup_loop() -> None:
     """1시간 간격으로 자동 백업 설정이 있는 볼륨에 대해 백업 사이클 실행."""
     await asyncio.sleep(60)  # 시작 후 1분 대기
@@ -753,6 +851,8 @@ async def start_background_workers():
     asyncio.create_task(_auto_backup_loop())
     if _svc_cfg.service_k3s_enabled:
         asyncio.create_task(_k3s_cleanup_loop())
+    if _svc_cfg.service_swift_enabled:
+        asyncio.create_task(_trash_cleanup_loop())
 
     from app.services.library_builder import _build_worker
 
