@@ -108,6 +108,16 @@ def _bep(conn) -> str:
     return conn.session.get_endpoint(service_type="key-manager")
 
 
+def _secret_uuid(s) -> str:
+    """openstacksdk Secret 객체에서 UUID만 추출.
+
+    openstacksdk 버전에 따라 s.id가 전체 URL을 반환하는 경우가 있어
+    secret_ref → rsplit("/")[-1] 로 UUID를 안전하게 추출한다.
+    """
+    ref = getattr(s, "secret_ref", None) or getattr(s, "id", "") or ""
+    return str(ref).rsplit("/", 1)[-1]
+
+
 # ── Secrets ──────────────────────────────────────────────────────────────────
 
 
@@ -115,7 +125,7 @@ def list_secrets(conn, **filters) -> list[dict]:
     """프로젝트 범위 secret 목록."""
     return [
         {
-            "id": s.id,
+            "id": _secret_uuid(s),
             "name": s.name,
             "secret_type": s.secret_type,
             "status": s.status,
@@ -134,7 +144,7 @@ def list_secrets(conn, **filters) -> list[dict]:
 def get_secret_meta(conn, secret_id: str) -> dict:
     s = conn.key_manager.get_secret(secret_id)
     return {
-        "id": s.id,
+        "id": _secret_uuid(s),
         "name": s.name,
         "secret_type": s.secret_type,
         "status": s.status,
