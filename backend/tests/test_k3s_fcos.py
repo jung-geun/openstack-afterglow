@@ -281,6 +281,76 @@ class TestFCOSAgentUserdata:
         assert "INSTALL_K3S_SKIP_SELINUX_RPM=true" in join_content
 
 
+class TestFCOSAgentNodeIp:
+    """A2: FCOS 에이전트 join 스크립트의 --node-ip 수정 검증."""
+
+    def test_fcos_agent_join_contains_node_ip_flag(self):
+        """FCOS 에이전트 join 스크립트에 --node-ip 플래그가 포함되어야 한다."""
+        from app.services.k3s_cloudinit import generate_agent_userdata
+
+        result = generate_agent_userdata(
+            cluster_name="test",
+            k3s_version="v1.31.4+k3s1",
+            server_ip="10.0.0.1",
+            node_token="tok",
+            os_type="fcos",
+        )
+        ign = _decode_userdata(result.data)
+        files = {f["path"]: f for f in ign["storage"]["files"]}
+        join_content = _decode_file_content(files["/opt/k3s/agent-join.sh"])
+        assert "--node-ip" in join_content
+
+    def test_fcos_agent_join_uses_ip_route_for_node_ip(self):
+        """FCOS 에이전트 join 스크립트가 ip route로 NODE_IP를 산출해야 한다."""
+        from app.services.k3s_cloudinit import generate_agent_userdata
+
+        result = generate_agent_userdata(
+            cluster_name="test",
+            k3s_version="v1.31.4+k3s1",
+            server_ip="10.0.0.1",
+            node_token="tok",
+            os_type="fcos",
+        )
+        ign = _decode_userdata(result.data)
+        files = {f["path"]: f for f in ign["storage"]["files"]}
+        join_content = _decode_file_content(files["/opt/k3s/agent-join.sh"])
+        assert "ip route get 8.8.8.8" in join_content
+
+    def test_fcos_agent_join_exec_contains_agent_subcommand(self):
+        """FCOS 에이전트 INSTALL_K3S_EXEC에 'agent --node-ip'가 포함되어야 한다."""
+        from app.services.k3s_cloudinit import generate_agent_userdata
+
+        result = generate_agent_userdata(
+            cluster_name="test",
+            k3s_version="v1.31.4+k3s1",
+            server_ip="10.0.0.1",
+            node_token="tok",
+            os_type="fcos",
+        )
+        ign = _decode_userdata(result.data)
+        files = {f["path"]: f for f in ign["storage"]["files"]}
+        join_content = _decode_file_content(files["/opt/k3s/agent-join.sh"])
+        assert "agent --node-ip" in join_content
+
+    def test_fcos_agent_join_extra_args_preserved_with_node_ip(self):
+        """extra_agent_args가 --node-ip와 함께 유지되어야 한다."""
+        from app.services.k3s_cloudinit import generate_agent_userdata
+
+        result = generate_agent_userdata(
+            cluster_name="test",
+            k3s_version="v1.31.4+k3s1",
+            server_ip="10.0.0.1",
+            node_token="tok",
+            os_type="fcos",
+            extra_agent_args=["--kubelet-arg=cloud-provider=external"],
+        )
+        ign = _decode_userdata(result.data)
+        files = {f["path"]: f for f in ign["storage"]["files"]}
+        join_content = _decode_file_content(files["/opt/k3s/agent-join.sh"])
+        assert "--node-ip" in join_content
+        assert "cloud-provider=external" in join_content
+
+
 class TestFCOSOsTypeValidation:
     def test_invalid_os_type_raises_error(self):
         """잘못된 os_type은 ValidationError를 발생시켜야 한다."""
@@ -311,3 +381,73 @@ class TestFCOSOsTypeValidation:
 
         req = CreateK3sClusterRequest(name="test")
         assert req.os_type == "ubuntu"
+
+
+class TestFCOSCallbackScript:
+    """A1: FCOS 콜백 스크립트가 Ubuntu 기준으로 정렬됐는지 검증."""
+
+    def _get_callback_content(self, **kwargs) -> str:
+        from app.services.k3s_cloudinit import generate_server_userdata
+
+        defaults = dict(
+            cluster_name="test",
+            k3s_version="v1.31.4+k3s1",
+            callback_url="http://api.example.com",
+            callback_token="tok",
+            os_type="fcos",
+        )
+        defaults.update(kwargs)
+        result = generate_server_userdata(**defaults)
+        ign = _decode_userdata(result.data)
+        files = {f["path"]: f for f in ign["storage"]["files"]}
+        return _decode_file_content(files["/opt/k3s/callback.sh"])
+
+    def test_fcos_callback_exports_path(self):
+        """FCOS callback.sh 상단에 PATH export가 있어야 한다."""
+        cb = self._get_callback_content()
+        assert 'export PATH="/usr/local/bin:$PATH"' in cb
+
+    def test_fcos_callback_has_livez_wait(self):
+        """FCOS callback.sh에 /livez kube-apiserver 준비 대기 루프가 있어야 한다."""
+        cb = self._get_callback_content()
+        assert "/livez" in cb
+        assert "APISERVER_READY" in cb
+
+    def test_fcos_callback_detects_nrestarts(self):
+        """FCOS callback.sh에 k3s NRestarts 재시작 루프 감지가 있어야 한다."""
+        cb = self._get_callback_content()
+        assert "NRestarts" in cb
+        assert "RESTART_THRESHOLD" in cb
+
+    def test_fcos_callback_plugin_apply_validate_false(self):
+        """FCOS callback.sh의 플러그인 apply가 --validate=false와 stderr 캡처를 포함해야 한다."""
+        cb = self._get_callback_content(
+            plugin_manifests=[{"name": "occm", "content": "apiVersion: v1\nkind: List\n"}],
+            needs_external_cloud_provider=True,
+        )
+        assert "--validate=false" in cb
+        assert "_ERR_FILE=" in cb
+
+    def test_fcos_callback_plugin_status_has_status_error_structure(self):
+        """FCOS callback.sh의 plugin_status가 {status, error} 구조여야 한다."""
+        cb = self._get_callback_content(
+            plugin_manifests=[{"name": "occm", "content": "apiVersion: v1\nkind: List\n"}],
+            needs_external_cloud_provider=True,
+        )
+        assert "status:" in cb
+        assert "error:" in cb
+        assert "_ERROR=" in cb
+
+    def test_fcos_callback_has_secret_cloud_config_status(self):
+        """cloud_conf 있을 때 FCOS callback.sh에 SECRET_CLOUD_CONFIG_STATUS가 있어야 한다."""
+        cb = self._get_callback_content(
+            cloud_conf="[Global]\nauth-url=https://keystone:5000/v3\n",
+        )
+        assert "SECRET_CLOUD_CONFIG_STATUS" in cb
+        assert "secret_cloud_config_status" in cb
+
+    def test_fcos_callback_server_ip_via_ip_route(self):
+        """FCOS callback.sh의 SERVER_IP 산출이 ip route get 8.8.8.8을 사용해야 한다."""
+        cb = self._get_callback_content()
+        assert "ip route get 8.8.8.8" in cb
+        assert "SERVER_IP" in cb

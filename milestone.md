@@ -830,6 +830,14 @@ config.toml 신규 섹션: `[k3s]` 하위 `cinder_csi_*`, `manila_csi_*`, `keyst
 
 config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id = ""`
 
+**2026-06-03 FCOS 안정화 (A1, A2, A4)**
+
+- [x] `backend/app/templates/k3s_server_fcos_callback.sh.j2` — Ubuntu 기준으로 drift 수정: `export PATH="/usr/local/bin:$PATH"` 상단 추가, kube-apiserver `/livez` 인증 대기 루프, k3s NRestarts 재시작 루프 감지, 플러그인 apply `--validate=false` + stderr 캡처, plugin_status `{status, error}` 구조 통일, `secret_cloud_config_status` payload 포함, `SERVER_IP` 산출을 `ip route get 8.8.8.8 | awk src`로 변경
+- [x] `backend/app/templates/k3s_agent_fcos_join.sh.j2` — `NODE_IP=$(ip route get 8.8.8.8 ... src)` 산출 추가, `INSTALL_K3S_EXEC="agent --node-ip ${NODE_IP} ..."` (agent 서브커맨드 + --node-ip 누락 수정)
+- [x] `backend/tests/test_k3s_fcos.py` — `TestFCOSCallbackScript` 클래스 7건(PATH export, /livez, NRestarts, --validate=false+stderr, {status,error}, secret_cloud_config_status, ip route), `TestFCOSAgentNodeIp` 클래스 4건(--node-ip, ip route, agent 서브커맨드, extra_args 보존) 추가 — 총 28건
+- [x] `backend/tests/test_k3s_clusters.py` — FCOS 503 가드 2건 추가 (k3s_fcos_image_id 미설정 시 503, ubuntu 요청은 503 미발생)
+- **알려진 제약**: 멀티 NIC 환경에서 FCOS는 NetworkManager가 보조 NIC에 default route를 탈취할 수 있음. `--node-ip` 고정으로 노드 등록 IP는 안전하나, 완전한 멀티 NIC 지원(route-metric/ipv4.never-default Ignition 주입)은 별도 PR로 진행 예정
+
 ### 8.14 k3s 부팅 데드락 수정 + callback.sh 진단 개선
 
 **문제**: barbican_kms / keystone_auth 플러그인이 부팅 시점 불가능한 의존성을 apiserver에 주입해 control plane이 영구 데드락에 빠짐. kubectl get nodes 시 노드가 보이지 않음.
