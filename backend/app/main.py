@@ -693,6 +693,7 @@ async def _trash_cleanup_loop() -> None:
 
             from app.api.object_storage.containers import (
                 _get_deleted_containers,
+                _mark_container_deleted,
                 _unmark_container_deleted,
             )
             from app.config import get_settings
@@ -722,13 +723,37 @@ async def _trash_cleanup_loop() -> None:
                     continue
 
                 try:
-                    # 1. 오브젝트 휴지통 — 모든 *-trash 버킷의 만료 항목 삭제
+                    # 컨테이너 목록 조회 (step 1·reconcile 공유)
+                    all_containers: list = []
                     try:
                         all_containers = await asyncio.to_thread(swift.list_containers, conn, False, True)
+                    except Exception:
+                        _logger.debug("trash_cleanup: pid=%s 컨테이너 목록 조회 실패", pid, exc_info=True)
+
+                    # 1. 오브젝트 휴지통 — 모든 *-trash 버킷의 만료 항목 삭제
+                    try:
                         trash_containers = [c for c in all_containers if c.get("is_trash")]
                         for tc in trash_containers:
                             # 원본 버킷 이름 추출 (suffix "-trash" 제거)
                             origin = tc["name"][: -len(swift.TRASH_SUFFIX)]
+                            trash_count = tc.get("count", -1)
+                            # C-2: 이미 빈 trash 버킷은 즉시 정리
+                            if trash_count == 0:
+                                try:
+                                    await asyncio.to_thread(swift.delete_container, conn, tc["name"])
+                                    _logger.info(
+                                        "trash_cleanup: 빈 휴지통 버킷 삭제 pid=%s bucket=%s",
+                                        pid,
+                                        tc["name"],
+                                    )
+                                except Exception:
+                                    _logger.debug(
+                                        "trash_cleanup: 빈 휴지통 버킷 삭제 실패 pid=%s bucket=%s",
+                                        pid,
+                                        tc["name"],
+                                        exc_info=True,
+                                    )
+                                continue
                             try:
                                 result = await asyncio.to_thread(
                                     swift.purge_expired_trash_objects, conn, origin, retention_days
@@ -740,6 +765,22 @@ async def _trash_cleanup_loop() -> None:
                                         origin,
                                         len(result["purged"]),
                                     )
+                                # C-2: purge 후 trash 버킷이 비었으면 삭제
+                                if trash_count >= 0 and len(result.get("purged", [])) >= trash_count:
+                                    try:
+                                        await asyncio.to_thread(swift.delete_container, conn, tc["name"])
+                                        _logger.info(
+                                            "trash_cleanup: 빈 휴지통 버킷 삭제 pid=%s bucket=%s",
+                                            pid,
+                                            tc["name"],
+                                        )
+                                    except Exception:
+                                        _logger.debug(
+                                            "trash_cleanup: 빈 휴지통 버킷 삭제 실패 pid=%s bucket=%s",
+                                            pid,
+                                            tc["name"],
+                                            exc_info=True,
+                                        )
                             except Exception:
                                 _logger.debug(
                                     "trash_cleanup: 오브젝트 purge 실패 pid=%s bucket=%s",
@@ -750,7 +791,41 @@ async def _trash_cleanup_loop() -> None:
                     except Exception:
                         _logger.debug("trash_cleanup: pid=%s 오브젝트 휴지통 처리 실패", pid, exc_info=True)
 
-                    # 2. 버킷 휴지통 — 만료된 소프트 삭제 컨테이너 하드 삭제
+                    # C-1. Redis 재동기화 — Swift 메타에 있으나 Redis 누락된 소프트 삭제 버킷 복원
+                    # Redis 유실 시 소프트 삭제 버킷이 사용자 목록에 부활하는 것을 ≤1h 내 자동 교정한다.
+                    try:
+                        current_redis_map = await _get_deleted_containers(pid)
+                        normal_containers = [
+                            c for c in all_containers if not c.get("is_trash") and not c.get("is_quarantine")
+                        ]
+                        reconciled = 0
+                        for nc in normal_containers:
+                            cname = nc["name"]
+                            if cname in current_redis_map:
+                                continue  # 이미 Redis에 있음
+                            try:
+                                meta_epoch = await asyncio.to_thread(swift.get_container_deleted_at, conn, cname)
+                            except Exception:
+                                continue
+                            if meta_epoch is not None:
+                                await _mark_container_deleted(pid, cname, meta_epoch, retention_days)
+                                reconciled += 1
+                                _logger.info(
+                                    "trash_cleanup: Redis 재동기화 pid=%s name=%s epoch=%d",
+                                    pid,
+                                    cname,
+                                    meta_epoch,
+                                )
+                        if reconciled:
+                            _logger.info(
+                                "trash_cleanup: reconcile 완료 pid=%s count=%d",
+                                pid,
+                                reconciled,
+                            )
+                    except Exception:
+                        _logger.debug("trash_cleanup: pid=%s reconcile 실패", pid, exc_info=True)
+
+                    # 2. 버킷 휴지통 — 만료된 소프트 삭제 컨테이너 하드 삭제 (reconcile 후 재조회)
                     try:
                         deleted_map = await _get_deleted_containers(pid)
                         for cname, epoch in deleted_map.items():

@@ -330,7 +330,7 @@ async def create_object_storage_container(
 
     이름 검증: bucket_naming.validate_bucket_name 으로 시스템 예약어 / S3 형식
     위반 차단. 위반 시 400 + 한국어 사유.
-    소프트 삭제 대기 중인 동명 버킷이 있으면 400 반환 (복구 또는 영구 삭제 후 재생성 가능).
+    소프트 삭제 대기 중인 동명 버킷이 있으면 409 반환 (복구 또는 영구 삭제 후 재생성 가능).
     """
     from app.services import swift
     from app.services.bucket_naming import validate_bucket_name

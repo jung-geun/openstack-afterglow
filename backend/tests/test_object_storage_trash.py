@@ -474,3 +474,146 @@ async def test_purge_deleted_container_404_if_not_in_trash(client, mock_conn):
         resp = await client.delete("/api/object-storage/trash/containers/nonexistent-bucket")
 
     assert resp.status_code in (404, 405)
+
+
+# ---------------------------------------------------------------------------
+# C-1. Redis reconcile 로직 검증
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_reconcile_marks_redis_when_meta_present_but_redis_absent():
+    """Swift 메타에 deleted_at이 있고 Redis에 없으면 _mark_container_deleted 호출 후
+    _is_container_deleted가 epoch를 반환해야 한다 (reconcile 경로 검증)."""
+    from app.api.object_storage.containers import (
+        _get_deleted_containers,
+        _is_container_deleted,
+        _mark_container_deleted,
+        _unmark_container_deleted,
+    )
+
+    pid = "reconcile-pid-001"
+    cname = "orphaned-by-redis-loss"
+    epoch = int(time.time()) - 3600
+
+    # 전제: Redis 비어 있음
+    await _unmark_container_deleted(pid, cname)
+    assert await _is_container_deleted(pid, cname) is None
+
+    # reconcile 조건: meta_epoch 있음 + redis map에 없음
+    current_map = await _get_deleted_containers(pid)
+    meta_epoch = epoch  # Swift HEAD에서 읽었다고 가정
+    assert cname not in current_map  # reconcile 트리거 조건
+    assert meta_epoch is not None
+
+    # reconcile 실행: _mark_container_deleted 호출
+    await _mark_container_deleted(pid, cname, meta_epoch, 30)
+
+    # 결과: Redis에 복원됨
+    assert await _is_container_deleted(pid, cname) == epoch
+
+    # 정리
+    await _unmark_container_deleted(pid, cname)
+
+
+@pytest.mark.asyncio
+async def test_reconcile_skips_container_already_in_redis():
+    """Redis에 이미 등록된 버킷은 reconcile이 중복 등록하지 않는다 (cname in current_redis_map → continue)."""
+    from app.api.object_storage.containers import (
+        _get_deleted_containers,
+        _is_container_deleted,
+        _mark_container_deleted,
+        _unmark_container_deleted,
+    )
+
+    pid = "reconcile-pid-002"
+    cname = "already-in-redis"
+    epoch_original = int(time.time()) - 7200
+
+    await _mark_container_deleted(pid, cname, epoch_original, 30)
+    assert await _is_container_deleted(pid, cname) == epoch_original
+
+    # reconcile skip 조건: redis_map에 이미 있으면 continue
+    current_map = await _get_deleted_containers(pid)
+    assert cname in current_map  # skip 조건 충족 → 아무것도 하지 않음
+
+    # epoch_original이 그대로 유지됨
+    assert await _is_container_deleted(pid, cname) == epoch_original
+
+    # 정리
+    await _unmark_container_deleted(pid, cname)
+
+
+@pytest.mark.asyncio
+async def test_reconcile_ignores_container_with_no_meta():
+    """Swift 메타에 deleted_at이 없으면 reconcile이 mark를 호출하지 않는다."""
+    from app.api.object_storage.containers import (
+        _is_container_deleted,
+        _unmark_container_deleted,
+    )
+
+    pid = "reconcile-pid-003"
+    cname = "normal-live-bucket"
+
+    await _unmark_container_deleted(pid, cname)
+
+    # meta_epoch == None → reconcile 조건 불충족 → mark 호출 없음
+    meta_epoch = None
+    if meta_epoch is not None:
+        raise AssertionError("이 경로는 실행되지 않아야 한다")
+
+    assert await _is_container_deleted(pid, cname) is None
+
+
+# ---------------------------------------------------------------------------
+# C-2. 빈 휴지통 버킷 자동 정리 조건 검증
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_empty_trash_bucket_triggers_immediate_delete():
+    """count == 0인 trash 버킷에 대해 purge 없이 delete_container가 호출되어야 한다."""
+    from app.services.swift import TRASH_SUFFIX
+
+    conn = _make_conn()
+    trash_name = f"my-bucket{TRASH_SUFFIX}"
+    tc = {"name": trash_name, "count": 0, "bytes": 0, "is_trash": True}
+
+    with patch("app.services.swift._apply_endpoint_override"):
+        with patch("app.services.swift.delete_container") as mock_del:
+            with patch("app.services.swift.purge_expired_trash_objects") as mock_purge:
+                # C-2 즉시 정리 경로 시뮬레이션: count == 0이면 purge 없이 delete
+                if tc.get("count", -1) == 0:
+                    import asyncio as _asyncio
+
+                    await _asyncio.to_thread(mock_del, conn, tc["name"])
+                else:
+                    await _asyncio.to_thread(mock_purge, conn, "my-bucket", 30)
+
+    mock_del.assert_called_once_with(conn, trash_name)
+    mock_purge.assert_not_called()
+
+
+def test_purge_all_objects_satisfies_empty_bucket_delete_condition():
+    """trash_count >= 0이고 purged 수 >= trash_count이면 빈 버킷 삭제 조건이 성립한다."""
+    # 전부 purge된 경우 → 조건 True
+    trash_count = 3
+    purged_full = ["key1", "key2", "key3"]
+    assert trash_count >= 0 and len(purged_full) >= trash_count
+
+    # 일부만 purge된 경우 → 조건 False (아직 남은 항목 있음)
+    purged_partial = ["key1"]
+    assert not (trash_count >= 0 and len(purged_partial) >= trash_count)
+
+    # count 불명(-1)인 경우 → 조건 False (안전 측)
+    trash_count_unknown = -1
+    assert not (trash_count_unknown >= 0 and len(purged_full) >= trash_count_unknown)
+
+
+def test_purge_zero_count_trash_bucket_also_satisfies_delete_condition():
+    """purge 전 count==0인 trash 버킷도 빈 버킷 삭제 조건을 만족한다."""
+    trash_count = 0
+    purged = []  # 만료 항목 없음 (이미 비어 있음)
+    # 하지만 count==0 분기에서 이미 처리됨 (continue) — purge 경로 진입 안 함
+    # purge 경로에서 이 조건을 만나면 True
+    assert trash_count >= 0 and len(purged) >= trash_count

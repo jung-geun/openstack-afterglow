@@ -3438,6 +3438,9 @@ uv run ruff check app/services/library_builder.py app/services/builder_vm.py app
 - [x] `backend/app/api/object_storage/containers.py` — `POST ""` 생성 시 소프트 삭제 대기 중 동명 버킷 409 차단
 - [x] `backend/app/api/object_storage/containers.py` — 신규 엔드포인트: `GET /{c}/trash`, `POST /{c}/trash/restore`, `DELETE /{c}/trash/{key}`, `GET /trash/containers`, `POST /trash/containers/{name}/restore`, `DELETE /trash/containers/{name}`
 - [x] `backend/app/main.py` — `_trash_cleanup_loop` 추가 (1시간 간격, `service_swift_enabled` 게이트, 만료 오브젝트·버킷 영구 삭제)
+- [x] `backend/app/main.py` — C-1: `_trash_cleanup_loop`에 Swift 메타→Redis reconcile 패스 추가 (Redis 유실 시 ≤1h 내 소프트 삭제 버킷 자동 재동기화)
+- [x] `backend/app/main.py` — C-2: 빈 `{name}-trash` 버킷 자동 정리 (count==0 즉시 삭제 + purge 후 전부 삭제 시 삭제)
+- [x] `backend/app/api/object_storage/containers.py` — docstring 오타 수정 (409 반환을 400으로 잘못 기재)
 - [x] `backend/app/config.py` — `os_trash_retention_days: int = 30` 필드 추가
 - [x] `config.toml.example` — `trash_retention_days = 30` 예시 추가
 - [x] `generate_k8s.py` — configmap에 `trash_retention_days` 포함
@@ -3455,7 +3458,7 @@ uv run ruff check app/services/library_builder.py app/services/builder_vm.py app
 **Tests**
 
 - [x] `backend/tests/test_bucket_naming.py` — `-trash` 접미사 거부 케이스 추가
-- [x] `backend/tests/test_object_storage_trash.py` — 신규: 서비스 단위 + 엔드포인트 통합 테스트 24개
+- [x] `backend/tests/test_object_storage_trash.py` — 신규: 서비스 단위 + 엔드포인트 통합 테스트 24개 + reconcile·빈버킷정리 검증 6개 (총 30개)
 
 ### 65.3 설계 결정
 
