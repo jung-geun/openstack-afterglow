@@ -106,7 +106,7 @@
 	</button>
 
 	{#if isOpen && !loading}
-		<div class="fixed left-0 bottom-0 w-full sm:absolute sm:bottom-auto sm:top-full sm:mt-1 sm:left-0 sm:w-64 max-h-[50vh] bg-gray-900 border border-gray-700 rounded-t-lg sm:rounded-lg shadow-xl z-50 overflow-hidden">
+		<div class="fixed left-0 bottom-0 w-full sm:absolute sm:top-auto sm:bottom-full sm:mb-1 sm:left-0 sm:w-64 max-h-[50vh] bg-gray-900 border border-gray-700 rounded-t-lg sm:rounded-lg shadow-xl z-50 overflow-hidden">
 			{#if error}
 				<div class="p-3 text-sm text-red-400">{error}</div>
 			{:else if projects.length === 0}
