@@ -37,7 +37,7 @@ _ALL_KEY = f"{_PREFIX}:all_configs"
 
 
 async def enable_db_auto_backup(
-    project_id: str, instance_id: str, max_daily: int = 2, max_weekly: int = 2, max_monthly: int = 1
+    project_id: str, instance_id: str, max_daily: int = 7, max_weekly: int = 0, max_monthly: int = 0
 ) -> dict:
     """DB 인스턴스 자동 백업 활성화. 설정을 Redis에 저장."""
     config = {

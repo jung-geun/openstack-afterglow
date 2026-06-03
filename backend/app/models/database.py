@@ -58,6 +58,6 @@ class RestoreFromBackupRequest(BaseModel):
 
 
 class DbAutoBackupConfigRequest(BaseModel):
-    max_daily: int = Field(2, ge=0, le=30)
-    max_weekly: int = Field(2, ge=0, le=30)
-    max_monthly: int = Field(1, ge=0, le=12)
+    max_daily: int = Field(7, ge=0, le=30)
+    max_weekly: int = Field(0, ge=0, le=30)
+    max_monthly: int = Field(0, ge=0, le=12)

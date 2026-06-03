@@ -6,24 +6,36 @@
 	let showBackupForm = $state(false);
 	let newBackup = $state({ name: '', description: '' });
 
-	// 자동 백업 설정 폼 상태
-	let autoForm = $state({ max_daily: 2, max_weekly: 2, max_monthly: 1 });
+	// 자동 백업 설정 폼 상태 (frequency + count 단순화)
+	type Frequency = 'daily' | 'weekly' | 'monthly';
+	let autoForm = $state<{ frequency: Frequency; count: number }>({ frequency: 'daily', count: 7 });
 	let showAutoForm = $state(false);
+
+	const FREQ_LABEL: Record<Frequency, string> = { daily: '일별', weekly: '주별', monthly: '월별' };
 
 	// 자동 백업 활성화 여부
 	const autoEnabled = $derived(s.autoBackupConfig !== null);
 
-	// 자동 백업 폼 열 때 현재 설정값으로 초기화
+	// 현재 설정에서 주기·개수 역매핑
+	function configToForm(): { frequency: Frequency; count: number } {
+		const cfg = s.autoBackupConfig;
+		if (!cfg) return { frequency: 'daily', count: 7 };
+		if (cfg.max_weekly > 0) return { frequency: 'weekly', count: cfg.max_weekly };
+		if (cfg.max_monthly > 0) return { frequency: 'monthly', count: cfg.max_monthly };
+		return { frequency: 'daily', count: cfg.max_daily || 7 };
+	}
+
+	// 주기·개수 → max_* 매핑
+	function formToConfig(freq: Frequency, count: number) {
+		return {
+			max_daily: freq === 'daily' ? count : 0,
+			max_weekly: freq === 'weekly' ? count : 0,
+			max_monthly: freq === 'monthly' ? count : 0,
+		};
+	}
+
 	function openAutoForm() {
-		if (s.autoBackupConfig) {
-			autoForm = {
-				max_daily: s.autoBackupConfig.max_daily,
-				max_weekly: s.autoBackupConfig.max_weekly,
-				max_monthly: s.autoBackupConfig.max_monthly,
-			};
-		} else {
-			autoForm = { max_daily: 2, max_weekly: 2, max_monthly: 1 };
-		}
+		autoForm = configToForm();
 		showAutoForm = true;
 	}
 
@@ -31,12 +43,14 @@
 		if (autoEnabled) {
 			await s.disableAutoBackup();
 		} else {
-			openAutoForm();
+			autoForm = { frequency: 'daily', count: 7 };
+			showAutoForm = true;
 		}
 	}
 
 	async function handleSaveAutoBackup() {
-		await s.saveAutoBackupConfig(autoForm.max_daily, autoForm.max_weekly, autoForm.max_monthly);
+		const { max_daily, max_weekly, max_monthly } = formToConfig(autoForm.frequency, autoForm.count);
+		await s.saveAutoBackupConfig(max_daily, max_weekly, max_monthly);
 		showAutoForm = false;
 	}
 
@@ -65,9 +79,8 @@
 		<div>
 			<h2 class="text-sm font-semibold text-white">자동 백업</h2>
 			{#if autoEnabled}
-				<p class="text-xs text-gray-500 mt-0.5">
-					일 {s.autoBackupConfig!.max_daily}개 · 주 {s.autoBackupConfig!.max_weekly}개 · 월 {s.autoBackupConfig!.max_monthly}개 보존
-				</p>
+				{@const f = configToForm()}
+				<p class="text-xs text-gray-500 mt-0.5">{FREQ_LABEL[f.frequency]} · {f.count}회 보존</p>
 			{:else}
 				<p class="text-xs text-gray-600 mt-0.5">비활성화됨</p>
 			{/if}
@@ -92,21 +105,19 @@
 
 	{#if showAutoForm}
 		<div class="mt-3 bg-gray-800 rounded-lg p-3 space-y-3">
-			<p class="text-xs text-gray-400">보존 개수 (0 = 해당 주기 비사용)</p>
-			<div class="grid grid-cols-3 gap-3">
-				<label class="flex flex-col gap-1">
-					<span class="text-xs text-gray-500">일별 최대</span>
-					<input type="number" min="0" max="30" bind:value={autoForm.max_daily}
-						class="bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 text-center" />
+			<div class="flex gap-3">
+				<label class="flex flex-col gap-1 flex-1">
+					<span class="text-xs text-gray-500">백업 주기</span>
+					<select bind:value={autoForm.frequency}
+						class="bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500">
+						<option value="daily">일별</option>
+						<option value="weekly">주별</option>
+						<option value="monthly">월별</option>
+					</select>
 				</label>
-				<label class="flex flex-col gap-1">
-					<span class="text-xs text-gray-500">주별 최대</span>
-					<input type="number" min="0" max="30" bind:value={autoForm.max_weekly}
-						class="bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 text-center" />
-				</label>
-				<label class="flex flex-col gap-1">
-					<span class="text-xs text-gray-500">월별 최대</span>
-					<input type="number" min="0" max="12" bind:value={autoForm.max_monthly}
+				<label class="flex flex-col gap-1 w-24">
+					<span class="text-xs text-gray-500">보존 개수</span>
+					<input type="number" min="1" max="30" bind:value={autoForm.count}
 						class="bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 text-center" />
 				</label>
 			</div>

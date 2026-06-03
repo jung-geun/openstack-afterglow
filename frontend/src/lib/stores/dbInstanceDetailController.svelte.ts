@@ -330,7 +330,11 @@ export function createDbInstanceDetailController(opts: DbInstanceDetailControlle
 	}
 
 	async function deleteBackup(backupId: string) {
-		if (!(await confirmDialog('백업을 삭제하시겠습니까?'))) return;
+		const isLast = backups.length === 1;
+		const msg = isLast
+			? '마지막 백업입니다. 삭제하면 복구 수단이 없습니다. 정말 삭제하시겠습니까?'
+			: '백업을 삭제하시겠습니까?';
+		if (!(await confirmDialog(msg))) return;
 		const tok = opts.token();
 		const proj = opts.projectId();
 		deletingBackup = backupId;
