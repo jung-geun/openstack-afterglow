@@ -5,6 +5,7 @@
 	import ProjectSelector from '$lib/components/ProjectSelector.svelte';
 	import { siteConfig } from '$lib/config/site';
 	import { openWizard } from '$lib/stores/wizard';
+	import { palette } from '$lib/stores/palette';
 	import RingMark from '$lib/components/ui/RingMark.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 
@@ -188,6 +189,19 @@
 		</Button>
 	</div>
 
+	<!-- 검색 버튼 (1024px 미만에서만 표시) -->
+	<div class="px-3 pb-2 lg:hidden">
+		<button
+			onclick={() => palette.open()}
+			class="w-full flex items-center gap-2 bg-gray-800 border border-gray-700 text-gray-500 rounded-lg pl-3 pr-2 py-1.5 text-[13px] hover:border-gray-600 transition-colors cursor-text"
+			aria-label="검색 (⌘K)"
+		>
+			<svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z"/></svg>
+			<span class="flex-1 text-left text-gray-600">리소스 검색...</span>
+			<kbd class="text-[10px] border border-gray-700 px-1.5 py-0.5 rounded font-mono text-gray-600">⌘K</kbd>
+		</button>
+	</div>
+
 	<nav class="flex-1 px-3 pb-4 space-y-0.5">
 		<!-- 대시보드 섹션 -->
 		<div>
@@ -257,14 +271,14 @@
 
 	<!-- 하단: 프로젝트 정보 + 관리 -->
 	<div class="border-t border-gray-800 shrink-0">
-		<!-- 프로젝트 선택 (모바일만) -->
-		<div class="p-3 sm:hidden">
+		<!-- 프로젝트 선택 (1024px 미만) -->
+		<div class="p-3 lg:hidden">
 			<div class="text-[10px] text-gray-500 uppercase tracking-wide px-1 mb-1.5">프로젝트</div>
 			<ProjectSelector />
 		</div>
 
-		<!-- 프로젝트 이름 표시 (데스크톱) -->
-		<div class="hidden md:block px-4 py-3">
+		<!-- 프로젝트 이름 표시 (1024px 이상) -->
+		<div class="hidden lg:block px-4 py-3">
 			<div class="text-[10px] text-gray-500 uppercase tracking-widest font-medium">프로젝트</div>
 			<div class="text-[13px] text-gray-200 font-medium mt-0.5 truncate">{$auth.projectName ?? '—'}</div>
 			<a
@@ -277,17 +291,17 @@
 		</div>
 
 		{#if $isAdmin}
-			<div class="px-3 pb-3 md:hidden">
-				<!-- 모바일: 관리/사용자 모드 전환 -->
+			<div class="px-3 pb-3 lg:hidden">
+				<!-- 1024px 미만: 관리/사용자 모드 전환 -->
 				{#if $page.url.pathname.startsWith('/admin')}
 					<a href="/dashboard"
-						class="nav-item nav-active flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors md:hidden">
+						class="nav-item nav-active flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors">
 						<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
 						사용자 모드
 					</a>
 				{:else}
 					<a href="/admin"
-						class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors text-gray-400 hover:text-white hover:bg-gray-800 md:hidden">
+						class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors text-gray-400 hover:text-white hover:bg-gray-800">
 						<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2l8 4v6c0 5-3.5 9-8 10-4.5-1-8-5-8-10V6l8-4z"></path></svg>
 						관리자 모드
 					</a>

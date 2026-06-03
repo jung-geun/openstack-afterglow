@@ -5,6 +5,7 @@
 	import ProjectSelector from '$lib/components/ProjectSelector.svelte';
 	import { siteConfig } from '$lib/config/site';
 	import RingMark from '$lib/components/ui/RingMark.svelte';
+	import { palette } from '$lib/stores/palette';
 
 	const sections = $state([
 		{
@@ -168,6 +169,19 @@
 		<span class="ml-auto text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-amber-900/30 border border-amber-800 text-amber-400 uppercase tracking-wider">Admin</span>
 	</div>
 
+	<!-- 검색 버튼 (1024px 미만에서만 표시) -->
+	<div class="px-3 pt-2 pb-1 lg:hidden">
+		<button
+			onclick={() => palette.open()}
+			class="w-full flex items-center gap-2 bg-gray-800 border border-gray-700 text-gray-500 rounded-lg pl-3 pr-2 py-1.5 text-[13px] hover:border-gray-600 transition-colors cursor-text"
+			aria-label="검색 (⌘K)"
+		>
+			<svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z"/></svg>
+			<span class="flex-1 text-left text-gray-600">리소스 검색...</span>
+			<kbd class="text-[10px] border border-gray-700 px-1.5 py-0.5 rounded font-mono text-gray-600">⌘K</kbd>
+		</button>
+	</div>
+
 	<nav class="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto">
 		<!-- 개요 -->
 		<a
@@ -229,7 +243,7 @@
 			<div class="text-[10px] text-gray-500 uppercase tracking-wide px-1 mb-1.5">프로젝트</div>
 			<ProjectSelector />
 		</div>
-		<div class="p-3 pt-0 md:hidden">
+		<div class="p-3 pt-0 lg:hidden">
 			<a href="/dashboard"
 				class="nav-item nav-active flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors">
 				<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>

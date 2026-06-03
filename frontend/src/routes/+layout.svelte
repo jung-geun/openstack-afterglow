@@ -146,7 +146,7 @@
 		<!-- 검색 입력 (⌘K 트리거) -->
 		<button
 			onclick={() => palette.open()}
-			class="flex-1 max-w-sm mx-4 hidden md:flex items-center gap-2 bg-gray-900 border border-gray-800 text-gray-500 rounded-lg pl-3 pr-2 py-1.5 text-[13px] hover:border-gray-700 transition-colors cursor-text"
+			class="flex-1 max-w-sm mx-4 hidden lg:flex items-center gap-2 bg-gray-900 border border-gray-800 text-gray-500 rounded-lg pl-3 pr-2 py-1.5 text-[13px] hover:border-gray-700 transition-colors cursor-text"
 			aria-label="검색 (⌘K)"
 		>
 			<svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z"/></svg>
@@ -163,13 +163,13 @@
 			{#if $isAdmin}
 				{#if $page.url.pathname.startsWith('/admin')}
 					<a href="/dashboard"
-						class="hidden md:flex items-center gap-1.5 px-3 h-8 rounded-lg border text-[12px] font-semibold transition-colors bg-amber-500/15 border-amber-600/50 text-amber-400 hover:bg-amber-500/25">
+						class="hidden lg:flex items-center gap-1.5 px-3 h-8 rounded-lg border text-[12px] font-semibold transition-colors bg-amber-500/15 border-amber-600/50 text-amber-400 hover:bg-amber-500/25">
 						<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
 						사용자 모드
 					</a>
 				{:else}
 					<a href="/admin"
-						class="hidden md:flex items-center gap-1.5 px-3 h-8 rounded-lg border text-[12px] font-semibold transition-colors bg-gray-900 border-gray-700 text-gray-200 hover:border-gray-600 hover:text-white">
+						class="hidden lg:flex items-center gap-1.5 px-3 h-8 rounded-lg border text-[12px] font-semibold transition-colors bg-gray-900 border-gray-700 text-gray-200 hover:border-gray-600 hover:text-white">
 						<svg class="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2l8 4v6c0 5-3.5 9-8 10-4.5-1-8-5-8-10V6l8-4z"/></svg>
 						관리자 모드
 					</a>
