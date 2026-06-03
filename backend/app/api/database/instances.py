@@ -16,6 +16,7 @@ from app.models.database import (
     CreateDatabaseRequest,
     CreateDbInstanceRequest,
     CreateUserRequest,
+    DbAutoBackupConfigRequest,
     RestoreFromBackupRequest,
 )
 from app.services import cache
@@ -733,3 +734,55 @@ async def create_instance_backup(
     await cache.invalidate(f"afterglow:trove:{pid}:*")
     await invalidation.invalidate_mutation_count("trove", pid)
     return result
+
+
+# ---------------------------------------------------------------------------
+# 자동 백업 설정
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{instance_id}/auto-backup")
+async def get_instance_auto_backup(
+    instance_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    """인스턴스 자동 백업 설정 조회."""
+    from app.services import db_auto_backup
+
+    await _assert_db_instance_owner(conn, instance_id, token_info)
+    pid = getattr(conn, "_afterglow_project_id", "unknown")
+    cfg = await db_auto_backup.get_db_auto_backup_config(pid, instance_id)
+    if cfg is None:
+        raise HTTPException(status_code=404, detail="자동 백업 설정이 없습니다")
+    return cfg
+
+
+@router.put("/{instance_id}/auto-backup", status_code=200)
+async def set_instance_auto_backup(
+    instance_id: str,
+    req: DbAutoBackupConfigRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    """인스턴스 자동 백업 활성화 또는 설정 갱신."""
+    from app.services import db_auto_backup
+
+    await _assert_db_instance_owner(conn, instance_id, token_info)
+    pid = getattr(conn, "_afterglow_project_id", "unknown")
+    cfg = await db_auto_backup.enable_db_auto_backup(pid, instance_id, req.max_daily, req.max_weekly, req.max_monthly)
+    return cfg
+
+
+@router.delete("/{instance_id}/auto-backup", status_code=204)
+async def delete_instance_auto_backup(
+    instance_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    """인스턴스 자동 백업 비활성화."""
+    from app.services import db_auto_backup
+
+    await _assert_db_instance_owner(conn, instance_id, token_info)
+    pid = getattr(conn, "_afterglow_project_id", "unknown")
+    await db_auto_backup.disable_db_auto_backup(pid, instance_id)

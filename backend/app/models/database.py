@@ -55,3 +55,9 @@ class RestoreFromBackupRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     flavor_id: str
     volume_size: int = Field(..., ge=1, le=1024)
+
+
+class DbAutoBackupConfigRequest(BaseModel):
+    max_daily: int = Field(2, ge=0, le=30)
+    max_weekly: int = Field(2, ge=0, le=30)
+    max_monthly: int = Field(1, ge=0, le=12)

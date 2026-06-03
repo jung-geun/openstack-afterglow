@@ -883,6 +883,36 @@ async def _auto_backup_loop() -> None:
         await asyncio.sleep(3600)  # 1시간
 
 
+async def _db_auto_backup_loop() -> None:
+    """1시간 간격으로 Trove DB 인스턴스 자동 백업 실행."""
+    await asyncio.sleep(90)  # 볼륨 루프와 겹치지 않도록 90초 지연
+    while True:
+        try:
+            from app.services import db_auto_backup as _dab
+            from app.services.keystone import get_admin_connection_for_project
+
+            configs = await _dab.list_all_db_auto_backup_configs()
+            if configs:
+                _logger.info("db_auto_backup: %d개 DB 인스턴스 자동 백업 시작", len(configs))
+                for cfg in configs:
+                    project_id = cfg.get("project_id")
+                    instance_id = cfg.get("instance_id")
+                    if not project_id or not instance_id:
+                        continue
+                    try:
+                        conn = await asyncio.to_thread(get_admin_connection_for_project, project_id)
+                        await _dab.run_db_backup_cycle(conn, project_id, instance_id, cfg)
+                    except Exception:
+                        _logger.warning(
+                            "db_auto_backup: 백업 사이클 실패 (instance=%s)",
+                            instance_id,
+                            exc_info=True,
+                        )
+        except Exception:
+            _logger.warning("db_auto_backup: 루프 오류", exc_info=True)
+        await asyncio.sleep(3600)  # 1시간
+
+
 async def _deferred_create_tables() -> None:
     """DB 테이블 생성을 백그라운드에서 실행. API 기동을 차단하지 않는다."""
     from app.database import create_tables
@@ -924,6 +954,7 @@ async def start_background_workers():
 
     asyncio.create_task(_snapshot_loop())
     asyncio.create_task(_auto_backup_loop())
+    asyncio.create_task(_db_auto_backup_loop())
     if _svc_cfg.service_k3s_enabled:
         asyncio.create_task(_k3s_cleanup_loop())
     if _svc_cfg.service_swift_enabled:
