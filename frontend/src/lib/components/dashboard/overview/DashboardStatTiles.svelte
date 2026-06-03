@@ -26,8 +26,8 @@
 	<div class="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
 		<StatTile
 			label="인스턴스"
-			value={summary?.instances.active ?? 0}
-			unit={summary ? `/ ${summary.instances.total}` : undefined}
+			value={summary?.instances.total ?? 0}
+			unit={summary && summary.compute.instances_limit > 0 ? `/ ${summary.compute.instances_limit}` : undefined}
 			accent="blue"
 		>
 			{#snippet icon()}
