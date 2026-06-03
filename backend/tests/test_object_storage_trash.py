@@ -34,6 +34,33 @@ def _make_conn(project_id: str = "test-project-123") -> MagicMock:
 
 
 @pytest.mark.asyncio
+async def test_soft_delete_object_non_ascii_name_url_encodes_meta():
+    """non-ASCII 파일명(한글 등)은 X-Object-Meta-Orig-Name 헤더에 URL-encode 되어야 한다.
+    HTTP 헤더는 Latin-1 범위만 허용하므로 raw 한글을 그대로 넣으면 UnicodeEncodeError 발생."""
+    from app.services.swift import soft_delete_object
+
+    conn = _make_conn()
+    korean_name = "ㅇㄴㅁ/ChatGPT Image.png"
+
+    with patch("app.services.swift._apply_endpoint_override"):
+        with patch("app.services.swift.create_container"):
+            with patch("app.services.swift.copy_object") as mock_copy:
+                with patch("app.services.swift.delete_object"):
+                    result = soft_delete_object(conn, "test-bucket", korean_name)
+
+    assert result["original_name"] == korean_name
+    call_args = mock_copy.call_args
+    hdrs = call_args.kwargs.get("extra_headers") or (call_args.args[5] if len(call_args.args) > 5 else {})
+    orig_name_header = hdrs.get("X-Object-Meta-Orig-Name", "")
+    # URL-encoded → ASCII-safe (no raw Korean chars)
+    assert orig_name_header.isascii(), f"헤더에 non-ASCII 문자 포함: {orig_name_header!r}"
+    # 디코딩하면 원본명이 복원되어야 함
+    import urllib.parse
+
+    assert urllib.parse.unquote(orig_name_header) == korean_name
+
+
+@pytest.mark.asyncio
 async def test_soft_delete_object_copies_and_deletes():
     """soft_delete_object 는 {container}-trash 로 COPY 후 원본을 삭제해야 한다."""
     from app.services.swift import soft_delete_object

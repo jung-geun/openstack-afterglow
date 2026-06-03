@@ -852,6 +852,7 @@ def soft_delete_object(conn, container: str, name: str) -> dict:
     고아로 남는 버그가 발생한다.
     """
     import time
+    import urllib.parse
     import uuid as _uuid
 
     _ensure_trash_container(conn, container)
@@ -865,9 +866,10 @@ def soft_delete_object(conn, container: str, name: str) -> dict:
         # 디렉토리: move_object 가 하위 파일 전체를 재귀 COPY+DELETE 처리
         move_object(conn, container, name, trash_container, trash_key)
     else:
+        # HTTP 헤더는 Latin-1 범위만 허용 — 한글 등 non-ASCII 값은 URL-encode
         extra_meta: dict[str, str] = {
-            "X-Object-Meta-Orig-Name": name,
-            "X-Object-Meta-Orig-Container": container,
+            "X-Object-Meta-Orig-Name": urllib.parse.quote(name, safe="/"),
+            "X-Object-Meta-Orig-Container": urllib.parse.quote(container, safe=""),
             "X-Object-Meta-Deleted-At": str(epoch),
         }
         copy_object(conn, container, name, trash_container, trash_key, extra_headers=extra_meta)
