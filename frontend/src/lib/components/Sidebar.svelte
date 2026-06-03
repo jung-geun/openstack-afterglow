@@ -181,16 +181,8 @@
 		</a>
 	</div>
 
-	<!-- VM 생성 버튼 -->
-	<div class="p-3">
-		<Button onclick={openWizard} class="w-full">
-			<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v14M5 12h14"/></svg>
-			VM 생성
-		</Button>
-	</div>
-
 	<!-- 검색 버튼 (1024px 미만에서만 표시) -->
-	<div class="px-3 pb-2 lg:hidden">
+	<div class="px-3 pt-3 pb-2 lg:hidden">
 		<button
 			onclick={() => palette.open()}
 			class="w-full flex items-center gap-2 bg-gray-800 border border-gray-700 text-gray-500 rounded-lg pl-3 pr-2 py-1.5 text-[13px] hover:border-gray-600 transition-colors cursor-text"
@@ -200,6 +192,14 @@
 			<span class="flex-1 text-left text-gray-600">리소스 검색...</span>
 			<kbd class="text-[10px] border border-gray-700 px-1.5 py-0.5 rounded font-mono text-gray-600">⌘K</kbd>
 		</button>
+	</div>
+
+	<!-- VM 생성 버튼 -->
+	<div class="px-3 pb-3 pt-2 lg:pt-0">
+		<Button onclick={openWizard} class="w-full">
+			<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v14M5 12h14"/></svg>
+			VM 생성
+		</Button>
 	</div>
 
 	<nav class="flex-1 px-3 pb-4 space-y-0.5">
