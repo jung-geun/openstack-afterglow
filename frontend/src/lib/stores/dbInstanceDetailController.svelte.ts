@@ -45,6 +45,17 @@ export function createDbInstanceDetailController(opts: DbInstanceDetailControlle
 	let deletingBackup = $state<string | null>(null);
 	let restoringBackup = $state<string | null>(null);
 
+	// Auto-backup state
+	interface AutoBackupConfig {
+		enabled: boolean;
+		max_daily: number;
+		max_weekly: number;
+		max_monthly: number;
+	}
+	let autoBackupConfig = $state<AutoBackupConfig | null>(null);
+	let loadingAutoBackup = $state(false);
+	let savingAutoBackup = $state(false);
+
 	// Derived
 	const instanceFips = $derived.by(() => {
 		const ips = instance?.ips ?? [];
@@ -77,6 +88,57 @@ export function createDbInstanceDetailController(opts: DbInstanceDetailControlle
 				: `mysql -h ${connectHost} -P ${dbPort} -u <user> -p`
 			: ''
 	);
+
+	async function loadAutoBackupConfig() {
+		const id = opts.instanceId();
+		const tok = opts.token();
+		const proj = opts.projectId();
+		loadingAutoBackup = true;
+		try {
+			const cfg = await api.get<AutoBackupConfig>(`/api/database-instances/${id}/auto-backup`, tok, proj);
+			autoBackupConfig = cfg;
+		} catch {
+			autoBackupConfig = null;
+		} finally {
+			loadingAutoBackup = false;
+		}
+	}
+
+	async function saveAutoBackupConfig(max_daily: number, max_weekly: number, max_monthly: number) {
+		const id = opts.instanceId();
+		const tok = opts.token();
+		const proj = opts.projectId();
+		savingAutoBackup = true;
+		try {
+			const cfg = await api.put<AutoBackupConfig>(
+				`/api/database-instances/${id}/auto-backup`,
+				{ max_daily, max_weekly, max_monthly },
+				tok, proj
+			);
+			autoBackupConfig = cfg;
+			toast.success('자동 백업 설정이 저장되었습니다.');
+		} catch (e) {
+			toast.error('자동 백업 설정 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+		} finally {
+			savingAutoBackup = false;
+		}
+	}
+
+	async function disableAutoBackup() {
+		const id = opts.instanceId();
+		const tok = opts.token();
+		const proj = opts.projectId();
+		savingAutoBackup = true;
+		try {
+			await api.delete(`/api/database-instances/${id}/auto-backup`, tok, proj);
+			autoBackupConfig = null;
+			toast.success('자동 백업이 비활성화되었습니다.');
+		} catch (e) {
+			toast.error('자동 백업 비활성화 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+		} finally {
+			savingAutoBackup = false;
+		}
+	}
 
 	// AutoRefresh
 	const ar = createAutoRefresh(() => loadAll(), {
@@ -113,6 +175,9 @@ export function createDbInstanceDetailController(opts: DbInstanceDetailControlle
 			api.get<FloatingIp[]>('/api/networks/floating-ips', tok, proj)
 				.then(v => { floatingIps = v; })
 				.catch(() => {}),
+			api.get<AutoBackupConfig>(`/api/database-instances/${id}/auto-backup`, tok, proj)
+				.then(v => { autoBackupConfig = v; })
+				.catch(() => { autoBackupConfig = null; }),
 		]);
 		loading = false;
 	}
@@ -322,6 +387,9 @@ export function createDbInstanceDetailController(opts: DbInstanceDetailControlle
 		get backupError() { return backupError; },
 		get deletingBackup() { return deletingBackup; },
 		get restoringBackup() { return restoringBackup; },
+		get autoBackupConfig() { return autoBackupConfig; },
+		get loadingAutoBackup() { return loadingAutoBackup; },
+		get savingAutoBackup() { return savingAutoBackup; },
 
 		// Derived getters
 		get instanceFips() { return instanceFips; },
@@ -339,6 +407,9 @@ export function createDbInstanceDetailController(opts: DbInstanceDetailControlle
 		// Handlers
 		loadAll,
 		reset,
+		loadAutoBackupConfig,
+		saveAutoBackupConfig,
+		disableAutoBackup,
 		attachFip,
 		detachFip,
 		deleteInstance,
