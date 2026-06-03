@@ -40,9 +40,18 @@
 		showAutoForm = false;
 	}
 
+	function autoBackupName(): string {
+		const base = s.instance?.name ?? 'backup';
+		const now = new Date();
+		const pad = (n: number) => String(n).padStart(2, '0');
+		const date = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
+		const time = `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+		return `${base}-${date}-${time}`;
+	}
+
 	async function handleCreateBackup() {
-		if (!newBackup.name.trim()) return;
-		const ok = await s.createBackup(newBackup.name.trim(), newBackup.description);
+		const name = newBackup.name.trim() || autoBackupName();
+		const ok = await s.createBackup(name, newBackup.description);
 		if (ok) {
 			showBackupForm = false;
 			newBackup = { name: '', description: '' };
@@ -126,12 +135,12 @@
 	</div>
 	{#if showBackupForm}
 		<div class="bg-gray-800 rounded-lg p-3 mb-3 space-y-2">
-			<input type="text" bind:value={newBackup.name} placeholder="backup-name"
-				class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-amber-500" />
+			<input type="text" bind:value={newBackup.name} placeholder="비우면 {s.instance?.name ?? 'db'}-날짜-시간으로 자동 생성"
+				class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-amber-500" />
 			<input type="text" bind:value={newBackup.description} placeholder="설명 (선택)"
 				class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-amber-500" />
 			{#if s.backupError}<p class="text-red-400 text-xs">{s.backupError}</p>{/if}
-			<button onclick={handleCreateBackup} disabled={s.creatingBackup || !newBackup.name.trim()}
+			<button onclick={handleCreateBackup} disabled={s.creatingBackup}
 				class="text-xs bg-amber-600 hover:bg-amber-500 disabled:bg-gray-700 disabled:text-gray-500 text-white px-3 py-1.5 rounded transition-colors">
 				{s.creatingBackup ? '생성 중...' : '백업 생성'}
 			</button>
