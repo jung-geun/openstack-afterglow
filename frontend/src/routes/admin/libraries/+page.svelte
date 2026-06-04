@@ -210,7 +210,7 @@
             <div class="max-h-80 overflow-y-auto">
             <table class="w-full text-sm">
               <thead>
-                <tr class="border-b border-gray-700 text-xs text-gray-500 uppercase tracking-wide sticky top-0 z-10 bg-gray-800">
+                <tr class="text-xs text-gray-500 uppercase tracking-wide sticky top-0 z-10 bg-gray-800 [box-shadow:inset_0_-1px_0_#374151]">
                   <th class="text-left px-4 py-2.5">라이브러리</th>
                   <th class="text-left px-4 py-2.5">상태</th>
                   <th class="text-left px-4 py-2.5 hidden md:table-cell">단계</th>
@@ -227,7 +227,7 @@
                     class="hover:bg-gray-700/30 transition-colors cursor-pointer {isDone ? 'opacity-50' : ''}"
                     onclick={() => openBuildDetail(build)}
                   >
-                    <td class="px-4 py-2.5 font-medium text-white">{build.library_id}</td>
+                    <td class="px-4 py-2.5 font-medium text-white max-w-32 truncate">{build.library_id}</td>
                     <td class="px-4 py-2.5">
                       <StatusChip status={build.status} />
                     </td>
