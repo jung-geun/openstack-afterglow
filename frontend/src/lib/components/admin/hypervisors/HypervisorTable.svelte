@@ -71,10 +71,11 @@
 		<tbody>
 			{#each hypervisors as h (h.id)}
 				<tr
-					class="border-b border-gray-800/50 text-xs cursor-pointer hover:bg-gray-800/50 transition-colors {selectedId === h.id ? 'bg-gray-800/70' : ''}"
-					onclick={() => onSelect(h.id)}
+					class="border-b border-gray-800/50 text-xs transition-colors {selectedId === h.id ? 'bg-gray-800/70' : ''}"
 				>
-					<td class="py-2 pr-4 text-white font-mono">{h.name}</td>
+					<td class="py-2 pr-4">
+						<button type="button" onclick={() => onSelect(h.id)} class="font-mono text-white hover:text-blue-400 transition-colors text-left">{h.name}</button>
+					</td>
 					<td class="py-2 pr-4">
 						<span class="{h.state === 'up' && h.status === 'enabled' ? 'text-green-400' : 'text-red-400'}">{h.state}/{h.status}</span>
 					</td>

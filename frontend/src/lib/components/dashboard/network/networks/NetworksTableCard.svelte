@@ -46,11 +46,7 @@
     <!-- Rows -->
     {#each networks as net (net.id)}
       <div
-        onclick={() => onOpenPanel(net.id)}
-        onkeydown={(e) => e.key === 'Enter' && onOpenPanel(net.id)}
-        tabindex="0"
-        role="button"
-        class="grid grid-cols-[1fr_0px_auto_0px_0px_0px_0px] sm:grid-cols-[1.4fr_1fr_100px_80px_80px_100px_56px] px-4 py-3 text-[13px] items-center border-b border-gray-800 hover:bg-gray-800/30 transition-colors cursor-pointer last:border-b-0"
+        class="grid grid-cols-[1fr_0px_auto_0px_0px_0px_0px] sm:grid-cols-[1.4fr_1fr_100px_80px_80px_100px_56px] px-4 py-3 text-[13px] items-center border-b border-gray-800 transition-colors last:border-b-0"
       >
         <!-- 이름 -->
         <div class="flex items-center gap-2.5 min-w-0">
@@ -61,7 +57,7 @@
           </div>
           <div class="min-w-0">
             <div class="flex items-center gap-1.5">
-              <span class="text-white font-medium truncate">{net.name || net.id.slice(0, 12)}</span>
+              <button type="button" onclick={() => onOpenPanel(net.id)} class="font-medium text-white hover:text-blue-400 transition-colors text-left truncate">{net.name || net.id.slice(0, 12)}</button>
               {#if net.id === defaultNetworkId}
                 <span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/40 border border-blue-700/60 text-blue-400 shrink-0">기본</span>
               {/if}

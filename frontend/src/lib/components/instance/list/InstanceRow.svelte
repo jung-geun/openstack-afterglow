@@ -18,11 +18,7 @@
 </script>
 
 <div
-	onclick={() => onSelect(instance.id)}
-	onkeydown={(e) => e.key === 'Enter' && onSelect(instance.id)}
-	tabindex="0"
-	role="button"
-	class="grid grid-cols-[1fr_0px_0px_1fr_0px_0px_0px] sm:grid-cols-[1.2fr_130px_0px_1.5fr_0px_0px_32px] md:grid-cols-[1.2fr_130px_1.2fr_1.5fr_0px_0px_32px] lg:grid-cols-[1.2fr_130px_1.2fr_1.5fr_80px_80px_32px] px-4 py-3 text-[13px] items-center border-b border-gray-800 hover:bg-gray-800/30 transition-colors cursor-pointer last:border-b-0"
+	class="grid grid-cols-[1fr_0px_0px_1fr_0px_0px_0px] sm:grid-cols-[1.2fr_130px_0px_1.5fr_0px_0px_32px] md:grid-cols-[1.2fr_130px_1.2fr_1.5fr_0px_0px_32px] lg:grid-cols-[1.2fr_130px_1.2fr_1.5fr_80px_80px_32px] px-4 py-3 text-[13px] items-center border-b border-gray-800 transition-colors last:border-b-0"
 >
 	<!-- 이름 -->
 	<div class="flex items-center gap-2.5 min-w-0">
@@ -32,7 +28,7 @@
 			</svg>
 		</div>
 		<div class="min-w-0">
-			<div class="text-white font-medium truncate">{instance.name}</div>
+			<button type="button" onclick={() => onSelect(instance.id)} class="block w-full font-medium text-white hover:text-blue-400 transition-colors text-left truncate">{instance.name}</button>
 			<div class="sm:hidden mt-0.5"><StatusChip status={instance.status} /></div>
 		</div>
 	</div>

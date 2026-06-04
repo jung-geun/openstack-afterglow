@@ -28,10 +28,11 @@
 		<tbody>
 			{#each networks as n (n.id)}
 				<tr
-					onclick={() => onRowClick(n.id)}
-					class="border-b border-gray-800/50 text-xs hover:bg-gray-800/30 transition-colors cursor-pointer"
+					class="border-b border-gray-800/50 text-xs transition-colors"
 				>
-					<td class="py-2 pr-4 text-white">{n.name || n.id.slice(0, 8)}</td>
+					<td class="py-2 pr-4">
+						<button type="button" onclick={() => onRowClick(n.id)} class="font-medium text-white hover:text-blue-400 transition-colors text-left">{n.name || n.id.slice(0, 8)}</button>
+					</td>
 					<td class="py-2 pr-4 {n.status === 'ACTIVE' ? 'text-green-400' : 'text-gray-400'}">{n.status}</td>
 					<td class="py-2 pr-4">
 						{#if n.is_external}<span class="px-1.5 py-0.5 bg-orange-900/30 text-orange-300 rounded text-xs mr-1">외부</span>{/if}

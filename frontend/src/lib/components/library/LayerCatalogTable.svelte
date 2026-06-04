@@ -71,8 +71,7 @@
       <tbody class="divide-y divide-gray-700/50">
         {#each treeNodes as { layer, depth }}
           <tr
-            class="hover:bg-gray-800/50 cursor-pointer transition-colors"
-            onclick={() => goto(layerHref(layer.id))}
+            class="transition-colors"
           >
             <td class="px-4 py-3">
               <div class="flex items-center gap-1" style="padding-left: {depth * 1.25}rem">
@@ -80,7 +79,7 @@
                   <span class="text-gray-600 mr-1">└</span>
                 {/if}
                 <div>
-                  <div class="font-medium text-gray-100">{layer.name}</div>
+                  <a href={layerHref(layer.id)} class="font-medium text-gray-100 hover:text-blue-400 transition-colors">{layer.name}</a>
                   <div class="text-xs text-gray-500">{layer.version}</div>
                 </div>
               </div>

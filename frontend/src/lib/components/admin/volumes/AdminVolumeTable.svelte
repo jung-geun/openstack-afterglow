@@ -64,10 +64,11 @@
 		<tbody>
 			{#each volumes as v (v.id)}
 				<tr
-					onclick={() => onSelect(v.id)}
-					class="border-b border-gray-800/50 text-xs hover:bg-gray-800/30 transition-colors cursor-pointer {selectedVolumeId === v.id ? 'bg-gray-800/50' : ''}"
+					class="border-b border-gray-800/50 text-xs transition-colors {selectedVolumeId === v.id ? 'bg-gray-800/50' : ''}"
 				>
-					<td class="py-2 pr-4 text-white">{v.name || v.id.slice(0, 8)}</td>
+					<td class="py-2 pr-4">
+						<button type="button" onclick={() => onSelect(v.id)} class="font-medium text-white hover:text-blue-400 transition-colors text-left">{v.name || v.id.slice(0, 8)}</button>
+					</td>
 					<td class="py-2 pr-4"><StatusChip status={v.status} /></td>
 					<td class="py-2 pr-4 text-gray-400">{formatNumber(v.size)} GB</td>
 					<td class="py-2 pr-4">

@@ -58,11 +58,7 @@
 	</div>
 	{#each volumes as vol (vol.id)}
 		<div
-			onclick={() => onOpenDetail(vol.id)}
-			onkeydown={(e) => e.key === 'Enter' && onOpenDetail(vol.id)}
-			tabindex="0"
-			role="button"
-			class="grid grid-cols-[1fr_60px_0px_32px_0px_0px_0px_0px] sm:grid-cols-[1.6fr_70px_90px_100px_0px_0px_0px_0px] lg:grid-cols-[1.6fr_70px_90px_100px_1fr_80px_80px_56px] px-4 py-3 text-[13px] items-center border-b border-gray-800 hover:bg-gray-800/30 transition-colors cursor-pointer last:border-b-0 {selectedVolumeId === vol.id ? 'bg-gray-800/30' : ''}"
+			class="grid grid-cols-[1fr_60px_0px_32px_0px_0px_0px_0px] sm:grid-cols-[1.6fr_70px_90px_100px_0px_0px_0px_0px] lg:grid-cols-[1.6fr_70px_90px_100px_1fr_80px_80px_56px] px-4 py-3 text-[13px] items-center border-b border-gray-800 transition-colors last:border-b-0 {selectedVolumeId === vol.id ? 'bg-gray-800/30' : ''}"
 		>
 			<!-- 이름 -->
 			<div class="flex items-center gap-2.5 min-w-0">
@@ -73,9 +69,9 @@
 				</div>
 				<div class="min-w-0">
 					{#if vol.name}
-						<div class="text-white font-medium truncate">{vol.name}</div>
+						<button type="button" onclick={() => onOpenDetail(vol.id)} class="block w-full font-medium text-white hover:text-blue-400 transition-colors text-left truncate">{vol.name}</button>
 					{:else}
-						<div class="text-gray-400 font-mono text-xs truncate">{vol.id}</div>
+						<button type="button" onclick={() => onOpenDetail(vol.id)} class="block w-full font-mono text-xs text-gray-400 hover:text-blue-400 transition-colors text-left truncate">{vol.id}</button>
 					{/if}
 					<div class="text-[11px] text-gray-500 font-mono truncate">{vol.id.slice(0, 8)}…</div>
 				</div>

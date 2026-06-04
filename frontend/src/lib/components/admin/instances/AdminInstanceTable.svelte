@@ -48,10 +48,11 @@
 		<tbody>
 			{#each instances as s (s.id)}
 				<tr
-					onclick={() => onOpen(s)}
-					class="border-b border-gray-800/50 text-xs hover:bg-gray-800/50 transition-colors cursor-pointer"
+					class="border-b border-gray-800/50 text-xs transition-colors"
 				>
-					<td class="py-2 pr-4 text-white">{s.name || s.id.slice(0, 8)}</td>
+					<td class="py-2 pr-4">
+						<button type="button" onclick={() => onOpen(s)} class="font-medium text-white hover:text-blue-400 transition-colors text-left">{s.name || s.id.slice(0, 8)}</button>
+					</td>
 					<td class="py-2 pr-4">
 						<div class="flex items-center gap-1.5">
 							<StatusChip status={s.status} />
