@@ -207,9 +207,10 @@
         <div class="mb-6">
           <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">빌드 현황</h3>
           <div class="bg-gray-800 border border-gray-700 rounded-xl overflow-hidden">
+            <div class="max-h-80 overflow-y-auto">
             <table class="w-full text-sm">
               <thead>
-                <tr class="border-b border-gray-700 text-xs text-gray-500 uppercase tracking-wide">
+                <tr class="border-b border-gray-700 text-xs text-gray-500 uppercase tracking-wide sticky top-0 z-10 bg-gray-800">
                   <th class="text-left px-4 py-2.5">라이브러리</th>
                   <th class="text-left px-4 py-2.5">상태</th>
                   <th class="text-left px-4 py-2.5 hidden md:table-cell">단계</th>
@@ -260,6 +261,7 @@
                 {/each}
               </tbody>
             </table>
+            </div>
           </div>
         </div>
       {/if}
