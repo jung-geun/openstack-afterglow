@@ -38,7 +38,7 @@
 	onMount(load);
 </script>
 
-<div class="p-4 md:p-8 max-w-7xl mx-auto">
+<div class="p-4 md:p-6 max-w-7xl mx-auto">
 	<PageHeader breadcrumb="IDENTITY / ROLES" title="역할">
 		{#snippet actions()}
 			<AutoRefreshControl
@@ -56,7 +56,7 @@
 	{:else if roles.length === 0}
 		<div class="text-gray-600 text-sm">역할이 없습니다</div>
 	{:else}
-		<div class="overflow-x-auto" class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
+		<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 overflow-x-auto" class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 			<table class="w-full text-sm">
 				<thead>
 					<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">

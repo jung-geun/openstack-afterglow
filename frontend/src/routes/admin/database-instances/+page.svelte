@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { confirmDialog } from '$lib/stores/confirm.svelte';
 	import { onMount } from 'svelte';
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
@@ -8,17 +9,9 @@
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 	import DbCreatePanel from '$lib/components/database/DbCreatePanel.svelte';
-
-	interface DbInstance {
-		id: string;
-		name: string;
-		status: string;
-		datastore: { type?: string; version?: string };
-		flavor_id: string;
-		size: number;
-		created_at: string;
-		project_id?: string;
-	}
+	import GrafanaEmbed from '$lib/components/monitoring/GrafanaEmbed.svelte';
+	import type { DbInstance } from '$lib/types/database';
+	import { toast } from '$lib/stores/toast';
 
 	let instances = $state<DbInstance[]>([]);
 	let loading = $state(true);
@@ -46,26 +39,26 @@
 	}
 
 	async function deleteInstance(id: string, name: string) {
-		if (!confirm(`DB 인스턴스 "${name || id.slice(0, 8)}"를 삭제하시겠습니까?`)) return;
+		if (!await confirmDialog(`DB 인스턴스 "${name || id.slice(0, 8)}"를 삭제하시겠습니까?`)) return;
 		deleting = id;
 		try {
 			await api.delete(`/api/database-instances/${id}`, token, projectId);
 			await load();
 		} catch (e) {
-			alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			deleting = null;
 		}
 	}
 
 	async function restartInstance(id: string, name: string) {
-		if (!confirm(`DB 인스턴스 "${name || id.slice(0, 8)}"를 재시작하시겠습니까?`)) return;
+		if (!await confirmDialog(`DB 인스턴스 "${name || id.slice(0, 8)}"를 재시작하시겠습니까?`)) return;
 		restarting = id;
 		try {
 			await api.post(`/api/database-instances/${id}/restart`, {}, token, projectId);
 			await load();
 		} catch (e) {
-			alert('재시작 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+			toast.error('재시작 실패: ' + (e instanceof ApiError ? e.message : String(e)));
 		} finally {
 			restarting = null;
 		}
@@ -146,5 +139,12 @@
 			</table>
 		</div>
 		</div>
+	{/if}
+
+	{#if !loading}
+	<div class="mt-8">
+		<h2 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">MySQL 메트릭 (mysqld_exporter)</h2>
+		<GrafanaEmbed dashboardKey="mysqld" height={400} />
+	</div>
 	{/if}
 </div>

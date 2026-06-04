@@ -38,12 +38,21 @@ COPY --from=backend-builder /app/.venv /app/.venv
 
 COPY backend/pyproject.toml backend/uv.lock ./
 COPY backend/app/ ./app/
+COPY backend/tofu/ ./tofu/
 
 # .pyc 직접 사용으로 cold start 가속
 RUN python -m compileall -q app/
 
-# apt 캐시/목록 제거 + 불필요 파일 정리로 레이어 최소화
-RUN rm -rf /var/lib/apt/lists/* /tmp/* /root/.cache
+# OpenTofu CLI 설치 (MPL-2.0, ~80MB)
+ARG TOFU_VERSION=1.8.3
+RUN apt-get update && apt-get install -y --no-install-recommends curl unzip \
+    && curl -fsSL "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.zip" -o /tmp/tofu.zip \
+    && unzip /tmp/tofu.zip tofu -d /usr/local/bin/ \
+    && rm /tmp/tofu.zip \
+    && apt-get purge -y --auto-remove curl unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN rm -rf /tmp/* /root/.cache
 
 RUN adduser --disabled-password --gecos "" appuser \
     && chown -R appuser:appuser /app
@@ -67,6 +76,58 @@ USER appuser
 ENV PATH="/app/.venv/bin:$PATH"
 # named volume 캐시가 오래된 .venv를 갖고 있어도 의존성 자동 동기화
 CMD ["sh", "-c", "uv sync --frozen --no-install-project && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Worker 스테이지 (afterglow-drover 이미지)
+# ─────────────────────────────────────────────────────────────────────────────
+# drover (app.worker) 와 notion-worker (app.notion_worker) 공용.
+# OpenTofu/curl/unzip 제외, fastapi/uvicorn/boto3 등 API 전용 패키지 제외.
+# 사용법:
+#   docker build --target worker -t afterglow-drover .
+
+# ── Worker 빌더 (worker 의존성 그룹만 설치) ──────────────────────────────────
+FROM python:3.12-slim AS worker-builder
+
+WORKDIR /app
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libc6-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY backend/pyproject.toml backend/uv.lock ./
+# worker 의존성 그룹만 설치 (fastapi/uvicorn/boto3 등 API 전용 패키지 제외)
+RUN uv sync --frozen --no-dev --no-install-project --only-group worker
+ENV PATH="/app/.venv/bin:$PATH"
+
+# ── Worker 프로덕션 (깨끗한 slim 이미지, OpenTofu/curl/unzip 없음) ───────────
+FROM python:3.12-slim AS worker
+
+WORKDIR /app
+
+# worker-builder에서 컴파일된 경량 가상환경 복사
+COPY --from=worker-builder /app/.venv /app/.venv
+
+COPY backend/pyproject.toml backend/uv.lock ./
+COPY backend/app/ ./app/
+# tofu/ 디렉토리는 API 전용 (OpenTofu CLI 연동) — 워커에 불필요하여 제외
+
+# .pyc 직접 사용으로 cold start 가속
+RUN python -m compileall -q app/
+
+RUN rm -rf /tmp/* /root/.cache
+
+RUN adduser --disabled-password --gecos "" appuser \
+    && chown -R appuser:appuser /app
+
+ENV PATH="/app/.venv/bin:$PATH"
+
+USER appuser
+
+# 기본 CMD: drover. notion-worker는 compose/k8s command로 override.
+CMD ["python", "-m", "app.worker"]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Frontend 스테이지

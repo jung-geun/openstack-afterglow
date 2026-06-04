@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { auth, setProject } from '$lib/stores/auth';
+	import { auth, setAuth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
 	import LoadingSpinner from './LoadingSpinner.svelte';
+	import CreateProjectModal from './projects/CreateProjectModal.svelte';
 
 	interface Project {
 		id: string;
@@ -12,9 +13,11 @@
 
 	let projects = $state<Project[]>([]);
 	let loading = $state(true);
+	let switching = $state(false);
 	let error = $state('');
 	let isOpen = $state(false);
 	let dropdownRef: HTMLDivElement | null = $state(null);
+	let showCreateModal = $state(false);
 
 	async function fetchProjects() {
 		if (!$auth.token) return;
@@ -29,12 +32,44 @@
 		}
 	}
 
-	function selectProject(project: Project) {
-		setProject(project.id, project.name);
-		isOpen = false;
-		// Default 네트워크 확인/생성 (fire-and-forget)
-		if ($auth.token) {
-			api.post('/api/networks/ensure-default', {}, $auth.token, project.id).catch(() => {});
+	async function selectProject(project: Project) {
+		if (!$auth.token || switching) return;
+		if (project.id === $auth.projectId) { isOpen = false; return; }
+
+		switching = true;
+		try {
+			const resp = await api.post<{
+				token: string;
+				refresh_token: string;
+				expires_at: string;
+				project_id: string;
+				project_name: string;
+				user_id: string;
+				username: string;
+				roles: string[];
+				is_system_admin: boolean;
+			}>('/api/auth/switch-project', { project_id: project.id }, $auth.token);
+
+			setAuth({
+				token: resp.token,
+				refreshToken: resp.refresh_token,
+				accessExpiresAt: resp.expires_at
+					? Math.floor(new Date(resp.expires_at).getTime() / 1000)
+					: null,
+				projectId: resp.project_id,
+				projectName: resp.project_name,
+				roles: resp.roles ?? [],
+				isSystemAdmin: !!resp.is_system_admin,
+			});
+
+			isOpen = false;
+
+			// Default 네트워크 확인/생성 (fire-and-forget)
+			api.post('/api/networks/ensure-default', {}, resp.token, resp.project_id).catch(() => {});
+		} catch (e) {
+			error = e instanceof ApiError ? `프로젝트 전환 실패: ${e.message}` : '프로젝트 전환 실패';
+		} finally {
+			switching = false;
 		}
 	}
 
@@ -53,11 +88,11 @@
 
 <div class="relative" bind:this={dropdownRef}>
 	<button
-		onclick={() => { if (!loading) isOpen = !isOpen; }}
-		disabled={loading}
+		onclick={() => { if (!loading && !switching) isOpen = !isOpen; }}
+		disabled={loading || switching}
 		class="flex items-center gap-2 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 disabled:bg-gray-800/50 rounded-lg text-sm transition-colors"
 	>
-		{#if loading}
+		{#if loading || switching}
 			<LoadingSpinner size="sm" color="gray" />
 		{:else}
 			<svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -71,17 +106,18 @@
 	</button>
 
 	{#if isOpen && !loading}
-		<div class="fixed left-0 bottom-0 w-full sm:absolute sm:bottom-auto sm:top-full sm:mt-1 sm:left-0 sm:w-64 max-h-[50vh] sm:max-h-64 bg-gray-900 border border-gray-700 rounded-t-lg sm:rounded-lg shadow-xl z-50 overflow-hidden">
+		<div class="fixed left-0 bottom-0 w-full sm:absolute sm:top-auto sm:bottom-full sm:mb-1 sm:left-0 sm:w-64 max-h-[50vh] bg-gray-900 border border-gray-700 rounded-t-lg sm:rounded-lg shadow-xl z-50 overflow-hidden">
 			{#if error}
 				<div class="p-3 text-sm text-red-400">{error}</div>
 			{:else if projects.length === 0}
 				<div class="p-3 text-sm text-gray-500">접근 가능한 프로젝트가 없습니다</div>
 			{:else}
-				<div class="overflow-y-auto max-h-[calc(50vh-1rem)] sm:max-h-64">
+				<div class="overflow-y-auto max-h-[calc(50vh-6rem)] sm:max-h-52">
 					{#each projects as project}
 						<button
 							onclick={() => selectProject(project)}
-							class="w-full text-left px-3 py-2 hover:bg-gray-800 transition-colors
+							disabled={switching}
+							class="w-full text-left px-3 py-2 hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed
 								{project.id === $auth.projectId ? 'bg-blue-900/30 border-l-2 border-blue-500' : ''}"
 						>
 							<div class="text-sm font-medium text-white">{project.name}</div>
@@ -92,6 +128,33 @@
 					{/each}
 				</div>
 			{/if}
+			<div class="border-t border-gray-800">
+				<button
+					onclick={() => { isOpen = false; showCreateModal = true; }}
+					class="w-full text-left px-3 py-2 text-xs text-gray-500 hover:text-white hover:bg-gray-800 transition-colors flex items-center gap-1.5"
+				>
+					<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v14M5 12h14"/></svg>
+					새 프로젝트
+				</button>
+				<a
+					href="/dashboard/project-settings"
+					onclick={() => { isOpen = false; }}
+					class="w-full text-left px-3 py-2 text-xs text-gray-500 hover:text-white hover:bg-gray-800 transition-colors flex items-center gap-1.5"
+				>
+					<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+					프로젝트 설정
+				</a>
+			</div>
 		</div>
 	{/if}
 </div>
+
+{#if showCreateModal}
+	<CreateProjectModal
+		onClose={() => (showCreateModal = false)}
+		onSuccess={(proj) => {
+			showCreateModal = false;
+			fetchProjects();
+		}}
+	/>
+{/if}

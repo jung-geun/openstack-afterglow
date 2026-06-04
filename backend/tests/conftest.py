@@ -4,6 +4,7 @@ import os
 
 os.environ.setdefault("AFTERGLOW_ALLOW_INSECURE", "1")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
+os.environ.setdefault("SERVICE_BARBICAN_ENABLED", "true")
 os.environ.setdefault("SERVICE_MANILA_ENABLED", "true")
 os.environ.setdefault("SERVICE_MAGNUM_ENABLED", "true")
 os.environ.setdefault("SERVICE_ZUN_ENABLED", "true")
@@ -107,6 +108,25 @@ def _reset_rate_limiter():
     except Exception:
         pass
     yield
+
+
+@pytest.fixture(autouse=True)
+def _fake_redis_global(monkeypatch):
+    """CI 환경에서 Redis 없이 테스트 가능하도록 fakeredis 전역 패치.
+
+    session_store 는 `from app.services.cache import _get_redis` 로 참조를 복사하므로
+    cache 모듈 경로와 session_store 모듈 경로 두 곳을 모두 패치한다.
+    """
+    import fakeredis.aioredis as _fakeredis
+
+    fake = _fakeredis.FakeRedis()
+
+    async def _get_fake():
+        return fake
+
+    monkeypatch.setattr("app.services.cache._get_redis", _get_fake, raising=False)
+    monkeypatch.setattr("app.services.session_store._get_redis", _get_fake, raising=False)
+    return fake
 
 
 @pytest.fixture(autouse=True)

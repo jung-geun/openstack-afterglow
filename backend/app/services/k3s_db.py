@@ -59,6 +59,10 @@ def _cluster_to_dict(cluster: K3sCluster) -> dict:
         "api_fip_id": cluster.api_fip_id or "",
         "api_fip_address": cluster.api_fip_address or "",
         "os_type": cluster.os_type or "ubuntu",
+        "template_id": cluster.template_id or None,
+        "template_snapshot": cluster.template_snapshot or None,
+        "master_count": cluster.master_count if hasattr(cluster, "master_count") else 1,
+        "stampede_enabled": bool(cluster.stampede_enabled) if hasattr(cluster, "stampede_enabled") else False,
     }
 
 
@@ -103,6 +107,10 @@ async def create_cluster_record(project_id: str, cluster_id: str, data: dict) ->
             api_fip_address=data.get("api_fip_address") or None,
             os_type=data.get("os_type") or "ubuntu",
             app_credential_id=data.get("app_credential_id") or None,
+            template_id=data.get("template_id") or None,
+            template_snapshot=data.get("template_snapshot") or None,
+            master_count=int(data.get("master_count") or 1),
+            stampede_enabled=bool(data.get("stampede_enabled", False)),
         )
         session.add(cluster)
         await session.commit()
@@ -240,6 +248,7 @@ async def update_cluster_status(
             "plugin_status",
             "secret_cloud_config_status",
             "app_credential_id",
+            "master_count",
         }
         for k, v in extra_fields.items():
             if k in _column_map:
@@ -570,3 +579,52 @@ async def get_cluster_app_credential_id(project_id: str, cluster_id: str) -> str
         )
         result = await session.execute(stmt)
         return result.scalar_one_or_none()
+
+
+# ---------------------------------------------------------------------------
+# HA 콜백 토큰 / 조인 카운터 — Redis 전담 (k3s_cluster.py 위임)
+# ---------------------------------------------------------------------------
+
+
+async def create_ha_callback_token(project_id: str, cluster_id: str, server_index: int) -> str:
+    from app.services import k3s_cluster as _redis
+
+    return await _redis.create_ha_callback_token(project_id, cluster_id, server_index)
+
+
+async def consume_ha_callback_token(token: str) -> dict | None:
+    from app.services import k3s_cluster as _redis
+
+    return await _redis.consume_ha_callback_token(token)
+
+
+async def get_ha_join_count(cluster_id: str) -> int:
+    from app.services import k3s_cluster as _redis
+
+    return await _redis.get_ha_join_count(cluster_id)
+
+
+async def incr_ha_join_count(cluster_id: str) -> int:
+    from app.services import k3s_cluster as _redis
+
+    return await _redis.incr_ha_join_count(cluster_id)
+
+
+async def record_rotation(cluster_id: str, initiated_by: str) -> None:
+    """인증서 회전 완료 기록 — last_rotation_at, last_rotation_initiated_by 갱신."""
+    if not is_db_available():
+        _logger.warning("record_rotation: DB 미설정 — 회전 기록 스킵 (cluster=%s)", cluster_id)
+        return
+
+    factory = get_session_factory()
+    async with factory() as session:
+        stmt = select(K3sCluster).where(K3sCluster.id == cluster_id)
+        result = await session.execute(stmt)
+        cluster = result.scalar_one_or_none()
+        if cluster is None:
+            _logger.warning("record_rotation: cluster %s not found", cluster_id)
+            return
+        cluster.last_rotation_at = datetime.now(UTC)
+        cluster.last_rotation_initiated_by = initiated_by
+        cluster.updated_at = datetime.now(UTC)
+        await session.commit()

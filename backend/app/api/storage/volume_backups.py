@@ -6,15 +6,15 @@ if TYPE_CHECKING:
     import openstack
 import asyncio
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from openstack.exceptions import HttpException
 from pydantic import BaseModel
 
 from app.api.common.activity_recorder import rec
 from app.api.common.owner_check import assert_resource_owner
-from app.api.deps import get_os_conn, get_token_info
+from app.api.deps import cache_bypass, get_os_conn, get_token_info
 from app.services import auto_backup, cinder
-from app.services.cache import cached_call, ttl_fast
+from app.services.cache import cached_call, invalidate, invalidation, keys, ttl_slow
 
 router = APIRouter()
 
@@ -62,14 +62,17 @@ class RestoreBackupRequest(BaseModel):
 
 
 @router.get("")
-async def list_backups(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
+async def list_backups(
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    bypass: bool = Depends(cache_bypass),
+):
     pid = conn._afterglow_project_id
     try:
         return await cached_call(
-            f"afterglow:cinder:{pid}:backups",
-            ttl_fast(),
+            keys.project_key("cinder", pid, "backups"),
+            ttl_slow(),
             lambda: cinder.list_backups(conn),
-            refresh=refresh,
+            refresh=bypass,
         )
     except Exception:
         raise HTTPException(status_code=500, detail="백업 목록 조회 실패")
@@ -86,6 +89,9 @@ async def create_backup(
         result = await asyncio.to_thread(
             cinder.create_backup, conn, req.volume_id, req.name, req.description, req.incremental
         )
+        pid = conn._afterglow_project_id
+        await invalidate(f"afterglow:cinder:{pid}:backups*")
+        await invalidation.invalidate_mutation_count("cinder", pid)
         await rec(
             token_info,
             conn,
@@ -125,10 +131,13 @@ async def get_backup(
     backup_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
+    bypass: bool = Depends(cache_bypass),
 ):
     await _assert_backup_owner(conn, backup_id, token_info)
+    pid = conn._afterglow_project_id
+    key = keys.project_key("cinder", pid, "backups", sub=backup_id)
     try:
-        return await asyncio.to_thread(cinder.get_backup, conn, backup_id)
+        return await cached_call(key, ttl_slow(), lambda: cinder.get_backup(conn, backup_id), refresh=bypass)
     except Exception:
         raise HTTPException(status_code=404, detail="백업을 찾을 수 없습니다")
 
@@ -142,6 +151,9 @@ async def delete_backup(
     await _assert_backup_owner(conn, backup_id, token_info)
     try:
         await asyncio.to_thread(cinder.delete_backup, conn, backup_id)
+        pid = conn._afterglow_project_id
+        await invalidate(f"afterglow:cinder:{pid}:backups*")
+        await invalidation.invalidate_mutation_count("cinder", pid)
         await rec(
             token_info,
             conn,
@@ -175,6 +187,9 @@ async def restore_backup(
         await _assert_volume_owner_local(conn, req.volume_id, token_info)
     try:
         result = await asyncio.to_thread(cinder.restore_backup, conn, backup_id, req.volume_id)
+        pid = conn._afterglow_project_id
+        await invalidate(f"afterglow:cinder:{pid}:backups*")
+        await invalidation.invalidate_mutation_count("cinder", pid)
         await rec(
             token_info,
             conn,

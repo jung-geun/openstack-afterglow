@@ -1,33 +1,17 @@
 <script lang="ts">
+	import { confirmDialog } from '$lib/stores/confirm.svelte';
   import { untrack } from 'svelte';
   import { goto } from '$app/navigation';
   import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
   import { apiMut } from '$lib/api/mutations';
+  import type { Cluster, ClusterTemplate, CreateClusterForm } from '$lib/types/cluster';
   import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
-  import StatusChip from '$lib/components/ui/StatusChip.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
   import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
-
-  interface ClusterTemplate {
-    id: string;
-    name: string;
-    coe: string;
-  }
-
-  interface Cluster {
-    id: string;
-    name: string;
-    status: string;
-    status_reason: string | null;
-    cluster_template_id: string | null;
-    master_count: number;
-    node_count: number;
-    api_address: string | null;
-    created_at: string | null;
-  }
-
+  import K3sClusterListTable from '$lib/components/k3s/K3sClusterListTable.svelte';
+  import K3sClusterCreateModal from '$lib/components/k3s/K3sClusterCreateModal.svelte';
 
   let clusters = $state<Cluster[]>([]);
   let templates = $state<ClusterTemplate[]>([]);
@@ -36,15 +20,6 @@
   let serviceUnavailable = $state(false);
   let deleting = $state<string | null>(null);
   let showModal = $state(false);
-  let creating = $state(false);
-  let createError = $state('');
-  let form = $state({
-    name: '',
-    cluster_template_id: '',
-    node_count: 1,
-    master_count: 1,
-    keypair: '',
-  });
 
   async function fetchClusters() {
     try {
@@ -66,16 +41,12 @@
   async function fetchTemplates() {
     try {
       templates = await api.get<ClusterTemplate[]>('/api/clusters/templates', $auth.token ?? undefined, $auth.projectId ?? undefined);
-      if (templates.length > 0) form.cluster_template_id = templates[0].id;
     } catch {
       templates = [];
     }
   }
 
-  async function createCluster() {
-    if (!form.name.trim() || !form.cluster_template_id) return;
-    creating = true;
-    createError = '';
+  async function createCluster(form: CreateClusterForm): Promise<string | true> {
     try {
       const body: Record<string, unknown> = {
         name: form.name,
@@ -84,19 +55,16 @@
         master_count: form.master_count,
       };
       if (form.keypair.trim()) body.keypair = form.keypair;
-      await apiMut('K8s 클러스터 생성', () => api.post('/api/clusters', body, $auth.token ?? undefined, $auth.projectId ?? undefined));
-      showModal = false;
-      form = { name: '', cluster_template_id: templates[0]?.id ?? '', node_count: 1, master_count: 1, keypair: '' };
+      await api.post('/api/clusters', body, $auth.token ?? undefined, $auth.projectId ?? undefined);
       await fetchClusters();
+      return true;
     } catch (e) {
-      createError = e instanceof ApiError ? e.message : '생성 실패';
-    } finally {
-      creating = false;
+      return e instanceof ApiError ? e.message : '생성 실패';
     }
   }
 
   async function deleteCluster(id: string, name: string) {
-    if (!confirm(`클러스터 "${name}"을 삭제하시겠습니까?`)) return;
+    if (!await confirmDialog(`클러스터 "${name}"을 삭제하시겠습니까?`)) return;
     deleting = id;
     try {
       await apiMut('K8s 클러스터 삭제', () => api.delete(`/api/clusters/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined));
@@ -122,51 +90,7 @@
   });
 </script>
 
-{#if showModal}
-  <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onclick={() => { showModal = false; createError = ''; }} role="dialog" aria-modal="true" tabindex="-1" onkeydown={(e) => e.key === 'Escape' && (showModal = false)}>
-    <div class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl" onclick={(e) => e.stopPropagation()} role="none" onkeydown={(e) => e.stopPropagation()}>
-      <h2 class="text-lg font-semibold text-white mb-5">K8s 클러스터 생성</h2>
-      <div class="space-y-4">
-        <div>
-          <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">클러스터 이름
-            <input bind:value={form.name} type="text" placeholder="my-cluster" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5" />
-          </label>
-        </div>
-        <div>
-          <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">클러스터 템플릿
-            <select bind:value={form.cluster_template_id} class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5">
-              {#each templates as t}
-                <option value={t.id}>{t.name} ({t.coe})</option>
-              {/each}
-            </select>
-          </label>
-        </div>
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">마스터 수
-              <input bind:value={form.master_count} type="number" min="1" max="5" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5" />
-            </label>
-          </div>
-          <div>
-            <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">워커 수
-              <input bind:value={form.node_count} type="number" min="1" max="50" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5" />
-            </label>
-          </div>
-        </div>
-        <div>
-          <label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">키페어 (선택)
-            <input bind:value={form.keypair} type="text" placeholder="my-keypair" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5" />
-          </label>
-        </div>
-      </div>
-      {#if createError}<div class="mt-3 text-red-400 text-xs">{createError}</div>{/if}
-      <div class="flex justify-end gap-3 mt-6">
-        <button onclick={() => { showModal = false; createError = ''; }} class="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors">취소</button>
-        <button onclick={createCluster} disabled={creating || !form.name || !form.cluster_template_id} class="px-5 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium rounded-lg transition-colors">{creating ? '생성 중...' : '생성'}</button>
-      </div>
-    </div>
-  </div>
-{/if}
+<K3sClusterCreateModal bind:open={showModal} {templates} onCreate={createCluster} />
 
 <div class="p-4 md:p-8">
   <PageHeader breadcrumb="CONTAINERS / K8S CLUSTERS" title="K8s 클러스터">
@@ -198,41 +122,11 @@
       <p class="text-sm">Magnum을 통해 새 클러스터를 생성하세요</p>
     </div>
   {:else}
-    <div class="overflow-x-auto">
-      <table class="w-full text-sm">
-        <thead>
-          <tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
-            <th class="text-left py-3 pr-6">이름</th>
-            <th class="text-left py-3 pr-6">상태</th>
-            <th class="text-left py-3 pr-6">마스터</th>
-            <th class="text-left py-3 pr-6">워커</th>
-            <th class="text-left py-3 pr-6">API 주소</th>
-            <th class="text-left py-3 pr-6">생성일</th>
-            <th class="text-left py-3"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each clusters as c (c.id)}
-            <tr class="border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors">
-              <td class="py-3 pr-6">
-                <button onclick={() => goto(`/dashboard/containers/clusters/${c.id}`)} class="font-medium text-white hover:text-blue-400 transition-colors text-left">{c.name}</button>
-              </td>
-              <td class="py-3 pr-6">
-                <StatusChip status={c.status} />
-              </td>
-              <td class="py-3 pr-6 text-gray-400 text-xs">{c.master_count}</td>
-              <td class="py-3 pr-6 text-gray-400 text-xs">{c.node_count}</td>
-              <td class="py-3 pr-6 text-gray-400 text-xs font-mono">{c.api_address ?? '-'}</td>
-              <td class="py-3 pr-6 text-gray-400 text-xs">{c.created_at?.slice(0, 10) ?? '-'}</td>
-              <td class="py-3">
-                <button onclick={() => deleteCluster(c.id, c.name)} disabled={deleting === c.id} class="text-xs text-red-400 hover:text-red-300 disabled:opacity-40 transition-colors">
-                  {deleting === c.id ? '삭제 중...' : '삭제'}
-                </button>
-              </td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
-    </div>
+    <K3sClusterListTable
+      {clusters}
+      {deleting}
+      onDelete={deleteCluster}
+      onNavigate={(id) => goto(`/dashboard/containers/clusters/${id}`)}
+    />
   {/if}
 </div>

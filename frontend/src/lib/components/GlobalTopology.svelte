@@ -1,12 +1,14 @@
 <script lang="ts">
 	import { onMount, untrack, tick } from 'svelte';
 	import { goto } from '$app/navigation';
-	import ResourceCard from './topology/ResourceCard.svelte';
 	import NetworkLane from './topology/NetworkLane.svelte';
 	import ConnectionOverlay from './topology/ConnectionOverlay.svelte';
+	import TopologyHeader from './topology/TopologyHeader.svelte';
+	import TopologySidebar from './topology/TopologySidebar.svelte';
+	import { createTopologyDerivedController } from './topology/topologyDerivedController.svelte.ts';
+	import { LANE_W, LANE_GAP, LANE_PAD, SIDEBAR_W } from './topology/topologyHelpers.ts';
 	import type {
-		TopologyData, TopologyTraffic, TopologyLoadBalancer,
-		ItemRow, LBItem, TopologyNetwork,
+		TopologyData, TopologyTraffic, TopologyLoadBalancer, ItemRow,
 	} from './topology/types.ts';
 
 	let {
@@ -31,7 +33,6 @@
 		onSelectLoadBalancer?: (lb: TopologyLoadBalancer) => void;
 	} = $props();
 
-	// ── State ─────────────────────────────────────────────────────────────────
 	// selectedId: 부모가 prop 으로 전달하면 controlled, 아니면 내부 상태 사용
 	let _selectedId = $state<string | null>(null);
 	const selectedId = $derived(selectedIdProp !== undefined ? selectedIdProp : _selectedId);
@@ -43,349 +44,24 @@
 	let containerEl = $state<HTMLElement | null>(null);
 	let sidebarEl = $state<HTMLElement | null>(null);
 	let sidebarHeight = $state(0);
-	let anchors = $state(new Map<string, { x: number; y: number }>());
-	// 본문 가로 스크롤 위치 — sticky 헤더 행 transform 동기화에 사용
 	let scrollEl = $state<HTMLElement | null>(null);
 	let scrollLeft = $state(0);
+	let anchors = $state(new Map<string, { x: number; y: number }>());
+
 	function onBodyScroll() { scrollLeft = scrollEl?.scrollLeft ?? 0; }
 
-	// ── Color palettes ────────────────────────────────────────────────────────
-	const EXT_COLORS = ['#ea580c', '#f97316'];
-	const SHR_COLORS = ['#0d9488', '#14b8a6'];
-	const INT_COLORS = ['#3b82f6', '#22c55e', '#a855f7', '#f59e0b', '#06b6d4', '#ec4899', '#ef4444'];
-
-	// ── Derived: networks ─────────────────────────────────────────────────────
-	const visibleNetworks = $derived(
-		showAll
-			? data.networks
-			: data.networks.filter(n =>
-				n.is_external || n.is_shared || (projectId != null && n.project_id === projectId)
-			)
-	);
-
-	const orderedNetworks: TopologyNetwork[] = $derived([
-		...visibleNetworks.filter(n => n.is_external).sort((a, b) => a.name.localeCompare(b.name)),
-		...visibleNetworks.filter(n => n.is_shared && !n.is_external).sort((a, b) => a.name.localeCompare(b.name)),
-		...visibleNetworks.filter(n => !n.is_external && !n.is_shared).sort((a, b) => a.name.localeCompare(b.name)),
-	]);
-
-	const netColors = $derived.by(() => {
-		const m = new Map<string, string>();
-		let eI = 0, sI = 0, iI = 0;
-		for (const n of orderedNetworks) {
-			if (n.is_external) m.set(n.id, EXT_COLORS[eI++ % EXT_COLORS.length]);
-			else if (n.is_shared) m.set(n.id, SHR_COLORS[sI++ % SHR_COLORS.length]);
-			else m.set(n.id, INT_COLORS[iI++ % INT_COLORS.length]);
-		}
-		return m;
+	const ctrl = createTopologyDerivedController({
+		data: () => data,
+		projectId: () => projectId,
+		showAll: () => showAll,
+		traffic: () => traffic,
+		selectedId: () => selectedId,
+		hoveredId: () => hoveredId,
+		anchors: () => anchors,
+		sidebarHeight: () => sidebarHeight,
+		searchTerm: () => searchTerm,
 	});
 
-	const netIdx = $derived(new Map(orderedNetworks.map((n, i) => [n.id, i])));
-
-	const nameToNetworks = $derived.by(() => {
-		const m = new Map<string, TopologyNetwork[]>();
-		for (const n of data.networks) { const arr = m.get(n.name) ?? []; arr.push(n); m.set(n.name, arr); }
-		return m;
-	});
-
-	const subnetNetId = $derived(new Map(
-		data.networks.flatMap(n => n.subnet_details.map(s => [s.id, n.id] as [string, string]))
-	));
-
-	const subnetById = $derived(new Map(
-		data.networks.flatMap(n => n.subnet_details.map(s => [s.id, s]))
-	));
-
-	const fipNetMap = $derived(new Map(
-		data.floating_ips.map(f => [f.floating_ip_address, f.floating_network_id])
-	));
-
-	// FIP → fixed_ip_address 역매핑. 인스턴스 카드에서 FIP 를 매핑된 fixed IP NIC 의
-	// tenant 네트워크 줄에 합쳐 표시하기 위해 사용. 실제 패킷이 검출되는 NIC 는
-	// fixed IP 측이므로 트래픽도 그쪽 줄의 카운터를 그대로 노출한다.
-	const fipFixedMap = $derived(new Map(
-		data.floating_ips
-			.filter(f => f.fixed_ip_address)
-			.map(f => [f.floating_ip_address, f.fixed_ip_address as string])
-	));
-
-	// ── IP helpers ────────────────────────────────────────────────────────────
-	function _ipToNum(ip: string): number | null {
-		const parts = ip.split('.');
-		if (parts.length !== 4) return null;
-		const nums = parts.map(Number);
-		if (nums.some(n => isNaN(n) || n < 0 || n > 255)) return null;
-		return ((nums[0] << 24) | (nums[1] << 16) | (nums[2] << 8) | nums[3]) >>> 0;
-	}
-	function _ipv4InCidr(ip: string, cidr: string): boolean {
-		const si = cidr.lastIndexOf('/');
-		if (si < 0) return false;
-		const mask = parseInt(cidr.slice(si + 1));
-		if (isNaN(mask) || mask < 0 || mask > 32) return false;
-		const ipN = _ipToNum(ip), netN = _ipToNum(cidr.slice(0, si));
-		if (ipN === null || netN === null) return false;
-		const mb = mask === 0 ? 0 : ((0xFFFFFFFF << (32 - mask)) >>> 0);
-		return (ipN & mb) === (netN & mb);
-	}
-	function resolveNetId(networkName: string, ipAddr: string): string | undefined {
-		const nets = nameToNetworks.get(networkName);
-		if (!nets?.length) return undefined;
-		if (nets.length === 1) return nets[0].id;
-		for (const net of nets) for (const s of net.subnet_details) if (_ipv4InCidr(ipAddr, s.cidr)) return net.id;
-		return nets[0].id;
-	}
-
-	// ── Rows ──────────────────────────────────────────────────────────────────
-	const rows = $derived.by((): ItemRow[] => {
-		const result: ItemRow[] = [];
-
-		for (const router of data.routers.filter(r => projectId == null || r.project_id === projectId)) {
-			const netSet = new Set<string>();
-			const netIps = new Map<string, string[]>();
-			if (router.external_gateway_network_id) {
-				netSet.add(router.external_gateway_network_id);
-				if (router.external_gateway_ips?.length) netIps.set(router.external_gateway_network_id, [...router.external_gateway_ips]);
-			}
-			for (const sid of router.connected_subnet_ids) {
-				const nid = subnetNetId.get(sid);
-				if (!nid) continue;
-				netSet.add(nid);
-				const subnet = subnetById.get(sid);
-				if (subnet?.gateway_ip) {
-					const ips = netIps.get(nid) ?? [];
-					if (!ips.includes(subnet.gateway_ip)) ips.push(subnet.gateway_ip);
-					netIps.set(nid, ips);
-				}
-			}
-			const connectedNetIds = [...netSet].sort((a, b) => (netIdx.get(a) ?? 0) - (netIdx.get(b) ?? 0));
-			const indices = connectedNetIds.map(id => netIdx.get(id) ?? 0);
-			result.push({
-				type: 'router', id: router.id, name: router.name, status: router.status,
-				connectedNetIds, netIps, floatingNetIps: new Map(),
-				leftIdx: indices.length ? Math.min(...indices) : 0,
-				rightIdx: indices.length ? Math.max(...indices) : 0,
-			});
-		}
-
-		for (const inst of data.instances.filter(i => projectId == null || i.project_id === projectId)) {
-			const netSet = new Set<string>();
-			const netIps = new Map<string, string[]>();
-			const floatingNetIps = new Map<string, string[]>();
-			// 인스턴스 로컬: fixed IP → 그 IP 가 속한 네트워크 ID. FIP 를 매핑된 fixed IP 의
-			// 네트워크 줄에 합쳐 표시하기 위해 1차 패스에서 채운다.
-			const fixedIpToNetId = new Map<string, string>();
-
-			for (const ipInfo of inst.ip_addresses) {
-				if (ipInfo.type === 'floating') continue;
-				const nid = ipInfo.network_id || resolveNetId(ipInfo.network_name, ipInfo.addr);
-				if (!nid) continue;
-				netSet.add(nid);
-				const ips = netIps.get(nid) ?? [];
-				if (!ips.includes(ipInfo.addr)) ips.push(ipInfo.addr);
-				netIps.set(nid, ips);
-				fixedIpToNetId.set(ipInfo.addr, nid);
-			}
-
-			for (const ipInfo of inst.ip_addresses) {
-				if (ipInfo.type !== 'floating') continue;
-				const fixedAddr = fipFixedMap.get(ipInfo.addr);
-				const mappedNetId = fixedAddr ? fixedIpToNetId.get(fixedAddr) : undefined;
-				// 정상 케이스: 매핑된 fixed IP 의 tenant 네트워크 줄에 합쳐 표시.
-				// 매칭 실패(데이터 결손) 시에만 외부 네트워크 ID 로 fallback.
-				const targetNetId = mappedNetId ?? fipNetMap.get(ipInfo.addr);
-				if (!targetNetId) continue;
-				const fips = floatingNetIps.get(targetNetId) ?? [];
-				if (!fips.includes(ipInfo.addr)) fips.push(ipInfo.addr);
-				floatingNetIps.set(targetNetId, fips);
-			}
-			const connectedNetIds = [...netSet].sort((a, b) => (netIdx.get(a) ?? 0) - (netIdx.get(b) ?? 0));
-			const indices = connectedNetIds.map(id => netIdx.get(id) ?? 0);
-			result.push({
-				type: 'instance', id: inst.id, name: inst.name, status: inst.status,
-				connectedNetIds, netIps, floatingNetIps,
-				leftIdx: indices.length ? Math.min(...indices) : 0,
-				rightIdx: indices.length ? Math.max(...indices) : 0,
-			});
-		}
-
-		result.sort((a, b) => {
-			if (a.type !== b.type) return a.type === 'router' ? -1 : 1;
-			if (a.leftIdx !== b.leftIdx) return a.leftIdx - b.leftIdx;
-			return a.name.localeCompare(b.name);
-		});
-		return result;
-	});
-
-	const lbItems = $derived.by((): LBItem[] => {
-		const lbs = (data.load_balancers ?? []).filter(lb => projectId == null || lb.project_id === projectId);
-		return lbs.map(lb => {
-			const vipNetId = lb.vip_network_id && netIdx.has(lb.vip_network_id)
-				? lb.vip_network_id
-				: lb.vip_subnet_id ? (subnetNetId.get(lb.vip_subnet_id) ?? null) : null;
-			return { lb, vipNetId };
-		});
-	});
-
-	// ── Traffic ───────────────────────────────────────────────────────────────
-	const instNetBps = $derived.by(() => {
-		const m = new Map<string, { rx_bps: number; tx_bps: number }>();
-		if (!traffic?.interfaces) return m;
-		for (const ifc of Object.values(traffic.interfaces)) {
-			const key = `${ifc.instance_id}|${ifc.network_id}`;
-			const cur = m.get(key);
-			if (cur) { cur.rx_bps += ifc.rx_bps; cur.tx_bps += ifc.tx_bps; }
-			else m.set(key, { rx_bps: ifc.rx_bps, tx_bps: ifc.tx_bps });
-		}
-		return m;
-	});
-
-	function formatBps(bps: number): string {
-		if (bps >= 1e9) return `${(bps / 1e9).toFixed(1)}G`;
-		if (bps >= 1e6) return `${(bps / 1e6).toFixed(1)}M`;
-		if (bps >= 1e3) return `${(bps / 1e3).toFixed(0)}k`;
-		if (bps > 0) return `${bps.toFixed(0)}b`;
-		return '0';
-	}
-
-	const totalTraffic = $derived.by(() => {
-		let rx = 0, tx = 0;
-		if (!traffic?.interfaces) return { rx, tx };
-		const visibleIds = new Set(instanceRows.map(r => r.id));
-		for (const ifc of Object.values(traffic.interfaces)) {
-			if (visibleIds.has(ifc.instance_id)) {
-				rx += ifc.rx_bps;
-				tx += ifc.tx_bps;
-			}
-		}
-		return { rx, tx };
-	});
-
-	function edgeIntensity(bps: number): { opacity: number; width: number } {
-		if (bps >= 1e8) return { opacity: 1.00, width: 3.5 };
-		if (bps >= 1e7) return { opacity: 0.90, width: 3.0 };
-		if (bps >= 1e6) return { opacity: 0.80, width: 2.5 };
-		if (bps >= 1e5) return { opacity: 0.65, width: 2.0 };
-		return { opacity: 0.40, width: 1.5 };
-	}
-
-	// ── Search filter ─────────────────────────────────────────────────────────
-	const filteredRows = $derived.by(() => {
-		if (!searchTerm.trim()) return rows;
-		const q = searchTerm.toLowerCase();
-		return rows.filter(r =>
-			r.name.toLowerCase().includes(q) ||
-			[...r.netIps.values()].flat().some(ip => ip.includes(q)) ||
-			[...r.floatingNetIps.values()].flat().some(ip => ip.includes(q))
-		);
-	});
-
-	const filteredLbItems = $derived.by(() => {
-		if (!searchTerm.trim()) return lbItems;
-		const q = searchTerm.toLowerCase();
-		return lbItems.filter(({ lb }) =>
-			lb.name.toLowerCase().includes(q) || (lb.vip_address ?? '').includes(q)
-		);
-	});
-
-	const routerRows = $derived(filteredRows.filter(r => r.type === 'router'));
-	const instanceRows = $derived(filteredRows.filter(r => r.type === 'instance'));
-
-	// ── Connection specs for overlay ──────────────────────────────────────────
-	interface ConnectionSpec {
-		key: string; netId: string; color: string; opacity: number; width: number;
-	}
-
-	const connections = $derived.by((): ConnectionSpec[] => {
-		const result: ConnectionSpec[] = [];
-		for (const row of filteredRows) {
-			const allNets = [
-				...row.connectedNetIds,
-				...[...row.floatingNetIps.keys()].filter(id => !row.connectedNetIds.includes(id)),
-			];
-			for (const netId of allNets) {
-				const color = netColors.get(netId) ?? '#3b82f6';
-				const bpsPair = row.type === 'instance' ? instNetBps.get(`${row.id}|${netId}`) : undefined;
-				const bps = (bpsPair?.rx_bps ?? 0) + (bpsPair?.tx_bps ?? 0);
-				const ei = edgeIntensity(bps);
-				const isFloating = !row.connectedNetIds.includes(netId);
-				result.push({
-					key: `${row.id}|${netId}`,
-					netId,
-					color,
-					opacity: isFloating ? ei.opacity * 0.6 : ei.opacity,
-					width: isFloating ? 1.5 : ei.width,
-				});
-			}
-		}
-		for (const { lb, vipNetId } of filteredLbItems) {
-			if (vipNetId) {
-				const color = netColors.get(vipNetId) ?? '#06b6d4';
-				result.push({ key: `lb|${lb.id}|${vipNetId}`, netId: vipNetId, color, opacity: 0.75, width: 2 });
-			}
-		}
-		return result;
-	});
-
-	// ── LB → member curves ────────────────────────────────────────────────────
-	interface LBCurve {
-		key: string;
-		x1: number; y1: number;
-		x2: number; y2: number;
-	}
-
-	const lbCurves = $derived.by((): LBCurve[] => {
-		const activeLbId = selectedId || hoveredId;
-		if (!activeLbId) return [];
-		const lbItem = filteredLbItems.find(({ lb }) => lb.id === activeLbId);
-		if (!lbItem) return [];
-
-		const result: LBCurve[] = [];
-		const lbAnchorKey = lbItem.vipNetId ? `lb|${lbItem.lb.id}|${lbItem.vipNetId}` : null;
-		const lbAnchor = lbAnchorKey ? anchors.get(lbAnchorKey) : null;
-		if (!lbAnchor) return [];
-
-		for (const member of lbItem.lb.members) {
-			if (!member.server_id) continue;
-			const row = instanceRows.find(r => r.id === member.server_id);
-			if (!row) continue;
-			const firstNetId = row.connectedNetIds[0];
-			if (!firstNetId) continue;
-			const instAnchor = anchors.get(`${row.id}|${firstNetId}`);
-			if (!instAnchor) continue;
-			result.push({
-				key: `lb-curve|${lbItem.lb.id}|${member.id}`,
-				x1: lbAnchor.x, y1: lbAnchor.y,
-				x2: instAnchor.x, y2: instAnchor.y,
-			});
-		}
-		return result;
-	});
-
-	// ── Layout constants ──────────────────────────────────────────────────────
-	const LANE_W = 180;
-	const LANE_GAP = 16;
-	const LANE_PAD = 16;
-	const SIDEBAR_W = 300;
-	const STAT_CARD_H = 90;
-
-	const canvasContentW = $derived(
-		LANE_PAD * 2 + orderedNetworks.length * LANE_W + Math.max(0, orderedNetworks.length - 1) * LANE_GAP
-	);
-
-	const laneXMap = $derived.by(() => {
-		const m = new Map<string, number>();
-		orderedNetworks.forEach((n, i) => {
-			const laneCenterInCanvas = LANE_PAD + i * (LANE_W + LANE_GAP) + LANE_W / 2;
-			m.set(n.id, SIDEBAR_W + laneCenterInCanvas);
-		});
-		return m;
-	});
-
-	// 헤더 카드 행이 sticky 로 별도 분리되어 사이드바 위쪽 spacer 가 사라졌으므로
-	// 사이드바 전체 높이가 곧 본문 캔버스 높이 기준이 된다.
-	const laneHeight = $derived(Math.max(400, sidebarHeight));
-
-	// ── Anchor measurement (offsetLeft/offsetTop chain, sticky-safe) ──────────
 	function offsetWithin(el: HTMLElement, ancestor: HTMLElement): { x: number; y: number } {
 		let x = 0, y = 0;
 		let cur: HTMLElement | null = el;
@@ -404,10 +80,7 @@
 			const key = el.dataset.anchorKey;
 			if (!key) continue;
 			const off = offsetWithin(el, sidebarEl);
-			m.set(key, {
-				x: off.x + el.offsetWidth,
-				y: off.y + el.offsetHeight / 2,
-			});
+			m.set(key, { x: off.x + el.offsetWidth, y: off.y + el.offsetHeight / 2 });
 		}
 		untrack(() => { anchors = m; });
 	}
@@ -445,19 +118,20 @@
 	});
 
 	$effect(() => {
-		void filteredRows; void filteredLbItems;
+		void ctrl.filteredRows; void ctrl.filteredLbItems;
 		scheduleMeasure();
 	});
 
-	// ── Selection ─────────────────────────────────────────────────────────────
 	function selectRow(row: ItemRow) {
 		if (selectedIdProp === undefined) {
-			// uncontrolled: 내부 상태 토글
 			_selectedId = _selectedId === row.id ? null : row.id;
 		}
-		if (row.type === 'instance') onSelectInstance?.(row.id);
-		else if (row.type === 'router') onSelectRouter?.(row.id);
+		if (row.type === 'instance') {
+			onSelectInstance?.(row.id);
+			if (!onSelectInstance) goto(`/dashboard/instances/${row.id}`);
+		} else if (row.type === 'router') onSelectRouter?.(row.id);
 	}
+
 	function selectLb(lb: TopologyLoadBalancer) {
 		if (selectedIdProp === undefined) {
 			_selectedId = _selectedId === lb.id ? null : lb.id;
@@ -467,60 +141,30 @@
 </script>
 
 <div class="w-full" bind:this={containerEl}>
-	<!-- Header bar -->
-	<div class="flex items-center gap-3 mb-4 flex-wrap">
-		<input
-			type="text"
-			placeholder="이름 또는 IP 검색…"
-			bind:value={searchTerm}
-			class="text-xs px-3 py-1.5 rounded-lg focus:outline-none focus:border-blue-500 w-52
-				{isLight
-					? 'bg-gray-100 border border-gray-300 text-gray-900 placeholder-gray-400'
-					: 'bg-gray-800 border border-gray-700 text-gray-200 placeholder-gray-600'}"
-		/>
-		{#if traffic?.interfaces || traffic?.ts}
-			<div class="ml-auto flex items-center gap-3 text-[10px]"
-			     style="color: {isLight ? '#6b7280' : '#9ca3af'}">
-				{#if traffic?.interfaces}
-					<div class="flex items-center gap-1.5 font-mono">
-						<span style="color: {isLight ? '#9ca3af' : '#6b7280'}">총합</span>
-						<span class="text-blue-400">↓{formatBps(totalTraffic.rx)}</span>
-						<span class="text-green-400">↑{formatBps(totalTraffic.tx)}</span>
-					</div>
-				{/if}
-				{#if traffic?.ts}
-					<div class="flex items-center gap-1.5">
-						<span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
-						Live
-					</div>
-				{/if}
-			</div>
-		{/if}
-	</div>
+	<TopologyHeader
+		bind:searchTerm
+		{isLight}
+		{traffic}
+		totalTraffic={ctrl.totalTraffic}
+	/>
 
-	<!--
-		네트워크 카드 행은 viewport sticky top 으로 고정되어야 하므로
-		overflow-x-auto 컨테이너 외부에 별도 행으로 둔다. 본문의 가로 스크롤
-		위치는 onscroll 에서 scrollLeft 로 캡처해 헤더의 transform 으로 미러링.
-	-->
-	{#if orderedNetworks.length > 0}
+	{#if ctrl.orderedNetworks.length > 0}
 		<div class="sticky top-0 z-30 overflow-hidden -mx-6 px-0 mb-1"
 		     style="background: {isLight ? '#f9fafb' : '#111827'}">
 			<div class="flex" style="width: max-content; transform: translateX({-scrollLeft}px); will-change: transform">
-				<!-- 사이드바 영역 spacer: 본문 사이드바와 같은 폭으로 좌측을 확보 -->
 				<div style="width: {SIDEBAR_W + 24}px; flex-shrink: 0"></div>
-				<div class="flex-shrink-0" style="width: {canvasContentW}px">
+				<div class="flex-shrink-0" style="width: {ctrl.canvasContentW}px">
 					<div class="flex py-2" style="gap: {LANE_GAP}px; padding-left: {LANE_PAD}px; padding-right: {LANE_PAD}px">
-						{#each orderedNetworks as net (net.id)}
+						{#each ctrl.orderedNetworks as net (net.id)}
 							<div style="width: {LANE_W}px; flex-shrink: 0">
 								<NetworkLane
 									mode="card"
 									{net}
-									color={netColors.get(net.id) ?? '#3b82f6'}
+									color={ctrl.netColors.get(net.id) ?? '#3b82f6'}
 									{traffic}
 									highlighted={highlightedNetId === net.id}
 									dimmed={highlightedNetId !== null && highlightedNetId !== net.id}
-									{laneHeight}
+									laneHeight={ctrl.laneHeight}
 									onSelect={() => { highlightedNetId = highlightedNetId === net.id ? null : net.id; }}
 								/>
 							</div>
@@ -531,130 +175,50 @@
 		</div>
 	{/if}
 
-	<!-- Scrollable viewport: horizontal scroll stays inside this box -->
+	<!-- 가로 스크롤 뷰포트: 이 박스 안에서만 horizontal scroll -->
 	<div class="overflow-x-auto" bind:this={scrollEl} onscroll={onBodyScroll}>
-		<!-- Content row: sidebar + canvas. relative for SVG overlay anchor. -->
 		<div class="flex items-start relative" style="min-width: max-content">
-			<!-- Left sidebar: resource cards (sticky — stays visible when scrolled right) -->
+			<!-- 사이드바: sticky left, sidebarEl 에 바인딩하여 anchor 측정 기준점 확보 -->
 			<div
 				class="sticky left-0 z-20 flex-shrink-0 flex flex-col gap-3 pr-4"
 				style="width: {SIDEBAR_W}px; background: {isLight ? '#f9fafb' : '#111827'}"
 				bind:this={sidebarEl}
 			>
-				{#if routerRows.length > 0}
-					<button
-						type="button"
-						class="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide px-1 w-full text-left transition-colors
-						{isLight ? 'text-gray-600 hover:text-gray-800' : 'text-gray-500 hover:text-gray-400'}"
-						onclick={() => { groupCollapsed.router = !groupCollapsed.router; scheduleMeasure(); }}
-					>
-						<span style="color: {isLight ? '#9ca3af' : '#4b5563'}">{groupCollapsed.router ? '▸' : '▾'}</span>
-						라우터 ({routerRows.length})
-					</button>
-					{#if !groupCollapsed.router}
-						{#each routerRows as row (row.id)}
-							<!-- svelte-ignore a11y_no_static_element_interactions -->
-							<div
-								onmouseenter={() => { hoveredId = row.id; }}
-								onmouseleave={() => { hoveredId = null; }}
-							>
-								<ResourceCard
-									{row}
-									{netColors}
-									{instNetBps}
-									selected={selectedId === row.id}
-									onSelect={() => selectRow(row)}
-								/>
-							</div>
-						{/each}
-					{/if}
-				{/if}
-
-				{#if filteredLbItems.length > 0}
-					<button
-						type="button"
-						class="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide px-1 mt-1 w-full text-left transition-colors
-						{isLight ? 'text-gray-600 hover:text-gray-800' : 'text-gray-500 hover:text-gray-400'}"
-						onclick={() => { groupCollapsed.lb = !groupCollapsed.lb; scheduleMeasure(); }}
-					>
-						<span style="color: {isLight ? '#9ca3af' : '#4b5563'}">{groupCollapsed.lb ? '▸' : '▾'}</span>
-						로드밸런서 ({filteredLbItems.length})
-					</button>
-					{#if !groupCollapsed.lb}
-						{#each filteredLbItems as { lb, vipNetId } (lb.id)}
-							<!-- svelte-ignore a11y_no_static_element_interactions -->
-							<div
-								onmouseenter={() => { hoveredId = lb.id; }}
-								onmouseleave={() => { hoveredId = null; }}
-							>
-								<ResourceCard
-									lbItem={{ lb, vipNetId }}
-									{netColors}
-									{instNetBps}
-									selected={selectedId === lb.id}
-									onSelect={() => selectLb(lb)}
-								/>
-							</div>
-						{/each}
-					{/if}
-				{/if}
-
-				{#if instanceRows.length > 0}
-					<button
-						type="button"
-						class="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide px-1 mt-1 w-full text-left transition-colors
-						{isLight ? 'text-gray-600 hover:text-gray-800' : 'text-gray-500 hover:text-gray-400'}"
-						onclick={() => { groupCollapsed.instance = !groupCollapsed.instance; scheduleMeasure(); }}
-					>
-						<span style="color: {isLight ? '#9ca3af' : '#4b5563'}">{groupCollapsed.instance ? '▸' : '▾'}</span>
-						인스턴스 ({instanceRows.length})
-					</button>
-					{#if !groupCollapsed.instance}
-						{#each instanceRows as row (row.id)}
-							<!-- svelte-ignore a11y_no_static_element_interactions -->
-							<div
-								onmouseenter={() => { hoveredId = row.id; }}
-								onmouseleave={() => { hoveredId = null; }}
-							>
-								<ResourceCard
-									{row}
-									{netColors}
-									{instNetBps}
-									selected={selectedId === row.id}
-									onSelect={() => {
-										selectRow(row);
-										if (!onSelectInstance) goto(`/dashboard/instances/${row.id}`);
-									}}
-								/>
-							</div>
-						{/each}
-					{/if}
-				{/if}
-
-				{#if filteredRows.length === 0 && filteredLbItems.length === 0}
-					<div class="text-xs px-2 py-4" style="color: {isLight ? '#9ca3af' : '#4b5563'}">리소스 없음</div>
-				{/if}
+				<TopologySidebar
+					routerRows={ctrl.routerRows}
+					filteredLbItems={ctrl.filteredLbItems}
+					instanceRows={ctrl.instanceRows}
+					{selectedId}
+					bind:hoveredId
+					netColors={ctrl.netColors}
+					instNetBps={ctrl.instNetBps}
+					{isLight}
+					bind:groupCollapsed
+					onSelectRow={selectRow}
+					onSelectLb={selectLb}
+					onScheduleMeasure={scheduleMeasure}
+				/>
 			</div>
 
-			<!-- Center canvas: network lanes (rail-only — 헤더 카드는 sticky 행에 별도) -->
-			<div class="flex-shrink-0" style="width: {canvasContentW}px">
-				{#if orderedNetworks.length === 0}
+			<!-- 네트워크 레인 (rail 모드: 헤더 카드는 sticky 행에 별도) -->
+			<div class="flex-shrink-0" style="width: {ctrl.canvasContentW}px">
+				{#if ctrl.orderedNetworks.length === 0}
 					<div class="flex items-center justify-center h-40 text-sm"
 					     style="color: {isLight ? '#9ca3af' : '#4b5563'}">
 						네트워크 없음
 					</div>
 				{:else}
 					<div class="flex" style="gap: {LANE_GAP}px; padding: 0 {LANE_PAD}px">
-						{#each orderedNetworks as net (net.id)}
+						{#each ctrl.orderedNetworks as net (net.id)}
 							<div style="width: {LANE_W}px; flex-shrink: 0">
 								<NetworkLane
 									mode="rail"
 									{net}
-									color={netColors.get(net.id) ?? '#3b82f6'}
+									color={ctrl.netColors.get(net.id) ?? '#3b82f6'}
 									{traffic}
 									highlighted={highlightedNetId === net.id}
 									dimmed={highlightedNetId !== null && highlightedNetId !== net.id}
-									{laneHeight}
+									laneHeight={ctrl.laneHeight}
 								/>
 							</div>
 						{/each}
@@ -662,14 +226,13 @@
 				{/if}
 			</div>
 
-			<!-- SVG overlay: connection lines (absolute, covers full content width) -->
 			<ConnectionOverlay
-				width={SIDEBAR_W + canvasContentW}
+				width={SIDEBAR_W + ctrl.canvasContentW}
 				height={sidebarHeight || 400}
-				{connections}
-				{laneXMap}
+				connections={ctrl.connections}
+				laneXMap={ctrl.laneXMap}
 				{anchors}
-				{lbCurves}
+				lbCurves={ctrl.lbCurves}
 				selectedKey={selectedId}
 				hoveredKey={hoveredId}
 			/>

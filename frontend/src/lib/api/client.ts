@@ -22,18 +22,43 @@ export class ApiError extends Error {
 
 // 동시 다수 요청이 401 받을 때 redirect 중복 호출 방지
 let _redirectingTo401 = false;
+// /api/admin/ 403 핸들러 중복 호출 방지
+let _handling403Admin = false;
+// 동시 다수 요청이 토큰 refresh를 중복 호출하지 않도록 직렬화
+let _refreshPromise: Promise<string | null> | null = null;
+
+/**
+ * /api/admin/ 경로에서 403 응답 시 isSystemAdmin=false 강등 + /dashboard로 이동.
+ * one-shot 가드로 무한 루프 방지.
+ */
+async function handleAdminForbidden(): Promise<void> {
+	if (typeof window === 'undefined') return;
+	if (_handling403Admin) return;
+	if (!window.location.pathname.startsWith('/admin')) return;
+	_handling403Admin = true;
+	try {
+		const [{ auth }, { goto }] = await Promise.all([
+			import('$lib/stores/auth'),
+			import('$app/navigation'),
+		]);
+		auth.update((s) => ({ ...s, isSystemAdmin: false }));
+		await goto('/dashboard');
+	} catch {
+		window.location.href = '/dashboard';
+	} finally {
+		setTimeout(() => { _handling403Admin = false; }, 5000);
+	}
+}
 
 /**
  * 401 응답 시 인증 상태 정리 + 로그인 페이지(/)로 자동 redirect.
- * SSR 환경 또는 이미 로그인 페이지면 no-op.
  */
 async function handleUnauthorized(): Promise<void> {
 	if (typeof window === 'undefined') return;
 	if (_redirectingTo401) return;
-	if (window.location.pathname === '/') return; // 이미 로그인 페이지
+	if (window.location.pathname === '/') return;
 	_redirectingTo401 = true;
 	try {
-		// dynamic import: client.ts ↔ stores/auth.ts circular dependency 회피
 		const [{ clearAuth }, { goto }] = await Promise.all([
 			import('$lib/stores/auth'),
 			import('$app/navigation'),
@@ -41,11 +66,62 @@ async function handleUnauthorized(): Promise<void> {
 		clearAuth();
 		await goto('/');
 	} catch {
-		// dynamic import 실패 시 hard reload 로 fallback
 		window.location.href = '/';
 	} finally {
 		setTimeout(() => { _redirectingTo401 = false; }, 1000);
 	}
+}
+
+/**
+ * refresh 토큰으로 새 access JWT를 발급. 성공하면 새 access token 반환, 실패하면 null.
+ * 동시 호출은 하나의 Promise로 합산(coalescing).
+ */
+async function tryRefresh(): Promise<string | null> {
+	if (_refreshPromise) return _refreshPromise;
+	_refreshPromise = (async () => {
+		try {
+			const { default: { get: getStore } } = await import('svelte/store');
+			const { auth } = await import('$lib/stores/auth');
+			const state = getStore(auth);
+			if (!state.refreshToken) return null;
+
+			const res = await fetch(`${getBaseUrl()}/api/auth/refresh`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ refresh_token: state.refreshToken }),
+				signal: AbortSignal.timeout(15_000),
+			});
+			if (!res.ok) return null;
+
+			const data = await res.json();
+			const { setAuth } = await import('$lib/stores/auth');
+			setAuth({
+				token: data.token,
+				refreshToken: data.refresh_token ?? state.refreshToken,
+				accessExpiresAt: data.expires_at
+					? Math.floor(new Date(data.expires_at).getTime() / 1000)
+					: null,
+			});
+			return data.token as string;
+		} catch {
+			return null;
+		}
+	})().finally(() => { _refreshPromise = null; });
+	return _refreshPromise;
+}
+
+function _buildHeaders(token?: string, projectId?: string, extra?: Record<string, string>): Record<string, string> {
+	const headers: Record<string, string> = {
+		'Content-Type': 'application/json',
+		...(extra ?? {}),
+	};
+	if (token) {
+		headers['Authorization'] = `Bearer ${token}`;
+	}
+	if (projectId) {
+		headers['X-Project-Id'] = projectId;
+	}
+	return headers;
 }
 
 async function request<T>(
@@ -54,23 +130,39 @@ async function request<T>(
 	token?: string,
 	projectId?: string
 ): Promise<T> {
-	const headers: Record<string, string> = {
-		'Content-Type': 'application/json',
-		...(options.headers as Record<string, string>)
-	};
-
-	if (token) {
-		headers['X-Auth-Token'] = token;
-	}
-	if (projectId) {
-		headers['X-Project-Id'] = projectId;
-	}
+	const headers = _buildHeaders(token, projectId, options.headers as Record<string, string>);
 
 	const res = await fetch(`${getBaseUrl()}${path}`, {
 		...options,
 		headers,
 		signal: options.signal ?? AbortSignal.timeout(30_000),
 	});
+
+	// 401: access JWT 만료 → refresh 후 1회 재시도
+	if (res.status === 401 && token) {
+		const newToken = await tryRefresh();
+		if (newToken && newToken !== token) {
+			const retryHeaders = _buildHeaders(newToken, projectId, options.headers as Record<string, string>);
+			const retry = await fetch(`${getBaseUrl()}${path}`, {
+				...options,
+				headers: retryHeaders,
+				signal: options.signal ?? AbortSignal.timeout(30_000),
+			});
+			if (retry.ok) {
+				if (retry.status === 204) return undefined as T;
+				return retry.json();
+			}
+			if (retry.status === 401) void handleUnauthorized();
+			let detail = retry.statusText;
+			try {
+				const body = await retry.json();
+				detail = body?.detail || JSON.stringify(body);
+			} catch { /* ignore */ }
+			throw new ApiError(retry.status, detail);
+		}
+		void handleUnauthorized();
+		throw new ApiError(401, '세션이 만료되었습니다');
+	}
 
 	if (!res.ok) {
 		let detail = res.statusText;
@@ -80,9 +172,11 @@ async function request<T>(
 		} catch {
 			detail = await res.text().catch(() => res.statusText);
 		}
-		// 401 (만료/유효하지 않은 토큰) 자동 로그인 페이지 redirect
 		if (res.status === 401) {
 			void handleUnauthorized();
+		}
+		if (res.status === 403 && path.includes('/admin')) {
+			void handleAdminForbidden();
 		}
 		throw new ApiError(res.status, detail);
 	}
@@ -118,7 +212,7 @@ export const api = {
 
 	upload: async <T>(path: string, formData: FormData, token?: string, projectId?: string): Promise<T> => {
 		const headers: Record<string, string> = {};
-		if (token) headers['X-Auth-Token'] = token;
+		if (token) headers['Authorization'] = `Bearer ${token}`;
 		if (projectId) headers['X-Project-Id'] = projectId;
 		const res = await fetch(`${getBaseUrl()}${path}`, {
 			method: 'POST',
@@ -151,7 +245,7 @@ export const api = {
 		const xhr = new XMLHttpRequest();
 		const promise = new Promise<T>((resolve, reject) => {
 			xhr.open('POST', `${getBaseUrl()}${path}`);
-			if (token) xhr.setRequestHeader('X-Auth-Token', token);
+			if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
 			if (projectId) xhr.setRequestHeader('X-Project-Id', projectId);
 			xhr.timeout = 0; // 타임아웃 없음 (서버 측에서 관리)
 
@@ -190,7 +284,7 @@ export const api = {
 		const xhr = new XMLHttpRequest();
 		const promise = new Promise<T>((resolve, reject) => {
 			xhr.open('PUT', `${getBaseUrl()}${path}`);
-			if (token) xhr.setRequestHeader('X-Auth-Token', token);
+			if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
 			if (projectId) xhr.setRequestHeader('X-Project-Id', projectId);
 			xhr.setRequestHeader('Content-Type', contentType || 'application/octet-stream');
 			xhr.timeout = 0;
@@ -257,7 +351,7 @@ export const api = {
 
 	downloadBlob: async (path: string, token?: string, projectId?: string): Promise<{ blob: Blob; filename: string }> => {
 		const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-		if (token) headers['X-Auth-Token'] = token;
+		if (token) headers['Authorization'] = `Bearer ${token}`;
 		if (projectId) headers['X-Project-Id'] = projectId;
 		const res = await fetch(`${getBaseUrl()}${path}`, {
 			method: 'GET',
@@ -303,7 +397,7 @@ export const api = {
 			'Content-Type': 'application/json',
 			'Accept': 'text/event-stream'
 		};
-		if (token) headers['X-Auth-Token'] = token;
+		if (token) headers['Authorization'] = `Bearer ${token}`;
 		if (projectId) headers['X-Project-Id'] = projectId;
 
 		// fetch로 POST 요청 후 스트림 처리

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -42,6 +43,7 @@ from app.models.compute import (
 from app.models.progress import ProgressMessage, ProgressStep
 from app.rate_limit import limiter
 from app.services import cinder, cloudinit, glance, keystone, manila, neutron, nova
+from app.services import instance_orchestration as instance_orch
 from app.services import libraries as lib_svc
 from app.services.cache import (
     cached_call,
@@ -51,6 +53,7 @@ from app.services.cache import (
     ttl_slow,
     ttl_static,
 )
+from app.services.cache import invalidation as cache_invalidation
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -157,23 +160,9 @@ async def create_instance(
 
     # Default 네트워크 결정 (asyncio.to_thread 호출 전에 미리 처리)
     if not req.network_id:
-        if settings.default_network_enabled:
-            try:
-                from app.services.default_network import ensure_default_network as _ensure_net
-
-                default_net = await _ensure_net(
-                    conn,
-                    conn._afterglow_project_id,
-                    external_network_id=settings.default_network_external_id or None,
-                    cidr=settings.default_network_cidr,
-                )
-                req = req.model_copy(update={"network_id": default_net.id})
-            except Exception:
-                logger.warning("Default 네트워크 조회 실패, 설정값 폴백", exc_info=True)
-                if settings.default_network_id:
-                    req = req.model_copy(update={"network_id": settings.default_network_id})
-        elif settings.default_network_id:
-            req = req.model_copy(update={"network_id": settings.default_network_id})
+        resolved_net_id = await instance_orch.resolve_default_network(conn, settings)
+        if resolved_net_id:
+            req = req.model_copy(update={"network_id": resolved_net_id})
 
     # 수집된 리소스 (rollback 용)
     created_file_storage_ids: list[str] = []
@@ -275,19 +264,8 @@ async def create_instance(
                 raise HTTPException(status_code=409, detail=msg)
 
         # 헬스 리포트 토큰 발급 (서버 생성 전에 UUID 선발급)
-        import uuid as _uuid
-
         project_id = conn._afterglow_project_id
-        from app.services import instance_health as _ih
-
-        _health_id = str(_uuid.uuid4())  # userdata에 포함할 안정적 식별자
-        _report_url = settings.k3s_callback_base_url or ""  # 백엔드 공개 URL 재사용
-        _health_token = ""
-        if _report_url:
-            try:
-                _health_token = await _ih.issue_report_token(_health_id, project_id)
-            except Exception:
-                logger.warning("헬스 토큰 발급 실패, 헬스체크 없이 계속", exc_info=True)
+        _health_id, _report_url, _health_token = await instance_orch.try_issue_health_token(project_id, settings)
 
         userdata = cloudinit.generate_userdata(
             libraries=resolved_libs,
@@ -304,60 +282,25 @@ async def create_instance(
         # ------------------------------------------------------------------
         # 5. Nova: 서버 생성
         # ------------------------------------------------------------------
-        if resolved_libs and settings.union_auto_egress_sg_enabled:
-            try:
-                _sg_name = await asyncio.to_thread(
-                    neutron.ensure_union_egress_sg,
-                    conn,
-                    project_id,
-                    settings.union_egress_sg_name,
-                )
-                _sgs = list(req.security_groups or [])
-                if _sg_name not in _sgs:
-                    _sgs.append(_sg_name)
-                req = req.model_copy(update={"security_groups": _sgs})
-            except Exception:
-                logger.warning("Union egress SG 자동 attach 실패, 계속 진행", exc_info=True)
+        effective_sgs = await instance_orch.compute_effective_security_groups(
+            conn,
+            settings,
+            project_id,
+            resolved_libs,
+            gpu_available,
+            list(req.security_groups or []),
+        )
+        req = req.model_copy(update={"security_groups": effective_sgs})
 
-        if settings.monitoring_auto_sg_enabled and settings.monitoring_scrape_cidr:
-            _sgs = list(req.security_groups or [])
-            if "default" not in _sgs:
-                _sgs.append("default")
-            try:
-                _ne = await asyncio.to_thread(
-                    neutron.ensure_node_exporter_sg,
-                    conn,
-                    project_id,
-                    settings.node_exporter_sg_name,
-                    settings.monitoring_scrape_cidr,
-                )
-                if _ne not in _sgs:
-                    _sgs.append(_ne)
-            except Exception:
-                logger.warning("node_exporter SG 자동 attach 실패, 계속 진행", exc_info=True)
-            if gpu_available:
-                try:
-                    _dc = await asyncio.to_thread(
-                        neutron.ensure_dcgm_exporter_sg,
-                        conn,
-                        project_id,
-                        settings.dcgm_exporter_sg_name,
-                        settings.monitoring_scrape_cidr,
-                    )
-                    if _dc not in _sgs:
-                        _sgs.append(_dc)
-                except Exception:
-                    logger.warning("dcgm_exporter SG 자동 attach 실패, 계속 진행", exc_info=True)
-            req = req.model_copy(update={"security_groups": _sgs})
-
-        meta = {
-            "union_libraries": ",".join(resolved_libs),
-            "union_strategy": req.strategy,
-            "union_share_ids": ",".join([s.get("file_storage_id", "") for s in file_storages_info]),
-            "union_upper_volume_id": upper_volume_id,
-        }
-        if _health_token:
-            meta["union_health_id"] = _health_id
+        meta = instance_orch.build_instance_meta(
+            resolved_libs,
+            file_storages_info,
+            upper_volume_id,
+            req.scheduling,
+            req.strategy or "none",
+            _health_id,
+            _health_token,
+        )
 
         # upper 볼륨을 두 번째 블록 디바이스로 추가
         # (Nova block_device_mapping_v2 에 추가 볼륨 연결)
@@ -407,6 +350,8 @@ async def create_instance(
             resource_id=server.id,
             resource_name=req.name,
         )
+        await invalidate(f"afterglow:nova:{project_id}:instances")
+        await cache_invalidation.invalidate_mutation_count("nova", project_id)
         return server
 
     except HTTPException:
@@ -437,7 +382,7 @@ async def create_instance(
             except Exception:
                 pass
 
-        await _rollback(
+        await instance_orch.rollback_instance(
             conn,
             server_id,
             boot_volume_id if not boot_volume_was_provided else None,
@@ -476,23 +421,9 @@ async def create_instance_async(
 
     # Default 네트워크 결정 (SSE 시작 전에 미리 처리)
     if not req.network_id:
-        if settings.default_network_enabled:
-            try:
-                from app.services.default_network import ensure_default_network as _ensure_net
-
-                default_net = await _ensure_net(
-                    conn,
-                    conn._afterglow_project_id,
-                    external_network_id=settings.default_network_external_id or None,
-                    cidr=settings.default_network_cidr,
-                )
-                req = req.model_copy(update={"network_id": default_net.id})
-            except Exception:
-                logger.warning("Default 네트워크 조회 실패, 설정값 폴백", exc_info=True)
-                if settings.default_network_id:
-                    req = req.model_copy(update={"network_id": settings.default_network_id})
-        elif settings.default_network_id:
-            req = req.model_copy(update={"network_id": settings.default_network_id})
+        resolved_net_id = await instance_orch.resolve_default_network(conn, settings)
+        if resolved_net_id:
+            req = req.model_copy(update={"network_id": resolved_net_id})
 
     async def progress_generator():
         import time
@@ -611,20 +542,13 @@ async def create_instance_async(
             # libraries 또는 GPU flavor 둘 중 하나라도 있으면 user-data 필요:
             # - libraries → OverlayFS + Manila 마운트 + 환경변수
             # - GPU only → NVIDIA 드라이버 + dcgm-exporter 설치 (libraries 없어도 필수)
+            _sse_health_id = ""
+            _sse_health_token = ""
             if resolved_libs or gpu_available:
                 yield send_progress(ProgressStep.USERDATA_GENERATING, 60, "cloud-init 생성 중...")
-                import uuid as _uuid2
-
-                _sse_health_id = str(_uuid2.uuid4())
-                _sse_report_url = settings.k3s_callback_base_url or ""
-                _sse_health_token = ""
-                if _sse_report_url:
-                    try:
-                        from app.services import instance_health as _ih2
-
-                        _sse_health_token = await _ih2.issue_report_token(_sse_health_id, conn._afterglow_project_id)
-                    except Exception:
-                        logger.warning("SSE 헬스 토큰 발급 실패", exc_info=True)
+                _sse_health_id, _sse_report_url, _sse_health_token = await instance_orch.try_issue_health_token(
+                    conn._afterglow_project_id, settings
+                )
 
                 userdata = cloudinit.generate_userdata(
                     libraries=resolved_libs,
@@ -641,65 +565,25 @@ async def create_instance_async(
 
             # Step 5: Nova server (65-95%)
             yield send_progress(ProgressStep.SERVER_CREATING, 65, "Nova 서버 생성 중...")
-            _sse_effective_sgs: list[str] | None = list(req.security_groups) if req.security_groups else None
-            if resolved_libs and settings.union_auto_egress_sg_enabled:
-                try:
-                    _sg_name = await asyncio.to_thread(
-                        neutron.ensure_union_egress_sg,
-                        conn,
-                        conn._afterglow_project_id,
-                        settings.union_egress_sg_name,
-                    )
-                    _sgs = list(req.security_groups or [])
-                    if _sg_name not in _sgs:
-                        _sgs.append(_sg_name)
-                    _sse_effective_sgs = _sgs
-                except Exception:
-                    logger.warning("Union egress SG 자동 attach 실패, 계속 진행", exc_info=True)
+            effective_sgs = await instance_orch.compute_effective_security_groups(
+                conn,
+                settings,
+                conn._afterglow_project_id,
+                resolved_libs,
+                gpu_available,
+                list(req.security_groups or []),
+            )
+            _sse_effective_sgs: list[str] | None = effective_sgs if effective_sgs else None
 
-            if settings.monitoring_auto_sg_enabled and settings.monitoring_scrape_cidr:
-                _sgs = list(_sse_effective_sgs or req.security_groups or [])
-                if "default" not in _sgs:
-                    _sgs.append("default")
-                try:
-                    _ne = await asyncio.to_thread(
-                        neutron.ensure_node_exporter_sg,
-                        conn,
-                        conn._afterglow_project_id,
-                        settings.node_exporter_sg_name,
-                        settings.monitoring_scrape_cidr,
-                    )
-                    if _ne not in _sgs:
-                        _sgs.append(_ne)
-                except Exception:
-                    logger.warning("node_exporter SG 자동 attach 실패, 계속 진행", exc_info=True)
-                if gpu_available:
-                    try:
-                        _dc = await asyncio.to_thread(
-                            neutron.ensure_dcgm_exporter_sg,
-                            conn,
-                            conn._afterglow_project_id,
-                            settings.dcgm_exporter_sg_name,
-                            settings.monitoring_scrape_cidr,
-                        )
-                        if _dc not in _sgs:
-                            _sgs.append(_dc)
-                    except Exception:
-                        logger.warning("dcgm_exporter SG 자동 attach 실패, 계속 진행", exc_info=True)
-                _sse_effective_sgs = _sgs
-
-            meta = {
-                "union_libraries": ",".join(resolved_libs) if resolved_libs else "none",
-                "union_strategy": req.strategy or "none",
-                "union_share_ids": (
-                    ",".join([s.get("file_storage_id", "") for s in file_storages_info])
-                    if file_storages_info
-                    else "none"
-                ),
-                "union_upper_volume_id": upper_volume_id or "none",
-            }
-            if resolved_libs and _sse_health_token:
-                meta["union_health_id"] = _sse_health_id
+            meta = instance_orch.build_instance_meta(
+                resolved_libs,
+                file_storages_info,
+                upper_volume_id,
+                req.scheduling,
+                req.strategy or "none",
+                _sse_health_id if resolved_libs else "",
+                _sse_health_token,
+            )
 
             server = await asyncio.to_thread(
                 nova.create_server,
@@ -778,6 +662,9 @@ async def create_instance_async(
                 resource_id=server_id,
                 resource_name=req.name,
             )
+            _pid = conn._afterglow_project_id
+            await invalidate(f"afterglow:nova:{_pid}:instances")
+            await cache_invalidation.invalidate_mutation_count("nova", _pid)
 
         except Exception as e:
             error_detail = str(e)
@@ -830,7 +717,7 @@ async def create_instance_async(
                 resource_name=req.name,
                 error_message=error_detail[:500],
             )
-            await _rollback(
+            await instance_orch.rollback_instance(
                 conn,
                 server_id,
                 boot_volume_id if not boot_volume_was_provided else None,
@@ -884,6 +771,7 @@ async def delete_instance(
     await invalidate(f"afterglow:nova:{pid}:instances")
     await invalidate(f"afterglow:nova:{pid}:instance:{instance_id}")
     await invalidate(f"afterglow:neutron:{pid}:port_mac_map")
+    await cache_invalidation.invalidate_mutation_count("nova", pid)
     await rec(
         token_info,
         conn,
@@ -948,35 +836,7 @@ async def start_instance(
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
 ):
-    pid = conn._afterglow_project_id
-    try:
-        server = await asyncio.to_thread(nova.get_server, conn, instance_id)
-    except Exception:
-        raise HTTPException(status_code=404, detail="인스턴스를 찾을 수 없습니다")
-    assert_instance_owner(server, conn, token_info)
-    try:
-        await asyncio.to_thread(nova.start_server, conn, instance_id)
-        await invalidate(f"afterglow:nova:{pid}:instance:{instance_id}")
-        await invalidate(f"afterglow:nova:{pid}:instances")
-        await rec(
-            token_info,
-            conn,
-            resource_type="instance",
-            action="instance.start",
-            status="success",
-            resource_id=instance_id,
-        )
-    except Exception as e:
-        await rec(
-            token_info,
-            conn,
-            resource_type="instance",
-            action="instance.start",
-            status="failed",
-            resource_id=instance_id,
-            error_message=str(e)[:500],
-        )
-        raise HTTPException(status_code=500, detail="작업 실패")
+    await _simple_action(conn, token_info, instance_id, nova_fn=nova.start_server, action_name="instance.start")
 
 
 @router.post("/{instance_id}/stop", status_code=204)
@@ -987,35 +847,7 @@ async def stop_instance(
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
 ):
-    pid = conn._afterglow_project_id
-    try:
-        server = await asyncio.to_thread(nova.get_server, conn, instance_id)
-    except Exception:
-        raise HTTPException(status_code=404, detail="인스턴스를 찾을 수 없습니다")
-    assert_instance_owner(server, conn, token_info)
-    try:
-        await asyncio.to_thread(nova.stop_server, conn, instance_id)
-        await invalidate(f"afterglow:nova:{pid}:instance:{instance_id}")
-        await invalidate(f"afterglow:nova:{pid}:instances")
-        await rec(
-            token_info,
-            conn,
-            resource_type="instance",
-            action="instance.stop",
-            status="success",
-            resource_id=instance_id,
-        )
-    except Exception as e:
-        await rec(
-            token_info,
-            conn,
-            resource_type="instance",
-            action="instance.stop",
-            status="failed",
-            resource_id=instance_id,
-            error_message=str(e)[:500],
-        )
-        raise HTTPException(status_code=500, detail="작업 실패")
+    await _simple_action(conn, token_info, instance_id, nova_fn=nova.stop_server, action_name="instance.stop")
 
 
 @router.post("/{instance_id}/reboot", status_code=204)
@@ -1026,35 +858,7 @@ async def reboot_instance(
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
 ):
-    pid = conn._afterglow_project_id
-    try:
-        server = await asyncio.to_thread(nova.get_server, conn, instance_id)
-    except Exception:
-        raise HTTPException(status_code=404, detail="인스턴스를 찾을 수 없습니다")
-    assert_instance_owner(server, conn, token_info)
-    try:
-        await asyncio.to_thread(nova.reboot_server, conn, instance_id)
-        await invalidate(f"afterglow:nova:{pid}:instance:{instance_id}")
-        await invalidate(f"afterglow:nova:{pid}:instances")
-        await rec(
-            token_info,
-            conn,
-            resource_type="instance",
-            action="instance.reboot",
-            status="success",
-            resource_id=instance_id,
-        )
-    except Exception as e:
-        await rec(
-            token_info,
-            conn,
-            resource_type="instance",
-            action="instance.reboot",
-            status="failed",
-            resource_id=instance_id,
-            error_message=str(e)[:500],
-        )
-        raise HTTPException(status_code=500, detail="작업 실패")
+    await _simple_action(conn, token_info, instance_id, nova_fn=nova.reboot_server, action_name="instance.reboot")
 
 
 @router.post("/{instance_id}/shelve", status_code=204)
@@ -1065,35 +869,7 @@ async def shelve_instance(
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
 ):
-    pid = conn._afterglow_project_id
-    try:
-        server = await asyncio.to_thread(nova.get_server, conn, instance_id)
-    except Exception:
-        raise HTTPException(status_code=404, detail="인스턴스를 찾을 수 없습니다")
-    assert_instance_owner(server, conn, token_info)
-    try:
-        await asyncio.to_thread(nova.shelve_server, conn, instance_id)
-        await invalidate(f"afterglow:nova:{pid}:instance:{instance_id}")
-        await invalidate(f"afterglow:nova:{pid}:instances")
-        await rec(
-            token_info,
-            conn,
-            resource_type="instance",
-            action="instance.shelve",
-            status="success",
-            resource_id=instance_id,
-        )
-    except Exception as e:
-        await rec(
-            token_info,
-            conn,
-            resource_type="instance",
-            action="instance.shelve",
-            status="failed",
-            resource_id=instance_id,
-            error_message=str(e)[:500],
-        )
-        raise HTTPException(status_code=500, detail="작업 실패")
+    await _simple_action(conn, token_info, instance_id, nova_fn=nova.shelve_server, action_name="instance.shelve")
 
 
 @router.post("/{instance_id}/unshelve", status_code=204)
@@ -1104,35 +880,7 @@ async def unshelve_instance(
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
 ):
-    pid = conn._afterglow_project_id
-    try:
-        server = await asyncio.to_thread(nova.get_server, conn, instance_id)
-    except Exception:
-        raise HTTPException(status_code=404, detail="인스턴스를 찾을 수 없습니다")
-    assert_instance_owner(server, conn, token_info)
-    try:
-        await asyncio.to_thread(nova.unshelve_server, conn, instance_id)
-        await invalidate(f"afterglow:nova:{pid}:instance:{instance_id}")
-        await invalidate(f"afterglow:nova:{pid}:instances")
-        await rec(
-            token_info,
-            conn,
-            resource_type="instance",
-            action="instance.unshelve",
-            status="success",
-            resource_id=instance_id,
-        )
-    except Exception as e:
-        await rec(
-            token_info,
-            conn,
-            resource_type="instance",
-            action="instance.unshelve",
-            status="failed",
-            resource_id=instance_id,
-            error_message=str(e)[:500],
-        )
-        raise HTTPException(status_code=500, detail="작업 실패")
+    await _simple_action(conn, token_info, instance_id, nova_fn=nova.unshelve_server, action_name="instance.unshelve")
 
 
 @router.get("/{instance_id}/console")
@@ -1459,6 +1207,46 @@ async def update_port_security_groups(
 # ---------------------------------------------------------------------------
 
 
+async def _simple_action(
+    conn: openstack.connection.Connection,
+    token_info: dict,
+    instance_id: str,
+    *,
+    nova_fn: Callable,
+    action_name: str,
+) -> None:
+    pid = conn._afterglow_project_id
+    try:
+        server = await asyncio.to_thread(nova.get_server, conn, instance_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="인스턴스를 찾을 수 없습니다")
+    assert_instance_owner(server, conn, token_info)
+    try:
+        await asyncio.to_thread(nova_fn, conn, instance_id)
+        await invalidate(f"afterglow:nova:{pid}:instance:{instance_id}")
+        await invalidate(f"afterglow:nova:{pid}:instances")
+        await cache_invalidation.invalidate_mutation_count("nova", pid)
+        await rec(
+            token_info,
+            conn,
+            resource_type="instance",
+            action=action_name,
+            status="success",
+            resource_id=instance_id,
+        )
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="instance",
+            action=action_name,
+            status="failed",
+            resource_id=instance_id,
+            error_message=str(e)[:500],
+        )
+        raise HTTPException(status_code=500, detail="작업 실패")
+
+
 def _resolve_project_subnet_cidrs(conn, network_id: str) -> list[str]:
     """주어진 네트워크의 subnet CIDR 목록을 반환."""
     detail = neutron.get_network_detail(conn, network_id)
@@ -1649,52 +1437,6 @@ async def _prepare_dynamic_file_storage(
             "nfs_export_location": "",
             "mount_options": "",
         }
-
-
-async def _rollback(
-    conn,
-    server_id: str | None,
-    boot_volume_id: str | None,
-    upper_volume_id: str | None,
-    file_storage_ids: list[str],
-    access_ids: list[tuple[str, str]],
-    floating_ip_id: str | None = None,
-):
-    if floating_ip_id:
-        try:
-            await asyncio.to_thread(neutron.delete_floating_ip, conn, floating_ip_id)
-        except Exception as e:
-            logger.error(f"Rollback - Floating IP 삭제 실패: {e}")
-
-    if server_id:
-        try:
-            await asyncio.to_thread(nova.delete_server, conn, server_id)
-        except Exception as e:
-            logger.error(f"Rollback - 서버 삭제 실패: {e}")
-
-    for vol_id in [boot_volume_id, upper_volume_id]:
-        if vol_id:
-            try:
-                await asyncio.to_thread(cinder.delete_volume, conn, vol_id)
-            except Exception as e:
-                logger.error(f"Rollback - 볼륨 삭제 실패 {vol_id}: {e}")
-
-    # prebuilt share는 service 프로젝트 소유이므로 service conn으로 revoke (admin role로 dynamic share도 처리 가능)
-    try:
-        svc_conn = await asyncio.to_thread(keystone.get_service_project_connection)
-    except RuntimeError:
-        svc_conn = conn  # service 프로젝트 미설정 환경에서는 user conn으로 fallback
-    for file_storage_id, access_id in access_ids:
-        try:
-            await asyncio.to_thread(manila.revoke_access_rule, svc_conn, file_storage_id, access_id)
-        except Exception as e:
-            logger.error(f"Rollback - access rule 삭제 실패: {e}")
-
-    for file_storage_id in file_storage_ids:
-        try:
-            await asyncio.to_thread(manila.delete_file_storage, conn, file_storage_id)
-        except Exception as e:
-            logger.error(f"Rollback - 파일 스토리지 삭제 실패 {file_storage_id}: {e}")
 
 
 # ---------------------------------------------------------------------------

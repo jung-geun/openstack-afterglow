@@ -10,12 +10,14 @@ import json
 import logging
 import queue as _queue_module
 import secrets
+import time
 import urllib.parse
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
-from app.api.deps import get_os_conn, get_token_info
+from app.api.deps import cache_bypass, get_os_conn, get_token_info
 from app.models.storage import (
     BulkDeleteRequest,
     CopyObjectRequest,
@@ -24,9 +26,89 @@ from app.models.storage import (
     MoveObjectRequest,
     RenameObjectRequest,
 )
+from app.services import cache
+from app.services.cache import invalidation, keys
 
 router = APIRouter()
 _logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# 휴지통 Redis 헬퍼 (소프트 삭제 버킷 추적)
+# ---------------------------------------------------------------------------
+
+
+def _trash_containers_key(pid: str) -> str:
+    """프로젝트별 소프트 삭제 버킷을 저장하는 Redis sorted-set 키."""
+    return f"afterglow:swift-trash:{pid}:containers"
+
+
+async def _mark_container_deleted(pid: str, name: str, epoch: int, retention_days: int) -> None:
+    """Redis sorted-set에 소프트 삭제 컨테이너 등록 (score = 삭제 epoch)."""
+    from app.services.cache import _get_redis  # type: ignore[attr-defined]
+
+    try:
+        r = await _get_redis()
+        tk = _trash_containers_key(pid)
+        await r.zadd(tk, {name: float(epoch)})
+        # TTL: 보관 기간 + 7일 여유
+        await r.expire(tk, (retention_days + 7) * 86400)
+    except Exception:
+        _logger.warning("소프트 삭제 마킹 Redis 실패 pid=%s name=%s", pid, name, exc_info=True)
+
+
+async def _unmark_container_deleted(pid: str, name: str) -> None:
+    """Redis sorted-set에서 소프트 삭제 마킹 제거."""
+    from app.services.cache import _get_redis  # type: ignore[attr-defined]
+
+    try:
+        r = await _get_redis()
+        await r.zrem(_trash_containers_key(pid), name)
+    except Exception:
+        _logger.warning("소프트 삭제 마킹 제거 Redis 실패 pid=%s name=%s", pid, name, exc_info=True)
+
+
+async def _get_deleted_containers(pid: str) -> dict[str, int]:
+    """소프트 삭제된 컨테이너 {name: epoch} 딕셔너리 반환."""
+    from app.services.cache import _get_redis  # type: ignore[attr-defined]
+
+    try:
+        r = await _get_redis()
+        members = await r.zrange(_trash_containers_key(pid), 0, -1, withscores=True)
+        result: dict[str, int] = {}
+        for m, s in members:
+            key_str = m.decode() if isinstance(m, bytes) else str(m)
+            result[key_str] = int(s)
+        return result
+    except Exception:
+        _logger.debug("소프트 삭제 목록 Redis 조회 실패 pid=%s", pid, exc_info=True)
+        return {}
+
+
+async def _is_container_deleted(pid: str, name: str) -> int | None:
+    """컨테이너가 소프트 삭제 중이면 epoch 반환, 아니면 None."""
+    from app.services.cache import _get_redis  # type: ignore[attr-defined]
+
+    try:
+        r = await _get_redis()
+        score = await r.zscore(_trash_containers_key(pid), name)
+        return int(score) if score is not None else None
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# 휴지통 복구·영구삭제 요청 모델
+# ---------------------------------------------------------------------------
+
+
+class RestoreObjectRequest(BaseModel):
+    trash_key: str
+
+
+class RestoreContainerRequest(BaseModel):
+    pass  # 이름은 URL path에서 수신
+
 
 _EOF = object()
 
@@ -105,10 +187,17 @@ async def get_object_storage_account(
 # ---------------------------------------------------------------------------
 
 
-async def _list_all_projects_containers(admin_token: str, include_quarantine: bool = False) -> list[dict]:
+async def _list_all_projects_containers(
+    admin_token: str,
+    include_quarantine: bool = False,
+    include_trash: bool = False,
+    include_deleted: bool = False,
+) -> list[dict]:
     """모든 프로젝트로 fan-out 해서 Swift 컨테이너 집계 (asyncio.gather 병렬).
 
     include_quarantine=True 시 `*-quarantine` 버킷도 포함 (admin UI 모니터링 용).
+    include_trash=True 시 `*-trash` 버킷도 포함.
+    include_deleted=True 시 소프트 삭제 컨테이너에 is_deleted/deleted_at 필드 포함.
     프로젝트당 ~700ms × 9개 = 7초 sequential 동작을 ~1초 이내로 단축.
     Semaphore(8) 로 Keystone/RGW 동시 부하 제한.
     """
@@ -132,7 +221,7 @@ async def _list_all_projects_containers(admin_token: str, include_quarantine: bo
                     _logger.warning("프로젝트 %s connection 실패: %s", pid, e)
                 return []
             try:
-                containers = await asyncio.to_thread(swift.list_containers, sub_conn, include_quarantine)
+                containers = await asyncio.to_thread(swift.list_containers, sub_conn, include_quarantine, include_trash)
             except Exception as e:
                 if _is_unauthorized(e):
                     _logger.info("프로젝트 %s 권한 없음 — skip", pid)
@@ -142,6 +231,22 @@ async def _list_all_projects_containers(admin_token: str, include_quarantine: bo
             finally:
                 with contextlib.suppress(Exception):
                     await asyncio.to_thread(sub_conn.close)
+
+            # 소프트 삭제 정보 주석 처리 (캐시 뮤테이션 방지: 새 dict 복사본 생성)
+            if containers:
+                deleted_map = await _get_deleted_containers(pid)
+                if include_deleted:
+                    annotated = []
+                    for c in containers:
+                        epoch = deleted_map.get(c["name"])
+                        if epoch:
+                            annotated.append({**c, "is_deleted": True, "deleted_at": epoch})
+                        else:
+                            annotated.append(c)
+                    containers = annotated
+                else:
+                    containers = [c for c in containers if c["name"] not in deleted_map]
+
             return [{**c, "project_id": pid, "project_name": p.get("name", "")} for c in containers]
 
     results = await asyncio.gather(*[_one(p) for p in projects])
@@ -154,26 +259,66 @@ async def list_object_storage_containers(
     token_info: dict = Depends(get_token_info),
     all_projects: bool = Query(False, description="admin 전용: 모든 프로젝트 버킷"),
     include_quarantine: bool = Query(False, description="admin 전용: *-quarantine 버킷 포함"),
+    include_trash: bool = Query(False, description="admin 전용: *-trash 버킷 포함"),
+    include_deleted: bool = Query(False, description="소프트 삭제 버킷 포함 (복구 대기 중인 버킷)"),
+    bypass: bool = Depends(cache_bypass),
 ):
-    """Swift 오브젝트 스토리지 컨테이너 목록. all_projects/include_quarantine 는 시스템 admin 전용."""
+    """Swift 오브젝트 스토리지 컨테이너 목록.
+
+    all_projects/include_quarantine/include_trash 는 시스템 admin 전용.
+    include_deleted 는 인증된 사용자 모두 사용 가능 (자신의 삭제 대기 버킷 조회).
+    """
     from app.services import swift
 
-    if include_quarantine and not token_info.get("is_system_admin", False):
+    is_admin = token_info.get("is_system_admin", False)
+
+    if (include_quarantine or include_trash) and not is_admin:
         raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다")
 
     if all_projects:
-        if not token_info.get("is_system_admin", False):
+        if not is_admin:
             raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다")
         try:
-            return await _list_all_projects_containers(token_info["token"], include_quarantine)
+            return await _list_all_projects_containers(
+                token_info["token"], include_quarantine, include_trash, include_deleted
+            )
         except Exception:
             _logger.exception("관리자 Swift 버킷 전체 조회 실패")
             raise HTTPException(status_code=500, detail="오브젝트 스토리지 컨테이너 목록 조회 실패")
 
+    pid = conn._afterglow_project_id
+    # 파라미터 조합마다 별도 캐시 항목 사용
+    cache_parts = []
+    if include_quarantine:
+        cache_parts.append("q")
+    if include_trash:
+        cache_parts.append("t")
+    cache_sub = "|".join(cache_parts) or None
+    key = keys.project_key("swift", pid, "containers", sub=cache_sub)
     try:
-        return await asyncio.to_thread(swift.list_containers, conn, include_quarantine)
+        containers = await cache.cached_call(
+            key,
+            cache.ttl_normal(),
+            lambda: swift.list_containers(conn, include_quarantine, include_trash),
+            refresh=bypass,
+        )
     except Exception:
         raise HTTPException(status_code=500, detail="오브젝트 스토리지 컨테이너 목록 조회 실패")
+
+    # 소프트 삭제 상태 주석 처리 (Redis 조회, 캐싱 미적용 — 상태 변경이 즉시 반영되어야 함)
+    # 주의: 캐시된 dict 를 직접 변경하지 않도록 새 dict 복사본을 생성한다.
+    deleted_map = await _get_deleted_containers(pid)
+    if include_deleted:
+        result = []
+        for c in containers:
+            epoch = deleted_map.get(c["name"])
+            if epoch:
+                result.append({**c, "is_deleted": True, "deleted_at": epoch})
+            else:
+                result.append(c)
+        return result
+    else:
+        return [c for c in containers if c["name"] not in deleted_map]
 
 
 @router.post("", status_code=201)
@@ -185,6 +330,7 @@ async def create_object_storage_container(
 
     이름 검증: bucket_naming.validate_bucket_name 으로 시스템 예약어 / S3 형식
     위반 차단. 위반 시 400 + 한국어 사유.
+    소프트 삭제 대기 중인 동명 버킷이 있으면 409 반환 (복구 또는 영구 삭제 후 재생성 가능).
     """
     from app.services import swift
     from app.services.bucket_naming import validate_bucket_name
@@ -194,11 +340,26 @@ async def create_object_storage_container(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    pid = conn._afterglow_project_id
+    # 소프트 삭제 대기 중인 동명 버킷 충돌 확인
+    existing_epoch = await _is_container_deleted(pid, req.name)
+    if existing_epoch is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"'{req.name}' 버킷은 삭제 대기 중입니다. 휴지통에서 복구하거나 영구 삭제 후 재생성할 수 있습니다."
+            ),
+        )
+
     try:
-        return await asyncio.to_thread(swift.create_container, conn, req.name)
+        result = await asyncio.to_thread(swift.create_container, conn, req.name)
     except Exception:
         _logger.exception("Swift 컨테이너 생성 실패: name=%s", req.name)
         raise HTTPException(status_code=500, detail="컨테이너 생성 실패")
+
+    await cache.invalidate(f"afterglow:swift:{pid}:*")
+    await invalidation.invalidate_mutation_count("swift", pid)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -210,12 +371,20 @@ async def create_object_storage_container(
 async def get_object_storage_container(
     container_name: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    bypass: bool = Depends(cache_bypass),
 ):
     """컨테이너 메타데이터(오브젝트 수, 바이트 등) 조회."""
     from app.services import swift
 
+    pid = conn._afterglow_project_id
+    key = keys.project_key("swift", pid, "containers", sub=container_name)
     try:
-        return await asyncio.to_thread(swift.get_container_metadata, conn, container_name)
+        return await cache.cached_call(
+            key,
+            cache.ttl_slow(),
+            lambda: swift.get_container_metadata(conn, container_name),
+            refresh=bypass,
+        )
     except Exception:
         raise HTTPException(status_code=404, detail="컨테이너를 찾을 수 없습니다")
 
@@ -223,15 +392,41 @@ async def get_object_storage_container(
 @router.delete("/{container_name}", status_code=204)
 async def delete_object_storage_container(
     container_name: str,
+    permanent: bool = Query(False, description="true 시 즉시 영구 삭제. 기본값은 30일 보관 후 자동 삭제."),
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    """오브젝트 스토리지 컨테이너 삭제 (비어있어야 함)."""
+    """오브젝트 스토리지 컨테이너 삭제.
+
+    기본(permanent=false): 소프트 삭제 — 설정된 보관 기간(기본 30일) 동안 복구 가능.
+    permanent=true: 즉시 영구 삭제 (복구 불가).
+    """
+    from app.config import get_settings
     from app.services import swift
 
-    try:
-        await asyncio.to_thread(swift.delete_container, conn, container_name)
-    except Exception:
-        raise HTTPException(status_code=500, detail="컨테이너 삭제 실패")
+    pid = conn._afterglow_project_id
+
+    if permanent:
+        # 하드 삭제: 기존 동작 유지
+        try:
+            await asyncio.to_thread(swift.delete_container, conn, container_name)
+        except Exception:
+            raise HTTPException(status_code=500, detail="컨테이너 삭제 실패")
+        # 혹시 소프트 삭제 마킹이 있었으면 제거
+        await _unmark_container_deleted(pid, container_name)
+    else:
+        # 소프트 삭제: 메타데이터 마킹 + Redis 등록
+        epoch = int(time.time())
+        settings = get_settings()
+        retention_days = settings.os_trash_retention_days
+        try:
+            await asyncio.to_thread(swift.soft_delete_container_metadata, conn, container_name, epoch)
+        except Exception:
+            _logger.warning("컨테이너 소프트 삭제 메타 설정 실패: %s", container_name, exc_info=True)
+        await _mark_container_deleted(pid, container_name, epoch, retention_days)
+        _logger.info("컨테이너 소프트 삭제: name=%s pid=%s", container_name, pid)
+
+    await cache.invalidate(f"afterglow:swift:{pid}:*")
+    await invalidation.invalidate_mutation_count("swift", pid)
 
 
 # ---------------------------------------------------------------------------
@@ -245,6 +440,7 @@ async def list_objects(
     prefix: str = Query(default=""),
     delimiter: str = Query(default="/"),
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    bypass: bool = Depends(cache_bypass),
 ):
     """컨테이너 내 오브젝트 목록.
 
@@ -253,8 +449,16 @@ async def list_objects(
     """
     from app.services import swift
 
+    pid = conn._afterglow_project_id
+    # prefix / delimiter 조합마다 별도 캐시 항목. 모두 afterglow:swift:{pid}:* 로 무효화됨.
+    key = keys.project_key("swift", pid, "objects", sub=f"{container_name}:{prefix}:{delimiter}")
     try:
-        return await asyncio.to_thread(swift.list_objects, conn, container_name, prefix, delimiter)
+        return await cache.cached_call(
+            key,
+            cache.ttl_fast(),
+            lambda: swift.list_objects(conn, container_name, prefix, delimiter),
+            refresh=bypass,
+        )
     except Exception:
         raise HTTPException(status_code=500, detail="오브젝트 목록 조회 실패")
 
@@ -280,7 +484,7 @@ async def upload_object(
         object_name = _sanitize_object_name(file.filename or "unnamed")
         content_type = file.content_type or ""
         # file.file (SpooledTemporaryFile)을 직접 전달해 스트리밍 업로드
-        return await asyncio.to_thread(
+        result = await asyncio.to_thread(
             swift.upload_object,
             conn,
             container_name,
@@ -294,6 +498,11 @@ async def upload_object(
     except Exception:
         _logger.exception("오브젝트 업로드 실패: container=%s name=%s", container_name, file.filename)
         raise HTTPException(status_code=500, detail="오브젝트 업로드 실패")
+
+    pid = conn._afterglow_project_id
+    await cache.invalidate(f"afterglow:swift:{pid}:*")
+    await invalidation.invalidate_mutation_count("swift", pid)
+    return result
 
 
 @router.put("/{container_name}/objects/{object_name:path}", status_code=201)
@@ -370,6 +579,10 @@ async def upload_object_stream(
                 break
         with contextlib.suppress(asyncio.CancelledError):
             await drain_task
+
+    pid = conn._afterglow_project_id
+    await cache.invalidate(f"afterglow:swift:{pid}:*")
+    await invalidation.invalidate_mutation_count("swift", pid)
     return result
 
 
@@ -499,15 +712,27 @@ async def download_object(
 async def delete_object(
     container_name: str,
     object_name: str,
+    permanent: bool = Query(False, description="true 시 즉시 영구 삭제. 기본값은 휴지통으로 이동."),
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    """오브젝트 삭제."""
+    """오브젝트 삭제.
+
+    기본(permanent=false): 소프트 삭제 — {container}-trash 버킷으로 이동, 보관 기간 내 복구 가능.
+    permanent=true: 즉시 영구 삭제 (복구 불가).
+    """
     from app.services import swift
 
+    pid = conn._afterglow_project_id
     try:
-        await asyncio.to_thread(swift.delete_object, conn, container_name, object_name)
+        if permanent:
+            await asyncio.to_thread(swift.delete_object, conn, container_name, object_name)
+        else:
+            await asyncio.to_thread(swift.soft_delete_object, conn, container_name, object_name)
     except Exception:
         raise HTTPException(status_code=500, detail="오브젝트 삭제 실패")
+
+    await cache.invalidate(f"afterglow:swift:{pid}:*")
+    await invalidation.invalidate_mutation_count("swift", pid)
 
 
 @router.get("/{container_name}/objects/{object_name:path}/metadata")
@@ -570,20 +795,35 @@ async def preview_object(
 async def bulk_delete_objects(
     container_name: str,
     body: BulkDeleteRequest,
+    permanent: bool = Query(False, description="true 시 즉시 영구 삭제. 기본값은 휴지통으로 이동."),
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
     """오브젝트 일괄 삭제.
 
     recursive=True이면 디렉토리(`/`로 끝나는) 하위 전체를 삭제한다.
+    permanent=false(기본): 휴지통으로 이동. permanent=true: 즉시 영구 삭제.
     반환: {"deleted": [...], "failed": [{"name": ..., "error": ...}]}
     """
     from app.services import swift
 
     try:
-        result = await asyncio.to_thread(swift.bulk_delete_objects, conn, container_name, body.objects, body.recursive)
-        return result
+        if permanent:
+            result = await asyncio.to_thread(
+                swift.bulk_delete_objects, conn, container_name, body.objects, body.recursive
+            )
+            result = {"deleted": result.get("deleted", []), "failed": result.get("failed", [])}
+        else:
+            result = await asyncio.to_thread(
+                swift.bulk_soft_delete_objects, conn, container_name, body.objects, body.recursive
+            )
+            result = {"deleted": result.get("moved", []), "failed": result.get("failed", [])}
     except Exception:
         raise HTTPException(status_code=500, detail="일괄 삭제 실패")
+
+    pid = conn._afterglow_project_id
+    await cache.invalidate(f"afterglow:swift:{pid}:*")
+    await invalidation.invalidate_mutation_count("swift", pid)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -601,10 +841,15 @@ async def create_directory(
     from app.services import swift
 
     try:
-        return await asyncio.to_thread(swift.create_directory, conn, container_name, body.path)
+        result = await asyncio.to_thread(swift.create_directory, conn, container_name, body.path)
     except Exception:
         _logger.exception("디렉토리 생성 실패: container=%s path=%s", container_name, body.path)
         raise HTTPException(status_code=500, detail="디렉토리 생성 실패")
+
+    pid = conn._afterglow_project_id
+    await cache.invalidate(f"afterglow:swift:{pid}:*")
+    await invalidation.invalidate_mutation_count("swift", pid)
+    return result
 
 
 @router.post("/{container_name}/objects/copy", status_code=200)
@@ -618,12 +863,17 @@ async def copy_object(
 
     dest_container = body.dest_container or container_name
     try:
-        return await asyncio.to_thread(
+        result = await asyncio.to_thread(
             swift.copy_object, conn, container_name, body.source, dest_container, body.destination
         )
     except Exception:
         _logger.exception("오브젝트 복사 실패: %s -> %s", body.source, body.destination)
         raise HTTPException(status_code=500, detail="오브젝트 복사 실패")
+
+    pid = conn._afterglow_project_id
+    await cache.invalidate(f"afterglow:swift:{pid}:*")
+    await invalidation.invalidate_mutation_count("swift", pid)
+    return result
 
 
 @router.post("/{container_name}/objects/move", status_code=200)
@@ -646,10 +896,17 @@ async def move_object(
         original_filename = body.source.rsplit("/", 1)[-1]
         dest_name = dest_name + original_filename
     try:
-        return await asyncio.to_thread(swift.move_object, conn, container_name, body.source, dest_container, dest_name)
+        result = await asyncio.to_thread(
+            swift.move_object, conn, container_name, body.source, dest_container, dest_name
+        )
     except Exception:
         _logger.exception("오브젝트 이동 실패: %s -> %s", body.source, body.destination)
         raise HTTPException(status_code=500, detail="오브젝트 이동 실패")
+
+    pid = conn._afterglow_project_id
+    await cache.invalidate(f"afterglow:swift:{pid}:*")
+    await invalidation.invalidate_mutation_count("swift", pid)
+    return result
 
 
 @router.post("/{container_name}/objects/rename", status_code=200)
@@ -662,7 +919,170 @@ async def rename_object(
     from app.services import swift
 
     try:
-        return await asyncio.to_thread(swift.rename_object, conn, container_name, body.source, body.new_name)
+        result = await asyncio.to_thread(swift.rename_object, conn, container_name, body.source, body.new_name)
     except Exception:
         _logger.exception("오브젝트 이름 변경 실패: %s -> %s", body.source, body.new_name)
         raise HTTPException(status_code=500, detail="오브젝트 이름 변경 실패")
+
+    pid = conn._afterglow_project_id
+    await cache.invalidate(f"afterglow:swift:{pid}:*")
+    await invalidation.invalidate_mutation_count("swift", pid)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# 휴지통 — 오브젝트 단위
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{container_name}/trash", status_code=200)
+async def list_trash(
+    container_name: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """버킷 휴지통({container}-trash)의 오브젝트 목록.
+
+    각 항목에 trash_key, original_name, deleted_at(epoch_seconds) 포함.
+    """
+    from app.services import swift
+
+    try:
+        return await asyncio.to_thread(swift.list_trash_objects, conn, container_name)
+    except Exception:
+        _logger.exception("휴지통 목록 조회 실패: container=%s", container_name)
+        raise HTTPException(status_code=500, detail="휴지통 목록 조회 실패")
+
+
+@router.post("/{container_name}/trash/restore", status_code=200)
+async def restore_trash_object(
+    container_name: str,
+    body: RestoreObjectRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """휴지통 오브젝트를 원본 버킷으로 복구.
+
+    body: {"trash_key": "{epoch}/{uuid8}/{original_name}"}
+    """
+    from app.services import swift
+
+    try:
+        result = await asyncio.to_thread(swift.restore_trash_object, conn, container_name, body.trash_key)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        _logger.exception("휴지통 오브젝트 복구 실패: container=%s key=%s", container_name, body.trash_key)
+        raise HTTPException(status_code=500, detail="오브젝트 복구 실패")
+
+    pid = conn._afterglow_project_id
+    await cache.invalidate(f"afterglow:swift:{pid}:*")
+    await invalidation.invalidate_mutation_count("swift", pid)
+    return result
+
+
+@router.delete("/{container_name}/trash/{trash_key:path}", status_code=204)
+async def purge_trash_object(
+    container_name: str,
+    trash_key: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """휴지통 오브젝트를 영구 삭제 (복구 불가)."""
+    from app.services import swift
+
+    try:
+        await asyncio.to_thread(swift.purge_trash_object, conn, container_name, trash_key)
+    except Exception:
+        _logger.exception("휴지통 오브젝트 영구 삭제 실패: container=%s key=%s", container_name, trash_key)
+        raise HTTPException(status_code=500, detail="영구 삭제 실패")
+
+    pid = conn._afterglow_project_id
+    await cache.invalidate(f"afterglow:swift:{pid}:*")
+    await invalidation.invalidate_mutation_count("swift", pid)
+
+
+# ---------------------------------------------------------------------------
+# 휴지통 — 버킷(컨테이너) 단위
+# ---------------------------------------------------------------------------
+
+
+@router.get("/trash/containers", status_code=200)
+async def list_deleted_containers(
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """소프트 삭제 대기 중인 버킷 목록 (복구 가능한 버킷).
+
+    Redis sorted-set 기반으로 빠르게 반환.
+    """
+    from app.services import swift
+
+    pid = conn._afterglow_project_id
+    deleted_map = await _get_deleted_containers(pid)
+    if not deleted_map:
+        return []
+
+    # Swift 기본 목록 조회 후 소프트 삭제 항목만 필터
+    try:
+        all_containers = await asyncio.to_thread(swift.list_containers, conn, False, False)
+    except Exception:
+        all_containers = []
+
+    container_map = {c["name"]: c for c in all_containers}
+    result = []
+    for name, epoch in deleted_map.items():
+        base = container_map.get(name, {"name": name, "count": 0, "bytes": 0})
+        result.append({**base, "is_deleted": True, "deleted_at": epoch})
+    return result
+
+
+@router.post("/trash/containers/{container_name}/restore", status_code=200)
+async def restore_deleted_container(
+    container_name: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """소프트 삭제된 버킷을 복구 (목록에서 다시 보이도록)."""
+    from app.services import swift
+
+    pid = conn._afterglow_project_id
+
+    # 소프트 삭제 상태인지 확인
+    epoch = await _is_container_deleted(pid, container_name)
+    if epoch is None:
+        raise HTTPException(status_code=404, detail="삭제 대기 중인 버킷을 찾을 수 없습니다")
+
+    try:
+        await asyncio.to_thread(swift.restore_container_metadata, conn, container_name)
+    except Exception:
+        _logger.warning("컨테이너 복구 메타 해제 실패: %s", container_name, exc_info=True)
+
+    await _unmark_container_deleted(pid, container_name)
+
+    await cache.invalidate(f"afterglow:swift:{pid}:*")
+    await invalidation.invalidate_mutation_count("swift", pid)
+
+    return {"name": container_name, "restored": True}
+
+
+@router.delete("/trash/containers/{container_name}", status_code=204)
+async def purge_deleted_container(
+    container_name: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """소프트 삭제된 버킷을 영구 삭제 (내용물 포함, 복구 불가)."""
+    from app.services import swift
+
+    pid = conn._afterglow_project_id
+
+    # 소프트 삭제 상태인지 확인
+    epoch = await _is_container_deleted(pid, container_name)
+    if epoch is None:
+        raise HTTPException(status_code=404, detail="삭제 대기 중인 버킷을 찾을 수 없습니다")
+
+    try:
+        await asyncio.to_thread(swift.delete_container, conn, container_name)
+    except Exception:
+        _logger.exception("소프트 삭제 버킷 영구 삭제 실패: %s", container_name)
+        raise HTTPException(status_code=500, detail="버킷 영구 삭제 실패")
+
+    await _unmark_container_deleted(pid, container_name)
+
+    await cache.invalidate(f"afterglow:swift:{pid}:*")
+    await invalidation.invalidate_mutation_count("swift", pid)

@@ -60,7 +60,7 @@ Nova, Glance, Cinder, Neutron, Manila, Octavia — every core service managed fr
 
 ---
 
-[GitHub repository](https://github.com/jung-geun/openstack-afterglow){: .btn .btn-primary }
+[GitHub repository](https://github.com/openstack-afterglow/openstack-afterglow){: .btn .btn-primary }
 
 ---
 
@@ -92,4 +92,4 @@ Nova, Glance, Cinder, Neutron, Manila, Octavia — every core service managed fr
 
 ### v1.13.8 and earlier
 
-See [GitHub Releases](https://github.com/jung-geun/openstack-afterglow/releases).
+See [GitHub Releases](https://github.com/openstack-afterglow/openstack-afterglow/releases).

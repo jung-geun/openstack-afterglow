@@ -40,14 +40,15 @@ write_files:
         exit 1
       fi
 
-      log "k3s 에이전트 설치 시작 (버전: {{ k3s_version }})..."
+      NODE_IP=$(ip route get 8.8.8.8 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); break}}')
+      [ -z "${NODE_IP}" ] && NODE_IP=$(hostname -I | awk '{print $1}')
+      log "k3s 에이전트 설치 시작 (버전: {{ k3s_version }}, node-ip: ${NODE_IP})..."
+      _EXEC_ARGS="agent --node-ip ${NODE_IP}{% for arg in extra_agent_args %} {{ arg }}{% endfor %}"
       curl -sfL https://get.k3s.io | \
         INSTALL_K3S_VERSION={{ k3s_version | shlex_quote }} \
         K3S_URL={{ ('https://' ~ server_ip ~ ':6443') | shlex_quote }} \
         K3S_TOKEN={{ node_token | shlex_quote }} \
-{% if extra_agent_args %}
-        INSTALL_K3S_EXEC={{ extra_agent_args | join(' ') | shlex_quote }} \
-{% endif %}
+        INSTALL_K3S_EXEC="${_EXEC_ARGS}" \
         sh - 2>&1 | tee -a "$LOG"
 
       log "k3s-agent 서비스 활성화 대기 중..."
@@ -63,6 +64,63 @@ write_files:
       systemctl status k3s-agent >> "$LOG" 2>&1 || true
       journalctl -u k3s-agent --no-pager -n 50 >> "$LOG" 2>&1 || true
       exit 1
+
+  - path: /usr/local/sbin/afterglow-nic-up.sh
+    permissions: "0750"
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      IFACE="${1:-}"
+      [ -z "${IFACE}" ] && exit 0
+      # 가상/루프 인터페이스 제외
+      case "${IFACE}" in
+        lo|lo:*|cni*|flannel*|veth*|kube*|dummy*|tunl*) exit 0 ;;
+      esac
+      NETPLAN_FILE="/etc/netplan/90-afterglow-${IFACE}.yaml"
+      LOCK="/run/afterglow-nic.lock"
+      exec 9>"${LOCK}"
+      flock -x 9
+      if [ -f "${NETPLAN_FILE}" ]; then
+        echo "[afterglow-nic-up] ${IFACE}: netplan already configured, skipping" | systemd-cat -t afterglow-nic-up
+        exit 0
+      fi
+      cat > "${NETPLAN_FILE}" <<EOF
+      network:
+        version: 2
+        ethernets:
+          ${IFACE}:
+            dhcp4: true
+            dhcp6: false
+            link-local: []
+            optional: true
+            dhcp4-overrides:
+              use-routes: false
+      EOF
+      echo "[afterglow-nic-up] ${IFACE}: applying netplan..." | systemd-cat -t afterglow-nic-up
+      if netplan apply 2>&1 | systemd-cat -t afterglow-nic-up; then
+        echo "[afterglow-nic-up] ${IFACE}: done" | systemd-cat -t afterglow-nic-up
+      else
+        echo "[afterglow-nic-up] ${IFACE}: netplan apply failed, rolling back" | systemd-cat -t afterglow-nic-up
+        rm -f "${NETPLAN_FILE}"
+      fi
+
+  - path: /etc/systemd/system/afterglow-nic-up@.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Afterglow NIC up handler for %i
+      After=network.target
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/sbin/afterglow-nic-up.sh %i
+      StandardOutput=journal
+      StandardError=journal
+
+  - path: /etc/udev/rules.d/99-afterglow-nic.rules
+    permissions: "0644"
+    content: |
+      SUBSYSTEM=="net", ACTION=="add", KERNEL!="lo", KERNEL!="cni*", KERNEL!="flannel*", KERNEL!="veth*", KERNEL!="kube*", KERNEL!="dummy*", KERNEL!="tunl*", RUN+="/bin/systemctl --no-block start afterglow-nic-up@%k.service"
 
   - path: /etc/systemd/system/k3s-agent-join.service
     permissions: "0644"
@@ -87,5 +145,6 @@ write_files:
       WantedBy=multi-user.target
 
 runcmd:
+  - udevadm control --reload-rules
   - systemctl daemon-reload
   - systemctl enable --now k3s-agent-join.service

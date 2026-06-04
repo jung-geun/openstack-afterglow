@@ -365,8 +365,12 @@ async def delete_subnet(
 # ---------------------------------------------------------------------------
 
 
-def _fetch_topology_sync(conn) -> dict:
-    """동기 방식으로 토폴로지 전체 데이터 수집 (cached_call 내부에서 to_thread로 실행됨)."""
+def _fetch_topology_sync(conn, project_id: str | None = None) -> dict:
+    """동기 방식으로 토폴로지 데이터 수집 (cached_call 내부에서 to_thread로 실행됨).
+
+    project_id 지정 시 해당 프로젝트의 인스턴스·네트워크·라우터만 반환 (user scope).
+    None이면 전체 반환 (admin scope).
+    """
     topo = neutron.get_topology(conn)
     servers = nova.list_servers(conn)
 
@@ -398,10 +402,19 @@ def _fetch_topology_sync(conn) -> dict:
         )
         for s in servers
     ]
+
+    # user scope: 현재 프로젝트 인스턴스만 표시
+    if project_id:
+        instance_list = [i for i in instance_list if i.project_id == project_id]
+        # 네트워크: 현재 프로젝트 소유 + external + shared 만 유지
+        topo.networks = [n for n in topo.networks if n.project_id == project_id or n.is_external or n.is_shared]
+        # 라우터: 현재 프로젝트 소유만 유지
+        topo.routers = [r for r in topo.routers if getattr(r, "project_id", None) == project_id]
+
     topo.instances = instance_list
     topo.load_balancers = get_topology_lbs(
         conn,
-        project_id=getattr(conn, "_afterglow_project_id", None),
+        project_id=project_id or getattr(conn, "_afterglow_project_id", None),
         instances=[inst.model_dump() for inst in instance_list],
     )
     return topo.model_dump()
@@ -414,7 +427,7 @@ async def get_topology(conn: openstack.connection.Connection = Depends(get_os_co
         return await cached_call(
             f"afterglow:neutron:{pid}:topology",
             ttl_normal(),
-            lambda: _fetch_topology_sync(conn),
+            lambda: _fetch_topology_sync(conn, project_id=pid),
             refresh=refresh,
         )
     except Exception:

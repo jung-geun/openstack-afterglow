@@ -80,6 +80,9 @@ def _build_server_ignition(
     extra_tls_sans: list[str],
     needs_external_cloud_provider: bool,
     server_node_name: str = "",
+    cluster_init: bool = False,
+    join_url: str = "",
+    ha_node_token: str = "",
 ) -> str:
     """FCOS k3s 서버 노드 Ignition JSON 생성."""
     template_vars = dict(
@@ -103,10 +106,19 @@ def _build_server_ignition(
         cloud_controller_args = '--disable-cloud-controller --kubelet-arg="cloud-provider=external"'
     extra_args_str = " ".join(extra_server_args) if extra_server_args else ""
 
+    # HA 분기 인자
+    if cluster_init:
+        ha_args = "--cluster-init"
+    elif join_url and ha_node_token:
+        ha_args = f'--server "{join_url}" --token "{ha_node_token}"'
+    else:
+        ha_args = ""
+
     node_name = server_node_name or f"{cluster_name}-server"
     install_script = f"""#!/bin/bash
 set -e
-SERVER_IP=$(hostname -I | awk '{{print $1}}')
+SERVER_IP=$(ip route get 8.8.8.8 2>/dev/null | awk '{{for(i=1;i<=NF;i++) if($i=="src"){{print $(i+1); break}}}}')
+[ -z "${{SERVER_IP}}" ] && SERVER_IP=$(hostname -I | awk '{{print $1}}')
 curl -sfL https://get.k3s.io | \\
   INSTALL_K3S_VERSION="{k3s_version}" \\
   INSTALL_K3S_SKIP_SELINUX_RPM=true \\
@@ -114,6 +126,8 @@ curl -sfL https://get.k3s.io | \\
     --tls-san "${{SERVER_IP}}" \\
     {tls_sans_args} \\
     --write-kubeconfig-mode 644 \\
+    --node-ip "${{SERVER_IP}}" \\
+    {ha_args} \\
     {cloud_controller_args} \\
     {extra_args_str} \\
     --node-name="{node_name}"
@@ -243,6 +257,10 @@ def generate_server_userdata(
     os_type: str = OS_TYPE_UBUNTU,
     server_node_name: str | None = None,
     barbican_kms_enabled: bool = False,
+    # HA 멀티 마스터 파라미터
+    cluster_init: bool = False,  # server#1: --cluster-init (embedded etcd)
+    join_url: str | None = None,  # server#2/3: --server <url>
+    ha_node_token: str | None = None,  # server#2/3 조인 토큰
     # 하위호환 파라미터 (deprecated — 레지스트리 우회 시에만 사용)
     occm_enabled: bool = False,
     occm_manifests: str | None = None,
@@ -273,6 +291,9 @@ def generate_server_userdata(
             extra_tls_sans=extra_tls_sans or [],
             needs_external_cloud_provider=needs_external_cloud_provider,
             server_node_name=server_node_name or "",
+            cluster_init=cluster_init,
+            join_url=join_url or "",
+            ha_node_token=ha_node_token or "",
         )
         # Ignition JSON 유효성 간단 확인
         json.loads(ign_str)
@@ -296,6 +317,9 @@ def generate_server_userdata(
         needs_external_cloud_provider=needs_external_cloud_provider,
         server_node_name=server_node_name or f"{cluster_name}-server",
         barbican_kms_enabled=barbican_kms_enabled,
+        cluster_init=cluster_init,
+        join_url=join_url or "",
+        ha_node_token=ha_node_token or "",
     )
     yaml_str = _jinja.get_template("k3s_server.yaml.j2").render(**template_vars)
     encoded = base64.b64encode(gzip.compress(yaml_str.encode())).decode()

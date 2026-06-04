@@ -67,14 +67,26 @@ def _resolve_admin_ids() -> tuple[str | None, str | None]:
     return None, None
 
 
-def _is_system_admin(user_id: str, *_args, **_kwargs) -> bool:
-    """사용자가 admin 프로젝트에서 admin role을 가지는지 확인.
-
-    서비스 admin 크리덴셜로 role_assignments 를 조회하여 policy 제약을 회피한다.
-    추가 인자(session, settings)는 호환성을 위해 받되 사용하지 않는다.
-    """
-    if not user_id:
+def _has_system_admin_role(user_id: str) -> bool:
+    """Keystone system:all scope admin role 보유 여부 확인."""
+    try:
+        _, admin_role_id = _resolve_admin_ids()
+        if not admin_role_id:
+            return False
+        ks = _get_admin_ks_client()
+        assignments = ks.role_assignments.list(
+            user=user_id,
+            role=admin_role_id,
+            system="all",
+        )
+        return len(assignments) > 0
+    except Exception:
+        _logger.warning("_has_system_admin_role 체크 실패", exc_info=True)
         return False
+
+
+def _has_admin_project_role(user_id: str) -> bool:
+    """기존 'admin project + admin role' 정책으로 admin 여부 확인 (호환 모드용)."""
     try:
         admin_project_id, admin_role_id = _resolve_admin_ids()
         if not admin_project_id or not admin_role_id:
@@ -87,8 +99,35 @@ def _is_system_admin(user_id: str, *_args, **_kwargs) -> bool:
         )
         return len(assignments) > 0
     except Exception:
-        _logger.warning("is_system_admin 체크 실패", exc_info=True)
+        _logger.warning("_has_admin_project_role 체크 실패", exc_info=True)
         return False
+
+
+def _is_system_admin(user_id: str, *_args, **_kwargs) -> bool:
+    """system admin 여부 판별 (dual-mode).
+
+    항상: Keystone system:all scope role 검사.
+    admin_legacy_project_policy=True 일 때만 OR: 기존 'admin project + admin role' 검사.
+    추가 인자(session, settings)는 호환성을 위해 받되 사용하지 않는다.
+    """
+    if not user_id:
+        return False
+    if _has_system_admin_role(user_id):
+        return True
+    settings = get_settings()
+    if settings.admin_legacy_project_policy:
+        return _has_admin_project_role(user_id)
+    return False
+
+
+def invalidate_admin_caches() -> None:
+    """admin_project_id / admin_role_id 프로세스 캐시 리셋.
+
+    admin project 또는 role이 운영 중 재생성될 때 system-roles 엔드포인트에서 명시 호출.
+    """
+    global _admin_project_id_cache, _admin_role_id_cache
+    _admin_project_id_cache = None
+    _admin_role_id_cache = None
 
 
 def authenticate(username: str, password: str, project_name: str, domain_name: str = "Default") -> dict:
@@ -259,6 +298,32 @@ def get_admin_connection_for_project(project_id: str) -> openstack.connection.Co
         username=settings.os_username,
         password=settings.os_password,
         project_id=project_id,
+        user_domain_name=settings.os_user_domain_name,
+        project_domain_name=settings.os_project_domain_name,
+        region_name=settings.os_region_name,
+        interface=settings.os_interface,
+        api_timeout=30,
+        verify=settings.ssl_verify,
+    )
+
+
+def get_admin_project_connection() -> openstack.connection.Connection:
+    """afterglow admin 크리덴셜로 admin 프로젝트에 스코프된 연결.
+
+    Barbican project-quotas 등 admin 프로젝트 스코프가 필요한 cross-project 관리 API에 사용.
+    사용자의 현재 프로젝트 선택과 무관하게 항상 admin 프로젝트로 스코프됨.
+    """
+    import openstack
+
+    settings = get_settings()
+    return openstack.connect(
+        load_envvars=False,
+        load_yaml_config=False,
+        auth_url=settings.os_auth_url,
+        auth_type="password",
+        username=settings.os_username,
+        password=settings.os_password,
+        project_name=settings.os_project_name,
         user_domain_name=settings.os_user_domain_name,
         project_domain_name=settings.os_project_domain_name,
         region_name=settings.os_region_name,
@@ -539,12 +604,18 @@ def list_projects(token: str) -> list[dict]:
     user_id = auth_plugin.get_access(sess).user_id
     projects = ks.projects.list(user=user_id)
 
+    try:
+        domain_map = {d.id: d.name for d in ks.domains.list()}
+    except Exception:
+        domain_map = {}
+
     return [
         {
             "id": p.id,
             "name": p.name,
             "description": p.description or "",
             "domain_id": p.domain_id,
+            "domain_name": domain_map.get(p.domain_id),
             "enabled": p.enabled,
         }
         for p in projects

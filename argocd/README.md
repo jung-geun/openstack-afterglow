@@ -21,7 +21,7 @@ argocd/
 
 ```
 git tag v1.x.x && git push origin main --tags
-  → GitHub Actions: ghcr.io/jung-geun/afterglow-api:{vX.Y.Z, latest} 빌드/푸시
+  → GitHub Actions: ghcr.io/openstack-afterglow/afterglow-api:{vX.Y.Z, latest} 빌드/푸시
   → ArgoCD: prod kustomization.yaml 의 newTag 변경 감지 → auto-sync → 새 Pod 롤아웃
   → Image Updater: :latest digest 변경 감지 → 다음 릴리즈부터 자동 재배포
 
@@ -67,7 +67,7 @@ Image Updater 가 GHCR 이미지 digest 를 polling 하려면 인증이 필요�
 ```bash
 kubectl create secret docker-registry ghcr-secret \
   --docker-server=ghcr.io \
-  --docker-username=jung-geun \
+  --docker-username=openstack-afterglow \
   --docker-password=<GITHUB_PAT_READ_PACKAGES> \
   -n argocd
 ```
@@ -78,8 +78,8 @@ kubectl create secret docker-registry ghcr-secret \
 ### 4. GitHub 레포 등록
 
 ```bash
-argocd repo add https://github.com/jung-geun/openstack-afterglow.git \
-  --username jung-geun \
+argocd repo add https://github.com/openstack-afterglow/openstack-afterglow.git \
+  --username openstack-afterglow \
   --password <GITHUB_PAT>
 ```
 

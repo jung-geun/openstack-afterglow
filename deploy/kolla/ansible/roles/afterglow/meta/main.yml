@@ -1,7 +1,7 @@
 ---
 galaxy_info:
   role_name: afterglow
-  author: jung-geun
+  author: openstack-afterglow
   description: Afterglow OpenStack meta-PaaS deployment role for kolla-ansible
   min_ansible_version: "2.14"
 

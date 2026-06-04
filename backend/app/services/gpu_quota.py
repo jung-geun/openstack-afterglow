@@ -239,10 +239,8 @@ async def get_all_gpu_aliases() -> list[str]:
             verify=s.ssl_verify,
         )
         try:
-            from app.api.identity.admin_gpu import (
-                _collect_gpu_hosts,
-                build_device_name_to_alias_map,
-            )
+            from app.api.identity.admin_gpu import build_device_name_to_alias_map
+            from app.services.gpu_inventory import _collect_gpu_hosts
 
             aliases: set[str] = set()
 

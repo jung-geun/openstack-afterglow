@@ -2,7 +2,7 @@
   import { untrack } from 'svelte';
   import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
-  import type { LoadBalancer } from '$lib/types/resources';
+  import type { LoadBalancer } from '$lib/types/loadbalancer';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
   import SlidePanel from '$lib/components/SlidePanel.svelte';

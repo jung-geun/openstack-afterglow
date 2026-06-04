@@ -7,19 +7,12 @@
     name: string;
     email: string;
     description: string;
-    default_project_id: string;
-  }
-
-  interface Project {
-    id: string;
-    name: string;
   }
 
   const token = $derived($auth.token ?? undefined);
   const projectId = $derived($auth.projectId ?? undefined);
 
-  let profile = $state<Profile>({ id: '', name: '', email: '', description: '', default_project_id: '' });
-  let projects = $state<Project[]>([]);
+  let profile = $state<Profile>({ id: '', name: '', email: '', description: '' });
   let loading = $state(true);
   let saving = $state(false);
   let error = $state('');
@@ -28,22 +21,16 @@
   let editName = $state('');
   let editEmail = $state('');
   let editDescription = $state('');
-  let editDefaultProjectId = $state('');
 
   async function load() {
     loading = true;
     error = '';
     try {
-      const [res, projs] = await Promise.all([
-        api.get<Profile>('/api/profile', token, projectId),
-        api.get<Project[]>('/api/auth/projects', token),
-      ]);
+      const res = await api.get<Profile>('/api/profile', token, projectId);
       profile = res;
       editName = res.name;
       editEmail = res.email;
       editDescription = res.description;
-      editDefaultProjectId = res.default_project_id || '';
-      projects = projs;
     } catch (e) {
       error = e instanceof ApiError ? e.message : '프로필을 불러올 수 없습니다';
     } finally {
@@ -60,7 +47,6 @@
       if (editName !== profile.name) body.name = editName;
       if (editEmail !== profile.email) body.email = editEmail;
       if (editDescription !== profile.description) body.description = editDescription;
-      if (editDefaultProjectId !== profile.default_project_id) body.default_project_id = editDefaultProjectId;
       if (Object.keys(body).length === 0) {
         error = '변경된 내용이 없습니다';
         return;
@@ -129,20 +115,6 @@
           placeholder="설명 입력 (선택)"
         ></textarea>
       </div>
-      {#if projects.length > 0}
-        <div>
-          <label class="block text-xs text-gray-400 mb-1">기본 프로젝트</label>
-          <select
-            bind:value={editDefaultProjectId}
-            class="w-full bg-gray-800 border border-gray-700 focus:border-blue-500 text-white text-sm rounded-lg px-3 py-2 outline-none transition-colors"
-          >
-            <option value="">선택 안 함</option>
-            {#each projects as p}
-              <option value={p.id}>{p.name}</option>
-            {/each}
-          </select>
-        </div>
-      {/if}
     </div>
     <div class="mt-4 flex justify-end">
       <button

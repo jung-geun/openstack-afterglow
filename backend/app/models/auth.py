@@ -9,12 +9,13 @@ class LoginRequest(BaseModel):
 
 
 class TokenResponse(BaseModel):
-    token: str
+    token: str  # access JWT (신규 클라이언트) — 이전 Keystone 토큰 필드명 유지
+    refresh_token: str | None = None
     project_id: str
     project_name: str
     user_id: str
     username: str
-    expires_at: str
+    expires_at: str  # access JWT 만료 ISO8601
     roles: list[str] = []
     default_project_id: str = ""
     is_system_admin: bool = False
@@ -34,7 +35,9 @@ class ProjectInfo(BaseModel):
     name: str
     description: str = ""
     domain_id: str | None = None
+    domain_name: str | None = None
     enabled: bool = True
+    last_accessed_at: str | None = None
 
 
 class GitLabCallbackRequest(BaseModel):

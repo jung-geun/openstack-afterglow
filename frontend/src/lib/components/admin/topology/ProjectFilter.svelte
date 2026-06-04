@@ -1,0 +1,56 @@
+<script lang="ts">
+	import { projectNames } from '$lib/stores/projectNames';
+
+	let {
+		projectFilter = $bindable<string | null>(null),
+		searchText = $bindable(''),
+		dropdownOpen = $bindable(false),
+	}: {
+		projectFilter: string | null;
+		searchText: string;
+		dropdownOpen: boolean;
+	} = $props();
+
+	let projectSuggestions = $derived(
+		Array.from($projectNames.entries())
+			.filter(([id, name]) =>
+				searchText.length === 0 ||
+				name.toLowerCase().includes(searchText.toLowerCase()) ||
+				id.toLowerCase().includes(searchText.toLowerCase())
+			)
+			.slice(0, 10)
+	);
+</script>
+
+<div class="relative project-filter-wrapper">
+	<div class="flex items-center bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 w-52 focus-within:border-blue-500">
+		<input
+			type="text"
+			placeholder="프로젝트 검색..."
+			bind:value={searchText}
+			onfocus={() => (dropdownOpen = true)}
+			oninput={() => { dropdownOpen = true; if (!searchText) { projectFilter = null; } }}
+			class="bg-transparent text-sm text-gray-300 flex-1 outline-none min-w-0"
+		/>
+		{#if projectFilter}
+			<button onclick={() => { projectFilter = null; searchText = ''; dropdownOpen = false; }} class="text-gray-500 hover:text-white ml-1 flex-shrink-0">✕</button>
+		{/if}
+	</div>
+	{#if dropdownOpen && projectSuggestions.length > 0}
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div
+			class="absolute top-full mt-1 left-0 w-64 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-30 overflow-hidden"
+			onmouseleave={() => {}}
+		>
+			{#each projectSuggestions as [id, name]}
+				<button
+					class="w-full text-left px-3 py-2 text-xs hover:bg-gray-800 transition-colors {projectFilter === id ? 'bg-blue-900/30 text-blue-400' : 'text-gray-300'}"
+					onclick={() => { projectFilter = id; searchText = name; dropdownOpen = false; }}
+				>
+					<div class="font-medium truncate">{name}</div>
+					<div class="text-gray-500 font-mono">{id.slice(0, 12)}...</div>
+				</button>
+			{/each}
+		</div>
+	{/if}
+</div>

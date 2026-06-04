@@ -2,65 +2,128 @@ name: Docker Build & Push
 
 on:
   push:
-    branches:
-      - main
-      - dev
+    branches: [main, dev]
+    tags: ['v*']
     paths-ignore:
+      # test.yml + docker-build.yml(main) paths-ignore 합집합
+      - 'deploy/k8s/overlays/**/.argocd-source-*.yaml'
       - 'deploy/k8s-template/overlays/**/.argocd-source-*.yaml'
       - 'deploy/k8s-template/overlays/dev/kustomization.yaml'
-    tags:
-      - 'v*'
   pull_request:
-    branches:
-      - main
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      targets:
+        description: 'Build targets (backend, frontend, worker, or both)'
+        required: false
+        default: 'both'
+        type: choice
+        options: [both, backend, frontend, worker]
 
 env:
   REGISTRY: ${{ secrets.REGISTRY_URL || 'ghcr.io' }}
   IMAGE_OWNER: ${{ github.repository_owner }}
 
 jobs:
+  # ─── 테스트: 단위 테스트 통과 후에만 빌드로 진행 ───
+  test:
+    name: Unit Tests
+    uses: ./.github/workflows/test.yml
+    secrets: inherit
+
   # ─── 변경 감지: dev 브랜치에서만 선택적 빌드, 나머지는 항상 전체 빌드 ───
   changes:
     name: Detect changed targets
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: read
     outputs:
       targets: ${{ steps.set-targets.outputs.targets }}
+      effective_ref: ${{ steps.eff-ref.outputs.ref }}
+      is_pr: ${{ steps.eff-ref.outputs.is_pr }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+
+      # push/PR/workflow_dispatch 이벤트는 github.ref 가 정확한 ref 를 직접 가리킨다.
+      - name: Resolve effective ref
+        id: eff-ref
+        run: |
+          echo "ref=$GITHUB_REF" >> $GITHUB_OUTPUT
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            echo "is_pr=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_pr=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Detect file changes
         id: filter
-        uses: dorny/paths-filter@v4
-        with:
-          filters: |
-            backend:
-              - 'backend/**'
-              - 'Dockerfile'
-              - '.dockerignore'
-            frontend:
-              - 'frontend/**'
-              - 'Dockerfile'
-              - '.dockerignore'
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "backend=true" >> $GITHUB_OUTPUT
+            echo "frontend=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          CHANGED=$(git diff --name-only HEAD^1 HEAD 2>/dev/null || echo "ALL")
+
+          # 비교 불가(초기 커밋 등) 시 전체 빌드
+          if [[ "$CHANGED" == "ALL" ]]; then
+            echo "backend=true" >> $GITHUB_OUTPUT
+            echo "frontend=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          if echo "$CHANGED" | grep -qE '^(backend/|Dockerfile$|\.dockerignore$)'; then
+            echo "backend=true" >> $GITHUB_OUTPUT
+            echo "worker=true" >> $GITHUB_OUTPUT
+          else
+            echo "backend=false" >> $GITHUB_OUTPUT
+            echo "worker=false" >> $GITHUB_OUTPUT
+          fi
+
+          if echo "$CHANGED" | grep -qE '^(frontend/|Dockerfile$|\.dockerignore$)'; then
+            echo "frontend=true" >> $GITHUB_OUTPUT
+          else
+            echo "frontend=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Build target list
         id: set-targets
         env:
           CHANGED_BACKEND: ${{ steps.filter.outputs.backend }}
           CHANGED_FRONTEND: ${{ steps.filter.outputs.frontend }}
+          DISPATCH_TARGETS: ${{ inputs.targets }}
+          EFFECTIVE_REF: ${{ steps.eff-ref.outputs.ref }}
         run: |
+          # workflow_dispatch: 입력값으로 타겟 결정
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            if [[ "${DISPATCH_TARGETS}" == "backend" ]]; then
+              echo 'targets=["backend"]' >> $GITHUB_OUTPUT
+            elif [[ "${DISPATCH_TARGETS}" == "frontend" ]]; then
+              echo 'targets=["frontend"]' >> $GITHUB_OUTPUT
+            elif [[ "${DISPATCH_TARGETS}" == "worker" ]]; then
+              echo 'targets=["worker"]' >> $GITHUB_OUTPUT
+            else
+              echo 'targets=["backend","frontend","worker"]' >> $GITHUB_OUTPUT
+            fi
+            exit 0
+          fi
           # dev 브랜치 이외(main, v* 태그, PR)는 항상 전체 빌드
-          if [[ "${GITHUB_REF}" != "refs/heads/dev" ]]; then
-            echo 'targets=["backend","frontend"]' >> $GITHUB_OUTPUT
+          if [[ "${EFFECTIVE_REF}" != "refs/heads/dev" ]]; then
+            echo 'targets=["backend","frontend","worker"]' >> $GITHUB_OUTPUT
             exit 0
           fi
           # dev 브랜치: 변경된 타겟만 빌드
           TARGETS="[]"
           if [[ "${CHANGED_BACKEND}" == "true" ]]; then
             TARGETS=$(echo "$TARGETS" | jq -c '. + ["backend"]')
+            TARGETS=$(echo "$TARGETS" | jq -c '. + ["worker"]')
           fi
           if [[ "${CHANGED_FRONTEND}" == "true" ]]; then
             TARGETS=$(echo "$TARGETS" | jq -c '. + ["frontend"]')
@@ -79,10 +142,10 @@ jobs:
         arch: [amd64, arm64]
         include:
           - arch: amd64
-            runner: [self-hosted, linux]
+            runner: [self-hosted, linux, x64]
             platform: linux/amd64
           - arch: arm64
-            runner: [self-hosted, macos]
+            runner: [self-hosted, linux, arm64]
             platform: linux/arm64
     runs-on: ${{ matrix.runner }}
     permissions:
@@ -92,9 +155,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
 
       - name: Install uv (tag push only)
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(needs.changes.outputs.effective_ref, 'refs/tags/v')
         uses: astral-sh/setup-uv@v6
         with:
           # arm64 self-hosted macos runner 는 backend/frontend 잡이 동일
@@ -104,27 +169,29 @@ jobs:
           enable-cache: ${{ matrix.arch == 'amd64' }}
 
       - name: Setup Node (tag push only)
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(needs.changes.outputs.effective_ref, 'refs/tags/v')
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
       - name: Apply tag version (tag push only)
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(needs.changes.outputs.effective_ref, 'refs/tags/v')
         env:
-          GITHUB_REF: ${{ github.ref }}
+          GITHUB_REF: ${{ needs.changes.outputs.effective_ref }}
         run: npm run version:apply-tag
 
       - name: Verify version sync
         run: bash scripts/check-version-sync.sh
         env:
-          GITHUB_REF: ${{ github.ref }}
+          GITHUB_REF: ${{ needs.changes.outputs.effective_ref }}
 
       - name: Resolve image name
         id: img
         run: |
           if [ "${{ matrix.target }}" = "backend" ]; then
             echo "name=${REGISTRY}/${IMAGE_OWNER}/afterglow-api" >> $GITHUB_OUTPUT
+          elif [ "${{ matrix.target }}" = "worker" ]; then
+            echo "name=${REGISTRY}/${IMAGE_OWNER}/afterglow-worker" >> $GITHUB_OUTPUT
           else
             echo "name=${REGISTRY}/${IMAGE_OWNER}/afterglow" >> $GITHUB_OUTPUT
           fi
@@ -160,7 +227,7 @@ jobs:
         run: |
           DOCKER_CONF_DIR="${RUNNER_TEMP}/docker-config"
           mkdir -p "${DOCKER_CONF_DIR}"
-          AUTH=$(printf "%s:%s" "${REG_USER}" "${REG_PASS}" | base64)
+          AUTH=$(printf "%s:%s" "${REG_USER}" "${REG_PASS}" | base64 | tr -d '\r\n')
           printf '{"auths":{"%s":{"auth":"%s"}}}\n' "${REGISTRY}" "${AUTH}" \
             > "${DOCKER_CONF_DIR}/config.json"
           echo "DOCKER_CONFIG=${DOCKER_CONF_DIR}" >> "$GITHUB_ENV"
@@ -188,10 +255,12 @@ jobs:
 
       - name: Compute base tag
         id: tag
+        env:
+          EFFECTIVE_REF: ${{ needs.changes.outputs.effective_ref }}
         run: |
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            echo "base=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-          elif [[ "${GITHUB_REF}" == refs/heads/main ]]; then
+          if [[ "${EFFECTIVE_REF}" == refs/tags/v* ]]; then
+            echo "base=${EFFECTIVE_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          elif [[ "${EFFECTIVE_REF}" == refs/heads/main ]]; then
             echo "base=nightly" >> $GITHUB_OUTPUT
           else
             echo "base=dev" >> $GITHUB_OUTPUT
@@ -206,7 +275,7 @@ jobs:
           file: ./Dockerfile
           target: ${{ matrix.target }}
           platforms: ${{ matrix.platform }}
-          push: ${{ github.event_name != 'pull_request' }}
+          push: ${{ needs.changes.outputs.is_pr != 'true' }}
           tags: ${{ steps.img.outputs.name }}:${{ steps.tag.outputs.base }}-${{ matrix.arch }}
 
       # amd64 (Linux, docker-container driver): registry cache 사용
@@ -218,16 +287,16 @@ jobs:
           file: ./Dockerfile
           target: ${{ matrix.target }}
           platforms: ${{ matrix.platform }}
-          push: ${{ github.event_name != 'pull_request' }}
+          push: ${{ needs.changes.outputs.is_pr != 'true' }}
           tags: ${{ steps.img.outputs.name }}:${{ steps.tag.outputs.base }}-${{ matrix.arch }}
           cache-from: type=registry,ref=${{ steps.img.outputs.name }}:cache-${{ matrix.arch }}
-          cache-to: ${{ github.event_name != 'pull_request' && format('type=registry,ref={0}:cache-{1},mode=max', steps.img.outputs.name, matrix.arch) || '' }}
+          cache-to: ${{ needs.changes.outputs.is_pr != 'true' && format('type=registry,ref={0}:cache-{1},mode=max', steps.img.outputs.name, matrix.arch) || '' }}
 
   # ─── manifest 통합: 두 arch 태그를 합쳐 단일 멀티플랫폼 태그로 push ───
   manifest:
     name: Manifest ${{ matrix.target }}
     needs: [changes, build]
-    if: github.event_name != 'pull_request' && needs.changes.outputs.targets != '[]'
+    if: needs.changes.outputs.is_pr != 'true' && needs.changes.outputs.targets != '[]'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -252,19 +321,23 @@ jobs:
         run: |
           if [ "${{ matrix.target }}" = "backend" ]; then
             echo "name=${REGISTRY}/${IMAGE_OWNER}/afterglow-api" >> $GITHUB_OUTPUT
+          elif [ "${{ matrix.target }}" = "worker" ]; then
+            echo "name=${REGISTRY}/${IMAGE_OWNER}/afterglow-worker" >> $GITHUB_OUTPUT
           else
             echo "name=${REGISTRY}/${IMAGE_OWNER}/afterglow" >> $GITHUB_OUTPUT
           fi
 
       - name: Compute final tags
         id: tags
+        env:
+          EFFECTIVE_REF: ${{ needs.changes.outputs.effective_ref }}
         run: |
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            VTAG="${GITHUB_REF#refs/tags/}"
+          if [[ "${EFFECTIVE_REF}" == refs/tags/v* ]]; then
+            VTAG="${EFFECTIVE_REF#refs/tags/}"
             echo "primary=${{ steps.img.outputs.name }}:${VTAG}" >> $GITHUB_OUTPUT
             echo "extra=${{ steps.img.outputs.name }}:latest" >> $GITHUB_OUTPUT
             echo "base=${VTAG}" >> $GITHUB_OUTPUT
-          elif [[ "${GITHUB_REF}" == refs/heads/main ]]; then
+          elif [[ "${EFFECTIVE_REF}" == refs/heads/main ]]; then
             echo "primary=${{ steps.img.outputs.name }}:nightly" >> $GITHUB_OUTPUT
             echo "extra=" >> $GITHUB_OUTPUT
             echo "base=nightly" >> $GITHUB_OUTPUT
@@ -288,4 +361,3 @@ jobs:
               "${IMG}:${BASE}-amd64" \
               "${IMG}:${BASE}-arm64"
           fi
-

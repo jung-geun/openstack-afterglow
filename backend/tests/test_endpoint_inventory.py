@@ -93,6 +93,9 @@ EXPECTED_PUBLIC = frozenset(
         ("GET", "/api/object-storage/{container_name}/objects/{object_name:path}/download"),
         # Prometheus SD — Bearer monitoring_sd_token으로 자체 인증 (Keystone X-Auth-Token 불가)
         ("GET", "/api/sd/prometheus/targets"),
+        ("GET", "/api/sd/prometheus/libvirt-targets"),
+        # refresh 토큰으로 자체 인증 (만료된 access token 갱신용)
+        ("POST", "/api/auth/refresh"),
     }
 )
 

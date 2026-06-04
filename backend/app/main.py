@@ -148,6 +148,7 @@ _mark("api.container")
 # ---------------------------------------------------------------------------
 from app.api.identity import admin_router, auth_router
 from app.api.identity.admin_activity import router as admin_activity_router
+from app.api.identity.admin_dashboard import router as admin_dashboard_router
 from app.api.identity.admin_flavors import router as admin_flavors_router
 from app.api.identity.admin_gpu import router as admin_gpu_router
 from app.api.identity.admin_identity import router as admin_identity_router
@@ -156,16 +157,32 @@ from app.api.identity.admin_instances import router as admin_instances_router
 from app.api.identity.admin_libraries import router as admin_libraries_router
 from app.api.identity.admin_notion import router as admin_notion_router
 from app.api.identity.admin_orphans import router as admin_orphans_router
+from app.api.identity.admin_secrets import router as admin_secrets_router
 from app.api.identity.admin_services import router as admin_services_router
+from app.api.identity.invitations import router as invitations_router
 from app.api.identity.profile import router as profile_router
 from app.api.identity.profile_activity import router as profile_activity_router
+from app.api.identity.projects import router as projects_router
 
 _mark("api.identity")
 
 # ---------------------------------------------------------------------------
 # app.api.k3s + network + storage
 # ---------------------------------------------------------------------------
-from app.api.k3s import k3s_callback_router, k3s_clusters_router, k3s_health_router
+from app.api.k3s import (
+    k3s_callback_router,
+    k3s_certificates_router,
+    k3s_clusters_router,
+    k3s_configmaps_router,
+    k3s_health_router,
+    k3s_nodegroups_router,
+    k3s_pods_router,
+    k3s_secrets_router,
+    k3s_services_router,
+    k3s_shell_router,
+    k3s_templates_router,
+    k3s_workloads_router,
+)
 from app.api.network import (
     loadbalancers_router,
     networks_router,
@@ -268,6 +285,23 @@ if _ClientDisconnect is not None:
         """
         _logger.info("client disconnect: %s %s", request.method, request.url.path)
         return JSONResponse(status_code=499, content={"detail": "클라이언트 연결 종료"})
+
+
+from app.services.k3s_errors import K3sApiError
+
+
+@app.exception_handler(K3sApiError)
+async def k3s_api_error_handler(request: Request, exc: K3sApiError) -> JSONResponse:
+    """k3s_kube 등 워커-공유 서비스가 던지는 FastAPI-free 예외를 HTTP 응답으로 변환."""
+    if exc.status_code >= 500:
+        _logger.error(
+            "K3sApiError %d: %s %s — %s",
+            exc.status_code,
+            request.method,
+            request.url.path,
+            exc.detail,
+        )
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
 @app.exception_handler(Exception)
@@ -377,6 +411,9 @@ app.include_router(profile_router, prefix="/api/profile", tags=["profile"])
 app.include_router(profile_activity_router, prefix="/api/profile/activity", tags=["profile-activity"])
 app.include_router(admin_activity_router, prefix="/api/admin", tags=["admin-activity"])
 app.include_router(admin_orphans_router, prefix="/api/admin", tags=["admin-orphans"])
+app.include_router(admin_dashboard_router, prefix="/api/admin", tags=["admin-dashboard"])
+app.include_router(projects_router, prefix="/api/projects", tags=["projects"])
+app.include_router(invitations_router, prefix="/api/invitations", tags=["invitations"])
 # Compute
 app.include_router(images_router, prefix="/api/images", tags=["images"])
 app.include_router(flavors_router, prefix="/api/flavors", tags=["flavors"])
@@ -415,6 +452,15 @@ if _svc_cfg.service_k3s_enabled:
     app.include_router(k3s_clusters_router, prefix="/api/k3s/clusters", tags=["k3s"])
     app.include_router(k3s_health_router, prefix="/api/k3s/clusters", tags=["k3s-health"])
     app.include_router(k3s_callback_router, prefix="/api/k3s", tags=["k3s-callback"])
+    app.include_router(k3s_configmaps_router, prefix="/api/k3s/clusters", tags=["k3s-configmaps"])
+    app.include_router(k3s_secrets_router, prefix="/api/k3s/clusters", tags=["k3s-secrets"])
+    app.include_router(k3s_pods_router, prefix="/api/k3s/clusters", tags=["k3s-pods"])
+    app.include_router(k3s_services_router, prefix="/api/k3s/clusters", tags=["k3s-services"])
+    app.include_router(k3s_workloads_router, prefix="/api/k3s/clusters", tags=["k3s-workloads"])
+    app.include_router(k3s_shell_router, prefix="/api/k3s/clusters", tags=["k3s-shell"])
+    app.include_router(k3s_templates_router, prefix="/api/k3s/cluster-templates", tags=["k3s-templates"])
+    app.include_router(k3s_nodegroups_router, prefix="/api/k3s/clusters", tags=["k3s-nodegroups"])
+    app.include_router(k3s_certificates_router, prefix="/api/k3s/clusters", tags=["k3s-certificates"])
 
 # Union Mount 레이어 시스템 (DB 연결 시 항상 활성화)
 from app.api.union import router as union_router  # noqa: E402
@@ -430,6 +476,13 @@ if _svc_cfg.service_swift_enabled:
 
     app.include_router(swift_router, prefix="/api/object-storage", tags=["object-storage"])
     app.include_router(swift_upload_router)
+if _svc_cfg.service_barbican_enabled:
+    from app.api.secrets import containers_router, orders_router, secrets_router
+
+    app.include_router(secrets_router, prefix="/api/secrets", tags=["secrets"])
+    app.include_router(containers_router, prefix="/api/secret-containers", tags=["secret-containers"])
+    app.include_router(orders_router, prefix="/api/secret-orders", tags=["secret-orders"])
+    app.include_router(admin_secrets_router, prefix="/api/admin", tags=["admin-key-manager"])
 # Common
 app.include_router(dashboard_router, prefix="/api/dashboard", tags=["dashboard"])
 app.include_router(metrics_router, prefix="/api/metrics", tags=["metrics"])
@@ -644,6 +697,179 @@ async def _k3s_cleanup_loop() -> None:
         await asyncio.sleep(300)
 
 
+async def _trash_cleanup_loop() -> None:
+    """1시간 간격으로 만료된 휴지통 오브젝트·버킷을 영구 삭제.
+
+    오브젝트 휴지통: 각 프로젝트의 모든 *-trash 버킷에서 retention_days 경과 항목 삭제.
+    버킷 휴지통: Redis sorted-set에서 만료된 소프트 삭제 컨테이너를 하드 삭제.
+    """
+    await asyncio.sleep(180)  # 시작 후 3분 대기
+    while True:
+        try:
+            import time as _time
+
+            from app.api.object_storage.containers import (
+                _get_deleted_containers,
+                _mark_container_deleted,
+                _unmark_container_deleted,
+            )
+            from app.config import get_settings
+            from app.services import swift
+            from app.services.keystone import (
+                get_admin_connection_for_project,
+                list_all_project_ids,
+            )
+
+            settings = get_settings()
+            retention_days = settings.os_trash_retention_days
+            cutoff = int(_time.time()) - retention_days * 86400
+
+            try:
+                project_ids: set[str] = await asyncio.to_thread(list_all_project_ids)
+            except Exception:
+                _logger.warning("trash_cleanup: 프로젝트 목록 조회 실패", exc_info=True)
+                project_ids = set()
+
+            for pid in project_ids:
+                if not pid:
+                    continue
+                try:
+                    conn = await asyncio.to_thread(get_admin_connection_for_project, pid)
+                except Exception:
+                    _logger.debug("trash_cleanup: 프로젝트 %s 연결 실패", pid, exc_info=True)
+                    continue
+
+                try:
+                    # 컨테이너 목록 조회 (step 1·reconcile 공유)
+                    all_containers: list = []
+                    try:
+                        all_containers = await asyncio.to_thread(swift.list_containers, conn, False, True)
+                    except Exception:
+                        _logger.debug("trash_cleanup: pid=%s 컨테이너 목록 조회 실패", pid, exc_info=True)
+
+                    # 1. 오브젝트 휴지통 — 모든 *-trash 버킷의 만료 항목 삭제
+                    try:
+                        trash_containers = [c for c in all_containers if c.get("is_trash")]
+                        for tc in trash_containers:
+                            # 원본 버킷 이름 추출 (suffix "-trash" 제거)
+                            origin = tc["name"][: -len(swift.TRASH_SUFFIX)]
+                            trash_count = tc.get("count", -1)
+                            # C-2: 이미 빈 trash 버킷은 즉시 정리
+                            if trash_count == 0:
+                                try:
+                                    await asyncio.to_thread(swift.delete_container, conn, tc["name"])
+                                    _logger.info(
+                                        "trash_cleanup: 빈 휴지통 버킷 삭제 pid=%s bucket=%s",
+                                        pid,
+                                        tc["name"],
+                                    )
+                                except Exception:
+                                    _logger.debug(
+                                        "trash_cleanup: 빈 휴지통 버킷 삭제 실패 pid=%s bucket=%s",
+                                        pid,
+                                        tc["name"],
+                                        exc_info=True,
+                                    )
+                                continue
+                            try:
+                                result = await asyncio.to_thread(
+                                    swift.purge_expired_trash_objects, conn, origin, retention_days
+                                )
+                                if result["purged"]:
+                                    _logger.info(
+                                        "trash_cleanup: pid=%s bucket=%s purged=%d",
+                                        pid,
+                                        origin,
+                                        len(result["purged"]),
+                                    )
+                                # C-2: purge 후 trash 버킷이 비었으면 삭제
+                                if trash_count >= 0 and len(result.get("purged", [])) >= trash_count:
+                                    try:
+                                        await asyncio.to_thread(swift.delete_container, conn, tc["name"])
+                                        _logger.info(
+                                            "trash_cleanup: 빈 휴지통 버킷 삭제 pid=%s bucket=%s",
+                                            pid,
+                                            tc["name"],
+                                        )
+                                    except Exception:
+                                        _logger.debug(
+                                            "trash_cleanup: 빈 휴지통 버킷 삭제 실패 pid=%s bucket=%s",
+                                            pid,
+                                            tc["name"],
+                                            exc_info=True,
+                                        )
+                            except Exception:
+                                _logger.debug(
+                                    "trash_cleanup: 오브젝트 purge 실패 pid=%s bucket=%s",
+                                    pid,
+                                    origin,
+                                    exc_info=True,
+                                )
+                    except Exception:
+                        _logger.debug("trash_cleanup: pid=%s 오브젝트 휴지통 처리 실패", pid, exc_info=True)
+
+                    # C-1. Redis 재동기화 — Swift 메타에 있으나 Redis 누락된 소프트 삭제 버킷 복원
+                    # Redis 유실 시 소프트 삭제 버킷이 사용자 목록에 부활하는 것을 ≤1h 내 자동 교정한다.
+                    try:
+                        current_redis_map = await _get_deleted_containers(pid)
+                        normal_containers = [
+                            c for c in all_containers if not c.get("is_trash") and not c.get("is_quarantine")
+                        ]
+                        reconciled = 0
+                        for nc in normal_containers:
+                            cname = nc["name"]
+                            if cname in current_redis_map:
+                                continue  # 이미 Redis에 있음
+                            try:
+                                meta_epoch = await asyncio.to_thread(swift.get_container_deleted_at, conn, cname)
+                            except Exception:
+                                continue
+                            if meta_epoch is not None:
+                                await _mark_container_deleted(pid, cname, meta_epoch, retention_days)
+                                reconciled += 1
+                                _logger.info(
+                                    "trash_cleanup: Redis 재동기화 pid=%s name=%s epoch=%d",
+                                    pid,
+                                    cname,
+                                    meta_epoch,
+                                )
+                        if reconciled:
+                            _logger.info(
+                                "trash_cleanup: reconcile 완료 pid=%s count=%d",
+                                pid,
+                                reconciled,
+                            )
+                    except Exception:
+                        _logger.debug("trash_cleanup: pid=%s reconcile 실패", pid, exc_info=True)
+
+                    # 2. 버킷 휴지통 — 만료된 소프트 삭제 컨테이너 하드 삭제 (reconcile 후 재조회)
+                    try:
+                        deleted_map = await _get_deleted_containers(pid)
+                        for cname, epoch in deleted_map.items():
+                            if epoch <= cutoff:
+                                try:
+                                    await asyncio.to_thread(swift.delete_container, conn, cname)
+                                    _logger.info("trash_cleanup: 버킷 영구 삭제 pid=%s name=%s", pid, cname)
+                                except Exception:
+                                    _logger.debug(
+                                        "trash_cleanup: 버킷 삭제 실패 pid=%s name=%s", pid, cname, exc_info=True
+                                    )
+                                finally:
+                                    await _unmark_container_deleted(pid, cname)
+                    except Exception:
+                        _logger.debug("trash_cleanup: pid=%s 버킷 휴지통 처리 실패", pid, exc_info=True)
+
+                finally:
+                    import contextlib as _cl
+
+                    with _cl.suppress(Exception):
+                        await asyncio.to_thread(conn.close)
+
+        except Exception:
+            _logger.warning("trash_cleanup: 루프 오류", exc_info=True)
+        await asyncio.sleep(3600)  # 1시간
+
+
 async def _auto_backup_loop() -> None:
     """1시간 간격으로 자동 백업 설정이 있는 볼륨에 대해 백업 사이클 실행."""
     await asyncio.sleep(60)  # 시작 후 1분 대기
@@ -671,6 +897,36 @@ async def _auto_backup_loop() -> None:
                         )
         except Exception:
             _logger.warning("auto_backup: 루프 오류", exc_info=True)
+        await asyncio.sleep(3600)  # 1시간
+
+
+async def _db_auto_backup_loop() -> None:
+    """1시간 간격으로 Trove DB 인스턴스 자동 백업 실행."""
+    await asyncio.sleep(90)  # 볼륨 루프와 겹치지 않도록 90초 지연
+    while True:
+        try:
+            from app.services import db_auto_backup as _dab
+            from app.services.keystone import get_admin_connection_for_project
+
+            configs = await _dab.list_all_db_auto_backup_configs()
+            if configs:
+                _logger.info("db_auto_backup: %d개 DB 인스턴스 자동 백업 시작", len(configs))
+                for cfg in configs:
+                    project_id = cfg.get("project_id")
+                    instance_id = cfg.get("instance_id")
+                    if not project_id or not instance_id:
+                        continue
+                    try:
+                        conn = await asyncio.to_thread(get_admin_connection_for_project, project_id)
+                        await _dab.run_db_backup_cycle(conn, project_id, instance_id, cfg)
+                    except Exception:
+                        _logger.warning(
+                            "db_auto_backup: 백업 사이클 실패 (instance=%s)",
+                            instance_id,
+                            exc_info=True,
+                        )
+        except Exception:
+            _logger.warning("db_auto_backup: 루프 오류", exc_info=True)
         await asyncio.sleep(3600)  # 1시간
 
 
@@ -715,8 +971,11 @@ async def start_background_workers():
 
     asyncio.create_task(_snapshot_loop())
     asyncio.create_task(_auto_backup_loop())
+    asyncio.create_task(_db_auto_backup_loop())
     if _svc_cfg.service_k3s_enabled:
         asyncio.create_task(_k3s_cleanup_loop())
+    if _svc_cfg.service_swift_enabled:
+        asyncio.create_task(_trash_cleanup_loop())
 
     from app.services.library_builder import _build_worker
 

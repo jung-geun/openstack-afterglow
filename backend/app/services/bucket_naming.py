@@ -35,7 +35,7 @@ _RESERVED_EXACT: frozenset[str] = frozenset(
 )
 
 # 접미사 (suffix). 우리 시스템 패턴 충돌 방지.
-_RESERVED_SUFFIXES: tuple[str, ...] = ("-quarantine", "_segments")
+_RESERVED_SUFFIXES: tuple[str, ...] = ("-quarantine", "-trash", "_segments")
 
 # 접두사 (prefix). 벤더 / Swift internal 충돌 방지.
 _RESERVED_PREFIXES: tuple[str, ...] = ("aws-", "amazon-", "_account", "_container")

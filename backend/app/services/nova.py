@@ -101,8 +101,10 @@ def create_server(
     return _server_to_info(s)
 
 
-def get_console_output(conn: openstack.connection.Connection, server_id: str, length: int = 100) -> str:
-    output = conn.compute.get_server_console_output(server_id, length=length)
+def get_console_output(conn: openstack.connection.Connection, server_id: str, length: int | None = 100) -> str:
+    """서버 serial console 출력을 반환한다. length=None 이면 전체 출력."""
+    kwargs: dict = {} if length is None else {"length": length}
+    output = conn.compute.get_server_console_output(server_id, **kwargs)
     return output.get("output", "")
 
 
@@ -176,25 +178,30 @@ def get_project_limits(conn: openstack.connection.Connection) -> dict:
     }
 
 
-def get_project_quota(conn: openstack.connection.Connection, project_id: str) -> dict:
-    """프로젝트의 상세 Nova 할당량 (usage 포함)."""
+_NOVA_QUOTA_KEYS = ("instances", "cores", "ram", "key_pairs", "server_groups")
 
-    def _extract(q):
-        if q is None:
-            return {"limit": -1, "in_use": 0}
+
+def get_project_quota(conn: openstack.connection.Connection, project_id: str) -> dict:
+    """프로젝트의 상세 Nova 할당량 (usage 포함).
+
+    openstacksdk `compute.get_quota_set(usage=True)` 가 nested
+    `{limit, in_use, reserved}` dict 를 plain int 로 평탄화해서 in_use 정보를
+    잃는 케이스가 있어 — admin endpoint 와 동일하게 raw Nova REST API
+    `GET /os-quota-sets/{project_id}/detail` 을 직접 호출한다.
+    """
+
+    def _normalize(q) -> dict:
         if isinstance(q, dict):
-            return {"limit": q.get("limit", -1), "in_use": q.get("in_use", 0)}
-        return {"limit": getattr(q, "limit", -1), "in_use": getattr(q, "in_use", 0)}
+            return {"limit": int(q.get("limit", -1)), "in_use": int(q.get("in_use", 0))}
+        if isinstance(q, int):
+            return {"limit": q, "in_use": 0}
+        return {"limit": -1, "in_use": 0}
 
     try:
-        quota = conn.compute.get_quota_set(project_id, usage=True)
-        return {
-            "instances": _extract(getattr(quota, "instances", None)),
-            "cores": _extract(getattr(quota, "cores", None)),
-            "ram": _extract(getattr(quota, "ram", None)),
-            "key_pairs": _extract(getattr(quota, "key_pairs", None)),
-            "server_groups": _extract(getattr(quota, "server_groups", None)),
-        }
+        compute_endpoint = conn.compute.get_endpoint()
+        resp = conn.session.get(f"{compute_endpoint}/os-quota-sets/{project_id}/detail")
+        qs = resp.json().get("quota_set", {})
+        return {k: _normalize(qs.get(k)) for k in _NOVA_QUOTA_KEYS}
     except Exception:
         _logger.warning("Nova quota_set 조회 실패 — limits API로 fallback", exc_info=True)
         # fallback: limits API 사용
@@ -485,6 +492,7 @@ def _server_to_info(s) -> InstanceInfo:
         union_strategy=meta.get("union_strategy"),
         union_share_ids=meta.get("union_share_ids", "").split(",") if meta.get("union_share_ids") else [],
         union_upper_volume_id=meta.get("union_upper_volume_id"),
+        scheduling=meta.get("scheduling"),
         key_name=getattr(s, "key_name", None),
         user_id=getattr(s, "user_id", None),
         project_id=getattr(s, "project_id", None) or getattr(s, "tenant_id", None),

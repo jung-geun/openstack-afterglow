@@ -1,4 +1,5 @@
 import re
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -74,6 +75,7 @@ class InstanceInfo(BaseModel):
     union_strategy: str | None = None  # "prebuilt" | "dynamic"
     union_share_ids: list[str] = []
     union_upper_volume_id: str | None = None
+    scheduling: str | None = None  # "standard" | "ha"
     key_name: str | None = None
     user_id: str | None = None
     project_id: str | None = None
@@ -86,6 +88,7 @@ class CreateInstanceRequest(BaseModel):
     flavor_id: str
     libraries: list[str] = []
     strategy: str | None = None  # "prebuilt" | "dynamic" | None (no libraries)
+    scheduling: Literal["standard", "ha"] = "standard"
     network_id: str | None = None
     key_name: str | None = None
     admin_pass: str | None = Field(None, min_length=8, max_length=128)

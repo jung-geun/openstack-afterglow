@@ -1,15 +1,17 @@
 import asyncio
 import logging
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.api.deps import extend_session, get_session_remaining, get_token_info, invalidate_token_cache
 from app.config import get_settings
 from app.models.auth import GitLabCallbackRequest, LoginRequest, ProjectInfo, TokenResponse, UserInfo
 from app.rate_limit import limiter
-from app.services import keystone
+from app.services import jwt_service, keystone, session_store
 from app.services.cache import cached_call, ttl_fast, ttl_normal, ttl_static
+from app.services.recent_projects import get_recent_project_ids, record_project_access
 
 _logger = logging.getLogger(__name__)
 
@@ -19,6 +21,56 @@ class GroupInfo(BaseModel):
     name: str
     description: str | None = None
     domain_id: str | None = None
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str = Field(..., min_length=1)
+
+
+class SwitchProjectRequest(BaseModel):
+    project_id: str = Field(..., min_length=1, max_length=255)
+
+
+async def _build_token_response(
+    *,
+    keystone_token: str,
+    project_id: str,
+    project_name: str,
+    user_id: str,
+    username: str,
+    roles: list[str],
+    is_system_admin: bool,
+    default_project_id: str = "",
+) -> TokenResponse:
+    """Keystone 토큰으로 JWT access+refresh 쌍을 발급하고 TokenResponse를 반환."""
+    refresh_str, r_jti, r_exp = jwt_service.sign_refresh(user_id)
+    access_str, _, a_exp = jwt_service.sign_access(
+        user_id=user_id,
+        username=username,
+        project_id=project_id,
+        project_name=project_name,
+        refresh_jti=r_jti,
+    )
+    await session_store.store_session(
+        jti=r_jti,
+        keystone_token=keystone_token,
+        project_id=project_id,
+        user_id=user_id,
+        exp=r_exp,
+    )
+    exp_dt = datetime.fromtimestamp(a_exp, tz=UTC)
+    return TokenResponse(
+        token=access_str,
+        refresh_token=refresh_str,
+        project_id=project_id,
+        project_name=project_name,
+        user_id=user_id,
+        username=username,
+        expires_at=exp_dt.isoformat(),
+        roles=roles,
+        default_project_id=default_project_id,
+        is_system_admin=is_system_admin,
+    )
 
 
 router = APIRouter()
@@ -79,19 +131,19 @@ async def login(request: Request, req: LoginRequest, background_tasks: Backgroun
     except Exception:
         pass
 
-    # 대시보드 캐시 프리워밍 (백그라운드)
+    # 대시보드 캐시 프리워밍 + 최근 프로젝트 기록 (백그라운드)
     background_tasks.add_task(_prewarm_dashboard, data["token"], data["project_id"])
+    background_tasks.add_task(record_project_access, data["user_id"], data["project_id"])
 
-    return TokenResponse(
-        token=data["token"],
+    return await _build_token_response(
+        keystone_token=data["token"],
         project_id=data["project_id"],
         project_name=data["project_name"],
         user_id=data["user_id"],
         username=data["username"],
-        expires_at=data["expires_at"],
         roles=data.get("roles", []),
-        default_project_id=default_project_id,
         is_system_admin=data.get("is_system_admin", False),
+        default_project_id=default_project_id,
     )
 
 
@@ -129,20 +181,93 @@ async def extend_session_endpoint(token_info: dict = Depends(get_token_info)):
 
 @router.post("/logout")
 async def logout(token_info: dict = Depends(get_token_info)):
-    """로그아웃: Keystone 토큰 폐기 + 검증/세션 캐시 즉시 invalidate.
-
-    이전 구현은 검증 캐시(`afterglow:session:{hash[:32]}`)와 deps 의 캐시
-    키(`afterglow:session:{hash}` — 64자 full hash)가 어긋나 5분간 토큰이 유효했다.
-    `invalidate_token_cache` 헬퍼가 두 키를 통합해서 모두 삭제한다.
-    """
+    """로그아웃: refresh 세션 삭제 + Keystone 토큰 폐기 + 검증/세션 캐시 invalidate."""
     token = token_info["token"]
     pid = token_info.get("project_id") or "noscope"
+
+    # JWT 경로: refresh 세션 삭제
+    refresh_jti = token_info.get("refresh_jti")
+    if refresh_jti:
+        try:
+            await session_store.delete_session(refresh_jti)
+        except Exception:
+            _logger.warning("refresh 세션 삭제 실패 (jti=%s)", refresh_jti, exc_info=True)
+
     try:
         await asyncio.to_thread(keystone.revoke_token, token)
     except Exception:
         _logger.warning("Keystone revoke 실패 — 캐시는 그대로 invalidate", exc_info=True)
     await invalidate_token_cache(token, pid)
     return {"message": "로그아웃 완료"}
+
+
+@router.post("/refresh", response_model=TokenResponse)
+@limiter.limit("30/minute")
+async def refresh_token(request: Request, req: RefreshRequest):
+    """refresh JWT로 새 access JWT + refresh JWT 발급 (토큰 회전).
+
+    기존 refresh JTI는 즉시 삭제되므로 같은 refresh 토큰으로 두 번 호출하면 두 번째는 401.
+    """
+    try:
+        r_payload = jwt_service.verify_refresh(req.refresh_token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="유효하지 않은 refresh 토큰")
+
+    r_jti = r_payload["jti"]
+    sess = await session_store.get_session(r_jti)
+    if sess is None:
+        raise HTTPException(status_code=401, detail="세션이 만료되었습니다. 다시 로그인해 주세요.")
+
+    # Keystone 토큰 유효성 확인 (만료 시 재로그인 필요)
+    try:
+        kc_info = await asyncio.to_thread(
+            keystone.validate_token, sess["keystone_token"], project_id=sess["project_id"]
+        )
+    except Exception:
+        await session_store.delete_session(r_jti)
+        raise HTTPException(status_code=401, detail="세션이 만료되었습니다. 다시 로그인해 주세요.")
+
+    # 토큰 회전: 기존 refresh 삭제 후 새 쌍 발급
+    await session_store.delete_session(r_jti)
+
+    return await _build_token_response(
+        keystone_token=kc_info["token"],
+        project_id=kc_info["project_id"],
+        project_name=kc_info["project_name"],
+        user_id=kc_info["user_id"],
+        username=kc_info["username"],
+        roles=kc_info.get("roles", []),
+        is_system_admin=kc_info.get("is_system_admin", False),
+    )
+
+
+@router.post("/switch-project", response_model=TokenResponse)
+async def switch_project(req: SwitchProjectRequest, token_info: dict = Depends(get_token_info)):
+    """현재 JWT를 새 프로젝트로 rescope하여 새 토큰 쌍 발급."""
+    keystone_token = token_info["token"]
+    try:
+        kc_info = await asyncio.to_thread(keystone.validate_token, keystone_token, project_id=req.project_id)
+    except Exception:
+        raise HTTPException(status_code=403, detail="해당 프로젝트에 접근 권한이 없습니다")
+
+    # 이전 refresh 세션 정리 (JWT 경로인 경우)
+    old_rjti = token_info.get("refresh_jti")
+    if old_rjti:
+        try:
+            await session_store.delete_session(old_rjti)
+        except Exception:
+            pass
+
+    await record_project_access(kc_info["user_id"], kc_info["project_id"])
+    return await _build_token_response(
+        keystone_token=kc_info["token"],
+        project_id=kc_info["project_id"],
+        project_name=kc_info["project_name"],
+        user_id=kc_info["user_id"],
+        username=kc_info["username"],
+        roles=kc_info.get("roles", []),
+        is_system_admin=kc_info.get("is_system_admin", False),
+    )
 
 
 @router.get("/groups", response_model=list[GroupInfo])
@@ -166,6 +291,37 @@ async def list_projects(token_info: dict = Depends(get_token_info)):
         return [ProjectInfo(**p) for p in projects]
     except Exception:
         raise HTTPException(status_code=500, detail="프로젝트 목록 조회 실패")
+
+
+@router.get("/projects/recent", response_model=list[ProjectInfo])
+async def list_projects_recent(token_info: dict = Depends(get_token_info)):
+    """최근 접근 순으로 정렬된 프로젝트 목록 반환.
+
+    Redis에 기록된 접근 시각 기준으로 정렬하고, last_accessed_at 필드를 포함한다.
+    Redis 기록이 없는 프로젝트는 이름순으로 뒤에 덧붙인다.
+    """
+    try:
+        projects = await asyncio.to_thread(keystone.list_projects, token_info["token"])
+    except Exception:
+        raise HTTPException(status_code=500, detail="프로젝트 목록 조회 실패")
+
+    user_id = token_info["user_id"]
+    recent_ids = await get_recent_project_ids(user_id)
+    recent_map: dict[str, int] = {pid: ts for pid, ts in recent_ids}
+
+    project_infos: list[ProjectInfo] = []
+    for p in projects:
+        ts = recent_map.get(p["id"])
+        last_accessed_at = datetime.fromtimestamp(ts / 1000, tz=UTC).isoformat() if ts else None
+        project_infos.append(ProjectInfo(**p, last_accessed_at=last_accessed_at))
+
+    # 최근 접근 기록 있는 것 먼저(최신순), 없는 것은 이름순
+    def _sort_key(pi: ProjectInfo) -> tuple[int, str]:
+        ts = recent_map.get(pi.id, 0)
+        return (-ts, pi.name)
+
+    project_infos.sort(key=_sort_key)
+    return project_infos
 
 
 @router.get("/gitlab/enabled")
@@ -207,15 +363,14 @@ async def gitlab_callback(request: Request, req: GitLabCallbackRequest, backgrou
     # default_project_id는 동기 Keystone 호출로 1초 안팎 지연이 발생하므로
     # 응답 경로에서 제외한다. exchange_code의 scoped 토큰 project_id를 그대로 사용.
     background_tasks.add_task(_prewarm_dashboard, data["token"], data["project_id"])
+    background_tasks.add_task(record_project_access, data["user_id"], data["project_id"])
 
-    return TokenResponse(
-        token=data["token"],
+    return await _build_token_response(
+        keystone_token=data["token"],
         project_id=data["project_id"],
         project_name=data["project_name"],
         user_id=data["user_id"],
         username=data["username"],
-        expires_at=data["expires_at"],
         roles=data.get("roles", []),
-        default_project_id="",
         is_system_admin=data.get("is_system_admin", False),
     )

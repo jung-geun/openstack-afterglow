@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS notion_config (
 
     -- 동기화 설정
     enabled                    TINYINT(1)   NOT NULL DEFAULT 0,
-    interval_minutes           INT          NOT NULL DEFAULT 5,
+    interval_minutes           INT          NOT NULL DEFAULT 30,
 
     -- 마지막 동기화 시각
     last_sync                  DATETIME(6),

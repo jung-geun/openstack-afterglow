@@ -2,6 +2,7 @@
   import { auth } from '$lib/stores/auth';
   import { api } from '$lib/api/client';
   import TopologyMini from '$lib/components/TopologyMini.svelte';
+  import type { FloatingIpInfo } from '$lib/types/networks';
 
   interface SubnetDetail {
     id: string; name: string; cidr: string;
@@ -28,12 +29,6 @@
     project_id?: string | null;
     network_names: string[];
     ip_addresses: { addr: string; type: string; network_name: string; network_id?: string | null }[];
-  }
-  interface FloatingIpInfo {
-    id: string; floating_ip_address: string;
-    fixed_ip_address: string | null; status: string;
-    port_id: string | null; floating_network_id: string;
-    project_id?: string | null;
   }
   interface TopologyLBMember {
     id: string; address: string; protocol_port: number;

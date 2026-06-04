@@ -27,6 +27,9 @@ from app.services import library_builder, manila, neutron, nova
 from app.services.cache import cached_call, invalidate, ttl_fast, ttl_normal, ttl_slow
 from app.services.octavia import get_topology_lbs
 
+# FastAPI-free 인벤토리 유틸리티로 이동됨 — admin.py 내부 호출 + 하위 호환 재export.
+from app.services.openstack_inventory import _fetch_hypervisors_raw
+
 router = APIRouter()
 
 
@@ -134,17 +137,6 @@ async def list_active_builds():
 # ---------------------------------------------------------------------------
 # 관리자 전용 엔드포인트
 # ---------------------------------------------------------------------------
-
-
-def _fetch_hypervisors_raw(conn: openstack.connection.Connection) -> list[dict]:
-    """Nova microversion 2.53으로 하이퍼바이저 raw JSON 조회.
-    2.88+ 에서 vcpus/memory_mb 등 필드가 deprecated되므로 2.53을 명시적으로 사용."""
-    endpoint = conn.compute.get_endpoint()
-    resp = conn.session.get(
-        f"{endpoint}/os-hypervisors/detail",
-        headers={"OpenStack-API-Version": "compute 2.53"},
-    )
-    return resp.json().get("hypervisors", [])
 
 
 def _fetch_overview_hypervisors(conn) -> dict:
@@ -1150,41 +1142,6 @@ async def create_port(
         _logger.warning("포트 생성 실패: %s", e)
 
         raise HTTPException(status_code=400, detail="포트 생성 실패")
-
-
-@router.get("/quotas/{project_id}", dependencies=[Depends(require_admin)])
-async def get_quotas(project_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
-    """특정 프로젝트의 쿼터 조회 (Compute + Volume, 실제 사용량 포함)."""
-    try:
-
-        def _get():
-            result: dict = {"compute": {}, "volume": {}}
-            compute_endpoint = conn.compute.get_endpoint()
-            bs_endpoint = conn.block_storage.get_endpoint()
-            try:
-                cq = conn.session.get(f"{compute_endpoint}/os-quota-sets/{project_id}/detail")
-                qs = cq.json().get("quota_set", {})
-                for key in ("instances", "cores", "ram"):
-                    q = qs.get(key, {})
-                    result["compute"][key] = {"limit": q.get("limit", 0), "in_use": q.get("in_use", 0)}
-            except Exception:
-                result["compute"] = {}
-            try:
-                bq = conn.session.get(f"{bs_endpoint}/os-quota-sets/{project_id}", params={"usage": "true"})
-                bqs = bq.json().get("quota_set", {})
-                for key in ("volumes", "gigabytes"):
-                    q = bqs.get(key, {})
-                    if isinstance(q, dict):
-                        result["volume"][key] = {"limit": q.get("limit", 0), "in_use": q.get("in_use", 0)}
-                    else:
-                        result["volume"][key] = {"limit": q, "in_use": 0}
-            except Exception:
-                result["volume"] = {}
-            return result
-
-        return await asyncio.to_thread(_get)
-    except Exception:
-        raise HTTPException(status_code=500, detail="쿼터 조회 실패")
 
 
 @router.get("/overview/projects", dependencies=[Depends(require_admin)])
@@ -2232,6 +2189,136 @@ async def delete_admin_k3s_cluster_async(
             yield f"data: {fail.model_dump_json()}\n\n"
 
     return StreamingResponse(gen(), media_type="text/event-stream", headers=_SSE_HEADERS)
+
+
+@router.get("/k3s-clusters/{cluster_id}/ca-certificate", dependencies=[Depends(require_admin)])
+async def download_admin_k3s_ca_certificate(cluster_id: str):
+    """관리자용 k3s CA 인증서 PEM 다운로드."""
+    from fastapi.responses import Response
+
+    from app.services.k3s_certs import extract_ca_pem
+
+    cluster = await k3s_cluster.get_cluster_admin(cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
+
+    project_id = cluster.get("project_id", "")
+    kc = await k3s_cluster.get_kubeconfig_admin(cluster_id)
+    if not kc:
+        raise HTTPException(status_code=404, detail="kubeconfig를 찾을 수 없습니다")
+
+    try:
+        pem = extract_ca_pem(kc)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"CA 인증서 추출 실패: {e}")
+
+    cluster_name = cluster.get("name", cluster_id)
+    _logger.info("k3s CA 다운로드 (admin): cluster=%s project=%s", cluster_id, project_id)
+    return Response(
+        content=pem.encode(),
+        media_type="application/x-pem-file",
+        headers={"Content-Disposition": f'attachment; filename="ca-{cluster_name}.pem"'},
+    )
+
+
+@router.get("/k3s-clusters/{cluster_id}/certificate-expiry", dependencies=[Depends(require_admin)])
+async def get_admin_k3s_certificate_expiry(cluster_id: str):
+    """관리자용 k3s 인증서 만료 조회."""
+    from app.models.k3s import CertificateExpiryResponse, CertificateInfo
+    from app.services.cache import cached_call
+    from app.services.cache import keys as cache_keys
+    from app.services.k3s_certs import parse_kubeconfig_certs, probe_tls_server_cert
+
+    cluster = await k3s_cluster.get_cluster_admin(cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
+
+    project_id = cluster.get("project_id", "")
+    kc = await k3s_cluster.get_kubeconfig_admin(cluster_id)
+    if not kc:
+        raise HTTPException(status_code=404, detail="kubeconfig를 찾을 수 없습니다")
+
+    cache_key = cache_keys.project_key("k3s", project_id, cluster_id, sub="cert_expiry")
+
+    async def _compute() -> dict:
+        import yaml
+
+        certs = parse_kubeconfig_certs(kc)
+        server_via_tls: list[dict] = []
+        try:
+            parsed = yaml.safe_load(kc)
+            server_url = parsed["clusters"][0]["cluster"]["server"]
+            host = server_url.split("//")[-1].split(":")[0]
+            port_str = server_url.split(":")[-1].split("/")[0]
+            port = int(port_str) if port_str.isdigit() else 6443
+            server_via_tls = await probe_tls_server_cert(host, port)
+        except Exception as e:
+            _logger.debug("TLS 프로브 실패: %s", e)
+        return {"ca": certs.get("ca"), "client": certs.get("client"), "server_via_tls": server_via_tls}
+
+    data = await cached_call(cache_key, 3600, _compute)
+
+    def _to_info(d: dict | None) -> CertificateInfo | None:
+        return CertificateInfo(**d) if d else None
+
+    return CertificateExpiryResponse(
+        ca=_to_info(data.get("ca")),
+        client=_to_info(data.get("client")),
+        server_via_tls=[CertificateInfo(**s) for s in (data.get("server_via_tls") or [])],
+    )
+
+
+@router.post("/k3s-clusters/{cluster_id}/rotate-certs", dependencies=[Depends(require_admin)])
+async def rotate_admin_k3s_certs(cluster_id: str):
+    """관리자용 k3s 인증서 회전 (SSE 스트림)."""
+    from app.api.k3s.clusters import _SSE_HEADERS
+    from app.config import get_settings
+    from app.services.k3s_cert_rotation import acquire_rotation_lock, release_rotation_lock, rotate_certificates
+
+    cluster = await k3s_cluster.get_cluster_admin(cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
+    if cluster.get("status") not in ("ACTIVE", "ERROR"):
+        raise HTTPException(status_code=409, detail="클러스터가 ACTIVE 상태가 아닙니다.")
+
+    master_count = cluster.get("master_count", 1)
+    if master_count < 3:
+        raise HTTPException(
+            status_code=422,
+            detail="단일 마스터 클러스터는 인증서 회전 중 다운타임이 발생합니다. HA 클러스터에서만 지원합니다.",
+        )
+
+    if not await acquire_rotation_lock(cluster_id):
+        raise HTTPException(status_code=409, detail="이미 진행 중인 인증서 회전 작업이 있습니다.")
+
+    settings = get_settings()
+    project_id = cluster.get("project_id", "")
+
+    async def _gen():
+        try:
+            async for msg in rotate_certificates(
+                cluster_id,
+                project_id,
+                "admin",
+                node_timeout=float(settings.k3s_cert_rotation_node_timeout_sec),
+                job_image=settings.k3s_cert_rotation_job_image,
+            ):
+                yield f"data: {msg.model_dump_json()}\n\n"
+        finally:
+            await release_rotation_lock(cluster_id)
+
+    return StreamingResponse(_gen(), media_type="text/event-stream", headers=_SSE_HEADERS)
+
+
+# k3s 클러스터 템플릿 관리 (관리자)
+
+
+@router.get("/k3s-cluster-templates", dependencies=[Depends(require_admin)])
+async def list_admin_k3s_cluster_templates():
+    """관리자용 템플릿 전체 목록 (public=False 포함)."""
+    from app.services import k3s_template as _tmpl_svc
+
+    return await _tmpl_svc.list_templates(admin=True)
 
 
 # ===========================================================================

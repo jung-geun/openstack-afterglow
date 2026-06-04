@@ -65,8 +65,8 @@
 				sessionInfoResult.status === 'fulfilled' ? sessionInfoResult.value.warning_before_seconds : 300;
 
 			// 기본 프로젝트가 설정되어 있고, 프로젝트 목록에 존재하면 해당 프로젝트로 전환
-			let selectedProjectId = data.project_id;
-			let selectedProjectName = data.project_name;
+			let selectedProjectId: string | null = null;
+			let selectedProjectName: string | null = null;
 			if (data.default_project_id && projects.length > 0) {
 				const defaultProject = projects.find(p => p.id === data.default_project_id);
 				if (defaultProject) {
@@ -74,21 +74,28 @@
 					selectedProjectName = defaultProject.name;
 				}
 			}
+			if (!selectedProjectId && projects.length === 1) {
+				selectedProjectId = projects[0].id;
+				selectedProjectName = projects[0].name;
+			}
 
 			setAuth({
 				token: data.token,
+				refreshToken: (data as { refresh_token?: string }).refresh_token ?? null,
+				accessExpiresAt: data.expires_at
+					? Math.floor(new Date(data.expires_at).getTime() / 1000)
+					: null,
 				userId: data.user_id,
 				username: data.username,
 				projectId: selectedProjectId,
 				projectName: selectedProjectName,
-				expiresAt: data.expires_at ?? null,
 				sessionTimeoutSeconds,
 				sessionWarningBeforeSeconds,
 				roles: data.roles ?? [],
 				isSystemAdmin: data.is_system_admin ?? false,
 			});
 			setAvailableProjects(projects);
-			goto('/dashboard');
+			goto(selectedProjectId ? '/dashboard' : '/select-project');
 		} catch (e) {
 			error = e instanceof ApiError ? `인증 실패 (${e.status}): ${e.message}` : 'GitLab 인증에 실패했습니다';
 			loading = false;

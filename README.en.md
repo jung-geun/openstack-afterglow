@@ -4,9 +4,9 @@
 
 > Next-generation OpenStack dashboard — Horizon's stability and feature completeness combined with Skyline's modern UX
 
-[![CI](https://github.com/jung-geun/openstack-afterglow/actions/workflows/test.yml/badge.svg)](https://github.com/jung-geun/openstack-afterglow/actions/workflows/test.yml)
-[![Docker Build](https://github.com/jung-geun/openstack-afterglow/actions/workflows/docker-build.yml/badge.svg)](https://github.com/jung-geun/openstack-afterglow/actions/workflows/docker-build.yml)
-[![License](https://img.shields.io/github/license/jung-geun/openstack-afterglow)](LICENSE)
+[![CI](https://github.com/openstack-afterglow/openstack-afterglow/actions/workflows/test.yml/badge.svg)](https://github.com/openstack-afterglow/openstack-afterglow/actions/workflows/test.yml)
+[![Docker Build](https://github.com/openstack-afterglow/openstack-afterglow/actions/workflows/docker-build.yml/badge.svg)](https://github.com/openstack-afterglow/openstack-afterglow/actions/workflows/docker-build.yml)
+[![License](https://img.shields.io/github/license/openstack-afterglow/openstack-afterglow)](LICENSE)
 
 ---
 
@@ -110,7 +110,7 @@ graph LR
 ## Quick Start (Docker Compose)
 
 ```bash
-git clone git@github.com:jung-geun/openstack-afterglow.git
+git clone git@github.com:openstack-afterglow/openstack-afterglow.git
 cd openstack-afterglow
 cp config.toml.example config.toml
 ```

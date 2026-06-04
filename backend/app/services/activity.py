@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Literal
 
 from sqlalchemy import and_, desc, select
@@ -13,6 +14,16 @@ from app.models.activity import ActivityLog
 logger = logging.getLogger(__name__)
 
 ActionStatus = Literal["started", "success", "failed"]
+
+_last_db_warn_ts: float = float("-inf")  # 첫 번째 경고는 항상 즉시 출력
+
+
+def _warn_db_unavailable(msg: str) -> None:
+    global _last_db_warn_ts
+    now = time.monotonic()
+    if now - _last_db_warn_ts >= 60.0:
+        logger.warning(msg)
+        _last_db_warn_ts = now
 
 
 async def record(
@@ -30,9 +41,11 @@ async def record(
 ) -> None:
     """활동 1건 기록. 실패 시 silently swallow + warning."""
     if not is_db_available():
+        _warn_db_unavailable("ActivityLog skipped: db unavailable (engine=None or circuit breaker open)")
         return
     factory = get_session_factory()
     if factory is None:
+        _warn_db_unavailable("ActivityLog skipped: session_factory is None")
         return
     try:
         async with factory() as session:

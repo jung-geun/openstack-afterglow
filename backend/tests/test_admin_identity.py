@@ -6,7 +6,7 @@
   - admin_client      → 403이 아님 (관문 통과, 실제 응답은 mock에 따라 다양)
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -251,6 +251,439 @@ async def test_create_project_calls_both_monitoring_sgs(admin_client, mock_conn)
     assert ne_called[0][1] == "proj-new-1"  # project_id
     assert len(dc_called) == 1
     assert dc_called[0][1] == "proj-new-1"
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 역할 할당/회수 audit + 즉시 세션 무효화
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+_ADMIN_ROLE_ID = "admin-role-id-xyz"
+_MEMBER_ROLE_ID = "member-role-id-abc"
+
+
+@pytest.mark.asyncio
+async def test_assign_admin_role_revokes_sessions(admin_client, mock_conn):
+    """admin role 할당 시 대상 사용자의 세션이 즉시 무효화되고 audit이 기록된다."""
+    mock_conn.identity.assign_project_role_to_user = MagicMock(return_value=None)
+
+    with (
+        patch(
+            "app.api.identity.admin_identity.keystone._resolve_admin_ids",
+            return_value=(None, _ADMIN_ROLE_ID),
+        ),
+        patch(
+            "app.api.identity.admin_identity.session_store.revoke_user_sessions",
+            new=AsyncMock(return_value=2),
+        ) as mock_revoke,
+        patch(
+            "app.api.identity.admin_identity.activity.record",
+            new=AsyncMock(),
+        ) as mock_record,
+    ):
+        resp = await admin_client.post(
+            "/api/admin/roles/assign",
+            json={"user_id": "target-user-1", "project_id": "admin-proj", "role_id": _ADMIN_ROLE_ID},
+        )
+
+    assert resp.status_code == 200
+    mock_revoke.assert_awaited_once_with("target-user-1")
+    mock_record.assert_awaited_once()
+    assert mock_record.call_args.kwargs["action"] == "admin_role_grant"
+    assert mock_record.call_args.kwargs["resource_id"] == "target-user-1"
+
+
+@pytest.mark.asyncio
+async def test_assign_non_admin_role_no_revoke(admin_client, mock_conn):
+    """일반 role 할당 시 세션 무효화는 수행하지 않고 audit만 기록된다."""
+    mock_conn.identity.assign_project_role_to_user = MagicMock(return_value=None)
+
+    with (
+        patch(
+            "app.api.identity.admin_identity.keystone._resolve_admin_ids",
+            return_value=(None, _ADMIN_ROLE_ID),
+        ),
+        patch(
+            "app.api.identity.admin_identity.session_store.revoke_user_sessions",
+            new=AsyncMock(return_value=0),
+        ) as mock_revoke,
+        patch(
+            "app.api.identity.admin_identity.activity.record",
+            new=AsyncMock(),
+        ) as mock_record,
+    ):
+        resp = await admin_client.post(
+            "/api/admin/roles/assign",
+            json={"user_id": "target-user-2", "project_id": "some-proj", "role_id": _MEMBER_ROLE_ID},
+        )
+
+    assert resp.status_code == 200
+    mock_revoke.assert_not_awaited()
+    mock_record.assert_awaited_once()
+    assert mock_record.call_args.kwargs["action"] == "role_grant"
+
+
+@pytest.mark.asyncio
+async def test_revoke_admin_role_revokes_sessions(admin_client, mock_conn):
+    """admin role 회수 시 대상 사용자의 세션이 즉시 무효화되고 audit이 기록된다."""
+    mock_conn.identity.unassign_project_role_from_user = MagicMock(return_value=None)
+
+    with (
+        patch(
+            "app.api.identity.admin_identity.keystone._resolve_admin_ids",
+            return_value=(None, _ADMIN_ROLE_ID),
+        ),
+        patch(
+            "app.api.identity.admin_identity.session_store.revoke_user_sessions",
+            new=AsyncMock(return_value=1),
+        ) as mock_revoke,
+        patch(
+            "app.api.identity.admin_identity.activity.record",
+            new=AsyncMock(),
+        ) as mock_record,
+    ):
+        resp = await admin_client.delete(
+            f"/api/admin/roles/assign?user_id=target-user-3&project_id=admin-proj&role_id={_ADMIN_ROLE_ID}",
+        )
+
+    assert resp.status_code == 200
+    mock_revoke.assert_awaited_once_with("target-user-3")
+    mock_record.assert_awaited_once()
+    assert mock_record.call_args.kwargs["action"] == "admin_role_revoke"
+    assert mock_record.call_args.kwargs["resource_id"] == "target-user-3"
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Security Policy
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+@pytest.mark.asyncio
+async def test_security_policy_requires_admin(non_admin_client):
+    resp = await non_admin_client.get("/api/admin/identity/security-policy")
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_security_policy_returns_compat_flag_and_count(admin_client):
+    """security-policy가 legacy_compat, system_admin_count, admin_project_member_count를 반환한다."""
+
+    def _make_assign(uid: str):
+        a = MagicMock()
+        a.user = {"id": uid}
+        return a
+
+    mock_ks = MagicMock()
+    mock_ks.role_assignments.list.side_effect = lambda **kwargs: (
+        [_make_assign("sys-1"), _make_assign("sys-2")] if kwargs.get("system") == "all" else [_make_assign("proj-1")]
+    )
+
+    with (
+        patch(
+            "app.api.identity.admin_identity.keystone._resolve_admin_ids",
+            return_value=("proj-id", _ADMIN_ROLE_ID),
+        ),
+        patch(
+            "app.api.identity.admin_identity.keystone._get_admin_ks_client",
+            return_value=mock_ks,
+        ),
+        patch(
+            "app.config.get_settings",
+            return_value=MagicMock(admin_legacy_project_policy=True),
+        ),
+    ):
+        resp = await admin_client.get("/api/admin/identity/security-policy")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["legacy_compat"] is True
+    assert data["system_admin_count"] == 2
+    assert data["admin_project_member_count"] == 1
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# migrate-from-project
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+@pytest.mark.asyncio
+async def test_migrate_from_project_requires_admin(non_admin_client):
+    resp = await non_admin_client.post("/api/admin/identity/system-roles/migrate-from-project")
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_migrate_from_project_grants_only_missing(admin_client):
+    """이미 system admin인 멤버는 skip, 아닌 멤버만 grant → migrated/skipped 카운트 정확."""
+
+    def _make_assign(uid: str):
+        a = MagicMock()
+        a.user = {"id": uid}
+        return a
+
+    mock_ks = MagicMock()
+
+    def _list_side(**kwargs):
+        if kwargs.get("system") == "all":
+            return [_make_assign("already-admin")]
+        return [_make_assign("already-admin"), _make_assign("new-admin")]
+
+    mock_ks.role_assignments.list.side_effect = _list_side
+    mock_ks.roles.grant = MagicMock(return_value=None)
+
+    with (
+        patch(
+            "app.api.identity.admin_identity.keystone._resolve_admin_ids",
+            return_value=("admin-proj-id", _ADMIN_ROLE_ID),
+        ),
+        patch(
+            "app.api.identity.admin_identity.keystone._get_admin_ks_client",
+            return_value=mock_ks,
+        ),
+        patch(
+            "app.api.identity.admin_identity.session_store.revoke_user_sessions",
+            new=AsyncMock(return_value=1),
+        ) as mock_revoke,
+        patch(
+            "app.api.identity.admin_identity.activity.record",
+            new=AsyncMock(),
+        ) as mock_record,
+    ):
+        resp = await admin_client.post("/api/admin/identity/system-roles/migrate-from-project")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["migrated"] == 1
+    assert data["skipped"] == 1
+    assert data["errors"] == []
+    mock_ks.roles.grant.assert_called_once()
+    mock_revoke.assert_awaited_once_with("new-admin")
+    mock_record.assert_awaited_once()
+    assert mock_record.call_args.kwargs["action"] == "admin_system_role_grant"
+    assert mock_record.call_args.kwargs["resource_id"] == "new-admin"
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# System Roles (system:all scope)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+@pytest.mark.asyncio
+async def test_list_system_roles_requires_admin(non_admin_client):
+    resp = await non_admin_client.get("/api/admin/identity/system-roles")
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_grant_system_role_revokes_sessions(admin_client):
+    """system role grant 시 대상 세션 즉시 무효화 + audit 기록."""
+    mock_ks = MagicMock()
+    mock_ks.roles.grant = MagicMock(return_value=None)
+
+    with (
+        patch(
+            "app.api.identity.admin_identity.keystone._resolve_admin_ids",
+            return_value=(None, _ADMIN_ROLE_ID),
+        ),
+        patch(
+            "app.api.identity.admin_identity.keystone._get_admin_ks_client",
+            return_value=mock_ks,
+        ),
+        patch(
+            "app.api.identity.admin_identity.session_store.revoke_user_sessions",
+            new=AsyncMock(return_value=1),
+        ) as mock_revoke,
+        patch(
+            "app.api.identity.admin_identity.activity.record",
+            new=AsyncMock(),
+        ) as mock_record,
+    ):
+        resp = await admin_client.post(
+            "/api/admin/identity/system-roles/grant",
+            json={"user_id": "target-user-sys"},
+        )
+
+    assert resp.status_code == 200
+    mock_revoke.assert_awaited_once_with("target-user-sys")
+    mock_record.assert_awaited_once()
+    assert mock_record.call_args.kwargs["action"] == "admin_system_role_grant"
+    assert mock_record.call_args.kwargs["resource_id"] == "target-user-sys"
+
+
+@pytest.mark.asyncio
+async def test_revoke_system_role_revokes_sessions(admin_client):
+    """system role revoke 시 대상 세션 즉시 무효화 + audit 기록."""
+    mock_ks = MagicMock()
+    mock_ks.roles.revoke = MagicMock(return_value=None)
+
+    with (
+        patch(
+            "app.api.identity.admin_identity.keystone._resolve_admin_ids",
+            return_value=(None, _ADMIN_ROLE_ID),
+        ),
+        patch(
+            "app.api.identity.admin_identity.keystone._get_admin_ks_client",
+            return_value=mock_ks,
+        ),
+        patch(
+            "app.api.identity.admin_identity.session_store.revoke_user_sessions",
+            new=AsyncMock(return_value=1),
+        ) as mock_revoke,
+        patch(
+            "app.api.identity.admin_identity.activity.record",
+            new=AsyncMock(),
+        ) as mock_record,
+    ):
+        resp = await admin_client.post(
+            "/api/admin/identity/system-roles/revoke",
+            json={"user_id": "target-user-sys"},
+        )
+
+    assert resp.status_code == 200
+    mock_revoke.assert_awaited_once_with("target-user-sys")
+    mock_record.assert_awaited_once()
+    assert mock_record.call_args.kwargs["action"] == "admin_system_role_revoke"
+    assert mock_record.call_args.kwargs["resource_id"] == "target-user-sys"
+
+
+@pytest.mark.asyncio
+async def test_list_system_roles_returns_enriched_fields(admin_client):
+    """list_system_roles 응답에 name/email/enabled 필드가 포함된다."""
+    mock_assignment = MagicMock()
+    mock_assignment.user = {"id": "sys-user-1"}
+
+    mock_user = MagicMock()
+    mock_user.name = "Alice"
+    mock_user.email = "alice@example.com"
+    mock_user.enabled = True
+
+    mock_ks = MagicMock()
+    mock_ks.role_assignments.list.return_value = [mock_assignment]
+    mock_ks.users.get.return_value = mock_user
+
+    with (
+        patch(
+            "app.api.identity.admin_identity.keystone._resolve_admin_ids",
+            return_value=(None, _ADMIN_ROLE_ID),
+        ),
+        patch(
+            "app.api.identity.admin_identity.keystone._get_admin_ks_client",
+            return_value=mock_ks,
+        ),
+    ):
+        resp = await admin_client.get("/api/admin/identity/system-roles")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["user_id"] == "sys-user-1"
+    assert data[0]["name"] == "Alice"
+    assert data[0]["email"] == "alice@example.com"
+    assert data[0]["enabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_revoke_last_system_admin_blocked(admin_client):
+    """마지막 system admin 회수 시도 → 422."""
+    mock_assignment = MagicMock()
+    mock_assignment.user = {"id": "last-admin"}
+
+    mock_ks = MagicMock()
+    mock_ks.role_assignments.list.return_value = [mock_assignment]
+
+    with (
+        patch(
+            "app.api.identity.admin_identity.keystone._resolve_admin_ids",
+            return_value=(None, _ADMIN_ROLE_ID),
+        ),
+        patch(
+            "app.api.identity.admin_identity.keystone._get_admin_ks_client",
+            return_value=mock_ks,
+        ),
+        patch(
+            "app.api.identity.admin_identity.session_store.revoke_user_sessions",
+            new=AsyncMock(return_value=0),
+        ),
+        patch(
+            "app.api.identity.admin_identity.activity.record",
+            new=AsyncMock(),
+        ),
+    ):
+        resp = await admin_client.post(
+            "/api/admin/identity/system-roles/revoke",
+            json={"user_id": "last-admin"},
+        )
+
+    assert resp.status_code == 422
+    assert "마지막" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_revoke_with_other_admins_succeeds(admin_client):
+    """system admin이 2명 이상인 경우 회수 성공 → 200."""
+
+    def _make_assign(uid: str):
+        a = MagicMock()
+        a.user = {"id": uid}
+        return a
+
+    mock_ks = MagicMock()
+    mock_ks.role_assignments.list.return_value = [_make_assign("admin-1"), _make_assign("admin-2")]
+    mock_ks.roles.revoke = MagicMock(return_value=None)
+
+    with (
+        patch(
+            "app.api.identity.admin_identity.keystone._resolve_admin_ids",
+            return_value=(None, _ADMIN_ROLE_ID),
+        ),
+        patch(
+            "app.api.identity.admin_identity.keystone._get_admin_ks_client",
+            return_value=mock_ks,
+        ),
+        patch(
+            "app.api.identity.admin_identity.session_store.revoke_user_sessions",
+            new=AsyncMock(return_value=1),
+        ),
+        patch(
+            "app.api.identity.admin_identity.activity.record",
+            new=AsyncMock(),
+        ),
+    ):
+        resp = await admin_client.post(
+            "/api/admin/identity/system-roles/revoke",
+            json={"user_id": "admin-1"},
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "revoked"
+
+
+@pytest.mark.asyncio
+async def test_revoke_non_admin_role_no_revoke(admin_client, mock_conn):
+    """일반 role 회수 시 세션 무효화는 수행하지 않고 audit만 기록된다."""
+    mock_conn.identity.unassign_project_role_from_user = MagicMock(return_value=None)
+
+    with (
+        patch(
+            "app.api.identity.admin_identity.keystone._resolve_admin_ids",
+            return_value=(None, _ADMIN_ROLE_ID),
+        ),
+        patch(
+            "app.api.identity.admin_identity.session_store.revoke_user_sessions",
+            new=AsyncMock(return_value=0),
+        ) as mock_revoke,
+        patch(
+            "app.api.identity.admin_identity.activity.record",
+            new=AsyncMock(),
+        ) as mock_record,
+    ):
+        resp = await admin_client.delete(
+            f"/api/admin/roles/assign?user_id=target-user-4&project_id=some-proj&role_id={_MEMBER_ROLE_ID}",
+        )
+
+    assert resp.status_code == 200
+    mock_revoke.assert_not_awaited()
+    mock_record.assert_awaited_once()
+    assert mock_record.call_args.kwargs["action"] == "role_revoke"
 
 
 @pytest.mark.asyncio

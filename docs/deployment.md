@@ -29,7 +29,7 @@ Afterglow는 Docker Compose(개발/소규모), Kubernetes(프로덕션), ArgoCD(
 ### 1. 저장소 클론 및 설정
 
 ```bash
-git clone git@github.com:jung-geun/openstack-afterglow.git
+git clone git@github.com:openstack-afterglow/openstack-afterglow.git
 cd openstack-afterglow
 cp config.toml.example config.toml
 ```
@@ -121,7 +121,7 @@ OpenStack 환경 내부(컨트롤러 노드)에서 kolla-ansible 플레이북으
 
 ```bash
 # 저장소 클론
-git clone git@github.com:jung-geun/openstack-afterglow.git
+git clone git@github.com:openstack-afterglow/openstack-afterglow.git
 cd openstack-afterglow/deploy/kolla
 
 # kolla-ansible 가상 환경 활성화
@@ -146,8 +146,8 @@ enable_afterglow_worker: "yes"
 afterglow_external_url: "https://afterglow.example.com"
 
 # 이미지 설정
-afterglow_backend_image: "ghcr.io/jung-geun/afterglow-api"
-afterglow_frontend_image: "ghcr.io/jung-geun/afterglow"
+afterglow_backend_image: "ghcr.io/openstack-afterglow/afterglow-api"
+afterglow_frontend_image: "ghcr.io/openstack-afterglow/afterglow"
 afterglow_image_tag: "latest"
 
 # OpenStack 서비스 연결
@@ -339,7 +339,7 @@ kubectl apply -f argocd/application.prod.yaml   # 프로덕션
 ```yaml
 spec:
   source:
-    repoURL: https://github.com/jung-geun/openstack-afterglow
+    repoURL: https://github.com/openstack-afterglow/openstack-afterglow
     targetRevision: dev          # 감시할 브랜치
     path: deploy/k8s-template/overlays/dev
   destination:

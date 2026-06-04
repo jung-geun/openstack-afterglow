@@ -3,13 +3,23 @@ import { render, screen, fireEvent } from '@testing-library/svelte';
 import { flushSync } from 'svelte';
 import SlidePanelWrapper from './_SlidePanelWrapper.svelte';
 
-// jsdom은 Web Animations API를 지원하지 않음 — Svelte transition을 위해 mock 필요
+// jsdom은 Web Animations API / matchMedia를 지원하지 않음 — mock 필요
 beforeEach(() => {
 	Element.prototype.animate = vi.fn().mockReturnValue({
 		finished: Promise.resolve(),
 		cancel: vi.fn(),
 		play: vi.fn(),
 	});
+	window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+		matches: false,
+		media: query,
+		onchange: null,
+		addListener: vi.fn(),
+		removeListener: vi.fn(),
+		addEventListener: vi.fn(),
+		removeEventListener: vi.fn(),
+		dispatchEvent: vi.fn(),
+	}));
 });
 
 describe('SlidePanel', () => {

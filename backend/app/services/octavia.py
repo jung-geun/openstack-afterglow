@@ -11,11 +11,13 @@ if TYPE_CHECKING:
 
 
 def _lb_to_dict(lb) -> dict:
+    prov = getattr(lb, "provisioning_status", "") or ""
     return {
         "id": lb.id,
         "name": lb.name or "",
         "description": getattr(lb, "description", "") or "",
-        "status": getattr(lb, "provisioning_status", "") or "",
+        "status": prov,
+        "provisioning_status": prov,
         "operating_status": getattr(lb, "operating_status", "") or "",
         "vip_address": getattr(lb, "vip_address", None),
         "vip_subnet_id": getattr(lb, "vip_subnet_id", None),

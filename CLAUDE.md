@@ -120,8 +120,23 @@ milestone.md          기능별 구현 현황 추적
 ### 테스트 의무
 
 - **백엔드 엔드포인트를 구현하면 반드시 `backend/tests/` 에 pytest 테스트를 함께 작성한다.**
-- 커밋 전 반드시 실행: `npm run test:all` + `npm run lint:backend`
 - 테스트 없는 엔드포인트 구현은 미완료로 간주한다.
+
+#### 커밋 전 필수 검증 절차 (반드시 순서대로 실행)
+
+```bash
+# 1. 전체 테스트 + lint 실행
+npm run test:all
+npm run lint:backend
+
+# 2. 위 명령이 모두 0(success) 으로 종료된 경우에만 커밋·push 진행
+git add <변경 파일>
+git commit -m "type: 요약"
+git push origin dev
+```
+
+> **규칙**: 테스트나 lint 중 하나라도 실패하면 **커밋하지 않는다.**
+> 실패 원인을 먼저 수정하고 재실행 후 전부 통과된 상태에서만 커밋한다.
 
 ### milestone.md 갱신 의무
 
@@ -163,3 +178,21 @@ milestone.md          기능별 구현 현황 추적
 - `.env`, 인증 정보, 시크릿 파일 커밋
 - 플래닝 없이 대규모 리팩토링 착수
 - 테스트 없이 백엔드 엔드포인트 커밋
+
+## Skill routing
+
+When the user's request matches an available skill, invoke it via the Skill tool. When in doubt, invoke the skill.
+
+Key routing rules:
+- Product ideas/brainstorming → invoke /office-hours
+- Strategy/scope → invoke /plan-ceo-review
+- Architecture → invoke /plan-eng-review
+- Design system/plan review → invoke /design-consultation or /plan-design-review
+- Full review pipeline → invoke /autoplan
+- Bugs/errors → invoke /investigate
+- QA/testing site behavior → invoke /qa or /qa-only
+- Code review/diff check → invoke /review
+- Visual polish → invoke /design-review
+- Ship/deploy/PR → invoke /ship or /land-and-deploy
+- Save progress → invoke /context-save
+- Resume context → invoke /context-restore

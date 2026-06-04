@@ -7,6 +7,7 @@ import os
 import tomllib
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
@@ -76,6 +77,7 @@ def _load_toml() -> dict:
     flat["os_manila_endpoint"] = ost.get("manila_endpoint", "")
     flat["os_swift_endpoint"] = ost.get("swift_endpoint", "")
     flat["os_swift_upload_timeout"] = ost.get("swift_upload_timeout", 1800)
+    flat["os_trash_retention_days"] = ost.get("trash_retention_days", 30)
     flat["os_manila_share_network_id"] = ost.get("manila_share_network_id", "")
     flat["os_manila_share_type"] = ost.get("manila_share_type", "cephfs")
     flat["os_manila_nfs_share_type"] = ost.get("manila_nfs_share_type", "nfstype")
@@ -94,6 +96,7 @@ def _load_toml() -> dict:
     flat["site_description"] = app.get("site_description", "OpenStack VM + OverlayFS 배포 플랫폼")
     flat["logo_path"] = app.get("logo_path", "/logo.png")
     flat["favicon_path"] = app.get("favicon_path", "/favicon.ico")
+    flat["frontend_base_url"] = app.get("frontend_base_url", "")
 
     cache = data.get("cache", {})
     flat["redis_url"] = cache.get("redis_url", "redis://localhost:6379/0")
@@ -102,6 +105,15 @@ def _load_toml() -> dict:
     flat["cache_ttl_normal"] = cache.get("ttl_normal", cache.get("default_ttl_seconds", 30))
     flat["cache_ttl_slow"] = cache.get("ttl_slow", 60)
     flat["cache_ttl_static"] = cache.get("ttl_static", 300)
+    flat["cache_backend"] = cache.get("backend", "redis")
+    flat["cache_dynamic_threshold_low"] = cache.get("dynamic_threshold_low", 5)
+    flat["cache_dynamic_threshold_high"] = cache.get("dynamic_threshold_high", 20)
+    flat["cache_ttl_identity_stable"] = cache.get("ttl_identity_stable", 86400)
+    flat["cache_ttl_catalog_slow"] = cache.get("ttl_catalog_slow", 900)
+    flat["cache_ttl_project_meta"] = cache.get("ttl_project_meta", 300)
+    flat["cache_ttl_operational_live"] = cache.get("ttl_operational_live", 30)
+    flat["cache_ttl_admin_overview"] = cache.get("ttl_admin_overview", 60)
+    flat["cache_ttl_auth_token"] = cache.get("ttl_auth_token", 60)
 
     svc = data.get("services", {})
     flat["service_magnum_enabled"] = svc.get("magnum", False)
@@ -160,8 +172,25 @@ def _load_toml() -> dict:
     flat["k3s_lb_subnet_id"] = k3s.get("lb_subnet_id", "")
     # API LB VIP 네트워크 (모드 A: provider 네트워크 직접 지정)
     flat["k3s_api_lb_vip_network_id"] = k3s.get("api_lb_vip_network_id", "")
+    # API LB Floating IP 외부 네트워크 (모드 B: FIP 할당)
+    flat["k3s_api_lb_floating_network_id"] = k3s.get("api_lb_floating_network_id", "")
     # FCOS (Fedora CoreOS) 이미지 ID
     flat["k3s_fcos_image_id"] = k3s.get("fcos_image_id", "")
+    # 인증서 회전
+    flat["k3s_cert_rotation_node_timeout_sec"] = k3s.get("cert_rotation_node_timeout_sec", 300)
+    flat["k3s_cert_rotation_job_image"] = k3s.get(
+        "cert_rotation_job_image",
+        "registry.k8s.io/util-linux/util-linux:latest",
+    )
+    # Stampede 오토스케일
+    flat["k3s_stampede_enabled"] = k3s.get("stampede_enabled", False)
+    flat["k3s_stampede_interval"] = k3s.get("stampede_interval", 60)
+    flat["k3s_stampede_scale_down_threshold"] = k3s.get("stampede_scale_down_threshold", 0.5)
+    flat["k3s_stampede_scale_down_window"] = k3s.get("stampede_scale_down_window", 600)
+    flat["k3s_stampede_scale_up_cooldown"] = k3s.get("stampede_scale_up_cooldown", 120)
+    flat["k3s_stampede_scale_down_cooldown"] = k3s.get("stampede_scale_down_cooldown", 300)
+    flat["k3s_stampede_resource_headroom_factor"] = k3s.get("stampede_resource_headroom_factor", 0.3)
+    flat["k3s_stampede_project_id"] = k3s.get("stampede_project_id", "")
 
     gpu = data.get("gpu", {})
     flat["gpu_available_visible"] = gpu.get("available_visible", False)
@@ -170,6 +199,8 @@ def _load_toml() -> dict:
     flat["session_timeout_seconds"] = sess.get("timeout_seconds", 3600)
     flat["session_warning_before_seconds"] = sess.get("warning_before_seconds", 300)
     flat["session_absolute_timeout"] = sess.get("absolute_timeout", 14400)
+    flat["jwt_access_ttl"] = sess.get("jwt_access_ttl", 900)
+    flat["jwt_refresh_ttl"] = sess.get("jwt_refresh_ttl", 604800)
 
     nv = data.get("nova", {})
     flat["default_network_id"] = nv.get("default_network_id", "")
@@ -184,6 +215,10 @@ def _load_toml() -> dict:
     flat["builder_image_id"] = builder.get("image_id", "")
     flat["builder_flavor_id"] = builder.get("flavor_id", "")
     flat["builder_network_id"] = builder.get("network_id", "")
+    flat["builder_ssh_user"] = builder.get("ssh_user", "ubuntu")
+    flat["builder_ssh_key_path"] = builder.get("ssh_key_path", "/etc/afterglow/ssh/builder.key")
+    flat["builder_floating_network_id"] = builder.get("floating_network_id", "")
+    flat["builder_build_timeout"] = builder.get("build_timeout", 3600)
 
     union = data.get("union", {})
     flat["union_layer_store_rw_share_id"] = union.get("layer_store_rw_share_id", "")
@@ -199,11 +234,29 @@ def _load_toml() -> dict:
     flat["monitoring_auto_sg_enabled"] = mon.get("auto_sg_enabled", True)
     flat["node_exporter_sg_name"] = mon.get("node_exporter_sg_name", "node_exporter")
     flat["dcgm_exporter_sg_name"] = mon.get("dcgm_exporter_sg_name", "dcgm_exporter")
+    flat["node_exporter_port"] = mon.get("node_exporter_port", 9100)
+    flat["dcgm_exporter_port"] = mon.get("dcgm_exporter_port", 9400)
+    flat["libvirt_exporter_port"] = mon.get("libvirt_exporter_port", 9177)
+    flat["gpu_flavor_prefix"] = mon.get("gpu_flavor_prefix", "gpu.")
     flat["grafana_base_url"] = mon.get("grafana_base_url", "")
-    flat["grafana_jwt_secret"] = mon.get("grafana_jwt_secret", "")
+    dashboards = mon.get("dashboards", {})
+    flat["grafana_dashboard_node_uid"] = dashboards.get("node_uid", "afterglow-node")
+    flat["grafana_dashboard_rabbitmq_uid"] = dashboards.get("rabbitmq_uid", "afterglow-rabbitmq")
+    flat["grafana_dashboard_mysqld_uid"] = dashboards.get("mysqld_uid", "afterglow-mysqld")
+    flat["grafana_dashboard_memcached_uid"] = dashboards.get("memcached_uid", "afterglow-memcached")
+    flat["grafana_dashboard_etcd_uid"] = dashboards.get("etcd_uid", "afterglow-etcd")
+    flat["grafana_dashboard_haproxy_uid"] = dashboards.get("haproxy_uid", "afterglow-haproxy")
+    flat["grafana_dashboard_libvirt_uid"] = dashboards.get("libvirt_uid", "afterglow-libvirt")
+    flat["grafana_dashboard_openstack_uid"] = dashboards.get("openstack_uid", "afterglow-openstack")
+    flat["grafana_dashboard_ceph_uid"] = dashboards.get("ceph_uid", "afterglow-ceph")
+    flat["grafana_dashboard_instance_cpu_uid"] = dashboards.get("instance_cpu_uid", "afterglow-instance-cpu")
+    flat["grafana_dashboard_instance_gpu_uid"] = dashboards.get("instance_gpu_uid", "afterglow-instance-gpu")
 
     notion = data.get("notion", {})
     flat["notion_config_encryption_key"] = notion.get("config_encryption_key", "")
+
+    security = data.get("security", {})
+    flat["admin_legacy_project_policy"] = security.get("admin_legacy_project_policy", True)
 
     gl = data.get("gitlab_oidc", {})
     flat["gitlab_oidc_enabled"] = gl.get("enabled", False)
@@ -220,6 +273,22 @@ def _load_toml() -> dict:
     flat["database_pool_size"] = db.get("pool_size", 5)
     flat["database_max_overflow"] = db.get("max_overflow", 10)
     flat["database_auto_create_tables"] = db.get("auto_create_tables", True)
+    flat["database_connect_timeout"] = db.get("connect_timeout", 10)
+    flat["database_pool_timeout"] = db.get("pool_timeout", 10)
+    flat["database_unhealthy_seconds"] = db.get("unhealthy_seconds", 15)
+
+    smtp = data.get("smtp", {})
+    flat["smtp_enabled"] = smtp.get("enabled", False)
+    flat["smtp_host"] = smtp.get("host", "")
+    flat["smtp_port"] = smtp.get("port", 587)
+    flat["smtp_username"] = smtp.get("username", "")
+    flat["smtp_password"] = smtp.get("password", "")
+    flat["smtp_from_address"] = smtp.get("from_address", "noreply@afterglow.example.com")
+    flat["smtp_from_name"] = smtp.get("from_name", "Afterglow")
+    flat["smtp_use_tls"] = smtp.get("use_tls", True)
+    flat["smtp_timeout_seconds"] = smtp.get("timeout_seconds", 10)
+    smtp_inv = smtp.get("invitation", {})
+    flat["smtp_invitation_token_expiry_days"] = smtp_inv.get("token_expiry_days", 7)
 
     cors = data.get("cors", {})
     flat["cors_origins"] = cors.get("origins", "http://localhost:3000,http://localhost")
@@ -257,6 +326,7 @@ class Settings(BaseSettings):
     # Swift 설정
     os_swift_endpoint: str = ""
     os_swift_upload_timeout: int = 1800  # 대용량 업로드용 타임아웃 (초)
+    os_trash_retention_days: int = 30  # 휴지통 보관 기간 (일). 만료 후 자동 영구 삭제.
     # S3 Direct Upload 설정 (Ceph RGW S3 endpoint 대상)
     os_s3_endpoint: str = "https://s3.dmslab.re.kr"
     upload_part_size_mb: int = 50
@@ -298,6 +368,18 @@ class Settings(BaseSettings):
     cache_ttl_normal: int = 30
     cache_ttl_slow: int = 60
     cache_ttl_static: int = 300
+    # 캐시 백엔드: "redis" | "valkey" (v1 동일 클라이언트, v2 에서 Memcached 추가 시 확장)
+    cache_backend: Literal["redis", "valkey"] = "redis"
+    # Dynamic TTL 조정 임계치 (시간당 mutation 횟수)
+    cache_dynamic_threshold_low: int = 5
+    cache_dynamic_threshold_high: int = 20
+    # 3-tier TTL 카테고리 (Phase B)
+    cache_ttl_identity_stable: int = 86400  # 개인 프로필, role/group 멤버십
+    cache_ttl_catalog_slow: int = 900  # flavors, image 메타, 데이터스토어
+    cache_ttl_project_meta: int = 300  # keypair, SG 정의, 네트워크 메타
+    cache_ttl_operational_live: int = 30  # instances/volumes/FIP/컨테이너 상태
+    cache_ttl_admin_overview: int = 60  # admin 토폴로지, 하이퍼바이저
+    cache_ttl_auth_token: int = 60  # Keystone 토큰 검증 결과
 
     # 선택적 서비스
     service_magnum_enabled: bool = False
@@ -346,8 +428,22 @@ class Settings(BaseSettings):
     k3s_lb_subnet_id: str = ""
     # API LB VIP 네트워크 (모드 A: provider 네트워크 직접 지정, 설정 시 FIP 불필요)
     k3s_api_lb_vip_network_id: str = ""
+    # API LB Floating IP 외부 네트워크 (모드 B: FIP 할당, 미설정 시 k3s_occm_floating_network_id fallback)
+    k3s_api_lb_floating_network_id: str = ""
     # FCOS (Fedora CoreOS) 이미지 ID (os_type=fcos 클러스터에 사용)
     k3s_fcos_image_id: str = ""
+    # 인증서 회전
+    k3s_cert_rotation_node_timeout_sec: int = 300
+    k3s_cert_rotation_job_image: str = "registry.k8s.io/util-linux/util-linux:latest"
+    # Stampede 오토스케일
+    k3s_stampede_enabled: bool = False
+    k3s_stampede_interval: int = 60
+    k3s_stampede_scale_down_threshold: float = 0.5
+    k3s_stampede_scale_down_window: int = 600
+    k3s_stampede_scale_up_cooldown: int = 120
+    k3s_stampede_scale_down_cooldown: int = 300
+    k3s_stampede_resource_headroom_factor: float = 0.3
+    k3s_stampede_project_id: str = ""
 
     # Union Mount 레이어 시스템 — Manila share ID
     union_layer_store_rw_share_id: str = ""  # layer-store-rw (Builder 전용 RW)
@@ -361,10 +457,24 @@ class Settings(BaseSettings):
     monitoring_auto_sg_enabled: bool = True  # 프로젝트/인스턴스 생성 시 monitoring SG 자동 attach
     node_exporter_sg_name: str = "node_exporter"  # node_exporter ingress SG 이름 (tcp/9100)
     dcgm_exporter_sg_name: str = "dcgm_exporter"  # dcgm_exporter ingress SG 이름 (tcp/9400, GPU 전용)
+    node_exporter_port: int = 9100  # VM에 설치된 node_exporter 포트
+    dcgm_exporter_port: int = 9400  # GPU VM의 dcgm_exporter 포트
+    libvirt_exporter_port: int = 9177  # compute 노드 libvirt_exporter 포트 (kolla enable_prometheus_libvirt_exporter)
+    gpu_flavor_prefix: str = "gpu."  # GPU 노드로 판별할 flavor 이름 prefix
     monitoring_scrape_cidr: str = ""  # Prometheus scrape CIDR (예: 10.0.0.0/8). 미설정 시 ValueError
     monitoring_sd_token: str = ""  # /api/sd/prometheus/targets 인증 토큰
-    grafana_jwt_secret: str = ""  # Grafana auth.jwt 서명 시크릿
     grafana_base_url: str = ""  # Grafana 외부 URL (예: https://grafana.example.com)
+    grafana_dashboard_node_uid: str = "afterglow-node"
+    grafana_dashboard_rabbitmq_uid: str = "afterglow-rabbitmq"
+    grafana_dashboard_mysqld_uid: str = "afterglow-mysqld"
+    grafana_dashboard_memcached_uid: str = "afterglow-memcached"
+    grafana_dashboard_etcd_uid: str = "afterglow-etcd"
+    grafana_dashboard_haproxy_uid: str = "afterglow-haproxy"
+    grafana_dashboard_libvirt_uid: str = "afterglow-libvirt"
+    grafana_dashboard_openstack_uid: str = "afterglow-openstack"
+    grafana_dashboard_ceph_uid: str = "afterglow-ceph"
+    grafana_dashboard_instance_cpu_uid: str = "afterglow-instance-cpu"
+    grafana_dashboard_instance_gpu_uid: str = "afterglow-instance-gpu"
     # Prometheus 서버 주소. 우선순위: 환경변수 PROMETHEUS_BASE_URL > config.toml [monitoring].prometheus_base_url > 기본값
     prometheus_base_url: str = "http://prometheus:9090"
     prometheus_username: str = ""  # basic auth 미사용 시 빈 문자열
@@ -380,6 +490,13 @@ class Settings(BaseSettings):
     session_timeout_seconds: int = 3600
     session_warning_before_seconds: int = 300
     session_absolute_timeout: int = 14400  # 절대 만료: 기본 4시간, 초과 시 연장 불가
+    jwt_access_ttl: int = 900  # access JWT 수명 (초), 기본 15분
+    jwt_refresh_ttl: int = 604800  # refresh JWT 수명 (초), 기본 7일
+
+    # 보안 정책
+    # True: system:all role OR admin project+role 모두 system admin 인정 (마이그레이션 호환 모드)
+    # False: system:all role만 system admin으로 인정 (자기복제 권한 상승 완전 차단)
+    admin_legacy_project_policy: bool = True
 
     # Nova 기본값
     default_network_id: str = ""  # 레거시 폴백 (default_network_enabled=false 시 사용)
@@ -394,12 +511,19 @@ class Settings(BaseSettings):
     builder_image_id: str = ""  # 빌더 VM 부팅 이미지 ID (Ubuntu 22.04+)
     builder_flavor_id: str = ""  # 빌더 VM 플레이버 ID
     builder_network_id: str = ""  # 빌더 VM 네트워크 ID (미지정 시 default_network_id 사용)
+    builder_ssh_user: str = "ubuntu"  # Builder VM SSH 사용자
+    builder_ssh_key_path: str = "/etc/afterglow/ssh/builder.key"  # SSH 개인키 경로
+    builder_floating_network_id: str = ""  # Builder VM FIP 할당용 외부 네트워크 ID
+    builder_build_timeout: int = 3600  # 빌드 SSH 명령 최대 대기 시간 (초)
 
     # 데이터베이스 (MariaDB/MySQL, 선택적)
     database_url: str = ""
     database_pool_size: int = 5
     database_max_overflow: int = 10
     database_auto_create_tables: bool = True
+    database_connect_timeout: int = 10
+    database_pool_timeout: int = 10
+    database_unhealthy_seconds: int = 15
 
     # GitLab OIDC
     gitlab_oidc_enabled: bool = False
@@ -410,6 +534,21 @@ class Settings(BaseSettings):
     gitlab_oidc_protocol_id: str = "openid"
     gitlab_oidc_redirect_uri: str = ""
     gitlab_oidc_scopes: str = "openid email profile read_user"
+
+    # SMTP 이메일 전송
+    smtp_enabled: bool = False
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_address: str = "noreply@afterglow.example.com"
+    smtp_from_name: str = "Afterglow"
+    smtp_use_tls: bool = True
+    smtp_timeout_seconds: int = 10
+    smtp_invitation_token_expiry_days: int = 7
+
+    # 프론트엔드 기본 URL (초대 이메일 링크 생성에 사용)
+    frontend_base_url: str = ""
 
     # 로깅 설정
     log_file_path: str = "/app/logs/afterglow-backend.log"

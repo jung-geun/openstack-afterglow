@@ -20,7 +20,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: backend
-    image: ghcr.io/jung-geun/afterglow-api:dev
+    image: ghcr.io/openstack-afterglow/afterglow-api:dev
     ports:
       - "8000:8000"
     volumes:
@@ -51,7 +51,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: frontend
-    image: ghcr.io/jung-geun/afterglow:dev
+    image: ghcr.io/openstack-afterglow/afterglow:dev
     ports:
       - "3000:3000"
     volumes:
@@ -60,6 +60,7 @@ services:
       - ORIGIN=http://localhost:3000
       - PUBLIC_API_BASE=http://localhost:8000
       - PUBLIC_S3_BASE=https://s3.dmslab.re.kr
+      - PUBLIC_GRAFANA_BASE=
     depends_on:
       backend:
         condition: service_healthy
@@ -81,9 +82,33 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      target: backend
-    image: ghcr.io/jung-geun/afterglow-api:dev
+      target: worker
+    image: ghcr.io/openstack-afterglow/afterglow-worker:dev
     command: python -m app.worker
+    volumes:
+      - ./config.toml:/app/config.toml:ro
+      - ./config.gpu.toml:/app/config.gpu.toml:ro
+      - ./logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_started
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  # ── Notion Sync Worker ────────────────────────────────────────────────────────
+  notion-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: worker
+    image: ghcr.io/openstack-afterglow/afterglow-worker:dev
+    command: python -m app.notion_worker
     volumes:
       - ./config.toml:/app/config.toml:ro
       - ./config.gpu.toml:/app/config.gpu.toml:ro

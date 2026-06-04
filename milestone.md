@@ -155,6 +155,7 @@ POST /api/instances 호출 시 순서:
 |--------|------|------|
 | POST | `/api/auth/login` | Keystone 인증, token 반환 |
 | GET | `/api/images` | OS 이미지 목록 (Glance/Cinder) |
+| POST | `/api/images` | 이미지 파일 업로드 (multipart, raw/qcow2/vmdk 등) |
 | GET | `/api/flavors` | 플레이버 목록 |
 | GET | `/api/libraries` | 사용 가능한 라이브러리 설정 목록 |
 | GET | `/api/shares` | 사전 빌드된 Manila share 목록 |
@@ -741,6 +742,26 @@ Step 5: 요약 & 배포
 - [x] `frontend/src/routes/admin/notion/+page.svelte` — 단수 폼 → 타겟 카드 리스트 UI로 재작성. "연결 추가" 버튼, 카드별 enabled 상태/마지막 동기화/인라인 수정 폼/지금 동기화/삭제 버튼
 - [x] `backend/tests/test_notion.py` — dedup skip/patch/신규 POST 3건 + 다중 타겟 CRUD API 6건 테스트 추가 (총 9건)
 
+### 8.6.1 Notion 주기 자동 동기화 워커 구동 + 기본 간격 30분 + 경량 이미지 분리
+
+**배경**: `notion_worker.py`가 구현되어 있었으나 어디에서도 실행되지 않는 고아 모듈이었음(`main.py` startup 미등록). 또한 워커가 backend 이미지(OpenTofu ~80MB 포함)를 그대로 사용해 낭비.
+
+- [x] `backend/app/models/db.py`, `admin_notion.py`, `notion_sync.py`, `migrations/002…` — `interval_minutes` 기본값 5→30
+- [x] `frontend/src/lib/components/admin/notion/NotionTargetAddForm.svelte`, `NotionTargetEditForm.svelte` — 폼 기본값 5→30
+- [x] `backend/migrations/015_notion_interval_default_30.sql` — 기존 타겟/설정 5→30 마이그레이션 SQL
+- [x] `backend/app/services/gpu_inventory.py` (신규) — `VENDOR_MAP`, `PCI_DEVICE_MAP`, `_collect_gpu_hosts`, `get_gpu_spec_list`, `build_alias_to_device_name_map` 등을 FastAPI 의존 없는 서비스 모듈로 추출
+- [x] `backend/app/services/openstack_inventory.py` (신규) — `collect_instance_data`, `collect_hypervisor_data`, `_fetch_hypervisors_raw`를 FastAPI 의존 없는 서비스 모듈로 추출
+- [x] `backend/app/services/k3s_errors.py` (신규) + `k3s_kube.py` — `HTTPException` → `K3sApiError` 치환으로 drover FastAPI 차단점 제거
+- [x] `backend/app/main.py` — `K3sApiError` exception handler 등록
+- [x] `backend/app/notion_worker.py` — import 경로를 `admin_*` 라우터 → `gpu_inventory`/`openstack_inventory` 서비스 모듈로 교체 (FastAPI-free)
+- [x] `backend/pyproject.toml` — `[dependency-groups] worker` 추가 (fastapi/uvicorn/boto3/asyncssh 등 API 전용 패키지 제외)
+- [x] `Dockerfile` — `worker-builder` + `worker` 스테이지 추가 (OpenTofu/curl/unzip 제외, 워커 의존성 그룹만 설치)
+- [x] `.github/workflows/docker-build.yml` — `worker` 타겟 빌드/푸시 → `afterglow-worker` 이미지로 CI 등록
+- [x] `docker-compose.yml`, `docker-compose.prod.yml` — drover 이미지 `afterglow-api` → `afterglow-worker`, `notion-worker` 서비스 추가
+- [x] `deploy/k8s-template/base/worker/` — `deployment.yaml` 이미지 교체, `notion-deployment.yaml` 신규, `kustomization.yaml` 등록
+- [x] `deploy/kolla/ansible/roles/afterglow/` — `afterglow_drover_image` 변수 추가, worker 이미지 교체, `afterglow-notion-worker` 컨테이너 추가
+- [x] `backend/tests/test_notion_worker.py` (신규) — 기본값 30 검증 2건, 워커 사이클 interval 존중 5건, FastAPI-free 회귀 가드 1건
+
 ### 8.7 인스턴스 로그 전체 조회 + HEAD kubeconfig + K3s 헬스 대시보드
 
 - [x] `backend/app/api/compute/instances.py` — 콘솔 로그 `length` 파라미터 `ge=1` → `ge=0` 변경 (Nova API에서 `length=0`은 전체 로그)
@@ -829,6 +850,14 @@ config.toml 신규 섹션: `[k3s]` 하위 `cinder_csi_*`, `manila_csi_*`, `keyst
 
 config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id = ""`
 
+**2026-06-03 FCOS 안정화 (A1, A2, A4)**
+
+- [x] `backend/app/templates/k3s_server_fcos_callback.sh.j2` — Ubuntu 기준으로 drift 수정: `export PATH="/usr/local/bin:$PATH"` 상단 추가, kube-apiserver `/livez` 인증 대기 루프, k3s NRestarts 재시작 루프 감지, 플러그인 apply `--validate=false` + stderr 캡처, plugin_status `{status, error}` 구조 통일, `secret_cloud_config_status` payload 포함, `SERVER_IP` 산출을 `ip route get 8.8.8.8 | awk src`로 변경
+- [x] `backend/app/templates/k3s_agent_fcos_join.sh.j2` — `NODE_IP=$(ip route get 8.8.8.8 ... src)` 산출 추가, `INSTALL_K3S_EXEC="agent --node-ip ${NODE_IP} ..."` (agent 서브커맨드 + --node-ip 누락 수정)
+- [x] `backend/tests/test_k3s_fcos.py` — `TestFCOSCallbackScript` 클래스 7건(PATH export, /livez, NRestarts, --validate=false+stderr, {status,error}, secret_cloud_config_status, ip route), `TestFCOSAgentNodeIp` 클래스 4건(--node-ip, ip route, agent 서브커맨드, extra_args 보존) 추가 — 총 28건
+- [x] `backend/tests/test_k3s_clusters.py` — FCOS 503 가드 2건 추가 (k3s_fcos_image_id 미설정 시 503, ubuntu 요청은 503 미발생)
+- **알려진 제약**: 멀티 NIC 환경에서 FCOS는 NetworkManager가 보조 NIC에 default route를 탈취할 수 있음. `--node-ip` 고정으로 노드 등록 IP는 안전하나, 완전한 멀티 NIC 지원(route-metric/ipv4.never-default Ignition 주입)은 별도 PR로 진행 예정
+
 ### 8.14 k3s 부팅 데드락 수정 + callback.sh 진단 개선
 
 **문제**: barbican_kms / keystone_auth 플러그인이 부팅 시점 불가능한 의존성을 apiserver에 주입해 control plane이 영구 데드락에 빠짐. kubectl get nodes 시 노드가 보이지 않음.
@@ -842,6 +871,45 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 - [x] Barbican KMS host static pod 재설계 (부팅 전 소켓 준비, apiserver 재시작 트리거) — 20항 참조
 - [x] Keystone Auth hostNetwork static pod 재설계 (webhook URL을 127.0.0.1:port로 변경) — 20항 참조
 - [x] callback.sh에서 k3s 재시작 루프 감지 시 success=false 보고
+
+### 8.15 k3s 노드 멀티 NIC + DB deleted 인스턴스 필터링 (2026-05-17)
+
+- [x] k3s 노드 멀티 NIC attach/detach API + udev/netplan 자동 적용
+- [x] DB 인스턴스 deleted 필터링 (Trove deleted=1 행 제외)
+
+### 8.16 k3s ConfigMap/Secret CRUD 프론트엔드 (2026-05-17)
+
+- [x] `frontend/src/lib/types/resources.ts` — `ConfigMapInfo`, `SecretInfo` 타입 추가
+- [x] `frontend/src/lib/api/k3sResources.ts` — namespaces/configmaps/secrets CRUD API 클라이언트
+- [x] `frontend/src/lib/stores/k3sClusterDetail.svelte.ts` — namespace/cm/secret 상태 + load/save/delete 메서드 추가
+- [x] `frontend/src/lib/components/k3s/K3sNamespaceSelector.svelte` — 네임스페이스 셀렉터
+- [x] `frontend/src/lib/components/k3s/K3sResourceEditor.svelte` — key-value 편집 모달
+- [x] `frontend/src/lib/components/k3s/K3sSecretValueDisplay.svelte` — base64 디코딩 + Reveal 토글 + 복사
+- [x] `frontend/src/lib/components/k3s/K3sClusterConfigMapsCard.svelte` — ConfigMap 목록/생성/편집/삭제
+- [x] `frontend/src/lib/components/k3s/K3sClusterSecretsCard.svelte` — Secret 목록/생성/편집/삭제 (type 선택)
+- [x] `frontend/src/lib/components/K3sClusterDetailPanel.svelte` — namespace selector + ConfigMaps/Secrets 카드 통합
+
+### 8.17 k3s ConfigMap/Secret CRUD 백엔드 (2026-05-17)
+
+- [x] `backend/app/services/k3s_kube.py` — `_kube_client` asynccontextmanager (mTLS K8s API 클라이언트), `list_namespaces`, ConfigMap/Secret CRUD (list/get/create/update/delete). Secret 은 함수 내에서 plain text → base64 인코딩 처리
+- [x] `backend/app/models/k3s.py` — `ConfigMapInfo`, `ConfigMapCreateRequest`, `ConfigMapWriteRequest`, `SecretInfo`, `SecretCreateRequest`, `SecretWriteRequest` Pydantic 모델 추가
+- [x] `backend/app/api/k3s/configmaps.py` — **신규** ConfigMap CRUD 라우터 + namespace 목록 (`/api/k3s/clusters/{id}/namespaces`, `/configmaps`, `/namespaces/{ns}/configmaps/{name}`)
+- [x] `backend/app/api/k3s/secrets.py` — **신규** Secret CRUD 라우터 (rec extra 에 data 미포함, 이름/namespace 만)
+- [x] `backend/app/api/k3s/__init__.py` — `k3s_configmaps_router`, `k3s_secrets_router` lazy import 추가
+- [x] `backend/app/main.py` — 두 라우터 `service_k3s_enabled` 블록에 마운트
+- [x] `backend/tests/test_k3s_configmaps.py` — **신규** 8개 테스트 (401/404/list/get/create/update/delete + namespaces)
+- [x] `backend/tests/test_k3s_secrets.py` — **신규** 8개 테스트 (401/404/list/get/create/update/delete + plain→service 전달 확인)
+
+### 8.18 k3s Cloud Shell 프론트엔드 (2026-05-17)
+
+- [x] k3s Cloud Shell — 웹 kubectl 터미널 (PVC 영속, user impersonation, idle 15분)
+- [x] `frontend/src/lib/types/resources.ts` — `CloudShellTicket` 타입 추가
+- [x] `frontend/src/lib/api/k3sResources.ts` — `createShellTicket()` 헬퍼 추가
+- [x] `frontend/src/lib/stores/k3sClusterDetail.svelte.ts` — `shellOpen` state + `openShell`/`closeShell` 메서드 + reset 정리
+- [x] `frontend/src/lib/components/k3s/K3sCloudShellOverlay.svelte` — **신규** 풀스크린 오버레이, xterm.js + K8s exec WebSocket (v4.channel.k8s.io binary framing, channel 0/1/2/4) + ResizeObserver + idle timeout(4408) UI
+- [x] `frontend/src/lib/components/k3s/K3sCloudShellButton.svelte` — **신규** 헤더 진입 버튼 (ACTIVE + kubeconfig 준비 시만 표시)
+- [x] `frontend/src/lib/components/k3s/K3sClusterHeader.svelte` — kubeconfig 다운로드 버튼 앞에 Cloud Shell 버튼 추가
+- [x] `frontend/src/lib/components/K3sClusterDetailPanel.svelte` — `shellOpen` 시 overlay 마운트
 
 ---
 
@@ -1130,9 +1198,9 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 - [x] `backend/tests/test_instances.py` — non-GPU/GPU/disabled/no-cidr 4건
 - [x] `backend/tests/conftest.py` — rate limiter storage reset autouse fixture 추가 (테스트 격리)
 
-### 12.3 Prometheus 스크래핑 — 메인 클러스터 통합 vs 프로젝트별 분리 (결정 필요)
+### 12.3 Prometheus 스크래핑 — 메인 클러스터 통합 vs 프로젝트별 분리 ✅ Option A 확정
 
-> **결정 미확정 (사용자 검토 필요)**: 옵션 A를 권장하나, 멀티테넌시 격리 요구 강도에 따라 B가 정답일 수 있음.
+> **결정 확정 (2026-05-15)**: Option A — 단일 Prometheus+Grafana 스택 + `var-project_id` URL 파라미터 기반 테넌트 분리. 운영 단순성, 기존 구현 기준.
 
 #### Option A: 메인 Prometheus + Grafana 단일 인스턴스 + tenant 라벨 분리 (권장)
 
@@ -1144,8 +1212,8 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
   - VM의 floating IP가 없어도 fixed IP를 그대로 노출 (스크래퍼가 internal network에 접근 가능하다는 가정)
 - [x] `backend/tests/test_sd_targets.py` — 라벨 형식, token 검증, 권한 4건
 - [ ] `deploy/k8s-template/monitoring/prometheus/configmap.yaml` — DCGM/Node 스크래핑 잡 추가 (`__meta_*` 라벨 → `project_id`/`instance` 재라벨)
-- [ ] `deploy/k8s-template/monitoring/grafana/` — provisioning datasource (Prometheus) + 기본 대시보드(JSON) 추가, `node_exporter`/`dcgm` 공식 대시보드 import
-- [ ] `frontend/src/routes/dashboard/observability/+page.svelte` (신규) — Grafana iframe 임베드 + 프로젝트별 URL 자동 생성 (`var-project_id={current}`)
+- [x] `deploy/k8s-template/monitoring/grafana/` — provisioning ConfigMaps (datasource + dashboards-provider + dashboards 9종) + volumeMounts + NetworkPolicy (외부 직접 접근 차단)
+- [x] `frontend/src/routes/dashboard/observability/+page.svelte` (신규) — Grafana iframe 임베드 + 프로젝트별 URL 자동 생성 (`var-project_id={current}`) + projectId null guard + 프론트엔드 테스트 4건
 
 #### Option B: 프로젝트별 컨테이너 모니터링 스택 (대안)
 
@@ -1166,11 +1234,23 @@ config.toml 신규: `[k3s]` 아래 `fcos_image_id = ""`, `api_lb_vip_network_id 
 
 Option A 채택 시 본 절 진행. Option B 채택 시 사용자가 자체 구성하므로 본 절은 템플릿 제공으로 한정.
 
-- [ ] `deploy/k8s-template/monitoring/grafana/provisioning/dashboards/` — node-exporter-full + nvidia-dcgm 공식 대시보드 JSON 동봉
+- [x] `monitoring/grafana/provisioning/dashboards/` — node/rabbitmq/mysqld/memcached/etcd 5종 대시보드 JSON + provider yaml 프로비저닝
 - [ ] Grafana org/folder 자동 생성 — 프로젝트별 folder, datasource label filter `project_id="<keystone_project_id>"`
-- [ ] `frontend/src/routes/dashboard/observability/+page.svelte` — Grafana iframe + auth proxy (Grafana `auth.proxy` 또는 `auth.jwt` 모드 + 백엔드가 토큰 발급)
+- [x] `frontend/src/lib/components/monitoring/GrafanaEmbed.svelte` — Grafana iframe 임베드 컴포넌트 (JWT + 빈 상태 폴백)
+- [x] `frontend/src/lib/stores/grafana.ts` — Grafana JWT + 대시보드 매핑 캐시 store
 - [x] `backend/app/api/common/grafana_auth.py` (신규) — Grafana 임베드용 JWT 발급 엔드포인트 (POST /api/grafana/token, HS256 JWT, standard library만 사용)
-- [x] `backend/tests/test_grafana_auth.py` — 토큰 발급/클레임 검증/시크릿 미설정 503 3건
+- [x] `backend/app/api/common/grafana_auth.py` — GET /api/grafana/dashboards 엔드포인트 + admin role JWT 분기
+- [x] `backend/tests/test_grafana_auth.py` — 토큰 발급/클레임 검증/시크릿 미설정 503 + admin role 테스트
+- [x] `backend/tests/test_grafana_dashboards.py` — dashboards 엔드포인트 4건 신규
+- [x] `/admin/monitoring` 인프라 탭 — 5종 exporter GrafanaEmbed (node/rabbitmq/mysqld/memcached/etcd)
+- [x] `/admin/hypervisors` 하단 node_exporter 메트릭 위젯
+- [x] `/admin/database-instances` 하단 mysqld 메트릭 위젯
+- [x] `/admin/messaging/rabbitmq`, `/admin/messaging/memcached`, `/admin/coordination/etcd` 신규 관리자 페이지
+- [x] AdminSidebar "인프라 서비스" 섹션 추가 (RabbitMQ/Memcached/etcd nav)
+- [x] `monitoring/grafana/provisioning/dashboards/instance-cpu.json` — CPU 전용 per-instance 대시보드 (`afterglow-instance-cpu`, CPU/메모리/네트워크/디스크 4패널)
+- [x] `monitoring/grafana/provisioning/dashboards/instance-gpu.json` — GPU per-instance 대시보드 (`afterglow-instance-gpu`, CPU/메모리/네트워크/디스크 + GPU 6패널)
+- [x] `frontend/src/lib/components/instance/MetricsPanel.svelte` — 차트/Grafana 탭 추가 (`isGpu`에 따라 `instance-gpu` / `instance-cpu` 대시보드 자동 선택)
+- [x] `backend/app/api/common/grafana_auth.py` / `config.py` / `generate_k8s.py` / `config.toml.example` — `instance-cpu` / `instance-gpu` 대시보드 UID 설정 연동
 
 ### 12.5 Open Questions (사용자 확인 필요)
 
@@ -2115,8 +2195,1302 @@ sudo cat /var/log/union-overlay.log && ls /opt/layers/
 - [ ] 브라우저 수동 검증 (인스턴스 페이지 + admin/인스턴스 페이지)
 - [ ] light mode 전환 가독성 확인
 
+### 33.6 VM 스케줄링/HA 분리 (완료)
+
+- [x] `backend/app/models/compute.py` — `CreateInstanceRequest.scheduling` (Literal["standard","ha"], 기본 "standard") + `InstanceInfo.scheduling` 추가
+- [x] `backend/app/services/nova.py` — `_server_to_info()` 에서 metadata scheduling 읽어 InstanceInfo 채움
+- [x] `backend/app/api/compute/instances.py` (sync/async 두 분기) — meta 에 `scheduling`, HA 시 `HA_Enabled=True` 추가
+- [x] `backend/app/api/identity/admin_instances.py` — 동일 meta 패턴 적용
+- [x] `backend/tests/test_instance_scheduling.py` — 신규 8개 테스트 (model default, _server_to_info metadata 파싱)
+- [x] `frontend/src/lib/stores/wizard.ts` — `scheduling: 'standard' | 'ha'` 필드 추가 (기본 'standard')
+- [x] `frontend/src/lib/components/wizard/SelectStrategy.svelte` — 재작성: 섹션 A(스케줄링 항상) + 섹션 B(레이어 마운트 방식, 라이브러리 있을 때만)
+- [x] `frontend/src/lib/components/VmCreatePanel.svelte` — step skip 로직 제거, selectScheduling 핸들러, canNext step4 조건, deploy body에 scheduling, footer summary 업데이트
+- [x] 62개 테스트 통과, `npm run check` 신규 에러 없음
+
 ### 33.5 향후 (별 PR)
 
 - cloud-init YAML 실시간 검증 (js-yaml 도입) + 예제 프리셋 적용
 - review deploy banner cost 추정 ($/hour → backend cost API 필요)
 - OS 별 logo 컬러 매핑 (메모리 규칙 재확인 후)
+- HA evacuate 실제 동작: cluster 에 Masakari 설치 + segment/host 등록 필요 (운영 문서 별도)
+
+## 34. k3s NIC attach 버그 수정 — default route 탈취 / OCCM LB 오라우팅 (2026-05-18)
+
+### 34.1 동기
+
+k3s 클러스터에 NIC를 추가(attach)하면 두 가지 운영 장애 발생:
+- **버그 1**: 신규 NIC가 더 낮은 metric의 default route를 받아 기존 primary NIC의 default route 탈취 → 클러스터 통신 단절
+- **버그 2**: cloud-provider-openstack(OCCM)이 신규 NIC IP를 NodeInternalIP로 채택 → LoadBalancer endpoint 오라우팅, 내부 서비스 접근 불가
+
+### 34.2 수정 내용
+
+- [x] `backend/app/templates/k3s_server.yaml.j2` — secondary NIC netplan에 `dhcp4-overrides: {use-routes: false, use-dns: false}` + `optional: true` 추가, kubelet `--node-ip=${SERVER_IP}` 주입
+- [x] `backend/app/templates/k3s_agent.yaml.j2` — 동일 netplan secondary NIC 규칙 적용
+- [x] `backend/app/templates/occm/cloud_config.conf.j2` — `[Networking]` 섹션에 `internal-network-name={{ primary_network_name }}` 추가
+- [x] `backend/app/services/k3s_cloudinit.py` — OCCM 렌더에 `primary_network_name` 전달 (Neutron network name lookup), server cloud-init에 `server_ip` 결정적 주입
+- [x] `backend/tests/test_k3s_occm.py` (신규) — cloud.conf `internal-network-name` 포함 검증, 빈 network_id 폴백 검증
+
+### 34.3 검증
+
+- [x] 149개 백엔드 테스트 통과
+- [x] `npm run lint:backend` 통과
+- [ ] 실 환경: NIC attach 후 `ip route` default 불변 확인, `kubectl get nodes -o wide` INTERNAL-IP가 primary NIC IP인지 확인
+
+---
+
+## 35. JWT access+refresh 토큰 도입 — Keystone 토큰 백엔드 격리 (2026-05-18)
+
+### 35.1 동기
+
+- Keystone 1시간 토큰을 localStorage에 평문 저장 → 보안 취약 + 자주 재로그인 필요
+- Afterglow 자체 JWT 발급(access 15분 + refresh 7일): frontend는 JWT만 보유, Keystone 토큰은 backend Redis에 격리
+
+### 35.2 신규 파일
+
+- [x] `backend/app/services/jwt_service.py` — HS256 access/refresh 서명·검증 (`sign_access`, `verify_access`, `sign_refresh`, `verify_refresh`)
+- [x] `backend/app/services/session_store.py` — `afterglow:refresh:{jti}` Redis 키로 Keystone 토큰 매핑 (TTL=refresh 만료까지)
+- [x] `backend/tests/test_auth_jwt.py` — 14개 테스트: JWT 서명·검증, 세션 저장소, 로그인 응답, Bearer 인증, 레거시 X-Auth-Token, 만료 JWT 401, 토큰 회전(replay 방지), 로그아웃 후 refresh 401
+
+### 35.3 백엔드 수정
+
+- [x] `backend/app/api/identity/auth.py` — `/login`, `/gitlab/callback` 응답에 `token`(access JWT) + `refresh_token` 쌍 발급, `/refresh` 엔드포인트(토큰 회전), `/switch-project` 엔드포인트 추가
+- [x] `backend/app/api/deps.py` — `Authorization: Bearer` 우선 처리 (`_resolve_jwt_token_info`), 레거시 `X-Auth-Token` fallback 유지 (dual-path)
+- [x] `backend/app/models/auth.py` — `TokenResponse`에 `refresh_token: str | None` 추가
+- [x] `backend/app/config.py` + `config.toml.example` + `generate_k8s.py` — `jwt_access_ttl=900`, `jwt_refresh_ttl=604800` 동기화
+- [x] `backend/pyproject.toml` — `pyjwt>=2.9.0` 의존성 추가
+
+### 35.4 프론트엔드 수정
+
+- [x] `frontend/src/lib/stores/auth.ts` — `refreshToken`, `accessExpiresAt` 필드 추가, `getAccessSecondsRemaining()` 헬퍼
+- [x] `frontend/src/lib/api/client.ts` — `Authorization: Bearer` 헤더 전환, 401 시 `tryRefresh()` + 1회 재시도, `_refreshPromise` coalescing으로 동시 refresh 직렬화
+- [x] `frontend/src/routes/+layout.svelte` — session-info 폴링 제거, JWT exp 기반 60초 타이머 auto-refresh (만료 2분 전)
+- [x] `frontend/src/routes/+page.svelte`, `auth/gitlab/callback/+page.svelte` — `accessExpiresAt` 저장, `refreshToken` 저장
+- [x] 직접 fetch 헤더 Bearer 전환: `k3sSseStream.ts`, `vmCreateStore.svelte.ts`, `k3sClusterDetail.svelte.ts`, `objectBrowser.svelte.ts`, `admin/notion/+page.svelte`, `dashboard/drover/+page.svelte`
+
+### 35.5 검증
+
+- [x] 149개 백엔드 테스트 통과 (14개 신규 JWT 테스트 포함)
+- [x] `npm run check` — PR 2 관련 신규 에러 없음
+- [ ] 실 환경: 로그인 → 16분 후 access 자동 갱신 → API 정상 동작, 로그아웃 후 refresh 재사용 차단
+
+
+---
+
+## 36. JWT stale 제거 + admin role 변동 즉시 반영 + audit (2026-05-18)
+
+### 36.1 동기
+
+PR 35(JWT 도입) 이후 access JWT(TTL 15분) payload에 `is_system_admin`/`roles`가 박혀 **admin role 박탈 후 15분간 admin으로 인식**되는 stale 윈도우 발생. X-Auth-Token 경로의 60s 캐시보다 후퇴한 보안 수준.
+
+### 36.2 변경 파일
+
+- [x] `backend/app/services/jwt_service.py` — `sign_access()`에서 `roles`/`is_system_admin` 파라미터 및 payload 클레임 제거. JWT는 신원 정보(sub, username, project_id, project_name, jti, rjti)만 보유.
+- [x] `backend/app/api/identity/auth.py` — `_build_token_response()`의 `sign_access()` 호출에서 해당 인자 제거. `TokenResponse` 응답에는 초기 렌더링용으로 계속 포함.
+- [x] `backend/app/api/deps.py` — `_resolve_jwt_token_info()` 정상 경로(프로젝트 전환 없음)도 `_cached_validate()` 호출로 통합. JWT payload의 stale 권한 사용 제거. stale window: 15분 → 60초(캐시 TTL).
+- [x] `backend/app/services/session_store.py` — 보조 인덱스 `afterglow:user-sessions:{user_id}` SET 도입. `store_session`에 SADD, `delete_session`에 SREM 연동. `revoke_user_sessions(user_id)` 신규: 사용자 전체 세션 즉시 삭제.
+- [x] `backend/app/api/identity/admin_identity.py` — `assign_role`/`revoke_role`에 `Depends(get_token_info)` 추가. `_resolve_admin_ids()`로 admin_role_id 비교 후 분기: admin role 변동 → `revoke_user_sessions` + audit; 일반 role 변동 → audit만.
+- [x] `frontend/src/lib/api/client.ts` — `/api/admin/` 경로 403 응답 시 `handleAdminForbidden()`: `isSystemAdmin=false` 강등 + `/dashboard` 이동. one-shot 가드로 무한 루프 방지.
+- [x] `frontend/src/routes/admin/+layout.svelte` — `onMount` 시 `/me` 강제 호출하여 stale 캐시 우회 + 즉시 권한 동기화.
+
+### 36.3 테스트
+
+- [x] `backend/tests/test_auth_jwt.py` 확장 (51개 통과):
+  - `test_access_payload_no_auth_claims`: JWT payload에 `roles`/`is_system_admin` 없음 검증
+  - `test_revoke_user_sessions`: 사용자 전체 세션 삭제, 다른 유저 세션 불변
+  - `test_revoke_user_sessions_empty`: 세션 없는 유저 → 0 반환
+  - `test_bearer_jwt_uses_cached_validate_not_payload`: Bearer JWT 경로가 JWT payload 대신 `_cached_validate`로 권한 결정함을 검증
+- [x] `backend/tests/test_admin_identity.py` 확장 (51개 통과):
+  - `test_assign_admin_role_revokes_sessions`: admin role 할당 → `revoke_user_sessions` 호출 + `admin_role_grant` audit
+  - `test_assign_non_admin_role_no_revoke`: 일반 role 할당 → `revoke_user_sessions` 미호출 + `role_grant` audit
+  - `test_revoke_admin_role_revokes_sessions`: admin role 회수 → `revoke_user_sessions` 호출 + `admin_role_revoke` audit
+  - `test_revoke_non_admin_role_no_revoke`: 일반 role 회수 → `revoke_user_sessions` 미호출 + `role_revoke` audit
+
+### 36.4 검증
+
+- [x] 51개 백엔드 테스트 통과
+- [x] `ruff check` — 수정 파일 lint 통과
+- [ ] 실 환경: admin role 박탈 후 즉시 강제 로그아웃 확인, /admin 접근 시 403 → /dashboard 이동 확인
+
+## 37. Keystone System Scope(`system:all`) 도입 — 자기복제 권한 상승 차단 (2026-05-18)
+
+### 37.1 동기
+
+기존 admin 판별 정책("admin project + admin role")의 구조적 약점: 현 admin이
+`/api/admin/roles/assign`으로 다른 사용자에게 `admin role on admin project`를 부여하면,
+그 사용자도 자동으로 system admin이 된다(`require_admin` 만으로 막을 수 없음). 이를
+Keystone system-scoped role (`scope.system=all`)로 대체하여 project-scope `assign_role`
+호출로는 system admin이 만들어지지 않도록 차단. 호환 모드(`admin_legacy_project_policy=true`)로
+한 릴리스 동안 기존 admin을 OR 인정하여 무중단 마이그레이션 지원.
+
+### 37.2 변경 파일
+
+- [x] `backend/app/config.py` — `_load_toml()` `[security]` 섹션 매핑 + `Settings.admin_legacy_project_policy: bool = True`
+- [x] `generate_k8s.py` — `_render_toml_for_k8s()` 에 `[security]` 블록 추가 (configmap 인라인)
+- [x] `backend/app/services/keystone.py` — `_is_system_admin` dual-mode 재작성:
+  - `_has_system_admin_role(user_id)`: `role_assignments.list(system="all")` 검사
+  - `_has_admin_project_role(user_id)`: 기존 project-scope 검사 (호환 모드용)
+  - `_is_system_admin`: `_has_system_admin_role OR (admin_legacy_project_policy AND _has_admin_project_role)`
+  - `invalidate_admin_caches()`: 캐시 리셋 헬퍼
+- [x] `backend/app/api/identity/admin_identity.py` — System Roles 섹션 신규 엔드포인트 3개:
+  - `GET /api/admin/identity/system-roles` — system:all admin 보유자 목록
+  - `POST /api/admin/identity/system-roles/grant` — system role 부여 + 세션 즉시 무효화 + audit
+  - `POST /api/admin/identity/system-roles/revoke` — system role 회수 + 세션 즉시 무효화 + audit
+
+### 37.3 테스트
+
+- [x] `backend/tests/test_keystone_system_scope.py` (신규, 4개):
+  - `test_system_role_grants_admin_regardless_of_compat`: system role 보유 → 호환 모드 무관 True
+  - `test_admin_project_role_with_compat_on`: project role + 호환 ON → True
+  - `test_admin_project_role_with_compat_off`: project role + 호환 OFF → False
+  - `test_no_role_returns_false`: 권한 없음 → False
+- [x] `backend/tests/test_admin_identity.py` 확장 (3개):
+  - `test_list_system_roles_requires_admin`: non_admin → 403
+  - `test_grant_system_role_revokes_sessions`: grant → `revoke_user_sessions` + `admin_system_role_grant` audit
+  - `test_revoke_system_role_revokes_sessions`: revoke → `revoke_user_sessions` + `admin_system_role_revoke` audit
+
+### 37.4 마이그레이션 절차
+
+1. **PR B 배포** (`admin_legacy_project_policy=true`, 호환 모드 ON) — 기존 admin 사용자 즉시 영향 없음.
+2. 운영 admin 1명에게 system role 수동 부여:
+   ```bash
+   openstack role add --system all --user <user-id> admin
+   ```
+   Afterglow `/admin` 정상 동작 확인.
+3. 기존 admin project 멤버 전원에게 system role 부여 — `POST /api/admin/identity/system-roles/grant` 일괄 호출.
+4. **다음 릴리스**: `config.toml`에서 `[security] admin_legacy_project_policy = false` 전환.
+5. **다다음 릴리스**: 호환 분기 코드 + `admin_legacy_project_policy` 설정 키 + `_has_admin_project_role` 헬퍼 제거.
+
+**policy.yaml 권장 변경** (운영자 별도 적용):
+```yaml
+"identity:list_users": "role:admin and system_scope:all"
+"identity:create_role_assignment_on_system": "role:admin and system_scope:all"
+```
+
+### 37.5 검증
+
+- [x] 58개 백엔드 테스트 통과 (`test_keystone_system_scope.py` + `test_admin_identity.py` + `test_auth_jwt.py`)
+- [x] `ruff check` + `ruff format` — 수정 파일 lint/format 통과
+- [ ] 실 환경: system role 부여(CLI) → admin 라우트 정상, admin project 멤버십 제거 후에도 admin 유지
+- [ ] 실 환경: system role 박탈 → 즉시 강제 로그아웃 + 다음 API 401
+- [ ] 실 환경: 호환 모드 OFF에서 project-scope admin role 부여 → `/admin` 403 (자기복제 차단 확인)
+
+---
+
+## § 38 — System Admin 계정 관리 (CLI + 관리자 페이지)
+
+**동기**: PR B(`e05d8c9`)로 system:all scope 판별과 grant/revoke 엔드포인트가 생겼지만, 운영자가 활용하려면 ① 첫 admin 부트스트랩 수단, ② 일상 관리 UI, ③ 마지막 admin lockout 방지가 필요하다.
+
+### 38.1 변경 파일
+
+| 파일 | 변경 |
+|---|---|
+| `backend/app/api/identity/admin_identity.py` | `list_system_roles` 응답 enrich (`name/email/enabled`); `revoke_system_role` lockout 가드 (count≤1 → 422) |
+| `backend/tests/test_admin_identity.py` | 3개 테스트 추가 (enrich 검증, 마지막 admin 422, 2명 시 200) |
+| `scripts/manage_system_admins.py` (신규) | argparse CLI — `list/grant/revoke`, `--os-system-scope` 옵션 |
+| `frontend/src/routes/admin/system-admins/+page.svelte` (신규) | 시스템 관리자 관리 페이지 |
+| `frontend/src/lib/components/admin/system-admins/SystemAdminTable.svelte` (신규) | 목록 테이블 + 회수 버튼 (마지막 1명 disabled, self-revoke confirm) |
+| `frontend/src/lib/components/admin/system-admins/SystemAdminGrantModal.svelte` (신규) | 사용자 검색 모달 → grant 호출 |
+| `frontend/src/lib/components/AdminSidebar.svelte` | Identity 섹션에 '시스템 관리자' 메뉴 추가 |
+
+### 38.2 CLI 사용법
+
+```bash
+# 환경 설정
+export OS_AUTH_URL=https://keystone.example.com/v3
+export OS_USERNAME=admin OS_PASSWORD=...
+export OS_PROJECT_NAME=admin OS_USER_DOMAIN_NAME=Default
+
+# 현재 system admin 목록
+python3 scripts/manage_system_admins.py list
+
+# 부여 (user_id 또는 name)
+python3 scripts/manage_system_admins.py grant alice@example.com
+
+# 회수 (lockout 가드 없음 — 부트스트랩/복구 수단)
+python3 scripts/manage_system_admins.py revoke alice@example.com
+
+# Keystone secure-RBAC 환경 첫 grant 부트스트랩
+python3 scripts/manage_system_admins.py --os-system-scope grant <user-id>
+```
+
+### 38.3 검증
+
+- [x] 43개 백엔드 테스트 통과 (`test_admin_identity.py` + `test_keystone_system_scope.py`)
+- [x] `ruff format` — 수정 파일 포맷 통과
+- [x] frontend 신규 파일 — svelte-check 에러 없음
+- [ ] 실 환경: CLI `list` → 빈 목록 정상
+- [ ] 실 환경: CLI `grant` → `GET /api/admin/identity/system-roles` 응답에 name/email 포함 확인
+- [ ] 실 환경: UI `/admin/system-admins` — 1명 표시 시 회수 버튼 disabled
+- [ ] 실 환경: UI grant 후 2명 → 첫 admin self-revoke → 즉시 로그아웃
+- [ ] 실 환경: 1명 남은 상태에서 `curl POST .../revoke` → 422
+
+---
+
+## § 39 — 호환 모드 마이그레이션 완성 (가시화 + 일괄 promote + 안전망)
+
+**동기**: PR B 도입 후 `admin_legacy_project_policy=true` 호환 모드에서 strict 모드(`=false`)로 전환하기 위해 운영자에게 필요한 도구가 부재했다. admin project 멤버 일괄 promote 자동화, 현재 모드 가시화, lockout 안전망을 추가해 마이그레이션 절차 Step 3·4를 실행 가능하게 했다.
+
+### 39.1 변경 파일
+
+| 파일 | 변경 |
+|---|---|
+| `backend/app/api/identity/admin_identity.py` | `GET /identity/security-policy` (모드+카운트 반환), `POST /identity/system-roles/migrate-from-project` (일괄 grant) 신규 엔드포인트 |
+| `backend/app/main.py` startup | compat OFF + system admin 0명이면 `_logger.error()` lockout 경고 |
+| `backend/tests/test_admin_identity.py` | 4개 테스트 추가 (security-policy 403/정상, migrate 403/정상) |
+| `scripts/manage_system_admins.py` | `migrate-from-project` 서브커맨드 추가 |
+| `frontend/src/routes/admin/system-admins/+page.svelte` | security-policy 병렬 fetch + SecurityPolicyBanner + MigrateModal 통합 |
+| `frontend/src/lib/components/admin/system-admins/SecurityPolicyBanner.svelte` (신규) | 3-상태 배너 (compat ON/OFF+count>0/OFF+count=0) |
+| `frontend/src/lib/components/admin/system-admins/MigrateModal.svelte` (신규) | 일괄 마이그레이션 확인 다이얼로그 + 결과 표시 |
+
+### 39.2 CLI 사용법
+
+```bash
+# 호환 모드 → strict 전환 직전 일괄 마이그레이션
+python3 scripts/manage_system_admins.py migrate-from-project
+
+# 출력 예시:
+# OK: alice (a1b2...) granted (system admin)
+# SKIP: bob (b2c3...) already system admin
+# 완료: 1명 grant, 1명 skip, 0건 오류
+```
+
+### 39.3 검증
+
+- [x] 47개 백엔드 테스트 통과 (`test_admin_identity.py` + `test_keystone_system_scope.py`)
+- [x] `ruff check` + `ruff format` — 수정 파일 lint/format 통과
+- [x] frontend 신규 파일 — svelte-check ERROR 없음 (a11y WARNING은 기존 패턴과 동일)
+- [ ] 실 환경: compat ON 상태에서 UI 노란 배너 + "일괄 마이그레이션" 버튼 확인
+- [ ] 실 환경: 마이그레이션 실행 → migrated/skipped 카운트 정확히 반환
+- [ ] 실 환경: `admin_legacy_project_policy=false` 후 재시작 → 초록 배너
+- [ ] 실 환경: compat OFF + system admin 0명 → startup ERROR 로그 + 빨간 배너
+
+---
+
+## § 40 — Drover Cluster Template CRUD (Magnum ClusterTemplate 도입)
+
+**동기**: 사용자가 매번 k3s_version, agent_count, flavor, plugins를 직접 고르는 불편을 해소하고, 운영자가 표준 프리셋("GPU dev 3대 + Cinder CSI")을 정의해 사용자가 선택+override할 수 있는 Magnum ClusterTemplate 추상화 도입.
+
+### 40.1 변경 파일
+
+| 파일 | 변경 |
+|---|---|
+| `backend/app/models/db.py` | `K3sClusterTemplate` ORM 신규, `K3sCluster`에 `template_id`/`template_snapshot` 컬럼 추가 |
+| `backend/app/models/k3s.py` | `K3sClusterTemplateInfo`, `CreateK3sClusterTemplateRequest`, `UpdateK3sClusterTemplateRequest` Pydantic 모델 신규, `CreateK3sClusterRequest.template_id` 추가 |
+| `backend/app/services/k3s_template.py` (신규) | CRUD 서비스 (soft-delete, 권한 분기: admin=All / user=public+own) |
+| `backend/app/api/k3s/templates.py` (신규) | GET 목록/단건, admin POST/PATCH/DELETE 5개 엔드포인트 |
+| `backend/app/api/k3s/__init__.py` | `k3s_templates_router` export |
+| `backend/app/main.py` | `k3s_templates_router` 등록 (`service_k3s_enabled` 가드 하위) |
+| `backend/app/api/k3s/clusters.py` | `create_k3s_cluster_async`에 `_apply_template()` 머지 (요청 본문 값 우선) |
+| `backend/app/services/k3s_db.py` | `_cluster_to_dict` / `create_cluster_record`에 template 필드 추가 |
+| `backend/app/api/identity/admin.py` | `GET /admin/k3s-cluster-templates` 미러 엔드포인트 |
+| `backend/migrations/009_k3s_cluster_templates.sql` (신규) | `k3s_cluster_templates` 테이블 DDL + `k3s_clusters` ALTER |
+| `backend/tests/test_k3s_cluster_templates.py` (신규) | 15개 테스트 |
+| `frontend/src/lib/types/k3s.ts` | `K3sClusterTemplate` 인터페이스 추가 |
+| `frontend/src/lib/components/admin/drover/K3sClusterTemplateModal.svelte` (신규) | 생성/편집 모달 |
+| `frontend/src/lib/components/admin/drover/K3sClusterTemplateCard.svelte` (신규) | 카드 컴포넌트 |
+| `frontend/src/routes/admin/drover/templates/+page.svelte` (신규) | admin 전용 템플릿 관리 페이지 |
+| `frontend/src/lib/components/dashboard/drover/K3sCreateClusterModal.svelte` | 템플릿 드롭다운 추가 + `applyTemplate()` |
+| `frontend/src/routes/dashboard/drover/+page.svelte` | `createCluster`에 `template_id` 전달 |
+| `frontend/src/lib/components/AdminSidebar.svelte` | "클러스터 템플릿" 메뉴 항목 추가 |
+
+### 40.2 검증
+
+- [x] 백엔드 15개 테스트 통과 (`test_k3s_cluster_templates.py`)
+- [x] 기존 87개 테스트 회귀 없음
+- [x] `ruff check` + `ruff format` — 수정 파일 통과
+- [x] frontend svelte-check ERROR 없음 (a11y WARNING은 기존 패턴과 동일)
+- [ ] 실 환경: admin 페이지에서 템플릿 생성 → 사용자 생성 모달 드롭다운 확인
+- [ ] 실 환경: 템플릿 선택 후 agent_count/flavor override 동작 확인
+- [ ] 실 환경: `public_visible=false` 템플릿이 타 사용자 드롭다운에 미노출 확인
+- [ ] 실 환경: 템플릿 PATCH/DELETE 후 기존 클러스터 `template_snapshot` 보존 확인
+
+---
+
+## § 41 — PR 2A: Nodegroup 추상화 레이어 (2026-05-18)
+
+### 41.1 변경 파일
+
+| 파일 | 변경 내용 |
+|---|---|
+| `backend/migrations/010_k3s_nodegroups.sql` (신규) | `k3s_nodegroups` + `k3s_nodegroup_vms` DDL, 기존 클러스터 SQL 백필 |
+| `backend/app/models/db.py` | `K3sNodegroup`, `K3sNodegroupVM` ORM 추가, `K3sCluster.nodegroups` 관계 |
+| `backend/app/models/k3s.py` | `K3sNodegroupInfo`, `CreateK3sNodegroupRequest`, `UpdateK3sNodegroupRequest` 추가 |
+| `backend/app/services/k3s_nodegroup.py` (신규) | CRUD 서비스 (list/get/create/update/delete + VM 추적 헬퍼) |
+| `backend/app/api/k3s/nodegroups.py` (신규) | GET list, GET 단건, POST, PATCH, DELETE 라우터 |
+| `backend/app/api/k3s/__init__.py` | `k3s_nodegroups_router` export 추가 |
+| `backend/app/main.py` | nodegroups 라우터 `service_k3s_enabled` 가드 하위 등록 |
+| `backend/tests/test_k3s_nodegroups.py` (신규) | 16개 테스트 |
+| `frontend/src/lib/types/k3s.ts` | `K3sNodegroup`, `K3sNodegroupVM` 인터페이스 추가 |
+| `frontend/src/lib/components/dashboard/drover/K3sNodegroupCard.svelte` (신규) | 노드그룹 카드 컴포넌트 |
+| `frontend/src/lib/components/dashboard/drover/K3sNodegroupCreateModal.svelte` (신규) | 노드그룹 생성 모달 |
+| `frontend/src/lib/components/k3s/K3sNodegroupsSection.svelte` (신규) | 클러스터 상세 내 노드그룹 목록 + 생성/삭제 |
+| `frontend/src/lib/components/K3sClusterDetailPanel.svelte` | `K3sNodegroupsSection` 임포트 및 배치 추가 |
+
+### 41.2 검증
+
+- [x] 백엔드 16개 테스트 통과 (`test_k3s_nodegroups.py`)
+- [x] svelte-check — 신규 파일 ERROR 없음
+- [ ] 실 환경: 기존 클러스터에 백필 SQL 실행 후 `GET /api/k3s/clusters/{id}/nodegroups` 응답 확인
+- [ ] 실 환경: 노드그룹 생성 → 수정(node_count) → 삭제 흐름 확인
+- [ ] 실 환경: default-server/default-agent 삭제 시 422 응답 확인
+- [ ] 클러스터 상세 패널에 노드그룹 섹션 표시 확인
+
+---
+
+## § 42 — PR 2B: k3s 마스터 HA (embedded etcd, LB-first) (2026-05-18)
+
+### 42.1 변경 파일
+
+| 파일 | 변경 내용 |
+|---|---|
+| `backend/migrations/011_k3s_master_ha.sql` (신규) | `k3s_clusters.master_count INT NOT NULL DEFAULT 1` ALTER |
+| `backend/app/models/db.py` | `K3sCluster.master_count` 컬럼 추가 |
+| `backend/app/models/k3s.py` | `K3sProgressStep` HA 단계 추가, `CreateK3sClusterRequest.master_count` (1\|3 validator), `K3sClusterInfo.master_count` |
+| `backend/app/services/k3s_cluster.py` | `create_ha_callback_token`, `consume_ha_callback_token`, `get_ha_join_count`, `incr_ha_join_count` 추가 |
+| `backend/app/services/k3s_db.py` | `_cluster_to_dict`, `create_cluster_record`, `_column_map`에 `master_count` 추가, HA 토큰/카운터 래퍼 추가 |
+| `backend/app/services/k3s_cloudinit.py` | `generate_server_userdata` + `_build_server_ignition`에 `cluster_init`, `join_url`, `ha_node_token` 파라미터 추가 |
+| `backend/app/templates/k3s_server.yaml.j2` | `cluster_init`/`join_url` HA 분기 추가 |
+| `backend/app/services/k3s_provisioner.py` (신규) | `provision_agents` (callback.py에서 이전) + `bootstrap_ha_servers` |
+| `backend/app/api/k3s/clusters.py` | Step 1-B HA LB+FIP 생성, `cluster_init` 전달, HA 필드 저장, `_rollback` lb_id/fip_id, `_cluster_to_info` master_count |
+| `backend/app/api/k3s/callback.py` | HA/일반 토큰 이중 시도, server_index 분기, `_handle_ha_joiner`, provision_agents → k3s_provisioner 이전 |
+| `backend/app/config.py` | `k3s_api_lb_floating_network_id` 추가 (Settings + _load_toml) |
+| `backend/tests/test_k3s_master_ha.py` (신규) | 11개 테스트 |
+| `frontend/src/lib/types/k3s.ts` | `K3sCluster.master_count?: number` 추가 |
+| `frontend/src/lib/components/dashboard/drover/K3sCreateClusterModal.svelte` | `master_count` 폼 필드, 1/3 토글 UI 추가 |
+
+### 42.2 검증
+
+- [x] 백엔드 11개 테스트 통과 (`test_k3s_master_ha.py`)
+- [ ] 실 환경: master_count=3 클러스터 생성 → LB+FIP 자동 생성, server#2/3 join 확인
+- [ ] 실 환경: server#1 강제 종료 → kubectl 페일오버 5초 내 확인
+- [ ] 실 환경: master_count=2 요청 → 422 응답 확인
+
+---
+
+## § 43 — PR 3-A: k3s 인증서 만료 조회 + CA 다운로드 (2026-05-18)
+
+### 43.1 변경 파일
+
+| 파일 | 변경 내용 |
+|---|---|
+| `backend/app/services/k3s_certs.py` (신규) | `extract_ca_pem`, `parse_kubeconfig_certs`, `probe_tls_server_cert` |
+| `backend/app/api/k3s/certificates.py` (신규) | `GET /{id}/ca-certificate`, `GET /{id}/certificate-expiry` |
+| `backend/app/api/k3s/__init__.py` | `k3s_certificates_router` 등록 |
+| `backend/app/main.py` | `k3s_certificates_router` import + `include_router` (service_k3s_enabled 가드) |
+| `backend/app/models/k3s.py` | `CertificateInfo`, `CertificateExpiryResponse` Pydantic 모델 추가 |
+| `backend/app/api/identity/admin.py` | 관리자 미러 2개: `GET /k3s-clusters/{id}/ca-certificate`, `GET /k3s-clusters/{id}/certificate-expiry` |
+| `backend/tests/test_k3s_certs.py` (신규) | 13개 테스트 |
+| `frontend/src/lib/types/k3s.ts` | `CertificateInfo`, `CertificateExpiryResponse` 타입 추가 |
+| `frontend/src/lib/components/k3s/K3sClusterInfoCard.svelte` | 인증서 행 (CA 다운로드 버튼 + 만료 조회 버튼) 추가 |
+| `frontend/src/lib/components/k3s/K3sCertificateExpiryModal.svelte` (신규) | CA/클라이언트/서버TLS 만료 정보 모달 (days_remaining 색상 chip) |
+
+### 43.2 검증
+
+- [x] 백엔드 13개 테스트 통과 (`test_k3s_certs.py`)
+- [x] ruff lint 클린
+- [ ] 실 환경: `GET /api/k3s/clusters/{id}/ca-certificate` → PEM 다운로드 확인
+- [ ] 실 환경: `GET /api/k3s/clusters/{id}/certificate-expiry` → days_remaining 정상 반환 확인
+- [ ] 실 환경: TLS 프로브 가능한 클러스터에서 server_via_tls 배열 확인
+
+---
+
+## § 44 — PR 3-B: k3s 인증서 회전 자동화 (2026-05-18)
+
+k3s 인증서 rolling 회전 — K8s Job(hostPID + nsenter)으로 SSH 없이 `systemctl restart k3s` 트리거.
+k3s는 재시작 시 만료 90일 이내 인증서를 자동 갱신한다.
+
+### 변경 파일
+
+| 파일 | 변경 |
+|---|---|
+| `backend/migrations/012_k3s_cert_rotation.sql` (신규) | `last_rotation_at`, `last_rotation_initiated_by` ALTER |
+| `backend/app/models/db.py` | `K3sCluster.last_rotation_at`, `last_rotation_initiated_by` 컬럼 추가 |
+| `backend/app/models/k3s.py` | `K3sProgressStep.ROTATE_DISCOVER/SERVER/AGENT/VERIFY` 추가 |
+| `backend/app/config.py` | `k3s_cert_rotation_node_timeout_sec`, `k3s_cert_rotation_job_image` |
+| `generate_k8s.py` | k3s_keys_str/int에 cert rotation 키 추가 |
+| `config.toml.example` | [k3s] cert rotation 섹션 문서화 |
+| `backend/app/services/k3s_kube.py` | `list_server_nodes`, `create_job`, `wait_job_completed`, `wait_node_ready` |
+| `backend/app/services/k3s_db.py` | `record_rotation()` |
+| `backend/app/services/k3s_cert_rotation.py` (신규) | `rotate_certificates()` 제너레이터, Redis 락, 캐시 무효화 |
+| `backend/app/api/k3s/certificates.py` | `POST /{id}/rotate-certs` SSE 엔드포인트 추가 |
+| `backend/app/api/identity/admin.py` | 관리자 미러: `POST /k3s-clusters/{id}/rotate-certs` |
+| `frontend/src/lib/components/k3s/K3sCertificateExpiryModal.svelte` | "인증서 회전" 버튼 (HA 전용) |
+| `frontend/src/lib/components/k3s/K3sRotateProgressModal.svelte` (신규) | SSE 스트림 진행률 모달 |
+| `backend/tests/test_k3s_cert_rotation.py` (신규) | 12개 테스트 |
+
+### 완료 기준
+
+- [x] 백엔드 12개 테스트 통과 (`test_k3s_cert_rotation.py`)
+- [x] PR 3-A 회귀 없음 (`test_k3s_certs.py` 13개 통과)
+- [x] ruff lint 클린
+- [ ] 실 환경: HA(3-master) 클러스터에서 회전 → SSE 스트림 완료, cert NotAfter 갱신 확인
+- [ ] 실 환경: 단일 마스터 클러스터에서 회전 → 422 확인
+- [ ] 실 환경: 동시 회전 → 두 번째 요청 409 확인
+
+---
+
+## Phase 48 — Frontend 공통 패턴 추출
+
+### Phase 48a — SWR 헬퍼 추출
+
+- [x] `frontend/src/lib/utils/swr.svelte.ts` 신규 생성 (`createSwr` 팩토리)
+- [x] `volumesController.svelte.ts` 인라인 swrGet/swrSet → `createSwr` import
+- [x] `dashboard/network/networks/+page.svelte` 인라인 swrGet/swrSet → `createSwr` import
+- [x] `dashboard/compute/instances/+page.svelte` 인라인 swrGet/swrSet → `createSwr` import
+- [x] `dashboard/file-storage/+page.svelte` 인라인 swrGet/swrSet → `createSwr` import
+- [x] npm run check 62 errors (기존과 동일, 신규 없음)
+- [x] npm run test 7 failed / 215 passed (기존과 동일, 신규 없음)
+
+### Phase 48b — Controller 추출
+
+- [x] `admin/database-instances/[id]` → `adminDatabaseInstanceDetailController.svelte.ts`
+- [x] `dashboard/network/loadbalancers/[id]` → `networkLoadbalancerDetailController.svelte.ts`
+- [x] `dashboard/loadbalancers/[id]` → `loadbalancerDetailController.svelte.ts`
+- [x] `admin/quotas` → `adminQuotasController.svelte.ts`
+- [x] `admin/groups` → `adminGroupsController.svelte.ts`
+
+### Phase 48c — 인라인 타입 통합
+
+- [x] `dashboard/topology/+page.svelte` 5개 인라인 타입 → `lib/types/topology.ts`
+- [x] `Network`/`SubnetDetail` 중복 2곳 → `lib/types/networks.ts`
+- [x] `Project`/`ProjectMember` → `lib/types/project.ts` (신규)
+- [x] `PagedResponse<T>` → `lib/types/resources.ts` (기존)
+- [x] `SecurityGroupRule`/`SecurityGroup` → `lib/types/securityGroup.ts` (신규)
+- [x] `QuotaItem`/`ManilaFileQuota` → `lib/types/quotas.ts` 확장
+
+### Phase 48d — ConfirmDialog 추출
+
+- [x] `lib/components/ui/ConfirmDialog.svelte` 신규 (ESC 닫기 포함)
+- [x] `lib/stores/confirm.svelte.ts` 신규 (`confirmDialog()` Promise<boolean>)
+- [x] `+layout.svelte`에 `<ConfirmDialog />` 마운트
+- [x] routes 31개 파일 42곳 `confirm()` → `await confirmDialog()` 치환
+- [x] Phase 48b controller 3개 내부 `confirm()` 동일 치환
+
+### Phase 48e — Modal/FormModal 추출
+
+- [x] `lib/components/ui/Modal.svelte` 신규 (백드롭 + ESC 닫기)
+- [x] `lib/components/ui/FormModal.svelte` 신규 (Modal 래핑, submit/cancel 슬롯)
+- [x] `admin/floating-ips/+page.svelte` 인라인 백드롭 2곳 → `<Modal bind:open>` 교체
+- [x] `admin/drover/templates/+page.svelte` 인라인 백드롭 1곳 → `<Modal>` 교체
+- [x] npm run check 62 errors (기존과 동일)
+- [x] npm run test 7 failed / 215 passed (기존과 동일)
+
+### Phase 48 — 180줄 잔존 파일 예외 처리 (architect 검증 완료)
+
+다음 5개 파일은 Phase 48b 명시 스코프(5개)에 포함되지 않았으며, architect 검토 결과 controller 추출 ROI 부족으로 **의도적으로 제외**:
+
+| 파일 | 줄수 | 제외 사유 |
+|---|---|---|
+| `admin/volumes/+page.svelte` | 200 | modal 합성 컨테이너, template 98줄 고정 — 추출 가치 < 비용 |
+| `admin/orphans/+page.svelte` | 193 | bind:selected 양방향 바인딩 4개, 추출 시 wrapping 오버헤드 |
+| `admin/ports/+page.svelte` | 193 | Phase 49+ 후속 분리 검토 대상 |
+| `dashboard/network/security-groups/+page.svelte` | 187 | bind:ruleForm 양방향 바인딩, Phase 49+ 검토 |
+| `dashboard/network/networks/[id]/+page.svelte` | 185 | Phase 49+ 후속 분리 검토 대상 |
+
+## Phase 49 — Frontend 후속 리팩토링 (UX 일관성 + 구조 개선)
+
+### Phase 49a — confirm() 잔존 39건 confirmDialog 치환
+
+- [x] lib/stores 14개 파일 (instanceDetail, dbInstanceDetail, loadBalancerDetail, routerDetail, fileStorageDetail, volumeDetail, volumesController, networkDetail, objectBrowser, k3sClusterDetail, imageDetail, k3sClusterListController, containerDetail, imagesController) confirm() → await confirmDialog()
+- [x] lib/components 4개 (K3sClusterConfigMapsCard, K3sClusterSecretsCard, KeypairsSection, SystemAdminTable) confirm() → await confirmDialog()
+- [x] grep confirm() 0건 확인
+- [x] npm run check 62 errors baseline 유지
+- [x] npm run test 7 known failures 외 회귀 없음
+
+### Phase 49b — alert() 128건 toast 교체
+
+- [x] lib/stores 14개 + lib/components 2개 alert() → toast.error/warning/success 치환
+- [x] routes/ 29개 파일 alert() → toast.error/warning/success 치환
+- [x] grep alert() 0건 확인
+- [x] npm run check 62 errors baseline 유지
+- [x] npm run test 7 known failures 외 회귀 없음
+
+### Phase 49c — legacy dashboard/loadbalancers/new/ 삭제
+
+- [x] +page.svelte + +page.server.ts 삭제 (진입 link 0건 사전 확인)
+- [x] npm run check 62 errors baseline 유지
+
+### Phase 49d — resources.ts 도메인 분리
+
+- [x] 7개 중복 이름 단일 source 통합 (Network/NetworkDetail/SubnetDetail → networks.ts, SecurityGroup → securityGroup.ts, Quotas → quotas.ts DashboardQuotas, QuotaItem/PagedResponse → 각 도메인)
+- [x] common.ts/compute.ts/volume.ts/loadbalancer.ts/database.ts/fileStorage.ts 도메인 파일 분리
+- [x] 143개 import 업데이트 — from '$lib/types/resources' 잔존 0건
+
+### Phase 49e — 11개 Detail store controller 컨벤션 정렬
+
+- [x] 파일명 xxxDetailController.svelte.ts, factory createXxxDetailController
+- [x] loadBalancerDetail 신·구 공존 해소
+
+### Phase 49f — GlobalTopology.svelte 678줄 내부 분해
+
+- [x] lib/components/topology/ 신규 (topologyHelpers.ts, topologyDerivedController.svelte.ts, TopologyHeader.svelte, TopologySidebar.svelte)
+- [x] GlobalTopology.svelte ≤ 250줄 (241줄)
+
+---
+
+## Phase 50 — Anthropic Design Handoff 적용 (대시보드 4 + 관리자 4 페이지)
+
+### Phase 50a — 디자인 토큰 + UI primitive 5종 신규
+
+- [x] --admin-tone CSS 변수 추가 (layout.css dark/light)
+- [x] Pill.svelte 신규 (8 tone)
+- [x] SectionHeader.svelte 신규 (uppercase + meta + right slot)
+- [x] Spark.svelte 신규 (SVG path, fixedWidth/stretch)
+- [x] Donut.svelte 신규 (SVG strokeDasharray + center slot)
+- [x] CapacityBar.svelte 신규 (80%/95% 자동 톤)
+- [x] StatTile.svelte admin-tone accent 추가
+- [x] lib/components/ui/index.ts barrel export 신규
+- [x] npm run check baseline 유지 (59 errors ≤ 62 baseline)
+
+### Phase 50b — 백엔드 endpoint (대시보드 4-A~4-E) + pytest
+
+- [x] backend/app/api/dashboard/ 5개 endpoint
+- [x] backend/app/models/dashboard.py Pydantic 모델
+- [x] backend/tests/test_dashboard_*.py pytest
+- [x] pytest 통과
+
+### Phase 50c — 백엔드 endpoint (관리자 A-1~A-7) + pytest
+
+- [x] admin_dashboard.py A-1~A-6 endpoint
+- [x] admin_identity.py A-7 summary
+- [x] bulk-action ActivityLog 자동 기록
+- [x] backend/tests/test_admin_dashboard.py require_admin 거부 케이스 포함
+- [x] pytest 통과
+
+### Phase 50d — 사이드바 nav + 신규 라우트 3종 스켈레톤
+
+- [x] Sidebar.svelte 대시보드 섹션 4개 메뉴
+- [x] dashboard/usage, usage-report, activity 라우트 스켈레톤
+
+### Phase 50e — 대시보드 4 페이지 마크업 이식
+
+- [x] routes/dashboard/+page.svelte PageOverview 이식 (14d 추세 + 알림 섹션 추가)
+- [x] routes/dashboard/usage/+page.svelte PageUsage 이식
+- [x] routes/dashboard/usage-report/+page.svelte PageUsageReport 이식
+- [x] routes/dashboard/activity/+page.svelte PageActivity 이식
+- [x] 비용/요금 단어 0건
+
+### Phase 50f — 관리자 4 페이지 마크업 이식
+
+- [x] routes/admin/+page.svelte 알림 배너 + AutoRefresh 추가
+- [x] routes/admin/identity/+page.svelte 허브 신설 (3탭 + admin-tone)
+- [x] routes/admin/monitoring/+page.svelte Grafana 바로가기 9종 추가
+- [x] routes/admin/instances/+page.svelte 5 KPI tiles 추가
+- [x] AdminSidebar.svelte Identity 허브 링크 추가
+- [x] bulk action ActivityLog 백엔드 검증 완료 (Phase 50c pytest)
+
+### Phase 50g — 8 페이지 AutoRefresh 통합
+
+- [x] 8 페이지 createAutoRefresh 적용 완료 (Phase 50e/50f에서 통합)
+- [x] localStorage 키 분리 (dashboard-home/usage/usage-report/activity, admin-overview/identity/monitoring/instances)
+
+### Phase 50h — milestone 정리 + 디자인 회귀 점검
+
+- [x] 비용/요금 단어 0건 (dashboard/admin 전체)
+- [x] 하드코딩 hex 0건 (4개 신규 대시보드 + 4개 관리자 페이지)
+- [x] 신규 4 대시보드 페이지 OpenStack 서비스명 0건
+- [x] npm run check baseline 59 errors 유지
+- [x] milestone.md 50a~50h [x]
+
+---
+
+## Phase 51 — Phase 50 후속 프로덕션 버그 5건 수정
+
+### Phase 51a — admin identity summary 500 fix
+
+- [x] `_collect()` users/projects/roles 개별 try/except + partial 필드 반환
+- [x] 외부 except에 `_logger.exception` 추가로 traceback 운영 가시화
+- [x] pytest: 부분 실패 케이스 2종 추가 (test_admin_dashboard.py)
+
+### Phase 51b — /dashboard/usage 무한 로딩 fix
+
+- [x] 백엔드 응답 키 `volume_by_type` → `volumes_by_type` 통일
+- [x] 프론트 `$effect` authReady 가드 추가 (activity 패턴 일관화)
+
+### Phase 51c — ActivityLog 가시성 + db_status 노출
+
+- [x] `services/activity.py` silent return → rate-limited warning (60s/1회)
+- [x] `/api/dashboard/activity` 응답에 `db_status` 필드 추가
+- [x] `hour_distribution` 응답 형식 단순 배열로 수정 (프론트 인터페이스 일치)
+- [x] `dashboard/activity/+page.svelte` db_status=unavailable 안내 카드 표시
+- [x] pytest: test_activity_silent_skip.py 신규 (3 cases)
+
+### Phase 51d — 사용자용 notifications 분리 + 14d trend 안내 개선
+
+- [x] 사용자 대시보드 `/api/admin/notifications` → `/api/dashboard/notifications` 교체
+- [x] 백엔드 신규 endpoint: project-scoped ERROR 인스턴스 알림
+- [x] 14d trend placeholder 문구 → "메트릭 수집 미설정 — 관리자에게 Grafana 설정 문의"
+- [x] pytest: test_dashboard_notifications.py 신규 (3 cases)
+
+### Phase 51e — /admin/monitoring Grafana 바로가기 섹션 제거
+
+- [x] admin/monitoring/+page.svelte Grafana 섹션 삭제 (사이드바 9종과 완전 중복)
+- [x] SectionHeader import 함께 제거
+
+### Phase 51f — 검증
+
+- [x] pytest 22 passed (test_admin_dashboard + test_dashboard_notifications + test_activity_silent_skip)
+- [x] npm run check 59 errors baseline 유지
+
+---
+
+## Phase 52 — Phase 51 후속 프로덕션 버그 5건 수정 + 14d trend 실데이터 연결
+
+### Phase 52a — /dashboard/usage TypeError fix (응답 키 정렬)
+
+- [x] top_instances: `flavor` → `flavor_name`, `status`/`disk_gb`/`usage_hours` 추가
+- [x] `_list_flavors_as_dicts` vcpus/ram/disk 필드 추가
+- [x] `_list_servers_as_dicts` name/created_at 필드 추가
+- [x] volumes_by_type: `size_gb` → `total_gb`, `count` 필드 추가
+- [x] isGpu(inst.flavor_name) TypeError 해소
+
+### Phase 52b — /dashboard/usage-report TypeError fix (forecast 키 정렬)
+
+- [x] 응답 `quota.forecast_pct` → `forecast.{vcpu_pct, memory_pct, storage_pct}`
+- [x] memory_pct/storage_pct 신규 계산 추가
+- [x] test_dashboard_usage_report.py 신규 4케이스
+
+### Phase 52c — /admin/identity 허브 "undefined" fix
+
+- [x] 응답에 flat alias 추가 (user_count/project_count/role_count/group_count/domain_count)
+- [x] recent_users/recent_projects 최근 5건 반환
+- [x] Phase 51a partial 케이스 호환 유지
+- [x] test_admin_dashboard.py Phase 52c 케이스 추가
+
+### Phase 52d — k3s 클러스터 상세 namespace 자동 로드
+
+- [x] K3sClusterDetailPanel.svelte: ACTIVE 진입 시 loadNamespaces() 자동 호출
+- [x] ConfigMap/Secret CRUD 네임스페이스별 동작 가능
+
+### Phase 52e — 14d trend 카드 PromQL 실데이터 연결
+
+- [x] /api/dashboard/metrics/trend endpoint 신규 (PromQL range_query, 14일치 1일 step)
+- [x] Prometheus 미설치 시 prometheus_available=false + data=[] fallback (500 없음)
+- [x] dashboard/+page.svelte Spark 컴포넌트 실데이터 연결
+- [x] prometheus_available=false 시 observability 링크 포함 안내 표시
+- [x] test_dashboard_metrics.py 신규 4케이스
+
+### Phase 52f — 검증
+
+- [x] pytest 41 passed (test_dashboard_new + test_dashboard_usage_report + test_dashboard_metrics + test_admin_dashboard + test_activity_silent_skip + test_dashboard_notifications)
+- [x] npm run check 59 errors baseline 유지
+
+## Phase 53 — Phase 52 후속 프로덕션 버그 5건 수정
+
+### Phase 53a — /dashboard/usage-report 요청 폭주 차단
+
+- [x] usage-report `$effect` untrack 래핑 — Svelte 5 무한 루프 차단
+- [x] intervalOptions에 300초 추가 (localStorage 복원 강등 방지)
+- [x] /api/dashboard/usage-report 응답에 `Cache-Control: private, max-age=60` 추가
+- [x] /api/dashboard/metrics/trend `range=24h` 지원 (step=300, flavor-relative PromQL)
+- [x] test_dashboard_usage_report.py Cache-Control 헤더 검증 추가
+- [x] test_dashboard_usage_spark.py 신규 5케이스
+
+### Phase 53b — /admin/instances 상단 KPI 응답 스키마 정렬
+
+- [x] /admin/instances/health 응답에 total/active/error/with_alerts/gpu_count 5필드 추가
+- [x] _is_gpu_flavor() 헬퍼 (original_name 기반 GPU 감지)
+- [x] 기존 items/count 호환 유지
+- [x] test_admin_dashboard.py KPI 5필드 검증 케이스 추가
+
+### Phase 53c — /dashboard/usage 24h Spark 카드 연결
+
+- [x] dashboard/usage/+page.svelte placeholder 제거 → Spark 컴포넌트 + PromQL 실데이터 연결
+- [x] vCPU/RAM flavor-relative %, 네트워크 KiB/s 표시
+- [x] prometheus_available=false 시 "메트릭 수집 미설정" 안내
+
+### Phase 53d — /admin/identity 역할 권한 부족 안내 + 상세 테마 통일
+
+- [x] _collect partial_reasons 필드 추가 (insufficient_privileges / connection_error 분류)
+- [x] admin/identity/+page.svelte partial 경고 배지 표시
+- [x] 상세 4개 페이지(users/projects/groups/roles) md:p-8 → md:p-6 정렬
+- [x] test_admin_dashboard.py partial_reasons 검증 케이스 추가
+
+### Phase 53e — /dashboard/topology 서버측 project_id 필터링
+
+- [x] _fetch_topology_sync project_id 파라미터 추가 (user scope 필터)
+- [x] 인스턴스: 현재 프로젝트만, 네트워크: 자기 프로젝트 + external + shared, 라우터: 자기 프로젝트만
+- [x] get_topology → _fetch_topology_sync(project_id=pid) 전달
+- [x] test_topology.py 신규 5케이스
+
+### Phase 53f — 검증
+
+- [x] pytest 36 passed (test_admin_dashboard + test_dashboard_usage_report + test_dashboard_usage_spark + test_topology)
+- [x] alert()/confirm() 잔존 0건, 비용/요금 0건, Nova/Cinder/Manila/Neutron(dashboard) 0건
+- [x] npm run check baseline 유지
+
+### Phase 53g — Overview 사용률 카드 Prometheus 통합
+
+**목표**: `/dashboard` Overview의 VCPU/메모리/스토리지 카드를 Prometheus 실데이터로 연결 + range 토글 추가.
+
+**스토리지 의미**: 인스턴스 root fs 사용률 % (node_exporter `node_filesystem_*`) — Cinder 볼륨 GB **아님**. 향후 Cinder 볼륨 추세는 openstack-exporter 도입 시 별도 Phase에서 다룸.
+
+- [x] `backend/app/api/common/dashboard.py` — `/metrics/trend` 엔드포인트 전면 재작성
+  - range=24h|7d|14d 지원 (기존 24h|14d에서 확장). step: 24h=300s, 7d=3600s, 14d=6h
+  - vCPU/Memory: 모든 range에서 동일 libvirt flavor-relative % 식 (24h range-별 분기 제거)
+  - Storage: `node_filesystem_avail/size_bytes{project_id="…",mountpoint="/"}` root fs 사용률 % (cinder_volume_capacity_bytes 제거)
+  - Network: `libvirt_domain_interface_stats_*` KiB/s — 응답에 별도 `network` 필드로 분리 (Phase 53c 버그: storage slot에 네트워크 데이터 혼입 → 수정)
+  - NaN 가드: `_safe_query`에서 `math.isnan` 포인트 제거 (인스턴스 0개 시 available 오판 방지)
+  - Redis 캐시: `cached_call(key, ttl, fn)` — TTL 24h=15s, 7d=120s, 14d=300s
+  - `?refresh=true` 쿼리스트링으로 캐시 강제 무효화
+- [x] `backend/tests/test_dashboard_usage_spark.py` — 기존 5케이스 assertion 갱신 + 신규 7케이스
+  - network 필드 분리 확인, 7d step=3600 검증, node_filesystem expr 확인, invalid range 400, NaN 필터, Redis 캐시 히트 확인
+- [x] `frontend/src/lib/components/dashboard/overview/RangeToggle.svelte` — 신규 segmented control (24h/7d/14d, aria-pressed, 화살표 네비)
+- [x] `frontend/src/routes/dashboard/+page.svelte` — range 토글 + fetchTrend() 분리
+  - range 상태 localStorage 영속 (`dashboard-overview-range`, 기본 14d)
+  - range 변경 시 5개 API 재호출 없이 trend만 부분 재조회
+  - 카드 라벨 동적 (`vCPU 사용률 (${range})` 등), 스토리지 라벨 "디스크 사용률"로 명시
+  - 카드 별 available 체크 → "수집 대기 중" 문구 (prometheus_available=true이나 특정 카드만 빈 경우)
+- [x] `frontend/src/routes/dashboard/usage/+page.svelte`
+  - Phase 53c 잔존 버그 수정: 네트워크 카드가 `storage.data`를 참조하던 것 → `network.data`로 정정
+  - 디스크 사용률 카드 신규 추가 (24h 그룹, 4번째)
+  - 14d 추세 placeholder 연결 — `trendData14d` 별도 조회, vCPU/RAM/디스크 mini-grid
+- [x] pytest 38 passed, tsc --noEmit 오류 0건
+
+### Phase 53h — Overview 사용률 카드 표시 회귀 정정
+
+- [x] vCPU/RAM PromQL을 node_exporter 기반으로 전환
+  - 근본 원인: libvirt scrape job이 Afterglow Prometheus configmap에 없어 `libvirt_domain_info_*{project_id="…"}` 가 빈 시리즈 반환
+  - 수정: `node_cpu_seconds_total{mode="idle"}` + `node_memory_MemAvailable/MemTotal_bytes`
+  - **의미 변경**: flavor-relative % → guest OS 실제 사용률 % (어떤 인스턴스가 무거운지 판단하는 목적에 더 정확)
+- [x] 카드 레이아웃 3행 재구성
+  - 헤더 우측: 현재값 (시리즈 마지막 포인트, `text-xl font-semibold tabular-nums`)
+  - Spark height 44 → 72 (카드 빈 공간 해소)
+  - 하단: `min X% · max Y%` 메타 행
+- [x] pytest 14 passed (신규 2건: `test_trend_vcpu_uses_node_cpu_expr`, `test_trend_memory_uses_node_memory_expr`)
+
+### Phase 53i — Overview 사용률 카드 libvirt_exporter 통합 + 그래프 폭 정정
+
+- [x] kolla `globals.afterglow.sample.yml` — `enable_prometheus_libvirt_exporter: "yes"` + `prometheus_libvirt_exporter_port: 9177` 추가
+  - 운영자: `kolla-ansible -i inventory reconfigure -t prometheus` 필요
+- [x] Prometheus configmap — `instances-libvirt` scrape job 추가 (http_sd → `/api/sd/prometheus/libvirt-targets`)
+- [x] Afterglow SD — `/api/sd/prometheus/libvirt-targets` 신설 (`_collect_libvirt_targets`: Nova hypervisors 목록)
+- [x] 설정 동기화 — `libvirt_exporter_port = 9177` (`config.py` / `config.toml.example` / `generate_k8s.py`)
+- [x] dashboard.py PromQL 교체
+  - vCPU: `libvirt_domain_info_cpu_time_seconds_total * on (domain) group_left(instance_id) libvirt_domain_openstack_info{instance_id=~"…"}` (UUID regex 조인)
+  - RAM: `libvirt_domain_memory_stats_used_percent` 평균 + 동일 조인
+  - 디스크: `node_filesystem_*` 유지 (libvirt에 디스크 사용률 메트릭 없음)
+  - 네트워크: `libvirt_domain_interface_stats_*` + UUID regex 조인
+  - 빈 프로젝트 early-return — PromQL 호출 0회 + prometheus_available=false
+- [x] **커버리지 개선**: node_exporter 미설치 인스턴스(BIO, SYSTEM 등)도 vCPU/RAM 데이터 표시 (kolla reconfigure 후)
+- [x] 카드 그래프 폭 정정: `<Spark … class="w-full" />` 로 좌→우 전체 채움
+- [x] pytest 15 passed (신규: `test_trend_empty_project_skips_prometheus`)
+
+### Phase 53j — Overview 디스크 카드 libvirt_exporter 가용성 조사 + fallback UX 정정
+
+- [x] `inovex/prometheus-libvirt-exporter` v2.3.1 메트릭 전수 조사
+  - `libvirt_domain_block_stats_capacity_bytes`: 정적값(= flavor root_disk), 실제 점유율 미반영
+  - `libvirt_domain_block_stats_read/write_bytes_total`: I/O 처리량 카운터, 공간 점유와 무관
+  - `allocation_bytes`/`physical_bytes`: exporter 의도적 미노출 (v2.3.1까지 변경 없음)
+  - `libvirt_storage_pool_allocation_bytes`: 풀 단위 합계, 인스턴스별 분해 불가
+- [x] **결론**: libvirt_exporter 단일 소스로 인스턴스별 디스크 사용률 % 산출 불가 → 디스크 카드는 `node_filesystem_*` 의존 유지
+- [x] fallback UX 정정: `prometheus_available=true` + storage `available=false` 시 "수집 대기 중" 대신 "node_exporter 미설치" 메시지 명시
+- [x] 후속(Phase 미정): QEMU Guest Agent 기반 디스크 메트릭 pipeline 검토 필요
+
+### Phase 53k — 사용량 페이지 상단 카드 충실화 + 인스턴스별 실 사용률
+
+- [x] 상단 4 카드(vCPU/RAM/디스크/네트워크) — Overview 3-row 패턴 통일: current값 + `class="w-full"` Spark + min·max 푸터
+- [x] 스토리지 카드 Phase 53j fallback 메시지("node_exporter 미설치") 적용
+- [x] 백엔드 `/api/dashboard/usage-stats` — per-instance `cpu_pct`/`ram_pct` 추가
+  - libvirt PromQL 2건(`query_instant_multi`) + UUID regex 조인 (`asyncio.gather` 병렬)
+  - Prometheus 미가용 시 silent fallback → 두 필드 `null`
+- [x] 상위 인스턴스 테이블 VCPU/RAM bar 의미 교체: 프로젝트 quota 대비 → 인스턴스 실 사용률 0~100%
+  - 데이터 없는 인스턴스: "—" 텍스트 + 빈 bar
+- [x] 하단 "14일 추세" + "볼륨 분포" 섹션 제거 (`trendData14d` state + fetch 정리)
+- [x] pytest 신규 케이스 4건 통과 (live usage 주입 / PromUnavailable fallback / 누락 UUID / 빈 프로젝트)
+
+### Phase 53l — Admin 인스턴스 GPU VM 카운트 0 버그 수정
+
+- [x] `admin_dashboard.py` `_is_gpu_flavor` 강화: `extra_specs`(`pci_passthrough:alias`, `:category`) + `id` fallback
+- [x] Nova `/servers/detail` 호출에 `OpenStack-API-Version: compute 2.53` 헤더 추가 (기본 2.1에서는 `original_name` 미포함)
+- [x] pytest 신규 5건 통과 (original_name 검출 / pci alias 검출 / audio alias 무시 / CPU 플레이버 0 / 마이크로버전 헤더 송신)
+
+### Phase 53m — Quota -1 → "무제한" 일관 표기
+
+- [x] `QuotaBar.svelte` — `limit === -1` 시 raw `-1` 대신 `무제한` 텍스트 표시 (dashboard 쿼터 사용률 카드 Floating IP 등 일괄 처리)
+- [x] `DashboardStatTiles.svelte` — 블록 볼륨 / Floating IP 타일: limit=-1 시 `/ 무제한` 단위 표시
+- [x] `VolumeSummaryCards.svelte` — 총 할당 용량 / 볼륨 개수 카드: limit=-1 시 `/ 무제한 GB` / `/ 무제한` 표기
+- [x] `QuotaDonut.svelte` — limit=-1 시 `used/무제한` 표기 (limit>0 가드 우회 분기 추가)
+- [x] 백엔드 변경 없음 (OpenStack 표준 -1 의미 보존)
+
+### Phase 53n — 사용량 페이지 기간 버튼 trend API 연동
+
+- [x] trend API 호출을 `range=24h` 고정 → 선택된 period 기반 동적 호출
+  - `30d` 선택 시 trend API 최대 범위(14d)로 fallback (`trendRange` $derived)
+- [x] 상단 4개 카드 레이블을 `trendRange` 기반 동적 표시 (예: `vCPU 7d 추세`)
+
+### Phase 53o — Drover 상세 페이지 6-탭 구조 + K8s 워크로드 조회·기본 액션
+
+**목표**: `/dashboard/drover/[id]` 를 6개 탭으로 재구성하고 누락된 워크로드 API/UI 를 추가한다.
+
+**탭 구성**: 메인 / ConfigMap / Secret / Service / Deployment·RS / Pod
+
+**백엔드**
+- [x] `backend/app/models/k3s.py` — 신규 Pydantic 모델 8개 (ContainerStatus, PodInfo, ServicePort, ServiceInfo, DeploymentInfo, ReplicaSetInfo, ScaleDeploymentRequest, PodLogResponse)
+- [x] `backend/app/services/k3s_kube.py` — K8s API 헬퍼 8개 + 정규화 함수 4개 (list_pods, list_services, list_deployments, list_replicasets, get_pod_log, delete_service, restart_deployment, scale_deployment)
+  - Pod 로그: `text/plain` 응답 → `resp.text` 직접 반환 (`_raise_k8s_error` 우회)
+  - Deployment restart: `Content-Type: application/strategic-merge-patch+json` 헤더
+  - Scale: `PUT .../scale` + `autoscaling/v1` Scale 객체
+- [x] `backend/app/api/k3s/pods.py` — GET /pods, DELETE /pods/{name}, GET /pods/{name}/log
+- [x] `backend/app/api/k3s/k3s_services.py` — GET /services, DELETE /services/{name}
+- [x] `backend/app/api/k3s/workloads.py` — GET/restart/scale deployments, GET replicasets
+- [x] `backend/app/api/k3s/__init__.py` — 3개 라우터 등록
+- [x] `backend/app/main.py` — 3개 라우터 include
+- [x] `backend/tests/test_k3s_workloads.py` — pytest 12건 통과 (헬퍼 정규화 4건 + 엔드포인트 8건)
+
+**프론트엔드**
+- [x] `frontend/src/lib/types/k3s.ts` — ContainerStatus, PodInfo, PodLogResponse, ServicePort, ServiceInfo, DeploymentInfo, ReplicaSetInfo 타입 추가
+- [x] `frontend/src/lib/api/k3sWorkloads.ts` — 신규 API 클라이언트 (pods/services/deployments/replicasets/log/restart/scale)
+- [x] `frontend/src/lib/stores/k3sClusterDetailController.svelte.ts` — 신규 state·메서드 추가: activeTab, pods/services/deployments/replicasets, loadPods/Services/Deployments, removePod/Svc, rolloutRestartDeployment, scaleDeploymentTo, fetchPodLog; selectedNamespace setter 워크로드 캐시 무효화
+- [x] `K3sClusterTabs.svelte` (신규) — 6탭 헤더 (ServiceTabs 패턴)
+- [x] `K3sClusterMainPanel.svelte` (신규) — 기존 카드 묶음
+- [x] `K3sClusterServicesCard.svelte` (신규) — Service 목록 + 삭제
+- [x] `K3sClusterDeploymentsCard.svelte` (신규) — Deployment + ReplicaSet 표 + restart/scale
+- [x] `K3sClusterPodsCard.svelte` (신규) — Pod 목록 + 삭제 + 로그
+- [x] `K3sPodLogOverlay.svelte` (신규) — Pod 로그 모달 (container 선택, tail_lines 토글)
+- [x] `K3sScaleModal.svelte` (신규) — Deployment replicas +/- modal
+- [x] `K3sClusterDetailPanel.svelte` — 탭 기반 레이아웃으로 리팩토링 (세로 스택 → 탭 분기)
+- [x] `frontend/src/routes/dashboard/drover/[id]/+page.svelte` — `?tab=` 쿼리 파라미터 URL 동기화
+
+## Phase 54 — 차트 라이브러리 도입 검토
+
+**목표**: 현재 raw SVG 자체 구현 차트들을 외부 라이브러리로 교체할지 평가. 비교표 + PoC + 권장 로드맵 산출.
+
+### Phase 54a — 라이브러리 비교표 작성
+
+- [x] 5개 후보(LayerChart, uPlot, ECharts, Chart.js, ApexCharts) 평가 기준 매트릭스 작성
+- [x] `frontend/docs/chart-library-comparison.md` 산출
+
+### Phase 54b — PoC 구현
+
+- [x] 최종 후보 1~2개 선정 후 `TimeSeriesChart.poc.svelte`, `QuotaDonut.poc.svelte` 작성
+- [x] 번들 크기 전후 비교 (`vite build`) — 기준선 288 KB → LayerChart 포함 447 KB (+155 KB gzip)
+
+### Phase 54c — 권장 로드맵 작성
+
+- [x] 도입 추천/비추천 결정 + 마이그레이션 우선순위
+- [x] `frontend/docs/chart-library-roadmap.md` 산출
+
+## Phase 55 — 영구 Builder VM + SSH 기반 라이브러리 빌드 파이프라인 (2026-05-21)
+
+### 55.1 동기
+
+기존 ephemeral VM + cloud-init 방식의 library_builder.py는 silent fail 지점이 다수 누적되어 빌드가 실제로 동작하지 않는 상태였다:
+- `_INSTALL_SCRIPTS`에 `pytorch` 키 부재 — UI가 보내는 ID와 매핑 불일치 → "Unknown library" 없이 SHUTOFF
+- `_monitor_build:573-575` — console 로그 조회 실패 시 `build_success=True`로 간주 (silent success)
+- `_monitor_build:740-749` — 최상위 try/except가 모든 예외를 삼킴
+- cloud-init 30분 타임아웃 안에 vllm/torch 다운로드 + CephFS write 빠듯
+- SSH key_name 미주입, console 로그 2000자 truncation으로 디버깅 불가
+
+`union.md` 원설계(service 프로젝트 영구 Builder VM 1대 + SSH 직접 명령)로 정렬해 파이프라인을 정상화한다.
+
+### 55.2 백엔드
+
+- [x] `backend/pyproject.toml` — `asyncssh>=2.18` 의존성 추가
+- [x] `backend/app/config.py` — 영구 Builder VM SSH 설정 필드 추가:
+  `builder_persistent_server_id`, `builder_ssh_user`, `builder_ssh_key_path`,
+  `builder_ssh_host`, `builder_floating_network_id`, `builder_build_timeout`
+- [x] `backend/app/services/ssh_executor.py` (신규) — asyncssh 기반 `run_command()`, `stream_command(line_callback)`
+- [x] `backend/app/services/builder_vm.py` (신규) — `ensure_builder_vm(svc_conn)`:
+  server_id 조회 → 없으면 keypair 생성, cloud-init bootstrap 부팅, FIP 할당, ACTIVE 대기, SSH 도달 확인
+- [x] `backend/app/services/library_builder.py` — 대규모 재작성:
+  - ephemeral VM 코드 제거 (`_create_builder_vm`, `_generate_cloudinit`, `_generate_probe_cloudinit`, `_verify_layer_accessible`, `_monitor_build`, `_cleanup_builder_resources`)
+  - `start_build()` → `ensure_builder_vm()` + `stream_command()` 기반으로 교체
+  - `_ssh_build_task()` 신규: RW rule 설치 → RO rule 전환 → metadata ready → set_share_public
+  - `_build_ssh_command()` 신규: cephx_secret + install_script를 base64 인코딩해 shell injection 방지
+  - `_INSTALL_SCRIPTS["pytorch"]` alias 추가 (UI ID 'pytorch' → 'torch' 동일 스크립트)
+  - `_get_lib_size()` — pytorch 항목 추가
+- [x] `backend/app/main.py` — 시작 시 `ensure_builder_vm` 백그라운드 호출 추가 (Manila 활성화 시)
+- [x] `config.toml.example` — `[builder]` 섹션 SSH 설정 항목 추가
+- [x] `generate_k8s.py` — 신규 builder 키 configmap 인라인에 포함
+
+### 55.3 테스트
+
+- [x] `backend/tests/test_ssh_executor.py` (신규) — `run_command` / `stream_command` asyncssh mock 4건
+- [x] `backend/tests/test_builder_vm.py` (신규) — ACTIVE 즉시반환, 캐시 히트, SHUTOFF 재기동, `_extract_fip`, `_build_ssh_command` 7건
+- [x] `backend/tests/test_library_builder.py` — 기존 ephemeral VM 테스트 제거, SSH 파이프라인 테스트로 교체:
+  pytorch alias 검증, `_build_ssh_command` 6건, `start_build` 4건, 큐/워커 5건
+
+### 55.4 검증
+
+```bash
+cd backend
+pytest tests/test_ssh_executor.py tests/test_builder_vm.py tests/test_library_builder.py -v
+npm run lint:backend && npm run test:all
+```
+
+실 환경 통합 검증:
+1. 백엔드 재기동 후 `openstack server list --project service` → `afterglow-builder` ACTIVE + FIP 할당 확인
+2. 관리자 UI에서 `python311` 빌드 → `library_builds` DB 진행률 변화 확인
+3. 완료 후 `openstack share show union-prebuilt-python311` → `metadata.union_status=ready`, `is_public=True`
+
+### 55.5 비범위
+
+- SSE/WebSocket 진행률 실시간 푸시 (별도 milestone 항목으로 추가 예정)
+- 멀티 Builder VM 풀 / 동시 빌드 수 확장 (단일 VM + asyncio.Queue 직렬화 유지)
+
+---
+
+## Phase 56 — 프로젝트 선택 페이지 + 로그인 후 자동 전환 (2026-05-23)
+
+### 56.1 목표
+
+로그인됐지만 프로젝트가 미선택인 상태에서 대시보드를 열면 모든 API가 오류를 내는 문제를 해결.
+Google Cloud Console 스타일의 `/select-project` 페이지를 도입하여 사용자가 명시적으로 프로젝트를 고르게 한다.
+
+### 56.2 구현
+
+**백엔드**
+- [x] `backend/app/models/auth.py` — `ProjectInfo`에 `domain_name`, `last_accessed_at` 옵션 필드 추가
+- [x] `backend/app/services/keystone.py` — `list_projects()` 내 도메인 목록 1회 조회 → `domain_name` 채움
+- [x] `backend/app/services/recent_projects.py` (신규) — Redis Sorted Set `afterglow:recent_projects:{user_id}` 기반 최근 접근 기록/조회 헬퍼 (TTL 30일)
+- [x] `backend/app/api/identity/auth.py` — `GET /api/auth/projects/recent` 엔드포인트 신설 (Redis 순 정렬 + 미기록 프로젝트 이름순 후미 배치)
+- [x] `backend/app/api/identity/auth.py` — login / gitlab_callback / switch-project 에서 `record_project_access` 호출
+- [x] `backend/app/api/deps.py` — `_resolve_jwt_token_info` 내 실제 rescope 시 `asyncio.create_task(record_project_access(...))` fire-and-forget
+
+**프론트엔드**
+- [x] `frontend/src/lib/stores/auth.ts` — `Project` 인터페이스 `export` + `domain_name`, `last_accessed_at` 옵션 필드 추가
+- [x] `frontend/src/routes/+layout.svelte` — `$authReady && $isLoggedIn && !projectId` guard `$effect` 추가 → `/select-project` 리다이렉트; `/select-project` 경로에서 nav/sidebar 제외한 미니멀 레이아웃 분기
+- [x] `frontend/src/routes/+page.svelte` — 로그인 후 분기: default_project_id 일치 또는 단일 프로젝트면 `/dashboard`, 그 외 `/select-project`
+- [x] `frontend/src/routes/auth/gitlab/callback/+page.svelte` — 동일 분기 로직
+- [x] `frontend/src/routes/select-project/+page.svelte` (신규) — `/api/auth/projects/recent` 카드 그리드 UI (이름·프로젝트ID·조직·액세스시기), 클릭 → `setProject` → `/dashboard`
+
+### 56.3 검증
+
+```bash
+npm run lint:backend   # All checks passed
+npx svelte-check       # 변경 파일 오류 없음 (기존 오류는 무관)
+```
+
+수동:
+1. `localStorage.afterglow_auth.projectId = null` → 새로고침 → `/select-project` 자동 진입 확인
+2. 다중 프로젝트 계정 로그인 → `/select-project` 진입, 카드 클릭 → `/dashboard` 전환 확인
+3. 단일 프로젝트 계정 로그인 → `/dashboard` 직행 확인
+- GPU 빌드 검증 (Builder VM은 CPU flavor 가정)
+
+---
+
+## 57. Identity 개요 허브 제거 및 통계 카드 이동
+
+### 57.1 목표
+
+사이드바 Identity 섹션의 "개요 허브"(`/admin/identity`) 를 제거하고, 4개 통계 카드(사용자·프로젝트·역할·그룹)를 관리자 개요(`/admin`)로 이동한다.
+
+### 57.2 구현
+
+- [x] `frontend/src/routes/admin/+page.svelte` — `IdentitySummary` 인터페이스/state 추가, `onMount`에서 `GET /api/admin/identity/summary` 호출, KpiCardRow와 ResourceDonutsCard 사이에 4개 StatTile 그리드 + `partial` 경고 배지 삽입
+- [x] `frontend/src/lib/components/AdminSidebar.svelte` — Identity 섹션에서 "개요 허브" 항목 삭제
+- [x] `frontend/src/routes/admin/identity/+page.svelte` (폴더째 삭제)
+
+---
+
+## 58. 라이브러리 빌드: Ephemeral cloud-init 자동완결 파이프라인 (Phase 0+1) (2026-05-24)
+
+### 58.1 목표
+
+영구 상주 Builder VM + asyncssh 스트림 방식을 **Ephemeral VM + cloud-init 자율 완결**로 전환 (Phase 0: DB 외부화, Phase 1: 핵심 파이프라인).
+
+### 58.2 구현
+
+**Phase 0 — DB Recipe 외부화**
+- [x] `app/models/db.py` — `LibraryRecipe` 모델 추가 (library_id·version·commands·apt_packages·pip_packages·share_proto·share_size_gb·cloud_init_template_version)
+- [x] `app/models/db.py` — `LibraryBuild` 에 컬럼 추가: `recipe_id`, `port_id`, `build_token` (CHAR 32, unique idx), `console_log_excerpt`, `cloud_init_status`
+- [x] `app/database.py` — `library_builds` ALTER TABLE 마이그레이션 (신규 컬럼 idempotent 추가)
+- [x] `app/services/library_recipes.py` (신규) — `get_recipe(library_id)` / `seed_default_recipes()` (python311·torch·vllm·jupyter·pytorch 5개 seed)
+- [x] `app/main.py` — 앱 시작 시 `seed_default_recipes()` 호출
+
+**Phase 1 — 핵심 파이프라인**
+- [x] `app/services/cloud_init_builder.py` (신규) — `render_user_data(recipe, mount_spec, build_token)` 순수 함수. NFS/CephFS 분기, sentinel `::AFTERGLOW::SUCCESS/FAILURE::<token>`, `tee /dev/console`, `_rc=0; chain || _rc=$?` 패턴, `power_state: {mode: poweroff}`
+- [x] `app/services/neutron.py` — `create_port(conn, network_id, name, security_group_ids=None)` 추가
+- [x] `app/services/nova.py` — `get_console_output(conn, server_id, length=None)` 추가 (length=None → 전체 조회)
+- [x] `app/services/ephemeral_build.py` (신규) — 8단계 오케스트레이터 `run_ephemeral_build(library_id, build_db_id)`: Recipe로드→Share생성→Port사전생성(IP예약)→AccessRule→ExportLocation→VM생성→SHUTOFF폴링(30분)→Sentinel grep→성공/실패/indeterminate 처리, finally: server+port 항상 정리
+- [x] `app/services/library_builder.py` — `start_ephemeral_build(library_id)` 및 `_ephemeral_build_task()` 추가, `_build_worker()` → `start_ephemeral_build` 호출로 전환
+
+**테스트**
+- [x] `tests/test_cloud_init_builder.py` (신규) — 24개 단위 테스트 (NFS/CephFS sentinel, tee/dev/console, _rc 패턴, mount명령, progress마커)
+- [x] `tests/test_neutron_create_port.py` (신규) — 5개 단위 테스트
+- [x] `tests/test_ephemeral_build_orchestration.py` (신규) — 5개 단위 테스트 (성공/실패/indeterminate/port→rule 순서)
+- [x] `tests/test_library_builder.py` — `_build_worker` 테스트를 `start_ephemeral_build` 호출로 업데이트
+- [x] `tests/test_ephemeral_builder_vm.py` — outdated `test_raises_without_floating_network` 제거 (708df70에서 내부 IP fallback으로 변경되어 더 이상 유효하지 않음)
+
+### 58.3 설계 원칙
+
+- **Sentinel-SoT**: `::AFTERGLOW::SUCCESS/FAILURE::<build_token>` — token-unique, `nova.get_console_output(length=None)` 으로 회수
+- **Port 사전 생성**: Manila access rule IP를 VM 생성 전에 예약 → race-free
+- **indeterminate 처리**: SHUTOFF지만 sentinel 없음 → `console_log_excerpt` (마지막 2000자) DB 저장 + `cloud_init_status=indeterminate`
+- **Phase 2 게이트**: NFS/CephFS 각 5회 연속 성공 + 의도된 실패 1회 + indeterminate 0회 충족 후 영구 VM 경로 삭제 진행
+  → **Phase 2 완료 (2026-05-24)**: 게이트 검증 없이 즉시 삭제 진행 (사용자 확인)
+
+### 58.4 검증
+
+```bash
+uv run pytest tests/test_cloud_init_builder.py tests/test_neutron_create_port.py tests/test_ephemeral_build_orchestration.py -q
+# 30 passed in 0.20s
+uv run ruff check app/services/ephemeral_build.py app/services/cloud_init_builder.py ...
+# All checks passed
+```
+
+## Phase 59 — 영구 Builder VM 코드 경로 삭제 (Phase 2) (2026-05-24)
+
+### 59.1 삭제 범위
+
+**`backend/app/services/builder_vm.py`** (−230줄):
+- `_BUILDER_VM_NAME`, `_BUILDER_KEYPAIR_NAME`, `_BOOTSTRAP_CLOUD_INIT` 상수 삭제
+- `BuilderEndpoint` dataclass, `_cached_endpoint`, `invalidate_cache()` 삭제
+- `ensure_builder_vm()`, `_find_existing_server()`, `_create_new_builder_vm()` 삭제
+- `_ensure_keypair()` (영구 VM 전용), `_extract_fip()`, `_ensure_fip()` 삭제
+- 공유 헬퍼(`_wait_for_active`, `_wait_for_ssh`, `_wait_for_cloud_init`) 및 Ephemeral 경로 전체 유지
+
+**`backend/app/services/library_builder.py`** (−415줄):
+- `_update_build_db()`, `_UV_BOOTSTRAP`, `_INSTALL_SCRIPTS`, `_PROGRESS_RE` 삭제
+- `_get_lib_size()`, `_build_ssh_command()` 삭제
+- `start_build()` (영구 VM SSH 경로) 삭제
+- `_ssh_build_task()` 삭제
+- `get_active_builds()`, `cancel_build()`, `start_ephemeral_build()`, `_ephemeral_build_task()`, `queue_build()`, `get_build_queue_status()`, `_build_worker()` 유지
+
+**`backend/app/services/ssh_executor.py`** (−48줄):
+- `stream_command()` 삭제 (호출처 `_ssh_build_task` 제거됨)
+- `run_command()` 유지 (ephemeral VM SSH 헬퍼에서 사용)
+
+**`backend/app/main.py`** (−15줄):
+- `_ensure_builder_vm_background()` 함수 및 `create_task` 호출 삭제
+
+**`backend/app/config.py`** (−5줄):
+- `builder_persistent_server_id`, `builder_ssh_host` 필드 및 `_load_toml()` 매핑 삭제
+
+**테스트** (−547줄):
+- `tests/test_builder_vm.py` 전체 삭제 (모든 테스트가 삭제된 심볼 참조)
+- `tests/test_library_builder.py` — 구 SSH 경로 테스트 전부 삭제, queue/worker 테스트 유지
+- `tests/test_ssh_executor.py` — `stream_command` 테스트 삭제, `run_command` 테스트 유지
+
+### 59.2 검증
+
+```bash
+uv run pytest tests/test_library_builder.py tests/test_ssh_executor.py tests/test_ephemeral_builder_vm.py -v
+# 19 passed, 5 warnings
+uv run ruff check app/services/library_builder.py app/services/builder_vm.py app/services/ssh_executor.py app/config.py
+# All checks passed
+```
+
+---
+
+## 60. 프로젝트 전환 시 JWT rescope + 로딩 스켈레톤 (2026-05-24)
+
+### 60.1 목표
+
+상단 `ProjectSelector` 드롭다운에서 프로젝트 전환 시 발생하는 두 가지 결함을 수정한다:
+1. 간헐적 401 인증 실패 — `selectProject()` 가 JWT rescope 없이 `X-Project-Id` 헤더만 변경, 백엔드 stampede 유발
+2. 이전 프로젝트 데이터 잔존 — 전환 후 state 미초기화로 구 데이터가 그대로 표시됨
+
+### 60.2 구현
+
+- [x] `frontend/src/lib/components/ProjectSelector.svelte` — `selectProject()` async 전환, `POST /api/auth/switch-project` 호출로 JWT rescope 후 `setAuth()` atomic 갱신, 전환 중 `disabled` + spinner 처리
+- [x] `frontend/src/routes/select-project/+page.svelte` — 동일한 rescope 패턴 적용 (로그인 직후 첫 선택 흐름)
+- [x] `frontend/src/routes/dashboard/+page.svelte` — `{#key $auth.projectId}` wrapper로 프로젝트 전환 시 컴포넌트 트리 remount → 기존 `loading && empty` 가드 자동 발동. 사용 추세 카드·시스템 알림 인라인 `animate-pulse` 스켈레톤 추가
+- [x] `frontend/src/routes/admin/+page.svelte` — 동일한 `{#key $auth.projectId}` wrapper 적용
+
+---
+
+## 61. 셀프서비스 프로젝트 생성 + 이메일 초대 시스템 (2026-05-25)
+
+### 61.1 목표
+
+일반 사용자가 직접 프로젝트를 생성하고, 이메일로 다른 사용자를 초대할 수 있는 셀프서비스 시스템을 구현한다.
+
+### 61.2 Backend (Phase 1~4)
+
+- [x] `backend/migrations/013_project_self_service.sql` — `project_roles`, `project_invitations` 테이블 DDL
+- [x] `backend/app/models/db.py` — `ProjectRole`, `ProjectInvitation` ORM 모델 추가
+- [x] `backend/app/database.py` — `create_tables()` idempotent DDL 추가
+- [x] `backend/app/config.py` — SMTP 설정 + `frontend_base_url` 필드 추가
+- [x] `config.toml.example` — `[smtp]` 섹션 + `frontend_base_url` 문서화
+- [x] `generate_k8s.py` — SMTP password를 `render_secret()` 추가
+- [x] `backend/pyproject.toml` — `aiosmtplib>=3.0.0` 의존성 추가
+- [x] `backend/app/services/email_service.py` (신규) — `send_email()` + `send_invitation_email()` aiosmtplib 구현
+- [x] `backend/app/services/project_service.py` (신규) — `create_project_for_user`, `create_invitation`, `accept_invitation`, `decline_invitation`, `is_project_manager`, `promote_to_manager`, `demote_manager`
+- [x] `backend/app/api/deps.py` — `require_project_manager` 의존성 추가
+- [x] `backend/app/api/identity/projects.py` (신규) — `/api/projects` 라우터 (7개 엔드포인트)
+- [x] `backend/app/api/identity/invitations.py` (신규) — `/api/invitations` 라우터 (3개 엔드포인트)
+- [x] `backend/app/main.py` — 두 라우터 등록
+- [x] `backend/tests/test_project_self_service.py` (신규) — 13개 단위 테스트 전통과
+
+### 61.3 Frontend (Phase 5)
+
+- [x] `frontend/src/lib/types/project.ts` — `ProjectManagerMember`, `ProjectInvitation`, `InvitationInfo` 인터페이스 추가
+- [x] `frontend/src/lib/components/projects/CreateProjectModal.svelte` (신규) — 프로젝트 생성 모달
+- [x] `frontend/src/routes/select-project/+page.svelte` — "새 프로젝트" 버튼 + CreateProjectModal 연결
+- [x] `frontend/src/routes/dashboard/project-settings/+page.svelte` (신규) — 멤버 탭 + 초대 탭
+- [x] `frontend/src/routes/invitations/[token]/+page.svelte` (신규) — 초대 수락/거절 공개 페이지
+- [x] `frontend/src/lib/components/Sidebar.svelte` — "프로젝트 설정" 링크 추가
+- [x] `frontend/src/lib/config/nav.ts` — `projectSettingsNavSection` export 추가
+- [x] `frontend/src/lib/config/routes.ts` — `'project-settings'`, `'invitations'` 라벨 추가
+- [x] `frontend/src/lib/components/account/ProjectsSection.svelte` — 활성 프로젝트에 "관리" 링크 추가
+- [x] `frontend/src/lib/components/ProjectSelector.svelte` — 드롭다운 하단 "새 프로젝트" 버튼 + 모달 연결
+- [x] `frontend/src/routes/+layout.svelte` — `/invitations/*` 경로를 auth guard 및 project guard에서 제외, 미니멀 렌더링
+
+---
+
+## 62. 목록 표 페이지네이션 위치 표시 (2026-06-01)
+
+### 62.1 목표
+
+관리자·대시보드의 모든 목록 표에 현재 페이지 번호를 표시해 탐색 위치를 한눈에 파악할 수 있게 한다.
+
+### 62.2 구현
+
+- [x] `frontend/src/lib/components/ui/Pagination.svelte` (신규) — 공용 페이지네이션 컴포넌트 (이전·다음 버튼 + 중앙 페이지 표시). `totalPages` 제공 시 "N / M", 없으면 "페이지 N". `total`·`pageSize` 제공 시 범위("X개 중 A–B개") 추가 표시. `note` prop으로 부가 텍스트 지원.
+- [x] `frontend/src/lib/components/ui/index.ts` — `Pagination` export 추가
+- [x] `frontend/src/lib/components/admin/images/AdminImagesTable.svelte` — `<Pagination>` 적용 (커서, "페이지 N")
+- [x] `frontend/src/lib/components/admin/instances/AdminInstanceTable.svelte` — `<Pagination>` 적용 (커서, "페이지 N")
+- [x] `frontend/src/lib/components/admin/ports/PortsTable.svelte` — `<Pagination>` 적용 (커서, "N개 포트 · 페이지 N")
+- [x] `frontend/src/lib/components/admin/users/AdminUsersTable.svelte` — `<Pagination>` 적용 (커서, "페이지 N"), `page` prop 추가
+- [x] `frontend/src/routes/admin/users/+page.svelte` — `page={markerStack.length + 1}` 전달
+- [x] `frontend/src/routes/admin/projects/+page.svelte` — 인라인 버튼 블록 → `<Pagination>` 교체 (커서, "페이지 N")
+- [x] `frontend/src/routes/admin/volumes/+page.svelte` — `AdminVolumePagination` → `<Pagination>` 교체 (커서, "페이지 N")
+- [x] `frontend/src/lib/components/library/LayerCatalogTable.svelte` — `<Pagination>` 적용 (offset, "페이지 N")
+- [x] `frontend/src/routes/admin/file-storage/+page.svelte` — `AdminFileStoragePagination` → `<Pagination>` 교체 (클라이언트 슬라이싱, "N / M")
+- [x] `frontend/src/lib/components/admin/flavors/AdminFlavorsTable.svelte` — `<Pagination>` 적용 (클라이언트 슬라이싱, "N개 중 A–B개 · N / M", 필터 note 보존)
+- [x] `frontend/src/lib/components/admin/volumes/AdminVolumePagination.svelte` — 삭제 (공용 컴포넌트로 통합)
+- [x] `frontend/src/lib/components/admin/file-storage/AdminFileStoragePagination.svelte` — 삭제 (공용 컴포넌트로 통합)
+- [x] `frontend/src/lib/components/admin/file-storage/AdminFileStoragePagination.svelte` — 삭제 (공용 컴포넌트로 통합)
+
+---
+
+## 63. Stampede 모드 — drover(k3s) 노드 오토스케일 (2026-06-01)
+
+### 63.1 목표
+
+사용자가 pod만 배포하면 drover 내부 reconcile 루프가 자동으로 노드(VM)를 확장/축소한다 (GCP Autopilot 유사). 노드그룹 단위로 스케일하며, flavor는 pending pod requests + 기존 부하 가중치로 자동 선택.
+
+### 63.2 Backend
+
+- [x] `backend/migrations/014_stampede.sql` — `k3s_clusters.stampede_enabled`, `k3s_nodegroups.{stampede_enabled, min_size, max_size, stampede_state}` DDL
+- [x] `backend/app/models/db.py` — `K3sCluster.stampede_enabled`, `K3sNodegroup.{stampede_enabled, min_size, max_size, stampede_state}` ORM 컬럼 추가
+- [x] `backend/app/services/k3s_db.py` — `_cluster_to_dict`에 `stampede_enabled` 필드 추가
+- [x] `backend/app/services/k3s_nodegroup.py` — `_ng_to_dict`에 Stampede 필드 추가, `update_nodegroup` 허용 컬럼 set 갱신
+- [x] `backend/app/services/k3s_kube.py` — Stampede 전용 5개 함수 신규: `list_unschedulable_pods`, `get_node_capacity`, `get_pod_resource_usage`, `cordon_node`, `drain_node` + K8s 수량 파서(`_parse_cpu_millicores`, `_parse_memory_bytes`)
+- [x] `backend/app/services/k3s_autoscale.py` (신규) — `provision_nodegroup_vms`, `delete_nodegroup_vms`: `_scale_agents` 로직을 노드그룹 파라미터(flavor/labels/taints)로 일반화 추출
+- [x] `backend/app/services/k3s_stampede.py` (신규) — Stampede Reconciler: fit-check(PVC/affinity/taint 필터), 가중치 기반 flavor 선택(`_select_flavor`), scale-up(in-flight 추적, max 가드레일), scale-down(stabilization window, min 가드레일, cooldown), `run_all()`
+- [x] `backend/app/worker.py` — `init_db()` 호출 추가, `_stampede_loop()` 추가(기본 60초 주기)
+- [x] `backend/app/api/k3s/clusters.py` — Stampede API 3개: `POST .../stampede/enable`, `POST .../stampede/disable`, `GET .../stampede`
+- [x] `backend/app/config.py` — Stampede 설정 8개 필드: `k3s_stampede_{enabled, interval, scale_down_threshold, scale_down_window, scale_up_cooldown, scale_down_cooldown, resource_headroom_factor, project_id}`
+- [x] `config.toml.example` — Stampede 설정 섹션 문서화
+- [x] `generate_k8s.py` — Stampede 설정 8개 k3s configmap 항목 추가
+- [x] `backend/tests/test_k3s_stampede.py` (신규) — 23개 단위 테스트 전통과: fit-check, flavor 선택, CPU/메모리 파서, API 엔드포인트 계약, scale-up max 가드레일, scale-down min 가드레일
+
+### 63.3 Frontend (미구현 — 후속)
+
+- [x] `K3sNodegroupCard.svelte` / `K3sNodegroupCreateModal.svelte` — min/max/stampede 토글 UI
+- [x] `K3sClusterDetailPanel.svelte` / `K3sClusterInfoCard.svelte` — Stampede 상태 뱃지
+- [x] `K3sClusterMainPanel.svelte` — `enableStampede` / `disableStampede` 액션 (클러스터 ACTIVE 시 활성화 버튼 표시)
+
+### 63.4 Phase 2 (후속)
+
+- [ ] OpenStack 프로젝트 격리 (`stampede_project_id`): Stampede VM/LB를 서비스 프로젝트에 생성
+- [ ] scale-from-zero (min=0): 노드 0개 상태에서 cold-start 프로비저닝
+- [ ] 멀티 nodegroup 동시 오토스케일
+- [ ] 스케일 이벤트 이력 조회 API/UI
+
+---
+
+## 64. Barbican Key Manager 대시보드 (2026-06-01)
+
+> **목표**: OpenStack Barbican을 통해 사용자가 비밀번호·인증서·암호화 키를 안전하게 저장·관리하고, 관리자가 프로젝트별 쿼터를 제어하는 Key Manager 대시보드 구현.
+> 인증서 **저장**만 지원 (CA 발급/certificate order는 OpenStack deprecated — 구현 제외).
+
+### 64.1 백엔드 서비스 래퍼 확장
+
+- [x] `backend/app/services/barbican.py` — KEK 헬퍼 유지 + 범용 Key Manager 함수 추가
+  - [x] `SYSTEM_MANAGED_PREFIXES`, `_is_system_managed()` — `afterglow-` prefix secret 보호
+  - [x] `list_secrets`, `get_secret_meta`, `get_secret_payload`, `create_secret`, `delete_secret` (시스템 관리 secret 삭제 차단)
+  - [x] `list_containers`, `create_container`, `delete_container`
+  - [x] `list_orders`, `create_order`, `get_order`, `delete_order`
+  - [x] `get_acl`, `set_acl`, `delete_acl` (raw REST)
+  - [x] `list_secret_consumers`, `list_container_consumers` (raw REST)
+  - [x] `get_effective_quota`, `list_project_quotas`, `get_project_quota`, `set_project_quota`, `delete_project_quota` (raw REST)
+
+### 64.2 Pydantic 모델
+
+- [x] `backend/app/models/barbican.py` — `SecretInfo`, `SecretCreateRequest`, `ContainerInfo`, `ContainerCreateRequest`, `OrderInfo`, `OrderCreateRequest`, `AclSetRequest`, `QuotaInfo`, `ProjectQuotaSetRequest`
+
+### 64.3 사용자 라우터 (`backend/app/api/secrets/`)
+
+- [x] `secrets.py` — GET/POST/DELETE secret, GET payload (캐시 제외), GET/PUT/DELETE ACL, GET consumers, GET quota/effective
+- [x] `containers.py` — GET/POST/DELETE container, GET/PUT ACL, GET consumers
+- [x] `orders.py` — GET/POST/GET/{id}/DELETE order
+- [x] `main.py` — `service_barbican_enabled` 가드 아래 4개 라우터 조건부 마운트
+
+### 64.4 관리자 라우터
+
+- [x] `backend/app/api/identity/admin_secrets.py` — 프로젝트 쿼터 CRUD (`require_admin` 필수), `/api/admin/key-manager/project-quotas`
+
+### 64.5 테스트
+
+- [x] `backend/tests/test_secrets.py` — 401/성공/시스템 secret 삭제 차단/payload 비캐시 검증 (6개)
+- [x] `backend/tests/test_secrets_admin.py` — 관리자 전용 쿼터 CRUD 403/성공 검증 (7개)
+
+### 64.6 프론트엔드
+
+- [x] `frontend/src/lib/api/secrets.ts` — `secretsApi` 클라이언트 (secrets/containers/orders/quota/admin 전 엔드포인트)
+- [x] `frontend/src/routes/dashboard/secrets/+page.svelte` — 4탭(비밀/컨테이너/Key Orders/쿼터), payload 1회 조회·복사·가림, 시스템 관리 secret 잠금
+- [x] `frontend/src/routes/admin/secrets/+page.svelte` — 프로젝트별 쿼터 설정/초기화 관리
+- [x] `Sidebar.svelte` — Key Manager 섹션 추가 (`/dashboard/secrets`)
+- [x] `AdminSidebar.svelte` — Key Manager 항목 추가 (`/admin/secrets`)
+- [ ] 프로비저닝 내구성: stale in-flight reconcile 루프
+
+## 65. 오브젝트 스토리지 휴지통 / 버킷 복구 기능
+
+### 65.1 목표
+
+버킷 내 파일 삭제 및 버킷 자체 삭제 시 일정 기간(기본 30일) 복구 가능하도록 소프트 삭제·휴지통 기능 추가.
+
+### 65.2 구현
+
+**Backend**
+
+- [x] `backend/app/services/bucket_naming.py` — `-trash` 예약 접미사 추가 (사용자 직접 생성 차단)
+- [x] `backend/app/services/swift.py` — `list_containers` `include_trash` 파라미터 추가, `copy_object` `extra_headers` 파라미터 추가
+- [x] `backend/app/services/swift.py` — 신규 함수: `soft_delete_object`, `bulk_soft_delete_objects`, `list_trash_objects`, `restore_trash_object`, `purge_trash_object`, `purge_expired_trash_objects`
+- [x] `backend/app/services/swift.py` — 버킷 소프트 삭제 함수: `soft_delete_container_metadata`, `restore_container_metadata`, `get_container_deleted_at`
+- [x] `backend/app/api/object_storage/containers.py` — Redis sorted-set 기반 소프트 삭제 추적 헬퍼 (`_mark_container_deleted`, `_unmark_container_deleted`, `_get_deleted_containers`, `_is_container_deleted`)
+- [x] `backend/app/api/object_storage/containers.py` — `DELETE /{c}/objects/{name}` 소프트 삭제 기본 (`?permanent=true` 하드 삭제)
+- [x] `backend/app/api/object_storage/containers.py` — `DELETE /{c}` 소프트 삭제 기본 (`?permanent=true` 하드 삭제)
+- [x] `backend/app/api/object_storage/containers.py` — `POST ""` 생성 시 소프트 삭제 대기 중 동명 버킷 409 차단
+- [x] `backend/app/api/object_storage/containers.py` — 신규 엔드포인트: `GET /{c}/trash`, `POST /{c}/trash/restore`, `DELETE /{c}/trash/{key}`, `GET /trash/containers`, `POST /trash/containers/{name}/restore`, `DELETE /trash/containers/{name}`
+- [x] `backend/app/main.py` — `_trash_cleanup_loop` 추가 (1시간 간격, `service_swift_enabled` 게이트, 만료 오브젝트·버킷 영구 삭제)
+- [x] `backend/app/main.py` — C-1: `_trash_cleanup_loop`에 Swift 메타→Redis reconcile 패스 추가 (Redis 유실 시 ≤1h 내 소프트 삭제 버킷 자동 재동기화)
+- [x] `backend/app/main.py` — C-2: 빈 `{name}-trash` 버킷 자동 정리 (count==0 즉시 삭제 + purge 후 전부 삭제 시 삭제)
+- [x] `backend/app/api/object_storage/containers.py` — docstring 오타 수정 (409 반환을 400으로 잘못 기재)
+- [x] `backend/app/config.py` — `os_trash_retention_days: int = 30` 필드 추가
+- [x] `config.toml.example` — `trash_retention_days = 30` 예시 추가
+- [x] `generate_k8s.py` — configmap에 `trash_retention_days` 포함
+
+**Frontend**
+
+- [x] `frontend/src/lib/types/common.ts` — `SwiftContainer`에 `is_trash?`, `is_deleted?`, `deleted_at?` 필드 추가
+- [x] `frontend/src/lib/utils/bucketName.ts` — `-trash` 예약 접미사 추가
+- [x] `frontend/src/lib/components/object-storage/buckets/BucketRow.svelte` — `휴지통`·`복구 대기` 배지 추가
+- [x] `frontend/src/lib/components/object-storage/buckets/TrashNotice.svelte` — 신규 휴지통 안내 컴포넌트
+- [x] `frontend/src/routes/dashboard/object-storage/buckets/+page.svelte` — 삭제 확인 문구 변경, 복구 대기 버킷 섹션 추가 (복구/영구 삭제 버튼)
+- [x] `frontend/src/routes/admin/object-storage/+page.svelte` — include_trash/include_deleted 포함 쿼리, TrashNotice 조건부 렌더
+- [x] `frontend/src/lib/stores/objectBrowser.svelte.ts` — 삭제 확인 문구 "휴지통으로 이동" 톤으로 변경
+
+**Tests**
+
+- [x] `backend/tests/test_bucket_naming.py` — `-trash` 접미사 거부 케이스 추가
+- [x] `backend/tests/test_object_storage_trash.py` — 신규: 서비스 단위 + 엔드포인트 통합 테스트 24개 + reconcile·빈버킷정리 검증 6개 (총 30개)
+
+### 65.3 설계 결정
+
+- **객체 휴지통**: 버킷별 `{name}-trash` 숨겨진 버킷 (격리용 `-quarantine` 패턴 미러링). trash 키 형식 `{epoch}/{uuid8}/{original_name}` — purge 루프가 HEAD 없이 이름만으로 만료 판정.
+- **버킷 복구**: 제자리 소프트 삭제 (데이터 이동 없음) — Redis sorted-set으로 빠른 필터링 + Swift `X-Container-Meta-Afterglow-Deleted-At` 감사 trail.
+- **하드 삭제 경로**: 저수준 `swift.delete_*`는 하드 삭제 유지 — 시스템 경로(quarantine, `_segments`, purge 루프) footgun 차단. HTTP DELETE 핸들러 레벨에서만 소프트 삭제 적용.
+- **보관 기간**: 기본 30일, `os_trash_retention_days` config 키로 조정.
+
+### 65.4 검증 (사용자 직접)
+
+- [ ] 파일 삭제 → `{bucket}-trash`에 이동 확인 → 복구 → 원위치
+- [ ] 버킷 삭제 → "삭제 대기" 섹션 등장 → 복구 → 버킷 목록 복귀
+- [ ] 동명 버킷 재생성 시도 → 409 오류 확인
+- [ ] 보관 기간 경과 또는 cleanup loop 실행 → 영구 삭제
+- [ ] RGW에서 컨테이너 간 `X-Copy-From` + `X-Object-Meta-*` 동시 설정 지원 확인

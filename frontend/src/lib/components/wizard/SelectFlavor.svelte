@@ -2,16 +2,7 @@
 	import { onMount } from 'svelte';
 	import { api } from '$lib/api/client';
 	import { auth } from '$lib/stores/auth';
-
-	interface FlavorInfo {
-		id: string;
-		name: string;
-		vcpus: number;
-		ram: number;
-		disk: number;
-		is_public: boolean;
-		extra_specs: Record<string, string>;
-	}
+	import type { FlavorInfo } from '$lib/types/flavor';
 
 	interface GpuTypeAvailability {
 		device_name: string;
@@ -92,7 +83,7 @@
 	const PAGE_SIZE = 10;
 
 	function hasGpu(flavor: FlavorInfo): boolean {
-		return Object.keys(flavor.extra_specs).some(
+		return Object.keys(flavor.extra_specs ?? {}).some(
 			(k) => k.toLowerCase().includes('gpu') || k.toLowerCase().includes('pci')
 		);
 	}
@@ -263,7 +254,7 @@
 				<span class="flex items-center gap-1"><i class="inline-block w-2 h-2 rounded-full bg-blue-500"></i>이번 VM 추가</span>
 			</div>
 		</div>
-		<div class="grid grid-cols-2 sm:grid-cols-4 gap-px bg-gray-800">
+		<div class="grid grid-cols-2 @2xl/panel:grid-cols-4 gap-px bg-gray-800">
 			<!-- VM cell -->
 			<div class="flex flex-col gap-1.5 px-3 py-2.5 bg-gray-900">
 				<span class="text-[10px] uppercase tracking-wider text-gray-500 font-mono font-semibold">VM</span>

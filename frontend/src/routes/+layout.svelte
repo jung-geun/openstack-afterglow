@@ -13,6 +13,7 @@
 	import UploadDock from '$lib/components/UploadDock.svelte';
 	import CmdPalette from '$lib/components/CmdPalette.svelte';
 	import { palette } from '$lib/stores/palette';
+	import ConfirmDialog from '$lib/components/ui/ConfirmDialog.svelte';
 	import './layout.css';
 
 	let { children } = $props();
@@ -26,15 +27,19 @@
 	);
 
 	const publicRoutes = ['/', '/auth/gitlab/callback'];
+	const projectAgnosticRoutes = ['/', '/auth/gitlab/callback', '/select-project'];
 
-	let sessionWarning = $state(false);
-	let sessionExpired = $state(false);
-	let sessionRemaining = $state(0);
-	let extendingSession = $state(false);
+	const isInvitationRoute = $derived($page.url.pathname.startsWith('/invitations/'));
 
 	$effect(() => {
-		if (!$isLoggedIn && !publicRoutes.includes($page.url.pathname)) {
+		if (!$isLoggedIn && !publicRoutes.includes($page.url.pathname) && !isInvitationRoute) {
 			goto('/');
+		}
+	});
+
+	$effect(() => {
+		if ($authReady && $isLoggedIn && !$auth.projectId && !projectAgnosticRoutes.includes($page.url.pathname) && !isInvitationRoute) {
+			goto('/select-project');
 		}
 	});
 
@@ -62,50 +67,35 @@
 	onMount(() => {
 		loadSiteConfig();
 
-		// 세션 타이머: 1분마다 남은 시간 체크
+		// access JWT 만료 2분 전에 자동 갱신 (client.ts의 401 재시도 보완)
 		const interval = setInterval(async () => {
-			if (!$auth.token) return;
-			try {
-				const info = await api.get<{ remaining_seconds: number; warning_before_seconds: number }>(
-					'/api/auth/session-info', $auth.token, $auth.projectId ?? undefined
-				);
-				sessionRemaining = info.remaining_seconds;
-				if (info.remaining_seconds <= 0) {
-					sessionExpired = true;
-					sessionWarning = false;
-					clearAuth();
-					goto('/');
-				} else if (info.remaining_seconds <= info.warning_before_seconds) {
-					sessionWarning = true;
-				} else {
-					sessionWarning = false;
+			if (!$auth.token || !$auth.refreshToken) return;
+			const expiresAt = $auth.accessExpiresAt;
+			if (!expiresAt) return;
+			const remaining = expiresAt - Math.floor(Date.now() / 1000);
+			if (remaining < 120) {
+				try {
+					const data = await api.post<{
+						token: string;
+						refresh_token?: string;
+						expires_at?: string;
+					}>('/api/auth/refresh', { refresh_token: $auth.refreshToken });
+					auth.update((s) => ({
+						...s,
+						token: data.token,
+						refreshToken: data.refresh_token ?? s.refreshToken,
+						accessExpiresAt: data.expires_at
+							? Math.floor(new Date(data.expires_at).getTime() / 1000)
+							: s.accessExpiresAt,
+					}));
+				} catch {
+					// refresh 실패 시 client.ts의 401 흐름이 처리
 				}
-			} catch {
-				// 세션 체크 실패 시 무시
 			}
 		}, 60_000);
 
 		return () => clearInterval(interval);
 	});
-
-	async function extendSession() {
-		if (!$auth.token || extendingSession) return;
-		extendingSession = true;
-		try {
-			await api.post('/api/auth/extend-session', {}, $auth.token, $auth.projectId ?? undefined);
-			sessionWarning = false;
-		} catch {
-			// 연장 실패 시 무시
-		} finally {
-			extendingSession = false;
-		}
-	}
-
-	function formatRemaining(seconds: number): string {
-		const m = Math.floor(seconds / 60);
-		const s = seconds % 60;
-		return m > 0 ? `${m}분 ${s}초` : `${s}초`;
-	}
 
 	// 테마 변경 시 <html> 클래스 업데이트
 	$effect(() => {
@@ -127,19 +117,12 @@
 
 <svelte:head><link rel="icon" href={$siteConfig.favicon_path} /></svelte:head>
 
-{#if $isLoggedIn}
-	<!-- 세션 만료 경고 배너 -->
-	{#if sessionWarning}
-		<div class="fixed top-14 left-0 md:left-60 right-0 z-40 bg-yellow-900/90 border-b border-yellow-700 px-3 md:px-6 py-2 flex items-center gap-4 text-sm">
-			<span class="text-yellow-200">세션이 <strong>{formatRemaining(sessionRemaining)}</strong> 후 만료됩니다.</span>
-			<button
-				onclick={extendSession}
-				disabled={extendingSession}
-				class="text-xs bg-yellow-700 hover:bg-yellow-600 text-white px-3 py-1 rounded transition-colors disabled:opacity-50"
-			>{extendingSession ? '연장 중...' : '세션 연장'}</button>
-			<button onclick={() => sessionWarning = false} class="ml-auto text-yellow-400 hover:text-yellow-200 text-xs">✕</button>
-		</div>
-	{/if}
+{#if ($isLoggedIn && $page.url.pathname.startsWith('/select-project')) || isInvitationRoute}
+	<Toast />
+	<main class="min-h-screen bg-gray-950 text-white">
+		{@render children()}
+	</main>
+{:else if $isLoggedIn}
 	<nav class="fixed top-0 left-0 md:left-60 right-0 z-50 bg-[#0B1220] border-b border-gray-800 h-14 flex items-center px-4 md:px-6 gap-4 shrink-0">
 		<!-- 모바일 햄버거 -->
 		<button
@@ -163,7 +146,7 @@
 		<!-- 검색 입력 (⌘K 트리거) -->
 		<button
 			onclick={() => palette.open()}
-			class="flex-1 max-w-sm mx-4 hidden md:flex items-center gap-2 bg-gray-900 border border-gray-800 text-gray-500 rounded-lg pl-3 pr-2 py-1.5 text-[13px] hover:border-gray-700 transition-colors cursor-text"
+			class="flex-1 max-w-sm mx-4 hidden lg:flex items-center gap-2 bg-gray-900 border border-gray-800 text-gray-500 rounded-lg pl-3 pr-2 py-1.5 text-[13px] hover:border-gray-700 transition-colors cursor-text"
 			aria-label="검색 (⌘K)"
 		>
 			<svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z"/></svg>
@@ -180,13 +163,13 @@
 			{#if $isAdmin}
 				{#if $page.url.pathname.startsWith('/admin')}
 					<a href="/dashboard"
-						class="hidden md:flex items-center gap-1.5 px-3 h-8 rounded-lg border text-[12px] font-semibold transition-colors bg-amber-500/15 border-amber-600/50 text-amber-400 hover:bg-amber-500/25">
+						class="hidden lg:flex items-center gap-1.5 px-3 h-8 rounded-lg border text-[12px] font-semibold transition-colors bg-amber-500/15 border-amber-600/50 text-amber-400 hover:bg-amber-500/25">
 						<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
 						사용자 모드
 					</a>
 				{:else}
 					<a href="/admin"
-						class="hidden md:flex items-center gap-1.5 px-3 h-8 rounded-lg border text-[12px] font-semibold transition-colors bg-gray-900 border-gray-700 text-gray-200 hover:border-gray-600 hover:text-white">
+						class="hidden lg:flex items-center gap-1.5 px-3 h-8 rounded-lg border text-[12px] font-semibold transition-colors bg-gray-900 border-gray-700 text-gray-200 hover:border-gray-600 hover:text-white">
 						<svg class="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2l8 4v6c0 5-3.5 9-8 10-4.5-1-8-5-8-10V6l8-4z"/></svg>
 						관리자 모드
 					</a>
@@ -233,6 +216,7 @@
 	<Toast />
 	<UploadDock />
 	<CmdPalette />
+	<ConfirmDialog />
 	<main class="min-h-screen bg-gray-950 text-white">
 		{@render children()}
 	</main>

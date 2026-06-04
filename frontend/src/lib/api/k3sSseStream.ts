@@ -18,7 +18,7 @@ export async function* streamK3sProgress(
     headers: {
       'Content-Type': 'application/json',
       Accept: 'text/event-stream',
-      ...(init.token ? { 'X-Auth-Token': init.token } : {}),
+      ...(init.token ? { 'Authorization': `Bearer ${init.token}` } : {}),
       ...(init.projectId ? { 'X-Project-Id': init.projectId } : {}),
     },
     body: init.body != null ? JSON.stringify(init.body) : undefined,

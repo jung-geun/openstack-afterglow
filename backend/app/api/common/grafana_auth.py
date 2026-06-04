@@ -1,80 +1,36 @@
-"""Grafana 임베드용 JWT 발급 엔드포인트."""
+"""Grafana 임베드 지원 엔드포인트."""
 
-from __future__ import annotations
-
-import base64
-import hashlib
-import hmac
-import json
-import time
-
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 
 from app.api.deps import get_token_info
 from app.config import get_settings
 
 router = APIRouter()
 
-_TOKEN_TTL = 3600  # 1시간
 
-
-def _b64url(data: bytes) -> str:
-    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
-
-
-def _create_grafana_jwt(
-    user_id: str,
-    username: str,
-    project_id: str,
-    secret: str,
-    ttl: int = _TOKEN_TTL,
-) -> str:
-    """Grafana auth.jwt 호환 HS256 JWT 발급."""
-    now = int(time.time())
-    header = _b64url(json.dumps({"alg": "HS256", "typ": "JWT"}, separators=(",", ":")).encode())
-    payload = _b64url(
-        json.dumps(
-            {
-                "sub": user_id,
-                "login": username,
-                "name": username,
-                "email": f"{username}@afterglow",
-                "role": "Viewer",
-                "project_id": project_id,
-                "iat": now,
-                "exp": now + ttl,
-            },
-            separators=(",", ":"),
-        ).encode()
-    )
-    signing_input = f"{header}.{payload}".encode()
-    sig = _b64url(hmac.new(secret.encode(), signing_input, hashlib.sha256).digest())
-    return f"{header}.{payload}.{sig}"
-
-
-@router.post("/token")
-async def issue_grafana_token(
+@router.get("/dashboards")
+async def get_grafana_dashboards(
     token_info: dict = Depends(get_token_info),
 ):
-    """현재 로그인 사용자를 위한 Grafana 임베드 JWT 발급.
+    """Grafana 대시보드 UID 매핑 + 기본 URL 반환.
 
-    반환값:
-    - `token`: Grafana X-JWT-Assertion 헤더에 사용할 JWT
-    - `grafana_url`: Grafana iframe용 기본 URL
-    - `expires_in`: 유효 시간(초)
+    미설정 시 grafana_url은 빈 문자열, dashboards는 기본 UID 반환.
+    항상 200 — 프론트엔드가 grafana_url 유무로 빈 상태 판단.
     """
     settings = get_settings()
-    if not settings.grafana_jwt_secret:
-        raise HTTPException(status_code=503, detail="grafana_jwt_secret이 설정되지 않았습니다")
-
-    token = _create_grafana_jwt(
-        user_id=token_info["user_id"],
-        username=token_info["username"],
-        project_id=token_info["project_id"],
-        secret=settings.grafana_jwt_secret,
-    )
     return {
-        "token": token,
         "grafana_url": settings.grafana_base_url,
-        "expires_in": _TOKEN_TTL,
+        "dashboards": {
+            "node": settings.grafana_dashboard_node_uid,
+            "rabbitmq": settings.grafana_dashboard_rabbitmq_uid,
+            "mysqld": settings.grafana_dashboard_mysqld_uid,
+            "memcached": settings.grafana_dashboard_memcached_uid,
+            "etcd": settings.grafana_dashboard_etcd_uid,
+            "haproxy": settings.grafana_dashboard_haproxy_uid,
+            "libvirt": settings.grafana_dashboard_libvirt_uid,
+            "openstack": settings.grafana_dashboard_openstack_uid,
+            "ceph": settings.grafana_dashboard_ceph_uid,
+            "instance-cpu": settings.grafana_dashboard_instance_cpu_uid,
+            "instance-gpu": settings.grafana_dashboard_instance_gpu_uid,
+        },
     }

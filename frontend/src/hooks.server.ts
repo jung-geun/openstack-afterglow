@@ -21,6 +21,19 @@ function buildConnectSrc(): string {
 	return parts.join(' ');
 }
 
+// frame-src에 Grafana origin 추가 (iframe 임베드 허용)
+function buildFrameSrc(): string {
+	const parts = ["'self'"];
+	if (env.PUBLIC_GRAFANA_BASE) {
+		try {
+			parts.push(new URL(env.PUBLIC_GRAFANA_BASE).origin);
+		} catch {
+			// 잘못된 URL 무시
+		}
+	}
+	return parts.join(' ');
+}
+
 // 모든 응답에 추가할 보안 헤더
 const SECURITY_HEADERS: Record<string, string> = {
 	'X-Frame-Options': 'DENY',
@@ -31,7 +44,14 @@ const SECURITY_HEADERS: Record<string, string> = {
 	'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
 	// SvelteKit은 인라인 스타일/스크립트를 사용하므로 unsafe-inline 허용
 	'Content-Security-Policy':
-		`default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ${buildConnectSrc()}; font-src 'self'; frame-ancestors 'none'`,
+		`default-src 'self'; ` +
+		`script-src 'self' 'unsafe-inline'; ` +
+		`style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; ` +
+		`img-src 'self' data:; ` +
+		`connect-src ${buildConnectSrc()}; ` +
+		`font-src 'self' https://fonts.gstatic.com; ` +
+		`frame-src ${buildFrameSrc()}; ` +
+		`frame-ancestors 'none'`,
 };
 
 export const handle: Handle = async ({ event, resolve }) => {

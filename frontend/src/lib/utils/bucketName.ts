@@ -25,7 +25,7 @@ const RESERVED_EXACT: ReadonlySet<string> = new Set([
 	'.well-known'
 ]);
 
-const RESERVED_SUFFIXES: readonly string[] = ['-quarantine', '_segments'];
+const RESERVED_SUFFIXES: readonly string[] = ['-quarantine', '-trash', '_segments'];
 const RESERVED_PREFIXES: readonly string[] = ['aws-', 'amazon-', '_account', '_container'];
 
 const FORMAT_RE = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/;

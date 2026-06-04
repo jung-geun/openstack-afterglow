@@ -23,15 +23,24 @@ _session_factory: async_sessionmaker | None = None
 
 # circuit breaker: OperationalError 발생 시 일정 시간 DB 호출 차단
 _db_unhealthy_until: float = 0.0
+_default_unhealthy_seconds: int = 15
 
 
 class Base(DeclarativeBase):
     pass
 
 
-def init_db(database_url: str, pool_size: int = 5, max_overflow: int = 10) -> None:
+def init_db(
+    database_url: str,
+    pool_size: int = 5,
+    max_overflow: int = 10,
+    connect_timeout: int = 10,
+    pool_timeout: int = 10,
+    unhealthy_seconds: int = 15,
+) -> None:
     """앱 시작 시 호출. engine과 session factory를 초기화."""
-    global _engine, _session_factory
+    global _engine, _session_factory, _default_unhealthy_seconds
+    _default_unhealthy_seconds = unhealthy_seconds
     if not database_url:
         _logger.info("database.url 미설정 — DB 없이 Redis 폴백으로 동작합니다")
         return
@@ -41,9 +50,9 @@ def init_db(database_url: str, pool_size: int = 5, max_overflow: int = 10) -> No
         pool_size=pool_size,
         max_overflow=max_overflow,
         pool_pre_ping=True,
-        pool_timeout=5,
+        pool_timeout=pool_timeout,
         pool_recycle=1800,
-        connect_args={"connect_timeout": 5},
+        connect_args={"connect_timeout": connect_timeout},
         echo=False,
     )
     _session_factory = async_sessionmaker(_engine, expire_on_commit=False, class_=AsyncSession)
@@ -59,11 +68,15 @@ def is_db_available() -> bool:
     return True
 
 
-def mark_db_unhealthy(seconds: int = 30) -> None:
-    """OperationalError 발생 시 호출 — 지정 시간 동안 is_db_available() False 반환."""
+def mark_db_unhealthy(seconds: int | None = None) -> None:
+    """OperationalError 발생 시 호출 — 지정 시간 동안 is_db_available() False 반환.
+
+    seconds=None이면 init_db에서 설정한 기본값(_default_unhealthy_seconds) 사용.
+    """
     global _db_unhealthy_until
-    _db_unhealthy_until = time.time() + seconds
-    _logger.warning("DB circuit breaker 활성화: %d초 동안 DB 호출 차단", seconds)
+    duration = seconds if seconds is not None else _default_unhealthy_seconds
+    _db_unhealthy_until = time.time() + duration
+    _logger.warning("DB circuit breaker 활성화: %d초 동안 DB 호출 차단", duration)
 
 
 async def create_tables() -> None:
@@ -128,6 +141,19 @@ async def create_tables() -> None:
             ("plugin_status", "JSON DEFAULT NULL"),
             ("secret_cloud_config_status", "VARCHAR(20) DEFAULT NULL"),
             ("app_credential_id", "VARCHAR(64) DEFAULT NULL"),
+        ]:
+            try:
+                await conn.exec_driver_sql(f"ALTER TABLE k3s_clusters ADD COLUMN {col} {col_def}")
+            except Exception:
+                pass  # 이미 존재하면 무시
+
+        # Template (PR 1) + Master HA (PR 2) + 인증서 회전 (PR 3-B) 컬럼 (없는 경우에만)
+        for col, col_def in [
+            ("template_id", "CHAR(36) DEFAULT NULL"),
+            ("template_snapshot", "JSON DEFAULT NULL"),
+            ("master_count", "INT NOT NULL DEFAULT 1"),
+            ("last_rotation_at", "DATETIME(6) DEFAULT NULL"),
+            ("last_rotation_initiated_by", "VARCHAR(64) DEFAULT NULL"),
         ]:
             try:
                 await conn.exec_driver_sql(f"ALTER TABLE k3s_clusters ADD COLUMN {col} {col_def}")
@@ -248,6 +274,81 @@ async def create_tables() -> None:
             )
         except Exception:
             pass
+
+        # library_builds 에 ephemeral 빌드 컬럼 추가 (없는 경우에만)
+        for _col_sql in [
+            "ALTER TABLE library_builds ADD COLUMN recipe_id INT DEFAULT NULL",
+            "ALTER TABLE library_builds ADD COLUMN port_id VARCHAR(64) DEFAULT NULL",
+            "ALTER TABLE library_builds ADD COLUMN build_token CHAR(32) DEFAULT NULL",
+            "ALTER TABLE library_builds ADD UNIQUE KEY uq_library_builds_token (build_token)",
+            "ALTER TABLE library_builds ADD COLUMN console_log_excerpt TEXT DEFAULT NULL",
+            "ALTER TABLE library_builds ADD COLUMN cloud_init_status VARCHAR(20) DEFAULT NULL",
+        ]:
+            try:
+                await conn.exec_driver_sql(_col_sql)
+            except Exception:
+                pass  # 이미 존재하면 무시
+
+        # 셀프서비스 프로젝트 관리자 역할 테이블
+        try:
+            await conn.exec_driver_sql(
+                "CREATE TABLE IF NOT EXISTS project_roles ("
+                "id INT AUTO_INCREMENT PRIMARY KEY,"
+                "project_id VARCHAR(64) NOT NULL,"
+                "user_id VARCHAR(64) NOT NULL,"
+                "role VARCHAR(32) NOT NULL DEFAULT 'manager',"
+                "granted_by VARCHAR(64) NOT NULL,"
+                "created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),"
+                "UNIQUE KEY uq_project_user_role (project_id, user_id, role),"
+                "KEY idx_project_roles_project (project_id),"
+                "KEY idx_project_roles_user (user_id)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+        except Exception:
+            pass
+
+        # 프로젝트 이메일 초대 테이블
+        try:
+            await conn.exec_driver_sql(
+                "CREATE TABLE IF NOT EXISTS project_invitations ("
+                "id INT AUTO_INCREMENT PRIMARY KEY,"
+                "project_id VARCHAR(64) NOT NULL,"
+                "invited_email VARCHAR(255) NOT NULL,"
+                "invited_user_id VARCHAR(64) DEFAULT NULL,"
+                "invited_by VARCHAR(64) NOT NULL,"
+                "invited_by_name VARCHAR(255) NOT NULL DEFAULT '',"
+                "token_hash VARCHAR(64) NOT NULL UNIQUE,"
+                "status VARCHAR(16) NOT NULL DEFAULT 'pending',"
+                "keystone_role VARCHAR(64) NOT NULL DEFAULT 'member',"
+                "expires_at DATETIME(6) NOT NULL,"
+                "accepted_at DATETIME(6) DEFAULT NULL,"
+                "created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),"
+                "updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),"
+                "KEY idx_project_invitations_status (project_id, status),"
+                "KEY idx_project_invitations_email (invited_email)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+        except Exception:
+            pass
+
+        # Stampede 오토스케일 컬럼 추가 (014_stampede, 없는 경우에만)
+        try:
+            await conn.exec_driver_sql(
+                "ALTER TABLE k3s_clusters ADD COLUMN stampede_enabled TINYINT(1) NOT NULL DEFAULT 0"
+            )
+        except Exception:
+            pass  # 이미 존재하면 무시
+
+        for _col_sql in [
+            "ALTER TABLE k3s_nodegroups ADD COLUMN stampede_enabled TINYINT(1) NOT NULL DEFAULT 0",
+            "ALTER TABLE k3s_nodegroups ADD COLUMN min_size INT NOT NULL DEFAULT 0",
+            "ALTER TABLE k3s_nodegroups ADD COLUMN max_size INT NOT NULL DEFAULT 5",
+            "ALTER TABLE k3s_nodegroups ADD COLUMN stampede_state JSON DEFAULT NULL",
+        ]:
+            try:
+                await conn.exec_driver_sql(_col_sql)
+            except Exception:
+                pass  # 이미 존재하면 무시
 
     _logger.info("데이터베이스 테이블 생성/확인 완료")
 

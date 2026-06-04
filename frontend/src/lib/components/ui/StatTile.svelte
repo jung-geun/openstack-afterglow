@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
 
-  type Accent = 'blue' | 'cyan' | 'violet' | 'emerald' | 'amber' | 'teal' | 'rose' | 'indigo';
+  type Accent = 'blue' | 'cyan' | 'violet' | 'emerald' | 'amber' | 'teal' | 'rose' | 'indigo' | 'admin-tone';
 
   interface Props {
     label: string;
@@ -36,14 +36,15 @@
 
   // Map legacy accent names to design-system tone classes
   const TONE_MAP: Record<Accent, string> = {
-    blue:    'icon-accent',
-    cyan:    'icon-info',
-    violet:  'icon-accent2',
-    emerald: 'icon-success',
-    amber:   'icon-warning',
-    teal:    'icon-info',
-    rose:    'icon-danger',
-    indigo:  'icon-accent2',
+    blue:        'icon-accent',
+    cyan:        'icon-info',
+    violet:      'icon-accent2',
+    emerald:     'icon-success',
+    amber:       'icon-warning',
+    teal:        'icon-info',
+    rose:        'icon-danger',
+    indigo:      'icon-accent2',
+    'admin-tone':'icon-admin-tone',
   };
 
   const chipClass = $derived(iconBgClass ?? TONE_MAP[accent] ?? TONE_MAP.blue);
@@ -135,6 +136,11 @@
     background: color-mix(in oklab, var(--color-state-info) 14%, transparent);
     border-color: color-mix(in oklab, var(--color-state-info) 30%, transparent);
     color: var(--color-state-info);
+  }
+  .icon-admin-tone {
+    background: var(--admin-tone-soft);
+    border-color: var(--admin-tone-ring);
+    color: var(--admin-tone);
   }
 
   .progress-accent  { background: var(--color-accent); }

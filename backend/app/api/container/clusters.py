@@ -13,7 +13,9 @@ from keystoneauth1 import exceptions as ks_exc
 from openstack import exceptions as os_exc
 
 from app.api.common.activity_recorder import rec
-from app.api.deps import get_os_conn, get_token_info
+from app.api.deps import cache_bypass, get_os_conn, get_token_info
+from app.services import cache
+from app.services.cache import invalidation, keys
 
 logger = logging.getLogger(__name__)
 from app.models.containers import (
@@ -41,39 +43,75 @@ def _is_service_unavailable(e: Exception) -> bool:
 
 
 @router.get("", response_model=list[ClusterInfo])
-async def list_clusters(conn: openstack.connection.Connection = Depends(get_os_conn)):
-    try:
-        return await asyncio.wait_for(
-            asyncio.to_thread(magnum.list_clusters, conn),
-            timeout=_MAGNUM_TIMEOUT,
-        )
-    except (TimeoutError, Exception) as e:
-        if isinstance(e, asyncio.TimeoutError) or _is_service_unavailable(e):
-            logger.warning("Magnum 서비스 응답 없음 (clusters): %s", e)
-            raise HTTPException(status_code=503, detail="Magnum 서비스에 연결할 수 없습니다")
-        logger.exception("클러스터 목록 조회 실패: %s", e)
-        raise HTTPException(status_code=500, detail="클러스터 목록 조회 실패")
+async def list_clusters(
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    bypass: bool = Depends(cache_bypass),
+):
+    pid = conn._afterglow_project_id
+
+    async def _load():
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(magnum.list_clusters, conn),
+                timeout=_MAGNUM_TIMEOUT,
+            )
+        except (TimeoutError, Exception) as e:
+            if isinstance(e, asyncio.TimeoutError) or _is_service_unavailable(e):
+                logger.warning("Magnum 서비스 응답 없음 (clusters): %s", e)
+                raise HTTPException(status_code=503, detail="Magnum 서비스에 연결할 수 없습니다")
+            logger.exception("클러스터 목록 조회 실패: %s", e)
+            raise HTTPException(status_code=500, detail="클러스터 목록 조회 실패")
+
+    return await cache.cached_call(
+        keys.project_key("magnum", pid, "clusters"),
+        cache.ttl_normal(),
+        _load,
+        refresh=bypass,
+    )
 
 
 @router.get("/templates", response_model=list[ClusterTemplateInfo])
-async def list_templates(conn: openstack.connection.Connection = Depends(get_os_conn)):
-    try:
-        return await asyncio.wait_for(
-            asyncio.to_thread(magnum.list_cluster_templates, conn),
-            timeout=_MAGNUM_TIMEOUT,
-        )
-    except (TimeoutError, Exception) as e:
-        if isinstance(e, asyncio.TimeoutError) or _is_service_unavailable(e):
-            logger.warning("Magnum 서비스 응답 없음 (templates): %s", e)
-            raise HTTPException(status_code=503, detail="Magnum 서비스에 연결할 수 없습니다")
-        logger.exception("클러스터 템플릿 조회 실패: %s", e)
-        raise HTTPException(status_code=500, detail="클러스터 템플릿 조회 실패")
+async def list_templates(
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    bypass: bool = Depends(cache_bypass),
+):
+    pid = conn._afterglow_project_id
+
+    async def _load():
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(magnum.list_cluster_templates, conn),
+                timeout=_MAGNUM_TIMEOUT,
+            )
+        except (TimeoutError, Exception) as e:
+            if isinstance(e, asyncio.TimeoutError) or _is_service_unavailable(e):
+                logger.warning("Magnum 서비스 응답 없음 (templates): %s", e)
+                raise HTTPException(status_code=503, detail="Magnum 서비스에 연결할 수 없습니다")
+            logger.exception("클러스터 템플릿 조회 실패: %s", e)
+            raise HTTPException(status_code=500, detail="클러스터 템플릿 조회 실패")
+
+    return await cache.cached_call(
+        keys.project_key("magnum", pid, "cluster-templates"),
+        cache.ttl_static(),
+        _load,
+        refresh=bypass,
+    )
 
 
 @router.get("/{cluster_id}", response_model=ClusterInfo)
-async def get_cluster(cluster_id: str, conn: openstack.connection.Connection = Depends(get_os_conn)):
+async def get_cluster(
+    cluster_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    bypass: bool = Depends(cache_bypass),
+):
+    pid = conn._afterglow_project_id
     try:
-        return await asyncio.to_thread(magnum.get_cluster, conn, cluster_id)
+        return await cache.cached_call(
+            keys.project_key("magnum", pid, "clusters", sub=cluster_id),
+            cache.ttl_normal(),
+            lambda: magnum.get_cluster(conn, cluster_id),
+            refresh=bypass,
+        )
     except Exception:
         raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
 
@@ -95,6 +133,9 @@ async def create_cluster(
             req.keypair,
             req.create_timeout,
         )
+        pid = conn._afterglow_project_id
+        await cache.invalidate(f"afterglow:magnum:{pid}:*")
+        await invalidation.invalidate_mutation_count("magnum", pid)
         await rec(token_info, conn, resource_type="container_cluster", action="create", resource_name=req.name)
         return result
     except Exception as e:
@@ -118,6 +159,9 @@ async def delete_cluster(
 ):
     try:
         await asyncio.to_thread(magnum.delete_cluster, conn, cluster_id)
+        pid = conn._afterglow_project_id
+        await cache.invalidate(f"afterglow:magnum:{pid}:*")
+        await invalidation.invalidate_mutation_count("magnum", pid)
         await rec(token_info, conn, resource_type="container_cluster", action="delete", resource_id=cluster_id)
     except Exception as e:
         await rec(

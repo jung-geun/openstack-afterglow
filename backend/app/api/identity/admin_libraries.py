@@ -15,11 +15,13 @@ if TYPE_CHECKING:
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import select
 
 from app.api.common.activity_recorder import rec
 from app.api.deps import get_os_conn, get_token_info, require_admin
+from app.database import get_session
 from app.services import libraries as lib_svc
-from app.services import library_builder, manila, neutron
+from app.services import library_builder, manila, neutron, nova
 from app.services.keystone import get_service_project_connection
 
 _logger = logging.getLogger(__name__)
@@ -99,14 +101,80 @@ async def list_library_builds(
             "file_storage_id": row.file_storage_id,
             "server_id": row.server_id,
             "status": row.status,
+            "cloud_init_status": row.cloud_init_status,
             "progress_step": row.progress_step,
             "progress_pct": row.progress_pct,
             "error_message": row.error_message,
-            "started_at": row.started_at.isoformat() if row.started_at else None,
-            "completed_at": row.completed_at.isoformat() if row.completed_at else None,
+            "console_log_excerpt": (row.console_log_excerpt or "")[-500:] if row.console_log_excerpt else None,
+            "started_at": row.started_at.isoformat() + "Z" if row.started_at else None,
+            "completed_at": row.completed_at.isoformat() + "Z" if row.completed_at else None,
+            "created_at": row.created_at.isoformat() + "Z" if row.created_at else None,
         }
         for row in rows
     ]
+
+
+@router.get("/builds/{build_id}", dependencies=[Depends(require_admin)])
+async def get_library_build(build_id: int) -> dict:
+    """빌드 상세 조회 — VM 실시간 상태·콘솔 로그 포함. 관리자 전용."""
+    from sqlalchemy import select
+
+    from app.database import get_session_factory
+    from app.models.db import LibraryBuild
+
+    factory = get_session_factory()
+    if factory is None:
+        raise HTTPException(status_code=503, detail="DB가 초기화되지 않았습니다")
+
+    async with factory() as session:
+        row = (await session.execute(select(LibraryBuild).where(LibraryBuild.id == build_id))).scalar_one_or_none()
+
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"빌드 {build_id}를 찾을 수 없습니다")
+
+    _TERMINAL = {"complete", "error", "timeout", "cancelled"}
+    is_active = row.status not in _TERMINAL
+
+    vm_status: str | None = None
+    vm_ip: str | None = None
+    live_console: str | None = None
+
+    if row.server_id:
+        try:
+            svc_conn = await asyncio.to_thread(get_service_project_connection)
+            server = await asyncio.to_thread(nova.get_server, svc_conn, row.server_id)
+            vm_status = server.status
+            # fixed IP 우선, 없으면 floating
+            ips = [a.addr for a in (server.ip_addresses or []) if a.type == "fixed"]
+            if not ips:
+                ips = [a.addr for a in (server.ip_addresses or [])]
+            vm_ip = ips[0] if ips else None
+
+            if is_active:
+                live_console = await asyncio.to_thread(nova.get_console_output, svc_conn, row.server_id, 300)
+        except Exception:
+            _logger.warning("[admin_libraries] VM 정보 조회 실패: server_id=%s", row.server_id, exc_info=True)
+
+    return {
+        "id": row.id,
+        "library_id": row.library_id,
+        "file_storage_id": row.file_storage_id,
+        "server_id": row.server_id,
+        "port_id": row.port_id,
+        "status": row.status,
+        "cloud_init_status": row.cloud_init_status,
+        "progress_step": row.progress_step,
+        "progress_pct": row.progress_pct,
+        "error_message": row.error_message,
+        "console_log_excerpt": row.console_log_excerpt,
+        "started_at": row.started_at.isoformat() + "Z" if row.started_at else None,
+        "completed_at": row.completed_at.isoformat() + "Z" if row.completed_at else None,
+        "created_at": row.created_at.isoformat() + "Z" if row.created_at else None,
+        # 실시간 VM 정보
+        "vm_status": vm_status,
+        "vm_ip": vm_ip,
+        "live_console": live_console,
+    }
 
 
 @router.get("/{library_id}", dependencies=[Depends(require_admin)])
@@ -262,6 +330,331 @@ async def cancel_library_build(
         raise HTTPException(status_code=409, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Ephemeral Builder VM 스모크 테스트
+# ---------------------------------------------------------------------------
+
+
+@router.post("/builder-vm/_smoke", status_code=200, dependencies=[Depends(require_admin)])
+async def smoke_test_ephemeral_vm() -> dict:
+    """임시 Builder VM 생성 → SSH 연결 확인 → 삭제. 관리자 전용 연결 검증 엔드포인트."""
+    from app.services import builder_vm as bvm
+    from app.services.ssh_executor import run_command
+
+    svc_conn = await asyncio.to_thread(get_service_project_connection)
+    vm: bvm.EphemeralBuilderVM | None = None
+    try:
+        vm = await bvm.create_ephemeral_vm(svc_conn)
+
+        rc, stdout, stderr = await run_command(
+            vm.host,
+            vm.key_path,
+            "echo ok && hostname && uname -r",
+            username=vm.username,
+        )
+        if rc != 0:
+            raise HTTPException(
+                status_code=500,
+                detail=f"SSH 명령 실패 (exit={rc}): {stderr}",
+            )
+
+        return {
+            "status": "ok",
+            "server_id": vm.server_id,
+            "fip": vm.host,
+            "internal_ip": vm.internal_ip,
+            "ssh_output": stdout.strip(),
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    finally:
+        if vm is not None:
+            cleanup_conn = await asyncio.to_thread(get_service_project_connection)
+            await bvm.delete_ephemeral_vm(cleanup_conn, vm.server_id, vm.fip_id)
+
+
+# ---------------------------------------------------------------------------
+# Ephemeral Builder VM + Manila 마운트 검증 스모크 테스트
+# ---------------------------------------------------------------------------
+
+
+class SmokeMountRequest(BaseModel):
+    share_proto: str = "NFS"  # "NFS" | "CEPHFS"
+    size_gb: int = 1
+
+
+@router.post("/builder-vm/_smoke-mount", status_code=200, dependencies=[Depends(require_admin)])
+async def smoke_test_ephemeral_mount(req: SmokeMountRequest) -> dict:
+    """임시 Builder VM 생성 → Manila share 생성 → 마운트 검증 → 전체 정리.
+
+    share_proto=NFS (기본) 또는 CEPHFS를 선택해 실제 마운트까지 검증한다.
+    """
+    import uuid
+
+    from app.services import builder_vm as bvm
+    from app.services import ephemeral_mount as emount
+
+    proto = req.share_proto.upper()
+    if proto not in ("NFS", "CEPHFS"):
+        raise HTTPException(status_code=400, detail="share_proto는 NFS 또는 CEPHFS여야 합니다")
+
+    svc_conn = await asyncio.to_thread(get_service_project_connection)
+    vm: bvm.EphemeralBuilderVM | None = None
+    share_id: str | None = None
+    access_rule: dict | None = None
+
+    try:
+        vm = await bvm.create_ephemeral_vm(svc_conn)
+
+        share_name = f"smoke-mount-{uuid.uuid4().hex[:8]}"
+        share_id = await emount.create_builder_share(svc_conn, share_name, req.size_gb, proto)
+
+        access_rule = await emount.add_vm_access_rule(svc_conn, share_id, vm.internal_ip, proto)
+
+        mount_cmd = await emount.build_mount_command(svc_conn, share_id, proto, access_rule)
+
+        result = await emount.verify_mount_via_ssh(vm, mount_cmd)
+
+        if not result["mounted"]:
+            raise HTTPException(
+                status_code=500,
+                detail=f"마운트 검증 실패: {result.get('error')}",
+            )
+
+        return {
+            "status": "ok",
+            "share_proto": proto,
+            "share_id": share_id,
+            "server_id": vm.server_id,
+            "internal_ip": vm.internal_ip,
+            "df_output": result["df_output"],
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    finally:
+        cleanup_conn = await asyncio.to_thread(get_service_project_connection)
+        if share_id and access_rule:
+            try:
+                await asyncio.to_thread(
+                    manila.revoke_access_rule,
+                    cleanup_conn,
+                    share_id,
+                    access_rule["access_id"],
+                )
+            except Exception:
+                _logger.warning("[smoke-mount] access rule revoke 실패", exc_info=True)
+        if share_id:
+            try:
+                await asyncio.to_thread(manila.delete_file_storage, cleanup_conn, share_id)
+            except Exception:
+                _logger.warning("[smoke-mount] share 삭제 실패", exc_info=True)
+        if vm is not None:
+            await bvm.delete_ephemeral_vm(cleanup_conn, vm.server_id, vm.fip_id)
+
+
+# ---------------------------------------------------------------------------
+# Heat stack 기반 smoke-mount (Phase 1 PoC)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/builder-vm/_smoke-mount-heat", status_code=200, dependencies=[Depends(require_admin)])
+async def smoke_test_mount_heat(req: SmokeMountRequest) -> dict:
+    """Heat HOT stack 으로 VM + FIP 선언 → Manila share/access rule Python 처리 → 마운트 검증."""
+    import uuid
+
+    from app.config import get_settings
+    from app.services import builder_vm as bvm
+    from app.services import ephemeral_mount as emount
+    from app.services import heat as heat_svc
+
+    proto = req.share_proto.upper()
+    if proto not in ("NFS", "CEPHFS"):
+        raise HTTPException(status_code=400, detail="share_proto는 NFS 또는 CEPHFS여야 합니다")
+
+    settings = get_settings()
+    svc_conn = await asyncio.to_thread(get_service_project_connection)
+    stack_id: str | None = None
+    share_id: str | None = None
+    access_rule: dict | None = None
+
+    try:
+        keypair_name = await bvm._ensure_ephemeral_keypair(svc_conn, settings.builder_ssh_key_path)
+
+        share_name = f"smoke-heat-{uuid.uuid4().hex[:8]}"
+        share_id = await emount.create_builder_share(svc_conn, share_name, req.size_gb, proto)
+
+        vm_name = f"afterglow-builder-{uuid.uuid4().hex[:8]}"
+        template_str = await asyncio.to_thread(heat_svc.render_template, "builder_smoke.yaml.j2", {})
+        parameters = {
+            "image_id": settings.builder_image_id,
+            "flavor_id": settings.builder_flavor_id,
+            "network_id": settings.builder_network_id or settings.default_network_id,
+            "keypair_name": keypair_name,
+            "user_data": bvm._EPHEMERAL_CLOUD_INIT,
+            "vm_name": vm_name,
+            "floating_network_id": settings.builder_floating_network_id or "",
+        }
+        stack_name = f"afterglow-smoke-{uuid.uuid4().hex[:8]}"
+        stack_id = await asyncio.to_thread(heat_svc.create_stack, svc_conn, stack_name, template_str, parameters)
+
+        outputs = await asyncio.to_thread(heat_svc.wait_for_stack_complete, svc_conn, stack_id)
+        internal_ip = outputs.get("internal_ip", "")
+        ssh_host = outputs.get("ssh_host", internal_ip)
+        server_id = outputs.get("server_id", "")
+
+        if not internal_ip:
+            raise RuntimeError("Heat stack outputs 에서 internal_ip 를 찾을 수 없습니다")
+
+        await bvm._wait_for_ssh(ssh_host, settings.builder_ssh_key_path, settings.builder_ssh_user)
+        await bvm._wait_for_cloud_init(ssh_host, settings.builder_ssh_key_path, settings.builder_ssh_user)
+
+        access_rule = await emount.add_vm_access_rule(svc_conn, share_id, internal_ip, proto)
+
+        vm = bvm.EphemeralBuilderVM(
+            server_id=server_id,
+            host=ssh_host,
+            username=settings.builder_ssh_user,
+            key_path=settings.builder_ssh_key_path,
+            internal_ip=internal_ip,
+            fip_id=outputs.get("fip_id") or None,
+        )
+        mount_cmd = await emount.build_mount_command(svc_conn, share_id, proto, access_rule)
+        result = await emount.verify_mount_via_ssh(vm, mount_cmd)
+
+        if not result["mounted"]:
+            raise HTTPException(status_code=500, detail=f"마운트 검증 실패: {result.get('error')}")
+
+        return {
+            "status": "ok",
+            "tool": "heat",
+            "share_proto": proto,
+            "share_id": share_id,
+            "server_id": server_id,
+            "internal_ip": internal_ip,
+            "df_output": result["df_output"],
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    finally:
+        cleanup_conn = await asyncio.to_thread(get_service_project_connection)
+        if share_id and access_rule:
+            try:
+                await asyncio.to_thread(manila.revoke_access_rule, cleanup_conn, share_id, access_rule["access_id"])
+            except Exception:
+                _logger.warning("[smoke-mount-heat] access rule revoke 실패", exc_info=True)
+        if share_id:
+            try:
+                await asyncio.to_thread(manila.delete_file_storage, cleanup_conn, share_id)
+            except Exception:
+                _logger.warning("[smoke-mount-heat] share 삭제 실패", exc_info=True)
+        if stack_id:
+            await asyncio.to_thread(heat_svc.delete_stack, cleanup_conn, stack_id)
+
+
+# ---------------------------------------------------------------------------
+# OpenTofu 기반 smoke-mount (Phase 1 PoC)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/builder-vm/_smoke-mount-tofu", status_code=200, dependencies=[Depends(require_admin)])
+async def smoke_test_mount_tofu(req: SmokeMountRequest) -> dict:
+    """OpenTofu 로 VM + FIP + Manila share + access rule 선언 → SSH 마운트 검증."""
+    import base64
+    import uuid
+
+    from app.config import get_settings
+    from app.services import builder_vm as bvm
+    from app.services import ephemeral_mount as emount
+    from app.services import tofu_runner
+
+    proto = req.share_proto.upper()
+    if proto not in ("NFS", "CEPHFS"):
+        raise HTTPException(status_code=400, detail="share_proto는 NFS 또는 CEPHFS여야 합니다")
+
+    settings = get_settings()
+    svc_conn = await asyncio.to_thread(get_service_project_connection)
+    workdir = None
+
+    try:
+        keypair_name = await bvm._ensure_ephemeral_keypair(svc_conn, settings.builder_ssh_key_path)
+
+        vm_name = f"afterglow-builder-{uuid.uuid4().hex[:8]}"
+        share_name = f"smoke-tofu-{uuid.uuid4().hex[:8]}"
+        userdata_b64 = base64.b64encode(bvm._EPHEMERAL_CLOUD_INIT.encode()).decode()
+
+        variables = {
+            "vm_name": vm_name,
+            "image_id": settings.builder_image_id,
+            "flavor_id": settings.builder_flavor_id,
+            "network_id": settings.builder_network_id or settings.default_network_id,
+            "keypair_name": keypair_name,
+            "user_data_b64": userdata_b64,
+            "floating_network_id": settings.builder_floating_network_id or "",
+            "share_name": share_name,
+            "share_proto": proto,
+            "size_gb": req.size_gb,
+            "share_type": (settings.os_manila_nfs_share_type if proto == "NFS" else settings.os_manila_share_type),
+            "share_network_id": settings.os_manila_share_network_id if proto == "NFS" else "",
+        }
+
+        workdir, outputs = await tofu_runner.apply("builder_smoke", variables, svc_conn)
+
+        internal_ip = outputs.get("internal_ip", "")
+        ssh_host = outputs.get("ssh_host", internal_ip)
+        share_id = outputs.get("share_id", "")
+        access_key = outputs.get("access_key", "")
+        server_id = outputs.get("server_id", "")
+
+        if not internal_ip or not share_id:
+            raise RuntimeError("tofu outputs 에서 internal_ip 또는 share_id 를 찾을 수 없습니다")
+
+        vm = bvm.EphemeralBuilderVM(
+            server_id=server_id,
+            host=ssh_host,
+            username=settings.builder_ssh_user,
+            key_path=settings.builder_ssh_key_path,
+            internal_ip=internal_ip,
+            fip_id=outputs.get("fip_id") or None,
+        )
+
+        await bvm._wait_for_ssh(ssh_host, settings.builder_ssh_key_path, settings.builder_ssh_user)
+        await bvm._wait_for_cloud_init(ssh_host, settings.builder_ssh_key_path, settings.builder_ssh_user)
+
+        access_rule_info = {"access_to": f"builder-{vm_name}", "access_key": access_key}
+        mount_cmd = await emount.build_mount_command(svc_conn, share_id, proto, access_rule_info)
+        result = await emount.verify_mount_via_ssh(vm, mount_cmd)
+
+        if not result["mounted"]:
+            raise HTTPException(status_code=500, detail=f"마운트 검증 실패: {result.get('error')}")
+
+        return {
+            "status": "ok",
+            "tool": "tofu",
+            "share_proto": proto,
+            "share_id": share_id,
+            "server_id": server_id,
+            "internal_ip": internal_ip,
+            "df_output": result["df_output"],
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    finally:
+        if workdir is not None:
+            cleanup_conn = await asyncio.to_thread(get_service_project_connection)
+            try:
+                await tofu_runner.destroy(workdir, cleanup_conn)
+            except Exception:
+                _logger.warning("[smoke-mount-tofu] tofu destroy 실패", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -441,3 +834,92 @@ async def list_library_project_access(
         "share_id": storage.id,
         "grants": list(grants.values()),
     }
+
+
+# ---------------------------------------------------------------------------
+# 카탈로그 관리 (CRUD)
+# ---------------------------------------------------------------------------
+
+
+class CatalogCreateRequest(BaseModel):
+    library_id: str
+    name: str
+    version: str
+    packages: list[str] = []
+    depends_on: list[str] = []
+    share_proto: str = "CEPHFS"
+    ubuntu_versions: list[str] = ["22.04", "24.04"]
+    visibility: str = "public"
+    license_type: str | None = None
+    max_concurrent_mounts: int | None = None
+
+
+class CatalogUpdateRequest(BaseModel):
+    name: str | None = None
+    version: str | None = None
+    packages: list[str] | None = None
+    depends_on: list[str] | None = None
+    share_proto: str | None = None
+    ubuntu_versions: list[str] | None = None
+    visibility: str | None = None
+    license_type: str | None = None
+    max_concurrent_mounts: int | None = None
+
+
+@router.post("/catalog", status_code=201, dependencies=[Depends(require_admin)])
+async def create_catalog_entry(
+    req: CatalogCreateRequest,
+    session=Depends(get_session),
+) -> dict:
+    """카탈로그 항목 생성. 관리자 전용."""
+    from app.models.db import LibraryCatalog
+
+    existing = (
+        await session.execute(select(LibraryCatalog).where(LibraryCatalog.library_id == req.library_id))
+    ).scalar_one_or_none()
+    if existing:
+        raise HTTPException(status_code=409, detail="이미 존재하는 라이브러리 ID")
+    row = LibraryCatalog(**req.model_dump())
+    session.add(row)
+    await session.commit()
+    await lib_svc.reload_catalog()
+    return {"ok": True}
+
+
+@router.patch("/catalog/{library_id}", dependencies=[Depends(require_admin)])
+async def update_catalog_entry(
+    library_id: str,
+    req: CatalogUpdateRequest,
+    session=Depends(get_session),
+) -> dict:
+    """카탈로그 항목 수정. 관리자 전용."""
+    from app.models.db import LibraryCatalog
+
+    row = (
+        await session.execute(select(LibraryCatalog).where(LibraryCatalog.library_id == library_id))
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="라이브러리를 찾을 수 없습니다")
+    for field, val in req.model_dump(exclude_none=True).items():
+        setattr(row, field, val)
+    await session.commit()
+    await lib_svc.reload_catalog()
+    return {"ok": True}
+
+
+@router.delete("/catalog/{library_id}", status_code=204, dependencies=[Depends(require_admin)])
+async def delete_catalog_entry(
+    library_id: str,
+    session=Depends(get_session),
+) -> None:
+    """카탈로그 항목 삭제. 관리자 전용."""
+    from app.models.db import LibraryCatalog
+
+    row = (
+        await session.execute(select(LibraryCatalog).where(LibraryCatalog.library_id == library_id))
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="라이브러리를 찾을 수 없습니다")
+    await session.delete(row)
+    await session.commit()
+    await lib_svc.reload_catalog()

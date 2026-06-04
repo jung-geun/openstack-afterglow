@@ -1,28 +1,5 @@
 <script lang="ts">
-	interface SubnetDetail {
-		id: string;
-		name: string;
-		cidr: string;
-		gateway_ip: string | null;
-		dhcp_enabled: boolean;
-	}
-
-	interface RouterInfo {
-		id: string;
-		name: string;
-		external_gateway_network_id: string | null;
-		connected_subnet_ids: string[];
-	}
-
-	interface NetworkDetail {
-		id: string;
-		name: string;
-		status: string;
-		is_external: boolean;
-		is_shared: boolean;
-		subnet_details: SubnetDetail[];
-		routers: RouterInfo[];
-	}
+	import type { NetworkDetail } from '$lib/types/networks';
 
 	let { network }: { network: NetworkDetail } = $props();
 

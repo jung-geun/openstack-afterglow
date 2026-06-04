@@ -6,15 +6,15 @@ if TYPE_CHECKING:
     import openstack
 import asyncio
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from openstack.exceptions import HttpException
 from pydantic import BaseModel
 
 from app.api.common.activity_recorder import rec
 from app.api.common.owner_check import assert_resource_owner
-from app.api.deps import get_os_conn, get_token_info
+from app.api.deps import cache_bypass, get_os_conn, get_token_info
 from app.services import cinder
-from app.services.cache import cached_call, invalidate, ttl_fast
+from app.services.cache import cached_call, invalidate, invalidation, keys, ttl_normal
 
 router = APIRouter()
 
@@ -47,7 +47,7 @@ async def list_snapshots(
     volume_id: str | None = None,
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
-    refresh: bool = Query(False),
+    bypass: bool = Depends(cache_bypass),
 ):
     pid = conn._afterglow_project_id
     is_admin = token_info.get("is_system_admin", False)
@@ -57,9 +57,9 @@ async def list_snapshots(
     try:
         return await cached_call(
             cache_key,
-            ttl_fast(),
+            ttl_normal(),
             lambda: cinder.list_snapshots(conn, volume_id, caller_project_id),
-            refresh=refresh,
+            refresh=bypass,
         )
     except Exception:
         raise HTTPException(status_code=500, detail="스냅샷 목록 조회 실패")
@@ -77,7 +77,8 @@ async def create_snapshot(
         result = await asyncio.to_thread(
             cinder.create_snapshot, conn, req.volume_id, req.name, req.description, req.force
         )
-        await invalidate(f"afterglow:cinder:{pid}:snapshots")
+        await invalidate(f"afterglow:cinder:{pid}:snapshots*")
+        await invalidation.invalidate_mutation_count("cinder", pid)
         await rec(
             token_info,
             conn,
@@ -117,10 +118,13 @@ async def get_snapshot(
     snapshot_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
+    bypass: bool = Depends(cache_bypass),
 ):
     await _assert_snapshot_owner(conn, snapshot_id, token_info)
+    pid = conn._afterglow_project_id
+    key = keys.project_key("cinder", pid, "snapshots", sub=snapshot_id)
     try:
-        return await asyncio.to_thread(cinder.get_snapshot, conn, snapshot_id)
+        return await cached_call(key, ttl_normal(), lambda: cinder.get_snapshot(conn, snapshot_id), refresh=bypass)
     except Exception:
         raise HTTPException(status_code=404, detail="스냅샷을 찾을 수 없습니다")
 
@@ -135,7 +139,8 @@ async def delete_snapshot(
     await _assert_snapshot_owner(conn, snapshot_id, token_info)
     try:
         await asyncio.to_thread(cinder.delete_snapshot, conn, snapshot_id)
-        await invalidate(f"afterglow:cinder:{pid}:snapshots")
+        await invalidate(f"afterglow:cinder:{pid}:snapshots*")
+        await invalidation.invalidate_mutation_count("cinder", pid)
         await rec(
             token_info,
             conn,

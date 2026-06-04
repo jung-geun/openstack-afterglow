@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
-"""config.toml → K8s configmap.yaml + secret.yaml 변환기.
+"""config.toml → K8s configmap.yaml + secret.yaml + grafana-deployment.yaml 변환기.
 
 현재 config.toml (및 config.*.toml 오버라이드)을 읽어
-deploy/k8s/secret.yaml과 deploy/k8s/configmap.yaml을 자동 생성합니다.
+deploy/k8s/{secret.yaml, configmap.yaml, grafana-deployment.yaml}을 자동 생성합니다.
+
+grafana-deployment.yaml 은 anonymous 인증으로 동작하는 Grafana Deployment 매니페스트로,
+iframe 임베드를 위해 GF_SECURITY_ALLOW_EMBEDDING 이 활성화되어 있습니다.
+Afterglow 앱 인증이 실질적인 접근 게이트 역할을 합니다.
 
 사용법:
     python3 generate_k8s.py
@@ -83,6 +87,20 @@ def _yaml_str(v: str) -> str:
     return f'"{v}"'
 
 
+def _yaml_block_scalar(v: str) -> str:
+    """멀티라인 YAML block scalar (|) 렌더링 — SSH 개인키 등에 사용.
+
+    단일 라인이면 _yaml_str로 위임. 빈 값이면 빈 문자열 반환.
+    """
+    if not v:
+        return '""'
+    if "\n" not in v:
+        return _yaml_str(v)
+    lines = v.splitlines()
+    body = "\n".join("    " + line for line in lines)
+    return "|\n" + body
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # TOML 헬퍼 (렌더링용)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -128,6 +146,7 @@ def render_secret(cfg: dict) -> str:
     db = cfg.get("database", {})
     mon = cfg.get("monitoring", {})
     notion = cfg.get("notion", {})
+    builder = cfg.get("builder", {})
 
     lines = [
         "apiVersion: v1",
@@ -186,20 +205,29 @@ def render_secret(cfg: dict) -> str:
             f'  MONITORING_SD_TOKEN: {_yaml_str(sd_token)}',
         ])
 
-    grafana_jwt_secret = mon.get("grafana_jwt_secret", "")
-    if grafana_jwt_secret:
-        lines.extend([
-            "",
-            "  # Grafana JWT 서명 시크릿",
-            f'  GRAFANA_JWT_SECRET: {_yaml_str(grafana_jwt_secret)}',
-        ])
-
     notion_enc_key = notion.get("config_encryption_key", "")
     if notion_enc_key:
         lines.extend([
             "",
             "  # Notion 설정 암호화 키",
             f'  NOTION_CONFIG_ENCRYPTION_KEY: {_yaml_str(notion_enc_key)}',
+        ])
+
+    smtp = cfg.get("smtp", {})
+    smtp_password = smtp.get("password", "")
+    if smtp_password:
+        lines.extend([
+            "",
+            "  # SMTP 이메일 서버 인증 비밀번호",
+            f'  SMTP_PASSWORD: {_yaml_str(smtp_password)}',
+        ])
+
+    ssh_private_key = builder.get("ssh_private_key", "")
+    if ssh_private_key:
+        lines.extend([
+            "",
+            "  # Builder VM SSH 개인키 — /etc/afterglow/ssh/builder.key 로 볼륨 마운트됨",
+            f'  BUILDER_SSH_PRIVATE_KEY: {_yaml_block_scalar(ssh_private_key)}',
         ])
 
     lines.append("")
@@ -228,6 +256,7 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     logging_cfg = cfg.get("logging", {})
     mon = cfg.get("monitoring", {})
     notion = cfg.get("notion", {})
+    smtp = cfg.get("smtp", {})
 
     lines = [
         "# Afterglow 통합 설정 파일",
@@ -264,6 +293,7 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     lines.append("# Swift 설정")
     lines.append(f'swift_endpoint = {_toml_str(os_cfg.get("swift_endpoint", ""))}')
     lines.append(f'swift_upload_timeout = {os_cfg.get("swift_upload_timeout", 600)}')
+    lines.append(f'trash_retention_days = {os_cfg.get("trash_retention_days", 30)}')
     lines.append("")
     lines.append("# Manila NFS 설정")
     lines.append(f'manila_nfs_root_squash = {_toml_bool(os_cfg.get("manila_nfs_root_squash", True))}')
@@ -289,6 +319,9 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     lines.append("# 프론트엔드 대시보드 자동 새로고침 간격 (밀리초)")
     lines.append(f'refresh_interval_ms = {app.get("refresh_interval_ms", 5000)}')
     lines.append("")
+    lines.append("# 초대 이메일 링크 생성에 사용하는 프론트엔드 베이스 URL")
+    lines.append(f'frontend_base_url = {_toml_str(app.get("frontend_base_url", ""))}')
+    lines.append("")
 
     # [logging] (선택)
     if logging_cfg:
@@ -306,6 +339,15 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     lines.append(f'ttl_slow = {cache.get("ttl_slow", 60)}      # 키페어, 보안그룹')
     lines.append(f'ttl_static = {cache.get("ttl_static", 300)}   # 이미지, 플레이버, 토큰 검증')
     lines.append(f'default_ttl_seconds = {cache.get("default_ttl_seconds", 30)}')
+    lines.append(f'backend = {_toml_str(cache.get("backend", "redis"))}')
+    lines.append(f'dynamic_threshold_low = {cache.get("dynamic_threshold_low", 5)}')
+    lines.append(f'dynamic_threshold_high = {cache.get("dynamic_threshold_high", 20)}')
+    lines.append(f'ttl_identity_stable = {cache.get("ttl_identity_stable", 86400)}')
+    lines.append(f'ttl_catalog_slow = {cache.get("ttl_catalog_slow", 900)}')
+    lines.append(f'ttl_project_meta = {cache.get("ttl_project_meta", 300)}')
+    lines.append(f'ttl_operational_live = {cache.get("ttl_operational_live", 30)}')
+    lines.append(f'ttl_admin_overview = {cache.get("ttl_admin_overview", 60)}')
+    lines.append(f'ttl_auth_token = {cache.get("ttl_auth_token", 60)}')
     lines.append("")
 
     # [session]
@@ -313,6 +355,8 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     lines.append(f'timeout_seconds = {sess.get("timeout_seconds", 3600)}')
     lines.append(f'warning_before_seconds = {sess.get("warning_before_seconds", 300)}')
     lines.append(f'absolute_timeout = {sess.get("absolute_timeout", 14400)}')
+    lines.append(f'jwt_access_ttl = {sess.get("jwt_access_ttl", 900)}')
+    lines.append(f'jwt_refresh_ttl = {sess.get("jwt_refresh_ttl", 604800)}')
     lines.append("")
 
     # [nova]
@@ -335,6 +379,18 @@ def _render_toml_for_k8s(cfg: dict) -> str:
             lines.append(f'flavor_id = {_toml_str(builder["flavor_id"])}')
         if "network_id" in builder:
             lines.append(f'network_id = {_toml_str(builder["network_id"])}')
+        if "persistent_server_id" in builder:
+            lines.append(f'persistent_server_id = {_toml_str(builder["persistent_server_id"])}')
+        if "ssh_user" in builder:
+            lines.append(f'ssh_user = {_toml_str(builder["ssh_user"])}')
+        if "ssh_key_path" in builder:
+            lines.append(f'ssh_key_path = {_toml_str(builder["ssh_key_path"])}')
+        if "ssh_host" in builder:
+            lines.append(f'ssh_host = {_toml_str(builder["ssh_host"])}')
+        if "floating_network_id" in builder:
+            lines.append(f'floating_network_id = {_toml_str(builder["floating_network_id"])}')
+        if "build_timeout" in builder:
+            lines.append(f'build_timeout = {builder["build_timeout"]}')
         lines.append("")
 
     # [union]
@@ -370,19 +426,29 @@ def _render_toml_for_k8s(cfg: dict) -> str:
         "octavia_ingress_subnet_id", "octavia_ingress_floating_network_id",
         "barbican_kms_image", "barbican_kms_kek_id",
         "api_lb_vip_network_id", "api_lb_floating_network_id", "lb_subnet_id",
+        "cert_rotation_job_image",
     )
-    k3s_keys_int = ("boot_volume_size_gb",)
+    k3s_keys_int = (
+        "boot_volume_size_gb", "cert_rotation_node_timeout_sec",
+        "stampede_interval", "stampede_scale_down_window",
+        "stampede_scale_up_cooldown", "stampede_scale_down_cooldown",
+    )
+    k3s_keys_float = ("stampede_scale_down_threshold", "stampede_resource_headroom_factor")
     k3s_keys_bool = (
         "occm_enabled", "cinder_csi_enabled", "manila_csi_enabled",
         "keystone_auth_enabled", "octavia_ingress_enabled", "barbican_kms_enabled",
-        "api_lb_enabled",
+        "api_lb_enabled", "stampede_enabled",
     )
+    k3s_keys_str = k3s_keys_str + ("stampede_project_id",)
     for key in k3s_keys_str:
         if key in k3s:
             lines.append(f'{key} = {_toml_str(k3s[key])}')
     for key in k3s_keys_int:
         if key in k3s:
             lines.append(f'{key} = {k3s[key]}')
+    for key in k3s_keys_float:
+        if key in k3s:
+            lines.append(f'{key} = {float(k3s[key])}')
     for key in k3s_keys_bool:
         if key in k3s:
             lines.append(f'{key} = {_toml_bool(k3s[key])}')
@@ -399,6 +465,12 @@ def _render_toml_for_k8s(cfg: dict) -> str:
             lines.append(f'max_overflow = {db["max_overflow"]}')
         if "auto_create_tables" in db:
             lines.append(f'auto_create_tables = {_toml_bool(db["auto_create_tables"])}')
+        if "connect_timeout" in db:
+            lines.append(f'connect_timeout = {db["connect_timeout"]}')
+        if "pool_timeout" in db:
+            lines.append(f'pool_timeout = {db["pool_timeout"]}')
+        if "unhealthy_seconds" in db:
+            lines.append(f'unhealthy_seconds = {db["unhealthy_seconds"]}')
         lines.append("")
 
     # [cors]
@@ -418,6 +490,24 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     lines.append(f'scopes = {_toml_str(oidc.get("scopes", "openid email profile read_user"))}')
     lines.append("")
 
+    # [smtp]
+    if smtp.get("host") or smtp.get("enabled"):
+        lines.append("[smtp]")
+        lines.append(f'enabled = {_toml_bool(smtp.get("enabled", False))}')
+        lines.append(f'host = {_toml_str(smtp.get("host", ""))}')
+        lines.append(f'port = {smtp.get("port", 587)}')
+        lines.append(f'username = {_toml_str(smtp.get("username", ""))}')
+        lines.append("# password는 secret.yaml의 SMTP_PASSWORD 환경변수로 주입됩니다")
+        lines.append(f'from_address = {_toml_str(smtp.get("from_address", "noreply@afterglow.example.com"))}')
+        lines.append(f'from_name = {_toml_str(smtp.get("from_name", "Afterglow"))}')
+        lines.append(f'use_tls = {_toml_bool(smtp.get("use_tls", True))}')
+        lines.append(f'timeout_seconds = {smtp.get("timeout_seconds", 10)}')
+        smtp_inv = smtp.get("invitation", {})
+        lines.append("")
+        lines.append("[smtp.invitation]")
+        lines.append(f'token_expiry_days = {smtp_inv.get("token_expiry_days", 7)}')
+        lines.append("")
+
     # [monitoring]
     lines.append("[monitoring]")
     lines.append(f'prometheus_base_url = {_toml_str(mon.get("prometheus_base_url", "http://prometheus:9090"))}')
@@ -427,9 +517,26 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     lines.append(f'auto_sg_enabled = {_toml_bool(mon.get("auto_sg_enabled", True))}')
     lines.append(f'node_exporter_sg_name = {_toml_str(mon.get("node_exporter_sg_name", "node_exporter"))}')
     lines.append(f'dcgm_exporter_sg_name = {_toml_str(mon.get("dcgm_exporter_sg_name", "dcgm_exporter"))}')
+    lines.append(f'node_exporter_port = {mon.get("node_exporter_port", 9100)}')
+    lines.append(f'dcgm_exporter_port = {mon.get("dcgm_exporter_port", 9400)}')
+    lines.append(f'libvirt_exporter_port = {mon.get("libvirt_exporter_port", 9177)}')
+    lines.append(f'gpu_flavor_prefix = {_toml_str(mon.get("gpu_flavor_prefix", "gpu."))}')
     lines.append(f'grafana_base_url = {_toml_str(mon.get("grafana_base_url", ""))}')
-    lines.append("# grafana_jwt_secret은 secret.yaml의 GRAFANA_JWT_SECRET 환경변수로 주입됩니다")
     lines.append("# sd_token은 secret.yaml의 MONITORING_SD_TOKEN 환경변수로 주입됩니다")
+    dashboards = mon.get("dashboards", {})
+    lines.append("")
+    lines.append("[monitoring.dashboards]")
+    lines.append(f'node_uid = {_toml_str(dashboards.get("node_uid", "afterglow-node"))}')
+    lines.append(f'rabbitmq_uid = {_toml_str(dashboards.get("rabbitmq_uid", "afterglow-rabbitmq"))}')
+    lines.append(f'mysqld_uid = {_toml_str(dashboards.get("mysqld_uid", "afterglow-mysqld"))}')
+    lines.append(f'memcached_uid = {_toml_str(dashboards.get("memcached_uid", "afterglow-memcached"))}')
+    lines.append(f'etcd_uid = {_toml_str(dashboards.get("etcd_uid", "afterglow-etcd"))}')
+    lines.append(f'haproxy_uid = {_toml_str(dashboards.get("haproxy_uid", "afterglow-haproxy"))}')
+    lines.append(f'libvirt_uid = {_toml_str(dashboards.get("libvirt_uid", "afterglow-libvirt"))}')
+    lines.append(f'openstack_uid = {_toml_str(dashboards.get("openstack_uid", "afterglow-openstack"))}')
+    lines.append(f'ceph_uid = {_toml_str(dashboards.get("ceph_uid", "afterglow-ceph"))}')
+    lines.append(f'instance_cpu_uid = {_toml_str(dashboards.get("instance_cpu_uid", "afterglow-instance-cpu"))}')
+    lines.append(f'instance_gpu_uid = {_toml_str(dashboards.get("instance_gpu_uid", "afterglow-instance-gpu"))}')
     lines.append("")
 
     # [notion]
@@ -437,6 +544,12 @@ def _render_toml_for_k8s(cfg: dict) -> str:
         lines.append("[notion]")
         lines.append("# config_encryption_key는 secret.yaml의 NOTION_CONFIG_ENCRYPTION_KEY 환경변수로 주입됩니다")
         lines.append("")
+
+    # [security]
+    security = cfg.get("security", {})
+    lines.append("[security]")
+    lines.append(f'admin_legacy_project_policy = {_toml_bool(security.get("admin_legacy_project_policy", True))}')
+    lines.append("")
 
     return "\n".join(lines)
 
@@ -487,6 +600,9 @@ def render_configmap(cfg: dict) -> str:
     # APP_S3_BASE: openstack.s3_endpoint (미설정 시 기본값)
     app_s3_base = ost.get("s3_endpoint", "https://s3.dmslab.re.kr")
 
+    # APP_GRAFANA_BASE: monitoring.grafana_base_url (CSP frame-src 및 frontend 임베드용)
+    app_grafana_base = cfg.get("monitoring", {}).get("grafana_base_url", "")
+
     # config.toml 인라인 (4칸 들여쓰기)
     toml_content = _render_toml_for_k8s(cfg)
     indented_toml = "\n".join("    " + line for line in toml_content.splitlines())
@@ -501,6 +617,7 @@ def render_configmap(cfg: dict) -> str:
         f'  APP_REDIS_URL: "{REDIS_K8S}"',
         f'  APP_ORIGIN: "{app_origin}"',
         f'  APP_S3_BASE: "{app_s3_base}"',
+        f'  APP_GRAFANA_BASE: "{app_grafana_base}"',
         "  config.toml: |",
         indented_toml,
     ]
@@ -515,6 +632,81 @@ def render_configmap(cfg: dict) -> str:
         ])
 
     lines.append("")
+    return "\n".join(lines)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# grafana-deployment.yaml 렌더링
+# ─────────────────────────────────────────────────────────────────────────────
+
+def render_grafana_deployment(cfg: dict) -> str:
+    """grafana-deployment.yaml 생성.
+
+    iframe 임베드(GF_SECURITY_ALLOW_EMBEDDING)와 익명 접근(auth.anonymous)을 설정한다.
+    provisioning ConfigMap (datasource + dashboards)을 volumeMounts로 마운트한다.
+    """
+    mon = cfg.get("monitoring", {})
+    admin_password = mon.get("grafana_admin_password", "admin")
+    lines = [
+        "apiVersion: apps/v1",
+        "kind: Deployment",
+        "metadata:",
+        "  name: grafana",
+        "  namespace: afterglow",
+        "  labels:",
+        "    app: grafana",
+        "spec:",
+        "  replicas: 1",
+        "  selector:",
+        "    matchLabels:",
+        "      app: grafana",
+        "  template:",
+        "    metadata:",
+        "      labels:",
+        "        app: grafana",
+        "    spec:",
+        "      containers:",
+        "        - name: grafana",
+        "          image: grafana/grafana:11.0.0",
+        "          ports:",
+        "            - containerPort: 3000",
+        "          env:",
+        "            - name: GF_SECURITY_ADMIN_PASSWORD",
+        f'              value: "{admin_password}"',
+        "            - name: GF_USERS_ALLOW_SIGN_UP",
+        '              value: "false"',
+        "            - name: GF_SECURITY_ALLOW_EMBEDDING",
+        '              value: "true"',
+        "            - name: GF_AUTH_ANONYMOUS_ENABLED",
+        '              value: "true"',
+        "            - name: GF_AUTH_ANONYMOUS_ORG_ROLE",
+        '              value: "Viewer"',
+        "          volumeMounts:",
+        "            - name: grafana-datasource",
+        "              mountPath: /etc/grafana/provisioning/datasources",
+        "            - name: grafana-dashboards-provider",
+        "              mountPath: /etc/grafana/provisioning/dashboards",
+        "            - name: grafana-dashboards",
+        "              mountPath: /var/lib/grafana/dashboards",
+        "          resources:",
+        "            requests:",
+        '              memory: "128Mi"',
+        '              cpu: "100m"',
+        "            limits:",
+        '              memory: "256Mi"',
+        '              cpu: "200m"',
+        "      volumes:",
+        "        - name: grafana-datasource",
+        "          configMap:",
+        "            name: grafana-datasource",
+        "        - name: grafana-dashboards-provider",
+        "          configMap:",
+        "            name: grafana-dashboards-provider",
+        "        - name: grafana-dashboards",
+        "          configMap:",
+        "            name: grafana-dashboards",
+        "",
+    ]
     return "\n".join(lines)
 
 
@@ -580,6 +772,7 @@ def main() -> None:
     # 렌더링
     secret_content = render_secret(cfg)
     configmap_content = render_configmap(cfg)
+    grafana_deployment_content = render_grafana_deployment(cfg)
 
     if args.dry_run:
         print("─" * 60)
@@ -590,17 +783,25 @@ def main() -> None:
         print("# configmap.yaml")
         print("─" * 60)
         print(configmap_content)
+        print("─" * 60)
+        print("# grafana-deployment.yaml")
+        print("─" * 60)
+        print(grafana_deployment_content)
         return
 
     # 파일 쓰기
     secret_path = output_dir / "secret.yaml"
     configmap_path = output_dir / "configmap.yaml"
+    grafana_deployment_path = output_dir / "grafana-deployment.yaml"
 
     write_atomic(secret_path, secret_content)
     print(f"  {green('✓')} {secret_path}")
 
     write_atomic(configmap_path, configmap_content)
     print(f"  {green('✓')} {configmap_path}")
+
+    write_atomic(grafana_deployment_path, grafana_deployment_content)
+    print(f"  {green('✓')} {grafana_deployment_path}")
 
     print()
     print(f"{green('완료!')} K8s 매니페스트가 생성되었습니다.")
@@ -611,6 +812,7 @@ def main() -> None:
     print("  적용 방법:")
     print(f"    kubectl apply -f {secret_path}")
     print(f"    kubectl apply -f {configmap_path}")
+    print(f"    kubectl apply -f {grafana_deployment_path}")
     print(f"    kubectl rollout restart deployment -n afterglow")
 
 

@@ -24,7 +24,7 @@ spec:
       terminationGracePeriodSeconds: 20
       containers:
         - name: frontend
-          image: ghcr.io/jung-geun/afterglow:latest
+          image: ghcr.io/openstack-afterglow/afterglow:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 3000
@@ -39,6 +39,11 @@ spec:
                 configMapKeyRef:
                   name: afterglow-config
                   key: APP_ORIGIN
+            - name: PUBLIC_GRAFANA_BASE
+              valueFrom:
+                configMapKeyRef:
+                  name: afterglow-config
+                  key: APP_GRAFANA_BASE
           startupProbe:
             httpGet:
               path: /

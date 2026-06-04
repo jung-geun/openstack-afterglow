@@ -4,18 +4,7 @@
 	import { api, ApiError } from '$lib/api/client';
 	import { goto } from '$app/navigation';
 
-	interface Network {
-		id: string;
-		name: string;
-		subnets: string[];
-		is_external: boolean;
-	}
-
-	interface SubnetDetail {
-		id: string;
-		name: string;
-		cidr: string;
-	}
+	import type { Network, SubnetDetail } from '$lib/types/networks';
 
 	let networks = $state<Network[]>([]);
 	let subnets = $state<SubnetDetail[]>([]);

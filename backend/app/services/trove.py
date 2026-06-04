@@ -111,11 +111,14 @@ def _instance_to_dict(i) -> dict:
 
 
 def list_instances(conn) -> list[dict]:
-    """현재 프로젝트의 DB 인스턴스 목록 반환 (raw REST: ip/addresses 보장)."""
+    """현재 프로젝트의 DB 인스턴스 목록 반환 (raw REST: ip/addresses 보장).
+
+    Trove 응답의 deleted=1 행은 이미 삭제된 인스턴스이므로 UI 노출 방지를 위해 제외.
+    """
     try:
         resp = conn.database.get("/instances")
         body = resp.json() if hasattr(resp, "json") else {}
-        return [_dict_from_raw(raw) for raw in body.get("instances", [])]
+        return [_dict_from_raw(raw) for raw in body.get("instances", []) if not raw.get("deleted")]
     except Exception:
         _logger.debug("Trove 인스턴스 목록 조회 실패", exc_info=True)
         return []
@@ -125,6 +128,7 @@ def list_instances_admin_all_projects(conn) -> list[dict]:
     """admin 전용: Trove /mgmt/instances 로 모든 프로젝트 DB 인스턴스 반환.
 
     반환 dict 에 project_id 필드 추가. mgmt API 미지원 환경에서는 빈 목록.
+    deleted=1 행은 응답에서 제외 (이미 삭제된 인스턴스).
     """
     try:
         endpoint = conn.database.get_endpoint()
@@ -137,6 +141,8 @@ def list_instances_admin_all_projects(conn) -> list[dict]:
 
     out: list[dict] = []
     for raw in items:
+        if raw.get("deleted"):
+            continue
         d = _dict_from_raw(raw)
         d["project_id"] = raw.get("tenant_id", "") or ""
         out.append(d)
@@ -144,9 +150,13 @@ def list_instances_admin_all_projects(conn) -> list[dict]:
 
 
 def count_instances(conn) -> int:
-    """현재 프로젝트의 DB 인스턴스 수 반환."""
+    """현재 프로젝트의 DB 인스턴스 수 반환 (deleted 행 제외).
+
+    SDK iterator (`conn.database.instances()`) 가 deleted 행을 포함하는지 불확실하므로
+    list_instances 기반으로 산정하여 목록 카운트와 항상 일치.
+    """
     try:
-        return sum(1 for _ in conn.database.instances())
+        return len(list_instances(conn))
     except Exception:
         return 0
 
@@ -156,10 +166,15 @@ def get_instance(conn, instance_id: str) -> dict:
 
     SDK Instance Resource 는 `ip`/`addresses` body 필드가 정의되지 않아
     attribute access 시 None 이 되는 문제 → raw REST 직접 호출.
+
+    `deleted` 필드를 반환 dict 에 포함하여 라우터에서 404 처리 가능하도록 한다.
     """
     resp = conn.database.get(f"/instances/{instance_id}")
     body = resp.json() if hasattr(resp, "json") else {}
-    return _dict_from_raw(body.get("instance") or {})
+    raw = body.get("instance") or {}
+    d = _dict_from_raw(raw)
+    d["deleted"] = bool(raw.get("deleted"))
+    return d
 
 
 def create_instance(
@@ -304,10 +319,32 @@ def list_databases(conn, instance_id: str) -> list[dict]:
 
 
 def create_database(
-    conn, instance_id: str, name: str, character_set: str = "utf8", collate: str = "utf8_general_ci"
+    conn,
+    instance_id: str,
+    name: str,
+    character_set: str | None = None,
+    collate: str | None = None,
 ) -> None:
-    """인스턴스 내 데이터베이스 생성."""
-    conn.database.create_database(instance_id, name=name, character_set=character_set, collate=collate)
+    """인스턴스 내 데이터베이스 생성 (raw REST: Trove POST /instances/{id}/databases).
+
+    SDK Database 리소스는 _prepare_request 오버라이드가 없어 {"database": {...}} 단수
+    키로 직렬화하지만, Trove API는 {"databases": [{...}]} 복수 배열을 요구한다.
+
+    주의: openstack proxy.post 는 raise_exc=False 기본이라 4xx/5xx 도 silent 통과.
+    반드시 resp.ok 를 직접 검증해야 한다.
+
+    PostgreSQL datastore 는 MySQL 형식의 character_set/collate 를 LC_COLLATE 로 그대로
+    전달해 실패하므로, 호출자가 None 을 주면 페이로드에서 제외한다 (PG 기본 locale 사용).
+    """
+    db: dict = {"name": name}
+    if character_set:
+        db["character_set"] = character_set
+    if collate:
+        db["collate"] = collate
+    resp = conn.database.post(f"/instances/{instance_id}/databases", json={"databases": [db]})
+    if not resp.ok:
+        body = (getattr(resp, "text", "") or "")[:500]
+        raise RuntimeError(f"Trove POST /databases status={resp.status_code} body={body}")
 
 
 def delete_database(conn, instance_id: str, db_name: str) -> None:

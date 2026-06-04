@@ -13,6 +13,7 @@ async def test_callback_invalid_token_returns_403():
     """무효 토큰으로 콜백 요청 시 403을 반환해야 한다."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         with patch("app.api.k3s.callback.k3s_cluster") as mock_db:
+            mock_db.consume_ha_callback_token = AsyncMock(return_value=None)
             mock_db.consume_callback_token = AsyncMock(return_value=None)
             resp = await ac.post(
                 "/api/k3s/callback",
@@ -32,6 +33,7 @@ async def test_callback_failure_updates_status():
     """success=false 콜백 시 클러스터 상태를 ERROR로 업데이트해야 한다."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         with patch("app.api.k3s.callback.k3s_cluster") as mock_db:
+            mock_db.consume_ha_callback_token = AsyncMock(return_value=None)
             mock_db.consume_callback_token = AsyncMock(return_value={"project_id": "proj-1", "cluster_id": "cluster-1"})
             mock_db.update_cluster_status = AsyncMock()
             resp = await ac.post(
@@ -54,6 +56,7 @@ async def test_callback_missing_kubeconfig_updates_error():
     """success=true이지만 kubeconfig 누락 시 ERROR로 처리해야 한다."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         with patch("app.api.k3s.callback.k3s_cluster") as mock_db:
+            mock_db.consume_ha_callback_token = AsyncMock(return_value=None)
             mock_db.consume_callback_token = AsyncMock(return_value={"project_id": "proj-1", "cluster_id": "cluster-1"})
             mock_db.update_cluster_status = AsyncMock()
             resp = await ac.post(
@@ -75,6 +78,7 @@ async def test_callback_missing_node_token_updates_error():
     """node_token 누락 시 ERROR로 처리해야 한다."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         with patch("app.api.k3s.callback.k3s_cluster") as mock_db:
+            mock_db.consume_ha_callback_token = AsyncMock(return_value=None)
             mock_db.consume_callback_token = AsyncMock(return_value={"project_id": "proj-1", "cluster_id": "cluster-1"})
             mock_db.update_cluster_status = AsyncMock()
             resp = await ac.post(
@@ -98,9 +102,11 @@ async def test_callback_success_triggers_agent_provisioning():
     """유효 콜백 성공 시 에이전트 VM 생성 태스크를 시작해야 한다."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         with patch("app.api.k3s.callback.k3s_cluster") as mock_db:
+            mock_db.consume_ha_callback_token = AsyncMock(return_value=None)
             mock_db.consume_callback_token = AsyncMock(return_value={"project_id": "proj-1", "cluster_id": "cluster-1"})
             mock_db.update_cluster_status = AsyncMock()
             mock_db.store_kubeconfig = AsyncMock()
+            mock_db.get_cluster = AsyncMock(return_value={"master_count": 1})
             with patch("app.api.k3s.callback.asyncio") as mock_asyncio:
                 mock_asyncio.create_task = AsyncMock()
                 resp = await ac.post(
@@ -144,9 +150,11 @@ async def test_callback_token_consumed_only_once():
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         with patch("app.api.k3s.callback.k3s_cluster") as mock_db:
+            mock_db.consume_ha_callback_token = AsyncMock(return_value=None)
             mock_db.consume_callback_token = AsyncMock(side_effect=side_effect)
             mock_db.update_cluster_status = AsyncMock()
             mock_db.store_kubeconfig = AsyncMock()
+            mock_db.get_cluster = AsyncMock(return_value={"master_count": 1})
             with patch("app.api.k3s.callback.asyncio"):
                 # 첫 번째 성공 요청 (success=false라서 update만)
                 resp1 = await ac.post(
@@ -168,9 +176,11 @@ async def test_callback_stores_plugin_status_dict():
     """plugin_status 객체 형식이 update_cluster_status에 전달되어야 한다."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         with patch("app.api.k3s.callback.k3s_cluster") as mock_db:
+            mock_db.consume_ha_callback_token = AsyncMock(return_value=None)
             mock_db.consume_callback_token = AsyncMock(return_value={"project_id": "proj-1", "cluster_id": "cluster-1"})
             mock_db.update_cluster_status = AsyncMock()
             mock_db.store_kubeconfig = AsyncMock()
+            mock_db.get_cluster = AsyncMock(return_value={"master_count": 1})
             with patch("app.api.k3s.callback.asyncio"):
                 resp = await ac.post(
                     "/api/k3s/callback",
@@ -195,9 +205,11 @@ async def test_callback_accepts_legacy_string_plugin_status():
     """기존 string 형식 plugin_status도 수용해야 한다 (backward compat)."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         with patch("app.api.k3s.callback.k3s_cluster") as mock_db:
+            mock_db.consume_ha_callback_token = AsyncMock(return_value=None)
             mock_db.consume_callback_token = AsyncMock(return_value={"project_id": "proj-1", "cluster_id": "cluster-1"})
             mock_db.update_cluster_status = AsyncMock()
             mock_db.store_kubeconfig = AsyncMock()
+            mock_db.get_cluster = AsyncMock(return_value={"master_count": 1})
             with patch("app.api.k3s.callback.asyncio"):
                 resp = await ac.post(
                     "/api/k3s/callback",

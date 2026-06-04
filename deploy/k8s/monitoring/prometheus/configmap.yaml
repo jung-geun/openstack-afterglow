@@ -49,3 +49,18 @@ data:
             action: keep
           - source_labels: [__address__]
             target_label: instance
+
+      # compute 노드의 libvirt_exporter — VM 내부 node_exporter 미설치 인스턴스도 커버
+      # kolla: enable_prometheus_libvirt_exporter: "yes" 설정 후 kolla-ansible reconfigure -t prometheus 필요
+      - job_name: 'instances-libvirt'
+        scrape_interval: 30s
+        metrics_path: /metrics
+        http_sd_configs:
+          - url: 'http://backend:8000/api/sd/prometheus/libvirt-targets'
+            authorization:
+              type: Bearer
+              credentials_file: /etc/prometheus/sd-token
+            refresh_interval: 60s
+        relabel_configs:
+          - source_labels: [__address__]
+            target_label: instance

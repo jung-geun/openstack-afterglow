@@ -1,13 +1,15 @@
 <script lang="ts">
+	import { confirmDialog } from '$lib/stores/confirm.svelte';
   import { untrack } from 'svelte';
   import { auth } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
-  import type { FloatingIp } from '$lib/types/resources';
+  import type { FloatingIp } from '$lib/types/networks';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
   import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
   import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
+  import { toast } from '$lib/stores/toast';
 
   let fips = $state<FloatingIp[]>([]);
   let loading = $state(true);
@@ -41,13 +43,13 @@
   }
 
   async function deleteFip(id: string, addr: string) {
-    if (!confirm(`Floating IP "${addr}"를 해제하시겠습니까?`)) return;
+    if (!await confirmDialog(`Floating IP "${addr}"를 해제하시겠습니까?`)) return;
     deleting = id;
     try {
       await api.delete(`/api/networks/floating-ips/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
       await load();
     } catch (e) {
-      alert('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
+      toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
     } finally {
       deleting = null;
     }
@@ -79,6 +81,11 @@
       />
     {/snippet}
   </PageHeader>
+
+  <div class="mb-4 text-sm text-gray-500">
+    Floating IP 할당은
+    <a href="/dashboard/network/networks" class="text-blue-400 hover:text-blue-300 underline">네트워크 페이지</a>에서 수행할 수 있습니다.
+  </div>
 
   {#if error}
     <div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>

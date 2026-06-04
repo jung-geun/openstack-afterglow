@@ -89,6 +89,18 @@ class TestGenerateCloudConf:
         result = generate_cloud_conf("proj-123", _make_settings(os_insecure=True))
         assert "ca-file" not in result
 
+    def test_internal_network_name_included(self):
+        from app.services.k3s_occm import generate_cloud_conf
+
+        result = generate_cloud_conf("proj-123", _make_settings(), internal_network_name="my-cluster-net")
+        assert "internal-network-name=my-cluster-net" in result
+
+    def test_no_internal_network_name_when_empty(self):
+        from app.services.k3s_occm import generate_cloud_conf
+
+        result = generate_cloud_conf("proj-123", _make_settings(), internal_network_name="")
+        assert "internal-network-name" not in result
+
 
 class TestGenerateOccmManifests:
     def test_basic_render(self):
@@ -174,6 +186,62 @@ class TestCloudInitIntegration:
         assert result.config_drive is False
         decoded = gzip.decompress(base64.b64decode(result.data)).decode()
         assert "cloud-provider=external" in decoded
+
+    def test_server_userdata_secondary_nic_no_default_route(self):
+        """신규 NIC가 default route를 빼앗지 않도록 netplan에 use-routes: false 포함 확인."""
+        from app.services.k3s_cloudinit import generate_server_userdata
+
+        result = generate_server_userdata(
+            cluster_name="test",
+            k3s_version="v1.31.4+k3s1",
+            callback_url="http://api.example.com",
+            callback_token="tok-123",
+        )
+        decoded = gzip.decompress(base64.b64decode(result.data)).decode()
+        assert "use-routes: false" in decoded
+        assert "optional: true" in decoded
+
+    def test_server_userdata_node_ip_deterministic(self):
+        """SERVER_IP를 ip route get 8.8.8.8 기반으로 결정 + --node-ip 포함 확인."""
+        from app.services.k3s_cloudinit import generate_server_userdata
+
+        result = generate_server_userdata(
+            cluster_name="test",
+            k3s_version="v1.31.4+k3s1",
+            callback_url="http://api.example.com",
+            callback_token="tok-123",
+        )
+        decoded = gzip.decompress(base64.b64decode(result.data)).decode()
+        assert "ip route get 8.8.8.8" in decoded
+        assert "--node-ip" in decoded
+
+    def test_agent_userdata_node_ip_injected(self):
+        """에이전트 cloud-init에 --node-ip와 ip route get 8.8.8.8 포함 확인."""
+        from app.services.k3s_cloudinit import generate_agent_userdata
+
+        result = generate_agent_userdata(
+            cluster_name="test",
+            k3s_version="v1.31.4+k3s1",
+            server_ip="10.0.0.1",
+            node_token="token-abc",
+        )
+        decoded = gzip.decompress(base64.b64decode(result.data)).decode()
+        assert "ip route get 8.8.8.8" in decoded
+        assert "--node-ip" in decoded
+
+    def test_agent_userdata_secondary_nic_no_default_route(self):
+        """에이전트 netplan에도 use-routes: false 포함 확인."""
+        from app.services.k3s_cloudinit import generate_agent_userdata
+
+        result = generate_agent_userdata(
+            cluster_name="test",
+            k3s_version="v1.31.4+k3s1",
+            server_ip="10.0.0.1",
+            node_token="token-abc",
+        )
+        decoded = gzip.decompress(base64.b64decode(result.data)).decode()
+        assert "use-routes: false" in decoded
+        assert "optional: true" in decoded
 
 
 class TestCallbackOccmStatus:

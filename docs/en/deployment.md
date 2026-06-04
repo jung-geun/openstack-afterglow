@@ -36,7 +36,7 @@ Suitable for development or single-host small-scale deployments.
 ### 1. Clone and Configure
 
 ```bash
-git clone git@github.com:jung-geun/openstack-afterglow.git
+git clone git@github.com:openstack-afterglow/openstack-afterglow.git
 cd openstack-afterglow
 cp config.toml.example config.toml
 ```
@@ -240,7 +240,7 @@ Key fields in `argocd/application.dev.yaml`:
 ```yaml
 spec:
   source:
-    repoURL: https://github.com/jung-geun/openstack-afterglow
+    repoURL: https://github.com/openstack-afterglow/openstack-afterglow
     targetRevision: dev          # branch to watch
     path: deploy/k8s/overlays/dev
   destination:

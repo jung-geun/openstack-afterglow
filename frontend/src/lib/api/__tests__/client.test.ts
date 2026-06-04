@@ -15,7 +15,7 @@ describe('api client', () => {
     mockFetch.mockReset();
   });
 
-  it('GET 요청에 X-Auth-Token 헤더를 포함한다', async () => {
+  it('GET 요청에 Authorization 헤더를 포함한다', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
       status: 200,
@@ -27,7 +27,7 @@ describe('api client', () => {
 
     expect(mockFetch).toHaveBeenCalledOnce();
     const [, options] = mockFetch.mock.calls[0];
-    expect(options.headers['X-Auth-Token']).toBe('my-token');
+    expect(options.headers['Authorization']).toBe('Bearer my-token');
     expect(options.headers['X-Project-Id']).toBe('proj-123');
   });
 

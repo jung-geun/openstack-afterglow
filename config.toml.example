@@ -21,6 +21,7 @@ password = "change-me-in-production"
 # Swift (Object Storage) 설정
 swift_endpoint = ""               # 서비스 카탈로그 대신 직접 지정할 경우 (예: https://s3.example.com/swift/v1/AUTH_%(project_id)s)
 swift_upload_timeout = 600  # Swift 업로드 타임아웃 (초)
+trash_retention_days = 30   # 휴지통 보관 기간 (일). 이 기간 이후 오브젝트·버킷이 자동 영구 삭제됨.
 
 # Manila 설정
 manila_endpoint = ""              # 서비스 카탈로그 대신 직접 지정할 경우
@@ -55,6 +56,9 @@ favicon_path = "/favicon.ico"
 # 권장 범위: 3000 ~ 30000
 refresh_interval_ms = 5000
 
+# 초대 이메일 링크 생성에 사용할 프론트엔드 기본 URL (예: https://afterglow.example.com)
+frontend_base_url = ""
+
 [cache]
 redis_url = "redis://redis:6379/0"
 # TTL 티어 (초). 리소스 변경 빈도에 따라 분류.
@@ -64,6 +68,20 @@ ttl_slow = 60       # 키페어, 보안그룹, 관리자 프로젝트/그룹/역
 ttl_static = 300    # 이미지, 플레이버, 토큰 검증
 default_ttl_seconds = 30  # TTL 티어 미지정 리소스의 기본 캐시 TTL (초)
 
+# 캐시 백엔드: "redis" 또는 "valkey" (v1 은 동일 redis-py 클라이언트 사용)
+backend = "redis"
+# Dynamic TTL 조정 임계치 (시간당 mutation 횟수)
+dynamic_threshold_low = 5
+dynamic_threshold_high = 20
+
+# 3-tier TTL 카테고리 (초) — 데이터 특성 기반 분류
+ttl_identity_stable = 86400  # 개인 프로필, role/group 멤버십 (1일)
+ttl_catalog_slow = 900       # flavors, image 메타, 데이터스토어, 클러스터 템플릿 (15분)
+ttl_project_meta = 300       # keypair, SG 정의, 네트워크 메타 (5분)
+ttl_operational_live = 30    # instances/volumes/FIP/컨테이너 상태 (30초)
+ttl_admin_overview = 60      # admin 토폴로지, 하이퍼바이저 (60초)
+ttl_auth_token = 60          # Keystone 토큰 검증 결과 (60초)
+
 [session]
 # 세션 유지 시간 (초). 이 시간이 지나면 재로그인 필요.
 # Keystone 토큰 만료 시간보다 짧게 설정 권장 (Keystone 기본값: 3600초)
@@ -72,6 +90,9 @@ timeout_seconds = 3600
 warning_before_seconds = 300
 # 절대 세션 만료 시간 (초). 활동 여부와 무관하게 이 시간이 지나면 강제 로그아웃.
 absolute_timeout = 14400
+# JWT access/refresh 토큰 수명 (초)
+jwt_access_ttl = 900      # access 토큰 (기본 15분)
+jwt_refresh_ttl = 604800  # refresh 토큰 (기본 7일)
 
 [nova]
 default_network_id = ""
@@ -222,13 +243,52 @@ api_lb_floating_network_id = ""       # [모드 B] FIP 할당 외부 네트워�
 # 설정 시 두 서브넷이 같은 라우터에 연결되어 있어야 L3 라우팅이 가능함
 lb_subnet_id = ""  # 예: "subnet-uuid-for-external-lb"
 
+# 인증서 회전 (Certificate Rotation)
+# k3s는 재시작 시 만료 90일 이내 인증서를 자동 갱신한다.
+# Afterglow는 K8s Job(hostPID + nsenter)으로 SSH 없이 k3s restart를 트리거한다.
+cert_rotation_node_timeout_sec = 300    # 노드당 Ready 대기 최대 시간 (초)
+cert_rotation_job_image = "registry.k8s.io/util-linux/util-linux:latest"  # nsenter 포함 이미지
+
+# Stampede 노드 오토스케일 (GCP Autopilot 유사 모드)
+# 사용자가 pod를 배포하면 드로버가 자동으로 노드(VM)를 확장/축소한다.
+stampede_enabled = false                        # 전역 활성화 여부
+stampede_interval = 60                          # reconcile 주기 (초)
+stampede_scale_down_threshold = 0.5             # 노드 사용률 이 값 미만이면 scale-down 후보
+stampede_scale_down_window = 600                # scale-down 안정화 대기 시간 (초, 연속 유휴 확인)
+stampede_scale_up_cooldown = 120                # scale-up 쿨다운 (초)
+stampede_scale_down_cooldown = 300              # scale-down 쿨다운 (초)
+stampede_resource_headroom_factor = 0.3         # flavor 선택 시 기존 부하 가중치 (0~1)
+stampede_project_id = ""                        # Stampede VM 생성 프로젝트 (미설정 시 사용자 프로젝트 폴백)
+
 
 [builder]
-# 라이브러리 빌드 전용 VM 설정 (OverlayFS 이미지 빌드용)
+# 라이브러리 빌드 전용 영구 VM 설정 (SSH 기반 빌드 파이프라인)
 # services.manila = true 환경에서 라이브러리 레이어를 미리 빌드할 때 사용
 image_id = ""       # 빌더 VM 이미지 ID (Ubuntu 22.04+ 권장)
 flavor_id = ""      # 빌더 VM 플레이버 ID
 network_id = ""     # 빌더 VM 네트워크 ID (미설정 시 nova.default_network_id 사용)
+
+# 영구 Builder VM (SSH 기반 빌드 파이프라인)
+# persistent_server_id: 기존 VM이 있으면 Nova UUID 입력 (없으면 최초 빌드 시 자동 생성)
+persistent_server_id = ""
+# ssh_user: Builder VM SSH 사용자 (Ubuntu 이미지 기본값 "ubuntu")
+ssh_user = "ubuntu"
+# ssh_key_path: SSH 개인키 파일 경로
+#   - K8s: Secret 볼륨으로 /etc/afterglow/ssh/builder.key 에 마운트
+#   - 로컬/Compose: 최초 생성 시 이 경로에 자동 저장
+ssh_key_path = "/etc/afterglow/ssh/builder.key"
+# ssh_private_key: SSH 개인키 내용 (PEM 형식)
+#   - K8s 배포 전용: generate_k8s.py가 이 값을 secret.yaml의 BUILDER_SSH_PRIVATE_KEY 로 출력
+#     → deployment.yaml이 afterglow-secrets의 BUILDER_SSH_PRIVATE_KEY 를 ssh_key_path 경로에 마운트
+#   - 로컬 환경에서는 이 필드를 비워 두거나 생략 (파일을 직접 관리)
+#   - 생성: ssh-keygen -t ed25519 -C "afterglow-builder" -f builder.key
+ssh_private_key = ""
+# ssh_host: Builder VM의 Floating IP (비워두면 Nova에서 자동 조회)
+ssh_host = ""
+# floating_network_id: FIP 할당용 외부 네트워크 ID (ssh_host 미설정 시 필수)
+floating_network_id = ""
+# build_timeout: 빌드 SSH 명령 최대 대기 시간 (초, 기본값 3600)
+build_timeout = 3600
 
 
 [union]
@@ -271,6 +331,12 @@ pool_size = 5
 max_overflow = 10
 # 앱 시작 시 테이블 자동 생성 (개발/테스트용, 운영에서는 false 후 migrations/ SQL 수동 실행 권장)
 auto_create_tables = true
+# MySQL TCP/핸드셰이크 대기 시간(초). 일시적 네트워크 지연을 견디려면 늘릴 것
+connect_timeout = 10
+# 커넥션 풀에서 빈 커넥션을 기다리는 시간(초)
+pool_timeout = 10
+# OperationalError 발생 시 모든 DB 호출을 즉시 차단할 시간(초). 짧으면 회복이 빠르고, 길면 죽은 DB에 재시도 비용을 줄임
+unhealthy_seconds = 15
 
 [monitoring]
 # Prometheus 서버 주소 (K8s 환경에서는 in-cluster DNS 권장)
@@ -285,9 +351,56 @@ scrape_cidr = ""
 auto_sg_enabled = true
 node_exporter_sg_name = "node_exporter"   # node_exporter ingress SG 이름 (tcp/9100)
 dcgm_exporter_sg_name = "dcgm_exporter"  # dcgm_exporter ingress SG 이름 (tcp/9400, GPU 전용)
+# VM 메트릭 수집 포트 (기본값 유지 권장)
+node_exporter_port = 9100       # VM에 설치된 node_exporter 포트 (기본 9100)
+dcgm_exporter_port = 9400       # GPU VM의 dcgm_exporter 포트 (기본 9400)
+libvirt_exporter_port = 9177    # compute 노드 libvirt_exporter 포트 (기본 9177, kolla enable_prometheus_libvirt_exporter)
+gpu_flavor_prefix = "gpu."      # GPU 노드 판별 flavor prefix (예: "gpu." → gpu.a100x1_80gb 등)
 # Grafana 연동
 grafana_base_url = ""           # Grafana 외부 URL (예: https://grafana.example.com)
-grafana_jwt_secret = ""         # Grafana auth.jwt 서명 시크릿 (secret.yaml에서 주입)
+                                # 이 값은 frontend 의 PUBLIC_GRAFANA_BASE 로도 주입되어 CSP frame-src 에 포함됩니다
+
+# === Prometheus scrape 설정 참고 (K8s ConfigMap에서 자동 생성 — 직접 수정 불필요) ===
+# scrape_configs:
+#   - job_name: "instances-node"
+#     http_sd_configs:
+#       - url: "http://backend:8000/api/sd/prometheus/targets"
+#         refresh_interval: 30s
+#         authorization:
+#           credentials_file: /etc/prometheus/sd-token
+#   - job_name: "instances-dcgm"
+#     http_sd_configs:
+#       - url: "http://backend:8000/api/sd/prometheus/targets"
+#         refresh_interval: 30s
+
+[monitoring.dashboards]
+# Grafana 대시보드 UID. monitoring/grafana/provisioning/dashboards/ 에 JSON이 프로비저닝되어야 함.
+node_uid = "afterglow-node"
+rabbitmq_uid = "afterglow-rabbitmq"
+mysqld_uid = "afterglow-mysqld"
+memcached_uid = "afterglow-memcached"
+etcd_uid = "afterglow-etcd"
+haproxy_uid = "afterglow-haproxy"
+libvirt_uid = "afterglow-libvirt"
+openstack_uid = "afterglow-openstack"
+ceph_uid = "afterglow-ceph"
+instance_cpu_uid = "afterglow-instance-cpu"   # CPU 전용 인스턴스 per-VM 대시보드
+instance_gpu_uid = "afterglow-instance-gpu"   # GPU 인스턴스 per-VM 대시보드
+
+
+[smtp]
+# 이메일 전송 설정 (프로젝트 초대 기능에 사용)
+enabled = false
+host = ""                   # SMTP 서버 호스트 (예: smtp.gmail.com)
+port = 587                  # SMTP 포트 (587 = STARTTLS, 465 = SSL)
+username = ""               # SMTP 인증 사용자명
+password = ""               # SMTP 인증 비밀번호 (secret.yaml에서 주입)
+from_address = "noreply@afterglow.example.com"
+from_name = "Afterglow"
+use_tls = true              # STARTTLS 사용 여부
+
+[smtp.invitation]
+token_expiry_days = 7       # 초대 링크 유효 기간 (일)
 
 
 [cors]

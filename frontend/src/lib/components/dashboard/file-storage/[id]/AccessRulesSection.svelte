@@ -1,0 +1,142 @@
+<script lang="ts">
+	import type { AccessRule } from '$lib/types/fileStorage';
+
+	let {
+		shareProto, accessRules, accessLoading,
+		onAdd, onRevoke,
+		addingRule, addError,
+		revokingId,
+	}: {
+		shareProto: string;
+		accessRules: AccessRule[];
+		accessLoading: boolean;
+		onAdd: (form: { access_to: string; access_level: string }) => Promise<boolean>;
+		onRevoke: (id: string) => Promise<void>;
+		addingRule: boolean;
+		addError: string;
+		revokingId: string | null;
+	} = $props();
+
+	let showAddRule = $state(false);
+	let ruleForm = $state({ access_to: '', access_level: 'ro' });
+	let copiedKey = $state<string | null>(null);
+
+	async function handleAdd() {
+		const success = await onAdd(ruleForm);
+		if (success) {
+			ruleForm = { access_to: '', access_level: 'ro' };
+			showAddRule = false;
+		}
+	}
+
+	async function copyKey(key: string, id: string) {
+		await navigator.clipboard.writeText(key);
+		copiedKey = id;
+		setTimeout(() => (copiedKey = null), 2000);
+	}
+</script>
+
+<div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4">
+	<div class="flex items-center justify-between mb-4">
+		<h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide">접근 규칙 {shareProto === 'NFS' ? '(IP)' : '(CephX)'}</h2>
+		<button
+			onclick={() => { showAddRule = !showAddRule; }}
+			class="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+		>
+			{showAddRule ? '취소' : '+ 추가'}
+		</button>
+	</div>
+
+	{#if showAddRule}
+		<div class="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-4">
+			<div class="flex gap-3 items-end">
+				<div class="flex-1">
+					<label class="block text-xs text-gray-400 mb-1">{shareProto === 'NFS' ? 'IP / CIDR' : 'CephX ID'}
+					<input
+						bind:value={ruleForm.access_to}
+						type="text"
+						placeholder={shareProto === 'NFS' ? '예: 10.0.0.0/24' : '예: my-instance'}
+						class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500 font-mono mt-1"
+					/>
+				</label>
+				</div>
+				<div>
+					<label class="block text-xs text-gray-400 mb-1">권한
+					<select
+						bind:value={ruleForm.access_level}
+						class="bg-gray-900 border border-gray-600 rounded px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500 mt-1"
+					>
+						<option value="ro">읽기 전용 (ro)</option>
+						<option value="rw">읽기/쓰기 (rw)</option>
+					</select>
+					</label>
+				</div>
+				<button
+					onclick={handleAdd}
+					disabled={addingRule || !ruleForm.access_to.trim()}
+					class="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm rounded transition-colors"
+				>
+					{addingRule ? '추가 중...' : '추가'}
+				</button>
+			</div>
+			{#if addError}<p class="text-red-400 text-xs mt-2">{addError}</p>{/if}
+		</div>
+	{/if}
+
+	{#if accessLoading}
+		<p class="text-gray-500 text-sm text-center py-4">로딩 중...</p>
+	{:else if accessRules.length === 0}
+		<p class="text-gray-600 text-sm text-center py-4">접근 규칙이 없습니다</p>
+	{:else}
+		<div class="overflow-x-auto">
+			<table class="w-full text-sm">
+				<thead>
+					<tr class="border-b border-gray-800 text-gray-500 text-xs uppercase tracking-wide">
+						<th class="text-left py-2 pr-4">접근 대상</th>
+						<th class="text-left py-2 pr-4">권한</th>
+						<th class="text-left py-2 pr-4">상태</th>
+						<th class="text-left py-2 pr-4">Access Key</th>
+						<th class="text-right py-2"></th>
+					</tr>
+				</thead>
+				<tbody>
+					{#each accessRules as rule (rule.id)}
+						<tr class="border-b border-gray-800/50">
+							<td class="py-2 pr-4 font-mono text-xs text-gray-300">{rule.access_to ?? '-'}</td>
+							<td class="py-2 pr-4">
+								<span class="text-xs px-1.5 py-0.5 rounded {rule.access_level === 'rw' ? 'bg-orange-900/30 text-orange-400' : 'bg-gray-800 text-gray-400'}">
+									{rule.access_level}
+								</span>
+							</td>
+							<td class="py-2 pr-4 text-xs text-gray-400">{rule.state || '-'}</td>
+							<td class="py-2 pr-4 text-xs font-mono">
+								{#if rule.access_key}
+									<div class="flex items-center gap-2">
+										<span class="text-gray-500 truncate max-w-[120px]">{rule.access_key.slice(0, 16)}...</span>
+										<button
+											onclick={() => copyKey(rule.access_key!, rule.id)}
+											class="text-xs px-1.5 py-0.5 rounded border transition-colors {copiedKey === rule.id ? 'border-green-700 text-green-400' : 'border-gray-700 text-gray-400 hover:text-gray-200'}"
+										>
+											{copiedKey === rule.id ? '복사됨' : '복사'}
+										</button>
+									</div>
+								{:else}
+									<span class="text-gray-600">-</span>
+								{/if}
+							</td>
+							<td class="py-2 text-right">
+								<button
+									onclick={() => onRevoke(rule.id)}
+									disabled={revokingId === rule.id}
+									class="text-xs text-red-400 hover:text-red-300 disabled:opacity-40 transition-colors"
+								>
+									{revokingId === rule.id ? '삭제 중...' : '삭제'}
+								</button>
+							</td>
+						</tr>
+					{/each}
+				</tbody>
+			</table>
+		</div>
+	{/if}
+</div>

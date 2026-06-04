@@ -1,13 +1,8 @@
 name: Unit Tests
 
 on:
-  push:
-    branches: [main, dev]
-    tags: ['v*']
-    paths-ignore:
-      - 'deploy/k8s/overlays/**/.argocd-source-*.yaml'
-  pull_request:
-    branches: [main]
+  # docker-build.yml 이 needs: 체인으로 호출 — push/PR 트리거는 거기서 관장
+  workflow_call:
 
 jobs:
   version-check:

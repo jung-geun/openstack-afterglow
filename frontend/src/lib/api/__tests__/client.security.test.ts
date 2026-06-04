@@ -64,7 +64,7 @@ describe('API Client — 보안 테스트', () => {
     await api.get('/api/test', 'my-secret-token', 'my-project');
 
     const [, options] = mockFetch.mock.calls[0];
-    expect(options.headers['X-Auth-Token']).toBe('my-secret-token');
+    expect(options.headers['Authorization']).toBe('Bearer my-secret-token');
     expect(options.headers['X-Project-Id']).toBe('my-project');
   });
 

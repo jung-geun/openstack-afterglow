@@ -7,7 +7,7 @@ import time
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, Query
 
 from app.config import get_settings
 from app.services import keystone
@@ -132,13 +132,84 @@ async def extend_session(token: str, project_id: str) -> None:
         _logger.warning("Redis 장애로 세션 연장을 건너뜁니다", exc_info=True)
 
 
+async def _resolve_jwt_token_info(bearer_token: str, x_project_id: str | None) -> dict:
+    """Bearer access JWT 검증 → Redis 세션 조회 → token_info dict 반환.
+
+    x_project_id가 JWT의 project_id와 다르면 Keystone rescope (프로젝트 전환용).
+    """
+    from app.services import jwt_service
+    from app.services.session_store import get_session
+
+    try:
+        payload = jwt_service.verify_access(bearer_token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="유효하지 않은 액세스 토큰")
+
+    refresh_jti = payload.get("rjti")
+    if not refresh_jti:
+        raise HTTPException(status_code=401, detail="액세스 토큰 형식 오류")
+
+    sess = await get_session(refresh_jti)
+    if sess is None:
+        raise HTTPException(status_code=401, detail="세션이 만료되었습니다. 다시 로그인해 주세요.")
+
+    jwt_project_id = payload.get("project_id", "")
+    target_project_id = x_project_id or jwt_project_id
+
+    # 권한 정보는 항상 Keystone live 검증(60s 캐시). JWT payload에서 꺼내지 않는다.
+    # 프로젝트 전환 여부와 무관하게 동일 경로로 통합 — stale window 제거.
+    effective_project_id = target_project_id or sess.get("project_id", jwt_project_id)
+    info = await _cached_validate(sess["keystone_token"], effective_project_id)
+
+    # validate_token은 POST /v3/auth/tokens으로 새 Keystone 토큰을 발급한다.
+    # 새 토큰이 원본과 다르면 Redis 세션에 역기록해 Keystone TTL 만료 문제를 방지.
+    new_ks_token = info.get("token", "")
+    if new_ks_token and new_ks_token != sess.get("keystone_token"):
+        from app.services.session_store import update_session_token
+
+        asyncio.create_task(update_session_token(refresh_jti, new_ks_token))
+
+    # X-Project-Id로 실제 rescope가 발생한 경우에만 접근 기록 (fire-and-forget)
+    user_id_for_record = info.get("user_id", payload.get("sub", ""))
+    if x_project_id and x_project_id != jwt_project_id and user_id_for_record:
+        from app.services.recent_projects import record_project_access
+
+        asyncio.create_task(record_project_access(user_id_for_record, x_project_id))
+
+    return {
+        "token": info["token"],
+        "user_id": info.get("user_id", payload.get("sub", "")),
+        "username": info.get("username", payload.get("username", "")),
+        "project_id": info.get("project_id", effective_project_id),
+        "project_name": info.get("project_name", payload.get("project_name", "")),
+        "roles": info.get("roles", []),
+        "is_system_admin": info.get("is_system_admin", False),
+        "refresh_jti": refresh_jti,
+    }
+
+
 async def get_token_info(
+    authorization: str | None = Header(None),
     x_auth_token: str | None = Header(None),
     x_project_id: str | None = Header(None),
 ) -> dict:
-    """모든 인증 필요 엔드포인트에서 사용하는 Depends 함수."""
+    """모든 인증 필요 엔드포인트에서 사용하는 Depends 함수.
+
+    우선순위:
+    1. Authorization: Bearer <access_jwt>  — JWT 경로 (신규)
+    2. X-Auth-Token: <keystone_token>      — 레거시 경로 (하위호환)
+    """
+    if authorization and authorization.startswith("Bearer "):
+        bearer = authorization[7:]
+        try:
+            return await _resolve_jwt_token_info(bearer, x_project_id)
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(status_code=401, detail="세션이 만료되었습니다. 다시 로그인해 주세요.")
+
     if not x_auth_token:
-        raise HTTPException(status_code=401, detail="X-Auth-Token 헤더가 필요합니다")
+        raise HTTPException(status_code=401, detail="인증 헤더가 필요합니다")
     try:
         token_hash = hashlib.sha256(x_auth_token.encode()).hexdigest()
         await _check_session_timeout(token_hash, x_project_id or "")
@@ -155,7 +226,36 @@ def require_admin(token_info: dict = Depends(get_token_info)):
         raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다")
 
 
+async def require_project_manager(
+    project_id: str,
+    token_info: dict = Depends(get_token_info),
+) -> dict:
+    """현재 프로젝트의 manager가 아니면 403. system admin은 bypass.
+
+    엔드포인트에서 Path 파라미터로 project_id를 직접 전달받아 사용:
+        manager = await require_project_manager(project_id, token_info=Depends(get_token_info))
+    또는 헬퍼 함수로 직접 호출:
+        await check_project_manager(project_id, token_info, session)
+    """
+    if token_info.get("is_system_admin", False):
+        return token_info
+
+    from app.database import get_session_factory
+    from app.services.project_service import is_project_manager
+
+    factory = get_session_factory()
+    if factory is None:
+        raise HTTPException(status_code=503, detail="DB를 사용할 수 없습니다")
+
+    async with factory() as session:
+        if not await is_project_manager(project_id, token_info["user_id"], session):
+            raise HTTPException(status_code=403, detail="프로젝트 관리자 권한이 필요합니다")
+
+    return token_info
+
+
 async def get_os_conn(
+    authorization: str | None = Header(None),
     x_auth_token: str | None = Header(None),
     x_project_id: str | None = Header(None),
 ) -> AsyncGenerator[openstack.connection.Connection, None]:
@@ -164,21 +264,18 @@ async def get_os_conn(
     Manila 등 openstacksdk 외부 클라이언트에서 그대로 사용할 수 있도록 한다.
     요청 완료 후 Connection을 닫아 리소스 누수를 방지한다.
     """
-    if not x_auth_token:
-        raise HTTPException(status_code=401, detail="X-Auth-Token 헤더가 필요합니다")
+    token_info = await get_token_info(
+        authorization=authorization,
+        x_auth_token=x_auth_token,
+        x_project_id=x_project_id,
+    )
+    scoped_token = token_info["token"]
+    project_id = token_info["project_id"]
     try:
-        token_hash = hashlib.sha256(x_auth_token.encode()).hexdigest()
-        await _check_session_timeout(token_hash, x_project_id or "")
-        token_info = await _cached_validate(x_auth_token, x_project_id or "")
-        scoped_token = token_info["token"]
-        project_id = token_info["project_id"]
         conn = keystone.get_openstack_connection(scoped_token, project_id)
-        # 프로젝트에 rescope된 토큰을 저장 (Manila 등 외부 클라이언트에서 사용)
         conn._afterglow_token = scoped_token
         conn._afterglow_project_id = project_id
         conn._afterglow_user_id = token_info.get("user_id", "")
-    except HTTPException:
-        raise
     except Exception:
         raise HTTPException(status_code=401, detail="유효하지 않은 토큰")
 
@@ -186,3 +283,11 @@ async def get_os_conn(
         yield conn
     finally:
         await asyncio.to_thread(conn.close)
+
+
+async def cache_bypass(refresh: bool = Query(False)) -> bool:
+    """`?refresh=true` 쿼리스트링으로 캐시 우회를 허용하는 의존성.
+
+    cached_call(key, ttl, fn, refresh=bypass) 와 페어로 사용한다.
+    """
+    return refresh

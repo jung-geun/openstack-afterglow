@@ -85,7 +85,7 @@ async def rotate_cephx_credentials(
     if token_data.get("instance_id") != instance_id:
         raise HTTPException(status_code=403, detail="토큰이 해당 인스턴스에 귀속되지 않음")
 
-    settings = get_settings()  # noqa: module-level import used for patch
+    settings = get_settings()
     if settings.union_cephx_rotate_hours == 0:
         raise HTTPException(status_code=503, detail="CephX 키 회전이 비활성화되어 있습니다")
 

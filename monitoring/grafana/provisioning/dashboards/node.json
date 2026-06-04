@@ -1,0 +1,379 @@
+{
+  "__inputs": [],
+  "__requires": [
+    {"type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "1.0.0"}
+  ],
+  "annotations": {"list": []},
+  "description": "node_exporter 기반 하이퍼바이저 노드 메트릭",
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "type": "row", "title": "Overview", "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0}, "id": 100, "panels": []
+    },
+    {
+      "type": "stat", "title": "호스트 수",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "text", "value": null}]},
+          "mappings": [], "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 1}, "id": 1,
+      "options": {
+        "colorMode": "value", "graphMode": "none", "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      },
+      "targets": [
+        {"expr": "count(count by (instance) (node_uname_info{job=\"node\", instance=~'$instance'}))",
+         "legendFormat": "", "refId": "A", "instant": true}
+      ]
+    },
+    {
+      "type": "stat", "title": "CPU 코어 합계",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "text", "value": null}]},
+          "mappings": [], "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 1}, "id": 2,
+      "options": {
+        "colorMode": "value", "graphMode": "none", "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      },
+      "targets": [
+        {"expr": "sum(count by (instance, cpu) (node_cpu_seconds_total{job=\"node\", instance=~'$instance', mode='idle'}))",
+         "legendFormat": "", "refId": "A", "instant": true}
+      ]
+    },
+    {
+      "type": "stat", "title": "총 메모리",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "text", "value": null}]},
+          "mappings": [], "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 1}, "id": 3,
+      "options": {
+        "colorMode": "value", "graphMode": "none", "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      },
+      "targets": [
+        {"expr": "sum(node_memory_MemTotal_bytes{job=\"node\", instance=~'$instance'})",
+         "legendFormat": "", "refId": "A", "instant": true}
+      ]
+    },
+    {
+      "type": "stat", "title": "평균 가동 시간",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "text", "value": null}]},
+          "mappings": [], "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 1}, "id": 4,
+      "options": {
+        "colorMode": "value", "graphMode": "none", "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      },
+      "targets": [
+        {"expr": "avg(node_time_seconds{job=\"node\", instance=~'$instance'} - node_boot_time_seconds{job=\"node\", instance=~'$instance'})",
+         "legendFormat": "", "refId": "A", "instant": true}
+      ]
+    },
+    {
+      "type": "row", "title": "CPU & Load", "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 5}, "id": 101, "panels": []
+    },
+    {
+      "type": "timeseries", "title": "CPU 사용률",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {"lineWidth": 1, "fillOpacity": 10, "spanNulls": false, "showPoints": "never"},
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6}, "id": 5,
+      "options": {
+        "tooltip": {"mode": "multi", "sort": "none"},
+        "legend": {"displayMode": "list", "placement": "bottom", "calcs": ["mean", "last", "max"]}
+      },
+      "targets": [
+        {"expr": "1 - avg by(instance) (rate(node_cpu_seconds_total{job=\"node\", mode='idle', instance=~'$instance'}[5m]))",
+         "legendFormat": "{{instance}}", "refId": "A"}
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Load Average",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {"lineWidth": 1, "fillOpacity": 10, "spanNulls": false, "showPoints": "never"},
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6}, "id": 6,
+      "options": {
+        "tooltip": {"mode": "multi", "sort": "none"},
+        "legend": {"displayMode": "list", "placement": "bottom", "calcs": ["mean", "last", "max"]}
+      },
+      "targets": [
+        {"expr": "node_load1{job=\"node\", instance=~'$instance'}", "legendFormat": "{{instance}} 1m", "refId": "A"},
+        {"expr": "node_load5{job=\"node\", instance=~'$instance'}", "legendFormat": "{{instance}} 5m", "refId": "B"},
+        {"expr": "node_load15{job=\"node\", instance=~'$instance'}", "legendFormat": "{{instance}} 15m", "refId": "C"}
+      ]
+    },
+    {
+      "type": "row", "title": "Memory", "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 14}, "id": 102, "panels": []
+    },
+    {
+      "type": "timeseries", "title": "메모리 사용량",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "lineWidth": 1, "fillOpacity": 60, "spanNulls": false, "showPoints": "never",
+            "stacking": {"mode": "normal", "group": "A"}
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 15}, "id": 7,
+      "options": {
+        "tooltip": {"mode": "multi", "sort": "none"},
+        "legend": {"displayMode": "list", "placement": "bottom", "calcs": ["mean", "last"]}
+      },
+      "targets": [
+        {"expr": "node_memory_MemTotal_bytes{job=\"node\", instance=~'$instance'} - node_memory_MemAvailable_bytes{job=\"node\", instance=~'$instance'}",
+         "legendFormat": "{{instance}} used", "refId": "A"},
+        {"expr": "node_memory_Buffers_bytes{job=\"node\", instance=~'$instance'}",
+         "legendFormat": "{{instance}} buffers", "refId": "B"},
+        {"expr": "node_memory_Cached_bytes{job=\"node\", instance=~'$instance'}",
+         "legendFormat": "{{instance}} cached", "refId": "C"}
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Swap 사용량",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {"lineWidth": 1, "fillOpacity": 10, "spanNulls": false, "showPoints": "never"},
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 15}, "id": 8,
+      "options": {
+        "tooltip": {"mode": "multi", "sort": "none"},
+        "legend": {"displayMode": "list", "placement": "bottom", "calcs": ["mean", "last", "max"]}
+      },
+      "targets": [
+        {"expr": "node_memory_SwapTotal_bytes{job=\"node\", instance=~'$instance'} - node_memory_SwapFree_bytes{job=\"node\", instance=~'$instance'}",
+         "legendFormat": "{{instance}} used", "refId": "A"},
+        {"expr": "node_memory_SwapTotal_bytes{job=\"node\", instance=~'$instance'}",
+         "legendFormat": "{{instance}} total", "refId": "B"}
+      ]
+    },
+    {
+      "type": "row", "title": "Network", "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 23}, "id": 103, "panels": []
+    },
+    {
+      "type": "timeseries", "title": "네트워크 I/O",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {"lineWidth": 1, "fillOpacity": 10, "spanNulls": false, "showPoints": "never"},
+          "unit": "Bps"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24}, "id": 9,
+      "options": {
+        "tooltip": {"mode": "multi", "sort": "none"},
+        "legend": {"displayMode": "list", "placement": "bottom", "calcs": ["mean", "last", "max"]}
+      },
+      "targets": [
+        {"expr": "rate(node_network_receive_bytes_total{job=\"node\", instance=~'$instance', device!~'lo|vnet.*|tap.*|vxlan.*|br.*|virbr.*'}[5m])",
+         "legendFormat": "{{instance}} {{device}} rx", "refId": "A"},
+        {"expr": "rate(node_network_transmit_bytes_total{job=\"node\", instance=~'$instance', device!~'lo|vnet.*|tap.*|vxlan.*|br.*|virbr.*'}[5m])",
+         "legendFormat": "{{instance}} {{device}} tx", "refId": "B"}
+      ]
+    },
+    {
+      "type": "timeseries", "title": "TCP 연결",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {"lineWidth": 1, "fillOpacity": 10, "spanNulls": false, "showPoints": "never"},
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24}, "id": 10,
+      "options": {
+        "tooltip": {"mode": "multi", "sort": "none"},
+        "legend": {"displayMode": "list", "placement": "bottom", "calcs": ["mean", "last", "max"]}
+      },
+      "targets": [
+        {"expr": "node_netstat_Tcp_CurrEstab{job=\"node\", instance=~'$instance'}",
+         "legendFormat": "{{instance}} established", "refId": "A"},
+        {"expr": "rate(node_netstat_Tcp_InSegs{job=\"node\", instance=~'$instance'}[5m])",
+         "legendFormat": "{{instance}} in/s", "refId": "B"},
+        {"expr": "rate(node_netstat_Tcp_OutSegs{job=\"node\", instance=~'$instance'}[5m])",
+         "legendFormat": "{{instance}} out/s", "refId": "C"}
+      ]
+    },
+    {
+      "type": "row", "title": "Disk", "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 32}, "id": 104, "panels": []
+    },
+    {
+      "type": "timeseries", "title": "디스크 처리량",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {"lineWidth": 1, "fillOpacity": 10, "spanNulls": false, "showPoints": "never"},
+          "unit": "Bps"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 33}, "id": 11,
+      "options": {
+        "tooltip": {"mode": "multi", "sort": "none"},
+        "legend": {"displayMode": "list", "placement": "bottom", "calcs": ["mean", "last", "max"]}
+      },
+      "targets": [
+        {"expr": "rate(node_disk_read_bytes_total{job=\"node\", instance=~'$instance', device=~'sd.*|vd.*|nvme.*'}[5m])",
+         "legendFormat": "{{instance}} {{device}} read", "refId": "A"},
+        {"expr": "rate(node_disk_written_bytes_total{job=\"node\", instance=~'$instance', device=~'sd.*|vd.*|nvme.*'}[5m])",
+         "legendFormat": "{{instance}} {{device}} write", "refId": "B"}
+      ]
+    },
+    {
+      "type": "timeseries", "title": "디스크 IOPS",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {"lineWidth": 1, "fillOpacity": 10, "spanNulls": false, "showPoints": "never"},
+          "unit": "iops"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 33}, "id": 12,
+      "options": {
+        "tooltip": {"mode": "multi", "sort": "none"},
+        "legend": {"displayMode": "list", "placement": "bottom", "calcs": ["mean", "last", "max"]}
+      },
+      "targets": [
+        {"expr": "rate(node_disk_reads_completed_total{job=\"node\", instance=~'$instance', device=~'sd.*|vd.*|nvme.*'}[5m])",
+         "legendFormat": "{{instance}} {{device}} read", "refId": "A"},
+        {"expr": "rate(node_disk_writes_completed_total{job=\"node\", instance=~'$instance', device=~'sd.*|vd.*|nvme.*'}[5m])",
+         "legendFormat": "{{instance}} {{device}} write", "refId": "B"}
+      ]
+    },
+    {
+      "type": "gauge", "title": "파일시스템 사용률",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 0.7},
+              {"color": "red", "value": 0.9}
+            ]
+          },
+          "mappings": [], "unit": "percentunit", "min": 0, "max": 1
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 33}, "id": 13,
+      "options": {
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": true},
+        "showThresholdMarkers": true,
+        "showThresholdLabels": false
+      },
+      "targets": [
+        {"expr": "1 - (node_filesystem_avail_bytes{job=\"node\", instance=~'$instance', fstype!~'tmpfs|fuse.*|overlay|squashfs'} / node_filesystem_size_bytes{job=\"node\", instance=~'$instance', fstype!~'tmpfs|fuse.*|overlay|squashfs'})",
+         "legendFormat": "{{instance}} {{mountpoint}}", "refId": "A", "instant": true}
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "tags": ["afterglow", "node-exporter"],
+  "templating": {
+    "list": [
+      {
+        "current": {"selected": true, "text": "Prometheus", "value": "Prometheus"},
+        "hide": 2,
+        "name": "datasource",
+        "query": "prometheus",
+        "type": "datasource"
+      },
+      {
+        "current": {},
+        "datasource": {"type": "prometheus"},
+        "definition": "label_values(node_uname_info{job=\"node\"}, instance)",
+        "hide": 0,
+        "includeAll": true,
+        "multi": true,
+        "name": "instance",
+        "options": [],
+        "query": "label_values(node_uname_info{job=\"node\"}, instance)",
+        "refresh": 2,
+        "type": "query",
+        "label": "Instance"
+      }
+    ]
+  },
+  "time": {"from": "now-1h", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Afterglow — Node Exporter",
+  "uid": "afterglow-node",
+  "version": 1
+}

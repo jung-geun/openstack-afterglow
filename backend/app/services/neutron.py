@@ -177,6 +177,26 @@ def update_subnet(
     )
 
 
+def create_port(
+    conn: openstack.connection.Connection,
+    network_id: str,
+    name: str,
+    security_group_ids: list[str] | None = None,
+) -> dict:
+    """Neutron 포트를 생성하고 { id, fixed_ip } 를 반환한다.
+
+    IP 예약 후 server에 attach 할 수 있어 Manila access rule에 고정 IP를 사전 등록할 때 사용.
+    """
+    kwargs: dict = {"network_id": network_id, "name": name}
+    if security_group_ids:
+        kwargs["security_groups"] = [{"id": sg} for sg in security_group_ids]
+    port = conn.network.create_port(**kwargs)
+    fixed_ip = ""
+    if port.fixed_ips:
+        fixed_ip = port.fixed_ips[0].get("ip_address", "")
+    return {"id": port.id, "fixed_ip": fixed_ip}
+
+
 def delete_port(conn: openstack.connection.Connection, port_id: str) -> None:
     conn.network.delete_port(port_id, ignore_missing=True)
 

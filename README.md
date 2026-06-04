@@ -4,9 +4,9 @@
 
 > Horizon의 안정성과 기능 완성도 + Skyline의 현대적 UX를 결합한 차세대 OpenStack 대시보드
 
-[![CI](https://github.com/jung-geun/openstack-afterglow/actions/workflows/test.yml/badge.svg)](https://github.com/jung-geun/openstack-afterglow/actions/workflows/test.yml)
-[![Docker Build](https://github.com/jung-geun/openstack-afterglow/actions/workflows/docker-build.yml/badge.svg)](https://github.com/jung-geun/openstack-afterglow/actions/workflows/docker-build.yml)
-[![License](https://img.shields.io/github/license/jung-geun/openstack-afterglow)](LICENSE)
+[![CI](https://github.com/openstack-afterglow/openstack-afterglow/actions/workflows/test.yml/badge.svg)](https://github.com/openstack-afterglow/openstack-afterglow/actions/workflows/test.yml)
+[![Docker Build](https://github.com/openstack-afterglow/openstack-afterglow/actions/workflows/docker-build.yml/badge.svg)](https://github.com/openstack-afterglow/openstack-afterglow/actions/workflows/docker-build.yml)
+[![License](https://img.shields.io/github/license/openstack-afterglow/openstack-afterglow)](LICENSE)
 
 ---
 
@@ -124,7 +124,7 @@ graph LR
 ## 빠른 시작 (Docker Compose)
 
 ```bash
-git clone git@github.com:jung-geun/openstack-afterglow.git
+git clone git@github.com:openstack-afterglow/openstack-afterglow.git
 cd openstack-afterglow
 cp config.toml.example config.toml
 ```
@@ -156,7 +156,7 @@ docker compose --profile monitoring up -d
 OpenStack 클러스터 내에서 kolla-ansible 역할로 Afterglow를 직접 배포합니다.
 
 ```bash
-git clone git@github.com:jung-geun/openstack-afterglow.git
+git clone git@github.com:openstack-afterglow/openstack-afterglow.git
 cd openstack-afterglow/deploy/kolla
 pip install kolla-ansible
 # 인벤토리와 globals.yml 설정 후:

@@ -24,15 +24,15 @@ _CHECK_INTERVAL = 60  # 1분마다 타겟 확인
 
 async def _run_notion_target_sync(target: dict) -> None:
     """단일 NotionTarget에 대해 전체 동기화를 실행한다."""
-    from app.api.identity.admin_gpu import (
+    from app.services import notion_sync
+    from app.services.gpu_inventory import (
         build_alias_to_device_name_map,
         get_gpu_spec_list,
     )
-    from app.api.identity.admin_notion import (
+    from app.services.openstack_inventory import (
         collect_hypervisor_data,
         collect_instance_data,
     )
-    from app.services import notion_sync
 
     target_id = target["id"]
     api_key = target["api_key"]
@@ -135,15 +135,15 @@ async def _run_notion_target_sync(target: dict) -> None:
 
 async def _run_sync_cycle() -> None:
     """1회 동기화 사이클: 다중 타겟 → fallback NotionConfig."""
-    from app.api.identity.admin_gpu import (
+    from app.services import notion_sync
+    from app.services.gpu_inventory import (
         build_alias_to_device_name_map,
         get_gpu_spec_list,
     )
-    from app.api.identity.admin_notion import (
+    from app.services.openstack_inventory import (
         collect_hypervisor_data,
         collect_instance_data,
     )
-    from app.services import notion_sync
 
     targets = await notion_sync.list_notion_targets(include_api_key=True)
     if targets:
@@ -156,6 +156,9 @@ async def _run_sync_cycle() -> None:
             if last_sync_str:
                 try:
                     last_sync_dt = datetime.fromisoformat(last_sync_str.replace("Z", "+00:00"))
+                    # MySQL/aiomysql는 timezone-naive datetime을 반환하므로 UTC로 명시
+                    if last_sync_dt.tzinfo is None:
+                        last_sync_dt = last_sync_dt.replace(tzinfo=UTC)
                     elapsed_min = (now - last_sync_dt).total_seconds() / 60
                     if elapsed_min < interval_min:
                         continue
@@ -275,13 +278,12 @@ async def main() -> None:
     _logger.info("Notion Sync Worker 시작")
 
     settings = get_settings()
-    db_cfg = settings.database if hasattr(settings, "database") else None
-    if db_cfg and getattr(db_cfg, "database_url", None):
+    if settings.database_url:
         try:
-            await init_db(
-                db_cfg.database_url,
-                pool_size=getattr(db_cfg, "database_pool_size", 5),
-                max_overflow=getattr(db_cfg, "database_max_overflow", 10),
+            init_db(
+                settings.database_url,
+                pool_size=settings.database_pool_size,
+                max_overflow=settings.database_max_overflow,
             )
             _logger.info("DB 연결 완료")
         except Exception:

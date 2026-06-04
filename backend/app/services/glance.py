@@ -102,6 +102,43 @@ def get_image(conn: openstack.connection.Connection, image_id: str) -> ImageDeta
     )
 
 
+_ALLOWED_DISK_FORMATS: frozenset[str] = frozenset(
+    {"raw", "qcow2", "vmdk", "vdi", "vhd", "vhdx", "iso", "ami", "aki", "ari"}
+)
+
+_UPLOAD_PROPERTY_WHITELIST: frozenset[str] = frozenset(
+    {"os_distro", "os_version", "hw_disk_bus", "hw_qemu_guest_agent"}
+)
+
+
+def create_image(
+    conn: openstack.connection.Connection,
+    *,
+    name: str,
+    disk_format: str,
+    container_format: str = "bare",
+    visibility: str = "private",
+    data,
+    properties: dict | None = None,
+):
+    """Glance 이미지 생성 + 바이너리 업로드 (openstacksdk 단일 PUT 스트리밍).
+
+    data는 파일 유사 객체(UploadFile.file)를 그대로 전달.
+    """
+    safe_props: dict = {}
+    if properties:
+        safe_props = {k: str(v) for k, v in properties.items() if k in _UPLOAD_PROPERTY_WHITELIST}
+    return conn.image.create_image(
+        name=name,
+        disk_format=disk_format,
+        container_format=container_format,
+        visibility=visibility,
+        data=data,
+        allow_duplicates=True,
+        **safe_props,
+    )
+
+
 def delete_image(conn: openstack.connection.Connection, image_id: str) -> None:
     conn.image.delete_image(image_id, ignore_missing=False)
 

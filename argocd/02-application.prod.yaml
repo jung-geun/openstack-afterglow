@@ -6,19 +6,30 @@ metadata:
   annotations:
     # ArgoCD Image Updater: :latest 태그의 digest 변경을 감지하여 자동 재배포
     argocd-image-updater.argoproj.io/image-list: |
-      backend=ghcr.io/jung-geun/afterglow-api:latest,frontend=ghcr.io/jung-geun/afterglow:latest
+      backend=ghcr.io/openstack-afterglow/afterglow-api:latest,frontend=ghcr.io/openstack-afterglow/afterglow:latest
     argocd-image-updater.argoproj.io/backend.update-strategy: digest
     argocd-image-updater.argoproj.io/frontend.update-strategy: digest
     argocd-image-updater.argoproj.io/write-back-method: argocd
 spec:
   project: afterglow
   source:
-    repoURL: "https://github.com/jung-geun/openstack-afterglow.git"
+    repoURL: "https://github.com/openstack-afterglow/openstack-afterglow.git"
     targetRevision: main
     path: deploy/k8s-template/overlays/prod
   destination:
     server: "https://kubernetes.default.svc"
     namespace: afterglow
+  # Ingress spec.rules / spec.tls 는 최초 생성 후 운영자가 직접 패치하므로
+  # ArgoCD가 git의 placeholder 값으로 되돌리지 않도록 무시
+  ignoreDifferences:
+  - group: networking.k8s.io
+    kind: Ingress
+    name: afterglow-ingress
+    namespace: afterglow
+    jsonPointers:
+    - /spec/rules
+    - /spec/tls
+
   syncPolicy:
     automated:
       prune: true
@@ -27,6 +38,7 @@ spec:
       - CreateNamespace=true
       - PruneLast=true
       - ApplyOutOfSyncOnly=true
+      - RespectIgnoreDifferences=true
     retry:
       limit: 3
       backoff:

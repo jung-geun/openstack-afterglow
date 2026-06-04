@@ -1,24 +1,11 @@
 <script lang="ts">
-  import { goto } from '$app/navigation';
   import { auth, isAdmin } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
+  import type { LayerInfo } from '$lib/types/layer';
   import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
-
-  import StatusChip from '$lib/components/ui/StatusChip.svelte';
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
-
-  interface LayerInfo {
-    id: string;
-    name: string;
-    version: string;
-    created_at: string;
-    created_by: string;
-    sealed: boolean;
-    parent_id: string | null;
-    ubuntu_base: string | null;
-    size_bytes: number | null;
-    file_count: number | null;
-  }
+  import LayerSearchBar from '$lib/components/library/LayerSearchBar.svelte';
+  import LayerCatalogTable from '$lib/components/library/LayerCatalogTable.svelte';
 
   let layers = $state<LayerInfo[]>([]);
   let loading = $state(true);
@@ -55,61 +42,15 @@
     if (token) loadLayers();
   });
 
-  function formatSize(bytes: number | null): string {
-    if (bytes === null) return '-';
-    if (bytes >= 1073741824) return `${(bytes / 1073741824).toFixed(1)} GB`;
-    if (bytes >= 1048576) return `${(bytes / 1048576).toFixed(1)} MB`;
-    return `${(bytes / 1024).toFixed(0)} KB`;
-  }
-
-  function formatDate(dt: string): string {
-    return new Date(dt).toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' });
-  }
-
-  function layerHref(id: string): string {
-    return `/dashboard/library/${encodeURIComponent(id)}`;
-  }
-
   function handleSearch() {
     currentPage = 0;
     loadLayers();
   }
-
-  // 트리 구조 계산: parent_id 기반
-  type TreeNode = { layer: LayerInfo; depth: number };
-
-  function buildTree(layers: LayerInfo[]): TreeNode[] {
-    const map = new Map(layers.map(l => [l.id, l]));
-    const childrenMap = new Map<string | null, LayerInfo[]>();
-    for (const l of layers) {
-      const key = l.parent_id ?? null;
-      if (!childrenMap.has(key)) childrenMap.set(key, []);
-      childrenMap.get(key)!.push(l);
-    }
-
-    const result: TreeNode[] = [];
-    function traverse(id: string | null, depth: number) {
-      const children = childrenMap.get(id) ?? [];
-      for (const child of children.sort((a, b) => a.name.localeCompare(b.name))) {
-        result.push({ layer: child, depth });
-        traverse(child.id, depth + 1);
-      }
-    }
-    traverse(null, 0);
-    // 트리에 포함 안 된 레이어 (부모가 현재 페이지에 없는 경우) 맨 뒤에 추가
-    const inTree = new Set(result.map(n => n.layer.id));
-    for (const l of layers) {
-      if (!inTree.has(l.id)) result.push({ layer: l, depth: 0 });
-    }
-    return result;
-  }
-
-  const treeNodes = $derived(nameFilter ? layers.map(l => ({ layer: l, depth: 0 })) : buildTree(layers));
 </script>
 
 <div class="flex flex-col h-full overflow-auto bg-gray-900 text-gray-100 p-6">
   <PageHeader title="레이어 카탈로그" breadcrumb="라이브러리">
-    {#snippet action()}
+    {#snippet actions()}
       <div class="flex items-center gap-2">
         {#if $isAdmin}
           <a
@@ -126,26 +67,7 @@
     {/snippet}
   </PageHeader>
 
-  <!-- 검색 -->
-  <div class="mb-4 flex gap-2">
-    <input
-      type="text"
-      bind:value={nameFilter}
-      placeholder="이름으로 검색..."
-      class="flex-1 max-w-xs px-3 py-1.5 text-sm bg-gray-800 border border-gray-700 rounded-md focus:outline-none focus:border-blue-500"
-      onkeydown={(e) => e.key === 'Enter' && handleSearch()}
-    />
-    <button
-      onclick={handleSearch}
-      class="px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 rounded-md transition-colors"
-    >검색</button>
-    {#if nameFilter}
-      <button
-        onclick={() => { nameFilter = ''; handleSearch(); }}
-        class="px-3 py-1.5 text-sm text-gray-400 hover:text-gray-200"
-      >초기화</button>
-    {/if}
-  </div>
+  <LayerSearchBar bind:query={nameFilter} onSearch={handleSearch} />
 
   {#if error}
     <div class="mb-4 p-3 bg-red-900/40 border border-red-700 rounded-md text-red-300 text-sm">{error}</div>
@@ -161,63 +83,14 @@
       <p>레이어가 없습니다</p>
     </div>
   {:else}
-    <div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
-    <div class="rounded-lg border border-gray-700 overflow-hidden">
-      <table class="w-full text-sm">
-        <thead class="bg-gray-800 text-gray-400 text-xs uppercase">
-          <tr>
-            <th class="px-4 py-3 text-left">이름 / 버전</th>
-            <th class="px-4 py-3 text-left">상태</th>
-            <th class="px-4 py-3 text-left hidden md:table-cell">Ubuntu Base</th>
-            <th class="px-4 py-3 text-left hidden lg:table-cell">크기</th>
-            <th class="px-4 py-3 text-left hidden lg:table-cell">생성일</th>
-            <th class="px-4 py-3 text-left hidden xl:table-cell">생성자</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-gray-700/50">
-          {#each treeNodes as { layer, depth }}
-            <tr
-              class="hover:bg-gray-800/50 cursor-pointer transition-colors"
-              onclick={() => goto(layerHref(layer.id))}
-            >
-              <td class="px-4 py-3">
-                <div class="flex items-center gap-1" style="padding-left: {depth * 1.25}rem">
-                  {#if depth > 0}
-                    <span class="text-gray-600 mr-1">└</span>
-                  {/if}
-                  <div>
-                    <div class="font-medium text-gray-100">{layer.name}</div>
-                    <div class="text-xs text-gray-500">{layer.version}</div>
-                  </div>
-                </div>
-              </td>
-              <td class="px-4 py-3">
-                <StatusChip status={layer.sealed ? 'sealed' : 'draft'} />
-              </td>
-              <td class="px-4 py-3 hidden md:table-cell text-gray-400 text-xs">{layer.ubuntu_base ?? '-'}</td>
-              <td class="px-4 py-3 hidden lg:table-cell text-gray-400 text-xs">{formatSize(layer.size_bytes)}</td>
-              <td class="px-4 py-3 hidden lg:table-cell text-gray-400 text-xs">{formatDate(layer.created_at)}</td>
-              <td class="px-4 py-3 hidden xl:table-cell text-gray-500 text-xs">{layer.created_by}</td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
-    </div>
-
-    <!-- 페이지네이션 -->
-    <div class="mt-4 flex items-center gap-2 text-sm text-gray-400">
-      <button
-        onclick={() => { currentPage = Math.max(0, currentPage - 1); loadLayers(); }}
-        disabled={currentPage === 0}
-        class="px-3 py-1 bg-gray-800 rounded disabled:opacity-40 hover:bg-gray-700 disabled:cursor-not-allowed"
-      >이전</button>
-      <span>페이지 {currentPage + 1}</span>
-      <button
-        onclick={() => { currentPage++; loadLayers(); }}
-        disabled={layers.length < pageSize}
-        class="px-3 py-1 bg-gray-800 rounded disabled:opacity-40 hover:bg-gray-700 disabled:cursor-not-allowed"
-      >다음</button>
-    </div>
-    </div>
+    <LayerCatalogTable
+      {layers}
+      query={nameFilter}
+      {refreshing}
+      {currentPage}
+      {pageSize}
+      onPrev={() => { currentPage = Math.max(0, currentPage - 1); loadLayers(); }}
+      onNext={() => { currentPage++; loadLayers(); }}
+    />
   {/if}
 </div>

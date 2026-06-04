@@ -23,18 +23,23 @@ from sqlalchemy.exc import InterfaceError, OperationalError
 from starlette.requests import Request
 
 from app.api.common.activity_recorder import rec
-from app.api.deps import get_os_conn, get_token_info
+from app.api.deps import cache_bypass, get_os_conn, get_token_info
 from app.config import get_settings
 from app.database import mark_db_unhealthy
 from app.models.k3s import (
     CreateK3sClusterRequest,
+    K3sAttachInterfaceRequest,
     K3sClusterInfo,
+    K3sInterfaceInfo,
     K3sProgressMessage,
     K3sProgressStep,
     ScaleK3sClusterRequest,
 )
 from app.services import cinder, k3s_cloudinit, k3s_kube, keystone, neutron, nova, octavia
 from app.services import k3s_db as k3s_cluster
+from app.services.cache import cached_call, invalidate, ttl_normal, ttl_slow
+from app.services.cache import invalidation as cache_invalidation
+from app.services.cache import keys as cache_keys
 
 router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
@@ -85,6 +90,8 @@ def _cluster_to_info(c: dict) -> K3sClusterInfo:
         api_lb_id=c.get("api_lb_id") or None,
         api_fip_id=c.get("api_fip_id") or None,
         api_fip_address=c.get("api_fip_address") or None,
+        master_count=int(c.get("master_count") or 1),
+        stampede_enabled=bool(c.get("stampede_enabled", False)),
     )
 
 
@@ -92,42 +99,96 @@ def _cluster_to_info(c: dict) -> K3sClusterInfo:
 async def list_k3s_clusters(
     token_info: dict = Depends(get_token_info),
     include_deleted: bool = Query(default=False),
+    bypass: bool = Depends(cache_bypass),
 ):
     project_id = token_info["project_id"]
+    sub = "all" if include_deleted else None
+    cache_key = cache_keys.project_key("k3s", project_id, "clusters", sub=sub)
+
+    async def _fetch():
+        try:
+            clusters = await k3s_cluster.list_clusters(project_id, include_deleted=include_deleted)
+        except (OperationalError, InterfaceError):
+            _logger.warning("k3s 클러스터 목록 DB 조회 실패 — 빈 목록 반환", exc_info=True)
+            mark_db_unhealthy()
+            return []
+        return [_cluster_to_info(c) for c in clusters]
+
     try:
-        clusters = await k3s_cluster.list_clusters(project_id, include_deleted=include_deleted)
+        return await cached_call(cache_key, ttl_normal(), _fetch, refresh=bypass)
     except (OperationalError, InterfaceError):
         _logger.warning("k3s 클러스터 목록 DB 조회 실패 — 빈 목록 반환", exc_info=True)
         mark_db_unhealthy()
         return []
-    return [_cluster_to_info(c) for c in clusters]
 
 
 @router.get("/{cluster_id}", response_model=K3sClusterInfo)
-async def get_k3s_cluster(cluster_id: str, token_info: dict = Depends(get_token_info)):
+async def get_k3s_cluster(
+    cluster_id: str,
+    token_info: dict = Depends(get_token_info),
+    bypass: bool = Depends(cache_bypass),
+):
     project_id = token_info["project_id"]
-    cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
-    if not cluster:
-        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
-    return _cluster_to_info(cluster)
+    cache_key = cache_keys.project_key("k3s", project_id, "clusters", sub=cluster_id)
+
+    async def _fetch():
+        cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
+        if not cluster:
+            raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
+        return _cluster_to_info(cluster)
+
+    return await cached_call(cache_key, ttl_normal(), _fetch, refresh=bypass)
 
 
 @router.api_route("/{cluster_id}/kubeconfig", methods=["GET", "HEAD"])
-async def download_kubeconfig(request: Request, cluster_id: str, token_info: dict = Depends(get_token_info)):
+async def download_kubeconfig(
+    request: Request,
+    cluster_id: str,
+    token_info: dict = Depends(get_token_info),
+    bypass: bool = Depends(cache_bypass),
+):
     """kubeconfig YAML 파일 다운로드. 아직 준비되지 않으면 404.
 
     매 호출마다 audit log 기록 — 토큰 탈취 시 다운로드 추적이 가능하도록.
+    None 결과는 캐시하지 않는다 (초기화 중인 클러스터 UX 보호).
     """
+    import json as _json
+
+    from app.services.cache import get_backend
+
     project_id = token_info["project_id"]
     cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
     if not cluster:
         raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
 
-    try:
-        kubeconfig = await k3s_cluster.get_kubeconfig(project_id, cluster_id)
-    except Exception as e:
-        _logger.error("kubeconfig 복호화 실패: %s", e)
-        raise HTTPException(status_code=500, detail="kubeconfig 복호화에 실패했습니다. 관리자에게 문의하세요.")
+    cache_key = cache_keys.project_key("k3s", project_id, "clusters", sub=f"{cluster_id}:kubeconfig")
+    kubeconfig: bytes | None = None
+
+    # 캐시 조회 (bypass=True 이면 건너뜀)
+    if not bypass:
+        try:
+            backend = get_backend()
+            cached_raw = await backend.get(cache_key)
+            if cached_raw is not None:
+                kubeconfig = _json.loads(cached_raw).encode()
+        except Exception:
+            pass  # 캐시 장애 → fallthrough
+
+    if kubeconfig is None:
+        try:
+            kubeconfig = await k3s_cluster.get_kubeconfig(project_id, cluster_id)
+        except Exception as e:
+            _logger.error("kubeconfig 복호화 실패: %s", e)
+            raise HTTPException(status_code=500, detail="kubeconfig 복호화에 실패했습니다. 관리자에게 문의하세요.")
+
+        # None이 아닐 때만 캐시 저장
+        if kubeconfig is not None:
+            try:
+                backend = get_backend()
+                await backend.set(cache_key, _json.dumps(kubeconfig.decode()), ttl_slow())
+            except Exception:
+                pass  # 캐시 장애 → silent fail
+
     if not kubeconfig:
         raise HTTPException(
             status_code=404, detail="kubeconfig가 아직 준비되지 않았습니다. 클러스터가 초기화 중입니다."
@@ -214,6 +275,23 @@ async def create_k3s_cluster_async(
         else:
             network_id = s.default_network_id
 
+    # 템플릿 적용 (지정 시 기본값 병합, 요청 본문 값이 있으면 override)
+    _template_snapshot: dict | None = None
+    if req.template_id:
+        from app.services import k3s_template as _tmpl_svc
+
+        _tmpl = await _tmpl_svc.get_template(req.template_id)
+        if not _tmpl:
+            raise HTTPException(status_code=400, detail=f"템플릿을 찾을 수 없습니다: {req.template_id}")
+        _template_snapshot = dict(_tmpl)
+        # 요청 본문에 명시적 값이 없으면 템플릿 기본값 적용
+        if req.agent_count == 1 and _tmpl.get("default_node_count") is not None:
+            req = req.model_copy(update={"agent_count": _tmpl["default_node_count"]})
+        if not req.agent_flavor_id and _tmpl.get("default_agent_flavor_id"):
+            req = req.model_copy(update={"agent_flavor_id": _tmpl["default_agent_flavor_id"]})
+        if req.os_type == "ubuntu" and _tmpl.get("os_type") and _tmpl["os_type"] != "ubuntu":
+            req = req.model_copy(update={"os_type": _tmpl["os_type"]})
+
     k3s_version = s.k3s_version
     boot_volume_size = s.k3s_boot_volume_size_gb
     cluster_id = str(uuid.uuid4())
@@ -248,6 +326,10 @@ async def create_k3s_cluster_async(
         boot_volume_id: str | None = None
         server_vm_id: str | None = None
         app_credential_id: str | None = None
+        ha_lb_id: str | None = None
+        ha_lb_pool_id: str | None = None
+        ha_fip_id: str | None = None
+        ha_fip_address: str | None = None
 
         try:
             # --- Step 1: 보안 그룹 생성 ---
@@ -331,6 +413,50 @@ async def create_k3s_cluster_async(
 
             extra_tls_sans: list[str] = []
 
+            # --- Step 1-B: HA LB + FIP 생성 (master_count >= 3) ---
+            if req.master_count >= 3:
+                yield event(K3sProgressStep.SERVER_HA_BOOTSTRAP, 12, "HA API LB 생성 중...")
+                subnets_for_lb = await asyncio.to_thread(lambda: list(conn.network.subnets(network_id=network_id)))
+                lb_subnet_id = subnets_for_lb[0].id if subnets_for_lb else None
+                ha_lb = await asyncio.to_thread(
+                    octavia.create_load_balancer,
+                    conn,
+                    f"k3s-ha-{req.name}-{cluster_id[:8]}",
+                    *(lb_subnet_id,) if lb_subnet_id else (),
+                    vip_network_id=s.k3s_api_lb_vip_network_id or None,
+                )
+                ha_lb_id = ha_lb["id"]
+                await asyncio.to_thread(octavia.wait_for_load_balancer, conn, ha_lb_id)
+                listener = await asyncio.to_thread(
+                    octavia.create_listener, conn, ha_lb_id, "TCP", 6443, name=f"k3s-ha-{req.name}-6443"
+                )
+                ha_lb_pool_id_raw = await asyncio.to_thread(
+                    octavia.create_pool,
+                    conn,
+                    ha_lb_id,
+                    "TCP",
+                    name=f"k3s-ha-{req.name}-pool",
+                    listener_id=listener["id"],
+                )
+                ha_lb_pool_id = ha_lb_pool_id_raw["id"]
+
+                # FIP 할당 (모드 B: floating network)
+                _fip_net = s.k3s_api_lb_floating_network_id or s.k3s_occm_floating_network_id or ""
+                if _fip_net:
+                    _lb_vip_port = ha_lb.get("vip_port_id")
+                    _fip = await asyncio.to_thread(
+                        lambda: conn.network.create_ip(
+                            floating_network_id=_fip_net,
+                            port_id=_lb_vip_port,
+                        )
+                    )
+                    ha_fip_id = _fip["id"]
+                    ha_fip_address = _fip["floating_ip_address"]
+                    extra_tls_sans.append(ha_fip_address)
+                    yield event(K3sProgressStep.SERVER_HA_BOOTSTRAP, 18, f"HA API LB 준비 완료 (FIP: {ha_fip_address})")
+                else:
+                    yield event(K3sProgressStep.SERVER_HA_BOOTSTRAP, 18, "HA API LB 준비 완료")
+
             # --- Step 2: 서버 부트 볼륨 생성 ---
             # K8s 스타일: 매 생성마다 고유한 suffix로 이름 충돌 방지
             server_suffix = _rand_suffix()
@@ -364,7 +490,13 @@ async def create_k3s_cluster_async(
             from app.services import k3s_plugins
             from app.services import keystone as _keystone
 
-            cloud_conf = k3s_plugins.aggregate_cloud_conf(project_id, s)
+            _internal_network_name = ""
+            try:
+                _net_obj = await asyncio.to_thread(lambda: conn.network.get_network(network_id))
+                _internal_network_name = _net_obj.name or ""
+            except Exception:
+                pass
+            cloud_conf = k3s_plugins.aggregate_cloud_conf(project_id, s, internal_network_name=_internal_network_name)
             active_plugins = k3s_plugins.get_active_plugin_names(s)
             occm_active = active_plugins.get("occm", False)
 
@@ -442,6 +574,7 @@ async def create_k3s_cluster_async(
                 os_type=os_type,
                 server_node_name=server_vm_name,
                 barbican_kms_enabled=any(p.name == "barbican_kms" for p in k3s_plugins.get_active_plugins(s)),
+                cluster_init=req.master_count >= 3,
             )
 
             # --- Step 4: 서버 VM 생성 ---
@@ -501,15 +634,24 @@ async def create_k3s_cluster_async(
                     "created_by_username": _creator_username or "",
                     "created_at": now,
                     "updated_at": now,
-                    "api_lb_id": "",
-                    "api_lb_pool_id": "",
-                    "api_fip_id": "",
-                    "api_fip_address": "",
+                    "api_lb_id": ha_lb_id or "",
+                    "api_lb_pool_id": ha_lb_pool_id or "",
+                    "api_fip_id": ha_fip_id or "",
+                    "api_fip_address": ha_fip_address or "",
+                    "master_count": req.master_count,
                     "os_type": os_type,
                     "server_vm_name": server_vm_name,
                     "app_credential_id": app_credential_id or "",
+                    "template_id": req.template_id or None,
+                    "template_snapshot": _template_snapshot,
+                    "stampede_enabled": req.stampede_enabled,
                 },
             )
+            try:
+                await invalidate(f"afterglow:k3s:{project_id}:*")
+                await cache_invalidation.invalidate_mutation_count("k3s", project_id)
+            except Exception:
+                pass
 
             await rec(
                 token_info_obj or {},
@@ -540,7 +682,16 @@ async def create_k3s_cluster_async(
             )
             yield event(K3sProgressStep.FAILED, 0, f"클러스터 생성 실패: {e}", error=str(e))
             # 롤백
-            await _rollback(conn, server_vm_id, boot_volume_id, sg_id, app_credential_id, project_id)
+            await _rollback(
+                conn,
+                server_vm_id,
+                boot_volume_id,
+                sg_id,
+                app_credential_id,
+                project_id,
+                lb_id=ha_lb_id,
+                fip_id=ha_fip_id,
+            )
 
     return StreamingResponse(
         progress_generator(),
@@ -556,6 +707,8 @@ async def _rollback(
     sg_id: str | None,
     app_credential_id: str | None = None,
     project_id: str | None = None,
+    lb_id: str | None = None,
+    fip_id: str | None = None,
 ) -> None:
     """생성 실패 시 리소스 역순 삭제."""
     if server_vm_id:
@@ -569,6 +722,16 @@ async def _rollback(
             await asyncio.to_thread(cinder.delete_volume, conn, boot_volume_id)
         except Exception as e:
             _logger.warning("Rollback: delete volume %s failed: %s", boot_volume_id, e)
+    if fip_id:
+        try:
+            await asyncio.to_thread(lambda: conn.network.delete_ip(fip_id, ignore_missing=True))
+        except Exception as e:
+            _logger.warning("Rollback: delete FIP %s failed: %s", fip_id, e)
+    if lb_id:
+        try:
+            await asyncio.to_thread(octavia.delete_load_balancer, conn, lb_id, cascade=True)
+        except Exception as e:
+            _logger.warning("Rollback: delete LB %s failed: %s", lb_id, e)
     if sg_id:
         try:
             await asyncio.to_thread(neutron.delete_security_group, conn, sg_id)
@@ -615,6 +778,11 @@ async def scale_k3s_cluster(
         return {"message": "변경 없음", "agent_count": current}
 
     await k3s_cluster.update_cluster_status(project_id, cluster_id, "SCALING")
+    try:
+        await invalidate(f"afterglow:k3s:{project_id}:*")
+        await cache_invalidation.invalidate_mutation_count("k3s", project_id)
+    except Exception:
+        pass
     asyncio.create_task(_scale_agents(project_id, cluster_id, current_agent_ids, desired))
     await rec(
         token_info,
@@ -939,6 +1107,12 @@ async def delete_k3s_cluster(
     if cluster.get("deleted_at"):
         return
 
+    try:
+        await invalidate(f"afterglow:k3s:{project_id}:*")
+        await cache_invalidation.invalidate_mutation_count("k3s", project_id)
+    except Exception:
+        pass
+
     async for _msg in _delete_cluster_progress(conn, project_id, cluster, token_info):
         pass
 
@@ -956,6 +1130,12 @@ async def delete_k3s_cluster_async(
     cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
     if not cluster:
         raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
+
+    try:
+        await invalidate(f"afterglow:k3s:{project_id}:*")
+        await cache_invalidation.invalidate_mutation_count("k3s", project_id)
+    except Exception:
+        pass
 
     async def gen() -> AsyncGenerator[str, None]:
         yield ": " + " " * 2048 + "\n\n"
@@ -985,3 +1165,306 @@ async def delete_k3s_cluster_async(
             yield f"data: {fail.model_dump_json()}\n\n"
 
     return StreamingResponse(gen(), media_type="text/event-stream", headers=_SSE_HEADERS)
+
+
+# ---------------------------------------------------------------------------
+# 노드 네트워크 인터페이스 attach / detach
+# ---------------------------------------------------------------------------
+
+
+def _assert_vm_in_cluster(vm_id: str, cluster: dict) -> str:
+    """vm_id 가 해당 클러스터에 속하면 'server'|'agent' 반환, 아니면 HTTPException 403."""
+    if cluster.get("server_vm_id") == vm_id:
+        return "server"
+    if vm_id in (cluster.get("agent_vm_ids") or []):
+        return "agent"
+    raise HTTPException(status_code=403, detail="해당 VM은 이 클러스터에 속하지 않습니다")
+
+
+@router.get("/{cluster_id}/nodes/{vm_id}/interfaces")
+async def list_node_interfaces(
+    cluster_id: str,
+    vm_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    project_id = conn._afterglow_project_id
+    cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
+    node_role = _assert_vm_in_cluster(vm_id, cluster)
+    ifaces = await asyncio.to_thread(lambda: list(conn.compute.server_interfaces(vm_id)))
+    return [
+        K3sInterfaceInfo(
+            port_id=i.port_id,
+            net_id=i.net_id,
+            fixed_ips=i.fixed_ips or [],
+            vm_id=vm_id,
+            node_role=node_role,
+        )
+        for i in ifaces
+    ]
+
+
+@router.post("/{cluster_id}/nodes/{vm_id}/interfaces", status_code=201)
+async def attach_node_interface(
+    cluster_id: str,
+    vm_id: str,
+    body: K3sAttachInterfaceRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    project_id = conn._afterglow_project_id
+    cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
+    node_role = _assert_vm_in_cluster(vm_id, cluster)
+    try:
+        result = await asyncio.to_thread(nova.attach_interface, conn, vm_id, body.net_id)
+        await invalidate(f"afterglow:neutron:{project_id}:ports:{vm_id}")
+        await invalidate(f"afterglow:neutron:{project_id}:port_mac_map")
+        await invalidate(f"afterglow:k3s:{project_id}:cluster:{cluster_id}")
+        await rec(
+            token_info,
+            conn,
+            resource_type="k3s_cluster",
+            action="k3s.attach_interface",
+            status="success",
+            resource_id=cluster_id,
+            extra={"vm_id": vm_id, "net_id": body.net_id, "node_role": node_role},
+        )
+        return K3sInterfaceInfo(
+            port_id=result["port_id"],
+            net_id=result["net_id"],
+            fixed_ips=result["fixed_ips"],
+            vm_id=vm_id,
+            node_role=node_role,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="k3s_cluster",
+            action="k3s.attach_interface",
+            status="failed",
+            resource_id=cluster_id,
+            error_message=str(e)[:500],
+        )
+        raise HTTPException(status_code=500, detail="인터페이스 attach 실패")
+
+
+@router.delete("/{cluster_id}/nodes/{vm_id}/interfaces/{port_id}", status_code=204)
+async def detach_node_interface(
+    cluster_id: str,
+    vm_id: str,
+    port_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    project_id = conn._afterglow_project_id
+    cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
+    node_role = _assert_vm_in_cluster(vm_id, cluster)
+    try:
+        await asyncio.to_thread(nova.detach_interface, conn, vm_id, port_id)
+        await invalidate(f"afterglow:neutron:{project_id}:ports:{vm_id}")
+        await invalidate(f"afterglow:neutron:{project_id}:port_mac_map")
+        await invalidate(f"afterglow:k3s:{project_id}:cluster:{cluster_id}")
+        await rec(
+            token_info,
+            conn,
+            resource_type="k3s_cluster",
+            action="k3s.detach_interface",
+            status="success",
+            resource_id=cluster_id,
+            extra={"vm_id": vm_id, "port_id": port_id, "node_role": node_role},
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        await rec(
+            token_info,
+            conn,
+            resource_type="k3s_cluster",
+            action="k3s.detach_interface",
+            status="failed",
+            resource_id=cluster_id,
+            error_message=str(e)[:500],
+        )
+        raise HTTPException(status_code=500, detail="인터페이스 detach 실패")
+
+
+# ---------------------------------------------------------------------------
+# Stampede 오토스케일 API
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{cluster_id}/stampede/enable", status_code=200)
+async def enable_stampede(
+    cluster_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    """클러스터의 Stampede 오토스케일 모드를 활성화한다."""
+
+    project_id = conn._afterglow_project_id
+    cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
+
+    if not get_settings().k3s_stampede_enabled:
+        raise HTTPException(status_code=400, detail="Stampede 기능이 서버에서 비활성화 상태입니다")
+
+    await k3s_cluster.update_cluster_status(project_id, cluster_id, cluster["status"], "")
+    # stampede_enabled 컬럼 갱신
+    from sqlalchemy import select as _select
+
+    from app.database import get_session_factory, is_db_available
+    from app.models.db import K3sCluster
+
+    if is_db_available():
+        factory = get_session_factory()
+        async with factory() as session:
+            stmt = _select(K3sCluster).where(K3sCluster.id == cluster_id)
+            result = await session.execute(stmt)
+            c = result.scalar_one_or_none()
+            if c:
+                c.stampede_enabled = True
+                await session.commit()
+
+    await invalidate(f"afterglow:k3s:{project_id}:cluster:{cluster_id}")
+    await rec(
+        token_info,
+        conn,
+        resource_type="k3s_cluster",
+        action="k3s.stampede_enable",
+        status="success",
+        resource_id=cluster_id,
+    )
+    return {"message": "Stampede 모드가 활성화되었습니다", "cluster_id": cluster_id}
+
+
+@router.post("/{cluster_id}/stampede/disable", status_code=200)
+async def disable_stampede(
+    cluster_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    """클러스터의 Stampede 오토스케일 모드를 비활성화한다."""
+    project_id = conn._afterglow_project_id
+    cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
+
+    from sqlalchemy import select as _select
+
+    from app.database import get_session_factory, is_db_available
+    from app.models.db import K3sCluster
+
+    if is_db_available():
+        factory = get_session_factory()
+        async with factory() as session:
+            stmt = _select(K3sCluster).where(K3sCluster.id == cluster_id)
+            result = await session.execute(stmt)
+            c = result.scalar_one_or_none()
+            if c:
+                c.stampede_enabled = False
+                await session.commit()
+
+    await invalidate(f"afterglow:k3s:{project_id}:cluster:{cluster_id}")
+    await rec(
+        token_info,
+        conn,
+        resource_type="k3s_cluster",
+        action="k3s.stampede_disable",
+        status="success",
+        resource_id=cluster_id,
+    )
+    return {"message": "Stampede 모드가 비활성화되었습니다", "cluster_id": cluster_id}
+
+
+@router.get("/{cluster_id}/stampede")
+async def get_stampede_status(
+    cluster_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    """클러스터의 Stampede 오토스케일 상태를 조회한다."""
+    from app.services import k3s_nodegroup as _k3s_ng
+
+    project_id = conn._afterglow_project_id
+    cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
+
+    all_ngs = await _k3s_ng.list_nodegroups(cluster_id)
+    stampede_ngs = [
+        {
+            "id": ng["id"],
+            "name": ng["name"],
+            "stampede_enabled": ng["stampede_enabled"],
+            "min_size": ng["min_size"],
+            "max_size": ng["max_size"],
+            "node_count": ng["node_count"],
+            "stampede_state": ng.get("stampede_state") or {},
+        }
+        for ng in all_ngs
+    ]
+
+    return {
+        "cluster_id": cluster_id,
+        "stampede_enabled": bool(cluster.get("stampede_enabled", False)),
+        "global_stampede_enabled": get_settings().k3s_stampede_enabled,
+        "nodegroups": stampede_ngs,
+    }
+
+
+@router.get("/{cluster_id}/stampede/events")
+async def get_stampede_events(
+    cluster_id: str,
+    limit: int = Query(default=50, ge=1, le=200),
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    """Stampede 스케일 이벤트 이력 조회 (최신순)."""
+    from sqlalchemy import desc
+    from sqlalchemy import select as _select
+
+    from app.database import get_session_factory, is_db_available
+    from app.models.activity import ActivityLog
+
+    project_id = conn._afterglow_project_id
+    cluster = await k3s_cluster.get_cluster(project_id, cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
+
+    if not is_db_available():
+        return []
+
+    factory = get_session_factory()
+    async with factory() as session:
+        stmt = (
+            _select(ActivityLog)
+            .where(
+                ActivityLog.resource_type == "k3s_stampede",
+                ActivityLog.resource_id == cluster_id,
+            )
+            .order_by(desc(ActivityLog.created_at))
+            .limit(limit)
+        )
+        result = await session.execute(stmt)
+        rows = result.scalars().all()
+
+    return [
+        {
+            "id": r.id,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "action": r.action,
+            "status": r.status,
+            "nodegroup_id": r.resource_name,
+            "extra": r.extra or {},
+        }
+        for r in rows
+    ]

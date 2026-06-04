@@ -34,6 +34,63 @@ write_files:
 {{ wf.content | indent(6, first=True) }}
 
 {% endfor %}
+  - path: /usr/local/sbin/afterglow-nic-up.sh
+    permissions: "0750"
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      IFACE="${1:-}"
+      [ -z "${IFACE}" ] && exit 0
+      # 가상/루프 인터페이스 제외
+      case "${IFACE}" in
+        lo|lo:*|cni*|flannel*|veth*|kube*|dummy*|tunl*) exit 0 ;;
+      esac
+      NETPLAN_FILE="/etc/netplan/90-afterglow-${IFACE}.yaml"
+      LOCK="/run/afterglow-nic.lock"
+      exec 9>"${LOCK}"
+      flock -x 9
+      if [ -f "${NETPLAN_FILE}" ]; then
+        echo "[afterglow-nic-up] ${IFACE}: netplan already configured, skipping" | systemd-cat -t afterglow-nic-up
+        exit 0
+      fi
+      cat > "${NETPLAN_FILE}" <<EOF
+      network:
+        version: 2
+        ethernets:
+          ${IFACE}:
+            dhcp4: true
+            dhcp6: false
+            link-local: []
+            optional: true
+            dhcp4-overrides:
+              use-routes: false
+      EOF
+      echo "[afterglow-nic-up] ${IFACE}: applying netplan..." | systemd-cat -t afterglow-nic-up
+      if netplan apply 2>&1 | systemd-cat -t afterglow-nic-up; then
+        echo "[afterglow-nic-up] ${IFACE}: done" | systemd-cat -t afterglow-nic-up
+      else
+        echo "[afterglow-nic-up] ${IFACE}: netplan apply failed, rolling back" | systemd-cat -t afterglow-nic-up
+        rm -f "${NETPLAN_FILE}"
+      fi
+
+  - path: /etc/systemd/system/afterglow-nic-up@.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Afterglow NIC up handler for %i
+      After=network.target
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/sbin/afterglow-nic-up.sh %i
+      StandardOutput=journal
+      StandardError=journal
+
+  - path: /etc/udev/rules.d/99-afterglow-nic.rules
+    permissions: "0644"
+    content: |
+      SUBSYSTEM=="net", ACTION=="add", KERNEL!="lo", KERNEL!="cni*", KERNEL!="flannel*", KERNEL!="veth*", KERNEL!="kube*", KERNEL!="dummy*", KERNEL!="tunl*", RUN+="/bin/systemctl --no-block start afterglow-nic-up@%k.service"
+
   - path: /opt/k3s/callback.sh
     permissions: "0750"
     content: |
@@ -131,7 +188,8 @@ write_files:
       fi
 
 {% endfor %}
-      SERVER_IP=$(hostname -I | awk '{print $1}')
+      SERVER_IP=$(ip route get 8.8.8.8 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); break}}')
+      [ -z "${SERVER_IP}" ] && SERVER_IP=$(hostname -I | awk '{print $1}')
       KUBECONFIG_RAW=$(cat /etc/rancher/k3s/k3s.yaml)
       # 127.0.0.1 → 실제 서버 IP로 치환
       KUBECONFIG_FIXED=$(echo "${KUBECONFIG_RAW}" | sed "s/127\.0\.0\.1/${SERVER_IP}/g")
@@ -178,6 +236,7 @@ write_files:
       fi
 
 runcmd:
+  - udevadm control --reload-rules
 {% if barbican_kms_enabled %}
   # KMS plugin 을 k3s 보다 먼저 install + start (sock 가 k3s 시작 전 존재해야 apiserver
   # encryption-provider 가 정상 init). podman 사용으로 k3s containerd 의존성 제거.
@@ -208,6 +267,13 @@ runcmd:
         --tls-san "{{ san }}" \
 {% endfor %}
         --write-kubeconfig-mode 644 \
+        --node-ip "${SERVER_IP}" \
+{% if cluster_init %}
+        --cluster-init \
+{% elif join_url %}
+        --server "{{ join_url }}" \
+        --token "{{ ha_node_token }}" \
+{% endif %}
 {% if needs_external_cloud_provider %}
         --disable-cloud-controller \
         --kubelet-arg="cloud-provider=external" \

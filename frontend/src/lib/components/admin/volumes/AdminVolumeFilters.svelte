@@ -1,0 +1,105 @@
+<script lang="ts">
+	import { onMount } from 'svelte';
+	import { projectNames } from '$lib/stores/projectNames';
+
+	let {
+		projectFilter = $bindable(''),
+		projectSearchText = $bindable(''),
+		statusFilter = $bindable(''),
+		nameSearch = $bindable(''),
+		onChange,
+	}: {
+		projectFilter: string;
+		projectSearchText: string;
+		statusFilter: string;
+		nameSearch: string;
+		onChange: () => void;
+	} = $props();
+
+	let projectDropdownOpen = $state(false);
+	let nameDebounceTimer = $state<ReturnType<typeof setTimeout> | null>(null);
+
+	let projectSuggestions = $derived(
+		Array.from($projectNames.entries())
+			.filter(
+				([id, name]) =>
+					projectSearchText.length === 0 ||
+					name.toLowerCase().includes(projectSearchText.toLowerCase()) ||
+					id.toLowerCase().includes(projectSearchText.toLowerCase()),
+			)
+			.slice(0, 10),
+	);
+
+	function handleDocumentClick(e: MouseEvent) {
+		const target = e.target as HTMLElement;
+		if (!target.closest('.project-filter-wrapper')) {
+			projectDropdownOpen = false;
+		}
+	}
+
+	onMount(() => {
+		document.addEventListener('click', handleDocumentClick);
+		return () => document.removeEventListener('click', handleDocumentClick);
+	});
+</script>
+
+<div class="flex flex-wrap gap-3 mb-4">
+	<select
+		bind:value={statusFilter}
+		onchange={() => { onChange(); }}
+		class="bg-gray-800 border border-gray-700 text-sm text-gray-300 rounded-lg px-2 py-1.5 focus:outline-none focus:border-blue-500"
+	>
+		<option value="">모든 상태</option>
+		{#each ['available', 'in-use', 'error', 'error_deleting', 'creating', 'deleting', 'attaching', 'detaching', 'reserved'] as s}
+			<option value={s}>{s}</option>
+		{/each}
+	</select>
+	<input
+		type="text"
+		placeholder="이름 검색..."
+		bind:value={nameSearch}
+		oninput={() => {
+			if (nameDebounceTimer) clearTimeout(nameDebounceTimer);
+			nameDebounceTimer = setTimeout(() => { onChange(); }, 300);
+		}}
+		class="bg-gray-800 border border-gray-700 text-sm text-gray-300 rounded-lg px-3 py-1.5 w-40 focus:outline-none focus:border-blue-500"
+	/>
+	<div class="relative project-filter-wrapper">
+		<div class="flex items-center bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 w-52 focus-within:border-blue-500">
+			<input
+				type="text"
+				placeholder="프로젝트 검색..."
+				bind:value={projectSearchText}
+				onfocus={() => (projectDropdownOpen = true)}
+				oninput={() => {
+					projectDropdownOpen = true;
+					if (!projectSearchText) { projectFilter = ''; }
+				}}
+				class="bg-transparent text-sm text-gray-300 flex-1 outline-none min-w-0"
+			/>
+			{#if projectFilter}
+				<button
+					onclick={() => { projectFilter = ''; projectSearchText = ''; projectDropdownOpen = false; onChange(); }}
+					class="text-gray-500 hover:text-white ml-1 flex-shrink-0"
+				>✕</button>
+			{/if}
+		</div>
+		{#if projectDropdownOpen && projectSuggestions.length > 0}
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<div
+				class="absolute top-full mt-1 left-0 w-64 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-20 overflow-hidden"
+				onmouseleave={() => {}}
+			>
+				{#each projectSuggestions as [id, name]}
+					<button
+						class="w-full text-left px-3 py-2 text-xs hover:bg-gray-800 transition-colors {projectFilter === id ? 'bg-blue-900/30 text-blue-400' : 'text-gray-300'}"
+						onclick={() => { projectFilter = id; projectSearchText = name; projectDropdownOpen = false; onChange(); }}
+					>
+						<div class="font-medium truncate">{name}</div>
+						<div class="text-gray-500 font-mono">{id.slice(0, 12)}...</div>
+					</button>
+				{/each}
+			</div>
+		{/if}
+	</div>
+</div>

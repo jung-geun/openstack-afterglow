@@ -111,8 +111,8 @@ async def admin_create_instance_async(
     from app.api.compute.instances import (
         _prepare_dynamic_file_storage,
         _prepare_prebuilt_file_storages,
-        _rollback,
     )
+    from app.services import instance_orchestration as instance_orch
 
     settings = get_settings()
     resolved_libs = lib_svc.resolve_with_deps(req.libraries)
@@ -275,7 +275,10 @@ async def admin_create_instance_async(
                     else "none"
                 ),
                 "union_upper_volume_id": upper_volume_id or "none",
+                "scheduling": req.scheduling,
             }
+            if req.scheduling == "ha":
+                meta["HA_Enabled"] = "True"
             if resolved_libs and _sse_health_token:
                 meta["union_health_id"] = _sse_health_id
 
@@ -389,7 +392,7 @@ async def admin_create_instance_async(
                 resource_name=req.name,
                 error_message=error_detail[:500],
             )
-            await _rollback(
+            await instance_orch.rollback_instance(
                 conn,
                 server_id,
                 boot_volume_id if not boot_volume_was_provided else None,

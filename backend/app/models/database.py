@@ -34,8 +34,8 @@ class CreateDbInstanceRequest(BaseModel):
 
 class CreateDatabaseRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=64)
-    character_set: str = "utf8"
-    collate: str = "utf8_general_ci"
+    character_set: str | None = None
+    collate: str | None = None
 
 
 class CreateUserRequest(BaseModel):
@@ -55,3 +55,9 @@ class RestoreFromBackupRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     flavor_id: str
     volume_size: int = Field(..., ge=1, le=1024)
+
+
+class DbAutoBackupConfigRequest(BaseModel):
+    max_daily: int = Field(7, ge=0, le=30)
+    max_weekly: int = Field(0, ge=0, le=30)
+    max_monthly: int = Field(0, ge=0, le=12)

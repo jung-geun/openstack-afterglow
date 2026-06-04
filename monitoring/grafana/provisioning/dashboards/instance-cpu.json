@@ -1,0 +1,146 @@
+{
+  "uid": "afterglow-instance-cpu",
+  "title": "Afterglow — Instance (CPU)",
+  "schemaVersion": 38,
+  "version": 1,
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "30s",
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": true, "text": "Prometheus", "value": "Prometheus" },
+        "hide": 2,
+        "name": "datasource",
+        "query": "prometheus",
+        "type": "datasource"
+      },
+      {
+        "hide": 2,
+        "name": "uuid",
+        "query": "",
+        "type": "textbox",
+        "label": "Instance UUID"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "timeseries",
+      "id": 1,
+      "title": "CPU 사용률",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "spanNulls": false, "showPoints": "never" },
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "none" },
+        "legend": { "displayMode": "list", "placement": "bottom", "calcs": ["mean", "last", "max"] }
+      },
+      "targets": [
+        {
+          "expr": "(100 - (avg by (instance_id) (rate(node_cpu_seconds_total{instance_id=\"$uuid\",mode=\"idle\"}[2m])) * 100))\nor\n((sum by (instance_id) (rate(libvirt_domain_info_cpu_time_seconds_total[2m]) * on (domain) group_left(instance_id) libvirt_domain_openstack_info{instance_id=\"$uuid\"}) / sum by (instance_id) (libvirt_domain_info_virtual_cpus * on (domain) group_left(instance_id) libvirt_domain_openstack_info{instance_id=\"$uuid\"})) * 100)",
+          "legendFormat": "CPU %",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "id": 2,
+      "title": "메모리 사용률",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "spanNulls": false, "showPoints": "never" },
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "none" },
+        "legend": { "displayMode": "list", "placement": "bottom", "calcs": ["mean", "last", "max"] }
+      },
+      "targets": [
+        {
+          "expr": "((1 - node_memory_MemAvailable_bytes{instance_id=\"$uuid\"} / node_memory_MemTotal_bytes{instance_id=\"$uuid\"}) * 100)\nor\n(avg by (instance_id) (libvirt_domain_memory_stats_used_percent * on (domain) group_left(instance_id) libvirt_domain_openstack_info{instance_id=\"$uuid\"}))",
+          "legendFormat": "Memory %",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "id": 3,
+      "title": "네트워크 처리량",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "fillOpacity": 5, "spanNulls": false, "showPoints": "never" },
+          "unit": "Bps"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "none" },
+        "legend": { "displayMode": "list", "placement": "bottom", "calcs": ["mean", "last", "max"] }
+      },
+      "targets": [
+        {
+          "expr": "(sum by (instance_id) (rate(node_network_receive_bytes_total{instance_id=\"$uuid\",device!~\"lo|veth.*|docker.*|cni.*\"}[2m])))\nor\n(sum by (instance_id) (rate(libvirt_domain_interface_stats_receive_bytes_total[2m]) * on (domain) group_left(instance_id) libvirt_domain_openstack_info{instance_id=\"$uuid\"}))",
+          "legendFormat": "RX",
+          "refId": "A"
+        },
+        {
+          "expr": "(sum by (instance_id) (rate(node_network_transmit_bytes_total{instance_id=\"$uuid\",device!~\"lo|veth.*|docker.*|cni.*\"}[2m])))\nor\n(sum by (instance_id) (rate(libvirt_domain_interface_stats_transmit_bytes_total[2m]) * on (domain) group_left(instance_id) libvirt_domain_openstack_info{instance_id=\"$uuid\"}))",
+          "legendFormat": "TX",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "id": 4,
+      "title": "디스크 처리량",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "fillOpacity": 5, "spanNulls": false, "showPoints": "never" },
+          "unit": "Bps"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "none" },
+        "legend": { "displayMode": "list", "placement": "bottom", "calcs": ["mean", "last", "max"] }
+      },
+      "targets": [
+        {
+          "expr": "(sum by (instance_id) (rate(node_disk_read_bytes_total{instance_id=\"$uuid\"}[2m])))\nor\n(sum by (instance_id) (rate(libvirt_domain_block_stats_read_bytes_total[2m]) * on (domain) group_left(instance_id) libvirt_domain_openstack_info{instance_id=\"$uuid\"}))",
+          "legendFormat": "Read",
+          "refId": "A"
+        },
+        {
+          "expr": "(sum by (instance_id) (rate(node_disk_written_bytes_total{instance_id=\"$uuid\"}[2m])))\nor\n(sum by (instance_id) (rate(libvirt_domain_block_stats_write_bytes_total[2m]) * on (domain) group_left(instance_id) libvirt_domain_openstack_info{instance_id=\"$uuid\"}))",
+          "legendFormat": "Write",
+          "refId": "B"
+        }
+      ]
+    }
+  ]
+}

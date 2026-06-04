@@ -10,14 +10,17 @@ import logging
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
 from app.api.common.owner_check import assert_resource_owner
-from app.api.deps import get_os_conn, get_token_info
+from app.api.deps import cache_bypass, get_os_conn, get_token_info
 from app.models.database import (
     CreateBackupRequest,
     CreateDatabaseRequest,
     CreateDbInstanceRequest,
     CreateUserRequest,
+    DbAutoBackupConfigRequest,
     RestoreFromBackupRequest,
 )
+from app.services import cache
+from app.services.cache import invalidation, keys
 
 _logger = logging.getLogger(__name__)
 
@@ -133,12 +136,15 @@ async def _assert_db_instance_owner(
 @router.get("/flavors")
 async def list_db_flavors(
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    bypass: bool = Depends(cache_bypass),
 ):
     """DB 플레이버 목록."""
     from app.services import trove
 
+    pid = getattr(conn, "_afterglow_project_id", "unknown")
+    key = keys.project_key("trove", pid, "flavors")
     try:
-        return await asyncio.to_thread(trove.list_flavors, conn)
+        return await cache.cached_call(key, cache.ttl_static(), lambda: trove.list_flavors(conn), refresh=bypass)
     except Exception:
         raise HTTPException(status_code=500, detail="DB 플레이버 목록 조회 실패")
 
@@ -146,12 +152,15 @@ async def list_db_flavors(
 @router.get("/datastores")
 async def list_datastores(
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    bypass: bool = Depends(cache_bypass),
 ):
     """데이터스토어(MySQL, MariaDB, PostgreSQL 등) 및 버전 목록."""
     from app.services import trove
 
+    pid = getattr(conn, "_afterglow_project_id", "unknown")
+    key = keys.project_key("trove", pid, "datastores")
     try:
-        return await asyncio.to_thread(trove.list_datastores, conn)
+        return await cache.cached_call(key, cache.ttl_static(), lambda: trove.list_datastores(conn), refresh=bypass)
     except Exception:
         raise HTTPException(status_code=500, detail="데이터스토어 목록 조회 실패")
 
@@ -159,12 +168,15 @@ async def list_datastores(
 @router.get("/configurations")
 async def list_db_configurations(
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    bypass: bool = Depends(cache_bypass),
 ):
     """DB Configuration group 목록."""
     from app.services import trove
 
+    pid = getattr(conn, "_afterglow_project_id", "unknown")
+    key = keys.project_key("trove", pid, "configurations")
     try:
-        return await asyncio.to_thread(trove.list_configurations, conn)
+        return await cache.cached_call(key, cache.ttl_slow(), lambda: trove.list_configurations(conn), refresh=bypass)
     except Exception:
         raise HTTPException(status_code=500, detail="Configuration group 목록 조회 실패")
 
@@ -172,12 +184,15 @@ async def list_db_configurations(
 @router.get("/volume-types")
 async def list_db_volume_types(
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    bypass: bool = Depends(cache_bypass),
 ):
     """볼륨 타입 목록 (DB 생성 폼용)."""
     from app.services import cinder
 
+    pid = getattr(conn, "_afterglow_project_id", "unknown")
+    key = keys.project_key("cinder", pid, "volume-types")
     try:
-        return await asyncio.to_thread(cinder.list_volume_types, conn)
+        return await cache.cached_call(key, cache.ttl_static(), lambda: cinder.list_volume_types(conn), refresh=bypass)
     except Exception:
         raise HTTPException(status_code=500, detail="볼륨 타입 목록 조회 실패")
 
@@ -203,6 +218,7 @@ async def _assert_db_backup_owner(
 @router.get("/backups")
 async def list_all_backups(
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    bypass: bool = Depends(cache_bypass),
 ):
     """현재 프로젝트의 전체 DB 백업 목록 (인스턴스 무관). 복원 폼 등에서 사용.
 
@@ -210,8 +226,10 @@ async def list_all_backups(
     """
     from app.services import trove
 
+    pid = getattr(conn, "_afterglow_project_id", "unknown")
+    key = keys.project_key("trove", pid, "backups")
     try:
-        return await asyncio.to_thread(trove.list_backups, conn)
+        return await cache.cached_call(key, cache.ttl_slow(), lambda: trove.list_backups(conn), refresh=bypass)
     except Exception:
         raise HTTPException(status_code=500, detail="백업 목록 조회 실패")
 
@@ -230,6 +248,9 @@ async def delete_backup(
         await asyncio.to_thread(trove.delete_backup, conn, backup_id)
     except Exception:
         raise HTTPException(status_code=500, detail="백업 삭제 실패")
+    pid = getattr(conn, "_afterglow_project_id", "unknown")
+    await cache.invalidate(f"afterglow:trove:{pid}:*")
+    await invalidation.invalidate_mutation_count("trove", pid)
 
 
 @router.post("/restore", status_code=201)
@@ -243,7 +264,7 @@ async def restore_from_backup(
 
     await _assert_db_backup_owner(conn, req.backup_id, token_info)
     try:
-        return await asyncio.to_thread(
+        result = await asyncio.to_thread(
             trove.create_instance,
             conn,
             req.name,
@@ -257,6 +278,10 @@ async def restore_from_backup(
         )
     except Exception:
         raise HTTPException(status_code=500, detail="백업 복원 실패")
+    pid = getattr(conn, "_afterglow_project_id", "unknown")
+    await cache.invalidate(f"afterglow:trove:{pid}:*")
+    await invalidation.invalidate_mutation_count("trove", pid)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -269,6 +294,7 @@ async def list_database_instances(
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
     all_projects: bool = Query(False, description="admin 전용: 모든 프로젝트 DB 인스턴스"),
+    bypass: bool = Depends(cache_bypass),
 ):
     """Trove DB 인스턴스 목록. all_projects=true 는 시스템 admin 전용."""
     from app.services import trove
@@ -282,8 +308,10 @@ async def list_database_instances(
             _logger.exception("관리자 DB 인스턴스 전체 조회 실패")
             raise HTTPException(status_code=500, detail="DB 인스턴스 목록 조회 실패")
 
+    pid = getattr(conn, "_afterglow_project_id", "unknown")
+    key = keys.project_key("trove", pid, "instances")
     try:
-        return await asyncio.to_thread(trove.list_instances, conn)
+        return await cache.cached_call(key, cache.ttl_normal(), lambda: trove.list_instances(conn), refresh=bypass)
     except Exception:
         raise HTTPException(status_code=500, detail="DB 인스턴스 목록 조회 실패")
 
@@ -334,6 +362,9 @@ async def create_database_instance(
             project_id = getattr(conn, "_afterglow_project_id", None)
             if project_id:
                 background_tasks.add_task(_run_attach_fip_bg, project_id, instance["id"])
+        pid = getattr(conn, "_afterglow_project_id", "unknown")
+        await cache.invalidate(f"afterglow:trove:{pid}:*")
+        await invalidation.invalidate_mutation_count("trove", pid)
         return instance
     except RuntimeError as e:
         _logger.exception(
@@ -357,15 +388,23 @@ async def get_database_instance(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
+    bypass: bool = Depends(cache_bypass),
 ):
-    """DB 인스턴스 상세."""
+    """DB 인스턴스 상세. deleted=1 인 경우 404."""
     from app.services import trove
 
     await _assert_db_instance_owner(conn, instance_id, token_info)
+    pid = getattr(conn, "_afterglow_project_id", "unknown")
+    key = keys.project_key("trove", pid, "instances", sub=instance_id)
     try:
-        return await asyncio.to_thread(trove.get_instance, conn, instance_id)
+        inst = await cache.cached_call(
+            key, cache.ttl_normal(), lambda: trove.get_instance(conn, instance_id), refresh=bypass
+        )
     except Exception:
         raise HTTPException(status_code=404, detail="DB 인스턴스를 찾을 수 없습니다")
+    if inst.get("deleted"):
+        raise HTTPException(status_code=404, detail="DB 인스턴스를 찾을 수 없습니다")
+    return inst
 
 
 @router.delete("/{instance_id}", status_code=204)
@@ -382,6 +421,9 @@ async def delete_database_instance(
         await asyncio.to_thread(trove.delete_instance, conn, instance_id)
     except Exception:
         raise HTTPException(status_code=500, detail="DB 인스턴스 삭제 실패")
+    pid = getattr(conn, "_afterglow_project_id", "unknown")
+    await cache.invalidate(f"afterglow:trove:{pid}:*")
+    await invalidation.invalidate_mutation_count("trove", pid)
 
 
 @router.post("/{instance_id}/restart", status_code=204)
@@ -398,6 +440,9 @@ async def restart_database_instance(
         await asyncio.to_thread(trove.restart_instance, conn, instance_id)
     except Exception:
         raise HTTPException(status_code=500, detail="DB 인스턴스 재시작 실패")
+    pid = getattr(conn, "_afterglow_project_id", "unknown")
+    await cache.invalidate(f"afterglow:trove:{pid}:*")
+    await invalidation.invalidate_mutation_count("trove", pid)
 
 
 @router.post("/{instance_id}/root")
@@ -411,9 +456,13 @@ async def enable_root_user(
 
     await _assert_db_instance_owner(conn, instance_id, token_info)
     try:
-        return await asyncio.to_thread(trove.enable_root, conn, instance_id)
+        result = await asyncio.to_thread(trove.enable_root, conn, instance_id)
     except Exception:
         raise HTTPException(status_code=500, detail="root 유저 활성화 실패")
+    pid = getattr(conn, "_afterglow_project_id", "unknown")
+    await cache.invalidate(f"afterglow:trove:{pid}:*")
+    await invalidation.invalidate_mutation_count("trove", pid)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -426,13 +475,18 @@ async def list_instance_databases(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
+    bypass: bool = Depends(cache_bypass),
 ):
     """인스턴스 내 데이터베이스 목록."""
     from app.services import trove
 
     await _assert_db_instance_owner(conn, instance_id, token_info)
+    pid = getattr(conn, "_afterglow_project_id", "unknown")
+    key = keys.project_key("trove", pid, f"instances:{instance_id}:databases")
     try:
-        return await asyncio.to_thread(trove.list_databases, conn, instance_id)
+        return await cache.cached_call(
+            key, cache.ttl_normal(), lambda: trove.list_databases(conn, instance_id), refresh=bypass
+        )
     except Exception:
         raise HTTPException(status_code=500, detail="데이터베이스 목록 조회 실패")
 
@@ -450,9 +504,13 @@ async def create_instance_database(
     await _assert_db_instance_owner(conn, instance_id, token_info)
     try:
         await asyncio.to_thread(trove.create_database, conn, instance_id, req.name, req.character_set, req.collate)
-        return {"name": req.name}
     except Exception:
+        _logger.exception("DB 생성 실패 instance=%s name=%s", instance_id, req.name)
         raise HTTPException(status_code=500, detail="데이터베이스 생성 실패")
+    pid = getattr(conn, "_afterglow_project_id", "unknown")
+    await cache.invalidate(f"afterglow:trove:{pid}:*")
+    await invalidation.invalidate_mutation_count("trove", pid)
+    return {"name": req.name}
 
 
 @router.delete("/{instance_id}/databases/{db_name}", status_code=204)
@@ -470,6 +528,9 @@ async def delete_instance_database(
         await asyncio.to_thread(trove.delete_database, conn, instance_id, db_name)
     except Exception:
         raise HTTPException(status_code=500, detail="데이터베이스 삭제 실패")
+    pid = getattr(conn, "_afterglow_project_id", "unknown")
+    await cache.invalidate(f"afterglow:trove:{pid}:*")
+    await invalidation.invalidate_mutation_count("trove", pid)
 
 
 # ---------------------------------------------------------------------------
@@ -482,13 +543,18 @@ async def list_instance_users(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
+    bypass: bool = Depends(cache_bypass),
 ):
     """인스턴스 내 유저 목록."""
     from app.services import trove
 
     await _assert_db_instance_owner(conn, instance_id, token_info)
+    pid = getattr(conn, "_afterglow_project_id", "unknown")
+    key = keys.project_key("trove", pid, f"instances:{instance_id}:users")
     try:
-        return await asyncio.to_thread(trove.list_users, conn, instance_id)
+        return await cache.cached_call(
+            key, cache.ttl_normal(), lambda: trove.list_users(conn, instance_id), refresh=bypass
+        )
     except Exception:
         raise HTTPException(status_code=500, detail="유저 목록 조회 실패")
 
@@ -514,10 +580,13 @@ async def create_instance_user(
             req.host,
             req.databases or None,
         )
-        return {"name": req.name, "host": req.host}
     except Exception:
         _logger.exception("DB 유저 생성 실패 instance=%s name=%s host=%s", instance_id, req.name, req.host)
         raise HTTPException(status_code=500, detail="유저 생성 실패")
+    pid = getattr(conn, "_afterglow_project_id", "unknown")
+    await cache.invalidate(f"afterglow:trove:{pid}:*")
+    await invalidation.invalidate_mutation_count("trove", pid)
+    return {"name": req.name, "host": req.host}
 
 
 @router.delete("/{instance_id}/users/{username}", status_code=204)
@@ -537,6 +606,9 @@ async def delete_instance_user(
     except Exception:
         _logger.exception("DB 유저 삭제 실패 instance=%s name=%s host=%s", instance_id, username, host)
         raise HTTPException(status_code=500, detail="유저 삭제 실패")
+    pid = getattr(conn, "_afterglow_project_id", "unknown")
+    await cache.invalidate(f"afterglow:trove:{pid}:*")
+    await invalidation.invalidate_mutation_count("trove", pid)
 
 
 # ---------------------------------------------------------------------------
@@ -557,12 +629,15 @@ async def attach_floating_ip(
     await _assert_db_instance_owner(conn, instance_id, token_info)
     try:
         result = await asyncio.to_thread(_attach_fip_to_instance_sync, conn, instance_id)
-        return result
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception:
         _logger.exception("Floating IP 할당 실패 instance=%s", instance_id)
         raise HTTPException(status_code=500, detail="Floating IP 할당 실패")
+    pid = getattr(conn, "_afterglow_project_id", "unknown")
+    await cache.invalidate(f"afterglow:trove:{pid}:*")
+    await invalidation.invalidate_mutation_count("trove", pid)
+    return result
 
 
 @router.delete("/{instance_id}/floating-ip", status_code=204)
@@ -579,6 +654,7 @@ async def detach_floating_ip(
     from app.services import neutron, trove
 
     await _assert_db_instance_owner(conn, instance_id, token_info)
+    pid = getattr(conn, "_afterglow_project_id", "unknown")
     try:
         inst = await asyncio.to_thread(trove.get_instance, conn, instance_id)
         ip = inst.get("ip")
@@ -602,6 +678,8 @@ async def detach_floating_ip(
                     await asyncio.to_thread(neutron.delete_floating_ip, conn, f.id)
                 else:
                     await asyncio.to_thread(neutron.disassociate_floating_ip, conn, f.id)
+                await cache.invalidate(f"afterglow:trove:{pid}:*")
+                await invalidation.invalidate_mutation_count("trove", pid)
                 return
         raise HTTPException(status_code=404, detail="이 인스턴스에 연결된 floating IP가 없습니다")
     except HTTPException:
@@ -621,13 +699,18 @@ async def list_instance_backups(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
+    bypass: bool = Depends(cache_bypass),
 ):
     """인스턴스 백업 목록."""
     from app.services import trove
 
     await _assert_db_instance_owner(conn, instance_id, token_info)
+    pid = getattr(conn, "_afterglow_project_id", "unknown")
+    key = keys.project_key("trove", pid, f"instances:{instance_id}:backups")
     try:
-        return await asyncio.to_thread(trove.list_backups, conn, instance_id)
+        return await cache.cached_call(
+            key, cache.ttl_slow(), lambda: trove.list_backups(conn, instance_id), refresh=bypass
+        )
     except Exception:
         raise HTTPException(status_code=500, detail="백업 목록 조회 실패")
 
@@ -644,6 +727,62 @@ async def create_instance_backup(
 
     await _assert_db_instance_owner(conn, instance_id, token_info)
     try:
-        return await asyncio.to_thread(trove.create_backup, conn, instance_id, req.name, req.description)
+        result = await asyncio.to_thread(trove.create_backup, conn, instance_id, req.name, req.description)
     except Exception:
         raise HTTPException(status_code=500, detail="백업 생성 실패")
+    pid = getattr(conn, "_afterglow_project_id", "unknown")
+    await cache.invalidate(f"afterglow:trove:{pid}:*")
+    await invalidation.invalidate_mutation_count("trove", pid)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# 자동 백업 설정
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{instance_id}/auto-backup")
+async def get_instance_auto_backup(
+    instance_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    """인스턴스 자동 백업 설정 조회."""
+    from app.services import db_auto_backup
+
+    await _assert_db_instance_owner(conn, instance_id, token_info)
+    pid = getattr(conn, "_afterglow_project_id", "unknown")
+    cfg = await db_auto_backup.get_db_auto_backup_config(pid, instance_id)
+    if cfg is None:
+        raise HTTPException(status_code=404, detail="자동 백업 설정이 없습니다")
+    return cfg
+
+
+@router.put("/{instance_id}/auto-backup", status_code=200)
+async def set_instance_auto_backup(
+    instance_id: str,
+    req: DbAutoBackupConfigRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    """인스턴스 자동 백업 활성화 또는 설정 갱신."""
+    from app.services import db_auto_backup
+
+    await _assert_db_instance_owner(conn, instance_id, token_info)
+    pid = getattr(conn, "_afterglow_project_id", "unknown")
+    cfg = await db_auto_backup.enable_db_auto_backup(pid, instance_id, req.max_daily, req.max_weekly, req.max_monthly)
+    return cfg
+
+
+@router.delete("/{instance_id}/auto-backup", status_code=204)
+async def delete_instance_auto_backup(
+    instance_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    """인스턴스 자동 백업 비활성화."""
+    from app.services import db_auto_backup
+
+    await _assert_db_instance_owner(conn, instance_id, token_info)
+    pid = getattr(conn, "_afterglow_project_id", "unknown")
+    await db_auto_backup.disable_db_auto_backup(pid, instance_id)

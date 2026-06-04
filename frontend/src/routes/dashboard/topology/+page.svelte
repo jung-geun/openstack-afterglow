@@ -6,45 +6,7 @@
 	import GlobalTopology from '$lib/components/GlobalTopology.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
-
-	interface SubnetDetail {
-		id: string; name: string; cidr: string;
-		gateway_ip: string | null; dhcp_enabled: boolean;
-	}
-	interface TopologyNetwork {
-		id: string; name: string; status: string;
-		is_external: boolean; is_shared: boolean;
-		project_id: string | null;
-		subnet_details: SubnetDetail[];
-	}
-	interface TopologyRouter {
-		id: string; name: string; status: string;
-		external_gateway_network_id: string | null;
-		external_gateway_ips: string[];
-		interface_ips: { ip_address: string; subnet_id: string }[];
-		is_distributed: boolean;
-		is_ha: boolean;
-		connected_subnet_ids: string[];
-		dvr_subnet_ids: string[];
-		project_id: string | null;
-	}
-	interface TopologyInstance {
-		id: string; name: string; status: string;
-		network_names: string[];
-		ip_addresses: { addr: string; type: string; network_name: string }[];
-	}
-	interface FloatingIpInfo {
-		id: string; floating_ip_address: string;
-		fixed_ip_address: string | null; status: string;
-		port_id: string | null; floating_network_id: string;
-		project_id?: string | null;
-	}
-	interface TopologyData {
-		networks: TopologyNetwork[];
-		routers: TopologyRouter[];
-		instances: TopologyInstance[];
-		floating_ips: FloatingIpInfo[];
-	}
+	import type { TopologyData } from '$lib/types/topology';
 
 	let data = $state<TopologyData | null>(null);
 	let loading = $state(true);
