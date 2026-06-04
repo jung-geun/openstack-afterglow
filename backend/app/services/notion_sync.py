@@ -582,7 +582,7 @@ def _row_to_dict(row) -> dict:
         "api_key": api_key,
         "database_id": row.database_id or "",
         "enabled": bool(row.enabled),
-        "interval_minutes": row.interval_minutes or 5,
+        "interval_minutes": row.interval_minutes or 30,
         "last_sync": _iso(row.last_sync),
         "users_database_id": row.users_database_id or "",
         "hypervisors_database_id": row.hypervisors_database_id or "",
@@ -664,7 +664,7 @@ async def save_notion_config(config: dict) -> None:
 
                 row.database_id = config.get("database_id") or ""
                 row.enabled = bool(config.get("enabled", False))
-                row.interval_minutes = int(config.get("interval_minutes") or 5)
+                row.interval_minutes = int(config.get("interval_minutes") or 30)
                 row.users_database_id = config.get("users_database_id") or None
                 row.hypervisors_database_id = config.get("hypervisors_database_id") or None
                 row.gpu_spec_database_id = config.get("gpu_spec_database_id") or None
@@ -1213,7 +1213,7 @@ def _target_to_dict(row, include_api_key: bool = False) -> dict:
         "hypervisors_database_id": row.hypervisors_database_id or "",
         "gpu_spec_database_id": row.gpu_spec_database_id or "",
         "enabled": bool(row.enabled),
-        "interval_minutes": row.interval_minutes or 5,
+        "interval_minutes": row.interval_minutes or 30,
         "last_sync": _iso(row.last_sync),
         "hypervisors_last_sync": _iso(row.hypervisors_last_sync),
         "gpu_spec_last_sync": _iso(row.gpu_spec_last_sync),
@@ -1276,7 +1276,7 @@ async def create_notion_target(data: dict) -> dict:
             hypervisors_database_id=data.get("hypervisors_database_id") or None,
             gpu_spec_database_id=data.get("gpu_spec_database_id") or None,
             enabled=bool(data.get("enabled", True)),
-            interval_minutes=int(data.get("interval_minutes") or 5),
+            interval_minutes=int(data.get("interval_minutes") or 30),
         )
         session.add(row)
         await session.commit()

@@ -10,3 +10,4 @@ resources:
   - redis/deployment.yaml
   - redis/service.yaml
   - worker/deployment.yaml
+  - worker/notion-deployment.yaml

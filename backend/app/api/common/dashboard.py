@@ -269,7 +269,7 @@ async def get_gpu_available(
     def _collect():
         import openstack
 
-        from app.api.identity.admin_gpu import _collect_gpu_hosts
+        from app.services.gpu_inventory import _collect_gpu_hosts
 
         # get_admin_connection_for_project()는 project_id(UUID)를 기대하므로
         # admin project는 project_name으로 직접 연결 생성 (gpu_quota.py와 동일 패턴)

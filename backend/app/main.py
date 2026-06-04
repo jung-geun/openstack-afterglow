@@ -287,6 +287,23 @@ if _ClientDisconnect is not None:
         return JSONResponse(status_code=499, content={"detail": "클라이언트 연결 종료"})
 
 
+from app.services.k3s_errors import K3sApiError
+
+
+@app.exception_handler(K3sApiError)
+async def k3s_api_error_handler(request: Request, exc: K3sApiError) -> JSONResponse:
+    """k3s_kube 등 워커-공유 서비스가 던지는 FastAPI-free 예외를 HTTP 응답으로 변환."""
+    if exc.status_code >= 500:
+        _logger.error(
+            "K3sApiError %d: %s %s — %s",
+            exc.status_code,
+            request.method,
+            request.url.path,
+            exc.detail,
+        )
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     """처리되지 않은 예외를 로그에 기록하고 500을 반환."""

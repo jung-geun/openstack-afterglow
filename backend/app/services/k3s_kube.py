@@ -12,9 +12,9 @@ import tempfile
 
 import httpx
 import yaml
-from fastapi import HTTPException
 
 from app.services import k3s_db
+from app.services.k3s_errors import K3sApiError
 
 _logger = logging.getLogger(__name__)
 
@@ -105,7 +105,7 @@ async def _kube_client(cluster_id: str, *, project_id: str | None = None):
     else:
         kubeconfig_yaml = await k3s_db.get_kubeconfig_admin(cluster_id)
     if not kubeconfig_yaml:
-        raise HTTPException(status_code=502, detail="kubeconfig 를 찾을 수 없습니다 (클러스터 미준비)")
+        raise K3sApiError(502, "kubeconfig 를 찾을 수 없습니다 (클러스터 미준비)")
     cert_pem, key_pem, server_url = _parse_kubeconfig(kubeconfig_yaml)
     ssl_ctx = _make_ssl_context(cert_pem, key_pem)
     async with httpx.AsyncClient(verify=ssl_ctx, timeout=15.0) as client:
@@ -113,14 +113,14 @@ async def _kube_client(cluster_id: str, *, project_id: str | None = None):
 
 
 def _raise_k8s_error(resp: httpx.Response, context: str) -> None:
-    """K8s API 비정상 응답을 HTTPException(502) 으로 정규화."""
+    """K8s API 비정상 응답을 K3sApiError(502) 으로 정규화."""
     try:
         body = resp.json()
         detail = body.get("message") or body.get("reason") or resp.text
     except Exception:
         detail = resp.text[:500]
     _logger.warning("k3s_kube: %s 실패 (status=%d): %s", context, resp.status_code, detail)
-    raise HTTPException(status_code=502, detail=f"K8s API {context} 실패: {detail}")
+    raise K3sApiError(502, f"K8s API {context} 실패: {detail}")
 
 
 def _cm_from_k8s(item: dict) -> dict:
@@ -187,7 +187,7 @@ async def get_configmap(cluster_id: str, namespace: str, name: str, *, project_i
             headers={"Accept": "application/json"},
         )
         if resp.status_code == 404:
-            raise HTTPException(status_code=404, detail=f"ConfigMap {namespace}/{name} 을 찾을 수 없습니다")
+            raise K3sApiError(404, f"ConfigMap {namespace}/{name} 을 찾을 수 없습니다")
         if resp.status_code != 200:
             _raise_k8s_error(resp, f"ConfigMap {namespace}/{name} 조회")
         return _cm_from_k8s(resp.json())
@@ -253,7 +253,7 @@ async def update_configmap(
             headers={"Accept": "application/json", "Content-Type": "application/json"},
         )
         if resp.status_code == 404:
-            raise HTTPException(status_code=404, detail=f"ConfigMap {namespace}/{name} 을 찾을 수 없습니다")
+            raise K3sApiError(404, f"ConfigMap {namespace}/{name} 을 찾을 수 없습니다")
         if resp.status_code != 200:
             _raise_k8s_error(resp, f"ConfigMap {namespace}/{name} 업데이트")
         return _cm_from_k8s(resp.json())
@@ -299,7 +299,7 @@ async def get_secret(cluster_id: str, namespace: str, name: str, *, project_id: 
             headers={"Accept": "application/json"},
         )
         if resp.status_code == 404:
-            raise HTTPException(status_code=404, detail=f"Secret {namespace}/{name} 을 찾을 수 없습니다")
+            raise K3sApiError(404, f"Secret {namespace}/{name} 을 찾을 수 없습니다")
         if resp.status_code != 200:
             _raise_k8s_error(resp, f"Secret {namespace}/{name} 조회")
         return _secret_from_k8s(resp.json())
@@ -369,7 +369,7 @@ async def update_secret(
             headers={"Accept": "application/json", "Content-Type": "application/json"},
         )
         if resp.status_code == 404:
-            raise HTTPException(status_code=404, detail=f"Secret {namespace}/{name} 을 찾을 수 없습니다")
+            raise K3sApiError(404, f"Secret {namespace}/{name} 을 찾을 수 없습니다")
         if resp.status_code != 200:
             _raise_k8s_error(resp, f"Secret {namespace}/{name} 업데이트")
         return _secret_from_k8s(resp.json())
@@ -402,7 +402,7 @@ async def _kube_ws_params(cluster_id: str, *, project_id: str | None = None):
     else:
         kubeconfig_yaml = await k3s_db.get_kubeconfig_admin(cluster_id)
     if not kubeconfig_yaml:
-        raise HTTPException(status_code=502, detail="kubeconfig 를 찾을 수 없습니다 (클러스터 미준비)")
+        raise K3sApiError(502, "kubeconfig 를 찾을 수 없습니다 (클러스터 미준비)")
     cert_pem, key_pem, server_url = _parse_kubeconfig(kubeconfig_yaml)
     ssl_ctx = _make_ssl_context(cert_pem, key_pem)
     wss_url = server_url.replace("https://", "wss://").replace("http://", "ws://")
@@ -438,7 +438,7 @@ async def ensure_namespace(cluster_id: str, name: str, *, project_id: str | None
     if not existing:
         try:
             await create_namespace(cluster_id, name, project_id=project_id)
-        except HTTPException as e:
+        except K3sApiError as e:
             if e.status_code != 409:  # 409 Conflict = 이미 존재
                 raise
 
@@ -488,7 +488,7 @@ async def ensure_pvc(
     if not existing:
         try:
             await create_pvc(cluster_id, namespace, name, size, project_id=project_id)
-        except HTTPException as e:
+        except K3sApiError as e:
             if e.status_code != 409:
                 raise
 
@@ -579,7 +579,7 @@ async def ensure_cluster_role_binding_for_user(
     if not existing:
         try:
             await create_cluster_role_binding(cluster_id, crb_name, k8s_user, project_id=project_id)
-        except HTTPException as e:
+        except K3sApiError as e:
             if e.status_code != 409:
                 raise
 
@@ -854,9 +854,9 @@ async def get_pod_log(
             params=params,
         )
         if resp.status_code == 404:
-            raise HTTPException(status_code=404, detail="Pod not found")
+            raise K3sApiError(404, "Pod not found")
         if resp.status_code != 200:
-            raise HTTPException(status_code=502, detail=f"K8s log error: {resp.status_code}")
+            raise K3sApiError(502, f"K8s log error: {resp.status_code}")
         return resp.text
 
 
@@ -915,7 +915,7 @@ async def scale_deployment(cluster_id: str, namespace: str, name: str, replicas:
 
 
 # ---------------------------------------------------------------------------
-# Stampede 오토스케일 전용 함수 (admin kubeconfig, HTTPException 미사용)
+# Stampede 오토스케일 전용 함수 (admin kubeconfig, K3sApiError 미사용)
 # ---------------------------------------------------------------------------
 
 

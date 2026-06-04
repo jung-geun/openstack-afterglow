@@ -15,6 +15,7 @@ from app.api.common.activity_recorder import rec
 from app.api.deps import get_os_conn, get_token_info
 from app.services import k3s_cloud_shell, k3s_cluster, k3s_kube
 from app.services.cache import _get_redis
+from app.services.k3s_errors import K3sApiError
 
 router = APIRouter()
 _logger = logging.getLogger(__name__)
@@ -83,7 +84,7 @@ async def shell_ws(
 
     try:
         pod = await k3s_cloud_shell.ensure_session(cluster_id, user_id, project_id=project_id)
-    except HTTPException as e:
+    except (HTTPException, K3sApiError) as e:
         try:
             await websocket.send_bytes(b"\x02" + f"\r\n\x1b[31m{e.detail}\x1b[0m\r\n".encode())
             await websocket.close(code=4500, reason=str(e.detail))

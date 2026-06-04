@@ -27,6 +27,9 @@ from app.services import library_builder, manila, neutron, nova
 from app.services.cache import cached_call, invalidate, ttl_fast, ttl_normal, ttl_slow
 from app.services.octavia import get_topology_lbs
 
+# FastAPI-free 인벤토리 유틸리티로 이동됨 — admin.py 내부 호출 + 하위 호환 재export.
+from app.services.openstack_inventory import _fetch_hypervisors_raw
+
 router = APIRouter()
 
 
@@ -134,17 +137,6 @@ async def list_active_builds():
 # ---------------------------------------------------------------------------
 # 관리자 전용 엔드포인트
 # ---------------------------------------------------------------------------
-
-
-def _fetch_hypervisors_raw(conn: openstack.connection.Connection) -> list[dict]:
-    """Nova microversion 2.53으로 하이퍼바이저 raw JSON 조회.
-    2.88+ 에서 vcpus/memory_mb 등 필드가 deprecated되므로 2.53을 명시적으로 사용."""
-    endpoint = conn.compute.get_endpoint()
-    resp = conn.session.get(
-        f"{endpoint}/os-hypervisors/detail",
-        headers={"OpenStack-API-Version": "compute 2.53"},
-    )
-    return resp.json().get("hypervisors", [])
 
 
 def _fetch_overview_hypervisors(conn) -> dict:

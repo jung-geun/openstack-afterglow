@@ -742,6 +742,26 @@ Step 5: 요약 & 배포
 - [x] `frontend/src/routes/admin/notion/+page.svelte` — 단수 폼 → 타겟 카드 리스트 UI로 재작성. "연결 추가" 버튼, 카드별 enabled 상태/마지막 동기화/인라인 수정 폼/지금 동기화/삭제 버튼
 - [x] `backend/tests/test_notion.py` — dedup skip/patch/신규 POST 3건 + 다중 타겟 CRUD API 6건 테스트 추가 (총 9건)
 
+### 8.6.1 Notion 주기 자동 동기화 워커 구동 + 기본 간격 30분 + 경량 이미지 분리
+
+**배경**: `notion_worker.py`가 구현되어 있었으나 어디에서도 실행되지 않는 고아 모듈이었음(`main.py` startup 미등록). 또한 워커가 backend 이미지(OpenTofu ~80MB 포함)를 그대로 사용해 낭비.
+
+- [x] `backend/app/models/db.py`, `admin_notion.py`, `notion_sync.py`, `migrations/002…` — `interval_minutes` 기본값 5→30
+- [x] `frontend/src/lib/components/admin/notion/NotionTargetAddForm.svelte`, `NotionTargetEditForm.svelte` — 폼 기본값 5→30
+- [x] `backend/migrations/015_notion_interval_default_30.sql` — 기존 타겟/설정 5→30 마이그레이션 SQL
+- [x] `backend/app/services/gpu_inventory.py` (신규) — `VENDOR_MAP`, `PCI_DEVICE_MAP`, `_collect_gpu_hosts`, `get_gpu_spec_list`, `build_alias_to_device_name_map` 등을 FastAPI 의존 없는 서비스 모듈로 추출
+- [x] `backend/app/services/openstack_inventory.py` (신규) — `collect_instance_data`, `collect_hypervisor_data`, `_fetch_hypervisors_raw`를 FastAPI 의존 없는 서비스 모듈로 추출
+- [x] `backend/app/services/k3s_errors.py` (신규) + `k3s_kube.py` — `HTTPException` → `K3sApiError` 치환으로 drover FastAPI 차단점 제거
+- [x] `backend/app/main.py` — `K3sApiError` exception handler 등록
+- [x] `backend/app/notion_worker.py` — import 경로를 `admin_*` 라우터 → `gpu_inventory`/`openstack_inventory` 서비스 모듈로 교체 (FastAPI-free)
+- [x] `backend/pyproject.toml` — `[dependency-groups] worker` 추가 (fastapi/uvicorn/boto3/asyncssh 등 API 전용 패키지 제외)
+- [x] `Dockerfile` — `worker-builder` + `worker` 스테이지 추가 (OpenTofu/curl/unzip 제외, 워커 의존성 그룹만 설치)
+- [x] `.github/workflows/docker-build.yml` — `worker` 타겟 빌드/푸시 → `afterglow-drover` 이미지로 CI 등록
+- [x] `docker-compose.yml`, `docker-compose.prod.yml` — drover 이미지 `afterglow-api` → `afterglow-drover`, `notion-worker` 서비스 추가
+- [x] `deploy/k8s-template/base/worker/` — `deployment.yaml` 이미지 교체, `notion-deployment.yaml` 신규, `kustomization.yaml` 등록
+- [x] `deploy/kolla/ansible/roles/afterglow/` — `afterglow_drover_image` 변수 추가, worker 이미지 교체, `afterglow-notion-worker` 컨테이너 추가
+- [x] `backend/tests/test_notion_worker.py` (신규) — 기본값 30 검증 2건, 워커 사이클 interval 존중 5건, FastAPI-free 회귀 가드 1건
+
 ### 8.7 인스턴스 로그 전체 조회 + HEAD kubeconfig + K3s 헬스 대시보드
 
 - [x] `backend/app/api/compute/instances.py` — 콘솔 로그 `length` 파라미터 `ge=1` → `ge=0` 변경 (Nova API에서 `length=0`은 전체 로그)

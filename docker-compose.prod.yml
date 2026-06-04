@@ -73,10 +73,36 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      target: backend
-    image: ${REGISTRY}/afterglow-api:${IMAGE_TAG:-latest}
+      target: worker
+    image: ${REGISTRY}/afterglow-drover:${IMAGE_TAG:-latest}
     pull_policy: always
     command: python -m app.worker
+    volumes:
+      - ./config.toml:/app/config.toml:ro
+      - ./logs:/app/logs
+    environment:
+      - OPENSTACK_PASSWORD=${OPENSTACK_PASSWORD}
+      - SECRET_KEY=${SECRET_KEY}
+      - AFTERGLOW_ENV=production
+    depends_on:
+      - redis
+      - backend
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  # ── Notion Sync Worker ────────────────────────────────────────────────────────
+  notion-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: worker
+    image: ${REGISTRY}/afterglow-drover:${IMAGE_TAG:-latest}
+    pull_policy: always
+    command: python -m app.notion_worker
     volumes:
       - ./config.toml:/app/config.toml:ro
       - ./logs:/app/logs

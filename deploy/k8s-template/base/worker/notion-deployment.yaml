@@ -1,10 +1,10 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: drover
+  name: notion-worker
   namespace: afterglow
   labels:
-    app: drover
+    app: notion-worker
 spec:
   replicas: 1
   revisionHistoryLimit: 3
@@ -15,21 +15,21 @@ spec:
       maxUnavailable: 0
   selector:
     matchLabels:
-      app: drover
+      app: notion-worker
   template:
     metadata:
       labels:
-        app: drover
+        app: notion-worker
     spec:
       terminationGracePeriodSeconds: 30
       containers:
-        - name: worker
+        - name: notion-worker
           image: ghcr.io/openstack-afterglow/afterglow-drover:latest
           imagePullPolicy: Always
           command:
             - "python"
             - "-m"
-            - "app.worker"
+            - "app.notion_worker"
           env:
             - name: REDIS_URL
               valueFrom:
@@ -56,8 +56,6 @@ spec:
                 secretKeyRef:
                   name: afterglow-secrets
                   key: DATABASE_URL
-            - name: K3S_HEALTH_INTERVAL
-              value: "180"
           volumeMounts:
             - name: afterglow-config-volume
               mountPath: /app/config.toml
@@ -67,8 +65,8 @@ spec:
               memory: "128Mi"
               cpu: "50m"
             limits:
-              memory: "256Mi"
-              cpu: "300m"
+              memory: "512Mi"
+              cpu: "500m"
       volumes:
         - name: afterglow-config-volume
           configMap:

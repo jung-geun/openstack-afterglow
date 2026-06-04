@@ -156,7 +156,7 @@ class NotionTarget(Base):
 
     # 동기화 설정
     enabled: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=True)
-    interval_minutes: Mapped[int] = mapped_column(INT, nullable=False, default=5)
+    interval_minutes: Mapped[int] = mapped_column(INT, nullable=False, default=30)
 
     # 마지막 동기화 시각
     last_sync: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -201,7 +201,7 @@ class NotionConfig(Base):
 
     # 동기화 설정
     enabled: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False)
-    interval_minutes: Mapped[int] = mapped_column(INT, nullable=False, default=5)
+    interval_minutes: Mapped[int] = mapped_column(INT, nullable=False, default=30)
 
     # 마지막 동기화 시각
     last_sync: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

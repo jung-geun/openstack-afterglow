@@ -20,7 +20,7 @@
 		apiKey: '',
 		databaseId: '',
 		enabled: true,
-		intervalMinutes: 5,
+		intervalMinutes: 30,
 		usersDatabaseId: '',
 		hypervisorsDatabaseId: '',
 		gpuSpecDatabaseId: '',

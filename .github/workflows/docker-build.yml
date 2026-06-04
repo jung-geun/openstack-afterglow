@@ -14,11 +14,11 @@ on:
   workflow_dispatch:
     inputs:
       targets:
-        description: 'Build targets (backend, frontend, or both)'
+        description: 'Build targets (backend, frontend, worker, or both)'
         required: false
         default: 'both'
         type: choice
-        options: [both, backend, frontend]
+        options: [both, backend, frontend, worker]
 
 env:
   REGISTRY: ${{ secrets.REGISTRY_URL || 'ghcr.io' }}
@@ -81,8 +81,10 @@ jobs:
 
           if echo "$CHANGED" | grep -qE '^(backend/|Dockerfile$|\.dockerignore$)'; then
             echo "backend=true" >> $GITHUB_OUTPUT
+            echo "worker=true" >> $GITHUB_OUTPUT
           else
             echo "backend=false" >> $GITHUB_OUTPUT
+            echo "worker=false" >> $GITHUB_OUTPUT
           fi
 
           if echo "$CHANGED" | grep -qE '^(frontend/|Dockerfile$|\.dockerignore$)'; then
@@ -105,20 +107,23 @@ jobs:
               echo 'targets=["backend"]' >> $GITHUB_OUTPUT
             elif [[ "${DISPATCH_TARGETS}" == "frontend" ]]; then
               echo 'targets=["frontend"]' >> $GITHUB_OUTPUT
+            elif [[ "${DISPATCH_TARGETS}" == "worker" ]]; then
+              echo 'targets=["worker"]' >> $GITHUB_OUTPUT
             else
-              echo 'targets=["backend","frontend"]' >> $GITHUB_OUTPUT
+              echo 'targets=["backend","frontend","worker"]' >> $GITHUB_OUTPUT
             fi
             exit 0
           fi
           # dev 브랜치 이외(main, v* 태그, PR)는 항상 전체 빌드
           if [[ "${EFFECTIVE_REF}" != "refs/heads/dev" ]]; then
-            echo 'targets=["backend","frontend"]' >> $GITHUB_OUTPUT
+            echo 'targets=["backend","frontend","worker"]' >> $GITHUB_OUTPUT
             exit 0
           fi
           # dev 브랜치: 변경된 타겟만 빌드
           TARGETS="[]"
           if [[ "${CHANGED_BACKEND}" == "true" ]]; then
             TARGETS=$(echo "$TARGETS" | jq -c '. + ["backend"]')
+            TARGETS=$(echo "$TARGETS" | jq -c '. + ["worker"]')
           fi
           if [[ "${CHANGED_FRONTEND}" == "true" ]]; then
             TARGETS=$(echo "$TARGETS" | jq -c '. + ["frontend"]')
@@ -185,6 +190,8 @@ jobs:
         run: |
           if [ "${{ matrix.target }}" = "backend" ]; then
             echo "name=${REGISTRY}/${IMAGE_OWNER}/afterglow-api" >> $GITHUB_OUTPUT
+          elif [ "${{ matrix.target }}" = "worker" ]; then
+            echo "name=${REGISTRY}/${IMAGE_OWNER}/afterglow-drover" >> $GITHUB_OUTPUT
           else
             echo "name=${REGISTRY}/${IMAGE_OWNER}/afterglow" >> $GITHUB_OUTPUT
           fi
@@ -314,6 +321,8 @@ jobs:
         run: |
           if [ "${{ matrix.target }}" = "backend" ]; then
             echo "name=${REGISTRY}/${IMAGE_OWNER}/afterglow-api" >> $GITHUB_OUTPUT
+          elif [ "${{ matrix.target }}" = "worker" ]; then
+            echo "name=${REGISTRY}/${IMAGE_OWNER}/afterglow-drover" >> $GITHUB_OUTPUT
           else
             echo "name=${REGISTRY}/${IMAGE_OWNER}/afterglow" >> $GITHUB_OUTPUT
           fi

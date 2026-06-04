@@ -24,15 +24,15 @@ _CHECK_INTERVAL = 60  # 1분마다 타겟 확인
 
 async def _run_notion_target_sync(target: dict) -> None:
     """단일 NotionTarget에 대해 전체 동기화를 실행한다."""
-    from app.api.identity.admin_gpu import (
+    from app.services import notion_sync
+    from app.services.gpu_inventory import (
         build_alias_to_device_name_map,
         get_gpu_spec_list,
     )
-    from app.api.identity.admin_notion import (
+    from app.services.openstack_inventory import (
         collect_hypervisor_data,
         collect_instance_data,
     )
-    from app.services import notion_sync
 
     target_id = target["id"]
     api_key = target["api_key"]
@@ -135,15 +135,15 @@ async def _run_notion_target_sync(target: dict) -> None:
 
 async def _run_sync_cycle() -> None:
     """1회 동기화 사이클: 다중 타겟 → fallback NotionConfig."""
-    from app.api.identity.admin_gpu import (
+    from app.services import notion_sync
+    from app.services.gpu_inventory import (
         build_alias_to_device_name_map,
         get_gpu_spec_list,
     )
-    from app.api.identity.admin_notion import (
+    from app.services.openstack_inventory import (
         collect_hypervisor_data,
         collect_instance_data,
     )
-    from app.services import notion_sync
 
     targets = await notion_sync.list_notion_targets(include_api_key=True)
     if targets:
