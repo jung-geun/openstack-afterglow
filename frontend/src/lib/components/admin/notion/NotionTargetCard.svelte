@@ -36,7 +36,12 @@
 
 	function formatDate(s: string | null | undefined): string {
 		if (!s) return '-';
-		return s.replace('T', ' ').slice(0, 19) + ' UTC';
+		const d = new Date(s.endsWith('Z') || s.includes('+') ? s : s + 'Z');
+		return d.toLocaleString(undefined, {
+			year: 'numeric', month: '2-digit', day: '2-digit',
+			hour: '2-digit', minute: '2-digit', second: '2-digit',
+			hour12: false,
+		});
 	}
 </script>
 
