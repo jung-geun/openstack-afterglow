@@ -275,13 +275,12 @@ async def main() -> None:
     _logger.info("Notion Sync Worker 시작")
 
     settings = get_settings()
-    db_cfg = settings.database if hasattr(settings, "database") else None
-    if db_cfg and getattr(db_cfg, "database_url", None):
+    if settings.database_url:
         try:
-            await init_db(
-                db_cfg.database_url,
-                pool_size=getattr(db_cfg, "database_pool_size", 5),
-                max_overflow=getattr(db_cfg, "database_max_overflow", 10),
+            init_db(
+                settings.database_url,
+                pool_size=settings.database_pool_size,
+                max_overflow=settings.database_max_overflow,
             )
             _logger.info("DB 연결 완료")
         except Exception:
