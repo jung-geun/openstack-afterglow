@@ -83,7 +83,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: worker
-    image: ghcr.io/openstack-afterglow/afterglow-drover:dev
+    image: ghcr.io/openstack-afterglow/afterglow-worker:dev
     command: python -m app.worker
     volumes:
       - ./config.toml:/app/config.toml:ro
@@ -107,7 +107,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: worker
-    image: ghcr.io/openstack-afterglow/afterglow-drover:dev
+    image: ghcr.io/openstack-afterglow/afterglow-worker:dev
     command: python -m app.notion_worker
     volumes:
       - ./config.toml:/app/config.toml:ro

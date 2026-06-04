@@ -7,7 +7,7 @@ afterglow_image_tag: "latest"
 afterglow_backend_image: "{{ afterglow_image_namespace }}/afterglow-api"
 afterglow_frontend_image: "{{ afterglow_image_namespace }}/afterglow"
 # 워커 전용 경량 이미지 (drover + notion-worker 공용)
-afterglow_drover_image: "{{ afterglow_image_namespace }}/afterglow-drover"
+afterglow_drover_image: "{{ afterglow_image_namespace }}/afterglow-worker"
 
 # ── 토글 ──────────────────────────────────────────────────────────────────────
 enable_afterglow: "no"

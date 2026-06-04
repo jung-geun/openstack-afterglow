@@ -756,8 +756,8 @@ Step 5: 요약 & 배포
 - [x] `backend/app/notion_worker.py` — import 경로를 `admin_*` 라우터 → `gpu_inventory`/`openstack_inventory` 서비스 모듈로 교체 (FastAPI-free)
 - [x] `backend/pyproject.toml` — `[dependency-groups] worker` 추가 (fastapi/uvicorn/boto3/asyncssh 등 API 전용 패키지 제외)
 - [x] `Dockerfile` — `worker-builder` + `worker` 스테이지 추가 (OpenTofu/curl/unzip 제외, 워커 의존성 그룹만 설치)
-- [x] `.github/workflows/docker-build.yml` — `worker` 타겟 빌드/푸시 → `afterglow-drover` 이미지로 CI 등록
-- [x] `docker-compose.yml`, `docker-compose.prod.yml` — drover 이미지 `afterglow-api` → `afterglow-drover`, `notion-worker` 서비스 추가
+- [x] `.github/workflows/docker-build.yml` — `worker` 타겟 빌드/푸시 → `afterglow-worker` 이미지로 CI 등록
+- [x] `docker-compose.yml`, `docker-compose.prod.yml` — drover 이미지 `afterglow-api` → `afterglow-worker`, `notion-worker` 서비스 추가
 - [x] `deploy/k8s-template/base/worker/` — `deployment.yaml` 이미지 교체, `notion-deployment.yaml` 신규, `kustomization.yaml` 등록
 - [x] `deploy/kolla/ansible/roles/afterglow/` — `afterglow_drover_image` 변수 추가, worker 이미지 교체, `afterglow-notion-worker` 컨테이너 추가
 - [x] `backend/tests/test_notion_worker.py` (신규) — 기본값 30 검증 2건, 워커 사이클 interval 존중 5건, FastAPI-free 회귀 가드 1건

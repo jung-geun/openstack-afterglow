@@ -24,7 +24,7 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
         - name: notion-worker
-          image: ghcr.io/openstack-afterglow/afterglow-drover:latest
+          image: ghcr.io/openstack-afterglow/afterglow-worker:latest
           imagePullPolicy: Always
           command:
             - "python"

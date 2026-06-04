@@ -191,7 +191,7 @@ jobs:
           if [ "${{ matrix.target }}" = "backend" ]; then
             echo "name=${REGISTRY}/${IMAGE_OWNER}/afterglow-api" >> $GITHUB_OUTPUT
           elif [ "${{ matrix.target }}" = "worker" ]; then
-            echo "name=${REGISTRY}/${IMAGE_OWNER}/afterglow-drover" >> $GITHUB_OUTPUT
+            echo "name=${REGISTRY}/${IMAGE_OWNER}/afterglow-worker" >> $GITHUB_OUTPUT
           else
             echo "name=${REGISTRY}/${IMAGE_OWNER}/afterglow" >> $GITHUB_OUTPUT
           fi
@@ -322,7 +322,7 @@ jobs:
           if [ "${{ matrix.target }}" = "backend" ]; then
             echo "name=${REGISTRY}/${IMAGE_OWNER}/afterglow-api" >> $GITHUB_OUTPUT
           elif [ "${{ matrix.target }}" = "worker" ]; then
-            echo "name=${REGISTRY}/${IMAGE_OWNER}/afterglow-drover" >> $GITHUB_OUTPUT
+            echo "name=${REGISTRY}/${IMAGE_OWNER}/afterglow-worker" >> $GITHUB_OUTPUT
           else
             echo "name=${REGISTRY}/${IMAGE_OWNER}/afterglow" >> $GITHUB_OUTPUT
           fi

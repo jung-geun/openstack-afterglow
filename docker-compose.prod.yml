@@ -74,7 +74,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: worker
-    image: ${REGISTRY}/afterglow-drover:${IMAGE_TAG:-latest}
+    image: ${REGISTRY}/afterglow-worker:${IMAGE_TAG:-latest}
     pull_policy: always
     command: python -m app.worker
     volumes:
@@ -100,7 +100,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: worker
-    image: ${REGISTRY}/afterglow-drover:${IMAGE_TAG:-latest}
+    image: ${REGISTRY}/afterglow-worker:${IMAGE_TAG:-latest}
     pull_policy: always
     command: python -m app.notion_worker
     volumes:
