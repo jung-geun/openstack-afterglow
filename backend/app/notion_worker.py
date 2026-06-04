@@ -156,6 +156,9 @@ async def _run_sync_cycle() -> None:
             if last_sync_str:
                 try:
                     last_sync_dt = datetime.fromisoformat(last_sync_str.replace("Z", "+00:00"))
+                    # MySQL/aiomysql는 timezone-naive datetime을 반환하므로 UTC로 명시
+                    if last_sync_dt.tzinfo is None:
+                        last_sync_dt = last_sync_dt.replace(tzinfo=UTC)
                     elapsed_min = (now - last_sync_dt).total_seconds() / 60
                     if elapsed_min < interval_min:
                         continue
