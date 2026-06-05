@@ -157,7 +157,7 @@
 		<!-- 우측 컨트롤 -->
 		<div class="ml-auto flex items-center gap-2.5">
 			{#if !$page.url.pathname.startsWith('/admin')}
-				<div class="hidden lg:block"><ProjectSelector /></div>
+				<div class="hidden lg:block"><ProjectSelector direction="down" /></div>
 			{/if}
 
 			{#if $isAdmin}

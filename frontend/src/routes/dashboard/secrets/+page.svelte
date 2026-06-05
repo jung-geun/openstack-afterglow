@@ -373,7 +373,7 @@
 			<span class="text-lg leading-none mt-0.5">📊</span>
 			<div>
 				<span class="text-gray-200 font-medium">쿼터(Quota)</span>는 이 프로젝트에서 생성할 수 있는 리소스 한도입니다.
-				<span class="text-white">∞</span>는 무제한을 의미합니다. 한도는 관리자 페이지의 Key Manager 쿼터 설정에서 변경할 수 있습니다.
+				<span class="text-white">∞</span>는 무제한을 의미합니다. 한도 변경은 관리자에게 문의하세요.
 			</div>
 		</div>
 	{/if}
