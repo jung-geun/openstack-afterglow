@@ -61,21 +61,25 @@
 			class="grid grid-cols-[1fr_60px_0px_32px_0px_0px_0px_0px] sm:grid-cols-[1.6fr_70px_90px_100px_0px_0px_0px_0px] lg:grid-cols-[1.6fr_70px_90px_100px_1fr_80px_80px_56px] px-4 py-3 text-[13px] items-center border-b border-gray-800 transition-colors last:border-b-0 {selectedVolumeId === vol.id ? 'bg-gray-800/30' : ''}"
 		>
 			<!-- 이름 -->
-			<div class="flex items-center gap-2.5 min-w-0">
+			<button
+				type="button"
+				onclick={() => onOpenDetail(vol.id)}
+				class="flex items-center gap-2.5 min-w-0 w-full text-left group"
+			>
 				<div class="hidden sm:flex shrink-0 w-7 h-7 rounded-md bg-cyan-500/15 border border-cyan-500/30 items-center justify-center">
 					<svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
 					</svg>
 				</div>
-				<div class="min-w-0">
+				<div class="min-w-0 flex-1">
 					{#if vol.name}
-						<button type="button" onclick={() => onOpenDetail(vol.id)} class="block w-full font-medium text-white hover:text-blue-400 transition-colors text-left truncate">{vol.name}</button>
+						<span class="block font-medium text-white group-hover:text-blue-400 transition-colors truncate">{vol.name}</span>
 					{:else}
-						<button type="button" onclick={() => onOpenDetail(vol.id)} class="block w-full font-mono text-xs text-gray-400 hover:text-blue-400 transition-colors text-left truncate">{vol.id}</button>
+						<span class="block font-mono text-xs text-gray-400 group-hover:text-blue-400 transition-colors truncate">{vol.id}</span>
 					{/if}
 					<div class="text-[11px] text-gray-500 font-mono truncate">{vol.id.slice(0, 8)}…</div>
 				</div>
-			</div>
+			</button>
 			<!-- 크기 -->
 			<div class="text-gray-300 font-mono text-[12px]">{formatStorage(vol.size)}</div>
 			<!-- 유형 -->

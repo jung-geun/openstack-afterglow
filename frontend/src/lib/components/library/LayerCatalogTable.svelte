@@ -78,10 +78,10 @@
                 {#if depth > 0}
                   <span class="text-gray-600 mr-1">└</span>
                 {/if}
-                <div>
-                  <a href={layerHref(layer.id)} class="font-medium text-gray-100 hover:text-blue-400 transition-colors max-md:block max-md:max-w-[66vw] max-md:truncate" title={layer.name}>{layer.name}</a>
+                <a href={layerHref(layer.id)} class="block flex-1 min-w-0 group" title={layer.name}>
+                  <span class="block font-medium text-gray-100 group-hover:text-blue-400 transition-colors max-md:max-w-[66vw] max-md:truncate">{layer.name}</span>
                   <div class="text-xs text-gray-500">{layer.version}</div>
-                </div>
+                </a>
               </div>
             </td>
             <td class="px-4 py-3">

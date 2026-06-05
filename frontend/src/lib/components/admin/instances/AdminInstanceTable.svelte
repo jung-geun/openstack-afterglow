@@ -50,8 +50,8 @@
 				<tr
 					class="border-b border-gray-800/50 text-xs transition-colors"
 				>
-					<td class="py-2 pr-4">
-						<button type="button" onclick={() => onOpen(s)} class="font-medium text-white hover:text-blue-400 transition-colors text-left max-md:block max-md:max-w-[66vw] max-md:truncate" title={s.name || s.id}>{s.name || s.id.slice(0, 8)}</button>
+					<td class="p-0">
+						<button type="button" onclick={() => onOpen(s)} class="block w-full py-2 pr-4 font-medium text-white hover:text-blue-400 transition-colors text-left" title={s.name || s.id}><span class="max-md:block max-md:max-w-[66vw] max-md:truncate">{s.name || s.id.slice(0, 8)}</span></button>
 					</td>
 					<td class="py-2 pr-4">
 						<div class="flex items-center gap-1.5">

@@ -49,22 +49,26 @@
         class="grid grid-cols-[1fr_0px_auto_0px_0px_0px_0px] sm:grid-cols-[1.4fr_1fr_100px_80px_80px_100px_56px] px-4 py-3 text-[13px] items-center border-b border-gray-800 transition-colors last:border-b-0"
       >
         <!-- 이름 -->
-        <div class="flex items-center gap-2.5 min-w-0">
+        <button
+          type="button"
+          onclick={() => onOpenPanel(net.id)}
+          class="flex items-center gap-2.5 min-w-0 w-full text-left group"
+        >
           <div class="shrink-0 w-7 h-7 rounded-md bg-violet-500/15 border border-violet-500/30 flex items-center justify-center">
             <svg class="w-3.5 h-3.5 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           </div>
-          <div class="min-w-0">
+          <div class="min-w-0 flex-1">
             <div class="flex items-center gap-1.5">
-              <button type="button" onclick={() => onOpenPanel(net.id)} class="font-medium text-white hover:text-blue-400 transition-colors text-left truncate">{net.name || net.id.slice(0, 12)}</button>
+              <span class="font-medium text-white group-hover:text-blue-400 transition-colors truncate">{net.name || net.id.slice(0, 12)}</span>
               {#if net.id === defaultNetworkId}
                 <span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/40 border border-blue-700/60 text-blue-400 shrink-0">기본</span>
               {/if}
             </div>
             <div class="text-[11px] text-gray-500 font-mono truncate">{net.id.slice(0, 8)}…</div>
           </div>
-        </div>
+        </button>
         <!-- CIDR -->
         <div class="hidden sm:block text-gray-400 font-mono text-[12px]">—</div>
         <!-- 유형 badge -->
