@@ -41,6 +41,7 @@ async def _build_token_response(
     roles: list[str],
     is_system_admin: bool,
     default_project_id: str = "",
+    auth_method: str = "password",
 ) -> TokenResponse:
     """Keystone 토큰으로 JWT access+refresh 쌍을 발급하고 TokenResponse를 반환."""
     refresh_str, r_jti, r_exp = jwt_service.sign_refresh(user_id)
@@ -57,6 +58,7 @@ async def _build_token_response(
         project_id=project_id,
         user_id=user_id,
         exp=r_exp,
+        auth_method=auth_method,
     )
     exp_dt = datetime.fromtimestamp(a_exp, tz=UTC)
     return TokenResponse(
@@ -70,6 +72,7 @@ async def _build_token_response(
         roles=roles,
         default_project_id=default_project_id,
         is_system_admin=is_system_admin,
+        auth_method=auth_method,
     )
 
 
@@ -144,6 +147,7 @@ async def login(request: Request, req: LoginRequest, background_tasks: Backgroun
         roles=data.get("roles", []),
         is_system_admin=data.get("is_system_admin", False),
         default_project_id=default_project_id,
+        auth_method="password",
     )
 
 
@@ -156,6 +160,7 @@ async def me(token_info: dict = Depends(get_token_info)):
         project_name=token_info["project_name"],
         roles=token_info["roles"],
         is_system_admin=token_info.get("is_system_admin", False),
+        auth_method=token_info.get("auth_method", "password"),
     )
 
 
@@ -238,6 +243,7 @@ async def refresh_token(request: Request, req: RefreshRequest):
         username=kc_info["username"],
         roles=kc_info.get("roles", []),
         is_system_admin=kc_info.get("is_system_admin", False),
+        auth_method=sess.get("auth_method", "password"),
     )
 
 
@@ -267,6 +273,7 @@ async def switch_project(req: SwitchProjectRequest, token_info: dict = Depends(g
         username=kc_info["username"],
         roles=kc_info.get("roles", []),
         is_system_admin=kc_info.get("is_system_admin", False),
+        auth_method=token_info.get("auth_method", "password"),
     )
 
 
@@ -373,4 +380,5 @@ async def gitlab_callback(request: Request, req: GitLabCallbackRequest, backgrou
         username=data["username"],
         roles=data.get("roles", []),
         is_system_admin=data.get("is_system_admin", False),
+        auth_method="federated",
     )

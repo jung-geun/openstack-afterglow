@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.api.deps import get_os_conn, get_token_info
 from app.main import app
 
 
@@ -93,3 +94,36 @@ async def test_change_password_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.post("/api/profile/password", json={"current_password": "a", "new_password": "b"})
     assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_change_password_federated_user(mock_conn):
+    """외부(federated) 로그인 사용자는 패스워드 변경 시 403."""
+    from tests.conftest import make_token_info
+
+    async def override_get_os_conn():
+        try:
+            yield mock_conn
+        finally:
+            pass
+
+    async def override_get_token_info():
+        return make_token_info(auth_method="federated")
+
+    app.dependency_overrides[get_os_conn] = override_get_os_conn
+    app.dependency_overrides[get_token_info] = override_get_token_info
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+            headers={"X-Auth-Token": "test-token", "X-Project-Id": "test-project-123"},
+        ) as ac:
+            resp = await ac.post(
+                "/api/profile/password",
+                json={"current_password": "OldPass123!", "new_password": "NewPass456!"},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 403
+    assert "외부 로그인" in resp.json()["detail"]

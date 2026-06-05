@@ -75,6 +75,7 @@ def make_token_info(
     roles: list[str] | None = None,
     project_id: str = "test-project-123",
     is_system_admin: bool = False,
+    auth_method: str = "password",
 ) -> dict:
     """모의 token_info 딕셔너리 생성."""
     return {
@@ -86,6 +87,7 @@ def make_token_info(
         "roles": roles or ["member"],
         "expires_at": "2099-01-01T00:00:00Z",
         "is_system_admin": is_system_admin,
+        "auth_method": auth_method,
     }
 
 

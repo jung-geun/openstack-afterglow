@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { auth } from '$lib/stores/auth';
+  import { auth, authReady } from '$lib/stores/auth';
   import { api, ApiError } from '$lib/api/client';
 
   const token = $derived($auth.token ?? undefined);
@@ -42,6 +42,7 @@
   }
 </script>
 
+{#if $authReady && !$auth.federated}
 <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
   <h3 class="text-sm font-semibold text-white mb-4">패스워드 변경</h3>
 
@@ -75,3 +76,4 @@
     >{saving ? '변경 중...' : '패스워드 변경'}</button>
   </div>
 </div>
+{/if}

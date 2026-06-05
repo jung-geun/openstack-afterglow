@@ -31,6 +31,7 @@ async def store_session(
     project_id: str,
     user_id: str,
     exp: int,
+    auth_method: str = "password",
 ) -> None:
     """refresh JTI에 세션 데이터를 저장. TTL은 refresh 만료 시각까지."""
     r = await _get_redis()
@@ -42,6 +43,7 @@ async def store_session(
             "project_id": project_id,
             "user_id": user_id,
             "exp": exp,
+            "auth_method": auth_method,
         }
     )
     async with r.pipeline() as pipe:

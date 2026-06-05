@@ -106,6 +106,10 @@ async def change_password(
     conn=Depends(get_os_conn),
 ):
     """패스워드 변경 (현재 패스워드 검증 후 변경)."""
+    # 외부(federated) 로그인 사용자는 로컬 패스워드가 없으므로 변경 불가
+    if token_info.get("auth_method") == "federated":
+        raise HTTPException(status_code=403, detail="외부 로그인 사용자는 패스워드를 변경할 수 없습니다")
+
     user_id = token_info["user_id"]
     username = token_info["username"]
     project_name = token_info.get("project_name", "")

@@ -186,6 +186,7 @@ async def _resolve_jwt_token_info(bearer_token: str, x_project_id: str | None) -
         "roles": info.get("roles", []),
         "is_system_admin": info.get("is_system_admin", False),
         "refresh_jti": refresh_jti,
+        "auth_method": sess.get("auth_method", "password"),
     }
 
 

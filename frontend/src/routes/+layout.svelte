@@ -55,7 +55,7 @@
 				const me = await api.get<{ user_id: string; username: string; project_id: string; project_name: string; roles: string[]; is_system_admin: boolean }>(
 					'/api/auth/me', token, projectId ?? undefined,
 				);
-				auth.update((s) => ({ ...s, isSystemAdmin: me.is_system_admin === true, roles: me.roles ?? s.roles }));
+				auth.update((s) => ({ ...s, isSystemAdmin: me.is_system_admin === true, roles: me.roles ?? s.roles, federated: me.auth_method === "federated" }));
 				authReady.set(true);
 			} catch {
 				authReady.set(false);

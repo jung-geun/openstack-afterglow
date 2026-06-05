@@ -19,6 +19,7 @@ class TokenResponse(BaseModel):
     roles: list[str] = []
     default_project_id: str = ""
     is_system_admin: bool = False
+    auth_method: str = "password"
 
 
 class UserInfo(BaseModel):
@@ -28,6 +29,7 @@ class UserInfo(BaseModel):
     project_name: str
     roles: list[str]
     is_system_admin: bool = False
+    auth_method: str = "password"
 
 
 class ProjectInfo(BaseModel):

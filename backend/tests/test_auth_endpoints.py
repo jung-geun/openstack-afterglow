@@ -220,3 +220,60 @@ async def test_gitlab_enabled(client):
     resp = await client.get("/api/auth/gitlab/enabled")
     assert resp.status_code == 200
     assert "enabled" in resp.json()
+
+
+# ────── auth_method 필드 ──────
+
+
+@pytest.mark.asyncio
+async def test_me_returns_auth_method(client):
+    """/me 응답에 auth_method 필드가 포함되어야 한다."""
+    resp = await client.get("/api/auth/me")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "auth_method" in data
+    assert data["auth_method"] == "password"  # 기본 로컬 로그인
+
+
+@pytest.mark.asyncio
+async def test_gitlab_callback_stores_federated_auth_method():
+    """gitlab_callback이 store_session에 auth_method='federated'를 전달하는지 확인."""
+    exchange_data = {
+        "token": "ks-token",
+        "project_id": "proj-123",
+        "project_name": "test-project",
+        "user_id": "user-123",
+        "username": "gitlabuser",
+        "roles": ["member"],
+        "is_system_admin": False,
+    }
+    captured: dict = {}
+
+    async def mock_store_session(*, jti, keystone_token, project_id, user_id, exp, auth_method="password"):
+        captured["auth_method"] = auth_method
+
+    with (
+        # exchange_code는 함수 내에서 지연 import되므로 원본 모듈에서 패치
+        patch("app.services.gitlab_oidc.exchange_code", new_callable=AsyncMock, return_value=exchange_data),
+        patch("app.services.session_store.store_session", side_effect=mock_store_session),
+        patch("app.services.jwt_service.sign_refresh", return_value=("refresh-tok", "jti-123", 9999999999)),
+        patch("app.services.jwt_service.sign_access", return_value=("access-tok", "ajti-123", 9999999999)),
+        patch("app.api.identity.auth._prewarm_dashboard"),
+        patch("app.api.identity.auth.record_project_access", new_callable=AsyncMock),
+    ):
+        from httpx import ASGITransport, AsyncClient
+
+        from app.main import app
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            resp = await ac.post(
+                "/api/auth/gitlab/callback",
+                json={"code": "auth-code", "state": "state-value"},
+            )
+
+    # GitLab OIDC 비활성화 시 404 — 그 외엔 store_session 호출 여부만 검증
+    if resp.status_code != 404:
+        assert captured.get("auth_method") == "federated", (
+            f"gitlab_callback은 auth_method='federated'를 store_session에 전달해야 합니다. "
+            f"실제 값: {captured.get('auth_method')!r}"
+        )

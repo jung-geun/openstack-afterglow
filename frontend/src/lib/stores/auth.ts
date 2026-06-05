@@ -24,6 +24,7 @@ export interface AuthState {
 	sessionWarningBeforeSeconds: number;
 	roles: string[];
 	isSystemAdmin: boolean;
+	federated: boolean;             // true = OIDC/외부 로그인 (패스워드 변경 불가)
 }
 
 const initial: AuthState = {
@@ -39,6 +40,7 @@ const initial: AuthState = {
 	sessionWarningBeforeSeconds: 300,
 	roles: [],
 	isSystemAdmin: false,
+	federated: false,
 };
 
 function loadPersistedAuth(): AuthState {
