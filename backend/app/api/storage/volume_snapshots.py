@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from app.api.common.activity_recorder import rec
 from app.api.common.owner_check import assert_resource_owner
-from app.api.deps import cache_bypass, get_os_conn, get_token_info
+from app.api.deps import CacheMode, cache_mode, get_os_conn, get_token_info
 from app.services import cinder
 from app.services.cache import cached_call, invalidate, invalidation, keys, ttl_normal
 
@@ -47,7 +47,7 @@ async def list_snapshots(
     volume_id: str | None = None,
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
-    bypass: bool = Depends(cache_bypass),
+    cm: CacheMode = Depends(cache_mode),
 ):
     pid = conn._afterglow_project_id
     is_admin = token_info.get("is_system_admin", False)
@@ -59,7 +59,8 @@ async def list_snapshots(
             cache_key,
             ttl_normal(),
             lambda: cinder.list_snapshots(conn, volume_id, caller_project_id),
-            refresh=bypass,
+            enabled=cm.enabled,
+            refresh=cm.refresh,
         )
     except Exception:
         raise HTTPException(status_code=500, detail="스냅샷 목록 조회 실패")
@@ -118,13 +119,15 @@ async def get_snapshot(
     snapshot_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
-    bypass: bool = Depends(cache_bypass),
+    cm: CacheMode = Depends(cache_mode),
 ):
     await _assert_snapshot_owner(conn, snapshot_id, token_info)
     pid = conn._afterglow_project_id
     key = keys.project_key("cinder", pid, "snapshots", sub=snapshot_id)
     try:
-        return await cached_call(key, ttl_normal(), lambda: cinder.get_snapshot(conn, snapshot_id), refresh=bypass)
+        return await cached_call(
+            key, ttl_normal(), lambda: cinder.get_snapshot(conn, snapshot_id), enabled=cm.enabled, refresh=cm.refresh
+        )
     except Exception:
         raise HTTPException(status_code=404, detail="스냅샷을 찾을 수 없습니다")
 

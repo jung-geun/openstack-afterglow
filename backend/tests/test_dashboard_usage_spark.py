@@ -315,8 +315,9 @@ async def test_trend_14d_uses_redis_cache(client, mock_conn):
     try:
         sample = [{"ts": i * 21600, "value": 50.0} for i in range(56)]
         with _patch_prom_query(sample) as mock_qr:
-            await client.get("/api/dashboard/metrics/trend?range=14d")
-            await client.get("/api/dashboard/metrics/trend?range=14d")
+            # 캐시 기본 OFF — read-through 를 쓰려면 ?cache=true 로 opt-in
+            await client.get("/api/dashboard/metrics/trend?range=14d&cache=true")
+            await client.get("/api/dashboard/metrics/trend?range=14d&cache=true")
 
         # 4개 식(vcpu, memory, storage, network) × 1회 = 4 (두 번째 호출은 캐시 히트)
         assert mock_qr.call_count == 4, f"캐시가 작동하면 4번 호출 기대, 실제: {mock_qr.call_count}"

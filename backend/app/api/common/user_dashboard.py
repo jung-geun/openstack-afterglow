@@ -9,9 +9,9 @@ if TYPE_CHECKING:
 import asyncio
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 
-from app.api.deps import get_os_conn
+from app.api.deps import CacheMode, cache_mode, get_os_conn
 from app.services import keystone
 from app.services.cache import cached_call, ttl_fast, ttl_normal
 
@@ -69,7 +69,14 @@ def _count_floating_ips(conn: openstack.connection.Connection, project_id: str) 
     return sum(1 for _ in conn.network.ips(project_id=project_id))
 
 
-async def _query_project(token: str, user_id: str, project_id: str, project_name: str, refresh: bool = False) -> dict:
+async def _query_project(
+    token: str,
+    user_id: str,
+    project_id: str,
+    project_name: str,
+    enabled: bool = True,
+    refresh: bool = False,
+) -> dict:
     """단일 프로젝트의 인스턴스/볼륨/네트워크/FIP 정보를 비동기로 조회."""
     try:
         proj_conn = await asyncio.to_thread(keystone.get_openstack_connection, token, project_id)
@@ -79,24 +86,28 @@ async def _query_project(token: str, user_id: str, project_id: str, project_name
                     f"afterglow:user-dashboard:{project_id}:{user_id}:servers",
                     ttl_normal(),
                     lambda c=proj_conn, u=user_id: _list_servers_for_project(c, u),
+                    enabled=enabled,
                     refresh=refresh,
                 ),
                 cached_call(
                     f"afterglow:user-dashboard:{project_id}:{user_id}:volumes",
                     ttl_normal(),
                     lambda c=proj_conn, u=user_id: _list_volumes_for_project(c, u),
+                    enabled=enabled,
                     refresh=refresh,
                 ),
                 cached_call(
                     f"afterglow:user-dashboard:{project_id}:networks",
                     ttl_normal(),
                     lambda c=proj_conn, pid=project_id: _count_networks(c, pid),
+                    enabled=enabled,
                     refresh=refresh,
                 ),
                 cached_call(
                     f"afterglow:user-dashboard:{project_id}:fips",
                     ttl_fast(),
                     lambda c=proj_conn, pid=project_id: _count_floating_ips(c, pid),
+                    enabled=enabled,
                     refresh=refresh,
                 ),
             )
@@ -140,7 +151,7 @@ async def _query_project(token: str, user_id: str, project_id: str, project_name
 @router.get("/summary")
 async def get_user_dashboard_summary(
     conn: openstack.connection.Connection = Depends(get_os_conn),
-    refresh: bool = Query(False),
+    cm: CacheMode = Depends(cache_mode),
 ):
     """사용자가 소속된 모든 프로젝트의 인스턴스/볼륨 통합 조회."""
     token = conn._afterglow_token
@@ -153,7 +164,9 @@ async def get_user_dashboard_summary(
         raise HTTPException(status_code=500, detail="프로젝트 목록 조회 실패")
 
     # 병렬로 각 프로젝트 데이터 조회
-    tasks = [_query_project(token, user_id, p["id"], p["name"], refresh=refresh) for p in projects]
+    tasks = [
+        _query_project(token, user_id, p["id"], p["name"], enabled=cm.enabled, refresh=cm.refresh) for p in projects
+    ]
     project_results = await asyncio.gather(*tasks)
 
     totals = {

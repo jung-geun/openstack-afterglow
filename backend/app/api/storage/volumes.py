@@ -7,12 +7,12 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import openstack
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.api.common.activity_recorder import rec
 from app.api.common.owner_check import assert_resource_owner
-from app.api.deps import get_os_conn, get_token_info, require_admin
+from app.api.deps import CacheMode, cache_mode, get_os_conn, get_token_info, require_admin
 from app.models.storage import CreateVolumeRequest, ExtendVolumeRequest, VolumeInfo
 from app.rate_limit import limiter
 from app.services import cinder, nova
@@ -35,14 +35,17 @@ async def _assert_volume_owner(
 
 
 @router.get("", response_model=list[VolumeInfo])
-async def list_volumes(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
+async def list_volumes(
+    conn: openstack.connection.Connection = Depends(get_os_conn), cm: CacheMode = Depends(cache_mode)
+):
     pid = conn._afterglow_project_id
     try:
         return await cached_call(
             f"afterglow:cinder:{pid}:volumes:v2",
             ttl_fast(),
             lambda: [v.model_dump() for v in cinder.list_volumes(conn)],
-            refresh=refresh,
+            enabled=cm.enabled,
+            refresh=cm.refresh,
         )
     except Exception:
         raise HTTPException(status_code=500, detail="볼륨 목록 조회 실패")

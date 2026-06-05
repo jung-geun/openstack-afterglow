@@ -23,7 +23,7 @@ from sqlalchemy.exc import InterfaceError, OperationalError
 from starlette.requests import Request
 
 from app.api.common.activity_recorder import rec
-from app.api.deps import cache_bypass, get_os_conn, get_token_info
+from app.api.deps import CacheMode, cache_mode, get_os_conn, get_token_info
 from app.config import get_settings
 from app.database import mark_db_unhealthy
 from app.models.k3s import (
@@ -99,7 +99,7 @@ def _cluster_to_info(c: dict) -> K3sClusterInfo:
 async def list_k3s_clusters(
     token_info: dict = Depends(get_token_info),
     include_deleted: bool = Query(default=False),
-    bypass: bool = Depends(cache_bypass),
+    cm: CacheMode = Depends(cache_mode),
 ):
     project_id = token_info["project_id"]
     sub = "all" if include_deleted else None
@@ -115,7 +115,7 @@ async def list_k3s_clusters(
         return [_cluster_to_info(c) for c in clusters]
 
     try:
-        return await cached_call(cache_key, ttl_normal(), _fetch, refresh=bypass)
+        return await cached_call(cache_key, ttl_normal(), _fetch, enabled=cm.enabled, refresh=cm.refresh)
     except (OperationalError, InterfaceError):
         _logger.warning("k3s 클러스터 목록 DB 조회 실패 — 빈 목록 반환", exc_info=True)
         mark_db_unhealthy()
@@ -126,7 +126,7 @@ async def list_k3s_clusters(
 async def get_k3s_cluster(
     cluster_id: str,
     token_info: dict = Depends(get_token_info),
-    bypass: bool = Depends(cache_bypass),
+    cm: CacheMode = Depends(cache_mode),
 ):
     project_id = token_info["project_id"]
     cache_key = cache_keys.project_key("k3s", project_id, "clusters", sub=cluster_id)
@@ -137,7 +137,7 @@ async def get_k3s_cluster(
             raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
         return _cluster_to_info(cluster)
 
-    return await cached_call(cache_key, ttl_normal(), _fetch, refresh=bypass)
+    return await cached_call(cache_key, ttl_normal(), _fetch, enabled=cm.enabled, refresh=cm.refresh)
 
 
 @router.api_route("/{cluster_id}/kubeconfig", methods=["GET", "HEAD"])
@@ -145,7 +145,7 @@ async def download_kubeconfig(
     request: Request,
     cluster_id: str,
     token_info: dict = Depends(get_token_info),
-    bypass: bool = Depends(cache_bypass),
+    cm: CacheMode = Depends(cache_mode),
 ):
     """kubeconfig YAML 파일 다운로드. 아직 준비되지 않으면 404.
 
@@ -164,8 +164,8 @@ async def download_kubeconfig(
     cache_key = cache_keys.project_key("k3s", project_id, "clusters", sub=f"{cluster_id}:kubeconfig")
     kubeconfig: bytes | None = None
 
-    # 캐시 조회 (bypass=True 이면 건너뜀)
-    if not bypass:
+    # 캐시 조회 (캐시 활성 + 강제 갱신 아님일 때만)
+    if cm.enabled and not cm.refresh:
         try:
             backend = get_backend()
             cached_raw = await backend.get(cache_key)
@@ -181,8 +181,8 @@ async def download_kubeconfig(
             _logger.error("kubeconfig 복호화 실패: %s", e)
             raise HTTPException(status_code=500, detail="kubeconfig 복호화에 실패했습니다. 관리자에게 문의하세요.")
 
-        # None이 아닐 때만 캐시 저장
-        if kubeconfig is not None:
+        # None이 아닐 때만, 캐시 활성 시에만 저장
+        if kubeconfig is not None and cm.enabled:
             try:
                 backend = get_backend()
                 await backend.set(cache_key, _json.dumps(kubeconfig.decode()), ttl_slow())

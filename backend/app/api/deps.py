@@ -5,6 +5,7 @@ import hashlib
 import logging
 import time
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from fastapi import Depends, Header, HTTPException, Query
@@ -289,5 +290,38 @@ async def cache_bypass(refresh: bool = Query(False)) -> bool:
     """`?refresh=true` 쿼리스트링으로 캐시 우회를 허용하는 의존성.
 
     cached_call(key, ttl, fn, refresh=bypass) 와 페어로 사용한다.
+
+    .. deprecated::
+        신규 엔드포인트는 cache_mode / CacheMode 를 사용한다.
     """
     return refresh
+
+
+@dataclass
+class CacheMode:
+    """캐시 read/write 모드를 담는 값 객체.
+
+    enabled=True, refresh=False  — opt-in read-through (`?cache=true`)
+    enabled=True, refresh=True   — 강제 재조회+재저장 (`?refresh=true`)
+    enabled=False, refresh=False — origin 직행, 캐시 미접촉 (기본)
+    """
+
+    enabled: bool
+    refresh: bool
+
+
+async def cache_mode(
+    cache: bool = Query(False, description="캐시 read-through opt-in"),
+    refresh: bool = Query(False, description="캐시 강제 갱신(재조회+재저장)"),
+) -> CacheMode:
+    """`?cache=true` / `?refresh=true` 쿼리를 읽어 CacheMode 를 반환하는 의존성.
+
+    우선순위: refresh > cache > 기본(origin 직행).
+    flip-flop 방지: `?refresh=true` 는 재조회+재저장(enabled=True, refresh=True) 으로
+    처리해 다음 `?cache=true` 조회가 stale 로 되돌아가지 않도록 한다.
+    """
+    if refresh:
+        return CacheMode(enabled=True, refresh=True)
+    if cache:
+        return CacheMode(enabled=True, refresh=False)
+    return CacheMode(enabled=False, refresh=False)

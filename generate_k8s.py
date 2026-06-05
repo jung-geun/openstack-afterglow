@@ -471,6 +471,8 @@ def _render_toml_for_k8s(cfg: dict) -> str:
             lines.append(f'pool_timeout = {db["pool_timeout"]}')
         if "unhealthy_seconds" in db:
             lines.append(f'unhealthy_seconds = {db["unhealthy_seconds"]}')
+        if "db_auto_backup_cron" in db:
+            lines.append(f'db_auto_backup_cron = {_toml_str(db["db_auto_backup_cron"])}')
         lines.append("")
 
     # [cors]

@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import and_, func, select
 from sqlalchemy.exc import OperationalError
 
-from app.api.deps import get_os_conn
+from app.api.deps import CacheMode, cache_mode, get_os_conn
 from app.config import get_settings
 from app.database import get_session_factory, is_db_available, mark_db_unhealthy
 from app.services import cinder, nova, prom_query
@@ -102,7 +102,7 @@ def _gpu_count_from_flavor(name: str, extra_specs: dict) -> int:
 @router.get("/summary")
 async def get_dashboard_summary(
     conn: openstack.connection.Connection = Depends(get_os_conn),
-    refresh: bool = Query(False),
+    cm: CacheMode = Depends(cache_mode),
 ):
     project_id = conn._afterglow_project_id
 
@@ -112,25 +112,29 @@ async def get_dashboard_summary(
                 f"afterglow:nova:{project_id}:servers",
                 ttl_fast(),
                 lambda: _list_servers_as_dicts(conn),
-                refresh=refresh,
+                enabled=cm.enabled,
+                refresh=cm.refresh,
             ),
             cached_call(
                 f"afterglow:nova:{project_id}:limits",
                 ttl_normal(),
                 lambda: nova.get_project_limits(conn),
-                refresh=refresh,
+                enabled=cm.enabled,
+                refresh=cm.refresh,
             ),
             cached_call(
                 f"afterglow:cinder:{project_id}:limits",
                 ttl_normal(),
                 lambda: cinder.get_volume_limits(conn),
-                refresh=refresh,
+                enabled=cm.enabled,
+                refresh=cm.refresh,
             ),
             cached_call(
                 f"afterglow:nova:{project_id}:flavors",
                 ttl_static(),
                 lambda: _list_flavors_as_dicts(conn),
-                refresh=refresh,
+                enabled=cm.enabled,
+                refresh=cm.refresh,
             ),
         )
     except Exception:
@@ -170,7 +174,7 @@ async def get_dashboard_config():
 @router.get("/quotas")
 async def get_project_quotas(
     conn: openstack.connection.Connection = Depends(get_os_conn),
-    refresh: bool = Query(False),
+    cm: CacheMode = Depends(cache_mode),
 ):
     """현재 프로젝트의 전체 할당량 (compute/storage/network/file_storage/gpu) 조회."""
     project_id = conn._afterglow_project_id
@@ -195,7 +199,8 @@ async def get_project_quotas(
             f"afterglow:dashboard:{project_id}:quotas",
             ttl_normal(),
             _fetch_quotas,
-            refresh=refresh,
+            enabled=cm.enabled,
+            refresh=cm.refresh,
         )
         compute_q, volume_q, network_q = results[0], results[1], results[2]
         idx = 3
@@ -256,7 +261,7 @@ async def get_project_quotas(
 @router.get("/gpu-available")
 async def get_gpu_available(
     conn: openstack.connection.Connection = Depends(get_os_conn),
-    refresh: bool = Query(False),
+    cm: CacheMode = Depends(cache_mode),
 ):
     """GPU 타입별 가용량 조회 (gpu_available_visible=true 시 활성화).
 
@@ -304,7 +309,9 @@ async def get_gpu_available(
         }
 
     try:
-        data = await cached_call("afterglow:gpu:availability", ttl_normal(), _collect, refresh=refresh)
+        data = await cached_call(
+            "afterglow:gpu:availability", ttl_normal(), _collect, enabled=cm.enabled, refresh=cm.refresh
+        )
     except Exception:
         _logger.warning("GPU 가용량 조회 실패", exc_info=True)
         raise HTTPException(status_code=500, detail="GPU 가용량 조회 실패")
@@ -353,7 +360,7 @@ async def get_project_usage(
     start: str = Query(default=None, description="시작일 YYYY-MM-DD"),
     end: str = Query(default=None, description="종료일 YYYY-MM-DD"),
     conn: openstack.connection.Connection = Depends(get_os_conn),
-    refresh: bool = Query(False),
+    cm: CacheMode = Depends(cache_mode),
 ):
     """기간별 프로젝트 리소스 사용량."""
     project_id = conn._afterglow_project_id
@@ -365,7 +372,8 @@ async def get_project_usage(
             f"afterglow:dashboard:{project_id}:usage:{start_dt}:{end_dt}",
             ttl_fast(),
             lambda: nova.get_project_usage(conn, project_id, start_dt, end_dt),
-            refresh=refresh,
+            enabled=cm.enabled,
+            refresh=cm.refresh,
         )
     except Exception:
         raise HTTPException(status_code=500, detail="작업 실패")
@@ -391,7 +399,7 @@ def _range_to_dates(range_str: str) -> tuple[str, str]:
 @router.get("/overview")
 async def get_dashboard_overview(
     conn: openstack.connection.Connection = Depends(get_os_conn),
-    refresh: bool = Query(False),
+    cm: CacheMode = Depends(cache_mode),
 ):
     """대시보드 개요: StatTile 6종 + 최근 인스턴스 8 + 실행 중 태스크."""
     project_id = conn._afterglow_project_id
@@ -403,25 +411,29 @@ async def get_dashboard_overview(
                 f"afterglow:nova:{project_id}:servers",
                 ttl_fast(),
                 lambda: _list_servers_as_dicts(conn),
-                refresh=refresh,
+                enabled=cm.enabled,
+                refresh=cm.refresh,
             ),
             cached_call(
                 f"afterglow:nova:{project_id}:limits",
                 ttl_normal(),
                 lambda: nova.get_project_limits(conn),
-                refresh=refresh,
+                enabled=cm.enabled,
+                refresh=cm.refresh,
             ),
             cached_call(
                 f"afterglow:cinder:{project_id}:limits",
                 ttl_normal(),
                 lambda: cinder.get_volume_limits(conn),
-                refresh=refresh,
+                enabled=cm.enabled,
+                refresh=cm.refresh,
             ),
             cached_call(
                 f"afterglow:neutron:{project_id}:fips",
                 ttl_fast(),
                 lambda: list(conn.network.ips(project_id=project_id)),
-                refresh=refresh,
+                enabled=cm.enabled,
+                refresh=cm.refresh,
             ),
             return_exceptions=True,
         )
@@ -486,7 +498,7 @@ async def get_dashboard_overview(
 async def get_dashboard_usage_stats(
     period: str = Query("30d", alias="range", description="24h|7d|14d|30d"),
     conn: openstack.connection.Connection = Depends(get_os_conn),
-    refresh: bool = Query(False),
+    cm: CacheMode = Depends(cache_mode),
 ):
     """사용량 분석: 인스턴스별 사용량 + OS 분포 + 볼륨 타입별 용량."""
     project_id = conn._afterglow_project_id
@@ -498,13 +510,15 @@ async def get_dashboard_usage_stats(
                 f"afterglow:nova:{project_id}:servers",
                 ttl_fast(),
                 lambda: _list_servers_as_dicts(conn),
-                refresh=refresh,
+                enabled=cm.enabled,
+                refresh=cm.refresh,
             ),
             cached_call(
                 f"afterglow:nova:{project_id}:flavors",
                 ttl_static(),
                 lambda: _list_flavors_as_dicts(conn),
-                refresh=refresh,
+                enabled=cm.enabled,
+                refresh=cm.refresh,
             ),
             cached_call(
                 f"afterglow:cinder:{project_id}:volumes",
@@ -513,13 +527,15 @@ async def get_dashboard_usage_stats(
                     {"id": v.id, "size": v.size or 0, "volume_type": v.volume_type or "standard"}
                     for v in conn.block_storage.volumes()
                 ],
-                refresh=refresh,
+                enabled=cm.enabled,
+                refresh=cm.refresh,
             ),
             cached_call(
                 f"afterglow:dashboard:{project_id}:nova_usage:{start_dt}:{end_dt}",
                 ttl_fast(),
                 lambda: nova.get_project_usage(conn, project_id, start_dt, end_dt),
-                refresh=refresh,
+                enabled=cm.enabled,
+                refresh=cm.refresh,
             ),
             return_exceptions=True,
         )
@@ -625,7 +641,7 @@ async def get_dashboard_usage_report(
     response: Response,
     period: str = Query("30d", alias="range", description="7d|14d|30d"),
     conn: openstack.connection.Connection = Depends(get_os_conn),
-    refresh: bool = Query(False),
+    cm: CacheMode = Depends(cache_mode),
 ):
     """사용량 리포트: 기간별 일별 사용량 + flavor 시간 + 쿼터 예측."""
     project_id = conn._afterglow_project_id
@@ -640,13 +656,15 @@ async def get_dashboard_usage_report(
                 f"afterglow:dashboard:{project_id}:nova_usage:{start_dt}:{end_dt}",
                 ttl_fast(),
                 lambda: nova.get_project_usage(conn, project_id, start_dt, end_dt),
-                refresh=refresh,
+                enabled=cm.enabled,
+                refresh=cm.refresh,
             ),
             cached_call(
                 f"afterglow:nova:{project_id}:quota",
                 ttl_normal(),
                 lambda: nova.get_project_quota(conn, project_id),
-                refresh=refresh,
+                enabled=cm.enabled,
+                refresh=cm.refresh,
             ),
             return_exceptions=True,
         )
@@ -714,7 +732,7 @@ async def get_dashboard_usage_report(
 async def get_dashboard_metrics_trend(
     conn: openstack.connection.Connection = Depends(get_os_conn),
     range_: str = Query("14d", alias="range", description="24h|7d|14d"),
-    refresh: bool = Query(False, description="캐시 강제 무효화"),
+    cm: CacheMode = Depends(cache_mode),
 ):
     """vCPU/메모리/스토리지/네트워크 추세 (PromQL).
 
@@ -810,14 +828,14 @@ async def get_dashboard_metrics_trend(
             "range": range_,
         }
 
-    return await cached_call(cache_key, cfg["ttl"], _query_all, refresh=refresh)
+    return await cached_call(cache_key, cfg["ttl"], _query_all, enabled=cm.enabled, refresh=cm.refresh)
 
 
 @router.get("/activity")
 async def get_dashboard_activity(
     period: str = Query("7d", alias="range", description="24h|7d|30d"),
     conn: openstack.connection.Connection = Depends(get_os_conn),
-    refresh: bool = Query(False),
+    cm: CacheMode = Depends(cache_mode),
 ):
     """활동 현황: KPI + 시간대 분포 + 최근 감사 로그."""
     project_id = conn._afterglow_project_id

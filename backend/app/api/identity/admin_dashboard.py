@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.api.common.activity_recorder import rec
-from app.api.deps import get_os_conn, get_token_info, require_admin
+from app.api.deps import CacheMode, cache_mode, get_os_conn, get_token_info, require_admin
 from app.services.cache import cached_call, ttl_fast, ttl_normal
 
 _logger = logging.getLogger(__name__)
@@ -36,6 +36,7 @@ BulkAction = Literal["start", "stop", "reboot", "hard-reboot", "snapshot"]
 @router.get("/notifications", dependencies=[Depends(require_admin)])
 async def get_admin_notifications(
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    cm: CacheMode = Depends(cache_mode),
 ):
     """관리자 알림 6종 (오류 인스턴스 / 높은 CPU 호스트 / k3s 대기 등)."""
     notifications: list[dict] = []
@@ -81,6 +82,8 @@ async def get_admin_notifications(
             "afterglow:admin:notifications:low_ram",
             ttl_fast(),
             _hypervisors,
+            enabled=cm.enabled,
+            refresh=cm.refresh,
         )
         if low_ram_hosts:
             notifications.append(
@@ -110,6 +113,8 @@ async def get_admin_notifications(
                 "afterglow:admin:notifications:k3s_pending",
                 ttl_normal(),
                 _k3s_pending,
+                enabled=cm.enabled,
+                refresh=cm.refresh,
             )
             if pending:
                 notifications.append(
@@ -141,6 +146,8 @@ async def get_admin_notifications(
             "afterglow:admin:notifications:fip_pool",
             ttl_normal(),
             _fip_pool,
+            enabled=cm.enabled,
+            refresh=cm.refresh,
         )
         if exhausted:
             notifications.append(
@@ -188,6 +195,7 @@ def _is_gpu_flavor(flavor: dict) -> bool:
 @router.get("/instances/health", dependencies=[Depends(require_admin)])
 async def get_instances_health(
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    cm: CacheMode = Depends(cache_mode),
 ):
     """전체 인스턴스 상태 집계 (total/active/error/with_alerts/gpu_count) + ERROR 목록."""
     try:
@@ -240,6 +248,8 @@ async def get_instances_health(
             "afterglow:admin:instances_health",
             ttl_fast(),
             _collect,
+            enabled=cm.enabled,
+            refresh=cm.refresh,
         )
     except Exception:
         raise HTTPException(status_code=500, detail="인스턴스 상태 조회 실패")
@@ -328,6 +338,7 @@ def _apply_action(
 @router.get("/floating-ips/pool-stats", dependencies=[Depends(require_admin)])
 async def get_fip_pool_stats(
     conn: openstack.connection.Connection = Depends(get_os_conn),
+    cm: CacheMode = Depends(cache_mode),
 ):
     """Floating IP 네트워크(풀)별 in_use / total / util% 통계."""
     try:
@@ -372,6 +383,8 @@ async def get_fip_pool_stats(
             "afterglow:admin:fip_pool_stats",
             ttl_normal(),
             _collect,
+            enabled=cm.enabled,
+            refresh=cm.refresh,
         )
     except Exception:
         raise HTTPException(status_code=500, detail="FIP 풀 통계 조회 실패")

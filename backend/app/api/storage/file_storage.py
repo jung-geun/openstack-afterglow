@@ -8,10 +8,10 @@ if TYPE_CHECKING:
 import logging
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.api.common.activity_recorder import rec
-from app.api.deps import get_os_conn, get_token_info
+from app.api.deps import CacheMode, cache_mode, get_os_conn, get_token_info
 from app.config import get_settings
 from app.models.storage import CreateAccessRuleRequest, CreateFileStorageRequest, FileStorageInfo
 from app.rate_limit import limiter
@@ -57,7 +57,7 @@ async def get_file_storage_quota(conn: openstack.connection.Connection = Depends
 async def list_file_storages(
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
-    refresh: bool = Query(False),
+    cm: CacheMode = Depends(cache_mode),
 ):
     pid = conn._afterglow_project_id
     is_admin = token_info.get("is_system_admin", False)
@@ -67,7 +67,8 @@ async def list_file_storages(
             f"afterglow:manila:{pid}:file_storages",
             ttl_fast(),
             lambda: [s.model_dump() for s in manila.list_file_storages(conn, caller_project_id=caller_project_id)],
-            refresh=refresh,
+            enabled=cm.enabled,
+            refresh=cm.refresh,
         )
     except Exception:
         raise HTTPException(status_code=500, detail="파일 스토리지 목록 조회 실패")

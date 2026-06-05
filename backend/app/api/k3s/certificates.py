@@ -7,7 +7,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response, StreamingResponse
 
-from app.api.deps import get_token_info
+from app.api.deps import CacheMode, cache_mode, get_token_info
 from app.config import get_settings
 from app.models.k3s import CertificateExpiryResponse, CertificateInfo
 from app.services import k3s_db
@@ -72,6 +72,7 @@ async def download_ca_certificate(
 async def get_certificate_expiry(
     cluster_id: str,
     token_info: dict = Depends(get_token_info),
+    cm: CacheMode = Depends(cache_mode),
 ):
     """k3s 클러스터 인증서 만료 조회 (CA, 클라이언트, 서버 TLS)."""
     project_id = token_info["project_id"]
@@ -105,7 +106,7 @@ async def get_certificate_expiry(
             "server_via_tls": server_via_tls,
         }
 
-    data = await cached_call(cache_key, _CERT_EXPIRY_TTL, _compute)
+    data = await cached_call(cache_key, _CERT_EXPIRY_TTL, _compute, enabled=cm.enabled, refresh=cm.refresh)
 
     def _to_info(d: dict | None) -> CertificateInfo | None:
         if not d:

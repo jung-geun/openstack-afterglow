@@ -12,7 +12,7 @@ import logging
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel
 
-from app.api.deps import get_os_conn, get_token_info, require_admin
+from app.api.deps import CacheMode, cache_mode, get_os_conn, get_token_info, require_admin
 from app.services import activity, keystone, session_store
 from app.services.cache import cached_call, invalidate, ttl_slow
 
@@ -176,7 +176,7 @@ class UpdateProjectRequest(BaseModel):
 
 @router.get("/projects/names", dependencies=[Depends(require_admin)])
 async def list_project_names(
-    conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)
+    conn: openstack.connection.Connection = Depends(get_os_conn), cm: CacheMode = Depends(cache_mode)
 ):
     """모든 프로젝트의 id/name 목록 (페이지네이션 없이)."""
 
@@ -184,7 +184,9 @@ async def list_project_names(
         return [{"id": p.id, "name": p.name or ""} for p in conn.identity.projects()]
 
     try:
-        return await cached_call("afterglow:admin:project_names", ttl_slow(), _list, refresh=refresh)
+        return await cached_call(
+            "afterglow:admin:project_names", ttl_slow(), _list, enabled=cm.enabled, refresh=cm.refresh
+        )
     except Exception:
         raise HTTPException(status_code=500, detail="프로젝트 이름 목록 조회 실패")
 
@@ -502,7 +504,9 @@ async def update_project_quotas(
 
 
 @router.get("/groups", dependencies=[Depends(require_admin)])
-async def list_groups(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
+async def list_groups(
+    conn: openstack.connection.Connection = Depends(get_os_conn), cm: CacheMode = Depends(cache_mode)
+):
     """그룹 목록."""
 
     def _list():
@@ -522,7 +526,7 @@ async def list_groups(conn: openstack.connection.Connection = Depends(get_os_con
         return groups
 
     try:
-        return await cached_call("afterglow:admin:groups", ttl_slow(), _list, refresh=refresh)
+        return await cached_call("afterglow:admin:groups", ttl_slow(), _list, enabled=cm.enabled, refresh=cm.refresh)
     except Exception:
         raise HTTPException(status_code=500, detail="그룹 목록 조회 실패")
 
@@ -723,7 +727,7 @@ async def remove_user_from_group(
 
 
 @router.get("/roles", dependencies=[Depends(require_admin)])
-async def list_roles(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
+async def list_roles(conn: openstack.connection.Connection = Depends(get_os_conn), cm: CacheMode = Depends(cache_mode)):
     """역할 목록."""
 
     def _list():
@@ -742,7 +746,7 @@ async def list_roles(conn: openstack.connection.Connection = Depends(get_os_conn
         return roles
 
     try:
-        return await cached_call("afterglow:admin:roles", ttl_slow(), _list, refresh=refresh)
+        return await cached_call("afterglow:admin:roles", ttl_slow(), _list, enabled=cm.enabled, refresh=cm.refresh)
     except Exception:
         raise HTTPException(status_code=500, detail="역할 목록 조회 실패")
 

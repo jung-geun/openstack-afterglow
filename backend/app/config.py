@@ -276,6 +276,7 @@ def _load_toml() -> dict:
     flat["database_connect_timeout"] = db.get("connect_timeout", 10)
     flat["database_pool_timeout"] = db.get("pool_timeout", 10)
     flat["database_unhealthy_seconds"] = db.get("unhealthy_seconds", 15)
+    flat["database_db_auto_backup_cron"] = db.get("db_auto_backup_cron", "0 3 * * *")
 
     smtp = data.get("smtp", {})
     flat["smtp_enabled"] = smtp.get("enabled", False)
@@ -524,6 +525,7 @@ class Settings(BaseSettings):
     database_connect_timeout: int = 10
     database_pool_timeout: int = 10
     database_unhealthy_seconds: int = 15
+    database_db_auto_backup_cron: str = "0 3 * * *"
 
     # GitLab OIDC
     gitlab_oidc_enabled: bool = False

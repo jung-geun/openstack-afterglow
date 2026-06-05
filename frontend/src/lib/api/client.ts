@@ -195,7 +195,17 @@ export const api = {
 		projectId?: string,
 		opts?: { refresh?: boolean; signal?: AbortSignal }
 	) => {
-		const url = opts?.refresh ? `${path}${path.includes('?') ? '&' : '?'}refresh=true` : path;
+		let url: string;
+		if (opts?.refresh) {
+			// 수동 새로고침: origin 직행 + 재저장 (`?refresh=true`)
+			url = `${path}${path.includes('?') ? '&' : '?'}refresh=true`;
+		} else if (path.includes('refresh=true')) {
+			// URL에 이미 refresh=true 포함 — 무변경 (수동 조립된 3개 경로 보존)
+			url = path;
+		} else {
+			// 기본: 백엔드 캐시 opt-in (`?cache=true`)
+			url = `${path}${path.includes('?') ? '&' : '?'}cache=true`;
+		}
 		const signal = opts?.signal
 			? AbortSignal.any([opts.signal, AbortSignal.timeout(30_000)])
 			: undefined;

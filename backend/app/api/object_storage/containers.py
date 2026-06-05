@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, U
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from app.api.deps import cache_bypass, get_os_conn, get_token_info
+from app.api.deps import CacheMode, cache_mode, get_os_conn, get_token_info
 from app.models.storage import (
     BulkDeleteRequest,
     CopyObjectRequest,
@@ -261,7 +261,7 @@ async def list_object_storage_containers(
     include_quarantine: bool = Query(False, description="admin 전용: *-quarantine 버킷 포함"),
     include_trash: bool = Query(False, description="admin 전용: *-trash 버킷 포함"),
     include_deleted: bool = Query(False, description="소프트 삭제 버킷 포함 (복구 대기 중인 버킷)"),
-    bypass: bool = Depends(cache_bypass),
+    cm: CacheMode = Depends(cache_mode),
 ):
     """Swift 오브젝트 스토리지 컨테이너 목록.
 
@@ -300,7 +300,8 @@ async def list_object_storage_containers(
             key,
             cache.ttl_normal(),
             lambda: swift.list_containers(conn, include_quarantine, include_trash),
-            refresh=bypass,
+            enabled=cm.enabled,
+            refresh=cm.refresh,
         )
     except Exception:
         raise HTTPException(status_code=500, detail="오브젝트 스토리지 컨테이너 목록 조회 실패")
@@ -371,7 +372,7 @@ async def create_object_storage_container(
 async def get_object_storage_container(
     container_name: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
-    bypass: bool = Depends(cache_bypass),
+    cm: CacheMode = Depends(cache_mode),
 ):
     """컨테이너 메타데이터(오브젝트 수, 바이트 등) 조회."""
     from app.services import swift
@@ -383,7 +384,8 @@ async def get_object_storage_container(
             key,
             cache.ttl_slow(),
             lambda: swift.get_container_metadata(conn, container_name),
-            refresh=bypass,
+            enabled=cm.enabled,
+            refresh=cm.refresh,
         )
     except Exception:
         raise HTTPException(status_code=404, detail="컨테이너를 찾을 수 없습니다")
@@ -440,7 +442,7 @@ async def list_objects(
     prefix: str = Query(default=""),
     delimiter: str = Query(default="/"),
     conn: openstack.connection.Connection = Depends(get_os_conn),
-    bypass: bool = Depends(cache_bypass),
+    cm: CacheMode = Depends(cache_mode),
 ):
     """컨테이너 내 오브젝트 목록.
 
@@ -457,7 +459,8 @@ async def list_objects(
             key,
             cache.ttl_fast(),
             lambda: swift.list_objects(conn, container_name, prefix, delimiter),
-            refresh=bypass,
+            enabled=cm.enabled,
+            refresh=cm.refresh,
         )
     except Exception:
         raise HTTPException(status_code=500, detail="오브젝트 목록 조회 실패")

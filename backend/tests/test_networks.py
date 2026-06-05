@@ -112,7 +112,7 @@ async def test_get_topology_includes_instance_project_id(client, mock_conn):
 
     mock_conn.network.ports.return_value = []
 
-    async def fake_cached_call(key, ttl, fn, refresh=False):
+    async def fake_cached_call(key, ttl, fn, refresh=False, enabled=True):
         return fn()
 
     with (

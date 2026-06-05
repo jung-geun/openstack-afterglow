@@ -31,12 +31,35 @@ async def test_list_keypairs(client, mock_conn):
 
 
 @pytest.mark.asyncio
-async def test_list_keypairs_cache_bypass(client, mock_conn):
-    """?refresh=true 쿼리스트링이 cached_call에 refresh=True로 전달되어야 한다."""
+async def test_list_keypairs_cache_opt_in(client, mock_conn):
+    """`?cache=true` 쿼리스트링이 cached_call에 enabled=True로 전달되어야 한다."""
     captured = {}
 
-    async def mock_cached_call(key, ttl, fn, *, refresh=False, **kw):
+    async def mock_cached_call(key, ttl, fn, *, enabled=True, refresh=False, **kw):
         captured["key"] = key
+        captured["enabled"] = enabled
+        captured["refresh"] = refresh
+        return fn()
+
+    with (
+        patch("app.api.compute.keypairs.nova.list_keypairs", return_value=[make_keypair()]),
+        patch("app.api.compute.keypairs.cached_call", new=mock_cached_call),
+    ):
+        resp = await client.get("/api/keypairs?cache=true")
+
+    assert resp.status_code == 200
+    assert captured.get("enabled") is True
+    assert captured.get("refresh") is False
+    assert "keypairs" in captured.get("key", "")
+
+
+@pytest.mark.asyncio
+async def test_list_keypairs_refresh(client, mock_conn):
+    """`?refresh=true` 쿼리스트링이 cached_call에 enabled=True, refresh=True로 전달되어야 한다."""
+    captured = {}
+
+    async def mock_cached_call(key, ttl, fn, *, enabled=True, refresh=False, **kw):
+        captured["enabled"] = enabled
         captured["refresh"] = refresh
         return fn()
 
@@ -47,15 +70,34 @@ async def test_list_keypairs_cache_bypass(client, mock_conn):
         resp = await client.get("/api/keypairs?refresh=true")
 
     assert resp.status_code == 200
+    assert captured.get("enabled") is True
     assert captured.get("refresh") is True
-    assert "keypairs" in captured.get("key", "")
+
+
+@pytest.mark.asyncio
+async def test_list_keypairs_default_no_cache(client, mock_conn):
+    """기본 요청(파라미터 없음)은 enabled=False(origin 직행)이어야 한다."""
+    captured = {}
+
+    async def mock_cached_call(key, ttl, fn, *, enabled=True, refresh=False, **kw):
+        captured["enabled"] = enabled
+        return fn()
+
+    with (
+        patch("app.api.compute.keypairs.nova.list_keypairs", return_value=[make_keypair()]),
+        patch("app.api.compute.keypairs.cached_call", new=mock_cached_call),
+    ):
+        resp = await client.get("/api/keypairs")
+
+    assert resp.status_code == 200
+    assert captured.get("enabled") is False
 
 
 @pytest.mark.asyncio
 async def test_create_keypair(client, mock_conn):
     with (
         patch("app.api.compute.keypairs.nova.create_keypair", return_value=make_keypair("new-key")),
-        patch("app.api.compute.keypairs.invalidate", new=AsyncMock()),
+        patch("app.api.compute.keypairs.patch_list", new=AsyncMock()),
         patch("app.api.compute.keypairs.invalidation.invalidate_mutation_count", new=AsyncMock()),
     ):
         resp = await client.post("/api/keypairs", json={"name": "new-key"})
@@ -63,24 +105,26 @@ async def test_create_keypair(client, mock_conn):
 
 
 @pytest.mark.asyncio
-async def test_create_keypair_invalidates_cache(client, mock_conn):
-    """키페어 생성 후 캐시 invalidate + mutation count 증가가 호출되어야 한다."""
-    mock_invalidate = AsyncMock()
+async def test_create_keypair_patches_cache(client, mock_conn):
+    """키페어 생성 후 patch_list(add=...) + mutation count 증가가 호출되어야 한다."""
+    mock_patch_list = AsyncMock()
     mock_mutation_count = AsyncMock()
 
     with (
         patch("app.api.compute.keypairs.nova.create_keypair", return_value=make_keypair("new-key")),
-        patch("app.api.compute.keypairs.invalidate", new=mock_invalidate),
+        patch("app.api.compute.keypairs.patch_list", new=mock_patch_list),
         patch("app.api.compute.keypairs.invalidation.invalidate_mutation_count", new=mock_mutation_count),
     ):
         resp = await client.post("/api/keypairs", json={"name": "new-key"})
 
     assert resp.status_code == 201
-    mock_invalidate.assert_called_once()
-    pattern = mock_invalidate.call_args[0][0]
-    assert "nova" in pattern
-    assert "keypairs" in pattern
-    assert pattern.endswith("*")
+    mock_patch_list.assert_called_once()
+    key_arg = mock_patch_list.call_args[0][0]
+    assert "nova" in key_arg
+    assert "keypairs" in key_arg
+    # add 키워드 인자가 전달되어야 함
+    assert "add" in mock_patch_list.call_args[1]
+    assert mock_patch_list.call_args[1]["add"]["name"] == "new-key"
     mock_mutation_count.assert_called_once_with("nova", mock_conn._afterglow_project_id)
 
 
@@ -88,7 +132,7 @@ async def test_create_keypair_invalidates_cache(client, mock_conn):
 async def test_delete_keypair(client, mock_conn):
     with (
         patch("app.api.compute.keypairs.nova.delete_keypair", return_value=None),
-        patch("app.api.compute.keypairs.invalidate", new=AsyncMock()),
+        patch("app.api.compute.keypairs.patch_list", new=AsyncMock()),
         patch("app.api.compute.keypairs.invalidation.invalidate_mutation_count", new=AsyncMock()),
     ):
         resp = await client.delete("/api/keypairs/my-key")
@@ -96,22 +140,22 @@ async def test_delete_keypair(client, mock_conn):
 
 
 @pytest.mark.asyncio
-async def test_delete_keypair_invalidates_cache(client, mock_conn):
-    """키페어 삭제 후 캐시 invalidate + mutation count 증가가 호출되어야 한다."""
-    mock_invalidate = AsyncMock()
+async def test_delete_keypair_patches_cache(client, mock_conn):
+    """키페어 삭제 후 patch_list(remove=True) + mutation count 증가가 호출되어야 한다."""
+    mock_patch_list = AsyncMock()
     mock_mutation_count = AsyncMock()
 
     with (
         patch("app.api.compute.keypairs.nova.delete_keypair", return_value=None),
-        patch("app.api.compute.keypairs.invalidate", new=mock_invalidate),
+        patch("app.api.compute.keypairs.patch_list", new=mock_patch_list),
         patch("app.api.compute.keypairs.invalidation.invalidate_mutation_count", new=mock_mutation_count),
     ):
         resp = await client.delete("/api/keypairs/my-key")
 
     assert resp.status_code == 204
-    mock_invalidate.assert_called_once()
-    pattern = mock_invalidate.call_args[0][0]
-    assert "nova" in pattern
-    assert "keypairs" in pattern
-    assert pattern.endswith("*")
+    mock_patch_list.assert_called_once()
+    key_arg = mock_patch_list.call_args[0][0]
+    assert "nova" in key_arg
+    assert "keypairs" in key_arg
+    assert mock_patch_list.call_args[1].get("remove") is True
     mock_mutation_count.assert_called_once_with("nova", mock_conn._afterglow_project_id)

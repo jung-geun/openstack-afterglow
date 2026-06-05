@@ -6,12 +6,12 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import openstack
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from app.api.common.activity_recorder import rec
 from app.api.common.owner_check import assert_resource_owner
-from app.api.deps import get_os_conn, get_token_info
+from app.api.deps import CacheMode, cache_mode, get_os_conn, get_token_info
 from app.rate_limit import limiter
 from app.services import octavia
 from app.services.cache import cached_call, invalidate, ttl_normal
@@ -83,7 +83,7 @@ def _handle(fn, error_msg: str):
 
 @router.get("")
 async def list_load_balancers(
-    conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)
+    conn: openstack.connection.Connection = Depends(get_os_conn), cm: CacheMode = Depends(cache_mode)
 ):
     pid = conn._afterglow_project_id
     try:
@@ -91,7 +91,8 @@ async def list_load_balancers(
             f"afterglow:octavia:{pid}:lbs",
             ttl_normal(),
             lambda: octavia.list_load_balancers(conn, project_id=pid),
-            refresh=refresh,
+            enabled=cm.enabled,
+            refresh=cm.refresh,
         )
     except Exception:
         raise HTTPException(status_code=500, detail="로드밸런서 목록 조회 실패")

@@ -141,6 +141,8 @@ def has_invalidation_call(node: ast.AsyncFunctionDef) -> bool:
     - invalidate_tag(...)
     - bump_version(...)
     - invalidate_mutation_count(...)
+    - write_through(...)  — terminal mutation direct-set (surgical write-through)
+    - patch_list(...)     — terminal mutation list entry patch
     - Delegation to a known invalidating helper (e.g. _simple_action)
     """
     for child in ast.walk(node):
@@ -151,6 +153,8 @@ def has_invalidation_call(node: ast.AsyncFunctionDef) -> bool:
                     "invalidate_tag",
                     "bump_version",
                     "invalidate_mutation_count",
+                    "write_through",
+                    "patch_list",
                 ):
                     return True
             elif isinstance(child.func, ast.Name):
@@ -158,6 +162,8 @@ def has_invalidation_call(node: ast.AsyncFunctionDef) -> bool:
                     "invalidate",
                     "invalidate_tag",
                     "bump_version",
+                    "write_through",
+                    "patch_list",
                     *INVALIDATING_HELPERS,
                 ):
                     return True

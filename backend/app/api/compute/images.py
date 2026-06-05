@@ -6,11 +6,11 @@ if TYPE_CHECKING:
     import openstack
 import asyncio
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
 from app.api.common.activity_recorder import rec
-from app.api.deps import get_os_conn, get_token_info
+from app.api.deps import CacheMode, cache_mode, get_os_conn, get_token_info
 from app.config import get_settings
 from app.models.compute import ImageDetail, ImageInfo
 from app.rate_limit import limiter
@@ -37,13 +37,16 @@ class UpdatePropertiesRequest(BaseModel):
 
 
 @router.get("", response_model=list[ImageInfo])
-async def list_images(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
+async def list_images(
+    conn: openstack.connection.Connection = Depends(get_os_conn), cm: CacheMode = Depends(cache_mode)
+):
     pid = conn._afterglow_project_id
     return await cached_call(
         f"afterglow:glance:{pid}:images",
         ttl_static(),
         lambda: [img.model_dump() for img in glance.list_images(conn, pid)],
-        refresh=refresh,
+        enabled=cm.enabled,
+        refresh=cm.refresh,
     )
 
 

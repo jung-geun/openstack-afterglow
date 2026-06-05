@@ -10,7 +10,7 @@ import logging
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
 from app.api.common.owner_check import assert_resource_owner
-from app.api.deps import cache_bypass, get_os_conn, get_token_info
+from app.api.deps import CacheMode, cache_mode, get_os_conn, get_token_info
 from app.models.database import (
     CreateBackupRequest,
     CreateDatabaseRequest,
@@ -136,7 +136,7 @@ async def _assert_db_instance_owner(
 @router.get("/flavors")
 async def list_db_flavors(
     conn: openstack.connection.Connection = Depends(get_os_conn),
-    bypass: bool = Depends(cache_bypass),
+    cm: CacheMode = Depends(cache_mode),
 ):
     """DB 플레이버 목록."""
     from app.services import trove
@@ -144,7 +144,9 @@ async def list_db_flavors(
     pid = getattr(conn, "_afterglow_project_id", "unknown")
     key = keys.project_key("trove", pid, "flavors")
     try:
-        return await cache.cached_call(key, cache.ttl_static(), lambda: trove.list_flavors(conn), refresh=bypass)
+        return await cache.cached_call(
+            key, cache.ttl_static(), lambda: trove.list_flavors(conn), enabled=cm.enabled, refresh=cm.refresh
+        )
     except Exception:
         raise HTTPException(status_code=500, detail="DB 플레이버 목록 조회 실패")
 
@@ -152,7 +154,7 @@ async def list_db_flavors(
 @router.get("/datastores")
 async def list_datastores(
     conn: openstack.connection.Connection = Depends(get_os_conn),
-    bypass: bool = Depends(cache_bypass),
+    cm: CacheMode = Depends(cache_mode),
 ):
     """데이터스토어(MySQL, MariaDB, PostgreSQL 등) 및 버전 목록."""
     from app.services import trove
@@ -160,7 +162,9 @@ async def list_datastores(
     pid = getattr(conn, "_afterglow_project_id", "unknown")
     key = keys.project_key("trove", pid, "datastores")
     try:
-        return await cache.cached_call(key, cache.ttl_static(), lambda: trove.list_datastores(conn), refresh=bypass)
+        return await cache.cached_call(
+            key, cache.ttl_static(), lambda: trove.list_datastores(conn), enabled=cm.enabled, refresh=cm.refresh
+        )
     except Exception:
         raise HTTPException(status_code=500, detail="데이터스토어 목록 조회 실패")
 
@@ -168,7 +172,7 @@ async def list_datastores(
 @router.get("/configurations")
 async def list_db_configurations(
     conn: openstack.connection.Connection = Depends(get_os_conn),
-    bypass: bool = Depends(cache_bypass),
+    cm: CacheMode = Depends(cache_mode),
 ):
     """DB Configuration group 목록."""
     from app.services import trove
@@ -176,7 +180,9 @@ async def list_db_configurations(
     pid = getattr(conn, "_afterglow_project_id", "unknown")
     key = keys.project_key("trove", pid, "configurations")
     try:
-        return await cache.cached_call(key, cache.ttl_slow(), lambda: trove.list_configurations(conn), refresh=bypass)
+        return await cache.cached_call(
+            key, cache.ttl_slow(), lambda: trove.list_configurations(conn), enabled=cm.enabled, refresh=cm.refresh
+        )
     except Exception:
         raise HTTPException(status_code=500, detail="Configuration group 목록 조회 실패")
 
@@ -184,7 +190,7 @@ async def list_db_configurations(
 @router.get("/volume-types")
 async def list_db_volume_types(
     conn: openstack.connection.Connection = Depends(get_os_conn),
-    bypass: bool = Depends(cache_bypass),
+    cm: CacheMode = Depends(cache_mode),
 ):
     """볼륨 타입 목록 (DB 생성 폼용)."""
     from app.services import cinder
@@ -192,7 +198,9 @@ async def list_db_volume_types(
     pid = getattr(conn, "_afterglow_project_id", "unknown")
     key = keys.project_key("cinder", pid, "volume-types")
     try:
-        return await cache.cached_call(key, cache.ttl_static(), lambda: cinder.list_volume_types(conn), refresh=bypass)
+        return await cache.cached_call(
+            key, cache.ttl_static(), lambda: cinder.list_volume_types(conn), enabled=cm.enabled, refresh=cm.refresh
+        )
     except Exception:
         raise HTTPException(status_code=500, detail="볼륨 타입 목록 조회 실패")
 
@@ -218,7 +226,7 @@ async def _assert_db_backup_owner(
 @router.get("/backups")
 async def list_all_backups(
     conn: openstack.connection.Connection = Depends(get_os_conn),
-    bypass: bool = Depends(cache_bypass),
+    cm: CacheMode = Depends(cache_mode),
 ):
     """현재 프로젝트의 전체 DB 백업 목록 (인스턴스 무관). 복원 폼 등에서 사용.
 
@@ -229,7 +237,9 @@ async def list_all_backups(
     pid = getattr(conn, "_afterglow_project_id", "unknown")
     key = keys.project_key("trove", pid, "backups")
     try:
-        return await cache.cached_call(key, cache.ttl_slow(), lambda: trove.list_backups(conn), refresh=bypass)
+        return await cache.cached_call(
+            key, cache.ttl_slow(), lambda: trove.list_backups(conn), enabled=cm.enabled, refresh=cm.refresh
+        )
     except Exception:
         raise HTTPException(status_code=500, detail="백업 목록 조회 실패")
 
@@ -294,7 +304,7 @@ async def list_database_instances(
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
     all_projects: bool = Query(False, description="admin 전용: 모든 프로젝트 DB 인스턴스"),
-    bypass: bool = Depends(cache_bypass),
+    cm: CacheMode = Depends(cache_mode),
 ):
     """Trove DB 인스턴스 목록. all_projects=true 는 시스템 admin 전용."""
     from app.services import trove
@@ -311,7 +321,9 @@ async def list_database_instances(
     pid = getattr(conn, "_afterglow_project_id", "unknown")
     key = keys.project_key("trove", pid, "instances")
     try:
-        return await cache.cached_call(key, cache.ttl_normal(), lambda: trove.list_instances(conn), refresh=bypass)
+        return await cache.cached_call(
+            key, cache.ttl_normal(), lambda: trove.list_instances(conn), enabled=cm.enabled, refresh=cm.refresh
+        )
     except Exception:
         raise HTTPException(status_code=500, detail="DB 인스턴스 목록 조회 실패")
 
@@ -388,7 +400,7 @@ async def get_database_instance(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
-    bypass: bool = Depends(cache_bypass),
+    cm: CacheMode = Depends(cache_mode),
 ):
     """DB 인스턴스 상세. deleted=1 인 경우 404."""
     from app.services import trove
@@ -398,7 +410,11 @@ async def get_database_instance(
     key = keys.project_key("trove", pid, "instances", sub=instance_id)
     try:
         inst = await cache.cached_call(
-            key, cache.ttl_normal(), lambda: trove.get_instance(conn, instance_id), refresh=bypass
+            key,
+            cache.ttl_normal(),
+            lambda: trove.get_instance(conn, instance_id),
+            enabled=cm.enabled,
+            refresh=cm.refresh,
         )
     except Exception:
         raise HTTPException(status_code=404, detail="DB 인스턴스를 찾을 수 없습니다")
@@ -475,7 +491,7 @@ async def list_instance_databases(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
-    bypass: bool = Depends(cache_bypass),
+    cm: CacheMode = Depends(cache_mode),
 ):
     """인스턴스 내 데이터베이스 목록."""
     from app.services import trove
@@ -485,7 +501,11 @@ async def list_instance_databases(
     key = keys.project_key("trove", pid, f"instances:{instance_id}:databases")
     try:
         return await cache.cached_call(
-            key, cache.ttl_normal(), lambda: trove.list_databases(conn, instance_id), refresh=bypass
+            key,
+            cache.ttl_normal(),
+            lambda: trove.list_databases(conn, instance_id),
+            enabled=cm.enabled,
+            refresh=cm.refresh,
         )
     except Exception:
         raise HTTPException(status_code=500, detail="데이터베이스 목록 조회 실패")
@@ -543,7 +563,7 @@ async def list_instance_users(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
-    bypass: bool = Depends(cache_bypass),
+    cm: CacheMode = Depends(cache_mode),
 ):
     """인스턴스 내 유저 목록."""
     from app.services import trove
@@ -553,7 +573,7 @@ async def list_instance_users(
     key = keys.project_key("trove", pid, f"instances:{instance_id}:users")
     try:
         return await cache.cached_call(
-            key, cache.ttl_normal(), lambda: trove.list_users(conn, instance_id), refresh=bypass
+            key, cache.ttl_normal(), lambda: trove.list_users(conn, instance_id), enabled=cm.enabled, refresh=cm.refresh
         )
     except Exception:
         raise HTTPException(status_code=500, detail="유저 목록 조회 실패")
@@ -699,7 +719,7 @@ async def list_instance_backups(
     instance_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
-    bypass: bool = Depends(cache_bypass),
+    cm: CacheMode = Depends(cache_mode),
 ):
     """인스턴스 백업 목록."""
     from app.services import trove
@@ -709,7 +729,7 @@ async def list_instance_backups(
     key = keys.project_key("trove", pid, f"instances:{instance_id}:backups")
     try:
         return await cache.cached_call(
-            key, cache.ttl_slow(), lambda: trove.list_backups(conn, instance_id), refresh=bypass
+            key, cache.ttl_slow(), lambda: trove.list_backups(conn, instance_id), enabled=cm.enabled, refresh=cm.refresh
         )
     except Exception:
         raise HTTPException(status_code=500, detail="백업 목록 조회 실패")

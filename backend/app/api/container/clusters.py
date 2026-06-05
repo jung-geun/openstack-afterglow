@@ -13,7 +13,7 @@ from keystoneauth1 import exceptions as ks_exc
 from openstack import exceptions as os_exc
 
 from app.api.common.activity_recorder import rec
-from app.api.deps import cache_bypass, get_os_conn, get_token_info
+from app.api.deps import CacheMode, cache_mode, get_os_conn, get_token_info
 from app.services import cache
 from app.services.cache import invalidation, keys
 
@@ -45,7 +45,7 @@ def _is_service_unavailable(e: Exception) -> bool:
 @router.get("", response_model=list[ClusterInfo])
 async def list_clusters(
     conn: openstack.connection.Connection = Depends(get_os_conn),
-    bypass: bool = Depends(cache_bypass),
+    cm: CacheMode = Depends(cache_mode),
 ):
     pid = conn._afterglow_project_id
 
@@ -66,14 +66,15 @@ async def list_clusters(
         keys.project_key("magnum", pid, "clusters"),
         cache.ttl_normal(),
         _load,
-        refresh=bypass,
+        enabled=cm.enabled,
+        refresh=cm.refresh,
     )
 
 
 @router.get("/templates", response_model=list[ClusterTemplateInfo])
 async def list_templates(
     conn: openstack.connection.Connection = Depends(get_os_conn),
-    bypass: bool = Depends(cache_bypass),
+    cm: CacheMode = Depends(cache_mode),
 ):
     pid = conn._afterglow_project_id
 
@@ -94,7 +95,8 @@ async def list_templates(
         keys.project_key("magnum", pid, "cluster-templates"),
         cache.ttl_static(),
         _load,
-        refresh=bypass,
+        enabled=cm.enabled,
+        refresh=cm.refresh,
     )
 
 
@@ -102,7 +104,7 @@ async def list_templates(
 async def get_cluster(
     cluster_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
-    bypass: bool = Depends(cache_bypass),
+    cm: CacheMode = Depends(cache_mode),
 ):
     pid = conn._afterglow_project_id
     try:
@@ -110,7 +112,8 @@ async def get_cluster(
             keys.project_key("magnum", pid, "clusters", sub=cluster_id),
             cache.ttl_normal(),
             lambda: magnum.get_cluster(conn, cluster_id),
-            refresh=bypass,
+            enabled=cm.enabled,
+            refresh=cm.refresh,
         )
     except Exception:
         raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")

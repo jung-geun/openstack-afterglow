@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from app.api.common.activity_recorder import rec
 from app.api.common.owner_check import assert_resource_owner
-from app.api.deps import cache_bypass, get_os_conn, get_token_info
+from app.api.deps import CacheMode, cache_mode, get_os_conn, get_token_info
 from app.services import auto_backup, cinder
 from app.services.cache import cached_call, invalidate, invalidation, keys, ttl_slow
 
@@ -64,7 +64,7 @@ class RestoreBackupRequest(BaseModel):
 @router.get("")
 async def list_backups(
     conn: openstack.connection.Connection = Depends(get_os_conn),
-    bypass: bool = Depends(cache_bypass),
+    cm: CacheMode = Depends(cache_mode),
 ):
     pid = conn._afterglow_project_id
     try:
@@ -72,7 +72,8 @@ async def list_backups(
             keys.project_key("cinder", pid, "backups"),
             ttl_slow(),
             lambda: cinder.list_backups(conn),
-            refresh=bypass,
+            enabled=cm.enabled,
+            refresh=cm.refresh,
         )
     except Exception:
         raise HTTPException(status_code=500, detail="백업 목록 조회 실패")
@@ -131,13 +132,15 @@ async def get_backup(
     backup_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
-    bypass: bool = Depends(cache_bypass),
+    cm: CacheMode = Depends(cache_mode),
 ):
     await _assert_backup_owner(conn, backup_id, token_info)
     pid = conn._afterglow_project_id
     key = keys.project_key("cinder", pid, "backups", sub=backup_id)
     try:
-        return await cached_call(key, ttl_slow(), lambda: cinder.get_backup(conn, backup_id), refresh=bypass)
+        return await cached_call(
+            key, ttl_slow(), lambda: cinder.get_backup(conn, backup_id), enabled=cm.enabled, refresh=cm.refresh
+        )
     except Exception:
         raise HTTPException(status_code=404, detail="백업을 찾을 수 없습니다")
 

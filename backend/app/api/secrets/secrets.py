@@ -9,7 +9,7 @@ if TYPE_CHECKING:
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from app.api.common.activity_recorder import rec
-from app.api.deps import get_os_conn, get_token_info
+from app.api.deps import CacheMode, cache_mode, get_os_conn, get_token_info
 from app.models.barbican import (
     AclSetRequest,
     SecretCreateRequest,
@@ -25,7 +25,7 @@ router = APIRouter()
 @router.get("", response_model=list[SecretInfo])
 async def list_secrets(
     conn: openstack.connection.Connection = Depends(get_os_conn),
-    refresh: bool = False,
+    cm: CacheMode = Depends(cache_mode),
 ):
     pid = conn._afterglow_project_id
     try:
@@ -33,7 +33,8 @@ async def list_secrets(
             f"afterglow:barbican:{pid}:secrets",
             ttl_normal(),
             lambda: bsvc.list_secrets(conn),
-            refresh=refresh,
+            enabled=cm.enabled,
+            refresh=cm.refresh,
         )
     except Exception:
         raise HTTPException(status_code=500, detail="비밀 목록 조회 실패")

@@ -9,7 +9,7 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.common.activity_recorder import rec
-from app.api.deps import get_os_conn, get_token_info
+from app.api.deps import CacheMode, cache_mode, get_os_conn, get_token_info
 from app.models.storage import CreateShareSnapshotRequest, ShareSnapshotInfo, ShareSnapshotRevertRequest
 from app.services import manila
 from app.services.cache import cached_call, invalidate, ttl_fast
@@ -21,7 +21,7 @@ router = APIRouter()
 async def list_share_snapshots(
     share_id: str | None = Query(None),
     conn: openstack.connection.Connection = Depends(get_os_conn),
-    refresh: bool = Query(False),
+    cm: CacheMode = Depends(cache_mode),
 ):
     pid = conn._afterglow_project_id
     cache_key = (
@@ -34,7 +34,8 @@ async def list_share_snapshots(
             cache_key,
             ttl_fast(),
             lambda: [_normalize_snapshot(s) for s in manila.list_share_snapshots(conn, share_id)],
-            refresh=refresh,
+            enabled=cm.enabled,
+            refresh=cm.refresh,
         )
     except Exception:
         raise HTTPException(status_code=500, detail="스냅샷 목록 조회 실패")

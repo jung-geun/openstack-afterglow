@@ -27,7 +27,7 @@ from openstack.exceptions import ConflictException, HttpException
 
 from app.api.common.activity_recorder import rec
 from app.api.common.owner_check import assert_instance_owner
-from app.api.deps import get_os_conn, get_token_info, require_admin
+from app.api.deps import CacheMode, cache_mode, get_os_conn, get_token_info, require_admin
 from app.config import get_settings
 from app.database import is_db_available
 from app.models.compute import (
@@ -95,7 +95,7 @@ def _resolve_names(servers: list, conn) -> list[dict]:
 @router.get("", response_model=list[InstanceInfo])
 async def list_instances(
     conn: openstack.connection.Connection = Depends(get_os_conn),
-    refresh: bool = Query(False),
+    cm: CacheMode = Depends(cache_mode),
 ):
     pid = conn._afterglow_project_id
     try:
@@ -103,7 +103,8 @@ async def list_instances(
             f"afterglow:nova:{pid}:instances",
             ttl_fast(),
             lambda: _resolve_names(nova.list_servers(conn), conn),
-            refresh=refresh,
+            enabled=cm.enabled,
+            refresh=cm.refresh,
         )
     except Exception as e:
         logger.error(f"인스턴스 목록 조회 실패: {e}")

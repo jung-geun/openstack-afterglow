@@ -9,7 +9,7 @@ if TYPE_CHECKING:
 
 from fastapi import APIRouter, Depends
 
-from app.api.deps import cache_bypass, get_os_conn
+from app.api.deps import CacheMode, cache_mode, get_os_conn
 from app.database import is_db_available
 from app.models.compute import FlavorInfo
 from app.services import cache, nova
@@ -22,7 +22,7 @@ _logger = logging.getLogger(__name__)
 @router.get("", response_model=list[FlavorInfo])
 async def list_flavors(
     conn: openstack.connection.Connection = Depends(get_os_conn),
-    bypass: bool = Depends(cache_bypass),
+    cm: CacheMode = Depends(cache_mode),
 ):
     pid = conn._afterglow_project_id
     key = keys.project_key("nova", pid, "flavors")
@@ -59,4 +59,4 @@ async def list_flavors(
 
         return all_flavors
 
-    return await cache.cached_call(key, cache.ttl_static(), _load, refresh=bypass)
+    return await cache.cached_call(key, cache.ttl_static(), _load, enabled=cm.enabled, refresh=cm.refresh)

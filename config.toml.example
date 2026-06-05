@@ -337,6 +337,8 @@ connect_timeout = 10
 pool_timeout = 10
 # OperationalError 발생 시 모든 DB 호출을 즉시 차단할 시간(초). 짧으면 회복이 빠르고, 길면 죽은 DB에 재시도 비용을 줄임
 unhealthy_seconds = 15
+# 자동 DB 백업 실행 시각 (cron 표현식, notion-worker가 APScheduler로 실행)
+# db_auto_backup_cron = "0 3 * * *"   # 매일 새벽 3시
 
 [monitoring]
 # Prometheus 서버 주소 (K8s 환경에서는 in-cluster DNS 권장)

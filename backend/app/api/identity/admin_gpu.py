@@ -8,9 +8,9 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import openstack
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 
-from app.api.deps import get_os_conn, require_admin
+from app.api.deps import CacheMode, cache_mode, get_os_conn, require_admin
 from app.services.cache import cached_call, ttl_normal
 
 # FastAPI-free 인벤토리 유틸리티로 이동된 항목들 — 하위 호환을 위해 재export.
@@ -32,14 +32,18 @@ router = APIRouter()
 
 
 @router.get("/gpu-hosts", dependencies=[Depends(require_admin)])
-async def list_gpu_hosts(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
+async def list_gpu_hosts(
+    conn: openstack.connection.Connection = Depends(get_os_conn), cm: CacheMode = Depends(cache_mode)
+):
     """Placement API에서 각 호스트별 GPU 정보 조회."""
 
     def _collect():
         return _collect_gpu_hosts(conn)
 
     try:
-        return await cached_call("afterglow:admin:gpu_hosts", ttl_normal(), _collect, refresh=refresh)
+        return await cached_call(
+            "afterglow:admin:gpu_hosts", ttl_normal(), _collect, enabled=cm.enabled, refresh=cm.refresh
+        )
     except Exception:
         raise HTTPException(status_code=500, detail="GPU 호스트 조회 실패")
 

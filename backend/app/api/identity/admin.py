@@ -15,7 +15,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.requests import Request
 
-from app.api.deps import get_os_conn, get_token_info, require_admin
+from app.api.deps import CacheMode, cache_mode, get_os_conn, get_token_info, require_admin
 from app.utils.version import read_app_version
 
 _logger = logging.getLogger(__name__)
@@ -382,7 +382,9 @@ def _count_identity_users_projects() -> tuple[int, int]:
 
 
 @router.get("/overview", dependencies=[Depends(require_admin)])
-async def admin_overview(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
+async def admin_overview(
+    conn: openstack.connection.Connection = Depends(get_os_conn), cm: CacheMode = Depends(cache_mode)
+):
     """하이퍼바이저 및 전체 리소스 집계."""
     try:
 
@@ -427,7 +429,9 @@ async def admin_overview(conn: openstack.connection.Connection = Depends(get_os_
                 "object_storage_containers_count": os_count,
             }
 
-        return await cached_call("afterglow:admin:overview", ttl_normal(), _collect, refresh=refresh)
+        return await cached_call(
+            "afterglow:admin:overview", ttl_normal(), _collect, enabled=cm.enabled, refresh=cm.refresh
+        )
     except Exception:
         _logger.warning("admin overview 조회 실패", exc_info=True)
         raise HTTPException(status_code=500, detail="개요 조회 실패")
@@ -483,7 +487,7 @@ def _collect_network_block(conn) -> dict:
 
 @router.get("/monitoring/summary", dependencies=[Depends(require_admin)])
 async def get_monitoring_summary(
-    conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)
+    conn: openstack.connection.Connection = Depends(get_os_conn), cm: CacheMode = Depends(cache_mode)
 ):
     """분야별 통합 모니터링 요약 — Compute/Storage/Network/Containers/Data Services/Identity.
 
@@ -579,14 +583,18 @@ async def get_monitoring_summary(
         return result
 
     try:
-        return await cached_call("afterglow:admin:monitoring", ttl_normal(), _collect, refresh=refresh)
+        return await cached_call(
+            "afterglow:admin:monitoring", ttl_normal(), _collect, enabled=cm.enabled, refresh=cm.refresh
+        )
     except Exception:
         _logger.warning("monitoring summary 조회 실패", exc_info=True)
         raise HTTPException(status_code=500, detail="모니터링 요약 조회 실패")
 
 
 @router.get("/hypervisors", dependencies=[Depends(require_admin)])
-async def list_hypervisors(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
+async def list_hypervisors(
+    conn: openstack.connection.Connection = Depends(get_os_conn), cm: CacheMode = Depends(cache_mode)
+):
     """컴퓨트 하이퍼바이저 목록."""
     try:
 
@@ -630,7 +638,9 @@ async def list_hypervisors(conn: openstack.connection.Connection = Depends(get_o
                 for h in data
             ]
 
-        return await cached_call("afterglow:admin:hypervisors", ttl_normal(), _list, refresh=refresh)
+        return await cached_call(
+            "afterglow:admin:hypervisors", ttl_normal(), _list, enabled=cm.enabled, refresh=cm.refresh
+        )
     except Exception:
         _logger.warning("hypervisors 조회 실패", exc_info=True)
         raise HTTPException(status_code=500, detail="하이퍼바이저 조회 실패")
@@ -831,7 +841,7 @@ async def list_all_volumes(
 
 @router.get("/all-containers", dependencies=[Depends(require_admin)])
 async def list_all_containers(
-    conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)
+    conn: openstack.connection.Connection = Depends(get_os_conn), cm: CacheMode = Depends(cache_mode)
 ):
     """전체 프로젝트의 컨테이너 목록 (Zun)."""
     if not get_settings().service_zun_enabled:
@@ -840,7 +850,11 @@ async def list_all_containers(
 
     try:
         return await cached_call(
-            "afterglow:admin:containers", ttl_normal(), lambda: list_containers_admin(conn), refresh=refresh
+            "afterglow:admin:containers",
+            ttl_normal(),
+            lambda: list_containers_admin(conn),
+            enabled=cm.enabled,
+            refresh=cm.refresh,
         )
     except ZunServiceUnavailable:
         return []
@@ -940,7 +954,7 @@ async def delete_admin_container(
 
 @router.get("/all-file-storages", dependencies=[Depends(require_admin)])
 async def list_all_file_storages(
-    conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)
+    conn: openstack.connection.Connection = Depends(get_os_conn), cm: CacheMode = Depends(cache_mode)
 ):
     """전체 프로젝트의 파일 스토리지 목록 (Manila)."""
     if not get_settings().service_manila_enabled:
@@ -950,14 +964,17 @@ async def list_all_file_storages(
             "afterglow:admin:file_storages",
             ttl_normal(),
             lambda: manila.list_file_storages(conn, None, True),
-            refresh=refresh,
+            enabled=cm.enabled,
+            refresh=cm.refresh,
         )
     except Exception:
         raise HTTPException(status_code=500, detail="파일 스토리지 조회 실패")
 
 
 @router.get("/topology", response_model=TopologyData, dependencies=[Depends(require_admin)])
-async def admin_topology(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
+async def admin_topology(
+    conn: openstack.connection.Connection = Depends(get_os_conn), cm: CacheMode = Depends(cache_mode)
+):
     """전체 프로젝트의 네트워크/라우터/인스턴스 토폴로지."""
 
     def _fetch():
@@ -1005,7 +1022,9 @@ async def admin_topology(conn: openstack.connection.Connection = Depends(get_os_
         return topo.model_dump()
 
     try:
-        return await cached_call("afterglow:admin:topology", ttl_normal(), _fetch, refresh=refresh)
+        return await cached_call(
+            "afterglow:admin:topology", ttl_normal(), _fetch, enabled=cm.enabled, refresh=cm.refresh
+        )
     except Exception:
         _logger.exception("토폴로지 조회 실패")
         raise HTTPException(status_code=500, detail="토폴로지 조회 실패")
@@ -1026,11 +1045,17 @@ async def get_timeseries(
 
 
 @router.get("/all-networks", dependencies=[Depends(require_admin)])
-async def list_all_networks(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
+async def list_all_networks(
+    conn: openstack.connection.Connection = Depends(get_os_conn), cm: CacheMode = Depends(cache_mode)
+):
     """전체 프로젝트의 네트워크 목록."""
     try:
         return await cached_call(
-            "afterglow:admin:networks", ttl_normal(), lambda: neutron.list_networks(conn, None), refresh=refresh
+            "afterglow:admin:networks",
+            ttl_normal(),
+            lambda: neutron.list_networks(conn, None),
+            enabled=cm.enabled,
+            refresh=cm.refresh,
         )
     except Exception:
         raise HTTPException(status_code=500, detail="네트워크 목록 조회 실패")
@@ -1038,23 +1063,33 @@ async def list_all_networks(conn: openstack.connection.Connection = Depends(get_
 
 @router.get("/all-floating-ips", dependencies=[Depends(require_admin)])
 async def list_all_floating_ips(
-    conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)
+    conn: openstack.connection.Connection = Depends(get_os_conn), cm: CacheMode = Depends(cache_mode)
 ):
     """전체 프로젝트의 Floating IP 목록."""
     try:
         return await cached_call(
-            "afterglow:admin:floating_ips", ttl_fast(), lambda: neutron.list_floating_ips(conn, None), refresh=refresh
+            "afterglow:admin:floating_ips",
+            ttl_fast(),
+            lambda: neutron.list_floating_ips(conn, None),
+            enabled=cm.enabled,
+            refresh=cm.refresh,
         )
     except Exception:
         raise HTTPException(status_code=500, detail="Floating IP 목록 조회 실패")
 
 
 @router.get("/all-routers", dependencies=[Depends(require_admin)])
-async def list_all_routers(conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)):
+async def list_all_routers(
+    conn: openstack.connection.Connection = Depends(get_os_conn), cm: CacheMode = Depends(cache_mode)
+):
     """전체 프로젝트의 라우터 목록."""
     try:
         return await cached_call(
-            "afterglow:admin:routers", ttl_normal(), lambda: neutron.list_routers(conn, None), refresh=refresh
+            "afterglow:admin:routers",
+            ttl_normal(),
+            lambda: neutron.list_routers(conn, None),
+            enabled=cm.enabled,
+            refresh=cm.refresh,
         )
     except Exception:
         raise HTTPException(status_code=500, detail="라우터 목록 조회 실패")
@@ -1146,7 +1181,7 @@ async def create_port(
 
 @router.get("/overview/projects", dependencies=[Depends(require_admin)])
 async def admin_overview_projects(
-    conn: openstack.connection.Connection = Depends(get_os_conn), refresh: bool = Query(False)
+    conn: openstack.connection.Connection = Depends(get_os_conn), cm: CacheMode = Depends(cache_mode)
 ):
     """프로젝트별 리소스 사용량 및 쿼터."""
     try:
@@ -1217,7 +1252,9 @@ async def admin_overview_projects(
                     pass
             return result
 
-        return await cached_call("afterglow:admin:overview_projects", ttl_slow(), _collect, refresh=refresh)
+        return await cached_call(
+            "afterglow:admin:overview_projects", ttl_slow(), _collect, enabled=cm.enabled, refresh=cm.refresh
+        )
     except Exception:
         _logger.warning("프로젝트별 리소스 조회 실패", exc_info=True)
         raise HTTPException(status_code=500, detail="프로젝트별 리소스 조회 실패")

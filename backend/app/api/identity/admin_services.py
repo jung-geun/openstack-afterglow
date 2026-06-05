@@ -13,7 +13,7 @@ from concurrent.futures import TimeoutError as FuturesTimeoutError
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.api.deps import get_os_conn, require_admin
+from app.api.deps import CacheMode, cache_mode, get_os_conn, require_admin
 from app.config import get_settings
 from app.services.cache import cached_call, ttl_normal
 
@@ -316,7 +316,7 @@ def _make_fetch_map(conn, settings):
 @router.get("/services", dependencies=[Depends(require_admin)])
 async def list_services(
     conn: openstack.connection.Connection = Depends(get_os_conn),
-    refresh: bool = Query(False),
+    cm: CacheMode = Depends(cache_mode),
     category: str | None = Query(None),
 ):
     """Nova, Cinder, Neutron, Manila, Heat, Zun, Magnum 서비스 상태 + API Endpoints + Storage Pools 조회.
@@ -337,7 +337,7 @@ async def list_services(
             return {category: fetch_fn()}
 
         try:
-            return await cached_call(cache_key, ttl_normal(), _collect_one, refresh=refresh)
+            return await cached_call(cache_key, ttl_normal(), _collect_one, enabled=cm.enabled, refresh=cm.refresh)
         except Exception:
             raise HTTPException(status_code=500, detail="서비스 상태 조회 실패")
 
@@ -359,6 +359,8 @@ async def list_services(
         return result
 
     try:
-        return await cached_call("afterglow:admin:services", ttl_normal(), _collect_all, refresh=refresh)
+        return await cached_call(
+            "afterglow:admin:services", ttl_normal(), _collect_all, enabled=cm.enabled, refresh=cm.refresh
+        )
     except Exception:
         raise HTTPException(status_code=500, detail="서비스 상태 조회 실패")

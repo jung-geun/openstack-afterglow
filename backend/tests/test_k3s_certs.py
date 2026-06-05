@@ -184,7 +184,7 @@ async def test_ca_certificate_no_kubeconfig(client):
 async def test_certificate_expiry_structure(client, _fake_kc):
     cluster_rec = {"id": "c1", "name": "mycluster", "status": "ACTIVE"}
 
-    async def _cached(key, ttl, fn):
+    async def _cached(key, ttl, fn, refresh=False, enabled=True):
         return await fn()
 
     with (

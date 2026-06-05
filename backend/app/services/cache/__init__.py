@@ -6,7 +6,7 @@
 예시: afterglow:nova:abc123:servers
 
 레거시 API (계속 동작 — ~85 call sites):
-- cached_call(key, ttl, fn, *, refresh=False)
+- cached_call(key, ttl, fn, *, refresh=False, enabled=True)
 - invalidate(pattern)
 - invalidate_project(project_id, service="*")
 - ttl_fast / ttl_normal / ttl_slow / ttl_static
@@ -18,11 +18,16 @@
 - base.Cache (ABC)
 - redis_backend.RedisBackend
 - keys.* / metrics / invalidation
+- write_through(key, ttl, value) — terminal mutation 직후 known-value 직접 set
+- patch_list(key, ttl, *, match, update/remove/add) — list 엔트리 surgical 패치
 
-write-through forbidden 불변식:
-mutation 응답 직후 set() 호출 금지. mutation 직후에는 invalidate() / delete() /
-invalidate_tag() / bump_version() 만 사용한다. (Nova create_server 의 부분 BUILD
-상태가 영구 stale 의 원인이 됨.)
+캐시 write 정책:
+- read-through (cached_call): 캐시 미스 시 fn 실행 후 저장 — 허용.
+- write-through (write_through / patch_list): terminal mutation 직후 핸들러가 이미
+  쥔 최종 값을 직접 set — 허용, 단 전이 상태(BUILD/creating/deleting 등) 리소스에는
+  사용 금지. 전이 상태 mutation 에는 invalidate() 만 사용한다.
+- 임의 set(): mutation 핸들러에서 직접 backend.set() / backend.get() 후 set() 패턴
+  금지 — 위 두 헬퍼를 통해서만 캐시에 쓴다.
 """
 
 from __future__ import annotations
@@ -39,6 +44,8 @@ from app.services.cache import metrics
 from app.services.cache.base import Cache
 from app.services.cache.redis_backend import RedisBackend
 from app.services.cache.ttl import ttl_fast, ttl_normal, ttl_slow, ttl_static
+
+_UNSET = object()  # patch_list 내부 sentinel
 
 logger = logging.getLogger(__name__)
 
@@ -98,13 +105,22 @@ async def cached_call(
     fn: Callable[[], Any],
     *,
     refresh: bool = False,
+    enabled: bool = True,
 ) -> Any:
     """캐시에서 값을 가져오거나, 없으면 fn을 실행하여 저장 후 반환.
 
     fn 이 동기 함수인 경우 asyncio.to_thread 로 실행한다.
     Redis 연결 실패 시 캐시 없이 fn 을 직접 실행한다 (silent fail).
     refresh=True 이면 기존 캐시를 삭제하고 fn 을 강제 실행한다.
+    enabled=False 이면 캐시 read/write 를 모두 건너뛰고 fn 만 실행한다
+    (인프라 캐시 — 토큰 검증, prewarm 등은 enabled 를 생략해 기본 True 유지).
     """
+    if not enabled:
+        metrics.increment("cache.disabled")
+        if asyncio.iscoroutinefunction(fn):
+            return await fn()
+        return await asyncio.to_thread(fn)
+
     backend = _get_backend()
 
     if refresh:
@@ -178,6 +194,84 @@ async def invalidate_project(project_id: str, service: str = "*") -> None:
     await invalidate(f"afterglow:{service}:{project_id}:*")
 
 
+async def write_through(key: str, ttl: int, value: Any) -> None:
+    """terminal mutation 직후, 핸들러가 이미 쥔 최종 값을 캐시에 직접 set.
+
+    origin 재조회·invalidate 선행 없음. 전이 상태(BUILD 등)에는 사용 금지.
+    요청 핸들러 동기 경로(get_os_conn finally 이전)에서 호출해야 한다.
+    """
+    backend = _get_backend()
+    try:
+        payload = json.dumps(_make_serializable(value))
+        await backend.set(key, payload, ttl)
+        metrics.increment("cache.write_through")
+    except Exception as e:
+        metrics.increment("cache.error")
+        logger.warning("write_through 실패 (%s): %s", key, e)
+
+
+async def patch_list(
+    key: str,
+    ttl: int,
+    *,
+    match: Callable[[Any], bool] | str | None = None,
+    update: Any = None,
+    remove: bool = False,
+    add: Any = None,
+) -> None:
+    """캐시된 list 를 읽어 match 로 찾은 엔트리만 surgical 수정/제거/추가 후 set.
+
+    캐시 miss(키 없음)면 no-op — 다음 cache 조회가 read-through 로 채운다.
+    origin 재조회 없음. terminal mutation 전용.
+
+    Args:
+        key:    캐시 키.
+        ttl:    갱신 시 적용할 TTL (GET 핸들러와 동일한 값 사용 권장).
+        match:  callable(item) → bool, 또는 id 문자열(dict 의 "id" 필드 비교).
+                add 만 사용할 때는 None 가능.
+        update: match 된 엔트리를 이 값으로 교체(Pydantic 모델 또는 dict).
+        remove: True 면 match 된 엔트리를 목록에서 제거.
+        add:    목록 끝에 추가할 객체(match 불필요). update/remove 보다 우선.
+    """
+    backend = _get_backend()
+    try:
+        cached = await backend.get(key)
+        if cached is None:
+            return  # 캐시 miss — no-op
+
+        try:
+            items: list = json.loads(cached)
+        except (TypeError, ValueError):
+            return  # 손상된 캐시 — no-op
+
+        if not isinstance(items, list):
+            return
+
+        if add is not None:
+            items = [*items, _make_serializable(add)]
+        elif match is not None:
+            if callable(match):
+                matcher = match
+            else:
+                _mid = match
+
+                def matcher(item: Any, _id: str = _mid) -> bool:  # noqa: E731
+                    return isinstance(item, dict) and item.get("id") == _id
+
+            if remove:
+                items = [item for item in items if not matcher(item)]
+            elif update is not None:
+                serialized = _make_serializable(update)
+                items = [serialized if matcher(item) else item for item in items]
+
+        payload = json.dumps(items)
+        await backend.set(key, payload, ttl)
+        metrics.increment("cache.patch_list")
+    except Exception as e:
+        metrics.increment("cache.error")
+        logger.warning("patch_list 실패 (%s): %s", key, e)
+
+
 __all__ = [
     # 레거시 호환
     "cached_call",
@@ -196,4 +290,7 @@ __all__ = [
     "get_backend",
     "set_backend",
     "metrics",
+    # write-through (terminal mutation 전용)
+    "write_through",
+    "patch_list",
 ]

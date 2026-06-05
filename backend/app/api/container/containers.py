@@ -20,7 +20,7 @@ from fastapi import (
 from pydantic import BaseModel
 
 from app.api.common.activity_recorder import rec
-from app.api.deps import cache_bypass, get_os_conn, get_token_info
+from app.api.deps import CacheMode, cache_mode, get_os_conn, get_token_info
 from app.models.containers import (
     ContainerListResponse,
     CreateZunContainerRequest,
@@ -39,7 +39,7 @@ router = APIRouter()
 @router.get("", response_model=ContainerListResponse)
 async def list_containers(
     conn: openstack.connection.Connection = Depends(get_os_conn),
-    bypass: bool = Depends(cache_bypass),
+    cm: CacheMode = Depends(cache_mode),
 ):
     pid = conn._afterglow_project_id
 
@@ -60,7 +60,8 @@ async def list_containers(
         keys.project_key("zun", pid, "containers"),
         cache.ttl_normal(),
         _load,
-        refresh=bypass,
+        enabled=cm.enabled,
+        refresh=cm.refresh,
     )
 
 
@@ -68,7 +69,7 @@ async def list_containers(
 async def get_container(
     container_id: str,
     conn: openstack.connection.Connection = Depends(get_os_conn),
-    bypass: bool = Depends(cache_bypass),
+    cm: CacheMode = Depends(cache_mode),
 ):
     pid = conn._afterglow_project_id
     try:
@@ -76,7 +77,8 @@ async def get_container(
             keys.project_key("zun", pid, "containers", sub=container_id),
             cache.ttl_normal(),
             lambda: zun.get_container(conn, container_id),
-            refresh=bypass,
+            enabled=cm.enabled,
+            refresh=cm.refresh,
         )
     except Exception:
         raise HTTPException(status_code=404, detail="컨테이너를 찾을 수 없습니다")
