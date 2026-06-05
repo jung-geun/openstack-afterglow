@@ -30,7 +30,7 @@ def _make_backup(instance_id: str, tier: str, days_ago: int, bid: str = "bk-1") 
         "name": f"auto_{instance_id[:8]}_{tier}_20240101",
         "instance_id": instance_id,
         "status": "COMPLETED",
-        "created": ts,
+        "created_at": ts,
     }
 
 
@@ -132,7 +132,7 @@ async def test_run_backup_cycle_skips_when_recent():
     config = {"max_daily": 2, "max_weekly": 2, "max_monthly": 1}
 
     recent_daily = _make_backup(instance_id, "daily", days_ago=0, bid="bk-recent")
-    recent_daily["created"] = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+    recent_daily["created_at"] = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
 
     with patch("app.services.db_auto_backup.trove") as mock_trove:
         mock_trove.list_backups = MagicMock(return_value=[recent_daily])
@@ -251,3 +251,36 @@ async def test_delete_auto_backup_removes_config(client, mock_conn):
                 headers={"Authorization": "Bearer test-token"},
             )
         assert resp.status_code in (204, 401, 403)
+
+
+@pytest.mark.asyncio
+async def test_backup_cycle_skips_when_recent_created_at():
+    """created_at 키로 마지막 백업 시각을 올바르게 읽어 min_interval 내 재생성하지 않는지 검증."""
+    now = datetime.now(UTC)
+    recent = (now - timedelta(hours=1)).isoformat()  # 1시간 전 — daily min_interval(24h) 이내
+
+    instance_id = "inst-1234-5678"
+    mock_backups = [
+        {
+            "id": "b-1",
+            "name": f"auto_{instance_id[:8]}_daily_20260605",
+            "created_at": recent,
+            "updated_at": recent,
+            "status": "COMPLETED",
+            "instance_id": instance_id,
+        }
+    ]
+
+    with patch("app.services.db_auto_backup.trove") as mock_trove:
+        mock_trove.list_backups = MagicMock(return_value=mock_backups)
+        mock_trove.create_backup = MagicMock()
+        mock_trove.delete_backup = MagicMock()
+
+        conn = MagicMock()
+        config = {"max_daily": 2, "max_weekly": 0, "max_monthly": 0}
+        from app.services import db_auto_backup
+
+        await db_auto_backup.run_db_backup_cycle(conn, "proj-1", instance_id, config)
+
+    # 24h min_interval 이내 → 새 daily 백업을 생성하지 않아야 함
+    mock_trove.create_backup.assert_not_called()

@@ -294,6 +294,53 @@ async def main() -> None:
         _logger.warning("DB 미사용 환경 — Notion 워커 종료")
         return
 
+    # DB 자동 백업 스케줄러 (APScheduler cron)
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    from apscheduler.triggers.cron import CronTrigger
+
+    scheduler = AsyncIOScheduler()
+    try:
+        from app.services import db_auto_backup as _dab
+        from app.services.keystone import get_admin_connection_for_project
+
+        async def _run_db_backup_job() -> None:
+            """APScheduler에서 호출되는 DB 자동 백업 사이클."""
+            import asyncio as _asyncio
+
+            try:
+                configs = await _dab.list_all_db_auto_backup_configs()
+                if configs:
+                    _logger.info("db_auto_backup: %d개 DB 인스턴스 자동 백업 시작", len(configs))
+                for cfg in configs:
+                    project_id = cfg.get("project_id")
+                    instance_id = cfg.get("instance_id")
+                    if not project_id or not instance_id:
+                        continue
+                    try:
+                        conn = await _asyncio.to_thread(get_admin_connection_for_project, project_id)
+                        await _dab.run_db_backup_cycle(conn, project_id, instance_id, cfg)
+                    except Exception:
+                        _logger.warning(
+                            "db_auto_backup: 백업 사이클 실패 (instance=%s)",
+                            instance_id,
+                            exc_info=True,
+                        )
+            except Exception:
+                _logger.warning("db_auto_backup: 잡 실행 오류", exc_info=True)
+
+        cron_expr = settings.database_db_auto_backup_cron
+        scheduler.add_job(
+            _run_db_backup_job,
+            CronTrigger.from_crontab(cron_expr),
+            id="db_auto_backup",
+            replace_existing=True,
+            misfire_grace_time=300,
+        )
+        scheduler.start()
+        _logger.info("DB 자동 백업 스케줄러 등록 완료 (cron=%s)", cron_expr)
+    except Exception:
+        _logger.warning("DB 자동 백업 스케줄러 등록 실패", exc_info=True)
+
     await asyncio.sleep(30)  # 초기 대기
 
     while True:

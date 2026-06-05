@@ -1,7 +1,18 @@
 <script lang="ts">
 	import { useDbInstanceDetailController } from '$lib/stores/dbInstanceDetailController.svelte';
+	import StatusChip from '$lib/components/ui/StatusChip.svelte';
+	import DbRestoreModal from '$lib/components/database/DbRestoreModal.svelte';
+	import type { DbBackup } from '$lib/types/database';
 
 	const s = useDbInstanceDetailController();
+
+	let showRestoreModal = $state(false);
+	let selectedBackup = $state<DbBackup | null>(null);
+
+	const STUCK_MS = 6 * 3600 * 1000;
+	function isStuck(b: DbBackup): boolean {
+		return b.status === 'BUILDING' && (Date.now() - new Date(b.created_at).getTime()) > STUCK_MS;
+	}
 
 	let showBackupForm = $state(false);
 	let newBackup = $state({ name: '', description: '' });
@@ -72,6 +83,14 @@
 		}
 	}
 </script>
+
+<DbRestoreModal
+	bind:open={showRestoreModal}
+	backup={selectedBackup}
+	flavors={s.flavors}
+	onRestore={async (id, name, fid, vs) => { await s.restoreBackup(id, name, fid, vs); }}
+	onClose={() => { showRestoreModal = false; }}
+/>
 
 <!-- 자동 백업 설정 -->
 <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-3">
@@ -174,12 +193,19 @@
 				{#each s.backups as b}
 					<tr class="border-t border-gray-800/50">
 						<td class="py-2 text-white">{b.name}</td>
-						<td class="py-2 text-gray-400 text-xs">{b.status}</td>
+						<td class="py-2">
+							<div class="flex items-center gap-1">
+								<StatusChip status={b.status} />
+								{#if isStuck(b)}
+									<span class="text-xs text-red-400 ml-1" title="Trove guest agent가 백업 업로드를 완료하지 못했습니다. 삭제 후 재시도하세요.">멈춤</span>
+								{/if}
+							</div>
+						</td>
 						<td class="py-2 text-gray-400 text-xs">{b.size ? `${b.size} GB` : '-'}</td>
 						<td class="py-2 text-gray-500 text-xs">{b.created_at ? b.created_at.slice(0, 10) : '-'}</td>
 						<td class="py-2 text-right">
 							<div class="flex justify-end gap-1">
-								<button onclick={() => s.restoreBackup(b.id)} disabled={s.restoringBackup === b.id}
+								<button onclick={() => { selectedBackup = b; showRestoreModal = true; }} disabled={s.restoringBackup === b.id}
 									class="text-blue-400 hover:text-blue-300 disabled:text-gray-600 text-xs px-2 py-0.5 rounded border border-blue-900 hover:border-blue-700 transition-colors">
 									{s.restoringBackup === b.id ? '...' : '복원'}
 								</button>

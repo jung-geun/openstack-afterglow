@@ -23,6 +23,11 @@ export const STATUS_STYLES: Record<string, StatusStyle> = {
   healthy:             { tone: 'success' },
   HEALTHY:             { tone: 'success' },
 
+  // Trove DB 백업 상태
+  BUILDING:            { tone: 'warning', pulse: true },
+  COMPLETED:           { tone: 'success' },
+  NEW:                 { tone: 'info', pulse: true, label: '대기 중' },
+
   // warning + pulse — active transitions (building, deleting, detaching)
   BUILD:               { tone: 'warning', pulse: true },
   PENDING:             { tone: 'warning', pulse: true },

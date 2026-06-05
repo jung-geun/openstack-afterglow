@@ -345,17 +345,15 @@ export function createDbInstanceDetailController(opts: DbInstanceDetailControlle
 		finally { deletingBackup = null; }
 	}
 
-	async function restoreBackup(backupId: string) {
+	async function restoreBackup(backupId: string, name: string, flavorId: string, volumeSize: number) {
 		const tok = opts.token();
 		const proj = opts.projectId();
-		const name = prompt('복원할 새 인스턴스 이름을 입력하세요:');
-		if (!name) return;
 		restoringBackup = backupId;
 		try {
 			await api.post('/api/database-instances/restore', {
 				backup_id: backupId, name,
-				flavor_id: instance?.flavor_id ?? '',
-				volume_size: instance?.size ?? 5,
+				flavor_id: flavorId,
+				volume_size: volumeSize,
 			}, tok, proj);
 			toast.success('복원 인스턴스 생성이 시작되었습니다.');
 			opts.onDeleted?.();

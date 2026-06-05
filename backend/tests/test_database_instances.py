@@ -642,3 +642,14 @@ async def test_list_instances_admin_filters_deleted():
     ids = [r["id"] for r in result]
     assert "a1" in ids
     assert "d1" not in ids
+
+
+@pytest.mark.asyncio
+async def test_restore_from_backup_unauthenticated():
+    """POST /restore: 인증 없이 복원 불가."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/database-instances/restore",
+            json={"backup_id": "bk-1", "name": "restored", "flavor_id": "fl-1", "volume_size": 10},
+        )
+    assert resp.status_code == 401

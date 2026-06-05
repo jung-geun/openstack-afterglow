@@ -40,4 +40,7 @@ export interface DbBackup {
   status: string;
   size: number;
   created_at: string;
+  instance_id?: string;
+  datastore?: { type?: string; version?: string };
+  description?: string;
 }

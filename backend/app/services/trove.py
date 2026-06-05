@@ -512,6 +512,14 @@ def _backup_to_dict(b: dict) -> dict:
         "size": b.get("size", 0),
         "created_at": b.get("created", "") or b.get("created_at", ""),
         "updated_at": b.get("updated", "") or b.get("updated_at", ""),
+        "datastore": {
+            "type": (b.get("datastore") or {}).get("type", "")
+            if isinstance(b.get("datastore"), dict)
+            else str(b.get("datastore", "")),
+            "version": (b.get("datastore_version") or {}).get("name", "")
+            if isinstance(b.get("datastore_version"), dict)
+            else str(b.get("datastore_version", "")),
+        },
     }
 
 

@@ -119,7 +119,7 @@ def _is_auto_backup(backup: dict, instance_id: str, tier: str) -> bool:
 
 def _backup_date(backup: dict) -> datetime | None:
     """백업의 created 또는 updated 타임스탬프를 datetime으로 반환."""
-    ts = backup.get("created") or backup.get("updated")
+    ts = backup.get("created_at") or backup.get("updated_at")
     if not ts:
         return None
     try:
@@ -160,8 +160,11 @@ async def run_db_backup_cycle(
     ]
 
     for tier, max_count, min_interval in tiers:
+        if max_count <= 0:
+            continue
+
         tier_backups = [b for b in all_backups if _is_auto_backup(b, instance_id, tier)]
-        tier_backups.sort(key=lambda b: b.get("created", b.get("updated", "")), reverse=True)
+        tier_backups.sort(key=lambda b: b.get("created_at", b.get("updated_at", "")), reverse=True)
 
         should_create = True
         if tier_backups:
@@ -174,7 +177,9 @@ async def run_db_backup_cycle(
             try:
                 await asyncio.to_thread(trove.create_backup, conn, instance_id, name, f"자동 백업 ({tier})")
                 _logger.info("db_auto_backup: %s 백업 생성 완료 (instance=%s, name=%s)", tier, instance_id, name)
-                tier_backups = [{"name": name, "created": now.isoformat(), "instance_id": instance_id}] + tier_backups
+                tier_backups = [
+                    {"name": name, "created_at": now.isoformat(), "instance_id": instance_id}
+                ] + tier_backups
             except Exception as e:
                 _logger.warning("db_auto_backup: %s 백업 생성 실패 (instance=%s): %s", tier, instance_id, e)
 

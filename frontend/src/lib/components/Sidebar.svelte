@@ -83,6 +83,7 @@
 			service: 'trove' as const,
 			items: [
 				{ label: 'DB 인스턴스', href: '/dashboard/database/instances', service: null },
+				{ label: 'DB 백업', href: '/dashboard/database/backups', service: null },
 			],
 		},
 		{
