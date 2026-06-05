@@ -96,6 +96,7 @@
 	);
 
 	onMount(() => {
+		if (window.matchMedia('(max-width: 767px)').matches) pageSize = 10;
 		load();
 		loadTimeseries(tsRange);
 		projectNames.load(token, projectId);

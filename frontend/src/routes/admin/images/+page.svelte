@@ -79,7 +79,11 @@
 		{ storageKey: 'admin-images', defaultInterval: 30, intervalOptions: [15, 30, 60] });
 	async function forceRefresh() { markerStack = []; nextMarker = null; await load(undefined, true); }
 
-	onMount(() => { load(); projectNames.load(token, projectId); });
+	onMount(() => {
+		if (window.matchMedia('(max-width: 767px)').matches) pageSize = 10;
+		load();
+		projectNames.load(token, projectId);
+	});
 </script>
 
 <div class="p-4 md:p-8 max-w-7xl mx-auto">
@@ -87,7 +91,7 @@
 		{#snippet actions()}
 			<AutoRefreshControl bind:active={ar.active} bind:intervalSeconds={ar.intervalSeconds}
 				intervalOptions={ar.intervalOptions} refreshing={refreshing} onManualRefresh={forceRefresh} />
-			<div class="flex items-center gap-1 text-xs text-gray-500">
+			<div class="flex items-center gap-1 text-xs text-gray-500 max-md:hidden">
 				표시:
 				{#each [10, 20, 30] as n}
 					<button onclick={() => { pageSize = n; markerStack = []; nextMarker = null; load(); }}

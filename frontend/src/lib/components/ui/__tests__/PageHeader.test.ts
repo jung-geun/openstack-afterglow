@@ -5,7 +5,7 @@ import PageHeader from '../PageHeader.svelte';
 describe('PageHeader', () => {
 	it('breadcrumb 텍스트 렌더링', () => {
 		render(PageHeader, { breadcrumb: 'OVERVIEW', title: 'Test' });
-		expect(screen.getByText('OVERVIEW')).toBeTruthy();
+		expect(screen.getAllByText('OVERVIEW').length).toBeGreaterThan(0);
 	});
 
 	it('title이 h1으로 렌더링', () => {

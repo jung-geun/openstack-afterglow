@@ -97,7 +97,10 @@
 		{ storageKey: 'admin-instances', defaultActive: true, defaultInterval: 15, intervalOptions: [10, 15, 30, 60] }
 	);
 
-	onMount(() => { load(); loadTimeseries(tsRange); loadHosts(); loadHealth(); projectNames.load(token, projectId); });
+	onMount(() => {
+		if (window.matchMedia('(max-width: 767px)').matches) pageSize = 10;
+		load(); loadTimeseries(tsRange); loadHosts(); loadHealth(); projectNames.load(token, projectId);
+	});
 </script>
 
 <div class="p-4 md:p-8 max-w-7xl mx-auto">
@@ -119,7 +122,7 @@
 				refreshing={loading || refreshing}
 				onManualRefresh={() => { markerStack = []; nextMarker = null; hostFilter = ''; projectFilter = ''; projectSearchText = ''; statusFilter = ''; nameSearch = ''; load(); loadHosts(); }}
 			/>
-			<div class="flex items-center gap-1 text-xs text-gray-500">
+			<div class="flex items-center gap-1 text-xs text-gray-500 max-md:hidden">
 				표시:
 				{#each [10, 20, 30] as n}
 					<button
@@ -136,8 +139,8 @@
 			<StatTile label="전체 VM" value={health.total} unit="instances" accent="blue" />
 			<StatTile label="ACTIVE" value={health.active} unit="/ {health.total}" accent="emerald" />
 			<StatTile label="ERROR" value={health.error} unit="instances" accent="rose" />
-			<StatTile label="알림 있음" value={health.with_alerts} unit="instances" accent="amber" />
-			<StatTile label="GPU VM" value={health.gpu_count} unit="가속" accent="violet" />
+			<StatTile label="알림 있음" value={health.with_alerts} unit="instances" accent="amber" class="max-md:hidden" />
+			<StatTile label="GPU VM" value={health.gpu_count} unit="가속" accent="violet" class="max-md:hidden" />
 		</div>
 	{/if}
 

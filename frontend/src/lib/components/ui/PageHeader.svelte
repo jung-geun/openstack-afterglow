@@ -14,7 +14,10 @@
 
 <div class="flex items-start justify-between mb-6 {className}">
   <div>
-    <div class="text-[11px] text-gray-500 uppercase tracking-widest font-medium mb-1">{breadcrumb}</div>
+    <div class="text-[11px] text-gray-500 uppercase tracking-widest font-medium mb-1">
+      <span class="md:hidden">{breadcrumb.includes(' / ') ? breadcrumb.split(' / ').at(-1) : breadcrumb}</span>
+      <span class="hidden md:inline">{breadcrumb}</span>
+    </div>
     <h1 class="text-[22px] font-bold text-white leading-tight">{title}</h1>
     {#if subtitle}
       <p class="text-[13px] text-gray-400 mt-0.5">{subtitle}</p>

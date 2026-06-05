@@ -60,7 +60,10 @@
 		intervalOptions: [30, 60],
 	});
 
-	onMount(load);
+	onMount(() => {
+		if (window.matchMedia('(max-width: 767px)').matches) pageSize = 10;
+		load();
+	});
 </script>
 
 <div class="p-4 md:p-6 max-w-7xl mx-auto">
@@ -77,7 +80,7 @@
 				refreshing={loading || refreshing}
 				onManualRefresh={() => load()}
 			/>
-			<div class="flex items-center gap-1 text-xs text-gray-500">
+			<div class="flex items-center gap-1 text-xs text-gray-500 max-md:hidden">
 				표시:
 				{#each [10, 20, 30] as n}
 					<button

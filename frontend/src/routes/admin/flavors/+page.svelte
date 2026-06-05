@@ -80,6 +80,7 @@
 	});
 
 	onMount(() => {
+		if (window.matchMedia('(max-width: 767px)').matches) pageSize = 10;
 		load();
 		projectNames.load(token, projectId);
 	});
@@ -106,7 +107,7 @@
 					load();
 				}}
 			/>
-			<div class="flex items-center gap-1 text-xs text-gray-500">
+			<div class="flex items-center gap-1 text-xs text-gray-500 max-md:hidden">
 				표시:
 				{#each [10, 20, 30] as n}
 					<button
