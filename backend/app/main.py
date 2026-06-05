@@ -287,6 +287,8 @@ if _ClientDisconnect is not None:
         return JSONResponse(status_code=499, content={"detail": "클라이언트 연결 종료"})
 
 
+from app.services.activity import _audit_ctx
+from app.services.activity import record as _record_activity
 from app.services.k3s_errors import K3sApiError
 
 
@@ -312,6 +314,56 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 
 # 보안 응답 헤더: API 서버이므로 제한적 CSP 적용
+# ---------------------------------------------------------------------------
+# CRUD 자동 로깅: path prefix → resource_type allowlist 레지스트리
+# ---------------------------------------------------------------------------
+# 긴 prefix 를 먼저 두어 longest-prefix 매칭이 단순 순회로 동작하도록 정렬.
+# 등록되지 않은 경로는 자동 로깅 제외 (allowlist 방식 — denylist 누락 위험 없음).
+_AUDIT_PREFIX_MAP: list[tuple[str, str]] = [
+    ("/api/volumes/backups", "volume_backup"),
+    ("/api/volume-snapshots", "volume_snapshot"),
+    ("/api/share-snapshots", "share_snapshot"),
+    ("/api/share-networks", "share_network"),
+    ("/api/security-services", "security_service"),
+    ("/api/security-groups", "security_group"),
+    ("/api/secret-containers", "secret_container"),
+    ("/api/secret-orders", "secret_order"),
+    ("/api/database-instances", "database"),
+    ("/api/admin/libraries", "library"),
+    ("/api/admin/images", "image"),
+    ("/api/admin/projects", "project"),
+    ("/api/loadbalancers", "load_balancer"),
+    ("/api/k3s/clusters", "container_cluster"),
+    ("/api/file-storage", "file_storage"),
+    ("/api/object-storage", "object_storage"),
+    ("/api/invitations", "invitation"),
+    ("/api/instances", "instance"),
+    ("/api/keypairs", "keypair"),
+    ("/api/networks", "network"),
+    ("/api/containers", "container"),
+    ("/api/libraries", "library"),
+    ("/api/volumes", "volume"),
+    ("/api/routers", "router"),
+    ("/api/secrets", "secret"),
+    ("/api/images", "image"),
+    ("/api/union", "union_layer"),
+    ("/api/clusters", "container_cluster"),
+]
+
+
+def _resource_for_path(path: str) -> tuple[str, str | None] | None:
+    """path prefix longest-match → (resource_type, resource_id) 또는 None(제외).
+
+    resource_id: prefix 제거 후 첫 path 세그먼트가 존재하면 사용, 없으면 None.
+    """
+    for prefix, rtype in _AUDIT_PREFIX_MAP:
+        if path.startswith(prefix):
+            rest = path[len(prefix) :].lstrip("/")
+            rid = rest.split("/")[0] if rest else None
+            return (rtype, rid or None)
+    return None
+
+
 _DOCS_PATHS = {"/docs", "/redoc", "/openapi.json"}
 
 
@@ -372,6 +424,53 @@ async def cors_middleware(request: Request, call_next):
         response.headers["Access-Control-Allow-Methods"] = _CORS_ALLOW_METHODS
         response.headers["Access-Control-Allow-Headers"] = _CORS_ALLOW_HEADERS
         response.headers["Vary"] = "Origin"
+    return response
+
+
+@app.middleware("http")
+async def activity_audit_middleware(request: Request, call_next):
+    """mutation(POST/PUT/PATCH/DELETE) 성공 시 명시적 로그가 없으면 자동 1행 기록.
+
+    수동 rec()/record() 호출이 있으면 _audit_ctx 공유 dict 를 통해 신호를 수신하고
+    자동 로깅을 건너뛴다 (중복 방지). 기존 218개 수동 호출은 그대로 유지.
+    """
+    is_mut = request.method in ("POST", "PUT", "PATCH", "DELETE")
+    holder: dict = {"logged": False}
+    tok = _audit_ctx.set(holder) if is_mut else None
+    try:
+        response = await call_next(request)
+    finally:
+        if tok is not None:
+            _audit_ctx.reset(tok)
+
+    if is_mut and not holder["logged"] and 200 <= response.status_code < 300:
+        info = getattr(request.state, "token_info", None)
+        mapped = _resource_for_path(request.url.path)
+        if info and mapped:
+            rtype, rid = mapped
+            pid = info.get("project_id", "")
+            uid = info.get("user_id", "")
+            uname = info.get("username", "")
+            if pid and uid:
+                action = {
+                    "POST": "create",
+                    "PUT": "update",
+                    "PATCH": "update",
+                    "DELETE": "delete",
+                }[request.method]
+                try:
+                    await _record_activity(
+                        project_id=pid,
+                        user_id=uid,
+                        username=uname,
+                        resource_type=rtype,
+                        action=action,
+                        status="success",
+                        resource_id=rid,
+                    )
+                except Exception:
+                    pass  # best-effort: 응답을 차단하지 않는다
+
     return response
 
 

@@ -88,6 +88,45 @@ async def test_list_project_members_requires_admin(non_admin_client):
     assert resp.status_code == 403
 
 
+@pytest.mark.asyncio
+async def test_get_project_requires_admin(non_admin_client):
+    resp = await non_admin_client.get("/api/admin/projects/proj-1")
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_get_project_returns_shape(admin_client, mock_conn):
+    """GET /api/admin/projects/{id} 가 Project shape 를 반환한다."""
+    fake_proj = MagicMock()
+    fake_proj.id = "proj-abc"
+    fake_proj.name = "테스트 프로젝트"
+    fake_proj.is_enabled = True
+    fake_proj.domain_id = "default"
+    fake_proj.created_at = "2024-01-01T00:00:00Z"
+    type(fake_proj).__getattr__ = lambda self, k: None  # getattr fallback
+    mock_conn.identity.get_project.return_value = fake_proj
+
+    resp = await admin_client.get("/api/admin/projects/proj-abc")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["id"] == "proj-abc"
+    assert data["name"] == "테스트 프로젝트"
+    assert data["enabled"] is True
+    assert data["domain_id"] == "default"
+    assert "created_at" in data
+
+
+@pytest.mark.asyncio
+async def test_get_project_not_found(admin_client, mock_conn):
+    """존재하지 않는 project_id → 404."""
+    mock_conn.identity.get_project.side_effect = Exception("Not found")
+
+    resp = await admin_client.get("/api/admin/projects/nonexistent")
+
+    assert resp.status_code == 404
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 할당량 (2개)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

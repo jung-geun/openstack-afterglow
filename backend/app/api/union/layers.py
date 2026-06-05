@@ -44,7 +44,7 @@ async def _resolve_mount_user_id(request: Request) -> str:
     x_project_id = request.headers.get("X-Project-Id")
     if not x_auth_token:
         raise HTTPException(status_code=401, detail="인증 토큰이 필요합니다")
-    token_info = await get_token_info(x_auth_token=x_auth_token, x_project_id=x_project_id)
+    token_info = await get_token_info(request=request, x_auth_token=x_auth_token, x_project_id=x_project_id)
     return token_info.get("user_id") or token_info.get("username") or "unknown"
 
 

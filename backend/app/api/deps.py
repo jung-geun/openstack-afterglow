@@ -8,7 +8,7 @@ from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from fastapi import Depends, Header, HTTPException, Query
+from fastapi import Depends, Header, HTTPException, Query, Request
 
 from app.config import get_settings
 from app.services import keystone
@@ -191,6 +191,7 @@ async def _resolve_jwt_token_info(bearer_token: str, x_project_id: str | None) -
 
 
 async def get_token_info(
+    request: Request,
     authorization: str | None = Header(None),
     x_auth_token: str | None = Header(None),
     x_project_id: str | None = Header(None),
@@ -200,11 +201,16 @@ async def get_token_info(
     우선순위:
     1. Authorization: Bearer <access_jwt>  — JWT 경로 (신규)
     2. X-Auth-Token: <keystone_token>      — 레거시 경로 (하위호환)
+
+    request.state.token_info 를 세팅해 activity_audit_middleware 가 자동 로깅 시
+    신원(project_id/user_id/username)을 추출할 수 있게 한다.
     """
     if authorization and authorization.startswith("Bearer "):
         bearer = authorization[7:]
         try:
-            return await _resolve_jwt_token_info(bearer, x_project_id)
+            info = await _resolve_jwt_token_info(bearer, x_project_id)
+            request.state.token_info = info
+            return info
         except HTTPException:
             raise
         except Exception:
@@ -215,7 +221,9 @@ async def get_token_info(
     try:
         token_hash = hashlib.sha256(x_auth_token.encode()).hexdigest()
         await _check_session_timeout(token_hash, x_project_id or "")
-        return await _cached_validate(x_auth_token, x_project_id or "")
+        info = await _cached_validate(x_auth_token, x_project_id or "")
+        request.state.token_info = info
+        return info
     except HTTPException:
         raise
     except Exception:
@@ -257,6 +265,7 @@ async def require_project_manager(
 
 
 async def get_os_conn(
+    request: Request,
     authorization: str | None = Header(None),
     x_auth_token: str | None = Header(None),
     x_project_id: str | None = Header(None),
@@ -267,6 +276,7 @@ async def get_os_conn(
     요청 완료 후 Connection을 닫아 리소스 누수를 방지한다.
     """
     token_info = await get_token_info(
+        request=request,
         authorization=authorization,
         x_auth_token=x_auth_token,
         x_project_id=x_project_id,

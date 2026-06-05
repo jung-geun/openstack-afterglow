@@ -291,6 +291,35 @@ async def create_project(
         raise
 
 
+@router.get("/projects/{project_id}", dependencies=[Depends(require_admin)])
+async def get_project(
+    project_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """프로젝트 상세 조회."""
+
+    def _get():
+        try:
+            p = conn.identity.get_project(project_id)
+            created_at = getattr(p, "created_at", None)
+            return {
+                "id": p.id,
+                "name": p.name or "",
+                "description": getattr(p, "description", "") or "",
+                "enabled": p.is_enabled,
+                "domain_id": getattr(p, "domain_id", None),
+                "created_at": str(created_at) if created_at else None,
+            }
+        except Exception as e:
+            _logger.warning("프로젝트 조회 실패: %s", e)
+            raise HTTPException(status_code=404, detail="프로젝트 조회 실패")
+
+    try:
+        return await asyncio.to_thread(_get)
+    except HTTPException:
+        raise
+
+
 @router.patch("/projects/{project_id}", dependencies=[Depends(require_admin)])
 async def update_project(
     project_id: str,

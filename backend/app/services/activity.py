@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from contextvars import ContextVar
 from typing import Literal
 
 from sqlalchemy import and_, desc, select
@@ -14,6 +15,14 @@ from app.models.activity import ActivityLog
 logger = logging.getLogger(__name__)
 
 ActionStatus = Literal["started", "success", "failed"]
+
+# 자동 로깅 미들웨어와의 중복 억제 채널.
+# BaseHTTPMiddleware 는 엔드포인트를 자식 태스크(컨텍스트 복사본)에서 실행하므로
+# ContextVar 바인딩 변경은 미들웨어로 전달되지 않는다. 하지만 값(dict 참조)은
+# 복사 시 참조로 공유되므로, dict 내용 변경은 양쪽에서 보인다.
+# 미들웨어가 dict 를 set 하고 핸들러가 record() 를 호출하면 dict["logged"]=True 가
+# 미들웨어 쪽에도 반영되어 자동 로깅을 억제한다.
+_audit_ctx: ContextVar[dict | None] = ContextVar("activity_audit", default=None)
 
 _last_db_warn_ts: float = float("-inf")  # 첫 번째 경고는 항상 즉시 출력
 
@@ -40,6 +49,11 @@ async def record(
     extra: dict | None = None,
 ) -> None:
     """활동 1건 기록. 실패 시 silently swallow + warning."""
+    # 자동 로깅 미들웨어에 "명시적 로그가 발생했음"을 신호 (중복 방지).
+    # rec() 경유 호출 + k3s 서비스의 직접 record() 2곳 모두 여기서 신호를 세팅한다.
+    _h = _audit_ctx.get()
+    if _h is not None:
+        _h["logged"] = True
     if not is_db_available():
         _warn_db_unavailable("ActivityLog skipped: db unavailable (engine=None or circuit breaker open)")
         return
