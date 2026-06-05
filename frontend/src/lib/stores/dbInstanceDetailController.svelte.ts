@@ -325,8 +325,22 @@ export function createDbInstanceDetailController(opts: DbInstanceDetailControlle
 			await api.post(`/api/database-instances/${id}/backups`, { name, description }, tok, proj);
 			backups = await api.get<DbBackup[]>(`/api/database-instances/${id}/backups`, tok, proj);
 			return true;
-		} catch (e) { backupError = e instanceof ApiError ? e.message : '실패'; return false; }
-		finally { creatingBackup = false; }
+		} catch (e) {
+			// POST가 타임아웃 등으로 실패해도 Trove에 백업이 실제로 생성됐을 수 있음.
+			// 목록을 재조회해 해당 이름의 백업이 존재하면 성공으로 처리한다.
+			try {
+				const refreshed = await api.get<DbBackup[]>(`/api/database-instances/${id}/backups`, tok, proj);
+				backups = refreshed;
+				if (refreshed.some(b => b.name === name)) {
+					// 백업이 Trove에 실제로 생성됨 — 오류 표시 없이 성공 반환
+					return true;
+				}
+			} catch { /* 목록 재조회 실패 시 아래 에러 표시로 진행 */ }
+			backupError = e instanceof ApiError
+				? e.message
+				: '요청 시간이 초과됐습니다. 백업이 생성됐을 수 있으니 목록을 확인하세요.';
+			return false;
+		} finally { creatingBackup = false; }
 	}
 
 	async function deleteBackup(backupId: string) {

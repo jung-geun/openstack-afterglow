@@ -23,6 +23,14 @@ export function createAutoRefresh(fn: () => void | Promise<void>, options: AutoR
 		intervalOptions
 	});
 
+	// 이전 라운드가 끝나기 전 다음 라운드가 겹쳐 실행되지 않도록 in-flight 가드
+	let _running = false;
+	async function tick() {
+		if (_running) return;
+		_running = true;
+		try { await fn(); } finally { _running = false; }
+	}
+
 	// Restore saved preferences from localStorage (client-only via $effect)
 	$effect(() => {
 		const savedActive = localStorage.getItem(`autoRefresh.${storageKey}.active`);
@@ -48,7 +56,7 @@ export function createAutoRefresh(fn: () => void | Promise<void>, options: AutoR
 
 		function start() {
 			timerId = setInterval(() => {
-				fn();
+				tick();
 			}, state.intervalSeconds * 1000);
 		}
 
@@ -64,13 +72,13 @@ export function createAutoRefresh(fn: () => void | Promise<void>, options: AutoR
 				stop();
 			} else {
 				stop();
-				fn();
+				tick();
 				start();
 			}
 		}
 
 		if (!document.hidden) {
-			if (invokeOnMount) untrack(() => fn());
+			if (invokeOnMount) untrack(() => tick());
 			start();
 		}
 

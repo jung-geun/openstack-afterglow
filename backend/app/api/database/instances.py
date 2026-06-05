@@ -748,6 +748,8 @@ async def create_instance_backup(
     await _assert_db_instance_owner(conn, instance_id, token_info)
     try:
         result = await asyncio.to_thread(trove.create_backup, conn, instance_id, req.name, req.description)
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
     except Exception:
         raise HTTPException(status_code=500, detail="백업 생성 실패")
     pid = getattr(conn, "_afterglow_project_id", "unknown")

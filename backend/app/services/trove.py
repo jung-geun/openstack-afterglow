@@ -541,8 +541,18 @@ def create_backup(conn, instance_id: str, name: str, description: str = "") -> d
     if description:
         payload["backup"]["description"] = description
     resp = conn.database.post("/backups", json=payload)
+    status = getattr(resp, "status_code", None)
+    text = (getattr(resp, "text", "") or "")[:2000]
     body = resp.json() if hasattr(resp, "json") else {}
-    return _backup_to_dict(body.get("backup", {}))
+    backup_data = body.get("backup", {})
+    if not backup_data or not backup_data.get("id"):
+        _logger.error(
+            "Trove create_backup 실패 status=%s body=%s",
+            status,
+            text,
+        )
+        raise RuntimeError(f"Trove 백업 생성 실패 (HTTP {status})")
+    return _backup_to_dict(backup_data)
 
 
 def delete_backup(conn, backup_id: str) -> None:
