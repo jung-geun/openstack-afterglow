@@ -105,8 +105,8 @@
 				{#each pagedFlavors as f (f.id)}
 					<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/50 transition-colors">
 						<td class="py-2 pr-4">
-							<div>
-								<span class="text-white">{f.name}</span>
+							<div class="min-w-0">
+								<span class="text-white max-md:block max-md:max-w-[66vw] max-md:truncate" title={f.name}>{f.name}</span>
 								{#if f.description}
 									<div class="text-gray-500 text-xs mt-0.5">{f.description}</div>
 								{/if}

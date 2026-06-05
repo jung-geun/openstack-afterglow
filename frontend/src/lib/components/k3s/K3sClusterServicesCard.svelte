@@ -46,7 +46,7 @@
 					{#each s.services as svc}
 						{@const actioning = s.workloadActioning === `${s.selectedNamespace}:svc:${svc.name}`}
 						<tr class="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
-							<td class="py-2.5 text-white font-medium font-mono">{svc.name}</td>
+							<td class="py-2.5 text-white font-medium font-mono"><span class="max-md:block max-md:max-w-[66vw] max-md:truncate" title={svc.name}>{svc.name}</span></td>
 							<td class="py-2.5 text-gray-400">{svc.type}</td>
 							<td class="py-2.5 text-gray-400 font-mono">{svc.cluster_ip ?? '—'}</td>
 							<td class="py-2.5 text-gray-400">

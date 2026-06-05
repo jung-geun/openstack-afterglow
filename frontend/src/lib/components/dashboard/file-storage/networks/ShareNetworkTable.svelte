@@ -25,7 +25,7 @@
       {#each networks as net (net.id)}
         <tr class="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
           <td class="py-3 pr-6 font-medium text-white">
-            {#if net.name}<span class="text-white font-medium">{net.name}</span>{:else}<span class="font-mono text-xs text-gray-400">{net.id.slice(0, 8)}</span>{/if}
+            {#if net.name}<span class="text-white font-medium max-md:block max-md:max-w-[66vw] max-md:truncate" title={net.name}>{net.name}</span>{:else}<span class="font-mono text-xs text-gray-400 max-md:block max-md:max-w-[66vw] max-md:truncate" title={net.id}>{net.id.slice(0, 8)}</span>{/if}
             {#if net.description}
               <div class="text-xs text-gray-500">{net.description}</div>
             {/if}

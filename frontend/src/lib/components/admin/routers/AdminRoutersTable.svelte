@@ -27,7 +27,7 @@
 		<tbody>
 			{#each routers as r (r.id)}
 				<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/30 transition-colors">
-					<td class="py-2 pr-4 text-white">{r.name || r.id.slice(0, 8)}</td>
+					<td class="py-2 pr-4 text-white"><span class="max-md:block max-md:max-w-[66vw] max-md:truncate" title={r.name || r.id}>{r.name || r.id.slice(0, 8)}</span></td>
 					<td class="py-2 pr-4 {r.status === 'ACTIVE' ? 'text-green-400' : 'text-gray-400'}">{r.status}</td>
 					<td class="py-2 pr-4 text-gray-500 font-mono">
 						{r.external_gateway_network_id ? r.external_gateway_network_id.slice(0, 8) + '...' : '-'}

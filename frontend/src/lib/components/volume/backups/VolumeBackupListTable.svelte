@@ -31,7 +31,7 @@
 		<tbody>
 			{#each backups as backup (backup.id)}
 				<tr class="border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors">
-					<td class="py-3 pr-6 font-medium text-white">{backup.name || backup.id.slice(0, 8)}</td>
+					<td class="py-3 pr-6 font-medium text-white"><span class="max-md:block max-md:max-w-[66vw] max-md:truncate" title={backup.name || backup.id}>{backup.name || backup.id.slice(0, 8)}</span></td>
 					<td class="py-3 pr-6"><StatusChip status={backup.status} /></td>
 					<td class="py-3 pr-6 text-gray-400">{formatStorage(backup.size)}</td>
 					<td class="py-3 pr-6"><span class="text-xs {backup.is_incremental ? 'text-blue-400' : 'text-gray-500'}">{backup.is_incremental ? '증분' : '전체'}</span></td>

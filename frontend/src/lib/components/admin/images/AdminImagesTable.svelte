@@ -59,8 +59,8 @@
 					class="border-b border-gray-800/50 text-xs transition-colors {selectedImageId === img.id ? 'bg-gray-800/50' : ''}"
 				>
 					<td class="py-2 pr-4">
-						<div>
-							<button type="button" onclick={() => onOpenDetail(img)} class="text-white hover:text-blue-400 transition-colors text-left">{img.name || img.id.slice(0, 12)}</button>
+						<div class="min-w-0">
+							<button type="button" onclick={() => onOpenDetail(img)} class="text-white hover:text-blue-400 transition-colors text-left max-md:block max-md:max-w-[66vw] max-md:truncate" title={img.name || img.id}>{img.name || img.id.slice(0, 12)}</button>
 							{#if img.os_distro}
 								<div class="text-gray-500 text-xs mt-0.5">{img.os_distro}</div>
 							{/if}

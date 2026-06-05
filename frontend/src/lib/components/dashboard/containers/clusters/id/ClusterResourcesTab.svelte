@@ -29,7 +29,7 @@
       <tbody>
         {#each resources as r}
           <tr class="border-b border-gray-800/50 text-xs">
-            <td class="py-2 pr-4 text-white font-medium">{r.resource_name}</td>
+            <td class="py-2 pr-4 text-white font-medium"><span class="max-md:block max-md:max-w-[66vw] max-md:truncate" title={r.resource_name}>{r.resource_name}</span></td>
             <td class="py-2 pr-4 text-gray-500 font-mono text-xs">{r.resource_type}</td>
             <td class="py-2 pr-4 text-gray-500 font-mono text-xs">{r.physical_resource_id?.slice(0, 12) || '-'}</td>
             <td class="py-2 pr-4">

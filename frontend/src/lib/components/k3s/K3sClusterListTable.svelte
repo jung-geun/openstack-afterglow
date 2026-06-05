@@ -32,7 +32,7 @@
 			{#each clusters as c (c.id)}
 				<tr class="border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors">
 					<td class="py-3 pr-6">
-						<button onclick={() => onNavigate(c.id)} class="font-medium text-white hover:text-blue-400 transition-colors text-left">{c.name}</button>
+						<button onclick={() => onNavigate(c.id)} class="font-medium text-white hover:text-blue-400 transition-colors text-left max-md:block max-md:max-w-[66vw] max-md:truncate" title={c.name}>{c.name}</button>
 					</td>
 					<td class="py-3 pr-6">
 						<StatusChip status={c.status} />

@@ -44,7 +44,7 @@
         {#each services as svc (svc.id)}
           <tr class="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
             <td class="py-3 pr-4 font-medium text-white">
-              {svc.name}
+              <span class="max-md:block max-md:max-w-[66vw] max-md:truncate" title={svc.name}>{svc.name}</span>
               {#if svc.description}
                 <div class="text-xs text-gray-500">{svc.description}</div>
               {/if}

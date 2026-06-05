@@ -88,7 +88,7 @@
 		<tbody>
 			{#each sortedHosts as h (h.name)}
 				<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/50 transition-colors cursor-pointer" onclick={() => toggleHost(h.name)}>
-					<td class="py-2 pr-4 text-white font-medium">{h.name}</td>
+					<td class="py-2 pr-4 text-white font-medium"><span class="max-md:block max-md:max-w-[66vw] max-md:truncate" title={h.name}>{h.name}</span></td>
 					<td class="py-2 pr-4 text-gray-400">
 						{#each h.gpu_groups as g}
 							<span class="mr-2">{g.device_name} x{g.total}</span>

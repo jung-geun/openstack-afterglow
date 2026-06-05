@@ -41,7 +41,7 @@
             class="border-b border-gray-800/50 text-xs hover:bg-gray-800/50 transition-colors cursor-pointer"
             onclick={() => onEdit(u)}
           >
-            <td class="py-2 pr-4 text-white">{u.name}</td>
+            <td class="py-2 pr-4 text-white"><span class="max-md:block max-md:max-w-[66vw] max-md:truncate" title={u.name}>{u.name}</span></td>
             <td class="py-2 pr-4 text-gray-400">{u.email || '-'}</td>
             <td class="py-2 pr-4">
               <span class="px-1.5 py-0.5 rounded text-xs font-medium {u.enabled ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{u.enabled ? '활성' : '비활성'}</span>

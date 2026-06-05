@@ -114,7 +114,7 @@
 					{#each instances as inst}
 						<tr class="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
 							<td class="py-3 px-4">
-								<a href="/admin/database-instances/{inst.id}" class="text-amber-400 hover:text-amber-300 font-medium">{inst.name}</a>
+								<a href="/admin/database-instances/{inst.id}" class="text-amber-400 hover:text-amber-300 font-medium max-md:block max-md:max-w-[66vw] max-md:truncate" title={inst.name}>{inst.name}</a>
 							</td>
 							<td class="py-3 px-4"><StatusChip status={inst.status} /></td>
 							<td class="py-3 px-4 text-gray-300">{inst.datastore?.type ?? '-'} {inst.datastore?.version ?? ''}</td>

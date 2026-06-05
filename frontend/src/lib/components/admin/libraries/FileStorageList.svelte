@@ -8,6 +8,7 @@
 <div class="mt-8">
 	<h2 class="text-sm font-medium text-gray-400 mb-3">프리빌트 Share 목록 ({fileStorages.length})</h2>
 	<div class="rounded-lg border border-gray-700 overflow-hidden">
+		<div class="overflow-x-auto">
 		<table class="w-full text-sm">
 			<thead class="bg-gray-800 text-gray-400 text-xs uppercase">
 				<tr>
@@ -19,7 +20,7 @@
 			<tbody class="divide-y divide-gray-700/50">
 				{#each fileStorages as fs}
 					<tr class="hover:bg-gray-800/50">
-						<td class="px-4 py-3 text-gray-300 text-xs font-mono">{fs.name}</td>
+						<td class="px-4 py-3 text-gray-300 text-xs font-mono"><span class="max-md:block max-md:max-w-[66vw] max-md:truncate" title={fs.name}>{fs.name}</span></td>
 						<td class="px-4 py-3 text-gray-400 text-xs">
 							{fs.library_name ?? '-'}
 							{#if fs.library_version}<span class="text-gray-600"> v{fs.library_version}</span>{/if}
@@ -29,5 +30,6 @@
 				{/each}
 			</tbody>
 		</table>
+		</div>
 	</div>
 </div>

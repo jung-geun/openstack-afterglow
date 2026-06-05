@@ -31,7 +31,7 @@
 					class="border-b border-gray-800/50 text-xs transition-colors"
 				>
 					<td class="py-2 pr-4">
-						<button type="button" onclick={() => onRowClick(n.id)} class="font-medium text-white hover:text-blue-400 transition-colors text-left">{n.name || n.id.slice(0, 8)}</button>
+						<button type="button" onclick={() => onRowClick(n.id)} class="font-medium text-white hover:text-blue-400 transition-colors text-left max-md:block max-md:max-w-[66vw] max-md:truncate" title={n.name || n.id}>{n.name || n.id.slice(0, 8)}</button>
 					</td>
 					<td class="py-2 pr-4 {n.status === 'ACTIVE' ? 'text-green-400' : 'text-gray-400'}">{n.status}</td>
 					<td class="py-2 pr-4">

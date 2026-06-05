@@ -406,8 +406,8 @@
 						{#each secrets as s}
 							<tr class="hover:bg-gray-800/30">
 								<td class="py-3 pr-4 font-mono text-xs">
-									<div class="flex items-center gap-2">
-										{s.name ?? s.id}
+									<div class="flex items-center gap-2 max-md:max-w-[66vw]">
+										<span class="max-md:truncate" title={s.name ?? s.id}>{s.name ?? s.id}</span>
 										{#if s.system_managed}
 											<span class="text-xs bg-gray-700 text-gray-400 px-2 py-0.5 rounded-full">시스템</span>
 										{/if}
@@ -472,8 +472,8 @@
 						{#each containers as c}
 							<tr class="hover:bg-gray-800/30">
 								<td class="py-3 pr-4">
-									<div>{c.name ?? '-'}</div>
-									<div class="text-xs text-gray-500 font-mono">{c.id}</div>
+									<div class="max-md:max-w-[66vw] max-md:truncate" title={c.name ?? c.id}>{c.name ?? '-'}</div>
+									<div class="text-xs text-gray-500 font-mono max-md:max-w-[66vw] max-md:truncate">{c.id}</div>
 								</td>
 								<td class="py-3 pr-4 text-gray-300">{c.type}</td>
 								<td class="py-3 pr-4">

@@ -6,6 +6,7 @@
 
 <div class="bg-gray-900 border border-gray-800 rounded-lg p-6">
 	<h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-4">연결된 라우터</h2>
+	<div class="overflow-x-auto">
 	<table class="w-full text-sm">
 		<thead>
 			<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
@@ -17,7 +18,7 @@
 		<tbody>
 			{#each routers as router}
 				<tr class="border-b border-gray-800/50">
-					<td class="py-2 pr-6 text-gray-300">{router.name || router.id.slice(0, 12) + '…'}</td>
+					<td class="py-2 pr-6 text-gray-300"><span class="max-md:block max-md:max-w-[66vw] max-md:truncate" title={router.name || router.id}>{router.name || router.id.slice(0, 12) + '…'}</span></td>
 					<td class="py-2 pr-6">
 						{#if router.external_gateway_network_id}
 							<span class="text-orange-300 text-xs font-mono">{router.external_gateway_network_id.slice(0, 12)}…</span>
@@ -32,4 +33,5 @@
 			{/each}
 		</tbody>
 	</table>
+	</div>
 </div>

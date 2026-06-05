@@ -116,7 +116,7 @@
 							role="button"
 							tabindex="0">
 							<td class="py-2 pr-4">
-								<span class="text-white hover:text-blue-400 transition-colors">
+								<span class="text-white hover:text-blue-400 transition-colors max-md:block max-md:max-w-[66vw] max-md:truncate" title={c.name}>
 									{c.name}
 								</span>
 								{#if c.status_reason}

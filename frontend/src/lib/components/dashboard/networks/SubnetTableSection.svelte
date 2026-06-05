@@ -187,7 +187,7 @@
 								</div>
 							</td>
 						{:else}
-							<td class="py-2 pr-6 text-gray-300">{subnet.name || '-'}</td>
+							<td class="py-2 pr-6 text-gray-300"><span class="max-md:block max-md:max-w-[66vw] max-md:truncate" title={subnet.name || subnet.id}>{subnet.name || '-'}</span></td>
 							<td class="py-2 pr-6 text-gray-300 font-mono text-xs">{subnet.cidr}</td>
 							<td class="py-2 pr-6 text-gray-400 font-mono text-xs">{subnet.gateway_ip ?? '-'}</td>
 							<td class="py-2 pr-4">

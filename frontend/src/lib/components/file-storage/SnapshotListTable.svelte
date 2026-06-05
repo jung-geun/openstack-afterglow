@@ -29,7 +29,7 @@
 		<tbody>
 			{#each snapshots as snap (snap.id)}
 				<tr class="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
-					<td class="py-3 pr-6 font-medium text-white">{snap.name || snap.id.slice(0, 8)}</td>
+					<td class="py-3 pr-6 font-medium text-white"><span class="max-md:block max-md:max-w-[66vw] max-md:truncate" title={snap.name || snap.id}>{snap.name || snap.id.slice(0, 8)}</span></td>
 					<td class="py-3 pr-6"><StatusChip status={snap.status} /></td>
 					<td class="py-3 pr-4 text-gray-400 text-xs">{snap.size > 0 ? `${snap.size} GB` : '-'}</td>
 					<td class="py-3 pr-6 font-mono text-xs text-gray-400">{snap.share_id.slice(0, 12)}...</td>

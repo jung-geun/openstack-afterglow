@@ -56,7 +56,7 @@
 </script>
 
 <div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
-  <div class="rounded-lg border border-gray-700 overflow-hidden">
+  <div class="rounded-lg border border-gray-700 overflow-hidden overflow-x-auto">
     <table class="w-full text-sm">
       <thead class="bg-gray-800 text-gray-400 text-xs uppercase">
         <tr>
@@ -79,7 +79,7 @@
                   <span class="text-gray-600 mr-1">└</span>
                 {/if}
                 <div>
-                  <a href={layerHref(layer.id)} class="font-medium text-gray-100 hover:text-blue-400 transition-colors">{layer.name}</a>
+                  <a href={layerHref(layer.id)} class="font-medium text-gray-100 hover:text-blue-400 transition-colors max-md:block max-md:max-w-[66vw] max-md:truncate" title={layer.name}>{layer.name}</a>
                   <div class="text-xs text-gray-500">{layer.version}</div>
                 </div>
               </div>

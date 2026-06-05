@@ -58,7 +58,7 @@
 					{#each s.deployments as dep}
 						{@const actioning = s.workloadActioning === `${s.selectedNamespace}:deploy:${dep.name}`}
 						<tr class="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
-							<td class="py-2.5 text-white font-medium font-mono">{dep.name}</td>
+							<td class="py-2.5 text-white font-medium font-mono"><span class="max-md:block max-md:max-w-[66vw] max-md:truncate" title={dep.name}>{dep.name}</span></td>
 							<td class="py-2.5">
 								<span class="tabular-nums text-white">{dep.ready}/{dep.replicas}</span>
 								{#if dep.available < dep.replicas}
@@ -106,7 +106,7 @@
 				<tbody>
 					{#each s.replicasets as rs}
 						<tr class="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
-							<td class="py-2.5 text-gray-300 font-mono">{rs.name}</td>
+							<td class="py-2.5 text-gray-300 font-mono"><span class="max-md:block max-md:max-w-[66vw] max-md:truncate" title={rs.name}>{rs.name}</span></td>
 							<td class="py-2.5 tabular-nums text-gray-300">{rs.ready}/{rs.replicas}</td>
 							<td class="py-2.5 text-gray-400">
 								{#if rs.owner_kind && rs.owner_name}

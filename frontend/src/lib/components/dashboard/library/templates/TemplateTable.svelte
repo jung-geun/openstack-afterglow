@@ -21,7 +21,7 @@
 </script>
 
 <div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
-  <div class="rounded-lg border border-gray-700 overflow-hidden">
+  <div class="rounded-lg border border-gray-700 overflow-hidden overflow-x-auto">
     <table class="w-full text-sm">
       <thead class="bg-gray-800 text-gray-400 text-xs uppercase">
         <tr>
@@ -38,7 +38,7 @@
             class="hover:bg-gray-800/50 cursor-pointer transition-colors"
             onclick={() => onSelect(tmpl)}
           >
-            <td class="px-4 py-3 font-medium">{tmpl.name}</td>
+            <td class="px-4 py-3 font-medium"><span class="max-md:block max-md:max-w-[66vw] max-md:truncate" title={tmpl.name}>{tmpl.name}</span></td>
             <td class="px-4 py-3 text-gray-400">v{tmpl.version}</td>
             <td class="px-4 py-3 hidden md:table-cell text-gray-400 text-xs">{tmpl.ubuntu_base}</td>
             <td class="px-4 py-3 hidden lg:table-cell text-gray-500 text-xs">{tmpl.note ?? '-'}</td>

@@ -41,7 +41,7 @@
 		<tbody>
 			{#each storages as fs (fs.id)}
 				<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/20">
-					<td class="py-2 pr-4 text-white font-medium">{fs.name || fs.id.slice(0, 8)}</td>
+					<td class="py-2 pr-4 text-white font-medium"><span class="max-md:block max-md:max-w-[66vw] max-md:truncate" title={fs.name || fs.id}>{fs.name || fs.id.slice(0, 8)}</span></td>
 					<td class="py-2 pr-4"><StatusChip status={fs.status} /></td>
 					<td class="py-2 pr-4 text-gray-400">{formatNumber(fs.size)} GB</td>
 					<td class="py-2 pr-4">

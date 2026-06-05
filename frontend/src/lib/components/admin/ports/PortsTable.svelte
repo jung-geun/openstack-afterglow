@@ -38,7 +38,7 @@
 			{#each ports as p (p.id)}
 				<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/30 transition-colors">
 					<td class="py-2 pr-4">
-						<div class="text-white">{p.name || '-'}</div>
+						<div class="text-white max-md:max-w-[66vw] max-md:truncate" title={p.name || ''}>{p.name || '-'}</div>
 						<div class="text-gray-600 font-mono">{p.id.slice(0, 12)}...</div>
 					</td>
 					<td class="py-2 pr-4 {p.status === 'ACTIVE' ? 'text-green-400' : 'text-gray-400'}">{p.status}</td>

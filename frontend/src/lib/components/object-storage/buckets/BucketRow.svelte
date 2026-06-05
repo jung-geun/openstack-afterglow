@@ -17,7 +17,8 @@
 	<td class="py-3 px-4">
 		<a
 			href="/admin/object-storage/{encodeURIComponent(container.name)}{container.project_id ? `?project_id=${encodeURIComponent(container.project_id)}` : ''}"
-			class="text-indigo-400 hover:text-indigo-300 font-medium"
+			class="text-indigo-400 hover:text-indigo-300 font-medium max-md:block max-md:max-w-[66vw] max-md:truncate"
+			title={container.name}
 		>{container.name}</a>
 		{#if container.is_quarantine}
 			<span

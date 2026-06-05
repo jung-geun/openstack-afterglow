@@ -41,7 +41,7 @@
 			{#each projects as p (p.id)}
 				<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/50 transition-colors">
 					<td class="py-2 pr-4 text-white">
-						<a href="/admin/projects/{p.id}" class="hover:text-blue-400 transition-colors">{p.name}</a>
+						<a href="/admin/projects/{p.id}" class="hover:text-blue-400 transition-colors max-md:block max-md:max-w-[66vw] max-md:truncate" title={p.name}>{p.name}</a>
 					</td>
 					<td class="py-2 pr-4 text-gray-400">{p.description || '-'}</td>
 					<td class="py-2 pr-4">

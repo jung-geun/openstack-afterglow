@@ -93,7 +93,7 @@
 							role="button"
 							tabindex="0"
 						>
-							<td class="py-2 pr-4 text-white">{c.name || c.uuid.slice(0, 8)}</td>
+							<td class="py-2 pr-4 text-white"><span class="max-md:block max-md:max-w-[66vw] max-md:truncate" title={c.name || c.uuid}>{c.name || c.uuid.slice(0, 8)}</span></td>
 							<td class="py-2 pr-4"><StatusChip status={c.status} /></td>
 							<td class="py-2 pr-4 text-gray-400 font-mono text-xs">{c.image || '-'}</td>
 							<td class="py-2 pr-4 text-gray-400">{c.cpu ?? '-'}</td>
