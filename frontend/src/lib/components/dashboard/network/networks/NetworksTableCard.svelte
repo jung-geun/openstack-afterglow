@@ -52,7 +52,7 @@
         <button
           type="button"
           onclick={() => onOpenPanel(net.id)}
-          class="flex items-center gap-2.5 min-w-0 w-full text-left group"
+          class="flex items-center gap-2.5 min-w-0 w-full text-left text-white hover:text-blue-400 transition-colors cursor-pointer"
         >
           <div class="shrink-0 w-7 h-7 rounded-md bg-violet-500/15 border border-violet-500/30 flex items-center justify-center">
             <svg class="w-3.5 h-3.5 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -61,7 +61,7 @@
           </div>
           <div class="min-w-0 flex-1">
             <div class="flex items-center gap-1.5">
-              <span class="font-medium text-white group-hover:text-blue-400 transition-colors truncate">{net.name || net.id.slice(0, 12)}</span>
+              <span class="font-medium truncate">{net.name || net.id.slice(0, 12)}</span>
               {#if net.id === defaultNetworkId}
                 <span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/40 border border-blue-700/60 text-blue-400 shrink-0">기본</span>
               {/if}

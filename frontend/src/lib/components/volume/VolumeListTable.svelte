@@ -64,7 +64,7 @@
 			<button
 				type="button"
 				onclick={() => onOpenDetail(vol.id)}
-				class="flex items-center gap-2.5 min-w-0 w-full text-left group"
+				class="flex items-center gap-2.5 min-w-0 w-full text-left text-white hover:text-blue-400 transition-colors cursor-pointer"
 			>
 				<div class="hidden sm:flex shrink-0 w-7 h-7 rounded-md bg-cyan-500/15 border border-cyan-500/30 items-center justify-center">
 					<svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -73,9 +73,9 @@
 				</div>
 				<div class="min-w-0 flex-1">
 					{#if vol.name}
-						<span class="block font-medium text-white group-hover:text-blue-400 transition-colors truncate">{vol.name}</span>
+						<span class="block font-medium truncate">{vol.name}</span>
 					{:else}
-						<span class="block font-mono text-xs text-gray-400 group-hover:text-blue-400 transition-colors truncate">{vol.id}</span>
+						<span class="block font-mono text-xs truncate">{vol.id}</span>
 					{/if}
 					<div class="text-[11px] text-gray-500 font-mono truncate">{vol.id.slice(0, 8)}…</div>
 				</div>

@@ -24,7 +24,7 @@
 	<button
 		type="button"
 		onclick={() => onSelect(instance.id)}
-		class="flex items-center gap-2.5 min-w-0 w-full text-left group"
+		class="flex items-center gap-2.5 min-w-0 w-full text-left text-white hover:text-blue-400 transition-colors cursor-pointer"
 	>
 		<div class="shrink-0 w-7 h-7 rounded-md bg-blue-500/15 border border-blue-500/30 flex items-center justify-center">
 			<svg class="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -32,7 +32,7 @@
 			</svg>
 		</div>
 		<div class="min-w-0 flex-1">
-			<span class="block font-medium text-white group-hover:text-blue-400 transition-colors truncate">{instance.name}</span>
+			<span class="block font-medium truncate">{instance.name}</span>
 			<div class="sm:hidden mt-0.5" onclick={(e) => e.stopPropagation()} role="none"><StatusChip status={instance.status} /></div>
 		</div>
 	</button>
