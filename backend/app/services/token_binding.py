@@ -1,4 +1,4 @@
-"""토큰 발급 출처(IP + 기기 지문) 바인딩 및 블랙리스트 검사.
+"""토큰 발급 출처(IP + 기기 지문) 바인딩, 블랙리스트 검사, 기기 정보 파싱.
 
 MAC 주소는 웹 환경에서 수집 불가능하므로(브라우저 JS 접근 차단, 서버는 L3 너머 클라이언트 MAC 불가),
 IP + User-Agent/Accept-Language/Accept-Encoding 해시(기기 지문)로 대체한다.
@@ -17,6 +17,49 @@ import ipaddress
 import logging
 
 _logger = logging.getLogger(__name__)
+
+
+def parse_device(user_agent: str) -> tuple[str, str]:
+    """User-Agent 문자열에서 (device_type, os) coarse 요약 반환.
+
+    raw UA는 저장하지 않고 이 함수의 결과값(요약)만 세션에 기록한다.
+    (Phase 1 hash-only 프라이버시 결정의 의식적 최소 확장)
+
+    Returns:
+        device_type: "desktop" | "mobile" | "tablet" | "unknown"
+        os:          "macOS" | "Windows" | "iOS" | "Android" | "Linux" | "unknown"
+    """
+    ua = user_agent or ""
+    ua_l = ua.lower()
+
+    # OS 판별
+    if "iphone" in ua_l or "ipad" in ua_l:
+        os_name = "iOS"
+    elif "android" in ua_l:
+        os_name = "Android"
+    elif "macintosh" in ua_l or "mac os x" in ua_l:
+        os_name = "macOS"
+    elif "windows" in ua_l:
+        os_name = "Windows"
+    elif "linux" in ua_l:
+        os_name = "Linux"
+    else:
+        os_name = "unknown"
+
+    # 기기 타입 판별
+    if "ipad" in ua_l or "tablet" in ua_l:
+        device_type = "tablet"
+    elif "android" in ua_l and "mobile" not in ua_l:
+        # Android 태블릿: UA에 "Mobile" 없이 "Android"만 포함
+        device_type = "tablet"
+    elif "mobile" in ua_l or "iphone" in ua_l or "mobi" in ua_l:
+        device_type = "mobile"
+    elif ua:
+        device_type = "desktop"
+    else:
+        device_type = "unknown"
+
+    return device_type, os_name
 
 
 def get_origin(request) -> tuple[str, str]:

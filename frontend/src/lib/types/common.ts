@@ -29,4 +29,6 @@ export interface User {
   domain_id: string | null;
   default_project_id: string | null;
   created_at: string | null;
+  first_seen?: string | null;
+  last_seen?: string | null;
 }

@@ -18,6 +18,8 @@
     last_seen: number;
     blacklisted: boolean;
     exp: number;
+    device_type: string;
+    os: string;
   }
 
   let sessions = $state<Session[]>([]);
@@ -26,6 +28,17 @@
   let error = $state('');
   let success = $state('');
   let showConfirm = $state(false);
+  let deletingJti = $state<string | null>(null); // 삭제 확인 대기 중인 jti
+  let removingJti = $state<string | null>(null); // API 요청 진행 중인 jti
+
+  function deviceLabel(sess: Session): string {
+    const os = sess.os && sess.os !== 'unknown' ? sess.os : '';
+    const dt = sess.device_type && sess.device_type !== 'unknown' ? sess.device_type : '';
+    if (os && dt) return `${os} · ${dt}`;
+    if (os) return os;
+    if (dt) return dt;
+    return '알 수 없음';
+  }
 
   async function loadSessions() {
     if (!token) return;
@@ -40,6 +53,24 @@
       // best-effort: 세션 목록 실패는 조용히 무시
     } finally {
       loadingSessions = false;
+    }
+  }
+
+  async function deleteSession(jti: string) {
+    deletingJti = null;
+    removingJti = jti;
+    error = '';
+    try {
+      await api.delete(`/api/auth/sessions/${jti}`, token, projectId);
+      await loadSessions();
+      if (sessions.length === 0) {
+        clearAuth();
+        goto('/');
+      }
+    } catch (e) {
+      error = e instanceof ApiError ? e.message : '세션 삭제 실패';
+    } finally {
+      removingJti = null;
     }
   }
 
@@ -90,15 +121,39 @@
   {#if sessions.length > 0}
     <div class="mb-4 space-y-2">
       <p class="text-xs text-gray-500 mb-2">활성 세션 <span class="text-gray-400 font-medium">{sessions.length}</span>개</p>
-      {#each sessions as sess}
+      {#each sessions as sess (sess.jti)}
         <div class="bg-gray-800/60 rounded-lg px-3 py-2 text-xs {sess.blacklisted ? 'border border-red-800/60' : 'border border-gray-700/40'}">
           <div class="flex items-center justify-between gap-2">
-            <span class="text-gray-300 font-mono">{sess.origin_ip || '—'}</span>
-            {#if sess.blacklisted}
-              <span class="text-red-400 text-[10px] font-semibold uppercase">차단됨</span>
-            {:else}
-              <span class="text-green-500 text-[10px]">활성</span>
-            {/if}
+            <div class="flex flex-col gap-0.5 min-w-0">
+              <span class="text-gray-300 font-mono truncate">{sess.origin_ip || '—'}</span>
+              <span class="text-gray-500">{deviceLabel(sess)}</span>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              {#if sess.blacklisted}
+                <span class="text-red-400 text-[10px] font-semibold uppercase">차단됨</span>
+              {:else}
+                <span class="text-green-500 text-[10px]">활성</span>
+              {/if}
+              {#if deletingJti === sess.jti}
+                <div class="flex items-center gap-1">
+                  <button
+                    onclick={() => deleteSession(sess.jti)}
+                    disabled={removingJti === sess.jti}
+                    class="px-2 py-0.5 bg-red-700 hover:bg-red-600 disabled:opacity-50 text-white text-[10px] rounded transition-colors"
+                  >{removingJti === sess.jti ? '삭제 중...' : '확인'}</button>
+                  <button
+                    onclick={() => { deletingJti = null; }}
+                    class="px-2 py-0.5 bg-gray-700 hover:bg-gray-600 text-white text-[10px] rounded transition-colors"
+                  >취소</button>
+                </div>
+              {:else}
+                <button
+                  onclick={() => { deletingJti = sess.jti; }}
+                  disabled={removingJti !== null}
+                  class="px-2 py-0.5 bg-gray-700 hover:bg-red-900/60 border border-gray-600 hover:border-red-700/60 text-gray-400 hover:text-red-300 text-[10px] rounded transition-colors disabled:opacity-40"
+                >제거</button>
+              {/if}
+            </div>
           </div>
           <div class="text-gray-500 mt-0.5">
             마지막 사용: {formatTime(sess.last_seen)}

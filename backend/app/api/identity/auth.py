@@ -44,6 +44,8 @@ async def _build_token_response(
     auth_method: str = "password",
     origin_ip: str = "",
     origin_fp: str = "",
+    device_type: str = "",
+    os: str = "",
 ) -> TokenResponse:
     """Keystone 토큰으로 JWT access+refresh 쌍을 발급하고 TokenResponse를 반환."""
     refresh_str, r_jti, r_exp = jwt_service.sign_refresh(user_id)
@@ -63,6 +65,8 @@ async def _build_token_response(
         auth_method=auth_method,
         origin_ip=origin_ip,
         origin_fp=origin_fp,
+        device_type=device_type,
+        os=os,
     )
     exp_dt = datetime.fromtimestamp(a_exp, tz=UTC)
     return TokenResponse(
@@ -138,9 +142,11 @@ async def login(request: Request, req: LoginRequest, background_tasks: Backgroun
     except Exception:
         pass
 
-    # 로그인 출처 기록
-    from app.services.token_binding import get_origin
+    # 로그인 출처 + 기기 정보 기록
+    from app.services.token_binding import get_origin, parse_device
+
     origin_ip, origin_fp = get_origin(request)
+    device_type, os_name = parse_device(request.headers.get("User-Agent", ""))
 
     # 대시보드 캐시 프리워밍 + 최근 프로젝트 기록 (백그라운드)
     background_tasks.add_task(_prewarm_dashboard, data["token"], data["project_id"])
@@ -158,6 +164,8 @@ async def login(request: Request, req: LoginRequest, background_tasks: Backgroun
         auth_method="password",
         origin_ip=origin_ip,
         origin_fp=origin_fp,
+        device_type=device_type,
+        os=os_name,
     )
 
 
@@ -237,9 +245,11 @@ async def refresh_token(request: Request, req: RefreshRequest):
     if sess.get("blacklisted"):
         raise HTTPException(status_code=401, detail="세션이 차단되었습니다.")
 
-    # 최초 로그인 origin을 회전 너머로 그대로 운반 (재핀 금지)
+    # 최초 로그인 origin과 기기 정보를 회전 너머로 그대로 운반 (재파싱 금지)
     origin_ip = sess.get("origin_ip", "")
     origin_fp = sess.get("origin_fp", "")
+    device_type = sess.get("device_type", "")
+    os_name = sess.get("os", "")
 
     # Keystone 토큰 유효성 확인 (만료 시 재로그인 필요)
     try:
@@ -264,6 +274,8 @@ async def refresh_token(request: Request, req: RefreshRequest):
         auth_method=sess.get("auth_method", "password"),
         origin_ip=origin_ip,
         origin_fp=origin_fp,
+        device_type=device_type,
+        os=os_name,
     )
 
 
@@ -294,9 +306,11 @@ async def switch_project(req: SwitchProjectRequest, token_info: dict = Depends(g
         roles=kc_info.get("roles", []),
         is_system_admin=kc_info.get("is_system_admin", False),
         auth_method=token_info.get("auth_method", "password"),
-        # 기존 세션의 origin을 그대로 운반 (프로젝트 전환 시 재핀 금지)
+        # 기존 세션의 origin·기기 정보를 그대로 운반 (프로젝트 전환 시 재파싱 금지)
         origin_ip=token_info.get("origin_ip", ""),
         origin_fp=token_info.get("origin_fp", ""),
+        device_type=token_info.get("device_type", ""),
+        os=token_info.get("os", ""),
     )
 
 
@@ -312,6 +326,31 @@ async def logout_all(token_info: dict = Depends(get_token_info)):
     # 현재 Keystone 토큰 검증 캐시도 즉시 무효화
     await invalidate_token_cache(token_info["token"], token_info.get("project_id"))
     return {"message": "모든 세션이 폐기되었습니다.", "revoked_count": count}
+
+
+@router.delete("/sessions/{jti}")
+async def delete_session_endpoint(jti: str, token_info: dict = Depends(get_token_info)):
+    """개별 세션 삭제 (소유권 확인 필수).
+
+    jti가 현재 사용자의 세션이 아니면 404 반환 (타인 세션 은닉).
+    Keystone 토큰도 즉시 폐기한다 (best-effort).
+    """
+    from app.services import activity as activity_svc
+
+    user_id = token_info["user_id"]
+    deleted = await session_store.delete_session_owned(user_id, jti)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
+    await activity_svc.record(
+        project_id=token_info.get("project_id", ""),
+        user_id=user_id,
+        username=token_info.get("username", ""),
+        resource_type="auth",
+        action="session_delete",
+        status="success",
+        extra={"deleted_jti": jti},
+    )
+    return {"message": "세션이 삭제되었습니다."}
 
 
 @router.get("/sessions")

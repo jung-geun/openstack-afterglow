@@ -32,7 +32,7 @@
           <th class="text-left py-2 pr-4">이메일</th>
           <th class="text-left py-2 pr-4">상태</th>
           <th class="text-left py-2 pr-4">ID</th>
-          <th class="text-left py-2">생성일</th>
+          <th class="text-left py-2">최초 활동일</th>
         </tr>
       </thead>
       <tbody>
@@ -47,7 +47,7 @@
               <span class="px-1.5 py-0.5 rounded text-xs font-medium {u.enabled ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">{u.enabled ? '활성' : '비활성'}</span>
             </td>
             <td class="py-2 pr-4 text-gray-500 font-mono text-xs">{u.id.slice(0, 8)}</td>
-            <td class="py-2 text-gray-500">{u.created_at?.slice(0, 10) ?? '-'}</td>
+            <td class="py-2 text-gray-500">{(u.first_seen ?? u.created_at)?.slice(0, 10) ?? '-'}</td>
           </tr>
         {/each}
       </tbody>

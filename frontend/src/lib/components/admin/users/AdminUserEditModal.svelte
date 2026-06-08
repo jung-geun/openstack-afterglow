@@ -14,6 +14,18 @@
   const token = $derived($auth.token ?? undefined);
   const projectId = $derived($auth.projectId ?? undefined);
 
+  interface AdminSession {
+    jti: string;
+    origin_ip: string;
+    last_ip: string;
+    last_seen: number;
+    blacklisted: boolean;
+    device_type: string;
+    os: string;
+    auth_method: string;
+    exp: number;
+  }
+
   let name = $state('');
   let email = $state('');
   let password = $state('');
@@ -23,6 +35,38 @@
   let error = $state('');
   let revokeSuccess = $state('');
   let showRevokeConfirm = $state(false);
+  let sessions = $state<AdminSession[]>([]);
+  let loadingSessions = $state(false);
+
+  function formatSessionTime(unixTs: number): string {
+    if (!unixTs) return '—';
+    return new Date(unixTs * 1000).toLocaleString('ko-KR', {
+      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+    });
+  }
+
+  function deviceLabel(sess: AdminSession): string {
+    const os = sess.os && sess.os !== 'unknown' ? sess.os : '';
+    const dt = sess.device_type && sess.device_type !== 'unknown' ? sess.device_type : '';
+    if (os && dt) return `${os} · ${dt}`;
+    if (os) return os;
+    if (dt) return dt;
+    return '알 수 없음';
+  }
+
+  async function loadUserSessions(userId: string) {
+    loadingSessions = true;
+    try {
+      const data = await api.get<{ sessions: AdminSession[]; count: number }>(
+        `/api/admin/users/${userId}/sessions`, token, projectId,
+      );
+      sessions = data.sessions ?? [];
+    } catch {
+      sessions = [];
+    } finally {
+      loadingSessions = false;
+    }
+  }
 
   $effect(() => {
     if (user) {
@@ -35,6 +79,8 @@
       showRevokeConfirm = false;
       updating = false;
       revoking = false;
+      sessions = [];
+      loadUserSessions(user.id);
     }
   });
 
@@ -95,8 +141,52 @@
         <div class="text-xs text-gray-500">ID: {user.id}</div>
       </div>
 
-      <!-- 세션 강제 폐기 -->
+      <!-- 활성 세션 목록 -->
       <div class="mt-5 pt-4 border-t border-gray-800">
+        <div class="flex items-center justify-between mb-2">
+          <p class="text-xs font-medium text-gray-400">활성 세션</p>
+          {#if loadingSessions}
+            <span class="text-[10px] text-gray-600">로딩...</span>
+          {:else}
+            <span class="text-[10px] text-gray-600">{sessions.length}개</span>
+          {/if}
+        </div>
+        {#if sessions.length > 0}
+          <div class="overflow-x-auto">
+            <table class="w-full text-xs">
+              <thead>
+                <tr class="border-b border-gray-700 text-gray-500 uppercase tracking-wide text-[10px]">
+                  <th class="text-left py-1 pr-3">출처 IP</th>
+                  <th class="text-left py-1 pr-3">기기</th>
+                  <th class="text-left py-1 pr-3">마지막 사용</th>
+                  <th class="text-left py-1">상태</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each sessions as sess (sess.jti)}
+                  <tr class="border-b border-gray-800/50">
+                    <td class="py-1.5 pr-3 font-mono text-gray-300">{sess.origin_ip || '—'}</td>
+                    <td class="py-1.5 pr-3 text-gray-400">{deviceLabel(sess)}</td>
+                    <td class="py-1.5 pr-3 text-gray-500">{formatSessionTime(sess.last_seen)}</td>
+                    <td class="py-1.5">
+                      {#if sess.blacklisted}
+                        <span class="text-red-400 font-semibold">차단</span>
+                      {:else}
+                        <span class="text-green-500">활성</span>
+                      {/if}
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {:else if !loadingSessions}
+          <p class="text-xs text-gray-600">활성 세션 없음</p>
+        {/if}
+      </div>
+
+      <!-- 세션 강제 폐기 -->
+      <div class="mt-3 pt-3 border-t border-gray-800">
         {#if showRevokeConfirm}
           <div class="bg-red-950/40 border border-red-800/60 rounded-lg px-3 py-3 mb-3">
             <p class="text-xs text-red-300 mb-2">이 사용자의 모든 세션을 강제 폐기합니까?<br>Keystone 토큰도 즉시 폐기됩니다.</p>

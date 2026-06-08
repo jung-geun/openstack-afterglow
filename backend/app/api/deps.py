@@ -248,6 +248,9 @@ async def _resolve_jwt_token_info(request, bearer_token: str, x_project_id: str 
         # 출처 필드 — switch_project 원본 운반용
         "origin_ip": sess.get("origin_ip", ""),
         "origin_fp": sess.get("origin_fp", ""),
+        # 기기 정보 — switch_project 운반용
+        "device_type": sess.get("device_type", ""),
+        "os": sess.get("os", ""),
     }
 
 

@@ -47,7 +47,11 @@ async def list_users(
     marker: str | None = Query(default=None),
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    """사용자 목록 (페이지네이션)."""
+    """사용자 목록 (페이지네이션).
+
+    Keystone은 created_at을 제공하지 않으므로 ActivityLog 기반 최초/최근 활동일로 대체한다.
+    (per-user Keystone GET 폴백은 항상 None을 반환하는 낭비 왕복이므로 제거됨)
+    """
 
     def _list():
         kwargs: dict = {"limit": limit}
@@ -55,14 +59,6 @@ async def list_users(
             kwargs["marker"] = marker
         users = []
         for u in conn.identity.users(**kwargs):
-            # Keystone list API가 created_at을 반환하지 않는 경우 개별 GET으로 보완
-            created_at = getattr(u, "created_at", None)
-            if not created_at:
-                try:
-                    detail = conn.identity.get_user(u.id)
-                    created_at = getattr(detail, "created_at", None)
-                except Exception:
-                    pass
             users.append(
                 {
                     "id": u.id,
@@ -71,7 +67,6 @@ async def list_users(
                     "enabled": u.is_enabled,
                     "domain_id": getattr(u, "domain_id", None),
                     "default_project_id": getattr(u, "default_project_id", None),
-                    "created_at": str(created_at) if created_at else None,
                 }
             )
             if len(users) >= limit:
@@ -80,9 +75,52 @@ async def list_users(
         return {"items": users, "next_marker": next_marker, "count": len(users)}
 
     try:
-        return await asyncio.to_thread(_list)
+        result = await asyncio.to_thread(_list)
     except Exception:
         raise HTTPException(status_code=500, detail="사용자 목록 조회 실패")
+
+    # ActivityLog 기반 최초·최근 활동일 배치 조회 (1쿼리)
+    user_ids = [u["id"] for u in result["items"]]
+    bounds = await activity.get_user_activity_bounds(user_ids)
+    for u in result["items"]:
+        b = bounds.get(u["id"], {})
+        u["first_seen"] = b.get("first_seen")
+        u["last_seen"] = b.get("last_seen")
+        # 하위호환: created_at → first_seen 값으로 매핑 (프론트 기존 참조 동작)
+        u["created_at"] = u["first_seen"]
+
+    return result
+
+
+@router.get("/users/stats", dependencies=[Depends(require_admin)])
+async def get_users_stats(
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """사용자 현황 집계 통계 (전체/활성/비활성 수). 통계 카드용."""
+
+    def _stats():
+        total = enabled = disabled = 0
+        for u in conn.identity.users():
+            total += 1
+            if u.is_enabled:
+                enabled += 1
+            else:
+                disabled += 1
+        return {"total": total, "enabled": enabled, "disabled": disabled}
+
+    try:
+        return await asyncio.to_thread(_stats)
+    except Exception:
+        raise HTTPException(status_code=500, detail="사용자 통계 조회 실패")
+
+
+@router.get("/users/activity", dependencies=[Depends(require_admin)])
+async def get_users_activity(
+    limit: int = Query(50, ge=1, le=200),
+    before_id: int | None = Query(None),
+):
+    """사용자 변경 로그 (생성·수정·삭제, 시간 역순). 변경 로그 카드용."""
+    return await activity.list_user_management_events(limit=limit, before_id=before_id)
 
 
 @router.post("/users", dependencies=[Depends(require_admin)], status_code=201)

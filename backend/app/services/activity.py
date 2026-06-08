@@ -143,6 +143,63 @@ async def list_for_user(
         return [_row_to_dict(r) for r in rows]
 
 
+async def get_user_activity_bounds(user_ids: list[str]) -> dict[str, dict]:
+    """사용자별 최초·최근 활동 시각을 1쿼리로 배치 조회.
+
+    Returns:
+        {user_id: {"first_seen": isoformat | None, "last_seen": isoformat | None}}
+        활동 기록 없는 user_id는 결과에 포함되지 않는다.
+    """
+    if not user_ids or not is_db_available():
+        return {}
+    factory = get_session_factory()
+    if factory is None:
+        return {}
+    from sqlalchemy import func
+
+    async with factory() as session:
+        stmt = (
+            select(
+                ActivityLog.user_id,
+                func.min(ActivityLog.created_at).label("first_seen"),
+                func.max(ActivityLog.created_at).label("last_seen"),
+            )
+            .where(ActivityLog.user_id.in_(user_ids))
+            .group_by(ActivityLog.user_id)
+        )
+        rows = (await session.execute(stmt)).all()
+        return {
+            row.user_id: {
+                "first_seen": row.first_seen.isoformat() if row.first_seen else None,
+                "last_seen": row.last_seen.isoformat() if row.last_seen else None,
+            }
+            for row in rows
+        }
+
+
+async def list_user_management_events(
+    *,
+    limit: int = 50,
+    before_id: int | None = None,
+) -> list[dict]:
+    """관리자용. resource_type='user' 이벤트를 cross-project로 시간 역순 조회.
+
+    사용자 생성·수정·삭제 변경 로그 카드에 사용.
+    """
+    if not is_db_available():
+        return []
+    factory = get_session_factory()
+    if factory is None:
+        return []
+    async with factory() as session:
+        conds = [ActivityLog.resource_type == "user"]
+        if before_id is not None:
+            conds.append(ActivityLog.id < before_id)
+        stmt = select(ActivityLog).where(and_(*conds)).order_by(desc(ActivityLog.id)).limit(limit)
+        rows = (await session.execute(stmt)).scalars().all()
+        return [_row_to_dict(r) for r in rows]
+
+
 def _row_to_dict(r: ActivityLog) -> dict:
     return {
         "id": r.id,

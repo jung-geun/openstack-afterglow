@@ -509,7 +509,7 @@ async def test_refresh_carries_origin(client):
     stored_sessions = {}
 
     async def _mock_store(
-        jti, keystone_token, project_id, user_id, exp, auth_method="password", origin_ip="", origin_fp=""
+        jti, keystone_token, project_id, user_id, exp, auth_method="password", origin_ip="", origin_fp="", **kwargs
     ):
         stored_sessions["origin_ip"] = origin_ip
         stored_sessions["origin_fp"] = origin_fp
