@@ -59,6 +59,14 @@ refresh_interval_ms = 5000
 # 초대 이메일 링크 생성에 사용할 프론트엔드 기본 URL (예: https://afterglow.example.com)
 frontend_base_url = ""
 
+# 리버스 프록시 신뢰 CIDR (쉼표 구분). 이 대역에서 온 요청의 X-Forwarded-For / X-Real-IP
+# 헤더를 신뢰해 실제 클라이언트 IP 를 추출한다. 기본값은 loopback 전용.
+# Docker Compose + HAProxy 프로필 사용 시 HAProxy 컨테이너의 실제 IP 대역을 명시:
+#   예) "127.0.0.1/32,::1/128,172.18.0.0/16"  ← docker network inspect 로 확인
+# Docker Desktop macOS 환경: 192.168.65.0/24 추가 필요
+# ⚠ /12 처럼 넓은 CIDR 은 내부 컨테이너가 헤더를 위조할 수 있어 위험함
+trusted_proxies = "127.0.0.1/32,::1/128"
+
 [cache]
 redis_url = "redis://redis:6379/0"
 # TTL 티어 (초). 리소스 변경 빈도에 따라 분류.

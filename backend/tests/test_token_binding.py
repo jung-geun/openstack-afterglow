@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # ──────────────────────────────────────────────
 # token_binding 모듈 순수 함수 테스트
 # ──────────────────────────────────────────────
@@ -50,22 +49,27 @@ def test_different_ua_gives_different_fingerprint():
 class TestSameSubnet:
     def test_ipv4_same_24(self):
         from app.services.token_binding import _same_subnet
+
         assert _same_subnet("192.168.1.10", "192.168.1.200")
 
     def test_ipv4_different_24(self):
         from app.services.token_binding import _same_subnet
+
         assert not _same_subnet("192.168.1.10", "192.168.2.10")
 
     def test_ipv6_same_64(self):
         from app.services.token_binding import _same_subnet
+
         assert _same_subnet("2001:db8::1", "2001:db8::ff")
 
     def test_ipv6_different_64(self):
         from app.services.token_binding import _same_subnet
+
         assert not _same_subnet("2001:db8:0:1::1", "2001:db8:0:2::1")
 
     def test_ipv4_ipv6_never_match(self):
         from app.services.token_binding import _same_subnet
+
         assert not _same_subnet("192.168.1.1", "::ffff:192.168.1.1")
 
 
@@ -75,35 +79,41 @@ class TestCheckBinding:
 
     def test_off_mode_always_ok(self):
         from app.services.token_binding import check_binding
+
         action, _ = check_binding(self._sess(), "1.2.3.4", "different_fp", "off")
         assert action == "ok"
 
     def test_legacy_session_always_ok(self):
         from app.services.token_binding import check_binding
+
         action, reason = check_binding({"origin_ip": "", "origin_fp": ""}, "1.2.3.4", "fp", "strict")
         assert action == "ok"
         assert reason == "legacy_session"
 
     def test_log_mode_same_ip_fp_ok(self):
         from app.services.token_binding import check_binding
+
         sess = self._sess("10.0.0.1", "fp123")
         action, _ = check_binding(sess, "10.0.0.1", "fp123", "log")
         assert action == "ok"
 
     def test_log_mode_different_ip_returns_log(self):
         from app.services.token_binding import check_binding
+
         action, reason = check_binding(self._sess(), "99.99.99.99", "different", "log")
         assert action == "log"
         assert "99.99.99.99" in reason
 
     def test_subnet_mode_same_subnet_ok(self):
         from app.services.token_binding import check_binding
+
         sess = self._sess("192.168.1.10", "fp")
         action, _ = check_binding(sess, "192.168.1.200", "fp", "subnet")
         assert action == "ok"
 
     def test_subnet_mode_different_subnet_block(self):
         from app.services.token_binding import check_binding
+
         sess = self._sess("192.168.1.10", "fp")
         action, reason = check_binding(sess, "10.0.0.1", "fp", "subnet")
         assert action == "block"
@@ -111,23 +121,27 @@ class TestCheckBinding:
 
     def test_subnet_mode_same_subnet_different_fp_log(self):
         from app.services.token_binding import check_binding
+
         sess = self._sess("192.168.1.10", "fp_origin")
         action, _ = check_binding(sess, "192.168.1.50", "fp_other", "subnet")
         assert action == "log"
 
     def test_strict_mode_exact_ip_fp_ok(self):
         from app.services.token_binding import check_binding
+
         sess = self._sess("10.0.0.1", "fp_exact")
         action, _ = check_binding(sess, "10.0.0.1", "fp_exact", "strict")
         assert action == "ok"
 
     def test_strict_mode_different_ip_block(self):
         from app.services.token_binding import check_binding
+
         action, _ = check_binding(self._sess(), "10.0.0.2", "aabbccdd" * 4, "strict")
         assert action == "block"
 
     def test_strict_mode_different_fp_block(self):
         from app.services.token_binding import check_binding
+
         sess = self._sess("10.0.0.1", "fp_a")
         action, _ = check_binding(sess, "10.0.0.1", "fp_b", "strict")
         assert action == "block"
@@ -207,6 +221,7 @@ def _make_redis_mock(stored: dict[str, bytes]):
 @pytest.mark.asyncio
 async def test_store_session_persists_origin():
     import json
+
     from app.services.session_store import store_session
 
     store: dict = {}
@@ -232,9 +247,9 @@ async def test_store_session_persists_origin():
 @pytest.mark.asyncio
 async def test_blacklist_session_sets_flag():
     import json
+
     from app.services.session_store import blacklist_session
 
-    import json as _json
     sess_data = {"keystone_token": "ks", "blacklisted": False, "blacklist_reason": ""}
     store = {"afterglow:refresh:jti1": json.dumps(sess_data).encode()}
     with patch("app.services.session_store._get_redis", AsyncMock(return_value=_make_redis_mock(store))):
@@ -247,6 +262,7 @@ async def test_blacklist_session_sets_flag():
 @pytest.mark.asyncio
 async def test_touch_session_seen_updates_last():
     import json
+
     from app.services.session_store import touch_session_seen
 
     sess_data = {
@@ -267,6 +283,7 @@ async def test_touch_session_seen_updates_last():
 async def test_touch_session_seen_throttle_skips():
     import json
     import time
+
     from app.services.session_store import touch_session_seen
 
     now = int(time.time())
@@ -277,7 +294,6 @@ async def test_touch_session_seen_throttle_skips():
         "last_seen": now,  # 방금 갱신됨
     }
     store = {"afterglow:refresh:jti1": json.dumps(sess_data).encode()}
-    original = json.dumps(sess_data).encode()
     with patch("app.services.session_store._get_redis", AsyncMock(return_value=_make_redis_mock(store))):
         await touch_session_seen("jti1", "10.0.0.1", "fp_same")  # 동일 IP/FP + 60초 이내 → skip
     # 내용이 바뀌지 않았거나 last_seen 만 갱신 (여기선 skip이므로 unchanged)
@@ -288,12 +304,13 @@ async def test_touch_session_seen_throttle_skips():
 async def test_revoke_user_sessions_calls_keystone():
     """revoke_user_sessions(revoke_keystone=True)가 Keystone revoke_token을 호출하는지 확인."""
     import json
+
     from app.services.session_store import revoke_user_sessions
 
     sess_data = {"keystone_token": "ks-token-abc", "user_id": "user1"}
     store = {
         "afterglow:refresh:jti1": json.dumps(sess_data).encode(),
-        "afterglow:user-sessions:user1": {"jti1".encode()},
+        "afterglow:user-sessions:user1": {b"jti1"},
     }
     mock_revoke = MagicMock()
     with (
@@ -310,12 +327,13 @@ async def test_revoke_user_sessions_calls_keystone():
 async def test_revoke_user_sessions_skip_keystone():
     """revoke_keystone=False이면 Keystone 폐기 없이 세션만 삭제."""
     import json
+
     from app.services.session_store import revoke_user_sessions
 
     sess_data = {"keystone_token": "ks-token", "user_id": "user1"}
     store = {
         "afterglow:refresh:jti1": json.dumps(sess_data).encode(),
-        "afterglow:user-sessions:user1": {"jti1".encode()},
+        "afterglow:user-sessions:user1": {b"jti1"},
     }
     mock_revoke = MagicMock()
     with (
@@ -353,13 +371,16 @@ def _make_sess(blacklisted=False, origin_ip="10.0.0.1", origin_fp="fp"):
 async def test_blacklisted_session_returns_401():
     """블랙리스트 세션 — _resolve_jwt_token_info 직접 호출 시 HTTPException(401)."""
     from fastapi import HTTPException
+
     from app.api.deps import _resolve_jwt_token_info
     from app.services import jwt_service
 
     _, r_jti, _ = jwt_service.sign_refresh("user1")
     access_str, _, _ = jwt_service.sign_access(
-        user_id="user1", username="testuser",
-        project_id="proj", project_name="Test",
+        user_id="user1",
+        username="testuser",
+        project_id="proj",
+        project_name="Test",
         refresh_jti=r_jti,
     )
     blacklisted_sess = _make_sess(blacklisted=True)
@@ -377,13 +398,16 @@ async def test_blacklisted_session_returns_401():
 async def test_subnet_mismatch_returns_401():
     """subnet 모드에서 다른 대역 IP 요청은 HTTPException(401)."""
     from fastapi import HTTPException
+
     from app.api.deps import _resolve_jwt_token_info
     from app.services import jwt_service
 
     _, r_jti, _ = jwt_service.sign_refresh("user1")
     access_str, _, _ = jwt_service.sign_access(
-        user_id="user1", username="testuser",
-        project_id="proj", project_name="Test",
+        user_id="user1",
+        username="testuser",
+        project_id="proj",
+        project_name="Test",
         refresh_jti=r_jti,
     )
     sess = _make_sess(origin_ip="192.168.1.1", origin_fp="fp_origin")
@@ -442,7 +466,9 @@ async def test_list_sessions_returns_sessions(client):
 async def test_admin_revoke_sessions(admin_client):
     """POST /api/admin/users/{id}/revoke-sessions 가 관리자 권한으로 호출된다."""
     with (
-        patch("app.api.identity.admin_identity.session_store.revoke_user_sessions", AsyncMock(return_value=2)) as mock_r,
+        patch(
+            "app.api.identity.admin_identity.session_store.revoke_user_sessions", AsyncMock(return_value=2)
+        ) as mock_r,
         patch("app.api.identity.admin_identity.activity.record", AsyncMock()),
     ):
         resp = await admin_client.post("/api/admin/users/target-user-id/revoke-sessions")
@@ -466,22 +492,25 @@ async def test_admin_revoke_sessions_forbidden_for_non_admin(client):
 @pytest.mark.asyncio
 async def test_refresh_carries_origin(client):
     """refresh 토큰 회전 시 origin_ip/origin_fp가 새 세션으로 그대로 운반된다."""
-    import json
-    from unittest.mock import call
     from app.services import jwt_service
 
     refresh_str, r_jti, r_exp = jwt_service.sign_refresh("user1")
 
     sess = _make_sess(origin_ip="10.1.1.1", origin_fp="fp_carried")
     kc_info = {
-        "token": "new-ks", "project_id": "proj", "project_name": "Test",
-        "user_id": "user1", "username": "testuser", "roles": ["member"],
+        "token": "new-ks",
+        "project_id": "proj",
+        "project_name": "Test",
+        "user_id": "user1",
+        "username": "testuser",
+        "roles": ["member"],
         "is_system_admin": False,
     }
     stored_sessions = {}
 
-    async def _mock_store(jti, keystone_token, project_id, user_id, exp,
-                          auth_method="password", origin_ip="", origin_fp=""):
+    async def _mock_store(
+        jti, keystone_token, project_id, user_id, exp, auth_method="password", origin_ip="", origin_fp=""
+    ):
         stored_sessions["origin_ip"] = origin_ip
         stored_sessions["origin_fp"] = origin_fp
 

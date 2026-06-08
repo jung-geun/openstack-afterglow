@@ -322,6 +322,10 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     lines.append("# 초대 이메일 링크 생성에 사용하는 프론트엔드 베이스 URL")
     lines.append(f'frontend_base_url = {_toml_str(app.get("frontend_base_url", ""))}')
     lines.append("")
+    lines.append("# 리버스 프록시 신뢰 CIDR — X-Forwarded-For / X-Real-IP 를 신뢰할 주소 범위")
+    lines.append(f'trusted_proxies = {_toml_str(app.get("trusted_proxies", "127.0.0.1/32,::1/128"))}')
+    lines.append("")
+
 
     # [logging] (선택)
     if logging_cfg:
