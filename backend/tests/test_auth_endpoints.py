@@ -249,7 +249,7 @@ async def test_gitlab_callback_stores_federated_auth_method():
     }
     captured: dict = {}
 
-    async def mock_store_session(*, jti, keystone_token, project_id, user_id, exp, auth_method="password"):
+    async def mock_store_session(*, jti, keystone_token, project_id, user_id, exp, auth_method="password", **kwargs):
         captured["auth_method"] = auth_method
 
     with (

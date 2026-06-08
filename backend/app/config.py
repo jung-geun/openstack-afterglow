@@ -201,6 +201,7 @@ def _load_toml() -> dict:
     flat["session_absolute_timeout"] = sess.get("absolute_timeout", 14400)
     flat["jwt_access_ttl"] = sess.get("jwt_access_ttl", 900)
     flat["jwt_refresh_ttl"] = sess.get("jwt_refresh_ttl", 604800)
+    flat["token_ip_binding_mode"] = sess.get("token_ip_binding_mode", "subnet")
 
     nv = data.get("nova", {})
     flat["default_network_id"] = nv.get("default_network_id", "")
@@ -493,6 +494,7 @@ class Settings(BaseSettings):
     session_absolute_timeout: int = 14400  # 절대 만료: 기본 4시간, 초과 시 연장 불가
     jwt_access_ttl: int = 900  # access JWT 수명 (초), 기본 15분
     jwt_refresh_ttl: int = 604800  # refresh JWT 수명 (초), 기본 7일
+    token_ip_binding_mode: str = "subnet"  # off | log | subnet | strict
 
     # 보안 정책
     # True: system:all role OR admin project+role 모두 system admin 인정 (마이그레이션 호환 모드)

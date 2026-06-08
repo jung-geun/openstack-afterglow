@@ -156,6 +156,37 @@ async def update_user(
         raise
 
 
+@router.post("/users/{user_id}/revoke-sessions", dependencies=[Depends(require_admin)])
+async def revoke_user_sessions_admin(
+    user_id: str,
+    token_info: dict = Depends(get_token_info),
+):
+    """관리자가 특정 사용자의 모든 세션을 강제 폐기 (Keystone 직접 폐기 포함).
+
+    요구사항 A(Keystone 직접 폐기) + B(관리자 강제 전체 로그아웃)를 동시 충족.
+    best-effort: Keystone revoke 실패해도 Redis 세션은 삭제된다.
+    """
+    count = await session_store.revoke_user_sessions(user_id, revoke_keystone=True)
+    await activity.record(
+        project_id=token_info.get("project_id", ""),
+        user_id=token_info["user_id"],
+        username=token_info["username"],
+        resource_type="auth",
+        action="admin_revoke_sessions",
+        status="success",
+        resource_id=user_id,
+        extra={"target_user_id": user_id, "revoked_count": count},
+    )
+    return {"message": f"세션 {count}개가 폐기되었습니다.", "revoked_count": count}
+
+
+@router.get("/users/{user_id}/sessions", dependencies=[Depends(require_admin)])
+async def list_user_sessions_admin(user_id: str):
+    """관리자가 특정 사용자의 활성 세션 목록을 조회 (keystone_token 제외)."""
+    sessions = await session_store.list_user_sessions(user_id)
+    return {"sessions": sessions, "count": len(sessions)}
+
+
 # ============================================================================
 # Projects
 # ============================================================================

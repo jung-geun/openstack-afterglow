@@ -133,7 +133,7 @@ async def extend_session(token: str, project_id: str) -> None:
         _logger.warning("Redis 장애로 세션 연장을 건너뜁니다", exc_info=True)
 
 
-async def _resolve_jwt_token_info(bearer_token: str, x_project_id: str | None) -> dict:
+async def _resolve_jwt_token_info(request, bearer_token: str, x_project_id: str | None) -> dict:
     """Bearer access JWT 검증 → Redis 세션 조회 → token_info dict 반환.
 
     x_project_id가 JWT의 project_id와 다르면 Keystone rescope (프로젝트 전환용).
@@ -153,6 +153,64 @@ async def _resolve_jwt_token_info(bearer_token: str, x_project_id: str | None) -
     sess = await get_session(refresh_jti)
     if sess is None:
         raise HTTPException(status_code=401, detail="세션이 만료되었습니다. 다시 로그인해 주세요.")
+
+    # ── 블랙리스트 검사 ─────────────────────────────────────────────────────
+    if sess.get("blacklisted"):
+        raise HTTPException(status_code=401, detail="세션이 차단되었습니다.")
+
+    # ── IP/기기 지문 바인딩 검사 (fail-open: 오류 시 차단 안 함) ───────────
+    _username = payload.get("username", "")
+    try:
+        from app.services.token_binding import check_binding, get_origin
+
+        settings = get_settings()
+        cur_ip, cur_fp = get_origin(request)
+        action, reason = check_binding(sess, cur_ip, cur_fp, settings.token_ip_binding_mode)
+        if action == "block":
+            from app.services import activity
+            from app.services.session_store import blacklist_session
+
+            asyncio.create_task(blacklist_session(refresh_jti, reason))
+            asyncio.create_task(
+                activity.record(
+                    project_id=sess.get("project_id", ""),
+                    user_id=sess.get("user_id", ""),
+                    username=_username,
+                    resource_type="auth",
+                    action="token_origin_mismatch",
+                    status="failed",
+                    extra={"ip": cur_ip, "origin_ip": sess.get("origin_ip", ""), "reason": reason},
+                )
+            )
+            raise HTTPException(status_code=401, detail="토큰 출처가 일치하지 않습니다.")
+        elif action == "log":
+            from app.services import activity
+
+            asyncio.create_task(
+                activity.record(
+                    project_id=sess.get("project_id", ""),
+                    user_id=sess.get("user_id", ""),
+                    username=_username,
+                    resource_type="auth",
+                    action="token_origin_mismatch",
+                    status="success",
+                    extra={
+                        "ip": cur_ip,
+                        "origin_ip": sess.get("origin_ip", ""),
+                        "reason": reason,
+                        "blocked": False,
+                    },
+                )
+            )
+        else:
+            # ok — last_seen 쓰로틀 갱신 (fire-and-forget)
+            from app.services.session_store import touch_session_seen
+
+            asyncio.create_task(touch_session_seen(refresh_jti, cur_ip, cur_fp))
+    except HTTPException:
+        raise
+    except Exception:
+        _logger.warning("토큰 바인딩 검사 실패 — fail-open", exc_info=True)
 
     jwt_project_id = payload.get("project_id", "")
     target_project_id = x_project_id or jwt_project_id
@@ -187,6 +245,9 @@ async def _resolve_jwt_token_info(bearer_token: str, x_project_id: str | None) -
         "is_system_admin": info.get("is_system_admin", False),
         "refresh_jti": refresh_jti,
         "auth_method": sess.get("auth_method", "password"),
+        # 출처 필드 — switch_project 원본 운반용
+        "origin_ip": sess.get("origin_ip", ""),
+        "origin_fp": sess.get("origin_fp", ""),
     }
 
 
@@ -208,7 +269,7 @@ async def get_token_info(
     if authorization and authorization.startswith("Bearer "):
         bearer = authorization[7:]
         try:
-            info = await _resolve_jwt_token_info(bearer, x_project_id)
+            info = await _resolve_jwt_token_info(request, bearer, x_project_id)
             request.state.token_info = info
             return info
         except HTTPException:

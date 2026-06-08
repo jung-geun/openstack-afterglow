@@ -42,6 +42,8 @@ async def _build_token_response(
     is_system_admin: bool,
     default_project_id: str = "",
     auth_method: str = "password",
+    origin_ip: str = "",
+    origin_fp: str = "",
 ) -> TokenResponse:
     """Keystone 토큰으로 JWT access+refresh 쌍을 발급하고 TokenResponse를 반환."""
     refresh_str, r_jti, r_exp = jwt_service.sign_refresh(user_id)
@@ -59,6 +61,8 @@ async def _build_token_response(
         user_id=user_id,
         exp=r_exp,
         auth_method=auth_method,
+        origin_ip=origin_ip,
+        origin_fp=origin_fp,
     )
     exp_dt = datetime.fromtimestamp(a_exp, tz=UTC)
     return TokenResponse(
@@ -134,6 +138,10 @@ async def login(request: Request, req: LoginRequest, background_tasks: Backgroun
     except Exception:
         pass
 
+    # 로그인 출처 기록
+    from app.services.token_binding import get_origin
+    origin_ip, origin_fp = get_origin(request)
+
     # 대시보드 캐시 프리워밍 + 최근 프로젝트 기록 (백그라운드)
     background_tasks.add_task(_prewarm_dashboard, data["token"], data["project_id"])
     background_tasks.add_task(record_project_access, data["user_id"], data["project_id"])
@@ -148,6 +156,8 @@ async def login(request: Request, req: LoginRequest, background_tasks: Backgroun
         is_system_admin=data.get("is_system_admin", False),
         default_project_id=default_project_id,
         auth_method="password",
+        origin_ip=origin_ip,
+        origin_fp=origin_fp,
     )
 
 
@@ -223,6 +233,14 @@ async def refresh_token(request: Request, req: RefreshRequest):
     if sess is None:
         raise HTTPException(status_code=401, detail="세션이 만료되었습니다. 다시 로그인해 주세요.")
 
+    # 블랙리스트 세션은 refresh 갱신도 거부
+    if sess.get("blacklisted"):
+        raise HTTPException(status_code=401, detail="세션이 차단되었습니다.")
+
+    # 최초 로그인 origin을 회전 너머로 그대로 운반 (재핀 금지)
+    origin_ip = sess.get("origin_ip", "")
+    origin_fp = sess.get("origin_fp", "")
+
     # Keystone 토큰 유효성 확인 (만료 시 재로그인 필요)
     try:
         kc_info = await asyncio.to_thread(
@@ -244,6 +262,8 @@ async def refresh_token(request: Request, req: RefreshRequest):
         roles=kc_info.get("roles", []),
         is_system_admin=kc_info.get("is_system_admin", False),
         auth_method=sess.get("auth_method", "password"),
+        origin_ip=origin_ip,
+        origin_fp=origin_fp,
     )
 
 
@@ -274,7 +294,34 @@ async def switch_project(req: SwitchProjectRequest, token_info: dict = Depends(g
         roles=kc_info.get("roles", []),
         is_system_admin=kc_info.get("is_system_admin", False),
         auth_method=token_info.get("auth_method", "password"),
+        # 기존 세션의 origin을 그대로 운반 (프로젝트 전환 시 재핀 금지)
+        origin_ip=token_info.get("origin_ip", ""),
+        origin_fp=token_info.get("origin_fp", ""),
     )
+
+
+@router.post("/logout-all")
+async def logout_all(token_info: dict = Depends(get_token_info)):
+    """현재 사용자의 모든 세션을 폐기 (Keystone 직접 폐기 포함).
+
+    federated 사용자 포함 — 패스워드 여부와 무관하게 세션은 항상 폐기 가능.
+    현재 세션도 함께 폐기되므로 호출 후 재로그인이 필요하다.
+    """
+    user_id = token_info["user_id"]
+    count = await session_store.revoke_user_sessions(user_id, revoke_keystone=True)
+    # 현재 Keystone 토큰 검증 캐시도 즉시 무효화
+    await invalidate_token_cache(token_info["token"], token_info.get("project_id"))
+    return {"message": "모든 세션이 폐기되었습니다.", "revoked_count": count}
+
+
+@router.get("/sessions")
+async def list_sessions(token_info: dict = Depends(get_token_info)):
+    """현재 사용자의 활성 세션 목록 반환 (출처 IP·기기·마지막 사용 포함).
+
+    keystone_token 등 민감 필드는 제거된 채 반환된다.
+    """
+    sessions = await session_store.list_user_sessions(token_info["user_id"])
+    return {"sessions": sessions, "count": len(sessions)}
 
 
 @router.get("/groups", response_model=list[GroupInfo])

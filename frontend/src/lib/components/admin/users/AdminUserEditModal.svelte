@@ -1,5 +1,7 @@
 <script lang="ts">
   import type { User } from '$lib/types/common';
+  import { auth } from '$lib/stores/auth';
+  import { api, ApiError } from '$lib/api/client';
 
   let {
     user = $bindable<User | null>(),
@@ -9,12 +11,18 @@
     onUpdate: (id: string, form: { name: string; email: string; password: string; enabled: boolean }) => Promise<string | true>;
   } = $props();
 
+  const token = $derived($auth.token ?? undefined);
+  const projectId = $derived($auth.projectId ?? undefined);
+
   let name = $state('');
   let email = $state('');
   let password = $state('');
   let enabled = $state(true);
   let updating = $state(false);
+  let revoking = $state(false);
   let error = $state('');
+  let revokeSuccess = $state('');
+  let showRevokeConfirm = $state(false);
 
   $effect(() => {
     if (user) {
@@ -23,7 +31,10 @@
       enabled = user.enabled;
       password = '';
       error = '';
+      revokeSuccess = '';
+      showRevokeConfirm = false;
       updating = false;
+      revoking = false;
     }
   });
 
@@ -39,6 +50,24 @@
       error = result;
     }
   }
+
+  async function revokeAllSessions() {
+    if (!user) return;
+    showRevokeConfirm = false;
+    revoking = true;
+    error = '';
+    revokeSuccess = '';
+    try {
+      const res = await api.post<{ revoked_count: number }>(
+        `/api/admin/users/${user.id}/revoke-sessions`, {}, token, projectId,
+      );
+      revokeSuccess = `세션 ${res.revoked_count}개가 폐기되었습니다.`;
+    } catch (e) {
+      error = e instanceof ApiError ? e.message : '세션 폐기 실패';
+    } finally {
+      revoking = false;
+    }
+  }
 </script>
 
 {#if user}
@@ -52,6 +81,7 @@
     <div class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl" onclick={(e) => e.stopPropagation()}>
       <h2 class="text-lg font-semibold text-white mb-5">사용자 수정</h2>
       {#if error}<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>{/if}
+      {#if revokeSuccess}<div class="bg-green-900/40 border border-green-700 text-green-300 rounded-lg px-4 py-3 text-sm mb-4">{revokeSuccess}</div>{/if}
       <div class="space-y-4">
         <div><label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">이름</label><input bind:value={name} type="text" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" /></div>
         <div><label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">이메일</label><input bind:value={email} type="email" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" /></div>
@@ -64,7 +94,34 @@
         </div>
         <div class="text-xs text-gray-500">ID: {user.id}</div>
       </div>
-      <div class="flex justify-end gap-3 mt-6">
+
+      <!-- 세션 강제 폐기 -->
+      <div class="mt-5 pt-4 border-t border-gray-800">
+        {#if showRevokeConfirm}
+          <div class="bg-red-950/40 border border-red-800/60 rounded-lg px-3 py-3 mb-3">
+            <p class="text-xs text-red-300 mb-2">이 사용자의 모든 세션을 강제 폐기합니까?<br>Keystone 토큰도 즉시 폐기됩니다.</p>
+            <div class="flex gap-2">
+              <button
+                onclick={revokeAllSessions}
+                disabled={revoking}
+                class="px-3 py-1.5 bg-red-700 hover:bg-red-600 disabled:opacity-50 text-white text-xs rounded-lg transition-colors"
+              >{revoking ? '폐기 중...' : '확인'}</button>
+              <button
+                onclick={() => { showRevokeConfirm = false; }}
+                class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded-lg transition-colors"
+              >취소</button>
+            </div>
+          </div>
+        {:else}
+          <button
+            onclick={() => { showRevokeConfirm = true; }}
+            disabled={revoking}
+            class="w-full px-3 py-2 bg-red-900/40 hover:bg-red-900/70 border border-red-800/60 text-red-300 text-xs rounded-lg transition-colors disabled:opacity-50"
+          >전체 세션 강제 폐기 (Keystone 직접 폐기 포함)</button>
+        {/if}
+      </div>
+
+      <div class="flex justify-end gap-3 mt-4">
         <button onclick={() => { user = null; }} class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded-lg">취소</button>
         <button onclick={submit} disabled={updating} class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg disabled:opacity-30">{updating ? '수정 중...' : '수정'}</button>
       </div>

@@ -357,6 +357,7 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     lines.append(f'absolute_timeout = {sess.get("absolute_timeout", 14400)}')
     lines.append(f'jwt_access_ttl = {sess.get("jwt_access_ttl", 900)}')
     lines.append(f'jwt_refresh_ttl = {sess.get("jwt_refresh_ttl", 604800)}')
+    lines.append(f'token_ip_binding_mode = {_toml_str(sess.get("token_ip_binding_mode", "subnet"))}')
     lines.append("")
 
     # [nova]

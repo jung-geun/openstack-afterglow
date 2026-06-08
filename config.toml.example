@@ -93,6 +93,12 @@ absolute_timeout = 14400
 # JWT access/refresh 토큰 수명 (초)
 jwt_access_ttl = 900      # access 토큰 (기본 15분)
 jwt_refresh_ttl = 604800  # refresh 토큰 (기본 7일)
+# 토큰 출처 IP/기기 바인딩 검사 모드
+#   off    — 검사 없음
+#   log    — 불일치 로깅만, 차단 없음
+#   subnet — IP가 다른 /24(IPv4)·/64(IPv6) 대역이면 차단 (기본값)
+#   strict — IP 정확 불일치 또는 기기 지문 불일치 시 차단
+token_ip_binding_mode = "subnet"
 
 [nova]
 default_network_id = ""
