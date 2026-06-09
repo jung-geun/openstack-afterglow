@@ -164,7 +164,7 @@ class TestFCOSServerUserdata:
         ign = _decode_userdata(result.data)
         files = {f["path"]: f for f in ign["storage"]["files"]}
         install_content = _decode_file_content(files["/opt/k3s/install.sh"])
-        assert '--node-name="test-x7k2m"' in install_content
+        assert "--node-name=test-x7k2m" in install_content
 
     def test_fcos_server_install_default_node_name_fallback(self):
         """server_node_name 미지정 시 {cluster_name}-server가 기본값이어야 한다."""
@@ -180,7 +180,7 @@ class TestFCOSServerUserdata:
         ign = _decode_userdata(result.data)
         files = {f["path"]: f for f in ign["storage"]["files"]}
         install_content = _decode_file_content(files["/opt/k3s/install.sh"])
-        assert '--node-name="mycluster-server"' in install_content
+        assert "--node-name=mycluster-server" in install_content
 
 
 class TestFCOSAgentUserdata:

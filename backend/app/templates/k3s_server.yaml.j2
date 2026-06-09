@@ -260,27 +260,27 @@ runcmd:
     # k3s 서버 설치 (KMS sock 이 이미 존재해 자동 enable + start 가 정상 부팅)
     SERVER_IP=$(hostname -I | awk '{print $1}')
     curl -sfL https://get.k3s.io | \
-      INSTALL_K3S_VERSION="{{ k3s_version }}" \
+      INSTALL_K3S_VERSION={{ k3s_version | shlex_quote }} \
       sh -s - server \
         --tls-san "${SERVER_IP}" \
 {% for san in extra_tls_sans %}
-        --tls-san "{{ san }}" \
+        --tls-san {{ san | shlex_quote }} \
 {% endfor %}
         --write-kubeconfig-mode 644 \
         --node-ip "${SERVER_IP}" \
 {% if cluster_init %}
         --cluster-init \
 {% elif join_url %}
-        --server "{{ join_url }}" \
-        --token "{{ ha_node_token }}" \
+        --server {{ join_url | shlex_quote }} \
+        --token {{ ha_node_token | shlex_quote }} \
 {% endif %}
 {% if needs_external_cloud_provider %}
         --disable-cloud-controller \
         --kubelet-arg="cloud-provider=external" \
 {% endif %}
 {% for arg in extra_server_args %}
-        {{ arg }} \
+        {{ arg | shlex_quote }} \
 {% endfor %}
-        --node-name="{{ server_node_name }}"
+        --node-name={{ server_node_name | shlex_quote }}
   # 콜백 스크립트를 백그라운드 실행 (k3s 준비 대기 후 전송)
   - nohup /opt/k3s/callback.sh > /var/log/k3s-callback.log 2>&1 &

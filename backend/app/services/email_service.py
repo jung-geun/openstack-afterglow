@@ -1,5 +1,6 @@
 """이메일 전송 서비스 (aiosmtplib 기반)."""
 
+import html
 import logging
 from datetime import datetime
 
@@ -59,6 +60,10 @@ async def send_invitation_email(
     site_name = settings.site_name
     expires_str = expires_at.strftime("%Y년 %m월 %d일")
 
+    safe_inviter = html.escape(inviter_name)
+    safe_project = html.escape(project_name)
+    safe_url = html.escape(accept_url)
+
     subject = f"[{site_name}] {project_name} 프로젝트 초대"
 
     text_body = (
@@ -74,9 +79,9 @@ async def send_invitation_email(
 <body style="font-family: sans-serif; color: #1a1a1a; max-width: 480px; margin: 0 auto; padding: 24px;">
   <h2 style="font-size: 18px; margin-bottom: 8px;">{site_name} 프로젝트 초대</h2>
   <p style="color: #555; margin-bottom: 24px;">
-    <strong>{inviter_name}</strong>님이 <strong>{project_name}</strong> 프로젝트에 초대했습니다.
+    <strong>{safe_inviter}</strong>님이 <strong>{safe_project}</strong> 프로젝트에 초대했습니다.
   </p>
-  <a href="{accept_url}"
+  <a href="{safe_url}"
      style="display: inline-block; background: #3b82f6; color: #fff; text-decoration: none;
             padding: 12px 24px; border-radius: 6px; font-weight: 600;">
     초대 수락

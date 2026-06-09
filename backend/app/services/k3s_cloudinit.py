@@ -100,17 +100,17 @@ def _build_server_ignition(
     callback_sh = _jinja.get_template("k3s_server_fcos_callback.sh.j2").render(**template_vars)
 
     # k3s 설치 스크립트 (systemd ExecStart용)
-    tls_sans_args = " ".join(f'--tls-san "{san}"' for san in extra_tls_sans)
+    tls_sans_args = " ".join(f"--tls-san {shlex.quote(san)}" for san in extra_tls_sans)
     cloud_controller_args = ""
     if needs_external_cloud_provider:
         cloud_controller_args = '--disable-cloud-controller --kubelet-arg="cloud-provider=external"'
-    extra_args_str = " ".join(extra_server_args) if extra_server_args else ""
+    extra_args_str = " ".join(shlex.quote(a) for a in extra_server_args) if extra_server_args else ""
 
     # HA 분기 인자
     if cluster_init:
         ha_args = "--cluster-init"
     elif join_url and ha_node_token:
-        ha_args = f'--server "{join_url}" --token "{ha_node_token}"'
+        ha_args = f"--server {shlex.quote(join_url)} --token {shlex.quote(ha_node_token)}"
     else:
         ha_args = ""
 
@@ -120,7 +120,7 @@ set -e
 SERVER_IP=$(ip route get 8.8.8.8 2>/dev/null | awk '{{for(i=1;i<=NF;i++) if($i=="src"){{print $(i+1); break}}}}')
 [ -z "${{SERVER_IP}}" ] && SERVER_IP=$(hostname -I | awk '{{print $1}}')
 curl -sfL https://get.k3s.io | \\
-  INSTALL_K3S_VERSION="{k3s_version}" \\
+  INSTALL_K3S_VERSION={shlex.quote(k3s_version)} \\
   INSTALL_K3S_SKIP_SELINUX_RPM=true \\
   sh -s - server \\
     --tls-san "${{SERVER_IP}}" \\
@@ -130,7 +130,7 @@ curl -sfL https://get.k3s.io | \\
     {ha_args} \\
     {cloud_controller_args} \\
     {extra_args_str} \\
-    --node-name="{node_name}"
+    --node-name={shlex.quote(node_name)}
 nohup /bin/bash /opt/k3s/callback.sh > /var/log/k3s-callback.log 2>&1 &
 """
 

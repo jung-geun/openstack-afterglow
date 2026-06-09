@@ -229,7 +229,14 @@ def create_instance(
             instance_body["replica_count"] = replica_count
 
     payload = {"instance": instance_body}
-    _logger.debug("Trove create_instance payload: %s", payload)
+    if _logger.isEnabledFor(logging.DEBUG):
+        import copy
+
+        _log_payload = copy.deepcopy(payload)
+        for u in _log_payload.get("instance", {}).get("users", []):
+            if "password" in u:
+                u["password"] = "***"
+        _logger.debug("Trove create_instance payload: %s", _log_payload)
 
     resp = conn.database.post("/instances", json=payload)
     status = getattr(resp, "status_code", None)

@@ -555,7 +555,10 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     # [security]
     security = cfg.get("security", {})
     lines.append("[security]")
-    lines.append(f'admin_legacy_project_policy = {_toml_bool(security.get("admin_legacy_project_policy", True))}')
+    lines.append(f'admin_legacy_project_policy = {_toml_bool(security.get("admin_legacy_project_policy", False))}')
+    lines.append(f'login_max_attempts = {security.get("login_max_attempts", 10)}')
+    lines.append(f'login_lockout_seconds = {security.get("login_lockout_seconds", 300)}')
+    lines.append(f'login_backoff_base = {security.get("login_backoff_base", 2)}')
     lines.append("")
 
     return "\n".join(lines)

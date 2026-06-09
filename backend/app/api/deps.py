@@ -154,6 +154,12 @@ async def _resolve_jwt_token_info(request, bearer_token: str, x_project_id: str 
     if sess is None:
         raise HTTPException(status_code=401, detail="세션이 만료되었습니다. 다시 로그인해 주세요.")
 
+    # ── 세션 타임아웃 검증 (JWT 경로) ─────────────────────────────────────────
+    # refresh_jti를 해시해 X-Auth-Token 경로와 동일한 _check_session_timeout 재사용
+    _rjti_hash = hashlib.sha256(refresh_jti.encode()).hexdigest()
+    _sess_project_id = sess.get("project_id", x_project_id or "")
+    await _check_session_timeout(_rjti_hash, _sess_project_id)
+
     # ── 블랙리스트 검사 ─────────────────────────────────────────────────────
     if sess.get("blacklisted"):
         raise HTTPException(status_code=401, detail="세션이 차단되었습니다.")
@@ -210,7 +216,12 @@ async def _resolve_jwt_token_info(request, bearer_token: str, x_project_id: str 
     except HTTPException:
         raise
     except Exception:
-        _logger.warning("토큰 바인딩 검사 실패 — fail-open", exc_info=True)
+        # fail-closed: 바인딩 검사 실패(Redis 장애·설정 오류) 시 요청 거부.
+        # 운영: Redis 가용성 모니터링 필수 — Redis 장애 시 전체 인증 차단됨.
+        _logger.error("토큰 바인딩 검사 실패 — 요청 거부 (fail-closed)", exc_info=True)
+        raise HTTPException(
+            status_code=401, detail="토큰 바인딩 검사를 완료할 수 없습니다. 잠시 후 다시 시도해 주세요."
+        )
 
     jwt_project_id = payload.get("project_id", "")
     target_project_id = x_project_id or jwt_project_id
@@ -257,14 +268,11 @@ async def _resolve_jwt_token_info(request, bearer_token: str, x_project_id: str 
 async def get_token_info(
     request: Request,
     authorization: str | None = Header(None),
-    x_auth_token: str | None = Header(None),
     x_project_id: str | None = Header(None),
 ) -> dict:
     """모든 인증 필요 엔드포인트에서 사용하는 Depends 함수.
 
-    우선순위:
-    1. Authorization: Bearer <access_jwt>  — JWT 경로 (신규)
-    2. X-Auth-Token: <keystone_token>      — 레거시 경로 (하위호환)
+    Authorization: Bearer <access_jwt> — JWT 경로만 지원.
 
     request.state.token_info 를 세팅해 activity_audit_middleware 가 자동 로깅 시
     신원(project_id/user_id/username)을 추출할 수 있게 한다.
@@ -279,19 +287,7 @@ async def get_token_info(
             raise
         except Exception:
             raise HTTPException(status_code=401, detail="세션이 만료되었습니다. 다시 로그인해 주세요.")
-
-    if not x_auth_token:
-        raise HTTPException(status_code=401, detail="인증 헤더가 필요합니다")
-    try:
-        token_hash = hashlib.sha256(x_auth_token.encode()).hexdigest()
-        await _check_session_timeout(token_hash, x_project_id or "")
-        info = await _cached_validate(x_auth_token, x_project_id or "")
-        request.state.token_info = info
-        return info
-    except HTTPException:
-        raise
-    except Exception:
-        raise HTTPException(status_code=401, detail="유효하지 않은 토큰")
+    raise HTTPException(status_code=401, detail="Authorization Bearer 토큰이 필요합니다")
 
 
 def require_admin(token_info: dict = Depends(get_token_info)):
@@ -331,7 +327,6 @@ async def require_project_manager(
 async def get_os_conn(
     request: Request,
     authorization: str | None = Header(None),
-    x_auth_token: str | None = Header(None),
     x_project_id: str | None = Header(None),
 ) -> AsyncGenerator[openstack.connection.Connection, None]:
     """openstacksdk Connection 객체를 반환하는 Depends 함수.
@@ -342,7 +337,6 @@ async def get_os_conn(
     token_info = await get_token_info(
         request=request,
         authorization=authorization,
-        x_auth_token=x_auth_token,
         x_project_id=x_project_id,
     )
     scoped_token = token_info["token"]

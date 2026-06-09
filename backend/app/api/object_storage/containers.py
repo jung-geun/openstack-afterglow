@@ -13,7 +13,7 @@ import secrets
 import time
 import urllib.parse
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -607,10 +607,8 @@ async def _resolve_swift_conn(
     dl_token: str | None,
     container_name: str,
     object_name: str,
-    x_auth_token: str | None,
-    x_project_id: str | None,
 ) -> openstack.connection.Connection:
-    """단발 다운로드 토큰 또는 헤더 인증으로 OpenStack 연결을 반환."""
+    """단발 다운로드 토큰으로 OpenStack 연결을 반환."""
     from app.services import keystone as ks
     from app.services.cache import _get_redis
 
@@ -624,21 +622,9 @@ async def _resolve_swift_conn(
             raise HTTPException(status_code=403, detail="토큰이 요청한 리소스와 일치하지 않습니다")
         return await asyncio.to_thread(ks.get_openstack_connection, payload["openstack_token"], payload["project_id"])
 
-    if not x_auth_token:
-        raise HTTPException(status_code=401, detail="X-Auth-Token 헤더가 필요합니다")
-    try:
-        import hashlib
-
-        from app.api.deps import _cached_validate, _check_session_timeout
-
-        token_hash = hashlib.sha256(x_auth_token.encode()).hexdigest()
-        await _check_session_timeout(token_hash, x_project_id or "")
-        token_info = await _cached_validate(x_auth_token, x_project_id or "")
-        return await asyncio.to_thread(ks.get_openstack_connection, token_info["token"], token_info["project_id"])
-    except HTTPException:
-        raise
-    except Exception:
-        raise HTTPException(status_code=401, detail="유효하지 않은 토큰")
+    raise HTTPException(
+        status_code=403, detail="다운로드 토큰이 필요합니다. /download-token 엔드포인트를 먼저 호출하세요."
+    )
 
 
 @router.post("/{container_name}/objects/{object_name:path}/download-token", status_code=200)
@@ -673,13 +659,11 @@ async def download_object(
     container_name: str,
     object_name: str,
     dl_token: str | None = Query(None, alias="token"),
-    x_auth_token: str | None = Header(None),
-    x_project_id: str | None = Header(None),
 ):
-    """오브젝트 스트리밍 다운로드. 단발 토큰(?token=) 또는 X-Auth-Token 헤더 인증."""
+    """오브젝트 스트리밍 다운로드. 단발 토큰(?token=) 인증."""
     from app.services import swift
 
-    conn = await _resolve_swift_conn(dl_token, container_name, object_name, x_auth_token, x_project_id)
+    conn = await _resolve_swift_conn(dl_token, container_name, object_name)
     try:
         chunks, content_type, content_length = await asyncio.to_thread(
             swift.stream_object, conn, container_name, object_name

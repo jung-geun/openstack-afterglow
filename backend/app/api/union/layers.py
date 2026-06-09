@@ -30,7 +30,7 @@ _logger = logging.getLogger(__name__)
 
 
 async def _resolve_mount_user_id(request: Request) -> str:
-    """record_mount/unmount 전용: X-Auth-Token(Keystone) 또는 Bearer(VM health) 토큰 모두 허용."""
+    """record_mount/unmount 전용: Bearer(VM health) 토큰만 허용."""
     auth = request.headers.get("Authorization", "")
     if auth.startswith("Bearer "):
         token = auth[len("Bearer ") :]
@@ -40,12 +40,7 @@ async def _resolve_mount_user_id(request: Request) -> str:
         if not token_data:
             raise HTTPException(status_code=401, detail="유효하지 않은 Bearer 토큰")
         return f"vm:{token_data.get('instance_id', 'unknown')}"
-    x_auth_token = request.headers.get("X-Auth-Token")
-    x_project_id = request.headers.get("X-Project-Id")
-    if not x_auth_token:
-        raise HTTPException(status_code=401, detail="인증 토큰이 필요합니다")
-    token_info = await get_token_info(request=request, x_auth_token=x_auth_token, x_project_id=x_project_id)
-    return token_info.get("user_id") or token_info.get("username") or "unknown"
+    raise HTTPException(status_code=401, detail="Authorization Bearer 토큰이 필요합니다")
 
 
 def _require_admin(token_info: dict) -> None:
@@ -322,7 +317,7 @@ async def record_mount(
     req: RecordMountRequest,
     session=Depends(get_session),
 ):
-    """마운트 기록 추가. X-Auth-Token 또는 VM Bearer 토큰 모두 허용."""
+    """마운트 기록 추가. VM Bearer 토큰만 허용."""
     user_id = await _resolve_mount_user_id(request)
     try:
         return await union_layers.record_mount(session, user_id, req.vm_hostname, req.leaf_layer_id)

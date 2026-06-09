@@ -1,5 +1,6 @@
 """K3s callback 엔드포인트 테스트 (/api/k3s/callback)."""
 
+import shlex
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -260,6 +261,7 @@ def _render_callback_script(k3s_version: str = "v1.31.0+k3s1") -> str:
 
     tpl_dir = Path(__file__).parent.parent / "app" / "templates"
     env = Environment(loader=FileSystemLoader(str(tpl_dir)))
+    env.filters["shlex_quote"] = shlex.quote
     tpl = env.get_template("k3s_server.yaml.j2")
 
     rendered = tpl.render(

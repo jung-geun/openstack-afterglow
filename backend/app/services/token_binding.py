@@ -152,6 +152,6 @@ def check_binding(
             return "block", reason
         return "ok", ""
 
-    # 알 수 없는 모드 — fail-open
-    _logger.warning("token_binding: 알 수 없는 mode=%r — fail-open", mode)
-    return "ok", ""
+    # 알 수 없는 모드 — 설정 오류로 간주하여 예외 발생 (fail-closed)
+    # deps.py의 except Exception 핸들러가 이를 포착하여 401을 반환.
+    raise ValueError(f"알 수 없는 token_ip_binding_mode: {mode!r}. 허용값: 'off', 'log', 'subnet', 'strict'")

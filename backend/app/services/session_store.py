@@ -221,27 +221,44 @@ async def delete_session_owned(user_id: str, jti: str, *, revoke_keystone: bool 
 
     jti가 user_id의 세션 인덱스에 없으면 False 반환 — 호출자는 404로 응답한다.
     소유권이 확인되면 Keystone 토큰도 폐기(best-effort) 후 세션 삭제 → True 반환.
+
+    보안: 인덱스 통과 후 세션 데이터의 user_id를 재검증하여 stale/오염된
+    Redis 인덱스로 인해 타인의 세션을 삭제하는 것을 방지한다.
     """
     r = await _get_redis()
     is_member = await r.sismember(_user_index_key(user_id), jti)
     if not is_member:
         return False
 
-    if revoke_keystone:
-        raw = await r.get(_key(jti))
-        if raw:
-            try:
-                sess = json.loads(raw)
-                ks_token = sess.get("keystone_token", "")
-                if ks_token:
-                    from app.services import keystone  # 순환 임포트 방지용 지연 임포트
+    # raw를 한 번만 읽어 소유권 재검증 + Keystone revoke에 재사용
+    raw = await r.get(_key(jti))
+    sess: dict | None = None
+    if raw:
+        try:
+            sess = json.loads(raw)
+        except Exception:
+            pass
 
-                    try:
-                        await asyncio.to_thread(keystone.revoke_token, ks_token)
-                    except Exception:
-                        _logger.warning("delete_session_owned: Keystone revoke 실패 (jti=%s)", jti, exc_info=True)
+    # 소유권 이중 검증: 인덱스뿐만 아니라 세션 데이터의 user_id도 확인
+    if sess is not None and sess.get("user_id") != user_id:
+        _logger.warning(
+            "delete_session_owned: 인덱스-데이터 user_id 불일치 "
+            "(index_user=%s, data_user=%s, jti=%s) — Redis 인덱스 오염 의심",
+            user_id,
+            sess.get("user_id"),
+            jti,
+        )
+        return False
+
+    if revoke_keystone and sess is not None:
+        ks_token = sess.get("keystone_token", "")
+        if ks_token:
+            from app.services import keystone  # 순환 임포트 방지용 지연 임포트
+
+            try:
+                await asyncio.to_thread(keystone.revoke_token, ks_token)
             except Exception:
-                pass
+                _logger.warning("delete_session_owned: Keystone revoke 실패 (jti=%s)", jti, exc_info=True)
 
     await delete_session(jti)
     return True

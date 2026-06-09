@@ -9,11 +9,12 @@ if TYPE_CHECKING:
 import asyncio
 import logging
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from app.api.deps import CacheMode, cache_mode, get_os_conn, get_token_info, require_admin
 from app.services import activity, keystone, session_store
+from app.services import login_guard as _login_guard
 from app.services.cache import cached_call, invalidate, ttl_slow
 
 _logger = logging.getLogger(__name__)
@@ -223,6 +224,39 @@ async def list_user_sessions_admin(user_id: str):
     """관리자가 특정 사용자의 활성 세션 목록을 조회 (keystone_token 제외)."""
     sessions = await session_store.list_user_sessions(user_id)
     return {"sessions": sessions, "count": len(sessions)}
+
+
+class UnlockAccountRequest(BaseModel):
+    username: str
+    domain: str = "Default"
+
+
+@router.post("/users/unlock-account", dependencies=[Depends(require_admin)])
+async def admin_unlock_account(
+    req: UnlockAccountRequest,
+    token_info: dict = Depends(get_token_info),
+):
+    """계정 로그인 잠금 강제 해제 (관리자 전용)."""
+    await _login_guard.admin_unlock(req.username, req.domain)
+    await activity.record(
+        project_id=token_info["project_id"],
+        user_id=token_info["user_id"],
+        username=token_info.get("username", ""),
+        resource_type="identity",
+        action="account_unlock",
+        status="success",
+        extra={"target_username": req.username, "domain": req.domain},
+    )
+    return {"status": "unlocked", "username": req.username, "domain": req.domain}
+
+
+@router.get("/users/lock-status", dependencies=[Depends(require_admin)])
+async def admin_get_lock_status(
+    username: str = Query(...),
+    domain: str = Query(default="Default"),
+):
+    """계정 잠금 상태 조회 (관리자 전용)."""
+    return await _login_guard.get_lock_status(username, domain)
 
 
 # ============================================================================
@@ -785,11 +819,9 @@ async def add_user_to_group(
 async def remove_user_from_group(
     group_id: str,
     user_id: str,
-    x_auth_token: str | None = Header(None),
-    x_project_id: str | None = Header(None),
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    """그룹에서 사용자 제거. Keystone 토큰 revocation 대비 세션 캐시 클리어."""
+    """그룹에서 사용자 제거."""
 
     def _remove():
         try:
@@ -801,20 +833,8 @@ async def remove_user_from_group(
 
     try:
         await asyncio.to_thread(_remove)
-        # 그룹 멤버십 변경 시 Keystone이 토큰을 revoke할 수 있으므로 세션 캐시 클리어
-        if x_auth_token:
-            import hashlib as _hl
-
-            from app.services.cache import _get_redis
-
-            token_hash = _hl.sha256(x_auth_token.encode()).hexdigest()[:32]
-            pid = x_project_id or "noscope"
-            try:
-                r = await _get_redis()
-                await r.delete(f"afterglow:session:{token_hash}:{pid}")
-                await r.delete(f"afterglow:session_start:{token_hash}:{pid}")
-            except Exception:
-                pass
+        # 그룹 멤버십 변경 시 해당 사용자의 모든 세션 무효화
+        await session_store.revoke_user_sessions(user_id)
     except HTTPException:
         raise
 

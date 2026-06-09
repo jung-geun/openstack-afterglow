@@ -257,7 +257,10 @@ def _load_toml() -> dict:
     flat["notion_config_encryption_key"] = notion.get("config_encryption_key", "")
 
     security = data.get("security", {})
-    flat["admin_legacy_project_policy"] = security.get("admin_legacy_project_policy", True)
+    flat["admin_legacy_project_policy"] = security.get("admin_legacy_project_policy", False)
+    flat["login_max_attempts"] = security.get("login_max_attempts", 10)
+    flat["login_lockout_seconds"] = security.get("login_lockout_seconds", 300)
+    flat["login_backoff_base"] = security.get("login_backoff_base", 2)
 
     gl = data.get("gitlab_oidc", {})
     flat["gitlab_oidc_enabled"] = gl.get("enabled", False)
@@ -496,10 +499,23 @@ class Settings(BaseSettings):
     jwt_refresh_ttl: int = 604800  # refresh JWT 수명 (초), 기본 7일
     token_ip_binding_mode: str = "subnet"  # off | log | subnet | strict
 
+    @field_validator("token_ip_binding_mode")
+    @classmethod
+    def validate_binding_mode(cls, v: str) -> str:
+        _VALID_MODES = {"off", "log", "subnet", "strict"}
+        if v not in _VALID_MODES:
+            raise ValueError(f"token_ip_binding_mode={v!r} 은 유효하지 않습니다. 허용값: {sorted(_VALID_MODES)}")
+        return v
+
     # 보안 정책
     # True: system:all role OR admin project+role 모두 system admin 인정 (마이그레이션 호환 모드)
     # False: system:all role만 system admin으로 인정 (자기복제 권한 상승 완전 차단)
-    admin_legacy_project_policy: bool = True
+    admin_legacy_project_policy: bool = False
+
+    # 로그인 브루트포스 방어
+    login_max_attempts: int = 10  # 잠금 임계값 (실패 횟수)
+    login_lockout_seconds: int = 300  # 기본 잠금 시간 (초, 5분)
+    login_backoff_base: int = 2  # 지수 백오프 밑수
 
     # Nova 기본값
     default_network_id: str = ""  # 레거시 폴백 (default_network_enabled=false 시 사용)

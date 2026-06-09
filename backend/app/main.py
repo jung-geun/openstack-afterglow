@@ -404,7 +404,7 @@ async def request_logging_middleware(request: Request, call_next):
     return response
 
 
-_CORS_ALLOW_HEADERS = "Content-Type, X-Auth-Token, X-Project-Id, Authorization"
+_CORS_ALLOW_HEADERS = "Content-Type, X-Project-Id, Authorization"
 _CORS_ALLOW_METHODS = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
 
 

@@ -264,29 +264,18 @@ async def test_bearer_access_protects_me_endpoint(_ks_authenticate, _ks_get_user
 
 
 @pytest.mark.asyncio
-async def test_legacy_x_auth_token_still_works(_rate_limiter_off):
-    """X-Auth-Token 레거시 헤더로 /me가 동작해야 한다 (하위호환)."""
+async def test_legacy_x_auth_token_rejected(_rate_limiter_off):
+    """X-Auth-Token 레거시 헤더는 더 이상 허용되지 않으며 401을 반환해야 한다."""
     from httpx import ASGITransport, AsyncClient
 
     from app.main import app
 
-    with (
-        patch(
-            "app.api.deps._cached_validate",
-            new=AsyncMock(return_value=dict(_KS_DATA)),
-        ),
-        patch(
-            "app.api.deps._check_session_timeout",
-            new=AsyncMock(),
-        ),
-    ):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-            me = await ac.get(
-                "/api/auth/me",
-                headers={"X-Auth-Token": _KEYSTONE_TOKEN, "X-Project-Id": "proj-1"},
-            )
-    assert me.status_code == 200
-    assert me.json()["user_id"] == "user-1"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        me = await ac.get(
+            "/api/auth/me",
+            headers={"X-Auth-Token": _KEYSTONE_TOKEN, "X-Project-Id": "proj-1"},
+        )
+    assert me.status_code == 401
 
 
 @pytest.mark.asyncio

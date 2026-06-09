@@ -10,6 +10,12 @@ _NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$")
 # 임의 메타문자 차단 — callback 단계에서 검증해 cloud-init 단계에서 인젝션을 차단한다.
 _NODE_TOKEN_RE = re.compile(r"^[A-Za-z0-9:_+/=.\-]{8,512}$")
 
+# K8s label/taint 키-값 허용 문자 기반 정규식 — 쉘 메타문자 명령주입 차단
+# prefix (선택): DNS subdomain + '/'
+_K8S_LABEL_NAME_RE = re.compile(r"^([a-zA-Z0-9][a-zA-Z0-9\-.]{0,252}/)?[a-zA-Z0-9][a-zA-Z0-9\-._]{0,62}$")
+_K8S_LABEL_VALUE_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9\-._]{0,62}$|^$")
+_TAINT_EFFECTS = {"NoSchedule", "PreferNoSchedule", "NoExecute"}
+
 
 class K3sProgressStep(str, Enum):
     SECURITY_GROUP = "security_group"
@@ -374,6 +380,39 @@ class CreateK3sNodegroupRequest(BaseModel):
             raise ValueError(f"role은 {sorted(_VALID_NG_ROLES)} 중 하나여야 합니다")
         return v
 
+    @field_validator("labels", mode="before")
+    @classmethod
+    def validate_labels(cls, v):
+        if v is None:
+            return v
+        for k, val in v.items():
+            if not _K8S_LABEL_NAME_RE.match(str(k)):
+                raise ValueError(f"유효하지 않은 라벨 키: {k!r}")
+            if not _K8S_LABEL_VALUE_RE.match(str(val)):
+                raise ValueError(f"유효하지 않은 라벨 값: {val!r}")
+        return v
+
+    @field_validator("taints", mode="before")
+    @classmethod
+    def validate_taints(cls, v):
+        if v is None:
+            return v
+        for taint in v:
+            if isinstance(taint, dict):
+                key = str(taint.get("key", ""))
+                value = str(taint.get("value", ""))
+                effect = str(taint.get("effect", ""))
+                if key and not _K8S_LABEL_NAME_RE.match(key):
+                    raise ValueError(f"유효하지 않은 taint 키: {key!r}")
+                if value and not _K8S_LABEL_VALUE_RE.match(value):
+                    raise ValueError(f"유효하지 않은 taint 값: {value!r}")
+                if effect and effect not in _TAINT_EFFECTS:
+                    raise ValueError(f"유효하지 않은 taint effect: {effect!r} (허용: {sorted(_TAINT_EFFECTS)})")
+            elif isinstance(taint, str):
+                if not re.match(r"^[a-zA-Z0-9\-._/]+(=[a-zA-Z0-9\-._]*)?:[a-zA-Z]+$", taint):
+                    raise ValueError(f"유효하지 않은 taint 형식: {taint!r}")
+        return v
+
 
 class UpdateK3sNodegroupRequest(BaseModel):
     node_count: int | None = Field(default=None, ge=0, le=20)
@@ -385,6 +424,39 @@ class UpdateK3sNodegroupRequest(BaseModel):
     stampede_enabled: bool | None = None
     min_size: int | None = Field(default=None, ge=0)
     max_size: int | None = Field(default=None, ge=0)
+
+    @field_validator("labels", mode="before")
+    @classmethod
+    def validate_labels(cls, v):
+        if v is None:
+            return v
+        for k, val in v.items():
+            if not _K8S_LABEL_NAME_RE.match(str(k)):
+                raise ValueError(f"유효하지 않은 라벨 키: {k!r}")
+            if not _K8S_LABEL_VALUE_RE.match(str(val)):
+                raise ValueError(f"유효하지 않은 라벨 값: {val!r}")
+        return v
+
+    @field_validator("taints", mode="before")
+    @classmethod
+    def validate_taints(cls, v):
+        if v is None:
+            return v
+        for taint in v:
+            if isinstance(taint, dict):
+                key = str(taint.get("key", ""))
+                value = str(taint.get("value", ""))
+                effect = str(taint.get("effect", ""))
+                if key and not _K8S_LABEL_NAME_RE.match(key):
+                    raise ValueError(f"유효하지 않은 taint 키: {key!r}")
+                if value and not _K8S_LABEL_VALUE_RE.match(value):
+                    raise ValueError(f"유효하지 않은 taint 값: {value!r}")
+                if effect and effect not in _TAINT_EFFECTS:
+                    raise ValueError(f"유효하지 않은 taint effect: {effect!r} (허용: {sorted(_TAINT_EFFECTS)})")
+            elif isinstance(taint, str):
+                if not re.match(r"^[a-zA-Z0-9\-._/]+(=[a-zA-Z0-9\-._]*)?:[a-zA-Z]+$", taint):
+                    raise ValueError(f"유효하지 않은 taint 형식: {taint!r}")
+        return v
 
     @model_validator(mode="after")
     def validate_stampede_sizes(self) -> "UpdateK3sNodegroupRequest":

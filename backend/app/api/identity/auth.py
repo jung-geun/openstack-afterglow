@@ -5,11 +5,17 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from app.api.deps import extend_session, get_session_remaining, get_token_info, invalidate_token_cache
+from app.api.deps import (
+    _check_session_timeout,
+    extend_session,
+    get_session_remaining,
+    get_token_info,
+    invalidate_token_cache,
+)
 from app.config import get_settings
 from app.models.auth import GitLabCallbackRequest, LoginRequest, ProjectInfo, TokenResponse, UserInfo
 from app.rate_limit import limiter
-from app.services import jwt_service, keystone, session_store
+from app.services import jwt_service, keystone, login_guard, session_store
 from app.services.cache import cached_call, ttl_fast, ttl_normal, ttl_static
 from app.services.recent_projects import get_recent_project_ids, record_project_access
 
@@ -123,6 +129,11 @@ async def _prewarm_dashboard(token: str, project_id: str):
 @router.post("/login", response_model=TokenResponse)
 @limiter.limit("10/minute")
 async def login(request: Request, req: LoginRequest, background_tasks: BackgroundTasks):
+    domain = req.domain_name or "Default"
+
+    # 잠금 확인 (HTTPException 429 발생 가능)
+    await login_guard.check_locked(req.username, domain)
+
     try:
         data = keystone.authenticate(
             username=req.username,
@@ -131,6 +142,7 @@ async def login(request: Request, req: LoginRequest, background_tasks: Backgroun
             domain_name=req.domain_name,
         )
     except Exception:
+        asyncio.create_task(login_guard.record_failure(req.username, domain))
         raise HTTPException(status_code=401, detail="인증 실패")
 
     # 사용자의 default_project_id 조회
@@ -147,6 +159,9 @@ async def login(request: Request, req: LoginRequest, background_tasks: Backgroun
 
     origin_ip, origin_fp = get_origin(request)
     device_type, os_name = parse_device(request.headers.get("User-Agent", ""))
+
+    # 성공 시 실패 카운트 초기화 (fire-and-forget)
+    asyncio.create_task(login_guard.record_success(req.username, domain))
 
     # 대시보드 캐시 프리워밍 + 최근 프로젝트 기록 (백그라운드)
     background_tasks.add_task(_prewarm_dashboard, data["token"], data["project_id"])
@@ -244,6 +259,12 @@ async def refresh_token(request: Request, req: RefreshRequest):
     # 블랙리스트 세션은 refresh 갱신도 거부
     if sess.get("blacklisted"):
         raise HTTPException(status_code=401, detail="세션이 차단되었습니다.")
+
+    # ── 세션 타임아웃 검증 ─────────────────────────────────────────────────────
+    import hashlib as _hl
+
+    _rjti_hash = _hl.sha256(r_jti.encode()).hexdigest()
+    await _check_session_timeout(_rjti_hash, sess.get("project_id", ""))
 
     # 최초 로그인 origin과 기기 정보를 회전 너머로 그대로 운반 (재파싱 금지)
     origin_ip = sess.get("origin_ip", "")

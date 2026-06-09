@@ -36,7 +36,7 @@
 		progress = 0;
 
 		const headers: Record<string, string> = {};
-		if (token) headers['X-Auth-Token'] = token;
+		if (token) headers['Authorization'] = `Bearer ${token}`;
 		if (projectId) headers['X-Project-Id'] = projectId;
 
 		try {

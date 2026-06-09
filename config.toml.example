@@ -108,6 +108,16 @@ jwt_refresh_ttl = 604800  # refresh 토큰 (기본 7일)
 #   strict — IP 정확 불일치 또는 기기 지문 불일치 시 차단
 token_ip_binding_mode = "subnet"
 
+[security]
+# system:all scope 기반 admin 인증 (보안 강화 권장)
+# True: admin 프로젝트 role도 시스템 admin으로 인정 (마이그레이션 호환 모드 — 권한 자기복제 허용)
+# False: system:all scope만 인정 (권장). 변경 전 scripts/bootstrap_system_admin.py 실행 필요.
+admin_legacy_project_policy = false
+# 로그인 브루트포스 방어
+login_max_attempts = 10       # 연속 실패 후 계정 잠금 임계값
+login_lockout_seconds = 300   # 기본 잠금 시간 (초)
+login_backoff_base = 2        # 지수 백오프 밑수 (실패 반복 시 잠금 시간 증가)
+
 [nova]
 default_network_id = ""
 default_availability_zone = "nova"

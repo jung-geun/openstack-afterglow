@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import logging
 
 import openstack as openstack_lib
@@ -24,7 +25,7 @@ def _verify_sd_token(request: Request) -> None:
     if not auth.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Authorization Bearer 토큰이 필요합니다")
     token = auth[len("Bearer ") :]
-    if token != expected:
+    if not hmac.compare_digest(token, expected):
         raise HTTPException(status_code=401, detail="유효하지 않은 SD 토큰")
 
 

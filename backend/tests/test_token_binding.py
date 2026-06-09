@@ -422,6 +422,7 @@ async def test_subnet_mismatch_returns_401():
         patch("app.services.activity.record", AsyncMock()),
     ):
         mock_settings.return_value.token_ip_binding_mode = "subnet"
+        mock_settings.return_value.session_timeout_seconds = 3600
         with pytest.raises(HTTPException) as exc_info:
             await _resolve_jwt_token_info(mock_req, access_str, None)
     assert exc_info.value.status_code == 401

@@ -27,8 +27,8 @@ _STATE_TTL = 600  # 10분
 _FALLBACK_MAX_SIZE = 500  # 인메모리 폴백 최대 항목 수 (메모리 누수 방지)
 
 # Redis 장애 시 인메모리 state 폴백 (단일 프로세스용, 재시작 시 소실)
-# {state: expiry_timestamp} — 최대 _FALLBACK_MAX_SIZE 항목 유지
-_fallback_states: dict[str, float] = {}
+# {state: (expiry_timestamp, nonce)} — 최대 _FALLBACK_MAX_SIZE 항목 유지
+_fallback_states: dict[str, tuple[float, str]] = {}
 
 
 async def _get_redis():
@@ -38,13 +38,15 @@ async def _get_redis():
 
 
 async def get_authorize_url() -> str:
-    """GitLab OAuth2 authorize URL을 생성하고 state를 Redis에 저장."""
+    """GitLab OAuth2 authorize URL을 생성하고 state(값=nonce)를 Redis에 저장."""
     settings = get_settings()
     state = secrets.token_urlsafe(32)
+    nonce = secrets.token_urlsafe(32)
 
     try:
         r = await _get_redis()
-        await r.setex(f"afterglow:gitlab_state:{state}", _STATE_TTL, "1")
+        # state 키의 값으로 nonce를 저장 — 콜백에서 id_token nonce 클레임 검증에 사용
+        await r.setex(f"afterglow:gitlab_state:{state}", _STATE_TTL, nonce)
     except Exception:
         logger.warning("Redis 장애로 OIDC state를 인메모리에 임시 저장합니다")
         import time as _time
@@ -52,14 +54,14 @@ async def get_authorize_url() -> str:
         now = _time.time()
         # 크기 초과 시 만료된 항목 정리 (메모리 누수 방지)
         if len(_fallback_states) >= _FALLBACK_MAX_SIZE:
-            expired = [k for k, exp in _fallback_states.items() if exp <= now]
+            expired = [k for k, (exp, _n) in _fallback_states.items() if exp <= now]
             for k in expired:
                 del _fallback_states[k]
             # 여전히 초과하면 가장 오래된 항목 제거
             if len(_fallback_states) >= _FALLBACK_MAX_SIZE:
-                oldest = min(_fallback_states, key=lambda k: _fallback_states[k])
+                oldest = min(_fallback_states, key=lambda k: _fallback_states[k][0])
                 del _fallback_states[oldest]
-        _fallback_states[state] = now + _STATE_TTL
+        _fallback_states[state] = (now + _STATE_TTL, nonce)
 
     params = {
         "client_id": settings.gitlab_oidc_client_id,
@@ -67,13 +69,14 @@ async def get_authorize_url() -> str:
         "response_type": "code",
         "scope": settings.gitlab_oidc_scopes,
         "state": state,
+        "nonce": nonce,
     }
     query = urllib.parse.urlencode(params)
     return f"{settings.gitlab_oidc_gitlab_url}/oauth/authorize?{query}"
 
 
-async def _validate_state(state: str) -> None:
-    """Redis에서 state 검증 후 삭제. Redis 장애 시 인메모리 폴백 확인."""
+async def _validate_state(state: str) -> str:
+    """Redis에서 state 검증 후 삭제. nonce 반환. Redis 장애 시 인메모리 폴백 확인."""
     import time as _time
 
     # Redis 시도
@@ -83,14 +86,16 @@ async def _validate_state(state: str) -> None:
         val = await r.get(key)
         if val is not None:
             await r.delete(key)
-            return
+            return val.decode() if isinstance(val, bytes) else val
     except Exception:
         logger.warning("Redis 장애로 state 검증을 인메모리 폴백으로 시도합니다")
 
     # 인메모리 폴백 확인
-    expiry = _fallback_states.pop(state, None)
-    if expiry is not None and _time.time() < expiry:
-        return
+    entry = _fallback_states.pop(state, None)
+    if entry is not None:
+        expiry, nonce = entry
+        if _time.time() < expiry:
+            return nonce
 
     raise ValueError("유효하지 않거나 만료된 state입니다")
 
@@ -223,10 +228,29 @@ async def exchange_code(code: str, state: str) -> dict:
     해당 프로젝트로 scope, 그렇지 않으면 첫 번째 프로젝트로 fallback.
     프로젝트 목록 조회와 default_project_id 조회를 병렬로 수행한다.
     """
-    await _validate_state(state)
+    import base64
+    import json as _json
+
+    expected_nonce = await _validate_state(state)
 
     tokens = await _exchange_gitlab_code(code)
-    fed = await _federated_auth(tokens["id_token"])
+
+    # id_token nonce 검증 (replay 공격 방지)
+    id_token = tokens["id_token"]
+    parts = id_token.split(".")
+    if len(parts) >= 2:
+        payload_b64 = parts[1] + "=="
+        try:
+            token_payload = _json.loads(base64.urlsafe_b64decode(payload_b64))
+            token_nonce = token_payload.get("nonce")
+            if expected_nonce and token_nonce != expected_nonce:
+                raise ValueError("OIDC nonce 불일치 — 토큰 재생 공격 의심")
+        except (ValueError, KeyError):
+            raise
+        except Exception:
+            logger.warning("id_token nonce 검증 실패 (파싱 오류)", exc_info=True)
+
+    fed = await _federated_auth(id_token)
     unscoped_token = fed["token"]
     user_id = fed.get("user", {}).get("id", "")
 
