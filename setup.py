@@ -293,7 +293,7 @@ def collect_app() -> dict:
     site_name = ask("사이트 이름", "afterglow")
     site_description = ask("사이트 설명", "OpenStack VM + OverlayFS 배포 플랫폼")
     backend_port = ask_int("백엔드 포트", 8000, 1, 65535)
-    frontend_port = ask_int("프론트엔드 포트", 3000, 1, 65535)
+    frontend_port = ask_int("프론트엔드 포트", 3080, 1, 65535)
     refresh_interval_ms = ask_int("대시보드 자동 새로고침 간격 (ms)", 5000, 1000, 60000)
 
     return {

@@ -21,7 +21,7 @@ afterglow_run_preconditions: true
 
 # ── 포트 ──────────────────────────────────────────────────────────────────────
 afterglow_backend_port: 8000
-afterglow_frontend_port: 3000
+afterglow_frontend_port: 3080
 afterglow_backend_listen_port: "{{ afterglow_backend_port }}"
 afterglow_frontend_listen_port: "{{ afterglow_frontend_port }}"
 
@@ -139,13 +139,13 @@ afterglow_services:
       ORIGIN: "{{ afterglow_external_url }}"
       PUBLIC_API_BASE: "{{ afterglow_external_url }}"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
+      test: ["CMD", "curl", "-f", "http://localhost:3080/"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 30s
     ports:
-      - "{{ afterglow_frontend_port }}:3000"
+      - "{{ afterglow_frontend_port }}:3080"
 
   afterglow-worker:
     container_name: afterglow_worker

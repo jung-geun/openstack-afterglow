@@ -89,7 +89,7 @@ def _load_toml() -> dict:
 
     app = data.get("app", {})
     flat["backend_port"] = app.get("backend_port", 8000)
-    flat["frontend_port"] = app.get("frontend_port", 3000)
+    flat["frontend_port"] = app.get("frontend_port", 3080)
     flat["secret_key"] = app.get("secret_key", "change-me-in-production")
     flat["refresh_interval_ms"] = app.get("refresh_interval_ms", 5000)
     flat["site_name"] = app.get("site_name", "Afterglow")
@@ -296,7 +296,7 @@ def _load_toml() -> dict:
     flat["smtp_invitation_token_expiry_days"] = smtp_inv.get("token_expiry_days", 7)
 
     cors = data.get("cors", {})
-    flat["cors_origins"] = cors.get("origins", "http://localhost:3000,http://localhost")
+    flat["cors_origins"] = cors.get("origins", "http://localhost:3080,http://localhost")
 
     log = data.get("logging", {})
     flat["log_file_path"] = log.get("log_file_path", "/app/logs/afterglow-backend.log")
@@ -349,7 +349,7 @@ class Settings(BaseSettings):
 
     # 앱 설정
     backend_port: int = 8000
-    frontend_port: int = 3000
+    frontend_port: int = 3080
     secret_key: str = "change-me-in-production"
     # object-storage 업로드 단일 파일 최대 크기 (GiB). 0 또는 음수 = 사실상 무제한(기존 100GiB cap).
     app_max_upload_gb: int = 10
@@ -359,7 +359,7 @@ class Settings(BaseSettings):
     trusted_proxies: str = "127.0.0.1/32,::1/128"
 
     # CORS 허용 origin (쉼표 구분)
-    cors_origins: str = "http://localhost:3000,http://localhost"
+    cors_origins: str = "http://localhost:3080,http://localhost"
     refresh_interval_ms: int = 5000
     site_name: str = "Afterglow"
     site_description: str = "OpenStack VM + OverlayFS 배포 플랫폼"

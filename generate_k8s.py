@@ -305,7 +305,7 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     # [app]
     lines.append("[app]")
     lines.append(f'backend_port = {app.get("backend_port", 8000)}')
-    lines.append(f'frontend_port = {app.get("frontend_port", 3000)}')
+    lines.append(f'frontend_port = {app.get("frontend_port", 3080)}')
     lines.append("# secret_key는 secret.yaml의 SECRET_KEY 환경변수로 주입됩니다")
     lines.append("")
     lines.append("# 사이트 표시 이름 및 설명")
@@ -482,7 +482,7 @@ def _render_toml_for_k8s(cfg: dict) -> str:
 
     # [cors]
     lines.append("[cors]")
-    lines.append(f'origins = {_toml_str(cors.get("origins", "http://localhost:3000"))}')
+    lines.append(f'origins = {_toml_str(cors.get("origins", "http://localhost:3080"))}')
     lines.append("")
 
     # [gitlab_oidc]
@@ -604,7 +604,7 @@ def render_configmap(cfg: dict) -> str:
     ost = cfg.get("openstack", {})
 
     # APP_ORIGIN: cors.origins 의 첫 번째 항목 (프로덕션 도메인)
-    origins_raw = cors.get("origins", "http://localhost:3000")
+    origins_raw = cors.get("origins", "http://localhost:3080")
     app_origin = origins_raw.split(",")[0].strip()
 
     # APP_S3_BASE: openstack.s3_endpoint (미설정 시 기본값)

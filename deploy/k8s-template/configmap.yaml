@@ -25,7 +25,7 @@ data:
 
     [app]
     backend_port = 8000
-    frontend_port = 3000
+    frontend_port = 3080
     # secret_key는 secret.yaml의 SECRET_KEY 환경변수로 주입됩니다
 
     # 사이트 표시 이름 및 설명
@@ -347,7 +347,7 @@ data:
     boot_volume_size_gb = 30
 
     [cors]
-    origins = "http://localhost:3000,http://127.0.0.1:3000"
+    origins = "http://localhost:3080,http://127.0.0.1:3080"
 
     [gitlab_oidc]
     enabled = false
