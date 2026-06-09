@@ -39,7 +39,7 @@
 ### Changed
 
 - **캐시 기본값 OFF** — 캐시 opt-in(`?cache=true`) 방식 전환. write-through/patch_list 헬퍼 추가.
-- **프론트엔드 포트 3080** — Docker 컨테이너 포트 3000 → 3080 변경 (호스트 충돌 방지).
+- **프론트엔드 포트 3080** — Docker/Kubernetes/Kolla 전반 프론트엔드 포트 3000 → 3080 통일. K8s deployment(containerPort, PORT env, 3개 probe), Service, Ingress, ConfigMap, docker-compose.prod, kolla defaults, generate_k8s.py, config.py 기본값 모두 갱신.
 - **이름 셀 클릭 영역 확장** — 아이콘+텍스트+빈공간 전체로 확장.
 
 ---
