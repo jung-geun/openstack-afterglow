@@ -156,8 +156,8 @@ RUN npm install --omit=dev --ignore-scripts \
 
 USER appuser
 
-EXPOSE 3000
-ENV PORT=3000
+# EXPOSE 3080
+ENV PORT=3080
 
 CMD ["node", "build"]
 
@@ -173,7 +173,7 @@ RUN bun install
 
 COPY frontend/ .
 
-EXPOSE 3000
-ENV PORT=3000
+# EXPOSE 3080
+ENV PORT=3080
 
-CMD ["bun", "run", "dev", "--host", "0.0.0.0", "--port", "3000"]
+CMD ["bun", "run", "dev", "--host", "0.0.0.0", "--port", "3080"]

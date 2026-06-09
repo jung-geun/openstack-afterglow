@@ -53,11 +53,11 @@ services:
       target: frontend
     image: ghcr.io/openstack-afterglow/afterglow:dev
     ports:
-      - "3000:3000"
+      - "3080:3080"
     volumes:
       - ./logs:/app/logs
     environment:
-      - ORIGIN=http://localhost:3000
+      - ORIGIN=http://localhost:3080
       - PUBLIC_API_BASE=http://localhost:8000
       - PUBLIC_S3_BASE=https://s3.dmslab.re.kr
       - PUBLIC_GRAFANA_BASE=
@@ -71,7 +71,7 @@ services:
         max-size: "10m"
         max-file: "3"
     healthcheck:
-      test: [ "CMD", "node", "-e", "fetch('http://localhost:3000/health').then(r=>{if(!r.ok)throw 1})" ]
+      test: [ "CMD", "node", "-e", "fetch('http://localhost:3080/health').then(r=>{if(!r.ok)throw 1})" ]
       interval: 30s
       timeout: 10s
       retries: 3
