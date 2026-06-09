@@ -134,8 +134,21 @@ async def _wait_for_shutoff(conn, server_id: str, build_db_id: int, build_token:
 # ---------------------------------------------------------------------------
 
 
-async def run_ephemeral_build(library_id: str, build_db_id: int) -> None:
-    """ephemeral VM cloud-init 빌드 메인 함수. 백그라운드 태스크로 실행된다."""
+async def run_ephemeral_build(
+    library_id: str,
+    build_db_id: int,
+    existing_share_id: str | None = None,
+) -> None:
+    """ephemeral VM cloud-init 빌드 메인 함수. 백그라운드 태스크로 실행된다.
+
+    Args:
+        library_id:        빌드할 라이브러리 ID.
+        build_db_id:       LibraryBuild DB 레코드 ID.
+        existing_share_id: 사전 생성된 Manila share ID. 지정 시 새 share를 생성하지
+                           않고 이 share를 빌드 대상으로 사용한다. 빌더는 service
+                           프로젝트 conn으로 동작하므로, 이 share가 service conn에서
+                           조회 가능해야 한다(service 프로젝트 소유 또는 공개 share).
+    """
     settings = get_settings()
     conn = await asyncio.to_thread(get_service_project_connection)
 
@@ -162,18 +175,45 @@ async def run_ephemeral_build(library_id: str, build_db_id: int) -> None:
         if not image_id:
             raise RuntimeError("빌드 이미지 ID가 설정되지 않았습니다 (config.toml [builder] image_id 필요)")
 
-        # ── 2. Manila share 생성 ──────────────────────────────────────────
-        await _update_db(build_db_id, status="creating_share", progress_step="Manila share 생성", progress_pct=5)
-        share_id = await ephemeral_mount.create_builder_share(
-            conn,
-            name=f"union-prebuilt-{library_id}-{build_token[:8]}",
-            size_gb=recipe.share_size_gb,
-            share_proto=proto,
-            metadata={
-                "union_library": library_id,
-                "union_version": library_version,
-            },
-        )
+        # ── 2. Manila share 생성 or 기존 share 사용 ─────────────────────────
+        if existing_share_id:
+            # 저수준 경로: 사전 생성된 share를 빌드 대상으로 사용
+            await _update_db(build_db_id, status="creating_share", progress_step="기존 share 검증", progress_pct=5)
+            try:
+                await asyncio.to_thread(manila.get_file_storage, conn, existing_share_id)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"사전 생성 share {existing_share_id}를 service 프로젝트에서 찾을 수 없습니다. "
+                    "share가 service 프로젝트 소속이거나 공개(is_public=True) 상태여야 합니다. "
+                    f"원인: {exc}"
+                ) from exc
+            share_id = existing_share_id
+            # 빌드 시작 메타데이터 세팅 — _handle_success에서 prebuilt로 승격됨
+            await asyncio.to_thread(
+                manila.update_share_metadata,
+                conn,
+                share_id,
+                {
+                    "union_type": "ephemeral-build",
+                    "union_status": "building",
+                    "union_library": library_id,
+                    "union_version": library_version,
+                },
+            )
+            _logger.info("[ephemeral_build] 기존 share 사용: %s (library=%s)", share_id, library_id)
+        else:
+            # 기본 경로: 새 share 생성
+            await _update_db(build_db_id, status="creating_share", progress_step="Manila share 생성", progress_pct=5)
+            share_id = await ephemeral_mount.create_builder_share(
+                conn,
+                name=f"union-prebuilt-{library_id}-{build_token[:8]}",
+                size_gb=recipe.share_size_gb,
+                share_proto=proto,
+                metadata={
+                    "union_library": library_id,
+                    "union_version": library_version,
+                },
+            )
         await _update_db(build_db_id, file_storage_id=share_id)
 
         # ── 3. Neutron port 사전 생성 (IP 예약) ───────────────────────────

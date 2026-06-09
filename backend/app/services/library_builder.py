@@ -19,8 +19,8 @@ _logger = logging.getLogger(__name__)
 # 빌드 중인 작업 추적 {library_id: {share_id, status, ...}} (인메모리 캐시, DB가 원본)
 _active_builds: dict[str, dict] = {}
 
-# 빌드 대기 큐 (library_id 문자열)
-_build_queue: asyncio.Queue[str] = asyncio.Queue()
+# 빌드 대기 큐 — (library_id, existing_share_id | None) 튜플
+_build_queue: asyncio.Queue[tuple[str, str | None]] = asyncio.Queue()
 # 큐에 있는 library_id 집합 (중복 요청 방지용 빠른 조회)
 _queued_libraries: set[str] = set()
 
@@ -113,10 +113,15 @@ async def cancel_build(build_db_id: int) -> dict:
 # ---------------------------------------------------------------------------
 
 
-async def start_ephemeral_build(library_id: str) -> dict:
+async def start_ephemeral_build(library_id: str, existing_share_id: str | None = None) -> dict:
     """Ephemeral VM cloud-init 경로로 라이브러리 빌드를 시작한다.
 
     DB 레코드를 생성하고 run_ephemeral_build 백그라운드 태스크를 시작한다.
+
+    Args:
+        library_id: 빌드할 라이브러리 ID.
+        existing_share_id: 사전 생성된 Manila share ID. 지정 시 빌더가 새 share를
+            생성하지 않고 이 share를 사용한다. None이면 기존 경로대로 신규 share 생성.
     """
     if library_id in _active_builds:
         raise RuntimeError(f"이미 빌드 중인 라이브러리: {library_id}")
@@ -125,6 +130,7 @@ async def start_ephemeral_build(library_id: str) -> dict:
     lib_svc.get_by_id(library_id)
 
     build_db_id: int | None = None
+    initial_share_id = existing_share_id or ""
     try:
         from app.database import get_session_factory
         from app.models.db import LibraryBuild
@@ -134,7 +140,7 @@ async def start_ephemeral_build(library_id: str) -> dict:
             async with factory() as session:
                 build_row = LibraryBuild(
                     library_id=library_id,
-                    file_storage_id="",  # run_ephemeral_build에서 share 생성 후 갱신
+                    file_storage_id=initial_share_id,  # 기존 share 있으면 미리 기록
                     status="queued",
                     cloud_init_status="queued",
                     progress_step="빌드 대기",
@@ -149,18 +155,20 @@ async def start_ephemeral_build(library_id: str) -> dict:
 
     _active_builds[library_id] = {
         "library_id": library_id,
-        "file_storage_id": "",
+        "file_storage_id": initial_share_id,
         "status": "queued",
         "started_at": datetime.now(UTC).isoformat(),
         "build_db_id": build_db_id,
     }
 
-    asyncio.create_task(_ephemeral_build_task(library_id=library_id, build_db_id=build_db_id))
+    asyncio.create_task(
+        _ephemeral_build_task(library_id=library_id, build_db_id=build_db_id, existing_share_id=existing_share_id)
+    )
 
-    return {"file_storage_id": "", "status": "queued", "library": library_id}
+    return {"file_storage_id": initial_share_id, "status": "queued", "library": library_id}
 
 
-async def _ephemeral_build_task(library_id: str, build_db_id: int | None) -> None:
+async def _ephemeral_build_task(library_id: str, build_db_id: int | None, existing_share_id: str | None = None) -> None:
     """백그라운드 ephemeral 빌드 래퍼 — 완료 시 _active_builds에서 제거한다."""
     try:
         if build_db_id is None:
@@ -168,17 +176,21 @@ async def _ephemeral_build_task(library_id: str, build_db_id: int | None) -> Non
             return
         from app.services.ephemeral_build import run_ephemeral_build
 
-        await run_ephemeral_build(library_id, build_db_id)
+        await run_ephemeral_build(library_id, build_db_id, existing_share_id=existing_share_id)
     except Exception:
         _logger.error("[builder] ephemeral 빌드 태스크 예외: %s", library_id, exc_info=True)
     finally:
         _active_builds.pop(library_id, None)
 
 
-async def queue_build(library_id: str) -> dict:
+async def queue_build(library_id: str, existing_share_id: str | None = None) -> dict:
     """라이브러리 빌드 요청을 큐에 추가한다.
 
     이미 빌드 중이거나 큐에 대기 중인 동일 라이브러리는 거부된다.
+
+    Args:
+        library_id: 빌드할 라이브러리 ID.
+        existing_share_id: 사전 생성된 Manila share ID. None이면 신규 share 생성.
 
     Returns:
         {"status": "queued", "library_id": ..., "queue_position": int}
@@ -189,7 +201,7 @@ async def queue_build(library_id: str) -> dict:
         raise RuntimeError(f"이미 빌드 큐에 있는 라이브러리: {library_id}")
 
     _queued_libraries.add(library_id)
-    await _build_queue.put(library_id)
+    await _build_queue.put((library_id, existing_share_id))
     position = _build_queue.qsize()
     _logger.info("[builder] 빌드 큐 추가: %s (대기 위치 %d)", library_id, position)
     return {"status": "queued", "library_id": library_id, "queue_position": position}
@@ -253,11 +265,11 @@ async def _build_worker() -> None:
     """
     _logger.info("[builder] 빌드 큐 워커 시작")
     while True:
-        library_id = await _build_queue.get()
+        library_id, existing_share_id = await _build_queue.get()
         _queued_libraries.discard(library_id)
         try:
             _logger.info("[builder] 큐에서 ephemeral 빌드 시작: %s", library_id)
-            await start_ephemeral_build(library_id)
+            await start_ephemeral_build(library_id, existing_share_id=existing_share_id)
         except Exception:
             _logger.error("[builder] 큐 빌드 실패: %s", library_id, exc_info=True)
         finally:

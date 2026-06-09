@@ -3694,3 +3694,39 @@ terminal mutation 후 캐시를 직접 패치(surgical write-through)해 mutatio
 - [x] `backend/tests/test_jwt_session_timeout.py` — B2 JWT 타임아웃 적용 (5건)
 - [x] `backend/tests/test_login_guard.py` — C1 잠금 임계값·백오프·해제 (9건)
 - [x] `backend/tests/test_x_auth_token_removal.py` — C4 X-Auth-Token 거부 (6건)
+
+---
+
+## 70. 라이브러리 기능 저수준 E2E — python 3.11 파일 스토리지 라이프사이클 (2026-06-10)
+
+### 70.1 동기
+
+7단계 인수 시나리오: backend API로 file storage 생성 → 해당 share를 빌더 VM에 연결해 uv로 python 3.11 설치 → cloud-init 완료·prebuilt 승격 → 새 VM에서 overlayfs(/opt/layers/merged)로 python3.11 실제 실행 확인 → teardown. "저수준 단계별 경로"(사용자 생성 share를 빌더에 직접 지정)를 지원하기 위한 최소 신규 코드 + E2E 테스트.
+
+### 70.2 백엔드 코드 변경
+
+- [x] `backend/app/api/identity/admin_libraries.py` — `TriggerBuildRequest`에 `file_storage_id: str | None` 추가. `trigger_library_build`가 `queue_build(existing_share_id=req.file_storage_id)` 전달.
+- [x] `backend/app/services/library_builder.py` — `_build_queue` 타입 `Queue[str]` → `Queue[tuple[str, str | None]]`. `queue_build`, `start_ephemeral_build`, `_ephemeral_build_task`, `_build_worker` 모두 `existing_share_id` 파라미터 관통.
+- [x] `backend/app/services/ephemeral_build.py` — `run_ephemeral_build`에 `existing_share_id: str | None = None` 추가. 지정 시 `create_builder_share` 건너뛰고 service conn guard(`get_file_storage`) + `update_share_metadata(building)` 후 기존 파이프라인(port·access rule·cloud-init·boot·sentinel·_handle_success·teardown) 재사용.
+- [x] `backend/tests/integration/ssh_helper.py` — `verify_python_executes(host, key, version, user)` 추가: 절대경로 `/opt/layers/merged/usr/local/bin/python<version>` 실행 + `command -v` 경로 검증. uv standalone CPython이 cp -a + overlayfs 통과 후 실제 동작하는지 확인.
+
+### 70.3 테스트
+
+- [x] `backend/tests/test_existing_share_build.py` (신규, mock 단위 테스트 3건):
+  - existing_share_id 지정 시 `create_builder_share` 미호출, `get_file_storage` guard + `update_share_metadata(building)` 호출 검증
+  - guard 실패(share 미발견) 시 `create_builder_share` 미호출, 빌드 error 처리
+  - existing_share_id 미지정(기본 경로) 시 `create_builder_share` 정상 호출
+- [x] `backend/tests/integration/test_python311_lifecycle_e2e.py` (신규, `pytest.mark.slow` + env-gated):
+  - Step 1: `POST /api/file-storage` → share 생성
+  - Step 2–5: `POST /api/admin/libraries/build {file_storage_id}` → 빌드 완료 폴링(~30분)
+  - Step 6–7: `POST /api/instances {strategy:prebuilt}` → ACTIVE → FIP → SSH → `verify_overlay_mount` + `verify_python_executes`
+  - cleanup: `DELETE /api/instances/{id}`
+
+### 70.4 환경 요건 (라이브 E2E)
+
+`AFTERGLOW_TEST_IMAGE_ID`, `AFTERGLOW_TEST_FLAVOR_SMALL`, `AFTERGLOW_TEST_SSH_KEY`, MariaDB, FIP 도달 가능 네트워크. 이 세션 환경(MariaDB closed, env 미설정)에서는 mock 단위 테스트 + ruff만 검증 완료. 라이브 실행은 self-hosted 러너에서 수행.
+
+### 70.5 검증
+
+- [x] `uv run pytest tests/test_existing_share_build.py -v` — 3 passed
+- [x] `uv run ruff check .` — All checks passed
