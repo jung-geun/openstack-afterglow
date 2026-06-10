@@ -175,7 +175,7 @@ async def test_python311_lifecycle_low_level(admin_client, integration_resources
             host,
             integration_resources.ssh_key_path,
             integration_resources.ssh_user,
-            300,
+            600,  # cloud-init + union-overlay NFS 마운트 완료 여유 시간
         )
         assert ssh_ready, f"VM SSH 접속 불가: {host}"
 
