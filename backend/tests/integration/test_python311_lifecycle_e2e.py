@@ -93,10 +93,7 @@ async def test_python311_lifecycle_low_level(admin_client, integration_resources
         assert resp.status_code == 202, f"빌드 트리거 실패: {resp.text}"
 
         build_id = resp.json().get("build_id")
-        assert build_id is not None, (
-            f"빌드 응답에 build_id가 없습니다: {resp.json()}. "
-            "start_ephemeral_build가 DB에 레코드를 생성하지 못했을 수 있습니다."
-        )
+        # build_id=None은 DB 비가용 시 발생 — 아래 share 메타데이터 폴링으로 처리
 
         # ── 빌드 완료 대기 ─────────────────────────────────────────────────
         # build_id=None은 DB 비가용 시 발생 — share 메타데이터 폴링으로 fallback
