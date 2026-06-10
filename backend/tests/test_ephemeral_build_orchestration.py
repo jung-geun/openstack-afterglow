@@ -122,7 +122,7 @@ async def test_run_ephemeral_build_success_calls_delete_server():
         patch("app.services.ephemeral_build._ensure_ephemeral_keypair", new=AsyncMock(return_value="kp")),
         patch("app.services.ephemeral_build.render_user_data", return_value="#cloud-config\n"),
         patch("app.services.ephemeral_build._update_db", new=AsyncMock()),
-        patch("app.services.ephemeral_build._wait_for_shutoff", new=AsyncMock()),
+        patch("app.services.ephemeral_build._wait_for_shutoff", new=AsyncMock(return_value=(False, False))),
     ):
         # Setup
         lr.get_recipe = AsyncMock(return_value=_FakeRecipe())
@@ -162,7 +162,7 @@ async def test_run_ephemeral_build_success_calls_delete_port():
         patch("app.services.ephemeral_build._ensure_ephemeral_keypair", new=AsyncMock(return_value="kp")),
         patch("app.services.ephemeral_build.render_user_data", return_value="#cloud-config\n"),
         patch("app.services.ephemeral_build._update_db", new=AsyncMock()),
-        patch("app.services.ephemeral_build._wait_for_shutoff", new=AsyncMock()),
+        patch("app.services.ephemeral_build._wait_for_shutoff", new=AsyncMock(return_value=(False, False))),
     ):
         lr.get_recipe = AsyncMock(return_value=_FakeRecipe())
         em.create_builder_share = AsyncMock(return_value="share-001")
@@ -208,7 +208,7 @@ async def test_run_ephemeral_build_failure_sentinel_marks_error():
         patch("app.services.ephemeral_build._ensure_ephemeral_keypair", new=AsyncMock(return_value="kp")),
         patch("app.services.ephemeral_build.render_user_data", return_value="#cloud-config\n"),
         patch("app.services.ephemeral_build._update_db", new=_capture_update),
-        patch("app.services.ephemeral_build._wait_for_shutoff", new=AsyncMock()),
+        patch("app.services.ephemeral_build._wait_for_shutoff", new=AsyncMock(return_value=(False, False))),
     ):
         lr.get_recipe = AsyncMock(return_value=_FakeRecipe())
         em.create_builder_share = AsyncMock(return_value="share-001")
@@ -257,7 +257,7 @@ async def test_run_ephemeral_build_no_sentinel_marks_indeterminate():
         patch("app.services.ephemeral_build._ensure_ephemeral_keypair", new=AsyncMock(return_value="kp")),
         patch("app.services.ephemeral_build.render_user_data", return_value="#cloud-config\n"),
         patch("app.services.ephemeral_build._update_db", new=_capture_update),
-        patch("app.services.ephemeral_build._wait_for_shutoff", new=AsyncMock()),
+        patch("app.services.ephemeral_build._wait_for_shutoff", new=AsyncMock(return_value=(False, False))),
     ):
         lr.get_recipe = AsyncMock(return_value=_FakeRecipe())
         em.create_builder_share = AsyncMock(return_value="share-001")
@@ -299,7 +299,7 @@ async def test_port_created_before_access_rule():
         patch("app.services.ephemeral_build._ensure_ephemeral_keypair", new=AsyncMock(return_value="kp")),
         patch("app.services.ephemeral_build.render_user_data", return_value="#cloud-config\n"),
         patch("app.services.ephemeral_build._update_db", new=AsyncMock()),
-        patch("app.services.ephemeral_build._wait_for_shutoff", new=AsyncMock()),
+        patch("app.services.ephemeral_build._wait_for_shutoff", new=AsyncMock(return_value=(False, False))),
     ):
 
         def _create_port(*a, **kw):
