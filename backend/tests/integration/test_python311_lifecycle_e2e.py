@@ -80,6 +80,8 @@ async def test_python311_lifecycle_low_level(admin_client, integration_resources
         assert share_id, "share ID가 없습니다"
 
         # ── Steps 2–3·5: 빌더 VM 실행 (uv python 3.11 설치 + teardown) ──
+        # file_storage_id 지정 경로는 큐 우회 → start_ephemeral_build 직접 호출
+        # → 응답 JSON에 build_id가 즉시 포함됨 (asyncio.create_task 기반 백그라운드 실행)
         resp = await admin_client.post(
             "/api/admin/libraries/build",
             json={
@@ -90,11 +92,10 @@ async def test_python311_lifecycle_low_level(admin_client, integration_resources
         )
         assert resp.status_code == 202, f"빌드 트리거 실패: {resp.text}"
 
-        # 큐 경로는 build_id를 즉시 반환하지 않으므로 DB 폴링으로 획득
-        build_id = await _find_build_id(admin_client, "python311", share_id, timeout=60)
+        build_id = resp.json().get("build_id")
         assert build_id is not None, (
-            f"빌드 레코드를 찾을 수 없습니다 (library=python311, share={share_id}). "
-            "GET /api/admin/libraries/builds?library_id=python311 확인."
+            f"빌드 응답에 build_id가 없습니다: {resp.json()}. "
+            "start_ephemeral_build가 DB에 레코드를 생성하지 못했을 수 있습니다."
         )
 
         # ── 빌드 완료 대기 ─────────────────────────────────────────────────

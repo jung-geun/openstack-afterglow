@@ -165,7 +165,7 @@ async def start_ephemeral_build(library_id: str, existing_share_id: str | None =
         _ephemeral_build_task(library_id=library_id, build_db_id=build_db_id, existing_share_id=existing_share_id)
     )
 
-    return {"file_storage_id": initial_share_id, "status": "queued", "library": library_id}
+    return {"file_storage_id": initial_share_id, "status": "queued", "library": library_id, "build_id": build_db_id}
 
 
 async def _ephemeral_build_task(library_id: str, build_db_id: int | None, existing_share_id: str | None = None) -> None:
