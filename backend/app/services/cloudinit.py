@@ -9,6 +9,7 @@ OverlayFS 구조: /opt/layers/{lower,upper,work,merged}
 """
 
 import base64
+import re
 import shlex
 from pathlib import Path
 
@@ -41,6 +42,27 @@ _VERSIONS = {
 
 _DCGM_EXPORTER_VERSION = "4.2.0-4.1.0"
 
+# cloud-init YAML에 보간되는 값의 형식 검증 — 개행/특수문자로 YAML 구조가
+# 파괴되어 임의 write_files/runcmd가 주입되는 것을 차단한다 (심층 방어).
+_CEPHX_KEY_RE = re.compile(r"^[A-Za-z0-9+/=]{1,128}$")
+_CEPHX_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+_CEPH_MONITORS_RE = re.compile(r"^[0-9A-Za-z.,:\[\]_-]+$")
+
+
+def _validate_cloudinit_inputs(file_storages: list[dict], ceph_monitors: str) -> None:
+    """cloud-init 템플릿 보간 값 형식 검증. 불일치 시 ValueError."""
+    for fs in file_storages:
+        if fs.get("share_proto", "CEPHFS") != "CEPHFS":
+            continue
+        cephx_id = fs.get("cephx_id", "")
+        cephx_key = fs.get("cephx_key", "")
+        if cephx_id and not _CEPHX_ID_RE.match(cephx_id):
+            raise ValueError(f"유효하지 않은 cephx_id 형식: {cephx_id!r}")
+        if cephx_key and not _CEPHX_KEY_RE.match(cephx_key):
+            raise ValueError("유효하지 않은 cephx_key 형식 (base64 문자만 허용)")
+    if ceph_monitors and not _CEPH_MONITORS_RE.match(ceph_monitors):
+        raise ValueError(f"유효하지 않은 ceph_monitors 형식: {ceph_monitors!r}")
+
 
 def generate_userdata(
     libraries: list[str],
@@ -71,6 +93,8 @@ def generate_userdata(
         report_url: 백엔드 베이스 URL (헬스 리포트용)
         report_token: 헬스 리포트 토큰 (헬스 리포트용)
     """
+    _validate_cloudinit_inputs(file_storages, ceph_monitors)
+
     resolved_libs = lib_svc.resolve_with_deps(libraries)
 
     # lowerdir 체인 생성 (의존성이 높은 라이브러리가 앞에 오도록)

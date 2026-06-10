@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import shlex
 
 from app.config import get_settings
 from app.services import manila
@@ -120,8 +121,14 @@ async def build_mount_command(
 
     export_path = export_locations[0]
 
+    # 쉘 보간 값은 출처(Manila API)와 무관하게 전부 shlex.quote — 심층 방어
+    q_mount_point = shlex.quote(mount_point)
+
     if proto_upper == "NFS":
-        return f"sudo mkdir -p {mount_point}\nsudo mount -t nfs {export_path} {mount_point} -o rw,hard,intr\n"
+        return (
+            f"sudo mkdir -p {q_mount_point}\n"
+            f"sudo mount -t nfs {shlex.quote(export_path)} {q_mount_point} -o rw,hard,intr\n"
+        )
     else:
         # CephFS export 형식: "mon1,mon2,mon3:/subpath"
         if ":" in export_path:
@@ -134,12 +141,12 @@ async def build_mount_command(
         secret_b64 = base64.b64encode(cephx_secret.encode()).decode()
 
         return (
-            f"sudo mkdir -p {mount_point}\n"
+            f"sudo mkdir -p {q_mount_point}\n"
             "SECRET_FILE=$(mktemp /tmp/ceph.XXXXXX)\n"
-            f"printf '%s' '{secret_b64}' | base64 -d > \"$SECRET_FILE\"\n"
+            f"printf '%s' {shlex.quote(secret_b64)} | base64 -d > \"$SECRET_FILE\"\n"
             'sudo chmod 600 "$SECRET_FILE"\n'
-            f"sudo mount -t ceph '{ceph_mons}:{ceph_path}' {mount_point} "
-            f'-o name={cephx_user},secretfile="$SECRET_FILE"\n'
+            f"sudo mount -t ceph {shlex.quote(f'{ceph_mons}:{ceph_path}')} {q_mount_point} "
+            f'-o name={shlex.quote(cephx_user)},secretfile="$SECRET_FILE"\n'
             'rm -f "$SECRET_FILE"\n'
         )
 
