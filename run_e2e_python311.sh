@@ -41,6 +41,8 @@ BACKEND_DIR="$SCRIPT_DIR/backend"
 # 빌드 타임아웃 (초) — parallel Python copy ≈ 7분 + cloud-init 오버헤드, _SHUTOFF_MAX_WAIT=3600에 맞춤
 : "${AFTERGLOW_TEST_BUILD_TIMEOUT:=3600}"
 : "${AFTERGLOW_TEST_VM_TIMEOUT:=600}"
+# FIP 네트워크(172.30.x.x)에 직접 접근 불가한 환경에서는 1로 설정해 SSH 검증을 건너뜀
+: "${AFTERGLOW_SKIP_SSH:=0}"
 
 # ── 출력 ────────────────────────────────────────────────────
 echo "=================================================="
@@ -78,6 +80,7 @@ export AFTERGLOW_TEST_SSH_KEY_NAME
 export AFTERGLOW_TEST_SSH_USER
 export AFTERGLOW_TEST_BUILD_TIMEOUT
 export AFTERGLOW_TEST_VM_TIMEOUT
+export AFTERGLOW_SKIP_SSH
 
 exec uv run pytest \
     tests/integration/test_python311_lifecycle_e2e.py \

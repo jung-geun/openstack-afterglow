@@ -165,63 +165,72 @@ async def test_python311_lifecycle_low_level(admin_client, integration_resources
                 "GET /api/admin/libraries?name=python311 로 중복 prebuilt share 확인."
             )
 
-        # FIP 할당
-        host = await _assign_floating_ip(admin_client, instance_id)
-        assert host, "floating IP 할당 실패"
+        # ── Step 4·7 SSH 검증: AFTERGLOW_SKIP_SSH=1 로 건너뛸 수 있음 ──────
+        # FIP 네트워크(172.30.x.x)에 직접 접근 불가능한 환경(로컬 Mac 등)에서는
+        # AFTERGLOW_SKIP_SSH=1 을 설정하면 step 1-6 검증 후 PASS 처리.
+        skip_ssh = os.getenv("AFTERGLOW_SKIP_SSH", "").strip() == "1"
 
-        # SSH 가용 대기 (cloud-init + sshd 기동 시간 포함)
-        ssh_ready = await asyncio.to_thread(
-            wait_for_ssh,
-            host,
-            integration_resources.ssh_key_path,
-            integration_resources.ssh_user,
-            600,  # cloud-init + union-overlay NFS 마운트 완료 여유 시간
-        )
-        assert ssh_ready, f"VM SSH 접속 불가: {host}"
-
-        # union-overlay.service jitter backoff 흡수
-        await asyncio.sleep(15)
-
-        # ── Step 4 검증: /opt/layers/merged 오버레이 마운트 존재 ───────────
-        mount_ok = await asyncio.to_thread(
-            verify_overlay_mount,
-            host,
-            integration_resources.ssh_key_path,
-            "/opt/layers/merged",
-            integration_resources.ssh_user,
-        )
-        assert mount_ok, (
-            f"VM {host}: /opt/layers/merged 오버레이 마운트 없음. "
-            "overlay_setup.sh 실행 실패 또는 NFS lowerdir 마운트 오류 가능성."
-        )
-
-        # ── Step 7 검증: python3.11 실제 실행 (핵심) ──────────────────────
-        # uv standalone CPython이 cp -a + overlayfs를 거쳐도 동작하는지 확인
-        py_result = await asyncio.to_thread(
-            verify_python_executes,
-            host,
-            integration_resources.ssh_key_path,
-            "3.11",
-            integration_resources.ssh_user,
-        )
-        assert py_result["exec_ok"], (
-            f"VM {host}: overlay에서 python3.11 실행 실패.\n"
-            f"  version_str={py_result['version_str']!r}\n"
-            f"  which_path={py_result['which_path']!r}\n"
-            "uv standalone CPython이 cp -a + overlayfs를 통해 실행되지 않았습니다. "
-            "빌더 레시피의 install_uv → python install → cp 경로를 확인하세요."
-        )
-        # which_ok는 non-fatal: 비login shell은 /etc/profile.d가 미적용되어
-        # PATH에 overlay bin이 없을 수 있음. exec_ok(절대 경로 실행)가 핵심 검증.
-        if not py_result["which_ok"]:
+        if skip_ssh:
             import warnings
 
             warnings.warn(
-                f"VM {host}: python3.11이 PATH에 노출되지 않음 "
-                f"(which_path={py_result['which_path']!r}). "
-                "/etc/profile.d/union-env.sh 소싱 여부 확인 권장 (비login shell 한계).",
+                "AFTERGLOW_SKIP_SSH=1: SSH 검증 단계(step 4·7) 건너뜀. "
+                "FIP 네트워크에 접근 가능한 환경에서 실행 시 이 변수를 제거하세요.",
                 stacklevel=1,
             )
+        else:
+            # FIP 할당
+            host = await _assign_floating_ip(admin_client, instance_id)
+            assert host, "floating IP 할당 실패"
+
+            # SSH 가용 대기 (cloud-init + sshd 기동 시간 포함)
+            ssh_ready = await asyncio.to_thread(
+                wait_for_ssh,
+                host,
+                integration_resources.ssh_key_path,
+                integration_resources.ssh_user,
+                600,  # cloud-init + union-overlay NFS 마운트 완료 여유 시간
+            )
+            assert ssh_ready, f"VM SSH 접속 불가: {host}"
+
+            # union-overlay.service jitter backoff 흡수
+            await asyncio.sleep(15)
+
+            # ── Step 4 검증: /opt/layers/merged 오버레이 마운트 존재 ─────
+            mount_ok = await asyncio.to_thread(
+                verify_overlay_mount,
+                host,
+                integration_resources.ssh_key_path,
+                "/opt/layers/merged",
+                integration_resources.ssh_user,
+            )
+            assert mount_ok, (
+                f"VM {host}: /opt/layers/merged 오버레이 마운트 없음. "
+                "overlay_setup.sh 실행 실패 또는 NFS lowerdir 마운트 오류 가능성."
+            )
+
+            # ── Step 7 검증: python3.11 실제 실행 (핵심) ──────────────────
+            py_result = await asyncio.to_thread(
+                verify_python_executes,
+                host,
+                integration_resources.ssh_key_path,
+                "3.11",
+                integration_resources.ssh_user,
+            )
+            assert py_result["exec_ok"], (
+                f"VM {host}: overlay에서 python3.11 실행 실패.\n"
+                f"  version_str={py_result['version_str']!r}\n"
+                f"  which_path={py_result['which_path']!r}\n"
+                "uv standalone CPython이 cp -a + overlayfs를 통해 실행되지 않았습니다. "
+                "빌더 레시피의 install_uv → python install → cp 경로를 확인하세요."
+            )
+            if not py_result["which_ok"]:
+                warnings.warn(
+                    f"VM {host}: python3.11이 PATH에 노출되지 않음 "
+                    f"(which_path={py_result['which_path']!r}). "
+                    "/etc/profile.d/union-env.sh 소싱 여부 확인 권장.",
+                    stacklevel=1,
+                )
 
     finally:
         # consumer VM 정리
