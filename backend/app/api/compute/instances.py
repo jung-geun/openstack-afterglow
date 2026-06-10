@@ -1275,7 +1275,14 @@ async def _prepare_prebuilt_file_storages(
         {"union_type": "prebuilt"},
         include_public=True,
     )
-    prebuilt_map = {s.library_name: s for s in prebuilt_file_storages}
+    # 동일 library_name의 share가 여러 개인 경우 union_built_at 기준 최신을 선택
+    prebuilt_map = {}
+    for s in prebuilt_file_storages:
+        if s.library_name is None:
+            continue
+        existing = prebuilt_map.get(s.library_name)
+        if existing is None or (s.built_at or "") > (existing.built_at or ""):
+            prebuilt_map[s.library_name] = s
 
     # NFS share가 있을 경우 project subnet CIDR 미리 조회
     project_cidrs: list[str] = []
