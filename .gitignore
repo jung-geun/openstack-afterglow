@@ -219,6 +219,9 @@ config.toml
 config.*.toml
 backend/tests/integration/credentials.toml
 
+# Helm 시크릿 포함 로컬 values 파일
+helm/afterglow/values-local.yaml
+
 # 로그 파일
 logs/
 *.log
