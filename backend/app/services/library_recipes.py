@@ -8,8 +8,7 @@ import types
 _logger = logging.getLogger(__name__)
 
 _UV_BOOTSTRAP = (
-    "curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh\n"
-    "export PATH=/usr/local/bin:$PATH\n"
+    "curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh\nexport PATH=/usr/local/bin:$PATH\n"
 )
 
 # 기본 레시피 정의 — DB seed와 DB 비가용 시 fallback에서 공유 사용

@@ -34,16 +34,51 @@ class RedisBackend(Cache):
     def _get_client(self) -> aioredis.Redis:
         if self._client is None:
             settings = get_settings()
-            self._client = aioredis.from_url(
-                settings.redis_url,
-                encoding="utf-8",
-                decode_responses=True,
-                socket_connect_timeout=3,
-                socket_timeout=5,
-                socket_keepalive=True,
-                health_check_interval=30,
-            )
+            if settings.sentinel_enabled:
+                self._client = self._build_sentinel_client(settings)
+            else:
+                self._client = aioredis.from_url(
+                    settings.redis_url,
+                    encoding="utf-8",
+                    decode_responses=True,
+                    socket_connect_timeout=3,
+                    socket_timeout=5,
+                    socket_keepalive=True,
+                    health_check_interval=30,
+                )
         return self._client
+
+    @staticmethod
+    def _build_sentinel_client(settings) -> aioredis.Redis:
+        """Redis Sentinel HA 클라이언트를 빌드한다.
+
+        sentinel_hosts: 콤마 구분 "host:port" 목록.
+        master_for() kwargs로 decode_responses=True 를 전달해 str 반환 보장.
+        """
+        from redis.asyncio.sentinel import Sentinel
+
+        hosts = []
+        for entry in settings.sentinel_hosts.split(","):
+            entry = entry.strip()
+            if not entry:
+                continue
+            if ":" in entry:
+                host, port_str = entry.rsplit(":", 1)
+                hosts.append((host, int(port_str)))
+            else:
+                hosts.append((entry, 26379))
+
+        sentinel = Sentinel(
+            hosts,
+            socket_timeout=5,
+            socket_connect_timeout=3,
+        )
+        return sentinel.master_for(
+            settings.sentinel_master_name,
+            decode_responses=True,
+            socket_keepalive=True,
+            health_check_interval=30,
+        )
 
     # ── 기본 ABC 구현 ────────────────────────────────────────────────────────
     async def get(self, key: str) -> bytes | None:

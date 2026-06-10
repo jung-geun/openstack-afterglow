@@ -106,6 +106,9 @@ def _load_toml() -> dict:
     flat["cache_ttl_slow"] = cache.get("ttl_slow", 60)
     flat["cache_ttl_static"] = cache.get("ttl_static", 300)
     flat["cache_backend"] = cache.get("backend", "redis")
+    flat["sentinel_enabled"] = cache.get("sentinel_enabled", False)
+    flat["sentinel_master_name"] = cache.get("sentinel_master_name", "mymaster")
+    flat["sentinel_hosts"] = cache.get("sentinel_hosts", "")
     flat["cache_dynamic_threshold_low"] = cache.get("dynamic_threshold_low", 5)
     flat["cache_dynamic_threshold_high"] = cache.get("dynamic_threshold_high", 20)
     flat["cache_ttl_identity_stable"] = cache.get("ttl_identity_stable", 86400)
@@ -375,6 +378,10 @@ class Settings(BaseSettings):
     cache_ttl_static: int = 300
     # 캐시 백엔드: "redis" | "valkey" (v1 동일 클라이언트, v2 에서 Memcached 추가 시 확장)
     cache_backend: Literal["redis", "valkey"] = "redis"
+    # Redis Sentinel HA
+    sentinel_enabled: bool = False
+    sentinel_master_name: str = "mymaster"
+    sentinel_hosts: str = ""  # 콤마 구분 "host:port" 목록 (예: sentinel-a:26379,sentinel-b:26379)
     # Dynamic TTL 조정 임계치 (시간당 mutation 횟수)
     cache_dynamic_threshold_low: int = 5
     cache_dynamic_threshold_high: int = 20

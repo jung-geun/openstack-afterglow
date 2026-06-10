@@ -29,6 +29,8 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
 REDIS_K8S = "redis://redis.afterglow.svc.cluster.local:6379/0"
+REDIS_SENTINEL_K8S = "redis-sentinel.afterglow.svc.cluster.local:26379"
+REDIS_SENTINEL_MASTER = "mymaster"
 
 # ANSI 색상 (Windows에서는 비활성화)
 _USE_COLOR = os.name != "nt" or os.environ.get("FORCE_COLOR")
@@ -337,6 +339,11 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     # [cache]
     lines.append("[cache]")
     lines.append(f'redis_url = {_toml_str(REDIS_K8S)}')
+    lines.append("")
+    lines.append("# Redis Sentinel HA — K8s 배포 시 자동 활성화")
+    lines.append("sentinel_enabled = true")
+    lines.append(f'sentinel_master_name = {_toml_str(REDIS_SENTINEL_MASTER)}')
+    lines.append(f'sentinel_hosts = {_toml_str(REDIS_SENTINEL_K8S)}')
     lines.append("# TTL 티어 (초)")
     lines.append(f'ttl_fast = {cache.get("ttl_fast", 15)}      # 인스턴스, 볼륨, 플로팅IP')
     lines.append(f'ttl_normal = {cache.get("ttl_normal", 30)}    # 네트워크, 라우터, 대시보드')
