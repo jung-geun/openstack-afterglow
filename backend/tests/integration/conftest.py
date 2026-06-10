@@ -238,7 +238,7 @@ async def project_b_auth_data(project_b_credentials_fx):
 async def project_b_client(project_b_auth_data):
     """project_b 계정으로 인증된 AsyncClient (격리 테스트용)."""
     headers = {
-        "X-Auth-Token": project_b_auth_data["token"],
+        "Authorization": f"Bearer {project_b_auth_data['token']}",
         "X-Project-Id": project_b_auth_data["project_id"],
     }
     async with AsyncClient(
@@ -314,9 +314,12 @@ def project_id(admin_auth_data):
 
 @pytest.fixture(scope="session")
 def auth_headers(token, project_id):
-    """인증 헤더 dict (admin 계정)."""
+    """인증 헤더 dict (admin 계정).
+
+    get_token_info는 Authorization: Bearer JWT 경로만 지원한다.
+    """
     return {
-        "X-Auth-Token": token,
+        "Authorization": f"Bearer {token}",
         "X-Project-Id": project_id,
     }
 
@@ -330,7 +333,7 @@ def auth_headers(token, project_id):
 async def admin_client(admin_auth_data):
     """admin 계정으로 인증된 AsyncClient."""
     headers = {
-        "X-Auth-Token": admin_auth_data["token"],
+        "Authorization": f"Bearer {admin_auth_data['token']}",
         "X-Project-Id": admin_auth_data["project_id"],
     }
     async with AsyncClient(
@@ -346,7 +349,7 @@ async def admin_client(admin_auth_data):
 async def admin_user_client(admin_user_auth_data):
     """admin_user 계정으로 인증된 AsyncClient (scoped project ≠ admin 일 수 있는 admin 권한 검증용)."""
     headers = {
-        "X-Auth-Token": admin_user_auth_data["token"],
+        "Authorization": f"Bearer {admin_user_auth_data['token']}",
         "X-Project-Id": admin_user_auth_data["project_id"],
     }
     async with AsyncClient(
@@ -362,7 +365,7 @@ async def admin_user_client(admin_user_auth_data):
 async def user_client(user_auth_data):
     """일반 유저 계정으로 인증된 AsyncClient (권한 분리 테스트용)."""
     headers = {
-        "X-Auth-Token": user_auth_data["token"],
+        "Authorization": f"Bearer {user_auth_data['token']}",
         "X-Project-Id": user_auth_data["project_id"],
     }
     async with AsyncClient(

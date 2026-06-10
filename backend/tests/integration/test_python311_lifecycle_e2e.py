@@ -58,7 +58,6 @@ async def test_python311_lifecycle_low_level(admin_client, integration_resources
       6. 새 VM: python311 prebuilt share RO 마운트 확인
       7. SSH: python3.11 실제 실행 검증 (uv standalone CPython 재배치 동작 확인)
     """
-    require_service("service_nova_enabled")
     require_service("service_manila_enabled")
 
     share_id: str | None = None
@@ -72,6 +71,7 @@ async def test_python311_lifecycle_low_level(admin_client, integration_resources
                 "name": "python311-e2e-test",
                 "size_gb": 20,
                 "share_proto": "NFS",
+                "share_type": "cephfsnfstype",  # CephFS-backed NFS (DHSS=False)
                 "metadata": {"union_test": "python311_lifecycle_e2e"},
             },
         )

@@ -32,6 +32,8 @@ BACKEND_DIR="$SCRIPT_DIR/backend"
 : "${AFTERGLOW_TEST_IMAGE_ID:=9390745d-69b3-42ec-a5b1-28800b653bdd}"
 # cpu.4c_4g  (4vCPU / 4GB RAM)
 : "${AFTERGLOW_TEST_FLAVOR_SMALL:=1bb05535-afff-4034-b95f-4b3d55a1b8b8}"
+# cpu.4c_8g_50d  (4vCPU / 8GB RAM / 50GB disk) — medium tier
+: "${AFTERGLOW_TEST_FLAVOR_MEDIUM:=2429cf09-6f8e-4ffd-b283-884377f03f7d}"
 # ed25519 키 (./run_e2e_python311.sh 실행 전 ssh-keygen으로 생성됨)
 : "${AFTERGLOW_TEST_SSH_KEY:=$HOME/.ssh/afterglow-e2e}"
 : "${AFTERGLOW_TEST_SSH_USER:=ubuntu}"
@@ -43,9 +45,10 @@ BACKEND_DIR="$SCRIPT_DIR/backend"
 echo "=================================================="
 echo " Afterglow python 3.11 라이프사이클 E2E"
 echo "=================================================="
-echo "  IMAGE_ID     : $AFTERGLOW_TEST_IMAGE_ID"
-echo "  FLAVOR_SMALL : $AFTERGLOW_TEST_FLAVOR_SMALL"
-echo "  SSH_KEY      : $AFTERGLOW_TEST_SSH_KEY"
+echo "  IMAGE_ID      : $AFTERGLOW_TEST_IMAGE_ID"
+echo "  FLAVOR_SMALL  : $AFTERGLOW_TEST_FLAVOR_SMALL"
+echo "  FLAVOR_MEDIUM : $AFTERGLOW_TEST_FLAVOR_MEDIUM"
+echo "  SSH_KEY       : $AFTERGLOW_TEST_SSH_KEY"
 echo "  SSH_USER     : $AFTERGLOW_TEST_SSH_USER"
 echo "  BUILD_TIMEOUT: ${AFTERGLOW_TEST_BUILD_TIMEOUT}s"
 echo "=================================================="
@@ -65,6 +68,7 @@ cd "$BACKEND_DIR"
 export AFTERGLOW_ALLOW_INSECURE=1
 export AFTERGLOW_TEST_IMAGE_ID
 export AFTERGLOW_TEST_FLAVOR_SMALL
+export AFTERGLOW_TEST_FLAVOR_MEDIUM
 export AFTERGLOW_TEST_SSH_KEY
 export AFTERGLOW_TEST_SSH_USER
 export AFTERGLOW_TEST_BUILD_TIMEOUT
