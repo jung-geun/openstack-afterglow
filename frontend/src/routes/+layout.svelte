@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
+	import { get } from 'svelte/store';
 	import { auth, authReady, isLoggedIn, isAdmin, clearAuth } from '$lib/stores/auth';
 	import { theme, resolvedTheme } from '$lib/stores/theme';
 	import { api } from '$lib/api/client';
@@ -58,8 +59,12 @@
 				auth.update((s) => ({ ...s, isSystemAdmin: me.is_system_admin === true, roles: me.roles ?? s.roles, federated: me.auth_method === "federated" }));
 				authReady.set(true);
 			} catch {
-				authReady.set(false);
-				clearAuth();
+				// Fix 2: stale 토큰 가드 — 비동기 /api/auth/me 검증 중 토큰이 교체됐으면
+				// 그 사이 새 토큰으로 이미 세션이 복구됐으므로 로그아웃하지 않음.
+				if (get(auth).token === token) {
+					authReady.set(false);
+					clearAuth();
+				}
 			}
 		})();
 	});

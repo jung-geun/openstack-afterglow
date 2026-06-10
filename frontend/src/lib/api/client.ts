@@ -56,6 +56,15 @@ async function handleAdminForbidden(): Promise<void> {
 async function handleUnauthorized(): Promise<void> {
 	if (typeof window === 'undefined') return;
 	if (_redirectingTo401) return;
+
+	// Fix 4: refresh가 진행 중이면 완료를 기다린 뒤, 토큰이 복구됐으면 로그아웃 취소.
+	// clearAuth()와 tryRefresh()가 경쟁할 때 refresh 성공 후 세션이 부활하더라도
+	// stale 401이 다시 세션을 지우는 race를 막는다.
+	if (_refreshPromise) {
+		const recovered = await _refreshPromise;
+		if (recovered) return;
+	}
+
 	if (window.location.pathname === '/') return;
 	_redirectingTo401 = true;
 	try {
@@ -128,7 +137,9 @@ async function request<T>(
 	path: string,
 	options: RequestInit = {},
 	token?: string,
-	projectId?: string
+	projectId?: string,
+	// Fix 3: caller가 401을 직접 처리하는 경우 전역 로그아웃 리다이렉트를 억제할 수 있음
+	reqOpts?: { suppressAuthRedirect?: boolean }
 ): Promise<T> {
 	const headers = _buildHeaders(token, projectId, options.headers as Record<string, string>);
 
@@ -152,7 +163,7 @@ async function request<T>(
 				if (retry.status === 204) return undefined as T;
 				return retry.json();
 			}
-			if (retry.status === 401) void handleUnauthorized();
+			if (retry.status === 401 && !reqOpts?.suppressAuthRedirect) void handleUnauthorized();
 			let detail = retry.statusText;
 			try {
 				const body = await retry.json();
@@ -160,7 +171,7 @@ async function request<T>(
 			} catch { /* ignore */ }
 			throw new ApiError(retry.status, detail);
 		}
-		void handleUnauthorized();
+		if (!reqOpts?.suppressAuthRedirect) void handleUnauthorized();
 		throw new ApiError(401, '세션이 만료되었습니다');
 	}
 
@@ -172,7 +183,7 @@ async function request<T>(
 		} catch {
 			detail = await res.text().catch(() => res.statusText);
 		}
-		if (res.status === 401) {
+		if (res.status === 401 && !reqOpts?.suppressAuthRedirect) {
 			void handleUnauthorized();
 		}
 		if (res.status === 403 && path.includes('/admin')) {
@@ -193,7 +204,8 @@ export const api = {
 		path: string,
 		token?: string,
 		projectId?: string,
-		opts?: { refresh?: boolean; signal?: AbortSignal }
+		// Fix 3: suppressAuthRedirect=true 시 401에서 전역 로그아웃을 억제함
+		opts?: { refresh?: boolean; signal?: AbortSignal; suppressAuthRedirect?: boolean }
 	) => {
 		let url: string;
 		if (opts?.refresh) {
@@ -209,7 +221,7 @@ export const api = {
 		const signal = opts?.signal
 			? AbortSignal.any([opts.signal, AbortSignal.timeout(30_000)])
 			: undefined;
-		return request<T>(url, { method: 'GET', signal }, token, projectId);
+		return request<T>(url, { method: 'GET', signal }, token, projectId, { suppressAuthRedirect: opts?.suppressAuthRedirect });
 	},
 	post: <T>(path: string, body: unknown, token?: string, projectId?: string) =>
 		request<T>(path, { method: 'POST', body: JSON.stringify(body) }, token, projectId),
