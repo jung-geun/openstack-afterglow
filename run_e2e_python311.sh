@@ -36,6 +36,7 @@ BACKEND_DIR="$SCRIPT_DIR/backend"
 : "${AFTERGLOW_TEST_FLAVOR_MEDIUM:=2429cf09-6f8e-4ffd-b283-884377f03f7d}"
 # ed25519 키 (./run_e2e_python311.sh 실행 전 ssh-keygen으로 생성됨)
 : "${AFTERGLOW_TEST_SSH_KEY:=$HOME/.ssh/afterglow-e2e}"
+: "${AFTERGLOW_TEST_SSH_KEY_NAME:=afterglow-e2e-test}"
 : "${AFTERGLOW_TEST_SSH_USER:=ubuntu}"
 # 빌드 타임아웃 (초) — parallel Python copy ≈ 7분 + cloud-init 오버헤드, _SHUTOFF_MAX_WAIT=3600에 맞춤
 : "${AFTERGLOW_TEST_BUILD_TIMEOUT:=3600}"
@@ -73,6 +74,7 @@ export AFTERGLOW_TEST_IMAGE_ID
 export AFTERGLOW_TEST_FLAVOR_SMALL
 export AFTERGLOW_TEST_FLAVOR_MEDIUM
 export AFTERGLOW_TEST_SSH_KEY
+export AFTERGLOW_TEST_SSH_KEY_NAME
 export AFTERGLOW_TEST_SSH_USER
 export AFTERGLOW_TEST_BUILD_TIMEOUT
 export AFTERGLOW_TEST_VM_TIMEOUT

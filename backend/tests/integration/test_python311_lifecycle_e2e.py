@@ -142,6 +142,7 @@ async def test_python311_lifecycle_low_level(admin_client, integration_resources
                 "flavor_id": integration_resources.flavor_small,
                 "libraries": ["python311"],
                 "strategy": "prebuilt",
+                "key_name": integration_resources.ssh_key_name,
             },
         )
         assert resp.status_code == 201, f"consumer VM 생성 실패: {resp.text}"

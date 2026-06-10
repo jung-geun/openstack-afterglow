@@ -44,6 +44,7 @@ class IntegrationResources:
     library_ids: list[str]
     ssh_key_path: str
     ssh_user: str
+    ssh_key_name: str
 
 
 # ---------------------------------------------------------------------------
@@ -130,6 +131,7 @@ def integration_resources():
     library_ids_raw = os.environ.get("AFTERGLOW_TEST_LIBRARY_IDS", "python311").strip()
     library_ids = [s.strip() for s in library_ids_raw.split(",") if s.strip()]
     ssh_user = os.environ.get("AFTERGLOW_TEST_SSH_USER", "ubuntu").strip() or "ubuntu"
+    ssh_key_name = os.environ.get("AFTERGLOW_TEST_SSH_KEY_NAME", "afterglow-e2e-test").strip()
 
     return IntegrationResources(
         image_id=image_id,
@@ -138,6 +140,7 @@ def integration_resources():
         library_ids=library_ids,
         ssh_key_path=ssh_key_path,
         ssh_user=ssh_user,
+        ssh_key_name=ssh_key_name,
     )
 
 
