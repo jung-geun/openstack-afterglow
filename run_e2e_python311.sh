@@ -66,6 +66,9 @@ chmod 600 "$AFTERGLOW_TEST_SSH_KEY"
 # ── pytest 실행 ──────────────────────────────────────────────
 cd "$BACKEND_DIR"
 export AFTERGLOW_ALLOW_INSECURE=1
+# E2E 테스트는 BUILD_TIMEOUT(40분)보다 access JWT TTL(기본 15분)이 짧아서 폴링 중 401 발생.
+# get_settings()는 이미 설정된 env var을 TOML 값으로 덮어쓰지 않으므로, 여기서 먼저 설정.
+export JWT_ACCESS_TTL=7200  # 2시간 — E2E 전용 (프로덕션 환경에서는 사용 금지)
 export AFTERGLOW_TEST_IMAGE_ID
 export AFTERGLOW_TEST_FLAVOR_SMALL
 export AFTERGLOW_TEST_FLAVOR_MEDIUM

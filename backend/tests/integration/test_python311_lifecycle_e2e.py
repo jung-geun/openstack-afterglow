@@ -27,9 +27,13 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import Awaitable, Callable
 
 import pytest
+from httpx import ASGITransport
+from httpx import AsyncClient as _AsyncClient
 
+from app.main import app as _app
 from tests.integration.conftest import require_service
 from tests.integration.ssh_helper import (
     verify_overlay_mount,
@@ -46,7 +50,7 @@ VM_ACTIVE_TIMEOUT = int(os.getenv("AFTERGLOW_TEST_VM_TIMEOUT", "600"))
 
 
 @pytest.mark.asyncio(loop_scope="session")
-async def test_python311_lifecycle_low_level(admin_client, integration_resources):
+async def test_python311_lifecycle_low_level(admin_client, integration_resources, admin_credentials_fx):
     """python 3.11 라이브러리 전체 라이프사이클 — 저수준 단계별 경로.
 
     7단계 인수 시나리오:
@@ -59,6 +63,13 @@ async def test_python311_lifecycle_low_level(admin_client, integration_resources
       7. SSH: python3.11 실제 실행 검증 (uv standalone CPython 재배치 동작 확인)
     """
     require_service("service_manila_enabled")
+
+    async def _relogin() -> None:
+        """JWT access 토큰 만료(401) 시 재로그인하여 admin_client 헤더를 갱신한다."""
+        async with _AsyncClient(transport=ASGITransport(app=_app), base_url="http://test") as ac:
+            r = await ac.post("/api/auth/login", json=admin_credentials_fx)
+            if r.status_code == 200:
+                admin_client.headers["Authorization"] = f"Bearer {r.json()['token']}"
 
     share_id: str | None = None
     instance_id: str | None = None
@@ -98,7 +109,7 @@ async def test_python311_lifecycle_low_level(admin_client, integration_resources
         # ── 빌드 완료 대기 ─────────────────────────────────────────────────
         # build_id=None은 DB 비가용 시 발생 — share 메타데이터 폴링으로 fallback
         if build_id is not None:
-            final_status = await _wait_for_build(admin_client, build_id, timeout=BUILD_TIMEOUT)
+            final_status = await _wait_for_build(admin_client, build_id, timeout=BUILD_TIMEOUT, relogin=_relogin)
             assert final_status == "complete", (
                 f"빌드가 complete 상태에 도달하지 못했습니다 (status={final_status}). "
                 f"GET /api/admin/libraries/builds/{build_id} 에서 console_log_excerpt 확인. "
@@ -109,11 +120,12 @@ async def test_python311_lifecycle_low_level(admin_client, integration_resources
             import warnings
 
             warnings.warn(
-                f"build_id가 None입니다 (DB 비가용 모드). "
-                f"share {share_id} 메타데이터 폴링으로 빌드 완료를 판정합니다.",
+                f"build_id가 None입니다 (DB 비가용 모드). share {share_id} 메타데이터 폴링으로 빌드 완료를 판정합니다.",
                 stacklevel=1,
             )
-            final_share_status = await _wait_for_share_ready(admin_client, share_id, timeout=BUILD_TIMEOUT)
+            final_share_status = await _wait_for_share_ready(
+                admin_client, share_id, timeout=BUILD_TIMEOUT, relogin=_relogin
+            )
             assert final_share_status == "ready", (
                 f"share {share_id}의 union_status가 ready에 도달하지 못했습니다 "
                 f"(status={final_share_status}). "
@@ -246,16 +258,27 @@ async def _find_build_id(client, library_id: str, share_id: str, timeout: int = 
     return None
 
 
-async def _wait_for_share_ready(client, share_id: str, timeout: int) -> str:
+async def _wait_for_share_ready(
+    client,
+    share_id: str,
+    timeout: int,
+    *,
+    relogin: Callable[[], Awaitable[None]] | None = None,
+) -> str:
     """share metadata union_status가 terminal 상태까지 폴링. 최종 status 반환.
 
     _handle_success: union_status=ready
     에러 경로:       union_status=error | indeterminate | cancelled
+    401 수신 시 relogin()으로 토큰 갱신 후 재폴링.
     """
     terminal = {"ready", "error", "indeterminate", "cancelled"}
     for _ in range(timeout // 15):
         await asyncio.sleep(15)
         resp = await client.get(f"/api/file-storage/{share_id}")
+        if resp.status_code == 401:
+            if relogin is not None:
+                await relogin()
+            continue
         if resp.status_code == 200:
             status = resp.json().get("metadata", {}).get("union_status", "")
             if status in terminal:
@@ -263,12 +286,22 @@ async def _wait_for_share_ready(client, share_id: str, timeout: int) -> str:
     return "TIMEOUT"
 
 
-async def _wait_for_build(client, build_id: int, timeout: int) -> str:
-    """빌드 terminal state까지 폴링. 최종 status 반환."""
+async def _wait_for_build(
+    client,
+    build_id: int,
+    timeout: int,
+    *,
+    relogin: Callable[[], Awaitable[None]] | None = None,
+) -> str:
+    """빌드 terminal state까지 폴링. 최종 status 반환. 401 시 재인증."""
     terminal = {"complete", "error", "timeout", "cancelled"}
     for _ in range(timeout // 15):
         await asyncio.sleep(15)
         resp = await client.get(f"/api/admin/libraries/builds/{build_id}")
+        if resp.status_code == 401:
+            if relogin is not None:
+                await relogin()
+            continue
         if resp.status_code == 200:
             status = resp.json().get("status", "")
             if status in terminal:
