@@ -56,6 +56,8 @@ secrets:
   smtpPassword: ""
   # 멀티라인 PEM 키: |로 시작하는 블록 스칼라로 입력
   builderSshPrivateKey: ""
+  # Grafana 관리자 비밀번호 (반드시 배포 시 --set으로 주입)
+  grafanaAdminPassword: ""
 
 # -----------------------------------------------------------------------------
 # [openstack]
@@ -306,7 +308,7 @@ monitoring:
     instanceGpuUid: "afterglow-instance-gpu"
   grafana:
     image: "grafana/grafana:11.0.0"
-    adminPassword: "admin"
+    # adminPassword는 secrets.grafanaAdminPassword 로 주입됩니다
     replicas: 1
   prometheus:
     image: "prom/prometheus:v2.51.0"
@@ -317,6 +319,9 @@ monitoring:
     replicas: 1
     storageSize: "10Gi"
     javaOpts: "-Xms512m -Xmx512m"
+    # 보안 플러그인 비활성화 여부 (기본 false = 보안 활성화)
+    # 개발 환경에서만 true로 설정할 것
+    disableSecurityPlugin: false
 
 # -----------------------------------------------------------------------------
 # [notion]

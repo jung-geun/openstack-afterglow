@@ -27,7 +27,7 @@ spec:
             - name: discovery.type
               value: "single-node"
             - name: DISABLE_SECURITY_PLUGIN
-              value: "true"
+              value: {{ .Values.monitoring.opensearch.disableSecurityPlugin | toString | quote }}
             - name: OPENSEARCH_JAVA_OPTS
               value: {{ .Values.monitoring.opensearch.javaOpts | quote }}
           volumeMounts:

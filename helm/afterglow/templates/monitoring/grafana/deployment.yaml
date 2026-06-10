@@ -23,7 +23,10 @@ spec:
             - containerPort: 3000
           env:
             - name: GF_SECURITY_ADMIN_PASSWORD
-              value: {{ .Values.monitoring.grafana.adminPassword | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: afterglow-secrets
+                  key: GRAFANA_ADMIN_PASSWORD
             - name: GF_USERS_ALLOW_SIGN_UP
               value: "false"
             - name: GF_SECURITY_ALLOW_EMBEDDING
