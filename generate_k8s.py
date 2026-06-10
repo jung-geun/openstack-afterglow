@@ -28,8 +28,10 @@ from pathlib import Path
 # ─────────────────────────────────────────────────────────────────────────────
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
-REDIS_K8S = "redis://redis.afterglow.svc.cluster.local:6379/0"
-REDIS_SENTINEL_K8S = "redis-sentinel.afterglow.svc.cluster.local:26379"
+# 네임스페이스 상대 이름 사용 — 동일 네임스페이스 내 서비스이므로
+# prod(afterglow)·dev(afterglow-dev) 양쪽에서 자동 해석됨
+REDIS_K8S = "redis://redis:6379/0"
+REDIS_SENTINEL_K8S = "redis-sentinel:26379"
 REDIS_SENTINEL_MASTER = "mymaster"
 
 # ANSI 색상 (Windows에서는 비활성화)
