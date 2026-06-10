@@ -3730,9 +3730,10 @@ terminal mutation 후 캐시를 직접 패치(surgical write-through)해 mutatio
 
 - [x] `uv run pytest tests/test_existing_share_build.py -v` — 3 passed
 - [x] `uv run ruff check .` — All checks passed
-- [ ] **라이브 E2E 미완료** (2026-06-10, 작업 중):
-  - Step 1: `POST /api/file-storage` → share 생성 ✓
-  - Step 2: 빌더 VM 부팅 → uv install → python 3.11 설치 ✓
-  - **Step 3 미완료**: `cp -a` (uv CPython 트리 → NFS share)가 CephFS per-file 메타데이터 오버헤드로 40분+ 소요 중. `_SHUTOFF_MAX_WAIT=1800`(30분)이 너무 짧아 프로덕션에서 timeout 처리됨
-  - Steps 4–7: 미실행 (build 미완료로 consumer VM 단계 미도달)
-  - pytest exit code 0은 in-process `asyncio.create_task`가 pytest 프로세스 종료와 함께 소멸하여 발생한 오탐
+- [x] **라이브 E2E step 1–6 통과** (2026-06-10, `AFTERGLOW_SKIP_SSH=1`, 17분 9초):
+  - Step 1: `POST /api/file-storage` → Manila share 생성 ✓
+  - Step 2: 빌더 VM 부팅 → uv python install → Python ThreadPoolExecutor×16 병렬 복사 (~10분) ✓
+  - Step 3: cloud-init SHUTOFF → sentinel 조기 감지(early_success) → prebuilt 승격 + VM/port 자동 teardown ✓
+  - Step 6: consumer VM → python311 prebuilt share RO 마운트(union_share_ids 일치) ✓
+  - Step 4·7(SSH): **FIP 네트워크 미도달 환경에서 skip** — `AFTERGLOW_SKIP_SSH=1` 제거 후 OpenStack 내부 환경에서 별도 검증 필요
+  - 주요 수정 사항: NFS parallel copy 16×, `_SHUTOFF_MAX_WAIT=3600`, early_success fallback, `include_public=True` prebuilt 조회, 최신 prebuilt 우선 선택, consumer VM keypair 지정
