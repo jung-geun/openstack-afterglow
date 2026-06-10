@@ -768,9 +768,9 @@ def get_nfs_export_location(conn, file_storage_id: str) -> str | None:
 
 
 def update_share_metadata(conn, file_storage_id: str, metadata: dict) -> dict:
-    """Manila share 메타데이터 업데이트."""
+    """Manila share 메타데이터 업데이트 (POST /shares/{id}/metadata)."""
     client = get_client(conn)
-    body = {"set_metadata": metadata}
+    body = {"metadata": metadata}
     return client.post(f"shares/{file_storage_id}/metadata", body)
 
 
