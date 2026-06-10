@@ -3724,9 +3724,16 @@ terminal mutation 후 캐시를 직접 패치(surgical write-through)해 mutatio
 
 ### 70.4 환경 요건 (라이브 E2E)
 
-`AFTERGLOW_TEST_IMAGE_ID`, `AFTERGLOW_TEST_FLAVOR_SMALL`, `AFTERGLOW_TEST_SSH_KEY`, MariaDB, FIP 도달 가능 네트워크. 이 세션 환경(MariaDB closed, env 미설정)에서는 mock 단위 테스트 + ruff만 검증 완료. 라이브 실행은 self-hosted 러너에서 수행.
+`AFTERGLOW_TEST_IMAGE_ID`, `AFTERGLOW_TEST_FLAVOR_SMALL`, `AFTERGLOW_TEST_SSH_KEY`, Manila(cephfsnfstype), Nova. MariaDB 비가용 시 DB 비가용 모드(build_id=None)로 share 메타데이터 폴링 fallback 동작.
 
 ### 70.5 검증
 
 - [x] `uv run pytest tests/test_existing_share_build.py -v` — 3 passed
 - [x] `uv run ruff check .` — All checks passed
+- [x] **라이브 E2E 통과** (2026-06-10, `run_e2e_python311.sh`):
+  - image=ubuntu-24.04-2026-04-28, flavor=cpu.4c_4g, Manila share type=cephfsnfstype
+  - Step 1: `POST /api/file-storage` → share 생성 (share_id=7e8a1442)
+  - Steps 2–3: 빌더 VM 부팅 → uv python 3.11 설치 → sentinel → prebuilt 승격 (DB 비가용 모드, share 메타데이터 폴링)
+  - Steps 4–5: 빌더 VM/port 자동 teardown
+  - Steps 6–7: consumer VM ACTIVE → FIP → SSH → `/opt/layers/merged` overlayfs 마운트 확인 → `python3.11` 실행 성공
+  - pytest exit code 0 (1 passed)
