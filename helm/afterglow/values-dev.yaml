@@ -1,0 +1,28 @@
+# dev 환경 오버라이드
+# helm upgrade --install afterglow-dev helm/afterglow -f helm/afterglow/values-dev.yaml \
+#   --namespace afterglow-dev --create-namespace \
+#   --set secrets.osPassword=XXX --set secrets.secretKey=XXX
+
+image:
+  backend:
+    tag: dev
+  frontend:
+    tag: dev
+  worker:
+    tag: dev
+
+replicaCount:
+  backend: 1
+  frontend: 1
+  worker: 1
+  notionWorker: 1
+
+ingress:
+  host: afterglow-dev.example.com
+  tlsSecretName: afterglow-dev-tls
+
+cors:
+  origins: "https://afterglow-dev.example.com"
+
+app:
+  frontendBaseUrl: "https://afterglow-dev.example.com"

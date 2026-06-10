@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-sentinel
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: redis-sentinel
+spec:
+  replicas: {{ .Values.replicaCount.sentinel }}
+  selector:
+    matchLabels:
+      app: redis-sentinel
+  template:
+    metadata:
+      labels:
+        app: redis-sentinel
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: redis-sentinel
+                topologyKey: kubernetes.io/hostname
+      initContainers:
+        - name: init-sentinel
+          image: redis:7-alpine
+          command:
+            - sh
+            - -c
+            - cp /config/sentinel.conf /etc/sentinel/sentinel.conf
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: sentinel-runtime-config
+              mountPath: /etc/sentinel
+      containers:
+        - name: sentinel
+          image: redis:7-alpine
+          command:
+            - redis-sentinel
+            - /etc/sentinel/sentinel.conf
+          ports:
+            - containerPort: 26379
+              name: sentinel
+          livenessProbe:
+            exec:
+              command:
+                - redis-cli
+                - -p
+                - "26379"
+                - ping
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources.sentinel | nindent 12 }}
+          volumeMounts:
+            - name: sentinel-runtime-config
+              mountPath: /etc/sentinel
+      volumes:
+        - name: config
+          configMap:
+            name: redis-config
+        - name: sentinel-runtime-config
+          emptyDir: {}

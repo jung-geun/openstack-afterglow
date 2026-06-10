@@ -1,0 +1,32 @@
+# prod 환경 오버라이드
+# helm upgrade --install afterglow helm/afterglow -f helm/afterglow/values-prod.yaml \
+#   --namespace afterglow --create-namespace \
+#   --set secrets.osPassword=XXX --set secrets.secretKey=XXX ...
+
+image:
+  backend:
+    tag: latest
+  frontend:
+    tag: latest
+  worker:
+    tag: latest
+
+replicaCount:
+  backend: 2
+  frontend: 2
+  worker: 1
+  notionWorker: 1
+  redis: 3
+  sentinel: 3
+
+ingress:
+  host: afterglow.example.com        # 실제 도메인으로 변경
+  tlsSecretName: afterglow-tls
+  certIssuer: letsencrypt-prod-traefik
+
+cors:
+  origins: "https://afterglow.example.com"
+
+app:
+  frontendBaseUrl: "https://afterglow.example.com"
+  trustedProxies: "127.0.0.1/32,::1/128,10.0.0.0/8"

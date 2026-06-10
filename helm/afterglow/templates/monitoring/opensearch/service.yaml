@@ -1,0 +1,18 @@
+{{- if and .Values.monitoring.enabled .Values.monitoring.opensearch.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: opensearch
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: opensearch
+spec:
+  type: ClusterIP
+  selector:
+    app: opensearch
+  ports:
+    - port: 9200
+      targetPort: 9200
+      protocol: TCP
+      name: http
+{{- end }}

@@ -1,0 +1,127 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: backend
+spec:
+  replicas: {{ .Values.replicaCount.backend }}
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: backend
+          image: {{ .Values.image.backend.repository }}:{{ .Values.image.backend.tag }}
+          imagePullPolicy: {{ .Values.image.backend.pullPolicy }}
+          command:
+            - "uvicorn"
+            - "app.main:app"
+            - "--host"
+            - "0.0.0.0"
+            - "--port"
+            - "8000"
+            - "--workers"
+            - "4"
+            - "--timeout-keep-alive"
+            - "65"
+            - "--loop"
+            - "uvloop"
+            - "--http"
+            - "httptools"
+          ports:
+            - containerPort: 8000
+          env:
+            - name: REDIS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: afterglow-config
+                  key: APP_REDIS_URL
+            - name: OS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: afterglow-secrets
+                  key: OS_PASSWORD
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: afterglow-secrets
+                  key: SECRET_KEY
+            - name: GITLAB_OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: afterglow-secrets
+                  key: GITLAB_OIDC_CLIENT_SECRET
+            - name: K3S_KUBECONFIG_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: afterglow-secrets
+                  key: K3S_KUBECONFIG_ENCRYPTION_KEY
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: afterglow-secrets
+                  key: DATABASE_URL
+            - name: PROMETHEUS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: afterglow-secrets
+                  key: PROMETHEUS_PASSWORD
+          volumeMounts:
+            - name: afterglow-config-volume
+              mountPath: /app/config.toml
+              subPath: config.toml
+            - name: builder-ssh-key
+              mountPath: /etc/afterglow/ssh
+              readOnly: true
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 60
+            timeoutSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            failureThreshold: 3
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            periodSeconds: 5
+            failureThreshold: 2
+            timeoutSeconds: 5
+          resources:
+            {{- toYaml .Values.resources.backend | nindent 12 }}
+      volumes:
+        - name: afterglow-config-volume
+          configMap:
+            name: afterglow-config
+            items:
+              - key: config.toml
+                path: config.toml
+        - name: builder-ssh-key
+          secret:
+            secretName: afterglow-secrets
+            items:
+              - key: BUILDER_SSH_PRIVATE_KEY
+                path: builder.key
+            defaultMode: 0400

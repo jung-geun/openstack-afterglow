@@ -1,0 +1,317 @@
+{{- $appOrigin := (splitList "," .Values.cors.origins) | first | trim -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: afterglow-config
+  namespace: {{ .Release.Namespace }}
+data:
+  APP_REDIS_URL: "redis://redis:6379/0"
+  APP_ORIGIN: {{ $appOrigin | quote }}
+  APP_S3_BASE: {{ .Values.openstack.s3Endpoint | quote }}
+  APP_GRAFANA_BASE: {{ .Values.monitoring.grafanaBaseUrl | quote }}
+  config.toml: |
+    # Afterglow 통합 설정 파일
+    # 비밀 값은 secret.yaml의 환경변수로 주입됩니다.
+
+    [openstack]
+    auth_url = {{ .Values.openstack.authUrl | quote }}
+    project_name = {{ .Values.openstack.projectName | quote }}
+    project_domain_name = {{ .Values.openstack.projectDomainName | quote }}
+    user_domain_name = {{ .Values.openstack.userDomainName | quote }}
+    region_name = {{ .Values.openstack.regionName | quote }}
+    username = {{ .Values.openstack.username | quote }}
+    interface = {{ .Values.openstack.interface | quote }}
+    {{- if .Values.openstack.insecure }}
+    insecure = true
+    {{- end }}
+    {{- if .Values.openstack.cacert }}
+    cacert = {{ .Values.openstack.cacert | quote }}
+    {{- end }}
+    # password는 secret.yaml의 OS_PASSWORD 환경변수로 주입됩니다
+
+    # Manila 설정
+    manila_endpoint = {{ .Values.openstack.manilaEndpoint | quote }}
+    manila_share_network_id = {{ .Values.openstack.manilaShareNetworkId | quote }}
+    manila_share_type = {{ .Values.openstack.manilaShareType | quote }}
+    manila_nfs_share_type = {{ .Values.openstack.manitaNfsShareType | quote }}
+    manila_nfs_root_squash = {{ .Values.openstack.manilaNfsRootSquash }}
+    manila_nfs_sec_flavor = {{ .Values.openstack.manilaNfsSecFlavor | quote }}
+    manila_cephx_key_timeout_seconds = {{ .Values.openstack.manilaCephxKeyTimeoutSeconds }}
+
+    # Ceph 모니터 (cloud-init CephFS 마운트용, 콤마 구분)
+    ceph_monitors = {{ .Values.openstack.cephMonitors | quote }}
+
+    # Union Mount 전용 service 프로젝트 UUID
+    service_project_id = {{ .Values.openstack.serviceProjectId | quote }}
+
+    # Swift 설정
+    swift_endpoint = {{ .Values.openstack.swiftEndpoint | quote }}
+    swift_upload_timeout = {{ .Values.openstack.swiftUploadTimeout }}
+    trash_retention_days = {{ .Values.openstack.trashRetentionDays }}
+
+    [app]
+    backend_port = {{ .Values.app.backendPort }}
+    frontend_port = {{ .Values.app.frontendPort }}
+    # secret_key는 secret.yaml의 SECRET_KEY 환경변수로 주입됩니다
+    site_name = {{ .Values.app.siteName | quote }}
+    site_description = {{ .Values.app.siteDescription | quote }}
+    logo_path = {{ .Values.app.logoPath | quote }}
+    favicon_path = {{ .Values.app.faviconPath | quote }}
+    refresh_interval_ms = {{ .Values.app.refreshIntervalMs }}
+    frontend_base_url = {{ .Values.app.frontendBaseUrl | quote }}
+    trusted_proxies = {{ .Values.app.trustedProxies | quote }}
+
+    [cache]
+    redis_url = "redis://redis:6379/0"
+    # Redis Sentinel HA — K8s 배포 시 자동 활성화
+    sentinel_enabled = true
+    sentinel_master_name = "mymaster"
+    sentinel_hosts = "redis-sentinel:26379"
+    ttl_fast = {{ .Values.cache.ttlFast }}
+    ttl_normal = {{ .Values.cache.ttlNormal }}
+    ttl_slow = {{ .Values.cache.ttlSlow }}
+    ttl_static = {{ .Values.cache.ttlStatic }}
+    default_ttl_seconds = {{ .Values.cache.defaultTtlSeconds }}
+    backend = {{ .Values.cache.backend | quote }}
+    dynamic_threshold_low = {{ .Values.cache.dynamicThresholdLow }}
+    dynamic_threshold_high = {{ .Values.cache.dynamicThresholdHigh }}
+    ttl_identity_stable = {{ .Values.cache.ttlIdentityStable }}
+    ttl_catalog_slow = {{ .Values.cache.ttlCatalogSlow }}
+    ttl_project_meta = {{ .Values.cache.ttlProjectMeta }}
+    ttl_operational_live = {{ .Values.cache.ttlOperationalLive }}
+    ttl_admin_overview = {{ .Values.cache.ttlAdminOverview }}
+    ttl_auth_token = {{ .Values.cache.ttlAuthToken }}
+
+    [session]
+    timeout_seconds = {{ .Values.session.timeoutSeconds }}
+    warning_before_seconds = {{ .Values.session.warningBeforeSeconds }}
+    absolute_timeout = {{ .Values.session.absoluteTimeout }}
+    jwt_access_ttl = {{ .Values.session.jwtAccessTtl }}
+    jwt_refresh_ttl = {{ .Values.session.jwtRefreshTtl }}
+    token_ip_binding_mode = {{ .Values.session.tokenIpBindingMode | quote }}
+
+    [nova]
+    default_network_id = {{ .Values.nova.defaultNetworkId | quote }}
+    default_availability_zone = {{ .Values.nova.defaultAvailabilityZone | quote }}
+    boot_volume_size_gb = {{ .Values.nova.bootVolumeSizeGb }}
+    upper_volume_size_gb = {{ .Values.nova.upperVolumeSizeGb }}
+    default_network_enabled = {{ .Values.nova.defaultNetworkEnabled }}
+    default_network_cidr = {{ .Values.nova.defaultNetworkCidr | quote }}
+    default_network_external_id = {{ .Values.nova.defaultNetworkExternalId | quote }}
+
+    {{- if or .Values.builder.imageId .Values.builder.flavorId .Values.builder.sshHost }}
+
+    [builder]
+    {{- if .Values.builder.imageId }}
+    image_id = {{ .Values.builder.imageId | quote }}
+    {{- end }}
+    {{- if .Values.builder.flavorId }}
+    flavor_id = {{ .Values.builder.flavorId | quote }}
+    {{- end }}
+    {{- if .Values.builder.networkId }}
+    network_id = {{ .Values.builder.networkId | quote }}
+    {{- end }}
+    {{- if .Values.builder.persistentServerId }}
+    persistent_server_id = {{ .Values.builder.persistentServerId | quote }}
+    {{- end }}
+    ssh_user = {{ .Values.builder.sshUser | quote }}
+    ssh_key_path = {{ .Values.builder.sshKeyPath | quote }}
+    {{- if .Values.builder.sshHost }}
+    ssh_host = {{ .Values.builder.sshHost | quote }}
+    {{- end }}
+    {{- if .Values.builder.floatingNetworkId }}
+    floating_network_id = {{ .Values.builder.floatingNetworkId | quote }}
+    {{- end }}
+    build_timeout = {{ .Values.builder.buildTimeout }}
+    {{- end }}
+
+    [union]
+    layer_store_rw_share_id = {{ .Values.union.layerStoreRwShareId | quote }}
+    layer_store_ro_share_id = {{ .Values.union.layerStoreRoShareId | quote }}
+    manifest_store_share_id = {{ .Values.union.manifestStoreShareId | quote }}
+
+    [gpu]
+    available_visible = {{ .Values.gpu.availableVisible }}
+    # GPU 디바이스 맵은 config.gpu.toml에서 관리됩니다
+
+    [services]
+    {{- range $svc := list "magnum" "manila" "zun" "k3s" "swift" "trove" "barbican" }}
+    {{ $svc }} = {{ index $.Values.services $svc }}
+    {{- end }}
+
+    [k3s]
+    {{- if .Values.k3s.version }}
+    version = {{ .Values.k3s.version | quote }}
+    {{- end }}
+    {{- if .Values.k3s.serverFlavorId }}
+    server_flavor_id = {{ .Values.k3s.serverFlavorId | quote }}
+    {{- end }}
+    {{- if .Values.k3s.defaultAgentFlavorId }}
+    default_agent_flavor_id = {{ .Values.k3s.defaultAgentFlavorId | quote }}
+    {{- end }}
+    {{- if .Values.k3s.serverImageId }}
+    server_image_id = {{ .Values.k3s.serverImageId | quote }}
+    {{- end }}
+    {{- if .Values.k3s.fcosImageId }}
+    fcos_image_id = {{ .Values.k3s.fcosImageId | quote }}
+    {{- end }}
+    {{- if .Values.k3s.callbackBaseUrl }}
+    callback_base_url = {{ .Values.k3s.callbackBaseUrl | quote }}
+    {{- end }}
+    boot_volume_size_gb = {{ .Values.k3s.bootVolumeSizeGb }}
+    occm_enabled = {{ .Values.k3s.occmEnabled }}
+    {{- if .Values.k3s.occmImage }}
+    occm_image = {{ .Values.k3s.occmImage | quote }}
+    {{- end }}
+    {{- if .Values.k3s.occmFloatingNetworkId }}
+    occm_floating_network_id = {{ .Values.k3s.occmFloatingNetworkId | quote }}
+    {{- end }}
+    {{- if .Values.k3s.occmPublicNetworkName }}
+    occm_public_network_name = {{ .Values.k3s.occmPublicNetworkName | quote }}
+    {{- end }}
+    cinder_csi_enabled = {{ .Values.k3s.cinderCsiEnabled }}
+    {{- if .Values.k3s.cinderCsiImage }}
+    cinder_csi_image = {{ .Values.k3s.cinderCsiImage | quote }}
+    {{- end }}
+    {{- if .Values.k3s.cinderCsiDefaultAz }}
+    cinder_csi_default_az = {{ .Values.k3s.cinderCsiDefaultAz | quote }}
+    {{- end }}
+    manila_csi_enabled = {{ .Values.k3s.manilaCsiEnabled }}
+    {{- if .Values.k3s.manilaCsiImage }}
+    manila_csi_image = {{ .Values.k3s.manilaCsiImage | quote }}
+    {{- end }}
+    {{- if .Values.k3s.manilaCsiNfsImage }}
+    manila_csi_nfs_image = {{ .Values.k3s.manilaCsiNfsImage | quote }}
+    {{- end }}
+    manila_csi_share_protocol = {{ .Values.k3s.manilaCsiShareProtocol | quote }}
+    keystone_auth_enabled = {{ .Values.k3s.keystoneAuthEnabled }}
+    {{- if .Values.k3s.keystoneAuthImage }}
+    keystone_auth_image = {{ .Values.k3s.keystoneAuthImage | quote }}
+    {{- end }}
+    {{- if .Values.k3s.keystoneAuthPolicy }}
+    keystone_auth_policy = {{ .Values.k3s.keystoneAuthPolicy | quote }}
+    {{- end }}
+    octavia_ingress_enabled = {{ .Values.k3s.octaviaIngressEnabled }}
+    {{- if .Values.k3s.octaviaIngressImage }}
+    octavia_ingress_image = {{ .Values.k3s.octaviaIngressImage | quote }}
+    {{- end }}
+    {{- if .Values.k3s.octaviaIngressSubnetId }}
+    octavia_ingress_subnet_id = {{ .Values.k3s.octaviaIngressSubnetId | quote }}
+    {{- end }}
+    {{- if .Values.k3s.octaviaIngressFloatingNetworkId }}
+    octavia_ingress_floating_network_id = {{ .Values.k3s.octaviaIngressFloatingNetworkId | quote }}
+    {{- end }}
+    barbican_kms_enabled = {{ .Values.k3s.barbicanKmsEnabled }}
+    {{- if .Values.k3s.barbicanKmsImage }}
+    barbican_kms_image = {{ .Values.k3s.barbicanKmsImage | quote }}
+    {{- end }}
+    {{- if .Values.k3s.barbicanKmsKekId }}
+    barbican_kms_kek_id = {{ .Values.k3s.barbicanKmsKekId | quote }}
+    {{- end }}
+    api_lb_enabled = {{ .Values.k3s.apiLbEnabled }}
+    {{- if .Values.k3s.apiLbVipNetworkId }}
+    api_lb_vip_network_id = {{ .Values.k3s.apiLbVipNetworkId | quote }}
+    {{- end }}
+    {{- if .Values.k3s.apiLbFloatingNetworkId }}
+    api_lb_floating_network_id = {{ .Values.k3s.apiLbFloatingNetworkId | quote }}
+    {{- end }}
+    {{- if .Values.k3s.lbSubnetId }}
+    lb_subnet_id = {{ .Values.k3s.lbSubnetId | quote }}
+    {{- end }}
+    {{- if .Values.k3s.certRotationJobImage }}
+    cert_rotation_job_image = {{ .Values.k3s.certRotationJobImage | quote }}
+    {{- end }}
+    cert_rotation_node_timeout_sec = {{ .Values.k3s.certRotationNodeTimeoutSec }}
+    stampede_enabled = {{ .Values.k3s.stampedeEnabled }}
+    {{- if .Values.k3s.stampedeProjectId }}
+    stampede_project_id = {{ .Values.k3s.stampedeProjectId | quote }}
+    {{- end }}
+    stampede_interval = {{ .Values.k3s.stampedeInterval }}
+    stampede_scale_down_window = {{ .Values.k3s.stampedeScaleDownWindow }}
+    stampede_scale_up_cooldown = {{ .Values.k3s.stampedeScaleUpCooldown }}
+    stampede_scale_down_cooldown = {{ .Values.k3s.stampedeScaleDownCooldown }}
+    stampede_scale_down_threshold = {{ .Values.k3s.stampedeScaleDownThreshold }}
+    stampede_resource_headroom_factor = {{ .Values.k3s.stampedeResourceHeadroomFactor }}
+    # kubeconfig_encryption_key는 secret.yaml의 K3S_KUBECONFIG_ENCRYPTION_KEY 환경변수로 주입됩니다
+
+    [database]
+    # url은 secret.yaml의 DATABASE_URL 환경변수로 주입됩니다
+    pool_size = {{ .Values.database.poolSize }}
+    max_overflow = {{ .Values.database.maxOverflow }}
+    auto_create_tables = {{ .Values.database.autoCreateTables }}
+    connect_timeout = {{ .Values.database.connectTimeout }}
+    pool_timeout = {{ .Values.database.poolTimeout }}
+    unhealthy_seconds = {{ .Values.database.unhealthySeconds }}
+    {{- if .Values.database.dbAutoBackupCron }}
+    db_auto_backup_cron = {{ .Values.database.dbAutoBackupCron | quote }}
+    {{- end }}
+
+    [cors]
+    origins = {{ .Values.cors.origins | quote }}
+
+    [gitlab_oidc]
+    enabled = {{ .Values.gitlabOidc.enabled }}
+    gitlab_url = {{ .Values.gitlabOidc.gitlabUrl | quote }}
+    client_id = {{ .Values.gitlabOidc.clientId | quote }}
+    # client_secret은 secret.yaml의 GITLAB_OIDC_CLIENT_SECRET 환경변수로 주입됩니다
+    idp_id = {{ .Values.gitlabOidc.idpId | quote }}
+    protocol_id = {{ .Values.gitlabOidc.protocolId | quote }}
+    redirect_uri = {{ .Values.gitlabOidc.redirectUri | quote }}
+    scopes = {{ .Values.gitlabOidc.scopes | quote }}
+
+    {{- if .Values.smtp.enabled }}
+
+    [smtp]
+    enabled = {{ .Values.smtp.enabled }}
+    host = {{ .Values.smtp.host | quote }}
+    port = {{ .Values.smtp.port }}
+    username = {{ .Values.smtp.username | quote }}
+    # password는 secret.yaml의 SMTP_PASSWORD 환경변수로 주입됩니다
+    from_address = {{ .Values.smtp.fromAddress | quote }}
+    from_name = {{ .Values.smtp.fromName | quote }}
+    use_tls = {{ .Values.smtp.useTls }}
+    timeout_seconds = {{ .Values.smtp.timeoutSeconds }}
+
+    [smtp.invitation]
+    token_expiry_days = {{ .Values.smtp.invitation.tokenExpiryDays }}
+    {{- end }}
+
+    [monitoring]
+    prometheus_base_url = {{ .Values.monitoring.prometheusBaseUrl | quote }}
+    prometheus_username = {{ .Values.monitoring.prometheusUsername | quote }}
+    # prometheus_password는 secret.yaml의 PROMETHEUS_PASSWORD 환경변수로 주입됩니다
+    scrape_cidr = {{ .Values.monitoring.scrapeCidr | quote }}
+    auto_sg_enabled = {{ .Values.monitoring.autoSgEnabled }}
+    node_exporter_sg_name = {{ .Values.monitoring.nodeExporterSgName | quote }}
+    dcgm_exporter_sg_name = {{ .Values.monitoring.dcgmExporterSgName | quote }}
+    node_exporter_port = {{ .Values.monitoring.nodeExporterPort }}
+    dcgm_exporter_port = {{ .Values.monitoring.dcgmExporterPort }}
+    libvirt_exporter_port = {{ .Values.monitoring.libvirtExporterPort }}
+    gpu_flavor_prefix = {{ .Values.monitoring.gpuFlavorPrefix | quote }}
+    grafana_base_url = {{ .Values.monitoring.grafanaBaseUrl | quote }}
+    # sd_token은 secret.yaml의 MONITORING_SD_TOKEN 환경변수로 주입됩니다
+
+    [monitoring.dashboards]
+    node_uid = {{ .Values.monitoring.dashboards.nodeUid | quote }}
+    rabbitmq_uid = {{ .Values.monitoring.dashboards.rabbitmqUid | quote }}
+    mysqld_uid = {{ .Values.monitoring.dashboards.mysqldUid | quote }}
+    memcached_uid = {{ .Values.monitoring.dashboards.memcachedUid | quote }}
+    etcd_uid = {{ .Values.monitoring.dashboards.etcdUid | quote }}
+    haproxy_uid = {{ .Values.monitoring.dashboards.haproxyUid | quote }}
+    libvirt_uid = {{ .Values.monitoring.dashboards.libvirtUid | quote }}
+    openstack_uid = {{ .Values.monitoring.dashboards.openstackUid | quote }}
+    ceph_uid = {{ .Values.monitoring.dashboards.cephUid | quote }}
+    instance_cpu_uid = {{ .Values.monitoring.dashboards.instanceCpuUid | quote }}
+    instance_gpu_uid = {{ .Values.monitoring.dashboards.instanceGpuUid | quote }}
+
+    {{- if .Values.notion.enabled }}
+
+    [notion]
+    # config_encryption_key는 secret.yaml의 NOTION_CONFIG_ENCRYPTION_KEY 환경변수로 주입됩니다
+    {{- end }}
+
+    [security]
+    admin_legacy_project_policy = {{ .Values.security.adminLegacyProjectPolicy }}
+    login_max_attempts = {{ .Values.security.loginMaxAttempts }}
+    login_lockout_seconds = {{ .Values.security.loginLockoutSeconds }}
+    login_backoff_base = {{ .Values.security.loginBackoffBase }}
