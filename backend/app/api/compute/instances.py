@@ -1269,7 +1269,12 @@ async def _prepare_prebuilt_file_storages(
     NFS share는 IP 기반 access rule이 필요하므로 project의 subnet CIDR로 rule을 추가한다.
     """
     svc_conn = await asyncio.to_thread(keystone.get_service_project_connection)
-    prebuilt_file_storages = await asyncio.to_thread(manila.list_file_storages, svc_conn, {"union_type": "prebuilt"})
+    prebuilt_file_storages = await asyncio.to_thread(
+        manila.list_file_storages,
+        svc_conn,
+        {"union_type": "prebuilt"},
+        include_public=True,
+    )
     prebuilt_map = {s.library_name: s for s in prebuilt_file_storages}
 
     # NFS share가 있을 경우 project subnet CIDR 미리 조회
