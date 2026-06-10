@@ -164,6 +164,68 @@ git push origin dev
 
 ---
 
+## 보안 개발 가이드라인
+
+> 이 프로젝트는 cloud-init/SSH로 **root 권한 원격 실행**을 수행하고 OpenStack 멀티테넌트
+> 리소스를 다룬다. 아래 규칙은 의무이며, 신규 코드 작성·리뷰 시 반드시 점검한다.
+> 전수 감사 방법론은 `security-audit` 스킬을 참조한다.
+
+### 1. 쉘·cloud-init·템플릿 보간 (명령 주입 방어)
+
+- SSH 원격 명령, cloud-init user-data, Jinja2 템플릿에 들어가는 **모든 동적 값**은
+  쿼팅한다. Python은 `shlex.quote()`, Jinja2 템플릿은 `| shlex_quote` 필터.
+- **외부 시스템(Manila/Keystone/Nova 등 OpenStack API) 반환값도 신뢰하지 않는다.**
+  export_path·cephx_user 등 API 응답도 공격자가 영향을 줄 수 있다고 가정하고 쿼팅한다.
+- 참조 구현: `app/services/ephemeral_mount.py:build_mount_command`,
+  `app/services/cloud_init_builder.py:_render_mount_lines`,
+  `app/services/cloudinit.py`(Jinja2 env에 `shlex_quote` 필터 등록, `autoescape=False`).
+
+### 2. 입력 검증 (화이트리스트 + 출력 쿼팅 이중 방어)
+
+- 사용자/외부 입력이 실행 컨텍스트(cloud-init YAML, K8s 라벨/테인트, 쉘)에 도달하면
+  **Pydantic validator로 화이트리스트 정규식 검증** 후, 출력 시 다시 쿼팅한다.
+- cloud-init YAML에 보간되는 값은 **개행 주입(YAML 구조 파괴 → 임의 write_files/runcmd)**
+  을 막기 위해 형식을 검증한다. 참조: `app/services/cloudinit.py:_validate_cloudinit_inputs`
+  (cephx_id/cephx_key/ceph_monitors), `app/models/k3s.py`(nodegroup labels/taints validator).
+
+### 3. fail-closed 원칙
+
+- 보안 검사(토큰 바인딩, 세션 블랙리스트, 리소스 소유권)는 예외 발생 시 **요청을 거부**한다.
+  `except Exception: pass` 또는 `logging.warning` 후 통과는 금지. 참조:
+  `app/api/deps.py`의 토큰 바인딩 검사(`fail-closed`, Redis 장애 시 401).
+- **예외**: 로그인 계정 잠금(`app/services/login_guard.py`)은 가용성 우선으로 fail-open(Redis
+  장애 시 잠금 생략)으로 **의도적으로 결정**됨. 이 동작은 변경하지 말고, 변경이 필요하면 사전 협의.
+
+### 4. 타이밍 안전 비교
+
+- API 토큰·다운로드 토큰·HMAC 서명·웹훅 시크릿 비교는 `==` 대신 `hmac.compare_digest` 사용.
+
+### 5. 인가 (IDOR/BOLA 방어)
+
+- 앱 DB 소유 리소스(k3s 클러스터, union 레이어, 라이브러리, 세션 등)는 path param ID로 접근 시
+  `resource.project_id == token_info["project_id"]` 소유권 검증을 **필수**로 한다.
+- 관리자 전용 엔드포인트는 `dependencies=[Depends(require_admin)]` 를 반드시 선언한다.
+- (참고: OpenStack 스코프 연결 `get_os_conn`은 Keystone이 테넌트 격리를 보장하므로 별도 검증 불필요.)
+
+### 6. 시크릿 관리
+
+- 하드코딩 금지. `config.py` 기본값에 실제 시크릿 금지(기본값은 production 부팅 시 거부되도록 유지).
+- 로그에 토큰/비밀번호/키 평문 출력 금지. 5xx 응답에 스택트레이스/내부 경로 노출 금지.
+- 비밀 값(password, secret, token, key)은 `generate_k8s.py`의 `render_secret()` 경유 → secret.yaml.
+  configmap(평문)에 들어가지 않도록 한다.
+
+### 7. 신규 엔드포인트 보안 체크리스트 (커밋 전 자문)
+
+1. 인증 의존성(`get_token_info`/`require_admin`)이 선언되었는가?
+2. 앱 DB 리소스라면 `project_id` 소유권을 검증하는가?
+3. 입력이 Pydantic 모델에서 검증되는가? (특히 실행 컨텍스트로 흐르는 값)
+4. 그 입력이 쉘/cloud-init/SSH까지 도달한다면 `shlex_quote`로 쿼팅되는가?
+5. 보안·인젝션 회귀 테스트를 `backend/tests/`에 추가했는가?
+   (참조: `tests/test_k3s_nodegroup_security.py`, `tests/test_ephemeral_mount.py`,
+   `tests/test_cloudinit.py`의 인젝션 방어 테스트.)
+
+---
+
 ## 커밋 규칙
 
 - 브랜치: 반드시 `dev`
