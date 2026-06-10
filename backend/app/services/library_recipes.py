@@ -11,6 +11,45 @@ _UV_BOOTSTRAP = (
     "curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh\nexport PATH=/usr/local/bin:$PATH\n"
 )
 
+# python311 설치 스크립트 (v2): Python ThreadPoolExecutor×16 병렬 복사
+# 측정값 (CephFS NFS4.2, RTT 20ms): cp -a=1766ms/파일 → parallel=108ms/파일 (16배 빠름)
+# 3946개 파일 기준: cp -a ≈116분 → parallel ≈7분
+_PYTHON311_INSTALL_SCRIPT = (
+    "uv python install cpython-3.11 --install-dir /tmp/py311\n"
+    # uv는 cpython-3.11-* (심볼릭 링크) → cpython-3.11.15-* (실제 디렉토리) 구조로 설치한다
+    "PYDIR=$(readlink -f /tmp/py311/cpython-3.11-linux-x86_64-gnu 2>/dev/null)\n"
+    'if [ -z "$PYDIR" ] || [ ! -d "$PYDIR" ]; then\n'
+    "  PYDIR=\"/tmp/py311/$(ls /tmp/py311/ | grep 'cpython-3\\.11\\.' | head -1)\"\n"
+    "fi\n"
+    "mkdir -p /mnt/share/usr/local\n"
+    "cat > /tmp/pycopy.py << 'PYEOF'\n"
+    "import os, sys, shutil, concurrent.futures\n"
+    "src, dst = sys.argv[1], sys.argv[2]\n"
+    "items = []\n"
+    "for dp, dirs, files in os.walk(src, followlinks=False):\n"
+    "    rel = os.path.relpath(dp, src)\n"
+    "    td = dst if rel == '.' else os.path.join(dst, rel)\n"
+    "    os.makedirs(td, exist_ok=True)\n"
+    "    for n in files: items.append((os.path.join(dp, n), os.path.join(td, n)))\n"
+    "    real = []\n"
+    "    for n in dirs:\n"
+    "        s = os.path.join(dp, n)\n"
+    "        if os.path.islink(s): items.append((s, os.path.join(td, n)))\n"
+    "        else: real.append(n)\n"
+    "    dirs[:] = real\n"
+    "def cp(pair):\n"
+    "    s, d = pair\n"
+    "    if os.path.islink(s):\n"
+    "        try: os.symlink(os.readlink(s), d)\n"
+    "        except FileExistsError: pass\n"
+    "    else: shutil.copy2(s, d)\n"
+    "with concurrent.futures.ThreadPoolExecutor(max_workers=16) as ex:\n"
+    "    list(ex.map(cp, items))\n"
+    "PYEOF\n"
+    'python3 /tmp/pycopy.py "$PYDIR" /mnt/share/usr/local\n'
+    "mkdir -p /mnt/share/usr/local/lib/python3.11/site-packages\n"
+)
+
 # 기본 레시피 정의 — DB seed와 DB 비가용 시 fallback에서 공유 사용
 _BUILTIN_RECIPE_DEFS: dict[str, dict] = {
     "python311": {
@@ -22,13 +61,7 @@ _BUILTIN_RECIPE_DEFS: dict[str, dict] = {
             {
                 "step": "install_python311",
                 "progress_pct": 80,
-                "script": (
-                    "uv python install cpython-3.11 --install-dir /tmp/py311\n"
-                    "PYDIR=$(ls /tmp/py311/ | grep cpython-3.11 | head -1)\n"
-                    "mkdir -p /mnt/share/usr/local\n"
-                    'cp -a /tmp/py311/"$PYDIR"/. /mnt/share/usr/local/\n'
-                    "mkdir -p /mnt/share/usr/local/lib/python3.11/site-packages\n"
-                ),
+                "script": _PYTHON311_INSTALL_SCRIPT,
             },
         ],
     },
@@ -170,6 +203,34 @@ async def seed_default_recipes() -> None:
             )
             _logger.info("[library_recipes] 기본 레시피 seed: %s", lib_id)
         await session.commit()
+
+    # python311 v2: 병렬 Python 복사 (cp -a → ThreadPoolExecutor×16)
+    # v1이 DB에 있어도 v2가 없으면 삽입 — get_recipe()는 최신 버전(desc)을 선택
+    async with factory() as session:
+        v2_exists = (
+            await session.execute(
+                select(LibraryRecipe).where(
+                    LibraryRecipe.library_id == "python311",
+                    LibraryRecipe.version == 2,
+                )
+            )
+        ).scalar_one_or_none()
+        if v2_exists is None:
+            entry = _BUILTIN_RECIPE_DEFS["python311"]
+            session.add(
+                LibraryRecipe(
+                    library_id="python311",
+                    version=2,
+                    commands=entry["commands"],
+                    apt_packages=entry.get("apt_packages", []),
+                    pip_packages=[],
+                    share_size_gb=entry["share_size_gb"],
+                    share_proto=entry["share_proto"],
+                    cloud_init_template_version=1,
+                )
+            )
+            await session.commit()
+            _logger.info("[library_recipes] python311 v2 seed: 병렬 Python 복사 적용")
 
     # pytorch = torch 동일 (alias)
     async with factory() as session:

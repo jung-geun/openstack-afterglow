@@ -43,8 +43,8 @@ from tests.integration.ssh_helper import (
 
 pytestmark = pytest.mark.slow
 
-# 빌드 완료 대기 최대 시간 (초) — uv python install ≈ 5분 + cloud-init 오버헤드
-BUILD_TIMEOUT = int(os.getenv("AFTERGLOW_TEST_BUILD_TIMEOUT", "2400"))
+# 빌드 완료 대기 최대 시간 (초) — parallel Python copy ≈ 7분 + cloud-init, _SHUTOFF_MAX_WAIT=3600에 맞춤
+BUILD_TIMEOUT = int(os.getenv("AFTERGLOW_TEST_BUILD_TIMEOUT", "3600"))
 # VM ACTIVE 대기 최대 시간 (초)
 VM_ACTIVE_TIMEOUT = int(os.getenv("AFTERGLOW_TEST_VM_TIMEOUT", "600"))
 

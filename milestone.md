@@ -3730,10 +3730,9 @@ terminal mutation 후 캐시를 직접 패치(surgical write-through)해 mutatio
 
 - [x] `uv run pytest tests/test_existing_share_build.py -v` — 3 passed
 - [x] `uv run ruff check .` — All checks passed
-- [x] **라이브 E2E 통과** (2026-06-10, `run_e2e_python311.sh`):
-  - image=ubuntu-24.04-2026-04-28, flavor=cpu.4c_4g, Manila share type=cephfsnfstype
-  - Step 1: `POST /api/file-storage` → share 생성 (share_id=7e8a1442)
-  - Steps 2–3: 빌더 VM 부팅 → uv python 3.11 설치 → sentinel → prebuilt 승격 (DB 비가용 모드, share 메타데이터 폴링)
-  - Steps 4–5: 빌더 VM/port 자동 teardown
-  - Steps 6–7: consumer VM ACTIVE → FIP → SSH → `/opt/layers/merged` overlayfs 마운트 확인 → `python3.11` 실행 성공
-  - pytest exit code 0 (1 passed)
+- [ ] **라이브 E2E 미완료** (2026-06-10, 작업 중):
+  - Step 1: `POST /api/file-storage` → share 생성 ✓
+  - Step 2: 빌더 VM 부팅 → uv install → python 3.11 설치 ✓
+  - **Step 3 미완료**: `cp -a` (uv CPython 트리 → NFS share)가 CephFS per-file 메타데이터 오버헤드로 40분+ 소요 중. `_SHUTOFF_MAX_WAIT=1800`(30분)이 너무 짧아 프로덕션에서 timeout 처리됨
+  - Steps 4–7: 미실행 (build 미완료로 consumer VM 단계 미도달)
+  - pytest exit code 0은 in-process `asyncio.create_task`가 pytest 프로세스 종료와 함께 소멸하여 발생한 오탐

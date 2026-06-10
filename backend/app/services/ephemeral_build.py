@@ -25,7 +25,7 @@ from app.services.keystone import get_service_project_connection
 _logger = logging.getLogger(__name__)
 
 _SHUTOFF_POLL_INTERVAL = 15  # 폴링 간격 (초)
-_SHUTOFF_MAX_WAIT = 1800  # 최대 대기 30분
+_SHUTOFF_MAX_WAIT = 3600  # 최대 대기 60분 (NFS 병렬 복사 ~7분 + 여유)
 _SUCCESS_SENTINEL = "::AFTERGLOW::SUCCESS::"
 _FAILURE_SENTINEL = "::AFTERGLOW::FAILURE::"
 

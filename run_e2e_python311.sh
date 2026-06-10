@@ -37,8 +37,8 @@ BACKEND_DIR="$SCRIPT_DIR/backend"
 # ed25519 키 (./run_e2e_python311.sh 실행 전 ssh-keygen으로 생성됨)
 : "${AFTERGLOW_TEST_SSH_KEY:=$HOME/.ssh/afterglow-e2e}"
 : "${AFTERGLOW_TEST_SSH_USER:=ubuntu}"
-# 빌드 타임아웃 (초) — uv python install ≈ 5분 + cloud-init
-: "${AFTERGLOW_TEST_BUILD_TIMEOUT:=2400}"
+# 빌드 타임아웃 (초) — parallel Python copy ≈ 7분 + cloud-init 오버헤드, _SHUTOFF_MAX_WAIT=3600에 맞춤
+: "${AFTERGLOW_TEST_BUILD_TIMEOUT:=3600}"
 : "${AFTERGLOW_TEST_VM_TIMEOUT:=600}"
 
 # ── 출력 ────────────────────────────────────────────────────
@@ -66,7 +66,7 @@ chmod 600 "$AFTERGLOW_TEST_SSH_KEY"
 # ── pytest 실행 ──────────────────────────────────────────────
 cd "$BACKEND_DIR"
 export AFTERGLOW_ALLOW_INSECURE=1
-# E2E 테스트는 BUILD_TIMEOUT(40분)보다 access JWT TTL(기본 15분)이 짧아서 폴링 중 401 발생.
+# E2E 테스트는 BUILD_TIMEOUT(60분)보다 access JWT TTL(기본 15분)이 짧아서 폴링 중 401 발생.
 # get_settings()는 이미 설정된 env var을 TOML 값으로 덮어쓰지 않으므로, 여기서 먼저 설정.
 export JWT_ACCESS_TTL=7200  # 2시간 — E2E 전용 (프로덕션 환경에서는 사용 금지)
 export AFTERGLOW_TEST_IMAGE_ID
