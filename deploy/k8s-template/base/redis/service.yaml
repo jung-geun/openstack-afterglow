@@ -9,6 +9,7 @@ spec:
   type: ClusterIP
   selector:
     app: redis
+    statefulset.kubernetes.io/pod-name: redis-0
   ports:
     - port: 6379
       targetPort: 6379
