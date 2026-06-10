@@ -36,7 +36,7 @@ _FAILURE_SENTINEL = "::AFTERGLOW::FAILURE::"
 
 
 async def _update_db(
-    build_id: int,
+    build_id: int | None,
     *,
     status: str | None = None,
     cloud_init_status: str | None = None,
@@ -55,6 +55,8 @@ async def _update_db(
     from app.database import get_session_factory
     from app.models.db import LibraryBuild
 
+    if build_id is None:
+        return
     factory = get_session_factory()
     if factory is None:
         return
@@ -97,7 +99,7 @@ async def _update_db(
 # ---------------------------------------------------------------------------
 
 
-async def _wait_for_shutoff(conn, server_id: str, build_db_id: int, build_token: str) -> None:
+async def _wait_for_shutoff(conn, server_id: str, build_db_id: int | None, build_token: str) -> None:
     """VM이 SHUTOFF(또는 ERROR) 될 때까지 폴링한다."""
     from app.services import nova
 
@@ -136,7 +138,7 @@ async def _wait_for_shutoff(conn, server_id: str, build_db_id: int, build_token:
 
 async def run_ephemeral_build(
     library_id: str,
-    build_db_id: int,
+    build_db_id: int | None,
     existing_share_id: str | None = None,
 ) -> None:
     """ephemeral VM cloud-init 빌드 메인 함수. 백그라운드 태스크로 실행된다.

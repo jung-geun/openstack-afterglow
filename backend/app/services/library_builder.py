@@ -172,8 +172,11 @@ async def _ephemeral_build_task(library_id: str, build_db_id: int | None, existi
     """백그라운드 ephemeral 빌드 래퍼 — 완료 시 _active_builds에서 제거한다."""
     try:
         if build_db_id is None:
-            _logger.error("[builder] DB ID 없이 ephemeral 빌드 실행 불가: %s", library_id)
-            return
+            _logger.warning(
+                "[builder] DB 레코드 없이 ephemeral 빌드 진행 (DB 비가용 모드): %s. "
+                "진행 상태는 share 메타데이터(union_status)로만 추적됩니다.",
+                library_id,
+            )
         from app.services.ephemeral_build import run_ephemeral_build
 
         await run_ephemeral_build(library_id, build_db_id, existing_share_id=existing_share_id)

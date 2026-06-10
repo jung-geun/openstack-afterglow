@@ -99,12 +99,30 @@ async def test_python311_lifecycle_low_level(admin_client, integration_resources
         )
 
         # ── 빌드 완료 대기 ─────────────────────────────────────────────────
-        final_status = await _wait_for_build(admin_client, build_id, timeout=BUILD_TIMEOUT)
-        assert final_status == "complete", (
-            f"빌드가 complete 상태에 도달하지 못했습니다 (status={final_status}). "
-            f"GET /api/admin/libraries/builds/{build_id} 에서 console_log_excerpt 확인. "
-            "uv python install 실패 또는 NFS mount 오류 가능성."
-        )
+        # build_id=None은 DB 비가용 시 발생 — share 메타데이터 폴링으로 fallback
+        if build_id is not None:
+            final_status = await _wait_for_build(admin_client, build_id, timeout=BUILD_TIMEOUT)
+            assert final_status == "complete", (
+                f"빌드가 complete 상태에 도달하지 못했습니다 (status={final_status}). "
+                f"GET /api/admin/libraries/builds/{build_id} 에서 console_log_excerpt 확인. "
+                "uv python install 실패 또는 NFS mount 오류 가능성."
+            )
+        else:
+            # DB 없이 빌드 중: share 메타데이터의 union_status=ready 대기
+            import warnings
+
+            warnings.warn(
+                f"build_id가 None입니다 (DB 비가용 모드). "
+                f"share {share_id} 메타데이터 폴링으로 빌드 완료를 판정합니다.",
+                stacklevel=1,
+            )
+            final_share_status = await _wait_for_share_ready(admin_client, share_id, timeout=BUILD_TIMEOUT)
+            assert final_share_status == "ready", (
+                f"share {share_id}의 union_status가 ready에 도달하지 못했습니다 "
+                f"(status={final_share_status}). "
+                "ephemeral 빌드 실패 가능성. "
+                f"GET /api/file-storage/{share_id} 메타데이터를 확인하세요."
+            )
 
         # ── Step 4·6: 새 VM — python311 prebuilt share RO 오버레이 마운트 ─
         resp = await admin_client.post(
@@ -229,6 +247,23 @@ async def _find_build_id(client, library_id: str, share_id: str, timeout: int = 
             if build.get("file_storage_id") == share_id:
                 return build["id"]
     return None
+
+
+async def _wait_for_share_ready(client, share_id: str, timeout: int) -> str:
+    """share metadata union_status가 terminal 상태까지 폴링. 최종 status 반환.
+
+    _handle_success: union_status=ready
+    에러 경로:       union_status=error | indeterminate | cancelled
+    """
+    terminal = {"ready", "error", "indeterminate", "cancelled"}
+    for _ in range(timeout // 15):
+        await asyncio.sleep(15)
+        resp = await client.get(f"/api/file-storage/{share_id}")
+        if resp.status_code == 200:
+            status = resp.json().get("metadata", {}).get("union_status", "")
+            if status in terminal:
+                return status
+    return "TIMEOUT"
 
 
 async def _wait_for_build(client, build_id: int, timeout: int) -> str:
