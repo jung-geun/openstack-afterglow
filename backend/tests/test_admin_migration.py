@@ -190,7 +190,9 @@ def test_get_server_migration_status_active():
     srv.compute_host = "src-host"
     conn.compute.get_server.return_value = srv
     conn.compute.server_migrations.return_value = [
-        _make_server_migration(source_compute="src-host", dest_compute="dst-host", memory_total_bytes=1000, memory_processed_bytes=450)
+        _make_server_migration(
+            source_compute="src-host", dest_compute="dst-host", memory_total_bytes=1000, memory_processed_bytes=450
+        )
     ]
 
     result = nova.get_server_migration_status(conn, "server-1")
