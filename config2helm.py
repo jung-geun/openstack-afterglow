@@ -4,6 +4,10 @@
 config.toml (및 config.*.toml 오버라이드)을 읽어
 helm/afterglow/values-override.yaml (또는 지정 경로)을 생성합니다.
 
+config.toml 옆에 config.gpu.toml(GPU 디바이스 맵 오버라이드)이 있으면
+원본 텍스트가 gpu.configToml 값으로 포함되어, 차트 기본값
+(helm/afterglow/files/config.gpu.toml) 대신 configmap에 렌더링됩니다.
+
 생성된 파일은 values.yaml 위에 덮어쓰는 오버라이드로 사용합니다:
     helm upgrade --install afterglow helm/afterglow \\
         -f helm/afterglow/values-prod.yaml \\
@@ -421,6 +425,15 @@ def main() -> None:
 
     include_secrets = not args.no_secrets
     values = convert(cfg, include_secrets=include_secrets)
+
+    # config.gpu.toml(GPU 디바이스 맵 오버라이드)이 있으면 원본 텍스트를
+    # gpu.configToml로 주입 — 차트가 기본값(files/config.gpu.toml) 대신 사용한다.
+    gpu_toml_path = config_path.parent / "config.gpu.toml"
+    if gpu_toml_path.exists():
+        values.setdefault("gpu", {})["configToml"] = gpu_toml_path.read_text(
+            encoding="utf-8"
+        )
+        print(f"  {green('✓')} GPU 디바이스 맵 포함: {dim(str(gpu_toml_path))}")
 
     header_lines = [
         "config.toml → Helm values 자동 변환 파일",
