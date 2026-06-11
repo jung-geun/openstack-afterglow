@@ -649,6 +649,9 @@ def _server_to_info(s) -> InstanceInfo:
         if raw_fault:
             fault = dict(raw_fault) if not isinstance(raw_fault, dict) else raw_fault
 
+    _h = getattr(s, "compute_host", None)
+    host = _h if isinstance(_h, str) else None
+
     return InstanceInfo(
         id=s.id,
         name=s.name,
@@ -669,5 +672,5 @@ def _server_to_info(s) -> InstanceInfo:
         project_id=getattr(s, "project_id", None) or getattr(s, "tenant_id", None),
         fault=fault,
         # 관리자 스코프에서만 채워짐 (OS-EXT-SRV-ATTR:host → compute_host)
-        host=getattr(s, "compute_host", None),
+        host=host,
     )
