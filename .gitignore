@@ -217,12 +217,17 @@ package
 
 config.toml
 config.*.toml
+# Helm 차트의 GPU 디바이스 맵은 시크릿이 아니므로 추적 (ArgoCD가 git에서 읽음)
+!helm/afterglow/files/config.gpu.toml
 backend/tests/integration/credentials.toml
 
 # Helm 시크릿 포함 로컬 values 파일
 helm/afterglow/values-local.yaml
 helm/afterglow/values-prod.yaml
 helm/afterglow/values-dev.yaml
+
+# ArgoCD Helm Application 생성물 (valuesObject에 시크릿 포함)
+deploy/k8s/argocd-application-*.yaml
 
 # 로그 파일
 logs/

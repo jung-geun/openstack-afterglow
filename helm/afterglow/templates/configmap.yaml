@@ -33,7 +33,7 @@ data:
     manila_endpoint = {{ .Values.openstack.manilaEndpoint | quote }}
     manila_share_network_id = {{ .Values.openstack.manilaShareNetworkId | quote }}
     manila_share_type = {{ .Values.openstack.manilaShareType | quote }}
-    manila_nfs_share_type = {{ .Values.openstack.manitaNfsShareType | quote }}
+    manila_nfs_share_type = {{ .Values.openstack.manilaNfsShareType | quote }}
     manila_nfs_root_squash = {{ .Values.openstack.manilaNfsRootSquash }}
     manila_nfs_sec_flavor = {{ .Values.openstack.manilaNfsSecFlavor | quote }}
     manila_cephx_key_timeout_seconds = {{ .Values.openstack.manilaCephxKeyTimeoutSeconds }}
@@ -315,3 +315,5 @@ data:
     login_max_attempts = {{ .Values.security.loginMaxAttempts }}
     login_lockout_seconds = {{ .Values.security.loginLockoutSeconds }}
     login_backoff_base = {{ .Values.security.loginBackoffBase }}
+  config.gpu.toml: |
+{{ .Files.Get "files/config.gpu.toml" | indent 4 }}

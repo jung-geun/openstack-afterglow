@@ -76,7 +76,7 @@ openstack:
   manilaEndpoint: ""
   manilaShareNetworkId: ""
   manilaShareType: "cephfs"
-  manitaNfsShareType: "nfstype"
+  manilaNfsShareType: "nfstype"
   manilaNfsRootSquash: true
   manilaNfsSecFlavor: "sys"
   manilaCephxKeyTimeoutSeconds: 300
@@ -147,6 +147,46 @@ nova:
   defaultNetworkExternalId: ""
 
 # -----------------------------------------------------------------------------
+# [builder]
+# -----------------------------------------------------------------------------
+builder:
+  imageId: ""
+  flavorId: ""
+  networkId: ""
+  persistentServerId: ""
+  sshUser: "ubuntu"
+  sshKeyPath: "/etc/afterglow/ssh/builder.key"
+  sshHost: ""
+  floatingNetworkId: ""
+  buildTimeout: 3600
+
+# -----------------------------------------------------------------------------
+# [union]
+# -----------------------------------------------------------------------------
+union:
+  layerStoreRwShareId: ""
+  layerStoreRoShareId: ""
+  manifestStoreShareId: ""
+
+# -----------------------------------------------------------------------------
+# [gpu]
+# -----------------------------------------------------------------------------
+gpu:
+  availableVisible: false
+
+# -----------------------------------------------------------------------------
+# [services]
+# -----------------------------------------------------------------------------
+services:
+  magnum: false
+  manila: true
+  zun: false
+  k3s: true
+  swift: false
+  trove: false
+  barbican: false
+
+# -----------------------------------------------------------------------------
 # [k3s]
 # -----------------------------------------------------------------------------
 k3s:
@@ -192,46 +232,6 @@ k3s:
   stampedeScaleDownCooldown: 300
   stampedeScaleDownThreshold: 0.3
   stampedeResourceHeadroomFactor: 1.2
-
-# -----------------------------------------------------------------------------
-# [builder]
-# -----------------------------------------------------------------------------
-builder:
-  imageId: ""
-  flavorId: ""
-  networkId: ""
-  persistentServerId: ""
-  sshUser: "ubuntu"
-  sshKeyPath: "/etc/afterglow/ssh/builder.key"
-  sshHost: ""
-  floatingNetworkId: ""
-  buildTimeout: 3600
-
-# -----------------------------------------------------------------------------
-# [union]
-# -----------------------------------------------------------------------------
-union:
-  layerStoreRwShareId: ""
-  layerStoreRoShareId: ""
-  manifestStoreShareId: ""
-
-# -----------------------------------------------------------------------------
-# [gpu]
-# -----------------------------------------------------------------------------
-gpu:
-  availableVisible: false
-
-# -----------------------------------------------------------------------------
-# [services]
-# -----------------------------------------------------------------------------
-services:
-  magnum: false
-  manila: true
-  zun: false
-  k3s: true
-  swift: false
-  trove: false
-  barbican: false
 
 # -----------------------------------------------------------------------------
 # [database]
@@ -314,7 +314,7 @@ monitoring:
     image: "prom/prometheus:v2.51.0"
     replicas: 1
   opensearch:
-    enabled: true
+    enabled: false
     image: "opensearchproject/opensearch:2.13.0"
     replicas: 1
     storageSize: "10Gi"
