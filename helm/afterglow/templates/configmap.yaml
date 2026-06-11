@@ -316,4 +316,8 @@ data:
     login_lockout_seconds = {{ .Values.security.loginLockoutSeconds }}
     login_backoff_base = {{ .Values.security.loginBackoffBase }}
   config.gpu.toml: |
+{{- if .Values.gpu.configToml }}
+{{ .Values.gpu.configToml | indent 4 }}
+{{- else }}
 {{ .Files.Get "files/config.gpu.toml" | indent 4 }}
+{{- end }}
