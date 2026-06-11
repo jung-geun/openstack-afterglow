@@ -46,6 +46,14 @@ _DEFAULT_CATALOG: list[LibraryConfig] = [
         packages=["jupyterlab==4.2.0", "ipykernel"],
         depends_on=["python311"],
     ),
+    LibraryConfig(
+        id="apache-php",
+        name="Apache + PHP + phpMyAdmin",
+        version="8.x",
+        packages=["apache2", "libapache2-mod-php", "php", "php-mysql", "phpmyadmin"],
+        depends_on=[],
+        share_proto="NFS",
+    ),
 ]
 
 # 메모리 캐시 — 기동 초기에는 seed 로 초기화.
