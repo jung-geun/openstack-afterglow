@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { auth, clearAuth, setAuth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
@@ -17,7 +18,8 @@
 		try {
 			const [projs, profile] = await Promise.all([
 				api.get<Project[]>('/api/auth/projects/recent', $auth.token ?? undefined),
-				api.get<{ default_project_id: string }>('/api/profile', $auth.token ?? undefined).catch(() => null),
+				// Fix 3: 프로필 401은 .catch(()=>null)로 의도적으로 허용 — 전역 로그아웃 억제
+			api.get<{ default_project_id: string }>('/api/profile', $auth.token ?? undefined, undefined, { suppressAuthRedirect: true }).catch(() => null),
 			]);
 			projects = projs;
 
@@ -35,8 +37,14 @@
 		}
 	}
 
-	$effect(() => {
-		if ($auth.token) load();
+	// Fix 1: 토큰 변경에 반응하는 $effect 대신 onMount 1회성 로드로 전환.
+	// 기존 $effect는 selectProject() → setAuth(새 토큰) → effect 재실행 → load() 재진입 루프를 일으킴.
+	onMount(() => {
+		if ($auth.token) {
+			load();
+		} else {
+			goto('/');
+		}
 	});
 
 	async function selectProject(proj: Project) {

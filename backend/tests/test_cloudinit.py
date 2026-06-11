@@ -271,3 +271,78 @@ def test_envmgr_rotate_key_uses_printf_not_heredoc():
     assert "printf '    key = %s\\n'" in yaml_str
     # 형식 검증 라인 존재
     assert "NEW_KEY 형식이 invalid" in yaml_str
+
+
+# ---------------------------------------------------------------------------
+# cloud-init 보간 값 형식 검증 (YAML 인젝션 방어 — 보안)
+# ---------------------------------------------------------------------------
+
+
+def _ceph_fs(**over) -> dict:
+    base = {
+        "name": "torch",
+        "share_proto": "CEPHFS",
+        "export_path": "",
+        "cephx_id": "builder-abc",
+        "cephx_key": "QVFCc2VjcmV0Kz09",  # 유효 base64
+        "mount_options": "",
+    }
+    base.update(over)
+    return base
+
+
+def test_cephx_key_with_newline_rejected():
+    """개행이 섞인 cephx_key는 YAML 구조 파괴를 유발하므로 거부된다."""
+    import pytest
+
+    fs = [_ceph_fs(cephx_key="QVFC\nkey2: stolen")]
+    with pytest.raises(ValueError, match="cephx_key"):
+        generate_userdata(
+            libraries=[],
+            strategy="prebuilt",
+            file_storages=fs,
+            upper_device="/dev/vdb",
+            ceph_monitors="10.0.0.1:6789",
+            gpu_available=False,
+        )
+
+
+def test_cephx_id_with_shell_meta_rejected():
+    """cephx_id에 경로/특수문자가 섞이면 거부된다."""
+    import pytest
+
+    fs = [_ceph_fs(cephx_id="../../etc/evil")]
+    with pytest.raises(ValueError, match="cephx_id"):
+        generate_userdata(
+            libraries=[],
+            strategy="prebuilt",
+            file_storages=fs,
+            upper_device="/dev/vdb",
+            ceph_monitors="10.0.0.1:6789",
+            gpu_available=False,
+        )
+
+
+def test_ceph_monitors_with_newline_rejected():
+    """개행이 섞인 ceph_monitors는 거부된다."""
+    import pytest
+
+    with pytest.raises(ValueError, match="ceph_monitors"):
+        generate_userdata(
+            **{**_COMMON_ARGS, "ceph_monitors": "10.0.0.1:6789\nmalicious: true"},
+        )
+
+
+def test_valid_ceph_inputs_pass():
+    """정상 형식의 cephx_id/cephx_key/ceph_monitors는 통과한다."""
+    fs = [_ceph_fs()]
+    encoded = generate_userdata(
+        libraries=[],
+        strategy="prebuilt",
+        file_storages=fs,
+        upper_device="/dev/vdb",
+        ceph_monitors="10.0.0.1:6789,10.0.0.2:6789",
+        gpu_available=False,
+    )
+    yaml_str = _decode_userdata(encoded)
+    assert "builder-abc" in yaml_str

@@ -125,6 +125,59 @@ def verify_nfs_mounts(
     return len(nfs_lines) >= expected_min_count
 
 
+def verify_python_executes(
+    host: str,
+    key_path: str,
+    version: str = "3.11",
+    user: str = "ubuntu",
+) -> dict:
+    """overlay에서 python<version>이 실제 실행되는지 검증한다.
+
+    uv의 relocatable standalone CPython이 cp -a + overlayfs를 거쳐도
+    동작하는지가 라이브러리 기능의 핵심 검증 포인트다.
+
+    Returns:
+        {
+          "which_ok": bool,   # command -v python<version>이 /opt/layers/merged/...을 가리키는지
+          "exec_ok": bool,    # python<version> -c 'print(sys.version)'이 <version>.x를 반환하는지
+          "version_str": str, # 실제 출력된 버전 문자열 (없으면 "")
+          "which_path": str,  # which 경로 (없으면 "")
+        }
+    """
+    binary = f"python{version}"
+    expected_prefix = "/opt/layers/merged"
+
+    # which 검사
+    rc_which, stdout_which, _ = ssh_run(
+        host,
+        key_path,
+        f"command -v {binary} 2>/dev/null || true",
+        user=user,
+        timeout=15,
+    )
+    which_path = stdout_which.strip()
+    which_ok = which_path.startswith(expected_prefix)
+
+    # 실행 검사 — PATH 대신 절대경로로 직접 호출해 overlayfs 경유를 명시적으로 확인
+    abs_binary = f"{expected_prefix}/usr/local/bin/{binary}"
+    rc_exec, stdout_exec, _ = ssh_run(
+        host,
+        key_path,
+        f"{abs_binary} -c 'import sys; print(sys.version)' 2>/dev/null || true",
+        user=user,
+        timeout=20,
+    )
+    version_str = stdout_exec.strip()
+    exec_ok = version_str.startswith(version)
+
+    return {
+        "which_ok": which_ok,
+        "exec_ok": exec_ok,
+        "version_str": version_str,
+        "which_path": which_path,
+    }
+
+
 def verify_envmgr_status(host: str, key_path: str, user: str = "ubuntu") -> dict:
     """`envmgr-use --status` 출력 파싱. envmgr 미설치 시 빈 dict 반환."""
     rc, stdout, _ = ssh_run(host, key_path, "envmgr-use --status 2>/dev/null || true", user=user)

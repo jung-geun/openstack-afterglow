@@ -235,6 +235,65 @@ class TestBuildMountCommand:
 
 
 # ---------------------------------------------------------------------------
+# build_mount_command — 쉘 인젝션 방어 (보안)
+# ---------------------------------------------------------------------------
+
+
+class TestBuildMountCommandInjection:
+    """Manila API 반환값(export_path/cephx_user)에 쉘 메타문자가 섞여도
+    SSH 명령에서 명령 주입이 일어나지 않도록 shlex.quote 적용을 검증한다."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "malicious",
+        [
+            "host:/p;rm -rf /",
+            "host:/p$(whoami)",
+            "host:/p`id`",
+            "host:/p\nsudo evil",
+            "host:/p && curl evil",
+        ],
+    )
+    async def test_nfs_export_path_is_quoted(self, malicious):
+        """악의적 export_path가 단일 토큰으로 따옴표 래핑되어 명령 분리가 차단된다."""
+        svc_conn = MagicMock()
+
+        with patch(
+            "app.services.ephemeral_mount.manila.get_export_locations",
+            return_value=[malicious],
+        ):
+            from app.services.ephemeral_mount import build_mount_command
+
+            cmd = await build_mount_command(svc_conn, "share-abc", "NFS", {})
+
+        # 위험 시퀀스가 따옴표 밖에서 raw로 노출되지 않아야 한다.
+        mount_line = next(line for line in cmd.splitlines() if "mount -t nfs" in line)
+        assert "'" in mount_line  # shlex.quote가 작은따옴표로 래핑
+        for token in (";", "$(", "`", "&&"):
+            if token in malicious:
+                # 메타문자는 반드시 따옴표 안에만 존재 (raw 분리 불가)
+                assert f" {token}" not in mount_line.replace(f"'{malicious}'", "")
+
+    @pytest.mark.asyncio
+    async def test_cephfs_user_and_mons_quoted(self):
+        """cephx_user / ceph_mons:path 가 shlex.quote 처리된다."""
+        svc_conn = MagicMock()
+        access_rule = {"access_to": "evil$(id)", "access_key": "sec"}
+
+        with patch(
+            "app.services.ephemeral_mount.manila.get_export_locations",
+            return_value=["m1,m2:/v;reboot"],
+        ):
+            from app.services.ephemeral_mount import build_mount_command
+
+            cmd = await build_mount_command(svc_conn, "share-abc", "CEPHFS", access_rule)
+
+        mount_line = next(line for line in cmd.splitlines() if "mount -t ceph" in line)
+        assert "'evil$(id)'" in mount_line
+        assert "'m1,m2:/v;reboot'" in mount_line
+
+
+# ---------------------------------------------------------------------------
 # verify_mount_via_ssh
 # ---------------------------------------------------------------------------
 

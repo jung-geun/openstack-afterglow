@@ -25,7 +25,7 @@ from app.services.keystone import get_service_project_connection
 _logger = logging.getLogger(__name__)
 
 _SHUTOFF_POLL_INTERVAL = 15  # 폴링 간격 (초)
-_SHUTOFF_MAX_WAIT = 1800  # 최대 대기 30분
+_SHUTOFF_MAX_WAIT = 3600  # 최대 대기 60분 (NFS 병렬 복사 ~7분 + 여유)
 _SUCCESS_SENTINEL = "::AFTERGLOW::SUCCESS::"
 _FAILURE_SENTINEL = "::AFTERGLOW::FAILURE::"
 
@@ -36,7 +36,7 @@ _FAILURE_SENTINEL = "::AFTERGLOW::FAILURE::"
 
 
 async def _update_db(
-    build_id: int,
+    build_id: int | None,
     *,
     status: str | None = None,
     cloud_init_status: str | None = None,
@@ -55,6 +55,8 @@ async def _update_db(
     from app.database import get_session_factory
     from app.models.db import LibraryBuild
 
+    if build_id is None:
+        return
     factory = get_session_factory()
     if factory is None:
         return
@@ -97,11 +99,21 @@ async def _update_db(
 # ---------------------------------------------------------------------------
 
 
-async def _wait_for_shutoff(conn, server_id: str, build_db_id: int, build_token: str) -> None:
-    """VM이 SHUTOFF(또는 ERROR) 될 때까지 폴링한다."""
+async def _wait_for_shutoff(conn, server_id: str, build_db_id: int | None, build_token: str) -> tuple[bool, bool]:
+    """VM이 SHUTOFF(또는 ERROR) 될 때까지 폴링한다.
+
+    Returns:
+        (early_success, early_failure): ACTIVE 상태에서 sentinel이 감지된 경우 True.
+        SHUTOFF 후 console이 없는 환경에서 caller가 fallback으로 사용한다.
+    """
     from app.services import nova
 
     waited = 0
+    early_success = False
+    early_failure = False
+    success_tok = f"{_SUCCESS_SENTINEL}{build_token}"
+    failure_tok = f"{_FAILURE_SENTINEL}{build_token}"
+
     while waited < _SHUTOFF_MAX_WAIT:
         await asyncio.sleep(_SHUTOFF_POLL_INTERVAL)
         waited += _SHUTOFF_POLL_INTERVAL
@@ -111,15 +123,16 @@ async def _wait_for_shutoff(conn, server_id: str, build_db_id: int, build_token:
 
         if status in ("SHUTOFF", "ERROR"):
             _logger.info("[ephemeral_build] VM %s 상태: %s (elapsed=%ds)", server_id, status, waited)
-            return
+            return (early_success, early_failure)
 
         if status == "ACTIVE" and waited > 60:
             try:
                 partial = await asyncio.to_thread(nova.get_console_output, conn, server_id, 200)
-                success_tok = f"{_SUCCESS_SENTINEL}{build_token}"
-                failure_tok = f"{_FAILURE_SENTINEL}{build_token}"
-                if success_tok in partial or failure_tok in partial:
+                if success_tok in partial:
+                    early_success = True
                     _logger.info("[ephemeral_build] sentinel 조기 감지 — SHUTOFF 대기 계속")
+                elif failure_tok in partial:
+                    early_failure = True
             except Exception:
                 pass
 
@@ -134,8 +147,21 @@ async def _wait_for_shutoff(conn, server_id: str, build_db_id: int, build_token:
 # ---------------------------------------------------------------------------
 
 
-async def run_ephemeral_build(library_id: str, build_db_id: int) -> None:
-    """ephemeral VM cloud-init 빌드 메인 함수. 백그라운드 태스크로 실행된다."""
+async def run_ephemeral_build(
+    library_id: str,
+    build_db_id: int | None,
+    existing_share_id: str | None = None,
+) -> None:
+    """ephemeral VM cloud-init 빌드 메인 함수. 백그라운드 태스크로 실행된다.
+
+    Args:
+        library_id:        빌드할 라이브러리 ID.
+        build_db_id:       LibraryBuild DB 레코드 ID.
+        existing_share_id: 사전 생성된 Manila share ID. 지정 시 새 share를 생성하지
+                           않고 이 share를 빌드 대상으로 사용한다. 빌더는 service
+                           프로젝트 conn으로 동작하므로, 이 share가 service conn에서
+                           조회 가능해야 한다(service 프로젝트 소유 또는 공개 share).
+    """
     settings = get_settings()
     conn = await asyncio.to_thread(get_service_project_connection)
 
@@ -162,18 +188,45 @@ async def run_ephemeral_build(library_id: str, build_db_id: int) -> None:
         if not image_id:
             raise RuntimeError("빌드 이미지 ID가 설정되지 않았습니다 (config.toml [builder] image_id 필요)")
 
-        # ── 2. Manila share 생성 ──────────────────────────────────────────
-        await _update_db(build_db_id, status="creating_share", progress_step="Manila share 생성", progress_pct=5)
-        share_id = await ephemeral_mount.create_builder_share(
-            conn,
-            name=f"union-prebuilt-{library_id}-{build_token[:8]}",
-            size_gb=recipe.share_size_gb,
-            share_proto=proto,
-            metadata={
-                "union_library": library_id,
-                "union_version": library_version,
-            },
-        )
+        # ── 2. Manila share 생성 or 기존 share 사용 ─────────────────────────
+        if existing_share_id:
+            # 저수준 경로: 사전 생성된 share를 빌드 대상으로 사용
+            await _update_db(build_db_id, status="creating_share", progress_step="기존 share 검증", progress_pct=5)
+            try:
+                await asyncio.to_thread(manila.get_file_storage, conn, existing_share_id)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"사전 생성 share {existing_share_id}를 service 프로젝트에서 찾을 수 없습니다. "
+                    "share가 service 프로젝트 소속이거나 공개(is_public=True) 상태여야 합니다. "
+                    f"원인: {exc}"
+                ) from exc
+            share_id = existing_share_id
+            # 빌드 시작 메타데이터 세팅 — _handle_success에서 prebuilt로 승격됨
+            await asyncio.to_thread(
+                manila.update_share_metadata,
+                conn,
+                share_id,
+                {
+                    "union_type": "ephemeral-build",
+                    "union_status": "building",
+                    "union_library": library_id,
+                    "union_version": library_version,
+                },
+            )
+            _logger.info("[ephemeral_build] 기존 share 사용: %s (library=%s)", share_id, library_id)
+        else:
+            # 기본 경로: 새 share 생성
+            await _update_db(build_db_id, status="creating_share", progress_step="Manila share 생성", progress_pct=5)
+            share_id = await ephemeral_mount.create_builder_share(
+                conn,
+                name=f"union-prebuilt-{library_id}-{build_token[:8]}",
+                size_gb=recipe.share_size_gb,
+                share_proto=proto,
+                metadata={
+                    "union_library": library_id,
+                    "union_version": library_version,
+                },
+            )
         await _update_db(build_db_id, file_storage_id=share_id)
 
         # ── 3. Neutron port 사전 생성 (IP 예약) ───────────────────────────
@@ -281,22 +334,32 @@ async def run_ephemeral_build(library_id: str, build_db_id: int) -> None:
 
         # ── 7. SHUTOFF 폴링 ───────────────────────────────────────────────
         await _update_db(build_db_id, status="building", progress_step="cloud-init 실행 중", progress_pct=25)
-        await _wait_for_shutoff(conn, server_id, build_db_id, build_token)
+        early_success, early_failure = await _wait_for_shutoff(conn, server_id, build_db_id, build_token)
 
         # ── 8. sentinel 검증 ──────────────────────────────────────────────
         await _update_db(build_db_id, cloud_init_status="finalizing", progress_step="결과 검증", progress_pct=90)
 
-        console = await asyncio.to_thread(nova.get_console_output, conn, server_id, None)
+        console = ""
+        try:
+            console = await asyncio.to_thread(nova.get_console_output, conn, server_id, None)
+        except Exception:
+            # SHUTOFF VM은 console이 없을 수 있음 (hypervisor 구현 차이)
+            # early sentinel을 fallback으로 사용
+            _logger.warning(
+                "[ephemeral_build] console_output 조회 실패 (SHUTOFF 후 console 없음) — "
+                "ACTIVE 중 감지한 sentinel 사용: early_success=%s",
+                early_success,
+            )
         excerpt = console[-2000:] if len(console) > 2000 else console
         await _update_db(build_db_id, console_log_excerpt=excerpt)
 
         success_tok = f"{_SUCCESS_SENTINEL}{build_token}"
         failure_tok = f"{_FAILURE_SENTINEL}{build_token}"
 
-        if success_tok in console:
+        if success_tok in console or early_success:
             await _handle_success(conn, library_id, library_version, share_id, proto, build_db_id, rw_access_id)
             rw_access_id = None  # 이미 회수됨
-        elif failure_tok in console:
+        elif failure_tok in console or early_failure:
             raise RuntimeError("cloud-init FAILURE sentinel 감지 — console_log_excerpt 참조")
         else:
             _logger.error("[ephemeral_build] sentinel 부재 (indeterminate): library=%s", library_id)

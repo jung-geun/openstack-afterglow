@@ -1,0 +1,362 @@
+{
+  "__inputs": [],
+  "__requires": [
+    {"type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "1.0.0"}
+  ],
+  "annotations": {"list": []},
+  "description": "etcd 내장 Prometheus 메트릭 (v3)",
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "type": "row", "title": "Overview", "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0}, "id": 100, "panels": []
+    },
+    {
+      "type": "stat", "title": "멤버 수",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "text", "value": null}]},
+          "mappings": [], "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 1}, "id": 1,
+      "options": {
+        "colorMode": "value", "graphMode": "none", "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      },
+      "targets": [
+        {"expr": "count(etcd_server_has_leader{instance=~'$instance'})",
+         "legendFormat": "", "refId": "A", "instant": true}
+      ]
+    },
+    {
+      "type": "stat", "title": "리더 상태",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "green", "value": 1}
+            ]
+          },
+          "mappings": [
+            {"options": {"0": {"text": "No Leader"}, "1": {"text": "OK"}}, "type": "value"}
+          ],
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 1}, "id": 2,
+      "options": {
+        "colorMode": "background", "graphMode": "none", "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      },
+      "targets": [
+        {"expr": "max(etcd_server_has_leader{instance=~'$instance'})",
+         "legendFormat": "", "refId": "A", "instant": true}
+      ]
+    },
+    {
+      "type": "stat", "title": "리더 변경 횟수 (1h)",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 1},
+              {"color": "red", "value": 3}
+            ]
+          },
+          "mappings": [], "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 1}, "id": 3,
+      "options": {
+        "colorMode": "background", "graphMode": "none", "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      },
+      "targets": [
+        {"expr": "sum(increase(etcd_server_leader_changes_seen_total{instance=~'$instance'}[1h]))",
+         "legendFormat": "", "refId": "A", "instant": true}
+      ]
+    },
+    {
+      "type": "stat", "title": "DB 크기",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "text", "value": null},
+              {"color": "yellow", "value": 1073741824},
+              {"color": "red", "value": 2147483648}
+            ]
+          },
+          "mappings": [], "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 1}, "id": 4,
+      "options": {
+        "colorMode": "value", "graphMode": "none", "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      },
+      "targets": [
+        {"expr": "max(etcd_mvcc_db_total_size_in_bytes{instance=~'$instance'})",
+         "legendFormat": "", "refId": "A", "instant": true}
+      ]
+    },
+    {
+      "type": "row", "title": "Raft", "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 5}, "id": 101, "panels": []
+    },
+    {
+      "type": "timeseries", "title": "Raft 제안 처리율",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {"lineWidth": 1, "fillOpacity": 10, "spanNulls": false, "showPoints": "never"},
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6}, "id": 5,
+      "options": {
+        "tooltip": {"mode": "multi", "sort": "none"},
+        "legend": {"displayMode": "list", "placement": "bottom", "calcs": ["mean", "last", "max"]}
+      },
+      "targets": [
+        {"expr": "rate(etcd_server_proposals_committed_total{instance=~'$instance'}[5m])",
+         "legendFormat": "{{instance}} committed/s", "refId": "A"},
+        {"expr": "rate(etcd_server_proposals_applied_total{instance=~'$instance'}[5m])",
+         "legendFormat": "{{instance}} applied/s", "refId": "B"},
+        {"expr": "rate(etcd_server_proposals_failed_total{instance=~'$instance'}[5m])",
+         "legendFormat": "{{instance}} failed/s", "refId": "C"}
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Raft 제안 대기열",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {"lineWidth": 1, "fillOpacity": 10, "spanNulls": false, "showPoints": "never"},
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6}, "id": 6,
+      "options": {
+        "tooltip": {"mode": "multi", "sort": "none"},
+        "legend": {"displayMode": "list", "placement": "bottom", "calcs": ["mean", "last", "max"]}
+      },
+      "targets": [
+        {"expr": "etcd_server_proposals_pending{instance=~'$instance'}",
+         "legendFormat": "{{instance}} pending", "refId": "A"}
+      ]
+    },
+    {
+      "type": "row", "title": "Disk", "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 14}, "id": 102, "panels": []
+    },
+    {
+      "type": "timeseries", "title": "WAL fsync 지연 (p99)",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {"lineWidth": 1, "fillOpacity": 10, "spanNulls": false, "showPoints": "never"},
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 15}, "id": 7,
+      "options": {
+        "tooltip": {"mode": "multi", "sort": "none"},
+        "legend": {"displayMode": "list", "placement": "bottom", "calcs": ["mean", "last", "max"]}
+      },
+      "targets": [
+        {"expr": "histogram_quantile(0.99, rate(etcd_disk_wal_fsync_duration_seconds_bucket{instance=~'$instance'}[5m]))",
+         "legendFormat": "{{instance}} p99", "refId": "A"},
+        {"expr": "histogram_quantile(0.50, rate(etcd_disk_wal_fsync_duration_seconds_bucket{instance=~'$instance'}[5m]))",
+         "legendFormat": "{{instance}} p50", "refId": "B"}
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Backend Commit 지연 (p99)",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {"lineWidth": 1, "fillOpacity": 10, "spanNulls": false, "showPoints": "never"},
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 15}, "id": 8,
+      "options": {
+        "tooltip": {"mode": "multi", "sort": "none"},
+        "legend": {"displayMode": "list", "placement": "bottom", "calcs": ["mean", "last", "max"]}
+      },
+      "targets": [
+        {"expr": "histogram_quantile(0.99, rate(etcd_disk_backend_commit_duration_seconds_bucket{instance=~'$instance'}[5m]))",
+         "legendFormat": "{{instance}} p99", "refId": "A"},
+        {"expr": "histogram_quantile(0.50, rate(etcd_disk_backend_commit_duration_seconds_bucket{instance=~'$instance'}[5m]))",
+         "legendFormat": "{{instance}} p50", "refId": "B"}
+      ]
+    },
+    {
+      "type": "row", "title": "Network", "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 23}, "id": 103, "panels": []
+    },
+    {
+      "type": "timeseries", "title": "피어 RTT (p99)",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {"lineWidth": 1, "fillOpacity": 10, "spanNulls": false, "showPoints": "never"},
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24}, "id": 9,
+      "options": {
+        "tooltip": {"mode": "multi", "sort": "none"},
+        "legend": {"displayMode": "list", "placement": "bottom", "calcs": ["mean", "last", "max"]}
+      },
+      "targets": [
+        {"expr": "histogram_quantile(0.99, rate(etcd_network_peer_round_trip_time_seconds_bucket{instance=~'$instance'}[5m]))",
+         "legendFormat": "{{instance}} p99", "refId": "A"}
+      ]
+    },
+    {
+      "type": "timeseries", "title": "gRPC 요청율 (top 5)",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {"lineWidth": 1, "fillOpacity": 10, "spanNulls": false, "showPoints": "never"},
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24}, "id": 10,
+      "options": {
+        "tooltip": {"mode": "multi", "sort": "none"},
+        "legend": {"displayMode": "list", "placement": "bottom", "calcs": ["mean", "last", "max"]}
+      },
+      "targets": [
+        {"expr": "topk(5, sum by (grpc_method) (rate(grpc_server_handled_total{instance=~'$instance'}[5m])))",
+         "legendFormat": "{{grpc_method}}", "refId": "A"}
+      ]
+    },
+    {
+      "type": "row", "title": "Storage", "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 32}, "id": 104, "panels": []
+    },
+    {
+      "type": "timeseries", "title": "DB 크기",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {"lineWidth": 1, "fillOpacity": 10, "spanNulls": false, "showPoints": "never"},
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 33}, "id": 11,
+      "options": {
+        "tooltip": {"mode": "multi", "sort": "none"},
+        "legend": {"displayMode": "list", "placement": "bottom", "calcs": ["mean", "last", "max"]}
+      },
+      "targets": [
+        {"expr": "etcd_mvcc_db_total_size_in_bytes{instance=~'$instance'}",
+         "legendFormat": "{{instance}} total", "refId": "A"},
+        {"expr": "etcd_mvcc_db_total_size_in_use_in_bytes{instance=~'$instance'}",
+         "legendFormat": "{{instance}} in use", "refId": "B"}
+      ]
+    },
+    {
+      "type": "timeseries", "title": "키 수",
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {"lineWidth": 1, "fillOpacity": 10, "spanNulls": false, "showPoints": "never"},
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 33}, "id": 12,
+      "options": {
+        "tooltip": {"mode": "multi", "sort": "none"},
+        "legend": {"displayMode": "list", "placement": "bottom", "calcs": ["mean", "last", "max"]}
+      },
+      "targets": [
+        {"expr": "etcd_debugging_mvcc_keys_total{instance=~'$instance'}",
+         "legendFormat": "{{instance}} keys", "refId": "A"}
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "tags": ["afterglow", "etcd"],
+  "templating": {
+    "list": [
+      {
+        "current": {"selected": true, "text": "Prometheus", "value": "Prometheus"},
+        "hide": 2,
+        "name": "datasource",
+        "query": "prometheus",
+        "type": "datasource"
+      },
+      {
+        "current": {},
+        "datasource": {"type": "prometheus"},
+        "definition": "label_values(etcd_server_has_leader, instance)",
+        "hide": 0,
+        "includeAll": true,
+        "multi": true,
+        "name": "instance",
+        "options": [],
+        "query": "label_values(etcd_server_has_leader, instance)",
+        "refresh": 2,
+        "type": "query",
+        "label": "Instance"
+      }
+    ]
+  },
+  "time": {"from": "now-1h", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Afterglow — etcd",
+  "uid": "afterglow-etcd",
+  "version": 1
+}

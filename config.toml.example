@@ -69,6 +69,13 @@ trusted_proxies = "127.0.0.1/32,::1/128"
 
 [cache]
 redis_url = "redis://redis:6379/0"
+
+# Redis Sentinel HA (false = 단일 Redis, true = Sentinel 고가용성 모드)
+# K8s 배포 시 generate_k8s.py 가 sentinel_enabled = true 로 자동 설정한다.
+sentinel_enabled = false
+sentinel_master_name = "mymaster"
+sentinel_hosts = ""  # 콤마 구분 "host:port" (예: "sentinel-a:26379,sentinel-b:26379")
+
 # TTL 티어 (초). 리소스 변경 빈도에 따라 분류.
 ttl_fast = 15       # 인스턴스, 볼륨, 플로팅IP 등 빈번히 변하는 리소스
 ttl_normal = 30     # 네트워크, 라우터, 토폴로지, 대시보드

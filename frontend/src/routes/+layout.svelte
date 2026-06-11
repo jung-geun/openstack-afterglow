@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
+	import { get } from 'svelte/store';
 	import { auth, authReady, isLoggedIn, isAdmin, clearAuth } from '$lib/stores/auth';
 	import { theme, resolvedTheme } from '$lib/stores/theme';
 	import { api } from '$lib/api/client';
@@ -58,8 +59,12 @@
 				auth.update((s) => ({ ...s, isSystemAdmin: me.is_system_admin === true, roles: me.roles ?? s.roles, federated: me.auth_method === "federated" }));
 				authReady.set(true);
 			} catch {
-				authReady.set(false);
-				clearAuth();
+				// Fix 2: stale 토큰 가드 — 비동기 /api/auth/me 검증 중 토큰이 교체됐으면
+				// 그 사이 새 토큰으로 이미 세션이 복구됐으므로 로그아웃하지 않음.
+				if (get(auth).token === token) {
+					authReady.set(false);
+					clearAuth();
+				}
 			}
 		})();
 	});
@@ -117,12 +122,7 @@
 
 <svelte:head><link rel="icon" href={$siteConfig.favicon_path} /></svelte:head>
 
-{#if ($isLoggedIn && $page.url.pathname.startsWith('/select-project')) || isInvitationRoute}
-	<Toast />
-	<main class="min-h-screen bg-gray-950 text-white">
-		{@render children()}
-	</main>
-{:else if $isLoggedIn}
+{#if $isLoggedIn && !($page.url.pathname.startsWith('/select-project') || isInvitationRoute)}
 	<nav class="fixed top-0 left-0 md:left-60 right-0 z-50 bg-[#0B1220] border-b border-gray-800 h-14 flex items-center px-4 md:px-6 gap-4 shrink-0">
 		<!-- 모바일 햄버거 -->
 		<button
@@ -213,13 +213,16 @@
 			</button>
 		</div>
 	</nav>
-	<Toast />
 	<UploadDock />
 	<CmdPalette />
 	<ConfirmDialog />
-	<main class="min-h-screen bg-gray-950 text-white">
-		{@render children()}
-	</main>
-{:else}
-	{@render children()}
 {/if}
+
+{#if $isLoggedIn}
+	<Toast />
+{/if}
+
+<!-- children은 단일 렌더 포인트에서 항상 렌더 — 분기 전환 시 컴포넌트 재마운트 방지 -->
+<main class="min-h-screen bg-gray-950 text-white">
+	{@render children()}
+</main>

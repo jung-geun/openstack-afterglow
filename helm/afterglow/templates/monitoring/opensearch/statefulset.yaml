@@ -1,0 +1,47 @@
+{{- if and .Values.monitoring.enabled .Values.monitoring.opensearch.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: opensearch
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: opensearch
+spec:
+  serviceName: opensearch
+  replicas: {{ .Values.monitoring.opensearch.replicas }}
+  selector:
+    matchLabels:
+      app: opensearch
+  template:
+    metadata:
+      labels:
+        app: opensearch
+    spec:
+      containers:
+        - name: opensearch
+          image: {{ .Values.monitoring.opensearch.image }}
+          ports:
+            - containerPort: 9200
+              name: http
+          env:
+            - name: discovery.type
+              value: "single-node"
+            - name: DISABLE_SECURITY_PLUGIN
+              value: {{ .Values.monitoring.opensearch.disableSecurityPlugin | toString | quote }}
+            - name: OPENSEARCH_JAVA_OPTS
+              value: {{ .Values.monitoring.opensearch.javaOpts | quote }}
+          volumeMounts:
+            - name: opensearch-data
+              mountPath: /usr/share/opensearch/data
+          resources:
+            {{- toYaml .Values.resources.opensearch | nindent 12 }}
+  volumeClaimTemplates:
+    - metadata:
+        name: opensearch-data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: {{ .Values.monitoring.opensearch.storageSize }}
+{{- end }}

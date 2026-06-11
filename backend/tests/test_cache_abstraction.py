@@ -204,3 +204,86 @@ async def test_invalidate_project_specific_service(backend: RedisBackend) -> Non
     assert await backend.get("afterglow:nova:p1:servers") is None
     # neutron 은 살아 있어야 한다
     assert await backend.get("afterglow:neutron:p1:networks") == "y"
+
+
+# ── Redis Sentinel HA 클라이언트 팩토리 ────────────────────────────────────────
+
+
+def test_sentinel_factory_selected_when_enabled(monkeypatch) -> None:
+    """sentinel_enabled=True 시 _build_sentinel_client 경로가 선택된다."""
+    import app.services.cache.redis_backend as rb_module
+    from app.config import Settings
+
+    fake_client = fakeredis.FakeRedis(decode_responses=True)
+    sentinel_called = []
+
+    def mock_build(settings):
+        sentinel_called.append(settings.sentinel_master_name)
+        return fake_client
+
+    fake_settings = Settings(
+        sentinel_enabled=True,
+        sentinel_master_name="mymaster",
+        sentinel_hosts="sentinel-a:26379",
+    )
+    monkeypatch.setattr(rb_module, "get_settings", lambda: fake_settings)
+    monkeypatch.setattr(rb_module.RedisBackend, "_build_sentinel_client", staticmethod(mock_build))
+
+    b = rb_module.RedisBackend()
+    client = b._get_client()
+    assert sentinel_called == ["mymaster"], "sentinel_enabled=True 이면 _build_sentinel_client를 호출해야 한다"
+    assert client is fake_client
+
+
+def test_url_factory_selected_when_sentinel_disabled(monkeypatch) -> None:
+    """sentinel_enabled=False 시 from_url 경로가 선택된다."""
+    import app.services.cache.redis_backend as rb_module
+    from app.config import Settings
+
+    url_called = []
+
+    def mock_from_url(url, **kwargs):
+        url_called.append(url)
+        return fakeredis.FakeRedis(decode_responses=True)
+
+    fake_settings = Settings(sentinel_enabled=False, redis_url="redis://test-host:6379/0")
+    monkeypatch.setattr(rb_module, "get_settings", lambda: fake_settings)
+    monkeypatch.setattr(rb_module.aioredis, "from_url", mock_from_url)
+
+    b = rb_module.RedisBackend()
+    b._get_client()
+    assert url_called == ["redis://test-host:6379/0"], "sentinel_enabled=False 이면 from_url을 호출해야 한다"
+
+
+def test_build_sentinel_client_parses_hosts(monkeypatch) -> None:
+    """_build_sentinel_client 가 sentinel_hosts 문자열을 (host, port) 튜플 목록으로 파싱한다."""
+    import app.services.cache.redis_backend as rb_module
+    from app.config import Settings
+
+    fake_settings = Settings(
+        sentinel_enabled=True,
+        sentinel_master_name="mymaster",
+        sentinel_hosts="sentinel-a:26379,sentinel-b:26379, sentinel-c:26380",
+    )
+
+    captured_hosts: list = []
+    fake_master = fakeredis.FakeRedis(decode_responses=True)
+
+    class FakeSentinel:
+        def __init__(self, hosts, **kwargs):
+            captured_hosts.extend(hosts)
+
+        def master_for(self, name, **kwargs):
+            return fake_master
+
+    import redis.asyncio.sentinel as sentinel_mod
+
+    monkeypatch.setattr(sentinel_mod, "Sentinel", FakeSentinel)
+
+    client = rb_module.RedisBackend._build_sentinel_client(fake_settings)
+    assert captured_hosts == [
+        ("sentinel-a", 26379),
+        ("sentinel-b", 26379),
+        ("sentinel-c", 26380),
+    ], "host:port 파싱이 올바르지 않다"
+    assert client is fake_master

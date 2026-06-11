@@ -1,0 +1,22 @@
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: afterglow-upload-timeout
+  namespace: {{ .Release.Namespace }}
+spec:
+  buffering:
+    maxRequestBodyBytes: 5368709120
+    memRequestBodyBytes: 2097152
+    maxResponseBodyBytes: 0
+    retryExpression: "IsNetworkError() && Attempts() < 2"
+---
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: backend-long-timeout
+  namespace: {{ .Release.Namespace }}
+spec:
+  forwardingTimeouts:
+    dialTimeout: 30s
+    responseHeaderTimeout: 600s
+    idleConnTimeout: 90s

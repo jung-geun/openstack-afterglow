@@ -57,12 +57,14 @@ export const auth = writable<AuthState>(loadPersistedAuth());
 // 자동 영속화
 if (typeof window !== 'undefined') {
 	auth.subscribe(($auth) => {
+		// Fix 5: Secure 속성은 HTTPS에서만 부착 — 비-localhost HTTP 배포에서 쿠키 드롭 방지
+		const secure = location.protocol === 'https:' ? '; Secure' : '';
 		if ($auth.token) {
 			localStorage.setItem('afterglow_auth', JSON.stringify($auth));
-			document.cookie = 'afterglow_session=1; path=/; SameSite=Strict; Secure';
+			document.cookie = `afterglow_session=1; path=/; SameSite=Strict${secure}`;
 		} else {
 			localStorage.removeItem('afterglow_auth');
-			document.cookie = 'afterglow_session=; path=/; SameSite=Strict; Secure; max-age=0';
+			document.cookie = `afterglow_session=; path=/; SameSite=Strict${secure}; max-age=0`;
 		}
 	});
 }

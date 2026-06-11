@@ -20,7 +20,7 @@ async def test_queue_build_adds_to_queue():
 
     from app.services import library_builder
 
-    fresh_queue: asyncio.Queue[str] = asyncio.Queue()
+    fresh_queue: asyncio.Queue[tuple[str, str | None]] = asyncio.Queue()
 
     with (
         patch("app.services.library_builder._active_builds", {}),
@@ -32,7 +32,8 @@ async def test_queue_build_adds_to_queue():
     assert result["status"] == "queued"
     assert result["library_id"] == "torch"
     assert fresh_queue.qsize() == 1
-    assert fresh_queue.get_nowait() == "torch"
+    # 큐 항목은 (library_id, existing_share_id) 튜플
+    assert fresh_queue.get_nowait() == ("torch", None)
 
 
 @pytest.mark.asyncio
@@ -42,7 +43,7 @@ async def test_queue_build_rejects_duplicate_queued():
 
     from app.services import library_builder
 
-    fresh_queue: asyncio.Queue[str] = asyncio.Queue()
+    fresh_queue: asyncio.Queue[tuple[str, str | None]] = asyncio.Queue()
     queued = {"torch"}
 
     with (
@@ -61,7 +62,7 @@ async def test_queue_build_rejects_active_library():
 
     from app.services import library_builder
 
-    fresh_queue: asyncio.Queue[str] = asyncio.Queue()
+    fresh_queue: asyncio.Queue[tuple[str, str | None]] = asyncio.Queue()
 
     with (
         patch("app.services.library_builder._active_builds", {"torch": {"status": "building"}}),
@@ -78,8 +79,8 @@ def test_get_build_queue_status():
 
     from app.services import library_builder
 
-    fresh_queue: asyncio.Queue[str] = asyncio.Queue()
-    fresh_queue.put_nowait("vllm")
+    fresh_queue: asyncio.Queue[tuple[str, str | None]] = asyncio.Queue()
+    fresh_queue.put_nowait(("vllm", None))
 
     with (
         patch("app.services.library_builder._active_builds", {"python311": {"status": "building"}}),
@@ -100,13 +101,13 @@ async def test_build_worker_calls_start_ephemeral_build_and_marks_done():
 
     from app.services import library_builder
 
-    fresh_queue: asyncio.Queue[str] = asyncio.Queue()
-    await fresh_queue.put("jupyter")
+    fresh_queue: asyncio.Queue[tuple[str, str | None]] = asyncio.Queue()
+    await fresh_queue.put(("jupyter", None))
     queued = {"jupyter"}
 
     calls: list[str] = []
 
-    async def _fake_start_ephemeral(lid: str) -> dict:
+    async def _fake_start_ephemeral(lid: str, existing_share_id: str | None = None) -> dict:
         calls.append(lid)
         return {"status": "building", "library_id": lid}
 

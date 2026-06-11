@@ -222,6 +222,9 @@ async def get_admin_library(
 class TriggerBuildRequest(BaseModel):
     library_id: str
     auto_install: bool = True
+    file_storage_id: str | None = None
+    """사전 생성한 file storage ID. 지정하면 빌더가 새 share를 생성하지 않고 이 share를 사용한다.
+    service 프로젝트에 소속되어 있거나 service conn으로 조회 가능해야 한다."""
 
 
 @router.post("/build", status_code=202, dependencies=[Depends(require_admin)])
@@ -240,7 +243,17 @@ async def trigger_library_build(
 
     if req.auto_install:
         try:
-            result = await library_builder.queue_build(req.library_id)
+            if req.file_storage_id:
+                # 사전 생성 share 경로: 큐를 거치지 않고 즉시 빌드 시작.
+                # queue_build는 _build_worker 기동에 의존하지만, ASGITransport 테스트 환경에서는
+                # lifespan 이벤트가 발동하지 않아 워커가 시작되지 않는다.
+                # start_ephemeral_build는 asyncio.create_task로 백그라운드 태스크를 직접 등록하므로
+                # 워커 없이도 동작하며 build_id를 즉시 반환한다.
+                result = await library_builder.start_ephemeral_build(
+                    req.library_id, existing_share_id=req.file_storage_id
+                )
+            else:
+                result = await library_builder.queue_build(req.library_id)
             await rec(token_info, None, resource_type="library", action="build", resource_id=req.library_id)
             return result
         except RuntimeError as e:

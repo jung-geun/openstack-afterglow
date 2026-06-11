@@ -55,6 +55,9 @@
 	const projectId = $derived($auth.projectId ?? undefined);
 
 	let inFlight: AbortController | null = null;
+	// auth 스토어 업데이트(isSystemAdmin 등 무관한 필드)로 $effect가 재실행될 때
+	// fetchAll()이 중복 호출되어 이전 요청을 abort하는 것을 방지
+	let _fetchedForPid: string | null = null;
 
 	async function fetchTrend(opts?: { refresh?: boolean }) {
 		const qs = opts?.refresh ? `?range=${range}&refresh=true` : `?range=${range}`;
@@ -119,7 +122,8 @@
 	$effect(() => {
 		const pid = $auth.projectId;
 		const ready = $authReady;
-		if (!pid || !ready) return;
+		if (!pid || !ready || pid === _fetchedForPid) return;
+		_fetchedForPid = pid;
 		untrack(() => fetchAll());
 	});
 

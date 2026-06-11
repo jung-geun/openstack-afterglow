@@ -1,0 +1,49 @@
+{{- if .Values.monitoring.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: {{ .Release.Namespace }}
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+
+    scrape_configs:
+      - job_name: 'afterglow-api'
+        static_configs:
+          - targets: ['backend:8000']
+        metrics_path: '/api/metrics'
+
+      - job_name: 'instances-node'
+        scrape_interval: 30s
+        metrics_path: /metrics
+        http_sd_configs:
+          - url: 'http://backend:8000/api/sd/prometheus/targets'
+            authorization:
+              type: Bearer
+              credentials_file: /etc/prometheus/sd-token
+            refresh_interval: 60s
+        relabel_configs:
+          - source_labels: [job]
+            regex: 'node_exporter'
+            action: keep
+          - source_labels: [__address__]
+            target_label: instance
+
+      - job_name: 'instances-dcgm'
+        scrape_interval: 30s
+        metrics_path: /metrics
+        http_sd_configs:
+          - url: 'http://backend:8000/api/sd/prometheus/targets'
+            authorization:
+              type: Bearer
+              credentials_file: /etc/prometheus/sd-token
+            refresh_interval: 60s
+        relabel_configs:
+          - source_labels: [job]
+            regex: 'dcgm_exporter'
+            action: keep
+          - source_labels: [__address__]
+            target_label: instance
+{{- end }}

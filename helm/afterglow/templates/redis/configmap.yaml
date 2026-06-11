@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-config
+  namespace: {{ .Release.Namespace }}
+data:
+  master.conf: |
+    bind 0.0.0.0
+    save ""
+    appendonly no
+    tcp-keepalive 300
+    timeout 0
+    loglevel notice
+
+  replica.conf: |
+    bind 0.0.0.0
+    save ""
+    appendonly no
+    tcp-keepalive 300
+    timeout 0
+    loglevel notice
+    replicaof redis-0.redis-headless.{{ .Release.Namespace }}.svc.cluster.local 6379
+
+  sentinel.conf: |
+    bind 0.0.0.0
+    sentinel resolve-hostnames yes
+    sentinel announce-hostnames yes
+    sentinel monitor mymaster redis-0.redis-headless.{{ .Release.Namespace }}.svc.cluster.local 6379 2
+    sentinel down-after-milliseconds mymaster 5000
+    sentinel failover-timeout mymaster 10000
+    sentinel parallel-syncs mymaster 1

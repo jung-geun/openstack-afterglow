@@ -455,19 +455,34 @@ def list_file_storages(
     metadata_filter: dict | None = None,
     all_tenants: bool = False,
     caller_project_id: str | None = None,
+    include_public: bool = False,
 ) -> list[FileStorageInfo]:
     client = get_client(conn)
+
+    shares_by_id: dict[str, FileStorageInfo] = {}
+
+    def _fetch(params: dict) -> None:
+        try:
+            data = client.get("shares/detail", params=params or None)["shares"]
+            for s in data:
+                fs = _parse_file_storage(s)
+                shares_by_id[fs.id] = fs
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 400:
+                logger.warning(f"Manila shares/detail 400 (파일 스토리지 없음으로 추정): {e}")
+            else:
+                raise
+
     params: dict = {}
     if all_tenants:
         params["all_tenants"] = "1"
-    try:
-        data = client.get("shares/detail", params=params or None)["shares"]
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 400:
-            logger.warning(f"Manila shares/detail 400 (파일 스토리지 없음으로 추정): {e}")
-            return []
-        raise
-    file_storages = [_parse_file_storage(s) for s in data]
+    _fetch(params)
+
+    # prebuilt share는 다른 프로젝트 소유일 수 있으므로 public share를 별도 조회하여 합침
+    if include_public and not all_tenants:
+        _fetch({"is_public": "true"})
+
+    file_storages = list(shares_by_id.values())
     if metadata_filter:
         file_storages = [s for s in file_storages if all(s.metadata.get(k) == v for k, v in metadata_filter.items())]
     if caller_project_id is not None:
@@ -768,9 +783,9 @@ def get_nfs_export_location(conn, file_storage_id: str) -> str | None:
 
 
 def update_share_metadata(conn, file_storage_id: str, metadata: dict) -> dict:
-    """Manila share 메타데이터 업데이트."""
+    """Manila share 메타데이터 업데이트 (POST /shares/{id}/metadata)."""
     client = get_client(conn)
-    body = {"set_metadata": metadata}
+    body = {"metadata": metadata}
     return client.post(f"shares/{file_storage_id}/metadata", body)
 
 

@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-config
+  namespace: afterglow
+data:
+  # redis-0 전용: replicaof 없음 (초기 마스터)
+  master.conf: |
+    bind 0.0.0.0
+    save ""
+    appendonly no
+    tcp-keepalive 300
+    timeout 0
+    loglevel notice
+
+  # redis-1, redis-2 전용: redis-0을 마스터로 복제
+  replica.conf: |
+    bind 0.0.0.0
+    save ""
+    appendonly no
+    tcp-keepalive 300
+    timeout 0
+    loglevel notice
+    replicaof redis-0.redis-headless.afterglow.svc.cluster.local 6379
+
+  # Sentinel 초기 설정 (런타임에 rewrite됨 → emptyDir 복사 필수)
+  # sentinel resolve-hostnames: StatefulSet DNS(redis-N.redis-headless.*)를 IP 대신 사용
+  sentinel.conf: |
+    bind 0.0.0.0
+    sentinel resolve-hostnames yes
+    sentinel announce-hostnames yes
+    sentinel monitor mymaster redis-0.redis-headless.afterglow.svc.cluster.local 6379 2
+    sentinel down-after-milliseconds mymaster 5000
+    sentinel failover-timeout mymaster 10000
+    sentinel parallel-syncs mymaster 1
