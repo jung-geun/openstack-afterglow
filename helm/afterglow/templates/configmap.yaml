@@ -7,7 +7,7 @@ metadata:
 data:
   APP_REDIS_URL: "redis://redis:6379/0"
   APP_ORIGIN: {{ $appOrigin | quote }}
-  APP_S3_BASE: {{ .Values.openstack.s3Endpoint | quote }}
+  PUBLIC_S3_BASE: {{ .Values.openstack.s3Endpoint | quote }}
   APP_GRAFANA_BASE: {{ .Values.monitoring.grafanaBaseUrl | quote }}
   config.toml: |
     # Afterglow 통합 설정 파일

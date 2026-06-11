@@ -6,7 +6,8 @@ metadata:
   annotations:
     kubernetes.io/ingress.class: {{ .Values.ingress.ingressClass | quote }}
     traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
-    traefik.ingress.kubernetes.io/service.serverstransport: afterglow-backend-long-timeout@kubernetescrd
+    traefik.ingress.kubernetes.io/router.middlewares: {{ .Release.Namespace }}-afterglow-upload-timeout@kubernetescrd
+    traefik.ingress.kubernetes.io/service.serverstransport: {{ .Release.Namespace }}-backend-long-timeout@kubernetescrd
     cert-manager.io/cluster-issuer: {{ .Values.ingress.certIssuer | quote }}
 spec:
   tls:
