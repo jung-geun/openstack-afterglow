@@ -186,6 +186,10 @@ def _render_runcmd_body(mount_lines: list[str], build_token: str) -> str:
             echo "{failure_sentinel}::rc=$_rc"
           fi
         }} 2>&1 | tee /dev/console
+        # 하이퍼바이저에 따라 SHUTOFF 후 console_output이 비어있을 수 있어,
+        # 오케스트레이터(15s 간격 ACTIVE 콘솔 폴링)가 sentinel을 확실히 읽도록
+        # poweroff 전 60초 대기한다 (조기 감지 윈도우 확보)
+        sleep 60
         # power_state: poweroff 는 cloud-init 전체 완료 후 실행되므로
         # runcmd 에서 직접 poweroff 해 SHUTOFF 지연을 방지한다
         sync
