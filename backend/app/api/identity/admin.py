@@ -1488,10 +1488,24 @@ class ColdMigrateRequest(BaseModel):
 
 
 @router.get("/compute-hosts", dependencies=[Depends(require_admin)])
-async def list_compute_hosts(conn: openstack.connection.Connection = Depends(get_os_conn)):
-    """마이그레이션 가능한 컴퓨트 호스트 목록."""
+async def list_compute_hosts(
+    server_id: str | None = Query(None),
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """마이그레이션 가능한 컴퓨트 호스트 목록.
+
+    server_id가 주어지면 해당 인스턴스의 현재 호스트를 소스로 삼아
+    동일 CPU 모델 호스트만 반환하고 소스 자신은 제외한다.
+    """
     try:
-        return await asyncio.to_thread(nova.list_compute_hosts, conn)
+        source_host: str | None = None
+        if server_id:
+            try:
+                srv = await asyncio.to_thread(conn.compute.get_server, server_id)
+                source_host = getattr(srv, "compute_host", None)
+            except Exception:
+                pass
+        return await asyncio.to_thread(nova.list_compute_hosts, conn, source_host)
     except Exception:
         raise HTTPException(status_code=500, detail="컴퓨트 호스트 목록 조회 실패")
 
@@ -1508,8 +1522,7 @@ async def live_migrate_instance(
         return {"status": "migrating"}
     except Exception as e:
         _logger.warning("라이브 마이그레이션 실패: %s", e)
-
-        raise HTTPException(status_code=400, detail="라이브 마이그레이션 실패")
+        raise HTTPException(status_code=400, detail=nova._extract_os_error(e))
 
 
 @router.post("/instances/{server_id}/cold-migrate", dependencies=[Depends(require_admin)])
@@ -1523,8 +1536,48 @@ async def cold_migrate_instance(
         return {"status": "migrating"}
     except Exception as e:
         _logger.warning("콜드 마이그레이션 실패: %s", e)
+        raise HTTPException(status_code=400, detail=nova._extract_os_error(e))
 
-        raise HTTPException(status_code=400, detail="콜드 마이그레이션 실패")
+
+@router.get("/instances/{server_id}/migration-status", dependencies=[Depends(require_admin)])
+async def get_migration_status(
+    server_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """인스턴스의 현재 호스트 + 진행 중 마이그레이션 상태 조회.
+
+    MIGRATING 중이면 source→dest·메모리 진행률을 포함한다.
+    실패 시 실패 사유를 포함한다. 폴링용으로 설계됨(예외는 fail-soft).
+    """
+    return await asyncio.to_thread(nova.get_server_migration_status, conn, server_id)
+
+
+@router.post("/instances/{server_id}/live-migrate/abort", dependencies=[Depends(require_admin)])
+async def abort_live_migration(
+    server_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """진행 중 라이브 마이그레이션 중단."""
+    try:
+        await asyncio.to_thread(nova.abort_live_migration, conn, server_id)
+        return {"status": "aborted"}
+    except Exception as e:
+        _logger.warning("라이브 마이그레이션 중단 실패: %s", e)
+        raise HTTPException(status_code=400, detail=nova._extract_os_error(e))
+
+
+@router.post("/instances/{server_id}/live-migrate/force-complete", dependencies=[Depends(require_admin)])
+async def force_complete_live_migration(
+    server_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """진행 중 라이브 마이그레이션 강제 완료."""
+    try:
+        await asyncio.to_thread(nova.force_complete_live_migration, conn, server_id)
+        return {"status": "force-completed"}
+    except Exception as e:
+        _logger.warning("라이브 마이그레이션 강제 완료 실패: %s", e)
+        raise HTTPException(status_code=400, detail=nova._extract_os_error(e))
 
 
 @router.post("/instances/{server_id}/confirm-resize", dependencies=[Depends(require_admin)])

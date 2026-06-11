@@ -12,6 +12,13 @@
 
 	let migrateHost = $state('');
 
+	// CPU 모델 안내 문구 — migrateHosts의 첫 번째 항목에서 cpu_model 추출
+	const cpuModelHint = $derived(
+		s.migrateHosts.length > 0 && s.migrateHosts[0].cpu_model
+			? `${s.migrateHosts[0].cpu_model} 호환 호스트만 표시`
+			: null
+	);
+
 	async function handleMigrate() {
 		const ok = await s.doMigrate(type, migrateHost);
 		if (ok) onClose();
@@ -40,15 +47,26 @@
 		{/if}
 		<div class="space-y-4">
 			<div>
-				<label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">
-					대상 호스트 <span class="text-gray-600">(선택 안 하면 자동)</span>
-				</label>
-				<select bind:value={migrateHost} class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
-					<option value="">자동 선택</option>
-					{#each s.migrateHosts as h}
-						<option value={h.name}>{h.name}</option>
-					{/each}
-				</select>
+				<div class="flex items-baseline justify-between mb-1.5">
+					<label class="text-xs text-gray-400 uppercase tracking-wide">
+						대상 호스트 <span class="text-gray-600">(선택 안 하면 자동)</span>
+					</label>
+					{#if cpuModelHint}
+						<span class="text-xs text-gray-500">{cpuModelHint}</span>
+					{/if}
+				</div>
+				{#if s.migrateHosts.length === 0}
+					<div class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-xs text-gray-500">
+						호환 가능한 호스트가 없습니다. 자동 선택만 가능합니다.
+					</div>
+				{:else}
+					<select bind:value={migrateHost} class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
+						<option value="">자동 선택</option>
+						{#each s.migrateHosts as h}
+							<option value={h.name}>{h.name}</option>
+						{/each}
+					</select>
+				{/if}
 			</div>
 		</div>
 		<div class="flex justify-end gap-3 mt-6">

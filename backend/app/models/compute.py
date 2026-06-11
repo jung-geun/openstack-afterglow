@@ -80,6 +80,7 @@ class InstanceInfo(BaseModel):
     user_id: str | None = None
     project_id: str | None = None
     fault: dict | None = None  # OpenStack 서버 fault: {"message": "...", "code": 500, "created": "..."}
+    host: str | None = None  # 현재 하이퍼바이저 호스트 (관리자 스코프에서만 채워짐)
 
 
 class CreateInstanceRequest(BaseModel):

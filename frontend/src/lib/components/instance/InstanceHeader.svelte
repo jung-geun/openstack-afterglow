@@ -22,6 +22,24 @@
 				<div class="text-xs opacity-90 break-words">{s.instance!.fault!.message}</div>
 			</div>
 		{/if}
+		{#if adminProjectId && s.instance!.status === 'MIGRATING' && s.migrationStatus?.migration}
+			{@const mig = s.migrationStatus.migration}
+			<div class="p-3 rounded-lg bg-cyan-900/20 border border-cyan-800/40 text-cyan-300 text-sm max-w-xl">
+				<div class="font-medium mb-1 text-xs text-cyan-400">마이그레이션 진행 중</div>
+				<div class="text-xs opacity-90">
+					{mig.source ?? '?'} → {mig.dest ?? '?'}
+					{#if mig.memory_percent !== null && mig.memory_percent !== undefined}
+						· 메모리 {mig.memory_percent}%
+					{/if}
+				</div>
+			</div>
+		{/if}
+		{#if adminProjectId && s.migrationStatus?.error && s.instance!.status !== 'ACTIVE'}
+			<div class="p-3 rounded-lg bg-red-900/30 border border-red-800/40 text-red-300 text-sm max-w-xl">
+				<div class="font-medium mb-1 text-xs text-red-400">마이그레이션 실패 (관리자)</div>
+				<div class="text-xs opacity-90 break-words">{s.migrationStatus.error}</div>
+			</div>
+		{/if}
 	{/snippet}
 	{#snippet actions()}
 		{#if s.instance!.status === 'SHUTOFF'}
@@ -74,6 +92,20 @@
 			</button>
 		{/if}
 		{#if adminProjectId}
+			{#if s.instance!.status === 'MIGRATING'}
+				<button
+					onclick={s.forceCompleteMigration}
+					class="text-cyan-400 hover:text-cyan-300 text-sm px-3 py-1.5 rounded border border-cyan-900 hover:border-cyan-700 transition-colors"
+				>
+					강제 완료
+				</button>
+				<button
+					onclick={s.abortMigration}
+					class="text-yellow-400 hover:text-yellow-300 text-sm px-3 py-1.5 rounded border border-yellow-900 hover:border-yellow-700 transition-colors"
+				>
+					마이그레이션 중단
+				</button>
+			{/if}
 			{#if s.instance!.status === 'ACTIVE'}
 				<button
 					onclick={() => onOpenMigrateModal('live')}

@@ -59,9 +59,26 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 	let resizeFlavors = $state<Flavor[]>([]);
 	let resizeLoading = $state(false);
 	let resizeError = $state('');
-	let migrateHosts = $state<{ name: string; state: string; status: string }[]>([]);
+	let migrateHosts = $state<{ name: string; state: string; status: string; cpu_model: string | null }[]>([]);
 	let migrateLoading = $state(false);
 	let migrateError = $state('');
+
+	// 마이그레이션 추적 상태
+	interface MigrationInfo {
+		id: string | null;
+		source: string | null;
+		dest: string | null;
+		status: string | null;
+		type: string | null;
+		memory_percent: number | null;
+	}
+	interface MigrationStatus {
+		host: string | null;
+		migration: MigrationInfo | null;
+		error: string | null;
+	}
+	let migrationStatus = $state<MigrationStatus | null>(null);
+	let migrationStatusLoading = $state(false);
 
 	// Derived
 	const fixedIpsList = $derived(instance?.ip_addresses.filter(ip => ip.type === 'fixed') ?? []);
@@ -148,7 +165,20 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 			availableVolumes = allVols.filter(v => v.status === 'available' && !attachedIds.has(v.id));
 			availableNetworks = nets;
 			ownerDisplay = ownerData.display || '';
-			if (opts.adminMode()) fetchPasswordPrecheck(id);
+			if (opts.adminMode()) {
+				fetchPasswordPrecheck(id);
+				// MIGRATING 중이면 migration-status도 함께 갱신
+				if (instance?.status === 'MIGRATING') {
+					loadMigrationStatus(id);
+				} else {
+					// 마이그레이션이 끝나면 상태를 초기화하지 않고 최종 결과를 유지
+					// (실패 사유나 이동 완료된 호스트를 표시하기 위해)
+					if (migrationStatus?.migration?.status !== 'running') {
+						// 비-MIGRATING 상태로 전환됐으면 한 번 더 조회해 최종 상태 확보
+						loadMigrationStatus(id);
+					}
+				}
+			}
 		} catch (e) {
 			error = e instanceof ApiError ? `조회 실패 (${e.status}): ${e.message}` : '서버 오류';
 		} finally {
@@ -446,8 +476,10 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 		migrateHosts = [];
 		migrateError = '';
 		try {
-			migrateHosts = await api.get<{ name: string; state: string; status: string }[]>(
-				'/api/admin/compute-hosts',
+			// server_id를 넘겨 백엔드에서 동일 CPU 모델 호스트만 필터링
+			const qs = instance ? `?server_id=${instance.id}` : '';
+			migrateHosts = await api.get<{ name: string; state: string; status: string; cpu_model: string | null }[]>(
+				`/api/admin/compute-hosts${qs}`,
 				tok(),
 				ownPid()
 			);
@@ -473,6 +505,46 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 			return false;
 		} finally {
 			migrateLoading = false;
+		}
+	}
+
+	// Admin: migration status tracking
+	async function loadMigrationStatus(serverId?: string) {
+		const id = serverId ?? instance?.id;
+		if (!id) return;
+		migrationStatusLoading = true;
+		try {
+			migrationStatus = await api.get<MigrationStatus>(
+				`/api/admin/instances/${id}/migration-status`,
+				tok(),
+				ownPid()
+			);
+		} catch {
+			// fail-soft — 폴링 중 오류는 무시하고 기존 상태 유지
+		} finally {
+			migrationStatusLoading = false;
+		}
+	}
+
+	async function abortMigration(): Promise<void> {
+		if (!instance) return;
+		try {
+			await api.post(`/api/admin/instances/${instance.id}/live-migrate/abort`, {}, tok(), ownPid());
+			toast.success('마이그레이션 중단 요청을 전송했습니다.');
+			await fetchInstance(instance.id, { silent: true });
+		} catch (e) {
+			toast.error(e instanceof ApiError ? e.message : '마이그레이션 중단 실패');
+		}
+	}
+
+	async function forceCompleteMigration(): Promise<void> {
+		if (!instance) return;
+		try {
+			await api.post(`/api/admin/instances/${instance.id}/live-migrate/force-complete`, {}, tok(), ownPid());
+			toast.success('마이그레이션 강제 완료 요청을 전송했습니다.');
+			await fetchInstance(instance.id, { silent: true });
+		} catch (e) {
+			toast.error(e instanceof ApiError ? e.message : '마이그레이션 강제 완료 실패');
 		}
 	}
 
@@ -508,6 +580,8 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 		get migrateLoading() { return migrateLoading; },
 		get migrateError() { return migrateError; },
 		set migrateError(v: string) { migrateError = v; },
+		get migrationStatus() { return migrationStatus; },
+		get migrationStatusLoading() { return migrationStatusLoading; },
 		detailPollAr,
 		consolePollAr,
 		fetchInstance,
@@ -534,6 +608,9 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 		doSetPassword,
 		loadMigrateHosts,
 		doMigrate,
+		loadMigrationStatus,
+		abortMigration,
+		forceCompleteMigration,
 		sgNameById,
 		networkNameById,
 		formatDate,

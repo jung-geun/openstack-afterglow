@@ -433,21 +433,192 @@ def get_server_image_meta(conn: openstack.connection.Connection, server_id: str)
         return {"qga_enabled": False, "os_admin_user": None, "image_id": image_id, "image_name": None}
 
 
-def list_compute_hosts(conn: openstack.connection.Connection) -> list[dict]:
-    """마이그레이션 대상 가능한 컴퓨트 호스트 목록."""
+def list_compute_hosts(
+    conn: openstack.connection.Connection,
+    source_host: str | None = None,
+) -> list[dict]:
+    """마이그레이션 대상 컴퓨트 호스트 목록.
+
+    source_host가 주어지면 동일 CPU 모델 호스트만 반환하고 source_host 자신은 제외한다.
+    CPU 정보 판별 불가 시 fail-open(전체 목록 반환).
+    """
     endpoint = conn.compute.get_endpoint()
     try:
         resp = conn.session.get(
             f"{endpoint}/os-hypervisors/detail",
             headers={"OpenStack-API-Version": "compute 2.53"},
         )
-        return [
-            {"name": h.get("hypervisor_hostname", ""), "state": h.get("state", ""), "status": h.get("status", "")}
-            for h in resp.json().get("hypervisors", [])
-            if h.get("state") == "up" and h.get("status") == "enabled"
-        ]
+        hypervisors = resp.json().get("hypervisors", [])
     except Exception:
         return []
+
+    def _cpu_model(h: dict) -> str | None:
+        ci = h.get("cpu_info") or {}
+        if isinstance(ci, str):
+            import json
+
+            try:
+                ci = json.loads(ci)
+            except Exception:
+                return None
+        return ci.get("model") if isinstance(ci, dict) else None
+
+    enabled = [h for h in hypervisors if h.get("state") == "up" and h.get("status") == "enabled"]
+
+    def _to_dict(h: dict) -> dict:
+        return {
+            "name": h.get("hypervisor_hostname", ""),
+            "state": h.get("state", ""),
+            "status": h.get("status", ""),
+            "cpu_model": _cpu_model(h),
+        }
+
+    if not source_host:
+        return [_to_dict(h) for h in enabled]
+
+    # source_host의 CPU 모델 탐색
+    source_model: str | None = None
+    for h in hypervisors:
+        hostname = h.get("hypervisor_hostname", "")
+        service_host = h.get("service", {}).get("host", "") if isinstance(h.get("service"), dict) else ""
+        if hostname == source_host or service_host == source_host:
+            source_model = _cpu_model(h)
+            break
+
+    if not source_model:
+        # CPU 정보 미제공 환경 — fail-open: 소스 자신만 제외하고 전체 반환
+        return [_to_dict(h) for h in enabled if h.get("hypervisor_hostname", "") != source_host]
+
+    # 동일 CPU 모델 + 소스 제외
+    return [
+        _to_dict(h)
+        for h in enabled
+        if h.get("hypervisor_hostname", "") != source_host and _cpu_model(h) == source_model
+    ]
+
+
+def _extract_os_error(e: Exception) -> str:
+    """OpenStack 예외에서 사람이 읽을 수 있는 메시지를 추출한다.
+
+    내부 경로·스택트레이스를 노출하지 않는다(CLAUDE.md 보안 #6).
+    """
+    # openstack.exceptions.HttpException 등에는 .details 또는 .message 속성이 있다.
+    for attr in ("message", "details", "response"):
+        val = getattr(e, attr, None)
+        if val is None:
+            continue
+        # response 객체인 경우 JSON에서 상세 추출 시도
+        if hasattr(val, "json"):
+            try:
+                body = val.json()
+                for key in ("faultstring", "message", "detail"):
+                    msg = body.get(key) or (body.get("error") or {}).get("message")
+                    if msg:
+                        return str(msg)
+            except Exception:
+                pass
+        msg = str(val).strip()
+        if msg:
+            return msg
+    return str(e).strip() or "알 수 없는 오류"
+
+
+def get_server_migration_status(conn: openstack.connection.Connection, server_id: str) -> dict:
+    """인스턴스의 현재 호스트 + 진행 중 마이그레이션 상태를 반환한다.
+
+    MIGRATING 중이면 source→dest·메모리 진행률을 포함한다.
+    진행 중이 아니고 최근 마이그레이션이 error 상태였다면 실패 사유를 반환한다.
+    예외는 fail-soft(빈 결과)로 처리해 폴링을 안전하게 유지한다.
+    """
+    result: dict = {"host": None, "migration": None, "error": None}
+    try:
+        srv = conn.compute.get_server(server_id)
+        result["host"] = getattr(srv, "compute_host", None)
+    except Exception:
+        pass
+
+    # 진행 중 라이브 마이그레이션 조회 (MV 2.23+)
+    try:
+        active: list = list(conn.compute.server_migrations(server_id))
+        if active:
+            m = active[0]  # 진행 중은 보통 1개
+            total = getattr(m, "memory_total_bytes", 0) or 0
+            processed = getattr(m, "memory_processed_bytes", 0) or 0
+            memory_percent = round(processed / total * 100, 1) if total > 0 else None
+            dest = getattr(m, "dest_host", None) or getattr(m, "dest_compute", None)
+            result["migration"] = {
+                "id": getattr(m, "id", None),
+                "source": getattr(m, "source_compute", None),
+                "dest": dest,
+                "status": getattr(m, "status", None),
+                "type": getattr(m, "migration_type", None),
+                "memory_percent": memory_percent,
+            }
+            return result
+    except Exception:
+        pass
+
+    # 진행 중이 아닌 경우 — 최근 실패 사유 회수
+    try:
+        fault = getattr(conn.compute.get_server(server_id), "fault", None)
+        if fault:
+            msg = fault.get("message") if isinstance(fault, dict) else getattr(fault, "message", None)
+            if msg:
+                result["error"] = str(msg)
+                return result
+    except Exception:
+        pass
+
+    try:
+        # os-migrations에서 최근 error 항목 확인
+        migs = list(conn.compute.migrations(instance_uuid=server_id))
+        # 최신 순으로 정렬 후 error 상태 탐색
+        migs.sort(key=lambda x: getattr(x, "created_at", "") or "", reverse=True)
+        for mg in migs[:3]:
+            if (getattr(mg, "status", "") or "").lower() == "error":
+                dest = getattr(mg, "dest_compute", None)
+                if dest:
+                    result["migration"] = {
+                        "id": getattr(mg, "id", None),
+                        "source": getattr(mg, "source_compute", None),
+                        "dest": dest,
+                        "status": "error",
+                        "type": getattr(mg, "migration_type", None),
+                        "memory_percent": None,
+                    }
+                break
+    except Exception:
+        pass
+
+    return result
+
+
+def abort_live_migration(
+    conn: openstack.connection.Connection,
+    server_id: str,
+    migration_id: str | None = None,
+) -> None:
+    """진행 중 라이브 마이그레이션을 중단한다."""
+    if migration_id is None:
+        active = list(conn.compute.server_migrations(server_id))
+        if not active:
+            raise ValueError("진행 중인 라이브 마이그레이션이 없습니다")
+        migration_id = active[0].id
+    conn.compute.abort_server_migration(migration_id, server_id)
+
+
+def force_complete_live_migration(
+    conn: openstack.connection.Connection,
+    server_id: str,
+    migration_id: str | None = None,
+) -> None:
+    """진행 중 라이브 마이그레이션을 강제 완료한다."""
+    if migration_id is None:
+        active = list(conn.compute.server_migrations(server_id))
+        if not active:
+            raise ValueError("진행 중인 라이브 마이그레이션이 없습니다")
+        migration_id = active[0].id
+    conn.compute.force_complete_server_migration(migration_id, server_id)
 
 
 def _server_to_info(s) -> InstanceInfo:
@@ -497,4 +668,6 @@ def _server_to_info(s) -> InstanceInfo:
         user_id=getattr(s, "user_id", None),
         project_id=getattr(s, "project_id", None) or getattr(s, "tenant_id", None),
         fault=fault,
+        # 관리자 스코프에서만 채워짐 (OS-EXT-SRV-ATTR:host → compute_host)
+        host=getattr(s, "compute_host", None),
     )
