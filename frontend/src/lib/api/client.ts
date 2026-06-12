@@ -85,28 +85,65 @@ async function handleUnauthorized(): Promise<void> {
  * refresh 토큰으로 새 access JWT를 발급. 성공하면 새 access token 반환, 실패하면 null.
  * 동시 호출은 하나의 Promise로 합산(coalescing).
  */
+/** localStorage에 영속화된 인증 상태를 직접 읽는다 (탭 간 race 대비 최신값 확인용). */
+function _readPersistedAuth(): { token?: string; refreshToken?: string; accessExpiresAt?: number } | null {
+	try {
+		if (typeof localStorage === 'undefined') return null;
+		const raw = localStorage.getItem('afterglow_auth');
+		return raw ? JSON.parse(raw) : null;
+	} catch {
+		return null;
+	}
+}
+
 async function tryRefresh(): Promise<string | null> {
 	if (_refreshPromise) return _refreshPromise;
 	_refreshPromise = (async () => {
 		try {
-			const { default: { get: getStore } } = await import('svelte/store');
-			const { auth } = await import('$lib/stores/auth');
-			const state = getStore(auth);
-			if (!state.refreshToken) return null;
+			const { get } = await import('svelte/store');
+			const { auth, setAuth } = await import('$lib/stores/auth');
+			const state = get(auth);
+
+			// 다른 탭이 이미 토큰을 회전시켰을 수 있다 — storage 이벤트 전파보다
+			// localStorage 직접 읽기가 항상 최신이므로 여기서 한 번 더 확인한다.
+			const persisted = _readPersistedAuth();
+			if (persisted?.token && persisted.token !== state.token) {
+				setAuth({
+					token: persisted.token,
+					refreshToken: persisted.refreshToken ?? state.refreshToken,
+					accessExpiresAt: persisted.accessExpiresAt ?? null,
+				});
+				return persisted.token;
+			}
+
+			const refreshToken = persisted?.refreshToken ?? state.refreshToken;
+			if (!refreshToken) return null;
 
 			const res = await fetch(`${getBaseUrl()}/api/auth/refresh`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ refresh_token: state.refreshToken }),
+				body: JSON.stringify({ refresh_token: refreshToken }),
 				signal: AbortSignal.timeout(15_000),
 			});
-			if (!res.ok) return null;
+			if (!res.ok) {
+				// refresh 토큰은 1회용(회전 시 폐기) — 동시에 다른 탭이 회전에 성공해
+				// 이쪽이 패배한 경우라면 그 탭의 새 토큰을 채택하고 로그아웃하지 않는다.
+				const winner = _readPersistedAuth();
+				if (winner?.token && winner.token !== state.token) {
+					setAuth({
+						token: winner.token,
+						refreshToken: winner.refreshToken ?? null,
+						accessExpiresAt: winner.accessExpiresAt ?? null,
+					});
+					return winner.token;
+				}
+				return null;
+			}
 
 			const data = await res.json();
-			const { setAuth } = await import('$lib/stores/auth');
 			setAuth({
 				token: data.token,
-				refreshToken: data.refresh_token ?? state.refreshToken,
+				refreshToken: data.refresh_token ?? refreshToken,
 				accessExpiresAt: data.expires_at
 					? Math.floor(new Date(data.expires_at).getTime() / 1000)
 					: null,
