@@ -53,9 +53,17 @@ def delete_volume(conn: openstack.connection.Connection, volume_id: str) -> None
     conn.block_storage.delete_volume(volume_id, ignore_missing=True)
 
 
-def reset_volume_status(conn: openstack.connection.Connection, volume_id: str, status: str = "error") -> None:
-    """볼륨 상태를 강제로 변경한다 (Cinder os-reset_status action)."""
-    conn.block_storage.reset_volume_status(volume_id, status)
+def reset_volume_status(
+    conn: openstack.connection.Connection,
+    volume_id: str,
+    status: str = "error",
+    attach_status: str | None = None,
+) -> None:
+    """볼륨 상태를 강제로 변경한다 (Cinder os-reset_status action).
+
+    attach_status 지정 시 함께 변경한다 (예: 'attached'). 기존 호출부 호환 유지.
+    """
+    conn.block_storage.reset_volume_status(volume_id, status, attach_status)
 
 
 def force_delete_volume(conn: openstack.connection.Connection, volume_id: str) -> None:

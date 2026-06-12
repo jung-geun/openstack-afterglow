@@ -13,6 +13,7 @@
 	import { openWizard } from '$lib/stores/wizard';
 	import AdminInstanceFilters from '$lib/components/admin/instances/AdminInstanceFilters.svelte';
 	import AdminInstanceTable from '$lib/components/admin/instances/AdminInstanceTable.svelte';
+	import RecoveryModal from '$lib/components/admin/instances/RecoveryModal.svelte';
 	import type { AdminInstance, PagedResponse, TsPoint } from '$lib/types/adminInstance';
 	import { StatTile } from '$lib/components/ui';
 
@@ -82,8 +83,12 @@
 		} catch { health = null; }
 	}
 
+	let recoveryInst = $state<AdminInstance | null>(null);
+
 	function openDetail(inst: AdminInstance) { selectedInstanceId = inst.id; selectedProjectId = inst.project_id; }
 	function closeDetail() { selectedInstanceId = null; selectedProjectId = null; }
+	function openRecovery(inst: AdminInstance) { recoveryInst = inst; }
+	function closeRecovery() { recoveryInst = null; }
 	function onFilterChange() { markerStack = []; nextMarker = null; load(); }
 	function onPrev() {
 		const prev = markerStack.slice(0, -1);
@@ -182,6 +187,7 @@
 			onOpen={openDetail}
 			{onPrev}
 			{onNext}
+			onRecover={openRecovery}
 		/>
 	{/if}
 </div>
@@ -190,4 +196,13 @@
 	<SlidePanel onClose={closeDetail}>
 		<InstanceDetailPanel instanceId={selectedInstanceId} adminProjectId={selectedProjectId} onClose={closeDetail} />
 	</SlidePanel>
+{/if}
+
+{#if recoveryInst}
+	<RecoveryModal
+		serverId={recoveryInst.id}
+		serverName={recoveryInst.name || recoveryInst.id.slice(0, 8)}
+		onClose={closeRecovery}
+		onRecovered={() => { closeRecovery(); markerStack = []; nextMarker = null; load(); }}
+	/>
 {/if}

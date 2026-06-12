@@ -13,15 +13,14 @@
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # ──────────────────────────────────────────────
 # 헬퍼
 # ──────────────────────────────────────────────
+
 
 def _make_build_row(
     id: int = 1,
@@ -147,7 +146,7 @@ async def test_reconcile_schedules_resume_task_for_server_id():
         patch("app.services.library_builder.get_service_project_connection", return_value=mock_conn),
         patch("app.services.library_builder.manila.get_file_storage", return_value=mock_share),
         patch("app.services.library_builder.lib_svc.get_by_id", return_value=MagicMock(version="3.11")),
-        patch("app.services.library_builder._resume_build_task", new=AsyncMock()) as mock_resume,
+        patch("app.services.library_builder._resume_build_task", new=AsyncMock()),
     ):
         # asyncio.create_task를 가로채서 생성된 태스크 수 확인
         original_create_task = asyncio.create_task

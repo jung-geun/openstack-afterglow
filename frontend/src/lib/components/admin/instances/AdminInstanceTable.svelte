@@ -12,6 +12,7 @@
 		onOpen,
 		onPrev,
 		onNext,
+		onRecover,
 	}: {
 		instances: AdminInstance[];
 		markerStack: string[];
@@ -20,6 +21,7 @@
 		onOpen: (inst: AdminInstance) => void;
 		onPrev: () => void;
 		onNext: () => void;
+		onRecover?: (inst: AdminInstance) => void;
 	} = $props();
 
 	let expandedError = $state<string | null>(null);
@@ -62,6 +64,13 @@
 									class="text-red-500 hover:text-red-300 text-xs underline"
 									title={s.fault}
 								>사유</button>
+							{/if}
+							{#if s.status === 'ERROR' && onRecover}
+								<button
+									onclick={(e) => { e.stopPropagation(); onRecover(s); }}
+									class="text-amber-500 hover:text-amber-300 text-xs underline"
+									title="복구 분석 및 실행"
+								>복구</button>
 							{/if}
 						</div>
 						{#if expandedError === s.id && s.fault}

@@ -15,15 +15,16 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.requests import Request
 
+from app.api.common.activity_recorder import rec
 from app.api.deps import CacheMode, cache_mode, get_os_conn, get_token_info, require_admin
 from app.utils.version import read_app_version
 
 _logger = logging.getLogger(__name__)
 from app.config import get_settings
 from app.models.storage import FileStorageInfo, TopologyData, TopologyInstance
+from app.services import instance_recovery, library_builder, manila, neutron, nova
 from app.services import k3s_db as k3s_cluster
 from app.services import libraries as lib_svc
-from app.services import library_builder, manila, neutron, nova
 from app.services.cache import cached_call, invalidate, ttl_fast, ttl_normal, ttl_slow
 from app.services.octavia import get_topology_lbs
 
@@ -1632,6 +1633,64 @@ async def revert_resize_instance(
     except Exception as e:
         _logger.warning("리사이즈 취소 실패: %s", e)
         raise HTTPException(status_code=400, detail="리사이즈 취소 실패")
+
+
+# ---------------------------------------------------------------------------
+# 인스턴스 복구 (관리자 전용)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/instances/{server_id}/recovery-analysis", dependencies=[Depends(require_admin)])
+async def get_recovery_analysis(
+    server_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """ERROR 인스턴스 진단 — 안전 검사 5종 + 시나리오 판정 + 복구 권장 단계 반환.
+
+    ERROR 상태가 아닌 경우에도 200을 반환하며 checks의 is_error_state 항목에 반영된다.
+    """
+    try:
+        return await asyncio.to_thread(instance_recovery.analyze_error_instance, conn, server_id)
+    except Exception as e:
+        _logger.warning("복구 분석 실패: %s", e)
+        raise HTTPException(status_code=500, detail="복구 분석 중 오류가 발생했습니다")
+
+
+@router.post("/instances/{server_id}/recover", dependencies=[Depends(require_admin)])
+async def recover_instance(
+    server_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    """ERROR 인스턴스 복구 실행.
+
+    실행 직전 안전 검사를 서버측에서 재수행한다(fail-closed).
+    auto_executable=False이면 409를 반환하고 아무 작업도 수행하지 않는다.
+    성공·실패 모두 활동 기록에 남긴다.
+    """
+    try:
+        result = await asyncio.to_thread(instance_recovery.execute_recovery, conn, server_id)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except Exception as e:
+        _logger.warning("복구 실행 실패: %s", e)
+        raise HTTPException(status_code=500, detail="복구 실행 중 오류가 발생했습니다")
+
+    status = "success" if result.get("executed") else "error"
+    try:
+        await rec(
+            token_info,
+            conn,
+            resource_type="instance",
+            action="recover",
+            status=status,
+            resource_id=server_id,
+            extra={"scenario": result.get("scenario"), "steps": result.get("steps")},
+        )
+    except Exception:
+        pass  # 활동 기록 실패는 복구 결과에 영향을 주지 않는다
+
+    return result
 
 
 class VolumeTransferRequest(BaseModel):

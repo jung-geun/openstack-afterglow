@@ -338,6 +338,11 @@ def reboot_server(conn: openstack.connection.Connection, server_id: str, reboot_
     conn.compute.reboot_server(server_id, reboot_type)
 
 
+def reset_server_state(conn: openstack.connection.Connection, server_id: str, state: str = "active") -> None:
+    """인스턴스 상태를 강제로 변경한다 (Nova os-resetState action). 관리자 전용."""
+    conn.compute.reset_server_state(server_id, state)
+
+
 def shelve_server(conn: openstack.connection.Connection, server_id: str) -> None:
     conn.compute.shelve_server(server_id)
 

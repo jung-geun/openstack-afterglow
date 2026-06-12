@@ -36,7 +36,6 @@ from app.models.compute import (
     AttachInterfaceRequest,
     AttachVolumeRequest,
     CreateInstanceRequest,
-    DataMountSpec,
     InstanceInfo,
     StorageAttachRequest,
     UpdateSecurityGroupsRequest,
@@ -852,8 +851,7 @@ async def delete_instance(
                 for _r in _rules:
                     _at = _r.get("access_to", "")
                     if _r.get("access_type") == "cephx" and (
-                        _at.startswith(f"data-ro-{_instance_name}-")
-                        or _at.startswith(f"data-rw-{_instance_name}-")
+                        _at.startswith(f"data-ro-{_instance_name}-") or _at.startswith(f"data-rw-{_instance_name}-")
                     ):
                         await asyncio.to_thread(manila.revoke_access_rule, conn, _fsi, _r["id"])
             except Exception as _ex:
@@ -1533,9 +1531,7 @@ async def _prepare_data_mounts(
                         detail="NFS 파일 스토리지 마운트를 위해 network_id가 필요합니다.",
                     )
                 try:
-                    project_cidrs = await asyncio.to_thread(
-                        _resolve_project_subnet_cidrs, conn, network_id
-                    )
+                    project_cidrs = await asyncio.to_thread(_resolve_project_subnet_cidrs, conn, network_id)
                 except Exception as e:
                     raise HTTPException(status_code=503, detail=f"Subnet CIDR 조회 실패: {e}")
             if not project_cidrs:
@@ -1560,23 +1556,23 @@ async def _prepare_data_mounts(
                 locs = await asyncio.to_thread(manila.get_export_locations, conn, share.id)
                 nfs_export = locs[0] if locs else ""
 
-            result.append({
-                "file_storage_id": share.id,
-                "mount_point": spec.mount_point,
-                "share_proto": "NFS",
-                "nfs_export_location": nfs_export,
-                "export_path": "",
-                "cephx_id": "",
-                "cephx_key": "",
-                "mount_options": mount_options,
-                "read_only": spec.read_only,
-            })
+            result.append(
+                {
+                    "file_storage_id": share.id,
+                    "mount_point": spec.mount_point,
+                    "share_proto": "NFS",
+                    "nfs_export_location": nfs_export,
+                    "export_path": "",
+                    "cephx_id": "",
+                    "cephx_key": "",
+                    "mount_options": mount_options,
+                    "read_only": spec.read_only,
+                }
+            )
 
         else:
             cephx_id = f"data-{access_level}-{instance_name}-{share.id[:8]}"
-            rule = await asyncio.to_thread(
-                manila.create_access_rule, conn, share.id, cephx_id, access_level
-            )
+            rule = await asyncio.to_thread(manila.create_access_rule, conn, share.id, cephx_id, access_level)
             created_access_ids.append((share.id, rule["access_id"]))
 
             locs = await asyncio.to_thread(manila.get_export_locations, conn, share.id)
@@ -1586,17 +1582,19 @@ async def _prepare_data_mounts(
                     detail=f"파일 스토리지 {spec.file_storage_id} export location을 찾을 수 없습니다.",
                 )
 
-            result.append({
-                "file_storage_id": share.id,
-                "mount_point": spec.mount_point,
-                "share_proto": share.share_proto,
-                "nfs_export_location": "",
-                "export_path": locs[0],
-                "cephx_id": cephx_id,
-                "cephx_key": rule["access_key"],
-                "mount_options": "",
-                "read_only": spec.read_only,
-            })
+            result.append(
+                {
+                    "file_storage_id": share.id,
+                    "mount_point": spec.mount_point,
+                    "share_proto": share.share_proto,
+                    "nfs_export_location": "",
+                    "export_path": locs[0],
+                    "cephx_id": cephx_id,
+                    "cephx_key": rule["access_key"],
+                    "mount_options": "",
+                    "read_only": spec.read_only,
+                }
+            )
 
     return result
 
@@ -1909,7 +1907,9 @@ async def attach_storage(
     if share.share_proto == "NFS":
         fixed_ip = next((ip.addr for ip in server.ip_addresses if ip.type == "fixed"), None)
         if not fixed_ip:
-            raise HTTPException(status_code=409, detail="VM의 fixed IP를 찾을 수 없습니다. VM이 실행 중인지 확인하세요.")
+            raise HTTPException(
+                status_code=409, detail="VM의 fixed IP를 찾을 수 없습니다. VM이 실행 중인지 확인하세요."
+            )
 
         rule = await asyncio.to_thread(
             manila.ensure_nfs_access_rule,
@@ -1952,9 +1952,7 @@ async def attach_storage(
 
     else:
         cephx_id = f"data-{access_level}-{server.name}-{share.id[:8]}"
-        rule = await asyncio.to_thread(
-            manila.create_access_rule, conn, share.id, cephx_id, access_level
-        )
+        rule = await asyncio.to_thread(manila.create_access_rule, conn, share.id, cephx_id, access_level)
 
         locs = await asyncio.to_thread(manila.get_export_locations, conn, share.id)
         export_path = locs[0] if locs else ""
@@ -2008,12 +2006,14 @@ async def list_storage_attachments(
     for fsi in [s for s in meta_val.split(",") if s]:
         try:
             share = await asyncio.to_thread(manila.get_file_storage, conn, fsi)
-            result.append({
-                "file_storage_id": share.id,
-                "name": share.name,
-                "share_proto": share.share_proto,
-                "status": share.status,
-            })
+            result.append(
+                {
+                    "file_storage_id": share.id,
+                    "name": share.name,
+                    "share_proto": share.share_proto,
+                    "status": share.status,
+                }
+            )
         except Exception:
             result.append({"file_storage_id": fsi, "name": None, "share_proto": None, "status": "unknown"})
 
@@ -2042,8 +2042,7 @@ async def detach_storage(
         for rule in rules:
             at = rule.get("access_to", "")
             if rule.get("access_type") == "cephx" and (
-                at.startswith(f"data-ro-{instance_name}-")
-                or at.startswith(f"data-rw-{instance_name}-")
+                at.startswith(f"data-ro-{instance_name}-") or at.startswith(f"data-rw-{instance_name}-")
             ):
                 await asyncio.to_thread(manila.revoke_access_rule, conn, file_storage_id, rule["id"])
     except Exception as e:

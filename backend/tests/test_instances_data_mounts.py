@@ -1,50 +1,58 @@
 """인스턴스 데이터 마운트(storage-attachments) 단위 테스트."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from app.models.compute import DataMountSpec, StorageAttachRequest
 
-
 # ────── 모델 검증 ──────
 
 
-@pytest.mark.parametrize("path", [
-    "/mnt/mydata",
-    "/mnt/data-set_1.2",
-    "/data/work",
-    "/srv/files",
-    "/home/userdir",
-    "/mnt",
-    "/data",
-])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/mnt/mydata",
+        "/mnt/data-set_1.2",
+        "/data/work",
+        "/srv/files",
+        "/home/userdir",
+        "/mnt",
+        "/data",
+    ],
+)
 def test_data_mount_spec_valid_paths(path):
     spec = DataMountSpec(file_storage_id="share-1", mount_point=path, read_only=False)
     assert spec.mount_point == path
 
 
-@pytest.mark.parametrize("path", [
-    "mnt/data",           # 상대 경로
-    "/tmp/data",          # 허용 외 prefix
-    "/opt/layers/merged", # 차단 prefix
-    "/etc/myconf",        # 차단 prefix
-    "/usr/local/bin",     # 차단 prefix
-    "/opt/layers",        # 차단 prefix 정확 일치
-    "/mnt/a/b c",         # 공백 포함
-    "/mnt/../etc/passwd", # path traversal
-])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "mnt/data",  # 상대 경로
+        "/tmp/data",  # 허용 외 prefix
+        "/opt/layers/merged",  # 차단 prefix
+        "/etc/myconf",  # 차단 prefix
+        "/usr/local/bin",  # 차단 prefix
+        "/opt/layers",  # 차단 prefix 정확 일치
+        "/mnt/a/b c",  # 공백 포함
+        "/mnt/../etc/passwd",  # path traversal
+    ],
+)
 def test_data_mount_spec_invalid_paths(path):
     with pytest.raises(Exception):
         DataMountSpec(file_storage_id="share-1", mount_point=path, read_only=False)
 
 
-@pytest.mark.parametrize("payload", [
-    {"file_storage_id": "s1", "mount_point": "/mnt/x$y"},    # 쉘 메타문자 $
-    {"file_storage_id": "s1", "mount_point": "/mnt/x`y"},    # 백틱
-    {"file_storage_id": "s1", "mount_point": "/mnt/x;y"},    # 세미콜론
-    {"file_storage_id": "s1", "mount_point": "/mnt/x\ny"},   # 개행
-])
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"file_storage_id": "s1", "mount_point": "/mnt/x$y"},  # 쉘 메타문자 $
+        {"file_storage_id": "s1", "mount_point": "/mnt/x`y"},  # 백틱
+        {"file_storage_id": "s1", "mount_point": "/mnt/x;y"},  # 세미콜론
+        {"file_storage_id": "s1", "mount_point": "/mnt/x\ny"},  # 개행
+    ],
+)
 def test_data_mount_spec_injection_chars_rejected(payload):
     with pytest.raises(Exception):
         DataMountSpec(**payload)
@@ -97,8 +105,7 @@ async def test_attach_nfs_storage_success(client, mock_conn):
     with (
         patch("app.api.compute.instances.nova.get_server", return_value=server),
         patch("app.api.compute.instances.manila.get_file_storage", return_value=share),
-        patch("app.api.compute.instances.manila.ensure_nfs_access_rule",
-              return_value={"access_id": "rule-1"}),
+        patch("app.api.compute.instances.manila.ensure_nfs_access_rule", return_value={"access_id": "rule-1"}),
     ):
         resp = await client.post(
             "/api/instances/inst-1/storage-attachments",
@@ -122,10 +129,14 @@ async def test_attach_cephfs_storage_success(client, mock_conn):
     with (
         patch("app.api.compute.instances.nova.get_server", return_value=server),
         patch("app.api.compute.instances.manila.get_file_storage", return_value=share),
-        patch("app.api.compute.instances.manila.create_access_rule",
-              return_value={"access_id": "rule-2", "access_key": "AAAABBBBCCCC=="}),
-        patch("app.api.compute.instances.manila.get_export_locations",
-              return_value=["mon1:6789,mon2:6789:/volumes/share-1"]),
+        patch(
+            "app.api.compute.instances.manila.create_access_rule",
+            return_value={"access_id": "rule-2", "access_key": "AAAABBBBCCCC=="},
+        ),
+        patch(
+            "app.api.compute.instances.manila.get_export_locations",
+            return_value=["mon1:6789,mon2:6789:/volumes/share-1"],
+        ),
     ):
         resp = await client.post(
             "/api/instances/inst-1/storage-attachments",
@@ -148,8 +159,7 @@ async def test_attach_storage_read_only_flag(client, mock_conn):
     with (
         patch("app.api.compute.instances.nova.get_server", return_value=server),
         patch("app.api.compute.instances.manila.get_file_storage", return_value=share),
-        patch("app.api.compute.instances.manila.ensure_nfs_access_rule",
-              return_value={"access_id": "rule-ro"}),
+        patch("app.api.compute.instances.manila.ensure_nfs_access_rule", return_value={"access_id": "rule-ro"}),
     ):
         resp = await client.post(
             "/api/instances/inst-1/storage-attachments",
@@ -305,7 +315,7 @@ async def test_detach_cephfs_storage_success(client, mock_conn):
         patch("app.api.compute.instances.nova.get_server", return_value=server),
         patch("app.api.compute.instances.manila.get_file_storage", return_value=share),
         patch("app.api.compute.instances.manila.list_access_rules", return_value=[cephx_rule]),
-        patch("app.api.compute.instances.manila.revoke_access_rule") as mock_revoke,
+        patch("app.api.compute.instances.manila.revoke_access_rule"),
     ):
         resp = await client.delete("/api/instances/inst-1/storage-attachments/share-c")
 
@@ -337,8 +347,7 @@ async def test_nfs_export_path_is_quoted_in_mount_command(client, mock_conn):
     with (
         patch("app.api.compute.instances.nova.get_server", return_value=server),
         patch("app.api.compute.instances.manila.get_file_storage", return_value=share),
-        patch("app.api.compute.instances.manila.ensure_nfs_access_rule",
-              return_value={"access_id": "rule-q"}),
+        patch("app.api.compute.instances.manila.ensure_nfs_access_rule", return_value={"access_id": "rule-q"}),
     ):
         resp = await client.post(
             "/api/instances/inst-1/storage-attachments",
