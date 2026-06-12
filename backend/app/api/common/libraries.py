@@ -61,9 +61,9 @@ async def list_libraries(
 
 
 @router.get("/file-storages", response_model=list[FileStorageInfo])
-async def list_prebuilt_file_storages():
+async def list_prebuilt_file_storages(token_info: dict = Depends(get_token_info)):
     """사전 빌드된 라이브러리 파일 스토리지 목록.
-    service conn + include_public=True로 조회해 모든 프로젝트에서 접근 가능하게 한다.
+    service conn + include_public=True로 조회해 인증된 사용자라면 누구나 조회 가능하게 한다.
     """
     svc_conn = await asyncio.to_thread(get_service_project_connection)
     return await asyncio.to_thread(
