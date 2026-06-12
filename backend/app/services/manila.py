@@ -598,10 +598,12 @@ def create_access_rule(
                 pass
             raise
     return {
-        "access_id": data["id"],
-        "access_key": access_key,
+        "id": data["id"],
+        "access_type": access_type,
         "access_to": access_to,
         "access_level": data["access_level"],
+        "access_key": access_key or None,
+        "state": data.get("state", "new"),
     }
 
 

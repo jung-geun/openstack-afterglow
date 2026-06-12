@@ -612,7 +612,9 @@ async def test_create_file_storage_nfs_uses_nfs_share_type_fallback(client, mock
     from app.config import get_settings
 
     settings = get_settings()
-    with patch("app.api.storage.file_storage.manila.create_file_storage", return_value=make_file_storage()) as mock_create:
+    with patch(
+        "app.api.storage.file_storage.manila.create_file_storage", return_value=make_file_storage()
+    ) as mock_create:
         resp = await client.post(
             "/api/file-storage",
             json={"name": "nfs-no-type", "size_gb": 10, "share_proto": "NFS"},
@@ -629,7 +631,9 @@ async def test_create_file_storage_cephfs_uses_cephfs_share_type_fallback(client
     from app.config import get_settings
 
     settings = get_settings()
-    with patch("app.api.storage.file_storage.manila.create_file_storage", return_value=make_file_storage()) as mock_create:
+    with patch(
+        "app.api.storage.file_storage.manila.create_file_storage", return_value=make_file_storage()
+    ) as mock_create:
         resp = await client.post(
             "/api/file-storage",
             json={"name": "ceph-no-type", "size_gb": 10, "share_proto": "CEPHFS"},
@@ -637,3 +641,65 @@ async def test_create_file_storage_cephfs_uses_cephfs_share_type_fallback(client
     assert resp.status_code == 201
     _, kwargs = mock_create.call_args
     assert kwargs["share_type"] == settings.os_manila_share_type
+
+
+# ─────────────────────────────────────────────────────────────────
+# 접근 규칙 생성 — metadata 미전달 + 오류 표면화 + 응답 필드 검증
+# ─────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_create_access_rule_no_metadata_passed(client, mock_conn):
+    """IP 타입 접근 규칙 생성 시 manila.create_access_rule에 metadata를 전달하지 않는다.
+
+    Manila CephFS는 access rule metadata를 지원하지 않으며 전달 시 400을 반환한다.
+    """
+    with (
+        patch("app.api.storage.file_storage.manila.get_file_storage", return_value=make_file_storage()),
+        patch(
+            "app.api.storage.file_storage.manila.create_access_rule", return_value=make_access_rule("rule-ip")
+        ) as mock_create,
+    ):
+        resp = await client.post(
+            "/api/file-storage/share-1/access-rules",
+            json={"access_to": "10.0.0.0/24", "access_level": "rw", "access_type": "ip"},
+        )
+    assert resp.status_code == 201
+    _, kwargs = mock_create.call_args
+    assert "metadata" not in kwargs
+
+
+@pytest.mark.asyncio
+async def test_create_access_rule_response_has_id_field(client, mock_conn):
+    """create_access_rule 응답에 'id' 필드가 있어야 한다 (마법사 step 3 keyed #each 바인딩)."""
+    rule = make_access_rule("rule-new")
+    with (
+        patch("app.api.storage.file_storage.manila.get_file_storage", return_value=make_file_storage()),
+        patch("app.api.storage.file_storage.manila.create_access_rule", return_value=rule),
+    ):
+        resp = await client.post(
+            "/api/file-storage/share-1/access-rules",
+            json={"access_to": "10.0.0.0/24", "access_level": "rw", "access_type": "ip"},
+        )
+    assert resp.status_code == 201
+    data = resp.json()
+    assert "id" in data
+    assert data["id"] == "rule-new"
+    assert "access_type" in data
+    assert "state" in data
+
+
+@pytest.mark.asyncio
+async def test_create_access_rule_propagates_manila_400(client, mock_conn):
+    """Manila 400 → HTTPException 400 + Manila 메시지가 detail에 포함된다."""
+    err = _make_manila_status_error(400, "Access rule already exists.")
+    with (
+        patch("app.api.storage.file_storage.manila.get_file_storage", return_value=make_file_storage()),
+        patch("app.api.storage.file_storage.manila.create_access_rule", side_effect=err),
+    ):
+        resp = await client.post(
+            "/api/file-storage/share-1/access-rules",
+            json={"access_to": "10.0.0.0/24", "access_level": "rw", "access_type": "ip"},
+        )
+    assert resp.status_code == 400
+    assert "already exists" in resp.json()["detail"]

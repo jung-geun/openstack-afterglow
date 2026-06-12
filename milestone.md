@@ -3887,6 +3887,10 @@ flavor extra spec은 키/값을 손으로 입력해야 해 오타·형식 실수
 - [x] `file_storage.py` — Manila RuntimeError → HTTPException 409 + 실패 사유 노출
 - [x] `fileStorageWizardStore.svelte.ts` — Promise.allSettled 로 types/networks 독립 로드
 - [x] `tests/test_file_storage.py` — NFS/CEPHFS fallback + RuntimeError→409 pytest
+- [x] `file_storage.py` — create_access_rule metadata 제거 (Manila CephFS NFS가 metadata 거부 → 400 → 마법사 접근 규칙 추가 실패 원인)
+- [x] `file_storage.py` — create_access_rule HTTPStatusError 핸들러 추가, 실패 사유 노출
+- [x] `manila.py` — create_access_rule 반환값 `access_id`→`id` + `access_type`/`state` 필드 추가 (마법사 step3 `rule.id` keyed each 바인딩 수정)
+- [x] `tests/test_file_storage.py` + `tests/test_create_access_rule_metadata.py` — 위 변경 반영 pytest
 
 ---
 
