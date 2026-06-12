@@ -104,7 +104,11 @@
 			a.click();
 			URL.revokeObjectURL(url);
 		} catch (e) {
-			error = e instanceof ApiError ? e.message : '템플릿 다운로드 실패';
+			if (format === 'xlsx' && e instanceof ApiError && e.status >= 500) {
+				error = '엑셀 템플릿 생성을 백엔드가 지원하지 않는 상태입니다 (재시작/재배포 필요). 우선 CSV 템플릿을 이용하세요.';
+			} else {
+				error = e instanceof ApiError ? e.message : '템플릿 다운로드 실패';
+			}
 		} finally {
 			downloading = false;
 		}

@@ -128,7 +128,14 @@ async def export_gpu_devices(format: str = Query("xlsx", pattern="^(xlsx|csv)$")
         media_type = "text/csv; charset=utf-8"
         filename = "gpu_devices.csv"
     else:
-        content = build_export_xlsx(devices)
+        try:
+            content = build_export_xlsx(devices)
+        except ImportError:
+            # 실행 중인 백엔드가 openpyxl 추가 이전에 시작된 경우 (재배포/재시작 필요)
+            raise HTTPException(
+                status_code=503,
+                detail="엑셀 모듈(openpyxl)이 설치되지 않았습니다 — 백엔드 재시작 후 사용 가능합니다. 우선 CSV 템플릿을 이용하세요.",
+            )
         media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         filename = "gpu_devices.xlsx"
     return Response(
@@ -187,7 +194,13 @@ async def import_gpu_devices(
     is_xlsx = raw[:4] == b"PK\x03\x04" or (file.filename or "").lower().endswith(".xlsx")
     try:
         if is_xlsx:
-            entries = parse_xlsx(raw)
+            try:
+                entries = parse_xlsx(raw)
+            except ImportError:
+                raise HTTPException(
+                    status_code=503,
+                    detail="엑셀 모듈(openpyxl)이 설치되지 않았습니다 — 백엔드 재시작 후 사용 가능합니다. 우선 CSV로 업로드하세요.",
+                )
         else:
             try:
                 content = raw.decode("utf-8-sig")

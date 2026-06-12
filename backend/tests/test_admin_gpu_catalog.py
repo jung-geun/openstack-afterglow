@@ -253,6 +253,28 @@ async def test_export_gpu_devices_invalid_format(admin_client):
     assert resp.status_code == 422
 
 
+@pytest.mark.asyncio
+async def test_export_gpu_devices_xlsx_without_openpyxl(admin_client):
+    """openpyxl 미설치 환경(구 이미지)에서는 503 + 안내 메시지를 반환한다."""
+    import sys
+
+    with (
+        patch("app.database.is_db_available", return_value=False),
+        patch.dict(sys.modules, {"openpyxl": None}),
+    ):
+        resp = await admin_client.get("/api/admin/gpu-devices/export?format=xlsx")
+    # 5xx detail은 sanitized_http_exception_handler가 마스킹 — 원인은 서버 로그에 기록됨
+    assert resp.status_code == 503
+
+    # CSV는 openpyxl 없이도 동작
+    with (
+        patch("app.database.is_db_available", return_value=False),
+        patch.dict(sys.modules, {"openpyxl": None}),
+    ):
+        resp = await admin_client.get("/api/admin/gpu-devices/export?format=csv")
+    assert resp.status_code == 200
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CSV import 엔드포인트
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
