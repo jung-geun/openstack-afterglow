@@ -12,11 +12,13 @@
 
 	let migrateHost = $state('');
 
-	// CPU 모델 안내 문구 — migrateHosts의 첫 번째 항목에서 cpu_model 추출
+	// CPU 모델 안내 문구
 	const cpuModelHint = $derived(
-		s.migrateHosts.length > 0 && s.migrateHosts[0].cpu_model
-			? `${s.migrateHosts[0].cpu_model} 호환 호스트만 표시`
-			: null
+		type === 'cold'
+			? '모든 호스트 표시 (CPU 모델 무관)'
+			: s.migrateHosts.length > 0 && s.migrateHosts[0].cpu_model
+				? `${s.migrateHosts[0].cpu_model} 호환 호스트만 표시`
+				: null
 	);
 
 	async function handleMigrate() {

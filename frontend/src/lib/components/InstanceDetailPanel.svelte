@@ -86,7 +86,7 @@
 		migrateType = type;
 		s.migrateError = '';
 		showMigrateModal = true;
-		await s.loadMigrateHosts();
+		await s.loadMigrateHosts(type);
 	}
 
 	function openPasswordModal() {

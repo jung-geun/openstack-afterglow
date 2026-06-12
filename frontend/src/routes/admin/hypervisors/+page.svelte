@@ -8,8 +8,9 @@
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
-	import GrafanaEmbed from '$lib/components/monitoring/GrafanaEmbed.svelte';
 	import HypervisorTable from '$lib/components/admin/hypervisors/HypervisorTable.svelte';
+	import SlidePanel from '$lib/components/SlidePanel.svelte';
+	import InstanceDetailPanel from '$lib/components/InstanceDetailPanel.svelte';
 	import type { HypervisorRow } from '$lib/components/admin/hypervisors/HypervisorTable.svelte';
 	import HypervisorDetailPanel from '$lib/components/admin/hypervisors/HypervisorDetailPanel.svelte';
 	import type { HypervisorDetail } from '$lib/components/admin/hypervisors/HypervisorDetailPanel.svelte';
@@ -96,14 +97,16 @@
 		}
 	}
 
+	const STRING_SORT_COLS = new Set(['name', 'cpu_model']);
+
 	let sortedHypervisors = $derived(
 		filteredHypervisors.toSorted((a, b) => {
 			if (!sortColumn) return 0;
 			let va: string | number;
 			let vb: string | number;
-			if (sortColumn === 'name') {
-				va = a.name;
-				vb = b.name;
+			if (STRING_SORT_COLS.has(sortColumn)) {
+				va = (a as unknown as Record<string, string>)[sortColumn] ?? '';
+				vb = (b as unknown as Record<string, string>)[sortColumn] ?? '';
 			} else {
 				va = (a as unknown as Record<string, number>)[sortColumn] ?? 0;
 				vb = (b as unknown as Record<string, number>)[sortColumn] ?? 0;
@@ -112,6 +115,12 @@
 			return sortAsc ? cmp : -cmp;
 		})
 	);
+
+	let selectedInstanceId = $state<string | null>(null);
+	let selectedProjectId = $state<string | null>(null);
+
+	function openInstanceDetail(id: string, pid: string) { selectedInstanceId = id; selectedProjectId = pid; }
+	function closeInstanceDetail() { selectedInstanceId = null; selectedProjectId = null; }
 
 	let showMigrateModal = $state(false);
 	let migrateContext = $state({ serverId: '', serverName: '', type: 'live' as 'live' | 'cold' });
@@ -188,19 +197,15 @@
 		gpus={selectedDetail ? (gpuHostMap.get(selectedDetail.hypervisor_hostname)?.gpus ?? []) : []}
 		onClose={() => { selectedDetail = null; }}
 		onMigrate={openMigrate}
+		onOpenDetail={openInstanceDetail}
 	/>
 {/if}
 </div>
 
-{#if !loading}
-<div class="mt-8">
-	<h2 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">하이퍼바이저 메트릭 (Node Exporter)</h2>
-	<GrafanaEmbed
-		dashboardKey="node"
-		height={400}
-		vars={selectedDetail ? { instance: `${selectedDetail.host_ip}:9100` } : {}}
-	/>
-</div>
+{#if selectedInstanceId}
+	<SlidePanel onClose={closeInstanceDetail}>
+		<InstanceDetailPanel instanceId={selectedInstanceId} adminProjectId={selectedProjectId} onClose={closeInstanceDetail} />
+	</SlidePanel>
 {/if}
 
 {#if showMigrateModal}

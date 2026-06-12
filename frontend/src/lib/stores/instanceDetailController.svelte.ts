@@ -472,14 +472,18 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 	}
 
 	// Admin: migrate
-	async function loadMigrateHosts() {
+	async function loadMigrateHosts(type: 'live' | 'cold' = 'live') {
 		migrateHosts = [];
 		migrateError = '';
 		try {
-			// server_id를 넘겨 백엔드에서 동일 CPU 모델 호스트만 필터링
-			const qs = instance ? `?server_id=${instance.id}` : '';
+			// server_id를 항상 전달해 소스 자신을 제외한다.
+			// 라이브 마이그레이션: cpu_filter=true(기본) — 동일 CPU 모델 호스트만
+			// 콜드 마이그레이션: cpu_filter=false — CPU 모델 무관 전체 호스트
+			const params = new URLSearchParams();
+			if (instance) params.set('server_id', instance.id);
+			if (type === 'cold') params.set('cpu_filter', 'false');
 			migrateHosts = await api.get<{ name: string; state: string; status: string; cpu_model: string | null }[]>(
-				`/api/admin/compute-hosts${qs}`,
+				`/api/admin/compute-hosts?${params.toString()}`,
 				tok(),
 				ownPid()
 			);
@@ -496,7 +500,7 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 			if (type === 'live') {
 				await api.post(`/api/admin/instances/${instance.id}/live-migrate`, { host: host || null, block_migration: 'auto' }, tok(), ownPid());
 			} else {
-				await api.post(`/api/admin/instances/${instance.id}/cold-migrate`, {}, tok(), ownPid());
+				await api.post(`/api/admin/instances/${instance.id}/cold-migrate`, { host: host || null }, tok(), ownPid());
 			}
 			await fetchInstance(instance.id, { silent: true });
 			return true;

@@ -127,6 +127,148 @@ def test_list_compute_hosts_disabled_excluded():
     assert not any(r["name"] == "disabled-host" for r in result)
 
 
+def test_list_compute_hosts_cpu_filter_false_all_models():
+    """cpu_filter=False이면 CPU 모델이 달라도 enabled 전체 반환(소스 제외)."""
+    hypervisors = [
+        _make_hypervisor("src-host", "Skylake-Server"),
+        _make_hypervisor("same-cpu", "Skylake-Server"),
+        _make_hypervisor("diff-cpu", "Cascadelake-Server"),
+        _make_hypervisor("no-cpu", None),
+    ]
+    conn = _conn_with_hypervisors(hypervisors)
+    result = nova.list_compute_hosts(conn, source_host="src-host", cpu_filter=False)
+    names = [r["name"] for r in result]
+    assert "src-host" not in names, "소스 호스트는 cpu_filter=False여도 제외"
+    assert "same-cpu" in names
+    assert "diff-cpu" in names
+    assert "no-cpu" in names
+
+
+def test_list_compute_hosts_cpu_filter_false_no_source():
+    """cpu_filter=False이고 source_host=None이면 전체 enabled 반환."""
+    hypervisors = [
+        _make_hypervisor("compute1", "Skylake-Server"),
+        _make_hypervisor("compute2", "Cascadelake-Server"),
+        _make_hypervisor("down", "Skylake-Server", state="down"),
+    ]
+    conn = _conn_with_hypervisors(hypervisors)
+    result = nova.list_compute_hosts(conn, cpu_filter=False)
+    names = [r["name"] for r in result]
+    assert "compute1" in names
+    assert "compute2" in names
+    assert "down" not in names
+
+
+# ───────────────────────────────────────────────
+# extract_cpu_model
+# ───────────────────────────────────────────────
+
+
+def test_extract_cpu_model_from_dict():
+    """cpu_info가 dict이면 model 반환."""
+    h = {"cpu_info": {"arch": "x86_64", "model": "Skylake-Server", "vendor": "Intel"}}
+    assert nova.extract_cpu_model(h) == "Skylake-Server"
+
+
+def test_extract_cpu_model_from_json_string():
+    """cpu_info가 JSON 문자열이면 파싱 후 model 반환."""
+    h = {"cpu_info": json.dumps({"arch": "x86_64", "model": "Broadwell-IBRS", "vendor": "Intel"})}
+    assert nova.extract_cpu_model(h) == "Broadwell-IBRS"
+
+
+def test_extract_cpu_model_none_cpu_info():
+    """cpu_info=None이면 None 반환."""
+    assert nova.extract_cpu_model({"cpu_info": None}) is None
+
+
+def test_extract_cpu_model_missing_model_key():
+    """cpu_info가 model 키 없는 dict이면 None 반환."""
+    assert nova.extract_cpu_model({"cpu_info": {"arch": "x86_64"}}) is None
+
+
+def test_extract_cpu_model_invalid_json_string():
+    """cpu_info가 파싱 불가 문자열이면 None 반환."""
+    assert nova.extract_cpu_model({"cpu_info": "not-json"}) is None
+
+
+def test_extract_cpu_model_empty_dict():
+    """cpu_info={} 이면 None 반환."""
+    assert nova.extract_cpu_model({"cpu_info": {}}) is None
+
+
+# ───────────────────────────────────────────────
+# cold_migrate_server — host 지정 / 자동 배치
+# ───────────────────────────────────────────────
+
+
+def test_cold_migrate_server_with_host_uses_microversion_2_56():
+    """host 지정 시 microversion 2.56 헤더와 함께 migrate action을 POST한다."""
+    conn = MagicMock()
+    conn.compute.get_endpoint.return_value = "http://nova:8774/v2.1"
+    nova.cold_migrate_server(conn, "server-1", host="compute2")
+    conn.session.post.assert_called_once()
+    call_kwargs = conn.session.post.call_args
+    assert "compute 2.56" in call_kwargs.kwargs.get("headers", {}).get("OpenStack-API-Version", "")
+    body = call_kwargs.kwargs.get("json", {})
+    assert body == {"migrate": {"host": "compute2"}}
+
+
+def test_cold_migrate_server_no_host_uses_sdk():
+    """host 미지정 시 기존 SDK 경로(migrate_server)를 사용한다."""
+    conn = MagicMock()
+    nova.cold_migrate_server(conn, "server-1", host=None)
+    conn.compute.migrate_server.assert_called_once_with("server-1")
+    conn.session.post.assert_not_called()
+
+
+# ───────────────────────────────────────────────
+# cold-migrate 엔드포인트 — host body 전달
+# ───────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_cold_migrate_with_host_body(admin_client, mock_conn):
+    """cold-migrate에 host body를 전달하면 nova.cold_migrate_server에 host가 넘어간다."""
+    with patch("app.api.identity.admin.nova.cold_migrate_server") as mock_fn:
+        resp = await admin_client.post(
+            "/api/admin/instances/inst-1/cold-migrate",
+            json={"host": "compute2"},
+        )
+    assert resp.status_code == 200
+    mock_fn.assert_called_once()
+    _, kwargs = mock_fn.call_args
+    assert kwargs.get("host") == "compute2" or mock_fn.call_args.args[2] == "compute2"
+
+
+@pytest.mark.asyncio
+async def test_cold_migrate_without_host_body(admin_client, mock_conn):
+    """cold-migrate에 body={}를 전달해도 host=None으로 처리된다(하위 호환)."""
+    with patch("app.api.identity.admin.nova.cold_migrate_server") as mock_fn:
+        resp = await admin_client.post(
+            "/api/admin/instances/inst-1/cold-migrate",
+            json={},
+        )
+    assert resp.status_code == 200
+    mock_fn.assert_called_once()
+
+
+# ───────────────────────────────────────────────
+# /compute-hosts?cpu_filter=false 엔드포인트
+# ───────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_compute_hosts_cpu_filter_false_passes_param(admin_client, mock_conn):
+    """cpu_filter=false 쿼리 파라미터가 nova.list_compute_hosts에 cpu_filter=False로 전달된다."""
+    with patch("app.api.identity.admin.nova.list_compute_hosts", return_value=[]) as mock_fn:
+        resp = await admin_client.get("/api/admin/compute-hosts?cpu_filter=false")
+    assert resp.status_code == 200
+    mock_fn.assert_called_once()
+    _, kwargs = mock_fn.call_args
+    passed = kwargs.get("cpu_filter", mock_fn.call_args.args[2] if len(mock_fn.call_args.args) > 2 else True)
+    assert passed is False
+
+
 # ───────────────────────────────────────────────
 # _extract_os_error
 # ───────────────────────────────────────────────

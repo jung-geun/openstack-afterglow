@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime
 from typing import TYPE_CHECKING
@@ -364,9 +365,21 @@ def live_migrate_server(
     conn.compute.live_migrate_server(server_id, host=host, block_migration=block_migration)
 
 
-def cold_migrate_server(conn: openstack.connection.Connection, server_id: str) -> None:
-    """콜드 마이그레이션 (인스턴스 종료 후 이동)."""
-    conn.compute.migrate_server(server_id)
+def cold_migrate_server(conn: openstack.connection.Connection, server_id: str, host: str | None = None) -> None:
+    """콜드 마이그레이션 (인스턴스 종료 후 이동).
+
+    host가 지정된 경우 Nova microversion 2.56을 사용해 대상 호스트를 직접 지정한다.
+    host가 None이면 Nova 스케줄러 자동 배치.
+    """
+    if host:
+        endpoint = conn.compute.get_endpoint()
+        conn.session.post(
+            f"{endpoint}/servers/{server_id}/action",
+            json={"migrate": {"host": host}},
+            headers={"OpenStack-API-Version": "compute 2.56"},
+        )
+    else:
+        conn.compute.migrate_server(server_id)
 
 
 def confirm_resize_server(conn: openstack.connection.Connection, server_id: str) -> None:
@@ -438,13 +451,31 @@ def get_server_image_meta(conn: openstack.connection.Connection, server_id: str)
         return {"qga_enabled": False, "os_admin_user": None, "image_id": image_id, "image_name": None}
 
 
+def extract_cpu_model(h: dict) -> str | None:
+    """하이퍼바이저 raw dict에서 CPU model 문자열을 추출한다.
+
+    cpu_info가 JSON 문자열이면 파싱 후 'model' 키를 반환하고,
+    dict이면 바로 'model' 키를 반환한다. 파싱 실패·필드 없으면 None.
+    """
+    ci = h.get("cpu_info") or {}
+    if isinstance(ci, str):
+        try:
+            ci = json.loads(ci)
+        except Exception:
+            return None
+    return ci.get("model") if isinstance(ci, dict) else None
+
+
 def list_compute_hosts(
     conn: openstack.connection.Connection,
     source_host: str | None = None,
+    cpu_filter: bool = True,
 ) -> list[dict]:
     """마이그레이션 대상 컴퓨트 호스트 목록.
 
-    source_host가 주어지면 동일 CPU 모델 호스트만 반환하고 source_host 자신은 제외한다.
+    source_host가 주어지면 소스 자신을 제외한다.
+    cpu_filter=True(기본)이고 source_host가 있으면 동일 CPU 모델 호스트만 반환한다.
+    cpu_filter=False이면 CPU 모델 관계 없이 enabled 전체를 반환(콜드 마이그레이션용).
     CPU 정보 판별 불가 시 fail-open(전체 목록 반환).
     """
     endpoint = conn.compute.get_endpoint()
@@ -457,17 +488,6 @@ def list_compute_hosts(
     except Exception:
         return []
 
-    def _cpu_model(h: dict) -> str | None:
-        ci = h.get("cpu_info") or {}
-        if isinstance(ci, str):
-            import json
-
-            try:
-                ci = json.loads(ci)
-            except Exception:
-                return None
-        return ci.get("model") if isinstance(ci, dict) else None
-
     enabled = [h for h in hypervisors if h.get("state") == "up" and h.get("status") == "enabled"]
 
     def _to_dict(h: dict) -> dict:
@@ -475,31 +495,33 @@ def list_compute_hosts(
             "name": h.get("hypervisor_hostname", ""),
             "state": h.get("state", ""),
             "status": h.get("status", ""),
-            "cpu_model": _cpu_model(h),
+            "cpu_model": extract_cpu_model(h),
         }
 
     if not source_host:
         return [_to_dict(h) for h in enabled]
 
-    # source_host의 CPU 모델 탐색
+    # 소스 호스트 제외 (공통)
+    candidates = [h for h in enabled if h.get("hypervisor_hostname", "") != source_host]
+
+    if not cpu_filter:
+        # 콜드 마이그레이션 — CPU 모델 무관, 소스만 제외
+        return [_to_dict(h) for h in candidates]
+
+    # 라이브 마이그레이션 — 동일 CPU 모델 필터
     source_model: str | None = None
     for h in hypervisors:
         hostname = h.get("hypervisor_hostname", "")
         service_host = h.get("service", {}).get("host", "") if isinstance(h.get("service"), dict) else ""
         if hostname == source_host or service_host == source_host:
-            source_model = _cpu_model(h)
+            source_model = extract_cpu_model(h)
             break
 
     if not source_model:
         # CPU 정보 미제공 환경 — fail-open: 소스 자신만 제외하고 전체 반환
-        return [_to_dict(h) for h in enabled if h.get("hypervisor_hostname", "") != source_host]
+        return [_to_dict(h) for h in candidates]
 
-    # 동일 CPU 모델 + 소스 제외
-    return [
-        _to_dict(h)
-        for h in enabled
-        if h.get("hypervisor_hostname", "") != source_host and _cpu_model(h) == source_model
-    ]
+    return [_to_dict(h) for h in candidates if extract_cpu_model(h) == source_model]
 
 
 def _extract_os_error(e: Exception) -> str:

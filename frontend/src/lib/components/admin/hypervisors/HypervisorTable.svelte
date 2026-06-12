@@ -18,6 +18,7 @@
 		running_vms: number;
 		gpu_total?: number;
 		gpu_used?: number;
+		cpu_model?: string | null;
 	}
 
 	let {
@@ -68,6 +69,11 @@
 					</button>
 				</th>
 				<th class="text-left py-2 pr-4">로컬 디스크</th>
+				<th class="text-left py-2 pr-4 max-lg:hidden">
+					<button onclick={() => onSort('cpu_model')} class="hover:text-white transition-colors flex items-center gap-1">
+						CPU 모델 <span class="text-gray-600">{sortIcon('cpu_model')}</span>
+					</button>
+				</th>
 				<th class="text-left py-2">
 					<button onclick={() => onSort('gpu_used')} class="hover:text-white transition-colors flex items-center gap-1">
 						GPU <span class="text-gray-600">{sortIcon('gpu_used')}</span>
@@ -108,6 +114,7 @@
 							label="{formatStorage(h.local_disk_used_gb)}/{formatStorage(h.local_disk_gb)}"
 						/>
 					</td>
+					<td class="py-2 pr-4 text-gray-400 font-mono text-xs max-lg:hidden">{h.cpu_model ?? '-'}</td>
 					<td class="py-2">
 						{#if (h.gpu_total ?? 0) > 0}
 							<HypervisorUsageBar

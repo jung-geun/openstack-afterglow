@@ -24,6 +24,7 @@
 		local_gb_used: number;
 		running_vms: number;
 		cpu_info: string | null;
+		cpu_model: string | null;
 		servers: { id: string; name: string; status: string; project_id: string; flavor: string }[];
 	}
 
@@ -34,6 +35,7 @@
 		gpus = [],
 		onClose,
 		onMigrate,
+		onOpenDetail,
 	}: {
 		detail: HypervisorDetail | null;
 		loading: boolean;
@@ -41,6 +43,7 @@
 		gpus?: GpuDevice[];
 		onClose: () => void;
 		onMigrate: (serverId: string, serverName: string, type: 'live' | 'cold') => void;
+		onOpenDetail: (serverId: string, projectId: string) => void;
 	} = $props();
 </script>
 
@@ -90,6 +93,12 @@
 						<dt class="text-gray-400">서비스 호스트</dt>
 						<dd class="text-gray-300 font-mono">{detail.service_host || '-'}</dd>
 					</div>
+					{#if detail.cpu_model}
+					<div class="flex justify-between">
+						<dt class="text-gray-400">CPU 모델</dt>
+						<dd class="text-gray-300 font-mono text-right">{detail.cpu_model}</dd>
+					</div>
+					{/if}
 				</dl>
 			</div>
 
@@ -151,7 +160,11 @@
 						{#each detail.servers as s}
 							<div class="flex items-center justify-between py-1.5 border-b border-gray-800/50 last:border-0">
 								<div class="flex-1 min-w-0">
-									<div class="text-xs text-gray-300 truncate">{s.name || s.id.slice(0, 12)}</div>
+									<button
+										type="button"
+										onclick={() => onOpenDetail(s.id, s.project_id)}
+										class="text-xs text-gray-300 hover:text-blue-400 transition-colors truncate block w-full text-left"
+									>{s.name || s.id.slice(0, 12)}</button>
 									<div class="text-xs text-gray-500">{projectNameMap.get(s.project_id) || s.project_id.slice(0, 8)} · {s.flavor}</div>
 								</div>
 								<div class="flex items-center gap-1 ml-2 flex-shrink-0">
