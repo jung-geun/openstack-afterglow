@@ -29,7 +29,10 @@ async def test_list_libraries_success(client, mock_conn):
 async def test_list_prebuilt_file_storages_unauthenticated():
     """service conn 사용 endpoint — 인증 없이도 200 반환 (공개 prebuilt share 목록)."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        with patch("app.api.common.libraries.manila") as mock_manila:
+        with (
+            patch("app.api.common.libraries.manila") as mock_manila,
+            patch("app.api.common.libraries.get_service_project_connection"),
+        ):
             mock_manila.list_file_storages.return_value = []
             resp = await ac.get("/api/libraries/file-storages")
     assert resp.status_code == 200
@@ -37,7 +40,10 @@ async def test_list_prebuilt_file_storages_unauthenticated():
 
 @pytest.mark.asyncio
 async def test_list_prebuilt_file_storages_success(client, mock_conn):
-    with patch("app.api.common.libraries.manila") as mock_manila:
+    with (
+        patch("app.api.common.libraries.manila") as mock_manila,
+        patch("app.api.common.libraries.get_service_project_connection"),
+    ):
         mock_manila.list_file_storages.return_value = []
         resp = await client.get("/api/libraries/file-storages")
     assert resp.status_code == 200
