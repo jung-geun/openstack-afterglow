@@ -118,15 +118,34 @@ aliases = ["RTX3070", "3070"]
 
 [[gpu.devices]]
 vendor_id = "10DE"
-device_id = "2504"
+device_id = "2487"
 name = "RTX 3060"
 is_audio = false
 aliases = ["RTX3060", "3060"]
 
 [[gpu.devices]]
 vendor_id = "10DE"
+device_id = "2504"
+name = "RTX 3060 LHR"
+is_audio = false
+aliases = ["RTX3060LHR", "3060LHR"]
+
+[[gpu.devices]]
+vendor_id = "10DE"
 device_id = "1AEF"
 name = "GA102 Audio"
+is_audio = true
+
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "228b"
+name = "GA104 Audio"
+is_audio = true
+
+[[gpu.devices]]
+vendor_id = "10DE"
+device_id = "228e"
+name = "GA106 Audio"
 is_audio = true
 
 # === Ada Lovelace Consumer ===
