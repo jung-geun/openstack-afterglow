@@ -3859,4 +3859,4 @@ flavor extra spec은 키/값을 손으로 입력해야 해 오타·형식 실수
 ### 74.4 share network UI 안내
 
 - [x] `file-storage/networks/+page.svelte` — DHSS=False 환경 안내 (share network 불필요 명시)
-- [ ] 파일 스토리지 생성 마법사 — share network 선택 선택 사항 안내
+- [x] 파일 스토리지 생성 마법사 — share network 선택 선택 사항 안내
