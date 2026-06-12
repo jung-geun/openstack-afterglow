@@ -12,6 +12,7 @@
 	import NetworkSection from '$lib/components/instance/NetworkSection.svelte';
 	import VolumesSection from '$lib/components/instance/VolumesSection.svelte';
 	import UnionInfoSection from '$lib/components/instance/UnionInfoSection.svelte';
+	import StorageAttachmentsSection from '$lib/components/instance/StorageAttachmentsSection.svelte';
 	import MigrateModal from '$lib/components/instance/MigrateModal.svelte';
 	import PasswordModal from '$lib/components/instance/PasswordModal.svelte';
 	import ResizeModal from '$lib/components/instance/ResizeModal.svelte';
@@ -164,6 +165,7 @@
 		<ConsoleSection />
 		<NetworkSection />
 		<VolumesSection />
+		<StorageAttachmentsSection />
 		<UnionInfoSection />
 	{/if}
 </div>

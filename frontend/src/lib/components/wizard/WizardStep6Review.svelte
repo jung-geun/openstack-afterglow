@@ -104,13 +104,30 @@
 	</div>
 	<!-- 루트 디스크 -->
 	{#if $wizard.bootSource === 'image'}
-	<div class="grid grid-cols-[140px_1fr_auto] gap-4 items-center px-4 py-3.5">
+	<div class="grid grid-cols-[140px_1fr_auto] gap-4 items-center px-4 py-3.5 {$wizard.dataMounts.length > 0 ? 'border-b border-gray-800' : ''}">
 		<span class="text-xs text-gray-400 font-medium">루트 디스크</span>
 		<span class="text-sm text-white font-mono">
 			{$wizard.bootVolumeSizeGb} GB
 			<span class="text-gray-500 text-xs ml-1">({$wizard.deleteBootVolumeOnTermination ? 'VM 삭제 시 함께 삭제' : '보존'})</span>
 		</span>
 		<button onclick={() => s.goTo(5)} class="review-edit-btn">✎ 수정</button>
+	</div>
+	{/if}
+	<!-- 파일 스토리지 마운트 -->
+	{#if $wizard.dataMounts.length > 0}
+	<div class="grid grid-cols-[140px_1fr_auto] gap-4 items-start px-4 py-3.5">
+		<span class="text-xs text-gray-400 font-medium mt-0.5">스토리지 마운트</span>
+		<div class="flex flex-col gap-1.5">
+			{#each $wizard.dataMounts as dm}
+				<div class="flex items-center gap-2 text-xs font-mono">
+					<span class="text-gray-300 truncate max-w-[140px]">{dm.fileStorageId ? (s.fileStorages.find(f => f.id === dm.fileStorageId)?.name ?? dm.fileStorageId.slice(0, 12)) : '—'}</span>
+					<span class="text-gray-600">→</span>
+					<span class="text-cyan-400">{dm.mountPoint || '—'}</span>
+					{#if dm.readOnly}<span class="text-amber-500/80 text-[10px]">ro</span>{/if}
+				</div>
+			{/each}
+		</div>
+		<button onclick={() => s.goTo(5)} class="review-edit-btn mt-0.5">✎ 수정</button>
 	</div>
 	{/if}
 </div>

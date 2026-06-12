@@ -27,6 +27,12 @@ export interface NewVolumeSpec {
 	size_gb: number;
 }
 
+export interface DataMountSpec {
+	fileStorageId: string;
+	mountPoint: string;
+	readOnly: boolean;
+}
+
 export interface WizardState {
 	step: number;
 	bootSource: 'image' | 'volume';
@@ -53,6 +59,7 @@ export interface WizardState {
 	deleteBootVolumeOnTermination: boolean;
 	additionalVolumeIds: string[];
 	newVolumes: NewVolumeSpec[];
+	dataMounts: DataMountSpec[];
 	targetProjectId: string | null;
 }
 
@@ -82,6 +89,7 @@ const initial: WizardState = {
 	deleteBootVolumeOnTermination: false,
 	additionalVolumeIds: [],
 	newVolumes: [],
+	dataMounts: [],
 	targetProjectId: null,
 };
 

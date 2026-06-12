@@ -102,6 +102,7 @@ class CreateInstanceRequest(BaseModel):
     new_volumes: list["NewVolumeRequest"] = []
     existing_upper_volume_id: str | None = None
     boot_volume_id: str | None = None  # 기존 부팅 볼륨 재사용 (image_id 와 상호 배타)
+    data_mounts: list["DataMountSpec"] = []  # 기존 Manila share 직접 마운트 목록
 
     @model_validator(mode="after")
     def validate_boot_source(self) -> "CreateInstanceRequest":
@@ -138,6 +139,54 @@ class NewVolumeRequest(BaseModel):
     def validate_size(cls, v: int) -> int:
         if v < 1 or v > 16384:
             raise ValueError("볼륨 크기는 1~16384 GB 범위여야 합니다")
+        return v
+
+
+_ALLOWED_MOUNT_PREFIXES = ("/mnt/", "/data/", "/srv/", "/home/")
+_MOUNT_POINT_RE = re.compile(r"^/(mnt|data|srv|home)(/[A-Za-z0-9._-]+)*$")
+_BLOCKED_MOUNT_PREFIXES = ("/opt/layers", "/opt/", "/etc/", "/usr/", "/var/", "/sys/", "/proc/", "/dev/", "/run/")
+
+
+class DataMountSpec(BaseModel):
+    """VM 생성/연결 시 기존 Manila share를 사용자 지정 경로에 마운트하는 스펙."""
+
+    file_storage_id: str
+    mount_point: str
+    read_only: bool = False
+
+    @field_validator("mount_point")
+    @classmethod
+    def validate_mount_point(cls, v: str) -> str:
+        if not _MOUNT_POINT_RE.match(v):
+            raise ValueError(
+                "mount_point는 /mnt, /data, /srv, /home 하위 절대 경로여야 하며, "
+                "영문자·숫자·점·하이픈·언더스코어만 허용됩니다 (예: /mnt/mydata)"
+            )
+        if any(seg in (".", "..") for seg in v.split("/")):
+            raise ValueError("mount_point에 '..' 또는 '.' 세그먼트는 허용되지 않습니다")
+        for blocked in _BLOCKED_MOUNT_PREFIXES:
+            if v == blocked.rstrip("/") or v.startswith(blocked):
+                raise ValueError(f"mount_point로 {blocked} 하위 경로는 허용되지 않습니다")
+        return v
+
+
+class StorageAttachRequest(BaseModel):
+    file_storage_id: str
+    mount_point: str
+    read_only: bool = False
+
+    @field_validator("mount_point")
+    @classmethod
+    def validate_mount_point(cls, v: str) -> str:
+        if not _MOUNT_POINT_RE.match(v):
+            raise ValueError(
+                "mount_point는 /mnt, /data, /srv, /home 하위 절대 경로여야 합니다 (예: /mnt/mydata)"
+            )
+        if any(seg in (".", "..") for seg in v.split("/")):
+            raise ValueError("mount_point에 '..' 또는 '.' 세그먼트는 허용되지 않습니다")
+        for blocked in _BLOCKED_MOUNT_PREFIXES:
+            if v == blocked.rstrip("/") or v.startswith(blocked):
+                raise ValueError(f"mount_point로 {blocked} 하위 경로는 허용되지 않습니다")
         return v
 
 

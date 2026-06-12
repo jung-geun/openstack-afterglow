@@ -36,7 +36,9 @@ from app.models.compute import (
     AttachInterfaceRequest,
     AttachVolumeRequest,
     CreateInstanceRequest,
+    DataMountSpec,
     InstanceInfo,
+    StorageAttachRequest,
     UpdateSecurityGroupsRequest,
     UpdateVolumeAttachmentRequest,
 )
@@ -201,6 +203,12 @@ async def create_instance(
             )
             file_storages_info = [file_storage_info]
 
+        data_mounts_info: list[dict] = []
+        if req.data_mounts:
+            data_mounts_info = await _prepare_data_mounts(
+                conn, req.data_mounts, req.name, created_access_ids, req.network_id or ""
+            )
+
         # ------------------------------------------------------------------
         # 2. Cinder: 부트 볼륨 생성 또는 기존 볼륨 검증
         # ------------------------------------------------------------------
@@ -278,6 +286,7 @@ async def create_instance(
             instance_id=_health_id if _health_token else "",
             report_url=_report_url if _health_token else "",
             report_token=_health_token,
+            data_mounts=data_mounts_info,
         )
 
         # ------------------------------------------------------------------
@@ -302,6 +311,8 @@ async def create_instance(
             _health_id,
             _health_token,
         )
+        if data_mounts_info:
+            meta["union_data_share_ids"] = ",".join(dm["file_storage_id"] for dm in data_mounts_info)
 
         # upper 볼륨을 두 번째 블록 디바이스로 추가
         # (Nova block_device_mapping_v2 에 추가 볼륨 연결)
@@ -447,30 +458,36 @@ async def create_instance_async(
 
         try:
             file_storages_info = []
+            data_mounts_info: list[dict] = []
             userdata = None
 
-            if resolved_libs:
+            if resolved_libs or req.data_mounts:
                 # Step 1: Manila 파일 스토리지 (0-20%)
                 yield send_progress(ProgressStep.MANILA_PREPARING, 0, "파일 스토리지 준비 중...")
-                if req.strategy == "prebuilt":
-                    file_storages_info = await _prepare_prebuilt_file_storages(
-                        conn,
-                        resolved_libs,
-                        req.name,
-                        created_access_ids,
-                        network_id=req.network_id or "",
-                        project_id=conn._afterglow_project_id,
+                if resolved_libs:
+                    if req.strategy == "prebuilt":
+                        file_storages_info = await _prepare_prebuilt_file_storages(
+                            conn,
+                            resolved_libs,
+                            req.name,
+                            created_access_ids,
+                            network_id=req.network_id or "",
+                            project_id=conn._afterglow_project_id,
+                        )
+                    else:
+                        file_storage_info = await _prepare_dynamic_file_storage(
+                            conn,
+                            req.name,
+                            resolved_libs,
+                            settings,
+                            created_file_storage_ids,
+                            created_access_ids,
+                        )
+                        file_storages_info = [file_storage_info]
+                if req.data_mounts:
+                    data_mounts_info = await _prepare_data_mounts(
+                        conn, req.data_mounts, req.name, created_access_ids, req.network_id or ""
                     )
-                else:
-                    file_storage_info = await _prepare_dynamic_file_storage(
-                        conn,
-                        req.name,
-                        resolved_libs,
-                        settings,
-                        created_file_storage_ids,
-                        created_access_ids,
-                    )
-                    file_storages_info = [file_storage_info]
                 yield send_progress(ProgressStep.MANILA_PREPARING, 20, "파일 스토리지 준비 완료")
 
             # GPU 플레이버 여부 확인 (항상 — SG attach와 cloud-init에 공용)
@@ -545,7 +562,7 @@ async def create_instance_async(
             # - GPU only → NVIDIA 드라이버 + dcgm-exporter 설치 (libraries 없어도 필수)
             _sse_health_id = ""
             _sse_health_token = ""
-            if resolved_libs or gpu_available:
+            if resolved_libs or gpu_available or data_mounts_info:
                 yield send_progress(ProgressStep.USERDATA_GENERATING, 60, "cloud-init 생성 중...")
                 _sse_health_id, _sse_report_url, _sse_health_token = await instance_orch.try_issue_health_token(
                     conn._afterglow_project_id, settings
@@ -553,7 +570,7 @@ async def create_instance_async(
 
                 userdata = cloudinit.generate_userdata(
                     libraries=resolved_libs,
-                    strategy=req.strategy,
+                    strategy=req.strategy or "none",
                     file_storages=file_storages_info,
                     upper_device="/dev/vdb",
                     ceph_monitors=settings.ceph_monitors,
@@ -561,6 +578,7 @@ async def create_instance_async(
                     instance_id=_sse_health_id if _sse_health_token else "",
                     report_url=_sse_report_url if _sse_health_token else "",
                     report_token=_sse_health_token,
+                    data_mounts=data_mounts_info,
                 )
                 yield send_progress(ProgressStep.USERDATA_GENERATING, 65, "cloud-init 생성 완료")
 
@@ -585,6 +603,8 @@ async def create_instance_async(
                 _sse_health_id if resolved_libs else "",
                 _sse_health_token,
             )
+            if data_mounts_info:
+                meta["union_data_share_ids"] = ",".join(dm["file_storage_id"] for dm in data_mounts_info)
 
             server = await asyncio.to_thread(
                 nova.create_server,
@@ -821,6 +841,23 @@ async def delete_instance(
                     logger.warning(f"prebuilt cephx rule 정리 실패 (share={file_storage_id}): {ex}")
         except Exception as ex:
             logger.warning(f"prebuilt access rule 정리 중 svc_conn 획득 실패: {ex}")
+
+    # data mount CephX access rule 정리 (best-effort, user conn 사용)
+    _data_share_meta = (server.metadata or {}).get("union_data_share_ids", "")
+    if _data_share_meta and _data_share_meta != "none":
+        _instance_name = server.name
+        for _fsi in [s for s in _data_share_meta.split(",") if s]:
+            try:
+                _rules = await asyncio.to_thread(manila.list_access_rules, conn, _fsi)
+                for _r in _rules:
+                    _at = _r.get("access_to", "")
+                    if _r.get("access_type") == "cephx" and (
+                        _at.startswith(f"data-ro-{_instance_name}-")
+                        or _at.startswith(f"data-rw-{_instance_name}-")
+                    ):
+                        await asyncio.to_thread(manila.revoke_access_rule, conn, _fsi, _r["id"])
+            except Exception as _ex:
+                logger.warning(f"data mount cephx rule 정리 실패 (share={_fsi}): {_ex}")
 
     # Floating IP 정리 (해제 + 삭제)
     try:
@@ -1452,6 +1489,118 @@ async def _prepare_dynamic_file_storage(
         }
 
 
+async def _prepare_data_mounts(
+    conn,
+    data_mounts: list,
+    instance_name: str,
+    created_access_ids: list,
+    network_id: str = "",
+) -> list[dict]:
+    """사용자 소유 Manila share를 VM 생성 시 직접 마운트하기 위한 access rule 준비.
+
+    반환값: cloud-init 템플릿에 전달할 data_mounts 목록.
+    """
+    if not data_mounts:
+        return []
+
+    settings = get_settings()
+    project_id = conn._afterglow_project_id
+    project_cidrs: list[str] = []
+    result = []
+
+    for spec in data_mounts:
+        share = await asyncio.to_thread(manila.get_file_storage, conn, spec.file_storage_id)
+
+        share_project = share.project_id or ""
+        if share_project != project_id and not share.is_public:
+            raise HTTPException(
+                status_code=403,
+                detail=f"파일 스토리지 {spec.file_storage_id}에 대한 접근 권한이 없습니다.",
+            )
+        if share.status != "available":
+            raise HTTPException(
+                status_code=409,
+                detail=f"파일 스토리지 {spec.file_storage_id}가 available 상태가 아닙니다: {share.status}",
+            )
+
+        access_level = "ro" if spec.read_only else "rw"
+
+        if share.share_proto == "NFS":
+            if not project_cidrs:
+                if not network_id:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="NFS 파일 스토리지 마운트를 위해 network_id가 필요합니다.",
+                    )
+                try:
+                    project_cidrs = await asyncio.to_thread(
+                        _resolve_project_subnet_cidrs, conn, network_id
+                    )
+                except Exception as e:
+                    raise HTTPException(status_code=503, detail=f"Subnet CIDR 조회 실패: {e}")
+            if not project_cidrs:
+                raise HTTPException(status_code=503, detail="Project subnet CIDR을 조회할 수 없습니다.")
+
+            nfs_base = "hard,intr,noatime,nosuid,nodev,_netdev,timeo=10,retrans=3"
+            mount_options = f"ro,{nfs_base}" if spec.read_only else nfs_base
+            for cidr in project_cidrs:
+                rule = await asyncio.to_thread(
+                    manila.ensure_nfs_access_rule,
+                    conn,
+                    share.id,
+                    cidr,
+                    access_level,
+                    settings.manila_nfs_root_squash,
+                    settings.manila_nfs_sec_flavor,
+                )
+                created_access_ids.append((share.id, rule["access_id"]))
+
+            nfs_export = share.nfs_export_location
+            if not nfs_export:
+                locs = await asyncio.to_thread(manila.get_export_locations, conn, share.id)
+                nfs_export = locs[0] if locs else ""
+
+            result.append({
+                "file_storage_id": share.id,
+                "mount_point": spec.mount_point,
+                "share_proto": "NFS",
+                "nfs_export_location": nfs_export,
+                "export_path": "",
+                "cephx_id": "",
+                "cephx_key": "",
+                "mount_options": mount_options,
+                "read_only": spec.read_only,
+            })
+
+        else:
+            cephx_id = f"data-{access_level}-{instance_name}-{share.id[:8]}"
+            rule = await asyncio.to_thread(
+                manila.create_access_rule, conn, share.id, cephx_id, access_level
+            )
+            created_access_ids.append((share.id, rule["access_id"]))
+
+            locs = await asyncio.to_thread(manila.get_export_locations, conn, share.id)
+            if not locs:
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"파일 스토리지 {spec.file_storage_id} export location을 찾을 수 없습니다.",
+                )
+
+            result.append({
+                "file_storage_id": share.id,
+                "mount_point": spec.mount_point,
+                "share_proto": share.share_proto,
+                "nfs_export_location": "",
+                "export_path": locs[0],
+                "cephx_id": cephx_id,
+                "cephx_key": rule["access_key"],
+                "mount_options": "",
+                "read_only": spec.read_only,
+            })
+
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Floating IP 자동 관리 엔드포인트
 # ---------------------------------------------------------------------------
@@ -1724,3 +1873,214 @@ async def set_admin_password(
             error_message=str(e)[:500],
         )
         raise HTTPException(status_code=500, detail="패스워드 변경 요청 실패")
+
+
+# ---------------------------------------------------------------------------
+# 파일 스토리지 연결 (실행 중 VM) — storage-attachments
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{instance_id}/storage-attachments", response_model=dict)
+async def attach_storage(
+    instance_id: str,
+    req: StorageAttachRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    """실행 중인 VM에 Manila 파일 스토리지 접근 규칙을 부여하고 마운트 명령을 반환한다."""
+    import shlex as _shlex
+
+    try:
+        server = await asyncio.to_thread(nova.get_server, conn, instance_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="인스턴스를 찾을 수 없습니다")
+    assert_instance_owner(server, conn, token_info)
+
+    share = await asyncio.to_thread(manila.get_file_storage, conn, req.file_storage_id)
+    project_id = conn._afterglow_project_id
+    if (share.project_id or "") != project_id and not share.is_public:
+        raise HTTPException(status_code=403, detail="파일 스토리지 접근 권한이 없습니다.")
+    if share.status != "available":
+        raise HTTPException(status_code=409, detail=f"파일 스토리지가 available 상태가 아닙니다: {share.status}")
+
+    access_level = "ro" if req.read_only else "rw"
+    settings = get_settings()
+
+    if share.share_proto == "NFS":
+        fixed_ip = next((ip.addr for ip in server.ip_addresses if ip.type == "fixed"), None)
+        if not fixed_ip:
+            raise HTTPException(status_code=409, detail="VM의 fixed IP를 찾을 수 없습니다. VM이 실행 중인지 확인하세요.")
+
+        rule = await asyncio.to_thread(
+            manila.ensure_nfs_access_rule,
+            conn,
+            share.id,
+            fixed_ip,
+            access_level,
+            settings.manila_nfs_root_squash,
+            settings.manila_nfs_sec_flavor,
+        )
+
+        nfs_export = share.nfs_export_location
+        if not nfs_export:
+            locs = await asyncio.to_thread(manila.get_export_locations, conn, share.id)
+            nfs_export = locs[0] if locs else ""
+
+        nfs_base = "hard,intr,noatime,nosuid,nodev,_netdev,timeo=10,retrans=3"
+        mount_opts = f"ro,{nfs_base}" if req.read_only else nfs_base
+        mount_command = (
+            f"sudo mkdir -p {_shlex.quote(req.mount_point)} && "
+            f"sudo mount -t nfs -o {mount_opts} {_shlex.quote(nfs_export)} {_shlex.quote(req.mount_point)}"
+        )
+
+        await asyncio.to_thread(
+            conn.compute.set_server_metadata,
+            instance_id,
+            _merge_data_share_meta(server, share.id),
+        )
+        await invalidate(f"afterglow:nova:{project_id}:instance:{instance_id}")
+        await cache_invalidation.invalidate_mutation_count("nova", project_id)
+
+        return {
+            "file_storage_id": share.id,
+            "share_proto": "NFS",
+            "mount_command": mount_command,
+            "keyring_file": None,
+            "keyring_path": None,
+            "access_id": rule["access_id"],
+        }
+
+    else:
+        cephx_id = f"data-{access_level}-{server.name}-{share.id[:8]}"
+        rule = await asyncio.to_thread(
+            manila.create_access_rule, conn, share.id, cephx_id, access_level
+        )
+
+        locs = await asyncio.to_thread(manila.get_export_locations, conn, share.id)
+        export_path = locs[0] if locs else ""
+        keyring_path = f"/etc/ceph/ceph.client.{cephx_id}.keyring"
+        keyring_content = f"[client.{cephx_id}]\n    key = {rule['access_key']}\n"
+        ceph_opts = f"name={cephx_id},secretfile={keyring_path},_netdev"
+        if req.read_only:
+            ceph_opts += ",ro"
+        mount_command = (
+            f"sudo mkdir -p {_shlex.quote(req.mount_point)} && "
+            f"sudo bash -c 'cat > {_shlex.quote(keyring_path)} << EOF\n{keyring_content}EOF' && "
+            f"sudo mount -t ceph {_shlex.quote(export_path)} {_shlex.quote(req.mount_point)} -o {_shlex.quote(ceph_opts)}"
+        )
+
+        await asyncio.to_thread(
+            conn.compute.set_server_metadata,
+            instance_id,
+            _merge_data_share_meta(server, share.id),
+        )
+        await invalidate(f"afterglow:nova:{project_id}:instance:{instance_id}")
+        await cache_invalidation.invalidate_mutation_count("nova", project_id)
+
+        return {
+            "file_storage_id": share.id,
+            "share_proto": "CEPHFS",
+            "mount_command": mount_command,
+            "keyring_file": keyring_content,
+            "keyring_path": keyring_path,
+            "access_id": rule["access_id"],
+        }
+
+
+@router.get("/{instance_id}/storage-attachments", response_model=list)
+async def list_storage_attachments(
+    instance_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    """VM에 연결된 데이터 파일 스토리지 목록을 반환한다."""
+    try:
+        server = await asyncio.to_thread(nova.get_server, conn, instance_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="인스턴스를 찾을 수 없습니다")
+    assert_instance_owner(server, conn, token_info)
+
+    meta_val = (server.metadata or {}).get("union_data_share_ids", "")
+    if not meta_val or meta_val == "none":
+        return []
+
+    result = []
+    for fsi in [s for s in meta_val.split(",") if s]:
+        try:
+            share = await asyncio.to_thread(manila.get_file_storage, conn, fsi)
+            result.append({
+                "file_storage_id": share.id,
+                "name": share.name,
+                "share_proto": share.share_proto,
+                "status": share.status,
+            })
+        except Exception:
+            result.append({"file_storage_id": fsi, "name": None, "share_proto": None, "status": "unknown"})
+
+    return result
+
+
+@router.delete("/{instance_id}/storage-attachments/{file_storage_id}", status_code=204)
+async def detach_storage(
+    instance_id: str,
+    file_storage_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    """VM에서 데이터 파일 스토리지 접근 규칙을 회수한다."""
+    try:
+        server = await asyncio.to_thread(nova.get_server, conn, instance_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="인스턴스를 찾을 수 없습니다")
+    assert_instance_owner(server, conn, token_info)
+
+    instance_name = server.name
+
+    # CephX 규칙 정리
+    try:
+        rules = await asyncio.to_thread(manila.list_access_rules, conn, file_storage_id)
+        for rule in rules:
+            at = rule.get("access_to", "")
+            if rule.get("access_type") == "cephx" and (
+                at.startswith(f"data-ro-{instance_name}-")
+                or at.startswith(f"data-rw-{instance_name}-")
+            ):
+                await asyncio.to_thread(manila.revoke_access_rule, conn, file_storage_id, rule["id"])
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Access rule 정리 실패: {e}")
+
+    # NFS IP 규칙 정리 (VM fixed IP)
+    fixed_ip = next((ip.addr for ip in server.ip_addresses if ip.type == "fixed"), None)
+    if fixed_ip:
+        try:
+            rules = await asyncio.to_thread(manila.list_access_rules, conn, file_storage_id)
+            for rule in rules:
+                if rule.get("access_type") == "ip" and rule.get("access_to") == fixed_ip:
+                    await asyncio.to_thread(manila.revoke_access_rule, conn, file_storage_id, rule["id"])
+        except Exception as e:
+            logger.warning(f"NFS IP rule 정리 실패 (share={file_storage_id}): {e}")
+
+    # 메타데이터에서 제거
+    try:
+        meta_val = (server.metadata or {}).get("union_data_share_ids", "")
+        ids = [s for s in meta_val.split(",") if s and s != file_storage_id] if meta_val and meta_val != "none" else []
+        await asyncio.to_thread(
+            conn.compute.set_server_metadata,
+            instance_id,
+            {"union_data_share_ids": ",".join(ids) if ids else "none"},
+        )
+    except Exception as e:
+        logger.warning(f"union_data_share_ids 메타데이터 갱신 실패: {e}")
+
+    _pid = conn._afterglow_project_id
+    await invalidate(f"afterglow:nova:{_pid}:instance:{instance_id}")
+    await cache_invalidation.invalidate_mutation_count("nova", _pid)
+
+
+def _merge_data_share_meta(server, new_share_id: str) -> dict:
+    """서버 메타데이터의 union_data_share_ids에 share_id를 추가한 dict 반환."""
+    meta_val = (server.metadata or {}).get("union_data_share_ids", "")
+    ids = [s for s in meta_val.split(",") if s] if meta_val and meta_val != "none" else []
+    if new_share_id not in ids:
+        ids.append(new_share_id)
+    return {"union_data_share_ids": ",".join(ids)}

@@ -150,6 +150,82 @@
 </div>
 {/if}
 
+<!-- 파일 스토리지 마운트 -->
+{#if s.fileStorages.length > 0}
+<div class="mb-4">
+	<div class="flex items-center justify-between mb-1.5">
+		<label class="block text-[11.5px] font-semibold text-gray-300 tracking-tight">
+			파일 스토리지 마운트 <span class="text-[10px] text-gray-500 font-normal px-1.5 py-0.5 rounded-full bg-gray-800">선택</span>
+		</label>
+		<button
+			type="button"
+			onclick={() => wizard.update(w => ({ ...w, dataMounts: [...w.dataMounts, { fileStorageId: '', mountPoint: '', readOnly: false }] }))}
+			class="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+		>+ 추가</button>
+	</div>
+	{#if $wizard.dataMounts.length === 0}
+		<p class="text-[11px] text-gray-500">마운트할 파일 스토리지가 없습니다. "+ 추가"를 눌러 추가하세요.</p>
+	{:else}
+		<div class="space-y-2">
+			{#each $wizard.dataMounts as mount, i}
+				<div class="flex gap-2 items-start bg-gray-800/60 rounded-lg p-2.5">
+					<div class="flex-1 grid grid-cols-1 @lg/panel:grid-cols-2 gap-2">
+						<select
+							value={mount.fileStorageId}
+							onchange={e => wizard.update(w => {
+								const m = [...w.dataMounts];
+								m[i] = { ...m[i], fileStorageId: (e.target as HTMLSelectElement).value };
+								return { ...w, dataMounts: m };
+							})}
+							class="bg-gray-700 border border-gray-600 text-gray-200 text-xs rounded px-2 py-1.5 focus:outline-none focus:border-blue-500"
+						>
+							<option value="">스토리지 선택...</option>
+							{#each s.fileStorages.filter(fs => fs.status === 'available') as fs}
+								<option value={fs.id}>{fs.name || fs.id.slice(0, 12)} ({fs.share_proto})</option>
+							{/each}
+						</select>
+						<input
+							type="text"
+							value={mount.mountPoint}
+							oninput={e => wizard.update(w => {
+								const m = [...w.dataMounts];
+								m[i] = { ...m[i], mountPoint: (e.target as HTMLInputElement).value };
+								return { ...w, dataMounts: m };
+							})}
+							placeholder="/mnt/mydata"
+							class="bg-gray-700 border border-gray-600 text-gray-200 text-xs rounded px-2 py-1.5 focus:outline-none focus:border-blue-500"
+						/>
+					</div>
+					<label class="flex items-center gap-1.5 text-xs text-gray-400 shrink-0 mt-1.5">
+						<input
+							type="checkbox"
+							checked={mount.readOnly}
+							onchange={e => wizard.update(w => {
+								const m = [...w.dataMounts];
+								m[i] = { ...m[i], readOnly: (e.target as HTMLInputElement).checked };
+								return { ...w, dataMounts: m };
+							})}
+							class="w-3.5 h-3.5 rounded border-gray-600 bg-gray-800 text-blue-500"
+						/>읽기 전용
+					</label>
+					<button
+						type="button"
+						onclick={() => wizard.update(w => ({ ...w, dataMounts: w.dataMounts.filter((_, j) => j !== i) }))}
+						class="text-gray-500 hover:text-red-400 transition-colors mt-0.5 shrink-0"
+						aria-label="삭제"
+					>
+						<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+						</svg>
+					</button>
+				</div>
+			{/each}
+		</div>
+		<p class="text-[10.5px] text-gray-600 mt-1">/mnt, /data, /srv, /home 하위 경로만 허용됩니다.</p>
+	{/if}
+</div>
+{/if}
+
 <!-- cloud-init 다크 에디터 -->
 <div class="mb-4">
 	<label for="cloud-init" class="block text-[11.5px] font-semibold text-gray-300 tracking-tight flex items-center gap-1.5 mb-1.5">

@@ -96,6 +96,8 @@ EXPECTED_PUBLIC = frozenset(
         ("GET", "/api/sd/prometheus/libvirt-targets"),
         # refresh 토큰으로 자체 인증 (만료된 access token 갱신용)
         ("POST", "/api/auth/refresh"),
+        # 서비스 conn으로 조회 — prebuilt share 목록은 인증 없이도 읽기 가능 (공개 정보)
+        ("GET", "/api/libraries/file-storages"),
     }
 )
 

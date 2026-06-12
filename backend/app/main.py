@@ -1061,8 +1061,9 @@ async def start_background_workers():
     if _svc_cfg.service_swift_enabled:
         asyncio.create_task(_trash_cleanup_loop())
 
-    from app.services.library_builder import _build_worker
+    from app.services.library_builder import _build_worker, reconcile_orphan_builds
 
+    asyncio.create_task(reconcile_orphan_builds())
     asyncio.create_task(_build_worker())
 
 

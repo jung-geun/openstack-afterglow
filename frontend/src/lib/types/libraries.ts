@@ -40,6 +40,7 @@ export interface LibraryBuildDetail extends LibraryBuild {
   vm_status: string | null;
   vm_ip: string | null;
   live_console: string | null;
+  console_note: string | null;
 }
 
 export interface TsPoint { ts: number; [key: string]: number | undefined; }

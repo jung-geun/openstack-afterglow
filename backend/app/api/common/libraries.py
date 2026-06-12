@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -12,6 +13,7 @@ from app.api.deps import get_os_conn, get_token_info
 from app.models.storage import FileStorageInfo, LibraryConfig
 from app.services import libraries as lib_svc
 from app.services import manila
+from app.services.keystone import get_service_project_connection
 
 router = APIRouter()
 
@@ -23,13 +25,21 @@ async def list_libraries(
 ):
     """사용 가능한 라이브러리 목록 (사전 빌드 파일 스토리지 가용 여부 포함).
     non-admin은 visibility=public 라이브러리만 반환.
+    prebuilt share는 service 프로젝트 소유 public share이므로 service conn + include_public=True로 조회한다.
     """
     is_admin = token_info.get("is_admin", False)
     catalog = lib_svc.get_all()
 
     # 사전 빌드된 파일 스토리지 목록에서 library_name 매핑
+    # service conn + include_public=True: 일반 프로젝트에서도 public prebuilt share가 보이도록
     try:
-        prebuilt_file_storages = manila.list_file_storages(conn, metadata_filter={"union_type": "prebuilt"})
+        svc_conn = await asyncio.to_thread(get_service_project_connection)
+        prebuilt_file_storages = await asyncio.to_thread(
+            manila.list_file_storages,
+            svc_conn,
+            {"union_type": "prebuilt"},
+            include_public=True,
+        )
         prebuilt_map = {s.library_name: s.id for s in prebuilt_file_storages if s.library_name}
     except Exception:
         prebuilt_map = {}
@@ -51,9 +61,17 @@ async def list_libraries(
 
 
 @router.get("/file-storages", response_model=list[FileStorageInfo])
-async def list_prebuilt_file_storages(conn: openstack.connection.Connection = Depends(get_os_conn)):
-    """사전 빌드된 라이브러리 파일 스토리지 목록."""
-    return manila.list_file_storages(conn, metadata_filter={"union_type": "prebuilt"})
+async def list_prebuilt_file_storages():
+    """사전 빌드된 라이브러리 파일 스토리지 목록.
+    service conn + include_public=True로 조회해 모든 프로젝트에서 접근 가능하게 한다.
+    """
+    svc_conn = await asyncio.to_thread(get_service_project_connection)
+    return await asyncio.to_thread(
+        manila.list_file_storages,
+        svc_conn,
+        {"union_type": "prebuilt"},
+        include_public=True,
+    )
 
 
 class ValidateLibrariesRequest(BaseModel):

@@ -79,6 +79,7 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 	let networks = $state<NetworkInfo[]>([]);
 	let keypairs = $state<KeypairInfo[]>([]);
 	let volumes = $state<Volume[]>([]);
+	let fileStorages = $state<{ id: string; name: string; status: string; share_proto: string }[]>([]);
 	let securityGroups = $state<SecurityGroupInfo[]>([]);
 	let availabilityZones = $state<AvailabilityZoneInfo[]>([]);
 	let defaultNetworkId = $state<string | null>(null);
@@ -311,6 +312,9 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 				try {
 					availabilityZones = await api.get<AvailabilityZoneInfo[]>('/api/instances/availability-zones', token, projectId);
 				} catch { availabilityZones = []; }
+				try {
+					fileStorages = await api.get<typeof fileStorages>('/api/storage/file-storages', token, projectId);
+				} catch { fileStorages = []; }
 
 				if (keypairs.length === 1 && !get(wizard).keyName) {
 					wizard.update(w => ({ ...w, keyName: keypairs[0].name }));
@@ -443,6 +447,11 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 			availability_zone: w.availabilityZone,
 			security_groups: w.securityGroups,
 			userdata: w.cloudInit || null,
+			data_mounts: w.dataMounts.map(m => ({
+				file_storage_id: m.fileStorageId,
+				mount_point: m.mountPoint,
+				read_only: m.readOnly,
+			})),
 		};
 		if (opts.adminMode() && adminSelectedProjectId) {
 			body.project_id = adminSelectedProjectId;
@@ -532,6 +541,7 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 		get networks() { return networks; },
 		get keypairs() { return keypairs; },
 		get volumes() { return volumes; },
+		get fileStorages() { return fileStorages; },
 		get securityGroups() { return securityGroups; },
 		get availabilityZones() { return availabilityZones; },
 		get defaultNetworkId() { return defaultNetworkId; },
