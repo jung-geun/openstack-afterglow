@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { auth } from '$lib/stores/auth';
 	import { goto } from '$app/navigation';
+	import { api } from '$lib/api/client';
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 	import { createInstanceDetailController, provideInstanceDetailController } from '$lib/stores/instanceDetailController.svelte';
@@ -40,10 +41,44 @@
 	let migrateType = $state<'live' | 'cold'>('live');
 	let showPasswordModal = $state(false);
 	let showResizeModal = $state(false);
+	let resizePreselectFlavorId = $state('');
+
+	// 리소스 사용량 권장 상태
+	interface FlavorSnippet { id: string; name: string; vcpus: number; ram: number; disk: number }
+	interface SummaryRec {
+		underutilized: boolean;
+		reason: string | null;
+		current_flavor: FlavorSnippet | null;
+		suggested_flavor: FlavorSnippet | null;
+	}
+	let recommendation = $state<SummaryRec | null>(null);
+	let summaryCpuAvg = $state<number | null>(null);
+	let summaryMemAvg = $state<number | null>(null);
+
+	async function loadSummary(iid: string) {
+		const token = $auth.token;
+		const projectId = adminProjectId ?? $auth.projectId ?? undefined;
+		if (!token) return;
+		try {
+			const resp = await api.get<{
+				prometheus_available: boolean;
+				stats: Record<string, { min: number | null; avg: number | null; max: number | null }>;
+				recommendation: SummaryRec | null;
+			}>(`/api/instances/${iid}/metrics-summary?range=7d`, token, projectId);
+			if (resp.prometheus_available) {
+				recommendation = resp.recommendation;
+				summaryCpuAvg = resp.stats.cpu?.avg ?? null;
+				summaryMemAvg = resp.stats.memory?.avg ?? null;
+			}
+		} catch {
+			// Prometheus 미연결 등 — 조용히 무시
+		}
+	}
 
 	$effect(() => {
 		if (!instanceId || !$auth.token) return;
 		s.fetchInstance(instanceId);
+		void loadSummary(instanceId);
 	});
 
 	async function openMigrateModal(type: 'live' | 'cold') {
@@ -57,8 +92,9 @@
 		showPasswordModal = true;
 	}
 
-	async function openResizeModal() {
+	async function openResizeModal(preselectId?: string) {
 		s.resizeError = '';
+		resizePreselectFlavorId = preselectId ?? '';
 		showResizeModal = true;
 		await s.loadResizeFlavors();
 	}
@@ -97,6 +133,26 @@
 			onOpenPasswordModal={openPasswordModal}
 			onOpenResizeModal={openResizeModal}
 		/>
+
+		{#if recommendation?.underutilized}
+			<div class="bg-amber-900/40 border border-amber-700 text-amber-300 rounded-lg px-4 py-3 text-sm mb-4 flex items-center justify-between gap-4">
+				<span>
+					최근 7일 평균 CPU {summaryCpuAvg != null ? summaryCpuAvg.toFixed(1) : '—'}% · RAM {summaryMemAvg != null ? summaryMemAvg.toFixed(1) : '—'}% — 사용량이 낮습니다.
+					{#if recommendation.suggested_flavor}
+						<strong class="text-amber-200">{recommendation.suggested_flavor.name}</strong>으로 리사이즈를 권장합니다.
+					{:else}
+						더 작은 플레이버로의 리사이즈를 권장합니다.
+					{/if}
+				</span>
+				<button
+					onclick={() => openResizeModal(recommendation?.suggested_flavor?.id)}
+					class="shrink-0 px-3 py-1.5 bg-amber-700 hover:bg-amber-600 text-white text-xs font-medium rounded-lg transition-colors"
+				>
+					리사이즈
+				</button>
+			</div>
+		{/if}
+
 		<InfoSection />
 		<div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4">
 			<div class="text-white text-[15px] font-semibold mb-4">성능 모니터링</div>
@@ -119,5 +175,5 @@
 	<PasswordModal onClose={() => { showPasswordModal = false; }} />
 {/if}
 {#if showResizeModal}
-	<ResizeModal onClose={() => { showResizeModal = false; }} />
+	<ResizeModal preselectFlavorId={resizePreselectFlavorId} onClose={() => { showResizeModal = false; }} />
 {/if}

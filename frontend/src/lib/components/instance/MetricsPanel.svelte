@@ -10,7 +10,7 @@
 		isGpu?: boolean;
 	}
 
-	type RangeKey = '15m' | '1h' | '6h' | '24h';
+	type RangeKey = '15m' | '1h' | '6h' | '24h' | '7d';
 	type MetricKey = 'cpu' | 'memory' | 'network_rx' | 'network_tx' | 'disk_read' | 'disk_write' | 'gpu_util' | 'gpu_mem';
 
 	interface Series {
@@ -28,8 +28,8 @@
 
 	let range: RangeKey = $state('1h');
 
-	const RANGES: RangeKey[] = ['15m', '1h', '6h', '24h'];
-	const RANGE_LABELS: Record<RangeKey, string> = { '15m': '15분', '1h': '1시간', '6h': '6시간', '24h': '24시간' };
+	const RANGES: RangeKey[] = ['15m', '1h', '6h', '24h', '7d'];
+	const RANGE_LABELS: Record<RangeKey, string> = { '15m': '15분', '1h': '1시간', '6h': '6시간', '24h': '24시간', '7d': '7일' };
 
 	type MetricState = { data: Series[] | null; error: string | null };
 
@@ -47,9 +47,32 @@
 	const baseMetrics: MetricKey[] = ['cpu', 'memory', 'network_rx', 'network_tx', 'disk_read', 'disk_write'];
 	const gpuMetrics: MetricKey[] = ['gpu_util', 'gpu_mem'];
 
+	// 통계 요약 (min/avg/max) — metrics-summary 엔드포인트
+	type StatInfo = { min: number | null; avg: number | null; max: number | null };
+	let summaryStats: Record<string, StatInfo> = $state({});
+
+	async function loadSummary() {
+		if (!token || !projectId) return;
+		try {
+			const resp = await api.get<{
+				prometheus_available: boolean;
+				stats: Record<string, StatInfo>;
+			}>(
+				`/api/instances/${instanceId}/metrics-summary?range=${range}`,
+				token,
+				projectId,
+			);
+			summaryStats = resp.prometheus_available ? resp.stats : {};
+		} catch {
+			summaryStats = {};
+		}
+	}
+
 	async function loadAll() {
 		if (!token) return;
 		const keys: MetricKey[] = isGpu ? [...baseMetrics, ...gpuMetrics] : baseMetrics;
+		// summary는 차트와 독립적으로 로드 (실패해도 차트 미영향)
+		void loadSummary();
 		try {
 			const resp = await api.get<{
 				metrics: Record<string, { series: Series[]; error: string | null }>;
@@ -286,6 +309,16 @@
 							</div>
 						</div>
 					{/if}
+				{/if}
+
+				<!-- 통계 요약 행 (min / avg / max) -->
+				{#if summaryStats[chart.key]}
+					{@const s = summaryStats[chart.key]}
+					<div class="flex gap-4 mt-2 pt-2 border-t border-gray-700/60 text-[11px] text-gray-500">
+						<span>최소 <span class="text-gray-300 font-medium">{s.min != null ? (chart.formatY ? chart.formatY(s.min) : `${s.min.toFixed(1)}${chart.unit}`) : '—'}</span></span>
+						<span>평균 <span class="text-gray-300 font-medium">{s.avg != null ? (chart.formatY ? chart.formatY(s.avg) : `${s.avg.toFixed(1)}${chart.unit}`) : '—'}</span></span>
+						<span>최대 <span class="text-gray-300 font-medium">{s.max != null ? (chart.formatY ? chart.formatY(s.max) : `${s.max.toFixed(1)}${chart.unit}`) : '—'}</span></span>
+					</div>
 				{/if}
 			</div>
 		{/each}

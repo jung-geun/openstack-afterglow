@@ -4,10 +4,12 @@
 
 	let {
 		instances,
+		underutilized = {},
 		onSelect,
 		onAction,
 	}: {
 		instances: Instance[];
+		underutilized?: Record<string, boolean>;
 		onSelect: (id: string) => void;
 		onAction: (kind: 'console' | 'shelve' | 'unshelve' | 'delete', instance: Instance) => Promise<void>;
 	} = $props();
@@ -25,7 +27,7 @@
 			<div></div>
 		</div>
 		{#each instances as inst (inst.id)}
-			<InstanceRow instance={inst} {onSelect} {onAction} />
+			<InstanceRow instance={inst} isUnderutilized={underutilized[inst.id] ?? false} {onSelect} {onAction} />
 		{/each}
 	</div>
 </div>

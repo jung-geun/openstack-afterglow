@@ -8,10 +8,12 @@
 
 	let {
 		instance,
+		isUnderutilized = false,
 		onSelect,
 		onAction,
 	}: {
 		instance: Instance;
+		isUnderutilized?: boolean;
 		onSelect: (id: string) => void;
 		onAction: (kind: 'console' | 'shelve' | 'unshelve' | 'delete', instance: Instance) => Promise<void>;
 	} = $props();
@@ -41,7 +43,14 @@
 	<!-- 이미지/플레이버 -->
 	<div class="hidden md:block text-xs min-w-0">
 		<div class="text-gray-300 truncate">{instance.image_name ?? '볼륨에서 부팅'}</div>
-		{#if instance.flavor_name}<div class="text-gray-500 mt-0.5 truncate">{instance.flavor_name}</div>{/if}
+		{#if instance.flavor_name}
+			<div class="text-gray-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
+				<span class="truncate">{instance.flavor_name}</span>
+				{#if isUnderutilized}
+					<span class="shrink-0 px-1.5 py-0.5 bg-amber-900/50 text-amber-400 border border-amber-700/60 rounded text-[10px] font-medium">리사이즈 권장</span>
+				{/if}
+			</div>
+		{/if}
 	</div>
 	<!-- IP -->
 	<div class="text-[11px] sm:text-xs">

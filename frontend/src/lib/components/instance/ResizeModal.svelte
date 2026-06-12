@@ -3,13 +3,14 @@
 
 	interface Props {
 		onClose: () => void;
+		preselectFlavorId?: string;
 	}
 
-	let { onClose }: Props = $props();
+	let { onClose, preselectFlavorId = '' }: Props = $props();
 
 	const s = useInstanceDetailController();
 
-	let resizeFlavorId = $state('');
+	let resizeFlavorId = $state(preselectFlavorId);
 
 	async function handleResize() {
 		const ok = await s.doResize(resizeFlavorId);

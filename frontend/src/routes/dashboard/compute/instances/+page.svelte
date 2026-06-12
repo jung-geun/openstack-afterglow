@@ -21,6 +21,7 @@
 	let refreshing = $state(false);
 	let error = $state('');
 	let selectedInstanceId = $state<string | null>(null);
+	let underutilized = $state<Record<string, boolean>>({});
 
 	const { swrGet, swrSet } = createSwr(() => $auth.projectId);
 
@@ -32,10 +33,31 @@
 			instances = await api.get<Instance[]>(path, $auth.token ?? undefined, $auth.projectId ?? undefined, opts);
 			swrSet(path, instances);
 			error = '';
+			// 리소스 사용량 배지 — 비차단 (실패해도 목록 미영향)
+			void fetchSummaryBatch();
 		} catch (e) {
 			if (!cached) error = e instanceof ApiError ? `조회 실패 (${e.status}): ${(e as ApiError).message}` : '서버 오류';
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function fetchSummaryBatch() {
+		const token = $auth.token;
+		const projectId = $auth.projectId ?? undefined;
+		if (!token) return;
+		try {
+			const resp = await api.get<{
+				prometheus_available: boolean;
+				instances: Record<string, { cpu_avg: number | null; mem_avg: number | null; underutilized: boolean }>;
+			}>('/api/instances/metrics-summary-batch', token, projectId);
+			if (resp.prometheus_available) {
+				const map: Record<string, boolean> = {};
+				for (const [id, data] of Object.entries(resp.instances)) map[id] = data.underutilized;
+				underutilized = map;
+			}
+		} catch {
+			// Prometheus 미연결 등 — 배지 없음, 에러 미노출
 		}
 	}
 
@@ -142,7 +164,7 @@
 			<button type="button" onclick={openWizard} class="text-blue-400 hover:text-blue-300 text-sm mt-2 inline-block bg-transparent">첫 VM을 생성하세요 →</button>
 		</div>
 	{:else}
-		<InstancesTable {instances} onSelect={openInstancePanel} onAction={handleAction} />
+		<InstancesTable {instances} {underutilized} onSelect={openInstancePanel} onAction={handleAction} />
 	{/if}
 </div>
 
