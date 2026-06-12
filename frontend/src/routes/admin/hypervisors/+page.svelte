@@ -14,8 +14,12 @@
 	import HypervisorDetailPanel from '$lib/components/admin/hypervisors/HypervisorDetailPanel.svelte';
 	import type { HypervisorDetail } from '$lib/components/admin/hypervisors/HypervisorDetailPanel.svelte';
 	import HypervisorMigrateModal from '$lib/components/admin/hypervisors/HypervisorMigrateModal.svelte';
+	import type { AggregatedHost, GpuType, GpuResponse } from '$lib/types/gpu';
 
 	let hypervisors = $state<HypervisorRow[]>([]);
+	let gpuHostMap = $state<Map<string, AggregatedHost>>(new Map());
+	let gpuTypes = $state<GpuType[]>([]);
+	let selectedGpuTypes = $state<Set<string>>(new Set());
 	let loading = $state(true);
 	let refreshing = $state(false);
 	let sortColumn = $state('');
@@ -30,15 +34,46 @@
 	async function load() {
 		if (hypervisors.length === 0) loading = true;
 		else refreshing = true;
-		try {
-			hypervisors = await api.get<HypervisorRow[]>('/api/admin/hypervisors', token, projectId);
-		} catch {
-			hypervisors = [];
-		} finally {
-			loading = false;
-			refreshing = false;
+		// GPU 정보(gpu-hosts)는 실패해도 하이퍼바이저 목록 표시에는 영향 없음
+		const [hvResult, gpuResult] = await Promise.allSettled([
+			api.get<HypervisorRow[]>('/api/admin/hypervisors', token, projectId),
+			api.get<GpuResponse>('/api/admin/gpu-hosts', token, projectId),
+		]);
+		hypervisors = hvResult.status === 'fulfilled' ? hvResult.value : [];
+		if (gpuResult.status === 'fulfilled') {
+			gpuHostMap = new Map((gpuResult.value.aggregated_hosts ?? []).map((h) => [h.name, h]));
+			gpuTypes = gpuResult.value.gpu_types ?? [];
+		} else {
+			gpuHostMap = new Map();
+			gpuTypes = [];
 		}
+		loading = false;
+		refreshing = false;
 	}
+
+	// 하이퍼바이저 행에 GPU 사용량 결합 (gpu-hosts 호스트명 = hypervisor_hostname)
+	let joinedHypervisors = $derived(
+		hypervisors.map((h) => {
+			const g = gpuHostMap.get(h.name);
+			return g ? { ...h, gpu_total: g.gpu_total, gpu_used: g.gpu_used } : h;
+		})
+	);
+
+	function toggleGpuType(deviceName: string) {
+		const next = new Set(selectedGpuTypes);
+		if (next.has(deviceName)) next.delete(deviceName);
+		else next.add(deviceName);
+		selectedGpuTypes = next;
+	}
+
+	let filteredHypervisors = $derived(
+		selectedGpuTypes.size === 0
+			? joinedHypervisors
+			: joinedHypervisors.filter((h) => {
+					const g = gpuHostMap.get(h.name);
+					return g?.gpu_groups.some((grp) => selectedGpuTypes.has(grp.device_name)) ?? false;
+				})
+	);
 
 	async function loadDetail(hvId: string) {
 		detailLoading = true;
@@ -62,7 +97,7 @@
 	}
 
 	let sortedHypervisors = $derived(
-		hypervisors.toSorted((a, b) => {
+		filteredHypervisors.toSorted((a, b) => {
 			if (!sortColumn) return 0;
 			let va: string | number;
 			let vb: string | number;
@@ -118,6 +153,20 @@
 	{:else if hypervisors.length === 0}
 		<div class="text-gray-600 text-sm">하이퍼바이저가 없습니다</div>
 	{:else}
+		{#if gpuTypes.length > 0}
+			<div class="flex items-center gap-2 mb-3 flex-wrap">
+				<span class="text-xs text-gray-500">GPU 필터:</span>
+				{#each gpuTypes as gt (gt.device_name)}
+					<button
+						onclick={() => toggleGpuType(gt.device_name)}
+						class="text-xs px-2.5 py-1 rounded transition-colors {selectedGpuTypes.has(gt.device_name) ? 'bg-blue-900/50 text-blue-300 border border-blue-500/50' : 'text-gray-400 hover:text-white border border-gray-800'}"
+					>{gt.device_name} <span class="text-gray-500">{gt.used}/{gt.total}</span></button>
+				{/each}
+				{#if selectedGpuTypes.size > 0}
+					<button onclick={() => (selectedGpuTypes = new Set())} class="text-xs text-gray-500 hover:text-white transition-colors">✕ 초기화</button>
+				{/if}
+			</div>
+		{/if}
 		<div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 			<HypervisorTable
 				hypervisors={sortedHypervisors}
@@ -136,6 +185,7 @@
 		detail={selectedDetail}
 		loading={detailLoading}
 		projectNameMap={$projectNames}
+		gpus={selectedDetail ? (gpuHostMap.get(selectedDetail.hypervisor_hostname)?.gpus ?? []) : []}
 		onClose={() => { selectedDetail = null; }}
 		onMigrate={openMigrate}
 	/>

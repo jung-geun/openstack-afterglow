@@ -9,6 +9,7 @@
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import AutoRefreshControl from '$lib/components/AutoRefreshControl.svelte';
 	import FlavorCreateModal from '$lib/components/admin/flavors/FlavorCreateModal.svelte';
+	import GpuDeviceCatalogModal from '$lib/components/admin/flavors/GpuDeviceCatalogModal.svelte';
 	import FlavorManagePanel from '$lib/components/admin/flavors/FlavorManagePanel.svelte';
 	import AdminFlavorsFilters from '$lib/components/admin/flavors/AdminFlavorsFilters.svelte';
 	import AdminFlavorsTable from '$lib/components/admin/flavors/AdminFlavorsTable.svelte';
@@ -28,6 +29,7 @@
 	let gpuFilter = $state('');
 
 	let showCreate = $state(false);
+	let showGpuCatalog = $state(false);
 	let selectedFlavor = $state<Flavor | null>(null);
 
 	const token = $derived($auth.token ?? undefined);
@@ -93,6 +95,10 @@
 				onclick={() => (showCreate = true)}
 				class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors"
 			>+ 생성</button>
+			<button
+				onclick={() => (showGpuCatalog = true)}
+				class="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm font-medium rounded-lg transition-colors"
+			>GPU 장치 카탈로그</button>
 			<AutoRefreshControl
 				bind:active={ar.active}
 				bind:intervalSeconds={ar.intervalSeconds}
@@ -148,6 +154,8 @@
 </div>
 
 <FlavorCreateModal bind:open={showCreate} onCreated={load} />
+
+<GpuDeviceCatalogModal bind:open={showGpuCatalog} />
 
 <FlavorManagePanel
 	flavor={selectedFlavor}

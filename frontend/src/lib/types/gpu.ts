@@ -43,6 +43,16 @@ export interface GpuType {
 	used: number;
 }
 
+export interface GpuCatalogDevice {
+	vendor_id: string;
+	device_id: string;
+	vendor_name: string;
+	name: string;
+	is_audio: boolean;
+	aliases: string[];
+	source: 'builtin' | 'config' | 'db';
+}
+
 export interface GpuResponse {
 	hosts: GpuHost[];
 	aggregated_hosts: AggregatedHost[];

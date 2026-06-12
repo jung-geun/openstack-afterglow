@@ -1,6 +1,13 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
+	import {
+		FLAVOR_SPEC_TEMPLATES,
+		FLAVOR_SPEC_CATEGORIES,
+		type FlavorSpecTemplate,
+	} from '$lib/constants/flavorSpecTemplates';
+	import type { GpuCatalogDevice } from '$lib/types/gpu';
 
 	interface Flavor {
 		id: string;
@@ -38,23 +45,78 @@
 	let editingSpecKey = $state<string | null>(null);
 	let editingSpecValue = $state('');
 
+	// 템플릿 선택 ('' = 직접 입력)
+	let selectedTemplateKey = $state('');
+	let gpuAlias = $state('');
+	let gpuCount = $state(1);
+
+	const currentTemplate = $derived<FlavorSpecTemplate | null>(
+		FLAVOR_SPEC_TEMPLATES.find((t) => t.key === selectedTemplateKey) ?? null
+	);
+
+	// GPU alias 후보 (카탈로그의 비-audio 장치 대표 alias)
+	let gpuAliasOptions = $state<{ alias: string; name: string }[]>([]);
+
+	async function loadGpuAliases() {
+		try {
+			const res = await api.get<{ devices: GpuCatalogDevice[] }>('/api/admin/gpu-devices', token, projectId);
+			const seen = new Set<string>();
+			gpuAliasOptions = res.devices
+				.filter((d) => !d.is_audio && d.aliases.length > 0)
+				.map((d) => ({ alias: d.aliases[0], name: d.name }))
+				.filter((o) => (seen.has(o.alias) ? false : (seen.add(o.alias), true)));
+		} catch {
+			gpuAliasOptions = [];
+		}
+	}
+
+	function selectTemplate(key: string) {
+		selectedTemplateKey = key;
+		const t = FLAVOR_SPEC_TEMPLATES.find((tpl) => tpl.key === key);
+		if (!t) {
+			newSpecKey = '';
+			newSpecValue = '';
+			return;
+		}
+		newSpecKey = t.key;
+		if (t.valueType === 'enum') {
+			newSpecValue = t.defaultValue ?? t.options?.[0] ?? '';
+		} else {
+			newSpecValue = t.defaultValue ?? '';
+		}
+		if (t.valueType === 'gpu_alias') {
+			gpuAlias = gpuAliasOptions[0]?.alias ?? '';
+			gpuCount = 1;
+		}
+	}
+
+	function effectiveValue(): string {
+		// gpu_alias 템플릿: alias 드롭다운 + 개수로 값 생성 (카탈로그 로드 실패 시 직접 입력 폴백)
+		if (currentTemplate?.valueType === 'gpu_alias' && gpuAliasOptions.length > 0) {
+			return gpuAlias ? `${gpuAlias}:${gpuCount}` : '';
+		}
+		return newSpecValue.trim();
+	}
+
 	async function addExtraSpec() {
+		const value = effectiveValue();
 		if (!newSpecKey.trim()) return;
 		specSaving = true;
 		specError = '';
 		try {
 			await api.post(
 				`/api/admin/flavors/${flavor.id}/extra-specs`,
-				{ key: newSpecKey.trim(), value: newSpecValue.trim() },
+				{ key: newSpecKey.trim(), value },
 				token,
 				projectId,
 			);
 			flavor = {
 				...flavor,
-				extra_specs: { ...flavor.extra_specs, [newSpecKey.trim()]: newSpecValue.trim() },
+				extra_specs: { ...flavor.extra_specs, [newSpecKey.trim()]: value },
 			};
 			newSpecKey = '';
 			newSpecValue = '';
+			selectedTemplateKey = '';
 			onChanged();
 		} catch (e: unknown) {
 			specError = e instanceof ApiError ? e.message : 'extra_spec 추가 실패';
@@ -62,6 +124,8 @@
 			specSaving = false;
 		}
 	}
+
+	onMount(loadGpuAliases);
 
 	function startEditSpec(key: string, value: string) {
 		editingSpecKey = key;
@@ -162,21 +226,86 @@
 
 <div class="text-sm text-gray-400 mb-2">속성 추가/수정</div>
 <div class="space-y-2">
-	<input
-		bind:value={newSpecKey}
-		type="text"
-		placeholder="키 (예: hw:numa_nodes)"
-		class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-1.5 text-white text-sm font-mono focus:outline-none focus:border-blue-500"
-	/>
-	<input
-		bind:value={newSpecValue}
-		type="text"
-		placeholder="값"
-		class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-1.5 text-white text-sm font-mono focus:outline-none focus:border-blue-500"
-	/>
+	<select
+		value={selectedTemplateKey}
+		onchange={(e) => selectTemplate(e.currentTarget.value)}
+		class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500"
+	>
+		<option value="">직접 입력</option>
+		{#each FLAVOR_SPEC_CATEGORIES as category}
+			<optgroup label={category}>
+				{#each FLAVOR_SPEC_TEMPLATES.filter((t) => t.category === category) as t}
+					<option value={t.key}>{t.label} ({t.key})</option>
+				{/each}
+			</optgroup>
+		{/each}
+	</select>
+
+	{#if currentTemplate}
+		<div class="text-xs text-gray-500">{currentTemplate.description}</div>
+		{#if currentTemplate.valueType === 'gpu_alias'}
+			{#if gpuAliasOptions.length === 0}
+				<div class="text-xs text-yellow-400">GPU alias 카탈로그를 불러올 수 없습니다 — 값을 직접 입력하세요</div>
+				<input
+					bind:value={newSpecValue}
+					type="text"
+					placeholder="예: RTX3090:1"
+					class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-1.5 text-white text-sm font-mono focus:outline-none focus:border-blue-500"
+				/>
+			{:else}
+				<div class="flex gap-2">
+					<select
+						bind:value={gpuAlias}
+						class="flex-1 min-w-0 bg-gray-800 border border-gray-600 rounded-lg px-3 py-1.5 text-white text-sm font-mono focus:outline-none focus:border-blue-500"
+					>
+						{#each gpuAliasOptions as o (o.alias)}
+							<option value={o.alias}>{o.alias} — {o.name}</option>
+						{/each}
+					</select>
+					<input
+						bind:value={gpuCount}
+						type="number"
+						min="1"
+						title="GPU 개수"
+						class="w-20 bg-gray-800 border border-gray-600 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500"
+					/>
+				</div>
+				<div class="text-xs text-gray-500 font-mono">값: {gpuAlias ? `${gpuAlias}:${gpuCount}` : '-'}</div>
+			{/if}
+		{:else if currentTemplate.valueType === 'enum'}
+			<select
+				bind:value={newSpecValue}
+				class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-1.5 text-white text-sm font-mono focus:outline-none focus:border-blue-500"
+			>
+				{#each currentTemplate.options ?? [] as opt}
+					<option value={opt}>{opt}</option>
+				{/each}
+			</select>
+		{:else}
+			<input
+				bind:value={newSpecValue}
+				type={currentTemplate.valueType === 'number' ? 'number' : 'text'}
+				placeholder={currentTemplate.placeholder ?? '값'}
+				class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-1.5 text-white text-sm font-mono focus:outline-none focus:border-blue-500"
+			/>
+		{/if}
+	{:else}
+		<input
+			bind:value={newSpecKey}
+			type="text"
+			placeholder="키 (예: hw:numa_nodes)"
+			class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-1.5 text-white text-sm font-mono focus:outline-none focus:border-blue-500"
+		/>
+		<input
+			bind:value={newSpecValue}
+			type="text"
+			placeholder="값"
+			class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-1.5 text-white text-sm font-mono focus:outline-none focus:border-blue-500"
+		/>
+	{/if}
 	<button
 		onclick={addExtraSpec}
-		disabled={specSaving || !newSpecKey.trim()}
+		disabled={specSaving || !newSpecKey.trim() || (currentTemplate?.valueType === 'gpu_alias' && gpuAliasOptions.length > 0 && !gpuAlias)}
 		class="w-full px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-lg disabled:opacity-30"
 	>
 		{specSaving ? '저장 중...' : '추가/수정'}

@@ -16,6 +16,8 @@
 		local_disk_gb: number;
 		local_disk_used_gb: number;
 		running_vms: number;
+		gpu_total?: number;
+		gpu_used?: number;
 	}
 
 	let {
@@ -65,7 +67,12 @@
 						RAM (GB) <span class="text-gray-600">{sortIcon('memory_used_mb')}</span>
 					</button>
 				</th>
-				<th class="text-left py-2">로컬 디스크</th>
+				<th class="text-left py-2 pr-4">로컬 디스크</th>
+				<th class="text-left py-2">
+					<button onclick={() => onSort('gpu_used')} class="hover:text-white transition-colors flex items-center gap-1">
+						GPU <span class="text-gray-600">{sortIcon('gpu_used')}</span>
+					</button>
+				</th>
 			</tr>
 		</thead>
 		<tbody>
@@ -94,12 +101,23 @@
 							label="{formatNumber(Math.round(h.memory_used_mb/1024))}/{formatNumber(Math.round((h.memory_allowed_mb || h.memory_size_mb)/1024))}"
 						/>
 					</td>
-					<td class="py-2">
+					<td class="py-2 pr-4">
 						<HypervisorUsageBar
 							used={h.local_disk_used_gb}
 							total={h.local_disk_gb}
 							label="{formatStorage(h.local_disk_used_gb)}/{formatStorage(h.local_disk_gb)}"
 						/>
+					</td>
+					<td class="py-2">
+						{#if (h.gpu_total ?? 0) > 0}
+							<HypervisorUsageBar
+								used={h.gpu_used ?? 0}
+								total={h.gpu_total ?? 0}
+								label="{formatNumber(h.gpu_used ?? 0)}/{formatNumber(h.gpu_total ?? 0)}"
+							/>
+						{:else}
+							<span class="text-gray-600">-</span>
+						{/if}
 					</td>
 				</tr>
 			{/each}

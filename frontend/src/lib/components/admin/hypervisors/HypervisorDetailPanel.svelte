@@ -1,6 +1,7 @@
 <script lang="ts">
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { formatNumber, formatStorage } from '$lib/utils/format';
+	import type { GpuDevice } from '$lib/types/gpu';
 
 	export interface HypervisorDetail {
 		id: string;
@@ -30,12 +31,14 @@
 		detail,
 		loading,
 		projectNameMap,
+		gpus = [],
 		onClose,
 		onMigrate,
 	}: {
 		detail: HypervisorDetail | null;
 		loading: boolean;
 		projectNameMap: Map<string, string>;
+		gpus?: GpuDevice[];
 		onClose: () => void;
 		onMigrate: (serverId: string, serverName: string, type: 'live' | 'cold') => void;
 	} = $props();
@@ -112,6 +115,33 @@
 					</div>
 				</dl>
 			</div>
+
+			<!-- GPU 장치 -->
+			{#if gpus.length > 0}
+				<div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+					<h3 class="text-xs text-gray-500 uppercase tracking-wide mb-3">GPU 장치 ({gpus.length})</h3>
+					<div class="space-y-1.5">
+						{#each gpus as gpu (gpu.provider_uuid)}
+							<div class="flex items-center justify-between bg-gray-800/50 border border-gray-700/50 rounded-lg px-3 py-2">
+								<div class="flex-1 min-w-0">
+									<div class="text-xs text-gray-300">
+										<span class="text-gray-300">{gpu.vendor_name}</span>
+										{#if gpu.device_name}
+											<span class="text-gray-300 ml-1">{gpu.device_name}</span>
+										{:else if gpu.device_id}
+											<span class="text-gray-500 ml-1">({gpu.device_id})</span>
+										{/if}
+									</div>
+									<div class="text-xs text-gray-500 font-mono">{gpu.pci_address} · {gpu.resource_class}</div>
+								</div>
+								<span class="ml-2 px-1.5 py-0.5 rounded text-xs font-medium shrink-0 {gpu.used > 0 ? 'bg-red-900/30 text-red-400' : 'bg-green-900/30 text-green-400'}">
+									{gpu.used > 0 ? '사용 중' : '사용 가능'}
+								</span>
+							</div>
+						{/each}
+					</div>
+				</div>
+			{/if}
 
 			<!-- VM 목록 -->
 			{#if detail.servers.length > 0}

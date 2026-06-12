@@ -1010,6 +1010,20 @@ async def _deferred_create_tables() -> None:
             "DB 테이블 자동 생성 실패 (migrations/001_k3s_tables.sql 수동 실행 필요)",
             exc_info=True,
         )
+    await _deferred_load_gpu_catalog()
+
+
+async def _deferred_load_gpu_catalog() -> None:
+    """DB의 GPU 장치 카탈로그를 PCI_DEVICE_MAP에 overlay. 실패해도 base map으로 동작."""
+    from app.database import is_db_available
+    from app.services.gpu_catalog import refresh_device_map_from_db
+
+    if not is_db_available():
+        return
+    try:
+        await refresh_device_map_from_db()
+    except Exception:
+        _logger.warning("GPU 장치 카탈로그 DB 로드 실패 — 내장/config 카탈로그로 동작", exc_info=True)
 
 
 @app.on_event("startup")
@@ -1037,6 +1051,8 @@ async def start_background_workers():
             # create_tables()를 await하지 않고 백그라운드 태스크로 실행해
             # API가 DB DDL 완료를 기다리지 않고 즉시 요청을 받을 수 있게 한다.
             asyncio.create_task(_deferred_create_tables())
+        else:
+            asyncio.create_task(_deferred_load_gpu_catalog())
 
     asyncio.create_task(_snapshot_loop())
     asyncio.create_task(_auto_backup_loop())

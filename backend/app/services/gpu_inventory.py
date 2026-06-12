@@ -113,6 +113,27 @@ def _load_device_map() -> dict[str, dict[str, dict]]:
 PCI_DEVICE_MAP = _load_device_map()
 
 
+def apply_db_overlay(db_entries: list[dict]) -> None:
+    """DB 카탈로그 항목을 base map(내장 기본값 + config.toml) 위에 overlay.
+
+    PCI_DEVICE_MAP을 in-place로 갱신하므로 이 dict를 import한 모듈
+    (admin_gpu, gpu_quota, openstack_inventory, notion_worker)에 즉시 반영된다.
+    """
+    merged = _load_device_map()
+    for entry in db_entries:
+        vendor = str(entry.get("vendor_id", "")).upper()
+        device = str(entry.get("device_id", "")).upper()
+        if not vendor or not device:
+            continue
+        merged.setdefault(vendor, {})[device] = {
+            "name": str(entry.get("name", "")),
+            "is_audio": bool(entry.get("is_audio", False)),
+            "aliases": [str(a) for a in entry.get("aliases", [])],
+        }
+    PCI_DEVICE_MAP.clear()
+    PCI_DEVICE_MAP.update(merged)
+
+
 def _extract_hostname(name: str) -> str:
     """RP 이름에서 PCI 주소 접미사를 제거하여 호스트명 반환.
 
