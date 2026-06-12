@@ -161,7 +161,9 @@ async def get_library_build(build_id: int) -> dict:
                     # console 없음 — DB excerpt 또는 안내 메시지 사용
                     status_upper = (vm_status or "").upper()
                     if status_upper in ("SHUTOFF", "ERROR"):
-                        console_note = f"VM이 {vm_status} 상태로 실시간 콘솔을 사용할 수 없습니다. 마지막 저장 로그를 확인하세요."
+                        console_note = (
+                            f"VM이 {vm_status} 상태로 실시간 콘솔을 사용할 수 없습니다. 마지막 저장 로그를 확인하세요."
+                        )
                     else:
                         console_note = "콘솔 로그를 가져올 수 없습니다."
         except Exception:

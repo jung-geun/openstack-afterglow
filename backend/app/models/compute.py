@@ -179,9 +179,7 @@ class StorageAttachRequest(BaseModel):
     @classmethod
     def validate_mount_point(cls, v: str) -> str:
         if not _MOUNT_POINT_RE.match(v):
-            raise ValueError(
-                "mount_point는 /mnt, /data, /srv, /home 하위 절대 경로여야 합니다 (예: /mnt/mydata)"
-            )
+            raise ValueError("mount_point는 /mnt, /data, /srv, /home 하위 절대 경로여야 합니다 (예: /mnt/mydata)")
         if any(seg in (".", "..") for seg in v.split("/")):
             raise ValueError("mount_point에 '..' 또는 '.' 세그먼트는 허용되지 않습니다")
         for blocked in _BLOCKED_MOUNT_PREFIXES:

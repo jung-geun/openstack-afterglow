@@ -137,10 +137,12 @@ def generate_userdata(
         )
 
     # CephFS 관련 정보가 필요한지 확인 (data_mounts 포함)
-    has_cephfs = any(fs.get("share_proto", "CEPHFS") == "CEPHFS" for fs in file_storages) or \
-                 any(dm.get("share_proto") == "CEPHFS" for dm in _data_mounts)
-    has_nfs = any(fs.get("share_proto", "CEPHFS") == "NFS" for fs in file_storages) or \
-              any(dm.get("share_proto") == "NFS" for dm in _data_mounts)
+    has_cephfs = any(fs.get("share_proto", "CEPHFS") == "CEPHFS" for fs in file_storages) or any(
+        dm.get("share_proto") == "CEPHFS" for dm in _data_mounts
+    )
+    has_nfs = any(fs.get("share_proto", "CEPHFS") == "NFS" for fs in file_storages) or any(
+        dm.get("share_proto") == "NFS" for dm in _data_mounts
+    )
 
     health_check_script = ""
     if report_url and instance_id and report_token:

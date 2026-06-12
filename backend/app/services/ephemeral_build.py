@@ -568,7 +568,9 @@ async def resume_ephemeral_build(
             )
             if share_id:
                 try:
-                    await asyncio.to_thread(manila.update_share_metadata, conn, share_id, {"union_status": "indeterminate"})
+                    await asyncio.to_thread(
+                        manila.update_share_metadata, conn, share_id, {"union_status": "indeterminate"}
+                    )
                 except Exception:
                     pass
 

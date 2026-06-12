@@ -269,9 +269,7 @@ async def _mark_error_and_cleanup(row) -> None:
 
     now = datetime.now(UTC)
     async with factory() as session:
-        db_row = (
-            await session.execute(select(LibraryBuild).where(LibraryBuild.id == row.id))
-        ).scalar_one_or_none()
+        db_row = (await session.execute(select(LibraryBuild).where(LibraryBuild.id == row.id))).scalar_one_or_none()
         if db_row is None:
             return
         db_row.status = "error"
@@ -323,9 +321,7 @@ async def reconcile_orphan_builds() -> None:
 
     async with factory() as session:
         rows = (
-            (await session.execute(select(LibraryBuild).where(LibraryBuild.status.notin_(_TERMINAL))))
-            .scalars()
-            .all()
+            (await session.execute(select(LibraryBuild).where(LibraryBuild.status.notin_(_TERMINAL)))).scalars().all()
         )
 
     if not rows:
