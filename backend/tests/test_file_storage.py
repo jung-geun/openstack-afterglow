@@ -168,21 +168,10 @@ def test_create_file_storage_cephfs_omits_share_network():
     assert "share_network_id" not in captured["body"]["share"]
 
 
-def test_create_file_storage_nfs_includes_share_network():
-    """manila.create_file_storage: NFS 일 때 share_network_id 를 share_body 에 포함한다."""
-    from unittest.mock import MagicMock
-
-    from app.services import manila as manila_svc
-
-    captured: dict = {}
-
-    fake_client = MagicMock()
-    fake_client.post.side_effect = lambda path, body: (
-        captured.update({"body": body}) or {"share": {"id": "s2", "status": "available"}}
-    )
-    fake_client.get.return_value = {
+def _make_nfs_share_response(share_id: str = "s2") -> dict:
+    return {
         "share": {
-            "id": "s2",
+            "id": share_id,
             "name": "f",
             "status": "available",
             "share_proto": "NFS",
@@ -195,17 +184,157 @@ def test_create_file_storage_nfs_includes_share_network():
         }
     }
 
+
+def test_create_file_storage_nfs_includes_share_network_when_dhss_true():
+    """manila.create_file_storage: DHSS=True share type + NFS → share_network_id 를 share_body 에 포함한다."""
+    from app.services import manila as manila_svc
+
+    captured: dict = {}
+    fake_client = MagicMock()
+    fake_client.post.side_effect = lambda path, body: (
+        captured.update({"body": body}) or {"share": {"id": "s2", "status": "available"}}
+    )
+    fake_client.get.return_value = _make_nfs_share_response()
+
+    dhss_true_type = [
+        {
+            "id": "t1",
+            "name": "nfstype",
+            "extra_specs": {"driver_handles_share_servers": "True"},
+            "supported_protocols": ["NFS"],
+        }
+    ]
+
     with patch("app.services.manila.get_client", return_value=fake_client):
         with patch("time.sleep"):
-            manila_svc.create_file_storage(
-                conn=MagicMock(),
-                name="f",
-                size_gb=10,
-                share_network_id="net-uuid",
-                share_proto="NFS",
-            )
+            with patch("app.services.manila.list_share_types", return_value=dhss_true_type):
+                manila_svc.create_file_storage(
+                    conn=MagicMock(),
+                    name="f",
+                    size_gb=10,
+                    share_network_id="net-uuid",
+                    share_type="nfstype",
+                    share_proto="NFS",
+                )
 
     assert captured["body"]["share"]["share_network_id"] == "net-uuid"
+
+
+def test_create_file_storage_nfs_omits_share_network_when_dhss_false():
+    """manila.create_file_storage: DHSS=False share type + NFS → share_network_id 무시."""
+    from app.services import manila as manila_svc
+
+    captured: dict = {}
+    fake_client = MagicMock()
+    fake_client.post.side_effect = lambda path, body: (
+        captured.update({"body": body}) or {"share": {"id": "s3", "status": "available"}}
+    )
+    fake_client.get.return_value = _make_nfs_share_response("s3")
+
+    dhss_false_type = [
+        {
+            "id": "t2",
+            "name": "nfstype",
+            "extra_specs": {"driver_handles_share_servers": "False"},
+            "supported_protocols": ["NFS"],
+        }
+    ]
+
+    with patch("app.services.manila.get_client", return_value=fake_client):
+        with patch("time.sleep"):
+            with patch("app.services.manila.list_share_types", return_value=dhss_false_type):
+                manila_svc.create_file_storage(
+                    conn=MagicMock(),
+                    name="f",
+                    size_gb=10,
+                    share_network_id="net-uuid",
+                    share_type="nfstype",
+                    share_proto="NFS",
+                )
+
+    assert "share_network_id" not in captured["body"]["share"]
+
+
+def test_create_file_storage_nfs_includes_share_network_on_type_lookup_failure():
+    """list_share_types 조회 실패 시 보수적 fallback: share_network_id 포함."""
+    from app.services import manila as manila_svc
+
+    captured: dict = {}
+    fake_client = MagicMock()
+    fake_client.post.side_effect = lambda path, body: (
+        captured.update({"body": body}) or {"share": {"id": "s4", "status": "available"}}
+    )
+    fake_client.get.return_value = _make_nfs_share_response("s4")
+
+    with patch("app.services.manila.get_client", return_value=fake_client):
+        with patch("time.sleep"):
+            with patch("app.services.manila.list_share_types", side_effect=Exception("conn fail")):
+                manila_svc.create_file_storage(
+                    conn=MagicMock(),
+                    name="f",
+                    size_gb=10,
+                    share_network_id="net-uuid",
+                    share_type="nfstype",
+                    share_proto="NFS",
+                )
+
+    assert captured["body"]["share"]["share_network_id"] == "net-uuid"
+
+
+def test_create_file_storage_error_status_deletes_share_and_raises():
+    """폴링 중 error 상태 → share 삭제 호출 + RuntimeError."""
+    from app.services import manila as manila_svc
+
+    fake_client = MagicMock()
+    fake_client.post.return_value = {"share": {"id": "s5", "status": "creating"}}
+
+    # 첫 폴링 → error; messages API; 두 번째 get → share 상세(delete 이후)
+    error_share = {
+        "share": {
+            "id": "s5",
+            "name": "f",
+            "status": "error",
+            "share_proto": "NFS",
+            "size": 10,
+            "export_locations": [],
+            "metadata": {},
+            "is_public": False,
+            "project_id": "test-project-123",
+            "created_at": "2024-01-01T00:00:00Z",
+        }
+    }
+    # get 호출 순서: 폴링 get → error 감지 → messages get → (delete) → 끝
+    fake_client.get.side_effect = [
+        error_share,  # 폴링 시 status=error
+        {"messages": [{"user_message": "No valid host"}]},  # messages API
+    ]
+    fake_client.delete = MagicMock()
+
+    dhss_false_type = [
+        {
+            "id": "t2",
+            "name": "nfstype",
+            "extra_specs": {"driver_handles_share_servers": "False"},
+            "supported_protocols": ["NFS"],
+        }
+    ]
+
+    with patch("app.services.manila.get_client", return_value=fake_client):
+        with patch("time.sleep"):
+            with patch("app.services.manila.list_share_types", return_value=dhss_false_type):
+                with pytest.raises(RuntimeError) as exc_info:
+                    manila_svc.create_file_storage(
+                        conn=MagicMock(),
+                        name="f",
+                        size_gb=10,
+                        share_network_id="",
+                        share_type="nfstype",
+                        share_proto="NFS",
+                    )
+
+    assert "error" in str(exc_info.value).lower()
+    # share 삭제가 호출됐는지 확인
+    fake_client.delete.assert_called_once_with("shares/s5")
 
 
 # ─────────────────────────────────────────────────────────────────

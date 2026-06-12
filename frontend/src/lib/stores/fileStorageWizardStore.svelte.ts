@@ -47,6 +47,12 @@ export function createFileStorageWizardStore(opts: FsWizardOptions) {
 	let metaEntries = $state<MetaEntry[]>([{ key: '', value: '' }]);
 
 	const currentShareType = $derived(shareTypes.find((t) => t.name === fsForm.share_type));
+	// DHSS=True 인 경우에만 share network 단계가 의미 있다.
+	// extra_specs.driver_handles_share_servers 가 명시적으로 'true'인 경우만 true.
+	// 값이 없거나 조회 전이면 false 로 fallback → 네트워크 단계 숨김 (안전한 방향).
+	const dhssEnabled = $derived(
+		currentShareType?.extra_specs?.driver_handles_share_servers?.toLowerCase() === 'true',
+	);
 	const allowedProtos = $derived<('CEPHFS' | 'NFS')[]>(
 		currentShareType?.supported_protocols && currentShareType.supported_protocols.length > 0
 			? currentShareType.supported_protocols.filter(
@@ -120,6 +126,11 @@ export function createFileStorageWizardStore(opts: FsWizardOptions) {
 			wizardError = '이름과 크기를 입력하세요.'; return;
 		}
 		wizardError = '';
+		// DHSS=False 이거나 CephFS 이면 네트워크 단계 불필요 → 바로 생성
+		if (!dhssEnabled || fsForm.share_proto === 'CEPHFS') {
+			createFileStorage();
+			return;
+		}
 		step = 2;
 		if (neutronNetworks.length === 0) {
 			api.get<NeutronNetwork[]>('/api/networks', token, projectId)
@@ -161,7 +172,8 @@ export function createFileStorageWizardStore(opts: FsWizardOptions) {
 	}
 
 	async function createFileStorage() {
-		if (fsForm.share_proto === 'NFS' && !selectedNetworkId) {
+		// DHSS=True 환경에서 NFS를 선택했고 share network 선택 단계를 통과한 경우만 필수 검증
+		if (dhssEnabled && fsForm.share_proto === 'NFS' && !selectedNetworkId) {
 			wizardError = 'NFS 프로토콜은 Share Network가 필수입니다.'; return;
 		}
 		creating = true; wizardError = '';
@@ -170,7 +182,8 @@ export function createFileStorageWizardStore(opts: FsWizardOptions) {
 				name: fsForm.name, size_gb: fsForm.size_gb,
 				share_type: fsForm.share_type, share_proto: fsForm.share_proto,
 			};
-			if (selectedNetworkId && fsForm.share_proto !== 'CEPHFS') body.share_network_id = selectedNetworkId;
+			// DHSS=True 이고 share network 가 선택된 경우에만 전달 (DHSS=False 이면 무시)
+			if (dhssEnabled && selectedNetworkId && fsForm.share_proto !== 'CEPHFS') body.share_network_id = selectedNetworkId;
 			const validMeta = metaEntries.filter((m) => m.key.trim());
 			if (validMeta.length > 0) {
 				const metadata: Record<string, string> = {};
@@ -232,6 +245,7 @@ export function createFileStorageWizardStore(opts: FsWizardOptions) {
 		get metaEntries() { return metaEntries; }, set metaEntries(v: MetaEntry[]) { metaEntries = v; },
 		get allowedProtos() { return allowedProtos; },
 		get currentShareType() { return currentShareType; },
+		get dhssEnabled() { return dhssEnabled; },
 
 		get shareNetworks() { return shareNetworks; },
 		get selectedNetworkId() { return selectedNetworkId; }, set selectedNetworkId(v: string) { selectedNetworkId = v; },

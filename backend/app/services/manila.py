@@ -410,8 +410,28 @@ def create_file_storage(
         "share_type": share_type,
         "metadata": metadata or {},
     }
-    # CephFS native (DHSS=False) 는 share_network_id 를 거부 → error 상태 폴링 후 500
-    if share_network_id and proto_upper != "CEPHFS":
+    # share_network_id 포함 여부 결정:
+    # 1) CephFS native 는 share_network_id 를 거부 → 항상 제외
+    # 2) share type의 DHSS=False 이면 share_network_id 불필요 → 전달 시 오류 → 제외
+    # 3) DHSS=True (또는 조회 실패 시 보수적 fallback) → 기존 동작 유지
+    _include_share_network = share_network_id and proto_upper != "CEPHFS"
+    if _include_share_network and share_type:
+        try:
+            types = list_share_types(conn)
+            matched = next((t for t in types if t["name"] == share_type), None)
+            if matched:
+                dhss_val = matched.get("extra_specs", {}).get("driver_handles_share_servers", "")
+                if dhss_val.lower() == "false":
+                    logger.warning(
+                        "create_file_storage: share type '%s' 는 DHSS=False 이므로 "
+                        "share_network_id '%s' 를 무시합니다.",
+                        share_type,
+                        share_network_id,
+                    )
+                    _include_share_network = False
+        except Exception:
+            pass  # 조회 실패 시 기존 동작(포함) 유지
+    if _include_share_network:
         share_body["share_network_id"] = share_network_id
     body = {"share": share_body}
     try:
@@ -440,7 +460,20 @@ def create_file_storage(
         if info["status"] == "available":
             break
         if info["status"] == "error":
-            raise RuntimeError(f"파일 스토리지 생성 실패 (error 상태): {file_storage_id}")
+            # 실패 원인 조회 (Manila Messages API, best-effort)
+            failure_reason = ""
+            try:
+                msgs = client.get("messages", params={"resource_id": file_storage_id}).get("messages", [])
+                if msgs:
+                    failure_reason = ": " + msgs[0].get("user_message", "")
+            except Exception:
+                pass
+            # error 상태 share 정리 (잔류 방지, best-effort)
+            try:
+                client.delete(f"shares/{file_storage_id}")
+            except Exception:
+                pass
+            raise RuntimeError(f"파일 스토리지 생성 실패 (error 상태){failure_reason} [{file_storage_id}]")
 
     return _parse_file_storage(client.get(f"shares/{file_storage_id}")["share"])
 

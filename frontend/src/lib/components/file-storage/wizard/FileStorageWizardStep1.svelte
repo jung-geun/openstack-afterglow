@@ -71,5 +71,8 @@
 {#if s.wizardError}<div class="mt-4 text-red-400 text-xs bg-red-900/20 border border-red-800 rounded px-3 py-2">{s.wizardError}</div>{/if}
 <div class="flex justify-end gap-3 mt-6">
 	<button onclick={s.closeWizard} class="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors">취소</button>
-	<button onclick={s.goStep2} class="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors">다음 →</button>
+	<button onclick={s.goStep2} disabled={s.creating}
+		class="px-5 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium rounded-lg transition-colors">
+		{s.creating ? '생성 중...' : (!s.dhssEnabled || s.fsForm.share_proto === 'CEPHFS') ? '생성' : '다음 →'}
+	</button>
 </div>
