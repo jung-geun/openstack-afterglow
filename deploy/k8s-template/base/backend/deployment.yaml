@@ -88,14 +88,15 @@ spec:
             - name: builder-ssh-key
               mountPath: /etc/afterglow/ssh
               readOnly: true
-          # startupProbe: 시작 완료까지 최대 10 + 30*5 = 160초 허용
+          # startupProbe: 시작 완료까지 최대 10 + 240*5 = 1210초(약 20분) 허용
+          # (2026-06-12 워커 재부팅 장애: 노드 I/O 저하 시 import 10분+ → 5분 한도로 크래시루프)
           startupProbe:
             httpGet:
               path: /api/health
               port: 8000
             initialDelaySeconds: 10
             periodSeconds: 5
-            failureThreshold: 60
+            failureThreshold: 240
             timeoutSeconds: 10
           livenessProbe:
             httpGet:
