@@ -200,6 +200,60 @@ async def test_delete_gpu_device_not_found(admin_client):
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 템플릿 export (다운로드)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+@pytest.mark.asyncio
+async def test_export_gpu_devices_requires_admin(non_admin_client):
+    resp = await non_admin_client.get("/api/admin/gpu-devices/export")
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_export_gpu_devices_csv(admin_client):
+    with patch("app.database.is_db_available", return_value=False):
+        resp = await admin_client.get("/api/admin/gpu-devices/export?format=csv")
+    assert resp.status_code == 200
+    assert 'filename="gpu_devices.csv"' in resp.headers["content-disposition"]
+    text = resp.content.decode("utf-8-sig")
+    lines = text.splitlines()
+    assert lines[0] == "vendor_id,device_id,name,is_audio,aliases,source"
+    assert any(line.startswith("10DE,2204,RTX 3090,false,") for line in lines)
+
+
+@pytest.mark.asyncio
+async def test_export_gpu_devices_xlsx_roundtrip(admin_client):
+    """export한 xlsx를 그대로 import 파서에 넣으면 동일 항목이 복원된다 (source 컬럼 무시)."""
+    from openpyxl import load_workbook
+
+    from app.services.gpu_catalog import parse_xlsx
+
+    with patch("app.database.is_db_available", return_value=False):
+        resp = await admin_client.get("/api/admin/gpu-devices/export")
+    assert resp.status_code == 200
+    assert 'filename="gpu_devices.xlsx"' in resp.headers["content-disposition"]
+
+    import io
+
+    wb = load_workbook(io.BytesIO(resp.content))
+    header = [c.value for c in next(wb.worksheets[0].iter_rows(max_row=1))]
+    assert header == ["vendor_id", "device_id", "name", "is_audio", "aliases", "source"]
+
+    entries = parse_xlsx(resp.content)
+    rtx3090 = next(e for e in entries if e["device_id"] == "2204")
+    assert rtx3090["name"] == "RTX 3090"
+    assert "RTX3090" in rtx3090["aliases"]
+    assert rtx3090["is_audio"] is False
+
+
+@pytest.mark.asyncio
+async def test_export_gpu_devices_invalid_format(admin_client):
+    resp = await admin_client.get("/api/admin/gpu-devices/export?format=pdf")
+    assert resp.status_code == 422
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CSV import 엔드포인트
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -248,6 +302,49 @@ async def test_import_gpu_devices_invalid_mode(admin_client):
             files={"file": ("catalog.csv", _CSV_OK, "text/csv")},
         )
     assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_import_gpu_devices_xlsx(admin_client):
+    """엑셀(xlsx) 업로드도 CSV와 동일하게 동작한다."""
+    import io
+
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["vendor_id", "device_id", "name", "is_audio", "aliases", "source"])
+    ws.append(["10DE", "AAAA", "Test GPU A", "false", "TESTA;testa", "db"])
+    ws.append(["10DE", "BBBB", "Test GPU B", True, "", ""])  # bool 셀도 허용
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    captured = {}
+
+    async def _fake_bulk(entries, mode):
+        captured["entries"] = entries
+        captured["mode"] = mode
+        return len(entries)
+
+    with (
+        patch("app.database.is_db_available", return_value=True),
+        patch("app.services.gpu_catalog.bulk_import", new=AsyncMock(side_effect=_fake_bulk)),
+        patch("app.services.gpu_catalog.refresh_device_map_from_db", new=AsyncMock()),
+    ):
+        resp = await admin_client.post(
+            "/api/admin/gpu-devices/import",
+            files={
+                "file": (
+                    "gpu_devices.xlsx",
+                    buf.getvalue(),
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            },
+        )
+    assert resp.status_code == 200
+    assert resp.json() == {"imported": 2, "mode": "replace"}
+    assert captured["entries"][0]["aliases"] == ["TESTA", "testa"]
+    assert captured["entries"][1]["is_audio"] is True
 
 
 @pytest.mark.asyncio

@@ -159,6 +159,38 @@ async def bulk_import(entries: list[dict], mode: str = "replace") -> int:
     return len(deduped)
 
 
+def _entry_from_cells(lineno: int, row: list[str]) -> dict | None:
+    """행(셀 리스트)을 카탈로그 항목으로 변환. 빈 행/헤더 행이면 None.
+
+    CSV와 xlsx 파싱이 같은 검증 경로를 타도록 공용으로 사용한다.
+    """
+    if not row or all(not c.strip() for c in row):
+        return None
+    if row[0].strip().lower() == "vendor_id":  # 헤더 행
+        return None
+    if len(row) < 4:
+        raise ValueError(f"{lineno}행: 컬럼 수 부족 (vendor_id,device_id,name,is_audio,aliases 필요)")
+    vendor_id = row[0].strip()
+    device_id = row[1].strip()
+    name = row[2].strip()
+    is_audio_raw = row[3].strip().lower()
+    if is_audio_raw not in ("true", "false", "1", "0", ""):
+        raise ValueError(f"{lineno}행: is_audio는 true/false여야 합니다: {row[3]!r}")
+    aliases_raw = row[4].strip() if len(row) > 4 else ""
+    aliases = [a.strip() for a in aliases_raw.split(";") if a.strip()]
+    try:
+        validate_entry(vendor_id, device_id, name, aliases)
+    except ValueError as e:
+        raise ValueError(f"{lineno}행: {e}") from e
+    return {
+        "vendor_id": vendor_id,
+        "device_id": device_id,
+        "name": name,
+        "is_audio": is_audio_raw in ("true", "1"),
+        "aliases": aliases,
+    }
+
+
 def parse_csv(content: str) -> list[dict]:
     """CSV 텍스트를 카탈로그 항목 리스트로 파싱.
 
@@ -169,36 +201,88 @@ def parse_csv(content: str) -> list[dict]:
     entries: list[dict] = []
     reader = csv.reader(io.StringIO(content))
     for lineno, row in enumerate(reader, start=1):
-        if not row or all(not c.strip() for c in row):
-            continue
-        if lineno == 1 and row[0].strip().lower() == "vendor_id":
-            continue
-        if len(row) < 4:
-            raise ValueError(f"{lineno}행: 컬럼 수 부족 (vendor_id,device_id,name,is_audio,aliases 필요)")
-        vendor_id = row[0].strip()
-        device_id = row[1].strip()
-        name = row[2].strip()
-        is_audio_raw = row[3].strip().lower()
-        if is_audio_raw not in ("true", "false", "1", "0", ""):
-            raise ValueError(f"{lineno}행: is_audio는 true/false여야 합니다: {row[3]!r}")
-        aliases_raw = row[4].strip() if len(row) > 4 else ""
-        aliases = [a.strip() for a in aliases_raw.split(";") if a.strip()]
-        try:
-            validate_entry(vendor_id, device_id, name, aliases)
-        except ValueError as e:
-            raise ValueError(f"{lineno}행: {e}") from e
-        entries.append(
-            {
-                "vendor_id": vendor_id,
-                "device_id": device_id,
-                "name": name,
-                "is_audio": is_audio_raw in ("true", "1"),
-                "aliases": aliases,
-            }
-        )
+        entry = _entry_from_cells(lineno, row)
+        if entry:
+            entries.append(entry)
     if not entries:
         raise ValueError("CSV에 유효한 항목이 없습니다")
     return entries
+
+
+def parse_xlsx(data: bytes) -> list[dict]:
+    """엑셀(xlsx) 파일을 카탈로그 항목 리스트로 파싱.
+
+    첫 번째 시트의 컬럼 순서는 CSV와 동일: vendor_id, device_id, name, is_audio, aliases.
+    export 파일의 source 같은 추가 컬럼은 무시한다.
+    """
+    from openpyxl import load_workbook
+
+    try:
+        wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+    except Exception as e:
+        raise ValueError(f"엑셀 파일을 읽을 수 없습니다: {e}") from e
+    try:
+        ws = wb.worksheets[0]
+        entries: list[dict] = []
+        for lineno, row in enumerate(ws.iter_rows(values_only=True), start=1):
+            cells = ["" if c is None else str(c) for c in row[:5]]
+            entry = _entry_from_cells(lineno, cells)
+            if entry:
+                entries.append(entry)
+    finally:
+        wb.close()
+    if not entries:
+        raise ValueError("엑셀에 유효한 항목이 없습니다")
+    return entries
+
+
+EXPORT_COLUMNS = [*CSV_COLUMNS, "source"]
+
+
+def build_export_csv(devices: list[dict]) -> str:
+    """병합 카탈로그를 CSV 텍스트로 직렬화 (템플릿 다운로드용)."""
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(EXPORT_COLUMNS)
+    for d in devices:
+        writer.writerow(
+            [
+                d["vendor_id"],
+                d["device_id"],
+                d["name"],
+                "true" if d["is_audio"] else "false",
+                ";".join(d.get("aliases", [])),
+                d.get("source", ""),
+            ]
+        )
+    return buf.getvalue()
+
+
+def build_export_xlsx(devices: list[dict]) -> bytes:
+    """병합 카탈로그를 엑셀(xlsx) 바이트로 직렬화 (템플릿 다운로드용)."""
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "gpu_devices"
+    ws.append(EXPORT_COLUMNS)
+    for d in devices:
+        ws.append(
+            [
+                d["vendor_id"],
+                d["device_id"],
+                d["name"],
+                "true" if d["is_audio"] else "false",
+                ";".join(d.get("aliases", [])),
+                d.get("source", ""),
+            ]
+        )
+    widths = {"A": 11, "B": 11, "C": 28, "D": 10, "E": 40, "F": 10}
+    for col, w in widths.items():
+        ws.column_dimensions[col].width = w
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
 
 
 async def refresh_device_map_from_db() -> None:

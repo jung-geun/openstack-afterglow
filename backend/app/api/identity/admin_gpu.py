@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import openstack
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel, Field
 
 from app.api.deps import CacheMode, cache_mode, get_os_conn, require_admin
@@ -66,13 +66,8 @@ def _require_db():
         raise HTTPException(status_code=503, detail="DB가 초기화되지 않아 GPU 카탈로그를 변경할 수 없습니다")
 
 
-@router.get("/gpu-devices", dependencies=[Depends(require_admin)])
-async def list_gpu_devices():
-    """병합된 GPU 장치 카탈로그 목록 (내장 기본값 + config.toml + DB overlay).
-
-    각 항목의 source: "builtin"(코드 내장) | "config"(config.toml) | "db"(관리자 추가).
-    db 항목만 삭제 가능하다.
-    """
+async def _merged_devices() -> list[dict]:
+    """내장 기본값 + config.toml + DB overlay 병합 카탈로그 목록 (source 표시)."""
     from app.database import is_db_available
     from app.services.gpu_catalog import list_db_devices
     from app.services.gpu_inventory import _DEFAULT_PCI_DEVICE_MAP
@@ -105,7 +100,42 @@ async def list_gpu_devices():
                 }
             )
     devices.sort(key=lambda d: (d["vendor_id"], d["name"]))
-    return {"devices": devices}
+    return devices
+
+
+@router.get("/gpu-devices", dependencies=[Depends(require_admin)])
+async def list_gpu_devices():
+    """병합된 GPU 장치 카탈로그 목록 (내장 기본값 + config.toml + DB overlay).
+
+    각 항목의 source: "builtin"(코드 내장) | "config"(config.toml) | "db"(관리자 추가).
+    db 항목만 삭제 가능하다.
+    """
+    return {"devices": await _merged_devices()}
+
+
+@router.get("/gpu-devices/export", dependencies=[Depends(require_admin)])
+async def export_gpu_devices(format: str = Query("xlsx", pattern="^(xlsx|csv)$")):
+    """현재 병합 카탈로그를 템플릿 파일로 다운로드 (값을 채워 import에 재업로드).
+
+    컬럼: vendor_id, device_id, name, is_audio, aliases, source — import 시 source는 무시된다.
+    """
+    from app.services.gpu_catalog import build_export_csv, build_export_xlsx
+
+    devices = await _merged_devices()
+    if format == "csv":
+        # 엑셀에서 한글이 깨지지 않도록 UTF-8 BOM 포함
+        content = ("\ufeff" + build_export_csv(devices)).encode("utf-8")
+        media_type = "text/csv; charset=utf-8"
+        filename = "gpu_devices.csv"
+    else:
+        content = build_export_xlsx(devices)
+        media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        filename = "gpu_devices.xlsx"
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post("/gpu-devices", dependencies=[Depends(require_admin)])
@@ -143,22 +173,27 @@ async def import_gpu_devices(
     file: UploadFile,
     mode: str = Query("replace", pattern="^(replace|upsert)$"),
 ):
-    """CSV 일괄 import. 포맷: vendor_id,device_id,name,is_audio,aliases(세미콜론 구분).
+    """CSV/엑셀(xlsx) 일괄 import. 컬럼: vendor_id,device_id,name,is_audio,aliases(세미콜론 구분).
 
+    /gpu-devices/export로 받은 템플릿에 값을 채워 그대로 업로드하면 된다 (source 컬럼은 무시).
     mode=replace(기본): DB 항목 전체 교체. mode=upsert: 기존 항목 유지하며 병합.
     """
-    from app.services.gpu_catalog import bulk_import, parse_csv, refresh_device_map_from_db
+    from app.services.gpu_catalog import bulk_import, parse_csv, parse_xlsx, refresh_device_map_from_db
 
     _require_db()
     raw = await file.read()
-    if len(raw) > 1024 * 1024:
-        raise HTTPException(status_code=400, detail="CSV 파일이 너무 큽니다 (최대 1MB)")
+    if len(raw) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="파일이 너무 큽니다 (최대 5MB)")
+    is_xlsx = raw[:4] == b"PK\x03\x04" or (file.filename or "").lower().endswith(".xlsx")
     try:
-        content = raw.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        raise HTTPException(status_code=400, detail="CSV는 UTF-8 인코딩이어야 합니다")
-    try:
-        entries = parse_csv(content)
+        if is_xlsx:
+            entries = parse_xlsx(raw)
+        else:
+            try:
+                content = raw.decode("utf-8-sig")
+            except UnicodeDecodeError:
+                raise HTTPException(status_code=400, detail="CSV는 UTF-8 인코딩이어야 합니다")
+            entries = parse_csv(content)
         imported = await bulk_import(entries, mode=mode)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

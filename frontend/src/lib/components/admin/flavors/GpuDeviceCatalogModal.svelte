@@ -22,10 +22,11 @@
 	let form = $state({ vendor_id: '10DE', device_id: '', name: '', is_audio: false, aliases: '' });
 	let saving = $state(false);
 
-	// CSV 업로드
+	// 일괄 갱신 (CSV/xlsx 업로드)
 	let csvFile = $state<File | null>(null);
 	let csvMode = $state<'replace' | 'upsert'>('replace');
 	let importing = $state(false);
+	let downloading = $state(false);
 
 	async function load() {
 		loading = true;
@@ -87,6 +88,28 @@
 		}
 	}
 
+	async function downloadTemplate(format: 'xlsx' | 'csv') {
+		downloading = true;
+		error = '';
+		try {
+			const { blob, filename } = await api.downloadBlob(
+				`/api/admin/gpu-devices/export?format=${format}`,
+				token,
+				projectId,
+			);
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = filename;
+			a.click();
+			URL.revokeObjectURL(url);
+		} catch (e) {
+			error = e instanceof ApiError ? e.message : '템플릿 다운로드 실패';
+		} finally {
+			downloading = false;
+		}
+	}
+
 	async function importCsv() {
 		if (!csvFile) return;
 		if (csvMode === 'replace' && !await confirmDialog('전체 교체 모드입니다. 관리자가 추가한 기존 DB 항목이 모두 CSV 내용으로 대체됩니다. 계속하시겠습니까?')) return;
@@ -102,7 +125,7 @@
 				token,
 				projectId,
 			);
-			notice = `CSV import 완료: ${res.imported}개 항목 (${res.mode === 'replace' ? '전체 교체' : '병합'})`;
+			notice = `일괄 갱신 완료: ${res.imported}개 항목 (${res.mode === 'replace' ? '전체 교체' : '병합'})`;
 			csvFile = null;
 			await load();
 		} catch (e) {
@@ -219,14 +242,29 @@
 					</div>
 				</div>
 
-				<!-- CSV 일괄 갱신 -->
+				<!-- 일괄 갱신 (템플릿 다운로드 → 값 입력 → 업로드) -->
 				<div>
-					<div class="text-xs text-gray-500 uppercase tracking-wide mb-2">CSV 일괄 갱신</div>
-					<div class="text-xs text-gray-500 mb-2 font-mono">포맷: vendor_id,device_id,name,is_audio,aliases (aliases는 ; 구분)</div>
+					<div class="text-xs text-gray-500 uppercase tracking-wide mb-2">일괄 갱신</div>
+					<div class="text-xs text-gray-500 mb-2">
+						1) 현재 카탈로그가 채워진 템플릿을 다운로드 → 2) 엑셀 등에서 값 입력 → 3) 업로드.
+						컬럼: <span class="font-mono">vendor_id, device_id, name, is_audio, aliases</span> (aliases는 ; 구분, source 컬럼은 무시됨)
+					</div>
+					<div class="flex flex-wrap items-center gap-2 mb-3">
+						<button
+							onclick={() => downloadTemplate('xlsx')}
+							disabled={downloading}
+							class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs rounded-lg disabled:opacity-30"
+						>⬇ 엑셀 템플릿 (.xlsx)</button>
+						<button
+							onclick={() => downloadTemplate('csv')}
+							disabled={downloading}
+							class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs rounded-lg disabled:opacity-30"
+						>⬇ CSV 템플릿</button>
+					</div>
 					<div class="flex flex-wrap items-center gap-3">
 						<input
 							type="file"
-							accept=".csv,text/csv"
+							accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 							onchange={(e) => (csvFile = e.currentTarget.files?.[0] ?? null)}
 							class="text-xs text-gray-400 file:mr-2 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-gray-800 file:text-gray-300 file:text-xs hover:file:bg-gray-700"
 						/>
