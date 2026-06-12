@@ -3878,11 +3878,15 @@ flavor extra spec은 키/값을 손으로 입력해야 해 오타·형식 실수
 
 ## 76. NFS 파일 스토리지 생성 실패 수정 — DHSS=False share network 무시 + 마법사 단계 스킵
 
-- [ ] `backend/app/services/manila.py` — DHSS=False share type이면 share_network_id 무시(경고 로그), error 상태 share 자동 삭제 후 원인 포함 에러
-- [ ] `frontend/src/lib/stores/fileStorageWizardStore.svelte.ts` — `dhssEnabled` derived 추가, DHSS=False일 때 네트워크 단계 건너뛰고 바로 생성
-- [ ] `FileStorageWizard.svelte` — DHSS=False일 때 '네트워크' 단계 인디케이터 숨김 (2단계)
-- [ ] `FileStorageWizardStep1.svelte` — DHSS=False일 때 버튼 라벨 '생성'으로 변경
-- [ ] `tests/test_file_storage.py` — DHSS=True/False/조회실패/error상태 시나리오 pytest
+- [x] `backend/app/services/manila.py` — DHSS=False share type이면 share_network_id 무시(경고 로그), error 상태 share 자동 삭제 후 원인 포함 에러
+- [x] `frontend/src/lib/stores/fileStorageWizardStore.svelte.ts` — `dhssEnabled` derived 추가, DHSS=False일 때 네트워크 단계 건너뛰고 바로 생성
+- [x] `FileStorageWizard.svelte` — DHSS=False일 때 '네트워크' 단계 인디케이터 숨김 (2단계)
+- [x] `FileStorageWizardStep1.svelte` — DHSS=False일 때 버튼 라벨 '생성'으로 변경
+- [x] `tests/test_file_storage.py` — DHSS=True/False/조회실패/error상태 시나리오 pytest
+- [x] `file_storage.py` — NFS/CEPHFS share_type 미지정 시 proto별 fallback (NFS→os_manila_nfs_share_type)
+- [x] `file_storage.py` — Manila RuntimeError → HTTPException 409 + 실패 사유 노출
+- [x] `fileStorageWizardStore.svelte.ts` — Promise.allSettled 로 types/networks 독립 로드
+- [x] `tests/test_file_storage.py` — NFS/CEPHFS fallback + RuntimeError→409 pytest
 
 ---
 

@@ -95,13 +95,14 @@ export function createFileStorageWizardStore(opts: FsWizardOptions) {
 	async function openWizard() {
 		opts.setOpen(true);
 		reset();
-		try {
-			const [types, networks] = await Promise.all([
-				api.get<ShareTypeMeta[]>('/api/file-storage/types', token, projectId),
-				api.get<ShareNetwork[]>('/api/share-networks', token, projectId),
-			]);
-			shareTypes = types;
-			shareNetworks = networks;
+		// Promise.allSettled 로 types/networks 를 독립적으로 로드
+		// — networks 실패가 share type 목록을 날리지 않도록
+		const [typesResult, networksResult] = await Promise.allSettled([
+			api.get<ShareTypeMeta[]>('/api/file-storage/types', token, projectId),
+			api.get<ShareNetwork[]>('/api/share-networks', token, projectId),
+		]);
+		if (typesResult.status === 'fulfilled') {
+			shareTypes = typesResult.value;
 			if (shareTypes.length > 0) {
 				const def = shareTypes.find((t) => t.is_default) ?? shareTypes[0];
 				fsForm.share_type = def.name;
@@ -110,7 +111,11 @@ export function createFileStorageWizardStore(opts: FsWizardOptions) {
 				);
 				if (protos && protos.length > 0) fsForm.share_proto = protos[0];
 			}
-		} catch { shareTypes = []; shareNetworks = []; }
+		} else {
+			shareTypes = [];
+			wizardError = 'Share type 목록을 불러오지 못했습니다. 다시 열거나 직접 입력하세요.';
+		}
+		shareNetworks = networksResult.status === 'fulfilled' ? networksResult.value : [];
 	}
 
 	function closeWizard() {

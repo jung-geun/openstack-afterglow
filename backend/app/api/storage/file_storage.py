@@ -115,7 +115,9 @@ async def create_file_storage(
             name=req.name,
             size_gb=req.size_gb,
             share_network_id=req.share_network_id or settings.os_manila_share_network_id,
-            share_type=req.share_type or settings.os_manila_share_type,
+            share_type=req.share_type or (
+                settings.os_manila_nfs_share_type if req.share_proto == "NFS" else settings.os_manila_share_type
+            ),
             share_proto=req.share_proto,
             metadata=req.metadata,
         )
@@ -148,6 +150,20 @@ async def create_file_storage(
             status_code=status if 400 <= status < 500 else 502,
             detail=message,
         )
+    except RuntimeError as e:
+        # Manila 폴링 오류 (error 상태, capabilities filter 등) — 실패 사유를 사용자에게 노출
+        reason = str(e)
+        _logger.warning("파일 스토리지 생성 실패(Manila error): name=%s reason=%s", req.name, reason[:300])
+        await rec(
+            token_info,
+            conn,
+            resource_type="file_storage",
+            action="file_storage.create",
+            status="failed",
+            resource_name=req.name,
+            error_message=reason[:500],
+        )
+        raise HTTPException(status_code=409, detail=reason[:300])
     except Exception as e:
         _logger.exception("파일 스토리지 생성 실패: name=%s proto=%s", req.name, req.share_proto)
         await rec(
