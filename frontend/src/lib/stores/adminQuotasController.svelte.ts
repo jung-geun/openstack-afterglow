@@ -55,14 +55,15 @@ export function createAdminQuotasController(opts: AdminQuotasControllerOpts) {
     }
   }
 
-  async function loadGpuDefaults() {
-    gpuDefaultLoading = true; gpuDefaultError = '';
+  async function loadGpuDefaults(opts?: { background?: boolean }) {
+    if (!opts?.background) { gpuDefaultLoading = true; }
+    gpuDefaultError = '';
     try {
       gpuDefaults = await api.get<GpuDefaultQuota[]>('/api/admin/gpu-quotas/defaults', tok(), pid());
     } catch (e) {
       gpuDefaultError = e instanceof ApiError ? e.message : '기본 GPU quota 조회 실패';
       gpuDefaults = [];
-    } finally { gpuDefaultLoading = false; }
+    } finally { if (!opts?.background) gpuDefaultLoading = false; }
   }
 
   async function setGpuDefault(gpuType: string, limit: number) {
@@ -70,8 +71,8 @@ export function createAdminQuotasController(opts: AdminQuotasControllerOpts) {
     try {
       await api.put('/api/admin/gpu-quotas/defaults', { gpu_type: gpuType, limit }, tok(), pid());
       gpuDefaultSuccess = '기본 GPU quota 저장됨';
-      await loadGpuDefaults();
-      if (selectedProjectId) await loadGpuQuotas();
+      await loadGpuDefaults({ background: true });
+      if (selectedProjectId) await loadGpuQuotas({ background: true });
     } catch (e) {
       gpuDefaultError = e instanceof ApiError ? e.message : '기본 GPU quota 설정 실패';
     }
@@ -87,15 +88,16 @@ export function createAdminQuotasController(opts: AdminQuotasControllerOpts) {
     await loadGpuQuotas();
   }
 
-  async function loadGpuQuotas() {
+  async function loadGpuQuotas(opts?: { background?: boolean }) {
     if (!selectedProjectId) { gpuQuotas = []; return; }
-    gpuQuotaLoading = true; gpuQuotaError = '';
+    if (!opts?.background) { gpuQuotaLoading = true; }
+    gpuQuotaError = '';
     try {
       gpuQuotas = await api.get<GpuQuota[]>(`/api/admin/gpu-quotas/${selectedProjectId}`, tok(), pid());
     } catch (e) {
       gpuQuotaError = e instanceof ApiError ? e.message : 'GPU quota 조회 실패';
       gpuQuotas = [];
-    } finally { gpuQuotaLoading = false; }
+    } finally { if (!opts?.background) gpuQuotaLoading = false; }
   }
 
   async function setGpuQuota(gpuType: string, limit: number) {
@@ -103,7 +105,7 @@ export function createAdminQuotasController(opts: AdminQuotasControllerOpts) {
     gpuQuotaError = '';
     try {
       await api.put(`/api/admin/gpu-quotas/${selectedProjectId}`, { gpu_type: gpuType, limit }, tok(), pid());
-      await loadGpuQuotas();
+      await loadGpuQuotas({ background: true });
     } catch (e) {
       gpuQuotaError = e instanceof ApiError ? e.message : 'GPU quota 설정 실패';
     }
@@ -113,7 +115,7 @@ export function createAdminQuotasController(opts: AdminQuotasControllerOpts) {
     if (!selectedProjectId) return;
     try {
       await api.delete(`/api/admin/gpu-quotas/${selectedProjectId}/${encodeURIComponent(gpuType)}`, tok(), pid());
-      await loadGpuQuotas();
+      await loadGpuQuotas({ background: true });
     } catch (e) {
       gpuQuotaError = e instanceof ApiError ? e.message : 'GPU quota 삭제 실패';
     }
