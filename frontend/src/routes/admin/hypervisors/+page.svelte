@@ -52,11 +52,13 @@
 		refreshing = false;
 	}
 
-	// 하이퍼바이저 행에 GPU 사용량 결합 (gpu-hosts 호스트명 = hypervisor_hostname)
+	// 하이퍼바이저 행에 GPU 사용량·모델 결합 (gpu-hosts 호스트명 = hypervisor_hostname)
 	let joinedHypervisors = $derived(
 		hypervisors.map((h) => {
 			const g = gpuHostMap.get(h.name);
-			return g ? { ...h, gpu_total: g.gpu_total, gpu_used: g.gpu_used } : h;
+			if (!g) return h;
+			const gpu_model = g.gpu_groups.map((grp) => grp.device_name).join(', ') || null;
+			return { ...h, gpu_total: g.gpu_total, gpu_used: g.gpu_used, gpu_model };
 		})
 	);
 
@@ -97,7 +99,7 @@
 		}
 	}
 
-	const STRING_SORT_COLS = new Set(['name', 'cpu_model']);
+	const STRING_SORT_COLS = new Set(['name', 'cpu_model', 'gpu_model']);
 
 	let sortedHypervisors = $derived(
 		filteredHypervisors.toSorted((a, b) => {
