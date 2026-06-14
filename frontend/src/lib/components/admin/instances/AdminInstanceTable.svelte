@@ -9,20 +9,31 @@
 		markerStack,
 		nextMarker,
 		refreshing,
+		selectedIds,
 		onOpen,
 		onPrev,
 		onNext,
 		onRecover,
+		onToggleSelect,
+		onToggleAll,
 	}: {
 		instances: AdminInstance[];
 		markerStack: string[];
 		nextMarker: string | null;
 		refreshing: boolean;
+		selectedIds?: Set<string>;
 		onOpen: (inst: AdminInstance) => void;
 		onPrev: () => void;
 		onNext: () => void;
 		onRecover?: (inst: AdminInstance) => void;
+		onToggleSelect?: (id: string) => void;
+		onToggleAll?: () => void;
 	} = $props();
+
+	const showCheckboxes = $derived(!!onToggleSelect);
+	const allSelected = $derived(
+		showCheckboxes && instances.length > 0 && instances.every(i => selectedIds?.has(i.id))
+	);
 
 	let expandedError = $state<string | null>(null);
 	let copiedProjectId = $state<string | null>(null);
@@ -39,6 +50,17 @@
 	<table class="w-full text-sm">
 		<thead>
 			<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
+				{#if showCheckboxes}
+					<th class="py-2 pr-2 w-8">
+						<input
+							type="checkbox"
+							checked={allSelected}
+							onclick={() => onToggleAll?.()}
+							class="w-4 h-4 rounded border-gray-600 bg-gray-800 accent-blue-500 cursor-pointer"
+							aria-label="전체 선택"
+						/>
+					</th>
+				{/if}
 				<th class="text-left py-2 pr-4">이름</th>
 				<th class="text-left py-2 pr-4">상태</th>
 				<th class="text-left py-2 pr-4">Flavor</th>
@@ -51,7 +73,19 @@
 			{#each instances as s (s.id)}
 				<tr
 					class="border-b border-gray-800/50 text-xs transition-colors"
+					class:bg-blue-900/10={selectedIds?.has(s.id)}
 				>
+					{#if showCheckboxes}
+						<td class="py-2 pr-2" onclick={(e) => e.stopPropagation()} role="none">
+							<input
+								type="checkbox"
+								checked={selectedIds?.has(s.id) ?? false}
+								onclick={() => onToggleSelect?.(s.id)}
+								class="w-4 h-4 rounded border-gray-600 bg-gray-800 accent-blue-500 cursor-pointer"
+								aria-label="인스턴스 선택"
+							/>
+						</td>
+					{/if}
 					<td class="p-0">
 						<button type="button" onclick={() => onOpen(s)} class="block w-full py-2 pr-4 font-medium text-white hover:text-blue-400 transition-colors text-left" title={s.name || s.id}><span class="max-md:block max-md:max-w-[66vw] max-md:truncate">{s.name || s.id.slice(0, 8)}</span></button>
 					</td>
