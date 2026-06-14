@@ -2,333 +2,64 @@
 
 **Language:** 한국어 · [English](README.en.md)
 
-> Horizon의 안정성과 기능 완성도 + Skyline의 현대적 UX를 결합한 차세대 OpenStack 대시보드
+> Horizon의 완성도 + Skyline의 현대적 UX를 결합한 차세대 OpenStack 대시보드
 
 [![CI](https://github.com/openstack-afterglow/openstack-afterglow/actions/workflows/test.yml/badge.svg)](https://github.com/openstack-afterglow/openstack-afterglow/actions/workflows/test.yml)
 [![Docker Build](https://github.com/openstack-afterglow/openstack-afterglow/actions/workflows/docker-build.yml/badge.svg)](https://github.com/openstack-afterglow/openstack-afterglow/actions/workflows/docker-build.yml)
 [![License](https://img.shields.io/github/license/openstack-afterglow/openstack-afterglow)](LICENSE)
 
----
-
-## 프로젝트 소개
-
-**Afterglow**는 OpenStack 클라우드 환경을 위한 새로운 웹 대시보드입니다.
-
-| 기존 대시보드 | 한계 |
-|---|---|
-| **Horizon** | Django 기반의 무거운 UI, 확장성 제한, 느린 렌더링 |
-| **Skyline** | 신규 OpenStack 서비스 지원 미흡, 커스터마이징 어려움 |
-
-Afterglow는 두 프로젝트의 장점을 취하고 단점을 보완합니다.
-
-- SvelteKit 기반 고성능 프론트엔드 (Skyline의 현대적 UX)
-- OpenStack 전체 서비스 커버리지 (Horizon의 기능 완성도)
-- **k3s 기반 Kubernetes 클러스터 프로비저닝** — Magnum을 대체하여 VM에 k3s를 직접 배포, 클라우드에서 즉시 사용 가능한 Kubernetes 환경 제공
-- OverlayFS + Manila 기반 공유 라이브러리 레이어 (AI/ML 워크로드 특화)
-
-> **현재 OS**: Ubuntu 기반 / **예정**: Fedora CoreOS 전환 (불변 인프라)
-
----
+Afterglow는 OpenStack 클라우드를 위한 오픈소스 웹 대시보드입니다. Horizon의 기능 완성도와 안정성을 유지하면서 SvelteKit 기반의 현대적 UI/UX를 제공하고, Magnum을 대체하는 **k3s 기반 Kubernetes 프로비저닝**과 AI/ML 워크로드에 특화된 **OverlayFS 라이브러리 레이어**를 내장합니다.
 
 ## 주요 기능
 
-### OpenStack 리소스 관리
-- VM 생성 · 시작 · 정지 · 삭제 · 콘솔 접속
-- 이미지(Glance) / 플레이버 / 네트워크 / Floating IP
-- 블록 스토리지(Cinder) / 공유 파일시스템(Manila)
-- 로드밸런서(Octavia) / 보안 그룹 / 키페어
+- **OpenStack 전체 서비스 관리** — Nova · Glance · Cinder · Neutron · Manila · Octavia를 단일 대시보드에서
+- **k3s 클러스터 프로비저닝** — Magnum 없이 VM에 k3s 직접 배포 (OCCM · Cinder/Manila CSI · Keystone Auth · Barbican KMS 플러그인)
+- **OverlayFS 라이브러리 레이어 (Union Mount v2)** — content-addressable 불변 레이어, Fork API, Manila 스냅샷 백업/복원
+- **모니터링 통합** — Grafana JWT 임베드, Prometheus HTTP SD, Monitoring 보안 그룹 자동화
+- **Defense-in-depth 보안** — IDOR 가드, HKDF 키 분리 암호화, kubeconfig audit log, production 부팅 가드
 
-### k3s 클러스터 프로비저닝 (Magnum 대체)
-- OpenStack VM 위에 k3s 클러스터 원클릭 배포
-- 단일 노드 / 멀티 노드(Master + Worker) 구성
-- 클러스터 생명주기 관리 (생성 · 삭제 이력 보존 · 스케일 인/아웃)
-- kubeconfig 다운로드
-- **Cloud Provider OpenStack 통합** — OCCM, Cinder CSI, Manila CSI, Keystone Auth, Octavia Ingress, Barbican KMS 플러그인 지원
-
-### OverlayFS 라이브러리 레이어 — Union Mount v2 (AI/ML 특화)
-- Manila NFS/CephFS share를 OverlayFS lower layer로 마운트
-- Python, PyTorch, vLLM, Jupyter 등 사전 빌드 레이어 공유
-- 프로젝트 간 read-only 라이브러리 공유로 스토리지 효율화
-- **Content-addressable 불변 레이어** — seal 후 digest 고정, 이후 변경 불가
-- **Fork API** — sealed 레이어에서 새 RW 레이어 파생 (single-parent 상속)
-- **Manila Snapshot 기반 백업/복원** — 레이어 스냅샷 생성·복원 및 볼륨 transfer
-- **백그라운드 빌드 워커** — 레이어 빌드를 비동기 워커로 처리
-
-### 모니터링 통합
-- Grafana JWT 발급 (`POST /api/grafana/token`) — 대시보드 embedded 접근
-- Prometheus HTTP SD (`GET /api/sd/prometheus/targets`) — 동적 타깃 디스커버리
-- Monitoring 보안 그룹 자동화 — 프로젝트별 모니터링 SG 생성·관리
-
-### Octavia Ingress
-- per-project 관리 사용자 + Application Credential 인증 모델
-- 프로젝트별 격리된 LB 권한 관리
-
-### 계정 및 부가 기능
-- 계정 설정 페이지 (`/dashboard/account`) 신설
-- Floating IP 연결 인스턴스 정보 표시
-- 인스턴스 볼륨 `delete_on_termination` 토글 UI
-- 볼륨 스냅샷 프로젝트별 필터링
-
-### 관리자 기능
-- 프로젝트별 쿼터 관리
-- 전체 이미지 관리 (substring 검색)
-- Notion 동기화 (다중 데이터베이스, dedup)
-- 시계열 메트릭 대시보드
-
-### 보안 (1.14.0+)
-- **Defense-in-depth IDOR 가드** — Network/LB/Trove/Cinder/Manila/Compute 의 mutation·detail 엔드포인트가 OpenStack RBAC 외 백엔드에서 한번 더 owner 검증 (admin 우회 + 외부/공유 자원 면제)
-- **K3s 비밀 암호화** — HKDF-SHA256 sub-key 도메인 분리 (kubeconfig / node_token / manager_password / notion 키 분리)
-- **Kubeconfig 다운로드 audit log** — 매 GET 마다 source IP 와 함께 기록 (forensic)
-- **Health Bearer 토큰** — 7일 절대 만료 (sliding TTL 제거)
-- **Production 부팅 가드** — `AFTERGLOW_ENV=production` + `AFTERGLOW_ALLOW_INSECURE=1` 또는 default secret_key 조합 시 즉시 ValueError
-- 상세: [보안 모델 문서](docs/security.md)
-
----
-
-## 아키텍처
-
-```mermaid
-graph LR
-    Browser["브라우저"] --> FE["SvelteKit :3000"]
-    FE --> API["FastAPI :8000"]
-    API --> Redis["Redis :6379"]
-    API --> KS["Keystone"]
-    API --> Nova["Nova"]
-    API --> Glance["Glance"]
-    API --> Cinder["Cinder"]
-    API --> Neutron["Neutron"]
-    API --> Manila["Manila"]
-    API --> Octavia["Octavia"]
-
-    subgraph k3s 프로비저닝
-        Nova --> VM["Ubuntu VM"]
-        VM --> K3S["k3s 클러스터"]
-    end
-
-    subgraph CI/CD 파이프라인
-        GH["GitHub Actions"] -->|이미지 빌드 & push| Registry["Container Registry"]
-        Registry -->|kustomization digest 자동 갱신| ArgoCD["ArgoCD"]
-        ArgoCD -->|auto-sync| K8S["Kubernetes 클러스터"]
-    end
-```
-
-| 구성 요소 | 기술 | 포트 |
-|---|---|---|
-| 프론트엔드 | SvelteKit + TypeScript + Tailwind CSS v4 | 3000 |
-| 백엔드 | FastAPI + openstacksdk (Python) | 8000 |
-| 캐시 / 세션 | Redis 7 (AOF 영속화) | 6379 |
-| 모니터링 | Prometheus + Grafana + OpenSearch | 9090 / 3001 / 9200 |
-
----
-
-## 빠른 시작 (Docker Compose)
+## 빠른 시작
 
 ```bash
 git clone git@github.com:openstack-afterglow/openstack-afterglow.git
 cd openstack-afterglow
-cp config.toml.example config.toml
+cp config.toml.example config.toml   # OpenStack 자격증명 입력
+docker compose up -d                 # http://localhost:3000
 ```
 
-`config.toml`에서 OpenStack 자격증명을 설정합니다:
-
-```toml
-[openstack]
-auth_url = "https://keystone.example.com:5000/v3"
-project_name = "myproject"
-region_name  = "RegionOne"
-```
-
-```bash
-docker compose up -d
-# http://localhost:3000 접속
-```
-
-모니터링 스택 포함 시:
-
-```bash
-docker compose --profile monitoring up -d
-```
-
----
-
-## kolla-ansible 배포 (OpenStack 환경 내부)
-
-OpenStack 클러스터 내에서 kolla-ansible 역할로 Afterglow를 직접 배포합니다.
-
-```bash
-git clone git@github.com:openstack-afterglow/openstack-afterglow.git
-cd openstack-afterglow/deploy/kolla
-pip install kolla-ansible
-# 인벤토리와 globals.yml 설정 후:
-bash install.sh
-```
-
-역할 파일은 `deploy/kolla/ansible/roles/afterglow/`에 위치합니다. 자세한 설정은 [배포 가이드](docs/deployment.md)를 참고하세요.
-
----
-
-## Kubernetes 배포
-
-### 사전 요구사항
-
-- kubectl 1.28+
-- k3s 또는 Kubernetes 1.28+ 클러스터
-- (선택) ArgoCD — GitOps 배포
-
-### Kustomize 배포
-
-```bash
-# 개발 환경
-kubectl apply -k deploy/k8s-template/overlays/dev
-
-# 프로덕션 환경
-kubectl apply -k deploy/k8s-template/overlays/prod
-```
-
-시크릿을 먼저 생성합니다:
-
-```bash
-kubectl create namespace afterglow
-
-kubectl create secret generic afterglow-secrets \
-  --namespace=afterglow \
-  --from-literal=OPENSTACK_PASSWORD=<password> \
-  --from-literal=SECRET_KEY=$(openssl rand -hex 32)
-```
-
-배포 상태 확인:
-
-```bash
-kubectl get all -n afterglow
-kubectl get ingress -n afterglow
-```
-
-### ArgoCD GitOps 배포
-
-```bash
-# AppProject 및 Application 등록
-kubectl apply -f argocd/appproject.yaml
-kubectl apply -f argocd/application.dev.yaml   # 개발
-kubectl apply -f argocd/application.prod.yaml  # 프로덕션
-```
-
-ArgoCD가 `dev` 브랜치를 감시하여 변경사항을 자동 동기화합니다.
-
-자세한 내용은 [Kubernetes 배포 가이드](docs/deployment.md)를 참고하세요.
-
----
-
-## k3s 클러스터 프로비저닝
-
-Afterglow는 Magnum 없이 OpenStack VM에 k3s를 직접 배포합니다.
-
-```
-대시보드 → 컨테이너 → k3s 클러스터 생성
-  ├── 마스터 노드 VM 생성 (Nova)
-  ├── cloud-init으로 k3s 서버 설치
-  ├── 워커 노드 VM 생성 및 조인
-  └── kubeconfig 다운로드
-```
-
-현재 Ubuntu 22.04 / 24.04 기반으로 동작하며, **Fedora CoreOS**로의 전환이 계획되어 있습니다 (불변 인프라, rpm-ostree 기반 업데이트).
-
-자세한 내용은 [k3s 클러스터 가이드](docs/k3s.md)를 참고하세요.
-
----
-
-## 설정
-
-모든 설정은 `config.toml` 하나로 관리합니다. 주요 섹션:
-
-| 섹션 | 주요 설정 |
-|---|---|
-| `[openstack]` | auth_url, project_name, region_name, manila_endpoint |
-| `[app]` | backend_port, frontend_port, secret_key |
-| `[cache]` | redis_url, default_ttl_seconds |
-| `[nova]` | default_network_id, boot_volume_size_gb |
-| `[session]` | 세션 타임아웃 설정 |
-
-전체 설정 레퍼런스: [config.toml.example](config.toml.example)
-
----
-
-## 프로젝트 구조
-
-```
-openstack-afterglow/
-├── backend/           # FastAPI 백엔드
-│   └── app/
-│       ├── api/       # REST API 라우터
-│       ├── models/    # Pydantic 모델
-│       ├── services/  # OpenStack 서비스 클라이언트
-│       └── templates/ # cloud-init Jinja2 템플릿
-├── frontend/          # SvelteKit 프론트엔드
-│   └── src/
-│       ├── routes/    # 페이지 라우트
-│       └── lib/       # 공유 컴포넌트 / 스토어 / API
-├── deploy/k8s-template/ # Kubernetes 매니페스트 (Kustomize)
-│   ├── base/            # 공통 리소스
-│   └── overlays/        # dev / prod 오버레이
-├── deploy/kolla/      # kolla-ansible 배포 역할
-├── argocd/            # ArgoCD Application 설정
-├── monitoring/        # Prometheus + Grafana 설정
-├── scripts/           # 유틸리티 스크립트
-├── docs/              # 기술 문서 (GitHub Pages)
-├── docker-compose.yml
-└── config.toml.example
-```
-
----
+Kubernetes · ArgoCD · kolla-ansible 배포와 상세 설정은 아래 문서를 참고하세요.
 
 ## 문서
 
+📖 전체 문서: **<https://openstack-afterglow.github.io/openstack-afterglow/>**
+
 | 문서 | 내용 |
 |---|---|
+| [시작하기 · 배포](docs/deployment.md) | Docker Compose · Kubernetes · ArgoCD · kolla-ansible |
 | [아키텍처](docs/architecture.md) | 시스템 구조, VM 생성 플로우, OverlayFS |
-| [배포 가이드](docs/deployment.md) | Docker Compose / Kubernetes / ArgoCD / kolla-ansible |
-| [k3s 클러스터](docs/k3s.md) | k3s 프로비저닝, 노드 구성, CoreOS 전환 계획 |
-| [API 레퍼런스](docs/api-reference.md) | 전체 REST API 엔드포인트 |
+| [k3s 클러스터](docs/k3s.md) | k3s 프로비저닝, 노드 구성, CoreOS 전환 |
+| [API 레퍼런스](docs/api-reference.md) | 전체 REST API |
 | [보안 모델](docs/security.md) | 인증·인가, IDOR 가드, HKDF 암호화, audit log |
-| [릴리스 노트](docs/releases/) | 버전별 변경사항 / [CHANGELOG](CHANGELOG.md) |
-| [kolla-ansible 배포](deploy/kolla/ansible/roles/afterglow/) | OpenStack 환경 내부 kolla-ansible 역할 배포 |
 
----
+릴리스 변경사항은 [CHANGELOG](CHANGELOG.md), 전체 로드맵은 [milestone.md](milestone.md)를 참고하세요.
 
-## 개발 환경
+## 기술 스택
+
+| 구성 | 기술 |
+|---|---|
+| 프론트엔드 | SvelteKit · TypeScript · Tailwind CSS v4 |
+| 백엔드 | FastAPI · openstacksdk (Python) |
+| 캐시 / 세션 | Redis 7 |
+| 배포 | Docker Compose · Kubernetes (Kustomize) · ArgoCD · kolla-ansible |
+
+## 개발
 
 ```bash
-# 백엔드
-cd backend
-uv sync
-uv run uvicorn app.main:app --reload --port 8000
-
-# 프론트엔드
-cd frontend
-npm install
-npm run dev
-
-# 테스트
-npm test              # 전체 (백엔드 + 프론트엔드)
-npm run test:backend  # 백엔드 단위 테스트
-npm run test:parallel # 병렬 실행
+cd backend && uv sync && uv run uvicorn app.main:app --reload   # 백엔드 :8000
+cd frontend && npm install && npm run dev                       # 프론트엔드 :3000
+npm test                                                        # 전체 테스트
 ```
 
----
+## 라이선스
 
-## 로드맵
-
-- [x] Manila NFS share 지원 + OverlayFS 통합 마운트
-- [x] k3s 클러스터 프로비저닝 (soft-delete 이력 보존)
-- [x] 관리자 쿼터 관리 / 이미지 substring 검색
-- [x] GitHub Actions CI/CD (멀티 플랫폼 Docker 빌드)
-- [x] Union Mount 레이어 시스템 v2 (Fork API, seal/unseal, 백그라운드 빌드 워커)
-- [x] Manila Share Snapshot 기반 백업/복원 + 볼륨 transfer
-- [x] kolla-ansible 통합 배포 (`deploy/kolla/ansible/roles/afterglow/`)
-- [x] 모니터링 통합 — Grafana JWT, Prometheus HTTP SD, Monitoring SG 자동화
-- [x] Octavia Ingress per-project 관리 사용자 + App Cred 인증 모델
-- [x] ArgoCD auto-sync — 이미지 push 후 kustomization digest 자동 갱신
-- [ ] Fedora CoreOS 기반 k3s 노드 전환
-- [ ] OverlayFS 상태 모니터링 에이전트
-- [ ] Frontend — NFS 옵션 UI / 라이브러리 카탈로그
-
-전체 로드맵: [milestone.md](milestone.md)
+MIT License — [LICENSE](LICENSE)
