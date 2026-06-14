@@ -77,3 +77,40 @@ def test_development_without_insecure_or_real_key_fails():
                 "SECRET_KEY": "change-me-in-production",
             }
         )
+
+
+def test_production_with_short_nondefault_key_fails_fast():
+    """production + 비기본이지만 32자 미만 약한 키 → ValueError (엔트로피 게이트)."""
+    with pytest.raises(ValueError, match="too short"):
+        _build_settings_with_env(
+            {
+                "AFTERGLOW_ENV": "production",
+                "AFTERGLOW_ALLOW_INSECURE": "",
+                "SECRET_KEY": "short-but-not-default",  # 21 chars < 32
+            }
+        )
+
+
+def test_production_with_strong_key_succeeds():
+    """production + 32자 이상 강한 키 → 부팅 허용."""
+    strong = "a" * 64  # e.g. openssl rand -hex 32
+    settings = _build_settings_with_env(
+        {
+            "AFTERGLOW_ENV": "production",
+            "AFTERGLOW_ALLOW_INSECURE": "",
+            "SECRET_KEY": strong,
+        }
+    )
+    assert settings.secret_key == strong
+
+
+def test_development_with_short_nondefault_key_succeeds():
+    """dev 환경에서는 짧은 비기본 키가 경고만 — 부팅 허용 (워크플로 비파괴)."""
+    settings = _build_settings_with_env(
+        {
+            "AFTERGLOW_ENV": "development",
+            "AFTERGLOW_ALLOW_INSECURE": "",
+            "SECRET_KEY": "dev-short-key",
+        }
+    )
+    assert settings.secret_key == "dev-short-key"

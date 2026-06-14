@@ -651,6 +651,20 @@ class Settings(BaseSettings):
                     "Set a strong random value in config.toml [app] secret_key or SECRET_KEY env var. "
                     "To override this check in development, set AFTERGLOW_ALLOW_INSECURE=1."
                 )
+        elif len(self.secret_key) < 32:
+            # 비기본이어도 약한(짧은) 키는 production 부팅을 거부 — 엔트로피 게이트.
+            # dev 는 기존 워크플로 비파괴를 위해 경고만.
+            if is_production:
+                raise ValueError(
+                    f"SECRET_KEY is too short for AFTERGLOW_ENV=production "
+                    f"(got {len(self.secret_key)} chars, require >= 32). "
+                    "Generate a strong random value, e.g. `openssl rand -hex 32`."
+                )
+            logger.warning(
+                "SECRET_KEY is shorter than 32 characters (%d). Use a strong random value "
+                "(e.g. `openssl rand -hex 32`) before deploying to production.",
+                len(self.secret_key),
+            )
         return self
 
     class Config:
