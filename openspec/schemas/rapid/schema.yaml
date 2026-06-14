@@ -1,0 +1,19 @@
+name: rapid
+version: 1
+description: "Tasks-only: proposal + tasks (no specs/design). docs/ remains
+  source of truth."
+artifacts:
+  - id: proposal
+    generates: proposal.md
+    description: High-level description of the change, its motivation, and scope
+    template: proposal.md
+    requires: []
+  - id: tasks
+    generates: tasks.md
+    description: Implementation checklist with trackable tasks
+    template: tasks.md
+    requires: []
+apply:
+  requires:
+    - tasks
+  tracks: tasks.md
