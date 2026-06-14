@@ -150,6 +150,20 @@ def test_union_manifest_share_export_rejects_injection():
         )
 
 
+@pytest.mark.parametrize(
+    "value",
+    [
+        "10.0.0.1:/vol\n",  # trailing newline — Python `$` gotcha 회귀 방지(\Z 필요)
+        "10.0.0.1:/vol\nfoo",  # 중간 개행 (그 외 문자는 정상)
+        "10.0.0.1:/vol\r",  # trailing CR
+    ],
+)
+def test_union_ro_share_export_rejects_newline_only(value):
+    """char-class에 걸리지 않는 순수 개행 값도 거부되어야 한다(\\Z 앵커 검증)."""
+    with pytest.raises(ValueError):
+        generate_userdata(**_COMMON_ARGS, union_ro_share_export=value)
+
+
 def test_union_exports_accept_valid_cephfs_and_nfs_paths():
     """정상 CephFS/NFS export 경로는 통과한다 (회귀 방지)."""
     encoded = generate_userdata(

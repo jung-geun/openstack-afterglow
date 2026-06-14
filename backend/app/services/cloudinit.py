@@ -44,13 +44,15 @@ _DCGM_EXPORTER_VERSION = "4.2.0-4.1.0"
 
 # cloud-init YAML에 보간되는 값의 형식 검증 — 개행/특수문자로 YAML 구조가
 # 파괴되어 임의 write_files/runcmd가 주입되는 것을 차단한다 (심층 방어).
-_CEPHX_KEY_RE = re.compile(r"^[A-Za-z0-9+/=]{1,128}$")
-_CEPHX_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
-_CEPH_MONITORS_RE = re.compile(r"^[0-9A-Za-z.,:\[\]_-]+$")
+# NOTE: 종단 앵커는 `$`가 아니라 `\Z`를 쓴다. Python에서 `$`는 문자열 끝의 단일
+# 개행(`"foo\n"`) 직전에도 매치되어 trailing-newline 주입을 허용하는 gotcha가 있다.
+_CEPHX_KEY_RE = re.compile(r"^[A-Za-z0-9+/=]{1,128}\Z")
+_CEPHX_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}\Z")
+_CEPH_MONITORS_RE = re.compile(r"^[0-9A-Za-z.,:\[\]_-]+\Z")
 # layer-store export 경로 — LAYER_STORE_RO_EXPORT 등 cloud-init conf 값에 무쿼팅 보간되므로
 # 개행/따옴표/쉘 메타문자를 거부해 YAML 구조 파괴(임의 write_files/runcmd 주입)와 conf 주입을
 # 차단한다. 값은 비신뢰 Manila share export에서 유래(CLAUDE.md §1·§2: API 반환값도 비신뢰).
-_EXPORT_PATH_RE = re.compile(r"^[A-Za-z0-9./:,_\[\]@=-]+$")
+_EXPORT_PATH_RE = re.compile(r"^[A-Za-z0-9./:,_\[\]@=-]+\Z")
 
 
 def _validate_export_path(value: str, label: str) -> None:
