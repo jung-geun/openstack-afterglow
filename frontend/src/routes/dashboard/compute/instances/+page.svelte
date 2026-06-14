@@ -209,7 +209,7 @@
 				refreshing={refreshing}
 				onManualRefresh={forceRefresh}
 			/>
-			<button type="button" onclick={openWizard} class="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+			<button type="button" onclick={() => openWizard()} class="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
 				+ VM 생성
 			</button>
 		{/snippet}
@@ -257,7 +257,7 @@
 		<div class="text-center py-20 text-gray-600">
 			<div class="text-5xl mb-4">☁️</div>
 			<p class="text-lg">인스턴스가 없습니다</p>
-			<button type="button" onclick={openWizard} class="text-blue-400 hover:text-blue-300 text-sm mt-2 inline-block bg-transparent">첫 VM을 생성하세요 →</button>
+			<button type="button" onclick={() => openWizard()} class="text-blue-400 hover:text-blue-300 text-sm mt-2 inline-block bg-transparent">첫 VM을 생성하세요 →</button>
 		</div>
 	{:else}
 		<InstancesTable

@@ -72,8 +72,7 @@
 		<tbody>
 			{#each instances as s (s.id)}
 				<tr
-					class="border-b border-gray-800/50 text-xs transition-colors"
-					class:bg-blue-900/10={selectedIds?.has(s.id)}
+					class="border-b border-gray-800/50 text-xs transition-colors {selectedIds?.has(s.id) ? 'bg-blue-900/10' : ''}"
 				>
 					{#if showCheckboxes}
 						<td class="py-2 pr-2" onclick={(e) => e.stopPropagation()} role="none">

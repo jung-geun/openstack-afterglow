@@ -26,8 +26,7 @@
 </script>
 
 <div
-	class="grid {showCheckboxes ? 'grid-cols-[36px_1fr_0px_0px_1fr_0px_0px_0px] sm:grid-cols-[36px_1.2fr_130px_0px_1.5fr_0px_0px_32px] md:grid-cols-[36px_1.2fr_130px_1.2fr_1.5fr_0px_0px_32px] lg:grid-cols-[36px_1.2fr_130px_1.2fr_1.5fr_80px_80px_32px]' : 'grid-cols-[1fr_0px_0px_1fr_0px_0px_0px] sm:grid-cols-[1.2fr_130px_0px_1.5fr_0px_0px_32px] md:grid-cols-[1.2fr_130px_1.2fr_1.5fr_0px_0px_32px] lg:grid-cols-[1.2fr_130px_1.2fr_1.5fr_80px_80px_32px]'} px-4 py-3 text-[13px] items-center border-b border-gray-800 transition-colors last:border-b-0"
-	class:bg-blue-900/10={isSelected}
+	class="grid {showCheckboxes ? 'grid-cols-[36px_1fr_0px_0px_1fr_0px_0px_0px] sm:grid-cols-[36px_1.2fr_130px_0px_1.5fr_0px_0px_32px] md:grid-cols-[36px_1.2fr_130px_1.2fr_1.5fr_0px_0px_32px] lg:grid-cols-[36px_1.2fr_130px_1.2fr_1.5fr_80px_80px_32px]' : 'grid-cols-[1fr_0px_0px_1fr_0px_0px_0px] sm:grid-cols-[1.2fr_130px_0px_1.5fr_0px_0px_32px] md:grid-cols-[1.2fr_130px_1.2fr_1.5fr_0px_0px_32px] lg:grid-cols-[1.2fr_130px_1.2fr_1.5fr_80px_80px_32px]'} px-4 py-3 text-[13px] items-center border-b border-gray-800 transition-colors last:border-b-0 {isSelected ? 'bg-blue-900/10' : ''}"
 >
 	<!-- 체크박스 -->
 	{#if showCheckboxes}

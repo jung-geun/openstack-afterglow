@@ -96,5 +96,12 @@ export function createAutoRefresh(fn: () => void | Promise<void>, options: AutoR
 		};
 	});
 
-	return Object.assign(state, { setBoost });
+	return {
+		get active() { return state.active; },
+		set active(v: boolean) { state.active = v; },
+		get intervalSeconds() { return state.intervalSeconds; },
+		set intervalSeconds(v: number) { state.intervalSeconds = v; },
+		get intervalOptions() { return state.intervalOptions; },
+		setBoost,
+	};
 }

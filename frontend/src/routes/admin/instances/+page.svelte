@@ -247,7 +247,7 @@
 			{onPrev}
 			{onNext}
 			onRecover={openRecovery}
-			onToggleSelect={(id) => {
+			onToggleSelect={(id: string) => {
 				const next = new Set(selectedIds);
 				if (next.has(id)) next.delete(id); else next.add(id);
 				selectedIds = next;
