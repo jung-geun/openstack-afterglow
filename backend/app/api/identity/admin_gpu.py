@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING
 
@@ -47,6 +48,86 @@ async def list_gpu_hosts(
         )
     except Exception:
         raise HTTPException(status_code=500, detail="GPU 호스트 조회 실패")
+
+
+@router.get("/gpu-hosts/raw", dependencies=[Depends(require_admin)])
+async def list_gpu_hosts_raw(
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """호스트별 Placement CUSTOM_PCI_* 원시 인벤토리 반환 (오디오 필터 미적용).
+
+    GPU 분류 진단 목적: 실제 device_id(예: 2503 vs 2504)와 resource_class를 그대로 노출.
+    `resolved_name`은 현재 PCI_DEVICE_MAP 기준 이름, 없으면 None.
+    `is_audio`로 오디오 장치를 식별할 수 있다.
+    """
+
+    def _collect_raw() -> dict:
+        placement_ep = conn.placement.get_endpoint()
+        rps_resp = conn.session.get(f"{placement_ep}/resource_providers")
+        all_rps = rps_resp.json().get("resource_providers", [])
+        rp_map: dict[str, dict] = {rp["uuid"]: rp for rp in all_rps}
+
+        host_map: dict[str, dict] = {}
+        for rp in all_rps:
+            if rp.get("parent_provider_uuid") is None:
+                host_map[rp["uuid"]] = {
+                    "name": rp["name"],
+                    "uuid": rp["uuid"],
+                    "pci_resources": [],
+                }
+
+        for rp in all_rps:
+            root_uuid = _find_root_uuid(rp["uuid"], rp_map)
+            if root_uuid not in host_map:
+                continue
+            try:
+                inv_resp = conn.session.get(f"{placement_ep}/resource_providers/{rp['uuid']}/inventories")
+                inventories = inv_resp.json().get("inventories", {})
+                pci_rcs = {k: v for k, v in inventories.items() if k.startswith("CUSTOM_PCI_")}
+                if not pci_rcs:
+                    continue
+
+                usages: dict[str, int] = {}
+                try:
+                    usage_resp = conn.session.get(f"{placement_ep}/resource_providers/{rp['uuid']}/usages")
+                    usages = usage_resp.json().get("usages", {})
+                except Exception:
+                    pass
+
+                root_name = host_map[root_uuid]["name"]
+                rp_name = rp["name"]
+                pci_address = rp_name[len(root_name) + 1 :] if rp_name.startswith(root_name + "_") else rp_name
+
+                for rc_name, inv_data in pci_rcs.items():
+                    parts = rc_name.split("_")
+                    vendor_id = parts[2] if len(parts) >= 3 else ""
+                    device_id = parts[3] if len(parts) >= 4 else ""
+                    resolved = _device_name(vendor_id, device_id)
+                    host_map[root_uuid]["pci_resources"].append(
+                        {
+                            "provider_uuid": rp["uuid"],
+                            "provider_name": rp_name,
+                            "pci_address": pci_address,
+                            "resource_class": rc_name,
+                            "vendor_id": vendor_id,
+                            "device_id": device_id,
+                            "vendor_name": VENDOR_MAP.get(vendor_id, vendor_id),
+                            "resolved_name": resolved if resolved != device_id else None,
+                            "total": inv_data.get("total", 0),
+                            "used": usages.get(rc_name, 0),
+                            "is_audio": _is_audio_device(vendor_id, device_id),
+                        }
+                    )
+            except Exception:
+                _logger.warning("RP %s raw 인벤토리 조회 실패", rp.get("uuid"), exc_info=True)
+
+        hosts_with_pci = sorted([h for h in host_map.values() if h["pci_resources"]], key=lambda h: h["name"])
+        return {"hosts": hosts_with_pci}
+
+    try:
+        return await asyncio.to_thread(_collect_raw)
+    except Exception:
+        raise HTTPException(status_code=500, detail="GPU raw 인벤토리 조회 실패")
 
 
 class GpuDeviceRequest(BaseModel):
