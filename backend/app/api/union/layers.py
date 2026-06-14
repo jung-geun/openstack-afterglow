@@ -164,15 +164,16 @@ async def get_dependents(
     session=Depends(get_session),
 ):
     """직접 자식 레이어 목록 조회."""
+    # 부모 레이어 소유권을 먼저 검증 (get_ancestors/get_layer 와 동일 패턴, early return)
+    parent = await union_layers.get_layer(session, layer_id)
+    if parent is None or not _can_access_layer(parent, token_info):
+        raise HTTPException(status_code=404, detail=f"레이어 {layer_id}를 찾을 수 없습니다")
     try:
         result = await union_layers.get_dependents(session, layer_id)
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    # 부모 레이어 소유권 검증 (공유 레이어는 누구나 접근 가능)
-    parent = await union_layers.get_layer(session, layer_id)
-    if parent is not None and not _can_access_layer(parent, token_info):
-        raise HTTPException(status_code=404, detail=f"레이어 {layer_id}를 찾을 수 없습니다")
-    return result
+    # 공유 부모(project_id=None)의 자식이 타 프로젝트 소유일 수 있으므로 접근 가능한 자식만 반환
+    return [child for child in result if _can_access_layer(child, token_info)]
 
 
 @router.get("/layers/{layer_id}/ancestors", response_model=AncestorChain)
