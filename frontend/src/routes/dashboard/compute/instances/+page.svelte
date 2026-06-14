@@ -15,6 +15,7 @@
 	import { openWizard } from '$lib/stores/wizard';
 	import InstancesTable from '$lib/components/instance/list/InstancesTable.svelte';
 	import { toast } from '$lib/stores/toast';
+	import { isTransitional } from '$lib/utils/instanceStatus';
 
 	let instances = $state<Instance[]>([]);
 	let loading = $state(true);
@@ -22,6 +23,8 @@
 	let error = $state('');
 	let selectedInstanceId = $state<string | null>(null);
 	let underutilized = $state<Record<string, boolean>>({});
+	let selectedIds = $state(new Set<string>());
+	let bulkActioning = $state(false);
 
 	const { swrGet, swrSet } = createSwr(() => $auth.projectId);
 
@@ -77,6 +80,65 @@
 		intervalOptions: [10, 15, 30, 60],
 	});
 
+	// 전이 중 인스턴스가 있으면 4초 가속, 모두 안정되면 해제
+	$effect(() => {
+		const hasTransitional = instances.some(i => isTransitional(i.status));
+		ar.setBoost(hasTransitional ? 4 : null);
+	});
+
+	async function startInstance(id: string) {
+		try {
+			await apiMut('인스턴스 시작', () => api.post(`/api/instances/${id}/start`, {}, $auth.token ?? undefined, $auth.projectId ?? undefined));
+			ar.setBoost(4);
+			await fetchInstances();
+		} catch { /* error toast shown by apiMut */ }
+	}
+
+	async function stopInstance(id: string) {
+		if (!await confirmDialog('인스턴스를 종료하시겠습니까?')) return;
+		try {
+			await apiMut('인스턴스 종료', () => api.post(`/api/instances/${id}/stop`, {}, $auth.token ?? undefined, $auth.projectId ?? undefined));
+			ar.setBoost(4);
+			await fetchInstances();
+		} catch { /* error toast shown by apiMut */ }
+	}
+
+	async function bulkAction(action: 'start' | 'stop' | 'delete') {
+		const ids = [...selectedIds];
+		if (ids.length === 0) return;
+
+		const labels: Record<string, string> = { start: '시작', stop: '종료', delete: '삭제' };
+		const verb = labels[action];
+
+		if (action === 'stop' || action === 'delete') {
+			const msg = action === 'delete'
+				? `선택한 인스턴스 ${ids.length}개를 삭제하시겠습니까?\nManila share와 볼륨도 함께 삭제됩니다.`
+				: `선택한 인스턴스 ${ids.length}개를 종료하시겠습니까?`;
+			if (!await confirmDialog(msg)) return;
+		}
+
+		bulkActioning = true;
+		try {
+			const res = await api.post<{ results: { id: string; ok: boolean; error?: string }[] }>(
+				'/api/instances/bulk-action',
+				{ action, instance_ids: ids },
+				$auth.token ?? undefined,
+				$auth.projectId ?? undefined,
+			);
+			const failed = res.results.filter(r => !r.ok);
+			const succeeded = res.results.filter(r => r.ok).length;
+			if (succeeded > 0) toast.success(`${succeeded}개 ${verb} 요청 완료`);
+			if (failed.length > 0) toast.error(`${failed.length}개 처리 실패`);
+			selectedIds = new Set();
+			ar.setBoost(4);
+			await fetchInstances();
+		} catch {
+			toast.error(`일괄 ${verb} 요청 실패`);
+		} finally {
+			bulkActioning = false;
+		}
+	}
+
 	async function shelveInstance(id: string) {
 		if (!await confirmDialog('인스턴스를 보관하시겠습니까? (SHELVED_OFFLOADED 상태로 전환됩니다)')) return;
 		try {
@@ -110,11 +172,13 @@
 		}
 	}
 
-	async function handleAction(kind: 'console' | 'shelve' | 'unshelve' | 'delete', instance: Instance) {
+	async function handleAction(kind: 'console' | 'shelve' | 'unshelve' | 'delete' | 'start' | 'stop', instance: Instance) {
 		if (kind === 'console') await openConsole(instance.id);
 		else if (kind === 'shelve') await shelveInstance(instance.id);
 		else if (kind === 'unshelve') await unshelveInstance(instance.id);
 		else if (kind === 'delete') await deleteInstance(instance.id, instance.name);
+		else if (kind === 'start') await startInstance(instance.id);
+		else if (kind === 'stop') await stopInstance(instance.id);
 	}
 
 	function openInstancePanel(id: string) {
@@ -155,6 +219,38 @@
 		<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>
 	{/if}
 
+	<!-- 일괄 액션 바 -->
+	{#if selectedIds.size > 0}
+		<div class="flex items-center gap-3 mb-3 px-4 py-2.5 bg-blue-950/60 border border-blue-800/60 rounded-xl">
+			<span class="text-blue-300 text-sm font-medium">{selectedIds.size}개 선택됨</span>
+			<div class="flex gap-2 ml-auto">
+				<button
+					type="button"
+					disabled={bulkActioning}
+					onclick={() => bulkAction('start')}
+					class="px-3 py-1.5 text-xs font-medium rounded-lg bg-green-700/80 hover:bg-green-600/80 text-white disabled:opacity-50 transition-colors"
+				>시작</button>
+				<button
+					type="button"
+					disabled={bulkActioning}
+					onclick={() => bulkAction('stop')}
+					class="px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-700/80 hover:bg-amber-600/80 text-white disabled:opacity-50 transition-colors"
+				>종료</button>
+				<button
+					type="button"
+					disabled={bulkActioning}
+					onclick={() => bulkAction('delete')}
+					class="px-3 py-1.5 text-xs font-medium rounded-lg bg-red-700/80 hover:bg-red-600/80 text-white disabled:opacity-50 transition-colors"
+				>삭제</button>
+				<button
+					type="button"
+					onclick={() => { selectedIds = new Set(); }}
+					class="px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-700/80 hover:bg-gray-600/80 text-gray-300 transition-colors"
+				>취소</button>
+			</div>
+		</div>
+	{/if}
+
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={5} />
 	{:else if instances.length === 0}
@@ -164,7 +260,25 @@
 			<button type="button" onclick={openWizard} class="text-blue-400 hover:text-blue-300 text-sm mt-2 inline-block bg-transparent">첫 VM을 생성하세요 →</button>
 		</div>
 	{:else}
-		<InstancesTable {instances} {underutilized} onSelect={openInstancePanel} onAction={handleAction} />
+		<InstancesTable
+			{instances}
+			{underutilized}
+			{selectedIds}
+			onSelect={openInstancePanel}
+			onAction={handleAction}
+			onToggleSelect={(id) => {
+				const next = new Set(selectedIds);
+				if (next.has(id)) next.delete(id); else next.add(id);
+				selectedIds = next;
+			}}
+			onToggleAll={() => {
+				if (instances.every(i => selectedIds.has(i.id))) {
+					selectedIds = new Set();
+				} else {
+					selectedIds = new Set(instances.map(i => i.id));
+				}
+			}}
+		/>
 	{/if}
 </div>
 

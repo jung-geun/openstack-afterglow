@@ -3,6 +3,7 @@ import { getContext, setContext } from 'svelte';
 import { auth } from '$lib/stores/auth';
 import { api, ApiError } from '$lib/api/client';
 import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
+import { isTransitional } from '$lib/utils/instanceStatus';
 import { confirmDialog } from '$lib/stores/confirm.svelte';
 import { toast } from '$lib/stores/toast';
 import type { Instance } from '$lib/types/compute';
@@ -103,6 +104,11 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 		defaultActive: false,
 		defaultInterval: 15,
 		intervalOptions: [10, 15, 30, 60],
+	});
+
+	// 인스턴스 상태가 전이 중이면 상세 폴링을 4초로 가속, 안정되면 해제
+	$effect(() => {
+		detailPollAr.setBoost(isTransitional(instance?.status) ? 4 : null);
 	});
 
 	// Token/projectId helpers (read at call time — not reactive)

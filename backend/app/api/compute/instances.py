@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     import openstack
@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from openstack.exceptions import ConflictException, HttpException
+from pydantic import BaseModel, field_validator
 
 from app.api.common.activity_recorder import rec
 from app.api.common.owner_check import assert_instance_owner
@@ -58,6 +59,22 @@ from app.services.cache import invalidation as cache_invalidation
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+class BulkActionRequest(BaseModel):
+    """일괄 인스턴스 액션 요청 모델."""
+
+    action: Literal["start", "stop", "delete", "reboot"]
+    instance_ids: list[str]
+
+    @field_validator("instance_ids")
+    @classmethod
+    def validate_count(cls, v: list[str]) -> list[str]:
+        if not v:
+            raise ValueError("최소 1개 이상 필요합니다")
+        if len(v) > 50:
+            raise ValueError("최대 50개 인스턴스만 처리 가능합니다")
+        return v
 
 
 def _resolve_names(servers: list, conn) -> list[dict]:
@@ -757,6 +774,61 @@ async def create_instance_async(
     )
 
 
+@router.post("/bulk-action", status_code=200)
+@limiter.limit("10/minute")
+async def bulk_instance_action(
+    request: Request,
+    body: BulkActionRequest,
+    conn=Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    """인스턴스 일괄 액션(start/stop/delete/reboot).
+
+    - 각 인스턴스마다 소유권 검증(IDOR 방지) 후 처리.
+    - 부분 성공 허용: per-id 결과 배열 반환.
+    - 오류는 "처리 실패"로만 노출(404/403 구분 없음 — IDOR oracle 방지).
+    """
+    pid = conn._afterglow_project_id
+    nova_fn_map = {
+        "start": nova.start_server,
+        "stop": nova.stop_server,
+        "reboot": nova.reboot_server,
+    }
+
+    results: list[dict] = []
+    for instance_id in body.instance_ids:
+        # 소유권 검증 — 실패 시 generic error로 응답(IDOR oracle 방지)
+        try:
+            server = await asyncio.to_thread(nova.get_server, conn, instance_id)
+            assert_instance_owner(server, conn, token_info)
+        except Exception:
+            results.append({"id": instance_id, "ok": False, "error": "처리 실패"})
+            continue
+
+        try:
+            if body.action == "delete":
+                await _bulk_delete_one(conn, token_info, server, instance_id, pid)
+            else:
+                nova_fn = nova_fn_map[body.action]
+                await asyncio.to_thread(nova_fn, conn, instance_id)
+                await invalidate(f"afterglow:nova:{pid}:instance:{instance_id}")
+                await invalidate(f"afterglow:nova:{pid}:instances")
+                await cache_invalidation.invalidate_mutation_count("nova", pid)
+                await rec(
+                    token_info,
+                    conn,
+                    resource_type="instance",
+                    action=f"instance.{body.action}",
+                    status="success",
+                    resource_id=instance_id,
+                )
+            results.append({"id": instance_id, "ok": True})
+        except Exception:
+            results.append({"id": instance_id, "ok": False, "error": "처리 실패"})
+
+    return {"results": results}
+
+
 @router.delete("/{instance_id}", status_code=204)
 @limiter.limit("5/minute")
 async def delete_instance(
@@ -1241,6 +1313,99 @@ async def update_port_security_groups(
 # ---------------------------------------------------------------------------
 # 내부 헬퍼
 # ---------------------------------------------------------------------------
+
+
+async def _bulk_delete_one(
+    conn,
+    token_info: dict,
+    server,
+    instance_id: str,
+    pid: str,
+) -> None:
+    """bulk-action DELETE용 인스턴스 삭제 (단건 delete_instance와 동일한 정리 수행)."""
+    upper_volume_id = server.union_upper_volume_id
+    file_storage_ids = server.union_share_ids
+    strategy = server.union_strategy
+    health_id = (server.metadata or {}).get("union_health_id", "")
+
+    if health_id:
+        try:
+            from app.services import instance_health as _ih  # noqa: PLC0415
+
+            await _ih.revoke_report_token_by_instance(health_id)
+        except Exception:
+            pass
+
+    await asyncio.to_thread(nova.delete_server, conn, instance_id)
+    await invalidate(f"afterglow:nova:{pid}:instances")
+    await invalidate(f"afterglow:nova:{pid}:instance:{instance_id}")
+    await invalidate(f"afterglow:neutron:{pid}:port_mac_map")
+    await cache_invalidation.invalidate_mutation_count("nova", pid)
+    await rec(
+        token_info,
+        conn,
+        resource_type="instance",
+        action="instance.delete",
+        status="success",
+        resource_id=instance_id,
+        resource_name=server.name,
+    )
+
+    # Strategy B: 전용 파일 스토리지 삭제 (best-effort)
+    if strategy == "dynamic":
+        for fsi in file_storage_ids:
+            if fsi:
+                try:
+                    await asyncio.to_thread(manila.delete_file_storage, conn, fsi)
+                except Exception:
+                    pass
+
+    # upper 볼륨 삭제 (best-effort)
+    if upper_volume_id:
+        try:
+            await asyncio.to_thread(cinder.delete_volume, conn, upper_volume_id)
+        except Exception:
+            pass
+
+    # Strategy A(prebuilt): CephX access rule 정리 (best-effort)
+    if strategy != "dynamic":
+        try:
+            svc_conn = await asyncio.to_thread(keystone.get_service_project_connection)
+            for fsi in file_storage_ids:
+                if not fsi:
+                    continue
+                try:
+                    rules = await asyncio.to_thread(manila.list_access_rules, svc_conn, fsi)
+                    for rule in rules:
+                        if rule.get("access_type") == "cephx" and rule.get("access_to", "").startswith(
+                            f"union-ro-{server.name}-"
+                        ):
+                            await asyncio.to_thread(manila.revoke_access_rule, svc_conn, fsi, rule["id"])
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    # data mount CephX access rule 정리 (best-effort)
+    _data_meta = (server.metadata or {}).get("union_data_share_ids", "")
+    if _data_meta and _data_meta != "none":
+        for _fsi in [s for s in _data_meta.split(",") if s]:
+            try:
+                rules = await asyncio.to_thread(manila.list_access_rules, conn, _fsi)
+                for r in rules:
+                    at = r.get("access_to", "")
+                    if r.get("access_type") == "cephx" and (
+                        at.startswith(f"data-ro-{server.name}-") or at.startswith(f"data-rw-{server.name}-")
+                    ):
+                        await asyncio.to_thread(manila.revoke_access_rule, conn, _fsi, r["id"])
+            except Exception:
+                pass
+
+    # Floating IP 정리 (best-effort)
+    try:
+        await asyncio.to_thread(neutron.cleanup_instance_fips, conn, instance_id)
+    except Exception:
+        pass
 
 
 async def _simple_action(
