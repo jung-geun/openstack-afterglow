@@ -2,6 +2,8 @@
 
 import base64
 
+import pytest
+
 from app.services.cloudinit import generate_userdata
 
 _COMMON_ARGS = dict(
@@ -122,6 +124,42 @@ def test_union_ro_share_export_injected_to_write_files():
     yaml_str = _decode_userdata(encoded)
     assert "LAYER_STORE_RO_EXPORT" in yaml_str
     assert "10.0.0.1:6789:/volumes/_nogroup/abc123" in yaml_str
+
+
+@pytest.mark.parametrize(
+    "malicious",
+    [
+        '10.0.0.1:/vol"\nruncmd:\n  - rm -rf /',  # 개행 → YAML 구조 주입
+        '10.0.0.1:/vol"; touch /tmp/pwned; echo "',  # 따옴표/세미콜론 → conf 주입
+        "10.0.0.1:/vol$(id)",  # 명령 치환
+        "10.0.0.1:/vol`id`",  # 백틱 치환
+    ],
+)
+def test_union_ro_share_export_rejects_injection(malicious):
+    """union_ro_share_export에 개행/따옴표/쉘 메타문자가 있으면 ValueError로 거부."""
+    with pytest.raises(ValueError):
+        generate_userdata(**_COMMON_ARGS, union_ro_share_export=malicious)
+
+
+def test_union_manifest_share_export_rejects_injection():
+    """union_manifest_share_export도 동일하게 인젝션 값을 거부."""
+    with pytest.raises(ValueError):
+        generate_userdata(
+            **_COMMON_ARGS,
+            union_manifest_share_export='x"\nwrite_files:\n  - path: /tmp/x',
+        )
+
+
+def test_union_exports_accept_valid_cephfs_and_nfs_paths():
+    """정상 CephFS/NFS export 경로는 통과한다 (회귀 방지)."""
+    encoded = generate_userdata(
+        **_COMMON_ARGS,
+        union_ro_share_export="mon1,mon2,mon3:6789:/volumes/_nogroup/abc-123",
+        union_manifest_share_export="10.0.0.5:/exports/manifest_store",
+    )
+    yaml_str = _decode_userdata(encoded)
+    assert "LAYER_STORE_RO_EXPORT" in yaml_str
+    assert "MANIFEST_STORE_EXPORT" in yaml_str
 
 
 def test_userdata_without_gpu_skips_dcgm():

@@ -47,6 +47,16 @@ _DCGM_EXPORTER_VERSION = "4.2.0-4.1.0"
 _CEPHX_KEY_RE = re.compile(r"^[A-Za-z0-9+/=]{1,128}$")
 _CEPHX_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 _CEPH_MONITORS_RE = re.compile(r"^[0-9A-Za-z.,:\[\]_-]+$")
+# layer-store export 경로 — LAYER_STORE_RO_EXPORT 등 cloud-init conf 값에 무쿼팅 보간되므로
+# 개행/따옴표/쉘 메타문자를 거부해 YAML 구조 파괴(임의 write_files/runcmd 주입)와 conf 주입을
+# 차단한다. 값은 비신뢰 Manila share export에서 유래(CLAUDE.md §1·§2: API 반환값도 비신뢰).
+_EXPORT_PATH_RE = re.compile(r"^[A-Za-z0-9./:,_\[\]@=-]+$")
+
+
+def _validate_export_path(value: str, label: str) -> None:
+    """layer-store export 경로 형식 검증(화이트리스트). 불일치 시 ValueError."""
+    if value and not _EXPORT_PATH_RE.match(value):
+        raise ValueError(f"유효하지 않은 {label} 형식: {value!r}")
 
 
 def _validate_cloudinit_inputs(file_storages: list[dict], ceph_monitors: str) -> None:
@@ -95,6 +105,8 @@ def generate_userdata(
         report_token: 헬스 리포트 토큰 (헬스 리포트용)
     """
     _validate_cloudinit_inputs(file_storages, ceph_monitors)
+    _validate_export_path(union_ro_share_export or "", "union_ro_share_export")
+    _validate_export_path(union_manifest_share_export or "", "union_manifest_share_export")
     _data_mounts = data_mounts or []
     for dm in _data_mounts:
         if dm.get("share_proto", "CEPHFS") == "CEPHFS":
