@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { auth } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
+	import { toast } from '$lib/stores/toast';
 
 	interface Flavor {
 		id: string;
@@ -28,6 +29,7 @@
 	let accessList = $state<FlavorAccess[]>([]);
 	let accessLoading = $state(false);
 	let accessError = $state('');
+	let addingId = $state<string | null>(null);
 	let projectSearch = $state('');
 	let allProjects = $state<{ id: string; name: string }[]>([]);
 
@@ -76,8 +78,9 @@
 	}
 
 	async function addAccess(pid: string) {
-		if (!pid) return;
+		if (!pid || addingId === pid) return;
 		accessError = '';
+		addingId = pid;
 		try {
 			await api.post(
 				`/api/admin/flavors/${flavor.id}/access`,
@@ -86,9 +89,14 @@
 				projectId,
 			);
 			projectSearch = '';
+			toast.success('접근 권한이 추가되었습니다');
 			await loadAccess();
 		} catch (e) {
-			accessError = e instanceof ApiError ? e.message : '접근 권한 추가 실패';
+			const msg = e instanceof ApiError ? e.message : '접근 권한 추가 실패';
+			accessError = msg;
+			toast.error(msg);
+		} finally {
+			addingId = null;
 		}
 	}
 
@@ -134,8 +142,19 @@
 							</div>
 							<button
 								onclick={() => addAccess(p.id)}
-								class="text-xs px-2 py-0.5 bg-blue-600 hover:bg-blue-500 text-white rounded ml-2"
-							>추가</button>
+								disabled={addingId === p.id}
+								class="text-xs px-2 py-0.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded ml-2 flex items-center gap-1"
+							>
+								{#if addingId === p.id}
+									<svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+										<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+										<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
+									</svg>
+									추가 중…
+								{:else}
+									추가
+								{/if}
+							</button>
 						</div>
 					{/each}
 				</div>
