@@ -27,14 +27,11 @@ async def test_get_dashboard_summary_unauthenticated():
 @pytest.mark.asyncio
 async def test_get_dashboard_summary_success(client):
     empty_list: list = []
-    empty_dict: dict = {"limit": 0, "in_use": 0, "reserved": 0}
     with patch(
         "app.api.common.dashboard.cached_call",
         new=AsyncMock(
             side_effect=[
                 empty_list,  # servers
-                empty_dict,  # compute_limits
-                empty_dict,  # volume_limits
                 empty_list,  # all_flavors
             ]
         ),
@@ -43,7 +40,9 @@ async def test_get_dashboard_summary_success(client):
     assert resp.status_code == 200
     data = resp.json()
     assert "instances" in data
-    assert "compute" in data
+    assert "gpu_used" in data
+    assert "compute" not in data
+    assert "storage" not in data
 
 
 @pytest.mark.asyncio

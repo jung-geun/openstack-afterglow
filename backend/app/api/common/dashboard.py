@@ -107,25 +107,11 @@ async def get_dashboard_summary(
     project_id = conn._afterglow_project_id
 
     try:
-        servers, compute_limits, volume_limits, all_flavors = await asyncio.gather(
+        servers, all_flavors = await asyncio.gather(
             cached_call(
                 f"afterglow:nova:{project_id}:servers",
                 ttl_fast(),
                 lambda: _list_servers_as_dicts(conn),
-                enabled=cm.enabled,
-                refresh=cm.refresh,
-            ),
-            cached_call(
-                f"afterglow:nova:{project_id}:limits",
-                ttl_normal(),
-                lambda: nova.get_project_limits(conn),
-                enabled=cm.enabled,
-                refresh=cm.refresh,
-            ),
-            cached_call(
-                f"afterglow:cinder:{project_id}:limits",
-                ttl_normal(),
-                lambda: cinder.get_volume_limits(conn),
                 enabled=cm.enabled,
                 refresh=cm.refresh,
             ),
@@ -159,8 +145,6 @@ async def get_dashboard_summary(
             "shutoff": sum(1 for s in servers if s["status"] == "SHUTOFF"),
             "error": sum(1 for s in servers if s["status"] == "ERROR"),
         },
-        "compute": compute_limits,
-        "storage": volume_limits,
         "gpu_used": gpu_used,
     }
 

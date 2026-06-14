@@ -26,8 +26,6 @@ export interface Instance {
 
 export interface DashboardSummary {
   instances: { total: number; active: number; shutoff: number; error: number };
-  compute: { instances_used: number; instances_limit: number; vcpus_used: number; vcpus_limit: number; ram_used_mb: number; ram_limit_mb: number };
-  storage: { volumes_used: number; volumes_limit: number; gigabytes_used: number; gigabytes_limit: number };
   gpu_used: number;
 }
 

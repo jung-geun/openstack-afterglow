@@ -222,17 +222,12 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 					gigabytes: r.volume?.gigabytes,
 				};
 			} else if (!opts.adminMode()) {
-				const r = await api.get<{
-					compute?: { instances_used?: number; instances_limit?: number; vcpus_used?: number; vcpus_limit?: number; ram_used_mb?: number; ram_limit_mb?: number };
-					storage?: { gigabytes_used?: number; gigabytes_limit?: number };
-				}>('/api/dashboard/summary', token, projectId);
-				const c = r.compute ?? {};
-				const st = r.storage ?? {};
+				const r = await api.get<{ compute?: any; storage?: any }>('/api/dashboard/quotas', token, projectId);
 				flavorQuota = {
-					instances: { limit: c.instances_limit ?? -1, in_use: c.instances_used ?? 0 },
-					cores: { limit: c.vcpus_limit ?? -1, in_use: c.vcpus_used ?? 0 },
-					ram: { limit: c.ram_limit_mb ?? -1, in_use: c.ram_used_mb ?? 0 },
-					gigabytes: { limit: st.gigabytes_limit ?? -1, in_use: st.gigabytes_used ?? 0 },
+					instances: r.compute?.instances,
+					cores: r.compute?.cores,
+					ram: r.compute?.ram,
+					gigabytes: r.storage?.gigabytes,
 				};
 			}
 		} catch {
