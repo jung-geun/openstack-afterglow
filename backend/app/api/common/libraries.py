@@ -27,7 +27,7 @@ async def list_libraries(
     non-admin은 visibility=public 라이브러리만 반환.
     prebuilt share는 service 프로젝트 소유 public share이므로 service conn + include_public=True로 조회한다.
     """
-    is_admin = token_info.get("is_admin", False)
+    is_admin = token_info.get("is_system_admin", False)
     catalog = lib_svc.get_all()
 
     # 사전 빌드된 파일 스토리지 목록에서 library_name 매핑
