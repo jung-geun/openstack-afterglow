@@ -41,7 +41,7 @@ Kubernetes · ArgoCD · kolla-ansible 배포와 상세 설정은 아래 문서�
 | [API 레퍼런스](docs/api-reference.md) | 전체 REST API |
 | [보안 모델](docs/security.md) | 인증·인가, IDOR 가드, HKDF 암호화, audit log |
 
-릴리스 변경사항은 [CHANGELOG](CHANGELOG.md), 전체 로드맵은 [milestone.md](milestone.md)를 참고하세요.
+릴리스 변경사항은 [CHANGELOG](CHANGELOG.md), 작업 기록·로드맵은 [`openspec/`](openspec/)(`openspec list`, 구 [milestone.md](milestone.md)에서 이관)를 참고하세요.
 
 ## 기술 스택
 

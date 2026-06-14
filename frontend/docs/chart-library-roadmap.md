@@ -181,4 +181,4 @@ Phase 54 전체 완료 조건:
 - [ ] `npm run check` 오류 0
 - [ ] dark mode + light mode 시각 동등성 확인 (dev 서버 + `/browse`)
 - [ ] 번들 크기 증가 50KB gzip 미만 유지
-- [ ] `milestone.md` Phase 54 항목 `[x]` 완료
+- [ ] 작업 기록 갱신 — `openspec/changes/archive/2026-05-18-54-phase/` (구 milestone.md Phase 54)

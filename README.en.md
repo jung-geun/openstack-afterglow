@@ -41,7 +41,7 @@ See the documentation below for Kubernetes / ArgoCD / kolla-ansible deployment a
 | [API reference](docs/api-reference.md) _(Korean)_ | Complete REST API |
 | [Security model](docs/security.md) _(Korean)_ | Authn/authz, IDOR guards, HKDF crypto, audit log |
 
-Release changes: [CHANGELOG](CHANGELOG.md) · full roadmap: [milestone.md](milestone.md) _(Korean)_.
+Release changes: [CHANGELOG](CHANGELOG.md) · work log: [`openspec/`](openspec/) (`openspec list`, migrated from milestone.md).
 
 ## Tech Stack
 
