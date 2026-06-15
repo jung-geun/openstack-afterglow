@@ -238,7 +238,7 @@
 				{/if}
 			</div>
 
-			<QuotaUsageCard {summary} {quotas} />
+			<QuotaUsageCard {quotas} />
 		</div>
 	</div>
 </div>

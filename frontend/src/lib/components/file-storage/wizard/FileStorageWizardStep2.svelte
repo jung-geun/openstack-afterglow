@@ -5,9 +5,12 @@
 </script>
 
 <h2 class="text-base font-semibold text-white mb-1">네트워크 설정</h2>
-<p class="text-xs text-gray-500 mb-4">
-	{s.fsForm.share_proto === 'NFS' ? 'NFS 프로토콜은 Share Network 선택이 필수입니다.' : 'CephFS는 Share Network 없이도 기본값으로 동작합니다.'}
-</p>
+<div class="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-blue-950/30 border border-blue-900/40 text-blue-300 text-xs mb-4">
+	<svg class="w-3.5 h-3.5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+		<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+	</svg>
+	<span>현재 환경(DHSS=False 드라이버)에서는 Share Network 없이 파일 스토리지가 생성됩니다. Share Network 선택은 선택 사항이며 실제로 사용되지 않습니다.</span>
+</div>
 <div class="space-y-4">
 	<div>
 		{#if s.fsForm.share_proto === 'CEPHFS'}

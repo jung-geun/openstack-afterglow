@@ -44,9 +44,21 @@ _DCGM_EXPORTER_VERSION = "4.2.0-4.1.0"
 
 # cloud-init YAML에 보간되는 값의 형식 검증 — 개행/특수문자로 YAML 구조가
 # 파괴되어 임의 write_files/runcmd가 주입되는 것을 차단한다 (심층 방어).
-_CEPHX_KEY_RE = re.compile(r"^[A-Za-z0-9+/=]{1,128}$")
-_CEPHX_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
-_CEPH_MONITORS_RE = re.compile(r"^[0-9A-Za-z.,:\[\]_-]+$")
+# NOTE: 종단 앵커는 `$`가 아니라 `\Z`를 쓴다. Python에서 `$`는 문자열 끝의 단일
+# 개행(`"foo\n"`) 직전에도 매치되어 trailing-newline 주입을 허용하는 gotcha가 있다.
+_CEPHX_KEY_RE = re.compile(r"^[A-Za-z0-9+/=]{1,128}\Z")
+_CEPHX_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}\Z")
+_CEPH_MONITORS_RE = re.compile(r"^[0-9A-Za-z.,:\[\]_-]+\Z")
+# layer-store export 경로 — LAYER_STORE_RO_EXPORT 등 cloud-init conf 값에 무쿼팅 보간되므로
+# 개행/따옴표/쉘 메타문자를 거부해 YAML 구조 파괴(임의 write_files/runcmd 주입)와 conf 주입을
+# 차단한다. 값은 비신뢰 Manila share export에서 유래(CLAUDE.md §1·§2: API 반환값도 비신뢰).
+_EXPORT_PATH_RE = re.compile(r"^[A-Za-z0-9./:,_\[\]@=-]+\Z")
+
+
+def _validate_export_path(value: str, label: str) -> None:
+    """layer-store export 경로 형식 검증(화이트리스트). 불일치 시 ValueError."""
+    if value and not _EXPORT_PATH_RE.match(value):
+        raise ValueError(f"유효하지 않은 {label} 형식: {value!r}")
 
 
 def _validate_cloudinit_inputs(file_storages: list[dict], ceph_monitors: str) -> None:
@@ -77,6 +89,7 @@ def generate_userdata(
     union_ro_share_export: str | None = None,
     union_manifest_share_export: str | None = None,
     union_cephx_rotate_hours: int = 0,
+    data_mounts: list[dict] | None = None,
 ) -> str:
     """
     cloud-init userdata 문자열(YAML) 생성.
@@ -94,6 +107,17 @@ def generate_userdata(
         report_token: 헬스 리포트 토큰 (헬스 리포트용)
     """
     _validate_cloudinit_inputs(file_storages, ceph_monitors)
+    _validate_export_path(union_ro_share_export or "", "union_ro_share_export")
+    _validate_export_path(union_manifest_share_export or "", "union_manifest_share_export")
+    _data_mounts = data_mounts or []
+    for dm in _data_mounts:
+        if dm.get("share_proto", "CEPHFS") == "CEPHFS":
+            cephx_id = dm.get("cephx_id", "")
+            cephx_key = dm.get("cephx_key", "")
+            if cephx_id and not _CEPHX_ID_RE.match(cephx_id):
+                raise ValueError(f"data_mounts: 유효하지 않은 cephx_id 형식: {cephx_id!r}")
+            if cephx_key and not _CEPHX_KEY_RE.match(cephx_key):
+                raise ValueError("data_mounts: 유효하지 않은 cephx_key 형식 (base64 문자만 허용)")
 
     resolved_libs = lib_svc.resolve_with_deps(libraries)
 
@@ -126,9 +150,13 @@ def generate_userdata(
             gpu_available=gpu_available,
         )
 
-    # CephFS 관련 정보가 필요한지 확인
-    has_cephfs = any(fs.get("share_proto", "CEPHFS") == "CEPHFS" for fs in file_storages)
-    has_nfs = any(fs.get("share_proto", "CEPHFS") == "NFS" for fs in file_storages)
+    # CephFS 관련 정보가 필요한지 확인 (data_mounts 포함)
+    has_cephfs = any(fs.get("share_proto", "CEPHFS") == "CEPHFS" for fs in file_storages) or any(
+        dm.get("share_proto") == "CEPHFS" for dm in _data_mounts
+    )
+    has_nfs = any(fs.get("share_proto", "CEPHFS") == "NFS" for fs in file_storages) or any(
+        dm.get("share_proto") == "NFS" for dm in _data_mounts
+    )
 
     health_check_script = ""
     if report_url and instance_id and report_token:
@@ -143,6 +171,12 @@ def generate_userdata(
     if union_cephx_rotate_hours > 0:
         rotate_key_script = _jinja.get_template("envmgr_rotate_key.sh.j2").render(
             union_cephx_rotate_hours=union_cephx_rotate_hours,
+        )
+
+    data_mounts_script = ""
+    if _data_mounts:
+        data_mounts_script = _jinja.get_template("data_mounts.sh.j2").render(
+            data_mounts=_data_mounts,
         )
 
     yaml_str = _jinja.get_template("cloudinit_base.yaml.j2").render(
@@ -164,6 +198,8 @@ def generate_userdata(
         union_cephx_rotate_hours=union_cephx_rotate_hours,
         rotate_key_script=rotate_key_script,
         dcgm_exporter_version=_DCGM_EXPORTER_VERSION,
+        data_mounts=_data_mounts,
+        data_mounts_script=data_mounts_script,
     )
 
     # Nova는 userdata를 base64로 인코딩해서 전달

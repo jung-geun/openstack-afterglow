@@ -85,7 +85,7 @@ describe('MetricsPanel', () => {
 		expect(errs.length).toBeGreaterThan(0);
 	});
 
-	it('range toggle buttons are rendered', async () => {
+	it('range toggle buttons are rendered including 7d', async () => {
 		mockAllMetrics();
 
 		render(MetricsPanel, { props: { instanceId: 'inst-1', isGpu: false } });
@@ -94,6 +94,34 @@ describe('MetricsPanel', () => {
 		expect(screen.getByText('1시간')).toBeTruthy();
 		expect(screen.getByText('6시간')).toBeTruthy();
 		expect(screen.getByText('24시간')).toBeTruthy();
+		expect(screen.getByText('7일')).toBeTruthy();
+	});
+
+	it('shows min/avg/max stats row when summary data is available', async () => {
+		mockGet.mockImplementation((url: string) => {
+			if (url.includes('metrics-summary')) {
+				return Promise.resolve({
+					prometheus_available: true,
+					stats: {
+						cpu: { min: 1.0, avg: 4.5, max: 31.0 },
+						memory: { min: 10.0, avg: 15.0, max: 22.0 },
+						disk_read: { min: 0, avg: 1024, max: 5000 },
+						disk_write: { min: 0, avg: 512, max: 3000 },
+					},
+					recommendation: null,
+				});
+			}
+			return Promise.resolve(makeBatchResponse(FAKE_SERIES));
+		});
+
+		render(MetricsPanel, { props: { instanceId: 'inst-1', isGpu: false } });
+
+		// 차트 카드 하단 통계 행의 "최소" 레이블이 렌더되어야 함
+		const minLabels = await screen.findAllByText(/최소/);
+		expect(minLabels.length).toBeGreaterThan(0);
+
+		const avgLabels = await screen.findAllByText(/평균/);
+		expect(avgLabels.length).toBeGreaterThan(0);
 	});
 
 	it('clicking a range button triggers reload', async () => {

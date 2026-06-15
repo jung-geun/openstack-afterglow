@@ -100,7 +100,8 @@ frontend/             SvelteKit + TypeScript + Tailwind CSS 4
     api/              API 클라이언트
 
 union.md              Union Mount 레이어 시스템 v2 설계 문서 (참조 필수)
-milestone.md          기능별 구현 현황 추적
+openspec/             작업 기록 (OpenSpec) — changes/<slug>/ 진행 중, changes/archive/ 완료
+milestone.md          → openspec/로 이관됨 (redirect stub만 유지)
 ```
 
 ## 기술 스택
@@ -138,10 +139,15 @@ git push origin dev
 > **규칙**: 테스트나 lint 중 하나라도 실패하면 **커밋하지 않는다.**
 > 실패 원인을 먼저 수정하고 재실행 후 전부 통과된 상태에서만 커밋한다.
 
-### milestone.md 갱신 의무
+### 작업 기록 의무 (OpenSpec)
 
-- 기능 구현 완료 시 `milestone.md`의 해당 항목을 `[ ]` → `[x]`로 업데이트한다.
-- 신규 기능을 추가할 경우 milestone.md에 항목을 먼저 추가한 후 구현에 착수한다.
+작업 기록은 [OpenSpec](https://github.com/Fission-AI/OpenSpec)로 관리한다. 구 `milestone.md` 단일 파일 방식은 폐지되었고, 완료분은 `openspec/changes/archive/<날짜-슬러그>/`로 이관됐다.
+
+- **신규 작업 착수 전**: `/opsx:propose "<목표>"`로 change를 만들고 `proposal.md`(목표·범위) + `tasks.md`(체크리스트)를 채운다. (CLI: `openspec new change <slug> --schema rapid`)
+- **작업 중**: 완료 항목을 `openspec/changes/<slug>/tasks.md`에서 `[ ]` → `[x]`로 갱신한다.
+- **작업 완료 시**: `/opsx:archive`로 아카이브한다. (CLI: `openspec archive <slug> --skip-specs --yes` — 본 프로젝트는 specs 레이어를 두지 않으므로 `--skip-specs` 필수. 현재 기능 명세는 `docs/` + `union.md`가 담당한다.)
+- 기본 스키마는 tasks-only `rapid`(`openspec/config.yaml`의 `defaultSchema`). 현황은 `openspec list`로 확인한다.
+- OpenSpec 슬래시 커맨드/스킬(`.claude/`)은 git-ignore되므로 머신별로 `openspec init`(또는 `openspec update`)를 1회 실행해야 한다. 커밋되는 것은 `openspec/`(changes·archive·schemas·config.yaml)다.
 
 ### 설정 파일 동기화 의무
 

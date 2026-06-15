@@ -168,21 +168,10 @@ def test_create_file_storage_cephfs_omits_share_network():
     assert "share_network_id" not in captured["body"]["share"]
 
 
-def test_create_file_storage_nfs_includes_share_network():
-    """manila.create_file_storage: NFS 일 때 share_network_id 를 share_body 에 포함한다."""
-    from unittest.mock import MagicMock
-
-    from app.services import manila as manila_svc
-
-    captured: dict = {}
-
-    fake_client = MagicMock()
-    fake_client.post.side_effect = lambda path, body: (
-        captured.update({"body": body}) or {"share": {"id": "s2", "status": "available"}}
-    )
-    fake_client.get.return_value = {
+def _make_nfs_share_response(share_id: str = "s2") -> dict:
+    return {
         "share": {
-            "id": "s2",
+            "id": share_id,
             "name": "f",
             "status": "available",
             "share_proto": "NFS",
@@ -195,17 +184,157 @@ def test_create_file_storage_nfs_includes_share_network():
         }
     }
 
+
+def test_create_file_storage_nfs_includes_share_network_when_dhss_true():
+    """manila.create_file_storage: DHSS=True share type + NFS → share_network_id 를 share_body 에 포함한다."""
+    from app.services import manila as manila_svc
+
+    captured: dict = {}
+    fake_client = MagicMock()
+    fake_client.post.side_effect = lambda path, body: (
+        captured.update({"body": body}) or {"share": {"id": "s2", "status": "available"}}
+    )
+    fake_client.get.return_value = _make_nfs_share_response()
+
+    dhss_true_type = [
+        {
+            "id": "t1",
+            "name": "nfstype",
+            "extra_specs": {"driver_handles_share_servers": "True"},
+            "supported_protocols": ["NFS"],
+        }
+    ]
+
     with patch("app.services.manila.get_client", return_value=fake_client):
         with patch("time.sleep"):
-            manila_svc.create_file_storage(
-                conn=MagicMock(),
-                name="f",
-                size_gb=10,
-                share_network_id="net-uuid",
-                share_proto="NFS",
-            )
+            with patch("app.services.manila.list_share_types", return_value=dhss_true_type):
+                manila_svc.create_file_storage(
+                    conn=MagicMock(),
+                    name="f",
+                    size_gb=10,
+                    share_network_id="net-uuid",
+                    share_type="nfstype",
+                    share_proto="NFS",
+                )
 
     assert captured["body"]["share"]["share_network_id"] == "net-uuid"
+
+
+def test_create_file_storage_nfs_omits_share_network_when_dhss_false():
+    """manila.create_file_storage: DHSS=False share type + NFS → share_network_id 무시."""
+    from app.services import manila as manila_svc
+
+    captured: dict = {}
+    fake_client = MagicMock()
+    fake_client.post.side_effect = lambda path, body: (
+        captured.update({"body": body}) or {"share": {"id": "s3", "status": "available"}}
+    )
+    fake_client.get.return_value = _make_nfs_share_response("s3")
+
+    dhss_false_type = [
+        {
+            "id": "t2",
+            "name": "nfstype",
+            "extra_specs": {"driver_handles_share_servers": "False"},
+            "supported_protocols": ["NFS"],
+        }
+    ]
+
+    with patch("app.services.manila.get_client", return_value=fake_client):
+        with patch("time.sleep"):
+            with patch("app.services.manila.list_share_types", return_value=dhss_false_type):
+                manila_svc.create_file_storage(
+                    conn=MagicMock(),
+                    name="f",
+                    size_gb=10,
+                    share_network_id="net-uuid",
+                    share_type="nfstype",
+                    share_proto="NFS",
+                )
+
+    assert "share_network_id" not in captured["body"]["share"]
+
+
+def test_create_file_storage_nfs_includes_share_network_on_type_lookup_failure():
+    """list_share_types 조회 실패 시 보수적 fallback: share_network_id 포함."""
+    from app.services import manila as manila_svc
+
+    captured: dict = {}
+    fake_client = MagicMock()
+    fake_client.post.side_effect = lambda path, body: (
+        captured.update({"body": body}) or {"share": {"id": "s4", "status": "available"}}
+    )
+    fake_client.get.return_value = _make_nfs_share_response("s4")
+
+    with patch("app.services.manila.get_client", return_value=fake_client):
+        with patch("time.sleep"):
+            with patch("app.services.manila.list_share_types", side_effect=Exception("conn fail")):
+                manila_svc.create_file_storage(
+                    conn=MagicMock(),
+                    name="f",
+                    size_gb=10,
+                    share_network_id="net-uuid",
+                    share_type="nfstype",
+                    share_proto="NFS",
+                )
+
+    assert captured["body"]["share"]["share_network_id"] == "net-uuid"
+
+
+def test_create_file_storage_error_status_deletes_share_and_raises():
+    """폴링 중 error 상태 → share 삭제 호출 + RuntimeError."""
+    from app.services import manila as manila_svc
+
+    fake_client = MagicMock()
+    fake_client.post.return_value = {"share": {"id": "s5", "status": "creating"}}
+
+    # 첫 폴링 → error; messages API; 두 번째 get → share 상세(delete 이후)
+    error_share = {
+        "share": {
+            "id": "s5",
+            "name": "f",
+            "status": "error",
+            "share_proto": "NFS",
+            "size": 10,
+            "export_locations": [],
+            "metadata": {},
+            "is_public": False,
+            "project_id": "test-project-123",
+            "created_at": "2024-01-01T00:00:00Z",
+        }
+    }
+    # get 호출 순서: 폴링 get → error 감지 → messages get → (delete) → 끝
+    fake_client.get.side_effect = [
+        error_share,  # 폴링 시 status=error
+        {"messages": [{"user_message": "No valid host"}]},  # messages API
+    ]
+    fake_client.delete = MagicMock()
+
+    dhss_false_type = [
+        {
+            "id": "t2",
+            "name": "nfstype",
+            "extra_specs": {"driver_handles_share_servers": "False"},
+            "supported_protocols": ["NFS"],
+        }
+    ]
+
+    with patch("app.services.manila.get_client", return_value=fake_client):
+        with patch("time.sleep"):
+            with patch("app.services.manila.list_share_types", return_value=dhss_false_type):
+                with pytest.raises(RuntimeError) as exc_info:
+                    manila_svc.create_file_storage(
+                        conn=MagicMock(),
+                        name="f",
+                        size_gb=10,
+                        share_network_id="",
+                        share_type="nfstype",
+                        share_proto="NFS",
+                    )
+
+    assert "error" in str(exc_info.value).lower()
+    # share 삭제가 호출됐는지 확인
+    fake_client.delete.assert_called_once_with("shares/s5")
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -439,21 +568,138 @@ async def test_create_file_storage_propagates_manila_400(client, mock_conn):
 
 
 @pytest.mark.asyncio
-async def test_create_file_storage_500_fallback(client, mock_conn):
-    """일반 Exception 은 여전히 500 으로 (detail 은 글로벌 핸들러가 마스킹)."""
+async def test_create_file_storage_runtime_error_returns_409(client, mock_conn):
+    """Manila 폴링 RuntimeError (capabilities filter 등) → 409 + 사유 detail 노출."""
     with patch(
         "app.api.storage.file_storage.manila.create_file_storage",
-        side_effect=RuntimeError("boom"),
+        side_effect=RuntimeError("파일 스토리지 생성 실패 (error 상태): Capabilities filter didn't succeed."),
     ):
         resp = await client.post(
             "/api/file-storage",
             json={
-                "name": "test-runtime",
+                "name": "test-cap-fail",
+                "size_gb": 10,
+                "share_type": "nfstype",
+                "share_proto": "NFS",
+            },
+        )
+    assert resp.status_code == 409
+    assert "Capabilities filter" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_create_file_storage_500_fallback(client, mock_conn):
+    """RuntimeError 가 아닌 일반 Exception 은 여전히 500 으로 (글로벌 핸들러가 마스킹)."""
+    with patch(
+        "app.api.storage.file_storage.manila.create_file_storage",
+        side_effect=ValueError("unexpected"),
+    ):
+        resp = await client.post(
+            "/api/file-storage",
+            json={
+                "name": "test-valueerr",
                 "size_gb": 10,
                 "share_type": "default",
                 "share_proto": "CEPHFS",
             },
         )
-    # Manila 가 아닌 일반 RuntimeError 는 httpx.HTTPStatusError 분기에 잡히지 않고
-    # 일반 Exception 분기로 떨어져 500 으로 변환되어야 한다.
     assert resp.status_code == 500
+
+
+@pytest.mark.asyncio
+async def test_create_file_storage_nfs_uses_nfs_share_type_fallback(client, mock_conn):
+    """share_type 미지정 + NFS → settings.os_manila_nfs_share_type 으로 fallback (CephFS 타입과 다름)."""
+    from app.config import get_settings
+
+    settings = get_settings()
+    with patch(
+        "app.api.storage.file_storage.manila.create_file_storage", return_value=make_file_storage()
+    ) as mock_create:
+        resp = await client.post(
+            "/api/file-storage",
+            json={"name": "nfs-no-type", "size_gb": 10, "share_proto": "NFS"},
+        )
+    assert resp.status_code == 201
+    _, kwargs = mock_create.call_args
+    assert kwargs["share_type"] == settings.os_manila_nfs_share_type
+    assert kwargs["share_type"] != settings.os_manila_share_type  # NFS ≠ CephFS 타입
+
+
+@pytest.mark.asyncio
+async def test_create_file_storage_cephfs_uses_cephfs_share_type_fallback(client, mock_conn):
+    """share_type 미지정 + CEPHFS → settings.os_manila_share_type 으로 fallback."""
+    from app.config import get_settings
+
+    settings = get_settings()
+    with patch(
+        "app.api.storage.file_storage.manila.create_file_storage", return_value=make_file_storage()
+    ) as mock_create:
+        resp = await client.post(
+            "/api/file-storage",
+            json={"name": "ceph-no-type", "size_gb": 10, "share_proto": "CEPHFS"},
+        )
+    assert resp.status_code == 201
+    _, kwargs = mock_create.call_args
+    assert kwargs["share_type"] == settings.os_manila_share_type
+
+
+# ─────────────────────────────────────────────────────────────────
+# 접근 규칙 생성 — metadata 미전달 + 오류 표면화 + 응답 필드 검증
+# ─────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_create_access_rule_no_metadata_passed(client, mock_conn):
+    """IP 타입 접근 규칙 생성 시 manila.create_access_rule에 metadata를 전달하지 않는다.
+
+    Manila CephFS는 access rule metadata를 지원하지 않으며 전달 시 400을 반환한다.
+    """
+    with (
+        patch("app.api.storage.file_storage.manila.get_file_storage", return_value=make_file_storage()),
+        patch(
+            "app.api.storage.file_storage.manila.create_access_rule", return_value=make_access_rule("rule-ip")
+        ) as mock_create,
+    ):
+        resp = await client.post(
+            "/api/file-storage/share-1/access-rules",
+            json={"access_to": "10.0.0.0/24", "access_level": "rw", "access_type": "ip"},
+        )
+    assert resp.status_code == 201
+    _, kwargs = mock_create.call_args
+    assert "metadata" not in kwargs
+
+
+@pytest.mark.asyncio
+async def test_create_access_rule_response_has_id_field(client, mock_conn):
+    """create_access_rule 응답에 'id' 필드가 있어야 한다 (마법사 step 3 keyed #each 바인딩)."""
+    rule = make_access_rule("rule-new")
+    with (
+        patch("app.api.storage.file_storage.manila.get_file_storage", return_value=make_file_storage()),
+        patch("app.api.storage.file_storage.manila.create_access_rule", return_value=rule),
+    ):
+        resp = await client.post(
+            "/api/file-storage/share-1/access-rules",
+            json={"access_to": "10.0.0.0/24", "access_level": "rw", "access_type": "ip"},
+        )
+    assert resp.status_code == 201
+    data = resp.json()
+    assert "id" in data
+    assert data["id"] == "rule-new"
+    assert "access_type" in data
+    assert "state" in data
+
+
+@pytest.mark.asyncio
+async def test_create_access_rule_propagates_manila_400(client, mock_conn):
+    """Manila 400 → HTTPException 400 + Manila 메시지가 detail에 포함된다."""
+    err = _make_manila_status_error(400, "Access rule already exists.")
+    with (
+        patch("app.api.storage.file_storage.manila.get_file_storage", return_value=make_file_storage()),
+        patch("app.api.storage.file_storage.manila.create_access_rule", side_effect=err),
+    ):
+        resp = await client.post(
+            "/api/file-storage/share-1/access-rules",
+            json={"access_to": "10.0.0.0/24", "access_level": "rw", "access_type": "ip"},
+        )
+    assert resp.status_code == 400
+    assert "already exists" in resp.json()["detail"]

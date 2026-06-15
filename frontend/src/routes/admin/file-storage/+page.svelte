@@ -30,14 +30,14 @@
 		fileStorages.slice(currentPage * pageSize, (currentPage + 1) * pageSize)
 	);
 
-	async function loadTimeseries(range: string) {
-		tsLoading = true;
+	async function loadTimeseries(range: string, opts?: { background?: boolean }) {
+		if (!opts?.background) tsLoading = true;
 		try {
 			tsData = await api.get<TsPoint[]>(`/api/admin/timeseries/file_storage?range=${range}`, token, projectId);
 		} catch {
-			tsData = [];
+			if (!opts?.background) tsData = [];
 		} finally {
-			tsLoading = false;
+			if (!opts?.background) tsLoading = false;
 		}
 	}
 
@@ -56,7 +56,7 @@
 	}
 
 	const ar = createAutoRefresh(
-		() => { load(); loadTimeseries(tsRange); },
+		() => { load(); loadTimeseries(tsRange, { background: true }); },
 		{ storageKey: 'admin-file-storage', defaultInterval: 30, intervalOptions: [15, 30, 60] }
 	);
 

@@ -195,7 +195,15 @@
 				<!-- 콘솔 로그 -->
 				<div>
 					<div class="flex items-center justify-between mb-1.5">
-						<p class="text-xs text-gray-500">콘솔 로그 {isActive ? '(10초마다 자동 갱신)' : ''}</p>
+						<p class="text-xs text-gray-500">
+							{#if detail.live_console}
+								콘솔 로그 {isActive ? '(10초마다 자동 갱신)' : ''}
+							{:else if detail.console_log_excerpt}
+								마지막 저장 로그
+							{:else}
+								콘솔 로그
+							{/if}
+						</p>
 						{#if isActive}
 							<button
 								onclick={loadDetail}
@@ -203,7 +211,13 @@
 							>새로고침</button>
 						{/if}
 					</div>
-					<pre class="bg-gray-950 text-[11px] text-gray-300 font-mono whitespace-pre-wrap break-all overflow-auto max-h-56 rounded-lg p-3 border border-gray-800">{detail.live_console || detail.console_log_excerpt || '로그 없음'}</pre>
+					{#if detail.live_console || detail.console_log_excerpt}
+						<pre class="bg-gray-950 text-[11px] text-gray-300 font-mono whitespace-pre-wrap break-all overflow-auto max-h-56 rounded-lg p-3 border border-gray-800">{detail.live_console || detail.console_log_excerpt}</pre>
+					{:else}
+						<div class="bg-gray-950 rounded-lg p-3 border border-gray-800 text-[11px] text-gray-500 font-mono">
+							{detail.console_note || '로그 없음'}
+						</div>
+					{/if}
 				</div>
 
 				<!-- 하단 액션 -->

@@ -138,6 +138,7 @@ async def get_library_build(build_id: int) -> dict:
     vm_status: str | None = None
     vm_ip: str | None = None
     live_console: str | None = None
+    console_note: str | None = None  # 콘솔 조회 불가 사유
 
     if row.server_id:
         try:
@@ -152,8 +153,24 @@ async def get_library_build(build_id: int) -> dict:
 
             if is_active:
                 live_console = await asyncio.to_thread(nova.get_console_output, svc_conn, row.server_id, 300)
+            else:
+                # 비활성(SHUTOFF/ERROR 등) VM — 하이퍼바이저에 따라 console이 남아 있을 수 있음
+                try:
+                    live_console = await asyncio.to_thread(nova.get_console_output, svc_conn, row.server_id, 300)
+                except Exception:
+                    # console 없음 — DB excerpt 또는 안내 메시지 사용
+                    status_upper = (vm_status or "").upper()
+                    if status_upper in ("SHUTOFF", "ERROR"):
+                        console_note = (
+                            f"VM이 {vm_status} 상태로 실시간 콘솔을 사용할 수 없습니다. 마지막 저장 로그를 확인하세요."
+                        )
+                    else:
+                        console_note = "콘솔 로그를 가져올 수 없습니다."
         except Exception:
             _logger.warning("[admin_libraries] VM 정보 조회 실패: server_id=%s", row.server_id, exc_info=True)
+            console_note = "VM 정보를 가져올 수 없습니다."
+    elif row.server_id is None and not is_active:
+        console_note = "빌드 VM 정보가 없습니다."
 
     return {
         "id": row.id,
@@ -174,6 +191,7 @@ async def get_library_build(build_id: int) -> dict:
         "vm_status": vm_status,
         "vm_ip": vm_ip,
         "live_console": live_console,
+        "console_note": console_note,
     }
 
 

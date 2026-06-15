@@ -7,7 +7,7 @@
 > **구현 현황 (2026-04-24)**: Phase 1 코드 완료.
 > DB 스키마 · REST API 7개 · `layerbuild` CLI · `envmgr-use` 스크립트 · 테스트 30개 구현.
 > Manila share 실제 프로비저닝 및 Builder/User VM 배포는 미완 (인프라 작업).
-> 세부 상태는 `milestone.md §9`를 참조.
+> 세부 상태는 `openspec/changes/archive/2026-04-16-09-union-mount-v2-content/` (구 milestone.md §9)를 참조.
 
 ## 0. 개요
 

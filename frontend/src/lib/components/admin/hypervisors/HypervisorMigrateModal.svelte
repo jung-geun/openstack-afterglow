@@ -16,7 +16,7 @@
 		onMigrated: () => void;
 	} = $props();
 
-	let hosts = $state<{ name: string }[]>([]);
+	let hosts = $state<{ name: string; cpu_model?: string | null }[]>([]);
 	let selectedHost = $state('');
 	let loading = $state(false);
 	let error = $state('');
@@ -30,10 +30,13 @@
 		}
 	});
 
+	// 라이브: server_id 전달 + CPU 모델 필터(기본). 콜드: CPU 필터 없이 전체(소스 제외)
 	async function fetchHosts() {
 		try {
-			hosts = await api.get<{ name: string }[]>(
-				'/api/admin/compute-hosts',
+			const params = new URLSearchParams({ server_id: serverId });
+			if (type === 'cold') params.set('cpu_filter', 'false');
+			hosts = await api.get<{ name: string; cpu_model?: string | null }[]>(
+				`/api/admin/compute-hosts?${params.toString()}`,
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined,
 			);
@@ -41,6 +44,15 @@
 			hosts = [];
 		}
 	}
+
+	// 라이브 마이그레이션 CPU 호환 힌트
+	const cpuModelHint = $derived(
+		type === 'cold'
+			? '모든 호스트 표시 (CPU 모델 무관)'
+			: hosts.length > 0 && hosts[0].cpu_model
+				? `${hosts[0].cpu_model} 호환 호스트만 표시`
+				: null
+	);
 
 	async function doMigrate() {
 		loading = true;
@@ -56,7 +68,7 @@
 			} else {
 				await api.post(
 					`/api/admin/instances/${serverId}/cold-migrate`,
-					{},
+					{ host: selectedHost || null },
 					$auth.token ?? undefined,
 					$auth.projectId ?? undefined,
 				);
@@ -86,7 +98,12 @@
 			<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>
 		{/if}
 		<div>
-			<label class="block text-xs text-gray-400 mb-1.5 uppercase tracking-wide">대상 호스트 <span class="text-gray-600">(선택 안 하면 자동)</span></label>
+			<div class="flex items-baseline justify-between mb-1.5">
+				<label class="text-xs text-gray-400 uppercase tracking-wide">대상 호스트 <span class="text-gray-600">(선택 안 하면 자동)</span></label>
+				{#if cpuModelHint}
+					<span class="text-xs text-gray-500">{cpuModelHint}</span>
+				{/if}
+			</div>
 			<select bind:value={selectedHost} class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
 				<option value="">자동 선택</option>
 				{#each hosts as h}

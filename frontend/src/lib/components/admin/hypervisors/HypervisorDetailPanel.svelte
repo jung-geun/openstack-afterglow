@@ -1,6 +1,7 @@
 <script lang="ts">
 	import LoadingSkeleton from '$lib/components/LoadingSkeleton.svelte';
 	import { formatNumber, formatStorage } from '$lib/utils/format';
+	import type { GpuDevice } from '$lib/types/gpu';
 
 	export interface HypervisorDetail {
 		id: string;
@@ -23,6 +24,7 @@
 		local_gb_used: number;
 		running_vms: number;
 		cpu_info: string | null;
+		cpu_model: string | null;
 		servers: { id: string; name: string; status: string; project_id: string; flavor: string }[];
 	}
 
@@ -30,14 +32,18 @@
 		detail,
 		loading,
 		projectNameMap,
+		gpus = [],
 		onClose,
 		onMigrate,
+		onOpenDetail,
 	}: {
 		detail: HypervisorDetail | null;
 		loading: boolean;
 		projectNameMap: Map<string, string>;
+		gpus?: GpuDevice[];
 		onClose: () => void;
 		onMigrate: (serverId: string, serverName: string, type: 'live' | 'cold') => void;
+		onOpenDetail: (serverId: string, projectId: string) => void;
 	} = $props();
 </script>
 
@@ -87,6 +93,12 @@
 						<dt class="text-gray-400">서비스 호스트</dt>
 						<dd class="text-gray-300 font-mono">{detail.service_host || '-'}</dd>
 					</div>
+					{#if detail.cpu_model}
+					<div class="flex justify-between">
+						<dt class="text-gray-400">CPU 모델</dt>
+						<dd class="text-gray-300 font-mono text-right">{detail.cpu_model}</dd>
+					</div>
+					{/if}
 				</dl>
 			</div>
 
@@ -113,6 +125,33 @@
 				</dl>
 			</div>
 
+			<!-- GPU 장치 -->
+			{#if gpus.length > 0}
+				<div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+					<h3 class="text-xs text-gray-500 uppercase tracking-wide mb-3">GPU 장치 ({gpus.length})</h3>
+					<div class="space-y-1.5">
+						{#each gpus as gpu (gpu.provider_uuid)}
+							<div class="flex items-center justify-between bg-gray-800/50 border border-gray-700/50 rounded-lg px-3 py-2">
+								<div class="flex-1 min-w-0">
+									<div class="text-xs text-gray-300">
+										<span class="text-gray-300">{gpu.vendor_name}</span>
+										{#if gpu.device_name}
+											<span class="text-gray-300 ml-1">{gpu.device_name}</span>
+										{:else if gpu.device_id}
+											<span class="text-gray-500 ml-1">({gpu.device_id})</span>
+										{/if}
+									</div>
+									<div class="text-xs text-gray-500 font-mono">{gpu.pci_address} · {gpu.resource_class}</div>
+								</div>
+								<span class="ml-2 px-1.5 py-0.5 rounded text-xs font-medium shrink-0 {gpu.used > 0 ? 'bg-red-900/30 text-red-400' : 'bg-green-900/30 text-green-400'}">
+									{gpu.used > 0 ? '사용 중' : '사용 가능'}
+								</span>
+							</div>
+						{/each}
+					</div>
+				</div>
+			{/if}
+
 			<!-- VM 목록 -->
 			{#if detail.servers.length > 0}
 				<div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
@@ -121,7 +160,11 @@
 						{#each detail.servers as s}
 							<div class="flex items-center justify-between py-1.5 border-b border-gray-800/50 last:border-0">
 								<div class="flex-1 min-w-0">
-									<div class="text-xs text-gray-300 truncate">{s.name || s.id.slice(0, 12)}</div>
+									<button
+										type="button"
+										onclick={() => onOpenDetail(s.id, s.project_id)}
+										class="text-xs text-gray-300 hover:text-blue-400 transition-colors truncate block w-full text-left"
+									>{s.name || s.id.slice(0, 12)}</button>
 									<div class="text-xs text-gray-500">{projectNameMap.get(s.project_id) || s.project_id.slice(0, 8)} · {s.flavor}</div>
 								</div>
 								<div class="flex items-center gap-1 ml-2 flex-shrink-0">

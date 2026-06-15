@@ -242,6 +242,39 @@ write_files:
       WantedBy=timers.target
 {% endif %}
 
+{% if data_mounts %}
+{% for dm in data_mounts %}
+{% if dm.share_proto == "CEPHFS" %}
+  - path: /etc/ceph/ceph.client.{{ dm.cephx_id }}.keyring
+    permissions: "0600"
+    content: |
+      [client.{{ dm.cephx_id }}]
+          key = {{ dm.cephx_key | trim }}
+{% endif %}
+{% endfor %}
+
+  - path: /opt/union/data_mounts.sh
+    permissions: "0750"
+    content: |
+{{ data_mounts_script | indent(6, first=True) }}
+
+  - path: /etc/systemd/system/afterglow-data-mounts.service
+    content: |
+      [Unit]
+      Description=Afterglow Data Mounts
+      After=network-online.target
+      Requires=network-online.target
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/opt/union/data_mounts.sh
+      TimeoutStartSec=300
+
+      [Install]
+      WantedBy=multi-user.target
+{% endif %}
+
 runcmd:
   - mkdir -p /opt/layers/lower /opt/layers/upper /opt/layers/work /opt/layers/merged /opt/union/scripts /var/lib/union
   - systemctl daemon-reload
@@ -257,6 +290,9 @@ runcmd:
   - /opt/union/install_dcgm_exporter.sh
   - systemctl daemon-reload
   - systemctl enable --now dcgm-exporter.service
+{% endif %}
+{% if data_mounts %}
+  - systemctl enable --now afterglow-data-mounts.service
 {% endif %}
 
 final_message: |

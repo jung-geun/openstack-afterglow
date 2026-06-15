@@ -27,6 +27,12 @@
 			<dt class="text-xs text-gray-500 mb-0.5">키페어</dt>
 			<dd class="text-sm text-gray-300 font-mono">{s.instance!.key_name ?? '-'}</dd>
 		</div>
+		{#if s.instance!.host}
+			<div>
+				<dt class="text-xs text-gray-500 mb-0.5">호스트</dt>
+				<dd class="text-sm text-gray-300 font-mono">{s.instance!.host}</dd>
+			</div>
+		{/if}
 		{#if s.ownerDisplay}
 			<div class="overflow-hidden">
 				<dt class="text-xs text-gray-500 mb-0.5">생성자</dt>

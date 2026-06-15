@@ -30,6 +30,12 @@ def _get_norm_map() -> dict[str, str]:
     return _norm_map
 
 
+def invalidate_norm_map() -> None:
+    """GPU 장치 카탈로그 변경 시 정규화 맵 lazy 캐시 무효화."""
+    global _norm_map
+    _norm_map = None
+
+
 def normalize_gpu_alias(alias: str) -> str:
     """GPU alias를 대표(canonical) 이름으로 정규화.
 

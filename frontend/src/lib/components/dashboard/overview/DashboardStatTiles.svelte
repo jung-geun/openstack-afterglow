@@ -27,7 +27,7 @@
 		<StatTile
 			label="인스턴스"
 			value={summary?.instances.total ?? 0}
-			unit={summary && summary.compute.instances_limit > 0 ? `/ ${summary.compute.instances_limit}` : undefined}
+			unit={quotas && quotas.compute.instances.limit > 0 ? `/ ${quotas.compute.instances.limit}` : undefined}
 			accent="blue"
 		>
 			{#snippet icon()}
@@ -37,8 +37,8 @@
 
 		<StatTile
 			label="블록 볼륨"
-			value={summary?.storage.volumes_used ?? 0}
-			unit={summary && summary.storage.volumes_limit > 0 ? `/ ${summary.storage.volumes_limit}` : (summary?.storage.volumes_limit === -1 ? '/ 무제한' : undefined)}
+			value={quotas?.storage.volumes.in_use ?? 0}
+			unit={quotas && quotas.storage.volumes.limit > 0 ? `/ ${quotas.storage.volumes.limit}` : (quotas?.storage.volumes.limit === -1 ? '/ 무제한' : undefined)}
 			accent="cyan"
 		>
 			{#snippet icon()}

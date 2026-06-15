@@ -17,7 +17,7 @@ from app.models.storage import CreateAccessRuleRequest, CreateFileStorageRequest
 from app.rate_limit import limiter
 from app.services import manila
 from app.services.cache import cached_call, invalidate, ttl_fast
-from app.services.manila import _build_nfs_access_metadata, extract_manila_error
+from app.services.manila import extract_manila_error
 
 router = APIRouter()
 _logger = logging.getLogger(__name__)
@@ -115,7 +115,8 @@ async def create_file_storage(
             name=req.name,
             size_gb=req.size_gb,
             share_network_id=req.share_network_id or settings.os_manila_share_network_id,
-            share_type=req.share_type or settings.os_manila_share_type,
+            share_type=req.share_type
+            or (settings.os_manila_nfs_share_type if req.share_proto == "NFS" else settings.os_manila_share_type),
             share_proto=req.share_proto,
             metadata=req.metadata,
         )
@@ -148,6 +149,20 @@ async def create_file_storage(
             status_code=status if 400 <= status < 500 else 502,
             detail=message,
         )
+    except RuntimeError as e:
+        # Manila 폴링 오류 (error 상태, capabilities filter 등) — 실패 사유를 사용자에게 노출
+        reason = str(e)
+        _logger.warning("파일 스토리지 생성 실패(Manila error): name=%s reason=%s", req.name, reason[:300])
+        await rec(
+            token_info,
+            conn,
+            resource_type="file_storage",
+            action="file_storage.create",
+            status="failed",
+            resource_name=req.name,
+            error_message=reason[:500],
+        )
+        raise HTTPException(status_code=409, detail=reason[:300])
     except Exception as e:
         _logger.exception("파일 스토리지 생성 실패: name=%s proto=%s", req.name, req.share_proto)
         await rec(
@@ -221,10 +236,7 @@ async def create_access_rule(
 ):
     _fetch_and_assert_share_owner(conn, file_storage_id, token_info)
     try:
-        metadata = _build_nfs_access_metadata(req.root_squash, req.sec_flavor) if req.access_type == "ip" else None
-        result = manila.create_access_rule(
-            conn, file_storage_id, req.access_to, req.access_level, req.access_type, metadata=metadata
-        )
+        result = manila.create_access_rule(conn, file_storage_id, req.access_to, req.access_level, req.access_type)
         await rec(
             token_info,
             conn,
@@ -235,7 +247,24 @@ async def create_access_rule(
             extra={"access_to": req.access_to},
         )
         return result
+    except httpx.HTTPStatusError as e:
+        status, message = extract_manila_error(e)
+        _logger.warning("Manila %s on access rule create: %s", status, message[:300])
+        await rec(
+            token_info,
+            conn,
+            resource_type="file_storage",
+            action="file_storage.grant_access",
+            status="failed",
+            resource_id=file_storage_id,
+            error_message=message[:500],
+        )
+        raise HTTPException(
+            status_code=status if 400 <= status < 500 else 502,
+            detail=message,
+        )
     except Exception as e:
+        _logger.exception("접근 규칙 생성 실패: file_storage_id=%s", file_storage_id)
         await rec(
             token_info,
             conn,
@@ -245,7 +274,7 @@ async def create_access_rule(
             resource_id=file_storage_id,
             error_message=str(e)[:500],
         )
-        raise HTTPException(status_code=500, detail="접근 규칙 생성 실패")
+        raise HTTPException(status_code=500, detail=f"접근 규칙 생성 실패: {str(e)[:200]}")
 
 
 @router.delete("/{file_storage_id}/access-rules/{access_id}", status_code=204)

@@ -67,6 +67,13 @@ def build_application(env: str) -> dict:
         sys.exit(f"values 파일이 없습니다: {values_path}")
     values = yaml.safe_load(values_path.read_text())
 
+    # 레포 루트의 config.gpu.toml(배포 머신 전용 GPU 디바이스 맵 오버라이드)이 있으면
+    # gpu.configToml 값으로 주입 → 차트 기본값(files/config.gpu.toml) 대신 사용된다.
+    gpu_toml_path = REPO_ROOT / "config.gpu.toml"
+    if gpu_toml_path.exists():
+        values.setdefault("gpu", {})["configToml"] = gpu_toml_path.read_text()
+        print(f"GPU 디바이스 맵 오버라이드 포함: {gpu_toml_path.name}")
+
     tag = cfg["image_tag"]
     image_list = ",".join(f"{alias}={repo}:{tag}" for alias, repo in IMAGES.items())
 

@@ -11,7 +11,7 @@ import logging
 from datetime import UTC, datetime
 
 from app.services import libraries as lib_svc
-from app.services import manila
+from app.services import manila, neutron
 from app.services.keystone import get_service_project_connection
 
 _logger = logging.getLogger(__name__)
@@ -23,6 +23,9 @@ _active_builds: dict[str, dict] = {}
 _build_queue: asyncio.Queue[tuple[str, str | None]] = asyncio.Queue()
 # 큐에 있는 library_id 집합 (중복 요청 방지용 빠른 조회)
 _queued_libraries: set[str] = set()
+
+# 백그라운드 태스크 참조 보관 — GC로 인한 태스크 소실 방지
+_background_tasks: set[asyncio.Task] = set()
 
 
 def get_active_builds() -> dict[str, dict]:
@@ -161,9 +164,11 @@ async def start_ephemeral_build(library_id: str, existing_share_id: str | None =
         "build_db_id": build_db_id,
     }
 
-    asyncio.create_task(
+    task = asyncio.create_task(
         _ephemeral_build_task(library_id=library_id, build_db_id=build_db_id, existing_share_id=existing_share_id)
     )
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
     return {"file_storage_id": initial_share_id, "status": "queued", "library": library_id, "build_id": build_db_id}
 
@@ -217,6 +222,158 @@ def get_build_queue_status() -> dict:
         "active": sorted(_active_builds.keys()),
         "queue_size": _build_queue.qsize(),
     }
+
+
+async def _resume_build_task(
+    build_db_id: int,
+    library_id: str,
+    library_version: str,
+    share_id: str,
+    server_id: str,
+    port_id: str | None,
+    build_token: str,
+    proto: str,
+) -> None:
+    """reconcile에서 생성된 재개 태스크 래퍼."""
+    try:
+        from app.services.ephemeral_build import resume_ephemeral_build
+
+        await resume_ephemeral_build(
+            build_db_id=build_db_id,
+            library_id=library_id,
+            library_version=library_version,
+            share_id=share_id,
+            server_id=server_id,
+            port_id=port_id,
+            build_token=build_token,
+            proto=proto,
+        )
+    except Exception:
+        _logger.error("[builder] reconcile 재개 태스크 예외: build_id=%d", build_db_id, exc_info=True)
+    finally:
+        _active_builds.pop(library_id, None)
+
+
+async def _mark_error_and_cleanup(row) -> None:
+    """DB row를 error로 마킹하고 Manila share 메타데이터를 갱신한다."""
+    from datetime import UTC, datetime
+
+    from sqlalchemy import select
+
+    from app.database import get_session_factory
+    from app.models.db import LibraryBuild
+
+    factory = get_session_factory()
+    if factory is None:
+        return
+
+    now = datetime.now(UTC)
+    async with factory() as session:
+        db_row = (await session.execute(select(LibraryBuild).where(LibraryBuild.id == row.id))).scalar_one_or_none()
+        if db_row is None:
+            return
+        db_row.status = "error"
+        db_row.cloud_init_status = "failure"
+        db_row.progress_step = "백엔드 재시작으로 중단됨 (VM 없음)"
+        db_row.error_message = "백엔드 재시작 시 빌드 VM 정보가 없어 자동 복구 불가"
+        db_row.completed_at = now
+        await session.commit()
+
+    if row.file_storage_id:
+        try:
+            conn = await asyncio.to_thread(get_service_project_connection)
+            await asyncio.to_thread(
+                manila.update_share_metadata,
+                conn,
+                row.file_storage_id,
+                {"union_status": "error"},
+            )
+        except Exception:
+            _logger.warning("[builder] reconcile: share 메타데이터 갱신 실패: share=%s", row.file_storage_id)
+
+        # port가 있으면 정리 시도
+        if row.port_id:
+            try:
+                conn = await asyncio.to_thread(get_service_project_connection)
+                await asyncio.to_thread(neutron.delete_port, conn, row.port_id)
+                _logger.info("[builder] reconcile: 고아 port 삭제: %s", row.port_id)
+            except Exception:
+                _logger.warning("[builder] reconcile: port 삭제 실패: %s", row.port_id)
+
+
+async def reconcile_orphan_builds() -> None:
+    """백엔드 재시작 시 비터미널 상태로 남은 고아 빌드를 재개하거나 error 처리한다.
+
+    server_id와 build_token이 있으면 VM 상태를 확인해 재개를 시도한다.
+    VM이 SHUTOFF면 sentinel 검증 후 성공/실패 처리한다.
+    VM이 없거나 server_id가 없으면 error 마킹 + 리소스 정리만 수행한다.
+    """
+    from sqlalchemy import select
+
+    from app.database import get_session_factory
+    from app.models.db import LibraryBuild
+
+    factory = get_session_factory()
+    if factory is None:
+        return
+
+    _TERMINAL = {"complete", "error", "timeout", "cancelled"}
+
+    async with factory() as session:
+        rows = (
+            (await session.execute(select(LibraryBuild).where(LibraryBuild.status.notin_(_TERMINAL)))).scalars().all()
+        )
+
+    if not rows:
+        return
+
+    _logger.info("[builder] reconcile: 고아 빌드 %d건 발견", len(rows))
+
+    for row in rows:
+        if row.server_id and row.build_token:
+            try:
+                lib = lib_svc.get_by_id(row.library_id)
+                library_version = lib.version
+            except Exception:
+                library_version = ""
+
+            # share proto 조회 (NFS 기본)
+            proto = "NFS"
+            if row.file_storage_id:
+                try:
+                    conn = await asyncio.to_thread(get_service_project_connection)
+                    share = await asyncio.to_thread(manila.get_file_storage, conn, row.file_storage_id)
+                    proto = (getattr(share, "share_proto", None) or "NFS").upper()
+                except Exception:
+                    pass
+
+            _logger.info(
+                "[builder] reconcile: 빌드 %d 재개 시도 (library=%s, server=%s)",
+                row.id,
+                row.library_id,
+                row.server_id,
+            )
+            task = asyncio.create_task(
+                _resume_build_task(
+                    build_db_id=row.id,
+                    library_id=row.library_id,
+                    library_version=library_version,
+                    share_id=row.file_storage_id or "",
+                    server_id=row.server_id,
+                    port_id=row.port_id,
+                    build_token=row.build_token,
+                    proto=proto,
+                )
+            )
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
+        else:
+            _logger.warning(
+                "[builder] reconcile: VM 정보 없음 — error 처리: build_id=%d, library=%s",
+                row.id,
+                row.library_id,
+            )
+            await _mark_error_and_cleanup(row)
 
 
 async def cleanup_stale_builds() -> None:

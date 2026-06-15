@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { formatNumber, formatStorage } from '$lib/utils/format';
+	import { formatNumber } from '$lib/utils/format';
 	import HypervisorUsageBar from './HypervisorUsageBar.svelte';
 
 	export interface HypervisorRow {
@@ -16,6 +16,10 @@
 		local_disk_gb: number;
 		local_disk_used_gb: number;
 		running_vms: number;
+		gpu_total?: number;
+		gpu_used?: number;
+		gpu_model?: string | null;
+		cpu_model?: string | null;
 	}
 
 	let {
@@ -52,7 +56,12 @@
 				<th class="text-left py-2 pr-4">상태</th>
 				<th class="text-left py-2 pr-4">
 					<button onclick={() => onSort('running_vms')} class="hover:text-white transition-colors flex items-center gap-1">
-						VM <span class="text-gray-600">{sortIcon('running_vms')}</span>
+						VM 수 <span class="text-gray-600">{sortIcon('running_vms')}</span>
+					</button>
+				</th>
+				<th class="text-left py-2 pr-4 max-lg:hidden">
+					<button onclick={() => onSort('cpu_model')} class="hover:text-white transition-colors flex items-center gap-1">
+						CPU 모델 <span class="text-gray-600">{sortIcon('cpu_model')}</span>
 					</button>
 				</th>
 				<th class="text-left py-2 pr-4">
@@ -65,7 +74,16 @@
 						RAM (GB) <span class="text-gray-600">{sortIcon('memory_used_mb')}</span>
 					</button>
 				</th>
-				<th class="text-left py-2">로컬 디스크</th>
+				<th class="text-left py-2 pr-4">
+					<button onclick={() => onSort('gpu_model')} class="hover:text-white transition-colors flex items-center gap-1">
+						GPU 모델 <span class="text-gray-600">{sortIcon('gpu_model')}</span>
+					</button>
+				</th>
+				<th class="text-left py-2">
+					<button onclick={() => onSort('gpu_used')} class="hover:text-white transition-colors flex items-center gap-1">
+						GPU 수 <span class="text-gray-600">{sortIcon('gpu_used')}</span>
+					</button>
+				</th>
 			</tr>
 		</thead>
 		<tbody>
@@ -80,6 +98,7 @@
 						<span class="{h.state === 'up' && h.status === 'enabled' ? 'text-green-400' : 'text-red-400'}">{h.state}/{h.status}</span>
 					</td>
 					<td class="py-2 pr-4 text-gray-400">{formatNumber(h.running_vms)}</td>
+					<td class="py-2 pr-4 text-gray-400 font-mono text-xs max-lg:hidden">{h.cpu_model ?? '-'}</td>
 					<td class="py-2 pr-4">
 						<HypervisorUsageBar
 							used={h.vcpus_used}
@@ -94,12 +113,17 @@
 							label="{formatNumber(Math.round(h.memory_used_mb/1024))}/{formatNumber(Math.round((h.memory_allowed_mb || h.memory_size_mb)/1024))}"
 						/>
 					</td>
+					<td class="py-2 pr-4 text-xs {h.gpu_model ? 'text-gray-400 font-mono' : 'text-gray-600'}">{h.gpu_model ?? '-'}</td>
 					<td class="py-2">
-						<HypervisorUsageBar
-							used={h.local_disk_used_gb}
-							total={h.local_disk_gb}
-							label="{formatStorage(h.local_disk_used_gb)}/{formatStorage(h.local_disk_gb)}"
-						/>
+						{#if (h.gpu_total ?? 0) > 0}
+							<HypervisorUsageBar
+								used={h.gpu_used ?? 0}
+								total={h.gpu_total ?? 0}
+								label="{formatNumber(h.gpu_used ?? 0)}/{formatNumber(h.gpu_total ?? 0)}"
+							/>
+						{:else}
+							<span class="text-gray-600">-</span>
+						{/if}
 					</td>
 				</tr>
 			{/each}

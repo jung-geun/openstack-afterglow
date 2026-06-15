@@ -35,24 +35,24 @@
 			role="none"
 			onkeydown={(e) => e.stopPropagation()}
 		>
-			<!-- 스텝 인디케이터 -->
+			<!-- 스텝 인디케이터: DHSS=False이면 네트워크 단계를 숨겨 2단계로 표시 -->
 			<div class="flex items-center gap-0 px-6 pt-6 pb-4 border-b border-gray-800">
-				{#each [
-					{ step: 1, label: '기본 정보' },
-					{ step: 2, label: '네트워크' },
-					{ step: 3, label: '접근 설정' },
-				] as item}
-					<div class="flex items-center {item.step < 3 ? 'flex-1' : ''}">
+				{#each (s.dhssEnabled
+					? [{ step: 1, label: '기본 정보' }, { step: 2, label: '네트워크' }, { step: 3, label: '접근 설정' }]
+					: [{ step: 1, label: '기본 정보' }, { step: 3, label: '접근 설정' }]
+				) as item, idx (item.step)}
+					{@const isLast = idx === (s.dhssEnabled ? 2 : 1)}
+					<div class="flex items-center {!isLast ? 'flex-1' : ''}">
 						<div class="flex flex-col items-center">
 							<div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-colors
 								{s.step === item.step ? 'border-blue-500 bg-blue-900/40 text-blue-400' :
 								 s.step > item.step ? 'border-green-600 bg-green-900/30 text-green-400' :
 								 'border-gray-700 bg-gray-800 text-gray-500'}">
-								{s.step > item.step ? '✓' : item.step}
+								{s.step > item.step ? '✓' : idx + 1}
 							</div>
 							<span class="text-xs mt-1 {s.step === item.step ? 'text-blue-400' : s.step > item.step ? 'text-green-400' : 'text-gray-600'}">{item.label}</span>
 						</div>
-						{#if item.step < 3}
+						{#if !isLast}
 							<div class="flex-1 h-px mx-3 mt-[-14px] {s.step > item.step ? 'bg-green-700' : 'bg-gray-700'}"></div>
 						{/if}
 					</div>

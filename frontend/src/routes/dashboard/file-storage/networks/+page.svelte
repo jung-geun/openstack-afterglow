@@ -91,7 +91,18 @@
     {/snippet}
   </PageHeader>
 
-  <p class="text-sm text-gray-500 mb-6">파일 스토리지(Manila)를 Neutron 네트워크에 연결하는 Share Network를 관리합니다. NFS 프로토콜 사용 시 필수입니다.</p>
+  <div class="mb-6 space-y-2">
+    <p class="text-sm text-gray-500">파일 스토리지(Manila)를 Neutron 네트워크에 연결하는 Share Network를 관리합니다.</p>
+    <div class="flex items-start gap-2 px-4 py-3 rounded-lg bg-blue-950/30 border border-blue-900/40 text-blue-300 text-xs">
+      <svg class="w-4 h-4 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+      </svg>
+      <span>
+        현재 환경(DHSS=False 드라이버)에서는 Share Network 없이 파일 스토리지가 생성되며, VM 연결은 IP 접근 규칙으로 제어됩니다.
+        Share Network는 DHSS=True 드라이버를 사용하는 경우에만 필요하며, 이 환경에서는 생성해도 실제로 사용되지 않습니다.
+      </span>
+    </div>
+  </div>
 
   {#if error}
     <div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>

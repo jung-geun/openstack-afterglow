@@ -8,18 +8,38 @@
 
 	let {
 		instance,
+		isUnderutilized = false,
+		isSelected = false,
+		showCheckboxes = false,
 		onSelect,
 		onAction,
+		onToggleSelect,
 	}: {
 		instance: Instance;
+		isUnderutilized?: boolean;
+		isSelected?: boolean;
+		showCheckboxes?: boolean;
 		onSelect: (id: string) => void;
 		onAction: (kind: 'console' | 'shelve' | 'unshelve' | 'delete', instance: Instance) => Promise<void>;
+		onToggleSelect?: () => void;
 	} = $props();
 </script>
 
 <div
-	class="grid grid-cols-[1fr_0px_0px_1fr_0px_0px_0px] sm:grid-cols-[1.2fr_130px_0px_1.5fr_0px_0px_32px] md:grid-cols-[1.2fr_130px_1.2fr_1.5fr_0px_0px_32px] lg:grid-cols-[1.2fr_130px_1.2fr_1.5fr_80px_80px_32px] px-4 py-3 text-[13px] items-center border-b border-gray-800 transition-colors last:border-b-0"
+	class="grid {showCheckboxes ? 'grid-cols-[36px_1fr_0px_0px_1fr_0px_0px_0px] sm:grid-cols-[36px_1.2fr_130px_0px_1.5fr_0px_0px_32px] md:grid-cols-[36px_1.2fr_130px_1.2fr_1.5fr_0px_0px_32px] lg:grid-cols-[36px_1.2fr_130px_1.2fr_1.5fr_80px_80px_32px]' : 'grid-cols-[1fr_0px_0px_1fr_0px_0px_0px] sm:grid-cols-[1.2fr_130px_0px_1.5fr_0px_0px_32px] md:grid-cols-[1.2fr_130px_1.2fr_1.5fr_0px_0px_32px] lg:grid-cols-[1.2fr_130px_1.2fr_1.5fr_80px_80px_32px]'} px-4 py-3 text-[13px] items-center border-b border-gray-800 transition-colors last:border-b-0 {isSelected ? 'bg-blue-900/10' : ''}"
 >
+	<!-- 체크박스 -->
+	{#if showCheckboxes}
+		<div class="flex items-center" onclick={(e) => e.stopPropagation()} role="none">
+			<input
+				type="checkbox"
+				checked={isSelected}
+				onclick={() => onToggleSelect?.()}
+				class="w-4 h-4 rounded border-gray-600 bg-gray-800 accent-blue-500 cursor-pointer"
+				aria-label="인스턴스 선택"
+			/>
+		</div>
+	{/if}
 	<!-- 이름 -->
 	<button
 		type="button"
@@ -41,7 +61,14 @@
 	<!-- 이미지/플레이버 -->
 	<div class="hidden md:block text-xs min-w-0">
 		<div class="text-gray-300 truncate">{instance.image_name ?? '볼륨에서 부팅'}</div>
-		{#if instance.flavor_name}<div class="text-gray-500 mt-0.5 truncate">{instance.flavor_name}</div>{/if}
+		{#if instance.flavor_name}
+			<div class="text-gray-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
+				<span class="truncate">{instance.flavor_name}</span>
+				{#if isUnderutilized}
+					<span class="shrink-0 px-1.5 py-0.5 bg-amber-900/50 text-amber-400 border border-amber-700/60 rounded text-[10px] font-medium">리사이즈 권장</span>
+				{/if}
+			</div>
+		{/if}
 	</div>
 	<!-- IP -->
 	<div class="text-[11px] sm:text-xs">

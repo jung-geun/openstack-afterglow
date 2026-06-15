@@ -31,10 +31,21 @@ def _owned_share() -> FileStorageInfo:
 
 
 @pytest.mark.asyncio
-async def test_ip_rule_includes_nfs_metadata(client):
-    """access_type=ip 로 rule 생성 시 root_squash/auth_flavor_list metadata가 전달된다."""
+async def test_ip_rule_no_metadata_passed(client):
+    """access_type=ip 로 rule 생성 시 metadata를 전달하지 않는다.
+
+    Manila CephFS NFS는 access rule metadata를 지원하지 않아 전달 시 400을 반환한다.
+    root_squash/sec_flavor는 ensure_nfs_access_rule(내부 마운트 경로)에서만 사용한다.
+    """
     mock_create = MagicMock(
-        return_value={"access_id": "rule-1", "access_key": "", "access_to": "10.0.0.0/24", "access_level": "ro"}
+        return_value={
+            "id": "rule-1",
+            "access_type": "ip",
+            "access_to": "10.0.0.0/24",
+            "access_level": "ro",
+            "state": "new",
+            "access_key": None,
+        }
     )
     with (
         patch("app.api.storage.file_storage.manila.get_file_storage", return_value=_owned_share()),
@@ -45,12 +56,8 @@ async def test_ip_rule_includes_nfs_metadata(client):
             json={"access_to": "10.0.0.0/24", "access_level": "ro", "access_type": "ip"},
         )
     assert resp.status_code == 201
-    # metadata 인자가 실제로 전달되었는지 확인
-    all_kwargs = mock_create.call_args[1]
-    assert "metadata" in all_kwargs, f"metadata 인자 미전달: {mock_create.call_args}"
-    meta = all_kwargs["metadata"]
-    assert meta is not None
-    assert "root_squash" in meta or "auth_flavor_list" in meta
+    _, kwargs = mock_create.call_args
+    assert "metadata" not in kwargs, f"Manila CephFS에 metadata를 전달하면 안 됩니다: {kwargs}"
 
 
 @pytest.mark.asyncio

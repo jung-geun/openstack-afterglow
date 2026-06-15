@@ -894,7 +894,7 @@ class TestNewUnionLayersAPI:
 
     @pytest.mark.asyncio
     async def test_get_dependents_not_found(self, client):
-        """없는 레이어의 dependents → 404."""
+        """없는 레이어의 dependents → 404 (부모 미존재 → early return)."""
         from app.database import get_session
 
         mock_session = AsyncMock()
@@ -905,13 +905,75 @@ class TestNewUnionLayersAPI:
         app.dependency_overrides[get_session] = override_get_session
         try:
             with patch(
-                "app.api.union.layers.union_layers.get_dependents",
-                AsyncMock(side_effect=KeyError("not found")),
+                "app.api.union.layers.union_layers.get_layer",
+                AsyncMock(return_value=None),
             ):
                 resp = await client.get(f"/api/union/layers/{_sha('x')}/dependents")
         finally:
             app.dependency_overrides.pop(get_session, None)
         assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_get_dependents_other_project_parent_forbidden(self, client):
+        """타 프로젝트 소유 부모의 dependents 조회 → 404 (IDOR 방어, 소유권 우선 검증)."""
+        from app.database import get_session
+
+        mock_session = AsyncMock()
+
+        async def override_get_session():
+            yield mock_session
+
+        # get_dependents 가 호출되면 안 된다 (소유권 검증을 먼저 통과해야 함)
+        dependents_mock = AsyncMock(return_value=[_make_layer_info(_sha("child"))])
+        app.dependency_overrides[get_session] = override_get_session
+        try:
+            with (
+                patch(
+                    "app.api.union.layers.union_layers.get_layer",
+                    AsyncMock(return_value=_make_layer_info(_sha("a"), project_id="other-project")),
+                ),
+                patch("app.api.union.layers.union_layers.get_dependents", dependents_mock),
+            ):
+                resp = await client.get(f"/api/union/layers/{_sha('a')}/dependents")
+        finally:
+            app.dependency_overrides.pop(get_session, None)
+        assert resp.status_code == 404
+        dependents_mock.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_get_dependents_filters_cross_project_children(self, client):
+        """공유 부모의 자식 중 타 프로젝트 소유 자식은 응답에서 제외된다."""
+        from app.database import get_session
+
+        mock_session = AsyncMock()
+
+        async def override_get_session():
+            yield mock_session
+
+        children = [
+            _make_layer_info(_sha("own"), "own", "1", project_id="test-project-123"),  # client 소유
+            _make_layer_info(_sha("shared"), "shared", "1", project_id=None),  # 공유
+            _make_layer_info(_sha("other"), "other", "1", project_id="other-project"),  # 타 프로젝트
+        ]
+        app.dependency_overrides[get_session] = override_get_session
+        try:
+            with (
+                patch(
+                    "app.api.union.layers.union_layers.get_layer",
+                    AsyncMock(return_value=_make_layer_info(_sha("a"), project_id=None)),
+                ),
+                patch(
+                    "app.api.union.layers.union_layers.get_dependents",
+                    AsyncMock(return_value=children),
+                ),
+            ):
+                resp = await client.get(f"/api/union/layers/{_sha('a')}/dependents")
+        finally:
+            app.dependency_overrides.pop(get_session, None)
+        assert resp.status_code == 200
+        returned_ids = {c["id"] for c in resp.json()}
+        assert returned_ids == {_sha("own"), _sha("shared")}
+        assert _sha("other") not in returned_ids
 
     @pytest.mark.asyncio
     async def test_delete_layer_admin_success(self, admin_client):

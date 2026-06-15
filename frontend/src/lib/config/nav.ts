@@ -117,7 +117,6 @@ export const adminNavSections: NavSection[] = [
       { label: 'Flavor', href: '/admin/flavors', service: null },
       { label: '이미지', href: '/admin/images', service: null },
       { label: '하이퍼바이저', href: '/admin/hypervisors', service: null },
-      { label: 'GPU', href: '/admin/gpu', service: null },
     ],
   },
   {

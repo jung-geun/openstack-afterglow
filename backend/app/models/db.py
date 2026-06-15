@@ -137,6 +137,23 @@ class GpuQuota(Base):
     __table_args__ = (Index("idx_gpu_quota_project_type", "project_id", "gpu_type", unique=True),)
 
 
+class GpuDeviceCatalog(Base):
+    """관리자가 추가한 GPU PCI 장치 카탈로그. 내장 기본값 + config.toml 위에 overlay된다."""
+
+    __tablename__ = "gpu_device_catalog"
+
+    id: Mapped[int] = mapped_column(INT, primary_key=True, autoincrement=True)
+    vendor_id: Mapped[str] = mapped_column(CHAR(4), nullable=False)  # PCI vendor (예: "10DE")
+    device_id: Mapped[str] = mapped_column(CHAR(4), nullable=False)  # PCI product (예: "2204")
+    name: Mapped[str] = mapped_column(VARCHAR(128), nullable=False)
+    is_audio: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False)
+    aliases: Mapped[list] = mapped_column(JSON, nullable=False, default=list)  # pci_passthrough alias 목록
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+    __table_args__ = (Index("idx_gpu_device_vendor_device", "vendor_id", "device_id", unique=True),)
+
+
 class NotionTarget(Base):
     """Notion 다중 연동 대상. API key는 AES-256-GCM 암호화 저장."""
 

@@ -115,7 +115,8 @@ def _render_mount_lines(proto: str, spec: dict) -> list[str]:
         export_path = spec["export_path"]
         return [
             "mkdir -p /mnt/share",
-            f"mount -t nfs {shlex.quote(export_path)} /mnt/share -o rw,hard,intr",
+            # nconnect: NFS TCP 다중 연결 — 수만 파일 병렬 복사(레이어 배치) 시 RTT 병목 완화
+            f"mount -t nfs {shlex.quote(export_path)} /mnt/share -o rw,hard,intr,nconnect=8",
         ]
     else:
         ceph_mons = spec["ceph_mons"]

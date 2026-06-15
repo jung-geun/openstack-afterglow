@@ -60,11 +60,35 @@ if (typeof window !== 'undefined') {
 		// Fix 5: Secure 속성은 HTTPS에서만 부착 — 비-localhost HTTP 배포에서 쿠키 드롭 방지
 		const secure = location.protocol === 'https:' ? '; Secure' : '';
 		if ($auth.token) {
-			localStorage.setItem('afterglow_auth', JSON.stringify($auth));
+			const serialized = JSON.stringify($auth);
+			// 동일 값 재기록 방지 — storage 이벤트로 받은 상태를 그대로 되쓰는 왕복 차단
+			if (localStorage.getItem('afterglow_auth') !== serialized) {
+				localStorage.setItem('afterglow_auth', serialized);
+			}
 			document.cookie = `afterglow_session=1; path=/; SameSite=Strict${secure}`;
 		} else {
 			localStorage.removeItem('afterglow_auth');
 			document.cookie = `afterglow_session=; path=/; SameSite=Strict${secure}; max-age=0`;
+		}
+	});
+
+	// 탭 간 세션 동기화: 같은 브라우저의 다른 탭이 토큰을 회전(갱신)하거나 로그아웃하면
+	// 즉시 이 탭의 store에 반영한다. refresh 토큰은 1회용(회전 시 즉시 폐기)이므로
+	// 동기화가 없으면 두 번째 탭이 폐기된 토큰으로 갱신을 시도하다 세션 전체가 끊긴다.
+	// storage 이벤트는 변경을 일으킨 탭 자신에게는 발생하지 않으므로 루프가 생기지 않는다.
+	window.addEventListener?.('storage', (e) => {
+		if (e.key !== 'afterglow_auth') return;
+		if (e.newValue === null) {
+			// 다른 탭에서 로그아웃
+			authReady.set(false);
+			auth.set(initial);
+			return;
+		}
+		try {
+			const incoming = JSON.parse(e.newValue) as Partial<AuthState>;
+			if (incoming.token) auth.update((cur) => ({ ...cur, ...incoming }));
+		} catch {
+			/* 손상된 값 무시 */
 		}
 	});
 }

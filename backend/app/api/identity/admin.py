@@ -15,15 +15,16 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.requests import Request
 
+from app.api.common.activity_recorder import rec
 from app.api.deps import CacheMode, cache_mode, get_os_conn, get_token_info, require_admin
 from app.utils.version import read_app_version
 
 _logger = logging.getLogger(__name__)
 from app.config import get_settings
 from app.models.storage import FileStorageInfo, TopologyData, TopologyInstance
+from app.services import instance_recovery, library_builder, manila, neutron, nova
 from app.services import k3s_db as k3s_cluster
 from app.services import libraries as lib_svc
-from app.services import library_builder, manila, neutron, nova
 from app.services.cache import cached_call, invalidate, ttl_fast, ttl_normal, ttl_slow
 from app.services.octavia import get_topology_lbs
 
@@ -634,6 +635,7 @@ async def list_hypervisors(
                     "local_disk_gb": h.get("local_gb", 0) or 0,
                     "local_disk_used_gb": h.get("local_gb_used", 0) or 0,
                     "running_vms": h.get("running_vms", 0) or 0,
+                    "cpu_model": nova.extract_cpu_model(h),
                 }
                 for h in data
             ]
@@ -727,6 +729,7 @@ async def get_hypervisor_detail(hypervisor_id: str, conn: openstack.connection.C
                 "local_gb_used": h.get("local_gb_used", 0) or 0,
                 "running_vms": h.get("running_vms", 0) or 0,
                 "cpu_info": h.get("cpu_info"),
+                "cpu_model": nova.extract_cpu_model(h),
                 "servers": servers,
             }
 
@@ -1484,14 +1487,30 @@ class LiveMigrateRequest(BaseModel):
 
 
 class ColdMigrateRequest(BaseModel):
-    pass
+    host: str | None = None
 
 
 @router.get("/compute-hosts", dependencies=[Depends(require_admin)])
-async def list_compute_hosts(conn: openstack.connection.Connection = Depends(get_os_conn)):
-    """마이그레이션 가능한 컴퓨트 호스트 목록."""
+async def list_compute_hosts(
+    server_id: str | None = Query(None),
+    cpu_filter: bool = Query(True),
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """마이그레이션 가능한 컴퓨트 호스트 목록.
+
+    server_id가 주어지면 해당 인스턴스의 현재 호스트를 소스로 삼아 소스 자신을 제외한다.
+    cpu_filter=true(기본)이면 동일 CPU 모델 호스트만 반환(라이브 마이그레이션용).
+    cpu_filter=false이면 CPU 모델 무관 전체 반환(콜드 마이그레이션용).
+    """
     try:
-        return await asyncio.to_thread(nova.list_compute_hosts, conn)
+        source_host: str | None = None
+        if server_id:
+            try:
+                srv = await asyncio.to_thread(conn.compute.get_server, server_id)
+                source_host = getattr(srv, "compute_host", None)
+            except Exception:
+                pass
+        return await asyncio.to_thread(nova.list_compute_hosts, conn, source_host, cpu_filter)
     except Exception:
         raise HTTPException(status_code=500, detail="컴퓨트 호스트 목록 조회 실패")
 
@@ -1508,23 +1527,63 @@ async def live_migrate_instance(
         return {"status": "migrating"}
     except Exception as e:
         _logger.warning("라이브 마이그레이션 실패: %s", e)
-
-        raise HTTPException(status_code=400, detail="라이브 마이그레이션 실패")
+        raise HTTPException(status_code=400, detail=nova._extract_os_error(e))
 
 
 @router.post("/instances/{server_id}/cold-migrate", dependencies=[Depends(require_admin)])
 async def cold_migrate_instance(
     server_id: str,
+    req: ColdMigrateRequest,
     conn: openstack.connection.Connection = Depends(get_os_conn),
 ):
-    """인스턴스 콜드 마이그레이션."""
+    """인스턴스 콜드 마이그레이션. host를 지정하면 해당 호스트로 이동한다."""
     try:
-        await asyncio.to_thread(nova.cold_migrate_server, conn, server_id)
+        await asyncio.to_thread(nova.cold_migrate_server, conn, server_id, req.host)
         return {"status": "migrating"}
     except Exception as e:
         _logger.warning("콜드 마이그레이션 실패: %s", e)
+        raise HTTPException(status_code=400, detail=nova._extract_os_error(e))
 
-        raise HTTPException(status_code=400, detail="콜드 마이그레이션 실패")
+
+@router.get("/instances/{server_id}/migration-status", dependencies=[Depends(require_admin)])
+async def get_migration_status(
+    server_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """인스턴스의 현재 호스트 + 진행 중 마이그레이션 상태 조회.
+
+    MIGRATING 중이면 source→dest·메모리 진행률을 포함한다.
+    실패 시 실패 사유를 포함한다. 폴링용으로 설계됨(예외는 fail-soft).
+    """
+    return await asyncio.to_thread(nova.get_server_migration_status, conn, server_id)
+
+
+@router.post("/instances/{server_id}/live-migrate/abort", dependencies=[Depends(require_admin)])
+async def abort_live_migration(
+    server_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """진행 중 라이브 마이그레이션 중단."""
+    try:
+        await asyncio.to_thread(nova.abort_live_migration, conn, server_id)
+        return {"status": "aborted"}
+    except Exception as e:
+        _logger.warning("라이브 마이그레이션 중단 실패: %s", e)
+        raise HTTPException(status_code=400, detail=nova._extract_os_error(e))
+
+
+@router.post("/instances/{server_id}/live-migrate/force-complete", dependencies=[Depends(require_admin)])
+async def force_complete_live_migration(
+    server_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """진행 중 라이브 마이그레이션 강제 완료."""
+    try:
+        await asyncio.to_thread(nova.force_complete_live_migration, conn, server_id)
+        return {"status": "force-completed"}
+    except Exception as e:
+        _logger.warning("라이브 마이그레이션 강제 완료 실패: %s", e)
+        raise HTTPException(status_code=400, detail=nova._extract_os_error(e))
 
 
 @router.post("/instances/{server_id}/confirm-resize", dependencies=[Depends(require_admin)])
@@ -1579,6 +1638,64 @@ async def revert_resize_instance(
     except Exception as e:
         _logger.warning("리사이즈 취소 실패: %s", e)
         raise HTTPException(status_code=400, detail="리사이즈 취소 실패")
+
+
+# ---------------------------------------------------------------------------
+# 인스턴스 복구 (관리자 전용)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/instances/{server_id}/recovery-analysis", dependencies=[Depends(require_admin)])
+async def get_recovery_analysis(
+    server_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """ERROR 인스턴스 진단 — 안전 검사 5종 + 시나리오 판정 + 복구 권장 단계 반환.
+
+    ERROR 상태가 아닌 경우에도 200을 반환하며 checks의 is_error_state 항목에 반영된다.
+    """
+    try:
+        return await asyncio.to_thread(instance_recovery.analyze_error_instance, conn, server_id)
+    except Exception as e:
+        _logger.warning("복구 분석 실패: %s", e)
+        raise HTTPException(status_code=500, detail="복구 분석 중 오류가 발생했습니다")
+
+
+@router.post("/instances/{server_id}/recover", dependencies=[Depends(require_admin)])
+async def recover_instance(
+    server_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    """ERROR 인스턴스 복구 실행.
+
+    실행 직전 안전 검사를 서버측에서 재수행한다(fail-closed).
+    auto_executable=False이면 409를 반환하고 아무 작업도 수행하지 않는다.
+    성공·실패 모두 활동 기록에 남긴다.
+    """
+    try:
+        result = await asyncio.to_thread(instance_recovery.execute_recovery, conn, server_id)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except Exception as e:
+        _logger.warning("복구 실행 실패: %s", e)
+        raise HTTPException(status_code=500, detail="복구 실행 중 오류가 발생했습니다")
+
+    status = "success" if result.get("executed") else "error"
+    try:
+        await rec(
+            token_info,
+            conn,
+            resource_type="instance",
+            action="recover",
+            status=status,
+            resource_id=server_id,
+            extra={"scenario": result.get("scenario"), "steps": result.get("steps")},
+        )
+    except Exception:
+        pass  # 활동 기록 실패는 복구 결과에 영향을 주지 않는다
+
+    return result
 
 
 class VolumeTransferRequest(BaseModel):

@@ -23,6 +23,10 @@ export function createAutoRefresh(fn: () => void | Promise<void>, options: AutoR
 		intervalOptions
 	});
 
+	// 비영속 boost: setBoost(seconds) 로 임시 가속, setBoost(null) 로 해제
+	let _boost = $state<number | null>(null);
+	function setBoost(seconds: number | null) { _boost = seconds; }
+
 	// 이전 라운드가 끝나기 전 다음 라운드가 겹쳐 실행되지 않도록 in-flight 가드
 	let _running = false;
 	async function tick() {
@@ -51,13 +55,15 @@ export function createAutoRefresh(fn: () => void | Promise<void>, options: AutoR
 	// Timer management + Page Visibility API
 	$effect(() => {
 		if (!state.active) return;
+		// _boost를 여기서 읽어야 reactive dependency로 등록됨 (boost 변화 시 timer 재시작)
+		const effectiveMs = (_boost ?? state.intervalSeconds) * 1000;
 
 		let timerId: ReturnType<typeof setInterval> | null = null;
 
 		function start() {
 			timerId = setInterval(() => {
 				tick();
-			}, state.intervalSeconds * 1000);
+			}, effectiveMs);
 		}
 
 		function stop() {
@@ -90,5 +96,12 @@ export function createAutoRefresh(fn: () => void | Promise<void>, options: AutoR
 		};
 	});
 
-	return state;
+	return {
+		get active() { return state.active; },
+		set active(v: boolean) { state.active = v; },
+		get intervalSeconds() { return state.intervalSeconds; },
+		set intervalSeconds(v: number) { state.intervalSeconds = v; },
+		get intervalOptions() { return state.intervalOptions; },
+		setBoost,
+	};
 }

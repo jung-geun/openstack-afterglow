@@ -1,0 +1,57 @@
+#!/bin/bash
+# afterglow-data-mounts: 사용자 지정 Manila share 마운트 (fstab 등록 포함)
+# cloud-init이 생성하며, 매 부팅 시 afterglow-data-mounts.service가 실행한다.
+set -euo pipefail
+
+LOG=/var/log/afterglow-data-mounts.log
+exec >> "$LOG" 2>&1
+echo "[$(date)] data-mounts 시작"
+
+MAX_RETRIES=30
+RETRY_INTERVAL=5
+
+{% for dm in data_mounts %}
+# ── {{ dm.mount_point }} ──────────────────────────────────────
+mkdir -p {{ dm.mount_point | shlex_quote }}
+{% if dm.share_proto == "NFS" %}
+if ! mountpoint -q {{ dm.mount_point | shlex_quote }}; then
+    echo "[$(date)] NFS 마운트 시도: {{ dm.nfs_export_location | shlex_quote }} -> {{ dm.mount_point | shlex_quote }}"
+    for _i in $(seq 1 $MAX_RETRIES); do
+        if mount -t nfs -o {{ dm.mount_options | shlex_quote }} {{ dm.nfs_export_location | shlex_quote }} {{ dm.mount_point | shlex_quote }} 2>/dev/null; then
+            echo "[$(date)] NFS 마운트 완료: {{ dm.mount_point | shlex_quote }}"
+            break
+        fi
+        if [ "$_i" -eq "$MAX_RETRIES" ]; then
+            echo "[$(date)] NFS 마운트 실패: {{ dm.mount_point | shlex_quote }}" >&2
+            exit 1
+        fi
+        sleep $RETRY_INTERVAL
+    done
+fi
+grep -qF {{ dm.nfs_export_location | shlex_quote }} /etc/fstab 2>/dev/null || \
+    printf '%s\t%s\tnfs\t%s\t0\t0\n' {{ dm.nfs_export_location | shlex_quote }} {{ dm.mount_point | shlex_quote }} {{ dm.mount_options | shlex_quote }} >> /etc/fstab
+{% elif dm.share_proto == "CEPHFS" %}
+_keyring={{ ('/etc/ceph/ceph.client.' + dm.cephx_id + '.keyring') | shlex_quote }}
+if ! mountpoint -q {{ dm.mount_point | shlex_quote }}; then
+    echo "[$(date)] CephFS 마운트 시도: {{ dm.export_path | shlex_quote }} -> {{ dm.mount_point | shlex_quote }}"
+    for _i in $(seq 1 $MAX_RETRIES); do
+        if modprobe ceph 2>/dev/null && \
+           mount -t ceph {{ dm.export_path | shlex_quote }} {{ dm.mount_point | shlex_quote }} \
+               -o "name={{ dm.cephx_id }},secretfile=${_keyring},_netdev{% if dm.read_only %},ro{% endif %}" 2>/dev/null; then
+            echo "[$(date)] CephFS 마운트 완료: {{ dm.mount_point | shlex_quote }}"
+            break
+        fi
+        if [ "$_i" -eq "$MAX_RETRIES" ]; then
+            echo "[$(date)] CephFS 마운트 실패: {{ dm.mount_point | shlex_quote }}" >&2
+            exit 1
+        fi
+        sleep $RETRY_INTERVAL
+    done
+fi
+grep -qF {{ dm.export_path | shlex_quote }} /etc/fstab 2>/dev/null || \
+    printf '%s\t%s\tceph\t%s\t0\t0\n' {{ dm.export_path | shlex_quote }} {{ dm.mount_point | shlex_quote }} \
+        "name={{ dm.cephx_id }},secretfile=/etc/ceph/ceph.client.{{ dm.cephx_id }}.keyring,_netdev{% if dm.read_only %},ro{% endif %}" >> /etc/fstab
+{% endif %}
+{% endfor %}
+
+echo "[$(date)] data-mounts 완료"

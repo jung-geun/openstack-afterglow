@@ -13,6 +13,10 @@
 	import { openWizard } from '$lib/stores/wizard';
 	import AdminInstanceFilters from '$lib/components/admin/instances/AdminInstanceFilters.svelte';
 	import AdminInstanceTable from '$lib/components/admin/instances/AdminInstanceTable.svelte';
+	import { toast } from '$lib/stores/toast';
+	import { confirmDialog } from '$lib/stores/confirm.svelte';
+	import { isTransitional } from '$lib/utils/instanceStatus';
+	import RecoveryModal from '$lib/components/admin/instances/RecoveryModal.svelte';
 	import type { AdminInstance, PagedResponse, TsPoint } from '$lib/types/adminInstance';
 	import { StatTile } from '$lib/components/ui';
 
@@ -69,11 +73,11 @@
 		} catch { availableHosts = []; }
 	}
 
-	async function loadTimeseries(range: string) {
-		tsLoading = true;
+	async function loadTimeseries(range: string, opts?: { background?: boolean }) {
+		if (!opts?.background) tsLoading = true;
 		try { tsData = await api.get<TsPoint[]>(`/api/admin/timeseries/instances?range=${range}`, token, projectId); }
-		catch { tsData = []; }
-		finally { tsLoading = false; }
+		catch { if (!opts?.background) tsData = []; }
+		finally { if (!opts?.background) tsLoading = false; }
 	}
 
 	async function loadHealth() {
@@ -82,8 +86,14 @@
 		} catch { health = null; }
 	}
 
+	let selectedIds = $state(new Set<string>());
+	let bulkActioning = $state(false);
+	let recoveryInst = $state<AdminInstance | null>(null);
+
 	function openDetail(inst: AdminInstance) { selectedInstanceId = inst.id; selectedProjectId = inst.project_id; }
 	function closeDetail() { selectedInstanceId = null; selectedProjectId = null; }
+	function openRecovery(inst: AdminInstance) { recoveryInst = inst; }
+	function closeRecovery() { recoveryInst = null; }
 	function onFilterChange() { markerStack = []; nextMarker = null; load(); }
 	function onPrev() {
 		const prev = markerStack.slice(0, -1);
@@ -93,9 +103,45 @@
 	function onNext() { if (!nextMarker) return; markerStack = [...markerStack, nextMarker]; load(nextMarker); }
 
 	const ar = createAutoRefresh(
-		() => { load(markerStack[markerStack.length - 1]); loadTimeseries(tsRange); },
+		() => { load(markerStack[markerStack.length - 1]); loadTimeseries(tsRange, { background: true }); },
 		{ storageKey: 'admin-instances', defaultActive: true, defaultInterval: 15, intervalOptions: [10, 15, 30, 60] }
 	);
+
+	$effect(() => {
+		const hasTransitional = allInstances.some(i => isTransitional(i.status));
+		ar.setBoost(hasTransitional ? 4 : null);
+	});
+
+	async function bulkAction(action: 'start' | 'stop' | 'delete') {
+		const ids = [...selectedIds];
+		if (ids.length === 0) return;
+		const labels: Record<string, string> = { start: '시작', stop: '종료', delete: '삭제' };
+		if (action === 'stop' || action === 'delete') {
+			const msg = action === 'delete'
+				? `선택한 인스턴스 ${ids.length}개를 삭제하시겠습니까?`
+				: `선택한 인스턴스 ${ids.length}개를 종료하시겠습니까?`;
+			if (!await confirmDialog(msg)) return;
+		}
+		bulkActioning = true;
+		try {
+			const res = await api.post<{ results: { id: string; ok: boolean; error?: string }[] }>(
+				'/api/instances/bulk-action',
+				{ action, instance_ids: ids },
+				token, projectId,
+			);
+			const failed = res.results.filter(r => !r.ok).length;
+			const ok = res.results.filter(r => r.ok).length;
+			if (ok > 0) toast.success(`${ok}개 ${labels[action]} 요청 완료`);
+			if (failed > 0) toast.error(`${failed}개 처리 실패`);
+			selectedIds = new Set();
+			ar.setBoost(4);
+			load(markerStack[markerStack.length - 1]);
+		} catch {
+			toast.error(`일괄 ${labels[action]} 요청 실패`);
+		} finally {
+			bulkActioning = false;
+		}
+	}
 
 	onMount(() => {
 		if (window.matchMedia('(max-width: 767px)').matches) pageSize = 10;
@@ -171,6 +217,23 @@
 		{/if}
 	</div>
 
+	<!-- 일괄 액션 바 -->
+	{#if selectedIds.size > 0}
+		<div class="flex items-center gap-3 mb-3 px-4 py-2.5 bg-blue-950/60 border border-blue-800/60 rounded-xl">
+			<span class="text-blue-300 text-sm font-medium">{selectedIds.size}개 선택됨</span>
+			<div class="flex gap-2 ml-auto">
+				<button type="button" disabled={bulkActioning} onclick={() => bulkAction('start')}
+					class="px-3 py-1.5 text-xs font-medium rounded-lg bg-green-700/80 hover:bg-green-600/80 text-white disabled:opacity-50 transition-colors">시작</button>
+				<button type="button" disabled={bulkActioning} onclick={() => bulkAction('stop')}
+					class="px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-700/80 hover:bg-amber-600/80 text-white disabled:opacity-50 transition-colors">종료</button>
+				<button type="button" disabled={bulkActioning} onclick={() => bulkAction('delete')}
+					class="px-3 py-1.5 text-xs font-medium rounded-lg bg-red-700/80 hover:bg-red-600/80 text-white disabled:opacity-50 transition-colors">삭제</button>
+				<button type="button" onclick={() => { selectedIds = new Set(); }}
+					class="px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-700/80 hover:bg-gray-600/80 text-gray-300 transition-colors">취소</button>
+			</div>
+		</div>
+	{/if}
+
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={5} />
 	{:else}
@@ -179,9 +242,23 @@
 			{markerStack}
 			{nextMarker}
 			{refreshing}
+			{selectedIds}
 			onOpen={openDetail}
 			{onPrev}
 			{onNext}
+			onRecover={openRecovery}
+			onToggleSelect={(id: string) => {
+				const next = new Set(selectedIds);
+				if (next.has(id)) next.delete(id); else next.add(id);
+				selectedIds = next;
+			}}
+			onToggleAll={() => {
+				if (allInstances.every(i => selectedIds.has(i.id))) {
+					selectedIds = new Set();
+				} else {
+					selectedIds = new Set(allInstances.map(i => i.id));
+				}
+			}}
 		/>
 	{/if}
 </div>
@@ -190,4 +267,13 @@
 	<SlidePanel onClose={closeDetail}>
 		<InstanceDetailPanel instanceId={selectedInstanceId} adminProjectId={selectedProjectId} onClose={closeDetail} />
 	</SlidePanel>
+{/if}
+
+{#if recoveryInst}
+	<RecoveryModal
+		serverId={recoveryInst.id}
+		serverName={recoveryInst.name || recoveryInst.id.slice(0, 8)}
+		onClose={closeRecovery}
+		onRecovered={() => { closeRecovery(); markerStack = []; nextMarker = null; load(); }}
+	/>
 {/if}

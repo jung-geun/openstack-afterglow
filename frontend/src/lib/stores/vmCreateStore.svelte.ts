@@ -79,6 +79,7 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 	let networks = $state<NetworkInfo[]>([]);
 	let keypairs = $state<KeypairInfo[]>([]);
 	let volumes = $state<Volume[]>([]);
+	let fileStorages = $state<{ id: string; name: string; status: string; share_proto: string }[]>([]);
 	let securityGroups = $state<SecurityGroupInfo[]>([]);
 	let availabilityZones = $state<AvailabilityZoneInfo[]>([]);
 	let defaultNetworkId = $state<string | null>(null);
@@ -221,17 +222,12 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 					gigabytes: r.volume?.gigabytes,
 				};
 			} else if (!opts.adminMode()) {
-				const r = await api.get<{
-					compute?: { instances_used?: number; instances_limit?: number; vcpus_used?: number; vcpus_limit?: number; ram_used_mb?: number; ram_limit_mb?: number };
-					storage?: { gigabytes_used?: number; gigabytes_limit?: number };
-				}>('/api/dashboard/summary', token, projectId);
-				const c = r.compute ?? {};
-				const st = r.storage ?? {};
+				const r = await api.get<{ compute?: any; storage?: any }>('/api/dashboard/quotas', token, projectId);
 				flavorQuota = {
-					instances: { limit: c.instances_limit ?? -1, in_use: c.instances_used ?? 0 },
-					cores: { limit: c.vcpus_limit ?? -1, in_use: c.vcpus_used ?? 0 },
-					ram: { limit: c.ram_limit_mb ?? -1, in_use: c.ram_used_mb ?? 0 },
-					gigabytes: { limit: st.gigabytes_limit ?? -1, in_use: st.gigabytes_used ?? 0 },
+					instances: r.compute?.instances,
+					cores: r.compute?.cores,
+					ram: r.compute?.ram,
+					gigabytes: r.storage?.gigabytes,
 				};
 			}
 		} catch {
@@ -311,6 +307,9 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 				try {
 					availabilityZones = await api.get<AvailabilityZoneInfo[]>('/api/instances/availability-zones', token, projectId);
 				} catch { availabilityZones = []; }
+				try {
+					fileStorages = await api.get<typeof fileStorages>('/api/storage/file-storages', token, projectId);
+				} catch { fileStorages = []; }
 
 				if (keypairs.length === 1 && !get(wizard).keyName) {
 					wizard.update(w => ({ ...w, keyName: keypairs[0].name }));
@@ -443,6 +442,11 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 			availability_zone: w.availabilityZone,
 			security_groups: w.securityGroups,
 			userdata: w.cloudInit || null,
+			data_mounts: w.dataMounts.map(m => ({
+				file_storage_id: m.fileStorageId,
+				mount_point: m.mountPoint,
+				read_only: m.readOnly,
+			})),
 		};
 		if (opts.adminMode() && adminSelectedProjectId) {
 			body.project_id = adminSelectedProjectId;
@@ -532,6 +536,7 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 		get networks() { return networks; },
 		get keypairs() { return keypairs; },
 		get volumes() { return volumes; },
+		get fileStorages() { return fileStorages; },
 		get securityGroups() { return securityGroups; },
 		get availabilityZones() { return availabilityZones; },
 		get defaultNetworkId() { return defaultNetworkId; },

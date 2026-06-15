@@ -479,6 +479,132 @@ async def _handle_success(
     _logger.info("[ephemeral_build] 빌드 성공: library=%s, share=%s", library_id, share_id)
 
 
+async def resume_ephemeral_build(
+    build_db_id: int,
+    library_id: str,
+    library_version: str,
+    share_id: str,
+    server_id: str,
+    port_id: str | None,
+    build_token: str,
+    proto: str = "NFS",
+) -> None:
+    """백엔드 재시작으로 중단된 ephemeral 빌드를 재개한다.
+
+    VM이 ACTIVE면 SHUTOFF 폴링을 재시작하고, SHUTOFF면 sentinel 검증만 수행한다.
+    VM이 없으면 error 처리 후 반환한다.
+    """
+    conn = await asyncio.to_thread(get_service_project_connection)
+
+    try:
+        server = await asyncio.to_thread(conn.compute.get_server, server_id)
+        vm_status = (server.status or "").upper()
+    except Exception:
+        _logger.warning("[ephemeral_build] 재개: VM 없음 (build_id=%d, server=%s)", build_db_id, server_id)
+        await _update_db(
+            build_db_id,
+            status="error",
+            cloud_init_status="failure",
+            progress_step="재개 실패: VM 없음",
+            error_message="백엔드 재시작 후 빌드 VM을 찾을 수 없습니다",
+            completed=True,
+        )
+        if share_id:
+            try:
+                await asyncio.to_thread(manila.update_share_metadata, conn, share_id, {"union_status": "error"})
+            except Exception:
+                pass
+        return
+
+    early_success = False
+    early_failure = False
+
+    try:
+        if vm_status == "ACTIVE":
+            await _update_db(
+                build_db_id,
+                status="building",
+                progress_step="cloud-init 실행 중 (재개)",
+                progress_pct=25,
+            )
+            early_success, early_failure = await _wait_for_shutoff(conn, server_id, build_db_id, build_token)
+        elif vm_status == "ERROR":
+            early_failure = True
+        # SHUTOFF: sentinel 검증으로 진행
+
+        await _update_db(
+            build_db_id,
+            cloud_init_status="finalizing",
+            progress_step="결과 검증 (재개)",
+            progress_pct=90,
+        )
+
+        console = ""
+        try:
+            console = await asyncio.to_thread(nova.get_console_output, conn, server_id, None)
+        except Exception:
+            _logger.warning("[ephemeral_build] 재개: console_output 조회 실패 (server=%s)", server_id)
+
+        if console:
+            excerpt = console[-2000:] if len(console) > 2000 else console
+            await _update_db(build_db_id, console_log_excerpt=excerpt)
+
+        success_tok = f"{_SUCCESS_SENTINEL}{build_token}"
+        failure_tok = f"{_FAILURE_SENTINEL}{build_token}"
+
+        if success_tok in console or early_success:
+            await _handle_success(conn, library_id, library_version, share_id, proto, build_db_id, None)
+        elif failure_tok in console or early_failure:
+            raise RuntimeError("cloud-init FAILURE sentinel 감지 (재개)")
+        else:
+            _logger.warning("[ephemeral_build] 재개: sentinel 부재 (indeterminate): library=%s", library_id)
+            await _update_db(
+                build_db_id,
+                status="error",
+                cloud_init_status="indeterminate",
+                progress_step="sentinel 부재 (재개)",
+                error_message="재개 후 sentinel을 찾을 수 없습니다. VM panic 또는 console buffer 초과 가능성.",
+                completed=True,
+            )
+            if share_id:
+                try:
+                    await asyncio.to_thread(
+                        manila.update_share_metadata, conn, share_id, {"union_status": "indeterminate"}
+                    )
+                except Exception:
+                    pass
+
+    except Exception as exc:
+        _logger.error("[ephemeral_build] 빌드 재개 실패: library=%s", library_id, exc_info=True)
+        if share_id:
+            try:
+                await asyncio.to_thread(manila.update_share_metadata, conn, share_id, {"union_status": "error"})
+            except Exception:
+                pass
+        await _update_db(
+            build_db_id,
+            status="error",
+            cloud_init_status="failure",
+            progress_step="재개 실패",
+            error_message=str(exc)[:1000],
+            completed=True,
+        )
+
+    finally:
+        if server_id:
+            try:
+                await asyncio.to_thread(conn.compute.delete_server, server_id)
+                _logger.info("[ephemeral_build] 재개: server 삭제: %s", server_id)
+            except Exception:
+                _logger.warning("[ephemeral_build] 재개: server 삭제 실패: %s", server_id, exc_info=True)
+        if port_id:
+            try:
+                await asyncio.to_thread(neutron.delete_port, conn, port_id)
+                _logger.info("[ephemeral_build] 재개: port 삭제: %s", port_id)
+            except Exception:
+                _logger.warning("[ephemeral_build] 재개: port 삭제 실패: %s", port_id, exc_info=True)
+
+
 async def cancel_ephemeral_build(build_db_id: int) -> dict:
     """진행 중인 ephemeral 빌드를 취소하고 OpenStack 리소스를 정리한다."""
     from sqlalchemy import select

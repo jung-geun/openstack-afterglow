@@ -59,14 +59,14 @@
 		});
 	}
 
-	async function loadTimeseries(range: string) {
-		tsLoading = true;
+	async function loadTimeseries(range: string, opts?: { background?: boolean }) {
+		if (!opts?.background) tsLoading = true;
 		try {
 			tsData = await api.get<TsPoint[]>(`/api/admin/timeseries/volumes?range=${range}`, token, projectId);
 		} catch {
-			tsData = [];
+			if (!opts?.background) tsData = [];
 		} finally {
-			tsLoading = false;
+			if (!opts?.background) tsLoading = false;
 		}
 	}
 
@@ -91,7 +91,7 @@
 	}
 
 	const ar = createAutoRefresh(
-		() => { load(markerStack[markerStack.length - 1]); loadTimeseries(tsRange); },
+		() => { load(markerStack[markerStack.length - 1]); loadTimeseries(tsRange, { background: true }); },
 		{ storageKey: 'admin-volumes', defaultActive: true, defaultInterval: 30, intervalOptions: [15, 30, 60] },
 	);
 
