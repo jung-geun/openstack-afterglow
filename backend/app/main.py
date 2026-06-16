@@ -1014,16 +1014,27 @@ async def _deferred_create_tables() -> None:
 
 
 async def _deferred_load_gpu_catalog() -> None:
-    """DB의 GPU 장치 카탈로그를 PCI_DEVICE_MAP에 overlay. 실패해도 base map으로 동작."""
+    """DB의 GPU 장치 카탈로그를 PCI_DEVICE_MAP에 overlay. 실패해도 base map으로 동작.
+
+    다중 replica 환경에서 각 pod가 startup 시 DB 카탈로그를 반드시 로드해야 한다.
+    이전 구현은 `is_db_available()`가 처음에 False면 즉시 return하고 재시도하지 않아,
+    DB 준비가 늦으면 해당 pod의 PCI_DEVICE_MAP에 DB overlay가 영구 누락되어
+    하이퍼바이저 GPU 이름이 raw로 표시되는 문제가 있었다. 짧게 재시도한다.
+    """
     from app.database import is_db_available
     from app.services.gpu_catalog import refresh_device_map_from_db
 
-    if not is_db_available():
-        return
-    try:
-        await refresh_device_map_from_db()
-    except Exception:
-        _logger.warning("GPU 장치 카탈로그 DB 로드 실패 — 내장/config 카탈로그로 동작", exc_info=True)
+    for attempt in range(8):
+        if is_db_available():
+            try:
+                await refresh_device_map_from_db()
+                return
+            except Exception:
+                _logger.warning(
+                    "GPU 장치 카탈로그 DB 로드 실패 (시도 %d) — 재시도", attempt + 1, exc_info=True
+                )
+        await asyncio.sleep(min(2**attempt, 30))
+    _logger.warning("GPU 장치 카탈로그 DB 로드 최종 실패 — 내장/config 카탈로그로 동작")
 
 
 @app.on_event("startup")

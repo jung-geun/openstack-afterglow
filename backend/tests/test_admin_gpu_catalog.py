@@ -118,6 +118,39 @@ async def test_list_gpu_devices_marks_db_source(admin_client):
     assert rtx3090["source"] == "db"
 
 
+@pytest.mark.asyncio
+async def test_list_gpu_devices_includes_db_only_device_not_in_map(admin_client):
+    """DB에만 있고 이 pod의 PCI_DEVICE_MAP에 overlay되지 않은 장치도 목록에 포함된다.
+
+    회귀 방지: 다중 replica/startup overlay 타이밍과 무관하게 카탈로그를 DB 기준으로 표시.
+    수정 전에는 PCI_DEVICE_MAP만 순회해 DB-only 장치가 누락(업로드 41개인데 38개만 표시)됐다.
+    """
+    from app.services.gpu_inventory import PCI_DEVICE_MAP
+
+    # apply_db_overlay를 호출하지 않음 → 맵에는 없지만 DB에는 있는 상황(업로드 처리 pod와
+    # 목록 서빙 pod가 다른 다중 replica 케이스)을 재현.
+    assert "AAAA" not in PCI_DEVICE_MAP.get("10DE", {}), "전제: 맵에 AAAA가 없어야 함"
+    db_only = {
+        "vendor_id": "10DE",
+        "device_id": "AAAA",
+        "name": "DB Only GPU",
+        "is_audio": False,
+        "aliases": ["DBONLY"],
+    }
+    with (
+        patch("app.database.is_db_available", return_value=True),
+        patch("app.services.gpu_catalog.list_db_devices", new=AsyncMock(return_value=[db_only])),
+    ):
+        resp = await admin_client.get("/api/admin/gpu-devices")
+    assert resp.status_code == 200
+    devices = resp.json()["devices"]
+    entry = next((d for d in devices if d["vendor_id"] == "10DE" and d["device_id"] == "AAAA"), None)
+    assert entry is not None, "DB-only 장치가 병합 카탈로그에 포함되어야 함 (수정 전에는 누락)"
+    assert entry["source"] == "db"
+    assert entry["name"] == "DB Only GPU"
+    assert entry["aliases"] == ["DBONLY"]
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # POST 단건 upsert + 입력 검증
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
