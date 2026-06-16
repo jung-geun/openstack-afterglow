@@ -83,6 +83,9 @@ spec:
             - name: afterglow-config-volume
               mountPath: /app/config.toml
               subPath: config.toml
+            - name: afterglow-config-volume
+              mountPath: /app/config.gpu.toml
+              subPath: config.gpu.toml
             - name: builder-ssh-key
               mountPath: /etc/afterglow/ssh
               readOnly: true
@@ -120,6 +123,8 @@ spec:
             items:
               - key: config.toml
                 path: config.toml
+              - key: config.gpu.toml
+                path: config.gpu.toml
         - name: builder-ssh-key
           secret:
             secretName: afterglow-secrets

@@ -60,6 +60,9 @@ spec:
             - name: afterglow-config-volume
               mountPath: /app/config.toml
               subPath: config.toml
+            - name: afterglow-config-volume
+              mountPath: /app/config.gpu.toml
+              subPath: config.gpu.toml
           resources:
             {{- toYaml .Values.resources.notionWorker | nindent 12 }}
       volumes:
@@ -69,3 +72,5 @@ spec:
             items:
               - key: config.toml
                 path: config.toml
+              - key: config.gpu.toml
+                path: config.gpu.toml
