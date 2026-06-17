@@ -40,7 +40,8 @@ _DEFAULT_PCI_DEVICE_MAP: dict[str, dict[str, dict]] = {
         "220A": {"name": "RTX 3080", "is_audio": False, "aliases": ["RTX3080", "RTX_3080", "3080"]},
         "2484": {"name": "RTX 3070 Ti", "is_audio": False, "aliases": ["RTX3070Ti", "RTX_3070_Ti", "3070ti", "3070Ti"]},
         "2482": {"name": "RTX 3070", "is_audio": False, "aliases": ["RTX3070", "RTX_3070", "3070"]},
-        "2504": {"name": "RTX 3060", "is_audio": False, "aliases": ["RTX3060", "RTX_3060", "3060"]},
+        "2487": {"name": "RTX 3060", "is_audio": False, "aliases": ["RTX3060", "RTX_3060", "3060"]},
+        "2504": {"name": "RTX 3060 LHR", "is_audio": False, "aliases": ["RTX3060LHR", "RTX_3060_LHR", "3060LHR"]},
         "1AEF": {"name": "GA102 Audio", "is_audio": True, "aliases": []},
         # === Ada Lovelace Consumer ===
         "2684": {"name": "RTX 4090", "is_audio": False, "aliases": ["RTX4090", "rtx4090", "RTX_4090", "4090"]},
