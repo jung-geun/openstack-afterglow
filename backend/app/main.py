@@ -1030,9 +1030,7 @@ async def _deferred_load_gpu_catalog() -> None:
                 await refresh_device_map_from_db()
                 return
             except Exception:
-                _logger.warning(
-                    "GPU 장치 카탈로그 DB 로드 실패 (시도 %d) — 재시도", attempt + 1, exc_info=True
-                )
+                _logger.warning("GPU 장치 카탈로그 DB 로드 실패 (시도 %d) — 재시도", attempt + 1, exc_info=True)
         await asyncio.sleep(min(2**attempt, 30))
     _logger.warning("GPU 장치 카탈로그 DB 로드 최종 실패 — 내장/config 카탈로그로 동작")
 
