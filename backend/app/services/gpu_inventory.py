@@ -408,6 +408,9 @@ def build_alias_to_device_name_map() -> dict[str, str]:
 
     예: "RTX3090" → "RTX 3090", "A100_80GB" → "A100 SXM4 80GB"
     GPU flavor의 pci_passthrough:alias 값을 GPU Spec Notion 페이지 이름으로 변환할 때 사용한다.
+
+    대소문자·구분자(-, _, 공백) 무관 매칭을 위해 원본 alias 외에 정규화 키도 등록한다.
+    예: "RTX3060LHR" 등록 시 "rtx3060lhr"도 함께 등록 → flavor name fallback("3060lhr") 허용.
     """
     alias_map: dict[str, str] = {}
     for devices in PCI_DEVICE_MAP.values():
@@ -418,4 +421,7 @@ def build_alias_to_device_name_map() -> dict[str, str]:
             for alias in info.get("aliases", []):
                 if alias:
                     alias_map[alias] = name
+                    # 정규화 키도 등록 (소문자, 구분자 제거) — exact match 우선 보장을 위해 setdefault
+                    norm = alias.replace("-", "").replace("_", "").replace(" ", "").lower()
+                    alias_map.setdefault(norm, name)
     return alias_map

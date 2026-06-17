@@ -131,7 +131,7 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 	const hasGpuFlavor = $derived(
 		flavors.find(f => f.id === wizardState.flavorId)
 			? Object.keys(flavors.find(f => f.id === wizardState.flavorId)?.extra_specs ?? {}).some(
-				k => k.toLowerCase().includes('gpu')
+				k => k.toLowerCase().includes('gpu') || k.startsWith('pci_passthrough')
 			)
 			: false
 	);

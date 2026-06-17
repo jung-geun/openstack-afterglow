@@ -84,7 +84,7 @@
 
 	function hasGpu(flavor: FlavorInfo): boolean {
 		return Object.keys(flavor.extra_specs ?? {}).some(
-			(k) => k.toLowerCase().includes('gpu') || k.toLowerCase().includes('pci')
+			(k) => k.toLowerCase().includes('gpu') || k.startsWith('pci_passthrough')
 		);
 	}
 
