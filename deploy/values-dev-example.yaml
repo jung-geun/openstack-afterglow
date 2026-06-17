@@ -1,0 +1,226 @@
+# =============================================================================
+# Afterglow Dev 환경 오버라이드 예시
+# 배포 서버에 values-dev.yaml 로 저장 후 아래 명령으로 배포:
+#
+#   helm upgrade --install afterglow-dev \
+#     oci://ghcr.io/openstack-afterglow/charts/afterglow \
+#     --version 1.15.2 \
+#     -f values-dev.yaml \
+#     -f secrets-dev.yaml \
+#     --namespace afterglow-dev --create-namespace
+#
+# 이 파일에는 시크릿을 기록하지 마세요. 시크릿은 secrets-dev.yaml 에만.
+# =============================================================================
+
+image:
+  backend:
+    tag: dev
+  frontend:
+    tag: dev
+  worker:
+    tag: dev
+
+replicaCount:
+  backend: 1
+  frontend: 1
+  worker: 1
+  notionWorker: 1
+  redis: 1
+
+ingress:
+  host: dev.cloud.example.com
+  tlsSecretName: afterglow-tls
+  certIssuer: letsencrypt-dev-traefik
+
+openstack:
+  authUrl: "https://keystone.example.com/v3"
+  projectName: "admin"
+  projectDomainName: "Default"
+  userDomainName: "Default"
+  regionName: "RegionOne"
+  username: "admin"
+  interface: "public"
+  manilaEndpoint: ""
+  manilaShareNetworkId: ""
+  manilaShareType: "cephfs"
+  manilaNfsShareType: "cephfsnfstype"
+  manilaNfsRootSquash: true
+  manilaNfsSecFlavor: "sys"
+  manilaCephxKeyTimeoutSeconds: 300
+  cephMonitors: "10.0.0.1:6789,10.0.0.2:6789,10.0.0.3:6789"
+  serviceProjectId: "YOUR_SERVICE_PROJECT_UUID"
+  swiftEndpoint: ""
+  swiftUploadTimeout: 600
+
+app:
+  backendPort: 8000
+  frontendPort: 3080
+  siteName: "My Cloud Dev"
+  siteDescription: "OpenStack 기반 클라우드 플랫폼 (dev)"
+  logoPath: "/logo.png"
+  faviconPath: "/favicon.ico"
+  refreshIntervalMs: 5000
+  frontendBaseUrl: "https://dev.cloud.example.com"
+
+cache:
+  ttlFast: 15
+  ttlNormal: 30
+  ttlSlow: 60
+  ttlStatic: 300
+  defaultTtlSeconds: 30
+  backend: "redis"
+  dynamicThresholdLow: 5
+  dynamicThresholdHigh: 20
+  ttlIdentityStable: 86400
+  ttlCatalogSlow: 900
+  ttlProjectMeta: 300
+  ttlOperationalLive: 30
+  ttlAdminOverview: 60
+  ttlAuthToken: 60
+
+session:
+  timeoutSeconds: 3600
+  warningBeforeSeconds: 300
+  absoluteTimeout: 14400
+  jwtAccessTtl: 900
+  jwtRefreshTtl: 604800
+
+nova:
+  defaultNetworkId: "YOUR_DEFAULT_NETWORK_UUID"
+  defaultAvailabilityZone: "nova"
+  bootVolumeSizeGb: 20
+  upperVolumeSizeGb: 50
+  defaultNetworkEnabled: true
+  defaultNetworkCidr: "10.0.0.0/16"
+  defaultNetworkExternalId: "YOUR_EXTERNAL_NETWORK_UUID"
+
+builder:
+  imageId: "YOUR_BUILDER_IMAGE_UUID"
+  flavorId: "YOUR_BUILDER_FLAVOR_UUID"
+  networkId: "YOUR_NETWORK_UUID"
+  persistentServerId: ""
+  sshUser: "ubuntu"
+  sshKeyPath: "/etc/afterglow/ssh/builder.key"
+  sshHost: ""
+  floatingNetworkId: ""
+  buildTimeout: 3600
+
+union:
+  layerStoreRwShareId: ""
+  layerStoreRoShareId: ""
+  manifestStoreShareId: ""
+
+gpu:
+  availableVisible: true
+
+services:
+  magnum: false
+  manila: true
+  zun: true
+  k3s: true
+  swift: true
+  trove: true
+  barbican: true
+
+k3s:
+  version: "v1.34.6+k3s1"
+  serverFlavorId: "YOUR_SERVER_FLAVOR_UUID"
+  defaultAgentFlavorId: "YOUR_AGENT_FLAVOR_UUID"
+  serverImageId: "YOUR_SERVER_IMAGE_UUID"
+  fcosImageId: "YOUR_FCOS_IMAGE_UUID"
+  callbackBaseUrl: "https://dev.cloud.example.com/"
+  bootVolumeSizeGb: 30
+  certRotationNodeTimeoutSec: 300
+  occmEnabled: true
+  occmImage: "registry.k8s.io/provider-os/openstack-cloud-controller-manager:v1.34.1"
+  occmFloatingNetworkId: "YOUR_FLOATING_NETWORK_UUID"
+  occmPublicNetworkName: "public_provider"
+  cinderCsiEnabled: true
+  cinderCsiImage: "registry.k8s.io/provider-os/cinder-csi-plugin:v1.34.1"
+  cinderCsiDefaultAz: "nova"
+  manilaCsiEnabled: true
+  manilaCsiImage: "registry.k8s.io/provider-os/manila-csi-plugin:v1.34.1"
+  manilaCsiNfsImage: "registry.k8s.io/sig-storage/nfsplugin:v4.9.0"
+  manilaCsiShareProtocol: "NFS"
+  keystoneAuthEnabled: true
+  keystoneAuthImage: "registry.k8s.io/provider-os/k8s-keystone-auth:v1.34.1"
+  octaviaIngressEnabled: true
+  octaviaIngressImage: "registry.k8s.io/provider-os/octavia-ingress-controller:v1.34.1"
+  octaviaIngressSubnetId: "YOUR_SUBNET_UUID"
+  octaviaIngressFloatingNetworkId: "YOUR_FLOATING_NETWORK_UUID"
+  barbicanKmsEnabled: false
+  barbicanKmsImage: "registry.k8s.io/provider-os/barbican-kms-plugin:v1.34.1"
+  barbicanKmsKekId: ""
+  apiLbEnabled: true
+  apiLbVipNetworkId: "YOUR_FLOATING_NETWORK_UUID"
+  lbSubnetId: ""
+  certRotationJobImage: "registry.k8s.io/util-linux/util-linux:latest"
+  stampedeEnabled: true
+  stampedeProjectId: ""
+  stampedeInterval: 60
+  stampedeScaleDownWindow: 600
+  stampedeScaleUpCooldown: 120
+  stampedeScaleDownCooldown: 300
+  stampedeScaleDownThreshold: 0.5
+  stampedeResourceHeadroomFactor: 0.3
+
+database:
+  poolSize: 5
+  maxOverflow: 10
+  autoCreateTables: true
+  connectTimeout: 10
+  poolTimeout: 10
+  unhealthySeconds: 15
+  dbAutoBackupCron: "0 3 * * *"
+
+cors:
+  origins: "https://dev.cloud.example.com"
+
+gitlabOidc:
+  enabled: true
+  gitlabUrl: "https://gitlab.example.com/"
+  clientId: "YOUR_GITLAB_CLIENT_ID"
+  idpId: "gitlab"
+  protocolId: "openid"
+  redirectUri: "https://dev.cloud.example.com/auth/gitlab/callback"
+  scopes: "openid email profile read_user"
+
+smtp:
+  enabled: true
+  host: "smtp.gmail.com"
+  port: 587
+  username: "noreply@example.com"
+  fromAddress: "noreply@cloud.example.com"
+  fromName: "My Cloud"
+  useTls: true
+  invitation:
+    tokenExpiryDays: 7
+
+security:
+  adminLegacyProjectPolicy: true
+
+monitoring:
+  enabled: false
+  prometheusBaseUrl: "https://prometheus.example.com"
+  prometheusUsername: "admin"
+  scrapeCidr: ""
+  autoSgEnabled: true
+  nodeExporterSgName: "node_exporter"
+  dcgmExporterSgName: "dcgm_exporter"
+  nodeExporterPort: 9100
+  dcgmExporterPort: 9400
+  libvirtExporterPort: 9177
+  gpuFlavorPrefix: "gpu."
+  grafanaBaseUrl: "https://grafana.example.com"
+  dashboards:
+    nodeUid: "afterglow-node"
+    rabbitmqUid: "afterglow-rabbitmq"
+    mysqldUid: "afterglow-mysqld"
+    memcachedUid: "afterglow-memcached"
+    etcdUid: "afterglow-etcd"
+    haproxyUid: "afterglow-haproxy"
+    libvirtUid: "afterglow-libvirt"
+    openstackUid: "afterglow-openstack"
+    cephUid: "afterglow-ceph"
+    instanceCpuUid: "afterglow-instance-cpu"
+    instanceGpuUid: "afterglow-instance-gpu"

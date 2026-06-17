@@ -37,4 +37,13 @@ try {
 	process.exit(1);
 }
 
+// 4) helm/afterglow/Chart.yaml — version 및 appVersion 갱신
+const chartPath = path.join(root, "helm/afterglow/Chart.yaml");
+if (fs.existsSync(chartPath)) {
+	let chart = fs.readFileSync(chartPath, "utf-8");
+	chart = chart.replace(/^version:\s*.+$/m, `version: ${version}`);
+	chart = chart.replace(/^appVersion:\s*.+$/m, `appVersion: "${version}"`);
+	fs.writeFileSync(chartPath, chart);
+}
+
 console.log(`✓ version synced to ${version}`);

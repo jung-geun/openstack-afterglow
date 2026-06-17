@@ -14,11 +14,14 @@ FE_V=$(extract_pkg_version "${ROOT_DIR}/frontend/package.json")
 BE_V=$(grep -E '^version[[:space:]]*=' "${ROOT_DIR}/backend/pyproject.toml" \
     | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
 
-if [ "$ROOT_V" != "$FE_V" ] || [ "$ROOT_V" != "$BE_V" ]; then
+CHART_V=$(grep '^version:' "${ROOT_DIR}/helm/afterglow/Chart.yaml" | awk '{print $2}')
+
+if [ "$ROOT_V" != "$FE_V" ] || [ "$ROOT_V" != "$BE_V" ] || [ "$ROOT_V" != "$CHART_V" ]; then
     echo "✗ version mismatch:" >&2
     echo "  root package.json        : $ROOT_V" >&2
     echo "  frontend/package.json    : $FE_V" >&2
     echo "  backend/pyproject.toml   : $BE_V" >&2
+    echo "  helm/afterglow/Chart.yaml: $CHART_V" >&2
     echo "" >&2
     echo "  fix: npm run version:sync" >&2
     exit 1
