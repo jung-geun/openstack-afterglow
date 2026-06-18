@@ -662,7 +662,22 @@ def list_access_rules(conn, file_storage_id: str) -> list[dict]:
     client = get_client(conn)
     # API v2.45+: use share-access-rules endpoint instead of action
     data = client.get(f"share-access-rules?share_id={file_storage_id}")
-    return data.get("access_rules", [])
+    rules = data.get("access_rules", [])
+    if rules:
+        return rules
+    # 일부 Manila 구성에서 share-access-rules가 빈 결과를 반환하는 경우 legacy action API fallback
+    try:
+        data2 = client.post(f"shares/{file_storage_id}/action", {"os-list-access": {}})
+        legacy = data2.get("access_list", [])
+        if legacy:
+            logger.warning(
+                "share-access-rules returned empty; os-list-access fallback returned %d rules",
+                len(legacy),
+            )
+        return legacy
+    except Exception as e:
+        logger.debug("os-list-access fallback failed: %s", e)
+        return rules
 
 
 def get_export_locations(conn, file_storage_id: str) -> list[str]:

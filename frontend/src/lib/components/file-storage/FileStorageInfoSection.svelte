@@ -85,14 +85,6 @@
 			<dd class="text-sm text-gray-300 font-mono truncate" title={fs.user_id ?? undefined}>{creatorLabel}</dd>
 		</div>
 
-		<!-- Availability Zone -->
-		{#if fs.availability_zone}
-			<div>
-				<dt class="text-xs text-gray-500 mb-0.5">가용 영역</dt>
-				<dd class="text-sm text-gray-300">{fs.availability_zone}</dd>
-			</div>
-		{/if}
-
 		<!-- Share Type -->
 		{#if fs.share_type_name}
 			<div>
@@ -106,14 +98,6 @@
 			<div>
 				<dt class="text-xs text-gray-500 mb-0.5">Share 네트워크</dt>
 				<dd class="text-sm text-gray-300 font-mono truncate">{fs.share_network_id}</dd>
-			</div>
-		{/if}
-
-		<!-- Host (admin 전용 — null이면 숨김) -->
-		{#if fs.host}
-			<div class="col-span-full">
-				<dt class="text-xs text-gray-500 mb-0.5">Host</dt>
-				<dd class="text-sm text-gray-300 font-mono break-all">{fs.host}</dd>
 			</div>
 		{/if}
 

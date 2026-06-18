@@ -37,7 +37,8 @@ function createFileStorageDetailController(opts: Options) {
 	let copiedKey = $state<string | null>(null);
 
 	async function fetchFileStorage() {
-		loading = true;
+		// 초기 로드일 때만 스켈레톤 표시 — 이미 데이터가 있으면 백그라운드 새로고침
+		if (fileStorage === null) loading = true;
 		error = '';
 		try {
 			fileStorage = await api.get<FileStorage>(
@@ -53,7 +54,8 @@ function createFileStorageDetailController(opts: Options) {
 	}
 
 	async function fetchAccessRules() {
-		accessLoading = true;
+		// 초기 로드일 때만 로딩 표시 — 이미 규칙이 있으면 백그라운드 새로고침
+		if (accessRules.length === 0) accessLoading = true;
 		accessError = '';
 		try {
 			accessRules = await api.get<AccessRule[]>(
