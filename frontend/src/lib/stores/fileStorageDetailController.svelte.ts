@@ -28,6 +28,7 @@ function createFileStorageDetailController(opts: Options) {
 
 	let accessRules = $state<AccessRule[]>([]);
 	let accessLoading = $state(false);
+	let accessError = $state('');
 	let showAddRule = $state(false);
 	let ruleForm = $state({ access_to: '', access_level: 'ro' });
 	let addingRule = $state(false);
@@ -53,14 +54,16 @@ function createFileStorageDetailController(opts: Options) {
 
 	async function fetchAccessRules() {
 		accessLoading = true;
+		accessError = '';
 		try {
 			accessRules = await api.get<AccessRule[]>(
 				`/api/file-storage/${opts.fileStorageId()}/access-rules`,
 				opts.token(),
 				opts.projectId()
 			);
-		} catch {
+		} catch (e) {
 			accessRules = [];
+			accessError = e instanceof ApiError ? `접근 규칙 로드 실패 (${e.status}): ${e.message}` : '접근 규칙을 불러오지 못했습니다';
 		} finally {
 			accessLoading = false;
 		}
@@ -145,6 +148,7 @@ function createFileStorageDetailController(opts: Options) {
 		get copiedIndex() { return copiedIndex; },
 		get accessRules() { return accessRules; },
 		get accessLoading() { return accessLoading; },
+		get accessError() { return accessError; },
 		get showAddRule() { return showAddRule; },
 		set showAddRule(v: boolean) { showAddRule = v; },
 		get ruleForm() { return ruleForm; },

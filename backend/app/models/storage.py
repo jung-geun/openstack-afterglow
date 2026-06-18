@@ -3,6 +3,12 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
+class ExportLocation(BaseModel):
+    path: str
+    preferred: bool = False
+    share_instance_id: str | None = None
+
+
 class FileStorageInfo(BaseModel):
     id: str
     name: str
@@ -19,6 +25,16 @@ class FileStorageInfo(BaseModel):
     library_name: str | None = None
     library_version: str | None = None
     built_at: str | None = None
+    # 확장 필드 (Manila 상세 정보)
+    progress: str | None = None
+    user_id: str | None = None
+    user_name: str | None = None  # Keystone 이름 해석(best-effort), 실패 시 None
+    access_rules_status: str | None = None
+    host: str | None = None  # admin 전용 — 비-admin 응답 시 None으로 마스킹
+    availability_zone: str | None = None
+    share_type_name: str | None = None
+    share_network_id: str | None = None
+    export_location_details: list[ExportLocation] = []  # path + preferred + instance
 
 
 class LibraryConfig(BaseModel):

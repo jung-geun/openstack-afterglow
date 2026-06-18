@@ -528,10 +528,36 @@ def list_file_storages(
     return file_storages
 
 
-def get_file_storage(conn, file_storage_id: str) -> FileStorageInfo:
+def get_file_storage(conn, file_storage_id: str, resolve_user: bool = False) -> FileStorageInfo:
+    """share 상세 조회.
+
+    resolve_user=True 시 Keystone에서 user_id → user_name 해석을 시도한다(best-effort).
+    export_locations는 별도 서브리소스를 통해 병합한다(Manila 2.9+ 인라인 제거 대응).
+    """
     client = get_client(conn)
     data = client.get(f"shares/{file_storage_id}")["share"]
-    return _parse_file_storage(data)
+
+    # export_locations 별도 조회 (Manila 2.9+에서 인라인 없음)
+    try:
+        export_details = get_export_location_details(conn, file_storage_id)
+    except Exception:
+        export_details = []
+
+    fs = _parse_file_storage(data, export_detail_list=export_details)
+
+    # 생성자 이름 해석 (best-effort)
+    if resolve_user and fs.user_id:
+        try:
+            from app.services import keystone
+
+            user_info = keystone.get_user(conn, fs.user_id)
+            resolved_name = user_info.get("name") or None
+            if resolved_name:
+                fs = fs.model_copy(update={"user_name": resolved_name})
+        except Exception:
+            pass  # user_name은 None 유지 — 프론트가 user_id로 fallback
+
+    return fs
 
 
 # ---------------------------------------------------------------------------
@@ -647,6 +673,26 @@ def get_export_locations(conn, file_storage_id: str) -> list[str]:
     return [loc["path"] for loc in locations if loc.get("is_admin_only") is False]
 
 
+def get_export_location_details(conn, file_storage_id: str) -> list[dict]:
+    """export_locations 서브리소스에서 상세 정보 반환 (path, preferred, share_instance_id).
+
+    Manila 2.9+에서 share 인라인 뷰에 export_locations가 포함되지 않으므로
+    상세 조회 시 이 함수로 별도 취득한다.
+    is_admin_only=True인 항목은 제외한다.
+    """
+    client = get_client(conn)
+    data = client.get(f"shares/{file_storage_id}/export_locations")
+    return [
+        {
+            "path": loc["path"],
+            "preferred": bool(loc.get("preferred", False)),
+            "share_instance_id": loc.get("share_instance_id"),
+        }
+        for loc in data.get("export_locations", [])
+        if loc.get("is_admin_only") is False
+    ]
+
+
 # ---------------------------------------------------------------------------
 # 내부 유틸
 # ---------------------------------------------------------------------------
@@ -710,14 +756,37 @@ def _get_access_key(client: ManilaClient, file_storage_id: str, access_id: str, 
     )
 
 
-def _parse_file_storage(data: dict) -> FileStorageInfo:
+def _parse_file_storage(data: dict, export_detail_list: list[dict] | None = None) -> FileStorageInfo:
+    """share dict를 FileStorageInfo로 변환.
+
+    export_detail_list: get_export_location_details()로 별도 취득한 상세 목록.
+                        None이면 인라인 data["export_locations"]에서 경로만 추출한다
+                        (목록 뷰용 — Manila 2.9+에서는 항상 빈 리스트가 된다).
+    """
     meta = data.get("metadata", {}) or {}
-    locations = []
-    for loc in data.get("export_locations", []):
-        if isinstance(loc, dict):
-            locations.append(loc.get("path", ""))
-        elif isinstance(loc, str):
-            locations.append(loc)
+
+    if export_detail_list is not None:
+        # 상세 조회 경로: 별도 취득한 dict 목록 사용
+        locations = [loc["path"] for loc in export_detail_list]
+        from app.models.storage import ExportLocation
+
+        export_location_details = [
+            ExportLocation(
+                path=loc["path"],
+                preferred=bool(loc.get("preferred", False)),
+                share_instance_id=loc.get("share_instance_id"),
+            )
+            for loc in export_detail_list
+        ]
+    else:
+        # 목록 조회 경로: 인라인 export (Manila 2.9+에서는 항상 비어 있음)
+        locations = []
+        for loc in data.get("export_locations", []):
+            if isinstance(loc, dict):
+                locations.append(loc.get("path", ""))
+            elif isinstance(loc, str):
+                locations.append(loc)
+        export_location_details = []
 
     share_proto = data.get("share_proto", "CEPHFS")
 
@@ -741,6 +810,15 @@ def _parse_file_storage(data: dict) -> FileStorageInfo:
         library_name=meta.get("union_library"),
         library_version=meta.get("union_version"),
         built_at=meta.get("union_built_at"),
+        # 확장 필드
+        progress=data.get("progress"),
+        user_id=data.get("user_id"),
+        access_rules_status=data.get("access_rules_status"),
+        host=data.get("host"),
+        availability_zone=data.get("availability_zone"),
+        share_type_name=data.get("share_type_name"),
+        share_network_id=data.get("share_network_id"),
+        export_location_details=export_location_details,
     )
 
 

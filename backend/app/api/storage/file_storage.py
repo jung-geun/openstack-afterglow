@@ -36,9 +36,9 @@ def _assert_share_owner(share, conn, token_info: dict) -> None:
         raise HTTPException(status_code=404, detail="파일 스토리지를 찾을 수 없습니다")
 
 
-def _fetch_and_assert_share_owner(conn, file_storage_id: str, token_info: dict):
+def _fetch_and_assert_share_owner(conn, file_storage_id: str, token_info: dict, resolve_user: bool = False):
     try:
-        share = manila.get_file_storage(conn, file_storage_id)
+        share = manila.get_file_storage(conn, file_storage_id, resolve_user=resolve_user)
     except Exception:
         raise HTTPException(status_code=404, detail="파일 스토리지를 찾을 수 없습니다")
     _assert_share_owner(share, conn, token_info)
@@ -96,7 +96,11 @@ async def get_file_storage(
     conn: openstack.connection.Connection = Depends(get_os_conn),
     token_info: dict = Depends(get_token_info),
 ):
-    return _fetch_and_assert_share_owner(conn, file_storage_id, token_info)
+    share = _fetch_and_assert_share_owner(conn, file_storage_id, token_info, resolve_user=True)
+    # host 필드는 백엔드 컨트롤러·CephFS 풀 토폴로지 정보 — admin 전용 노출
+    if not token_info.get("is_system_admin", False) and share.host is not None:
+        share = share.model_copy(update={"host": None})
+    return share
 
 
 @router.post("", response_model=FileStorageInfo, status_code=201)
