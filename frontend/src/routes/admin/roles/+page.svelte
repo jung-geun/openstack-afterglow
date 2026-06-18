@@ -23,7 +23,7 @@
 	async function load() {
 		if (roles.length === 0) loading = true;
 		else refreshing = true;
-		try { roles = await api.get<Role[]>('/api/admin/roles', token, projectId); }
+		try { roles = await api.get<Role[]>('/api/v1/admin/roles', token, projectId); }
 		catch { roles = []; }
 		finally { loading = false; refreshing = false; }
 	}

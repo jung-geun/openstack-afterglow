@@ -181,7 +181,7 @@ async def test_list_pods_endpoint(client):
     ):
         mc.get_cluster = AsyncMock(return_value=_cluster())
         mk.list_pods = AsyncMock(return_value=pods)
-        resp = await client.get("/api/k3s/clusters/k3s-1/namespaces/default/pods")
+        resp = await client.get("/api/v1/k3s/clusters/k3s-1/namespaces/default/pods")
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) == 2
@@ -198,7 +198,7 @@ async def test_delete_pod_idempotent_404(client):
     ):
         mc.get_cluster = AsyncMock(return_value=_cluster())
         mk.delete_pod = AsyncMock(return_value=None)
-        resp = await client.delete("/api/k3s/clusters/k3s-1/namespaces/default/pods/mypod")
+        resp = await client.delete("/api/v1/k3s/clusters/k3s-1/namespaces/default/pods/mypod")
     assert resp.status_code == 204
     mk.delete_pod.assert_called_once_with("k3s-1", "default", "mypod", project_id=ANY)
 
@@ -212,7 +212,7 @@ async def test_get_pod_log_passes_tail_lines(client):
     ):
         mc.get_cluster = AsyncMock(return_value=_cluster())
         mk.get_pod_log = AsyncMock(return_value="line1\nline2\n")
-        resp = await client.get("/api/k3s/clusters/k3s-1/namespaces/default/pods/mypod/log?tail_lines=50")
+        resp = await client.get("/api/v1/k3s/clusters/k3s-1/namespaces/default/pods/mypod/log?tail_lines=50")
     assert resp.status_code == 200
     body = resp.json()
     assert "line1" in body["log"]
@@ -234,7 +234,7 @@ async def test_pods_endpoint_requires_project_match(client):
         patch("app.api.k3s.pods.k3s_kube"),
     ):
         mc.get_cluster = AsyncMock(return_value=None)
-        resp = await client.get("/api/k3s/clusters/other-cluster/namespaces/default/pods")
+        resp = await client.get("/api/v1/k3s/clusters/other-cluster/namespaces/default/pods")
     assert resp.status_code == 404
 
 
@@ -249,7 +249,7 @@ async def test_restart_deployment_patches_annotation(client):
     ):
         mc.get_cluster = AsyncMock(return_value=_cluster())
         mk.restart_deployment = AsyncMock(return_value=dep_result)
-        resp = await client.post("/api/k3s/clusters/k3s-1/namespaces/default/deployments/mydeploy/restart")
+        resp = await client.post("/api/v1/k3s/clusters/k3s-1/namespaces/default/deployments/mydeploy/restart")
     assert resp.status_code == 200
     mk.restart_deployment.assert_called_once_with("k3s-1", "default", "mydeploy", project_id=ANY)
     assert resp.json()["name"] == "mydeploy"
@@ -267,7 +267,7 @@ async def test_scale_deployment_zero_allowed(client):
         mc.get_cluster = AsyncMock(return_value=_cluster())
         mk.scale_deployment = AsyncMock(return_value=dep_result)
         resp = await client.patch(
-            "/api/k3s/clusters/k3s-1/namespaces/default/deployments/mydeploy/scale",
+            "/api/v1/k3s/clusters/k3s-1/namespaces/default/deployments/mydeploy/scale",
             json={"replicas": 0},
         )
     assert resp.status_code == 200
@@ -283,7 +283,7 @@ async def test_scale_deployment_negative_rejected(client):
     ):
         mc.get_cluster = AsyncMock(return_value=_cluster())
         resp = await client.patch(
-            "/api/k3s/clusters/k3s-1/namespaces/default/deployments/mydeploy/scale",
+            "/api/v1/k3s/clusters/k3s-1/namespaces/default/deployments/mydeploy/scale",
             json={"replicas": -1},
         )
     assert resp.status_code == 422
@@ -299,7 +299,7 @@ async def test_list_services_endpoint(client):
     ):
         mc.get_cluster = AsyncMock(return_value=_cluster())
         mk.list_services = AsyncMock(return_value=svcs)
-        resp = await client.get("/api/k3s/clusters/k3s-1/namespaces/default/services")
+        resp = await client.get("/api/v1/k3s/clusters/k3s-1/namespaces/default/services")
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) == 2

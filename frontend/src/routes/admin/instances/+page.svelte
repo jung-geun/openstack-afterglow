@@ -53,7 +53,7 @@
 	async function load(marker?: string) {
 		allInstances.length === 0 ? (loading = true) : (refreshing = true);
 		try {
-			let url = `/api/admin/all-instances?limit=${pageSize}`;
+			let url = `/api/v1/admin/all-instances?limit=${pageSize}`;
 			if (marker) url += `&marker=${marker}`;
 			if (hostFilter) url += `&host=${encodeURIComponent(hostFilter)}`;
 			if (projectFilter) url += `&project_id=${encodeURIComponent(projectFilter)}`;
@@ -68,21 +68,21 @@
 
 	async function loadHosts() {
 		try {
-			const hvs = await api.get<{ id: string; name: string }[]>('/api/admin/hypervisors', token, projectId);
+			const hvs = await api.get<{ id: string; name: string }[]>('/api/v1/admin/hypervisors', token, projectId);
 			availableHosts = hvs.map(h => h.name).sort();
 		} catch { availableHosts = []; }
 	}
 
 	async function loadTimeseries(range: string, opts?: { background?: boolean }) {
 		if (!opts?.background) tsLoading = true;
-		try { tsData = await api.get<TsPoint[]>(`/api/admin/timeseries/instances?range=${range}`, token, projectId); }
+		try { tsData = await api.get<TsPoint[]>(`/api/v1/admin/timeseries/instances?range=${range}`, token, projectId); }
 		catch { if (!opts?.background) tsData = []; }
 		finally { if (!opts?.background) tsLoading = false; }
 	}
 
 	async function loadHealth() {
 		try {
-			health = await api.get<InstanceHealth>('/api/admin/instances/health', token, projectId);
+			health = await api.get<InstanceHealth>('/api/v1/admin/instances/health', token, projectId);
 		} catch { health = null; }
 	}
 
@@ -125,7 +125,7 @@
 		bulkActioning = true;
 		try {
 			const res = await api.post<{ results: { id: string; ok: boolean; error?: string }[] }>(
-				'/api/instances/bulk-action',
+				'/api/v1/instances/bulk-action',
 				{ action, instance_ids: ids },
 				token, projectId,
 			);

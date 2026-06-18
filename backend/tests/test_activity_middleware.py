@@ -43,55 +43,55 @@ _DEFAULT_TOKEN_INFO = {
 
 
 def test_resource_for_path_instances_no_id():
-    assert _resource_for_path("/api/instances") == ("instance", None)
+    assert _resource_for_path("/api/v1/instances") == ("instance", None)
 
 
 def test_resource_for_path_instances_with_id():
-    assert _resource_for_path("/api/instances/abc-123") == ("instance", "abc-123")
+    assert _resource_for_path("/api/v1/instances/abc-123") == ("instance", "abc-123")
 
 
 def test_resource_for_path_volume_backups_longer_prefix_wins():
-    """/api/volumes/backups は /api/volumes より長い prefix を優先する."""
-    rtype, rid = _resource_for_path("/api/volumes/backups/bid-1")
+    """/api/v1/volumes/backups は /api/volumes より長い prefix を優先する."""
+    rtype, rid = _resource_for_path("/api/v1/volumes/backups/bid-1")
     assert rtype == "volume_backup"
     assert rid == "bid-1"
 
 
 def test_resource_for_path_volumes_short():
-    rtype, rid = _resource_for_path("/api/volumes/vol-1")
+    rtype, rid = _resource_for_path("/api/v1/volumes/vol-1")
     assert rtype == "volume"
     assert rid == "vol-1"
 
 
 def test_resource_for_path_keypairs():
-    rtype, _ = _resource_for_path("/api/keypairs/key-1")
+    rtype, _ = _resource_for_path("/api/v1/keypairs/key-1")
     assert rtype == "keypair"
 
 
 def test_resource_for_path_admin_projects():
-    rtype, rid = _resource_for_path("/api/admin/projects/proj-abc")
+    rtype, rid = _resource_for_path("/api/v1/admin/projects/proj-abc")
     assert rtype == "project"
     assert rid == "proj-abc"
 
 
 def test_resource_for_path_not_in_allowlist_auth():
-    assert _resource_for_path("/api/auth/login") is None
+    assert _resource_for_path("/api/v1/auth/login") is None
 
 
 def test_resource_for_path_not_in_allowlist_dashboard():
-    assert _resource_for_path("/api/dashboard/notifications") is None
+    assert _resource_for_path("/api/v1/dashboard/notifications") is None
 
 
 def test_resource_for_path_not_in_allowlist_metrics():
-    assert _resource_for_path("/api/metrics") is None
+    assert _resource_for_path("/api/v1/metrics") is None
 
 
 def test_resource_for_path_not_in_allowlist_profile():
-    assert _resource_for_path("/api/profile/activity") is None
+    assert _resource_for_path("/api/v1/profile/activity") is None
 
 
 def test_resource_for_path_not_in_allowlist_sd():
-    assert _resource_for_path("/api/sd/targets") is None
+    assert _resource_for_path("/api/v1/sd/targets") is None
 
 
 # ─── 미들웨어 동작 통합 테스트 ────────────────────────────────────────────────
@@ -100,7 +100,7 @@ def test_resource_for_path_not_in_allowlist_sd():
 @pytest.mark.asyncio
 async def test_auto_log_created_when_no_manual_log():
     """수동 rec() 없는 성공 mutation → _record_activity 자동 1회 호출."""
-    req = _make_request("POST", "/api/instances", _DEFAULT_TOKEN_INFO)
+    req = _make_request("POST", "/api/v1/instances", _DEFAULT_TOKEN_INFO)
 
     async def call_next(r):
         # 핸들러가 record() 를 호출하지 않는다 — holder["logged"] 는 False 유지.
@@ -122,7 +122,7 @@ async def test_auto_log_created_when_no_manual_log():
 @pytest.mark.asyncio
 async def test_auto_log_suppressed_when_manual_log_present():
     """핸들러가 record() 를 호출하면(= holder["logged"]=True) 자동 로그 skip."""
-    req = _make_request("PATCH", "/api/instances/inst-1", _DEFAULT_TOKEN_INFO)
+    req = _make_request("PATCH", "/api/v1/instances/inst-1", _DEFAULT_TOKEN_INFO)
 
     async def call_next(r):
         # record() 호출 시 _audit_ctx 의 공유 dict 를 직접 세팅 (실제 record() 동작 재현)
@@ -141,7 +141,7 @@ async def test_auto_log_suppressed_when_manual_log_present():
 @pytest.mark.asyncio
 async def test_auto_log_skipped_on_error_response():
     """4xx/5xx 응답에서는 자동 로그를 생성하지 않는다."""
-    req = _make_request("POST", "/api/keypairs", _DEFAULT_TOKEN_INFO)
+    req = _make_request("POST", "/api/v1/keypairs", _DEFAULT_TOKEN_INFO)
 
     async def call_next(r):
         return JSONResponse({"detail": "err"}, status_code=400)
@@ -155,7 +155,7 @@ async def test_auto_log_skipped_on_error_response():
 @pytest.mark.asyncio
 async def test_auto_log_skipped_when_unauthenticated():
     """token_info 없는 요청(미인증)은 자동 로그를 생성하지 않는다."""
-    req = _make_request("POST", "/api/instances")  # token_info 미세팅
+    req = _make_request("POST", "/api/v1/instances")  # token_info 미세팅
 
     async def call_next(r):
         return JSONResponse({"ok": True}, status_code=201)
@@ -169,7 +169,7 @@ async def test_auto_log_skipped_when_unauthenticated():
 @pytest.mark.asyncio
 async def test_auto_log_skipped_for_get_request():
     """GET 요청은 mutation 이 아니므로 자동 로그 대상이 아니다."""
-    req = _make_request("GET", "/api/instances", _DEFAULT_TOKEN_INFO)
+    req = _make_request("GET", "/api/v1/instances", _DEFAULT_TOKEN_INFO)
 
     async def call_next(r):
         return JSONResponse([], status_code=200)
@@ -183,7 +183,7 @@ async def test_auto_log_skipped_for_get_request():
 @pytest.mark.asyncio
 async def test_auto_log_skipped_for_unregistered_path():
     """allowlist 에 없는 경로는 자동 로그를 생성하지 않는다."""
-    req = _make_request("POST", "/api/auth/login", _DEFAULT_TOKEN_INFO)
+    req = _make_request("POST", "/api/v1/auth/login", _DEFAULT_TOKEN_INFO)
 
     async def call_next(r):
         return JSONResponse({"token": "x"}, status_code=200)
@@ -197,7 +197,7 @@ async def test_auto_log_skipped_for_unregistered_path():
 @pytest.mark.asyncio
 async def test_auto_log_delete_action():
     """DELETE 메서드는 action='delete' 로 기록된다."""
-    req = _make_request("DELETE", "/api/keypairs/key-xyz", _DEFAULT_TOKEN_INFO)
+    req = _make_request("DELETE", "/api/v1/keypairs/key-xyz", _DEFAULT_TOKEN_INFO)
 
     async def call_next(r):
         return JSONResponse(None, status_code=204)
@@ -214,7 +214,7 @@ async def test_auto_log_delete_action():
 @pytest.mark.asyncio
 async def test_auto_log_does_not_block_response_on_record_error():
     """_record_activity 자체가 예외를 던져도 응답을 차단하지 않는다 (best-effort)."""
-    req = _make_request("POST", "/api/networks", _DEFAULT_TOKEN_INFO)
+    req = _make_request("POST", "/api/v1/networks", _DEFAULT_TOKEN_INFO)
 
     async def call_next(r):
         return JSONResponse({"id": "net-1"}, status_code=201)

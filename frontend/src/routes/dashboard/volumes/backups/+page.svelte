@@ -26,7 +26,7 @@
 
 	async function fetchBackups() {
 		try {
-			backups = await api.get<VolumeBackup[]>('/api/volumes/backups', $auth.token ?? undefined, $auth.projectId ?? undefined);
+			backups = await api.get<VolumeBackup[]>('/api/v1/volumes/backups', $auth.token ?? undefined, $auth.projectId ?? undefined);
 			error = '';
 		} catch (e) {
 			error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
@@ -37,13 +37,13 @@
 
 	async function fetchVolumes() {
 		try {
-			volumes = await api.get<Volume[]>('/api/volumes', $auth.token ?? undefined, $auth.projectId ?? undefined);
+			volumes = await api.get<Volume[]>('/api/v1/volumes', $auth.token ?? undefined, $auth.projectId ?? undefined);
 		} catch { /* ignore */ }
 	}
 
 	async function createBackup(form: { volume_id: string; name: string; description: string; incremental: boolean }): Promise<string | true> {
 		try {
-			await api.post('/api/volumes/backups', form, $auth.token ?? undefined, $auth.projectId ?? undefined);
+			await api.post('/api/v1/volumes/backups', form, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			await fetchBackups();
 			return true;
 		} catch (e) {
@@ -54,7 +54,7 @@
 	async function restoreBackup(backupId: string): Promise<{ volume_id: string; volume_name: string } | string> {
 		try {
 			return await api.post<{ volume_id: string; volume_name: string }>(
-				`/api/volumes/backups/${backupId}/restore`,
+				`/api/v1/volumes/backups/${backupId}/restore`,
 				{},
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined
@@ -68,7 +68,7 @@
 		if (!await confirmDialog(`백업 "${name || id.slice(0, 8)}"을 삭제하시겠습니까?`)) return;
 		deleting = id;
 		try {
-			await api.delete(`/api/volumes/backups/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+			await api.delete(`/api/v1/volumes/backups/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			await fetchBackups();
 		} catch (e) {
 			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));

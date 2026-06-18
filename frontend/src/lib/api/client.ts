@@ -119,7 +119,7 @@ async function tryRefresh(): Promise<string | null> {
 			const refreshToken = persisted?.refreshToken ?? state.refreshToken;
 			if (!refreshToken) return null;
 
-			const res = await fetch(`${getBaseUrl()}/api/auth/refresh`, {
+			const res = await fetch(`${getBaseUrl()}/api/v1/auth/refresh`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ refresh_token: refreshToken }),

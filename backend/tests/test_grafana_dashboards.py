@@ -33,7 +33,7 @@ async def test_get_dashboards_returns_all_uids(client):
     fake_settings = _make_settings()
 
     with patch("app.api.common.grafana_auth.get_settings", return_value=fake_settings):
-        resp = await client.get("/api/grafana/dashboards")
+        resp = await client.get("/api/v1/grafana/dashboards")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -52,7 +52,7 @@ async def test_get_dashboards_grafana_url_empty(client):
     fake_settings = _make_settings(grafana_base_url="")
 
     with patch("app.api.common.grafana_auth.get_settings", return_value=fake_settings):
-        resp = await client.get("/api/grafana/dashboards")
+        resp = await client.get("/api/v1/grafana/dashboards")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -66,7 +66,7 @@ async def test_get_dashboards_requires_auth(non_admin_client):
     fake_settings = _make_settings()
 
     with patch("app.api.common.grafana_auth.get_settings", return_value=fake_settings):
-        resp = await non_admin_client.get("/api/grafana/dashboards")
+        resp = await non_admin_client.get("/api/v1/grafana/dashboards")
 
     assert resp.status_code == 200
 
@@ -80,7 +80,7 @@ async def test_get_dashboards_custom_uids(client):
     )
 
     with patch("app.api.common.grafana_auth.get_settings", return_value=fake_settings):
-        resp = await client.get("/api/grafana/dashboards")
+        resp = await client.get("/api/v1/grafana/dashboards")
 
     data = resp.json()
     assert data["dashboards"]["node"] == "custom-node-dashboard"

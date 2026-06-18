@@ -65,7 +65,7 @@
     const projectId = $auth.projectId ?? undefined;
     if (!token) return;
     loading = true;
-    api.get<TopologyData>('/api/networks/topology', token, projectId)
+    api.get<TopologyData>('/api/v1/networks/topology', token, projectId)
       .then(v => { data = v; })
       .catch(() => { error = '토폴로지 불러오기 실패'; })
       .finally(() => { loading = false; });

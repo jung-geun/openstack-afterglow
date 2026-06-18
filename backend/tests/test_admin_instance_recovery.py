@@ -162,7 +162,7 @@ async def test_analysis_migration_failed_volume_stuck(admin_client):
             return_value=[{"id": "p1", "status": "ACTIVE", "binding_vif_type": "ovs"}],
         ),
     ):
-        resp = await admin_client.get(f"/api/admin/instances/{_SERVER_ID}/recovery-analysis")
+        resp = await admin_client.get(f"/api/v1/admin/instances/{_SERVER_ID}/recovery-analysis")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -214,7 +214,7 @@ async def test_analysis_generic_error_no_stuck_volumes(admin_client):
             return_value=[{"id": "p1", "status": "ACTIVE", "binding_vif_type": "ovs"}],
         ),
     ):
-        resp = await admin_client.get(f"/api/admin/instances/{_SERVER_ID}/recovery-analysis")
+        resp = await admin_client.get(f"/api/v1/admin/instances/{_SERVER_ID}/recovery-analysis")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -259,7 +259,7 @@ async def test_analysis_live_migration_fail_not_auto_executable(admin_client):
         patch("app.services.instance_recovery._collect_volumes", return_value=[]),
         patch("app.services.instance_recovery._collect_ports", return_value=[]),
     ):
-        resp = await admin_client.get(f"/api/admin/instances/{_SERVER_ID}/recovery-analysis")
+        resp = await admin_client.get(f"/api/v1/admin/instances/{_SERVER_ID}/recovery-analysis")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -292,7 +292,7 @@ async def test_analysis_non_volume_backed_not_auto_executable(admin_client):
         patch("app.services.instance_recovery._collect_volumes", return_value=[]),
         patch("app.services.instance_recovery._collect_ports", return_value=[]),
     ):
-        resp = await admin_client.get(f"/api/admin/instances/{_SERVER_ID}/recovery-analysis")
+        resp = await admin_client.get(f"/api/v1/admin/instances/{_SERVER_ID}/recovery-analysis")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -328,7 +328,7 @@ async def test_analysis_binding_failed_port_not_auto_executable(admin_client):
             return_value=[{"id": "p1", "status": "DOWN", "binding_vif_type": "binding_failed"}],
         ),
     ):
-        resp = await admin_client.get(f"/api/admin/instances/{_SERVER_ID}/recovery-analysis")
+        resp = await admin_client.get(f"/api/v1/admin/instances/{_SERVER_ID}/recovery-analysis")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -361,7 +361,7 @@ async def test_analysis_active_server_is_error_check_fails(admin_client):
         patch("app.services.instance_recovery._collect_volumes", return_value=[]),
         patch("app.services.instance_recovery._collect_ports", return_value=[]),
     ):
-        resp = await admin_client.get(f"/api/admin/instances/{_SERVER_ID}/recovery-analysis")
+        resp = await admin_client.get(f"/api/v1/admin/instances/{_SERVER_ID}/recovery-analysis")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -544,14 +544,14 @@ def test_execute_recovery_stops_on_step_failure():
 @pytest.mark.anyio
 async def test_recovery_analysis_requires_admin(client):
     """일반 사용자 → 403."""
-    resp = await client.get(f"/api/admin/instances/{_SERVER_ID}/recovery-analysis")
+    resp = await client.get(f"/api/v1/admin/instances/{_SERVER_ID}/recovery-analysis")
     assert resp.status_code == 403
 
 
 @pytest.mark.anyio
 async def test_recover_requires_admin(client):
     """일반 사용자 recover → 403."""
-    resp = await client.post(f"/api/admin/instances/{_SERVER_ID}/recover")
+    resp = await client.post(f"/api/v1/admin/instances/{_SERVER_ID}/recover")
     assert resp.status_code == 403
 
 
@@ -562,7 +562,7 @@ async def test_recover_returns_409_when_not_auto_executable(admin_client):
         patch("app.api.identity.admin.asyncio.to_thread", new=AsyncMock(side_effect=lambda f, *a, **kw: f(*a, **kw))),
         patch("app.services.instance_recovery.execute_recovery", side_effect=ValueError("자동 복구 조건 미충족")),
     ):
-        resp = await admin_client.post(f"/api/admin/instances/{_SERVER_ID}/recover")
+        resp = await admin_client.post(f"/api/v1/admin/instances/{_SERVER_ID}/recover")
 
     assert resp.status_code == 409
     assert "미충족" in resp.json()["detail"]
@@ -584,7 +584,7 @@ async def test_recover_success_returns_steps(admin_client):
         patch("app.services.instance_recovery.execute_recovery", return_value=mock_result),
         patch("app.api.identity.admin.rec", new=AsyncMock()),
     ):
-        resp = await admin_client.post(f"/api/admin/instances/{_SERVER_ID}/recover")
+        resp = await admin_client.post(f"/api/v1/admin/instances/{_SERVER_ID}/recover")
 
     assert resp.status_code == 200
     body = resp.json()

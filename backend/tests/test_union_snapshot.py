@@ -199,7 +199,7 @@ async def test_snapshot_api_returns_201(admin_client):
             return_value=snap_result,
         ):
             resp = await admin_client.post(
-                f"/api/union/layers/{layer_id}/snapshot",
+                f"/api/v1/union/layers/{layer_id}/snapshot",
                 json={"share_id": "share-api", "name": "test-snap"},
             )
     finally:
@@ -234,7 +234,7 @@ async def test_restore_api_returns_204(admin_client):
             return_value=None,
         ):
             resp = await admin_client.post(
-                f"/api/union/layers/{layer_id}/restore",
+                f"/api/v1/union/layers/{layer_id}/restore",
                 json={"share_id": "share-api", "snapshot_id": "snap-api"},
             )
     finally:
@@ -269,7 +269,7 @@ async def test_snapshot_api_layer_not_found_returns_404(admin_client):
             side_effect=KeyError("레이어를 찾을 수 없습니다"),
         ):
             resp = await admin_client.post(
-                f"/api/union/layers/{layer_id}/snapshot",
+                f"/api/v1/union/layers/{layer_id}/snapshot",
                 json={"share_id": "share-api"},
             )
     finally:

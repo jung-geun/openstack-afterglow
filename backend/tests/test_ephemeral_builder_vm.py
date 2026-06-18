@@ -207,7 +207,7 @@ class TestSmokeEndpoint:
     @pytest.mark.asyncio
     async def test_smoke_forbidden_for_non_admin(self, non_admin_client):
         """일반 사용자 → 403."""
-        resp = await non_admin_client.post("/api/admin/libraries/builder-vm/_smoke")
+        resp = await non_admin_client.post("/api/v1/admin/libraries/builder-vm/_smoke")
         assert resp.status_code == 403
 
     @pytest.mark.asyncio
@@ -244,7 +244,7 @@ class TestSmokeEndpoint:
                 new_callable=AsyncMock,
             ),
         ):
-            resp = await admin_client.post("/api/admin/libraries/builder-vm/_smoke")
+            resp = await admin_client.post("/api/v1/admin/libraries/builder-vm/_smoke")
 
         assert resp.status_code == 200
         data = resp.json()
@@ -284,7 +284,7 @@ class TestSmokeEndpoint:
             ),
             patch("app.services.builder_vm.delete_ephemeral_vm", mock_delete),
         ):
-            resp = await admin_client.post("/api/admin/libraries/builder-vm/_smoke")
+            resp = await admin_client.post("/api/v1/admin/libraries/builder-vm/_smoke")
 
         assert resp.status_code == 500
         mock_delete.assert_awaited_once()

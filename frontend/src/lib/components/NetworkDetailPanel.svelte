@@ -14,7 +14,7 @@
 		projectId?: string;
 	}
 
-	let { networkId, apiBase = '/api/admin/networks', onClose, token, projectId }: Props = $props();
+	let { networkId, apiBase = '/api/v1/admin/networks', onClose, token, projectId }: Props = $props();
 
 	const s = createNetworkDetailController({
 		networkId: () => networkId,

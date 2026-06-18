@@ -163,6 +163,43 @@ git push origin dev
 > 비밀 값(password, secret, token, key) 기준: `render_secret()` → secret.yaml 환경변수로 주입.
 > 나머지는 `_render_toml_for_k8s()` → configmap의 config.toml 인라인에 포함.
 
+### API 버전 규칙
+
+> **모든 라우터는 `/api/v1` 단독 마운트**로 전환 완료(2026-06-18).
+> 레거시 `/api`는 아래 3종 baked 엔드포인트에 한해 dual-mount로만 유지한다. 신규 레거시 추가 금지.
+
+**레거시 `/api` 유지 대상 (cloud-init baked — 기존 VM 재배포 없이 재bake 불가):**
+- `POST /api/k3s/callback` → `k3s_callback_router` dual-mount
+- `POST /api/instances/{id}/health/report` → `instance_health_router` dual-mount
+- `POST /api/instances/{id}/credentials/rotate-cephx` → `instance_health_router` dual-mount
+
+**규칙:**
+
+1. **라우터 마운트는 `/api/v1` 단독.** `backend/app/main.py`의 `app.include_router(...)` 호출 시 `prefix="/api/v1/<resource>"` 형태를 사용한다.
+   개별 라우터 파일(`APIRouter()`)은 prefix 없이 작성하고, 마운트 prefix는 `main.py` 등록 시점에서만 부여한다.
+   baked 엔드포인트가 아닌 경우 레거시 `/api` 추가 dual-mount 금지.
+
+   ```python
+   # main.py 예시 — 신규 라우터 (v1 단독)
+   app.include_router(my_new_router, prefix="/api/v1/my-resource", tags=["my-resource"])
+   ```
+
+2. **프론트엔드·테스트·배포 설정 모두 v1.** 모든 API 호출은 `/api/v1/...` 경로로 작성한다.
+   테스트(`backend/tests/`)도 `/api/v1/...` 경로로 작성한다.
+   k8s probe, haproxy healthcheck, prometheus configmap도 v1 기준.
+
+3. **인가/리소스 매핑 동기화 의무.** v1 엔드포인트가 소유권 검증 대상 리소스를 다루는 경우,
+   `main.py`의 `_AUDIT_PREFIX_MAP` 리스트에 `/api/v1/<resource>` 항목을 **반드시 함께 등록**한다.
+   이 매핑이 빠지면 fail-closed 감사 미들웨어가 조용히 무력화된다.
+
+   ```python
+   # main.py _AUDIT_PREFIX_MAP 예시 — 신규 v1 리소스
+   ("/api/v1/my-resource", "my_resource"),
+   ```
+
+4. **baked 레거시 계약 테스트.** `backend/tests/test_api_v1_legacy_compat.py`가 3종 baked 경로의
+   `/api` 레거시 dual-mount 존재를 고정(404 아님)한다. 이 테스트를 삭제하거나 무력화하지 않는다.
+
 ### Union Mount 설계
 
 - Union Mount 레이어 시스템 구현 시 **`union.md` 를 반드시 먼저 읽는다.**

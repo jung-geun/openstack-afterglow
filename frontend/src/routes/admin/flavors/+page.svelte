@@ -51,7 +51,7 @@
 		error = '';
 		try {
 			const res = await api.get<PagedResponse<Flavor>>(
-				'/api/admin/flavors?limit=999',
+				'/api/v1/admin/flavors?limit=999',
 				token,
 				projectId,
 			);
@@ -68,7 +68,7 @@
 	async function deleteFlavor(id: string) {
 		if (!await confirmDialog('이 Flavor를 삭제하시겠습니까?')) return;
 		try {
-			await api.delete(`/api/admin/flavors/${id}`, token, projectId);
+			await api.delete(`/api/v1/admin/flavors/${id}`, token, projectId);
 			await load();
 		} catch (e) {
 			toast.error('Flavor 삭제 실패: ' + (e instanceof ApiError ? e.message : '오류'));

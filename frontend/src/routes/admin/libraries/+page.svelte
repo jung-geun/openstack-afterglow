@@ -38,7 +38,7 @@
   async function loadBuilds() {
     try {
       builds = await api.get<LibraryBuild[]>(
-        '/api/admin/libraries/builds',
+        '/api/v1/admin/libraries/builds',
         token,
         projectId,
         { refresh: true },
@@ -53,10 +53,10 @@
     else refreshing = true;
     error = '';
     await Promise.allSettled([
-      api.get<LibraryConfig[]>('/api/libraries', token, projectId)
+      api.get<LibraryConfig[]>('/api/v1/libraries', token, projectId)
         .then(v => { libraries = v; loading = false; })
         .catch(e => { error = e instanceof ApiError ? e.message : '데이터 로드 실패'; loading = false; }),
-      api.get<FileStorage[]>('/api/admin/file-storage', token, projectId)
+      api.get<FileStorage[]>('/api/v1/admin/file-storage', token, projectId)
         .then(v => { fileStorages = v; })
         .catch(() => {}),
       loadBuilds(),
@@ -92,7 +92,7 @@
 
   async function loadUsage(range: string) {
     try {
-      usageData = await api.get<TsPoint[]>(`/api/admin/timeseries/library_usage?range=${range}`, token, projectId);
+      usageData = await api.get<TsPoint[]>(`/api/v1/admin/timeseries/library_usage?range=${range}`, token, projectId);
     } catch {
       usageData = [];
     }
@@ -138,7 +138,7 @@
     message = '';
     error = '';
     try {
-      await api.post(`/api/admin/file-storage/build?library_id=${encodeURIComponent(lib.id)}&auto_install=true`, {}, token, projectId);
+      await api.post(`/api/v1/admin/file-storage/build?library_id=${encodeURIComponent(lib.id)}&auto_install=true`, {}, token, projectId);
       message = `${lib.name} 빌드를 시작했습니다.`;
       await loadData();
     } catch (e) {

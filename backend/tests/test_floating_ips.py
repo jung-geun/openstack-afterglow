@@ -26,7 +26,7 @@ async def test_list_floating_ips(client, mock_conn):
         patch("app.api.network.networks.neutron.list_floating_ips", return_value=[make_fip()]),
         patch("app.api.network.networks.cached_call", new=mock_cached_call),
     ):
-        resp = await client.get("/api/networks/floating-ips")
+        resp = await client.get("/api/v1/networks/floating-ips")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
     assert resp.json()[0]["id"] == "fip-1"
@@ -35,7 +35,7 @@ async def test_list_floating_ips(client, mock_conn):
 @pytest.mark.asyncio
 async def test_create_floating_ip(client, mock_conn):
     with patch("app.api.network.networks.neutron.create_floating_ip", return_value=make_fip("fip-new")):
-        resp = await client.post("/api/networks/floating-ips", json={"floating_network_id": "ext-net-1"})
+        resp = await client.post("/api/v1/networks/floating-ips", json={"floating_network_id": "ext-net-1"})
     assert resp.status_code == 201
 
 
@@ -45,7 +45,7 @@ async def test_associate_floating_ip(client, mock_conn):
     associated["port_id"] = "port-1"
     associated["fixed_ip_address"] = "192.168.1.10"
     with patch("app.api.network.networks.neutron.associate_floating_ip", return_value=associated):
-        resp = await client.post("/api/networks/floating-ips/fip-1/associate", json={"instance_id": "inst-1"})
+        resp = await client.post("/api/v1/networks/floating-ips/fip-1/associate", json={"instance_id": "inst-1"})
     assert resp.status_code == 200
 
 
@@ -53,14 +53,14 @@ async def test_associate_floating_ip(client, mock_conn):
 async def test_disassociate_floating_ip(client, mock_conn):
     disassociated = make_fip()
     with patch("app.api.network.networks.neutron.disassociate_floating_ip", return_value=disassociated):
-        resp = await client.post("/api/networks/floating-ips/fip-1/disassociate")
+        resp = await client.post("/api/v1/networks/floating-ips/fip-1/disassociate")
     assert resp.status_code == 200
 
 
 @pytest.mark.asyncio
 async def test_delete_floating_ip(client, mock_conn):
     with patch("app.api.network.networks.neutron.delete_floating_ip", return_value=None):
-        resp = await client.delete("/api/networks/floating-ips/fip-1")
+        resp = await client.delete("/api/v1/networks/floating-ips/fip-1")
     assert resp.status_code == 204
 
 
@@ -82,7 +82,7 @@ async def test_list_floating_ips_with_instance(client, mock_conn):
         patch("app.api.network.networks.neutron.list_floating_ips", return_value=[fip_with_instance]),
         patch("app.api.network.networks.cached_call", new=mock_cached_call),
     ):
-        resp = await client.get("/api/networks/floating-ips")
+        resp = await client.get("/api/v1/networks/floating-ips")
 
     assert resp.status_code == 200
     result = resp.json()[0]
@@ -106,7 +106,7 @@ async def test_list_floating_ips_without_instance(client, mock_conn):
         patch("app.api.network.networks.neutron.list_floating_ips", return_value=[fip_unassociated]),
         patch("app.api.network.networks.cached_call", new=mock_cached_call),
     ):
-        resp = await client.get("/api/networks/floating-ips")
+        resp = await client.get("/api/v1/networks/floating-ips")
 
     assert resp.status_code == 200
     result = resp.json()[0]

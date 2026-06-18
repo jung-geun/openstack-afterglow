@@ -39,7 +39,7 @@ async def test_transfer_no_attachments_skips_detach(client):
         patch("app.api.storage.volumes.nova.detach_volume") as mock_detach,
         patch("app.api.storage.volumes.cinder.wait_volume_available") as mock_wait,
     ):
-        resp = await client.post("/api/volumes/vol-1/transfer", json={})
+        resp = await client.post("/api/v1/volumes/vol-1/transfer", json={})
     assert resp.status_code == 201
     mock_detach.assert_not_called()
     mock_wait.assert_not_called()
@@ -56,7 +56,7 @@ async def test_transfer_auto_detaches_attached_vm(client):
         patch("app.api.storage.volumes.cinder.wait_volume_available", return_value=_make_volume("available")),
         patch("app.api.storage.volumes.cinder.create_volume_transfer", return_value=_TRANSFER_RESULT),
     ):
-        resp = await client.post("/api/volumes/vol-1/transfer", json={})
+        resp = await client.post("/api/v1/volumes/vol-1/transfer", json={})
     assert resp.status_code == 201
     mock_detach.assert_called_once()
     assert resp.json()["auth_key"] == "secret-key"
@@ -79,7 +79,7 @@ async def test_transfer_detaches_multiple_attachments(client):
         patch("app.api.storage.volumes.cinder.wait_volume_available", return_value=_make_volume("available")),
         patch("app.api.storage.volumes.cinder.create_volume_transfer", return_value=_TRANSFER_RESULT),
     ):
-        resp = await client.post("/api/volumes/vol-1/transfer", json={})
+        resp = await client.post("/api/v1/volumes/vol-1/transfer", json={})
     assert resp.status_code == 201
     assert mock_detach.call_count == 2
 
@@ -93,7 +93,7 @@ async def test_transfer_detach_failure_returns_409(client):
         patch("app.api.storage.volumes.cinder.get_volume", return_value=attached),
         patch("app.api.storage.volumes.nova.detach_volume", side_effect=RuntimeError("detach error")),
     ):
-        resp = await client.post("/api/volumes/vol-1/transfer", json={})
+        resp = await client.post("/api/v1/volumes/vol-1/transfer", json={})
     assert resp.status_code == 409
     assert "detach 실패" in resp.json()["detail"]
 
@@ -102,7 +102,7 @@ async def test_transfer_detach_failure_returns_409(client):
 async def test_transfer_volume_not_found_returns_404(client):
     """볼륨 미존재 시 404 반환."""
     with patch("app.api.storage.volumes.cinder.get_volume", side_effect=RuntimeError("not found")):
-        resp = await client.post("/api/volumes/vol-1/transfer", json={})
+        resp = await client.post("/api/v1/volumes/vol-1/transfer", json={})
     assert resp.status_code == 404
 
 
@@ -119,7 +119,7 @@ async def test_transfer_wait_timeout_returns_409(client):
             side_effect=RuntimeError("timeout"),
         ),
     ):
-        resp = await client.post("/api/volumes/vol-1/transfer", json={})
+        resp = await client.post("/api/v1/volumes/vol-1/transfer", json={})
     assert resp.status_code == 409
     assert "대기 시간 초과" in resp.json()["detail"]
 
@@ -139,7 +139,7 @@ async def test_transfer_creation_failure_rollbacks_attach(client):
         ),
         patch("app.api.storage.volumes.nova.attach_volume") as mock_reattach,
     ):
-        resp = await client.post("/api/volumes/vol-1/transfer", json={})
+        resp = await client.post("/api/v1/volumes/vol-1/transfer", json={})
     assert resp.status_code == 500
     mock_reattach.assert_called_once()
     assert mock_reattach.call_args.args[1] == "srv-1"
@@ -166,7 +166,7 @@ async def test_transfer_rollback_multiple_servers(client):
         ),
         patch("app.api.storage.volumes.nova.attach_volume") as mock_reattach,
     ):
-        resp = await client.post("/api/volumes/vol-1/transfer", json={})
+        resp = await client.post("/api/v1/volumes/vol-1/transfer", json={})
     assert resp.status_code == 500
     assert mock_reattach.call_count == 2
 

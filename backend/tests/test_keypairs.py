@@ -24,7 +24,7 @@ async def test_list_keypairs(client, mock_conn):
         patch("app.api.compute.keypairs.nova.list_keypairs", return_value=[make_keypair()]),
         patch("app.api.compute.keypairs.cached_call", new=mock_cached_call),
     ):
-        resp = await client.get("/api/keypairs")
+        resp = await client.get("/api/v1/keypairs")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
     assert resp.json()[0]["name"] == "my-key"
@@ -45,7 +45,7 @@ async def test_list_keypairs_cache_opt_in(client, mock_conn):
         patch("app.api.compute.keypairs.nova.list_keypairs", return_value=[make_keypair()]),
         patch("app.api.compute.keypairs.cached_call", new=mock_cached_call),
     ):
-        resp = await client.get("/api/keypairs?cache=true")
+        resp = await client.get("/api/v1/keypairs?cache=true")
 
     assert resp.status_code == 200
     assert captured.get("enabled") is True
@@ -67,7 +67,7 @@ async def test_list_keypairs_refresh(client, mock_conn):
         patch("app.api.compute.keypairs.nova.list_keypairs", return_value=[make_keypair()]),
         patch("app.api.compute.keypairs.cached_call", new=mock_cached_call),
     ):
-        resp = await client.get("/api/keypairs?refresh=true")
+        resp = await client.get("/api/v1/keypairs?refresh=true")
 
     assert resp.status_code == 200
     assert captured.get("enabled") is True
@@ -87,7 +87,7 @@ async def test_list_keypairs_default_no_cache(client, mock_conn):
         patch("app.api.compute.keypairs.nova.list_keypairs", return_value=[make_keypair()]),
         patch("app.api.compute.keypairs.cached_call", new=mock_cached_call),
     ):
-        resp = await client.get("/api/keypairs")
+        resp = await client.get("/api/v1/keypairs")
 
     assert resp.status_code == 200
     assert captured.get("enabled") is False
@@ -100,7 +100,7 @@ async def test_create_keypair(client, mock_conn):
         patch("app.api.compute.keypairs.patch_list", new=AsyncMock()),
         patch("app.api.compute.keypairs.invalidation.invalidate_mutation_count", new=AsyncMock()),
     ):
-        resp = await client.post("/api/keypairs", json={"name": "new-key"})
+        resp = await client.post("/api/v1/keypairs", json={"name": "new-key"})
     assert resp.status_code == 201
 
 
@@ -115,7 +115,7 @@ async def test_create_keypair_patches_cache(client, mock_conn):
         patch("app.api.compute.keypairs.patch_list", new=mock_patch_list),
         patch("app.api.compute.keypairs.invalidation.invalidate_mutation_count", new=mock_mutation_count),
     ):
-        resp = await client.post("/api/keypairs", json={"name": "new-key"})
+        resp = await client.post("/api/v1/keypairs", json={"name": "new-key"})
 
     assert resp.status_code == 201
     mock_patch_list.assert_called_once()
@@ -135,7 +135,7 @@ async def test_delete_keypair(client, mock_conn):
         patch("app.api.compute.keypairs.patch_list", new=AsyncMock()),
         patch("app.api.compute.keypairs.invalidation.invalidate_mutation_count", new=AsyncMock()),
     ):
-        resp = await client.delete("/api/keypairs/my-key")
+        resp = await client.delete("/api/v1/keypairs/my-key")
     assert resp.status_code == 204
 
 
@@ -150,7 +150,7 @@ async def test_delete_keypair_patches_cache(client, mock_conn):
         patch("app.api.compute.keypairs.patch_list", new=mock_patch_list),
         patch("app.api.compute.keypairs.invalidation.invalidate_mutation_count", new=mock_mutation_count),
     ):
-        resp = await client.delete("/api/keypairs/my-key")
+        resp = await client.delete("/api/v1/keypairs/my-key")
 
     assert resp.status_code == 204
     mock_patch_list.assert_called_once()

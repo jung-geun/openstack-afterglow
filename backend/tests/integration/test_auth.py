@@ -5,7 +5,7 @@ import pytest
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_login_success(anon_client, credentials):
-    resp = await anon_client.post("/api/auth/login", json=credentials)
+    resp = await anon_client.post("/api/v1/auth/login", json=credentials)
     assert resp.status_code == 200
     data = resp.json()
     assert "token" in data
@@ -17,13 +17,13 @@ async def test_login_success(anon_client, credentials):
 @pytest.mark.asyncio(loop_scope="session")
 async def test_login_bad_password(anon_client, credentials):
     bad = {**credentials, "password": "wrong-password-12345"}
-    resp = await anon_client.post("/api/auth/login", json=bad)
+    resp = await anon_client.post("/api/v1/auth/login", json=bad)
     assert resp.status_code == 401
 
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_me(client):
-    resp = await client.get("/api/auth/me")
+    resp = await client.get("/api/v1/auth/me")
     assert resp.status_code == 200
     data = resp.json()
     assert "user_id" in data
@@ -33,7 +33,7 @@ async def test_me(client):
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_list_projects(client):
-    resp = await client.get("/api/auth/projects")
+    resp = await client.get("/api/v1/auth/projects")
     assert resp.status_code == 200
     data = resp.json()
     assert isinstance(data, list)
@@ -44,13 +44,13 @@ async def test_list_projects(client):
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_no_token_returns_401(anon_client):
-    resp = await anon_client.get("/api/auth/me")
+    resp = await anon_client.get("/api/v1/auth/me")
     assert resp.status_code == 401
 
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_gitlab_enabled(anon_client):
-    resp = await anon_client.get("/api/auth/gitlab/enabled")
+    resp = await anon_client.get("/api/v1/auth/gitlab/enabled")
     assert resp.status_code == 200
     data = resp.json()
     assert "enabled" in data
@@ -99,15 +99,15 @@ async def test_admin_user_login_is_system_admin(admin_user_auth_data):
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_admin_user_me_returns_is_system_admin(admin_user_client):
-    """/api/auth/me 응답에도 is_system_admin=True 가 포함돼야 한다.
+    """/api/v1/auth/me 응답에도 is_system_admin=True 가 포함돼야 한다.
 
     페이지 새로고침 시 localStorage 재동기화에 사용되는 엔드포인트.
     실패 시 백엔드 UserInfo 모델 또는 /me 핸들러 is_system_admin 반환 확인.
     """
-    resp = await admin_user_client.get("/api/auth/me")
+    resp = await admin_user_client.get("/api/v1/auth/me")
     assert resp.status_code == 200
     body = resp.json()
     assert body.get("is_system_admin") is True, (
-        "/api/auth/me 응답에 is_system_admin=True 없음 — "
+        "/api/v1/auth/me 응답에 is_system_admin=True 없음 — "
         "UserInfo 모델과 me() 핸들러가 is_system_admin 을 반환하는지 확인"
     )

@@ -41,7 +41,7 @@
 		loading = true;
 		try {
 			attachments = await api.get<StorageAttachment[]>(
-				`/api/instances/${s.instance.id}/storage-attachments`,
+				`/api/v1/instances/${s.instance.id}/storage-attachments`,
 				tok(), pid()
 			);
 		} catch {
@@ -53,7 +53,7 @@
 
 	async function loadFileStorages() {
 		try {
-			fileStorages = await api.get<FileStorage[]>('/api/storage/file-storages', tok(), pid());
+			fileStorages = await api.get<FileStorage[]>('/api/v1/storage/file-storages', tok(), pid());
 		} catch {
 			fileStorages = [];
 		}
@@ -65,7 +65,7 @@
 		lastMountInfo = null;
 		try {
 			const result = await api.post<{ mount_command: string; keyring_file: string | null }>(
-				`/api/instances/${s.instance.id}/storage-attachments`,
+				`/api/v1/instances/${s.instance.id}/storage-attachments`,
 				{ file_storage_id: selectedStorageId, mount_point: mountPoint.trim(), read_only: readOnly },
 				tok(), pid()
 			);
@@ -87,7 +87,7 @@
 		detaching = fileStorageId;
 		try {
 			await api.delete(
-				`/api/instances/${s.instance.id}/storage-attachments/${fileStorageId}`,
+				`/api/v1/instances/${s.instance.id}/storage-attachments/${fileStorageId}`,
 				tok(), pid()
 			);
 			await loadAttachments();

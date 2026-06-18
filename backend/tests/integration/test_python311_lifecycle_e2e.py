@@ -67,7 +67,7 @@ async def test_python311_lifecycle_low_level(admin_client, integration_resources
     async def _relogin() -> None:
         """JWT access 토큰 만료(401) 시 재로그인하여 admin_client 헤더를 갱신한다."""
         async with _AsyncClient(transport=ASGITransport(app=_app), base_url="http://test") as ac:
-            r = await ac.post("/api/auth/login", json=admin_credentials_fx)
+            r = await ac.post("/api/v1/auth/login", json=admin_credentials_fx)
             if r.status_code == 200:
                 admin_client.headers["Authorization"] = f"Bearer {r.json()['token']}"
 
@@ -77,7 +77,7 @@ async def test_python311_lifecycle_low_level(admin_client, integration_resources
     try:
         # ── Step 1: file storage 직접 생성 ───────────────────────────────
         resp = await admin_client.post(
-            "/api/file-storage",
+            "/api/v1/file-storage",
             json={
                 "name": "python311-e2e-test",
                 "size_gb": 20,
@@ -94,7 +94,7 @@ async def test_python311_lifecycle_low_level(admin_client, integration_resources
         # file_storage_id 지정 경로는 큐 우회 → start_ephemeral_build 직접 호출
         # → 응답 JSON에 build_id가 즉시 포함됨 (asyncio.create_task 기반 백그라운드 실행)
         resp = await admin_client.post(
-            "/api/admin/libraries/build",
+            "/api/v1/admin/libraries/build",
             json={
                 "library_id": "python311",
                 "auto_install": True,
@@ -135,7 +135,7 @@ async def test_python311_lifecycle_low_level(admin_client, integration_resources
 
         # ── Step 4·6: 새 VM — python311 prebuilt share RO 오버레이 마운트 ─
         resp = await admin_client.post(
-            "/api/instances",
+            "/api/v1/instances",
             json={
                 "name": "test-python311-consumer",
                 "image_id": integration_resources.image_id,
@@ -155,7 +155,7 @@ async def test_python311_lifecycle_low_level(admin_client, integration_resources
         # ── Step 6 검증: consumer VM이 올바른 share를 마운트했는지 identity 확인 ─
         # stale prebuilt 충돌 방지 — 동일 library_name의 구 share가 존재할 수 있으므로
         # VM 메타데이터의 union_share_ids가 이번에 생성한 share_id를 포함해야 한다.
-        resp = await admin_client.get(f"/api/instances/{instance_id}")
+        resp = await admin_client.get(f"/api/v1/instances/{instance_id}")
         if resp.status_code == 200:
             mounted = resp.json().get("union_share_ids", [])
             assert share_id in mounted, (
@@ -236,11 +236,11 @@ async def test_python311_lifecycle_low_level(admin_client, integration_resources
         # consumer VM 정리
         if instance_id:
             try:
-                await admin_client.delete(f"/api/instances/{instance_id}")
+                await admin_client.delete(f"/api/v1/instances/{instance_id}")
             except Exception:
                 pass
         # share는 prebuilt 아티팩트로 보존 (다른 테스트에서 재사용 가능)
-        # 명시적 삭제: await admin_client.delete(f"/api/file-storage/{share_id}")
+        # 명시적 삭제: await admin_client.delete(f"/api/v1/file-storage/{share_id}")
 
 
 # ---------------------------------------------------------------------------
@@ -257,7 +257,7 @@ async def _find_build_id(client, library_id: str, share_id: str, timeout: int = 
     """
     for _ in range(timeout // 3):
         await asyncio.sleep(3)
-        resp = await client.get(f"/api/admin/libraries/builds?library_id={library_id}")
+        resp = await client.get(f"/api/v1/admin/libraries/builds?library_id={library_id}")
         if resp.status_code != 200:
             continue
         builds = resp.json()
@@ -284,7 +284,7 @@ async def _wait_for_share_ready(
     terminal = {"ready", "error", "indeterminate", "cancelled"}
     for _ in range(timeout // 15):
         await asyncio.sleep(15)
-        resp = await client.get(f"/api/file-storage/{share_id}")
+        resp = await client.get(f"/api/v1/file-storage/{share_id}")
         if resp.status_code == 401:
             if relogin is not None:
                 await relogin()
@@ -307,7 +307,7 @@ async def _wait_for_build(
     terminal = {"complete", "error", "timeout", "cancelled"}
     for _ in range(timeout // 15):
         await asyncio.sleep(15)
-        resp = await client.get(f"/api/admin/libraries/builds/{build_id}")
+        resp = await client.get(f"/api/v1/admin/libraries/builds/{build_id}")
         if resp.status_code == 401:
             if relogin is not None:
                 await relogin()
@@ -323,7 +323,7 @@ async def _wait_for_active(client, instance_id: str, timeout: int) -> str:
     """VM ACTIVE 또는 ERROR까지 폴링. 최종 status 반환."""
     for _ in range(timeout // 10):
         await asyncio.sleep(10)
-        resp = await client.get(f"/api/instances/{instance_id}")
+        resp = await client.get(f"/api/v1/instances/{instance_id}")
         if resp.status_code == 200:
             status = resp.json().get("status", "")
             if status in ("ACTIVE", "ERROR"):
@@ -333,12 +333,12 @@ async def _wait_for_active(client, instance_id: str, timeout: int) -> str:
 
 async def _assign_floating_ip(client, instance_id: str) -> str | None:
     """FIP 자동 할당 후 IP 주소 반환."""
-    resp = await client.get(f"/api/instances/{instance_id}")
+    resp = await client.get(f"/api/v1/instances/{instance_id}")
     if resp.status_code == 200:
         for ip in resp.json().get("ip_addresses", []):
             if ip.get("type") == "floating" and ip.get("addr"):
                 return ip["addr"]
-    resp = await client.post(f"/api/instances/{instance_id}/floating-ip")
+    resp = await client.post(f"/api/v1/instances/{instance_id}/floating-ip")
     if resp.status_code in (200, 201):
         return resp.json().get("floating_ip_address")
     return None

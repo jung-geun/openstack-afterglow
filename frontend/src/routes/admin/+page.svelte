@@ -47,7 +47,7 @@
 
 	function loadProjectUsage() {
 		projectUsageLoading = true;
-		api.get<ProjectUsage[]>('/api/admin/overview/projects', token, projectId)
+		api.get<ProjectUsage[]>('/api/v1/admin/overview/projects', token, projectId)
 			.then(r => { projectUsage = r; })
 			.catch(() => {})
 			.finally(() => { projectUsageLoading = false; });
@@ -59,7 +59,7 @@
 	);
 
 	onMount(() => {
-		api.get<Overview>('/api/admin/overview', token, projectId)
+		api.get<Overview>('/api/v1/admin/overview', token, projectId)
 			.then(r => { overview = r; })
 			.catch((e) => {
 				if (e instanceof ApiError && e.status === 403) { goto('/dashboard'); return; }
@@ -69,15 +69,15 @@
 
 		loadProjectUsage();
 
-		api.get<VersionInfo>('/api/admin/version', token, projectId)
+		api.get<VersionInfo>('/api/v1/admin/version', token, projectId)
 			.then(r => { versionInfo = r; })
 			.catch(() => {});
 
-		api.get<Notification[]>('/api/admin/notifications', token, projectId)
+		api.get<Notification[]>('/api/v1/admin/notifications', token, projectId)
 			.then(r => { notifications = r; })
 			.catch(() => {});
 
-		api.get<IdentitySummary>('/api/admin/identity/summary', token, projectId)
+		api.get<IdentitySummary>('/api/v1/admin/identity/summary', token, projectId)
 			.then(r => { identitySummary = r; })
 			.catch(() => {});
 	});

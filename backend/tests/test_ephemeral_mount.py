@@ -369,7 +369,7 @@ class TestSmokeMountEndpoint:
     async def test_forbidden_for_non_admin(self, non_admin_client):
         """일반 사용자 → 403."""
         resp = await non_admin_client.post(
-            "/api/admin/libraries/builder-vm/_smoke-mount",
+            "/api/v1/admin/libraries/builder-vm/_smoke-mount",
             json={"share_proto": "NFS"},
         )
         assert resp.status_code == 403
@@ -382,7 +382,7 @@ class TestSmokeMountEndpoint:
             return_value=MagicMock(),
         ):
             resp = await admin_client.post(
-                "/api/admin/libraries/builder-vm/_smoke-mount",
+                "/api/v1/admin/libraries/builder-vm/_smoke-mount",
                 json={"share_proto": "S3"},
             )
         assert resp.status_code == 400
@@ -427,7 +427,7 @@ class TestSmokeMountEndpoint:
             patch("app.services.manila.delete_file_storage"),
         ):
             resp = await admin_client.post(
-                "/api/admin/libraries/builder-vm/_smoke-mount",
+                "/api/v1/admin/libraries/builder-vm/_smoke-mount",
                 json={"share_proto": "NFS", "size_gb": 1},
             )
 
@@ -483,7 +483,7 @@ class TestSmokeMountEndpoint:
             patch("app.services.manila.delete_file_storage"),
         ):
             resp = await admin_client.post(
-                "/api/admin/libraries/builder-vm/_smoke-mount",
+                "/api/v1/admin/libraries/builder-vm/_smoke-mount",
                 json={"share_proto": "NFS"},
             )
 

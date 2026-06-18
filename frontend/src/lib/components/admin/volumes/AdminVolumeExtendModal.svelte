@@ -41,7 +41,7 @@
 		extending = true;
 		extendError = '';
 		try {
-			await api.post(`/api/admin/volumes/${volume.id}/extend`, { new_size: newSize }, token, projectId);
+			await api.post(`/api/v1/admin/volumes/${volume.id}/extend`, { new_size: newSize }, token, projectId);
 			onSuccess();
 			onClose();
 		} catch (e) {

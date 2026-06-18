@@ -22,8 +22,8 @@
 		if (!projectId) return;
 		loading = true;
 		Promise.all([
-			api.get<Project>(`/api/admin/projects/${projectId}`, token, adminProjectId),
-			api.get<Member[]>(`/api/admin/projects/${projectId}/members`, token, adminProjectId),
+			api.get<Project>(`/api/v1/admin/projects/${projectId}`, token, adminProjectId),
+			api.get<Member[]>(`/api/v1/admin/projects/${projectId}/members`, token, adminProjectId),
 		]).then(([p, m]) => {
 			project = p;
 			members = m;
@@ -133,7 +133,7 @@
 		<!-- 활동 탭 -->
 		{#if tab === 'activity'}
 			<ActivityLogTable
-				endpoint={`/api/admin/projects/${projectId}/activity`}
+				endpoint={`/api/v1/admin/projects/${projectId}/activity`}
 				storageKey="admin-project-activity"
 				showUser
 			/>

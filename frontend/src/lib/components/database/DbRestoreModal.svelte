@@ -29,7 +29,7 @@
 		volumeSize = minVolume;
 		error = '';
 		if (!externalFlavors || externalFlavors.length === 0) {
-			api.get<DbFlavor[]>('/api/database-instances/flavors', $auth.token ?? undefined, $auth.projectId ?? undefined)
+			api.get<DbFlavor[]>('/api/v1/database-instances/flavors', $auth.token ?? undefined, $auth.projectId ?? undefined)
 				.then(f => {
 					loadedFlavors = f;
 					if (f.length > 0 && !flavorId) flavorId = String(f[0].id);

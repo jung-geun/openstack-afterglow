@@ -371,7 +371,7 @@ async def list_my_groups(token_info: dict = Depends(get_token_info)):
     except PermissionError:
         return []
     except Exception:
-        _logger.exception("/api/auth/groups 처리 실패 (user_id=%s)", token_info.get("user_id"))
+        _logger.exception("/api/v1/auth/groups 처리 실패 (user_id=%s)", token_info.get("user_id"))
         raise HTTPException(status_code=500, detail="그룹 목록 조회 실패")
 
 

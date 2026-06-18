@@ -40,7 +40,7 @@
 		if (!$auth.token) return;
 		try {
 			traffic = await api.get<TopologyTraffic>(
-				'/api/networks/topology/traffic',
+				'/api/v1/networks/topology/traffic',
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined,
 			);
@@ -65,7 +65,7 @@
 		error = '';
 		try {
 			data = await api.get<TopologyData>(
-				'/api/networks/topology',
+				'/api/v1/networks/topology',
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined,
 				opts,

@@ -25,7 +25,7 @@ _TROVE_ENABLED = os.environ.get("SERVICE_TROVE_ENABLED", "false").lower() in ("t
 @pytest.mark.asyncio
 async def test_list_database_instances_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/database-instances")
+        resp = await ac.get("/api/v1/database-instances")
     # trove 미활성화 시 404/405, 활성화+인증없음 시 401
     assert resp.status_code in (401, 404, 405)
 
@@ -33,35 +33,35 @@ async def test_list_database_instances_unauthenticated():
 @pytest.mark.asyncio
 async def test_create_database_instance_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.post("/api/database-instances", json={"name": "mydb"})
+        resp = await ac.post("/api/v1/database-instances", json={"name": "mydb"})
     assert resp.status_code in (401, 404, 405, 422)
 
 
 @pytest.mark.asyncio
 async def test_get_database_instance_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/database-instances/inst-1")
+        resp = await ac.get("/api/v1/database-instances/inst-1")
     assert resp.status_code in (401, 404, 405)
 
 
 @pytest.mark.asyncio
 async def test_delete_database_instance_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.delete("/api/database-instances/inst-1")
+        resp = await ac.delete("/api/v1/database-instances/inst-1")
     assert resp.status_code in (401, 404, 405)
 
 
 @pytest.mark.asyncio
 async def test_list_database_flavors_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/database-instances/flavors")
+        resp = await ac.get("/api/v1/database-instances/flavors")
     assert resp.status_code in (401, 404, 405)
 
 
 @pytest.mark.asyncio
 async def test_list_datastores_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/database-instances/datastores")
+        resp = await ac.get("/api/v1/database-instances/datastores")
     assert resp.status_code in (401, 404, 405)
 
 
@@ -77,7 +77,7 @@ async def test_list_database_instances_success(client, mock_conn):
 
     # list_instances는 asyncio.to_thread 로 호출되는 sync 함수이므로 MagicMock 사용
     with patch("app.services.trove.list_instances", new=MagicMock(return_value=[])):
-        resp = await client.get("/api/database-instances")
+        resp = await client.get("/api/v1/database-instances")
     assert resp.status_code in (200, 500)
 
 
@@ -87,7 +87,7 @@ async def test_list_database_instances_error_handling(client, mock_conn):
     from unittest.mock import MagicMock, patch
 
     with patch("app.services.trove.list_instances", new=MagicMock(side_effect=Exception("trove error"))):
-        resp = await client.get("/api/database-instances")
+        resp = await client.get("/api/v1/database-instances")
     assert resp.status_code in (500, 503)
 
 
@@ -99,7 +99,7 @@ async def test_list_database_instances_error_handling(client, mock_conn):
 @pytest.mark.asyncio
 async def test_list_db_instances_all_projects_requires_admin(non_admin_client):
     """all_projects=true + is_system_admin=False → 403."""
-    resp = await non_admin_client.get("/api/database-instances?all_projects=true")
+    resp = await non_admin_client.get("/api/v1/database-instances?all_projects=true")
     assert resp.status_code == 403
 
 
@@ -112,7 +112,7 @@ async def test_list_db_instances_all_projects_requires_admin(non_admin_client):
 async def test_create_instance_database_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.post(
-            "/api/database-instances/inst-1/databases",
+            "/api/v1/database-instances/inst-1/databases",
             json={"name": "mydb"},
         )
     assert resp.status_code in (401, 404, 405)
@@ -213,7 +213,7 @@ async def test_list_db_instances_all_projects_admin(admin_client, mock_conn):
         "app.services.trove.list_instances_admin_all_projects",
         new=MagicMock(return_value=[fake_instance]),
     ):
-        resp = await admin_client.get("/api/database-instances?all_projects=true")
+        resp = await admin_client.get("/api/v1/database-instances?all_projects=true")
     assert resp.status_code == 200
     body = resp.json()
     assert len(body) == 1
@@ -233,7 +233,7 @@ async def test_list_database_instances_uses_cached_call(client, mock_conn):
         "app.api.database.instances.cache.cached_call",
         new=AsyncMock(return_value=fake),
     ) as mock_cached:
-        resp = await client.get("/api/database-instances")
+        resp = await client.get("/api/v1/database-instances")
     assert resp.status_code == 200
     assert resp.json() == fake
     mock_cached.assert_awaited_once()
@@ -251,7 +251,7 @@ async def test_get_database_instance_uses_cached_call(client, mock_conn):
         "app.api.database.instances.cache.cached_call",
         new=AsyncMock(return_value=fake),
     ) as mock_cached:
-        resp = await client.get("/api/database-instances/inst-1")
+        resp = await client.get("/api/v1/database-instances/inst-1")
     assert resp.status_code == 200
     mock_cached.assert_awaited_once()
     call_key = mock_cached.call_args[0][0]
@@ -266,7 +266,7 @@ async def test_list_db_flavors_uses_cached_call(client, mock_conn):
         "app.api.database.instances.cache.cached_call",
         new=AsyncMock(return_value=fake),
     ) as mock_cached:
-        resp = await client.get("/api/database-instances/flavors")
+        resp = await client.get("/api/v1/database-instances/flavors")
     assert resp.status_code == 200
     mock_cached.assert_awaited_once()
     # TTL 인자가 ttl_static() 값(300)인지 확인
@@ -282,7 +282,7 @@ async def test_list_datastores_uses_cached_call(client, mock_conn):
         "app.api.database.instances.cache.cached_call",
         new=AsyncMock(return_value=fake),
     ) as mock_cached:
-        resp = await client.get("/api/database-instances/datastores")
+        resp = await client.get("/api/v1/database-instances/datastores")
     assert resp.status_code == 200
     mock_cached.assert_awaited_once()
     call_ttl = mock_cached.call_args[0][1]
@@ -297,7 +297,7 @@ async def test_list_backups_uses_cached_call(client, mock_conn):
         "app.api.database.instances.cache.cached_call",
         new=AsyncMock(return_value=fake),
     ) as mock_cached:
-        resp = await client.get("/api/database-instances/backups")
+        resp = await client.get("/api/v1/database-instances/backups")
     assert resp.status_code == 200
     mock_cached.assert_awaited_once()
     call_ttl = mock_cached.call_args[0][1]
@@ -312,7 +312,7 @@ async def test_list_instance_databases_uses_cached_call(client, mock_conn):
         "app.api.database.instances.cache.cached_call",
         new=AsyncMock(return_value=fake),
     ) as mock_cached:
-        resp = await client.get("/api/database-instances/inst-1/databases")
+        resp = await client.get("/api/v1/database-instances/inst-1/databases")
     assert resp.status_code == 200
     mock_cached.assert_awaited_once()
     call_key = mock_cached.call_args[0][0]
@@ -328,7 +328,7 @@ async def test_list_instance_users_uses_cached_call(client, mock_conn):
         "app.api.database.instances.cache.cached_call",
         new=AsyncMock(return_value=fake),
     ) as mock_cached:
-        resp = await client.get("/api/database-instances/inst-1/users")
+        resp = await client.get("/api/v1/database-instances/inst-1/users")
     assert resp.status_code == 200
     mock_cached.assert_awaited_once()
     call_key = mock_cached.call_args[0][0]
@@ -343,7 +343,7 @@ async def test_list_instance_backups_uses_cached_call(client, mock_conn):
         "app.api.database.instances.cache.cached_call",
         new=AsyncMock(return_value=fake),
     ) as mock_cached:
-        resp = await client.get("/api/database-instances/inst-1/backups")
+        resp = await client.get("/api/v1/database-instances/inst-1/backups")
     assert resp.status_code == 200
     mock_cached.assert_awaited_once()
     call_ttl = mock_cached.call_args[0][1]
@@ -369,7 +369,7 @@ async def test_delete_database_instance_invalidates_cache(client, mock_conn):
             new=AsyncMock(),
         ) as mock_mc,
     ):
-        resp = await client.delete("/api/database-instances/inst-1")
+        resp = await client.delete("/api/v1/database-instances/inst-1")
     assert resp.status_code == 204
     mock_inv.assert_awaited_once()
     inv_pattern = mock_inv.call_args[0][0]
@@ -406,7 +406,7 @@ async def test_create_database_instance_invalidates_cache(client, mock_conn):
         ) as mock_mc,
     ):
         resp = await client.post(
-            "/api/database-instances",
+            "/api/v1/database-instances",
             json={
                 "name": "mydb",
                 "flavor_id": "f1",
@@ -435,7 +435,7 @@ async def test_create_instance_database_invalidates_cache(client, mock_conn):
         ) as mock_mc,
     ):
         resp = await client.post(
-            "/api/database-instances/inst-1/databases",
+            "/api/v1/database-instances/inst-1/databases",
             json={"name": "newdb"},
         )
     assert resp.status_code == 201
@@ -458,7 +458,7 @@ async def test_delete_instance_database_invalidates_cache(client, mock_conn):
             new=AsyncMock(),
         ) as mock_mc,
     ):
-        resp = await client.delete("/api/database-instances/inst-1/databases/mydb")
+        resp = await client.delete("/api/v1/database-instances/inst-1/databases/mydb")
     assert resp.status_code == 204
     mock_inv.assert_awaited_once()
     mock_mc.assert_awaited_once_with("trove", "test-project-123")
@@ -479,7 +479,7 @@ async def test_create_instance_user_invalidates_cache(client, mock_conn):
         ) as mock_mc,
     ):
         resp = await client.post(
-            "/api/database-instances/inst-1/users",
+            "/api/v1/database-instances/inst-1/users",
             json={"name": "alice", "password": "secret123"},
         )
     assert resp.status_code == 201
@@ -502,7 +502,7 @@ async def test_delete_instance_user_invalidates_cache(client, mock_conn):
             new=AsyncMock(),
         ) as mock_mc,
     ):
-        resp = await client.delete("/api/database-instances/inst-1/users/alice")
+        resp = await client.delete("/api/v1/database-instances/inst-1/users/alice")
     assert resp.status_code == 204
     mock_inv.assert_awaited_once()
     mock_mc.assert_awaited_once_with("trove", "test-project-123")
@@ -524,7 +524,7 @@ async def test_create_instance_backup_invalidates_cache(client, mock_conn):
         ) as mock_mc,
     ):
         resp = await client.post(
-            "/api/database-instances/inst-1/backups",
+            "/api/v1/database-instances/inst-1/backups",
             json={"name": "snap"},
         )
     assert resp.status_code == 201
@@ -546,7 +546,7 @@ async def test_restart_database_instance_invalidates_cache(client, mock_conn):
             new=AsyncMock(),
         ) as mock_mc,
     ):
-        resp = await client.post("/api/database-instances/inst-1/restart")
+        resp = await client.post("/api/v1/database-instances/inst-1/restart")
     assert resp.status_code == 204
     mock_inv.assert_awaited_once()
     mock_mc.assert_awaited_once_with("trove", "test-project-123")
@@ -567,7 +567,7 @@ async def test_enable_root_user_invalidates_cache(client, mock_conn):
             new=AsyncMock(),
         ) as mock_mc,
     ):
-        resp = await client.post("/api/database-instances/inst-1/root")
+        resp = await client.post("/api/v1/database-instances/inst-1/root")
     assert resp.status_code == 200
     assert resp.json()["name"] == "root"
     mock_inv.assert_awaited_once()
@@ -584,7 +584,7 @@ async def test_mutation_does_not_invalidate_on_failure(client, mock_conn):
             new=AsyncMock(),
         ) as mock_inv,
     ):
-        resp = await client.delete("/api/database-instances/inst-1")
+        resp = await client.delete("/api/v1/database-instances/inst-1")
     assert resp.status_code == 500
     mock_inv.assert_not_awaited()
 
@@ -649,7 +649,7 @@ async def test_restore_from_backup_unauthenticated():
     """POST /restore: 인증 없이 복원 불가."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.post(
-            "/api/database-instances/restore",
+            "/api/v1/database-instances/restore",
             json={"backup_id": "bk-1", "name": "restored", "flavor_id": "fl-1", "volume_size": 10},
         )
     assert resp.status_code == 401

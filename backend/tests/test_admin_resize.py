@@ -13,7 +13,7 @@ async def test_admin_resize_calls_nova(admin_client, mock_conn):
         patch("app.api.identity.admin.invalidate"),
     ):
         resp = await admin_client.post(
-            "/api/admin/instances/inst-1/resize",
+            "/api/v1/admin/instances/inst-1/resize",
             json={"flavor_id": "flavor-new"},
         )
     assert resp.status_code == 200
@@ -25,7 +25,7 @@ async def test_admin_resize_calls_nova(admin_client, mock_conn):
 async def test_admin_resize_requires_admin(non_admin_client):
     """일반 사용자는 resize 엔드포인트에 접근 불가 (403)."""
     resp = await non_admin_client.post(
-        "/api/admin/instances/inst-1/resize",
+        "/api/v1/admin/instances/inst-1/resize",
         json={"flavor_id": "flavor-new"},
     )
     assert resp.status_code == 403
@@ -38,7 +38,7 @@ async def test_admin_revert_resize_calls_nova(admin_client, mock_conn):
         patch("app.api.identity.admin.nova.revert_resize_server") as mock_revert,
         patch("app.api.identity.admin.invalidate"),
     ):
-        resp = await admin_client.post("/api/admin/instances/inst-1/revert-resize")
+        resp = await admin_client.post("/api/v1/admin/instances/inst-1/revert-resize")
     assert resp.status_code == 200
     assert resp.json()["status"] == "reverting"
     mock_revert.assert_called_once_with(mock_conn, "inst-1")
@@ -49,7 +49,7 @@ async def test_admin_resize_nova_failure_returns_400(admin_client, mock_conn):
     """Nova 오류 시 400을 반환한다."""
     with patch("app.api.identity.admin.nova.resize_server", side_effect=Exception("Nova error")):
         resp = await admin_client.post(
-            "/api/admin/instances/inst-1/resize",
+            "/api/v1/admin/instances/inst-1/resize",
             json={"flavor_id": "flavor-new"},
         )
     assert resp.status_code == 400

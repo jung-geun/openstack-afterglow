@@ -10,5 +10,5 @@ from app.main import app
 async def test_health_public():
     """GET /api/health — 인증 불필요, 항상 200."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/health")
+        resp = await ac.get("/api/v1/health")
     assert resp.status_code == 200

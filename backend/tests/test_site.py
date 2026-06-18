@@ -10,7 +10,7 @@ from app.main import app
 async def test_get_site_config_public():
     """GET /api/site-config — 인증 불필요, 항상 200."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/site-config")
+        resp = await ac.get("/api/v1/site-config")
     assert resp.status_code == 200
     data = resp.json()
     assert "site_name" in data
@@ -21,7 +21,7 @@ async def test_get_site_config_public():
 async def test_get_site_config_contains_service_flags():
     """서비스 플래그 필드 확인."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/site-config")
+        resp = await ac.get("/api/v1/site-config")
     services = resp.json()["services"]
     assert "manila" in services
     assert "magnum" in services

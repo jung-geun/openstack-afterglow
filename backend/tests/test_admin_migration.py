@@ -231,7 +231,7 @@ async def test_cold_migrate_with_host_body(admin_client, mock_conn):
     """cold-migrate에 host body를 전달하면 nova.cold_migrate_server에 host가 넘어간다."""
     with patch("app.api.identity.admin.nova.cold_migrate_server") as mock_fn:
         resp = await admin_client.post(
-            "/api/admin/instances/inst-1/cold-migrate",
+            "/api/v1/admin/instances/inst-1/cold-migrate",
             json={"host": "compute2"},
         )
     assert resp.status_code == 200
@@ -245,7 +245,7 @@ async def test_cold_migrate_without_host_body(admin_client, mock_conn):
     """cold-migrate에 body={}를 전달해도 host=None으로 처리된다(하위 호환)."""
     with patch("app.api.identity.admin.nova.cold_migrate_server") as mock_fn:
         resp = await admin_client.post(
-            "/api/admin/instances/inst-1/cold-migrate",
+            "/api/v1/admin/instances/inst-1/cold-migrate",
             json={},
         )
     assert resp.status_code == 200
@@ -261,7 +261,7 @@ async def test_cold_migrate_without_host_body(admin_client, mock_conn):
 async def test_compute_hosts_cpu_filter_false_passes_param(admin_client, mock_conn):
     """cpu_filter=false 쿼리 파라미터가 nova.list_compute_hosts에 cpu_filter=False로 전달된다."""
     with patch("app.api.identity.admin.nova.list_compute_hosts", return_value=[]) as mock_fn:
-        resp = await admin_client.get("/api/admin/compute-hosts?cpu_filter=false")
+        resp = await admin_client.get("/api/v1/admin/compute-hosts?cpu_filter=false")
     assert resp.status_code == 200
     mock_fn.assert_called_once()
     _, kwargs = mock_fn.call_args
@@ -457,25 +457,25 @@ def test_force_complete_live_migration_auto_resolve():
 
 @pytest.mark.asyncio
 async def test_compute_hosts_requires_admin(non_admin_client):
-    resp = await non_admin_client.get("/api/admin/compute-hosts")
+    resp = await non_admin_client.get("/api/v1/admin/compute-hosts")
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_migration_status_requires_admin(non_admin_client):
-    resp = await non_admin_client.get("/api/admin/instances/inst-1/migration-status")
+    resp = await non_admin_client.get("/api/v1/admin/instances/inst-1/migration-status")
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_abort_migration_requires_admin(non_admin_client):
-    resp = await non_admin_client.post("/api/admin/instances/inst-1/live-migrate/abort")
+    resp = await non_admin_client.post("/api/v1/admin/instances/inst-1/live-migrate/abort")
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_force_complete_migration_requires_admin(non_admin_client):
-    resp = await non_admin_client.post("/api/admin/instances/inst-1/live-migrate/force-complete")
+    resp = await non_admin_client.post("/api/v1/admin/instances/inst-1/live-migrate/force-complete")
     assert resp.status_code == 403
 
 
@@ -492,7 +492,7 @@ async def test_live_migrate_error_message_exposed(admin_client, mock_conn):
 
     with patch("app.api.identity.admin.nova.live_migrate_server", side_effect=err):
         resp = await admin_client.post(
-            "/api/admin/instances/inst-1/live-migrate",
+            "/api/v1/admin/instances/inst-1/live-migrate",
             json={"host": None, "block_migration": "auto"},
         )
 
@@ -507,7 +507,7 @@ async def test_cold_migrate_error_message_exposed(admin_client, mock_conn):
     err.message = "Instance is not running"  # type: ignore[attr-defined]
 
     with patch("app.api.identity.admin.nova.cold_migrate_server", side_effect=err):
-        resp = await admin_client.post("/api/admin/instances/inst-1/cold-migrate", json={})
+        resp = await admin_client.post("/api/v1/admin/instances/inst-1/cold-migrate", json={})
 
     assert resp.status_code == 400
     assert "Instance is not running" in resp.json()["detail"]
@@ -520,6 +520,6 @@ async def test_migration_status_admin_ok(admin_client, mock_conn):
         "app.api.identity.admin.nova.get_server_migration_status",
         return_value={"host": "compute1", "migration": None, "error": None},
     ):
-        resp = await admin_client.get("/api/admin/instances/inst-1/migration-status")
+        resp = await admin_client.get("/api/v1/admin/instances/inst-1/migration-status")
     assert resp.status_code != 403
     assert resp.json()["host"] == "compute1"

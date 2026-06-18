@@ -22,7 +22,7 @@ function createContainerDetailController(opts: Options) {
 	let actioning = $state(false);
 	let actionError = $state('');
 
-	const apiBase = $derived(opts.adminMode() ? '/api/admin/containers' : '/api/containers');
+	const apiBase = $derived(opts.adminMode() ? '/api/v1/admin/containers' : '/api/v1/containers');
 
 	async function fetchContainer() {
 		loading = true;

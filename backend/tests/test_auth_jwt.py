@@ -232,7 +232,7 @@ async def test_login_returns_access_and_refresh(_ks_authenticate, _ks_get_user, 
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.post(
-            "/api/auth/login",
+            "/api/v1/auth/login",
             json={"username": "alice", "password": "pw", "project_name": "myproject"},
         )
     assert resp.status_code == 200
@@ -254,11 +254,11 @@ async def test_bearer_access_protects_me_endpoint(_ks_authenticate, _ks_get_user
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         login = await ac.post(
-            "/api/auth/login",
+            "/api/v1/auth/login",
             json={"username": "alice", "password": "pw", "project_name": "myproject"},
         )
         access = login.json()["token"]
-        me = await ac.get("/api/auth/me", headers={"Authorization": f"Bearer {access}"})
+        me = await ac.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {access}"})
     assert me.status_code == 200
     assert me.json()["username"] == "alice"
 
@@ -272,7 +272,7 @@ async def test_legacy_x_auth_token_rejected(_rate_limiter_off):
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         me = await ac.get(
-            "/api/auth/me",
+            "/api/v1/auth/me",
             headers={"X-Auth-Token": _KEYSTONE_TOKEN, "X-Project-Id": "proj-1"},
         )
     assert me.status_code == 401
@@ -301,7 +301,7 @@ async def test_expired_access_jwt_returns_401(_rate_limiter_off):
     expired_token = pyjwt.encode(payload, "test-secret-key-for-jwt-tests", algorithm="HS256")
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/auth/me", headers={"Authorization": f"Bearer {expired_token}"})
+        resp = await ac.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {expired_token}"})
     assert resp.status_code == 401
 
 
@@ -314,14 +314,14 @@ async def test_refresh_rotates_tokens(_ks_authenticate, _ks_get_user, _ks_valida
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         login = await ac.post(
-            "/api/auth/login",
+            "/api/v1/auth/login",
             json={"username": "alice", "password": "pw", "project_name": "myproject"},
         )
         old_refresh = login.json()["refresh_token"]
         old_access = login.json()["token"]
 
         # 첫 refresh → 성공
-        r1 = await ac.post("/api/auth/refresh", json={"refresh_token": old_refresh})
+        r1 = await ac.post("/api/v1/auth/refresh", json={"refresh_token": old_refresh})
         assert r1.status_code == 200
         new_access = r1.json()["token"]
         new_refresh = r1.json()["refresh_token"]
@@ -329,7 +329,7 @@ async def test_refresh_rotates_tokens(_ks_authenticate, _ks_get_user, _ks_valida
         assert new_refresh != old_refresh
 
         # 같은 refresh 재사용 → 401 (토큰 회전)
-        r2 = await ac.post("/api/auth/refresh", json={"refresh_token": old_refresh})
+        r2 = await ac.post("/api/v1/auth/refresh", json={"refresh_token": old_refresh})
         assert r2.status_code == 401
 
 
@@ -343,20 +343,20 @@ async def test_logout_revokes_refresh_session(_ks_authenticate, _ks_get_user, _k
     with patch("app.api.identity.auth.keystone.revoke_token"):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             login = await ac.post(
-                "/api/auth/login",
+                "/api/v1/auth/login",
                 json={"username": "alice", "password": "pw", "project_name": "myproject"},
             )
             access = login.json()["token"]
             refresh = login.json()["refresh_token"]
 
             logout = await ac.post(
-                "/api/auth/logout",
+                "/api/v1/auth/logout",
                 headers={"Authorization": f"Bearer {access}"},
             )
             assert logout.status_code == 200
 
             # 로그아웃 후 refresh 사용 → 401
-            r = await ac.post("/api/auth/refresh", json={"refresh_token": refresh})
+            r = await ac.post("/api/v1/auth/refresh", json={"refresh_token": refresh})
             assert r.status_code == 401
 
 
@@ -368,7 +368,7 @@ async def test_no_auth_header_returns_401(_rate_limiter_off):
     from app.main import app
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/auth/me")
+        resp = await ac.get("/api/v1/auth/me")
     assert resp.status_code == 401
 
 
@@ -382,7 +382,7 @@ async def test_bearer_jwt_uses_cached_validate_not_payload(_ks_authenticate, _ks
     # 로그인: JWT payload에 권한 정보 없음
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         login = await ac.post(
-            "/api/auth/login",
+            "/api/v1/auth/login",
             json={"username": "alice", "password": "pw", "project_name": "myproject"},
         )
     access = login.json()["token"]
@@ -391,7 +391,7 @@ async def test_bearer_jwt_uses_cached_validate_not_payload(_ks_authenticate, _ks
     elevated_ks_data = dict(_KS_DATA, is_system_admin=True, roles=["admin", "member"])
     with patch("app.api.deps._cached_validate", new=AsyncMock(return_value=elevated_ks_data)):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-            me = await ac.get("/api/auth/me", headers={"Authorization": f"Bearer {access}"})
+            me = await ac.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {access}"})
 
     assert me.status_code == 200
     # JWT payload에는 is_system_admin이 없지만 Keystone mock이 True를 반환하므로 True여야 함

@@ -30,7 +30,7 @@
 	let error = $state('');
 
 	$effect(() => {
-		void api.get<K3sFlavor[]>('/api/flavors', token, projectId).then(f => { flavors = f; }).catch(() => {});
+		void api.get<K3sFlavor[]>('/api/v1/flavors', token, projectId).then(f => { flavors = f; }).catch(() => {});
 	});
 
 	async function save() {
@@ -46,7 +46,7 @@
 				...(form.stampede_enabled ? { min_size: Number(form.min_size), max_size: Number(form.max_size) } : {}),
 			};
 			const ng = await api.post<K3sNodegroup>(
-				`/api/k3s/clusters/${clusterId}/nodegroups`,
+				`/api/v1/k3s/clusters/${clusterId}/nodegroups`,
 				body,
 				token,
 				projectId,

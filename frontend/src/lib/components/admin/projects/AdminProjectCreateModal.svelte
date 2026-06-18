@@ -29,7 +29,7 @@
 		createError = '';
 		try {
 			await api.post(
-				'/api/admin/projects',
+				'/api/v1/admin/projects',
 				{ name: form.name, description: form.description || null, enabled: form.enabled },
 				token,
 				projectId,

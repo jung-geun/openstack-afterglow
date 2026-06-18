@@ -54,7 +54,7 @@
 		(async () => {
 			try {
 				const me = await api.get<{ user_id: string; username: string; project_id: string; project_name: string; roles: string[]; is_system_admin: boolean }>(
-					'/api/auth/me', token, projectId ?? undefined,
+					'/api/v1/auth/me', token, projectId ?? undefined,
 				);
 				auth.update((s) => ({ ...s, isSystemAdmin: me.is_system_admin === true, roles: me.roles ?? s.roles, federated: me.auth_method === "federated" }));
 				authReady.set(true);
@@ -84,7 +84,7 @@
 						token: string;
 						refresh_token?: string;
 						expires_at?: string;
-					}>('/api/auth/refresh', { refresh_token: $auth.refreshToken });
+					}>('/api/v1/auth/refresh', { refresh_token: $auth.refreshToken });
 					auth.update((s) => ({
 						...s,
 						token: data.token,
@@ -112,7 +112,7 @@
 		// best-effort 서버 토큰 폐기
 		if ($auth.token) {
 			try {
-				await api.post('/api/auth/logout', {}, $auth.token, $auth.projectId ?? undefined);
+				await api.post('/api/v1/auth/logout', {}, $auth.token, $auth.projectId ?? undefined);
 			} catch { /* 실패해도 로컬 정리는 진행 */ }
 		}
 		clearAuth();

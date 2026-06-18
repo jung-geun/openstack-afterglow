@@ -18,7 +18,7 @@
 		error = '';
 		try {
 			const result = await api.post<{ id: string; name: string; description: string }>(
-				'/api/projects',
+				'/api/v1/projects',
 				{ name: name.trim(), description: description.trim() },
 				$auth.token ?? undefined
 			);

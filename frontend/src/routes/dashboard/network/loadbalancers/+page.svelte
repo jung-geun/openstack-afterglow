@@ -29,7 +29,7 @@
 
   async function fetchLoadbalancers(opts?: { refresh?: boolean }) {
     try {
-      loadbalancers = await api.get<LoadBalancer[]>('/api/loadbalancers', $auth.token ?? undefined, $auth.projectId ?? undefined, opts);
+      loadbalancers = await api.get<LoadBalancer[]>('/api/v1/loadbalancers', $auth.token ?? undefined, $auth.projectId ?? undefined, opts);
       error = '';
     } catch (e) {
       error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';

@@ -62,7 +62,7 @@
 	async function fetchTrend(opts?: { refresh?: boolean }) {
 		const qs = opts?.refresh ? `?range=${range}&refresh=true` : `?range=${range}`;
 		try {
-			const v = await api.get<TrendData>(`/api/dashboard/metrics/trend${qs}`, token, projectId);
+			const v = await api.get<TrendData>(`/api/v1/dashboard/metrics/trend${qs}`, token, projectId);
 			trendData = v;
 		} catch {
 			// Prometheus 미설치 시 silent fail
@@ -76,19 +76,19 @@
 		if (!summary) summaryLoading = true;
 		try {
 			await Promise.allSettled([
-				api.get<DashboardSummary>('/api/dashboard/summary', token, projectId, { ...opts, signal: ctrl.signal })
+				api.get<DashboardSummary>('/api/v1/dashboard/summary', token, projectId, { ...opts, signal: ctrl.signal })
 					.then(v => { if (!ctrl.signal.aborted) { summary = v; summaryLoading = false; } })
 					.catch(() => { summaryLoading = false; }),
-				api.get<Quotas>('/api/dashboard/quotas', token, projectId, { signal: ctrl.signal })
+				api.get<Quotas>('/api/v1/dashboard/quotas', token, projectId, { signal: ctrl.signal })
 					.then(v => { if (!ctrl.signal.aborted) quotas = v; })
 					.catch(() => {}),
-				api.get<Instance[]>('/api/instances', token, projectId, { ...opts, signal: ctrl.signal })
+				api.get<Instance[]>('/api/v1/instances', token, projectId, { ...opts, signal: ctrl.signal })
 					.then(v => { if (!ctrl.signal.aborted) recentInstances = v.slice(0, 5); })
 					.catch(() => {}),
-				api.get<unknown[]>('/api/k3s/clusters', token, projectId, { signal: ctrl.signal })
+				api.get<unknown[]>('/api/v1/k3s/clusters', token, projectId, { signal: ctrl.signal })
 					.then(v => { if (!ctrl.signal.aborted) k3sCount = v.filter((c: any) => c.status === 'ACTIVE' || c.provisioning_status === 'ACTIVE').length; })
 					.catch(() => { k3sCount = null; }),
-				api.get<{ notifications: Notification[] }>('/api/dashboard/notifications', token, projectId, { signal: ctrl.signal })
+				api.get<{ notifications: Notification[] }>('/api/v1/dashboard/notifications', token, projectId, { signal: ctrl.signal })
 					.then(v => { if (!ctrl.signal.aborted) notifications = v.notifications ?? []; })
 					.catch(() => {}),
 				fetchTrend(opts),

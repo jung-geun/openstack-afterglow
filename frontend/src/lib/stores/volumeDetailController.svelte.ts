@@ -57,8 +57,8 @@ export function createVolumeDetailController(opts: VolumeDetailOpts) {
     const proj = opts.projectId();
     try {
       const [vol, snaps] = await Promise.all([
-        api.get<Volume>(`/api/volumes/${id}`, tok, proj),
-        api.get<VolumeSnapshot[]>(`/api/volume-snapshots?volume_id=${id}`, tok, proj).catch(() => [] as VolumeSnapshot[]),
+        api.get<Volume>(`/api/v1/volumes/${id}`, tok, proj),
+        api.get<VolumeSnapshot[]>(`/api/v1/volume-snapshots?volume_id=${id}`, tok, proj).catch(() => [] as VolumeSnapshot[]),
       ]);
       volume = vol;
       snapshots = snaps;
@@ -89,7 +89,7 @@ export function createVolumeDetailController(opts: VolumeDetailOpts) {
     showAttachModal = true;
     attachError = '';
     try {
-      instances = await api.get<Instance[]>('/api/instances', opts.token(), opts.projectId());
+      instances = await api.get<Instance[]>('/api/v1/instances', opts.token(), opts.projectId());
     } catch {
       instances = [];
     }
@@ -106,7 +106,7 @@ export function createVolumeDetailController(opts: VolumeDetailOpts) {
     attachError = '';
     try {
       await api.post(
-        `/api/instances/${attachInstanceId}/volumes`,
+        `/api/v1/instances/${attachInstanceId}/volumes`,
         { volume_id: opts.volumeId() },
         opts.token(),
         opts.projectId(),
@@ -128,7 +128,7 @@ export function createVolumeDetailController(opts: VolumeDetailOpts) {
     if (!(await confirmDialog(`볼륨 "${v.name || id.slice(0, 8)}"을 삭제하시겠습니까?`))) return;
     deleting = true;
     try {
-      await api.delete(`/api/volumes/${id}`, opts.token(), opts.projectId());
+      await api.delete(`/api/v1/volumes/${id}`, opts.token(), opts.projectId());
       opts.onDeleted?.();
       opts.onClose?.();
     } catch (e) {
@@ -156,7 +156,7 @@ export function createVolumeDetailController(opts: VolumeDetailOpts) {
     snapshotError = '';
     try {
       await api.post(
-        '/api/volume-snapshots',
+        '/api/v1/volume-snapshots',
         { volume_id: opts.volumeId(), name: snapshotName.trim(), description: snapshotDesc.trim() || undefined },
         opts.token(),
         opts.projectId(),
@@ -176,7 +176,7 @@ export function createVolumeDetailController(opts: VolumeDetailOpts) {
     if (!(await confirmDialog(`스냅샷 "${name || id.slice(0, 8)}"을 삭제하시겠습니까?`))) return;
     deletingSnapshot = id;
     try {
-      await api.delete(`/api/volume-snapshots/${id}`, opts.token(), opts.projectId());
+      await api.delete(`/api/v1/volume-snapshots/${id}`, opts.token(), opts.projectId());
       snapshots = snapshots.filter(s => s.id !== id);
     } catch (e) {
       toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));

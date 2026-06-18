@@ -37,7 +37,7 @@ async def test_precheck_returns_supported_when_active_and_qga(admin_client, mock
     """ACTIVE + QGA 지원 시 supported=True를 반환한다."""
     mock_conn.compute.get_server.return_value = _make_server()
     with patch("app.api.compute.instances.nova.get_server_image_meta", return_value=_qga_meta(True)):
-        resp = await admin_client.get("/api/instances/server-1/admin-password/precheck")
+        resp = await admin_client.get("/api/v1/instances/server-1/admin-password/precheck")
     assert resp.status_code == 200
     data = resp.json()
     assert data["supported"] is True
@@ -50,7 +50,7 @@ async def test_precheck_returns_unsupported_when_not_active(admin_client, mock_c
     """ACTIVE가 아닌 인스턴스는 supported=False를 반환한다."""
     mock_conn.compute.get_server.return_value = _make_server(status="SHELVED")
     with patch("app.api.compute.instances.nova.get_server_image_meta", return_value=_qga_meta(True)):
-        resp = await admin_client.get("/api/instances/server-1/admin-password/precheck")
+        resp = await admin_client.get("/api/v1/instances/server-1/admin-password/precheck")
     assert resp.status_code == 200
     data = resp.json()
     assert data["supported"] is False
@@ -62,7 +62,7 @@ async def test_precheck_returns_unsupported_when_no_qga(admin_client, mock_conn)
     """QGA 미지원 이미지는 supported=False를 반환한다."""
     mock_conn.compute.get_server.return_value = _make_server()
     with patch("app.api.compute.instances.nova.get_server_image_meta", return_value=_qga_meta(False)):
-        resp = await admin_client.get("/api/instances/server-1/admin-password/precheck")
+        resp = await admin_client.get("/api/v1/instances/server-1/admin-password/precheck")
     assert resp.status_code == 200
     data = resp.json()
     assert data["supported"] is False
@@ -72,7 +72,7 @@ async def test_precheck_returns_unsupported_when_no_qga(admin_client, mock_conn)
 @pytest.mark.asyncio
 async def test_precheck_requires_admin(non_admin_client):
     """비관리자는 precheck 엔드포인트에 접근 불가 (403)."""
-    resp = await non_admin_client.get("/api/instances/server-1/admin-password/precheck")
+    resp = await non_admin_client.get("/api/v1/instances/server-1/admin-password/precheck")
     assert resp.status_code == 403
 
 
@@ -85,7 +85,7 @@ async def test_set_password_success(admin_client, mock_conn):
         patch("app.api.compute.instances.nova.change_server_password") as mock_chpw,
     ):
         resp = await admin_client.post(
-            "/api/instances/server-1/admin-password",
+            "/api/v1/instances/server-1/admin-password",
             json={"new_password": "Secure1234!"},
         )
     assert resp.status_code == 204
@@ -99,7 +99,7 @@ async def test_set_password_success(admin_client, mock_conn):
 async def test_set_password_requires_admin(non_admin_client):
     """비관리자는 패스워드 변경 불가 (403)."""
     resp = await non_admin_client.post(
-        "/api/instances/server-1/admin-password",
+        "/api/v1/instances/server-1/admin-password",
         json={"new_password": "Secure1234!"},
     )
     assert resp.status_code == 403
@@ -110,7 +110,7 @@ async def test_set_password_rejects_non_active(admin_client, mock_conn):
     """ACTIVE가 아닌 인스턴스에 패스워드 변경 시도 시 409를 반환한다."""
     mock_conn.compute.get_server.return_value = _make_server(status="SHUTOFF")
     resp = await admin_client.post(
-        "/api/instances/server-1/admin-password",
+        "/api/v1/instances/server-1/admin-password",
         json={"new_password": "Secure1234!"},
     )
     assert resp.status_code == 409
@@ -123,7 +123,7 @@ async def test_set_password_rejects_no_qga(admin_client, mock_conn):
     mock_conn.compute.get_server.return_value = _make_server()
     with patch("app.api.compute.instances.nova.get_server_image_meta", return_value=_qga_meta(False)):
         resp = await admin_client.post(
-            "/api/instances/server-1/admin-password",
+            "/api/v1/instances/server-1/admin-password",
             json={"new_password": "Secure1234!"},
         )
     assert resp.status_code == 409
@@ -134,7 +134,7 @@ async def test_set_password_rejects_no_qga(admin_client, mock_conn):
 async def test_set_password_rejects_short_password(admin_client, mock_conn):
     """8자 미만 패스워드는 422를 반환한다."""
     resp = await admin_client.post(
-        "/api/instances/server-1/admin-password",
+        "/api/v1/instances/server-1/admin-password",
         json={"new_password": "short"},
     )
     assert resp.status_code == 422

@@ -45,7 +45,7 @@ async def test_list_file_storages(client, mock_conn):
         patch("app.api.storage.file_storage.manila.list_file_storages", return_value=[make_file_storage()]),
         patch("app.api.storage.file_storage.cached_call", new=mock_cached_call),
     ):
-        resp = await client.get("/api/file-storage")
+        resp = await client.get("/api/v1/file-storage")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
     assert resp.json()[0]["id"] == "share-1"
@@ -54,7 +54,7 @@ async def test_list_file_storages(client, mock_conn):
 @pytest.mark.asyncio
 async def test_get_file_storage(client, mock_conn):
     with patch("app.api.storage.file_storage.manila.get_file_storage", return_value=make_file_storage()):
-        resp = await client.get("/api/file-storage/share-1")
+        resp = await client.get("/api/v1/file-storage/share-1")
     assert resp.status_code == 200
     assert resp.json()["id"] == "share-1"
 
@@ -63,7 +63,7 @@ async def test_get_file_storage(client, mock_conn):
 async def test_create_file_storage(client, mock_conn):
     with patch("app.api.storage.file_storage.manila.create_file_storage", return_value=make_file_storage("share-new")):
         resp = await client.post(
-            "/api/file-storage",
+            "/api/v1/file-storage",
             json={
                 "name": "test-share",
                 "size_gb": 100,
@@ -81,7 +81,7 @@ async def test_delete_file_storage(client, mock_conn):
         patch("app.api.storage.file_storage.manila.delete_file_storage", return_value=None),
         patch("app.api.storage.file_storage.invalidate"),
     ):
-        resp = await client.delete("/api/file-storage/share-1")
+        resp = await client.delete("/api/v1/file-storage/share-1")
     assert resp.status_code == 204
 
 
@@ -91,7 +91,7 @@ async def test_list_access_rules(client, mock_conn):
         patch("app.api.storage.file_storage.manila.get_file_storage", return_value=make_file_storage()),
         patch("app.api.storage.file_storage.manila.list_access_rules", return_value=[make_access_rule()]),
     ):
-        resp = await client.get("/api/file-storage/share-1/access-rules")
+        resp = await client.get("/api/v1/file-storage/share-1/access-rules")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
 
@@ -103,7 +103,7 @@ async def test_create_access_rule(client, mock_conn):
         patch("app.api.storage.file_storage.manila.create_access_rule", return_value=make_access_rule("rule-new")),
     ):
         resp = await client.post(
-            "/api/file-storage/share-1/access-rules",
+            "/api/v1/file-storage/share-1/access-rules",
             json={
                 "access_to": "10.0.0.0/24",
                 "access_level": "rw",
@@ -119,7 +119,7 @@ async def test_revoke_access_rule(client, mock_conn):
         patch("app.api.storage.file_storage.manila.get_file_storage", return_value=make_file_storage()),
         patch("app.api.storage.file_storage.manila.revoke_access_rule", return_value=None),
     ):
-        resp = await client.delete("/api/file-storage/share-1/access-rules/rule-1")
+        resp = await client.delete("/api/v1/file-storage/share-1/access-rules/rule-1")
     assert resp.status_code == 204
 
 
@@ -421,7 +421,7 @@ async def test_list_file_storages_filters_other_project(client, mock_conn):
         patch("app.api.storage.file_storage.manila.list_file_storages", side_effect=mock_list),
         patch("app.api.storage.file_storage.cached_call", new=mock_cached_call),
     ):
-        resp = await client.get("/api/file-storage")
+        resp = await client.get("/api/v1/file-storage")
     assert resp.status_code == 200
     ids = [s["id"] for s in resp.json()]
     assert "share-mine" in ids
@@ -449,7 +449,7 @@ async def test_list_file_storages_exposes_public_share(client, mock_conn):
         patch("app.api.storage.file_storage.manila.list_file_storages", side_effect=mock_list),
         patch("app.api.storage.file_storage.cached_call", new=mock_cached_call),
     ):
-        resp = await client.get("/api/file-storage")
+        resp = await client.get("/api/v1/file-storage")
     assert resp.status_code == 200
     assert any(s["id"] == "share-other" for s in resp.json())
 
@@ -459,7 +459,7 @@ async def test_get_file_storage_cross_project_returns_404(client, mock_conn):
     """non-admin이 다른 프로젝트 share를 직접 ID로 GET 시 404."""
     other = _make_share_other_project(is_public=False)
     with patch("app.api.storage.file_storage.manila.get_file_storage", return_value=other):
-        resp = await client.get("/api/file-storage/share-other")
+        resp = await client.get("/api/v1/file-storage/share-other")
     assert resp.status_code == 404
 
 
@@ -468,7 +468,7 @@ async def test_admin_can_get_cross_project_share(admin_client, mock_conn):
     """admin은 다른 프로젝트 share도 GET 가능."""
     other = _make_share_other_project(is_public=False)
     with patch("app.api.storage.file_storage.manila.get_file_storage", return_value=other):
-        resp = await admin_client.get("/api/file-storage/share-other")
+        resp = await admin_client.get("/api/v1/file-storage/share-other")
     assert resp.status_code == 200
 
 
@@ -555,7 +555,7 @@ async def test_create_file_storage_propagates_manila_400(client, mock_conn):
     err = _make_manila_status_error(400, "Invalid share protocol provided: NFS. Available protocols: ['CEPHFS'].")
     with patch("app.api.storage.file_storage.manila.create_file_storage", side_effect=err):
         resp = await client.post(
-            "/api/file-storage",
+            "/api/v1/file-storage",
             json={
                 "name": "test-bad",
                 "size_gb": 10,
@@ -575,7 +575,7 @@ async def test_create_file_storage_runtime_error_returns_409(client, mock_conn):
         side_effect=RuntimeError("파일 스토리지 생성 실패 (error 상태): Capabilities filter didn't succeed."),
     ):
         resp = await client.post(
-            "/api/file-storage",
+            "/api/v1/file-storage",
             json={
                 "name": "test-cap-fail",
                 "size_gb": 10,
@@ -595,7 +595,7 @@ async def test_create_file_storage_500_fallback(client, mock_conn):
         side_effect=ValueError("unexpected"),
     ):
         resp = await client.post(
-            "/api/file-storage",
+            "/api/v1/file-storage",
             json={
                 "name": "test-valueerr",
                 "size_gb": 10,
@@ -616,7 +616,7 @@ async def test_create_file_storage_nfs_uses_nfs_share_type_fallback(client, mock
         "app.api.storage.file_storage.manila.create_file_storage", return_value=make_file_storage()
     ) as mock_create:
         resp = await client.post(
-            "/api/file-storage",
+            "/api/v1/file-storage",
             json={"name": "nfs-no-type", "size_gb": 10, "share_proto": "NFS"},
         )
     assert resp.status_code == 201
@@ -635,7 +635,7 @@ async def test_create_file_storage_cephfs_uses_cephfs_share_type_fallback(client
         "app.api.storage.file_storage.manila.create_file_storage", return_value=make_file_storage()
     ) as mock_create:
         resp = await client.post(
-            "/api/file-storage",
+            "/api/v1/file-storage",
             json={"name": "ceph-no-type", "size_gb": 10, "share_proto": "CEPHFS"},
         )
     assert resp.status_code == 201
@@ -661,7 +661,7 @@ async def test_create_access_rule_no_metadata_passed(client, mock_conn):
         ) as mock_create,
     ):
         resp = await client.post(
-            "/api/file-storage/share-1/access-rules",
+            "/api/v1/file-storage/share-1/access-rules",
             json={"access_to": "10.0.0.0/24", "access_level": "rw", "access_type": "ip"},
         )
     assert resp.status_code == 201
@@ -678,7 +678,7 @@ async def test_create_access_rule_response_has_id_field(client, mock_conn):
         patch("app.api.storage.file_storage.manila.create_access_rule", return_value=rule),
     ):
         resp = await client.post(
-            "/api/file-storage/share-1/access-rules",
+            "/api/v1/file-storage/share-1/access-rules",
             json={"access_to": "10.0.0.0/24", "access_level": "rw", "access_type": "ip"},
         )
     assert resp.status_code == 201
@@ -698,7 +698,7 @@ async def test_create_access_rule_propagates_manila_400(client, mock_conn):
         patch("app.api.storage.file_storage.manila.create_access_rule", side_effect=err),
     ):
         resp = await client.post(
-            "/api/file-storage/share-1/access-rules",
+            "/api/v1/file-storage/share-1/access-rules",
             json={"access_to": "10.0.0.0/24", "access_level": "rw", "access_type": "ip"},
         )
     assert resp.status_code == 400
@@ -870,7 +870,7 @@ async def test_get_file_storage_detail_masks_host_for_non_admin(client, mock_con
     """비-admin 사용자 상세 조회 시 host 필드가 None으로 마스킹된다."""
     share_with_host = make_file_storage().model_copy(update={"host": "dms-controller1@cephfsnfs1#cephfs"})
     with patch("app.api.storage.file_storage.manila.get_file_storage", return_value=share_with_host):
-        resp = await client.get("/api/file-storage/share-1")
+        resp = await client.get("/api/v1/file-storage/share-1")
     assert resp.status_code == 200
     assert resp.json()["host"] is None
 
@@ -880,6 +880,6 @@ async def test_get_file_storage_detail_exposes_host_for_admin(admin_client, mock
     """admin 사용자 상세 조회 시 host 필드가 노출된다."""
     share_with_host = make_file_storage().model_copy(update={"host": "dms-controller1@cephfsnfs1#cephfs"})
     with patch("app.api.storage.file_storage.manila.get_file_storage", return_value=share_with_host):
-        resp = await admin_client.get("/api/file-storage/share-1")
+        resp = await admin_client.get("/api/v1/file-storage/share-1")
     assert resp.status_code == 200
     assert resp.json()["host"] == "dms-controller1@cephfsnfs1#cephfs"

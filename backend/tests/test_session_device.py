@@ -154,7 +154,7 @@ async def test_delete_session_endpoint_own(client, _fake_redis_global):
     )
 
     with patch("app.services.keystone.revoke_token"):
-        resp = await client.delete(f"/api/auth/sessions/{jti}")
+        resp = await client.delete(f"/api/v1/auth/sessions/{jti}")
 
     assert resp.status_code == 200
     assert await session_store.get_session(jti) is None
@@ -174,7 +174,7 @@ async def test_delete_session_endpoint_other_user(client, _fake_redis_global):
         exp=9_999_999_999,
     )
 
-    resp = await client.delete(f"/api/auth/sessions/{jti}")
+    resp = await client.delete(f"/api/v1/auth/sessions/{jti}")
     assert resp.status_code == 404
     # 세션이 그대로 남아 있어야 함
     assert await session_store.get_session(jti) is not None
@@ -263,7 +263,7 @@ async def test_list_users_no_per_user_get_and_activity_bounds(admin_client, mock
         new_callable=AsyncMock,
         return_value={"uid-1": {"first_seen": "2025-01-01T00:00:00", "last_seen": "2025-06-01T00:00:00"}},
     ):
-        resp = await admin_client.get("/api/admin/users?limit=20")
+        resp = await admin_client.get("/api/v1/admin/users?limit=20")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -294,7 +294,7 @@ async def test_list_users_activity_bounds_missing_user(admin_client, mock_conn):
         new_callable=AsyncMock,
         return_value={},  # 활동 기록 없음
     ):
-        resp = await admin_client.get("/api/admin/users?limit=20")
+        resp = await admin_client.get("/api/v1/admin/users?limit=20")
 
     assert resp.status_code == 200
     item = resp.json()["items"][0]
@@ -311,7 +311,7 @@ async def test_list_users_activity_bounds_missing_user(admin_client, mock_conn):
 @pytest.mark.anyio
 async def test_get_users_stats_forbidden_for_non_admin(non_admin_client):
     """require_admin 게이트 — 일반 사용자는 403."""
-    resp = await non_admin_client.get("/api/admin/users/stats")
+    resp = await non_admin_client.get("/api/v1/admin/users/stats")
     assert resp.status_code == 403
 
 
@@ -327,7 +327,7 @@ async def test_get_users_stats_counts(admin_client, mock_conn):
         users_mock.append(u)
     mock_conn.identity.users.return_value = users_mock
 
-    resp = await admin_client.get("/api/admin/users/stats")
+    resp = await admin_client.get("/api/v1/admin/users/stats")
     assert resp.status_code == 200
     data = resp.json()
     assert data["total"] == 3
@@ -343,7 +343,7 @@ async def test_get_users_stats_counts(admin_client, mock_conn):
 @pytest.mark.anyio
 async def test_get_users_activity_forbidden_for_non_admin(non_admin_client):
     """require_admin 게이트 — 일반 사용자는 403."""
-    resp = await non_admin_client.get("/api/admin/users/activity")
+    resp = await non_admin_client.get("/api/v1/admin/users/activity")
     assert resp.status_code == 403
 
 
@@ -371,7 +371,7 @@ async def test_get_users_activity_returns_events(admin_client):
         new_callable=AsyncMock,
         return_value=sample,
     ) as mock_list:
-        resp = await admin_client.get("/api/admin/users/activity?limit=10")
+        resp = await admin_client.get("/api/v1/admin/users/activity?limit=10")
 
     assert resp.status_code == 200
     data = resp.json()

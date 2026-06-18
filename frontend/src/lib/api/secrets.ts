@@ -44,61 +44,61 @@ export interface QuotaInfo {
 
 export const secretsApi = {
 	listSecrets: (token?: string, projectId?: string) =>
-		api.get<SecretInfo[]>('/api/secrets', token, projectId),
+		api.get<SecretInfo[]>('/api/v1/secrets', token, projectId),
 
 	createSecret: (body: object, token?: string, projectId?: string) =>
-		api.post<SecretInfo>('/api/secrets', body, token, projectId),
+		api.post<SecretInfo>('/api/v1/secrets', body, token, projectId),
 
 	deleteSecret: (id: string, token?: string, projectId?: string) =>
-		api.delete<void>(`/api/secrets/${id}`, token, projectId),
+		api.delete<void>(`/api/v1/secrets/${id}`, token, projectId),
 
 	getPayload: async (id: string, token?: string, projectId?: string): Promise<string> => {
 		const headers: Record<string, string> = {};
 		if (token) headers['Authorization'] = `Bearer ${token}`;
 		if (projectId) headers['X-Project-Id'] = projectId;
-		const res = await fetch(`${getBaseUrl()}/api/secrets/${id}/payload`, { headers });
+		const res = await fetch(`${getBaseUrl()}/api/v1/secrets/${id}/payload`, { headers });
 		if (!res.ok) throw new Error('payload 조회 실패');
 		const buf = await res.arrayBuffer();
 		return new TextDecoder().decode(buf);
 	},
 
 	getAcl: (id: string, token?: string, projectId?: string) =>
-		api.get<object>(`/api/secrets/${id}/acl`, token, projectId),
+		api.get<object>(`/api/v1/secrets/${id}/acl`, token, projectId),
 
 	setAcl: (id: string, body: object, token?: string, projectId?: string) =>
-		api.put<object>(`/api/secrets/${id}/acl`, body, token, projectId),
+		api.put<object>(`/api/v1/secrets/${id}/acl`, body, token, projectId),
 
 	listConsumers: (id: string, token?: string, projectId?: string) =>
-		api.get<object[]>(`/api/secrets/${id}/consumers`, token, projectId),
+		api.get<object[]>(`/api/v1/secrets/${id}/consumers`, token, projectId),
 
 	getEffectiveQuota: (token?: string, projectId?: string) =>
-		api.get<QuotaInfo>('/api/secrets/quota/effective', token, projectId),
+		api.get<QuotaInfo>('/api/v1/secrets/quota/effective', token, projectId),
 
 	listContainers: (token?: string, projectId?: string) =>
-		api.get<ContainerInfo[]>('/api/secret-containers', token, projectId),
+		api.get<ContainerInfo[]>('/api/v1/secret-containers', token, projectId),
 
 	createContainer: (body: object, token?: string, projectId?: string) =>
-		api.post<ContainerInfo>('/api/secret-containers', body, token, projectId),
+		api.post<ContainerInfo>('/api/v1/secret-containers', body, token, projectId),
 
 	deleteContainer: (id: string, token?: string, projectId?: string) =>
-		api.delete<void>(`/api/secret-containers/${id}`, token, projectId),
+		api.delete<void>(`/api/v1/secret-containers/${id}`, token, projectId),
 
 	listOrders: (token?: string, projectId?: string) =>
-		api.get<OrderInfo[]>('/api/secret-orders', token, projectId),
+		api.get<OrderInfo[]>('/api/v1/secret-orders', token, projectId),
 
 	createOrder: (body: object, token?: string, projectId?: string) =>
-		api.post<OrderInfo>('/api/secret-orders', body, token, projectId),
+		api.post<OrderInfo>('/api/v1/secret-orders', body, token, projectId),
 
 	getOrder: (id: string, token?: string, projectId?: string) =>
-		api.get<OrderInfo>(`/api/secret-orders/${id}`, token, projectId),
+		api.get<OrderInfo>(`/api/v1/secret-orders/${id}`, token, projectId),
 
 	// Admin
 	listProjectQuotas: (token?: string, projectId?: string) =>
-		api.get<object[]>('/api/admin/key-manager/project-quotas', token, projectId),
+		api.get<object[]>('/api/v1/admin/key-manager/project-quotas', token, projectId),
 
 	setProjectQuota: (pid: string, body: object, token?: string, projectId?: string) =>
-		api.put<object>(`/api/admin/key-manager/project-quotas/${pid}`, body, token, projectId),
+		api.put<object>(`/api/v1/admin/key-manager/project-quotas/${pid}`, body, token, projectId),
 
 	deleteProjectQuota: (pid: string, token?: string, projectId?: string) =>
-		api.delete<void>(`/api/admin/key-manager/project-quotas/${pid}`, token, projectId),
+		api.delete<void>(`/api/v1/admin/key-manager/project-quotas/${pid}`, token, projectId),
 };

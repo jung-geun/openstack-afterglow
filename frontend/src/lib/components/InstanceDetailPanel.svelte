@@ -65,7 +65,7 @@
 				prometheus_available: boolean;
 				stats: Record<string, { min: number | null; avg: number | null; max: number | null }>;
 				recommendation: SummaryRec | null;
-			}>(`/api/instances/${iid}/metrics-summary?range=7d`, token, projectId);
+			}>(`/api/v1/instances/${iid}/metrics-summary?range=7d`, token, projectId);
 			if (resp.prometheus_available) {
 				recommendation = resp.recommendation;
 				summaryCpuAvg = resp.stats.cpu?.avg ?? null;

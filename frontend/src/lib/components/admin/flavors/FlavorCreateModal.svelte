@@ -21,7 +21,7 @@
 		creating = true;
 		createError = '';
 		try {
-			await api.post('/api/admin/flavors', {
+			await api.post('/api/v1/admin/flavors', {
 				name: form.name,
 				vcpus: form.vcpus,
 				ram: form.ram,

@@ -19,7 +19,7 @@
 		membersError = '';
 		try {
 			const data = await api.get<{ items: ProjectManagerMember[] }>(
-				`/api/projects/${projectId}/members`,
+				`/api/v1/projects/${projectId}/members`,
 				$auth.token ?? undefined
 			);
 			members = data.items;
@@ -32,7 +32,7 @@
 
 	async function promoteManager(userId: string) {
 		try {
-			await api.post(`/api/projects/${projectId}/managers/${userId}`, {}, $auth.token ?? undefined);
+			await api.post(`/api/v1/projects/${projectId}/managers/${userId}`, {}, $auth.token ?? undefined);
 			await loadMembers();
 		} catch (e) {
 			membersError = e instanceof ApiError ? e.message : '승격 실패';
@@ -41,7 +41,7 @@
 
 	async function demoteManager(userId: string) {
 		try {
-			await api.delete(`/api/projects/${projectId}/managers/${userId}`, $auth.token ?? undefined);
+			await api.delete(`/api/v1/projects/${projectId}/managers/${userId}`, $auth.token ?? undefined);
 			await loadMembers();
 		} catch (e) {
 			membersError = e instanceof ApiError ? e.message : '해제 실패';
@@ -63,7 +63,7 @@
 		invitationsError = '';
 		try {
 			const data = await api.get<{ items: ProjectInvitation[] }>(
-				`/api/projects/${projectId}/invitations`,
+				`/api/v1/projects/${projectId}/invitations`,
 				$auth.token ?? undefined
 			);
 			invitations = data.items;
@@ -81,7 +81,7 @@
 		inviteSuccess = '';
 		try {
 			await api.post(
-				`/api/projects/${projectId}/invitations`,
+				`/api/v1/projects/${projectId}/invitations`,
 				{ email: inviteEmail.trim(), keystone_role: inviteRole },
 				$auth.token ?? undefined
 			);
@@ -98,7 +98,7 @@
 	async function revokeInvitation(invId: number) {
 		try {
 			await api.delete(
-				`/api/projects/${projectId}/invitations/${invId}`,
+				`/api/v1/projects/${projectId}/invitations/${invId}`,
 				$auth.token ?? undefined
 			);
 			await loadInvitations();

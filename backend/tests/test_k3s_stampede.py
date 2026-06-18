@@ -200,7 +200,7 @@ def test_parse_memory_bytes():
 async def test_stampede_enable_unauthenticated():
     """미인증 요청은 401."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.post("/api/k3s/clusters/cl-1/stampede/enable")
+        resp = await ac.post("/api/v1/k3s/clusters/cl-1/stampede/enable")
     assert resp.status_code == 401
 
 
@@ -215,7 +215,7 @@ async def test_stampede_enable_cluster_not_found(client):
         s = MagicMock()
         s.k3s_stampede_enabled = True
         mock_settings.return_value = s
-        resp = await client.post("/api/k3s/clusters/cl-1/stampede/enable")
+        resp = await client.post("/api/v1/k3s/clusters/cl-1/stampede/enable")
     assert resp.status_code == 404
 
 
@@ -230,7 +230,7 @@ async def test_stampede_enable_global_disabled(client):
         s = MagicMock()
         s.k3s_stampede_enabled = False
         mock_settings.return_value = s
-        resp = await client.post("/api/k3s/clusters/cl-1/stampede/enable")
+        resp = await client.post("/api/v1/k3s/clusters/cl-1/stampede/enable")
     assert resp.status_code == 400
 
 
@@ -238,7 +238,7 @@ async def test_stampede_enable_global_disabled(client):
 async def test_stampede_disable_unauthenticated():
     """미인증 요청은 401."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.post("/api/k3s/clusters/cl-1/stampede/disable")
+        resp = await ac.post("/api/v1/k3s/clusters/cl-1/stampede/disable")
     assert resp.status_code == 401
 
 
@@ -246,7 +246,7 @@ async def test_stampede_disable_unauthenticated():
 async def test_stampede_status_unauthenticated():
     """미인증 요청은 401."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/k3s/clusters/cl-1/stampede")
+        resp = await ac.get("/api/v1/k3s/clusters/cl-1/stampede")
     assert resp.status_code == 401
 
 
@@ -262,7 +262,7 @@ async def test_stampede_status_success(client):
         s = MagicMock()
         s.k3s_stampede_enabled = True
         mock_settings.return_value = s
-        resp = await client.get("/api/k3s/clusters/cl-1/stampede")
+        resp = await client.get("/api/v1/k3s/clusters/cl-1/stampede")
     assert resp.status_code == 200
     data = resp.json()
     assert "stampede_enabled" in data

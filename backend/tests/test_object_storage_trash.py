@@ -312,7 +312,7 @@ async def test_delete_object_uses_soft_delete_by_default(client, mock_conn):
             return_value={"trash_key": "1234/abc/file.txt", "original_name": "file.txt", "deleted_at": 1234}
         )
         mock_swift.delete_object = MagicMock()
-        resp = await client.delete("/api/object-storage/my-bucket/objects/file.txt")
+        resp = await client.delete("/api/v1/object-storage/my-bucket/objects/file.txt")
 
     assert resp.status_code in (204, 404, 405, 500)
     if resp.status_code == 204:
@@ -326,7 +326,7 @@ async def test_delete_object_permanent_uses_hard_delete(client, mock_conn):
     with patch("app.services.swift") as mock_swift:
         mock_swift.delete_object = MagicMock()
         mock_swift.soft_delete_object = MagicMock()
-        resp = await client.delete("/api/object-storage/my-bucket/objects/file.txt?permanent=true")
+        resp = await client.delete("/api/v1/object-storage/my-bucket/objects/file.txt?permanent=true")
 
     assert resp.status_code in (204, 404, 405, 500)
     if resp.status_code == 204:
@@ -354,7 +354,7 @@ async def test_list_trash_returns_objects(client, mock_conn):
                 }
             ]
         )
-        resp = await client.get("/api/object-storage/my-bucket/trash")
+        resp = await client.get("/api/v1/object-storage/my-bucket/trash")
 
     assert resp.status_code in (200, 404, 405, 500)
     if resp.status_code == 200:
@@ -371,7 +371,7 @@ async def test_restore_trash_object_endpoint(client, mock_conn):
             return_value={"restored_name": "report.pdf", "original_name": "report.pdf", "container": "my-bucket"}
         )
         resp = await client.post(
-            "/api/object-storage/my-bucket/trash/restore",
+            "/api/v1/object-storage/my-bucket/trash/restore",
             json={"trash_key": trash_key},
         )
 
@@ -384,7 +384,7 @@ async def test_purge_trash_object_endpoint(client, mock_conn):
     trash_key = f"{int(time.time())}/abc12345/report.pdf"
     with patch("app.services.swift") as mock_swift:
         mock_swift.purge_trash_object = MagicMock()
-        resp = await client.delete(f"/api/object-storage/my-bucket/trash/{trash_key}")
+        resp = await client.delete(f"/api/v1/object-storage/my-bucket/trash/{trash_key}")
 
     assert resp.status_code in (204, 404, 405, 500)
 
@@ -400,7 +400,7 @@ async def test_delete_container_soft_by_default(client, mock_conn):
     with patch("app.services.swift") as mock_swift:
         mock_swift.soft_delete_container_metadata = MagicMock()
         mock_swift.delete_container = MagicMock()
-        resp = await client.delete("/api/object-storage/my-bucket")
+        resp = await client.delete("/api/v1/object-storage/my-bucket")
 
     assert resp.status_code in (204, 404, 405, 500)
     if resp.status_code == 204:
@@ -414,7 +414,7 @@ async def test_delete_container_permanent_hard_deletes(client, mock_conn):
     with patch("app.services.swift") as mock_swift:
         mock_swift.delete_container = MagicMock()
         mock_swift.soft_delete_container_metadata = MagicMock()
-        resp = await client.delete("/api/object-storage/my-bucket?permanent=true")
+        resp = await client.delete("/api/v1/object-storage/my-bucket?permanent=true")
 
     assert resp.status_code in (204, 404, 405, 500)
     if resp.status_code == 204:
@@ -431,7 +431,7 @@ async def test_create_container_blocks_soft_deleted_name(client, mock_conn):
 
     with patch("app.services.swift") as mock_swift:
         mock_swift.create_container = MagicMock()
-        resp = await client.post("/api/object-storage", json={"name": "blocked-bucket"})
+        resp = await client.post("/api/v1/object-storage", json={"name": "blocked-bucket"})
 
     assert resp.status_code in (409, 404, 405)
     if resp.status_code == 409:
@@ -447,7 +447,7 @@ async def test_list_deleted_containers_endpoint(client, mock_conn):
 
     with patch("app.services.swift") as mock_swift:
         mock_swift.list_containers = MagicMock(return_value=[{"name": "deleted-bucket", "count": 5, "bytes": 1024}])
-        resp = await client.get("/api/object-storage/trash/containers")
+        resp = await client.get("/api/v1/object-storage/trash/containers")
 
     assert resp.status_code in (200, 404, 405, 500)
     if resp.status_code == 200:
@@ -470,7 +470,7 @@ async def test_restore_deleted_container_endpoint(client, mock_conn):
 
     with patch("app.services.swift") as mock_swift:
         mock_swift.restore_container_metadata = MagicMock()
-        resp = await client.post("/api/object-storage/trash/containers/my-bucket/restore")
+        resp = await client.post("/api/v1/object-storage/trash/containers/my-bucket/restore")
 
     assert resp.status_code in (200, 404, 405, 500)
     if resp.status_code == 200:
@@ -486,7 +486,7 @@ async def test_purge_deleted_container_endpoint(client, mock_conn):
 
     with patch("app.services.swift") as mock_swift:
         mock_swift.delete_container = MagicMock()
-        resp = await client.delete("/api/object-storage/trash/containers/purge-bucket")
+        resp = await client.delete("/api/v1/object-storage/trash/containers/purge-bucket")
 
     assert resp.status_code in (204, 404, 405, 500)
     if resp.status_code == 204:
@@ -498,7 +498,7 @@ async def test_purge_deleted_container_404_if_not_in_trash(client, mock_conn):
     """소프트 삭제 마킹 없는 버킷 영구 삭제 시 404."""
     with patch("app.services.swift") as mock_swift:
         mock_swift.delete_container = MagicMock()
-        resp = await client.delete("/api/object-storage/trash/containers/nonexistent-bucket")
+        resp = await client.delete("/api/v1/object-storage/trash/containers/nonexistent-bucket")
 
     assert resp.status_code in (404, 405)
 

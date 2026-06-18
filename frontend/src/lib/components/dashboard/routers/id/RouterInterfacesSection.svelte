@@ -30,7 +30,7 @@
 		if (!selectedNetId) { allSubnets = []; selectedSubnetId = ''; return; }
 		const net = availableNetworks.find(n => n.id === selectedNetId);
 		if (!net) return;
-		api.get<{ subnet_details: RouterSubnet[] }>(`/api/networks/${selectedNetId}`, token, projectId)
+		api.get<{ subnet_details: RouterSubnet[] }>(`/api/v1/networks/${selectedNetId}`, token, projectId)
 			.then(d => { allSubnets = d.subnet_details ?? []; selectedSubnetId = allSubnets[0]?.id ?? ''; })
 			.catch(() => {});
 	});

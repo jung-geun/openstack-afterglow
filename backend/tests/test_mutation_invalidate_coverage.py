@@ -68,6 +68,7 @@ EXEMPT_ROUTERS: set[str] = {
     "k3s/templates.py",  # TODO: Phase C/D — k3s cluster templates
     "k3s/workloads.py",  # TODO: Phase C/D — k3s workload ops
     "union/layers.py",  # TODO: Phase C/D — Union layers
+    "union/layer_ops.py",  # TODO: Phase C/D — Union layer build/seal ops (캐시 무효화 미연동)
     "network/loadbalancers.py",  # TODO: Phase C/D — listener/pool/member sub-resources
     "network/networks.py",  # TODO: Phase C/D — floating_ip / subnet sub-resources
     "network/routers.py",  # TODO: Phase C/D — interface / gateway sub-resources

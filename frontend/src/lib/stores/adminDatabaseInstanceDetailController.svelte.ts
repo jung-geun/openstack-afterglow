@@ -37,16 +37,16 @@ export function createAdminDatabaseInstanceDetailController(opts: AdminDbInstanc
   async function loadAll() {
     loading = true;
     await Promise.allSettled([
-      api.get<DbInstance>(`/api/database-instances/${id()}`, tok(), pid())
+      api.get<DbInstance>(`/api/v1/database-instances/${id()}`, tok(), pid())
         .then(v => { instance = v; loading = false; })
         .catch(() => { instance = null; loading = false; }),
-      api.get<DbDatabase[]>(`/api/database-instances/${id()}/databases`, tok(), pid())
+      api.get<DbDatabase[]>(`/api/v1/database-instances/${id()}/databases`, tok(), pid())
         .then(v => { databases = v; })
         .catch(() => {}),
-      api.get<DbUser[]>(`/api/database-instances/${id()}/users`, tok(), pid())
+      api.get<DbUser[]>(`/api/v1/database-instances/${id()}/users`, tok(), pid())
         .then(v => { users = v; })
         .catch(() => {}),
-      api.get<DbBackup[]>(`/api/database-instances/${id()}/backups`, tok(), pid())
+      api.get<DbBackup[]>(`/api/v1/database-instances/${id()}/backups`, tok(), pid())
         .then(v => { backups = v; })
         .catch(() => {}),
     ]);
@@ -57,7 +57,7 @@ export function createAdminDatabaseInstanceDetailController(opts: AdminDbInstanc
     if (!await confirmDialog(`DB 인스턴스 "${instance?.name}"를 삭제하시겠습니까?`)) return;
     deleting = true;
     try {
-      await api.delete(`/api/database-instances/${id()}`, tok(), pid());
+      await api.delete(`/api/v1/database-instances/${id()}`, tok(), pid());
       goto('/admin/database-instances');
     } catch (e) {
       toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
@@ -68,7 +68,7 @@ export function createAdminDatabaseInstanceDetailController(opts: AdminDbInstanc
   async function enableRoot() {
     enablingRoot = true;
     try {
-      rootInfo = await api.post<{ name: string; password: string }>(`/api/database-instances/${id()}/root`, {}, tok(), pid());
+      rootInfo = await api.post<{ name: string; password: string }>(`/api/v1/database-instances/${id()}/root`, {}, tok(), pid());
     } catch (e) {
       toast.error('root 활성화 실패: ' + (e instanceof ApiError ? e.message : String(e)));
     } finally { enablingRoot = false; }
@@ -77,8 +77,8 @@ export function createAdminDatabaseInstanceDetailController(opts: AdminDbInstanc
   async function createDb(form: { name: string; character_set: string; collate: string }): Promise<boolean> {
     creatingDb = true; dbError = '';
     try {
-      await api.post(`/api/database-instances/${id()}/databases`, form, tok(), pid());
-      databases = await api.get<DbDatabase[]>(`/api/database-instances/${id()}/databases`, tok(), pid());
+      await api.post(`/api/v1/database-instances/${id()}/databases`, form, tok(), pid());
+      databases = await api.get<DbDatabase[]>(`/api/v1/database-instances/${id()}/databases`, tok(), pid());
       return true;
     } catch (e) { dbError = e instanceof ApiError ? e.message : '실패'; return false; }
     finally { creatingDb = false; }
@@ -88,7 +88,7 @@ export function createAdminDatabaseInstanceDetailController(opts: AdminDbInstanc
     if (!await confirmDialog(`데이터베이스 "${name}"를 삭제하시겠습니까?`)) return;
     deletingDb = name;
     try {
-      await api.delete(`/api/database-instances/${id()}/databases/${encodeURIComponent(name)}`, tok(), pid());
+      await api.delete(`/api/v1/database-instances/${id()}/databases/${encodeURIComponent(name)}`, tok(), pid());
       databases = databases.filter(d => d.name !== name);
     } catch (e) { toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e))); }
     finally { deletingDb = null; }
@@ -98,8 +98,8 @@ export function createAdminDatabaseInstanceDetailController(opts: AdminDbInstanc
     creatingUser = true; userError = '';
     try {
       const dbs = form.databases.split(',').map(s => s.trim()).filter(Boolean);
-      await api.post(`/api/database-instances/${id()}/users`, { ...form, databases: dbs }, tok(), pid());
-      users = await api.get<DbUser[]>(`/api/database-instances/${id()}/users`, tok(), pid());
+      await api.post(`/api/v1/database-instances/${id()}/users`, { ...form, databases: dbs }, tok(), pid());
+      users = await api.get<DbUser[]>(`/api/v1/database-instances/${id()}/users`, tok(), pid());
       return true;
     } catch (e) { userError = e instanceof ApiError ? e.message : '실패'; return false; }
     finally { creatingUser = false; }
@@ -109,7 +109,7 @@ export function createAdminDatabaseInstanceDetailController(opts: AdminDbInstanc
     if (!await confirmDialog(`유저 "${name}"를 삭제하시겠습니까?`)) return;
     deletingUser = name;
     try {
-      await api.delete(`/api/database-instances/${id()}/users/${encodeURIComponent(name)}`, tok(), pid());
+      await api.delete(`/api/v1/database-instances/${id()}/users/${encodeURIComponent(name)}`, tok(), pid());
       users = users.filter(u => u.name !== name);
     } catch (e) { toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e))); }
     finally { deletingUser = null; }
@@ -118,8 +118,8 @@ export function createAdminDatabaseInstanceDetailController(opts: AdminDbInstanc
   async function createBackup(form: { name: string; description: string }): Promise<boolean> {
     creatingBackup = true; backupError = '';
     try {
-      await api.post(`/api/database-instances/${id()}/backups`, form, tok(), pid());
-      backups = await api.get<DbBackup[]>(`/api/database-instances/${id()}/backups`, tok(), pid());
+      await api.post(`/api/v1/database-instances/${id()}/backups`, form, tok(), pid());
+      backups = await api.get<DbBackup[]>(`/api/v1/database-instances/${id()}/backups`, tok(), pid());
       return true;
     } catch (e) { backupError = e instanceof ApiError ? e.message : '실패'; return false; }
     finally { creatingBackup = false; }
@@ -129,7 +129,7 @@ export function createAdminDatabaseInstanceDetailController(opts: AdminDbInstanc
     if (!await confirmDialog('백업을 삭제하시겠습니까?')) return;
     deletingBackup = backupId;
     try {
-      await api.delete(`/api/database-instances/backups/${backupId}`, tok(), pid());
+      await api.delete(`/api/v1/database-instances/backups/${backupId}`, tok(), pid());
       backups = backups.filter(b => b.id !== backupId);
     } catch (e) { toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e))); }
     finally { deletingBackup = null; }
@@ -140,7 +140,7 @@ export function createAdminDatabaseInstanceDetailController(opts: AdminDbInstanc
     if (!name) return;
     restoringBackup = backupId;
     try {
-      await api.post('/api/database-instances/restore', {
+      await api.post('/api/v1/database-instances/restore', {
         backup_id: backupId, name,
         flavor_id: instance?.flavor_id ?? '',
         volume_size: instance?.size ?? 5,

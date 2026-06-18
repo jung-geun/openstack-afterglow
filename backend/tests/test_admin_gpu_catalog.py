@@ -24,14 +24,14 @@ from app.services.gpu_inventory import PCI_DEVICE_MAP, apply_db_overlay
 
 @pytest.mark.asyncio
 async def test_list_gpu_devices_requires_admin(non_admin_client):
-    resp = await non_admin_client.get("/api/admin/gpu-devices")
+    resp = await non_admin_client.get("/api/v1/admin/gpu-devices")
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_upsert_gpu_device_requires_admin(non_admin_client):
     resp = await non_admin_client.post(
-        "/api/admin/gpu-devices",
+        "/api/v1/admin/gpu-devices",
         json={"vendor_id": "10DE", "device_id": "FFFF", "name": "Test GPU", "aliases": ["TESTGPU"]},
     )
     assert resp.status_code == 403
@@ -39,14 +39,14 @@ async def test_upsert_gpu_device_requires_admin(non_admin_client):
 
 @pytest.mark.asyncio
 async def test_delete_gpu_device_requires_admin(non_admin_client):
-    resp = await non_admin_client.delete("/api/admin/gpu-devices/10DE/FFFF")
+    resp = await non_admin_client.delete("/api/v1/admin/gpu-devices/10DE/FFFF")
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_import_gpu_devices_requires_admin(non_admin_client):
     resp = await non_admin_client.post(
-        "/api/admin/gpu-devices/import",
+        "/api/v1/admin/gpu-devices/import",
         files={"file": ("catalog.csv", b"10DE,FFFF,Test,false,TESTGPU", "text/csv")},
     )
     assert resp.status_code == 403
@@ -61,7 +61,7 @@ async def test_import_gpu_devices_requires_admin(non_admin_client):
 async def test_upsert_gpu_device_db_not_initialized(admin_client):
     with patch("app.database.is_db_available", return_value=False):
         resp = await admin_client.post(
-            "/api/admin/gpu-devices",
+            "/api/v1/admin/gpu-devices",
             json={"vendor_id": "10DE", "device_id": "FFFF", "name": "Test GPU", "aliases": ["TESTGPU"]},
         )
     assert resp.status_code == 503
@@ -70,7 +70,7 @@ async def test_upsert_gpu_device_db_not_initialized(admin_client):
 @pytest.mark.asyncio
 async def test_delete_gpu_device_db_not_initialized(admin_client):
     with patch("app.database.is_db_available", return_value=False):
-        resp = await admin_client.delete("/api/admin/gpu-devices/10DE/FFFF")
+        resp = await admin_client.delete("/api/v1/admin/gpu-devices/10DE/FFFF")
     assert resp.status_code == 503
 
 
@@ -78,7 +78,7 @@ async def test_delete_gpu_device_db_not_initialized(admin_client):
 async def test_import_gpu_devices_db_not_initialized(admin_client):
     with patch("app.database.is_db_available", return_value=False):
         resp = await admin_client.post(
-            "/api/admin/gpu-devices/import",
+            "/api/v1/admin/gpu-devices/import",
             files={"file": ("catalog.csv", b"10DE,FFFF,Test,false,TESTGPU", "text/csv")},
         )
     assert resp.status_code == 503
@@ -92,7 +92,7 @@ async def test_import_gpu_devices_db_not_initialized(admin_client):
 @pytest.mark.asyncio
 async def test_list_gpu_devices_returns_builtin(admin_client):
     with patch("app.database.is_db_available", return_value=False):
-        resp = await admin_client.get("/api/admin/gpu-devices")
+        resp = await admin_client.get("/api/v1/admin/gpu-devices")
     assert resp.status_code == 200
     devices = resp.json()["devices"]
     assert devices, "내장 기본값 카탈로그가 비어있으면 안 됨"
@@ -112,7 +112,7 @@ async def test_list_gpu_devices_marks_db_source(admin_client):
         patch("app.database.is_db_available", return_value=True),
         patch("app.services.gpu_catalog.list_db_devices", new=AsyncMock(return_value=db_entries)),
     ):
-        resp = await admin_client.get("/api/admin/gpu-devices")
+        resp = await admin_client.get("/api/v1/admin/gpu-devices")
     assert resp.status_code == 200
     rtx3090 = next(d for d in resp.json()["devices"] if d["device_id"] == "2204")
     assert rtx3090["source"] == "db"
@@ -141,7 +141,7 @@ async def test_list_gpu_devices_includes_db_only_device_not_in_map(admin_client)
         patch("app.database.is_db_available", return_value=True),
         patch("app.services.gpu_catalog.list_db_devices", new=AsyncMock(return_value=[db_only])),
     ):
-        resp = await admin_client.get("/api/admin/gpu-devices")
+        resp = await admin_client.get("/api/v1/admin/gpu-devices")
     assert resp.status_code == 200
     devices = resp.json()["devices"]
     entry = next((d for d in devices if d["vendor_id"] == "10DE" and d["device_id"] == "AAAA"), None)
@@ -165,7 +165,7 @@ async def test_upsert_gpu_device_ok(admin_client):
         patch("app.services.gpu_catalog.refresh_device_map_from_db", new=AsyncMock()) as mock_refresh,
     ):
         resp = await admin_client.post(
-            "/api/admin/gpu-devices",
+            "/api/v1/admin/gpu-devices",
             json={"vendor_id": "10DE", "device_id": "FFFF", "name": "Test GPU", "aliases": ["TESTGPU"]},
         )
     assert resp.status_code == 200
@@ -178,7 +178,7 @@ async def test_upsert_gpu_device_ok(admin_client):
 async def test_upsert_gpu_device_rejects_bad_vendor_id(admin_client):
     with patch("app.database.is_db_available", return_value=True):
         resp = await admin_client.post(
-            "/api/admin/gpu-devices",
+            "/api/v1/admin/gpu-devices",
             json={"vendor_id": "XYZ!", "device_id": "FFFF", "name": "Test", "aliases": []},
         )
     assert resp.status_code == 422
@@ -188,7 +188,7 @@ async def test_upsert_gpu_device_rejects_bad_vendor_id(admin_client):
 async def test_upsert_gpu_device_rejects_bad_alias(admin_client):
     with patch("app.database.is_db_available", return_value=True):
         resp = await admin_client.post(
-            "/api/admin/gpu-devices",
+            "/api/v1/admin/gpu-devices",
             json={"vendor_id": "10DE", "device_id": "FFFF", "name": "Test", "aliases": ["bad;alias\nrm -rf"]},
         )
     assert resp.status_code == 400
@@ -206,7 +206,7 @@ async def test_delete_gpu_device_ok(admin_client):
         patch("app.services.gpu_catalog.delete_device", new=AsyncMock(return_value=True)),
         patch("app.services.gpu_catalog.refresh_device_map_from_db", new=AsyncMock()) as mock_refresh,
     ):
-        resp = await admin_client.delete("/api/admin/gpu-devices/10DE/FFFF")
+        resp = await admin_client.delete("/api/v1/admin/gpu-devices/10DE/FFFF")
     assert resp.status_code == 204
     mock_refresh.assert_awaited_once()
 
@@ -218,7 +218,7 @@ async def test_delete_gpu_device_builtin_conflict(admin_client):
         patch("app.database.is_db_available", return_value=True),
         patch("app.services.gpu_catalog.delete_device", new=AsyncMock(return_value=False)),
     ):
-        resp = await admin_client.delete("/api/admin/gpu-devices/10DE/2204")
+        resp = await admin_client.delete("/api/v1/admin/gpu-devices/10DE/2204")
     assert resp.status_code == 409
 
 
@@ -228,7 +228,7 @@ async def test_delete_gpu_device_not_found(admin_client):
         patch("app.database.is_db_available", return_value=True),
         patch("app.services.gpu_catalog.delete_device", new=AsyncMock(return_value=False)),
     ):
-        resp = await admin_client.delete("/api/admin/gpu-devices/10DE/FFFF")
+        resp = await admin_client.delete("/api/v1/admin/gpu-devices/10DE/FFFF")
     assert resp.status_code == 404
 
 
@@ -239,14 +239,14 @@ async def test_delete_gpu_device_not_found(admin_client):
 
 @pytest.mark.asyncio
 async def test_export_gpu_devices_requires_admin(non_admin_client):
-    resp = await non_admin_client.get("/api/admin/gpu-devices/export")
+    resp = await non_admin_client.get("/api/v1/admin/gpu-devices/export")
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_export_gpu_devices_csv(admin_client):
     with patch("app.database.is_db_available", return_value=False):
-        resp = await admin_client.get("/api/admin/gpu-devices/export?format=csv")
+        resp = await admin_client.get("/api/v1/admin/gpu-devices/export?format=csv")
     assert resp.status_code == 200
     assert 'filename="gpu_devices.csv"' in resp.headers["content-disposition"]
     text = resp.content.decode("utf-8-sig")
@@ -263,7 +263,7 @@ async def test_export_gpu_devices_xlsx_roundtrip(admin_client):
     from app.services.gpu_catalog import parse_xlsx
 
     with patch("app.database.is_db_available", return_value=False):
-        resp = await admin_client.get("/api/admin/gpu-devices/export")
+        resp = await admin_client.get("/api/v1/admin/gpu-devices/export")
     assert resp.status_code == 200
     assert 'filename="gpu_devices.xlsx"' in resp.headers["content-disposition"]
 
@@ -282,7 +282,7 @@ async def test_export_gpu_devices_xlsx_roundtrip(admin_client):
 
 @pytest.mark.asyncio
 async def test_export_gpu_devices_invalid_format(admin_client):
-    resp = await admin_client.get("/api/admin/gpu-devices/export?format=pdf")
+    resp = await admin_client.get("/api/v1/admin/gpu-devices/export?format=pdf")
     assert resp.status_code == 422
 
 
@@ -295,7 +295,7 @@ async def test_export_gpu_devices_xlsx_without_openpyxl(admin_client):
         patch("app.database.is_db_available", return_value=False),
         patch.dict(sys.modules, {"openpyxl": None}),
     ):
-        resp = await admin_client.get("/api/admin/gpu-devices/export?format=xlsx")
+        resp = await admin_client.get("/api/v1/admin/gpu-devices/export?format=xlsx")
     # 5xx detail은 sanitized_http_exception_handler가 마스킹 — 원인은 서버 로그에 기록됨
     assert resp.status_code == 503
 
@@ -304,7 +304,7 @@ async def test_export_gpu_devices_xlsx_without_openpyxl(admin_client):
         patch("app.database.is_db_available", return_value=False),
         patch.dict(sys.modules, {"openpyxl": None}),
     ):
-        resp = await admin_client.get("/api/admin/gpu-devices/export?format=csv")
+        resp = await admin_client.get("/api/v1/admin/gpu-devices/export?format=csv")
     assert resp.status_code == 200
 
 
@@ -325,7 +325,7 @@ async def test_import_gpu_devices_replace_default(admin_client):
         patch("app.services.gpu_catalog.refresh_device_map_from_db", new=AsyncMock()),
     ):
         resp = await admin_client.post(
-            "/api/admin/gpu-devices/import",
+            "/api/v1/admin/gpu-devices/import",
             files={"file": ("catalog.csv", _CSV_OK, "text/csv")},
         )
     assert resp.status_code == 200
@@ -341,7 +341,7 @@ async def test_import_gpu_devices_upsert_mode(admin_client):
         patch("app.services.gpu_catalog.refresh_device_map_from_db", new=AsyncMock()),
     ):
         resp = await admin_client.post(
-            "/api/admin/gpu-devices/import?mode=upsert",
+            "/api/v1/admin/gpu-devices/import?mode=upsert",
             files={"file": ("catalog.csv", _CSV_OK, "text/csv")},
         )
     assert resp.status_code == 200
@@ -353,7 +353,7 @@ async def test_import_gpu_devices_upsert_mode(admin_client):
 async def test_import_gpu_devices_invalid_mode(admin_client):
     with patch("app.database.is_db_available", return_value=True):
         resp = await admin_client.post(
-            "/api/admin/gpu-devices/import?mode=overwrite",
+            "/api/v1/admin/gpu-devices/import?mode=overwrite",
             files={"file": ("catalog.csv", _CSV_OK, "text/csv")},
         )
     assert resp.status_code == 422
@@ -387,7 +387,7 @@ async def test_import_gpu_devices_xlsx(admin_client):
         patch("app.services.gpu_catalog.refresh_device_map_from_db", new=AsyncMock()),
     ):
         resp = await admin_client.post(
-            "/api/admin/gpu-devices/import",
+            "/api/v1/admin/gpu-devices/import",
             files={
                 "file": (
                     "gpu_devices.xlsx",
@@ -407,7 +407,7 @@ async def test_import_gpu_devices_bad_csv_returns_row_number(admin_client):
     bad = b"10DE,ZZZZ,Bad Device,false,ALIAS\n"
     with patch("app.database.is_db_available", return_value=True):
         resp = await admin_client.post(
-            "/api/admin/gpu-devices/import",
+            "/api/v1/admin/gpu-devices/import",
             files={"file": ("catalog.csv", bad, "text/csv")},
         )
     assert resp.status_code == 400

@@ -26,7 +26,7 @@
 		if (templates.length === 0) loading = true;
 		else refreshing = true;
 		try {
-			templates = await api.get<K3sClusterTemplate[]>('/api/admin/k3s-cluster-templates', token, projectId);
+			templates = await api.get<K3sClusterTemplate[]>('/api/v1/admin/k3s-cluster-templates', token, projectId);
 		} catch {
 			templates = [];
 		} finally {
@@ -39,7 +39,7 @@
 		if (!deleteTarget) return;
 		deleteError = '';
 		try {
-			await api.delete(`/api/k3s/cluster-templates/${deleteTarget.id}`, token, projectId);
+			await api.delete(`/api/v1/k3s/cluster-templates/${deleteTarget.id}`, token, projectId);
 			deleteTarget = null;
 			await load();
 		} catch (e) {

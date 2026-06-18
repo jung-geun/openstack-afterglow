@@ -27,14 +27,14 @@
     if (fileStorages.length === 0) loading = true;
     else refreshing = true;
     await Promise.allSettled([
-      api.get<FileStorage[]>('/api/admin/file-storage', token, projectId)
+      api.get<FileStorage[]>('/api/v1/admin/file-storage', token, projectId)
         .then(v => { fileStorages = v; loading = false; })
         .catch(e => {
           error = e instanceof ApiError ? `로드 실패: ${e.message}` : '서버 오류';
           fileStorages = [];
           loading = false;
         }),
-      api.get<LibraryConfig[]>('/api/libraries', token, projectId)
+      api.get<LibraryConfig[]>('/api/v1/libraries', token, projectId)
         .then(v => { libraries = v; })
         .catch(() => {}),
     ]);
@@ -50,7 +50,7 @@
       const params = new URLSearchParams({ library_id: libId });
       if (autoInstall) params.set('auto_install', 'true');
       const res = await api.post<{ file_storage_id: string; server_id?: string }>(
-        `/api/admin/file-storage/build?${params}`, {}, token, projectId
+        `/api/v1/admin/file-storage/build?${params}`, {}, token, projectId
       );
       if (autoInstall && res.server_id) {
         message = `자동 빌드 시작됨 (Share: ${res.file_storage_id}, VM: ${res.server_id})`;

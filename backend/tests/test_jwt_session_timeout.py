@@ -74,7 +74,7 @@ class TestJwtSessionTimeout:
         with patch("app.api.deps._check_session_timeout", timeout_mock):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 login = await ac.post(
-                    "/api/auth/login",
+                    "/api/v1/auth/login",
                     json={"username": "bob", "password": "pw", "project_name": "timeout-project"},
                 )
                 assert login.status_code == 200
@@ -83,7 +83,7 @@ class TestJwtSessionTimeout:
                 # 로그인 단계에서는 타임아웃 함수가 호출되지 않아야 한다
                 assert timeout_mock.await_count == 0
 
-                me = await ac.get("/api/auth/me", headers={"Authorization": f"Bearer {access}"})
+                me = await ac.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {access}"})
                 assert me.status_code == 200
 
         # /me 접근 1회 → _check_session_timeout 1회 호출
@@ -98,7 +98,7 @@ class TestJwtSessionTimeout:
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             login = await ac.post(
-                "/api/auth/login",
+                "/api/v1/auth/login",
                 json={"username": "bob", "password": "pw", "project_name": "timeout-project"},
             )
             assert login.status_code == 200
@@ -110,7 +110,7 @@ class TestJwtSessionTimeout:
         )
         with patch("app.api.deps._check_session_timeout", timeout_expired):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-                me = await ac.get("/api/auth/me", headers={"Authorization": f"Bearer {access}"})
+                me = await ac.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {access}"})
 
         assert me.status_code == 401
         assert "만료" in me.json()["detail"]
@@ -131,7 +131,7 @@ class TestJwtSessionTimeout:
             with patch("app.api.identity.auth._check_session_timeout", timeout_mock):
                 async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                     login = await ac.post(
-                        "/api/auth/login",
+                        "/api/v1/auth/login",
                         json={"username": "bob", "password": "pw", "project_name": "timeout-project"},
                     )
                     assert login.status_code == 200
@@ -140,7 +140,7 @@ class TestJwtSessionTimeout:
                     # 로그인 시 refresh 엔드포인트는 호출되지 않으므로 count == 0
                     assert timeout_mock.await_count == 0
 
-                    r = await ac.post("/api/auth/refresh", json={"refresh_token": refresh_token})
+                    r = await ac.post("/api/v1/auth/refresh", json={"refresh_token": refresh_token})
                     assert r.status_code == 200
 
             # /refresh 호출 1회 → _check_session_timeout 1회 호출
@@ -155,7 +155,7 @@ class TestJwtSessionTimeout:
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             login = await ac.post(
-                "/api/auth/login",
+                "/api/v1/auth/login",
                 json={"username": "bob", "password": "pw", "project_name": "timeout-project"},
             )
             assert login.status_code == 200
@@ -166,7 +166,7 @@ class TestJwtSessionTimeout:
         )
         with patch("app.api.identity.auth._check_session_timeout", timeout_expired):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-                r = await ac.post("/api/auth/refresh", json={"refresh_token": refresh_token})
+                r = await ac.post("/api/v1/auth/refresh", json={"refresh_token": refresh_token})
 
         assert r.status_code == 401
         assert "만료" in r.json()["detail"]
@@ -193,13 +193,13 @@ class TestJwtSessionTimeout:
 
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 login = await ac.post(
-                    "/api/auth/login",
+                    "/api/v1/auth/login",
                     json={"username": "bob", "password": "pw", "project_name": "timeout-project"},
                 )
                 assert login.status_code == 200
                 access = login.json()["token"]
 
-                await ac.get("/api/auth/me", headers={"Authorization": f"Bearer {access}"})
+                await ac.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {access}"})
 
         # 호출 인자 검증: token_hash는 refresh_jti의 sha256이어야 한다
         assert len(captured_args) == 1

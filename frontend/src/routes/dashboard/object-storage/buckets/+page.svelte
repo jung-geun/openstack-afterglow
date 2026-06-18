@@ -29,13 +29,13 @@
 		if (containers.length === 0) loading = true;
 		else refreshing = true;
 		await Promise.allSettled([
-			api.get<SwiftContainer[]>('/api/object-storage', token, projectId)
+			api.get<SwiftContainer[]>('/api/v1/object-storage', token, projectId)
 				.then(v => { containers = v; loading = false; })
 				.catch(() => { containers = []; loading = false; }),
-			api.get<SwiftContainer[]>('/api/object-storage/trash/containers', token, projectId)
+			api.get<SwiftContainer[]>('/api/v1/object-storage/trash/containers', token, projectId)
 				.then(v => { deletedContainers = v; })
 				.catch(() => { deletedContainers = []; }),
-			api.get<AccountMeta>('/api/object-storage/account', token, projectId)
+			api.get<AccountMeta>('/api/v1/object-storage/account', token, projectId)
 				.then(v => { account = v; })
 				.catch(() => {}),
 		]);
@@ -46,13 +46,13 @@
 	async function forceRefresh() {
 		refreshing = true;
 		await Promise.allSettled([
-			api.get<SwiftContainer[]>('/api/object-storage', token, projectId, { refresh: true })
+			api.get<SwiftContainer[]>('/api/v1/object-storage', token, projectId, { refresh: true })
 				.then(v => { containers = v; })
 				.catch(() => { containers = []; }),
-			api.get<SwiftContainer[]>('/api/object-storage/trash/containers', token, projectId)
+			api.get<SwiftContainer[]>('/api/v1/object-storage/trash/containers', token, projectId)
 				.then(v => { deletedContainers = v; })
 				.catch(() => { deletedContainers = []; }),
-			api.get<AccountMeta>('/api/object-storage/account', token, projectId, { refresh: true })
+			api.get<AccountMeta>('/api/v1/object-storage/account', token, projectId, { refresh: true })
 				.then(v => { account = v; })
 				.catch(() => {}),
 		]);
@@ -61,7 +61,7 @@
 
 	async function createContainer(name: string): Promise<string | true> {
 		try {
-			await api.post('/api/object-storage', { name }, token, projectId);
+			await api.post('/api/v1/object-storage', { name }, token, projectId);
 			await load();
 			return true;
 		} catch (e) {
@@ -73,7 +73,7 @@
 		if (!await confirmDialog(`버킷 "${name}"을 휴지통으로 이동합니다. 보관 기간(기본 30일) 내에 복구할 수 있습니다. 계속하시겠습니까?`)) return;
 		deleting = name;
 		try {
-			await api.delete(`/api/object-storage/${encodeURIComponent(name)}`, token, projectId);
+			await api.delete(`/api/v1/object-storage/${encodeURIComponent(name)}`, token, projectId);
 			await load();
 		} catch (e) {
 			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
@@ -85,7 +85,7 @@
 	async function restoreContainer(name: string) {
 		restoring = name;
 		try {
-			await api.post(`/api/object-storage/trash/containers/${encodeURIComponent(name)}/restore`, {}, token, projectId);
+			await api.post(`/api/v1/object-storage/trash/containers/${encodeURIComponent(name)}/restore`, {}, token, projectId);
 			await load();
 			toast.success(`버킷 "${name}" 복구 완료`);
 		} catch (e) {
@@ -99,7 +99,7 @@
 		if (!await confirmDialog(`버킷 "${name}"을 영구 삭제합니다. 이 작업은 되돌릴 수 없습니다. 계속하시겠습니까?`)) return;
 		deleting = name;
 		try {
-			await api.delete(`/api/object-storage/trash/containers/${encodeURIComponent(name)}`, token, projectId);
+			await api.delete(`/api/v1/object-storage/trash/containers/${encodeURIComponent(name)}`, token, projectId);
 			await load();
 		} catch (e) {
 			toast.error('영구 삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));

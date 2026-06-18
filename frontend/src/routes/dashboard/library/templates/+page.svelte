@@ -27,7 +27,7 @@
     else refreshing = true;
     error = '';
     try {
-      templates = await api.get<TemplateInfo[]>('/api/union/templates', token, projectId);
+      templates = await api.get<TemplateInfo[]>('/api/v1/union/templates', token, projectId);
       initialLoaded = true;
     } catch (e) {
       error = e instanceof ApiError ? e.message : '템플릿 로드 실패';
@@ -47,7 +47,7 @@
     loadingDetail = true;
     try {
       const detail = await api.get<TemplateInfo>(
-        `/api/union/templates/${encodeURIComponent(t.name)}/${t.version}`,
+        `/api/v1/union/templates/${encodeURIComponent(t.name)}/${t.version}`,
         token,
         projectId
       );
@@ -69,7 +69,7 @@
     error = '';
     try {
       await api.post(
-        '/api/union/templates',
+        '/api/v1/union/templates',
         {
           name: form.name,
           version: form.version,

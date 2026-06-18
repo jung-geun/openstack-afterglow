@@ -439,7 +439,7 @@ async def test_logout_all_revokes_sessions(client):
         patch("app.api.identity.auth.session_store.revoke_user_sessions", AsyncMock(return_value=3)) as mock_revoke,
         patch("app.api.identity.auth.invalidate_token_cache", AsyncMock()),
     ):
-        resp = await client.post("/api/auth/logout-all")
+        resp = await client.post("/api/v1/auth/logout-all")
     assert resp.status_code == 200
     data = resp.json()
     assert data["revoked_count"] == 3
@@ -456,7 +456,7 @@ async def test_list_sessions_returns_sessions(client):
         patch("app.api.identity.auth.get_token_info", return_value=make_token_info()),
         patch("app.api.identity.auth.session_store.list_user_sessions", AsyncMock(return_value=mock_sessions)),
     ):
-        resp = await client.get("/api/auth/sessions")
+        resp = await client.get("/api/v1/auth/sessions")
     assert resp.status_code == 200
     data = resp.json()
     assert data["count"] == 1
@@ -472,7 +472,7 @@ async def test_admin_revoke_sessions(admin_client):
         ) as mock_r,
         patch("app.api.identity.admin_identity.activity.record", AsyncMock()),
     ):
-        resp = await admin_client.post("/api/admin/users/target-user-id/revoke-sessions")
+        resp = await admin_client.post("/api/v1/admin/users/target-user-id/revoke-sessions")
     assert resp.status_code == 200
     data = resp.json()
     assert data["revoked_count"] == 2
@@ -486,7 +486,7 @@ async def test_admin_revoke_sessions_forbidden_for_non_admin(client):
 
     normal_info = make_token_info(is_system_admin=False)
     with patch("app.api.identity.admin_identity.get_token_info", return_value=normal_info):
-        resp = await client.post("/api/admin/users/target-user-id/revoke-sessions")
+        resp = await client.post("/api/v1/admin/users/target-user-id/revoke-sessions")
     assert resp.status_code == 403
 
 
@@ -522,7 +522,7 @@ async def test_refresh_carries_origin(client):
         patch("app.api.identity.auth.asyncio.to_thread", new=AsyncMock(return_value=kc_info)),
     ):
         resp = await client.post(
-            "/api/auth/refresh",
+            "/api/v1/auth/refresh",
             json={"refresh_token": refresh_str},
         )
     assert resp.status_code == 200
@@ -538,6 +538,6 @@ async def test_refresh_blocked_for_blacklisted_session(client):
     refresh_str, r_jti, _ = jwt_service.sign_refresh("user1")
     blacklisted = _make_sess(blacklisted=True)
     with patch("app.api.identity.auth.session_store.get_session", AsyncMock(return_value=blacklisted)):
-        resp = await client.post("/api/auth/refresh", json={"refresh_token": refresh_str})
+        resp = await client.post("/api/v1/auth/refresh", json={"refresh_token": refresh_str})
     assert resp.status_code == 401
     assert "차단" in resp.json()["detail"]

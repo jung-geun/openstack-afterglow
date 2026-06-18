@@ -33,7 +33,7 @@
 		phase = 'loading';
 		try {
 			analysis = await api.get<RecoveryAnalysis>(
-				`/api/admin/instances/${serverId}/recovery-analysis`,
+				`/api/v1/admin/instances/${serverId}/recovery-analysis`,
 				token,
 				projectId
 			);
@@ -49,7 +49,7 @@
 		phase = 'executing';
 		try {
 			result = await api.post<RecoveryResult>(
-				`/api/admin/instances/${serverId}/recover`,
+				`/api/v1/admin/instances/${serverId}/recover`,
 				{},
 				token,
 				projectId

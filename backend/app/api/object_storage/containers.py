@@ -650,7 +650,7 @@ async def issue_download_token(
 
     encoded_container = urllib.parse.quote(container_name, safe="")
     encoded_object = "/".join(urllib.parse.quote(p, safe="") for p in object_name.split("/"))
-    url = f"/api/object-storage/{encoded_container}/objects/{encoded_object}/download?token={token}"
+    url = f"/api/v1/object-storage/{encoded_container}/objects/{encoded_object}/download?token={token}"
     return {"url": url, "expires_in": 60}
 
 

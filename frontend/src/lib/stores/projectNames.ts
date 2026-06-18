@@ -7,7 +7,7 @@ let loaded = false;
 async function load(token?: string, projectId?: string) {
 	if (loaded) return;
 	try {
-		const data: { id: string; name: string }[] = await api.get('/api/admin/projects/names', token, projectId);
+		const data: { id: string; name: string }[] = await api.get('/api/v1/admin/projects/names', token, projectId);
 		const map = new Map<string, string>();
 		for (const p of data) {
 			map.set(p.id, p.name);

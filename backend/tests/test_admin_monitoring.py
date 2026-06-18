@@ -69,7 +69,7 @@ async def test_monitoring_summary_includes_k3s_active(admin_client):
 
         app.dependency_overrides[get_os_conn] = override
         try:
-            resp = await admin_client.get("/api/admin/monitoring/summary")
+            resp = await admin_client.get("/api/v1/admin/monitoring/summary")
         finally:
             app.dependency_overrides.pop(get_os_conn, None)
 
@@ -107,7 +107,7 @@ async def test_monitoring_summary_k3s_zero_when_empty(admin_client):
 
         app.dependency_overrides[get_os_conn] = override
         try:
-            resp = await admin_client.get("/api/admin/monitoring/summary")
+            resp = await admin_client.get("/api/v1/admin/monitoring/summary")
         finally:
             app.dependency_overrides.pop(get_os_conn, None)
     assert resp.status_code == 200
@@ -144,7 +144,7 @@ async def test_monitoring_summary_includes_new_groups(admin_client):
 
         app.dependency_overrides[get_os_conn] = override
         try:
-            resp = await admin_client.get("/api/admin/monitoring/summary")
+            resp = await admin_client.get("/api/v1/admin/monitoring/summary")
         finally:
             app.dependency_overrides.pop(get_os_conn, None)
     assert resp.status_code == 200
@@ -196,7 +196,7 @@ async def test_monitoring_summary_handles_per_resource_failure(admin_client):
 
         app.dependency_overrides[get_os_conn] = override
         try:
-            resp = await admin_client.get("/api/admin/monitoring/summary")
+            resp = await admin_client.get("/api/v1/admin/monitoring/summary")
         finally:
             app.dependency_overrides.pop(get_os_conn, None)
     assert resp.status_code == 200

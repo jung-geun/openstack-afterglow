@@ -33,14 +33,14 @@ def _foreign_share(fs_id: str = "share-foreign", owner: str = "other-project-999
 @pytest.mark.asyncio
 async def test_get_share_other_project_returns_404(client, mock_conn):
     with patch("app.api.storage.file_storage.manila.get_file_storage", return_value=_foreign_share()):
-        resp = await client.get("/api/file-storage/share-foreign")
+        resp = await client.get("/api/v1/file-storage/share-foreign")
     assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_delete_share_other_project_returns_404(client, mock_conn):
     with patch("app.api.storage.file_storage.manila.get_file_storage", return_value=_foreign_share()):
-        resp = await client.delete("/api/file-storage/share-foreign")
+        resp = await client.delete("/api/v1/file-storage/share-foreign")
     assert resp.status_code == 404
 
 
@@ -51,14 +51,14 @@ async def test_admin_can_delete_other_project_share(admin_client, mock_conn):
         patch("app.api.storage.file_storage.manila.delete_file_storage", return_value=None),
         patch("app.api.storage.file_storage.invalidate"),
     ):
-        resp = await admin_client.delete("/api/file-storage/share-foreign")
+        resp = await admin_client.delete("/api/v1/file-storage/share-foreign")
     assert resp.status_code == 204
 
 
 @pytest.mark.asyncio
 async def test_list_access_rules_other_project_returns_404(client, mock_conn):
     with patch("app.api.storage.file_storage.manila.get_file_storage", return_value=_foreign_share()):
-        resp = await client.get("/api/file-storage/share-foreign/access-rules")
+        resp = await client.get("/api/v1/file-storage/share-foreign/access-rules")
     assert resp.status_code == 404
 
 
@@ -67,7 +67,7 @@ async def test_create_access_rule_other_project_returns_404(client, mock_conn):
     """가장 위험 — 다른 프로젝트 share 에 IP rule 추가하면 cross-tenant CephFS mount 가능."""
     with patch("app.api.storage.file_storage.manila.get_file_storage", return_value=_foreign_share()):
         resp = await client.post(
-            "/api/file-storage/share-foreign/access-rules",
+            "/api/v1/file-storage/share-foreign/access-rules",
             json={"access_to": "10.0.0.0/24", "access_level": "rw", "access_type": "ip"},
         )
     assert resp.status_code == 404
@@ -76,7 +76,7 @@ async def test_create_access_rule_other_project_returns_404(client, mock_conn):
 @pytest.mark.asyncio
 async def test_revoke_access_rule_other_project_returns_404(client, mock_conn):
     with patch("app.api.storage.file_storage.manila.get_file_storage", return_value=_foreign_share()):
-        resp = await client.delete("/api/file-storage/share-foreign/access-rules/rule-1")
+        resp = await client.delete("/api/v1/file-storage/share-foreign/access-rules/rule-1")
     assert resp.status_code == 404
 
 
@@ -86,5 +86,5 @@ async def test_public_share_access_passes_for_get(client, mock_conn):
     public = _foreign_share()
     public.is_public = True
     with patch("app.api.storage.file_storage.manila.get_file_storage", return_value=public):
-        resp = await client.get("/api/file-storage/share-foreign")
+        resp = await client.get("/api/v1/file-storage/share-foreign")
     assert resp.status_code == 200

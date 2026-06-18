@@ -157,8 +157,8 @@ export function createDbCreateStore(opts: DbCreateOpts) {
 		const p = projectId;
 		try {
 			[flavors, datastores] = await Promise.all([
-				api.get<DbFlavor[]>('/api/database-instances/flavors', t, p),
-				api.get<DbDatastore[]>('/api/database-instances/datastores', t, p),
+				api.get<DbFlavor[]>('/api/v1/database-instances/flavors', t, p),
+				api.get<DbDatastore[]>('/api/v1/database-instances/datastores', t, p),
 			]);
 			if (flavors.length) flavorId = flavors[0].id;
 			if (datastores.length) {
@@ -170,27 +170,27 @@ export function createDbCreateStore(opts: DbCreateOpts) {
 		}
 		await Promise.allSettled([
 			api
-				.get<DbNetwork[]>('/api/networks', t, p)
+				.get<DbNetwork[]>('/api/v1/networks', t, p)
 				.then((v) => (networks = v.filter((n) => !n.is_external && !n.is_shared)))
 				.catch(() => {}),
 			api
-				.get<DbAZ[]>('/api/instances/availability-zones', t, p)
+				.get<DbAZ[]>('/api/v1/instances/availability-zones', t, p)
 				.then((v) => (availabilityZones = v))
 				.catch(() => {}),
 			api
-				.get<DbVolumeType[]>('/api/database-instances/volume-types', t, p)
+				.get<DbVolumeType[]>('/api/v1/database-instances/volume-types', t, p)
 				.then((v) => (volumeTypes = v))
 				.catch(() => {}),
 			api
-				.get<DbConfiguration[]>('/api/database-instances/configurations', t, p)
+				.get<DbConfiguration[]>('/api/v1/database-instances/configurations', t, p)
 				.then((v) => (configurations = v))
 				.catch(() => {}),
 			api
-				.get<DbInstance[]>('/api/database-instances', t, p)
+				.get<DbInstance[]>('/api/v1/database-instances', t, p)
 				.then((v) => (instances = v))
 				.catch(() => {}),
 			api
-				.get<DbBackup[]>('/api/database-instances/backups', t, p)
+				.get<DbBackup[]>('/api/v1/database-instances/backups', t, p)
 				.then((v) => (backups = v))
 				.catch(() => {}),
 		]);
@@ -262,7 +262,7 @@ export function createDbCreateStore(opts: DbCreateOpts) {
 			replica_count: replicaOf && replicaCount > 1 ? replicaCount : null,
 		};
 		try {
-			await api.post('/api/database-instances', body, t, p);
+			await api.post('/api/v1/database-instances', body, t, p);
 			opts.setOpen(false);
 			opts.onCreated();
 			if (isPublic) {

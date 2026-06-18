@@ -40,7 +40,7 @@
 		if (instances.length === 0) loading = true;
 		else refreshing = true;
 		try {
-			instances = await api.get<DbInstance[]>('/api/database-instances', token, projectId);
+			instances = await api.get<DbInstance[]>('/api/v1/database-instances', token, projectId);
 		} catch {
 			instances = [];
 		} finally {
@@ -52,7 +52,7 @@
 	async function forceRefresh() {
 		refreshing = true;
 		try {
-			instances = await api.get<DbInstance[]>('/api/database-instances', token, projectId, { refresh: true });
+			instances = await api.get<DbInstance[]>('/api/v1/database-instances', token, projectId, { refresh: true });
 		} catch {
 			instances = [];
 		} finally {
@@ -64,7 +64,7 @@
 		if (!await confirmDialog(`DB 인스턴스 "${name || id.slice(0, 8)}"를 삭제하시겠습니까?`)) return;
 		deleting = id;
 		try {
-			await api.delete(`/api/database-instances/${id}`, token, projectId);
+			await api.delete(`/api/v1/database-instances/${id}`, token, projectId);
 			await load();
 		} catch (e) {
 			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
@@ -77,7 +77,7 @@
 		if (!await confirmDialog(`DB 인스턴스 "${name || id.slice(0, 8)}"를 재시작하시겠습니까?`)) return;
 		restarting = id;
 		try {
-			await api.post(`/api/database-instances/${id}/restart`, {}, token, projectId);
+			await api.post(`/api/v1/database-instances/${id}/restart`, {}, token, projectId);
 			await load();
 		} catch (e) {
 			toast.error('재시작 실패: ' + (e instanceof ApiError ? e.message : String(e)));

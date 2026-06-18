@@ -49,7 +49,7 @@
 		errorMsg = '';
 		try {
 			const result = await api.post<CreateTransferResult>(
-				`/api/volumes/${volumeId}/transfer`,
+				`/api/v1/volumes/${volumeId}/transfer`,
 				{ name: transferName || null },
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined,
@@ -76,7 +76,7 @@
 		errorMsg = '';
 		try {
 			await api.post(
-				`/api/volumes/transfer/${acceptTransferId.trim()}/accept`,
+				`/api/v1/volumes/transfer/${acceptTransferId.trim()}/accept`,
 				{ auth_key: acceptAuthKey.trim() },
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined,
@@ -95,7 +95,7 @@
 		errorMsg = '';
 		try {
 			transfers = await api.get<Transfer[]>(
-				'/api/volumes/transfers',
+				'/api/v1/volumes/transfers',
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined,
 			);
@@ -110,7 +110,7 @@
 		cancellingId = id;
 		try {
 			await api.delete(
-				`/api/volumes/transfer/${id}`,
+				`/api/v1/volumes/transfer/${id}`,
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined,
 			);

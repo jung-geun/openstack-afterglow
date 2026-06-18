@@ -73,7 +73,7 @@ async def test_attach_interface_wrong_vm_403(client, mock_cluster):
     with patch("app.api.k3s.clusters.k3s_cluster") as mock_k3s_cluster:
         mock_k3s_cluster.get_cluster = AsyncMock(return_value=mock_cluster)
         resp = await client.post(
-            "/api/k3s/clusters/cluster-1/nodes/unknown-vm/interfaces",
+            "/api/v1/k3s/clusters/cluster-1/nodes/unknown-vm/interfaces",
             json={"net_id": "net-1"},
         )
     assert resp.status_code == 403
@@ -85,7 +85,7 @@ async def test_attach_interface_cluster_not_found_404(client):
     with patch("app.api.k3s.clusters.k3s_cluster") as mock_k3s_cluster:
         mock_k3s_cluster.get_cluster = AsyncMock(return_value=None)
         resp = await client.post(
-            "/api/k3s/clusters/nonexistent/nodes/server-vm-1/interfaces",
+            "/api/v1/k3s/clusters/nonexistent/nodes/server-vm-1/interfaces",
             json={"net_id": "net-1"},
         )
     assert resp.status_code == 404
@@ -107,7 +107,7 @@ async def test_attach_server_vm_success(client, mock_cluster):
             "fixed_ips": [{"ip_address": "192.168.100.5", "subnet_id": "sub-1"}],
         }
         resp = await client.post(
-            "/api/k3s/clusters/cluster-1/nodes/server-vm-1/interfaces",
+            "/api/v1/k3s/clusters/cluster-1/nodes/server-vm-1/interfaces",
             json={"net_id": "net-1"},
         )
     assert resp.status_code == 201
@@ -128,6 +128,6 @@ async def test_detach_agent_vm_success(client, mock_cluster):
         mock_k3s_cluster.get_cluster = AsyncMock(return_value=mock_cluster)
         mock_nova.detach_interface.return_value = None
         resp = await client.delete(
-            "/api/k3s/clusters/cluster-1/nodes/agent-vm-1/interfaces/port-old",
+            "/api/v1/k3s/clusters/cluster-1/nodes/agent-vm-1/interfaces/port-old",
         )
     assert resp.status_code == 204

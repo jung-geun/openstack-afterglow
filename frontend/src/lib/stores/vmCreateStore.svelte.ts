@@ -213,7 +213,7 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 		try {
 			if (opts.adminMode() && adminSelectedProjectId) {
 				const r = await api.get<{ compute?: any; volume?: any }>(
-					`/api/admin/quotas/${encodeURIComponent(adminSelectedProjectId)}`, token, projectId,
+					`/api/v1/admin/quotas/${encodeURIComponent(adminSelectedProjectId)}`, token, projectId,
 				);
 				flavorQuota = {
 					instances: r.compute?.instances,
@@ -222,7 +222,7 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 					gigabytes: r.volume?.gigabytes,
 				};
 			} else if (!opts.adminMode()) {
-				const r = await api.get<{ compute?: any; storage?: any }>('/api/dashboard/quotas', token, projectId);
+				const r = await api.get<{ compute?: any; storage?: any }>('/api/v1/dashboard/quotas', token, projectId);
 				flavorQuota = {
 					instances: r.compute?.instances,
 					cores: r.compute?.cores,
@@ -240,7 +240,7 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 		const token = get(auth).token ?? undefined;
 		const projectId = get(auth).projectId ?? undefined;
 		try {
-			const rows = await api.get<ProjectQuota[]>('/api/admin/overview/projects', token, projectId);
+			const rows = await api.get<ProjectQuota[]>('/api/v1/admin/overview/projects', token, projectId);
 			const map = new Map<string, ProjectQuota>();
 			for (const r of rows) map.set(r.project_id, r);
 			adminProjectQuotas = map;
@@ -255,7 +255,7 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 		const token = get(auth).token ?? undefined;
 		const projectId = get(auth).projectId ?? undefined;
 		try {
-			const res = await api.get<{ id: string; name: string }[]>('/api/admin/projects/names', token, projectId);
+			const res = await api.get<{ id: string; name: string }[]>('/api/v1/admin/projects/names', token, projectId);
 			adminProjects = res.map(p => ({ id: p.id, name: p.name }));
 		} catch {
 			adminProjects = [];
@@ -274,41 +274,41 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 			if (opts.adminMode() && adminSelectedProjectId) {
 				const pid = adminSelectedProjectId;
 				[images, flavors, libraries] = await Promise.all([
-					api.get<any[]>('/api/images', token, projectId),
-					api.get<any[]>('/api/flavors', token, projectId),
-					api.get<any[]>('/api/libraries', token, projectId),
+					api.get<any[]>('/api/v1/images', token, projectId),
+					api.get<any[]>('/api/v1/flavors', token, projectId),
+					api.get<any[]>('/api/v1/libraries', token, projectId),
 				]);
 				[networks, volumes] = await Promise.all([
-					api.get<NetworkInfo[]>(`/api/admin/instances/networks-for-project?project_id=${pid}`, token, projectId).catch(() => [] as NetworkInfo[]),
-					api.get<Volume[]>(`/api/admin/instances/volumes-for-project?project_id=${pid}`, token, projectId).catch(() => [] as Volume[]),
+					api.get<NetworkInfo[]>(`/api/v1/admin/instances/networks-for-project?project_id=${pid}`, token, projectId).catch(() => [] as NetworkInfo[]),
+					api.get<Volume[]>(`/api/v1/admin/instances/volumes-for-project?project_id=${pid}`, token, projectId).catch(() => [] as Volume[]),
 				]);
 				keypairs = [];
 				try {
 					securityGroups = await api.get<SecurityGroupInfo[]>(
-						`/api/admin/instances/security-groups-for-project?project_id=${pid}`, token, projectId,
+						`/api/v1/admin/instances/security-groups-for-project?project_id=${pid}`, token, projectId,
 					);
 				} catch { securityGroups = []; }
 				availabilityZones = [];
 				try {
-					availabilityZones = await api.get<AvailabilityZoneInfo[]>('/api/instances/availability-zones', token, projectId);
+					availabilityZones = await api.get<AvailabilityZoneInfo[]>('/api/v1/instances/availability-zones', token, projectId);
 				} catch { /* 무시 */ }
 			} else {
 				[images, flavors, libraries, networks, keypairs, volumes] = await Promise.all([
-					api.get<any[]>('/api/images', token, projectId),
-					api.get<any[]>('/api/flavors', token, projectId),
-					api.get<any[]>('/api/libraries', token, projectId),
-					api.get<NetworkInfo[]>('/api/networks', token, projectId),
-					api.get<KeypairInfo[]>('/api/keypairs', token, projectId),
-					api.get<Volume[]>('/api/volumes', token, projectId),
+					api.get<any[]>('/api/v1/images', token, projectId),
+					api.get<any[]>('/api/v1/flavors', token, projectId),
+					api.get<any[]>('/api/v1/libraries', token, projectId),
+					api.get<NetworkInfo[]>('/api/v1/networks', token, projectId),
+					api.get<KeypairInfo[]>('/api/v1/keypairs', token, projectId),
+					api.get<Volume[]>('/api/v1/volumes', token, projectId),
 				]);
 				try {
-					securityGroups = await api.get<SecurityGroupInfo[]>('/api/security-groups', token, projectId);
+					securityGroups = await api.get<SecurityGroupInfo[]>('/api/v1/security-groups', token, projectId);
 				} catch { securityGroups = []; }
 				try {
-					availabilityZones = await api.get<AvailabilityZoneInfo[]>('/api/instances/availability-zones', token, projectId);
+					availabilityZones = await api.get<AvailabilityZoneInfo[]>('/api/v1/instances/availability-zones', token, projectId);
 				} catch { availabilityZones = []; }
 				try {
-					fileStorages = await api.get<typeof fileStorages>('/api/storage/file-storages', token, projectId);
+					fileStorages = await api.get<typeof fileStorages>('/api/v1/storage/file-storages', token, projectId);
 				} catch { fileStorages = []; }
 
 				if (keypairs.length === 1 && !get(wizard).keyName) {
@@ -317,7 +317,7 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 				if (networks.length > 0 && !get(wizard).networkId) {
 					let selectedNet = networks[0];
 					try {
-						const defaultRecord = await api.get<{ network_id: string }>('/api/networks/default', token, projectId);
+						const defaultRecord = await api.get<{ network_id: string }>('/api/v1/networks/default', token, projectId);
 						defaultNetworkId = defaultRecord.network_id;
 						const found = networks.find(n => n.id === defaultRecord.network_id);
 						if (found) selectedNet = found;
@@ -328,7 +328,7 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 					wizard.update(w => ({ ...w, networkId: selectedNet.id, networkName: selectedNet.name }));
 				} else if (get(wizard).networkId) {
 					try {
-						const defaultRecord = await api.get<{ network_id: string }>('/api/networks/default', token, projectId);
+						const defaultRecord = await api.get<{ network_id: string }>('/api/v1/networks/default', token, projectId);
 						defaultNetworkId = defaultRecord.network_id;
 					} catch { /* 무시 */ }
 				}
@@ -420,8 +420,8 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 		if (authState.projectId) headers['X-Project-Id'] = authState.projectId;
 
 		const endpoint = opts.adminMode()
-			? `${baseUrl}/api/admin/instances/async`
-			: `${baseUrl}/api/instances/async`;
+			? `${baseUrl}/api/v1/admin/instances/async`
+			: `${baseUrl}/api/v1/instances/async`;
 
 		const w = get(wizard);
 		const body: Record<string, unknown> = {

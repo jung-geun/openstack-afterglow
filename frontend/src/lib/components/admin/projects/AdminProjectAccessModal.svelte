@@ -68,10 +68,10 @@
 			accessTab = 'users';
 			const p = project;
 			Promise.all([
-				api.get<Member[]>(`/api/admin/projects/${p.id}/members`, token, projectId),
-				api.get<{ items: User[] }>('/api/admin/users?limit=100', token, projectId),
-				api.get<Role[]>('/api/admin/roles', token, projectId),
-				api.get<Group[]>('/api/admin/groups', token, projectId),
+				api.get<Member[]>(`/api/v1/admin/projects/${p.id}/members`, token, projectId),
+				api.get<{ items: User[] }>('/api/v1/admin/users?limit=100', token, projectId),
+				api.get<Role[]>('/api/v1/admin/roles', token, projectId),
+				api.get<Group[]>('/api/v1/admin/groups', token, projectId),
 			]).then(([m, u, r, g]) => {
 				members = m;
 				allUsers = u.items;
@@ -92,7 +92,7 @@
 	async function reloadMembers() {
 		if (!project) return;
 		try {
-			members = await api.get<Member[]>(`/api/admin/projects/${project.id}/members`, token, projectId);
+			members = await api.get<Member[]>(`/api/v1/admin/projects/${project.id}/members`, token, projectId);
 		} catch { members = []; }
 	}
 
@@ -101,7 +101,7 @@
 		addSaving = true;
 		addError = '';
 		try {
-			await api.post('/api/admin/roles/assign', {
+			await api.post('/api/v1/admin/roles/assign', {
 				user_id: userId,
 				project_id: project.id,
 				role_id: roleId,
@@ -120,7 +120,7 @@
 		addSaving = true;
 		addError = '';
 		try {
-			await api.post('/api/admin/roles/assign-group', {
+			await api.post('/api/v1/admin/roles/assign-group', {
 				group_id: groupId,
 				project_id: project.id,
 				role_id: roleId,
@@ -139,12 +139,12 @@
 		try {
 			if (m.type === 'group' && m.group_id) {
 				await api.delete(
-					`/api/admin/roles/assign-group?group_id=${m.group_id}&project_id=${project.id}&role_id=${m.role_id}`,
+					`/api/v1/admin/roles/assign-group?group_id=${m.group_id}&project_id=${project.id}&role_id=${m.role_id}`,
 					token, projectId,
 				);
 			} else {
 				await api.delete(
-					`/api/admin/roles/assign?user_id=${m.user_id}&project_id=${project.id}&role_id=${m.role_id}`,
+					`/api/v1/admin/roles/assign?user_id=${m.user_id}&project_id=${project.id}&role_id=${m.role_id}`,
 					token, projectId,
 				);
 			}

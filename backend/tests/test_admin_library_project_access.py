@@ -145,7 +145,7 @@ class TestGrantProjectAccess:
             ),
         ):
             resp = await admin_client.post(
-                "/api/admin/libraries/python311/project-access",
+                "/api/v1/admin/libraries/python311/project-access",
                 json={"project_id": "proj-b", "network_id": "net-b"},
             )
         assert resp.status_code == 200
@@ -168,11 +168,11 @@ class TestGrantProjectAccess:
             patch("app.api.identity.admin_libraries.manila.ensure_nfs_access_rule", mock_ensure),
         ):
             resp1 = await admin_client.post(
-                "/api/admin/libraries/python311/project-access",
+                "/api/v1/admin/libraries/python311/project-access",
                 json={"project_id": "proj-b", "network_id": "net-b"},
             )
             resp2 = await admin_client.post(
-                "/api/admin/libraries/python311/project-access",
+                "/api/v1/admin/libraries/python311/project-access",
                 json={"project_id": "proj-b", "network_id": "net-b"},
             )
         assert resp1.status_code == 200
@@ -188,7 +188,7 @@ class TestGrantProjectAccess:
             patch("app.api.identity.admin_libraries.manila.list_file_storages", return_value=[ceph_storage]),
         ):
             resp = await admin_client.post(
-                "/api/admin/libraries/torch/project-access",
+                "/api/v1/admin/libraries/torch/project-access",
                 json={"project_id": "proj-b", "network_id": "net-b"},
             )
         assert resp.status_code == 400
@@ -199,7 +199,7 @@ class TestGrantProjectAccess:
         """존재하지 않는 라이브러리 → 404."""
         with patch("app.api.identity.admin_libraries.get_service_project_connection", return_value=MagicMock()):
             resp = await admin_client.post(
-                "/api/admin/libraries/nonexistent-lib/project-access",
+                "/api/v1/admin/libraries/nonexistent-lib/project-access",
                 json={"project_id": "proj-b", "network_id": "net-b"},
             )
         assert resp.status_code == 404
@@ -208,7 +208,7 @@ class TestGrantProjectAccess:
     async def test_grant_non_admin_forbidden(self, user_client):
         """비관리자 → 403."""
         resp = await user_client.post(
-            "/api/admin/libraries/python311/project-access",
+            "/api/v1/admin/libraries/python311/project-access",
             json={"project_id": "proj-b", "network_id": "net-b"},
         )
         assert resp.status_code == 403
@@ -227,7 +227,7 @@ class TestGrantProjectAccess:
             patch("app.api.identity.admin_libraries.manila.ensure_nfs_access_rule", mock_ensure),
         ):
             await admin_client.post(
-                "/api/admin/libraries/python311/project-access",
+                "/api/v1/admin/libraries/python311/project-access",
                 json={"project_id": "proj-target", "network_id": "net-b"},
             )
         # extra_metadata 인자에 union_grant_project가 포함되어야 함
@@ -271,7 +271,7 @@ class TestRevokeProjectAccess:
             patch("app.api.identity.admin_libraries.manila.list_access_rules", return_value=rules),
             patch("app.api.identity.admin_libraries.manila.revoke_access_rule", mock_revoke),
         ):
-            resp = await admin_client.delete("/api/admin/libraries/python311/project-access/proj-b")
+            resp = await admin_client.delete("/api/v1/admin/libraries/python311/project-access/proj-b")
         assert resp.status_code == 200
         data = resp.json()
         assert data["revoked_count"] == 1
@@ -290,14 +290,14 @@ class TestRevokeProjectAccess:
             patch("app.api.identity.admin_libraries.manila.list_access_rules", return_value=[]),
             patch("app.api.identity.admin_libraries.manila.revoke_access_rule"),
         ):
-            resp = await admin_client.delete("/api/admin/libraries/python311/project-access/proj-x")
+            resp = await admin_client.delete("/api/v1/admin/libraries/python311/project-access/proj-x")
         assert resp.status_code == 200
         assert resp.json()["revoked_count"] == 0
 
     @pytest.mark.asyncio
     async def test_revoke_non_admin_forbidden(self, user_client):
         """비관리자 → 403."""
-        resp = await user_client.delete("/api/admin/libraries/python311/project-access/proj-b")
+        resp = await user_client.delete("/api/v1/admin/libraries/python311/project-access/proj-b")
         assert resp.status_code == 403
 
 
@@ -336,7 +336,7 @@ class TestListProjectAccess:
             patch("app.api.identity.admin_libraries.manila.list_file_storages", return_value=[nfs_storage]),
             patch("app.api.identity.admin_libraries.manila.list_access_rules", return_value=rules),
         ):
-            resp = await admin_client.get("/api/admin/libraries/python311/project-access")
+            resp = await admin_client.get("/api/v1/admin/libraries/python311/project-access")
         assert resp.status_code == 200
         data = resp.json()
         assert data["library_id"] == "python311"
@@ -349,7 +349,7 @@ class TestListProjectAccess:
     @pytest.mark.asyncio
     async def test_list_non_admin_forbidden(self, user_client):
         """비관리자 → 403."""
-        resp = await user_client.get("/api/admin/libraries/python311/project-access")
+        resp = await user_client.get("/api/v1/admin/libraries/python311/project-access")
         assert resp.status_code == 403
 
     @pytest.mark.asyncio
@@ -375,7 +375,7 @@ class TestListProjectAccess:
             patch("app.api.identity.admin_libraries.manila.list_file_storages", return_value=[nfs_storage]),
             patch("app.api.identity.admin_libraries.manila.list_access_rules", return_value=rules),
         ):
-            resp = await admin_client.get("/api/admin/libraries/python311/project-access")
+            resp = await admin_client.get("/api/v1/admin/libraries/python311/project-access")
         assert resp.status_code == 200
         grants = {g["project_id"]: g for g in resp.json()["grants"]}
         assert "__unknown__" in grants
@@ -404,7 +404,7 @@ class TestGrantNegativePaths:
             patch("app.api.identity.admin_libraries.manila.ensure_nfs_access_rule", mock_ensure),
         ):
             resp = await admin_client.post(
-                "/api/admin/libraries/python311/project-access",
+                "/api/v1/admin/libraries/python311/project-access",
                 json={"project_id": "proj-b", "network_id": "net-b"},
             )
         assert resp.status_code == 200
@@ -428,7 +428,7 @@ class TestGrantNegativePaths:
             patch("app.api.identity.admin_libraries.neutron.get_network_detail", return_value=empty_cidr_detail),
         ):
             resp = await admin_client.post(
-                "/api/admin/libraries/python311/project-access",
+                "/api/v1/admin/libraries/python311/project-access",
                 json={"project_id": "proj-b", "network_id": "net-b"},
             )
         assert resp.status_code == 400
@@ -442,7 +442,7 @@ class TestGrantNegativePaths:
             side_effect=RuntimeError("Keystone 연결 불가"),
         ):
             resp = await admin_client.post(
-                "/api/admin/libraries/python311/project-access",
+                "/api/v1/admin/libraries/python311/project-access",
                 json={"project_id": "proj-b", "network_id": "net-b"},
             )
         assert resp.status_code == 502
@@ -474,7 +474,7 @@ class TestRevokeNegativePaths:
             patch("app.api.identity.admin_libraries.manila.list_access_rules", return_value=rules),
             patch("app.api.identity.admin_libraries.manila.revoke_access_rule", mock_revoke),
         ):
-            resp = await admin_client.delete("/api/admin/libraries/python311/project-access/proj-target")
+            resp = await admin_client.delete("/api/v1/admin/libraries/python311/project-access/proj-target")
         assert resp.status_code == 200
         assert resp.json()["revoked_count"] == 1
         # 레거시 rule은 revoke되지 않아야 함

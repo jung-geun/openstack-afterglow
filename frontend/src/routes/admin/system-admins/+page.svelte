@@ -39,8 +39,8 @@
 		else refreshing = true;
 		try {
 			[admins, policy] = await Promise.all([
-				api.get<SystemAdmin[]>('/api/admin/identity/system-roles', token, projectId),
-				api.get<SecurityPolicy>('/api/admin/identity/security-policy', token, projectId),
+				api.get<SystemAdmin[]>('/api/v1/admin/identity/system-roles', token, projectId),
+				api.get<SecurityPolicy>('/api/v1/admin/identity/security-policy', token, projectId),
 			]);
 		} catch {
 			admins = [];

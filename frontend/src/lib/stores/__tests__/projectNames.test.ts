@@ -32,7 +32,7 @@ describe('projectNames store', () => {
 		const map = get(projectNames);
 		expect(map.get('proj-1')).toBe('프로젝트 A');
 		expect(map.get('proj-2')).toBe('프로젝트 B');
-		expect(api.get).toHaveBeenCalledWith('/api/admin/projects/names', 'token', 'proj-1');
+		expect(api.get).toHaveBeenCalledWith('/api/v1/admin/projects/names', 'token', 'proj-1');
 	});
 
 	it('load() 두 번째 호출은 API를 다시 호출하지 않음 (idempotent)', async () => {

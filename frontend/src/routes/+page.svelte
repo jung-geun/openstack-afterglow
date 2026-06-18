@@ -11,7 +11,7 @@
 	onMount(async () => {
 		loadSiteConfig();
 		try {
-			const res = await api.get<{ enabled: boolean }>('/api/auth/gitlab/enabled');
+			const res = await api.get<{ enabled: boolean }>('/api/v1/auth/gitlab/enabled');
 			gitlabEnabled = res.enabled;
 		} catch {
 			gitlabEnabled = false;
@@ -34,7 +34,7 @@
 		gitlabLoading = true;
 		error = '';
 		try {
-			const res = await api.get<{ authorize_url: string }>('/api/auth/gitlab/authorize');
+			const res = await api.get<{ authorize_url: string }>('/api/v1/auth/gitlab/authorize');
 			// 안전한 프로토콜인지 확인 (오픈 리다이렉트 방지)
 			const redirectUrl = new URL(res.authorize_url);
 			if (!['https:', 'http:'].includes(redirectUrl.protocol)) {
@@ -53,13 +53,13 @@
 		error = '';
 		loading = true;
 		try {
-			const data = await api.post<LoginResponse>('/api/auth/login', {
+			const data = await api.post<LoginResponse>('/api/v1/auth/login', {
 				username, password, domain_name: domainName,
 			});
 
 			let projects: Project[] = [];
 			try {
-				projects = await api.get<Project[]>('/api/auth/projects', data.token);
+				projects = await api.get<Project[]>('/api/v1/auth/projects', data.token);
 			} catch { /* 프로젝트 목록 조회 실패 시 무시 */ }
 
 			let selectedProjectId: string | null = null;

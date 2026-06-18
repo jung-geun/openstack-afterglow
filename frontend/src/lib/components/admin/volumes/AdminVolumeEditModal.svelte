@@ -41,7 +41,7 @@
 		updating = true;
 		editError = '';
 		try {
-			await api.patch(`/api/admin/volumes/${volume.id}`, { name: editName }, token, projectId);
+			await api.patch(`/api/v1/admin/volumes/${volume.id}`, { name: editName }, token, projectId);
 			onSuccess();
 			onClose();
 		} catch (e) {

@@ -44,7 +44,7 @@ def _make_secret_record(name: str = "mysecret", namespace: str = "default"):
 @pytest.mark.asyncio
 async def test_list_secrets_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/k3s/clusters/k3s-1/secrets")
+        resp = await ac.get("/api/v1/k3s/clusters/k3s-1/secrets")
     assert resp.status_code == 401
 
 
@@ -56,7 +56,7 @@ async def test_list_secrets_cluster_not_found(client):
     ):
         mock_cluster.get_cluster = AsyncMock(return_value=None)
         mock_kube.list_secrets = AsyncMock(return_value=[])
-        resp = await client.get("/api/k3s/clusters/k3s-1/secrets")
+        resp = await client.get("/api/v1/k3s/clusters/k3s-1/secrets")
     assert resp.status_code == 404
 
 
@@ -68,7 +68,7 @@ async def test_list_secrets_success(client):
     ):
         mock_cluster.get_cluster = AsyncMock(return_value=_make_cluster_record())
         mock_kube.list_secrets = AsyncMock(return_value=[_make_secret_record("s1"), _make_secret_record("s2")])
-        resp = await client.get("/api/k3s/clusters/k3s-1/secrets?namespace=default")
+        resp = await client.get("/api/v1/k3s/clusters/k3s-1/secrets?namespace=default")
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) == 2
@@ -83,7 +83,7 @@ async def test_get_secret_success(client):
     ):
         mock_cluster.get_cluster = AsyncMock(return_value=_make_cluster_record())
         mock_kube.get_secret = AsyncMock(return_value=_make_secret_record("mysecret"))
-        resp = await client.get("/api/k3s/clusters/k3s-1/namespaces/default/secrets/mysecret")
+        resp = await client.get("/api/v1/k3s/clusters/k3s-1/namespaces/default/secrets/mysecret")
     assert resp.status_code == 200
     data = resp.json()
     assert data["name"] == "mysecret"
@@ -101,7 +101,7 @@ async def test_create_secret_success(client):
         mock_cluster.get_cluster = AsyncMock(return_value=_make_cluster_record())
         mock_kube.create_secret = AsyncMock(return_value=_make_secret_record("newsecret"))
         resp = await client.post(
-            "/api/k3s/clusters/k3s-1/namespaces/default/secrets",
+            "/api/v1/k3s/clusters/k3s-1/namespaces/default/secrets",
             json={"name": "newsecret", "data": {"key": "plain"}},
         )
     assert resp.status_code == 201
@@ -125,7 +125,7 @@ async def test_create_secret_encodes_base64(client):
         mock_cluster.get_cluster = AsyncMock(return_value=_make_cluster_record())
         mock_kube.create_secret = AsyncMock(return_value=_make_secret_record("mysecret"))
         resp = await client.post(
-            "/api/k3s/clusters/k3s-1/namespaces/default/secrets",
+            "/api/v1/k3s/clusters/k3s-1/namespaces/default/secrets",
             json={"name": "mysecret", "data": {"key": "plain"}},
         )
     assert resp.status_code == 201
@@ -145,7 +145,7 @@ async def test_update_secret_success(client):
         mock_cluster.get_cluster = AsyncMock(return_value=_make_cluster_record())
         mock_kube.update_secret = AsyncMock(return_value=_make_secret_record("mysecret"))
         resp = await client.put(
-            "/api/k3s/clusters/k3s-1/namespaces/default/secrets/mysecret",
+            "/api/v1/k3s/clusters/k3s-1/namespaces/default/secrets/mysecret",
             json={"data": {"key": "newplain"}},
         )
     assert resp.status_code == 200
@@ -163,5 +163,5 @@ async def test_delete_secret_success(client):
     ):
         mock_cluster.get_cluster = AsyncMock(return_value=_make_cluster_record())
         mock_kube.delete_secret = AsyncMock(return_value=None)
-        resp = await client.delete("/api/k3s/clusters/k3s-1/namespaces/default/secrets/mysecret")
+        resp = await client.delete("/api/v1/k3s/clusters/k3s-1/namespaces/default/secrets/mysecret")
     assert resp.status_code == 204

@@ -24,7 +24,7 @@
 		const token = $auth.token ?? undefined;
 		const projectId = $auth.projectId ?? undefined;
 		try {
-			await api.post(`/api/k3s/clusters/${s.cluster.id}/stampede/disable`, {}, token, projectId);
+			await api.post(`/api/v1/k3s/clusters/${s.cluster.id}/stampede/disable`, {}, token, projectId);
 		} catch {
 			// best-effort
 		} finally {
@@ -38,7 +38,7 @@
 		const token = $auth.token ?? undefined;
 		const projectId = $auth.projectId ?? undefined;
 		try {
-			await api.post(`/api/k3s/clusters/${s.cluster.id}/stampede/enable`, {}, token, projectId);
+			await api.post(`/api/v1/k3s/clusters/${s.cluster.id}/stampede/enable`, {}, token, projectId);
 		} catch {
 			// best-effort
 		} finally {

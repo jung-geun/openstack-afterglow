@@ -92,7 +92,7 @@ spec:
           # (2026-06-12 워커 재부팅 장애: 노드 I/O 저하 시 import 10분+ → 5분 한도로 크래시루프)
           startupProbe:
             httpGet:
-              path: /api/health
+              path: /api/v1/health
               port: 8000
             initialDelaySeconds: 10
             periodSeconds: 5
@@ -100,7 +100,7 @@ spec:
             timeoutSeconds: 10
           livenessProbe:
             httpGet:
-              path: /api/health
+              path: /api/v1/health
               port: 8000
             initialDelaySeconds: 15
             periodSeconds: 30
@@ -108,7 +108,7 @@ spec:
             timeoutSeconds: 5
           readinessProbe:
             httpGet:
-              path: /api/health
+              path: /api/v1/health
               port: 8000
             periodSeconds: 5
             failureThreshold: 2

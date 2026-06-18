@@ -22,7 +22,7 @@ def _patch_redis():
 
 @pytest.mark.asyncio
 async def test_notifications_non_admin_returns_403(non_admin_client):
-    resp = await non_admin_client.get("/api/admin/notifications")
+    resp = await non_admin_client.get("/api/v1/admin/notifications")
     assert resp.status_code == 403
 
 
@@ -33,7 +33,7 @@ async def test_notifications_returns_structure(admin_client, mock_conn):
     mock_conn.network.ips.return_value = []
     mock_conn.network.networks.return_value = []
     with _patch_redis():
-        resp = await admin_client.get("/api/admin/notifications")
+        resp = await admin_client.get("/api/v1/admin/notifications")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -51,7 +51,7 @@ async def test_notifications_error_instances_trigger_alert(admin_client, mock_co
     mock_conn.network.ips.return_value = []
     mock_conn.network.networks.return_value = []
     with _patch_redis():
-        resp = await admin_client.get("/api/admin/notifications")
+        resp = await admin_client.get("/api/v1/admin/notifications")
 
     assert resp.status_code == 200
     notifs = resp.json()["notifications"]
@@ -65,7 +65,7 @@ async def test_notifications_error_instances_trigger_alert(admin_client, mock_co
 
 @pytest.mark.asyncio
 async def test_instances_health_non_admin_returns_403(non_admin_client):
-    resp = await non_admin_client.get("/api/admin/instances/health")
+    resp = await non_admin_client.get("/api/v1/admin/instances/health")
     assert resp.status_code == 403
 
 
@@ -92,7 +92,7 @@ async def test_instances_health_returns_list(admin_client, mock_conn):
         ]
     }
     with _patch_redis():
-        resp = await admin_client.get("/api/admin/instances/health")
+        resp = await admin_client.get("/api/v1/admin/instances/health")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -141,7 +141,7 @@ async def test_instances_health_kpi_fields(admin_client, mock_conn):
         ]
     }
     with _patch_redis():
-        resp = await admin_client.get("/api/admin/instances/health")
+        resp = await admin_client.get("/api/v1/admin/instances/health")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -158,7 +158,7 @@ async def test_instances_health_empty(admin_client, mock_conn):
     """서버 없을 때 KPI 0 반환."""
     mock_conn.session.get.return_value.json.return_value = {"servers": []}
     with _patch_redis():
-        resp = await admin_client.get("/api/admin/instances/health")
+        resp = await admin_client.get("/api/v1/admin/instances/health")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -177,7 +177,7 @@ async def test_instances_health_empty(admin_client, mock_conn):
 @pytest.mark.asyncio
 async def test_bulk_action_non_admin_returns_403(non_admin_client):
     resp = await non_admin_client.post(
-        "/api/admin/instances/bulk-action",
+        "/api/v1/admin/instances/bulk-action",
         json={"instance_ids": ["s1"], "action": "stop"},
     )
     assert resp.status_code == 403
@@ -191,7 +191,7 @@ async def test_bulk_action_stop_records_activity(admin_client, mock_conn):
 
     with patch("app.api.identity.admin_dashboard.rec", new_callable=AsyncMock) as mock_rec:
         resp = await admin_client.post(
-            "/api/admin/instances/bulk-action",
+            "/api/v1/admin/instances/bulk-action",
             json={"instance_ids": ["s1", "s2"], "action": "stop"},
         )
 
@@ -204,7 +204,7 @@ async def test_bulk_action_stop_records_activity(admin_client, mock_conn):
 @pytest.mark.asyncio
 async def test_bulk_action_empty_ids_returns_400(admin_client, mock_conn):
     resp = await admin_client.post(
-        "/api/admin/instances/bulk-action",
+        "/api/v1/admin/instances/bulk-action",
         json={"instance_ids": [], "action": "start"},
     )
     assert resp.status_code == 400
@@ -213,7 +213,7 @@ async def test_bulk_action_empty_ids_returns_400(admin_client, mock_conn):
 @pytest.mark.asyncio
 async def test_bulk_action_too_many_ids_returns_400(admin_client, mock_conn):
     resp = await admin_client.post(
-        "/api/admin/instances/bulk-action",
+        "/api/v1/admin/instances/bulk-action",
         json={"instance_ids": [f"s{i}" for i in range(51)], "action": "start"},
     )
     assert resp.status_code == 400
@@ -233,7 +233,7 @@ async def test_bulk_action_partial_failure_still_records_all(admin_client, mock_
 
     with patch("app.api.identity.admin_dashboard.rec", new_callable=AsyncMock) as mock_rec:
         resp = await admin_client.post(
-            "/api/admin/instances/bulk-action",
+            "/api/v1/admin/instances/bulk-action",
             json={"instance_ids": ["s1", "s2"], "action": "stop"},
         )
 
@@ -251,7 +251,7 @@ async def test_bulk_action_partial_failure_still_records_all(admin_client, mock_
 
 @pytest.mark.asyncio
 async def test_fip_pool_stats_non_admin_returns_403(non_admin_client):
-    resp = await non_admin_client.get("/api/admin/floating-ips/pool-stats")
+    resp = await non_admin_client.get("/api/v1/admin/floating-ips/pool-stats")
     assert resp.status_code == 403
 
 
@@ -271,7 +271,7 @@ async def test_fip_pool_stats_returns_structure(admin_client, mock_conn):
     mock_conn.network.ips.return_value = [fip1, fip2]
 
     with _patch_redis():
-        resp = await admin_client.get("/api/admin/floating-ips/pool-stats")
+        resp = await admin_client.get("/api/v1/admin/floating-ips/pool-stats")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -290,7 +290,7 @@ async def test_fip_pool_stats_returns_structure(admin_client, mock_conn):
 
 @pytest.mark.asyncio
 async def test_identity_summary_non_admin_returns_403(non_admin_client):
-    resp = await non_admin_client.get("/api/admin/identity/summary")
+    resp = await non_admin_client.get("/api/v1/admin/identity/summary")
     assert resp.status_code == 403
 
 
@@ -304,7 +304,7 @@ async def test_identity_summary_returns_counts(admin_client, mock_conn):
     mock_conn.identity.domains.return_value = [MagicMock()]
 
     with _patch_redis():
-        resp = await admin_client.get("/api/admin/identity/summary")
+        resp = await admin_client.get("/api/v1/admin/identity/summary")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -332,7 +332,7 @@ async def test_identity_summary_partial_when_users_fails(admin_client, mock_conn
     mock_conn.identity.domains.return_value = []
 
     with _patch_redis():
-        resp = await admin_client.get("/api/admin/identity/summary")
+        resp = await admin_client.get("/api/v1/admin/identity/summary")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -354,7 +354,7 @@ async def test_identity_summary_partial_when_roles_fails(admin_client, mock_conn
     mock_conn.identity.domains.return_value = []
 
     with _patch_redis():
-        resp = await admin_client.get("/api/admin/identity/summary")
+        resp = await admin_client.get("/api/v1/admin/identity/summary")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -376,7 +376,7 @@ async def test_identity_summary_partial_reasons_403_classified(admin_client, moc
     mock_conn.identity.domains.return_value = []
 
     with _patch_redis():
-        resp = await admin_client.get("/api/admin/identity/summary")
+        resp = await admin_client.get("/api/v1/admin/identity/summary")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -395,7 +395,7 @@ async def test_identity_summary_no_partial_reasons_when_success(admin_client, mo
     mock_conn.identity.domains.return_value = []
 
     with _patch_redis():
-        resp = await admin_client.get("/api/admin/identity/summary")
+        resp = await admin_client.get("/api/v1/admin/identity/summary")
 
     assert resp.status_code == 200
     data = resp.json()

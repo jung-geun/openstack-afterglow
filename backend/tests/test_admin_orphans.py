@@ -216,14 +216,14 @@ class TestAdminOrphansEndpoint:
     @pytest.mark.asyncio
     async def test_endpoint_requires_admin(self, non_admin_client):
         """비관리자 GET → 403."""
-        resp = await non_admin_client.get("/api/admin/orphans")
+        resp = await non_admin_client.get("/api/v1/admin/orphans")
         assert resp.status_code == 403
 
     @pytest.mark.asyncio
     async def test_cleanup_invalid_kind_rejected(self, admin_client):
         """kind 미정의 값 → 422."""
         resp = await admin_client.post(
-            "/api/admin/orphans/cleanup",
+            "/api/v1/admin/orphans/cleanup",
             json={"kind": "snapshot", "ids": ["x"]},
         )
         assert resp.status_code == 422
@@ -240,7 +240,7 @@ class TestAdminOrphansEndpoint:
             patch("app.api.identity.admin_orphans.rec", new=AsyncMock()) as mock_rec,
         ):
             resp = await admin_client.post(
-                "/api/admin/orphans/cleanup",
+                "/api/v1/admin/orphans/cleanup",
                 json={"kind": "volume", "ids": ["vol-ok", "vol-bad"]},
             )
         assert resp.status_code == 200

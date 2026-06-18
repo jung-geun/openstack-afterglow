@@ -11,7 +11,7 @@ import pytest
 async def test_list_file_storages_admin(admin_client, settings):
     if not settings.service_manila_enabled:
         pytest.skip("Manila 비활성화")
-    resp = await admin_client.get("/api/file-storage")
+    resp = await admin_client.get("/api/v1/file-storage")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
 
@@ -20,7 +20,7 @@ async def test_list_file_storages_admin(admin_client, settings):
 async def test_file_storage_quota_admin(admin_client, settings):
     if not settings.service_manila_enabled:
         pytest.skip("Manila 비활성화")
-    resp = await admin_client.get("/api/file-storage/quota")
+    resp = await admin_client.get("/api/v1/file-storage/quota")
     assert resp.status_code == 200
     body = resp.json()
     assert isinstance(body, dict)
@@ -35,7 +35,7 @@ async def test_file_storage_quota_admin(admin_client, settings):
 async def test_list_share_types_admin(admin_client, settings):
     if not settings.service_manila_enabled:
         pytest.skip("Manila 비활성화")
-    resp = await admin_client.get("/api/file-storage/types")
+    resp = await admin_client.get("/api/v1/file-storage/types")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
 
@@ -44,7 +44,7 @@ async def test_list_share_types_admin(admin_client, settings):
 async def test_list_share_networks_admin(admin_client, settings):
     if not settings.service_manila_enabled:
         pytest.skip("Manila 비활성화")
-    resp = await admin_client.get("/api/share-networks")
+    resp = await admin_client.get("/api/v1/share-networks")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
 
@@ -53,7 +53,7 @@ async def test_list_share_networks_admin(admin_client, settings):
 async def test_list_security_services_admin(admin_client, settings):
     if not settings.service_manila_enabled:
         pytest.skip("Manila 비활성화")
-    resp = await admin_client.get("/api/security-services")
+    resp = await admin_client.get("/api/v1/security-services")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
 
@@ -67,7 +67,7 @@ async def test_list_security_services_admin(admin_client, settings):
 async def test_list_file_storages_user(user_client, settings):
     if not settings.service_manila_enabled:
         pytest.skip("Manila 비활성화")
-    resp = await user_client.get("/api/file-storage")
+    resp = await user_client.get("/api/v1/file-storage")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
 
@@ -76,7 +76,7 @@ async def test_list_file_storages_user(user_client, settings):
 async def test_list_share_networks_user(user_client, settings):
     if not settings.service_manila_enabled:
         pytest.skip("Manila 비활성화")
-    resp = await user_client.get("/api/share-networks")
+    resp = await user_client.get("/api/v1/share-networks")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
 
@@ -85,6 +85,6 @@ async def test_list_share_networks_user(user_client, settings):
 async def test_list_security_services_user(user_client, settings):
     if not settings.service_manila_enabled:
         pytest.skip("Manila 비활성화")
-    resp = await user_client.get("/api/security-services")
+    resp = await user_client.get("/api/v1/security-services")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)

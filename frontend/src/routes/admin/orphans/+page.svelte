@@ -63,7 +63,7 @@
 		scanError = '';
 		try {
 			const data = await api.get<OrphanScanResponse>(
-				`/api/admin/orphans?min_age_days=${minAgeDays}`,
+				`/api/v1/admin/orphans?min_age_days=${minAgeDays}`,
 				token,
 				projectId
 			);
@@ -101,7 +101,7 @@
 		cleanupError = '';
 		try {
 			const res = await api.post<CleanupResult>(
-				'/api/admin/orphans/cleanup',
+				'/api/v1/admin/orphans/cleanup',
 				{ kind: confirmKind, ids: confirmIds },
 				token,
 				projectId

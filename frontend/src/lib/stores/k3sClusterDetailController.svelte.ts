@@ -93,7 +93,7 @@ export function createK3sClusterDetailController(opts: K3sClusterDetailControlle
   let servicesLoaded = $state(false);
   let deploymentsLoaded = $state(false);
 
-  const apiBase = $derived(opts.adminMode() ? '/api/admin/k3s-clusters' : '/api/k3s/clusters');
+  const apiBase = $derived(opts.adminMode() ? '/api/v1/admin/k3s-clusters' : '/api/v1/k3s/clusters');
   const isActive = $derived(cluster?.status === 'ACTIVE');
 
   async function loadCluster() {
@@ -114,7 +114,7 @@ export function createK3sClusterDetailController(opts: K3sClusterDetailControlle
     const id = opts.clusterId();
     if (!id || !cluster || cluster.status !== 'ACTIVE') return;
     try {
-      health = await api.get<K3sClusterHealth>(`/api/k3s/clusters/${id}/health`, opts.token(), opts.projectId());
+      health = await api.get<K3sClusterHealth>(`/api/v1/k3s/clusters/${id}/health`, opts.token(), opts.projectId());
     } catch {
       // 404는 아직 헬스 데이터 없음 — 무시
     }
@@ -125,7 +125,7 @@ export function createK3sClusterDetailController(opts: K3sClusterDetailControlle
     if (!id || checkingHealth) return;
     checkingHealth = true;
     try {
-      health = await api.post<K3sClusterHealth>(`/api/k3s/clusters/${id}/health/check`, {}, opts.token(), opts.projectId());
+      health = await api.post<K3sClusterHealth>(`/api/v1/k3s/clusters/${id}/health/check`, {}, opts.token(), opts.projectId());
     } catch {
       // rate limit(429) 등 — 무시
     } finally {
@@ -227,7 +227,7 @@ export function createK3sClusterDetailController(opts: K3sClusterDetailControlle
   async function loadNetworks() {
     if (networks.length > 0) return;
     try {
-      networks = await api.get<NetworkInfo[]>('/api/networks', opts.token(), opts.projectId());
+      networks = await api.get<NetworkInfo[]>('/api/v1/networks', opts.token(), opts.projectId());
     } catch {
       networks = [];
     }

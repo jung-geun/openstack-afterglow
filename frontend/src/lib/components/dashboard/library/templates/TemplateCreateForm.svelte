@@ -33,7 +33,7 @@
 
   async function loadSealedLayers() {
     try {
-      const all = await api.get<LayerInfo[]>('/api/union/layers?limit=200', token, projectId);
+      const all = await api.get<LayerInfo[]>('/api/v1/union/layers?limit=200', token, projectId);
       sealedLayers = all.filter((l) => l.sealed);
     } catch {}
   }

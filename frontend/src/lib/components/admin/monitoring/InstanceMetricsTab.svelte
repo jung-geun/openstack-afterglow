@@ -51,7 +51,7 @@
 		try {
 			const marker = nextMarker && !reset ? `&marker=${nextMarker}` : '';
 			const resp = await api.get<PagedResponse<AdminInstance>>(
-				`/api/admin/all-instances?limit=50${marker}`,
+				`/api/v1/admin/all-instances?limit=50${marker}`,
 				token,
 				projectId,
 			);

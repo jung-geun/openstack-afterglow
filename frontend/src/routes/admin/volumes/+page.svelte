@@ -62,7 +62,7 @@
 	async function loadTimeseries(range: string, opts?: { background?: boolean }) {
 		if (!opts?.background) tsLoading = true;
 		try {
-			tsData = await api.get<TsPoint[]>(`/api/admin/timeseries/volumes?range=${range}`, token, projectId);
+			tsData = await api.get<TsPoint[]>(`/api/v1/admin/timeseries/volumes?range=${range}`, token, projectId);
 		} catch {
 			if (!opts?.background) tsData = [];
 		} finally {
@@ -74,7 +74,7 @@
 		if (allVolumes.length === 0) loading = true;
 		else refreshing = true;
 		try {
-			let url = `/api/admin/all-volumes?limit=${pageSize}`;
+			let url = `/api/v1/admin/all-volumes?limit=${pageSize}`;
 			if (marker) url += `&marker=${marker}`;
 			if (projectFilter) url += `&project_id=${encodeURIComponent(projectFilter)}`;
 			if (statusFilter) url += `&status=${encodeURIComponent(statusFilter)}`;

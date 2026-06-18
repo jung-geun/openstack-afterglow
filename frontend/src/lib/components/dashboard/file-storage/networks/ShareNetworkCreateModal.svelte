@@ -27,7 +27,7 @@
       form = { name: '', description: '', neutron_net_id: '', neutron_subnet_id: '' };
       subnets = [];
       createError = '';
-      api.get<ShareNeutronNetwork[]>('/api/networks', token, projectId).then(
+      api.get<ShareNeutronNetwork[]>('/api/v1/networks', token, projectId).then(
         (data) => { neutronNetworks = data; },
         () => { neutronNetworks = []; }
       );
@@ -41,7 +41,7 @@
     loadingSubnets = true;
     try {
       const detail = await api.get<{ id: string; subnet_details: ShareSubnet[] }>(
-        `/api/networks/${form.neutron_net_id}`, token, projectId
+        `/api/v1/networks/${form.neutron_net_id}`, token, projectId
       );
       subnets = detail.subnet_details ?? [];
     } catch {

@@ -23,7 +23,7 @@
 
   async function fetchSnapshots() {
     try {
-      snapshots = await api.get<VolumeSnapshot[]>('/api/volume-snapshots', $auth.token ?? undefined, $auth.projectId ?? undefined);
+      snapshots = await api.get<VolumeSnapshot[]>('/api/v1/volume-snapshots', $auth.token ?? undefined, $auth.projectId ?? undefined);
       error = '';
     } catch (e) {
       error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
@@ -34,13 +34,13 @@
 
   async function fetchVolumes() {
     try {
-      volumes = await api.get<Volume[]>('/api/volumes', $auth.token ?? undefined, $auth.projectId ?? undefined);
+      volumes = await api.get<Volume[]>('/api/v1/volumes', $auth.token ?? undefined, $auth.projectId ?? undefined);
     } catch { /* ignore */ }
   }
 
   async function createSnapshot(form: { volume_id: string; name: string; description: string; force: boolean }): Promise<string | true> {
     try {
-      await api.post('/api/volume-snapshots', form, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      await api.post('/api/v1/volume-snapshots', form, $auth.token ?? undefined, $auth.projectId ?? undefined);
       await fetchSnapshots();
       return true;
     } catch (e) {
@@ -52,7 +52,7 @@
     if (!await confirmDialog(`스냅샷 "${name || id.slice(0, 8)}"을 삭제하시겠습니까?`)) return;
     deleting = id;
     try {
-      await api.delete(`/api/volume-snapshots/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      await api.delete(`/api/v1/volume-snapshots/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
       await fetchSnapshots();
     } catch (e) {
       toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));

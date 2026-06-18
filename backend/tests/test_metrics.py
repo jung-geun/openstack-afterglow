@@ -20,21 +20,21 @@ from app.main import app
 async def test_metrics_requires_auth():
     """인증 없이 /api/metrics 접근 → 401."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/metrics")
+        resp = await ac.get("/api/v1/metrics")
     assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
 async def test_metrics_allowed_for_admin(admin_client):
     """admin role 보유 사용자 → 200 (prometheus 텍스트 형식)."""
-    resp = await admin_client.get("/api/metrics")
+    resp = await admin_client.get("/api/v1/metrics")
     assert resp.status_code != 403
 
 
 @pytest.mark.asyncio
 async def test_metrics_forbidden_for_member(non_admin_client):
     """member 역할만 가진 사용자 → 403."""
-    resp = await non_admin_client.get("/api/metrics")
+    resp = await non_admin_client.get("/api/v1/metrics")
     assert resp.status_code == 403
 
 
@@ -60,7 +60,7 @@ async def test_metrics_blocks_project_admin_without_system_admin(mock_conn):
             base_url="http://test",
             headers={"X-Auth-Token": "test-token", "X-Project-Id": "test-project-123"},
         ) as ac:
-            resp = await ac.get("/api/metrics")
+            resp = await ac.get("/api/v1/metrics")
         assert resp.status_code == 403
     finally:
         app.dependency_overrides.clear()

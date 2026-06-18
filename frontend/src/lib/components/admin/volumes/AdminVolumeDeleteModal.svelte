@@ -37,7 +37,7 @@
 		deleting = true;
 		deleteError = '';
 		try {
-			await api.delete(`/api/admin/volumes/${volume.id}`, token, projectId);
+			await api.delete(`/api/v1/admin/volumes/${volume.id}`, token, projectId);
 			onSuccess();
 			onClose();
 		} catch (e) {

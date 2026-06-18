@@ -31,7 +31,7 @@ _PRIVATE_TMPL = {**_TMPL, "id": "tmpl-private-0000", "public_visible": False, "c
 @pytest.mark.asyncio
 async def test_create_template_requires_admin(non_admin_client):
     resp = await non_admin_client.post(
-        "/api/k3s/cluster-templates",
+        "/api/v1/k3s/cluster-templates",
         json={"name": "test-tmpl", "os_type": "ubuntu"},
     )
     assert resp.status_code == 403
@@ -39,13 +39,13 @@ async def test_create_template_requires_admin(non_admin_client):
 
 @pytest.mark.asyncio
 async def test_update_template_requires_admin(non_admin_client):
-    resp = await non_admin_client.patch("/api/k3s/cluster-templates/tmpl-1", json={"description": "x"})
+    resp = await non_admin_client.patch("/api/v1/k3s/cluster-templates/tmpl-1", json={"description": "x"})
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_delete_template_requires_admin(non_admin_client):
-    resp = await non_admin_client.delete("/api/k3s/cluster-templates/tmpl-1")
+    resp = await non_admin_client.delete("/api/v1/k3s/cluster-templates/tmpl-1")
     assert resp.status_code == 403
 
 
@@ -58,7 +58,7 @@ async def test_delete_template_requires_admin(non_admin_client):
 async def test_create_template_success(admin_client):
     with patch("app.services.k3s_template.create_template", new=AsyncMock(return_value=_TMPL)):
         resp = await admin_client.post(
-            "/api/k3s/cluster-templates",
+            "/api/v1/k3s/cluster-templates",
             json={"name": "standard", "os_type": "ubuntu", "default_node_count": 3},
         )
     assert resp.status_code == 201
@@ -71,7 +71,7 @@ async def test_create_template_success(admin_client):
 async def test_create_template_invalid_name(admin_client):
     with patch("app.services.k3s_template.create_template", new=AsyncMock(return_value=_TMPL)):
         resp = await admin_client.post(
-            "/api/k3s/cluster-templates",
+            "/api/v1/k3s/cluster-templates",
             json={"name": "bad name!", "os_type": "ubuntu"},
         )
     assert resp.status_code == 422
@@ -81,7 +81,7 @@ async def test_create_template_invalid_name(admin_client):
 async def test_create_template_invalid_os_type(admin_client):
     with patch("app.services.k3s_template.create_template", new=AsyncMock(return_value=_TMPL)):
         resp = await admin_client.post(
-            "/api/k3s/cluster-templates",
+            "/api/v1/k3s/cluster-templates",
             json={"name": "t", "os_type": "windows"},
         )
     assert resp.status_code == 422
@@ -95,7 +95,7 @@ async def test_create_template_invalid_os_type(admin_client):
 @pytest.mark.asyncio
 async def test_list_templates_returns_public(admin_client):
     with patch("app.services.k3s_template.list_templates", new=AsyncMock(return_value=[_TMPL])):
-        resp = await admin_client.get("/api/k3s/cluster-templates")
+        resp = await admin_client.get("/api/v1/k3s/cluster-templates")
     assert resp.status_code == 200
     assert len(resp.json()) == 1
 
@@ -103,7 +103,7 @@ async def test_list_templates_returns_public(admin_client):
 @pytest.mark.asyncio
 async def test_get_template_not_found(admin_client):
     with patch("app.services.k3s_template.get_template", new=AsyncMock(return_value=None)):
-        resp = await admin_client.get("/api/k3s/cluster-templates/does-not-exist")
+        resp = await admin_client.get("/api/v1/k3s/cluster-templates/does-not-exist")
     assert resp.status_code == 404
 
 
@@ -111,7 +111,7 @@ async def test_get_template_not_found(admin_client):
 async def test_get_private_template_by_non_owner(non_admin_client):
     """public=False이고 본인 소유 아닌 템플릿은 404 반환."""
     with patch("app.services.k3s_template.get_template", new=AsyncMock(return_value=_PRIVATE_TMPL)):
-        resp = await non_admin_client.get(f"/api/k3s/cluster-templates/{_PRIVATE_TMPL['id']}")
+        resp = await non_admin_client.get(f"/api/v1/k3s/cluster-templates/{_PRIVATE_TMPL['id']}")
     assert resp.status_code == 404
 
 
@@ -125,7 +125,7 @@ async def test_update_template_success(admin_client):
     updated = {**_TMPL, "description": "업데이트됨"}
     with patch("app.services.k3s_template.update_template", new=AsyncMock(return_value=updated)):
         resp = await admin_client.patch(
-            f"/api/k3s/cluster-templates/{_TMPL['id']}",
+            f"/api/v1/k3s/cluster-templates/{_TMPL['id']}",
             json={"description": "업데이트됨"},
         )
     assert resp.status_code == 200
@@ -135,21 +135,21 @@ async def test_update_template_success(admin_client):
 @pytest.mark.asyncio
 async def test_update_template_not_found(admin_client):
     with patch("app.services.k3s_template.update_template", new=AsyncMock(return_value=None)):
-        resp = await admin_client.patch("/api/k3s/cluster-templates/no-such-id", json={"description": "x"})
+        resp = await admin_client.patch("/api/v1/k3s/cluster-templates/no-such-id", json={"description": "x"})
     assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_delete_template_success(admin_client):
     with patch("app.services.k3s_template.delete_template", new=AsyncMock(return_value=True)):
-        resp = await admin_client.delete(f"/api/k3s/cluster-templates/{_TMPL['id']}")
+        resp = await admin_client.delete(f"/api/v1/k3s/cluster-templates/{_TMPL['id']}")
     assert resp.status_code == 204
 
 
 @pytest.mark.asyncio
 async def test_delete_template_not_found(admin_client):
     with patch("app.services.k3s_template.delete_template", new=AsyncMock(return_value=False)):
-        resp = await admin_client.delete("/api/k3s/cluster-templates/no-such-id")
+        resp = await admin_client.delete("/api/v1/k3s/cluster-templates/no-such-id")
     assert resp.status_code == 404
 
 
@@ -160,7 +160,7 @@ async def test_delete_template_not_found(admin_client):
 
 @pytest.mark.asyncio
 async def test_admin_list_templates_requires_admin(non_admin_client):
-    resp = await non_admin_client.get("/api/admin/k3s-cluster-templates")
+    resp = await non_admin_client.get("/api/v1/admin/k3s-cluster-templates")
     assert resp.status_code == 403
 
 
@@ -171,6 +171,6 @@ async def test_admin_list_templates_returns_all(admin_client):
         "app.services.k3s_template.list_templates",
         new=AsyncMock(return_value=[_TMPL, _PRIVATE_TMPL]),
     ):
-        resp = await admin_client.get("/api/admin/k3s-cluster-templates")
+        resp = await admin_client.get("/api/v1/admin/k3s-cluster-templates")
     assert resp.status_code == 200
     assert len(resp.json()) == 2

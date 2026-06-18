@@ -80,7 +80,7 @@ async def test_create_instance_existing_upper_skips_create_empty_volume(client, 
             new_callable=AsyncMock,
         ),
     ):
-        resp = await client.post("/api/instances", json=BASE_PAYLOAD)
+        resp = await client.post("/api/v1/instances", json=BASE_PAYLOAD)
 
     assert resp.status_code == 201
     mock_create_empty.assert_not_called()
@@ -98,7 +98,7 @@ async def test_create_instance_existing_upper_in_use_returns_400(client, mock_co
         patch("app.api.compute.instances.cinder.get_volume", return_value=_make_vol("in-use")),
         patch("app.api.compute.instances.cinder.create_empty_volume") as mock_create_empty,
     ):
-        resp = await client.post("/api/instances", json=BASE_PAYLOAD)
+        resp = await client.post("/api/v1/instances", json=BASE_PAYLOAD)
 
     assert resp.status_code == 400
     mock_create_empty.assert_not_called()

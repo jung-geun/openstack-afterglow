@@ -11,7 +11,7 @@ from app.main import app
 @pytest.mark.asyncio
 async def test_list_libraries_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/libraries")
+        resp = await ac.get("/api/v1/libraries")
     assert resp.status_code == 401
 
 
@@ -20,7 +20,7 @@ async def test_list_libraries_success(client, mock_conn):
     with patch("app.api.common.libraries.lib_svc") as mock_lib, patch("app.api.common.libraries.manila") as mock_manila:
         mock_lib.get_all.return_value = []
         mock_manila.list_file_storages.return_value = []
-        resp = await client.get("/api/libraries")
+        resp = await client.get("/api/v1/libraries")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
 
@@ -29,7 +29,7 @@ async def test_list_libraries_success(client, mock_conn):
 async def test_list_prebuilt_file_storages_unauthenticated():
     """인증 없이 접근 시 401 반환."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/libraries/file-storages")
+        resp = await ac.get("/api/v1/libraries/file-storages")
     assert resp.status_code == 401
 
 
@@ -41,7 +41,7 @@ async def test_list_prebuilt_file_storages_success(client, mock_conn):
     ):
         mock_svc_conn.return_value = mock_conn
         mock_manila.list_file_storages.return_value = []
-        resp = await client.get("/api/libraries/file-storages")
+        resp = await client.get("/api/v1/libraries/file-storages")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
 
@@ -124,13 +124,13 @@ def test_check_python_version_conflict():
 @pytest.mark.asyncio
 async def test_validate_endpoint_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.post("/api/libraries/validate", json={"library_ids": ["python311"]})
+        resp = await ac.post("/api/v1/libraries/validate", json={"library_ids": ["python311"]})
     assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
 async def test_validate_endpoint_compatible(client, mock_conn):
-    resp = await client.post("/api/libraries/validate", json={"library_ids": ["python311", "torch"]})
+    resp = await client.post("/api/v1/libraries/validate", json={"library_ids": ["python311", "torch"]})
     assert resp.status_code == 200
     data = resp.json()
     assert data["compatible"] is True
@@ -139,7 +139,7 @@ async def test_validate_endpoint_compatible(client, mock_conn):
 
 @pytest.mark.asyncio
 async def test_validate_endpoint_unknown_library(client, mock_conn):
-    resp = await client.post("/api/libraries/validate", json={"library_ids": ["nonexistent"]})
+    resp = await client.post("/api/v1/libraries/validate", json={"library_ids": ["nonexistent"]})
     assert resp.status_code == 200
     data = resp.json()
     assert data["compatible"] is False
@@ -191,7 +191,7 @@ async def test_list_libraries_response_includes_license_fields(client, mock_conn
     with patch("app.api.common.libraries.lib_svc") as mock_lib, patch("app.api.common.libraries.manila") as mock_manila:
         mock_lib.get_all.return_value = [test_lib]
         mock_manila.list_file_storages.return_value = []
-        resp = await client.get("/api/libraries")
+        resp = await client.get("/api/v1/libraries")
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) == 1

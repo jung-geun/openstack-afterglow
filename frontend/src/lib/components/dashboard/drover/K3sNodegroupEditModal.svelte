@@ -29,7 +29,7 @@
 	let error = $state('');
 
 	$effect(() => {
-		void api.get<K3sFlavor[]>('/api/flavors', token, projectId).then(f => { flavors = f; }).catch(() => {});
+		void api.get<K3sFlavor[]>('/api/v1/flavors', token, projectId).then(f => { flavors = f; }).catch(() => {});
 	});
 
 	async function save() {
@@ -47,7 +47,7 @@
 				max_size: Number(form.max_size),
 			};
 			const ng = await api.patch<K3sNodegroup>(
-				`/api/k3s/clusters/${clusterId}/nodegroups/${nodegroup.id}`,
+				`/api/v1/k3s/clusters/${clusterId}/nodegroups/${nodegroup.id}`,
 				body,
 				token,
 				projectId,

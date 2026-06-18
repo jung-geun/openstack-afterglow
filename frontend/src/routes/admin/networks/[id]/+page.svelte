@@ -35,7 +35,7 @@
 		loading = true;
 		error = '';
 		try {
-			network = await api.get<NetworkDetail>(`/api/admin/networks/${id}`, token, projectId);
+			network = await api.get<NetworkDetail>(`/api/v1/admin/networks/${id}`, token, projectId);
 		} catch (e) {
 			error = e instanceof ApiError ? `조회 실패 (${e.status}): ${e.message}` : '서버 오류';
 		} finally {
@@ -48,7 +48,7 @@
 		if (!await confirmDialog(`네트워크 "${network.name || network.id}"를 삭제하시겠습니까?`)) return;
 		deleting = true;
 		try {
-			await api.delete(`/api/admin/networks/${network.id}`, token, projectId);
+			await api.delete(`/api/v1/admin/networks/${network.id}`, token, projectId);
 			goto('/admin/networks');
 		} catch (e) {
 			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));
@@ -63,7 +63,7 @@
 		subnetError = '';
 		try {
 			await api.post(
-				`/api/networks/${network.id}/subnets`,
+				`/api/v1/networks/${network.id}/subnets`,
 				{
 					name: form.name || `${network.name}-subnet`,
 					cidr: form.cidr,
@@ -87,7 +87,7 @@
 		editSubnetError = '';
 		try {
 			await api.put(
-				`/api/networks/subnets/${subnetId}`,
+				`/api/v1/networks/subnets/${subnetId}`,
 				{
 					name: form.name || null,
 					gateway_ip: form.gateway || null,
@@ -109,7 +109,7 @@
 		if (!await confirmDialog(`서브넷 "${subnetName || subnetId.slice(0, 8)}"를 삭제하시겠습니까?`)) return;
 		deletingSubnetId = subnetId;
 		try {
-			await api.delete(`/api/networks/subnets/${subnetId}`, token, projectId);
+			await api.delete(`/api/v1/networks/subnets/${subnetId}`, token, projectId);
 			await fetchNetwork(network!.id);
 		} catch (e) {
 			toast.error('서브넷 삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));

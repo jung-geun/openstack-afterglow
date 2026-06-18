@@ -25,7 +25,7 @@
 
   async function fetchNetworks(opts?: { refresh?: boolean }) {
     try {
-      networks = await api.get<ShareNetwork[]>('/api/share-networks', token, projectId, opts);
+      networks = await api.get<ShareNetwork[]>('/api/v1/share-networks', token, projectId, opts);
       error = '';
     } catch (e) {
       error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
@@ -37,7 +37,7 @@
   async function createNetwork(form: { name: string; description: string; neutron_net_id: string; neutron_subnet_id: string }): Promise<boolean> {
     creating = true;
     try {
-      await api.post('/api/share-networks', form, token, projectId);
+      await api.post('/api/v1/share-networks', form, token, projectId);
       await fetchNetworks();
       return true;
     } finally {
@@ -49,7 +49,7 @@
     if (!await confirmDialog(`Share 네트워크 "${name || id.slice(0, 8)}"을 삭제하시겠습니까?\n이 네트워크를 사용 중인 파일 스토리지가 있으면 삭제할 수 없습니다.`)) return;
     deleting = id;
     try {
-      await api.delete(`/api/share-networks/${id}`, token, projectId);
+      await api.delete(`/api/v1/share-networks/${id}`, token, projectId);
       await fetchNetworks();
     } catch (e) {
       toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));

@@ -77,7 +77,7 @@ async def test_topology_filters_other_project_instances(client, mock_conn):
         fake.get = MagicMock(return_value=None)
         fake.setex = MagicMock(return_value=None)
         with patch.object(cache_mod, "_get_client", return_value=fake):
-            resp = await client.get("/api/networks/topology")
+            resp = await client.get("/api/v1/networks/topology")
     finally:
         _stop(patches)
 
@@ -129,7 +129,7 @@ async def test_topology_includes_external_networks(client, mock_conn):
         fake.get = MagicMock(return_value=None)
         fake.setex = MagicMock(return_value=None)
         with patch.object(cache_mod, "_get_client", return_value=fake):
-            resp = await client.get("/api/networks/topology")
+            resp = await client.get("/api/v1/networks/topology")
     finally:
         _stop(patches)
 
@@ -165,7 +165,7 @@ async def test_topology_includes_shared_networks(client, mock_conn):
         fake.get = MagicMock(return_value=None)
         fake.setex = MagicMock(return_value=None)
         with patch.object(cache_mod, "_get_client", return_value=fake):
-            resp = await client.get("/api/networks/topology")
+            resp = await client.get("/api/v1/networks/topology")
     finally:
         _stop(patches)
 
@@ -203,7 +203,7 @@ async def test_topology_filters_other_project_routers(client, mock_conn):
         fake.get = MagicMock(return_value=None)
         fake.setex = MagicMock(return_value=None)
         with patch.object(cache_mod, "_get_client", return_value=fake):
-            resp = await client.get("/api/networks/topology")
+            resp = await client.get("/api/v1/networks/topology")
     finally:
         _stop(patches)
 
@@ -237,7 +237,7 @@ async def test_topology_empty_project_returns_empty(client, mock_conn):
         fake.get = MagicMock(return_value=None)
         fake.setex = MagicMock(return_value=None)
         with patch.object(cache_mod, "_get_client", return_value=fake):
-            resp = await client.get("/api/networks/topology")
+            resp = await client.get("/api/v1/networks/topology")
     finally:
         _stop(patches)
 

@@ -134,7 +134,7 @@ async def test_ca_certificate_download_content_type(client, _fake_kc):
         patch("app.api.k3s.certificates.k3s_db.get_cluster", new=AsyncMock(return_value=cluster_rec)),
         patch("app.api.k3s.certificates.k3s_db.get_kubeconfig", new=AsyncMock(return_value=_fake_kc)),
     ):
-        resp = await client.get("/api/k3s/clusters/c1/ca-certificate")
+        resp = await client.get("/api/v1/k3s/clusters/c1/ca-certificate")
     assert resp.status_code == 200
     assert "application/x-pem-file" in resp.headers["content-type"]
 
@@ -146,7 +146,7 @@ async def test_ca_certificate_download_pem_body(client, _fake_kc):
         patch("app.api.k3s.certificates.k3s_db.get_cluster", new=AsyncMock(return_value=cluster_rec)),
         patch("app.api.k3s.certificates.k3s_db.get_kubeconfig", new=AsyncMock(return_value=_fake_kc)),
     ):
-        resp = await client.get("/api/k3s/clusters/c1/ca-certificate")
+        resp = await client.get("/api/v1/k3s/clusters/c1/ca-certificate")
     body = resp.text
     assert body.startswith("-----BEGIN CERTIFICATE-----")
 
@@ -158,14 +158,14 @@ async def test_ca_certificate_download_filename_header(client, _fake_kc):
         patch("app.api.k3s.certificates.k3s_db.get_cluster", new=AsyncMock(return_value=cluster_rec)),
         patch("app.api.k3s.certificates.k3s_db.get_kubeconfig", new=AsyncMock(return_value=_fake_kc)),
     ):
-        resp = await client.get("/api/k3s/clusters/c1/ca-certificate")
+        resp = await client.get("/api/v1/k3s/clusters/c1/ca-certificate")
     assert "ca-mycluster.pem" in resp.headers.get("content-disposition", "")
 
 
 @pytest.mark.asyncio
 async def test_ca_certificate_cluster_not_found(client):
     with patch("app.api.k3s.certificates.k3s_db.get_cluster", new=AsyncMock(return_value=None)):
-        resp = await client.get("/api/k3s/clusters/nonexistent/ca-certificate")
+        resp = await client.get("/api/v1/k3s/clusters/nonexistent/ca-certificate")
     assert resp.status_code == 404
 
 
@@ -176,7 +176,7 @@ async def test_ca_certificate_no_kubeconfig(client):
         patch("app.api.k3s.certificates.k3s_db.get_cluster", new=AsyncMock(return_value=cluster_rec)),
         patch("app.api.k3s.certificates.k3s_db.get_kubeconfig", new=AsyncMock(return_value=None)),
     ):
-        resp = await client.get("/api/k3s/clusters/c1/ca-certificate")
+        resp = await client.get("/api/v1/k3s/clusters/c1/ca-certificate")
     assert resp.status_code == 404
 
 
@@ -192,7 +192,7 @@ async def test_certificate_expiry_structure(client, _fake_kc):
         patch("app.api.k3s.certificates.k3s_db.get_kubeconfig", new=AsyncMock(return_value=_fake_kc)),
         patch("app.api.k3s.certificates.cached_call", new=AsyncMock(side_effect=_cached)),
     ):
-        resp = await client.get("/api/k3s/clusters/c1/certificate-expiry")
+        resp = await client.get("/api/v1/k3s/clusters/c1/certificate-expiry")
     assert resp.status_code == 200
     data = resp.json()
     assert "ca" in data
@@ -209,7 +209,7 @@ async def test_certificate_expiry_unauthenticated():
     from app.main import app
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/k3s/clusters/c1/certificate-expiry")
+        resp = await ac.get("/api/v1/k3s/clusters/c1/certificate-expiry")
     assert resp.status_code == 401
 
 
@@ -217,5 +217,5 @@ async def test_certificate_expiry_unauthenticated():
 async def test_certificate_expiry_different_project_404(client):
     """다른 project_id의 cluster_id → 404."""
     with patch("app.api.k3s.certificates.k3s_db.get_cluster", new=AsyncMock(return_value=None)):
-        resp = await client.get("/api/k3s/clusters/other-project-cluster/certificate-expiry")
+        resp = await client.get("/api/v1/k3s/clusters/other-project-cluster/certificate-expiry")
     assert resp.status_code == 404

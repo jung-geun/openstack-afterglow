@@ -33,7 +33,7 @@
 
   async function fetchServices(opts?: { refresh?: boolean }) {
     try {
-      services = await api.get<SecurityService[]>('/api/security-services', token, projectId, opts);
+      services = await api.get<SecurityService[]>('/api/v1/security-services', token, projectId, opts);
       error = '';
     } catch (e) {
       error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
@@ -48,7 +48,7 @@
     if (!form.name.trim()) return false;
     creating = true; createError = '';
     try {
-      await api.post('/api/security-services', { ...form }, token, projectId);
+      await api.post('/api/v1/security-services', { ...form }, token, projectId);
       await fetchServices();
       return true;
     } catch (e) {
@@ -60,7 +60,7 @@
   async function openAttachModal(serviceId: string) {
     selectedServiceId = serviceId; selectedNetworkId = ''; attachError = '';
     showAttachModal = true;
-    try { shareNetworks = await api.get<ShareNetwork[]>('/api/share-networks', token, projectId); }
+    try { shareNetworks = await api.get<ShareNetwork[]>('/api/v1/share-networks', token, projectId); }
     catch { shareNetworks = []; }
   }
 
@@ -68,7 +68,7 @@
     if (!selectedNetworkId) return false;
     attaching = true; attachError = '';
     try {
-      await api.post(`/api/security-services/${selectedServiceId}/attach?share_network_id=${selectedNetworkId}`, {}, token, projectId);
+      await api.post(`/api/v1/security-services/${selectedServiceId}/attach?share_network_id=${selectedNetworkId}`, {}, token, projectId);
       toast.success('Share Network에 Security Service가 연결되었습니다.');
       return true;
     } catch (e) {
@@ -80,7 +80,7 @@
   async function deleteService(id: string, name: string) {
     if (!await confirmDialog(`Security Service "${name}"을 삭제하시겠습니까?`)) return;
     deleting = id;
-    try { await api.delete(`/api/security-services/${id}`, token, projectId); await fetchServices(); }
+    try { await api.delete(`/api/v1/security-services/${id}`, token, projectId); await fetchServices(); }
     catch (e) { toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e))); }
     finally { deleting = null; }
   }

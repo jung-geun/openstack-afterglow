@@ -54,26 +54,26 @@ _COMMON_PATCHES = [
 @pytest.mark.asyncio
 async def test_admin_create_instance_non_admin_returns_403(client):
     """admin 권한 없는 사용자는 403."""
-    resp = await client.post("/api/admin/instances/async", json=_BASE_PAYLOAD)
+    resp = await client.post("/api/v1/admin/instances/async", json=_BASE_PAYLOAD)
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_admin_list_networks_non_admin_returns_403(client):
     """admin 권한 없는 사용자는 403."""
-    resp = await client.get("/api/admin/instances/networks-for-project?project_id=p1")
+    resp = await client.get("/api/v1/admin/instances/networks-for-project?project_id=p1")
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_admin_list_security_groups_non_admin_returns_403(client):
-    resp = await client.get("/api/admin/instances/security-groups-for-project?project_id=p1")
+    resp = await client.get("/api/v1/admin/instances/security-groups-for-project?project_id=p1")
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_admin_list_volumes_non_admin_returns_403(client):
-    resp = await client.get("/api/admin/instances/volumes-for-project?project_id=p1")
+    resp = await client.get("/api/v1/admin/instances/volumes-for-project?project_id=p1")
     assert resp.status_code == 403
 
 
@@ -86,7 +86,7 @@ async def test_admin_list_volumes_non_admin_returns_403(client):
 async def test_admin_create_instance_missing_project_id_returns_422(admin_client):
     """project_id 누락 시 422."""
     payload = {k: v for k, v in _BASE_PAYLOAD.items() if k != "project_id"}
-    resp = await admin_client.post("/api/admin/instances/async", json=payload)
+    resp = await admin_client.post("/api/v1/admin/instances/async", json=payload)
     assert resp.status_code == 422
 
 
@@ -94,14 +94,14 @@ async def test_admin_create_instance_missing_project_id_returns_422(admin_client
 async def test_admin_create_instance_missing_boot_source_returns_422(admin_client):
     """image_id와 boot_volume_id 모두 없으면 422."""
     payload = {"name": "vm", "flavor_id": "flavor-1", "project_id": "proj-1"}
-    resp = await admin_client.post("/api/admin/instances/async", json=payload)
+    resp = await admin_client.post("/api/v1/admin/instances/async", json=payload)
     assert resp.status_code == 422
 
 
 @pytest.mark.asyncio
 async def test_admin_list_networks_missing_project_id_returns_422(admin_client):
     """project_id 쿼리 파라미터 누락 시 422."""
-    resp = await admin_client.get("/api/admin/instances/networks-for-project")
+    resp = await admin_client.get("/api/v1/admin/instances/networks-for-project")
     assert resp.status_code == 422
 
 
@@ -121,7 +121,7 @@ async def test_admin_list_networks_calls_admin_conn(admin_client):
         ) as mock_get_conn,
         patch("app.api.identity.admin_instances.neutron.list_networks", return_value=[]),
     ):
-        resp = await admin_client.get("/api/admin/instances/networks-for-project?project_id=target-project-abc")
+        resp = await admin_client.get("/api/v1/admin/instances/networks-for-project?project_id=target-project-abc")
     assert resp.status_code == 200
     mock_get_conn.assert_called_once_with("target-project-abc")
 
@@ -139,7 +139,7 @@ async def test_admin_list_security_groups_returns_list(admin_client):
             return_value=[{"id": "sg-1", "name": "default"}],
         ),
     ):
-        resp = await admin_client.get("/api/admin/instances/security-groups-for-project?project_id=proj-1")
+        resp = await admin_client.get("/api/v1/admin/instances/security-groups-for-project?project_id=proj-1")
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
 
@@ -171,7 +171,7 @@ async def test_admin_create_instance_calls_admin_conn(admin_client):
         patch("app.api.identity.admin_instances.neutron.list_networks", return_value=[]),
         patch("app.api.compute.instances._prepare_dynamic_file_storage", return_value={}),
     ):
-        resp = await admin_client.post("/api/admin/instances/async", json=_BASE_PAYLOAD)
+        resp = await admin_client.post("/api/v1/admin/instances/async", json=_BASE_PAYLOAD)
 
     assert resp.status_code == 200
     mock_get_conn.assert_called_once_with("target-project-abc")
@@ -202,7 +202,7 @@ async def test_admin_create_instance_from_image_sse(admin_client):
         patch("app.api.compute.instances._prepare_dynamic_file_storage", return_value={}),
     ):
         resp = await admin_client.post(
-            "/api/admin/instances/async",
+            "/api/v1/admin/instances/async",
             json={"name": "vm-img", "image_id": "img-1", "flavor_id": "f1", "project_id": "proj-x"},
         )
 
@@ -231,7 +231,7 @@ async def test_admin_create_instance_boot_from_volume(admin_client):
         patch("app.api.compute.instances._prepare_dynamic_file_storage", return_value={}),
     ):
         resp = await admin_client.post(
-            "/api/admin/instances/async",
+            "/api/v1/admin/instances/async",
             json={
                 "name": "vm-vol",
                 "boot_volume_id": "vol-boot-1",
@@ -272,7 +272,7 @@ async def test_admin_create_instance_no_keypair_allowed(admin_client):
         patch("app.api.compute.instances._prepare_dynamic_file_storage", return_value={}),
     ):
         resp = await admin_client.post(
-            "/api/admin/instances/async",
+            "/api/v1/admin/instances/async",
             json={"name": "vm-nokey", "image_id": "img-1", "flavor_id": "f1", "project_id": "proj-z"},
         )
 

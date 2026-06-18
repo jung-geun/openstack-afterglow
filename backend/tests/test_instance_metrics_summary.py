@@ -64,7 +64,7 @@ async def test_summary_returns_stats(client):
             new=AsyncMock(return_value=_instant(5.0)),
         ),
     ):
-        resp = await client.get("/api/instances/inst-1/metrics-summary?range=7d")
+        resp = await client.get("/api/v1/instances/inst-1/metrics-summary?range=7d")
     assert resp.status_code == 200
     body = resp.json()
     assert body["prometheus_available"] is True
@@ -84,7 +84,7 @@ async def test_summary_cpu_low_triggers_recommendation(client):
             new=AsyncMock(return_value=_instant(5.0)),
         ),
     ):
-        resp = await client.get("/api/instances/inst-1/metrics-summary?range=7d")
+        resp = await client.get("/api/v1/instances/inst-1/metrics-summary?range=7d")
     body = resp.json()
     rec = body["recommendation"]
     assert rec is not None
@@ -113,7 +113,7 @@ async def test_summary_mem_low_triggers_recommendation(client):
         patch("app.api.compute.instance_metrics.nova.list_flavors", return_value=_DEFAULT_FLAVORS),
         patch("app.api.compute.instance_metrics.query_instant_multi", side_effect=_side),
     ):
-        resp = await client.get("/api/instances/inst-1/metrics-summary?range=7d")
+        resp = await client.get("/api/v1/instances/inst-1/metrics-summary?range=7d")
     body = resp.json()
     rec = body["recommendation"]
     assert rec is not None
@@ -132,7 +132,7 @@ async def test_summary_no_recommendation_when_both_normal(client):
             new=AsyncMock(return_value=_instant(50.0)),  # 50% — 높음
         ),
     ):
-        resp = await client.get("/api/instances/inst-1/metrics-summary?range=7d")
+        resp = await client.get("/api/v1/instances/inst-1/metrics-summary?range=7d")
     body = resp.json()
     rec = body["recommendation"]
     assert rec is not None
@@ -157,7 +157,7 @@ async def test_summary_suggested_flavor_excludes_disk_shrink(client):
             new=AsyncMock(return_value=_instant(5.0)),
         ),
     ):
-        resp = await client.get("/api/instances/inst-1/metrics-summary?range=7d")
+        resp = await client.get("/api/v1/instances/inst-1/metrics-summary?range=7d")
     body = resp.json()
     rec = body["recommendation"]
     assert rec["underutilized"] is True
@@ -189,7 +189,7 @@ async def test_summary_no_suggested_when_no_candidate(client):
             new=AsyncMock(return_value=_instant(5.0, "inst-small")),
         ),
     ):
-        resp = await client.get("/api/instances/inst-small/metrics-summary?range=7d")
+        resp = await client.get("/api/v1/instances/inst-small/metrics-summary?range=7d")
     body = resp.json()
     rec = body["recommendation"]
     assert rec["underutilized"] is True
@@ -206,7 +206,7 @@ async def test_summary_gpu_instance_no_recommendation(client):
             new=AsyncMock(return_value=_instant(1.0, "inst-gpu")),
         ),
     ):
-        resp = await client.get("/api/instances/inst-gpu/metrics-summary?range=7d")
+        resp = await client.get("/api/v1/instances/inst-gpu/metrics-summary?range=7d")
     body = resp.json()
     assert body["recommendation"] is None
 
@@ -220,7 +220,7 @@ async def test_summary_gpu_instance_no_recommendation(client):
 async def test_summary_unauthorized_other_project(client):
     """다른 프로젝트 인스턴스 → 403."""
     with patch("app.api.compute.instance_metrics.nova.get_server", return_value=_OTHER_INSTANCE):
-        resp = await client.get("/api/instances/inst-other/metrics-summary")
+        resp = await client.get("/api/v1/instances/inst-other/metrics-summary")
     assert resp.status_code == 403
 
 
@@ -235,7 +235,7 @@ async def test_summary_admin_can_access_any(admin_client):
             new=AsyncMock(return_value=_instant(50.0, "inst-other")),
         ),
     ):
-        resp = await admin_client.get("/api/instances/inst-other/metrics-summary")
+        resp = await admin_client.get("/api/v1/instances/inst-other/metrics-summary")
     assert resp.status_code == 200
 
 
@@ -243,7 +243,7 @@ async def test_summary_admin_can_access_any(admin_client):
 async def test_summary_instance_not_found(client):
     """인스턴스 없음 → 404."""
     with patch("app.api.compute.instance_metrics.nova.get_server", side_effect=Exception("not found")):
-        resp = await client.get("/api/instances/bad-id/metrics-summary")
+        resp = await client.get("/api/v1/instances/bad-id/metrics-summary")
     assert resp.status_code == 404
 
 
@@ -264,7 +264,7 @@ async def test_summary_prom_unavailable_returns_200(client):
             new=AsyncMock(side_effect=PromUnavailable("down")),
         ),
     ):
-        resp = await client.get("/api/instances/inst-1/metrics-summary")
+        resp = await client.get("/api/v1/instances/inst-1/metrics-summary")
     assert resp.status_code == 200
     body = resp.json()
     assert body["prometheus_available"] is False
@@ -295,7 +295,7 @@ async def test_summary_libvirt_fallback(client):
         patch("app.api.compute.instance_metrics.nova.list_flavors", return_value=_DEFAULT_FLAVORS),
         patch("app.api.compute.instance_metrics.query_instant_multi", side_effect=_side),
     ):
-        resp = await client.get("/api/instances/inst-1/metrics-summary")
+        resp = await client.get("/api/v1/instances/inst-1/metrics-summary")
     assert resp.status_code == 200
     # libvirt 폴백으로 값이 채워졌으면 libvirt 식이 호출됐어야 함
     libvirt_calls = [p for p in call_order if "libvirt" in p]
@@ -325,7 +325,7 @@ async def test_batch_returns_per_instance_data(client):
         return []  # libvirt 폴백 — 이미 node 결과 있으므로 merge 안 됨
 
     with patch("app.api.compute.instance_metrics.query_instant_multi", side_effect=_side):
-        resp = await client.get("/api/instances/metrics-summary-batch")
+        resp = await client.get("/api/v1/instances/metrics-summary-batch")
     assert resp.status_code == 200
     body = resp.json()
     assert body["prometheus_available"] is True
@@ -355,7 +355,7 @@ async def test_batch_invalid_project_id_returns_empty(client):
             "app.api.compute.instance_metrics.query_instant_multi",
             new=AsyncMock(return_value=[]),
         ) as mock_q:
-            resp = await client.get("/api/instances/metrics-summary-batch")
+            resp = await client.get("/api/v1/instances/metrics-summary-batch")
         assert resp.status_code == 200
         assert resp.json()["instances"] == {}
         mock_q.assert_not_called()
@@ -372,7 +372,7 @@ async def test_batch_prom_unavailable_returns_200(client):
         "app.api.compute.instance_metrics.query_instant_multi",
         new=AsyncMock(side_effect=PromUnavailable("down")),
     ):
-        resp = await client.get("/api/instances/metrics-summary-batch")
+        resp = await client.get("/api/v1/instances/metrics-summary-batch")
     assert resp.status_code == 200
     body = resp.json()
     assert body["prometheus_available"] is False

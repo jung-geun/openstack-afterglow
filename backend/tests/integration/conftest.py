@@ -232,7 +232,7 @@ async def project_b_auth_data(project_b_credentials_fx):
         transport=ASGITransport(app=app),
         base_url="http://test",
     ) as ac:
-        resp = await ac.post("/api/auth/login", json=project_b_credentials_fx)
+        resp = await ac.post("/api/v1/auth/login", json=project_b_credentials_fx)
         assert resp.status_code == 200, f"project_b 로그인 실패: {resp.text}"
         return resp.json()
 
@@ -270,7 +270,7 @@ async def admin_auth_data(admin_credentials_fx):
         transport=ASGITransport(app=app),
         base_url="http://test",
     ) as ac:
-        resp = await ac.post("/api/auth/login", json=admin_credentials_fx)
+        resp = await ac.post("/api/v1/auth/login", json=admin_credentials_fx)
         assert resp.status_code == 200, f"admin 로그인 실패: {resp.text}"
         return resp.json()
 
@@ -282,7 +282,7 @@ async def admin_user_auth_data(admin_user_credentials_fx):
         transport=ASGITransport(app=app),
         base_url="http://test",
     ) as ac:
-        resp = await ac.post("/api/auth/login", json=admin_user_credentials_fx)
+        resp = await ac.post("/api/v1/auth/login", json=admin_user_credentials_fx)
         assert resp.status_code == 200, f"admin_user 로그인 실패: {resp.text}"
         return resp.json()
 
@@ -294,7 +294,7 @@ async def user_auth_data(user_credentials_fx):
         transport=ASGITransport(app=app),
         base_url="http://test",
     ) as ac:
-        resp = await ac.post("/api/auth/login", json=user_credentials_fx)
+        resp = await ac.post("/api/v1/auth/login", json=user_credentials_fx)
         assert resp.status_code == 200, f"일반 유저 로그인 실패: {resp.text}"
         return resp.json()
 

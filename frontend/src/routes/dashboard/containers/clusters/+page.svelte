@@ -23,7 +23,7 @@
 
   async function fetchClusters() {
     try {
-      clusters = await api.get<Cluster[]>('/api/clusters', $auth.token ?? undefined, $auth.projectId ?? undefined);
+      clusters = await api.get<Cluster[]>('/api/v1/clusters', $auth.token ?? undefined, $auth.projectId ?? undefined);
       error = '';
       serviceUnavailable = false;
     } catch (e) {
@@ -40,7 +40,7 @@
 
   async function fetchTemplates() {
     try {
-      templates = await api.get<ClusterTemplate[]>('/api/clusters/templates', $auth.token ?? undefined, $auth.projectId ?? undefined);
+      templates = await api.get<ClusterTemplate[]>('/api/v1/clusters/templates', $auth.token ?? undefined, $auth.projectId ?? undefined);
     } catch {
       templates = [];
     }
@@ -55,7 +55,7 @@
         master_count: form.master_count,
       };
       if (form.keypair.trim()) body.keypair = form.keypair;
-      await api.post('/api/clusters', body, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      await api.post('/api/v1/clusters', body, $auth.token ?? undefined, $auth.projectId ?? undefined);
       await fetchClusters();
       return true;
     } catch (e) {
@@ -67,7 +67,7 @@
     if (!await confirmDialog(`클러스터 "${name}"을 삭제하시겠습니까?`)) return;
     deleting = id;
     try {
-      await apiMut('K8s 클러스터 삭제', () => api.delete(`/api/clusters/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined));
+      await apiMut('K8s 클러스터 삭제', () => api.delete(`/api/v1/clusters/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined));
       await fetchClusters();
     } catch {
       // error toast shown by apiMut

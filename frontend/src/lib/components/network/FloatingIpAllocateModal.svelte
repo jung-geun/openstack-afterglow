@@ -46,7 +46,7 @@
 		allocError = '';
 		try {
 			await api.post(
-				'/api/networks/floating-ips',
+				'/api/v1/networks/floating-ips',
 				{ floating_network_id: selectedNetworkId },
 				token,
 				projectId

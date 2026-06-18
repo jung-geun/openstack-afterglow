@@ -29,7 +29,7 @@
 
 	async function fetchSecurityGroups(opts?: { refresh?: boolean }) {
 		try {
-			securityGroups = await api.get<SecurityGroup[]>('/api/security-groups', $auth.token ?? undefined, $auth.projectId ?? undefined, opts);
+			securityGroups = await api.get<SecurityGroup[]>('/api/v1/security-groups', $auth.token ?? undefined, $auth.projectId ?? undefined, opts);
 			sgError = '';
 			if (!selectedSg && securityGroups.length > 0) {
 				selectedSg = securityGroups[0].name;
@@ -62,7 +62,7 @@
 		sgCreating = true;
 		sgCreateError = '';
 		try {
-			await api.post('/api/security-groups', form, $auth.token ?? undefined, $auth.projectId ?? undefined);
+			await api.post('/api/v1/security-groups', form, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			showSgModal = false;
 			await fetchSecurityGroups();
 			return true;
@@ -77,7 +77,7 @@
 	async function deleteSecurityGroup(sgId: string, name: string) {
 		if (!await confirmDialog(`"${name}" 보안 그룹을 삭제하시겠습니까?`)) return;
 		try {
-			await api.delete(`/api/security-groups/${sgId}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+			await api.delete(`/api/v1/security-groups/${sgId}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			if (selectedSg === name) selectedSg = null;
 			await fetchSecurityGroups();
 		} catch (e) {
@@ -98,7 +98,7 @@
 			if (ruleForm.port_range_max) body.port_range_max = parseInt(ruleForm.port_range_max);
 			if (body.port_range_min != null && body.port_range_max == null) body.port_range_max = body.port_range_min;
 			if (ruleForm.remote_ip_prefix) body.remote_ip_prefix = ruleForm.remote_ip_prefix;
-			await api.post(`/api/security-groups/${sgId}/rules`, body, $auth.token ?? undefined, $auth.projectId ?? undefined);
+			await api.post(`/api/v1/security-groups/${sgId}/rules`, body, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			addRuleOpen = false;
 			ruleForm = { direction: 'ingress', protocol: '', port_range_min: '', port_range_max: '', remote_ip_prefix: '', ethertype: 'IPv4' };
 			await fetchSecurityGroups();
@@ -111,7 +111,7 @@
 
 	async function deleteSgRule(sgId: string, ruleId: string) {
 		try {
-			await api.delete(`/api/security-groups/${sgId}/rules/${ruleId}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+			await api.delete(`/api/v1/security-groups/${sgId}/rules/${ruleId}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			await fetchSecurityGroups();
 		} catch (e) {
 			toast.error('규칙 삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));

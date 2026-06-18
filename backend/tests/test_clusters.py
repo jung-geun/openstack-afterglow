@@ -48,7 +48,7 @@ def _make_template():
 @pytest.mark.asyncio
 async def test_list_clusters_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/clusters")
+        resp = await ac.get("/api/v1/clusters")
     assert resp.status_code == 401
 
 
@@ -56,14 +56,14 @@ async def test_list_clusters_unauthenticated():
 async def test_list_clusters_success(client):
     with patch("app.api.container.clusters.asyncio") as mock_asyncio:
         mock_asyncio.wait_for = AsyncMock(return_value=[])
-        resp = await client.get("/api/clusters")
+        resp = await client.get("/api/v1/clusters")
     assert resp.status_code == 200
 
 
 @pytest.mark.asyncio
 async def test_list_templates_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/clusters/templates")
+        resp = await ac.get("/api/v1/clusters/templates")
     assert resp.status_code == 401
 
 
@@ -71,21 +71,21 @@ async def test_list_templates_unauthenticated():
 async def test_list_templates_success(client):
     with patch("app.api.container.clusters.asyncio") as mock_asyncio:
         mock_asyncio.wait_for = AsyncMock(return_value=[])
-        resp = await client.get("/api/clusters/templates")
+        resp = await client.get("/api/v1/clusters/templates")
     assert resp.status_code == 200
 
 
 @pytest.mark.asyncio
 async def test_get_cluster_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/clusters/cl-1")
+        resp = await ac.get("/api/v1/clusters/cl-1")
     assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
 async def test_get_cluster_success(client):
     with patch("app.api.container.clusters.magnum.get_cluster", return_value=_make_cluster()):
-        resp = await client.get("/api/clusters/cl-1")
+        resp = await client.get("/api/v1/clusters/cl-1")
     assert resp.status_code == 200
 
 
@@ -93,7 +93,7 @@ async def test_get_cluster_success(client):
 async def test_create_cluster_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.post(
-            "/api/clusters",
+            "/api/v1/clusters",
             json={
                 "name": "mycluster",
                 "cluster_template_id": "tmpl-1",
@@ -109,7 +109,7 @@ async def test_create_cluster_success(client):
     with patch("app.api.container.clusters.asyncio") as mock_asyncio:
         mock_asyncio.to_thread = AsyncMock(return_value=_make_cluster())
         resp = await client.post(
-            "/api/clusters",
+            "/api/v1/clusters",
             json={
                 "name": "mycluster",
                 "cluster_template_id": "tmpl-1",
@@ -123,7 +123,7 @@ async def test_create_cluster_success(client):
 @pytest.mark.asyncio
 async def test_delete_cluster_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.delete("/api/clusters/cl-1")
+        resp = await ac.delete("/api/v1/clusters/cl-1")
     assert resp.status_code == 401
 
 
@@ -131,14 +131,14 @@ async def test_delete_cluster_unauthenticated():
 async def test_delete_cluster_success(client):
     with patch("app.api.container.clusters.asyncio") as mock_asyncio:
         mock_asyncio.to_thread = AsyncMock(return_value=None)
-        resp = await client.delete("/api/clusters/cl-1")
+        resp = await client.delete("/api/v1/clusters/cl-1")
     assert resp.status_code == 204
 
 
 @pytest.mark.asyncio
 async def test_get_cluster_stack_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/clusters/cl-1/stack")
+        resp = await ac.get("/api/v1/clusters/cl-1/stack")
     assert resp.status_code == 401
 
 
@@ -148,5 +148,5 @@ async def test_get_cluster_stack_success(client):
     stack_detail = {"id": "stack-1", "name": "k8s-stack", "status": "CREATE_COMPLETE", "resources": []}
     with patch("app.api.container.clusters.asyncio") as mock_asyncio:
         mock_asyncio.to_thread = AsyncMock(side_effect=[cluster, stack_detail])
-        resp = await client.get("/api/clusters/cl-1/stack")
+        resp = await client.get("/api/v1/clusters/cl-1/stack")
     assert resp.status_code == 200

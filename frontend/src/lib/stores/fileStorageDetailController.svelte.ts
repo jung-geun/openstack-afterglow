@@ -42,7 +42,7 @@ function createFileStorageDetailController(opts: Options) {
 		error = '';
 		try {
 			fileStorage = await api.get<FileStorage>(
-				`/api/file-storage/${opts.fileStorageId()}`,
+				`/api/v1/file-storage/${opts.fileStorageId()}`,
 				opts.token(),
 				opts.projectId()
 			);
@@ -59,7 +59,7 @@ function createFileStorageDetailController(opts: Options) {
 		accessError = '';
 		try {
 			accessRules = await api.get<AccessRule[]>(
-				`/api/file-storage/${opts.fileStorageId()}/access-rules`,
+				`/api/v1/file-storage/${opts.fileStorageId()}/access-rules`,
 				opts.token(),
 				opts.projectId()
 			);
@@ -82,7 +82,7 @@ function createFileStorageDetailController(opts: Options) {
 		const access_type = fileStorage.share_proto === 'NFS' ? 'ip' : 'cephx';
 		try {
 			await api.post(
-				`/api/file-storage/${fileStorage.id}/access-rules`,
+				`/api/v1/file-storage/${fileStorage.id}/access-rules`,
 				{ access_to: ruleForm.access_to.trim(), access_level: ruleForm.access_level, access_type },
 				opts.token(),
 				opts.projectId()
@@ -103,7 +103,7 @@ function createFileStorageDetailController(opts: Options) {
 		revokingId = accessId;
 		try {
 			await api.delete(
-				`/api/file-storage/${fileStorage.id}/access-rules/${accessId}`,
+				`/api/v1/file-storage/${fileStorage.id}/access-rules/${accessId}`,
 				opts.token(),
 				opts.projectId()
 			);
@@ -132,7 +132,7 @@ function createFileStorageDetailController(opts: Options) {
 		if (!(await confirmDialog(`파일 스토리지 "${fileStorage.name || fileStorage.id}"를 삭제하시겠습니까?`))) return;
 		deleting = true;
 		try {
-			await api.delete(`/api/file-storage/${fileStorage.id}`, opts.token(), opts.projectId());
+			await api.delete(`/api/v1/file-storage/${fileStorage.id}`, opts.token(), opts.projectId());
 			opts.onDeleted?.();
 			opts.onClose?.();
 		} catch (e) {

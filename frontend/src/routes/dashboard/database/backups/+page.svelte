@@ -53,7 +53,7 @@
 
 	async function fetchBackups() {
 		try {
-			backups = await api.get<DbBackup[]>('/api/database-instances/backups', $auth.token ?? undefined, $auth.projectId ?? undefined);
+			backups = await api.get<DbBackup[]>('/api/v1/database-instances/backups', $auth.token ?? undefined, $auth.projectId ?? undefined);
 			error = '';
 		} catch (e) {
 			error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
@@ -64,18 +64,18 @@
 
 	async function fetchInstances() {
 		try {
-			instances = await api.get<DbInstance[]>('/api/database-instances', $auth.token ?? undefined, $auth.projectId ?? undefined);
+			instances = await api.get<DbInstance[]>('/api/v1/database-instances', $auth.token ?? undefined, $auth.projectId ?? undefined);
 		} catch { /* ignore */ }
 	}
 
 	async function fetchFlavors() {
 		try {
-			flavors = await api.get<DbFlavor[]>('/api/database-instances/flavors', $auth.token ?? undefined, $auth.projectId ?? undefined);
+			flavors = await api.get<DbFlavor[]>('/api/v1/database-instances/flavors', $auth.token ?? undefined, $auth.projectId ?? undefined);
 		} catch { /* ignore */ }
 	}
 
 	async function restoreBackup(backupId: string, name: string, flavorId: string, volumeSize: number) {
-		await api.post('/api/database-instances/restore', {
+		await api.post('/api/v1/database-instances/restore', {
 			backup_id: backupId, name, flavor_id: flavorId, volume_size: volumeSize,
 		}, $auth.token ?? undefined, $auth.projectId ?? undefined);
 		toast.success('복원 인스턴스 생성이 시작되었습니다.');
@@ -90,7 +90,7 @@
 		if (!await confirmDialog(baseMsg + stuckNote)) return;
 		deleting = id;
 		try {
-			await api.delete(`/api/database-instances/backups/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+			await api.delete(`/api/v1/database-instances/backups/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			await fetchBackups();
 		} catch (e) {
 			toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));

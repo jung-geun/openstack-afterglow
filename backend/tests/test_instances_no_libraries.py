@@ -94,7 +94,7 @@ async def test_sync_no_libraries_skips_manila_and_upper(client, mock_conn):
         patch("app.api.compute.instances.manila.create_file_storage") as mock_manila,
         patch("app.api.compute.instances.cinder.create_empty_volume") as mock_upper,
     ):
-        resp = await client.post("/api/instances", json=PAYLOAD)
+        resp = await client.post("/api/v1/instances", json=PAYLOAD)
 
     assert resp.status_code == 201, resp.text
     mock_manila.assert_not_called()
@@ -139,7 +139,7 @@ async def test_sse_no_libraries_skips_manila_and_upper(client, mock_conn):
         patch("app.api.compute.instances.manila.create_file_storage") as mock_manila,
         patch("app.api.compute.instances.cinder.create_empty_volume") as mock_upper,
     ):
-        resp = await client.post("/api/instances/async", json=PAYLOAD)
+        resp = await client.post("/api/v1/instances/async", json=PAYLOAD)
 
     assert resp.status_code == 200, resp.text
     assert "text/event-stream" in resp.headers.get("content-type", "")

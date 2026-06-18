@@ -31,7 +31,7 @@
 		if (images.length === 0) loading = true; else refreshing = true;
 		error = '';
 		try {
-			let url = `/api/admin/images?limit=${pageSize}`;
+			let url = `/api/v1/admin/images?limit=${pageSize}`;
 			if (marker) url += `&marker=${marker}`;
 			if (searchFilter) url += `&search=${encodeURIComponent(searchFilter)}`;
 			if (visibilityFilter) url += `&visibility=${encodeURIComponent(visibilityFilter)}`;
@@ -52,7 +52,7 @@
 		if (!editTarget) return;
 		editing = true; editError = '';
 		try {
-			await api.patch(`/api/admin/images/${editTarget.id}`, {
+			await api.patch(`/api/v1/admin/images/${editTarget.id}`, {
 				name: editForm.name || undefined, os_distro: editForm.os_distro || undefined, visibility: editForm.visibility || undefined,
 			}, token, projectId);
 			editTarget = null; await load(curMarker);
@@ -62,14 +62,14 @@
 
 	async function deleteImage(img: AdminImage) {
 		if (!await confirmDialog(`이미지 "${img.name}"을 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) return;
-		try { await api.delete(`/api/admin/images/${img.id}`, token, projectId); await load(curMarker); }
+		try { await api.delete(`/api/v1/admin/images/${img.id}`, token, projectId); await load(curMarker); }
 		catch (e) { toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e))); }
 	}
 
 	async function toggleActivation(img: AdminImage) {
 		togglingId = img.id;
 		try {
-			await api.post(`/api/admin/images/${img.id}/${img.status === 'active' ? 'deactivate' : 'reactivate'}`, {}, token, projectId);
+			await api.post(`/api/v1/admin/images/${img.id}/${img.status === 'active' ? 'deactivate' : 'reactivate'}`, {}, token, projectId);
 			await load(curMarker);
 		} catch (e) { toast.error('상태 변경 실패: ' + (e instanceof ApiError ? e.message : String(e))); }
 		finally { togglingId = null; }

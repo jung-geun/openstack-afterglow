@@ -1,4 +1,5 @@
 #!/bin/bash
+# 주의: /api/ 경로는 레거시 유지 - cloud-init baked VM 호환 (dual-mount 보장)
 # envmgr-rotate-key.sh — CephX 키 주기적 회전 스크립트
 # systemd union-rotate-key.timer ({{ union_cephx_rotate_hours }}h)가 실행한다.
 #

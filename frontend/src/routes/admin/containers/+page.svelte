@@ -34,7 +34,7 @@
 		if (containers.length === 0) loading = true;
 		else refreshing = true;
 		try {
-			containers = await api.get<AdminContainer[]>('/api/admin/all-containers', token, projectId);
+			containers = await api.get<AdminContainer[]>('/api/v1/admin/all-containers', token, projectId);
 		} catch {
 			containers = [];
 		} finally {

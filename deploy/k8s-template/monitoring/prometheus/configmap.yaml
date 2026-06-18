@@ -12,14 +12,14 @@ data:
       - job_name: 'afterglow-api'
         static_configs:
           - targets: ['backend:8000']
-        metrics_path: '/api/metrics'
+        metrics_path: '/api/v1/metrics'
 
       # VM node_exporter (port 9100) — http_sd로 타깃 자동 갱신
       - job_name: 'instances-node'
         scrape_interval: 30s
         metrics_path: /metrics
         http_sd_configs:
-          - url: 'http://backend:8000/api/sd/prometheus/targets'
+          - url: 'http://backend:8000/api/v1/sd/prometheus/targets'
             authorization:
               type: Bearer
               credentials_file: /etc/prometheus/sd-token
@@ -38,7 +38,7 @@ data:
         scrape_interval: 30s
         metrics_path: /metrics
         http_sd_configs:
-          - url: 'http://backend:8000/api/sd/prometheus/targets'
+          - url: 'http://backend:8000/api/v1/sd/prometheus/targets'
             authorization:
               type: Bearer
               credentials_file: /etc/prometheus/sd-token

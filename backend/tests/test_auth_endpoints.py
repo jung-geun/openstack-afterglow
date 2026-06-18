@@ -38,7 +38,7 @@ async def test_login_success(client):
         patch("app.api.identity.auth.keystone.get_openstack_connection", return_value=mock_conn),
     ):
         resp = await client.post(
-            "/api/auth/login",
+            "/api/v1/auth/login",
             json={
                 "username": "testuser",
                 "password": "password123",
@@ -56,7 +56,7 @@ async def test_login_success(client):
 async def test_login_failure(client):
     with patch("app.api.identity.auth.keystone.authenticate", side_effect=Exception("auth failed")):
         resp = await client.post(
-            "/api/auth/login",
+            "/api/v1/auth/login",
             json={
                 "username": "testuser",
                 "password": "wrongpassword",
@@ -72,7 +72,7 @@ async def test_login_failure(client):
 
 @pytest.mark.asyncio
 async def test_me(client):
-    resp = await client.get("/api/auth/me")
+    resp = await client.get("/api/v1/auth/me")
     assert resp.status_code == 200
     data = resp.json()
     assert data["user_id"] == "test-user-123"
@@ -99,7 +99,7 @@ async def test_scope_project(client):
         patch("app.api.identity.auth.record_project_access", new_callable=AsyncMock),
     ):
         resp = await client.post(
-            "/api/auth/token/project",
+            "/api/v1/auth/token/project",
             json={"project_id": "other-project-456"},
         )
     assert resp.status_code == 200
@@ -116,7 +116,7 @@ async def test_scope_project_no_access(client):
         side_effect=Exception("forbidden"),
     ):
         resp = await client.post(
-            "/api/auth/token/project",
+            "/api/v1/auth/token/project",
             json={"project_id": "forbidden-project"},
         )
     assert resp.status_code == 403
@@ -126,12 +126,10 @@ async def test_scope_project_no_access(client):
 async def test_scope_project_old_route_gone(client):
     """구 /switch-project 경로는 더 이상 처리되지 않아야 한다 (404 또는 405)."""
     resp = await client.post(
-        "/api/auth/switch-project",
+        "/api/v1/auth/switch-project",
         json={"project_id": "any-project"},
     )
-    assert resp.status_code in (404, 405), (
-        f"구 /switch-project가 예상치 못한 {resp.status_code}를 반환했습니다"
-    )
+    assert resp.status_code in (404, 405), f"구 /switch-project가 예상치 못한 {resp.status_code}를 반환했습니다"
 
 
 # ────── logout ──────
@@ -146,7 +144,7 @@ async def test_logout(client):
         mock_r = AsyncMock()
         mock_r.delete = AsyncMock()
         mock_redis.return_value = mock_r
-        resp = await client.post("/api/auth/logout")
+        resp = await client.post("/api/v1/auth/logout")
     assert resp.status_code == 200
     assert "로그아웃" in resp.json()["message"]
 
@@ -161,7 +159,7 @@ async def test_logout_invalidates_token_cache(client):
             new_callable=AsyncMock,
         ) as mock_invalidate,
     ):
-        resp = await client.post("/api/auth/logout")
+        resp = await client.post("/api/v1/auth/logout")
     assert resp.status_code == 200
     # invalidate_token_cache 가 호출되어야 함 (token, project_id 인자)
     assert mock_invalidate.await_count == 1
@@ -185,7 +183,7 @@ def test_token_cache_ttl_is_short():
 async def test_list_projects(client):
     projects = [{"id": "proj-1", "name": "myproject", "description": "", "domain_id": "default", "enabled": True}]
     with patch("app.api.identity.auth.keystone.list_projects", return_value=projects):
-        resp = await client.get("/api/auth/projects")
+        resp = await client.get("/api/v1/auth/projects")
     assert resp.status_code == 200
     assert resp.json()[0]["id"] == "proj-1"
 
@@ -197,7 +195,7 @@ async def test_list_projects(client):
 async def test_list_my_groups_success(client):
     groups = [{"id": "grp-1", "name": "devteam", "description": "Dev Team", "domain_id": "default"}]
     with patch("app.api.identity.auth.keystone.list_user_groups", return_value=groups):
-        resp = await client.get("/api/auth/groups")
+        resp = await client.get("/api/v1/auth/groups")
     assert resp.status_code == 200
     assert resp.json()[0]["id"] == "grp-1"
     assert resp.json()[0]["name"] == "devteam"
@@ -206,7 +204,7 @@ async def test_list_my_groups_success(client):
 @pytest.mark.asyncio
 async def test_list_my_groups_forbidden(client):
     with patch("app.api.identity.auth.keystone.list_user_groups", side_effect=PermissionError("forbidden")):
-        resp = await client.get("/api/auth/groups")
+        resp = await client.get("/api/v1/auth/groups")
     assert resp.status_code == 200
     assert resp.json() == []
 
@@ -215,7 +213,7 @@ async def test_list_my_groups_forbidden(client):
 async def test_list_my_groups_unexpected_error_returns_empty(client):
     # service 내부에서 어떤 예외든 PermissionError 로 변환되므로 endpoint 는 [] 반환
     with patch("app.api.identity.auth.keystone.list_user_groups", side_effect=PermissionError("unexpected")):
-        resp = await client.get("/api/auth/groups")
+        resp = await client.get("/api/v1/auth/groups")
     assert resp.status_code == 200
     assert resp.json() == []
 
@@ -248,7 +246,7 @@ def test_list_user_groups_converts_exception_to_permission_error():
 
 @pytest.mark.asyncio
 async def test_gitlab_enabled(client):
-    resp = await client.get("/api/auth/gitlab/enabled")
+    resp = await client.get("/api/v1/auth/gitlab/enabled")
     assert resp.status_code == 200
     assert "enabled" in resp.json()
 
@@ -259,7 +257,7 @@ async def test_gitlab_enabled(client):
 @pytest.mark.asyncio
 async def test_me_returns_auth_method(client):
     """/me 응답에 auth_method 필드가 포함되어야 한다."""
-    resp = await client.get("/api/auth/me")
+    resp = await client.get("/api/v1/auth/me")
     assert resp.status_code == 200
     data = resp.json()
     assert "auth_method" in data
@@ -298,7 +296,7 @@ async def test_gitlab_callback_stores_federated_auth_method():
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             resp = await ac.post(
-                "/api/auth/gitlab/callback",
+                "/api/v1/auth/gitlab/callback",
                 json={"code": "auth-code", "state": "state-value"},
             )
 

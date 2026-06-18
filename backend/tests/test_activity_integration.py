@@ -22,7 +22,7 @@ async def test_volume_create_records_activity(client):
         patch("app.api.storage.volumes.invalidate", new=AsyncMock()),
         patch("app.api.common.activity_recorder.record", new=mock_record),
     ):
-        resp = await client.post("/api/volumes", json={"name": "my-vol", "size_gb": 10})
+        resp = await client.post("/api/v1/volumes", json={"name": "my-vol", "size_gb": 10})
 
     assert resp.status_code == 201
     mock_record.assert_called_once()
@@ -40,7 +40,7 @@ async def test_volume_create_failed_records_failed_status(client):
         patch("app.api.storage.volumes.cinder.create_empty_volume", side_effect=Exception("Cinder 오류")),
         patch("app.api.common.activity_recorder.record", new=mock_record),
     ):
-        resp = await client.post("/api/volumes", json={"name": "bad-vol", "size_gb": 10})
+        resp = await client.post("/api/v1/volumes", json={"name": "bad-vol", "size_gb": 10})
 
     assert resp.status_code == 500
     mock_record.assert_called_once()
@@ -56,7 +56,7 @@ async def test_admin_activity_endpoint_filters(admin_client):
     """GET /api/admin/projects/{id}/activity?resource_type=volume 가 list_for_project 에 resource_type='volume' 을 전달한다."""
     mock_fn = AsyncMock(return_value=[])
     with patch("app.api.identity.admin_activity.svc.list_for_project", new=mock_fn):
-        resp = await admin_client.get("/api/admin/projects/test-project/activity?resource_type=volume")
+        resp = await admin_client.get("/api/v1/admin/projects/test-project/activity?resource_type=volume")
 
     assert resp.status_code == 200
     mock_fn.assert_called_once()

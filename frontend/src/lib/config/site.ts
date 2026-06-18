@@ -52,7 +52,7 @@ export async function loadSiteConfig(): Promise<void> {
 		const apiBase = typeof window !== 'undefined'
 			? (env.PUBLIC_API_BASE || `${window.location.protocol}//${window.location.hostname}:8000`)
 			: (env.PUBLIC_API_BASE || 'http://backend:8000');
-		const res = await fetch(`${apiBase}/api/site-config`);
+		const res = await fetch(`${apiBase}/api/v1/site-config`);
 		if (res.ok) {
 			const data = await res.json();
 			siteConfig.set({ ...DEFAULTS, ...data });

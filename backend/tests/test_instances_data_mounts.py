@@ -108,7 +108,7 @@ async def test_attach_nfs_storage_success(client, mock_conn):
         patch("app.api.compute.instances.manila.ensure_nfs_access_rule", return_value={"access_id": "rule-1"}),
     ):
         resp = await client.post(
-            "/api/instances/inst-1/storage-attachments",
+            "/api/v1/instances/inst-1/storage-attachments",
             json={"file_storage_id": "share-1", "mount_point": "/mnt/mydata", "read_only": False},
         )
 
@@ -139,7 +139,7 @@ async def test_attach_cephfs_storage_success(client, mock_conn):
         ),
     ):
         resp = await client.post(
-            "/api/instances/inst-1/storage-attachments",
+            "/api/v1/instances/inst-1/storage-attachments",
             json={"file_storage_id": "share-1", "mount_point": "/data/ceph", "read_only": False},
         )
 
@@ -162,7 +162,7 @@ async def test_attach_storage_read_only_flag(client, mock_conn):
         patch("app.api.compute.instances.manila.ensure_nfs_access_rule", return_value={"access_id": "rule-ro"}),
     ):
         resp = await client.post(
-            "/api/instances/inst-1/storage-attachments",
+            "/api/v1/instances/inst-1/storage-attachments",
             json={"file_storage_id": "share-1", "mount_point": "/mnt/ro", "read_only": True},
         )
 
@@ -181,7 +181,7 @@ async def test_attach_storage_foreign_share_returns_403(client, mock_conn):
         patch("app.api.compute.instances.manila.get_file_storage", return_value=share),
     ):
         resp = await client.post(
-            "/api/instances/inst-1/storage-attachments",
+            "/api/v1/instances/inst-1/storage-attachments",
             json={"file_storage_id": "share-1", "mount_point": "/mnt/x", "read_only": False},
         )
 
@@ -199,7 +199,7 @@ async def test_attach_storage_unavailable_share_returns_409(client, mock_conn):
         patch("app.api.compute.instances.manila.get_file_storage", return_value=share),
     ):
         resp = await client.post(
-            "/api/instances/inst-1/storage-attachments",
+            "/api/v1/instances/inst-1/storage-attachments",
             json={"file_storage_id": "share-1", "mount_point": "/mnt/x", "read_only": False},
         )
 
@@ -210,7 +210,7 @@ async def test_attach_storage_unavailable_share_returns_409(client, mock_conn):
 async def test_attach_storage_invalid_mount_point_returns_422(client, mock_conn):
     """잘못된 mount_point → 422 (Pydantic 검증)."""
     resp = await client.post(
-        "/api/instances/inst-1/storage-attachments",
+        "/api/v1/instances/inst-1/storage-attachments",
         json={"file_storage_id": "share-1", "mount_point": "/etc/passwd", "read_only": False},
     )
     assert resp.status_code == 422
@@ -220,7 +220,7 @@ async def test_attach_storage_invalid_mount_point_returns_422(client, mock_conn)
 async def test_attach_storage_injection_mount_point_rejected(client, mock_conn):
     """쉘 메타문자 포함 mount_point → 422."""
     resp = await client.post(
-        "/api/instances/inst-1/storage-attachments",
+        "/api/v1/instances/inst-1/storage-attachments",
         json={"file_storage_id": "s1", "mount_point": "/mnt/$(rm -rf /)", "read_only": False},
     )
     assert resp.status_code == 422
@@ -233,7 +233,7 @@ async def test_attach_storage_foreign_instance_returns_404(client, mock_conn):
 
     with patch("app.api.compute.instances.nova.get_server", return_value=server):
         resp = await client.post(
-            "/api/instances/inst-1/storage-attachments",
+            "/api/v1/instances/inst-1/storage-attachments",
             json={"file_storage_id": "s1", "mount_point": "/mnt/x", "read_only": False},
         )
 
@@ -249,7 +249,7 @@ async def test_list_storage_attachments_empty(client, mock_conn):
     server.metadata = {}
 
     with patch("app.api.compute.instances.nova.get_server", return_value=server):
-        resp = await client.get("/api/instances/inst-1/storage-attachments")
+        resp = await client.get("/api/v1/instances/inst-1/storage-attachments")
 
     assert resp.status_code == 200
     assert resp.json() == []
@@ -269,7 +269,7 @@ async def test_list_storage_attachments_with_shares(client, mock_conn):
         patch("app.api.compute.instances.nova.get_server", return_value=server),
         patch("app.api.compute.instances.manila.get_file_storage", side_effect=mock_get_share),
     ):
-        resp = await client.get("/api/instances/inst-1/storage-attachments")
+        resp = await client.get("/api/v1/instances/inst-1/storage-attachments")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -296,7 +296,7 @@ async def test_detach_nfs_storage_success(client, mock_conn):
         patch("app.api.compute.instances.manila.list_access_rules", return_value=[ip_rule]),
         patch("app.api.compute.instances.manila.revoke_access_rule") as mock_revoke,
     ):
-        resp = await client.delete("/api/instances/inst-1/storage-attachments/share-1")
+        resp = await client.delete("/api/v1/instances/inst-1/storage-attachments/share-1")
 
     assert resp.status_code == 204
     mock_revoke.assert_called_once()
@@ -317,7 +317,7 @@ async def test_detach_cephfs_storage_success(client, mock_conn):
         patch("app.api.compute.instances.manila.list_access_rules", return_value=[cephx_rule]),
         patch("app.api.compute.instances.manila.revoke_access_rule"),
     ):
-        resp = await client.delete("/api/instances/inst-1/storage-attachments/share-c")
+        resp = await client.delete("/api/v1/instances/inst-1/storage-attachments/share-c")
 
     assert resp.status_code == 204
 
@@ -328,7 +328,7 @@ async def test_detach_storage_foreign_instance_returns_404(client, mock_conn):
     server = _make_server(project_id="other-project-999")
 
     with patch("app.api.compute.instances.nova.get_server", return_value=server):
-        resp = await client.delete("/api/instances/inst-1/storage-attachments/share-1")
+        resp = await client.delete("/api/v1/instances/inst-1/storage-attachments/share-1")
 
     assert resp.status_code == 404
 
@@ -350,7 +350,7 @@ async def test_nfs_export_path_is_quoted_in_mount_command(client, mock_conn):
         patch("app.api.compute.instances.manila.ensure_nfs_access_rule", return_value={"access_id": "rule-q"}),
     ):
         resp = await client.post(
-            "/api/instances/inst-1/storage-attachments",
+            "/api/v1/instances/inst-1/storage-attachments",
             json={"file_storage_id": "share-1", "mount_point": "/mnt/q", "read_only": False},
         )
 

@@ -65,7 +65,7 @@
 	async function loadCategory(cat: TabKey, isRefresh = false) {
 		if (!isRefresh) loadingMap[cat] = true;
 		try {
-			const url = isRefresh ? `/api/admin/services?category=${cat}&refresh=true` : `/api/admin/services?category=${cat}`;
+			const url = isRefresh ? `/api/v1/admin/services?category=${cat}&refresh=true` : `/api/v1/admin/services?category=${cat}`;
 			const res = await api.get<Record<string, unknown>>(url, token, projectId);
 			switch (cat) {
 				case 'compute': computeServices = (res.compute as Service[]) || []; break;

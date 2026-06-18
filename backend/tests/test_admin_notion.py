@@ -5,23 +5,23 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_get_notion_config_requires_admin(non_admin_client):
-    resp = await non_admin_client.get("/api/admin/notion/config")
+    resp = await non_admin_client.get("/api/v1/admin/notion/config")
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_save_notion_config_requires_admin(non_admin_client):
-    resp = await non_admin_client.post("/api/admin/notion/config", json={"api_key": "secret", "database_id": "db-1"})
+    resp = await non_admin_client.post("/api/v1/admin/notion/config", json={"api_key": "secret", "database_id": "db-1"})
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_delete_notion_config_requires_admin(non_admin_client):
-    resp = await non_admin_client.delete("/api/admin/notion/config")
+    resp = await non_admin_client.delete("/api/v1/admin/notion/config")
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_notion_test_requires_admin(non_admin_client):
-    resp = await non_admin_client.post("/api/admin/notion/test")
+    resp = await non_admin_client.post("/api/v1/admin/notion/test")
     assert resp.status_code == 403

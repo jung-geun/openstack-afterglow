@@ -25,7 +25,7 @@ def _make_cluster_record(status: str = "ACTIVE") -> dict:
 @pytest.mark.asyncio
 async def test_create_shell_ticket_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.post("/api/k3s/clusters/k3s-1/shell-ticket")
+        resp = await ac.post("/api/v1/k3s/clusters/k3s-1/shell-ticket")
     assert resp.status_code == 401
 
 
@@ -33,7 +33,7 @@ async def test_create_shell_ticket_unauthenticated():
 async def test_create_shell_ticket_cluster_not_found(client):
     with patch("app.api.k3s.shell.k3s_cluster") as mock_cluster:
         mock_cluster.get_cluster = AsyncMock(return_value=None)
-        resp = await client.post("/api/k3s/clusters/k3s-1/shell-ticket")
+        resp = await client.post("/api/v1/k3s/clusters/k3s-1/shell-ticket")
     assert resp.status_code == 404
 
 
@@ -41,7 +41,7 @@ async def test_create_shell_ticket_cluster_not_found(client):
 async def test_create_shell_ticket_cluster_not_active(client):
     with patch("app.api.k3s.shell.k3s_cluster") as mock_cluster:
         mock_cluster.get_cluster = AsyncMock(return_value=_make_cluster_record(status="CREATING"))
-        resp = await client.post("/api/k3s/clusters/k3s-1/shell-ticket")
+        resp = await client.post("/api/v1/k3s/clusters/k3s-1/shell-ticket")
     assert resp.status_code == 409
 
 
@@ -55,7 +55,7 @@ async def test_create_shell_ticket_success(client):
         patch("app.api.k3s.shell.rec", new_callable=AsyncMock),
     ):
         mock_cluster.get_cluster = AsyncMock(return_value=_make_cluster_record())
-        resp = await client.post("/api/k3s/clusters/k3s-1/shell-ticket")
+        resp = await client.post("/api/v1/k3s/clusters/k3s-1/shell-ticket")
     assert resp.status_code == 201
     data = resp.json()
     assert "ticket" in data

@@ -12,7 +12,7 @@ from app.main import app
 async def test_get_dashboard_config_public():
     """GET /api/dashboard/config — 인증 불필요, 항상 200."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/dashboard/config")
+        resp = await ac.get("/api/v1/dashboard/config")
     assert resp.status_code == 200
     assert "refresh_interval_ms" in resp.json()
 
@@ -20,7 +20,7 @@ async def test_get_dashboard_config_public():
 @pytest.mark.asyncio
 async def test_get_dashboard_summary_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/dashboard/summary")
+        resp = await ac.get("/api/v1/dashboard/summary")
     assert resp.status_code == 401
 
 
@@ -36,7 +36,7 @@ async def test_get_dashboard_summary_success(client):
             ]
         ),
     ):
-        resp = await client.get("/api/dashboard/summary")
+        resp = await client.get("/api/v1/dashboard/summary")
     assert resp.status_code == 200
     data = resp.json()
     assert "instances" in data
@@ -48,7 +48,7 @@ async def test_get_dashboard_summary_success(client):
 @pytest.mark.asyncio
 async def test_get_dashboard_quotas_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/dashboard/quotas")
+        resp = await ac.get("/api/v1/dashboard/quotas")
     assert resp.status_code == 401
 
 
@@ -66,7 +66,7 @@ async def test_get_dashboard_quotas_success(client):
         "app.api.common.dashboard.cached_call",
         new=AsyncMock(return_value=[quota, quota, quota, quota, quota_int, swift_meta]),
     ):
-        resp = await client.get("/api/dashboard/quotas")
+        resp = await client.get("/api/v1/dashboard/quotas")
     assert resp.status_code == 200
     data = resp.json()
     assert "compute" in data
@@ -76,7 +76,7 @@ async def test_get_dashboard_quotas_success(client):
 @pytest.mark.asyncio
 async def test_get_dashboard_usage_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/dashboard/usage")
+        resp = await ac.get("/api/v1/dashboard/usage")
     assert resp.status_code == 401
 
 
@@ -84,7 +84,7 @@ async def test_get_dashboard_usage_unauthenticated():
 async def test_get_dashboard_usage_success(client):
     usage_data = {"server_usages": [], "total_hours": 0}
     with patch("app.api.common.dashboard.cached_call", new=AsyncMock(return_value=usage_data)):
-        resp = await client.get("/api/dashboard/usage")
+        resp = await client.get("/api/v1/dashboard/usage")
     assert resp.status_code == 200
     data = resp.json()
     assert "server_usages" in data
@@ -103,14 +103,14 @@ async def test_gpu_available_disabled_by_default(client):
     """
     with patch("app.api.common.dashboard.get_settings") as mock_settings:
         mock_settings.return_value.gpu_available_visible = False
-        resp = await client.get("/api/dashboard/gpu-available")
+        resp = await client.get("/api/v1/dashboard/gpu-available")
     assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_gpu_available_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/dashboard/gpu-available")
+        resp = await ac.get("/api/v1/dashboard/gpu-available")
     # feature-flag에 따라 404 또는 401
     assert resp.status_code in (401, 404)
 
@@ -125,7 +125,7 @@ async def test_gpu_available_enabled(client):
     with patch("app.api.common.dashboard.get_settings") as mock_settings:
         mock_settings.return_value.gpu_available_visible = True
         with patch("app.api.common.dashboard.cached_call", new=AsyncMock(return_value=mock_result)):
-            resp = await client.get("/api/dashboard/gpu-available")
+            resp = await client.get("/api/v1/dashboard/gpu-available")
     if resp.status_code == 200:
         data = resp.json()
         assert "gpu_types" in data
@@ -140,7 +140,7 @@ async def test_gpu_available_cache_refresh(client):
         with patch(
             "app.api.common.dashboard.cached_call", new=AsyncMock(return_value={"gpu_types": [], "summary": {}})
         ):
-            resp = await client.get("/api/dashboard/gpu-available?refresh=true")
+            resp = await client.get("/api/v1/dashboard/gpu-available?refresh=true")
     # 200 또는 500(실제 admin conn 없음), 중요한 건 404가 아닌 것
     assert resp.status_code != 403
 
@@ -171,7 +171,7 @@ async def test_get_dashboard_quotas_gpu_db_error_returns_empty_gpu(client):
         ),
         patch("app.api.common.dashboard.mark_db_unhealthy") as mock_mark,
     ):
-        resp = await client.get("/api/dashboard/quotas")
+        resp = await client.get("/api/v1/dashboard/quotas")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -200,7 +200,7 @@ async def test_get_dashboard_quotas_gpu_partial_error_returns_empty_gpu(client):
         ),
         patch("app.api.common.dashboard.mark_db_unhealthy"),
     ):
-        resp = await client.get("/api/dashboard/quotas")
+        resp = await client.get("/api/v1/dashboard/quotas")
 
     assert resp.status_code == 200
     assert resp.json()["gpu"] == []

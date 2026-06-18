@@ -31,7 +31,7 @@
 		loading = true;
 		try {
 			detail = await api.get<LibraryBuildDetail>(
-				`/api/admin/libraries/builds/${buildId}`,
+				`/api/v1/admin/libraries/builds/${buildId}`,
 				token,
 				projectId,
 				{ refresh: true },
@@ -49,7 +49,7 @@
 		cancelError = '';
 		try {
 			await api.post(
-				`/api/admin/libraries/builds/${buildId}/cancel`,
+				`/api/v1/admin/libraries/builds/${buildId}/cancel`,
 				{},
 				token,
 				projectId,

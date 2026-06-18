@@ -109,7 +109,7 @@
     const baseUrl = getBaseUrl();
     const proto = baseUrl.startsWith('https') ? 'wss:' : 'ws:';
     const host = new URL(baseUrl || window.location.origin).host;
-    const url = `${proto}//${host}/api/k3s/clusters/${s.cluster.id}/shell?ticket=${encodeURIComponent(ticket)}`;
+    const url = `${proto}//${host}/api/v1/k3s/clusters/${s.cluster.id}/shell?ticket=${encodeURIComponent(ticket)}`;
 
     const socket = new WebSocket(url);
     socket.binaryType = 'arraybuffer';

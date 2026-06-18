@@ -26,7 +26,7 @@
 
   async function fetchContainer() {
     try {
-      container = await api.get<ZunContainerDetail>(`/api/containers/${containerId}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      container = await api.get<ZunContainerDetail>(`/api/v1/containers/${containerId}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
       error = '';
     } catch (e) {
       error = e instanceof ApiError ? `조회 실패: ${e.message}` : '서버 오류';
@@ -38,7 +38,7 @@
   async function fetchLogs() {
     logsLoading = true;
     try {
-      const result = await api.get<{ logs: string }>(`/api/containers/${containerId}/logs`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      const result = await api.get<{ logs: string }>(`/api/v1/containers/${containerId}/logs`, $auth.token ?? undefined, $auth.projectId ?? undefined);
       logs = result.logs;
     } catch {
       logs = '로그를 가져올 수 없습니다';
@@ -50,7 +50,7 @@
   async function handleAction(action: 'start' | 'stop') {
     actioning = true;
     try {
-      await api.post(`/api/containers/${containerId}/${action}`, {}, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      await api.post(`/api/v1/containers/${containerId}/${action}`, {}, $auth.token ?? undefined, $auth.projectId ?? undefined);
       await fetchContainer();
     } catch (e) {
       toast.error(`${action === 'start' ? '시작' : '중지'} 실패: ` + (e instanceof ApiError ? e.message : String(e)));
@@ -63,7 +63,7 @@
     if (!container) return;
     if (!await confirmDialog(`컨테이너 "${container.name}"을 삭제하시겠습니까?`)) return;
     try {
-      await api.delete(`/api/containers/${containerId}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+      await api.delete(`/api/v1/containers/${containerId}`, $auth.token ?? undefined, $auth.projectId ?? undefined);
       goto('/dashboard/containers/instances');
     } catch (e) {
       toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));

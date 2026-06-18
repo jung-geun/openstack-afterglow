@@ -47,7 +47,7 @@
 		if (clusters.length === 0) loading = true;
 		else refreshing = true;
 		try {
-			clusters = await api.get<AdminK3sCluster[]>('/api/admin/k3s-clusters', token, projectId);
+			clusters = await api.get<AdminK3sCluster[]>('/api/v1/admin/k3s-clusters', token, projectId);
 		} catch {
 			clusters = [];
 		} finally {

@@ -44,7 +44,7 @@
 		if (projects.length === 0) loading = true;
 		else refreshing = true;
 		try {
-			let url = `/api/admin/projects?limit=${pageSize}`;
+			let url = `/api/v1/admin/projects?limit=${pageSize}`;
 			if (marker) url += `&marker=${marker}`;
 			const res = await api.get<PagedResponse<Project>>(url, token, projectId);
 			projects = res.items; nextMarker = res.next_marker;

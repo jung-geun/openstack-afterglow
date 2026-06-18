@@ -206,7 +206,7 @@ def cmd_init(args: argparse.Namespace) -> None:
     if args.parent:
         log.info("부모 레이어 조상 체인 조회: %s", args.parent)
         try:
-            chain = _api_get(f"/api/union/layers/{args.parent}/ancestors", dry_run=dry_run)
+            chain = _api_get(f"/api/v1/union/layers/{args.parent}/ancestors", dry_run=dry_run)
             layers = chain.get("layers", [])
         except Exception as e:
             log.error("API 호출 실패: %s", e)
@@ -423,9 +423,9 @@ def cmd_seal(args: argparse.Namespace) -> None:
         log.warning(".api_pending 마커 기록 — `layerbuild resume-api %s`로 재시도 가능", content_hash)
     else:
         try:
-            _api_post("/api/union/layers", payload)
+            _api_post("/api/v1/union/layers", payload)
             log.info("레이어 등록 완료: %s", content_hash)
-            _api_post(f"/api/union/layers/{content_hash}/seal", {})
+            _api_post(f"/api/v1/union/layers/{content_hash}/seal", {})
             log.info("레이어 봉인 완료")
         except Exception as e:
             log.error("API 호출 실패: %s", e)
@@ -493,9 +493,9 @@ def cmd_resume_api(args: argparse.Namespace) -> None:
     payload = json.loads(marker.read_text())
 
     try:
-        _api_post("/api/union/layers", payload)
+        _api_post("/api/v1/union/layers", payload)
         log.info("레이어 재등록 완료: %s", content_hash)
-        _api_post(f"/api/union/layers/{content_hash}/seal", {})
+        _api_post(f"/api/v1/union/layers/{content_hash}/seal", {})
         log.info("레이어 봉인 완료")
     except Exception as e:
         log.error("API 재등록 실패: %s", e)

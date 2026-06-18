@@ -37,7 +37,7 @@ def make_token_info(is_manager=False, is_admin=False, user_id="user-abc", email=
 async def test_create_project_requires_auth():
     """인증 없이 프로젝트 생성 불가."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.post("/api/projects", json={"name": "MyProject"})
+        resp = await ac.post("/api/v1/projects", json={"name": "MyProject"})
     assert resp.status_code == 401
 
 
@@ -80,7 +80,7 @@ async def test_create_project_success():
             base_url="http://test",
             headers={"X-Auth-Token": "test-token"},
         ) as ac:
-            resp = await ac.post("/api/projects", json={"name": "MyProject"})
+            resp = await ac.post("/api/v1/projects", json={"name": "MyProject"})
 
     app.dependency_overrides.clear()
     assert resp.status_code == 201
@@ -110,7 +110,7 @@ async def test_create_project_empty_name_rejected():
         base_url="http://test",
         headers={"X-Auth-Token": "test-token"},
     ) as ac:
-        resp = await ac.post("/api/projects", json={"name": "   "})
+        resp = await ac.post("/api/v1/projects", json={"name": "   "})
     app.dependency_overrides.clear()
     assert resp.status_code == 422
 
@@ -142,7 +142,7 @@ async def test_create_invitation_requires_manager():
             headers={"X-Auth-Token": "test-token"},
         ) as ac:
             resp = await ac.post(
-                f"/api/projects/{PROJECT_ID}/invitations",
+                f"/api/v1/projects/{PROJECT_ID}/invitations",
                 json={"email": "invite@example.com"},
             )
     app.dependency_overrides.clear()
@@ -190,7 +190,7 @@ async def test_create_invitation_success():
             headers={"X-Auth-Token": "test-token"},
         ) as ac:
             resp = await ac.post(
-                f"/api/projects/{PROJECT_ID}/invitations",
+                f"/api/v1/projects/{PROJECT_ID}/invitations",
                 json={"email": "invite@example.com"},
             )
     app.dependency_overrides.clear()
@@ -371,7 +371,7 @@ async def test_system_admin_can_invite():
             headers={"X-Auth-Token": "test-token"},
         ) as ac:
             resp = await ac.post(
-                f"/api/projects/{PROJECT_ID}/invitations",
+                f"/api/v1/projects/{PROJECT_ID}/invitations",
                 json={"email": "new@example.com"},
             )
     app.dependency_overrides.clear()

@@ -29,7 +29,7 @@
 	async function load() {
 		loading = true;
 		try {
-			fips = await api.get<FloatingIpInfo[]>('/api/admin/all-floating-ips', token, projectId);
+			fips = await api.get<FloatingIpInfo[]>('/api/v1/admin/all-floating-ips', token, projectId);
 		} catch {
 			fips = [];
 		} finally {
@@ -40,7 +40,7 @@
 	async function openCreate() {
 		showCreate = true; createError = '';
 		try {
-			const nets = await api.get<NetworkInfo[]>('/api/admin/all-networks', token, projectId);
+			const nets = await api.get<NetworkInfo[]>('/api/v1/admin/all-networks', token, projectId);
 			externalNets = nets.filter(n => n.is_external);
 			selectedNetId = externalNets.length > 0 ? externalNets[0].id : '';
 		} catch {
@@ -52,7 +52,7 @@
 		if (!selectedNetId) return;
 		creating = true; createError = '';
 		try {
-			await api.post('/api/admin/floating-ips', { floating_network_id: selectedNetId }, token, projectId);
+			await api.post('/api/v1/admin/floating-ips', { floating_network_id: selectedNetId }, token, projectId);
 			showCreate = false; await load();
 		} catch (e) { createError = e instanceof ApiError ? e.message : '생성 실패'; } finally { creating = false; }
 	}
@@ -61,7 +61,7 @@
 		if (!deleteFip) return;
 		deleting = true; deleteError = '';
 		try {
-			await api.delete(`/api/admin/floating-ips/${deleteFip.id}`, token, projectId);
+			await api.delete(`/api/v1/admin/floating-ips/${deleteFip.id}`, token, projectId);
 			deleteFip = null; await load();
 		} catch (e) { deleteError = e instanceof ApiError ? e.message : '삭제 실패'; } finally { deleting = false; }
 	}

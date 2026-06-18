@@ -55,7 +55,7 @@
     let ticket: string;
     try {
       const res = await api.post<{ ticket: string }>(
-        `/api/containers/${containerId}/exec-ticket`,
+        `/api/v1/containers/${containerId}/exec-ticket`,
         {},
         token,
         projectId,
@@ -70,7 +70,7 @@
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.hostname;
     const port = import.meta.env.PUBLIC_API_BASE ? new URL(import.meta.env.PUBLIC_API_BASE).port || '8000' : '8000';
-    const url = `${proto}//${host}:${port}/api/containers/${containerId}/exec?ticket=${encodeURIComponent(ticket)}`;
+    const url = `${proto}//${host}:${port}/api/v1/containers/${containerId}/exec?ticket=${encodeURIComponent(ticket)}`;
 
     const socket = new WebSocket(url);
     ws = socket;

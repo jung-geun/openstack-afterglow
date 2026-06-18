@@ -27,7 +27,7 @@ async def test_all_volumes_status_filter(admin_client, mock_conn):
     vol = _make_volume(status="available")
     mock_conn.block_storage.volumes.return_value = [vol]
 
-    resp = await admin_client.get("/api/admin/all-volumes?limit=10&status=available")
+    resp = await admin_client.get("/api/v1/admin/all-volumes?limit=10&status=available")
     assert resp.status_code == 200
 
     call_kwargs = mock_conn.block_storage.volumes.call_args[1]
@@ -40,7 +40,7 @@ async def test_all_volumes_project_id_filter(admin_client, mock_conn):
     vol = _make_volume(project_id="proj-abc")
     mock_conn.block_storage.volumes.return_value = [vol]
 
-    resp = await admin_client.get("/api/admin/all-volumes?limit=10&project_id=proj-abc")
+    resp = await admin_client.get("/api/v1/admin/all-volumes?limit=10&project_id=proj-abc")
     assert resp.status_code == 200
 
     call_kwargs = mock_conn.block_storage.volumes.call_args[1]
@@ -53,7 +53,7 @@ async def test_all_volumes_name_filter(admin_client, mock_conn):
     vol = _make_volume(name="my-vol")
     mock_conn.block_storage.volumes.return_value = [vol]
 
-    resp = await admin_client.get("/api/admin/all-volumes?limit=10&name=my-vol")
+    resp = await admin_client.get("/api/v1/admin/all-volumes?limit=10&name=my-vol")
     assert resp.status_code == 200
 
     call_kwargs = mock_conn.block_storage.volumes.call_args[1]
@@ -94,7 +94,7 @@ async def test_all_instances_status_filter(admin_client, mock_conn):
     mock_conn.compute.get_endpoint.return_value = "http://nova"
     mock_conn.session.get.return_value = _make_session_response(_make_servers_response(status="ACTIVE"))
 
-    resp = await admin_client.get("/api/admin/all-instances?limit=10&status=ACTIVE")
+    resp = await admin_client.get("/api/v1/admin/all-instances?limit=10&status=ACTIVE")
     assert resp.status_code == 200
 
     call_kwargs = mock_conn.session.get.call_args[1]
@@ -107,7 +107,7 @@ async def test_all_instances_name_filter_wraps_in_regex(admin_client, mock_conn)
     mock_conn.compute.get_endpoint.return_value = "http://nova"
     mock_conn.session.get.return_value = _make_session_response(_make_servers_response(name="test-vm"))
 
-    resp = await admin_client.get("/api/admin/all-instances?limit=10&name=test-vm")
+    resp = await admin_client.get("/api/v1/admin/all-instances?limit=10&name=test-vm")
     assert resp.status_code == 200
 
     call_kwargs = mock_conn.session.get.call_args[1]
@@ -123,7 +123,7 @@ async def test_all_instances_name_filter_escapes_metachar(admin_client, mock_con
     mock_conn.compute.get_endpoint.return_value = "http://nova"
     mock_conn.session.get.return_value = _make_session_response({"servers": []})
 
-    resp = await admin_client.get("/api/admin/all-instances?limit=10&name=test.vm%5B")
+    resp = await admin_client.get("/api/v1/admin/all-instances?limit=10&name=test.vm%5B")
     assert resp.status_code == 200
 
     call_kwargs = mock_conn.session.get.call_args[1]
@@ -160,7 +160,7 @@ async def test_topology_instance_includes_project_id(admin_client, mock_conn):
         patch("app.api.identity.admin.neutron.get_topology", return_value=topo_data),
         patch("app.api.identity.admin.cached_call", new=AsyncMock(side_effect=lambda key, ttl, fn, **kw: fn())),
     ):
-        resp = await admin_client.get("/api/admin/topology")
+        resp = await admin_client.get("/api/v1/admin/topology")
 
     assert resp.status_code == 200
     data = resp.json()

@@ -33,7 +33,7 @@
 	async function loadTimeseries(range: string, opts?: { background?: boolean }) {
 		if (!opts?.background) tsLoading = true;
 		try {
-			tsData = await api.get<TsPoint[]>(`/api/admin/timeseries/file_storage?range=${range}`, token, projectId);
+			tsData = await api.get<TsPoint[]>(`/api/v1/admin/timeseries/file_storage?range=${range}`, token, projectId);
 		} catch {
 			if (!opts?.background) tsData = [];
 		} finally {
@@ -46,7 +46,7 @@
 		else refreshing = true;
 		currentPage = 0;
 		try {
-			fileStorages = await api.get<AdminFileStorage[]>('/api/admin/all-file-storages', token, projectId);
+			fileStorages = await api.get<AdminFileStorage[]>('/api/v1/admin/all-file-storages', token, projectId);
 		} catch {
 			fileStorages = [];
 		} finally {

@@ -18,7 +18,7 @@ class TestAdminLibraryList:
     async def test_list_admin_libraries_returns_all(self, admin_client):
         """관리자는 전체 라이브러리 목록 반환."""
         with patch("app.api.identity.admin_libraries.manila.list_file_storages", return_value=[]):
-            resp = await admin_client.get("/api/admin/libraries")
+            resp = await admin_client.get("/api/v1/admin/libraries")
         assert resp.status_code == 200
         data = resp.json()
         assert isinstance(data, list)
@@ -29,14 +29,14 @@ class TestAdminLibraryList:
     @pytest.mark.asyncio
     async def test_list_admin_libraries_forbidden_for_non_admin(self, non_admin_client):
         """일반 사용자 → 403."""
-        resp = await non_admin_client.get("/api/admin/libraries")
+        resp = await non_admin_client.get("/api/v1/admin/libraries")
         assert resp.status_code == 403
 
     @pytest.mark.asyncio
     async def test_list_admin_libraries_includes_dependency_tree(self, admin_client):
         """응답에 dependency_tree 포함."""
         with patch("app.api.identity.admin_libraries.manila.list_file_storages", return_value=[]):
-            resp = await admin_client.get("/api/admin/libraries")
+            resp = await admin_client.get("/api/v1/admin/libraries")
         assert resp.status_code == 200
         torch_lib = next((lib for lib in resp.json() if lib["id"] == "torch"), None)
         assert torch_lib is not None
@@ -49,7 +49,7 @@ class TestAdminLibraryDetail:
     async def test_get_known_library(self, admin_client):
         """알려진 라이브러리 상세 조회 성공."""
         with patch("app.api.identity.admin_libraries.manila.list_file_storages", return_value=[]):
-            resp = await admin_client.get("/api/admin/libraries/python311")
+            resp = await admin_client.get("/api/v1/admin/libraries/python311")
         assert resp.status_code == 200
         data = resp.json()
         assert data["id"] == "python311"
@@ -59,13 +59,13 @@ class TestAdminLibraryDetail:
     async def test_get_unknown_library_returns_404(self, admin_client):
         """알 수 없는 라이브러리 → 404."""
         with patch("app.api.identity.admin_libraries.manila.list_file_storages", return_value=[]):
-            resp = await admin_client.get("/api/admin/libraries/unknown_lib")
+            resp = await admin_client.get("/api/v1/admin/libraries/unknown_lib")
         assert resp.status_code == 404
 
     @pytest.mark.asyncio
     async def test_get_library_forbidden_for_non_admin(self, non_admin_client):
         """일반 사용자 → 403."""
-        resp = await non_admin_client.get("/api/admin/libraries/python311")
+        resp = await non_admin_client.get("/api/v1/admin/libraries/python311")
         assert resp.status_code == 403
 
 
@@ -83,7 +83,7 @@ class TestBuildCancel:
             "app.api.identity.admin_libraries.library_builder.cancel_build",
             mock_cancel,
         ):
-            resp = await admin_client.post("/api/admin/libraries/builds/1/cancel")
+            resp = await admin_client.post("/api/v1/admin/libraries/builds/1/cancel")
         assert resp.status_code == 200
         data = resp.json()
         assert data["cancelled"] is True
@@ -96,7 +96,7 @@ class TestBuildCancel:
             "app.api.identity.admin_libraries.library_builder.cancel_build",
             AsyncMock(side_effect=KeyError("빌드 999를 찾을 수 없습니다")),
         ):
-            resp = await admin_client.post("/api/admin/libraries/builds/999/cancel")
+            resp = await admin_client.post("/api/v1/admin/libraries/builds/999/cancel")
         assert resp.status_code == 404
 
     @pytest.mark.asyncio
@@ -106,13 +106,13 @@ class TestBuildCancel:
             "app.api.identity.admin_libraries.library_builder.cancel_build",
             AsyncMock(side_effect=ValueError("이미 종료된 빌드입니다 (상태: complete)")),
         ):
-            resp = await admin_client.post("/api/admin/libraries/builds/1/cancel")
+            resp = await admin_client.post("/api/v1/admin/libraries/builds/1/cancel")
         assert resp.status_code == 409
 
     @pytest.mark.asyncio
     async def test_cancel_forbidden_for_non_admin(self, non_admin_client):
         """일반 사용자 취소 시도 → 403."""
-        resp = await non_admin_client.post("/api/admin/libraries/builds/1/cancel")
+        resp = await non_admin_client.post("/api/v1/admin/libraries/builds/1/cancel")
         assert resp.status_code == 403
 
 
@@ -167,14 +167,14 @@ class TestBuildList:
             from app.database import get_session_factory
 
             with patch.object(get_session_factory, "__call__", return_value=None, create=True):
-                resp = await admin_client.get("/api/admin/libraries/builds")
+                resp = await admin_client.get("/api/v1/admin/libraries/builds")
         # 200이거나 빈 목록이면 성공
         assert resp.status_code in (200, 500)  # DB 없으면 500도 허용
 
     @pytest.mark.asyncio
     async def test_list_builds_admin_only(self, non_admin_client):
         """일반 사용자 → 403."""
-        resp = await non_admin_client.get("/api/admin/libraries/builds")
+        resp = await non_admin_client.get("/api/v1/admin/libraries/builds")
         assert resp.status_code == 403
 
 
@@ -227,7 +227,7 @@ class TestCatalogCreate:
         app.dependency_overrides[get_session] = _override
         try:
             with patch("app.api.identity.admin_libraries.lib_svc.reload_catalog", AsyncMock()):
-                resp = await admin_client.post("/api/admin/libraries/catalog", json=_CATALOG_CREATE_PAYLOAD)
+                resp = await admin_client.post("/api/v1/admin/libraries/catalog", json=_CATALOG_CREATE_PAYLOAD)
         finally:
             app.dependency_overrides.pop(get_session, None)
 
@@ -249,7 +249,7 @@ class TestCatalogCreate:
 
         app.dependency_overrides[get_session] = _override
         try:
-            resp = await admin_client.post("/api/admin/libraries/catalog", json=_CATALOG_CREATE_PAYLOAD)
+            resp = await admin_client.post("/api/v1/admin/libraries/catalog", json=_CATALOG_CREATE_PAYLOAD)
         finally:
             app.dependency_overrides.pop(get_session, None)
 
@@ -258,7 +258,7 @@ class TestCatalogCreate:
     @pytest.mark.asyncio
     async def test_create_catalog_entry_forbidden_for_non_admin(self, non_admin_client):
         """일반 사용자 → 403."""
-        resp = await non_admin_client.post("/api/admin/libraries/catalog", json=_CATALOG_CREATE_PAYLOAD)
+        resp = await non_admin_client.post("/api/v1/admin/libraries/catalog", json=_CATALOG_CREATE_PAYLOAD)
         assert resp.status_code == 403
 
 
@@ -281,7 +281,7 @@ class TestCatalogUpdate:
         try:
             with patch("app.api.identity.admin_libraries.lib_svc.reload_catalog", AsyncMock()):
                 resp = await admin_client.patch(
-                    "/api/admin/libraries/catalog/testlib",
+                    "/api/v1/admin/libraries/catalog/testlib",
                     json={"name": "Updated Name", "version": "2.0"},
                 )
         finally:
@@ -304,7 +304,7 @@ class TestCatalogUpdate:
         app.dependency_overrides[get_session] = _override
         try:
             resp = await admin_client.patch(
-                "/api/admin/libraries/catalog/nonexistent",
+                "/api/v1/admin/libraries/catalog/nonexistent",
                 json={"name": "Ghost"},
             )
         finally:
@@ -316,7 +316,7 @@ class TestCatalogUpdate:
     async def test_update_catalog_entry_forbidden_for_non_admin(self, non_admin_client):
         """일반 사용자 → 403."""
         resp = await non_admin_client.patch(
-            "/api/admin/libraries/catalog/testlib",
+            "/api/v1/admin/libraries/catalog/testlib",
             json={"name": "Hacked"},
         )
         assert resp.status_code == 403
@@ -340,7 +340,7 @@ class TestCatalogDelete:
         app.dependency_overrides[get_session] = _override
         try:
             with patch("app.api.identity.admin_libraries.lib_svc.reload_catalog", AsyncMock()):
-                resp = await admin_client.delete("/api/admin/libraries/catalog/testlib")
+                resp = await admin_client.delete("/api/v1/admin/libraries/catalog/testlib")
         finally:
             app.dependency_overrides.pop(get_session, None)
 
@@ -359,7 +359,7 @@ class TestCatalogDelete:
 
         app.dependency_overrides[get_session] = _override
         try:
-            resp = await admin_client.delete("/api/admin/libraries/catalog/nonexistent")
+            resp = await admin_client.delete("/api/v1/admin/libraries/catalog/nonexistent")
         finally:
             app.dependency_overrides.pop(get_session, None)
 
@@ -368,5 +368,5 @@ class TestCatalogDelete:
     @pytest.mark.asyncio
     async def test_delete_catalog_entry_forbidden_for_non_admin(self, non_admin_client):
         """일반 사용자 → 403."""
-        resp = await non_admin_client.delete("/api/admin/libraries/catalog/testlib")
+        resp = await non_admin_client.delete("/api/v1/admin/libraries/catalog/testlib")
         assert resp.status_code == 403

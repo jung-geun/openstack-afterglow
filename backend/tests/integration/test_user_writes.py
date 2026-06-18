@@ -17,19 +17,19 @@ async def test_keypair_create_and_delete(user_client):
     name = f"pr5-kp-{uuid.uuid4().hex[:8]}"
     created = False
     try:
-        resp = await user_client.post("/api/keypairs", json={"name": name})
+        resp = await user_client.post("/api/v1/keypairs", json={"name": name})
         assert resp.status_code == 201, f"create failed: {resp.text}"
         body = resp.json()
         assert body.get("name") == name
         assert "private_key" in body  # Nova가 생성 시 반환
         created = True
 
-        resp = await user_client.get("/api/keypairs")
+        resp = await user_client.get("/api/v1/keypairs")
         assert resp.status_code == 200
         assert any(kp.get("name") == name for kp in resp.json()), f"생성된 키페어 '{name}'가 목록에 없음"
     finally:
         if created:
-            resp = await user_client.delete(f"/api/keypairs/{name}")
+            resp = await user_client.delete(f"/api/v1/keypairs/{name}")
             assert resp.status_code in (204, 404), f"cleanup failed: {resp.text}"
 
 
@@ -41,7 +41,7 @@ async def test_security_group_and_rule_lifecycle(user_client):
     rule_id = None
     try:
         resp = await user_client.post(
-            "/api/security-groups",
+            "/api/v1/security-groups",
             json={
                 "name": sg_name,
                 "description": "PR5 integration test — auto cleanup",
@@ -51,7 +51,7 @@ async def test_security_group_and_rule_lifecycle(user_client):
         sg_id = resp.json()["id"]
 
         resp = await user_client.post(
-            f"/api/security-groups/{sg_id}/rules",
+            f"/api/v1/security-groups/{sg_id}/rules",
             json={
                 "direction": "ingress",
                 "ethertype": "IPv4",
@@ -65,9 +65,9 @@ async def test_security_group_and_rule_lifecycle(user_client):
         rule_id = resp.json()["id"]
     finally:
         if rule_id and sg_id:
-            await user_client.delete(f"/api/security-groups/{sg_id}/rules/{rule_id}")
+            await user_client.delete(f"/api/v1/security-groups/{sg_id}/rules/{rule_id}")
         if sg_id:
-            resp = await user_client.delete(f"/api/security-groups/{sg_id}")
+            resp = await user_client.delete(f"/api/v1/security-groups/{sg_id}")
             assert resp.status_code in (204, 404), f"SG cleanup failed: {resp.text}"
 
 
@@ -76,7 +76,7 @@ async def test_share_snapshot_lifecycle(user_client):
     """manila 활성 + 기존 share 존재 시 스냅샷 생성 → 삭제."""
     require_service("service_manila_enabled")
 
-    resp = await user_client.get("/api/file-storage")
+    resp = await user_client.get("/api/v1/file-storage")
     assert resp.status_code == 200
     shares = resp.json()
     if not shares:
@@ -89,7 +89,7 @@ async def test_share_snapshot_lifecycle(user_client):
         snap_name = f"pr5-snap-{uuid.uuid4().hex[:8]}"
         try:
             resp = await user_client.post(
-                "/api/share-snapshots",
+                "/api/v1/share-snapshots",
                 json={
                     "share_id": share_id,
                     "name": snap_name,
@@ -103,7 +103,7 @@ async def test_share_snapshot_lifecycle(user_client):
             break
         finally:
             if snap_id:
-                await user_client.delete(f"/api/share-snapshots/{snap_id}")
+                await user_client.delete(f"/api/v1/share-snapshots/{snap_id}")
                 break
 
     if snap_id is None:

@@ -46,10 +46,10 @@
 	async function loadDeps() {
 		try {
 			[flavors, networks, keypairs, templates] = await Promise.all([
-				api.get<K3sFlavor[]>('/api/flavors', token, projectId),
-				api.get<K3sNetwork[]>('/api/networks', token, projectId),
-				api.get<K3sKeypair[]>('/api/keypairs', token, projectId),
-				api.get<K3sClusterTemplate[]>('/api/k3s/cluster-templates', token, projectId).catch(() => []),
+				api.get<K3sFlavor[]>('/api/v1/flavors', token, projectId),
+				api.get<K3sNetwork[]>('/api/v1/networks', token, projectId),
+				api.get<K3sKeypair[]>('/api/v1/keypairs', token, projectId),
+				api.get<K3sClusterTemplate[]>('/api/v1/k3s/cluster-templates', token, projectId).catch(() => []),
 			]);
 			const defaultNet = networks.find(n => !n.is_external && (n.name === 'Default' || n.name === 'default'));
 			if (defaultNet) form.network_id = defaultNet.id;

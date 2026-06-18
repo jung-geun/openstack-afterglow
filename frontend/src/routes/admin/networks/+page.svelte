@@ -30,7 +30,7 @@
 	async function loadNetworks() {
 		loading = true;
 		try {
-			networks = await api.get<AdminNetwork[]>('/api/admin/all-networks', token, projectId);
+			networks = await api.get<AdminNetwork[]>('/api/v1/admin/all-networks', token, projectId);
 		} catch {
 			networks = [];
 		} finally {
@@ -41,7 +41,7 @@
 	async function loadTimeseries(range: string, opts?: { background?: boolean }) {
 		if (!opts?.background) tsLoading = true;
 		try {
-			tsData = await api.get<TsPoint[]>(`/api/admin/timeseries/networks?range=${range}`, token, projectId);
+			tsData = await api.get<TsPoint[]>(`/api/v1/admin/timeseries/networks?range=${range}`, token, projectId);
 		} catch {
 			if (!opts?.background) tsData = [];
 		} finally {
@@ -51,7 +51,7 @@
 
 	async function createNetwork(form: { name: string; cidr: string; is_external: boolean; is_shared: boolean; enable_dhcp: boolean }): Promise<string | true> {
 		try {
-			await api.post('/api/admin/networks', {
+			await api.post('/api/v1/admin/networks', {
 				name: form.name,
 				cidr: form.cidr || null,
 				is_external: form.is_external,
@@ -67,7 +67,7 @@
 
 	async function updateNetwork(id: string, form: { name: string; is_shared: boolean }): Promise<string | true> {
 		try {
-			await api.put(`/api/admin/networks/${id}`, form, token, projectId);
+			await api.put(`/api/v1/admin/networks/${id}`, form, token, projectId);
 			await loadNetworks();
 			return true;
 		} catch (e) {
@@ -77,7 +77,7 @@
 
 	async function deleteNetwork(id: string): Promise<string | true> {
 		try {
-			await api.delete(`/api/admin/networks/${id}`, token, projectId);
+			await api.delete(`/api/v1/admin/networks/${id}`, token, projectId);
 			await loadNetworks();
 			return true;
 		} catch (e) {

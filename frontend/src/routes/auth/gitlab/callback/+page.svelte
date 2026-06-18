@@ -48,12 +48,12 @@
 				roles?: string[];
 				default_project_id?: string;
 				is_system_admin?: boolean;
-			}>('/api/auth/gitlab/callback', { code, state });
+			}>('/api/v1/auth/gitlab/callback', { code, state });
 
 			// 프로젝트 목록 조회
 			let projects: Project[] = [];
 			try {
-				projects = await api.get<Project[]>('/api/auth/projects', data.token);
+				projects = await api.get<Project[]>('/api/v1/auth/projects', data.token);
 			} catch { /* 프로젝트 목록 조회 실패 시 무시 */ }
 
 			// 기본 프로젝트가 설정되어 있고, 프로젝트 목록에 존재하면 해당 프로젝트로 전환

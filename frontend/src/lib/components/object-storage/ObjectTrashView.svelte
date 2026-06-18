@@ -31,7 +31,7 @@
 		loading = true;
 		try {
 			items = await api.get<TrashObject[]>(
-				`/api/object-storage/${encodeURIComponent(containerName)}/trash`,
+				`/api/v1/object-storage/${encodeURIComponent(containerName)}/trash`,
 				token,
 				projectId
 			);
@@ -46,7 +46,7 @@
 		restoring = trashKey;
 		try {
 			const res = await api.post<{ restored_name: string }>(
-				`/api/object-storage/${encodeURIComponent(containerName)}/trash/restore`,
+				`/api/v1/object-storage/${encodeURIComponent(containerName)}/trash/restore`,
 				{ trash_key: trashKey },
 				token,
 				projectId
@@ -70,7 +70,7 @@
 		purging = trashKey;
 		try {
 			await api.delete(
-				`/api/object-storage/${encodeURIComponent(containerName)}/trash/${encodeURIComponent(trashKey)}`,
+				`/api/v1/object-storage/${encodeURIComponent(containerName)}/trash/${encodeURIComponent(trashKey)}`,
 				token,
 				projectId
 			);

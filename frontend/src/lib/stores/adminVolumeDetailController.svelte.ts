@@ -26,7 +26,7 @@ function createAdminVolumeDetailController(opts: Options) {
 
 	async function fetchVolume() {
 		try {
-			volume = await api.get<AdminVolumeDetail>(`/api/admin/volumes/${opts.volumeId()}`, opts.token(), opts.projectId());
+			volume = await api.get<AdminVolumeDetail>(`/api/v1/admin/volumes/${opts.volumeId()}`, opts.token(), opts.projectId());
 		} catch (e) {
 			error = e instanceof ApiError ? e.message : '볼륨 조회 실패';
 		} finally {

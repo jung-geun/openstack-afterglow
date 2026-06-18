@@ -219,7 +219,7 @@ async def test_sync_new_instance_always_posts():
 async def test_list_notion_targets_empty(admin_client):
     """NotionTarget이 없으면 빈 배열을 반환한다."""
     with patch("app.services.notion_sync.list_notion_targets", AsyncMock(return_value=[])):
-        resp = await admin_client.get("/api/admin/notion/targets")
+        resp = await admin_client.get("/api/v1/admin/notion/targets")
     assert resp.status_code == 200
     assert resp.json() == []
 
@@ -246,7 +246,7 @@ async def test_list_notion_targets_returns_masked_keys(admin_client):
         }
     ]
     with patch("app.services.notion_sync.list_notion_targets", AsyncMock(return_value=fake_targets)):
-        resp = await admin_client.get("/api/admin/notion/targets")
+        resp = await admin_client.get("/api/v1/admin/notion/targets")
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) == 1
@@ -257,7 +257,7 @@ async def test_list_notion_targets_returns_masked_keys(admin_client):
 async def test_delete_notion_target_not_found(admin_client):
     """존재하지 않는 타겟 삭제 시 404를 반환한다."""
     with patch("app.services.notion_sync.delete_notion_target", AsyncMock(return_value=False)):
-        resp = await admin_client.delete("/api/admin/notion/targets/999")
+        resp = await admin_client.delete("/api/v1/admin/notion/targets/999")
     assert resp.status_code == 404
 
 
@@ -265,7 +265,7 @@ async def test_delete_notion_target_not_found(admin_client):
 async def test_delete_notion_target_success(admin_client):
     """정상 삭제 시 200과 ok 메시지를 반환한다."""
     with patch("app.services.notion_sync.delete_notion_target", AsyncMock(return_value=True)):
-        resp = await admin_client.delete("/api/admin/notion/targets/1")
+        resp = await admin_client.delete("/api/v1/admin/notion/targets/1")
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
 
@@ -277,12 +277,12 @@ async def test_update_notion_target_not_found(admin_client):
         patch("app.services.notion_sync.get_notion_target", AsyncMock(return_value=None)),
         patch("app.services.notion_sync.update_notion_target", AsyncMock(return_value=None)),
     ):
-        resp = await admin_client.patch("/api/admin/notion/targets/999", json={"label": "new"})
+        resp = await admin_client.patch("/api/v1/admin/notion/targets/999", json={"label": "new"})
     assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_update_notion_target_invalid_interval(admin_client):
     """interval_minutes 범위 초과 시 400을 반환한다."""
-    resp = await admin_client.patch("/api/admin/notion/targets/1", json={"interval_minutes": 9999})
+    resp = await admin_client.patch("/api/v1/admin/notion/targets/1", json={"interval_minutes": 9999})
     assert resp.status_code == 400

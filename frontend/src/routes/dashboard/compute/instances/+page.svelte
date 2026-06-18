@@ -29,7 +29,7 @@
 	const { swrGet, swrSet } = createSwr(() => $auth.projectId);
 
 	async function fetchInstances(opts?: { refresh?: boolean }) {
-		const path = '/api/instances';
+		const path = '/api/v1/instances';
 		const cached = swrGet<Instance[]>(path);
 		if (cached && instances.length === 0) instances = cached;
 		try {
@@ -53,7 +53,7 @@
 			const resp = await api.get<{
 				prometheus_available: boolean;
 				instances: Record<string, { cpu_avg: number | null; mem_avg: number | null; underutilized: boolean }>;
-			}>('/api/instances/metrics-summary-batch', token, projectId);
+			}>('/api/v1/instances/metrics-summary-batch', token, projectId);
 			if (resp.prometheus_available) {
 				const map: Record<string, boolean> = {};
 				for (const [id, data] of Object.entries(resp.instances)) map[id] = data.underutilized;
@@ -88,7 +88,7 @@
 
 	async function startInstance(id: string) {
 		try {
-			await apiMut('인스턴스 시작', () => api.post(`/api/instances/${id}/start`, {}, $auth.token ?? undefined, $auth.projectId ?? undefined));
+			await apiMut('인스턴스 시작', () => api.post(`/api/v1/instances/${id}/start`, {}, $auth.token ?? undefined, $auth.projectId ?? undefined));
 			ar.setBoost(4);
 			await fetchInstances();
 		} catch { /* error toast shown by apiMut */ }
@@ -97,7 +97,7 @@
 	async function stopInstance(id: string) {
 		if (!await confirmDialog('인스턴스를 종료하시겠습니까?')) return;
 		try {
-			await apiMut('인스턴스 종료', () => api.post(`/api/instances/${id}/stop`, {}, $auth.token ?? undefined, $auth.projectId ?? undefined));
+			await apiMut('인스턴스 종료', () => api.post(`/api/v1/instances/${id}/stop`, {}, $auth.token ?? undefined, $auth.projectId ?? undefined));
 			ar.setBoost(4);
 			await fetchInstances();
 		} catch { /* error toast shown by apiMut */ }
@@ -120,7 +120,7 @@
 		bulkActioning = true;
 		try {
 			const res = await api.post<{ results: { id: string; ok: boolean; error?: string }[] }>(
-				'/api/instances/bulk-action',
+				'/api/v1/instances/bulk-action',
 				{ action, instance_ids: ids },
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined,
@@ -142,7 +142,7 @@
 	async function shelveInstance(id: string) {
 		if (!await confirmDialog('인스턴스를 보관하시겠습니까? (SHELVED_OFFLOADED 상태로 전환됩니다)')) return;
 		try {
-			await apiMut('인스턴스 보관', () => api.post(`/api/instances/${id}/shelve`, {}, $auth.token ?? undefined, $auth.projectId ?? undefined));
+			await apiMut('인스턴스 보관', () => api.post(`/api/v1/instances/${id}/shelve`, {}, $auth.token ?? undefined, $auth.projectId ?? undefined));
 			await fetchInstances();
 		} catch { /* error toast shown by apiMut */ }
 	}
@@ -150,7 +150,7 @@
 	async function unshelveInstance(id: string) {
 		if (!await confirmDialog('인스턴스 보관을 해제하시겠습니까?')) return;
 		try {
-			await apiMut('인스턴스 보관 해제', () => api.post(`/api/instances/${id}/unshelve`, {}, $auth.token ?? undefined, $auth.projectId ?? undefined));
+			await apiMut('인스턴스 보관 해제', () => api.post(`/api/v1/instances/${id}/unshelve`, {}, $auth.token ?? undefined, $auth.projectId ?? undefined));
 			await fetchInstances();
 		} catch { /* error toast shown by apiMut */ }
 	}
@@ -158,14 +158,14 @@
 	async function deleteInstance(id: string, name: string) {
 		if (!await confirmDialog(`"${name}" 인스턴스를 삭제하시겠습니까?\nManila share와 볼륨도 함께 삭제됩니다.`)) return;
 		try {
-			await apiMut('인스턴스 삭제', () => api.delete(`/api/instances/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined));
+			await apiMut('인스턴스 삭제', () => api.delete(`/api/v1/instances/${id}`, $auth.token ?? undefined, $auth.projectId ?? undefined));
 			await fetchInstances();
 		} catch { /* error toast shown by apiMut */ }
 	}
 
 	async function openConsole(id: string) {
 		try {
-			const data = await api.get<{ url: string }>(`/api/instances/${id}/console`, $auth.token ?? undefined, $auth.projectId ?? undefined);
+			const data = await api.get<{ url: string }>(`/api/v1/instances/${id}/console`, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			window.open(data.url, '_blank');
 		} catch {
 			toast.error('콘솔 URL을 가져올 수 없습니다');

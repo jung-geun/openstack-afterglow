@@ -30,7 +30,7 @@
 		error = '';
 		try {
 			events = await api.get<StampedeEvent[]>(
-				`/api/k3s/clusters/${clusterId}/stampede/events?limit=100`,
+				`/api/v1/k3s/clusters/${clusterId}/stampede/events?limit=100`,
 				token,
 				projectId,
 			);

@@ -30,7 +30,7 @@
 		loading = true;
 		try {
 			targets = await api.get<NotionTarget[]>(
-				'/api/admin/notion/targets',
+				'/api/v1/admin/notion/targets',
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined
 			);
@@ -46,7 +46,7 @@
 		if (!await confirmDialog('이 연동 대상을 삭제하시겠습니까?')) return;
 		try {
 			await api.delete(
-				`/api/admin/notion/targets/${id}`,
+				`/api/v1/admin/notion/targets/${id}`,
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined
 			);
@@ -64,7 +64,7 @@
 			const headers: Record<string, string> = { 'Content-Type': 'application/json' };
 			if ($auth.token) headers['Authorization'] = `Bearer ${$auth.token}`;
 			if ($auth.projectId) headers['X-Project-Id'] = $auth.projectId;
-			const resp = await fetch(`${getBaseUrl()}/api/admin/notion/targets/${id}/test`, {
+			const resp = await fetch(`${getBaseUrl()}/api/v1/admin/notion/targets/${id}/test`, {
 				method: 'POST',
 				headers,
 				body: '{}',

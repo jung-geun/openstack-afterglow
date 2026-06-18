@@ -41,7 +41,7 @@
 		resetting = true;
 		resetError = '';
 		try {
-			await api.post(`/api/admin/volumes/${volume.id}/reset-status`, { status: resetStatus }, token, projectId);
+			await api.post(`/api/v1/admin/volumes/${volume.id}/reset-status`, { status: resetStatus }, token, projectId);
 			onSuccess();
 			onClose();
 		} catch (e) {

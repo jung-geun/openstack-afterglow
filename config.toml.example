@@ -372,7 +372,7 @@ unhealthy_seconds = 15
 prometheus_base_url = "http://prometheus:9090"
 prometheus_username = ""        # basic auth 사용자명 (미사용 시 빈 문자열)
 prometheus_password = ""        # basic auth 비밀번호 (secret.yaml에서 주입)
-# Prometheus Service Discovery 인증 토큰 (/api/sd/prometheus/targets)
+# Prometheus Service Discovery 인증 토큰 (/api/v1/sd/prometheus/targets)
 sd_token = ""                   # secret.yaml에서 주입
 # Prometheus scrape 대역 CIDR (예: 10.0.0.0/8). monitoring API 사용 시 필수.
 scrape_cidr = ""
@@ -393,13 +393,13 @@ grafana_base_url = ""           # Grafana 외부 URL (예: https://grafana.examp
 # scrape_configs:
 #   - job_name: "instances-node"
 #     http_sd_configs:
-#       - url: "http://backend:8000/api/sd/prometheus/targets"
+#       - url: "http://backend:8000/api/v1/sd/prometheus/targets"
 #         refresh_interval: 30s
 #         authorization:
 #           credentials_file: /etc/prometheus/sd-token
 #   - job_name: "instances-dcgm"
 #     http_sd_configs:
-#       - url: "http://backend:8000/api/sd/prometheus/targets"
+#       - url: "http://backend:8000/api/v1/sd/prometheus/targets"
 #         refresh_interval: 30s
 
 [monitoring.dashboards]

@@ -20,7 +20,7 @@ async def test_trend_returns_structure(client, mock_conn):
 
     with patch("app.api.common.dashboard.prom_query.query_range", new_callable=AsyncMock) as mock_qr:
         mock_qr.return_value = fake_series
-        resp = await client.get("/api/dashboard/metrics/trend")
+        resp = await client.get("/api/v1/dashboard/metrics/trend")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -41,7 +41,7 @@ async def test_trend_prometheus_unavailable_returns_empty(client, mock_conn):
 
     with patch("app.api.common.dashboard.prom_query.query_range", new_callable=AsyncMock) as mock_qr:
         mock_qr.side_effect = PromUnavailable("연결 실패")
-        resp = await client.get("/api/dashboard/metrics/trend")
+        resp = await client.get("/api/v1/dashboard/metrics/trend")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -67,7 +67,7 @@ async def test_trend_partial_failure_returns_available_series(client, mock_conn)
         raise PromUnavailable("no data")
 
     with patch("app.api.common.dashboard.prom_query.query_range", side_effect=_side_effect):
-        resp = await client.get("/api/dashboard/metrics/trend")
+        resp = await client.get("/api/v1/dashboard/metrics/trend")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -84,7 +84,7 @@ async def test_trend_data_values_rounded(client, mock_conn):
 
     with patch("app.api.common.dashboard.prom_query.query_range", new_callable=AsyncMock) as mock_qr:
         mock_qr.return_value = fake_series
-        resp = await client.get("/api/dashboard/metrics/trend")
+        resp = await client.get("/api/v1/dashboard/metrics/trend")
 
     assert resp.status_code == 200
     assert resp.json()["vcpu"]["data"][0] == 25.12

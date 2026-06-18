@@ -17,7 +17,7 @@ async def test_callback_invalid_token_returns_403():
             mock_db.consume_ha_callback_token = AsyncMock(return_value=None)
             mock_db.consume_callback_token = AsyncMock(return_value=None)
             resp = await ac.post(
-                "/api/k3s/callback",
+                "/api/v1/k3s/callback",
                 json={
                     "token": "invalid-token",
                     "success": True,
@@ -38,7 +38,7 @@ async def test_callback_failure_updates_status():
             mock_db.consume_callback_token = AsyncMock(return_value={"project_id": "proj-1", "cluster_id": "cluster-1"})
             mock_db.update_cluster_status = AsyncMock()
             resp = await ac.post(
-                "/api/k3s/callback",
+                "/api/v1/k3s/callback",
                 json={
                     "token": "valid-token",
                     "success": False,
@@ -61,7 +61,7 @@ async def test_callback_missing_kubeconfig_updates_error():
             mock_db.consume_callback_token = AsyncMock(return_value={"project_id": "proj-1", "cluster_id": "cluster-1"})
             mock_db.update_cluster_status = AsyncMock()
             resp = await ac.post(
-                "/api/k3s/callback",
+                "/api/v1/k3s/callback",
                 json={
                     "token": "valid-token",
                     "success": True,
@@ -83,7 +83,7 @@ async def test_callback_missing_node_token_updates_error():
             mock_db.consume_callback_token = AsyncMock(return_value={"project_id": "proj-1", "cluster_id": "cluster-1"})
             mock_db.update_cluster_status = AsyncMock()
             resp = await ac.post(
-                "/api/k3s/callback",
+                "/api/v1/k3s/callback",
                 json={
                     "token": "valid-token",
                     "success": True,
@@ -111,7 +111,7 @@ async def test_callback_success_triggers_agent_provisioning():
             with patch("app.api.k3s.callback.asyncio") as mock_asyncio:
                 mock_asyncio.create_task = AsyncMock()
                 resp = await ac.post(
-                    "/api/k3s/callback",
+                    "/api/v1/k3s/callback",
                     json={
                         "token": "valid-token",
                         "success": True,
@@ -159,14 +159,14 @@ async def test_callback_token_consumed_only_once():
             with patch("app.api.k3s.callback.asyncio"):
                 # 첫 번째 성공 요청 (success=false라서 update만)
                 resp1 = await ac.post(
-                    "/api/k3s/callback",
+                    "/api/v1/k3s/callback",
                     json={"token": "one-time-token", "success": False, "error": "fail"},
                 )
                 assert resp1.status_code == 200
 
             # 두 번째 동일 토큰 → 403
             resp2 = await ac.post(
-                "/api/k3s/callback",
+                "/api/v1/k3s/callback",
                 json={"token": "one-time-token", "success": False},
             )
     assert resp2.status_code == 403
@@ -184,7 +184,7 @@ async def test_callback_stores_plugin_status_dict():
             mock_db.get_cluster = AsyncMock(return_value={"master_count": 1})
             with patch("app.api.k3s.callback.asyncio"):
                 resp = await ac.post(
-                    "/api/k3s/callback",
+                    "/api/v1/k3s/callback",
                     json={
                         "token": "valid-token",
                         "success": True,
@@ -213,7 +213,7 @@ async def test_callback_accepts_legacy_string_plugin_status():
             mock_db.get_cluster = AsyncMock(return_value={"master_count": 1})
             with patch("app.api.k3s.callback.asyncio"):
                 resp = await ac.post(
-                    "/api/k3s/callback",
+                    "/api/v1/k3s/callback",
                     json={
                         "token": "valid-token",
                         "success": True,
@@ -232,7 +232,7 @@ async def test_callback_accepts_legacy_string_plugin_status():
 async def test_callback_requires_post():
     """GET /api/k3s/callback은 405를 반환해야 한다."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.get("/api/k3s/callback")
+        resp = await ac.get("/api/v1/k3s/callback")
     assert resp.status_code == 405
 
 
@@ -241,7 +241,7 @@ async def test_callback_invalid_json_returns_422():
     """유효하지 않은 JSON body는 422를 반환해야 한다."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.post(
-            "/api/k3s/callback",
+            "/api/v1/k3s/callback",
             content=b"not-json",
             headers={"Content-Type": "application/json"},
         )

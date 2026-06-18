@@ -48,11 +48,11 @@
 
     try {
       const results = await Promise.allSettled([
-        api.get<Array<{ id: string; name?: string }>>('/api/instances', token, project),
-        api.get<Array<{ id: string; name?: string }>>('/api/volumes', token, project),
-        api.get<Array<{ id: string; name?: string }>>('/api/images', token, project),
-        api.get<Array<{ id: string; name?: string }>>('/api/networks', token, project),
-        api.get<Array<{ id: string; name?: string }>>('/api/routers', token, project),
+        api.get<Array<{ id: string; name?: string }>>('/api/v1/instances', token, project),
+        api.get<Array<{ id: string; name?: string }>>('/api/v1/volumes', token, project),
+        api.get<Array<{ id: string; name?: string }>>('/api/v1/images', token, project),
+        api.get<Array<{ id: string; name?: string }>>('/api/v1/networks', token, project),
+        api.get<Array<{ id: string; name?: string }>>('/api/v1/routers', token, project),
       ]);
 
       const [instances, volumes, images, networks, routers] = results;

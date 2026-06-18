@@ -48,7 +48,7 @@ export function createLoadbalancerDetailController(opts: LoadbalancerDetailContr
     const t = untrack(() => opts.token());
     const pid = untrack(() => opts.projectId());
     api
-      .get<Member[]>(`/api/loadbalancers/${opts.lbId()}/pools/${poolId}/members`, t, pid)
+      .get<Member[]>(`/api/v1/loadbalancers/${opts.lbId()}/pools/${poolId}/members`, t, pid)
       .then((m) => {
         selectedPoolMembers = m;
       })
@@ -62,9 +62,9 @@ export function createLoadbalancerDetailController(opts: LoadbalancerDetailContr
     loading = true;
     try {
       const [lbData, listenersData, poolsData] = await Promise.all([
-        api.get<LoadBalancerDetail>(`/api/loadbalancers/${id}`, t, pid),
-        api.get<Listener[]>(`/api/loadbalancers/${id}/listeners`, t, pid),
-        api.get<Pool[]>(`/api/loadbalancers/${id}/pools`, t, pid),
+        api.get<LoadBalancerDetail>(`/api/v1/loadbalancers/${id}`, t, pid),
+        api.get<Listener[]>(`/api/v1/loadbalancers/${id}/listeners`, t, pid),
+        api.get<Pool[]>(`/api/v1/loadbalancers/${id}/pools`, t, pid),
       ]);
       lb = lbData;
       listeners = listenersData;
@@ -72,7 +72,7 @@ export function createLoadbalancerDetailController(opts: LoadbalancerDetailContr
       error = '';
       if (lbData.status === 'ERROR') {
         api
-          .get<LbStatusNode>(`/api/loadbalancers/${id}/status`, t, pid)
+          .get<LbStatusNode>(`/api/v1/loadbalancers/${id}/status`, t, pid)
           .then((tree) => {
             statusTree = tree;
           })
@@ -89,7 +89,7 @@ export function createLoadbalancerDetailController(opts: LoadbalancerDetailContr
     saving = true;
     try {
       await api.post(
-        `/api/loadbalancers/${opts.lbId()}/listeners`,
+        `/api/v1/loadbalancers/${opts.lbId()}/listeners`,
         listenerForm,
         opts.token(),
         opts.projectId(),
@@ -109,7 +109,7 @@ export function createLoadbalancerDetailController(opts: LoadbalancerDetailContr
     saving = true;
     try {
       await api.delete(
-        `/api/loadbalancers/${opts.lbId()}/listeners/${listenerId}`,
+        `/api/v1/loadbalancers/${opts.lbId()}/listeners/${listenerId}`,
         opts.token(),
         opts.projectId(),
       );
@@ -129,7 +129,7 @@ export function createLoadbalancerDetailController(opts: LoadbalancerDetailContr
     saving = true;
     try {
       await api.post(
-        `/api/loadbalancers/${opts.lbId()}/pools`,
+        `/api/v1/loadbalancers/${opts.lbId()}/pools`,
         poolForm,
         opts.token(),
         opts.projectId(),
@@ -149,7 +149,7 @@ export function createLoadbalancerDetailController(opts: LoadbalancerDetailContr
     saving = true;
     try {
       await api.delete(
-        `/api/loadbalancers/${opts.lbId()}/pools/${poolId}`,
+        `/api/v1/loadbalancers/${opts.lbId()}/pools/${poolId}`,
         opts.token(),
         opts.projectId(),
       );
@@ -175,7 +175,7 @@ export function createLoadbalancerDetailController(opts: LoadbalancerDetailContr
     saving = true;
     try {
       await api.post(
-        `/api/loadbalancers/${opts.lbId()}/pools/${selectedPoolId}/members`,
+        `/api/v1/loadbalancers/${opts.lbId()}/pools/${selectedPoolId}/members`,
         memberForm,
         opts.token(),
         opts.projectId(),
@@ -183,7 +183,7 @@ export function createLoadbalancerDetailController(opts: LoadbalancerDetailContr
       showAddMember = false;
       memberForm = { address: '', protocol_port: 80, weight: 1, name: '' };
       selectedPoolMembers = await api.get<Member[]>(
-        `/api/loadbalancers/${opts.lbId()}/pools/${selectedPoolId}/members`,
+        `/api/v1/loadbalancers/${opts.lbId()}/pools/${selectedPoolId}/members`,
         opts.token(),
         opts.projectId(),
       );
@@ -199,7 +199,7 @@ export function createLoadbalancerDetailController(opts: LoadbalancerDetailContr
     saving = true;
     try {
       await api.delete(
-        `/api/loadbalancers/${opts.lbId()}/pools/${selectedPoolId}/members/${memberId}`,
+        `/api/v1/loadbalancers/${opts.lbId()}/pools/${selectedPoolId}/members/${memberId}`,
         opts.token(),
         opts.projectId(),
       );
@@ -221,7 +221,7 @@ export function createLoadbalancerDetailController(opts: LoadbalancerDetailContr
       return;
     saving = true;
     try {
-      await api.delete(`/api/loadbalancers/${id}`, opts.token(), opts.projectId());
+      await api.delete(`/api/v1/loadbalancers/${id}`, opts.token(), opts.projectId());
       opts.onDeleted?.();
     } catch (e) {
       toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));

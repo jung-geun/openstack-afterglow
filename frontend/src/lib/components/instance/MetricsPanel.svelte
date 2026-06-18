@@ -58,7 +58,7 @@
 				prometheus_available: boolean;
 				stats: Record<string, StatInfo>;
 			}>(
-				`/api/instances/${instanceId}/metrics-summary?range=${range}`,
+				`/api/v1/instances/${instanceId}/metrics-summary?range=${range}`,
 				token,
 				projectId,
 			);
@@ -77,7 +77,7 @@
 			const resp = await api.get<{
 				metrics: Record<string, { series: Series[]; error: string | null }>;
 			}>(
-				`/api/instances/${instanceId}/metrics-batch?metrics=${keys.join(',')}&range=${range}`,
+				`/api/v1/instances/${instanceId}/metrics-batch?metrics=${keys.join(',')}&range=${range}`,
 				token,
 				projectId,
 			);

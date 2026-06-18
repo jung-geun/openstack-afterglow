@@ -313,10 +313,10 @@ def test_cmd_seal_calls_api_post_register_then_seal(isolated_layer_store, monkey
         layerbuild.cmd_seal(args)
 
     assert len(api_calls) == 2
-    assert api_calls[0][0] == "/api/union/layers"
+    assert api_calls[0][0] == "/api/v1/union/layers"
     assert api_calls[0][1]["content_hash"] == fixed_hash
     assert api_calls[0][1]["name"] == "test-layer"
-    assert api_calls[1][0] == f"/api/union/layers/{fixed_hash}/seal"
+    assert api_calls[1][0] == f"/api/v1/union/layers/{fixed_hash}/seal"
 
 
 def test_cmd_seal_api_failure_writes_api_pending_marker(isolated_layer_store, monkeypatch):
@@ -450,8 +450,8 @@ def test_resume_api_reads_pending_and_posts(isolated_layer_store, monkeypatch):
         layerbuild.cmd_resume_api(args)
 
     assert len(api_calls) == 2
-    assert api_calls[0][0] == "/api/union/layers"
-    assert api_calls[1][0] == f"/api/union/layers/{layer_hash}/seal"
+    assert api_calls[0][0] == "/api/v1/union/layers"
+    assert api_calls[1][0] == f"/api/v1/union/layers/{layer_hash}/seal"
     assert not (dest / ".api_pending").exists()
 
 

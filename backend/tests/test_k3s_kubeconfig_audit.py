@@ -27,7 +27,7 @@ async def test_kubeconfig_download_records_audit(client):
     ):
         mock_db.get_cluster = AsyncMock(return_value=_make_cluster_record())
         mock_db.get_kubeconfig = AsyncMock(return_value=b"apiVersion: v1\n...")
-        resp = await client.get("/api/k3s/clusters/k3s-1/kubeconfig")
+        resp = await client.get("/api/v1/k3s/clusters/k3s-1/kubeconfig")
     assert resp.status_code == 200
     mock_rec.assert_called_once()
     kwargs = mock_rec.call_args.kwargs
@@ -46,7 +46,7 @@ async def test_kubeconfig_head_does_not_record(client):
     ):
         mock_db.get_cluster = AsyncMock(return_value=_make_cluster_record())
         mock_db.get_kubeconfig = AsyncMock(return_value=b"apiVersion: v1\n...")
-        resp = await client.request("HEAD", "/api/k3s/clusters/k3s-1/kubeconfig")
+        resp = await client.request("HEAD", "/api/v1/k3s/clusters/k3s-1/kubeconfig")
     assert resp.status_code == 200
     mock_rec.assert_not_called()
 
@@ -59,6 +59,6 @@ async def test_kubeconfig_404_does_not_record(client):
         patch("app.api.k3s.clusters.rec", new=AsyncMock()) as mock_rec,
     ):
         mock_db.get_cluster = AsyncMock(return_value=None)
-        resp = await client.get("/api/k3s/clusters/missing/kubeconfig")
+        resp = await client.get("/api/v1/k3s/clusters/missing/kubeconfig")
     assert resp.status_code == 404
     mock_rec.assert_not_called()

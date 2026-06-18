@@ -49,7 +49,7 @@
 	async function load(marker?: string) {
 		loading = true;
 		try {
-			let url = `/api/admin/all-ports?limit=${pageSize}`;
+			let url = `/api/v1/admin/all-ports?limit=${pageSize}`;
 			if (marker) url += `&marker=${marker}`;
 			if (projectFilter) url += `&project_id=${encodeURIComponent(projectFilter)}`;
 			const res = await api.get<PagedResponse<PortInfo>>(url, token, projectId);
@@ -64,13 +64,13 @@
 
 	async function loadProjects() {
 		try {
-			allProjects = await api.get<ProjectName[]>('/api/admin/projects/names', token, projectId);
+			allProjects = await api.get<ProjectName[]>('/api/v1/admin/projects/names', token, projectId);
 		} catch { allProjects = []; }
 	}
 
 	async function loadNetworks() {
 		try {
-			allNetworks = await api.get<NetworkInfo[]>('/api/admin/all-networks', token, projectId);
+			allNetworks = await api.get<NetworkInfo[]>('/api/v1/admin/all-networks', token, projectId);
 		} catch { allNetworks = []; }
 	}
 
@@ -78,7 +78,7 @@
 		if (!editPort) return false;
 		updating = true; editError = '';
 		try {
-			await api.put(`/api/admin/ports/${editPort.id}`, { name }, token, projectId);
+			await api.put(`/api/v1/admin/ports/${editPort.id}`, { name }, token, projectId);
 			editPort = null;
 			await load(markerStack[markerStack.length - 1]);
 			return true;
@@ -87,7 +87,7 @@
 
 	async function doDelete(id: string): Promise<string | true> {
 		try {
-			await api.delete(`/api/admin/ports/${id}`, token, projectId);
+			await api.delete(`/api/v1/admin/ports/${id}`, token, projectId);
 			await load(markerStack[markerStack.length - 1]);
 			return true;
 		} catch (e) { return e instanceof ApiError ? e.message : '삭제 실패'; }
@@ -96,7 +96,7 @@
 	async function createPort(form: { network_id: string; name: string; project_id: string; fixed_ip: string }): Promise<boolean> {
 		creating = true; createError = '';
 		try {
-			await api.post('/api/admin/ports', {
+			await api.post('/api/v1/admin/ports', {
 				network_id: form.network_id,
 				name: form.name || undefined,
 				project_id: form.project_id || undefined,

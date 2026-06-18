@@ -53,7 +53,7 @@ async def test_overview_returns_stats(client, mock_conn):
             },
         ),
     ):
-        resp = await client.get("/api/dashboard/overview")
+        resp = await client.get("/api/v1/dashboard/overview")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -74,7 +74,7 @@ async def test_overview_error_instance_in_alerts(client, mock_conn):
         patch("app.api.common.dashboard.nova.get_project_limits", return_value={}),
         patch("app.api.common.dashboard.cinder.get_volume_limits", return_value={}),
     ):
-        resp = await client.get("/api/dashboard/overview")
+        resp = await client.get("/api/v1/dashboard/overview")
 
     assert resp.status_code == 200
     alerts = resp.json()["alerts"]
@@ -91,7 +91,7 @@ async def test_overview_no_instances(client, mock_conn):
         patch("app.api.common.dashboard.nova.get_project_limits", return_value={}),
         patch("app.api.common.dashboard.cinder.get_volume_limits", return_value={}),
     ):
-        resp = await client.get("/api/dashboard/overview")
+        resp = await client.get("/api/v1/dashboard/overview")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -124,7 +124,7 @@ async def test_usage_stats_returns_expected_structure(client, mock_conn):
             },
         ),
     ):
-        resp = await client.get("/api/dashboard/usage-stats?range=30d")
+        resp = await client.get("/api/v1/dashboard/usage-stats?range=30d")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -144,7 +144,7 @@ async def test_usage_stats_top_instances_sorted_by_vcpus(client, mock_conn):
         patch("app.api.common.dashboard._list_flavors_as_dicts", return_value=MOCK_FLAVORS),
         patch("app.api.common.dashboard.nova.get_project_usage", return_value={}),
     ):
-        resp = await client.get("/api/dashboard/usage-stats")
+        resp = await client.get("/api/v1/dashboard/usage-stats")
 
     assert resp.status_code == 200
     instances = resp.json()["top_instances"]
@@ -178,7 +178,7 @@ async def test_usage_stats_unauthenticated(non_admin_client):
             yield mock_conn
 
         app.dependency_overrides[get_os_conn] = override
-        resp = await non_admin_client.get("/api/dashboard/usage-stats")
+        resp = await non_admin_client.get("/api/v1/dashboard/usage-stats")
 
     assert resp.status_code == 200  # 일반 사용자도 접근 가능
 
@@ -211,7 +211,7 @@ async def test_usage_report_structure(client, mock_conn):
             },
         ),
     ):
-        resp = await client.get("/api/dashboard/usage-report?range=30d")
+        resp = await client.get("/api/v1/dashboard/usage-report?range=30d")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -240,7 +240,7 @@ async def test_usage_report_flavor_hours_sorted(client, mock_conn):
         ),
         patch("app.api.common.dashboard.nova.get_project_quota", return_value={}),
     ):
-        resp = await client.get("/api/dashboard/usage-report?range=7d")
+        resp = await client.get("/api/v1/dashboard/usage-report?range=7d")
 
     assert resp.status_code == 200
     hours = [fh["usage_hours"] for fh in resp.json()["flavor_hours"]]
@@ -256,7 +256,7 @@ async def test_usage_report_flavor_hours_sorted(client, mock_conn):
 async def test_activity_no_db_returns_empty_kpi(client, mock_conn):
     """DB 미사용 시 KPI 0 + 24개 버킷 반환 (에러 아님)."""
     with patch("app.api.common.dashboard.is_db_available", return_value=False):
-        resp = await client.get("/api/dashboard/activity?range=7d")
+        resp = await client.get("/api/v1/dashboard/activity?range=7d")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -270,7 +270,7 @@ async def test_activity_no_db_returns_empty_kpi(client, mock_conn):
 async def test_activity_hour_distribution_always_24_buckets(client, mock_conn):
     """hour_distribution 항상 24개 요소 (범위 파라미터 무관)."""
     with patch("app.api.common.dashboard.is_db_available", return_value=False):
-        resp = await client.get("/api/dashboard/activity?range=24h")
+        resp = await client.get("/api/v1/dashboard/activity?range=24h")
 
     assert resp.status_code == 200
     dist = resp.json()["hour_distribution"]
@@ -282,7 +282,7 @@ async def test_activity_hour_distribution_always_24_buckets(client, mock_conn):
 async def test_activity_range_in_response(client, mock_conn):
     """응답에 range 필드가 요청값 그대로 반환."""
     with patch("app.api.common.dashboard.is_db_available", return_value=False):
-        resp = await client.get("/api/dashboard/activity?range=30d")
+        resp = await client.get("/api/v1/dashboard/activity?range=30d")
 
     assert resp.status_code == 200
     assert resp.json()["range"] == "30d"

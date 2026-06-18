@@ -24,8 +24,8 @@
     error = '';
     try {
       const [projs, profile] = await Promise.all([
-        api.get<Project[]>('/api/auth/projects', token),
-        api.get<{ default_project_id: string }>('/api/profile', token).catch(() => null),
+        api.get<Project[]>('/api/v1/auth/projects', token),
+        api.get<{ default_project_id: string }>('/api/v1/profile', token).catch(() => null),
       ]);
       projects = projs;
       defaultProjectId = profile?.default_project_id ?? '';
@@ -52,7 +52,7 @@
         username: string;
         roles: string[];
         is_system_admin: boolean;
-      }>('/api/auth/token/project', { project_id: proj.id }, $auth.token);
+      }>('/api/v1/auth/token/project', { project_id: proj.id }, $auth.token);
 
       setAuth({
         token: resp.token,
@@ -66,7 +66,7 @@
         isSystemAdmin: !!resp.is_system_admin,
       });
 
-      api.post('/api/networks/ensure-default', {}, resp.token, resp.project_id).catch(() => {});
+      api.post('/api/v1/networks/ensure-default', {}, resp.token, resp.project_id).catch(() => {});
     } catch (e) {
       error = e instanceof ApiError ? `전환 실패: ${e.message}` : '프로젝트 전환 실패';
     } finally {
@@ -79,7 +79,7 @@
     settingDefault = true;
     defaultMsg = '';
     try {
-      await api.patch('/api/profile', { default_project_id: proj.id }, token);
+      await api.patch('/api/v1/profile', { default_project_id: proj.id }, token);
       defaultProjectId = proj.id;
       defaultMsg = `'${proj.name}'이(가) 기본 프로젝트로 설정되었습니다.`;
     } catch (e) {
@@ -94,7 +94,7 @@
     settingDefault = true;
     defaultMsg = '';
     try {
-      await api.patch('/api/profile', { default_project_id: '' }, token);
+      await api.patch('/api/v1/profile', { default_project_id: '' }, token);
       defaultProjectId = '';
       defaultMsg = '기본 프로젝트가 해제되었습니다.';
     } catch (e) {

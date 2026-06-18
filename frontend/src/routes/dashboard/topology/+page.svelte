@@ -33,7 +33,7 @@
 		error = '';
 		try {
 			data = await api.get<TopologyData>(
-				'/api/networks/topology',
+				'/api/v1/networks/topology',
 				$auth.token ?? undefined,
 				$auth.projectId ?? undefined
 			);

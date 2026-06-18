@@ -17,9 +17,9 @@
 		error = '';
 		try {
 			const [projs, profile] = await Promise.all([
-				api.get<Project[]>('/api/auth/projects/recent', $auth.token ?? undefined),
+				api.get<Project[]>('/api/v1/auth/projects/recent', $auth.token ?? undefined),
 				// Fix 3: 프로필 401은 .catch(()=>null)로 의도적으로 허용 — 전역 로그아웃 억제
-			api.get<{ default_project_id: string }>('/api/profile', $auth.token ?? undefined, undefined, { suppressAuthRedirect: true }).catch(() => null),
+			api.get<{ default_project_id: string }>('/api/v1/profile', $auth.token ?? undefined, undefined, { suppressAuthRedirect: true }).catch(() => null),
 			]);
 			projects = projs;
 
@@ -61,7 +61,7 @@
 				username: string;
 				roles: string[];
 				is_system_admin: boolean;
-			}>('/api/auth/token/project', { project_id: proj.id }, $auth.token);
+			}>('/api/v1/auth/token/project', { project_id: proj.id }, $auth.token);
 			setAuth({
 				token: resp.token,
 				refreshToken: resp.refresh_token,
@@ -83,7 +83,7 @@
 
 	function logout() {
 		if ($auth.token) {
-			api.post('/api/auth/logout', {}, $auth.token).catch(() => {});
+			api.post('/api/v1/auth/logout', {}, $auth.token).catch(() => {});
 		}
 		clearAuth();
 		goto('/');

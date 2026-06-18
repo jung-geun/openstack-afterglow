@@ -60,10 +60,10 @@ describe('api.upload', () => {
 
 		const { api } = await import('../client');
 		const formData = new FormData();
-		const result = await api.upload('/api/upload', formData, 'my-token', 'proj-1');
+		const result = await api.upload('/api/v1/upload', formData, 'my-token', 'proj-1');
 
 		const [url, opts] = mockFetch.mock.calls[0];
-		expect(url).toContain('/api/upload');
+		expect(url).toContain('/api/v1/upload');
 		expect(opts.method).toBe('POST');
 		expect(opts.headers['Authorization']).toBe('Bearer my-token');
 		expect(opts.headers['X-Project-Id']).toBe('proj-1');
@@ -74,7 +74,7 @@ describe('api.upload', () => {
 	it('204 응답 시 undefined 반환', async () => {
 		mockFetch.mockResolvedValueOnce({ ok: true, status: 204 });
 		const { api } = await import('../client');
-		const result = await api.upload('/api/upload', new FormData());
+		const result = await api.upload('/api/v1/upload', new FormData());
 		expect(result).toBeUndefined();
 	});
 
@@ -86,7 +86,7 @@ describe('api.upload', () => {
 			json: async () => ({ detail: '파일이 너무 큽니다' }),
 		});
 		const { api, ApiError } = await import('../client');
-		await expect(api.upload('/api/upload', new FormData())).rejects.toBeInstanceOf(ApiError);
+		await expect(api.upload('/api/v1/upload', new FormData())).rejects.toBeInstanceOf(ApiError);
 	});
 });
 
@@ -97,7 +97,7 @@ describe('api.uploadWithProgress', () => {
 
 	it('XHR에 올바른 헤더 설정', async () => {
 		const { api } = await import('../client');
-		api.uploadWithProgress('/api/upload', new FormData(), vi.fn(), 'tok', 'my-proj');
+		api.uploadWithProgress('/api/v1/upload', new FormData(), vi.fn(), 'tok', 'my-proj');
 
 		expect(lastXhr._headers['Authorization']).toBe('Bearer tok');
 		expect(lastXhr._headers['X-Project-Id']).toBe('my-proj');
@@ -107,7 +107,7 @@ describe('api.uploadWithProgress', () => {
 	it('onload 성공 시 JSON 파싱 결과 반환', async () => {
 		const { api } = await import('../client');
 		// uploadWithProgress 호출 후에 lastXhr 설정 (XHR 인스턴스가 생성된 뒤)
-		const { promise } = api.uploadWithProgress('/api/upload', new FormData(), vi.fn());
+		const { promise } = api.uploadWithProgress('/api/v1/upload', new FormData(), vi.fn());
 		lastXhr.status = 200;
 		lastXhr.responseText = '{"id":"obj-1"}';
 		lastXhr.onload?.();
@@ -118,7 +118,7 @@ describe('api.uploadWithProgress', () => {
 
 	it('204 응답 시 undefined 반환', async () => {
 		const { api } = await import('../client');
-		const { promise } = api.uploadWithProgress('/api/upload', new FormData(), vi.fn());
+		const { promise } = api.uploadWithProgress('/api/v1/upload', new FormData(), vi.fn());
 		lastXhr.status = 204;
 		lastXhr.onload?.();
 
@@ -128,7 +128,7 @@ describe('api.uploadWithProgress', () => {
 	it('progress 이벤트 콜백 호출', async () => {
 		const { api } = await import('../client');
 		const onProgress = vi.fn();
-		api.uploadWithProgress('/api/upload', new FormData(), onProgress);
+		api.uploadWithProgress('/api/v1/upload', new FormData(), onProgress);
 
 		lastXhr.upload.onprogress?.({ lengthComputable: true, loaded: 50, total: 100 });
 		expect(onProgress).toHaveBeenCalledWith({ loaded: 50, total: 100 });
@@ -137,7 +137,7 @@ describe('api.uploadWithProgress', () => {
 	it('lengthComputable=false면 onProgress 호출 안 함', async () => {
 		const { api } = await import('../client');
 		const onProgress = vi.fn();
-		api.uploadWithProgress('/api/upload', new FormData(), onProgress);
+		api.uploadWithProgress('/api/v1/upload', new FormData(), onProgress);
 
 		lastXhr.upload.onprogress?.({ lengthComputable: false, loaded: 0, total: 0 });
 		expect(onProgress).not.toHaveBeenCalled();
@@ -145,7 +145,7 @@ describe('api.uploadWithProgress', () => {
 
 	it('abort()로 ApiError(0) reject', async () => {
 		const { api, ApiError } = await import('../client');
-		const { promise, abort } = api.uploadWithProgress('/api/upload', new FormData(), vi.fn());
+		const { promise, abort } = api.uploadWithProgress('/api/v1/upload', new FormData(), vi.fn());
 		abort();
 		await expect(promise).rejects.toBeInstanceOf(ApiError);
 		await expect(promise).rejects.toMatchObject({ status: 0 });
@@ -153,7 +153,7 @@ describe('api.uploadWithProgress', () => {
 
 	it('4xx onload 시 ApiError reject', async () => {
 		const { api, ApiError } = await import('../client');
-		const { promise } = api.uploadWithProgress('/api/upload', new FormData(), vi.fn());
+		const { promise } = api.uploadWithProgress('/api/v1/upload', new FormData(), vi.fn());
 		lastXhr.status = 400;
 		lastXhr.statusText = 'Bad Request';
 		lastXhr.responseText = '{"detail":"잘못된 요청"}';
@@ -163,7 +163,7 @@ describe('api.uploadWithProgress', () => {
 
 	it('onerror 시 네트워크 오류 reject', async () => {
 		const { api } = await import('../client');
-		const { promise } = api.uploadWithProgress('/api/upload', new FormData(), vi.fn());
+		const { promise } = api.uploadWithProgress('/api/v1/upload', new FormData(), vi.fn());
 		lastXhr.onerror?.();
 		await expect(promise).rejects.toThrow('네트워크 오류');
 	});
@@ -177,7 +177,7 @@ describe('api.putWithProgress', () => {
 	it('PUT 메서드로 blob 전송', async () => {
 		const { api } = await import('../client');
 		const blob = new Blob(['data'], { type: 'text/plain' });
-		api.putWithProgress('/api/upload', blob, 'text/plain', vi.fn(), 'tok', 'proj');
+		api.putWithProgress('/api/v1/upload', blob, 'text/plain', vi.fn(), 'tok', 'proj');
 
 		expect(lastXhr._method).toBe('PUT');
 		expect(lastXhr._headers['Content-Type']).toBe('text/plain');
@@ -188,7 +188,7 @@ describe('api.putWithProgress', () => {
 	it('성공 시 JSON 파싱', async () => {
 		const { api } = await import('../client');
 		const blob = new Blob(['data']);
-		const { promise } = api.putWithProgress('/api/upload', blob, 'application/octet-stream', vi.fn());
+		const { promise } = api.putWithProgress('/api/v1/upload', blob, 'application/octet-stream', vi.fn());
 		lastXhr.status = 200;
 		lastXhr.responseText = '{"etag":"abc"}';
 		lastXhr.onload?.();
@@ -199,7 +199,7 @@ describe('api.putWithProgress', () => {
 	it('abort() 동작', async () => {
 		const { api, ApiError } = await import('../client');
 		const blob = new Blob(['data']);
-		const { promise, abort } = api.putWithProgress('/api/upload', blob, 'application/octet-stream', vi.fn());
+		const { promise, abort } = api.putWithProgress('/api/v1/upload', blob, 'application/octet-stream', vi.fn());
 		abort();
 		await expect(promise).rejects.toBeInstanceOf(ApiError);
 	});
@@ -207,7 +207,7 @@ describe('api.putWithProgress', () => {
 	it('contentType 없으면 application/octet-stream 기본값', async () => {
 		const { api } = await import('../client');
 		const blob = new Blob(['data']);
-		api.putWithProgress('/api/upload', blob, '', vi.fn());
+		api.putWithProgress('/api/v1/upload', blob, '', vi.fn());
 		expect(lastXhr._headers['Content-Type']).toBe('application/octet-stream');
 	});
 });
@@ -228,7 +228,7 @@ describe('api.downloadBlob', () => {
 		});
 
 		const { api } = await import('../client');
-		const result = await api.downloadBlob('/api/download');
+		const result = await api.downloadBlob('/api/v1/download');
 		expect(result.filename).toBe('report.pdf');
 		expect(result.blob).toBe(blob);
 	});
@@ -242,7 +242,7 @@ describe('api.downloadBlob', () => {
 		});
 
 		const { api } = await import('../client');
-		const result = await api.downloadBlob('/api/download');
+		const result = await api.downloadBlob('/api/v1/download');
 		expect(result.filename).toBe('download');
 	});
 
@@ -255,7 +255,7 @@ describe('api.downloadBlob', () => {
 		});
 
 		const { api } = await import('../client');
-		await api.downloadBlob('/api/download', 'tok', 'proj-1');
+		await api.downloadBlob('/api/v1/download', 'tok', 'proj-1');
 
 		const [, opts] = mockFetch.mock.calls[0];
 		expect(opts.headers['Authorization']).toBe('Bearer tok');
@@ -271,7 +271,7 @@ describe('api.downloadBlob', () => {
 		});
 
 		const { api, ApiError } = await import('../client');
-		await expect(api.downloadBlob('/api/download')).rejects.toBeInstanceOf(ApiError);
+		await expect(api.downloadBlob('/api/v1/download')).rejects.toBeInstanceOf(ApiError);
 	});
 });
 
@@ -306,7 +306,7 @@ describe('api.postSse', () => {
 		);
 
 		const { api } = await import('../client');
-		api.postSse('/api/sse', { cmd: 'run' }, 'tok', 'proj', onMessage);
+		api.postSse('/api/v1/sse', { cmd: 'run' }, 'tok', 'proj', onMessage);
 
 		// 비동기 스트림 처리 대기
 		await new Promise((r) => setTimeout(r, 10));
@@ -320,7 +320,7 @@ describe('api.postSse', () => {
 		mockFetch.mockResolvedValueOnce(makeStreamResponse(['data: not-json\n', '']));
 
 		const { api } = await import('../client');
-		api.postSse('/api/sse', {}, undefined, undefined, onMessage);
+		api.postSse('/api/v1/sse', {}, undefined, undefined, onMessage);
 		await new Promise((r) => setTimeout(r, 10));
 		expect(onMessage).not.toHaveBeenCalled();
 	});
@@ -330,7 +330,7 @@ describe('api.postSse', () => {
 		mockFetch.mockRejectedValueOnce(new Error('Network failure'));
 
 		const { api } = await import('../client');
-		api.postSse('/api/sse', {}, undefined, undefined, undefined, onError);
+		api.postSse('/api/v1/sse', {}, undefined, undefined, undefined, onError);
 		await new Promise((r) => setTimeout(r, 10));
 		expect(onError).toHaveBeenCalledOnce();
 	});
@@ -339,7 +339,7 @@ describe('api.postSse', () => {
 		mockFetch.mockResolvedValueOnce(makeStreamResponse(['']));
 
 		const { api } = await import('../client');
-		api.postSse('/api/sse', { body: true }, 'my-tok', 'my-proj');
+		api.postSse('/api/v1/sse', { body: true }, 'my-tok', 'my-proj');
 		await new Promise((r) => setTimeout(r, 10));
 
 		const [, opts] = mockFetch.mock.calls[0];

@@ -26,7 +26,7 @@
 
   async function fetchSnapshots(opts?: { refresh?: boolean }) {
     try {
-      snapshots = await api.get<ShareSnapshot[]>('/api/share-snapshots', token, projectId, opts);
+      snapshots = await api.get<ShareSnapshot[]>('/api/v1/share-snapshots', token, projectId, opts);
       error = '';
     } catch (e) {
       error = e instanceof ApiError ? `조회 실패 (${e.status})` : '서버 오류';
@@ -37,7 +37,7 @@
 
   async function openCreateModal() {
     try {
-      fileStorages = await api.get<FileStorage[]>('/api/file-storage', token, projectId);
+      fileStorages = await api.get<FileStorage[]>('/api/v1/file-storage', token, projectId);
     } catch {
       fileStorages = [];
     }
@@ -46,7 +46,7 @@
 
   async function createSnapshot(form: { share_id: string; name: string; description: string }): Promise<string | true> {
     try {
-      await api.post('/api/share-snapshots', {
+      await api.post('/api/v1/share-snapshots', {
         share_id: form.share_id,
         name: form.name,
         description: form.description || undefined,
@@ -62,7 +62,7 @@
     if (!await confirmDialog(`스냅샷 "${name || id.slice(0, 8)}"을 삭제하시겠습니까?`)) return;
     deleting = id;
     try {
-      await api.delete(`/api/share-snapshots/${id}`, token, projectId);
+      await api.delete(`/api/v1/share-snapshots/${id}`, token, projectId);
       await fetchSnapshots();
     } catch (e) {
       toast.error('삭제 실패: ' + (e instanceof ApiError ? e.message : String(e)));

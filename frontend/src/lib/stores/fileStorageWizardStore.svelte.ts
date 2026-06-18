@@ -98,8 +98,8 @@ export function createFileStorageWizardStore(opts: FsWizardOptions) {
 		// Promise.allSettled 로 types/networks 를 독립적으로 로드
 		// — networks 실패가 share type 목록을 날리지 않도록
 		const [typesResult, networksResult] = await Promise.allSettled([
-			api.get<ShareTypeMeta[]>('/api/file-storage/types', token, projectId),
-			api.get<ShareNetwork[]>('/api/share-networks', token, projectId),
+			api.get<ShareTypeMeta[]>('/api/v1/file-storage/types', token, projectId),
+			api.get<ShareNetwork[]>('/api/v1/share-networks', token, projectId),
 		]);
 		if (typesResult.status === 'fulfilled') {
 			shareTypes = typesResult.value;
@@ -138,7 +138,7 @@ export function createFileStorageWizardStore(opts: FsWizardOptions) {
 		}
 		step = 2;
 		if (neutronNetworks.length === 0) {
-			api.get<NeutronNetwork[]>('/api/networks', token, projectId)
+			api.get<NeutronNetwork[]>('/api/v1/networks', token, projectId)
 				.then((r) => (neutronNetworks = r))
 				.catch(() => (neutronNetworks = []));
 		}
@@ -152,7 +152,7 @@ export function createFileStorageWizardStore(opts: FsWizardOptions) {
 		loadingSubnets = true;
 		try {
 			const detail = await api.get<{ id: string; subnet_details: Subnet[] }>(
-				`/api/networks/${inlineNetForm.neutron_net_id}`, token, projectId,
+				`/api/v1/networks/${inlineNetForm.neutron_net_id}`, token, projectId,
 			);
 			subnets = detail.subnet_details ?? [];
 		} catch { subnets = []; }
@@ -163,7 +163,7 @@ export function createFileStorageWizardStore(opts: FsWizardOptions) {
 		if (!inlineNetForm.name.trim() || !inlineNetForm.neutron_net_id || !inlineNetForm.neutron_subnet_id) return;
 		inlineNetCreating = true; inlineNetError = '';
 		try {
-			const net = await api.post<ShareNetwork>('/api/share-networks', {
+			const net = await api.post<ShareNetwork>('/api/v1/share-networks', {
 				name: inlineNetForm.name, description: inlineNetForm.description,
 				neutron_net_id: inlineNetForm.neutron_net_id, neutron_subnet_id: inlineNetForm.neutron_subnet_id,
 			}, token, projectId);
@@ -196,12 +196,12 @@ export function createFileStorageWizardStore(opts: FsWizardOptions) {
 				body.metadata = metadata;
 			}
 			const created = await apiMut('파일 스토리지 생성',
-				() => api.post<FileStorage>('/api/file-storage', body, token, projectId),
+				() => api.post<FileStorage>('/api/v1/file-storage', body, token, projectId),
 			);
 			createdFs = created;
 			try {
 				accessRules = await api.get<AccessRule[]>(
-					`/api/file-storage/${created.id}/access-rules`, token, projectId,
+					`/api/v1/file-storage/${created.id}/access-rules`, token, projectId,
 				);
 			} catch { accessRules = []; }
 			step = 3;
@@ -216,7 +216,7 @@ export function createFileStorageWizardStore(opts: FsWizardOptions) {
 		try {
 			const access_type = createdFs.share_proto === 'NFS' ? 'ip' : 'cephx';
 			const rule = await api.post<AccessRule>(
-				`/api/file-storage/${createdFs.id}/access-rules`,
+				`/api/v1/file-storage/${createdFs.id}/access-rules`,
 				{ access_to: ruleForm.access_to.trim(), access_level: ruleForm.access_level, access_type },
 				token, projectId,
 			);

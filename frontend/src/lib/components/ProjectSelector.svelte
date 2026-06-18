@@ -25,7 +25,7 @@
 		if (!$auth.token) return;
 		loading = true;
 		try {
-			projects = await api.get<Project[]>('/api/auth/projects', $auth.token);
+			projects = await api.get<Project[]>('/api/v1/auth/projects', $auth.token);
 			error = '';
 		} catch (e) {
 			error = e instanceof ApiError ? e.message : '프로젝트 목록 조회 실패';
@@ -50,7 +50,7 @@
 				username: string;
 				roles: string[];
 				is_system_admin: boolean;
-			}>('/api/auth/token/project', { project_id: project.id }, $auth.token);
+			}>('/api/v1/auth/token/project', { project_id: project.id }, $auth.token);
 
 			setAuth({
 				token: resp.token,
@@ -67,7 +67,7 @@
 			isOpen = false;
 
 			// Default 네트워크 확인/생성 (fire-and-forget)
-			api.post('/api/networks/ensure-default', {}, resp.token, resp.project_id).catch(() => {});
+			api.post('/api/v1/networks/ensure-default', {}, resp.token, resp.project_id).catch(() => {});
 		} catch (e) {
 			error = e instanceof ApiError ? `프로젝트 전환 실패: ${e.message}` : '프로젝트 전환 실패';
 		} finally {

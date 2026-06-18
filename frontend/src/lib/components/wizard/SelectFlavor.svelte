@@ -35,7 +35,7 @@
 	onMount(async () => {
 		try {
 			const data = await api.get<{ gpu_types: GpuTypeAvailability[] }>(
-				'/api/dashboard/gpu-available', token, projectId
+				'/api/v1/dashboard/gpu-available', token, projectId
 			);
 			gpuAvailability = data.gpu_types ?? [];
 		} catch (e) {

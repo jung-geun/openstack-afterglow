@@ -28,7 +28,7 @@
 		error = '';
 		try {
 			data = await api.get<CertificateExpiryResponse>(
-				`/api/k3s/clusters/${clusterId}/certificate-expiry`,
+				`/api/v1/k3s/clusters/${clusterId}/certificate-expiry`,
 				token,
 				projectId,
 			);

@@ -11,7 +11,7 @@ from app.main import app
 @pytest.mark.asyncio
 async def test_list_secrets_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-        r = await c.get("/api/secrets")
+        r = await c.get("/api/v1/secrets")
     assert r.status_code == 401
 
 
@@ -37,7 +37,7 @@ async def test_list_secrets_success(client):
             ]
         ),
     ):
-        r = await client.get("/api/secrets")
+        r = await client.get("/api/v1/secrets")
     assert r.status_code == 200
     data = r.json()
     assert len(data) == 1
@@ -55,7 +55,7 @@ async def test_create_secret_success(client):
             return_value={"id": "new-id", "name": "test-secret", "secret_ref": "http://barbican/v1/secrets/new-id"}
         )
         r = await client.post(
-            "/api/secrets",
+            "/api/v1/secrets",
             json={
                 "name": "test-secret",
                 "secret_type": "passphrase",
@@ -75,7 +75,7 @@ async def test_delete_system_managed_secret_forbidden(client):
         mock_asyncio.to_thread = AsyncMock(
             side_effect=ValueError("시스템 관리 secret은 삭제할 수 없습니다: afterglow-k8s-kek")
         )
-        r = await client.delete("/api/secrets/some-id")
+        r = await client.delete("/api/v1/secrets/some-id")
     assert r.status_code == 403
 
 
@@ -85,7 +85,7 @@ async def test_get_effective_quota_success(client):
         mock_asyncio.to_thread = AsyncMock(
             return_value={"secrets": -1, "orders": -1, "containers": -1, "consumers": -1, "cas": -1}
         )
-        r = await client.get("/api/secrets/quota/effective")
+        r = await client.get("/api/v1/secrets/quota/effective")
     assert r.status_code == 200
 
 

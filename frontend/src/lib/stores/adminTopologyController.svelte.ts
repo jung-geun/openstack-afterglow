@@ -29,7 +29,7 @@ export function createAdminTopologyController(opts: AdminTopologyControllerOpts)
     error = '';
     try {
       data = await api.get<TopologyData>(
-        '/api/admin/topology',
+        '/api/v1/admin/topology',
         opts.token(),
         opts.projectId(),
       );
@@ -45,7 +45,7 @@ export function createAdminTopologyController(opts: AdminTopologyControllerOpts)
     if (!opts.token()) return;
     try {
       traffic = await api.get<TopologyTraffic>(
-        '/api/networks/topology/traffic?all_projects=true',
+        '/api/v1/networks/topology/traffic?all_projects=true',
         opts.token(),
         opts.projectId(),
       );

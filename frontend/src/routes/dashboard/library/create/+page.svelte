@@ -37,7 +37,7 @@
   async function loadSealedLayers() {
     loadingParents = true;
     try {
-      const all = await api.get<LayerInfo[]>('/api/union/layers?limit=200', token, projectId);
+      const all = await api.get<LayerInfo[]>('/api/v1/union/layers?limit=200', token, projectId);
       sealedLayers = all.filter(l => l.sealed);
     } catch {
       // 부모 로드 실패는 무시 (선택 사항)
@@ -72,7 +72,7 @@
       if (parentId) body.parent_id = parentId;
       if (ubuntuBase.trim()) body.ubuntu_base = ubuntuBase.trim();
 
-      const result = await api.post<LayerInfo>('/api/union/layers', body, token, projectId);
+      const result = await api.post<LayerInfo>('/api/v1/union/layers', body, token, projectId);
       goto(`/dashboard/library/${encodeURIComponent(result.id)}`);
     } catch (e) {
       error = e instanceof ApiError ? e.message : '레이어 생성 실패';

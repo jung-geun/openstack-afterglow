@@ -24,7 +24,7 @@ def _foreign_resource(project_id: str = "other-project-999"):
 @pytest.mark.asyncio
 async def test_get_network_other_project_returns_404(client, mock_conn):
     mock_conn.network.get_network = MagicMock(return_value=_foreign_resource())
-    resp = await client.get("/api/networks/net-foreign")
+    resp = await client.get("/api/v1/networks/net-foreign")
     assert resp.status_code == 404
 
 
@@ -49,14 +49,14 @@ async def test_get_external_network_passes_owner_check(client, mock_conn):
             "routers": [],
         },
     ):
-        resp = await client.get("/api/networks/net-ext")
+        resp = await client.get("/api/v1/networks/net-ext")
     assert resp.status_code == 200
 
 
 @pytest.mark.asyncio
 async def test_delete_network_other_project_returns_404(client, mock_conn):
     mock_conn.network.get_network = MagicMock(return_value=_foreign_resource())
-    resp = await client.delete("/api/networks/net-foreign")
+    resp = await client.delete("/api/v1/networks/net-foreign")
     assert resp.status_code == 404
 
 
@@ -64,7 +64,7 @@ async def test_delete_network_other_project_returns_404(client, mock_conn):
 async def test_admin_can_delete_other_project_network(admin_client, mock_conn):
     mock_conn.network.get_network = MagicMock(return_value=_foreign_resource())
     with patch("app.api.network.networks.neutron.delete_network", return_value=None):
-        resp = await admin_client.delete("/api/networks/net-foreign")
+        resp = await admin_client.delete("/api/v1/networks/net-foreign")
     assert resp.status_code == 204
 
 
@@ -75,7 +75,7 @@ async def test_admin_can_delete_other_project_network(admin_client, mock_conn):
 async def test_update_subnet_other_project_returns_404(client, mock_conn):
     mock_conn.network.get_subnet = MagicMock(return_value=_foreign_resource())
     resp = await client.put(
-        "/api/networks/subnets/sub-foreign",
+        "/api/v1/networks/subnets/sub-foreign",
         json={"name": "x", "gateway_ip": None, "enable_dhcp": True},
     )
     assert resp.status_code == 404
@@ -84,7 +84,7 @@ async def test_update_subnet_other_project_returns_404(client, mock_conn):
 @pytest.mark.asyncio
 async def test_delete_subnet_other_project_returns_404(client, mock_conn):
     mock_conn.network.get_subnet = MagicMock(return_value=_foreign_resource())
-    resp = await client.delete("/api/networks/subnets/sub-foreign")
+    resp = await client.delete("/api/v1/networks/subnets/sub-foreign")
     assert resp.status_code == 404
 
 
@@ -94,21 +94,21 @@ async def test_delete_subnet_other_project_returns_404(client, mock_conn):
 @pytest.mark.asyncio
 async def test_associate_fip_other_project_returns_404(client, mock_conn):
     mock_conn.network.get_ip = MagicMock(return_value=_foreign_resource())
-    resp = await client.post("/api/networks/floating-ips/fip-foreign/associate", json={"instance_id": "i-1"})
+    resp = await client.post("/api/v1/networks/floating-ips/fip-foreign/associate", json={"instance_id": "i-1"})
     assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_disassociate_fip_other_project_returns_404(client, mock_conn):
     mock_conn.network.get_ip = MagicMock(return_value=_foreign_resource())
-    resp = await client.post("/api/networks/floating-ips/fip-foreign/disassociate")
+    resp = await client.post("/api/v1/networks/floating-ips/fip-foreign/disassociate")
     assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_delete_fip_other_project_returns_404(client, mock_conn):
     mock_conn.network.get_ip = MagicMock(return_value=_foreign_resource())
-    resp = await client.delete("/api/networks/floating-ips/fip-foreign")
+    resp = await client.delete("/api/v1/networks/floating-ips/fip-foreign")
     assert resp.status_code == 404
 
 
@@ -118,28 +118,28 @@ async def test_delete_fip_other_project_returns_404(client, mock_conn):
 @pytest.mark.asyncio
 async def test_get_router_other_project_returns_404(client, mock_conn):
     mock_conn.network.get_router = MagicMock(return_value=_foreign_resource())
-    resp = await client.get("/api/routers/r-foreign")
+    resp = await client.get("/api/v1/routers/r-foreign")
     assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_delete_router_other_project_returns_404(client, mock_conn):
     mock_conn.network.get_router = MagicMock(return_value=_foreign_resource())
-    resp = await client.delete("/api/routers/r-foreign")
+    resp = await client.delete("/api/v1/routers/r-foreign")
     assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_add_interface_other_project_router_returns_404(client, mock_conn):
     mock_conn.network.get_router = MagicMock(return_value=_foreign_resource())
-    resp = await client.post("/api/routers/r-foreign/interfaces", json={"subnet_id": "s-1"})
+    resp = await client.post("/api/v1/routers/r-foreign/interfaces", json={"subnet_id": "s-1"})
     assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_set_gateway_other_project_router_returns_404(client, mock_conn):
     mock_conn.network.get_router = MagicMock(return_value=_foreign_resource())
-    resp = await client.post("/api/routers/r-foreign/gateway", json={"external_network_id": "ext-1"})
+    resp = await client.post("/api/v1/routers/r-foreign/gateway", json={"external_network_id": "ext-1"})
     assert resp.status_code == 404
 
 
@@ -149,7 +149,7 @@ async def test_set_gateway_other_project_router_returns_404(client, mock_conn):
 @pytest.mark.asyncio
 async def test_delete_sg_other_project_returns_404(client, mock_conn):
     mock_conn.network.get_security_group = MagicMock(return_value=_foreign_resource())
-    resp = await client.delete("/api/security-groups/sg-foreign")
+    resp = await client.delete("/api/v1/security-groups/sg-foreign")
     assert resp.status_code == 404
 
 
@@ -157,7 +157,7 @@ async def test_delete_sg_other_project_returns_404(client, mock_conn):
 async def test_create_sg_rule_other_project_returns_404(client, mock_conn):
     mock_conn.network.get_security_group = MagicMock(return_value=_foreign_resource())
     resp = await client.post(
-        "/api/security-groups/sg-foreign/rules",
+        "/api/v1/security-groups/sg-foreign/rules",
         json={"direction": "ingress", "protocol": "tcp"},
     )
     assert resp.status_code == 404
@@ -166,5 +166,5 @@ async def test_create_sg_rule_other_project_returns_404(client, mock_conn):
 @pytest.mark.asyncio
 async def test_delete_sg_rule_other_project_returns_404(client, mock_conn):
     mock_conn.network.get_security_group = MagicMock(return_value=_foreign_resource())
-    resp = await client.delete("/api/security-groups/sg-foreign/rules/rule-1")
+    resp = await client.delete("/api/v1/security-groups/sg-foreign/rules/rule-1")
     assert resp.status_code == 404

@@ -24,7 +24,7 @@ async def test_dynamic_share_not_visible_cross_project(admin_client, admin_auth_
     share_id = None
     try:
         resp = await admin_client.post(
-            "/api/file-storage",
+            "/api/v1/file-storage",
             json={
                 "name": "test-isolation-dynamic",
                 "size_gb": 1,
@@ -35,13 +35,13 @@ async def test_dynamic_share_not_visible_cross_project(admin_client, admin_auth_
         share_id = resp.json()["id"]
 
         # project B → A의 private dynamic share가 목록에 없어야 함
-        resp_b = await project_b_client.get("/api/file-storage?refresh=true")
+        resp_b = await project_b_client.get("/api/v1/file-storage?refresh=true")
         assert resp_b.status_code == 200
         ids_b = {s["id"] for s in resp_b.json()}
         assert share_id not in ids_b, "다른 프로젝트의 private dynamic share가 project_b에 노출됨"
     finally:
         if share_id:
-            await admin_client.delete(f"/api/file-storage/{share_id}")
+            await admin_client.delete(f"/api/v1/file-storage/{share_id}")
 
 
 @pytest.mark.asyncio
@@ -50,7 +50,7 @@ async def test_public_prebuilt_share_visible_cross_project(admin_client, project
     require_service("service_manila_enabled")
 
     # 기존 public share를 검색 (prebuilt 라이브러리 빌드 완료 후 set_share_public=True된 share)
-    resp = await admin_client.get("/api/file-storage?refresh=true")
+    resp = await admin_client.get("/api/v1/file-storage?refresh=true")
     assert resp.status_code == 200
 
     public_shares = [s for s in resp.json() if s.get("is_public")]
@@ -60,7 +60,7 @@ async def test_public_prebuilt_share_visible_cross_project(admin_client, project
     public_id = public_shares[0]["id"]
 
     # project B도 public share를 볼 수 있어야 함
-    resp_b = await project_b_client.get("/api/file-storage?refresh=true")
+    resp_b = await project_b_client.get("/api/v1/file-storage?refresh=true")
     assert resp_b.status_code == 200
     ids_b = {s["id"] for s in resp_b.json()}
     assert public_id in ids_b, f"public share {public_id}가 project_b 목록에 미노출"
@@ -75,7 +75,7 @@ async def test_direct_get_cross_project_share_returns_404(admin_client, admin_au
     share_id = None
     try:
         resp = await admin_client.post(
-            "/api/file-storage",
+            "/api/v1/file-storage",
             json={
                 "name": "test-isolation-404",
                 "size_gb": 1,
@@ -86,8 +86,8 @@ async def test_direct_get_cross_project_share_returns_404(admin_client, admin_au
         share_id = resp.json()["id"]
 
         # project B가 A의 private share를 직접 GET → 404
-        resp_b = await project_b_client.get(f"/api/file-storage/{share_id}")
+        resp_b = await project_b_client.get(f"/api/v1/file-storage/{share_id}")
         assert resp_b.status_code == 404, f"격리 실패: project_b가 private share를 조회함 (status={resp_b.status_code})"
     finally:
         if share_id:
-            await admin_client.delete(f"/api/file-storage/{share_id}")
+            await admin_client.delete(f"/api/v1/file-storage/{share_id}")

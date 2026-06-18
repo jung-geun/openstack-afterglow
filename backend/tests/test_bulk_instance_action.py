@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-_URL = "/api/instances/bulk-action"
+_URL = "/api/v1/instances/bulk-action"
 
 # ---------------------------------------------------------------------------
 # 헬퍼
