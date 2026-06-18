@@ -30,8 +30,7 @@
 					{/if}
 					{#if extractHost(loc.path)}
 						<span class="shrink-0 font-mono text-xs text-teal-300 font-medium">{extractHost(loc.path)}</span>
-						<span class="text-gray-600 text-xs">:</span>
-						<code class="flex-1 text-xs text-gray-400 font-mono truncate">{loc.path.replace(/^\d{1,3}(?:\.\d{1,3}){3}/, '')}</code>
+						<code class="flex-1 text-xs text-gray-400 font-mono truncate">{loc.path.replace(/^\d{1,3}(?:\.\d{1,3}){3}:/, '')}</code>
 					{:else}
 						<code class="flex-1 text-xs text-gray-300 font-mono break-all">{loc.path}</code>
 					{/if}

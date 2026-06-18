@@ -58,9 +58,9 @@
 
 	<!-- creating 상태일 때 progress 표시 -->
 	{#if fs.status === 'creating' && fs.progress}
+		{@const pct = (() => { const m = fs.progress.match(/^(\d+(?:\.\d+)?)%$/); return m ? parseFloat(m[1]) : 0; })()}
 		<div class="mt-3 flex items-center gap-2">
 			<div class="flex-1 h-1 bg-gray-800 rounded-full overflow-hidden">
-				{@const pct = (() => { const m = fs.progress.match(/^(\d+(?:\.\d+)?)%$/); return m ? parseFloat(m[1]) : 0; })()}
 				<div class="h-full rounded-full bg-yellow-500 transition-all" style="width: {pct}%"></div>
 			</div>
 			<span class="text-[10px] text-yellow-400 shrink-0">{fs.progress}</span>
