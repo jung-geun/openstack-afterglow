@@ -11,7 +11,7 @@
 	onMount(async () => {
 		loadSiteConfig();
 		try {
-			const res = await api.get<{ enabled: boolean }>('/api/v1/auth/gitlab/enabled');
+			const res = await api.get<{ enabled: boolean }>('/auth/gitlab/enabled');
 			gitlabEnabled = res.enabled;
 		} catch {
 			gitlabEnabled = false;
@@ -34,7 +34,7 @@
 		gitlabLoading = true;
 		error = '';
 		try {
-			const res = await api.get<{ authorize_url: string }>('/api/v1/auth/gitlab/authorize');
+			const res = await api.get<{ authorize_url: string }>('/auth/gitlab/authorize');
 			// 안전한 프로토콜인지 확인 (오픈 리다이렉트 방지)
 			const redirectUrl = new URL(res.authorize_url);
 			if (!['https:', 'http:'].includes(redirectUrl.protocol)) {

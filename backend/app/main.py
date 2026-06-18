@@ -146,7 +146,7 @@ _mark("api.container")
 # ---------------------------------------------------------------------------
 # app.api.identity (admin, auth, sub-routers)
 # ---------------------------------------------------------------------------
-from app.api.identity import admin_router, auth_router
+from app.api.identity import admin_router, auth_router, gitlab_auth_router
 from app.api.identity.admin_activity import router as admin_activity_router
 from app.api.identity.admin_dashboard import router as admin_dashboard_router
 from app.api.identity.admin_flavors import router as admin_flavors_router
@@ -497,6 +497,8 @@ async def options_handler(request: Request, rest_of_path: str):
 
 # Identity
 app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
+# OIDC/OAuth 콜백은 /api/v1 없이 /auth 경로로 직접 마운트 (OIDC redirect_uri 표준 준수)
+app.include_router(gitlab_auth_router, prefix="/auth", tags=["auth-oidc"])
 # admin_instances_router를 admin_router보다 먼저 등록 (정적 경로 /instances/async 우선 매칭)
 app.include_router(admin_instances_router, prefix="/api/v1/admin", tags=["admin-instances"])
 app.include_router(admin_router, prefix="/api/v1/admin", tags=["admin"])

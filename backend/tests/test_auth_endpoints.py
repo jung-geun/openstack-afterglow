@@ -246,7 +246,7 @@ def test_list_user_groups_converts_exception_to_permission_error():
 
 @pytest.mark.asyncio
 async def test_gitlab_enabled(client):
-    resp = await client.get("/api/v1/auth/gitlab/enabled")
+    resp = await client.get("/auth/gitlab/enabled")
     assert resp.status_code == 200
     assert "enabled" in resp.json()
 
@@ -296,7 +296,7 @@ async def test_gitlab_callback_stores_federated_auth_method():
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             resp = await ac.post(
-                "/api/v1/auth/gitlab/callback",
+                "/auth/gitlab/callback",
                 json={"code": "auth-code", "state": "state-value"},
             )
 

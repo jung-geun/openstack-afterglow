@@ -416,14 +416,18 @@ async def list_projects_recent(token_info: dict = Depends(get_token_info)):
     return project_infos
 
 
-@router.get("/gitlab/enabled")
+# OIDC/OAuth 전용 라우터 — /api/v1 없이 /auth 경로로 직접 마운트
+gitlab_router = APIRouter()
+
+
+@gitlab_router.get("/gitlab/enabled")
 async def gitlab_enabled():
     """GitLab OIDC 활성화 여부 반환 (프론트엔드에서 버튼 표시 여부 결정)."""
     settings = get_settings()
     return {"enabled": settings.gitlab_oidc_enabled}
 
 
-@router.get("/gitlab/authorize")
+@gitlab_router.get("/gitlab/authorize")
 async def gitlab_authorize():
     """GitLab OAuth2 인증 URL 반환."""
     settings = get_settings()
@@ -438,7 +442,7 @@ async def gitlab_authorize():
     return {"authorize_url": url}
 
 
-@router.post("/gitlab/callback", response_model=TokenResponse)
+@gitlab_router.post("/gitlab/callback", response_model=TokenResponse)
 @limiter.limit("10/minute")
 async def gitlab_callback(request: Request, req: GitLabCallbackRequest, background_tasks: BackgroundTasks):
     """GitLab OAuth2 콜백: authorization code로 Keystone 토큰 발급."""

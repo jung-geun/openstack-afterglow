@@ -79,9 +79,9 @@ EXPECTED_PUBLIC = frozenset(
         ("GET", "/api/v1/health/detail"),  # 모니터링 대시보드용 Redis 상태 포함 헬스체크
         ("GET", "/api/v1/site-config"),
         ("GET", "/api/v1/dashboard/config"),  # 새로고침 간격 등 UI 설정만 반환, 인증 불필요
-        ("GET", "/api/v1/auth/gitlab/enabled"),
-        ("GET", "/api/v1/auth/gitlab/authorize"),
-        ("POST", "/api/v1/auth/gitlab/callback"),
+        ("GET", "/auth/gitlab/enabled"),
+        ("GET", "/auth/gitlab/authorize"),
+        ("POST", "/auth/gitlab/callback"),
         ("POST", "/api/v1/auth/login"),
         # k3s 활성 시에만 등록되는 라우트
         ("POST", "/api/v1/k3s/callback"),
