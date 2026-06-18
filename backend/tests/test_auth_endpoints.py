@@ -79,28 +79,59 @@ async def test_me(client):
     assert data["username"] == "testuser"
 
 
-# ────── session-info ──────
+# ────── token/project (rescope) ──────
 
 
 @pytest.mark.asyncio
-async def test_session_info(client):
-    with patch("app.api.identity.auth.get_session_remaining", new_callable=AsyncMock, return_value=3500):
-        resp = await client.get("/api/auth/session-info")
+async def test_scope_project(client):
+    """POST /api/auth/token/project: 접근 가능한 프로젝트로 새 토큰 쌍 발급."""
+    kc_info = {
+        "token": "new-ks-token",
+        "project_id": "other-project-456",
+        "project_name": "other-project",
+        "user_id": "test-user-123",
+        "username": "testuser",
+        "roles": ["member"],
+        "is_system_admin": False,
+    }
+    with (
+        patch("app.api.identity.auth.keystone.validate_token", return_value=kc_info),
+        patch("app.api.identity.auth.record_project_access", new_callable=AsyncMock),
+    ):
+        resp = await client.post(
+            "/api/auth/token/project",
+            json={"project_id": "other-project-456"},
+        )
     assert resp.status_code == 200
     data = resp.json()
-    assert "remaining_seconds" in data
-    assert "timeout_seconds" in data
-
-
-# ────── extend-session ──────
+    assert data["project_id"] == "other-project-456"
+    assert data["token"] and data["token"].count(".") == 2
 
 
 @pytest.mark.asyncio
-async def test_extend_session(client):
-    with patch("app.api.identity.auth.extend_session", new_callable=AsyncMock):
-        resp = await client.post("/api/auth/extend-session")
-    assert resp.status_code == 200
-    assert "message" in resp.json()
+async def test_scope_project_no_access(client):
+    """접근 권한 없는 프로젝트로 rescope 시 403."""
+    with patch(
+        "app.api.identity.auth.keystone.validate_token",
+        side_effect=Exception("forbidden"),
+    ):
+        resp = await client.post(
+            "/api/auth/token/project",
+            json={"project_id": "forbidden-project"},
+        )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_scope_project_old_route_gone(client):
+    """구 /switch-project 경로는 더 이상 처리되지 않아야 한다 (404 또는 405)."""
+    resp = await client.post(
+        "/api/auth/switch-project",
+        json={"project_id": "any-project"},
+    )
+    assert resp.status_code in (404, 405), (
+        f"구 /switch-project가 예상치 못한 {resp.status_code}를 반환했습니다"
+    )
 
 
 # ────── logout ──────

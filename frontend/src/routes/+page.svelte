@@ -62,16 +62,6 @@
 				projects = await api.get<Project[]>('/api/auth/projects', data.token);
 			} catch { /* 프로젝트 목록 조회 실패 시 무시 */ }
 
-			let sessionTimeoutSeconds = 3600;
-			let sessionWarningBeforeSeconds = 300;
-			try {
-				const sessionInfo = await api.get<{ timeout_seconds: number; warning_before_seconds: number }>(
-					'/api/auth/session-info', data.token, data.project_id
-				);
-				sessionTimeoutSeconds = sessionInfo.timeout_seconds;
-				sessionWarningBeforeSeconds = sessionInfo.warning_before_seconds;
-			} catch { /* 기본값 유지 */ }
-
 			let selectedProjectId: string | null = null;
 			let selectedProjectName: string | null = null;
 
@@ -97,8 +87,6 @@
 				username: data.username,
 				projectId: selectedProjectId,
 				projectName: selectedProjectName,
-				sessionTimeoutSeconds,
-				sessionWarningBeforeSeconds,
 				roles: data.roles ?? [],
 				isSystemAdmin: data.is_system_admin ?? false,
 			});

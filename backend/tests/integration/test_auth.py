@@ -32,20 +32,6 @@ async def test_me(client):
 
 
 @pytest.mark.asyncio(loop_scope="session")
-async def test_session_info(client):
-    resp = await client.get("/api/auth/session-info")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "remaining_seconds" in data
-
-
-@pytest.mark.asyncio(loop_scope="session")
-async def test_extend_session(client):
-    resp = await client.post("/api/auth/extend-session")
-    assert resp.status_code == 200
-
-
-@pytest.mark.asyncio(loop_scope="session")
 async def test_list_projects(client):
     resp = await client.get("/api/auth/projects")
     assert resp.status_code == 200
@@ -89,14 +75,6 @@ async def test_user_login_is_not_system_admin(user_auth_data):
     assert user_auth_data.get("is_system_admin") is False, (
         "일반 유저가 is_system_admin=True — credentials.toml [user] 계정이 system admin role을 보유하지 않는지 확인"
     )
-
-
-@pytest.mark.asyncio(loop_scope="session")
-async def test_user_session_info(user_client):
-    """일반 유저도 세션 정보를 조회할 수 있어야 한다."""
-    resp = await user_client.get("/api/auth/session-info")
-    assert resp.status_code == 200
-    assert "remaining_seconds" in resp.json()
 
 
 # ─────────────────────────────────────────────────────────────────

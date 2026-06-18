@@ -61,7 +61,7 @@
 				username: string;
 				roles: string[];
 				is_system_admin: boolean;
-			}>('/api/auth/switch-project', { project_id: proj.id }, $auth.token);
+			}>('/api/auth/token/project', { project_id: proj.id }, $auth.token);
 			setAuth({
 				token: resp.token,
 				refreshToken: resp.refresh_token,

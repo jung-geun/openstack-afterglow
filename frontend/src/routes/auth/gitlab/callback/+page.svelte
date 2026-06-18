@@ -50,19 +50,11 @@
 				is_system_admin?: boolean;
 			}>('/api/auth/gitlab/callback', { code, state });
 
-			// 프로젝트 목록 + 세션 설정 병렬 조회
-			const [projectsResult, sessionInfoResult] = await Promise.allSettled([
-				api.get<Project[]>('/api/auth/projects', data.token),
-				api.get<{ timeout_seconds: number; warning_before_seconds: number }>(
-					'/api/auth/session-info', data.token, data.project_id
-				),
-			]);
-			const projects: Project[] =
-				projectsResult.status === 'fulfilled' ? projectsResult.value : [];
-			const sessionTimeoutSeconds =
-				sessionInfoResult.status === 'fulfilled' ? sessionInfoResult.value.timeout_seconds : 3600;
-			const sessionWarningBeforeSeconds =
-				sessionInfoResult.status === 'fulfilled' ? sessionInfoResult.value.warning_before_seconds : 300;
+			// 프로젝트 목록 조회
+			let projects: Project[] = [];
+			try {
+				projects = await api.get<Project[]>('/api/auth/projects', data.token);
+			} catch { /* 프로젝트 목록 조회 실패 시 무시 */ }
 
 			// 기본 프로젝트가 설정되어 있고, 프로젝트 목록에 존재하면 해당 프로젝트로 전환
 			let selectedProjectId: string | null = null;
@@ -89,8 +81,6 @@
 				username: data.username,
 				projectId: selectedProjectId,
 				projectName: selectedProjectName,
-				sessionTimeoutSeconds,
-				sessionWarningBeforeSeconds,
 				roles: data.roles ?? [],
 				isSystemAdmin: data.is_system_admin ?? false,
 			});

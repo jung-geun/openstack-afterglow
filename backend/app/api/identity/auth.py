@@ -7,8 +7,6 @@ from pydantic import BaseModel, Field
 
 from app.api.deps import (
     _check_session_timeout,
-    extend_session,
-    get_session_remaining,
     get_token_info,
     invalidate_token_cache,
 )
@@ -33,7 +31,7 @@ class RefreshRequest(BaseModel):
     refresh_token: str = Field(..., min_length=1)
 
 
-class SwitchProjectRequest(BaseModel):
+class ProjectScopeRequest(BaseModel):
     project_id: str = Field(..., min_length=1, max_length=255)
 
 
@@ -197,26 +195,6 @@ async def me(token_info: dict = Depends(get_token_info)):
     )
 
 
-@router.get("/session-info")
-async def session_info(token_info: dict = Depends(get_token_info)):
-    """현재 세션의 남은 시간(초)과 설정된 타임아웃을 반환."""
-    settings = get_settings()
-    remaining = await get_session_remaining(token_info["token"], token_info["project_id"])
-    return {
-        "remaining_seconds": remaining,
-        "timeout_seconds": settings.session_timeout_seconds,
-        "warning_before_seconds": settings.session_warning_before_seconds,
-    }
-
-
-@router.post("/extend-session")
-async def extend_session_endpoint(token_info: dict = Depends(get_token_info)):
-    """세션을 연장 (시작 시간을 지금으로 재설정)."""
-    await extend_session(token_info["token"], token_info["project_id"])
-    settings = get_settings()
-    return {"message": "세션이 연장되었습니다", "timeout_seconds": settings.session_timeout_seconds}
-
-
 @router.post("/logout")
 async def logout(token_info: dict = Depends(get_token_info)):
     """로그아웃: refresh 세션 삭제 + Keystone 토큰 폐기 + 검증/세션 캐시 invalidate."""
@@ -300,9 +278,9 @@ async def refresh_token(request: Request, req: RefreshRequest):
     )
 
 
-@router.post("/switch-project", response_model=TokenResponse)
-async def switch_project(req: SwitchProjectRequest, token_info: dict = Depends(get_token_info)):
-    """현재 JWT를 새 프로젝트로 rescope하여 새 토큰 쌍 발급."""
+@router.post("/token/project", response_model=TokenResponse)
+async def scope_project(req: ProjectScopeRequest, token_info: dict = Depends(get_token_info)):
+    """접근 가능한 프로젝트로 새 토큰 쌍 발급 (rescope)."""
     keystone_token = token_info["token"]
     try:
         kc_info = await asyncio.to_thread(keystone.validate_token, keystone_token, project_id=req.project_id)
