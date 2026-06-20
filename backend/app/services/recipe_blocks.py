@@ -24,6 +24,8 @@ LAYER_ROOT = "/mnt/share"
 
 # Debian 패키지명 정책: 소문자 영숫자 시작, [a-z0-9.+-]
 _APT_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9.+-]*$")
+# squashfs/프로필 이름: 소문자 영숫자 시작, [a-z0-9.+-]  (apt 이름과 동일 정책)
+_LAYER_NAME_RE = _APT_NAME_RE
 # pip 패키지 스펙: 이름[extras]제약 — 공백·셸 메타문자 불허
 _PIP_SPEC_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\[\],<>=!~+*-]*$")
 # Python 버전: major.minor
@@ -248,3 +250,94 @@ def apt_capture_layer(
         '       "$CAP/upper/var/lib/apt/lists" "$CAP/upper/var/log" "$CAP/upper/root" \\\n'
         '       "$CAP/upper/etc/machine-id" 2>/dev/null || true\n' + parallel_copy('"$CAP/upper"', LAYER_ROOT)
     )
+
+
+# ---------------------------------------------------------------------------
+# squashfs 레이어 빌드 블록
+# ---------------------------------------------------------------------------
+
+
+def squashfs_uv_layer(name: str) -> str:
+    """uv 바이너리만 담은 squashfs 레이어를 빌드하는 스크립트.
+
+    NFS share(/mnt/share)에 다음을 기록한다:
+      /mnt/share/images/<name>-<ts>.sqsh          — squashfs 이미지
+      /mnt/share/images/<name>-latest.sqsh        — 최신 심링크
+
+    consumer VM에서 layer-activate.sh가 loop-mount + OverlayFS로 합성한다.
+    /usr/local/bin/uv 만 포함 (CPython 미포함).
+    """
+    _validate([name], _LAYER_NAME_RE, "레이어 이름")
+    output_dir = f"{LAYER_ROOT}/images"
+    quoted_name = shlex.quote(name)
+
+    script = uv_bootstrap()
+    script += (
+        'STAGING="$(mktemp -d /tmp/layer-staging.XXXXX)"\n'
+        'LAYER_TS="$(date +%Y%m%d%H%M%S)"\n'
+        f'LAYER_VERSION={quoted_name}-"$LAYER_TS"\n'
+        'STAGING_BINDIR="$STAGING/usr/local/bin"\n'
+        'mkdir -p "$STAGING_BINDIR"\n'
+        "# uv 바이너리만 포함 (CPython 제외)\n"
+        'cp -a /usr/local/bin/uv "$STAGING_BINDIR/uv"\n'
+    )
+    script += (
+        f"mkdir -p {output_dir}\n"
+        f'OUT_SQSH={output_dir}/"$LAYER_VERSION.sqsh"\n'
+        'mksquashfs "$STAGING" "$OUT_SQSH" -comp zstd -Xcompression-level 3 -noappend -no-exports\n'
+        f'ln -sf "$LAYER_VERSION.sqsh" {output_dir}/{quoted_name}-latest.sqsh\n'
+        'rm -rf "$STAGING"\n'
+    )
+    return script
+
+
+def squashfs_python_layer(
+    name: str,
+    python_version: str,
+    pip_packages: list[str] | None = None,
+) -> str:
+    """uv standalone CPython만 담은 squashfs 레이어를 빌드하는 스크립트.
+
+    NFS share(/mnt/share)에 다음을 기록한다:
+      /mnt/share/images/<name>-<ts>.sqsh          — squashfs 이미지
+      /mnt/share/images/<name>-latest.sqsh        — 최신 심링크
+
+    uv 바이너리는 포함하지 않는다 (squashfs_uv_layer로 별도 레이어 빌드).
+    프로필(.conf) 기록도 하지 않는다 — LayerProfile DB가 담당.
+    """
+    _validate([name], _LAYER_NAME_RE, "레이어 이름")
+    _validate([python_version], _PY_VERSION_RE, "Python 버전")
+    if pip_packages:
+        _validate(pip_packages, _PIP_SPEC_RE, "pip 패키지 스펙")
+
+    v = python_version
+    output_dir = f"{LAYER_ROOT}/images"
+    quoted_name = shlex.quote(name)
+
+    # uv 설치(빌드 전용) + CPython 설치
+    script = uv_bootstrap() + _resolve_uv_python(v)
+
+    # staging: CPython 트리만 (uv 바이너리 제외)
+    script += (
+        'STAGING="$(mktemp -d /tmp/layer-staging.XXXXX)"\n'
+        'LAYER_TS="$(date +%Y%m%d%H%M%S)"\n'
+        f'LAYER_VERSION={quoted_name}-"$LAYER_TS"\n'
+        'STAGING_LOCAL="$STAGING/usr/local"\n'
+        'mkdir -p "$STAGING_LOCAL"\n'
+        "# CPython 트리만 복사 (uv 바이너리 제외 — 별도 레이어)\n"
+        'cp -a "$PYDIR/." "$STAGING_LOCAL/"\n'
+    )
+
+    if pip_packages:
+        pkgs = " ".join(shlex.quote(p) for p in pip_packages)
+        site = f'"$STAGING_LOCAL/lib/python{v}/site-packages"'
+        script += f'mkdir -p {site}\nuv pip install --python "$PYBIN" --no-cache --target {site} {pkgs}\n'
+
+    script += (
+        f"mkdir -p {output_dir}\n"
+        f'OUT_SQSH={output_dir}/"$LAYER_VERSION.sqsh"\n'
+        'mksquashfs "$STAGING" "$OUT_SQSH" -comp zstd -Xcompression-level 3 -noappend -no-exports\n'
+        f'ln -sf "$LAYER_VERSION.sqsh" {output_dir}/{quoted_name}-latest.sqsh\n'
+        'rm -rf "$STAGING"\n'
+    )
+    return script

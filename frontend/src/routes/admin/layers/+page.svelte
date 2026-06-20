@@ -14,8 +14,8 @@
   interface LayerBuild {
     id: number;
     layer_name: string;
-    python_version: string;
-    profile_name: string;
+    kind: string;
+    python_version: string | null;
     share_id: string;
     server_id: string | null;
     port_id: string | null;
@@ -73,20 +73,30 @@
   // 빌드 폼
   // ---------------------------------------------------------------------------
 
-  let buildForm = $state({
-    layer_name: '',
-    python_version: '3.11',
-    pip_packages: '',
-    profile_name: 'default',
-  });
-  let buildSubmitting = $state(false);
+  // uv 레이어 빌드 폼
+  let uvForm = $state({ layer_name: '' });
+  let uvSubmitting = $state(false);
+
+  // python 레이어 빌드 폼
+  let pyForm = $state({ layer_name: '', python_version: '3.11', pip_packages: '' });
+  let pySubmitting = $state(false);
+
+  // 프로필 구성 폼
+  interface LayerArtifact { id: number; name: string; kind: string; python_version: string | null; sqsh_filename: string; created_at: string | null; }
+  interface LayerProfile { id: number; name: string; layers: string[]; created_at: string | null; updated_at: string | null; }
+  let artifacts = $state<LayerArtifact[]>([]);
+  let profiles = $state<LayerProfile[]>([]);
+  let profileForm = $state({ name: '', selectedLayers: [] as string[] });
+  let profileSubmitting = $state(false);
+  let profileMessage = $state('');
+  let profileError = $state('');
 
   // ---------------------------------------------------------------------------
   // 소비 폼
   // ---------------------------------------------------------------------------
 
   let consumeForm = $state({
-    profile_name: 'default',
+    profile_name: '',
     server_name: '',
     flavor_id: '',
     image_id: '',
@@ -132,10 +142,22 @@
     } catch { /* 무시 */ }
   }
 
+  async function loadArtifacts() {
+    try {
+      artifacts = await api.get<LayerArtifact[]>('/api/v1/admin/layers/artifacts', token, projectId, { refresh: true });
+    } catch { /* 무시 */ }
+  }
+
+  async function loadProfiles() {
+    try {
+      profiles = await api.get<LayerProfile[]>('/api/v1/admin/layers/profiles', token, projectId, { refresh: true });
+    } catch { /* 무시 */ }
+  }
+
   async function loadAll() {
     if (builds.length === 0 && consumes.length === 0) loading = true;
     error = '';
-    await Promise.allSettled([loadBuilds(), loadConsumes()]);
+    await Promise.allSettled([loadBuilds(), loadConsumes(), loadArtifacts(), loadProfiles()]);
     loading = false;
   }
 
@@ -154,33 +176,76 @@
   // 빌드 트리거
   // ---------------------------------------------------------------------------
 
-  async function triggerBuild() {
-    if (buildSubmitting) return;
-    buildSubmitting = true;
+  async function triggerUvBuild() {
+    if (uvSubmitting) return;
+    uvSubmitting = true;
     error = '';
     message = '';
     try {
-      const pip = buildForm.pip_packages
-        .split(',')
-        .map(s => s.trim())
-        .filter(Boolean);
       const result = await api.post<{ build_id: number; layer_name: string; status: string }>(
         '/api/v1/admin/layers/build',
-        {
-          layer_name: buildForm.layer_name,
-          python_version: buildForm.python_version,
-          pip_packages: pip,
-          profile_name: buildForm.profile_name,
-        },
+        { layer_name: uvForm.layer_name, kind: 'uv' },
         token,
         projectId,
       );
-      message = `레이어 빌드 시작 (ID: ${result.build_id}, 레이어: ${result.layer_name})`;
-      await loadBuilds();
+      message = `uv 레이어 빌드 시작 (ID: ${result.build_id}, 레이어: ${result.layer_name})`;
+      await Promise.allSettled([loadBuilds(), loadArtifacts()]);
     } catch (e) {
       error = e instanceof ApiError ? `빌드 트리거 실패: ${e.message}` : '네트워크 오류';
     } finally {
-      buildSubmitting = false;
+      uvSubmitting = false;
+    }
+  }
+
+  async function triggerPyBuild() {
+    if (pySubmitting) return;
+    pySubmitting = true;
+    error = '';
+    message = '';
+    try {
+      const pip = pyForm.pip_packages.split(',').map(s => s.trim()).filter(Boolean);
+      const result = await api.post<{ build_id: number; layer_name: string; status: string }>(
+        '/api/v1/admin/layers/build',
+        { layer_name: pyForm.layer_name, kind: 'python', python_version: pyForm.python_version, pip_packages: pip },
+        token,
+        projectId,
+      );
+      message = `Python 레이어 빌드 시작 (ID: ${result.build_id}, 레이어: ${result.layer_name})`;
+      await Promise.allSettled([loadBuilds(), loadArtifacts()]);
+    } catch (e) {
+      error = e instanceof ApiError ? `빌드 트리거 실패: ${e.message}` : '네트워크 오류';
+    } finally {
+      pySubmitting = false;
+    }
+  }
+
+  async function upsertProfile() {
+    if (profileSubmitting) return;
+    profileSubmitting = true;
+    profileError = '';
+    profileMessage = '';
+    try {
+      const result = await api.post<{ id: number; name: string; layers: string[] }>(
+        '/api/v1/admin/layers/profiles',
+        { name: profileForm.name, layers: profileForm.selectedLayers },
+        token,
+        projectId,
+      );
+      profileMessage = `프로필 '${result.name}' 저장 완료 (레이어: ${result.layers.join(', ')})`;
+      await loadProfiles();
+    } catch (e) {
+      profileError = e instanceof ApiError ? `프로필 저장 실패: ${e.message}` : '네트워크 오류';
+    } finally {
+      profileSubmitting = false;
+    }
+  }
+
+  function toggleLayer(layerName: string) {
+    const idx = profileForm.selectedLayers.indexOf(layerName);
+    if (idx >= 0) {
+      profileForm.selectedLayers = profileForm.selectedLayers.filter(l => l !== layerName);
+    } else {
+      profileForm.selectedLayers = [...profileForm.selectedLayers, layerName];
     }
   }
 
@@ -359,95 +424,119 @@
   {#if loading}
     <LoadingSkeleton rows={4} />
   {:else}
-    <div class="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-8">
+    <div class="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-8">
       <!-- ------------------------------------------------------------------ -->
-      <!-- Button 1: 레이어 빌드                                               -->
+      <!-- uv 레이어 빌드                                                      -->
       <!-- ------------------------------------------------------------------ -->
       <section class="bg-gray-800 border border-gray-700 rounded-xl p-5">
-        <h2 class="text-sm font-semibold text-white mb-1">레이어 빌드</h2>
+        <h2 class="text-sm font-semibold text-white mb-1">uv 레이어 빌드</h2>
         <p class="text-xs text-gray-400 mb-4">
-          squashfs Python 레이어를 빌드해 layer-store-rw NFS share에 저장합니다.
-          빌드 VM이 자동으로 생성·실행·삭제됩니다.
+          uv 바이너리(<code class="font-mono">/usr/local/bin/uv</code>)만 담은 squashfs를 빌드합니다.
         </p>
-
         <div class="space-y-3">
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="block text-xs text-gray-400 mb-1" for="layer-name">레이어 이름 *</label>
-              <input
-                id="layer-name"
-                type="text"
-                placeholder="예: uvpy311"
-                bind:value={buildForm.layer_name}
-                class="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
-              />
-            </div>
-            <div>
-              <label class="block text-xs text-gray-400 mb-1" for="python-ver">Python 버전 *</label>
-              <input
-                id="python-ver"
-                type="text"
-                placeholder="3.11"
-                bind:value={buildForm.python_version}
-                class="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
-              />
-            </div>
+          <div>
+            <label class="block text-xs text-gray-400 mb-1" for="uv-layer-name">레이어 이름 *</label>
+            <input
+              id="uv-layer-name"
+              type="text"
+              placeholder="예: uv"
+              bind:value={uvForm.layer_name}
+              class="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+            />
           </div>
-
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="block text-xs text-gray-400 mb-1" for="profile-name">프로필 이름</label>
-              <input
-                id="profile-name"
-                type="text"
-                placeholder="default"
-                bind:value={buildForm.profile_name}
-                class="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
-              />
-            </div>
-            <div>
-              <label class="block text-xs text-gray-400 mb-1" for="pip-packages">pip 패키지 (쉼표 구분)</label>
-              <input
-                id="pip-packages"
-                type="text"
-                placeholder="numpy,pandas,scikit-learn"
-                bind:value={buildForm.pip_packages}
-                class="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
-              />
-            </div>
-          </div>
-
           <button
-            onclick={triggerBuild}
-            disabled={buildSubmitting || !buildForm.layer_name || !buildForm.python_version}
+            onclick={triggerUvBuild}
+            disabled={uvSubmitting || !uvForm.layer_name}
             class="w-full py-2 px-4 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
           >
-            {buildSubmitting ? '빌드 시작 중...' : '레이어 빌드 시작'}
+            {uvSubmitting ? '빌드 시작 중...' : 'uv 레이어 빌드'}
           </button>
         </div>
       </section>
 
       <!-- ------------------------------------------------------------------ -->
-      <!-- Button 2: 소비 인스턴스 생성                                        -->
+      <!-- Python 레이어 빌드                                                  -->
+      <!-- ------------------------------------------------------------------ -->
+      <section class="bg-gray-800 border border-gray-700 rounded-xl p-5">
+        <h2 class="text-sm font-semibold text-white mb-1">Python 레이어 빌드</h2>
+        <p class="text-xs text-gray-400 mb-4">
+          CPython 트리만 담은 squashfs를 빌드합니다. uv 바이너리는 포함하지 않습니다.
+        </p>
+        <div class="space-y-3">
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs text-gray-400 mb-1" for="py-layer-name">레이어 이름 *</label>
+              <input
+                id="py-layer-name"
+                type="text"
+                placeholder="예: python311"
+                bind:value={pyForm.layer_name}
+                class="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label class="block text-xs text-gray-400 mb-1" for="py-ver">Python 버전 *</label>
+              <input
+                id="py-ver"
+                type="text"
+                placeholder="3.11"
+                bind:value={pyForm.python_version}
+                class="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs text-gray-400 mb-1" for="py-pip">pip 패키지 (쉼표 구분)</label>
+            <input
+              id="py-pip"
+              type="text"
+              placeholder="numpy,pandas"
+              bind:value={pyForm.pip_packages}
+              class="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+            />
+          </div>
+          <button
+            onclick={triggerPyBuild}
+            disabled={pySubmitting || !pyForm.layer_name || !pyForm.python_version}
+            class="w-full py-2 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            {pySubmitting ? '빌드 시작 중...' : 'Python 레이어 빌드'}
+          </button>
+        </div>
+      </section>
+
+      <!-- ------------------------------------------------------------------ -->
+      <!-- 소비 인스턴스 생성                                                  -->
       <!-- ------------------------------------------------------------------ -->
       <section class="bg-gray-800 border border-gray-700 rounded-xl p-5">
         <h2 class="text-sm font-semibold text-white mb-1">소비 인스턴스 생성</h2>
         <p class="text-xs text-gray-400 mb-4">
-          layer-store-ro NFS share를 RO 마운트하고 layer-activate.sh로
-          squashfs + OverlayFS를 활성화한 VM을 생성합니다.
+          layer-store-ro를 RO 마운트하고 OverlayFS를 활성화한 VM을 생성합니다.
         </p>
-
         <div class="space-y-3">
           <div class="grid grid-cols-2 gap-3">
             <div>
-              <label class="block text-xs text-gray-400 mb-1" for="consume-profile">프로필 이름 *</label>
-              <input
-                id="consume-profile"
-                type="text"
-                placeholder="default"
-                bind:value={consumeForm.profile_name}
-                class="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
-              />
+              <label class="block text-xs text-gray-400 mb-1" for="consume-profile">프로필 *</label>
+              {#if profiles.length > 0}
+                <select
+                  id="consume-profile"
+                  bind:value={consumeForm.profile_name}
+                  class="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                >
+                  <option value="">선택하세요</option>
+                  {#each profiles as p}
+                    <option value={p.name}>{p.name} ({p.layers.length}개 레이어)</option>
+                  {/each}
+                </select>
+              {:else}
+                <input
+                  id="consume-profile"
+                  type="text"
+                  placeholder="프로필 이름"
+                  bind:value={consumeForm.profile_name}
+                  class="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+                />
+              {/if}
             </div>
             <div>
               <label class="block text-xs text-gray-400 mb-1" for="server-name">서버 이름 *</label>
@@ -460,7 +549,6 @@
               />
             </div>
           </div>
-
           <div>
             <label class="block text-xs text-gray-400 mb-1" for="flavor-id">Flavor ID *</label>
             <input
@@ -471,14 +559,13 @@
               class="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
             />
           </div>
-
           <div class="grid grid-cols-2 gap-3">
             <div>
               <label class="block text-xs text-gray-400 mb-1" for="image-id">Image ID (선택)</label>
               <input
                 id="image-id"
                 type="text"
-                placeholder="기본 이미지 사용"
+                placeholder="기본 이미지"
                 bind:value={consumeForm.image_id}
                 class="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
               />
@@ -488,13 +575,12 @@
               <input
                 id="network-id"
                 type="text"
-                placeholder="기본 네트워크 사용"
+                placeholder="기본 네트워크"
                 bind:value={consumeForm.network_id}
                 class="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
               />
             </div>
           </div>
-
           <button
             onclick={triggerConsume}
             disabled={consumeSubmitting || !consumeForm.profile_name || !consumeForm.server_name || !consumeForm.flavor_id}
@@ -502,6 +588,86 @@
           >
             {consumeSubmitting ? '인스턴스 생성 중...' : '소비 인스턴스 생성'}
           </button>
+        </div>
+      </section>
+    </div>
+
+    <!-- ---------------------------------------------------------------------- -->
+    <!-- 프로필 구성 카드                                                        -->
+    <!-- ---------------------------------------------------------------------- -->
+    <div class="mb-8">
+      <section class="bg-gray-800 border border-gray-700 rounded-xl p-5">
+        <h2 class="text-sm font-semibold text-white mb-1">프로필 구성</h2>
+        <p class="text-xs text-gray-400 mb-4">
+          빌드된 레이어를 순서대로 묶어 named 프로필로 저장합니다.
+          소비 인스턴스는 이 프로필의 레이어 스택을 OverlayFS로 마운트합니다.
+          <span class="text-gray-500">(lowerdir: 위 항목이 우선)</span>
+        </p>
+        {#if profileError}
+          <div class="mb-3 p-2 bg-red-900/40 border border-red-700 rounded text-red-300 text-xs">{profileError}</div>
+        {/if}
+        {#if profileMessage}
+          <div class="mb-3 p-2 bg-green-900/40 border border-green-700 rounded text-green-300 text-xs">{profileMessage}</div>
+        {/if}
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <p class="text-xs text-gray-500 mb-2">빌드된 레이어 (클릭해 선택)</p>
+            {#if artifacts.length === 0}
+              <p class="text-xs text-gray-600 italic">아직 빌드된 레이어가 없습니다</p>
+            {:else}
+              <div class="space-y-1 max-h-40 overflow-y-auto">
+                {#each artifacts as a}
+                  {@const selected = profileForm.selectedLayers.includes(a.name)}
+                  <button
+                    type="button"
+                    onclick={() => toggleLayer(a.name)}
+                    class="w-full text-left flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs transition-colors {selected ? 'bg-blue-700/50 border border-blue-500 text-white' : 'bg-gray-900 border border-gray-700 text-gray-400 hover:border-gray-500'}"
+                  >
+                    <span class="font-mono flex-1">{a.name}</span>
+                    <span class="text-[10px] px-1.5 py-0.5 rounded {a.kind === 'uv' ? 'bg-amber-900/60 text-amber-300' : 'bg-indigo-900/60 text-indigo-300'}">{a.kind}</span>
+                    {#if selected}
+                      <span class="text-[10px] text-blue-400">#{profileForm.selectedLayers.indexOf(a.name) + 1}</span>
+                    {/if}
+                  </button>
+                {/each}
+              </div>
+            {/if}
+          </div>
+          <div class="space-y-3">
+            <div>
+              <p class="text-xs text-gray-500 mb-1">선택된 레이어 순서</p>
+              {#if profileForm.selectedLayers.length === 0}
+                <p class="text-xs text-gray-600 italic">레이어를 선택하세요</p>
+              {:else}
+                <div class="space-y-1">
+                  {#each profileForm.selectedLayers as layer, i}
+                    <div class="flex items-center gap-2 text-xs text-gray-300 px-2 py-1 bg-gray-900 rounded">
+                      <span class="text-gray-600 w-4 text-right">{i + 1}</span>
+                      <span class="font-mono flex-1">{layer}</span>
+                      <button type="button" onclick={() => toggleLayer(layer)} class="text-gray-600 hover:text-red-400 transition-colors">✕</button>
+                    </div>
+                  {/each}
+                </div>
+              {/if}
+            </div>
+            <div>
+              <label class="block text-xs text-gray-400 mb-1" for="profile-name-input">프로필 이름 *</label>
+              <input
+                id="profile-name-input"
+                type="text"
+                placeholder="예: default"
+                bind:value={profileForm.name}
+                class="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <button
+              onclick={upsertProfile}
+              disabled={profileSubmitting || !profileForm.name || profileForm.selectedLayers.length === 0}
+              class="w-full py-2 px-4 bg-teal-700 hover:bg-teal-600 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+            >
+              {profileSubmitting ? '저장 중...' : '프로필 저장'}
+            </button>
+          </div>
         </div>
       </section>
     </div>
@@ -527,7 +693,7 @@
               <thead>
                 <tr class="text-xs text-gray-500 uppercase tracking-wide sticky top-0 z-10 bg-gray-800 [box-shadow:inset_0_-1px_0_#374151]">
                   <th class="text-left px-4 py-2.5">레이어 이름</th>
-                  <th class="text-left px-4 py-2.5 hidden sm:table-cell">Python</th>
+                  <th class="text-left px-4 py-2.5 hidden sm:table-cell">Kind / Python</th>
                   <th class="text-left px-4 py-2.5">상태</th>
                   <th class="text-left px-4 py-2.5 hidden md:table-cell">단계</th>
                   <th class="text-left px-4 py-2.5 w-36 hidden lg:table-cell">진행률</th>
@@ -544,7 +710,10 @@
                     onclick={() => openBuildDetail(build)}
                   >
                     <td class="px-4 py-2.5 font-medium text-white max-w-28 truncate">{build.layer_name}</td>
-                    <td class="px-4 py-2.5 text-gray-400 text-xs font-mono hidden sm:table-cell">{build.python_version}</td>
+                    <td class="px-4 py-2.5 text-gray-400 text-xs font-mono hidden sm:table-cell">
+                      <span class="text-[10px] px-1.5 py-0.5 rounded mr-1 {build.kind === 'uv' ? 'bg-amber-900/60 text-amber-300' : 'bg-indigo-900/60 text-indigo-300'}">{build.kind ?? 'python'}</span>
+                      {build.python_version ?? ''}
+                    </td>
                     <td class="px-4 py-2.5">
                       <StatusChip status={build.status} />
                     </td>
@@ -650,7 +819,7 @@
         <div>
           <p class="text-xs text-gray-500 mb-1">레이어 빌드 상세</p>
           <h2 class="text-base font-semibold text-white">{buildDetail?.layer_name ?? '—'}</h2>
-          <p class="text-xs text-gray-500 mt-0.5">Python {buildDetail?.python_version ?? '—'} · 프로필: {buildDetail?.profile_name ?? '—'}</p>
+          <p class="text-xs text-gray-500 mt-0.5">Kind: {buildDetail?.kind ?? '—'}{buildDetail?.python_version ? ` · Python ${buildDetail.python_version}` : ''}</p>
         </div>
         <div class="flex items-center gap-2 shrink-0">
           {#if buildDetail?.status}

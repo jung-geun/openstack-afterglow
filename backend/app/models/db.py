@@ -286,6 +286,101 @@ class LibraryBuild(Base):
 
 
 # ---------------------------------------------------------------------------
+# squashfs NFS 레이어 빌드/소비 추적
+# ---------------------------------------------------------------------------
+
+
+class LayerBuild(Base):
+    """squashfs 레이어 빌드 작업 추적 — NFS Manila share에 .sqsh 파일 생성."""
+
+    __tablename__ = "layer_builds"
+
+    id: Mapped[int] = mapped_column(INT, primary_key=True, autoincrement=True)
+    layer_name: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(VARCHAR(16), nullable=False, server_default="python")
+    python_version: Mapped[str | None] = mapped_column(VARCHAR(16))
+    profile_name: Mapped[str | None] = mapped_column(VARCHAR(64))
+    share_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+
+    # 빌더 VM 추적
+    server_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    port_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    build_token: Mapped[str | None] = mapped_column(CHAR(32), nullable=True, unique=True)
+    console_log_excerpt: Mapped[str | None] = mapped_column(TEXT, nullable=True)
+    # queued/booting/installing/finalizing/success/failure/indeterminate
+    cloud_init_status: Mapped[str | None] = mapped_column(VARCHAR(20), nullable=True)
+
+    # 상태: queued/creating_access/creating_vm/building/verifying/complete/error/cancelled
+    status: Mapped[str] = mapped_column(VARCHAR(32), nullable=False, default="pending")
+    progress_step: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, default="")
+    progress_pct: Mapped[int] = mapped_column(INT, nullable=False, default=0)
+    error_message: Mapped[str | None] = mapped_column(TEXT)
+
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+
+class LayerConsume(Base):
+    """squashfs 레이어 소비 인스턴스 추적 — 관리자가 생성한 레이어 소비 VM."""
+
+    __tablename__ = "layer_consumes"
+
+    id: Mapped[int] = mapped_column(INT, primary_key=True, autoincrement=True)
+    profile_name: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, index=True)
+    server_id: Mapped[str | None] = mapped_column(VARCHAR(64), index=True)
+    port_id: Mapped[str | None] = mapped_column(VARCHAR(64))
+    share_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    server_name: Mapped[str | None] = mapped_column(VARCHAR(128))
+
+    # 상태: creating/active/error
+    status: Mapped[str] = mapped_column(VARCHAR(32), nullable=False, default="creating")
+    error_message: Mapped[str | None] = mapped_column(TEXT)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class LayerArtifact(Base):
+    """squashfs 레이어 빌드 성공 시 생성되는 아티팩트 레코드.
+
+    레이어 정보를 DB에 별도로 기록해 미래의 개별 NFS share 분리에 대비한다.
+    """
+
+    __tablename__ = "layer_artifacts"
+
+    id: Mapped[int] = mapped_column(INT, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, index=True)
+    # "uv" | "python"
+    kind: Mapped[str] = mapped_column(VARCHAR(16), nullable=False, index=True)
+    python_version: Mapped[str | None] = mapped_column(VARCHAR(16))
+    sqsh_filename: Mapped[str] = mapped_column(VARCHAR(256), nullable=False)
+    share_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    build_id: Mapped[int | None] = mapped_column(INT, ForeignKey("layer_builds.id", ondelete="SET NULL"))
+    size_bytes: Mapped[int | None] = mapped_column(BIGINT)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+
+
+class LayerProfile(Base):
+    """레이어 프로필 — 여러 레이어를 순서 있는 리스트로 묶어 DB에 저장.
+
+    소비 VM cloud-init에서 이 레이어 리스트를 주입해 OverlayFS를 구성한다.
+    NFS /profiles/*.conf 파일을 대체하는 DB-based source of truth.
+    """
+
+    __tablename__ = "layer_profiles"
+
+    id: Mapped[int] = mapped_column(INT, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, unique=True, index=True)
+    # JSON 배열: ["uv-latest", "python-latest"]  순서 = OverlayFS lowerdir 위→아래
+    layers: Mapped[list] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+
+# ---------------------------------------------------------------------------
 # Union Mount 레이어 시스템
 # ---------------------------------------------------------------------------
 

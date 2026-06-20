@@ -18,7 +18,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from pydantic import ValidationError
 
-from app.api.union.layer_ops import LayerBuildRequest, LayerConsumeRequest
+from app.api.union.layer_ops import LayerBuildRequest, LayerConsumeRequest, LayerProfileRequest
 from app.main import app
 
 BASE = "/api/v1/admin/layers"
@@ -32,70 +32,78 @@ BASE = "/api/v1/admin/layers"
 class TestLayerBuildRequestValidation:
     """LayerBuildRequest 입력값 화이트리스트 검증."""
 
-    def test_valid_request_accepted(self):
+    def test_valid_python_request_accepted(self):
         req = LayerBuildRequest(
-            layer_name="uvpy311",
+            layer_name="python311",
+            kind="python",
             python_version="3.11",
             pip_packages=["numpy", "pandas"],
-            profile_name="smoke",
         )
-        assert req.layer_name == "uvpy311"
+        assert req.layer_name == "python311"
+        assert req.kind == "python"
         assert req.python_version == "3.11"
         assert req.pip_packages == ["numpy", "pandas"]
 
+    def test_valid_uv_request_accepted(self):
+        req = LayerBuildRequest(layer_name="uv", kind="uv")
+        assert req.layer_name == "uv"
+        assert req.kind == "uv"
+        assert req.python_version is None
+
     def test_valid_layer_name_with_dots_and_hyphens(self):
-        req = LayerBuildRequest(layer_name="uv-py3.11", python_version="3.11")
+        req = LayerBuildRequest(layer_name="uv-py3.11", kind="python", python_version="3.11")
         assert req.layer_name == "uv-py3.11"
 
     # --- layer_name 명령주입 차단 ---
 
     def test_layer_name_with_semicolon_rejected(self):
         with pytest.raises(ValidationError):
-            LayerBuildRequest(layer_name="name;evil", python_version="3.11")
+            LayerBuildRequest(layer_name="name;evil", kind="python", python_version="3.11")
 
     def test_layer_name_with_newline_rejected(self):
         with pytest.raises(ValidationError):
-            LayerBuildRequest(layer_name="name\nevil", python_version="3.11")
+            LayerBuildRequest(layer_name="name\nevil", kind="python", python_version="3.11")
 
     def test_layer_name_with_backtick_rejected(self):
         with pytest.raises(ValidationError):
-            LayerBuildRequest(layer_name="`rm -rf /`", python_version="3.11")
+            LayerBuildRequest(layer_name="`rm -rf /`", kind="python", python_version="3.11")
 
     def test_layer_name_with_dollar_rejected(self):
         with pytest.raises(ValidationError):
-            LayerBuildRequest(layer_name="$(id)", python_version="3.11")
+            LayerBuildRequest(layer_name="$(id)", kind="python", python_version="3.11")
 
     def test_layer_name_with_slash_rejected(self):
         with pytest.raises(ValidationError):
-            LayerBuildRequest(layer_name="a/b", python_version="3.11")
+            LayerBuildRequest(layer_name="a/b", kind="python", python_version="3.11")
 
     def test_layer_name_starting_with_hyphen_rejected(self):
         with pytest.raises(ValidationError):
-            LayerBuildRequest(layer_name="-bad", python_version="3.11")
+            LayerBuildRequest(layer_name="-bad", kind="python", python_version="3.11")
 
     # --- python_version 형식 검증 ---
 
     def test_python_version_major_minor_only_accepted(self):
-        req = LayerBuildRequest(layer_name="test", python_version="3.12")
+        req = LayerBuildRequest(layer_name="test", kind="python", python_version="3.12")
         assert req.python_version == "3.12"
 
     def test_python_version_with_patch_rejected(self):
         with pytest.raises(ValidationError):
-            LayerBuildRequest(layer_name="test", python_version="3.11.2")
+            LayerBuildRequest(layer_name="test", kind="python", python_version="3.11.2")
 
     def test_python_version_text_rejected(self):
         with pytest.raises(ValidationError):
-            LayerBuildRequest(layer_name="test", python_version="latest")
+            LayerBuildRequest(layer_name="test", kind="python", python_version="latest")
 
     def test_python_version_with_injection_rejected(self):
         with pytest.raises(ValidationError):
-            LayerBuildRequest(layer_name="test", python_version="3.11;evil")
+            LayerBuildRequest(layer_name="test", kind="python", python_version="3.11;evil")
 
     # --- pip_packages 명령주입 차단 ---
 
     def test_valid_pip_packages_accepted(self):
         req = LayerBuildRequest(
             layer_name="test",
+            kind="python",
             python_version="3.11",
             pip_packages=["numpy>=1.24", "pandas[excel]", "scikit-learn~=1.0"],
         )
@@ -105,6 +113,7 @@ class TestLayerBuildRequestValidation:
         with pytest.raises(ValidationError):
             LayerBuildRequest(
                 layer_name="test",
+                kind="python",
                 python_version="3.11",
                 pip_packages=["numpy;rm -rf /"],
             )
@@ -113,6 +122,7 @@ class TestLayerBuildRequestValidation:
         with pytest.raises(ValidationError):
             LayerBuildRequest(
                 layer_name="test",
+                kind="python",
                 python_version="3.11",
                 pip_packages=["$(evil)"],
             )
@@ -121,27 +131,24 @@ class TestLayerBuildRequestValidation:
         with pytest.raises(ValidationError):
             LayerBuildRequest(
                 layer_name="test",
+                kind="python",
                 python_version="3.11",
                 pip_packages=["numpy\nevil"],
             )
 
-    # --- profile_name 검증 ---
+    # --- kind 검증 ---
 
-    def test_profile_name_with_injection_rejected(self):
+    def test_kind_invalid_value_rejected(self):
         with pytest.raises(ValidationError):
-            LayerBuildRequest(
-                layer_name="test",
-                python_version="3.11",
-                profile_name="profile$(id)",
-            )
+            LayerBuildRequest(layer_name="test", kind="shell", python_version="3.11")
 
-    def test_profile_name_with_newline_rejected(self):
+    def test_kind_uv_with_python_version_rejected(self):
         with pytest.raises(ValidationError):
-            LayerBuildRequest(
-                layer_name="test",
-                python_version="3.11",
-                profile_name="profile\nevil",
-            )
+            LayerBuildRequest(layer_name="uv", kind="uv", python_version="3.11")
+
+    def test_kind_python_without_version_rejected(self):
+        with pytest.raises(ValidationError):
+            LayerBuildRequest(layer_name="test", kind="python")
 
 
 # ============================================================================
@@ -292,9 +299,9 @@ async def test_trigger_build_success(admin_client):
             f"{BASE}/build",
             json={
                 "layer_name": "uvpy311",
+                "kind": "python",
                 "python_version": "3.11",
                 "pip_packages": ["numpy"],
-                "profile_name": "smoke",
             },
         )
 
@@ -372,14 +379,15 @@ async def test_list_builds_success(admin_client):
     """GET /builds → 목록 반환."""
     mock_row = _make_build_row()
 
-    with patch("app.api.union.layer_ops.get_session") as mock_session_ctx:
+    with patch("app.api.union.layer_ops.get_session_factory") as mock_factory:
         mock_session = AsyncMock()
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=False)
         mock_session.execute = AsyncMock(
             return_value=MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[mock_row]))))
         )
-        mock_session_ctx.return_value = mock_session
+        mock_cm = AsyncMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_cm.__aexit__ = AsyncMock(return_value=False)
+        mock_factory.return_value.return_value = mock_cm
 
         resp = await admin_client.get(f"{BASE}/builds")
 
@@ -391,12 +399,13 @@ async def test_list_builds_success(admin_client):
 @pytest.mark.asyncio
 async def test_get_build_detail_not_found(admin_client):
     """GET /builds/{id} — 존재하지 않는 빌드 ID → 404."""
-    with patch("app.api.union.layer_ops.get_session") as mock_session_ctx:
+    with patch("app.api.union.layer_ops.get_session_factory") as mock_factory:
         mock_session = AsyncMock()
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=False)
         mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
-        mock_session_ctx.return_value = mock_session
+        mock_cm = AsyncMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_cm.__aexit__ = AsyncMock(return_value=False)
+        mock_factory.return_value.return_value = mock_cm
 
         resp = await admin_client.get(f"{BASE}/builds/9999")
 
@@ -511,3 +520,141 @@ async def test_trigger_consume_missing_share_id(admin_client):
         )
 
     assert resp.status_code == 400
+
+
+# ============================================================================
+# Part 7: Pydantic 화이트리스트 검증 — LayerProfileRequest
+# ============================================================================
+
+
+class TestLayerProfileRequestValidation:
+    """LayerProfileRequest 입력값 화이트리스트 검증."""
+
+    def test_valid_request_accepted(self):
+        req = LayerProfileRequest(name="default", layers=["uv-latest", "python-latest"])
+        assert req.name == "default"
+        assert req.layers == ["uv-latest", "python-latest"]
+
+    def test_name_with_injection_rejected(self):
+        with pytest.raises(ValidationError):
+            LayerProfileRequest(name="profile$(id)", layers=["uv-latest"])
+
+    def test_name_with_newline_rejected(self):
+        with pytest.raises(ValidationError):
+            LayerProfileRequest(name="profile\nevil", layers=["uv-latest"])
+
+    def test_empty_layers_rejected(self):
+        with pytest.raises(ValidationError):
+            LayerProfileRequest(name="default", layers=[])
+
+    def test_layer_with_injection_rejected(self):
+        with pytest.raises(ValidationError):
+            LayerProfileRequest(name="default", layers=["uv-latest;evil"])
+
+    def test_layer_with_newline_rejected(self):
+        with pytest.raises(ValidationError):
+            LayerProfileRequest(name="default", layers=["uv\nevil"])
+
+
+# ============================================================================
+# Part 8: GET /artifacts 엔드포인트
+# ============================================================================
+
+
+class TestListArtifacts:
+    """GET /artifacts — 아티팩트 목록."""
+
+    @pytest.mark.asyncio
+    async def test_list_artifacts_requires_admin(self):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.get(f"{BASE}/artifacts")
+        assert resp.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_list_artifacts_success(self, admin_client):
+        from app.models.db import LayerArtifact
+
+        with patch("app.api.union.layer_ops.get_session_factory") as mock_factory:
+            mock_session = AsyncMock()
+            mock_row = MagicMock(spec=LayerArtifact)
+            mock_row.id = 1
+            mock_row.name = "uv"
+            mock_row.kind = "uv"
+            mock_row.python_version = None
+            mock_row.sqsh_filename = "uv-latest.sqsh"
+            mock_row.share_id = "share-abc"
+            mock_row.build_id = 1
+            mock_row.size_bytes = None
+            mock_row.created_at = None
+            mock_result = MagicMock()
+            mock_result.scalars.return_value.all.return_value = [mock_row]
+            mock_session.execute = AsyncMock(return_value=mock_result)
+            mock_cm = AsyncMock()
+            mock_cm.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_cm.__aexit__ = AsyncMock(return_value=False)
+            mock_factory.return_value.return_value = mock_cm
+
+            resp = await admin_client.get(f"{BASE}/artifacts")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert isinstance(data, list)
+        assert data[0]["name"] == "uv"
+        assert data[0]["kind"] == "uv"
+
+
+# ============================================================================
+# Part 9: POST /profiles 엔드포인트
+# ============================================================================
+
+
+class TestUpsertProfile:
+    """POST /profiles — 레이어 프로필 upsert."""
+
+    @pytest.mark.asyncio
+    async def test_upsert_profile_requires_admin(self):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.post(f"{BASE}/profiles", json={"name": "default", "layers": ["uv-latest"]})
+        assert resp.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_upsert_profile_name_injection_rejected(self, admin_client):
+        """프로필 이름 인젝션 — 422 Unprocessable Entity."""
+        resp = await admin_client.post(
+            f"{BASE}/profiles",
+            json={"name": "evil$(id)", "layers": ["uv-latest"]},
+        )
+        assert resp.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_upsert_profile_empty_layers_rejected(self, admin_client):
+        """빈 레이어 리스트 — 422."""
+        resp = await admin_client.post(
+            f"{BASE}/profiles",
+            json={"name": "default", "layers": []},
+        )
+        assert resp.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_upsert_profile_missing_artifact_rejected(self, admin_client):
+        """존재하지 않는 레이어 참조 — 400."""
+        with patch("app.api.union.layer_ops.get_session_factory") as mock_factory:
+            mock_session = AsyncMock()
+            # artifact 조회 → 빈 결과
+            mock_art_result = MagicMock()
+            mock_art_result.scalars.return_value.all.return_value = []
+            # profile 조회 → 없음
+            mock_prof_result = MagicMock()
+            mock_prof_result.scalar_one_or_none.return_value = None
+            mock_session.execute = AsyncMock(side_effect=[mock_art_result, mock_prof_result])
+            mock_cm = AsyncMock()
+            mock_cm.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_cm.__aexit__ = AsyncMock(return_value=False)
+            mock_factory.return_value.return_value = mock_cm
+
+            resp = await admin_client.post(
+                f"{BASE}/profiles",
+                json={"name": "default", "layers": ["nonexistent-latest"]},
+            )
+        assert resp.status_code == 400
+        assert "존재하지 않는 레이어" in resp.json()["detail"]
