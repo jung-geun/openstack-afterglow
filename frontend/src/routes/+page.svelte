@@ -55,10 +55,8 @@
 				username, password, domain_name: domainName,
 			});
 
-			// 백엔드가 이미 기본 프로젝트로 scope된 토큰을 반환한다.
-			// default_project_id 가 있으면 project_id/project_name 을 그대로 사용하고,
-			// 없으면 null 로 두어 $effect 가 /select-project 로 라우팅하도록 한다.
-			const hasDefault = !!data.default_project_id;
+			// 백엔드가 이미 기본 프로젝트(없으면 첫 번째 활성 프로젝트)로 scope된 토큰을 반환한다.
+			// project_id 가 있으면 바로 대시보드로, 없으면 선택 화면으로 이동한다.
 			setAuth({
 				token: data.token,
 				refreshToken: data.refresh_token ?? null,
@@ -67,8 +65,8 @@
 					: null,
 				userId: data.user_id,
 				username: data.username,
-				projectId: hasDefault ? data.project_id : null,
-				projectName: hasDefault ? data.project_name : null,
+				projectId: data.project_id || null,
+				projectName: data.project_name || null,
 				roles: data.roles ?? [],
 				isSystemAdmin: data.is_system_admin ?? false,
 			});
