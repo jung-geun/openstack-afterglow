@@ -14,7 +14,8 @@
 	let { direction = 'up' }: { direction?: 'up' | 'down' } = $props();
 
 	let projects = $state<Project[]>([]);
-	let loading = $state(true);
+	let loading = $state(false);
+	let loaded = $state(false);   // 목록을 한 번이라도 fetch 했는지
 	let switching = $state(false);
 	let error = $state('');
 	let isOpen = $state(false);
@@ -82,7 +83,7 @@
 	}
 
 	onMount(() => {
-		fetchProjects();
+		// fetchProjects 는 드롭다운 최초 오픈 시 지연 호출한다 (대시보드 초기 렌더 불필요 요청 방지).
 		document.addEventListener('click', handleClickOutside);
 		return () => document.removeEventListener('click', handleClickOutside);
 	});
@@ -90,8 +91,16 @@
 
 <div class="relative" bind:this={dropdownRef}>
 	<button
-		onclick={() => { if (!loading && !switching) isOpen = !isOpen; }}
-		disabled={loading || switching}
+		onclick={() => {
+			if (switching) return;
+			isOpen = !isOpen;
+			// 드롭다운 첫 오픈 시 목록 지연 로드
+			if (isOpen && !loaded) {
+				loaded = true;
+				fetchProjects();
+			}
+		}}
+		disabled={switching}
 		class="flex items-center gap-2 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 disabled:bg-gray-800/50 rounded-lg text-sm transition-colors"
 	>
 		{#if loading || switching}

@@ -1,15 +1,13 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { setAuth, setAvailableProjects, isLoggedIn } from '$lib/stores/auth';
+	import { auth, setAuth, isLoggedIn } from '$lib/stores/auth';
 	import { api, ApiError } from '$lib/api/client';
-	import { loadSiteConfig } from '$lib/config/site';
 	import LoginBrandHeader from '$lib/components/auth/LoginBrandHeader.svelte';
 	import LoginForm from '$lib/components/auth/LoginForm.svelte';
-	import type { Project, LoginResponse } from '$lib/types/auth';
+	import type { LoginResponse } from '$lib/types/auth';
 
 	onMount(async () => {
-		loadSiteConfig();
 		try {
 			const res = await api.get<{ enabled: boolean }>('/auth/gitlab/enabled');
 			gitlabEnabled = res.enabled;
@@ -27,7 +25,7 @@
 	let gitlabLoading = $state(false);
 
 	$effect(() => {
-		if ($isLoggedIn) goto('/dashboard');
+		if ($isLoggedIn) goto($auth.projectId ? '/dashboard' : '/select-project');
 	});
 
 	async function loginWithGitlab() {
@@ -57,26 +55,10 @@
 				username, password, domain_name: domainName,
 			});
 
-			let projects: Project[] = [];
-			try {
-				projects = await api.get<Project[]>('/api/v1/auth/projects', data.token);
-			} catch { /* 프로젝트 목록 조회 실패 시 무시 */ }
-
-			let selectedProjectId: string | null = null;
-			let selectedProjectName: string | null = null;
-
-			if (data.default_project_id && projects.length > 0) {
-				const defaultProject = projects.find(p => p.id === data.default_project_id);
-				if (defaultProject) {
-					selectedProjectId = defaultProject.id;
-					selectedProjectName = defaultProject.name;
-				}
-			}
-			if (!selectedProjectId && projects.length === 1) {
-				selectedProjectId = projects[0].id;
-				selectedProjectName = projects[0].name;
-			}
-
+			// 백엔드가 이미 기본 프로젝트로 scope된 토큰을 반환한다.
+			// default_project_id 가 있으면 project_id/project_name 을 그대로 사용하고,
+			// 없으면 null 로 두어 $effect 가 /select-project 로 라우팅하도록 한다.
+			const hasDefault = !!data.default_project_id;
 			setAuth({
 				token: data.token,
 				refreshToken: data.refresh_token ?? null,
@@ -85,13 +67,12 @@
 					: null,
 				userId: data.user_id,
 				username: data.username,
-				projectId: selectedProjectId,
-				projectName: selectedProjectName,
+				projectId: hasDefault ? data.project_id : null,
+				projectName: hasDefault ? data.project_name : null,
 				roles: data.roles ?? [],
 				isSystemAdmin: data.is_system_admin ?? false,
 			});
-			setAvailableProjects(projects);
-			goto(selectedProjectId ? '/dashboard' : '/select-project');
+			// 라우팅은 $effect (isLoggedIn + auth.projectId 기반) 가 처리한다.
 		} catch (e) {
 			error = e instanceof ApiError ? `인증 실패 (${e.status})` : '서버 오류가 발생했습니다';
 		} finally {
