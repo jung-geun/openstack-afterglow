@@ -26,15 +26,18 @@ class _JSONFormatter(logging.Formatter):
 
 def _setup_logging() -> None:
     from app.config import get_settings
+    from app.utils.log import SensitiveDataFilter
 
     cfg = get_settings()
 
+    sensitive_filter = SensitiveDataFilter()
     formatter = _JSONFormatter()
     root = logging.getLogger()
     root.handlers.clear()
 
     stream_handler = logging.StreamHandler()
     stream_handler.setFormatter(formatter)
+    stream_handler.addFilter(sensitive_filter)
     root.addHandler(stream_handler)
 
     log_path = cfg.log_file_path
@@ -56,6 +59,7 @@ def _setup_logging() -> None:
                 encoding="utf-8",
             )
         file_handler.setFormatter(formatter)
+        file_handler.addFilter(sensitive_filter)
         root.addHandler(file_handler)
     except OSError:
         pass  # 로그 디렉터리 없으면 파일 핸들러 없이 진행
@@ -392,7 +396,7 @@ async def request_logging_middleware(request: Request, call_next):
     response = await call_next(request)
     duration_ms = (time.perf_counter() - start) * 1000
     _record_request(request.method, request.url.path, response.status_code, duration_ms)
-    if not request.url.path.startswith("/api/v1/health"):
+    if not request.url.path.startswith(("/api/v1/health", "/api/health")):
         _logger.info(
             "request",
             extra={
@@ -601,12 +605,14 @@ app.include_router(user_dashboard_router, prefix="/api/v1/user-dashboard", tags=
 
 
 @app.get("/api/v1/health")
+@app.get("/api/health", include_in_schema=False)
 async def health():
     """K8s probe용. 항상 즉시 200 반환."""
     return {"status": "ok"}
 
 
 @app.get("/api/v1/health/detail")
+@app.get("/api/health/detail", include_in_schema=False)
 async def health_detail(token_info: dict = Depends(get_token_info)):
     """모니터링 대시보드용 상세 헬스체크. Redis 연결 상태 포함."""
     detail: dict = {"status": "ok", "redis": "unknown"}
