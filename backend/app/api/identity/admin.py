@@ -226,8 +226,6 @@ def _fetch_overview_servers(conn) -> dict:
         for s in _resp.json().get("servers", []):
             flavor = s.get("flavor") or {}
             fname = (flavor.get("original_name") or flavor.get("id") or "").lower()
-            if "gpu" in fname:
-                gpu_instances += 1
             instance_stats["total"] += 1
             st = (s.get("status") or "").upper()
             if st == "ACTIVE":
@@ -238,6 +236,9 @@ def _fetch_overview_servers(conn) -> dict:
                 instance_stats["error"] += 1
             else:
                 instance_stats["other"] += 1
+            # SHELVED/SHELVED_OFFLOADED는 실제 호스트 할당이 없으므로 GPU 사용량에서 제외
+            if "gpu" in fname and st in ("ACTIVE", "SHUTOFF", "PAUSED", "SUSPENDED", "RESIZE"):
+                gpu_instances += 1
     except Exception:
         _logger.warning("서버 집계 실패", exc_info=True)
     return {"gpu_instances": gpu_instances, "instance_stats": instance_stats}
@@ -1201,6 +1202,10 @@ async def admin_overview_projects(
                     headers={"OpenStack-API-Version": "compute 2.53"},
                 )
                 for s in resp.json().get("servers", []):
+                    # SHELVED/SHELVED_OFFLOADED는 실제 호스트 할당이 없으므로 제외
+                    st = (s.get("status") or "").upper()
+                    if st not in ("ACTIVE", "SHUTOFF", "PAUSED", "SUSPENDED", "RESIZE"):
+                        continue
                     pid = s.get("tenant_id") or s.get("project_id") or ""
                     fname = (s.get("flavor") or {}).get("original_name") or ""
                     if "gpu" in fname.lower():

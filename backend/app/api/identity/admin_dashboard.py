@@ -231,7 +231,14 @@ async def get_instances_health(
                             "reason": "오류 상태",
                         }
                     )
-                if _is_gpu_flavor(s.get("flavor") or {}):
+                # SHELVED/SHELVED_OFFLOADED는 실제 호스트 할당이 없으므로 GPU 카운트 제외
+                if _is_gpu_flavor(s.get("flavor") or {}) and status in (
+                    "ACTIVE",
+                    "SHUTOFF",
+                    "PAUSED",
+                    "SUSPENDED",
+                    "RESIZE",
+                ):
                     gpu_count += 1
 
             return {
