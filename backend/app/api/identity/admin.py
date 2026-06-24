@@ -123,8 +123,8 @@ async def list_active_builds():
                                 "progress_step": r.progress_step,
                                 "progress_pct": r.progress_pct,
                                 "error_message": r.error_message,
-                                "started_at": r.started_at.isoformat() if r.started_at else None,
-                                "completed_at": r.completed_at.isoformat() if r.completed_at else None,
+                                "started_at": r.started_at.isoformat() + "Z" if r.started_at else None,
+                                "completed_at": r.completed_at.isoformat() + "Z" if r.completed_at else None,
                             }
                         )
         except Exception:

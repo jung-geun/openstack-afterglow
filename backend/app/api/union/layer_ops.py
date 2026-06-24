@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator, model_validator
@@ -16,6 +17,15 @@ from app.api.deps import require_admin
 from app.database import get_session_factory
 
 _logger = logging.getLogger(__name__)
+
+
+def _iso(dt: datetime | None) -> str | None:
+    """datetime → ISO 8601 문자열. naive datetime은 UTC로 간주하고 'Z' suffix 부착."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.isoformat().replace("+00:00", "Z")
 
 router = APIRouter()
 
@@ -31,14 +41,16 @@ _FLAVOR_ID_RE = re.compile(r"^[a-zA-Z0-9\-_.]+$")
 
 
 class LayerBuildRequest(BaseModel):
-    """레이어 빌드 요청 — uv 또는 Python 레이어 빌드."""
+    """레이어 빌드 요청 — base 또는 stacked 레이어 빌드."""
 
     layer_name: str
-    # "uv" | "python"
+    # "uv" | "python" | 기타 사용자 정의 kind (pip, torch 등)
     kind: str = "python"
-    # kind="python"일 때만 필수
+    # kind="python"일 때만 필수 (stacked 빌드 시 부모의 uv로 설치하므로 필수)
     python_version: str | None = None
     pip_packages: list[str] = []
+    # 부모 레이어 이름 — 지정 시 stacked 빌드 (부모 체인 RO 마운트 → delta squash)
+    parent: str | None = None
 
     @field_validator("layer_name")
     @classmethod
@@ -50,8 +62,17 @@ class LayerBuildRequest(BaseModel):
     @field_validator("kind")
     @classmethod
     def validate_kind(cls, v: str) -> str:
-        if v not in ("uv", "python"):
-            raise ValueError(f"kind는 'uv' 또는 'python'이어야 합니다: {v!r}")
+        if not _LAYER_NAME_RE.match(v):
+            raise ValueError(f"유효하지 않은 kind (소문자·숫자·점·하이픈만 허용): {v!r}")
+        return v
+
+    @field_validator("parent")
+    @classmethod
+    def validate_parent(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        if not _LAYER_NAME_RE.match(v):
+            raise ValueError(f"유효하지 않은 부모 레이어 이름: {v!r}")
         return v
 
     @field_validator("python_version")
@@ -73,10 +94,10 @@ class LayerBuildRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_kind_requirements(self) -> LayerBuildRequest:
-        if self.kind == "python" and not self.python_version:
-            raise ValueError("kind='python'일 때 python_version은 필수입니다")
         if self.kind == "uv" and self.python_version is not None:
             raise ValueError("kind='uv'일 때 python_version은 사용할 수 없습니다")
+        if self.kind == "python" and not self.python_version and not self.parent:
+            raise ValueError("kind='python'일 때 python_version은 필수입니다 (stacked 빌드 시 parent 지정 가능)")
         return self
 
 
@@ -142,15 +163,47 @@ class LayerProfileRequest(BaseModel):
 
 @router.post("/build", dependencies=[Depends(require_admin)])
 async def trigger_layer_build(req: LayerBuildRequest) -> dict:
-    """squashfs 레이어 빌드를 시작한다. 백그라운드 태스크로 실행."""
+    """squashfs 레이어 빌드를 시작한다. 백그라운드 태스크로 실행.
+
+    parent 지정 시 stacked 빌드: 부모 체인 share를 RO 마운트 → delta squash.
+    """
+    from app.models.db import LayerArtifact
     from app.services import layer_builder
+
+    _logger.info(
+        "[layer_ops] 빌드 요청: layer=%s kind=%s python=%s parent=%s pip_count=%d",
+        req.layer_name, req.kind, req.python_version or "-",
+        req.parent or "-", len(req.pip_packages or []),
+    )
+
+    # 부모 레이어 이름을 artifact ID로 변환
+    parent_artifact_id: int | None = None
+    if req.parent:
+        async with get_session_factory()() as session:
+            parent_row = (
+                await session.execute(
+                    select(LayerArtifact)
+                    .where(LayerArtifact.name == req.parent)
+                    .where(LayerArtifact.is_sealed.is_(True))
+                    .order_by(desc(LayerArtifact.id))
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+        if parent_row is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"부모 레이어 {req.parent!r}를 찾을 수 없습니다 (봉인된 artifact 필요)",
+            )
+        parent_artifact_id = parent_row.id
 
     result = await layer_builder.start_layer_build(
         layer_name=req.layer_name,
         kind=req.kind,
         python_version=req.python_version,
         pip_packages=req.pip_packages,
+        parent_artifact_id=parent_artifact_id,
     )
+    _logger.info("[layer_ops] 빌드 등록 완료: build_id=%s layer=%s", result.get("build_id"), req.layer_name)
     return result
 
 
@@ -210,11 +263,16 @@ async def cancel_layer_build(build_id: int) -> dict:
     """진행 중인 레이어 빌드를 취소한다."""
     from app.services import layer_builder
 
+    _logger.info("[layer_ops] 빌드 취소 요청: build_id=%d", build_id)
     try:
-        return await layer_builder.cancel_layer_build(build_id)
+        result = await layer_builder.cancel_layer_build(build_id)
+        _logger.info("[layer_ops] 빌드 취소 완료: build_id=%d", build_id)
+        return result
     except KeyError as e:
+        _logger.warning("[layer_ops] 빌드 취소 실패 — not found: build_id=%d", build_id)
         raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
+        _logger.warning("[layer_ops] 빌드 취소 실패 — 상태 불일치: build_id=%d err=%s", build_id, e)
         raise HTTPException(status_code=409, detail=str(e)) from e
 
 
@@ -230,6 +288,10 @@ async def trigger_layer_consume(req: LayerConsumeRequest) -> dict:
     layer-store-ro NFS share를 RO 마운트하고 layer-activate.sh로
     squashfs + OverlayFS를 활성화하는 VM을 생성해 반환한다.
     """
+    _logger.info(
+        "[layer_ops] 소비 인스턴스 요청: profile=%s server_name=%s flavor=%s",
+        req.profile_name, req.server_name, req.flavor_id,
+    )
 
     from app.config import get_settings
     from app.database import get_session_factory
@@ -349,6 +411,7 @@ async def upsert_layer_profile(req: LayerProfileRequest) -> dict:
 
     layers 리스트의 각 레이어가 LayerArtifact에 존재해야 한다.
     """
+    _logger.info("[layer_ops] 프로필 upsert: name=%s layers=%s", req.name, req.layers)
     from app.models.db import LayerArtifact, LayerProfile
 
     async with get_session_factory()() as session:
@@ -431,9 +494,9 @@ def _build_row_to_dict(row) -> dict:
         "progress_pct": row.progress_pct,
         "error_message": row.error_message,
         "console_log_excerpt": row.console_log_excerpt,
-        "started_at": row.started_at.isoformat() if row.started_at else None,
-        "completed_at": row.completed_at.isoformat() if row.completed_at else None,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "started_at": _iso(row.started_at),
+        "completed_at": _iso(row.completed_at),
+        "created_at": _iso(row.created_at),
     }
 
 
@@ -447,8 +510,8 @@ def _consume_row_to_dict(row) -> dict:
         "share_id": row.share_id,
         "status": row.status,
         "error_message": row.error_message,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-        "completed_at": row.completed_at.isoformat() if row.completed_at else None,
+        "created_at": _iso(row.created_at),
+        "completed_at": _iso(row.completed_at),
     }
 
 
@@ -462,7 +525,9 @@ def _artifact_row_to_dict(row) -> dict:
         "share_id": row.share_id,
         "build_id": row.build_id,
         "size_bytes": row.size_bytes,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "parent_id": row.parent_id,
+        "is_sealed": row.is_sealed,
+        "created_at": _iso(row.created_at),
     }
 
 
@@ -471,6 +536,6 @@ def _profile_row_to_dict(row) -> dict:
         "id": row.id,
         "name": row.name,
         "layers": row.layers,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        "created_at": _iso(row.created_at),
+        "updated_at": _iso(row.updated_at),
     }

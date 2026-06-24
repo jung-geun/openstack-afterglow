@@ -1460,7 +1460,7 @@ async def get_stampede_events(
     return [
         {
             "id": r.id,
-            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "created_at": r.created_at.isoformat() + "Z" if r.created_at else None,
             "action": r.action,
             "status": r.status,
             "nodegroup_id": r.resource_name,

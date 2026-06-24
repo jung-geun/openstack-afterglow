@@ -77,16 +77,28 @@
   let uvForm = $state({ layer_name: '' });
   let uvSubmitting = $state(false);
 
-  // python 레이어 빌드 폼
-  let pyForm = $state({ layer_name: '', python_version: '3.11', pip_packages: '' });
+  // python / stacked 레이어 빌드 폼
+  // parent: 봉인된 부모 레이어 이름 — 지정 시 stacked 빌드(delta squash)
+  let pyForm = $state({ layer_name: '', python_version: '3.11', pip_packages: '', parent: '' });
   let pySubmitting = $state(false);
 
   // 프로필 구성 폼
-  interface LayerArtifact { id: number; name: string; kind: string; python_version: string | null; sqsh_filename: string; created_at: string | null; }
+  interface LayerArtifact {
+    id: number;
+    name: string;
+    kind: string;
+    python_version: string | null;
+    sqsh_filename: string;
+    parent_id: number | null;
+    is_sealed: boolean;
+    created_at: string | null;
+  }
   interface LayerProfile { id: number; name: string; layers: string[]; created_at: string | null; updated_at: string | null; }
   let artifacts = $state<LayerArtifact[]>([]);
   let profiles = $state<LayerProfile[]>([]);
   let profileForm = $state({ name: '', selectedLayers: [] as string[] });
+  // 봉인 완료된 artifact만 부모 후보로 사용
+  const sealedArtifacts = $derived(artifacts.filter(a => a.is_sealed));
   let profileSubmitting = $state(false);
   let profileMessage = $state('');
   let profileError = $state('');
@@ -204,13 +216,23 @@
     message = '';
     try {
       const pip = pyForm.pip_packages.split(',').map(s => s.trim()).filter(Boolean);
-      const result = await api.post<{ build_id: number; layer_name: string; status: string }>(
+      const body: Record<string, unknown> = {
+        layer_name: pyForm.layer_name,
+        kind: 'python',
+        python_version: pyForm.python_version || undefined,
+        pip_packages: pip,
+      };
+      // stacked 빌드: 부모 레이어 지정
+      if (pyForm.parent) body.parent = pyForm.parent;
+
+      const result = await api.post<{ build_id: number; layer_name: string; parent_artifact_id: number | null; status: string }>(
         '/api/v1/admin/layers/build',
-        { layer_name: pyForm.layer_name, kind: 'python', python_version: pyForm.python_version, pip_packages: pip },
+        body,
         token,
         projectId,
       );
-      message = `Python 레이어 빌드 시작 (ID: ${result.build_id}, 레이어: ${result.layer_name})`;
+      const stackedNote = result.parent_artifact_id ? ` (stacked, 부모 ID: ${result.parent_artifact_id})` : '';
+      message = `Python 레이어 빌드 시작 (ID: ${result.build_id}, 레이어: ${result.layer_name})${stackedNote}`;
       await Promise.allSettled([loadBuilds(), loadArtifacts()]);
     } catch (e) {
       error = e instanceof ApiError ? `빌드 트리거 실패: ${e.message}` : '네트워크 오류';
@@ -388,14 +410,20 @@
     return `${Math.floor(h / 24)}일 전`;
   }
 
+  // timezone 없는 ISO 문자열을 UTC로 강제 해석 (서버가 naive datetime을 반환할 경우 대비)
+  function parseISO(iso: string): Date {
+    const hasZone = iso.endsWith('Z') || iso.includes('+') || /[+-]\d{2}:\d{2}$/.test(iso);
+    return new Date(hasZone ? iso : iso + 'Z');
+  }
+
   function fmtDate(iso: string | null | undefined): string {
     if (!iso) return '—';
-    return new Date(iso).toLocaleString('ko-KR');
+    return parseISO(iso).toLocaleString('ko-KR');
   }
 
   function elapsed(started: string | null | undefined): string {
     if (!started) return '—';
-    const ms = Date.now() - new Date(started).getTime();
+    const ms = Date.now() - parseISO(started).getTime();
     const s = Math.floor(ms / 1000);
     if (s < 60) return `${s}초`;
     const m = Math.floor(s / 60);
@@ -455,12 +483,13 @@
       </section>
 
       <!-- ------------------------------------------------------------------ -->
-      <!-- Python 레이어 빌드                                                  -->
+      <!-- Python / Stacked 레이어 빌드                                       -->
       <!-- ------------------------------------------------------------------ -->
       <section class="bg-gray-800 border border-gray-700 rounded-xl p-5">
-        <h2 class="text-sm font-semibold text-white mb-1">Python 레이어 빌드</h2>
+        <h2 class="text-sm font-semibold text-white mb-1">Python / Stacked 레이어 빌드</h2>
         <p class="text-xs text-gray-400 mb-4">
-          CPython 트리만 담은 squashfs를 빌드합니다. uv 바이너리는 포함하지 않습니다.
+          CPython을 설치하거나, 부모 레이어 위에 패키지를 쌓는 stacked 빌드를 수행합니다.
+          부모 지정 시 delta(upperdir)만 새 share로 squash합니다.
         </p>
         <div class="space-y-3">
           <div class="grid grid-cols-2 gap-3">
@@ -475,7 +504,9 @@
               />
             </div>
             <div>
-              <label class="block text-xs text-gray-400 mb-1" for="py-ver">Python 버전 *</label>
+              <label class="block text-xs text-gray-400 mb-1" for="py-ver">
+                Python 버전{pyForm.parent ? ' (선택)' : ' *'}
+              </label>
               <input
                 id="py-ver"
                 type="text"
@@ -485,6 +516,39 @@
               />
             </div>
           </div>
+          <!-- 부모 레이어 드롭다운 — stacked 빌드 -->
+          <div>
+            <label class="block text-xs text-gray-400 mb-1" for="py-parent">
+              부모 레이어
+              <span class="text-gray-600 ml-1">(선택 — 지정 시 stacked 빌드)</span>
+            </label>
+            {#if sealedArtifacts.length > 0}
+              <select
+                id="py-parent"
+                bind:value={pyForm.parent}
+                class="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+              >
+                <option value="">없음 (base 빌드)</option>
+                {#each sealedArtifacts as a}
+                  <option value={a.name}>{a.name} ({a.kind}{a.python_version ? ` · py${a.python_version}` : ''})</option>
+                {/each}
+              </select>
+            {:else}
+              <div class="text-xs text-gray-600 italic px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg">
+                봉인된 레이어 없음 (먼저 uv 레이어를 빌드하세요)
+              </div>
+            {/if}
+          </div>
+          {#if pyForm.parent}
+            <div class="flex items-center gap-2 px-3 py-2 bg-indigo-900/20 border border-indigo-700/40 rounded-lg">
+              <svg class="w-3.5 h-3.5 text-indigo-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+              </svg>
+              <span class="text-xs text-indigo-300">
+                stacked 빌드: <span class="font-mono">{pyForm.parent}</span> → <span class="font-mono">{pyForm.layer_name || '(새 레이어)'}</span>
+              </span>
+            </div>
+          {/if}
           <div>
             <label class="block text-xs text-gray-400 mb-1" for="py-pip">pip 패키지 (쉼표 구분)</label>
             <input
@@ -497,10 +561,16 @@
           </div>
           <button
             onclick={triggerPyBuild}
-            disabled={pySubmitting || !pyForm.layer_name || !pyForm.python_version}
+            disabled={pySubmitting || !pyForm.layer_name || (!pyForm.python_version && !pyForm.parent)}
             class="w-full py-2 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
           >
-            {pySubmitting ? '빌드 시작 중...' : 'Python 레이어 빌드'}
+            {#if pySubmitting}
+              빌드 시작 중...
+            {:else if pyForm.parent}
+              Stacked 레이어 빌드
+            {:else}
+              Python 레이어 빌드
+            {/if}
           </button>
         </div>
       </section>
@@ -511,7 +581,8 @@
       <section class="bg-gray-800 border border-gray-700 rounded-xl p-5">
         <h2 class="text-sm font-semibold text-white mb-1">소비 인스턴스 생성</h2>
         <p class="text-xs text-gray-400 mb-4">
-          layer-store-ro를 RO 마운트하고 OverlayFS를 활성화한 VM을 생성합니다.
+          프로필의 레이어 체인을 각자 별도 NFS share에서 RO 마운트하고
+          OverlayFS로 합성한 VM을 생성합니다.
         </p>
         <div class="space-y-3">
           <div class="grid grid-cols-2 gap-3">
@@ -621,10 +692,21 @@
                   <button
                     type="button"
                     onclick={() => toggleLayer(a.name)}
-                    class="w-full text-left flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs transition-colors {selected ? 'bg-blue-700/50 border border-blue-500 text-white' : 'bg-gray-900 border border-gray-700 text-gray-400 hover:border-gray-500'}"
+                    disabled={!a.is_sealed}
+                    title={!a.is_sealed ? '봉인 전 — 빌드 완료 후 사용 가능' : undefined}
+                    class="w-full text-left flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs transition-colors
+                      {!a.is_sealed ? 'opacity-40 cursor-not-allowed bg-gray-900 border border-gray-800 text-gray-600' :
+                       selected ? 'bg-blue-700/50 border border-blue-500 text-white' :
+                       'bg-gray-900 border border-gray-700 text-gray-400 hover:border-gray-500'}"
                   >
                     <span class="font-mono flex-1">{a.name}</span>
                     <span class="text-[10px] px-1.5 py-0.5 rounded {a.kind === 'uv' ? 'bg-amber-900/60 text-amber-300' : 'bg-indigo-900/60 text-indigo-300'}">{a.kind}</span>
+                    {#if a.parent_id}
+                      <span class="text-[10px] text-gray-500" title="stacked">↑</span>
+                    {/if}
+                    {#if !a.is_sealed}
+                      <span class="text-[10px] text-yellow-600">빌드 중</span>
+                    {/if}
                     {#if selected}
                       <span class="text-[10px] text-blue-400">#{profileForm.selectedLayers.indexOf(a.name) + 1}</span>
                     {/if}
