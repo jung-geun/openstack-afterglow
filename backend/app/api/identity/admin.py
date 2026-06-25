@@ -1495,6 +1495,11 @@ class ColdMigrateRequest(BaseModel):
     host: str | None = None
 
 
+class EvacuateRequest(BaseModel):
+    host: str | None = None
+    on_shared_storage: bool = False
+
+
 @router.get("/compute-hosts", dependencies=[Depends(require_admin)])
 async def list_compute_hosts(
     server_id: str | None = Query(None),
@@ -1547,6 +1552,24 @@ async def cold_migrate_instance(
         return {"status": "migrating"}
     except Exception as e:
         _logger.warning("콜드 마이그레이션 실패: %s", e)
+        raise HTTPException(status_code=400, detail=nova._extract_os_error(e))
+
+
+@router.post("/instances/{server_id}/evacuate", dependencies=[Depends(require_admin)])
+async def evacuate_instance(
+    server_id: str,
+    req: EvacuateRequest,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """호스트 장애 인스턴스 강제 이주(evacuate).
+
+    host가 지정되면 해당 호스트로, 생략하면 Nova 스케줄러가 자동 선택한다.
+    """
+    try:
+        await asyncio.to_thread(nova.evacuate_server, conn, server_id, req.host, req.on_shared_storage)
+        return {"status": "evacuating"}
+    except Exception as e:
+        _logger.warning("evacuate 실패: %s", e)
         raise HTTPException(status_code=400, detail=nova._extract_os_error(e))
 
 

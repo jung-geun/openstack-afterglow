@@ -17,6 +17,7 @@
 	import { confirmDialog } from '$lib/stores/confirm.svelte';
 	import { isTransitional } from '$lib/utils/instanceStatus';
 	import RecoveryModal from '$lib/components/admin/instances/RecoveryModal.svelte';
+	import EvacuateModal from '$lib/components/admin/instances/EvacuateModal.svelte';
 	import type { AdminInstance, PagedResponse, TsPoint } from '$lib/types/adminInstance';
 	import { StatTile } from '$lib/components/ui';
 
@@ -89,11 +90,14 @@
 	let selectedIds = $state(new Set<string>());
 	let bulkActioning = $state(false);
 	let recoveryInst = $state<AdminInstance | null>(null);
+	let evacuateInst = $state<AdminInstance | null>(null);
 
 	function openDetail(inst: AdminInstance) { selectedInstanceId = inst.id; selectedProjectId = inst.project_id; }
 	function closeDetail() { selectedInstanceId = null; selectedProjectId = null; }
 	function openRecovery(inst: AdminInstance) { recoveryInst = inst; }
 	function closeRecovery() { recoveryInst = null; }
+	function openEvacuate(inst: AdminInstance) { evacuateInst = inst; }
+	function closeEvacuate() { evacuateInst = null; }
 	function onFilterChange() { markerStack = []; nextMarker = null; load(); }
 	function onPrev() {
 		const prev = markerStack.slice(0, -1);
@@ -247,6 +251,7 @@
 			{onPrev}
 			{onNext}
 			onRecover={openRecovery}
+			onEvacuate={openEvacuate}
 			onToggleSelect={(id: string) => {
 				const next = new Set(selectedIds);
 				if (next.has(id)) next.delete(id); else next.add(id);
@@ -275,5 +280,15 @@
 		serverName={recoveryInst.name || recoveryInst.id.slice(0, 8)}
 		onClose={closeRecovery}
 		onRecovered={() => { closeRecovery(); markerStack = []; nextMarker = null; load(); }}
+	/>
+{/if}
+
+{#if evacuateInst}
+	<EvacuateModal
+		serverId={evacuateInst.id}
+		serverName={evacuateInst.name || evacuateInst.id.slice(0, 8)}
+		currentHost={evacuateInst.host}
+		onClose={closeEvacuate}
+		onEvacuated={() => { closeEvacuate(); ar.setBoost(4); load(markerStack[markerStack.length - 1]); }}
 	/>
 {/if}

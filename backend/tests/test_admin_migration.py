@@ -523,3 +523,84 @@ async def test_migration_status_admin_ok(admin_client, mock_conn):
         resp = await admin_client.get("/api/v1/admin/instances/inst-1/migration-status")
     assert resp.status_code != 403
     assert resp.json()["host"] == "compute1"
+
+
+# ───────────────────────────────────────────────
+# evacuate_server — nova 서비스 단위 테스트
+# ───────────────────────────────────────────────
+
+
+def test_evacuate_server_no_host():
+    """host 미지정 시 evacuate body에 host 없이 onSharedStorage=False로 POST."""
+    conn = MagicMock()
+    conn.compute.get_endpoint.return_value = "http://nova:8774/v2.1"
+    nova.evacuate_server(conn, "server-1")
+    conn.session.post.assert_called_once()
+    body = conn.session.post.call_args.kwargs.get("json", {})
+    assert body == {"evacuate": {"onSharedStorage": False}}
+
+
+def test_evacuate_server_with_host():
+    """host 지정 시 evacuate body에 host 포함."""
+    conn = MagicMock()
+    conn.compute.get_endpoint.return_value = "http://nova:8774/v2.1"
+    nova.evacuate_server(conn, "server-1", host="compute3")
+    body = conn.session.post.call_args.kwargs.get("json", {})
+    assert body["evacuate"]["host"] == "compute3"
+
+
+def test_evacuate_server_shared_storage():
+    """on_shared_storage=True이면 body에 onSharedStorage=True."""
+    conn = MagicMock()
+    conn.compute.get_endpoint.return_value = "http://nova:8774/v2.1"
+    nova.evacuate_server(conn, "server-1", on_shared_storage=True)
+    body = conn.session.post.call_args.kwargs.get("json", {})
+    assert body["evacuate"]["onSharedStorage"] is True
+
+
+# ───────────────────────────────────────────────
+# evacuate 엔드포인트
+# ───────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_evacuate_requires_admin(non_admin_client):
+    resp = await non_admin_client.post("/api/v1/admin/instances/inst-1/evacuate", json={})
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_evacuate_default_body(admin_client, mock_conn):
+    """body={}이면 host=None, on_shared_storage=False로 nova.evacuate_server 호출."""
+    with patch("app.api.identity.admin.nova.evacuate_server") as mock_fn:
+        resp = await admin_client.post("/api/v1/admin/instances/inst-1/evacuate", json={})
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "evacuating"
+    mock_fn.assert_called_once()
+    _, _, host, shared = mock_fn.call_args.args
+    assert host is None
+    assert shared is False
+
+
+@pytest.mark.asyncio
+async def test_evacuate_with_host(admin_client, mock_conn):
+    """host 지정 시 nova.evacuate_server에 전달된다."""
+    with patch("app.api.identity.admin.nova.evacuate_server") as mock_fn:
+        resp = await admin_client.post(
+            "/api/v1/admin/instances/inst-1/evacuate",
+            json={"host": "compute3"},
+        )
+    assert resp.status_code == 200
+    _, _, host, _ = mock_fn.call_args.args
+    assert host == "compute3"
+
+
+@pytest.mark.asyncio
+async def test_evacuate_error_exposed(admin_client, mock_conn):
+    """Nova 에러 메시지가 400 detail에 노출된다."""
+    err = Exception("evacuate failure")
+    err.message = "No valid host was found"  # type: ignore[attr-defined]
+    with patch("app.api.identity.admin.nova.evacuate_server", side_effect=err):
+        resp = await admin_client.post("/api/v1/admin/instances/inst-1/evacuate", json={})
+    assert resp.status_code == 400
+    assert "No valid host was found" in resp.json()["detail"]
