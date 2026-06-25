@@ -14,7 +14,6 @@
 		onPrev,
 		onNext,
 		onRecover,
-		onEvacuate,
 		onToggleSelect,
 		onToggleAll,
 	}: {
@@ -27,7 +26,6 @@
 		onPrev: () => void;
 		onNext: () => void;
 		onRecover?: (inst: AdminInstance) => void;
-		onEvacuate?: (inst: AdminInstance) => void;
 		onToggleSelect?: (id: string) => void;
 		onToggleAll?: () => void;
 	} = $props();
@@ -106,13 +104,6 @@
 									class="text-amber-500 hover:text-amber-300 text-xs underline"
 									title="복구 분석 및 실행"
 								>복구</button>
-							{/if}
-							{#if onEvacuate}
-								<button
-									onclick={(e) => { e.stopPropagation(); onEvacuate(s); }}
-									class="text-orange-500 hover:text-orange-300 text-xs underline"
-									title="호스트 장애 시 강제 이주 (Evacuate)"
-								>강제이주</button>
 							{/if}
 						</div>
 						{#if expandedError === s.id && s.fault}
