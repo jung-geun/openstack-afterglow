@@ -10,6 +10,29 @@ import asyncio
 import logging
 from datetime import UTC, datetime
 
+from app.services.layer_ubuntu import normalize_ubuntu_base
+
+
+def _base_image_fields(snapshot: dict | None) -> dict:
+    if not isinstance(snapshot, dict):
+        return {}
+    return {
+        name: snapshot.get(name)
+        for name in (
+            "base_image_id",
+            "base_image_name",
+            "base_image_checksum",
+            "base_image_os_hash_algo",
+            "base_image_os_hash_value",
+            "base_image_min_disk",
+            "base_image_visibility",
+            "base_image_owner",
+            "source_metadata",
+        )
+        if snapshot.get(name) is not None
+    }
+
+
 _logger = logging.getLogger(__name__)
 
 # 진행 중인 빌드 추적 {build_db_id: info_dict}
@@ -28,15 +51,29 @@ async def start_layer_build(
     kind: str,
     python_version: str | None,
     pip_packages: list[str],
+    apt_packages: list[str] | None = None,
+    pip_index_url: str | None = None,
+    pip_extra_index_urls: list[str] | None = None,
+    pip_find_links: list[str] | None = None,
+    parent_artifact_id: int | None = None,
+    nvidia_driver_branch: str | None = None,
+    ubuntu_base: str | None = None,
+    base_image_snapshot: dict | None = None,
+    source_metadata: dict | None = None,
 ) -> dict:
-    """LayerBuild DB 레코드를 생성하고 백그라운드 빌드 태스크를 시작한다."""
-    from app.config import get_settings
+    """LayerBuild DB 레코드를 생성하고 백그라운드 빌드 태스크를 시작한다.
+
+    share_id는 run_layer_build에서 동적 생성 후 DB에 기록한다.
+    """
     from app.database import get_session_factory
     from app.models.db import LayerBuild
 
-    settings = get_settings()
-    share_id = settings.union_layer_store_rw_share_id or ""
-
+    if base_image_snapshot and base_image_snapshot.get("ubuntu_base"):
+        effective_ubuntu_base = normalize_ubuntu_base(base_image_snapshot.get("ubuntu_base"))
+    else:
+        effective_ubuntu_base = normalize_ubuntu_base(ubuntu_base)
+    if source_metadata is not None:
+        base_image_snapshot = {**(base_image_snapshot or {}), "source_metadata": source_metadata}
     build_db_id: int | None = None
     factory = get_session_factory()
     if factory:
@@ -45,11 +82,16 @@ async def start_layer_build(
                 layer_name=layer_name,
                 kind=kind,
                 python_version=python_version,
-                share_id=share_id,
+                pip_packages=list(pip_packages or []),
+                apt_packages=list(apt_packages or []),
+                ubuntu_base=effective_ubuntu_base,
+                parent_artifact_id=parent_artifact_id,
+                share_id="",  # 동적 share — run_layer_build에서 생성 후 갱신
                 status="queued",
                 cloud_init_status="queued",
                 progress_step="빌드 대기",
                 progress_pct=0,
+                **_base_image_fields(base_image_snapshot),
             )
             session.add(row)
             await session.commit()
@@ -64,6 +106,16 @@ async def start_layer_build(
             "layer_name": layer_name,
             "kind": kind,
             "python_version": python_version,
+            "parent_artifact_id": parent_artifact_id,
+            "pip_packages": list(pip_packages or []),
+            "apt_packages": list(apt_packages or []),
+            "ubuntu_base": effective_ubuntu_base,
+            "pip_index_url": pip_index_url,
+            "pip_extra_index_urls": list(pip_extra_index_urls or []),
+            "pip_find_links": list(pip_find_links or []),
+            "nvidia_driver_branch": nvidia_driver_branch,
+            "base_image_id": (base_image_snapshot or {}).get("base_image_id"),
+            "base_image_name": (base_image_snapshot or {}).get("base_image_name"),
             "status": "queued",
             "started_at": datetime.now(UTC).isoformat(),
         }
@@ -75,6 +127,15 @@ async def start_layer_build(
             kind=kind,
             python_version=python_version,
             pip_packages=pip_packages,
+            apt_packages=[] if kind == "nvidia" else apt_packages,
+            pip_index_url=pip_index_url,
+            pip_extra_index_urls=pip_extra_index_urls,
+            pip_find_links=pip_find_links,
+            parent_artifact_id=parent_artifact_id,
+            nvidia_driver_branch=nvidia_driver_branch,
+            ubuntu_base=effective_ubuntu_base,
+            base_image_snapshot=base_image_snapshot,
+            source_metadata=source_metadata,
         )
     )
     _background_tasks.add(task)
@@ -83,7 +144,11 @@ async def start_layer_build(
     return {
         "build_id": build_db_id,
         "layer_name": layer_name,
+        "parent_artifact_id": parent_artifact_id,
         "status": "queued",
+        "ubuntu_base": effective_ubuntu_base,
+        "base_image_id": (base_image_snapshot or {}).get("base_image_id"),
+        "base_image_name": (base_image_snapshot or {}).get("base_image_name"),
     }
 
 
@@ -93,12 +158,36 @@ async def _build_task(
     kind: str,
     python_version: str | None,
     pip_packages: list[str],
+    apt_packages: list[str] | None = None,
+    pip_index_url: str | None = None,
+    pip_extra_index_urls: list[str] | None = None,
+    pip_find_links: list[str] | None = None,
+    parent_artifact_id: int | None = None,
+    nvidia_driver_branch: str | None = None,
+    ubuntu_base: str | None = None,
+    base_image_snapshot: dict | None = None,
+    source_metadata: dict | None = None,
 ) -> None:
     """백그라운드 빌드 래퍼 — 완료 시 _active_builds에서 제거."""
     try:
         from app.services.layer_build import run_layer_build
 
-        await run_layer_build(build_db_id, layer_name, kind, python_version, pip_packages)
+        await run_layer_build(
+            build_db_id,
+            layer_name,
+            kind,
+            python_version,
+            pip_packages,
+            apt_packages,
+            pip_index_url=pip_index_url,
+            pip_extra_index_urls=pip_extra_index_urls,
+            pip_find_links=pip_find_links,
+            parent_artifact_id=parent_artifact_id,
+            nvidia_driver_branch=nvidia_driver_branch,
+            ubuntu_base=ubuntu_base,
+            base_image_snapshot=base_image_snapshot,
+            source_metadata=source_metadata,
+        )
     except Exception:
         _logger.error("[layer_builder] 빌드 태스크 예외: layer=%s", layer_name, exc_info=True)
     finally:
