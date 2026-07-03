@@ -30,6 +30,33 @@ export interface FileStorage {
   export_location_details: ExportLocationDetail[];
 }
 
+export type FileStorageDeleteRootCauseCode =
+  | 'dhss_false_share_network_mismatch'
+  | 'backend_missing_after_failed_create_or_delete'
+  | 'normal_delete_possible'
+  | 'unknown';
+
+export interface FileStorageDeleteDiagnostic {
+  file_storage_id: string;
+  status: string | null;
+  share_proto: string | null;
+  share_type_name: string | null;
+  share_network_id: string | null;
+  share_instance_ids: string[];
+  root_cause_code: FileStorageDeleteRootCauseCode;
+  confidence: 'high' | 'medium' | 'low';
+  summary: string;
+  evidence: string[];
+  recommended_action: string;
+  force_delete_available: boolean;
+}
+
+export interface FileStorageForceDeleteResult {
+  file_storage_id: string;
+  status: 'force_delete_submitted' | 'already_deleted';
+  diagnostic: FileStorageDeleteDiagnostic | null;
+}
+
 export interface AccessRule {
   id: string;
   access_to: string;

@@ -10,7 +10,7 @@ import time
 
 import httpx
 
-from app.models.storage import FileStorageInfo
+from app.models.storage import FileStorageDeleteDiagnostic, FileStorageInfo
 
 logger = logging.getLogger(__name__)
 
@@ -39,12 +39,12 @@ class ManilaClient:
             r.raise_for_status()
             return r.json()
 
-    def post(self, path: str, body: dict) -> dict:
+    def post(self, path: str, body: dict, log_errors: bool = True) -> dict:
         with httpx.Client() as c:
             url = self._url(path)
             logger.debug(f"Manila POST {url}")
             r = c.post(url, headers=self.headers, json=body, timeout=30)
-            if not r.is_success:
+            if log_errors and not r.is_success:
                 logger.error(f"Manila POST {url} → {r.status_code}: {r.text}")
             r.raise_for_status()
             return r.json() if r.content else {}
@@ -483,6 +483,148 @@ def delete_file_storage(conn, file_storage_id: str) -> None:
     client.delete(f"shares/{file_storage_id}")
 
 
+def _list_share_messages(client: ManilaClient, file_storage_id: str) -> list[dict]:
+    try:
+        return client.get("messages", params={"resource_id": file_storage_id}).get("messages", [])
+    except Exception:
+        return []
+
+
+def _list_share_instances(client: ManilaClient, file_storage_id: str) -> list[dict]:
+    try:
+        return client.get(f"shares/{file_storage_id}/instances").get("share_instances", [])
+    except Exception:
+        pass
+
+    try:
+        instances = client.get("share_instances").get("share_instances", [])
+    except Exception:
+        return []
+    return [inst for inst in instances if inst.get("share_id") == file_storage_id]
+
+
+def _get_share_type_extra_specs(conn, share_type_name: str | None) -> dict:
+    if not share_type_name:
+        return {}
+    try:
+        share_type = next((t for t in list_share_types(conn) if t.get("name") == share_type_name), None)
+    except Exception:
+        return {}
+    return (share_type or {}).get("extra_specs") or {}
+
+
+def _message_text(message: dict) -> str:
+    parts: list[str] = []
+    for value in message.values():
+        if isinstance(value, str):
+            parts.append(value)
+    return " ".join(parts)
+
+
+def _matched_backend_missing_message(messages: list[dict]) -> str | None:
+    needles = ("enoent", "no such file or directory", "not found")
+    for message in messages:
+        text = _message_text(message)
+        lower = text.lower()
+        if any(needle in lower for needle in needles):
+            return text
+    return None
+
+
+def diagnose_file_storage_delete_issue(conn, file_storage_id: str) -> FileStorageDeleteDiagnostic:
+    fs = get_file_storage(conn, file_storage_id)
+    client = get_client(conn)
+    messages = _list_share_messages(client, file_storage_id)
+    instances = _list_share_instances(client, file_storage_id)
+    share_instance_ids = [str(inst["id"]) for inst in instances if inst.get("id")]
+    if not share_instance_ids:
+        share_instance_ids = [
+            detail.share_instance_id for detail in fs.export_location_details if detail.share_instance_id
+        ]
+
+    base = {
+        "file_storage_id": file_storage_id,
+        "status": fs.status,
+        "share_proto": fs.share_proto,
+        "share_type_name": fs.share_type_name,
+        "share_network_id": fs.share_network_id,
+        "share_instance_ids": share_instance_ids,
+    }
+
+    extra_specs = _get_share_type_extra_specs(conn, fs.share_type_name)
+    dhss = str(extra_specs.get("driver_handles_share_servers", "")).lower()
+    if fs.share_network_id and dhss == "false":
+        return FileStorageDeleteDiagnostic(
+            **base,
+            root_cause_code="dhss_false_share_network_mismatch",
+            confidence="high",
+            summary="DHSS=False share type에 share_network_id가 포함되어 Manila 드라이버가 작업을 거부한 것으로 판단됩니다.",
+            evidence=[
+                f"share_type_name={fs.share_type_name}",
+                "driver_handles_share_servers=False",
+                f"share_network_id={fs.share_network_id}",
+            ],
+            recommended_action="backend export/subvolume이 없는 것을 확인한 뒤 관리자 강제 삭제로 Manila share/instance DB 레코드를 제거하고, 동일 share type으로 재생성할 때 share_network_id를 제거하세요.",
+            force_delete_available=True,
+        )
+
+    matched_message = _matched_backend_missing_message(messages)
+    if fs.status in {"error_deleting", "deleting"} and matched_message:
+        return FileStorageDeleteDiagnostic(
+            **base,
+            root_cause_code="backend_missing_after_failed_create_or_delete",
+            confidence="high",
+            summary="Manila DB 레코드는 남아 있지만 backend export/subvolume이 이미 없어서 삭제가 실패한 것으로 판단됩니다.",
+            evidence=[f"status={fs.status}", f"manila_message={matched_message}"],
+            recommended_action="관리자 강제 삭제로 Manila share/instance DB 레코드를 제거하세요.",
+            force_delete_available=True,
+        )
+
+    if fs.status == "error":
+        return FileStorageDeleteDiagnostic(
+            **base,
+            root_cause_code="unknown",
+            confidence="medium",
+            summary="Share가 error 상태입니다. 일반 삭제를 먼저 시도할 수 있지만 실패하면 관리자 강제 삭제가 필요할 수 있습니다.",
+            evidence=[f"status={fs.status}"],
+            recommended_action="일반 삭제가 실패했거나 backend 리소스 부재가 확인되었다면 관리자 강제 삭제로 Manila 레코드를 제거하세요.",
+            force_delete_available=True,
+        )
+
+    if fs.status in {"available", "inactive"}:
+        return FileStorageDeleteDiagnostic(
+            **base,
+            root_cause_code="normal_delete_possible",
+            confidence="medium",
+            summary="현재 상태에서는 일반 삭제 경로를 먼저 사용하세요.",
+            evidence=[f"status={fs.status}"],
+            recommended_action="상단의 파일 스토리지 삭제 버튼으로 일반 삭제를 먼저 실행하세요.",
+            force_delete_available=False,
+        )
+
+    return FileStorageDeleteDiagnostic(
+        **base,
+        root_cause_code="unknown",
+        confidence="low",
+        summary="자동 진단으로 정확한 원인을 특정하지 못했습니다.",
+        evidence=[],
+        recommended_action="Manila messages/logs와 backend export 존재 여부를 확인한 뒤, backend 리소스가 이미 없거나 일반 삭제가 실패한 경우에만 관리자 강제 삭제를 사용하세요.",
+        force_delete_available=fs.status in {"error", "error_deleting", "deleting"},
+    )
+
+
+def force_delete_file_storage(conn, file_storage_id: str) -> str:
+    client = get_client(conn)
+    try:
+        # Manila API force-delete action: https://docs.openstack.org/api-ref/shared-file-system/
+        client.post(f"shares/{file_storage_id}/action", {"force_delete": None})
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            return "already_deleted"
+        raise
+    return "force_delete_submitted"
+
+
 def list_file_storages(
     conn,
     metadata_filter: dict | None = None,
@@ -667,7 +809,7 @@ def list_access_rules(conn, file_storage_id: str) -> list[dict]:
         return rules
     # 일부 Manila 구성에서 share-access-rules가 빈 결과를 반환하는 경우 legacy action API fallback
     try:
-        data2 = client.post(f"shares/{file_storage_id}/action", {"os-list-access": {}})
+        data2 = client.post(f"shares/{file_storage_id}/action", {"os-list-access": {}}, log_errors=False)
         legacy = data2.get("access_list", [])
         if legacy:
             logger.warning(
@@ -879,7 +1021,7 @@ def ensure_nfs_access_rule(
     meta = _build_nfs_access_metadata(root_squash=root_squash, sec_flavor=sec_flavor)
     if extra_metadata:
         meta.update(extra_metadata)
-    return create_access_rule(
+    result = create_access_rule(
         conn,
         file_storage_id=file_storage_id,
         access_to=access_to,
@@ -887,6 +1029,16 @@ def ensure_nfs_access_rule(
         access_type="ip",
         metadata=meta or None,
     )
+    # create_access_rule 반환은 access_id 형식이 기본이다. 구형 호출자/테스트 호환을 위해 id도 허용.
+    access_id = result.get("access_id") or result.get("id")
+    if not access_id:
+        raise KeyError("access_id")
+    return {
+        "access_id": access_id,
+        "access_key": result.get("access_key"),
+        "access_to": access_to,
+        "access_level": result["access_level"],
+    }
 
 
 def set_share_public(conn, file_storage_id: str, is_public: bool = True) -> dict:

@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    import openstack
 import asyncio
 import itertools
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
+from typing import TYPE_CHECKING
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -17,11 +15,14 @@ from starlette.requests import Request
 
 from app.api.common.activity_recorder import rec
 from app.api.deps import CacheMode, cache_mode, get_os_conn, get_token_info, require_admin
-from app.utils.version import read_app_version
-
-_logger = logging.getLogger(__name__)
 from app.config import get_settings
-from app.models.storage import FileStorageInfo, TopologyData, TopologyInstance
+from app.models.storage import (
+    FileStorageDeleteDiagnostic,
+    FileStorageForceDeleteResult,
+    FileStorageInfo,
+    TopologyData,
+    TopologyInstance,
+)
 from app.services import instance_recovery, library_builder, manila, neutron, nova
 from app.services import k3s_db as k3s_cluster
 from app.services import libraries as lib_svc
@@ -30,6 +31,12 @@ from app.services.octavia import get_topology_lbs
 
 # FastAPI-free 인벤토리 유틸리티로 이동됨 — admin.py 내부 호출 + 하위 호환 재export.
 from app.services.openstack_inventory import _fetch_hypervisors_raw
+from app.utils.version import read_app_version
+
+if TYPE_CHECKING:
+    import openstack
+
+_logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -975,6 +982,101 @@ async def list_all_file_storages(
         raise HTTPException(status_code=500, detail="파일 스토리지 조회 실패")
 
 
+@router.get(
+    "/file-storage/{file_storage_id}/delete-diagnostics",
+    response_model=FileStorageDeleteDiagnostic,
+    dependencies=[Depends(require_admin)],
+)
+async def get_file_storage_delete_diagnostics(
+    file_storage_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """관리자용 Manila share 삭제 실패 진단."""
+    try:
+        return await asyncio.to_thread(manila.diagnose_file_storage_delete_issue, conn, file_storage_id)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            raise HTTPException(status_code=404, detail="파일 스토리지를 찾을 수 없습니다")
+        _logger.warning("파일 스토리지 삭제 진단 실패: %s", file_storage_id, exc_info=True)
+        raise HTTPException(status_code=500, detail="파일 스토리지 삭제 진단 실패")
+    except Exception:
+        _logger.warning("파일 스토리지 삭제 진단 실패: %s", file_storage_id, exc_info=True)
+        raise HTTPException(status_code=500, detail="파일 스토리지 삭제 진단 실패")
+
+
+@router.post(
+    "/file-storage/{file_storage_id}/force-delete",
+    response_model=FileStorageForceDeleteResult,
+    status_code=202,
+    dependencies=[Depends(require_admin)],
+)
+async def force_delete_file_storage(
+    file_storage_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    """관리자용 Manila share 강제 삭제."""
+    diagnostic: FileStorageDeleteDiagnostic | None = None
+    try:
+        diagnostic = await asyncio.to_thread(manila.diagnose_file_storage_delete_issue, conn, file_storage_id)
+    except Exception:
+        _logger.info("파일 스토리지 강제 삭제 전 진단 실패: %s", file_storage_id, exc_info=True)
+
+    try:
+        status = await asyncio.to_thread(manila.force_delete_file_storage, conn, file_storage_id)
+        await invalidate("afterglow:admin:file_storages")
+        await invalidate("afterglow:manila:*:file_storages")
+        try:
+            await rec(
+                token_info,
+                conn,
+                resource_type="file_storage",
+                action="file_storage.force_delete",
+                status="success",
+                resource_id=file_storage_id,
+                extra={"result": status, "diagnostic": diagnostic.root_cause_code if diagnostic else None},
+            )
+        except Exception:
+            pass
+        return FileStorageForceDeleteResult(
+            file_storage_id=file_storage_id,
+            status=status,
+            diagnostic=diagnostic,
+        )
+    except httpx.HTTPStatusError as e:
+        try:
+            await rec(
+                token_info,
+                conn,
+                resource_type="file_storage",
+                action="file_storage.force_delete",
+                status="failed",
+                resource_id=file_storage_id,
+                extra={"status_code": e.response.status_code},
+            )
+        except Exception:
+            pass
+        _logger.warning("파일 스토리지 강제 삭제 실패: %s", file_storage_id, exc_info=True)
+        raise HTTPException(
+            status_code=e.response.status_code,
+            detail=f"파일 스토리지 강제 삭제 실패: {manila.format_error_message(e)}",
+        )
+    except Exception:
+        try:
+            await rec(
+                token_info,
+                conn,
+                resource_type="file_storage",
+                action="file_storage.force_delete",
+                status="failed",
+                resource_id=file_storage_id,
+            )
+        except Exception:
+            pass
+        _logger.warning("파일 스토리지 강제 삭제 실패: %s", file_storage_id, exc_info=True)
+        raise HTTPException(status_code=500, detail="파일 스토리지 강제 삭제 실패")
+
+
 @router.get("/topology", response_model=TopologyData, dependencies=[Depends(require_admin)])
 async def admin_topology(
     conn: openstack.connection.Connection = Depends(get_os_conn), cm: CacheMode = Depends(cache_mode)
@@ -1063,6 +1165,25 @@ async def list_all_networks(
         )
     except Exception:
         raise HTTPException(status_code=500, detail="네트워크 목록 조회 실패")
+
+
+@router.get("/all-loadbalancers", dependencies=[Depends(require_admin)])
+async def list_all_loadbalancers(
+    conn: openstack.connection.Connection = Depends(get_os_conn), cm: CacheMode = Depends(cache_mode)
+):
+    """전체 프로젝트의 로드밸런서 목록."""
+    from app.services import octavia
+
+    try:
+        return await cached_call(
+            "afterglow:admin:loadbalancers",
+            ttl_normal(),
+            lambda: octavia.list_load_balancers(conn, project_id=None),
+            enabled=cm.enabled,
+            refresh=cm.refresh,
+        )
+    except Exception:
+        raise HTTPException(status_code=500, detail="로드밸런서 목록 조회 실패")
 
 
 @router.get("/all-floating-ips", dependencies=[Depends(require_admin)])

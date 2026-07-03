@@ -37,6 +37,32 @@ class FileStorageInfo(BaseModel):
     export_location_details: list[ExportLocation] = []  # path + preferred + instance
 
 
+class FileStorageDeleteDiagnostic(BaseModel):
+    file_storage_id: str
+    status: str | None = None
+    share_proto: str | None = None
+    share_type_name: str | None = None
+    share_network_id: str | None = None
+    share_instance_ids: list[str] = []
+    root_cause_code: Literal[
+        "dhss_false_share_network_mismatch",
+        "backend_missing_after_failed_create_or_delete",
+        "normal_delete_possible",
+        "unknown",
+    ]
+    confidence: Literal["high", "medium", "low"]
+    summary: str
+    evidence: list[str] = []
+    recommended_action: str
+    force_delete_available: bool
+
+
+class FileStorageForceDeleteResult(BaseModel):
+    file_storage_id: str
+    status: Literal["force_delete_submitted", "already_deleted"]
+    diagnostic: FileStorageDeleteDiagnostic | None = None
+
+
 class LibraryConfig(BaseModel):
     id: str  # e.g. "python311"
     name: str  # e.g. "Python 3.11"

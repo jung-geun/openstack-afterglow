@@ -1,6 +1,6 @@
 """파일 스토리지 API 단위 테스트."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -79,10 +79,12 @@ async def test_delete_file_storage(client, mock_conn):
     with (
         patch("app.api.storage.file_storage.manila.get_file_storage", return_value=make_file_storage()),
         patch("app.api.storage.file_storage.manila.delete_file_storage", return_value=None),
-        patch("app.api.storage.file_storage.invalidate"),
+        patch("app.api.storage.file_storage.invalidate", new_callable=AsyncMock) as invalidate_mock,
     ):
         resp = await client.delete("/api/v1/file-storage/share-1")
     assert resp.status_code == 204
+    invalidate_mock.assert_any_await("afterglow:manila:test-project-123:file_storages")
+    invalidate_mock.assert_any_await("afterglow:admin:file_storages")
 
 
 @pytest.mark.asyncio
@@ -883,3 +885,171 @@ async def test_get_file_storage_detail_exposes_host_for_admin(admin_client, mock
         resp = await admin_client.get("/api/v1/file-storage/share-1")
     assert resp.status_code == 200
     assert resp.json()["host"] == "dms-controller1@cephfsnfs1#cephfs"
+
+
+# ─────────────────────────────────────────────────────────────────
+# Manila delete diagnostics / force delete
+# ─────────────────────────────────────────────────────────────────
+
+
+def _diagnostic_client(messages: list[dict] | None = None, instances: list[dict] | None = None) -> MagicMock:
+    client = MagicMock()
+
+    def _get(path: str, params: dict | None = None):
+        if path == "messages":
+            assert params == {"resource_id": "share-1"}
+            return {"messages": messages or []}
+        if path == "shares/share-1/instances":
+            return {"share_instances": instances or []}
+        if path == "share_instances":
+            return {"share_instances": [inst for inst in (instances or []) if inst.get("share_id") == "share-1"]}
+        return {}
+
+    client.get.side_effect = _get
+    return client
+
+
+def test_diagnose_delete_issue_detects_dhss_false_share_network_mismatch():
+    from app.services import manila as manila_svc
+
+    fs = make_file_storage().model_copy(
+        update={
+            "share_type_name": "nfstype",
+            "share_network_id": "share-network-1",
+            "export_location_details": [],
+        }
+    )
+    with (
+        patch("app.services.manila.get_file_storage", return_value=fs),
+        patch("app.services.manila.get_client", return_value=_diagnostic_client()),
+        patch(
+            "app.services.manila.list_share_types",
+            return_value=[
+                {
+                    "name": "nfstype",
+                    "extra_specs": {"driver_handles_share_servers": "False"},
+                }
+            ],
+        ),
+    ):
+        diagnostic = manila_svc.diagnose_file_storage_delete_issue(MagicMock(), "share-1")
+
+    assert diagnostic.root_cause_code == "dhss_false_share_network_mismatch"
+    assert diagnostic.confidence == "high"
+    assert diagnostic.force_delete_available is True
+    assert "share_network_id=share-network-1" in diagnostic.evidence
+
+
+def test_diagnose_delete_issue_detects_backend_missing_message():
+    from app.services import manila as manila_svc
+
+    fs = make_file_storage().model_copy(update={"status": "error_deleting"})
+    client = _diagnostic_client(messages=[{"user_message": "Driver failed: ENOENT no such file or directory"}])
+    with (
+        patch("app.services.manila.get_file_storage", return_value=fs),
+        patch("app.services.manila.get_client", return_value=client),
+        patch("app.services.manila.list_share_types", return_value=[]),
+    ):
+        diagnostic = manila_svc.diagnose_file_storage_delete_issue(MagicMock(), "share-1")
+
+    assert diagnostic.root_cause_code == "backend_missing_after_failed_create_or_delete"
+    assert diagnostic.confidence == "high"
+    assert diagnostic.force_delete_available is True
+    assert any("ENOENT" in item for item in diagnostic.evidence)
+
+
+def test_diagnose_delete_issue_available_prefers_normal_delete():
+    from app.services import manila as manila_svc
+
+    with (
+        patch("app.services.manila.get_file_storage", return_value=make_file_storage()),
+        patch("app.services.manila.get_client", return_value=_diagnostic_client()),
+        patch("app.services.manila.list_share_types", return_value=[]),
+    ):
+        diagnostic = manila_svc.diagnose_file_storage_delete_issue(MagicMock(), "share-1")
+
+    assert diagnostic.root_cause_code == "normal_delete_possible"
+    assert diagnostic.force_delete_available is False
+
+
+def test_diagnose_delete_issue_error_allows_force_delete_recovery():
+    from app.services import manila as manila_svc
+
+    fs = make_file_storage().model_copy(update={"status": "error"})
+    with (
+        patch("app.services.manila.get_file_storage", return_value=fs),
+        patch("app.services.manila.get_client", return_value=_diagnostic_client()),
+        patch("app.services.manila.list_share_types", return_value=[]),
+    ):
+        diagnostic = manila_svc.diagnose_file_storage_delete_issue(MagicMock(), "share-1")
+
+    assert diagnostic.root_cause_code == "unknown"
+    assert diagnostic.confidence == "medium"
+    assert diagnostic.force_delete_available is True
+
+
+def test_diagnose_delete_issue_prefers_share_instance_api_ids():
+    from app.services import manila as manila_svc
+
+    fs = make_file_storage().model_copy(update={"status": "error", "export_location_details": []})
+    client = _diagnostic_client(instances=[{"id": "inst-1", "share_id": "share-1"}])
+    with (
+        patch("app.services.manila.get_file_storage", return_value=fs),
+        patch("app.services.manila.get_client", return_value=client),
+        patch("app.services.manila.list_share_types", return_value=[]),
+    ):
+        diagnostic = manila_svc.diagnose_file_storage_delete_issue(MagicMock(), "share-1")
+
+    assert diagnostic.share_instance_ids == ["inst-1"]
+
+
+@pytest.mark.asyncio
+async def test_non_admin_cannot_get_delete_diagnostics(non_admin_client, mock_conn):
+    resp = await non_admin_client.get("/api/v1/admin/file-storage/share-1/delete-diagnostics")
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_non_admin_cannot_force_delete_file_storage(non_admin_client, mock_conn):
+    resp = await non_admin_client.post("/api/v1/admin/file-storage/share-1/force-delete")
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_admin_force_delete_submits_and_invalidates(admin_client, mock_conn):
+    from app.models.storage import FileStorageDeleteDiagnostic
+
+    diagnostic = FileStorageDeleteDiagnostic(
+        file_storage_id="share-1",
+        status="error_deleting",
+        share_proto="NFS",
+        share_type_name="nfstype",
+        share_network_id="share-network-1",
+        share_instance_ids=["inst-1"],
+        root_cause_code="dhss_false_share_network_mismatch",
+        confidence="high",
+        summary="diagnostic summary",
+        evidence=["share_network_id=share-network-1"],
+        recommended_action="force delete",
+        force_delete_available=True,
+    )
+    with (
+        patch("app.api.identity.admin.manila.diagnose_file_storage_delete_issue", return_value=diagnostic),
+        patch(
+            "app.api.identity.admin.manila.force_delete_file_storage", return_value="force_delete_submitted"
+        ) as force_mock,
+        patch("app.api.identity.admin.invalidate", new_callable=AsyncMock) as invalidate_mock,
+        patch("app.api.identity.admin.rec", new_callable=AsyncMock) as rec_mock,
+    ):
+        resp = await admin_client.post("/api/v1/admin/file-storage/share-1/force-delete")
+
+    assert resp.status_code == 202
+    assert resp.json()["status"] == "force_delete_submitted"
+    force_mock.assert_called_once_with(mock_conn, "share-1")
+    invalidate_mock.assert_any_await("afterglow:admin:file_storages")
+    invalidate_mock.assert_any_await("afterglow:manila:*:file_storages")
+    rec_mock.assert_awaited_once()
+    assert rec_mock.await_args.kwargs["resource_type"] == "file_storage"
+    assert rec_mock.await_args.kwargs["action"] == "file_storage.force_delete"
+    assert rec_mock.await_args.kwargs["status"] == "success"
+    assert rec_mock.await_args.kwargs["resource_id"] == "share-1"
