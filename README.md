@@ -23,9 +23,12 @@ Afterglow는 OpenStack 클라우드를 위한 오픈소스 웹 대시보드입�
 ```bash
 git clone git@github.com:openstack-afterglow/openstack-afterglow.git
 cd openstack-afterglow
-cp config.toml.example config.toml   # OpenStack 자격증명 입력
+cp afterglow.conf.example afterglow.conf   # OpenStack 자격증명 입력
+cp .env.example .env                       # 로컬 compose 전용: SECRET_KEY 교체 또는 dev-only allow 플래그 유지
 docker compose up -d                 # http://localhost:3000
 ```
+
+`afterglow.conf`가 기본 설정 파일입니다. 기존 `config.toml`은 레거시 fallback으로 계속 읽지만 신규 설치는 `afterglow.conf`를 사용하세요. `.env.example`의 `AFTERGLOW_ALLOW_INSECURE=1`은 Docker Compose 로컬 개발 전용이며 Kubernetes/production에는 넣지 않습니다.
 
 Kubernetes · ArgoCD · kolla-ansible 배포와 상세 설정은 아래 문서를 참고하세요.
 

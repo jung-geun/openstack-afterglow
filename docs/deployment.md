@@ -31,10 +31,11 @@ Afterglow는 Docker Compose(개발/소규모), Kubernetes(프로덕션), ArgoCD(
 ```bash
 git clone git@github.com:openstack-afterglow/openstack-afterglow.git
 cd openstack-afterglow
-cp config.toml.example config.toml
+cp afterglow.conf.example afterglow.conf
+cp .env.example .env
 ```
 
-`config.toml` 필수 항목 설정:
+`afterglow.conf` 필수 항목 설정:
 
 ```toml
 [openstack]
@@ -45,16 +46,18 @@ user_domain_name     = "Default"
 region_name          = "RegionOne"
 
 [app]
-secret_key = "your-random-secret-key-change-me"  # 반드시 변경
+secret_key = "openssl-rand-hex-32-output"  # 반드시 32자 이상 random 값으로 변경
 
 [nova]
 default_network_id = "your-network-uuid"
 ```
 
+Docker Compose 로컬 개발에서는 `.env`도 함께 읽습니다. `.env.example`에는 예시 `SECRET_KEY=change-me-in-production`과 이를 로컬에서만 허용하는 `AFTERGLOW_ALLOW_INSECURE=1`이 들어 있습니다. 운영·Kubernetes에서는 `AFTERGLOW_ALLOW_INSECURE`를 절대 설정하지 말고 실제 `SECRET_KEY`를 사용하세요.
+
 ### 1-b. 설정 오버라이드 (선택)
 
 긴 옵션 섹션(GPU 디바이스 맵 등)은 별도 오버라이드 파일로 분리할 수 있습니다.  
-`config.toml`과 같은 디렉토리에 `config.<name>.toml`을 두면 백엔드 기동 시 알파벳순으로 딥 머지됩니다.
+`afterglow.conf`와 같은 디렉토리에 `afterglow.<name>.conf`, `afterglow.<name>.toml` 또는 레거시 `config.<name>.toml`을 두면 백엔드 기동 시 알파벳순으로 딥 머지됩니다.
 
 **머지 규칙**: `dict`는 재귀 병합, `list`와 스칼라는 오버라이드 파일이 덮어씁니다.
 
@@ -67,9 +70,9 @@ cp config.gpu.toml.example config.gpu.toml
 여러 오버라이드 파일을 동시에 사용할 수 있습니다:
 
 ```
-config.toml          ← 베이스 설정
-config.gpu.toml      ← GPU 디바이스 맵 오버라이드
-config.openstack.toml  ← OpenStack 자격증명 오버라이드 (선택)
+afterglow.conf        ← 베이스 설정
+config.gpu.toml       ← GPU 디바이스 맵 오버라이드 (레거시 이름도 계속 지원)
+afterglow.openstack.conf  ← OpenStack 자격증명 오버라이드 (선택)
 ```
 
 파일명 예시 처럼 알파벳순(`g` < `o`)으로 적용되며 뒤 파일이 앞 파일을 이깁니다.
@@ -206,37 +209,46 @@ docker logs afterglow_worker
 
 ```
 deploy/k8s-template/
-├── base/              # 공통 리소스
+├── configmap.yaml      # afterglow.conf/config.toml ConfigMap
+├── secret.yaml         # afterglow-secrets 예시
+├── ingress.yaml
+├── cert-manager.yaml
+├── base/              # 공통 Deployment/Service 리소스
 │   ├── namespace.yaml
-│   ├── configmap.yaml
-│   ├── ingress.yaml
-│   ├── cert-manager.yaml
 │   ├── backend/
 │   ├── frontend/
 │   ├── redis/
-│   ├── worker/
-│   └── monitoring/
+│   └── worker/
 └── overlays/
     ├── dev/           # 개발 오버레이
     └── prod/          # 프로덕션 오버레이
 ```
 
-### 1. 네임스페이스 및 시크릿 생성
+### 1. 프로덕션 네임스페이스 및 시크릿 생성
+
+아래 정적 `configmap.yaml`/`secret.yaml`은 `metadata.namespace: afterglow`를 포함하므로 프로덕션 네임스페이스 전용입니다. `overlays/dev`는 `namespace: afterglow-dev`를 사용하므로 이 파일을 그대로 적용해도 dev Pod가 `afterglow-config`/`afterglow-secrets`를 볼 수 없습니다. dev 오버레이를 단독으로 쓰려면 동일한 ConfigMap/Secret을 `afterglow-dev` 네임스페이스용으로 별도 생성하거나 ArgoCD/ExternalSecret에서 관리해야 합니다.
 
 ```bash
 kubectl create namespace afterglow
+# Builder SSH를 쓰지 않으면 빈 파일로 키 존재만 보장합니다. 실제 사용 시 private key 경로를 지정하세요.
+touch builder.key
 
 kubectl create secret generic afterglow-secrets \
   --namespace=afterglow \
-  --from-literal=OPENSTACK_PASSWORD=<password> \
-  --from-literal=SECRET_KEY=$(openssl rand -hex 32)
+  --from-literal=OS_PASSWORD=<openstack-password> \
+  --from-literal=SECRET_KEY=$(openssl rand -hex 32) \
+  --from-literal=GITLAB_OIDC_CLIENT_SECRET='' \
+  --from-literal=K3S_KUBECONFIG_ENCRYPTION_KEY=$(openssl rand -hex 32) \
+  --from-literal=DATABASE_URL='mysql+asyncmy://afterglow:<db-password>@mariadb/afterglow' \
+  --from-literal=PROMETHEUS_PASSWORD='' \
+  --from-file=BUILDER_SSH_PRIVATE_KEY=builder.key
 ```
 
-### 2. Kustomize 배포
+### 2. 프로덕션 ConfigMap 및 Kustomize 배포
 
 ```bash
-# 개발 환경
-kubectl apply -k deploy/k8s-template/overlays/dev
+# afterglow.conf/config.toml ConfigMap은 prod overlay에 포함되지 않으므로 먼저 적용
+kubectl apply -f deploy/k8s-template/configmap.yaml
 
 # 프로덕션 환경
 kubectl apply -k deploy/k8s-template/overlays/prod
@@ -255,19 +267,25 @@ kubectl logs -f deployment/frontend -n afterglow
 
 ### ConfigMap 주요 설정
 
-`deploy/k8s-template/base/configmap.yaml` 수정:
+`deploy/k8s-template/configmap.yaml`은 `afterglow.conf`를 인라인으로 제공합니다. `generate_k8s.py`로 생성하는 경우 ConfigMap에는 브라우저/프론트엔드용 `APP_REDIS_URL`, `APP_ORIGIN`, `APP_S3_BASE`, `APP_GRAFANA_BASE`와 런타임 설정 `afterglow.conf`가 들어갑니다. 하위호환을 위해 같은 TOML 본문을 `config.toml` 키에도 함께 출력합니다.
 
 ```yaml
 data:
-  OPENSTACK_AUTH_URL: "https://keystone.example.com:5000/v3"
-  OPENSTACK_PROJECT_NAME: "myproject"
-  OPENSTACK_REGION_NAME: "RegionOne"
-  REDIS_URL: "redis://redis:6379/0"
+  APP_ORIGIN: "https://afterglow.example.com"
+  APP_REDIS_URL: "redis://redis:6379/0"
+  afterglow.conf: |
+    [openstack]
+    auth_url = "https://keystone.example.com:5000/v3"
+    # password는 afterglow-secrets/OS_PASSWORD 환경변수로 주입
 ```
+
+비밀 값은 ConfigMap에 넣지 않습니다. `OS_PASSWORD`, `SECRET_KEY`, `GITLAB_OIDC_CLIENT_SECRET`, `K3S_KUBECONFIG_ENCRYPTION_KEY`, `DATABASE_URL`, `PROMETHEUS_PASSWORD`, `BUILDER_SSH_PRIVATE_KEY`는 `afterglow-secrets`에서 환경변수 또는 Secret volume으로 주입됩니다.
+
+`generate_k8s.py --config ./afterglow.conf --output-dir deploy/k8s-template`는 `configmap.yaml`, `secret.yaml`, `grafana-deployment.yaml`을 생성합니다. `[app].secret_key`가 빈 값, `change-me-in-production`, 32자 미만이면 `secret.yaml` 생성을 실패시켜 Kubernetes production guard와 맞춥니다.
 
 ### Ingress 도메인 설정
 
-`deploy/k8s-template/base/ingress.yaml`:
+`deploy/k8s-template/ingress.yaml`:
 
 ```yaml
 spec:
@@ -305,11 +323,40 @@ spec:
 
 ```bash
 # 전체 모니터링 배포
-kubectl apply -f deploy/k8s-template/base/monitoring/
+kubectl apply -k deploy/k8s-template/monitoring/
 
 # 포트 포워딩으로 로컬 접근
 kubectl port-forward svc/grafana 3001:3000 -n afterglow
 kubectl port-forward svc/prometheus 9090:9090 -n afterglow
+```
+
+### 런타임 설정·시크릿 계약
+
+Kubernetes의 Python 서비스는 Docker Compose 개발 모드와 다르게 항상 production guard를 사용합니다.
+
+| Deployment | 설정 파일 | Secret 참조 |
+|---|---|---|
+| `backend` | `/app/afterglow.conf` | `OS_PASSWORD`, `SECRET_KEY`, `GITLAB_OIDC_CLIENT_SECRET`, `K3S_KUBECONFIG_ENCRYPTION_KEY`, `DATABASE_URL`, `PROMETHEUS_PASSWORD`, `BUILDER_SSH_PRIVATE_KEY` |
+| `drover` (`worker`) | `/app/afterglow.conf` | `OS_PASSWORD`, `SECRET_KEY`, `K3S_KUBECONFIG_ENCRYPTION_KEY`, `DATABASE_URL` |
+| `notion-worker` | `/app/afterglow.conf` | `OS_PASSWORD`, `SECRET_KEY`, `K3S_KUBECONFIG_ENCRYPTION_KEY`, `DATABASE_URL` |
+
+세 서비스 모두 `AFTERGLOW_ENV=production`으로 실행되며, `AFTERGLOW_ALLOW_INSECURE=1`은 Kubernetes manifest에 넣으면 안 됩니다. Secret을 직접 작성하지 않고 `generate_k8s.py`를 사용할 때도 `[app].secret_key`가 비어 있거나 `change-me-in-production`이거나 32자 미만이면 `secret.yaml` 생성을 중단합니다.
+
+### Helm 배포
+
+Helm chart도 같은 계약을 사용합니다. `backend`, `drover`, `notion-worker`는 `afterglow-config/afterglow.conf`를 `/app/afterglow.conf`로 마운트하고 `afterglow-secrets/SECRET_KEY`를 읽습니다.
+
+Secret 소유 방식은 두 가지입니다.
+
+1. **ExternalSecret/ArgoCD가 `afterglow-secrets`를 소유**: `values.yaml`의 `secrets.osPassword`를 비워 두면 Helm은 Secret을 렌더하지 않고 Deployment만 기존 Secret을 참조합니다.
+2. **Helm이 Secret 직접 렌더**: `secrets.osPassword`를 설정하면 Helm이 `afterglow-secrets`를 만들며, 이때 `secrets.secretKey`, `secrets.databaseUrl`, `secrets.k3sKubeconfigEncryptionKey`도 필수입니다. GitLab/Prometheus/Builder/Grafana 등 선택 Secret 키는 값이 비어 있어도 Secret에 포함됩니다. 필수 값이 하나라도 빠지면 template 단계에서 실패합니다.
+
+```bash
+helm template afterglow helm/afterglow --namespace afterglow \
+  --set secrets.osPassword='<openstack-password>' \
+  --set secrets.secretKey="$(openssl rand -hex 32)" \
+  --set secrets.k3sKubeconfigEncryptionKey="$(openssl rand -hex 32)" \
+  --set secrets.databaseUrl='mysql+asyncmy://afterglow:<db-password>@mariadb/afterglow'
 ```
 
 ---
@@ -329,12 +376,17 @@ kubectl apply -n argocd \
 ### 2. Application 등록
 
 ```bash
-kubectl apply -f argocd/appproject.yaml
-kubectl apply -f argocd/application.dev.yaml    # 개발
-kubectl apply -f argocd/application.prod.yaml   # 프로덕션
+kubectl apply -f argocd/00-namespace.yaml
+kubectl apply -f argocd/01-appproject.yaml
+kubectl apply -f argocd/02-application.dev.yaml    # 개발
+kubectl apply -f argocd/02-application.prod.yaml   # 프로덕션
+kubectl apply -f argocd/03-ingress.yaml
+kubectl apply -f argocd/04-server-config.yaml
 ```
 
-`argocd/application.dev.yaml` 주요 설정:
+`02-application.*.yaml`은 `deploy/k8s-template/overlays/*`만 동기화합니다. root의 `configmap.yaml`/`secret.yaml`은 ArgoCD Application 범위 밖이고 `namespace: afterglow`가 고정되어 있으므로, sync 전에 대상 네임스페이스(`afterglow-dev` 또는 `afterglow`)에 `afterglow-config`와 `afterglow-secrets`를 별도로 생성하거나 ExternalSecret으로 공급해야 합니다.
+
+`argocd/02-application.dev.yaml` 주요 설정:
 
 ```yaml
 spec:
@@ -367,7 +419,7 @@ cert-manager를 사용하여 Let's Encrypt 인증서를 자동으로 발급합�
 
 ```bash
 # cert-manager 설치
-kubectl apply -f deploy/k8s-template/base/cert-manager.yaml
+kubectl apply -f deploy/k8s-template/cert-manager.yaml
 ```
 
 ClusterIssuer 생성:
@@ -417,9 +469,11 @@ docker compose up -d
 ### Kubernetes
 
 ```bash
-# 이미지 업데이트 후 롤링 재시작
+# 이미지 또는 ConfigMap/Secret 업데이트 후 Python 서비스 롤링 재시작
 kubectl rollout restart deployment/backend -n afterglow
 kubectl rollout restart deployment/frontend -n afterglow
+kubectl rollout restart deployment/drover -n afterglow
+kubectl rollout restart deployment/notion-worker -n afterglow
 kubectl rollout status deployment/backend -n afterglow
 ```
 

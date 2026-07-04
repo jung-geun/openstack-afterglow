@@ -23,9 +23,12 @@ Afterglow is an open-source web dashboard for OpenStack clouds. It keeps Horizon
 ```bash
 git clone git@github.com:openstack-afterglow/openstack-afterglow.git
 cd openstack-afterglow
-cp config.toml.example config.toml   # set your OpenStack credentials
+cp afterglow.conf.example afterglow.conf   # set your OpenStack credentials
+cp .env.example .env                       # local compose only: replace SECRET_KEY or keep dev-only allow flag
 docker compose up -d                 # http://localhost:3000
 ```
+
+`afterglow.conf` is the primary config file. Legacy `config.toml` is still read as a fallback, but new installs should use `afterglow.conf`. The `AFTERGLOW_ALLOW_INSECURE=1` flag in `.env.example` is only for local Docker Compose development; never set it in Kubernetes or production.
 
 See the documentation below for Kubernetes / ArgoCD / kolla-ansible deployment and full configuration.
 

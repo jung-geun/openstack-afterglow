@@ -25,22 +25,23 @@
 
 1. [개요 및 리소스 집계](#1-개요-및-리소스-집계)
 2. [파일 스토리지 관리](#2-파일-스토리지-관리)
-3. [인스턴스/볼륨/네트워크 전체 조회](#3-인스턴스볼륨네트워크-전체-조회)
-4. [토폴로지 및 시계열](#4-토폴로지-및-시계열)
-5. [볼륨 관리](#5-볼륨-관리)
-6. [네트워크 관리](#6-네트워크-관리)
-7. [서비스 상태 모니터링](#7-서비스-상태-모니터링)
-8. [Flavor 관리](#8-flavor-관리)
-9. [사용자 관리](#9-사용자-관리)
-10. [프로젝트 관리](#10-프로젝트-관리)
-11. [쿼터 관리](#11-쿼터-관리)
-12. [그룹 관리](#12-그룹-관리)
-13. [역할 관리](#13-역할-관리)
-14. [GPU 호스트 모니터링](#14-gpu-호스트-모니터링)
-15. [GPU Quota 관리](#15-gpu-quota-관리)
-16. [하이퍼바이저 상세](#16-하이퍼바이저-상세)
-17. [파일 스토리지 빌드](#17-파일-스토리지-빌드)
-18. [모니터링 요약](#18-모니터링-요약)
+3. [라이브러리 관리 (squashfs 레이어)](#3-라이브러리-관리-squashfs-레이어)
+4. [인스턴스/볼륨/네트워크 전체 조회](#4-인스턴스볼륨네트워크-전체-조회)
+5. [토폴로지 및 시계열](#5-토폴로지-및-시계열)
+6. [볼륨 관리](#6-볼륨-관리)
+7. [네트워크 관리](#7-네트워크-관리)
+8. [서비스 상태 모니터링](#8-서비스-상태-모니터링)
+9. [Flavor 관리](#9-flavor-관리)
+10. [사용자 관리](#10-사용자-관리)
+11. [프로젝트 관리](#11-프로젝트-관리)
+12. [쿼터 관리](#12-쿼터-관리)
+13. [그룹 관리](#13-그룹-관리)
+14. [역할 관리](#14-역할-관리)
+15. [GPU 호스트 모니터링](#15-gpu-호스트-모니터링)
+16. [GPU Quota 관리](#16-gpu-quota-관리)
+17. [하이퍼바이저 상세](#17-하이퍼바이저-상세)
+18. [파일 스토리지 빌드](#18-파일-스토리지-빌드)
+19. [모니터링 요약](#19-모니터링-요약)
 
 ---
 
@@ -166,7 +167,7 @@
 
 ### POST /api/admin/file-storage/build
 
-사전 빌드(prebuilt) 파일 스토리지 생성을 트리거합니다. 실제 빌드는 별도 백그라운드 프로세스에서 수행됩니다.
+사전 빌드 파일 스토리지 share 생성을 트리거합니다. 실제 빌드는 별도 백그라운드 프로세스에서 수행됩니다.
 
 | 파라미터 | 위치 | 타입 | 필수 | 설명 |
 |----------|------|------|------|------|
@@ -189,7 +190,29 @@
 
 ---
 
-## 3. 인스턴스/볼륨/네트워크 전체 조회
+## 3. 라이브러리 관리 (squashfs 레이어)
+
+관리자 라이브러리 관리 화면은 squashfs 레이어 워크플로우를 사용합니다. 기존 prebuilt 라이브러리 카탈로그 관리 API가 아니라, 레이어 artifact·프로필·소비 인스턴스를 관리합니다.
+
+모든 엔드포인트는 `Depends(require_admin)`가 필요하며 prefix는 `/api/v1/admin/libraries`입니다. `/api/v1/admin/layers` backend alias는 제공하지 않습니다.
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| `POST` | `/api/v1/admin/libraries/build` | squashfs 레이어 빌드 시작 |
+| `GET` | `/api/v1/admin/libraries/builds` | 레이어 빌드 목록 |
+| `GET` | `/api/v1/admin/libraries/builds/{id}` | 레이어 빌드 상세 |
+| `POST` | `/api/v1/admin/libraries/builds/{id}/cancel` | 레이어 빌드 취소 |
+| `GET` | `/api/v1/admin/libraries/artifacts` | 봉인된 레이어 artifact 목록 |
+| `GET` | `/api/v1/admin/libraries/artifacts/{id}/delete-preview` | artifact 삭제 영향 미리보기 |
+| `DELETE` | `/api/v1/admin/libraries/artifacts/{id}` | artifact 삭제 |
+| `POST` | `/api/v1/admin/libraries/profiles` | 레이어 프로필 생성/갱신 |
+| `DELETE` | `/api/v1/admin/libraries/profiles/{profile_name}` | 레이어 프로필 삭제 |
+| `POST` | `/api/v1/admin/libraries/consume` | 프로필 소비 인스턴스 생성 |
+| `GET` | `/api/v1/admin/libraries/consumes` | 소비 인스턴스 목록 |
+
+---
+
+## 4. 인스턴스/볼륨/네트워크 전체 조회
 
 ### GET /api/admin/all-instances
 
@@ -315,7 +338,7 @@
 
 ---
 
-## 4. 토폴로지 및 시계열
+## 5. 토폴로지 및 시계열
 
 ### GET /api/admin/topology
 
@@ -362,7 +385,7 @@
 
 ---
 
-## 5. 볼륨 관리
+## 6. 볼륨 관리
 
 ![전체 볼륨 관리](../../assets/admin-volume.png)
 *전체 프로젝트의 볼륨을 시계열 차트와 함께 일괄 조회 — 상태·크기·프로젝트별 필터링, 수정·삭제 지원*
@@ -439,7 +462,7 @@
 
 ---
 
-## 6. 네트워크 관리
+## 7. 네트워크 관리
 
 ### POST /api/admin/networks
 
@@ -596,7 +619,7 @@ Floating IP를 삭제합니다.
 
 ---
 
-## 7. 서비스 상태 모니터링
+## 8. 서비스 상태 모니터링
 
 > 태그: `admin-services`
 
@@ -671,7 +694,7 @@ Nova, Cinder, Neutron, Manila, Heat, Zun 서비스 상태, API 엔드포인트, 
 
 ---
 
-## 8. Flavor 관리
+## 9. Flavor 관리
 
 > 태그: `admin-flavors`
 
@@ -811,7 +834,7 @@ Flavor의 특정 extra_spec을 삭제합니다.
 
 ---
 
-## 9. 사용자 관리
+## 10. 사용자 관리
 
 > 태그: `admin-identity`
 
@@ -896,7 +919,7 @@ Flavor의 특정 extra_spec을 삭제합니다.
 
 ---
 
-## 10. 프로젝트 관리
+## 11. 프로젝트 관리
 
 ### GET /api/admin/projects
 
@@ -1016,7 +1039,7 @@ Flavor의 특정 extra_spec을 삭제합니다.
 
 ---
 
-## 11. 쿼터 관리
+## 12. 쿼터 관리
 
 ### GET /api/admin/quotas/{project_id}
 
@@ -1072,7 +1095,7 @@ Flavor의 특정 extra_spec을 삭제합니다.
 
 ---
 
-## 12. 그룹 관리
+## 13. 그룹 관리
 
 ### GET /api/admin/groups
 
@@ -1170,7 +1193,7 @@ Flavor의 특정 extra_spec을 삭제합니다.
 
 ---
 
-## 13. 역할 관리
+## 14. 역할 관리
 
 ### GET /api/admin/roles
 
@@ -1258,7 +1281,7 @@ Flavor의 특정 extra_spec을 삭제합니다.
 
 ---
 
-## 14. GPU 호스트 모니터링
+## 15. GPU 호스트 모니터링
 
 > 태그: `admin-gpu`
 
@@ -1342,7 +1365,7 @@ Placement API에서 각 호스트별 GPU 정보를 조회합니다. PCI 디바�
 | `gpu_types` | GPU 모델별 집계 |
 ---
 
-## 15. GPU Quota 관리
+## 16. GPU Quota 관리
 
 > 태그: `admin-gpu`
 
@@ -1421,7 +1444,7 @@ GPU 리소스의 alias 정의와 프로젝트별 쿼터를 관리합니다.
 
 ---
 
-## 16. 하이퍼바이저 상세
+## 17. 하이퍼바이저 상세
 
 ### GET /api/admin/hypervisors/{hypervisor_id}
 
@@ -1435,7 +1458,7 @@ GPU 리소스의 alias 정의와 프로젝트별 쿼터를 관리합니다.
 
 ---
 
-## 17. 파일 스토리지 빌드
+## 18. 파일 스토리지 빌드
 
 ### GET /api/admin/file-storage/builds
 
@@ -1445,7 +1468,7 @@ GPU 리소스의 alias 정의와 프로젝트별 쿼터를 관리합니다.
 
 ---
 
-## 18. 모니터링 요약
+## 19. 모니터링 요약
 
 ### GET /api/admin/monitoring/summary
 

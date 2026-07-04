@@ -27,7 +27,7 @@ __pycache__/
 
 # Distribution / packaging
 .Python
-build/
+# build/
 develop-eggs/
 dist/
 downloads/
@@ -215,6 +215,8 @@ package
 
 # End of https://www.toptal.com/developers/gitignore/api/git,svelte,python,visualstudiocode
 
+afterglow.conf
+afterglow.*.conf
 config.toml
 config.*.toml
 # Helm 차트의 GPU 디바이스 맵은 시크릿이 아니므로 추적 (ArgoCD가 git에서 읽음)
@@ -251,3 +253,8 @@ docker-compose.override.yml
 
 # 루트 테스트 러너 package.json 의존성
 /node_modules/
+test.ipynb
+.agents/
+.codex/
+
+AGENTS.md

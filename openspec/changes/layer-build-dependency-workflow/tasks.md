@@ -1,0 +1,28 @@
+# Tasks
+
+- [x] Backend contract validation
+- [x] Recipe split
+- [x] Frontend form split
+- [x] Regression tests
+- [x] Automated verification
+- [x] Manual `/admin/layers` UI/network-payload check
+- [x] System request validation
+- [x] System squashfs recipe
+- [x] DB metadata migration/model fields
+- [x] Ubuntu 24.04 base metadata/backfill
+- [x] Frontend system/uv card update
+- [x] Regression tests for system layers
+- [x] Verification for system layer workflow
+- [x] NVIDIA template request validation
+- [x] NVIDIA squashfs recipe with `/usr` manifest guard
+- [x] Frontend NVIDIA template card update
+- [x] Regression tests for NVIDIA template
+- [x] Verification for NVIDIA template workflow (backend/frontend tests + static payload evidence; browser surface unavailable)
+- [x] Ubuntu base request validation
+- [x] Ubuntu image mapping config
+- [x] Builder image resolution by ubuntu_base
+- [x] Parent ubuntu_base inheritance
+- [x] Consume profile ubuntu_base compatibility
+- [x] Frontend Ubuntu selector
+- [x] Ubuntu selector regression tests
+- [x] Verification for Ubuntu image selection
