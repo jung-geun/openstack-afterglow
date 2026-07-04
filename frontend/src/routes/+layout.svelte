@@ -7,7 +7,7 @@
 	import { theme, resolvedTheme } from '$lib/stores/theme';
 	import { api } from '$lib/api/client';
 	import ProjectSelector from '$lib/components/ProjectSelector.svelte';
-	import { siteConfig, loadSiteConfig } from '$lib/config/site';
+	import { siteConfig, initSiteConfig } from '$lib/config/site';
 	import { sidebarOpen } from '$lib/stores/sidebar';
 	import { deriveBreadcrumb } from '$lib/config/routes';
 	import Toast from '$lib/components/ui/Toast.svelte';
@@ -17,7 +17,9 @@
 	import ConfirmDialog from '$lib/components/ui/ConfirmDialog.svelte';
 	import './layout.css';
 
-	let { children } = $props();
+	let { children, data } = $props();
+
+	initSiteConfig(data.siteConfig);
 
 	// breadcrumb + title from URL
 	const crumb = $derived(deriveBreadcrumb($page.url.pathname));
@@ -70,8 +72,6 @@
 	});
 
 	onMount(() => {
-		loadSiteConfig();
-
 		// access JWT 만료 2분 전에 자동 갱신 (client.ts의 401 재시도 보완)
 		const interval = setInterval(async () => {
 			if (!$auth.token || !$auth.refreshToken) return;

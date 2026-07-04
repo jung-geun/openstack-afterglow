@@ -95,7 +95,7 @@
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={5} />
 	{:else}
-		<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5" class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
+		<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
 			<AdminProjectTable
 				{projects}
 				{copiedId}

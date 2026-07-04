@@ -96,7 +96,6 @@
 	{:else if instances.length === 0}
 		<div class="text-gray-600 text-sm">DB 인스턴스가 없습니다</div>
 	{:else}
-		<div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 		<div class="overflow-x-auto">
 			<table class="w-full text-sm">
 				<thead>
@@ -137,7 +136,6 @@
 					{/each}
 				</tbody>
 			</table>
-		</div>
 		</div>
 	{/if}
 

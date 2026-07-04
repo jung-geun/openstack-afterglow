@@ -178,7 +178,6 @@
 				{/if}
 			</div>
 		{/if}
-		<div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 			<HypervisorTable
 				hypervisors={sortedHypervisors}
 				selectedId={selectedDetail?.id ?? null}
@@ -187,7 +186,6 @@
 				onSort={toggleSort}
 				onSelect={loadDetail}
 			/>
-		</div>
 	{/if}
 </div>
 

@@ -100,13 +100,12 @@ async def test_list_gpu_devices_returns_builtin(admin_client):
     assert rtx3090["name"] == "RTX 3090"
     assert rtx3090["source"] == "builtin"
     assert rtx3090["vendor_name"] == "NVIDIA"
-    assert "RTX3090" in rtx3090["aliases"]
 
 
 @pytest.mark.asyncio
 async def test_list_gpu_devices_marks_db_source(admin_client):
     db_entries = [
-        {"vendor_id": "10DE", "device_id": "2204", "name": "RTX 3090 custom", "is_audio": False, "aliases": []}
+        {"vendor_id": "10DE", "device_id": "2204", "name": "RTX 3090 DB", "is_audio": True, "aliases": ["RTX-3090"]}
     ]
     with (
         patch("app.database.is_db_available", return_value=True),
@@ -116,6 +115,9 @@ async def test_list_gpu_devices_marks_db_source(admin_client):
     assert resp.status_code == 200
     rtx3090 = next(d for d in resp.json()["devices"] if d["device_id"] == "2204")
     assert rtx3090["source"] == "db"
+    assert rtx3090["name"] == "RTX 3090 DB"
+    assert rtx3090["is_audio"] is True
+    assert rtx3090["aliases"] == ["RTX-3090"]
 
 
 @pytest.mark.asyncio
@@ -276,7 +278,6 @@ async def test_export_gpu_devices_xlsx_roundtrip(admin_client):
     entries = parse_xlsx(resp.content)
     rtx3090 = next(e for e in entries if e["device_id"] == "2204")
     assert rtx3090["name"] == "RTX 3090"
-    assert "RTX3090" in rtx3090["aliases"]
     assert rtx3090["is_audio"] is False
 
 

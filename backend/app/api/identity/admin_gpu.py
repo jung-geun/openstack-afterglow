@@ -173,18 +173,21 @@ async def _merged_devices() -> list[dict]:
             seen.add(key)
             if key in db_entries:
                 source = "db"
+                merged_info = db_entries[key]
             elif device_id in _DEFAULT_PCI_DEVICE_MAP.get(vendor_id, {}):
                 source = "builtin"
+                merged_info = info
             else:
                 source = "config"
+                merged_info = info
             devices.append(
                 {
                     "vendor_id": vendor_id,
                     "device_id": device_id,
                     "vendor_name": VENDOR_MAP.get(vendor_id, vendor_id),
-                    "name": info["name"],
-                    "is_audio": info["is_audio"],
-                    "aliases": info.get("aliases", []),
+                    "name": merged_info["name"],
+                    "is_audio": merged_info["is_audio"],
+                    "aliases": merged_info.get("aliases", []),
                     "source": source,
                 }
             )

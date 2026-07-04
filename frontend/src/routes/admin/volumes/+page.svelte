@@ -143,7 +143,6 @@
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={5} />
 	{:else}
-		<div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 			<AdminVolumeTable
 				volumes={allVolumes}
 				{selectedVolumeId}
@@ -165,7 +164,6 @@
 						prefill: { bootSource: 'volume', bootVolumeId: v.id, bootVolumeName: v.name },
 					})}
 			/>
-		</div>
 		<Pagination
 			page={markerStack.length + 1}
 			hasPrev={markerStack.length > 0}

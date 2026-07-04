@@ -80,7 +80,7 @@
 </script>
 
 <div class="p-4 md:p-8 max-w-7xl mx-auto">
-  <PageHeader breadcrumb="FILE STORAGE / MANAGE" title="라이브러리 관리" subtitle="Strategy A (사전 빌드)에서 사용할 Manila CephFS 파일 스토리지를 관리합니다.">
+  <PageHeader breadcrumb="FILE STORAGE / MANAGE" title="사전 빌드 파일 스토리지" subtitle="구 prebuilt 라이브러리 share를 확인하거나 수동으로 빌드합니다.">
     {#snippet actions()}
       <label class="flex items-center gap-2 text-xs text-gray-400 cursor-pointer">
         <input type="checkbox" bind:checked={autoInstall} class="rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0" />
@@ -106,7 +106,6 @@
   {#if loading}
     <LoadingSkeleton variant="list" rows={4} />
   {:else}
-    <div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
       <div class="mb-8">
         <h2 class="text-base font-semibold text-white mb-3">사전 빌드 상태</h2>
         <PrebuiltLibraryGrid {libraries} {fileStorages} {building} onBuild={buildFileStorage} />
@@ -120,6 +119,5 @@
       {:else}
         <FileStorageManageGrid {fileStorages} />
       {/if}
-    </div>
   {/if}
 </div>

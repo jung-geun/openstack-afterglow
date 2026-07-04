@@ -6,8 +6,12 @@
 
 	let {
 		storages,
+		selectedId = null,
+		onOpen,
 	}: {
 		storages: AdminFileStorage[];
+		selectedId?: string | null;
+		onOpen: (storage: AdminFileStorage) => void;
 	} = $props();
 
 	let copiedId = $state<string | null>(null);
@@ -35,13 +39,14 @@
 				<th class="text-left py-2 pr-4">유형</th>
 				<th class="text-left py-2 pr-4">프로젝트</th>
 				<th class="text-left py-2 pr-4">생성일</th>
-				<th class="text-left py-2">Export 경로</th>
+				<th class="text-left py-2 pr-4">Export 경로</th>
+				<th class="text-left py-2">작업</th>
 			</tr>
 		</thead>
 		<tbody>
 			{#each storages as fs (fs.id)}
-				<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/20">
-					<td class="py-2 pr-4 text-white font-medium"><span class="max-md:block max-md:max-w-[66vw] max-md:truncate" title={fs.name || fs.id}>{fs.name || fs.id.slice(0, 8)}</span></td>
+				<tr class="border-b border-gray-800/50 text-xs transition-colors {selectedId === fs.id ? 'bg-blue-900/10' : 'hover:bg-gray-800/20'}">
+					<td class="p-0"><button type="button" onclick={() => onOpen(fs)} class="block w-full py-2 pr-4 font-medium text-white hover:text-blue-400 transition-colors text-left" title={fs.name || fs.id}><span class="max-md:block max-md:max-w-[66vw] max-md:truncate">{fs.name || fs.id.slice(0, 8)}</span></button></td>
 					<td class="py-2 pr-4"><StatusChip status={fs.status} /></td>
 					<td class="py-2 pr-4 text-gray-400">{formatNumber(fs.size)} GB</td>
 					<td class="py-2 pr-4">
@@ -53,7 +58,7 @@
 							<div class="flex items-center gap-1.5">
 								<span class="text-gray-300">{$projectNames.get(fs.project_id) ?? fs.project_id.slice(0, 8)}</span>
 								<button
-									onclick={() => copyValue(fs.project_id!)}
+									onclick={(e) => { e.stopPropagation(); copyValue(fs.project_id!); }}
 									class="text-gray-600 hover:text-gray-400 transition-colors"
 									title={fs.project_id}
 								>
@@ -74,7 +79,7 @@
 							<div class="flex items-center gap-1.5">
 								<span class="truncate max-w-[200px]" title={fs.export_locations[0]}>{fs.export_locations[0]}</span>
 								<button
-									onclick={() => copyValue(fs.export_locations[0])}
+									onclick={(e) => { e.stopPropagation(); copyValue(fs.export_locations[0]); }}
 									class="text-gray-600 hover:text-gray-400 transition-colors shrink-0"
 								>
 									{#if copiedId === fs.export_locations[0]}
@@ -87,6 +92,9 @@
 						{:else}
 							<span>-</span>
 						{/if}
+					</td>
+					<td class="py-2">
+						<button type="button" onclick={() => onOpen(fs)} class="px-2 py-1 rounded border border-blue-500/40 text-blue-300 hover:bg-blue-500/10 hover:text-blue-200 transition-colors text-xs font-medium">상세</button>
 					</td>
 				</tr>
 			{/each}

@@ -41,6 +41,17 @@ def _ng_to_dict(ng: K3sNodegroup) -> dict:
     }
 
 
+def _validate_scalable_invariants(role: str, node_count: int, flavor_id: str | None, stampede_enabled: bool) -> None:
+    if role == "server":
+        raise ValueError("커스텀 server 노드그룹은 아직 지원되지 않습니다.")
+    if stampede_enabled and not flavor_id:
+        raise ValueError("Stampede 노드그룹은 flavor_id가 필요합니다.")
+
+
+def _deterministic_default_id(cluster_id: str, name: str) -> str:
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"afterglow:k3s-nodegroup:{cluster_id}:{name}"))
+
+
 # ---------------------------------------------------------------------------
 # 조회
 # ---------------------------------------------------------------------------
@@ -92,6 +103,53 @@ async def get_nodegroup(cluster_id: str, nodegroup_id: str) -> dict | None:
 # ---------------------------------------------------------------------------
 
 
+async def create_default_nodegroups(
+    session,
+    *,
+    cluster_id: str,
+    server_flavor_id: str | None,
+    agent_flavor_id: str | None,
+    agent_count: int,
+) -> None:
+    """신규 클러스터용 기본 server/agent 노드그룹을 같은 DB 트랜잭션에 추가한다."""
+    existing = await session.execute(
+        select(K3sNodegroup.name).where(
+            K3sNodegroup.cluster_id == cluster_id,
+            K3sNodegroup.name.in_(["default-server", "default-agent"]),
+            K3sNodegroup.deleted_at.is_(None),
+        )
+    )
+    names = set(existing.scalars().all())
+    if "default-server" not in names:
+        session.add(
+            K3sNodegroup(
+                id=_deterministic_default_id(cluster_id, "default-server"),
+                cluster_id=cluster_id,
+                name="default-server",
+                role="server",
+                node_count=1,
+                flavor_id=server_flavor_id,
+                is_default=True,
+                min_size=1,
+                max_size=1,
+            )
+        )
+    if "default-agent" not in names:
+        session.add(
+            K3sNodegroup(
+                id=_deterministic_default_id(cluster_id, "default-agent"),
+                cluster_id=cluster_id,
+                name="default-agent",
+                role="agent",
+                node_count=max(0, int(agent_count or 0)),
+                flavor_id=agent_flavor_id,
+                is_default=True,
+                min_size=0,
+                max_size=max(5, int(agent_count or 0)),
+            )
+        )
+
+
 async def create_nodegroup(cluster_id: str, data: dict) -> dict:
     """노드그룹 생성. DB 미설정 시 RuntimeError."""
     if not is_db_available():
@@ -116,18 +174,24 @@ async def create_nodegroup(cluster_id: str, data: dict) -> dict:
         if dup_result.scalar_one_or_none() is not None:
             raise ValueError(f"이미 같은 이름의 노드그룹이 존재합니다: {data['name']}")
 
+        role = data.get("role", "agent")
+        node_count = int(data.get("node_count", 0))
+        flavor_id = data.get("flavor_id") or None
+        stampede_enabled = bool(data.get("stampede_enabled", False))
+        _validate_scalable_invariants(role, node_count, flavor_id, stampede_enabled)
+
         ng = K3sNodegroup(
             id=str(uuid.uuid4()),
             cluster_id=cluster_id,
             name=data["name"],
-            role=data.get("role", "agent"),
-            node_count=int(data.get("node_count", 0)),
-            flavor_id=data.get("flavor_id") or None,
+            role=role,
+            node_count=node_count,
+            flavor_id=flavor_id,
             image_id=data.get("image_id") or None,
             labels=data.get("labels") or None,
             taints=data.get("taints") or None,
             is_default=False,
-            stampede_enabled=bool(data.get("stampede_enabled", False)),
+            stampede_enabled=stampede_enabled,
             min_size=int(data.get("min_size", 0)),
             max_size=int(data.get("max_size", 5)),
         )
@@ -158,6 +222,12 @@ async def update_nodegroup(cluster_id: str, nodegroup_id: str, updates: dict) ->
         ng = result.scalar_one_or_none()
         if ng is None:
             return None
+
+        next_role = updates.get("role", ng.role)
+        next_count = int(updates.get("node_count", ng.node_count))
+        next_flavor = updates.get("flavor_id", ng.flavor_id)
+        next_stampede = bool(updates.get("stampede_enabled", ng.stampede_enabled))
+        _validate_scalable_invariants(next_role, next_count, next_flavor, next_stampede)
 
         _allowed = {
             "node_count",
@@ -265,6 +335,24 @@ async def count_creating_vms(nodegroup_id: str) -> int:
         )
         result = await session.execute(stmt)
         return result.scalar_one() or 0
+
+
+async def set_nodegroup_count(cluster_id: str, nodegroup_id: str, node_count: int) -> None:
+    if not is_db_available():
+        return
+    factory = get_session_factory()
+    async with factory() as session:
+        stmt = select(K3sNodegroup).where(
+            K3sNodegroup.id == nodegroup_id,
+            K3sNodegroup.cluster_id == cluster_id,
+            K3sNodegroup.deleted_at.is_(None),
+        )
+        result = await session.execute(stmt)
+        ng = result.scalar_one_or_none()
+        if ng:
+            ng.node_count = max(0, int(node_count))
+            ng.updated_at = datetime.now(UTC)
+            await session.commit()
 
 
 async def get_default_agent_nodegroup_id(cluster_id: str) -> str | None:

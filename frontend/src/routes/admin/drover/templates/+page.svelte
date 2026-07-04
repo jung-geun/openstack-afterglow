@@ -79,7 +79,6 @@
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={3} />
 	{:else}
-		<div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 			{#if templates.length === 0}
 				<div class="text-gray-500 text-sm py-12 text-center">등록된 클러스터 템플릿이 없습니다.</div>
 			{:else}
@@ -93,7 +92,6 @@
 					{/each}
 				</div>
 			{/if}
-		</div>
 	{/if}
 </div>
 

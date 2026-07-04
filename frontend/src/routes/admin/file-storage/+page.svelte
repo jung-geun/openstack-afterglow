@@ -12,6 +12,8 @@
 	import AdminFileStorageTimeseries from '$lib/components/admin/file-storage/AdminFileStorageTimeseries.svelte';
 	import AdminFileStorageTable from '$lib/components/admin/file-storage/AdminFileStorageTable.svelte';
 	import Pagination from '$lib/components/ui/Pagination.svelte';
+	import SlidePanel from '$lib/components/SlidePanel.svelte';
+	import AdminFileStorageDetailPanel from '$lib/components/admin/file-storage/AdminFileStorageDetailPanel.svelte';
 
 	let fileStorages = $state<AdminFileStorage[]>([]);
 	let loading = $state(true);
@@ -21,6 +23,7 @@
 	let tsLoading = $state(true);
 	let pageSize = $state(20);
 	let currentPage = $state(0);
+	let selectedFileStorageId = $state<string | null>(null);
 
 	const token = $derived($auth.token ?? undefined);
 	const projectId = $derived($auth.projectId ?? undefined);
@@ -41,18 +44,30 @@
 		}
 	}
 
-	async function load() {
+	async function load(opts?: { refresh?: boolean }) {
 		if (fileStorages.length === 0) loading = true;
 		else refreshing = true;
 		currentPage = 0;
 		try {
-			fileStorages = await api.get<AdminFileStorage[]>('/api/v1/admin/all-file-storages', token, projectId);
+			fileStorages = await api.get<AdminFileStorage[]>('/api/v1/admin/all-file-storages', token, projectId, opts);
 		} catch {
 			fileStorages = [];
 		} finally {
 			loading = false;
 			refreshing = false;
 		}
+	}
+
+	function openDetail(fs: AdminFileStorage) {
+		selectedFileStorageId = fs.id;
+	}
+
+	function closeDetail() {
+		selectedFileStorageId = null;
+	}
+
+	async function handleDeleted() {
+		await load({ refresh: true });
 	}
 
 	const ar = createAutoRefresh(
@@ -84,7 +99,7 @@
 				bind:intervalSeconds={ar.intervalSeconds}
 				intervalOptions={ar.intervalOptions}
 				refreshing={loading || refreshing}
-				onManualRefresh={load}
+				onManualRefresh={() => load({ refresh: true })}
 			/>
 		{/snippet}
 	</PageHeader>
@@ -103,8 +118,7 @@
 	{:else if fileStorages.length === 0}
 		<div class="text-gray-600 text-sm">파일 스토리지가 없습니다</div>
 	{:else}
-		<div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
-			<AdminFileStorageTable storages={displayedStorages} />
+			<AdminFileStorageTable storages={displayedStorages} selectedId={selectedFileStorageId} onOpen={openDetail} />
 			{#if totalPages > 1}
 				<Pagination
 					page={currentPage + 1}
@@ -117,6 +131,11 @@
 					onNext={() => { currentPage++; }}
 				/>
 			{/if}
-		</div>
 	{/if}
 </div>
+
+{#if selectedFileStorageId}
+	<SlidePanel onClose={closeDetail} width="w-full md:w-[60vw] max-w-4xl" storageKey="admin.fileStorage.detail.width">
+		<AdminFileStorageDetailPanel fileStorageId={selectedFileStorageId} onClose={closeDetail} onDeleted={handleDeleted} />
+	</SlidePanel>
+{/if}

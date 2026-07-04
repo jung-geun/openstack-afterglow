@@ -64,8 +64,20 @@
 				{#if s.instance!.status === 'ACTIVE'}
 					<button
 						onclick={s.openConsole}
+						disabled={s.consoleOpening}
+						aria-busy={s.consoleOpening}
+						aria-describedby={s.consoleOpening || s.consoleOpenError ? 'instance-console-status' : undefined}
 						class="{btn.base} {btn.gray}"
-					>콘솔 열기</button>
+					>
+						{#if s.consoleOpening}
+							<span class="inline-flex items-center gap-1.5">
+								<span class="w-3 h-3 rounded-full border border-gray-500 border-t-gray-200 animate-spin" aria-hidden="true"></span>
+								콘솔 준비 중...
+							</span>
+						{:else}
+							콘솔 열기
+						{/if}
+					</button>
 					<button
 						onclick={() => s.performAction('stop')}
 						disabled={!!s.actioning}
@@ -118,6 +130,16 @@
 					>{s.deleting ? '삭제 중...' : '삭제'}</button>
 				{/if}
 			</div>
+			{#if s.consoleOpening || s.consoleOpenError}
+				<div
+					id="instance-console-status"
+					role={s.consoleOpenError ? 'alert' : 'status'}
+					aria-live={s.consoleOpenError ? 'assertive' : 'polite'}
+					class="max-w-xl rounded-lg border px-3 py-2 text-xs {s.consoleOpenError ? 'bg-red-900/30 border-red-800/40 text-red-300' : 'bg-blue-900/20 border-blue-800/40 text-blue-300'}"
+				>
+					{s.consoleOpenError || s.consoleOpenMessage}
+				</div>
+			{/if}
 
 			{#if adminProjectId}
 				<!-- 2행: 라이브 마이그레이션, 콜드 마이그레이션, 리사이즈 -->

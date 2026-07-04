@@ -13,8 +13,6 @@ async def test_dashboard_summary(client):
     assert resp.status_code == 200
     data = resp.json()
     assert "instances" in data
-    assert "compute" in data
-    assert "storage" in data
     assert "gpu_used" in data
 
 

@@ -1,16 +1,19 @@
 <script lang="ts">
+	import type { GpuFilterOption } from './flavorGpuFilters';
 	let {
 		nameFilter = $bindable(),
 		vcpuFilter = $bindable(),
 		ramFilter = $bindable(),
 		diskFilter = $bindable(),
 		gpuFilter = $bindable(),
+		gpuOptions,
 	}: {
 		nameFilter: string;
 		vcpuFilter: string;
 		ramFilter: string;
 		diskFilter: string;
 		gpuFilter: string;
+		gpuOptions: GpuFilterOption[];
 	} = $props();
 </script>
 
@@ -43,8 +46,8 @@
 		bind:value={gpuFilter}
 		class="bg-gray-800 border border-gray-700 text-sm text-gray-300 rounded-lg px-3 py-1.5 focus:outline-none focus:border-blue-500"
 	>
-		<option value="">GPU 전체</option>
-		<option value="yes">GPU 있음</option>
-		<option value="no">GPU 없음</option>
+		{#each gpuOptions as option}
+			<option value={option.value}>{option.label}</option>
+		{/each}
 	</select>
 </div>

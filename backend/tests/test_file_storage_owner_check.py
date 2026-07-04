@@ -4,7 +4,7 @@ afterglow 가 share metadata.union_project_id 로 owner 추적 — 다른 프로
 share_id 로 detail/delete + access-rule 조작 시 404.
 """
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -49,10 +49,13 @@ async def test_admin_can_delete_other_project_share(admin_client, mock_conn):
     with (
         patch("app.api.storage.file_storage.manila.get_file_storage", return_value=_foreign_share()),
         patch("app.api.storage.file_storage.manila.delete_file_storage", return_value=None),
-        patch("app.api.storage.file_storage.invalidate"),
+        patch("app.api.storage.file_storage.invalidate", new_callable=AsyncMock) as invalidate_mock,
     ):
         resp = await admin_client.delete("/api/v1/file-storage/share-foreign")
     assert resp.status_code == 204
+    invalidate_mock.assert_any_await("afterglow:manila:test-project-123:file_storages")
+    invalidate_mock.assert_any_await("afterglow:manila:other-project-999:file_storages")
+    invalidate_mock.assert_any_await("afterglow:admin:file_storages")
 
 
 @pytest.mark.asyncio

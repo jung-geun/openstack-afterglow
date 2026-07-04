@@ -5,6 +5,9 @@
 
 from __future__ import annotations
 
+import base64
+import re
+
 import pytest
 
 from app.services import recipe_blocks as rb
@@ -33,6 +36,77 @@ def test_python_layer_targets_layer_root():
     assert "/mnt/share/usr/local" in out
     assert "/mnt/share/usr/local/lib/python3.11/site-packages" in out
     assert rb._PYCOPY_PATH in out  # 병렬 복사기 사용
+
+
+def test_squashfs_python_layer_is_cpython_only():
+    out = rb.squashfs_python_layer("python311", "3.11")
+    assert "uv python install cpython-3.11" in out
+    assert 'cp -a "$PYDIR/." "$STAGING_LOCAL/"' in out
+    assert "uv pip install" not in out
+
+
+def test_squashfs_stacked_python_runtime_excludes_pip_install():
+    out = rb.squashfs_stacked_layer(
+        "python311",
+        python_version="3.11",
+        pip_packages=None,
+        parent_exports=[("10.0.0.1:/layers/uv", "uv-latest.sqsh")],
+    )
+    assert '"$UV_BIN" python install "$PY_VER"' in out
+    assert "pip install" not in out
+
+
+def test_squashfs_stacked_package_layer_excludes_python_install():
+    out = rb.squashfs_stacked_layer(
+        "numpy-stack",
+        python_version=None,
+        pip_packages=["numpy==1.26.4"],
+        parent_exports=[("10.0.0.1:/layers/python", "python311-latest.sqsh")],
+    )
+    assert "pip install" in out
+    assert "numpy==1.26.4" in out
+    assert 'python install "$PY_VER"' not in out
+
+
+def test_squashfs_stacked_package_layer_renders_pip_source_options():
+    out = rb.squashfs_stacked_layer(
+        "torch-stack",
+        python_version=None,
+        pip_packages=["torch", "torchvision"],
+        parent_exports=[("10.0.0.1:/layers/python", "python311-latest.sqsh")],
+        pip_index_url="https://download.pytorch.org/whl/cpu",
+        pip_extra_index_urls=["https://pypi.org/simple"],
+        pip_find_links=["https://download.pytorch.org/whl/cpu/torch_stable.html"],
+    )
+    install_line = next(line for line in out.splitlines() if "pip install" in line)
+    assert "--index-url https://download.pytorch.org/whl/cpu" in install_line
+    assert "--extra-index-url https://pypi.org/simple" in install_line
+    assert "--find-links https://download.pytorch.org/whl/cpu/torch_stable.html" in install_line
+    assert install_line.index("--index-url") < install_line.index("torch")
+
+
+def test_squashfs_stacked_package_layer_rejects_secret_index_url():
+    with pytest.raises(ValueError):
+        rb.squashfs_stacked_layer(
+            "torch-stack",
+            python_version=None,
+            pip_packages=["torch"],
+            parent_exports=[("10.0.0.1:/layers/python", "python311-latest.sqsh")],
+            pip_index_url="https://token:secret@download.pytorch.org/whl/cpu",
+        )
+
+
+def test_squashfs_stacked_package_layer_ignores_python_config_helper():
+    out = rb.squashfs_stacked_layer(
+        "numpy-stack",
+        python_version=None,
+        pip_packages=["numpy==1.26.4"],
+        parent_exports=[("10.0.0.1:/layers/python", "python311-latest.sqsh")],
+    )
+    assert "ls /mnt/merged/usr/local/bin/python3.*" not in out
+    assert "! -name '*-config'" in out
+    assert "-c 'import sys'" in out
+    assert 'PYBIN="$candidate"' in out
 
 
 def test_python_layer_rejects_bad_version():
@@ -85,6 +159,57 @@ def test_apt_capture_layer_structure():
     assert "$CAP/upper/var/cache" in out
     assert "$CAP/upper/var/lib/apt/lists" in out
     assert f'{rb._PYCOPY_PATH} "$CAP/upper" /mnt/share' in out
+
+
+def test_squashfs_system_apt_layer_structure():
+    out = rb.squashfs_system_apt_layer("sys-tools", ["curl", "nfs-common"])
+
+    assert "apt-get update -q" in out
+    assert "apt-get install -y --no-install-recommends curl nfs-common" in out
+    assert 'mksquashfs "$CAP/upper"' in out
+    assert "/mnt/share/images" in out
+    assert "sys-tools-latest.sqsh" in out
+    assert "uv pip install" not in out
+    assert "uv python install" not in out
+
+
+def test_squashfs_system_apt_layer_rejects_invalid_input():
+    with pytest.raises(ValueError):
+        rb.squashfs_system_apt_layer("sys-tools", [])
+    with pytest.raises(ValueError):
+        rb.squashfs_system_apt_layer("sys-tools", ["curl;rm"])
+    with pytest.raises(ValueError):
+        rb.squashfs_system_apt_layer("Bad", ["curl"])
+
+
+def test_squashfs_nvidia_driver_layer_structure():
+    out = rb.squashfs_nvidia_driver_layer("nvidia-driver", "580")
+
+    hook_match = re.search(r"<<'AFTERGLOW_NVIDIA_HOOK'\n(.+?)\nAFTERGLOW_NVIDIA_HOOK", out, re.S)
+    assert hook_match is not None
+    hook = base64.b64decode(hook_match.group(1)).decode()
+    assert "cuda-keyring" in hook
+    assert "nvidia-dkms-${BRANCH}-open" in hook
+    assert "libnvidia-compute-${BRANCH}" in hook
+    assert "nvidia-utils-${BRANCH}" in hook
+    assert "AFTERGLOW_NVIDIA_HOOK" in out
+    assert 'HOOK_DIR="$STAGING/usr/lib/afterglow/layer-hooks.d"' in out
+    assert '"$HOOK_DIR/50-nvidia-driver-install.sh"' in out
+    assert 'MANIFEST_DIR="$STAGING/usr/share/afterglow/layers"' in out
+    assert '"$MANIFEST_DIR/nvidia-driver-nvidia-driver.txt"' in out
+    assert "kind=nvidia" in out
+    assert "overlay_contract=/usr-only activation hook" in out
+    assert "nvidia-dkms-580-open,libnvidia-compute-580,nvidia-utils-580" in out
+    assert 'mksquashfs "$STAGING"' in out
+    assert "uv pip install" not in out
+    assert "uv python install" not in out
+    assert "chroot" not in out
+
+
+@pytest.mark.parametrize("branch", ["123", "580;rm", "abc"])
+def test_squashfs_nvidia_driver_layer_rejects_invalid_branch(branch):
+    with pytest.raises(ValueError):
+        rb.squashfs_nvidia_driver_layer("nvidia-driver", branch)
 
 
 def test_apt_capture_layer_debconf_selections():

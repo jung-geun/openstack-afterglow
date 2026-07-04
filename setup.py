@@ -858,7 +858,7 @@ def print_completion(deploy_mode: int, app: dict):
         print(f"  {cyan('Docker Compose')}")
         print("    docker compose up -d")
         print(f"    # Frontend: http://localhost:{app['frontend_port']}")
-        print(f"    # Backend:  http://localhost:{app['backend_port']}/api/health")
+        print(f"    # Backend:  http://localhost:{app['backend_port']}/api/v1/health")
     if deploy_mode in (DEPLOY_K8S, DEPLOY_BOTH):
         print(f"  {cyan('Kubernetes')}")
         print("    kubectl apply -f k8s/namespace.yaml")

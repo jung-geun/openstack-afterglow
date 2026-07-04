@@ -105,7 +105,11 @@ async def provision_agents(project_id: str, cluster_id: str, server_ip: str, nod
 
     if new_agent_entries:
         await k3s_cluster.add_agent_vms(cluster_id, new_agent_entries)
+        from app.services import k3s_nodegroup
 
+        default_agent_id = await k3s_nodegroup.get_default_agent_nodegroup_id(cluster_id)
+        if default_agent_id:
+            await k3s_nodegroup.add_nodegroup_vms(default_agent_id, cluster_id, new_agent_entries)
     reason = f"에이전트 {failed_count}개 생성 실패" if failed_count else ""
     await k3s_cluster.update_cluster_status(project_id, cluster_id, "ACTIVE", reason, agent_vm_ids=agent_vm_ids)
     _logger.info(

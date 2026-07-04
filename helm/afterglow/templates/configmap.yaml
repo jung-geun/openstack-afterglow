@@ -9,7 +9,7 @@ data:
   APP_ORIGIN: {{ $appOrigin | quote }}
   PUBLIC_S3_BASE: {{ .Values.openstack.s3Endpoint | quote }}
   APP_GRAFANA_BASE: {{ .Values.monitoring.grafanaBaseUrl | quote }}
-  config.toml: |
+  afterglow.conf: |
     # Afterglow 통합 설정 파일
     # 비밀 값은 secret.yaml의 환경변수로 주입됩니다.
 
@@ -223,9 +223,6 @@ data:
     {{- end }}
     cert_rotation_node_timeout_sec = {{ .Values.k3s.certRotationNodeTimeoutSec }}
     stampede_enabled = {{ .Values.k3s.stampedeEnabled }}
-    {{- if .Values.k3s.stampedeProjectId }}
-    stampede_project_id = {{ .Values.k3s.stampedeProjectId | quote }}
-    {{- end }}
     stampede_interval = {{ .Values.k3s.stampedeInterval }}
     stampede_scale_down_window = {{ .Values.k3s.stampedeScaleDownWindow }}
     stampede_scale_up_cooldown = {{ .Values.k3s.stampedeScaleUpCooldown }}

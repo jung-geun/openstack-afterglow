@@ -4,7 +4,7 @@
   uv run python -m app.worker
 
 K3s ACTIVE 클러스터를 3분 간격으로 프로빙하여 Redis에 헬스 결과 저장.
-Stampede 오토스케일 reconcile을 별도 주기(STAMPEDE_INTERVAL)로 실행.
+Stampede 오토스케일 reconcile은 설정의 k3s_stampede_interval 주기로 실행.
 메인 API(app.main)는 이 결과를 Redis에서 읽어 제공.
 """
 
@@ -21,7 +21,7 @@ logging.basicConfig(
 _logger = logging.getLogger("drover.health")
 
 _CHECK_INTERVAL = int(os.environ.get("K3S_HEALTH_INTERVAL", "180"))  # 기본 3분
-_STAMPEDE_INTERVAL = int(os.environ.get("STAMPEDE_INTERVAL", "60"))  # 기본 1분
+_STAMPEDE_INTERVAL_FALLBACK = int(os.environ.get("STAMPEDE_INTERVAL", "60"))  # 설정 로드 실패 시 폴백
 
 
 async def _run_health_check() -> None:
@@ -48,6 +48,15 @@ async def _health_loop() -> None:
         await asyncio.sleep(_CHECK_INTERVAL)
 
 
+def _stampede_interval_seconds() -> int:
+    try:
+        from app.config import get_settings
+
+        return int(get_settings().k3s_stampede_interval)
+    except Exception:
+        return _STAMPEDE_INTERVAL_FALLBACK
+
+
 async def _stampede_loop() -> None:
     """Stampede reconcile 루프 (기본 1분 주기)."""
     while True:
@@ -55,14 +64,14 @@ async def _stampede_loop() -> None:
             await _run_stampede()
         except Exception:
             _logger.exception("Stampede reconcile 루프 오류")
-        await asyncio.sleep(_STAMPEDE_INTERVAL)
+        await asyncio.sleep(_stampede_interval_seconds())
 
 
 async def main() -> None:
     _logger.info(
         "Drover Health Manager 시작 (health_interval=%ds, stampede_interval=%ds)",
         _CHECK_INTERVAL,
-        _STAMPEDE_INTERVAL,
+        _stampede_interval_seconds(),
     )
 
     # DB 초기화 (admin kubeconfig / Stampede 설정 접근에 필요)

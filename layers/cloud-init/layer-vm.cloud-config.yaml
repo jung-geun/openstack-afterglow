@@ -1,0 +1,199 @@
+#cloud-config
+# squashfs + OverlayFS 레이어 VM cloud-init 템플릿
+#
+# 사용 전 치환 필요:
+#   __NFS_EXPORT__    — Manila NFS share export_location
+#                       예: 10.0.0.100:/path/to/share  또는  10.0.0.100:/volumes/share-uuid
+#                       afterglow Manila share export_location 확인:
+#                         openstack share access list <share-name>
+#                         → access_to 컬럼(NFS share의 경우 export 경로)
+#   __PROFILE_NAME__  — layers/profiles/ 의 conf 파일 이름 (확장자 제외)
+#                       예: ml-worker, web-server
+#
+# 플랫폼: Ubuntu 24.04 (커널 6.8+, systemd 255+)
+# 필수: NFS share가 ro 권한으로 마운트 가능해야 함 (Manila의 NFS export)
+
+# ---------------------------------------------------------------------------
+# 패키지
+# ---------------------------------------------------------------------------
+package_update: true
+package_upgrade: false
+
+packages:
+  - nfs-common
+  - squashfs-tools
+
+# ---------------------------------------------------------------------------
+# 파일 배치
+# ---------------------------------------------------------------------------
+write_files:
+
+  # layer-activate.sh — squashfs 마운트 + OverlayFS 합성 스크립트
+  - path: /usr/local/bin/layer-activate.sh
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      # layer-activate.sh — squashfs 레이어 마운트 + OverlayFS 합성 (VM 측)
+      # 전체 버전: afterglow/layers/vm/layer-activate.sh
+      set -euo pipefail
+
+      if [ $# -ne 1 ]; then
+        echo "사용법: $0 <profile-name>" >&2; exit 1
+      fi
+
+      _validate_name() {
+        local val="$1" kind="$2"
+        if ! [[ "$val" =~ ^[a-z0-9][a-z0-9.+\-]*$ ]]; then
+          echo "오류: 유효하지 않은 ${kind}: '${val}'" >&2; exit 1
+        fi
+      }
+
+      PROFILE="$1"
+      _validate_name "$PROFILE" "profile-name"
+
+      NFS_MOUNT="${NFS_MOUNT:-/mnt/nfs-layers}"
+      SQSH_BASE="${SQSH_BASE:-/mnt/sqsh}"
+      CACHE_DIR="${CACHE_DIR:-/var/cache/layers}"
+      LOCAL_UPPER="${LOCAL_UPPER:-/var/lib/overlay/upper}"
+      LOCAL_WORK="${LOCAL_WORK:-/var/lib/overlay/work}"
+      OVERLAY_TARGET="${OVERLAY_TARGET:-/usr}"
+
+      LOG="/var/log/layer-activate.log"
+      exec >> "$LOG" 2>&1
+      echo "[$(date)] layer-activate 시작: profile=${PROFILE} target=${OVERLAY_TARGET}"
+
+      mkdir -p "$SQSH_BASE" "$CACHE_DIR" "$LOCAL_UPPER" "$LOCAL_WORK"
+
+      PROFILE_FILE="${NFS_MOUNT}/profiles/${PROFILE}.conf"
+      [ ! -f "$PROFILE_FILE" ] && echo "[ERROR] 프로필 없음: ${PROFILE_FILE}" >&2 && exit 1
+
+      LAYERS=()
+      while IFS= read -r line; do
+        line="${line%%#*}"; line="${line//[[:space:]]/}"
+        [ -z "$line" ] && continue
+        _validate_name "$line" "layer"
+        LAYERS+=("$line")
+      done < "$PROFILE_FILE"
+
+      [ "${#LAYERS[@]}" -eq 0 ] && echo "[ERROR] 레이어 없음" >&2 && exit 1
+      echo "[$(date)] 레이어: ${LAYERS[*]}"
+
+      LOWER_DIRS=""
+      for LAYER in "${LAYERS[@]}"; do
+        SQSH_NFS="${NFS_MOUNT}/images/${LAYER}.sqsh"
+        SQSH_CACHE="${CACHE_DIR}/${LAYER}.sqsh"
+        MOUNT_POINT="${SQSH_BASE}/${LAYER}"
+
+        if mountpoint -q "$MOUNT_POINT" 2>/dev/null; then
+          LOWER_DIRS="${LOWER_DIRS:+${LOWER_DIRS}:}${MOUNT_POINT}"; continue
+        fi
+        mkdir -p "$MOUNT_POINT"
+
+        if [ -f "$SQSH_NFS" ]; then
+          _ns="$(stat -c%s "$SQSH_NFS" 2>/dev/null||echo 0)"
+          _cs="$(stat -c%s "$SQSH_CACHE" 2>/dev/null||echo -1)"
+          if [ ! -f "$SQSH_CACHE" ]||[ "$SQSH_NFS" -nt "$SQSH_CACHE" ]||[ "$_ns" != "$_cs" ]; then
+            cp "$SQSH_NFS" "${SQSH_CACHE}.tmp" 2>/dev/null && mv "${SQSH_CACHE}.tmp" "$SQSH_CACHE" || true
+          fi
+        fi
+
+        if [ -f "$SQSH_CACHE" ]; then
+          SQSH_SRC="$SQSH_CACHE"
+        elif [ -f "$SQSH_NFS" ]; then
+          SQSH_SRC="$SQSH_NFS"
+        else
+          echo "[ERROR] 이미지 없음: ${LAYER}" >&2; exit 1
+        fi
+
+        mount -t squashfs "$SQSH_SRC" "$MOUNT_POINT" -o ro
+        echo "[$(date)] 마운트: ${LAYER} → ${MOUNT_POINT}"
+        LOWER_DIRS="${LOWER_DIRS:+${LOWER_DIRS}:}${MOUNT_POINT}"
+      done
+
+      if mountpoint -q "$OVERLAY_TARGET" 2>/dev/null; then
+        _ft="$(findmnt -n -o FSTYPE "$OVERLAY_TARGET" 2>/dev/null||true)"
+        if [ "$_ft" = "overlay" ]; then
+          echo "[$(date)] 이미 활성 — 스킵"; exit 0
+        fi
+      fi
+
+      [ -d "$LOCAL_WORK" ] && rm -rf "${LOCAL_WORK:?}/"* "${LOCAL_WORK:?}/".* 2>/dev/null||true
+
+      mount -t overlay overlay \
+        -o "lowerdir=${LOWER_DIRS}:/,upperdir=${LOCAL_UPPER},workdir=${LOCAL_WORK},metacopy=on" \
+        "$OVERLAY_TARGET"
+
+      echo "[$(date)] 완료: ${OVERLAY_TARGET} ← ${LAYERS[*]}"
+
+  # 이 VM에서 사용할 레이어 프로필 이름
+  - path: /etc/layer-profile
+    content: |
+      __PROFILE_NAME__
+
+  # layer-activate 자동 실행 스크립트 (메타데이터에서 프로필 읽기)
+  - path: /usr/local/bin/layer-activate-auto.sh
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      PROFILE="$(cat /etc/layer-profile | tr -d '[:space:]')"
+      exec /usr/local/bin/layer-activate.sh "$PROFILE"
+
+  # systemd 서비스 — 부팅마다 레이어 활성화
+  # 네트워크 준비 + NFS automount 완료 후, multi-user.target 전에 실행
+  - path: /etc/systemd/system/layer-activate.service
+    content: |
+      [Unit]
+      Description=Activate squashfs overlay layers
+      After=network-online.target mnt-nfs\x2dlayers.mount
+      Requires=network-online.target mnt-nfs\x2dlayers.mount
+      Before=multi-user.target
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/usr/local/bin/layer-activate-auto.sh
+      ExecStop=/bin/sh -c 'umount "${OVERLAY_TARGET:-/usr}" 2>/dev/null || true'
+      StandardOutput=journal
+      StandardError=journal
+
+      [Install]
+      WantedBy=multi-user.target
+
+# /etc/fstab — Manila NFS share 마운트 (x-systemd.automount으로 network-online 후 자동)
+# 아래 항목을 /etc/fstab 에 추가한다.
+# __NFS_EXPORT__ 를 Manila share의 NFS export_location 으로 치환:
+#   openstack share show <share-name> -c export_locations
+#   또는: openstack share access list <share-name>
+#
+# NOTE: cloud-config write_files 의 append:true 로 추가한다.
+  - path: /etc/fstab
+    append: true
+    content: |
+      # afterglow Manila NFS layer store (squashfs 레이어 저장소)
+      __NFS_EXPORT__  /mnt/nfs-layers  nfs4  ro,hard,timeo=50,retrans=3,_netdev,x-systemd.automount  0  0
+
+# ---------------------------------------------------------------------------
+# 부팅 시 실행 명령
+# ---------------------------------------------------------------------------
+runcmd:
+  # 필요한 디렉토리 생성
+  - mkdir -p /mnt/nfs-layers /mnt/sqsh /var/cache/layers /var/lib/overlay/upper /var/lib/overlay/work
+
+  # systemd 유닛 로드 + layer-activate 서비스 활성화
+  - systemctl daemon-reload
+  - systemctl enable layer-activate.service
+
+  # upper 초기화 옵션 — 아래 둘 중 하나를 선택:
+  #
+  # 옵션 A: 매 부팅 시 초기화 (불변 인프라 — 레이어만 사용, 개인 변경 불필요)
+  # - rm -rf /var/lib/overlay/upper/*
+  #
+  # 옵션 B: 유지 (사용자가 pip install 등으로 추가 설치한 것 보존, 기본)
+  # (아무 것도 안 함)
+
+final_message: |
+  squashfs + OverlayFS 레이어 VM 초기화 완료.
+  레이어 상태 확인: journalctl -u layer-activate --no-pager | tail -20
+  마운트 확인: findmnt -t overlay
+  프로필: $(cat /etc/layer-profile 2>/dev/null || echo 미설정)

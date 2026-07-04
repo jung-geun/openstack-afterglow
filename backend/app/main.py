@@ -158,7 +158,6 @@ from app.api.identity.admin_gpu import router as admin_gpu_router
 from app.api.identity.admin_identity import router as admin_identity_router
 from app.api.identity.admin_images import router as admin_images_router
 from app.api.identity.admin_instances import router as admin_instances_router
-from app.api.identity.admin_libraries import router as admin_libraries_router
 from app.api.identity.admin_notion import router as admin_notion_router
 from app.api.identity.admin_orphans import router as admin_orphans_router
 from app.api.identity.admin_secrets import router as admin_secrets_router
@@ -167,7 +166,7 @@ from app.api.identity.invitations import router as invitations_router
 from app.api.identity.profile import router as profile_router
 from app.api.identity.profile_activity import router as profile_activity_router
 from app.api.identity.projects import router as projects_router
-from app.api.union.layer_ops import router as admin_layers_router
+from app.api.union.layer_ops import router as admin_libraries_router
 
 _mark("api.identity")
 
@@ -334,7 +333,7 @@ _AUDIT_PREFIX_MAP: list[tuple[str, str]] = [
     ("/api/v1/secret-containers", "secret_container"),
     ("/api/v1/secret-orders", "secret_order"),
     ("/api/v1/database-instances", "database"),
-    ("/api/v1/admin/libraries", "library"),
+    ("/api/v1/admin/libraries", "union_layer"),
     ("/api/v1/admin/images", "image"),
     ("/api/v1/admin/projects", "project"),
     ("/api/v1/loadbalancers", "load_balancer"),
@@ -422,6 +421,21 @@ def _get_allowed_origins() -> set[str]:
 @app.middleware("http")
 async def cors_middleware(request: Request, call_next):
     origin = request.headers.get("origin", "")
+    if request.method == "OPTIONS":
+        if origin not in _get_allowed_origins():
+            return JSONResponse(content="Forbidden", status_code=403)
+        return JSONResponse(
+            content="OK",
+            headers={
+                "Access-Control-Allow-Origin": origin,
+                "Access-Control-Allow-Credentials": "true",
+                "Access-Control-Allow-Methods": _CORS_ALLOW_METHODS,
+                "Access-Control-Allow-Headers": _CORS_ALLOW_HEADERS,
+                "Access-Control-Max-Age": "600",
+                "Vary": "Origin",
+            },
+        )
+
     response = await call_next(request)
     if origin and origin in _get_allowed_origins():
         response.headers["Access-Control-Allow-Origin"] = origin
@@ -479,26 +493,6 @@ async def activity_audit_middleware(request: Request, call_next):
     return response
 
 
-@app.options("/{rest_of_path:path}")
-async def options_handler(request: Request, rest_of_path: str):
-    """OPTIONS preflight 전용 핸들러."""
-    origin = request.headers.get("origin", "")
-    allowed = _get_allowed_origins()
-    if origin not in allowed:
-        return JSONResponse(content="Forbidden", status_code=403)
-    return JSONResponse(
-        content="OK",
-        headers={
-            "Access-Control-Allow-Origin": origin,
-            "Access-Control-Allow-Credentials": "true",
-            "Access-Control-Allow-Methods": _CORS_ALLOW_METHODS,
-            "Access-Control-Allow-Headers": _CORS_ALLOW_HEADERS,
-            "Access-Control-Max-Age": "600",
-            "Vary": "Origin",
-        },
-    )
-
-
 # Identity
 app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
 # OIDC/OAuth 콜백은 /api/v1 없이 /auth 경로로 직접 마운트 (OIDC redirect_uri 표준 준수)
@@ -511,7 +505,6 @@ app.include_router(admin_flavors_router, prefix="/api/v1/admin", tags=["admin-fl
 app.include_router(admin_identity_router, prefix="/api/v1/admin", tags=["admin-identity"])
 app.include_router(admin_gpu_router, prefix="/api/v1/admin", tags=["admin-gpu"])
 app.include_router(admin_libraries_router, prefix="/api/v1/admin/libraries", tags=["admin-libraries"])
-app.include_router(admin_layers_router, prefix="/api/v1/admin/layers", tags=["admin-layers"])
 app.include_router(admin_notion_router, prefix="/api/v1/admin", tags=["admin-notion"])
 app.include_router(admin_images_router, prefix="/api/v1/admin", tags=["admin-images"])
 app.include_router(profile_router, prefix="/api/v1/profile", tags=["profile"])
@@ -540,7 +533,7 @@ app.include_router(networks_router, prefix="/api/v1/networks", tags=["networks"]
 app.include_router(routers_router, prefix="/api/v1/routers", tags=["routers"])
 app.include_router(loadbalancers_router, prefix="/api/v1/loadbalancers", tags=["loadbalancers"])
 app.include_router(security_groups_router, prefix="/api/v1/security-groups", tags=["security-groups"])
-# Optional services — config.toml [services] 섹션에서 활성화
+# Optional services — afterglow.conf/config.toml [services] 섹션에서 활성화
 from app.config import get_settings as _get_cfg
 
 _svc_cfg = _get_cfg()

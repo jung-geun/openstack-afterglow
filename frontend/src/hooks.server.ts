@@ -1,5 +1,6 @@
 import type { Handle } from '@sveltejs/kit';
 import { env } from '$env/dynamic/public';
+import { loadPublicSiteConfig } from '$lib/server/config';
 
 // 인증 없이 접근 가능한 경로
 const PUBLIC_PATHS = ['/', '/auth/gitlab/callback'];
@@ -55,6 +56,7 @@ const SECURITY_HEADERS: Record<string, string> = {
 };
 
 export const handle: Handle = async ({ event, resolve }) => {
+	event.locals.siteConfig = loadPublicSiteConfig();
 	const path = event.url.pathname;
 
 	// 공개 경로, 정적 리소스, SvelteKit 내부 경로는 통과

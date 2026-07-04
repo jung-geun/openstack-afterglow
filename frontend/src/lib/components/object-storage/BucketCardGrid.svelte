@@ -15,7 +15,7 @@
 	} = $props();
 </script>
 
-<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5" class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
 	{#each containers as c}
 		<div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
 			<div class="flex items-center gap-2.5 mb-3">

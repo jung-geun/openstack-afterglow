@@ -64,7 +64,7 @@ afterglow_cephx_user: "client.afterglow"
 # ── k3s ──────────────────────────────────────────────────────────────────────
 afterglow_k3s_callback_base_url: "{{ afterglow_external_url }}"
 
-# ── 선택적 OpenStack 서비스 (config.toml [services] 반영) ─────────────────────
+# ── 선택적 OpenStack 서비스 (afterglow.conf/config.toml [services] 반영) ───────
 afterglow_service_manila_enabled: true
 afterglow_service_swift_enabled: true
 afterglow_service_k3s_enabled: true

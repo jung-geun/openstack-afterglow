@@ -18,8 +18,22 @@
 			: 'bg-blue-900/40 text-blue-400 border-blue-800'
 	);
 
+
+	function nestedNumber(source: Record<string, unknown>, path: string[]): number {
+		let value: unknown = source;
+		for (const key of path) {
+			if (!value || typeof value !== 'object') return 0;
+			value = (value as Record<string, unknown>)[key];
+		}
+		const n = Number(value ?? 0);
+		return Number.isFinite(n) ? n : 0;
+	}
 	const runningVms = $derived(nodegroup.vms.filter(v => v.status === 'RUNNING' || v.status === 'ACTIVE').length);
 	const inFlight = $derived((nodegroup.stampede_state as Record<string, number>)?.in_flight_count ?? 0);
+	const gpuCount = $derived(
+		nestedNumber(nodegroup.stampede_state, ['flavor_summary', 'gpu']) ||
+			nestedNumber(nodegroup.stampede_state, ['capacity', 'allocatable', 'gpu'])
+	);
 </script>
 
 <div class="bg-gray-800/50 border border-gray-700 rounded-lg p-3 space-y-2">
@@ -33,6 +47,9 @@
 			{#if nodegroup.stampede_enabled}
 				<span class="text-xs bg-blue-900/50 text-blue-300 border border-blue-700/60 rounded px-1.5 py-0.5 leading-none">Stampede</span>
 				<span class="text-xs text-gray-500">{nodegroup.min_size}–{nodegroup.max_size}</span>
+				{#if gpuCount > 0}
+					<span class="text-xs bg-emerald-900/50 text-emerald-300 border border-emerald-700/60 rounded px-1.5 py-0.5 leading-none">GPU {gpuCount}</span>
+				{/if}
 				{#if inFlight > 0}
 					<span class="text-xs text-yellow-400 animate-pulse">▲ +{inFlight} 프로비저닝 중</span>
 				{/if}

@@ -71,7 +71,7 @@ def require_service(flag: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 전역 fakeredis 패치 비활성화 — 통합 테스트는 실제 Redis를 사용
+# 전역 Redis 테스트 패치 비활성화 — 통합 테스트는 실제 Redis를 사용
 # ---------------------------------------------------------------------------
 
 
@@ -81,6 +81,17 @@ def _fake_redis_global():
 
     통합 테스트는 실제 Keystone 로그인 후 세션을 실제 Redis에 저장하므로
     fakeredis로 교체하면 이후 요청에서 세션을 찾지 못해 401이 발생한다.
+    """
+    yield
+
+
+@pytest.fixture(autouse=True)
+async def _flush_afterglow_cache():
+    """루트 Redis flush를 통합 테스트에서 비활성화한다.
+
+    루트 tests/conftest.py의 _flush_afterglow_cache는 단위 테스트 격리를 위해
+    afterglow:* 전체를 지우는데, 통합 테스트에서는 실제 Redis의
+    afterglow:refresh:* 세션 키까지 테스트 사이에 삭제해 인증이 401로 깨진다.
     """
     yield
 

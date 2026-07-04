@@ -178,3 +178,53 @@ async def test_delete_k8s_nodes_continues_on_failure():
         await delete_k8s_nodes("cluster-1", ["node-a", "node-b", "node-c"])
 
     assert call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_get_pod_resource_usage_sums_gpu_and_init_containers(monkeypatch):
+    monkeypatch.setattr("app.services.k3s_kube._make_ssl_context", lambda *a, **k: None)
+    resp = _make_response(200)
+    resp.json.return_value = {
+        "items": [
+            {
+                "metadata": {
+                    "name": "gpu-job",
+                    "namespace": "ml",
+                    "ownerReferences": [{"kind": "Job"}],
+                    "annotations": {},
+                },
+                "spec": {
+                    "nodeName": "node-a",
+                    "containers": [
+                        {"resources": {"requests": {"cpu": "500m", "memory": "1Gi", "nvidia.com/gpu": "1"}}}
+                    ],
+                    "initContainers": [
+                        {"resources": {"requests": {"cpu": "250m", "memory": "512Mi", "nvidia.com/gpu": "1"}}}
+                    ],
+                },
+            }
+        ]
+    }
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(return_value=resp)
+    with patch("app.services.k3s_kube.k3s_db") as mock_db:
+        mock_db.get_kubeconfig_admin = AsyncMock(return_value=_FAKE_KUBECONFIG)
+        with patch("app.services.k3s_kube.httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            from app.services.k3s_kube import get_pod_resource_usage
+
+            result = await get_pod_resource_usage("cluster-1")
+
+    assert result == [
+        {
+            "node": "node-a",
+            "namespace": "ml",
+            "name": "gpu-job",
+            "cpu_m": 750,
+            "memory_bytes": 1536 * 1024**2,
+            "gpu": 2,
+            "is_daemonset": False,
+            "is_mirror": False,
+        }
+    ]

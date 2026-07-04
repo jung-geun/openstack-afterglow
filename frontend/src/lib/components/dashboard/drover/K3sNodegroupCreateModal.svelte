@@ -33,9 +33,31 @@
 		void api.get<K3sFlavor[]>('/api/v1/flavors', token, projectId).then(f => { flavors = f; }).catch(() => {});
 	});
 
+	function flavorGpuCount(flavor: K3sFlavor): number {
+		const direct = Number(flavor.gpu_count ?? flavor.extra_specs?.gpu_count ?? 0);
+		if (Number.isFinite(direct) && direct > 0) return direct;
+		const alias = flavor.extra_specs?.['pci_passthrough:alias'] ?? '';
+		return alias.split(',').reduce((sum, entry) => {
+			const [name, count] = entry.trim().split(':');
+			if (!name || name.toLowerCase().includes('audio')) return sum;
+			const parsed = Number(count ?? 1);
+			return sum + (Number.isFinite(parsed) ? parsed : 1);
+		}, 0);
+	}
+
 	async function save() {
 		saving = true;
 		error = '';
+		if (form.stampede_enabled && !form.flavor_id) {
+			error = 'Stampede 노드그룹은 명시적 Flavor가 필요합니다.';
+			saving = false;
+			return;
+		}
+		if (Number(form.node_count) > 0 && !form.flavor_id) {
+			error = '노드 프로비저닝을 시작하려면 Flavor를 선택하세요.';
+			saving = false;
+			return;
+		}
 		try {
 			const body = {
 				name: form.name,
@@ -86,18 +108,10 @@
 
 			<div>
 				<span class="block text-xs text-gray-400 uppercase tracking-wide mb-1.5">역할</span>
-				<div class="flex gap-2">
-					<button
-						type="button"
-						onclick={() => (form.role = 'agent')}
-						class="flex-1 px-3 py-2 rounded-lg border text-sm transition-colors {form.role === 'agent' ? 'border-blue-500 bg-blue-900/30 text-white' : 'border-gray-600 bg-gray-800 text-gray-400 hover:border-gray-500'}"
-					>에이전트</button>
-					<button
-						type="button"
-						onclick={() => (form.role = 'server')}
-						class="flex-1 px-3 py-2 rounded-lg border text-sm transition-colors {form.role === 'server' ? 'border-purple-500 bg-purple-900/30 text-white' : 'border-gray-600 bg-gray-800 text-gray-400 hover:border-gray-500'}"
-					>서버</button>
+				<div class="px-3 py-2 rounded-lg border border-blue-500 bg-blue-900/30 text-white text-sm">
+					에이전트
 				</div>
+				<p class="mt-1 text-xs text-gray-500">커스텀 server 노드그룹은 HA join 설계 후 지원됩니다.</p>
 			</div>
 
 			<label class="block text-xs text-gray-400 uppercase tracking-wide">
@@ -112,14 +126,14 @@
 			</label>
 
 			<label class="block text-xs text-gray-400 uppercase tracking-wide">
-				Flavor (선택)
+				Flavor {form.stampede_enabled || Number(form.node_count) > 0 ? '(필수)' : '(선택)'}
 				<select
 					bind:value={form.flavor_id}
 					class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 mt-1.5"
 				>
-					<option value="">기본값 사용</option>
+					<option value="">선택 안 함</option>
 					{#each flavors as f}
-						<option value={f.id}>{f.name} ({f.vcpus}vCPU / {Math.round(f.ram / 1024)}GB)</option>
+						<option value={f.id}>{f.name} ({f.vcpus}vCPU / {Math.round(f.ram / 1024)}GB){flavorGpuCount(f) > 0 ? ` / GPU ${flavorGpuCount(f)}` : ''}</option>
 					{/each}
 				</select>
 			</label>
@@ -159,7 +173,7 @@
 								class="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500 mt-1" />
 						</label>
 					</div>
-					<p class="mt-2 text-xs text-gray-500">Pending pod 발생 시 자동으로 {form.min_size}~{form.max_size}개 노드 범위로 스케일합니다.</p>
+					<p class="mt-2 text-xs text-gray-500">Pending pod 발생 시 명시한 Flavor로 {form.min_size}~{form.max_size}개 agent 노드 범위에서 스케일합니다.</p>
 				{/if}
 			</div>
 		</div>
@@ -175,7 +189,7 @@
 				disabled={saving || !form.name}
 				class="px-5 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium rounded-lg"
 			>
-				{saving ? '생성 중...' : '생성'}
+				{saving ? '생성 중...' : Number(form.node_count) > 0 ? '프로비저닝 시작' : '생성'}
 			</button>
 		</div>
 	</div>

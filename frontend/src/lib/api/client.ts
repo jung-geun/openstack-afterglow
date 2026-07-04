@@ -20,6 +20,25 @@ export class ApiError extends Error {
 	}
 }
 
+function formatErrorDetail(body: unknown, fallback: string): string {
+	if (!body || typeof body !== 'object') return fallback;
+	const detail = (body as { detail?: unknown }).detail;
+	if (typeof detail === 'string') return detail;
+	if (Array.isArray(detail)) {
+		return detail
+			.map((item) => {
+				if (!item || typeof item !== 'object') return String(item);
+				const record = item as { loc?: unknown; msg?: unknown };
+				const loc = Array.isArray(record.loc) ? record.loc.join('.') : '';
+				const msg = typeof record.msg === 'string' ? record.msg : JSON.stringify(item);
+				return loc ? `${loc}: ${msg}` : msg;
+			})
+			.join('; ');
+	}
+	if (detail && typeof detail === 'object') return JSON.stringify(detail);
+	return JSON.stringify(body);
+}
+
 // 동시 다수 요청이 401 받을 때 redirect 중복 호출 방지
 let _redirectingTo401 = false;
 // /api/admin/ 403 핸들러 중복 호출 방지
@@ -204,7 +223,7 @@ async function request<T>(
 			let detail = retry.statusText;
 			try {
 				const body = await retry.json();
-				detail = body?.detail || JSON.stringify(body);
+				detail = formatErrorDetail(body, retry.statusText);
 			} catch { /* ignore */ }
 			throw new ApiError(retry.status, detail);
 		}
@@ -216,7 +235,7 @@ async function request<T>(
 		let detail = res.statusText;
 		try {
 			const body = await res.json();
-			detail = body?.detail || JSON.stringify(body);
+			detail = formatErrorDetail(body, res.statusText);
 		} catch {
 			detail = await res.text().catch(() => res.statusText);
 		}
@@ -283,7 +302,7 @@ export const api = {
 			let detail = res.statusText;
 			try {
 				const body = await res.json();
-				detail = body?.detail || JSON.stringify(body);
+				detail = formatErrorDetail(body, res.statusText);
 			} catch {
 				detail = await res.text().catch(() => res.statusText);
 			}

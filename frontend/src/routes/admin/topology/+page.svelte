@@ -88,7 +88,6 @@
 	{:else if ctrl.loading}
 		<LoadingSkeleton variant="card" rows={8} />
 	{:else if ctrl.data}
-		<div class:opacity-60={ctrl.refreshing} class:pointer-events-none={ctrl.refreshing}>
 		<div class="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-4">
 			<GlobalTopology
 				data={ctrl.data}
@@ -120,7 +119,6 @@
 			<span>인스턴스 {ctrl.data.instances.length}개</span>
 			<span>Floating IP {ctrl.data.floating_ips.length}개</span>
 			<span>로드밸런서 {(ctrl.data.load_balancers ?? []).length}개</span>
-		</div>
 		</div>
 	{/if}
 </div>

@@ -26,7 +26,7 @@ export const ROUTE_LABELS: Record<string, string> = {
 
   // File Storage
   'file-storage': 'FILE STORAGE',
-  manage: '라이브러리 관리',
+  manage: '사전 빌드 파일 스토리지',
   networks: '네트워크',
   'security-services': 'Security Service',
 

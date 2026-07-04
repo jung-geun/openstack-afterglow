@@ -82,7 +82,6 @@
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={3} />
 	{:else}
-		<div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 			{#if policy}
 				<SecurityPolicyBanner {policy} onMigrate={() => (showMigrate = true)} />
 			{/if}
@@ -94,7 +93,6 @@
 			{:else}
 				<SystemAdminTable {admins} onRevoked={load} />
 			{/if}
-		</div>
 	{/if}
 </div>
 

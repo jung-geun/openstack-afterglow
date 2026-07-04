@@ -24,12 +24,14 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./config.toml:/app/config.toml:ro
+      - ./afterglow.conf:/app/afterglow.conf:ro
       - ./config.gpu.toml:/app/config.gpu.toml:ro
       - ./logs:/app/logs
     env_file:
       - path: .env
         required: false
+    # environment:
+    #   - AFTERGLOW_ALLOW_INSECURE=1
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     depends_on:
       - redis
@@ -55,6 +57,7 @@ services:
     ports:
       - "3080:3080"
     volumes:
+      - ./afterglow.conf:/app/afterglow.conf:ro
       - ./logs:/app/logs
     environment:
       - ORIGIN=http://localhost:3080
@@ -86,9 +89,14 @@ services:
     image: ghcr.io/openstack-afterglow/afterglow-worker:dev
     command: python -m app.worker
     volumes:
-      - ./config.toml:/app/config.toml:ro
+      - ./afterglow.conf:/app/afterglow.conf:ro
       - ./config.gpu.toml:/app/config.gpu.toml:ro
       - ./logs:/app/logs
+    env_file:
+      - path: .env
+        required: false
+    # environment:
+    #   - AFTERGLOW_ALLOW_INSECURE=1
     depends_on:
       redis:
         condition: service_started
@@ -110,9 +118,14 @@ services:
     image: ghcr.io/openstack-afterglow/afterglow-worker:dev
     command: python -m app.notion_worker
     volumes:
-      - ./config.toml:/app/config.toml:ro
+      - ./afterglow.conf:/app/afterglow.conf:ro
       - ./config.gpu.toml:/app/config.gpu.toml:ro
       - ./logs:/app/logs
+    env_file:
+      - path: .env
+        required: false
+    # environment:
+    #   - AFTERGLOW_ALLOW_INSECURE=1
     depends_on:
       redis:
         condition: service_started

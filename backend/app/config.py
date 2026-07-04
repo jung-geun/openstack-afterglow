@@ -1,6 +1,6 @@
 """Afterglow 설정 모듈.
 
-우선순위: 환경변수 > config.toml (프로젝트 루트) > 기본값
+우선순위: 환경변수 > afterglow.conf/config.toml (프로젝트 루트) > 기본값
 """
 
 import os
@@ -14,12 +14,19 @@ from pydantic_settings import BaseSettings
 
 
 def _config_candidates() -> list[Path]:
-    """설정 파일 후보 경로 목록. CWD → 상위 → /app (Docker) → afterglow.toml (K8s ConfigMap)."""
+    """설정 파일 후보 경로 목록.
+
+    afterglow.conf는 TOML 문법을 유지하는 신규 기본 파일명이고,
+    config.toml/afterglow.toml은 기존 배포 호환을 위해 계속 지원한다.
+    """
     return [
+        Path.cwd() / "afterglow.conf",
+        Path.cwd().parent / "afterglow.conf",
         Path.cwd() / "config.toml",
         Path.cwd().parent / "config.toml",
+        Path("/app/afterglow.conf"),
         Path("/app/config.toml"),
-        Path("/app/afterglow.toml"),  # K8s ConfigMap 마운트 경로
+        Path("/app/afterglow.toml"),  # 레거시 K8s ConfigMap 마운트 경로
         Path.cwd() / "afterglow.toml",
     ]
 
@@ -39,25 +46,37 @@ def _deep_merge(base: dict, override: dict) -> dict:
 
 
 def _config_override_paths(base_path: Path) -> list[Path]:
-    """base_path와 같은 디렉토리에서 `<stem>.*.toml` 오버라이드 파일을 알파벳순으로 반환.
+    """base_path와 같은 디렉토리에서 설정 오버라이드 파일을 알파벳순으로 반환.
 
-    예: base_path=/app/config.toml 이면 config.gpu.toml, config.openstack.toml 등을 찾는다.
-    base 자기자신과 크기 0 파일은 제외.
+    예:
+    - base_path=/app/afterglow.conf → afterglow.*.conf, afterglow.*.toml, config.*.toml
+    - base_path=/app/config.toml → config.*.toml
+
+    base 자기자신과 크기 0 파일은 제외한다. afterglow.conf 전환 중에도 기존
+    config.gpu.toml 오버라이드를 그대로 재사용할 수 있게 config.*.toml도 허용한다.
     """
     parent = base_path.parent
-    pattern = f"{base_path.stem}.*.toml"
-    overrides: list[Path] = []
-    for p in sorted(parent.glob(pattern)):
-        if p.name == base_path.name:
-            continue
-        if not p.is_file() or p.stat().st_size == 0:
-            continue
-        overrides.append(p)
-    return overrides
+    patterns = [f"{base_path.stem}.*{base_path.suffix}"]
+    if base_path.suffix != ".toml":
+        patterns.append(f"{base_path.stem}.*.toml")
+    if base_path.name == "afterglow.conf":
+        patterns.append("config.*.toml")
+
+    overrides: dict[Path, Path] = {}
+    for pattern in patterns:
+        for p in parent.glob(pattern):
+            if p.name == base_path.name:
+                continue
+            if not p.is_file() or p.stat().st_size == 0:
+                continue
+            if p.name == "config.toml":
+                continue
+            overrides[p.resolve()] = p
+    return [overrides[key] for key in sorted(overrides)]
 
 
 def _load_toml() -> dict:
-    """프로젝트 루트의 config.toml(+ 오버라이드)을 읽어 평탄화된 dict를 반환."""
+    """프로젝트 루트의 afterglow.conf/config.toml(+ 오버라이드)을 읽어 평탄화된 dict를 반환."""
     data = load_raw_toml()
     if not data:
         return {}
@@ -193,7 +212,6 @@ def _load_toml() -> dict:
     flat["k3s_stampede_scale_up_cooldown"] = k3s.get("stampede_scale_up_cooldown", 120)
     flat["k3s_stampede_scale_down_cooldown"] = k3s.get("stampede_scale_down_cooldown", 300)
     flat["k3s_stampede_resource_headroom_factor"] = k3s.get("stampede_resource_headroom_factor", 0.3)
-    flat["k3s_stampede_project_id"] = k3s.get("stampede_project_id", "")
 
     gpu = data.get("gpu", {})
     flat["gpu_available_visible"] = gpu.get("available_visible", False)
@@ -212,15 +230,21 @@ def _load_toml() -> dict:
     flat["default_availability_zone"] = nv.get("default_availability_zone", "nova")
     flat["boot_volume_size_gb"] = nv.get("boot_volume_size_gb", 20)
     flat["upper_volume_size_gb"] = nv.get("upper_volume_size_gb", 50)
+    flat["server_image_id"] = nv.get("server_image_id", "")
 
     builder = data.get("builder", {})
     flat["builder_image_id"] = builder.get("image_id", "")
+    flat["builder_ubuntu_18_04_image_id"] = builder.get("ubuntu_18_04_image_id", "")
+    flat["builder_ubuntu_20_04_image_id"] = builder.get("ubuntu_20_04_image_id", "")
+    flat["builder_ubuntu_22_04_image_id"] = builder.get("ubuntu_22_04_image_id", "")
+    flat["builder_ubuntu_24_04_image_id"] = builder.get("ubuntu_24_04_image_id", "")
     flat["builder_flavor_id"] = builder.get("flavor_id", "")
     flat["builder_network_id"] = builder.get("network_id", "")
     flat["builder_ssh_user"] = builder.get("ssh_user", "ubuntu")
     flat["builder_ssh_key_path"] = builder.get("ssh_key_path", "/etc/afterglow/ssh/builder.key")
     flat["builder_floating_network_id"] = builder.get("floating_network_id", "")
     flat["builder_build_timeout"] = builder.get("build_timeout", 3600)
+    flat["builder_layer_share_size_gb"] = builder.get("layer_share_size_gb", 20)
 
     union = data.get("union", {})
     flat["union_layer_store_rw_share_id"] = union.get("layer_store_rw_share_id", "")
@@ -453,7 +477,6 @@ class Settings(BaseSettings):
     k3s_stampede_scale_up_cooldown: int = 120
     k3s_stampede_scale_down_cooldown: int = 300
     k3s_stampede_resource_headroom_factor: float = 0.3
-    k3s_stampede_project_id: str = ""
 
     # Union Mount 레이어 시스템 — Manila share ID
     union_layer_store_rw_share_id: str = ""  # layer-store-rw (Builder 전용 RW)
@@ -485,7 +508,7 @@ class Settings(BaseSettings):
     grafana_dashboard_ceph_uid: str = "afterglow-ceph"
     grafana_dashboard_instance_cpu_uid: str = "afterglow-instance-cpu"
     grafana_dashboard_instance_gpu_uid: str = "afterglow-instance-gpu"
-    # Prometheus 서버 주소. 우선순위: 환경변수 PROMETHEUS_BASE_URL > config.toml [monitoring].prometheus_base_url > 기본값
+    # Prometheus 서버 주소. 우선순위: 환경변수 PROMETHEUS_BASE_URL > afterglow.conf/config.toml [monitoring].prometheus_base_url > 기본값
     prometheus_base_url: str = "http://prometheus:9090"
     prometheus_username: str = ""  # basic auth 미사용 시 빈 문자열
     prometheus_password: str = ""
@@ -528,15 +551,21 @@ class Settings(BaseSettings):
     default_availability_zone: str = "nova"
     boot_volume_size_gb: int = 20
     upper_volume_size_gb: int = 50
+    server_image_id: str = ""
 
     # 라이브러리 빌더 VM 설정
     builder_image_id: str = ""  # 빌더 VM 부팅 이미지 ID (Ubuntu 22.04+)
+    builder_ubuntu_18_04_image_id: str = ""  # 레이어 workflow Ubuntu 18.04 canonical image ID
+    builder_ubuntu_20_04_image_id: str = ""  # 레이어 workflow Ubuntu 20.04 canonical image ID
+    builder_ubuntu_22_04_image_id: str = ""  # 레이어 workflow Ubuntu 22.04 canonical image ID
+    builder_ubuntu_24_04_image_id: str = ""  # 레이어 workflow Ubuntu 24.04 canonical image ID
     builder_flavor_id: str = ""  # 빌더 VM 플레이버 ID
     builder_network_id: str = ""  # 빌더 VM 네트워크 ID (미지정 시 default_network_id 사용)
     builder_ssh_user: str = "ubuntu"  # Builder VM SSH 사용자
     builder_ssh_key_path: str = "/etc/afterglow/ssh/builder.key"  # SSH 개인키 경로
     builder_floating_network_id: str = ""  # Builder VM FIP 할당용 외부 네트워크 ID
     builder_build_timeout: int = 3600  # 빌드 SSH 명령 최대 대기 시간 (초)
+    builder_layer_share_size_gb: int = 20  # 레이어별 동적 Manila NFS share 용량 (GB)
 
     # 데이터베이스 (MariaDB/MySQL, 선택적)
     database_url: str = ""
@@ -644,7 +673,7 @@ class Settings(BaseSettings):
             else:
                 raise ValueError(
                     "SECRET_KEY is set to the default value 'change-me-in-production'. "
-                    "Set a strong random value in config.toml [app] secret_key or SECRET_KEY env var. "
+                    "Set a strong random value in afterglow.conf [app] secret_key or SECRET_KEY env var. "
                     "To override this check in development, set AFTERGLOW_ALLOW_INSECURE=1."
                 )
         elif len(self.secret_key) < 32:
@@ -670,7 +699,7 @@ class Settings(BaseSettings):
 
 @lru_cache
 def load_raw_toml() -> dict:
-    """config.toml 원본(+ 같은 디렉토리의 `config.*.toml` 오버라이드 딥 머지)을 중첩 구조 그대로 반환.
+    """afterglow.conf/config.toml 원본(+ 같은 디렉토리 오버라이드 딥 머지)을 중첩 구조 그대로 반환.
 
     머지 규칙: dict는 재귀 병합, 그 외는 오버라이드가 덮어쓴다. 오버라이드 파일은 알파벳순으로
     적용되어 뒤에 오는 파일이 앞의 값을 이긴다.

@@ -132,6 +132,33 @@ async def test_get_gpu_aliases_empty(admin_client):
     assert resp.json() == {"aliases": []}
 
 
+@pytest.mark.asyncio
+async def test_get_all_gpu_aliases_refreshes_db_overlay_before_discovery():
+    """DB catalog aliases must be loaded before mapping Placement device names to quota aliases."""
+
+    class FakeConnection:
+        def close(self):
+            pass
+
+    refresh = AsyncMock()
+    with (
+        patch("app.services.gpu_quota.is_db_available", return_value=True),
+        patch("app.services.gpu_catalog.refresh_device_map_from_db", new=refresh),
+        patch("openstack.connect", return_value=FakeConnection()),
+        patch("app.services.nova.list_flavors", return_value=[]),
+        patch(
+            "app.services.gpu_inventory._collect_gpu_hosts", return_value={"gpu_types": [{"device_name": "RTX 3090"}]}
+        ),
+        patch("app.api.identity.admin_gpu.build_device_name_to_alias_map", return_value={"RTX 3090": "RTX-3090"}),
+    ):
+        from app.services.gpu_quota import get_all_gpu_aliases
+
+        result = await get_all_gpu_aliases()
+
+    refresh.assert_awaited_once()
+    assert result == ["RTX-3090"]
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 기본 GPU quota CRUD
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

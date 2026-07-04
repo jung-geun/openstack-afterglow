@@ -176,13 +176,13 @@ gpu:
   configToml: |
     # Afterglow GPU 디바이스 맵 오버라이드
     #
-    # 이 파일을 `config.gpu.toml`로 복사하여 같은 디렉토리의 `config.toml` 옆에 두면
-    # 백엔드 기동 시 자동으로 딥 머지되어 적용됩니다.
+    # 이 파일을 `config.gpu.toml`로 복사하여 같은 디렉토리의 `afterglow.conf`
+    # 또는 레거시 `config.toml` 옆에 두면 백엔드 기동 시 자동으로 딥 머지되어 적용됩니다.
     #
     # 복사: cp config.gpu.toml.example config.gpu.toml
     #
     # 머지 규칙: dict는 재귀 병합, 리스트/스칼라는 이 파일이 덮어쓴다.
-    # 즉, [[gpu.devices]] 엔트리를 여기에 두면 config.toml의 동일 키를 완전히 대체한다.
+    # 즉, [[gpu.devices]] 엔트리를 여기에 두면 afterglow.conf/config.toml의 동일 키를 완전히 대체한다.
     
     [gpu]
     # GPU 디바이스 맵 커스터마이징
@@ -531,7 +531,6 @@ k3s:
   certRotationJobImage: ""
   certRotationNodeTimeoutSec: 300
   stampedeEnabled: false
-  stampedeProjectId: ""
   stampedeInterval: 60
   stampedeScaleDownWindow: 300
   stampedeScaleUpCooldown: 120

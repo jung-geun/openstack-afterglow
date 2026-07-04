@@ -188,10 +188,16 @@ async def delete_file_storage(
     token_info: dict = Depends(get_token_info),
 ):
     pid = conn._afterglow_project_id
-    _fetch_and_assert_share_owner(conn, file_storage_id, token_info)
+    share = _fetch_and_assert_share_owner(conn, file_storage_id, token_info)
+    owner_pid = (share.metadata or {}).get("union_project_id") or share.project_id
     try:
         manila.delete_file_storage(conn, file_storage_id)
         await invalidate(f"afterglow:manila:{pid}:file_storages")
+        if owner_pid and owner_pid != pid:
+            await invalidate(f"afterglow:manila:{owner_pid}:file_storages")
+        if not owner_pid and token_info.get("is_system_admin", False):
+            await invalidate("afterglow:manila:*:file_storages")
+        await invalidate("afterglow:admin:file_storages")
         await rec(
             token_info,
             conn,

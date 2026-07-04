@@ -35,7 +35,8 @@
 		"@xterm/xterm": "^6.0.0",
 		"d3-array": "^3.2.4",
 		"d3-scale": "^4.0.2",
-		"layerchart": "^2.0.0-next.64"
+		"layerchart": "^2.0.0-next.64",
+		"smol-toml": "^1.6.1"
 	},
 	"overrides": {
 		"cookie": "^0.7.0",

@@ -72,7 +72,6 @@
 	});
 </script>
 
-<div class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
 	<div class="overflow-x-auto">
 		<table class="w-full text-sm">
 			<thead>
@@ -157,4 +156,3 @@
 		onNext={() => { currentPage += 1; }}
 		note={flavors.length < totalUnfiltered ? `(전체 ${totalUnfiltered}개 필터됨)` : null}
 	/>
-</div>

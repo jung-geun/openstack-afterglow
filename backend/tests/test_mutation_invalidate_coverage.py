@@ -44,7 +44,6 @@ EXEMPT_ROUTERS: set[str] = {
     "identity/admin_images.py",
     "identity/admin_instances.py",
     "identity/admin_gpu.py",
-    "identity/admin_libraries.py",
     "identity/admin_notion.py",
     "identity/admin_orphans.py",
     "identity/admin_services.py",

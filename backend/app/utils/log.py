@@ -6,19 +6,36 @@ import logging
 import re
 
 # 정확 매칭 대상 필드명 (소문자 + 언더스코어 정규화)
-_SENSITIVE_EXACT: frozenset[str] = frozenset({
-    "password", "passwd",
-    "secret",
-    "token", "access_token", "refresh_token", "build_token", "report_token",
-    "monitoring_sd_token", "x_auth_token",
-    "key", "cephx_key", "private_key", "api_key",
-    "kubeconfig", "kube_config",
-    "authorization",
-})
+_SENSITIVE_EXACT: frozenset[str] = frozenset(
+    {
+        "password",
+        "passwd",
+        "secret",
+        "token",
+        "access_token",
+        "refresh_token",
+        "build_token",
+        "report_token",
+        "monitoring_sd_token",
+        "x_auth_token",
+        "key",
+        "cephx_key",
+        "private_key",
+        "api_key",
+        "kubeconfig",
+        "kube_config",
+        "authorization",
+    }
+)
 
 # 필드명에 이 문자열이 포함되면 마스킹
 _SENSITIVE_SUBSTR: tuple[str, ...] = (
-    "password", "passwd", "secret", "token", "private_key", "kubeconfig",
+    "password",
+    "passwd",
+    "secret",
+    "token",
+    "private_key",
+    "kubeconfig",
 )
 
 # JWT/Bearer 패턴
@@ -55,10 +72,7 @@ def mask_dict(d: dict, *, _depth: int = 3) -> dict:
         elif isinstance(v, dict):
             result[k] = mask_dict(v, _depth=_depth - 1)
         elif isinstance(v, list):
-            result[k] = [
-                mask_dict(i, _depth=_depth - 1) if isinstance(i, dict) else i
-                for i in v
-            ]
+            result[k] = [mask_dict(i, _depth=_depth - 1) if isinstance(i, dict) else i for i in v]
         else:
             result[k] = v
     return result
@@ -78,9 +92,7 @@ class SensitiveDataFilter(logging.Filter):
     - extra 필드: 민감 키 이름 감지 후 값 마스킹
     """
 
-    _SKIP_ATTRS: frozenset[str] = frozenset(
-        logging.LogRecord("", 0, "", 0, "", (), None).__dict__
-    )
+    _SKIP_ATTRS: frozenset[str] = frozenset(logging.LogRecord("", 0, "", 0, "", (), None).__dict__)
 
     def filter(self, record: logging.LogRecord) -> bool:
         # 메시지 마스킹

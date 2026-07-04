@@ -46,6 +46,8 @@ spec:
           ports:
             - containerPort: 8000
           env:
+            - name: AFTERGLOW_ENV
+              value: "production"
             - name: REDIS_URL
               valueFrom:
                 configMapKeyRef:
@@ -83,8 +85,8 @@ spec:
                   key: PROMETHEUS_PASSWORD
           volumeMounts:
             - name: afterglow-config-volume
-              mountPath: /app/config.toml
-              subPath: config.toml
+              mountPath: /app/afterglow.conf
+              subPath: afterglow.conf
             - name: builder-ssh-key
               mountPath: /etc/afterglow/ssh
               readOnly: true
@@ -125,8 +127,8 @@ spec:
           configMap:
             name: afterglow-config
             items:
-              - key: config.toml
-                path: config.toml
+              - key: afterglow.conf
+                path: afterglow.conf
         - name: builder-ssh-key
           secret:
             secretName: afterglow-secrets

@@ -893,6 +893,12 @@ async def _scale_agents(
 
         if new_entries:
             await k3s_cluster.add_agent_vms(cluster_id, new_entries)
+            from app.services import k3s_nodegroup
+
+            default_agent_id = await k3s_nodegroup.get_default_agent_nodegroup_id(cluster_id)
+            if default_agent_id:
+                await k3s_nodegroup.add_nodegroup_vms(default_agent_id, cluster_id, new_entries)
+                await k3s_nodegroup.set_nodegroup_count(cluster_id, default_agent_id, desired_count)
 
     else:
         # 스케일 다운: K8s 노드 제거 후 VM 삭제
@@ -920,6 +926,12 @@ async def _scale_agents(
                 _logger.warning("k3s scale down: delete VM %s failed: %s", vm_id, e)
 
         await k3s_cluster.remove_agent_vms(cluster_id, remove_ids)
+        from app.services import k3s_nodegroup
+
+        default_agent_id = await k3s_nodegroup.get_default_agent_nodegroup_id(cluster_id)
+        if default_agent_id:
+            await k3s_nodegroup.remove_nodegroup_vms(default_agent_id, remove_ids)
+            await k3s_nodegroup.set_nodegroup_count(cluster_id, default_agent_id, desired_count)
 
     await k3s_cluster.update_agent_count(project_id, cluster_id, desired_count)
     await k3s_cluster.update_cluster_status(project_id, cluster_id, "ACTIVE", "")
@@ -1400,18 +1412,30 @@ async def get_stampede_status(
         raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다")
 
     all_ngs = await _k3s_ng.list_nodegroups(cluster_id)
-    stampede_ngs = [
-        {
-            "id": ng["id"],
-            "name": ng["name"],
-            "stampede_enabled": ng["stampede_enabled"],
-            "min_size": ng["min_size"],
-            "max_size": ng["max_size"],
-            "node_count": ng["node_count"],
-            "stampede_state": ng.get("stampede_state") or {},
-        }
-        for ng in all_ngs
-    ]
+    stampede_ngs = []
+    for ng in all_ngs:
+        state = ng.get("stampede_state") or {}
+        stampede_ngs.append(
+            {
+                "id": ng["id"],
+                "name": ng["name"],
+                "role": ng.get("role"),
+                "flavor_id": ng.get("flavor_id"),
+                "stampede_enabled": ng["stampede_enabled"],
+                "min_size": ng["min_size"],
+                "max_size": ng["max_size"],
+                "node_count": ng["node_count"],
+                "in_flight": int(state.get("in_flight_count", 0) or 0),
+                "capacity": state.get("capacity") or {},
+                "pending_assignments": state.get("pending_assignments") or [],
+                "blocked_reasons": state.get("blocked_reasons") or [],
+                "last_decision": state.get("last_decision") or "",
+                "last_blocked_reason": state.get("last_blocked_reason") or "",
+                "flavor_summary": state.get("flavor_summary") or {},
+                "quota_state": state.get("quota_state") or {},
+                "stampede_state": state,
+            }
+        )
 
     return {
         "cluster_id": cluster_id,

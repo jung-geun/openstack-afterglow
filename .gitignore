@@ -232,6 +232,7 @@ helm/afterglow/values-*.yaml.bak
 
 # ArgoCD Helm Application 생성물 (valuesObject에 시크릿 override 포함)
 deploy/k8s/argocd-application-*.yaml
+deploy/k8s-test/
 
 # 로그 파일
 logs/

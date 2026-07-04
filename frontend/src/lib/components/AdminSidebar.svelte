@@ -51,6 +51,7 @@
 				{ label: '네트워크', href: '/admin/networks', service: null },
 				{ label: 'Floating IP', href: '/admin/floating-ips', service: null },
 				{ label: '라우터', href: '/admin/routers', service: null },
+				{ label: '로드밸런서', href: '/admin/loadbalancers', service: null },
 				{ label: '포트', href: '/admin/ports', service: null },
 			],
 		},

@@ -1,5 +1,6 @@
 """k3s 노드그룹 API — /api/k3s/clusters/{cluster_id}/nodegroups"""
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -19,6 +20,47 @@ async def _assert_cluster_access(cluster_id: str, token_info: dict) -> None:
     cluster = await k3s_db.get_cluster(project_id, cluster_id)
     if cluster is None:
         raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다.")
+
+
+async def _provision_nodegroup_and_reconcile(project_id: str, cluster_id: str, ng: dict, add_count: int) -> None:
+    from app.services import k3s_autoscale
+
+    created = await k3s_autoscale.provision_nodegroup_vms(
+        project_id=project_id,
+        cluster_id=cluster_id,
+        nodegroup_id=ng["id"],
+        add_count=add_count,
+        flavor_id=ng["flavor_id"],
+        image_id=ng.get("image_id"),
+        labels=ng.get("labels"),
+        taints=ng.get("taints"),
+    )
+    if len(created) != add_count:
+        latest = await _svc.get_nodegroup(cluster_id, ng["id"])
+        actual = len((latest or {}).get("vms") or [])
+        await _svc.set_nodegroup_count(cluster_id, ng["id"], actual)
+        _logger.warning(
+            "nodegroup %s provisioning reconciled desired %d to actual %d",
+            ng["id"],
+            add_count,
+            actual,
+        )
+
+
+async def _delete_nodegroup_and_reconcile(
+    project_id: str, cluster_id: str, ng: dict, remove_entries: list[dict]
+) -> None:
+    from app.services import k3s_autoscale
+
+    await k3s_autoscale.delete_nodegroup_vms(
+        project_id=project_id,
+        cluster_id=cluster_id,
+        nodegroup_id=ng["id"],
+        vm_entries=remove_entries,
+    )
+    latest = await _svc.get_nodegroup(cluster_id, ng["id"])
+    actual = len((latest or {}).get("vms") or [])
+    await _svc.set_nodegroup_count(cluster_id, ng["id"], actual)
 
 
 @router.get("/{cluster_id}/nodegroups", response_model=list[K3sNodegroupInfo])
@@ -44,10 +86,20 @@ async def create_nodegroup(
     req: CreateK3sNodegroupRequest,
     token_info: dict = Depends(get_token_info),
 ):
-    """노드그룹 생성 (메타데이터만; VM 프로비저닝 없음)."""
+    """노드그룹 생성. agent 그룹은 node_count > 0이면 VM 프로비저닝을 시작한다."""
     await _assert_cluster_access(cluster_id, token_info)
     try:
-        return await _svc.create_nodegroup(cluster_id, req.model_dump())
+        ng = await _svc.create_nodegroup(cluster_id, req.model_dump())
+        if ng["role"] == "agent" and ng.get("node_count", 0) > 0:
+            asyncio.create_task(
+                _provision_nodegroup_and_reconcile(
+                    token_info.get("project_id") or "",
+                    cluster_id,
+                    ng,
+                    int(ng.get("node_count", 0)),
+                )
+            )
+        return ng
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except RuntimeError as e:
@@ -61,12 +113,29 @@ async def update_nodegroup(
     req: UpdateK3sNodegroupRequest,
     token_info: dict = Depends(get_token_info),
 ):
-    """노드그룹 수정 (node_count, flavor_id, labels, taints)."""
+    """노드그룹 수정. agent node_count 변경은 VM 프로비저닝/삭제를 시작한다."""
     await _assert_cluster_access(cluster_id, token_info)
+    before = await _svc.get_nodegroup(cluster_id, nodegroup_id)
+    if not before:
+        raise HTTPException(status_code=404, detail="노드그룹을 찾을 수 없습니다.")
     updates = {k: v for k, v in req.model_dump().items() if v is not None}
-    ng = await _svc.update_nodegroup(cluster_id, nodegroup_id, updates)
+    if before.get("role") == "server" and "node_count" in updates and updates["node_count"] != before.get("node_count"):
+        raise HTTPException(status_code=422, detail="server 노드그룹 node_count 변경은 아직 지원되지 않습니다.")
+    try:
+        ng = await _svc.update_nodegroup(cluster_id, nodegroup_id, updates)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     if not ng:
         raise HTTPException(status_code=404, detail="노드그룹을 찾을 수 없습니다.")
+    if ng["role"] == "agent" and "node_count" in updates:
+        desired = int(ng.get("node_count", 0))
+        current = len(before.get("vms") or [])
+        project_id = token_info.get("project_id") or ""
+        if desired > current:
+            asyncio.create_task(_provision_nodegroup_and_reconcile(project_id, cluster_id, ng, desired - current))
+        elif desired < current:
+            remove_entries = list(reversed(before.get("vms") or []))[: current - desired]
+            asyncio.create_task(_delete_nodegroup_and_reconcile(project_id, cluster_id, ng, remove_entries))
     return ng
 
 

@@ -156,7 +156,6 @@ k3s:
   lbSubnetId: ""
   certRotationJobImage: "registry.k8s.io/util-linux/util-linux:latest"
   stampedeEnabled: true
-  stampedeProjectId: ""
   stampedeInterval: 60
   stampedeScaleDownWindow: 600
   stampedeScaleUpCooldown: 120

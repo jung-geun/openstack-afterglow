@@ -46,7 +46,7 @@
 	}
 </script>
 
-<div class="overflow-x-auto" class:opacity-60={refreshing} class:pointer-events-none={refreshing}>
+<div class="overflow-x-auto">
 	<table class="w-full text-sm">
 		<thead>
 			<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">

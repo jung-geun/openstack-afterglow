@@ -53,6 +53,9 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 	let consoleLog = $state('');
 	let logLoading = $state(false);
 	let logFull = $state(false);
+	let consoleOpening = $state(false);
+	let consoleOpenMessage = $state('');
+	let consoleOpenError = $state('');
 
 	// Admin domain state
 	let passwordPrecheck = $state<PasswordPrecheck | null>(null);
@@ -222,12 +225,31 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 	}
 
 	async function openConsole() {
-		if (!instance) return;
+		if (!instance || consoleOpening) return;
+		const instanceId = instance.id;
+		consoleOpening = true;
+		consoleOpenError = '';
+		consoleOpenMessage = 'Nova에서 noVNC 콘솔 URL을 요청하는 중입니다...';
 		try {
-			const data = await api.get<{ url: string }>(`/api/v1/instances/${instance.id}/console`, tok(), ownPid());
-			window.open(data.url, '_blank');
+			const data = await api.get<{ url: string }>(`/api/v1/instances/${instanceId}/console`, tok(), ownPid());
+			const url = data.url?.trim();
+			if (!url) {
+				consoleOpenError = '콘솔 URL이 비어 있습니다. 관리자에게 문의하세요.';
+				toast.error(consoleOpenError);
+				return;
+			}
+			consoleOpenMessage = '콘솔 창을 여는 중입니다...';
+			const opened = window.open(url, '_blank');
+			if (!opened) {
+				consoleOpenError = '브라우저가 콘솔 창 팝업을 차단했습니다. 팝업 허용 후 다시 시도하세요.';
+				toast.error(consoleOpenError);
+			}
 		} catch {
-			toast.error('콘솔 URL을 가져올 수 없습니다');
+			consoleOpenError = '콘솔 URL을 가져올 수 없습니다. 잠시 후 다시 시도하세요.';
+			toast.error(consoleOpenError);
+		} finally {
+			consoleOpening = false;
+			consoleOpenMessage = '';
 		}
 	}
 
@@ -575,6 +597,9 @@ export function createInstanceDetailController(opts: InstanceDetailControllerOpt
 		get consoleLog() { return consoleLog; },
 		get logLoading() { return logLoading; },
 		get logFull() { return logFull; },
+		get consoleOpening() { return consoleOpening; },
+		get consoleOpenMessage() { return consoleOpenMessage; },
+		get consoleOpenError() { return consoleOpenError; },
 		set logFull(v: boolean) { logFull = v; },
 		get fixedIpsList() { return fixedIpsList; },
 		get floatingIpsList() { return floatingIpsList; },

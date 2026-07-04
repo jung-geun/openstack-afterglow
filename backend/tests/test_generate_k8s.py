@@ -9,7 +9,41 @@ import yaml
 ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
-from generate_k8s import render_grafana_deployment  # noqa: E402
+from generate_k8s import _render_toml_for_k8s, render_grafana_deployment, render_secret  # noqa: E402
+
+
+def test_render_toml_includes_nova_server_image_id():
+    result = _render_toml_for_k8s({"nova": {"server_image_id": "legacy-server-image"}})
+
+    assert "[nova]" in result
+    assert 'server_image_id = "legacy-server-image"' in result
+
+
+def test_render_secret_rejects_default_secret_key():
+    try:
+        render_secret({"app": {"secret_key": "change-me-in-production"}})
+    except ValueError as exc:
+        assert "기본 SECRET_KEY" in str(exc)
+    else:
+        raise AssertionError("render_secret must reject the default SECRET_KEY")
+
+
+def test_render_secret_accepts_strong_secret_key():
+    result = render_secret({"app": {"secret_key": "0123456789abcdef0123456789abcdef"}})
+
+    assert 'SECRET_KEY: "0123456789abcdef0123456789abcdef"' in result
+
+
+def test_render_secret_always_emits_manifest_required_keys():
+    result = render_secret({"app": {"secret_key": "0123456789abcdef0123456789abcdef"}})
+    doc = yaml.safe_load(result)
+
+    keys = doc["stringData"]
+    assert keys["GITLAB_OIDC_CLIENT_SECRET"] == ""
+    assert keys["K3S_KUBECONFIG_ENCRYPTION_KEY"] == ""
+    assert keys["DATABASE_URL"] == ""
+    assert keys["PROMETHEUS_PASSWORD"] == ""
+    assert keys["BUILDER_SSH_PRIVATE_KEY"] == ""
 
 
 class TestRenderGrafanaDeployment:

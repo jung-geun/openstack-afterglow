@@ -23,7 +23,6 @@
 	{#if ctrl.loading}
 		<LoadingSkeleton variant="table" rows={3} />
 	{:else}
-		<div class:opacity-60={ctrl.refreshing} class:pointer-events-none={ctrl.refreshing}>
 			<GpuDefaultQuotaSection
 				defaults={ctrl.gpuDefaultMap}
 				allGpuTypes={ctrl.allGpuTypes}
@@ -65,6 +64,5 @@
 					<div class="text-gray-600 text-sm">쿼터를 불러올 수 없습니다</div>
 				{/if}
 			{/if}
-		</div>
 	{/if}
 </div>
