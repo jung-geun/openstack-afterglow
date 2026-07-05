@@ -19,7 +19,6 @@ def test_render_toml_includes_nova_server_image_id():
     assert 'server_image_id = "legacy-server-image"' in result
 
 
-
 def test_render_configmap_exposes_frontend_runtime_keys():
     result = render_configmap(
         {
@@ -34,6 +33,7 @@ def test_render_configmap_exposes_frontend_runtime_keys():
     assert doc["data"]["PUBLIC_S3_BASE"] == "https://s3.example.com"
     assert doc["data"]["APP_GRAFANA_BASE"] == "https://grafana.example.com"
     assert "APP_S3_BASE" not in doc["data"]
+
 
 def test_render_secret_rejects_default_secret_key():
     try:
