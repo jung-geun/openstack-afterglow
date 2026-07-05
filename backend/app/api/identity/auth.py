@@ -416,7 +416,7 @@ async def list_projects_recent(token_info: dict = Depends(get_token_info)):
     return project_infos
 
 
-# OIDC/OAuth 전용 라우터 — /api/v1 없이 /auth 경로로 직접 마운트
+# OIDC/OAuth API router - mounted under /api/v1/auth in main.py.
 gitlab_router = APIRouter()
 
 

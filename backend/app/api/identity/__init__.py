@@ -5,7 +5,7 @@ _ROUTERS = {
     "auth_router": ".auth",
 }
 
-# OIDC 전용 라우터 — /api/v1 없이 /auth 경로로 직접 마운트
+# OIDC 인증 API 라우터 - main.py에서 /api/v1/auth 경로로 마운트
 _ATTR_ROUTERS = {
     "gitlab_auth_router": (".auth", "gitlab_router"),
 }

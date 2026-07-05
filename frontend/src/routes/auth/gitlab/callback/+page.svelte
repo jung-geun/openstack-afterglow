@@ -48,7 +48,7 @@
 				roles?: string[];
 				default_project_id?: string;
 				is_system_admin?: boolean;
-			}>('/auth/gitlab/callback', { code, state });
+			}>('/api/v1/auth/gitlab/callback', { code, state });
 
 			// 프로젝트 목록 조회
 			let projects: Project[] = [];

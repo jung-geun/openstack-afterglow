@@ -50,7 +50,7 @@ async def test_no_token_returns_401(anon_client):
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_gitlab_enabled(anon_client):
-    resp = await anon_client.get("/auth/gitlab/enabled")
+    resp = await anon_client.get("/api/v1/auth/gitlab/enabled")
     assert resp.status_code == 200
     data = resp.json()
     assert "enabled" in data
