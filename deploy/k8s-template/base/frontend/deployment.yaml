@@ -41,6 +41,11 @@ spec:
                 configMapKeyRef:
                   name: afterglow-config
                   key: APP_ORIGIN
+            - name: PUBLIC_S3_BASE
+              valueFrom:
+                configMapKeyRef:
+                  name: afterglow-config
+                  key: PUBLIC_S3_BASE
             - name: PUBLIC_GRAFANA_BASE
               valueFrom:
                 configMapKeyRef:

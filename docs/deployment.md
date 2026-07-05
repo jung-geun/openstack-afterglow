@@ -267,12 +267,14 @@ kubectl logs -f deployment/frontend -n afterglow
 
 ### ConfigMap 주요 설정
 
-`deploy/k8s-template/configmap.yaml`은 `afterglow.conf`를 인라인으로 제공합니다. `generate_k8s.py`로 생성하는 경우 ConfigMap에는 브라우저/프론트엔드용 `APP_REDIS_URL`, `APP_ORIGIN`, `APP_S3_BASE`, `APP_GRAFANA_BASE`와 런타임 설정 `afterglow.conf`가 들어갑니다. 하위호환을 위해 같은 TOML 본문을 `config.toml` 키에도 함께 출력합니다.
+`deploy/k8s-template/configmap.yaml`은 `afterglow.conf`를 인라인으로 제공합니다. `generate_k8s.py`로 생성하는 경우 ConfigMap에는 브라우저/프론트엔드용 `APP_REDIS_URL`, `APP_ORIGIN`, `PUBLIC_S3_BASE`, `APP_GRAFANA_BASE`와 런타임 설정 `afterglow.conf`가 들어갑니다. 하위호환을 위해 같은 TOML 본문을 `config.toml` 키에도 함께 출력합니다.
 
 ```yaml
 data:
   APP_ORIGIN: "https://afterglow.example.com"
   APP_REDIS_URL: "redis://redis:6379/0"
+  PUBLIC_S3_BASE: "https://s3.example.com"
+  APP_GRAFANA_BASE: "https://grafana.example.com"
   afterglow.conf: |
     [openstack]
     auth_url = "https://keystone.example.com:5000/v3"

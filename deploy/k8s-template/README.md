@@ -40,9 +40,9 @@ minikube image load afterglow:latest
 
 배포 전 반드시 다음 값을 실제 환경에 맞게 수정하세요.
 
-- `configmap.yaml`: `afterglow.conf` 인라인 설정, `APP_ORIGIN`, `APP_S3_BASE`, `APP_GRAFANA_BASE`
+- `configmap.yaml`: `afterglow.conf` 인라인 설정, `APP_ORIGIN`, `PUBLIC_S3_BASE`, `APP_GRAFANA_BASE`
 - `secret.yaml`: `OS_PASSWORD`, `SECRET_KEY`, `GITLAB_OIDC_CLIENT_SECRET`, `K3S_KUBECONFIG_ENCRYPTION_KEY`, `DATABASE_URL`, `PROMETHEUS_PASSWORD`, `BUILDER_SSH_PRIVATE_KEY`
-- `base/frontend/deployment.yaml`: `ORIGIN` 및 `PUBLIC_API_BASE` (실제 도메인)
+- `base/frontend/deployment.yaml`: `ORIGIN`, `PUBLIC_API_BASE`, `PUBLIC_S3_BASE`, `PUBLIC_GRAFANA_BASE`
 - `ingress.yaml`: `host` 값 (실제 도메인)
 
 `backend`, `worker`(drover), `notion-worker`는 모두 `/app/afterglow.conf`를 마운트하고 `afterglow-secrets/SECRET_KEY`를 환경변수로 읽습니다. 세 서비스 모두 `AFTERGLOW_ENV=production`으로 실행되므로 `AFTERGLOW_ALLOW_INSECURE=1`은 이 manifest에 넣지 않습니다.

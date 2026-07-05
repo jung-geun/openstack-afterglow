@@ -713,8 +713,8 @@ def render_configmap(cfg: dict) -> str:
     origins_raw = cors.get("origins", "http://localhost:3080")
     app_origin = origins_raw.split(",")[0].strip()
 
-    # APP_S3_BASE: openstack.s3_endpoint (미설정 시 기본값)
-    app_s3_base = ost.get("s3_endpoint", "https://s3.dmslab.re.kr")
+    # PUBLIC_S3_BASE: openstack.s3_endpoint (미설정 시 기본값)
+    public_s3_base = ost.get("s3_endpoint", "https://s3.dmslab.re.kr")
 
     # APP_GRAFANA_BASE: monitoring.grafana_base_url (CSP frame-src 및 frontend 임베드용)
     app_grafana_base = cfg.get("monitoring", {}).get("grafana_base_url", "")
@@ -732,7 +732,7 @@ def render_configmap(cfg: dict) -> str:
         "data:",
         f'  APP_REDIS_URL: "{REDIS_K8S}"',
         f'  APP_ORIGIN: "{app_origin}"',
-        f'  APP_S3_BASE: "{app_s3_base}"',
+        f'  PUBLIC_S3_BASE: "{public_s3_base}"',
         f'  APP_GRAFANA_BASE: "{app_grafana_base}"',
         "  afterglow.conf: |",
         indented_toml,

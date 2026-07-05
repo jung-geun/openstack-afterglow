@@ -9,7 +9,7 @@ import yaml
 ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
-from generate_k8s import _render_toml_for_k8s, render_grafana_deployment, render_secret  # noqa: E402
+from generate_k8s import _render_toml_for_k8s, render_configmap, render_grafana_deployment, render_secret  # noqa: E402
 
 
 def test_render_toml_includes_nova_server_image_id():
@@ -18,6 +18,22 @@ def test_render_toml_includes_nova_server_image_id():
     assert "[nova]" in result
     assert 'server_image_id = "legacy-server-image"' in result
 
+
+
+def test_render_configmap_exposes_frontend_runtime_keys():
+    result = render_configmap(
+        {
+            "cors": {"origins": "https://afterglow.example.com,http://localhost:3080"},
+            "openstack": {"s3_endpoint": "https://s3.example.com"},
+            "monitoring": {"grafana_base_url": "https://grafana.example.com"},
+        }
+    )
+    doc = yaml.safe_load(result)
+
+    assert doc["data"]["APP_ORIGIN"] == "https://afterglow.example.com"
+    assert doc["data"]["PUBLIC_S3_BASE"] == "https://s3.example.com"
+    assert doc["data"]["APP_GRAFANA_BASE"] == "https://grafana.example.com"
+    assert "APP_S3_BASE" not in doc["data"]
 
 def test_render_secret_rejects_default_secret_key():
     try:

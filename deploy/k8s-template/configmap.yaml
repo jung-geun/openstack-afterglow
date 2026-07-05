@@ -7,6 +7,8 @@ data:
   APP_REDIS_URL: "redis://redis.afterglow.svc.cluster.local:6379/0"
   # 실제 서비스 도메인으로 변경 필요 (예: https://afterglow.example.com)
   APP_ORIGIN: "http://afterglow.example.com"
+  PUBLIC_S3_BASE: "https://s3.example.com"
+  APP_GRAFANA_BASE: ""
   afterglow.conf: |
     # Afterglow 통합 설정 파일
     [openstack]
