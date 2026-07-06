@@ -354,10 +354,17 @@ describe('getBaseUrl', () => {
 		vi.resetModules();
 	});
 
-	it('PUBLIC_API_BASE가 설정되어 있으면 그것을 반환', async () => {
-		vi.mock('$env/dynamic/public', () => ({
-			env: { PUBLIC_API_BASE: 'http://api.example.com' },
-		}));
+	it('runtime api_base가 설정되어 있으면 그것을 반환', async () => {
+		const { initSiteConfig } = await import('$lib/config/site');
+		initSiteConfig({
+			site_name: 'Afterglow',
+			site_description: '',
+			logo_path: '/logo.png',
+			favicon_path: '/favicon.ico',
+			refresh_interval_ms: 5000,
+			services: { magnum: false, manila: false, zun: false, k3s: false, trove: false, swift: false, barbican: false },
+			runtime: { api_base: 'http://api.example.com', s3_base: '', grafana_base: '' },
+		});
 		const { getBaseUrl } = await import('../client');
 		expect(getBaseUrl()).toBe('http://api.example.com');
 	});

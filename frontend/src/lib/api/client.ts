@@ -1,14 +1,26 @@
-import { env } from '$env/dynamic/public';
+import { get } from 'svelte/store';
+import { siteConfig } from '$lib/config/site';
+
+function stripTrailingSlash(value: string): string {
+	return value.replace(/\/+$/, '');
+}
+
+function browserFallbackBaseUrl(): string {
+	if (typeof window === 'undefined') return 'http://localhost:8000';
+	return `${window.location.protocol}//${window.location.hostname}:8000`;
+}
 
 // 브라우저에서 직접 접근하는 Backend 주소
-// PUBLIC_API_BASE 는 docker-compose 또는 .env 에서 런타임으로 주입
+// afterglow.conf의 [app] frontend_base_url/backend_port 조합에서 런타임 주입
 export function getBaseUrl(): string {
-	if (typeof window !== 'undefined') {
-		// 브라우저: PUBLIC_API_BASE 없으면 현재 호스트의 8000 포트로 시도
-		return env.PUBLIC_API_BASE || `${window.location.protocol}//${window.location.hostname}:8000`;
-	}
-	// SSR: docker 내부 주소
-	return env.PUBLIC_API_BASE || 'http://backend:8000';
+	const configured = get(siteConfig).runtime.api_base;
+	return stripTrailingSlash(configured || browserFallbackBaseUrl());
+}
+
+export function getWebSocketUrl(path: string): string {
+	const base = new URL(getBaseUrl() || (typeof window === 'undefined' ? 'http://localhost' : window.location.origin));
+	base.protocol = base.protocol === 'https:' ? 'wss:' : 'ws:';
+	return new URL(path, base).toString();
 }
 
 export class ApiError extends Error {

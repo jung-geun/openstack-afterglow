@@ -61,6 +61,7 @@ app:
   faviconPath: "/favicon.ico"
   refreshIntervalMs: 5000
   frontendBaseUrl: "https://dev.cloud.example.com"
+  publicApiBase: "https://dev.cloud.example.com"
 
 cache:
   ttlFast: 15
@@ -173,7 +174,7 @@ database:
   dbAutoBackupCron: "0 3 * * *"
 
 cors:
-  origins: "https://dev.cloud.example.com"
+  origins: "https://dev.cloud.example.com,http://localhost:3080,http://127.0.0.1:3080"
 
 gitlabOidc:
   enabled: true

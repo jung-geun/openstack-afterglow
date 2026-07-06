@@ -60,6 +60,10 @@ refresh_interval_ms = 5000
 # 초대 이메일 링크 생성에 사용할 프론트엔드 기본 URL (예: https://afterglow.example.com)
 frontend_base_url = ""
 
+# 브라우저에서 호출할 API Origin (예: https://afterglow.example.com).
+# 비워두면 frontend_base_url, 첫 CORS origin, 개발 backend_port 순서로 유도합니다.
+public_api_base = ""
+
 # 리버스 프록시 신뢰 CIDR (쉼표 구분). 이 대역에서 온 요청의 X-Forwarded-For / X-Real-IP
 # 헤더를 신뢰해 실제 클라이언트 IP 를 추출한다. 기본값은 loopback 전용.
 # Docker Compose + HAProxy 프로필 사용 시 HAProxy 컨테이너의 실제 IP 대역을 명시:
@@ -448,8 +452,8 @@ token_expiry_days = 7       # 초대 링크 유효 기간 (일)
 # CORS 허용 origin (쉼표 구분). 프론트엔드 실제 접근 URL로 설정.
 # 이 값이 S3 직접 업로드(multipart) 시 RGW quarantine 버킷 CORS 의 AllowedOrigins 로도 사용됨.
 # 프로덕션 도메인을 첫 번째로, 개발 도메인을 이후에 나열.
-# 예: origins = "https://cloud.dmslab.re.kr,http://localhost:3000"
-origins = "http://localhost:3000,http://localhost"
+# 예: origins = "https://cloud.dmslab.re.kr,http://localhost:3080,http://127.0.0.1:3080"
+origins = "https://afterglow.example.com,http://localhost:3080,http://127.0.0.1:3080"
 
 [gitlab_oidc]
 # GitLab OIDC 로그인 활성화 여부

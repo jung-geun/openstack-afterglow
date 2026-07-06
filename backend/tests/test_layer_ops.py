@@ -26,6 +26,7 @@ from app.api.union.layer_ops import (
     LayerProfileRequest,
     _artifact_delete_preview,
 )
+from app.config import get_settings
 from app.main import app
 
 BASE = "/api/v1/admin/libraries"
@@ -583,10 +584,11 @@ async def test_base_images_filters_active_ubuntu(admin_client, mock_conn):
 @pytest.mark.asyncio
 async def test_options_preflight_works_without_catchall_route():
     """CORS middleware handles OPTIONS without a catch-all route that masks 404s."""
+    origin = get_settings().cors_origin_list[0]
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.options(OLD_BASE, headers={"origin": "http://localhost"})
+        resp = await ac.options(OLD_BASE, headers={"origin": origin})
     assert resp.status_code == 200
-    assert resp.headers["Access-Control-Allow-Origin"] == "http://localhost"
+    assert resp.headers["Access-Control-Allow-Origin"] == origin
 
 
 @pytest.mark.asyncio

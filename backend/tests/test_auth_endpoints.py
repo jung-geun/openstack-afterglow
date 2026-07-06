@@ -4,6 +4,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.config import get_settings
+
 
 def make_auth_data() -> dict:
     return {
@@ -249,6 +251,22 @@ async def test_gitlab_enabled(client):
     resp = await client.get("/api/v1/auth/gitlab/enabled")
     assert resp.status_code == 200
     assert "enabled" in resp.json()
+
+
+@pytest.mark.asyncio
+async def test_gitlab_enabled_preflight_allows_configured_frontend_origin(client):
+    origin = get_settings().cors_origin_list[0]
+    resp = await client.options(
+        "/api/v1/auth/gitlab/enabled",
+        headers={
+            "Origin": origin,
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert resp.headers["Access-Control-Allow-Origin"] == origin
+    assert resp.headers["Access-Control-Allow-Credentials"] == "true"
 
 
 # ────── auth_method 필드 ──────

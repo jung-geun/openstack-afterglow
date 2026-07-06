@@ -1,8 +1,7 @@
 <script lang="ts">
 	import { confirmDialog } from '$lib/stores/confirm.svelte';
 	import { auth } from '$lib/stores/auth';
-	import { api, ApiError } from '$lib/api/client';
-	import { env } from '$env/dynamic/public';
+	import { api, ApiError, getBaseUrl } from '$lib/api/client';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import NotionTargetAddForm from '$lib/components/admin/notion/NotionTargetAddForm.svelte';
 	import NotionTargetEditForm from '$lib/components/admin/notion/NotionTargetEditForm.svelte';
@@ -10,12 +9,6 @@
 	import type { NotionTarget } from '$lib/components/admin/notion/NotionTargetCard.svelte';
 	import { toast } from '$lib/stores/toast';
 
-	function getBaseUrl(): string {
-		if (typeof window !== 'undefined') {
-			return env.PUBLIC_API_BASE || `${window.location.protocol}//${window.location.hostname}:8000`;
-		}
-		return env.PUBLIC_API_BASE || 'http://backend:8000';
-	}
 
 	let targets = $state<NotionTarget[]>([]);
 	let loading = $state(true);

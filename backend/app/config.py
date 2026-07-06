@@ -116,6 +116,7 @@ def _load_toml() -> dict:
     flat["logo_path"] = app.get("logo_path", "/logo.png")
     flat["favicon_path"] = app.get("favicon_path", "/favicon.ico")
     flat["frontend_base_url"] = app.get("frontend_base_url", "")
+    flat["public_api_base"] = app.get("public_api_base", "")
 
     cache = data.get("cache", {})
     flat["redis_url"] = cache.get("redis_url", "redis://localhost:6379/0")
@@ -601,6 +602,8 @@ class Settings(BaseSettings):
 
     # 프론트엔드 기본 URL (초대 이메일 링크 생성에 사용)
     frontend_base_url: str = ""
+    # 브라우저 런타임 API Origin (비워두면 프론트엔드가 현재 호스트의 backend_port 사용)
+    public_api_base: str = ""
 
     # 로깅 설정
     log_file_path: str = "/app/logs/afterglow-backend.log"

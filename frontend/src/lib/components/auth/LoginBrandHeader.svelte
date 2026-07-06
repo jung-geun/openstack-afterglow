@@ -1,11 +1,10 @@
 <script lang="ts">
   import { siteConfig } from '$lib/config/site';
-  import { resolvedTheme } from '$lib/stores/theme';
 </script>
 
 <div class="text-center mb-8">
   <img
-    src={$resolvedTheme === 'light' ? $siteConfig.logo_light_path : $siteConfig.logo_dark_path}
+    src={$siteConfig.logo_path}
     alt={$siteConfig.site_name}
     class="h-24 sm:h-32 md:h-40 lg:h-48 w-auto mx-auto mb-4"
   />

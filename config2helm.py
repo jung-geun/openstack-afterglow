@@ -174,7 +174,7 @@ def convert(cfg: dict, include_secrets: bool) -> dict:
     app_out: dict = {}
     for k in ("backend_port", "frontend_port", "site_name", "site_description",
               "logo_path", "favicon_path", "refresh_interval_ms",
-              "frontend_base_url", "trusted_proxies"):
+              "frontend_base_url", "public_api_base", "trusted_proxies"):
         if k in app:
             app_out[_s(k)] = app[k]
     if app_out:

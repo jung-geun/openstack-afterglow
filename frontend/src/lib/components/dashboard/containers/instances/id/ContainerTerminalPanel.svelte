@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
-  import { api } from '$lib/api/client';
+  import { api, getWebSocketUrl } from '$lib/api/client';
 
   interface Props {
     open: boolean;
@@ -67,10 +67,9 @@
       return;
     }
 
-    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.hostname;
-    const port = import.meta.env.PUBLIC_API_BASE ? new URL(import.meta.env.PUBLIC_API_BASE).port || '8000' : '8000';
-    const url = `${proto}//${host}:${port}/api/v1/containers/${containerId}/exec?ticket=${encodeURIComponent(ticket)}`;
+    const url = getWebSocketUrl(
+      `/api/v1/containers/${containerId}/exec?ticket=${encodeURIComponent(ticket)}`,
+    );
 
     const socket = new WebSocket(url);
     ws = socket;

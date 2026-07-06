@@ -4,7 +4,7 @@ declare global {
 	namespace App {
 		// interface Error {}
 		interface Locals {
-			siteConfig: import('$lib/server/config').PublicSiteConfig;
+			siteConfig: import('$lib/types/siteConfig').PublicSiteConfig;
 		}
 		// interface PageData {}
 		// interface PageState {}

@@ -102,6 +102,7 @@ app:
   faviconPath: "/favicon.ico"
   refreshIntervalMs: 5000
   frontendBaseUrl: ""
+  publicApiBase: ""
   trustedProxies: "127.0.0.1/32,::1/128"
 
 # -----------------------------------------------------------------------------
@@ -554,7 +555,7 @@ database:
 # [cors]
 # -----------------------------------------------------------------------------
 cors:
-  origins: "https://afterglow.example.com"
+  origins: "https://afterglow.example.com,http://localhost:3080,http://127.0.0.1:3080"
 
 # -----------------------------------------------------------------------------
 # [gitlab_oidc]

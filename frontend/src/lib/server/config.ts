@@ -1,22 +1,6 @@
 import { readFileSync } from 'fs';
 import { parse } from 'smol-toml';
-
-export interface PublicSiteConfig {
-	site_name: string;
-	site_description: string;
-	logo_path: string;
-	favicon_path: string;
-	refresh_interval_ms: number;
-	services: {
-		magnum: boolean;
-		manila: boolean;
-		zun: boolean;
-		k3s: boolean;
-		trove: boolean;
-		swift: boolean;
-		barbican: boolean;
-	};
-}
+import type { PublicSiteConfig } from '$lib/types/siteConfig';
 
 const DEFAULTS: PublicSiteConfig = {
 	site_name: 'Afterglow',
@@ -25,6 +9,11 @@ const DEFAULTS: PublicSiteConfig = {
 	favicon_path: '/favicon.ico',
 	refresh_interval_ms: 5000,
 	services: { magnum: false, manila: false, zun: false, k3s: false, trove: false, swift: false, barbican: false },
+	runtime: {
+		api_base: 'http://localhost:8000',
+		s3_base: '',
+		grafana_base: '',
+	},
 };
 
 function findConfigPath(): string | null {
@@ -49,6 +38,38 @@ function findConfigPath(): string | null {
 	return null;
 }
 
+function stringOrEmpty(value: unknown): string {
+	return typeof value === 'string' ? value.trim() : '';
+}
+
+function originOf(value: string): string {
+	if (!value) return '';
+	try {
+		return new URL(value).origin;
+	} catch {
+		return '';
+	}
+}
+
+function portFrom(value: unknown, fallback: number): number {
+	const num = Number(value);
+	return Number.isFinite(num) && num > 0 ? num : fallback;
+}
+
+export function deriveBrowserApiBase(app: Record<string, unknown>, env: Record<string, string | undefined> = process.env): string {
+	const publicApiEnvOrigin = originOf(stringOrEmpty(env.PUBLIC_API_BASE));
+	if (publicApiEnvOrigin) return publicApiEnvOrigin;
+
+	const publicApiOrigin = originOf(stringOrEmpty(app.public_api_base));
+	if (publicApiOrigin) return publicApiOrigin;
+
+	const frontendOrigin = originOf(stringOrEmpty(app.frontend_base_url));
+	if (frontendOrigin) return frontendOrigin;
+
+	const backendPort = portFrom(app.backend_port, 8000);
+	return `http://localhost:${backendPort}`;
+}
+
 let _cached: PublicSiteConfig | null = null;
 
 export function loadPublicSiteConfig(): PublicSiteConfig {
@@ -56,7 +77,11 @@ export function loadPublicSiteConfig(): PublicSiteConfig {
 
 	const configPath = findConfigPath();
 	if (!configPath) {
-		_cached = { ...DEFAULTS, services: { ...DEFAULTS.services } };
+		_cached = {
+			...DEFAULTS,
+			services: { ...DEFAULTS.services },
+			runtime: { ...DEFAULTS.runtime },
+		};
 		return _cached;
 	}
 
@@ -66,6 +91,8 @@ export function loadPublicSiteConfig(): PublicSiteConfig {
 
 		const app = (toml.app ?? {}) as Record<string, unknown>;
 		const services = (toml.services ?? {}) as Record<string, unknown>;
+		const openstack = (toml.openstack ?? {}) as Record<string, unknown>;
+		const monitoring = (toml.monitoring ?? {}) as Record<string, unknown>;
 
 		_cached = {
 			site_name: String(app.site_name ?? DEFAULTS.site_name),
@@ -82,9 +109,18 @@ export function loadPublicSiteConfig(): PublicSiteConfig {
 				swift: Boolean(services.swift ?? false),
 				barbican: Boolean(services.barbican ?? false),
 			},
+			runtime: {
+				api_base: deriveBrowserApiBase(app),
+				s3_base: originOf(stringOrEmpty(openstack.s3_endpoint)),
+				grafana_base: originOf(stringOrEmpty(monitoring.grafana_base_url)),
+			},
 		};
 	} catch {
-		_cached = { ...DEFAULTS, services: { ...DEFAULTS.services } };
+		_cached = {
+			...DEFAULTS,
+			services: { ...DEFAULTS.services },
+			runtime: { ...DEFAULTS.runtime },
+		};
 	}
 
 	return _cached;

@@ -19,6 +19,51 @@ def test_render_toml_includes_nova_server_image_id():
     assert 'server_image_id = "legacy-server-image"' in result
 
 
+def test_render_toml_derives_public_api_base_for_k8s_runtime_config():
+    result = _render_toml_for_k8s(
+        {
+            "cors": {"origins": "https://afterglow.example.com,http://localhost:3080"},
+            "app": {"frontend_base_url": ""},
+        }
+    )
+
+    assert 'public_api_base = "https://afterglow.example.com"' in result
+
+
+def test_render_toml_preserves_explicit_public_api_base():
+    result = _render_toml_for_k8s(
+        {
+            "cors": {"origins": "https://afterglow.example.com"},
+            "app": {
+                "frontend_base_url": "https://frontend.example.com",
+                "public_api_base": "https://api.example.com/root/path",
+            },
+        }
+    )
+
+    assert 'public_api_base = "https://api.example.com"' in result
+
+
+def test_render_toml_strips_credentials_from_public_api_origin():
+    result = _render_toml_for_k8s({"app": {"public_api_base": "https://user:pass@api.example.com/root/path"}})
+
+    assert 'public_api_base = "https://api.example.com"' in result
+
+
+def test_render_toml_falls_back_to_backend_port_without_public_origin():
+    result = _render_toml_for_k8s({"app": {"backend_port": 8123}})
+
+    assert 'public_api_base = "http://localhost:8123"' in result
+
+
+def test_render_configmap_falls_back_to_backend_port_without_public_origin():
+    result = render_configmap({"app": {"backend_port": 8123}})
+    doc = yaml.safe_load(result)
+
+    assert doc["data"]["PUBLIC_API_BASE"] == "http://localhost:8123"
+    assert 'public_api_base = "http://localhost:8123"' in doc["data"]["afterglow.conf"]
+
+
 def test_render_configmap_exposes_frontend_runtime_keys():
     result = render_configmap(
         {
@@ -32,7 +77,9 @@ def test_render_configmap_exposes_frontend_runtime_keys():
     assert doc["data"]["APP_ORIGIN"] == "https://afterglow.example.com"
     assert doc["data"]["PUBLIC_S3_BASE"] == "https://s3.example.com"
     assert doc["data"]["APP_GRAFANA_BASE"] == "https://grafana.example.com"
+    assert doc["data"]["PUBLIC_API_BASE"] == "https://afterglow.example.com"
     assert "APP_S3_BASE" not in doc["data"]
+    assert 'public_api_base = "https://afterglow.example.com"' in doc["data"]["afterglow.conf"]
 
 
 def test_render_secret_rejects_default_secret_key():
