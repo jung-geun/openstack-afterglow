@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { betaFeatures } from '$lib/stores/betaFeatures';
 	let {
 		scheduling,
 		onSchedulingChange,
@@ -18,6 +19,12 @@
 		mountProtocol: 'CEPHFS' | 'NFS';
 		onProtocolChange: (p: 'CEPHFS' | 'NFS') => void;
 	} = $props();
+
+	$effect(() => {
+		if (!$betaFeatures.haDeploy && scheduling === 'ha') {
+			onSchedulingChange('standard');
+		}
+	});
 </script>
 
 <!-- 섹션 A: 스케줄링 (항상) -->
@@ -47,6 +54,7 @@
 			</div>
 		</button>
 
+		{#if $betaFeatures.haDeploy}
 		<button
 			onclick={() => onSchedulingChange('ha')}
 			class="flex items-start gap-3 p-4 rounded-xl border text-left transition-all {scheduling === 'ha'
@@ -70,6 +78,7 @@
 				<p class="text-xs text-gray-400 leading-relaxed">호스트 장애 시 자동 evacuate. Masakari 등 HA 솔루션 활성화 시 동작합니다.</p>
 			</div>
 		</button>
+		{/if}
 	</div>
 </div>
 

@@ -21,6 +21,9 @@ spec:
       labels:
         app: backend
     spec:
+      {{- if and (eq .Values.workerRuntime.mode "kubernetes") .Values.workerRuntime.kubernetes.serviceAccountName }}
+      serviceAccountName: {{ .Values.workerRuntime.kubernetes.serviceAccountName | quote }}
+      {{- end }}
       terminationGracePeriodSeconds: 30
       containers:
         - name: backend

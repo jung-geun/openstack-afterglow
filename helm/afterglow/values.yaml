@@ -33,6 +33,43 @@ replicaCount:
   sentinel: 3
 
 # -----------------------------------------------------------------------------
+# Background worker runtime manager (disabled/static by default)
+# -----------------------------------------------------------------------------
+workerRuntime:
+  mode: static
+  reconcileInterval: 30
+  failClosed: true
+  workers:
+    drover:
+      enabled: true
+      desiredReplicas: 1
+      maxReplicas: 1
+      module: app.worker
+    notionWorker:
+      enabled: true
+      desiredReplicas: 1
+      maxReplicas: 1
+      module: app.notion_worker
+  docker:
+    socketPath: ""
+    image: ""
+    network: ""
+    configMount: /app/afterglow.conf
+    configHostPath: ""
+    gpuConfigMount: /app/config.gpu.toml
+    gpuConfigHostPath: ""
+    logsMount: /app/logs
+    logsHostPath: ""
+    envAllowlist: "AFTERGLOW_ENV,AFTERGLOW_ALLOW_INSECURE,SECRET_KEY,OS_PASSWORD,DATABASE_URL,K3S_KUBECONFIG_ENCRYPTION_KEY,PROMETHEUS_PASSWORD,GITLAB_OIDC_CLIENT_SECRET,NOTION_CONFIG_ENCRYPTION_KEY"
+  kubernetes:
+    namespace: ""
+    serviceAccountName: afterglow-backend-worker-runtime
+    serviceAccountTokenPath: /var/run/secrets/kubernetes.io/serviceaccount/token
+    serviceAccountCaPath: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+    rbac:
+      create: false
+
+# -----------------------------------------------------------------------------
 # 인그레스
 # -----------------------------------------------------------------------------
 ingress:

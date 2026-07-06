@@ -56,6 +56,79 @@ def test_render_toml_falls_back_to_backend_port_without_public_origin():
     assert 'public_api_base = "http://localhost:8123"' in result
 
 
+def test_render_toml_includes_worker_runtime_defaults():
+    result = _render_toml_for_k8s({})
+
+    assert "[worker_runtime]" in result
+    assert 'mode = "static"' in result
+    assert "reconcile_interval = 30" in result
+    assert "fail_closed = true" in result
+    assert "[worker_runtime.workers.drover]" in result
+    assert 'module = "app.worker"' in result
+    assert "[worker_runtime.workers.notion_worker]" in result
+    assert 'module = "app.notion_worker"' in result
+    assert "[worker_runtime.docker]" in result
+    assert 'config_mount = "/app/afterglow.conf"' in result
+    assert "[worker_runtime.kubernetes]" in result
+    assert 'namespace = "afterglow"' in result
+    assert 'service_account_token_path = "/var/run/secrets/kubernetes.io/serviceaccount/token"' in result
+    assert 'service_account_ca_path = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"' in result
+    assert "manage_deployments = false" in result
+
+
+def test_render_toml_and_configmap_exclude_secret_values():
+    sentinels = {
+        "openstack_password": "worker-runtime-openstack-secret-sentinel",
+        "app_secret_key": "worker-runtime-app-secret-sentinel-0123456789abcdef",
+        "database_url": "worker-runtime-db-secret-sentinel",
+        "oidc_client_secret": "worker-runtime-oidc-secret-sentinel",
+        "prometheus_password": "worker-runtime-prom-secret-sentinel",
+        "monitoring_sd_token": "worker-runtime-monitoring-token-sentinel",
+        "notion_encryption_key": "worker-runtime-notion-secret-sentinel",
+        "smtp_password": "worker-runtime-smtp-secret-sentinel",
+        "builder_ssh_private_key": "worker-runtime-builder-key-sentinel",
+        "service_account_token_contents": "worker-runtime-sa-token-secret-sentinel",
+        "service_account_ca_contents": "worker-runtime-sa-ca-secret-sentinel",
+    }
+    cfg = {
+        "openstack": {"password": sentinels["openstack_password"]},
+        "app": {"secret_key": sentinels["app_secret_key"]},
+        "database": {"url": sentinels["database_url"]},
+        "gitlab_oidc": {"client_secret": sentinels["oidc_client_secret"]},
+        "monitoring": {
+            "prometheus_password": sentinels["prometheus_password"],
+            "sd_token": sentinels["monitoring_sd_token"],
+        },
+        "notion": {"config_encryption_key": sentinels["notion_encryption_key"]},
+        "smtp": {
+            "host": "smtp.example.com",
+            "password": sentinels["smtp_password"],
+        },
+        "builder": {"ssh_private_key": sentinels["builder_ssh_private_key"]},
+        "worker_runtime": {
+            "kubernetes": {
+                "service_account_token_path": "/var/run/secrets/afterglow/token",
+                "service_account_ca_path": "/var/run/secrets/afterglow/ca.crt",
+                "service_account_token_contents": sentinels["service_account_token_contents"],
+                "service_account_ca_contents": sentinels["service_account_ca_contents"],
+            }
+        },
+    }
+
+    toml_output = _render_toml_for_k8s(cfg)
+    configmap_output = render_configmap(cfg)
+    configmap_doc = yaml.safe_load(configmap_output)
+
+    assert 'service_account_token_path = "/var/run/secrets/afterglow/token"' in toml_output
+    assert 'service_account_ca_path = "/var/run/secrets/afterglow/ca.crt"' in toml_output
+    assert 'service_account_token_path = "/var/run/secrets/afterglow/token"' in configmap_doc["data"]["afterglow.conf"]
+    assert 'service_account_ca_path = "/var/run/secrets/afterglow/ca.crt"' in configmap_doc["data"]["afterglow.conf"]
+
+    for sentinel in sentinels.values():
+        assert sentinel not in toml_output
+        assert sentinel not in configmap_output
+
+
 def test_render_configmap_falls_back_to_backend_port_without_public_origin():
     result = render_configmap({"app": {"backend_port": 8123}})
     doc = yaml.safe_load(result)

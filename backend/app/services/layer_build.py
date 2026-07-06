@@ -1098,12 +1098,18 @@ async def run_layer_consume(
     network_id: str | None = None,
     ssh_public_key: str | None = None,
     ssh_username: str | None = None,
+    *,
+    compute_conn=None,
+    share_conn=None,
+    artifact_ids: list[int] | None = None,
+    resolved_artifacts: list[dict] | None = None,
 ) -> str:
-    """소비 인스턴스를 생성하고 server_id를 반환한다.
+    """Create a layer consumer VM.
 
-    프로필의 레이어 체인에서 각 레이어의 전용 NFS share(per-layer-share)를 RO 마운트해
-    OverlayFS로 합성한 VM을 즉시 생성한다.
-    빌드와 달리 sentinel/폴링 없이 VM 생성 후 즉시 반환 — 진행상태는 Nova 인스턴스 상태로 확인.
+    Admin callers keep the historical default: service-project compute and Manila.
+    Public callers pass a caller-scoped compute connection plus the service-project
+    Manila connection and concrete artifact ids so authorization cannot drift to a
+    newer unpublished artifact with the same name.
     """
     from sqlalchemy import select as _select
 
@@ -1118,54 +1124,94 @@ async def run_layer_consume(
             "네트워크 ID가 설정되지 않았습니다 (config.toml [nova] default_network_id 또는 [builder] network_id 필요)"
         )
 
-    conn = None
+    owned_compute_conn = compute_conn
+    owned_share_conn = share_conn
     port_id: str | None = None
     server_id: str | None = None
-    # VM 생성 실패 시 회수할 RO access rule (share_id, access_id)
     consume_ro_access_ids: list[tuple[str, str]] = []
+
+    def _artifact_entry_from_row(art) -> dict:
+        snapshot = _artifact_base_image_snapshot(art, settings)
+        return {
+            "id": art.id,
+            "name": art.name,
+            "share_id": art.share_id,
+            "sqsh_filename": art.sqsh_filename,
+            "ubuntu_base": normalize_ubuntu_base(snapshot.get("ubuntu_base")),
+            "base_image_id": snapshot.get("base_image_id"),
+            "base_image_checksum": snapshot.get("base_image_checksum"),
+            "base_image_os_hash_algo": snapshot.get("base_image_os_hash_algo"),
+            "base_image_os_hash_value": snapshot.get("base_image_os_hash_value"),
+        }
 
     try:
         await _update_consume_db(consume_db_id, status="creating")
 
-        # ── 1. LayerProfile → 레이어 이름 목록 ──────────────────────────────
-        profile_layers: list[str] = []
-        async with get_session_factory()() as _prof_session:
-            _prof_row = (
-                await _prof_session.execute(_select(LayerProfile).where(LayerProfile.name == profile_name))
-            ).scalar_one_or_none()
-            if _prof_row is None:
-                raise RuntimeError(f"프로필을 찾을 수 없습니다: {profile_name!r}")
-            profile_layers = list(_prof_row.layers)
+        if resolved_artifacts is not None:
+            artifact_entries = list(resolved_artifacts)
+        elif artifact_ids is not None:
+            if not artifact_ids:
+                raise RuntimeError("소비할 레이어 artifact 목록이 비어 있습니다")
+            ordered_ids = list(dict.fromkeys(artifact_ids))
+            async with get_session_factory()() as _art_session:
+                rows = (
+                    (await _art_session.execute(_select(LayerArtifact).where(LayerArtifact.id.in_(ordered_ids))))
+                    .scalars()
+                    .all()
+                )
+                by_id = {row.id: row for row in rows}
+                missing = [artifact_id for artifact_id in ordered_ids if artifact_id not in by_id]
+                if missing:
+                    raise RuntimeError(f"레이어 artifact를 찾을 수 없습니다: {missing}")
+                artifact_entries = [_artifact_entry_from_row(by_id[artifact_id]) for artifact_id in ordered_ids]
+        else:
+            profile_layers: list[str] = []
+            async with get_session_factory()() as _prof_session:
+                _prof_row = (
+                    await _prof_session.execute(_select(LayerProfile).where(LayerProfile.name == profile_name))
+                ).scalar_one_or_none()
+                if _prof_row is None:
+                    raise RuntimeError(f"프로필을 찾을 수 없습니다: {profile_name!r}")
+                profile_layers = list(_prof_row.layers)
 
-        if not profile_layers:
-            raise RuntimeError(f"프로필 {profile_name!r}의 레이어 목록이 비어 있습니다")
+            if not profile_layers:
+                raise RuntimeError(f"프로필 {profile_name!r}의 레이어 목록이 비어 있습니다")
 
-        # ── 2. LayerArtifact → (share_id, sqsh_filename, base image fingerprint) 수집 ───
-        layer_share_info: list[tuple[str, str]] = []  # [(share_id, sqsh_filename), ...]
+            artifact_entries = []
+            async with get_session_factory()() as _art_session:
+                for layer_name in profile_layers:
+                    art = (
+                        await _art_session.execute(
+                            _select(LayerArtifact)
+                            .where(LayerArtifact.name == layer_name)
+                            .where(LayerArtifact.is_sealed.is_(True))
+                            .order_by(LayerArtifact.created_at.desc())
+                            .limit(1)
+                        )
+                    ).scalar_one_or_none()
+                    if art is None:
+                        raise RuntimeError(f"봉인된 레이어 아티팩트를 찾을 수 없습니다: {layer_name!r}")
+                    artifact_entries.append(_artifact_entry_from_row(art))
+
+        if not artifact_entries:
+            raise RuntimeError("소비할 레이어 목록이 비어 있습니다")
+
+        layer_share_info: list[tuple[str, str]] = []
         profile_ubuntu_bases: set[str] = set()
         profile_base_image_ids: set[str] = set()
-        async with get_session_factory()() as _art_session:
-            for layer_name in profile_layers:
-                art = (
-                    await _art_session.execute(
-                        _select(LayerArtifact)
-                        .where(LayerArtifact.name == layer_name)
-                        .where(LayerArtifact.is_sealed.is_(True))
-                        .order_by(LayerArtifact.created_at.desc())
-                        .limit(1)
-                    )
-                ).scalar_one_or_none()
-                if art is None:
-                    raise RuntimeError(f"봉인된 레이어 아티팩트를 찾을 수 없습니다: {layer_name!r}")
-                if not art.share_id:
-                    raise RuntimeError(f"레이어 {layer_name!r}에 share_id가 없습니다")
-                snapshot = _artifact_base_image_snapshot(art, settings)
-                resolved_image_id = snapshot.get("base_image_id")
-                if not resolved_image_id:
-                    raise RuntimeError(f"레이어 {layer_name!r}의 base_image_id를 확인할 수 없습니다")
-                profile_ubuntu_bases.add(normalize_ubuntu_base(snapshot.get("ubuntu_base")))
-                profile_base_image_ids.add(str(resolved_image_id))
-                layer_share_info.append((art.share_id, art.sqsh_filename))
+        for entry in artifact_entries:
+            share_id = str(entry.get("share_id") or "")
+            sqsh_filename = str(entry.get("sqsh_filename") or "")
+            if not share_id:
+                raise RuntimeError(f"레이어 {entry.get('name')!r}에 share_id가 없습니다")
+            if not sqsh_filename:
+                raise RuntimeError(f"레이어 {entry.get('name')!r}에 sqsh_filename이 없습니다")
+            resolved_image_id = entry.get("base_image_id")
+            if not resolved_image_id:
+                raise RuntimeError(f"레이어 {entry.get('name')!r}의 base_image_id를 확인할 수 없습니다")
+            profile_ubuntu_bases.add(normalize_ubuntu_base(entry.get("ubuntu_base")))
+            profile_base_image_ids.add(str(resolved_image_id))
+            layer_share_info.append((share_id, sqsh_filename))
 
         if len(profile_ubuntu_bases) != 1:
             raise RuntimeError(
@@ -1181,24 +1227,26 @@ async def run_layer_consume(
             raise RuntimeError("요청 image_id가 프로필 base image와 일치하지 않습니다")
         effective_image_id = profile_base_image_id
 
-        conn = await asyncio.to_thread(get_service_project_connection)
-        resolved_flavor_id = await asyncio.to_thread(_resolve_flavor_id, conn, flavor_id)
+        if owned_compute_conn is None:
+            owned_compute_conn = await asyncio.to_thread(get_service_project_connection)
+        if owned_share_conn is None:
+            owned_share_conn = owned_compute_conn
 
-        # ── 3. Neutron port 생성 (IP 예약) ────────────────────────────────
+        resolved_flavor_id = await asyncio.to_thread(_resolve_flavor_id, owned_compute_conn, flavor_id)
+
         token = uuid.uuid4().hex[:8]
         port_info = await asyncio.to_thread(
-            neutron.create_port, conn, effective_network_id, f"afterglow-layer-consume-{token}"
+            neutron.create_port, owned_compute_conn, effective_network_id, f"afterglow-layer-consume-{token}"
         )
         port_id = port_info["id"]
         fixed_ip = port_info["fixed_ip"]
         await _update_consume_db(consume_db_id, port_id=port_id)
 
-        # ── 4. 각 레이어 share에 RO access rule + export 수집 ───────────────
-        mounts: list[tuple[str, str]] = []  # [(export_path, sqsh_filename), ...]
+        mounts: list[tuple[str, str]] = []
         for share_id, sqsh_filename in layer_share_info:
             rule = await asyncio.to_thread(
                 manila.ensure_nfs_access_rule,
-                conn,
+                owned_share_conn,
                 share_id,
                 fixed_ip,
                 "ro",
@@ -1207,17 +1255,13 @@ async def run_layer_consume(
             )
             consume_ro_access_ids.append((share_id, rule["access_id"]))
 
-            export_locations = await asyncio.to_thread(manila.get_export_locations, conn, share_id)
+            export_locations = await asyncio.to_thread(manila.get_export_locations, owned_share_conn, share_id)
             if not export_locations:
                 raise RuntimeError(f"share {share_id}의 export location이 없습니다")
             mounts.append((export_locations[0], sqsh_filename))
             _logger.info("[layer_consume] share RO rule: share=%s access=%s", share_id, rule["access_id"])
 
-        # ── 5. cloud-init 렌더 ─────────────────────────────────────────────
-        # Profiles are stored root→leaf for UI/cascade semantics; the renderer
-        # contract is child-first so overlay lowerdir priority stays topmost-first.
         mounts_child_first = list(reversed(mounts))
-
         user_data_str = render_layer_consume_user_data(
             profile_name,
             mounts_child_first,
@@ -1226,9 +1270,8 @@ async def run_layer_consume(
         )
         user_data_b64 = base64.b64encode(user_data_str.encode()).decode()
 
-        # ── 6. 소비 VM 생성 ────────────────────────────────────────────────
         server = await asyncio.to_thread(
-            conn.compute.create_server,
+            owned_compute_conn.compute.create_server,
             name=server_name,
             image_id=effective_image_id,
             flavor_id=resolved_flavor_id,
@@ -1255,16 +1298,21 @@ async def run_layer_consume(
             error_message=str(exc)[:1000],
             completed=True,
         )
-        # 실패 시 부여한 RO access rule 회수
-        if not server_id and conn is not None:
-            for _sid, _aid in consume_ro_access_ids:
+        if not server_id:
+            if owned_share_conn is not None:
+                for _sid, _aid in consume_ro_access_ids:
+                    try:
+                        await asyncio.to_thread(manila.revoke_access_rule, owned_share_conn, _sid, _aid)
+                    except Exception:
+                        _logger.warning(
+                            "[layer_consume] RO rule 회수 실패: share=%s access=%s",
+                            _sid,
+                            _aid,
+                            exc_info=True,
+                        )
+            if port_id and owned_compute_conn is not None:
                 try:
-                    await asyncio.to_thread(manila.revoke_access_rule, conn, _sid, _aid)
-                except Exception:
-                    _logger.warning("[layer_consume] RO rule 회수 실패: share=%s access=%s", _sid, _aid, exc_info=True)
-            if port_id:
-                try:
-                    await asyncio.to_thread(neutron.delete_port, conn, port_id)
+                    await asyncio.to_thread(neutron.delete_port, owned_compute_conn, port_id)
                 except Exception:
                     _logger.warning("[layer_consume] 실패 후 port 정리 실패", exc_info=True)
         raise

@@ -354,6 +354,8 @@ class LayerConsume(Base):
     server_id: Mapped[str | None] = mapped_column(VARCHAR(64), index=True)
     port_id: Mapped[str | None] = mapped_column(VARCHAR(64))
     share_id: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    project_id: Mapped[str | None] = mapped_column(VARCHAR(64), nullable=True, index=True)
+    artifact_ids: Mapped[list[int] | None] = mapped_column(JSON, nullable=True)
     server_name: Mapped[str | None] = mapped_column(VARCHAR(128))
 
     # 상태: creating/active/error
@@ -415,6 +417,7 @@ class LayerArtifact(Base):
     )
     # 봉인 여부: 빌드 성공 후 RW rule 회수 완료 = True (소비 가능 상태)
     is_sealed: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False)
+    is_published: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False, server_default="0", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
 
 
@@ -424,17 +427,23 @@ class LayerImportJob(Base):
     __tablename__ = "layer_import_jobs"
 
     id: Mapped[int] = mapped_column(INT, primary_key=True, autoincrement=True)
-    source_type: Mapped[str] = mapped_column(VARCHAR(32), nullable=False, default="github_dockerfile")
-    status: Mapped[str] = mapped_column(VARCHAR(32), nullable=False, default="queued", index=True)
+    source_type: Mapped[str] = mapped_column(
+        VARCHAR(32), nullable=False, default="github_dockerfile", server_default="github_dockerfile"
+    )
+    status: Mapped[str] = mapped_column(
+        VARCHAR(32), nullable=False, default="queued", server_default="queued", index=True
+    )
     progress_step: Mapped[str | None] = mapped_column(VARCHAR(64), nullable=True)
-    progress_pct: Mapped[int] = mapped_column(INT, nullable=False, default=0)
+    progress_pct: Mapped[int] = mapped_column(INT, nullable=False, default=0, server_default="0")
     error_message: Mapped[str | None] = mapped_column(TEXT, nullable=True)
 
     github_url: Mapped[str] = mapped_column(VARCHAR(512), nullable=False)
     repo_owner: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
     repo_name: Mapped[str] = mapped_column(VARCHAR(128), nullable=False)
     commit_sha: Mapped[str] = mapped_column(CHAR(40), nullable=False)
-    dockerfile_path: Mapped[str] = mapped_column(VARCHAR(255), nullable=False, default="Dockerfile")
+    dockerfile_path: Mapped[str] = mapped_column(
+        VARCHAR(255), nullable=False, default="Dockerfile", server_default="Dockerfile"
+    )
 
     layer_prefix: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
     profile_name: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
@@ -449,7 +458,7 @@ class LayerImportJob(Base):
     planned_layers: Mapped[list | None] = mapped_column(JSON, nullable=True)
     artifact_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
     build_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -467,6 +476,7 @@ class LayerProfile(Base):
     name: Mapped[str] = mapped_column(VARCHAR(64), nullable=False, unique=True, index=True)
     # JSON 배열: ["uv-latest", "python-latest"]  순서 = OverlayFS lowerdir 위→아래
     layers: Mapped[list] = mapped_column(JSON, nullable=False)
+    is_published: Mapped[bool] = mapped_column(BOOLEAN, nullable=False, default=False, server_default="0", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
 

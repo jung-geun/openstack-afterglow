@@ -325,6 +325,20 @@ async def create_tables() -> None:
                 except Exception:
                     pass  # 이미 존재하면 무시
 
+        # Public squashfs publication and caller-owned consume tracking (022, 없는 경우에만)
+        for _col_sql in [
+            "ALTER TABLE layer_consumes ADD COLUMN project_id VARCHAR(64) DEFAULT NULL",
+            "ALTER TABLE layer_consumes ADD COLUMN artifact_ids JSON DEFAULT NULL",
+            "ALTER TABLE layer_consumes ADD INDEX ix_layer_consumes_project_id (project_id)",
+            "ALTER TABLE layer_artifacts ADD COLUMN is_published BOOLEAN NOT NULL DEFAULT FALSE",
+            "ALTER TABLE layer_artifacts ADD INDEX ix_layer_artifacts_is_published (is_published)",
+            "ALTER TABLE layer_profiles ADD COLUMN is_published BOOLEAN NOT NULL DEFAULT FALSE",
+            "ALTER TABLE layer_profiles ADD INDEX ix_layer_profiles_is_published (is_published)",
+        ]:
+            try:
+                await conn.exec_driver_sql(_col_sql)
+            except Exception:
+                pass  # 이미 존재하면 무시
         try:
             await conn.exec_driver_sql(
                 "CREATE TABLE IF NOT EXISTS layer_import_jobs ("
@@ -360,6 +374,44 @@ async def create_tables() -> None:
             )
         except Exception:
             pass
+
+        for _col, _def in [
+            ("source_type", "VARCHAR(32) NOT NULL DEFAULT 'github_dockerfile'"),
+            ("status", "VARCHAR(32) NOT NULL DEFAULT 'queued'"),
+            ("progress_step", "VARCHAR(64) DEFAULT NULL"),
+            ("progress_pct", "INT NOT NULL DEFAULT 0"),
+            ("error_message", "TEXT DEFAULT NULL"),
+            ("github_url", "VARCHAR(512) NOT NULL"),
+            ("repo_owner", "VARCHAR(64) NOT NULL"),
+            ("repo_name", "VARCHAR(128) NOT NULL"),
+            ("commit_sha", "CHAR(40) NOT NULL"),
+            ("dockerfile_path", "VARCHAR(255) NOT NULL DEFAULT 'Dockerfile'"),
+            ("layer_prefix", "VARCHAR(64) NOT NULL"),
+            ("profile_name", "VARCHAR(64) NOT NULL"),
+            ("ubuntu_base", "VARCHAR(255) NOT NULL"),
+            ("base_image_id", "VARCHAR(128) NOT NULL"),
+            ("base_image_name", "VARCHAR(255) DEFAULT NULL"),
+            ("base_image_checksum", "VARCHAR(128) DEFAULT NULL"),
+            ("base_image_os_hash_algo", "VARCHAR(32) DEFAULT NULL"),
+            ("base_image_os_hash_value", "VARCHAR(128) DEFAULT NULL"),
+            ("base_image_min_disk", "INT DEFAULT NULL"),
+            ("planned_layers", "JSON DEFAULT NULL"),
+            ("artifact_ids", "JSON DEFAULT NULL"),
+            ("build_ids", "JSON DEFAULT NULL"),
+            ("completed_at", "DATETIME(6) DEFAULT NULL"),
+        ]:
+            try:
+                await conn.exec_driver_sql(f"ALTER TABLE layer_import_jobs ADD COLUMN {_col} {_def}")
+            except Exception:
+                pass
+        for _idx_sql in [
+            "ALTER TABLE layer_import_jobs ADD INDEX ix_layer_import_jobs_status (status)",
+            "ALTER TABLE layer_import_jobs ADD INDEX ix_layer_import_jobs_created_at (created_at)",
+        ]:
+            try:
+                await conn.exec_driver_sql(_idx_sql)
+            except Exception:
+                pass
 
         # 셀프서비스 프로젝트 관리자 역할 테이블
         try:

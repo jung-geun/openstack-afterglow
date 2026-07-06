@@ -162,11 +162,13 @@ from app.api.identity.admin_notion import router as admin_notion_router
 from app.api.identity.admin_orphans import router as admin_orphans_router
 from app.api.identity.admin_secrets import router as admin_secrets_router
 from app.api.identity.admin_services import router as admin_services_router
+from app.api.identity.admin_worker_runtime import router as admin_worker_runtime_router
 from app.api.identity.invitations import router as invitations_router
 from app.api.identity.profile import router as profile_router
 from app.api.identity.profile_activity import router as profile_activity_router
 from app.api.identity.projects import router as projects_router
 from app.api.union.layer_ops import router as admin_libraries_router
+from app.api.union.layer_public import router as squashfs_libraries_router
 
 _mark("api.identity")
 
@@ -333,7 +335,9 @@ _AUDIT_PREFIX_MAP: list[tuple[str, str]] = [
     ("/api/v1/secret-containers", "secret_container"),
     ("/api/v1/secret-orders", "secret_order"),
     ("/api/v1/database-instances", "database"),
+    ("/api/v1/admin/worker-runtime", "worker_runtime"),
     ("/api/v1/admin/libraries", "union_layer"),
+    ("/api/v1/libraries/squashfs", "union_layer"),
     ("/api/v1/admin/images", "image"),
     ("/api/v1/admin/projects", "project"),
     ("/api/v1/loadbalancers", "load_balancer"),
@@ -501,6 +505,7 @@ app.include_router(gitlab_auth_router, prefix="/api/v1/auth", tags=["auth-oidc"]
 app.include_router(admin_instances_router, prefix="/api/v1/admin", tags=["admin-instances"])
 app.include_router(admin_router, prefix="/api/v1/admin", tags=["admin"])
 app.include_router(admin_services_router, prefix="/api/v1/admin", tags=["admin-services"])
+app.include_router(admin_worker_runtime_router, prefix="/api/v1/admin", tags=["admin-worker-runtime"])
 app.include_router(admin_flavors_router, prefix="/api/v1/admin", tags=["admin-flavors"])
 app.include_router(admin_identity_router, prefix="/api/v1/admin", tags=["admin-identity"])
 app.include_router(admin_gpu_router, prefix="/api/v1/admin", tags=["admin-gpu"])
@@ -590,6 +595,7 @@ if _svc_cfg.service_barbican_enabled:
 # Common
 app.include_router(dashboard_router, prefix="/api/v1/dashboard", tags=["dashboard"])
 app.include_router(metrics_router, prefix="/api/v1/metrics", tags=["metrics"])
+app.include_router(squashfs_libraries_router, prefix="/api/v1/libraries/squashfs", tags=["squashfs-libraries"])
 app.include_router(libraries_router, prefix="/api/v1/libraries", tags=["libraries"])
 app.include_router(sd_targets_router, prefix="/api/v1/sd", tags=["sd-targets"])
 app.include_router(grafana_auth_router, prefix="/api/v1/grafana", tags=["grafana-auth"])
@@ -1076,6 +1082,11 @@ async def start_background_workers():
         asyncio.create_task(_k3s_cleanup_loop())
     if _svc_cfg.service_swift_enabled:
         asyncio.create_task(_trash_cleanup_loop())
+
+    if _db_cfg.worker_runtime_mode != "static" and _db_cfg.worker_runtime_reconcile_interval > 0:
+        from app.services.worker_runtime import reconcile_loop
+
+        asyncio.create_task(reconcile_loop())
 
     from app.services.library_builder import _build_worker, reconcile_orphan_builds
 

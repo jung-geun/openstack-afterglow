@@ -13,3 +13,9 @@
 - [x] Add GitHub Dockerfile import frontend panel
 - [x] Add backend and frontend regression coverage
 - [x] Run focused and full verification gates
+- [x] Update OpenSpec scope for beta public squashfs consume
+- [x] Add publication and LayerConsume ownership schema
+- [x] Add authenticated public squashfs consume router
+- [x] Add VM wizard beta squashfs consume workflow
+- [x] Add ownership publication and VM wizard regressions
+- [x] Run focused and full gates for expanded scope

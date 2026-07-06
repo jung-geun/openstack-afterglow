@@ -214,6 +214,49 @@ def _load_toml() -> dict:
     flat["k3s_stampede_scale_down_cooldown"] = k3s.get("stampede_scale_down_cooldown", 300)
     flat["k3s_stampede_resource_headroom_factor"] = k3s.get("stampede_resource_headroom_factor", 0.3)
 
+    wr = data.get("worker_runtime", {})
+    wr_workers = wr.get("workers", {})
+    wr_drover = wr_workers.get("drover", {})
+    wr_notion = wr_workers.get("notion_worker", {})
+    wr_docker = wr.get("docker", {})
+    wr_k8s = wr.get("kubernetes", {})
+    flat["worker_runtime_mode"] = wr.get("mode", "static")
+    flat["worker_runtime_reconcile_interval"] = wr.get("reconcile_interval", 30)
+    flat["worker_runtime_fail_closed"] = wr.get("fail_closed", True)
+    flat["worker_runtime_drover_enabled"] = wr_drover.get("enabled", True)
+    flat["worker_runtime_drover_desired_replicas"] = wr_drover.get("desired_replicas", 1)
+    flat["worker_runtime_drover_max_replicas"] = wr_drover.get("max_replicas", 1)
+    flat["worker_runtime_drover_module"] = wr_drover.get("module", "app.worker")
+    flat["worker_runtime_notion_worker_enabled"] = wr_notion.get("enabled", True)
+    flat["worker_runtime_notion_worker_desired_replicas"] = wr_notion.get("desired_replicas", 1)
+    flat["worker_runtime_notion_worker_max_replicas"] = wr_notion.get("max_replicas", 1)
+    flat["worker_runtime_notion_worker_module"] = wr_notion.get("module", "app.notion_worker")
+    flat["worker_runtime_docker_socket_path"] = wr_docker.get("socket_path", "")
+    flat["worker_runtime_docker_image"] = wr_docker.get("image", "")
+    flat["worker_runtime_docker_network"] = wr_docker.get("network", "")
+    flat["worker_runtime_docker_config_mount"] = wr_docker.get("config_mount", "/app/afterglow.conf")
+    flat["worker_runtime_docker_config_host_path"] = wr_docker.get("config_host_path", "")
+    flat["worker_runtime_docker_gpu_config_mount"] = wr_docker.get("gpu_config_mount", "/app/config.gpu.toml")
+    flat["worker_runtime_docker_gpu_config_host_path"] = wr_docker.get("gpu_config_host_path", "")
+    flat["worker_runtime_docker_logs_mount"] = wr_docker.get("logs_mount", "/app/logs")
+    flat["worker_runtime_docker_logs_host_path"] = wr_docker.get("logs_host_path", "")
+    flat["worker_runtime_docker_env_allowlist"] = wr_docker.get(
+        "env_allowlist",
+        (
+            "AFTERGLOW_ENV,AFTERGLOW_ALLOW_INSECURE,SECRET_KEY,OS_PASSWORD,DATABASE_URL,"
+            "K3S_KUBECONFIG_ENCRYPTION_KEY,PROMETHEUS_PASSWORD,GITLAB_OIDC_CLIENT_SECRET,"
+            "NOTION_CONFIG_ENCRYPTION_KEY"
+        ),
+    )
+    flat["worker_runtime_kubernetes_namespace"] = wr_k8s.get("namespace", "afterglow")
+    flat["worker_runtime_kubernetes_service_account_token_path"] = wr_k8s.get(
+        "service_account_token_path", "/var/run/secrets/kubernetes.io/serviceaccount/token"
+    )
+    flat["worker_runtime_kubernetes_service_account_ca_path"] = wr_k8s.get(
+        "service_account_ca_path", "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+    )
+    flat["worker_runtime_kubernetes_manage_deployments"] = wr_k8s.get("manage_deployments", False)
+
     gpu = data.get("gpu", {})
     flat["gpu_available_visible"] = gpu.get("available_visible", False)
 
@@ -478,6 +521,50 @@ class Settings(BaseSettings):
     k3s_stampede_scale_up_cooldown: int = 120
     k3s_stampede_scale_down_cooldown: int = 300
     k3s_stampede_resource_headroom_factor: float = 0.3
+
+    # Background worker runtime manager
+    worker_runtime_mode: Literal["static", "docker", "kubernetes"] = "static"
+    worker_runtime_reconcile_interval: int = 30
+    worker_runtime_fail_closed: bool = True
+    worker_runtime_drover_enabled: bool = True
+    worker_runtime_drover_desired_replicas: int = 1
+    worker_runtime_drover_max_replicas: int = 1
+    worker_runtime_drover_module: str = "app.worker"
+    worker_runtime_notion_worker_enabled: bool = True
+    worker_runtime_notion_worker_desired_replicas: int = 1
+    worker_runtime_notion_worker_max_replicas: int = 1
+    worker_runtime_notion_worker_module: str = "app.notion_worker"
+    worker_runtime_docker_socket_path: str = ""
+    worker_runtime_docker_image: str = ""
+    worker_runtime_docker_network: str = ""
+    worker_runtime_docker_config_mount: str = "/app/afterglow.conf"
+    worker_runtime_docker_config_host_path: str = ""
+    worker_runtime_docker_gpu_config_mount: str = "/app/config.gpu.toml"
+    worker_runtime_docker_gpu_config_host_path: str = ""
+    worker_runtime_docker_logs_mount: str = "/app/logs"
+    worker_runtime_docker_logs_host_path: str = ""
+    worker_runtime_docker_env_allowlist: str = (
+        "AFTERGLOW_ENV,AFTERGLOW_ALLOW_INSECURE,SECRET_KEY,OS_PASSWORD,DATABASE_URL,"
+        "K3S_KUBECONFIG_ENCRYPTION_KEY,PROMETHEUS_PASSWORD,GITLAB_OIDC_CLIENT_SECRET,"
+        "NOTION_CONFIG_ENCRYPTION_KEY"
+    )
+    worker_runtime_kubernetes_namespace: str = "afterglow"
+    worker_runtime_kubernetes_service_account_token_path: str = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+    worker_runtime_kubernetes_service_account_ca_path: str = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+    worker_runtime_kubernetes_manage_deployments: bool = False
+
+    @field_validator(
+        "worker_runtime_reconcile_interval",
+        "worker_runtime_drover_desired_replicas",
+        "worker_runtime_drover_max_replicas",
+        "worker_runtime_notion_worker_desired_replicas",
+        "worker_runtime_notion_worker_max_replicas",
+    )
+    @classmethod
+    def validate_worker_runtime_counts(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("worker runtime replica counts and intervals must be non-negative")
+        return v
 
     # Union Mount 레이어 시스템 — Manila share ID
     union_layer_store_rw_share_id: str = ""  # layer-store-rw (Builder 전용 RW)

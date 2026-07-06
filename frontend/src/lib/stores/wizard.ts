@@ -48,6 +48,9 @@ export interface WizardState {
 	mountProtocol: 'CEPHFS' | 'NFS';
 	templateName: string | null;
 	templateVersion: number | null;
+	squashfsMode: 'profile' | 'artifacts' | null;
+	layerProfileName: string | null;
+	layerArtifactIds: number[];
 	instanceName: string;
 	networkId: string | null;
 	networkName: string | null;
@@ -78,6 +81,9 @@ const initial: WizardState = {
 	mountProtocol: 'NFS',
 	templateName: null,
 	templateVersion: null,
+	squashfsMode: null,
+	layerProfileName: null,
+	layerArtifactIds: [],
 	instanceName: '',
 	networkId: null,
 	networkName: null,

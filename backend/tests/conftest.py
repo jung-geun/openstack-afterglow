@@ -4,6 +4,9 @@ import os
 
 os.environ.setdefault("AFTERGLOW_ALLOW_INSECURE", "1")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
+os.environ.setdefault("JWT_ACCESS_TTL", "36000")
+os.environ.setdefault("JWT_REFRESH_TTL", "36000")
+os.environ.setdefault("SESSION_TIMEOUT_SECONDS", "36000")
 os.environ.setdefault("SERVICE_BARBICAN_ENABLED", "true")
 os.environ.setdefault("SERVICE_MANILA_ENABLED", "true")
 os.environ.setdefault("SERVICE_MAGNUM_ENABLED", "true")

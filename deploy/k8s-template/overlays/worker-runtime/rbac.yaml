@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: afterglow-backend-worker-runtime
+  labels:
+    app: backend
+    afterglow.worker-runtime: "true"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: afterglow-backend-worker-runtime-role
+  labels:
+    app: backend
+    afterglow.worker-runtime: "true"
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments", "deployments/scale"]
+    verbs: ["get", "list", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: afterglow-backend-worker-runtime-binding
+  labels:
+    app: backend
+    afterglow.worker-runtime: "true"
+subjects:
+  - kind: ServiceAccount
+    name: afterglow-backend-worker-runtime
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: afterglow-backend-worker-runtime-role

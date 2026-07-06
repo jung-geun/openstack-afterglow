@@ -115,7 +115,11 @@
 </div>
 
 <!-- 루트 디스크 -->
-{#if $wizard.bootSource === 'image'}
+{#if $wizard.squashfsMode}
+<div class="mb-4 p-3 rounded-lg bg-blue-900/20 border border-blue-800/40 text-blue-300 text-xs">
+	squashfs 라이브러리 소비 VM은 선택한 레이어의 Glance base image에서 직접 부팅합니다. 루트 디스크 크기와 삭제 옵션은 이 베타 경로에서 적용되지 않습니다.
+</div>
+{:else if $wizard.bootSource === 'image'}
 <div class="grid grid-cols-1 @lg/panel:grid-cols-2 gap-3.5 mb-4">
 	<div>
 		<label for="boot-volume-size" class="block text-[11.5px] font-semibold text-gray-300 tracking-tight flex items-center gap-1.5 mb-1.5">

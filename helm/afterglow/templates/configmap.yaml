@@ -234,6 +234,41 @@ data:
     stampede_resource_headroom_factor = {{ .Values.k3s.stampedeResourceHeadroomFactor }}
     # kubeconfig_encryption_key는 secret.yaml의 K3S_KUBECONFIG_ENCRYPTION_KEY 환경변수로 주입됩니다
 
+    [worker_runtime]
+    mode = {{ .Values.workerRuntime.mode | quote }}
+    reconcile_interval = {{ .Values.workerRuntime.reconcileInterval }}
+    fail_closed = {{ .Values.workerRuntime.failClosed }}
+
+    [worker_runtime.workers.drover]
+    enabled = {{ .Values.workerRuntime.workers.drover.enabled }}
+    desired_replicas = {{ .Values.workerRuntime.workers.drover.desiredReplicas }}
+    max_replicas = {{ .Values.workerRuntime.workers.drover.maxReplicas }}
+    module = {{ .Values.workerRuntime.workers.drover.module | quote }}
+
+    [worker_runtime.workers.notion_worker]
+    enabled = {{ .Values.workerRuntime.workers.notionWorker.enabled }}
+    desired_replicas = {{ .Values.workerRuntime.workers.notionWorker.desiredReplicas }}
+    max_replicas = {{ .Values.workerRuntime.workers.notionWorker.maxReplicas }}
+    module = {{ .Values.workerRuntime.workers.notionWorker.module | quote }}
+
+    [worker_runtime.docker]
+    socket_path = {{ .Values.workerRuntime.docker.socketPath | quote }}
+    image = {{ .Values.workerRuntime.docker.image | quote }}
+    network = {{ .Values.workerRuntime.docker.network | quote }}
+    config_mount = {{ .Values.workerRuntime.docker.configMount | quote }}
+    config_host_path = {{ .Values.workerRuntime.docker.configHostPath | quote }}
+    gpu_config_mount = {{ .Values.workerRuntime.docker.gpuConfigMount | quote }}
+    gpu_config_host_path = {{ .Values.workerRuntime.docker.gpuConfigHostPath | quote }}
+    logs_mount = {{ .Values.workerRuntime.docker.logsMount | quote }}
+    logs_host_path = {{ .Values.workerRuntime.docker.logsHostPath | quote }}
+    env_allowlist = {{ .Values.workerRuntime.docker.envAllowlist | quote }}
+
+    [worker_runtime.kubernetes]
+    namespace = {{ default .Release.Namespace .Values.workerRuntime.kubernetes.namespace | quote }}
+    service_account_token_path = {{ .Values.workerRuntime.kubernetes.serviceAccountTokenPath | quote }}
+    service_account_ca_path = {{ .Values.workerRuntime.kubernetes.serviceAccountCaPath | quote }}
+    manage_deployments = false
+
     [database]
     # url은 secret.yaml의 DATABASE_URL 환경변수로 주입됩니다
     pool_size = {{ .Values.database.poolSize }}

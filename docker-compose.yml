@@ -15,6 +15,23 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # ── Worker runtime manager opt-in (disabled by default) ─────────────────────
+  # The default development path keeps static drover/notion-worker services below.
+  # To let the backend manage extra Docker workers explicitly:
+  #   1. Add this backend volume manually:
+  #        - /var/run/docker.sock:/var/run/docker.sock
+  #   2. Set afterglow.conf:
+  #        [worker_runtime]
+  #        mode = "docker"
+  #        [worker_runtime.docker]
+  #        socket_path = "/var/run/docker.sock"
+  #        image = "ghcr.io/openstack-afterglow/afterglow-worker:dev"
+  #        config_host_path = "/absolute/host/path/to/afterglow.conf"
+  #        gpu_config_host_path = "/absolute/host/path/to/config.gpu.toml"
+  #        logs_host_path = "/absolute/host/path/to/logs"
+  #        env_allowlist = "AFTERGLOW_ALLOW_INSECURE,SECRET_KEY,OS_PASSWORD,DATABASE_URL,K3S_KUBECONFIG_ENCRYPTION_KEY,PROMETHEUS_PASSWORD,GITLAB_OIDC_CLIENT_SECRET,NOTION_CONFIG_ENCRYPTION_KEY"
+  # Never mount the Docker socket in the committed default compose file.
+
   backend:
     build:
       context: .

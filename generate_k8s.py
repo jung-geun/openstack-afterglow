@@ -396,6 +396,7 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     mon = cfg.get("monitoring", {})
     notion = cfg.get("notion", {})
     smtp = cfg.get("smtp", {})
+    worker_runtime = cfg.get("worker_runtime", {})
 
     lines = [
         "# Afterglow 통합 설정 파일",
@@ -689,6 +690,53 @@ def _render_toml_for_k8s(cfg: dict) -> str:
     lines.append(
         "# kubeconfig_encryption_key는 secret.yaml의 K3S_KUBECONFIG_ENCRYPTION_KEY 환경변수로 주입됩니다"
     )
+    lines.append("")
+    # [worker_runtime] (non-secret runtime manager config)
+    wr_workers = worker_runtime.get("workers", {})
+    wr_drover = wr_workers.get("drover", {})
+    wr_notion = wr_workers.get("notion_worker", {})
+    wr_docker = worker_runtime.get("docker", {})
+    wr_k8s = worker_runtime.get("kubernetes", {})
+    lines.append("[worker_runtime]")
+    lines.append(f"mode = {_toml_str(worker_runtime.get('mode', 'static'))}")
+    lines.append(f"reconcile_interval = {worker_runtime.get('reconcile_interval', 30)}")
+    lines.append(f"fail_closed = {_toml_bool(worker_runtime.get('fail_closed', True))}")
+    lines.append("")
+    lines.append("[worker_runtime.workers.drover]")
+    lines.append(f"enabled = {_toml_bool(wr_drover.get('enabled', True))}")
+    lines.append(f"desired_replicas = {wr_drover.get('desired_replicas', 1)}")
+    lines.append(f"max_replicas = {wr_drover.get('max_replicas', 1)}")
+    lines.append(f"module = {_toml_str(wr_drover.get('module', 'app.worker'))}")
+    lines.append("")
+    lines.append("[worker_runtime.workers.notion_worker]")
+    lines.append(f"enabled = {_toml_bool(wr_notion.get('enabled', True))}")
+    lines.append(f"desired_replicas = {wr_notion.get('desired_replicas', 1)}")
+    lines.append(f"max_replicas = {wr_notion.get('max_replicas', 1)}")
+    lines.append(f"module = {_toml_str(wr_notion.get('module', 'app.notion_worker'))}")
+    lines.append("")
+    lines.append("[worker_runtime.docker]")
+    lines.append(f"socket_path = {_toml_str(wr_docker.get('socket_path', ''))}")
+    lines.append(f"image = {_toml_str(wr_docker.get('image', ''))}")
+    lines.append(f"network = {_toml_str(wr_docker.get('network', ''))}")
+    lines.append(f"config_mount = {_toml_str(wr_docker.get('config_mount', '/app/afterglow.conf'))}")
+    lines.append(f"config_host_path = {_toml_str(wr_docker.get('config_host_path', ''))}")
+    lines.append(f"gpu_config_mount = {_toml_str(wr_docker.get('gpu_config_mount', '/app/config.gpu.toml'))}")
+    lines.append(f"gpu_config_host_path = {_toml_str(wr_docker.get('gpu_config_host_path', ''))}")
+    lines.append(f"logs_mount = {_toml_str(wr_docker.get('logs_mount', '/app/logs'))}")
+    lines.append(f"logs_host_path = {_toml_str(wr_docker.get('logs_host_path', ''))}")
+    lines.append(
+        f"env_allowlist = {_toml_str(wr_docker.get('env_allowlist', 'AFTERGLOW_ENV,AFTERGLOW_ALLOW_INSECURE,SECRET_KEY,OS_PASSWORD,DATABASE_URL,K3S_KUBECONFIG_ENCRYPTION_KEY,PROMETHEUS_PASSWORD,GITLAB_OIDC_CLIENT_SECRET,NOTION_CONFIG_ENCRYPTION_KEY'))}"
+    )
+    lines.append("")
+    lines.append("[worker_runtime.kubernetes]")
+    lines.append(f"namespace = {_toml_str(wr_k8s.get('namespace', 'afterglow'))}")
+    lines.append(
+        f"service_account_token_path = {_toml_str(wr_k8s.get('service_account_token_path', '/var/run/secrets/kubernetes.io/serviceaccount/token'))}"
+    )
+    lines.append(
+        f"service_account_ca_path = {_toml_str(wr_k8s.get('service_account_ca_path', '/var/run/secrets/kubernetes.io/serviceaccount/ca.crt'))}"
+    )
+    lines.append(f"manage_deployments = {_toml_bool(wr_k8s.get('manage_deployments', False))}")
     lines.append("")
 
     # [database] (url은 비밀, 나머지는 포함)

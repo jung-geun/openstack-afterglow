@@ -107,6 +107,7 @@ def _consume(
     *,
     status: str = "active",
     server_id: str | None = "srv-1",
+    artifact_ids: list[int] | None = None,
 ):
     return _row(
         id=consume_id,
@@ -117,6 +118,7 @@ def _consume(
         server_name=f"consumer-{consume_id}",
         share_id="share-ro",
         error_message=None,
+        artifact_ids=artifact_ids,
         created_at=None,
         completed_at=None,
     )
@@ -1422,6 +1424,18 @@ def test_delete_preview_ignores_deleted_consume_reference():
 
     assert preview["active_consume_references"] == []
     assert {b["type"] for b in preview["delete_blockers"]} == {"profile_references"}
+
+
+def test_delete_preview_blocks_direct_consume_artifact_reference():
+    """직접 public consume이 artifact_ids로 참조 중인 artifact 삭제를 차단한다."""
+    target = _artifact(2, "python311", pip_packages=["numpy"])
+    consume = _consume(profile_name="direct-ab12cd34", status="active", server_id="srv-1", artifact_ids=[1, 2])
+
+    preview = _artifact_delete_preview(target, [target], [], [consume], [])
+
+    assert preview["can_delete"] is False
+    assert preview["active_consume_references"][0]["artifact_ids"] == [1, 2]
+    assert {b["type"] for b in preview["delete_blockers"]} == {"active_consume_references"}
 
 
 # ============================================================================

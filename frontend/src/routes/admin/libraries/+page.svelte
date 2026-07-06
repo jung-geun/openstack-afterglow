@@ -153,6 +153,7 @@
     python_version: string | null;
     parent_id: number | null;
     is_sealed: boolean;
+    is_published: boolean;
     pip_packages: string[];
     apt_packages: string[];
     ubuntu_base: string;
@@ -187,6 +188,7 @@
     sqsh_filename: string;
     parent_id: number | null;
     is_sealed: boolean;
+    is_published: boolean;
     created_at: string | null;
     pip_packages: string[];
     apt_packages: string[];
@@ -206,10 +208,11 @@
     delete_blockers: DeleteBlocker[];
     can_delete: boolean;
   }
-  interface LayerProfile { id: number; name: string; layers: string[]; created_at: string | null; updated_at: string | null; }
+  interface LayerProfile { id: number; name: string; layers: string[]; is_published: boolean; created_at: string | null; updated_at: string | null; }
   let artifacts = $state<LayerArtifact[]>([]);
   let profiles = $state<LayerProfile[]>([]);
   let profileForm = $state({ name: '', selectedLayers: [] as string[] });
+  let publicationUpdating = $state('');
   const profileNameValid = $derived(/^[a-z0-9][a-z0-9.+-]*$/.test(profileForm.name));
   // 봉인 완료된 artifact만 부모 후보로 사용
   const sealedArtifacts = $derived(artifacts.filter(a => a.is_sealed));
@@ -670,6 +673,50 @@
       }
     } finally {
       profileDeletingName = '';
+    }
+  }
+
+  async function setProfilePublication(profile: LayerProfile, is_published: boolean) {
+    const key = `profile:${profile.name}`;
+    if (publicationUpdating) return;
+    publicationUpdating = key;
+    profileMessage = '';
+    profileDeleteError = '';
+    try {
+      await api.patch<LayerProfile>(
+        `/api/v1/admin/libraries/profiles/${encodeURIComponent(profile.name)}/publication`,
+        { is_published },
+        token,
+        projectId,
+      );
+      profileMessage = `프로필 '${profile.name}' ${is_published ? '공개' : '비공개'} 전환 완료`;
+      await loadProfiles();
+    } catch (e) {
+      profileDeleteError = e instanceof ApiError ? `공개 상태 변경 실패: ${e.message}` : '네트워크 오류';
+    } finally {
+      publicationUpdating = '';
+    }
+  }
+
+  async function setArtifactPublication(artifact: LayerArtifact, is_published: boolean) {
+    const key = `artifact:${artifact.id}`;
+    if (publicationUpdating) return;
+    publicationUpdating = key;
+    error = '';
+    message = '';
+    try {
+      await api.patch<LayerArtifact>(
+        `/api/v1/admin/libraries/artifacts/${artifact.id}/publication`,
+        { is_published },
+        token,
+        projectId,
+      );
+      message = `artifact #${artifact.id} ${is_published ? '공개' : '비공개'} 전환 완료`;
+      await loadArtifacts();
+    } catch (e) {
+      error = e instanceof ApiError ? `공개 상태 변경 실패: ${e.message}` : '네트워크 오류';
+    } finally {
+      publicationUpdating = '';
     }
   }
 
@@ -1718,6 +1765,7 @@
                         <th class="text-left px-3 py-2">이름</th>
                         <th class="text-left px-3 py-2">레이어 체인</th>
                         <th class="text-left px-3 py-2">활성 consume</th>
+                        <th class="text-left px-3 py-2">공개</th>
                         <th class="px-3 py-2"></th>
                       </tr>
                     </thead>
@@ -1728,6 +1776,9 @@
                           <td class="px-3 py-2 font-mono text-gray-200">{profile.name}</td>
                           <td class="px-3 py-2 text-gray-400">{profile.layers.join(' → ')}</td>
                           <td class="px-3 py-2 text-gray-400">{blockers.length}</td>
+                          <td class="px-3 py-2">
+                            <span class="{profile.is_published ? 'text-blue-300' : 'text-gray-500'}">{profile.is_published ? '공개' : '비공개'}</span>
+                          </td>
                           <td class="px-3 py-2">
                             <div class="flex justify-end gap-2">
                               <button
@@ -1740,6 +1791,14 @@
                                 class="px-2 py-1 rounded border border-gray-600 text-gray-300 hover:border-gray-400 transition-colors"
                               >
                                 불러오기
+                              </button>
+                              <button
+                                type="button"
+                                onclick={() => setProfilePublication(profile, !profile.is_published)}
+                                disabled={publicationUpdating === `profile:${profile.name}`}
+                                class="px-2 py-1 rounded border border-blue-800 text-blue-300 hover:border-blue-500 disabled:border-gray-700 disabled:text-gray-600 disabled:cursor-not-allowed transition-colors"
+                              >
+                                {publicationUpdating === `profile:${profile.name}` ? '변경 중...' : (profile.is_published ? '비공개' : '공개')}
                               </button>
                               <button
                                 type="button"
@@ -1812,6 +1871,13 @@
                       {/if}
                     </td>
                     <td class="px-4 py-2.5 text-right">
+                      <button
+                        type="button"
+                        onclick={() => setArtifactPublication(a, !a.is_published)}
+                        disabled={!a.is_sealed || publicationUpdating === `artifact:${a.id}`}
+                        class="mr-3 text-xs {a.is_published ? 'text-blue-300 hover:text-blue-200' : 'text-gray-400 hover:text-white'} disabled:text-gray-600 disabled:cursor-not-allowed transition-colors"
+                        title={!a.is_sealed ? '봉인된 artifact만 공개할 수 있습니다' : (a.is_published ? '사용자 VM 마법사에서 숨기기' : '사용자 VM 마법사에 공개')}
+                      >{publicationUpdating === `artifact:${a.id}` ? '변경 중...' : (a.is_published ? '공개 중' : '비공개')}</button>
                       <button
                         type="button"
                         onclick={() => openDeletePreview(a)}

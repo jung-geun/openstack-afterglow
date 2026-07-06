@@ -17,6 +17,7 @@ from sqlalchemy import desc, select
 
 from app.api.deps import get_os_conn, require_admin
 from app.database import get_session_factory
+from app.services.cache import invalidate
 from app.services.k3s_cloudinit import _validate_ssh_public_key
 from app.services.layer_base_images import (
     legacy_snapshot_for_ubuntu_base,
@@ -388,6 +389,47 @@ class DockerfileImportRequest(BaseModel):
     @classmethod
     def validate_import_base_image_id(cls, v: str) -> str:
         return validate_base_image_id(v)
+
+
+class PublicationRequest(BaseModel):
+    is_published: bool
+
+
+async def _validate_profile_publication(session, profile) -> None:
+    from app.models.db import LayerArtifact
+
+    layer_names = list(getattr(profile, "layers", None) or [])
+    if not layer_names:
+        raise HTTPException(status_code=400, detail="빈 프로필은 공개할 수 없습니다")
+
+    rows = (
+        (
+            await session.execute(
+                select(LayerArtifact)
+                .where(LayerArtifact.name.in_(layer_names))
+                .where(LayerArtifact.is_published.is_(True))
+                .where(LayerArtifact.is_sealed.is_(True))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    by_name: dict[str, list[object]] = {}
+    for row in rows:
+        by_name.setdefault(row.name, []).append(row)
+
+    resolved: list[object] = []
+    for layer_name in layer_names:
+        matches = by_name.get(layer_name, [])
+        if not matches:
+            raise HTTPException(status_code=400, detail=f"프로필 레이어가 공개/봉인되어 있지 않습니다: {layer_name!r}")
+        if len(matches) > 1:
+            raise HTTPException(status_code=409, detail=f"프로필 레이어 이름이 중복되어 모호합니다: {layer_name!r}")
+        resolved.append(matches[0])
+
+    base_image_ids = {getattr(row, "base_image_id", None) for row in resolved}
+    if len(base_image_ids) != 1 or None in base_image_ids:
+        raise HTTPException(status_code=400, detail="프로필 레이어의 base image가 일치하지 않습니다")
 
 
 # ---------------------------------------------------------------------------
@@ -932,6 +974,24 @@ async def preview_delete_layer_artifact(artifact_id: int) -> dict:
     }
 
 
+@router.patch("/artifacts/{artifact_id}/publication", dependencies=[Depends(require_admin)])
+async def set_layer_artifact_publication(artifact_id: int, req: PublicationRequest) -> dict:
+    """Publish or unpublish a sealed artifact for public squashfs consumption."""
+    from app.models.db import LayerArtifact
+
+    async with get_session_factory()() as session:
+        row = await session.get(LayerArtifact, artifact_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"artifact {artifact_id}를 찾을 수 없습니다")
+        if req.is_published and not bool(getattr(row, "is_sealed", False)):
+            raise HTTPException(status_code=400, detail="봉인되지 않은 artifact는 공개할 수 없습니다")
+        row.is_published = req.is_published
+        await session.commit()
+        await session.refresh(row)
+        await invalidate("afterglow:union_layer:*")
+        return _artifact_row_to_dict(row)
+
+
 @router.delete("/artifacts/{artifact_id}", dependencies=[Depends(require_admin)])
 async def delete_layer_artifact(artifact_id: int) -> dict:
     """차단 사유가 없는 leaf artifact만 Manila share 삭제 후 DB에서 제거한다."""
@@ -1046,6 +1106,29 @@ async def list_layer_profiles() -> list[dict]:
         rows = (await session.execute(select(LayerProfile).order_by(LayerProfile.name))).scalars().all()
 
     return [_profile_row_to_dict(r) for r in rows]
+
+
+@router.patch("/profiles/{profile_name}/publication", dependencies=[Depends(require_admin)])
+async def set_layer_profile_publication(profile_name: str, req: PublicationRequest) -> dict:
+    """Publish or unpublish a profile for public squashfs consumption."""
+    from app.models.db import LayerProfile
+
+    if not _LAYER_NAME_RE.match(profile_name):
+        raise HTTPException(status_code=422, detail=f"유효하지 않은 프로필 이름: {profile_name!r}")
+
+    async with get_session_factory()() as session:
+        row = (
+            await session.execute(select(LayerProfile).where(LayerProfile.name == profile_name))
+        ).scalar_one_or_none()
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"프로필 '{profile_name}'을 찾을 수 없습니다")
+        if req.is_published:
+            await _validate_profile_publication(session, row)
+        row.is_published = req.is_published
+        await session.commit()
+        await session.refresh(row)
+        await invalidate("afterglow:union_layer:*")
+        return _profile_row_to_dict(row)
 
 
 @router.get("/profiles/{profile_name}", dependencies=[Depends(require_admin)])
@@ -1166,6 +1249,8 @@ def _consume_row_to_dict(row) -> dict:
         "port_id": row.port_id,
         "server_name": row.server_name,
         "share_id": row.share_id,
+        "project_id": getattr(row, "project_id", None),
+        "artifact_ids": _json_list(getattr(row, "artifact_ids", None)),
         "status": row.status,
         "error_message": row.error_message,
         "created_at": _iso(row.created_at),
@@ -1179,6 +1264,11 @@ def _json_list(value) -> list:
 
 def _int_or_none(value) -> int | None:
     return value if isinstance(value, int) else None
+
+
+def _bool_attr(row, name: str) -> bool:
+    value = getattr(row, name, False)
+    return value if isinstance(value, bool) else bool(value) if isinstance(value, int) else False
 
 
 def _ubuntu_base(value) -> str:
@@ -1195,6 +1285,7 @@ def _artifact_summary(row) -> dict:
         "is_sealed": bool(getattr(row, "is_sealed", False)),
         "pip_packages": _json_list(getattr(row, "pip_packages", None)),
         "apt_packages": _json_list(getattr(row, "apt_packages", None)),
+        "is_published": _bool_attr(row, "is_published"),
         "ubuntu_base": _ubuntu_base(getattr(row, "ubuntu_base", None)),
         **_base_image_dict(row),
         "requested_packages": _json_list(getattr(row, "pip_packages", None)),
@@ -1479,9 +1570,15 @@ def _artifact_delete_preview(target, artifacts, profiles, consumes, builds) -> d
     direct_children = [row for row in artifacts if getattr(row, "parent_id", None) == target_id]
     profile_refs = [row for row in profiles if target_name in _profile_layers(row)]
     profile_names = {row.name for row in profile_refs}
-    active_consume_refs = [
+    profile_consume_refs = [
         row for row in consumes if _is_blocking_consume(row) and getattr(row, "profile_name", None) in profile_names
     ]
+    direct_consume_refs = [
+        row
+        for row in consumes
+        if _is_blocking_consume(row) and target_id in _json_list(getattr(row, "artifact_ids", None))
+    ]
+    active_consume_refs = profile_consume_refs + [row for row in direct_consume_refs if row not in profile_consume_refs]
     active_build_refs = [
         row for row in builds if _is_active_build(row) and getattr(row, "parent_artifact_id", None) == target_id
     ]
@@ -1507,13 +1604,14 @@ def _artifact_delete_preview(target, artifacts, profiles, consumes, builds) -> d
         blockers.append(
             {
                 "type": "active_consume_references",
-                "message": "활성 consume이 해당 이름 기반 프로필을 사용 중입니다",
+                "message": "활성 consume이 해당 artifact를 사용 중입니다",
                 "items": [
                     {
                         "id": row.id,
                         "profile_name": row.profile_name,
                         "status": row.status,
                         "server_id": getattr(row, "server_id", None),
+                        "artifact_ids": _json_list(getattr(row, "artifact_ids", None)),
                     }
                     for row in active_consume_refs
                 ],
@@ -1547,6 +1645,7 @@ def _artifact_delete_preview(target, artifacts, profiles, consumes, builds) -> d
                 "profile_name": row.profile_name,
                 "status": row.status,
                 "server_id": getattr(row, "server_id", None),
+                "artifact_ids": _json_list(getattr(row, "artifact_ids", None)),
             }
             for row in active_consume_refs
         ],
@@ -1573,6 +1672,7 @@ def _artifact_row_to_dict(row, *, lineage: list[dict] | None = None, delete_prev
         "requested_packages": _json_list(getattr(row, "pip_packages", None)),
         "sqsh_filename": row.sqsh_filename,
         "share_id": row.share_id,
+        "is_published": _bool_attr(row, "is_published"),
         "build_id": row.build_id,
         "size_bytes": row.size_bytes,
         "parent_id": _int_or_none(getattr(row, "parent_id", None)),
@@ -1595,6 +1695,7 @@ def _profile_row_to_dict(row) -> dict:
         "id": row.id,
         "name": row.name,
         "layers": row.layers,
+        "is_published": _bool_attr(row, "is_published"),
         "created_at": _iso(row.created_at),
         "updated_at": _iso(row.updated_at),
     }

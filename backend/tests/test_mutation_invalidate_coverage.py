@@ -48,6 +48,7 @@ EXEMPT_ROUTERS: set[str] = {
     "identity/admin_orphans.py",
     "identity/admin_services.py",
     "identity/admin_dashboard.py",  # admin bulk action — manages OS infra directly, not per-project cache
+    "identity/admin_worker_runtime.py",  # admin-only worker desired state; no per-project OS resource cache
     # ------------------------------------------------------------------
     # Phase C/D TODO — cache not yet wired up in these modules.
     # Remove each entry as the corresponding phase lands.

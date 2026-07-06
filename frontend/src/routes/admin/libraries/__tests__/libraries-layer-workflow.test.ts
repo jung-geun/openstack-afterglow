@@ -51,6 +51,13 @@ describe('/admin/libraries layer workflow UI contract', () => {
 		expect(source).toContain('소비 VM 이미지는 프로필 레이어가 저장한 Glance base image fingerprint에서 자동 결정됩니다');
 		expect(source).toContain('표시는 base→상위 레이어 순서');
 	});
+
+	it('shows private-by-default publication controls for artifacts and profiles', () => {
+		expect(source).toContain('/publication');
+		expect(source).toContain('is_published');
+		expect(source).toContain('setArtifactPublication');
+		expect(source).toContain('setProfilePublication');
+	});
 	
 	it('surfaces Dockerfile import workflow and polls active import jobs', () => {
 		expect(source).toContain('GitHub Dockerfile import');

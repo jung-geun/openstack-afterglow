@@ -1,0 +1,49 @@
+{{- if and (eq .Values.workerRuntime.mode "kubernetes") .Values.workerRuntime.kubernetes.rbac.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.workerRuntime.kubernetes.serviceAccountName | quote }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: backend
+    afterglow.worker-runtime: "true"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ printf "%s-role" .Values.workerRuntime.kubernetes.serviceAccountName | quote }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: backend
+    afterglow.worker-runtime: "true"
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments", "deployments/scale"]
+    verbs:
+      - get
+      - list
+      - patch
+      - update
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs:
+      - get
+      - list
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ printf "%s-binding" .Values.workerRuntime.kubernetes.serviceAccountName | quote }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: backend
+    afterglow.worker-runtime: "true"
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.workerRuntime.kubernetes.serviceAccountName | quote }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ printf "%s-role" .Values.workerRuntime.kubernetes.serviceAccountName | quote }}
+{{- end }}

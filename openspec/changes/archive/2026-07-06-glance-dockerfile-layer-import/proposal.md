@@ -14,10 +14,11 @@ Let admin Library Management select the actual active Ubuntu Glance image used f
 - Build imported Dockerfile steps into ordered sealed layer artifacts and a profile consumable by the existing layer consume path.
 - Update `/admin/libraries` to use real Glance image selectors, profile image validation, and a Dockerfile import panel.
 - Add focused backend/frontend regression coverage and run required gates.
+- Add an authenticated beta VM-creation squashfs consume surface under `/api/v1/libraries/squashfs` that reuses the existing layer consume service and persists caller project ownership.
 
 ## Non-goals
 
 - No `/api/v1/admin/layers` compatibility alias.
 - No private GitHub repository/token support in this change.
 - No general Docker runtime compatibility for unsupported Dockerfile metadata/instructions.
-- No new parallel layer consume path; completed imports use existing profiles and consume flow.
+- No second layer-mount implementation path; admin and public consume routes both call the existing `run_layer_consume` service seam.
