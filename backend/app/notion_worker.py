@@ -72,45 +72,7 @@ async def _run_notion_target_sync(target: dict) -> None:
 
     # GPU 사용량 집계
     alias_to_device_name = build_alias_to_device_name_map()
-    usage_by_gpu: dict[str, dict] = {}
-    for h in hypervisors:
-        for g in h.get("gpu_groups", []):
-            device_name = g.get("device_name", "")
-            if not device_name:
-                continue
-            if device_name not in usage_by_gpu:
-                usage_by_gpu[device_name] = {
-                    "total_cpu_used": 0,
-                    "total_ram_used": 0,
-                    "total_gpu_used": 0,
-                    "instance_count": 0,
-                    "gpu_available": 0,
-                    "gpu_used": 0,
-                    "gpu_remaining": 0,
-                }
-            usage_by_gpu[device_name]["gpu_available"] += g.get("total", 0)
-    for inst in instances:
-        gpu_display = inst.get("gpu_name", "")
-        if not gpu_display or not inst.get("gpu_count"):
-            continue
-        canonical = alias_to_device_name.get(gpu_display, gpu_display)
-        if canonical not in usage_by_gpu:
-            usage_by_gpu[canonical] = {
-                "total_cpu_used": 0,
-                "total_ram_used": 0,
-                "total_gpu_used": 0,
-                "instance_count": 0,
-                "gpu_available": 0,
-                "gpu_used": 0,
-                "gpu_remaining": 0,
-            }
-        usage_by_gpu[canonical]["total_cpu_used"] += inst.get("vcpus", 0)
-        usage_by_gpu[canonical]["total_ram_used"] += inst.get("ram_gb", 0)
-        usage_by_gpu[canonical]["total_gpu_used"] += inst.get("gpu_count", 0)
-        usage_by_gpu[canonical]["instance_count"] += 1
-        usage_by_gpu[canonical]["gpu_used"] += inst.get("gpu_count", 0)
-    for u in usage_by_gpu.values():
-        u["gpu_remaining"] = u["gpu_available"] - u["gpu_used"]
+    usage_by_gpu = notion_sync.build_gpu_usage_by_gpu(hypervisors, instances, alias_to_device_name)
 
     if gpu_spec_db_id and usage_by_gpu:
         try:
@@ -212,46 +174,7 @@ async def _run_sync_cycle() -> None:
     )
 
     alias_to_device_name = build_alias_to_device_name_map()
-    usage_by_gpu: dict[str, dict] = {}
-    for h in hypervisors:
-        for g in h.get("gpu_groups", []):
-            device_name = g.get("device_name", "")
-            total = g.get("total", 0)
-            if not device_name:
-                continue
-            if device_name not in usage_by_gpu:
-                usage_by_gpu[device_name] = {
-                    "total_cpu_used": 0,
-                    "total_ram_used": 0,
-                    "total_gpu_used": 0,
-                    "instance_count": 0,
-                    "gpu_available": 0,
-                    "gpu_used": 0,
-                    "gpu_remaining": 0,
-                }
-            usage_by_gpu[device_name]["gpu_available"] += total
-    for inst in instances:
-        gpu_display = inst.get("gpu_name", "")
-        if not gpu_display or not inst.get("gpu_count"):
-            continue
-        canonical = alias_to_device_name.get(gpu_display, gpu_display)
-        if canonical not in usage_by_gpu:
-            usage_by_gpu[canonical] = {
-                "total_cpu_used": 0,
-                "total_ram_used": 0,
-                "total_gpu_used": 0,
-                "instance_count": 0,
-                "gpu_available": 0,
-                "gpu_used": 0,
-                "gpu_remaining": 0,
-            }
-        usage_by_gpu[canonical]["total_cpu_used"] += inst.get("vcpus", 0)
-        usage_by_gpu[canonical]["total_ram_used"] += inst.get("ram_gb", 0)
-        usage_by_gpu[canonical]["total_gpu_used"] += inst.get("gpu_count", 0)
-        usage_by_gpu[canonical]["instance_count"] += 1
-        usage_by_gpu[canonical]["gpu_used"] += inst.get("gpu_count", 0)
-    for u in usage_by_gpu.values():
-        u["gpu_remaining"] = u["gpu_available"] - u["gpu_used"]
+    usage_by_gpu = notion_sync.build_gpu_usage_by_gpu(hypervisors, instances, alias_to_device_name)
 
     if gpu_spec_db_id:
         try:

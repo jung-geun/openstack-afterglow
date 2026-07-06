@@ -286,3 +286,68 @@ async def test_update_notion_target_invalid_interval(admin_client):
     """interval_minutes 범위 초과 시 400을 반환한다."""
     resp = await admin_client.patch("/api/v1/admin/notion/targets/1", json={"interval_minutes": 9999})
     assert resp.status_code == 400
+
+
+def test_build_gpu_usage_by_gpu_excludes_shelved_statuses():
+    from app.services.notion_sync import build_gpu_usage_by_gpu
+
+    usage_by_gpu = build_gpu_usage_by_gpu(
+        hypervisors=[
+            {
+                "gpu_groups": [
+                    {
+                        "device_name": "RTX 3090",
+                        "total": 2,
+                    }
+                ]
+            }
+        ],
+        instances=[
+            {
+                "status": "ACTIVE",
+                "gpu_name": "RTX 3090",
+                "gpu_count": 1,
+                "vcpus": 8,
+                "ram_gb": 16,
+            },
+            {
+                "status": "SHELVED_OFFLOADED",
+                "gpu_name": "RTX 3090",
+                "gpu_count": 1,
+                "vcpus": 8,
+                "ram_gb": 16,
+            },
+            {
+                "status": "SHELVED",
+                "gpu_name": "RTX 3090",
+                "gpu_count": 1,
+                "vcpus": 8,
+                "ram_gb": 16,
+            },
+        ],
+        alias_to_device_name={},
+    )
+
+    assert usage_by_gpu["RTX 3090"]["gpu_used"] == 1
+    assert usage_by_gpu["RTX 3090"]["total_gpu_used"] == 1
+    assert usage_by_gpu["RTX 3090"]["instance_count"] == 1
+    assert usage_by_gpu["RTX 3090"]["gpu_remaining"] == 1
+
+
+def test_build_instance_properties_clears_empty_gpu_map_relation():
+    from app.services.notion_sync import _build_instance_properties
+
+    schema = {
+        "Name": {"type": "title"},
+        "GPU map": {"type": "relation"},
+    }
+    props = _build_instance_properties(
+        schema,
+        "Name",
+        {
+            "name": "shelved-gpu",
+            "gpu_spec_page_id": "",
+        },
+    )
+
+    assert props["GPU map"] == {"relation": []}
