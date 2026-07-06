@@ -175,6 +175,12 @@ async def create_instance(
 ):
     """동기식 인스턴스 생성 (기존 방식)."""
     settings = get_settings()
+    from app.services.instance_names import ensure_unique_instance_name
+
+    try:
+        req = req.model_copy(update={"name": await asyncio.to_thread(ensure_unique_instance_name, conn, req.name)})
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     resolved_libs = lib_svc.resolve_with_deps(req.libraries)
 
     # Default 네트워크 결정 (asyncio.to_thread 호출 전에 미리 처리)
@@ -452,6 +458,12 @@ async def create_instance_async(
 ):
     """SSE로 진행 상황을 스트리밍하는 비동기 인스턴스 생성."""
     settings = get_settings()
+    from app.services.instance_names import ensure_unique_instance_name
+
+    try:
+        req = req.model_copy(update={"name": await asyncio.to_thread(ensure_unique_instance_name, conn, req.name)})
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     resolved_libs = lib_svc.resolve_with_deps(req.libraries)
 
     # Default 네트워크 결정 (SSE 시작 전에 미리 처리)

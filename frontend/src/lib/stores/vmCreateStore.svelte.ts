@@ -162,8 +162,28 @@ export function shouldUseSquashfsConsume(options: {
 	}) && options.squashfsMode !== null;
 }
 
+export type WizardStepId = 1 | 2 | 3 | 4 | 5 | 6;
 export const TOTAL_STEPS = 6;
-export const STEP_LABELS = ['이미지', '플레이버', '라이브러리', '전략', '설정', '배포'];
+export const STEP_LABELS: Record<WizardStepId, string> = {
+	1: '이미지',
+	2: '플레이버',
+	3: '라이브러리',
+	4: '전략',
+	5: '설정',
+	6: '배포',
+};
+
+export function wizardStepSequence(options: {
+	squashfsEligible: boolean;
+	haDeploy: boolean;
+	hasLibraries?: boolean;
+}): WizardStepId[] {
+	const steps: WizardStepId[] = [1, 2];
+	if (options.squashfsEligible) steps.push(3);
+	if (options.haDeploy || options.hasLibraries) steps.push(4);
+	steps.push(5, 6);
+	return steps;
+}
 
 export const ALL_PROGRESS_STEPS = [
 	{ id: 'manila_preparing', label: 'File Storage', description: '파일 스토리지 준비', needsLibrary: true },
@@ -305,6 +325,20 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 		libraries.some(l => wizardState.libraries.includes(l.id) && l.available_prebuilt)
 	);
 
+	const visibleStepIds = $derived.by(() =>
+		wizardStepSequence({
+			squashfsEligible,
+			haDeploy: betaState.haDeploy,
+			hasLibraries: wizardState.libraries.length > 0,
+		})
+	);
+	const visibleStepLabels = $derived(visibleStepIds.map(step => STEP_LABELS[step]));
+	const visibleTotalSteps = $derived(visibleStepIds.length);
+	const visibleStepIndex = $derived.by(() => {
+		const index = visibleStepIds.indexOf(wizardState.step as WizardStepId);
+		return index >= 0 ? index + 1 : 1;
+	});
+
 	const selectedFlavorDetail = $derived.by(() => {
 		const f = flavors.find(fl => fl.id === wizardState.flavorId);
 		if (!f) return '';
@@ -329,7 +363,12 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 	$effect(() => {
 		const needsSchedulingReset = wizardState.scheduling !== normalizeSchedulingForBeta(betaState, wizardState.scheduling);
 		const needsSquashfsReset = !squashfsEligible && wizardState.squashfsMode !== null;
-		if (!needsSchedulingReset && !needsSquashfsReset) return;
+		const needsStrategyReset = !visibleStepIds.includes(4) && wizardState.strategy !== null;
+		const isVisibleStep = visibleStepIds.includes(wizardState.step as WizardStepId);
+		const nextVisibleStep = isVisibleStep
+			? null
+			: (visibleStepIds.find(step => step > wizardState.step) ?? visibleStepIds[visibleStepIds.length - 1] ?? 1);
+		if (!needsSchedulingReset && !needsSquashfsReset && !needsStrategyReset && nextVisibleStep === null) return;
 		wizard.update(w => {
 			let next = w;
 			const nextScheduling = normalizeSchedulingForBeta(betaState, next.scheduling);
@@ -338,6 +377,12 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 			}
 			if (!squashfsEligible && next.squashfsMode !== null) {
 				next = { ...next, squashfsMode: null, layerProfileName: null, layerArtifactIds: [] };
+			}
+			if (!visibleStepIds.includes(4) && next.strategy !== null) {
+				next = { ...next, strategy: null };
+			}
+			if (nextVisibleStep !== null && next.step !== nextVisibleStep) {
+				next = { ...next, step: nextVisibleStep };
 			}
 			return next;
 		});
@@ -354,8 +399,8 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 				if (wizardState.libraries.length > 0 && !wizardState.strategy) return false;
 				return true;
 			}
-			case 5: return !!wizardState.instanceName.trim() && (adminMode || !!wizardState.keyName);
-			case 6: return !!wizardState.instanceName.trim();
+			case 5: return adminMode || !!wizardState.keyName;
+			case 6: return true;
 			default: return false;
 		}
 	})());
@@ -577,15 +622,36 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 		}
 	}
 
+	function nearestVisibleStep(step: number): WizardStepId {
+		return (
+			visibleStepIds.find(candidate => candidate >= step) ??
+			visibleStepIds[visibleStepIds.length - 1] ??
+			1
+		);
+	}
+
 	function nextStep() {
-		if (get(wizard).step < TOTAL_STEPS) wizard.update(w => ({ ...w, step: w.step + 1 }));
+		const current = get(wizard).step as WizardStepId;
+		const index = visibleStepIds.indexOf(current);
+		const next = visibleStepIds[Math.min(index + 1, visibleStepIds.length - 1)];
+		if (next && next !== current) wizard.update(w => ({ ...w, step: next }));
 	}
 
 	function prevStep() {
-		if (get(wizard).step > 1) wizard.update(w => ({ ...w, step: w.step - 1 }));
+		const current = get(wizard).step as WizardStepId;
+		const index = visibleStepIds.indexOf(current);
+		const prev = visibleStepIds[Math.max(index - 1, 0)];
+		if (prev && prev !== current) wizard.update(w => ({ ...w, step: prev }));
 	}
 
-	function goTo(step: number) { wizard.update(w => ({ ...w, step })); }
+	function goTo(step: number) {
+		wizard.update(w => ({ ...w, step: nearestVisibleStep(step) }));
+	}
+
+	function goToVisible(index: number) {
+		const step = visibleStepIds[index - 1];
+		if (step) wizard.update(w => ({ ...w, step }));
+	}
 
 	function selectImage(id: string, name: string) { wizard.update(w => ({ ...w, imageId: id, imageName: name })); }
 	function selectFlavor(id: string, name: string) { wizard.update(w => ({ ...w, flavorId: id, flavorName: name })); }
@@ -699,8 +765,9 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 			squashfsBaseMismatch,
 		});
 		if (useSquashfsConsume) {
+			const requestedName = w.instanceName.trim() || null;
 			const consumeBody: Record<string, unknown> = {
-				server_name: w.instanceName,
+				server_name: requestedName,
 				flavor_id: w.flavorId,
 				image_id: w.imageId,
 				network_id: w.networkId,
@@ -742,8 +809,9 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 			}
 		}
 
+		const requestedName = w.instanceName.trim() || null;
 		const body: Record<string, unknown> = {
-			name: w.instanceName,
+			name: requestedName,
 			...(w.bootSource === 'volume'
 				? { boot_volume_id: w.bootVolumeId }
 				: {
@@ -869,6 +937,10 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 		get currentStep() { return currentStep; },
 		get progress() { return progress; },
 		get progressMessage() { return progressMessage; },
+		get visibleStepIds() { return visibleStepIds; },
+		get visibleStepLabels() { return visibleStepLabels; },
+		get visibleTotalSteps() { return visibleTotalSteps; },
+		get visibleStepIndex() { return visibleStepIndex; },
 		get elapsedSeconds() { return elapsedSeconds; },
 		// Admin state
 		get adminProjects() { return adminProjects; },
@@ -910,6 +982,7 @@ export function createVmCreateStore(opts: VmCreateOpts) {
 		nextStep,
 		prevStep,
 		goTo,
+		goToVisible,
 		selectImage,
 		selectFlavor,
 		toggleLibrary,

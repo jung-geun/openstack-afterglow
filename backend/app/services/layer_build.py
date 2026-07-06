@@ -427,6 +427,7 @@ async def _update_consume_db(
     server_id: str | None = None,
     port_id: str | None = None,
     error_message: str | None = None,
+    server_name: str | None = None,
     completed: bool = False,
 ) -> None:
     from sqlalchemy import select
@@ -450,6 +451,8 @@ async def _update_consume_db(
             row.server_id = server_id
         if port_id is not None:
             row.port_id = port_id
+        if server_name is not None:
+            row.server_name = server_name
         if error_message is not None:
             row.error_message = error_message
         if completed:
@@ -1092,7 +1095,7 @@ async def run_layer_build(
 async def run_layer_consume(
     consume_db_id: int | None,
     profile_name: str,
-    server_name: str,
+    server_name: str | None,
     flavor_id: str,
     image_id: str | None = None,
     network_id: str | None = None,
@@ -1231,6 +1234,13 @@ async def run_layer_consume(
             owned_compute_conn = await asyncio.to_thread(get_service_project_connection)
         if owned_share_conn is None:
             owned_share_conn = owned_compute_conn
+        from app.services.instance_names import ensure_unique_instance_name
+
+        try:
+            server_name = await asyncio.to_thread(ensure_unique_instance_name, owned_compute_conn, server_name)
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+        await _update_consume_db(consume_db_id, server_name=server_name)
 
         resolved_flavor_id = await asyncio.to_thread(_resolve_flavor_id, owned_compute_conn, flavor_id)
 

@@ -286,7 +286,7 @@ class LayerConsumeRequest(BaseModel):
     """레이어 소비 인스턴스 생성 요청."""
 
     profile_name: str
-    server_name: str
+    server_name: str | None = None
     flavor_id: str
     image_id: str | None = None
     network_id: str | None = None
@@ -303,10 +303,10 @@ class LayerConsumeRequest(BaseModel):
 
     @field_validator("server_name")
     @classmethod
-    def validate_server_name(cls, v: str) -> str:
-        if not _SERVER_NAME_RE.match(v) or len(v) > 63:
-            raise ValueError(f"유효하지 않은 서버 이름: {v!r}")
-        return v
+    def validate_server_name(cls, v: str | None) -> str | None:
+        from app.services.instance_names import normalize_requested_instance_name
+
+        return normalize_requested_instance_name(v)
 
     @field_validator("flavor_id")
     @classmethod

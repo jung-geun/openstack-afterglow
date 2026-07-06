@@ -10,15 +10,16 @@
 <!-- VM 이름 -->
 <div class="mb-4">
 	<label for="vm-name" class="block text-[11.5px] font-semibold text-gray-300 tracking-tight flex items-center gap-1.5 mb-1.5">
-		VM 이름 <span class="text-red-400">*</span>
+		VM 이름 <span class="text-[10px] text-gray-500 font-normal px-1.5 py-0.5 rounded-full bg-gray-800">선택</span>
 	</label>
 	<input
 		id="vm-name"
 		bind:value={$wizard.instanceName}
 		type="text"
-		placeholder="my-vm"
+		placeholder="비워두면 자동 생성"
 		class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
 	/>
+	<p class="text-xs text-gray-500 mt-1">입력하지 않으면 같은 프로젝트 안에서 중복되지 않는 안전한 영문 이름이 자동 생성됩니다.</p>
 </div>
 
 <!-- 네트워크 + 키페어 -->

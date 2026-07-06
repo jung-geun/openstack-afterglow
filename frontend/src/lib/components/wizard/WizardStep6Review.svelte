@@ -22,7 +22,7 @@
 	<!-- 이름 -->
 	<div class="grid grid-cols-[140px_1fr_auto] gap-4 items-center px-4 py-3.5 border-b border-gray-800">
 		<span class="text-xs text-gray-400 font-medium">이름</span>
-		<span class="text-sm text-white font-semibold font-mono">{$wizard.instanceName || '-'}</span>
+		<span class="text-sm text-white font-semibold font-mono">{$wizard.instanceName || '자동 생성'}</span>
 		<button onclick={() => s.goTo(5)} class="review-edit-btn">✎ 수정</button>
 	</div>
 	<!-- 이미지 / 볼륨 -->
@@ -85,6 +85,7 @@
 		<span class="text-sm text-white font-mono">{$wizard.keyName ?? '없음'}</span>
 		<button onclick={() => s.goTo(5)} class="review-edit-btn">✎ 수정</button>
 	</div>
+	{#if s.visibleStepIds.includes(4)}
 	<!-- 전략 -->
 	<div class="grid grid-cols-[140px_1fr_auto] gap-4 items-center px-4 py-3.5 border-b border-gray-800">
 		<span class="text-xs text-gray-400 font-medium">전략</span>
@@ -96,6 +97,7 @@
 		</span>
 		<button onclick={() => s.goTo(4)} class="review-edit-btn">✎ 수정</button>
 	</div>
+	{/if}
 	<!-- 네트워크 -->
 	<div class="grid grid-cols-[140px_1fr_auto] gap-4 items-center px-4 py-3.5 border-b border-gray-800">
 		<span class="text-xs text-gray-400 font-medium">네트워크</span>

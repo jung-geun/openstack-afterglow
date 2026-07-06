@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { wizard } from '$lib/stores/wizard';
-	import { betaFeatures } from '$lib/stores/betaFeatures';
 	import { useVmCreate } from '$lib/stores/vmCreateStore.svelte';
 
 	const s = useVmCreate();
@@ -25,9 +24,9 @@
 	});
 </script>
 
-<h2 class="text-lg font-semibold text-white mb-1">라이브러리 레이어 <span class="text-gray-500 text-sm font-normal">VM에 적용할 레이어 선택</span></h2>
-
 {#if squashfsEligible}
+	<h2 class="text-lg font-semibold text-white mb-1">라이브러리 레이어 <span class="text-gray-500 text-sm font-normal">VM에 적용할 레이어 선택</span></h2>
+
 	<div class="mb-5 rounded-xl border border-blue-900/60 bg-blue-950/20 p-4">
 		<div class="flex items-start justify-between gap-4 mb-3">
 			<div>
@@ -94,16 +93,6 @@
 
 		{#if s.squashfsBaseMismatch}
 			<p class="mt-3 text-xs text-red-300">선택한 squashfs 레이어의 base image가 부팅 이미지와 일치하지 않습니다.</p>
-		{/if}
-	</div>
-{:else}
-	<div class="mb-5 rounded-xl border border-gray-800 bg-gray-950/40 p-4 text-sm text-gray-400">
-		{#if !$betaFeatures.libraryConsume}
-			계정 설정에서 squashfs 라이브러리 소비 베타를 켜면 이 단계에서 공개 프로필/레이어를 선택할 수 있습니다.
-		{:else if $wizard.bootSource !== 'image'}
-			squashfs 소비는 이미지 부팅 VM에서만 지원됩니다. 볼륨 부팅에서는 일반 VM 생성으로 진행합니다.
-		{:else}
-			선택한 부팅 이미지가 지원되는 Ubuntu 18.04/20.04/22.04/24.04 이미지로 식별되지 않았습니다.
 		{/if}
 	</div>
 {/if}

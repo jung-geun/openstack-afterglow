@@ -68,6 +68,11 @@ def test_public_consume_request_requires_exactly_one_selector() -> None:
         )
 
 
+def test_public_consume_request_allows_empty_server_name_for_auto_generation() -> None:
+    req = layer_public.PublicLayerConsumeRequest(profile_name="prof", server_name="", flavor_id="m1.small")
+    assert req.server_name is None
+
+
 def test_public_artifact_dict_strips_service_owned_mount_fields() -> None:
     data = layer_public._artifact_public_dict(_artifact(parent_id=7))
     assert data["id"] == 1

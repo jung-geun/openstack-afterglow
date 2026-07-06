@@ -12,7 +12,7 @@
 
 <section class="bg-gray-900 border border-gray-800 rounded-xl p-5">
 	<div class="mb-5">
-		<p class="text-sm font-semibold text-white">베타 기능</p>
+		<p class="text-sm font-semibold text-white">고급 VM 생성 옵션</p>
 		<p class="text-xs text-gray-400 mt-1">
 			이 설정은 현재 브라우저에만 저장됩니다. 프로젝트 전체 서버 설정이나 다른 사용자에게는 적용되지 않습니다.
 		</p>

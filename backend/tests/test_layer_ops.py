@@ -438,6 +438,14 @@ class TestLayerConsumeRequestValidation:
         assert req.profile_name == "default"
         assert req.server_name == "consumer-01"
 
+    def test_empty_server_name_uses_auto_generation(self):
+        req = LayerConsumeRequest(
+            profile_name="default",
+            server_name="",
+            flavor_id="m1.small",
+        )
+        assert req.server_name is None
+
     # --- server_name 검증 ---
 
     def test_server_name_with_semicolon_rejected(self):

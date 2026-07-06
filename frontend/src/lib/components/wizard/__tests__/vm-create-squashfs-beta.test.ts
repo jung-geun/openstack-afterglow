@@ -9,6 +9,7 @@ import {
 	isSquashfsWizardEligible,
 	normalizeSchedulingForBeta,
 	shouldUseSquashfsConsume,
+	wizardStepSequence,
 } from '../../../stores/vmCreateStore.svelte';
 
 const wizardStepSource = readFileSync(resolve(__dirname, '../WizardStep3Library.svelte'), 'utf8');
@@ -52,10 +53,11 @@ describe('VM create squashfs beta workflow contract', () => {
 		expect(betaStoreSource).toContain('afterglow.beta.haDeploy');
 	});
 
-	it('replaces the old step 3 library selectors with squashfs-only UI', () => {
+	it('keeps the library step renderable only as squashfs UI when the step is visible', () => {
 		expect(wizardStepSource).toContain('squashfs 라이브러리 소비');
 		expect(wizardStepSource).not.toContain('SelectLibraries');
 		expect(wizardStepSource).not.toContain('SelectTemplate');
+		expect(wizardStepSource).not.toContain('계정 설정에서 squashfs 라이브러리 소비 베타');
 	});
 
 	it('detects supported Ubuntu images from metadata or image name', () => {
@@ -111,6 +113,13 @@ describe('VM create squashfs beta workflow contract', () => {
 				selectedImageUbuntuBase: '22.04',
 			}),
 		).toBe(false);
+	});
+
+	it('removes hidden beta steps from the wizard sequence instead of showing disabled cards', () => {
+		expect(wizardStepSequence({ squashfsEligible: false, haDeploy: false })).toEqual([1, 2, 5, 6]);
+		expect(wizardStepSequence({ squashfsEligible: true, haDeploy: false })).toEqual([1, 2, 3, 5, 6]);
+		expect(wizardStepSequence({ squashfsEligible: false, haDeploy: true })).toEqual([1, 2, 4, 5, 6]);
+		expect(wizardStepSequence({ squashfsEligible: true, haDeploy: true })).toEqual([1, 2, 3, 4, 5, 6]);
 	});
 
 	it('uses the public consume router only for eligible, ready squashfs selections', () => {
@@ -181,6 +190,7 @@ describe('VM create squashfs beta workflow contract', () => {
 		expect(normalizeSchedulingForBeta({ haDeploy: true }, 'ha')).toBe('ha');
 		expect(storeSource).toContain('/api/v1/libraries/squashfs/consume');
 		expect(storeSource).toContain('normalizeSchedulingForBeta(betaState, w.scheduling)');
+		expect(storeSource).toContain('w.instanceName.trim() || null');
 	});
 
 	it('hides the HA option in the strategy step unless the beta flag is enabled', async () => {

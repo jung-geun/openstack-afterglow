@@ -13,10 +13,10 @@ describe('BetaFeaturesSection', () => {
 		betaFeatures.set({ libraryConsume: false, haDeploy: false });
 	});
 
-	it('renders per-browser beta feature guidance', () => {
+	it('renders per-browser advanced VM option guidance', () => {
 		render(BetaFeaturesSection);
 
-		expect(screen.getByText('베타 기능')).toBeTruthy();
+		expect(screen.getByText('고급 VM 생성 옵션')).toBeTruthy();
 		expect(
 			screen.getByText('이 설정은 현재 브라우저에만 저장됩니다. 프로젝트 전체 서버 설정이나 다른 사용자에게는 적용되지 않습니다.'),
 		).toBeTruthy();
