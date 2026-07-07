@@ -11,6 +11,7 @@ export interface DbInstanceDetailControllerOpts {
 	token: () => string | undefined;
 	projectId: () => string | undefined;
 	onDeleted?: () => void;
+	databaseBackupsEnabled?: () => boolean;
 }
 
 export function createDbInstanceDetailController(opts: DbInstanceDetailControllerOpts) {
@@ -56,6 +57,8 @@ export function createDbInstanceDetailController(opts: DbInstanceDetailControlle
 	let loadingAutoBackup = $state(false);
 	let savingAutoBackup = $state(false);
 
+	const databaseBackupsOn = () => opts.databaseBackupsEnabled?.() ?? true;
+
 	// Derived
 	const instanceFips = $derived.by(() => {
 		const ips = instance?.ips ?? [];
@@ -90,6 +93,11 @@ export function createDbInstanceDetailController(opts: DbInstanceDetailControlle
 	);
 
 	async function loadAutoBackupConfig() {
+		if (!databaseBackupsOn()) {
+			autoBackupConfig = null;
+			loadingAutoBackup = false;
+			return;
+		}
 		const id = opts.instanceId();
 		const tok = opts.token();
 		const proj = opts.projectId();
@@ -105,6 +113,7 @@ export function createDbInstanceDetailController(opts: DbInstanceDetailControlle
 	}
 
 	async function saveAutoBackupConfig(max_daily: number, max_weekly: number, max_monthly: number) {
+		if (!databaseBackupsOn()) return;
 		const id = opts.instanceId();
 		const tok = opts.token();
 		const proj = opts.projectId();
@@ -125,6 +134,10 @@ export function createDbInstanceDetailController(opts: DbInstanceDetailControlle
 	}
 
 	async function disableAutoBackup() {
+		if (!databaseBackupsOn()) {
+			autoBackupConfig = null;
+			return;
+		}
 		const id = opts.instanceId();
 		const tok = opts.token();
 		const proj = opts.projectId();
@@ -164,9 +177,11 @@ export function createDbInstanceDetailController(opts: DbInstanceDetailControlle
 			api.get<DbUser[]>(`/api/v1/database-instances/${id}/users`, tok, proj)
 				.then(v => { users = v; })
 				.catch(() => {}),
-			api.get<DbBackup[]>(`/api/v1/database-instances/${id}/backups`, tok, proj)
-				.then(v => { backups = v; })
-				.catch(() => {}),
+			databaseBackupsOn()
+				? api.get<DbBackup[]>(`/api/v1/database-instances/${id}/backups`, tok, proj)
+					.then(v => { backups = v; })
+					.catch(() => {})
+				: Promise.resolve().then(() => { backups = []; }),
 			flavors.length === 0
 				? api.get<DbFlavor[]>('/api/v1/database-instances/flavors', tok, proj)
 					.then(v => { flavors = v; })
@@ -175,9 +190,11 @@ export function createDbInstanceDetailController(opts: DbInstanceDetailControlle
 			api.get<FloatingIp[]>('/api/v1/networks/floating-ips', tok, proj)
 				.then(v => { floatingIps = v; })
 				.catch(() => {}),
-			api.get<AutoBackupConfig>(`/api/v1/database-instances/${id}/auto-backup`, tok, proj)
-				.then(v => { autoBackupConfig = v; })
-				.catch(() => { autoBackupConfig = null; }),
+			databaseBackupsOn()
+				? api.get<AutoBackupConfig>(`/api/v1/database-instances/${id}/auto-backup`, tok, proj)
+					.then(v => { autoBackupConfig = v; })
+					.catch(() => { autoBackupConfig = null; })
+				: Promise.resolve().then(() => { autoBackupConfig = null; }),
 		]);
 		loading = false;
 	}
@@ -317,6 +334,7 @@ export function createDbInstanceDetailController(opts: DbInstanceDetailControlle
 	}
 
 	async function createBackup(name: string, description: string) {
+		if (!databaseBackupsOn()) return false;
 		const id = opts.instanceId();
 		const tok = opts.token();
 		const proj = opts.projectId();
@@ -344,6 +362,7 @@ export function createDbInstanceDetailController(opts: DbInstanceDetailControlle
 	}
 
 	async function deleteBackup(backupId: string) {
+		if (!databaseBackupsOn()) return;
 		const isLast = backups.length === 1;
 		const msg = isLast
 			? '마지막 백업입니다. 삭제하면 복구 수단이 없습니다. 정말 삭제하시겠습니까?'
@@ -360,6 +379,7 @@ export function createDbInstanceDetailController(opts: DbInstanceDetailControlle
 	}
 
 	async function restoreBackup(backupId: string, name: string, flavorId: string, volumeSize: number) {
+		if (!databaseBackupsOn()) return;
 		const tok = opts.token();
 		const proj = opts.projectId();
 		restoringBackup = backupId;

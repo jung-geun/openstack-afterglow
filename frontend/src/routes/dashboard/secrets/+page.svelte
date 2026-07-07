@@ -10,6 +10,8 @@
 	import { secretsApi, type SecretInfo, type ContainerInfo, type OrderInfo, type QuotaInfo } from '$lib/api/secrets';
 	import { ApiError } from '$lib/api/client';
 	import { untrack } from 'svelte';
+	import { betaFeatures } from '$lib/stores/betaFeatures';
+	import BetaFeatureGate from '$lib/components/ui/BetaFeatureGate.svelte';
 
 	type Tab = 'secrets' | 'containers' | 'orders' | 'quota';
 
@@ -47,8 +49,23 @@
 	let payloadLoading = $state<string | null>(null);
 
 	const SECRET_TYPES = ['passphrase', 'certificate', 'symmetric', 'public', 'private', 'opaque'];
+	const keyManagerEnabled = $derived($betaFeatures.keyManager);
+
+	function clearKeyManagerState() {
+		secrets = [];
+		containers = [];
+		orders = [];
+		quota = null;
+		error = '';
+	}
+
 
 	async function fetchAll() {
+		if (!keyManagerEnabled) {
+			clearKeyManagerState();
+			loading = false;
+			return;
+		}
 		try {
 			const [s, c, o, q] = await Promise.allSettled([
 				secretsApi.listSecrets($auth.token ?? undefined, $auth.projectId ?? undefined),
@@ -83,11 +100,17 @@
 
 	$effect(() => {
 		const pid = $auth.projectId;
+		if (!keyManagerEnabled) {
+			clearKeyManagerState();
+			loading = false;
+			return;
+		}
 		if (!pid) return;
 		untrack(() => fetchAll());
 	});
 
 	async function handleCreateSecret() {
+		if (!keyManagerEnabled) return;
 		creating = true;
 		try {
 			await secretsApi.createSecret({
@@ -109,6 +132,7 @@
 	}
 
 	async function handleDeleteSecret(s: SecretInfo) {
+		if (!keyManagerEnabled) return;
 		if (s.system_managed) return;
 		if (!await confirmDialog(`비밀 "${s.name ?? s.id}"를 삭제하시겠습니까?`)) return;
 		try {
@@ -121,6 +145,7 @@
 	}
 
 	async function handleShowPayload(s: SecretInfo) {
+		if (!keyManagerEnabled) return;
 		if (payloadVisible[s.id]) {
 			const next = { ...payloadVisible };
 			delete next[s.id];
@@ -139,6 +164,7 @@
 	}
 
 	async function copyPayload(val: string) {
+		if (!keyManagerEnabled) return;
 		try {
 			await navigator.clipboard.writeText(val);
 			toast.success('복사됨');
@@ -148,6 +174,7 @@
 	}
 
 	async function handleCreateContainer() {
+		if (!keyManagerEnabled) return;
 		creatingContainer = true;
 		try {
 			await secretsApi.createContainer({
@@ -167,6 +194,7 @@
 	}
 
 	async function handleDeleteContainer(id: string, name: string | null) {
+		if (!keyManagerEnabled) return;
 		if (!await confirmDialog(`컨테이너 "${name ?? id}"를 삭제하시겠습니까?`)) return;
 		try {
 			await secretsApi.deleteContainer(id, $auth.token ?? undefined, $auth.projectId ?? undefined);
@@ -178,6 +206,7 @@
 	}
 
 	async function handleCreateOrder() {
+		if (!keyManagerEnabled) return;
 		creatingOrder = true;
 		try {
 			await secretsApi.createOrder({
@@ -214,6 +243,11 @@
 	};
 </script>
 
+{#if !keyManagerEnabled}
+	<div class="p-4 md:p-8">
+		<BetaFeatureGate title="Key Manager는 베타 기능입니다" />
+	</div>
+{:else}
 <!-- 비밀 생성 모달 -->
 <FormModal
 	bind:open={showCreateSecret}
@@ -544,3 +578,4 @@
 		{/if}
 	{/if}
 </div>
+{/if}

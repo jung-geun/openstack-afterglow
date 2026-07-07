@@ -1,7 +1,10 @@
+import type { BetaFeatures } from '$lib/stores/betaFeatures';
+
 export interface NavItem {
   label: string;
   href: string;
   service: string | null;
+  beta?: keyof BetaFeatures;
 }
 
 export interface NavSection {
@@ -10,6 +13,7 @@ export interface NavSection {
   extraPrefixes?: string[];
   icon: string;
   service?: string | null;
+  beta?: keyof BetaFeatures;
   items: NavItem[];
 }
 
@@ -31,8 +35,8 @@ export const userNavSections: NavSection[] = [
     icon: 'M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4',
     items: [
       { label: '볼륨 목록', href: '/dashboard/volumes', service: null },
-      { label: '볼륨 백업', href: '/dashboard/volumes/backups', service: null },
-      { label: '볼륨 스냅샷', href: '/dashboard/volumes/snapshots', service: null },
+      { label: '볼륨 백업', href: '/dashboard/volumes/backups', service: null, beta: 'volumeBackups' },
+      { label: '볼륨 스냅샷', href: '/dashboard/volumes/snapshots', service: null, beta: 'volumeSnapshots' },
     ],
   },
   {
@@ -43,9 +47,9 @@ export const userNavSections: NavSection[] = [
     service: 'manila',
     items: [
       { label: '파일 스토리지', href: '/dashboard/file-storage', service: null },
-      { label: '스냅샷', href: '/dashboard/file-storage/snapshots', service: null },
-      { label: 'Share 네트워크', href: '/dashboard/file-storage/networks', service: null },
-      { label: 'Security Service', href: '/dashboard/file-storage/security-services', service: null },
+      { label: '스냅샷', href: '/dashboard/file-storage/snapshots', service: null, beta: 'fileStorageSnapshots' },
+      { label: 'Share 네트워크', href: '/dashboard/file-storage/networks', service: null, beta: 'fileStorageShareNetworks' },
+      { label: 'Security Service', href: '/dashboard/file-storage/security-services', service: null, beta: 'fileStorageSecurityServices' },
     ],
   },
   {
@@ -68,7 +72,7 @@ export const userNavSections: NavSection[] = [
     service: 'trove',
     items: [
       { label: 'DB 인스턴스', href: '/dashboard/database/instances', service: null },
-      { label: 'DB 백업', href: '/dashboard/database/backups', service: null },
+      { label: 'DB 백업', href: '/dashboard/database/backups', service: null, beta: 'databaseBackups' },
     ],
   },
   {
@@ -79,6 +83,16 @@ export const userNavSections: NavSection[] = [
     service: 'swift',
     items: [
       { label: '버킷', href: '/dashboard/object-storage/buckets', service: null },
+    ],
+  },
+  {
+    label: 'Key Manager',
+    prefix: '/dashboard/secrets',
+    extraPrefixes: [],
+    icon: 'M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z',
+    beta: 'keyManager',
+    items: [
+      { label: '비밀 관리', href: '/dashboard/secrets', service: null },
     ],
   },
   {
@@ -150,6 +164,15 @@ export const adminNavSections: NavSection[] = [
     ],
   },
   {
+    label: 'Key Manager',
+    prefix: '/admin/secrets',
+    icon: 'M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z',
+    beta: 'keyManager',
+    items: [
+      { label: '프로젝트 쿼터', href: '/admin/secrets', service: null },
+    ],
+  },
+  {
     label: '모니터링',
     prefix: '/admin/monitoring',
     icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z',
@@ -180,9 +203,12 @@ export const adminNavSections: NavSection[] = [
   },
 ];
 
-export function allNavItems(isAdmin: boolean): Array<NavItem & { section: string }> {
+export function allNavItems(isAdmin: boolean, betaFeatures: BetaFeatures): Array<NavItem & { section: string }> {
   const sections = isAdmin ? adminNavSections : userNavSections;
-  return sections.flatMap((s) =>
-    s.items.map((item) => ({ ...item, section: s.label }))
-  );
+  return sections.flatMap((section) => {
+    if (section.beta && !betaFeatures[section.beta]) return [];
+    return section.items
+      .filter((item) => !item.beta || betaFeatures[item.beta])
+      .map((item) => ({ ...item, section: section.label }));
+  });
 }

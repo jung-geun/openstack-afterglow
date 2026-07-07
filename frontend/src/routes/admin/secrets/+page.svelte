@@ -9,6 +9,8 @@
 	import { secretsApi } from '$lib/api/secrets';
 	import { ApiError } from '$lib/api/client';
 	import { untrack } from 'svelte';
+	import { betaFeatures } from '$lib/stores/betaFeatures';
+	import BetaFeatureGate from '$lib/components/ui/BetaFeatureGate.svelte';
 
 	interface ProjectQuota {
 		project_id: string;
@@ -33,8 +35,20 @@
 	let editOrders = $state<number | null>(null);
 	let editContainers = $state<number | null>(null);
 	let submitting = $state(false);
+	const keyManagerEnabled = $derived($betaFeatures.keyManager);
+
+	function clearKeyManagerState() {
+		quotas = [];
+		error = '';
+	}
+
 
 	async function fetchQuotas() {
+		if (!keyManagerEnabled) {
+			clearKeyManagerState();
+			loading = false;
+			return;
+		}
 		try {
 			quotas = (await secretsApi.listProjectQuotas($auth.token ?? undefined, $auth.projectId ?? undefined)) as ProjectQuota[];
 			error = '';
@@ -59,11 +73,17 @@
 
 	$effect(() => {
 		const token = $auth.token;
+		if (!keyManagerEnabled) {
+			clearKeyManagerState();
+			loading = false;
+			return;
+		}
 		if (!token) return;
 		untrack(() => fetchQuotas());
 	});
 
 	function openEdit(q: ProjectQuota) {
+		if (!keyManagerEnabled) return;
 		editProjectId = q.project_id;
 		editSecrets = q.project_quotas.secrets ?? null;
 		editOrders = q.project_quotas.orders ?? null;
@@ -72,6 +92,7 @@
 	}
 
 	async function handleSetQuota() {
+		if (!keyManagerEnabled) return;
 		submitting = true;
 		const body: Record<string, number> = {};
 		if (editSecrets !== null) body.secrets = editSecrets;
@@ -90,6 +111,7 @@
 	}
 
 	async function handleResetQuota(projectId: string) {
+		if (!keyManagerEnabled) return;
 		try {
 			await secretsApi.deleteProjectQuota(projectId, $auth.token ?? undefined, $auth.projectId ?? undefined);
 			toast.success('기본값으로 초기화되었습니다');
@@ -108,6 +130,11 @@
 	]);
 </script>
 
+{#if !keyManagerEnabled}
+	<div class="p-4 md:p-8">
+		<BetaFeatureGate title="Key Manager는 베타 기능입니다" />
+	</div>
+{:else}
 <FormModal
 	bind:open={showSetQuota}
 	title="프로젝트 쿼터 설정"
@@ -186,3 +213,4 @@
 		</div>
 	{/if}
 </div>
+{/if}

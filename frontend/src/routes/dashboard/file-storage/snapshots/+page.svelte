@@ -12,6 +12,8 @@
   import SnapshotListTable from '$lib/components/file-storage/SnapshotListTable.svelte';
   import SnapshotsEmptyState from '$lib/components/file-storage/SnapshotsEmptyState.svelte';
   import { toast } from '$lib/stores/toast';
+  import { betaFeatures } from '$lib/stores/betaFeatures';
+  import BetaFeatureGate from '$lib/components/ui/BetaFeatureGate.svelte';
 
   let snapshots = $state<ShareSnapshot[]>([]);
   let fileStorages = $state<FileStorage[]>([]);
@@ -23,8 +25,21 @@
 
   const token = $derived($auth.token ?? undefined);
   const projectId = $derived($auth.projectId ?? undefined);
+  const fileStorageSnapshotsEnabled = $derived($betaFeatures.fileStorageSnapshots);
+
+  function clearSnapshotsState() {
+    snapshots = [];
+    fileStorages = [];
+    error = '';
+  }
+
 
   async function fetchSnapshots(opts?: { refresh?: boolean }) {
+    if (!fileStorageSnapshotsEnabled) {
+      clearSnapshotsState();
+      loading = false;
+      return;
+    }
     try {
       snapshots = await api.get<ShareSnapshot[]>('/api/v1/share-snapshots', token, projectId, opts);
       error = '';
@@ -36,6 +51,7 @@
   }
 
   async function openCreateModal() {
+    if (!fileStorageSnapshotsEnabled) return;
     try {
       fileStorages = await api.get<FileStorage[]>('/api/v1/file-storage', token, projectId);
     } catch {
@@ -45,6 +61,7 @@
   }
 
   async function createSnapshot(form: { share_id: string; name: string; description: string }): Promise<string | true> {
+    if (!fileStorageSnapshotsEnabled) return '파일 스토리지 스냅샷 베타 기능이 꺼져 있습니다.';
     try {
       await api.post('/api/v1/share-snapshots', {
         share_id: form.share_id,
@@ -59,6 +76,7 @@
   }
 
   async function deleteSnapshot(id: string, name: string) {
+    if (!fileStorageSnapshotsEnabled) return;
     if (!await confirmDialog(`스냅샷 "${name || id.slice(0, 8)}"을 삭제하시겠습니까?`)) return;
     deleting = id;
     try {
@@ -88,12 +106,22 @@
   });
 
   $effect(() => {
+    if (!fileStorageSnapshotsEnabled) {
+      clearSnapshotsState();
+      loading = false;
+      return;
+    }
     if (!$auth.projectId) return;
     loading = true;
     untrack(() => fetchSnapshots());
   });
 </script>
 
+{#if !fileStorageSnapshotsEnabled}
+  <div class="p-4 md:p-8">
+    <BetaFeatureGate title="파일 스토리지 스냅샷은 베타 기능입니다" />
+  </div>
+{:else}
 <SnapshotCreateModal bind:open={showModal} {fileStorages} onCreate={createSnapshot} />
 
 <div class="p-4 md:p-8">
@@ -122,3 +150,4 @@
     <SnapshotListTable {snapshots} {deleting} onDelete={deleteSnapshot} />
   {/if}
 </div>
+{/if}

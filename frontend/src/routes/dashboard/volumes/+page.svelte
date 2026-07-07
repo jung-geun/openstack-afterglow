@@ -15,13 +15,16 @@
   import VolumesLoadingState from '$lib/components/volume/VolumesLoadingState.svelte';
   import VolumesEmptyState from '$lib/components/volume/VolumesEmptyState.svelte';
   import VolumesModalStack from '$lib/components/volume/VolumesModalStack.svelte';
+  import { betaFeatures } from '$lib/stores/betaFeatures';
 
   const ctrl = createVolumesController({
     token: () => $auth.token ?? undefined,
     projectId: () => $auth.projectId ?? undefined,
+    volumeBackupsEnabled: () => $betaFeatures.volumeBackups,
+    volumeSnapshotsEnabled: () => $betaFeatures.volumeSnapshots,
   });
 
-  const ar = createAutoRefresh(() => { ctrl.fetchVolumes(); ctrl.fetchSnapshots(); }, {
+  const ar = createAutoRefresh(() => ctrl.fetchAll(), {
     storageKey: 'dashboard-volumes',
     defaultActive: true,
     defaultInterval: 10,
@@ -30,6 +33,9 @@
 
   $effect(() => {
     const projectId = $auth.projectId;
+    if (!$betaFeatures.volumeSnapshots && ctrl.tab === 'snapshots') {
+      ctrl.tab = 'volumes';
+    }
     if (!projectId) return;
     ctrl.loading = true;
     untrack(() => ctrl.fetchAll());
@@ -50,7 +56,7 @@
         bind:intervalSeconds={ar.intervalSeconds}
         intervalOptions={ar.intervalOptions}
         refreshing={ctrl.refreshing}
-        onManualRefresh={() => ctrl.fetchVolumes(true)}
+        onManualRefresh={() => ctrl.fetchAll()}
       />
       <button onclick={() => ctrl.showModal = true} class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">+ 볼륨 생성</button>
     {/snippet}
@@ -63,8 +69,8 @@
   {:else if ctrl.volumes.length === 0}
     <VolumesEmptyState onCreate={() => ctrl.showModal = true} />
   {:else}
-    <VolumeSummaryCards volumes={ctrl.volumes} snapshots={ctrl.snapshots} quotas={ctrl.quotas} />
-    <VolumesTabs bind:tab={ctrl.tab} volumeCount={ctrl.volumes.length} snapshotCount={ctrl.snapshots.length} />
+    <VolumeSummaryCards volumes={ctrl.volumes} snapshots={ctrl.snapshots} quotas={ctrl.quotas} showSnapshots={$betaFeatures.volumeSnapshots} />
+    <VolumesTabs bind:tab={ctrl.tab} volumeCount={ctrl.volumes.length} snapshotCount={ctrl.snapshots.length} showSnapshots={$betaFeatures.volumeSnapshots} />
 
     {#if ctrl.tab === 'volumes'}
       <VolumeListTable
@@ -86,6 +92,8 @@
         onForceDelete={ctrl.forceDeleteVolume}
         onDelete={ctrl.deleteVolume}
         onToggleAutoBackup={ctrl.toggleAutoBackup}
+        volumeBackupsEnabled={$betaFeatures.volumeBackups}
+        volumeSnapshotsEnabled={$betaFeatures.volumeSnapshots}
       />
     {:else}
       <SnapshotListTable
@@ -124,4 +132,6 @@
   onCloseBackup={() => ctrl.backupTargetVol = null}
   onCloseSnapshot={() => ctrl.snapshotTargetVol = null}
   onSnapshotSuccess={() => { ctrl.snapshotTargetVol = null; ctrl.fetchSnapshots(); }}
+  volumeBackupsEnabled={$betaFeatures.volumeBackups}
+  volumeSnapshotsEnabled={$betaFeatures.volumeSnapshots}
 />

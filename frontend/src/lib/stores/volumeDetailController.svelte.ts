@@ -25,6 +25,7 @@ export interface VolumeDetailOpts {
   projectId: () => string | undefined;
   onDeleted?: () => void;
   onClose?: () => void;
+  volumeSnapshotsEnabled?: () => boolean;
 }
 
 export function createVolumeDetailController(opts: VolumeDetailOpts) {
@@ -46,6 +47,8 @@ export function createVolumeDetailController(opts: VolumeDetailOpts) {
   let attachInstanceId = $state('');
   let attaching = $state(false);
   let attachError = $state('');
+  const volumeSnapshotsOn = () => opts.volumeSnapshotsEnabled?.() ?? true;
+
 
   const canDelete = $derived(
     !!volume && (volume.attachments?.length ?? 0) === 0 && !deleting
@@ -56,9 +59,12 @@ export function createVolumeDetailController(opts: VolumeDetailOpts) {
     const tok = opts.token();
     const proj = opts.projectId();
     try {
+      const snapshotRequest = volumeSnapshotsOn()
+        ? api.get<VolumeSnapshot[]>(`/api/v1/volume-snapshots?volume_id=${id}`, tok, proj).catch(() => [] as VolumeSnapshot[])
+        : Promise.resolve([] as VolumeSnapshot[]);
       const [vol, snaps] = await Promise.all([
         api.get<Volume>(`/api/v1/volumes/${id}`, tok, proj),
-        api.get<VolumeSnapshot[]>(`/api/v1/volume-snapshots?volume_id=${id}`, tok, proj).catch(() => [] as VolumeSnapshot[]),
+        snapshotRequest,
       ]);
       volume = vol;
       snapshots = snaps;
@@ -139,6 +145,7 @@ export function createVolumeDetailController(opts: VolumeDetailOpts) {
   }
 
   function startSnapshot() {
+    if (!volumeSnapshotsOn()) return;
     showSnapshotForm = true;
     snapshotError = '';
   }
@@ -151,6 +158,7 @@ export function createVolumeDetailController(opts: VolumeDetailOpts) {
   }
 
   async function createSnapshot() {
+    if (!volumeSnapshotsOn()) return;
     if (!snapshotName.trim()) return;
     creatingSnapshot = true;
     snapshotError = '';
@@ -173,6 +181,7 @@ export function createVolumeDetailController(opts: VolumeDetailOpts) {
   }
 
   async function deleteSnapshot(id: string, name: string) {
+    if (!volumeSnapshotsOn()) return;
     if (!(await confirmDialog(`스냅샷 "${name || id.slice(0, 8)}"을 삭제하시겠습니까?`))) return;
     deletingSnapshot = id;
     try {

@@ -8,6 +8,7 @@ export interface AdminDbInstanceDetailOpts {
   instanceId: () => string;
   token: () => string | undefined;
   projectId: () => string | undefined;
+  databaseBackupsEnabled?: () => boolean;
 }
 
 export function createAdminDatabaseInstanceDetailController(opts: AdminDbInstanceDetailOpts) {
@@ -33,6 +34,8 @@ export function createAdminDatabaseInstanceDetailController(opts: AdminDbInstanc
   const id = opts.instanceId;
   const tok = opts.token;
   const pid = opts.projectId;
+  const databaseBackupsOn = () => opts.databaseBackupsEnabled?.() ?? true;
+
 
   async function loadAll() {
     loading = true;
@@ -46,9 +49,11 @@ export function createAdminDatabaseInstanceDetailController(opts: AdminDbInstanc
       api.get<DbUser[]>(`/api/v1/database-instances/${id()}/users`, tok(), pid())
         .then(v => { users = v; })
         .catch(() => {}),
-      api.get<DbBackup[]>(`/api/v1/database-instances/${id()}/backups`, tok(), pid())
-        .then(v => { backups = v; })
-        .catch(() => {}),
+      databaseBackupsOn()
+        ? api.get<DbBackup[]>(`/api/v1/database-instances/${id()}/backups`, tok(), pid())
+          .then(v => { backups = v; })
+          .catch(() => {})
+        : Promise.resolve().then(() => { backups = []; }),
     ]);
     loading = false;
   }
@@ -116,6 +121,7 @@ export function createAdminDatabaseInstanceDetailController(opts: AdminDbInstanc
   }
 
   async function createBackup(form: { name: string; description: string }): Promise<boolean> {
+    if (!databaseBackupsOn()) return false;
     creatingBackup = true; backupError = '';
     try {
       await api.post(`/api/v1/database-instances/${id()}/backups`, form, tok(), pid());
@@ -126,6 +132,7 @@ export function createAdminDatabaseInstanceDetailController(opts: AdminDbInstanc
   }
 
   async function deleteBackup(backupId: string) {
+    if (!databaseBackupsOn()) return;
     if (!await confirmDialog('백업을 삭제하시겠습니까?')) return;
     deletingBackup = backupId;
     try {
@@ -136,6 +143,7 @@ export function createAdminDatabaseInstanceDetailController(opts: AdminDbInstanc
   }
 
   async function restoreBackup(backupId: string) {
+    if (!databaseBackupsOn()) return;
     const name = prompt('복원할 새 인스턴스 이름:');
     if (!name) return;
     restoringBackup = backupId;

@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { render, screen, waitFor } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import SelectStrategy from '../SelectStrategy.svelte';
-import { betaFeatures } from '../../../stores/betaFeatures';
+import { DEFAULT_BETA_FEATURES, betaFeatures } from '../../../stores/betaFeatures';
 import {
 	detectUbuntuBaseImage,
 	isSquashfsWizardEligible,
@@ -44,7 +44,7 @@ function renderStrategy(props: Partial<{
 
 describe('VM create squashfs beta workflow contract', () => {
 	beforeEach(() => {
-		betaFeatures.set({ libraryConsume: false, haDeploy: false });
+		betaFeatures.set(DEFAULT_BETA_FEATURES);
 	});
 
 	it('keeps beta feature preferences on the account page', () => {
@@ -204,7 +204,7 @@ describe('VM create squashfs beta workflow contract', () => {
 	});
 
 	it('shows the HA option when the HA beta is enabled', () => {
-		betaFeatures.set({ libraryConsume: false, haDeploy: true });
+		betaFeatures.set({ ...DEFAULT_BETA_FEATURES, haDeploy: true });
 		renderStrategy();
 		expect(screen.getByText('HA 배포')).toBeTruthy();
 	});

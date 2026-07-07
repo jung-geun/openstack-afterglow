@@ -11,6 +11,8 @@
   import ShareNetworkCreateModal from '$lib/components/dashboard/file-storage/networks/ShareNetworkCreateModal.svelte';
   import ShareNetworkTable from '$lib/components/dashboard/file-storage/networks/ShareNetworkTable.svelte';
   import { toast } from '$lib/stores/toast';
+  import { betaFeatures } from '$lib/stores/betaFeatures';
+  import BetaFeatureGate from '$lib/components/ui/BetaFeatureGate.svelte';
 
   let networks = $state<ShareNetwork[]>([]);
   let loading = $state(true);
@@ -22,8 +24,20 @@
 
   const token = $derived($auth.token ?? undefined);
   const projectId = $derived($auth.projectId ?? undefined);
+  const shareNetworksEnabled = $derived($betaFeatures.fileStorageShareNetworks);
+
+  function clearNetworksState() {
+    networks = [];
+    error = '';
+  }
+
 
   async function fetchNetworks(opts?: { refresh?: boolean }) {
+    if (!shareNetworksEnabled) {
+      clearNetworksState();
+      loading = false;
+      return;
+    }
     try {
       networks = await api.get<ShareNetwork[]>('/api/v1/share-networks', token, projectId, opts);
       error = '';
@@ -35,6 +49,7 @@
   }
 
   async function createNetwork(form: { name: string; description: string; neutron_net_id: string; neutron_subnet_id: string }): Promise<boolean> {
+    if (!shareNetworksEnabled) return false;
     creating = true;
     try {
       await api.post('/api/v1/share-networks', form, token, projectId);
@@ -46,6 +61,7 @@
   }
 
   async function deleteNetwork(id: string, name: string) {
+    if (!shareNetworksEnabled) return;
     if (!await confirmDialog(`Share 네트워크 "${name || id.slice(0, 8)}"을 삭제하시겠습니까?\n이 네트워크를 사용 중인 파일 스토리지가 있으면 삭제할 수 없습니다.`)) return;
     deleting = id;
     try {
@@ -66,12 +82,22 @@
   });
 
   $effect(() => {
+    if (!shareNetworksEnabled) {
+      clearNetworksState();
+      loading = false;
+      return;
+    }
     if (!$auth.projectId) return;
     loading = true;
     untrack(() => fetchNetworks());
   });
 </script>
 
+{#if !shareNetworksEnabled}
+  <div class="p-4 md:p-8">
+    <BetaFeatureGate title="Share 네트워크는 베타 기능입니다" />
+  </div>
+{:else}
 <ShareNetworkCreateModal bind:open={showModal} {creating} {token} {projectId} onCreate={createNetwork} />
 
 <div class="p-4 md:p-8">
@@ -120,3 +146,4 @@
     <ShareNetworkTable {networks} {deleting} onDelete={deleteNetwork} />
   {/if}
 </div>
+{/if}

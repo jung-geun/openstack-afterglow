@@ -3,10 +3,12 @@
 		tab = $bindable<'volumes' | 'snapshots'>(),
 		volumeCount,
 		snapshotCount,
+		showSnapshots = true,
 	}: {
 		tab: 'volumes' | 'snapshots';
 		volumeCount: number;
 		snapshotCount: number;
+		showSnapshots?: boolean;
 	} = $props();
 </script>
 
@@ -19,12 +21,14 @@
 	>
 		볼륨 {volumeCount}
 	</button>
-	<button
-		onclick={() => (tab = 'snapshots')}
-		class="px-4 py-2 text-[13px] font-medium border-b-2 -mb-px transition-colors {tab === 'snapshots'
-			? 'border-blue-500 text-white'
-			: 'border-transparent text-gray-400 hover:text-gray-200'}"
-	>
-		스냅샷 {snapshotCount}
-	</button>
+	{#if showSnapshots}
+		<button
+			onclick={() => (tab = 'snapshots')}
+			class="px-4 py-2 text-[13px] font-medium border-b-2 -mb-px transition-colors {tab === 'snapshots'
+				? 'border-blue-500 text-white'
+				: 'border-transparent text-gray-400 hover:text-gray-200'}"
+		>
+			스냅샷 {snapshotCount}
+		</button>
+	{/if}
 </div>

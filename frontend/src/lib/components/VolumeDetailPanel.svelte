@@ -8,6 +8,7 @@
 	import VolumeSnapshotsSection from '$lib/components/volume/VolumeSnapshotsSection.svelte';
 	import VolumeActions from '$lib/components/volume/VolumeActions.svelte';
 	import VolumeAttachModal from '$lib/components/volume/VolumeAttachModal.svelte';
+	import { betaFeatures } from '$lib/stores/betaFeatures';
 
 	interface Props {
 		volumeId: string;
@@ -23,6 +24,7 @@
 		projectId: () => $auth.projectId ?? undefined,
 		onDeleted,
 		onClose,
+		volumeSnapshotsEnabled: () => $betaFeatures.volumeSnapshots,
 	});
 	provideVolumeDetailController(s);
 
@@ -54,7 +56,7 @@
 	{:else if s.volume}
 		<VolumeInfoCard />
 		<VolumeAttachmentsList />
-		<VolumeSnapshotsSection />
+		{#if $betaFeatures.volumeSnapshots}<VolumeSnapshotsSection />{/if}
 		<VolumeActions />
 	{/if}
 </div>
