@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const repoRoot = resolve(__dirname, '../../..');
 const layoutSource = readFileSync(resolve(repoRoot, 'src/routes/layout.css'), 'utf8');
 const designSource = readFileSync(resolve(repoRoot, '../DESIGN.md'), 'utf8');
 const readmeSource = readFileSync(resolve(repoRoot, 'README.md'), 'utf8');
-const agentsSource = readFileSync(resolve(repoRoot, '../AGENTS.md'), 'utf8');
+const agentsPath = resolve(repoRoot, '../AGENTS.md');
+const agentsSource = existsSync(agentsPath) ? readFileSync(agentsPath, 'utf8') : '';
 const uiIndexSource = readFileSync(resolve(repoRoot, 'src/lib/components/ui/index.ts'), 'utf8');
 
 const designTokenNames = [
@@ -60,9 +61,9 @@ describe('design system source contracts', () => {
 		for (const token of designTokenNames) expect(designSource).toContain(token);
 	});
 
-	it('links frontend and agent instructions to the canonical design system', () => {
+	it('links tracked frontend docs and optional local agent instructions to the canonical design system', () => {
 		expect(readmeSource).toContain('../DESIGN.md');
-		expect(agentsSource).toContain('프론트엔드 UI/UX 디자인 시스템');
+		if (agentsSource) expect(agentsSource).toContain('프론트엔드 UI/UX 디자인 시스템');
 	});
 
 	it('exports the reusable primitives required for new UI work', () => {
