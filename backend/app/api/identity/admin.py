@@ -22,11 +22,14 @@ from app.models.storage import (
     FileStorageInfo,
     TopologyData,
     TopologyInstance,
+    VolumeDeleteDiagnostic,
+    VolumeDeleteRecoveryResult,
 )
-from app.services import instance_recovery, library_builder, manila, neutron, nova
+from app.services import instance_recovery, keystone, library_builder, manila, neutron, nova, volume_delete_recovery
 from app.services import k3s_db as k3s_cluster
 from app.services import libraries as lib_svc
 from app.services.cache import cached_call, invalidate, ttl_fast, ttl_normal, ttl_slow
+from app.services.cache import invalidation as cache_invalidation
 from app.services.octavia import get_topology_lbs
 
 # FastAPI-free 인벤토리 유틸리티로 이동됨 — admin.py 내부 호출 + 하위 호환 재export.
@@ -809,6 +812,34 @@ async def list_all_instances(
         raise HTTPException(status_code=500, detail="전체 인스턴스 조회 실패")
 
 
+@router.get("/volumes/status-summary", dependencies=[Depends(require_admin)])
+async def get_volume_status_summary(
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """전체 프로젝트의 Cinder 볼륨 상태별 개수."""
+    try:
+
+        def _collect():
+            counts: dict[str, int] = {}
+            total = 0
+            for volume in conn.block_storage.volumes(details=True, all_projects=True):
+                status = (getattr(volume, "status", None) or "unknown").lower()
+                counts[status] = counts.get(status, 0) + 1
+                total += 1
+            return {
+                "total": total,
+                "statuses": [
+                    {"status": status, "count": count}
+                    for status, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+                ],
+            }
+
+        return await asyncio.to_thread(_collect)
+    except Exception:
+        _logger.warning("볼륨 상태 요약 조회 실패", exc_info=True)
+        raise HTTPException(status_code=500, detail="볼륨 상태 요약 조회 실패")
+
+
 @router.get("/all-volumes", dependencies=[Depends(require_admin)])
 async def list_all_volumes(
     limit: int = Query(default=20, ge=1, le=100),
@@ -1470,6 +1501,97 @@ async def update_volume(
 
 
 _ERROR_STATUSES = {"error", "deleting", "error_deleting", "error_extending", "error_restoring", "error_managing"}
+
+
+async def _invalidate_volume_recovery_caches(project_id: str | None) -> None:
+    if project_id:
+        await invalidate(f"afterglow:cinder:{project_id}:volumes*")
+        await invalidate(f"afterglow:cinder:{project_id}:vol_attach:*")
+        await cache_invalidation.invalidate_mutation_count("cinder", project_id)
+    else:
+        await invalidate("afterglow:cinder:*:volumes*")
+        await invalidate("afterglow:cinder:*:vol_attach:*")
+    await invalidate("afterglow:admin:overview*")
+    await invalidate("afterglow:admin:monitoring*")
+
+
+@router.get(
+    "/volumes/{volume_id}/delete-diagnostics",
+    response_model=VolumeDeleteDiagnostic,
+    dependencies=[Depends(require_admin)],
+)
+async def get_volume_delete_diagnostics(
+    volume_id: str,
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+):
+    """볼륨 삭제 실패 원인을 진단한다 (관리자)."""
+    try:
+        return await asyncio.to_thread(
+            volume_delete_recovery.diagnose_volume_delete_issue,
+            conn,
+            volume_id,
+            keystone.get_admin_connection_for_project,
+        )
+    except Exception:
+        _logger.warning("볼륨 삭제 진단 실패: %s", volume_id, exc_info=True)
+        raise HTTPException(status_code=500, detail="볼륨 삭제 진단 실패")
+
+
+@router.post(
+    "/volumes/{volume_id}/recover-delete",
+    response_model=VolumeDeleteRecoveryResult,
+    dependencies=[Depends(require_admin)],
+)
+async def recover_delete_volume(
+    volume_id: str,
+    verify_timeout_seconds: int = Query(default=30, ge=0, le=120),
+    conn: openstack.connection.Connection = Depends(get_os_conn),
+    token_info: dict = Depends(get_token_info),
+):
+    """error_deleting 볼륨의 삭제 복구를 진단→실행→검증한다 (관리자)."""
+    try:
+        result = await asyncio.to_thread(
+            volume_delete_recovery.recover_delete_volume,
+            conn,
+            volume_id,
+            keystone.get_admin_connection_for_project,
+            verify_timeout_seconds=verify_timeout_seconds,
+        )
+        if result.status in {"deleted", "already_deleted", "delete_submitted"}:
+            await _invalidate_volume_recovery_caches(result.diagnostic.project_id)
+        try:
+            await rec(
+                token_info,
+                conn,
+                resource_type="volume",
+                action="volume.recover_delete",
+                status="success" if result.status in {"deleted", "already_deleted", "delete_submitted"} else "failed",
+                resource_id=volume_id,
+                error_message=result.status if result.status in {"blocked", "failed"} else None,
+                extra={
+                    "result": result.status,
+                    "verified_deleted": result.verified_deleted,
+                    "root_cause": result.diagnostic.root_cause_code,
+                    "steps": [step.model_dump() for step in result.steps],
+                },
+            )
+        except Exception:
+            pass
+        return result
+    except Exception:
+        try:
+            await rec(
+                token_info,
+                conn,
+                resource_type="volume",
+                action="volume.recover_delete",
+                status="failed",
+                resource_id=volume_id,
+            )
+        except Exception:
+            pass
+        _logger.warning("볼륨 삭제 복구 실패: %s", volume_id, exc_info=True)
+        raise HTTPException(status_code=500, detail="볼륨 삭제 복구 실패")
 
 
 @router.delete("/volumes/{volume_id}", dependencies=[Depends(require_admin)], status_code=204)

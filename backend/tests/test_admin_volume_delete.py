@@ -1,6 +1,6 @@
 """admin 볼륨 삭제 엔드포인트 — force-delete 폴백 분기 단위 테스트."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 from openstack.exceptions import ResourceNotFound
@@ -167,3 +167,90 @@ async def test_force_delete_volume_requires_admin(non_admin_client):
     resp = await non_admin_client.post("/api/v1/admin/volumes/vol-1/force-delete")
 
     assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_non_admin_cannot_get_delete_diagnostics(non_admin_client):
+    """비admin 사용자는 delete-diagnostics 엔드포인트에 접근할 수 없다."""
+    resp = await non_admin_client.get("/api/v1/admin/volumes/vol-1/delete-diagnostics")
+
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_non_admin_cannot_recover_delete(non_admin_client):
+    """비admin 사용자는 recover-delete 엔드포인트에 접근할 수 없다."""
+    resp = await non_admin_client.post("/api/v1/admin/volumes/vol-1/recover-delete")
+
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_recover_delete_volume_records_activity_and_invalidates(admin_client, mock_conn):
+    """복구 성공 시 activity, 캐시 무효화, mutation count bump 를 함께 수행한다."""
+    from app.models.storage import (
+        VolumeDeleteDiagnostic,
+        VolumeDeleteRecoveryResult,
+        VolumeDeleteRecoveryStep,
+    )
+
+    diagnostic = VolumeDeleteDiagnostic(
+        volume_id="vol-1",
+        status="error_deleting",
+        project_id="proj-abc",
+        attachments=[],
+        dependencies=[],
+        messages=[],
+        root_cause_code="recoverable_error_deleting",
+        confidence="high",
+        summary="recoverable",
+        evidence=["status=error_deleting"],
+        recommended_action="recover now",
+        recovery_available=True,
+        force_delete_available=True,
+    )
+    result = VolumeDeleteRecoveryResult(
+        volume_id="vol-1",
+        status="deleted",
+        verified_deleted=True,
+        final_status=None,
+        diagnostic=diagnostic,
+        steps=[
+            VolumeDeleteRecoveryStep(action="diagnose", status="success", detail="recoverable_error_deleting"),
+            VolumeDeleteRecoveryStep(action="reset_status", status="success", detail="error/detached"),
+        ],
+    )
+
+    with (
+        patch(
+            "app.api.identity.admin.volume_delete_recovery.recover_delete_volume", return_value=result
+        ) as recover_mock,
+        patch("app.api.identity.admin.invalidate", new_callable=AsyncMock) as invalidate_mock,
+        patch(
+            "app.api.identity.admin.cache_invalidation.invalidate_mutation_count",
+            new_callable=AsyncMock,
+        ) as mutation_mock,
+        patch("app.api.identity.admin.rec", new_callable=AsyncMock) as rec_mock,
+    ):
+        resp = await admin_client.post("/api/v1/admin/volumes/vol-1/recover-delete")
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "deleted"
+    recover_mock.assert_called_once_with(mock_conn, "vol-1", ANY, verify_timeout_seconds=30)
+    assert invalidate_mock.await_count == 4
+    invalidate_mock.assert_any_await("afterglow:cinder:proj-abc:volumes*")
+    invalidate_mock.assert_any_await("afterglow:cinder:proj-abc:vol_attach:*")
+    invalidate_mock.assert_any_await("afterglow:admin:overview*")
+    invalidate_mock.assert_any_await("afterglow:admin:monitoring*")
+    mutation_mock.assert_awaited_once_with("cinder", "proj-abc")
+    rec_mock.assert_awaited_once()
+    rec_kwargs = rec_mock.await_args.kwargs
+    assert rec_kwargs["resource_type"] == "volume"
+    assert rec_kwargs["action"] == "volume.recover_delete"
+    assert rec_kwargs["status"] == "success"
+    assert rec_kwargs["resource_id"] == "vol-1"
+    assert rec_kwargs["error_message"] is None
+    assert rec_kwargs["extra"]["result"] == "deleted"
+    assert rec_kwargs["extra"]["verified_deleted"] is True
+    assert rec_kwargs["extra"]["root_cause"] == "recoverable_error_deleting"
+    assert rec_kwargs["extra"]["steps"][0]["action"] == "diagnose"

@@ -118,6 +118,10 @@
 								>상태변경</button>
 								{#if /^(error|deleting)/i.test(v.status ?? '')}
 									<button
+										onclick={() => { onActionMenuClose(); onSelect(v.id); }}
+										class="volume-recovery-action w-full text-left px-3 py-1.5 text-[13px] transition-colors"
+									>복구 진단</button>
+									<button
 										onclick={() => { onActionMenuClose(); onForceDelete(v); }}
 										class="w-full text-left px-3 py-1.5 text-[13px] text-rose-400 hover:text-rose-300 hover:bg-gray-800 transition-colors"
 									>강제삭제</button>
@@ -134,3 +138,14 @@
 		</tbody>
 	</table>
 </div>
+
+<style>
+	.volume-recovery-action {
+		color: var(--color-state-warning);
+	}
+
+	.volume-recovery-action:hover {
+		color: color-mix(in oklab, var(--color-state-warning) 82%, var(--color-ink-0));
+		background: var(--color-surface-sunken);
+	}
+</style>

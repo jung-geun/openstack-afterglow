@@ -89,6 +89,86 @@ class VolumeInfo(BaseModel):
     volume_image_metadata: dict | None = None
 
 
+VolumeDeleteRootCause = Literal[
+    "already_deleted",
+    "attached_volume_delete_blocked",
+    "dependent_snapshot_or_backup",
+    "recoverable_error_deleting",
+    "recoverable_error_state",
+    "normal_delete_possible",
+    "not_recoverable_status",
+    "unknown",
+]
+
+VolumeDeleteRecoveryStatus = Literal[
+    "deleted",
+    "already_deleted",
+    "delete_submitted",
+    "blocked",
+    "failed",
+]
+
+VolumeDeleteRecoveryAction = Literal[
+    "diagnose",
+    "reset_status",
+    "delete",
+    "verify_after_delete",
+    "force_delete",
+    "verify_after_force_delete",
+]
+
+VolumeDeleteRecoveryStepStatus = Literal["success", "skipped", "failed"]
+
+
+class VolumeDeleteMessage(BaseModel):
+    id: str | None = None
+    event_id: str | None = None
+    request_id: str | None = None
+    message_level: str | None = None
+    resource_uuid: str | None = None
+    resource_type: str | None = None
+    user_message: str | None = None
+    created_at: str | None = None
+
+
+class VolumeDeleteDependency(BaseModel):
+    id: str
+    status: str | None = None
+    name: str | None = None
+    kind: Literal["snapshot", "backup"]
+
+
+class VolumeDeleteDiagnostic(BaseModel):
+    volume_id: str
+    status: str | None = None
+    project_id: str | None = None
+    attachments: list[dict] = []
+    dependencies: list[VolumeDeleteDependency] = []
+    messages: list[VolumeDeleteMessage] = []
+    root_cause_code: VolumeDeleteRootCause
+    confidence: Literal["high", "medium", "low"]
+    summary: str
+    evidence: list[str] = []
+    recommended_action: str
+    recovery_available: bool
+    force_delete_available: bool
+
+
+class VolumeDeleteRecoveryStep(BaseModel):
+    action: VolumeDeleteRecoveryAction
+    status: VolumeDeleteRecoveryStepStatus
+    detail: str | None = None
+
+
+class VolumeDeleteRecoveryResult(BaseModel):
+    volume_id: str
+    status: VolumeDeleteRecoveryStatus
+    verified_deleted: bool
+    final_status: str | None = None
+    diagnostic: VolumeDeleteDiagnostic
+    steps: list[VolumeDeleteRecoveryStep] = []
+
+
 class NetworkInfo(BaseModel):
     id: str
     name: str
