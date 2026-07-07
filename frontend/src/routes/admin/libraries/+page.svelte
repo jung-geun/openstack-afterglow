@@ -7,6 +7,7 @@
   import PageHeader from '$lib/components/ui/PageHeader.svelte';
   import StatusChip from '$lib/components/ui/StatusChip.svelte';
   import Modal from '$lib/components/ui/Modal.svelte';
+  import Alert from '$lib/components/ui/Alert.svelte';
 
   // ---------------------------------------------------------------------------
   // 타입
@@ -1117,10 +1118,10 @@
   </PageHeader>
 
   {#if error}
-    <div class="mb-4 p-3 bg-red-900/40 border border-red-700 rounded-md text-red-300 text-sm">{error}</div>
+    <Alert tone="danger" class="mb-4">{error}</Alert>
   {/if}
   {#if message}
-    <div class="mb-4 p-3 bg-green-900/40 border border-green-700 rounded-md text-green-300 text-sm">{message}</div>
+    <Alert tone="success" class="mb-4">{message}</Alert>
   {/if}
 
   {#if loading}

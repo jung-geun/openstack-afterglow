@@ -396,6 +396,7 @@ class PublicationRequest(BaseModel):
 
 
 async def _validate_profile_publication(session, profile) -> None:
+    from app.config import get_settings
     from app.models.db import LayerArtifact
 
     layer_names = list(getattr(profile, "layers", None) or [])
@@ -427,8 +428,22 @@ async def _validate_profile_publication(session, profile) -> None:
             raise HTTPException(status_code=409, detail=f"프로필 레이어 이름이 중복되어 모호합니다: {layer_name!r}")
         resolved.append(matches[0])
 
-    base_image_ids = {getattr(row, "base_image_id", None) for row in resolved}
-    if len(base_image_ids) != 1 or None in base_image_ids:
+    settings = get_settings()
+    snapshots: list[dict] = []
+    for row in resolved:
+        snapshot = _artifact_base_image_snapshot(row)
+        if not snapshot.get("base_image_id"):
+            try:
+                snapshot = legacy_snapshot_for_ubuntu_base(settings, snapshot.get("ubuntu_base"))
+            except (RuntimeError, ValueError) as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"프로필 레이어의 base image를 확인할 수 없습니다: {getattr(row, 'name', None)!r}",
+                ) from exc
+        snapshots.append(snapshot)
+
+    base_image_ids = {str(snapshot["base_image_id"]) for snapshot in snapshots if snapshot.get("base_image_id")}
+    if len(base_image_ids) != 1:
         raise HTTPException(status_code=400, detail="프로필 레이어의 base image가 일치하지 않습니다")
 
 

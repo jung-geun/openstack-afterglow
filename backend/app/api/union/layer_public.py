@@ -20,6 +20,7 @@ from app.services.cache import invalidate
 from app.services.cache import invalidation as cache_invalidation
 from app.services.k3s_cloudinit import _validate_ssh_public_key
 from app.services.keystone import get_service_project_connection
+from app.services.layer_base_images import legacy_snapshot_for_ubuntu_base
 from app.services.layer_ubuntu import normalize_ubuntu_base
 
 _logger = logging.getLogger(__name__)
@@ -124,14 +125,8 @@ def _iso(value) -> str | None:
     return value.isoformat().replace("+00:00", "Z")
 
 
-def _artifact_public_dict(row: LayerArtifact) -> dict[str, Any]:
-    return {
-        "id": row.id,
-        "name": row.name,
-        "kind": row.kind,
-        "python_version": row.python_version,
-        "pip_packages": row.pip_packages if isinstance(row.pip_packages, list) else [],
-        "apt_packages": row.apt_packages if isinstance(row.apt_packages, list) else [],
+def _artifact_base_image_snapshot(row: LayerArtifact) -> dict[str, Any]:
+    snapshot = {
         "ubuntu_base": normalize_ubuntu_base(row.ubuntu_base),
         "base_image_id": row.base_image_id,
         "base_image_name": row.base_image_name,
@@ -141,6 +136,38 @@ def _artifact_public_dict(row: LayerArtifact) -> dict[str, Any]:
         "base_image_min_disk": row.base_image_min_disk,
         "base_image_visibility": row.base_image_visibility,
         "base_image_owner": row.base_image_owner,
+    }
+    if snapshot.get("base_image_id"):
+        return snapshot
+    return legacy_snapshot_for_ubuntu_base(get_settings(), snapshot.get("ubuntu_base"))
+
+
+def _base_image_id(row: LayerArtifact) -> str:
+    snapshot = _artifact_base_image_snapshot(row)
+    image_id = snapshot.get("base_image_id")
+    if not image_id:
+        raise ValueError(f"artifact {row.id} base_image_id is unresolved")
+    return str(image_id)
+
+
+def _artifact_public_dict(row: LayerArtifact) -> dict[str, Any]:
+    snapshot = _artifact_base_image_snapshot(row)
+    return {
+        "id": row.id,
+        "name": row.name,
+        "kind": row.kind,
+        "python_version": row.python_version,
+        "pip_packages": row.pip_packages if isinstance(row.pip_packages, list) else [],
+        "apt_packages": row.apt_packages if isinstance(row.apt_packages, list) else [],
+        "ubuntu_base": normalize_ubuntu_base(snapshot.get("ubuntu_base")),
+        "base_image_id": snapshot.get("base_image_id"),
+        "base_image_name": snapshot.get("base_image_name"),
+        "base_image_checksum": snapshot.get("base_image_checksum"),
+        "base_image_os_hash_algo": snapshot.get("base_image_os_hash_algo"),
+        "base_image_os_hash_value": snapshot.get("base_image_os_hash_value"),
+        "base_image_min_disk": snapshot.get("base_image_min_disk"),
+        "base_image_visibility": snapshot.get("base_image_visibility"),
+        "base_image_owner": snapshot.get("base_image_owner"),
         "parent_id": row.parent_id,
         "created_at": _iso(row.created_at),
     }
@@ -185,21 +212,24 @@ def _profile_artifacts(profile: LayerProfile, by_name: dict[str, LayerArtifact])
 
 
 def _base_image_summary(rows: list[LayerArtifact]) -> dict[str, Any]:
-    first = rows[0]
+    snapshot = _artifact_base_image_snapshot(rows[0])
     return {
-        "ubuntu_base": normalize_ubuntu_base(first.ubuntu_base),
-        "base_image_id": first.base_image_id,
-        "base_image_name": first.base_image_name,
-        "base_image_checksum": first.base_image_checksum,
-        "base_image_os_hash_algo": first.base_image_os_hash_algo,
-        "base_image_os_hash_value": first.base_image_os_hash_value,
-        "base_image_min_disk": first.base_image_min_disk,
+        "ubuntu_base": normalize_ubuntu_base(snapshot.get("ubuntu_base")),
+        "base_image_id": snapshot.get("base_image_id"),
+        "base_image_name": snapshot.get("base_image_name"),
+        "base_image_checksum": snapshot.get("base_image_checksum"),
+        "base_image_os_hash_algo": snapshot.get("base_image_os_hash_algo"),
+        "base_image_os_hash_value": snapshot.get("base_image_os_hash_value"),
+        "base_image_min_disk": snapshot.get("base_image_min_disk"),
     }
 
 
 def _validate_single_base(rows: list[LayerArtifact]) -> None:
-    base_ids = {row.base_image_id for row in rows}
-    if len(base_ids) != 1 or None in base_ids:
+    try:
+        base_ids = {_base_image_id(row) for row in rows}
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="선택한 레이어의 base image를 확인할 수 없습니다") from exc
+    if len(base_ids) != 1:
         raise HTTPException(status_code=400, detail="선택한 레이어의 base image가 일치하지 않습니다")
 
 
@@ -288,7 +318,13 @@ async def list_public_squashfs_artifacts(_token_info: dict = Depends(get_token_i
         raise HTTPException(status_code=503, detail="DB 연결이 초기화되지 않았습니다")
     async with factory() as session:
         rows = await _load_published_artifacts(session)
-        return [_artifact_public_dict(row) for row in rows]
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                result.append(_artifact_public_dict(row))
+            except (RuntimeError, ValueError):
+                _logger.warning("[layer_public] skipping artifact with unresolved base image: %s", row.id)
+        return result
 
 
 @router.get("/profiles")
@@ -313,8 +349,9 @@ async def list_public_squashfs_profiles(_token_info: dict = Depends(get_token_in
             artifacts = _profile_artifacts(profile, by_name)
             if not artifacts:
                 continue
-            base_ids = {row.base_image_id for row in artifacts}
-            if len(base_ids) != 1 or None in base_ids:
+            try:
+                _validate_single_base(artifacts)
+            except HTTPException:
                 continue
             result.append(
                 {
