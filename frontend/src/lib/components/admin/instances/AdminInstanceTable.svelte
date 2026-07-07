@@ -2,6 +2,7 @@
 	import { projectNames } from '$lib/stores/projectNames';
 	import StatusChip from '$lib/components/ui/StatusChip.svelte';
 	import Pagination from '$lib/components/ui/Pagination.svelte';
+	import SelectionCheckbox from '$lib/components/ui/SelectionCheckbox.svelte';
 	import type { AdminInstance } from '$lib/types/adminInstance';
 
 	let {
@@ -34,6 +35,8 @@
 	const allSelected = $derived(
 		showCheckboxes && instances.length > 0 && instances.every(i => selectedIds?.has(i.id))
 	);
+	const hasSelection = $derived(showCheckboxes && instances.some(i => selectedIds?.has(i.id)));
+	const partiallySelected = $derived(hasSelection && !allSelected);
 
 	let expandedError = $state<string | null>(null);
 	let copiedProjectId = $state<string | null>(null);
@@ -47,18 +50,19 @@
 </script>
 
 <div class="overflow-x-auto">
-	<table class="w-full text-sm">
+	<table class="selection-table w-full text-sm" class:has-selection={hasSelection}>
 		<thead>
 			<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
 				{#if showCheckboxes}
 					<th class="py-2 pr-2 w-8">
-						<input
-							type="checkbox"
-							checked={allSelected}
-							onclick={() => onToggleAll?.()}
-							class="w-4 h-4 rounded border-gray-600 bg-gray-800 accent-blue-500 cursor-pointer"
-							aria-label="전체 선택"
-						/>
+						<div class="selection-header-reveal" class:is-selected={hasSelection}>
+							<SelectionCheckbox
+								checked={allSelected}
+								indeterminate={partiallySelected}
+								onclick={() => onToggleAll?.()}
+								ariaLabel="전체 선택"
+							/>
+						</div>
 					</th>
 				{/if}
 				<th class="text-left py-2 pr-4">이름</th>
@@ -72,17 +76,17 @@
 		<tbody>
 			{#each instances as s (s.id)}
 				<tr
-					class="border-b border-gray-800/50 text-xs transition-colors {selectedIds?.has(s.id) ? 'bg-blue-900/10' : ''}"
+					class="instance-admin-row border-b border-gray-800/50 text-xs transition-colors {selectedIds?.has(s.id) ? 'is-selected bg-blue-900/10' : ''}"
 				>
 					{#if showCheckboxes}
-						<td class="py-2 pr-2" onclick={(e) => e.stopPropagation()} role="none">
-							<input
-								type="checkbox"
-								checked={selectedIds?.has(s.id) ?? false}
-								onclick={() => onToggleSelect?.(s.id)}
-								class="w-4 h-4 rounded border-gray-600 bg-gray-800 accent-blue-500 cursor-pointer"
-								aria-label="인스턴스 선택"
-							/>
+						<td class="py-2 pr-2">
+							<div class="selection-reveal" class:is-selected={selectedIds?.has(s.id) ?? false}>
+								<SelectionCheckbox
+									checked={selectedIds?.has(s.id) ?? false}
+									onclick={() => onToggleSelect?.(s.id)}
+									ariaLabel={`${s.name || s.id} 선택`}
+								/>
+							</div>
 						</td>
 					{/if}
 					<td class="p-0">
@@ -141,3 +145,28 @@
 	{onPrev}
 	{onNext}
 />
+
+<style>
+	.selection-header-reveal,
+	.selection-reveal {
+		opacity: 0;
+		pointer-events: none;
+		transform: translateX(-4px);
+		transition:
+			opacity 0.16s ease,
+			transform 0.16s ease;
+	}
+
+	.selection-table:hover .selection-header-reveal,
+	.selection-table:focus-within .selection-header-reveal,
+	.selection-table.has-selection .selection-header-reveal,
+	.selection-header-reveal.is-selected,
+	.instance-admin-row:hover .selection-reveal,
+	.instance-admin-row:focus-within .selection-reveal,
+	.instance-admin-row.is-selected .selection-reveal,
+	.selection-reveal.is-selected {
+		opacity: 1;
+		pointer-events: auto;
+		transform: translateX(0);
+	}
+</style>

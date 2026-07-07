@@ -1,5 +1,6 @@
 <script lang="ts" generics="T extends { id: string }">
 	import type { Snippet } from 'svelte';
+	import SelectionCheckbox from '$lib/components/ui/SelectionCheckbox.svelte';
 
 	let {
 		title,
@@ -20,6 +21,10 @@
 		row: Snippet<[T]>;
 		onCleanup: () => void;
 	} = $props();
+
+	const allSelected = $derived(items.length > 0 && selected.size === items.length);
+	const hasSelection = $derived(selected.size > 0);
+	const partiallySelected = $derived(hasSelection && !allSelected);
 
 	function toggle(id: string) {
 		const next = new Set(selected);
@@ -54,28 +59,33 @@
 		</div>
 	{:else}
 		<div class="overflow-x-auto">
-			<table class="w-full text-sm">
+			<table class="selection-table w-full text-sm" class:has-selection={hasSelection}>
 				<thead>
 					<tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
 						<th class="text-left py-2 pr-4 w-8">
-							<input
-								type="checkbox"
-								checked={selected.size === items.length && items.length > 0}
-								onchange={toggleAll}
-							/>
+							<div class="selection-header-reveal" class:is-selected={hasSelection}>
+								<SelectionCheckbox
+									checked={allSelected}
+									indeterminate={partiallySelected}
+									onclick={toggleAll}
+									ariaLabel={`${title} 전체 선택`}
+								/>
+							</div>
 						</th>
 						{@render headers()}
 					</tr>
 				</thead>
 				<tbody>
 					{#each items as item (item.id)}
-						<tr class="border-b border-gray-800/50 text-xs hover:bg-gray-800/30 transition-colors">
+						<tr class="orphan-row border-b border-gray-800/50 text-xs hover:bg-gray-800/30 transition-colors" class:is-selected={selected.has(item.id)}>
 							<td class="py-2 pr-4">
-								<input
-									type="checkbox"
-									checked={selected.has(item.id)}
-									onchange={() => toggle(item.id)}
-								/>
+								<div class="selection-reveal" class:is-selected={selected.has(item.id)}>
+									<SelectionCheckbox
+										checked={selected.has(item.id)}
+										onclick={() => toggle(item.id)}
+										ariaLabel={`${item.id} 선택`}
+									/>
+								</div>
 							</td>
 							{@render row(item)}
 						</tr>
@@ -85,3 +95,28 @@
 		</div>
 	{/if}
 </section>
+
+<style>
+	.selection-header-reveal,
+	.selection-reveal {
+		opacity: 0;
+		pointer-events: none;
+		transform: translateX(-4px);
+		transition:
+			opacity 0.16s ease,
+			transform 0.16s ease;
+	}
+
+	.selection-table:hover .selection-header-reveal,
+	.selection-table:focus-within .selection-header-reveal,
+	.selection-table.has-selection .selection-header-reveal,
+	.selection-header-reveal.is-selected,
+	.orphan-row:hover .selection-reveal,
+	.orphan-row:focus-within .selection-reveal,
+	.orphan-row.is-selected .selection-reveal,
+	.selection-reveal.is-selected {
+		opacity: 1;
+		pointer-events: auto;
+		transform: translateX(0);
+	}
+</style>

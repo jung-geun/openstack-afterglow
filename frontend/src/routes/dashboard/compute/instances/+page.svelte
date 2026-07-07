@@ -16,6 +16,7 @@
 	import InstancesTable from '$lib/components/instance/list/InstancesTable.svelte';
 	import { toast } from '$lib/stores/toast';
 	import { isTransitional } from '$lib/utils/instanceStatus';
+	import BulkSelectionOverlay from '$lib/components/ui/BulkSelectionOverlay.svelte';
 
 	let instances = $state<Instance[]>([]);
 	let loading = $state(true);
@@ -199,7 +200,7 @@
 	});
 </script>
 
-<div class="p-4 md:p-8">
+<div class="p-4 md:p-8 pb-28 md:pb-32">
 	<PageHeader breadcrumb="COMPUTE / INSTANCES" title="인스턴스">
 		{#snippet actions()}
 			<AutoRefreshControl
@@ -219,37 +220,6 @@
 		<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>
 	{/if}
 
-	<!-- 일괄 액션 바 -->
-	{#if selectedIds.size > 0}
-		<div class="flex items-center gap-3 mb-3 px-4 py-2.5 bg-blue-950/60 border border-blue-800/60 rounded-xl">
-			<span class="text-blue-300 text-sm font-medium">{selectedIds.size}개 선택됨</span>
-			<div class="flex gap-2 ml-auto">
-				<button
-					type="button"
-					disabled={bulkActioning}
-					onclick={() => bulkAction('start')}
-					class="px-3 py-1.5 text-xs font-medium rounded-lg bg-green-700/80 hover:bg-green-600/80 text-white disabled:opacity-50 transition-colors"
-				>시작</button>
-				<button
-					type="button"
-					disabled={bulkActioning}
-					onclick={() => bulkAction('stop')}
-					class="px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-700/80 hover:bg-amber-600/80 text-white disabled:opacity-50 transition-colors"
-				>종료</button>
-				<button
-					type="button"
-					disabled={bulkActioning}
-					onclick={() => bulkAction('delete')}
-					class="px-3 py-1.5 text-xs font-medium rounded-lg bg-red-700/80 hover:bg-red-600/80 text-white disabled:opacity-50 transition-colors"
-				>삭제</button>
-				<button
-					type="button"
-					onclick={() => { selectedIds = new Set(); }}
-					class="px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-700/80 hover:bg-gray-600/80 text-gray-300 transition-colors"
-				>취소</button>
-			</div>
-		</div>
-	{/if}
 
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={5} />
@@ -280,6 +250,15 @@
 			}}
 		/>
 	{/if}
+
+<BulkSelectionOverlay
+	count={selectedIds.size}
+	busy={bulkActioning}
+	onStart={() => bulkAction('start')}
+	onStop={() => bulkAction('stop')}
+	onDelete={() => bulkAction('delete')}
+	onClear={() => { selectedIds = new Set(); }}
+/>
 </div>
 
 {#if selectedInstanceId}

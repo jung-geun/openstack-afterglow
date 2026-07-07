@@ -12,38 +12,38 @@ describe('AutoRefreshControl', () => {
 		expect(btn).toBeTruthy();
 	});
 
-	it('새로고침 주기 select가 렌더링됨', () => {
+	it('새로고침 주기 toggle group이 렌더링됨', () => {
 		render(AutoRefreshControlWrapper, {});
 		flushSync();
-		const select = screen.getByTitle('새로고침 주기');
-		expect(select).toBeTruthy();
+		const group = screen.getByRole('group');
+		expect(group).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Off' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: '10s' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: '30s' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: '60s' })).toBeTruthy();
 	});
 
-	it('intervalOptions가 select에 렌더링 (Off 포함)', () => {
+	it('intervalOptions가 toggle group에 렌더링 (Off 포함)', () => {
 		render(AutoRefreshControlWrapper, { intervalOptions: [5, 10, 20] });
 		flushSync();
-		const select = screen.getByTitle('새로고침 주기') as HTMLSelectElement;
-		const options = Array.from(select.options).map((o) => o.text);
-		expect(options).toContain('Off');
-		expect(options).toContain('5s');
-		expect(options).toContain('10s');
-		expect(options).toContain('20s');
+		expect(screen.getByRole('button', { name: 'Off' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: '5s' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: '10s' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: '20s' })).toBeTruthy();
 	});
 
-	it('select에서 Off 선택 시 active=false', async () => {
+	it('toggle에서 Off 선택 시 active=false', async () => {
 		render(AutoRefreshControlWrapper, { active: true, intervalSeconds: 30 });
 		flushSync();
-		const select = screen.getByTitle('새로고침 주기') as HTMLSelectElement;
-		await fireEvent.change(select, { target: { value: 'off' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Off' }));
 		flushSync();
 		expect(screen.getByTestId('active-state').textContent).toBe('false');
 	});
 
-	it('select에서 인터벌 선택 시 active=true + intervalSeconds 갱신', async () => {
+	it('toggle에서 인터벌 선택 시 active=true + intervalSeconds 갱신', async () => {
 		render(AutoRefreshControlWrapper, { active: false, intervalSeconds: 30, intervalOptions: [10, 30, 60] });
 		flushSync();
-		const select = screen.getByTitle('새로고침 주기') as HTMLSelectElement;
-		await fireEvent.change(select, { target: { value: '10' } });
+		await fireEvent.click(screen.getByRole('button', { name: '10s' }));
 		flushSync();
 		expect(screen.getByTestId('active-state').textContent).toBe('true');
 		expect(screen.getByTestId('interval-state').textContent).toBe('10');

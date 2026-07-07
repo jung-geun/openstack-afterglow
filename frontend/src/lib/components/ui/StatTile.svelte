@@ -10,11 +10,11 @@
     delta?: string;
     icon?: Snippet;
     accent?: Accent;
-    // legacy props
     suffix?: string;
     iconBgClass?: string;
     progress?: { value: number; max: number };
     footer?: Snippet;
+    children?: Snippet;
     class?: string;
   }
 
@@ -34,17 +34,16 @@
 
   const displayUnit = $derived(unit ?? suffix);
 
-  // Map legacy accent names to design-system tone classes
   const TONE_MAP: Record<Accent, string> = {
-    blue:        'icon-accent',
-    cyan:        'icon-info',
-    violet:      'icon-accent2',
-    emerald:     'icon-success',
-    amber:       'icon-warning',
-    teal:        'icon-info',
-    rose:        'icon-danger',
-    indigo:      'icon-accent2',
-    'admin-tone':'icon-admin-tone',
+    blue: 'icon-accent',
+    cyan: 'icon-info',
+    violet: 'icon-accent2',
+    emerald: 'icon-success',
+    amber: 'icon-warning',
+    teal: 'icon-info',
+    rose: 'icon-danger',
+    indigo: 'icon-accent2',
+    'admin-tone': 'icon-admin-tone',
   };
 
   const chipClass = $derived(iconBgClass ?? TONE_MAP[accent] ?? TONE_MAP.blue);
@@ -59,25 +58,25 @@
   );
 </script>
 
-<div class="bg-gray-900 border border-gray-800 rounded-2xl p-[18px] flex items-center gap-3.5 {className}">
+<div class="stat-tile {className}">
   {#if icon}
     <div class="icon-chip {chipClass}">
       {@render icon()}
     </div>
   {/if}
-  <div class="flex-1 min-w-0">
-    <div class="text-[11px] uppercase tracking-wider font-medium text-gray-500">{label}</div>
-    <div class="flex items-baseline gap-2 mt-0.5 flex-wrap">
-      <div class="text-[28px] font-bold text-white leading-none">{value}</div>
-      {#if displayUnit}<div class="text-gray-500 text-xs">{displayUnit}</div>{/if}
-      {#if delta}<div class="ml-auto text-emerald-400 text-[11px] font-medium">{delta}</div>{/if}
+  <div class="stat-body">
+    <div class="stat-label">{label}</div>
+    <div class="stat-value-row">
+      <div class="stat-value">{value}</div>
+      {#if displayUnit}<div class="stat-unit">{displayUnit}</div>{/if}
+      {#if delta}<div class="stat-delta">{delta}</div>{/if}
     </div>
     {#if progress && progress.max > 0}
-      <div class="mt-2 w-full bg-gray-800 rounded-full h-1 overflow-hidden">
-        <div class="progress-bar {progressTone} h-1 rounded-full transition-all" style="width:{pct}%"></div>
+      <div class="progress-track">
+        <div class="progress-bar {progressTone}" style="width:{pct}%"></div>
       </div>
     {:else if footer}
-      <div class="mt-1">
+      <div class="stat-footer">
         {@render footer()}
       </div>
     {/if}
@@ -85,10 +84,67 @@
 </div>
 
 <style>
+  .stat-tile {
+    display: flex;
+    align-items: center;
+    gap: 0.875rem;
+    border: 1px solid var(--color-line);
+    border-radius: 1rem;
+    background: var(--color-surface-raised);
+    padding: 1.125rem;
+  }
+  .stat-body {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .stat-label {
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-weight: 500;
+    color: var(--color-ink-3);
+  }
+  .stat-value-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    margin-top: 0.125rem;
+    flex-wrap: wrap;
+  }
+  .stat-value {
+    font-size: 1.75rem;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--color-ink-0);
+  }
+  .stat-unit {
+    font-size: 0.75rem;
+    color: var(--color-ink-3);
+  }
+  .stat-delta {
+    margin-left: auto;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    color: var(--color-state-success);
+  }
+  .stat-footer { margin-top: 0.25rem; }
+  .progress-track {
+    margin-top: 0.5rem;
+    width: 100%;
+    height: 0.25rem;
+    overflow: hidden;
+    border-radius: 999px;
+    background: var(--color-surface-sunken);
+  }
+  .progress-bar {
+    height: 0.25rem;
+    border-radius: 999px;
+    transition: width 0.2s ease;
+  }
   .icon-chip {
-    width: 40px;
-    height: 40px;
-    border-radius: 10px;
+    width: 2.5rem;
+    height: 2.5rem;
+    border-radius: 0.625rem;
     border: 1px solid transparent;
     display: flex;
     align-items: center;
@@ -97,15 +153,14 @@
     position: relative;
   }
   .icon-chip::before {
-    content: "";
+    content: '';
     position: absolute;
-    inset: -8px;
-    border-radius: 16px;
+    inset: -0.5rem;
+    border-radius: 1rem;
     background: radial-gradient(circle at center, currentColor 0%, transparent 70%);
     opacity: 0.07;
     pointer-events: none;
   }
-
   .icon-accent {
     background: var(--accent-soft);
     border-color: var(--accent-ring);
@@ -142,8 +197,7 @@
     border-color: var(--admin-tone-ring);
     color: var(--admin-tone);
   }
-
-  .progress-accent  { background: var(--color-accent); }
+  .progress-accent { background: var(--color-accent); }
   .progress-warning { background: var(--color-state-warning); }
-  .progress-danger  { background: var(--color-state-danger); }
+  .progress-danger { background: var(--color-state-danger); }
 </style>

@@ -29,4 +29,26 @@ describe('StatusChip', () => {
 		const spans = container.querySelectorAll('span');
 		expect(spans.length).toBeGreaterThanOrEqual(2);
 	});
+
+	it('maps ACTIVE to success tone', () => {
+		const { container } = render(StatusChip, { status: 'ACTIVE' });
+		expect(container.querySelector('.chip-success')).toBeTruthy();
+	});
+
+	it('maps BUILD to warning tone with pulse', () => {
+		const { container } = render(StatusChip, { status: 'BUILD' });
+		const chip = container.querySelector('.chip-warning');
+		expect(chip).toBeTruthy();
+		expect(chip?.classList.contains('pulse')).toBe(true);
+	});
+
+	it('maps ERROR to danger tone', () => {
+		const { container } = render(StatusChip, { status: 'ERROR' });
+		expect(container.querySelector('.chip-danger')).toBeTruthy();
+	});
+
+	it('maps unknown statuses to neutral tone', () => {
+		const { container } = render(StatusChip, { status: 'mystery' });
+		expect(container.querySelector('.chip-neutral')).toBeTruthy();
+	});
 });

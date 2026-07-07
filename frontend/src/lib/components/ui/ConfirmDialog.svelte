@@ -1,31 +1,47 @@
 <script lang="ts">
 	import { dialogState } from '$lib/stores/confirm.svelte';
+	import Button from './Button.svelte';
+	import Card from './Card.svelte';
 </script>
 
 {#if dialogState.open}
-	<div
-		class="fixed inset-0 z-[200] flex items-center justify-center bg-black/60"
-		role="dialog"
-		aria-modal="true"
-	>
-		<div class="bg-gray-900 border border-gray-700 rounded-xl shadow-2xl p-6 w-full max-w-sm mx-4">
-			<p class="text-gray-200 text-sm whitespace-pre-wrap mb-6">{dialogState.message}</p>
-			<div class="flex gap-3 justify-end">
-				<button
-					onclick={dialogState.reject}
-					class="px-4 py-2 text-sm text-gray-300 hover:text-white border border-gray-600 hover:border-gray-400 rounded-lg transition-colors"
-				>
-					취소
-				</button>
-				<button
-					onclick={dialogState.accept}
-					class="px-4 py-2 text-sm text-white bg-red-600 hover:bg-red-500 rounded-lg transition-colors"
-				>
-					확인
-				</button>
+	<div class="confirm-overlay" role="dialog" aria-modal="true">
+		<Card surface="modal" padding="lg" class="confirm-card">
+			<p class="confirm-message">{dialogState.message}</p>
+			<div class="confirm-actions">
+				<Button onclick={dialogState.reject} variant="secondary">취소</Button>
+				<Button onclick={dialogState.accept} variant="danger">확인</Button>
 			</div>
-		</div>
+		</Card>
 	</div>
 {/if}
 
 <svelte:window onkeydown={(e) => { if (e.key === 'Escape' && dialogState.open) dialogState.reject(); }} />
+
+<style>
+	.confirm-overlay {
+		position: fixed;
+		inset: 0;
+		z-index: 200;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: color-mix(in oklab, var(--color-surface-canvas) 72%, transparent);
+	}
+	.confirm-card {
+		width: min(100% - 2rem, 24rem);
+		margin-inline: 1rem;
+	}
+	.confirm-message {
+		margin: 0 0 1.5rem;
+		white-space: pre-wrap;
+		font-size: 0.875rem;
+		line-height: 1.5;
+		color: var(--color-ink-1);
+	}
+	.confirm-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 0.75rem;
+	}
+</style>

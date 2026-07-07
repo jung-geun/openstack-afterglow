@@ -185,7 +185,7 @@
 
 	<!-- VM 생성 버튼 -->
 	<div class="px-3 pb-3 pt-2 lg:pt-0">
-		<Button onclick={openWizard} class="w-full">
+		<Button onclick={() => openWizard()} class="w-full">
 			<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v14M5 12h14"/></svg>
 			VM 생성
 		</Button>

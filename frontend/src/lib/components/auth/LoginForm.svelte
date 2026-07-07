@@ -1,76 +1,75 @@
 <script lang="ts">
-  import Button from '$lib/components/ui/Button.svelte';
-  import GitLabLoginButton from './GitLabLoginButton.svelte';
+	import Alert from '$lib/components/ui/Alert.svelte';
+	import Button from '$lib/components/ui/Button.svelte';
+	import Field from '$lib/components/ui/Field.svelte';
+	import TextInput from '$lib/components/ui/TextInput.svelte';
+	import GitLabLoginButton from './GitLabLoginButton.svelte';
 
-  let {
-    domainName = $bindable(),
-    username = $bindable(),
-    password = $bindable(),
-    error,
-    loading,
-    gitlabEnabled,
-    gitlabLoading,
-    onSubmit,
-    onGitlab,
-  }: {
-    domainName: string;
-    username: string;
-    password: string;
-    error: string;
-    loading: boolean;
-    gitlabEnabled: boolean;
-    gitlabLoading: boolean;
-    onSubmit: () => Promise<void>;
-    onGitlab: () => Promise<void>;
-  } = $props();
+	let {
+		domainName = $bindable(),
+		username = $bindable(),
+		password = $bindable(),
+		error,
+		loading,
+		gitlabEnabled,
+		gitlabLoading,
+		onSubmit,
+		onGitlab,
+	}: {
+		domainName: string;
+		username: string;
+		password: string;
+		error: string;
+		loading: boolean;
+		gitlabEnabled: boolean;
+		gitlabLoading: boolean;
+		onSubmit: () => Promise<void>;
+		onGitlab: () => Promise<void>;
+	} = $props();
 </script>
 
 <form
-  onsubmit={(e) => { e.preventDefault(); onSubmit(); }}
-  class="bg-gray-900 rounded-xl border border-gray-700 p-8 space-y-4"
+	onsubmit={(e) => { e.preventDefault(); onSubmit(); }}
+	class="login-form"
 >
-  {#if error}
-    <div class="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm">
-      {error}
-    </div>
-  {/if}
+	{#if error}
+		<Alert tone="danger">{error}</Alert>
+	{/if}
 
-  <div>
-    <label for="domain" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">도메인</label>
-    <input
-      id="domain"
-      bind:value={domainName}
-      type="text"
-      class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
-    />
-  </div>
+	<Field label="도메인" for="domain">
+		<TextInput id="domain" bind:value={domainName} type="text" />
+	</Field>
 
-  <div>
-    <label for="username" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">사용자명</label>
-    <input
-      id="username"
-      bind:value={username}
-      type="text"
-      required
-      class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
-    />
-  </div>
+	<Field label="사용자명" for="username" required>
+		<TextInput id="username" bind:value={username} type="text" required />
+	</Field>
 
-  <div>
-    <label for="password" class="block text-gray-400 text-xs mb-1.5 uppercase tracking-wide">비밀번호</label>
-    <input
-      id="password"
-      bind:value={password}
-      type="password"
-      required
-      onkeydown={(e) => { if (e.key === 'Enter' && !loading) { e.preventDefault(); onSubmit(); } }}
-      class="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500 transition-colors"
-    />
-  </div>
+	<Field label="비밀번호" for="password" required>
+		<TextInput
+			id="password"
+			bind:value={password}
+			type="password"
+			required
+			onkeydown={(e) => { if (e.key === 'Enter' && !loading) { e.preventDefault(); onSubmit(); } }}
+		/>
+	</Field>
 
-  <Button type="submit" disabled={loading} class="w-full" size="lg">
-    {loading ? '로그인 중...' : '로그인'}
-  </Button>
+	<Button type="submit" disabled={loading} class="login-submit" size="lg">
+		{loading ? '로그인 중...' : '로그인'}
+	</Button>
 
-  <GitLabLoginButton enabled={gitlabEnabled} loading={gitlabLoading} onClick={onGitlab} />
+	<GitLabLoginButton enabled={gitlabEnabled} loading={gitlabLoading} onClick={onGitlab} />
 </form>
+
+<style>
+	.login-form {
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+		border: 1px solid var(--color-line-2);
+		border-radius: 0.75rem;
+		background: var(--color-surface-raised);
+		padding: 2rem;
+	}
+	.login-submit { width: 100%; }
+</style>

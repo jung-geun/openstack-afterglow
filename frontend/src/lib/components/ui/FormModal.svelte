@@ -1,5 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import Button from './Button.svelte';
+	import Card from './Card.svelte';
 	import Modal from './Modal.svelte';
 
 	interface Props {
@@ -33,18 +35,37 @@
 </script>
 
 <Modal bind:open {onClose}>
-	<div class="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl">
-		<h2 class="text-lg font-semibold text-white mb-5">{title}</h2>
+	<Card surface="modal" padding="lg" class="form-modal-card">
+		<h2 class="form-modal-title">{title}</h2>
 		{@render children()}
-		<div class="flex justify-end gap-3 mt-6">
+		<div class="form-modal-actions">
 			{#if actions}
 				{@render actions()}
 			{:else}
-				<button onclick={close} class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded-lg">{cancelLabel}</button>
+				<Button onclick={close} variant="secondary">{cancelLabel}</Button>
 				{#if onSubmit}
-					<button onclick={onSubmit} disabled={submitting} class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg disabled:opacity-30">{submitting ? '처리 중...' : submitLabel}</button>
+					<Button onclick={onSubmit} disabled={submitting} variant="accent">{submitting ? '처리 중...' : submitLabel}</Button>
 				{/if}
 			{/if}
 		</div>
-	</div>
+	</Card>
 </Modal>
+
+<style>
+	.form-modal-card {
+		width: min(100% - 2rem, 28rem);
+		margin-inline: 1rem;
+	}
+	.form-modal-title {
+		margin: 0 0 1.25rem;
+		font-size: 1.125rem;
+		font-weight: 600;
+		color: var(--color-ink-0);
+	}
+	.form-modal-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 0.75rem;
+		margin-top: 1.5rem;
+	}
+</style>

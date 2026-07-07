@@ -11,7 +11,7 @@
 	import ServiceCountCards from '$lib/components/admin/overview/ServiceCountCards.svelte';
 	import VersionInfoPanel from '$lib/components/admin/overview/VersionInfoPanel.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
-	import { StatTile, SectionHeader, Pill } from '$lib/components/ui';
+	import { Alert, StatTile, Pill } from '$lib/components/ui';
 
 	interface Notification {
 		severity: string;
@@ -109,10 +109,7 @@
 	{#if notifications.length > 0}
 		{@const critCount = notifications.filter(n => n.severity === 'critical').length}
 		{@const warnCount = notifications.filter(n => n.severity === 'warning').length}
-		<div class="bg-gray-900 border border-gray-800 rounded-2xl p-4 flex items-center gap-3 border-l-4"
-			 style="border-left-color: var(--color-state-danger);">
-			<span class="w-1.5 h-1.5 rounded-full animate-pulse shrink-0"
-				  style="background: var(--color-state-danger);"></span>
+		<Alert tone={critCount > 0 ? 'danger' : 'warning'} class="notification-alert">
 			<span class="text-sm" style="color: var(--color-ink-1);">
 				{#if critCount > 0}
 					<span class="font-semibold" style="color: var(--color-state-danger);">{critCount} critical</span> ·
@@ -123,19 +120,19 @@
 				{notifications.length - critCount - warnCount} info —
 				<a href="/admin/monitoring" class="underline" style="color: var(--admin-tone);">모니터링 상세 →</a>
 			</span>
-			<div class="ml-auto flex gap-1.5">
+			{#snippet actions()}
 				{#each notifications.filter(n => n.severity === 'critical').slice(0, 1) as n}
 					<Pill tone="danger">{n.severity.toUpperCase()}</Pill>
 				{/each}
 				{#if warnCount > 0}
 					<Pill tone="warning">{warnCount} WARN</Pill>
 				{/if}
-			</div>
-		</div>
+			{/snippet}
+		</Alert>
 	{/if}
 
 	{#if error}
-		<div class="bg-red-900/40 border border-red-700 text-red-300 rounded-xl px-4 py-3 text-sm">{error}</div>
+		<Alert tone="danger">{error}</Alert>
 	{/if}
 
 	{#if overviewLoading}
@@ -162,7 +159,7 @@
 							{#snippet footer()}
 								<span class="flex items-center gap-1 text-[10px] text-emerald-400">
 									<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0 animate-pulse"></span>
-									최근 추가 {identitySummary.recent_users.length}명
+									최근 추가 {identitySummary?.recent_users?.length ?? 0}명
 								</span>
 							{/snippet}
 						{/if}
@@ -179,7 +176,7 @@
 							{#snippet footer()}
 								<span class="flex items-center gap-1 text-[10px] text-emerald-400">
 									<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0 animate-pulse"></span>
-									최근 추가 {identitySummary.recent_projects.length}개
+									최근 추가 {identitySummary?.recent_projects?.length ?? 0}개
 								</span>
 							{/snippet}
 						{/if}

@@ -18,7 +18,8 @@
 	import { isTransitional } from '$lib/utils/instanceStatus';
 	import RecoveryModal from '$lib/components/admin/instances/RecoveryModal.svelte';
 	import type { AdminInstance, PagedResponse, TsPoint } from '$lib/types/adminInstance';
-	import { StatTile } from '$lib/components/ui';
+	import { Button, StatTile, ToggleGroup } from '$lib/components/ui';
+	import BulkSelectionOverlay from '$lib/components/ui/BulkSelectionOverlay.svelte';
 
 	let allInstances = $state<AdminInstance[]>([]);
 	let loading = $state(true);
@@ -149,18 +150,15 @@
 	});
 </script>
 
-<div class="p-4 md:p-8 max-w-7xl mx-auto">
+<div class="p-4 md:p-8 pb-28 md:pb-32 max-w-7xl mx-auto">
 	<PageHeader breadcrumb="COMPUTE / INSTANCES" title="전체 인스턴스">
 		{#snippet actions()}
-			<button
-				onclick={() => openWizard()}
-				class="px-3 py-1.5 text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors flex items-center gap-1.5"
-			>
+			<Button onclick={() => openWizard()} variant="accent" size="sm">
 				<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
 				</svg>
 				VM 생성
-			</button>
+			</Button>
 			<AutoRefreshControl
 				bind:active={ar.active}
 				bind:intervalSeconds={ar.intervalSeconds}
@@ -170,12 +168,12 @@
 			/>
 			<div class="flex items-center gap-1 text-xs text-gray-500 max-md:hidden">
 				표시:
-				{#each [10, 20, 30] as n}
-					<button
-						onclick={() => { pageSize = n; markerStack = []; nextMarker = null; load(); }}
-						class="px-2 py-0.5 rounded {pageSize === n ? 'bg-blue-600 text-white' : 'bg-gray-800 hover:bg-gray-700 text-gray-400'}"
-					>{n}</button>
-				{/each}
+				<ToggleGroup
+					value={String(pageSize)}
+					options={[10, 20, 30].map((n) => ({ value: String(n), label: String(n) }))}
+					onchange={(value) => { pageSize = parseInt(value, 10); markerStack = []; nextMarker = null; load(); }}
+					size="xs"
+				/>
 			</div>
 		{/snippet}
 	</PageHeader>
@@ -217,22 +215,6 @@
 		{/if}
 	</div>
 
-	<!-- 일괄 액션 바 -->
-	{#if selectedIds.size > 0}
-		<div class="flex items-center gap-3 mb-3 px-4 py-2.5 bg-blue-950/60 border border-blue-800/60 rounded-xl">
-			<span class="text-blue-300 text-sm font-medium">{selectedIds.size}개 선택됨</span>
-			<div class="flex gap-2 ml-auto">
-				<button type="button" disabled={bulkActioning} onclick={() => bulkAction('start')}
-					class="px-3 py-1.5 text-xs font-medium rounded-lg bg-green-700/80 hover:bg-green-600/80 text-white disabled:opacity-50 transition-colors">시작</button>
-				<button type="button" disabled={bulkActioning} onclick={() => bulkAction('stop')}
-					class="px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-700/80 hover:bg-amber-600/80 text-white disabled:opacity-50 transition-colors">종료</button>
-				<button type="button" disabled={bulkActioning} onclick={() => bulkAction('delete')}
-					class="px-3 py-1.5 text-xs font-medium rounded-lg bg-red-700/80 hover:bg-red-600/80 text-white disabled:opacity-50 transition-colors">삭제</button>
-				<button type="button" onclick={() => { selectedIds = new Set(); }}
-					class="px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-700/80 hover:bg-gray-600/80 text-gray-300 transition-colors">취소</button>
-			</div>
-		</div>
-	{/if}
 
 	{#if loading}
 		<LoadingSkeleton variant="table" rows={5} />
@@ -261,6 +243,15 @@
 			}}
 		/>
 	{/if}
+
+<BulkSelectionOverlay
+	count={selectedIds.size}
+	busy={bulkActioning}
+	onStart={() => bulkAction('start')}
+	onStop={() => bulkAction('stop')}
+	onDelete={() => bulkAction('delete')}
+	onClear={() => { selectedIds = new Set(); }}
+/>
 </div>
 
 {#if selectedInstanceId}

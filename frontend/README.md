@@ -38,6 +38,12 @@ src/
     └── components/              # 슬라이드 패널, 위저드, 차트 등 UI 컴포넌트
 ```
 
+## Design system
+
+Frontend visual changes must start from root `DESIGN.md`; reusable assets live in `src/lib/components/ui`; semantic token metadata lives in `src/lib/design`.
+
+See [`../DESIGN.md`](../DESIGN.md).
+
 ## 환경 설정
 
 백엔드 API는 `/api` 경로로 프록시됩니다.
