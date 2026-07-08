@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 const fs = require("fs");
 const path = require("path");
-const { spawnSync } = require("child_process");
+const { spawn, spawnSync } = require("child_process");
 
 const rootDir = path.resolve(__dirname, "..");
 const backendDir = path.join(rootDir, "backend");
@@ -305,11 +305,12 @@ const targets = {
 };
 
 function printUsage(stream) {
-	stream.write("Usage: node scripts/test-target.js [--list] [--help] [--dry-run|-n] <target|backend:selector|frontend:selector>...\n");
+	stream.write("Usage: node scripts/test-target.js [--list] [--help] [--dry-run|-n] [--parallel|-p] <target|backend:selector|frontend:selector>...\n");
 	stream.write("\n");
 	stream.write("Examples:\n");
 	stream.write("  npm run test:list\n");
 	stream.write("  npm run test:target -- auth layers\n");
+	stream.write("  npm run test:target -- --parallel instances\n");
 	stream.write("  npm run test:target -- backend:tests/test_instances.py::test_delete_instance\n");
 	stream.write("  npm run test:target -- frontend:src/lib/config/site.test.ts\n");
 	stream.write("  npm run test:auth -- --dry-run\n");
@@ -508,13 +509,89 @@ function runStep(step, dryRun) {
 	return result.status === null ? 1 : result.status;
 }
 
+function runStepAsync(step, dryRun) {
+	if (dryRun) {
+		printStep(step);
+		return Promise.resolve(0);
+	}
+	if (step.targetName === "db" && !process.env.AFTERGLOW_TEST_DATABASE_URL) {
+		console.error(dbRequirementMessage);
+		return Promise.resolve(2);
+	}
+	printStep(step);
+	return new Promise((resolve) => {
+		const child = spawn(step.command, step.args, {
+			cwd: step.cwd,
+			env: { ...process.env, ...step.envAdditions },
+			stdio: "inherit",
+			shell: process.platform === "win32"
+		});
+		child.on("error", (error) => {
+			console.error(error.message);
+			resolve(1);
+		});
+		child.on("exit", (code) => {
+			resolve(code === null ? 1 : code);
+		});
+	});
+}
+
+function getLaneName(step, index) {
+	if (step.cwdLabel === "backend" || step.cwdLabel === "frontend") {
+		return step.cwdLabel;
+	}
+	return `other-${index}`;
+}
+
+function groupStepsByLane(steps) {
+	const lanes = new Map();
+	steps.forEach((step, index) => {
+		const laneName = getLaneName(step, index);
+		if (!lanes.has(laneName)) {
+			lanes.set(laneName, []);
+		}
+		lanes.get(laneName).push(step);
+	});
+	return Array.from(lanes.values());
+}
+
+function runStepsSerial(steps, dryRun, runner = runStep) {
+	for (const step of steps) {
+		const exitCode = runner(step, dryRun);
+		if (exitCode !== 0) {
+			return exitCode;
+		}
+	}
+	return 0;
+}
+
+async function runLaneSerial(steps, dryRun, runner = runStepAsync) {
+	for (const step of steps) {
+		const exitCode = await runner(step, dryRun);
+		if (exitCode !== 0) {
+			return exitCode;
+		}
+	}
+	return 0;
+}
+
+async function runStepsParallel(steps, dryRun, runner = runStepAsync) {
+	if (dryRun) {
+		return runStepsSerial(steps, dryRun);
+	}
+	const laneExitCodes = await Promise.all(groupStepsByLane(steps).map((lane) => runLaneSerial(lane, false, runner)));
+	return laneExitCodes.find((code) => code !== 0) || 0;
+}
+
+
 function fail(message, code = 1) {
 	console.error(message);
 	process.exit(code);
 }
 
-function main(argv) {
+async function main(argv) {
 	let dryRun = false;
+	let parallel = false;
 	let showList = false;
 	let showHelp = false;
 	const namedTargets = [];
@@ -524,6 +601,10 @@ function main(argv) {
 	for (const arg of argv) {
 		if (arg === "--dry-run" || arg === "-n") {
 			dryRun = true;
+			continue;
+		}
+		if (arg === "--parallel" || arg === "-p") {
+			parallel = true;
 			continue;
 		}
 		if (arg === "--list") {
@@ -570,13 +651,29 @@ function main(argv) {
 		steps.push(buildCustomFrontendStep(customFrontendSelectors));
 	}
 
-	for (const step of steps) {
-		const exitCode = runStep(step, dryRun);
-		if (exitCode !== 0) {
-			return exitCode;
-		}
-	}
-	return 0;
+	return parallel ? runStepsParallel(steps, dryRun) : runStepsSerial(steps, dryRun);
 }
 
-process.exit(main(process.argv.slice(2)));
+if (require.main === module) {
+	main(process.argv.slice(2))
+		.then((code) => process.exit(code))
+		.catch((error) => {
+			console.error(error.message);
+			process.exit(1);
+		});
+}
+
+module.exports = {
+	buildBackendStep,
+	buildFrontendStep,
+	buildNamedTargetSteps,
+	buildCustomBackendStep,
+	buildCustomFrontendStep,
+	groupStepsByLane,
+	main,
+	runStep,
+	runStepAsync,
+	runStepsParallel,
+	runStepsSerial
+};
+

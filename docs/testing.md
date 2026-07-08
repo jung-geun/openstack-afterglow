@@ -17,6 +17,7 @@ nav_order: 8
 ```bash
 npm run test:list
 npm run test:target -- auth layers
+npm run test:target -- --parallel instances
 npm run test:target -- backend:tests/test_instances.py::test_delete_instance
 npm run test:target -- frontend:src/lib/config/site.test.ts
 npm run test:auth -- --dry-run
@@ -45,6 +46,14 @@ npm run test:auth -- --dry-run
 
 ```bash
 npm run test:target -- backend:tests/test_instances.py::test_delete_instance
+```
+
+백엔드와 프론트엔드 step이 함께 있는 target(`instances`, `auth`, `config` 등)은 `--parallel` 을 붙이면
+backend lane 1개와 frontend lane 1개를 동시에 실행한다. 각 lane 내부 순서는 그대로 유지하므로,
+pytest 프로세스끼리 섞지 않고도 국소 확인 시간을 줄일 수 있다.
+
+```bash
+npm run test:target -- --parallel instances
 ```
 
 직접 pytest를 호출하려면 아래와 같다.
