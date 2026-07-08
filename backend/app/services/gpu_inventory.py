@@ -111,6 +111,26 @@ def _load_device_map() -> dict[str, dict[str, dict]]:
     return device_map
 
 
+def _normalize_alias_value(alias: str) -> str:
+    return alias.replace("-", "").replace("_", "").replace(" ", "").lower()
+
+
+def resolve_alias_to_device_name(alias: str, alias_map: dict[str, str] | None = None) -> str | None:
+    """Resolve a Nova PCI alias to the canonical GPU device name.
+
+    Tries the raw alias first, then a normalized fallback so Nova aliases like
+    ``RTX-3060-LHR`` can still match catalog aliases such as ``RTX_3060_LHR``
+    or ``3060LHR``.
+    """
+    if not alias:
+        return None
+    mapping = alias_map if alias_map is not None else build_alias_to_device_name_map()
+    resolved = mapping.get(alias)
+    if resolved:
+        return resolved
+    return mapping.get(_normalize_alias_value(alias))
+
+
 PCI_DEVICE_MAP = _load_device_map()
 
 
@@ -473,6 +493,5 @@ def build_alias_to_device_name_map() -> dict[str, str]:
                 if alias:
                     alias_map[alias] = name
                     # 정규화 키도 등록 (소문자, 구분자 제거) — exact match 우선 보장을 위해 setdefault
-                    norm = alias.replace("-", "").replace("_", "").replace(" ", "").lower()
-                    alias_map.setdefault(norm, name)
+                    alias_map.setdefault(_normalize_alias_value(alias), name)
     return alias_map

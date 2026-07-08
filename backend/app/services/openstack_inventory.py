@@ -41,7 +41,7 @@ async def collect_instance_data(
 
     from app.config import get_settings
     from app.services import notion_sync
-    from app.services.gpu_inventory import build_alias_to_device_name_map
+    from app.services.gpu_inventory import build_alias_to_device_name_map, resolve_alias_to_device_name
 
     settings = get_settings()
     alias_to_device_name = build_alias_to_device_name_map()
@@ -110,7 +110,7 @@ async def collect_instance_data(
                 gpu_display_name = gpu_alias  # Notion GPU 필드에 표시할 이름
                 gpu_count = flavor_gpu_count if resource_allocated else 0
                 if gpu_alias:
-                    canonical_name = alias_to_device_name.get(gpu_alias)
+                    canonical_name = resolve_alias_to_device_name(gpu_alias, alias_to_device_name)
                     if canonical_name:
                         gpu_display_name = canonical_name
                         if resource_allocated:

@@ -166,6 +166,17 @@ async def test_notion_sync(conn=Depends(get_os_conn)):
     users_db_id = config.get("users_database_id", "")
     hypervisors_db_id = config.get("hypervisors_database_id", "")
     gpu_spec_db_id = config.get("gpu_spec_database_id", "")
+    from app.database import is_db_available
+
+    if is_db_available():
+        try:
+            from app.services import gpu_catalog
+
+            await gpu_catalog.refresh_device_map_from_db()
+        except Exception:
+            _logger.warning(
+                "Notion 테스트: GPU 카탈로그 DB overlay 갱신 실패 — 기존 device map으로 진행", exc_info=True
+            )
 
     from app.api.identity.admin_gpu import build_alias_to_device_name_map, get_gpu_spec_list
 
@@ -376,6 +387,18 @@ async def test_notion_target_sync(target_id: int, conn=Depends(get_os_conn)):
     users_db_id = target.get("users_database_id", "")
     hypervisors_db_id = target.get("hypervisors_database_id", "")
     gpu_spec_db_id = target.get("gpu_spec_database_id", "")
+    from app.database import is_db_available
+    from app.services.gpu_inventory import resolve_alias_to_device_name
+
+    if is_db_available():
+        try:
+            from app.services import gpu_catalog
+
+            await gpu_catalog.refresh_device_map_from_db()
+        except Exception:
+            _logger.warning(
+                "Notion target 테스트: GPU 카탈로그 DB overlay 갱신 실패 — 기존 device map으로 진행", exc_info=True
+            )
 
     from app.api.identity.admin_gpu import build_alias_to_device_name_map, get_gpu_spec_list
 
@@ -436,7 +459,7 @@ async def test_notion_target_sync(target_id: int, conn=Depends(get_os_conn)):
         gpu_display = inst.get("gpu_name", "")
         if not gpu_display or not inst.get("gpu_count"):
             continue
-        canonical = alias_to_device_name.get(gpu_display, gpu_display)
+        canonical = resolve_alias_to_device_name(gpu_display, alias_to_device_name) or gpu_display
         if canonical not in usage_by_gpu:
             usage_by_gpu[canonical] = {
                 "total_cpu_used": 0,

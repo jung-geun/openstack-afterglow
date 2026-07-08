@@ -97,6 +97,7 @@ async def _run_notion_target_sync(target: dict) -> None:
 
 async def _run_sync_cycle() -> None:
     """1회 동기화 사이클: 다중 타겟 → fallback NotionConfig."""
+    from app.database import is_db_available
     from app.services import notion_sync
     from app.services.gpu_inventory import (
         build_alias_to_device_name_map,
@@ -106,6 +107,14 @@ async def _run_sync_cycle() -> None:
         collect_hypervisor_data,
         collect_instance_data,
     )
+
+    if is_db_available():
+        try:
+            from app.services import gpu_catalog
+
+            await gpu_catalog.refresh_device_map_from_db()
+        except Exception:
+            _logger.warning("GPU 카탈로그 DB overlay 갱신 실패 — 기존 device map으로 Notion sync 진행", exc_info=True)
 
     targets = await notion_sync.list_notion_targets(include_api_key=True)
     if targets:

@@ -87,6 +87,7 @@ def build_gpu_usage_by_gpu(
     alias_to_device_name: dict[str, str],
 ) -> dict[str, dict]:
     """Build GPU Spec usage buckets from hypervisor capacity and allocated instances."""
+    from app.services.gpu_inventory import resolve_alias_to_device_name
 
     def _empty_bucket() -> dict:
         return {
@@ -115,7 +116,7 @@ def build_gpu_usage_by_gpu(
         gpu_count = inst.get("gpu_count", 0)
         if not gpu_display or not gpu_count:
             continue
-        canonical = alias_to_device_name.get(gpu_display, gpu_display)
+        canonical = resolve_alias_to_device_name(gpu_display, alias_to_device_name) or gpu_display
         bucket = usage_by_gpu.setdefault(canonical, _empty_bucket())
         bucket["total_cpu_used"] += inst.get("vcpus", 0)
         bucket["total_ram_used"] += inst.get("ram_gb", 0)

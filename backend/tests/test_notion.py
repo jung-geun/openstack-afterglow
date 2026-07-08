@@ -1,6 +1,7 @@
 """Notion 다중 타겟 + dedup 테스트."""
 
 import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -286,6 +287,69 @@ async def test_update_notion_target_invalid_interval(admin_client):
     """interval_minutes 범위 초과 시 400을 반환한다."""
     resp = await admin_client.patch("/api/v1/admin/notion/targets/1", json={"interval_minutes": 9999})
     assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_collect_instance_data_resolves_normalized_gpu_alias_for_notion_relation():
+    from app.services.openstack_inventory import collect_instance_data
+
+    flavor = SimpleNamespace(
+        id="flavor-3060",
+        name="gpu.3060lhr_8c_16g",
+        vcpus=8,
+        ram=16384,
+        extra_specs={"pci_passthrough:alias": "RTX-3060-LHR:1"},
+    )
+    server = SimpleNamespace(
+        id="inst-3060",
+        name="alias-vm",
+        status="ACTIVE",
+        flavor={"id": "flavor-3060", "original_name": "gpu.3060lhr_8c_16g"},
+        addresses={},
+        created_at="2026-07-01 00:00:00",
+        compute_host="compute-1",
+        user_id="user-1",
+        project_id="project-1",
+    )
+    conn = SimpleNamespace(
+        compute=SimpleNamespace(
+            flavors=MagicMock(return_value=[flavor]),
+            servers=MagicMock(return_value=[server]),
+        ),
+        identity=SimpleNamespace(
+            projects=MagicMock(return_value=[SimpleNamespace(id="project-1", name="project")]),
+            users=MagicMock(return_value=[SimpleNamespace(id="user-1", name="user", email="user@example.com")]),
+        ),
+        close=MagicMock(),
+    )
+    settings = SimpleNamespace(
+        os_auth_url="https://openstack.example/v3",
+        os_username="user",
+        os_password="password",
+        os_project_name="service",
+        os_user_domain_name="Default",
+        os_project_domain_name="Default",
+        ssl_verify=True,
+    )
+
+    with (
+        patch("openstack.connect", return_value=conn),
+        patch("app.config.get_settings", return_value=settings),
+        patch(
+            "app.services.gpu_inventory.build_alias_to_device_name_map",
+            return_value={
+                "RTX_3060_LHR": "RTX 3060 LHR",
+                "rtx3060lhr": "RTX 3060 LHR",
+            },
+        ),
+    ):
+        rows = await collect_instance_data(
+            gpu_name_to_page_id={"RTX 3060 LHR": "page-3060"},
+        )
+
+    assert rows[0]["gpu_name"] == "RTX 3060 LHR"
+    assert rows[0]["gpu_spec_page_id"] == "page-3060"
+    assert rows[0]["gpu_count"] == 1
 
 
 def test_build_gpu_usage_by_gpu_excludes_shelved_statuses():
