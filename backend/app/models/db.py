@@ -13,7 +13,9 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    LargeBinary,
 )
+from sqlalchemy.dialects.mysql import MEDIUMBLOB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -705,6 +707,26 @@ class LibraryCatalog(Base):
     max_concurrent_mounts: Mapped[int | None] = mapped_column(INT, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+
+class SiteBrandingAsset(Base):
+    """DB-backed public branding asset for login-page logo variants."""
+
+    __tablename__ = "site_branding_assets"
+
+    id: Mapped[int] = mapped_column(INT, primary_key=True, autoincrement=True)
+    slot: Mapped[str] = mapped_column(VARCHAR(32), nullable=False, unique=True, index=True)
+    filename: Mapped[str] = mapped_column(VARCHAR(255), nullable=False)
+    content_type: Mapped[str] = mapped_column(VARCHAR(64), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(INT, nullable=False)
+    sha256: Mapped[str] = mapped_column(CHAR(64), nullable=False)
+    content: Mapped[bytes] = mapped_column(
+        LargeBinary(length=1_048_576).with_variant(MEDIUMBLOB, "mysql", "mariadb"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+    updated_by_user_id: Mapped[str | None] = mapped_column(VARCHAR(64), nullable=True)
 
 
 # ActivityLog 모델을 Base.metadata 에 등록 (create_tables 자동 감지)

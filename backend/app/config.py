@@ -114,6 +114,8 @@ def _load_toml() -> dict:
     flat["site_name"] = app.get("site_name", "Afterglow")
     flat["site_description"] = app.get("site_description", "OpenStack VM + OverlayFS 배포 플랫폼")
     flat["logo_path"] = app.get("logo_path", "/logo.png")
+    flat["logo_dark_path"] = app.get("logo_dark_path", "/logo-dark.png")
+    flat["logo_light_path"] = app.get("logo_light_path", "/logo-white.png")
     flat["favicon_path"] = app.get("favicon_path", "/favicon.ico")
     flat["frontend_base_url"] = app.get("frontend_base_url", "")
     flat["public_api_base"] = app.get("public_api_base", "")
@@ -433,6 +435,8 @@ class Settings(BaseSettings):
     site_name: str = "Afterglow"
     site_description: str = "OpenStack VM + OverlayFS 배포 플랫폼"
     logo_path: str = "/logo.png"
+    logo_dark_path: str = "/logo-dark.png"
+    logo_light_path: str = "/logo-white.png"
     favicon_path: str = "/favicon.ico"
 
     # Redis 캐시

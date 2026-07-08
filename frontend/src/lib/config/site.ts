@@ -1,10 +1,7 @@
 import { writable, get } from 'svelte/store';
 import type { PublicSiteConfig } from '$lib/types/siteConfig';
 
-export type SiteConfig = PublicSiteConfig & {
-	logo_dark_path: string;
-	logo_light_path: string;
-};
+export type SiteConfig = PublicSiteConfig;
 
 const DEFAULTS: SiteConfig = {
 	site_name: 'Afterglow',
@@ -24,13 +21,24 @@ const DEFAULTS: SiteConfig = {
 
 export const siteConfig = writable<SiteConfig>({ ...DEFAULTS });
 
-export function initSiteConfig(config: PublicSiteConfig): void {
-	siteConfig.set({
-		...DEFAULTS,
+export function initSiteConfig(config: Partial<PublicSiteConfig>): void {
+	siteConfig.update((current) => ({
+		...current,
 		...config,
-		services: { ...DEFAULTS.services, ...config.services },
-		runtime: { ...DEFAULTS.runtime, ...config.runtime },
-	});
+		services: { ...current.services, ...(config.services ?? {}) },
+		runtime: { ...current.runtime, ...(config.runtime ?? {}) },
+	}));
+}
+
+export function qualifyBackendAssetPaths(config: Partial<PublicSiteConfig>, apiBase: string): Partial<PublicSiteConfig> {
+	const qualify = (value: string | undefined) =>
+		value?.startsWith('/api/') ? `${apiBase}${value}` : value;
+	const next = { ...config };
+	if (next.logo_path) next.logo_path = qualify(next.logo_path);
+	if (next.logo_dark_path) next.logo_dark_path = qualify(next.logo_dark_path);
+	if (next.logo_light_path) next.logo_light_path = qualify(next.logo_light_path);
+	if (next.favicon_path) next.favicon_path = qualify(next.favicon_path);
+	return next;
 }
 
 export function getSiteName(): string {

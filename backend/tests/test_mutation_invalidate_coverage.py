@@ -105,6 +105,10 @@ EXEMPT_HANDLERS: set[str] = {
     "set_secret_acl",
     "delete_secret_acl",
     "set_container_acl",
+    # Site branding POST/DELETE mutate DB-backed public branding assets, not a
+    # per-project OpenStack resource cache tracked by mutation counts.
+    "upload_site_branding_asset",
+    "reset_site_branding_asset",
 }
 
 # ---------------------------------------------------------------------------

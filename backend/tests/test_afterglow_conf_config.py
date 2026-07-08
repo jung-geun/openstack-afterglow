@@ -49,6 +49,25 @@ redis_url = "redis://cache.example:6379/2"
     assert flat["redis_url"] == "redis://cache.example:6379/2"
 
 
+def test_app_config_loads_login_branding_paths_from_afterglow_conf(isolated_config_dir):
+    (isolated_config_dir / "afterglow.conf").write_text(
+        """
+[app]
+logo_dark_path = "/brand-dark.png"
+logo_light_path = "/brand-light.png"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    flat = app_config._load_toml()
+    settings = app_config.Settings(**flat)
+
+    assert flat["logo_dark_path"] == "/brand-dark.png"
+    assert flat["logo_light_path"] == "/brand-light.png"
+    assert settings.logo_dark_path == "/brand-dark.png"
+    assert settings.logo_light_path == "/brand-light.png"
+
+
 def test_app_config_applies_matching_afterglow_conf_overrides(isolated_config_dir):
     (isolated_config_dir / "afterglow.conf").write_text(
         """

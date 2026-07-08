@@ -47,6 +47,20 @@
   };
 
   const chipClass = $derived(iconBgClass ?? TONE_MAP[accent] ?? TONE_MAP.blue);
+  const TILE_TONE_MAP: Record<Accent, string> = {
+    blue: 'tile-accent',
+    cyan: 'tile-info',
+    violet: 'tile-accent2',
+    emerald: 'tile-success',
+    amber: 'tile-warning',
+    teal: 'tile-info',
+    rose: 'tile-danger',
+    indigo: 'tile-accent2',
+    'admin-tone': 'tile-admin-tone',
+  };
+
+  const tileToneClass = $derived(TILE_TONE_MAP[accent] ?? TILE_TONE_MAP.blue);
+
 
   const pct = $derived(
     progress && progress.max > 0
@@ -58,7 +72,7 @@
   );
 </script>
 
-<div class="stat-tile {className}">
+<div class="stat-tile {tileToneClass} {className}">
   {#if icon}
     <div class="icon-chip {chipClass}">
       {@render icon()}
@@ -92,6 +106,42 @@
     border-radius: 1rem;
     background: var(--color-surface-raised);
     padding: 1.125rem;
+    transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+  }
+  :global(a:hover) > .stat-tile,
+  :global(a:focus-visible) > .stat-tile {
+    border-color: var(--stat-tile-ring);
+    background: color-mix(in oklab, var(--stat-tile-tone) 8%, var(--color-surface-sunken));
+    box-shadow: 0 10px 28px color-mix(in oklab, var(--stat-tile-tone) 14%, transparent);
+    transform: translateY(-1px);
+  }
+  .tile-accent {
+    --stat-tile-tone: var(--color-accent);
+    --stat-tile-ring: var(--accent-ring);
+  }
+  .tile-accent2 {
+    --stat-tile-tone: var(--color-accent-2);
+    --stat-tile-ring: color-mix(in oklab, var(--color-accent-2) 30%, transparent);
+  }
+  .tile-success {
+    --stat-tile-tone: var(--color-state-success);
+    --stat-tile-ring: color-mix(in oklab, var(--color-state-success) 30%, transparent);
+  }
+  .tile-warning {
+    --stat-tile-tone: var(--color-state-warning);
+    --stat-tile-ring: color-mix(in oklab, var(--color-state-warning) 30%, transparent);
+  }
+  .tile-danger {
+    --stat-tile-tone: var(--color-state-danger);
+    --stat-tile-ring: color-mix(in oklab, var(--color-state-danger) 30%, transparent);
+  }
+  .tile-info {
+    --stat-tile-tone: var(--color-state-info);
+    --stat-tile-ring: color-mix(in oklab, var(--color-state-info) 30%, transparent);
+  }
+  .tile-admin-tone {
+    --stat-tile-tone: var(--admin-tone);
+    --stat-tile-ring: var(--admin-tone-ring);
   }
   .stat-body {
     flex: 1 1 0;

@@ -18,6 +18,32 @@ function buildConnectSrc(siteConfig: PublicSiteConfig): string {
 	return parts.join(' ');
 }
 
+function addOrigin(parts: Set<string>, raw: string): void {
+	if (!raw) return;
+	try {
+		const url = new URL(raw);
+		if (url.protocol === 'http:' || url.protocol === 'https:') {
+			parts.add(url.origin);
+		}
+	} catch {
+		// Relative paths stay covered by 'self'.
+	}
+}
+
+function buildImgSrc(siteConfig: PublicSiteConfig): string {
+	const parts = new Set(["'self'", 'data:']);
+	for (const raw of [
+		siteConfig.runtime.api_base,
+		siteConfig.logo_path,
+		siteConfig.logo_dark_path,
+		siteConfig.logo_light_path,
+		siteConfig.favicon_path,
+	]) {
+		addOrigin(parts, raw);
+	}
+	return [...parts].join(' ');
+}
+
 // frame-src에 Grafana origin 추가 (iframe 임베드 허용)
 function buildFrameSrc(siteConfig: PublicSiteConfig): string {
 	const parts = ["'self'"];
@@ -41,7 +67,7 @@ function buildSecurityHeaders(siteConfig: PublicSiteConfig): Record<string, stri
 			`default-src 'self'; ` +
 			`script-src 'self' 'unsafe-inline'; ` +
 			`style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; ` +
-			`img-src 'self' data:; ` +
+			`img-src ${buildImgSrc(siteConfig)}; ` +
 			`connect-src ${buildConnectSrc(siteConfig)}; ` +
 			`font-src 'self' https://fonts.gstatic.com; ` +
 			`frame-src ${buildFrameSrc(siteConfig)}; ` +

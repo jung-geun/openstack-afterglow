@@ -56,6 +56,13 @@ def test_render_toml_falls_back_to_backend_port_without_public_origin():
     assert 'public_api_base = "http://localhost:8123"' in result
 
 
+def test_render_toml_includes_login_branding_paths():
+    result = _render_toml_for_k8s({"app": {"logo_dark_path": "/brand-dark.png", "logo_light_path": "/brand-light.png"}})
+
+    assert 'logo_dark_path = "/brand-dark.png"' in result
+    assert 'logo_light_path = "/brand-light.png"' in result
+
+
 def test_render_toml_includes_worker_runtime_defaults():
     result = _render_toml_for_k8s({})
 

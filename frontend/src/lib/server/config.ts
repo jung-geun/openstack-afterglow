@@ -6,6 +6,8 @@ const DEFAULTS: PublicSiteConfig = {
 	site_name: 'Afterglow',
 	site_description: 'OpenStack VM + OverlayFS 배포 플랫폼',
 	logo_path: '/logo.png',
+	logo_dark_path: '/logo-dark.png',
+	logo_light_path: '/logo-white.png',
 	favicon_path: '/favicon.ico',
 	refresh_interval_ms: 5000,
 	services: { magnum: false, manila: false, zun: false, k3s: false, trove: false, swift: false, barbican: false },
@@ -98,6 +100,8 @@ export function loadPublicSiteConfig(): PublicSiteConfig {
 			site_name: String(app.site_name ?? DEFAULTS.site_name),
 			site_description: String(app.site_description ?? DEFAULTS.site_description),
 			logo_path: String(app.logo_path ?? DEFAULTS.logo_path),
+			logo_dark_path: String(app.logo_dark_path ?? DEFAULTS.logo_dark_path),
+			logo_light_path: String(app.logo_light_path ?? DEFAULTS.logo_light_path),
 			favicon_path: String(app.favicon_path ?? DEFAULTS.favicon_path),
 			refresh_interval_ms: Number(app.refresh_interval_ms ?? DEFAULTS.refresh_interval_ms),
 			services: {

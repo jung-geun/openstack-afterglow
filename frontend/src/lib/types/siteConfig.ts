@@ -2,6 +2,8 @@ export interface PublicSiteConfig {
 	site_name: string;
 	site_description: string;
 	logo_path: string;
+	logo_dark_path: string;
+	logo_light_path: string;
 	favicon_path: string;
 	refresh_interval_ms: number;
 	services: {

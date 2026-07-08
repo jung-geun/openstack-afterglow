@@ -1,10 +1,17 @@
 <script lang="ts">
   import { siteConfig } from '$lib/config/site';
+  import { resolvedTheme } from '$lib/stores/theme';
+
+  const loginLogoSrc = $derived(
+    $resolvedTheme === 'dark'
+      ? ($siteConfig.logo_light_path || $siteConfig.logo_path)
+      : ($siteConfig.logo_dark_path || $siteConfig.logo_path)
+  );
 </script>
 
 <div class="text-center mb-8">
   <img
-    src={$siteConfig.logo_path}
+    src={loginLogoSrc}
     alt={$siteConfig.site_name}
     class="h-24 sm:h-32 md:h-40 lg:h-48 w-auto mx-auto mb-4"
   />

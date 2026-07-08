@@ -10,6 +10,7 @@
 	import ProjectUsageTable from '$lib/components/admin/overview/ProjectUsageTable.svelte';
 	import ServiceCountCards from '$lib/components/admin/overview/ServiceCountCards.svelte';
 	import VersionInfoPanel from '$lib/components/admin/overview/VersionInfoPanel.svelte';
+	import AdminLoginBrandingPanel from '$lib/components/admin/AdminLoginBrandingPanel.svelte';
 	import { createAutoRefresh } from '$lib/utils/autoRefresh.svelte';
 	import { Alert, StatTile, Pill } from '$lib/components/ui';
 
@@ -134,6 +135,8 @@
 	{#if error}
 		<Alert tone="danger">{error}</Alert>
 	{/if}
+
+	<AdminLoginBrandingPanel {token} {projectId} />
 
 	{#if overviewLoading}
 		<div class="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
